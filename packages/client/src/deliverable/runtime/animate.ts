@@ -91,6 +91,11 @@ export function stepCommand(cmd: StepCmd): void {
   if (!slide) return;
   const sel = selection().filter(e => slideOf(e) === slide);
   if (cmd.how === 'add') {
+    // a list whose items already come one by one (data-steps), or a box holding one, is not made to
+    // appear as a whole as well: that hid its first items until the list's own click, and they then
+    // came all at once (ticking "List items one by one" and then pressing Appear, as one would)
+    const sel = selection().filter(e => slideOf(e) === slide && !e.matches(':is(ul, ol)[data-steps]') && !e.querySelector(':is(ul, ol)[data-steps]'));
+    if (!sel.length) return;
     const objs = objectsOf(slide, sel);
     const picks = sel.map((e, i) => ({ obj: objs.findIndex(o => o.el === e), kind: cmd.kind, together: !!cmd.together && i > 0 }));
     apply(objs, appendSteps(objs.map(o => o.iv), picks));

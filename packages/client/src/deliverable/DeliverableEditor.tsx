@@ -1054,6 +1054,29 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
 
   /* ------------------------------------------------------------- keys */
 
+  // the tools' letters (T text, R rectangle, O ellipse, L line, A arrow, P pen, B curve, V pointer,
+  // N the points of the selection) — but a run of letters is somebody typing, as they would in
+  // PowerPoint, where letters are no tools: back to the pointer, and say once how to type on the
+  // slide (typing at a selected group switched tools, drew stray lines and opened point editing).
+  // N waits a moment for that reason: point editing would swallow the rest of the word.
+  const lastLetter = useRef(0);
+  const typingHinted = useRef(false);
+  const nodesTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const letterKey = (key: string): boolean => {
+    const now = performance.now(), typing = now - lastLetter.current < 600;
+    lastLetter.current = now;
+    if (nodesTimer.current) { clearTimeout(nodesTimer.current); nodesTimer.current = null; }
+    if (typing) {
+      setToolState('select');
+      if (!typingHinted.current) { typingHinted.current = true; notify('To type on the slide, double-click a text box — or press T and click where the text goes.'); }
+      return true;
+    }
+    const k = key.toLowerCase();
+    const map: Record<string, Tool> = { t: 'text', r: 'rect', o: 'ellipse', l: 'line', a: 'arrow', p: 'pen', b: 'bezier', v: 'select' };
+    if (map[k]) { setToolState(map[k]); return true; }
+    if (k === 'n' && selRef.current.length) { nodesTimer.current = setTimeout(() => { nodesTimer.current = null; arrangeSel('edit-nodes'); }, 600); return true; }
+    return false;
+  };
   const onRuntimeKey = (m: Extract<FromRuntime, { ol: 'key' }>) => {
     const mod = m.ctrl || m.meta;
     if (typeAhead.current && !mod && m.key.length === 1) { typeAhead.current.push(m.key); return; }
@@ -1087,11 +1110,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     if (m.key === 'Escape') { setToolState('select'); return; }
     // the slide before / after (the canvas shows one; the rail moves between them)
     if (!mod && !m.alt && (m.key === 'PageDown' || m.key === 'PageUp') && kindRef.current === 'deck') { gotoSlide(currentRef.current + (m.key === 'PageDown' ? 1 : -1)); return; }
-    if (!mod && !m.alt) {
-      const map: Record<string, Tool> = { t: 'text', r: 'rect', o: 'ellipse', l: 'line', a: 'arrow', p: 'pen', b: 'bezier', v: 'select' };
-      if (map[k]) { setToolState(map[k]); return; }
-      if (k === 'n' && selRef.current.length) { arrangeSel('edit-nodes'); return; }
-    }
+    if (!mod && !m.alt && m.key.length === 1 && letterKey(m.key)) return;
     host.key?.(m);
   };
 
@@ -1140,10 +1159,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
           return;
         }
         // the tools' letters also before the canvas has the focus
-        const map: Record<string, Tool> = { t: 'text', r: 'rect', o: 'ellipse', l: 'line', a: 'arrow', p: 'pen', b: 'bezier', v: 'select' };
-        const t = map[e.key.toLowerCase()];
-        if (t) { e.preventDefault(); setToolState(t); }
-        else if (e.key.toLowerCase() === 'n' && selRef.current.length) { e.preventDefault(); arrangeSel('edit-nodes'); }
+        if (letterKey(e.key)) e.preventDefault();
       }
       else if (e.key === 'Escape') setToolState('select');
     };

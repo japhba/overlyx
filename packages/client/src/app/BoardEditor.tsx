@@ -511,8 +511,11 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
   const noteEdit = (key: string, o: BoardObj) => (
     <textarea
       class="board-note-edit"
-      autofocus
-      value={o.text ?? ''}
+      // not controlled: a render while typing (a co-author's cursor moving) put the empty text back, and
+      // `autofocus` does nothing for an element added later — the keys went to the board, the note
+      // stayed empty and the board, still "editing", ignored Ctrl+Z from then on
+      defaultValue={o.text ?? ''}
+      ref={el => { if (el && !el.dataset.focused) { el.dataset.focused = '1'; el.focus({ preventScroll: true }); el.select(); } }}
       onBlur={e => { const v = (e.target as HTMLTextAreaElement).value; mutate(() => { const cur = objects.get(key); if (cur) objects.set(key, { ...cur, text: v }); }); setEditing(null); }}
       onKeyDown={e => { e.stopPropagation(); if (e.key === 'Escape') (e.target as HTMLTextAreaElement).blur(); }}
       onPointerDown={e => e.stopPropagation()}

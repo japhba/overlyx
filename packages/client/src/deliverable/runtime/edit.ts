@@ -1528,7 +1528,11 @@ function commitText(final = false): void {
   const path = pathOf(editing);
   const html = cleanHtml(editing);
   const src = srcOf.get(editing);
-  const toDiv = final && !!src && PHRASING_BOXES.has(editing.localName) && BLOCK_INSIDE.test(html);
+  // a list (or another block) in a paragraph or heading box: the box becomes a <div> with the first save
+  // that has it — the parser pushes a <ul> out of a <p>, and a save before the retyping ended (a reload,
+  // a closed tab) left the list at the slide's corner. The box being retyped stays as it is meanwhile
+  // (reconcile's guard); its source is the <div> from then on.
+  const toDiv = !!src && PHRASING_BOXES.has(src.localName) && BLOCK_INSIDE.test(html);
   if (!path || (html === editStartHtml && !toDiv)) return;
   editStartHtml = html;
   const attrs = toDiv ? Array.from(src!.attributes).map(a => ` ${a.name}="${a.value.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"`).join('') : '';
@@ -1622,6 +1626,13 @@ function onKeyDown(e: KeyboardEvent): void {
     if (mod && /^[bi]$/i.test(e.key)) { e.preventDefault(); exec(e.key.toLowerCase() === 'b' ? 'bold' : 'italic'); return; }
     if (mod && e.key.toLowerCase() === 'u') { e.preventDefault(); exec('underline'); return; }
     if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); commitText(); fwd(e); return; }
+    // Tab in a list item nests it (Shift+Tab lifts it back), as in PowerPoint; elsewhere it stays in the
+    // text — the browser moved the focus out of the frame, and the next words went into the speaker notes
+    if (e.key === 'Tab' && !mod && !e.altKey) {
+      e.preventDefault();
+      if (getSelection()?.anchorNode?.parentElement?.closest('li')) exec(e.shiftKey ? 'outdent' : 'indent');
+      return;
+    }
     // Enter in a text box that is a paragraph or a heading: a line break — a paragraph inside it would be
     // pushed out of the box by the parser (a stray box at the slide's corner after a reload)
     if (e.key === 'Enter' && !mod && !e.altKey && PHRASING_BOXES.has(editing.localName) && !getSelection()?.anchorNode?.parentElement?.closest('li')) {
