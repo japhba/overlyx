@@ -337,7 +337,7 @@ html[data-theme="dark"] .tb-btn .tb-img { filter: invert(0.85) hue-rotate(180deg
 .tb-btn.math { font-family: var(--editor-font); font-style: italic; }
 .tb-sep { width: 1px; height: 20px; background: var(--ui-border); margin: 0 4px; }
 
-.main { display: flex; flex: 1; min-height: 0; }
+.main { display: flex; flex: 1; min-height: 0; position: relative; }
 .sidebar { width: 260px; border-right: 1px solid var(--ui-border); background: var(--surface2); overflow: auto; display: flex; flex-direction: column; }
 .sidebar.right { border-right: 0; border-left: 1px solid var(--ui-border); width: var(--right-width, 360px); }
 .sidebar-grip { flex: none; width: 5px; margin: 0 -2px; cursor: col-resize; touch-action: none; z-index: 5; }
@@ -355,6 +355,9 @@ html[data-theme="dark"] .tb-btn .tb-img { filter: invert(0.85) hue-rotate(180deg
 .rail.right { border-right: 0; border-left: 1px solid var(--ui-border); }
 .rail button { border: 0; background: none; color: var(--ui-muted); font-size: 11.5px; letter-spacing: 0.3px; padding: 9px 0; margin: 0 3px; border-radius: 3px; writing-mode: vertical-rl; cursor: pointer; }
 .rail.left button { transform: rotate(180deg); }
+/* the files panel hidden: not a strip beside the page (or the slide) but a tab over its edge, half-way down — all the width is the page's */
+.rail.left { position: absolute; left: 0; top: 50%; transform: translateY(-50%); z-index: 30; width: 22px; padding: 4px 0; border: 1px solid var(--ui-border); border-left: 0; border-radius: 0 6px 6px 0; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12); opacity: 0.85; }
+.rail.left:hover { opacity: 1; }
 .rail button:hover { background: var(--ui-hover); color: var(--ui-fg); }
 .panel-body { flex: 1; overflow: auto; padding: 6px; }
 .panel-body h3 { margin: 6px 0; font-size: 12px; text-transform: uppercase; color: var(--ui-muted); letter-spacing: 0.5px; }
@@ -2570,9 +2573,8 @@ html[data-theme="dark"] .lyx-par[data-layout="FrameTitle"] { color: #9d9dff; }
 .dl-rail-head { position: absolute; left: 0; right: 0; top: 0; height: 28px; display: flex; align-items: center; justify-content: space-between; gap: 4px; padding: 0 4px 0 10px; box-sizing: border-box; font-size: 11.5px; color: var(--ui-muted); z-index: 2; }
 .dl-rail-count { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dl-rail-hide { flex: none; min-width: 24px; height: 22px; padding: 0 4px; color: var(--ui-muted); }
-.dl-rail.folded { width: 28px; }
-.dl-rail-show { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 6px 0; border: 0; background: transparent; color: var(--ui-muted); font: inherit; font-size: 12px; cursor: pointer; }
-.dl-rail-show:hover { background: var(--ui-hover); color: var(--ui-fg); }
+.dl-rail-show { position: absolute; left: 0; bottom: 14px; z-index: 6; width: 24px; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 8px 0; border: 1px solid var(--ui-border); border-left: 0; border-radius: 0 6px 6px 0; background: var(--ui-bg); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12); opacity: 0.88; color: var(--ui-muted); font: inherit; font-size: 12px; cursor: pointer; }
+.dl-rail-show:hover { opacity: 1; background: var(--ui-hover); color: var(--ui-fg); }
 .dl-rail-show-label { writing-mode: vertical-rl; letter-spacing: .03em; white-space: nowrap; }
 .dl-rail-actions { position: absolute; left: 0; right: 0; bottom: 0; padding: 6px; display: flex; justify-content: center; background: linear-gradient(transparent, var(--ui-bg) 40%); }
 /* the rail's right edge: dragged sideways, the slides get wider or narrower */

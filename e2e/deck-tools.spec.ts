@@ -478,6 +478,14 @@ test('Draw: strokes one after the other in the pen\'s colour, the highlighter, t
   await slides(page).first().waitFor({ timeout: 30000 });
   await expect(page.locator('[data-dl-rail-show]')).toBeVisible();
   await expect(page.locator('[data-dl-notes-show]')).toBeVisible();
+  // folded away, neither the slides nor the files panel takes room beside the slide: tabs over its edge
+  await page.locator('.docpanel .hide').click();
+  await expect(page.locator('.rail.left [data-rail="outline"]')).toBeVisible();
+  await expect.poll(async () => { const m = (await page.locator('.main').boundingBox())!, cv = (await page.locator('.dl-canvas').boundingBox())!; return Math.round(cv.x - m.x); }).toBe(0);
+  const tab = (await page.locator('[data-dl-rail-show]').boundingBox())!, cv0 = (await page.locator('.dl-canvas').boundingBox())!;
+  expect(tab.x).toBeLessThan(cv0.x + 1);
+  await page.locator('.rail.left [data-rail="outline"]').click();
+  await expect(page.locator('.sidebar.left .docpanel')).toBeVisible();
   await page.locator('[data-dl-rail-show]').click();
   await expect(page.frameLocator('.dl-railframe').locator('section.slide')).toHaveCount(2);
   await page.locator('[data-dl-notes-show]').click();

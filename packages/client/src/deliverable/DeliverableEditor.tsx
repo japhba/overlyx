@@ -1713,9 +1713,8 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
         <span class={'dl-status' + (online ? '' : ' off')}>{!synced ? 'Loading…' : !online ? 'Offline' : readOnly ? 'View only' : ''}</span>
       </div>
       <div class="dl-body">
-        {showRail && (
-          <div class={'dl-rail' + (railShown ? '' : ' folded')} ref={railBox} style={railShown ? { width: `${railW}px` } : undefined}>
-            {railShown ? <>
+        {showRail && railShown && (
+          <div class="dl-rail" ref={railBox} style={{ width: `${railW}px` }}>
               <div class="dl-rail-head">
                 <span class="dl-rail-count" title="The slide shown, of all slides">{slides.length ? `Slide ${current + 1} of ${slides.length}` : 'Slides'}</span>
                 <button class="dl-btn dl-rail-hide" title="Hide the slides (more room for the slide)" aria-label="Hide the slides" data-dl-rail-hide onClick={() => setRailShown(false)}>«</button>
@@ -1727,12 +1726,6 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
               <div class="dl-rail-actions">
                 <button class="dl-btn" title="New slide after this one (Ctrl+M)" data-dl-newslide disabled={locked} onClick={() => newSlide(current)}>+ Slide</button>
               </div>
-            </> : (
-              <button type="button" class="dl-rail-show" title="Show the slides" data-dl-rail-show onClick={() => setRailShown(true)}>
-                <span aria-hidden="true">»</span>
-                <span class="dl-rail-show-label">Slides{slides.length ? ` · ${current + 1} of ${slides.length}` : ''}</span>
-              </button>
-            )}
           </div>
         )}
         <div class="dl-main">
@@ -1767,6 +1760,13 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
               </div>
             )}
             {hud && <div key={hud.n} class="dl-hud" role="status" data-dl-hud>{hud.text}</div>}
+            {/* the slides folded away: no strip beside the slide, a tab over its edge (bottom left: the files panel's is half-way up) */}
+            {showRail && !railShown && (
+              <button type="button" class="dl-rail-show" title="Show the slides" data-dl-rail-show onClick={() => setRailShown(true)}>
+                <span aria-hidden="true">»</span>
+                <span class="dl-rail-show-label">Slides{slides.length ? ` · ${current + 1} of ${slides.length}` : ''}</span>
+              </button>
+            )}
             {(lost || zoomed || (soloOn && slideFree)) && kind !== 'page' && (
               <button type="button" class={'dl-refocus' + (lost ? ' lost' : '')} data-dl-refocus onClick={fitSlide}
                 title={zoomed ? 'Show the whole slide again (Ctrl+0)' : 'Back into the middle (Ctrl+0)'}>

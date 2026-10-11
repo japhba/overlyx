@@ -813,8 +813,9 @@ blend.
     without it a later attribute change duplicated a text's inline elements.
   * **Around the canvas** (`DeliverableEditor.tsx`): the slide rail (a second frame in `thumb`
     mode: click, drag to reorder, its menu — new slide in the design of the current one, blank,
-    duplicate, move, delete; its header's « folds it to a » Slides strip, `ol.deckSlides`, folded at
-    first on screens under 700 px; the speaker notes' ▾ folds them to a strip with their first line,
+    duplicate, move, delete; its header's « folds it away to a » Slides tab over the canvas's bottom
+    left edge — no strip: folded, all the width is the slide's — `ol.deckSlides`, folded at first on
+    screens under 700 px; the speaker notes' ▾ folds them to a strip with their first line,
     `ol.deckNotes`), the **contextual toolbar** (`decktoolbar.tsx`, the toolbars' own
     component: the tools always; then only what fits the selection — text, shape, line or picture
     tools, Arrange, Path and the rest — and with nothing selected the slide's background and the canvas;
@@ -1672,7 +1673,8 @@ blend.
   take (`App.tsx`, a layout effect on the scroll container's top edge).
 * **Sidebars**: the documents panel (left) and the Comments / PDF / Versions panels (right) hide
   with the « » buttons in their tab strip; a hidden sidebar leaves a thin rail with its panels' names
-  that brings it back. The state is remembered per browser (`localStorage.ol.files`, `ol.right`; the
+  that brings it back — on the left only a tab over the page's edge, half-way down (`.rail.left`
+  absolute: the page, or a slide, has all the width). The state is remembered per browser (`localStorage.ol.files`, `ol.right`; the
   right side starts hidden, a PDF build opens it).
 * **Seaborn's palettes in every colour picker** (`app/seaborn.tsx`): a row of ten under the grid of
   the Google-style picker (`ColorGrid`: document text colour, the slides' text / fill / border / line

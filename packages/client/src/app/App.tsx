@@ -1631,7 +1631,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
           (.bottom-toolbars is absolutely positioned), so their coming and going with the cursor
           never shifts the document. */}
       {isLyxDoc && (tb.showMath || tb.showTable || tb.showReview || inkMode) && (
-        <div class="bottom-toolbars" style={{ left: showFiles ? 'var(--left-width, 272px)' : '24px', right: rightTab ? 'var(--right-width, 360px)' : '24px' }}>
+        <div class="bottom-toolbars" style={{ left: showFiles ? 'var(--left-width, 272px)' : '0px', right: rightTab ? 'var(--right-width, 360px)' : '24px' }}>
           {tb.showMath && <Toolbar id="math" label="Math" groups={tb.math} />}
           {tb.showMath && tbMode('mathpanels') !== 'off' && <Toolbar id="mathpanels" label="Panels" groups={tb.mathPanels} />}
           {tb.showTable && <Toolbar id="table" label="Table" groups={tb.table} />}

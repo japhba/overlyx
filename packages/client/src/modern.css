@@ -305,6 +305,7 @@ html[data-ui="modern"] .ruler { background: var(--m-canvas); }
 
 /* ------------------------------------------------------------ the side rails: square keys */
 html[data-ui="modern"] .rail { width: 48px; padding: 8px 0; gap: 4px; align-items: center; background: var(--ui-bg); border: 0; border-left: 1px solid var(--m-line2); }
+html[data-ui="modern"] .rail.left { width: 44px; padding: 4px 0; border: 1px solid var(--m-line2); border-left: 0; border-radius: 0 12px 12px 0; }   /* (a tab over the edge: styles.css) */
 html[data-ui="modern"] .rail button { writing-mode: horizontal-tb; transform: none !important; width: 36px; height: 36px; margin: 0; padding: 0; border-radius: 8px; font-size: 0; color: var(--m-ink2); display: flex; align-items: center; justify-content: center; }
 html[data-ui="modern"] .rail button::before { content: ''; width: 18px; height: 18px; background: currentColor; -webkit-mask: var(--icon) center / 18px no-repeat; mask: var(--icon) center / 18px no-repeat; }
 html[data-ui="modern"] .rail button:hover { background: var(--m-hover); color: var(--m-ink); }
