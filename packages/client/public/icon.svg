@@ -1,31 +1,25 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <!-- OverLyX favicon: LYX doing acrobatics with the O — the Y hangs from the ring by both hands and
-       swings, the X cartwheels along its inside, the L leans back against it (the wordmark's blue L,
-       yellow Y, red X). The ring is always the strongest contrast: graphite on a paper disc with a
-       paper rim outside it (light), or light on a dark disc with a dark rim (dark scheme), so it never
-       melts into a tab bar. Strokes only, no fonts: it renders identically everywhere. -->
+  <!-- OverLyX favicon: LYX (the wordmark's tilted blue L, yellow Y, red X, where they always stood)
+       woven through a tilted O — the L and the Y pass in front of the ring's far side and behind its
+       near side, the X stays whole in front. A gap in the disc's colour marks every crossing. All on a
+       paper disc (dark disc, light ring in the dark scheme), so the ring never melts into a tab bar.
+       Strokes only, no fonts: it renders identically everywhere. -->
   <style>
-    .rim { fill: #fbfaf7 } .disc { fill: #fbfaf7 } .ring { stroke: #1c1b19 }
-    .l { stroke: #2152a3 } .y { stroke: #eaaa12 } .x { stroke: #d6402b } .swish { stroke: #1c1b19; opacity: .3 }
+    .disc { fill: #fbfaf7 } .halo { stroke: #fbfaf7 } .ring { stroke: #1c1b19 }
+    .l { stroke: #2152a3 } .y { stroke: #e9a90f } .x { stroke: #d6402b }
     @media (prefers-color-scheme: dark) {
-      .rim { fill: #141312 } .disc { fill: #2b2926 } .ring { stroke: #f4f1ea }
-      .l { stroke: #7fa8f4 } .y { stroke: #f6c43c } .x { stroke: #f2654c } .swish { stroke: #f4f1ea; opacity: .4 }
+      .disc { fill: #2a2825 } .halo { stroke: #2a2825 } .ring { stroke: #f4f1ea }
+      .l { stroke: #7fa8f4 } .y { stroke: #f6c43c } .x { stroke: #f2654c }
     }
   </style>
-  <circle class="rim" cx="32" cy="32" r="31.5"/>
-  <circle class="disc" cx="32" cy="32" r="26"/>
-  <g fill="none" stroke-linecap="round">
-    <!-- the swing and the roll -->
-    <path class="swish" d="M14.6 23.4 A19 19 0 0 1 20.4 16.6" stroke-width="1.7"/>
-    <path class="swish" d="M52.4 26 A21 21 0 0 1 52.2 38.6" stroke-width="1.7"/>
+  <circle class="disc" cx="32" cy="32" r="31.5"/>
+  <!-- the ring's far side, the letters, the near side, the X again on top -->
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path class="ring" d="M3.3999999999999986 32.2 A28.6 9.6 0 0 1 60.6 32.2" stroke-width="3.4" transform="rotate(-8 32 32.2)"/>
   </g>
-  <circle class="ring" cx="32" cy="32" r="26.6" fill="none" stroke-width="4.4"/>
-  <g fill="none" stroke-width="4.6" stroke-linejoin="miter">
-    <!-- L: leaning back, its heel braced against the ring -->
-    <path class="l" stroke-linecap="butt" transform="rotate(-15 17.8 46.6)" d="M17.8 28 V46.6 H26.4"/>
-    <!-- X: a cartwheel along the inside of the ring -->
-    <path class="x" stroke-linecap="butt" transform="rotate(16 43.6 38.6)" d="M38.8 28.6 L48.4 48.6 M48.4 28.6 L38.8 48.6"/>
-    <!-- Y: an aerialist hanging from the ring by both hands, swinging -->
-    <g transform="rotate(-16 32 32)"><path class="y" stroke-linecap="round" d="M26.4 6.4 L32 16.4 L37.6 6.4 M32 16.4 V27.4"/></g>
+  <g fill="none" stroke-linecap="butt" stroke-linejoin="miter">
+    <path class="halo" transform="rotate(-12 18.5 32)" d="M14.4 15.6 V47.4 H25" stroke-width="8.6"/><path class="halo" transform="rotate(7 31.8 32)" d="M25.4 15.6 L31.8 29.2 L38.2 15.6 M31.8 29.2 V48.4" stroke-width="8.6"/><path class="halo" transform="rotate(12 44.6 32)" d="M38.6 15.6 L50.6 48.4 M50.6 15.6 L38.6 48.4" stroke-width="8.6"/><path class="l" transform="rotate(-12 18.5 32)" d="M14.4 15.6 V47.4 H25" stroke-width="5.2"/><path class="y" transform="rotate(7 31.8 32)" d="M25.4 15.6 L31.8 29.2 L38.2 15.6 M31.8 29.2 V48.4" stroke-width="5.2"/><path class="x" transform="rotate(12 44.6 32)" d="M38.6 15.6 L50.6 48.4 M50.6 15.6 L38.6 48.4" stroke-width="5.2"/>
   </g>
+  <g fill="none" stroke-linecap="round"><g transform="rotate(-8 32 32.2)"><path class="halo" d="M3.3999999999999986 32.2 A28.6 9.6 0 0 0 60.6 32.2" stroke-width="6.8"/><path class="ring" d="M3.3999999999999986 32.2 A28.6 9.6 0 0 0 60.6 32.2" stroke-width="3.4"/></g></g>
+  <g fill="none" stroke-linecap="butt" stroke-linejoin="miter"><path class="halo" transform="rotate(12 44.6 32)" d="M38.6 15.6 L50.6 48.4 M50.6 15.6 L38.6 48.4" stroke-width="8.6"/><path class="x" transform="rotate(12 44.6 32)" d="M38.6 15.6 L50.6 48.4 M50.6 15.6 L38.6 48.4" stroke-width="5.2"/></g>
 </svg>
