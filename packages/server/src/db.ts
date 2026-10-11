@@ -199,7 +199,18 @@ export interface UserRow {
   is_guest?: number;
 }
 
-export const USER_COLORS = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#bfef45', '#fabed4', '#469990', '#dcbeff', '#9A6324', '#800000', '#aaffc3', '#808000', '#000075'];
+/**
+ * A person's colour (their cursor, selection, avatar): LyX's blue, red and amber — the wordmark's —
+ * first, then seaborn tones that sit with them (deep, dark). Cursor labels and avatars put dark text
+ * on the light ones (client app/contrast.ts).
+ */
+export const USER_COLORS = ['#2152a3', '#d6402b', '#e0a40c', '#55a868', '#8172b3', '#64b5cd', '#da8bc3', '#937860', '#12711c', '#a23582', '#ccb974', '#006374'];
+/** the bright palette of before (11 Oct 2026), mapped onto the new one by index at start-up */
+const OLD_USER_COLORS = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#bfef45', '#fabed4', '#469990', '#dcbeff', '#9a6324', '#800000', '#aaffc3', '#808000', '#000075'];
+{
+  const recolour = db.prepare('UPDATE users SET color = ? WHERE lower(color) = ?');
+  db.transaction(() => { OLD_USER_COLORS.forEach((c, i) => recolour.run(USER_COLORS[i % USER_COLORS.length], c)); })();
+}
 
 export function pickColor(): string {
   const n = (db.prepare('SELECT COUNT(*) AS n FROM users').get() as { n: number }).n;

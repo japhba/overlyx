@@ -1,10 +1,12 @@
 /**
  * The colour picker of Google Docs / Slides: ten greys, ten bright colours and six rows of their
  * tints and shades, the colours picked with "Custom…" kept below (this browser, `ol.customColors`),
- * and "None" where a colour can be taken away (a fill, a highlight). Used by the deck toolbar and
+ * and "None" where a colour can be taken away (a fill, a highlight); a row of seaborn's palette
+ * (right-click it for the other variants, app/seaborn.tsx). Used by the deck toolbar and
  * the documents' text menu; `onPick` gets a CSS colour (#rrggbb) or null.
  */
 import { useState } from 'preact/hooks';
+import { SeabornRow } from './seaborn';
 
 export const GOOGLE_COLORS: string[][] = [
   ['#000000', '#434343', '#666666', '#999999', '#b7b7b7', '#cccccc', '#d9d9d9', '#efefef', '#f3f3f3', '#ffffff'],
@@ -53,6 +55,7 @@ export function ColorGrid({ current, onPick, close, none, named }: { current: st
     <div class="cg" data-color-grid data-color-palette>
       {none && <button type="button" class="cg-none" data-color="none" onMouseDown={e => e.preventDefault()} onClick={() => pick(null)}><span class="cg-none-swatch" />{none}</button>}
       {GOOGLE_COLORS.map((row, i) => <div key={i} class={'cg-row' + (i === 1 ? ' gap' : '')}>{row.map(c => sw(c, c))}</div>)}
+      <SeabornRow swatch={c => sw(c, 's' + c)} />
       {named && <>
         <div class="cg-custom-title">LaTeX colours</div>
         <div class="cg-row cg-wrap">{named.map(([n, css]) => (

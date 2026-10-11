@@ -7,6 +7,7 @@
  * Built from the shared ToolbarContext (toolbars.tsx), so both shells show the same row.
  */
 import { useEffect, useState } from 'preact/hooks';
+import { SeabornRow } from './seaborn';
 import type { EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
 import { hexToTex, cssColor, OBJECT_EFFECTS, PAGE_TRANSITIONS, PAGE_PRESETS, SHAPE_PRESETS, rgbToHex } from '@overlyx/core';
@@ -88,6 +89,9 @@ export function LayoutColorPalette({ current, onPick, close, noneLabel }: { curr
           <input type="color" value={custom} onInput={e => setCustom((e.target as HTMLInputElement).value)} onChange={e => pick(hexToTex((e.target as HTMLInputElement).value))} />
         </label>
       </div>
+      <SeabornRow titleClass="ol-colors-title" rowClass="tb-color-grid sb-grid" swatch={c => (
+        <button key={c} type="button" class={'tb-swatch' + (cssNow?.toLowerCase() === c ? ' active' : '')} style={{ background: c }} title={c} data-color={c} onMouseDown={e => e.preventDefault()} onClick={() => pick(hexToTex(c))} />
+      )} />
       <div class="ol-colors-title">Lighter / darker</div>
       <div class="tb-color-grid">
         {current && !current.startsWith('[') && [15, 30, 50, 70].map(p => <button key={p} type="button" class="tb-swatch" style={{ background: cssColor(`${current}!${p}`, docColors.map) ?? '#ccc' }} title={`${current}!${p}`} onMouseDown={e => e.preventDefault()} onClick={() => pick(`${current}!${p}`)} />)}

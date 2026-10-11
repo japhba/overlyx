@@ -5,6 +5,7 @@
  * at the right of the action bar switches to a grid of cards, remembered per browser (`ol.homeView`).
  */
 import { useEffect, useState } from 'preact/hooks';
+import { inkOn } from './contrast';
 import { api, zipUrl, type AdminProjectInfo, type Project, type ProjectPerson, type User } from '../api';
 import { AvatarContent, initials } from './Avatar';
 import { OverleafImport, type ImportInitial } from './OverleafImport';
@@ -134,7 +135,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
       <div class="people" data-people={p.name}>
         <span class="people-faces">
           {shown.slice(0, 6).map(m => (
-            <span key={m.username} class={'avatar' + (m.role === 'owner' ? ' owner' : '')} style={{ background: m.color || 'var(--muted2)' }} data-initials={m.avatar ? undefined : initials(m.name).length}
+            <span key={m.username} class={'avatar' + (m.role === 'owner' ? ' owner' : '')} style={{ background: m.color || 'var(--muted2)', color: m.color ? inkOn(m.color) : undefined }} data-initials={m.avatar ? undefined : initials(m.name).length}
               title={m.role === 'owner' ? `${m.name} (${m.username}) — owns this project` : `${m.name} (${m.username}) — ${m.role === 'edit' ? 'can edit' : 'can view'}, joined ${when(m.since)}${m.via === 'link' ? ' through the link' : ''}`}>
               <AvatarContent name={m.name} src={m.avatar} />
             </span>

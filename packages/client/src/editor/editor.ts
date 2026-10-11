@@ -3,6 +3,7 @@
  * node views (MathLive, insets, graphics, commands), decorations and collaboration cursors.
  */
 import { EditorState, TextSelection } from 'prosemirror-state';
+import { inkOn } from '../app/contrast';
 import { EditorView } from 'prosemirror-view';
 import * as Y from 'yjs';
 import { snapshotCovers, localWritesCommitted } from './savedstate';
@@ -323,6 +324,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
           cursor.style.borderColor = user.color;
           const label = document.createElement('div');
           label.style.backgroundColor = user.color;
+          label.style.color = inkOn(user.color);
           label.textContent = user.name;
           cursor.appendChild(label);
           return cursor;

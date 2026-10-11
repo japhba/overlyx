@@ -5,6 +5,7 @@
  * refuses everything else.
  */
 import { useEffect, useState } from 'preact/hooks';
+import { inkOn } from './contrast';
 import { AvatarContent, initials } from './Avatar';
 import { api, pdfLinkUrl, type ActivityEntry, type PdfLinkInfo, type PdfLinksInfo, type PdfPublishInfo, type ShareInfo, type User } from '../api';
 import { ago } from './Git';
@@ -118,7 +119,7 @@ export function ShareDialog({ project, user, onClose, onChanged }: { project: st
             {info.members.map(m => (
               <div class="share-row" key={m.id} data-member={m.user?.username ?? m.email ?? ''}>
                 {m.user
-                  ? <span class="avatar" style={{ background: m.user.color }} data-initials={m.user.avatar ? undefined : initials(m.user.name).length}><AvatarContent name={m.user.name} src={m.user.avatar} /></span>
+                  ? <span class="avatar" style={{ background: m.user.color, color: inkOn(m.user.color) }} data-initials={m.user.avatar ? undefined : initials(m.user.name).length}><AvatarContent name={m.user.name} src={m.user.avatar} /></span>
                   : <span class="avatar pending" title="Invited — has not signed in yet">✉</span>}
                 <span class="who" title={m.user ? `${m.user.name} (${m.user.username})` : m.email ?? ''}>
                   {m.user ? m.user.name : m.email}

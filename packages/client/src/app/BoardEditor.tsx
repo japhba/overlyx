@@ -10,6 +10,7 @@
  * resizing scales the points). The server serialises the map to the .board JSON file on disk.
  */
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { inkOn } from './contrast';
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 import * as decoding from 'lib0/decoding';
@@ -594,7 +595,7 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
         {peers.map(p => (
           <div key={p.clientId} class="board-peer" style={{ left: p.x + 'px', top: p.y + 'px' }}>
             <span class="dot" style={{ background: p.color, transform: `scale(${1 / cam.s})` }} />
-            <span class="name" style={{ background: p.color, transform: `scale(${1 / cam.s})` }}>{p.name}</span>
+            <span class="name" style={{ background: p.color, color: inkOn(p.color), transform: `scale(${1 / cam.s})` }}>{p.name}</span>
           </div>
         ))}
       </div>

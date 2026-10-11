@@ -21,6 +21,7 @@
  * drag that leaves the frame keeps going.
  */
 import type { Path, SelItem, SelStyle, Tool, Rect, HtmlOp, ObjKind, KeyPress } from '../protocol';
+import { inkOn } from '../../app/contrast';
 import { MODE, post, state, srcOf, pathOf, liveAt, sourced, slides, slideOf, docRect, isForeign, sendLayout } from './env';
 import { guard, linkTree } from './reconcile';
 import { typeset } from './math';
@@ -600,7 +601,7 @@ export function draw(): void {
     const el = liveAt(path);
     if (!el) continue;
     const r = docRect(el);
-    parts.push(`<div class="frame peer" style="left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px;border-color:${esc(p.color)};border-width:${bw}px"></div><div class="peer-tag" style="left:${r.x}px;top:${r.y}px;background:${esc(p.color)}">${esc(p.name)}</div>`);
+    parts.push(`<div class="frame peer" style="left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px;border-color:${esc(p.color)};border-width:${bw}px"></div><div class="peer-tag" style="left:${r.x}px;top:${r.y}px;background:${esc(p.color)};color:${inkOn(p.color)}">${esc(p.name)}</div>`);
   }
   // suggestions and comment pins (review.ts): on the slide shown, on a web page all
   const rv = reviewOverlay(isSolo() ? slides()[soloIndex()] ?? null : null, boxOf, selected);

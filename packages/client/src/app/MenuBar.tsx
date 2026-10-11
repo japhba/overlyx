@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
+import { inkOn } from './contrast';
 import type { User } from '../api';
 import type { PresenceUser } from '../editor/editor';
 import { UserAvatars } from './StatusBar';
@@ -478,7 +479,7 @@ export function MenuBar({ menus, user, right, primary, title, onLogout, onSettin
       {showThemeToggle && <ThemeToggle />}
       {user && <div class={'menu user-menu' + (userOpen ? ' open' : '')}>
         <button type="button" class="avatar-btn" data-user-menu title={`${user.name} (${user.username})`} onMouseDown={e => { e.preventDefault(); if (open !== null) setOpen(null); setUserOpen(o => !o); }}>
-          <span class="avatar" style={{ background: user.color }} data-initials={user.avatar ? undefined : initials(user.name).length}><AvatarContent name={user.name} src={user.avatar} /></span>
+          <span class="avatar" style={{ background: user.color, color: inkOn(user.color) }} data-initials={user.avatar ? undefined : initials(user.name).length}><AvatarContent name={user.name} src={user.avatar} /></span>
         </button>
         {userOpen && <MenuList items={[{ label: user.name, disabled: true }, { label: user.guest ? 'guest (not signed in)' : user.username, disabled: true }, { sep: true },
           ...(user.guest && onSignIn ? [{ label: 'Sign in to keep this project…', action: onSignIn }] : onSettings ? [{ label: 'Settings…', action: onSettings }] : []),

@@ -1478,6 +1478,17 @@ blend.
   with the « » buttons in their tab strip; a hidden sidebar leaves a thin rail with its panels' names
   that brings it back. The state is remembered per browser (`localStorage.ol.files`, `ol.right`; the
   right side starts hidden, a PDF build opens it).
+* **Seaborn's palettes in every colour picker** (`app/seaborn.tsx`): a row of ten under the grid of
+  the Google-style picker (`ColorGrid`: document text colour, the slides' text / fill / border / line
+  / background colours), in the layout documents' palette and in the pens' colour editor. *muted*
+  (tab10's muted sibling) by default; a right-click on the row, or a click on its title, lists
+  *deep*, *pastel*, *bright*, *dark*, *colorblind* and matplotlib's *tab10* with a strip each; the
+  choice is kept per browser (`ol.seaborn`). A pick takes the picker's own path (a hex colour, a TeX
+  colour expression, a pen preset).
+* **People's colours** (server `db.ts USER_COLORS`): the wordmark's blue, red and amber first, then
+  seaborn tones that sit with them (deep / dark); the bright 16-colour list of before is mapped onto
+  them by index at start-up, so existing accounts change too. Cursor labels, avatars and name tags
+  put dark text on the light ones (`app/contrast.ts inkOn`).
 * **Top right, Google-Docs style** (`app/MenuBar.tsx`): the **presence avatars** (profile pictures
   for Google accounts, initials otherwise) are the people in the document — click one to jump to
   where they are editing (their cursor is scrolled into view and flashes) —, then the **Share**

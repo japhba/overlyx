@@ -5,6 +5,7 @@
  * tool bar (as a popover under it). Widths are millimetres on the page.
  */
 import { HIGHLIGHT_OPACITY, INK_WIDTH_RANGE, formatMm, inkColorName, mmToPx, type InkPen } from '../editor/plugins/ink';
+import { SeabornRow } from './seaborn';
 
 /** The colour grid: greys, then six hues in three tones (the highlighter shows them translucent). */
 export const INK_COLOR_GRID: string[] = [
@@ -26,6 +27,10 @@ export function InkColorPicker({ value, pen, onChange }: { value: string; pen: I
           <input type="color" value={value} data-ink-custom onInput={e => onChange((e.target as HTMLInputElement).value)} />
         </label>
       </div>
+      <SeabornRow titleClass="ink-pick-title" rowClass="ink-pick-grid sb-grid" swatch={c => (
+        <button key={c} type="button" class={'ink-pick-sw' + (hl ? ' hl' : '') + (c === value.toLowerCase() ? ' active' : '')} style={{ background: c }}
+          title={inkColorName(c)} data-ink-color={c} onMouseDown={e => e.preventDefault()} onClick={() => onChange(c)} />
+      )} />
       <div class="ink-pick-foot"><span>{inkColorName(value)}</span><span class="ink-pick-hint">replaces this preset</span></div>
     </div>
   );
