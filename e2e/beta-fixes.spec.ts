@@ -206,3 +206,24 @@ test('a formula from the toolbar takes spaces as TeX spaces: "E = mc^2" stays on
   await expect.poll(() => readFileSync(`${DIR}/spaces.tex`, 'utf8'), { timeout: 15000 }).toContain('Einstein wrote $E=mc^{2}$ in 1905.');
   expect(errors).toEqual([]);
 });
+
+test('a new comment: the field at the foot of its card writes the first message, not a reply under an empty one', async ({ page }) => {
+  const errors = collectErrors(page);
+  writeFileSync(`${DIR}/comment.tex`, texDoc('We explain the method here.'));
+  await page.addInitScript(() => localStorage.setItem('ol.margin', '1'));
+  await login(page);
+  await page.request.get('/api/projects');
+  await page.goto(`/#/${PROJECT}/comment.tex`);
+  await page.waitForSelector('.lyx-editor .lyx-par', { timeout: 30000 });
+  await page.locator('.lyx-editor .lyx-par', { hasText: 'We explain' }).dblclick({ position: { x: 30, y: 8 } });
+  await page.keyboard.press('Control+Alt+c');
+  const card = page.locator('.lyx-editor .lyx-inset-note-comment').first();
+  await expect(card.locator('.comment-header')).toHaveCount(1);
+  await expect(card.locator('.inset-action[data-act="reply"]')).toHaveText('Comment');
+  await card.locator('.inset-action[data-act="reply"]').click();     // as one would: the field at the card's foot
+  await page.keyboard.type('Say which method.');
+  await expect(card.locator('.comment-header')).toHaveCount(1);
+  await expect(card).toContainText('Say which method.');
+  await expect(card.locator('.inset-action[data-act="reply"]')).toHaveText('Reply');
+  expect(errors).toEqual([]);
+});

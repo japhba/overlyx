@@ -767,6 +767,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       setOutline(buildOutline(h.view.state.doc, true, m?.secnumdepth ?? 3));
       rerender();
     };
+    // an author unknown to the change bars (a co-author started suggesting after we loaded): the table again
+    editorContext.refreshAuthors = () => { api.meta(docId).then(m => { if (cancelled) return; setMeta(m); editorContext.meta = m; applyAuthorColors(m.authors); }).catch(() => {}); };
     let metaRetry: ReturnType<typeof setTimeout> | undefined;
     let metaAttempt = 0;
     loadMeta = () => {

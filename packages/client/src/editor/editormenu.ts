@@ -14,7 +14,7 @@ import { editorContext, viewDocDir, viewProject } from './context';
 import { clipboardMenuItems, selectionCovers, MOD } from './clipmenu';
 import * as C from './commands';
 import { tableToolbarState, setColumnWidth } from './tablecommands';
-import { changeAt, resolveChange } from './plugins/changes';
+import { changeAt, resolveChange, changeAuthorName } from './plugins/changes';
 import { fileUrl, graphicsUrl } from '../api';
 import { STANDARD_LAYOUTS } from './layouts';
 import { resolveDocPath } from './context';
@@ -166,7 +166,7 @@ export function editorContextMenu(view: EditorView, ev: MouseEvent, spelling?: {
   // tracked change under the cursor
   const change = changeAt(view.state, view.state.selection.from);
   if (change) {
-    const author = editorContext.meta?.authors.find(a => a.id === change.author)?.name ?? `author ${change.author}`;
+    const author = changeAuthorName(change.author);
     const when = change.time ? new Date(change.time * 1000).toLocaleString() : '';
     items.push(
       { label: `${change.type === 'deleted' ? 'Deleted' : 'Inserted'} by ${author}${when ? ' on ' + when : ''}`, info: true },

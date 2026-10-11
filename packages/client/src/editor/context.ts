@@ -19,6 +19,8 @@ export interface EditorContext {
   lastError?: string;
   /** when this window last applied its LaTeX source pane (SourcePane apply): formulas the server rebuilds from it come back without their edit clock — ours, not a competing edit (mathconflict.ts) */
   sourceAppliedAt?: number;
+  /** fetch the document's metadata again (an author the editor does not know yet showed up in a change) — App.tsx */
+  refreshAuthors?: () => void;
   /** author id used for change tracking */
   changeAuthorId?: number;
   trackChanges: boolean;

@@ -487,9 +487,17 @@ export function resolveChange(range: ChangeRange, accept: boolean): Command {
   };
 }
 
-/** A change author's name from the document's author table ("author 3" when it has none). */
+/**
+ * A change author's name from the document's author table. Somebody who started suggesting after
+ * this editor loaded the table is not in it yet (their name showed as "author 83031974"): the table
+ * is fetched again, once per such author, and meanwhile they are "a co-author".
+ */
+const authorsAsked = new Set<number>();
 export function changeAuthorName(id: number): string {
-  return editorContext.meta?.authors.find(a => a.id === id)?.name ?? `author ${id}`;
+  const name = editorContext.meta?.authors.find(a => a.id === id)?.name;
+  if (name) return name;
+  if (!authorsAsked.has(id)) { authorsAsked.add(id); editorContext.refreshAuthors?.(); }
+  return 'a co-author';
 }
 
 /* ------------------------------------------------ navigation (LyX change-next / change-previous) */
