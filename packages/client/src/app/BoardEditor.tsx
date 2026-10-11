@@ -434,7 +434,16 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
   };
 
   const onKeyDown = (e: KeyboardEvent) => {
-    if (editing) return;
+    if (editing) {
+      // a key typed the moment the note was made, before its text box has the focus: the note's
+      const ta = vpRef.current?.querySelector<HTMLTextAreaElement>('.board-note-edit');
+      if (ta && e.target !== ta && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        ta.focus({ preventScroll: true });
+        ta.setRangeText(e.key, ta.selectionStart, ta.selectionEnd, 'end');
+      }
+      return;
+    }
     if ((e.key === 'Delete' || e.key === 'Backspace') && selectedRef.current.size && !readOnlyRef.current) {
       mutate(() => { for (const id of selectedRef.current) objects.delete(id); });
       setSelected(new Set());
@@ -516,7 +525,7 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
       // stayed empty and the board, still "editing", ignored Ctrl+Z from then on
       defaultValue={o.text ?? ''}
       // (after the click that made the note: its mousedown focuses the board, which would close the note again)
-      ref={el => { if (el && !el.dataset.focused) { el.dataset.focused = '1'; setTimeout(() => { if (el.isConnected) { el.focus({ preventScroll: true }); el.select(); } }, 0); } }}
+      ref={el => { if (el && !el.dataset.focused) { el.dataset.focused = '1'; setTimeout(() => { if (el.isConnected && document.activeElement !== el) { el.focus({ preventScroll: true }); el.select(); } }, 0); } }}
       onBlur={e => { const v = (e.target as HTMLTextAreaElement).value; mutate(() => { const cur = objects.get(key); if (cur) objects.set(key, { ...cur, text: v }); }); setEditing(null); }}
       onKeyDown={e => { e.stopPropagation(); if (e.key === 'Escape') (e.target as HTMLTextAreaElement).blur(); }}
       onPointerDown={e => e.stopPropagation()}

@@ -545,7 +545,12 @@ async function buildViaLatexmk(job: BuildJob): Promise<BuildResult> {
     // document: the PDF is still produced, so report them as warnings (as LyX does)
     const errs = errorLocations(full);
     const bbl = errs.filter(e => /\.bbl$/.test(e.file));
-    realErrors = errs.length > bbl.length || (r.code !== 0 && errs.length === 0);
+    // a .bib that BibTeX / biber cannot read: named at the top of the log and as warnings (the PDF is
+    // there, without those entries) — latexmk's failure for it alone is no LaTeX error
+    const blg = readTextIn(exp.dir, base + '.blg', 4 * 1024 * 1024);
+    const bib = blg ? bibtexErrors(blg) : [];
+    if (bib.length) { log = `BibTeX:\n${bib.join('\n')}\n\n` + log; warnings.push(...bib.map(e => `bibliography: ${e}`)); }
+    realErrors = errs.length > bbl.length || (r.code !== 0 && errs.length === 0 && !bib.length);
     if (bbl.length) warnings.push(...bbl.map(e => `bibliography: ${path.basename(e.file)}:${e.line}: ${e.message}`));
   }
   const havePdf = isRegularFileAt(pdf);
@@ -601,7 +606,7 @@ export function buildErrors(log: string, max = 5): string[] {
   const out: string[] = [];
   const lines = log.split('\n');
   for (let i = 0; i < lines.length && out.length < max; i++) {
-    const fl = /^(.+?\.(?:tex|sty|cls|bbl)):(\d+): (.*)$/.exec(lines[i]);
+    const fl = /^(.+?\.(?:tex|sty|cls|bbl|bib)):(\d+): (.*)$/.exec(lines[i]);
     const m = fl ? [fl[1], fl[2], fl[3]] : lines[i].startsWith('! ') ? ['', '', lines[i].slice(2)] : null;
     if (!m) continue;
     // TeX's "l.42 \foo" context line tells where on the line it stopped
@@ -618,6 +623,24 @@ export function buildErrors(log: string, max = 5): string[] {
   return out;
 }
 
+/**
+ * BibTeX's and biber's complaints from their log (<base>.blg) as `refs.bib:3: message` lines — the
+ * LaTeX log has none of them, and the build said "(no errors found in log)" while the PDF lacked
+ * its bibliography.
+ */
+export function bibtexErrors(blg: string): string[] {
+  const out: string[] = [];
+  for (const l of blg.split('\n')) {
+    const at = /^(.*?)---line (\d+) of file (.+?\.bib)\s*$/.exec(l);
+    if (at) { out.push(`${path.basename(at[3])}:${at[2]}: ${at[1].trim()}`); continue; }
+    const open = /^I couldn't open (?:database |style )?file (.+?)\s*$/.exec(l);
+    if (open) { out.push(`BibTeX could not open ${open[1]}`); continue; }
+    const biber = /\bERROR - (.*)$/.exec(l);
+    if (biber) out.push(biber[1].trim());
+  }
+  return [...new Set(out)];
+}
+
 /** Pull "! error" blocks and file:line:error lines out of a LaTeX log. */
 export function extractErrors(log: string): string {
   const lines = log.split('\n');
@@ -629,7 +652,7 @@ export function extractErrors(log: string): string {
       i += 2;
     }
   }
-  return out.length ? out.join('\n\n') : '(no errors found in log)';
+  return out.length ? out.join('\n\n') : '(no LaTeX errors in the log)';
 }
 
 export { resolveProjectPath };
