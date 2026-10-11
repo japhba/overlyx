@@ -23,7 +23,7 @@ import { FormulaReview } from '../mathconflict';
 import { formulaNodeGrid, convertFormulaToTable } from '../formulatable';
 
 /** Position of a formula that was just inserted by the user and should grab the keyboard once mounted. */
-export const pendingFocus: { pos: number | null; keys: string[]; /** the formula was opened by typing $ / $$ (see LyxMathField.dollar) */ dollar: '' | '$' | '$$' } = { pos: null, keys: [], dollar: '' };
+export const pendingFocus: { pos: number | null; keys: string[]; /** the formula was opened by typing $ / $$ (see LyxMathField.dollar) */ dollar: '' | '$' | '$$'; /** opened from the toolbar or a menu: Space is a TeX space (commands.ts insertMathFromUi) */ texSpaces?: boolean } = { pos: null, keys: [], dollar: '' };
 
 /* ------------------------------------------------ deferred static rendering */
 
@@ -273,6 +273,7 @@ function focusIfPending(f: LyxMathField, getPos: () => number | undefined) {
   if (pos === undefined || pendingFocus.pos !== pos) return;
   pendingFocus.pos = null;
   if (pendingFocus.dollar) { f.dollar = pendingFocus.dollar; pendingFocus.dollar = ''; }
+  if (pendingFocus.texSpaces) { f.typeAsTex(); pendingFocus.texSpaces = false; }
   // a formula made from selected text continues at its end; an empty one starts in its first cell (LyX: align, cases, ... begin left of the first &)
   requestAnimationFrame(() => { f.focus(f.isEmpty() ? 'start' : 'end'); for (const k of pendingFocus.keys.splice(0)) f.execute('insert', k); });
 }

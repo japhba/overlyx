@@ -151,7 +151,7 @@ export function mathExecutor(getView: () => EditorView | null | undefined): Tool
     const f = activeMathField();
     if (f) { f.execute(cmd, ...args); f.focus(); return; }
     const v = getView();
-    if (v) { C.insertMath(false)(v); setTimeout(() => activeMathField()?.execute(cmd, ...args), 60); }
+    if (v) { C.insertMathFromUi(false)(v); setTimeout(() => activeMathField()?.execute(cmd, ...args), 60); }
   };
 }
 
@@ -340,8 +340,8 @@ export function buildToolbars(ctx: ToolbarContext): Toolbars {
       { id: 'charstyles', title: 'Custom text styles', icon: 'charstyles', palette: styles },
     ],
     [
-      { id: 'math', title: 'Inline formula (Ctrl+M)', icon: 'math', action: () => runView(C.insertMath(false)) },
-      { id: 'dmath', title: 'Display formula (Ctrl+Shift+M)', icon: 'dmath', action: () => runView(C.insertMath(true)) },
+      { id: 'math', title: 'Inline formula (Ctrl+M)', icon: 'math', action: () => runView(C.insertMathFromUi(false)) },
+      { id: 'dmath', title: 'Display formula (Ctrl+Shift+M)', icon: 'dmath', action: () => runView(C.insertMathFromUi(true)) },
       { id: 'graphics', title: 'Insert graphics (Ctrl+Shift+G)', icon: 'graphics', action: () => setDialog({ name: 'graphics' }) },
       { id: 'table', title: 'Insert table (Ctrl+Alt+T)', icon: 'table', palette: { title: 'Insert table', render: close => <TableSizePicker close={close} onPick={(r, c) => run(C.insertTable(r, c))} /> } },
       { id: 'flex', title: 'Custom insets (Flex)', icon: 'box', palette: { title: 'Custom insets of this document class', list: true, cols: 1, items: (meta?.flexInsets ?? []).map(n => ({ label: n, action: () => run(C.insertFlex(n)) })).concat([{ label: 'Other…', action: () => { void uiPrompt('Custom Inset', 'Flex inset name:', meta?.flexInsets?.[0] ?? 'Code').then(n => { if (n) run(C.insertFlex(n)); }); } }]) } },

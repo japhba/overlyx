@@ -818,7 +818,7 @@ export const smartQuote: Command = (state, dispatch) => {
 
 /* ------------------------------------------------------------------ math */
 
-export function insertMath(display: boolean, env?: string): (view: EditorView) => boolean {
+export function insertMath(display: boolean, env?: string, opts: { texSpaces?: boolean } = {}): (view: EditorView) => boolean {
   return (view) => {
     const { state } = view;
     let node: PMNode;
@@ -841,7 +841,7 @@ export function insertMath(display: boolean, env?: string): (view: EditorView) =
     // a selected object stays (keepSelectedObjects): the formula goes after it
     const tr = keepSelectedObjects(state.tr);
     const pos = tr.selection.from;   // the node is inserted where the selection starts
-    pendingFocus.pos = pos; pendingFocus.keys = [];
+    pendingFocus.pos = pos; pendingFocus.keys = []; pendingFocus.texSpaces = !!opts.texSpaces;
     tr.replaceSelectionWith(node, false);
     view.dispatch(tr);
     // focus the mathfield (the node view DOM exists right after dispatch; retry on the next frame)
@@ -858,6 +858,14 @@ export function insertMath(display: boolean, env?: string): (view: EditorView) =
 }
 
 import { inRawText } from './rawtext';
+
+/**
+ * A formula from the toolbar or a menu: Space in it is a TeX space (as in one opened with `$`), not
+ * LyX's "leave the formula" — "E = mc^2" typed after the Σ button kept only "E" as math and wrote the
+ * rest as text (usability wave 3, a newcomer). Ctrl+M, LyX's key, keeps LyX's Space.
+ */
+export const insertMathFromUi = (display: boolean, env?: string) => insertMath(display, env, { texSpaces: true });
+
 export { inRawText };
 
 /**

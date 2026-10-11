@@ -735,6 +735,9 @@ export class LyxMathField {
     this.scheduleLayout();
   }
 
+  /** Space at the top level is a TeX space from now on, not "leave the formula" (a formula from the toolbar or a menu) */
+  typeAsTex(): void { this.texTyped = true; }
+
   private typed(text: string): void {
     if (this.readOnly || !text) return;
     let keep = false;

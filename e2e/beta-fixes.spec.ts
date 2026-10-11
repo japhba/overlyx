@@ -185,3 +185,24 @@ test('End at the end of an exponent leaves the exponent, not the formula', async
   expect(readFileSync(`${DIR}/endkey.tex`, 'utf8')).toContain('after.');
   expect(errors).toEqual([]);
 });
+
+test('a formula from the toolbar takes spaces as TeX spaces: "E = mc^2" stays one formula', async ({ page }) => {
+  const errors = collectErrors(page);
+  writeFileSync(`${DIR}/spaces.tex`, texDoc('Einstein wrote'));
+  await login(page);
+  await page.request.get('/api/projects');
+  await page.goto(`/#/${PROJECT}/spaces.tex`);
+  await page.waitForSelector('.lyx-editor .lyx-par', { timeout: 30000 });
+  await page.locator('.lyx-editor .lyx-par', { hasText: 'Einstein wrote' }).click();
+  await page.keyboard.press('End');
+  await page.keyboard.type(' ');
+  await page.locator('[data-tb="math"]').first().click();
+  await expect(page.locator('.lm-field.focused')).toHaveCount(1);
+  await page.keyboard.type('E = mc^2');
+  await page.keyboard.press('ArrowRight');   // out of the exponent
+  await page.keyboard.press('ArrowRight');   // out of the formula
+  await page.keyboard.type(' in 1905.');
+  await page.keyboard.press('Control+s');
+  await expect.poll(() => readFileSync(`${DIR}/spaces.tex`, 'utf8'), { timeout: 15000 }).toContain('Einstein wrote $E=mc^{2}$ in 1905.');
+  expect(errors).toEqual([]);
+});
