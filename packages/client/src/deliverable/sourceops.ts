@@ -73,8 +73,9 @@ export function penPathD(pts: [number, number][]): string {
  * The markup of an object drawn with a tool, at `rect` (slide px; a click without dragging gives it
  * a default size). Boxes (rectangles, ellipses) are divs that centre text typed into them, like
  * Google Slides' shapes; other shapes are SVG polygons stretched to their box with an outline that
- * keeps its width; lines go from the drag's start to its end (`pts`), the pen's stroke through `pts`
- * in its `ink` (the highlighter's translucent, multiplied over what is under it so text stays dark).
+ * keeps its width; lines go from the drag's start to its end (`pts`); Draw's stroke is its outline
+ * (`path`: runtime/freehand.ts, in its box's px) filled with its `ink` — the highlighter's translucent,
+ * multiplied over what is under it so text stays dark (an older pen's stroke: a line through `pts`).
  */
 export function objectHtml(tool: Tool, rect: Rect, kind: DeliverableKind, scaleHint = 1, pts?: [number, number][], path?: { d: string; closed: boolean }, ink?: InkStyle): string {
   const flow = kind === 'page';
@@ -110,6 +111,12 @@ export function objectHtml(tool: Tool, rect: Rect, kind: DeliverableKind, scaleH
       return `<svg style="${flow ? '' : `position: absolute; left: ${r(rect.x)}px; top: ${r(rect.y)}px; `}width: ${W}px; height: ${H}px; overflow: visible" viewBox="0 0 100 100" preserveAspectRatio="none"><polygon points="${POLYGONS[tool]}" fill="${SHAPE_FILL}" stroke="none" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linejoin="round"/></svg>`;
     }
     case 'pen': {
+      if (path?.d) {
+        const W = Math.max(1, Math.ceil(rect.w)), H = Math.max(1, Math.ceil(rect.h));
+        const color = ink && /^(#[0-9a-fA-F]{3,8}|[a-z]+|rgba?\([\d\s.,%]+\))$/.test(ink.color) ? ink.color : '#1d2433';
+        const hl = !!ink && ink.opacity < 1;
+        return `<svg class="ol-ink" style="${flow ? '' : `position: absolute; left: ${r(rect.x)}px; top: ${r(rect.y)}px; `}width: ${W}px; height: ${H}px; overflow: visible${hl ? '; mix-blend-mode: multiply' : ''}" viewBox="0 0 ${W} ${H}"><path d="${path.d.replace(/[^MLQCZz0-9 .,-]/g, '')}" fill="${color}"${hl ? ` fill-opacity="${Math.round(ink!.opacity * 100) / 100}"` : ''}/></svg>`;
+      }
       if (!pts || pts.length < 2) return '';
       const x0 = rect.x, y0 = rect.y, W = Math.max(1, r(rect.w)), H = Math.max(1, r(rect.h));
       const d = penPathD(pts.map(([x, y]) => [x - x0, y - y0]));

@@ -136,3 +136,62 @@ describe('a slide pulled loose', () => {
     expect(v.isFree()).toBe(true);
   });
 });
+
+describe('zooming the slide (a pinch, a trackpad)', () => {
+  const box = { w: 1000, h: 700 }, rect = { x: 48, y: 48, w: 1280, h: 720 };
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubGlobal('matchMedia', () => ({ matches: true }));
+    vi.stubGlobal('requestAnimationFrame', (f: (t: number) => void) => setTimeout(() => f(performance.now()), 16));
+    vi.stubGlobal('cancelAnimationFrame', (h: ReturnType<typeof setTimeout>) => clearTimeout(h));
+    vi.stubGlobal('devicePixelRatio', 2);
+  });
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+  const make = () => {
+    const frame = { style: {} as Record<string, string> };
+    let scale = 0.6;
+    const v = new SlideView(() => frame as unknown as HTMLElement, () => ({ box, rect, scale, margin: 32 }));
+    return { v, frame, setScale: (s: number) => { scale = s; } };
+  };
+
+  it('a pinch keeps what was under the fingers under them, at the scale their distance gives — shown before the editor catches up', () => {
+    const { v, setScale } = make();
+    v.render();
+    // the fingers' middle was over the frame's (400, 300); now at the canvas' (300, 300), twice as far apart
+    v.placeAt(1.2, 400, 300, 300, 300);
+    expect(v.scaleNow()).toBe(1.2);
+    const p = v.toCanvas(400, 300)!;
+    expect(p.x).toBeCloseTo(300, 6);
+    expect(p.y).toBeCloseTo(300, 6);
+    // the editor's scale catches up: the view's own is given up, the place stays
+    setScale(1.2);
+    v.render();
+    expect(v.toCanvas(400, 300)!.x).toBeCloseTo(300, 6);
+    // pulled past the edge of its range while pinching: on the rubber band, as iOS does
+    v.placeAt(1.2, 400, 300, 700, 300);
+    expect(v.toCanvas(400, 300)!.x).toBeLessThan(700);
+    expect(v.toCanvas(400, 300)!.x).toBeGreaterThan(454);
+  });
+
+  it('a wheel zoom keeps the point under the pointer and shows the new scale at once', () => {
+    const { v } = make();
+    v.render();
+    const before = v.toCanvas(700, 400)!;
+    v.zoomTo(0.9, before.x, before.y);
+    expect(v.scaleNow()).toBe(0.9);
+    const after = v.toCanvas(700, 400)!;
+    expect(after.x).toBeCloseTo(before.x, 6);
+    expect(after.y).toBeCloseTo(before.y, 6);
+  });
+
+  it('is a layer of its own only while it moves; at rest it is drawn again on whole device px (iPad blur)', () => {
+    const { v, frame } = make();
+    v.placeAt(1.234, 401.3, 299.7, 517.77, 333.33);
+    expect(frame.style.willChange).toBe('transform');
+    vi.advanceTimersByTime(250);
+    expect(frame.style.willChange).toBe('');
+    const [, tx, ty] = /translate\(([-\d.]+)px, ([-\d.]+)px\)/.exec(frame.style.transform)!.map(Number);
+    expect(Number.isInteger(tx * 2)).toBe(true);
+    expect(Number.isInteger(ty * 2)).toBe(true);
+  });
+});

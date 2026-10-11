@@ -35,6 +35,7 @@ import { startCrop, isCropping, endCrop, cropNow, cropTarget, setCropAspect, red
 import { chipify, unchip, openChip, openChipEl, chipOpening, holdKey, holdAfter, keyPress, isModifierKey, typeKeysHere, chipHooks, flushAfter, insertRefChip, shownChip, setChip, doneChip, displayChip, closeChip, trackChip, insertChip, chipBeside, CHIP_CSS } from './mathedit';
 import { initPaths, isNodeEditing, nodesAfterSource, nodesTargetOf, startNodesOrConvert, endNodes, redrawNodes, penDown, penMove, penUp, penKey, penDouble, penCancel, isPenDrawing, setMenuShape } from './pathedit';
 import { isSolo, showSlide, soloIndex, revealSlideOf } from './solo';
+import { freeOutline, outlinePathD, outlineBox, type FreePt } from './freehand';
 import { reviewOverlay, bindPins, setReviewHover, showGhost, lockDeletions, trackInput, commentTarget, setLiveAt, styleAuthors, REVIEW_OVERLAY_CSS } from './review';
 
 const NS = 'http://www.w3.org/1999/xhtml';
@@ -43,8 +44,8 @@ let root: ShadowRoot;
 let layer: HTMLElement;
 let scale = 1;
 let tool: Tool = 'select';
-/** Draw: the ink of the pen's strokes (its preview while drawing; the editor writes the stroke) */
-let ink: InkStyle = { color: '#1d2433', width: 4, opacity: 1 };
+/** Draw: the ink of the pen's strokes (the stroke drawn in the page while drawing; the editor writes it) */
+let inkStyle: InkStyle = { color: '#1d2433', width: 4, opacity: 1 };
 let selected: Element[] = [];
 let peers: { paths: Path[]; color: string; name: string }[] = [];
 let editing: HTMLElement | null = null;
@@ -160,7 +161,7 @@ export function setScale(s: number, anchor?: { docY: number; screenY: number }):
 }
 export function setTool(t: Tool, style?: InkStyle): void {
   tool = t;
-  if (style) ink = style;
+  if (style) inkStyle = style;
   document.documentElement.classList.toggle('ol-tool-draw', t !== 'select' && t !== 'eraser');
   document.documentElement.classList.toggle('ol-tool-erase', t === 'eraser');
   if (t !== 'bezier') penCancel();
@@ -223,6 +224,7 @@ export function setSelection(els: Element[]): void { selected = els; report(); d
 
 /** after a new version of the text: the selection found again, the frame redrawn */
 export function afterSource(): void {
+  inkArrived();
   selected = selected.map(e => (e.isConnected ? e : null)).filter((e): e is Element => !!e && !!pathOf(e));
   if (editing && !editing.isConnected) { editing = null; post({ ol: 'editing', path: null }); }
   stepsChanged();
@@ -410,9 +412,10 @@ export function lineOf(el: Element): SVGLineElement | null {
   return shapes.length === 1 && shapes[0].localName === 'line' ? shapes[0] as SVGLineElement : null;
 }
 
-/** an SVG drawn with the pen: open paths only, no fill */
+/** an SVG drawn with the pen: Draw's ink (an outline, filled), or open paths only, no fill */
 function isStrokeArt(el: Element): boolean {
   if (el.localName !== 'svg') return false;
+  if (el.classList.contains('ol-ink')) return true;
   const shapes = Array.from(el.querySelectorAll('path, polyline')).filter(s => !s.closest('defs, marker, symbol'));
   return shapes.length > 0 && shapes.length === el.querySelectorAll('path, polyline, polygon, rect, circle, ellipse, line, text').length && shapes.every(s => (s.getAttribute('fill') ?? cs(s).fill) === 'none');
 }
@@ -420,6 +423,7 @@ function isStrokeArt(el: Element): boolean {
 export function kindOf(el: Element): ObjKind {
   if (el.localName === 'img' || (el.classList.contains('ol-crop') && el.querySelector('img'))) return 'image';
   if (isSvgPart(el)) return 'svgpart';
+  if (el.localName === 'svg' && el.classList.contains('ol-ink')) return 'ink';
   if (el.localName === 'svg') return lineOf(el) || isStrokeArt(el) ? 'line' : 'svg';
   if (REPLACED.has(el.localName)) return 'other';
   if (isGroup(el)) return 'group';
@@ -646,7 +650,7 @@ const cornersOf = (b: Box): [number, number][] => [handleAt(b, 0, 0), handleAt(b
 const SVG_PART_NAMES: Record<string, string> = { path: 'path', rect: 'rectangle', circle: 'circle', ellipse: 'ellipse', line: 'line', polyline: 'polyline', polygon: 'polygon', text: 'text', tspan: 'text', g: 'group', use: 'symbol', image: 'picture' };
 const KIND_NAMES: Record<ObjKind, [string, string]> = {
   text: ['Text', 'texts'], shape: ['Shape', 'shapes'], line: ['Line', 'lines'], image: ['Picture', 'pictures'], svg: ['SVG', 'SVGs'],
-  svgpart: ['SVG part', 'SVG parts'], group: ['Group', 'groups'], formula: ['Formula', 'formulas'], other: ['Object', 'objects'],
+  svgpart: ['SVG part', 'SVG parts'], group: ['Group', 'groups'], formula: ['Formula', 'formulas'], ink: ['Ink', 'strokes'], other: ['Object', 'objects'],
 };
 const OTHER_NAMES: Record<string, string> = { video: 'Video', audio: 'Audio', canvas: 'Canvas', iframe: 'Embedded page', object: 'Embedded object', embed: 'Embedded object', table: 'Table' };
 
@@ -749,12 +753,10 @@ export function draw(): void {
   }
   if (drawBox) parts.push(`<div class="draw" style="left:${drawBox.x}px;top:${drawBox.y}px;width:${drawBox.w}px;height:${drawBox.h}px;border-width:${bw}px"></div>`);
   if (dropBox) parts.push(`<div class="drop" style="left:${dropBox.x}px;top:${dropBox.y}px;width:${dropBox.w}px;height:${dropBox.h}px;border-width:${3 / scale}px"></div>`);
-  if (drag && (drag.kind === 'pen' || ((drag.kind === 'draw') && (tool === 'line' || tool === 'arrow'))) && drag.pts && drag.moved) {
-    const d = drag.kind === 'pen' ? smoothPath(drag.pts) : `M${drag.pts[0][0]} ${drag.pts[0][1]}L${drag.pts[drag.pts.length - 1][0]} ${drag.pts[drag.pts.length - 1][1]}`;
-    // the pen's stroke in its ink (slide px → page px), a line in the selection's blue
-    const k = drag.kind === 'pen' && drag.slide && drag.slide.offsetWidth ? docRect(drag.slide).w / drag.slide.offsetWidth : 1;
-    const paint = drag.kind === 'pen' ? `stroke="${esc(ink.color)}" stroke-width="${ink.width * k}" stroke-opacity="${ink.opacity}"` : `stroke="#2f6fde" stroke-width="${3 / scale}"`;
-    parts.push(`<svg class="ink" width="1" height="1"><path d="${d}" fill="none" ${paint} stroke-linecap="round" stroke-linejoin="round"/></svg>`);
+  // (Draw's strokes are drawn in the page itself, as they will stay: startInk)
+  if (drag && drag.kind === 'draw' && (tool === 'line' || tool === 'arrow') && drag.pts && drag.moved) {
+    const d = `M${drag.pts[0][0]} ${drag.pts[0][1]}L${drag.pts[drag.pts.length - 1][0]} ${drag.pts[drag.pts.length - 1][1]}`;
+    parts.push(`<svg class="ink" width="1" height="1"><path d="${d}" fill="none" stroke="#2f6fde" stroke-width="${3 / scale}" stroke-linecap="round" stroke-linejoin="round"/></svg>`);
   }
   // the comment pins over everything (they are pressed)
   parts.push(rv.pins);
@@ -771,39 +773,7 @@ function rotatable(el: Element): boolean {
 
 const esc = (s: string) => s.replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
 
-/** a smooth path through the points (the pen's preview and its result) */
-export function smoothPath(pts: [number, number][]): string {
-  const r = (n: number) => Math.round(n * 10) / 10;
-  if (!pts.length) return '';
-  let d = `M${r(pts[0][0])} ${r(pts[0][1])}`;
-  if (pts.length === 1) return d + `L${r(pts[0][0] + 0.1)} ${r(pts[0][1])}`;
-  for (let i = 1; i < pts.length - 1; i++) {
-    const mx = (pts[i][0] + pts[i + 1][0]) / 2, my = (pts[i][1] + pts[i + 1][1]) / 2;
-    d += `Q${r(pts[i][0])} ${r(pts[i][1])} ${r(mx)} ${r(my)}`;
-  }
-  const last = pts[pts.length - 1];
-  return d + `L${r(last[0])} ${r(last[1])}`;
-}
 
-/** Ramer–Douglas–Peucker: the points a hand-drawn line needs */
-function simplify(pts: [number, number][], eps: number): [number, number][] {
-  if (pts.length < 3) return pts;
-  const keep = new Uint8Array(pts.length);
-  keep[0] = keep[pts.length - 1] = 1;
-  const stack: [number, number][] = [[0, pts.length - 1]];
-  while (stack.length) {
-    const [a, b] = stack.pop()!;
-    const [ax, ay] = pts[a], [bx, by] = pts[b];
-    const len = Math.hypot(bx - ax, by - ay) || 1;
-    let best = -1, bd = 0;
-    for (let i = a + 1; i < b; i++) {
-      const d = Math.abs((bx - ax) * (ay - pts[i][1]) - (ax - pts[i][0]) * (by - ay)) / len;
-      if (d > bd) { bd = d; best = i; }
-    }
-    if (best > 0 && bd > eps) { keep[best] = 1; stack.push([a, best], [best, b]); }
-  }
-  return pts.filter((_, i) => keep[i]);
-}
 
 /* ------------------------------------------------------------------ pointer */
 
@@ -852,6 +822,8 @@ interface Drag {
   /** the rotation drag's centre and starting angles */
   rot?: { cx: number; cy: number; a0: number; p0: number };
   last?: { x: number; y: number };
+  /** the pointer's last place on the screen (a finger's pan: the frame's own px change as the slide moves) */
+  ls?: { x: number; y: number };
   pointerId?: number;
   pointerType?: string;
   hold?: ReturnType<typeof setTimeout>;
@@ -873,8 +845,10 @@ function onPointerDown(e: PointerEvent): void {
   if (isCropping() || isNodeEditing()) return;
   // keys typed after leaving a formula, before this press: theirs first
   flushAfter();
+  if (e.pointerType === 'pen') penSeen = true;
   if (e.pointerType === 'touch') {
-    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.screenX, sy: e.screenY });
+    if (touches.size >= 3 || tri) { e.preventDefault(); e.stopPropagation(); if (!tri) startTri(); return; }
     if (touches.size >= 2) { e.preventDefault(); e.stopPropagation(); startPinch(); return; }
   }
   if (e.button !== 0) return;
@@ -896,7 +870,20 @@ function onPointerDown(e: PointerEvent): void {
   if (tool === 'bezier') { penDown(e, el => slideOf(el)); addEventListener('pointerup', penUpOnce, true); return; }
   grab(e);
   const x = e.pageX, y = e.pageY;
-  const base = { x0: x, y0: y, els: [], moved: false, pointerId: e.pointerId, pointerType: e.pointerType, last: { x: e.clientX, y: e.clientY } };
+  const base = { x0: x, y0: y, els: [], moved: false, pointerId: e.pointerId, pointerType: e.pointerType, last: { x: e.clientX, y: e.clientY }, ls: { x: e.screenX, y: e.screenY } };
+  // drawing with a Pencil: fingers (and the palm resting on the screen) move the slide, they do not draw (GoodNotes)
+  if ((tool === 'pen' || tool === 'eraser') && e.pointerType === 'touch' && penSeen) {
+    drag = { ...base, kind: 'pan', slide: slideOf(t) };
+    capture();
+    return;
+  }
+  if (tool === 'pen') {
+    const slide = slideOf(t);
+    drag = { ...base, kind: 'pen', slide, pts: [[x, y]] };
+    startInk(e, slide);
+    capture();
+    return;
+  }
   if (tool === 'eraser') {
     drag = { ...base, kind: 'erase', slide: slideOf(t), erased: [] };
     eraseAt(e, drag);
@@ -905,7 +892,7 @@ function onPointerDown(e: PointerEvent): void {
   }
   if (tool !== 'select') {
     const slide = slideOf(t);
-    drag = { ...base, kind: tool === 'pen' ? 'pen' : 'draw', slide, pts: [[x, y]] };
+    drag = { ...base, kind: 'draw', slide, pts: [[x, y]] };
     capture();
     return;
   }
@@ -1074,6 +1061,7 @@ function onDragMove(e: PointerEvent): void {
   if (!drag || (drag.pointerId !== undefined && e.pointerId !== drag.pointerId)) return;
   if (pinch) return;
   if (drag.kind === 'erase') { eraseAt(e, drag); return; }
+  if (drag.kind === 'pen') { if (Math.hypot(e.pageX - drag.x0, e.pageY - drag.y0) * scale >= 1) drag.moved = true; moveInk(e); return; }
   const dx = e.pageX - drag.x0, dy = e.pageY - drag.y0;
   if (!drag.moved && Math.hypot(dx, dy) * scale < (drag.pointerType === 'touch' ? 6 : 3)) return;
   if (!drag.moved) {
@@ -1084,22 +1072,18 @@ function onDragMove(e: PointerEvent): void {
       document.documentElement.classList.add('ol-dragging');
       // the cursor of what is dragged stays on wherever the pointer goes (Safari keeps the cursor it had at the press)
       const b = drag.kind === 'resize' && drag.els[0] ? boxOf(drag.els[0].el) : null;
-      const cur = drag.kind === 'move' || drag.kind === 'end' ? MOVE_CURSOR : drag.kind === 'rotate' ? ROT_CURSOR : b && drag.handle ? cursorFor(drag.handle, b.a) : drag.kind === 'draw' || drag.kind === 'pen' ? 'crosshair' : '';
+      const cur = drag.kind === 'move' || drag.kind === 'end' ? MOVE_CURSOR : drag.kind === 'rotate' ? ROT_CURSOR : b && drag.handle ? cursorFor(drag.handle, b.a) : drag.kind === 'draw' ? 'crosshair' : '';
       if (dragCss && cur) dragCss.textContent = `html.ol-dragging, html.ol-dragging * { cursor: ${cur} !important; }`;
     }
   }
   if (drag.kind === 'pan') {
-    const last = drag.last ?? { x: e.clientX, y: e.clientY };
-    if (isSolo()) post({ ol: 'pan', dx: e.clientX - last.x, dy: e.clientY - last.y, finger: true });
+    // in the screen's px: the frame moves under the finger, its own px would take back each step the step before made
+    const last = drag.last ?? { x: e.clientX, y: e.clientY }, ls = drag.ls ?? { x: e.screenX, y: e.screenY };
+    if (isSolo()) post({ ol: 'pan', dx: e.screenX - ls.x, dy: e.screenY - ls.y, finger: true, screen: true });
     else scrollBy(0, last.y - e.clientY);
-    if (!isSolo() && last.x !== e.clientX) post({ ol: 'pan', dx: e.clientX - last.x });
+    if (!isSolo() && ls.x !== e.screenX) post({ ol: 'pan', dx: e.screenX - ls.x, screen: true });
     drag.last = { x: e.clientX, y: e.clientY };
-    return;
-  }
-  if (drag.kind === 'pen') {
-    const last = drag.pts![drag.pts!.length - 1];
-    if (Math.hypot(e.pageX - last[0], e.pageY - last[1]) * scale >= 1.5) drag.pts!.push([e.pageX, e.pageY]);
-    draw();
+    drag.ls = { x: e.screenX, y: e.screenY };
     return;
   }
   if (drag.kind === 'draw' || drag.kind === 'marquee') {
@@ -1252,8 +1236,9 @@ function onDragEnd(e: PointerEvent): void {
     if (paths.length) commit([{ t: 'remove', paths }]);
     return;
   }
+  if (d.kind === 'pen') { if (e.type === 'pointercancel') dropInk(); else endInk(e); return; }
   if (e.type === 'pointercancel') { for (const x of d.els) revertLive(x); drawBox = null; draw(); return; }
-  if (d.kind === 'draw' || d.kind === 'pen') {
+  if (d.kind === 'draw') {
     const box = drawBox;
     drawBox = null;
     draw();
@@ -1363,39 +1348,179 @@ function lineOp(svg: HTMLElement): HtmlOp | null {
 
 /* ------------------------------------------------------------------ touch: panning and pinching */
 
-const touches = new Map<number, { x: number; y: number }>();
-let pinch: { d: number; mx: number; my: number } | null = null;
+const touches = new Map<number, { x: number; y: number; sx: number; sy: number }>();
+let pinch: { d: number; mx: number; my: number; smx: number; smy: number } | null = null;
 
-function touchGeom(): { d: number; mx: number; my: number } | null {
+/** the two fingers' distance (on the screen) and middle (in the frame and on the screen) */
+function touchGeom(): { d: number; mx: number; my: number; smx: number; smy: number } | null {
   const ps = [...touches.values()];
   if (ps.length < 2) return null;
   const [a, b] = ps;
-  return { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 };
+  return { d: Math.hypot(a.sx - b.sx, a.sy - b.sy) || 1, mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2, smx: (a.sx + b.sx) / 2, smy: (a.sy + b.sy) / 2 };
 }
 
+/** a drag the first finger began is given up (a second finger came) */
+function dropDrag(): void {
+  if (!drag) return;
+  if (drag.kind === 'pen') dropInk();
+  for (const x of drag.els) revertLive(x);
+  if (drag.kind === 'erase') for (const el of drag.erased ?? []) (el as HTMLElement | SVGElement).style.visibility = '';
+  if (drag.hold) clearTimeout(drag.hold);
+  release(); drag = null; drawBox = null; guides = []; draw();
+}
+
+/** the two fingers of a pinch: in the frame's px and on the screen */
+const pinchPts = () => [...touches.values()].slice(0, 2).map(p => ({ x: p.x, y: p.y, sx: p.sx, sy: p.sy }));
+
 function startPinch(): void {
-  // a drag the first finger began is given up
-  if (drag) { for (const x of drag.els) revertLive(x); if (drag.hold) clearTimeout(drag.hold); release(); drag = null; drawBox = null; guides = []; draw(); }
+  dropDrag();
   pinch = touchGeom();
+  // one slide: the editor zooms and moves it, from where the fingers were at the start (absolute — no step undoes the last)
+  if (pinch && isSolo()) post({ ol: 'pinch', phase: 'start', pts: pinchPts() });
 }
 
 function onTouchMove(e: PointerEvent): void {
   if (!touches.has(e.pointerId)) return;
-  touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  touches.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.screenX, sy: e.screenY });
+  if (tri) { moveTri(); return; }
   if (!pinch) return;
+  if (isSolo()) { post({ ol: 'pinch', phase: 'move', pts: pinchPts() }); return; }
   const g = touchGeom();
   if (!g) return;
+  // a web page: step by step, measured on the screen (the frame's px change with each step)
   const f = g.d / pinch.d;
   if (Math.abs(f - 1) > 0.002) post({ ol: 'zoom', factor: f, clientX: g.mx, clientY: g.my, pageY: g.my + scrollY });
-  scrollBy(0, pinch.my - g.my);
-  if (g.mx !== pinch.mx) post({ ol: 'pan', dx: g.mx - pinch.mx });
+  scrollBy(0, (pinch.smy - g.smy) / scale);
+  if (g.smx !== pinch.smx) post({ ol: 'pan', dx: g.smx - pinch.smx, screen: true });
   pinch = g;
 }
 
 function onTouchUp(e: PointerEvent): void {
   if (e.pointerType !== 'touch') return;
   touches.delete(e.pointerId);
-  if (touches.size < 2) pinch = null;
+  if (tri) { if (!touches.size) endTri(); return; }
+  if (touches.size < 2 && pinch) {
+    if (isSolo()) post({ ol: 'pinch', phase: 'end', pts: [] });
+    pinch = null;
+  }
+}
+
+/* ------------------------------------------------------------------ three fingers: undo, redo */
+
+/** three fingers down: where their middle was (screen px), when, how far it went */
+let tri: { t0: number; x0: number; y0: number; x: number; y: number } | null = null;
+const triMid = () => { const ps = [...touches.values()]; return { x: ps.reduce((a, p) => a + p.sx, 0) / ps.length, y: ps.reduce((a, p) => a + p.sy, 0) / ps.length }; };
+
+function startTri(): void {
+  dropDrag();
+  if (pinch && isSolo()) post({ ol: 'pinch', phase: 'cancel', pts: [] });
+  pinch = null;
+  const m = triMid();
+  tri = { t0: performance.now(), x0: m.x, y0: m.y, x: m.x, y: m.y };
+}
+
+function moveTri(): void {
+  // (the middle of all three: when one lifts first, the others' middle is not where the hand went)
+  if (!tri || touches.size < 3) return;
+  const m = triMid();
+  tri.x = m.x; tri.y = m.y;
+}
+
+/** all fingers up: a swipe left undoes, right redoes (iPadOS), a tap undoes (GoodNotes) */
+function endTri(): void {
+  const g = tri;
+  tri = null;
+  if (!g) return;
+  const dx = g.x - g.x0, dy = g.y - g.y0;
+  if (Math.abs(dx) >= 60 && Math.abs(dx) > 1.5 * Math.abs(dy)) post({ ol: 'history', redo: dx > 0 });
+  else if (performance.now() - g.t0 < 500 && Math.hypot(dx, dy) < 30) post({ ol: 'history', redo: false });
+}
+
+/* ------------------------------------------------------------------ Draw: the stroke as it is drawn */
+
+/** a Pencil drew here: fingers move the slide from now on, they do not draw */
+let penSeen = false;
+
+/** the stroke being drawn: in the page itself, where it will stay and as it will look (freehand.ts) */
+let ink: { slide: HTMLElement | null; pts: FreePt[]; pressure: boolean; svg: SVGSVGElement; path: SVGPathElement; frame: number } | null = null;
+/** strokes drawn and sent to the editor, shown until the page has them (`count`: that many strokes the slide will have then) */
+const sentInk: { svg: SVGSVGElement; slide: HTMLElement | null; count: number; timer: ReturnType<typeof setTimeout> }[] = [];
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const inkCount = (slide: HTMLElement | null) => (slide ?? document.body).querySelectorAll(':scope > svg.ol-ink:not([data-ol-runtime])').length;
+
+function inkPoint(e: PointerEvent, slide: HTMLElement | null): FreePt {
+  const [x, y] = slide ? slidePoint(slide, e.pageX, e.pageY) : [e.pageX, e.pageY];
+  return [x, y, e.pointerType === 'pen' && e.pressure > 0 ? e.pressure : 0.5];
+}
+
+function startInk(e: PointerEvent, slide: HTMLElement | null): void {
+  dropInk();
+  const svg = document.createElementNS(SVG_NS, 'svg') as SVGSVGElement;
+  svg.setAttribute('data-ol-runtime', '');
+  svg.setAttribute('class', 'ol-ink');
+  svg.setAttribute('aria-hidden', 'true');
+  const hl = inkStyle.opacity < 1;
+  svg.setAttribute('style', `position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none${hl ? '; mix-blend-mode: multiply' : ''}`);
+  const path = document.createElementNS(SVG_NS, 'path') as SVGPathElement;
+  path.setAttribute('fill', inkStyle.color);
+  if (hl) path.setAttribute('fill-opacity', String(inkStyle.opacity));
+  svg.append(path);
+  (slide ?? document.body).append(svg);
+  ink = { slide, pts: [inkPoint(e, slide)], pressure: e.pointerType === 'pen', svg, path, frame: 0 };
+  paintInk(false);
+}
+
+/** the pen moved: every point it passed (the coalesced events), drawn at the next frame */
+function moveInk(e: PointerEvent): void {
+  if (!ink) return;
+  for (const ev of e.getCoalescedEvents?.() ?? [e]) ink.pts.push(inkPoint(ev, ink.slide));
+  if (!ink.frame) ink.frame = requestAnimationFrame(() => { if (ink) { ink.frame = 0; paintInk(false); } });
+}
+
+function paintInk(last: boolean): number[][] {
+  if (!ink) return [];
+  const poly = freeOutline(ink.pts, { width: inkStyle.width, highlighter: inkStyle.opacity < 1, pressure: ink.pressure, last });
+  ink.path.setAttribute('d', outlinePathD(poly));
+  return poly;
+}
+
+/** the pen lifted: the stroke drawn to its end, sent; it stays shown until the page has it */
+function endInk(e: PointerEvent): void {
+  if (!ink) return;
+  if (ink.frame) cancelAnimationFrame(ink.frame);
+  // where it lifted, if not where it last was — with the pressure it had (a Pencil lifting reports none)
+  const up = inkPoint(e, ink.slide), last = ink.pts[ink.pts.length - 1];
+  if (Math.hypot(up[0] - last[0], up[1] - last[1]) > 0.5) ink.pts.push([up[0], up[1], last[2]]);
+  const poly = paintInk(true);
+  const b = outlineBox(poly);
+  const { slide, svg } = ink;
+  ink = null;
+  if (state.version === null || !poly.length || (!b.w && !b.h)) { svg.remove(); return; }
+  // whole px for its place, the outline moved into its own box
+  const x = Math.floor(b.x), y = Math.floor(b.y);
+  const rect = { x, y, w: Math.ceil(b.x + b.w) - x, h: Math.ceil(b.y + b.h) - y };
+  const waiting = sentInk.filter(s => s.slide === slide).length;
+  const entry = { svg, slide, count: inkCount(slide) + waiting + 1, timer: setTimeout(() => { svg.remove(); const i = sentInk.indexOf(entry); if (i >= 0) sentInk.splice(i, 1); }, 4000) };
+  sentInk.push(entry);
+  post({ ol: 'draw', version: state.version, tool: 'pen', slide: slide ? pathOf(slide) : null, rect, after: null, d: outlinePathD(poly, -x, -y), closed: true });
+}
+
+/** the stroke being drawn given up (a second finger, a cancelled pointer) */
+function dropInk(): void {
+  if (!ink) return;
+  if (ink.frame) cancelAnimationFrame(ink.frame);
+  ink.svg.remove();
+  ink = null;
+}
+
+/** a new version of the page: the strokes it has now are no longer shown twice */
+function inkArrived(): void {
+  for (const s of [...sentInk]) {
+    if (s.svg.isConnected && inkCount(s.slide) < s.count) continue;
+    clearTimeout(s.timer);
+    s.svg.remove();
+    sentInk.splice(sentInk.indexOf(s), 1);
+  }
 }
 
 /** Ctrl / ⌘ + wheel (a trackpad pinch, as Chromium and Firefox report it) zooms; sideways scrolling pans */
@@ -1550,17 +1675,10 @@ function eraseAt(e: PointerEvent, d: Drag): void {
 function finishDraw(d: Drag, box: Rect | null, e: PointerEvent): void {
   if (state.version === null) return;
   const slide = d.slide ?? (state.kind !== 'page' ? slideOf(document.elementFromPoint(e.clientX, e.clientY)) : null);
-  if (d.kind === 'pen' && (!d.moved || (d.pts?.length ?? 0) < 2)) return;
   const toLocal = (x: number, y: number): [number, number] => (slide ? slidePoint(slide, x, y) : [x, y]);
   let rect: Rect;
   let pts: [number, number][] | undefined;
-  if (d.kind === 'pen') {
-    const loc = d.pts!.map(([x, y]) => toLocal(x, y));
-    pts = simplify(loc, 0.9);
-    const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
-    const x = Math.min(...xs), y = Math.min(...ys);
-    rect = { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
-  } else if ((tool === 'line' || tool === 'arrow') && d.pts && d.pts.length === 2 && d.moved) {
+  if ((tool === 'line' || tool === 'arrow') && d.pts && d.pts.length === 2 && d.moved) {
     pts = d.pts.map(([x, y]) => toLocal(x, y));
     const x = Math.min(pts[0][0], pts[1][0]), y = Math.min(pts[0][1], pts[1][1]);
     rect = { x, y, w: Math.abs(pts[0][0] - pts[1][0]), h: Math.abs(pts[0][1] - pts[1][1]) };

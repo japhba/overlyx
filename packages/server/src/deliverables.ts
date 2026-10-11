@@ -19,7 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import type { Express, Request, Response } from 'express';
-import { JWT_SECRET } from './config.ts';
+import { JWT_SECRET, config } from './config.ts';
 import { db } from './db.ts';
 import { toSessionUser, type SessionUser } from './auth.ts';
 import { roleFor } from './access.ts';
@@ -101,6 +101,14 @@ function commonHeaders(res: Response): void {
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
 }
 
+/**
+ * The runtime's address with its build in it (the file's time): /_ol is cached for an hour, and an
+ * open browser kept the runtime it had after a deploy — the canvas a version behind its editor.
+ */
+export function runtimeSrc(dist = config.clientDist): string {
+  try { return `/_ol/runtime.js?v=${Math.round(fs.statSync(path.join(dist, '_ol', 'runtime.js')).mtimeMs).toString(36)}`; } catch { return '/_ol/runtime.js'; }
+}
+
 export function mountDeliverables(app: Express): void {
   // the runtime and its MathJax: public code, fetched by opaque-origin frames
   app.use('/_ol', (_req, res, next) => { res.setHeader('Access-Control-Allow-Origin', '*'); res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin'); next(); });
@@ -162,7 +170,7 @@ export async function resolveDeliverable(token: string, rawRest: string, query: 
     let html: string;
     try { html = await liveHtml(grant.project, rel); } catch { return { status: 404, type: 'text/plain', body: 'Not found.' }; }
     const mode = (RUNTIME_MODES as readonly string[]).includes(String(query.ol)) ? String(query.ol) as RuntimeMode : 'view';
-    return { status: 200, type: 'text/html; charset=utf-8', body: injectRuntime(html, runtimeTags(mode, { ...extrasOf(grant.project, rel, html) })), headers: { 'Cache-Control': 'no-store' } };
+    return { status: 200, type: 'text/html; charset=utf-8', body: injectRuntime(html, runtimeTags(mode, { ...extrasOf(grant.project, rel, html) }, runtimeSrc())), headers: { 'Cache-Control': 'no-store' } };
   }
 
   let st: fs.Stats;

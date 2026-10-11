@@ -520,9 +520,15 @@ blend.
     with a constant-width outline), lines and arrows from where the drag started to where it ended
     (Shift: 45° steps), **Draw** (P; `deckink.ts`: pen, highlighter and eraser E with the documents'
     margin-ink presets — a click on the picked colour / width changes it, `ol.deckInk`; the pen stays in
-    hand stroke after stroke until Esc, each stroke a smoothed `<path>` in its ink, the highlighter's
-    translucent with `mix-blend-mode: multiply`; the eraser hides the strokes — open unfilled paths —
-    it passes over and removes them in one change on release); handles as in Inkscape: a click selects with the
+    hand stroke after stroke until Esc. A stroke is GoodNotes' (`runtime/freehand.ts`, perfect-freehand):
+    an outline whose width follows the Pencil's pressure (else the speed), tapered in and out, a tap a
+    dot, the highlighter an even band — drawn in the slide itself while the pen moves (an
+    `svg.ol-ink[data-ol-runtime]`, coalesced events, one rAF) exactly as it is then written
+    (`<svg class="ol-ink">` with one filled `<path>`, the highlighter translucent with `mix-blend-mode:
+    multiply`), and shown until the page has it (`inkArrived`), so nothing flickers or changes on
+    release. Once a Pencil has drawn, fingers (and the palm) move the slide instead of drawing. Selected,
+    a stroke's toolbar is its ink colour (kind `ink`). The eraser hides the strokes — Draw's, and open
+    unfilled paths — it passes over and removes them in one change on release); handles as in Inkscape: a click selects with the
     resize box, a click on the selected object again turns its handles into rotation arrows off the
     four corners (the centre marked; any arrow turns it, CSS `rotate`, Shift: 15° steps, snaps to
     0/90/180/270) and the next click back, a double click edits its points (a path) or its text — the
@@ -659,7 +665,17 @@ blend.
     none`, the page laid out simply around it as for printing, 48 px of room for handles), fitted
     into the canvas both ways and centred; the rail, Page Down / Page Up and selecting an object of
     another slide (undo, the code view) change it, the zoom stays. The editor sizes the frame to the
-    slide and moves it by a transform set outside renders (`deliverable/viewport.ts` `SlideView`):
+    slide and moves it by a transform set outside renders (`deliverable/viewport.ts` `SlideView`; a zoom
+    too while it goes on — `zoomTo`, `placeAt` hold a `live` scale the editor's `zoom` takes over ~120 ms
+    after the last wheel step or when the fingers lift, so a pinch renders no Preact; `will-change` only
+    while it moves and the offset on whole device px at rest — iPad blur). A pinch is absolute: the
+    runtime sends both fingers (frame px and screenX/Y, `pinch`), the editor keeps what was under their
+    middle under it at the scale their distance gives — measured in screen px, as the frame's own px
+    change with each step (incremental factors in frame px took back every other step: the jank); a
+    finger's pan is in screen px for the same reason. Three fingers: a tap or a swipe left undoes, a
+    swipe right redoes (`history`, a "↶ Undo" sign). The runtime's script is `/_ol/runtime.js?v=<its
+    mtime>` (server `runtimeSrc`): cached for an hour, an open browser kept the old one after a deploy.
+    The view:
     zoomed in it pans as far as the slide's edges and a margin; a scroll, a finger or a pinch past
     that — or while the whole slide fits — pulls it against Apple's rubber-band resistance, the
     slide stretching a little towards the pull, and on letting go it springs back into the middle

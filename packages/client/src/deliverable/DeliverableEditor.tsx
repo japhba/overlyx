@@ -570,11 +570,13 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
         case 'pan':
           if (!fromCanvas) break;
           if (soloRef.current) {
-            // (a finger moves in the frame's px; a wheel's deltas are the device's, whatever the frame's scale)
-            const s = scaleRef.current;
-            if (m.finger) slideView.panBy(m.dx * s, (m.dy ?? 0) * s); else slideView.scroll(m.dx, m.dy ?? 0);
-          } else setPanX(p => p + m.dx * scaleRef.current);
+            // (a finger moves on the screen — or, from an older runtime, in the frame's px; a wheel's deltas are the device's, whatever the frame's scale)
+            const s = slideView.scaleNow() ?? scaleRef.current, k = m.screen ? screenK.current : s;
+            if (m.finger) slideView.panBy(m.dx * k, (m.dy ?? 0) * k); else slideView.scroll(m.dx, m.dy ?? 0);
+          } else setPanX(p => p + m.dx * (m.screen ? screenK.current : scaleRef.current));
           break;
+        case 'pinch': if (fromCanvas) onPinch(m); break;
+        case 'history': if (fromCanvas) historyGesture(m.redo); break;
         case 'panEnd': if (fromCanvas) slideView.release(); break;
         case 'colors': if (fromCanvas) setColors({ desk: m.desk, page: m.page }); break;
         case 'cropping': if (fromCanvas) setCropping(m.path); break;
@@ -648,12 +650,68 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     setZoom(z1);
   };
   /** one slide on the canvas: zoom by `factor` about a canvas point (no smaller than half the fit) */
+  /** a zoom the view shows (zoomTo, placeAt) becomes the editor's once it rests: not a render per wheel step or finger move */
+  const zoomCommit = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const commitLiveZoom = (delay: number) => {
+    if (zoomCommit.current) clearTimeout(zoomCommit.current);
+    zoomCommit.current = setTimeout(() => { zoomCommit.current = null; const s = slideView.scaleNow(); if (s) setZoom(s / fitRef.current); }, delay);
+  };
   const zoomSolo = (factor: number, px: number, py: number) => {
-    const z0 = zoomRef.current, f = fitRef.current;
-    const z1 = Math.max(0.5, Math.min(MAX_ZOOM / f, z0 * factor));
-    if (Math.abs(z1 - z0) < 1e-4) return;
-    slideView.zoomed(f * z0, f * z1, px, py);
-    setZoom(z1);
+    const f = fitRef.current, s0 = slideView.scaleNow() ?? f * zoomRef.current;
+    const s1 = Math.max(0.5 * f, Math.min(MAX_ZOOM, s0 * factor));
+    if (Math.abs(s1 - s0) < 1e-4 * s0) return;
+    slideView.zoomTo(s1, px, py);
+    commitLiveZoom(120);
+  };
+  /** canvas px per screen px (the browser's zoom): measured by each pinch, for a finger's pan */
+  const screenK = useRef(1);
+  /**
+   * Two fingers on the slide (runtime pinch): what was under each stays under it — the slide's scale
+   * from their distance, its place from their middle, all from where they came down. Their screen
+   * positions are the measure (the frame's own px change with every step), mapped onto the canvas by
+   * where they were then.
+   */
+  const pinchRef = useRef<{ c: { x: number; y: number }[]; r: { x: number; y: number }[]; a: { x: number; y: number }; k: number; s0: number; d0: number } | null>(null);
+  const onPinch = (m: Extract<FromRuntime, { ol: 'pinch' }>) => {
+    if (!soloRef.current) return;
+    const f = fitRef.current;
+    if (m.phase === 'start') {
+      if (m.pts.length < 2) return;
+      if (zoomCommit.current) { clearTimeout(zoomCommit.current); zoomCommit.current = null; }
+      const s0 = slideView.scaleNow() ?? scaleRef.current;
+      const c = m.pts.slice(0, 2).map(p => slideView.toCanvas(p.x, p.y));
+      if (!c[0] || !c[1]) return;
+      const dc = Math.hypot(c[0].x - c[1].x, c[0].y - c[1].y), dr = Math.hypot(m.pts[0].sx - m.pts[1].sx, m.pts[0].sy - m.pts[1].sy);
+      const k = dr > 8 ? Math.max(0.25, Math.min(4, dc / dr)) : 1;
+      screenK.current = Math.abs(k - 1) < 0.03 ? 1 : k;
+      pinchRef.current = { c: c as { x: number; y: number }[], r: m.pts.slice(0, 2).map(p => ({ x: p.sx, y: p.sy })), a: { x: (m.pts[0].x + m.pts[1].x) / 2, y: (m.pts[0].y + m.pts[1].y) / 2 }, k, s0, d0: Math.max(1, dc) };
+      return;
+    }
+    const g = pinchRef.current;
+    if (!g) return;
+    if (m.phase === 'move') {
+      if (m.pts.length < 2) return;
+      const now = m.pts.slice(0, 2).map((p, i) => ({ x: g.c[i].x + g.k * (p.sx - g.r[i].x), y: g.c[i].y + g.k * (p.sy - g.r[i].y) }));
+      const s = Math.max(0.5 * f, Math.min(MAX_ZOOM, g.s0 * Math.hypot(now[0].x - now[1].x, now[0].y - now[1].y) / g.d0));
+      slideView.placeAt(s, g.a.x, g.a.y, (now[0].x + now[1].x) / 2, (now[0].y + now[1].y) / 2);
+      return;
+    }
+    pinchRef.current = null;
+    // a third finger came (undo, redo): back to where the slide was
+    if (m.phase === 'cancel') slideView.placeAt(g.s0, g.a.x, g.a.y, (g.c[0].x + g.c[1].x) / 2, (g.c[0].y + g.c[1].y) / 2);
+    commitLiveZoom(0);
+    slideView.release();
+  };
+  /** three fingers (runtime): undo, redo — said for a moment on the canvas, as the gesture shows nothing itself */
+  const [hud, setHud] = useState<{ text: string; n: number } | null>(null);
+  const hudTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const historyGesture = (redo: boolean) => {
+    if (readOnlyRef.current) return;
+    toCanvas({ ol: 'stopText' });
+    setTimeout(() => (redo ? host.redo() : host.undo()), 30);
+    setHud(h => ({ text: redo ? '↷ Redo' : '↶ Undo', n: (h?.n ?? 0) + 1 }));
+    if (hudTimer.current) clearTimeout(hudTimer.current);
+    hudTimer.current = setTimeout(() => setHud(null), 900);
   };
   const zoomStep = (factor: number) => {
     if (soloRef.current) { const b = boxRef.current; zoomSolo(factor, b.w / 2, b.h / 2); return; }
@@ -663,6 +721,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     zoomAbout(factor, cx, cy, scrollRef.current + cy);
   };
   const fitSlide = () => {
+    if (zoomCommit.current) { clearTimeout(zoomCommit.current); zoomCommit.current = null; }
     setZoom(1);
     setPanX(0);
     if (soloRef.current) { slideView.recentre(true); return; }
@@ -1492,6 +1551,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
                 </svg>
               </div>
             )}
+            {hud && <div key={hud.n} class="dl-hud" role="status" data-dl-hud>{hud.text}</div>}
             {(lost || zoomed || (soloOn && slideFree)) && kind !== 'page' && (
               <button type="button" class={'dl-refocus' + (lost ? ' lost' : '')} data-dl-refocus onClick={fitSlide}
                 title={zoomed ? 'Show the whole slide again (Ctrl+0)' : 'Back into the middle (Ctrl+0)'}>

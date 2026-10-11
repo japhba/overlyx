@@ -26,7 +26,7 @@ export type Tool = 'select' | 'text' | 'rect' | 'roundrect' | 'ellipse' | 'trian
 export interface InkStyle { color: string; width: number; opacity: number }
 
 /** what kind of object the toolbar is showing tools for */
-export type ObjKind = 'text' | 'shape' | 'line' | 'image' | 'svg' | 'svgpart' | 'group' | 'formula' | 'other';
+export type ObjKind = 'text' | 'shape' | 'line' | 'image' | 'svg' | 'svgpart' | 'group' | 'formula' | 'ink' | 'other';
 
 /** PowerPoint's / Inkscape's arrangement commands, carried out by the runtime on the selection */
 export type ArrangeHow =
@@ -242,7 +242,16 @@ export type FromRuntime =
   /** a pinch or Ctrl+wheel in the frame: zoom by `factor` about a point (frame client px; its document y) */
   | { ol: 'zoom'; factor: number; clientX: number; clientY: number; pageY: number }
   /** panning asked for in the frame (frame px; the editor pans what overflows its canvas): a wheel or trackpad scroll, a finger */
-  | { ol: 'pan'; dx: number; dy?: number; finger?: boolean }
+  /** `screen`: the deltas are the pointer's on the screen (screenX/Y: the frame's own px change as it is zoomed and moved) */
+  | { ol: 'pan'; dx: number; dy?: number; finger?: boolean; screen?: boolean }
+  /**
+   * two fingers on one slide (solo): where they are, in the frame's px (`x`, `y`) and on the screen
+   * (`sx`, `sy`); the editor zooms and moves the slide so that what was under them at the start stays
+   * under them. `cancel`: a third finger came — back to where it was.
+   */
+  | { ol: 'pinch'; phase: 'start' | 'move' | 'end' | 'cancel'; pts: { x: number; y: number; sx: number; sy: number }[] }
+  /** three fingers: a tap or a swipe left undoes, a swipe right redoes */
+  | { ol: 'history'; redo: boolean }
   /** the finger that panned was lifted (the editor lets the canvas spring back) */
   | { ol: 'panEnd' }
   /** the page's own colours: what is around its slides (the body's background) and the slides' usual one */

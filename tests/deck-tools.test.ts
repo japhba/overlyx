@@ -8,6 +8,7 @@
 import { describe, it, expect } from 'vitest';
 import { objectHtml, inlineSvgHtml, penPathD } from '../packages/client/src/deliverable/sourceops.ts';
 import { loadDeckInk, saveDeckInk, patchDeckInk, deckInkStyle, defaultDeckInk } from '../packages/client/src/deliverable/deckink.ts';
+import { freeOutline, outlinePathD, outlineBox, type FreePt } from '../packages/client/src/deliverable/runtime/freehand.ts';
 import { applyOp, opSplices, parseSource, rebaseOp } from '../packages/core/src/html/source.ts';
 
 describe('objects drawn on a slide', () => {
@@ -47,6 +48,55 @@ describe('objects drawn on a slide', () => {
     expect(hl).toContain('stroke="#fbbc04" stroke-width="24" stroke-opacity="0.35"');
     // a colour that is no colour does not reach the page
     expect(objectHtml('pen', { x: 0, y: 0, w: 20, h: 10 }, 'deck', 1, pts, undefined, { color: '"><script>', width: 4, opacity: 1 })).toContain('stroke="#1d2433"');
+  });
+});
+
+describe("Draw's strokes as GoodNotes draws them (runtime/freehand.ts)", () => {
+  /** half the stroke's width at x (the outline of a level stroke along y = 0, where its edges cross x) */
+  const half = (poly: number[][], x: number) => {
+    let h = 0;
+    for (let i = 0; i < poly.length; i++) {
+      const [ax, ay] = poly[i], [bx, by] = poly[(i + 1) % poly.length];
+      if ((ax - x) * (bx - x) > 0 || ax === bx) continue;
+      h = Math.max(h, Math.abs(ay + (by - ay) * (x - ax) / (bx - ax)));
+    }
+    return h;
+  };
+  const level = (n: number, press: (t: number) => number): FreePt[] => Array.from({ length: n + 1 }, (_, i) => [i * 4, 0, press(i / n)]);
+
+  it("tapers in at the start and out at the end; the Pencil's pressure makes it wider", () => {
+    const poly = freeOutline(level(100, () => 0.5), { width: 6, pressure: true, last: true });
+    expect(half(poly, 200)).toBeGreaterThan(2);
+    expect(half(poly, 2)).toBeLessThan(half(poly, 200) * 0.6);
+    expect(half(poly, 398)).toBeLessThan(half(poly, 200) * 0.6);
+    const hard = freeOutline(level(100, () => 1), { width: 6, pressure: true, last: true });
+    const light = freeOutline(level(100, () => 0.15), { width: 6, pressure: true, last: true });
+    expect(half(hard, 200)).toBeGreaterThan(half(light, 200) * 1.6);
+  });
+
+  it("the highlighter is an even band; a tap is a dot", () => {
+    const poly = freeOutline(level(100, () => 0.5), { width: 20, highlighter: true, last: true });
+    expect(half(poly, 30)).toBeCloseTo(10, 0);
+    expect(half(poly, 200)).toBeCloseTo(10, 0);
+    const dot = outlineBox(freeOutline([[50, 50, 0.5]], { width: 6, pressure: true, last: true }));
+    expect(dot.w).toBeGreaterThan(3);
+    expect(dot.h).toBeGreaterThan(3);
+  });
+
+  it('is written as one closed path, moved into its own box', () => {
+    const poly = freeOutline(level(20, () => 0.5), { width: 4, last: true });
+    const b = outlineBox(poly);
+    const d = outlinePathD(poly, -b.x, -b.y);
+    expect(d).toMatch(/^M[\d.]+ [\d.]+Q/);
+    expect(d.endsWith('Z')).toBe(true);
+    expect(d).not.toMatch(/-\d/);   // (nothing left of or above its box)
+    const html = objectHtml('pen', { x: 10, y: 20, w: b.w, h: b.h }, 'deck', 1, undefined, { d, closed: true }, { color: '#d93025', width: 4, opacity: 1 });
+    expect(html).toMatch(/^<svg class="ol-ink" style="position: absolute; left: 10px; top: 20px; /);
+    expect(html).toContain(`<path d="${d}" fill="#d93025"/>`);
+    const hl = objectHtml('pen', { x: 0, y: 0, w: 9, h: 9 }, 'deck', 1, undefined, { d: 'M0 0L9 9Z" onload="x', closed: true }, { color: '#fbbc04', width: 24, opacity: 0.35 });
+    expect(hl).toContain('mix-blend-mode: multiply');
+    expect(hl).toContain('fill="#fbbc04" fill-opacity="0.35"');
+    expect(hl).not.toContain('onload');
   });
 });
 

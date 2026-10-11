@@ -12,7 +12,9 @@
  * between pages; a finger always can.
  *
  * The frame (the iframe showing the page) is moved by a CSS transform set here, outside Preact's
- * renders: a scroll or a spring moves it every frame without rendering the editor.
+ * renders: a scroll or a spring moves it every frame without rendering the editor. So is a zoom while
+ * it lasts (a pinch, a trackpad's): the view holds the scale it shows (`live`) until the editor's
+ * catches up with it.
  */
 
 export interface Size { w: number; h: number }
@@ -110,10 +112,44 @@ export class SlideView {
   private popAnim = 0;
   /** the ring's pop plays until then (performance.now()) */
   private popping = 0;
+  /** the scale shown while a zoom goes on (frame px → screen px), ahead of the editor's (`input().scale`) */
+  private live: number | null = null;
+  /** it moves (a scroll, a finger, a zoom, a spring): a layer of its own until it rests */
+  private moving = false;
+  private stillTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private frame: () => HTMLElement | null, private input: () => ViewInput | null, private marks: ViewMarks = {}) {}
 
   isFree(): boolean { return this.free; }
+
+  /**
+   * The slide moves: a compositor layer of its own while it does (will-change: moved without being
+   * drawn again), given up ~200 ms after the last move — then drawn again, on whole device px. A layer
+   * kept at rest stays as blurry as the scale it was first drawn at (Chrome freezes its raster scale,
+   * WebKit keeps the iframe composited: soft slides on the iPad), and a fractional offset resamples it.
+   */
+  private motion(): void {
+    const el = this.frame();
+    if (!this.moving && el) el.style.willChange = 'transform';
+    this.moving = true;
+    if (this.stillTimer) clearTimeout(this.stillTimer);
+    this.stillTimer = setTimeout(() => {
+      this.stillTimer = null;
+      this.moving = false;
+      const f = this.frame();
+      if (f) f.style.willChange = '';
+      this.render();
+    }, 200);
+  }
+
+  /** the scale shown: a zoom's as it goes on, else the editor's */
+  private sc(v: ViewInput): number { return this.live ?? v.scale; }
+
+  /** the scale shown now (frame px → screen px) */
+  scaleNow(): number | null {
+    const v = this.input();
+    return v ? this.sc(v) : null;
+  }
 
   private reduced(): boolean {
     try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; }
@@ -122,8 +158,8 @@ export class SlideView {
   /** the pan range: the slide's place */
   private ranges(v: ViewInput): Ranges {
     return {
-      x: panRange(v.rect.w * v.scale, v.box.w, v.margin),
-      y: panRange(v.rect.h * v.scale, v.box.h, v.margin),
+      x: panRange(v.rect.w * this.sc(v), v.box.w, v.margin),
+      y: panRange(v.rect.h * this.sc(v), v.box.h, v.margin),
     };
   }
 
@@ -131,8 +167,8 @@ export class SlideView {
   private active(v: ViewInput): Ranges {
     if (!this.free) return this.ranges(v);
     return {
-      x: freeRange(v.rect.w * v.scale, v.box.w, v.margin),
-      y: freeRange(v.rect.h * v.scale, v.box.h, v.margin),
+      x: freeRange(v.rect.w * this.sc(v), v.box.w, v.margin),
+      y: freeRange(v.rect.h * this.sc(v), v.box.h, v.margin),
     };
   }
 
@@ -147,7 +183,7 @@ export class SlideView {
   place(): { tx: number; ty: number; s: number } | null {
     const v = this.input();
     if (!v) return null;
-    const s = v.scale;
+    const s = this.sc(v);
     return {
       tx: v.box.w / 2 - (v.rect.x + v.rect.w / 2) * s + this.shown.x,
       ty: v.box.h / 2 - (v.rect.y + v.rect.h / 2) * s + this.shown.y,
@@ -165,6 +201,8 @@ export class SlideView {
   render(): void {
     const el = this.frame(), v = this.input();
     if (!el || !v) return;
+    // the editor's scale caught up with the zoom shown
+    if (this.live !== null && Math.abs(v.scale - this.live) < 1e-6 * Math.max(1, this.live)) this.live = null;
     const r = this.active(v);
     const lag = this.lag();
     if (!this.anim) {
@@ -185,6 +223,8 @@ export class SlideView {
       tx = ax + (tx - ax) * kx;
       ty = ay + (ty - ay) * ky;
     }
+    // at rest, on whole device px (iPad blur)
+    if (!this.moving) { const d = (typeof devicePixelRatio === 'number' && devicePixelRatio) || 1; tx = Math.round(tx * d) / d; ty = Math.round(ty * d) / d; }
     el.style.transform = `translate(${tx}px, ${ty}px) scale(${p.s * kx}, ${p.s * ky})`;
     this.drawRing(v);
   }
@@ -195,7 +235,7 @@ export class SlideView {
     if (!ring || performance.now() < this.popping) return;
     if (ring.classList.contains('pop')) ring.classList.remove('pop');
     const home = this.ranges(v);
-    const w = v.rect.w * v.scale, h = v.rect.h * v.scale;
+    const w = v.rect.w * this.sc(v), h = v.rect.h * this.sc(v);
     const left = (v.box.w - w) / 2 + this.shown.x, top = (v.box.h - h) / 2 + this.shown.y;
     // the pull the shown place stands for (springing back too), past the range
     const ux = unband(this.shown.x, home.x, v.box.w) - clampTo(this.shown.x, home.x);
@@ -237,6 +277,7 @@ export class SlideView {
       this.raw = { x: unband(this.shown.x, r.x, v.box.w), y: unband(this.shown.y, r.y, v.box.h) };
       this.stop();
     }
+    this.motion();
     const home = this.ranges(v);
     const before = pastRanges(this.raw, home);
     this.raw.x += dx;
@@ -267,6 +308,7 @@ export class SlideView {
       const step = () => {
         this.popAnim = 0;
         if (!this.pop) return;
+        this.motion();
         if (performance.now() - this.pop.t0 > 600) this.pop = null;
         this.render();
         if (this.pop) this.popAnim = requestAnimationFrame(step);
@@ -309,11 +351,43 @@ export class SlideView {
     this.idle = setTimeout(() => { this.idle = null; this.release(); }, 140);
   }
 
+  /**
+   * Zoomed to scale `s` about a canvas point (that point of the slide stays under it), shown at once:
+   * the editor takes the scale over when it can (a wheel, a trackpad: many steps a second).
+   */
+  zoomTo(s: number, px: number, py: number): void {
+    const v = this.input();
+    if (!v) return;
+    this.zoomed(this.sc(v), s, px, py);
+    this.live = s;
+    this.render();
+  }
+
+  /**
+   * A pinch: scale `s`, the frame's point (ax, ay) — what was under the fingers' middle when they
+   * came down — under the canvas point (cx, cy) where their middle is now. Absolute (from where the
+   * pinch began), so no step takes back the one before. Let go: `release`.
+   */
+  placeAt(s: number, ax: number, ay: number, cx: number, cy: number): void {
+    const v = this.input();
+    if (!v) return;
+    if (this.anim) this.stop();
+    if (this.idle) { clearTimeout(this.idle); this.idle = null; }
+    this.motion();
+    this.pop = null;
+    this.ringOn = false;
+    this.live = s;
+    this.raw = { x: cx - ax * s - v.box.w / 2 + (v.rect.x + v.rect.w / 2) * s, y: cy - ay * s - v.box.h / 2 + (v.rect.y + v.rect.h / 2) * s };
+    this.shown = { ...this.raw };
+    this.render();
+  }
+
   /** zoomed from scale `s0` to `s1` about a canvas point: that point of the slide stays under it */
   zoomed(s0: number, s1: number, px: number, py: number): void {
     const v = this.input();
     if (!v || !s0) return;
     if (this.anim) this.stop();
+    this.motion();
     this.pop = null;
     this.ringOn = false;
     const cx = px - v.box.w / 2, cy = py - v.box.h / 2;
@@ -357,6 +431,7 @@ export class SlideView {
     this.pop = null;
     this.ringOn = false;
     this.raw = { x: 0, y: 0 };
+    this.live = null;
     if (this.free) { this.free = false; this.marks.onFree?.(false); }
     if (animated) this.animateFrom(from, this.raw);
     else this.render();
@@ -378,6 +453,7 @@ export class SlideView {
     const t0 = performance.now();
     this.settling = t0;
     const step = (now: number) => {
+      this.motion();
       const t = (now - t0) / 1000;
       const x = spring(d0.x, t), y = spring(d0.y, t);
       this.shown = { x: to.x + x, y: to.y + y };
@@ -397,6 +473,7 @@ export class SlideView {
 
   destroy(): void {
     this.stop();
+    if (this.stillTimer) clearTimeout(this.stillTimer);
     if (this.popAnim) cancelAnimationFrame(this.popAnim);
     if (this.idle) clearTimeout(this.idle);
   }

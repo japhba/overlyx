@@ -268,7 +268,7 @@ function paintLabel(items: SelItem[]): string {
  * alignment; shapes: fill and border; lines: colour, weight, arrowheads; pictures: crop and background;
  * then group / ungroup and arrange, `extra` (duplicate, comment) and delete. Empty while points, a formula or a crop are edited.
  */
-const QUICK: string[][] = [['dk-b', 'dk-i', 'dk-color', 'dk-size'], ['dk-align'], ['dk-fill', 'dk-stroke'], ['dk-linecolor', 'dk-lineweight', 'dk-tips'], ['dk-crop', 'dk-nobg'], ['dk-group', 'dk-ungroup', 'dk-arrange']];
+const QUICK: string[][] = [['dk-b', 'dk-i', 'dk-color', 'dk-size'], ['dk-align'], ['dk-inkcolor', 'dk-fill', 'dk-stroke'], ['dk-linecolor', 'dk-lineweight', 'dk-tips'], ['dk-crop', 'dk-nobg'], ['dk-group', 'dk-ungroup', 'dk-arrange']];
 export function quickGroups(sections: ToolSection[], extra: ToolButton[]): ToolButton[][] {
   const all = new Map<string, ToolButton>();
   for (const sec of sections) for (const g of sec.groups) for (const b of g) all.set(b.id, b);
@@ -330,6 +330,7 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
   const shapes = sel.filter(s => s.kind === 'shape' || s.kind === 'svg' || s.kind === 'svgpart' || (s.kind === 'text' && s.style.fill));
   const lines = sel.filter(s => s.kind === 'line');
   const images = sel.filter(s => s.kind === 'image');
+  const inks = sel.filter(s => s.kind === 'ink');
 
   if (textish) {
     section(!c.editingText && one?.kind === 'formula' ? 'Formula' : 'Text');
@@ -421,6 +422,15 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
           { label: 'At the start ←', active: st.arrowStart && !st.arrowEnd, action: () => c.paint({ arrowStart: true, arrowEnd: false }) },
           { label: 'Both ↔', active: st.arrowStart && st.arrowEnd, action: () => c.paint({ arrowStart: true, arrowEnd: true }) },
         ] } },
+    ]);
+  }
+  if (inks.length) {
+    // Draw's strokes: their ink's colour (the outline is filled with it)
+    section(inks.length > 1 ? 'Strokes' : 'Ink');
+    const st = inks[0].style;
+    context.push([
+      { id: 'dk-inkcolor', title: 'Ink colour', icon: '', html: swatchIcon(ICONSVG.stroke, st.fill),
+        palette: { title: 'Ink colour', render: close => <ColorGrid current={st.fill} close={close} onPick={col => { if (col) c.paint({ fill: col }); }} /> } },
     ]);
   }
   if (images.length === 1 || c.image.cropping) {

@@ -30,6 +30,7 @@
     "lucide": "^1.55.0",
     "nspell": "^2.1.5",
     "pdfjs-dist": "^6.3.289",
+    "perfect-freehand": "^1.2.3",
     "polygon-clipping": "^0.15.7",
     "preact": "^10.29.8",
     "prosemirror-commands": "^1.6.2",

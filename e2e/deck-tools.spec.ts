@@ -344,20 +344,29 @@ test('Draw: strokes one after the other in the pen\'s colour, the highlighter, t
   const errors = collectErrors(page);
   await login(page);
   await setup(page);
-  const strokes = () => (fileText().match(/<path d="[^"]*" fill="none" stroke="#/g) ?? []).length;
+  const strokes = () => (fileText().match(/<svg class="ol-ink"/g) ?? []).length;
   const stroke = async (x0: number, y0: number, x1: number, y1: number) => {
     const a = await at(page, x0, y0), b = await at(page, x1, y1);
     await page.mouse.move(a.x, a.y); await page.mouse.down(); await page.mouse.move(b.x, b.y, { steps: 12 }); await page.mouse.up();
   };
+  const fr = () => editFrame(page);
   // Draw: its own row — pen, highlighter, eraser, the colours and widths
   await page.locator('[data-tb="dk-draw"]').click();
   await expect(page.locator('[data-tb="dk-ink-pen"]')).toBeVisible();
-  await stroke(100, 600, 400, 640);
+  // the stroke is in the slide while it is drawn, in its ink (no preview of another colour), tapered
+  const a0 = await at(page, 100, 600), a1 = await at(page, 400, 640);
+  await page.mouse.move(a0.x, a0.y); await page.mouse.down(); await page.mouse.move(a1.x, a1.y, { steps: 12 });
+  await page.waitForTimeout(100);
+  expect(await fr().evaluate(`(() => { const p = document.querySelector('section.slide svg.ol-ink[data-ol-runtime] path'); return p ? p.getAttribute('fill') + ' ' + (p.getAttribute('d') || '').length : null; })()`)).toMatch(/^#[0-9a-f]{6} \d{3,}/);
+  await page.mouse.up();
   await expect.poll(strokes, { timeout: 15000 }).toBe(1);
+  // once the page has it, the stroke drawn is not shown twice
+  await expect.poll(() => fr().evaluate(`document.querySelectorAll('svg.ol-ink[data-ol-runtime]').length`), { timeout: 5000 }).toBe(0);
+  expect(await fr().evaluate(`document.querySelectorAll('section.slide svg.ol-ink').length`)).toBe(1);
   // the pen stays in hand (the stroke is not selected): the next one, red
   await page.locator('[data-tb="dk-ink-c2"]').click();
   await stroke(100, 680, 400, 690);
-  await expect.poll(fileText, { timeout: 15000 }).toContain('stroke="#d93025"');
+  await expect.poll(fileText, { timeout: 15000 }).toContain('fill="#d93025"');
   expect(strokes()).toBe(2);
   await expect(page.locator('[data-tb="dk-draw"]')).toHaveClass(/active/);
   // the highlighter over the title: translucent, multiplied over the text
@@ -392,6 +401,80 @@ test('Draw: strokes one after the other in the pen\'s colour, the highlighter, t
   await page.locator('[data-dl-notes-show]').click();
   await expect(page.locator('[data-dl-notes]')).toBeVisible();
   expect(real(errors)).toEqual([]);
+});
+
+test('touch: a pinch zooms smoothly about the fingers, three fingers undo, a Pencil draws and fingers then move the slide', async ({ browser }) => {
+  const ctx = await browser.newContext({ baseURL: BASE_URL, hasTouch: true, viewport: { width: 1280, height: 900 } });
+  const page = await ctx.newPage();
+  const errors = collectErrors(page);
+  await login(page);
+  await setup(page);
+  const cdp = await ctx.newCDPSession(page);
+  const touches = (type: string, pts: { x: number; y: number }[]) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: pts.map((p, i) => ({ x: p.x, y: p.y, id: i + 1 })) });
+  /** the frame's scale and the slide point under a canvas point */
+  const view = () => page.evaluate(() => {
+    const f = document.querySelector('.dl-frame') as HTMLElement;
+    const m = /scale\(([\d.]+)/.exec(f.style.transform);
+    return { s: m ? Number(m[1]) : 1, box: f.getBoundingClientRect().toJSON() as { x: number; y: number } };
+  });
+  const c = await at(page, 640, 360);
+
+  // a pinch: the scale follows the fingers' distance, step by step, never back; what is under their middle stays
+  const v0 = await view();
+  const under0 = { x: (c.x - v0.box.x) / v0.s, y: (c.y - v0.box.y) / v0.s };
+  await touches('touchStart', [{ x: c.x - 60, y: c.y }, { x: c.x + 60, y: c.y }]);
+  const seen: number[] = [];
+  for (let i = 1; i <= 12; i++) {
+    const d = 60 + 90 * i / 12;
+    await touches('touchMove', [{ x: c.x - d, y: c.y }, { x: c.x + d, y: c.y }]);
+    await page.waitForTimeout(20);
+    seen.push((await view()).s);
+  }
+  await touches('touchEnd', []);
+  for (let i = 1; i < seen.length; i++) expect(seen[i]).toBeGreaterThanOrEqual(seen[i - 1] - 1e-6);
+  expect(seen[seen.length - 1] / v0.s).toBeGreaterThan(2.3);
+  expect(seen[seen.length - 1] / v0.s).toBeLessThan(2.7);
+  const v1 = await view();
+  expect(Math.abs((c.x - v1.box.x) / v1.s - under0.x)).toBeLessThan(4);
+  expect(Math.abs((c.y - v1.box.y) / v1.s - under0.y)).toBeLessThan(4);
+  // the zoom is the editor's once the fingers are up
+  await expect(page.locator('.dl-zoom')).toHaveText(new RegExp(`^${Math.round(v1.s * 100)}%$`), { timeout: 3000 });
+  await page.locator('.dl-zoom').click();
+  await expect.poll(async () => Math.abs((await view()).s - v0.s), { timeout: 3000 }).toBeLessThan(0.002);
+  await page.waitForTimeout(700);
+
+  // three fingers tap: undo (and it says so)
+  const b = await at(page, 150, 450);
+  await page.mouse.click(b.x, b.y);
+  await page.locator('.dl-toolbar [data-tb="dk-delete"]').click();
+  await expect.poll(fileText, { timeout: 15000 }).not.toContain('id="a"');
+  const e = await at(page, 640, 250);
+  await touches('touchStart', [{ x: e.x - 50, y: e.y }, { x: e.x, y: e.y - 20 }, { x: e.x + 50, y: e.y }]);
+  await page.waitForTimeout(80);
+  await touches('touchEnd', []);
+  await expect(page.locator('[data-dl-hud]')).toHaveText(/Undo/);
+  await expect.poll(fileText, { timeout: 15000 }).toContain('id="a"');
+
+  // a Pencil draws, with its pressure; a finger then moves the slide instead of drawing (the palm too)
+  await page.locator('[data-tb="dk-draw"]').click();
+  const strokes = () => (fileText().match(/<svg class="ol-ink"/g) ?? []).length;
+  const p0 = await at(page, 200, 620);
+  const pen = (type: string, x: number, y: number, force: number) => cdp.send('Input.dispatchMouseEvent', { type, x, y, button: 'left', buttons: type === 'mouseReleased' ? 0 : 1, clickCount: 1, force, pointerType: 'pen' });
+  await pen('mousePressed', p0.x, p0.y, 0.2);
+  for (let i = 1; i <= 16; i++) await pen('mouseMoved', p0.x + i * 12, p0.y + Math.sin(i / 3) * 10, 0.2 + 0.7 * Math.sin(i / 16 * Math.PI));
+  await pen('mouseReleased', p0.x + 192, p0.y, 0.1);
+  await expect.poll(strokes, { timeout: 15000 }).toBe(1);
+  const t0 = (await view()).box;
+  const f0 = await at(page, 700, 600);
+  await touches('touchStart', [f0]);
+  for (let i = 1; i <= 8; i++) { await touches('touchMove', [{ x: f0.x - i * 10, y: f0.y }]); await page.waitForTimeout(16); }
+  // (the slide follows the finger; let go, it springs back into place)
+  expect(t0.x - (await view()).box.x).toBeGreaterThan(20);
+  await touches('touchEnd', []);
+  await page.waitForTimeout(600);
+  expect(strokes()).toBe(1);
+  expect(real(errors)).toEqual([]);
+  await ctx.close();
 });
 
 test('the canvas: a checkerboard from its menu, Back to the slide when zoomed in', async ({ page }) => {
