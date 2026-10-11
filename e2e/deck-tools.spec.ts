@@ -6,7 +6,8 @@
  * their own), the Objects pane (select at any depth, rename, lock, restack), sizes and line weights in points,
  * flip, the rotation handle, new shapes and a line
  * drawn backwards, an SVG dropped in (inline, sanitised, its shapes editable), a crop preset, the
- * canvas's checkerboard from its right-click menu, "Back to the slide" when zoomed in, and moving a
+ * canvas's checkerboard from its right-click menu, "Back to the slide" when zoomed in, the zoom said
+ * over the canvas while a pinch changes it, and moving a
  * text box with a finger on a touch screen (the ⌖ select tool; swiped over an object not selected,
  * the slide turns), Draw (pen, highlighter, eraser), the
  * rail and the notes folded away. What lands in index.html each time.
@@ -735,6 +736,36 @@ test('the canvas: a checkerboard from its menu, Back to the slide when zoomed in
   await expect(page.locator('[data-dl-refocus]')).toBeVisible();
   await page.locator('[data-dl-refocus]').click();
   await expect(page.locator('[data-dl-refocus]')).toHaveCount(0);
+  expect(real(errors)).toEqual([]);
+});
+
+test('the zoom is said over the canvas while it changes: a pinch (Ctrl + wheel) as it goes, Fit, − / +', async ({ page }) => {
+  const errors = collectErrors(page);
+  await login(page);
+  await setup(page);
+  const hud = page.locator('[data-dl-zoomhud]');
+  await expect(hud).not.toHaveClass(/\bon\b/);
+  // a trackpad pinch over the slide: the zoom as it goes (the toolbar's figure waits till it rests)
+  const c = await at(page, 640, 360);
+  await page.mouse.move(c.x, c.y);
+  await page.keyboard.down('Control');
+  const seen: string[] = [];
+  for (let i = 0; i < 6; i++) { await page.mouse.wheel(0, -20); await page.waitForTimeout(50); seen.push((await hud.textContent()) ?? ''); }
+  await page.keyboard.up('Control');
+  await expect(hud).toHaveClass(/\bon\b/);
+  expect(new Set(seen.filter(Boolean)).size).toBeGreaterThan(2);
+  expect(seen[seen.length - 1]).toMatch(/^\d+ %$/);
+  // at rest it fades, the toolbar saying the same
+  await expect(hud).not.toHaveClass(/\bon\b/, { timeout: 3000 });
+  await expect(page.locator('.dl-zoomgroup .dl-zoom')).toHaveText((await hud.textContent())!.replace(' %', '%'));
+  // Fit (the figure's button): said as Fit
+  await page.locator('.dl-zoomgroup .dl-zoom').click();
+  await expect(hud).toHaveText(/^Fit · \d+ %$/);
+  await expect(hud).toHaveClass(/\bfit\b/);
+  // − : a percentage again
+  await page.locator('.dl-zoomgroup button[title^="Zoom out"]').click();
+  await expect(hud).toHaveText(/^\d+ %$/);
+  await expect(hud).toHaveClass(/\bon\b/);
   expect(real(errors)).toEqual([]);
 });
 

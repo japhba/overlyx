@@ -646,7 +646,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   const gotoSlideRef = useRef<(i: number) => void>(() => {});
   const slideView = useMemo(() => new SlideView(() => canvasFrame.current, () => viewInput.current, {
     // (a pinch's scale reaches the page as it goes: the handles keep their size on the screen)
-    pull: () => pullRing.current, onFree: setSlideFree, onLive: s => toCanvas({ ol: 'scale', scale: s }),
+    pull: () => pullRing.current, onFree: setSlideFree, onLive: s => { toCanvas({ ol: 'scale', scale: s }); showZoom(s); },
     // a swipe sideways: the next slide, or the one before (viewport.ts steer)
     pages: () => kindRef.current === 'deck' && slidesRef.current.length > 1,
     onPage: dir => {
@@ -693,6 +693,24 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   const MAX_ZOOM = 8;
   const zoomRef = useRef(zoom); zoomRef.current = zoom;
   const fitRef = useRef(fit); fitRef.current = fit;
+  /**
+   * The zoom while it changes (a pinch, Ctrl + wheel, − / +, Fit): said over the canvas, as the
+   * toolbar's figure catches up only once a pinch rests. Written straight into the element, once a
+   * frame at most (the view's live scale), not a render per finger move.
+   */
+  const zoomHud = useRef<HTMLDivElement>(null);
+  const zoomHudTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showZoom = (s: number) => {
+    const el = zoomHud.current;
+    if (!el) return;
+    const pct = Math.round(s * 100), fitted = Math.abs(s / fitRef.current - 1) < 0.005;
+    el.textContent = fitted ? `Fit · ${pct} %` : `${pct} %`;
+    el.classList.toggle('fit', fitted);
+    el.classList.add('on');
+    if (zoomHudTimer.current) clearTimeout(zoomHudTimer.current);
+    zoomHudTimer.current = setTimeout(() => el.classList.remove('on'), 800);
+  };
+  useEffect(() => () => { if (zoomHudTimer.current) clearTimeout(zoomHudTimer.current); }, []);
   const boxRef = useRef(box); boxRef.current = box;
   const frameWRef = useRef(frameW); frameWRef.current = frameW;
   const panRef = useRef(panX); panRef.current = panX;
@@ -712,6 +730,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     setPanX(screenX - clientX * s1);
     anchorRef.current = { docY: pageY, screenY: clientY * s0 };
     setZoom(z1);
+    showZoom(s1);
   };
   /** one slide on the canvas: zoom by `factor` about a canvas point (no smaller than half the fit) */
   /** a zoom the view shows (zoomTo, placeAt) becomes the editor's once it rests: not a render per wheel step or finger move */
@@ -864,6 +883,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     if (zoomCommit.current) { clearTimeout(zoomCommit.current); zoomCommit.current = null; }
     setZoom(1);
     setPanX(0);
+    showZoom(fitRef.current);
     if (soloRef.current) { slideView.recentre(true); return; }
     setTimeout(() => toCanvas({ ol: 'scrollTo', slide: currentRef.current, smooth: true }), 30);
   };
@@ -1760,6 +1780,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
               </div>
             )}
             {hud && <div key={hud.n} class="dl-hud" role="status" data-dl-hud>{hud.text}</div>}
+            <div ref={zoomHud} class="dl-zoomhud" aria-hidden="true" data-dl-zoomhud />
             {/* the slides folded away: no strip beside the slide, a tab over its edge (bottom left: the files panel's is half-way up) */}
             {showRail && !railShown && (
               <button type="button" class="dl-rail-show" title="Show the slides" data-dl-rail-show onClick={() => setRailShown(true)}>

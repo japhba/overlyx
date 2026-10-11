@@ -729,7 +729,9 @@ blend.
     background of its own) — a view setting of this browser per document (`ol.canvas:<path>`),
     never written to the file. **Zoom**: Ctrl+wheel / a trackpad or two-finger pinch zooms about the
     pointer (the frame's scroll keeps the point, the editor pans sideways when the zoomed frame is
-    wider than the canvas); *Fit slide* / *Back to slide N* appears when zoomed in or when the slide
+    wider than the canvas); while it changes the zoom is said over the canvas (`.dl-zoomhud`: "137 %",
+    "Fit · 64 %" when fitted — written into the element from SlideView's `onLive` once a frame, as the
+    toolbar's figure catches up only once a pinch rests; it fades 0.8 s later); *Fit slide* / *Back to slide N* appears when zoomed in or when the slide
     in view is mostly off the screen (Ctrl+0).
   * **One slide per canvas** (11 Oct 2026, the user: "each slide in a deck its own canvas, no
     scrolling through slides apart from the slide side menu"): in a deck or poster the canvas frame
