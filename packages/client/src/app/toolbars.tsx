@@ -17,9 +17,12 @@ import { setPref, type Prefs } from '../prefs';
 import { colorIcon, ColumnWidthPicker, DelimPalette, TableSizePicker, mathPanelPalettes, mathPreview, NAMED_COLORS, type ToolButton, type DelimChoice, type Palette } from './Toolbar';
 import { ColorGrid } from './ColorGrid';
 import { openPalette } from './MenuBar';
+import { effectiveShortcut } from './keybindings';
 import { MODERN_ICONS, mdiSvg } from './modernicons';
 
 const MODERN_SVG = (id: string): string | null => (MODERN_ICONS[id] ? mdiSvg(MODERN_ICONS[id]) : null);
+/** a button's title with its shortcut in force (the user's, or the default), if it has one */
+const withKey = (title: string, key: string | undefined) => (key ? `${title} (${key})` : title);
 import { uiPrompt, uiConfirm } from './Dialogs';
 import { activeMathField, type LyxMathField } from '../editor/lyxmath/field';
 import { useMathRendererVersion } from '../editor/lyxmath/usemath';
@@ -318,7 +321,7 @@ export function buildToolbars(ctx: ToolbarContext): Toolbars {
       // font size: text, table cells, a formula as a whole, a selected text box (editor/fontsize.ts)
       ...(view ? [{ id: 'fontsize', title: 'Font size (points)', icon: '', widget: () => <FontSizeBox view={view} /> } as ToolButton] : []),
       boldBtn,
-      { id: 'italic', title: 'Italic (Ctrl+I)', icon: 'italic', action: () => run(C.fontCommands.italic), active: markActive('shape', 'italic') },
+      { id: 'italic', title: withKey('Italic', effectiveShortcut('Edit ▸ Text Style ▸ Italic', 'Ctrl+I')), icon: 'italic', action: () => run(C.fontCommands.italic), active: markActive('shape', 'italic') },
       underlineBtn,
       textColorBtn,
       { id: 'emph', title: 'Emphasis (Ctrl+E)', icon: 'emph', action: () => run(C.fontCommands.emph), active: markActive('emph', 'on') },

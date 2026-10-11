@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { parseBind, lyxKey, commandFor, planBind } from '../packages/client/src/app/lyxbind.ts';
+import { parseBind, lyxKey, commandFor, planBind, ctrlIPlan, ctrlINow, CTRLI_COMMANDS } from '../packages/client/src/app/lyxbind.ts';
 import { LYX_LIB } from './lyxlib';
 
 describe('parseBind', () => {
@@ -86,10 +86,29 @@ describe('the defaults are LyX’s', () => {
     const menus = documentMenus({ view: null, meta: null, run: () => {}, runView: () => {}, setDialog: () => {}, setFindOpen: () => {}, textColor: null, tracking: false, changeInfo: null, toggleTracking: () => {}, toggleCellLine: () => {}, healthItems: [], reloadMetadata: () => {} } as never);
     const entries = collectEntries(Object.values(menus).filter(Boolean) as never);
     const plan = planBind(readFileSync(cua, 'utf8'), entries);
-    // what OverLyX gives other work: Ctrl+I italic (LyX: open/close inset), Ctrl+Shift+P the command
+    // what OverLyX gives other work: Ctrl+I italic (LyX: open/close inset — LyX's meaning can be chosen
+    // in Settings ▸ Shortcuts, Classic; a .bind giving it to inset-toggle does the same), Ctrl+Shift+P the command
     // palette (LyX: typewriter), Alt+- an em dash (LyX: hyphenation point); and LyX's second keys
     // (Ctrl+Alt+B bold, Ctrl+Shift+Z redo, Ctrl+Shift+F find, Ctrl+Alt+I inset settings), Ctrl+Alt+Space
     const allowed = new Set(['font-bold', 'font-typewriter', 'dialog-show findreplaceadv', 'inset-toggle', 'inset-settings', 'redo', 'specialchar-insert hyphenation', 'space-insert normal']);
     expect(plan.set.filter(s => !allowed.has(s.lfun))).toEqual([]);
   }, 60000);
+});
+
+describe('Ctrl+I: italic or LyX\'s open / close the inset', () => {
+  const ids = ['Edit ▸ Text Style ▸ Bold', ...CTRLI_COMMANDS];
+  it('LyX\'s meaning gives Ctrl+I to inset-toggle and takes it from italic; italic puts both defaults back', () => {
+    expect(CTRLI_COMMANDS).toEqual(['Edit ▸ Text Style ▸ Italic', 'Edit ▸ Open/close inset']);
+    expect(ctrlIPlan('inset', ids)).toEqual([{ id: 'Edit ▸ Open/close inset', key: 'Ctrl+I' }, { id: 'Edit ▸ Text Style ▸ Italic', key: null }]);
+    expect(ctrlIPlan('italic', ids)).toEqual([{ id: 'Edit ▸ Open/close inset', key: undefined }, { id: 'Edit ▸ Text Style ▸ Italic', key: undefined }]);
+    expect(ctrlIPlan('inset', ['Edit ▸ Text Style ▸ Bold'])).toEqual([]);
+  });
+  it('what Ctrl+I does with the shortcuts in force', () => {
+    expect(ctrlINow({}, ids)).toBe('italic');
+    expect(ctrlINow({ 'Edit ▸ Open/close inset': 'Ctrl+I', 'Edit ▸ Text Style ▸ Italic': null }, ids)).toBe('inset');
+    expect(ctrlINow({ 'Edit ▸ Open/close inset': 'Ctrl+Alt+J' }, ids)).toBe('italic');
+    // a .bind file's \bind "C-i" "inset-toggle" (LyX's cua.bind has it) lands as LyX's meaning
+    const plan = planBind('\\bind "C-i" "inset-toggle"\n', [{ id: 'Edit ▸ Open/close inset', shortcut: 'Ctrl+Alt+I' }, { id: 'Edit ▸ Text Style ▸ Italic', shortcut: 'Ctrl+I' }]);
+    expect(ctrlINow(Object.fromEntries(plan.set.map(b => [b.id, b.key])), ids)).toBe('inset');
+  });
 });

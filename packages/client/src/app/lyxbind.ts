@@ -144,8 +144,8 @@ export function planBind(text: string, entries: { id: string; shortcut?: string 
   return { set: [...set.values()], skipped, includes };
 }
 
-/* ---- a file waiting to be applied: chosen on the landing page before the sign-in, or in Settings ----
-   (the commands it binds are known once a document's menus are there: MenuBar applies it then) */
+/* ---- a file waiting to be applied: chosen in Settings ▸ Shortcuts (Classic), kept in the browser until
+   the commands it binds are known — once a document's menus are there: MenuBar applies it then) ---- */
 
 const PENDING = 'ol.lyxbind';
 export const LYXBIND_EVENT = 'ol:lyxbind';
@@ -160,5 +160,24 @@ export function pendingLyxBind(): { name: string; text: string } | null {
 }
 export function clearPendingLyxBind(): void { try { localStorage.removeItem(PENDING); } catch { /* ignore */ } }
 
-/** how many key bindings a file carries (the landing page's note before the sign-in) */
-export function bindCount(text: string): number { return parseBind(text).binds.length; }
+/* ---- Ctrl+I: italic (OverLyX's default, as in other editors) or LyX's inset-toggle (open / close the
+   inset at the cursor) — a choice for people coming from LyX (Settings ▸ Shortcuts, Classic) ---- */
+
+export type CtrlI = 'italic' | 'inset';
+const ITALIC = 'font-italic', INSET = 'inset-toggle';
+/** the two commands the choice is about (their menu paths) */
+export const CTRLI_COMMANDS = [LFUNS[ITALIC], LFUNS[INSET]];
+
+/** the shortcuts that give Ctrl+I to `v`, for the commands among `ids` (none when they are not there) */
+export function ctrlIPlan(v: CtrlI, ids: string[]): { id: string; key: string | null | undefined }[] {
+  const italic = commandFor(ITALIC, ids), inset = commandFor(INSET, ids);
+  if (!italic || !inset) return [];
+  // LyX's: Ctrl+I opens / closes insets, italic has no key (LyX users emphasise with Ctrl+E); back: both defaults
+  return v === 'inset' ? [{ id: inset, key: canonical('Ctrl+I') }, { id: italic, key: null }] : [{ id: inset, key: undefined }, { id: italic, key: undefined }];
+}
+
+/** what Ctrl+I does with these shortcuts (`ids`: the commands, as for ctrlIPlan) */
+export function ctrlINow(bindings: Record<string, string | null>, ids: string[]): CtrlI {
+  const inset = commandFor(INSET, ids);
+  return inset && canonical(bindings[inset] ?? undefined) === canonical('Ctrl+I') ? 'inset' : 'italic';
+}

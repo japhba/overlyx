@@ -86,12 +86,12 @@ test.describe('landing page', () => {
     await ctx.close();
   });
 
-  test('coming from LyX: a .bind file chosen before the sign-in becomes shortcuts once a document is open', async ({ page }) => {
+  test('coming from LyX, in Classic only: Settings ▸ Shortcuts gives Ctrl+I LyX\'s meaning and takes a .bind file', async ({ page }) => {
     await page.addInitScript(TOUR_SEEN_SCRIPT);
     await page.goto('/');
-    await expect(page.locator('[data-from-lyx]')).toContainText('Coming from LyX?');
-    await page.locator('[data-from-lyx-file]').setInputFiles({ name: 'user.bind', mimeType: 'text/plain', buffer: Buffer.from('# mine\n\\bind "C-S-b" "font-bold"\n\\bind "M-p 2" "layout Section"\n') });
-    await expect(page.locator('[data-from-lyx-note]')).toContainText('user.bind: 2 key bindings');
+    // the landing page talks to everyone: nothing of LyX's keys there
+    await expect(page.getByPlaceholder('Username')).toBeVisible();
+    await expect(page.locator('[data-from-lyx]')).toHaveCount(0);
     const creds = userCredentials('bob');
     await page.getByPlaceholder('Username').fill(creds.username);
     await page.getByPlaceholder('Password').fill(creds.password);
@@ -99,16 +99,43 @@ test.describe('landing page', () => {
     await page.waitForSelector('.home', { timeout: 30000 });
     await page.request.get(BASE_URL + '/api/projects');
     await page.goto('/#/bob/welcome/welcome.tex');
-    // the menus are there: the file applies, and says what it left out
+    await page.waitForSelector('.lyx-editor', { timeout: 30000 });
+    const keys = () => page.evaluate(() => JSON.parse(localStorage.getItem('ol.keys') ?? '{}'));
+    const settings = page.locator('.dialog', { has: page.locator('[data-reset-shortcuts]') });
+    // Classic (the default): Ctrl+I is italic until LyX's meaning is chosen
+    await page.evaluate(() => (window as any).overlyx.openDialog('preferences'));
+    await expect(settings.locator('[data-from-lyx]')).toBeVisible();
+    await expect(settings.locator('[data-ctrl-i]')).toHaveValue('italic');
+    await expect(page.locator('[data-tb="italic"]').first()).toHaveAttribute('title', /Italic \(Ctrl\+I\)/);
+    await settings.locator('[data-ctrl-i]').selectOption('inset');
+    await expect.poll(keys).toMatchObject({ 'Edit ▸ Open/close inset': 'Ctrl+I', 'Edit ▸ Text Style ▸ Italic': null });
+    // a .bind file: its keys apply on top, and it says what it left out
+    await settings.locator('[data-import-lyxbind-file]').setInputFiles({ name: 'user.bind', mimeType: 'text/plain', buffer: Buffer.from('# mine\n\\bind "C-S-b" "font-bold"\n\\bind "M-p 2" "layout Section"\n') });
     const dlg = dialogLocator(page);
     await expect(dlg).toContainText('1 shortcut from user.bind now apply', { timeout: 30000 });
     await expect(dlg).toContainText('M-p 2 → layout Section: a chord');
     await acceptDialog(page);
-    await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('ol.keys') ?? '{}')['Edit ▸ Text Style ▸ Bold'])).toBe('Ctrl+Shift+B');
+    await expect.poll(keys).toMatchObject({ 'Edit ▸ Text Style ▸ Bold': 'Ctrl+Shift+B', 'Edit ▸ Open/close inset': 'Ctrl+I' });
     await expect.poll(() => page.evaluate(() => localStorage.getItem('ol.lyxbind'))).toBeNull();
-    // (bob's other tests expect LyX's default keys)
+    // the toolbar's italic says it has no key now
+    await page.keyboard.press('Escape');
+    await page.locator('.lyx-editor .lyx-par').first().click();
+    await expect(page.locator('[data-tb="italic"]').first()).toHaveAttribute('title', 'Italic');
+    await page.evaluate(() => (window as any).overlyx.openDialog('preferences'));
+    // back to italic
+    await settings.locator('[data-ctrl-i]').selectOption('italic');
+    await expect.poll(async () => { const k = await keys(); return ['Edit ▸ Open/close inset', 'Edit ▸ Text Style ▸ Italic'].some(id => id in k); }).toBe(false);
+    await page.keyboard.press('Escape');
+    // Modern: no LyX keys in Settings
+    await page.evaluate(() => localStorage.setItem('ol.ui', 'modern'));
+    await page.reload();
+    await page.waitForSelector('.lyx-editor', { timeout: 30000 });
+    await page.evaluate(() => (window as any).overlyx.openDialog('preferences'));
+    await expect(settings.locator('[data-reset-shortcuts]')).toBeVisible();
+    await expect(settings.locator('[data-from-lyx]')).toHaveCount(0);
+    // (bob's other tests expect the default keys and Classic)
     await page.request.post(BASE_URL + '/api/keys', { data: { keys: {} } });
-    await page.evaluate(() => localStorage.removeItem('ol.keys'));
+    await page.evaluate(() => { localStorage.removeItem('ol.keys'); localStorage.removeItem('ol.ui'); });
   });
 
   test('with Google: one big Google button, the password form folded away behind a quiet link', async ({ page }) => {

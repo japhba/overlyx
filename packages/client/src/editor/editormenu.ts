@@ -19,6 +19,7 @@ import { fileUrl, graphicsUrl } from '../api';
 import { STANDARD_LAYOUTS } from './layouts';
 import { resolveDocPath } from './context';
 import { getPrefs, setPref } from '../prefs';
+import { effectiveShortcut } from '../app/keybindings';
 import { openRewrite, REWRITE_KEY } from './ai/rewrite';
 import { openLinkBox, openLink, hrefOf, unlinkText, LINK_KEY } from './links';
 import { addToDictionary, ignoreWord } from './spell/plugin';
@@ -268,7 +269,7 @@ function pushInsetItems(view: EditorView, node: PMNode, pos: number, items: Menu
   items.push({ label: `${name}${arg ? ' ' + arg : ''} inset`, info: true });
   if (isComment && nv?.reply) items.push({ label: 'Reply to comment', icon: 'comment', action: () => nv.reply!() }, { label: 'Resolve / reopen thread', icon: 'spell', action: () => nv.toggleResolved!() });
   items.push(
-    { label: node.attrs.status === 'collapsed' ? 'Open inset' : 'Close inset', icon: 'inset', shortcut: 'Ctrl+I', action: () => { if (nv?.toggle) nv.toggle(); else C.toggleInset(view.state, view.dispatch); } },
+    { label: node.attrs.status === 'collapsed' ? 'Open inset' : 'Close inset', icon: 'inset', shortcut: effectiveShortcut('Edit ▸ Open/close inset', 'Ctrl+Alt+I'), action: () => { if (nv?.toggle) nv.toggle(); else C.toggleInset(view.state, view.dispatch); } },
     { label: 'Inset settings…', icon: 'settings', shortcut: 'Ctrl+Alt+I', action: () => editorContext.openInsetDialog?.(view, pos) },
     { label: 'Dissolve inset', icon: 'clearFormat', action: () => { C.dissolveInset(pos)(view.state, view.dispatch); view.focus(); } },
     { sep: true },

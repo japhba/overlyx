@@ -1155,8 +1155,8 @@ blend.
   newest GitHub release. The Google buttons carry the location hash as `?next=`, so a deep link
   (`#/owner/project/doc.tex`, a share link) is where the sign-in returns to; a share link that did not
   open, or a guest asked to sign in, shows a note above the button (and *Continue as a guest for now*
-  to go back). Under the Overleaf import, one line *Coming from LyX?* takes a `.bind` file (see LyX's
-  keys below). Then sections under a heavy rule: *See it in action* — a demo gallery wheel with six
+  to go back). Nothing of LyX's keys on this page (LyX concepts show in the Classic interface only:
+  Settings ▸ Shortcuts, see LyX's keys below). Then sections under a heavy rule: *See it in action* — a demo gallery wheel with six
   clips (`public/landing/*.{webm,mp4,jpg}`), real recordings of the editor in the Modern interface
   (WYSIWYG math typing; the raw .tex split; a slide deck edited — a formula in LyX's formula editor
   included — presented with the laser, and a formula on the poster beside it; Inkscape's path tools on
@@ -1303,13 +1303,16 @@ blend.
 * **LyX's keys, and your own from LyX** (`app/lyxbind.ts`): the defaults are LyX's (cua.bind +
   menus.bind + math.bind; `tests/lyxbind.test.ts` checks every key cua.bind gives a command here
   against its default — the deliberate exceptions: Ctrl+I italic, Ctrl+Shift+P the palette, Alt+-
-  an em dash, LyX's second keys). A LyX `.bind` file (`bind/user.bind` of the LyX user directory,
-  or any other) is taken on the landing page (*Coming from LyX?*, kept in the browser until the
-  sign-in) or in *Settings ▸ Shortcuts*; once a document's menus are there (`MenuBar`) each
-  `\bind "key" "function"` whose LyX function has a command here becomes its shortcut (`\unbind`
-  takes the default away; keys LyX binds anyway are skipped), and a dialog says what was left out —
-  two-key chords, plain editing keys, functions without a command. *Back to LyX's default keys*
-  clears them all.
+  an em dash, LyX's second keys). *Settings ▸ Shortcuts* has a *Coming from LyX* block in the
+  Classic interface only: **Ctrl+I** italic (the default, as in other editors) or LyX's meaning,
+  open / close the inset at the cursor (`ctrlIPlan`: Ctrl+I to *Edit ▸ Open/close inset*, none to
+  *Italic*; the toolbar's tooltip and the right-click menu show the key in force), and a LyX `.bind`
+  file (`bind/user.bind` of the LyX user directory, or any other), kept in the browser until a
+  document's menus are there (`MenuBar`): each `\bind "key" "function"` whose LyX function has a
+  command here becomes its shortcut (`\unbind` takes the default away; keys LyX binds anyway are
+  skipped; a file giving Ctrl+I to inset-toggle — cua.bind does — takes it from italic as the choice
+  would), and a dialog says what was left out — two-key chords, plain editing keys, functions without
+  a command. *Back to the default keys* clears them all.
 * **Shortcut tips** (`shortcuttips.ts`): an action that has a shortcut but is taken with the mouse —
   a toolbar button (the shortcut at the end of its tooltip), a menu entry, a palette result, the
   right-click menu — shows a small tip with the shortcut, below the button or where the entry was,
