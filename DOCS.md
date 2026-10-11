@@ -1374,6 +1374,17 @@ blend.
   while scrolling. The ◐ button in the PDF toolbar (dark theme only) and *Settings ▸ Editor ▸ PDF*
   switch it (pref `darkPdf`); the VS Code PDF panel follows VS Code's dark themes the same way.
   `e2e/darkpdf.spec.ts` reads the canvas pixels back.
+* **Slides in the dark theme** (`app/darkslides.ts`): the canvas around a deck's slide (inside the
+  frame and around it, and the rail's background) and around a layout document's pages is dark grey
+  (`DARK_DESK`) unless a canvas colour was chosen for the document (*Canvas colour ▸ Automatic*).
+  *Invert slides in the dark theme* (pref `invertSlides`, **off** by default — designed slides change
+  colour; `darkPdf` stays on by default) shows the slides light on dark like the PDF's pages: a CSS
+  `invert(1) hue-rotate(180deg)` on each slide (deck runtime, `{ol:'dark'}` to the canvas and rail
+  frames only, never the presentation frame) or layout page (`data-invert-slides` on <html>, set by
+  theme.ts; `.ol-present-stage` excluded), pictures and videos filtered once more back to their own
+  colours, the formula field over a slide's formula (MathOverlay) inverted with it. Switched by the
+  ◐ button beside the deck's zoom, the canvas's right-click menu and *Settings ▸ Slides and
+  posters*. `e2e/deck-dark.spec.ts`, `tests/darkslides.test.ts`.
 * **Panes: WYSIWYG · TeX · PDF** (web client, `app/panes.ts`, `app/PaneSwitch.tsx`): the writing
   area shows the rendered document, its LaTeX source and the PDF side by side — any one, two or all
   three, in any order (Overleaf's split view with a third pane). The switch in the middle of the menu

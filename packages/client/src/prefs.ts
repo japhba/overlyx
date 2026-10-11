@@ -27,6 +27,8 @@ export interface Prefs {
   invertFigures: boolean;
   /** in the dark theme, PDF pages are shown light on dark with their photographs in colour (app/pdfdark.ts) */
   darkPdf: boolean;
+  /** in the dark theme, slides and posters are shown light on dark too (app/darkslides.ts); off by default — designed slides change colour */
+  invertSlides: boolean;
   /** OpenRouter model ids for ⌘J (rewrite) and for autocomplete ('' = the server's default) */
   aiModel: string;
   aiCompletionModel: string;
@@ -55,7 +57,7 @@ export interface Prefs {
   autoCorrectChosen?: boolean;
 }
 
-export const DEFAULT_PREFS: Prefs = { spellcheck: true, spellEngine: 'overlyx', autoCorrect: false, aiButton: false, aiRewrite: false, aiCompleteText: false, aiCompleteMath: false, aiCompleteDelay: 200, invertFigures: true, darkPdf: true, aiModel: '', aiCompletionModel: '', darkTone: 'white', usageStats: true, autoBuild: 'shown', autoBuildDelay: 1, editorFont: 'cm', editorMathFont: 'match', shortcutTips: true };
+export const DEFAULT_PREFS: Prefs = { spellcheck: true, spellEngine: 'overlyx', autoCorrect: false, aiButton: false, aiRewrite: false, aiCompleteText: false, aiCompleteMath: false, aiCompleteDelay: 200, invertFigures: true, darkPdf: true, invertSlides: false, aiModel: '', aiCompletionModel: '', darkTone: 'white', usageStats: true, autoBuild: 'shown', autoBuildDelay: 1, editorFont: 'cm', editorMathFont: 'match', shortcutTips: true };
 /** delays that were the default in earlier builds: a stored one of these follows the current default */
 const OLD_DEFAULT_DELAYS = new Set([600, 450]);
 const STORAGE = 'ol.prefs';

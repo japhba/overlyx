@@ -56,6 +56,11 @@ function applyTone(p: Prefs): void { document.documentElement.dataset.tone = p.d
 subscribePrefs(applyTone);
 applyTone(getPrefs());
 
+/** slides inverted in the dark theme (prefs.invertSlides, app/darkslides.ts): `data-invert-slides` on <html>, for the layout pages' rules in styles.css */
+function applyInvertSlides(p: Prefs): void { document.documentElement.toggleAttribute('data-invert-slides', !!p.invertSlides); }
+subscribePrefs(applyInvertSlides);
+applyInvertSlides(getPrefs());
+
 /** Preact hook: re-renders when the preference or the system theme changes. */
 export function useTheme(): { pref: ThemePref; theme: Theme } {
   const [, tick] = useState(0);

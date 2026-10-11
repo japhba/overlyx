@@ -181,6 +181,12 @@ export type ToRuntime =
   | { ol: 'exec'; command: string; value?: string }
   | { ol: 'go'; slide: number }
   | { ol: 'peers'; peers: PeerInfo[] }
+  /**
+   * The editor's dark theme (app/darkslides.ts): `invert` — the slides shown light on dark
+   * (prefs.invertSlides; the canvas and the rail, never presenting); `desk` — the rail's background
+   * (the canvas's comes with the view), null for the page's own
+   */
+  | { ol: 'dark'; invert: boolean; desk: string | null }
   | { ol: 'current'; slide: number }
   /** a file of the project changed on disk (project-relative): stylesheets and pictures are fetched again, scripts and data reload the page */
   | { ol: 'asset'; path: string; v: number }
