@@ -29,7 +29,7 @@
 import { Plugin, TextSelection } from 'prosemirror-state';
 import type { Node as PMNode, MarkType } from 'prosemirror-model';
 import * as Y from 'yjs';
-import { ySyncPluginKey, updateYFragment } from 'y-prosemirror';
+import { ySyncPluginKey, updateYFragment, absolutePositionToRelativePosition, relativePositionToAbsolutePosition } from 'y-prosemirror';
 import { recordCopies, followMoves } from '../../../../core/src/moves';
 
 /** The parts of y-prosemirror's ProsemirrorBinding used here. */
@@ -195,6 +195,55 @@ function splitPoint(node: PMNode, pos: number): { index: number; offset: number 
 }
 
 /** Installs the anchoring in front of y-prosemirror's own PM → Yjs sync (place it right after ySyncPlugin). */
+/**
+ * The cursor stays after what its owner typed. After a change from elsewhere y-prosemirror puts the
+ * cursor back "before the character on its right" — so when two people type at the same place, each
+ * one's next letter lands behind the other's last one and their words interleave letter by letter
+ * ("IsU 10. 1 Unm2"), and a Backspace then deletes the other person's letters (usability test,
+ * co-authoring a heading). Here the cursor is anchored to the character on its *left* instead — the
+ * one its owner just typed —, as Google Docs keeps it: before a change from elsewhere that character
+ * is remembered (a Yjs relative position), after it the cursor goes back right behind it, if it is
+ * still there and still that character. Selections, the start of a paragraph and anything else keep
+ * y-prosemirror's placement.
+ */
+type PMView = { state: import('prosemirror-state').EditorState; dispatch(tr: import('prosemirror-state').Transaction): void };
+function caretStaysWithItsText(b: SyncBinding): () => void {
+  const binding = b as unknown as Omit<SyncBinding, 'prosemirrorView'> & { prosemirrorView?: PMView | null };
+  const ydoc = binding.type.doc!;
+  let anchor: { rel: Y.RelativePosition; ch: string } | null = null;
+  const before = (tr: Y.Transaction) => {
+    anchor = null;
+    if (tr.local) return;
+    const st = binding.prosemirrorView?.state;
+    const sel = st?.selection;
+    if (!st || !(sel instanceof TextSelection) || !sel.empty || sel.$head.parentOffset === 0) return;
+    const prev = sel.$head.nodeBefore;
+    if (!prev?.isText) return;
+    try {
+      const rel = absolutePositionToRelativePosition(sel.head - 1, binding.type, binding.mapping as never);
+      anchor = { rel, ch: st.doc.textBetween(sel.head - 1, sel.head) };
+    } catch { anchor = null; }
+  };
+  const after = (tr: Y.Transaction) => {
+    const a = anchor;
+    anchor = null;
+    const view = binding.prosemirrorView;
+    if (!a || tr.local || !view) return;
+    const st = view.state, sel = st.selection;
+    if (!(sel instanceof TextSelection) || !sel.empty) return;
+    let at: number | null = null;
+    try { at = relativePositionToAbsolutePosition(ydoc, binding.type, a.rel, binding.mapping as never); } catch { at = null; }
+    if (at === null || at + 1 > st.doc.content.size || at + 1 === sel.head) return;
+    if (st.doc.textBetween(at, at + 1) !== a.ch) return;
+    const $t = st.doc.resolve(at + 1);
+    if (!$t.parent.isTextblock || $t.parent !== sel.$head.parent) return;
+    view.dispatch(st.tr.setSelection(TextSelection.create(st.doc, at + 1)).setMeta('addToHistory', false));
+  };
+  ydoc.on('beforeTransaction', before);
+  ydoc.on('afterTransaction', after);
+  return () => { ydoc.off('beforeTransaction', before); ydoc.off('afterTransaction', after); };
+}
+
 export function typingAnchorPlugin(): Plugin {
   return new Plugin({
     view(view) {
@@ -218,7 +267,9 @@ export function typingAnchorPlugin(): Plugin {
         }, ySyncPluginKey);
       };
       // moved text keeps the cursor and the undo history on it when the move comes from elsewhere
-      return { destroy: followMoves(binding.type.doc!) };
+      const stopMoves = followMoves(binding.type.doc!);
+      const stopCaret = caretStaysWithItsText(binding);
+      return { destroy: () => { stopMoves(); stopCaret(); } };
     },
   });
 }

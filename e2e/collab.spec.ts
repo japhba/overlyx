@@ -203,3 +203,25 @@ test('undo is per user: one user undoing removes only their own text', async ({ 
   for (const s of [a, b]) expect(relevantErrors(s.errors)).toEqual([]);
   await a.ctx.close(); await b.ctx.close();
 });
+
+test('two people typing at the same place keep their words together; a Backspace deletes only one\'s own', async ({ browser }) => {
+  test.setTimeout(180000);
+  const [a, b] = await openSessions(browser, 2);
+  const stamp = Date.now().toString(36);
+  const wa = `alpha${stamp} `, wb = `Is this realistic${stamp}? `;
+  // both cursors at the start of the same paragraph (usability test: a co-author's comment typed into a heading)
+  for (const s of [a, b]) { await par(s.page, 3).click(); await s.page.keyboard.press('Home'); }
+  await Promise.all([a.page.keyboard.type(wa, { delay: 60 }), b.page.keyboard.type(wb, { delay: 25 })]);
+  // each one's letters stay together (y-prosemirror put a cursor "before the character on its right": they interleaved)
+  for (const s of [a, b]) {
+    await expect.poll(() => editorText(s.page), { timeout: 20000 }).toContain(wa);
+    await expect.poll(() => editorText(s.page), { timeout: 20000 }).toContain(wb);
+  }
+  for (let i = 0; i < wb.length; i++) await b.page.keyboard.press('Backspace');
+  for (const s of [a, b]) {
+    await expect.poll(() => editorText(s.page), { timeout: 20000 }).not.toContain(wb.trim());
+    expect(await editorText(s.page)).toContain(wa);
+  }
+  for (const s of [a, b]) expect(relevantErrors(s.errors)).toEqual([]);
+  await a.ctx.close(); await b.ctx.close();
+});
