@@ -533,8 +533,9 @@ blend.
     (Shift: 45° steps), **Draw** (P; `deckink.ts`: pen, highlighter and eraser E with the documents'
     margin-ink presets — a click on the picked colour / width changes it, `ol.deckInk`; the pen stays in
     hand stroke after stroke until Esc. A stroke is GoodNotes' (`runtime/freehand.ts`, perfect-freehand):
-    an outline whose width follows the Pencil's pressure (else the speed), tapered in and out, a tap a
-    dot, the highlighter an even band — drawn in the slide itself while the pen moves (an
+    an outline whose width follows the Pencil's pressure (else the speed), a little thinner at either
+    end over a width or two and blunt (tapers of 1½–2 widths down to a third — the long needle ends
+    were too much), a tap a dot, the highlighter an even band — drawn in the slide itself while the pen moves (an
     `svg.ol-ink[data-ol-runtime]`, coalesced events, one rAF) exactly as it is then written
     (`<svg class="ol-ink">` with one filled `<path>`, the highlighter translucent with `mix-blend-mode:
     multiply`), and shown until the page has it (`inkArrived`), so nothing flickers or changes on
@@ -699,8 +700,15 @@ blend.
     runtime sends both fingers (frame px and screenX/Y, `pinch`), the editor keeps what was under their
     middle under it at the scale their distance gives — measured in screen px, as the frame's own px
     change with each step (incremental factors in frame px took back every other step: the jank); a
-    finger's pan is in screen px for the same reason. Three fingers: a tap or a swipe left undoes, a
-    swipe right redoes (`history`, a "↶ Undo" sign). The runtime's script is `/_ol/runtime.js?v=<its
+    finger's pan is in screen px for the same reason. Two fingers that pan do not zoom
+    (`deliverable/gestures.ts` `pinchFactor`): they zoom only once ~12 % closer or further apart, and
+    once their middle has gone 24 px first the gesture is a pan and holds the scale unless they close
+    or spread by a third (a pan's fingers never stay exactly as far apart: every pan zoomed a little).
+    The same on a web page's step-by-step pinch. Safari's `gesture*` events are ignored while fingers
+    are down (the iPad sends them alongside the pointers: a second zoom). Fingers on the grey canvas
+    beside the slide do what they do on it (`canvasTouch`: one pulls, two pan and pinch, three undo;
+    `.dl-canvas` is `touch-action: none` — the iPad zoomed the whole page there). Three fingers: a tap
+    or a swipe left undoes, a swipe right redoes (`history`, a "↶ Undo" sign; `triGesture`). The runtime's script is `/_ol/runtime.js?v=<its
     mtime>` (server `runtimeSrc`): cached for an hour, an open browser kept the old one after a deploy.
     The view:
     zoomed in it pans as far as the slide's edges and a margin; a scroll, a finger or a pinch past

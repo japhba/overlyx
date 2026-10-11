@@ -6,6 +6,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { rubber, banded, unband, panRange, freeRange, spring, clampTo, SlideView, BREAK, snapDistance } from '../packages/client/src/deliverable/viewport.ts';
+import { pinchFactor, pinchLock, triGesture, PINCH_START, PAN_BREAK } from '../packages/client/src/deliverable/gestures.ts';
 
 describe('the slide canvas', () => {
   it('pulls past an edge against a growing resistance, never as far as the canvas', () => {
@@ -163,6 +164,10 @@ describe('zooming the slide (a pinch, a trackpad)', () => {
     const p = v.toCanvas(400, 300)!;
     expect(p.x).toBeCloseTo(300, 6);
     expect(p.y).toBeCloseTo(300, 6);
+    // (and back: the frame's point under a canvas point)
+    const q = v.toFrame(300, 300)!;
+    expect(q.x).toBeCloseTo(400, 6);
+    expect(q.y).toBeCloseTo(300, 6);
     // the editor's scale catches up: the view's own is given up, the place stays
     setScale(1.2);
     v.render();
@@ -193,5 +198,41 @@ describe('zooming the slide (a pinch, a trackpad)', () => {
     const [, tx, ty] = /translate\(([-\d.]+)px, ([-\d.]+)px\)/.exec(frame.style.transform)!.map(Number);
     expect(Number.isInteger(tx * 2)).toBe(true);
     expect(Number.isInteger(ty * 2)).toBe(true);
+  });
+});
+
+describe('fingers on the canvas (gestures.ts)', () => {
+  it('two fingers that pan, never quite as far apart, do not zoom', () => {
+    const lock = pinchLock();
+    for (let i = 1; i <= 20; i++) expect(pinchFactor(lock, 200, 200 * (1 + (i % 2 ? 0.09 : -0.08)), i * 6)).toBe(1);
+    expect(lock.mode).toBe('pan');
+    // a pan's fingers spreading a little more: still a pan; by a third and more: a zoom, from the scale it had
+    expect(pinchFactor(lock, 200, 250, 130)).toBe(1);
+    const z = pinchFactor(lock, 200, 200 * Math.exp(PAN_BREAK + 0.1), 130);
+    expect(lock.mode).toBe('zoom');
+    expect(z).toBeCloseTo(Math.exp(0.1), 6);
+  });
+
+  it('a pinch zooms once the fingers have clearly come closer or gone further apart, without a jump', () => {
+    const lock = pinchLock();
+    expect(pinchFactor(lock, 200, 220, 2)).toBe(1);
+    expect(lock.mode).toBe('wait');
+    const just = pinchFactor(lock, 200, 200 * Math.exp(PINCH_START + 0.001), 3);
+    expect(lock.mode).toBe('zoom');
+    expect(just).toBeCloseTo(1, 2);
+    // from then on, as their distance: twice as far apart again, twice the scale
+    const a = pinchFactor(lock, 200, 300, 4), b = pinchFactor(lock, 200, 600, 4);
+    expect(b / a).toBeCloseTo(2, 6);
+    // pinched in
+    const inward = pinchLock();
+    expect(pinchFactor(inward, 200, 100, 4)).toBeCloseTo(0.5 * Math.exp(PINCH_START), 6);
+  });
+
+  it('three fingers: a tap or a swipe left undoes, a swipe right redoes, a slow touch does nothing', () => {
+    expect(triGesture(2, 3, 120)).toBe('undo');
+    expect(triGesture(-90, 10, 400)).toBe('undo');
+    expect(triGesture(90, -10, 400)).toBe('redo');
+    expect(triGesture(4, 2, 900)).toBe(null);
+    expect(triGesture(10, 120, 300)).toBe(null);
   });
 });

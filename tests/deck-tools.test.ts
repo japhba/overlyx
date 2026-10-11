@@ -64,11 +64,19 @@ describe("Draw's strokes as GoodNotes draws them (runtime/freehand.ts)", () => {
   };
   const level = (n: number, press: (t: number) => number): FreePt[] => Array.from({ length: n + 1 }, (_, i) => [i * 4, 0, press(i / n)]);
 
-  it("tapers in at the start and out at the end; the Pencil's pressure makes it wider", () => {
-    const poly = freeOutline(level(100, () => 0.5), { width: 6, pressure: true, last: true });
-    expect(half(poly, 200)).toBeGreaterThan(2);
-    expect(half(poly, 2)).toBeLessThan(half(poly, 200) * 0.6);
-    expect(half(poly, 398)).toBeLessThan(half(poly, 200) * 0.6);
+  it("is a little thinner at the start and the end — short, blunt tapers, no needle; the Pencil's pressure makes it wider", () => {
+    for (const pressure of [true, false]) {
+      const poly = freeOutline(level(100, () => 0.5), { width: 6, pressure, last: true });
+      const mid = half(poly, 200);
+      expect(mid).toBeGreaterThan(2);
+      for (const x of [1, 399]) {
+        expect(half(poly, x)).toBeLessThan(mid * 0.6);
+        expect(half(poly, x)).toBeGreaterThan(mid * 0.25);
+      }
+      // (as wide as the rest a width and a half in)
+      expect(half(poly, 9)).toBeGreaterThan(mid * 0.85);
+      expect(half(poly, 391)).toBeGreaterThan(mid * 0.85);
+    }
     const hard = freeOutline(level(100, () => 1), { width: 6, pressure: true, last: true });
     const light = freeOutline(level(100, () => 0.15), { width: 6, pressure: true, last: true });
     expect(half(hard, 200)).toBeGreaterThan(half(light, 200) * 1.6);

@@ -197,6 +197,12 @@ export class SlideView {
     return p ? { x: p.tx + fx * p.s, y: p.ty + fy * p.s } : null;
   }
 
+  /** a canvas point on the frame's page (CSS px) */
+  toFrame(cx: number, cy: number): { x: number; y: number } | null {
+    const p = this.place();
+    return p && p.s ? { x: (cx - p.tx) / p.s, y: (cy - p.ty) / p.s } : null;
+  }
+
   /** the transform for the offsets shown (with the stretch of a pull past an edge), and the ring */
   render(): void {
     const el = this.frame(), v = this.input();

@@ -1,7 +1,7 @@
 /**
  * Draw's strokes as GoodNotes draws them (perfect-freehand): an outline whose width follows the
- * Pencil's pressure — or, with a mouse or a finger, the speed (faster is thinner) — tapering in at the
- * start and out at the end; the highlighter's an even band. The outline is what the page keeps (a
+ * Pencil's pressure — or, with a mouse or a finger, the speed (faster is thinner) — a little thinner
+ * at the start and the end (short, blunt tapers); the highlighter's an even band. The outline is what the page keeps (a
  * filled `<path>`, sourceops.ts objectHtml), and what is shown while the stroke is drawn, so the line
  * under the pen is the line that stays. Pure: the runtime draws it, the tests measure it.
  */
@@ -20,6 +20,9 @@ export interface FreeOpts {
   last?: boolean;
 }
 
+/** a taper's width along it (0 at the tip, 1 where it ends): from a third of the stroke's */
+const BLUNT = (t: number) => 0.3 + 0.7 * t * (2 - t);
+
 /** the closed outline of a stroke (polygon points) */
 export function freeOutline(pts: FreePt[], o: FreeOpts): number[][] {
   if (!pts.length) return [];
@@ -34,13 +37,14 @@ export function freeOutline(pts: FreePt[], o: FreeOpts): number[][] {
   return getStroke(pts, {
     // a pen's nib at full pressure ~1.5× its width, light ~0.4×: the width the preset names is the middle
     size: w * 1.15,
-    thinning: o.pressure ? 0.62 : 0.5,
+    thinning: o.pressure ? 0.55 : 0.5,
     smoothing: 0.6,
     streamline: o.pressure ? 0.32 : 0.45,
     simulatePressure: !o.pressure,
     easing: o.pressure ? (t: number) => t * 0.65 + Math.sin((t * Math.PI) / 2) * 0.35 : (t: number) => Math.sin((t * Math.PI) / 2),
-    start: { cap: true, taper: dot ? 0 : Math.max(6, w * 3), easing: (t: number) => t * (2 - t) },
-    end: { cap: true, taper: dot ? 0 : Math.max(8, w * 4), easing: (t: number) => t * (2 - t) },
+    // the ends a little thinner, over a width or two, and blunt: a pen's, not a brush's needle (the Pencil's own lighter touch at either end does the rest)
+    start: { cap: true, taper: dot ? 0 : Math.max(3, w * 1.5), easing: BLUNT },
+    end: { cap: true, taper: dot ? 0 : Math.max(4, w * 2), easing: BLUNT },
     last: !!o.last,
   });
 }

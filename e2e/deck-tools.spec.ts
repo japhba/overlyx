@@ -76,6 +76,8 @@ async function setup(page: Page, deck = DECK): Promise<void> {
   FILE = `${PROJECTS_DIR}/${PROJECT}/${FOLDER}/index.html`;
   mkdirSync(`${PROJECTS_DIR}/${PROJECT}/${FOLDER}`, { recursive: true });
   writeFileSync(FILE, deck);
+  // (the server takes a new folder on as a project when it lists them: before the page asks for the deck, or that is refused)
+  await page.request.get('/api/projects');
   await page.goto(`/#/${PROJECT}/${FOLDER}/index.html`);
   await slides(page).first().waitFor({ timeout: 30000 });
   await page.waitForTimeout(900);
@@ -475,7 +477,7 @@ test('Draw: strokes one after the other in the pen\'s colour, the highlighter, t
   expect(real(errors)).toEqual([]);
 });
 
-test('touch: a pinch zooms smoothly about the fingers, three fingers undo, a Pencil draws and fingers then move the slide', async ({ browser }) => {
+test('touch: a pinch zooms smoothly about the fingers, two fingers that pan do not zoom, fingers beside the slide move it too, three fingers undo, a Pencil draws and fingers then move the slide', async ({ browser }) => {
   const ctx = await browser.newContext({ baseURL: BASE_URL, hasTouch: true, viewport: { width: 1280, height: 900 } });
   const page = await ctx.newPage();
   const errors = collectErrors(page);
@@ -491,7 +493,7 @@ test('touch: a pinch zooms smoothly about the fingers, three fingers undo, a Pen
   });
   const c = await at(page, 640, 360);
 
-  // a pinch: the scale follows the fingers' distance, step by step, never back; what is under their middle stays
+  // a pinch: the scale follows the fingers' distance (once they have clearly spread), step by step, never back; what is under their middle stays
   const v0 = await view();
   const under0 = { x: (c.x - v0.box.x) / v0.s, y: (c.y - v0.box.y) / v0.s };
   await touches('touchStart', [{ x: c.x - 60, y: c.y }, { x: c.x + 60, y: c.y }]);
@@ -504,8 +506,9 @@ test('touch: a pinch zooms smoothly about the fingers, three fingers undo, a Pen
   }
   await touches('touchEnd', []);
   for (let i = 1; i < seen.length; i++) expect(seen[i]).toBeGreaterThanOrEqual(seen[i - 1] - 1e-6);
-  expect(seen[seen.length - 1] / v0.s).toBeGreaterThan(2.3);
-  expect(seen[seen.length - 1] / v0.s).toBeLessThan(2.7);
+  // (×2.5 apart, less the first ~12 % they spread before it zoomed)
+  expect(seen[seen.length - 1] / v0.s).toBeGreaterThan(2.1);
+  expect(seen[seen.length - 1] / v0.s).toBeLessThan(2.35);
   const v1 = await view();
   expect(Math.abs((c.x - v1.box.x) / v1.s - under0.x)).toBeLessThan(4);
   expect(Math.abs((c.y - v1.box.y) / v1.s - under0.y)).toBeLessThan(4);
@@ -513,6 +516,47 @@ test('touch: a pinch zooms smoothly about the fingers, three fingers undo, a Pen
   await expect(page.locator('.dl-zoom')).toHaveText(new RegExp(`^${Math.round(v1.s * 100)}%$`), { timeout: 3000 });
   await page.locator('.dl-zoom').click();
   await expect.poll(async () => Math.abs((await view()).s - v0.s), { timeout: 3000 }).toBeLessThan(0.002);
+  await page.waitForTimeout(700);
+
+  // two fingers that pan, never quite as far apart: the slide follows them, its scale stays (zoomed in: within its range, no rubber band's stretch)
+  for (let i = 0; i < 3; i++) await page.locator('.dl-zoomgroup button[title^="Zoom in"]').click();
+  await page.waitForTimeout(400);
+  const vp = await view();
+  await touches('touchStart', [{ x: c.x - 60, y: c.y }, { x: c.x + 60, y: c.y }]);
+  let panned = 0;
+  for (let i = 1; i <= 10; i++) {
+    const h = 60 + (i % 2 ? 6 : -5), mx = c.x - i * 12;
+    await touches('touchMove', [{ x: mx - h, y: c.y + i * 3 }, { x: mx + h, y: c.y + i * 3 }]);
+    await page.waitForTimeout(16);
+    const v = await view();
+    expect(Math.abs(v.s - vp.s)).toBeLessThan(1e-4);
+    panned = Math.max(panned, vp.box.x - v.box.x);
+  }
+  await touches('touchEnd', []);
+  expect(panned).toBeGreaterThan(60);
+  await page.locator('.dl-zoom').click();
+  await page.waitForTimeout(700);
+
+  // beside the slide (zoomed out, the canvas all round it): a pinch zooms the slide, a finger pulls it
+  for (let i = 0; i < 3; i++) await page.locator('.dl-zoomgroup button[title^="Zoom out"]').click();
+  await page.waitForTimeout(400);
+  const cb = (await page.locator('.dl-canvas').boundingBox())!, fb = (await view()).box as unknown as { x: number; y: number; width: number; height: number };
+  expect(fb.x - cb.x).toBeGreaterThan(120);
+  const gx = cb.x + (fb.x - cb.x) / 2, gy = fb.y + fb.height / 2, sOut = (await view()).s;
+  await touches('touchStart', [{ x: gx, y: gy - 50 }, { x: gx, y: gy + 50 }]);
+  for (let i = 1; i <= 10; i++) { const d = 50 + 70 * i / 10; await touches('touchMove', [{ x: gx, y: gy - d }, { x: gx, y: gy + d }]); await page.waitForTimeout(16); }
+  await touches('touchEnd', []);
+  expect((await view()).s / sOut).toBeGreaterThan(1.8);
+  await page.locator('.dl-zoom').click();
+  await page.waitForTimeout(700);
+  for (let i = 0; i < 3; i++) await page.locator('.dl-zoomgroup button[title^="Zoom out"]').click();
+  await page.waitForTimeout(400);
+  const before = (await view()).box.x;
+  await touches('touchStart', [{ x: gx, y: gy }]);
+  for (let i = 1; i <= 8; i++) { await touches('touchMove', [{ x: gx + i * 10, y: gy }]); await page.waitForTimeout(16); }
+  expect((await view()).box.x - before).toBeGreaterThan(30);
+  await touches('touchEnd', []);
+  await page.locator('.dl-zoom').click();
   await page.waitForTimeout(700);
 
   // three fingers tap: undo (and it says so)

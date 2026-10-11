@@ -18,8 +18,9 @@
  * back (arrange.ts).
  *
  * Touch and pen: the canvas takes every gesture itself (touch-action: none) — a finger on an
- * object moves it, on nothing pans, held still first draws a selection box, two fingers pinch-zoom
- * and pan (the editor scales the frame); a pen works like the mouse. The pointer is captured, so a
+ * object moves it, on nothing pans, held still first draws a selection box, two fingers pan, and
+ * pinch-zoom once they have clearly come closer or gone further apart (gestures.ts; the editor scales
+ * the frame); a pen works like the mouse. The pointer is captured, so a
  * drag that leaves the frame keeps going.
  */
 import type { Path, SelItem, SelStyle, Tool, Rect, HtmlOp, ObjKind, KeyPress, InkStyle, PeerInfo, TextCaret } from '../protocol';
@@ -36,6 +37,7 @@ import { chipify, unchip, openChip, openChipEl, chipOpening, holdKey, holdAfter,
 import { initPaths, isNodeEditing, nodesAfterSource, nodesTargetOf, startNodesOrConvert, endNodes, redrawNodes, penDown, penMove, penUp, penKey, penDouble, penCancel, isPenDrawing, setMenuShape } from './pathedit';
 import { isSolo, showSlide, soloIndex, revealSlideOf } from './solo';
 import { freeOutline, outlinePathD, outlineBox, type FreePt } from './freehand';
+import { pinchFactor, pinchLock, triGesture, type PinchLock } from '../gestures';
 import { offsetOf, caretBox, selectionBoxes, safeColor } from './carets';
 import { postObjects } from './objects';
 import { reviewOverlay, bindPins, setReviewHover, showGhost, lockDeletions, trackInput, commentTarget, setLiveAt, styleAuthors, REVIEW_OVERLAY_CSS } from './review';
@@ -1590,6 +1592,8 @@ function lineOp(svg: HTMLElement): HtmlOp | null {
 
 const touches = new Map<number, { x: number; y: number; sx: number; sy: number }>();
 let pinch: { d: number; mx: number; my: number; smx: number; smy: number } | null = null;
+/** a web page's pinch: where it began, how far it has zoomed, pan or zoom (gestures.ts) */
+let pinch0: { d: number; smx: number; smy: number; f: number; lock: PinchLock } | null = null;
 
 /** the two fingers' distance (on the screen) and middle (in the frame and on the screen) */
 function touchGeom(): { d: number; mx: number; my: number; smx: number; smy: number } | null {
@@ -1615,6 +1619,7 @@ const pinchPts = () => [...touches.values()].slice(0, 2).map(p => ({ x: p.x, y: 
 function startPinch(): void {
   dropDrag();
   pinch = touchGeom();
+  pinch0 = pinch && { d: pinch.d, smx: pinch.smx, smy: pinch.smy, f: 1, lock: pinchLock() };
   // one slide: the editor zooms and moves it, from where the fingers were at the start (absolute — no step undoes the last)
   if (pinch && isSolo()) post({ ol: 'pinch', phase: 'start', pts: pinchPts() });
 }
@@ -1627,9 +1632,10 @@ function onTouchMove(e: PointerEvent): void {
   if (isSolo()) { post({ ol: 'pinch', phase: 'move', pts: pinchPts() }); return; }
   const g = touchGeom();
   if (!g) return;
-  // a web page: step by step, measured on the screen (the frame's px change with each step)
-  const f = g.d / pinch.d;
-  if (Math.abs(f - 1) > 0.002) post({ ol: 'zoom', factor: f, clientX: g.mx, clientY: g.my, pageY: g.my + scrollY });
+  // a web page: step by step, measured on the screen (the frame's px change with each step); a pan zooms not at all
+  const z = pinch0 ? pinchFactor(pinch0.lock, pinch0.d, g.d, Math.hypot(g.smx - pinch0.smx, g.smy - pinch0.smy)) : 1;
+  const f = pinch0 ? z / pinch0.f : 1;
+  if (Math.abs(f - 1) > 0.002) { post({ ol: 'zoom', factor: f, clientX: g.mx, clientY: g.my, pageY: g.my + scrollY }); if (pinch0) pinch0.f = z; }
   scrollBy(0, (pinch.smy - g.smy) / scale);
   if (g.smx !== pinch.smx) post({ ol: 'pan', dx: g.smx - pinch.smx, screen: true });
   pinch = g;
@@ -1641,7 +1647,7 @@ function onTouchUp(e: PointerEvent): void {
   if (tri) { if (!touches.size) endTri(); return; }
   if (touches.size < 2 && pinch) {
     if (isSolo()) post({ ol: 'pinch', phase: 'end', pts: [] });
-    pinch = null;
+    pinch = null; pinch0 = null;
   }
 }
 
@@ -1654,7 +1660,7 @@ const triMid = () => { const ps = [...touches.values()]; return { x: ps.reduce((
 function startTri(): void {
   dropDrag();
   if (pinch && isSolo()) post({ ol: 'pinch', phase: 'cancel', pts: [] });
-  pinch = null;
+  pinch = null; pinch0 = null;
   const m = triMid();
   tri = { t0: performance.now(), x0: m.x, y0: m.y, x: m.x, y: m.y };
 }
@@ -1666,14 +1672,13 @@ function moveTri(): void {
   tri.x = m.x; tri.y = m.y;
 }
 
-/** all fingers up: a swipe left undoes, right redoes (iPadOS), a tap undoes (GoodNotes) */
+/** all fingers up: undo or redo (gestures.ts triGesture) */
 function endTri(): void {
   const g = tri;
   tri = null;
   if (!g) return;
-  const dx = g.x - g.x0, dy = g.y - g.y0;
-  if (Math.abs(dx) >= 60 && Math.abs(dx) > 1.5 * Math.abs(dy)) post({ ol: 'history', redo: dx > 0 });
-  else if (performance.now() - g.t0 < 500 && Math.hypot(dx, dy) < 30) post({ ol: 'history', redo: false });
+  const h = triGesture(g.x - g.x0, g.y - g.y0, performance.now() - g.t0);
+  if (h) post({ ol: 'history', redo: h === 'redo' });
 }
 
 /* ------------------------------------------------------------------ Draw: the stroke as it is drawn */
@@ -1786,6 +1791,8 @@ function onWheel(e: WheelEvent): void {
 let gestureScale = 1;
 function onGesture(e: Event & { scale?: number; clientX?: number; clientY?: number; pageY?: number }): void {
   e.preventDefault();
+  // (the iPad's Safari sends these for fingers too: their pointers pinch already — two zooms at once, and one without a pan's lock)
+  if (touches.size) return;
   if (e.type === 'gesturestart') { gestureScale = 1; return; }
   const s = e.scale ?? 1;
   post({ ol: 'zoom', factor: s / gestureScale, clientX: e.clientX ?? innerWidth / 2, clientY: e.clientY ?? innerHeight / 2, pageY: e.pageY ?? scrollY + innerHeight / 2 });

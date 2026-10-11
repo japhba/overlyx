@@ -21,6 +21,7 @@ import type { DeliverableHost, Peer } from './host';
 import { webHost } from './webHost';
 import type { FromRuntime, ToRuntime, SelItem, SlideBox, Tool, Path, HtmlOp, DeliverableKind, Rect, ArrangeHow, Paint, CanvasView, KeyPress, Solo, ObjNode } from './protocol';
 import { SlideView } from './viewport';
+import { pinchFactor, pinchLock, triGesture, type PinchLock } from './gestures';
 import { isFromRuntime } from './protocol';
 import { rebasedSplices, objectHtml, imageHtml, insertPlace, newSlideHtml, slidePaths, slideNotes, notesOp, sourceRange, inlineSvgHtml } from './sourceops';
 import { sizePt, stepPt } from './units';
@@ -636,6 +637,23 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   const slideView = useMemo(() => new SlideView(() => canvasFrame.current, () => viewInput.current,
     { pull: () => pullRing.current, onFree: setSlideFree }), []);
   useEffect(() => () => slideView.destroy(), [slideView]);
+  // Safari's pinches beside the slide (a Mac's trackpad; the iPad's fingers, which canvasTouch takes): the slide's zoom, never the page's
+  useEffect(() => {
+    const el = canvasBox.current;
+    if (!el) return;
+    let last = 1;
+    const on = (e: Event & { scale?: number; clientX?: number; clientY?: number }) => {
+      e.preventDefault();
+      if (canvasFingers.current.size || !soloRef.current) return;
+      if (e.type === 'gesturestart') { last = 1; return; }
+      const r = el.getBoundingClientRect(), sc = e.scale ?? 1;
+      zoomSolo(sc / last, (e.clientX ?? r.left + r.width / 2) - r.left, (e.clientY ?? r.top + r.height / 2) - r.top);
+      last = sc;
+    };
+    const opts = { passive: false } as AddEventListenerOptions;
+    for (const t of ['gesturestart', 'gesturechange']) el.addEventListener(t, on as EventListener, opts);
+    return () => { for (const t of ['gesturestart', 'gesturechange']) el.removeEventListener(t, on as EventListener, opts); };
+  }, [canvasBox.current]);
   useLayoutEffect(() => { if (soloOn) slideView.render(); });
   // another slide: in the middle again (the zoom stays, as in PowerPoint)
   useLayoutEffect(() => { if (soloOn) slideView.recentre(false); }, [solo?.slide, soloOn]);
@@ -687,41 +705,101 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   /** canvas px per screen px (the browser's zoom): measured by each pinch, for a finger's pan */
   const screenK = useRef(1);
   /**
-   * Two fingers on the slide (runtime pinch): what was under each stays under it — the slide's scale
-   * from their distance, its place from their middle, all from where they came down. Their screen
-   * positions are the measure (the frame's own px change with every step), mapped onto the canvas by
-   * where they were then.
+   * Two fingers on the slide (runtime pinch) or beside it (canvasTouch): what was under each stays
+   * under it — the slide's scale from their distance, its place from their middle, all from where they
+   * came down. Their screen positions are the measure (the frame's own px change with every step),
+   * mapped onto the canvas by where they were then. Fingers that move together pan and do not zoom
+   * until they have clearly come closer or gone further apart (gestures.ts).
    */
-  const pinchRef = useRef<{ c: { x: number; y: number }[]; r: { x: number; y: number }[]; a: { x: number; y: number }; k: number; s0: number; d0: number } | null>(null);
-  const onPinch = (m: Extract<FromRuntime, { ol: 'pinch' }>) => {
-    if (!soloRef.current) return;
+  const pinchRef = useRef<{ c: { x: number; y: number }[]; r: { x: number; y: number }[]; a: { x: number; y: number }; k: number; s0: number; d0: number; lock: PinchLock } | null>(null);
+  /** two fingers down: each one's canvas point and screen point */
+  const pinchStart = (c: { x: number; y: number }[], r: { x: number; y: number }[]) => {
+    if (zoomCommit.current) { clearTimeout(zoomCommit.current); zoomCommit.current = null; }
+    const s0 = slideView.scaleNow() ?? scaleRef.current;
+    const a = slideView.toFrame((c[0].x + c[1].x) / 2, (c[0].y + c[1].y) / 2);
+    if (!a) return;
+    const dc = Math.hypot(c[0].x - c[1].x, c[0].y - c[1].y), dr = Math.hypot(r[0].x - r[1].x, r[0].y - r[1].y);
+    const k = dr > 8 ? Math.max(0.25, Math.min(4, dc / dr)) : 1;
+    screenK.current = Math.abs(k - 1) < 0.03 ? 1 : k;
+    pinchRef.current = { c, r, a, k, s0, d0: Math.max(1, dc), lock: pinchLock() };
+  };
+  /** they moved: their screen points now */
+  const pinchMove = (r: { x: number; y: number }[]) => {
+    const g = pinchRef.current;
+    if (!g || r.length < 2) return;
     const f = fitRef.current;
-    if (m.phase === 'start') {
-      if (m.pts.length < 2) return;
-      if (zoomCommit.current) { clearTimeout(zoomCommit.current); zoomCommit.current = null; }
-      const s0 = slideView.scaleNow() ?? scaleRef.current;
-      const c = m.pts.slice(0, 2).map(p => slideView.toCanvas(p.x, p.y));
-      if (!c[0] || !c[1]) return;
-      const dc = Math.hypot(c[0].x - c[1].x, c[0].y - c[1].y), dr = Math.hypot(m.pts[0].sx - m.pts[1].sx, m.pts[0].sy - m.pts[1].sy);
-      const k = dr > 8 ? Math.max(0.25, Math.min(4, dc / dr)) : 1;
-      screenK.current = Math.abs(k - 1) < 0.03 ? 1 : k;
-      pinchRef.current = { c: c as { x: number; y: number }[], r: m.pts.slice(0, 2).map(p => ({ x: p.sx, y: p.sy })), a: { x: (m.pts[0].x + m.pts[1].x) / 2, y: (m.pts[0].y + m.pts[1].y) / 2 }, k, s0, d0: Math.max(1, dc) };
-      return;
-    }
+    const now = r.slice(0, 2).map((p, i) => ({ x: g.c[i].x + g.k * (p.x - g.r[i].x), y: g.c[i].y + g.k * (p.y - g.r[i].y) }));
+    const travel = Math.hypot((r[0].x + r[1].x - g.r[0].x - g.r[1].x) / 2, (r[0].y + r[1].y - g.r[0].y - g.r[1].y) / 2);
+    const z = pinchFactor(g.lock, g.d0, Math.hypot(now[0].x - now[1].x, now[0].y - now[1].y), travel);
+    const s = Math.max(0.5 * f, Math.min(MAX_ZOOM, g.s0 * z));
+    slideView.placeAt(s, g.a.x, g.a.y, (now[0].x + now[1].x) / 2, (now[0].y + now[1].y) / 2);
+  };
+  /** one lifted (`cancel`: a third came — undo, redo: back to where the slide was) */
+  const pinchEnd = (cancel: boolean) => {
     const g = pinchRef.current;
     if (!g) return;
-    if (m.phase === 'move') {
-      if (m.pts.length < 2) return;
-      const now = m.pts.slice(0, 2).map((p, i) => ({ x: g.c[i].x + g.k * (p.sx - g.r[i].x), y: g.c[i].y + g.k * (p.sy - g.r[i].y) }));
-      const s = Math.max(0.5 * f, Math.min(MAX_ZOOM, g.s0 * Math.hypot(now[0].x - now[1].x, now[0].y - now[1].y) / g.d0));
-      slideView.placeAt(s, g.a.x, g.a.y, (now[0].x + now[1].x) / 2, (now[0].y + now[1].y) / 2);
-      return;
-    }
     pinchRef.current = null;
-    // a third finger came (undo, redo): back to where the slide was
-    if (m.phase === 'cancel') slideView.placeAt(g.s0, g.a.x, g.a.y, (g.c[0].x + g.c[1].x) / 2, (g.c[0].y + g.c[1].y) / 2);
+    if (cancel) slideView.placeAt(g.s0, g.a.x, g.a.y, (g.c[0].x + g.c[1].x) / 2, (g.c[0].y + g.c[1].y) / 2);
     commitLiveZoom(0);
     slideView.release();
+  };
+  const onPinch = (m: Extract<FromRuntime, { ol: 'pinch' }>) => {
+    if (!soloRef.current) return;
+    if (m.phase === 'start') {
+      if (m.pts.length < 2) return;
+      const c = m.pts.slice(0, 2).map(p => slideView.toCanvas(p.x, p.y));
+      if (c[0] && c[1]) pinchStart(c as { x: number; y: number }[], m.pts.slice(0, 2).map(p => ({ x: p.sx, y: p.sy })));
+    } else if (m.phase === 'move') pinchMove(m.pts.map(p => ({ x: p.sx, y: p.sy })));
+    else pinchEnd(m.phase === 'cancel');
+  };
+  /**
+   * Fingers on the canvas beside the slide, as on it (runtime/edit.ts): one pulls the slide, two pan
+   * and pinch, three undo or redo. Not the browser's: the iPad's Safari zoomed the whole page.
+   */
+  const canvasFingers = useRef(new Map<number, { x: number; y: number }>());
+  const canvasGesture = useRef<{ kind: 'pan' | 'pinch' | 'tri' | 'done'; x: number; y: number; x0: number; y0: number; t0: number } | null>(null);
+  const fingerMid = () => {
+    const ps = [...canvasFingers.current.values()];
+    return { x: ps.reduce((a, p) => a + p.x, 0) / ps.length, y: ps.reduce((a, p) => a + p.y, 0) / ps.length };
+  };
+  const canvasTouch = (e: PointerEvent) => {
+    if (e.pointerType !== 'touch' || !soloRef.current) return;
+    const fingers = canvasFingers.current, box = canvasBox.current?.getBoundingClientRect();
+    if (!box) return;
+    const at = { x: e.clientX - box.left, y: e.clientY - box.top };
+    if (e.type === 'pointerdown') {
+      if (e.target !== e.currentTarget && !fingers.size) return;
+      e.preventDefault();
+      fingers.set(e.pointerId, at);
+      const g = canvasGesture.current, m = fingerMid();
+      if (fingers.size === 1) canvasGesture.current = { kind: 'pan', x: at.x, y: at.y, x0: at.x, y0: at.y, t0: performance.now() };
+      else if (fingers.size === 2 && g?.kind === 'pan') {
+        const ps = [...fingers.values()];
+        canvasGesture.current = { ...g, kind: 'pinch' };
+        pinchStart(ps, ps);
+      } else if (fingers.size >= 3 && g?.kind !== 'tri' && g?.kind !== 'done') {
+        if (g?.kind === 'pinch') pinchEnd(true);
+        canvasGesture.current = { kind: 'tri', x: m.x, y: m.y, x0: m.x, y0: m.y, t0: performance.now() };
+      }
+      return;
+    }
+    if (!fingers.has(e.pointerId)) return;
+    const g = canvasGesture.current;
+    if (e.type === 'pointermove') {
+      fingers.set(e.pointerId, at);
+      if (g?.kind === 'pan') { slideView.panBy(at.x - g.x, at.y - g.y); g.x = at.x; g.y = at.y; }
+      else if (g?.kind === 'pinch') pinchMove([...fingers.values()]);
+      else if (g?.kind === 'tri' && fingers.size >= 3) { const m = fingerMid(); g.x = m.x; g.y = m.y; }
+      return;
+    }
+    // up or cancelled: the gesture ends with the first finger to lift (the others do nothing till they lift too)
+    fingers.delete(e.pointerId);
+    if (g?.kind === 'pan') slideView.release();
+    else if (g?.kind === 'pinch') pinchEnd(false);
+    if (g && g.kind !== 'tri') g.kind = 'done';
+    if (fingers.size) return;
+    if (g?.kind === 'tri') { const h = triGesture(g.x - g.x0, g.y - g.y0, performance.now() - g.t0); if (h) historyGesture(h === 'redo'); }
+    canvasGesture.current = null;
   };
   /** three fingers (runtime): undo, redo — said for a moment on the canvas, as the gesture shows nothing itself */
   const [hud, setHud] = useState<{ text: string; n: number } | null>(null);
@@ -1563,6 +1641,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
         <div class="dl-main">
           <div class="dl-canvas" ref={canvasBox} style={deskCss ? { background: deskCss } : undefined} data-desk={view.deskChecker ? 'checker' : view.desk ? 'custom' : 'page'}
             onContextMenu={e => { if (e.target === e.currentTarget) { e.preventDefault(); canvasMenu(e.clientX, e.clientY); } }}
+            onPointerDown={canvasTouch} onPointerMove={canvasTouch} onPointerUp={canvasTouch} onPointerCancel={canvasTouch}
             onWheel={e => {
               if (e.target !== e.currentTarget) return;
               const k = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;
