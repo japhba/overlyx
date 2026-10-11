@@ -1260,6 +1260,17 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     if (docId) api.meta(docId).then(m => { setMeta(m); editorContext.meta = m; }).catch(() => {});
   };
   /** Entries picked in the citation dialog become known to the editor (for rendering author/year) even if they were not cited before. */
+  /** a citation in a document without a bibliography prints as [?] — say so (once per document), and how to add one */
+  const bibHinted = useRef(new Set<string>());
+  const noBibliographyHint = () => {
+    const v = activeViewRef.current ?? editorRef.current?.view;
+    if (!v || !docId || meta?.master || bibHinted.current.has(docId)) return;
+    let has = false;
+    v.state.doc.descendants(n => { if (has) return false; if (n.type.name === 'command' && String(n.attrs.params ?? '').includes('LatexCommand bibtex')) has = true; return !has; });
+    if (has) return;
+    bibHinted.current.add(docId);
+    notify('This document has no bibliography yet, so its citations print as [?] in the PDF — add one with Insert ▸ BibTeX bibliography… (usually at the end).');
+  };
   const rememberBib = (entries: { key: string; author: string; year: string; title: string }[]) => {
     const m = editorContext.meta;
     if (!m || !entries.length) return;
@@ -1391,7 +1402,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
           return <CiteDialog meta={meta} docId={docId} project={viewOnly ? undefined : project} onAdded={onBibAdded} initial={{ keys: unquote(p.get('key')).split(',').map(k => k.trim()).filter(Boolean), cmd: p.get('LatexCommand') ?? 'cite', before: unquote(p.get('before')), after: unquote(p.get('after')) }} onClose={close}
             onInsert={(keys, cmd, b, a, entries) => { rememberBib(entries); const params = [`LatexCommand ${cmd}`]; if (a) params.push(`after "${a}"`); if (b) params.push(`before "${b}"`); params.push(`key "${keys.join(',')}"`, 'literal "false"', ''); view.dispatch(view.state.tr.setNodeMarkup(target.pos, undefined, { ...target.node.attrs, params: JSON.stringify(params) })); }} />;
         }
-        return <CiteDialog meta={meta} docId={docId} project={viewOnly ? undefined : project} onClose={close} onAdded={onBibAdded} onInsert={(keys, cmd, b, a, entries) => { rememberBib(entries); run(C.insertCite(keys, cmd, b, a)); }} />;
+        return <CiteDialog meta={meta} docId={docId} project={viewOnly ? undefined : project} onClose={close} onAdded={onBibAdded} onInsert={(keys, cmd, b, a, entries) => { rememberBib(entries); run(C.insertCite(keys, cmd, b, a)); noBibliographyHint(); }} />;
       }
       case 'href': return <HrefDialog onClose={close} onInsert={(t, n) => run(C.insertHref(t, n))} />;
       case 'settings': return <SettingsDialog docId={docId} meta={meta} headerLines={headerLines} tab={typeof dialog.arg === 'string' ? dialog.arg : undefined} onClose={close} onSaved={() => api.meta(docId).then(m => { setMeta(m); editorContext.meta = m; if (masterView) refreshMacros(masterView, m.macros); })} />;
