@@ -22,7 +22,7 @@
  * and pan (the editor scales the frame); a pen works like the mouse. The pointer is captured, so a
  * drag that leaves the frame keeps going.
  */
-import type { Path, SelItem, SelStyle, Tool, Rect, HtmlOp, ObjKind, KeyPress, InkStyle } from '../protocol';
+import type { Path, SelItem, SelStyle, Tool, Rect, HtmlOp, ObjKind, KeyPress, InkStyle, PeerInfo, TextCaret } from '../protocol';
 import { inkOn } from '../../app/contrast';
 import { MODE, post, state, srcOf, pathOf, liveAt, sourced, slides, slideOf, docRect, isForeign, sendLayout } from './env';
 import { guard, linkTree } from './reconcile';
@@ -36,6 +36,7 @@ import { chipify, unchip, openChip, openChipEl, chipOpening, holdKey, holdAfter,
 import { initPaths, isNodeEditing, nodesAfterSource, nodesTargetOf, startNodesOrConvert, endNodes, redrawNodes, penDown, penMove, penUp, penKey, penDouble, penCancel, isPenDrawing, setMenuShape } from './pathedit';
 import { isSolo, showSlide, soloIndex, revealSlideOf } from './solo';
 import { freeOutline, outlinePathD, outlineBox, type FreePt } from './freehand';
+import { offsetOf, caretBox, selectionBoxes, safeColor } from './carets';
 import { reviewOverlay, bindPins, setReviewHover, showGhost, lockDeletions, trackInput, commentTarget, setLiveAt, styleAuthors, REVIEW_OVERLAY_CSS } from './review';
 
 const NS = 'http://www.w3.org/1999/xhtml';
@@ -47,7 +48,7 @@ let tool: Tool = 'select';
 /** Draw: the ink of the pen's strokes (the stroke drawn in the page while drawing; the editor writes it) */
 let inkStyle: InkStyle = { color: '#1d2433', width: 4, opacity: 1 };
 let selected: Element[] = [];
-let peers: { paths: Path[]; color: string; name: string }[] = [];
+let peers: PeerInfo[] = [];
 let editing: HTMLElement | null = null;
 /** the selected object showing rotation arrows instead of resize handles (Inkscape: a click on the selected object switches them) */
 let rotating: Element | null = null;
@@ -98,6 +99,9 @@ export function startEditing(): void {
     ${STEPS_CSS}
     ${REVIEW_OVERLAY_CSS}
     .peer-tag { position: absolute; transform: translateY(-100%); color: #fff; padding: 1px 5px; border-radius: 3px 3px 0 0; white-space: nowrap; pointer-events: none; font-size: calc(11px * var(--s)); }
+    .psel { position: absolute; opacity: .28; pointer-events: none; }
+    .pcaret { position: absolute; width: calc(2px * var(--s)); margin-left: calc(-1px * var(--s)); pointer-events: none; }
+    .pflag { position: absolute; left: calc(-1px * var(--s)); bottom: 100%; padding: 0 calc(4px * var(--s)); border-radius: calc(3px * var(--s)) calc(3px * var(--s)) calc(3px * var(--s)) 0; white-space: nowrap; pointer-events: none; font: 600 calc(10px * var(--s)) / 1.3 system-ui, -apple-system, sans-serif; }
     svg.ink { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
   </style><div class="layer"></div>`;
   layer = root.querySelector('.layer') as HTMLElement;
@@ -140,6 +144,8 @@ export function startEditing(): void {
   addEventListener('gesturestart', onGesture as EventListener, { capture: true, passive: false } as AddEventListenerOptions);
   addEventListener('gesturechange', onGesture as EventListener, { capture: true, passive: false } as AddEventListenerOptions);
   addEventListener('submit', e => e.preventDefault(), true);
+  // where the caret is in the text being retyped, for the others
+  document.addEventListener('selectionchange', caretMoved);
   addEventListener('scroll', () => {
     // one slide on the canvas: the editor pans the frame, the page never scrolls (a focus could scroll it)
     if (isSolo() && (scrollX || scrollY)) { scrollTo(0, 0); return; }
@@ -196,7 +202,73 @@ export function cropPreset(path: Path, how: { aspect: number | null; shape?: 're
   if (el) cropNow(el, cropCtx(), how);
 }
 export { setCropAspect, endCrop };
-export function setPeers(p: typeof peers): void { peers = p; draw(); }
+export function setPeers(p: PeerInfo[]): void { peers = p; draw(); }
+
+/* ------------------------------------------------------------------ the caret, for the others */
+
+let caretTimer: ReturnType<typeof setTimeout> | null = null;
+let caretSent = '';
+let drawSoon = 0;
+
+/** this person's caret (and selected words) in the text being retyped — or the formula open in it, taken whole */
+function localCaret(): TextCaret | null {
+  if (!editing) return null;
+  const path = pathOf(editing);
+  if (!path) return null;
+  const open = editing.querySelector('.ol-mathchip[data-ol-mathediting]');
+  if (open?.parentNode) {
+    const at = offsetOf(editing, open.parentNode, Array.prototype.indexOf.call(open.parentNode.childNodes, open));
+    return { path, anchor: at, head: at + 1 };
+  }
+  const sel = getSelection();
+  if (!sel || !sel.rangeCount || !sel.anchorNode || !sel.focusNode || !editing.contains(sel.anchorNode) || !editing.contains(sel.focusNode)) return null;
+  return { path, anchor: offsetOf(editing, sel.anchorNode, sel.anchorOffset), head: offsetOf(editing, sel.focusNode, sel.focusOffset) };
+}
+
+/** the caret to the editor (the others' awareness) now, unless it is where it was last sent */
+function sendCaret(): void {
+  if (caretTimer) { clearTimeout(caretTimer); caretTimer = null; }
+  const c = localCaret();
+  const k = c ? JSON.stringify(c) : '';
+  if (k === caretSent) return;
+  caretSent = k;
+  post({ ol: 'caret', caret: c });
+}
+
+/**
+ * The caret moved: sent at most every 80 ms — and while typed text waits to be committed, with that
+ * commit (scheduleCommit), so that the others get the text before the caret placed in it.
+ */
+function caretMoved(): void {
+  if (MODE !== 'edit' || !editing || caretTimer) return;
+  caretTimer = setTimeout(() => { caretTimer = null; if (!editTimer) sendCaret(); }, 80);
+}
+
+/** others' carets in the text being retyped here follow what is typed */
+function redrawSoon(): void {
+  if (drawSoon || !peers.some(p => p.caret)) return;
+  drawSoon = requestAnimationFrame(() => { drawSoon = 0; draw(); });
+}
+
+/** the others' carets as last drawn (page px; `window.__ol.peerCarets()`, for tests) */
+let drawnCarets: { name: string; x: number; y: number; h: number; selected: number }[] = [];
+export function peerCarets(): typeof drawnCarets { return drawnCarets; }
+
+/** a caret of another person: the words they selected, the bar and their name over it (page px) */
+function peerCaret(el: Element, p: PeerInfo): string {
+  const c = p.caret!;
+  const color = safeColor(p.color);
+  const out: string[] = [];
+  const sel = selectionBoxes(el, c.anchor, c.head);
+  for (const b of sel) out.push(`<div class="psel" style="left:${b.x + scrollX}px;top:${b.y + scrollY}px;width:${b.w}px;height:${b.h}px;background:${color}"></div>`);
+  const at = caretBox(el, c.head);
+  if (at) drawnCarets.push({ name: p.name, x: at.x + scrollX, y: at.top + scrollY, h: at.h, selected: sel.length });
+  if (at) out.push(`<div class="pcaret" data-ol-peer-caret style="left:${at.x + scrollX}px;top:${at.top + scrollY}px;height:${at.h}px;background:${color}"><div class="pflag" style="background:${color};color:${inkOn(color)}">${esc(p.name)}</div></div>`);
+  return out.join('');
+}
+
+/** drawn: it takes room on the page (not on a slide hidden by the one-slide canvas) */
+const shown = (el: Element): boolean => el.getClientRects().length > 0;
 
 export function selectPaths(paths: Path[]): void {
   selected = paths.map(liveAt).filter((e): e is Element => !!e);
@@ -266,7 +338,7 @@ export function editTextAt(path: Path, selectAll = false, math = false): void {
 
 /* ------------------------------------------------------------------ formulas (runtime/mathedit.ts) */
 
-export function mathShown(id: number): void { shownChip(id); }
+export function mathShown(id: number): void { shownChip(id); sendCaret(); }
 export function mathSet(id: number, tex: string): void { void setChip(id, tex).then(() => { if (editing) scheduleCommit(); }); }
 export function mathDisplay(id: number): void { displayChip(id); }
 /** the formula left last: text typed after it waits for the caret to be beside it */
@@ -693,11 +765,19 @@ export function draw(): void {
   const parts: string[] = [];
   const bw = 1.5 / scale;
   if (hoverEl && !selected.includes(hoverEl) && hoverEl.isConnected && !editing) parts.push(frameAt('hover', boxOf(hoverEl), `outline-width:${1 / scale}px`));
-  for (const p of peers) for (const path of p.paths) {
-    const el = liveAt(path);
-    if (!el) continue;
-    const r = docRect(el);
-    parts.push(`<div class="frame peer" style="left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px;border-color:${esc(p.color)};border-width:${bw}px"></div><div class="peer-tag" style="left:${r.x}px;top:${r.y}px;background:${esc(p.color)};color:${inkOn(p.color)}">${esc(p.name)}</div>`);
+  drawnCarets = [];
+  for (const p of peers) {
+    const color = safeColor(p.color);
+    // the text they retype: their caret carries the name
+    const typing = p.caret ? liveAt(p.caret.path) : null;
+    for (const path of p.paths) {
+      const el = liveAt(path);
+      if (!el || !shown(el)) continue;
+      const r = docRect(el);
+      parts.push(`<div class="frame peer" data-ol-peer="${esc(p.name)}" style="left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px;border-color:${color};border-width:${bw}px"></div>`);
+      if (el !== typing) parts.push(`<div class="peer-tag" style="left:${r.x}px;top:${r.y}px;background:${color};color:${inkOn(color)}">${esc(p.name)}</div>`);
+    }
+    if (typing && shown(typing)) parts.push(peerCaret(typing, p));
   }
   // suggestions and comment pins (review.ts): on the slide shown, on a web page all
   const rv = reviewOverlay(isSolo() ? slides()[soloIndex()] ?? null : null, boxOf, selected);
@@ -1843,7 +1923,8 @@ function onBeforeInput(e: Event): void {
 
 function scheduleCommit(): void {
   if (editTimer) clearTimeout(editTimer);
-  editTimer = setTimeout(commitText, 350);
+  editTimer = setTimeout(() => { commitText(); sendCaret(); }, 350);
+  redrawSoon();
 }
 
 /** the retyped text's markup, cleaned of what contenteditable adds */
@@ -1918,6 +1999,7 @@ export function stopText(): void {
     void typeset([el]).then(draw);
   }
   post({ ol: 'editing', path: null });
+  sendCaret();
   draw();
 }
 

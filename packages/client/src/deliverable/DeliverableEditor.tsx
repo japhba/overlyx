@@ -17,7 +17,7 @@ import { type User } from '../api';
 import { showContextMenu, closeContextMenu, type MenuItem } from '../editor/contextmenu';
 import { Toolbar } from '../app/Toolbar';
 import { ColorGrid } from '../app/ColorGrid';
-import type { DeliverableHost } from './host';
+import type { DeliverableHost, Peer } from './host';
 import { webHost } from './webHost';
 import type { FromRuntime, ToRuntime, SelItem, SlideBox, Tool, Path, HtmlOp, DeliverableKind, Rect, ArrangeHow, Paint, CanvasView, KeyPress, Solo } from './protocol';
 import { SlideView } from './viewport';
@@ -124,6 +124,8 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   const locked = readOnly || viewing;
   const readOnlyRef = useRef(false); readOnlyRef.current = locked;
   const hostReadOnly = useRef(false); hostReadOnly.current = readOnly;
+  /** the others on the page (sent again to a frame that (re)loads) */
+  const peersRef = useRef<Peer[]>([]);
 
   /* ------------------------------------------------------------- review: comments and suggestions (core html/review.ts) */
 
@@ -313,7 +315,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
       host.onChange(origin => { sendSource(origin === 'canvas'); codeSync(origin); rerender(); }),
       host.onStatus(() => setOnline(host.online())),
       host.onReady(() => { setSynced(true); sendSource(true); }),
-      host.onPeers(peers => toCanvas({ ol: 'peers', peers })),
+      host.onPeers(peers => { peersRef.current = peers; toCanvas({ ol: 'peers', peers }); toRail({ ol: 'peers', peers }); }),
       host.onAsset((p, v) => { toCanvas({ ol: 'asset', path: p, v }); toRail({ ol: 'asset', path: p, v }); }),
     ];
     if (host.ready()) { setSynced(true); sendSource(true); }
@@ -448,6 +450,8 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   const selRef = useRef(sel); selRef.current = sel;
   const kindRef = useRef(kind); kindRef.current = kind;
   const currentRef = useRef(current); currentRef.current = current;
+  // the slide looked at, for the others (their rails show who is where)
+  useEffect(() => { if (kind !== 'page') host.setSlide?.(current); }, [current, kind, host]);
   const slidesRef = useRef(slides); slidesRef.current = slides;
 
   useEffect(() => {
@@ -479,12 +483,14 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
             if (host.ready()) toCanvas({ ol: 'source', version: version.current, html: versions.current.get(version.current) ?? text.toString() });
             setDeckMacros(macroTableOf(m.macros ?? {}));
             if (bibKnown.current.size) toCanvas({ ol: 'bib', entries: [...bibKnown.current.values()] });
+            if (peersRef.current.length) toCanvas({ ol: 'peers', peers: peersRef.current });
           } else {
             railReady.current = true;
             if (bibKnown.current.size) toRail({ ol: 'bib', entries: [...bibKnown.current.values()] });
             toRail({ ol: 'scale', scale: railScale });
             if (host.ready()) toRail({ ol: 'source', version: version.current, html: text.toString() });
             toRail({ ol: 'current', slide: currentRef.current });
+            if (peersRef.current.length) toRail({ ol: 'peers', peers: peersRef.current });
           }
           break;
         case 'layout':
@@ -503,6 +509,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
           }
           break;
         case 'selection': if (fromCanvas) { setSel(m.items); host.setSelection(m.items.map(i => i.path)); } break;
+        case 'caret': if (fromCanvas) host.setCaret?.(m.caret); break;
         case 'dragging': if (fromCanvas) setDragging(m.on); break;
         case 'editing':
           if (!fromCanvas) break;

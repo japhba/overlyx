@@ -5,7 +5,7 @@
  * the VS Code extension in the file's TextDocument (packages/vscode, deliverable webview).
  */
 import type { Splice } from '@overlyx/core/html/source.ts';
-import type { Path } from './protocol';
+import type { Path, PeerInfo, TextCaret } from './protocol';
 import type { MenuItem } from '../editor/contextmenu';
 
 export type { Splice };
@@ -13,7 +13,7 @@ export type { Splice };
 /** what made a change: the canvas or the toolbar ('canvas'), the code view ('code'), anybody else */
 export type ChangeOrigin = 'canvas' | 'code' | 'remote';
 
-export interface Peer { paths: Path[]; color: string; name: string }
+export type Peer = PeerInfo;
 
 export interface DeliverableHost {
   /** project-relative path of the page (folder of uploads, the title) */
@@ -41,6 +41,9 @@ export interface DeliverableHost {
   onAsset(cb: (path: string, v: number) => void): () => void;
   /** this person's selection, for the others; the others' */
   setSelection(paths: Path[]): void;
+  /** this person's caret in the text they retype (null: none), and the slide they look at — for the others (a host without others leaves them out) */
+  setCaret?(caret: TextCaret | null): void;
+  setSlide?(slide: number): void;
   onPeers(cb: (peers: Peer[]) => void): () => void;
   /** the Download menu's entries (the web app: PDF, website; VS Code: print, open in the browser) */
   downloads(open: (mode: string) => string): MenuItem[];

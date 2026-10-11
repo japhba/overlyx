@@ -13,8 +13,10 @@
  * In every mode TeX math is typeset (math.ts) and speaker notes are hidden; `window.__olReady`
  * turns true once fonts, math and pictures have settled (the renderer waits for it).
  */
-import type { ToRuntime, Path } from '../protocol';
-import { MODE, post, state, detectKind, slideBoxes, pageSize, sendLayout, slides, srcOf, pathOf, docRect, isForeign, layoutHooks } from './env';
+import type { ToRuntime, Path, PeerInfo } from '../protocol';
+import { MODE, post, state, detectKind, slideBoxes, pageSize, sendLayout, slides, srcOf, pathOf, docRect, isForeign, layoutHooks, liveAt, slideOf } from './env';
+import { safeColor } from './carets';
+import { inkOn } from '../../app/contrast';
 import { startMath, typesetPage } from './math';
 import { renderCites, refreshCites, addEntries, CITE_CSS } from './cite';
 import { applySource, whenTypeset } from './reconcile';
@@ -55,6 +57,26 @@ let railCurrent = -1;
 let railScale = 0.15;
 let railLayer: HTMLElement | null = null;
 let railDrag: { from: number; y0: number; to: number | null } | null = null;
+/** the others on the page: a dot with their initials on the slide they are at */
+let railPeers: PeerInfo[] = [];
+/** who the rail shows where (`window.__ol.railPeers()`, for tests) */
+let railDrawn: { slide: number; name: string }[] = [];
+
+/** the slide a person is at: the one with the text they retype or what they selected, else the one they look at */
+function peerSlide(p: PeerInfo, ss: HTMLElement[]): number {
+  for (const path of [p.caret?.path, ...p.paths]) {
+    const s = path ? slideOf(liveAt(path)) : null;
+    const i = s ? ss.indexOf(s) : -1;
+    if (i >= 0) return i;
+  }
+  return p.slide ?? -1;
+}
+
+const escAttr = (t: string): string => t.replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
+const initials = (name: string): string => {
+  const w = name.trim().split(/\s+/).filter(Boolean);
+  return ((w[0]?.[0] ?? '?') + (w.length > 1 ? w[w.length - 1][0] : '')).toUpperCase();
+};
 
 function startThumb(): void {
   addStyle(`html, body { scrollbar-width: none; } html::-webkit-scrollbar { display: none; } html, html * { cursor: pointer !important; }`);
@@ -69,6 +91,8 @@ function startThumb(): void {
     .c { position: absolute; transform: translate(calc(-100% - 4px / var(--s)), calc(4px / var(--s))); display: flex; align-items: center; gap: calc(2px / var(--s)); font: 700 calc(11px / var(--s)) system-ui, sans-serif; color: #3a2a00; background: #f6b400; padding: calc(1px / var(--s)) calc(5px / var(--s)); border-radius: calc(8px / var(--s)) calc(8px / var(--s)) calc(8px / var(--s)) calc(2px / var(--s)); }
     .chg { position: absolute; width: calc(4px / var(--s)); transform: translateX(calc(-7px / var(--s))); border-radius: calc(2px / var(--s)); }
     .del { position: absolute; transform: translate(-50%, -50%); font: 700 calc(12px / var(--s)) system-ui, sans-serif; color: #fff; background: #d2453c; padding: calc(2px / var(--s)) calc(8px / var(--s)); border-radius: calc(4px / var(--s)); }
+    .who { position: absolute; display: flex; gap: calc(2px / var(--s)); transform: translate(calc(-100% - 4px / var(--s)), calc(-100% - 4px / var(--s))); }
+    .who span { display: grid; place-items: center; width: calc(18px / var(--s)); height: calc(18px / var(--s)); border-radius: 50%; font: 700 calc(9px / var(--s)) system-ui, sans-serif; box-shadow: 0 0 0 calc(1.5px / var(--s)) #fff; }
   </style><div class="l"></div>`;
   railLayer = root.querySelector('.l') as HTMLElement;
   document.documentElement.appendChild(host);
@@ -147,6 +171,7 @@ function drawRail(): void {
   railLayer.style.setProperty('--s', String(railScale));
   const ss = slides();
   const parts: string[] = [];
+  railDrawn = [];
   ss.forEach((s, i) => {
     const r = docRect(s);
     parts.push(`<div class="n" style="left:${r.x}px;top:${r.y}px">${i + 1}</div>`);
@@ -156,6 +181,12 @@ function drawRail(): void {
     if (rv.deleted) parts.push(`<div class="del" style="left:${r.x + r.w / 2}px;top:${r.y + r.h / 2}px">Deleted</div>`);
     if (rv.comments) parts.push(`<div class="c" style="left:${r.x + r.w}px;top:${r.y}px">💬 ${rv.comments}</div>`);
     if (i === railCurrent) parts.push(`<div class="cur" style="left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px"></div>`);
+    const here = railPeers.filter(p => peerSlide(p, ss) === i).slice(0, 4);
+    for (const p of here) railDrawn.push({ slide: i, name: p.name });
+    if (here.length) {
+      const dots = here.map(p => { const c = safeColor(p.color); return `<span title="${escAttr(p.name)}" style="background:${c};color:${inkOn(c)}">${escAttr(initials(p.name))}</span>`; }).join('');
+      parts.push(`<div class="who" data-ol-rail-peers="${i}" style="left:${r.x + r.w}px;top:${r.y + r.h}px">${dots}</div>`);
+    }
   });
   if (railDrag && railDrag.to !== null) {
     const t = railDrag.to;
@@ -201,7 +232,7 @@ function onMessage(e: MessageEvent): void {
     case 'scale': if (MODE === 'edit') edit.setScale(m.scale, m.anchor); else { railScale = m.scale; drawRail(); } break;
     case 'tool': if (MODE === 'edit') edit.setTool(m.tool, m.ink); break;
     case 'exec': if (MODE === 'edit') edit.exec(m.command, m.value); break;
-    case 'peers': if (MODE === 'edit') edit.setPeers(m.peers); break;
+    case 'peers': if (MODE === 'edit') edit.setPeers(m.peers); else if (MODE === 'thumb') { railPeers = m.peers; drawRail(); } break;
     case 'current': if (MODE === 'thumb') railShow(m.slide); break;
     case 'asset': refreshAsset(m.path, m.v); break;
     case 'arrange': if (MODE === 'edit') arrange(m.how); break;
@@ -287,7 +318,7 @@ function init(): void {
   // citations and lists of references (cite.ts)
   addStyle(CITE_CSS);
   if (document.body) { renderCites([document.body]); refreshCites(); }
-  window.__ol = { report, version: () => state.version, slides: () => slideBoxes(), size: pageSize };
+  window.__ol = { report, version: () => state.version, slides: () => slideBoxes(), size: pageSize, peerCarets: edit.peerCarets, railPeers: () => railDrawn };
   if (MODE === 'present') startPresenting();
   if (MODE === 'edit') { edit.startEditing(); ensureSolo(); }
   if (MODE === 'thumb') startThumb();
