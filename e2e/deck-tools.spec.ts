@@ -537,7 +537,12 @@ test("Draw: the pen's settings (GoodNotes'), a ball pen kept for the next visit;
   await mouseLine([[300, 640], [700, 640]]);
   await expect.poll(strokes, { timeout: 15000 }).toBe(2);
   const scribble = (y0: number, y1: number) => Array.from({ length: 13 }, (_, i) => [380 + i * 12, i % 2 ? y0 : y1] as [number, number]);
-  await mouseLine(scribble(610, 670));
+  await mouseLine(scribble(620, 660));
+  await expect.poll(strokes, { timeout: 15000 }).toBe(1);
+  await page.keyboard.press('Control+z');
+  await expect.poll(strokes, { timeout: 15000 }).toBe(2);
+  // a zig-zag struck through it (legs at ±55°, five of them): gone too
+  await mouseLine(Array.from({ length: 6 }, (_, i) => [420 + i * 18, i % 2 ? 615 : 665] as [number, number]));
   await expect.poll(strokes, { timeout: 15000 }).toBe(1);
   await page.keyboard.press('Control+z');
   await expect.poll(strokes, { timeout: 15000 }).toBe(2);

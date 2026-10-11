@@ -543,8 +543,10 @@ blend.
     margin-ink presets — a click on the picked colour / width changes it, `ol.deckInk`; the pen stays in
     hand stroke after stroke until Esc. A stroke is GoodNotes' (`runtime/freehand.ts` `inkRuns`): a
     centripetal Catmull-Rom curve through every point the pen reported (however few: loops stay
-    loops), resampled every ⅔ px and smoothed only where needed — 3 px when the points all came in
-    whole px (older Safari), and the stroke stabilization — by Tukey's twicing (2·G − G∘G: a plain
+    loops) — in pieces at the pen's sharp turns (`cornered`: more than 100° over 2 px either side; a
+    curve through a v's point rounded it, which read as stabilized) — resampled every ⅔ px and
+    smoothed only where needed — whole-px points (older Safari): 3 px but never further than their
+    rounding (0.6 px, `within`); the stroke stabilization — by Tukey's twicing (2·G − G∘G: a plain
     Gaussian pulled small loops in by σ²/2r, the ink "contracted"); its width from the Pencil's
     pressure through `pressureWidth(p, sensitivity)` (usual writing ≈ the nominal width whatever the
     sensitivity), the pressure smoothed too (raw, it beaded); a mouse's, a finger's and the
@@ -573,9 +575,11 @@ blend.
     and what they began is undone (a pinch put back, a pull let go, three fingers no undo); a third
     touch well after two others is the hand too. The editor hears `penDown` and does the same for
     the hand resting on the grey canvas beside the slide (which moves the slide only after 10 px).
-    **Scribble to erase** (`isScribble`: five legs or more, back and forth along one axis, several
-    times as long as its box is across; `scribbledOut`: the strokes under it, if it went over any —
-    a scribble over nothing stays as written). Selected,
+    **Scribble to erase** (`isScribble`: four legs or more, each going back the way the last came,
+    turns measured over ~5 and ~8 screen px — a quick hand turns round — by more than 100°, a zig-zag
+    struck through a word too; `scribbledOut`: the strokes under it, each point probed 3 screen px
+    round, if it was over strokes for a fifth of its length — shape alone cannot tell a small m from a
+    rounded zig-zag, being over ink does; a scribble over nothing stays as written). Selected,
     a stroke's toolbar is its ink colour (kind `ink`). The eraser hides the strokes — Draw's, and open
     unfilled paths — it passes over and removes them in one change on release); handles as in Inkscape: a click selects with the
     resize box, a click on the selected object again turns its handles into rotation arrows off the

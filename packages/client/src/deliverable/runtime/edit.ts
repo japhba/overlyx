@@ -1838,16 +1838,17 @@ function endInk(e: PointerEvent): void {
 }
 
 /**
- * The strokes a scribble went over (Draw's, and open unfilled paths, as the eraser takes) — if it went
- * over strokes at all (for a twentieth of its length: a zig-zag across one line crosses it at each
- * leg); a scribble over nothing stays, as written.
+ * The strokes a scribble went over (Draw's, and open unfilled paths, as the eraser takes) — if it was
+ * over strokes for a fifth of its length or more, each point of it taken as a few screen px across
+ * (thin strokes are hard to land on exactly): a zig-zag across one line crosses it at each leg, a
+ * scribble over a word is over it all along; writing that only crosses a line (an m over an underline)
+ * is not, and stays — as does a scribble over nothing.
  */
 function scribbledOut(client: [number, number][]): Element[] {
   const found: Element[] = [];
   let samples = 0, hits = 0, carry = 0;
-  const step = 3 / scale;
-  const at = (x: number, y: number) => {
-    samples++;
+  const step = 3 / scale, r = 3 / scale;
+  const probe = (x: number, y: number) => {
     let hit = false;
     for (const h of document.elementsFromPoint(x, y)) {
       if (!(h instanceof SVGGeometryElement) || h.localName === 'svg') continue;
@@ -1856,6 +1857,12 @@ function scribbledOut(client: [number, number][]): Element[] {
       hit = true;
       if (!found.includes(obj)) found.push(obj);
     }
+    return hit;
+  };
+  const at = (x: number, y: number) => {
+    samples++;
+    // (each probe, not only the first that hits: all the strokes under the scribble go)
+    const hit = [probe(x, y), probe(x - r, y), probe(x + r, y), probe(x, y - r), probe(x, y + r)].some(Boolean);
     if (hit) hits++;
   };
   at(client[0][0], client[0][1]);
@@ -1863,7 +1870,7 @@ function scribbledOut(client: [number, number][]): Element[] {
     const [ax, ay] = client[i - 1], [bx, by] = client[i], l = Math.hypot(bx - ax, by - ay);
     for (carry += l; carry >= step; carry -= step) { const f = 1 - (carry - step) / Math.max(l, 1e-6); at(ax + (bx - ax) * f, ay + (by - ay) * f); }
   }
-  return hits >= Math.max(2, 0.05 * samples) ? found : [];
+  return hits >= Math.max(2, samples / 5) ? found : [];
 }
 
 /** the stroke being drawn given up (a second finger, a cancelled pointer) */

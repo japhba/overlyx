@@ -72,6 +72,14 @@ describe("Draw's strokes as GoodNotes draws them (runtime/freehand.ts)", () => {
     for (const [x, y] of start) expect(Math.abs(Math.hypot(x - 100, y - 100) - 20)).toBeLessThan(0.35);
   });
 
+  it("keeps the pen's sharp turns sharp (a v's point): a curve through them rounded them", () => {
+    // a V from sparse points (6 px apart, as at 60 Hz): on its two arms, not bulging past the point (0.36 px before)
+    const arm = (ax: number, ay: number, bx: number, by: number, n: number): FreePt[] => Array.from({ length: n }, (_, i) => [ax + (bx - ax) * i / n, ay + (by - ay) * i / n, 0.5]);
+    const v: FreePt[] = [...arm(0, 0, 30, 60, 11), ...arm(30, 60, 60, 0, 11), [60, 0, 0.5]];
+    const toArms = ([x, y]: number[]) => { const seg = (ax: number, ay: number, bx: number, by: number) => { const t = Math.max(0, Math.min(1, ((x - ax) * (bx - ax) + (y - ay) * (by - ay)) / ((bx - ax) ** 2 + (by - ay) ** 2))); return Math.hypot(x - ax - t * (bx - ax), y - ay - t * (by - ay)); }; return Math.min(seg(0, 0, 30, 60), seg(30, 60, 60, 0)); };
+    expect(Math.max(...drawn(inkRuns(v, { width: 4 })).map(toArms))).toBeLessThan(0.2);
+  });
+
   it("whole-px points (an older Safari's) come out a straight line, not stairs", () => {
     const pts: FreePt[] = Array.from({ length: 160 }, (_, i) => [Math.round(10 + i * 1.3), Math.round(20 + i * 1.3 * 0.3), 0.5]);
     expect(offLine([{ w: 4, pts: pts.map(([x, y]) => [x, y]) }], 10, 20, 0.3)).toBeGreaterThan(0.45);
@@ -170,6 +178,11 @@ describe("Draw's strokes as GoodNotes draws them (runtime/freehand.ts)", () => {
     expect(isScribble(pts(t => [100 + 60 * Math.abs(((t * 7) % 2) - 1), 50 + t * 20]))).toBe(true);
     // a tighter, slanted one
     expect(isScribble(pts(t => { const a = 40 * Math.abs(((t * 9) % 2) - 1); return [a + t * 30, a * 0.6 + 100]; }))).toBe(true);
+    // a zig-zag struck through a word (its legs at ±55°, five of them), and four legs back and forth along a line
+    expect(isScribble(pts(t => [t * 90, 30 * Math.abs(((t * 5) % 2) - 1)]))).toBe(true);
+    expect(isScribble(pts(t => [80 * Math.abs(((t * 4) % 2) - 1), 50 + t * 6]))).toBe(true);
+    // a quick hand's: the turns round (a radius of 4 px), not on a point
+    expect(isScribble(pts(t => { const a = t * Math.PI * 6; return [40 + 40 * Math.tanh(4 * Math.sin(a)) / Math.tanh(4), 50 + 4 * Math.cos(a) + t * 10]; }))).toBe(true);
     // writing: m m m (down-strokes retraced, arches over), loops (e e e), a straight line, a few zig-zags
     // (an m's arches, six of them: from the baseline up, over and down, turning back up at each foot)
     const m = pts(t => { const u = t * 6, k = Math.min(5, Math.floor(u)), a = Math.PI * (u - k); return [k * 24 + 12 - 12 * Math.cos(a), 40 - 40 * Math.sin(a)]; });
@@ -177,6 +190,9 @@ describe("Draw's strokes as GoodNotes draws them (runtime/freehand.ts)", () => {
     expect(isScribble(pts(t => [t * 120 + 10 * Math.cos(t * 30), 50 + 10 * Math.sin(t * 30)]))).toBe(false);
     expect(isScribble(pts(t => [t * 200, 30]))).toBe(false);
     expect(isScribble(pts(t => [60 * Math.abs(((t * 3) % 2) - 1), t * 20]))).toBe(false);
+    // a circle round and round, an s
+    expect(isScribble(pts(t => [50 + 20 * Math.cos(t * 12), 50 + 20 * Math.sin(t * 12)]))).toBe(false);
+    expect(isScribble(pts(t => [30 * Math.sin(t * Math.PI * 2), t * 60]))).toBe(false);
   });
 
   it("takes each of the pen's points once, in order: Safari's coalesced events repeat the last move's (A B A C D C)", () => {

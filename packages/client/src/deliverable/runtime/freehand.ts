@@ -51,40 +51,46 @@ export function freshPoint(pts: FreePt[], lastT: number, t: number, p: FreePt): 
 }
 
 /**
- * Whether a stroke is a scribble (GoodNotes' scribble to erase): back and forth over one place — five
- * legs or more, each turning back on the last (by more than 120°) and going back the way it came,
- * along one axis (writing's turns go every which way, an m's arches all go on), and the whole several
- * times as long as its box is across.
- * `zoom`: screen px per px of the points. Whether it erases is the runtime's: only over strokes.
+ * Whether a stroke is a scribble (GoodNotes' scribble to erase): back and forth — four legs or more,
+ * each going back the way the last came, the whole half as long again as its box is across. Turns are
+ * measured over ~5 screen px either side (a quick hand turns round, not on a point). Writing turns
+ * back too (a w, an m's foot), but an m's arches all go on and loops go round; what tells the rest
+ * from a scribble is that a scribble is over strokes — the runtime's `scribbledOut`. `zoom`: screen px
+ * per px of the points.
  */
 export function isScribble(pts: [number, number][], zoom = 1): boolean {
-  if (pts.length < 8) return false;
-  const step = 2 / zoom, minLeg = 6 / zoom;
-  const legs: [number, number][] = [];
-  let [ax, ay] = pts[0], [px, py] = pts[0], dx = 0, dy = 0, total = 0;
-  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-  for (const [x, y] of pts) {
-    x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
-    const sx = x - px, sy = y - py, l = Math.hypot(sx, sy);
-    if (l < step) continue;
-    total += l;
-    // (the way it has been going: the last few steps)
-    const dl = Math.hypot(dx, dy);
-    if (dl && (sx * dx + sy * dy) / (l * dl) < -0.5) { legs.push([px - ax, py - ay]); ax = px; ay = py; dx = 0; dy = 0; }
-    dx = dx * 0.5 + sx / l; dy = dy * 0.5 + sy / l;
-    px = x; py = y;
+  const step = 1.5 / zoom, minLeg = 8 / zoom;
+  // the path, a point every `step` px or so
+  const q: [number, number][] = [];
+  let total = 0, x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const p of pts) {
+    x0 = Math.min(x0, p[0]); y0 = Math.min(y0, p[1]); x1 = Math.max(x1, p[0]); y1 = Math.max(y1, p[1]);
+    const l = q[q.length - 1];
+    if (!l) { q.push(p); continue; }
+    const d = Math.hypot(p[0] - l[0], p[1] - l[1]);
+    if (d >= step) { q.push(p); total += d; }
   }
-  legs.push([px - ax, py - ay]);
-  const long = legs.filter(([a, b]) => Math.hypot(a, b) >= minLeg);
-  if (long.length < 5 || total < 2.5 * Math.hypot(x1 - x0, y1 - y0)) return false;
-  // back and forth: each leg goes back the way the last came (an m's arches all go on, one after the other)
-  let back = 0;
-  for (let i = 1; i < long.length; i++) if (long[i][0] * long[i - 1][0] + long[i][1] * long[i - 1][1] < 0) back++;
-  if (back < 0.7 * (long.length - 1)) return false;
-  // one axis: the legs' directions (either way along it) agree
-  let c = 0, sn = 0;
-  for (const [a, b] of long) { const t = 2 * Math.atan2(b, a); c += Math.cos(t); sn += Math.sin(t); }
-  return Math.hypot(c, sn) / long.length >= 0.6;
+  const n = q.length, W = Math.max(2, Math.ceil(5 / zoom / step)), W2 = Math.max(W + 1, Math.ceil(8 / zoom / step));
+  if (n < 2 * W + 4 || total < 1.5 * Math.hypot(x1 - x0, y1 - y0)) return false;
+  const unit = (a: number, b: number) => { const dx = q[b][0] - q[a][0], dy = q[b][1] - q[a][1], l = Math.hypot(dx, dy) || 1; return [dx / l, dy / l]; };
+  const cosAt = (i: number, w: number) => { const a = unit(Math.max(0, i - w), i), b = unit(i, Math.min(n - 1, i + w)); return a[0] * b[0] + a[1] * b[1]; };
+  // the way in and the way out, over ~5 screen px and over ~8 (a quick turn round a radius of a few px; an m's arch is wider)
+  const back = (i: number) => Math.min(cosAt(i, W), cosAt(i, W2));
+  // the turns: the sharpest point of each stretch where they differ by more than 100°
+  const TURN = -0.17;
+  const marks = [0];
+  for (let i = W; i < n - W; i++) {
+    if (back(i) >= TURN) continue;
+    let best = i;
+    while (i + 1 < n - W && back(i + 1) < TURN) { i++; if (back(i) < back(best)) best = i; }
+    marks.push(best);
+  }
+  marks.push(n - 1);
+  const legs = marks.slice(1).map((m, i) => [q[m][0] - q[marks[i]][0], q[m][1] - q[marks[i]][1]]).filter(([a, b]) => Math.hypot(a, b) >= minLeg);
+  if (legs.length < 4) return false;
+  let goesBack = 0;
+  for (let i = 1; i < legs.length; i++) if (legs[i][0] * legs[i - 1][0] + legs[i][1] * legs[i - 1][1] < 0) goesBack++;
+  return goesBack >= 0.75 * (legs.length - 1);
 }
 
 /**
@@ -121,13 +127,15 @@ export function inkRuns(input: FreePt[], o: FreeOpts): InkRun[] {
   if (pts.length === 1) return [{ w: round2(w * (sens ? pressureWidth(pts[0][2], sens) : 1)), pts: [[pts[0][0], pts[0][1]]] }];
   // samples every h px along the curve through the points
   const h = Math.max(0.3, Math.min(1, w / 6));
-  const s = resample(spline(pts, h), h);
+  const s = resample(cornered(pts).flatMap((piece, i) => (i ? spline(piece, h).slice(1) : spline(piece, h))), h);
   // smoothed only where asked (the stabilization, in screen px) or needed (whole px), without pulling curves in
   const zoom = o.zoom && o.zoom > 0 ? o.zoom : 1;
   const sq = o.coarse ? COARSE_SIGMA : 0, ss = (clamp01(nib.stabilization ?? 0) * STAB_PX) / zoom;
   const sigma = Math.hypot(sq, ss);
-  const x = twice(s.x, sigma / h), y = twice(s.y, sigma / h);
-  const p = sens ? gauss(s.p, Math.max(2, 2.5 * sigma) / h, true) : s.p;
+  let x = twice(s.x, sigma / h), y = twice(s.y, sigma / h);
+  // whole px, unstabilized: smoothed only as far as the rounding could have put the pen (its steps go, its shape stays)
+  if (o.coarse && !ss) { x = within(x, s.x, COARSE_WITHIN); y = within(y, s.y, COARSE_WITHIN); }
+  const p = sens ? gauss(s.p, Math.max(1.2, 2.5 * sigma) / h, true) : s.p;
   // the width along it: pressure, the flat tip's direction, the sharp tip's taper at the start (and the end, once lifted)
   const n = x.length;
   const across = flat ? flatWidth(flat) : null;
@@ -165,8 +173,10 @@ export function inkRuns(input: FreePt[], o: FreeOpts): InkRun[] {
 
 const clamp01 = (v: number) => (Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0);
 const round2 = (n: number) => Math.round(n * 100) / 100;
-/** the smoothing (px) of whole-px points: their steps gone, the loops of handwriting kept */
+/** the smoothing (px) of whole-px points, never moving the line further than their rounding (half a px, and a little) */
 const COARSE_SIGMA = 3;
+const COARSE_WITHIN = 0.6;
+const within = (v: number[], raw: number[], d: number) => v.map((a, i) => Math.max(raw[i] - d, Math.min(raw[i] + d, a)));
 /** the smoothing (screen px) at full stroke stabilization: at half, a 6 px loop moves less than 0.1 px and a shaky hand's line is calm */
 const STAB_PX = 6;
 
@@ -188,6 +198,34 @@ function clean(input: FreePt[], pen: boolean): FreePt[] {
     }
   }
   return out;
+}
+
+/**
+ * The points in pieces at the pen's sharp turns (by more than 100°, measured over 2 px either side —
+ * a v's point, an m's foot, a scribble's turn): a curve through a turn rounds it, which read as the
+ * line being stabilized; each piece is a curve of its own, the turn stays sharp.
+ */
+function cornered(pts: FreePt[]): FreePt[][] {
+  const n = pts.length;
+  if (n < 5) return [pts];
+  const reach = 2;
+  const turn = (i: number) => {
+    let j = i - 1, k = i + 1;
+    while (j > 0 && Math.hypot(pts[i][0] - pts[j][0], pts[i][1] - pts[j][1]) < reach) j--;
+    while (k < n - 1 && Math.hypot(pts[k][0] - pts[i][0], pts[k][1] - pts[i][1]) < reach) k++;
+    const ax = pts[i][0] - pts[j][0], ay = pts[i][1] - pts[j][1], bx = pts[k][0] - pts[i][0], by = pts[k][1] - pts[i][1];
+    const la = Math.hypot(ax, ay), lb = Math.hypot(bx, by);
+    return la < reach * 0.5 || lb < reach * 0.5 ? 1 : (ax * bx + ay * by) / (la * lb);
+  };
+  const cos = pts.map((_, i) => (i && i < n - 1 ? turn(i) : 1));
+  const pieces: FreePt[][] = [];
+  let from = 0;
+  for (let i = 2; i < n - 2; i++) {
+    // the sharpest point of a turn (its neighbours turn less), a piece at least three points long
+    if (cos[i] < -0.17 && cos[i] <= cos[i - 1] && cos[i] < cos[i + 1] && i - from >= 2) { pieces.push(pts.slice(from, i + 1)); from = i; }
+  }
+  pieces.push(pts.slice(from));
+  return pieces;
 }
 
 /** the centripetal Catmull-Rom curve through the points, as a polyline with pieces of at most `step` px (pressure along it linearly) */
