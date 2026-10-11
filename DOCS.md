@@ -518,7 +518,11 @@ blend.
     `runtime/view.ts`, `runtime/crop.ts`): shapes (rectangle, rounded, ellipse — boxes that centre
     text typed into them — and triangle, diamond, star, hexagon as SVG polygons stretched to their box
     with a constant-width outline), lines and arrows from where the drag started to where it ended
-    (Shift: 45° steps), the pen (a smoothed `<path>`); handles as in Inkscape: a click selects with the
+    (Shift: 45° steps), **Draw** (P; `deckink.ts`: pen, highlighter and eraser E with the documents'
+    margin-ink presets — a click on the picked colour / width changes it, `ol.deckInk`; the pen stays in
+    hand stroke after stroke until Esc, each stroke a smoothed `<path>` in its ink, the highlighter's
+    translucent with `mix-blend-mode: multiply`; the eraser hides the strokes — open unfilled paths —
+    it passes over and removes them in one change on release); handles as in Inkscape: a click selects with the
     resize box, a click on the selected object again turns its handles into rotation arrows off the
     four corners (the centre marked; any arrow turns it, CSS `rotate`, Shift: 15° steps, snaps to
     0/90/180/270) and the next click back, a double click edits its points (a path) or its text — the
@@ -715,7 +719,9 @@ blend.
     without it a later attribute change duplicated a text's inline elements.
   * **Around the canvas** (`DeliverableEditor.tsx`): the slide rail (a second frame in `thumb`
     mode: click, drag to reorder, its menu — new slide in the design of the current one, blank,
-    duplicate, move, delete), the **contextual toolbar** (`decktoolbar.tsx`, the toolbars' own
+    duplicate, move, delete; its header's « folds it to a » Slides strip, `ol.deckSlides`, folded at
+    first on screens under 700 px; the speaker notes' ▾ folds them to a strip with their first line,
+    `ol.deckNotes`), the **contextual toolbar** (`decktoolbar.tsx`, the toolbars' own
     component: the tools always; then only what fits the selection — text, shape, line or picture
     tools, Arrange, Path and the rest — and with nothing selected the slide's background and the canvas;
     when they do not fit beside the tools they float as a bar of their own over the canvas's top edge

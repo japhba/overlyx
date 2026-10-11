@@ -22,7 +22,7 @@
  * and pan (the editor scales the frame); a pen works like the mouse. The pointer is captured, so a
  * drag that leaves the frame keeps going.
  */
-import type { Path, SelItem, SelStyle, Tool, Rect, HtmlOp, ObjKind, KeyPress } from '../protocol';
+import type { Path, SelItem, SelStyle, Tool, Rect, HtmlOp, ObjKind, KeyPress, InkStyle } from '../protocol';
 import { inkOn } from '../../app/contrast';
 import { MODE, post, state, srcOf, pathOf, liveAt, sourced, slides, slideOf, docRect, isForeign, sendLayout } from './env';
 import { guard, linkTree } from './reconcile';
@@ -43,6 +43,8 @@ let root: ShadowRoot;
 let layer: HTMLElement;
 let scale = 1;
 let tool: Tool = 'select';
+/** Draw: the ink of the pen's strokes (its preview while drawing; the editor writes the stroke) */
+let ink: InkStyle = { color: '#1d2433', width: 4, opacity: 1 };
 let selected: Element[] = [];
 let peers: { paths: Path[]; color: string; name: string }[] = [];
 let editing: HTMLElement | null = null;
@@ -62,6 +64,8 @@ const SVG_SHAPES = new Set(['rect', 'circle', 'ellipse', 'line', 'polyline', 'po
  */
 const MOVE_SVG = `<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'><path d='M12 1.5l3.6 4h-2.4v5.3h5.3V8.4l4 3.6-4 3.6v-2.4h-5.3v5.3h2.4l-3.6 4-3.6-4h2.4v-5.3H5.5v2.4L1.5 12l4-3.6v2.4h5.3V5.5H8.4z' fill='black' stroke='white' stroke-width='1.2' stroke-linejoin='round'/></svg>`;
 export const MOVE_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(MOVE_SVG).replace(/'/g, '%27')}") 12 12, move`;
+/** the eraser's cursor: the circle it rubs out with */
+const ERASER_CURSOR = `url("data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><circle cx="10" cy="10" r="7" fill="white" fill-opacity="0.6" stroke="black" stroke-width="1.2"/></svg>')}") 10 10, cell`;
 const ROT_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M18 7a8 8 0 1 0 2 6' fill='none' stroke='white' stroke-width='4'/%3E%3Cpath d='M18 7a8 8 0 1 0 2 6' fill='none' stroke='black' stroke-width='1.6'/%3E%3Cpath d='M14 3l5 4-6 2z' fill='black' stroke='white' stroke-width='.8'/%3E%3C/svg%3E") 12 12, grab`;
 
 export function startEditing(): void {
@@ -105,6 +109,7 @@ export function startEditing(): void {
     html.ol-edit, html.ol-edit body { touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
     html.ol-edit [data-ol-editing], html.ol-edit [data-ol-editing] * { -webkit-user-select: text; user-select: text; }
     html.ol-tool-draw, html.ol-tool-draw * { cursor: crosshair !important; }
+    html.ol-tool-erase, html.ol-tool-erase * { cursor: ${ERASER_CURSOR} !important; }
     html.ol-dragging, html.ol-dragging * { user-select: none !important; }
     html.ol-over-obj, html.ol-over-obj * { cursor: ${MOVE_CURSOR} !important; }
     html.ol-edit a { cursor: default; }
@@ -153,11 +158,15 @@ export function setScale(s: number, anchor?: { docY: number; screenY: number }):
   redrawCrop();
   redrawNodes();
 }
-export function setTool(t: Tool): void {
+export function setTool(t: Tool, style?: InkStyle): void {
   tool = t;
-  document.documentElement.classList.toggle('ol-tool-draw', t !== 'select');
+  if (style) ink = style;
+  document.documentElement.classList.toggle('ol-tool-draw', t !== 'select' && t !== 'eraser');
+  document.documentElement.classList.toggle('ol-tool-erase', t === 'eraser');
   if (t !== 'bezier') penCancel();
   if (t !== 'select') { stopText(); if (isCropping()) endCrop(true); endNodes(); }
+  // drawing: stroke after stroke on top of the slide, nothing selected in between (GoodNotes)
+  if ((t === 'pen' || t === 'eraser') && selected.length) { selected = []; report(); draw(); }
 }
 
 /* ------------------------------------------------------------------ crop (runtime/crop.ts: modal while it lasts) */
@@ -742,7 +751,10 @@ export function draw(): void {
   if (dropBox) parts.push(`<div class="drop" style="left:${dropBox.x}px;top:${dropBox.y}px;width:${dropBox.w}px;height:${dropBox.h}px;border-width:${3 / scale}px"></div>`);
   if (drag && (drag.kind === 'pen' || ((drag.kind === 'draw') && (tool === 'line' || tool === 'arrow'))) && drag.pts && drag.moved) {
     const d = drag.kind === 'pen' ? smoothPath(drag.pts) : `M${drag.pts[0][0]} ${drag.pts[0][1]}L${drag.pts[drag.pts.length - 1][0]} ${drag.pts[drag.pts.length - 1][1]}`;
-    parts.push(`<svg class="ink" width="1" height="1"><path d="${d}" fill="none" stroke="#2f6fde" stroke-width="${3 / scale}" stroke-linecap="round" stroke-linejoin="round"/></svg>`);
+    // the pen's stroke in its ink (slide px → page px), a line in the selection's blue
+    const k = drag.kind === 'pen' && drag.slide && drag.slide.offsetWidth ? docRect(drag.slide).w / drag.slide.offsetWidth : 1;
+    const paint = drag.kind === 'pen' ? `stroke="${esc(ink.color)}" stroke-width="${ink.width * k}" stroke-opacity="${ink.opacity}"` : `stroke="#2f6fde" stroke-width="${3 / scale}"`;
+    parts.push(`<svg class="ink" width="1" height="1"><path d="${d}" fill="none" ${paint} stroke-linecap="round" stroke-linejoin="round"/></svg>`);
   }
   // the comment pins over everything (they are pressed)
   parts.push(rv.pins);
@@ -820,7 +832,9 @@ interface DragEl {
   members?: DragEl[];
 }
 interface Drag {
-  kind: 'move' | 'resize' | 'rotate' | 'end' | 'draw' | 'pen' | 'marquee' | 'pan';
+  kind: 'move' | 'resize' | 'rotate' | 'end' | 'draw' | 'pen' | 'erase' | 'marquee' | 'pan';
+  /** the eraser's strokes so far (hidden until the release removes them) */
+  erased?: Element[];
   x0: number; y0: number;
   els: DragEl[];
   handle?: string;
@@ -883,6 +897,12 @@ function onPointerDown(e: PointerEvent): void {
   grab(e);
   const x = e.pageX, y = e.pageY;
   const base = { x0: x, y0: y, els: [], moved: false, pointerId: e.pointerId, pointerType: e.pointerType, last: { x: e.clientX, y: e.clientY } };
+  if (tool === 'eraser') {
+    drag = { ...base, kind: 'erase', slide: slideOf(t), erased: [] };
+    eraseAt(e, drag);
+    capture();
+    return;
+  }
   if (tool !== 'select') {
     const slide = slideOf(t);
     drag = { ...base, kind: tool === 'pen' ? 'pen' : 'draw', slide, pts: [[x, y]] };
@@ -1053,6 +1073,7 @@ function snap(r: Rect, skip: Set<Element>, slide: HTMLElement | null, axisMoves:
 function onDragMove(e: PointerEvent): void {
   if (!drag || (drag.pointerId !== undefined && e.pointerId !== drag.pointerId)) return;
   if (pinch) return;
+  if (drag.kind === 'erase') { eraseAt(e, drag); return; }
   const dx = e.pageX - drag.x0, dy = e.pageY - drag.y0;
   if (!drag.moved && Math.hypot(dx, dy) * scale < (drag.pointerType === 'touch' ? 6 : 3)) return;
   if (!drag.moved) {
@@ -1221,6 +1242,14 @@ function onDragEnd(e: PointerEvent): void {
     // a tap on nothing: the selection goes
     if (!d.moved && !e.shiftKey) { selected = []; report(); }
     draw();
+    return;
+  }
+  if (d.kind === 'erase') {
+    const gone = d.erased ?? [];
+    if (e.type === 'pointercancel' || state.version === null) { for (const el of gone) (el as HTMLElement | SVGElement).style.visibility = ''; return; }
+    // one change for the whole rub (one undo brings them all back)
+    const paths = gone.map(pathOf).filter((p): p is Path => !!p);
+    if (paths.length) commit([{ t: 'remove', paths }]);
     return;
   }
   if (e.type === 'pointercancel') { for (const x of d.els) revertLive(x); drawBox = null; draw(); return; }
@@ -1496,6 +1525,27 @@ export function slidePoint(slide: HTMLElement, x: number, y: number): [number, n
 }
 
 /* ------------------------------------------------------------------ drawing new objects */
+
+/**
+ * The eraser (Draw): the hand-drawn strokes under the pointer, a few screen px around it, go —
+ * hidden at once, removed on the release. Only strokes (open paths without a fill: the pen's, the
+ * highlighter's, an open Bézier path), as GoodNotes' eraser takes whole strokes; their painted line is
+ * what it must touch, not their box.
+ */
+function eraseAt(e: PointerEvent, d: Drag): void {
+  const rad = 7 / scale;
+  const pts: [number, number][] = [[0, 0]];
+  for (let i = 0; i < 8; i++) pts.push([Math.cos(i * Math.PI / 4) * rad, Math.sin(i * Math.PI / 4) * rad]);
+  for (const [dx, dy] of pts) {
+    for (const hit of document.elementsFromPoint(e.clientX + dx, e.clientY + dy)) {
+      if (!(hit instanceof SVGGeometryElement) || hit.localName === 'svg') continue;
+      const obj = objectFor(hit, false);
+      if (!obj || d.erased!.includes(obj) || isLocked(obj) || !isStrokeArt(obj)) continue;
+      (obj as HTMLElement | SVGElement).style.visibility = 'hidden';
+      d.erased!.push(obj);
+    }
+  }
+}
 
 function finishDraw(d: Drag, box: Rect | null, e: PointerEvent): void {
   if (state.version === null) return;

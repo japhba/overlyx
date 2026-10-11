@@ -6,7 +6,8 @@
  * flip, the rotation handle, new shapes and a line
  * drawn backwards, an SVG dropped in (inline, sanitised, its shapes editable), a crop preset, the
  * canvas's checkerboard from its right-click menu, "Back to the slide" when zoomed in, and moving a
- * text box with a finger on a touch screen (the ⌖ select tool). What lands in index.html each time.
+ * text box with a finger on a touch screen (the ⌖ select tool), Draw (pen, highlighter, eraser), the
+ * rail and the notes folded away. What lands in index.html each time.
  * Needs the seeded admin.
  */
 import { test, expect, type Page, type Frame } from '@playwright/test';
@@ -336,6 +337,60 @@ test('new shapes, a line drawn backwards, an SVG dropped in and a crop preset', 
   await page.locator('[data-tb="dk-cropshape"]').click();
   await page.locator('[data-palette="dk-cropshape"] .tb-pal-item', { hasText: 'Square 1:1' }).click();
   await expect.poll(fileText, { timeout: 15000 }).toContain('class="ol-crop"');
+  expect(real(errors)).toEqual([]);
+});
+
+test('Draw: strokes one after the other in the pen\'s colour, the highlighter, the eraser; the rail and the notes fold away', async ({ page }) => {
+  const errors = collectErrors(page);
+  await login(page);
+  await setup(page);
+  const strokes = () => (fileText().match(/<path d="[^"]*" fill="none" stroke="#/g) ?? []).length;
+  const stroke = async (x0: number, y0: number, x1: number, y1: number) => {
+    const a = await at(page, x0, y0), b = await at(page, x1, y1);
+    await page.mouse.move(a.x, a.y); await page.mouse.down(); await page.mouse.move(b.x, b.y, { steps: 12 }); await page.mouse.up();
+  };
+  // Draw: its own row — pen, highlighter, eraser, the colours and widths
+  await page.locator('[data-tb="dk-draw"]').click();
+  await expect(page.locator('[data-tb="dk-ink-pen"]')).toBeVisible();
+  await stroke(100, 600, 400, 640);
+  await expect.poll(strokes, { timeout: 15000 }).toBe(1);
+  // the pen stays in hand (the stroke is not selected): the next one, red
+  await page.locator('[data-tb="dk-ink-c2"]').click();
+  await stroke(100, 680, 400, 690);
+  await expect.poll(fileText, { timeout: 15000 }).toContain('stroke="#d93025"');
+  expect(strokes()).toBe(2);
+  await expect(page.locator('[data-tb="dk-draw"]')).toHaveClass(/active/);
+  // the highlighter over the title: translucent, multiplied over the text
+  await page.locator('[data-tb="dk-ink-hl"]').click();
+  await stroke(100, 140, 700, 140);
+  await expect.poll(fileText, { timeout: 15000 }).toContain('mix-blend-mode: multiply');
+  expect(strokes()).toBe(3);
+  // the eraser across the two pen strokes: both go, the highlighter and the shapes stay; one undo brings both back
+  await page.locator('[data-tb="dk-ink-eraser"]').click();
+  await stroke(250, 570, 250, 720);
+  await expect.poll(strokes, { timeout: 15000 }).toBe(1);
+  expect(fileText()).toContain('mix-blend-mode: multiply');
+  expect(fileText()).toContain('id="a"');
+  await page.keyboard.press('Control+z');
+  await expect.poll(strokes, { timeout: 15000 }).toBe(3);
+  // Esc puts the pen away
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[data-tb="dk-ink-pen"]')).toHaveCount(0);
+  await expect(page.locator('[data-tb="dk-draw"]')).not.toHaveClass(/active/);
+
+  // the slide rail and the speaker notes fold away, stay so after a reload, and come back
+  await page.locator('[data-dl-rail-hide]').click();
+  await expect(page.locator('.dl-railframe')).toHaveCount(0);
+  await page.locator('[data-dl-notes-hide]').click();
+  await expect(page.locator('[data-dl-notes]')).toHaveCount(0);
+  await page.reload();
+  await slides(page).first().waitFor({ timeout: 30000 });
+  await expect(page.locator('[data-dl-rail-show]')).toBeVisible();
+  await expect(page.locator('[data-dl-notes-show]')).toBeVisible();
+  await page.locator('[data-dl-rail-show]').click();
+  await expect(page.frameLocator('.dl-railframe').locator('section.slide')).toHaveCount(2);
+  await page.locator('[data-dl-notes-show]').click();
+  await expect(page.locator('[data-dl-notes]')).toBeVisible();
   expect(real(errors)).toEqual([]);
 });
 

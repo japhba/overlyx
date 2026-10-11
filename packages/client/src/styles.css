@@ -2531,6 +2531,14 @@ html[data-theme="dark"] .lyx-par[data-layout="FrameTitle"] { color: #9d9dff; }
 .dl-body { flex: 1; display: flex; min-height: 0; }
 .dl-rail { width: 170px; flex: none; position: relative; overflow: hidden; border-right: 1px solid var(--ui-border); background: var(--ui-bg); display: flex; flex-direction: column; }
 .dl-railframe { position: absolute; left: 8px; top: 0; border: 0; transform-origin: 0 0; background: transparent; }
+/* the rail's header (which slide of how many, « hides the rail) and the rail folded to a strip (» Slides) */
+.dl-rail-head { position: absolute; left: 0; right: 0; top: 0; height: 28px; display: flex; align-items: center; justify-content: space-between; gap: 4px; padding: 0 4px 0 10px; box-sizing: border-box; font-size: 11.5px; color: var(--ui-muted); z-index: 2; }
+.dl-rail-count { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dl-rail-hide { flex: none; min-width: 24px; height: 22px; padding: 0 4px; color: var(--ui-muted); }
+.dl-rail.folded { width: 28px; }
+.dl-rail-show { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 6px 0; border: 0; background: transparent; color: var(--ui-muted); font: inherit; font-size: 12px; cursor: pointer; }
+.dl-rail-show:hover { background: var(--ui-hover); color: var(--ui-fg); }
+.dl-rail-show-label { writing-mode: vertical-rl; letter-spacing: .03em; white-space: nowrap; }
 .dl-rail-actions { position: absolute; left: 0; right: 0; bottom: 0; padding: 6px; display: flex; justify-content: center; background: linear-gradient(transparent, var(--ui-bg) 40%); }
 /* the rail's right edge: dragged sideways, the slides get wider or narrower */
 .dl-rail-grip { position: absolute; top: 0; right: 0; bottom: 0; width: 7px; z-index: 3; cursor: col-resize; touch-action: none; }
@@ -2563,14 +2571,20 @@ html[data-theme="dark"] .lyx-par[data-layout="FrameTitle"] { color: #9d9dff; }
 .dl-quick .toolbar { background: none; border: 0; padding: 0; flex-wrap: nowrap; }
 .dl-ctx-secs > .toolbar + .toolbar { margin-left: 6px; padding-left: 6px; border-left: 1px solid var(--ui-border); }
 .dl-ctx-secs .tb-label { white-space: nowrap; }
-.dl-notes { flex: none; height: 74px; border-top: 1px solid var(--ui-border); background: var(--surface); }
+.dl-notes { flex: none; height: 74px; border-top: 1px solid var(--ui-border); background: var(--surface); position: relative; }
+/* ▾ hides the speaker notes; hidden, a strip under the canvas brings them back (with the first line of the slide's notes) */
+.dl-notes-hide { position: absolute; top: 4px; right: 8px; min-width: 22px; height: 22px; padding: 0 4px; color: var(--ui-muted); font-size: 12px; }
+.dl-notes textarea { padding-right: 36px; }
+.dl-notes-show { flex: none; display: block; width: 100%; height: 24px; padding: 0 12px; border: 0; border-top: 1px solid var(--ui-border); background: var(--surface); color: var(--ui-muted); font: 12px/24px var(--ui-font); text-align: left; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dl-notes-show:hover { color: var(--ui-fg); background: var(--ui-hover); }
+.dl-notes-peek { opacity: .8; }
 .dl-notes textarea { width: 100%; height: 100%; box-sizing: border-box; border: 0; resize: none; padding: 8px 12px; font: 13px/1.4 var(--ui-font); background: transparent; color: var(--ui-fg); outline: none; }
 .dl-code { width: min(46%, 640px); flex: none; display: flex; flex-direction: column; border-left: 1px solid var(--ui-border); background: var(--surface); }
 .dl-code-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 6px 2px 10px; font-size: 12px; color: var(--ui-muted); border-bottom: 1px solid var(--ui-border); }
 .dl-code textarea { flex: 1; border: 0; resize: none; padding: 8px 10px; font: 12.5px/18px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--code-bg); color: var(--editor-fg); outline: none; white-space: pre; tab-size: 2; }
 .dl-presenting { position: fixed; inset: 0; z-index: 10000; background: #000; }
 .dl-presenting iframe { width: 100%; height: 100%; border: 0; }
-@media (max-width: 700px) { .dl-rail { display: none; } .dl-code { width: 100%; position: absolute; inset: 34px 0 0 0; z-index: 5; } }
+@media (max-width: 700px) { .dl-code { width: 100%; position: absolute; inset: 34px 0 0 0; z-index: 5; } }
 .ol-newkinds { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 10px 0 14px; }
 .ol-newkind { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 8px; border: 1px solid var(--ui-border); border-radius: 8px; background: var(--surface); color: inherit; font: inherit; cursor: pointer; }
 .ol-newkind.active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-border); }

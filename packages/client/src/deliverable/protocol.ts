@@ -15,8 +15,15 @@ import type { MathJaxMacro } from '@overlyx/core/html/deckextras.ts';
 export type { HtmlOp, Path };
 
 export type DeliverableKind = 'deck' | 'poster' | 'page';
-/** `references`: a list of the works cited (an element of class ol-bibliography, runtime/cite.ts) */
-export type Tool = 'select' | 'text' | 'rect' | 'roundrect' | 'ellipse' | 'triangle' | 'diamond' | 'star' | 'hexagon' | 'line' | 'arrow' | 'pen' | 'bezier' | 'formula' | 'references';
+/**
+ * `references`: a list of the works cited (an element of class ol-bibliography, runtime/cite.ts);
+ * `pen`: Draw — freehand strokes in the pen's or the highlighter's ink (InkStyle), one after the
+ * other; `eraser`: removes the strokes it passes over
+ */
+export type Tool = 'select' | 'text' | 'rect' | 'roundrect' | 'ellipse' | 'triangle' | 'diamond' | 'star' | 'hexagon' | 'line' | 'arrow' | 'pen' | 'eraser' | 'bezier' | 'formula' | 'references';
+
+/** the ink a stroke is drawn in (Draw): colour, width in slide px, opacity (the highlighter's < 1, laid over what is under it as a highlighter is) */
+export interface InkStyle { color: string; width: number; opacity: number }
 
 /** what kind of object the toolbar is showing tools for */
 export type ObjKind = 'text' | 'shape' | 'line' | 'image' | 'svg' | 'svgpart' | 'group' | 'formula' | 'other';
@@ -160,7 +167,7 @@ export type ToRuntime =
   | { ol: 'stopText' }
   | { ol: 'scrollTo'; slide: number; smooth?: boolean }
   | { ol: 'scale'; scale: number; anchor?: { docY: number; screenY: number } }
-  | { ol: 'tool'; tool: Tool }
+  | { ol: 'tool'; tool: Tool; ink?: InkStyle }
   | { ol: 'exec'; command: string; value?: string }
   | { ol: 'go'; slide: number }
   | { ol: 'peers'; peers: { paths: Path[]; color: string; name: string }[] }

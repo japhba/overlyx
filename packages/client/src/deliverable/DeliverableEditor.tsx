@@ -25,6 +25,7 @@ import { isFromRuntime } from './protocol';
 import { rebasedSplices, objectHtml, imageHtml, insertPlace, newSlideHtml, slidePaths, slideNotes, notesOp, sourceRange, inlineSvgHtml } from './sourceops';
 import { sizePt, stepPt } from './units';
 import { deckToolbar, quickGroups, type DeckTextActions } from './decktoolbar';
+import { loadDeckInk, saveDeckInk, patchDeckInk, deckInkStyle, type DeckInk, type DeckInkPatch } from './deckink';
 import { QuickBar } from './QuickBar';
 import { BgRemoveDialog } from './BgRemoveDialog';
 import { MathOverlay, type MathEditState, type MathOps } from './MathOverlay';
@@ -48,6 +49,16 @@ import { EditModeSwitch, type EditMode } from '../app/EditModeSwitch';
 const PAD = 48;
 /** the slide rail's width: by default, and as far as its edge can be dragged */
 const RAIL_W = 170, RAIL_MIN = 110, RAIL_MAX = 480;
+/** the rail's header (which slide of how many, «): the thumbnails' frame starts under it */
+const RAIL_HEAD = 28;
+/** the slide rail and the speaker notes, shown or hidden (this browser's; a narrow screen starts without the rail) */
+function loadShown(key: string, narrowHides: boolean): boolean {
+  try { const v = localStorage.getItem(key); if (v !== null) return v === '1'; } catch { /* private window */ }
+  return !(narrowHides && typeof innerWidth === 'number' && innerWidth < 700);
+}
+function saveShown(key: string, on: boolean): void {
+  try { localStorage.setItem(key, on ? '1' : '0'); } catch { /* private window */ }
+}
 function loadRailW(): number {
   try { const v = Number(localStorage.getItem('ol.deckRail')); return v >= RAIL_MIN && v <= RAIL_MAX ? v : RAIL_W; } catch { return RAIL_W; }
 }
@@ -148,6 +159,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   /** a deck's or poster's one slide on the canvas (runtime solo.ts): the frame is sized to it and panned here (viewport.ts) */
   const [solo, setSolo] = useState<Solo | null>(null);
   const [pageW, setPageW] = useState(1280);
+  const pageWRef = useRef(pageW); pageWRef.current = pageW;
   const [pageH, setPageH] = useState(0);
   const [railW, setRailW] = useState(loadRailW);
   const [box, setBox] = useState({ w: 800, h: 600 });
@@ -201,6 +213,15 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   const [nodeEd, setNodeEd] = useState<{ selected: number; total: number } | null>(null);
   const nodeEdRef = useRef(false); nodeEdRef.current = !!nodeEd;
   const [tool, setToolState] = useState<Tool>('select');
+  /** Draw: the pen's and the highlighter's presets, which of them is in hand (deckink.ts) */
+  const [ink, setInkState] = useState<DeckInk>(loadDeckInk);
+  const inkRef = useRef(ink); inkRef.current = ink;
+  const setInk = (p: DeckInkPatch) => { const v = patchDeckInk(inkRef.current, p); inkRef.current = v; setInkState(v); saveDeckInk(v); };
+  /** the slide rail and the speaker notes, hidden or not (their « / ▾ buttons) */
+  const [railShown, setRailShownState] = useState(() => loadShown('ol.deckSlides', true));
+  const [notesShown, setNotesShownState] = useState(() => loadShown('ol.deckNotes', false));
+  const setRailShown = (on: boolean) => { setRailShownState(on); saveShown('ol.deckSlides', on); };
+  const setNotesShown = (on: boolean) => { setNotesShownState(on); saveShown('ol.deckNotes', on); };
   const [codeOpen, setCodeOpen] = useState(false);
   // the Animation pane (open or not: this browser's) and the sequence of the slide it shows (runtime/animate.ts)
   const [animOpen, setAnimOpen] = useState(() => { try { return localStorage.getItem('ol.animPane') === '1'; } catch { return false; } });
@@ -220,6 +241,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     : Math.max(0.05, Math.min(kind === 'page' ? 1 : 2, (box.w - 24) / frameW));
   const scale = fit * zoom;
   const showRail = kind === 'deck';
+  const railOpen = showRail && railShown;
   const railScale = Math.max(0.05, (railW - 20) / frameW);
 
   const toFrame = (f: HTMLIFrameElement | null, msg: ToRuntime) => { try { f?.contentWindow?.postMessage(msg, '*'); } catch { /* gone */ } };
@@ -451,7 +473,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
             if (m.height) setPageH(m.height);
             setSolo(m.solo ?? null);
             toCanvas({ ol: 'scale', scale });
-            toCanvas({ ol: 'tool', tool });
+            toCanvas({ ol: 'tool', tool, ink: deckInkStyle(inkRef.current, pageWRef.current) });
             toCanvas({ ol: 'view', view: viewRef.current });
             toCanvas(reviewMsgRef.current());
             if (host.ready()) toCanvas({ ol: 'source', version: version.current, html: versions.current.get(version.current) ?? text.toString() });
@@ -573,7 +595,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
       const b = canvasBox.current;
       if (b) setBox({ w: b.clientWidth, h: b.clientHeight });
       const rb = railBox.current;
-      if (rb) setRailH(rb.clientHeight);
+      if (rb) setRailH(Math.max(0, rb.clientHeight - RAIL_HEAD));
     });
     if (canvasBox.current) ro.observe(canvasBox.current);
     if (railBox.current) ro.observe(railBox.current);
@@ -597,7 +619,10 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   useLayoutEffect(() => { if (soloOn) slideView.refit(); }, [box.w, box.h, solo?.rect.w, solo?.rect.h]);
   useEffect(() => { toRail({ ol: 'scale', scale: railScale }); }, [railScale]);
   // (the Bézier pen takes Enter / Esc / Backspace: the keyboard goes to the canvas)
-  useEffect(() => { toCanvas({ ol: 'tool', tool }); if (tool === 'bezier') canvasFrame.current?.focus(); }, [tool]);
+  const inkStyle = deckInkStyle(ink, pageW);
+  useEffect(() => { toCanvas({ ol: 'tool', tool, ink: inkStyle }); if (tool === 'bezier') canvasFrame.current?.focus(); }, [tool, inkStyle.color, inkStyle.width, inkStyle.opacity]);
+  // the rail folded away: its frame goes, and says it is ready again when it comes back
+  useEffect(() => { if (!railOpen) railReady.current = false; }, [railOpen]);
 
   const MAX_ZOOM = 8;
   const zoomRef = useRef(zoom); zoomRef.current = zoom;
@@ -683,17 +708,19 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   const setTool = (t: Tool) => { setToolState(t); };
 
   const onDraw = (v: number, t: Tool, slide: Path | null, rect: Rect, after: Path | null, pts?: [number, number][], bez?: { d: string; closed: boolean }) => {
-    setToolState('select');
+    // Draw: the pen stays in hand and the stroke is not selected — the next one follows (GoodNotes)
+    const drawing = t === 'pen';
+    if (!drawing) setToolState('select');
     if (readOnlyRef.current) return;
     if (versions.current.get(v) === undefined) return;
     const cur = text.toString();
     const k = kindRef.current;
     const place = insertPlace(cur, slide, after, k);
     if (!place) return;
-    const html = objectHtml(t, rect, k, pageW / 1280, pts, bez);
+    const html = objectHtml(t, rect, k, pageW / 1280, pts, bez, drawing ? deckInkStyle(inkRef.current, pageWRef.current) : undefined);
     if (!html) return;
     if (!applyOps([{ t: 'insert', parent: place.parent, index: place.index, html }])) return;
-    pending.current = t === 'formula' ? { editText: place.path, math: true } : t === 'text' ? { editText: place.path } : { select: [place.path] };
+    pending.current = drawing ? null : t === 'formula' ? { editText: place.path, math: true } : t === 'text' ? { editText: place.path } : { select: [place.path] };
     if (t === 'text') {
       textAhead.current = true;
       if (textAheadTimer.current) clearTimeout(textAheadTimer.current);
@@ -1061,7 +1088,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
 
   /* ------------------------------------------------------------- keys */
 
-  // the tools' letters (T text, R rectangle, O ellipse, L line, A arrow, P pen, B curve, V pointer,
+  // the tools' letters (T text, R rectangle, O ellipse, L line, A arrow, P pen, E eraser, B curve, V pointer,
   // N the points of the selection) — but a run of letters is somebody typing, as they would in
   // PowerPoint, where letters are no tools: back to the pointer, and say once how to type on the
   // slide (typing at a selected group switched tools, drew stray lines and opened point editing).
@@ -1079,7 +1106,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
       return true;
     }
     const k = key.toLowerCase();
-    const map: Record<string, Tool> = { t: 'text', r: 'rect', o: 'ellipse', l: 'line', a: 'arrow', p: 'pen', b: 'bezier', v: 'select' };
+    const map: Record<string, Tool> = { t: 'text', r: 'rect', o: 'ellipse', l: 'line', a: 'arrow', p: 'pen', e: 'eraser', b: 'bezier', v: 'select' };
     if (map[k]) { setToolState(map[k]); return true; }
     if (k === 'n' && selRef.current.length) { nodesTimer.current = setTimeout(() => { nodesTimer.current = null; arrangeSel('edit-nodes'); }, 600); return true; }
     return false;
@@ -1261,7 +1288,13 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     const op = notesOp(text.toString(), path, v);
     // (speaker notes are the presenter's: never a suggestion)
     if (op) applyOps([op], true);
+  };  /** the notes folded away: what was being typed is kept first (a removed textarea is not blurred) */
+  const hideNotes = () => {
+    const d = draftRef.current;
+    if (d) { saveNotes(d.text, d.path); setNotesDraftState(null); }
+    setNotesShown(false);
   };
+
   // another slide: what was typed goes to the slide it was typed for
   useEffect(() => {
     const d = draftRef.current;
@@ -1319,6 +1352,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     slideBackground: c => { const sp = slidePaths(text.toString())[currentRef.current]; if (sp) applyOps([{ t: 'style', path: sp, set: { background: c } }]); },
     canvas: { view, set: setView },
     newSlide: () => newSlide(currentRef.current),
+    ink: { presets: ink, set: setInk, draw: on => setToolState(on ? 'pen' : 'select') },
     review: {
       comment: () => toCanvas({ ol: 'newComment' }),
       suggestion: selChange ? { by: selChange.by, summary: selChange.summary, accept: () => resolveChange(selChange, true), reject: () => resolveChange(selChange, false) } : null,
@@ -1407,14 +1441,25 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
       </div>
       <div class="dl-body">
         {showRail && (
-          <div class="dl-rail" ref={railBox} style={{ width: `${railW}px` }}>
-            {link && synced && <iframe ref={railFrame} class="dl-railframe" title="Slides" sandbox="allow-scripts" src={src('thumb')}
-              style={{ width: `${frameW}px`, height: `${railH / railScale}px`, transform: `scale(${railScale})` }} />}
-            <div class="dl-rail-grip" role="separator" aria-orientation="vertical" aria-label="Slide rail width" title="Drag to make the slides wider or narrower (double-click: back to the usual width)"
-              data-dl-railgrip onPointerDown={onRailGrip} onDblClick={() => setRail(RAIL_W)} />
-            <div class="dl-rail-actions">
-              <button class="dl-btn" title="New slide after this one (Ctrl+M)" data-dl-newslide disabled={locked} onClick={() => newSlide(current)}>+ Slide</button>
-            </div>
+          <div class={'dl-rail' + (railShown ? '' : ' folded')} ref={railBox} style={railShown ? { width: `${railW}px` } : undefined}>
+            {railShown ? <>
+              <div class="dl-rail-head">
+                <span class="dl-rail-count" title="The slide shown, of all slides">{slides.length ? `Slide ${current + 1} of ${slides.length}` : 'Slides'}</span>
+                <button class="dl-btn dl-rail-hide" title="Hide the slides (more room for the slide)" aria-label="Hide the slides" data-dl-rail-hide onClick={() => setRailShown(false)}>«</button>
+              </div>
+              {link && synced && <iframe ref={railFrame} class="dl-railframe" title="Slides" sandbox="allow-scripts" src={src('thumb')}
+                style={{ top: `${RAIL_HEAD}px`, width: `${frameW}px`, height: `${railH / railScale}px`, transform: `scale(${railScale})` }} />}
+              <div class="dl-rail-grip" role="separator" aria-orientation="vertical" aria-label="Slide rail width" title="Drag to make the slides wider or narrower (double-click: back to the usual width)"
+                data-dl-railgrip onPointerDown={onRailGrip} onDblClick={() => setRail(RAIL_W)} />
+              <div class="dl-rail-actions">
+                <button class="dl-btn" title="New slide after this one (Ctrl+M)" data-dl-newslide disabled={locked} onClick={() => newSlide(current)}>+ Slide</button>
+              </div>
+            </> : (
+              <button type="button" class="dl-rail-show" title="Show the slides" data-dl-rail-show onClick={() => setRailShown(true)}>
+                <span aria-hidden="true">»</span>
+                <span class="dl-rail-show-label">Slides{slides.length ? ` · ${current + 1} of ${slides.length}` : ''}</span>
+              </button>
+            )}
           </div>
         )}
         <div class="dl-main">
@@ -1454,13 +1499,18 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
               </button>
             )}
           </div>
-          {kind === 'deck' && (
+          {kind === 'deck' && (notesShown ? (
             <div class="dl-notes">
               <textarea placeholder="Speaker notes" value={notesDraft && curSlidePath && notesDraft.path.join() === curSlidePath.join() ? notesDraft.text : notes} disabled={locked || !curSlidePath} data-dl-notes
                 onInput={e => setNotesDraft((e.target as HTMLTextAreaElement).value)}
                 onBlur={e => { const d = draftRef.current; saveNotes((e.target as HTMLTextAreaElement).value, d?.path ?? curSlidePath); setNotesDraftState(null); }} />
+              <button type="button" class="dl-btn dl-notes-hide" title="Hide the speaker notes" aria-label="Hide the speaker notes" data-dl-notes-hide onMouseDown={e => e.preventDefault()} onClick={hideNotes}>▾</button>
             </div>
-          )}
+          ) : (
+            <button type="button" class="dl-notes-show" title="Show the speaker notes" data-dl-notes-show onClick={() => setNotesShown(true)}>
+              <span aria-hidden="true">▴</span> Speaker notes{notes.trim() ? <span class="dl-notes-peek"> — {notes.trim().split('\n')[0]}</span> : ''}
+            </button>
+          ))}
         </div>
         {animOpen && kind === 'deck' && (
           <AnimationPane seq={seq} sel={sel} readOnly={locked} close={() => toggleAnim(false)}

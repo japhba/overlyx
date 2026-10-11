@@ -13,6 +13,9 @@ import { ColorGrid } from '../app/ColorGrid';
 import type { SelItem, Tool, Paint, ArrangeHow, DeliverableKind, CanvasView, NodeCmd } from './protocol';
 import { ASPECTS } from './runtime/crop';
 import { fmtPt, ptToPx, pxToPt, sizePt, stepPt } from './units';
+import { InkColorPicker } from '../app/InkPickers';
+import { inkColorName } from '../editor/plugins/ink';
+import { DECK_INK_WIDTH_CHOICES, deckInkDot, type DeckInk, type DeckInkPatch } from './deckink';
 import './deckicons';
 
 export interface DeckTextActions {
@@ -70,6 +73,43 @@ export interface DeckCtx {
   nodes: { editing: boolean; selected: number; total: number; cmd(c: NodeCmd): void };
   /** comments and suggestions (ReviewPane): a new comment, the selected object's suggestion to accept or reject */
   review?: { comment(): void; suggestion: { by: string; summary: string; accept(): void; reject(): void } | null };
+  /** Draw: the pen's and the highlighter's presets (deckink.ts); `draw(true)` takes the pen in hand, `draw(false)` puts it away */
+  ink: { presets: DeckInk; set(p: DeckInkPatch): void; draw(on: boolean): void };
+}
+
+/** the Draw row while drawing: pen, highlighter, eraser, then the colours and widths of the pen in hand (the documents' Draw row, inkToolbar.tsx) */
+function drawGroups(c: DeckCtx): ToolButton[][] {
+  const ink = c.ink.presets, pen = ink.pens[ink.pen];
+  const erasing = c.tool === 'eraser';
+  const hl = ink.pen === 'highlighter';
+  const name = hl ? 'Highlighter' : 'Pen';
+  const take = (p: DeckInkPatch) => { c.ink.set(p); if (erasing) c.setTool('pen'); };
+  return [
+    [
+      { id: 'dk-ink-pen', title: 'Pen (P) — with its own colour and width', icon: 'inkpen', active: !erasing && !hl, action: () => take({ pen: 'pen' }) },
+      { id: 'dk-ink-hl', title: 'Highlighter — with its own colour and width; what is under it shows through', icon: 'inkhl', active: !erasing && hl, action: () => take({ pen: 'highlighter' }) },
+      { id: 'dk-ink-eraser', title: 'Eraser (E) — removes the strokes it passes over (drawn ones: shapes and text stay)', icon: 'inkeraser', active: erasing, action: () => c.setTool('eraser') },
+    ],
+    pen.colors.map((col, i) => ({
+      id: 'dk-ink-c' + i, title: `${inkColorName(col)} (${name.toLowerCase()}) — click the selected colour again to change it`, icon: col,
+      html: `<span class="tb-ink-swatch${hl ? ' hl' : ''}" data-color="${col}" style="background:${col}"></span>`,
+      active: !erasing && pen.color === col,
+      action: () => take({ color: col }),
+      paletteWhenActive: true,
+      palette: { title: `${name} colour ${i + 1}`, render: () => <InkColorPicker value={col} pen={ink.pen} onChange={v => take({ slotColor: { idx: i, color: v } })} /> },
+    })),
+    pen.widths.map((w, i) => ({
+      id: 'dk-ink-w' + i, title: `${name} ${fmtPt(pxToPt(w))} pt — click the selected width again to change it`, icon: String(w),
+      html: `<span class="tb-ink-width" data-width="${w}" style="width:${deckInkDot(ink.pen, w)}px;height:${deckInkDot(ink.pen, w)}px"></span>`,
+      active: !erasing && pen.width === w,
+      action: () => take({ width: w }),
+      paletteWhenActive: true,
+      palette: { title: `${name} width ${i + 1}`, list: true, cols: 1, items: DECK_INK_WIDTH_CHOICES[ink.pen].map(v => ({
+        label: `${fmtPt(pxToPt(v))} pt`, html: `<svg viewBox="0 0 40 16" width="40"><path d="M3 8h34" stroke="currentColor" stroke-width="${Math.min(v, 14)}" stroke-linecap="round"${hl ? ' opacity="0.45"' : ''}/></svg>`,
+        active: v === w, action: () => take({ slotWidth: { idx: i, width: v } }) })) },
+    })),
+    [{ id: 'dk-draw-done', title: 'Done drawing (Esc or V)', icon: 'Done', active: true, action: () => c.ink.draw(false) }],
+  ];
 }
 
 /** the node editor's row: Inkscape's node toolbar */
@@ -178,7 +218,8 @@ const SHAPES: { tool: Tool; label: string }[] = [
   { tool: 'rect', label: 'Rectangle' }, { tool: 'roundrect', label: 'Rounded rectangle' }, { tool: 'ellipse', label: 'Ellipse' },
   { tool: 'triangle', label: 'Triangle' }, { tool: 'diamond', label: 'Diamond' }, { tool: 'star', label: 'Star' }, { tool: 'hexagon', label: 'Hexagon' },
 ];
-const LINES: { tool: Tool; label: string }[] = [{ tool: 'line', label: 'Line' }, { tool: 'arrow', label: 'Arrow' }, { tool: 'pen', label: 'Scribble (pen)' }, { tool: 'bezier', label: 'Path: click for corners, drag for curves (B)' }];
+// (freehand strokes: Draw, a tool of its own)
+const LINES: { tool: Tool; label: string }[] = [{ tool: 'line', label: 'Line' }, { tool: 'arrow', label: 'Arrow' }, { tool: 'bezier', label: 'Path: click for corners, drag for curves (B)' }];
 
 const firstFamily = (css: string) => css.split(',')[0].trim().replace(/^["']|["']$/g, '');
 
@@ -246,6 +287,7 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
   const one = sel.length === 1 ? sel[0] : null;
   const shapeTool = SHAPES.find(s => s.tool === c.tool);
   const lineTool = LINES.find(s => s.tool === c.tool);
+  const drawing = c.tool === 'pen' || c.tool === 'eraser';
 
   const tools: ToolButton[][] = [
     [
@@ -257,8 +299,9 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
       { id: 'dk-text', title: 'Text box (T) — click or drag on the slide', icon: 'dk-text', action: () => c.setTool('text'), active: c.tool === 'text', disabled: ro },
       { id: 'dk-shapes', title: 'Shapes (R rectangle, O ellipse)', icon: shapeTool ? `dk-${shapeTool.tool}` : 'dk-shapes', active: !!shapeTool, disabled: ro,
         palette: { title: 'Shapes', cols: 4, items: SHAPES.map(s => ({ label: s.label, html: ICON(`dk-${s.tool}`), active: c.tool === s.tool, action: () => c.setTool(s.tool) })) } },
-      { id: 'dk-lines', title: 'Lines (L line, A arrow, P pen, B Bézier path)', icon: lineTool ? `dk-${lineTool.tool}` : 'dk-line', active: !!lineTool, disabled: ro,
+      { id: 'dk-lines', title: 'Lines (L line, A arrow, B Bézier path)', icon: lineTool ? `dk-${lineTool.tool}` : 'dk-line', active: !!lineTool, disabled: ro,
         palette: { title: 'Lines', cols: 4, items: LINES.map(s => ({ label: s.label, html: ICON(`dk-${s.tool}`), active: c.tool === s.tool, action: () => c.setTool(s.tool) })) } },
+      { id: 'dk-draw', title: drawing ? 'Done drawing (Esc)' : 'Draw (P) — pen, highlighter and eraser, stroke after stroke until Esc', icon: 'dk-draw', active: drawing, disabled: ro, action: () => c.ink.draw(!drawing) },
       { id: 'dk-image', title: 'Picture… (or drop a picture or an SVG on the slide)', icon: 'dk-image', action: c.insertImage, disabled: ro },
       { id: 'dk-formula', title: c.editingText ? 'Formula here, in the text (Ctrl+M or $; Ctrl+Shift+M displayed)' : 'Formula — click or drag on the slide; while typing a text, Ctrl+M or $ puts one in it', icon: 'dk-formula',
         action: () => { if (c.editingText) c.math.insert(false); else c.setTool('formula'); }, active: c.tool === 'formula' || c.math.editing, disabled: ro },
@@ -272,6 +315,7 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
   if (ro) return { tools, context: [], sections: [] };
   if (c.math.editing) { const g = mathGroups(c); return { tools, context: g, sections: [{ label: 'Formula', groups: g }] }; }
   if (c.nodes.editing) { const g = nodeGroups(c); return { tools, context: g, sections: [{ label: 'Points', groups: g }] }; }
+  if (drawing) { const g = drawGroups(c); return { tools, context: g, sections: [{ label: 'Draw', groups: g }] }; }
   const sections: ToolSection[] = [];
   let context: ToolButton[][] = [];
   // the selected object's suggestion: accepted or rejected here, before its own tools

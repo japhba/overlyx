@@ -62,7 +62,7 @@ export const MODERN_ICONS: Record<string, string> = {
   'dk-radius': N(SquareRoundCorner), 'dk-opacity': N(Blend), 'dk-shadow': N(Layers), 'dk-arrange': N(BringToFront),
   'dk-lock': N(Lock), 'dk-delete': N(Trash), 'dk-crop': N(Crop), 'dk-cropshape': N(Scan), 'dk-nobg': N(WandSparkles),
   'dk-replace': N(Replace), 'dk-bg': N(PaintBucket), 'dk-canvas': N(Grid2x2), 'dk-undo': N(Undo2), 'dk-redo': N(Redo2),
-  'dk-cropaspect': N(SquareDashed), 'dk-highlight': N(Highlighter), 'dk-fill': N(Droplet), 'dk-pen': N(PencilLine),
+  'dk-cropaspect': N(SquareDashed), 'dk-highlight': N(Highlighter), 'dk-fill': N(Droplet), 'dk-pen': N(PencilLine), 'dk-draw': N(Pen), 'dk-ink-pen': N(Pen), 'dk-ink-hl': N(Highlighter), 'dk-ink-eraser': N(Eraser),
   'dk-duplicate': N(Copy), 'dk-present': N(Presentation), 'dk-code': N(FileCode),
   // LaTeX on slides: the list of references, steps (beamer's overlays)
   'dk-references': N(LibraryBig), 'dk-step': N(GalleryVerticalEnd),

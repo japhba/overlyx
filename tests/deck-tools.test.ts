@@ -1,12 +1,13 @@
 // @vitest-environment happy-dom
 /**
  * The deck canvas's new objects and edits as text (deliverable/sourceops.ts, core html/source.ts):
- * the shapes the toolbar draws, a line keeping the direction it was drawn in, the pen's stroke, an
- * SVG file made a safe inline drawing (inlineSvgHtml), and the `reorder` operation behind
+ * the shapes the toolbar draws, a line keeping the direction it was drawn in, the pen's stroke (in
+ * Draw's ink: deckink.ts), an SVG file made a safe inline drawing (inlineSvgHtml), and the `reorder` operation behind
  * Arrange ▸ order (the text between the elements stays put, nothing else of the file changes).
  */
 import { describe, it, expect } from 'vitest';
 import { objectHtml, inlineSvgHtml, penPathD } from '../packages/client/src/deliverable/sourceops.ts';
+import { loadDeckInk, saveDeckInk, patchDeckInk, deckInkStyle, defaultDeckInk } from '../packages/client/src/deliverable/deckink.ts';
 import { applyOp, opSplices, parseSource, rebaseOp } from '../packages/core/src/html/source.ts';
 
 describe('objects drawn on a slide', () => {
@@ -34,6 +35,52 @@ describe('objects drawn on a slide', () => {
     expect(html).toContain('left: 100px; top: 50px; width: 20px; height: 10px');
     expect(html).toContain('<path d="M0 0Q10 10 15 5L20 0" fill="none"');
     expect(objectHtml('pen', { x: 0, y: 0, w: 0, h: 0 }, 'deck', 1, [[1, 1]])).toBe('');
+  });
+
+  it("Draw's strokes are in the pen's ink; the highlighter's translucent and multiplied over what is under it", () => {
+    const pts: [number, number][] = [[0, 0], [10, 10], [20, 0]];
+    const pen = objectHtml('pen', { x: 0, y: 0, w: 20, h: 10 }, 'deck', 1, pts, undefined, { color: '#d93025', width: 8, opacity: 1 });
+    expect(pen).toContain('stroke="#d93025" stroke-width="8" stroke-linecap');
+    expect(pen).not.toContain('mix-blend-mode');
+    const hl = objectHtml('pen', { x: 0, y: 0, w: 20, h: 10 }, 'deck', 1, pts, undefined, { color: '#fbbc04', width: 24, opacity: 0.35 });
+    expect(hl).toContain('overflow: visible; mix-blend-mode: multiply"');
+    expect(hl).toContain('stroke="#fbbc04" stroke-width="24" stroke-opacity="0.35"');
+    // a colour that is no colour does not reach the page
+    expect(objectHtml('pen', { x: 0, y: 0, w: 20, h: 10 }, 'deck', 1, pts, undefined, { color: '"><script>', width: 4, opacity: 1 })).toContain('stroke="#1d2433"');
+  });
+});
+
+describe("Draw's pens (deckink.ts)", () => {
+  it('a preset clicked again and changed replaces that preset and is drawn with; the other pen keeps its own', () => {
+    const ink = defaultDeckInk();
+    const a = patchDeckInk(ink, { slotColor: { idx: 1, color: '#123456' } });
+    expect(a.pens.pen.colors[1]).toBe('#123456');
+    expect(a.pens.pen.color).toBe('#123456');
+    expect(ink.pens.pen.colors[1]).not.toBe('#123456');   // (a new object)
+    const b = patchDeckInk(a, { pen: 'highlighter', width: 40 });
+    expect(b.pen).toBe('highlighter');
+    expect(b.pens.highlighter.width).toBe(40);
+    expect(b.pens.pen.color).toBe('#123456');
+    expect(patchDeckInk(b, { slotWidth: { idx: 9, width: 3 } })).toEqual(b);   // no such preset
+  });
+
+  it("the stroke's ink: the highlighter translucent, widths scaled to the page (a poster's as thick, seen whole, as a slide's)", () => {
+    const ink = defaultDeckInk();
+    expect(deckInkStyle(ink)).toEqual({ color: ink.pens.pen.color, width: 4, opacity: 1 });
+    expect(deckInkStyle(ink, 2560).width).toBe(8);
+    expect(deckInkStyle(patchDeckInk(ink, { pen: 'highlighter' })).opacity).toBeLessThan(1);
+  });
+
+  it("is kept in this browser; what is broken in storage is the default's", () => {
+    saveDeckInk(patchDeckInk(defaultDeckInk(), { pen: 'highlighter', color: '#4285f4' }));
+    const back = loadDeckInk();
+    expect(back.pen).toBe('highlighter');
+    expect(back.pens.highlighter.color).toBe('#4285f4');
+    localStorage.setItem('ol.deckInk', JSON.stringify({ pen: 'brush', pens: { pen: { color: 'red', width: -1, colors: [1, 2], widths: 'x' } } }));
+    expect(loadDeckInk()).toEqual(defaultDeckInk());
+    localStorage.setItem('ol.deckInk', '{');
+    expect(loadDeckInk()).toEqual(defaultDeckInk());
+    localStorage.removeItem('ol.deckInk');
   });
 });
 

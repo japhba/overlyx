@@ -21,6 +21,8 @@ Object.assign(ICONS, {
   'dk-line': I('<path d="M2.5 13.5l11-11"/>'),
   'dk-arrow': I('<path d="M2.5 13.5L13 3"/><path d="M8 3h5v5"/>'),
   'dk-pen': I('<path d="M2 14c3-1 2-5 5-6s3 3 7-4"/>'),
+  // Draw: a pen nib over its stroke
+  'dk-draw': I('<path d="M9.5 3.5l3 3-6.2 6.2-3.6.6.6-3.6z"/><path d="M8.3 4.7l3 3"/><path d="M1.8 14.6c1.2-.6 2.2-.4 3.2-.1" stroke-width="1"/>'),
   'dk-bezier': I('<path d="M2.5 13C4 6 10 10 13.5 3"/><path d="M2.5 13l3.2-5.6M13.5 3L9.8 8.8" stroke-width="0.9"/><rect x="1.3" y="11.8" width="2.4" height="2.4" fill="currentColor"/><rect x="12.3" y="1.8" width="2.4" height="2.4" fill="currentColor"/><circle cx="5.7" cy="7.4" r="1"/><circle cx="9.8" cy="8.8" r="1"/>'),
   'dk-nodes': I('<path d="M2.5 12.5C3 6 6 3 13 3.5"/><path d="M3.8 3.2L7 6" stroke-width="0.9"/><path d="M1.2 12.5l1.3-1.3 1.3 1.3-1.3 1.3z" fill="currentColor"/><path d="M11.7 3.5L13 2.2l1.3 1.3L13 4.8z" fill="currentColor"/><circle cx="3.8" cy="3.2" r="1"/><path d="M8 8l2.5 6 1-2.3 2.3-1z" fill="currentColor" stroke-width="0.6"/>'),
   'dk-path': I('<circle cx="6" cy="7" r="4"/><circle cx="10" cy="9" r="4"/>'),

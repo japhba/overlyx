@@ -199,7 +199,7 @@ function onMessage(e: MessageEvent): void {
     case 'stopText': if (MODE === 'edit') edit.stopText(); break;
     case 'scrollTo': if (MODE === 'edit') edit.scrollToSlide(m.slide, m.smooth); else if (MODE === 'thumb') railShow(m.slide); break;
     case 'scale': if (MODE === 'edit') edit.setScale(m.scale, m.anchor); else { railScale = m.scale; drawRail(); } break;
-    case 'tool': if (MODE === 'edit') edit.setTool(m.tool); break;
+    case 'tool': if (MODE === 'edit') edit.setTool(m.tool, m.ink); break;
     case 'exec': if (MODE === 'edit') edit.exec(m.command, m.value); break;
     case 'peers': if (MODE === 'edit') edit.setPeers(m.peers); break;
     case 'current': if (MODE === 'thumb') railShow(m.slide); break;
