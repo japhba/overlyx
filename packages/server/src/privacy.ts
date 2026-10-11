@@ -36,7 +36,7 @@ export function privacyHtml(): string {
     : 'with <b>Help ▸ Report a problem</b> in the app (choose “A question”) — it reaches the operator directly and is not published';
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Privacy · OverLyX</title><link rel="icon" href="/icon.svg">
+<title>Privacy · OverLyX</title><link rel="icon" href="/icon.svg"><link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <style>
 :root{--bg:#fbfaf7;--fg:#1b1b1b;--mute:#5d5d5d;--rule:#e2dfd8;--accent:#c8102e}
 @media (prefers-color-scheme:dark){:root{--bg:#161616;--fg:#ebe9e4;--mute:#a7a49d;--rule:#33312d;--accent:#ff5a6e}}

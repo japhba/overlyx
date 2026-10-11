@@ -41,7 +41,7 @@ function serviceWorker(): Plugin {
       };
       walk(outDir);
       // MathJax's other fonts (assets/mathjax/<font>/, see MATHJAX_ASSETS) are cached once used, not with the shell
-      const precache = files.filter(f => f === '/index.html' || (f.startsWith('/assets/') && (!f.startsWith('/assets/mathjax/') || f.startsWith('/assets/mathjax/newcm/'))) || f === '/manifest.webmanifest' || f === '/icon.svg').sort();
+      const precache = files.filter(f => f === '/index.html' || (f.startsWith('/assets/') && (!f.startsWith('/assets/mathjax/') || f.startsWith('/assets/mathjax/newcm/'))) || f === '/manifest.webmanifest' || f === '/icon.svg' || f === '/apple-touch-icon.png' || /^\/icon-\d+\.png$/.test(f)).sort();
       // … and all of a font's files once it is chosen (the page tells the worker, src/sw.js 'math-font')
       const fonts: Record<string, string[]> = {};
       for (const f of files) { const m = /^\/assets\/mathjax\/([a-z0-9]+)\//.exec(f); if (m && m[1] !== 'newcm') (fonts[m[1]] ??= []).push(f); }
