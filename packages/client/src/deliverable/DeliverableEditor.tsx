@@ -1308,7 +1308,8 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     latex: { link: insertLink, cite: host.docId ? () => setCiteOpen(true) : undefined, reference: pickReference },
     animate: { open: animOpen && kind === 'deck', toggle: () => toggleAnim() },
     nodes: { editing: !!nodeEd, selected: nodeEd?.selected ?? 0, total: nodeEd?.total ?? 0, cmd: cmd => toCanvas({ ol: 'nodes', cmd }) },
-    undo: () => host.undo(), redo: () => host.redo(),
+    // (the text being retyped ends first: its box does not take the undone version while it is retyped)
+    undo: () => { toCanvas({ ol: 'stopText' }); setTimeout(() => host.undo(), 30); }, redo: () => { toCanvas({ ol: 'stopText' }); setTimeout(() => host.redo(), 30); },
     insertImage: () => fileInput.current?.click(),
     text: textActions, paint, arrange: arrangeSel, image: imageTools, remove: removeSel,
     slideBackground: c => { const sp = slidePaths(text.toString())[currentRef.current]; if (sp) applyOps([{ t: 'style', path: sp, set: { background: c } }]); },

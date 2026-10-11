@@ -227,3 +227,55 @@ test('a new comment: the field at the foot of its card writes the first message,
   await expect(card.locator('.inset-action[data-act="reply"]')).toHaveText('Reply');
   expect(errors).toEqual([]);
 });
+
+test.describe('⌘Z on a Mac takes back one word, one formula part, one slide edit at a time', () => {
+  test.beforeEach(async ({ page }) => { await page.addInitScript({ content: "Object.defineProperty(Navigator.prototype, 'platform', { get: () => 'MacIntel' });" }); });
+
+  test('typed words and a formula: one step each; ⌘⇧Z brings them back', async ({ page }) => {
+    const errors = collectErrors(page);
+    writeFileSync(`${DIR}/undo.tex`, texDoc('Second paragraph here.'));
+    await login(page);
+    await page.request.get('/api/projects');
+    await page.goto(`/#/${PROJECT}/undo.tex`);
+    await page.waitForSelector('.lyx-editor .lyx-par', { timeout: 30000 });
+    const par = page.locator('.lyx-editor .lyx-par', { hasText: 'Second paragraph' });
+    const text = async () => (await par.innerText()).replace(/\s+/g, ' ').trim();
+    await par.click(); await page.keyboard.press('End');
+    await page.keyboard.type(' Hello world again.', { delay: 30 });     // one burst, no pauses
+    await expect.poll(text).toBe('Second paragraph here. Hello world again.');
+    await page.keyboard.press('Meta+z');
+    await expect.poll(text).toBe('Second paragraph here. Hello world');
+    await page.keyboard.press('Meta+z');
+    await expect.poll(text).toBe('Second paragraph here. Hello');
+    await page.keyboard.press('Meta+Shift+z');
+    await expect.poll(text).toBe('Second paragraph here. Hello world');
+    await page.keyboard.press('Meta+Shift+z');
+    await expect.poll(text).toBe('Second paragraph here. Hello world again.');
+    // inside a formula: an operator starts a step
+    await page.locator('[data-tb="math"]').first().click();
+    await expect(page.locator('.lm-field.focused')).toHaveCount(1);
+    await page.keyboard.type('a+b+c', { delay: 30 });
+    await page.keyboard.press('Meta+z');
+    await expect(page.locator('.lm-field.focused')).toHaveText(/^\s*𝑎\s*\+\s*𝑏\s*$/);
+    expect(errors).toEqual([]);
+  });
+
+  test('a slide text being retyped: ⌘Z shows the text before', async ({ page }) => {
+    const errors = collectErrors(page);
+    await login(page);
+    await page.goto(`/#/${PROJECT}/talk/index.html`);
+    await slide(page).waitFor({ timeout: 30000 });
+    await page.waitForTimeout(900);
+    await page.locator('[data-tb="dk-select"]').click();
+    const before = fileText();
+    await page.mouse.dblclick(...await at(page, 900, 130));      // the banner's text
+    await page.keyboard.press('End');
+    await page.keyboard.type(' DRAFT', { delay: 30 });
+    await expect.poll(fileText, { timeout: 15000 }).toContain('DRAFT');
+    await page.keyboard.press('Meta+z');
+    await expect.poll(fileText, { timeout: 15000 }).not.toContain('DRAFT');
+    await expect(slide(page).locator('#v')).not.toContainText('DRAFT');
+    expect(fileText()).toBe(before);
+    expect(real(errors)).toEqual([]);
+  });
+});

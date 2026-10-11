@@ -196,6 +196,7 @@ function onMessage(e: MessageEvent): void {
     }
     case 'select': if (MODE === 'edit') edit.selectPaths(m.paths as Path[]); break;
     case 'editText': if (MODE === 'edit') edit.editTextAt(m.path, m.selectAll, m.math); break;
+    case 'stopText': if (MODE === 'edit') edit.stopText(); break;
     case 'scrollTo': if (MODE === 'edit') edit.scrollToSlide(m.slide, m.smooth); else if (MODE === 'thumb') railShow(m.slide); break;
     case 'scale': if (MODE === 'edit') edit.setScale(m.scale, m.anchor); else { railScale = m.scale; drawRail(); } break;
     case 'tool': if (MODE === 'edit') edit.setTool(m.tool); break;

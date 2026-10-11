@@ -1620,7 +1620,9 @@ function onKeyDown(e: KeyboardEvent): void {
       const c = chipBeside(e.key === 'ArrowLeft' ? 'before' : 'after');
       if (c) { e.preventDefault(); openChip(c, null, e.key === 'ArrowLeft' ? 'end' : 'start'); return; }
     }
-    if (mod && /^[zy]$/i.test(e.key)) { e.preventDefault(); commitText(); fwd(e); return; }
+    // undo / redo: the retyping ends first — the box being retyped is kept as it is while new versions
+    // come in (reconcile's guard), so the undone text never showed and ⌘Z seemed to do nothing
+    if (mod && /^[zy]$/i.test(e.key)) { e.preventDefault(); stopText(); fwd(e); return; }
     // link, citation, cross-reference: the editor's dialogs (as in documents: Ctrl+K, Ctrl+Shift+C, Ctrl+Shift+I)
     if (mod && ((!e.shiftKey && e.key.toLowerCase() === 'k') || (e.shiftKey && /^[ci]$/i.test(e.key)))) { e.preventDefault(); commitText(); fwd(e); return; }
     if (mod && /^[bi]$/i.test(e.key)) { e.preventDefault(); exec(e.key.toLowerCase() === 'b' ? 'bold' : 'italic'); return; }

@@ -747,6 +747,8 @@ export class LyxMathField {
       // typing what the suggestion starts with keeps the rest of it on show
       const g = this.ghost;
       keep = !!g && ch !== '\\' && ch !== ' ' && g.startsWith(ch) && g.length > 1;
+      // an operator, relation, script, brace or command starts a new undo step: ⌘Z takes back "+c", not "a+b+c"
+      if (!/[\p{L}\p{N}]/u.test(ch)) this.lastEdit = { kind: '', time: 0 };
       this.snapshot('type');
       const ok = this.cursor.interpretChar(ch);
       if (keep) this.ghost = g!.slice(1).replace(/^\s+/, '');

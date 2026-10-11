@@ -20,6 +20,7 @@ import { openRewriteMath, REWRITE_KEY } from '../ai/rewrite';
 import { openMathLinkBox, openLink, mathLinkUrl, LINK_KEY } from '../links';
 import { applyChangeAttrs } from '../plugins/changes';
 import { FormulaReview } from '../mathconflict';
+import { FORMULA_EDIT } from '../plugins/undogroups';
 import { formulaNodeGrid, convertFormulaToTable } from '../formulatable';
 
 /** Position of a formula that was just inserted by the user and should grab the keyboard once mounted. */
@@ -399,7 +400,7 @@ export class MathInlineView implements NodeView {
     const editClock = this.review.edited(body);
     this.lastLatex = body;
     this.dom.classList.toggle('empty', !body.trim());
-    this.view.dispatch(this.view.state.tr.setNodeMarkup(pos, undefined, { ...cur.attrs, latex: body, editClock }).setMeta('addToHistory', true));
+    this.view.dispatch(this.view.state.tr.setNodeMarkup(pos, undefined, { ...cur.attrs, latex: body, editClock }).setMeta('addToHistory', true).setMeta(FORMULA_EDIT, pos));
   }
   refreshMacros() {
     pump();   // macros may have just arrived: deferred lazy upgrades can proceed
@@ -726,7 +727,7 @@ export class MathDisplayView implements NodeView {
     if (!cur || cur.attrs.latex === latex) return;
     const editClock = this.review.edited(latex);
     this.lastLatex = latex;
-    this.view.dispatch(this.view.state.tr.setNodeMarkup(pos, undefined, { ...cur.attrs, latex, editClock }));
+    this.view.dispatch(this.view.state.tr.setNodeMarkup(pos, undefined, { ...cur.attrs, latex, editClock }).setMeta(FORMULA_EDIT, pos));
     this.renderMeta();
   }
 

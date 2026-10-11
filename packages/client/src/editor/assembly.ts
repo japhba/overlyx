@@ -10,6 +10,7 @@
  * handler added to one shell only is exactly the divergence this file exists to prevent
  * (tests/parity.test.ts checks that neither front end assembles an editor of its own).
  */
+import { undoGroupsPlugin } from './plugins/undogroups';
 import { Plugin, NodeSelection, TextSelection, type EditorState, type Transaction } from 'prosemirror-state';
 import type { EditorView, EditorProps, NodeView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
@@ -121,6 +122,7 @@ export function assemblePlugins(o: AssemblyOptions): Plugin[] {
   return [
     ...o.sync,
     typingAnchorPlugin(),   // typed text joins the Yjs history where it was typed (wraps the ySyncPlugin's PM → Yjs step)
+    undoGroupsPlugin(),     // undo steps per word / kind of edit, not per half-second of activity
     // AI preview / ghost text come first: their Tab / Escape must win over the LyX bindings and table navigation
     aiRewritePlugin(),
     aiCompletePlugin(),

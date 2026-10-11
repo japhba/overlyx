@@ -156,6 +156,8 @@ export type ToRuntime =
   | { ol: 'select'; paths: Path[] }
   /** `math`: its first formula opened in LyX's formula editor at once (a new formula object) */
   | { ol: 'editText'; path: Path; selectAll?: boolean; math?: boolean }
+  /** end the retyping of a text (before an undo from the toolbar: the box being retyped does not take new versions) */
+  | { ol: 'stopText' }
   | { ol: 'scrollTo'; slide: number; smooth?: boolean }
   | { ol: 'scale'; scale: number; anchor?: { docY: number; screenY: number } }
   | { ol: 'tool'; tool: Tool }
