@@ -1647,6 +1647,9 @@ textarea::selection, .dialog pre::selection, .dialog input::selection { backgrou
    (CSS order and flex-grow set inline), a draggable divider between neighbours */
 .editor-column.panes { flex-direction: row; }
 .editor-column.panes > [data-pane] { min-width: 0; min-height: 0; }
+/* the document keeps a readable width when the TeX and PDF panes and a sidebar (Versions, Comments) share a narrow
+   window: they give way first (the WYSIWYG column fell to ~230 px, one word per line) */
+.editor-column.panes > [data-pane="doc"] { min-width: min(400px, 100%); }
 .editor-column.panes > .source-pane.fill { width: auto; height: auto; border-left: 0; }
 .editor-column.panes > .pdf-pane { display: flex; flex-direction: column; background: var(--surface2); }
 .pane-grip { flex: none; width: 7px; margin: 0 -3px; z-index: 6; cursor: col-resize; touch-action: none; position: relative; }

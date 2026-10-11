@@ -33,6 +33,18 @@ function ownInsertionBefore(doc: PMNode, pos: number): Mark | null {
 const UNTRACKED_NODES = new Set(['sketch']);
 
 /**
+ * Comment threads are no part of the text: starting one, writing in it or deleting it is never a
+ * suggestion (as in Google Docs) — a comment made while suggesting came wrapped in a tracked
+ * insertion, which a reviewer then had to accept before the thread was an ordinary one.
+ */
+const isComment = (n: PMNode) => n.type.name === 'inset' && n.attrs.name === 'Note' && n.attrs.arg === 'Comment';
+function inComment(doc: PMNode, pos: number): boolean {
+  const $p = doc.resolve(pos);
+  for (let d = $p.depth; d > 0; d--) if (isComment($p.node(d))) return true;
+  return false;
+}
+
+/**
  * Adds the inserted-mark to what the user inserts while tracking is active: text gets the change
  * mark, an inline node (a pasted formula, a reference, a footnote…) records it in its `marks`
  * attribute — like LyX, which marks the inset's position. Only pure insertions mark nodes: a
@@ -55,7 +67,7 @@ function deletedSlice(slice: Slice): Slice {
       const end = index === content.childCount - 1 ? openEnd : 0;
       const ch = changeOf(node);
       if (node.isInline) {
-        if (UNTRACKED_NODES.has(node.type.name) || (ch?.type === 'inserted' && ch.author === editorContext.changeAuthorId)) return;
+        if (UNTRACKED_NODES.has(node.type.name) || isComment(node) || (ch?.type === 'inserted' && ch.author === editorContext.changeAuthorId)) return;
         if (ch?.type === 'deleted') nodes.push(node);
         else nodes.push(node.isText ? node.mark(del.addToSet(node.marks)) : node.type.create(withChange(node, del.attrs), node.content, node.marks));
       } else {
@@ -123,6 +135,7 @@ export function changeTrackingPlugin(): Plugin {
           const step = t.steps[i];
           if (!(step instanceof ReplaceStep)) continue;
           if (structural.some(r => step.from >= r.from && step.from <= r.to)) continue;
+          if (inComment(t.docs[i], step.from) && inComment(t.docs[i], step.to)) continue;
           // Editing attributes of an existing formula is not a textual replacement.
           const oldNode = t.docs[i].nodeAt(step.from);
           if (step.to > step.from && oldNode && !oldNode.isText && oldNode.isAtom && step.to - step.from === oldNode.nodeSize && step.slice.content.childCount === 1 && step.slice.content.firstChild?.type === oldNode.type) {
@@ -139,6 +152,7 @@ export function changeTrackingPlugin(): Plugin {
             if (to > from) {
               const ins = ownInsertionBefore(tr.doc, from) ?? changeMark('inserted');
               tr.doc.nodesBetween(from, to, (node, pos) => {
+                if (isComment(node)) return false;
                 if (node.isText) {
                   if (!changeOf(node)) tr.addMark(Math.max(from, pos), Math.min(to, pos + node.nodeSize), ins);
                 } else if (node.isInline && pos >= from && pos + node.nodeSize <= to && !UNTRACKED_NODES.has(node.type.name)) {

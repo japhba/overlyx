@@ -76,13 +76,18 @@ describe('a comment on a selection keeps the selected text', () => {
     expect(s.doc.textContent.startsWith(before.slice(0, 20))).toBe(true);
   });
 
-  it('while suggesting: nothing is deleted, the thread is the only insertion', () => {
+  it('while suggesting: nothing is deleted, and the thread is no suggestion (as in Google Docs)', () => {
     editorContext.trackChanges = true; editorContext.changeAuthorId = 5;
     let s = select(stateOf(doc(par('We want to minimise.')), true), 9, 11);
     s = run(s, C.insertComment);
-    let deleted = 0;
-    s.doc.descendants(n => { if (changeOf(n)?.type === 'deleted') deleted++; });
+    let deleted = 0, inserted = 0;
+    s.doc.descendants(n => { const c = changeOf(n)?.type; if (c === 'deleted') deleted++; if (c === 'inserted') inserted++; });
     expect(deleted).toBe(0);
+    expect(inserted).toBe(0);
+    // writing in the thread is not tracked either
+    s = run(s, (st, d) => { d!(st.tr.insertText('Check this.')); return true; });
+    s.doc.descendants(n => { if (changeOf(n)) inserted++; });
+    expect(inserted).toBe(0);
     expect(s.doc.firstChild!.textContent.startsWith('We want to')).toBe(true);
   });
 });

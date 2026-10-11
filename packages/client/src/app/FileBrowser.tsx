@@ -259,11 +259,15 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
     for (let k = 1; ; k++) { rel = (dir ? dir + '/' : '') + `${stem} copy${k > 1 ? ' ' + k : ''}${ext}`; if (!exists(rel)) return rel; }
   };
   const renamePath = async (p: string) => {
-    const nn = await uiPrompt('Rename', 'New name (a path moves the file):', p);
-    if (nn && nn !== p) await doOp({ op: 'rename', from: p, to: nn });
+    const nn = (await uiPrompt('Rename', 'New name — a path with / moves it (/name: to the top of the project):', p))?.trim();
+    // a bare name stays in the file's folder, as in every file manager: "results-final.tex" for
+    // chapters/results.tex moved it to the top and broke \input{chapters/…}
+    const dir = p.includes('/') ? p.slice(0, p.lastIndexOf('/') + 1) : '';
+    const to = !nn ? '' : nn.startsWith('/') ? nn.replace(/^\/+/, '') : nn.includes('/') ? nn : dir + nn;
+    if (to && to !== p) await doOp({ op: 'rename', from: p, to });
   };
   const deletePath = async (p: string, isDir: boolean) => {
-    if (!(await uiConfirm('Delete', `Delete ${p}${isDir ? ' and everything in it' : ''}? (It is moved to the server's trash, not erased.)`, { danger: true, okLabel: 'Delete' }))) return;
+    if (!(await uiConfirm('Delete', `Delete ${p}${isDir ? ' and everything in it' : ''}? It waits 30 days in the server's trash — ask the people who run OverLyX (Help ▸ Report a problem) to bring it back.`, { danger: true, okLabel: 'Delete' }))) return;
     await doOp({ op: 'delete', from: p });
   };
   const newFolder = async (dir = '') => {

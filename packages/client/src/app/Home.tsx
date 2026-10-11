@@ -114,7 +114,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
   const [newOpen, setNewOpen] = useState(false);
   const remove = async (p: Project) => {
     const what = p.kind === 'example' ? 'your example project (it will not be re-created)' : `the project "${projectTitle(p)}" and its ${p.files.length} file(s)`;
-    const ok = await uiConfirm('Delete Project', `Delete ${what}?\n\nThe folder is moved to the server's trash, not destroyed; ask an administrator to get it back.`, { danger: true, okLabel: 'Delete' });
+    const ok = await uiConfirm('Delete Project', `Delete ${what}?\n\nIt waits 30 days in the server's trash, then it is erased — until then, the people who run OverLyX can bring it back (Help ▸ Report a problem).`, { danger: true, okLabel: 'Delete' });
     if (!ok) return;
     try { await api.deleteProject(p.name); await load(); onChanged(); notify(`Project "${projectTitle(p)}" removed`); }
     catch (e) { notify((e as Error).message, 'error'); }

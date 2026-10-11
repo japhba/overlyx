@@ -580,9 +580,8 @@ export const insertComment: Command = (state, dispatch) => {
   const user = editorContext.user?.name ?? 'Anonymous';
   const header = schema.nodes.paragraph.create({ layout: 'Plain Layout' }, schema.text(commentHeader(user, formatTimestamp())));
   const body = schema.nodes.paragraph.create({ layout: 'Plain Layout' });
+  // never a suggestion, also while suggesting (plugins/changes.ts isComment)
   const attrs: Record<string, unknown> = { name: 'Note', arg: 'Comment', params: '[]', status: 'open' };
-  const marks = insertedMarks();
-  if (marks) attrs.marks = marks;
   const node = schema.nodes.inset.create(attrs, Fragment.from([header, body]));
   if (!dispatch) return true;
   const tr = state.tr.setSelection(Selection.near(state.doc.resolve(commentAnchor(state)), -1));
