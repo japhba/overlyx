@@ -872,10 +872,21 @@ export const typeDollar: Command = (state, _dispatch, view) => {
 };
 
 /** Toggle inline <-> display for the math node at/near the selection. */
-export const toggleMathDisplay: Command = (state, dispatch) => {
+export const toggleMathDisplay: Command = (state, dispatch, view) => {
   const sel = state.selection;
   let pos = -1, node: PMNode | null = null;
-  if (sel instanceof NodeSelection && (sel.node.type.name === 'math_inline' || sel.node.type.name === 'math_display')) { pos = sel.from; node = sel.node; }
+  // the formula being edited, wherever the document's own caret was left: the Edit menu turned the
+  // display equation beside that caret into inline math instead (and its \label with it)
+  const field = editorContext.mathField;
+  if (view && field?.dom.isConnected) {
+    state.doc.descendants((n, p) => {
+      if (node) return false;
+      if ((n.type.name === 'math_inline' || n.type.name === 'math_display') && view.nodeDOM(p)?.contains(field.dom)) { pos = p; node = n; }
+      return !node;
+    });
+  }
+  if (node) { /* found */ }
+  else if (sel instanceof NodeSelection && (sel.node.type.name === 'math_inline' || sel.node.type.name === 'math_display')) { pos = sel.from; node = sel.node; }
   else {
     const nb = sel.$from.nodeBefore, na = sel.$from.nodeAfter;
     if (nb && (nb.type.name === 'math_inline' || nb.type.name === 'math_display')) { pos = sel.from - nb.nodeSize; node = nb; }
@@ -883,13 +894,18 @@ export const toggleMathDisplay: Command = (state, dispatch) => {
   }
   if (!node) return false;
   if (!dispatch) return true;
+  const target: PMNode = node;
   let repl: PMNode;
-  if (node.type.name === 'math_inline') repl = schema.nodes.math_display.create({ marks: node.attrs.marks, latex: `\\[\n${node.attrs.latex}\n\\]` });
+  let lostLabels: string[] = [];
+  if (target.type.name === 'math_inline') repl = schema.nodes.math_display.create({ marks: target.attrs.marks, latex: `\\[\n${target.attrs.latex}\n\\]` });
   else {
-    const m = /\\\[\s*([\s\S]*?)\s*\\\]/.exec(node.attrs.latex) ?? /\\begin\{[a-z*]+\}\s*([\s\S]*?)\s*\\end\{[a-z*]+\}/.exec(node.attrs.latex);
-    repl = schema.nodes.math_inline.create({ marks: node.attrs.marks, latex: (m?.[1] ?? node.attrs.latex).replace(/\\label\{[^}]*\}/g, '').trim(), delim: '$' });
+    const m = /\\\[\s*([\s\S]*?)\s*\\\]/.exec(target.attrs.latex) ?? /\\begin\{[a-z*]+\}\s*([\s\S]*?)\s*\\end\{[a-z*]+\}/.exec(target.attrs.latex);
+    lostLabels = [...String(target.attrs.latex).matchAll(/\\label\{([^}]*)\}/g)].map(x => x[1]);
+    repl = schema.nodes.math_inline.create({ marks: target.attrs.marks, latex: (m?.[1] ?? target.attrs.latex).replace(/\\label\{[^}]*\}/g, '').trim(), delim: '$' });
   }
-  dispatch(state.tr.replaceWith(pos, pos + node.nodeSize, repl));
+  dispatch(state.tr.replaceWith(pos, pos + target.nodeSize, repl));
+  // an inline formula has no number: references to the equation now print ?? — say so
+  if (lostLabels.length) editorContext.notify?.(`The equation is inline now and has no number: its label ${lostLabels.join(', ')} is gone, references to it print ?? — Ctrl+Z brings it back`);
   return true;
 };
 

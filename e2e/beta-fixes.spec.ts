@@ -133,3 +133,24 @@ test('whiteboard: a sticky note takes what is typed; Ctrl+Z undoes a stroke, Ctr
   await expect(page.locator('.board-stroke:not(.live)')).toHaveCount(1);
   expect(errors).toEqual([]);
 });
+
+test('Edit ▸ Math: toggle inline/display acts on the formula being edited, not the one beside the caret', async ({ page }) => {
+  const errors = collectErrors(page);
+  writeFileSync(`${DIR}/toggle.tex`, texDoc('Before.\n\n\\begin{equation}\n\\Omega=1\\label{eq:mono}\n\\end{equation}\nfixes the sign.\n\nThe Hamiltonian is $H=B\\sigma$ here, see \\eqref{eq:mono}.'));
+  await login(page);
+  await page.request.get('/api/projects');
+  await page.goto(`/#/${PROJECT}/toggle.tex`);
+  await page.waitForSelector('.lyx-editor .lyx-math-inline', { timeout: 30000 });
+  // the document's caret right after the display equation, then a click into the inline formula
+  await page.locator('.lyx-editor .lyx-par', { hasText: 'fixes the sign' }).click();
+  await page.keyboard.press('Home');
+  await page.locator('.lyx-editor .lyx-math-inline').first().click();
+  await expect(page.locator('.lyx-math-inline .lm-input:focus, .lyx-math-inline.focused, .lyx-math-inline .focused')).not.toHaveCount(0);
+  await page.locator('.menubar .menu button', { hasText: 'Edit' }).click();
+  await page.locator('.menu-item:visible', { hasText: 'Math: toggle inline/display' }).click();
+  const file = `${DIR}/toggle.tex`;
+  await page.keyboard.press('Control+s');
+  await expect.poll(() => readFileSync(file, 'utf8'), { timeout: 15000 }).toMatch(/\\\[\s*H=B\\sigma\s*\\\]/);
+  expect(readFileSync(file, 'utf8')).toMatch(/\\begin\{equation\}[\s\S]*\\label\{eq:mono\}[\s\S]*\\end\{equation\}/);
+  expect(errors).toEqual([]);
+});
