@@ -378,7 +378,7 @@ test('presentation: F5, overlay steps, the next page, Esc', async ({ page }) => 
   expect(errors).toEqual([]);
 });
 
-test('a layout document opens with its whole page in the window; a pinch (Ctrl + wheel) zooms about the pointer', async ({ page }) => {
+test('a layout document opens with its whole page in the window; a pinch (Ctrl + wheel) zooms about the pointer, said over the canvas, and stops at the whole page', async ({ page }) => {
   const errors = collectErrors(page);
   await login(page);
   await openLayout(page, 'zoom.tex');
@@ -402,12 +402,23 @@ test('a layout document opens with its whole page in the window; a pinch (Ctrl +
   expect(Math.abs(pg1.x + pg1.width * 0.3 - px)).toBeLessThan(slack);
   expect(Math.abs(pg1.y + pg1.height * 0.4 - py)).toBeLessThan(slack);
   await expect(page.locator('.zoom-select')).not.toHaveValue('fit');
+  // (said over the canvas while it changed)
+  await expect(page.locator('[data-layout-zoomhud]')).toHaveText(/^\d+ %$/);
   // Ctrl+Minus steps out, Fit goes back to the whole page
   await page.keyboard.press('Control+Minus');
   await page.waitForTimeout(200);
   expect((await page.locator('.lyx-editor .ol-page').first().boundingBox())!.width).toBeLessThan(pg1.width);
   await page.selectOption('.zoom-select', 'fit');
   await page.waitForTimeout(200);
+  expect(Math.abs((await page.locator('.lyx-editor .ol-page').first().boundingBox())!.width - pg0.width)).toBeLessThan(2);
+  await expect(page.locator('[data-layout-zoomhud]')).toHaveText(/^Fit · \d+ %$/);
+  // a small pinch at the whole page holds there and settles back on it
+  await page.mouse.move(px, py);
+  await page.keyboard.down('Control');
+  for (let i = 0; i < 4; i++) { await page.mouse.wheel(0, -5); await page.waitForTimeout(30); }
+  await page.keyboard.up('Control');
+  await page.waitForTimeout(600);
+  await expect(page.locator('.zoom-select')).toHaveValue('fit');
   expect(Math.abs((await page.locator('.lyx-editor .ol-page').first().boundingBox())!.width - pg0.width)).toBeLessThan(2);
   expect(errors).toEqual([]);
 });

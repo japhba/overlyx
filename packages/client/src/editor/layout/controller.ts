@@ -48,6 +48,8 @@ import { followMasters, masterWidgets, destroyMasterLayers, masterChain, placeho
 import { followConnectors, copyObjects, freshId, sitePoint, centre, outlinePoint, isConnector, pageSegs, shapeAttrsFor, parseEnd, endRef, connectorPath, SIDES, type Side } from './connectors';
 import { editorContext } from '../context';
 import { sourceOnlyParagraph, layoutTableSpacing } from './source';
+import { DetentPinch, stepOnto, type Detent } from '../../app/zoomdetent';
+import { hostedZoomPill } from '../../app/zoomhud';
 
 export type Tool = 'select' | 'text' | 'shape' | 'line' | 'arrow' | 'pen' | 'pencil' | 'nodes' | 'crop';
 
@@ -406,6 +408,9 @@ const nodeIds = new WeakMap<PMNode, number>();
 let nodeSeq = 0;
 const nodeId = (n: PMNode) => { let v = nodeIds.get(n); if (v === undefined) { v = ++nodeSeq; nodeIds.set(n, v); } return v; };
 
+/** the whole page (zoom 1): a level a pinch stops at and holds, and a mouse wheel's notch does not pass (app/zoomdetent.ts) */
+const FIT_DETENT: Detent<'fit'>[] = [{ key: 'fit', z: 1, hold: Math.log(1.35) }];
+
 class LayoutController {
   private active = false;
   /** the master pages are shown and edited (setMasterView) */
@@ -624,6 +629,7 @@ class LayoutController {
       // Safari's trackpad pinch
       scroller.addEventListener('gesturestart', this.onGesture as EventListener, { passive: false });
       scroller.addEventListener('gesturechange', this.onGesture as EventListener, { passive: false });
+      scroller.addEventListener('gestureend', this.onGesture as EventListener, { passive: false });
     }
     activeZoom.add(this);
     this.readHeader(true);
@@ -651,7 +657,13 @@ class LayoutController {
       this.scroller.removeEventListener('pointerdown', this.onCanvasDown);
       this.scroller.removeEventListener('gesturestart', this.onGesture as EventListener);
       this.scroller.removeEventListener('gesturechange', this.onGesture as EventListener);
+      this.scroller.removeEventListener('gestureend', this.onGesture as EventListener);
     }
+    if (this.pinch?.timer) clearTimeout(this.pinch.timer);
+    this.pinch = null;
+    this.held = false;
+    cancelAnimationFrame(this.settleRaf);
+    this.pill.dispose();
     this.scroller = null;
     activeZoom.delete(this);
     zoomChanged();
@@ -765,17 +777,67 @@ class LayoutController {
   private fitPagePt = 1;
   private scroller: HTMLElement | null = null;
   private pendingZoom: { z: number; x: number; y: number } | null = null;
-  private gestureStart = 1;
+  private gestureLast = 1;
+  /** the zoom said over the canvas while it changes (app/zoomhud.ts) */
+  private pill = hostedZoomPill(() => this.scroller, 'data-layout-zoomhud');
+  /**
+   * A pinch under way (a trackpad's: Ctrl + wheel, Safari's gesture — the iPad's fingers too): its
+   * course through the zoom, which stops at the whole page and holds there (app/zoomdetent.ts), where it
+   * is, and the timer that ends it (a wheel says nothing when it ends). `held`: held at the whole page.
+   */
+  private pinch: { p: DetentPinch<'fit'>; x: number; y: number; timer: ReturnType<typeof setTimeout> | null } | null = null;
+  private held = false;
+  private settleRaf = 0;
 
   /** a pinch on a trackpad (Ctrl + wheel in Chromium and Firefox) or Ctrl/⌘ + wheel zooms about the pointer */
   private onWheel = (ev: WheelEvent): void => {
     if (!(ev.ctrlKey || ev.metaKey)) { this.wheelSlides(ev); return; }
     ev.preventDefault();
     const dy = ev.deltaMode === 1 ? ev.deltaY * 16 : ev.deltaMode === 2 ? ev.deltaY * 400 : ev.deltaY;
-    const base = this.pendingZoom?.z ?? this.zoom;
-    // a trackpad sends many small deltas, a mouse wheel ±100 per notch (×1.28 then)
-    this.zoomAt(base * Math.exp(-Math.max(-25, Math.min(25, dy)) * 0.01), ev.clientX, ev.clientY);
+    if (!dy) return;
+    // a mouse wheel ±100 per notch: a step (×1.28) that stops at the whole page; a trackpad sends many small deltas — a pinch
+    if (ev.deltaMode !== 0 || Math.abs(dy) >= 50) {
+      if (!this.pinch) this.zoomAt(stepOnto(this.pendingZoom?.z ?? this.zoom, dy < 0 ? 1.28 : 1 / 1.28, FIT_DETENT).z, ev.clientX, ev.clientY);
+      return;
+    }
+    this.pinchBy(-dy * 0.01, ev.clientX, ev.clientY, true);
   };
+
+  /** a pinch's step (log of the factor) about a point of the screen */
+  private pinchBy(d: number, x: number, y: number, timed: boolean): void {
+    cancelAnimationFrame(this.settleRaf);
+    this.settleRaf = 0;
+    let g = this.pinch;
+    if (!g) {
+      const base = this.pendingZoom?.z ?? this.zoom;
+      g = this.pinch = { p: new DetentPinch<'fit'>(Math.abs(base - 1) < 1e-3 ? 'fit' : base, base, [0.1, zoomMax(this.fitPagePt)]), x, y, timer: null };
+    }
+    g.x = x; g.y = y;
+    if (g.timer) clearTimeout(g.timer);
+    if (timed) g.timer = setTimeout(() => this.endPinch(), 220);
+    const sh = g.p.by(d, FIT_DETENT);
+    this.held = sh.zoom === 'fit';
+    this.zoomAt(sh.zoom === 'fit' ? sh.stretch : sh.zoom, x, y);
+  }
+
+  /** the pinch let go: held at the whole page, or near it, onto it on a short spring */
+  private endPinch(): void {
+    const g = this.pinch;
+    this.pinch = null;
+    if (!g) return;
+    if (g.timer) clearTimeout(g.timer);
+    const end = g.p.end(FIT_DETENT);
+    if (!end) { this.held = false; return; }
+    this.held = true;
+    const t0 = performance.now();
+    const frame = () => {
+      const t = Math.min(1, (performance.now() - t0) / 220), k = 1 - (1 - t) ** 3;
+      if (t >= 1) this.held = false;
+      this.zoomAt(end.from + (1 - end.from) * k, g.x, g.y);
+      this.settleRaf = t < 1 ? requestAnimationFrame(frame) : 0;
+    };
+    frame();
+  }
 
   /** one slide at a time: scrolling on beyond the slide's top or bottom edge turns to the previous or next slide */
   private wheelSlides(ev: WheelEvent): void {
@@ -797,9 +859,13 @@ class LayoutController {
 
   private onGesture = (ev: Event & { scale?: number; clientX?: number; clientY?: number }): void => {
     ev.preventDefault();
-    if (ev.type === 'gesturestart') { this.gestureStart = this.zoom; return; }
+    if (ev.type === 'gestureend') { this.endPinch(); return; }
+    if (ev.type === 'gesturestart') { this.gestureLast = 1; return; }
+    const s = ev.scale ?? 1;
+    if (!(s > 0)) return;
     const r = this.scroller?.getBoundingClientRect();
-    this.zoomAt(this.gestureStart * (ev.scale ?? 1), ev.clientX ?? (r ? r.left + r.width / 2 : 0), ev.clientY ?? (r ? r.top + r.height / 2 : 0));
+    this.pinchBy(Math.log(s / this.gestureLast), ev.clientX ?? (r ? r.left + r.width / 2 : 0), ev.clientY ?? (r ? r.top + r.height / 2 : 0), false);
+    this.gestureLast = s;
   };
 
   /** zoom to `z` keeping the point under (x, y) where it is (applied once per frame) */
@@ -837,10 +903,18 @@ class LayoutController {
       sc.scrollTop += r1.top + fy * r1.height - p.y;
     }
     this.renderOverlays(true);
+    this.showZoom();
+  }
+
+  /** the zoom said over the canvas: the percentage of the real size, the whole page as Fit (held there too) */
+  private showZoom(): void {
+    const fit = this.held || this.isFit();
+    this.pill.show((fit ? this.percentAt(1) : this.zoomPercent()) / 100, fit ? 'Fit' : null);
   }
 
   /** the zoom in percent of the paper's real size (96 px to the inch) */
-  zoomPercent(): number { return Math.round(this.fitPagePt * this.zoom * 2.845276 / (96 / 25.4) * 100); }
+  zoomPercent(): number { return this.percentAt(this.zoom); }
+  private percentAt(z: number): number { return Math.round(this.fitPagePt * z * 2.845276 / (96 / 25.4) * 100); }
   isFit(): boolean { return Math.abs(this.zoom - 1) < 1e-3; }
   /** the Zoom menu / keys: d = 1 in, −1 out, 0 back to the whole page; 'pct' a percentage of the real size */
   zoomStep(d: number | { pct: number }): void {
@@ -849,7 +923,7 @@ class LayoutController {
     if (typeof d === 'object') { this.zoomAt(d.pct / 100 * (96 / 25.4) / 2.845276 / this.fitPagePt, cx, cy); return; }
     if (d === 0) {
       // the whole page (the one mostly in view)
-      this.zoom = 1; this.fit(); this.renderOverlays(true);
+      this.zoom = 1; this.fit(); this.renderOverlays(true); this.showZoom();
       const sel = L.pageAt(this.view.state.doc, this.view.state.selection.from);
       const dom = sel ? this.view.nodeDOM(sel.pos) as HTMLElement | null : null;
       dom?.scrollIntoView({ block: 'start', inline: 'center' });

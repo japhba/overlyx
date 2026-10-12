@@ -4,6 +4,7 @@
  * author colours and ids for change tracking, the document language, label suggestions, the
  * paragraph layout picker, word counts. One copy for both shells (tests/parity.test.ts).
  */
+import { hostedZoomPill } from './zoomhud';
 import { useState } from 'preact/hooks';
 import { styleLabel, styleSearchText } from './stylenames';
 import type { EditorView } from 'prosemirror-view';
@@ -20,7 +21,12 @@ import { editorContext, onMetaChange } from '../editor/context';
 export function applyEditorZoom(zoom: number): void {
   document.documentElement.style.setProperty('--editor-zoom', String(zoom));
   try { localStorage.setItem('ol.zoom', String(zoom)); } catch { /* storage unavailable */ }
+  // a change (not the zoom a document opens with): said over the text for a moment, as every zoom is (zoomhud.ts)
+  if (textZoomShown !== null && textZoomShown !== zoom) textZoomPill.show(zoom);
+  textZoomShown = zoom;
 }
+let textZoomShown: number | null = null;
+const textZoomPill = hostedZoomPill(() => document.querySelector<HTMLElement>('.editor-scroll'), 'data-text-zoomhud');
 
 export function debounce<T extends (...a: any[]) => void>(fn: T, ms: number): T & { cancel(): void } {
   let t: ReturnType<typeof setTimeout> | null = null;

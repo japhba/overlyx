@@ -4,7 +4,8 @@
  * and flashes the box; a double-click on the first page's abstract puts the cursor into that
  * paragraph (inverse search); a PDF file of the project opens in a tab of its own with the viewer;
  * a pinch (Ctrl + wheel) zooms about the pointer, and a huge page (A0) stays sharp where it is in view;
- * Fit content zooms past the margins, a level among the steps that a pinch stops at and holds.
+ * Fit content and Trim margins zoom past the margins, levels among the steps that a pinch (two fingers
+ * too) stops at and holds; the zoom is said over the pages while it changes.
  */
 import { test, expect } from '@playwright/test';
 import { mkdirSync, rmSync, writeFileSync, copyFileSync, existsSync } from 'node:fs';
@@ -105,7 +106,7 @@ test('a PDF file of the project opens in a tab with the viewer', async ({ page }
 test('Fit content zooms past the margins; a pinch snaps onto it and holds there, a mouse wheel steps to it, the next viewer starts there', async ({ page }) => {
   test.skip(!existsSync(`${DIR}/paper.pdf`), 'no PDF fixture (example-gan/arxiv-1406.2661.pdf)');
   const errors = collectErrors(page);
-  await page.setViewportSize({ width: 1000, height: 1100 });   // (a pane taller than wide, as beside a document)
+  await page.setViewportSize({ width: 1000, height: 1400 });   // (a pane taller than wide, as beside a document: Fit content spans its width — Trim margins is the same)
   await page.request.get('/api/projects');
   await page.goto('/#/' + ID);
   await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par').length > 0, null, { timeout: 30000 });
@@ -154,7 +155,7 @@ test('Fit content zooms past the margins; a pinch snaps onto it and holds there,
   await page.waitForTimeout(400);
   await pinch(10, 7);
   await expect(pick).toHaveValue('content');
-  await expect(page.locator('.pdf-tab .pdf-zoom-hud')).toHaveText('Fit content');
+  await expect(page.locator('.pdf-tab [data-pdf-zoomhud]')).toHaveText(/^Fit content · \d+ %$/);
   await expect.poll(async () => Math.abs((await card(2).boundingBox())!.width - contentW), { timeout: 3000 }).toBeLessThan(1);
 
   // a mouse wheel's notches (and − / +) step through the levels: Fit content is one of them
@@ -181,6 +182,60 @@ test('Fit content zooms past the margins; a pinch snaps onto it and holds there,
   expect(errors.filter(e => !/favicon|ResizeObserver/.test(e))).toEqual([]);
 });
 
+test('Trim margins: the pages past their margins as wide as a wide pane (Fit content: a whole page by its height); two fingers pinch the viewer, stopping at the fits', async ({ page, browser }) => {
+  test.skip(!existsSync(`${DIR}/paper.pdf`), 'no PDF fixture (example-gan/arxiv-1406.2661.pdf)');
+  const errors = collectErrors(page);
+  const open = async (p: typeof page) => {
+    await p.request.get('/api/projects');
+    await p.goto('/#/' + ID);
+    await p.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par').length > 0, null, { timeout: 30000 });
+    await p.locator('.tree-row.file', { hasText: 'paper.pdf' }).click();
+    await expect(p.locator('.pdf-tab .pdf-page-box canvas.ready').first()).toBeAttached({ timeout: 30000 });
+  };
+  await page.setViewportSize({ width: 1500, height: 800 });   // (a pane wider than tall, as a PDF in a tab)
+  await open(page);
+  const pick = page.locator('.pdf-tab [data-pdf-zoom]'), pagesEl = page.locator('.pdf-tab .pdf-pages');
+  const card = (n: number) => page.locator(`.pdf-tab .pdf-page-box[data-page="${n}"]`);
+  const pane = await pagesEl.evaluate(e => ({ w: e.clientWidth, h: e.clientHeight }));
+  const fitWidth = (await card(2).boundingBox())!.width;
+  await pick.selectOption('margins');
+  await expect(pagesEl).toHaveAttribute('data-zoom', 'margins');
+  // what is printed on a page spans the pane's width: the margins just out of sight, the page scrolled
+  await expect.poll(async () => (await card(2).boundingBox())!.width / (pane.w - 16), { timeout: 10000 }).toBeGreaterThan(0.97);
+  expect((await card(2).boundingBox())!.width / (pane.w - 16)).toBeLessThan(1.01);
+  expect(await card(2).locator('.pdf-sheet').evaluate(e => (e as HTMLElement).offsetWidth)).toBeGreaterThan(fitWidth * 1.1);
+  expect((await card(2).boundingBox())!.height).toBeGreaterThan(pane.h);
+  await expect(page.locator('.pdf-tab [data-pdf-zoomhud]')).toHaveText(/^Trim margins · \d+ %$/);
+  // Fit content, here: all of a page's content, by the pane's height — smaller
+  await pick.selectOption('content');
+  await expect.poll(async () => (await card(2).boundingBox())!.height / (pane.h - 24), { timeout: 10000 }).toBeGreaterThan(0.97);
+  expect((await card(2).boundingBox())!.width).toBeLessThan(pane.w * 0.8);
+
+  // two fingers on a touch screen: the viewer's pinch (not the browser's), which stops at Trim margins and settles there
+  const ctx = await browser.newContext({ hasTouch: true, viewport: { width: 1500, height: 800 } });
+  const tp = await ctx.newPage();
+  const terrors = collectErrors(tp);
+  await login(tp);
+  await open(tp);
+  const tpick = tp.locator('.pdf-tab [data-pdf-zoom]');
+  await expect(tpick).toHaveValue('width');
+  const v = (await tp.locator('.pdf-tab .pdf-pages').boundingBox())!;
+  const cx = v.x + v.width / 2, cy = v.y + v.height / 2;
+  const cdp = await ctx.newCDPSession(tp);
+  const fingers = (type: 'touchStart' | 'touchMove' | 'touchEnd', half: number) =>
+    cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x: cx - half, y: cy, id: 0 }, { x: cx + half, y: cy, id: 1 }] });
+  await fingers('touchStart', 60);
+  for (let h = 62; h <= 88; h += 2) { await fingers('touchMove', h); await tp.waitForTimeout(30); }
+  await expect(tp.locator('.pdf-tab [data-pdf-zoomhud]')).toHaveText(/^Trim margins · \d+ %$/);
+  await fingers('touchEnd', 0);
+  await expect(tpick).toHaveValue('margins');
+  await expect(tp.locator('.pdf-tab .pdf-pages')).toHaveAttribute('data-zoom', 'margins');
+  // (the browser zoomed nothing itself)
+  expect(await tp.evaluate(() => (window.visualViewport?.scale ?? 1))).toBe(1);
+  await ctx.close();
+  expect([...errors, ...terrors].filter(e => !/favicon|ResizeObserver/.test(e))).toEqual([]);
+});
+
 test('a pinch (Ctrl + wheel) zooms the viewer about the pointer; an A0 page stays sharp where it is in view', async ({ page }) => {
   const errors = collectErrors(page);
   await page.request.get('/api/projects');
@@ -190,8 +245,12 @@ test('a pinch (Ctrl + wheel) zooms the viewer about the pointer; an A0 page stay
   const pageBox = page.locator('.pdf-tab .pdf-page-box');
   await expect(pageBox).toHaveCount(1, { timeout: 30000 });
   await expect(page.locator('.pdf-tab .pdf-page-box canvas.ready').first()).toBeAttached({ timeout: 15000 });
+  // (from 50 %, past the fits: a pinch through Trim margins jumps by the margin it trims, as it should)
+  await page.locator('.pdf-tab .pdf-toolbar [data-pdf-zoom]').selectOption('0.5');
+  await page.waitForTimeout(300);
+  const view0 = (await page.locator('.pdf-tab .pdf-pages').boundingBox())!;
   const b0 = (await pageBox.boundingBox())!;
-  const x = b0.x + b0.width * 0.3, y = b0.y + 200;
+  const x = view0.x + view0.width * 0.3, y = view0.y + 300;
   const fx = (x - b0.x) / b0.width, fy = (y - b0.y) / b0.height;
   await page.mouse.move(x, y);
   // a trackpad pinch arrives as Ctrl + wheel (many small deltas): it zooms this viewer, not the whole page

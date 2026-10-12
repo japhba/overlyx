@@ -359,10 +359,6 @@ html[data-theme="dark"] .tb-btn .tb-img { filter: invert(0.85) hue-rotate(180deg
 .rail { flex: none; width: 24px; display: flex; flex-direction: column; align-items: stretch; gap: 2px; padding: 6px 0; background: var(--ui-bg2); border-right: 1px solid var(--ui-border); }
 .rail.right { border-right: 0; border-left: 1px solid var(--ui-border); }
 .rail button { border: 0; background: none; color: var(--ui-muted); font-size: 11.5px; letter-spacing: 0.3px; padding: 9px 0; margin: 0 3px; border-radius: 3px; writing-mode: vertical-rl; cursor: pointer; }
-.rail.left button { transform: rotate(180deg); }
-/* the files panel hidden: not a strip beside the page (or the slide) but a tab over its edge, half-way down — all the width is the page's */
-.rail.left { position: absolute; left: 0; top: 50%; transform: translateY(-50%); z-index: 30; width: 22px; padding: 4px 0; border: 1px solid var(--ui-border); border-left: 0; border-radius: 0 6px 6px 0; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12); opacity: 0.85; }
-.rail.left:hover { opacity: 1; }
 .rail button:hover { background: var(--ui-hover); color: var(--ui-fg); }
 .panel-body { flex: 1; overflow: auto; padding: 6px; }
 .panel-body h3 { margin: 6px 0; font-size: 12px; text-transform: uppercase; color: var(--ui-muted); letter-spacing: 0.5px; }
@@ -863,6 +859,14 @@ html[data-theme="dark"] { --cm-accent: #f4c03c; --cm-chip-bg: #8a6b12; --cm-chip
 /* ------------------------------------------------------------ status bar */
 .statusbar { display: flex; align-items: center; gap: 14px; height: 24px; padding: 0 10px; background: var(--ui-bg); border-top: 1px solid var(--ui-border); font-size: 12px; color: var(--ui-muted); }
 .statusbar .spacer { flex: 1; }
+/* the panels folded away (the files; a deck's slides and notes — app/CornerButton.tsx): their buttons in the screen's bottom-left corner, never over the page or the slide */
+.statusbar > .statusbar-corner, .statusbar > .statusbar-slot { display: inline-flex; align-items: center; gap: 2px; flex: none; overflow: visible; }
+.statusbar > .statusbar-corner:empty, .statusbar > .statusbar-slot:empty { display: none; }
+.statusbar > .statusbar-corner:first-child, .statusbar > .statusbar-corner:empty + .statusbar-slot { margin-left: -6px; }
+.corner-btn { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 7px; border: 0; border-radius: 4px; background: none; color: var(--ui-muted); font: inherit; line-height: 20px; cursor: pointer; white-space: nowrap; }
+.corner-btn:hover { background: var(--ui-hover); color: var(--ui-fg); }
+.corner-btn svg { width: 14px; height: 14px; flex: none; }
+.corner-btn .dl-notes-dot { color: var(--accent); }
 .statusbar > span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .statusbar .build-version { flex-shrink: 0; font-variant-numeric: tabular-nums; user-select: text; }
 /* presence (top right of the menubar, Google-Docs style): overlapping avatars, the Share pill, the account avatar with its menu */
@@ -1658,7 +1662,7 @@ textarea::selection, .dialog pre::selection, .dialog input::selection { backgrou
 .pdf-busy-line { position: absolute; top: 0; left: 0; right: 0; height: 2px; z-index: 3; overflow: hidden; pointer-events: none; }
 .pdf-busy-line::before { content: ''; position: absolute; top: 0; bottom: 0; width: 30%; background: var(--accent); animation: pdf-busy 1.3s ease-in-out infinite; }
 @keyframes pdf-busy { 0% { left: -30%; } 100% { left: 100%; } }
-.pdf-pages { flex: 1; overflow: auto; padding: 12px 0; position: relative; }
+.pdf-pages { flex: 1; overflow: auto; padding: 12px 0; position: relative; touch-action: pan-x pan-y; }   /* (two fingers: the viewer's pinch, PdfViewer.tsx — never the browser's zoom of the whole app) */
 /* fitted, the pages never need a scroll bar sideways (one coming and going while a pinch pulls at a fit would change the fit) */
 .pdf-pages.fitted { overflow-x: hidden; }
 /* a page's box shows the part of the whole page (.pdf-sheet) in view: all of it, or with Fit content what is painted on it */
@@ -1674,8 +1678,6 @@ textarea::selection, .dialog pre::selection, .dialog input::selection { backgrou
 .pdf-toolbar .pdf-dark-toggle { font-size: 13px; line-height: 1; }
 .pdf-toolbar .pdf-zoom { height: 20px; max-width: 8.5em; font-size: 11px; padding: 0 2px; border: 1px solid var(--ui-border); border-radius: 3px; background: var(--surface); color: var(--ui-fg); }
 /* a pinch caught by a fit (PdfViewer): its name, for a moment */
-.pdf-zoom-hud { position: absolute; top: 12px; left: 50%; z-index: 4; padding: 3px 10px; border-radius: 10px; background: rgba(20,20,24,0.72); color: #fff; font-size: 11px; pointer-events: none; transform: translateX(-50%); animation: pdf-zoom-hud 0.9s ease-out forwards; }
-@keyframes pdf-zoom-hud { 0% { opacity: 0; transform: translateX(-50%) scale(0.9); } 12% { opacity: 1; transform: translateX(-50%) scale(1); } 70% { opacity: 1; } 100% { opacity: 0; } }
 .pdf-flash { position: absolute; border: 2px solid var(--accent); background: rgba(59,110,165,0.18); border-radius: 3px; pointer-events: none; animation: pdf-flash 2.5s ease-out forwards; }
 @keyframes pdf-flash { 0% { opacity: 1; } 70% { opacity: 1; } 100% { opacity: 0; } }
 .pdf-error { color: var(--err); padding: 12px; background: var(--surface); margin: 12px; border-radius: 4px; }
@@ -2589,13 +2591,10 @@ html[data-theme="dark"][data-dark-pages] .lyx-par[data-layout="FrameTitle"] { co
 .dl-body { flex: 1; display: flex; min-height: 0; }
 .dl-rail { width: 170px; flex: none; position: relative; overflow: hidden; border-right: 1px solid var(--ui-border); background: var(--ui-bg); display: flex; flex-direction: column; }
 .dl-railframe { position: absolute; left: 8px; top: 0; border: 0; transform-origin: 0 0; background: transparent; }
-/* the rail's header (which slide of how many, « hides the rail) and the rail folded to a strip (» Slides) */
+/* the rail's header (which slide of how many, « hides the rail); folded away, its button is in the screen's corner (app/CornerButton.tsx) */
 .dl-rail-head { position: absolute; left: 0; right: 0; top: 0; height: 28px; display: flex; align-items: center; justify-content: space-between; gap: 4px; padding: 0 4px 0 10px; box-sizing: border-box; font-size: 11.5px; color: var(--ui-muted); z-index: 2; }
 .dl-rail-count { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dl-rail-hide { flex: none; min-width: 24px; height: 22px; padding: 0 4px; color: var(--ui-muted); }
-.dl-rail-show { position: absolute; left: 0; bottom: 14px; z-index: 6; width: 24px; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 8px 0; border: 1px solid var(--ui-border); border-left: 0; border-radius: 0 6px 6px 0; background: var(--ui-bg); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12); opacity: 0.88; color: var(--ui-muted); font: inherit; font-size: 12px; cursor: pointer; }
-.dl-rail-show:hover { opacity: 1; background: var(--ui-hover); color: var(--ui-fg); }
-.dl-rail-show-label { writing-mode: vertical-rl; letter-spacing: .03em; white-space: nowrap; }
 .dl-rail-actions { position: absolute; left: 0; right: 0; bottom: 0; padding: 6px; display: flex; justify-content: center; background: linear-gradient(transparent, var(--ui-bg) 40%); }
 /* the rail's right edge: dragged sideways, the slides get wider or narrower */
 .dl-rail-grip { position: absolute; top: 0; right: 0; bottom: 0; width: 7px; z-index: 3; cursor: col-resize; touch-action: none; }
@@ -2629,20 +2628,20 @@ html[data-theme="dark"][data-dark-pages] .lyx-par[data-layout="FrameTitle"] { co
 .dl-ctx-secs > .toolbar + .toolbar { margin-left: 6px; padding-left: 6px; border-left: 1px solid var(--ui-border); }
 .dl-ctx-secs .tb-label { white-space: nowrap; }
 .dl-notes { flex: none; height: 74px; border-top: 1px solid var(--ui-border); background: var(--surface); position: relative; }
-/* ▾ hides the speaker notes; hidden, a strip under the canvas brings them back (with the first line of the slide's notes) */
+/* ▾ hides the speaker notes, all of them: their button is in the screen's corner (a dot when the slide has notes) */
+/* (in VS Code, without the app's status bar: the corner's buttons in a strip of their own under the editor) */
+.dl-foot { flex: none; display: flex; align-items: center; gap: 2px; height: 24px; padding: 0 4px; border-top: 1px solid var(--ui-border); background: var(--ui-bg); font-size: 12px; }
 .dl-notes-hide { position: absolute; top: 4px; right: 8px; min-width: 22px; height: 22px; padding: 0 4px; color: var(--ui-muted); font-size: 12px; }
 .dl-notes textarea { padding-right: 36px; }
-.dl-notes-show { flex: none; display: block; width: 100%; height: 24px; padding: 0 12px; border: 0; border-top: 1px solid var(--ui-border); background: var(--surface); color: var(--ui-muted); font: 12px/24px var(--ui-font); text-align: left; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dl-notes-show:hover { color: var(--ui-fg); background: var(--ui-hover); }
-.dl-notes-peek { opacity: .8; }
 /* what three fingers did (undo, redo): said for a moment at the top of the canvas */
 .dl-hud { position: absolute; top: 14px; left: 50%; z-index: 6; padding: 5px 14px; border-radius: 16px; background: rgba(32, 33, 36, .84); color: #fff; font: 13px/1.3 var(--ui-font); pointer-events: none; animation: dl-hud .9s ease-out forwards; }
 @keyframes dl-hud { 0% { opacity: 0; transform: translate(-50%, -4px); } 12% { opacity: 1; transform: translate(-50%, 0); } 70% { opacity: 1; transform: translate(-50%, 0); } 100% { opacity: 0; transform: translate(-50%, 0); } }
-/* the zoom while it changes (DeliverableEditor showZoom): over the canvas, fading once it rests; "Fit · …" fitted */
-.dl-zoomhud { position: absolute; top: 14px; left: 50%; z-index: 6; padding: 5px 14px; border-radius: 16px; background: rgba(32, 33, 36, .84); color: #fff; font: 13px/1.3 var(--ui-font); font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; transform: translateX(-50%); opacity: 0; transition: opacity .3s ease-out .1s; }
-.dl-zoomhud:empty { display: none; }
-.dl-zoomhud.on { opacity: 1; transition: opacity .08s; }
-.dl-zoomhud.fit { background: var(--accent); }
+/* the zoom while it changes (app/zoomhud.ts): over the view that zooms (slides, a PDF, a layout canvas, a board, the text), fading once it rests; at a fit, its name */
+.zoom-hud { position: absolute; top: 14px; left: 50%; z-index: 6; padding: 5px 14px; border-radius: 16px; background: rgba(32, 33, 36, .84); color: #fff; font: 13px/1.3 var(--ui-font); font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; transform: translateX(-50%); opacity: 0; transition: opacity .3s ease-out .1s; }
+.zoom-hud:empty { display: none; }
+.zoom-hud.on { opacity: 1; transition: opacity .08s; }
+.zoom-hud.fit { background: var(--accent); }
+.zoom-hud.fixed { position: fixed; z-index: 40; }
 .dl-notes textarea { width: 100%; height: 100%; box-sizing: border-box; border: 0; resize: none; padding: 8px 12px; font: 13px/1.4 var(--ui-font); background: transparent; color: var(--ui-fg); outline: none; }
 .dl-code { width: min(46%, 640px); flex: none; display: flex; flex-direction: column; border-left: 1px solid var(--ui-border); background: var(--surface); }
 .dl-code-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 6px 2px 10px; font-size: 12px; color: var(--ui-muted); border-bottom: 1px solid var(--ui-border); }

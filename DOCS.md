@@ -737,10 +737,17 @@ blend.
     background of its own) — a view setting of this browser per document (`ol.canvas:<path>`),
     never written to the file. **Zoom**: Ctrl+wheel / a trackpad or two-finger pinch zooms about the
     pointer (the frame's scroll keeps the point, the editor pans sideways when the zoomed frame is
-    wider than the canvas); while it changes the zoom is said over the canvas (`.dl-zoomhud`: "137 %",
-    "Fit · 64 %" when fitted — written into the element from SlideView's `onLive` once a frame, as the
-    toolbar's figure catches up only once a pinch rests; it fades 0.8 s later); *Fit slide* / *Back to slide N* appears when zoomed in or when the slide
-    in view is mostly off the screen (Ctrl+0).
+    wider than the canvas); while it changes the zoom is said over the canvas (`app/zoomhud.ts`,
+    `[data-dl-zoomhud]`: "137 %", "Fit · 64 %" when fitted or held there — written into the element from
+    SlideView's `onLive` once a frame, as the toolbar's figure catches up only once a pinch rests; it
+    fades 0.8 s later). **Fit is a level a pinch stops at** (`app/zoomdetent.ts` `DetentPinch`, as the
+    PDF viewer's fits; fingers, a trackpad's Ctrl + wheel, Safari's gestures): within 7 % it snaps on and
+    holds until pinched ×1.35 past it, the slide giving a quarter of the pull, and let go held or near
+    it, it settles on it (220 ms; a wheel's pinch ends 220 ms after its last event). Fingers that leave
+    Fit no longer keep the slide's point exactly under them (the hold took some of their spread); past
+    Fit they do. − / +, Ctrl±, and a mouse wheel's notch (≥ 50 px: ×1.25, no more ×e) step and stop at
+    Fit on their way (`stepOnto`). *Fit slide* / *Back to slide N* appears when zoomed in or when the
+    slide in view is mostly off the screen (Ctrl+0).
   * **One slide per canvas** (11 Oct 2026, the user: "each slide in a deck its own canvas, no
     scrolling through slides apart from the slide side menu"): in a deck or poster the canvas frame
     shows only the current slide (`runtime/solo.ts`: `html.ol-solo`, the other slides `display:
@@ -831,10 +838,14 @@ blend.
     without it a later attribute change duplicated a text's inline elements.
   * **Around the canvas** (`DeliverableEditor.tsx`): the slide rail (a second frame in `thumb`
     mode: click, drag to reorder, its menu — new slide in the design of the current one, blank,
-    duplicate, move, delete; its header's « folds it away to a » Slides tab over the canvas's bottom
-    left edge — no strip: folded, all the width is the slide's — `ol.deckSlides`, folded at first on
-    screens under 700 px; the speaker notes' ▾ folds them to a strip with their first line,
-    `ol.deckNotes`), the **contextual toolbar** (`decktoolbar.tsx`, the toolbars' own
+    duplicate, move, delete; its header's « folds it away — `ol.deckSlides`, folded at first on
+    screens under 700 px; the speaker notes' ▾ folds them away completely, `ol.deckNotes`). Folded,
+    nothing of them is left beside, under or over the slide (the user, 12 Oct 2026: "the slide and menu
+    bar menus should be in the corners of the screen so as to not occlude any slide content"): their
+    buttons — *Slides · 3 of 12*, *Notes* (a dot when the slide has notes, its first line in the
+    tooltip) — are in the screen's bottom-left corner, after the files' (`app/CornerButton.tsx`,
+    portalled into the status bar's `[data-statusbar-slot]`; in VS Code, which has no status bar, a
+    strip of their own under the editor, `.dl-foot`). The **contextual toolbar** (`decktoolbar.tsx`, the toolbars' own
     component: the tools always; then only what fits the selection — text, shape, line or picture
     tools, Arrange, Path and the rest — and with nothing selected the slide's background and the canvas;
     when they do not fit beside the tools they float as a bar of their own over the canvas's top edge
@@ -950,7 +961,10 @@ blend.
     page in the window; a trackpad pinch or Ctrl/⌘ + wheel zooms the canvas about the pointer (Safari's
     gesture events too), Ctrl+Plus / Minus and the status bar's zoom step through the usual percentages
     of the paper's real size, *Fit* returns to the whole page (`layoutZoomStep`, which both shells'
-    zoom commands try first). Text boxes with *height follows the text* grow with what is typed.
+    zoom commands try first). As on a deck's canvas, the whole page is a level a pinch stops at and
+    holds (`FIT_DETENT`, `DetentPinch`; a mouse wheel's notch ×1.28 stops at it), and the zoom is said
+    over the canvas while it changes (`hostedZoomPill`, fixed in `<body>` as the canvas scrolls:
+    "Fit · 48 %", "120 %" of the real size). Text boxes with *height follows the text* grow with what is typed.
   * **Tools** (the *Layout* toolbar, `app/layouttoolbar.tsx`, and Inkscape's keys): select (V), text
     box (T), shapes (R rectangle, E ellipse, palette), line (L), arrow (A), Bézier pen (B: click =
     corner, drag = smooth node, click the first node / double-click / Enter finishes), pencil (P,
@@ -1437,23 +1451,33 @@ blend.
   one is signed in already) arrives in that hover pose and relaxes back — the hover's leave
   (`Wordmark arrive`: held 450 ms from when its fonts are in and the page has painted, once per load).
 * **PDF viewer and SyncTeX** (`app/PdfViewer.tsx`, pdf.js): the built PDF is shown in its pane
-  by our own viewer (zoom, page navigation). **Zoom** (`app/pdfzoom.ts`): *Fit width*, *Fit content*
-  and the steps between them, one order for −, + and a mouse wheel's notches with Ctrl/⌘ (deltas of
+  by our own viewer (zoom, page navigation). **Zoom** (`app/pdfzoom.ts`): *Fit width*, *Trim margins*,
+  *Fit content* and the steps between them, one order for −, + and a mouse wheel's notches with Ctrl/⌘ (deltas of
   lines or ≥ 50 px; no step within 5 % of a fit), and the zoom menu. **Fit content** zooms past the
   margins: every page is cropped (`.pdf-page-box` showing part of its `.pdf-sheet`) to what is painted
   on it — measured by drawing it 400 px tall in idle moments, the pages in reach first, the non-white
   pixels' box plus 6 pt — and the pages are as big as the pane takes them, the typical page's content
   (the median of the pages' fits) spanning the pane's width in a narrow pane, its height in a wide one;
   wider content (a broad table) is shown smaller so all of it shows, less is not blown up; a page not
-  measured yet takes the typical crop, and measured pages keep the reader at the same point. The fit
+  measured yet takes the typical crop, and measured pages keep the reader at the same point. **Trim
+  margins** (12 Oct 2026, the user: "another specialized zoom level that just covers the margins"):
+  the same crops, the typical page's content as wide as the pane whatever its height — the margins
+  just out of sight, the page scrolled (`contentLayout(…).wide`); in a wide pane Fit content is
+  smaller than Fit width (a whole page by its height), Trim margins bigger. Of two fits within 7 % of
+  each other only one is a level (`fitLevels`: Fit content, then Fit width, then Trim margins — in a
+  narrow pane Fit content spans the width; a beamer PDF has no margins to trim). The fit
   chosen last is the next viewer's (`ol.pdfFit`). **Pinch zoom**: a trackpad pinch (Ctrl + wheel in
-  Chromium and Firefox with small deltas, Safari's gesture events) zooms about the pointer, one step
-  per frame, and stops at the fits (`Pinch`): within 7 % of one it snaps on (the name shows for a
-  moment, `.pdf-zoom-hud`), and it holds there until pinched ×1.2 past Fit width, ×1.45 past Fit
-  content — meanwhile the pages give a quarter of the pull and spring back when let go (220 ms after
+  Chromium and Firefox with small deltas, Safari's gesture events) or two fingers on a touch screen
+  (touch events, `.pdf-pages { touch-action: pan-x pan-y }` so the browser zooms nothing itself; their
+  middle pans; Safari's gesture events ignored meanwhile) zooms about the pointer, one step
+  per frame, and stops at the fits (`Pinch`, on `app/zoomdetent.ts` `DetentPinch`): within 7 % of one
+  it snaps on, and it holds there until pinched ×1.2 past Fit width, ×1.45 past the two past the
+  margins — meanwhile the pages give a quarter of the pull and spring back when let go (220 ms after
   the last wheel event, or `gestureend`); let go within 7 % of a fit it settles on it. The drawn pages
   stretch meanwhile and are drawn anew once the pinch settles (160 ms) — a pinch let go where it began
-  draws nothing anew. A page whose canvas would exceed 2²⁵ pixels (an A0 poster zoomed in — browsers
+  draws nothing anew. While the zoom changes it is said over the pages (`[data-pdf-zoomhud]`: "Fit
+  content · 142 %", "137 %"). A pinch through Trim margins jumps sideways by the margin it trims (the
+  crop fills the pane's width: nothing to scroll by). A page whose canvas would exceed 2²⁵ pixels (an A0 poster zoomed in — browsers
   draw nothing on far bigger canvases) is drawn coarser, with a sharp detail canvas (`.pdf-detail`)
   over the part in view and half a window around it. A **rebuilt PDF replaces the old one
   without a flicker**: the new document loads while the old pages stay in view (one shared pdf.js
@@ -1726,8 +1750,9 @@ blend.
   take (`App.tsx`, a layout effect on the scroll container's top edge).
 * **Sidebars**: the documents panel (left) and the Comments / PDF / Versions panels (right) hide
   with the « » buttons in their tab strip; a hidden sidebar leaves a thin rail with its panels' names
-  that brings it back — on the left only a tab over the page's edge, half-way down (`.rail.left`
-  absolute: the page, or a slide, has all the width). The state is remembered per browser (`localStorage.ol.files`, `ol.right`; the
+  that brings it back — on the left nothing at all: the page, or a slide, has all the width, and its
+  button (*Files*, `[data-rail="outline"]`) is in the screen's bottom-left corner, the status bar's
+  start (`StatusBar` `corner`, `app/CornerButton.tsx`; a deck's folded slides and notes follow it). The state is remembered per browser (`localStorage.ol.files`, `ol.right`; the
   right side starts hidden, a PDF build opens it).
 * **Seaborn's palettes in every colour picker** (`app/seaborn.tsx`): a row of ten under the grid of
   the Google-style picker (`ColorGrid`: document text colour, the slides' text / fill / border / line
@@ -1999,7 +2024,8 @@ document helpers of the shells (`app/shellutil.tsx`). `tests/parity.test.ts` fai
 grows a plugin list, a toolbar button or one of those helpers of its own again — that is how the
 extension once lacked autocorrect, markdown headings, image paste and the delimiter buttons. Zoom is
 one of those helpers (`applyEditorZoom`: the `--editor-zoom` variable the editor's font size is
-computed from); the extension used to zoom with CSS `zoom` on its scroll container instead, which puts
+computed from; a change is said over the text for a moment, as every zoom is — `app/zoomhud.ts`,
+also a board's); the extension used to zoom with CSS `zoom` on its scroll container instead, which puts
 mouse coordinates and layout into different scales in Chromium — drags stopped following the pointer
 and selection highlights disagreed with the selection as soon as the document was zoomed.
 

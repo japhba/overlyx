@@ -22,6 +22,10 @@ import { webHost } from './webHost';
 import type { FromRuntime, ToRuntime, SelItem, SlideBox, Tool, Path, HtmlOp, DeliverableKind, Rect, ArrangeHow, Paint, CanvasView, KeyPress, Solo, ObjNode, InkRunD, WordsStyle } from './protocol';
 import { SlideView } from './viewport';
 import { pinchFactor, pinchLock, triGesture, type PinchLock } from './gestures';
+import { DetentPinch, stepOnto, type Detent, type Shown } from '../app/zoomdetent';
+import { zoomPill } from '../app/zoomhud';
+import { CornerButton } from '../app/CornerButton';
+import { createPortal } from 'preact/compat';
 import { isFromRuntime } from './protocol';
 import { rebasedSplices, objectHtml, imageHtml, insertPlace, newSlideHtml, slidePaths, slideNotes, notesOp, sourceRange, inlineSvgHtml } from './sourceops';
 import { sizePt, stepPt } from './units';
@@ -234,6 +238,9 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   /** the slide rail and the speaker notes, hidden or not (their « / ▾ buttons) */
   const [railShown, setRailShownState] = useState(() => loadShown('ol.deckSlides', true));
   const [notesShown, setNotesShownState] = useState(() => loadShown('ol.deckNotes', false));
+  /** the app's status bar: the buttons of the folded slides and notes go into its corner (none in VS Code) */
+  const [cornerSlot, setCornerSlot] = useState<HTMLElement | null>(null);
+  useEffect(() => { setCornerSlot(document.querySelector<HTMLElement>('[data-statusbar-slot]')); }, []);
   const setRailShown = (on: boolean) => { setRailShownState(on); saveShown('ol.deckSlides', on); };
   const setNotesShown = (on: boolean) => { setNotesShownState(on); saveShown('ol.deckNotes', on); };
   const [codeOpen, setCodeOpen] = useState(false);
@@ -698,23 +705,48 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   const zoomRef = useRef(zoom); zoomRef.current = zoom;
   const fitRef = useRef(fit); fitRef.current = fit;
   /**
-   * The zoom while it changes (a pinch, Ctrl + wheel, − / +, Fit): said over the canvas, as the
-   * toolbar's figure catches up only once a pinch rests. Written straight into the element, once a
-   * frame at most (the view's live scale), not a render per finger move.
+   * The zoom while it changes (a pinch, Ctrl + wheel, − / +, Fit): said over the canvas (app/zoomhud.ts),
+   * as the toolbar's figure catches up only once a pinch rests. Written straight into the element, once
+   * a frame at most (the view's live scale), not a render per finger move. Held at Fit, it says Fit.
    */
   const zoomHud = useRef<HTMLDivElement>(null);
-  const zoomHudTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pill = useMemo(() => zoomPill(() => zoomHud.current), []);
+  const heldFit = useRef(false);
   const showZoom = (s: number) => {
-    const el = zoomHud.current;
-    if (!el) return;
-    const pct = Math.round(s * 100), fitted = Math.abs(s / fitRef.current - 1) < 0.005;
-    el.textContent = fitted ? `Fit · ${pct} %` : `${pct} %`;
-    el.classList.toggle('fit', fitted);
-    el.classList.add('on');
-    if (zoomHudTimer.current) clearTimeout(zoomHudTimer.current);
-    zoomHudTimer.current = setTimeout(() => el.classList.remove('on'), 800);
+    const f = fitRef.current, fitted = heldFit.current || Math.abs(s / f - 1) < 0.005;
+    pill.show(fitted ? f : s, fitted ? 'Fit' : null);
   };
-  useEffect(() => () => { if (zoomHudTimer.current) clearTimeout(zoomHudTimer.current); }, []);
+  useEffect(() => () => pill.dispose(), []);
+  /**
+   * Fit is a level of the zoom a pinch stops at (app/zoomdetent.ts, as the PDF viewer's fits): near it
+   * the slide snaps onto it and stays there till pinched well past it, giving a little meanwhile and
+   * springing back once let go; let go near it, it settles on it. A step (− / +, a mouse wheel's notch)
+   * stops at it on its way.
+   */
+  const detents = (): Detent<'fit'>[] => [{ key: 'fit', z: fitRef.current, hold: Math.log(1.35) }];
+  const newPinch = (s0: number) => new DetentPinch<'fit'>(Math.abs(s0 / fitRef.current - 1) < 0.005 ? 'fit' : s0, s0, [0.5 * fitRef.current, MAX_ZOOM]);
+  /** the scale a pinch shows: held at Fit, the fit stretched by the give */
+  const shownScale = (sh: Shown<'fit'>): number => { heldFit.current = sh.zoom === 'fit'; return sh.zoom === 'fit' ? fitRef.current * sh.stretch : sh.zoom; };
+  const settleRaf = useRef(0);
+  useEffect(() => () => cancelAnimationFrame(settleRaf.current), []);
+  /** a pinch let go: held at Fit or near it, onto it on a short spring about the canvas point (px, py); false: it stays as it is */
+  const settle = (p: DetentPinch<'fit'>, px: number, py: number): boolean => {
+    const end = p.end(detents());
+    cancelAnimationFrame(settleRaf.current);
+    if (!end) { heldFit.current = false; return false; }
+    heldFit.current = true;
+    const t0 = performance.now();
+    const frame = () => {
+      const t = Math.min(1, (performance.now() - t0) / 220), k = 1 - (1 - t) ** 3;
+      slideView.zoomTo(fitRef.current * (end.from + (1 - end.from) * k), px, py);
+      if (t < 1) { settleRaf.current = requestAnimationFrame(frame); return; }
+      settleRaf.current = 0;
+      heldFit.current = false;
+      commitLiveZoom(0);
+    };
+    frame();
+    return true;
+  };
   const boxRef = useRef(box); boxRef.current = box;
   const frameWRef = useRef(frameW); frameWRef.current = frameW;
   const panRef = useRef(panX); panRef.current = panX;
@@ -743,9 +775,34 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     if (zoomCommit.current) clearTimeout(zoomCommit.current);
     zoomCommit.current = setTimeout(() => { zoomCommit.current = null; const s = slideView.scaleNow(); if (s) setZoom(s / fitRef.current); }, delay);
   };
+  /** a trackpad's pinch (Ctrl + wheel, Safari's gesture) under way: its course through the zoom, where it is, the timer that ends it (no event says it ended) */
+  const wheelPinch = useRef<{ p: DetentPinch<'fit'>; x: number; y: number; timer: ReturnType<typeof setTimeout> | null } | null>(null);
   const zoomSolo = (factor: number, px: number, py: number) => {
+    cancelAnimationFrame(settleRaf.current);
+    // a mouse wheel's notch (a hundred px or so at once): a step, as − / +
+    if (Math.abs(Math.log(factor)) >= 0.5 && !wheelPinch.current) { stepSolo(factor > 1 ? 1.25 : 1 / 1.25, px, py); return; }
     const f = fitRef.current, s0 = slideView.scaleNow() ?? f * zoomRef.current;
-    const s1 = Math.max(0.5 * f, Math.min(MAX_ZOOM, s0 * factor));
+    let w = wheelPinch.current;
+    if (!w) w = wheelPinch.current = { p: newPinch(s0), x: px, y: py, timer: null };
+    w.x = px; w.y = py;
+    if (w.timer) clearTimeout(w.timer);
+    w.timer = setTimeout(endWheelPinch, 220);
+    if (zoomCommit.current) { clearTimeout(zoomCommit.current); zoomCommit.current = null; }
+    const s1 = shownScale(w.p.by(Math.log(factor), detents()));
+    if (Math.abs(s1 - s0) < 1e-4 * s0) return;
+    slideView.zoomTo(s1, px, py);
+  };
+  const endWheelPinch = () => {
+    const w = wheelPinch.current;
+    wheelPinch.current = null;
+    if (!w) return;
+    if (w.timer) clearTimeout(w.timer);
+    if (!settle(w.p, w.x, w.y)) commitLiveZoom(0);
+  };
+  /** a step in or out about a canvas point (− / +, a mouse wheel's notch): it stops at Fit on its way */
+  const stepSolo = (factor: number, px: number, py: number) => {
+    const f = fitRef.current, s0 = slideView.scaleNow() ?? f * zoomRef.current;
+    const s1 = Math.max(0.5 * f, Math.min(MAX_ZOOM, stepOnto(s0, factor, detents()).z));
     if (Math.abs(s1 - s0) < 1e-4 * s0) return;
     slideView.zoomTo(s1, px, py);
     commitLiveZoom(120);
@@ -759,17 +816,19 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
    * mapped onto the canvas by where they were then. Fingers that move together pan and do not zoom
    * until they have clearly come closer or gone further apart (gestures.ts).
    */
-  const pinchRef = useRef<{ c: { x: number; y: number }[]; r: { x: number; y: number }[]; a: { x: number; y: number }; k: number; s0: number; d0: number; lock: PinchLock } | null>(null);
+  const pinchRef = useRef<{ c: { x: number; y: number }[]; r: { x: number; y: number }[]; a: { x: number; y: number }; k: number; s0: number; d0: number; lock: PinchLock; p: DetentPinch<'fit'>; raw: number; mid: { x: number; y: number } } | null>(null);
   /** two fingers down: each one's canvas point and screen point */
   const pinchStart = (c: { x: number; y: number }[], r: { x: number; y: number }[]) => {
     if (zoomCommit.current) { clearTimeout(zoomCommit.current); zoomCommit.current = null; }
+    cancelAnimationFrame(settleRaf.current);
     const s0 = slideView.scaleNow() ?? scaleRef.current;
     const a = slideView.toFrame((c[0].x + c[1].x) / 2, (c[0].y + c[1].y) / 2);
     if (!a) return;
     const dc = Math.hypot(c[0].x - c[1].x, c[0].y - c[1].y), dr = Math.hypot(r[0].x - r[1].x, r[0].y - r[1].y);
     const k = dr > 8 ? Math.max(0.25, Math.min(4, dc / dr)) : 1;
     screenK.current = Math.abs(k - 1) < 0.03 ? 1 : k;
-    pinchRef.current = { c, r, a, k, s0, d0: Math.max(1, dc), lock: pinchLock() };
+    const mid = { x: (c[0].x + c[1].x) / 2, y: (c[0].y + c[1].y) / 2 };
+    pinchRef.current = { c, r, a, k, s0, d0: Math.max(1, dc), lock: pinchLock(), p: newPinch(s0), raw: s0, mid };
   };
   /** they moved: their screen points now */
   const pinchMove = (r: { x: number; y: number }[]) => {
@@ -779,15 +838,21 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     const now = r.slice(0, 2).map((p, i) => ({ x: g.c[i].x + g.k * (p.x - g.r[i].x), y: g.c[i].y + g.k * (p.y - g.r[i].y) }));
     const travel = Math.hypot((r[0].x + r[1].x - g.r[0].x - g.r[1].x) / 2, (r[0].y + r[1].y - g.r[0].y - g.r[1].y) / 2);
     const z = pinchFactor(g.lock, g.d0, Math.hypot(now[0].x - now[1].x, now[0].y - now[1].y), travel);
-    const s = Math.max(0.5 * f, Math.min(MAX_ZOOM, g.s0 * z));
-    slideView.placeAt(s, g.a.x, g.a.y, (now[0].x + now[1].x) / 2, (now[0].y + now[1].y) / 2);
+    const raw = Math.max(0.5 * f, Math.min(MAX_ZOOM, g.s0 * z));
+    // (through the levels: it stops at Fit)
+    const s = shownScale(g.p.by(Math.log(raw / g.raw), detents()));
+    g.raw = raw;
+    g.mid = { x: (now[0].x + now[1].x) / 2, y: (now[0].y + now[1].y) / 2 };
+    slideView.placeAt(s, g.a.x, g.a.y, g.mid.x, g.mid.y);
   };
   /** one lifted (`cancel`: a third came — undo, redo: back to where the slide was) */
   const pinchEnd = (cancel: boolean) => {
     const g = pinchRef.current;
     if (!g) return;
     pinchRef.current = null;
-    if (cancel) slideView.placeAt(g.s0, g.a.x, g.a.y, (g.c[0].x + g.c[1].x) / 2, (g.c[0].y + g.c[1].y) / 2);
+    if (cancel) { heldFit.current = false; slideView.placeAt(g.s0, g.a.x, g.a.y, (g.c[0].x + g.c[1].x) / 2, (g.c[0].y + g.c[1].y) / 2); }
+    // held at Fit, or let go near it: onto it (the view springs back into place once it has settled)
+    else if (settle(g.p, g.mid.x, g.mid.y)) return;
     commitLiveZoom(0);
     slideView.release();
   };
@@ -877,7 +942,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     hudTimer.current = setTimeout(() => setHud(null), 900);
   };
   const zoomStep = (factor: number) => {
-    if (soloRef.current) { const b = boxRef.current; zoomSolo(factor, b.w / 2, b.h / 2); return; }
+    if (soloRef.current) { const b = boxRef.current; stepSolo(factor, b.w / 2, b.h / 2); return; }
     const sc = scaleRef.current, b = boxRef.current;
     const left = leftFor(sc, panRef.current);
     const cx = (b.w / 2 - left) / sc, cy = b.h / 2 / sc;
@@ -885,6 +950,8 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   };
   const fitSlide = () => {
     if (zoomCommit.current) { clearTimeout(zoomCommit.current); zoomCommit.current = null; }
+    cancelAnimationFrame(settleRaf.current);
+    heldFit.current = false;
     setZoom(1);
     setPanX(0);
     showZoom(fitRef.current);
@@ -1697,12 +1764,30 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     lost = seen < 0.35 && fills < 0.6;
   }
   const zoomed = soloOn ? Math.abs(zoom - 1) > 0.01 : zoom > 1.01;
+  /**
+   * The slides and the notes folded away: their buttons in the screen's bottom-left corner — the app's
+   * status bar (its slot, after the files' button), or in VS Code a strip of their own under the
+   * editor — never over the slide.
+   */
+  const notesFirst = notes.trim().split('\n')[0];
+  const corner = (showRail && !railShown) || (kind === 'deck' && !notesShown) ? <>
+    {showRail && !railShown && (
+      <CornerButton icon="slides" title="Show the slides" data-dl-rail-show onClick={() => setRailShown(true)}>
+        Slides{slides.length ? ` · ${current + 1} of ${slides.length}` : ''}
+      </CornerButton>
+    )}
+    {kind === 'deck' && !notesShown && (
+      <CornerButton icon="notes" title={notesFirst ? `Show the speaker notes — ${notesFirst}` : 'Show the speaker notes'} data-dl-notes-show onClick={() => setNotesShown(true)}>
+        Notes{notesFirst && <span class="dl-notes-dot" aria-label=" (this slide has notes)"> •</span>}
+      </CornerButton>
+    )}
+  </> : null;
 
   return (
     <div class={'dl-editor' + (presenting ? ' presenting' : '')} data-kind={kind}>
       {quick.length > 0 && quickRect && <QuickBar groups={quick} rect={quickRect} box={onWords ? sel[0]?.rect : undefined} frame={() => canvasFrame.current} scrollY={() => (soloOn ? 0 : scrollRef.current)} />}
       {/* (the context tools, when they float below the bar, start right of the slide rail: its header stays clear) */}
-      <div ref={barRef} class={'dl-toolbar' + (ctxRow ? ' dl-ctx-row' : '')} role="toolbar" style={`--ctx-left: ${showRail ? (railShown ? railW : 28) + 8 : 8}px`}>
+      <div ref={barRef} class={'dl-toolbar' + (ctxRow ? ' dl-ctx-row' : '')} role="toolbar" style={`--ctx-left: ${railOpen ? railW + 8 : 8}px`}>
         <span class="dl-title" title={path}>{title}</span>
         <Toolbar id="deck-tools" groups={bars.tools} />
         <input ref={fileInput} type="file" accept="image/*,.svg" multiple hidden onChange={e => { const fs = Array.from((e.target as HTMLInputElement).files ?? []); (e.target as HTMLInputElement).value = ''; void uploadImages(fs.map(f => ({ name: f.name, type: f.type, data: f })), null); }} />
@@ -1787,14 +1872,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
               </div>
             )}
             {hud && <div key={hud.n} class="dl-hud" role="status" data-dl-hud>{hud.text}</div>}
-            <div ref={zoomHud} class="dl-zoomhud" aria-hidden="true" data-dl-zoomhud />
-            {/* the slides folded away: no strip beside the slide, a tab over its edge (bottom left: the files panel's is half-way up) */}
-            {showRail && !railShown && (
-              <button type="button" class="dl-rail-show" title="Show the slides" data-dl-rail-show onClick={() => setRailShown(true)}>
-                <span aria-hidden="true">»</span>
-                <span class="dl-rail-show-label">Slides{slides.length ? ` · ${current + 1} of ${slides.length}` : ''}</span>
-              </button>
-            )}
+            <div ref={zoomHud} class="zoom-hud" aria-hidden="true" data-dl-zoomhud />
             {(lost || zoomed || (soloOn && slideFree)) && kind !== 'page' && (
               <button type="button" class={'dl-refocus' + (lost ? ' lost' : '')} data-dl-refocus onClick={fitSlide}
                 title={zoomed ? 'Show the whole slide again (Ctrl+0)' : 'Back into the middle (Ctrl+0)'}>
@@ -1802,18 +1880,15 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
               </button>
             )}
           </div>
-          {kind === 'deck' && (notesShown ? (
+          {/* (folded away, nothing of them is left here: their button is in the corner) */}
+          {kind === 'deck' && notesShown && (
             <div class="dl-notes">
               <textarea placeholder="Speaker notes" value={notesDraft && curSlidePath && notesDraft.path.join() === curSlidePath.join() ? notesDraft.text : notes} disabled={locked || !curSlidePath} data-dl-notes
                 onInput={e => setNotesDraft((e.target as HTMLTextAreaElement).value)}
                 onBlur={e => { const d = draftRef.current; saveNotes((e.target as HTMLTextAreaElement).value, d?.path ?? curSlidePath); setNotesDraftState(null); }} />
               <button type="button" class="dl-btn dl-notes-hide" title="Hide the speaker notes" aria-label="Hide the speaker notes" data-dl-notes-hide onMouseDown={e => e.preventDefault()} onClick={hideNotes}>▾</button>
             </div>
-          ) : (
-            <button type="button" class="dl-notes-show" title="Show the speaker notes" data-dl-notes-show onClick={() => setNotesShown(true)}>
-              <span aria-hidden="true">▴</span> Speaker notes{notes.trim() ? <span class="dl-notes-peek"> — {notes.trim().split('\n')[0]}</span> : ''}
-            </button>
-          ))}
+          )}
         </div>
         {objOpen && (
           <ObjectsPane slide={objects.slide} items={objects.items} sel={sel} readOnly={locked} close={() => toggleObjects(false)}
@@ -1842,6 +1917,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
           </div>
         )}
       </div>
+      {corner && (cornerSlot ? createPortal(corner, cornerSlot) : <div class="dl-foot">{corner}</div>)}
       {floatPop && <FloatPopover {...floatPop} onClose={() => setFloatPop(null)} />}
       {citeOpen && host.docId && <CiteDialog meta={CITE_META} search docId={host.docId} project={host.docId.split('/').slice(0, 2).join('/')}
         onInsert={(keys, cmd, before, after) => {

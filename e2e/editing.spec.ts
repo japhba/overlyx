@@ -335,7 +335,7 @@ test('Ctrl+Alt+← / → go back and forward through jumps, also across tabs', a
   await page.keyboard.press('Control+Alt+ArrowRight');
   await expect.poll(cursorPos).toBe(p1);
   // the outline is a jump too
-  const rail = page.locator('.rail.left [data-rail="outline"]');
+  const rail = page.locator('[data-rail="outline"]');
   if (await rail.count()) await rail.click();
   await page.locator('.docpanel .doc-tab.active .outline-item').nth(3).click();
   const p2 = await cursorPos();

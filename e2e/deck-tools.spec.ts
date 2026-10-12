@@ -7,7 +7,7 @@
  * flip, the rotation handle, new shapes and a line
  * drawn backwards, an SVG dropped in (inline, sanitised, its shapes editable), a crop preset, the
  * canvas's checkerboard from its right-click menu, "Back to the slide" when zoomed in, the zoom said
- * over the canvas while a pinch changes it, and moving a
+ * over the canvas while a pinch changes it (which stops at Fit), and moving a
  * text box with a finger on a touch screen (the ⌖ select tool; swiped over an object not selected,
  * the slide turns), Draw (pen, highlighter, eraser), the
  * rail and the notes folded away. What lands in index.html each time.
@@ -542,13 +542,20 @@ test('Draw: strokes one after the other in the pen\'s colour, the highlighter, t
   await slides(page).first().waitFor({ timeout: 30000 });
   await expect(page.locator('[data-dl-rail-show]')).toBeVisible();
   await expect(page.locator('[data-dl-notes-show]')).toBeVisible();
-  // folded away, neither the slides nor the files panel takes room beside the slide: tabs over its edge
+  // folded away, neither the slides, the notes nor the files panel takes room beside or under the slide,
+  // and nothing of them lies over it: their buttons are in the screen's bottom-left corner (the status bar)
   await page.locator('.docpanel .hide').click();
-  await expect(page.locator('.rail.left [data-rail="outline"]')).toBeVisible();
-  await expect.poll(async () => { const m = (await page.locator('.main').boundingBox())!, cv = (await page.locator('.dl-canvas').boundingBox())!; return Math.round(cv.x - m.x); }).toBe(0);
-  const tab = (await page.locator('[data-dl-rail-show]').boundingBox())!, cv0 = (await page.locator('.dl-canvas').boundingBox())!;
-  expect(tab.x).toBeLessThan(cv0.x + 1);
-  await page.locator('.rail.left [data-rail="outline"]').click();
+  await expect(page.locator('[data-rail="outline"]')).toBeVisible();
+  await expect.poll(async () => { const m = (await page.locator('.main').boundingBox())!, cv = (await page.locator('.dl-canvas').boundingBox())!; return [Math.round(cv.x - m.x), Math.round(m.y + m.height - cv.y - cv.height)].join(); }).toBe('0,0');
+  const cv0 = (await page.locator('.dl-canvas').boundingBox())!;
+  for (const sel of ['[data-rail="outline"]', '[data-dl-rail-show]', '[data-dl-notes-show]']) {
+    const b = (await page.locator(sel).boundingBox())!;
+    expect(b.y).toBeGreaterThanOrEqual(cv0.y + cv0.height);
+    expect(b.x).toBeLessThan(400);
+    await expect(page.locator(`.statusbar ${sel}`)).toBeVisible();
+  }
+  await expect(page.locator('.dl-canvas button, .dl-canvas [role="button"]')).toHaveCount(0);
+  await page.locator('[data-rail="outline"]').click();
   await expect(page.locator('.sidebar.left .docpanel')).toBeVisible();
   await page.locator('[data-dl-rail-show]').click();
   await expect(page.frameLocator('.dl-railframe').locator('section.slide')).toHaveCount(2);
@@ -632,7 +639,20 @@ test('touch: a pinch zooms smoothly about the fingers, two fingers that pan do n
   });
   const c = await at(page, 640, 360);
 
-  // a pinch: the scale follows the fingers' distance (once they have clearly spread), step by step, never back; what is under their middle stays
+  // at Fit, a small pinch holds there — the slide gives a little — and settles back on it once the fingers lift
+  const vFit = await view(), fitText = (await page.locator('.dl-zoom').textContent())!;
+  await touches('touchStart', [{ x: c.x - 60, y: c.y }, { x: c.x + 60, y: c.y }]);
+  for (let i = 1; i <= 6; i++) { await touches('touchMove', [{ x: c.x - 60 - 3 * i, y: c.y }, { x: c.x + 60 + 3 * i, y: c.y }]); await page.waitForTimeout(20); }
+  expect((await view()).s).toBeGreaterThan(vFit.s * 1.01);
+  await expect(page.locator('[data-dl-zoomhud]')).toHaveText(/^Fit · \d+ %$/);
+  await touches('touchEnd', []);
+  await expect.poll(async () => Math.abs((await view()).s - vFit.s), { timeout: 3000 }).toBeLessThan(0.002);
+  await expect(page.locator('.dl-zoom')).toHaveText(fitText);
+  await page.waitForTimeout(500);
+
+  // past Fit (125 %), a pinch: the scale follows the fingers' distance (once they have clearly spread), step by step, never back; what is under their middle stays
+  await page.locator('.dl-zoomgroup button[title^="Zoom in"]').click();
+  await page.waitForTimeout(500);
   const v0 = await view();
   const under0 = { x: (c.x - v0.box.x) / v0.s, y: (c.y - v0.box.y) / v0.s };
   // (the scales the page hears: it draws its handles for them)
@@ -667,7 +687,7 @@ test('touch: a pinch zooms smoothly about the fingers, two fingers that pan do n
   // the zoom is the editor's once the fingers are up
   await expect(page.locator('.dl-zoom')).toHaveText(new RegExp(`^${Math.round(v1.s * 100)}%$`), { timeout: 3000 });
   await page.locator('.dl-zoom').click();
-  await expect.poll(async () => Math.abs((await view()).s - v0.s), { timeout: 3000 }).toBeLessThan(0.002);
+  await expect.poll(async () => Math.abs((await view()).s - vFit.s), { timeout: 3000 }).toBeLessThan(0.002);
   await page.waitForTimeout(700);
 
   // two fingers that pan, never quite as far apart: the slide follows them, its scale stays (zoomed in: within its range, no rubber band's stretch)
@@ -801,7 +821,7 @@ test('the canvas: a checkerboard from its menu, Back to the slide when zoomed in
   expect(real(errors)).toEqual([]);
 });
 
-test('the zoom is said over the canvas while it changes: a pinch (Ctrl + wheel) as it goes, Fit, − / +', async ({ page }) => {
+test('the zoom is said over the canvas while it changes: a pinch (Ctrl + wheel) as it goes, Fit, − / +; a pinch stops at Fit and holds there', async ({ page }) => {
   const errors = collectErrors(page);
   await login(page);
   await setup(page);
@@ -824,10 +844,30 @@ test('the zoom is said over the canvas while it changes: a pinch (Ctrl + wheel) 
   await page.locator('.dl-zoomgroup .dl-zoom').click();
   await expect(hud).toHaveText(/^Fit · \d+ %$/);
   await expect(hud).toHaveClass(/\bfit\b/);
+  const fitText = (await page.locator('.dl-zoomgroup .dl-zoom').textContent())!;
   // − : a percentage again
   await page.locator('.dl-zoomgroup button[title^="Zoom out"]').click();
   await expect(hud).toHaveText(/^\d+ %$/);
   await expect(hud).toHaveClass(/\bon\b/);
+  // + : a step stops at Fit on its way
+  await page.locator('.dl-zoomgroup button[title^="Zoom in"]').click();
+  await expect(page.locator('.dl-zoomgroup .dl-zoom')).toHaveText(fitText);
+  await page.locator('.dl-zoomgroup button[title^="Zoom out"]').click();
+  await expect(page.locator('.dl-zoomgroup .dl-zoom')).not.toHaveText(fitText);
+  // a pinch in, on past Fit: it stops there and holds (said as Fit, the slide giving a little), and settles on it once let go
+  await page.mouse.move(c.x, c.y);
+  await page.keyboard.down('Control');
+  for (let i = 0; i < 8; i++) { await page.mouse.wheel(0, -5); await page.waitForTimeout(30); }
+  await expect(hud).toHaveText(/^Fit · \d+ %$/);
+  await page.keyboard.up('Control');
+  await expect(page.locator('.dl-zoomgroup .dl-zoom')).toHaveText(fitText, { timeout: 3000 });
+  // pinched well past it, it lets go
+  await page.waitForTimeout(400);
+  await page.keyboard.down('Control');
+  for (let i = 0; i < 12; i++) { await page.mouse.wheel(0, -5); await page.waitForTimeout(30); }
+  await page.keyboard.up('Control');
+  await expect(hud).toHaveText(/^\d+ %$/);
+  await expect(page.locator('.dl-zoomgroup .dl-zoom')).not.toHaveText(fitText, { timeout: 3000 });
   expect(real(errors)).toEqual([]);
 });
 

@@ -5,6 +5,7 @@
  * springs back.
  */
 import { describe, it, expect } from 'vitest';
+import { stepOnto } from '../packages/client/src/app/zoomdetent.ts';
 import { inkBox, cropOf, contentLayout, fitLevels, stepZoom, zoomValue, Pinch, HOLD, CATCH, GIVE, CONTENT_PAD, SIDE, PAD, type Box } from '../packages/client/src/app/pdfzoom.ts';
 
 /** a white RGBA image with grey pixels at `ink` */
@@ -66,6 +67,16 @@ describe('Fit content', () => {
     expect(geo[3].crop.x + geo[3].crop.w / 2).toBeCloseTo(figure.x + figure.w / 2);
   });
 
+  it('Trim margins: the same crops as wide as the pane, whatever its height', () => {
+    const wide = contentLayout([LETTER, LETTER], [TEXT, TEXT], { width: 1400, height: 800 });
+    expect(wide.wide).not.toBeNull();
+    const c = cropOf(TEXT, LETTER);
+    expect(wide.wide!.scale).toBeCloseTo((1400 - 2 * SIDE) / c.w, 5);
+    expect(wide.wide!.scale).toBeGreaterThan(wide.scale!);   // (Fit content: by the height here)
+    expect(wide.wide!.geo[1].crop).toEqual(wide.geo[1].crop);
+    expect(contentLayout([LETTER], [undefined], { width: 600, height: 800 }).wide).toBeNull();
+  });
+
   it('pages not measured yet take the typical crop; with none measured every page is fitted whole', () => {
     const { geo } = contentLayout([LETTER, LETTER], [TEXT, undefined], pane);
     expect(geo[1]).toEqual(geo[0]);
@@ -97,9 +108,25 @@ describe('the zoom levels', () => {
     expect(stepZoom(3, 1, l)).toBe(3);
   });
 
-  it('two fits that nearly coincide are one: Fit content', () => {
+  it('two fits that nearly coincide are one: Fit content before Fit width before Trim margins', () => {
     expect(fitLevels({ width: 1.2, content: 1.22 })).toEqual([{ fit: 'content', z: 1.22 }]);
     expect(fitLevels({ width: 1.1, content: 0.9 }).map(f => f.fit)).toEqual(['content', 'width']);
+    // a wide pane: Fit content is the whole page's content (by its height), Trim margins past Fit width
+    expect(fitLevels({ width: 1.1, content: 0.9, margins: 1.5 }).map(f => f.fit)).toEqual(['content', 'width', 'margins']);
+    // a narrow pane: Fit content spans the width — Trim margins is the same
+    expect(fitLevels({ width: 1.1, content: 1.5, margins: 1.52 }).map(f => f.fit)).toEqual(['width', 'content']);
+    // pages without margins (a beamer PDF): nothing to trim
+    expect(fitLevels({ width: 1.1, content: 0.8, margins: 1.12 }).map(f => f.fit)).toEqual(['content', 'width']);
+    expect(stepZoom(1.1, 1, { width: 1.1, content: 0.9, margins: 1.5 })).toBe(1.25);
+    expect(stepZoom(1.25, 1, { width: 1.1, content: 0.9, margins: 1.5 })).toBe('margins');
+  });
+
+  it('a step (a wheel\'s notch, − / +) stops at a level on its way', () => {
+    const ds = [{ key: 'fit', z: 0.6, hold: 0.3 }];
+    expect(stepOnto(0.5, 1.25, ds)).toEqual({ zoom: 'fit', z: 0.6 });   // (0.625 would have passed it)
+    expect(stepOnto(0.6, 1.25, ds).zoom).toBeCloseTo(0.75);
+    expect(stepOnto(0.75, 0.8, ds)).toEqual({ zoom: 'fit', z: 0.6 });
+    expect(stepOnto(0.3, 1.25, ds).zoom).toBeCloseTo(0.375);
   });
 });
 

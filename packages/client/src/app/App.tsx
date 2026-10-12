@@ -40,6 +40,7 @@ import { PdfPanel, stateFromBuild, jobActive, EMPTY_PDF, type PdfState } from '.
 import { Ruler, NOTE_SCALE_DEFAULT, NOTE_SCALE_MIN, NOTE_SCALE_MAX } from './Ruler';
 import { useNotesPane, NotesSash } from './notespane';
 import { StatusBar, SaveIndicator, ZoomControl, type Status } from './StatusBar';
+import { CornerButton } from './CornerButton';
 import { SourcePane, type SourceTarget, cursorLine, docBlocks, blockPos } from './SourcePane';
 import { activeMathField, mathFocusListeners, mathCursorListeners, type LyxMathField } from '../editor/lyxmath/field';
 import { Tour, InterfacePrompt, tourWanted, rememberTour, type TourEnd } from './Tour';
@@ -1571,13 +1572,12 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         );
       })()}
       <div class="main">
-        {showFiles ? (
+        {/* (hidden, its button is in the bottom-left corner: StatusBar `corner`) */}
+        {showFiles && (
           <div class="sidebar left">
             <DocPanel current={textId} currentDoc={isLyxDoc ? docId : null} refreshKey={refreshKey} outline={outline} activePos={activePos} view={masterView}
               onOpen={(id, o) => openInTab(id, o)} onHide={() => setShowFiles(false)} onProject={setCurProject} notify={notify} />
           </div>
-        ) : (
-          <div class="rail left"><button data-rail="outline" title={LEFT_TITLE} onClick={() => setShowFiles(true)}>Files</button></div>
         )}
         {showFiles && <SidebarGrip side="left" />}
         <div class={'editor-column panes' + (isLyxDoc && shownPanes.length > 1 ? ' split' : '')} ref={columnRef}>
@@ -1643,6 +1643,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         docLabel={view && masterView && view !== masterView ? viewDocId(view).split('/').pop() ?? null : null}
         readOnly={!!docId && viewOnly} updateReady={updateReady} aiBusy={aiBusy > 0}
         quiet={!!docId && !isLyxDoc} stats={docStats} zoom={zoom} onZoom={setZoom}
+        corner={!showFiles && <CornerButton icon="files" title={LEFT_TITLE} data-rail="outline" onClick={() => setShowFiles(true)}>Files</CornerButton>}
         pdf={isLyxDoc ? { state: pdf, onClick: rebuild => { if (rebuild && !pdf.busy) void build(); else if (!pdfPaneVisible) changePanes(l => (narrowPanes ? { ...setPaneShown(l, 'pdf', true), order: ['pdf', ...l.order.filter(p => p !== 'pdf')] } : setPaneShown(l, 'pdf', true))); } } : undefined} />
       {renderDialog()}
       {shareFor && <ShareDialog project={shareFor} user={user} onClose={() => setShareFor(null)} onChanged={() => setRefreshKey(k => k + 1)} />}

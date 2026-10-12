@@ -309,7 +309,6 @@ html[data-ui="modern"] .ruler { background: var(--m-canvas); }
 
 /* ------------------------------------------------------------ the side rails: square keys */
 html[data-ui="modern"] .rail { width: 48px; padding: 8px 0; gap: 4px; align-items: center; background: var(--ui-bg); border: 0; border-left: 1px solid var(--m-line2); }
-html[data-ui="modern"] .rail.left { width: 44px; padding: 4px 0; border: 1px solid var(--m-line2); border-left: 0; border-radius: 0 12px 12px 0; }   /* (a tab over the edge: styles.css) */
 html[data-ui="modern"] .rail button { writing-mode: horizontal-tb; transform: none !important; width: 36px; height: 36px; margin: 0; padding: 0; border-radius: 8px; font-size: 0; color: var(--m-ink2); display: flex; align-items: center; justify-content: center; }
 html[data-ui="modern"] .rail button::before { content: ''; width: 18px; height: 18px; background: currentColor; -webkit-mask: var(--icon) center / 18px no-repeat; mask: var(--icon) center / 18px no-repeat; }
 html[data-ui="modern"] .rail button:hover { background: var(--m-hover); color: var(--m-ink); }
@@ -400,7 +399,6 @@ html[data-ui="modern"] .dl-notes { border-top: 1px solid var(--m-line2); backgro
 html[data-ui="modern"] .dl-notes textarea { background: var(--m-paper); border: 1px solid var(--m-line2); border-radius: 8px; margin: 8px 12px; width: calc(100% - 24px); height: calc(100% - 16px); }
 html[data-ui="modern"] .dl-notes-hide { top: 12px; right: 18px; }
 html[data-ui="modern"] .tb-btn.active .tb-ink-width { background: currentColor; }   /* the width dot on the inverted (dark) active button */
-html[data-ui="modern"] .dl-notes-show { background: var(--ui-bg); border-top: 1px solid var(--m-line2); padding: 0 16px; }
 html[data-ui="modern"] .dk-size { border-radius: 5px; border-color: var(--m-line); background: var(--m-field); }
 html[data-ui="modern"] .dl-refocus { border-radius: var(--m-radius); border-color: var(--m-line); background: var(--m-paper); box-shadow: var(--m-shadow); font-size: 12.5px; }
 html[data-ui="modern"] .dl-refocus.lost { background: var(--m-press); color: var(--m-on-press); }
@@ -446,7 +444,6 @@ html[data-ui="modern"] .rail button[data-rail="versions"] { --icon: url("data:im
 html[data-ui="modern"] .rail button[data-rail="agent"] { --icon: url("data:image/svg+xml;utf8,<svg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27black%27 stroke-width=%271.7%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27><path d=%27M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z%27/><path d=%27M20 2v4%27/><path d=%27M22 4h-4%27/><circle cx=%274%27 cy=%2720%27 r=%272%27/></svg>"); }
 html[data-ui="modern"] .rail button[data-rail="pdf"] { --icon: url("data:image/svg+xml;utf8,<svg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27black%27 stroke-width=%271.7%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27><path d=%27M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z%27/><path d=%27M14 2v5a1 1 0 0 0 1 1h5%27/><path d=%27M10 9H8%27/><path d=%27M16 13H8%27/><path d=%27M16 17H8%27/></svg>"); }
 html[data-ui="modern"] .rail button[data-rail="source"] { --icon: url("data:image/svg+xml;utf8,<svg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27black%27 stroke-width=%271.7%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27><path d=%27m18 16 4-4-4-4%27/><path d=%27m6 8-4 4 4 4%27/><path d=%27m14.5 4-5 16%27/></svg>"); }
-html[data-ui="modern"] .rail button[data-rail="outline"] { --icon: url("data:image/svg+xml;utf8,<svg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27black%27 stroke-width=%271.7%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27><path d=%27M8 5h13%27/><path d=%27M13 12h8%27/><path d=%27M13 19h8%27/><path d=%27M3 10a2 2 0 0 0 2 2h3%27/><path d=%27M3 5v12a2 2 0 0 0 2 2h3%27/></svg>"); }
 
 /* ------------------------------------------------------------ a phone */
 @media (max-width: 600px) {

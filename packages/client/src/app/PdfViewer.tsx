@@ -11,11 +11,12 @@
  * offset into it are kept, not the scroll fraction, so pages added above do not move the view).
  * `busy` draws a thin progress line along the top; `overlay` floats over the pages.
  *
- * Zoom: Fit width, Fit content (past the margins: the pages cropped to what is painted on them, as big
- * as the pane takes them — pdfzoom.ts) and the steps between, from the toolbar or a mouse wheel's
- * notches with Ctrl/⌘; or a pinch on a trackpad (Ctrl + wheel in Chromium and Firefox, the gesture
- * events in Safari), about the pointer, which stops at the fits and holds there. While a pinch goes on
- * the drawn pages are stretched; they are drawn anew once it settles. A page whose canvas would exceed
+ * Zoom: Fit width, Trim margins and Fit content (past the margins: the pages cropped to what is painted
+ * on them, as wide as the pane, or as big as it takes them — pdfzoom.ts) and the steps between, from the
+ * toolbar or a mouse wheel's notches with Ctrl/⌘; or a pinch — a trackpad's (Ctrl + wheel in Chromium
+ * and Firefox, the gesture events in Safari), two fingers on a touch screen — about the pointer, which
+ * stops at the fits and holds there. The zoom is said over the pages while it changes (zoomhud.ts).
+ * While a pinch goes on the drawn pages are stretched; they are drawn anew once it settles. A page whose canvas would exceed
  * MAX_CANVAS_PIXELS (an A0 poster zoomed in) is drawn coarser, with a sharp detail canvas over the
  * part of it in view.
  */
@@ -29,7 +30,8 @@ import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, RenderTask } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { formRects, paintDark, useDarkPages } from './pdfdark';
 import { setPref } from '../prefs';
-import { contentLayout, inkBox, stepZoom, zoomValue, Pinch, GAP, PAD, PT, WIDTH_SPARE, ZOOMS, type Box, type Fit, type Geo, type Levels, type Zoom } from './pdfzoom';
+import { contentLayout, inkBox, stepZoom, zoomValue, Pinch, FIT_NAMES, GAP, PAD, PT, WIDTH_SPARE, ZOOMS, type Box, type Fit, type Geo, type Levels, type Zoom } from './pdfzoom';
+import { zoomPill } from './zoomhud';
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/legacy/build/pdf.worker.min.mjs', import.meta.url).toString();
 
@@ -99,8 +101,8 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay }:
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null);
   const [pages, setPages] = useState<PageInfo[]>([]);
   const [error, setError] = useState<string | null>(null);
-  /** Fit width, Fit content (past the margins), or a factor on 96 dpi */
-  const [zoom, setZoom] = useState<Zoom>(() => { try { return localStorage.getItem(FIT_KEY) === 'content' ? 'content' : 'width'; } catch { return 'width'; } });
+  /** Fit width, Trim margins, Fit content (the two past the margins), or a factor on 96 dpi */
+  const [zoom, setZoom] = useState<Zoom>(() => { try { const f = localStorage.getItem(FIT_KEY); return f === 'content' || f === 'margins' ? f : 'width'; } catch { return 'width'; } });
   /** a fit's pages stretched a little: a pinch held at the fit pulls at it (pdfzoom.ts GIVE) */
   const [stretch, setStretch] = useState(1);
   /** the pane's inner size (px) */
@@ -108,9 +110,9 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay }:
   const width = pane.width;
   const [current, setCurrent] = useState(1);
   const [flash, setFlash] = useState<{ page: number; x: number; y: number; w: number; h: number } | null>(null);
-  /** a pinch has just caught a fit: its name, for a moment */
-  const [caught, setCaught] = useState<Fit | null>(null);
-  const caughtTimer = useRef(0);
+  /** the zoom said over the pages while it changes */
+  const hudEl = useRef<HTMLDivElement>(null);
+  const hud = useMemo(() => zoomPill(() => hudEl.current), []);
   const rendered = useRef(new Map<number, PageState>());
   const canvases = useRef(new Map<number, HTMLCanvasElement>());
   /** per page, the sharp canvas over the part in view when the page's own canvas is coarse */
@@ -147,13 +149,14 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay }:
   const anchor = useRef<{ page: number; y: number } | null>(null);
 
   const widthScale = (p: PageInfo) => Math.max(0.2, (width - WIDTH_SPARE) / p.width);
-  // Fit content: the pages cropped to what is painted on them (pdfzoom.ts)
+  // Fit content, Trim margins: the pages cropped to what is painted on them (pdfzoom.ts)
   const content = useMemo(() => (pages.length && width ? contentLayout(pages, pages.map((_, i) => boxes.current.get(i + 1)), pane) : null), [pages, width, pane.height, boxesVer]);
-  const levels: Levels = pages.length && width ? { width: widthScale(pages[0]) / PT, content: (content?.scale ?? content?.geo[0]?.scale ?? 0) / PT || undefined } : {};
+  const levels: Levels = pages.length && width ? { width: widthScale(pages[0]) / PT, content: (content?.scale ?? content?.geo[0]?.scale ?? 0) / PT || undefined, margins: content?.wide ? content.wide.scale / PT : undefined } : {};
   /** every page's scale (px per pt) and the part of it shown */
   const geo = useMemo<Geo[]>(() => pages.map((p, i) => {
     if (zoom === 'content' && content) return { scale: content.geo[i].scale * stretch, crop: content.geo[i].crop };
-    // (Fit content before the pane's size is known: as Fit width)
+    if (zoom === 'margins' && content?.wide) return { scale: content.wide.geo[i].scale * stretch, crop: content.wide.geo[i].crop };
+    // (Fit content before the pane's size is known, Trim margins before a page is measured: as Fit width)
     return { scale: typeof zoom === 'string' ? widthScale(p) * stretch : zoom * PT, crop: { x: 0, y: 0, w: p.width, h: p.height } };
   }), [pages, zoom, stretch, content, width]);
   const tops = useMemo(() => topsOf(geo), [geo]);
@@ -194,7 +197,7 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay }:
     for (const s of rendered.current.values()) s.task?.cancel();
     for (const t of retired.current) void t.destroy();
     void shownTask.current?.destroy();
-    clearTimeout(caughtTimer.current);
+    hud.dispose();
     cancelAnimationFrame(springRaf.current);
     if (gesture.current) clearTimeout(gesture.current.timer);
   }, []);
@@ -221,8 +224,8 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay }:
       if (raf) return;
       raf = requestAnimationFrame(() => {
         raf = 0;
-        // Fit content's pages change size: the reader stays at the same place
-        if (layoutRef.current.zoom === 'content' && !anchor.current) anchor.current = readAnchor();
+        // the pages past the margins change size: the reader stays at the same place
+        if ((layoutRef.current.zoom === 'content' || layoutRef.current.zoom === 'margins') && !anchor.current) anchor.current = readAnchor();
         setBoxesVer(v => v + 1);
       });
     };
@@ -274,6 +277,7 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay }:
     zoomNow.current = p.zoom;
     setZoom(p.zoom);
     setStretch(p.stretch);
+    hud.show(zoomValue(p.zoom, layoutRef.current.levels), typeof p.zoom === 'string' ? FIT_NAMES[p.zoom] : null);
   };
   /** the fit chosen last is the next viewer's */
   const remember = (z: Zoom) => { if (typeof z === 'string') try { localStorage.setItem(FIT_KEY, z); } catch { /* storage unavailable */ } };
@@ -302,11 +306,6 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay }:
   };
   /** a zoom chosen from the menu */
   const choose = (z: Zoom) => { springStop(); remember(z); const m = middle(); request(z, 1, m.x, m.y); };
-  const showCaught = (f: Fit) => {
-    setCaught(f);
-    clearTimeout(caughtTimer.current);
-    caughtTimer.current = window.setTimeout(() => setCaught(null), 900);
-  };
   /** a pinch's step (log of the factor) about the pointer: on through the levels, stopping at the fits (pdfzoom.ts Pinch) */
   const pinchBy = (d: number, x: number, y: number, timed: boolean) => {
     springStop();
@@ -316,7 +315,6 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay }:
     clearTimeout(g.timer);
     if (timed) g.timer = window.setTimeout(endPinch, PINCH_END_MS);
     const shown = g.pinch.by(d, layoutRef.current.levels);
-    if (shown.caught) showCaught(shown.caught);
     request(shown.zoom, shown.stretch, x, y);
   };
   /** the pinch let go: held at a fit, or near one, it springs onto it */
@@ -331,7 +329,7 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay }:
     springTo(s.zoom, s.from, g.x, g.y);
   };
 
-  // a pinch on a trackpad (Ctrl + wheel; Safari's gesture events), or a mouse wheel's notches with Ctrl/⌘
+  // a pinch on a trackpad (Ctrl + wheel; Safari's gesture events) or with two fingers, or a mouse wheel's notches with Ctrl/⌘
   useEffect(() => {
     const el = host.current;
     if (!el) return;
@@ -345,10 +343,32 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay }:
       if (e.deltaMode !== 0 || Math.abs(dy) >= 50) { if (!gesture.current) step(dy < 0 ? 1 : -1, e.clientX, e.clientY); return; }
       pinchBy(-dy * 0.01, e.clientX, e.clientY, true);
     };
-    // Safari's trackpad pinch: its scale is from where the pinch began
+    // two fingers on a touch screen (an iPad, a phone): the viewer's pinch, not the browser's — about
+    // their middle, which pans the pages as it moves; one finger scrolls as ever
+    let touch: { d: number; x: number; y: number } | null = null;
+    const two = (t: TouchList) => ({ d: Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY), x: (t[0].clientX + t[1].clientX) / 2, y: (t[0].clientY + t[1].clientY) / 2 });
+    const onTouch = (e: TouchEvent) => {
+      if (e.type === 'touchstart') {
+        if (e.touches.length === 2) { e.preventDefault(); touch = two(e.touches); }
+        return;
+      }
+      if (e.type === 'touchmove') {
+        if (!touch || e.touches.length < 2) return;
+        e.preventDefault();
+        const now = two(e.touches);
+        el.scrollLeft -= now.x - touch.x;
+        el.scrollTop -= now.y - touch.y;
+        if (now.d > 0 && touch.d > 0 && now.d !== touch.d) pinchBy(Math.log(now.d / touch.d), now.x, now.y, false);
+        touch = now;
+        return;
+      }
+      if (touch && e.touches.length < 2) { touch = null; endPinch(); }
+    };
+    // Safari's trackpad pinch: its scale is from where the pinch began (on an iPad the fingers' touches are the measure)
     let last = 1;
     const onGesture = (e: Event & { scale?: number; clientX?: number; clientY?: number }) => {
       e.preventDefault();
+      if (touch) return;
       if (e.type === 'gestureend') { endPinch(); return; }
       if (e.type === 'gesturestart') { last = 1; return; }
       const s = e.scale ?? 1;
@@ -359,9 +379,11 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay }:
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     for (const t of ['gesturestart', 'gesturechange', 'gestureend']) el.addEventListener(t, onGesture as EventListener, { passive: false });
+    for (const t of ['touchstart', 'touchmove', 'touchend', 'touchcancel']) el.addEventListener(t, onTouch as EventListener, { passive: false });
     return () => {
       el.removeEventListener('wheel', onWheel);
       for (const t of ['gesturestart', 'gesturechange', 'gestureend']) el.removeEventListener(t, onGesture as EventListener);
+      for (const t of ['touchstart', 'touchmove', 'touchend', 'touchcancel']) el.removeEventListener(t, onTouch as EventListener);
     };
   }, []);
 
@@ -555,10 +577,11 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay }:
         <button class="small-btn" title="Next page" onClick={() => gotoPage(current + 1)}>›</button>
         <span class="pdf-sep" />
         <button class="small-btn" title="Zoom out" onClick={() => step(-1)}>−</button>
-        <select class="pdf-zoom" data-pdf-zoom value={zoomPick} onChange={e => { const v = (e.target as HTMLSelectElement).value; if (v !== 'custom') choose(v === 'width' || v === 'content' ? v : Number(v)); }}
-          title={`Zoom (${Math.round(shownZoom * 100)} %). Fit content zooms past the margins: what is printed on the pages, as big as the pane takes it. A pinch stops at Fit width and Fit content.`}>
-          <option value="width">Fit width</option>
-          <option value="content">Fit content</option>
+        <select class="pdf-zoom" data-pdf-zoom value={zoomPick} onChange={e => { const v = (e.target as HTMLSelectElement).value; if (v !== 'custom') choose(v in FIT_NAMES ? v as Fit : Number(v)); }}
+          title={`Zoom (${Math.round(shownZoom * 100)} %). Trim margins and Fit content zoom past the margins: what is printed on the pages as wide as the pane, or as big as the pane takes it. A pinch stops at the fits.`}>
+          <option value="width">{FIT_NAMES.width}</option>
+          <option value="margins">{FIT_NAMES.margins}</option>
+          <option value="content">{FIT_NAMES.content}</option>
           {zoomPick === 'custom' && <option value="custom">{Math.round(shownZoom * 100)}%</option>}
           {ZOOMS.map(z => <option key={z} value={String(z)}>{Math.round(z * 100)}%</option>)}
         </select>
@@ -572,7 +595,7 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay }:
       <div class="pdf-stage">
         {busy && <div class="pdf-busy-line" aria-hidden="true" />}
         {overlay}
-        {caught && <div class="pdf-zoom-hud" aria-hidden="true">{caught === 'content' ? 'Fit content' : 'Fit width'}</div>}
+        <div ref={hudEl} class="zoom-hud" aria-hidden="true" data-pdf-zoomhud />
         <div class={'pdf-pages' + (typeof zoom === 'string' ? ' fitted' : '')} ref={host} data-zoom={typeof zoom === 'string' ? zoom : undefined}>
           {error && <div class="pdf-error">Could not open the PDF: {error}</div>}
           {pages.map((p, i) => {

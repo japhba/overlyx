@@ -21,6 +21,7 @@ import { HIGHLIGHT_OPACITY, LASER_COLOR, LASER_FADE_MS, getInk, setInk, subscrib
 import { InkColorPicker, InkWidthPicker, widthDotPx } from './InkPickers';
 import { useUiMode } from './uimode';
 import { MODERN_ICONS, iconSvg } from './modernicons';
+import { hostedZoomPill } from './zoomhud';
 
 export interface BoardObj {
   t: 'stroke' | 'img' | 'note';
@@ -70,6 +71,15 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
   const [, bump] = useState(0);
   const rerender = () => bump(t => t + 1);
   const [cam, setCam] = useState<Camera>({ tx: 0, ty: 0, s: 1 });
+  // the zoom said over the board while it changes (zoomhud.ts); "Fit" right after Zoom to fit everything
+  const pill = useMemo(() => hostedZoomPill(() => vpRef.current, 'data-board-zoomhud'), []);
+  const shownS = useRef<number | null>(null);
+  const fitS = useRef<number | null>(null);
+  useEffect(() => {
+    if (shownS.current !== null && shownS.current !== cam.s) pill.show(cam.s, fitS.current === cam.s ? 'Fit' : null);
+    shownS.current = cam.s;
+  }, [cam.s]);
+  useEffect(() => () => pill.dispose(), []);
   const camRef = useRef(cam); camRef.current = cam;
   const [tool, setToolState] = useState<Tool>('select');
   const toolRef = useRef(tool); toolRef.current = tool;
@@ -176,6 +186,7 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     if (minX > maxX) return;
     const pad = 60;
     const s = Math.min(2, Math.max(0.1, Math.min((vp.clientWidth - pad * 2) / Math.max(50, maxX - minX), (vp.clientHeight - pad * 2) / Math.max(50, maxY - minY))));
+    fitS.current = s;
     setCam({ s, tx: (vp.clientWidth - (maxX + minX) * s) / 2, ty: (vp.clientHeight - (maxY + minY) * s) / 2 });
   };
 

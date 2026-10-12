@@ -299,13 +299,13 @@ test.describe('sidebars', () => {
     await expect(page.locator('.docpanel .doc-tab.active .outline-item').first()).toBeVisible();
     await expect(page.locator('.docpanel .filetree .doc-tab.active > .tree-row.current')).toHaveCount(1);   // one tree: the document's row is a file row, its outline under it
     await expect(page.locator('.tabbar')).toHaveCount(0);
-    await expect(page.locator('.rail.left')).toHaveCount(0);
+    await expect(page.locator('[data-rail="outline"]')).toHaveCount(0);
     await expect(page.locator('.rail.right')).toBeVisible();
     for (const t of ['comments', 'source', 'pdf', 'versions']) await expect(page.locator(`.rail.right [data-rail="${t}"]`)).toBeVisible();
     // hide the documents panel: a rail takes its place
     await page.locator('.docpanel .hide').click();
     await expect(page.locator('.sidebar.left')).toHaveCount(0);
-    await expect(page.locator('.rail.left [data-rail="outline"]')).toBeVisible();
+    await expect(page.locator('[data-rail="outline"]')).toBeVisible();
     // the right rail opens the panel that was clicked
     await page.locator('.rail.right [data-rail="versions"]').click();
     await expect(page.locator('.sidebar.right [data-tab="versions"]')).toHaveClass(/active/);
@@ -313,18 +313,18 @@ test.describe('sidebars', () => {
     // reload: the same
     await page.reload();
     await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par').length > 0, null, { timeout: 30000 });
-    await expect(page.locator('.rail.left')).toBeVisible();
+    await expect(page.locator('[data-rail="outline"]')).toBeVisible();
     await expect(page.locator('.sidebar.right [data-tab="versions"]')).toHaveClass(/active/);
     await page.locator('.sidebar.right .panel-tabs .hide').click();
     await expect(page.locator('.sidebar.right')).toHaveCount(0);
     await expect(page.locator('.rail.right')).toBeVisible();
     // the rail brings the documents panel back; Ctrl+Alt+O toggles it
-    await page.locator('.rail.left [data-rail="outline"]').click();
+    await page.locator('[data-rail="outline"]').click();
     await expect(page.locator('.sidebar.left .docpanel')).toBeVisible();
-    await expect(page.locator('.rail.left')).toHaveCount(0);
+    await expect(page.locator('[data-rail="outline"]')).toHaveCount(0);
     await page.locator('.lyx-editor > .lyx-par').first().click();
     await page.keyboard.press('Control+Alt+o');
-    await expect(page.locator('.rail.left')).toBeVisible();
+    await expect(page.locator('[data-rail="outline"]')).toBeVisible();
     await page.keyboard.press('Control+Alt+o');
     await expect(page.locator('.sidebar.left .docpanel')).toBeVisible();
   });
@@ -381,7 +381,7 @@ test.describe('command palette', () => {
     await expect(first.locator('.shortcut')).toHaveText('Ctrl+Alt+O');   // Linux: no ⌘
     await expect(first).toHaveClass(/checked/);   // the outline is shown at the moment
     await page.keyboard.press('Enter');
-    await expect(page.locator('.rail.left')).toBeVisible();   // Enter ran "View ▸ Outline": the documents panel is hidden now
+    await expect(page.locator('[data-rail="outline"]')).toBeVisible();   // Enter ran "View ▸ Outline": the documents panel is hidden now
     await expect(page.locator('[data-help-search]')).toHaveCount(0);
     // the keyboard goes back to the text
     await page.keyboard.type('HELPSEARCH');
@@ -419,9 +419,9 @@ test.describe('command palette', () => {
     await expect(page.locator('[data-help-search]')).toHaveCount(0);
     // the new key toggles the outline; the default Ctrl+Alt+O does nothing any more
     await page.keyboard.press('Control+Shift+9');
-    await expect(page.locator('.rail.left')).toBeVisible();
+    await expect(page.locator('[data-rail="outline"]')).toBeVisible();
     await page.keyboard.press('Control+Alt+o');
-    await expect(page.locator('.rail.left')).toBeVisible();
+    await expect(page.locator('[data-rail="outline"]')).toBeVisible();
     await page.keyboard.press('Control+Shift+9');
     await expect(page.locator('.sidebar.left .docpanel')).toBeVisible();
     // the same key for another command: a themed confirm (app/Dialogs.tsx); accepting moves the key over
@@ -456,7 +456,7 @@ test.describe('command palette', () => {
     await page.keyboard.press('Control+Shift+9');   // now the source pane
     await expect(page.locator('.source-pane')).toBeVisible();
     await page.keyboard.press('Control+Alt+o');    // the outline's default again
-    await expect(page.locator('.rail.left')).toBeVisible();
+    await expect(page.locator('[data-rail="outline"]')).toBeVisible();
   });
 });
 

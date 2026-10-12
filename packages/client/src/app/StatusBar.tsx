@@ -1,3 +1,4 @@
+import type { ComponentChildren } from 'preact';
 import type { SaveState, PresenceUser } from '../editor/editor';
 import { AvatarContent, initials } from './Avatar';
 import { inkOn } from './contrast';
@@ -92,7 +93,7 @@ function BuildVersion() {
   return <span class="build-version" title={`OverLyX build (UTC): ${version}`}>{version}</span>;
 }
 
-export function StatusBar({ layout, status, chord, message, save, tracking, trackingAs, change, docLabel, readOnly, quiet, updateReady, aiBusy, stats, zoom, onZoom, pdf }: {
+export function StatusBar({ layout, status, chord, message, save, tracking, trackingAs, change, docLabel, readOnly, quiet, updateReady, aiBusy, stats, zoom, onZoom, pdf, corner }: {
   layout: string; status: Status; chord: string | null; message: { text: string; kind: 'info' | 'error' } | null; save: SaveState;
   tracking: boolean; trackingAs?: string; change?: string | null; docLabel?: string | null; readOnly?: boolean;
   /** no document editor is open (start screen, text file): only messages and the build version */
@@ -107,10 +108,15 @@ export function StatusBar({ layout, status, chord, message, save, tracking, trac
   onZoom?: (z: number) => void;
   /** the PDF's age / state (a document with a PDF pane) */
   pdf?: { state: PdfStatusInput; onClick: (rebuild: boolean) => void };
+  /** the buttons of the panels folded away (the files): in the screen's bottom-left corner, never over the page */
+  corner?: ComponentChildren;
 }) {
-  if (quiet) return <div class="statusbar">{message && <span class={'msg ' + message.kind}>{message.text}</span>}<span class="spacer" /><BuildVersion /></div>;
+  // (after them, `data-statusbar-slot`: an open slide deck's folded slides and notes, DeliverableEditor's portal)
+  const start = <><span class="statusbar-corner">{corner}</span><span class="statusbar-slot" data-statusbar-slot /></>;
+  if (quiet) return <div class="statusbar">{start}{message && <span class={'msg ' + message.kind}>{message.text}</span>}<span class="spacer" /><BuildVersion /></div>;
   return (
     <div class="statusbar">
+      {start}
       <span><span class={'dot' + (status.connected ? ' on' : '')} />{status.connected ? (status.synced ? 'connected' : 'syncing…') : save.state === 'connecting' ? 'connecting…' : 'offline'}</span>
       {docLabel && <span class="doclabel" title="Document under the cursor">{docLabel}</span>}
       {document.documentElement.dataset.ui === 'modern' ? <span title="Paragraph style at the cursor">{styleLabel(layout, 'modern')}</span> : <span title="Current paragraph layout">{layout}</span>}

@@ -134,7 +134,7 @@ test('the PDF beside the document on a laptop folds the side panels away and bri
   await expect(page.locator('.sidebar.left')).toHaveCount(0);
   expect(await docWidth()).toBeGreaterThanOrEqual(600);
   // opened again by hand, the panel stays
-  await page.locator('.rail.left [data-rail="outline"]').click();
+  await page.locator('[data-rail="outline"]').click();
   await expect(page.locator('.sidebar.left')).toBeVisible();
   await page.waitForTimeout(300);
   await expect(page.locator('.sidebar.left')).toBeVisible();

@@ -1,24 +1,28 @@
 /**
- * The PDF viewer's zoom (PdfViewer.tsx): its two fits, the steps between them, and how a pinch stops
- * at a fit.
+ * The PDF viewer's zoom (PdfViewer.tsx): its three fits, the steps between them, and how a pinch
+ * stops at a fit.
  *
- * Fit content zooms past the margins: every page is cropped to what is painted on it (found by drawing
- * it small, `inkBox`) and shown as big as the pane takes it, so the content is as near the pane's edges
- * as it goes and all of it shows. In a narrow pane it spans the pane's width, in a wide one its height.
- * The typical page (the median of the pages' fits) sets the zoom, so the text is one size on every
- * page. A page with wider content (a broad table) is shown smaller so that all of it shows; a page with
- * less content is not blown up.
+ * Fit content and Trim margins zoom past the margins: every page is cropped to what is painted on it
+ * (found by drawing it small, `inkBox`). Fit content shows it as big as the pane takes it, so the
+ * content is as near the pane's edges as it goes and all of it shows: in a narrow pane it spans the
+ * pane's width, in a wide one its height. Trim margins spans the pane's width whatever its height: the
+ * margins just out of sight, the page scrolled. The typical page (the median of the pages' fits) sets
+ * the zoom, so the text is one size on every page. A page with wider content (a broad table) is shown
+ * smaller so that all of it shows; a page with less content is not blown up.
  *
- * Both fits are levels of the zoom, in order with the steps (−, +, a mouse wheel's notches). A pinch
+ * The fits are levels of the zoom, in order with the steps (−, +, a mouse wheel's notches). A pinch
  * (a trackpad's, Ctrl + wheel) stops at them. Near one it snaps onto it, and it stays there until
- * pinched well past it, Fit content most of all. Meanwhile the pages give a little and spring back
- * when let go. A pinch let go near a fit settles on it.
+ * pinched well past it, the two past the margins most of all. Meanwhile the pages give a little and
+ * spring back when let go. A pinch let go near a fit settles on it.
  */
+import { DetentPinch, CATCH, GIVE, type Detent, type Shown as DetentShown } from './zoomdetent';
 
 /** a rectangle of a page (pt from its top-left), or of a canvas (px) */
 export interface Box { x: number; y: number; w: number; h: number }
 export interface PageSize { width: number; height: number }
-export type Fit = 'width' | 'content';
+export type Fit = 'width' | 'margins' | 'content';
+/** what the fits are called (the zoom menu, the zoom said over the pages) */
+export const FIT_NAMES: Record<Fit, string> = { width: 'Fit width', margins: 'Trim margins', content: 'Fit content' };
 /** a fit, or a factor on 96 dpi */
 export type Zoom = Fit | number;
 
@@ -69,14 +73,16 @@ export interface Geo { scale: number; crop: Box }
  * Fit content: per page its scale and crop, in a pane of `pane` px (inside its padding: as wide as it
  * is, `PAD` above and below). `boxes[i]`: what is painted on page i (pt), unknown till measured. A page
  * not measured yet takes the typical crop. `scale` is the typical page's (px per pt). It is null with
- * nothing measured; then every page is fitted whole.
+ * nothing measured; then every page is fitted whole. `wide`: Trim margins, the same crops as wide as
+ * the pane (null with nothing measured).
  */
-export function contentLayout(pages: PageSize[], boxes: (Box | null | undefined)[], pane: { width: number; height: number }): { geo: Geo[]; scale: number | null } {
+export function contentLayout(pages: PageSize[], boxes: (Box | null | undefined)[], pane: { width: number; height: number }): { geo: Geo[]; scale: number | null; wide: { geo: Geo[]; scale: number } | null } {
   const aw = Math.max(40, pane.width - 2 * SIDE), ah = Math.max(40, pane.height - 2 * PAD);
-  const fit = (b: Box) => Math.min(aw / b.w, ah / b.h);
+  const fitW = (b: Box) => aw / b.w;
+  const fit = (b: Box) => Math.min(fitW(b), ah / b.h);
   const crops = pages.map((p, i) => { const b = boxes[i]; return b ? cropOf(b, p) : null; });
   const known = crops.filter((c): c is Box => !!c);
-  if (!known.length) return { geo: pages.map(p => { const crop = { x: 0, y: 0, w: p.width, h: p.height }; return { scale: fit(crop), crop }; }), scale: null };
+  if (!known.length) return { geo: pages.map(p => { const crop = { x: 0, y: 0, w: p.width, h: p.height }; return { scale: fit(crop), crop }; }), scale: null, wide: null };
   const typ = { x: median(known.map(c => c.x)), y: median(known.map(c => c.y)), w: median(known.map(c => c.w)), h: median(known.map(c => c.h)) };
   const full = pages.map((p, i) => {
     let c = crops[i];
@@ -91,18 +97,27 @@ export function contentLayout(pages: PageSize[], boxes: (Box | null | undefined)
     }
     return c;
   });
-  const scale = median(known.map(fit));
-  return { geo: full.map(crop => ({ scale: Math.min(scale, fit(crop)), crop })), scale };
+  const scale = median(known.map(fit)), wide = median(known.map(fitW));
+  return {
+    geo: full.map(crop => ({ scale: Math.min(scale, fit(crop)), crop })), scale,
+    wide: { geo: full.map(crop => ({ scale: Math.min(wide, fitW(crop)), crop })), scale: wide },
+  };
 }
 
 /** the zoom each fit shows now (a factor on 96 dpi) */
 export type Levels = Partial<Record<Fit, number>>;
 
-/** the fits as levels, lowest first; of two that nearly coincide only Fit content */
+/**
+ * The fits as levels, lowest first. Of two that nearly coincide only one: Fit content before Fit width
+ * before Trim margins (in a narrow pane Fit content spans the width too; pages without margins, a
+ * beamer PDF's, have none to trim).
+ */
 export function fitLevels(l: Levels): { fit: Fit; z: number }[] {
   const out: { fit: Fit; z: number }[] = [];
-  if (l.content) out.push({ fit: 'content', z: l.content });
-  if (l.width && !(l.content && Math.abs(Math.log(l.width / l.content)) < CATCH)) out.push({ fit: 'width', z: l.width });
+  for (const fit of ['content', 'width', 'margins'] as const) {
+    const z = l[fit];
+    if (z && out.every(f => Math.abs(Math.log(z / f.z)) >= CATCH)) out.push({ fit, z });
+  }
   return out.sort((a, b) => a.z - b.z);
 }
 
@@ -120,80 +135,29 @@ export function stepZoom(cur: number, dir: 1 | -1, l: Levels): Zoom {
   return (next ?? (dir > 0 ? all[all.length - 1] : all[0])).zoom;
 }
 
-/** how far (log of the factor) a pinch must go on past a fit to leave it: Fit content holds on hardest */
-export const HOLD: Record<Fit, number> = { width: Math.log(1.2), content: Math.log(1.45) };
-/** a pinch coming this near a fit (log) snaps onto it; let go this near one, the zoom settles on it */
-export const CATCH = Math.log(1.07);
-/** the share of a pinch held at a fit that shows: the pages give a little */
-export const GIVE = 0.25;
+/** how far (log of the factor) a pinch must go on past a fit to leave it: the two past the margins hold on hardest */
+export const HOLD: Record<Fit, number> = { width: Math.log(1.2), margins: Math.log(1.45), content: Math.log(1.45) };
+export { CATCH, GIVE };
 
 /** what a pinch shows: a zoom, and a fit's pages stretched by `stretch` (the give) */
-export interface Shown { zoom: Zoom; stretch: number; caught?: Fit }
+export type Shown = DetentShown<Fit>;
 
-const clampLog = (l: number) => Math.max(Math.log(MIN_ZOOM), Math.min(Math.log(MAX_ZOOM), l));
+/** the fits a pinch stops at (zoomdetent.ts) */
+const detentsOf = (l: Levels): Detent<Fit>[] => fitLevels(l).map(f => ({ key: f.fit, z: f.z, hold: HOLD[f.fit] }));
 
 /**
  * One pinch: its steps (`by`, log of the factor) through the zoom levels, stopping at the fits. It
  * begins at the zoom shown, held at it if that is a fit.
  */
 export class Pinch {
-  /** the fit it is held at, and how far it has pulled at it since (log) */
-  held: Fit | null = null;
-  strain = 0;
+  private p: DetentPinch<Fit>;
+  constructor(start: Zoom, l: Levels) { this.p = new DetentPinch<Fit>(start, zoomValue(start, l), [MIN_ZOOM, MAX_ZOOM]); }
+  /** the fit it is held at */
+  get held(): Fit | null { return this.p.held; }
   /** the zoom shown (log), the give left out */
-  at: number;
-  /** the fit it left, not caught again till the pinch has gone a little further away */
-  private away: Fit | null = null;
-
-  constructor(start: Zoom, l: Levels) {
-    this.at = Math.log(zoomValue(start, l));
-    if (typeof start === 'string') this.held = start;
-  }
-
-  by(d: number, l: Levels): Shown {
-    if (this.held) {
-      const lv = l[this.held];
-      if (lv === undefined) { this.held = null; return this.by(d, l); }
-      this.strain += d;
-      const hold = HOLD[this.held];
-      if (Math.abs(this.strain) < hold) return { zoom: this.held, stretch: Math.exp(GIVE * this.strain) };
-      // pulled loose: on from where the give had taken it, so nothing jumps
-      this.at = clampLog(Math.log(lv) + Math.sign(this.strain) * (GIVE * hold + Math.abs(this.strain) - hold));
-      this.away = this.held;
-      this.held = null;
-      this.strain = 0;
-      return { zoom: Math.exp(this.at), stretch: 1 };
-    }
-    const from = this.at, to = clampLog(from + d);
-    // a fit passed on the way, or close ahead: caught (the way past it pulls at it)
-    let best: { fit: Fit; l: number } | null = null;
-    for (const f of fitLevels(l)) {
-      if (f.fit === this.away) continue;
-      const lf = Math.log(f.z);
-      const passed = from !== lf && (from - lf) * (to - lf) <= 0;
-      const near = Math.abs(to - lf) < CATCH && Math.abs(to - lf) < Math.abs(from - lf);
-      if ((passed || near) && (!best || Math.abs(lf - from) < Math.abs(best.l - from))) best = { fit: f.fit, l: lf };
-    }
-    if (best) {
-      this.held = best.fit;
-      this.at = best.l;
-      this.strain = (to - best.l) * Math.sign(to - from) > 0 ? to - best.l : 0;
-      const shown = this.by(0, l);
-      return this.held ? { ...shown, caught: best.fit } : shown;
-    }
-    if (this.away && Math.abs(to - Math.log(l[this.away] ?? Math.exp(to))) > 2 * CATCH) this.away = null;
-    this.at = to;
-    return { zoom: Math.exp(to), stretch: 1 };
-  }
-
+  get at(): number { return this.p.at; }
+  set at(v: number) { this.p.at = v; }
+  by(d: number, l: Levels): Shown { return this.p.by(d, detentsOf(l)); }
   /** let go: the fit it settles on and the stretch it springs back from (to 1); null: it stays as it is */
-  end(l: Levels): { zoom: Fit; from: number } | null {
-    if (this.held) return { zoom: this.held, from: Math.exp(GIVE * this.strain) };
-    let best: { fit: Fit; d: number } | null = null;
-    for (const f of fitLevels(l)) {
-      const d = this.at - Math.log(f.z);
-      if (Math.abs(d) < CATCH && (!best || Math.abs(d) < Math.abs(best.d))) best = { fit: f.fit, d };
-    }
-    return best && { zoom: best.fit, from: Math.exp(best.d) };
-  }
+  end(l: Levels): { zoom: Fit; from: number } | null { return this.p.end(detentsOf(l)); }
 }
