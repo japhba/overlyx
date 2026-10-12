@@ -56,6 +56,8 @@ export interface DeckCtx {
   remove(): void;
   slideBackground(c: string | null): void;
   canvas: { view: CanvasView; set(v: Partial<CanvasView>): void };
+  /** the guides (guides.ts): shown or not, and what can be done with them (the slide's right-click menu's Guides) */
+  guides: { shown: boolean; items(): { label: string; action: () => void; active?: boolean }[] };
   newSlide(): void;
   /** LyX's formula editor (MathOverlay): open on a formula of the text, a new formula at the caret, its commands, the math panels; a displayed one numbered and labelled */
   math: { editing: boolean; insert(display: boolean): void; exec(cmd: string, ...args: unknown[]): void; panels: { id: string; title: string; palette: Palette }[]; display: boolean; number(): void; label(): void };
@@ -515,6 +517,17 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
             <label class="dk-check"><input type="checkbox" checked={v.pageChecker} onChange={e => c.canvas.set({ pageChecker: (e.target as HTMLInputElement).checked })} /> Checkerboard under the slides (shows transparency)</label>
             <div class="dk-pal-title">Canvas colour</div>
             <ColorGrid current={v.desk} close={close} none="Same as the page" onPick={col => c.canvas.set({ desk: col, deskChecker: false })} />
+          </div>
+        ) } },
+      { id: 'dk-guides', title: 'Guides: lines objects snap to — every slide’s (the master’s) and a slide’s own; drag one to move it (Alt: a copy), off the slide to remove it (also: right-click the slide)', icon: 'dk-guides', active: c.guides.shown,
+        // (what can be done, worked out when it opens: it reads the deck's guides)
+        palette: { title: 'Guides', list: true, render: close => (
+          <div class="tb-popup-grid">
+            {c.guides.items().map((it, i) => (
+              <button key={i} type="button" class={'tb-pal-item' + (it.active ? ' active' : '')} data-guides-item={it.label} onMouseDown={e => e.preventDefault()} onClick={() => { close(); it.action(); }}>
+                <span class="tb-pal-label">{it.active ? '✓ ' : ''}{it.label}</span>
+              </button>
+            ))}
           </div>
         ) } },
       // (a poster is one page: a "slide" added to it was invisible — no rail — and a blank page of the PDF)

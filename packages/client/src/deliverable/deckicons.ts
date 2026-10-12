@@ -83,6 +83,7 @@ Object.assign(ICONS, {
   'dk-duplicate': I('<rect x="2.5" y="5.5" width="8" height="8" rx="1"/><path d="M5.5 5.5V3.5a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-2"/>'),
   'dk-delete': I('<path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 9h5.6l.7-9"/>'),
   'dk-background': I('<rect x="1.5" y="3" width="13" height="10" rx="1"/><path d="M1.5 10.5l4-3.5 3 2.5 2-1.5 4 3" fill="currentColor" fill-opacity="0.25"/>'),
+  'dk-guides': I('<rect x="1.5" y="1.5" width="13" height="13" rx="1"/><path d="M5.5 1.5v13M1.5 10h13" stroke-dasharray="1.6 1.2"/>'),
   'dk-canvas': I('<rect x="1.5" y="1.5" width="13" height="13" rx="1" stroke-dasharray="1.6 1.2"/><rect x="4" y="5" width="8" height="6" rx="0.5" fill="currentColor" fill-opacity="0.25"/>'),
   'dk-present': F('<path d="M4.5 2.5l9 5.5-9 5.5z"/>'),
   'dk-code': I('<path d="M5.5 4L2 8l3.5 4M10.5 4L14 8l-3.5 4"/>'),

@@ -21,6 +21,7 @@ import { startMath, typesetPage } from './math';
 import { renderCites, refreshCites, addEntries, CITE_CSS } from './cite';
 import { applySource, whenTypeset } from './reconcile';
 import * as edit from './edit';
+import { setGuidesShown } from './guides';
 import { weave } from './weave';
 import { arrange, paint, valign, restack } from './arrange';
 import { wantObjects } from './objects';
@@ -244,6 +245,7 @@ function onMessage(e: MessageEvent): void {
     case 'scrollTo': if (MODE === 'edit') edit.scrollToSlide(m.slide, m.smooth); else if (MODE === 'thumb') railShow(m.slide); break;
     case 'scale': if (MODE === 'edit') edit.setScale(m.scale, m.anchor); else { railScale = m.scale; drawRail(); } break;
     case 'tool': if (MODE === 'edit') edit.setTool(m.tool, m.ink); break;
+    case 'guides': if (MODE === 'edit') setGuidesShown(m.show); break;
     case 'exec': if (MODE === 'edit') edit.exec(m.command, m.value); break;
     case 'peers': if (MODE === 'edit') edit.setPeers(m.peers); else if (MODE === 'thumb') { railPeers = m.peers; drawRail(); } break;
     case 'dark': if (MODE === 'edit' || MODE === 'thumb') { setDarkSlides(m.invert, !!m.figures); if (MODE === 'thumb') railDesk(m.desk); } break;

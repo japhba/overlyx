@@ -44,6 +44,7 @@ import { reviewOverlay, bindPins, setReviewHover, showGhost, lockDeletions, trac
 import { initListDrag, hoverList, notePointer, listParts, bindListGrips, listDragging, stepItem, LIST_DRAG_CSS } from './listdrag';
 import { clipOf, postClip, paste } from './clip';
 import { weaveMenu } from './weave';
+import { initGuides, guideSlide, guideAt, guideSnaps, guideParts, startGuideDrag, moveGuideDrag, endGuideDrag, GUIDES_CSS } from './guides';
 
 const NS = 'http://www.w3.org/1999/xhtml';
 let host: HTMLElement;
@@ -97,6 +98,7 @@ export function startEditing(): void {
       background: linear-gradient(#2f6fde, #2f6fde) center / 1.5px 100% no-repeat, linear-gradient(#2f6fde, #2f6fde) center / 100% 1.5px no-repeat; opacity: .8; }
     .lock { position: absolute; transform: translate(-100%, -100%); font-size: calc(12px * var(--s)); line-height: 1; pointer-events: none; }
     .guide { position: absolute; background: #e8467c; pointer-events: none; }
+    ${GUIDES_CSS}
     .draw { position: absolute; border: 1.5px dashed #2f6fde; background: rgba(47,111,222,.08); pointer-events: none; }
     .drop { position: absolute; border: 3px dashed #2f6fde; background: rgba(47,111,222,.10); pointer-events: none; box-sizing: border-box; }
     .tag { position: absolute; transform: translateY(calc(-100% - 3px * var(--s))); background: #2f6fde; color: #fff; padding: calc(1px * var(--s)) calc(6px * var(--s)); border-radius: calc(3px * var(--s)); white-space: nowrap; pointer-events: none; font: 600 calc(10.5px * var(--s)) / 1.35 system-ui, -apple-system, sans-serif; letter-spacing: .02em; }
@@ -114,6 +116,7 @@ export function startEditing(): void {
   layer = root.querySelector('.layer') as HTMLElement;
   document.documentElement.appendChild(host);
   initPaths({ root, scale: () => scale });
+  initGuides({ scale: () => scale, commit: ops => commit(ops), draw });
   // a list's items dragged into another order (listdrag.ts): the text being retyped, else the one box selected
   initListDrag({
     scale: () => scale,
@@ -136,6 +139,8 @@ export function startEditing(): void {
     html.ol-tool-erase, html.ol-tool-erase * { cursor: ${ERASER_CURSOR} !important; }
     html.ol-dragging, html.ol-dragging * { user-select: none !important; }
     html.ol-over-obj, html.ol-over-obj * { cursor: ${MOVE_CURSOR} !important; }
+    html.ol-on-guide-x, html.ol-on-guide-x * { cursor: col-resize !important; }
+    html.ol-on-guide-y, html.ol-on-guide-y * { cursor: row-resize !important; }
     html.ol-edit a { cursor: default; }
     ${CHIP_CSS}`;
   document.head.appendChild(css);
@@ -1022,6 +1027,8 @@ export function draw(): void {
       } else if (!isSvgPart(el) || partBox(el)) for (const [k, fx, fy] of hs) { const [x, y] = handleAt(b, fx, fy); parts.push(`<div class="handle" data-h="${k}" style="left:${x}px;top:${y}px;cursor:${cursorFor(k, b.a)};border-width:${bw}px"></div>`); }
     }
   }
+  // the guides one places (guides.ts), under the snapping lines of a drag
+  parts.push(guideParts(guideSlide(null)));
   for (const g of guides) {
     parts.push(g.axis === 'x'
       ? `<div class="guide" style="left:${g.at}px;top:${g.from}px;width:${1 / scale}px;height:${g.to - g.from}px"></div>`
@@ -1071,7 +1078,12 @@ function onHover(e: PointerEvent): void {
   if (e.pointerType === 'touch') { onTouchMove(e); return; }
   if (drag || editing) return;
   const t = e.target as Element;
-  const el = (tool === 'select' || isOrdering()) && t && !isForeign(t) ? objectFor(t, e.ctrlKey || e.metaKey, { x: e.clientX, y: e.clientY }) : null;
+  // right on a guide: its own cursor (a press takes it before the object under it)
+  const onGuide = tool === 'select' && !isOrdering() ? guideAt(guideSlide(t), e.pageX, e.pageY, 4) : null;
+  const html = document.documentElement;
+  html.classList.toggle('ol-on-guide-x', onGuide?.g.axis === 'x');
+  html.classList.toggle('ol-on-guide-y', onGuide?.g.axis === 'y');
+  const el = !onGuide && (tool === 'select' || isOrdering()) && t && !isForeign(t) ? objectFor(t, e.ctrlKey || e.metaKey, { x: e.clientX, y: e.clientY }) : null;
   if (el !== hoverEl) { hoverEl = el; setReviewHover(el); draw(); }
 }
 
@@ -1085,7 +1097,7 @@ interface DragEl {
   part?: { box: Box; form: PartForm; P: DOMMatrix; Pinv: DOMMatrix; flip: number };
 }
 interface Drag {
-  kind: 'move' | 'resize' | 'rotate' | 'end' | 'draw' | 'pen' | 'erase' | 'marquee' | 'pan';
+  kind: 'move' | 'resize' | 'rotate' | 'end' | 'draw' | 'pen' | 'erase' | 'marquee' | 'pan' | 'guide';
   /** the eraser's strokes so far (hidden until the release removes them) */
   erased?: Element[];
   x0: number; y0: number;
@@ -1184,6 +1196,14 @@ function onPointerDown(e: PointerEvent): void {
   if (tool !== 'select') {
     const slide = slideOf(t);
     drag = { ...base, kind: 'draw', slide, pts: [[x, y]] };
+    capture();
+    return;
+  }
+  // right on a guide (guides.ts): it moves — Alt / Ctrl: a copy —, dragged off the slide it goes
+  const onGuide = !e.shiftKey ? guideAt(guideSlide(t), x, y, e.pointerType === 'touch' ? 10 : 4) : null;
+  if (onGuide) {
+    drag = { ...base, kind: 'guide' };
+    startGuideDrag(onGuide.slide, onGuide.g, e.altKey || e.ctrlKey || e.metaKey, x, y);
     capture();
     return;
   }
@@ -1343,7 +1363,7 @@ function release(): void {
 
 const SNAP = 6;
 
-/** where a moved box snaps: the slide's edges and middle, the other objects' edges and middles */
+/** where a moved box snaps: the slide's edges and middle, the other objects' edges and middles, the guides */
 function snap(r: Rect, skip: Set<Element>, slide: HTMLElement | null, axisMoves: { x: boolean; y: boolean }): { dx: number; dy: number } {
   guides = [];
   if (!slide) return { dx: 0, dy: 0 };
@@ -1358,6 +1378,10 @@ function snap(r: Rect, skip: Set<Element>, slide: HTMLElement | null, axisMoves:
     xs.push(q.x, q.x + q.w / 2, q.x + q.w);
     ys.push(q.y, q.y + q.h / 2, q.y + q.h);
   }
+  // the guides shown (guides.ts)
+  const ug = guideSnaps(slide);
+  xs.push(...ug.xs);
+  ys.push(...ug.ys);
   let dx = 0, dy = 0, bx = t + 1, by = t + 1, gx: number | null = null, gy: number | null = null;
   if (axisMoves.x) for (const v of [r.x, r.x + r.w / 2, r.x + r.w]) for (const s of xs) { const d = s - v; if (Math.abs(d) < bx) { bx = Math.abs(d); dx = d; gx = s; } }
   if (axisMoves.y) for (const v of [r.y, r.y + r.h / 2, r.y + r.h]) for (const s of ys) { const d = s - v; if (Math.abs(d) < by) { by = Math.abs(d); dy = d; gy = s; } }
@@ -1373,6 +1397,8 @@ function onDragMove(e: PointerEvent): void {
   if (pinch) return;
   if (drag.kind === 'erase') { eraseAt(e, drag); return; }
   if (drag.kind === 'pen') { if (Math.hypot(e.pageX - drag.x0, e.pageY - drag.y0) * scale >= 1) drag.moved = true; moveInk(e); return; }
+  // (a guide follows the pointer from the start: it does not wait for the few px a drag needs; Ctrl / ⌘ held: no snapping)
+  if (drag.kind === 'guide') { drag.moved = true; moveGuideDrag(e.pageX, e.pageY, e.ctrlKey || e.metaKey); return; }
   const dx = e.pageX - drag.x0, dy = e.pageY - drag.y0;
   if (!drag.moved && Math.hypot(dx, dy) * scale < (drag.pointerType === 'touch' ? 6 : 3)) return;
   if (!drag.moved) {
@@ -1560,6 +1586,7 @@ function onDragEnd(e: PointerEvent): void {
   if (!d) return;
   if (d.hold) clearTimeout(d.hold);
   if (d.told) post({ ol: 'dragging', on: false });
+  if (d.kind === 'guide') { endGuideDrag(e.type === 'pointercancel' || state.version === null); return; }
   if (d.kind === 'pan') {
     if (d.moved && isSolo()) post({ ol: 'panEnd' });
     // a tap on nothing: the selection goes; on an object: that one is selected
@@ -2595,7 +2622,10 @@ function onContextMenu(e: MouseEvent): void {
   const s = slideOf(e.target as Element);
   // two shapes crossing under the pointer: the lower one can be woven over the upper one there (weave.ts)
   const woven = el ? weaveMenu(e.clientX, e.clientY, e.target as Element) : null;
-  post({ ol: 'contextmenu', x: e.clientX, y: e.clientY, on, slide: s ? slides().indexOf(s) : undefined, ...(woven ? { weave: woven } : {}) });
+  // the point of the slide (its px): a guide added there
+  const sr = s ? docRect(s) : null;
+  const at = s && sr && sr.w && sr.h ? { x: (e.pageX - sr.x) * (s.offsetWidth / sr.w), y: (e.pageY - sr.y) * (s.offsetHeight / sr.h) } : undefined;
+  post({ ol: 'contextmenu', x: e.clientX, y: e.clientY, on, slide: s ? slides().indexOf(s) : undefined, ...(woven ? { weave: woven } : {}), ...(at ? { at } : {}) });
 }
 
 /* ------------------------------------------------------------------ the slide in view */

@@ -29,7 +29,8 @@ import { keepAwake } from '../app/wakelock';
 import { presentFingersDraw, savePresentFingersDraw } from '../app/presentkit';
 import { createPortal } from 'preact/compat';
 import { isFromRuntime } from './protocol';
-import { rebasedSplices, objectHtml, imageHtml, insertPlace, newSlideHtml, slidePaths, slideNotes, notesOp, sourceRange, inlineSvgHtml } from './sourceops';
+import { rebasedSplices, objectHtml, imageHtml, insertPlace, newSlideHtml, slidePaths, slideNotes, notesOp, sourceRange, inlineSvgHtml, guidesIn } from './sourceops';
+import { GUIDES_ATTR, parseGuides, masterGuides, formatGuides, withGuide, type Guide } from './guides';
 import { sizePt, stepPt } from './units';
 import { deckToolbar, quickGroups, type DeckTextActions } from './decktoolbar';
 import { loadDeckInk, saveDeckInk, patchDeckInk, deckInkStyle, type DeckInk, type DeckInkPatch } from './deckink';
@@ -240,6 +241,12 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   /** the slide rail and the speaker notes, hidden or not (their « / ▾ buttons) */
   const [railShown, setRailShownState] = useState(() => loadShown('ol.deckSlides', true));
   const [notesShown, setNotesShownState] = useState(() => loadShown('ol.deckNotes', false));
+  /** the guides on the slides (guides.ts): shown or not, this browser's — off at first, as PowerPoint's */
+  const [guidesShown, setGuidesShown] = useState(() => { try { return localStorage.getItem('ol.deckGuides') === '1'; } catch { return false; } });
+  const guidesRef = useRef(guidesShown); guidesRef.current = guidesShown;
+  const showGuides = (on: boolean) => { guidesRef.current = on; setGuidesShown(on); saveShown('ol.deckGuides', on); toCanvas({ ol: 'guides', show: on }); };
+  /** where the slide was last right-clicked (slide px): a guide added there */
+  const menuPoint = useRef<{ x: number; y: number } | null>(null);
   /** the app's status bar: the buttons of the folded slides and notes go into its corner (none in VS Code) */
   const [cornerSlot, setCornerSlot] = useState<HTMLElement | null>(null);
   useEffect(() => { setCornerSlot(document.querySelector<HTMLElement>('[data-statusbar-slot]')); }, []);
@@ -379,7 +386,9 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     const cur = text.toString();
     if (base === undefined) { notify('The page changed meanwhile — try again.', 'error'); return false; }
     let reviewed: HtmlOp[];
-    try { reviewed = reviewOps(parseSource(base), ops, suggestStamp()); } catch { reviewed = ops; }
+    // (a guide moved is no suggestion: guides are the editor's, not the slides')
+    if (ops.every(o => o.t === 'attr' && o.name === GUIDES_ATTR)) reviewed = ops;
+    else try { reviewed = reviewOps(parseSource(base), ops, suggestStamp()); } catch { reviewed = ops; }
     const sp = rebasedSplices(base, cur, reviewed);
     if (!sp) { notify('Somebody changed that object meanwhile — try again.', 'error'); sendSource(true); return false; }
     applySplices(sp);
@@ -508,6 +517,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
             setSolo(m.solo ?? null);
             toCanvas({ ol: 'scale', scale });
             toCanvas({ ol: 'tool', tool, ink: deckInkStyle(inkRef.current, pageWRef.current) });
+            toCanvas({ ol: 'guides', show: guidesRef.current });
             toCanvas({ ol: 'view', view: shownView(viewRef.current) });
             toCanvas({ ol: 'dark', invert: darkRef.current.invert, figures: darkRef.current.figures, desk: null });
             toCanvas(reviewMsgRef.current());
@@ -599,6 +609,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
           const r = f.getBoundingClientRect();
           const s = fromRail ? railScale : scale;
           const x = r.left + m.x * s, y = r.top + m.y * s;
+          menuPoint.current = fromRail ? null : m.at ?? null;
           if (fromRail) slideMenu(x, y, m.slide ?? currentRef.current);
           else if (m.on === 'canvas') canvasMenu(x, y);
           else if (m.on === 'slide' && !selRef.current.length) emptySlideMenu(x, y, m.slide ?? currentRef.current);
@@ -1341,7 +1352,42 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
       { label: zoomRef.current > 1.01 ? 'Fit the slide' : 'Back to the slide', action: fitSlide },
     ];
   };
-  const canvasMenu = (x: number, y: number) => showContextMenu(x, y, canvasItems(x, y));
+  /**
+   * Guides (guides.ts): shown or not (this browser's); added where the slide was right-clicked — the
+   * master's (every slide) or this slide's own —; a slide's own reset to the master's, the master's
+   * made of a slide's, all reset to the slide's middle lines, or none. One undo each; never a suggestion.
+   */
+  const guideItems = (i: number, here: { x: number; y: number } | null): MenuItem[] => {
+    const g = guidesIn(text.toString());
+    const sp = g.slides[i] ?? null;
+    const box = slidesRef.current[i]?.rect, w = box?.w || pageWRef.current || 1280, h = box?.h || 720;
+    const master = masterGuides(g.master, w, h), own = parseGuides(sp?.own);
+    // (from the toolbar: through the slide's middle)
+    const at = here ?? { x: w / 2, y: h / 2 }, where = here ? ' here' : '';
+    const ro = readOnlyRef.current || !g.body;
+    const write = (ops: HtmlOp[]) => { if (ops.length && applyOps(ops, true)) showGuides(true); };
+    const masterOp = (gs: Guide[]): HtmlOp => ({ t: 'attr', path: g.body!, name: GUIDES_ATTR, value: formatGuides(gs) });
+    const ownOp = (path: Path, gs: Guide[]): HtmlOp => ({ t: 'attr', path, name: GUIDES_ATTR, value: gs.length ? formatGuides(gs) : null });
+    const owned = g.slides.filter(x => x.own !== null);
+    const clearOwn = owned.map(x => ownOp(x.path, []));
+    return [
+      { label: 'Show guides', checked: guidesRef.current, action: () => showGuides(!guidesRef.current) },
+      { sep: true },
+      { label: `Add a vertical guide${where} (every slide)`, disabled: ro, action: () => write([masterOp(withGuide(master, { axis: 'x', at: at.x }))]) },
+      { label: `Add a horizontal guide${where} (every slide)`, disabled: ro, action: () => write([masterOp(withGuide(master, { axis: 'y', at: at.y }))]) },
+      { label: `Add a vertical guide${where}, this slide only`, disabled: ro || !sp, action: () => write([ownOp(sp!.path, withGuide(own, { axis: 'x', at: at.x }))]) },
+      { label: `Add a horizontal guide${where}, this slide only`, disabled: ro || !sp, action: () => write([ownOp(sp!.path, withGuide(own, { axis: 'y', at: at.y }))]) },
+      { sep: true },
+      { label: 'Reset this slide’s guides to every slide’s', disabled: ro || !own.length, action: () => write([ownOp(sp!.path, [])]) },
+      { label: 'Make this slide’s guides every slide’s', disabled: ro || !own.length, action: () => write([masterOp([...master, ...own]), ownOp(sp!.path, [])]) },
+      { label: 'Reset all guides (the slide’s middle lines)', disabled: ro || (g.master === null && !owned.length), action: () => write([{ t: 'attr', path: g.body!, name: GUIDES_ATTR, value: null }, ...clearOwn]) },
+      { label: 'Remove all guides', disabled: ro || (!master.length && !owned.length), action: () => write([masterOp([]), ...clearOwn]) },
+    ];
+  };
+  const canvasMenu = (x: number, y: number) => showContextMenu(x, y, [
+    ...canvasItems(x, y),
+    ...(kind !== 'page' ? [{ sep: true }, { label: 'Guides', sub: guideItems(currentRef.current, menuPoint.current) }] : []),
+  ]);
   const emptySlideMenu = (x: number, y: number, i: number) => {
     const ps = slidePaths(text.toString());
     const sp = ps[i];
@@ -1354,6 +1400,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
         { label: 'Slide background colour…', disabled: !sp || readOnlyRef.current, action: () => pickAt(x, y, 'Slide background', close => <ColorGrid current={null} close={close} none="As the design has it" onPick={c => { if (sp) applyOps([{ t: 'style', path: sp, set: { background: c } }]); }} />) },
         { label: 'New slide', shortcut: 'Ctrl+M', action: () => newSlide(i) },
         { label: 'Duplicate slide', action: () => duplicateSlide(i) },
+        { label: 'Guides', sub: guideItems(i, menuPoint.current) },
       ] : []),
       { sep: true },
       { label: 'Canvas', sub: canvasItems(x, y) },
@@ -1710,6 +1757,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     if (!open && seq.ordering) toCanvas({ ol: 'steps', cmd: { how: 'order', kind: null } });
   };
   const bars = deckToolbar({
+    guides: { shown: guidesShown, items: () => guideItems(currentRef.current, null).filter(m => !m.sep && !m.disabled && m.action).map(m => ({ label: m.label!, action: m.action!, active: m.checked })) },
     // (over selected words, the text tools show how the words look: their size, bold …, not the box's)
     kind, tool, setTool, readOnly: locked, sel: editingText && words?.style && sel.length === 1 ? [{ ...sel[0], style: { ...sel[0].style, ...words.style } }] : sel, editingText: !!editingText,
     math: { editing: !!mathEdit && !mathEdit.closing, insert: display => toCanvas({ ol: 'insertMath', display }), exec: mathExec, panels: mathPanels,

@@ -203,6 +203,8 @@ export type ToRuntime =
   | { ol: 'scrollTo'; slide: number; smooth?: boolean }
   | { ol: 'scale'; scale: number; anchor?: { docY: number; screenY: number } }
   | { ol: 'tool'; tool: Tool; ink?: InkStyle }
+  /** the guides shown on the slides (guides.ts) or not */
+  | { ol: 'guides'; show: boolean }
   | { ol: 'exec'; command: string; value?: string }
   | { ol: 'go'; slide: number }
   | { ol: 'peers'; peers: PeerInfo[] }
@@ -303,7 +305,8 @@ export type FromRuntime =
   | { ol: 'words'; rect: Rect | null; style?: WordsStyle; choosing?: boolean }
   | { ol: 'key'; key: string; ctrl: boolean; shift: boolean; alt: boolean; meta: boolean }
   /** `on`: what was right-clicked — an object (now selected), a slide's empty area, or the canvas around the pages; `weave`: two shapes cross there (runtime/weave.ts) */
-  | { ol: 'contextmenu'; x: number; y: number; slide?: number; on?: 'object' | 'slide' | 'canvas'; weave?: { label: string; undo: boolean } }
+  /** (`at`: the point of the slide right-clicked, slide px — a guide added there) */
+  | { ol: 'contextmenu'; x: number; y: number; slide?: number; on?: 'object' | 'slide' | 'canvas'; weave?: { label: string; undo: boolean }; at?: { x: number; y: number } }
   | { ol: 'visible'; slide: number }
   | { ol: 'goto'; slide: number }
   | { ol: 'exit' }

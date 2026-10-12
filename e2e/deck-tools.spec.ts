@@ -10,7 +10,8 @@
  * over the canvas while a pinch changes it (which stops at Fit), and moving a
  * text box with a finger on a touch screen (the ⌖ select tool; swiped over an object not selected,
  * the slide turns), Draw (pen, highlighter, eraser), the
- * rail and the notes folded away. What lands in index.html each time.
+ * rail and the notes folded away, the guides one places (shown, added, dragged, snapped to, reset).
+ * What lands in index.html each time.
  * Needs the seeded admin.
  */
 import { test, expect, type Page, type Frame } from '@playwright/test';
@@ -868,6 +869,73 @@ test('the zoom is said over the canvas while it changes: a pinch (Ctrl + wheel) 
   await page.keyboard.up('Control');
   await expect(hud).toHaveText(/^\d+ %$/);
   await expect(page.locator('.dl-zoomgroup .dl-zoom')).not.toHaveText(fitText, { timeout: 3000 });
+  expect(real(errors)).toEqual([]);
+});
+
+test('guides: shown from the slide\'s menu (its middle lines), added where right-clicked — every slide\'s or one slide\'s —, dragged, copied with Alt, gone off the slide; objects snap to them; reset', async ({ page }) => {
+  const errors = collectErrors(page);
+  await login(page);
+  await setup(page);
+  const menu = async (x: number, y: number, item: string) => {
+    const p = await at(page, x, y);
+    await page.mouse.click(p.x, p.y, { button: 'right' });
+    await page.locator('.ctx-menu').first().getByText('Guides', { exact: true }).hover();
+    await page.locator('.ctx-menu').last().getByText(item, { exact: true }).click();
+    await page.waitForTimeout(300);
+  };
+  const master = () => { const m = /<body[^>]*?data-ol-guides(?:="([^"]*)")?/.exec(fileText()); return m ? m[1] ?? '' : null; };
+  const own = () => /<section class="slide"[^>]*data-ol-guides="([^"]*)"/.exec(fileText())?.[1] ?? null;
+  const dragFrom = async (x0: number, y0: number, x1: number, y1: number, alt = false) => {
+    const a = await at(page, x0, y0), b = await at(page, x1, y1);
+    if (alt) await page.keyboard.down('Alt');
+    await page.mouse.move(a.x, a.y); await page.mouse.down(); await page.mouse.move(b.x, b.y, { steps: 10 }); await page.mouse.up();
+    if (alt) await page.keyboard.up('Alt');
+  };
+  // off at first; shown, the master's are the slide's middle lines — written nowhere
+  await menu(1000, 620, 'Show guides');
+  expect(master()).toBeNull();
+  // one added where the slide was right-clicked, on every slide: the master's written out
+  await menu(1000, 620, 'Add a vertical guide here (every slide)');
+  await expect.poll(master, { timeout: 10000 }).toMatch(/^x640 x(99\d|100\d)(\.5)? y360$/);
+  // dragged (it snaps to nothing here): moved
+  const x1 = Number(/x(\d+(\.5)?) y/.exec(master()!)![1]);
+  await dragFrom(x1, 650, 1100, 650);
+  await expect.poll(master, { timeout: 10000 }).toMatch(/^x640 x(109\d|110\d)(\.5)? y360$/);
+  const g = Number(/ x(\d+(?:\.5)?) y/.exec(master()!)![1]);
+  // an object moved near it snaps to it (its right edge on the guide)
+  await dragFrom(850, 450, 850 + (g - 3 - 900), 450);
+  await expect.poll(() => styleOf('c'), { timeout: 10000 }).toContain(`left: ${g - 100}px`);
+  await page.keyboard.press('Escape');   // (its quick menu floats over the slide above it)
+  // Alt: a copy of the middle line, the original stays
+  await dragFrom(640, 650, 320, 650, true);
+  await expect.poll(master, { timeout: 10000 }).toMatch(/^x3[12]\d(\.5)? x640 x\d+(\.5)? y360$/);
+  // dragged off the slide (the middle line across it, off the top): gone
+  await dragFrom(1200, 360, 1200, -60);
+  await expect.poll(master, { timeout: 10000 }).toMatch(/^x3[12]\d(\.5)? x640 x\d+(\.5)?$/);
+  // this slide only: its own, besides every slide's; reset to every slide's
+  await menu(1000, 620, 'Add a horizontal guide here, this slide only');
+  await expect.poll(own, { timeout: 10000 }).toMatch(/^y6[12]\d(\.5)?$/);
+  await menu(1000, 620, 'Reset this slide’s guides to every slide’s');
+  await expect.poll(own, { timeout: 10000 }).toBeNull();
+  // all reset: the middle lines again (nothing written), one undo brings them back
+  await menu(1000, 620, 'Reset all guides (the slide’s middle lines)');
+  await expect.poll(master, { timeout: 10000 }).toBeNull();
+  await page.keyboard.press('Control+z');
+  await expect.poll(master, { timeout: 10000 }).not.toBeNull();
+  // the toolbar's Guides (an iPad has no right-click): the same, through the slide's middle
+  await page.keyboard.press('Escape');
+  const pick = async (item: string) => {
+    await page.locator('[data-tb="dk-guides"]').click();
+    await page.locator(`[data-palette="dk-guides"] [data-guides-item="${item}"]`).click();
+  };
+  await expect(page.locator('[data-tb="dk-guides"]')).toHaveClass(/active/);
+  await pick('Remove all guides');
+  await expect.poll(master, { timeout: 10000 }).toBe('');
+  await pick('Add a horizontal guide (every slide)');
+  await expect.poll(master, { timeout: 10000 }).toBe('y360');
+  // hidden again (this browser's)
+  await pick('Show guides');
+  await expect(page.locator('[data-tb="dk-guides"]')).not.toHaveClass(/active/);
   expect(real(errors)).toEqual([]);
 });
 

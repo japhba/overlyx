@@ -836,6 +836,24 @@ blend.
     editor read-only. The runtime syncs these `data-ol-` attributes like any source attribute
     (reconcile.ts `SOURCE_OL`); `stopText` re-pairs a retyped element's children (`linkTree`) —
     without it a later attribute change duplicated a text's inline elements.
+  * **Guides** (12 Oct 2026, the user: "guidelines + an option to reset them, possibly tied to a slide
+    master"; `deliverable/guides.ts`, `runtime/guides.ts`), as PowerPoint's: lines across the slide that
+    moved and resized objects snap to (edit.ts `snap`, with the slide's and the objects' edges), drawn
+    only on the editing canvas (the overlay) — never in a slide, the rail, a presentation or an export.
+    Written in the HTML as `data-ol-guides="x640 y360"` (slide px from the left / top edge): on
+    `<body>` the master's, every slide's (no attribute: the slide's middle lines; empty: none) — dashed
+    orange —, on a slide's `<section>` its own besides — solid teal. Shown or not is this browser's
+    (`ol.deckGuides`, off at first). The slide's right-click menu (and the canvas's) ▸ *Guides*: show,
+    add a vertical / horizontal guide where it was right-clicked (every slide's, or this slide's only),
+    reset this slide's to every slide's, make this slide's every slide's, reset all (the middle lines),
+    remove all — the toolbar's Slide section has the same (`dk-guides`, through the slide's middle: an
+    iPad has no right-click). A guide is dragged where the pointer is right on it (4 px, a finger 10 —
+    before the object under it, so one over a full-slide picture moves too; the cursor says so), snapping
+    to the slide's middle and edges and the objects' (Ctrl / ⌘: freely), with its place in points; Alt /
+    Ctrl drags a copy; dragged off the slide it goes. The runtime reads the guides from the parsed source
+    (`state.src`: the live `<body>` is the page's own and does not follow the text) and writes them to
+    the source body's path. Guide edits are never suggestions (Suggesting): `applyRuntimeOps` and the
+    menu's `applyOps(…, true)` pass them as they are.
   * **Around the canvas** (`DeliverableEditor.tsx`): the slide rail (a second frame in `thumb`
     mode: click, drag to reorder, its menu — new slide in the design of the current one, blank,
     duplicate, move, delete; its header's « folds it away — `ol.deckSlides`, folded at first on

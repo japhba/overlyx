@@ -4,6 +4,7 @@
  * drawn on the canvas; slides added, duplicated, removed; speaker notes. Pure string work (core
  * html/source.ts), so it is tested without a browser.
  */
+import { GUIDES_ATTR } from './guides';
 import { parseSource, opSplices, mapOffset, elementAt, elementChildren, outerRange, attr, hasClass, type HtmlOp, type Path, type Splice, type HElement } from '@overlyx/core/html/source.ts';
 import { slideElements } from '@overlyx/core/html/deliverable.ts';
 import type { Rect, Tool, DeliverableKind, InkStyle, InkRunD } from './protocol';
@@ -270,6 +271,18 @@ export function insertPlace(text: string, slide: Path | null, after: Path | null
 }
 
 /* ------------------------------------------------------------------ slides */
+
+/** the guides written in the deck (guides.ts): <body>'s path and its `data-ol-guides` (the master's; null: none written), and each slide's own */
+export function guidesIn(text: string): { body: Path | null; master: string | null; slides: { path: Path; own: string | null }[] } {
+  const { doc } = parseSource(text);
+  const html = elementChildren(doc).find(e => e.tagName === 'html');
+  const body = html ? elementChildren(html).find(e => e.tagName === 'body') : undefined;
+  return {
+    body: body ? pathOfEl(body) : null,
+    master: body ? attr(body, GUIDES_ATTR) : null,
+    slides: slideElements(doc).map(el => ({ path: pathOfEl(el), own: attr(el, GUIDES_ATTR) })),
+  };
+}
 
 export function slidePaths(text: string): Path[] {
   const { doc } = parseSource(text);
