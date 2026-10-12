@@ -524,7 +524,14 @@ blend.
     on the page); it follows the selection through zoom and pan (the frame's box read every frame),
     steps aside while something is dragged (the runtime's `dragging` message), and is not shown while
     points, a formula or a crop are edited. It is positioned with left / top: a transformed parent
-    would carry the palettes' fixed popups away.
+    would carry the palettes' fixed popups away. **Over selected words**: while a text is retyped —
+    a text box, or a text at any depth (inside a group, a page's section) — and words are selected in
+    it, the menu sits right over those words (10 px above them; above the box's name tag when they are
+    in its first lines) with the word tools: font, size, bold, italic, underline, colour, highlight,
+    link, comment — no Delete, which would take the whole box. The runtime tells where they are
+    (`words` message: their box from the DOM selection, once a frame; how the first letter looks, so
+    the toolbar's size / bold … show the words', not the box's); while the pointer is still selecting
+    them (`choosing`) the menu waits, and comes back over them when it is lifted.
   * **List items move by drag and drop** (`runtime/listdrag.ts`, as in documents): with a text box
     selected or being retyped, a grip (in the overlay's shadow root) shows left of the bullet of the
     item under the pointer — of every item for a finger or a pen. Dragged, a line shows where it lands:

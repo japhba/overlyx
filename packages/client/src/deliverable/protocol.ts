@@ -186,6 +186,8 @@ export type StepCmd =
  * carets.ts). `head` is where the caret is, `anchor` where the selected words start.
  */
 export interface TextCaret { path: Path; anchor: number; head: number }
+/** how selected words look (computed, as SelStyle has them) */
+export type WordsStyle = Pick<SelStyle, 'fontSize' | 'fontFamily' | 'fontWeight' | 'fontStyle' | 'textDecoration' | 'color'>;
 
 /** another person on the page: what they selected, the text they retype, the slide they look at */
 export interface PeerInfo { paths: Path[]; color: string; name: string; caret?: TextCaret | null; slide?: number }
@@ -291,6 +293,12 @@ export type FromRuntime =
   | { ol: 'clip'; html: string | null; plain: string | null }
   /** where the caret is in the text being retyped (null: none), for the others */
   | { ol: 'caret'; caret: TextCaret | null }
+  /**
+   * the words selected in the text being retyped, for the quick menu: their box (the frame's document,
+   * CSS px) and how the first of them look; null: none (the menu goes back to the box). `choosing`:
+   * the pointer is still selecting them (the menu waits until it is lifted)
+   */
+  | { ol: 'words'; rect: Rect | null; style?: WordsStyle; choosing?: boolean }
   | { ol: 'key'; key: string; ctrl: boolean; shift: boolean; alt: boolean; meta: boolean }
   /** `on`: what was right-clicked — an object (now selected), a slide's empty area, or the canvas around the pages; `weave`: two shapes cross there (runtime/weave.ts) */
   | { ol: 'contextmenu'; x: number; y: number; slide?: number; on?: 'object' | 'slide' | 'canvas'; weave?: { label: string; undo: boolean } }

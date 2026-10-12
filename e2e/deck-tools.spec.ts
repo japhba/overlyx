@@ -205,6 +205,68 @@ test('the quick menu beside the selection: the toolbar\'s main buttons, out of t
   expect(real(errors)).toEqual([]);
 });
 
+const WORDS_DECK = DECK.replace(/<section class="slide">[\s\S]*?<\/section>/, `<section class="slide">
+  <div id="t" style="position: absolute; left: 100px; top: 120px; width: 900px; font-size: 32px"><p style="margin: 0 0 140px">First line of the box</p><p style="margin: 0">Words to pick here</p></div>
+  <div class="ol-group" style="position: absolute; left: 100px; top: 440px; width: 700px; height: 240px">
+    <p id="g1" style="position: absolute; left: 0px; top: 0px; width: 700px; margin: 0; font-size: 28px">Grouped heading</p>
+    <p id="g2" style="position: absolute; left: 0px; top: 200px; width: 700px; margin: 0; font-size: 28px">Grouped words below</p>
+  </div>
+</section>`);
+
+test('the quick menu goes over the words selected while typing — in a text box, in a text inside a group — with the word tools', async ({ page }) => {
+  const errors = collectErrors(page);
+  await login(page);
+  await page.request.post(BASE_URL + '/api/projects', { data: { name: NAME } });
+  await setup(page, WORDS_DECK);
+  const quick = page.locator('[data-dl-quick]');
+  const k = (await slides(page).first().boundingBox())!.width / 1280;
+  // typing in the box, nothing selected: the menu is the box's, above it
+  const line2 = await at(page, 140, 315);
+  await page.mouse.dblclick(line2.x, line2.y);
+  await expect(quick).toBeVisible();
+  await expect(quick.locator('[data-tb="q-dup"]')).toHaveCount(1);
+  const boxTop = (await at(page, 100, 120)).y;
+  expect((await quick.boundingBox())!.y + (await quick.boundingBox())!.height).toBeLessThanOrEqual(boxTop);
+  // words selected (the keys): the menu over them, far below the box's top — font, size, bold … link, comment; no Delete
+  await page.keyboard.press('End');
+  await page.keyboard.press('Control+Shift+ArrowLeft');
+  await page.keyboard.press('Control+Shift+ArrowLeft');
+  await expect(quick.locator('[data-tb="q-font"]')).toHaveCount(1);
+  for (const id of ['q-size', 'q-b', 'q-i', 'q-u', 'q-color', 'q-hl', 'q-href', 'q-comment']) await expect(quick.locator(`[data-tb="${id}"]`)).toHaveCount(1);
+  for (const id of ['q-delete', 'q-dup', 'q-align']) await expect(quick.locator(`[data-tb="${id}"]`)).toHaveCount(0);
+  const wordsTop = (await at(page, 0, 298)).y;   // (the second line's top: 120 + 38 + 140)
+  await expect.poll(async () => { const q = (await quick.boundingBox())!; return q.y + q.height; }).toBeGreaterThan(wordsTop - 30 * k - 20);
+  const qb = (await quick.boundingBox())!;
+  expect(qb.y + qb.height).toBeLessThanOrEqual(wordsTop + 2);
+  // its Bold makes those words bold, and then shows them bold
+  await quick.locator('[data-tb="q-b"]').click();
+  await expect(quick.locator('[data-tb="q-b"]')).toHaveClass(/\bactive\b/);
+  await expect(page.locator('.dl-toolbar [data-tb="dk-b"]')).toHaveClass(/\bactive\b/);
+  await page.keyboard.press('Escape');
+  await expect.poll(fileText, { timeout: 15000 }).toMatch(/Words to <span style="font-weight: bold;">pick here<\/span>|Words to <b>pick here<\/b>/);
+  await expect(quick.locator('[data-tb="q-dup"]')).toHaveCount(1);   // back beside the box
+
+  // a text inside a group, its words chosen with the pointer: the menu waits until the pointer is lifted, then sits over them
+  const g = await at(page, 300, 460);
+  await page.mouse.click(g.x, g.y);
+  const w0 = await at(page, 102, 656), w1 = await at(page, 230, 656);
+  await page.mouse.dblclick(w1.x, w1.y);
+  await expect(quick).toBeVisible();
+  await page.mouse.move(w0.x, w0.y);
+  await page.mouse.down();
+  await page.mouse.move(w1.x, w1.y, { steps: 6 });
+  await expect(quick).toHaveCount(0);
+  await page.mouse.up();
+  await expect(quick.locator('[data-tb="q-font"]')).toHaveCount(1);
+  // (the words are on the text's first line: the menu stays clear of its name tag)
+  const gb = (await quick.boundingBox())!, gTop = (await at(page, 0, 640)).y;
+  expect(gb.y + gb.height).toBeLessThanOrEqual(gTop - 24);
+  expect(gb.y + gb.height).toBeGreaterThan(gTop - 40);
+  expect(Math.abs(gb.x - w0.x)).toBeLessThan(30);
+  await page.keyboard.press('Escape');
+  expect(real(errors)).toEqual([]);
+});
+
 const GROUP_DECK = DECK.replace(/<section class="slide">[\s\S]*?<\/section>/, `<section class="slide">
   <div id="a" style="position: absolute; left: 100px; top: 100px; width: 100px; height: 100px; background: #ff0000"></div>
   <div id="b" style="position: absolute; left: 300px; top: 100px; width: 100px; height: 100px; background: #00ff00"></div>

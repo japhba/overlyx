@@ -2,13 +2,15 @@
  * The quick menu: the selection's most used operations (decktoolbar.tsx quickGroups) in a small bar
  * right beside it — above the selection, or below it when there is no room above — following it
  * while the canvas is zoomed or panned (the frame's box is read every frame: the one-slide view
- * moves the frame with a transform, not through Preact). Hidden while something is dragged.
+ * moves the frame with a transform, not through Preact). Hidden while something is dragged. Over words
+ * selected in a text being retyped, it sits right over those words — above the name tag of their `box`
+ * when they are in its first lines.
  */
 import { useLayoutEffect, useRef } from 'preact/hooks';
 import { Toolbar, type ToolButton } from '../app/Toolbar';
 import type { Rect } from './protocol';
 
-export function QuickBar({ groups, rect, frame, scrollY }: { groups: ToolButton[][]; rect: Rect; frame: () => HTMLIFrameElement | null; scrollY: () => number }) {
+export function QuickBar({ groups, rect, box, frame, scrollY }: { groups: ToolButton[][]; rect: Rect; box?: Rect; frame: () => HTMLIFrameElement | null; scrollY: () => number }) {
   const ref = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     let raf = 0;
@@ -21,7 +23,8 @@ export function QuickBar({ groups, rect, frame, scrollY }: { groups: ToolButton[
         const a = (f.closest('.dl-canvas') ?? f.parentElement ?? f).getBoundingClientRect();
         const x = r.left + rect.x * s, top = r.top + (rect.y - scrollY()) * s, bottom = top + rect.h * s;
         const w = el.offsetWidth, h = el.offsetHeight, gap = 26;   // (clear of the selection's name tag above its corner)
-        let y = top - h - gap;
+        let y = top - h - (box ? 10 : gap);
+        if (box) { const boxTop = r.top + (box.y - scrollY()) * s; if (y + h > boxTop - gap && y < boxTop) y = boxTop - h - gap; }
         if (y < a.top + 4) y = bottom + gap;
         if (y + h > a.bottom - 4) y = Math.max(a.top + 4, Math.min(top - h - gap, a.bottom - h - 4));
         const left = Math.max(a.left + 4, Math.min(x, a.right - w - 4));
@@ -34,7 +37,7 @@ export function QuickBar({ groups, rect, frame, scrollY }: { groups: ToolButton[
     };
     place();
     return () => cancelAnimationFrame(raf);
-  }, [rect.x, rect.y, rect.w, rect.h]);
+  }, [rect.x, rect.y, rect.w, rect.h, box?.y]);
   return (
     <div ref={ref} class="dl-quick" data-dl-quick style={{ visibility: 'hidden' }} onMouseDown={e => { if ((e.target as HTMLElement).tagName !== 'INPUT') e.preventDefault(); }}>
       <Toolbar id="deck-quick" groups={groups} />

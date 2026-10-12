@@ -15,11 +15,11 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/ho
 import type { ComponentChildren } from 'preact';
 import { type User } from '../api';
 import { showContextMenu, closeContextMenu, type MenuItem } from '../editor/contextmenu';
-import { Toolbar, ICONS } from '../app/Toolbar';
+import { Toolbar, ICONS, type ToolButton } from '../app/Toolbar';
 import { ColorGrid } from '../app/ColorGrid';
 import type { DeliverableHost, Peer } from './host';
 import { webHost } from './webHost';
-import type { FromRuntime, ToRuntime, SelItem, SlideBox, Tool, Path, HtmlOp, DeliverableKind, Rect, ArrangeHow, Paint, CanvasView, KeyPress, Solo, ObjNode, InkRunD } from './protocol';
+import type { FromRuntime, ToRuntime, SelItem, SlideBox, Tool, Path, HtmlOp, DeliverableKind, Rect, ArrangeHow, Paint, CanvasView, KeyPress, Solo, ObjNode, InkRunD, WordsStyle } from './protocol';
 import { SlideView } from './viewport';
 import { pinchFactor, pinchLock, triGesture, type PinchLock } from './gestures';
 import { isFromRuntime } from './protocol';
@@ -192,6 +192,8 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   /** something selected is being dragged on the canvas (the quick menu steps aside) */
   const [dragging, setDragging] = useState(false);
   const [editingText, setEditingText] = useState<Path | null>(null);
+  /** the words selected in the text being retyped (the quick menu sits over them), or being chosen with the pointer */
+  const [words, setWords] = useState<{ rect: Rect | null; style?: WordsStyle; choosing?: boolean } | null>(null);
   const editingTextRef = useRef(false); editingTextRef.current = !!editingText;
   /** a formula of the text being retyped, open in LyX's formula editor (MathOverlay) */
   const [mathEdit, setMathEdit] = useState<MathEditState | null>(null);
@@ -530,11 +532,12 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
         case 'clip': if (fromCanvas) clipRef.current = m.html ? { html: m.html, plain: m.plain ?? '' } : null; break;
         case 'pasteText': if (fromCanvas) pasteText(m.version, m.slide, m.after, m.text); break;
         case 'dragging': if (fromCanvas) setDragging(m.on); break;
+        case 'words': if (fromCanvas) setWords(m.rect || m.choosing ? { rect: m.rect, style: m.style, choosing: m.choosing } : null); break;
         case 'editing':
           if (!fromCanvas) break;
           setEditingText(m.path);
           editingTextRef.current = !!m.path;
-          if (!m.path) setMathEdit(null);
+          if (!m.path) { setMathEdit(null); setWords(null); }
           // the new text box is being retyped: what was typed meanwhile goes into it
           if (m.path) textAhead.current = false;
           break;
@@ -1628,7 +1631,8 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     if (!open && seq.ordering) toCanvas({ ol: 'steps', cmd: { how: 'order', kind: null } });
   };
   const bars = deckToolbar({
-    kind, tool, setTool, readOnly: locked, sel, editingText: !!editingText,
+    // (over selected words, the text tools show how the words look: their size, bold …, not the box's)
+    kind, tool, setTool, readOnly: locked, sel: editingText && words?.style && sel.length === 1 ? [{ ...sel[0], style: { ...sel[0].style, ...words.style } }] : sel, editingText: !!editingText,
     math: { editing: !!mathEdit && !mathEdit.closing, insert: display => toCanvas({ ol: 'insertMath', display }), exec: mathExec, panels: mathPanels,
       display: !!mathEdit?.display, number: () => mathOps.current?.number(), label: labelFormula },
     latex: { link: insertLink, cite: host.docId ? () => setCiteOpen(true) : undefined, reference: pickReference },
@@ -1648,13 +1652,14 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     },
   });
   const openComments = review.threads.filter(t => !t.thread.done).length;
-  // the quick menu beside the selection (QuickBar.tsx): the toolbar's most used buttons, duplicate, comment
-  const quick = !locked && !dragging && !presenting && tool === 'select' && sel.length && !nodeEd && !mathEdit && !cropping
-    ? quickGroups(bars.sections, [
-      { id: 'dk-dup', title: 'Duplicate (Ctrl+D)', icon: 'dk-duplicate', action: duplicateSel },
-      { id: 'dk-comment', title: 'Comment (Ctrl+Alt+M)', icon: 'dk-comment', action: () => toCanvas({ ol: 'newComment' }) },
-    ]) : [];
-  const quickRect = sel.length ? sel.map(s => s.rect).reduce((a, r) => {
+  // the quick menu beside the selection (QuickBar.tsx): the toolbar's most used buttons, duplicate, comment —
+  // over the words selected in the text being retyped (wherever that text sits: in a group, a table, a page's section) the word tools
+  const onWords = !!editingText && !!words?.rect;
+  const comment: ToolButton = { id: 'dk-comment', title: 'Comment (Ctrl+Alt+M)', icon: 'dk-comment', action: () => toCanvas({ ol: 'newComment' }) };
+  const quick = !locked && !dragging && !presenting && tool === 'select' && sel.length && !nodeEd && !mathEdit && !cropping && !words?.choosing
+    ? onWords ? quickGroups(bars.sections, [comment], true)
+    : quickGroups(bars.sections, [{ id: 'dk-dup', title: 'Duplicate (Ctrl+D)', icon: 'dk-duplicate', action: duplicateSel }, comment]) : [];
+  const quickRect = onWords ? words!.rect : sel.length ? sel.map(s => s.rect).reduce((a, r) => {
     const x = Math.min(a.x, r.x), y = Math.min(a.y, r.y);
     return { x, y, w: Math.max(a.x + a.w, r.x + r.w) - x, h: Math.max(a.y + a.h, r.y + r.h) - y };
   }) : null;
@@ -1695,7 +1700,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
 
   return (
     <div class={'dl-editor' + (presenting ? ' presenting' : '')} data-kind={kind}>
-      {quick.length > 0 && quickRect && <QuickBar groups={quick} rect={quickRect} frame={() => canvasFrame.current} scrollY={() => (soloOn ? 0 : scrollRef.current)} />}
+      {quick.length > 0 && quickRect && <QuickBar groups={quick} rect={quickRect} box={onWords ? sel[0]?.rect : undefined} frame={() => canvasFrame.current} scrollY={() => (soloOn ? 0 : scrollRef.current)} />}
       {/* (the context tools, when they float below the bar, start right of the slide rail: its header stays clear) */}
       <div ref={barRef} class={'dl-toolbar' + (ctxRow ? ' dl-ctx-row' : '')} role="toolbar" style={`--ctx-left: ${showRail ? (railShown ? railW : 28) + 8 : 8}px`}>
         <span class="dl-title" title={path}>{title}</span>

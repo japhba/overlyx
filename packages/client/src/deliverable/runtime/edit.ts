@@ -23,7 +23,7 @@
  * the frame); a pen works like the mouse. The pointer is captured, so a
  * drag that leaves the frame keeps going.
  */
-import type { Path, SelItem, SelStyle, Tool, Rect, HtmlOp, ObjKind, KeyPress, InkStyle, PeerInfo, TextCaret } from '../protocol';
+import type { Path, SelItem, SelStyle, Tool, Rect, HtmlOp, ObjKind, KeyPress, InkStyle, PeerInfo, TextCaret, WordsStyle } from '../protocol';
 import { inkOn } from '../../app/contrast';
 import { MODE, post, state, srcOf, pathOf, liveAt, sourced, slides, slideOf, docRect, isForeign, sendLayout } from './env';
 import { guard, linkTree } from './reconcile';
@@ -163,8 +163,10 @@ export function startEditing(): void {
   addEventListener('gesturestart', onGesture as EventListener, { capture: true, passive: false } as AddEventListenerOptions);
   addEventListener('gesturechange', onGesture as EventListener, { capture: true, passive: false } as AddEventListenerOptions);
   addEventListener('submit', e => e.preventDefault(), true);
-  // where the caret is in the text being retyped, for the others
+  // where the caret is in the text being retyped, for the others; the words selected, for the quick menu
   document.addEventListener('selectionchange', caretMoved);
+  document.addEventListener('selectionchange', wordsMoved);
+  addEventListener('pointerdown', chooseWords, true);
   addEventListener('scroll', () => {
     // one slide on the canvas: the editor pans the frame, the page never scrolls (a focus could scroll it)
     if (isSolo() && (scrollX || scrollY)) { scrollTo(0, 0); return; }
@@ -261,6 +263,64 @@ function sendCaret(): void {
 function caretMoved(): void {
   if (MODE !== 'edit' || !editing || caretTimer) return;
   caretTimer = setTimeout(() => { caretTimer = null; if (!editTimer) sendCaret(); }, 80);
+}
+
+/* ------------------------------------------------------------------ the selected words, for the quick menu */
+
+let wordsFrame = 0;
+let wordsSent = '';
+/** the pointer is down in the text being retyped: words are being chosen */
+let choosingWords = false;
+
+/** the words selected changed (or moved: typed, restyled): told once a frame at most */
+function wordsMoved(): void {
+  if (MODE !== 'edit' || wordsFrame) return;
+  wordsFrame = requestAnimationFrame(() => { wordsFrame = 0; sendWords(); });
+}
+
+/** the box of the words selected in the text being retyped (at whatever depth it sits) and how the first look */
+function sendWords(): void {
+  const sel = getSelection();
+  const r = editing && !choosingWords && sel && sel.rangeCount && !sel.isCollapsed && sel.anchorNode && sel.focusNode && editing.contains(sel.anchorNode) && editing.contains(sel.focusNode) ? sel.getRangeAt(0) : null;
+  const b = r?.getBoundingClientRect();
+  const rect: Rect | null = b && (b.width || b.height) ? { x: Math.round(b.left + scrollX), y: Math.round(b.top + scrollY), w: Math.round(b.width), h: Math.round(b.height) } : null;
+  const style = rect && r ? wordsStyle(r) : undefined;
+  const k = JSON.stringify([rect, style, choosingWords]);
+  if (k === wordsSent) return;
+  wordsSent = k;
+  post({ ol: 'words', rect, ...(style ? { style } : {}), ...(choosingWords ? { choosing: true } : {}) });
+}
+
+/** how the first selected letter looks (an underline is drawn by an element around it: not inherited) */
+function wordsStyle(r: Range): WordsStyle | undefined {
+  const w = document.createTreeWalker(r.commonAncestorContainer, NodeFilter.SHOW_TEXT);
+  let t: Node | null = r.commonAncestorContainer.nodeType === 3 ? r.commonAncestorContainer : w.nextNode();
+  for (; t; t = w.nextNode()) {
+    if (!r.intersectsNode(t) || !(t as Text).data.trim()) continue;
+    if (t === r.startContainer && r.startOffset >= (t as Text).length) continue;
+    break;
+  }
+  const el = t?.parentElement;
+  if (!el || !editing?.contains(el)) return undefined;
+  const c = getComputedStyle(el);
+  let deco = c.textDecorationLine;
+  for (let x: Element | null = el; x && x !== editing.parentElement && deco === 'none'; x = x.parentElement) deco = getComputedStyle(x).textDecorationLine;
+  return { fontSize: c.fontSize, fontFamily: c.fontFamily, fontWeight: c.fontWeight, fontStyle: c.fontStyle, textDecoration: deco, color: c.color };
+}
+
+/** words chosen with the pointer: the quick menu steps aside until it is lifted */
+function chooseWords(e: PointerEvent): void {
+  if (!editing || !editing.contains(e.target as Node)) return;
+  choosingWords = true;
+  sendWords();
+  addEventListener('pointerup', chosenWords, true);
+  addEventListener('pointercancel', chosenWords, true);
+}
+function chosenWords(): void {
+  removeEventListener('pointerup', chosenWords, true);
+  removeEventListener('pointercancel', chosenWords, true);
+  choosingWords = false;
+  wordsMoved();
 }
 
 /** others' carets in the text being retyped here follow what is typed */
@@ -2249,6 +2309,7 @@ function scheduleCommit(): void {
   if (editTimer) clearTimeout(editTimer);
   editTimer = setTimeout(() => { commitText(); sendCaret(); }, 350);
   redrawSoon();
+  wordsMoved();
 }
 
 /** the retyped text's markup, cleaned of what contenteditable adds */
@@ -2324,6 +2385,8 @@ export function stopText(): void {
   }
   post({ ol: 'editing', path: null });
   sendCaret();
+  // (a pointer lifted outside the frame: the next text's menu does not wait for it)
+  chosenWords();
   draw();
 }
 

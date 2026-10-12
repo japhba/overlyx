@@ -272,15 +272,18 @@ function paintLabel(items: SelItem[]): string {
  * toolbar's own sections (so they act and look the same) — text: bold, italic, colour, size,
  * alignment; shapes: fill and border; lines: colour, weight, arrowheads; pictures: crop and background;
  * then group / ungroup and arrange, `extra` (duplicate, comment) and delete. Empty while points, a formula or a crop are edited.
+ * Over `words` selected in a text being retyped: what is done to words — font, size, bold … highlight, a link —, then `extra`.
  */
 const QUICK: string[][] = [['dk-b', 'dk-i', 'dk-color', 'dk-size'], ['dk-align'], ['dk-inkcolor', 'dk-fill', 'dk-stroke'], ['dk-linecolor', 'dk-lineweight', 'dk-tips'], ['dk-crop', 'dk-nobg'], ['dk-group', 'dk-ungroup', 'dk-arrange']];
-export function quickGroups(sections: ToolSection[], extra: ToolButton[]): ToolButton[][] {
+const QUICK_WORDS: string[][] = [['dk-font', 'dk-size'], ['dk-b', 'dk-i', 'dk-u', 'dk-color', 'dk-hl'], ['dk-href']];
+export function quickGroups(sections: ToolSection[], extra: ToolButton[], words = false): ToolButton[][] {
   const all = new Map<string, ToolButton>();
   for (const sec of sections) for (const g of sec.groups) for (const b of g) all.set(b.id, b);
   if (all.has('dk-node-done') || all.has('dk-cropdone') || all.has('m-frac')) return [];
-  const groups = QUICK.map(ids => ids.map(id => all.get(id)).filter((b): b is ToolButton => !!b)).filter(g => g.length);
+  const groups = (words ? QUICK_WORDS : QUICK).map(ids => ids.map(id => all.get(id)).filter((b): b is ToolButton => !!b)).filter(g => g.length);
   if (!groups.length) return [];
-  const del = all.get('dk-delete');
+  // (over words, Delete would take the whole box)
+  const del = words ? undefined : all.get('dk-delete');
   // its own ids (q-…): the toolbar's buttons stay one of a kind on the page
   const own = (x: ToolButton): ToolButton => ({ ...x, id: 'q-' + x.id.replace(/^dk-/, '') });
   return [...groups, [...extra, ...(del ? [del] : [])]].map(g => g.map(own));
