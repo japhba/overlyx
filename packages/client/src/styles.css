@@ -365,6 +365,8 @@ html[data-theme="dark"] .tb-btn .tb-img { filter: invert(0.85) hue-rotate(180deg
 
 .editor-column { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .editor-scroll { flex: 1; min-height: 0; overflow: auto; background: var(--page-bg); position: relative; scroll-padding-bottom: 90px; /* keep the caret above the bottom-docked toolbars */ }
+/* two fingers on a document's text: its own pinch, the text's zoom (shellutil.tsx useTextPinch) — not the browser's (a layout document's canvas zooms itself) */
+.editor-scroll:has(> .editor-page .lyx-editor:not(.ol-layout)) { touch-action: pan-x pan-y; }
 /* "infinite margin": the page fills the viewport; text stays in a left-bound column of readable width,
    while wide objects (display math, tables, floats) may overflow the column and are centred on it */
 .editor-page { position: relative; background: var(--page-bg); min-height: 100%; width: 100%; padding: 36px 48px 120px 48px; }
@@ -2581,6 +2583,8 @@ html[data-theme="dark"][data-dark-pages] .lyx-par[data-layout="FrameTitle"] { co
 .dl-present:hover:not(:disabled) { background: var(--accent-strong) !important; }
 .dl-fs { font-size: 11px; color: var(--ui-muted); min-width: 34px; text-align: center; }
 .dl-zoom { font-size: 11px; min-width: 44px; }
+/* the zoom menu (the levels, percentages) looks like the buttons beside it */
+select.dl-zoom { appearance: none; -webkit-appearance: none; text-align: center; text-align-last: center; max-width: 10em; }
 .dl-color { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 5px; cursor: pointer; }
 .dl-color:hover { background: var(--ui-hover); }
 .dl-color span { font-weight: 700; font-size: 13px; border-bottom: 3px solid #000; line-height: 1; padding: 0 2px; }

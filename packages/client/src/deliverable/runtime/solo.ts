@@ -6,7 +6,7 @@
  * sizes the frame to that and pans and zooms the frame itself (DeliverableEditor, viewport.ts): the
  * page never scrolls.
  */
-import type { Solo } from '../protocol';
+import type { Rect, Solo } from '../protocol';
 import { MODE, state, slides, docRect, layoutHooks, post, slideOf } from './env';
 
 /** room around the slide shown (CSS px of the page): the selection's handles and label fit in it */
@@ -80,12 +80,64 @@ export function revealSlideOf(el: Element | null): boolean {
   return true;
 }
 
+/** elements drawn whole: their box is what they show */
+const WHOLE = /^(img|svg|canvas|video|iframe|object|embed|picture|math|mjx-container|input|textarea|select|button|hr)$/;
+
+/** a background, a border or a shadow shows: the box is drawn */
+function painted(cs: CSSStyleDeclaration): boolean {
+  if (cs.backgroundImage !== 'none' || cs.boxShadow !== 'none') return true;
+  const bg = cs.backgroundColor;
+  if (bg && bg !== 'transparent' && !/^rgba\(.*,\s*0(\.0+)?\)$/.test(bg)) return true;
+  return (['Top', 'Right', 'Bottom', 'Left'] as const).some(k => parseFloat(cs.getPropertyValue(`border-${k.toLowerCase()}-width`)) > 0 && !/^(none|hidden)$/.test(cs.getPropertyValue(`border-${k.toLowerCase()}-style`)));
+}
+
+/**
+ * Where what is on slide `s` is (page CSS px): its words, pictures and drawings, and boxes drawn with
+ * a fill, a border or a shadow — not a box as big as the slide (its background, a frame round it) —,
+ * clipped to the slide. Null: nothing on it.
+ */
+export function contentRect(s: Element): Rect | null {
+  const sr = s.getBoundingClientRect();
+  if (sr.width < 1 || sr.height < 1) return null;
+  let l = Infinity, t = Infinity, r = -Infinity, b = -Infinity;
+  const add = (x: DOMRect) => {
+    const x0 = Math.max(sr.left, x.left), y0 = Math.max(sr.top, x.top), x1 = Math.min(sr.right, x.right), y1 = Math.min(sr.bottom, x.bottom);
+    // (a rule: a line one way, nothing the other)
+    if (x1 < x0 || y1 < y0 || x1 - x0 + (y1 - y0) < 1) return;
+    l = Math.min(l, x0); t = Math.min(t, y0); r = Math.max(r, x1); b = Math.max(b, y1);
+  };
+  const range = document.createRange();
+  const visit = (el: Element) => {
+    for (const n of Array.from(el.childNodes)) {
+      if (n.nodeType === Node.TEXT_NODE) {
+        if (!n.textContent?.trim()) continue;
+        range.selectNodeContents(n);
+        for (const x of Array.from(range.getClientRects())) add(x);
+        continue;
+      }
+      if (n.nodeType !== Node.ELEMENT_NODE) continue;
+      const e = n as Element;
+      if (e.hasAttribute('data-ol-runtime')) continue;
+      const cs = getComputedStyle(e);
+      if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') continue;
+      const box = e.getBoundingClientRect();
+      if (WHOLE.test(e.localName)) { add(box); continue; }
+      if (box.width * box.height < 0.9 * sr.width * sr.height && painted(cs)) add(box);
+      visit(e);
+    }
+  };
+  visit(s);
+  if (r < l || b < t) return null;
+  return { x: l + scrollX, y: t + scrollY, w: r - l, h: b - t };
+}
+
 function soloInfo(): Solo | undefined {
   if (!isSolo()) return undefined;
   const s = slides()[index];
   if (!s) return undefined;
   const r = docRect(s);
-  return { slide: index, rect: r, height: Math.ceil(r.y + r.h + SOLO_PAD) };
+  const content = contentRect(s) ?? undefined;
+  return { slide: index, rect: r, height: Math.ceil(r.y + r.h + SOLO_PAD), ...(content ? { content } : {}) };
 }
 
 layoutHooks.solo = soloInfo;

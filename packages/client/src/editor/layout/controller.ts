@@ -48,7 +48,7 @@ import { followMasters, masterWidgets, destroyMasterLayers, masterChain, placeho
 import { followConnectors, copyObjects, freshId, sitePoint, centre, outlinePoint, isConnector, pageSegs, shapeAttrsFor, parseEnd, endRef, connectorPath, SIDES, type Side } from './connectors';
 import { editorContext } from '../context';
 import { sourceOnlyParagraph, layoutTableSpacing } from './source';
-import { DetentPinch, stepOnto, type Detent } from '../../app/zoomdetent';
+import { CATCH, DetentPinch, stepOnto, type Detent } from '../../app/zoomdetent';
 import { hostedZoomPill } from '../../app/zoomhud';
 
 export type Tool = 'select' | 'text' | 'shape' | 'line' | 'arrow' | 'pen' | 'pencil' | 'nodes' | 'crop';
@@ -389,14 +389,17 @@ function zoomTarget(): LayoutController | null {
   if (own && activeZoom.has(own)) return own;
   return activeZoom.size === 1 ? [...activeZoom][0] : null;
 }
-/** The canvas zoom of the open layout document (null: none open): the status bar's zoom shows it. */
-export function layoutZoom(): { percent: number; fit: boolean } | null {
+/**
+ * The canvas zoom of the open layout document (null: none open): the status bar's zoom shows it.
+ * `level`: the level it is at (the whole page, its width the window's); `width`: Fit width is a level of its own here.
+ */
+export function layoutZoom(): { percent: number; fit: boolean; level: PageFit | null; width: boolean } | null {
   const c = zoomTarget();
-  return c ? { percent: c.zoomPercent(), fit: c.isFit() } : null;
+  return c ? { percent: c.zoomPercent(), fit: c.isFit(), level: c.levelNow(), width: c.hasWidthLevel() } : null;
 }
 export function onLayoutZoom(f: () => void): () => void { zoomListeners.add(f); return () => { zoomListeners.delete(f); }; }
-/** Zoom in (1), out (−1), to the whole page (0) or to a percentage of the real size; false without a layout document. */
-export function layoutZoomStep(d: number | { pct: number }): boolean {
+/** Zoom in (1), out (−1), to the whole page (0), to a level or to a percentage of the real size; false without a layout document. */
+export function layoutZoomStep(d: number | { pct: number } | { level: PageFit }): boolean {
   const c = zoomTarget();
   if (!c) return false;
   c.zoomStep(d);
@@ -408,8 +411,14 @@ const nodeIds = new WeakMap<PMNode, number>();
 let nodeSeq = 0;
 const nodeId = (n: PMNode) => { let v = nodeIds.get(n); if (v === undefined) { v = ++nodeSeq; nodeIds.set(n, v); } return v; };
 
-/** the whole page (zoom 1): a level a pinch stops at and holds, and a mouse wheel's notch does not pass (app/zoomdetent.ts) */
-const FIT_DETENT: Detent<'fit'>[] = [{ key: 'fit', z: 1, hold: Math.log(1.35) }];
+/**
+ * The levels of a layout document's zoom: the whole page (`fit`, zoom 1) and the page as wide as the
+ * window (`width`: a poster, or a slide in a tall window). A pinch stops at them and holds there, a
+ * mouse wheel's notch or − / + does not pass them (app/zoomdetent.ts).
+ */
+export type PageFit = 'fit' | 'width';
+export const PAGE_FIT_NAMES: Record<PageFit, string> = { fit: 'Fit', width: 'Fit width' };
+const PAGE_HOLD: Record<PageFit, number> = { fit: Math.log(1.35), width: Math.log(1.2) };
 
 class LayoutController {
   private active = false;
@@ -661,7 +670,7 @@ class LayoutController {
     }
     if (this.pinch?.timer) clearTimeout(this.pinch.timer);
     this.pinch = null;
-    this.held = false;
+    this.held = null;
     cancelAnimationFrame(this.settleRaf);
     this.pill.dispose();
     this.scroller = null;
@@ -785,9 +794,22 @@ class LayoutController {
    * course through the zoom, which stops at the whole page and holds there (app/zoomdetent.ts), where it
    * is, and the timer that ends it (a wheel says nothing when it ends). `held`: held at the whole page.
    */
-  private pinch: { p: DetentPinch<'fit'>; x: number; y: number; timer: ReturnType<typeof setTimeout> | null } | null = null;
-  private held = false;
+  private pinch: { p: DetentPinch<PageFit>; x: number; y: number; timer: ReturnType<typeof setTimeout> | null } | null = null;
+  private held: PageFit | null = null;
   private settleRaf = 0;
+  /** the zoom at which the page is as wide as the window (fit) */
+  private widthZoom = 1;
+
+  /** the levels a pinch stops at: the whole page, and the page's width when that is a level apart */
+  private detents(): Detent<PageFit>[] {
+    const ds: Detent<PageFit>[] = [{ key: 'fit', z: 1, hold: PAGE_HOLD.fit }];
+    if (Math.abs(Math.log(this.widthZoom)) >= CATCH) ds.push({ key: 'width', z: this.widthZoom, hold: PAGE_HOLD.width });
+    return ds;
+  }
+  hasWidthLevel(): boolean { return this.detents().length > 1; }
+  /** the level the zoom is at, if any */
+  levelNow(): PageFit | null { return this.detents().find(d => Math.abs(this.zoom / d.z - 1) < 1e-3)?.key ?? null; }
+  private levelZoom(k: PageFit): number { return this.detents().find(d => d.key === k)?.z ?? 1; }
 
   /** a pinch on a trackpad (Ctrl + wheel in Chromium and Firefox) or Ctrl/⌘ + wheel zooms about the pointer */
   private onWheel = (ev: WheelEvent): void => {
@@ -797,7 +819,7 @@ class LayoutController {
     if (!dy) return;
     // a mouse wheel ±100 per notch: a step (×1.28) that stops at the whole page; a trackpad sends many small deltas — a pinch
     if (ev.deltaMode !== 0 || Math.abs(dy) >= 50) {
-      if (!this.pinch) this.zoomAt(stepOnto(this.pendingZoom?.z ?? this.zoom, dy < 0 ? 1.28 : 1 / 1.28, FIT_DETENT).z, ev.clientX, ev.clientY);
+      if (!this.pinch) this.zoomAt(stepOnto(this.pendingZoom?.z ?? this.zoom, dy < 0 ? 1.28 : 1 / 1.28, this.detents()).z, ev.clientX, ev.clientY);
       return;
     }
     this.pinchBy(-dy * 0.01, ev.clientX, ev.clientY, true);
@@ -810,30 +832,32 @@ class LayoutController {
     let g = this.pinch;
     if (!g) {
       const base = this.pendingZoom?.z ?? this.zoom;
-      g = this.pinch = { p: new DetentPinch<'fit'>(Math.abs(base - 1) < 1e-3 ? 'fit' : base, base, [0.1, zoomMax(this.fitPagePt)]), x, y, timer: null };
+      const at = this.detents().find(l => Math.abs(base / l.z - 1) < 1e-3)?.key;
+      g = this.pinch = { p: new DetentPinch<PageFit>(at ?? base, base, [0.1, zoomMax(this.fitPagePt)]), x, y, timer: null };
     }
     g.x = x; g.y = y;
     if (g.timer) clearTimeout(g.timer);
     if (timed) g.timer = setTimeout(() => this.endPinch(), 220);
-    const sh = g.p.by(d, FIT_DETENT);
-    this.held = sh.zoom === 'fit';
-    this.zoomAt(sh.zoom === 'fit' ? sh.stretch : sh.zoom, x, y);
+    const sh = g.p.by(d, this.detents());
+    this.held = typeof sh.zoom === 'string' ? sh.zoom : null;
+    this.zoomAt(typeof sh.zoom === 'string' ? this.levelZoom(sh.zoom) * sh.stretch : sh.zoom, x, y);
   }
 
-  /** the pinch let go: held at the whole page, or near it, onto it on a short spring */
+  /** the pinch let go: held at a level, or near one, onto it on a short spring */
   private endPinch(): void {
     const g = this.pinch;
     this.pinch = null;
     if (!g) return;
     if (g.timer) clearTimeout(g.timer);
-    const end = g.p.end(FIT_DETENT);
-    if (!end) { this.held = false; return; }
-    this.held = true;
+    const end = g.p.end(this.detents());
+    if (!end) { this.held = null; return; }
+    this.held = end.zoom;
+    const z = this.levelZoom(end.zoom);
     const t0 = performance.now();
     const frame = () => {
       const t = Math.min(1, (performance.now() - t0) / 220), k = 1 - (1 - t) ** 3;
-      if (t >= 1) this.held = false;
-      this.zoomAt(end.from + (1 - end.from) * k, g.x, g.y);
+      if (t >= 1) this.held = null;
+      this.zoomAt(z * (end.from + (1 - end.from) * k), g.x, g.y);
       this.settleRaf = t < 1 ? requestAnimationFrame(frame) : 0;
     };
     frame();
@@ -906,20 +930,22 @@ class LayoutController {
     this.showZoom();
   }
 
-  /** the zoom said over the canvas: the percentage of the real size, the whole page as Fit (held there too) */
+  /** the zoom said over the canvas: the percentage of the real size, a level by its name (held there too) */
   private showZoom(): void {
-    const fit = this.held || this.isFit();
-    this.pill.show((fit ? this.percentAt(1) : this.zoomPercent()) / 100, fit ? 'Fit' : null);
+    const k = this.held ?? this.levelNow();
+    this.pill.show((k ? this.percentAt(this.levelZoom(k)) : this.zoomPercent()) / 100, k ? PAGE_FIT_NAMES[k] : null);
   }
 
   /** the zoom in percent of the paper's real size (96 px to the inch) */
   zoomPercent(): number { return this.percentAt(this.zoom); }
   private percentAt(z: number): number { return Math.round(this.fitPagePt * z * 2.845276 / (96 / 25.4) * 100); }
   isFit(): boolean { return Math.abs(this.zoom - 1) < 1e-3; }
-  /** the Zoom menu / keys: d = 1 in, −1 out, 0 back to the whole page; 'pct' a percentage of the real size */
-  zoomStep(d: number | { pct: number }): void {
+  /** the Zoom menu / keys: d = 1 in, −1 out, 0 back to the whole page; a level; 'pct' a percentage of the real size */
+  zoomStep(d: number | { pct: number } | { level: PageFit }): void {
     const r = this.scroller?.getBoundingClientRect();
     const cx = r ? r.left + r.width / 2 : 0, cy = r ? r.top + Math.min(r.height, 600) / 2 : 0;
+    if (typeof d === 'object' && 'level' in d && d.level === 'fit') d = 0;
+    if (typeof d === 'object' && 'level' in d) { this.zoomAt(this.levelZoom(d.level), cx, cy); return; }
     if (typeof d === 'object') { this.zoomAt(d.pct / 100 * (96 / 25.4) / 2.845276 / this.fitPagePt, cx, cy); return; }
     if (d === 0) {
       // the whole page (the one mostly in view)
@@ -932,7 +958,7 @@ class LayoutController {
     // the usual percentages of the paper's real size, and the whole page among them
     const perPct = (96 / 25.4) / 2.845276 / this.fitPagePt / 100;
     const steps = [5, 10, 15, 25, 33, 50, 67, 75, 100, 125, 150, 200, 300, 400, 600, 800, 1200, 1600].map(p => p * perPct);
-    steps.push(1);
+    steps.push(...this.detents().map(l => l.z));
     steps.sort((a, b) => a - b);
     const cur = this.zoom;
     const next = d > 0 ? steps.find(v => v > cur * 1.01) ?? cur : [...steps].reverse().find(v => v < cur / 1.01) ?? cur;
@@ -1061,6 +1087,7 @@ class LayoutController {
     const height = Math.max(150, ((single ? sc?.offsetHeight : sc?.clientHeight) ?? 800) - 70 - notes - ruler);
     const pxPerMm = Math.min(width / this.page.w, height / this.page.h);
     this.fitPagePt = Math.min(pxPerMm / 2.845276, 4);
+    this.widthZoom = Math.max(1, width / this.page.w / 2.845276 / this.fitPagePt);
     this.view.dom.style.setProperty('--ol-fit-pt', `${(this.fitPagePt * this.zoom).toFixed(4)}px`);
     this.centerShown();
     zoomChanged();

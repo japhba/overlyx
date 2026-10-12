@@ -29,7 +29,7 @@ import { useUiMode, setUiMode, adoptAccountUi } from './uimode';
 import { usePresentation } from './presentation';
 import { Toolbar, NAMED_COLORS, type ToolButton } from './Toolbar';
 import { buildToolbars, loadToolbarPrefs, mathExecutor, useMathPanels, toolbarClipboard, markValue, MODERN_COLLAPSE, type ToolbarId, type ToolbarMode, type ToolbarPrefs } from './toolbars';
-import { debounce, hashAuthor, applyAuthorColors, bcp47, suggestLabel, LayoutPicker, documentStats, applyEditorZoom, SidebarGrip, restoreSidebarWidths } from './shellutil';
+import { debounce, hashAuthor, applyAuthorColors, bcp47, suggestLabel, LayoutPicker, documentStats, applyEditorZoom, stepTextZoom, useTextPinch, SidebarGrip, restoreSidebarWidths } from './shellutil';
 import { setDocumentFonts } from '../fonts/editorfont';
 import { setDocumentParagraphs } from '../editor/paragraphsep';
 import { Outline, buildOutline, type OutlineItem } from './Outline';
@@ -531,6 +531,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   }, []);
 
   useEffect(() => applyEditorZoom(zoom), [zoom]);
+  useTextPinch(zoom, setZoom);
   // Settings ▸ Editor ▸ Font ▸ "As in the document" follows the document's roman font
   useEffect(() => { setDocumentFonts(headerLines); setDocumentParagraphs(headerLines); setLayoutHeader(headerLines); }, [headerLines]);
   // Ctrl/Cmd +/- zoom the document text, never the browser chrome — wherever the focus is (formula
@@ -866,7 +867,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       acceptAll: () => run(acceptAllChanges()),
       rejectAll: () => run(rejectAllChanges()),
       closeTab: () => closeDoc(),
-      zoom: (d) => { if (!layoutZoomStep(d)) setZoom(z => (d === 0 ? 1 : Math.min(2.5, Math.max(0.5, +(z + d * 0.1).toFixed(2))))); },
+      zoom: (d) => { if (!layoutZoomStep(d)) setZoom(z => stepTextZoom(z, d)); },
       textWidth: stepTextWidth,
       openFile: () => setShowFiles(true),
       // any kind of file: the name's ending decides (app/newfile.ts)

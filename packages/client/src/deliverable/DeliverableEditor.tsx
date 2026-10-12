@@ -20,7 +20,7 @@ import { ColorGrid } from '../app/ColorGrid';
 import type { DeliverableHost, Peer } from './host';
 import { webHost } from './webHost';
 import type { FromRuntime, ToRuntime, SelItem, SlideBox, Tool, Path, HtmlOp, DeliverableKind, Rect, ArrangeHow, Paint, CanvasView, KeyPress, Solo, ObjNode, InkRunD, WordsStyle } from './protocol';
-import { SlideView } from './viewport';
+import { SlideView, viewLevels, viewDetents, levelAt, levelAnchor, VIEW_FIT_NAMES, type ViewFit, type ViewLevels } from './viewport';
 import { pinchFactor, pinchLock, triGesture, type PinchLock } from './gestures';
 import { DetentPinch, stepOnto, type Detent, type Shown } from '../app/zoomdetent';
 import { zoomPill } from '../app/zoomhud';
@@ -86,9 +86,12 @@ function saveView(path: string, v: CanvasView): void {
 /** the same slide shown in the same place (a layout that changes nothing does not render the editor) */
 function sameSolo(a: Solo | null, b: Solo | null): boolean {
   if (!a || !b) return a === b;
-  const r = a.rect, q = b.rect;
-  return a.slide === b.slide && Math.abs(a.height - b.height) < 2 && Math.abs(r.x - q.x) < 1 && Math.abs(r.y - q.y) < 1 && Math.abs(r.w - q.w) < 1 && Math.abs(r.h - q.h) < 1;
+  const near = (r?: Rect, q?: Rect) => !r || !q ? r === q : Math.abs(r.x - q.x) < 1 && Math.abs(r.y - q.y) < 1 && Math.abs(r.w - q.w) < 1 && Math.abs(r.h - q.h) < 1;
+  return a.slide === b.slide && Math.abs(a.height - b.height) < 2 && near(a.rect, b.rect) && near(a.content, b.content);
 }
+
+/** the zoom menu's percentages (of the slide's own size) */
+const DECK_ZOOMS = [50, 75, 100, 150, 200];
 
 /** the natural size of a picture file (null when the browser cannot decode it) */
 async function naturalSize(data: Blob): Promise<{ w: number; h: number } | null> {
@@ -729,43 +732,86 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
    */
   const zoomHud = useRef<HTMLDivElement>(null);
   const pill = useMemo(() => zoomPill(() => zoomHud.current), []);
-  const heldFit = useRef(false);
+  /** the level a pinch holds the slide at (said as that level, whatever the give shows) */
+  const heldAt = useRef<ViewFit | null>(null);
+  /** the level the view rests at: it stays that level as the canvas changes size and on another slide */
+  const levelRef = useRef<ViewFit | null>('fit');
+  const soloState = useRef(solo); soloState.current = solo;
+  const boxRef = useRef(box); boxRef.current = box;
+  /** the zoom levels of the slide shown (viewport.ts): Fit, Fit width, Fit content, Trim margins */
+  const levelsNow = (): ViewLevels => {
+    const so = soloState.current;
+    return so && soloRef.current ? viewLevels(boxRef.current, so.rect, so.content ?? null, MAX_ZOOM) : { fit: fitRef.current };
+  };
+  /** a level as the zoom menu names it */
+  const levelName = (k: ViewFit) => k !== 'fit' ? VIEW_FIT_NAMES[k] : kindRef.current === 'poster' ? 'Fit poster' : kindRef.current === 'page' ? 'Fit width' : 'Fit slide';
   const showZoom = (s: number) => {
-    const f = fitRef.current, fitted = heldFit.current || Math.abs(s / f - 1) < 0.005;
-    pill.show(fitted ? f : s, fitted ? 'Fit' : null);
+    const l = levelsNow(), k = heldAt.current ?? levelAt(l, s);
+    pill.show(k ? l[k] ?? s : s, k ? VIEW_FIT_NAMES[k] : null);
   };
   useEffect(() => () => pill.dispose(), []);
   /**
-   * Fit is a level of the zoom a pinch stops at (app/zoomdetent.ts, as the PDF viewer's fits): near it
-   * the slide snaps onto it and stays there till pinched well past it, giving a little meanwhile and
-   * springing back once let go; let go near it, it settles on it. A step (− / +, a mouse wheel's notch)
-   * stops at it on its way.
+   * The levels are where a pinch stops (app/zoomdetent.ts, as the PDF viewer's fits): near one the
+   * slide snaps onto it and stays there till pinched well past it, giving a little meanwhile and
+   * springing back once let go; let go near one, it settles on it. A step (− / +, a mouse wheel's
+   * notch) stops at them on its way.
    */
-  const detents = (): Detent<'fit'>[] => [{ key: 'fit', z: fitRef.current, hold: Math.log(1.35) }];
-  const newPinch = (s0: number) => new DetentPinch<'fit'>(Math.abs(s0 / fitRef.current - 1) < 0.005 ? 'fit' : s0, s0, [0.5 * fitRef.current, MAX_ZOOM]);
-  /** the scale a pinch shows: held at Fit, the fit stretched by the give */
-  const shownScale = (sh: Shown<'fit'>): number => { heldFit.current = sh.zoom === 'fit'; return sh.zoom === 'fit' ? fitRef.current * sh.stretch : sh.zoom; };
+  const detents = (): Detent<ViewFit>[] => viewDetents(levelsNow());
+  const newPinch = (s0: number) => new DetentPinch<ViewFit>(levelAt(levelsNow(), s0) ?? s0, s0, [0.5 * fitRef.current, MAX_ZOOM]);
+  /** the scale a pinch shows: held at a level, its scale stretched by the give */
+  const shownScale = (sh: Shown<ViewFit>): number => {
+    if (typeof sh.zoom !== 'string') { heldAt.current = null; return sh.zoom; }
+    heldAt.current = sh.zoom;
+    return (levelsNow()[sh.zoom] ?? fitRef.current) * sh.stretch;
+  };
   const settleRaf = useRef(0);
   useEffect(() => () => cancelAnimationFrame(settleRaf.current), []);
-  /** a pinch let go: held at Fit or near it, onto it on a short spring about the canvas point (px, py); false: it stays as it is */
-  const settle = (p: DetentPinch<'fit'>, px: number, py: number): boolean => {
-    const end = p.end(detents());
+  /**
+   * Onto level `k`: its scale, and the slide where the level shows it (viewport.ts levelAnchor: Fit
+   * content puts what is on the slide in the middle) — on a short spring from where it is (`animate`),
+   * else at once. The view rests at that level after.
+   */
+  const goToLevel = (k: ViewFit, animate: boolean) => {
+    const so = soloState.current, b = boxRef.current;
+    if (!so || !soloRef.current) return;
     cancelAnimationFrame(settleRaf.current);
-    if (!end) { heldFit.current = false; return false; }
-    heldFit.current = true;
+    settleRaf.current = 0;
+    if (zoomCommit.current) { clearTimeout(zoomCommit.current); zoomCommit.current = null; }
+    const s1 = levelsNow()[k] ?? fitRef.current, s0 = slideView.scaleNow() ?? s1;
+    const a0 = slideView.toFrame(b.w / 2, b.h / 2);
+    if (!a0) return;
+    const want = levelAnchor(k, so.rect, so.content ?? null), a1 = { x: want.x, y: want.y ?? a0.y };
+    levelRef.current = k;
+    heldAt.current = k;
+    const done = () => {
+      settleRaf.current = 0;
+      heldAt.current = null;
+      commitLiveZoom(0);
+      slideView.release();
+    };
     const t0 = performance.now();
     const frame = () => {
-      const t = Math.min(1, (performance.now() - t0) / 220), k = 1 - (1 - t) ** 3;
-      slideView.zoomTo(fitRef.current * (end.from + (1 - end.from) * k), px, py);
+      const t = animate ? Math.min(1, (performance.now() - t0) / 260) : 1, e = 1 - (1 - t) ** 3;
+      slideView.placeAt(s0 * Math.pow(s1 / s0, e), a0.x + (a1.x - a0.x) * e, a0.y + (a1.y - a0.y) * e, b.w / 2, b.h / 2);
       if (t < 1) { settleRaf.current = requestAnimationFrame(frame); return; }
-      settleRaf.current = 0;
-      heldFit.current = false;
-      commitLiveZoom(0);
+      done();
     };
     frame();
+  };
+  // the canvas or the slide changes size, another slide: a view resting at a level stays at it (this slide's, at this size)
+  useLayoutEffect(() => {
+    const k = levelRef.current;
+    if (!soloOn || !k || k === 'fit' || heldAt.current || pinchRef.current || wheelPinch.current) return;
+    goToLevel(k, false);
+  }, [box.w, box.h, solo?.rect.w, solo?.rect.h, solo?.slide, soloOn]);
+  /** a pinch let go: held at a level or near one, onto it on a short spring; false: it stays as it is */
+  const settle = (p: DetentPinch<ViewFit>): boolean => {
+    const end = p.end(detents());
+    cancelAnimationFrame(settleRaf.current);
+    if (!end) { heldAt.current = null; levelRef.current = null; return false; }
+    goToLevel(end.zoom, true);
     return true;
   };
-  const boxRef = useRef(box); boxRef.current = box;
   const frameWRef = useRef(frameW); frameWRef.current = frameW;
   const panRef = useRef(panX); panRef.current = panX;
   /** the frame's left edge in the canvas: centred when it fits, else where it was panned to (clamped) */
@@ -794,7 +840,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     zoomCommit.current = setTimeout(() => { zoomCommit.current = null; const s = slideView.scaleNow(); if (s) setZoom(s / fitRef.current); }, delay);
   };
   /** a trackpad's pinch (Ctrl + wheel, Safari's gesture) under way: its course through the zoom, where it is, the timer that ends it (no event says it ended) */
-  const wheelPinch = useRef<{ p: DetentPinch<'fit'>; x: number; y: number; timer: ReturnType<typeof setTimeout> | null } | null>(null);
+  const wheelPinch = useRef<{ p: DetentPinch<ViewFit>; x: number; y: number; timer: ReturnType<typeof setTimeout> | null } | null>(null);
   const zoomSolo = (factor: number, px: number, py: number) => {
     cancelAnimationFrame(settleRaf.current);
     // a mouse wheel's notch (a hundred px or so at once): a step, as − / +
@@ -815,12 +861,17 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     wheelPinch.current = null;
     if (!w) return;
     if (w.timer) clearTimeout(w.timer);
-    if (!settle(w.p, w.x, w.y)) commitLiveZoom(0);
+    if (!settle(w.p)) commitLiveZoom(0);
   };
-  /** a step in or out about a canvas point (− / +, a mouse wheel's notch): it stops at Fit on its way */
+  /** a step in or out about a canvas point (− / +, a mouse wheel's notch): it stops at a level on its way (and shows it as the level does) */
   const stepSolo = (factor: number, px: number, py: number) => {
+    cancelAnimationFrame(settleRaf.current);
+    settleRaf.current = 0;
     const f = fitRef.current, s0 = slideView.scaleNow() ?? f * zoomRef.current;
-    const s1 = Math.max(0.5 * f, Math.min(MAX_ZOOM, stepOnto(s0, factor, detents()).z));
+    const to = stepOnto(s0, factor, detents());
+    if (typeof to.zoom === 'string') { goToLevel(to.zoom, true); return; }
+    levelRef.current = null;
+    const s1 = Math.max(0.5 * f, Math.min(MAX_ZOOM, to.z));
     if (Math.abs(s1 - s0) < 1e-4 * s0) return;
     slideView.zoomTo(s1, px, py);
     commitLiveZoom(120);
@@ -834,7 +885,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
    * mapped onto the canvas by where they were then. Fingers that move together pan and do not zoom
    * until they have clearly come closer or gone further apart (gestures.ts).
    */
-  const pinchRef = useRef<{ c: { x: number; y: number }[]; r: { x: number; y: number }[]; a: { x: number; y: number }; k: number; s0: number; d0: number; lock: PinchLock; p: DetentPinch<'fit'>; raw: number; mid: { x: number; y: number } } | null>(null);
+  const pinchRef = useRef<{ c: { x: number; y: number }[]; r: { x: number; y: number }[]; a: { x: number; y: number }; k: number; s0: number; d0: number; lock: PinchLock; p: DetentPinch<ViewFit>; raw: number; mid: { x: number; y: number } } | null>(null);
   /** two fingers down: each one's canvas point and screen point */
   const pinchStart = (c: { x: number; y: number }[], r: { x: number; y: number }[]) => {
     if (zoomCommit.current) { clearTimeout(zoomCommit.current); zoomCommit.current = null; }
@@ -857,7 +908,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     const travel = Math.hypot((r[0].x + r[1].x - g.r[0].x - g.r[1].x) / 2, (r[0].y + r[1].y - g.r[0].y - g.r[1].y) / 2);
     const z = pinchFactor(g.lock, g.d0, Math.hypot(now[0].x - now[1].x, now[0].y - now[1].y), travel);
     const raw = Math.max(0.5 * f, Math.min(MAX_ZOOM, g.s0 * z));
-    // (through the levels: it stops at Fit)
+    // (through the levels: it stops at them)
     const s = shownScale(g.p.by(Math.log(raw / g.raw), detents()));
     g.raw = raw;
     g.mid = { x: (now[0].x + now[1].x) / 2, y: (now[0].y + now[1].y) / 2 };
@@ -868,9 +919,9 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     const g = pinchRef.current;
     if (!g) return;
     pinchRef.current = null;
-    if (cancel) { heldFit.current = false; slideView.placeAt(g.s0, g.a.x, g.a.y, (g.c[0].x + g.c[1].x) / 2, (g.c[0].y + g.c[1].y) / 2); }
-    // held at Fit, or let go near it: onto it (the view springs back into place once it has settled)
-    else if (settle(g.p, g.mid.x, g.mid.y)) return;
+    if (cancel) { heldAt.current = null; slideView.placeAt(g.s0, g.a.x, g.a.y, (g.c[0].x + g.c[1].x) / 2, (g.c[0].y + g.c[1].y) / 2); }
+    // held at a level, or let go near one: onto it
+    else if (settle(g.p)) return;
     commitLiveZoom(0);
     slideView.release();
   };
@@ -966,10 +1017,25 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     const cx = (b.w / 2 - left) / sc, cy = b.h / 2 / sc;
     zoomAbout(factor, cx, cy, scrollRef.current + cy);
   };
+  /** the zoom menu: a level, or a percentage of the slide's own size (about the canvas' middle) */
+  const chooseZoom = (v: string) => {
+    if (v === 'fit') { fitSlide(); return; }
+    if (v in VIEW_FIT_NAMES) { goToLevel(v as ViewFit, true); return; }
+    const s1 = Number(v) / 100;
+    if (!(s1 > 0)) return;
+    const s0 = slideView.scaleNow() ?? scaleRef.current, b = boxRef.current;
+    if (!soloRef.current) { zoomStep(s1 / s0); return; }
+    cancelAnimationFrame(settleRaf.current);
+    levelRef.current = null;
+    heldAt.current = null;
+    slideView.zoomTo(s1, b.w / 2, b.h / 2);
+    commitLiveZoom(120);
+  };
   const fitSlide = () => {
     if (zoomCommit.current) { clearTimeout(zoomCommit.current); zoomCommit.current = null; }
     cancelAnimationFrame(settleRaf.current);
-    heldFit.current = false;
+    heldAt.current = null;
+    levelRef.current = 'fit';
     setZoom(1);
     setPanX(0);
     showZoom(fitRef.current);
@@ -1691,6 +1757,12 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
 
   const curSlidePath = slides[current]?.path ?? null;
   const notes = curSlidePath && kind === 'deck' ? slideNotes(text.toString(), curSlidePath).text : '';
+  // the zoom menu: the levels (one slide: Fit, Fit width, Fit content, Trim margins — those apart), what the zoom is at
+  const shownLevels: ViewLevels = soloOn ? viewLevels(box, solo!.rect, solo!.content ?? null, MAX_ZOOM) : { fit };
+  const zoomLevels = soloOn ? viewDetents(shownLevels).map(d => d.key) : ['fit' as const];
+  const pct = Math.round(scale * 100);
+  const atLevel = soloOn ? levelAt(shownLevels, scale) : Math.abs(zoom - 1) < 0.005 ? 'fit' : null;
+  const zoomPick = atLevel ?? (DECK_ZOOMS.includes(pct) ? String(pct) : 'custom');
   /** notes being typed, with the slide they are typed for (a click in the rail changes the slide without a blur) */
   const [notesDraft, setNotesDraftState] = useState<{ path: Path; text: string } | null>(null);
   const draftRef = useRef(notesDraft); draftRef.current = notesDraft;
@@ -1861,7 +1933,12 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
         </>}
         <span class="dl-zoomgroup">
           <button class="dl-btn" title="Zoom out (Ctrl+−)" onClick={() => zoomStep(1 / 1.25)}>−</button>
-          <button class="dl-btn dl-zoom" title="Fit (Ctrl+0)" onClick={fitSlide}>{Math.round(scale * 100)}%</button>
+          <select class="dl-btn dl-zoom" data-dl-zoom value={zoomPick} onChange={e => { const el = e.currentTarget as HTMLSelectElement; chooseZoom(el.value); el.blur(); }}
+            title={`Zoom (${pct} %). ${zoomLevels.map(levelName).join(', ')}: a pinch stops at ${zoomLevels.length > 1 ? 'them' : 'it'}${solo?.content ? '; Fit content and Trim margins leave the slide’s margins out' : ''}. Ctrl+0: ${levelName('fit')}`}>
+            {zoomLevels.map(k => <option key={k} value={k}>{levelName(k)}</option>)}
+            {zoomPick === 'custom' && <option value="custom">{pct}%</option>}
+            {DECK_ZOOMS.map(z => <option key={z} value={String(z)}>{z}%</option>)}
+          </select>
           <button class="dl-btn" title="Zoom in (Ctrl+=)" onClick={() => zoomStep(1.25)}>+</button>
         </span>
         {darkS.dark && <button class={'dl-btn dl-invert' + (darkS.invert ? ' on' : '')} data-dl-invert aria-pressed={darkS.invert} onClick={toggleDarkPages}
@@ -1935,8 +2012,8 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
             <div ref={zoomHud} class="zoom-hud" aria-hidden="true" data-dl-zoomhud />
             {(lost || zoomed || (soloOn && slideFree)) && kind !== 'page' && (
               <button type="button" class={'dl-refocus' + (lost ? ' lost' : '')} data-dl-refocus onClick={fitSlide}
-                title={zoomed ? 'Show the whole slide again (Ctrl+0)' : 'Back into the middle (Ctrl+0)'}>
-                {lost ? `⤢ Back to slide ${current + 1}` : zoomed ? '⤢ Fit slide' : '⤢ Centre slide'}
+                title={zoomed ? `Show the whole ${kind === 'poster' ? 'poster' : 'slide'} again (Ctrl+0)` : 'Back into the middle (Ctrl+0)'}>
+                {lost ? (kind === 'poster' ? '⤢ Back to the poster' : `⤢ Back to slide ${current + 1}`) : `⤢ ${zoomed ? 'Fit' : 'Centre'} ${kind === 'poster' ? 'poster' : 'slide'}`}
               </button>
             )}
           </div>

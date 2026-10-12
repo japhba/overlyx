@@ -154,8 +154,10 @@ export interface ReviewView {
 /**
  * A deck or poster on the canvas shows one slide at a time (runtime edit.ts): the slide shown, where it
  * is in the frame's document (CSS px) and the frame's height that holds it with room around it.
+ * `content`: where what is on it is (its text, pictures, drawings, filled or framed boxes — not its
+ * background), the slide's margins left out: what Fit content and Trim margins zoom to (none: nothing on it).
  */
-export interface Solo { slide: number; rect: Rect; height: number }
+export interface Solo { slide: number; rect: Rect; height: number; content?: Rect }
 
 /** what an object does at a step when presenting (core html/steps.ts) */
 export type StepKind = 'appear' | 'disappear';

@@ -3,7 +3,7 @@ import { setLayoutHeader, layoutZoomStep, refreshLayoutCheck } from '@client/edi
 import { documentMenus } from '@client/app/documentMenus';
 import { editorViewMenu } from '@client/app/editorViewMenu';
 import { buildToolbars, loadToolbarPrefs, mathExecutor, useMathPanels, toolbarClipboard, markValue, type ToolbarId, type ToolbarMode, type ToolbarPrefs } from '@client/app/toolbars';
-import { debounce, hashAuthor, applyAuthorColors, bcp47, suggestLabel, LayoutPicker, documentStats, applyEditorZoom, SidebarGrip, restoreSidebarWidths } from '@client/app/shellutil';
+import { debounce, hashAuthor, applyAuthorColors, bcp47, suggestLabel, LayoutPicker, documentStats, applyEditorZoom, stepTextZoom, useTextPinch, SidebarGrip, restoreSidebarWidths } from '@client/app/shellutil';
 import { setDocumentFonts } from '@client/fonts/editorfont';
 import { setDocumentParagraphs } from '@client/editor/paragraphsep';
 import { usePresentation } from '@client/app/presentation';
@@ -173,6 +173,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   useEffect(() => { localStorage.setItem('ol.toolbars', JSON.stringify(toolbars)); }, [toolbars]);
   useEffect(() => subscribePrefs(setPrefsState), []);
   useEffect(() => applyEditorZoom(zoom), [zoom]);
+  useTextPinch(zoom, setZoom);
   // Settings ▸ Editor ▸ Font ▸ "As in the document" follows the document's roman font
   useEffect(() => { setDocumentFonts(headerLines); setDocumentParagraphs(headerLines); setLayoutHeader(headerLines); }, [headerLines]);
   usePresentation();   // View ▸ Presentation mode: Shift+F11 toggles, Esc leaves
@@ -475,7 +476,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       acceptAll: () => run(acceptAllChanges()),
       rejectAll: () => run(rejectAllChanges()),
       closeTab: () => hostCommand('closeTab'),
-      zoom: (d) => { if (!layoutZoomStep(d)) setZoom(z => (d === 0 ? 1 : Math.min(2.5, Math.max(0.5, +(z + d * 0.1).toFixed(2))))); },
+      zoom: (d) => { if (!layoutZoomStep(d)) setZoom(z => stepTextZoom(z, d)); },
       textWidth: stepTextWidth,
       openFile: () => hostCommand('openFile'),
       newFile: () => hostCommand('newFile'),

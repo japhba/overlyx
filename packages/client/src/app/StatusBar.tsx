@@ -6,6 +6,7 @@ import { pdfStatus, useTicker, type PdfStatusInput } from './pdfstatus';
 import { useEffect, useState } from 'preact/hooks';
 import { styleLabel } from './stylenames';
 import { layoutZoom, layoutZoomStep, onLayoutZoom } from '../editor/layout/controller';
+import { stepTextZoom } from './shellutil';
 
 export interface Status { connected: boolean; synced: boolean; users: PresenceUser[] }
 
@@ -47,11 +48,12 @@ export function ZoomControl({ zoom, onZoom }: { zoom: number; onZoom: (z: number
     const presets = [10, 25, 50, 75, 100, 150, 200, 300, 400];
     const cur = String(canvas.percent);
     return (
-      <span class="zoom" title="Zoom the page (pinch or Ctrl + wheel, Ctrl+Plus / Ctrl+Minus; Fit shows the whole page)">
+      <span class="zoom" title="Zoom the page (pinch or Ctrl + wheel, Ctrl+Plus / Ctrl+Minus; Fit shows the whole page, Fit width the page as wide as the window — a pinch stops at them)">
         <button type="button" class="zoom-btn" data-zoom-out onClick={() => layoutZoomStep(-1)}>−</button>
-        <select class="zoom-select" data-zoom value={canvas.fit ? 'fit' : cur} onChange={e => { const v = (e.target as HTMLSelectElement).value; layoutZoomStep(v === 'fit' ? 0 : { pct: Number(v) }); }}>
-          <option value="fit">Fit{canvas.fit ? ` (${canvas.percent}%)` : ''}</option>
-          {(presets.includes(canvas.percent) || canvas.fit ? presets : [...presets, canvas.percent].sort((a, b) => a - b)).map(p => <option key={p} value={String(p)}>{p}%</option>)}
+        <select class="zoom-select" data-zoom value={canvas.level ?? cur} onChange={e => { const v = (e.target as HTMLSelectElement).value; layoutZoomStep(v === 'fit' ? 0 : v === 'width' ? { level: 'width' } : { pct: Number(v) }); }}>
+          <option value="fit">Fit{canvas.level === 'fit' ? ` (${canvas.percent}%)` : ''}</option>
+          {canvas.width && <option value="width">Fit width{canvas.level === 'width' ? ` (${canvas.percent}%)` : ''}</option>}
+          {(presets.includes(canvas.percent) || canvas.level ? presets : [...presets, canvas.percent].sort((a, b) => a - b)).map(p => <option key={p} value={String(p)}>{p}%</option>)}
         </select>
         <button type="button" class="zoom-btn" data-zoom-in onClick={() => layoutZoomStep(1)}>+</button>
       </span>
@@ -60,12 +62,12 @@ export function ZoomControl({ zoom, onZoom }: { zoom: number; onZoom: (z: number
   const pct = Math.round(zoom * 100);
   const presets = [50, 75, 90, 100, 110, 125, 150, 175, 200, 250];
   return (
-    <span class="zoom" title="Zoom the document text (Ctrl+Plus / Ctrl+Minus; pick 100% to reset)">
-      <button type="button" class="zoom-btn" data-zoom-out onClick={() => onZoom(Math.max(0.5, +(zoom - 0.1).toFixed(2)))}>−</button>
+    <span class="zoom" title="Zoom the document text (pinch, Ctrl+Plus / Ctrl+Minus; a pinch stops at 100 %, pick 100% to reset)">
+      <button type="button" class="zoom-btn" data-zoom-out onClick={() => onZoom(stepTextZoom(zoom, -1))}>−</button>
       <select class="zoom-select" data-zoom value={String(pct)} onChange={e => onZoom(Number((e.target as HTMLSelectElement).value) / 100)}>
         {(presets.includes(pct) ? presets : [...presets, pct].sort((a, b) => a - b)).map(p => <option key={p} value={String(p)}>{p}%</option>)}
       </select>
-      <button type="button" class="zoom-btn" data-zoom-in onClick={() => onZoom(Math.min(2.5, +(zoom + 0.1).toFixed(2)))}>+</button>
+      <button type="button" class="zoom-btn" data-zoom-in onClick={() => onZoom(stepTextZoom(zoom, 1))}>+</button>
     </span>
   );
 }

@@ -740,13 +740,26 @@ blend.
     wider than the canvas); while it changes the zoom is said over the canvas (`app/zoomhud.ts`,
     `[data-dl-zoomhud]`: "137 %", "Fit · 64 %" when fitted or held there — written into the element from
     SlideView's `onLive` once a frame, as the toolbar's figure catches up only once a pinch rests; it
-    fades 0.8 s later). **Fit is a level a pinch stops at** (`app/zoomdetent.ts` `DetentPinch`, as the
+    fades 0.8 s later). **The zoom's levels** (12 Oct 2026, the user: "the zoom to work and lock in
+    slides, posters and docs" — the PDF viewer's fits on the canvas too; `viewport.ts` `viewLevels`):
+    *Fit slide* / *Fit poster* (the whole slide, edge to edge), *Fit width* (its width the canvas'),
+    *Fit content* (what is on the slide — its margins left out — as big as the canvas takes it, 16 px
+    of room) and *Trim margins* (what is on it as wide as the canvas). What is on the slide comes from
+    the page with every layout (`Solo.content`, runtime `solo.ts` `contentRect`: its words, pictures,
+    drawings and boxes drawn with a fill, a border or a shadow, not a box ≥ 90 % of the slide — its
+    background —, clipped to the slide). Of levels within 7 % of each other only the first is one
+    (`viewDetents`: Fit, Fit width, Fit content, Trim margins — a wide slide in a wide canvas has Fit
+    and Fit content only). The toolbar's zoom menu (`select.dl-zoom`) lists them and 50–200 % and says
+    the level the zoom is at. **A pinch stops at the levels** (`app/zoomdetent.ts` `DetentPinch`, as the
     PDF viewer's fits; fingers, a trackpad's Ctrl + wheel, Safari's gestures): within 7 % it snaps on and
-    holds until pinched ×1.35 past it, the slide giving a quarter of the pull, and let go held or near
-    it, it settles on it (220 ms; a wheel's pinch ends 220 ms after its last event). Fingers that leave
-    Fit no longer keep the slide's point exactly under them (the hold took some of their spread); past
-    Fit they do. − / +, Ctrl±, and a mouse wheel's notch (≥ 50 px: ×1.25, no more ×e) step and stop at
-    Fit on their way (`stepOnto`). *Fit slide* / *Back to slide N* appears when zoomed in or when the
+    holds until pinched past it (×1.35 Fit, ×1.2 Fit width, ×1.45 the content's), the slide giving a
+    quarter of the pull, and let go held or near one it springs onto it (`goToLevel`, 260 ms): Fit
+    content puts what is on the slide in the middle, the widths centre across and keep the place up
+    and down (`levelAnchor`). Fingers that leave a level no longer keep the slide's point exactly under
+    them (the hold took some of their spread). − / +, Ctrl±, and a mouse wheel's notch (≥ 50 px: ×1.25,
+    no more ×e) step and stop at the levels on their way (`stepOnto`). A view at a level stays at it
+    when the canvas changes size and on another slide (that slide's content), not when what is on the
+    slide changes as it is edited. *Fit slide* / *Back to slide N* appears when zoomed in or when the
     slide in view is mostly off the screen (Ctrl+0).
   * **One slide per canvas** (11 Oct 2026, the user: "each slide in a deck its own canvas, no
     scrolling through slides apart from the slide side menu"): in a deck or poster the canvas frame
@@ -979,8 +992,10 @@ blend.
     page in the window; a trackpad pinch or Ctrl/⌘ + wheel zooms the canvas about the pointer (Safari's
     gesture events too), Ctrl+Plus / Minus and the status bar's zoom step through the usual percentages
     of the paper's real size, *Fit* returns to the whole page (`layoutZoomStep`, which both shells'
-    zoom commands try first). As on a deck's canvas, the whole page is a level a pinch stops at and
-    holds (`FIT_DETENT`, `DetentPinch`; a mouse wheel's notch ×1.28 stops at it), and the zoom is said
+    zoom commands try first). As on a deck's canvas, the whole page — and, where it is a level apart
+    (a wide window), the page as wide as the window, *Fit width* (also in the status bar's menu) — is
+    a level a pinch stops at and holds (`PageFit`, `DetentPinch`; a mouse wheel's notch ×1.28 and
+    − / + stop at them), and the zoom is said
     over the canvas while it changes (`hostedZoomPill`, fixed in `<body>` as the canvas scrolls:
     "Fit · 48 %", "120 %" of the real size). Text boxes with *height follows the text* grow with what is typed.
   * **Tools** (the *Layout* toolbar, `app/layouttoolbar.tsx`, and Inkscape's keys): select (V), text
@@ -2043,7 +2058,13 @@ grows a plugin list, a toolbar button or one of those helpers of its own again �
 extension once lacked autocorrect, markdown headings, image paste and the delimiter buttons. Zoom is
 one of those helpers (`applyEditorZoom`: the `--editor-zoom` variable the editor's font size is
 computed from; a change is said over the text for a moment, as every zoom is — `app/zoomhud.ts`,
-also a board's); the extension used to zoom with CSS `zoom` on its scroll container instead, which puts
+also a board's). **A pinch zooms the text** (`useTextPinch`, 12 Oct 2026): a trackpad's (Ctrl + wheel,
+Safari's gesture events) or two fingers on a touch screen (`.editor-scroll:has(… .lyx-editor) {
+touch-action: pan-x pan-y }`, their middle scrolls) — never the browser's page; the character under
+the fingers stays under them while the text reflows (`caretPositionFromPoint`, the scroll set again
+each frame), and 100 % is a level it stops at and holds (×1.25), as the canvases' fits. A mouse
+wheel's notch with Ctrl/⌘ steps 10 %; every step (Ctrl ±, the status bar's − / +) stops at 100 %
+(`stepTextZoom`). Not on a layout document's canvas, which zooms itself. The extension used to zoom with CSS `zoom` on its scroll container instead, which puts
 mouse coordinates and layout into different scales in Chromium — drags stopped following the pointer
 and selection highlights disagreed with the selection as soon as the document was zoomed.
 

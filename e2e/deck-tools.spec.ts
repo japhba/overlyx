@@ -641,18 +641,19 @@ test('touch: a pinch zooms smoothly about the fingers, two fingers that pan do n
   const c = await at(page, 640, 360);
 
   // at Fit, a small pinch holds there — the slide gives a little — and settles back on it once the fingers lift
-  const vFit = await view(), fitText = (await page.locator('.dl-zoom').textContent())!;
+  const vFit = await view();
+  await expect(page.locator('.dl-zoom')).toHaveValue('fit');
   await touches('touchStart', [{ x: c.x - 60, y: c.y }, { x: c.x + 60, y: c.y }]);
   for (let i = 1; i <= 6; i++) { await touches('touchMove', [{ x: c.x - 60 - 3 * i, y: c.y }, { x: c.x + 60 + 3 * i, y: c.y }]); await page.waitForTimeout(20); }
   expect((await view()).s).toBeGreaterThan(vFit.s * 1.01);
   await expect(page.locator('[data-dl-zoomhud]')).toHaveText(/^Fit · \d+ %$/);
   await touches('touchEnd', []);
   await expect.poll(async () => Math.abs((await view()).s - vFit.s), { timeout: 3000 }).toBeLessThan(0.002);
-  await expect(page.locator('.dl-zoom')).toHaveText(fitText);
+  await expect(page.locator('.dl-zoom')).toHaveValue('fit');
   await page.waitForTimeout(500);
 
-  // past Fit (125 %), a pinch: the scale follows the fingers' distance (once they have clearly spread), step by step, never back; what is under their middle stays
-  await page.locator('.dl-zoomgroup button[title^="Zoom in"]').click();
+  // past the levels (200 %: Fit content and Trim margins are below it), a pinch: the scale follows the fingers' distance (once they have clearly spread), step by step, never back; what is under their middle stays
+  await page.locator('.dl-zoom').selectOption('200');
   await page.waitForTimeout(500);
   const v0 = await view();
   const under0 = { x: (c.x - v0.box.x) / v0.s, y: (c.y - v0.box.y) / v0.s };
@@ -686,8 +687,8 @@ test('touch: a pinch zooms smoothly about the fingers, two fingers that pan do n
   expect(Math.abs((c.x - v1.box.x) / v1.s - under0.x)).toBeLessThan(4);
   expect(Math.abs((c.y - v1.box.y) / v1.s - under0.y)).toBeLessThan(4);
   // the zoom is the editor's once the fingers are up
-  await expect(page.locator('.dl-zoom')).toHaveText(new RegExp(`^${Math.round(v1.s * 100)}%$`), { timeout: 3000 });
-  await page.locator('.dl-zoom').click();
+  await expect(page.locator('.dl-zoom option:checked')).toHaveText(new RegExp(`^${Math.round(v1.s * 100)}%$`), { timeout: 3000 });
+  await page.locator('.dl-zoom').selectOption('fit');
   await expect.poll(async () => Math.abs((await view()).s - vFit.s), { timeout: 3000 }).toBeLessThan(0.002);
   await page.waitForTimeout(700);
 
@@ -707,7 +708,7 @@ test('touch: a pinch zooms smoothly about the fingers, two fingers that pan do n
   }
   await touches('touchEnd', []);
   expect(panned).toBeGreaterThan(60);
-  await page.locator('.dl-zoom').click();
+  await page.locator('.dl-zoom').selectOption('fit');
   await page.waitForTimeout(700);
 
   // beside the slide (zoomed out, the canvas all round it): a pinch zooms the slide, a finger pulls it
@@ -720,7 +721,7 @@ test('touch: a pinch zooms smoothly about the fingers, two fingers that pan do n
   for (let i = 1; i <= 10; i++) { const d = 50 + 70 * i / 10; await touches('touchMove', [{ x: gx, y: gy - d }, { x: gx, y: gy + d }]); await page.waitForTimeout(16); }
   await touches('touchEnd', []);
   expect((await view()).s / sOut).toBeGreaterThan(1.8);
-  await page.locator('.dl-zoom').click();
+  await page.locator('.dl-zoom').selectOption('fit');
   await page.waitForTimeout(700);
   for (let i = 0; i < 3; i++) await page.locator('.dl-zoomgroup button[title^="Zoom out"]').click();
   await page.waitForTimeout(400);
@@ -729,7 +730,7 @@ test('touch: a pinch zooms smoothly about the fingers, two fingers that pan do n
   for (let i = 1; i <= 8; i++) { await touches('touchMove', [{ x: gx + i * 10, y: gy }]); await page.waitForTimeout(16); }
   expect((await view()).box.x - before).toBeGreaterThan(30);
   await touches('touchEnd', []);
-  await page.locator('.dl-zoom').click();
+  await page.locator('.dl-zoom').selectOption('fit');
   await page.waitForTimeout(700);
 
   // three fingers tap: undo (and it says so)
@@ -826,49 +827,129 @@ test('the zoom is said over the canvas while it changes: a pinch (Ctrl + wheel) 
   const errors = collectErrors(page);
   await login(page);
   await setup(page);
-  const hud = page.locator('[data-dl-zoomhud]');
+  const hud = page.locator('[data-dl-zoomhud]'), menu = page.locator('.dl-zoomgroup .dl-zoom');
   await expect(hud).not.toHaveClass(/\bon\b/);
-  // a trackpad pinch over the slide: the zoom as it goes (the toolbar's figure waits till it rests)
+  // a trackpad pinch out over the slide: the zoom as it goes (the toolbar's figure waits till it rests)
   const c = await at(page, 640, 360);
   await page.mouse.move(c.x, c.y);
   await page.keyboard.down('Control');
   const seen: string[] = [];
-  for (let i = 0; i < 6; i++) { await page.mouse.wheel(0, -20); await page.waitForTimeout(50); seen.push((await hud.textContent()) ?? ''); }
+  for (let i = 0; i < 6; i++) { await page.mouse.wheel(0, 12); await page.waitForTimeout(50); seen.push((await hud.textContent()) ?? ''); }
   await page.keyboard.up('Control');
   await expect(hud).toHaveClass(/\bon\b/);
   expect(new Set(seen.filter(Boolean)).size).toBeGreaterThan(2);
   expect(seen[seen.length - 1]).toMatch(/^\d+ %$/);
   // at rest it fades, the toolbar saying the same
   await expect(hud).not.toHaveClass(/\bon\b/, { timeout: 3000 });
-  await expect(page.locator('.dl-zoomgroup .dl-zoom')).toHaveText((await hud.textContent())!.replace(' %', '%'));
-  // Fit (the figure's button): said as Fit
-  await page.locator('.dl-zoomgroup .dl-zoom').click();
+  await expect(menu.locator('option:checked')).toHaveText((await hud.textContent())!.replace(' %', '%'));
+  // Fit slide (the menu): said as Fit
+  await menu.selectOption('fit');
   await expect(hud).toHaveText(/^Fit · \d+ %$/);
   await expect(hud).toHaveClass(/\bfit\b/);
-  const fitText = (await page.locator('.dl-zoomgroup .dl-zoom').textContent())!;
+  await expect(menu).toHaveValue('fit');
   // − : a percentage again
   await page.locator('.dl-zoomgroup button[title^="Zoom out"]').click();
   await expect(hud).toHaveText(/^\d+ %$/);
   await expect(hud).toHaveClass(/\bon\b/);
   // + : a step stops at Fit on its way
   await page.locator('.dl-zoomgroup button[title^="Zoom in"]').click();
-  await expect(page.locator('.dl-zoomgroup .dl-zoom')).toHaveText(fitText);
+  await expect(menu).toHaveValue('fit');
   await page.locator('.dl-zoomgroup button[title^="Zoom out"]').click();
-  await expect(page.locator('.dl-zoomgroup .dl-zoom')).not.toHaveText(fitText);
+  await expect(menu).not.toHaveValue('fit');
   // a pinch in, on past Fit: it stops there and holds (said as Fit, the slide giving a little), and settles on it once let go
   await page.mouse.move(c.x, c.y);
   await page.keyboard.down('Control');
   for (let i = 0; i < 8; i++) { await page.mouse.wheel(0, -5); await page.waitForTimeout(30); }
   await expect(hud).toHaveText(/^Fit · \d+ %$/);
   await page.keyboard.up('Control');
-  await expect(page.locator('.dl-zoomgroup .dl-zoom')).toHaveText(fitText, { timeout: 3000 });
+  await expect(menu).toHaveValue('fit', { timeout: 3000 });
   // pinched well past it, it lets go
   await page.waitForTimeout(400);
   await page.keyboard.down('Control');
   for (let i = 0; i < 12; i++) { await page.mouse.wheel(0, -5); await page.waitForTimeout(30); }
   await page.keyboard.up('Control');
-  await expect(hud).toHaveText(/^\d+ %$/);
-  await expect(page.locator('.dl-zoomgroup .dl-zoom')).not.toHaveText(fitText, { timeout: 3000 });
+  await expect(hud).not.toHaveText(/^Fit · /);
+  await expect(menu).not.toHaveValue('fit', { timeout: 3000 });
+  expect(real(errors)).toEqual([]);
+});
+
+/** a portrait poster with what is on it in its middle: its levels lie well apart */
+const POSTER = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="overlyx" content="poster">
+<title>Poster</title>
+<style>
+  body { margin: 0; background: #dfe3ea; font-family: system-ui, sans-serif; }
+  .slide { width: 800px; height: 1200px; position: relative; overflow: hidden; background: #fff; }
+</style>
+</head>
+<body>
+
+<section class="slide">
+  <h1 style="position: absolute; left: 200px; top: 450px; width: 400px; margin: 0; font-size: 40px">Middle</h1>
+  <div id="m" style="position: absolute; left: 200px; top: 550px; width: 400px; height: 200px; background: #3366cc"></div>
+</section>
+
+</body>
+</html>
+`;
+
+test('a poster\'s zoom levels: Fit poster, Fit width, Fit content (what is on it, in the middle) and Trim margins — from the menu, and a pinch stops at each and holds there', async ({ page }) => {
+  const errors = collectErrors(page);
+  await page.setViewportSize({ width: 1400, height: 800 });
+  await login(page);
+  await setup(page, POSTER);
+  const hud = page.locator('[data-dl-zoomhud]'), menu = page.locator('.dl-zoomgroup .dl-zoom');
+  await expect(menu).toHaveValue('fit');
+  expect(await menu.locator('option').evaluateAll(os => os.map(o => (o as HTMLOptionElement).value))).toEqual(expect.arrayContaining(['fit', 'width', 'content', 'margins']));
+  await expect(menu.locator('option[value="fit"]')).toHaveText('Fit poster');
+  const canvas = (await page.locator('.dl-canvas').boundingBox())!;
+  /** what is on the poster (its title and box) on the screen */
+  const content = async () => {
+    const h = (await frameLoc(page).locator('h1').boundingBox())!, m = (await frameLoc(page).locator('#m').boundingBox())!;
+    const x0 = Math.min(h.x, m.x), y0 = Math.min(h.y, m.y), x1 = Math.max(h.x + h.width, m.x + m.width), y1 = Math.max(h.y + h.height, m.y + m.height);
+    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2 };
+  };
+  const poster = async () => (await slides(page).first().boundingBox())!;
+  // Fit width: the poster as wide as the canvas
+  await menu.selectOption('width');
+  await expect(hud).toHaveText(/^Fit width · \d+ %$/);
+  await expect.poll(async () => Math.abs((await poster()).width - canvas.width), { timeout: 3000 }).toBeLessThan(3);
+  await expect(menu).toHaveValue('width');
+  // Fit content: what is on it as big as the canvas takes it, in the middle
+  await menu.selectOption('content');
+  await expect(hud).toHaveText(/^Fit content · \d+ %$/);
+  await expect.poll(async () => { const k = await content(); return Math.abs(k.cx - (canvas.x + canvas.width / 2)) + Math.abs(k.cy - (canvas.y + canvas.height / 2)); }, { timeout: 3000 }).toBeLessThan(4);
+  const k1 = await content();
+  expect(Math.min(canvas.width - k1.w, canvas.height - k1.h)).toBeLessThan(40);
+  expect(k1.w).toBeLessThanOrEqual(canvas.width);
+  expect(k1.h).toBeLessThanOrEqual(canvas.height);
+  // Trim margins: as wide as the canvas, less a little room
+  await menu.selectOption('margins');
+  await expect(hud).toHaveText(/^Trim margins · \d+ %$/);
+  await expect.poll(async () => { const k = await content(); return Math.abs(k.w - (canvas.width - 32)) + Math.abs(k.cx - (canvas.x + canvas.width / 2)); }, { timeout: 3000 }).toBeLessThan(4);
+  // a pinch in from the whole poster stops at Fit width and holds there, and settles on it once let go
+  await menu.selectOption('fit');
+  await page.waitForTimeout(400);
+  await page.mouse.move(canvas.x + canvas.width / 2, canvas.y + canvas.height / 2);
+  await page.keyboard.down('Control');
+  for (let i = 0; i < 40 && !/^Fit width/.test((await hud.textContent()) ?? ''); i++) { await page.mouse.wheel(0, -8); await page.waitForTimeout(25); }
+  await expect(hud).toHaveText(/^Fit width · /);
+  for (let i = 0; i < 2; i++) { await page.mouse.wheel(0, -5); await page.waitForTimeout(25); }
+  await expect(hud).toHaveText(/^Fit width · /);
+  await page.keyboard.up('Control');
+  await expect(menu).toHaveValue('width', { timeout: 3000 });
+  // on in, it lets go of it and stops at Fit content next
+  await page.waitForTimeout(400);
+  await page.keyboard.down('Control');
+  for (let i = 0; i < 60 && !/^Fit content/.test((await hud.textContent()) ?? ''); i++) { await page.mouse.wheel(0, -8); await page.waitForTimeout(25); }
+  await page.keyboard.up('Control');
+  await expect(menu).toHaveValue('content', { timeout: 3000 });
+  // + stops at the next level on its way, never past it
+  for (let i = 0; i < 4 && (await menu.inputValue()) !== 'margins'; i++) { await page.locator('.dl-zoomgroup button[title^="Zoom in"]').click(); await page.waitForTimeout(400); }
+  await expect(menu).toHaveValue('margins');
   expect(real(errors)).toEqual([]);
 });
 

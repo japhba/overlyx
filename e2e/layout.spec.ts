@@ -423,6 +423,32 @@ test('a layout document opens with its whole page in the window; a pinch (Ctrl +
   expect(errors).toEqual([]);
 });
 
+test('a wide window: the page as wide as it (Fit width) is a level of its own — from the status bar, and a pinch stops at it', async ({ page }) => {
+  const errors = collectErrors(page);
+  await page.setViewportSize({ width: 1800, height: 600 });
+  await login(page);
+  await openLayout(page, 'zoom.tex');
+  const sel = page.locator('.zoom-select'), hud = page.locator('[data-layout-zoomhud]');
+  await expect(sel).toHaveValue('fit');
+  await expect(sel.locator('option[value="width"]')).toHaveCount(1);
+  const w0 = (await page.locator('.lyx-editor .ol-page').first().boundingBox())!.width;
+  await sel.selectOption('width');
+  await expect(hud).toHaveText(/^Fit width · \d+ %$/);
+  await expect(sel).toHaveValue('width');
+  expect((await page.locator('.lyx-editor .ol-page').first().boundingBox())!.width).toBeGreaterThan(w0 * 1.3);
+  // from the whole page, a pinch in stops at it and holds there, and settles on it once let go
+  await sel.selectOption('fit');
+  await page.waitForTimeout(300);
+  const pg = (await page.locator('.lyx-editor .ol-page').first().boundingBox())!;
+  await page.mouse.move(pg.x + pg.width / 2, pg.y + pg.height / 2);
+  await page.keyboard.down('Control');
+  for (let i = 0; i < 40 && !/^Fit width/.test((await hud.textContent()) ?? ''); i++) { await page.mouse.wheel(0, -8); await page.waitForTimeout(25); }
+  await expect(hud).toHaveText(/^Fit width · /);
+  await page.keyboard.up('Control');
+  await expect(sel).toHaveValue('width', { timeout: 3000 });
+  expect(errors).toEqual([]);
+});
+
 test("presentation: beamer's overlays in a box's text (\\item<2->, \\only<3>)", async ({ page }) => {
   const errors = collectErrors(page);
   await login(page);

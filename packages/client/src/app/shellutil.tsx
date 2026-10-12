@@ -5,7 +5,8 @@
  * paragraph layout picker, word counts. One copy for both shells (tests/parity.test.ts).
  */
 import { hostedZoomPill } from './zoomhud';
-import { useState } from 'preact/hooks';
+import { DetentPinch, stepOnto, type Detent } from './zoomdetent';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { styleLabel, styleSearchText } from './stylenames';
 import type { EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
@@ -27,6 +28,187 @@ export function applyEditorZoom(zoom: number): void {
 }
 let textZoomShown: number | null = null;
 const textZoomPill = hostedZoomPill(() => document.querySelector<HTMLElement>('.editor-scroll'), 'data-text-zoomhud');
+
+/** how far the text zooms (the status bar's, Ctrl + / −'s, a pinch's) */
+export const TEXT_ZOOM_MIN = 0.5, TEXT_ZOOM_MAX = 2.5;
+/** the text's own size: a level a pinch stops at and holds, and a step does not pass (zoomdetent.ts) */
+const TEXT_LEVELS: Detent<'own'>[] = [{ key: 'own', z: 1, hold: Math.log(1.25) }];
+
+/** the text zoom a step from `z` goes to (Ctrl + / −, the status bar's − / +: `d` ±1; 0: 100 %): 10 % on, not past 100 % */
+export function stepTextZoom(z: number, d: number): number {
+  if (d === 0) return 1;
+  const to = stepOnto(z, (z + d * 0.1) / z, TEXT_LEVELS).z;
+  return Math.max(TEXT_ZOOM_MIN, Math.min(TEXT_ZOOM_MAX, +to.toFixed(2)));
+}
+
+/** the scroller of the document text under `t`, if a pinch there zooms the text (a layout document's canvas zooms itself) */
+function textScroller(t: EventTarget | null): HTMLElement | null {
+  const el = t instanceof Element ? t : null;
+  const sc = el?.closest<HTMLElement>('.editor-scroll');
+  const ed = sc?.querySelector('.lyx-editor');
+  return sc && ed && !ed.classList.contains('ol-layout') && el!.closest('.editor-page') ? sc : null;
+}
+
+/**
+ * What a zoom keeps where it is: the character under the screen point (x, y) — its middle's screen y,
+ * read again once the text has reflowed — and how far from the point it was.
+ */
+function textAnchor(x: number, y: number): { mid: () => number | null; off: number } | null {
+  const d = document as Document & { caretPositionFromPoint?(x: number, y: number): { offsetNode: Node; offset: number } | null; caretRangeFromPoint?(x: number, y: number): Range | null };
+  const pos = d.caretPositionFromPoint?.(x, y);
+  const r = pos ? { node: pos.offsetNode, at: pos.offset } : (() => { const q = d.caretRangeFromPoint?.(x, y); return q ? { node: q.startContainer, at: q.startOffset } : null; })();
+  if (!r) return null;
+  const mid = (): number | null => {
+    if (!r.node.isConnected) return null;
+    let box: DOMRect | undefined;
+    const len = r.node.nodeType === Node.TEXT_NODE ? r.node.textContent?.length ?? 0 : 0;
+    if (len) {
+      // (a character's box: a collapsed range has none at a line's start in some browsers)
+      const q = document.createRange(), i = Math.min(r.at, len - 1);
+      q.setStart(r.node, i); q.setEnd(r.node, i + 1);
+      box = q.getClientRects()[0] ?? q.getBoundingClientRect();
+    } else box = (r.node instanceof Element ? r.node : r.node.parentElement)?.getBoundingClientRect();
+    return box && (box.width || box.height) ? box.top + box.height / 2 : null;
+  };
+  const m = mid();
+  return m === null ? null : { mid, off: m - y };
+}
+
+/**
+ * A pinch on a document's text zooms the text — never the browser's page: a trackpad's (Ctrl + wheel;
+ * Safari's gesture events), two fingers on a touch screen (their middle pans as it moves; one finger
+ * scrolls as ever). The line under the fingers stays under them while the text reflows. It stops at
+ * the text's own size (100 %) and holds there till pinched well past it (zoomdetent.ts), giving a
+ * little meanwhile and settling back once let go; let go near it, it settles on it. A mouse wheel's
+ * notch with Ctrl / ⌘ steps by 10 %, not past 100 %. Said over the text as it goes (the pill). Both
+ * shells (App, VS Code's EditorShell): `zoom` and `setZoom` are their text zoom.
+ */
+export function useTextPinch(zoom: number, setZoom: (z: number) => void): void {
+  const zoomRef = useRef(zoom); zoomRef.current = zoom;
+  const setRef = useRef(setZoom); setRef.current = setZoom;
+  useEffect(() => {
+    /** the zoom shown now, ahead of the shell's while a pinch goes on (`--editor-zoom`) */
+    const shown = () => parseFloat(document.documentElement.style.getPropertyValue('--editor-zoom')) || zoomRef.current;
+    /** show zoom `z` (the text reflows), the anchor's character back at (its offset from) the screen y `y`; `held`: said as 100 % */
+    const show = (sc: HTMLElement, a: ReturnType<typeof textAnchor>, z0: number, z: number, y: number, held: boolean) => {
+      document.documentElement.style.setProperty('--editor-zoom', String(z));
+      textZoomPill.show(held ? 1 : z);
+      textZoomShown = z;
+      const m = a?.mid();
+      if (a && m !== null && m !== undefined) sc.scrollTop += m - (y + a.off * (z / z0));
+    };
+    const commit = (z: number) => { const v = Math.abs(z - 1) < 0.005 ? 1 : +z.toFixed(2); textZoomShown = v; setRef.current(v); };
+
+    let g: { sc: HTMLElement; p: DetentPinch<'own'>; a: ReturnType<typeof textAnchor>; z0: number; z: number; held: boolean; x: number; y: number; timer: ReturnType<typeof setTimeout> | null } | null = null;
+    let raf = 0, settling = 0;
+    const draw = () => { raf = 0; if (g) show(g.sc, g.a, g.z0, g.z, g.y, g.held); };
+    const begin = (sc: HTMLElement, x: number, y: number) => {
+      cancelAnimationFrame(settling); settling = 0;
+      const z0 = shown();
+      g = { sc, p: new DetentPinch<'own'>(Math.abs(z0 - 1) < 0.005 ? 'own' : z0, z0, [TEXT_ZOOM_MIN, TEXT_ZOOM_MAX]), a: textAnchor(x, y), z0, z: z0, held: false, x, y, timer: null };
+    };
+    const by = (d: number, x: number, y: number) => {
+      if (!g) return;
+      const sh = g.p.by(d, TEXT_LEVELS);
+      g.held = typeof sh.zoom === 'string';
+      g.z = typeof sh.zoom === 'string' ? sh.stretch : sh.zoom;
+      g.x = x; g.y = y;
+      if (!raf) raf = requestAnimationFrame(draw);
+    };
+    const end = () => {
+      const p = g;
+      g = null;
+      if (!p) return;
+      if (p.timer) clearTimeout(p.timer);
+      cancelAnimationFrame(raf); raf = 0;
+      const e = p.p.end(TEXT_LEVELS);
+      if (!e) { show(p.sc, p.a, p.z0, p.z, p.y, false); commit(p.z); return; }
+      // onto 100 % on a short spring
+      const t0 = performance.now();
+      const frame = () => {
+        const t = Math.min(1, (performance.now() - t0) / 200), k = 1 - (1 - t) ** 3;
+        show(p.sc, p.a, p.z0, e.from + (1 - e.from) * k, p.y, true);
+        if (t < 1) { settling = requestAnimationFrame(frame); return; }
+        settling = 0;
+        commit(1);
+      };
+      frame();
+    };
+    /** a step (a mouse wheel's notch): 10 % in or out about the point, stopping at 100 % */
+    const step = (sc: HTMLElement, dir: number, x: number, y: number) => {
+      const z0 = shown(), z = stepTextZoom(z0, dir);
+      if (Math.abs(z - z0) < 1e-3) return;
+      show(sc, textAnchor(x, y), z0, z, y, Math.abs(z - 1) < 0.005);
+      commit(z);
+    };
+
+    const onWheel = (e: WheelEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.defaultPrevented) return;
+      const sc = g?.sc ?? textScroller(e.target);
+      if (!sc) return;
+      e.preventDefault();
+      const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
+      if (!dy) return;
+      // a mouse wheel's notch (lines, or a hundred px or so at once): a step; a trackpad sends many small deltas — a pinch
+      if (e.deltaMode !== 0 || Math.abs(dy) >= 50) { if (!g) step(sc, dy < 0 ? 1 : -1, e.clientX, e.clientY); return; }
+      if (!g) begin(sc, e.clientX, e.clientY);
+      if (g!.timer) clearTimeout(g!.timer);
+      g!.timer = setTimeout(end, 220);
+      by(-dy * 0.01, e.clientX, e.clientY);
+    };
+    let touch: { d: number; x: number; y: number } | null = null;
+    const two = (t: TouchList) => ({ d: Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY), x: (t[0].clientX + t[1].clientX) / 2, y: (t[0].clientY + t[1].clientY) / 2 });
+    const onTouch = (e: TouchEvent) => {
+      if (e.type === 'touchstart') {
+        if (e.touches.length !== 2 || touch) return;
+        const sc = textScroller(e.target);
+        if (!sc) return;
+        e.preventDefault();
+        touch = two(e.touches);
+        begin(sc, touch.x, touch.y);
+        return;
+      }
+      if (!touch) return;
+      if (e.type === 'touchmove') {
+        if (e.touches.length < 2 || !g) return;
+        e.preventDefault();
+        const now = two(e.touches);
+        g.sc.scrollTop -= now.y - touch.y;
+        g.sc.scrollLeft -= now.x - touch.x;
+        if (now.d > 0 && touch.d > 0) by(Math.log(now.d / touch.d), now.x, now.y);
+        touch = now;
+        return;
+      }
+      if (e.touches.length < 2) { touch = null; end(); }
+    };
+    // Safari's trackpad pinch: its scale is from where it began (an iPad's fingers: the touches are the measure)
+    let last = 1;
+    const onGesture = (e: Event & { scale?: number; clientX?: number; clientY?: number }) => {
+      const sc = g?.sc ?? textScroller(e.target);
+      if (!sc) return;
+      e.preventDefault();
+      if (touch) return;
+      if (e.type === 'gestureend') { end(); return; }
+      const r = sc.getBoundingClientRect(), x = e.clientX ?? r.left + r.width / 2, y = e.clientY ?? r.top + r.height / 2;
+      if (e.type === 'gesturestart') { last = 1; begin(sc, x, y); return; }
+      const s = e.scale ?? 1;
+      if (!(s > 0)) return;
+      by(Math.log(s / last), x, y);
+      last = s;
+    };
+    const opts = { passive: false } as AddEventListenerOptions;
+    document.addEventListener('wheel', onWheel, opts);
+    for (const t of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(t, onGesture as EventListener, opts);
+    for (const t of ['touchstart', 'touchmove', 'touchend', 'touchcancel']) document.addEventListener(t, onTouch as EventListener, opts);
+    return () => {
+      document.removeEventListener('wheel', onWheel);
+      for (const t of ['gesturestart', 'gesturechange', 'gestureend']) document.removeEventListener(t, onGesture as EventListener);
+      for (const t of ['touchstart', 'touchmove', 'touchend', 'touchcancel']) document.removeEventListener(t, onTouch as EventListener);
+      cancelAnimationFrame(raf); cancelAnimationFrame(settling);
+      if (g?.timer) clearTimeout(g.timer);
+    };
+  }, []);
+}
 
 export function debounce<T extends (...a: any[]) => void>(fn: T, ms: number): T & { cancel(): void } {
   let t: ReturnType<typeof setTimeout> | null = null;
