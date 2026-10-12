@@ -11,8 +11,8 @@
  * offset into it are kept, not the scroll fraction, so pages added above do not move the view).
  * `busy` draws a thin progress line along the top; `overlay` floats over the pages.
  *
- * Zoom: Fit width, Trim margins and Fit content (past the margins: the pages cropped to what is painted
- * on them, as wide as the pane, or as big as it takes them — pdfzoom.ts) and the steps between, from the
+ * Zoom: Fit width and Fit content (past the margins: the pages cropped to what is painted on them, as
+ * big as the pane takes them — pdfzoom.ts) and the steps between, from the
  * toolbar or a mouse wheel's notches with Ctrl/⌘; or a pinch — a trackpad's (Ctrl + wheel in Chromium
  * and Firefox, the gesture events in Safari), two fingers on a touch screen — about the pointer, which
  * stops at the fits and holds there. The zoom is said over the pages while it changes (zoomhud.ts).
@@ -101,8 +101,8 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay }:
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null);
   const [pages, setPages] = useState<PageInfo[]>([]);
   const [error, setError] = useState<string | null>(null);
-  /** Fit width, Trim margins, Fit content (the two past the margins), or a factor on 96 dpi */
-  const [zoom, setZoom] = useState<Zoom>(() => { try { const f = localStorage.getItem(FIT_KEY); return f === 'content' || f === 'margins' ? f : 'width'; } catch { return 'width'; } });
+  /** Fit width, Fit content (past the margins), or a factor on 96 dpi */
+  const [zoom, setZoom] = useState<Zoom>(() => { try { return localStorage.getItem(FIT_KEY) === 'content' ? 'content' : 'width'; } catch { return 'width'; } });
   /** a fit's pages stretched a little: a pinch held at the fit pulls at it (pdfzoom.ts GIVE) */
   const [stretch, setStretch] = useState(1);
   /** the pane's inner size (px) */
@@ -149,14 +149,13 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay }:
   const anchor = useRef<{ page: number; y: number } | null>(null);
 
   const widthScale = (p: PageInfo) => Math.max(0.2, (width - WIDTH_SPARE) / p.width);
-  // Fit content, Trim margins: the pages cropped to what is painted on them (pdfzoom.ts)
+  // Fit content: the pages cropped to what is painted on them (pdfzoom.ts)
   const content = useMemo(() => (pages.length && width ? contentLayout(pages, pages.map((_, i) => boxes.current.get(i + 1)), pane) : null), [pages, width, pane.height, boxesVer]);
-  const levels: Levels = pages.length && width ? { width: widthScale(pages[0]) / PT, content: (content?.scale ?? content?.geo[0]?.scale ?? 0) / PT || undefined, margins: content?.wide ? content.wide.scale / PT : undefined } : {};
+  const levels: Levels = pages.length && width ? { width: widthScale(pages[0]) / PT, content: (content?.scale ?? content?.geo[0]?.scale ?? 0) / PT || undefined } : {};
   /** every page's scale (px per pt) and the part of it shown */
   const geo = useMemo<Geo[]>(() => pages.map((p, i) => {
     if (zoom === 'content' && content) return { scale: content.geo[i].scale * stretch, crop: content.geo[i].crop };
-    if (zoom === 'margins' && content?.wide) return { scale: content.wide.geo[i].scale * stretch, crop: content.wide.geo[i].crop };
-    // (Fit content before the pane's size is known, Trim margins before a page is measured: as Fit width)
+    // (Fit content before the pane's size is known: as Fit width)
     return { scale: typeof zoom === 'string' ? widthScale(p) * stretch : zoom * PT, crop: { x: 0, y: 0, w: p.width, h: p.height } };
   }), [pages, zoom, stretch, content, width]);
   const tops = useMemo(() => topsOf(geo), [geo]);
@@ -225,7 +224,7 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay }:
       raf = requestAnimationFrame(() => {
         raf = 0;
         // the pages past the margins change size: the reader stays at the same place
-        if ((layoutRef.current.zoom === 'content' || layoutRef.current.zoom === 'margins') && !anchor.current) anchor.current = readAnchor();
+        if (layoutRef.current.zoom === 'content' && !anchor.current) anchor.current = readAnchor();
         setBoxesVer(v => v + 1);
       });
     };
@@ -578,9 +577,8 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay }:
         <span class="pdf-sep" />
         <button class="small-btn" title="Zoom out" onClick={() => step(-1)}>−</button>
         <select class="pdf-zoom" data-pdf-zoom value={zoomPick} onChange={e => { const v = (e.target as HTMLSelectElement).value; if (v !== 'custom') choose(v in FIT_NAMES ? v as Fit : Number(v)); }}
-          title={`Zoom (${Math.round(shownZoom * 100)} %). Trim margins and Fit content zoom past the margins: what is printed on the pages as wide as the pane, or as big as the pane takes it. A pinch stops at the fits.`}>
+          title={`Zoom (${Math.round(shownZoom * 100)} %). Fit content zooms past the margins: what is printed on the pages, as big as the pane takes it. A pinch stops at Fit width and Fit content.`}>
           <option value="width">{FIT_NAMES.width}</option>
-          <option value="margins">{FIT_NAMES.margins}</option>
           <option value="content">{FIT_NAMES.content}</option>
           {zoomPick === 'custom' && <option value="custom">{Math.round(shownZoom * 100)}%</option>}
           {ZOOMS.map(z => <option key={z} value={String(z)}>{Math.round(z * 100)}%</option>)}

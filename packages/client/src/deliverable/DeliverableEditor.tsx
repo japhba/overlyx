@@ -738,7 +738,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   const levelRef = useRef<ViewFit | null>('fit');
   const soloState = useRef(solo); soloState.current = solo;
   const boxRef = useRef(box); boxRef.current = box;
-  /** the zoom levels of the slide shown (viewport.ts): Fit, Fit width, Fit content, Trim margins */
+  /** the zoom levels of the slide shown (viewport.ts): Fit, Fit width, Fit content */
   const levelsNow = (): ViewLevels => {
     const so = soloState.current;
     return so && soloRef.current ? viewLevels(boxRef.current, so.rect, so.content ?? null, MAX_ZOOM) : { fit: fitRef.current };
@@ -1757,7 +1757,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
 
   const curSlidePath = slides[current]?.path ?? null;
   const notes = curSlidePath && kind === 'deck' ? slideNotes(text.toString(), curSlidePath).text : '';
-  // the zoom menu: the levels (one slide: Fit, Fit width, Fit content, Trim margins — those apart), what the zoom is at
+  // the zoom menu: the levels (one slide: Fit, Fit width, Fit content — those apart), what the zoom is at
   const shownLevels: ViewLevels = soloOn ? viewLevels(box, solo!.rect, solo!.content ?? null, MAX_ZOOM) : { fit };
   const zoomLevels = soloOn ? viewDetents(shownLevels).map(d => d.key) : ['fit' as const];
   const pct = Math.round(scale * 100);
@@ -1934,7 +1934,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
         <span class="dl-zoomgroup">
           <button class="dl-btn" title="Zoom out (Ctrl+−)" onClick={() => zoomStep(1 / 1.25)}>−</button>
           <select class="dl-btn dl-zoom" data-dl-zoom value={zoomPick} onChange={e => { const el = e.currentTarget as HTMLSelectElement; chooseZoom(el.value); el.blur(); }}
-            title={`Zoom (${pct} %). ${zoomLevels.map(levelName).join(', ')}: a pinch stops at ${zoomLevels.length > 1 ? 'them' : 'it'}${solo?.content ? '; Fit content and Trim margins leave the slide’s margins out' : ''}. Ctrl+0: ${levelName('fit')}`}>
+            title={`Zoom (${pct} %). ${zoomLevels.map(levelName).join(', ')}: a pinch stops at ${zoomLevels.length > 1 ? 'them' : 'it'}${solo?.content ? '; Fit content leaves the slide’s margins out' : ''}. Ctrl+0: ${levelName('fit')}`}>
             {zoomLevels.map(k => <option key={k} value={k}>{levelName(k)}</option>)}
             {zoomPick === 'custom' && <option value="custom">{pct}%</option>}
             {DECK_ZOOMS.map(z => <option key={z} value={String(z)}>{z}%</option>)}

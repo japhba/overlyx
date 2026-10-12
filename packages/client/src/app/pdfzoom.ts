@@ -1,28 +1,27 @@
 /**
- * The PDF viewer's zoom (PdfViewer.tsx): its three fits, the steps between them, and how a pinch
+ * The PDF viewer's zoom (PdfViewer.tsx): its two fits, the steps between them, and how a pinch
  * stops at a fit.
  *
- * Fit content and Trim margins zoom past the margins: every page is cropped to what is painted on it
- * (found by drawing it small, `inkBox`). Fit content shows it as big as the pane takes it, so the
- * content is as near the pane's edges as it goes and all of it shows: in a narrow pane it spans the
- * pane's width, in a wide one its height. Trim margins spans the pane's width whatever its height: the
- * margins just out of sight, the page scrolled. The typical page (the median of the pages' fits) sets
- * the zoom, so the text is one size on every page. A page with wider content (a broad table) is shown
- * smaller so that all of it shows; a page with less content is not blown up.
+ * Fit content zooms past the margins: every page is cropped to what is painted on it (found by
+ * drawing it small, `inkBox`) and shown as big as the pane takes it, so the content is as near the
+ * pane's edges as it goes and all of it shows: in a narrow pane it spans the pane's width, in a wide
+ * one its height. The typical page (the median of the pages' fits) sets the zoom, so the text is one
+ * size on every page. A page with wider content (a broad table) is shown smaller so that all of it
+ * shows; a page with less content is not blown up.
  *
  * The fits are levels of the zoom, in order with the steps (−, +, a mouse wheel's notches). A pinch
  * (a trackpad's, Ctrl + wheel) stops at them. Near one it snaps onto it, and it stays there until
- * pinched well past it, the two past the margins most of all. Meanwhile the pages give a little and
- * spring back when let go. A pinch let go near a fit settles on it.
+ * pinched well past it, Fit content most of all. Meanwhile the pages give a little and spring back
+ * when let go. A pinch let go near a fit settles on it.
  */
 import { DetentPinch, CATCH, GIVE, type Detent, type Shown as DetentShown } from './zoomdetent';
 
 /** a rectangle of a page (pt from its top-left), or of a canvas (px) */
 export interface Box { x: number; y: number; w: number; h: number }
 export interface PageSize { width: number; height: number }
-export type Fit = 'width' | 'margins' | 'content';
+export type Fit = 'width' | 'content';
 /** what the fits are called (the zoom menu, the zoom said over the pages) */
-export const FIT_NAMES: Record<Fit, string> = { width: 'Fit width', margins: 'Trim margins', content: 'Fit content' };
+export const FIT_NAMES: Record<Fit, string> = { width: 'Fit width', content: 'Fit content' };
 /** a fit, or a factor on 96 dpi */
 export type Zoom = Fit | number;
 
@@ -73,16 +72,14 @@ export interface Geo { scale: number; crop: Box }
  * Fit content: per page its scale and crop, in a pane of `pane` px (inside its padding: as wide as it
  * is, `PAD` above and below). `boxes[i]`: what is painted on page i (pt), unknown till measured. A page
  * not measured yet takes the typical crop. `scale` is the typical page's (px per pt). It is null with
- * nothing measured; then every page is fitted whole. `wide`: Trim margins, the same crops as wide as
- * the pane (null with nothing measured).
+ * nothing measured; then every page is fitted whole.
  */
-export function contentLayout(pages: PageSize[], boxes: (Box | null | undefined)[], pane: { width: number; height: number }): { geo: Geo[]; scale: number | null; wide: { geo: Geo[]; scale: number } | null } {
+export function contentLayout(pages: PageSize[], boxes: (Box | null | undefined)[], pane: { width: number; height: number }): { geo: Geo[]; scale: number | null } {
   const aw = Math.max(40, pane.width - 2 * SIDE), ah = Math.max(40, pane.height - 2 * PAD);
-  const fitW = (b: Box) => aw / b.w;
-  const fit = (b: Box) => Math.min(fitW(b), ah / b.h);
+  const fit = (b: Box) => Math.min(aw / b.w, ah / b.h);
   const crops = pages.map((p, i) => { const b = boxes[i]; return b ? cropOf(b, p) : null; });
   const known = crops.filter((c): c is Box => !!c);
-  if (!known.length) return { geo: pages.map(p => { const crop = { x: 0, y: 0, w: p.width, h: p.height }; return { scale: fit(crop), crop }; }), scale: null, wide: null };
+  if (!known.length) return { geo: pages.map(p => { const crop = { x: 0, y: 0, w: p.width, h: p.height }; return { scale: fit(crop), crop }; }), scale: null };
   const typ = { x: median(known.map(c => c.x)), y: median(known.map(c => c.y)), w: median(known.map(c => c.w)), h: median(known.map(c => c.h)) };
   const full = pages.map((p, i) => {
     let c = crops[i];
@@ -97,24 +94,17 @@ export function contentLayout(pages: PageSize[], boxes: (Box | null | undefined)
     }
     return c;
   });
-  const scale = median(known.map(fit)), wide = median(known.map(fitW));
-  return {
-    geo: full.map(crop => ({ scale: Math.min(scale, fit(crop)), crop })), scale,
-    wide: { geo: full.map(crop => ({ scale: Math.min(wide, fitW(crop)), crop })), scale: wide },
-  };
+  const scale = median(known.map(fit));
+  return { geo: full.map(crop => ({ scale: Math.min(scale, fit(crop)), crop })), scale };
 }
 
 /** the zoom each fit shows now (a factor on 96 dpi) */
 export type Levels = Partial<Record<Fit, number>>;
 
-/**
- * The fits as levels, lowest first. Of two that nearly coincide only one: Fit content before Fit width
- * before Trim margins (in a narrow pane Fit content spans the width too; pages without margins, a
- * beamer PDF's, have none to trim).
- */
+/** the fits as levels, lowest first; of two that nearly coincide only Fit content (pages without margins, a beamer PDF's) */
 export function fitLevels(l: Levels): { fit: Fit; z: number }[] {
   const out: { fit: Fit; z: number }[] = [];
-  for (const fit of ['content', 'width', 'margins'] as const) {
+  for (const fit of ['content', 'width'] as const) {
     const z = l[fit];
     if (z && out.every(f => Math.abs(Math.log(z / f.z)) >= CATCH)) out.push({ fit, z });
   }
@@ -135,8 +125,8 @@ export function stepZoom(cur: number, dir: 1 | -1, l: Levels): Zoom {
   return (next ?? (dir > 0 ? all[all.length - 1] : all[0])).zoom;
 }
 
-/** how far (log of the factor) a pinch must go on past a fit to leave it: the two past the margins hold on hardest */
-export const HOLD: Record<Fit, number> = { width: Math.log(1.2), margins: Math.log(1.45), content: Math.log(1.45) };
+/** how far (log of the factor) a pinch must go on past a fit to leave it: Fit content holds on hardest */
+export const HOLD: Record<Fit, number> = { width: Math.log(1.2), content: Math.log(1.45) };
 export { CATCH, GIVE };
 
 /** what a pinch shows: a zoom, and a fit's pages stretched by `stretch` (the give) */

@@ -1,6 +1,6 @@
 /**
  * The zoom levels a pinch stops at outside the PDF viewer (pdfzoom.test.ts): a slide's or a poster's
- * (packages/client/src/deliverable/viewport.ts — Fit, Fit width, Fit content, Trim margins) and a
+ * (packages/client/src/deliverable/viewport.ts — Fit, Fit width, Fit content) and a
  * document's text (packages/client/src/app/shellutil.tsx — 100 %).
  */
 import { describe, it, expect } from 'vitest';
@@ -10,13 +10,12 @@ import { stepTextZoom } from '../packages/client/src/app/shellutil.tsx';
 
 describe("a slide's zoom levels", () => {
   const box = { w: 1000, h: 600 };
-  it('a portrait poster: the whole of it, its width, what is on it, as wide as the canvas — all apart', () => {
+  it('a portrait poster: the whole of it, its width, what is on it — all apart', () => {
     const l = viewLevels(box, { w: 800, h: 1200 }, { w: 400, h: 300 }, 8);
     expect(l.fit).toBeCloseTo(0.5, 9);
     expect(l.width).toBeCloseTo(1.25, 9);
     expect(l.content).toBeCloseTo((600 - 2 * CONTENT_SIDE) / 300, 9);
-    expect(l.margins).toBeCloseTo((1000 - 2 * CONTENT_SIDE) / 400, 9);
-    expect(viewDetents(l).map(d => d.key)).toEqual(['fit', 'width', 'content', 'margins']);
+    expect(viewDetents(l).map(d => d.key)).toEqual(['fit', 'width', 'content']);
     expect(levelAt(l, l.content!)).toBe('content');
     expect(levelAt(l, l.content! * 1.02)).toBeNull();
   });
@@ -29,12 +28,11 @@ describe("a slide's zoom levels", () => {
     expect(viewLevels(box, { w: 1280, h: 720 }, null, 8).content).toBeUndefined();
     expect(viewLevels(box, { w: 1280, h: 720 }, { w: 2, h: 2 }, 8).content).toBe(8);
   });
-  it('Fit content puts what is on the slide in the middle; the widths keep where the view is up and down', () => {
+  it('Fit content puts what is on the slide in the middle; Fit width keeps where the view is up and down', () => {
     const slide = { x: 48, y: 48, w: 800, h: 1200 }, content = { x: 248, y: 498, w: 400, h: 300 };
     expect(levelAnchor('fit', slide, content)).toEqual({ x: 448, y: 648 });
     expect(levelAnchor('content', slide, content)).toEqual({ x: 448, y: 648 });
     expect(levelAnchor('width', slide, content)).toEqual({ x: 448, y: null });
-    expect(levelAnchor('margins', slide, { ...content, x: 100 })).toEqual({ x: 300, y: null });
   });
   it('a pinch from the whole poster stops at Fit width and holds there; a step stops at Fit content', () => {
     const ds = viewDetents(viewLevels(box, { w: 800, h: 1200 }, { w: 400, h: 300 }, 8));

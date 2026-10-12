@@ -743,12 +743,13 @@ blend.
     fades 0.8 s later). **The zoom's levels** (12 Oct 2026, the user: "the zoom to work and lock in
     slides, posters and docs" — the PDF viewer's fits on the canvas too; `viewport.ts` `viewLevels`):
     *Fit slide* / *Fit poster* (the whole slide, edge to edge), *Fit width* (its width the canvas'),
-    *Fit content* (what is on the slide — its margins left out — as big as the canvas takes it, 16 px
-    of room) and *Trim margins* (what is on it as wide as the canvas). What is on the slide comes from
+    and *Fit content* (what is on the slide — its margins left out — as big as the canvas takes it,
+    16 px of room; a fourth, *Trim margins*, what is on it as wide as the canvas, was taken out again the
+    same day at the user's word: "seems weird"). What is on the slide comes from
     the page with every layout (`Solo.content`, runtime `solo.ts` `contentRect`: its words, pictures,
     drawings and boxes drawn with a fill, a border or a shadow, not a box ≥ 90 % of the slide — its
     background —, clipped to the slide). Of levels within 7 % of each other only the first is one
-    (`viewDetents`: Fit, Fit width, Fit content, Trim margins — a wide slide in a wide canvas has Fit
+    (`viewDetents`: Fit, Fit width, Fit content — a wide slide in a wide canvas has Fit
     and Fit content only). The toolbar's zoom menu (`select.dl-zoom`) lists them and 50–200 % and says
     the level the zoom is at. **A pinch stops at the levels** (`app/zoomdetent.ts` `DetentPinch`, as the
     PDF viewer's fits; fingers, a trackpad's Ctrl + wheel, Safari's gestures): within 7 % it snaps on and
@@ -1484,7 +1485,7 @@ blend.
   one is signed in already) arrives in that hover pose and relaxes back — the hover's leave
   (`Wordmark arrive`: held 450 ms from when its fonts are in and the page has painted, once per load).
 * **PDF viewer and SyncTeX** (`app/PdfViewer.tsx`, pdf.js): the built PDF is shown in its pane
-  by our own viewer (zoom, page navigation). **Zoom** (`app/pdfzoom.ts`): *Fit width*, *Trim margins*,
+  by our own viewer (zoom, page navigation). **Zoom** (`app/pdfzoom.ts`): *Fit width*,
   *Fit content* and the steps between them, one order for −, + and a mouse wheel's notches with Ctrl/⌘ (deltas of
   lines or ≥ 50 px; no step within 5 % of a fit), and the zoom menu. **Fit content** zooms past the
   margins: every page is cropped (`.pdf-page-box` showing part of its `.pdf-sheet`) to what is painted
@@ -1492,25 +1493,22 @@ blend.
   pixels' box plus 6 pt — and the pages are as big as the pane takes them, the typical page's content
   (the median of the pages' fits) spanning the pane's width in a narrow pane, its height in a wide one;
   wider content (a broad table) is shown smaller so all of it shows, less is not blown up; a page not
-  measured yet takes the typical crop, and measured pages keep the reader at the same point. **Trim
-  margins** (12 Oct 2026, the user: "another specialized zoom level that just covers the margins"):
-  the same crops, the typical page's content as wide as the pane whatever its height — the margins
-  just out of sight, the page scrolled (`contentLayout(…).wide`); in a wide pane Fit content is
-  smaller than Fit width (a whole page by its height), Trim margins bigger. Of two fits within 7 % of
-  each other only one is a level (`fitLevels`: Fit content, then Fit width, then Trim margins — in a
-  narrow pane Fit content spans the width; a beamer PDF has no margins to trim). The fit
+  measured yet takes the typical crop, and measured pages keep the reader at the same point; in a
+  wide pane Fit content is smaller than Fit width (a whole page by its height). (A third fit, *Trim
+  margins* — the content as wide as the pane whatever its height, the page scrolled — was added on
+  12 Oct 2026 and taken out the same day: the user found it weird.) Of two fits within 7 % of each
+  other only one is a level (`fitLevels`: Fit content, then Fit width). The fit
   chosen last is the next viewer's (`ol.pdfFit`). **Pinch zoom**: a trackpad pinch (Ctrl + wheel in
   Chromium and Firefox with small deltas, Safari's gesture events) or two fingers on a touch screen
   (touch events, `.pdf-pages { touch-action: pan-x pan-y }` so the browser zooms nothing itself; their
   middle pans; Safari's gesture events ignored meanwhile) zooms about the pointer, one step
   per frame, and stops at the fits (`Pinch`, on `app/zoomdetent.ts` `DetentPinch`): within 7 % of one
-  it snaps on, and it holds there until pinched ×1.2 past Fit width, ×1.45 past the two past the
-  margins — meanwhile the pages give a quarter of the pull and spring back when let go (220 ms after
+  it snaps on, and it holds there until pinched ×1.2 past Fit width, ×1.45 past Fit content —
+  meanwhile the pages give a quarter of the pull and spring back when let go (220 ms after
   the last wheel event, or `gestureend`); let go within 7 % of a fit it settles on it. The drawn pages
   stretch meanwhile and are drawn anew once the pinch settles (160 ms) — a pinch let go where it began
   draws nothing anew. While the zoom changes it is said over the pages (`[data-pdf-zoomhud]`: "Fit
-  content · 142 %", "137 %"). A pinch through Trim margins jumps sideways by the margin it trims (the
-  crop fills the pane's width: nothing to scroll by). A page whose canvas would exceed 2²⁵ pixels (an A0 poster zoomed in — browsers
+  content · 142 %", "137 %"). A page whose canvas would exceed 2²⁵ pixels (an A0 poster zoomed in — browsers
   draw nothing on far bigger canvases) is drawn coarser, with a sharp detail canvas (`.pdf-detail`)
   over the part in view and half a window around it. A **rebuilt PDF replaces the old one
   without a flicker**: the new document loads while the old pages stay in view (one shared pdf.js

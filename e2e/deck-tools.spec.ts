@@ -652,7 +652,7 @@ test('touch: a pinch zooms smoothly about the fingers, two fingers that pan do n
   await expect(page.locator('.dl-zoom')).toHaveValue('fit');
   await page.waitForTimeout(500);
 
-  // past the levels (200 %: Fit content and Trim margins are below it), a pinch: the scale follows the fingers' distance (once they have clearly spread), step by step, never back; what is under their middle stays
+  // past the levels (200 %: Fit content is below it), a pinch: the scale follows the fingers' distance (once they have clearly spread), step by step, never back; what is under their middle stays
   await page.locator('.dl-zoom').selectOption('200');
   await page.waitForTimeout(500);
   const v0 = await view();
@@ -896,14 +896,14 @@ const POSTER = `<!doctype html>
 </html>
 `;
 
-test('a poster\'s zoom levels: Fit poster, Fit width, Fit content (what is on it, in the middle) and Trim margins — from the menu, and a pinch stops at each and holds there', async ({ page }) => {
+test('a poster\'s zoom levels: Fit poster, Fit width, Fit content (what is on it, in the middle) — from the menu, and a pinch stops at each and holds there', async ({ page }) => {
   const errors = collectErrors(page);
   await page.setViewportSize({ width: 1400, height: 800 });
   await login(page);
   await setup(page, POSTER);
   const hud = page.locator('[data-dl-zoomhud]'), menu = page.locator('.dl-zoomgroup .dl-zoom');
   await expect(menu).toHaveValue('fit');
-  expect(await menu.locator('option').evaluateAll(os => os.map(o => (o as HTMLOptionElement).value))).toEqual(expect.arrayContaining(['fit', 'width', 'content', 'margins']));
+  expect(await menu.locator('option').evaluateAll(os => os.map(o => (o as HTMLOptionElement).value).filter(v => !/^\d+$/.test(v)))).toEqual(['fit', 'width', 'content']);
   await expect(menu.locator('option[value="fit"]')).toHaveText('Fit poster');
   const canvas = (await page.locator('.dl-canvas').boundingBox())!;
   /** what is on the poster (its title and box) on the screen */
@@ -926,10 +926,6 @@ test('a poster\'s zoom levels: Fit poster, Fit width, Fit content (what is on it
   expect(Math.min(canvas.width - k1.w, canvas.height - k1.h)).toBeLessThan(40);
   expect(k1.w).toBeLessThanOrEqual(canvas.width);
   expect(k1.h).toBeLessThanOrEqual(canvas.height);
-  // Trim margins: as wide as the canvas, less a little room
-  await menu.selectOption('margins');
-  await expect(hud).toHaveText(/^Trim margins · \d+ %$/);
-  await expect.poll(async () => { const k = await content(); return Math.abs(k.w - (canvas.width - 32)) + Math.abs(k.cx - (canvas.x + canvas.width / 2)); }, { timeout: 3000 }).toBeLessThan(4);
   // a pinch in from the whole poster stops at Fit width and holds there, and settles on it once let go
   await menu.selectOption('fit');
   await page.waitForTimeout(400);
@@ -947,9 +943,11 @@ test('a poster\'s zoom levels: Fit poster, Fit width, Fit content (what is on it
   for (let i = 0; i < 60 && !/^Fit content/.test((await hud.textContent()) ?? ''); i++) { await page.mouse.wheel(0, -8); await page.waitForTimeout(25); }
   await page.keyboard.up('Control');
   await expect(menu).toHaveValue('content', { timeout: 3000 });
-  // + stops at the next level on its way, never past it
-  for (let i = 0; i < 4 && (await menu.inputValue()) !== 'margins'; i++) { await page.locator('.dl-zoomgroup button[title^="Zoom in"]').click(); await page.waitForTimeout(400); }
-  await expect(menu).toHaveValue('margins');
+  // from Fit width, + stops at Fit content on its way, never past it
+  await menu.selectOption('width');
+  await page.waitForTimeout(400);
+  for (let i = 0; i < 4 && (await menu.inputValue()) !== 'content'; i++) { await page.locator('.dl-zoomgroup button[title^="Zoom in"]').click(); await page.waitForTimeout(400); }
+  await expect(menu).toHaveValue('content');
   expect(real(errors)).toEqual([]);
 });
 

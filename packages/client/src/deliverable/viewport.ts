@@ -81,16 +81,16 @@ const PAGE_FINGER = 0.15;
 
 /**
  * The zoom levels of a slide on the canvas, as the PDF viewer's fits (app/pdfzoom.ts): the whole slide
- * (`fit`), its width the canvas' (`width`), what is on it — its margins left out — as big as the canvas
- * takes it (`content`) and as wide as the canvas (`margins`). A pinch stops at them and holds there
- * (app/zoomdetent.ts); a step (− / +, a mouse wheel's notch) does not pass them; the zoom menu lists them.
+ * (`fit`), its width the canvas' (`width`) and what is on it — its margins left out — as big as the
+ * canvas takes it (`content`). A pinch stops at them and holds there (app/zoomdetent.ts); a step
+ * (− / +, a mouse wheel's notch) does not pass them; the zoom menu lists them.
  */
-export type ViewFit = 'fit' | 'width' | 'content' | 'margins';
+export type ViewFit = 'fit' | 'width' | 'content';
 export type ViewLevels = { fit: number } & Partial<Record<Exclude<ViewFit, 'fit'>, number>>;
-export const VIEW_FIT_NAMES: Record<ViewFit, string> = { fit: 'Fit', width: 'Fit width', content: 'Fit content', margins: 'Trim margins' };
+export const VIEW_FIT_NAMES: Record<ViewFit, string> = { fit: 'Fit', width: 'Fit width', content: 'Fit content' };
 /** how far (log of the factor) a pinch goes on past a level before it lets go */
-export const VIEW_HOLD: Record<ViewFit, number> = { fit: Math.log(1.35), width: Math.log(1.2), content: Math.log(1.45), margins: Math.log(1.45) };
-/** the room (screen px) Fit content and Trim margins keep between what is on the slide and the canvas' sides */
+export const VIEW_HOLD: Record<ViewFit, number> = { fit: Math.log(1.35), width: Math.log(1.2), content: Math.log(1.45) };
+/** the room (screen px) Fit content keeps between what is on the slide and the canvas' sides */
 export const CONTENT_SIDE = 16;
 
 /**
@@ -104,15 +104,14 @@ export function viewLevels(box: Size, slide: Size, content: Size | null, max: nu
   if (content && content.w >= 1 && content.h >= 1) {
     const w = Math.max(1, box.w - 2 * CONTENT_SIDE), h = Math.max(1, box.h - 2 * CONTENT_SIDE);
     out.content = cap(Math.min(w / content.w, h / content.h));
-    out.margins = cap(w / content.w);
   }
   return out;
 }
 
-/** the levels a pinch stops at: one of any that come as near together as a pinch catches (the first named: Fit before Fit width before Fit content before Trim margins) */
+/** the levels a pinch stops at: one of any that come as near together as a pinch catches (the first named: Fit before Fit width before Fit content) */
 export function viewDetents(l: ViewLevels): Detent<ViewFit>[] {
   const out: Detent<ViewFit>[] = [];
-  for (const key of ['fit', 'width', 'content', 'margins'] as const) {
+  for (const key of ['fit', 'width', 'content'] as const) {
     const z = l[key];
     if (z === undefined || out.some(d => Math.abs(Math.log(z / d.z)) < CATCH)) continue;
     out.push({ key, z, hold: VIEW_HOLD[key] });
@@ -127,11 +126,11 @@ export function levelAt(l: ViewLevels, s: number): ViewFit | null {
 
 /**
  * Where a level shows the slide: the point of the frame's page (CSS px) it puts at the canvas' middle —
- * the slide's middle (Fit), what is on it in the middle (Fit content); across only for the widths (the
+ * the slide's middle (Fit), what is on it in the middle (Fit content); across only for Fit width (the
  * other way, null: where it is).
  */
 export function levelAnchor(k: ViewFit, slide: Box, content: Box | null): { x: number; y: number | null } {
-  const c = (k === 'content' || k === 'margins') && content ? content : slide;
+  const c = k === 'content' && content ? content : slide;
   return { x: c.x + c.w / 2, y: k === 'fit' || k === 'content' ? c.y + c.h / 2 : null };
 }
 
