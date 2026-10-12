@@ -6,7 +6,9 @@
  * zooming the slide, a click then not going on, a drag panning, `0` and Escape going back to the
  * whole slide, a second Escape ending the presentation, the arrow keys going on (unzoomed); the
  * bar out of sight until the mouse nears the bottom edge (a tap on a touch screen: the bar, not the
- * next slide); the pen drawing on a slide, its drawing kept with that slide, E clearing it.
+ * next slide); the pen drawing on a slide, its drawing kept with that slide, E clearing it; on a
+ * touch screen only the Pencil drawing (fingers swipe and pinch with a tool in hand) unless the bar's
+ * "Fingers draw" is on, which the editor keeps for the next presentation; the screen kept on.
  * Needs the seeded admin.
  */
 import { test, expect, type Page, type FrameLocator, type Locator } from '@playwright/test';
@@ -249,6 +251,95 @@ test.describe('on a touch screen', () => {
     // the keys still go on
     await page.keyboard.press('ArrowRight');
     await expect(pos).toHaveText('2 / 2');
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.dl-presenting')).toHaveCount(0, { timeout: 10000 });
+    expect(real(errors)).toEqual([]);
+  });
+
+  test('an HTML deck: only the Pencil draws — fingers swipe on and pinch with a tool in hand — unless "Fingers draw", which is kept; the screen kept on', async ({ page }) => {
+    const errors = collectErrors(page);
+    // the wake lock, recorded (headless Chromium refuses the real one)
+    await page.addInitScript(() => {
+      const rec = { asked: 0, released: 0 };
+      (window as unknown as { __wl: typeof rec }).__wl = rec;
+      Object.defineProperty(navigator, 'wakeLock', { configurable: true, value: { request: async () => {
+        rec.asked++;
+        const s = Object.assign(new EventTarget(), { released: false, type: 'screen', release: async () => { if (!s.released) { s.released = true; rec.released++; } } });
+        return s;
+      } } });
+    });
+    const wl = () => page.evaluate(() => (window as unknown as { __wl: { asked: number; released: number } }).__wl);
+    await login(page);
+    await page.goto(`/#/${PROJECT}/talk/index.html`);
+    await page.frameLocator('.dl-frame').locator('section.slide').first().waitFor({ timeout: 30000 });
+    await page.waitForTimeout(800);
+    const pres = page.frameLocator('.dl-presenting iframe');
+    const ui = pres.locator('ol-present-ui');
+    const pos = ui.locator('.pos'), bar = ui.locator('.bar');
+    const strokes = ui.locator('svg.laser g.strokes path');
+    const fingers = ui.locator('button[data-k="fingers"]');
+    const zs = async () => (await pres.locator('html').evaluate(e => parseFloat((e as HTMLElement).style.getPropertyValue('--ol-zs')) || 1));
+    const cdp = await page.context().newCDPSession(page);
+    const touches = (type: string, pts: { x: number; y: number }[]) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: pts.map((p, i) => ({ x: p.x, y: p.y, id: i + 1 })) });
+    const finger = async (x0: number, y0: number, dx: number, dy: number) => {
+      await touches('touchStart', [{ x: x0, y: y0 }]);
+      for (let i = 1; i <= 6; i++) await touches('touchMove', [{ x: x0 + dx * i / 6, y: y0 + dy * i / 6 }]);
+      await touches('touchEnd', []);
+    };
+    const pen = (type: string, x: number, y: number) => cdp.send('Input.dispatchMouseEvent', { type, x, y, button: 'left', buttons: type === 'mouseReleased' ? 0 : 1, clickCount: 1, force: 0.5, pointerType: 'pen' });
+    const present = async () => {
+      await page.locator('[data-dl-present]').click();
+      await expect(pos).toHaveText('1 / 2', { timeout: 20000 });
+      await page.waitForTimeout(400);
+    };
+    await present();
+    await expect.poll(async () => (await wl()).asked).toBeGreaterThan(0);
+    const box = (await page.locator('.dl-presenting iframe').boundingBox())!;
+    const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
+    // the pen from the bar (a tap brings it)
+    await page.touchscreen.tap(cx, cy);
+    await expect(bar).toHaveClass(/show/);
+    await expect(fingers).toBeVisible();
+    await expect(fingers).toHaveAttribute('aria-pressed', 'false');
+    await ui.locator('button[data-k="pen"]').tap();
+    await expect(pres.locator('html')).toHaveClass(/olpk-drawing/);
+    // a finger's swipe goes on and back, drawing nothing
+    await finger(cx + 150, cy, -300, 4);
+    await expect(pos).toHaveText('2 / 2');
+    await finger(cx - 150, cy, 300, 4);
+    await expect(pos).toHaveText('1 / 2');
+    await expect(strokes).toHaveCount(0);
+    // two fingers zoom
+    await touches('touchStart', [{ x: cx - 50, y: cy }, { x: cx + 50, y: cy }]);
+    for (let i = 1; i <= 8; i++) await touches('touchMove', [{ x: cx - 50 - i * 15, y: cy }, { x: cx + 50 + i * 15, y: cy }]);
+    await touches('touchEnd', []);
+    await expect.poll(zs).toBeGreaterThan(1.5);
+    await expect(strokes).toHaveCount(0);
+    await page.keyboard.press('0');
+    await expect.poll(zs).toBe(1);
+    // the Pencil draws, and does not go on
+    await pen('mousePressed', cx - 100, cy - 40);
+    for (let i = 1; i <= 10; i++) await pen('mouseMoved', cx - 100 + i * 20, cy - 40 + i * 6);
+    await pen('mouseReleased', cx + 100, cy + 20);
+    await expect(strokes).toHaveCount(1);
+    await page.waitForTimeout(500);
+    await expect(pos).toHaveText('1 / 2');
+    // "Fingers draw": now a finger draws with the pen in hand
+    await page.touchscreen.tap(cx, cy + 100);
+    await expect(bar).toHaveClass(/show/);
+    await fingers.tap();
+    await expect(fingers).toHaveAttribute('aria-pressed', 'true');
+    await finger(cx - 100, cy + 80, 200, 30);
+    await expect(strokes).toHaveCount(2);
+    await expect(pos).toHaveText('1 / 2');
+    await page.keyboard.press('Escape');
+    await expect(pres.locator('html')).not.toHaveClass(/olpk-drawing/);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.dl-presenting')).toHaveCount(0, { timeout: 10000 });
+    await expect.poll(async () => (await wl()).released).toBeGreaterThan(0);
+    // the next presentation: still on (the frame has no storage: the editor kept it)
+    await present();
+    await expect(fingers).toHaveAttribute('aria-pressed', 'true');
     await page.keyboard.press('Escape');
     await expect(page.locator('.dl-presenting')).toHaveCount(0, { timeout: 10000 });
     expect(real(errors)).toEqual([]);

@@ -25,6 +25,8 @@ import { pinchFactor, pinchLock, triGesture, type PinchLock } from './gestures';
 import { DetentPinch, stepOnto, type Detent, type Shown } from '../app/zoomdetent';
 import { zoomPill } from '../app/zoomhud';
 import { CornerButton } from '../app/CornerButton';
+import { keepAwake } from '../app/wakelock';
+import { presentFingersDraw, savePresentFingersDraw } from '../app/presentkit';
 import { createPortal } from 'preact/compat';
 import { isFromRuntime } from './protocol';
 import { rebasedSplices, objectHtml, imageHtml, insertPlace, newSlideHtml, slidePaths, slideNotes, notesOp, sourceRange, inlineSvgHtml } from './sourceops';
@@ -487,7 +489,12 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
       if (fromPresent) {
         if (m.ol === 'presentZoom') presentZoomed.current = m.zoomed;
         if (m.ol === 'exit') stopPresenting();
-        if (m.ol === 'visible') setCurrent(canvasIndexOf(m.slide));
+        if (m.ol === 'presentFingers') savePresentFingersDraw(m.on);
+        if (m.ol === 'visible') {
+          // (its first slide shown: the frame has no storage, so the bar's "Fingers draw" comes from here)
+          if (!presentPrefsSent.current) { presentPrefsSent.current = true; toFrame(presentFrame.current, { ol: 'presentFingers', on: presentFingersDraw() }); }
+          setCurrent(canvasIndexOf(m.slide));
+        }
         return;
       }
       switch (m.ol) {
@@ -1572,8 +1579,11 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   const presentZoomed = useRef(false);
   /** the slide the presentation starts on: F5 the first (PowerPoint), Shift+F5 and the button the one shown */
   const presentFrom = useRef(0);
+  /** the presenting frame was told this browser's presenting settings */
+  const presentPrefsSent = useRef(false);
   const startPresenting = (fromStart = false) => {
     presentZoomed.current = false;
+    presentPrefsSent.current = false;
     presentFrom.current = fromStart ? 0 : presentIndexOf(currentRef.current);
     if (link && host.present?.(src('present') + `#${presentFrom.current + 1}`)) return;
     setPresenting(true);
@@ -1596,6 +1606,8 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     return () => document.removeEventListener('fullscreenchange', onFs);
   }, [presenting]);
   useEffect(() => { if (!presenting && slides[current]) { toCanvas({ ol: 'scrollTo', slide: current }); toRail({ ol: 'current', slide: current }); } }, [presenting]);
+  // the screen kept on while presenting (an iPad locks mid-talk): asked for here, as the sandboxed frame may not
+  useEffect(() => (presenting ? keepAwake() : undefined), [presenting]);
 
   /* ------------------------------------------------------------- code view */
 

@@ -232,6 +232,8 @@ export type ToRuntime =
   | { ol: 'endCrop'; commit: boolean }
   /** presenting: back to the whole slide (Escape left full screen while it was zoomed) */
   | { ol: 'unzoom' }
+  /** presenting: fingers draw too, or only the Pencil does (app/presentkit.ts; kept by the editor, the frame has no storage) */
+  | { ol: 'presentFingers'; on: boolean }
   /** the formula open in LyX's formula editor changed (runtime/mathedit.ts: the chip follows) */
   | { ol: 'mathSet'; id: number; tex: string }
   /** LyX's formula editor left the formula (`dir`: by an arrow key / Escape, the caret goes that side; null: elsewhere; `putBack`: Backspace in the empty formula `$` opened gives the typed dollar back as text) */
@@ -329,6 +331,8 @@ export type FromRuntime =
   | { ol: 'cropping'; path: Path | null }
   /** presenting: the slide is zoomed in (or not any more) */
   | { ol: 'presentZoom'; zoomed: boolean }
+  /** presenting: the bar's "Fingers draw" switched */
+  | { ol: 'presentFingers'; on: boolean }
   /**
    * a formula of the text being retyped to edit with LyX's formula editor (runtime/mathedit.ts):
    * where it is and how big its letters are, its colour; `at`: the click into it; `dollar`: opened

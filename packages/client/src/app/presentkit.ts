@@ -7,17 +7,22 @@
  *   and dragged (or drawn with a finger or pen), its trace stays while held and fades once lifted.
  *   While it is on, clicks don't advance (the keys still do);
  * - pinch to zoom and pan: a trackpad pinch (Ctrl + wheel, as Chromium and Firefox report it; Safari's
- *   gesture events), two fingers on a touch screen, `+` / `-`; zoomed, a drag or a two-finger scroll
+ *   gesture events), two fingers on a touch screen (once they spread or close by an eighth: two
+ *   fingers moving together, or a resting hand, do not zoom), `+` / `-`; zoomed, a drag or a two-finger scroll
  *   pans, a click does not advance, `0`, a double click / tap or Escape go back to the whole slide;
  * - drawing on the slides (Keynote's and PowerPoint's presenting ink): a pen, a highlighter, an
  *   eraser (Ctrl+P, Ctrl+I, Ctrl+E; Ctrl+A or Escape put the tool away; E clears the slide), in a few
  *   colours. The drawings belong to their slide (kept while presenting, never saved) and zoom with
- *   it. Once an Apple Pencil (a pen) has drawn, fingers no longer draw: they swipe, tap and pinch;
+ *   it. The Apple Pencil (a pen) draws — with the pen when no tool is in hand, as in PowerPoint and
+ *   GoodNotes — and fingers swipe, tap and pinch; they draw too only with the bar's "Fingers draw"
+ *   on (kept in this browser). The hand resting on the glass while the Pencil writes is ignored;
  * - a small control bar (bottom left: ◀, n / N, ▶, the drawing tools, laser, back to the whole
  *   slide, end). The audience sees the screen (AirPlay mirroring, a shared screen), so it stays out
  *   of sight until asked for: a tap on a touch screen (a tap no longer goes on — a swipe does) or the
  *   mouse near the bottom edge brings it, and it fades out again a few seconds later, or as soon as
- *   a stroke begins.
+ *   a stroke begins;
+ * - the screen kept on while presenting (app/wakelock.ts), where the presenter is the top-level page
+ *   (a sandboxed frame may not: the editor presenting it asks for it).
  *
  * DOM only — no framework — so the runtime bundle stays small. Everything is drawn in screen space
  * (CSS px of the window, not scaled with the slide) inside a shadow root, out of the page's styles.
@@ -25,6 +30,8 @@
  * slide's fit.
  */
 import { laserPathD } from '@overlyx/core/ink.ts';
+import { keepAwake } from './wakelock';
+import { pinchFactor, pinchLock, type PinchLock } from '../deliverable/gestures';
 
 /** the whiteboard's laser colour and fade time (editor/plugins/ink.ts LASER_COLOR / LASER_FADE_MS — a test checks they agree) */
 export const LASER_COLOR = '#ff2d55';
@@ -47,8 +54,21 @@ export const MARKER_PX = 18;
 /** how near the eraser must come to a stroke (screen px) */
 export const ERASER_PX = 12;
 export const INK_COLORS = ['#ff3b30', '#ffd60a', '#30d158', '#0a84ff', '#ffffff', '#111111'] as const;
+/** a touch this soon after the Pencil lifts is the hand's (ms; deliverable/runtime/edit.ts PALM_AFTER) */
+export const PALM_AFTER_MS = 400;
+/** fingers draw with the tool in hand ('1'), or only the Pencil does (localStorage; the HTML deck's presenting frame has none: its editor keeps it) */
+export const PRESENT_FINGERS_KEY = 'ol.presentFingers';
+
+/** the bar's "Fingers draw" as kept in this browser */
+export function presentFingersDraw(): boolean {
+  try { return localStorage.getItem(PRESENT_FINGERS_KEY) === '1'; } catch { return false; }
+}
+export function savePresentFingersDraw(on: boolean): void {
+  try { localStorage.setItem(PRESENT_FINGERS_KEY, on ? '1' : '0'); } catch { /* a sandboxed frame: its editor keeps it */ }
+}
 
 export type PresentTool = 'laser' | 'pen' | 'marker' | 'eraser';
+type InkTool = Exclude<PresentTool, 'laser'>;
 /** a stroke drawn on a slide: points in slide units (SLIDE_UNITS), width too */
 export interface InkStroke { marker: boolean; color: string; w: number; pts: [number, number][] }
 
@@ -204,6 +224,8 @@ export interface PresentKitHost {
   position(): string;
   /** the zoom began or ended */
   onZoom?(zoomed: boolean): void;
+  /** the bar's "Fingers draw" switched (kept in this browser by the kit where it can; a sandboxed frame hands it to its editor) */
+  onFingersDraw?(on: boolean): void;
 }
 
 const DOC_CSS = `.olpk-surface, .olpk-surface * { touch-action: none !important; }
@@ -249,15 +271,18 @@ const ICON = {
   marker: '<svg width="16" height="16" viewBox="0 0 16 16"><path d="M4.6 10.4 3 12l1 1 1.6-1.6M5.2 7.6l3.2 3.2 5-5a1.2 1.2 0 0 0 0-1.7l-1.5-1.5a1.2 1.2 0 0 0-1.7 0zM4 9l3 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/><path d="M2 14.5h12" stroke="#ffd60a" stroke-width="1.6" stroke-linecap="round"/></svg>',
   eraser: '<svg width="16" height="16" viewBox="0 0 16 16"><path d="M7 13.5h6.5M2.9 9.6l5.6-5.6a1.2 1.2 0 0 1 1.7 0l2.5 2.5a1.2 1.2 0 0 1 0 1.7l-5.3 5.3H5.6L2.9 11.3a1.2 1.2 0 0 1 0-1.7zM5.7 6.8l4.2 4.2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>',
   clear: '<svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 4.5h10M6.3 4.5V3h3.4v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>',
+  fingers: '<svg width="16" height="16" viewBox="0 0 16 16"><path d="M6.5 9.2V3a1.1 1.1 0 0 1 2.2 0v4.6M8.7 7.2a1.1 1.1 0 0 1 2.2 0v.6M10.9 7.7a1.1 1.1 0 0 1 2.2 0v2.2c0 2.6-1.6 4.6-4.4 4.6h-.6c-1.5 0-2.5-.6-3.4-1.8L3 10.2a1.1 1.1 0 0 1 1.8-1.3l1.7 1.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/></svg>',
   fit: '<svg width="16" height="16" viewBox="0 0 16 16"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
 };
 
 type Gesture =
-  | { kind: 'pinch'; ids: [number, number]; d0: number; c0: { x: number; y: number }; v0: ZoomView }
-  | { kind: 'pan'; id: number; x: number; y: number; moved: boolean }
+  /** `lock`: a zoom only once the fingers' spread has changed enough, else a pan (deliverable/gestures.ts, as on the canvas) */
+  | { kind: 'pinch'; ids: [number, number]; d0: number; c0: { x: number; y: number }; v0: ZoomView; lock: PinchLock }
+  /** `v0`: the view it began from (put back should the touch turn out to be the hand's) */
+  | { kind: 'pan'; id: number; x: number; y: number; moved: boolean; v0: ZoomView }
   | { kind: 'laser'; id: number }
-  /** a drawing tool's stroke (or the eraser's sweep); `moved`: past a tap */
-  | { kind: 'draw'; id: number; x0: number; y0: number; moved: boolean; pen: boolean; erased: boolean; stroke: InkStroke | null; f: { k: number; ox: number; oy: number } | null }
+  /** a drawing tool's stroke (or the eraser's sweep), with the tool it draws with; `moved`: past a tap */
+  | { kind: 'draw'; id: number; tool: InkTool; x0: number; y0: number; moved: boolean; erased: boolean; stroke: InkStroke | null; f: { k: number; ox: number; oy: number } | null }
   | { kind: 'swipe'; id: number; x0: number; y0: number; t0: number; moved: boolean };
 
 /**
@@ -280,6 +305,7 @@ export class PresentKit {
   private bar: HTMLElement;
   private posEl: HTMLElement;
   private laserBtn: HTMLElement;
+  private fingersBtn: HTMLElement;
   private zoomBtn: HTMLElement;
   private clearBtn: HTMLElement;
   private colorsEl: HTMLElement;
@@ -289,8 +315,13 @@ export class PresentKit {
   private markerColor: string = INK_COLORS[1];
   /** the drawings, per slide (by its position text) */
   private ink = new Map<string, InkStroke[]>();
-  /** an Apple Pencil (a pen) has drawn: fingers no longer draw */
-  private penSeen = false;
+  /** fingers draw (and point the laser) with the tool in hand; off: only the Pencil does, fingers swipe, tap and pinch */
+  private fingersDraw = false;
+  /** the Pencil on the glass (its pointer), and when it last lifted */
+  private penOn: number | null = null;
+  private penOffAt = -1e9;
+  /** the hand's touches: they count for nothing until they lift */
+  private palms = new Set<number>();
   private inkRaf = 0;
   /** what the bar was last asked for with lasts this long */
   private barMs = IDLE_MS;
@@ -333,6 +364,7 @@ export class PresentKit {
         <button data-k="marker" title="Highlighter (Ctrl+I)" aria-label="Highlighter" aria-pressed="false">${ICON.marker}</button>
         <button data-k="eraser" title="Eraser (Ctrl+E)" aria-label="Eraser" aria-pressed="false">${ICON.eraser}</button>
         <button data-k="laser" title="Laser pointer (L)" aria-label="Laser pointer" aria-pressed="false"><span class="dot"></span></button>
+        <button data-k="fingers" title="Fingers draw too (off: only the Apple Pencil draws; fingers swipe, tap and pinch)" aria-label="Fingers draw" aria-pressed="false" hidden>${ICON.fingers}</button>
         <span class="colors" hidden>${INK_COLORS.map(c => `<button class="sw" data-k="color" data-c="${c}" style="--c:${c}" title="Colour" aria-label="Colour ${c}"></button>`).join('')}</span>
         <button data-k="clear" title="Clear the drawings on this slide (E)" aria-label="Clear the drawings on this slide" hidden>${ICON.clear}</button>
         <button data-k="zoom" title="Back to the whole slide (0)" hidden>${ICON.fit}<span class="z"></span></button>
@@ -346,6 +378,9 @@ export class PresentKit {
     this.bar = sr.querySelector('.bar') as HTMLElement;
     this.posEl = sr.querySelector('.pos') as HTMLElement;
     this.laserBtn = sr.querySelector('[data-k="laser"]') as HTMLElement;
+    this.fingersBtn = sr.querySelector('[data-k="fingers"]') as HTMLElement;
+    // (only where there are fingers to draw with)
+    this.fingersBtn.hidden = !(this.win.navigator.maxTouchPoints > 0);
     this.zoomBtn = sr.querySelector('[data-k="zoom"]') as HTMLElement;
     this.clearBtn = sr.querySelector('[data-k="clear"]') as HTMLElement;
     this.colorsEl = sr.querySelector('.colors') as HTMLElement;
@@ -379,6 +414,8 @@ export class PresentKit {
     });
     on('gestureend' as keyof WindowEventMap, (e: Event) => { if (this.safari) { e.preventDefault(); this.safari = null; this.suppressClick = true; } });
     on('resize', () => { this.resetZoom(); this.scheduleInk(); });
+    if (this.win === this.win.top) this.offs.push(keepAwake(this.win));
+    this.setFingersDraw(presentFingersDraw(), false);
     this.refresh();
   }
 
@@ -389,6 +426,7 @@ export class PresentKit {
   /** the drawings on the slide shown */
   get strokes(): readonly InkStroke[] { return this.ink.get(this.host.position()) ?? []; }
   get zoom(): ZoomView { return { ...this.view }; }
+  get fingersDrawOn(): boolean { return this.fingersDraw; }
 
   /**
    * The presenter's keys first: L (laser), Ctrl+P / Ctrl+I / Ctrl+E (pen, highlighter, eraser —
@@ -433,7 +471,7 @@ export class PresentKit {
     const root = this.host.root.classList;
     root.toggle('olpk-laser-on', t === 'laser');
     root.toggle('olpk-drawing', t === 'pen' || t === 'marker' || t === 'eraser');
-    for (const b of Array.from(this.bar.querySelectorAll<HTMLElement>('button[aria-pressed]'))) {
+    for (const b of Array.from(this.bar.querySelectorAll<HTMLElement>('button[aria-pressed]:not([data-k="fingers"])'))) {
       const on = b.dataset.k === t;
       b.classList.toggle('on', on);
       b.setAttribute('aria-pressed', String(on));
@@ -442,6 +480,16 @@ export class PresentKit {
     this.markColor();
     if (was === 'laser' && t !== 'laser') { this.endHeld(); this.tail = []; this.head = null; }
     this.render();
+  }
+
+  /** fingers draw with the tool in hand too, or only the Pencil does; `tell`: kept (and the host told), else only shown (the host's own setting arriving) */
+  setFingersDraw(on: boolean, tell = true): void {
+    this.fingersDraw = on;
+    this.fingersBtn.classList.toggle('on', on);
+    this.fingersBtn.setAttribute('aria-pressed', String(on));
+    if (!tell) return;
+    savePresentFingersDraw(on);
+    this.host.onFingersDraw?.(on);
   }
 
   /** the slide's drawings cleared */
@@ -475,6 +523,7 @@ export class PresentKit {
     if (k === 'prev') this.host.prev();
     else if (k === 'next') this.host.next();
     else if (k === 'laser') this.setLaser(this.tool !== 'laser');
+    else if (k === 'fingers') this.setFingersDraw(!this.fingersDraw);
     else if (k === 'pen' || k === 'marker' || k === 'eraser') this.setTool(this.tool === k ? null : k);
     else if (k === 'color' && c) {
       if (this.tool === 'marker') this.markerColor = c;
@@ -551,18 +600,51 @@ export class PresentKit {
 
   /* -------------------------------------------------------------- pointers */
 
-  /** this pointer draws with the tool in hand (once a pen has drawn, a finger does not) */
-  private drawsWith(e: PointerEvent): boolean {
-    const t = this.tool;
-    return (t === 'pen' || t === 'marker' || t === 'eraser') && (e.pointerType !== 'touch' || !this.penSeen);
+  /**
+   * What this pointer does with the tool in hand: the Pencil always draws (the pen when nothing is
+   * in hand); a finger only with "Fingers draw" on (else it swipes, taps, pinches and pans); the
+   * mouse with the tool in hand. Null: no tool — it goes on, swipes or pans.
+   */
+  private toolFor(e: PointerEvent): PresentTool | null {
+    if (e.pointerType === 'pen') return this.tool ?? 'pen';
+    if (e.pointerType === 'touch' && !this.fingersDraw) return null;
+    return this.tool;
+  }
+
+  /**
+   * A touch that is the hand resting on the glass: it comes while the Pencil writes or just after it
+   * lifts. (Not told by its breadth, as the canvas does once fingers move the slide: the iPad's contact
+   * sizes come in coarse steps, and a thumb pressed flat would no longer swipe or pinch.)
+   */
+  private isPalm(): boolean {
+    return this.penOn !== null || performance.now() - this.penOffAt < PALM_AFTER_MS;
+  }
+
+  /**
+   * The Pencil lands: the touches already down are the hand's (GoodNotes' palm rejection, as on the
+   * canvas: deliverable/runtime/edit.ts penLands). What they began is undone — a pinch or a pan put
+   * back, a swipe, a laser trace or a finger's stroke let go — and they count for nothing until they lift.
+   */
+  private penLands(e: PointerEvent): void {
+    this.penOn = e.pointerId;
+    const touches = [...this.pointers].filter(([, p]) => p.type === 'touch').map(([id]) => id);
+    if (!touches.length) return;
+    for (const id of touches) { this.palms.add(id); this.pointers.delete(id); }
+    const g = this.gesture;
+    if (!g || (g.kind !== 'pinch' && !touches.includes(g.id))) return;
+    this.gesture = null;
+    if (g.kind === 'pinch' || g.kind === 'pan') this.setView(g.v0);
+    if (g.kind === 'pan') this.host.root.classList.remove('olpk-panning');
+    if (g.kind === 'draw') this.cancelDraw();
+    if (g.kind === 'laser') { this.held = null; this.head = null; this.render(); }
   }
 
   private down(e: PointerEvent): void {
     this.lastType = e.pointerType;
     if (this.fromUi(e)) return;
-    // a palm on the glass while the pencil writes: nothing
-    if (e.pointerType === 'touch' && this.gesture?.kind === 'draw' && this.gesture.pen) return;
-    if (e.pointerType === 'pen' && this.drawsWith(e)) this.penSeen = true;
+    // the hand on the glass while the Pencil writes: nothing
+    if (e.pointerType === 'touch' && this.isPalm()) { this.palms.add(e.pointerId); e.preventDefault(); return; }
+    if (e.pointerType === 'pen') this.penLands(e);
     this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, type: e.pointerType });
     this.suppressClick = false;
     if (e.pointerType === 'touch' && this.pointers.size >= 2) {
@@ -570,7 +652,7 @@ export class PresentKit {
       const [a, b] = ids.map(id => this.pointers.get(id)!);
       this.endHeld();
       this.cancelDraw();
-      this.gesture = { kind: 'pinch', ids, d0: Math.hypot(a.x - b.x, a.y - b.y), c0: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, v0: { ...this.view } };
+      this.gesture = { kind: 'pinch', ids, d0: Math.hypot(a.x - b.x, a.y - b.y), c0: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, v0: { ...this.view }, lock: pinchLock() };
       this.suppressClick = true;
       e.preventDefault();
       return;
@@ -578,7 +660,8 @@ export class PresentKit {
     if (this.pointers.size > 1) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     const pt = { x: e.clientX, y: e.clientY, t: performance.now() };
-    if (this.tool === 'laser') {
+    const tool = this.toolFor(e);
+    if (tool === 'laser') {
       this.held = [pt];
       this.head = pt;
       this.tail = [];
@@ -587,15 +670,15 @@ export class PresentKit {
       e.preventDefault();
       this.capture(e);
       this.render();
-    } else if (this.drawsWith(e)) {
-      const g: Gesture = { kind: 'draw', id: e.pointerId, x0: e.clientX, y0: e.clientY, moved: false, pen: e.pointerType === 'pen', erased: false, stroke: null, f: inkFrame(this.view, this.host.base()) };
+    } else if (tool) {
+      const g: Gesture = { kind: 'draw', id: e.pointerId, tool, x0: e.clientX, y0: e.clientY, moved: false, erased: false, stroke: null, f: inkFrame(this.view, this.host.base()) };
       this.gesture = g;
       this.suppressClick = true;
       e.preventDefault();
       this.capture(e);
-      if (this.tool === 'eraser') this.eraseAt(e.clientX, e.clientY, g);
+      if (tool === 'eraser') this.eraseAt(e.clientX, e.clientY, g);
     } else if (this.zoomed) {
-      this.gesture = { kind: 'pan', id: e.pointerId, x: e.clientX, y: e.clientY, moved: false };
+      this.gesture = { kind: 'pan', id: e.pointerId, x: e.clientX, y: e.clientY, moved: false, v0: { ...this.view } };
       this.host.root.classList.add('olpk-panning');
       e.preventDefault();
       this.capture(e);
@@ -619,7 +702,9 @@ export class PresentKit {
       const a = this.pointers.get(g.ids[0]), b = this.pointers.get(g.ids[1]);
       if (!a || !b) return;
       e.preventDefault();
-      this.setView(pinchView(g.v0, g.d0, Math.hypot(a.x - b.x, a.y - b.y), g.c0, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, this.host.base(), W, H));
+      const c = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      const f = pinchFactor(g.lock, g.d0, Math.hypot(a.x - b.x, a.y - b.y), Math.hypot(c.x - g.c0.x, c.y - g.c0.y));
+      this.setView(pinchView(g.v0, 1, f, g.c0, c, this.host.base(), W, H));
       return;
     }
     if (g?.kind === 'draw' && g.id === e.pointerId) {
@@ -629,14 +714,14 @@ export class PresentKit {
         g.moved = true;
         // the audience sees the stroke, not the bar
         this.hideBar();
-        if (this.tool !== 'eraser' && g.f) {
-          const marker = this.tool === 'marker';
+        if (g.tool !== 'eraser' && g.f) {
+          const marker = g.tool === 'marker';
           g.stroke = { marker, color: marker ? this.markerColor : this.penColor, w: (marker ? MARKER_PX : PEN_PX) / g.f.k, pts: [toSlide({ x: g.x0, y: g.y0 }, g.f)] };
         }
       }
       const evs = e.getCoalescedEvents?.() ?? [];
       for (const c of evs.length ? evs : [e]) {
-        if (this.tool === 'eraser') this.eraseAt(c.clientX, c.clientY, g);
+        if (g.tool === 'eraser') this.eraseAt(c.clientX, c.clientY, g);
         else if (g.stroke && g.f) {
           const q = toSlide({ x: c.clientX, y: c.clientY }, g.f);
           const last = g.stroke.pts[g.stroke.pts.length - 1];
@@ -674,6 +759,9 @@ export class PresentKit {
   }
 
   private up(e: PointerEvent, cancelled = false): void {
+    // the hand lifted: nothing (not a tap either — its click must not go on)
+    if (this.palms.delete(e.pointerId)) { this.suppressClick = true; return; }
+    if (e.pointerId === this.penOn) { this.penOn = null; this.penOffAt = performance.now(); }
     this.pointers.delete(e.pointerId);
     const g = this.gesture;
     if (!g) return;

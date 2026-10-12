@@ -3,11 +3,12 @@
  * Drawing on slides while presenting, and the control bar that stays out of the audience's sight
  * (packages/client/src/app/presentkit.ts): slide units through the fit and the zoom, the eraser's
  * reach, strokes kept per slide; a tap brings the bar without going on, a second sends it away, it
- * fades by itself, the mouse brings it only near the bottom edge, a stroke sends it away; once a pen
- * has drawn, fingers tap and swipe instead of drawing.
+ * fades by itself, the mouse brings it only near the bottom edge, a stroke sends it away; only the
+ * Pencil draws (with the pen when no tool is in hand) unless the bar's "Fingers draw" is on — fingers
+ * tap, swipe and pinch; the hand resting on the glass while the Pencil writes counts for nothing.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { PresentKit, inkFrame, toSlide, strokesHit, strokeSvg, SLIDE_UNITS, TAP_IDLE_MS, INK_COLORS, type InkStroke } from '../packages/client/src/app/presentkit';
+import { PresentKit, inkFrame, toSlide, strokesHit, strokeSvg, SLIDE_UNITS, TAP_IDLE_MS, INK_COLORS, PALM_AFTER_MS, PRESENT_FINGERS_KEY, type InkStroke } from '../packages/client/src/app/presentkit';
 
 describe('slide units', () => {
   const base = { x: 80, y: 0, w: 1440, h: 810 };
@@ -51,7 +52,11 @@ describe('the kit on a presenting surface', () => {
   let kit: PresentKit;
   let slide = 1;
   let next: ReturnType<typeof vi.fn>;
+  let fingersTold: boolean[];
   let clicks: number;
+  /** performance.now(), moved on by the tests (the hand's touches are told by how soon after the Pencil they come) */
+  let now = 0;
+  const later = (ms = PALM_AFTER_MS + 50) => { now += ms; };
   const H = () => window.innerHeight;
 
   const pointer = (type: string, pointerType: string, x: number, y: number, id = 1, extra: Record<string, unknown> = {}) =>
@@ -71,6 +76,10 @@ describe('the kit on a presenting surface', () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
+    now = 1000;
+    vi.spyOn(performance, 'now').mockImplementation(() => now);
+    localStorage.removeItem(PRESENT_FINGERS_KEY);
+    fingersTold = [];
     document.body.innerHTML = '';
     root = document.createElement('div');
     document.body.appendChild(root);
@@ -87,10 +96,11 @@ describe('the kit on a presenting surface', () => {
       prev: () => undefined,
       exit: () => undefined,
       position: () => `${slide} / 3`,
+      onFingersDraw: on => fingersTold.push(on),
     });
     kit.slideChanged();
   });
-  afterEach(() => { kit.destroy(); vi.useRealTimers(); });
+  afterEach(() => { kit.destroy(); vi.restoreAllMocks(); vi.useRealTimers(); });
 
   it('a tap on a touch screen brings the bar and does not go on; a second sends it away; it fades by itself', () => {
     expect(barShown()).toBe(false);
@@ -157,31 +167,136 @@ describe('the kit on a presenting surface', () => {
     expect(key('Escape')).toBe(false);
   });
 
-  it('once a pen has drawn, a finger taps and swipes instead of drawing; a palm under the pen is ignored', () => {
+  it('only the Pencil draws: a finger with the tool in hand swipes, taps and pinches instead', () => {
     key('i', { ctrlKey: true });
     expect(kit.toolOn).toBe('marker');
-    // before any pen: a finger draws
-    stroke('touch', [[100, 100], [200, 100]]);
+    expect(kit.fingersDrawOn).toBe(false);
+    // a finger's swipe goes on and draws nothing, even before any Pencil
+    stroke('touch', [[400, 300], [330, 302], [250, 304]], 2);
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(kit.strokes).toHaveLength(0);
+    expect(clicks).toBe(0);
+    // the Pencil draws with the tool in hand
+    stroke('pen', [[100, 200], [150, 210], [200, 220]], 7);
     expect(kit.strokes).toHaveLength(1);
     expect(kit.strokes[0].marker).toBe(true);
-    stroke('pen', [[100, 200], [200, 220]], 7);
+    later();
+    // two fingers pinch, the tool still in hand
+    pointer('pointerdown', 'touch', 300, 200, 3);
+    pointer('pointerdown', 'touch', 400, 200, 4);
+    pointer('pointermove', 'touch', 250, 200, 3);
+    pointer('pointermove', 'touch', 450, 200, 4);
+    pointer('pointerup', 'touch', 250, 200, 3);
+    pointer('pointerup', 'touch', 450, 200, 4);
+    expect(kit.zoomed).toBe(true);
+    expect(kit.strokes).toHaveLength(1);
+    // zoomed, a finger pans and does not draw
+    const z = kit.zoom;
+    stroke('touch', [[300, 200], [340, 230], [380, 260]], 5);
+    expect(kit.zoom).not.toEqual(z);
+    expect(kit.strokes).toHaveLength(1);
+    // no tool in hand: the Pencil draws with the pen, and its stroke does not go on
+    kit.resetZoom();
+    key('Escape');
+    expect(kit.toolOn).toBeNull();
+    later();
+    stroke('pen', [[100, 300], [160, 320], [220, 330]], 8);
     expect(kit.strokes).toHaveLength(2);
-    // now a finger's swipe goes on and draws nothing
-    pointer('pointerdown', 'touch', 400, 300, 2);
-    pointer('pointermove', 'touch', 300, 302, 2);
-    pointer('pointermove', 'touch', 250, 304, 2);
-    pointer('pointerup', 'touch', 250, 304, 2);
+    expect(kit.strokes[1].marker).toBe(false);
+    expect(kit.strokes[1].color).toBe(INK_COLORS[0]);
+    expect(clicks).toBe(0);
     expect(next).toHaveBeenCalledTimes(1);
+    // the laser in hand: the Pencil points, a finger still swipes
+    later();
+    key('l');
+    pointer('pointerdown', 'pen', 300, 300, 9);
+    pointer('pointermove', 'pen', 380, 330, 9);
+    vi.advanceTimersByTime(50);
+    expect(shadow().querySelectorAll('g.live g.held path')).not.toHaveLength(0);
+    pointer('pointerup', 'pen', 340, 310, 9);
     expect(kit.strokes).toHaveLength(2);
-    // a palm on the glass while the pen writes: the stroke goes on, nothing is pinched
+    later();
+    stroke('touch', [[400, 300], [330, 302], [250, 304]], 10);
+    expect(next).toHaveBeenCalledTimes(2);
+  });
+
+  it('"Fingers draw" on the bar: a finger draws with the tool in hand, kept in this browser and told to the host', () => {
+    const btn = shadow().querySelector<HTMLElement>('button[data-k="fingers"]')!;
+    expect(btn.getAttribute('aria-pressed')).toBe('false');
+    btn.click();
+    expect(kit.fingersDrawOn).toBe(true);
+    expect(btn.getAttribute('aria-pressed')).toBe('true');
+    expect(localStorage.getItem(PRESENT_FINGERS_KEY)).toBe('1');
+    expect(fingersTold).toEqual([true]);
+    // no tool in hand: a finger still swipes
+    stroke('touch', [[400, 300], [330, 302], [250, 304]], 2);
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(kit.strokes).toHaveLength(0);
+    key('p', { ctrlKey: true });
+    // (picking a tool leaves the switch alone)
+    expect(btn.getAttribute('aria-pressed')).toBe('true');
+    stroke('touch', [[100, 100], [150, 100], [200, 100]], 3);
+    expect(kit.strokes).toHaveLength(1);
+    expect(next).toHaveBeenCalledTimes(1);
+    // the host's own setting arriving: shown, not told back
+    kit.setFingersDraw(false, false);
+    expect(btn.getAttribute('aria-pressed')).toBe('false');
+    expect(fingersTold).toEqual([true]);
+    stroke('touch', [[100, 150], [150, 150], [200, 150]], 4);
+    expect(kit.strokes).toHaveLength(1);
+    // a new presentation starts with what this browser kept
+    kit.destroy();
+    kit = new PresentKit({ root, base: () => ({ x: 0, y: 0, w: 800, h: 450 }), apply: () => undefined, next: () => undefined, prev: () => undefined, exit: () => undefined, position: () => '1 / 3' });
+    expect(kit.fingersDrawOn).toBe(true);
+  });
+
+  it('the hand on the glass while the Pencil writes counts for nothing: under it, just after it, or down before it', () => {
+    // a palm while the pen writes: the stroke goes on, nothing is pinched
     pointer('pointerdown', 'pen', 100, 300, 8);
     pointer('pointermove', 'pen', 150, 310, 8);
     pointer('pointerdown', 'touch', 500, 400, 3);
+    pointer('pointerdown', 'touch', 560, 420, 4);
+    pointer('pointermove', 'touch', 600, 450, 4);
     pointer('pointermove', 'pen', 200, 320, 8);
     pointer('pointerup', 'pen', 200, 320, 8);
     pointer('pointerup', 'touch', 500, 400, 3);
-    expect(kit.strokes).toHaveLength(3);
+    pointer('pointerup', 'touch', 600, 450, 4);
+    expect(kit.strokes).toHaveLength(1);
     expect(kit.zoomed).toBe(false);
+    // a palm coming down just after the pen lifts and dragging: no next slide, no bar
+    now += 100;
+    stroke('touch', [[400, 300], [330, 302], [250, 304]], 5);
+    expect(next).not.toHaveBeenCalled();
+    expect(clicks).toBe(0);
+    tap('touch', 300, 200, 6);
+    expect(barShown()).toBe(false);
+    // the hand down first (two touches pinching), then the pen: the pinch is put back, the pen draws
+    later();
+    pointer('pointerdown', 'touch', 300, 300, 11);
+    pointer('pointerdown', 'touch', 380, 320, 12);
+    pointer('pointermove', 'touch', 250, 300, 11);
+    pointer('pointermove', 'touch', 450, 330, 12);
+    expect(kit.zoomed).toBe(true);
+    pointer('pointerdown', 'pen', 100, 100, 13);
+    expect(kit.zoomed).toBe(false);
+    pointer('pointermove', 'pen', 150, 120, 13);
+    pointer('pointermove', 'touch', 500, 340, 12);
+    pointer('pointermove', 'pen', 200, 140, 13);
+    pointer('pointerup', 'pen', 200, 140, 13);
+    expect(kit.zoomed).toBe(false);
+    expect(kit.strokes).toHaveLength(2);
+    // the hand lifting later is no swipe, no tap
+    later();
+    pointer('pointermove', 'touch', 100, 340, 12);
+    pointer('pointerup', 'touch', 100, 340, 12);
+    pointer('pointerup', 'touch', 250, 300, 11);
+    click(250, 300);
+    expect(next).not.toHaveBeenCalled();
+    expect(clicks).toBe(0);
+    expect(barShown()).toBe(false);
+    // a finger after all that: a swipe goes on again
+    stroke('touch', [[400, 300], [330, 302], [250, 304]], 14);
+    expect(next).toHaveBeenCalledTimes(1);
   });
 
   it('a tap with a drawing tool in hand makes no dot: it brings the bar', () => {

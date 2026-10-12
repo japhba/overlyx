@@ -56,6 +56,8 @@ export function startPresenting(): void {
     position: () => { const n = slides().length; return n ? `${current + 1} / ${n}` : ''; },
     // (for the editor: leaving full screen — Escape in a real browser — first goes back to the whole slide)
     onZoom: zoomed => post({ ol: 'presentZoom', zoomed }),
+    // (the frame has no storage: the editor keeps it, and hands it over as the presentation starts)
+    onFingersDraw: on => post({ ol: 'presentFingers', on }),
   });
   const h = /^#(\d+)$/.exec(location.hash);
   go(h ? Number(h[1]) - 1 : 0);
@@ -69,6 +71,7 @@ export function startPresenting(): void {
     if (e.source !== window.parent || !e.data) return;
     if (e.data.ol === 'go') go(Number(e.data.slide));
     else if (e.data.ol === 'unzoom') kit?.resetZoom();
+    else if (e.data.ol === 'presentFingers') kit?.setFingersDraw(e.data.on === true, false);
   });
 }
 
