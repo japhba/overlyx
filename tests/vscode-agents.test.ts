@@ -25,7 +25,8 @@ process.env.CODEX_HOME = path.join(ROOT, 'codex-home');
 
 const { editDocument, writeDocument, addComment, replyToComment } = await import('../packages/vscode/src/agents/localEdit.ts');
 const reg = await import('../packages/vscode/src/agents/register.ts');
-const { authorFor } = await import('../packages/vscode/src/agents/server.ts');
+const { authorFor, handToEditor } = await import('../packages/vscode/src/agents/server.ts');
+const { inEditor, WindowUnreachable } = await import('../packages/vscode/src/agents/handover.ts');
 const { publishOpenDocuments, openDocuments } = await import('../packages/vscode/src/agents/openDocuments.ts');
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -265,6 +266,58 @@ describe('local tools: the MCP server agents start (stdio)', () => {
     expect(authorFor({ name: 'codex-mcp-client' })).toBe('Codex');
     expect(authorFor({ name: 'my-agent', title: 'My Agent' })).toBe('My Agent');
     expect(authorFor(undefined)).toBe('AI agent');
+  });
+});
+
+describe('handing a call to the VS Code window: only while it can finish it', () => {
+  const never = () => new Promise<never>(() => undefined);
+  const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+  const fast = { probeMs: 50, beginMs: 100 };
+
+  it('a window that does not answer (Remote-SSH with the user\'s computer disconnected) gets nothing: the file is edited', async () => {
+    let started = false;
+    expect(await inEditor(never, () => { started = true; return Promise.resolve('x'); }, fast)).toEqual({ gone: true });
+    expect(started).toBe(false);
+    expect(await inEditor(() => Promise.resolve(), () => undefined, fast)).toEqual({ gone: true });   // closed meanwhile
+  });
+
+  it('an answering window does the edit and returns its result, or the tool\'s error', async () => {
+    expect(await inEditor(() => Promise.resolve(), async h => { h.begin(); return { ok: true }; }, fast)).toEqual({ result: { ok: true } });
+    expect(await inEditor(() => Promise.resolve(), async () => { throw new Error('old_text was not found'); }, fast)).toEqual({ error: 'old_text was not found' });
+  });
+
+  it('an edit that has not begun by the deadline is abandoned and never applies later', async () => {
+    let applied = false;
+    let release!: () => void;
+    const queued = new Promise<void>(r => { release = r; });   // stuck behind an edit the window cannot finish
+    const answer = await inEditor(() => Promise.resolve(), async h => { await queued; h.begin(); applied = true; return 'late'; }, fast);
+    expect(answer).toEqual({ gone: true });
+    release(); await sleep(10);
+    expect(applied).toBe(false);
+    // the reload never came: nothing applied, so the file is edited instead
+    expect(await inEditor(() => Promise.resolve(), async () => { throw new WindowUnreachable('VS Code did not reload main.tex from disk'); }, fast)).toEqual({ gone: true });
+  });
+
+  it('an edit that has begun is the window\'s: its outcome is awaited, not done again on the file', async () => {
+    expect(await inEditor(() => Promise.resolve(), async h => { h.begin(); await sleep(250); return 'done'; }, fast)).toEqual({ result: 'done' });
+  });
+
+  it('the tool server edits the file when the window is unreachable or answers gone, and says so when the window held on too long', async () => {
+    const http = await import('node:http');
+    const call = { tool: 'edit_document' as const, args: {}, author: 'Claude Code', cwd: ROOT };
+    const listen = async (handle: (res: import('node:http').ServerResponse) => void) => {
+      const server = http.createServer((_req, res) => handle(res));
+      await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+      return { server, endpoint: `http://127.0.0.1:${(server.address() as { port: number }).port}/t/tok` };
+    };
+    const gone = await listen(res => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ gone: true })); });
+    const stuck = await listen(() => undefined);
+    try {
+      expect(await handToEditor(gone.endpoint, call)).toBeNull();
+      expect(await handToEditor('http://127.0.0.1:9/t/tok', call)).toBeNull();
+      const late = await handToEditor(stuck.endpoint, call, 200);
+      expect(late?.error).toMatch(/did not finish it within .* Read the file again/);
+    } finally { gone.server.close(); stuck.server.closeAllConnections(); stuck.server.close(); }
   });
 });
 

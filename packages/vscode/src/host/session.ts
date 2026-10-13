@@ -17,6 +17,7 @@ import { isMarkdownPath } from '@overlyx/core/md/index.ts';
 import { primePreserveCache, type ParseTexResult, type PreserveCache } from '@overlyx/core/tex/index.ts';
 import { buildMeta } from './meta.ts';
 import { findMaster } from './project.ts';
+import { WindowUnreachable } from '../agents/handover.ts';
 import { markEditedSettings } from '@overlyx/core/tex/preamble.ts';
 
 export class DocSession {
@@ -164,7 +165,7 @@ export class DocSession {
           if (event.document !== this.document || event.contentChanges.length === 0) return;
           clearTimeout(timeout); listener.dispose(); resolve();
         });
-        const timeout = setTimeout(() => { listener.dispose(); reject(new Error(`VS Code did not reload ${this.docId} from disk`)); }, 5000);
+        const timeout = setTimeout(() => { listener.dispose(); reject(new WindowUnreachable(`VS Code did not reload ${this.docId} from disk`)); }, 5000);
       });
       disk = fs.readFileSync(this.document.uri.fsPath, 'utf8');
     }

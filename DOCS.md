@@ -2874,10 +2874,25 @@ clientInfo, User-Agent). It exposes these tools:
   store, in turn with the webview's updates (`OpenEditor.agentEdit`, editorProvider.ts: syncFromDisk,
   compute on `document.getText()`, `DocSession.writeAgentText`, snapshot to the webview, save — so the
   agent reads and builds the result from the file). Unsaved typing survives even in the paragraph the
-  agent changes; only keystrokes still in the webview's debounce can conflict. Otherwise (no window,
-  or it answers `gone` / cannot be reached) the tool server edits the file, and an editor opened later
-  — or one whose window missed the hand-over — merges it like any change on disk (`session.ts
-  readDisk`, paragraph-level: the file wins a paragraph both changed, the draft goes to `recovery`).
+  agent changes; only keystrokes still in the webview's debounce can conflict. **The window only
+  takes the call while it can finish it** (`agents/handover.ts inEditor`, 13 Oct, the user: "allow
+  editing as long as the agent process in control is live"): applying goes through VS Code's
+  document API, which with Remote-SSH is answered by the window on the user's own computer — while
+  that connection is down (laptop asleep, network dropped; VS Code may not notice for hours, so the
+  extension host and its bridge live on) the reload never comes and edits never apply, which made
+  agents' edits fail with "VS Code did not reload … from disk" or hang. So the extension first makes
+  a round trip through the window (`vscode.commands.getCommands`, 3 s), and an edit that has not
+  begun to apply within 15 s (still queued behind a stuck one, or the reload timed out —
+  `WindowUnreachable`) is abandoned: the job checks `HandOver.signal` before syncing and computing,
+  and `HandOver.begin()` right before `writeAgentText`. Either way the answer is `gone`. Once begun,
+  the edit is the window's and its outcome is awaited; if the tool server's request times out after
+  that (60 s), it tells the agent the edit may still land instead of doing it a second time on the
+  file. Otherwise (no window, it answers `gone`, or cannot be reached) the tool server edits the
+  file, and an editor opened later — or one whose window missed the hand-over, or comes back after
+  a disconnect — merges it like any change on disk (`session.ts readDisk`, paragraph-level: the file
+  wins a paragraph both changed, the draft goes to `recovery`). Tests: `tests/vscode-agents.test.ts`
+  (probe unanswered, abandoned before beginning and never applied later, begun and awaited, a bridge
+  that holds on).
   Verified with `packages/vscode/test/probeAgentEdit.mjs` (xvfb: typed text kept, the change bar names
   the agent once the metadata reloads). No account, server or sync is involved. Registration (`agents/register.ts`, `host/agents.ts`): on
   activation the installed extension (not a development host or the tests) offers once (Connect / Not now = a week / Never; globalState

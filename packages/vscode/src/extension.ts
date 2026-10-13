@@ -27,6 +27,7 @@ import { setupSync } from './host/sync.ts';
 import { registerNewDocumentCommands } from './host/newDocument.ts';
 import { DeliverableServer, DeliverableEditorProvider } from './host/deliverables.ts';
 import { runTool, toolTarget, TOOL_NAMES, type ToolName, type TextStore } from './agents/localEdit.ts';
+import { inEditor } from './agents/handover.ts';
 import * as build from './host/build.ts';
 import { initAppearance } from './host/appearance.ts';
 import type { HostToEditor } from './shared/protocol.ts';
@@ -237,12 +238,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
         const run = (store: TextStore) => runTool(call.tool as ToolName, call.args, {
           cwd: call.cwd, layoutDir: layoutDir(), author: call.author, store: abs => (abs === target ? store : undefined),
         });
-        for (const e of registry.all()) {
-          const job = e.agentEdit?.(target, run);
-          if (!job) continue;
-          try { return { result: await job }; } catch (err) { return { error: (err as Error)?.message ?? String(err) }; }
-        }
-        return { gone: true };   // closed meanwhile: the tool server edits the file
+        // only while this window answers (with Remote-SSH: while the user's computer is connected) and
+        // begins the edit in time; else — or closed meanwhile — `gone`: the tool server edits the file (agents/handover.ts)
+        return inEditor(() => vscode.commands.getCommands(true), h => {
+          for (const e of registry.all()) { const job = e.agentEdit?.(target, run, h); if (job) return job; }
+          return undefined;
+        });
       },
     };
   }

@@ -13,6 +13,7 @@ import { z } from 'zod';
 import { resolveLayoutDir } from '../host/lyxlib.ts';
 import { runTool, toolTarget, type ToolName } from './localEdit.ts';
 import { openDocuments } from './openDocuments.ts';
+import type { EditorAnswer } from './handover.ts';
 
 export const LOCAL_SERVER_NAME = 'overlyx-local';
 
@@ -38,17 +39,25 @@ export function authorFor(client: { name?: string; title?: string } | undefined)
 const ok = (value: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(value, null, 2) }] });
 const fail = (e: unknown) => ({ content: [{ type: 'text' as const, text: (e as Error)?.message ?? String(e) }], isError: true });
 
-/** What the extension answers a handed-over call (host/agents.ts): the result, the tool's error, or that the document is no longer open there. */
-export interface EditorAnswer { result?: unknown; error?: string; gone?: boolean }
-
-/** Hand a call to the VS Code window that has the document open; null when that window cannot be reached (closed meanwhile). */
-async function handToEditor(endpoint: string, call: { tool: ToolName; args: Record<string, unknown>; author: string; cwd: string }): Promise<EditorAnswer | null> {
+/**
+ * Hand a call to the VS Code window that has the document open; null when the file is to be edited
+ * here instead: the window cannot be reached (closed meanwhile), or answers `gone` (it would not get
+ * to the edit now, agents/handover.ts). A window that took the edit answers within its deadlines;
+ * one that holds on past `timeoutMs` may still apply it, so the agent is told rather than the edit
+ * done a second time on the file.
+ */
+export async function handToEditor(endpoint: string, call: { tool: ToolName; args: Record<string, unknown>; author: string; cwd: string },
+  timeoutMs = 60_000): Promise<EditorAnswer | null> {
+  let res: Response;
   try {
-    const res = await fetch(`${endpoint}/api/agent/tool`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(call), signal: AbortSignal.timeout(60_000) });
-    if (!res.ok) return null;
-    const answer = await res.json() as EditorAnswer;
-    return answer.gone ? null : answer;
-  } catch { return null; }
+    res = await fetch(`${endpoint}/api/agent/tool`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(call), signal: AbortSignal.timeout(timeoutMs) });
+  } catch (e) {
+    if ((e as Error)?.name !== 'TimeoutError') return null;
+    return { error: `The VS Code window that has this document open took the edit but did not finish it within ${Math.round(timeoutMs / 1000)} s; it may still apply once that window responds. Read the file again before editing the same passage.` };
+  }
+  if (!res.ok) return null;
+  const answer = await res.json() as EditorAnswer;
+  return answer.gone ? null : answer;
 }
 
 export function buildLocalServer(opts: { cwd: string; layoutDir: string; agentsDir?: string }): McpServer {

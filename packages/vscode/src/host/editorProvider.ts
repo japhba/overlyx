@@ -13,6 +13,7 @@ import type { EditorToHost, HostToEditor } from '../shared/protocol.ts';
 import type { TexContext } from './texdoc.ts';
 import { projectDirFor } from './project.ts';
 import type { TextStore } from '../agents/localEdit.ts';
+import { WindowUnreachable, type HandOver } from '../agents/handover.ts';
 
 export interface ProviderDeps {
   bridgeBase(): Promise<string>;
@@ -96,14 +97,17 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
       return !target.document.isDirty;
     };
     entry.resync = resync;
-    entry.agentEdit = <T>(absPath: string, run: (store: TextStore) => Promise<T>): Promise<T> | undefined => {
+    entry.agentEdit = <T>(absPath: string, run: (store: TextStore) => Promise<T>, handOver: HandOver): Promise<T> | undefined => {
       const target = [session, ...related.values()].find(s => s.document.uri.fsPath === absPath);
       if (!target) return undefined;
+      const abandoned = () => { if (handOver.signal.aborted) throw new WindowUnreachable('abandoned'); };
       // in turn with the webview's updates: the edit applies to the text as the user has it, unsaved typing included
       const job = this.applyChain.then(async () => {
+        abandoned();
         if (await target.syncFromDisk()) pushSnapshot(target);
+        abandoned();
         const before = target.document.getText();
-        const result = await run({ read: () => target.document.getText(), write: text => target.writeAgentText(text) });
+        const result = await run({ read: () => target.document.getText(), write: text => { handOver.begin(); return target.writeAgentText(text); } });
         if (target.document.getText() !== before) {
           pushSnapshot(target);
           // on disk at once: the agent reads, builds and edits on from the file
