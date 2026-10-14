@@ -5,7 +5,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { hasSettingsLine, isProjectKey } from '@overlyx/core';
+import { hasSettingsLine, isProjectKey, GROUP_MANIFEST, parseDocGroup, type DocGroup } from '@overlyx/core';
 import { isMarkdownPath } from '@overlyx/core/md/index.ts';
 import { config } from './config.ts';
 
@@ -14,6 +14,8 @@ export interface ProjectFile {
   path: string; name: string; size: number; mtime: number; kind: 'doc' | 'lyx' | 'bib' | 'image' | 'tex' | 'pdf' | 'board' | 'html' | 'dir' | 'other';
   /** an HTML file: the kind of deliverable it is (its `<meta name="overlyx">`; none: a plain web page) */
   deliverable?: 'deck' | 'poster' | 'page';
+  /** a directory that is a document group (its GROUP_MANIFEST, core/docgroup.ts): its documents in order */
+  group?: DocGroup;
 }
 
 const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.svg', '.pdf', '.eps', '.ps', '.tif', '.tiff', '.webp', '.bmp']);
@@ -90,7 +92,12 @@ export function collect(root: string, dir: string, out: ProjectFile[], depth: nu
     if (e.name.startsWith('.') || e.name === 'node_modules' || e.name.endsWith('.overlyx-tmp')) continue;
     const full = path.join(dir, e.name);
     if (e.isDirectory()) {
-      try { out.push({ path: path.relative(root, full), name: e.name, size: 0, mtime: fs.statSync(full).mtimeMs, kind: 'dir' }); } catch { /* ignore */ }
+      try {
+        const d: ProjectFile = { path: path.relative(root, full), name: e.name, size: 0, mtime: fs.statSync(full).mtimeMs, kind: 'dir' };
+        const manifest = path.join(full, GROUP_MANIFEST);
+        if (fs.existsSync(manifest)) { const g = parseDocGroup(fs.readFileSync(manifest, 'utf8')); if (g) d.group = g; }
+        out.push(d);
+      } catch { /* ignore */ }
       collect(root, full, out, depth + 1);
       continue;
     }

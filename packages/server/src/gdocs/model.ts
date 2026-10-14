@@ -269,6 +269,43 @@ export interface DocsDocument {
   objectSources?: Record<number, NativeSource>;
 }
 
+/**
+ * A Google Doc read with its tabs (documents.get with includeTabsContent): each tab holds a body of
+ * its own — with its own indices, lists and footnotes — and may have child tabs.
+ */
+export interface DocsTab {
+  tabProperties: { tabId: string; title?: string; index?: number; parentTabId?: string; nestingLevel?: number };
+  documentTab?: { body: { content: DocsStructural[] }; lists?: DocsDocument['lists']; footnotes?: DocsDocument['footnotes']; namedRanges?: DocsDocument['namedRanges'] };
+  childTabs?: DocsTab[];
+}
+export interface DocsFile { documentId: string; title?: string; revisionId?: string; tabs: DocsTab[] }
+
+/** a tab in reading order (depth first): its id, title, nesting level and parent */
+export interface FlatTab { id: string; title: string; level: number; parent: string | null }
+
+export function flatTabs(f: DocsFile): FlatTab[] {
+  const out: FlatTab[] = [];
+  const walk = (tabs: DocsTab[], level: number, parent: string | null) => {
+    for (const t of tabs) {
+      out.push({ id: t.tabProperties.tabId, title: (t.tabProperties.title ?? '').trim() || `Tab ${out.length + 1}`, level, parent });
+      walk(t.childTabs ?? [], level + 1, t.tabProperties.tabId);
+    }
+  };
+  walk(f.tabs ?? [], 0, null);
+  return out;
+}
+
+/** One tab of a Google Doc as a document of its own (what readGoogle and planRound work on); null when the tab is gone. */
+export function tabDocument(f: DocsFile, tabId: string): DocsDocument | null {
+  const find = (tabs: DocsTab[]): DocsTab | undefined => {
+    for (const t of tabs) { if (t.tabProperties.tabId === tabId) return t; const c = find(t.childTabs ?? []); if (c) return c; }
+    return undefined;
+  };
+  const t = find(f.tabs ?? []);
+  if (!t?.documentTab) return null;
+  return { documentId: f.documentId, title: f.title, revisionId: f.revisionId, body: t.documentTab.body, lists: t.documentTab.lists, footnotes: t.documentTab.footnotes, namedRanges: t.documentTab.namedRanges };
+}
+
 /** a block of the Google Doc with where it is: the paragraph's / table's index range (a code block: one per line) */
 export type ReadBlock = (GPara & { start: number; end: number; elements: DocsParagraphElement[]; locked?: true }) | (GTable & { start: number; end: number; cellParas: { start: number; end: number; elements: DocsParagraphElement[] }[][]; locked?: true });
 

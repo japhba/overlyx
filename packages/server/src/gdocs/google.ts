@@ -12,7 +12,7 @@ import crypto from 'node:crypto';
 import type { Request as ExpressRequest, Response } from 'express';
 import { db } from '../db.ts';
 import { config, JWT_SECRET } from '../config.ts';
-import type { DocsDocument } from './model.ts';
+import type { DocsDocument, DocsFile } from './model.ts';
 import type { Request } from './edits.ts';
 
 export const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
@@ -50,6 +50,15 @@ interface Row { user_id: number; email: string | null; refresh_token: string; ac
 export const GOOGLE_STUB = process.env.OVERLYX_E2E_GOOGLE_STUB === '1';
 
 export function driveConfigured(): boolean { return GOOGLE_STUB || (!!config.google.clientId && !!config.google.clientSecret); }
+
+/**
+ * Google's file picker (linking or importing a Google Doc that exists): an API key of the server's
+ * Google project, restricted to the Picker API (GOOGLE_PICKER_API_KEY), and the project's number as
+ * the picker's app id — what makes a picked file one the `drive.file` authorisation covers. The
+ * number is the OAuth client id's prefix (GOOGLE_APP_ID overrides it).
+ */
+export function pickerConfigured(): boolean { return GOOGLE_STUB || (driveConfigured() && !!config.google.pickerKey); }
+export function pickerAppId(): string { return config.google.appId || config.google.clientId.split('-')[0] || ''; }
 
 export function driveAccount(userId: number): { email: string | null } | null {
   const r = db.prepare('SELECT email FROM google_drive WHERE user_id = ?').get(userId) as { email: string | null } | undefined;
@@ -167,12 +176,15 @@ export interface GoogleApi {
   createDocument(title: string): Promise<GFile>;
   /** Real Google uses DOCX conversion; optional for the legacy API simulation. */
   importDocument?(title: string, docx: Uint8Array): Promise<GFile>;
+  /** the first tab's body (a Google Doc without tabs has just that one) */
   getDocument(id: string): Promise<DocsDocument>;
+  /** every tab's body (documents.get with includeTabsContent) */
+  getDocumentTabs(id: string): Promise<DocsFile>;
   batchUpdate(id: string, requests: Request[], requiredRevisionId?: string): Promise<{ replies: Record<string, unknown>[]; revisionId?: string }>;
   getFile(id: string): Promise<GFile>;
   listComments(id: string): Promise<GComment[]>;
-  /** a comment on `quoted` (anchored to `range` of the body where the API allows it) */
-  createComment(id: string, c: { content: string; quoted?: string; range?: { startIndex: number; endIndex: number } }): Promise<GComment>;
+  /** a comment on `quoted` (anchored to `range` of the body — of a tab's, with its tabId — where the API allows it) */
+  createComment(id: string, c: { content: string; quoted?: string; range?: { startIndex: number; endIndex: number; tabId?: string } }): Promise<GComment>;
   createReply(id: string, commentId: string, r: { content?: string; action?: 'resolve' | 'reopen' }): Promise<GReply>;
 }
 
@@ -223,6 +235,7 @@ export function googleApi(userId: number): GoogleApi {
     },
     // (suggestions inline: the indices are the document's own; model.ts reads around them)
     getDocument: (id) => call<DocsDocument>('GET', DOCS + encodeURIComponent(id) + '?suggestionsViewMode=SUGGESTIONS_INLINE'),
+    getDocumentTabs: (id) => call<DocsFile>('GET', DOCS + encodeURIComponent(id) + '?includeTabsContent=true&suggestionsViewMode=SUGGESTIONS_INLINE'),
     batchUpdate: (id, requests, requiredRevisionId) => call('POST', DOCS + encodeURIComponent(id) + ':batchUpdate', { requests, ...(requiredRevisionId ? { writeControl: { requiredRevisionId } } : {}) }),
     getFile: (id) => call<GFile>('GET', DRIVE + encodeURIComponent(id) + '?fields=id,name,webViewLink,trashed,version,modifiedTime,lastModifyingUser(displayName,me)'),
     listComments: async (id) => {

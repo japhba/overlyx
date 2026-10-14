@@ -13,6 +13,13 @@
  *
  * Linked documents sync on their own (`auto`): a minute after an edit here, and when Drive says the
  * Google Doc changed. The sync acts with the Drive authorisation of whoever linked the document.
+ *
+ * Tabs: a link may name a tab of the Google Doc (`tab_id`; a link made by creating a Google Doc
+ * names none and syncs the first). The sync then reads every tab (includeTabsContent), works on
+ * that tab's body as a document of its own (model.ts tabDocument) and aims its requests at it
+ * (edits.ts inTab). The tabs of one Google Doc are a document group here (importing.ts); comments
+ * belong to a file, not to a tab, so each Google comment goes to the tab whose text holds what it
+ * quotes (the group's first tab when none does), once — a comment one tab took stays that tab's.
  */
 import { addAuthor, commentHeader, formatTimestamp, lyxAuthorId, parseThread, type Item, type LyxDocument, type Paragraph, type TextInset } from '@overlyx/core';
 import fs from 'node:fs';
@@ -21,10 +28,11 @@ import { isMarkdownPath } from '@overlyx/core/md/index.ts';
 import { resolveProjectPath } from '../projectfiles.ts';
 import { db } from '../db.ts';
 import { manager, type OpenDoc } from '../docs.ts';
-import { project, readGoogle, strip, toParagraphs, blockKey, itemRuns, nativeKeys, hasUnknownObjects, MEDIA_WARNING, UNKNOWN_WARNING, type GBlock, type Projection } from './model.ts';
-import { planRound } from './edits.ts';
+import { project, readGoogle, strip, toParagraphs, blockKey, itemRuns, nativeKeys, hasUnknownObjects, MEDIA_WARNING, UNKNOWN_WARNING, flatTabs, tabDocument, type DocsDocument, type DocsFile, type GBlock, type Projection } from './model.ts';
+import { planRound, inTab } from './edits.ts';
 import { buildDocx } from './docx.ts';
 import { attachObjectSources, bindImportedObjects, type ObjectBindings } from './native.ts';
+import { reconcileGroup } from './importing.ts';
 import { googleApi, GoogleAuthError, type GComment, type GoogleApi } from './google.ts';
 import { roleFor, atLeast } from '../access.ts';
 import { toSessionUser } from '../auth.ts';
@@ -46,8 +54,9 @@ CREATE TABLE IF NOT EXISTS gdocs_links (
   created_at INTEGER NOT NULL
 );
 `);
+// (tab_id: the tab a link syncs with — none: the Google Doc's first)
 const linkColumns = new Set((db.prepare('PRAGMA table_info(gdocs_links)').all() as { name: string }[]).map(c => c.name));
-for (const [name, type] of [['format', "TEXT NOT NULL DEFAULT 'text'"], ['objects', 'TEXT'], ['last_warnings', 'TEXT']]) {
+for (const [name, type] of [['format', "TEXT NOT NULL DEFAULT 'text'"], ['objects', 'TEXT'], ['last_warnings', 'TEXT'], ['tab_id', 'TEXT']]) {
   if (!linkColumns.has(name)) db.exec(`ALTER TABLE gdocs_links ADD COLUMN ${name} ${type}`);
 }
 
@@ -56,6 +65,7 @@ export interface LinkRow {
   base_text: string | null; base_google: string | null; comments: string | null;
   auto: number; last_sync: number | null; last_error: string | null; last_version: string | null; created_at: number;
   format: 'text' | 'docx'; objects: string | null; last_warnings: string | null;
+  tab_id: string | null;
 }
 
 export function linkOf(docId: string): LinkRow | null {
@@ -63,7 +73,20 @@ export function linkOf(docId: string): LinkRow | null {
 }
 
 export function publicLink(l: LinkRow | null) {
-  return l ? { fileId: l.file_id, url: l.url ?? `https://docs.google.com/document/d/${l.file_id}/edit`, auto: !!l.auto, lastSync: l.last_sync, lastError: l.last_error, linkedBy: l.user_id, format: l.format, warnings: l.last_warnings ? JSON.parse(l.last_warnings) as string[] : [] } : null;
+  if (!l) return null;
+  const url = l.url ?? `https://docs.google.com/document/d/${l.file_id}/edit`;
+  return { fileId: l.file_id, tabId: l.tab_id, url: l.tab_id ? `${url.replace(/[?#].*$/, '')}?tab=${encodeURIComponent(l.tab_id)}` : url, auto: !!l.auto, lastSync: l.last_sync, lastError: l.last_error, linkedBy: l.user_id, format: l.format, warnings: l.last_warnings ? JSON.parse(l.last_warnings) as string[] : [] };
+}
+
+/** the links to one Google Doc (the documents of its tabs) */
+export function linksOfFile(fileId: string): LinkRow[] {
+  return db.prepare('SELECT * FROM gdocs_links WHERE file_id = ?').all(fileId) as LinkRow[];
+}
+
+/** A link with its base: what both sides held at the "last sync" (the next sync takes the differences from there). */
+export function insertLink(l: { docId: string; fileId: string; userId: number; url: string | null; tabId: string | null; baseText: string | null; baseGoogle: GBlock[] | null; version: string | null }): void {
+  db.prepare('INSERT OR REPLACE INTO gdocs_links (doc_id, file_id, user_id, url, tab_id, base_text, base_google, auto, last_sync, last_version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)')
+    .run(l.docId, l.fileId, l.userId, l.url, l.tabId, l.baseText, l.baseGoogle ? JSON.stringify(l.baseGoogle) : null, l.baseText === null ? null : Date.now(), l.version, Date.now());
 }
 
 /** the API a link syncs with (tests put a simulation here) */
@@ -116,12 +139,32 @@ async function createLink(docId: string, userId: number, title: string): Promise
   return linkOf(docId)!;
 }
 
+/**
+ * Link the document to a Google Doc that exists (picked in Google's picker — what gives the
+ * `drive.file` authorisation access to it), to `tabId` or its first tab. Neither side is
+ * overwritten: the base is the document as it is on both sides, so the first sync brings what the
+ * Google Doc holds differently as tracked changes by the Google side, to accept or reject here.
+ */
+export async function linkExistingGoogleDoc(docId: string, userId: number, fileId: string, tabId: string | null): Promise<LinkRow> {
+  const api = apiFor(userId);
+  const [file, whole] = await Promise.all([api.getFile(fileId), api.getDocumentTabs(fileId)]);
+  if (file.trashed) throw new Error('That Google Doc is in the trash');
+  const tab = tabId ?? flatTabs(whole)[0]?.id ?? null;
+  if (!tab || !tabDocument(whole, tab)) throw new Error('That Google Doc has no such tab');
+  const doc = await manager.open(docId);
+  const ours = doc.toLyxDocument();
+  insertLink({ docId, fileId, userId, url: file.webViewLink ?? null, tabId: tab, baseText: doc.textOf(ours), baseGoogle: strip(project(ours).blocks), version: null });
+  await syncDoc(docId);
+  return linkOf(docId)!;
+}
+
 export function unlink(docId: string): void { db.prepare('DELETE FROM gdocs_links WHERE doc_id = ?').run(docId); }
 export function setAuto(docId: string, auto: boolean): void { db.prepare('UPDATE gdocs_links SET auto = ? WHERE doc_id = ?').run(auto ? 1 : 0, docId); }
 
 /* ------------------------------------------------------------------ the sync */
 
-export interface SyncReport { pulled: number; pushed: number; rounds: number; comments: { fromGoogle: number; toGoogle: number }; warnings: string[] }
+/** `warnings`: what was left out of the sync; `notes`: what it did besides the text (a tab of the Google Doc that became a document) */
+export interface SyncReport { pulled: number; pushed: number; rounds: number; comments: { fromGoogle: number; toGoogle: number }; warnings: string[]; notes: string[] }
 
 const running = new Map<string, Promise<SyncReport>>();
 
@@ -149,7 +192,7 @@ async function runSync(docId: string): Promise<SyncReport> {
   if (!link) throw new Error('This document is not linked to a Google Doc');
   if (!linkerMayEdit(link)) { unlink(docId); throw new Error('The person who linked this document to Google Docs may not edit it any more: the link is removed'); }
   const api = apiFor(link.user_id);
-  const report: SyncReport = { pulled: 0, pushed: 0, rounds: 0, comments: { fromGoogle: 0, toGoogle: 0 }, warnings: [] };
+  const report: SyncReport = { pulled: 0, pushed: 0, rounds: 0, comments: { fromGoogle: 0, toGoogle: 0 }, warnings: [], notes: [] };
   try {
     const doc = await manager.open(docId);
     const markdown = isMarkdownPath(doc.relPath);
@@ -157,8 +200,17 @@ async function runSync(docId: string): Promise<SyncReport> {
     if (file.trashed) throw new Error('The Google Doc is in the trash — restore it, or unlink the document');
     const bindings: ObjectBindings = link.objects ? JSON.parse(link.objects) : {};
     const native = link.format === 'docx';
-    const getDocument = async () => attachObjectSources(await api.getDocument(link.file_id), bindings);
-    let raw = await getDocument();
+    // a link to a tab: the tab's body as the document to sync (every tab read: the comments are shared out by their text)
+    let whole = null as DocsFile | null;
+    const readRaw = async (): Promise<DocsDocument> => {
+      if (!link.tab_id) return attachObjectSources(await api.getDocument(link.file_id), bindings);
+      whole = await api.getDocumentTabs(link.file_id);
+      const t = tabDocument(whole, link.tab_id);
+      if (!t) { unlink(docId); throw new Error('Its tab was deleted from the Google Doc: this document is no longer synced (it stays as it is)'); }
+      return attachObjectSources(t, bindings);
+    };
+    const aimed = (requests: ReturnType<typeof planRound>) => (link.tab_id ? inTab(requests, link.tab_id) : requests);
+    let raw = await readRaw();
     const gNow = strip(readGoogle(raw).blocks);
     if (hasUnknownObjects(gNow)) report.warnings.push(UNKNOWN_WARNING);
 
@@ -189,14 +241,14 @@ async function runSync(docId: string): Promise<SyncReport> {
     for (; report.rounds < 10; report.rounds++) {
       const requests = planRound(raw, want, report.warnings);
       if (!requests.length) break;
-      await api.batchUpdate(link.file_id, requests, raw.revisionId || undefined);
+      await api.batchUpdate(link.file_id, aimed(requests), raw.revisionId || undefined);
       report.pushed += requests.length;
-      raw = await getDocument();
+      raw = await readRaw();
     }
     if (report.rounds >= 10) report.warnings.push('The Google Doc could not be brought fully in line in one sync');
 
     // 3. comment threads, both ways (a thread from Google Docs changes the document)
-    const { doc: withComments, changed } = await syncComments(api, link, ours, raw, report);
+    const { doc: withComments, changed } = await syncComments(api, link, ours, raw, report, whole ? commentScope(link, whole) : undefined);
     if (changed) await doc.agentEdit('plain', doc.textOf(ours), { after: doc.textOf(withComments) });
 
     // 4. the base of the next sync: the document as written to Google (with the comment threads), the Google Doc as it is now
@@ -204,6 +256,8 @@ async function runSync(docId: string): Promise<SyncReport> {
     report.warnings = [...new Set(report.warnings)];
     db.prepare('UPDATE gdocs_links SET base_text = ?, base_google = ?, comments = ?, last_sync = ?, last_error = NULL, last_version = ?, last_warnings = ? WHERE doc_id = ?')
       .run(doc.textOf(withComments), JSON.stringify(strip(readGoogle(raw).blocks)), link.comments, Date.now(), after.version ?? null, JSON.stringify(report.warnings), docId);
+    // the tabs of a Google Doc that is a group here: tabs made there since become documents, titles and order follow
+    if (whole) { const g = await reconcileGroup(docId, link, whole); report.warnings.push(...g.warnings); report.notes.push(...g.notes); }
     return report;
   } catch (e) {
     db.prepare('UPDATE gdocs_links SET last_error = ?, last_sync = ? WHERE doc_id = ?').run((e as Error).message, Date.now(), docId);
@@ -288,6 +342,31 @@ function lcsRegions(a: string[], b: string[]): { a: number; b: number; c: number
 }
 
 /* ------------------------------------------------------------------ comments */
+
+/** Which Google comments a tab's document takes (a link to a tab of a Google Doc linked tab by tab). */
+interface CommentScope { claimed: Set<string>; mine: (c: GComment) => boolean }
+
+const norm = (t: string) => t.replace(/\s+/g, ' ').trim();
+
+/**
+ * A comment goes to the first tab whose text holds what it quotes — of the tabs linked here; to the
+ * first linked tab when none does (or it quotes nothing) — unless another tab's document took it already.
+ */
+export function commentScope(link: LinkRow, whole: DocsFile): CommentScope {
+  const linked = new Set(linksOfFile(link.file_id).map(l => l.tab_id ?? ''));
+  const tabs = flatTabs(whole).filter(t => linked.has(t.id));
+  const texts = new Map(tabs.map(t => [t.id, norm(readGoogle(tabDocument(whole, t.id)!).blocks.map(b => (b.t === 'p' ? b.runs.map(r => r.text).join('') : b.cells.flat(2).map(r => r.text).join(' '))).join(' '))]));
+  const claimed = new Set<string>();
+  for (const other of linksOfFile(link.file_id)) if (other.doc_id !== link.doc_id && other.comments) for (const e of JSON.parse(other.comments) as ThreadEntry[]) claimed.add(e.gid);
+  return {
+    claimed,
+    mine: c => {
+      const q = norm(c.quotedFileContent?.value ?? '');
+      const home = (q && tabs.find(t => texts.get(t.id)!.includes(q))) || tabs[0];
+      return !!home && home.id === link.tab_id;
+    },
+  };
+}
 
 interface ThreadEntry {
   /** the Google comment */
@@ -402,7 +481,7 @@ function rangeOf(raw: import('./model.ts').DocsDocument, quoted: string): { star
  * Comment threads both ways. Returns the document with the threads changed by Google Docs (new
  * comments, replies, resolved) — `changed` when there were any — and updates `link.comments`.
  */
-export async function syncComments(api: GoogleApi, link: LinkRow, ours: LyxDocument, raw: import('./model.ts').DocsDocument, report: SyncReport): Promise<{ doc: LyxDocument; changed: boolean }> {
+export async function syncComments(api: GoogleApi, link: LinkRow, ours: LyxDocument, raw: import('./model.ts').DocsDocument, report: SyncReport, scope?: CommentScope): Promise<{ doc: LyxDocument; changed: boolean }> {
   const doc: LyxDocument = JSON.parse(JSON.stringify(ours));
   const map: ThreadEntry[] = link.comments ? JSON.parse(link.comments) : [];
   const comments = await api.listComments(link.file_id);
@@ -424,6 +503,8 @@ export async function syncComments(api: GoogleApi, link: LinkRow, ours: LyxDocum
     let entry = map.find(e => e.gid === c.id);
     if (c.deleted) { if (entry) entry.closed = true; continue; }
     const replies = (c.replies ?? []).filter(r => !r.deleted);
+    // another tab's comment (or one another tab's document took)
+    if (!entry && scope && (scope.claimed.has(c.id) || !scope.mine(c))) continue;
     if (!entry) {
       const messages = [{ author: c.author?.displayName || 'Google Docs', time: gTime(c.createdTime), text: gText(c) }, ...replies.filter(r => gText(r)).map(r => ({ author: r.author?.displayName || 'Google Docs', time: gTime(r.createdTime), text: gText(r) }))];
       const inset: TextInset = { type: 'Text', name: 'Note', arg: 'Comment', params: [], status: 'open', paragraphs: threadParagraphs(messages, !!c.resolved) };
@@ -490,7 +571,8 @@ export async function syncComments(api: GoogleApi, link: LinkRow, ours: LyxDocum
     const sig = msgSig(first);
     if (map.some(e => e.sig === sig) || map.some(e => !e.closed && e.sig.startsWith(`${first.author}|${first.time}|`) && find(e.sig) === t)) continue;
     const quoted = quoteFor(t.before);
-    const c: GComment = await api.createComment(link.file_id, { content: `${first.author}: ${first.text}`, quoted, range: rangeOf(raw, quoted) });
+    const range = rangeOf(raw, quoted);
+    const c: GComment = await api.createComment(link.file_id, { content: `${first.author}: ${first.text}`, quoted, range: range && link.tab_id ? { ...range, tabId: link.tab_id } : range });
     const entry: ThreadEntry = { gid: c.id, sig, replies: [], msgs: [sig], resolved: false };
     for (const m of thread.messages.slice(1)) {
       const r = await api.createReply(link.file_id, c.id, { content: `${m.author}: ${m.text}` });

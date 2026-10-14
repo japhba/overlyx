@@ -23,6 +23,10 @@ export const config = {
   google: {
     clientId: process.env.GOOGLE_CLIENT_ID ?? '',
     clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? '',
+    /** an API key of the same Google project, restricted to the Picker API: linking / importing Google Docs that exist (gdocs/google.ts) */
+    pickerKey: process.env.GOOGLE_PICKER_API_KEY ?? '',
+    /** the project's number (the picker's app id); by default the OAuth client id's prefix */
+    appId: process.env.GOOGLE_APP_ID ?? '',
   },
   /**
    * E-mail (or username) of the instance owner: this account is an administrator and owns every

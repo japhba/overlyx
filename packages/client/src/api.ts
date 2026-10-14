@@ -1,4 +1,4 @@
-import type { LayoutCheck } from '@overlyx/core';
+import type { LayoutCheck, DocGroup } from '@overlyx/core';
 import { offlineGet } from './offline-api';
 
 export interface User {
@@ -16,6 +16,8 @@ export interface ProjectFile {
   path: string; name: string; size: number; mtime: number; kind: 'doc' | 'lyx' | 'bib' | 'image' | 'tex' | 'pdf' | 'board' | 'html' | 'dir' | 'other';
   /** an HTML file: the kind of deliverable it is (none: a plain web page) */
   deliverable?: 'deck' | 'poster' | 'page';
+  /** a directory that is a document group (core/docgroup.ts): its documents in order, their titles */
+  group?: DocGroup;
 }
 export type Role = 'owner' | 'edit' | 'view';
 export interface Project {
@@ -173,8 +175,11 @@ async function req<T>(method: string, url: string, body?: unknown, raw?: BodyIni
 
 export const encId = (id: string) => encodeURIComponent(id);
 
-export interface GdocsLink { fileId: string; url: string; auto: boolean; lastSync: number | null; lastError: string | null; linkedBy: number; format: 'text' | 'docx'; warnings: string[] }
-export interface GdocsStatus { configured: boolean; account: { email: string | null } | null; link: GdocsLink | null; canEdit: boolean; guest: boolean }
+export interface GdocsLink { fileId: string; tabId: string | null; url: string; auto: boolean; lastSync: number | null; lastError: string | null; linkedBy: number; format: 'text' | 'docx'; warnings: string[] }
+export interface GdocsStatus { configured: boolean; picker: boolean; account: { email: string | null } | null; link: GdocsLink | null; canEdit: boolean; guest: boolean }
+/** what Google's file picker needs (app/gpicker.ts); the e2e stub offers the simulated account's Google Docs */
+export type GdocsPicker = { stub: true; files: { id: string; name: string }[] } | { stub?: false; apiKey: string; appId: string; token: string };
+export interface GdocsTab { id: string; title: string; level: number; parent: string | null }
 
 /** keys of the projects the server listed for this user (a link naming one needs no resolveId) */
 export const knownProjects = new Set<string>();
@@ -342,7 +347,15 @@ export const api = {
   // the Google Docs sync (server gdocs/)
   gdocsStatus: (id: string) => req<GdocsStatus>('GET', `/api/gdocs/status?doc=${encId(id)}`),
   gdocsLink: (id: string, title: string) => req<{ link: GdocsLink }>('POST', `/api/docs/${encId(id)}/gdocs/link`, { title }),
-  gdocsSync: (id: string) => req<{ link: GdocsLink; report: { pulled: number; pushed: number; comments: { fromGoogle: number; toGoogle: number }; warnings: string[] } }>('POST', `/api/docs/${encId(id)}/gdocs/sync`),
+  /** link the document to a Google Doc that exists (picked): its differences come in as tracked changes */
+  gdocsLinkExisting: (id: string, fileId: string, tabId: string | null) => req<{ link: GdocsLink }>('POST', `/api/docs/${encId(id)}/gdocs/link`, { fileId, tabId }),
+  /** the account's Drive connection, without a document */
+  gdocsAccount: () => req<GdocsStatus>('GET', '/api/gdocs/status'),
+  gdocsPicker: () => req<GdocsPicker>('GET', '/api/gdocs/picker'),
+  gdocsFile: (fileId: string) => req<{ id: string; name: string; tabs: GdocsTab[] }>('GET', `/api/gdocs/file?id=${encodeURIComponent(fileId)}`),
+  /** a picked Google Doc into the project: a document, or a document group of its tabs (the first document to open) */
+  gdocsImport: (project: string, fileId: string, dir: string) => req<{ id: string; docs: string[]; group: string | null }>('POST', `/api/projects/${encodeURIComponent(project)}/gdocs/import`, { fileId, dir }),
+  gdocsSync: (id: string) => req<{ link: GdocsLink; report: { pulled: number; pushed: number; comments: { fromGoogle: number; toGoogle: number }; warnings: string[]; notes: string[] } }>('POST', `/api/docs/${encId(id)}/gdocs/sync`),
   gdocsAuto: (id: string, auto: boolean) => req<{ link: GdocsLink }>('POST', `/api/docs/${encId(id)}/gdocs/auto`, { auto }),
   gdocsUnlink: (id: string) => req<{ ok: boolean }>('POST', `/api/docs/${encId(id)}/gdocs/unlink`),
   gdocsDisconnect: () => req<{ ok: boolean }>('POST', '/api/gdocs/disconnect'),

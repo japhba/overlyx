@@ -429,6 +429,22 @@ function listIds(raw: DocsDocument): Map<number, string> {
   return out;
 }
 
+/**
+ * Requests made for one tab's body (planRound on tabDocument) aimed at that tab: every location and
+ * range (a footnote's too) names the tab — without it the Docs API applies a request to the first tab.
+ */
+export function inTab(requests: Request[], tabId: string): Request[] {
+  const aim = (v: unknown, key = ''): unknown => {
+    if (Array.isArray(v)) return v.map(x => aim(x));
+    if (!v || typeof v !== 'object') return v;
+    const out: Record<string, unknown> = {};
+    for (const [k, x] of Object.entries(v)) out[k] = aim(x, k);
+    if (key === 'location' || key === 'range' || key === 'endOfSegmentLocation') out.tabId = tabId;
+    return out;
+  };
+  return requests.map(r => aim(r) as Request);
+}
+
 /** Does the Google Doc hold `want` (nothing left to do)? */
 export function inSync(raw: DocsDocument, want: GBlock[]): boolean {
   return planRound(raw, want).length === 0;

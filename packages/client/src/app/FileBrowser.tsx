@@ -4,18 +4,23 @@
  * makes any of them, the name's ending deciding what it becomes (app/newfile.ts); documents, text
  * files, PDFs and whiteboards open in place, images in a browser tab. LaTeX build products and LyX
  * backups are hidden unless "all files" is on. Under the files panel a document row expands into its
- * outline.
+ * outline. A document group (a folder with core/docgroup.ts's manifest — the tabs of an imported
+ * Google Doc) shows as one entry: its title, then its documents in the group's order under the titles
+ * the group gives them (nested ones indented), the folder's other files after them.
+ * *Import from Google Docs…* (where Google's picker is set up) brings a Google Doc in: a document, or
+ * a group of its tabs (server gdocs/importing.ts).
  */
 import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { api, fileUrl, isAuxFile, isTextFile, type Project, type ProjectFile } from '../api';
 import { subscribeProjectEvents } from '../projectevents';
 import { showContextMenu, type MenuItem } from '../editor/contextmenu';
-import { projectOfDoc, splitDocId, projectShortName } from '@overlyx/core';
+import { projectOfDoc, splitDocId, projectShortName, type DocGroup, type DocGroupMember } from '@overlyx/core';
 import { uiPrompt, uiConfirm, uiAlert } from './Dialogs';
 import { promptNewFile } from './newfile';
 import { useUiMode } from './uimode';
 import { KIND_ICONS, iconSvg } from './modernicons';
+import { pickGoogleDoc } from './gpicker';
 
 /**
  * Subscribe to the server's change stream for one project (SSE): `onChange` fires whenever files
@@ -31,7 +36,7 @@ export function useProjectEvents(project: string | null | undefined, onChange: (
   }, [project]);
 }
 
-interface TreeNode { name: string; path: string; children: TreeNode[]; file?: ProjectFile }
+interface TreeNode { name: string; path: string; children: TreeNode[]; file?: ProjectFile; group?: DocGroup }
 
 function buildTree(files: ProjectFile[]): TreeNode[] {
   const root: TreeNode = { name: '', path: '', children: [] };
@@ -46,9 +51,13 @@ function buildTree(files: ProjectFile[]): TreeNode[] {
       cur = next;
     }
     if (f.kind !== 'dir') cur.children.push({ name: parts[parts.length - 1], path: f.path, children: [], file: f });
+    else if (f.group) cur.group = f.group;
   }
   const sort = (n: TreeNode) => {
-    n.children.sort((a, b) => Number(!!a.file) - Number(!!b.file) || a.name.localeCompare(b.name, undefined, { numeric: true }));
+    // a group: its documents in the group's order first
+    const at = new Map((n.group?.members ?? []).map((m, i) => [m.file, i]));
+    const rank = (c: TreeNode) => (c.file ? at.get(c.name) ?? Infinity : Infinity);
+    n.children.sort((a, b) => (rank(a) - rank(b) || 0) || Number(!!a.file) - Number(!!b.file) || a.name.localeCompare(b.name, undefined, { numeric: true }));
     n.children.forEach(sort);
   };
   sort(root);
@@ -166,6 +175,26 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
     if (dir) reveal(dir + '/');
     await load();
     onOpen(id);
+  };
+  // Google's picker is set up on this server (the import is offered then)
+  const [gdocs, setGdocs] = useState(false);
+  useEffect(() => { api.gdocsAccount().then(s => setGdocs(s.picker)).catch(() => setGdocs(false)); }, []);
+  /** a Google Doc picked in Google's picker into `dir`: a document, or a group of its tabs — opened */
+  const importGoogle = async (dir = '') => {
+    if (!project) return;
+    try {
+      const st = await api.gdocsAccount();
+      if (!st.account) {
+        if (await uiConfirm('Import from Google Docs', 'Connect Google Drive first — OverLyX then opens only the Google Docs you pick.', { okLabel: 'Connect Google Drive…' })) location.href = '/api/gdocs/connect?next=' + encodeURIComponent(location.hash.replace(/\?.*$/, ''));
+        return;
+      }
+      const fileId = await pickGoogleDoc('Import a Google Doc');
+      if (!fileId) return;
+      const r = await api.gdocsImport(project.name, fileId, dir);
+      reveal((r.group ?? dir) + '/');
+      await load();
+      onOpen(r.id);
+    } catch (e) { await uiAlert('Import Failed', (e as Error).message); }
   };
   const upload = async (dir = '') => {
     if (!project) return;
@@ -303,6 +332,7 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
     { label: 'New File…', action: () => void newFile(dir) },
     { label: 'New Folder…', action: () => void newFolder(dir) },
     { label: 'Upload…', action: () => void upload(dir) },
+    ...(gdocs ? [{ label: 'Import from Google Docs…', action: () => void importGoogle(dir) }] : []),
   ] : [];
   const fileCtx = (f: ProjectFile, openIt: () => void) => (e: MouseEvent) => {
     e.preventDefault(); e.stopPropagation();
@@ -327,8 +357,28 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
     ]);
   };
 
-  const renderNode = (node: TreeNode, depth: number) => {
+  const renderNode = (node: TreeNode, depth: number, member?: DocGroupMember) => {
     const key = project!.name + ':' + node.path;
+    if (!node.file && node.group) {
+      // a document group: one entry, its documents (the group's order, titles and nesting) under it
+      const closedByDefault = depth > 0 || !!outlines;
+      const isCollapsed = collapsed[key] ?? closedByDefault;
+      const byFile = new Map(node.group.members.map(m => [m.file, m]));
+      const n = node.children.filter(c => c.file && byFile.has(c.name)).length;
+      return (
+        <div key={key} class={'doc-group' + (isCollapsed ? '' : ' open')} data-group={node.path}>
+          <div class={'tree-row folder group-row' + (dropDir === node.path ? ' drop-target' : '')} style={{ paddingLeft: 6 + depth * 14 + 'px' }} onClick={() => toggle(key, closedByDefault)} onContextMenu={folderCtx(node.path)}
+            onDragOver={dragOver(node.path)} onDrop={drop(node.path)} title={`${node.path} · a document group: ${n} document${n === 1 ? '' : 's'}`}>
+            <span class="twisty">{isCollapsed ? '▸' : '▾'}</span>
+            {modern
+              ? <span class="ficon icon" data-kind="group" dangerouslySetInnerHTML={{ __html: iconSvg(KIND_ICONS.group, 15) }} />
+              : <span class="ficon" data-kind="group">🗂</span>}
+            <span class="fname">{node.group.title ?? node.name}</span><span class="group-count">{n}</span>
+          </div>
+          {!isCollapsed && node.children.map(c => renderNode(c, depth + 1, c.file ? byFile.get(c.name) : undefined))}
+        </div>
+      );
+    }
     if (!node.file) {
       const closedByDefault = depth > 0 || !!outlines;   // under the documents panel folders start closed: the open document stays near the top
       const isCollapsed = collapsed[key] ?? closedByDefault;
@@ -365,7 +415,7 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
     const outlined = isDoc && !!outlines;
     const open = outlined && outlines!.open(id);
     const row = (
-      <a key={key} class={'tree-row file' + (id === current ? ' current' : '') + (outlined ? ' doc-name' : '')} style={{ paddingLeft: 6 + depth * 14 + 'px' }}
+      <a key={key} class={'tree-row file' + (id === current ? ' current' : '') + (outlined ? ' doc-name' : '') + (member ? ' group-member' : '')} style={{ paddingLeft: 6 + (depth + (member?.level ?? 0)) * 14 + 'px' }}
         href={href} target={inTab ? undefined : '_blank'} title={`${f.path} · ${(f.size / 1024).toFixed(0)} KB${isLyx ? ' · click to import as .tex' : inTab && isPdf ? ' · opens in the PDF viewer' : inTab && !isDoc ? ' · opens in the text editor' : ''}`}
         data-file={f.path}
         onDragOver={dragOver(f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) : '')}
@@ -377,7 +427,7 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
           : <span class="twisty" />)}
         {modern
           ? <span class="ficon icon" data-kind={kind} dangerouslySetInnerHTML={{ __html: iconSvg(KIND_ICONS[kind] ?? KIND_ICONS.other, 15) }} />
-          : <span class="ficon" data-kind={kind}>{f.kind === 'html' && f.deliverable ? DELIVERABLE_ICON[f.deliverable] : ICON[f.kind] ?? '·'}</span>}<span class="fname">{node.name}</span>
+          : <span class="ficon" data-kind={kind}>{f.kind === 'html' && f.deliverable ? DELIVERABLE_ICON[f.deliverable] : ICON[f.kind] ?? '·'}</span>}<span class="fname">{member?.title ?? node.name}</span>
         {isDoc && offlineDocs.has(id) && <span class="offline-mark" title="A copy of this document is stored in this browser: it can be opened and edited offline">⬇</span>}
       </a>
     );
@@ -385,7 +435,7 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
     return (
       <div key={key} class={'doc-tab' + (id === current ? ' active' : '') + (open ? ' open' : '')} data-doc={f.path}>
         {row}
-        {open && <div class="doc-outline" style={{ paddingLeft: 6 + depth * 14 + 17 + 'px' }}>{outlines!.render(id)}</div>}
+        {open && <div class="doc-outline" style={{ paddingLeft: 6 + (depth + (member?.level ?? 0)) * 14 + 17 + 'px' }}>{outlines!.render(id)}</div>}
       </div>
     );
   };
@@ -412,6 +462,7 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
         {canEdit && project && <button class="small-btn" onClick={() => void newFile()} title="New file in this project — the ending decides what it is: .tex a LaTeX document, .md a Markdown document, .board a whiteboard, .bib, .sty … a text file">+ File</button>}
         {canEdit && project && <button class="small-btn" onClick={() => void newFolder()} title="New folder in this project (also in the right-click menu of any folder)">+ Folder</button>}
         {canEdit && project && <button class="small-btn" onClick={() => void upload()} title="Upload files (figures, .bib, .sty …) — or drag them from your computer onto the file list">⇧</button>}
+        {canEdit && project && gdocs && <button class="small-btn" data-gdocs-import onClick={() => void importGoogle()} title="Import a Google Doc (picked in Google's picker) — one with tabs becomes a document group; it stays in step with the Google Doc">G⇩</button>}
         {role === 'owner' && via !== 'admin' && project && onShare && <button class="small-btn" data-share={project.name} onClick={() => onShare(project.name)} title="Share this project…">👥</button>}
         <button class="small-btn" onClick={() => setShowAll(!showAll)} title="Show LaTeX build files (.aux, .log, .bbl …) and LyX backups (~, #, .emergency)">{showAll ? 'Fewer' : 'All files'}</button>
       </div>

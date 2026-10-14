@@ -8,8 +8,10 @@
  * createParagraphBullets takes leading tabs as nesting levels and removes them, insertTable puts a
  * newline before the table, createFootnote makes a footnote holding " \n". Comments are anchored
  * to the characters they quote and lose their anchor when those characters are deleted.
+ * A Google Doc has tabs (each a FakeDoc of its own, the first one `docs`): documents.get without
+ * includeTabsContent reads the first, a request goes to the tab its location / range names.
  */
-import type { DocsDocument, DocsTextStyle, DocsStructural, DocsParagraphElement } from './model.ts';
+import type { DocsDocument, DocsFile, DocsTab, DocsTextStyle, DocsStructural, DocsParagraphElement } from './model.ts';
 import type { GComment, GFile, GReply, GoogleApi } from './google.ts';
 import { GoogleApiError } from './errors.ts';
 
@@ -351,12 +353,24 @@ export class FakeDoc {
   hasChar(c: Ch): boolean { return this.charsIn(1, 1e9).includes(c); }
 }
 
-interface FakeComment extends GComment { anchorChars?: Ch[] }
+interface FakeComment extends GComment { anchorChars?: Ch[]; tabId?: string }
+interface FakeTab { id: string; title: string; parent: string | null; doc: FakeDoc }
+
+/** the tab a request is aimed at (a tabId in its location or range), if any */
+function tabOf(v: unknown): string | undefined {
+  if (!v || typeof v !== 'object') return undefined;
+  if (typeof (v as { tabId?: unknown }).tabId === 'string') return (v as { tabId: string }).tabId;
+  for (const x of Object.values(v)) { const t = tabOf(x); if (t) return t; }
+  return undefined;
+}
 
 /** The Docs and Drive APIs for any number of documents, acting as one Google account ("me"). */
 export class FakeGoogle implements GoogleApi {
   importDocument?: GoogleApi['importDocument'];
+  /** each Google Doc's first tab */
   docs = new Map<string, FakeDoc>();
+  /** each Google Doc's tabs, in reading order (a child tab after its parent) */
+  tabs = new Map<string, FakeTab[]>();
   files = new Map<string, GFile & { version: string }>();
   comments = new Map<string, FakeComment[]>();
   /** the anchored comment request of the Docs API (in preview): off to test the Drive fallback */
@@ -374,37 +388,72 @@ export class FakeGoogle implements GoogleApi {
 
   async createDocument(title: string): Promise<GFile> {
     const id = 'doc' + ++this.n;
-    this.docs.set(id, new FakeDoc(id, title));
+    const doc = new FakeDoc(id, title);
+    this.docs.set(id, doc);
+    this.tabs.set(id, [{ id: 't.0', title: 'Tab 1', parent: null, doc }]);
     const f = { id, name: title, webViewLink: `https://docs.google.com/document/d/${id}/edit`, version: '1', trashed: false };
     this.files.set(id, f);
     this.comments.set(id, []);
     return { ...f };
   }
   async getDocument(id: string): Promise<DocsDocument> { return JSON.parse(JSON.stringify(this.doc(id).json())); }
+  async getDocumentTabs(id: string): Promise<DocsFile> {
+    const first = this.doc(id), list = this.tabs.get(id)!;
+    const depth = (t: FakeTab): number => (t.parent ? 1 + depth(list.find(x => x.id === t.parent)!) : 0);
+    const node = (t: FakeTab): DocsTab => {
+      const j = t.doc.json();
+      const kids = list.filter(c => c.parent === t.id);
+      return { tabProperties: { tabId: t.id, title: t.title, index: list.filter(x => x.parent === t.parent).indexOf(t), nestingLevel: depth(t), ...(t.parent ? { parentTabId: t.parent } : {}) }, documentTab: { body: j.body, lists: j.lists, footnotes: j.footnotes, namedRanges: j.namedRanges }, ...(kids.length ? { childTabs: kids.map(node) } : {}) };
+    };
+    return JSON.parse(JSON.stringify({ documentId: id, title: first.title, revisionId: 'rev' + first.revision, tabs: list.filter(t => !t.parent).map(node) }));
+  }
   doc(id: string): FakeDoc { const d = this.docs.get(id); if (!d) throw new GoogleApiError('File not found', 404); return d; }
+  /** a tab's body (the first tab without `tabId`) */
+  tabDoc(id: string, tabId?: string): FakeDoc {
+    if (!tabId) return this.doc(id);
+    const t = this.tabs.get(id)?.find(x => x.id === tabId);
+    if (!t) throw new GoogleApiError(`No tab ${tabId}`, 400);
+    return t.doc;
+  }
+  /** a collaborator adds a tab (after the parent's last child tab, or at the end); its id */
+  addTab(id: string, title: string, parent: string | null = null, by = 'Kirsten'): string {
+    const list = this.tabs.get(id)!;
+    const tab: FakeTab = { id: 't.' + ++this.n, title, parent, doc: new FakeDoc(id, title) };
+    const below = (t: FakeTab): boolean => !!t.parent && (t.parent === parent || below(list.find(x => x.id === t.parent)!));
+    let at = list.length;
+    if (parent) { at = list.findIndex(x => x.id === parent) + 1; while (at < list.length && below(list[at])) at++; }
+    list.splice(at, 0, tab);
+    this.doc(id).revision++;
+    this.touch(id, by);
+    return tab.id;
+  }
+  /** the Google Docs the account has (the e2e picker's list) */
+  list(): { id: string; name: string }[] { return [...this.files.values()].filter(f => !f.trashed).map(f => ({ id: f.id, name: f.name ?? f.id })); }
 
   /** a batch by `by` (the sync is "me"; a collaborator's edits are made through here as well) */
   async batchUpdate(id: string, requests: Record<string, unknown>[], requiredRevisionId?: string, by = this.me): Promise<{ replies: Record<string, unknown>[]; revisionId: string }> {
-    const d = this.doc(id);
+    const d = this.doc(id), tabs = this.tabs.get(id)!;
     if (requiredRevisionId && requiredRevisionId !== 'rev' + d.revision) throw new GoogleApiError('The document was changed since the revision', 400, 'FAILED_PRECONDITION');
-    // all or nothing, like the real API
-    const backup = JSON.stringify({ body: d.body, footnotes: [...d.footnotes], lists: [...d.lists], namedRanges: [...d.namedRanges] });
+    // all or nothing, like the real API (every tab)
+    const backup = JSON.stringify(tabs.map(t => ({ body: t.doc.body, footnotes: [...t.doc.footnotes], lists: [...t.doc.lists], namedRanges: [...t.doc.namedRanges] })));
     const replies: Record<string, unknown>[] = [];
     try {
       for (const r of requests) {
+        const tabId = tabOf(r);
+        const target = this.tabDoc(id, tabId);
         if ('insertComment' in r) {
           if (!this.anchoredComments) throw new GoogleApiError('Invalid JSON payload received. Unknown name "insertComment"', 400);
           const ic = (r as { insertComment: { content: string; range: { startIndex: number; endIndex: number } } }).insertComment;
-          const chars = d.charsIn(ic.range.startIndex, ic.range.endIndex);
-          this.comments.get(id)!.push({ id: 'c' + ++this.n, content: ic.content, author: { displayName: this.me, me: true }, createdTime: new Date().toISOString(), resolved: false, quotedFileContent: { value: chars.map(c => c.ch).join('') }, anchor: 'kix.anchor', anchorChars: chars, replies: [] });
+          const chars = target.charsIn(ic.range.startIndex, ic.range.endIndex);
+          this.comments.get(id)!.push({ id: 'c' + ++this.n, content: ic.content, author: { displayName: this.me, me: true }, createdTime: new Date().toISOString(), resolved: false, quotedFileContent: { value: chars.map(c => c.ch).join('') }, anchor: 'kix.anchor', anchorChars: chars, ...(tabId ? { tabId } : {}), replies: [] });
           replies.push({});
           continue;
         }
-        replies.push(d.apply(r));
+        replies.push(target.apply(r));
       }
     } catch (e) {
-      const b = JSON.parse(backup);
-      d.body = b.body; d.footnotes = new Map(b.footnotes); d.lists = new Map(b.lists); d.namedRanges = new Map(b.namedRanges);
+      const b = JSON.parse(backup) as { body: El[]; footnotes: [string, El[]][]; lists: [string, boolean][]; namedRanges: [string, unknown][] }[];
+      tabs.forEach((t, k) => { t.doc.body = b[k].body; t.doc.footnotes = new Map(b[k].footnotes); t.doc.lists = new Map(b[k].lists); t.doc.namedRanges = new Map(b[k].namedRanges as never); });
       throw e;
     }
     d.revision++;
@@ -416,13 +465,13 @@ export class FakeGoogle implements GoogleApi {
   async getFile(id: string): Promise<GFile> { const f = this.files.get(id); if (!f) throw new GoogleApiError('File not found', 404); return { ...f }; }
 
   async listComments(id: string): Promise<GComment[]> {
-    const d = this.doc(id);
-    return (this.comments.get(id) ?? []).map(c => ({ ...c, anchorChars: undefined, replies: (c.replies ?? []).map(r => ({ ...r })), ...(c.anchorChars ? { anchored: c.anchorChars.every(x => d.hasChar(x)) } : {}) }));
+    this.doc(id);
+    return (this.comments.get(id) ?? []).map(c => ({ ...c, anchorChars: undefined, tabId: undefined, replies: (c.replies ?? []).map(r => ({ ...r })), ...(c.anchorChars ? { anchored: c.anchorChars.every(x => this.tabDoc(id, c.tabId).hasChar(x)) } : {}) }));
   }
-  async createComment(id: string, c: { content: string; quoted?: string; range?: { startIndex: number; endIndex: number } }): Promise<GComment> {
+  async createComment(id: string, c: { content: string; quoted?: string; range?: { startIndex: number; endIndex: number; tabId?: string } }): Promise<GComment> {
     if (c.range && this.anchoredComments) {
       await this.batchUpdate(id, [{ insertComment: { content: c.content, range: c.range } }]);
-      return { ...this.comments.get(id)!.at(-1)!, anchorChars: undefined } as GComment;
+      return { ...this.comments.get(id)!.at(-1)!, anchorChars: undefined, tabId: undefined } as GComment;
     }
     const made: FakeComment = { id: 'c' + ++this.n, content: c.content, author: { displayName: this.me, me: true }, createdTime: new Date().toISOString(), resolved: false, quotedFileContent: c.quoted ? { value: c.quoted } : undefined, replies: [] };
     this.comments.get(id)!.push(made);
@@ -440,18 +489,18 @@ export class FakeGoogle implements GoogleApi {
 
   /* ---- a collaborator in Google Docs ---- */
 
-  /** a comment by `by` on the body characters [start, end) */
-  comment(id: string, start: number, end: number, content: string, by = 'Kirsten'): GComment {
-    const d = this.doc(id);
+  /** a comment by `by` on the body characters [start, end) (of a tab's body) */
+  comment(id: string, start: number, end: number, content: string, by = 'Kirsten', tabId?: string): GComment {
+    const d = this.tabDoc(id, tabId);
     const chars = d.charsIn(start, end);
-    const c: FakeComment = { id: 'c' + ++this.n, content, author: { displayName: by, me: false }, createdTime: '2026-10-04T09:30:00Z', resolved: false, quotedFileContent: { value: chars.map(x => x.ch).join('') }, anchor: 'kix.x', anchorChars: chars, replies: [] };
+    const c: FakeComment = { id: 'c' + ++this.n, content, author: { displayName: by, me: false }, createdTime: '2026-10-04T09:30:00Z', resolved: false, quotedFileContent: { value: chars.map(x => x.ch).join('') }, anchor: 'kix.x', anchorChars: chars, ...(tabId ? { tabId } : {}), replies: [] };
     this.comments.get(id)!.push(c);
     this.touch(id, by);
     return c;
   }
-  /** the body index of `text` (its first occurrence) */
-  indexOf(id: string, text: string): number {
-    const raw = this.doc(id).json();
+  /** the body index of `text` (its first occurrence; in a tab's body) */
+  indexOf(id: string, text: string, tabId?: string): number {
+    const raw = this.tabDoc(id, tabId).json();
     for (const s of raw.body.content) {
       if (!s.paragraph) continue;
       const t = s.paragraph.elements.map(e => e.textRun?.content ?? '￼'.repeat(e.endIndex - e.startIndex)).join('');
@@ -463,6 +512,6 @@ export class FakeGoogle implements GoogleApi {
   /** is the comment still anchored to text that exists? */
   anchored(id: string, commentId: string): boolean {
     const c = this.comments.get(id)!.find(x => x.id === commentId)!;
-    return !!c.anchorChars?.length && c.anchorChars.every(x => this.doc(id).hasChar(x));
+    return !!c.anchorChars?.length && c.anchorChars.every(x => this.tabDoc(id, c.tabId).hasChar(x));
   }
 }

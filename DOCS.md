@@ -2192,7 +2192,9 @@ split or join is remembered, so that an editor coming back from offline after it
 placed, default 30; see *Offline mode*), `OVERLYX_SANDBOX` (`auto` — use bubblewrap when installed, the default; `bwrap` — required;
 `none`),
 `LYX_LAYOUT_DIR` (LyX `lib/layouts`), `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` +
-`OVERLYX_PUBLIC_URL` to enable Google sign-in, `OVERLYX_OWNER_EMAIL` (the instance owner: made an
+`OVERLYX_PUBLIC_URL` to enable Google sign-in, `GOOGLE_PICKER_API_KEY` (Google's file picker for
+linking / importing Google Docs that exist; `GOOGLE_APP_ID`, the Cloud project number, defaults to
+the client id's prefix — see *Google Docs sync*), `OVERLYX_OWNER_EMAIL` (the instance owner: made an
 administrator at sign-in; a project directory put at the top level of the projects directory moves
 into its namespace),
 `OVERLYX_SMTP_URL` (an SMTP URL with credentials, e.g.
@@ -2744,6 +2746,36 @@ read, comment and edit in Google Docs.
   secret) in `google_drive`. **Setup:** in the Google Cloud project of `GOOGLE_CLIENT_ID`, enable the
   *Google Docs API* and the *Google Drive API* (APIs & Services ▸ Library); `drive.file` is a
   non-sensitive scope, so no app verification is needed. Without the APIs enabled the dialog says so.
+  Once per server, not per user: every account then just connects its Drive.
+* **Google Docs that exist** (14 Oct 2026), through Google's file picker (`client/app/gpicker.ts`;
+  `GET /api/gdocs/picker` hands it the API key, the app id and a short-lived access token of the
+  account's own authorisation): a file picked there is one `drive.file` covers from then on, so the
+  scope stays as narrow as before. **Setup**, also once per server: enable the *Google Picker API*,
+  create an API key restricted to it and to the site's address, set `GOOGLE_PICKER_API_KEY` (the app
+  id is the project number: the OAuth client id's prefix, or `GOOGLE_APP_ID`). The CSP then allows
+  Google's script and frame (`security.ts`; only where the picker is set up). Two ways in:
+  *Link an existing Google Doc…* in the dialog (`linkExistingGoogleDoc`; a Google Doc with tabs:
+  the tab to be) — the base is the document as it is, so the first sync brings what the Google Doc
+  holds differently as tracked changes by the Google side and writes nothing there; and
+  *Import from Google Docs…* in the file browser (`gdocs/importing.ts`, `POST /api/projects/<p>/gdocs/import`)
+  — the Google Doc becomes a markdown document, one with several tabs a **document group** (below),
+  each document linked to its tab with what the tab holds as its base (the first sync, run at once,
+  brings the comments over and writes nothing). Images and equations of a Google Doc that OverLyX
+  did not create have no source bindings (`native.ts`): an import writes them as
+  `[Google Docs image: …]` / `[Google Docs equation]` text, and the sync leaves their paragraphs
+  alone on both sides (`UNKNOWN_WARNING`).
+* **Tabs** (`gdocs_links.tab_id`; a link made by creating a Google Doc names none and syncs the
+  first tab). A link to a tab reads the Google Doc with `includeTabsContent`, syncs that tab's body
+  as a document of its own (`model.ts` `tabDocument`: own indices, lists, footnotes) and aims every
+  request at it (`edits.ts` `inTab`: a `tabId` in each location and range). Comments belong to the
+  file, so each Google comment goes to the linked tab whose text holds what it quotes (the first
+  linked tab when none does), once (`commentScope`: a comment another tab's document took stays
+  there); a thread written here becomes a comment anchored in its own tab. After each sync of a
+  group's document, `reconcileGroup` brings the group in step with the tabs: a tab made in Google
+  Docs becomes a document of the group (its comments come with the next automatic sync), the
+  group's order, titles and nesting follow the tabs (a file keeps its name when its tab is renamed).
+  A deleted tab unlinks its document, which stays. A plain document linked to a Google Doc that
+  gains tabs says so in the sync report.
 * **The model** (`gdocs/model.ts`). A document projects to blocks Google Docs can hold: headings
   (the document's top heading level is Heading 1), paragraphs, bulleted / numbered lists with
   nesting, quotes (indented), code blocks (monospace lines on a grey ground), tables, text with
@@ -2796,13 +2828,31 @@ read, comment and edit in Google Docs.
   *Sync automatically* off leaves it to the button. The sync uses the Drive of whoever linked the
   document. Unlinking keeps the Google Doc; a link whose document is gone is dropped.
 * **Tests**: `tests/gdocs.test.ts` runs against `gdocs/fake.ts`, a simulation of the Docs / Drive
-  APIs (indices, paragraph joins, bullets from tabs, tables, footnotes, anchored comments).
+  APIs (indices, paragraph joins, bullets from tabs, tables, footnotes, anchored comments, tabs:
+  a body per tab, requests routed by their `tabId`, a collaborator adding tabs);
+  `tests/gdocs-tabs.test.ts` covers importing a Google Doc with tabs as a group, per-tab syncing both
+  ways, comments by tab, new and renamed tabs, and linking a document to a Google Doc that exists.
   `e2e/gdocs.spec.ts` needs a server started with `OVERLYX_E2E_GOOGLE_STUB=1`: the simulation
   instead of Google, a Drive connection without the consent screen, and `/api/gdocs/e2e/*` for the
-  test to play the collaborator.
+  test to play the collaborator (`/api/gdocs/e2e/create` makes a Google Doc with tabs for the
+  picker, which the stub replaces by a prompt listing the simulated account's Google Docs).
   `tests/gdocs-native.test.ts` adds a real DOCX-import readback fixture, variable-width equation
   spans, moving object bindings, comment preservation, text pullback beside equations, skipped
   object edits and failed conversions.
+
+## Document groups
+
+Documents that belong together and read as one — the tabs of a Google Doc, a report's chapters — are
+a **document group** (`core/docgroup.ts`): a folder with a manifest, `.overlyx-group.json`, listing
+its documents in order with the titles shown for them and how deep each is nested
+(`{ "version": 1, "title": …, "members": [{ "file": "aims.md", "title": "Aims", "level": 1 }] }`;
+`file` is a name in the folder). Being a file, a group travels with the project through git, synced
+clones and VS Code (there it is an ordinary folder). The file listing reads the manifest
+(`projectfiles.ts` `collect`: a directory entry's `group`); the file browser shows the folder as one
+entry — its title, a count, a coloured rule tying its documents together — with its documents in the
+group's order under their titles (nested ones indented) and the folder's other files after them. A
+manifest that does not parse leaves an ordinary folder. Groups are made by importing a Google Doc
+with tabs (above), which keeps them in step with the tabs.
 
 ## The .tex format
 

@@ -1,12 +1,15 @@
 /**
  * File ▸ Google Docs…: the document's link to a Google Doc (server gdocs/). Connect the account's
- * Google Drive once, create a Google Doc from the document, and they stay in step both ways — edits
- * made in Google Docs come back as tracked changes by whoever made them, comment threads, replies
- * and resolving go both ways — on their own every minute, or with Sync now.
+ * Google Drive once, create a Google Doc from the document — or link it to one that exists, picked
+ * in Google's picker (app/gpicker.ts; a Google Doc with tabs: one of its tabs), whose differences
+ * then come in as tracked changes — and they stay in step both ways: edits made in Google Docs come
+ * back as tracked changes by whoever made them, comment threads, replies and resolving go both ways,
+ * on their own every minute, or with Sync now.
  */
 import { useEffect, useState } from 'preact/hooks';
-import { api, type GdocsStatus } from '../api';
+import { api, type GdocsStatus, type GdocsTab } from '../api';
 import { Dialog } from './Dialogs';
+import { pickGoogleDoc } from './gpicker';
 
 const ago = (t: number | null) => {
   if (!t) return 'never';
@@ -27,6 +30,20 @@ export function GoogleDocsDialog({ docId, onClose, notify }: { docId: string; on
   };
   const connect = () => { location.href = '/api/gdocs/connect?next=' + encodeURIComponent(location.hash.replace(/\?.*$/, '') + '?gdocs=connected'); };
   const link = st?.link;
+  // a picked Google Doc with tabs: which tab this document is to be
+  const [picked, setPicked] = useState<{ id: string; name: string; tabs: GdocsTab[]; tab: string } | null>(null);
+  const linkExisting = (fileId: string, name: string, tabId: string | null) => act('existing', async () => {
+    await api.gdocsLinkExisting(docId, fileId, tabId);
+    setPicked(null);
+    notify(`Linked to “${name}”: what it holds differently comes in as tracked changes`);
+  });
+  const pickExisting = () => act('pick', async () => {
+    const id = await pickGoogleDoc('Link this document to a Google Doc');
+    if (!id) return;
+    const f = await api.gdocsFile(id);
+    if (f.tabs.length > 1) setPicked({ ...f, tab: f.tabs[0].id });
+    else await linkExisting(id, f.name, null);
+  });
   return (
     <Dialog title="Google Docs" onClose={onClose}>
       <div class="gdocs-dialog" data-gdocs>
@@ -36,7 +53,7 @@ export function GoogleDocsDialog({ docId, onClose, notify }: { docId: string; on
           <>
             <p>Sync this document with a Google Doc: write here, collaborators comment and edit in Google Docs. Their edits come back as tracked changes you can accept or reject; comments, replies and resolving go both ways.</p>
             {st.guest ? <p class="hint">Sign in to connect Google Drive.</p> : st.canEdit ? <button class="primary" data-gdocs-connect onClick={connect}>Connect Google Drive…</button> : <p class="hint">You can only view this project.</p>}
-            <p class="hint">OverLyX only gets access to the Google Docs it creates (Drive's “files this app created” permission).</p>
+            <p class="hint">OverLyX only gets access to the Google Docs it creates and the ones you pick (Drive's “files this app uses” permission).</p>
           </>
         )}
         {st && st.configured && !link && st.account && (
@@ -46,6 +63,22 @@ export function GoogleDocsDialog({ docId, onClose, notify }: { docId: string; on
             {st.canEdit
               ? <button class="primary" data-gdocs-create disabled={!!busy} onClick={() => act('create', async () => { await api.gdocsLink(docId, title); notify('Linked to a new Google Doc'); })}>{busy === 'create' ? 'Creating…' : 'Create Google Doc'}</button>
               : <p class="hint">You can only view this project.</p>}
+            {st.canEdit && st.picker && !picked && (
+              <p>Or <button data-gdocs-existing disabled={!!busy} onClick={pickExisting}>{busy === 'pick' ? 'Opening Google’s picker…' : 'Link an existing Google Doc…'}</button> — nothing is overwritten: what it holds differently comes in here as tracked changes.</p>
+            )}
+            {picked && (
+              <>
+                <p><b>{picked.name}</b> has {picked.tabs.length} tabs. This document is to be the tab</p>
+                <select data-gdocs-tab value={picked.tab} onChange={e => setPicked({ ...picked, tab: (e.target as HTMLSelectElement).value })}>
+                  {picked.tabs.map(t => <option key={t.id} value={t.id}>{'\u2003'.repeat(t.level)}{t.title}</option>)}
+                </select>
+                <div class="buttons-row">
+                  <button class="primary" disabled={!!busy} onClick={() => linkExisting(picked.id, picked.name, picked.tab)}>{busy === 'existing' ? 'Linking…' : 'Link'}</button>
+                  <button disabled={!!busy} onClick={() => setPicked(null)}>Cancel</button>
+                </div>
+                <p class="hint">To have every tab as a document, import the Google Doc instead (file list ▸ right click ▸ Import from Google Docs…): it becomes a document group.</p>
+              </>
+            )}
           </>
         )}
         {link && (
@@ -59,7 +92,7 @@ export function GoogleDocsDialog({ docId, onClose, notify }: { docId: string; on
               <div class="buttons-row">
                 <button class="primary" data-gdocs-sync disabled={!!busy} onClick={() => act('sync', async () => {
                   const r = await api.gdocsSync(docId);
-                  const parts = [r.report.pulled ? `${r.report.pulled} characters changed in Google Docs` : '', r.report.comments.fromGoogle ? `${r.report.comments.fromGoogle} comments from Google Docs` : '', r.report.comments.toGoogle ? `${r.report.comments.toGoogle} comments sent` : ''].filter(Boolean);
+                  const parts = [r.report.pulled ? `${r.report.pulled} characters changed in Google Docs` : '', r.report.comments.fromGoogle ? `${r.report.comments.fromGoogle} comments from Google Docs` : '', r.report.comments.toGoogle ? `${r.report.comments.toGoogle} comments sent` : '', ...r.report.notes].filter(Boolean);
                   notify(r.report.warnings.length ? 'Synced with some changes left out: ' + r.report.warnings.join(' ') : 'Synced with Google Docs' + (parts.length ? ': ' + parts.join(', ') : ''));
                 })}>{busy === 'sync' ? 'Syncing…' : 'Sync now'}</button>
                 <label class="row"><input type="checkbox" checked={link.auto} disabled={!!busy} onChange={e => act('auto', () => api.gdocsAuto(docId, (e.target as HTMLInputElement).checked))} /> Sync automatically</label>

@@ -84,7 +84,7 @@ export const MODERN_ICONS: Record<string, string> = {
 export const KIND_ICONS: Record<string, string> = {
   doc: N(FileText), tex: N(FileText), lyx: N(FileText), md: N(FileType), deck: N(Presentation), poster: N(PanelsTopLeft),
   page: N(Globe), html: N(Globe), board: N(Brush), bib: N(BookMarked), image: N(FileImage), pdf: N(FileType2), other: N(File),
-  project: N(Folder), hello: N(Folder),
+  project: N(Folder), hello: N(Folder), group: N(Files),
 };
 
 /** an icon (an entry of MODERN_ICONS) as markup, for palette items and buttons drawn as HTML */
