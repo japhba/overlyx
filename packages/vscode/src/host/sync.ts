@@ -5,6 +5,17 @@
  * branch follows the server's commits. No pull, commit or push; the history keeps OverLyX's own
  * schedule (a commit made here becomes one there, with its message).
  *
+ * A clone inside a workspace folder is synced too, without adding it to the workspace (a paper in a
+ * subdirectory or submodule of its code's repository): the folders are searched NEST_DEPTH levels
+ * down (at most NEST_DIRS directories, hidden and SKIP ones left out, a clone's inside not searched),
+ * again when the window gets the focus (at most every RESCAN_MS); a clone deeper than that is found
+ * when a file of it is opened; one made with *Clone Project from OverLyX…* inside the workspace at
+ * once. A clone inside a synced clone is left alone (its files belong to the outer one's folder).
+ * A clone found that way that was never synced asks first (once per workspace: "Keep in Step" /
+ * "Not Now"), since nobody opened it on purpose and its first sync merges what changed on both sides;
+ * until then it is paused, and its status bar item starts it. A submodule's detached HEAD is put on
+ * the server's branch by the engine (attachDetachedHead) when that changes no file and loses no commit.
+ *
  * The engine is the CLI's (packages/cli/bin/overlyx.js, bundled: `overlyx sync --watch` does the
  * same in a terminal, and the two never run on one clone at once). Here it adds: files with unsaved
  * changes in an editor wait until they are saved, a status bar item, a log, conflict notices, and
@@ -15,16 +26,22 @@
  * flow, bundled, with `app=vscode` so the page says "OverLyX for VS Code" — and keeps the credential
  * where the CLI keeps its sign-ins (~/.config/overlyx/hosts.json: one sign-in per computer for both);
  * *Clone Project from OverLyX…* lists the account's projects and clones one (the credential in an
- * environment header, never in .git/config); *Sign Out…* forgets the sign-in.
+ * environment header, never in .git/config), into a folder named after the project; into a folder of
+ * a git repository (one that is not a clone of a project itself) as a submodule of it or as a clone
+ * it ignores (.gitignore), the user's choice; *Sign Out…* forgets the sign-in.
  */
 import * as vscode from 'vscode';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
-import { syncEngineFor, syncTarget, syncCredentials, knownSyncHosts, describeChanges, signInWithBrowser, signedInHosts, signOutOf, remoteProjects, cloneProject, type SyncEngine, type SyncStatus, type SyncTarget, type SyncChanges, type SyncAuth } from '../../../cli/bin/overlyx.js';
+import { syncEngineFor, syncTarget, syncCredentials, knownSyncHosts, describeChanges, signInWithBrowser, signedInHosts, signOutOf, remoteProjects, cloneProject, enclosingRepo, addProjectSubmodule, ignoreInRepo, type SyncEngine, type SyncStatus, type SyncTarget, type SyncChanges, type SyncAuth } from '../../../cli/bin/overlyx.js';
 
 interface FolderSync {
   dir: string;
+  /** inside a workspace folder, not one itself */
+  nested: boolean;
+  /** found by the search and never synced: paused until the user says to keep it in step */
+  unasked: boolean;
   target: SyncTarget;
   engine: SyncEngine | null;
   item: vscode.StatusBarItem;
@@ -39,8 +56,49 @@ const DEFAULT_HOST = 'https://overlyx.app';
 const hostName = (h: string) => new URL(h).host;
 const PAUSED = (dir: string) => `overlyx.sync.paused:${dir}`;
 const ANNOUNCED = (dir: string) => `overlyx.sync.announced:${dir}`;
+const ASKED = (dir: string) => `overlyx.sync.asked:${dir}`;
 const time = (t: number) => new Date(t).toLocaleTimeString();
 const projectUrl = (t: SyncTarget) => `${t.host}/#/${t.project.split('/').map(encodeURIComponent).join('/')}`;
+const inside = (file: string, dir: string) => file.startsWith(dir + path.sep);
+
+/** a clone's git directory: .git, or where the .git file of a submodule or worktree points */
+function gitDirOf(dir: string): string {
+  const dotgit = path.join(dir, '.git');
+  try {
+    if (fs.statSync(dotgit).isFile()) {
+      const m = /^gitdir:\s*(.+)$/m.exec(fs.readFileSync(dotgit, 'utf8'));
+      if (m) return path.resolve(dir, m[1].trim());
+    }
+  } catch { /* no .git: the caller's existsSync says no */ }
+  return dotgit;
+}
+/** synced before (by the extension or `overlyx sync`): the engine keeps its state in the git directory */
+const syncedBefore = (dir: string) => { try { return fs.existsSync(path.join(gitDirOf(dir), 'overlyx-sync')); } catch { return true; } };
+
+/** directories never searched for clones: dependencies, environments, build output */
+const SKIP = new Set(['node_modules', '__pycache__', 'venv', 'env', 'site-packages', 'dist', 'build', '_build', 'target', 'out']);
+const NEST_DEPTH = 3, NEST_DIRS = 2000, RESCAN_MS = 120_000;
+
+/** The git clones below `root` (not `root` itself): directories with a .git (a directory, or a file
+ *  for submodules and worktrees) at most NEST_DEPTH levels down, breadth first, at most NEST_DIRS
+ *  directories read; hidden and SKIP directories and a clone's inside are not searched, symlinks are
+ *  not followed. A directory that cannot be read is passed over. */
+export async function nestedClones(root: string): Promise<string[]> {
+  const found: string[] = [];
+  let level = [root], budget = NEST_DIRS;
+  for (let depth = 0; depth <= NEST_DEPTH && level.length; depth++) {
+    const next: string[] = [];
+    for (const dir of level) {
+      if (budget-- <= 0) return found;
+      let entries: fs.Dirent[];
+      try { entries = await fs.promises.readdir(dir, { withFileTypes: true }); } catch { continue; }
+      if (depth > 0 && entries.some(e => e.name === '.git')) { found.push(dir); continue; }
+      if (depth < NEST_DEPTH) for (const e of entries) if (e.isDirectory() && !e.name.startsWith('.') && !SKIP.has(e.name)) next.push(path.join(dir, e.name));
+    }
+    level = next;
+  }
+  return found;
+}
 
 export function setupSync(context: vscode.ExtensionContext, report: (e: unknown, area: string) => void): void {
   const out = vscode.window.createOutputChannel('OverLyX Sync');
@@ -58,7 +116,7 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
     const name = syncs.size > 1 ? ` ${f.target.project.split('/').pop()}` : '';
     const where = `**${f.target.project}** on ${new URL(f.target.host).host}`;
     let text: string, detail: string;
-    if (!enabled() || paused(f.dir)) { text = `$(debug-pause) OverLyX${name}`; detail = 'Sync paused — click to resume.'; }
+    if (!enabled() || paused(f.dir)) { text = `$(debug-pause) OverLyX${name}`; detail = f.unasked ? 'Not kept in step with the server yet — click to start.' : 'Sync paused — click to resume.'; }
     else if (f.signin) { text = `$(account) OverLyX${name}: sign in`; detail = 'Not signed in — click to sign in through the browser.'; }
     else if (f.problem || !s) { text = `$(sync) OverLyX${name}`; detail = f.problem ?? 'Starting…'; }
     else {
@@ -136,10 +194,11 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
       return c;
     };
     f.engine = engine;
-    const stateDir = (() => { try { return fs.existsSync(path.join(f.dir, '.git', 'overlyx-sync')); } catch { return true; } })();
-    if (!stateDir && !context.workspaceState.get<boolean>(ANNOUNCED(f.dir))) {
+    f.unasked = false;
+    if (!syncedBefore(f.dir) && !context.workspaceState.get<boolean>(ASKED(f.dir)) && !context.workspaceState.get<boolean>(ANNOUNCED(f.dir))) {
       void context.workspaceState.update(ANNOUNCED(f.dir), true);
-      void vscode.window.showInformationMessage(`OverLyX keeps this folder in step with ${f.target.project} on ${new URL(f.target.host).host}: files you save go there within seconds, and changes made there arrive here — no pull or push needed.`, 'Pause for this folder').then(a => { if (a) void setPaused(f, true); });
+      const what = f.nested ? `${vscode.workspace.asRelativePath(f.dir, true)} (a clone in this window's folder)` : 'this folder';
+      void vscode.window.showInformationMessage(`OverLyX keeps ${what} in step with ${f.target.project} on ${new URL(f.target.host).host}: files you save go there within seconds, and changes made there arrive here — no pull or push needed.`, 'Pause for this folder').then(a => { if (a) void setPaused(f, true); });
     }
     log(f.dir, `syncing ${f.dir} with ${f.target.project} on ${f.target.host}`);
     render(f);
@@ -158,19 +217,71 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
     else await connect(f);
   }
 
+  /** clones being looked at (their remote read), so that two scans do not add one twice */
+  const adding = new Set<string>();
+
+  /** A clone found inside a workspace folder that was never synced: ask before its first sync (once per
+   *  workspace; it stays paused until then, and on "Not Now" — its status bar item starts it later). */
+  async function ask(f: FolderSync): Promise<void> {
+    await context.workspaceState.update(ASKED(f.dir), true);
+    await context.workspaceState.update(PAUSED(f.dir), true);
+    f.unasked = true;
+    render(f);
+    const rel = vscode.workspace.asRelativePath(f.dir, true);
+    const a = await vscode.window.showInformationMessage(
+      `OverLyX: ${rel} is a clone of ${f.target.project} on ${hostName(f.target.host)}. Keep it in step with the server while this window is open? Files you save there reach the project within seconds and changes made there arrive here; the first sync merges what changed on both sides since the clone was last in step.`,
+      'Keep in Step', 'Not Now');
+    if (a === 'Keep in Step') await setPaused(f, false);
+    else log(f.dir, `not kept in step (${a ? 'not now' : 'no answer'}) — the status bar item starts it`);
+  }
+
+  /** `dir` synced if its git remote is a project on a known server; false when it is not a clone of one.
+   *  `found`: by the search of a workspace folder (not opened or cloned on purpose), so a first sync asks. */
+  async function addClone(dir: string, nested: boolean, found = false): Promise<boolean> {
+    if (syncs.has(dir)) return true;
+    if (adding.has(dir) || [...syncs.keys()].some(d => inside(dir, d))) return false;
+    adding.add(dir);
+    try {
+      const target = await syncTarget(dir);
+      if (!target) return false;
+      const servers = [...knownSyncHosts(), ...(config().get<string[]>('sync.servers') ?? []).map(h => h.replace(/\/$/, ''))];
+      if (!servers.includes(target.host) || syncs.has(dir)) return false;
+      const item = vscode.window.createStatusBarItem(`overlyx.sync:${dir}`, vscode.StatusBarAlignment.Left, 40);
+      item.name = 'OverLyX Sync';
+      item.command = { command: 'overlyx.syncMenu', title: 'OverLyX Sync', arguments: [dir] };
+      const f: FolderSync = { dir, nested, unasked: false, target, engine: null, item, problem: null, signin: false, spin: null, connecting: null };
+      syncs.set(dir, f);
+      // a nested clone found before the folder it sits in (two scans racing) gives way to it
+      for (const d of [...syncs.keys()]) if (inside(d, dir)) removeFolder(d);
+      if (found && enabled() && !paused(dir) && !context.workspaceState.get<boolean>(ASKED(dir)) && !syncedBefore(dir)) { void ask(f); return true; }
+      f.unasked = found && paused(dir) && !syncedBefore(dir);
+      await connect(f);
+      return true;
+    } finally { adding.delete(dir); }
+  }
+
+  /** a workspace folder: the folder itself if it is a clone, else the clones inside it */
   async function addFolder(folder: vscode.WorkspaceFolder): Promise<void> {
-    if (folder.uri.scheme !== 'file' || syncs.has(folder.uri.fsPath)) return;
-    const dir = folder.uri.fsPath;
-    const target = await syncTarget(dir);
-    if (!target) return;
-    const servers = [...knownSyncHosts(), ...(config().get<string[]>('sync.servers') ?? []).map(h => h.replace(/\/$/, ''))];
-    if (!servers.includes(target.host)) return;
-    const item = vscode.window.createStatusBarItem(`overlyx.sync:${dir}`, vscode.StatusBarAlignment.Left, 40);
-    item.name = 'OverLyX Sync';
-    item.command = { command: 'overlyx.syncMenu', title: 'OverLyX Sync', arguments: [dir] };
-    const f: FolderSync = { dir, target, engine: null, item, problem: null, signin: false, spin: null, connecting: null };
-    syncs.set(dir, f);
-    await connect(f);
+    if (folder.uri.scheme !== 'file') return;
+    const root = folder.uri.fsPath;
+    if (await addClone(root, false)) return;
+    for (const dir of await nestedClones(root)) await addClone(dir, true, true);
+  }
+
+  /** an opened file in a clone the scan did not reach (deeper than NEST_DEPTH): the nearest
+   *  directory with a .git between the file and its workspace folder */
+  const looked = new Set<string>();
+  async function addCloneOf(uri: vscode.Uri): Promise<void> {
+    if (uri.scheme !== 'file' || !enabled()) return;
+    const root = vscode.workspace.getWorkspaceFolder(uri)?.uri.fsPath;
+    if (!root || syncs.has(root)) return;
+    const file = uri.fsPath;
+    if ([...syncs.keys()].some(d => inside(file, d))) return;
+    for (let dir = path.dirname(file); inside(dir, root); dir = path.dirname(dir)) {
+      if (looked.has(dir)) return;
+      looked.add(dir);
+      if (fs.existsSync(path.join(dir, '.git'))) { await addClone(dir, true, true); return; }
+    }
   }
 
   function removeFolder(dir: string): void {
@@ -251,12 +362,36 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
     const parents = await vscode.window.showOpenDialog({ canSelectFolders: true, canSelectFiles: false, canSelectMany: false, openLabel: 'Clone here', title: `Folder to clone ${choice.p.name} into`, defaultUri: vscode.Uri.file(last && fs.existsSync(last) ? last : os.homedir()) });
     if (!parents?.length) return;
     const parent = parents[0].fsPath;
+    // a folder of a git repository (the code's): the paper as its submodule, or as a clone it ignores
+    const top = await enclosingRepo(parent);
+    const repo = top && !(await syncTarget(top)) ? top : null;
+    let how: 'clone' | 'submodule' | 'ignored' = 'clone';
+    if (repo) {
+      const name = path.basename(repo);
+      const pickHow = await vscode.window.showQuickPick([
+        { label: `$(repo) As a submodule of ${name}`, description: 'the repository records which version of the paper goes with its code', how: 'submodule' as const },
+        { label: `$(eye-closed) As a clone ${name} ignores`, description: `its folder goes into ${name}'s .gitignore`, how: 'ignored' as const },
+      ], { title: `${choice.p.name} into ${vscode.workspace.asRelativePath(parent, true)}, a folder of the git repository ${name}` });
+      if (!pickHow) return;
+      how = pickHow.how;
+    }
     let dir: string;
-    try { dir = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Cloning ${choice.p.name}…` }, () => cloneProject(host, auth, choice.p.name, parent)); }
-    catch (e) { void vscode.window.showErrorMessage(`OverLyX: cloning ${choice.p.name} failed — ${(e as Error).message}`); return; }
+    try {
+      dir = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Cloning ${choice.p.name}…` },
+        () => how === 'submodule' ? addProjectSubmodule(host, auth, choice.p.name, parent) : cloneProject(host, auth, choice.p.name, parent));
+      if (how === 'ignored') await ignoreInRepo(repo!, dir);
+    } catch (e) { void vscode.window.showErrorMessage(`OverLyX: cloning ${choice.p.name} failed — ${(e as Error).message}`); return; }
     await context.globalState.update('overlyx.clone.parent', parent);
     const uri = vscode.Uri.file(dir);
-    const open = await vscode.window.showInformationMessage(`OverLyX: cloned ${choice.p.name} into ${dir}. While it is open in VS Code it stays in step with the server.`, 'Open', 'Open in New Window', 'Add to Workspace');
+    const note = how === 'submodule' ? ` It is a submodule of ${path.basename(repo!)} now (staged: commit .gitmodules and ${path.relative(repo!, dir)} there to record it).`
+      : how === 'ignored' ? ` ${path.basename(repo!)}'s .gitignore leaves it out.` : '';
+    // cloned into this window's folders: in step from now on, no need to open it or add it
+    if (vscode.workspace.getWorkspaceFolder(uri) && await addClone(dir, true)) {
+      const open = await vscode.window.showInformationMessage(`OverLyX: cloned ${choice.p.name} into ${vscode.workspace.asRelativePath(uri, true)}.${note} It is in this window's folder, so it stays in step with the server while the window is open.`, 'Open in New Window');
+      if (open) await vscode.commands.executeCommand('vscode.openFolder', uri, { forceNewWindow: true });
+      return;
+    }
+    const open = await vscode.window.showInformationMessage(`OverLyX: cloned ${choice.p.name} into ${dir}.${note} While it is open in VS Code it stays in step with the server.`, 'Open', 'Open in New Window', 'Add to Workspace');
     if (open === 'Open') await vscode.commands.executeCommand('vscode.openFolder', uri, { forceNewWindow: false });
     else if (open === 'Open in New Window') await vscode.commands.executeCommand('vscode.openFolder', uri, { forceNewWindow: true });
     else if (open === 'Add to Workspace') vscode.workspace.updateWorkspaceFolders(vscode.workspace.workspaceFolders?.length ?? 0, 0, { uri });
@@ -273,15 +408,21 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
     for (const f of syncs.values()) if (f.target.host === choice.h.host) { disconnect(f); f.signin = true; f.problem = 'Signed out.'; render(f); }
   }
 
+  let scanned = 0;
   function rescan(): void {
+    scanned = Date.now();
+    looked.clear();
     for (const folder of vscode.workspace.workspaceFolders ?? []) void addFolder(folder).catch(e => report(e, 'sync.folder'));
+    for (const d of vscode.workspace.textDocuments) void addCloneOf(d.uri).catch(e => report(e, 'sync.folder'));
   }
+
+  /** the synced clone a file belongs to (the innermost one: a nested clone is not its folder's) */
+  const owner = (file: string): FolderSync | undefined => [...syncs.values()].filter(f => inside(file, f.dir)).sort((a, b) => b.dir.length - a.dir.length)[0];
 
   const pick = (dir?: string): FolderSync | undefined => {
     if (dir) return syncs.get(dir);
     const active = vscode.window.activeTextEditor?.document.uri;
-    const folder = active ? vscode.workspace.getWorkspaceFolder(active) : undefined;
-    return (folder && syncs.get(folder.uri.fsPath)) ?? [...syncs.values()][0];
+    return (active?.scheme === 'file' ? owner(active.fsPath) : undefined) ?? [...syncs.values()][0];
   };
   const none = () => void vscode.window.showInformationMessage('OverLyX: no folder here is a clone of an OverLyX project (git clone https://overlyx.app/git/<owner>/<project>.git).');
 
@@ -323,10 +464,16 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
       await choice?.run();
     }),
     // a save is sent at once (the file watcher would notice it too, a moment later)
-    vscode.workspace.onDidSaveTextDocument(d => { for (const f of syncs.values()) if (d.uri.fsPath.startsWith(f.dir + path.sep)) f.engine?.poke?.(); }),
-    vscode.window.onDidChangeWindowState(s => { if (s.focused) for (const f of syncs.values()) { if (f.engine) f.engine.poke?.(); else if (!f.signin) void connect(f); } }),
+    vscode.workspace.onDidSaveTextDocument(d => { if (d.uri.scheme === 'file') owner(d.uri.fsPath)?.engine?.poke?.(); }),
+    vscode.window.onDidChangeWindowState(s => {
+      if (!s.focused) return;
+      for (const f of syncs.values()) { if (f.engine) f.engine.poke?.(); else if (!f.signin) void connect(f); }
+      // a clone made meanwhile (git clone in a terminal) inside a workspace folder
+      if (enabled() && Date.now() - scanned > RESCAN_MS) rescan();
+    }),
+    vscode.workspace.onDidOpenTextDocument(d => void addCloneOf(d.uri).catch(e => report(e, 'sync.folder'))),
     vscode.workspace.onDidChangeWorkspaceFolders(e => {
-      for (const r of e.removed) removeFolder(r.uri.fsPath);
+      for (const r of e.removed) for (const d of [...syncs.keys()]) if (d === r.uri.fsPath || inside(d, r.uri.fsPath)) removeFolder(d);
       for (const a of e.added) void addFolder(a).catch(err => report(err, 'sync.folder'));
     }),
     vscode.workspace.onDidChangeConfiguration(e => {

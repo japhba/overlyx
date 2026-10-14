@@ -1306,6 +1306,27 @@ async function gitOut(dir, args, opts = {}) {
 }
 
 /** An OverLyX remote URL → { host, project } (host may carry a path prefix in front of /git/). */
+/**
+ * A detached HEAD (a submodule after `git submodule update` sits on a commit, not a branch): put
+ * `branch` on it so that the branch can follow the server's commits — only when that changes no file
+ * and loses no commit: the branch does not exist yet (made at HEAD), is at HEAD, or is behind it (moved
+ * forward to HEAD). HEAD keeps its commit, so the index and the files stay exactly as they are.
+ * Resolves with null when it attached, else why not ('commits': the branch has commits HEAD lacks).
+ */
+export async function attachDetachedHead(dir, branch) {
+  if ((await gitOut(dir, ['symbolic-ref', '-q', 'HEAD']).catch(() => '')).trim()) return 'attached already';
+  const head = (await gitOut(dir, ['rev-parse', '-q', '--verify', 'HEAD']).catch(() => '')).trim();
+  if (!head) return 'no commit';
+  const ref = `refs/heads/${branch}`;
+  const at = (await gitOut(dir, ['rev-parse', '-q', '--verify', ref]).catch(() => '')).trim();
+  if (at && at !== head && !(await gitOut(dir, ['merge-base', '--is-ancestor', at, head]).then(() => true, () => false))) return 'commits';
+  const why = 'overlyx sync: the detached HEAD onto its branch';
+  // the expected old value guards against a branch moved meanwhile (40 zeros: it must not exist)
+  if (at !== head) await gitOut(dir, ['update-ref', '-m', why, ref, head, at || '0'.repeat(head.length)]);
+  await gitOut(dir, ['symbolic-ref', '-m', why, 'HEAD', ref]);
+  return null;
+}
+
 export function parseSyncRemote(url) {
   let u;
   try { u = new URL(url); } catch { return null; }
@@ -1574,7 +1595,18 @@ export class SyncEngine {
   /** The local branch moves to the server's commits; commits made here are recorded there (their messages, on what both sides now hold). */
   async followBranch(remote, inStep) {
     if (!remote.head || !remote.branch) return;
-    const branch = await this.localBranch();
+    let branch = await this.localBranch();
+    if (!branch) {
+      // a detached HEAD (a submodule): onto the server's branch when no file and no commit is affected
+      const why = await attachDetachedHead(this.dir, remote.branch);
+      if (!why) { branch = remote.branch; this.log(`HEAD was detached (a submodule?): now on ${branch}, which follows the server's commits`); }
+      else if (!this.detachedNoted) {
+        this.detachedNoted = true;
+        this.log(why === 'commits'
+          ? `HEAD is detached and ${remote.branch} has commits it lacks: files stay in step, the branch does not follow the server — git switch ${remote.branch} attaches it`
+          : `HEAD is detached (${why}): files stay in step, the branch does not follow the server`);
+      }
+    }
     if (branch !== remote.branch) return;
     const tracking = `refs/remotes/${this.o.remote}/${remote.branch}`;
     const head = (await gitOut(this.dir, ['rev-parse', '-q', '--verify', 'HEAD']).catch(() => '')).trim();
@@ -1853,6 +1885,37 @@ export async function cloneProject(host, auth, project, parent, name) {
   if (fs.existsSync(dir)) fail(`${dir} exists already`);
   await git(parent, ['clone', '-q', url.toString(), dir], auth);
   return dir;
+}
+
+/** The top level of the git repository `dir` is in, or null. */
+export async function enclosingRepo(dir) {
+  try { return (await gitOut(dir, ['rev-parse', '--show-toplevel'], { timeout: 10000 })).trim() || null; } catch { return null; }
+}
+
+/**
+ * Clone `project` into `parent` as a submodule of the git repository `parent` is in (a paper next to
+ * its code): the folder is named after the project unless `name` says otherwise, and .gitmodules gets
+ * the project's address without an account in it (whoever clones the code's repository signs in as
+ * themselves). `git submodule add` stages .gitmodules and the submodule; committing is the user's.
+ */
+export async function addProjectSubmodule(host, auth, project, parent, name) {
+  const top = await enclosingRepo(parent);
+  if (!top) fail(`${parent} is not in a git repository`);
+  const dir = path.join(parent, name ?? project.split('/').pop());
+  if (fs.existsSync(dir)) fail(`${dir} exists already`);
+  await git(top, ['submodule', '--quiet', 'add', '--', gitUrl({ host }, project), path.relative(top, dir).split(path.sep).join('/')], auth);
+  return dir;
+}
+
+/** A clone inside a repository that is not to track it: `/<its path>/` appended to the repository's
+ *  .gitignore. False when the repository ignores it already. */
+export async function ignoreInRepo(top, dir) {
+  const rel = path.relative(top, dir).split(path.sep).join('/');
+  if (await gitOut(top, ['check-ignore', '-q', '--', rel]).then(() => true, () => false)) return false;
+  const file = path.join(top, '.gitignore');
+  const before = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+  fs.writeFileSync(file, `${before}${before && !before.endsWith('\n') ? '\n' : ''}/${rel}/\n`);
+  return true;
 }
 
 /** The servers this computer is signed in to with the CLI, and overlyx.app: a clone of a project on one of them is synced. */

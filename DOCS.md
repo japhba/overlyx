@@ -285,7 +285,32 @@ blend.
   pushing. The VS Code extension does it by itself for every workspace folder whose git remote is a
   project on overlyx.app (or on a server in `overlyx.sync.servers` or signed in with the CLI) while
   the window is open (`host/sync.ts`: status bar item, *OverLyX: Sync Now / Pause / Resume / Show
-  Sync Log*, a one-time notice, `overlyx.sync.enabled` switches it off). The extension needs neither
+  Sync Log*, a one-time notice, `overlyx.sync.enabled` switches it off). A clone *inside* a workspace
+  folder is synced too, without being added to the workspace (14 Oct 2026; a paper in a subdirectory
+  or submodule of its code's repository): `nestedClones` searches each folder that is not a clone
+  itself breadth first, three levels down, at most 2000 directories (hidden ones, `node_modules`,
+  environments and build output left out, a clone's inside not searched, symlinks not followed),
+  again on window focus at most every two minutes; a deeper clone is taken up when a file of it is
+  opened (the nearest directory with a `.git` between the file and its workspace folder); *Clone
+  Project from OverLyX…* into a workspace folder syncs the new clone at once instead of offering to
+  open it. A clone inside a synced clone is left alone. Status bar, *Sync Now* and saves go to the
+  innermost synced clone of the active file. A clone the search (or an opened file) turned up that
+  was never synced (no `overlyx-sync/` in its git directory — `.git`, or where a submodule's `.git`
+  file points) asks first, once per workspace (*Keep in Step* / *Not Now*): nobody opened it on
+  purpose, and its first sync merges what changed on both sides; until then it is paused and its
+  status bar item says "not kept in step yet — click to start". Into a folder of a git repository
+  that is not a clone of a project itself, *Clone Project from OverLyX…* asks how: **as a submodule**
+  (`addProjectSubmodule`: `git submodule add` with the project's address without an account in
+  `.gitmodules`, staged for the user to commit) or **as a clone the repository ignores**
+  (`ignoreInRepo`: `/<path>/` appended to its `.gitignore`); either way the folder is named after the
+  project. A submodule after `git submodule update` sits on a detached HEAD: the engine puts the
+  server's branch on it (`attachDetachedHead`, in `followBranch`) when that changes no file and loses
+  no commit — the branch is new, at HEAD or behind it — so that the branch follows the server's
+  commits; otherwise files still sync and the log says `git switch <branch>` attaches it. Tests:
+  `tests/vscode-nested-clones.test.ts` (the search), `tests/cli-nested-repos.test.ts` (attaching a
+  detached HEAD; a submodule and an ignored clone, against a bare repository as the project's
+  address), `test/runSyncTest.mjs` (a two-folder workspace: a clone two levels down and one four
+  levels down, each waiting for the user's go-ahead, the clone command into the folder). The extension needs neither
   the CLI nor a pasted token: *OverLyX: Sign In…* (offered by itself when a clone of a server without
   a sign-in turns up, or when the credential stops working) runs the CLI's browser sign-in from the
   bundle with `app=vscode` — the consent page and the credential say "OverLyX for VS Code on

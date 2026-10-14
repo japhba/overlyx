@@ -106,8 +106,11 @@ on disk (see above).
 
 ### Clones of OverLyX projects stay in step
 
-Open a git clone of a project on overlyx.app (`git clone https://overlyx.app/git/<owner>/<project>.git`)
-and the extension keeps it in step with the server while the window is open: files you save reach
+Open a git clone of a project on overlyx.app (`git clone https://overlyx.app/git/<owner>/<project>.git`),
+or a folder with such a clone inside it (a paper in a subdirectory or submodule of your code's
+repository, up to three levels down; a deeper one as soon as you open a file of it — such a clone
+asks once before its first sync), and the extension keeps it in step with the server while the
+window is open: files you save reach
 the project within seconds, what people write there arrives here, and your branch follows the
 server's commits — no pull, commit or push. The project's history gets no commit per sync (OverLyX
 commits on its own schedule; a commit you make here becomes one there, with your message). Where
@@ -116,7 +119,9 @@ is a tracked change over it; other text merges by lines; what cannot merge keeps
 version and yours next to it as a conflict copy. A file with unsaved changes waits until you save
 it. The status bar shows the state (click it to sync now, pause the folder, see the log or open the
 project in the browser). No CLI and no token needed: **OverLyX: Clone Project from OverLyX…** (also
-in the empty Explorer) signs you in through the browser, lists your projects and clones one;
+in the empty Explorer) signs you in through the browser, lists your projects and clones one into a
+folder named after the project — into a folder of your code's git repository as a submodule of it
+or as a clone it ignores, as you choose;
 **OverLyX: Sign In… / Sign Out…** manage the sign-in, which the OverLyX CLI on the same computer
 shares. A clone made some other way asks you to sign in once, unless the CLI or git already has a
 sign-in for the server. `overlyx.sync.enabled` switches it off,

@@ -48,7 +48,12 @@ export class SyncEngine {
 }
 
 export function blobHash(buf: Buffer): string;
+/** A detached HEAD onto `branch` when no file and no commit is affected; null when attached, else why not. */
+export function attachDetachedHead(dir: string, branch: string): Promise<null | 'attached already' | 'no commit' | 'commits'>;
 export function parseSyncRemote(url: string): { host: string; project: string } | null;
+export function enclosingRepo(dir: string): Promise<string | null>;
+export function addProjectSubmodule(host: string, auth: SyncAuth, project: string, parent: string, name?: string): Promise<string>;
+export function ignoreInRepo(top: string, dir: string): Promise<boolean>;
 export function syncTarget(dir: string): Promise<SyncTarget | null>;
 export function syncCredentials(host: string, dir: string): Promise<SyncAuth | null>;
 export function syncEngineFor(dir: string, opts?: Partial<SyncEngineOptions>): Promise<{ engine?: SyncEngine; target?: SyncTarget; error?: string; signin?: boolean }>;
