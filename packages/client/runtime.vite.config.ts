@@ -36,7 +36,8 @@ function mathjax(): Plugin {
       const font = path.join(NM, '@mathjax/mathjax-newcm-font');
       copyDir(path.join(font, 'svg'), path.join(out, 'fonts/mathjax-newcm-font/svg'), f => f.endsWith('.js'));
       fs.copyFileSync(path.resolve(__dirname, 'src/deliverable/offline-frame.html'), path.join(OUT, 'offline-frame.html'));
-      finalizeOfflineRuntime(path.dirname(OUT));
+      // The extension uses dist/ol without the web service worker's /_ol cache.
+      if (path.basename(OUT) === '_ol') finalizeOfflineRuntime(path.dirname(OUT));
     },
   };
 }
