@@ -121,7 +121,10 @@ in the empty Explorer) signs you in through the browser, lists your projects and
 shares. A clone made some other way asks you to sign in once, unless the CLI or git already has a
 sign-in for the server. `overlyx.sync.enabled` switches it off,
 `overlyx.sync.servers` adds self-hosted servers. In a terminal, `overlyx sync --watch` (OverLyX CLI)
-does the same; the two never run on one clone at once.
+does the same; the two never run on one clone at once. A clone that lives inside the repository of
+your code (a submodule, say) can share its README.md and AGENTS.md with that repository:
+`overlyx repo link paper` (OverLyX CLI) — symlinks there, their contents in its commits, the clone
+the source of truth.
 
 ## Requirements
 

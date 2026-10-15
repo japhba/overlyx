@@ -70,6 +70,29 @@ lines) keeps the server's version and yours as `name (conflict, <computer> <date
 The OverLyX VS Code extension does the same by itself while a clone is open in VS Code (only one of
 the two runs on a clone at a time).
 
+## A project inside another repository
+
+A paper often lives as a clone inside the repository of its code (a git submodule, or a directory
+that repository ignores). `repo link` makes the project's README.md and AGENTS.md those of that
+repository too, with the clone as the source of truth:
+
+```sh
+cd code && overlyx repo link paper          # paper/ is the clone; --files README.md,AGENTS.md is the default
+```
+
+Locally the repository gets relative symlinks (`README.md -> paper/README.md`), so an edit shows at
+once on both sides; a file only the repository had is moved into the clone. Every commit of the
+repository carries the files' contents as ordinary files (GitHub renders them): a pre-commit hook
+stages the clone's content. `git status` stays clean — the paths are skip-worktree entries of a sparse
+checkout that expects them — and a checkout, pull, merge or rebase updates the index entry only; where
+both sides changed a linked file, a merge driver takes the clone's version and says so, and a received
+change the clone lacks is pointed out after the checkout or merge. What the command writes is
+version-controlled: `.overlyx/links` (the pairs) and `.overlyx/link.sh` (the installer, the hooks and
+the merge driver); commit them, and every other clone of the repository sets itself up with
+`sh .overlyx/link.sh install` (hooks that were there keep running after ours, as
+`<hook>.before-overlyx-link`). `sh .overlyx/link.sh check` repairs a replaced symlink or resolves a
+conflict in a linked file; `overlyx repo unlink paper` puts ordinary files back. Linux and macOS.
+
 ## Local AI agents (Claude Code, Codex, …)
 
 ```sh
@@ -114,6 +137,8 @@ overlyx auth logout [--host URL]
 overlyx repo list [--host URL]
 overlyx repo create [NAME] [--source PATH] [--push] [--remote NAME]
 overlyx repo push [PATH] [--name NAME] [--remote NAME]
+overlyx repo link [CLONE] [--files README.md,AGENTS.md]
+overlyx repo unlink [CLONE]
 overlyx build OWNER/PROJECT/FILE.tex [--pdf FILE] [--log] [--wait SECONDS]
 overlyx restore OWNER/PROJECT COMMIT
 overlyx mcp install [--client claude,codex] [--yes] [--ask-each-time] | status | uninstall | serve

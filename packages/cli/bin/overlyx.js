@@ -10,7 +10,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execFileP = promisify(execFile);
-const VERSION = '0.7.0';
+const VERSION = '0.8.0';
 const DEFAULT_HOST = 'https://overlyx.app';
 
 const HELP = `OverLyX CLI ${VERSION}
@@ -24,6 +24,9 @@ Usage:
   overlyx repo list [--host URL]
   overlyx repo create [NAME] [--source PATH] [--push] [--remote NAME]
   overlyx repo push [PATH] [--name NAME] [--remote NAME]
+  overlyx repo link [CLONE] [--files README.md,AGENTS.md]   a clone inside another repository: the files
+                                                        live in the clone, that repository commits them
+  overlyx repo unlink [CLONE]
   overlyx build OWNER/PROJECT/FILE.tex [--pdf FILE] [--log] [--wait SECONDS]
   overlyx restore OWNER/PROJECT COMMIT
   overlyx sync [DIR] [--watch]                          keep a clone in step with the server, both ways
@@ -36,6 +39,7 @@ Examples:
   overlyx auth login                      # opens the browser: Authorize, and the CLI is signed in
   overlyx repo create my-paper --source . --push
   overlyx repo push . --name my-paper
+  overlyx repo link paper                 # paper/ is a clone inside a code repository: its README.md and AGENTS.md are the repository's too
   overlyx build ada/my-paper/main.tex     # compile on the server: errors, exit code 1 if it fails
   overlyx restore ada/my-paper 3f2a91c    # the whole project as it was at that commit (a new commit)
   overlyx sync --watch                    # in a clone: saved files reach the server, its changes come here
@@ -442,6 +446,8 @@ async function authCommand(action, flags) {
 }
 
 async function repoCommand(action, args, flags) {
+  if (action === 'link') return repoLink(args, flags);
+  if (action === 'unlink') return repoUnlink(args);
   const creds = credentials(flags);
   if (action === 'list') {
     const result = await api(creds, '/git/api/projects');
@@ -482,6 +488,334 @@ async function repoCommand(action, args, flags) {
       process.stdout.write(`Added remote ${remoteName} (${url.toString()})\n`);
     }
   } else process.stdout.write(`Clone: ${remote.url}\n`);
+}
+
+/* ------------------------------------------------------------ repo link: a clone inside another repository */
+
+/**
+ * `.overlyx/link.sh`, written into the enclosing repository by `overlyx repo link`: the installer, the hooks
+ * and the merge driver that keep the linked files of the clone and the repository's commits in step.
+ * This string is the file (the CLI is one file). Its first line names the version: bump it with every
+ * change, so that `repo link` run again rewrites the copy a repository has.
+ */
+const LINK_SCRIPT = `#!/bin/sh
+# overlyx-link script v1 — written by \`overlyx repo link\`; https://overlyx.app
+#
+# Files of an OverLyX project cloned inside this repository (its README.md, AGENTS.md, …) are shared
+# with this repository: .overlyx/links names them ("<path here> <path in the clone>"). The clone is
+# the source of truth. Here each one is a relative symlink into the clone, so an edit shows at once
+# on both sides, and every commit of this repository carries the file's contents as an ordinary file
+# (GitHub renders it): the pre-commit hook stages the clone's content as a blob. \`git status\` stays
+# clean because the paths are skip-worktree entries of a sparse checkout that expects files outside
+# its patterns (git neither compares nor rewrites them). A checkout, pull or merge updates the index
+# entry only; where both sides of a merge changed a linked file, the merge driver takes the clone's.
+#
+#   sh .overlyx/link.sh install      set this clone of the repository up (idempotent): symlinks, index
+#                                    bits, sparse checkout, merge driver, hooks (existing hooks are kept
+#                                    as <hook>.before-overlyx-link and run after ours)
+#   sh .overlyx/link.sh check        repair: symlinks, index bits, a conflict in a linked file
+#   sh .overlyx/link.sh uninstall    back to ordinary files, hooks and configuration restored
+#   sh .overlyx/link.sh hook NAME    what the installed hooks run
+#   sh .overlyx/link.sh merge O A B P   the merge driver (merge.overlyx-link.driver)
+set -eu
+
+LINKS=.overlyx/links
+HOOKS='pre-commit post-commit post-checkout post-merge post-rewrite'
+MARK='overlyx-link'
+
+note() { printf 'overlyx link: %s\\n' "$*" >&2; }
+die() { note "$*"; exit 1; }
+
+root=$(git rev-parse --show-toplevel) || exit 1
+cd "$root"
+
+git_path() { p=$(git rev-parse --git-path "$1"); case $p in /*) printf '%s' "$p";; *) printf '%s/%s' "$root" "$p";; esac; }
+
+# \`each FN\`: FN <path here> <path in the clone>, for every link (the loop reads a here-document, so
+# commands inside never consume a hook's stdin)
+each() {
+  fn=$1; shift
+  while read -r outer inner rest; do
+    case $outer in ''|'#'*) continue;; esac
+    [ -n "$inner" ] && [ -z "$rest" ] || die "bad line in $LINKS: $outer $inner $rest"
+    case $outer$inner in *' '*|*'	'*|/*|*'..'*) die "bad paths in $LINKS: $outer $inner";; esac
+    "$fn" "$outer" "$inner" "$@"
+  done <<EOF
+$(cat "$LINKS")
+EOF
+}
+
+# the symlink target for <path here> → <path in the clone>, both relative to the repository root
+target_of() { d=$(dirname "$1"); t=$2; while [ "$d" != . ]; do t=../$t; d=$(dirname "$d"); done; printf '%s' "$t"; }
+index_hash() { git ls-files -s -- "$1" | awk 'NR==1 {print $2}'; }
+head_hash() { git rev-parse -q --verify "HEAD:$1" 2>/dev/null || true; }
+in_index() { git ls-files --error-unmatch -- "$1" >/dev/null 2>&1; }
+skip_bit() { git update-index --skip-worktree -- "$1"; }
+
+# the index entry for <path here> := the clone's file, marked skip-worktree (a conflict is resolved by it)
+stage() {
+  [ -f "$2" ] || die "$2 is missing (is the clone checked out?), so $1 cannot be staged"
+  mode=100644; [ -x "$2" ] && mode=100755
+  git update-index --add --cacheinfo "$mode,$(git hash-object -w -- "$2"),$1"
+  skip_bit "$1"
+}
+
+# after a commit: the index entry follows what was committed (a commit of chosen paths leaves it behind)
+resync() {
+  in_index "$1" || return 0
+  entry=$(git ls-tree HEAD -- "$1"); [ -n "$entry" ] || return 0
+  set -- "$1" "$2" $entry
+  [ "$(index_hash "$1")" = "$5" ] || git update-index --add --cacheinfo "$3,$5,$1"
+  skip_bit "$1"
+}
+
+# the symlink and the index bit of one link, repaired where git or someone replaced them
+check() {
+  outer=$1; inner=$2; target=$(target_of "$outer" "$inner")
+  if [ -n "$(git ls-files -u -- "$outer")" ]; then
+    note "$outer: both sides changed it; resolved with $inner, the source of truth"
+    stage "$outer" "$inner"; [ -L "$outer" ] || rm -f "$outer"
+  fi
+  if ! in_index "$outer"; then [ -L "$outer" ] && note "$outer is not tracked on this branch; its symlink is untracked here"; return 0; fi
+  case $(git ls-files -t -- "$outer") in S*) ;; *) skip_bit "$outer";; esac
+  if [ -L "$outer" ]; then
+    [ "$(readlink "$outer")" = "$target" ] || die "$outer is a symlink to $(readlink "$outer"), not to $target"
+  elif [ -e "$outer" ]; then
+    [ -f "$outer" ] || die "$outer is neither a symlink nor a regular file"
+    blob=$(git hash-object -- "$outer")
+    if [ "$blob" = "$(index_hash "$outer")" ] || [ "$blob" = "$(head_hash "$outer")" ] || { [ -f "$inner" ] && cmp -s "$outer" "$inner"; }; then
+      rm -f "$outer"; ln -s "$target" "$outer"; note "$outer: symlink restored"
+    else
+      die "$outer is a regular file with content that is neither committed nor in $inner: move what is wanted into $inner, delete it, then run: sh .overlyx/link.sh check"
+    fi
+  else
+    ln -s "$target" "$outer"
+  fi
+}
+
+# after commits came in: a linked file they changed, differently from the clone, is worth a look
+warn_changed() {
+  outer=$1; inner=$2; prev=$3
+  old=$(git rev-parse -q --verify "$prev:$outer" 2>/dev/null || true); new=$(head_hash "$outer")
+  [ "$old" = "$new" ] && return 0
+  [ -f "$inner" ] && [ "$new" = "$(git hash-object -- "$inner")" ] && return 0
+  note "$outer changed in the commits just received, differently from $inner (the source of truth, which the next commit here takes): see  git diff $prev HEAD -- $outer  and port what is wanted into $inner"
+}
+
+ensure_config() {
+  if [ "$(git config --get core.sparseCheckoutCone || true)" = true ] && [ "$(git config --get sparse.expectFilesOutsideOfPatterns || true)" != true ]; then
+    die "this repository uses a cone-mode sparse checkout, which cannot exclude single files"
+  fi
+  git config core.sparseCheckout true
+  git config core.sparseCheckoutCone false
+  git config sparse.expectFilesOutsideOfPatterns true
+  patterns=$(git_path info/sparse-checkout); mkdir -p "$(dirname "$patterns")"
+  [ -s "$patterns" ] || printf '/*\\n' > "$patterns"
+  attributes=$(git_path info/attributes); [ -f "$attributes" ] || : > "$attributes"
+  each ensure_patterns "$patterns" "$attributes"
+  git config merge.overlyx-link.name 'the clone of the OverLyX project is the source of truth'
+  git config merge.overlyx-link.driver 'sh .overlyx/link.sh merge %O %A %B %P'
+}
+ensure_patterns() {
+  grep -qxF -- "!/$1" "$3" || printf '!/%s\\n' "$1" >> "$3"
+  grep -qxF -- "/$1 merge=$MARK" "$4" || printf '/%s merge=%s\\n' "$1" "$MARK" >> "$4"
+}
+
+install_hooks() {
+  dir=$(git_path hooks); mkdir -p "$dir"
+  for name in $HOOKS; do
+    f=$dir/$name
+    if [ -e "$f" ] && ! grep -q "$MARK" "$f"; then
+      [ -e "$f.before-$MARK" ] && die "both $f and $f.before-$MARK exist; merge them into one hook by hand"
+      mv "$f" "$f.before-$MARK"; note "the existing $name hook is kept as $name.before-$MARK and runs after ours"
+    fi
+    cat > "$f" <<EOF
+#!/bin/sh
+# $MARK hook: runs .overlyx/link.sh for this hook, then the hook it replaced ($name.before-$MARK)
+dir=\\$(cd "\\$(dirname "\\$0")" && pwd); name=\\$(basename "\\$0")
+root=\\$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+if [ -f "\\$root/.overlyx/link.sh" ]; then sh "\\$root/.overlyx/link.sh" hook "\\$name" "\\$@" </dev/null || exit \\$?; fi
+if [ -x "\\$dir/\\$name.before-$MARK" ]; then exec "\\$dir/\\$name.before-$MARK" "\\$@"; fi
+exit 0
+EOF
+    chmod +x "$f"
+  done
+}
+
+# the clone's directory must be a checked-out repository of its own (not an empty submodule directory)
+clone_checked_out() { top=$(git -C "$(dirname "$1")" rev-parse --show-toplevel 2>/dev/null) && [ "$top" != "$root" ]; }
+
+# one link: the file lives in the clone (adopted from here when the clone lacks it), a symlink here, an index entry marked skip-worktree
+install_link() {
+  outer=$1; inner=$2; target=$(target_of "$outer" "$inner")
+  clone_checked_out "$inner" || die "$(dirname "$inner") is not a checked-out repository: check the clone out first (a submodule: git submodule update --init $(dirname "$inner"))"
+  if [ -L "$outer" ]; then
+    [ "$(readlink "$outer")" = "$target" ] || die "$outer is already a symlink to $(readlink "$outer"); remove it first"
+    [ -f "$inner" ] || die "$inner is missing: check the clone out first"
+  elif [ -f "$outer" ]; then
+    if [ ! -e "$inner" ]; then
+      mkdir -p "$(dirname "$inner")"; mv "$outer" "$inner"; note "$outer moved into the clone as $inner"
+    elif cmp -s "$outer" "$inner"; then
+      rm "$outer"
+    else
+      blob=$(git hash-object -- "$outer")
+      if [ "$blob" = "$(head_hash "$outer")" ] || [ "$blob" = "$(index_hash "$outer")" ]; then
+        rm "$outer"; note "$outer differs from $inner, which wins (the committed version stays in the history: git show HEAD:$outer)"
+      else
+        die "$outer has uncommitted changes that differ from $inner: merge them into $inner by hand, delete $outer, then run this again"
+      fi
+    fi
+    ln -s "$target" "$outer"
+  elif [ -e "$outer" ]; then
+    die "$outer exists and is neither a regular file nor a symlink"
+  else
+    [ -f "$inner" ] || die "neither $outer nor $inner exists"
+    ln -s "$target" "$outer"
+  fi
+  if in_index "$outer"; then skip_bit "$outer"; else stage "$outer" "$inner"; note "$outer: added to the index"; fi
+}
+
+uninstall_link() {
+  outer=$1; inner=$2
+  if [ -L "$outer" ]; then rm "$outer"; [ -f "$inner" ] && cp "$inner" "$outer"; fi
+  in_index "$outer" && git update-index --no-skip-worktree -- "$outer"
+  patterns=$(git_path info/sparse-checkout); attributes=$(git_path info/attributes)
+  for f in "$patterns" "$attributes"; do [ -f "$f" ] && { grep -vxF -e "!/$outer" -e "/$outer merge=$MARK" "$f" > "$f.tmp" || true; mv "$f.tmp" "$f"; }; done
+  return 0
+}
+
+uninstall() {
+  each uninstall_link
+  patterns=$(git_path info/sparse-checkout)
+  if [ -f "$patterns" ] && [ "$(cat "$patterns")" = '/*' ]; then
+    rm "$patterns"; git config --unset core.sparseCheckout || true; git config --unset core.sparseCheckoutCone || true; git config --unset sparse.expectFilesOutsideOfPatterns || true
+  fi
+  attributes=$(git_path info/attributes); [ -f "$attributes" ] && [ ! -s "$attributes" ] && rm "$attributes"
+  git config --remove-section merge.overlyx-link 2>/dev/null || true
+  dir=$(git_path hooks)
+  for name in $HOOKS; do
+    f=$dir/$name
+    [ -f "$f" ] && grep -q "$MARK" "$f" && rm "$f"
+    [ -e "$f.before-$MARK" ] && mv "$f.before-$MARK" "$f"
+  done
+  note "unlinked: the files are ordinary files again"
+}
+
+hook() {
+  [ -f "$LINKS" ] || exit 0
+  case $1 in
+    pre-commit) each stage;;
+    post-commit) each resync;;
+    post-checkout) each check; [ "\${4:-0}" = 1 ] && [ "$2" != "$3" ] && each warn_changed "$2";;
+    post-merge) each check; git rev-parse -q --verify ORIG_HEAD >/dev/null 2>&1 && each warn_changed ORIG_HEAD;;
+    post-rewrite) each check;;
+  esac
+  return 0
+}
+
+merge_driver() {
+  base=$1; ours=$2; theirs=$3; pathname=$4
+  inner=$(awk -v p="$pathname" '$1 == p { print $2 }' "$LINKS")
+  if [ -z "$inner" ]; then git merge-file -L ours -L base -L theirs "$ours" "$base" "$theirs"; return $?; fi
+  [ -f "$inner" ] || die "$inner is missing, so the merge of $pathname cannot take it"
+  cat "$inner" > "$ours"
+  note "$pathname: changed on both sides; resolved with $inner, the source of truth (both versions remain in the history)"
+}
+
+cmd=\${1:-}; [ $# -gt 0 ] && shift
+case $cmd in
+  install)
+    [ -f "$LINKS" ] || die "$LINKS not found: run \\\`overlyx repo link\\\` first"
+    ensure_config; each install_link; install_hooks
+    note "installed in $root (hooks: $HOOKS)"
+    ;;
+  check) [ -f "$LINKS" ] || die "$LINKS not found"; ensure_config; each check;;
+  uninstall) [ -f "$LINKS" ] || die "$LINKS not found"; uninstall;;
+  hook) [ $# -ge 1 ] || die "usage: link.sh hook NAME [ARGS]"; hook "$@";;
+  merge) [ $# -eq 4 ] || die "usage: link.sh merge BASE OURS THEIRS PATH"; merge_driver "$@";;
+  *) sed -n '2,20p' "$0" | sed 's/^# \\{0,1\\}//' >&2; exit 2;;
+esac
+`;
+
+/** `sh ARGS` in `cwd`, its output passed through; a failure fails the command. */
+async function sh(cwd, args) {
+  const { spawn } = await import('node:child_process');
+  const code = await new Promise((resolve, reject) => {
+    const child = spawn('sh', args, { cwd, stdio: 'inherit', env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
+    child.on('error', reject);
+    child.on('close', resolve);
+  });
+  if (code !== 0) fail(`sh ${args.join(' ')} failed (exit code ${code})`);
+}
+
+/** The clone named on the command line (its root) and the repository it lies in. */
+async function nestedClone(arg) {
+  if (process.platform === 'win32') fail('repo link needs symlinks and a POSIX shell (Linux or macOS)');
+  const clone = path.resolve(arg ?? '.');
+  let st;
+  try { st = fs.statSync(clone); } catch { fail(`not a directory: ${clone}`); }
+  if (!st.isDirectory()) fail(`not a directory: ${clone}`);
+  if (!await isRepo(clone)) fail(`${clone} is not a git repository: name the clone of the OverLyX project`);
+  const top = path.resolve((await git(clone, ['rev-parse', '--show-toplevel'])).stdout.trim());
+  if (top !== clone) fail(`${clone} is inside the repository ${top}: name the clone itself`);
+  let outer = null;
+  try { outer = path.resolve((await git(path.dirname(clone), ['rev-parse', '--show-toplevel'])).stdout.trim()); } catch { /* not inside a repository */ }
+  if (!outer || outer === clone) fail(`${clone} is not inside another git repository`);
+  return { clone, outer, rel: path.relative(outer, clone).split(path.sep).join('/') };
+}
+
+/**
+ * `overlyx repo link [CLONE] [--files README.md,AGENTS.md]`: files of the project (in the clone, the
+ * source of truth) are those of the enclosing repository too — symlinks there, their contents in its
+ * commits. Writes `.overlyx/links` and `.overlyx/link.sh` into that repository and runs the installer.
+ */
+async function repoLink(args, flags) {
+  const { clone, outer, rel } = await nestedClone(args[0]);
+  const names = String(flags.files ?? 'README.md,AGENTS.md').split(',').map(s => s.trim()).filter(Boolean);
+  if (!names.length) fail('--files needs at least one file name');
+  const lines = [], skipped = [];
+  for (const name of names) {
+    if (/\s/.test(name) || name.startsWith('/') || name.split('/').some(p => p === '' || p === '.' || p === '..')) fail(`invalid file name: ${name}`);
+    const here = path.basename(name);
+    if (!fs.existsSync(path.join(clone, name)) && !fs.existsSync(path.join(outer, here))) {
+      if (flags.files) fail(`${name}: neither ${path.join(clone, name)} nor ${path.join(outer, here)} exists`);
+      skipped.push(name);
+      continue;
+    }
+    lines.push(`${here} ${rel}/${name}`);
+  }
+  if (!lines.length) fail(`nothing to link: none of ${names.join(', ')} exists in ${clone} or ${outer}`);
+  const dir = path.join(outer, '.overlyx');
+  fs.mkdirSync(dir, { recursive: true });
+  const manifest = path.join(dir, 'links');
+  const existing = fs.existsSync(manifest) ? fs.readFileSync(manifest, 'utf8').split('\n').map(l => l.trim()).filter(Boolean) : [];
+  for (const line of lines) {
+    if (existing.includes(line)) continue;
+    const here = line.split(' ')[0];
+    const clash = existing.find(l => !l.startsWith('#') && l.split(/\s+/)[0] === here);
+    if (clash) fail(`${here} is already linked to ${clash.split(/\s+/)[1]} (.overlyx/links)`);
+    existing.push(line);
+  }
+  fs.writeFileSync(manifest, existing.join('\n') + '\n');
+  const script = path.join(dir, 'link.sh');
+  if (!fs.existsSync(script) || fs.readFileSync(script, 'utf8') !== LINK_SCRIPT) fs.writeFileSync(script, LINK_SCRIPT);
+  fs.chmodSync(script, 0o755);
+  await sh(outer, ['.overlyx/link.sh', 'install']);
+  const target = await syncTarget(clone);
+  process.stdout.write(`Linked ${lines.map(l => l.split(' ')[0]).join(', ')} of ${target ? `${target.project} on ${target.host}` : rel} into ${outer}: symlinks here, their contents in every commit\n`);
+  if (skipped.length) process.stdout.write(`Not linked (in neither place): ${skipped.join(', ')}\n`);
+  process.stdout.write(`Commit .overlyx/ in ${outer}; another clone of it sets itself up with: sh .overlyx/link.sh install\n`);
+}
+
+/** `overlyx repo unlink [CLONE]`: ordinary files again; `.overlyx/links` and `.overlyx/link.sh` are deleted. */
+async function repoUnlink(args) {
+  const { outer } = await nestedClone(args[0]);
+  const dir = path.join(outer, '.overlyx');
+  if (!fs.existsSync(path.join(dir, 'links'))) fail(`${outer} has no linked files (.overlyx/links)`);
+  await sh(outer, ['.overlyx/link.sh', 'uninstall']);
+  for (const name of ['links', 'link.sh']) fs.rmSync(path.join(dir, name), { force: true });
+  if (!fs.readdirSync(dir).length) fs.rmdirSync(dir);
+  process.stdout.write(`Unlinked: ordinary files in ${outer} again; .overlyx/links and .overlyx/link.sh are deleted (commit that)\n`);
 }
 
 /* ------------------------------------------------------------ build / restore */

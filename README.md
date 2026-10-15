@@ -41,7 +41,8 @@ edit your projects on the server, and keep working when the server or your login
 of this repository they are connected already (`.mcp.json`, `.codex/config.toml`).
 
 The `olx` alias and the more GitHub-like `overlyx repo create my-paper --source . --push` form are
-equivalent. The installer verifies a SHA-256 checksum and writes to `~/.local/bin` by default;
+equivalent; `overlyx repo link paper` shares a clone's README.md and AGENTS.md with the code
+repository it lives in. The installer verifies a SHA-256 checksum and writes to `~/.local/bin` by default;
 Node.js 20 or newer is required. Use `--host https://your-overlyx.example` for a self-hosted instance.
 
 **VS Code:** the same editor as an extension — file browsing, git and agents stay VS Code's

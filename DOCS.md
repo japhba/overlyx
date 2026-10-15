@@ -338,6 +338,33 @@ blend.
   push, preserving the local history without an unrelated synthetic merge. Its Basic-authenticated
   `/git/api/user` and `/git/api/projects` endpoints use the account token and the same rate limiting
   as smart HTTP. The remote URL stores the username but not the token.
+
+  **A clone inside another repository** (14 Oct 2026; CLI 0.8.0, `overlyx repo link [CLONE]
+  [--files README.md,AGENTS.md]`, no server involved): a paper that is a submodule (or an ignored
+  directory) of its code's repository shares its README.md and AGENTS.md with that repository, the
+  clone being the source of truth. The command writes `.overlyx/links` (`<path here> <path in the
+  clone>` per line) and `.overlyx/link.sh` (a POSIX sh script embedded in `overlyx.js` as
+  `LINK_SCRIPT`, versioned by its first line) into the enclosing repository and runs
+  `sh .overlyx/link.sh install`, which is what another clone of that repository runs too. Install:
+  a file only the repository has is moved into the clone (one with uncommitted changes that differ
+  from the clone's is refused), the path becomes a relative symlink, its index entry (added from the
+  clone for a new file) is marked skip-worktree, and the repository becomes a non-cone sparse checkout
+  (`core.sparseCheckout`, patterns `/*` plus `!/<path>` in `info/sparse-checkout`) with
+  `sparse.expectFilesOutsideOfPatterns`, without which git clears the bit of any skip-worktree entry
+  whose file exists when it reads the index. That is what keeps `git status` clean (skip-worktree
+  entries are neither compared nor written) and lets checkout, merge, pull, rebase, stash and reset
+  update the index entry without refusing over the symlink or touching it; a branch that lacks the
+  file removes the symlink with the entry and the post-checkout hook puts it back on return. Hooks
+  (installed into `git rev-parse --git-path hooks`, an existing hook kept as
+  `<hook>.before-overlyx-link` and run after ours): pre-commit stages the clone's content as a blob
+  (`hash-object -w` + `update-index --cacheinfo`, then the bit again) — so every commit carries the
+  clone's files, `--no-verify` commits what the index had; post-commit re-syncs the index entry after
+  a commit of chosen paths; post-checkout, post-merge and post-rewrite repair the symlinks and bits
+  and point out a linked file the received commits changed differently from the clone. A merge driver
+  (`merge.overlyx-link.driver`, `info/attributes`) resolves a linked file both sides changed with the
+  clone's content. `link.sh check` repairs by hand, `link.sh uninstall` / `overlyx repo unlink` undo
+  everything. Tests: `tests/link.test.ts` (the CLI on real repositories: install, commits, hooks
+  chained, checkout / pull / rebase / stash / reset, a fresh clone, refusals, unlink).
   Projects created in the app get a `.gitignore` for LaTeX build products and LyX backups; CLI
   imports preserve the local project's own ignore rules. Symlinks are never checked out as links.
   `OVERLYX_GIT=off` disables all of this.
