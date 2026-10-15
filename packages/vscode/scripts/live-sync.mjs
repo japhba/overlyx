@@ -8,6 +8,23 @@ const git = (repo, ...args) => execFileSync('git', ['-C', repo, ...args], { enco
 export const liveStatusPath = repo => git(repo, 'rev-parse', '--path-format=absolute', '--git-path', 'overlyx-live-status.json');
 const clean = repo => git(repo, 'status', '--porcelain', '--untracked-files=all') === '';
 
+/**
+ * Validation candidates (`update-*` in the cache: a worktree of the candidate commit with its own
+ * node_modules and build, the better part of a gigabyte) are kept only while they matter: `keep` —
+ * the one holding the live package (the status's vsixPath) and a check's own when it did not get
+ * through (its validation.log). Everything else in the cache stays. Each upstream update used to
+ * leave one behind (hundreds, over a hundred gigabytes).
+ */
+export function pruneCandidates(repo, cache, keep) {
+  const kept = new Set(keep.filter(Boolean).map(p => path.resolve(p)));
+  for (const name of fs.readdirSync(cache)) {
+    const dir = path.join(cache, name);
+    if (name.startsWith('update-') && !kept.has(dir)) fs.rmSync(dir, { recursive: true, force: true });
+  }
+  // the removed candidates' worktree registrations (their directories are gone)
+  git(repo, 'worktree', 'prune');
+}
+
 export async function syncLiveCheckout(repo, { validate, beforeApply = () => {}, afterApply = () => {} }) {
   const statusPath = liveStatusPath(repo);
   const previous = fs.existsSync(statusPath) ? JSON.parse(fs.readFileSync(statusPath, 'utf8')) : {};
@@ -73,42 +90,49 @@ async function main() {
   const retryActivation = fs.existsSync(statusFile) && JSON.parse(fs.readFileSync(statusFile, 'utf8')).activationPending;
   let candidate;
   const run = (cwd, command, args, log) => execFileSync(command, args, { cwd, timeout: 600000, stdio: ['ignore', log, log] });
-  const result = await syncLiveCheckout(repo, {
-    validate(commit) {
-      candidate = fs.mkdtempSync(path.join(cache, 'update-'));
-      const checkout = path.join(candidate, 'source');
-      git(repo, 'worktree', 'add', '--detach', checkout, commit);
-      const log = fs.openSync(path.join(candidate, 'validation.log'), 'a');
-      try {
-        // Reuse the already installed LyX data only when its recorded revision matches.
-        const lyx = path.join(repo, 'lyx');
-        if (git(repo, 'rev-parse', `${commit}:lyx`) === git(lyx, 'rev-parse', 'HEAD')) {
-          fs.rmdirSync(path.join(checkout, 'lyx'));
-          fs.symlinkSync(lyx, path.join(checkout, 'lyx'));
-        } else run(checkout, 'git', ['submodule', 'update', '--init', 'lyx'], log);
-        run(checkout, 'npm', ['ci', '--no-audit', '--no-fund'], log);
-        run(checkout, 'npm', ['run', 'build', '-w', 'packages/vscode'], log);
-        run(checkout, 'node_modules/.bin/tsc', ['--noEmit', '-p', 'packages/vscode'], log);
-        run(checkout, 'node_modules/.bin/tsc', ['--noEmit', '-p', 'packages/client'], log);
-        run(checkout, 'node_modules/.bin/vitest', ['run', 'tests/parity.test.ts', 'tests/vscode-sync.test.ts', 'tests/bug-reports.test.ts', 'tests/vscode-host.test.ts', 'tests/editor-transactions.test.ts', 'tests/live-sync.test.ts', 'tests/vscode-live-update.test.ts'], log);
-      } catch (error) { throw new Error(`Update validation failed; see ${path.join(candidate, 'validation.log')}`, { cause: error }); }
-      finally { fs.closeSync(log); }
-    },
-    beforeApply() { if (process.argv.includes('--service')) execFileSync('systemctl', ['--user', 'stop', 'overlyx-live.service']); },
-    afterApply() {
-      const log = fs.openSync(path.join(candidate, 'activation.log'), 'a');
-      try {
-        if (retryActivation || fs.readFileSync(lockfile, 'utf8') !== previousLockfile) run(repo, 'npm', ['ci', '--no-audit', '--no-fund'], log);
-        run(repo, 'npm', ['run', 'build', '-w', 'packages/vscode'], log);
-        const vsixPath = path.join(candidate, 'overlyx-live.vsix');
-        run(repo, process.execPath, ['packages/vscode/scripts/package-live.mjs', vsixPath], log);
-        return { vsixPath, artifactHead: git(repo, 'rev-parse', 'HEAD') };
-      } finally {
-        fs.closeSync(log);
-        if (process.argv.includes('--service')) execFileSync('systemctl', ['--user', 'start', 'overlyx-live.service']);
-      }
-    },
-  });
+  let result;
+  try {
+    result = await syncLiveCheckout(repo, {
+      validate(commit) {
+        candidate = fs.mkdtempSync(path.join(cache, 'update-'));
+        const checkout = path.join(candidate, 'source');
+        git(repo, 'worktree', 'add', '--detach', checkout, commit);
+        const log = fs.openSync(path.join(candidate, 'validation.log'), 'a');
+        try {
+          // Reuse the already installed LyX data only when its recorded revision matches.
+          const lyx = path.join(repo, 'lyx');
+          if (git(repo, 'rev-parse', `${commit}:lyx`) === git(lyx, 'rev-parse', 'HEAD')) {
+            fs.rmdirSync(path.join(checkout, 'lyx'));
+            fs.symlinkSync(lyx, path.join(checkout, 'lyx'));
+          } else run(checkout, 'git', ['submodule', 'update', '--init', 'lyx'], log);
+          run(checkout, 'npm', ['ci', '--no-audit', '--no-fund'], log);
+          run(checkout, 'npm', ['run', 'build', '-w', 'packages/vscode'], log);
+          run(checkout, 'node_modules/.bin/tsc', ['--noEmit', '-p', 'packages/vscode'], log);
+          run(checkout, 'node_modules/.bin/tsc', ['--noEmit', '-p', 'packages/client'], log);
+          run(checkout, 'node_modules/.bin/vitest', ['run', 'tests/parity.test.ts', 'tests/vscode-sync.test.ts', 'tests/bug-reports.test.ts', 'tests/vscode-host.test.ts', 'tests/editor-transactions.test.ts', 'tests/live-sync.test.ts', 'tests/vscode-live-update.test.ts'], log);
+        } catch (error) { throw new Error(`Update validation failed; see ${path.join(candidate, 'validation.log')}`, { cause: error }); }
+        finally { fs.closeSync(log); }
+      },
+      beforeApply() { if (process.argv.includes('--service')) execFileSync('systemctl', ['--user', 'stop', 'overlyx-live.service']); },
+      afterApply() {
+        const log = fs.openSync(path.join(candidate, 'activation.log'), 'a');
+        try {
+          if (retryActivation || fs.readFileSync(lockfile, 'utf8') !== previousLockfile) run(repo, 'npm', ['ci', '--no-audit', '--no-fund'], log);
+          run(repo, 'npm', ['run', 'build', '-w', 'packages/vscode'], log);
+          const vsixPath = path.join(candidate, 'overlyx-live.vsix');
+          run(repo, process.execPath, ['packages/vscode/scripts/package-live.mjs', vsixPath], log);
+          return { vsixPath, artifactHead: git(repo, 'rev-parse', 'HEAD') };
+        } finally {
+          fs.closeSync(log);
+          if (process.argv.includes('--service')) execFileSync('systemctl', ['--user', 'start', 'overlyx-live.service']);
+        }
+      },
+    });
+  } finally {
+    // the live package's candidate stays, and this check's own when it did not get through (its logs)
+    const { vsixPath } = JSON.parse(fs.readFileSync(statusFile, 'utf8'));
+    pruneCandidates(repo, cache, [vsixPath && path.dirname(vsixPath), result?.status === 'updated' ? null : candidate]);
+  }
   console.log(JSON.stringify(result));
 }
 

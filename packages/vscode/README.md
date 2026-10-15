@@ -285,6 +285,7 @@ Commit local source work before expecting automatic upstream integration. No upd
 a release VSIX over the live loader. Live status compares Git commits, not the loader's version.
 Each source update also refreshes the live VSIX manifest so new commands and settings become
 available after reloading. The service records its status in Git's `overlyx-live-status.json`; validation and activation logs
-are retained under `$FAST_CACHE_DIR/overlyx-live/update-*`. The status bar offers **Reload Window**
+are under `$FAST_CACHE_DIR/overlyx-live/update-*`. Each is a full build, so after every check only two
+stay: the one holding the live VSIX and, when a check did not get through, that check's own. The status bar offers **Reload Window**
 when a new extension host is ready. UI edits still use Vite HMR, while changes requiring a full
 reload are reported so the editor's in-memory undo history is not discarded automatically.
