@@ -5,7 +5,7 @@
  * No deliverable source, editor API, local-storage editor state or fixture project is seeded.
  */
 import { test, expect, type Page } from '@playwright/test';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { userCredentials, collectErrors, grantClipboard, pickTheme } from './helpers';
 
 const canvas = (page: Page) => page.frameLocator('.dl-frame').locator('section.slide').first();
@@ -115,11 +115,10 @@ test('GUI authors a complete A0 research poster, reviews it and exports one page
     await text(page, x, 727 - height, 48, label, 30, '#134f5c', true);
   }
   await text(page, 300, 810, 240, 'Figure 1. Invented cooling medians: control, gravel and planted storage.', 28, '#666666');
-  // A reusable project asset is uploaded with the visible chooser; the full manual poster uses the public-domain USGS original.
-  const officialImage = 'scratch/beta-fix-20261013/poster/usgs-waterquality.jpg';
+  // Use the checked-in drawing so clean release checkouts exercise the same import.
   const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.locator('[data-tb="dk-image"]').click()]);
-  await chooser.setFiles(existsSync(officialImage) ? officialImage : 'e2e/fixtures/beta-orbit-map.svg');
-  const image = canvas(page).locator('img,svg.ol-svg').last();
+  await chooser.setFiles('e2e/fixtures/beta-orbit-map.svg');
+  const image = canvas(page).locator(':scope > img, :scope > svg[role="img"]').last();
   await expect(image).toBeVisible();
   // Resize before moving the image; all four corners stay inside the poster, avoiding native hidden-overflow auto-scroll.
   let b = await image.boundingBox(); const cb = await canvas(page).boundingBox();
