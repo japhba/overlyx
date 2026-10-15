@@ -2268,28 +2268,31 @@ document. Tests: `tests/security-limits.test.ts`, `tests/pdffetch.test.ts`.
 systemd unit's `WorkingDirectory`), and the VS Code extension is released by
 `.github/workflows/extension-release.yml` from `origin/master` (`packages/vscode/RELEASING.md`), so
 both must come from the same commit: `scripts/deploy.sh` refuses a diverged `master`/`origin/master`,
-typechecks the client and extension, runs the unit suite with strict collaboration fuzz invariants,
-and builds and browser-tests an isolated candidate before pushing (which starts the extension
-release). It then fast-forwards the production checkout, runs `npm ci` when the lockfile changed,
-promotes the exact tested client/runtime assets, restarts the unit and checks that https://overlyx.app
+typechecks the client and extension, runs the unit suite and builds the client/runtime candidate
+before pushing (which starts the extension release). It then fast-forwards the production checkout,
+runs `npm ci` when the lockfile changed, promotes exactly those built assets, restarts the unit and checks that https://overlyx.app
 serves the new bundle (`/api/version` reports the running commit). Pushes from any other machine deploy themselves:
 `deploy/overlyx-autodeploy.timer` runs `scripts/autodeploy.sh` every two minutes on the server, which
 fetches origin and, when origin/master is ahead of production, typechecks the client and the
-extension, runs the strict unit suite and the same isolated browser gate in a throwaway worktree,
-then fast-forwards, promotes the tested assets, restarts and
+extension, runs the unit suite and builds the candidate in a throwaway worktree,
+then fast-forwards, promotes the built assets, restarts and
 verifies — reporting a `deploy/overlyx.app` commit status on GitHub (pending → success / failure;
 `gh api repos/japhba/overlyx/commits/<sha>/status --jq '.statuses[] | "\(.state) \(.description)"'`, or
 `curl -s https://overlyx.app/api/version` once it is live). A failed commit is not retried; the next push is.
 Both scripts share one lock. Install the units with `cp deploy/overlyx-autodeploy.* /etc/systemd/system/
 && systemctl daemon-reload && systemctl enable --now overlyx-autodeploy.timer`; logs in
-`journalctl -u overlyx-autodeploy`.
+`journalctl -u overlyx-autodeploy`. Testing is kept to a minimum unless the user asks for more (15 Oct
+2026: deploys took ~45 min with the browser gate on every push): `OVERLYX_DEPLOY_FULL=1
+scripts/deploy.sh` (or that variable in the autodeploy unit's environment) adds the strict unit
+matrix and the browser release gate below.
 
 `npm run test:beta` runs the browser release gate locally: it builds the app and runtime, seeds
 disposable accounts, starts a localhost-only server with temporary data/projects, exercises creating,
 editing, sharing, saving, recovering offline work and exporting documents/decks/posters, and cleans
 up that instance. Reports, failure screenshots and traces remain under `test-results/beta-*`.
-It requires no production credentials. `OVERLYX_E2E_BROWSERS=all npm run test:beta` also runs
-Firefox and WebKit; the deployment gate defaults to Chromium. Set `OVERLYX_BETA_REPORT_DIR`
+It requires no production credentials (~35 min, Chromium; run it when asked, or deploy with
+`OVERLYX_DEPLOY_FULL=1`). `OVERLYX_E2E_BROWSERS=all npm run test:beta` also runs Firefox and WebKit;
+`OVERLYX_BETA_BROWSER=0` only builds the candidate (what a deploy does by default). Set `OVERLYX_BETA_REPORT_DIR`
 to retain evidence elsewhere and `OVERLYX_BETA_BUILD_DIR` to keep the tested assets for promotion.
 The gate records immutable hashes for every public file, including lazy modules, fonts and images,
 and rejects added, missing or changed files before and after the browsers run. It also verifies the
@@ -2298,7 +2301,7 @@ A stopped server or a document-worker/native-repair failure also fails the gate.
 Deployment promotes those tested bytes and verifies their hashes from the running server.
 `npm run test:release` runs the unit suite with strict collaboration invariants, then repeats the
 randomized collaboration matrix with paragraph joins enabled. It clears inherited fuzz debugging
-or reduced-matrix settings. Both deployment paths use it before the browser gate.
+or reduced-matrix settings. Deploys run it only with `OVERLYX_DEPLOY_FULL=1`.
 *Help ▸ OverLyX for VS Code* (`/api/vscode-extension`) redirects to the latest GitHub release's
 `overlyx-vscode.vsix` (the build the extension's self-updater installs); a `.vsix` packaged into
 `packages/vscode` of the running checkout is the fallback (`OVERLYX_VSIX_SOURCE=local` forces it).

@@ -8,7 +8,8 @@
 #   1. fetches origin; nothing to do when production already is at origin/master;
 #   2. reports a "deploy/overlyx.app" commit status on GitHub (pending → success / failure), so the
 #      pusher sees the outcome with `gh api repos/<repo>/commits/<sha>/status`;
-#   3. checks the commit in a throwaway worktree — both typechecks, strict unit tests and browser workflows,
+#   3. checks the commit in a throwaway worktree — both typechecks, the unit tests and the client build
+#      (OVERLYX_DEPLOY_FULL=1 in the unit's environment: the strict unit matrix and the browser workflows too),
 #      with the production node_modules unless the lockfile changed;
 #   4. on green: fast-forwards the production checkout, `npm ci` when the lockfile changed, builds
 #      the client, restarts the unit and verifies that the site serves that commit (/api/version).
@@ -86,15 +87,17 @@ check() {   # name command...
 }
 check "client typecheck" npx tsc -p packages/client/tsconfig.json --noEmit
 check "extension typecheck" npx tsc -p packages/vscode/tsconfig.json --noEmit
-check "unit tests" bash scripts/check-unit-release.sh
-check "browser workflows" env OVERLYX_BETA_REPORT_DIR="$STATE/$target-browser" OVERLYX_BETA_BUILD_DIR="$WT/packages/client/dist.beta" OVERLYX_BETA_ASSET_PROOF="$WT/packages/client/dist.beta-proof.json" node scripts/check-beta.mjs
+# testing is kept to a minimum unless asked for (OVERLYX_DEPLOY_FULL=1)
+FULL=${OVERLYX_DEPLOY_FULL:-0}
+if [ "$FULL" = 1 ]; then check "unit tests" bash scripts/check-unit-release.sh; else check "unit tests" npx vitest run; fi
+check "$([ "$FULL" = 1 ] && echo "browser workflows" || echo "client build")" env OVERLYX_BETA_BROWSER="$FULL" OVERLYX_BETA_REPORT_DIR="$STATE/$target-browser" OVERLYX_BETA_BUILD_DIR="$WT/packages/client/dist.beta" OVERLYX_BETA_ASSET_PROOF="$WT/packages/client/dist.beta-proof.json" node scripts/check-beta.mjs
 rm -f "$STATE/$target-"*.log
 
 log "checks passed — deploying ${target:0:10}"
 status "$target" pending "checks passed — deploying"
 git -C "$PROD" merge --ff-only --quiet "$target"
 if [ "$lockfile_changed" = 1 ]; then (cd "$PROD" && npm ci --no-audit --no-fund); fi
-# Publish the same compiled assets exercised by the isolated browser gate.
+# Publish the compiled assets built (and, with OVERLYX_DEPLOY_FULL=1, browser-tested) above.
 (cd "$PROD/packages/client" && rm -rf dist.new && cp -a "$WT/packages/client/dist.beta" dist.new && rm -rf dist && mv dist.new dist) \
   || { status "$target" failure "could not publish tested client assets"; touch "$STATE/failed-$target"; exit 1; }
 systemctl restart "$UNIT"

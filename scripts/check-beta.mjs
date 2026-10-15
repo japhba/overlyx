@@ -84,32 +84,38 @@ try {
     fs.mkdirSync(path.dirname(proof), { recursive: true, mode: 0o700 });
     fs.writeFileSync(proof, JSON.stringify(snapshot) + '\n', { mode: 0o600 });
   }
-  const users = ['admin', 'Admin', 'bob', 'Bob', 'carol', 'Carol', ...Array.from({ length: 6 }, (_, i) => [`u${i + 1}`, `User ${i + 1}`]).flat(),
-    ...Array.from({ length: 6 }, (_, i) => [`luna${i + 1}`, `Reviewer ${i + 1}`]).flat(), 'betadeck', 'Morgan', 'betaposter', 'Riley', 'betareviewer', 'Casey', 'betanew', 'Avery'];
-  await run('seed', process.execPath, ['--import', 'tsx', 'packages/server/src/seed.ts', ...users]);
-  env.PORT = String(await freePort());
-  env.OVERLYX_E2E_BASE = `http://127.0.0.1:${env.PORT}`;
-  const fd = fs.openSync(serverLog, 'w', 0o600);
-  server = spawn(process.execPath, ['--import', 'tsx', 'packages/server/src/index.ts'], { cwd: repo, env, stdio: ['ignore', fd, fd] });
-  server.once('error', error => { serverSpawnError = error.code ?? 'spawn failure'; });
-  fs.closeSync(fd);
-  let ready = false;
-  for (let attempt = 0; attempt < 120; attempt++) {
+  if (process.env.OVERLYX_BETA_BROWSER === '0') {
+    // a deploy builds the candidate only (scripts/deploy.sh, autodeploy.sh); OVERLYX_DEPLOY_FULL=1 or
+    // `npm run test:beta` runs the browser workflows too
+    console.log(`Beta check: candidate built in ${dist} (browser workflows skipped)`);
+  } else {
+    const users = ['admin', 'Admin', 'bob', 'Bob', 'carol', 'Carol', ...Array.from({ length: 6 }, (_, i) => [`u${i + 1}`, `User ${i + 1}`]).flat(),
+      ...Array.from({ length: 6 }, (_, i) => [`luna${i + 1}`, `Reviewer ${i + 1}`]).flat(), 'betadeck', 'Morgan', 'betaposter', 'Riley', 'betareviewer', 'Casey', 'betanew', 'Avery'];
+    await run('seed', process.execPath, ['--import', 'tsx', 'packages/server/src/seed.ts', ...users]);
+    env.PORT = String(await freePort());
+    env.OVERLYX_E2E_BASE = `http://127.0.0.1:${env.PORT}`;
+    const fd = fs.openSync(serverLog, 'w', 0o600);
+    server = spawn(process.execPath, ['--import', 'tsx', 'packages/server/src/index.ts'], { cwd: repo, env, stdio: ['ignore', fd, fd] });
+    server.once('error', error => { serverSpawnError = error.code ?? 'spawn failure'; });
+    fs.closeSync(fd);
+    let ready = false;
+    for (let attempt = 0; attempt < 120; attempt++) {
+      serverHealth();
+      try { const response = await fetch(env.OVERLYX_E2E_BASE + '/api/version', { signal: AbortSignal.timeout(1500) }); if (response.ok) { ready = true; break; } } catch {}
+      await delay(250);
+    }
+    if (!ready) throw new Error(`Isolated server did not become ready. Reports: ${report}`);
+    await verifyReleaseAssets(dist, env.OVERLYX_E2E_BASE, { snapshot });
+    await run('browser', process.platform === 'win32' ? 'npx.cmd' : 'npx', ['playwright', 'test', '-c', 'playwright.release.config.ts']);
     serverHealth();
-    try { const response = await fetch(env.OVERLYX_E2E_BASE + '/api/version', { signal: AbortSignal.timeout(1500) }); if (response.ok) { ready = true; break; } } catch {}
-    await delay(250);
+    let result;
+    try { result = JSON.parse(fs.readFileSync(path.join(report, 'browser-results.json'), 'utf8')); }
+    catch { throw new Error(`Browser report could not be read. Reports: ${report}`); }
+    if (!Number.isSafeInteger(result.stats?.expected) || result.stats.expected < 1 || result.stats.unexpected || result.stats.flaky || result.errors?.length) throw new Error(`Browser gate did not report a clean completed suite. Reports: ${report}`);
+    await verifyReleaseAssets(dist, env.OVERLYX_E2E_BASE, { snapshot });
+    serverHealth();
+    console.log(`Beta browser checks passed: ${result.stats.expected} passed, ${result.stats.skipped} skipped. Reports: ${report}`);
   }
-  if (!ready) throw new Error(`Isolated server did not become ready. Reports: ${report}`);
-  await verifyReleaseAssets(dist, env.OVERLYX_E2E_BASE, { snapshot });
-  await run('browser', process.platform === 'win32' ? 'npx.cmd' : 'npx', ['playwright', 'test', '-c', 'playwright.release.config.ts']);
-  serverHealth();
-  let result;
-  try { result = JSON.parse(fs.readFileSync(path.join(report, 'browser-results.json'), 'utf8')); }
-  catch { throw new Error(`Browser report could not be read. Reports: ${report}`); }
-  if (!Number.isSafeInteger(result.stats?.expected) || result.stats.expected < 1 || result.stats.unexpected || result.stats.flaky || result.errors?.length) throw new Error(`Browser gate did not report a clean completed suite. Reports: ${report}`);
-  await verifyReleaseAssets(dist, env.OVERLYX_E2E_BASE, { snapshot });
-  serverHealth();
-  console.log(`Beta browser checks passed: ${result.stats.expected} passed, ${result.stats.skipped} skipped. Reports: ${report}`);
 } catch (error) {
   console.error(error.message);
   process.exitCode = 1;

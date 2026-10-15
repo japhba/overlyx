@@ -16,8 +16,10 @@
 #      systemd unit): fast-forwarded to the same commit, dependencies installed when the lockfile
 #      changed, client built, server restarted, site checked.
 #
-# Both typechecks, strict unit tests and isolated browser workflows must pass before the
-# push or production checkout changes. The compiled client tested there is the one deployed.
+# Both typechecks and the unit tests must pass before the push or production checkout changes;
+# the client built for that check is the one deployed. Testing is kept to a minimum unless asked
+# for: OVERLYX_DEPLOY_FULL=1 adds the strict unit matrix (npm run test:release) and the isolated
+# browser workflows (npm run test:beta, ~35 min).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 DEV=$(pwd)
@@ -48,10 +50,11 @@ echo "commit $HEAD"
 step "check the release candidate before pushing or changing production"
 npx tsc -p packages/client/tsconfig.json --noEmit
 npx tsc -p packages/vscode/tsconfig.json --noEmit
-bash scripts/check-unit-release.sh
+FULL=${OVERLYX_DEPLOY_FULL:-0}
+if [ "$FULL" = 1 ]; then bash scripts/check-unit-release.sh; else npx vitest run; fi
 candidate=$(mktemp -d /tmp/overlyx-deploy-candidate.XXXXXX)
 trap 'rm -rf "$candidate"' EXIT
-OVERLYX_BETA_BUILD_DIR="$candidate/dist" OVERLYX_BETA_ASSET_PROOF="$candidate/asset-proof.json" node scripts/check-beta.mjs
+OVERLYX_BETA_BROWSER="$FULL" OVERLYX_BETA_BUILD_DIR="$candidate/dist" OVERLYX_BETA_ASSET_PROOF="$candidate/asset-proof.json" node scripts/check-beta.mjs
 node scripts/release-guards.mjs clean "$DEV" "$HEAD"
 
 if [ "$PUSH" = 1 ]; then

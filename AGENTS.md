@@ -2,14 +2,17 @@
 
 How to run, test and deploy: [DOCS.md](DOCS.md). The file format: [README.md](README.md).
 
-## Batch fixes before testing
+## Keep testing to a minimum
 
-Batch related fixes, then run focused checks for the combined changes. Avoid rebuilding or
-rerunning the full suite after every edit. Use extra targeted checks when needed to diagnose a
-failure or resolve uncertainty.
+The user trusts the agents' changes: keep testing to a minimum unless they ask for more. Batch
+related fixes, then run a focused check of what changed (a typecheck, the unit tests of the code you
+touched, a look at the screen for visual changes). Don't add e2e/browser runs, full suites or new
+deployment gates on your own; use extra targeted checks only to diagnose a failure or resolve real
+uncertainty.
 
-When handling deployment, run only tests covering changed code and directly affected behavior.
-Skip unrelated tests and full-suite deployment gates unless the user explicitly requests them.
+Deploys (`scripts/deploy.sh`, the autodeploy timer) run both typechecks, the unit suite and the
+client build — nothing more. The browser release gate (`npm run test:beta`, ~35 min) and the strict
+unit matrix (`npm run test:release`) run only when the user asks (`OVERLYX_DEPLOY_FULL=1`).
 
 ## Keyboard shortcuts are contextual (VS Code's model)
 
