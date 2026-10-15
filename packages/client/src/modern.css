@@ -1,14 +1,15 @@
 /* ============================================================ the Modern interface (app/uimode.ts)
    OverLyX's own quiet look over the same app, after Dieter Rams ("less, but better") and the
    Bauhaus: warm paper greys, graphite ink, hairline rules, a strict 4 / 8 px grid and modest radii;
-   the wordmark's three colours with one job each, always small (a bar, an underline, a fill behind a
-   line icon, a tint), never a surface: red for the one thing to press (Share, + New, Present, a
-   dialog's OK); blue for where you are and what is selected (the selection and the caret, focus,
-   links, the current file, section, tab and style, ticked boxes, the step of the tour); yellow for
-   what is worth a look (comments — styles.css `--cm-*` — find matches, hints and tips, the starter
-   examples, what is still being saved); blue and yellow again, softly, in the marks of what a file
-   is (documents blue, slides / posters / web pages yellow). A toggle that is on stays a pressed
-   graphite key. Type: Jost
+   the wordmark's three colours with one job each, used where they mean something and not only in
+   small doses: blue (LyX's L) is the working colour — what is on and where you are: a key that is
+   on (a pressed toolbar, canvas or rail key, the open menu), the menu item under the pointer, the
+   view you are in, the selection and the caret, focus, links, the current file, tab and style,
+   ticked boxes, a live connection; yellow (LyX's Y) is review and what is worth a look: comments
+   (styles.css `--cm-*`) and the keys that open them, Suggesting, tracked changes switched on, find
+   matches, hints and tips, the starter examples, what is still being saved; red (LyX's X) is the
+   one thing to press (Share, + New, Present, a dialog's OK) and a lost connection. What a file is
+   stays graphite: a colour there would rank some files above others. Type: Jost
    (geometric, Futura's family) for names and titles, Inter for everything one reads while working.
    Icons: Lucide's line set (modernicons.ts). html[data-ui="modern"] redefines the tokens of
    styles.css and lays out the header (one row: the wordmark, the menu button — every menu in one
@@ -48,8 +49,9 @@ html[data-ui="modern"][data-theme="dark"]:not([data-dark-pages]) .editor-page:no
   --m-line2: #e3e0d9;
   --m-line-strong: #c3beb4;
   --m-hover: rgba(28, 27, 25, 0.06);
-  --m-press: #262521;        /* a toggle that is on: a pressed key */
-  --m-on-press: #f6f5f1;
+  --m-press: var(--m-blue);  /* a key that is on, the open menu, the item under the pointer */
+  --m-on-press: #ffffff;
+  --m-on-yellow: #1c1b19;    /* ink on a yellow key, in both themes */
   /* the colours: one signal, the selection, the marks */
   --m-signal: #d6402b;       /* the wordmark's red (LyX's X): the one thing to press */
   --m-signal-hover: #bb3220;
@@ -61,8 +63,6 @@ html[data-ui="modern"][data-theme="dark"]:not([data-dark-pages]) .editor-page:no
   --m-shadow: 0 1px 2px rgba(28, 27, 25, 0.06), 0 8px 24px rgba(28, 27, 25, 0.12);
   /* the two accents as tints: where you are (blue), worth a look (yellow) */
   --m-blue-soft: color-mix(in srgb, var(--m-blue) 11%, var(--m-ground));
-  --m-doc-tint: color-mix(in srgb, var(--m-blue) 24%, var(--m-field));     /* what a file is: a document */
-  --m-show-tint: color-mix(in srgb, var(--m-yellow) 40%, var(--m-paper));  /* slides, a poster, a web page */
   --row-sel: var(--m-blue-soft);
   --hl-bg: color-mix(in srgb, var(--m-yellow) 38%, var(--m-paper));
   --hl-bg2: color-mix(in srgb, var(--m-yellow) 72%, var(--m-paper));
@@ -107,7 +107,7 @@ html[data-ui="modern"][data-theme="dark"] {
   --m-line2: #2e2d29;
   --m-line-strong: #4a4842;
   --m-hover: rgba(236, 235, 230, 0.07);
-  --m-press: #ecebe6;
+  --m-press: var(--m-blue);
   --m-on-press: #1b1a18;
   --m-signal: #ec5a43;
   --m-signal-hover: #ff7058;
@@ -125,7 +125,6 @@ html[data-ui="modern"][data-theme="dark"] {
   --surface2: #201f1c;
   --row-hover: rgba(236, 235, 230, 0.05);
   --m-blue-soft: color-mix(in srgb, var(--m-blue) 17%, var(--m-ground));
-  --m-doc-tint: color-mix(in srgb, var(--m-blue) 34%, var(--m-field));
   --row-sel: var(--m-blue-soft);
   --hl-bg: color-mix(in srgb, var(--m-yellow) 32%, var(--m-paper));
   --hl-bg2: color-mix(in srgb, var(--m-yellow) 48%, var(--m-paper));
@@ -146,17 +145,23 @@ html[data-ui="modern"] * { scrollbar-color: var(--m-line-strong) transparent; sc
 html[data-ui="modern"] .lyx-editor:not(.view-only), html[data-ui="modern"] :is(input, textarea):not([type=checkbox], [type=radio], [type=range]) { caret-color: var(--m-blue); }
 /* yellow: comments wherever one is added, the sun, a tip, what is still being saved */
 html[data-ui="modern"] .tb-btn:is([data-tb="comment"], [data-tb="r-comment"], [data-tb="dk-comment"]) svg { fill: color-mix(in srgb, var(--m-yellow) 45%, var(--m-paper)); }
+html[data-ui="modern"] .toolbar .tb-btn:is([data-tb="r-track"], [data-tb="dk-comment"]).active, html[data-ui="modern"] .rail button[data-rail="comments"].active { background: var(--m-yellow); color: var(--m-on-yellow); }
+html[data-ui="modern"] .toolbar .tb-btn[data-tb="dk-comment"].active svg { fill: none; }
+html[data-ui="modern"] .edit-mode-btn.mode-suggesting { background: color-mix(in srgb, var(--m-yellow) 30%, var(--m-paper)); border-color: var(--m-yellow); color: var(--m-ink); }
+html[data-ui="modern"] .edit-mode-btn.mode-suggesting:hover, html[data-ui="modern"] .edit-mode-btn.mode-suggesting[aria-expanded="true"] { background: color-mix(in srgb, var(--m-yellow) 45%, var(--m-paper)); }
+/* blue: the view you are in, a live connection (red: lost), the settings page you are on */
+html[data-ui="modern"] .view-mode-switch button.active { color: var(--m-blue); }
+html[data-ui="modern"] .statusbar .dot { background: var(--m-red); }
+html[data-ui="modern"] .statusbar .dot.on { background: var(--m-blue); }
+html[data-ui="modern"] .panel-tabs button.active[data-tab="comments"] { border-bottom-color: var(--m-yellow); }
+html[data-ui="modern"] .statusbar .tracking { color: var(--m-ink); background: color-mix(in srgb, var(--m-yellow) 30%, var(--m-ground)); padding: 0 8px; border-radius: 4px; }
+html[data-ui="modern"] .settings-nav button.active { box-shadow: inset 2px 0 0 var(--m-blue); border-radius: 0 4px 4px 0; }
 html[data-ui="modern"] .theme-toggle[data-pref="light"] svg circle { fill: var(--m-yellow); stroke: color-mix(in srgb, var(--m-yellow) 55%, var(--m-ink)); }
 html[data-ui="modern"] .theme-toggle[data-pref="dark"] svg path { fill: color-mix(in srgb, var(--m-yellow) 70%, transparent); stroke: var(--m-yellow); }
 html[data-ui="modern"] .shortcut-tip { background: var(--m-paper); border-color: var(--m-line); box-shadow: inset 3px 0 0 var(--m-yellow), var(--m-shadow); }
 html[data-ui="modern"] .save-state.saving::before { content: ''; display: inline-block; width: 6px; height: 6px; margin: 0 6px 1px 0; border-radius: 50%; background: var(--m-yellow); vertical-align: middle; animation: m-saving 1.1s ease-in-out infinite; }
 @keyframes m-saving { 50% { opacity: 0.3; } }
 @media (prefers-reduced-motion: reduce) { html[data-ui="modern"] .save-state.saving::before { animation: none; } }
-/* what a file is: documents on blue paper, slides, posters and web pages on yellow (opaque tints, so
-   a line icon's overlapping shapes fill evenly) */
-html[data-ui="modern"] :is(.ficon, .hglyph).icon:is([data-kind="doc"], [data-kind="tex"], [data-kind="lyx"], [data-kind="md"]) svg { fill: var(--m-doc-tint); }
-html[data-ui="modern"] :is(.ficon, .hglyph).icon:is([data-kind="deck"], [data-kind="poster"], [data-kind="page"], [data-kind="html"]) svg { fill: var(--m-show-tint); }
-html[data-ui="modern"] :is(.ficon, .hglyph).icon[data-kind="deck"] svg > :last-child { fill: none; }   /* the easel's legs */
 
 /* ------------------------------------------------------------ the wordmark: the Bauhaus one (styles.css `.ol-wordmark.bauhaus`) */
 
@@ -233,14 +238,17 @@ html[data-ui="modern"] .menu-list, html[data-ui="modern"] .ctx-menu, html[data-u
 }
 html[data-ui="modern"] .menu-list { padding: 4px; min-width: 248px; }
 html[data-ui="modern"] .menu-item { padding: 0 10px; min-height: 28px; align-items: center; border-radius: 4px; font-size: 13px; }
-html[data-ui="modern"] .menu-item:hover { background: var(--m-hover); color: var(--m-ink); }
-html[data-ui="modern"] .menu-item .shortcut, html[data-ui="modern"] .menu-item:hover .shortcut { color: var(--m-muted); font-size: 11.5px; font-variant-numeric: tabular-nums; letter-spacing: 0.01em; }
+html[data-ui="modern"] .menu-item:hover { background: var(--m-press); color: var(--m-on-press); }
+html[data-ui="modern"] .menu-item .shortcut { color: var(--m-muted); font-size: 11.5px; font-variant-numeric: tabular-nums; letter-spacing: 0.01em; }
 html[data-ui="modern"] .menu-list hr, html[data-ui="modern"] .menu-sep { border: 0; border-top: 1px solid var(--m-line2); margin: 4px 6px; }
-html[data-ui="modern"] .menu-list :focus-visible, html[data-ui="modern"] .ctx-menu :focus-visible { outline: none; background: var(--m-hover); }
-html[data-ui="modern"] .menu-result.sel { background: var(--m-hover); color: var(--m-ink); }
+html[data-ui="modern"] .menu-list :focus-visible, html[data-ui="modern"] .ctx-menu :focus-visible { outline: none; }
+html[data-ui="modern"] :is(.menu-list, .ctx-menu):not(:hover) :focus-visible { background: var(--m-press); color: var(--m-on-press); }   /* one highlight: the pointer's wins */
+html[data-ui="modern"] .menu-result.sel { background: var(--m-press); color: var(--m-on-press); }
+html[data-ui="modern"] :is(.menu-item:hover, .menu-result.sel) :is(.shortcut, .path), html[data-ui="modern"] .ctx-item:is(:hover, .active) :is(.shortcut, .arrow, .ctx-icon) { color: var(--on-accent-muted); }
+html[data-ui="modern"] .ctx-item.checked:is(:hover, .active) .ctx-icon::before { color: inherit; }
 html[data-ui="modern"] .ctx-menu { padding: 4px; }
 html[data-ui="modern"] .ctx-item { border-radius: 4px; min-height: 28px; padding: 0 10px 0 12px; }
-html[data-ui="modern"] .ctx-item:hover, html[data-ui="modern"] .ctx-item.active { background: var(--m-hover); }
+html[data-ui="modern"] .ctx-item:hover, html[data-ui="modern"] .ctx-item.active { background: var(--m-press); color: var(--m-on-press); }
 html[data-ui="modern"] .tb-popup { padding: 6px; }
 html[data-ui="modern"] .tb-popup-title { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: var(--m-muted); padding: 4px 8px 6px; }
 html[data-ui="modern"] .tb-popup.list .tb-pal-item { height: 30px; border-radius: 4px; padding: 0 10px; border: 0; }
@@ -389,18 +397,18 @@ html[data-ui="modern"] .home-card .title { font-family: var(--m-display); font-s
 html[data-ui="modern"] .home-card .blurb { color: var(--m-ink2); font-size: 13px; line-height: 1.55; }
 html[data-ui="modern"] .home-card .docs a { color: var(--m-ink2); font-size: 12.5px; display: flex; align-items: center; gap: 6px; }
 html[data-ui="modern"] .home-row .docs a { display: inline-flex; }
-html[data-ui="modern"] .home-card .docs a:hover { color: var(--m-ink); }
+html[data-ui="modern"] .home-card .docs a:hover { color: var(--m-blue); }
 html[data-ui="modern"] .home .cards.rows { border: 1px solid var(--m-line); border-radius: 10px; box-shadow: none; background: var(--m-paper); }
 html[data-ui="modern"] .home-row { border-radius: 0; border: 0; border-top: 1px solid var(--m-line2); padding: 12px 16px; background: transparent; box-shadow: none; }
 html[data-ui="modern"] .home-row:first-child { border-top: 0; }
 html[data-ui="modern"] .home-row:hover { background: color-mix(in srgb, var(--m-ink) 2.5%, transparent); }
 html[data-ui="modern"] .home-row .title .name { font-family: var(--m-display); font-size: 15px; font-weight: 500; display: inline-flex; align-items: center; gap: 8px; }
-html[data-ui="modern"] .home-row .title .name:hover { color: var(--m-ink); text-decoration: underline; text-decoration-color: var(--m-line-strong); text-underline-offset: 3px; }
+html[data-ui="modern"] .home-row .title .name:hover { color: var(--m-blue); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--m-blue) 45%, transparent); text-underline-offset: 3px; }
 html[data-ui="modern"] .home-row .docs { gap: 2px 16px; }
 /* a row's buttons are quiet; Open is the one with an edge */
 html[data-ui="modern"] .home-card .actions .btn { border-color: transparent; color: var(--m-ink2); }
 html[data-ui="modern"] .home-card .actions .btn:hover:not(:disabled) { color: var(--m-ink); }
-html[data-ui="modern"] .home-card .actions .btn.primary { background: transparent; border-color: var(--m-line-strong); color: var(--m-ink); font-weight: 600; }
+html[data-ui="modern"] .home-card .actions .btn.primary { background: transparent; border-color: color-mix(in srgb, var(--m-blue) 45%, transparent); color: var(--m-blue); font-weight: 600; }
 html[data-ui="modern"] .home-card .actions .btn.primary:hover:not(:disabled) { background: var(--m-press); border-color: var(--m-press); color: var(--m-on-press); }
 html[data-ui="modern"] .home-card .actions .btn.danger { color: var(--m-muted); }
 html[data-ui="modern"] .home-card .actions .btn.danger:hover:not(:disabled) { color: var(--err); }
