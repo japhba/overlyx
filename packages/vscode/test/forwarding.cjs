@@ -4,17 +4,20 @@ const Module = require('node:module');
 const path = require('node:path');
 
 exports.startForwarding = async function (vscode, extension) {
-  let target;
+  let target, bridgeRoute, canvasRoute;
+  const targets = new Map();
   let enabled = true;
   let resolved = 0;
   const requests = [];
   const proxy = http.createServer((req, res) => {
-    if (!enabled || !target || !req.url.startsWith('/forwarded/')) {
+    const route = /^\/forwarded\/(\d+)(\/.*)$/.exec(req.url || '');
+    const upstreamTarget = route && targets.get(route[1]);
+    if (!enabled || !upstreamTarget) {
       res.statusCode = 503; res.end(); return;
     }
     requests.push(req.url);
-    const upstream = http.request({ hostname: target.hostname, port: target.port,
-      path: req.url.slice('/forwarded'.length), method: req.method, headers: req.headers }, response => {
+    const upstream = http.request({ hostname: upstreamTarget.hostname, port: upstreamTarget.port,
+      path: route[2], method: req.method, headers: req.headers }, response => {
       res.writeHead(response.statusCode, response.headers);
       response.pipe(res);
     });
@@ -26,19 +29,24 @@ exports.startForwarding = async function (vscode, extension) {
   const origin = `http://localhost:${proxy.address().port}`;
   const forwardedEnv = Object.create(vscode.env);
   Object.defineProperty(forwardedEnv, 'asExternalUri', { value: async uri => {
-    target = new URL(uri.toString());
-    if (!Number(target.port)) throw new Error('bridge must start before resolving its external URI');
-    const response = await fetch(`${target}/api/projects`);
-    if (!response.ok) throw new Error('bridge must be ready before a webview can connect');
+    const resolvedTarget = new URL(uri.toString());
+    if (!Number(resolvedTarget.port)) throw new Error('server must start before resolving its external URI');
+    const bridge = resolvedTarget.pathname.startsWith('/t/');
+    const response = await fetch(bridge ? `${resolvedTarget}/api/projects` : `${resolvedTarget.origin}/_ol/svg-frame.html`);
+    if (!response.ok) throw new Error('server must be ready before a webview can connect');
+    let id = [...targets].find(([, value]) => value.origin === resolvedTarget.origin)?.[0];
+    if (!id) { id = String(targets.size + 1); targets.set(id, new URL(resolvedTarget.origin)); }
+    if (bridge) { target = resolvedTarget; bridgeRoute = id; } else canvasRoute = id;
     resolved++;
-    return vscode.Uri.parse(`${origin}/forwarded${target.pathname}`);
+    return vscode.Uri.parse(`${origin}/forwarded/${id}${resolvedTarget.pathname}`);
   } });
   const forwardedVscode = Object.create(vscode);
   Object.defineProperty(forwardedVscode, 'env', { value: forwardedEnv, enumerable: true });
   return {
     origin, requests,
     get resolved() { return resolved; },
-    get base() { return `${origin}/forwarded${target.pathname}`; },
+    get base() { return `${origin}/forwarded/${bridgeRoute}${target.pathname}`; },
+    get canvasBase() { return canvasRoute ? `${origin}/forwarded/${canvasRoute}/_ol/` : undefined; },
     setEnabled(value) { enabled = value; },
     async activate() {
       const originalLoad = Module._load;

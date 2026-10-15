@@ -46,6 +46,10 @@ exports.run = async function run() {
   assert.ok(forwarding.resolved >= 2, 'resolve the forwarding URI after startup and when opening the editor');
   assert.notStrictEqual(new URL(forwarding.base).port, new URL(base).port, 'the test must exercise different client and server ports');
   assert.ok(entry.panel.webview.html.includes(forwarding.base), 'the webview uses the complete forwarded URI');
+  assert.ok(forwarding.canvasBase, 'the SVG canvas server has its own forwarded route');
+  assert.ok(entry.panel.webview.html.includes(forwarding.canvasBase), 'the webview keeps the canvas forwarding prefix');
+  assert.strictEqual((await fetch(forwarding.canvasBase + 'svg-frame.html')).status, 200, 'the SVG bootstrap is served through its route');
+  assert.strictEqual((await fetch(forwarding.canvasBase + 'runtime.js')).status, 200, 'the layout runtime is served through its route');
   const enc = encodeURIComponent(entry.session.docId);
   const meta = await (await fetch(`${base}/api/docs/${enc}/meta`)).json();
   assert.strictEqual(meta.textclass, 'article');
