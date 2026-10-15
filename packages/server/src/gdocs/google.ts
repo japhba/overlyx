@@ -188,6 +188,8 @@ export interface GoogleApi {
   /** a comment on `quoted` (anchored to `range` of the body — of a tab's, with its tabId — where the API allows it) */
   createComment(id: string, c: { content: string; quoted?: string; range?: { startIndex: number; endIndex: number; tabId?: string } }): Promise<GComment>;
   createReply(id: string, commentId: string, r: { content?: string; action?: 'resolve' | 'reopen' }): Promise<GReply>;
+  /** delete a comment (Drive allows it for the account's own) */
+  deleteComment?(id: string, commentId: string): Promise<void>;
 }
 
 import { GoogleApiError } from './errors.ts';
@@ -277,6 +279,7 @@ export function googleApi(userId: number): GoogleApi {
       }
       return call<GComment>('POST', DRIVE + encodeURIComponent(id) + `/comments?fields=${encodeURIComponent(COMMENT_FIELDS)}`, { content: c.content, ...(c.quoted ? { quotedFileContent: { mimeType: 'text/plain', value: c.quoted } } : {}) });
     },
+    deleteComment: async (id, commentId) => { await call('DELETE', DRIVE + encodeURIComponent(id) + '/comments/' + encodeURIComponent(commentId)); },
     createReply: (id, commentId, r) => call<GReply>('POST', DRIVE + encodeURIComponent(id) + '/comments/' + encodeURIComponent(commentId) + '/replies?fields=id,content,author(displayName,me),createdTime,action', { ...(r.content ? { content: r.content } : {}), ...(r.action ? { action: r.action } : {}) }),
   };
   return api;

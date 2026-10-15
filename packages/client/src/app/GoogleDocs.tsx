@@ -105,7 +105,7 @@ export function GoogleDocsDialog({ docId, onClose, notify }: { docId: string; on
         )}
         {st?.configured && (!link || link.format === 'docx') && <div data-gdocs-limitations>
           <p class="hint">Images and equations go to Google Docs as a Word (DOCX) upload. Review complex equations: Google Docs can simplify their layout, including flattening matrices.</p>
-          <p class="hint">When images or equations change here, the next sync uploads the whole document into the same Google Doc again (its link, sharing and version history stay). Comments made in Google Docs then keep their text but lose their place there; here they stay at theirs. Changes to images and equations made in Google Docs don't come back.</p>
+          <p class="hint">When images or equations change here, the next sync uploads the whole document into the same Google Doc again (its link, sharing and version history stay). Open comments go along and are placed at their text again, with their replies; a comment someone else made in Google Docs reappears under the account that linked the document, with that person's name in front, and the old one is resolved. Changes to images and equations made in Google Docs don't come back.</p>
         </div>}
         {error && <p class="error" data-gdocs-error>{error}</p>}
         {st?.account && (

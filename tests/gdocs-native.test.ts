@@ -220,6 +220,44 @@ describe('DOCX-backed sync', async () => {
     } finally { delete google.replaceWithDocx; replacer.mockClear(); }
   });
 
+  it('an upload carries the open comment threads along: anchored again, replies included, the old comments let go', async () => {
+    const at = google.indexOf(fileId, 'Text after');
+    const theirs = google.comment(fileId, at, at + 10, 'Check this phrase');
+    await google.createReply(fileId, theirs.id, { content: 'And a reply' }, 'Kirsten');
+    expect((await sync.syncDoc(id)).comments.fromGoogle).toBe(1);
+    expect(fs.readFileSync(file, 'utf8')).toContain('And a reply');
+    const threads = () => (fs.readFileSync(file, 'utf8').match(/<!-- @comment/g) ?? []).length;
+    expect(threads()).toBe(1);
+    // Drive's conversion makes an anchored comment (by the account) of each Word comment in the upload
+    const importing = vi.fn(async (gid: string) => {
+      await replacer(gid);
+      const doc = await manager.open(id);
+      for (const t of docx.markThreads(doc.toLyxDocument()).threads) {
+        const k = google.indexOf(gid, 'Text after');
+        google.comment(gid, k, k + 10, t.content).author = { displayName: 'U', me: true };
+      }
+    });
+    google.replaceWithDocx = importing;
+    try {
+      const equation = nativeElements(await google.getDocument(fileId))[1];
+      await google.batchUpdate(fileId, [{ deleteContentRange: { range: { startIndex: equation.startIndex, endIndex: equation.endIndex } } }], undefined, 'Kirsten');
+      const report = await sync.syncDoc(id);
+      expect(importing).toHaveBeenCalledTimes(1);
+      expect(report.notes.join(' ')).toMatch(/1 comment anchored in the Google Doc again/);
+      const all = await google.listComments(fileId);
+      const moved = all.find(c => c.id !== theirs.id && c.content === 'Kirsten: Check this phrase')!;
+      expect(google.anchored(fileId, moved.id)).toBe(true);
+      expect(moved.replies?.map(r => r.content)).toEqual(['Kirsten: And a reply']);
+      // Kirsten's own comment cannot be deleted by the account: resolved instead, and no longer synced
+      expect(all.find(c => c.id === theirs.id)?.resolved).toBe(true);
+      expect(threads()).toBe(1);
+      const again = await sync.syncDoc(id);
+      expect(again.comments).toEqual({ fromGoogle: 0, toGoogle: 0 });
+      expect(threads()).toBe(1);
+      expect(fs.readFileSync(file, 'utf8')).not.toMatch(/\[resolved\]/);
+    } finally { delete google.replaceWithDocx; replacer.mockClear(); }
+  });
+
   it('turns an older text link (formulas as $…$) into a DOCX link with native equations', async () => {
     const legacy = path.join(ROOT, 'projects/u/p/legacy.md'), legacyId = 'u/p/legacy.md';
     fs.writeFileSync(legacy, PROBE);

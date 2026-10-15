@@ -478,6 +478,13 @@ export class FakeGoogle implements GoogleApi {
     this.comments.get(id)!.push(made);
     return { ...made };
   }
+  async deleteComment(id: string, commentId: string): Promise<void> {
+    const c = this.comments.get(id)?.find(x => x.id === commentId && !x.deleted);
+    if (!c) throw new GoogleApiError('Comment not found', 404);
+    if (!c.author?.me) throw new GoogleApiError('The user does not have sufficient permissions for this comment', 403);
+    c.deleted = true;
+  }
+
   async createReply(id: string, commentId: string, r: { content?: string; action?: 'resolve' | 'reopen' }, by = this.me): Promise<GReply> {
     const c = this.comments.get(id)!.find(x => x.id === commentId);
     if (!c) throw new GoogleApiError('Comment not found', 404);

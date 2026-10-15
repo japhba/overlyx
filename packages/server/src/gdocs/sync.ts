@@ -10,7 +10,8 @@
  *     only through a DOCX upload (the Docs API cannot insert an equation): when the ones here differ
  *     from the Google Doc's — or an older text link still shows them as `$…$` — the whole document
  *     is uploaded into the same Google Doc again (reexport), which turns them into native equations
- *     and images; comments made in Google Docs keep their text there but lose their place;
+ *     and images. The open comment threads go along as Word comments, so Google anchors them at
+ *     their text again; the sync takes those comments over and deletes the old ones (adoptComments);
  *  3. syncs comment threads: a Google comment becomes a thread at the text it quotes, a thread
  *     written here a Google comment (anchored where the API allows), replies and resolving both ways;
  *  4. remembers the document's text and the Google Doc's blocks as the base of the next sync.
@@ -34,7 +35,7 @@ import { db } from '../db.ts';
 import { manager, type OpenDoc } from '../docs.ts';
 import { project, readGoogle, strip, toParagraphs, blockKey, itemRuns, nativeKeys, hasUnknownObjects, MEDIA_WARNING, UNKNOWN_WARNING, flatTabs, tabDocument, type DocsDocument, type DocsFile, type GBlock, type Projection } from './model.ts';
 import { planRound, inTab } from './edits.ts';
-import { buildDocx } from './docx.ts';
+import { buildDocx, markThreads } from './docx.ts';
 import { attachObjectSources, bindImportedObjects, type ObjectBindings } from './native.ts';
 import { reconcileGroup } from './importing.ts';
 import { googleApi, GoogleAuthError, type GComment, type GoogleApi } from './google.ts';
@@ -120,7 +121,7 @@ async function createLink(docId: string, userId: number, title: string): Promise
   if (api.importDocument) {
     const doc = await manager.open(docId);
     const snapshot = doc.toLyxDocument(), baseText = doc.textOf(snapshot);
-    const file = await api.importDocument(title, await buildDocx(snapshot, doc.project, doc.relPath));
+    const file = await api.importDocument(title, await buildDocx(snapshot, doc.project, doc.relPath, { comments: true }));
     let raw = await api.getDocument(file.id);
     const { bindings, requests } = bindImportedObjects(raw, project(snapshot, true).blocks);
     if (requests.length) {
@@ -132,6 +133,7 @@ async function createLink(docId: string, userId: number, title: string): Promise
     if (!linkerMayEdit({ doc_id: docId, user_id: userId })) throw new Error('The person who linked this document to Google Docs may not edit it any more');
     db.prepare(`INSERT INTO gdocs_links (doc_id, file_id, user_id, url, auto, created_at, format, objects, base_text, base_google) VALUES (?, ?, ?, ?, 1, ?, 'docx', ?, ?, ?)`)
       .run(docId, file.id, userId, file.webViewLink ?? null, Date.now(), JSON.stringify(bindings), baseText, JSON.stringify(strip(readGoogle(raw).blocks)));
+    await adoptComments(api, linkOf(docId)!, snapshot, new Set());
     await syncDoc(docId);
     return linkOf(docId)!;
   }
@@ -292,8 +294,9 @@ async function reexport(api: GoogleApi, link: LinkRow, doc: OpenDoc, ours: LyxDo
   if (reexportFailed.get(link.doc_id) === mine) { report.warnings.push(MEDIA_WARNING); return null; }
   const now = await api.getDocument(link.file_id);
   if (raw.revisionId && now.revisionId !== raw.revisionId) return null;   // edited in Google Docs just now
+  const before = new Set((await api.listComments(link.file_id)).map(c => c.id));
   try {
-    await api.replaceWithDocx(link.file_id, await buildDocx(ours, doc.project, doc.relPath));
+    await api.replaceWithDocx(link.file_id, await buildDocx(ours, doc.project, doc.relPath, { comments: true }));
   } catch (e) {
     reexportFailed.set(link.doc_id, mine);
     report.warnings.push(`Formulas and images could not be exported to the Google Doc: ${(e as Error).message}`);
@@ -318,7 +321,50 @@ async function reexport(api: GoogleApi, link: LinkRow, doc: OpenDoc, ours: LyxDo
   link.format = 'docx';
   link.objects = objects;
   report.notes.push('formulas and images uploaded to the Google Doc');
+  await adoptComments(api, link, ours, before, report);
   return { raw: attachObjectSources(fresh, bindings), bindings };
+}
+
+/**
+ * After a DOCX upload that carried the open threads as Word comments (buildDocx `comments`): each
+ * thread takes over the comment Google made of its Word comment — anchored at its text — with its
+ * replies posted again, and the comment it had before is deleted (resolved where Drive does not
+ * allow that). Comments the upload made that match no thread are deleted too. Comments that appeared
+ * meanwhile from anybody else are left alone (the sync takes them in as usual). The comments let go
+ * stay in the map, closed, so that the sync never takes them for new ones. `before`: the comment ids
+ * before the upload.
+ */
+async function adoptComments(api: GoogleApi, link: LinkRow, ours: LyxDocument, before: Set<string>, report?: SyncReport): Promise<void> {
+  const made = (await api.listComments(link.file_id)).filter(c => !before.has(c.id) && !c.deleted && c.author?.me !== false);
+  if (!made.length) return;
+  const map: ThreadEntry[] = link.comments ? JSON.parse(link.comments) : [];
+  const norm = (s: string) => s.replace(/\s+/g, ' ').trim();
+  const free = new Set(made.map(c => c.id));
+  const retire = async (gid: string) => {
+    try { if (!api.deleteComment) throw new Error('no delete'); await api.deleteComment(link.file_id, gid); }
+    catch { await api.createReply(link.file_id, gid, { action: 'resolve' }).catch(() => undefined); }
+  };
+  let moved = 0;
+  for (const t of markThreads(ours).threads) {
+    const c = made.find(x => free.has(x.id) && norm(x.content ?? '') === norm(t.content));
+    if (!c) continue;
+    free.delete(c.id);
+    const sig = msgSig(t.messages[0]);
+    const entry: ThreadEntry = { gid: c.id, sig, replies: (c.replies ?? []).map(r => r.id), msgs: [sig], resolved: false };
+    for (const m of t.messages.slice(1)) {
+      const r = await api.createReply(link.file_id, c.id, { content: `${m.author}: ${m.text}` });
+      entry.replies.push(r.id);
+      entry.msgs.push(msgSig(m));
+    }
+    for (const old of map.filter(e => !e.closed && e.sig === sig)) { await retire(old.gid); old.closed = true; }
+    map.push(entry);
+    moved++;
+  }
+  for (const gid of free) { await retire(gid); map.push({ gid, sig: '', replies: [], msgs: [], resolved: true, closed: true }); }
+  link.comments = JSON.stringify(map);
+  // at once: a sync that fails later must not take the new comments for comments made in Google Docs
+  db.prepare('UPDATE gdocs_links SET comments = ? WHERE doc_id = ?').run(link.comments, link.doc_id);
+  if (moved) report?.notes.push(`${moved} comment${moved === 1 ? '' : 's'} anchored in the Google Doc again`);
 }
 
 const isTracking = (lines: string[]) => lines.includes('\\tracking_changes true');
