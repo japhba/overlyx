@@ -13,7 +13,7 @@ import type { DocsDocument, DocsTextStyle, DocsStructural, DocsParagraphElement 
 import type { GComment, GFile, GReply, GoogleApi } from './google.ts';
 import { GoogleApiError } from './errors.ts';
 
-interface Ch { ch: string; style: DocsTextStyle; foot?: string; id: number }
+interface Ch { ch: string; style: DocsTextStyle; foot?: string; id: number; native?: { width: number; equation?: {}; inlineObjectElement?: { inlineObjectId: string } }; continuation?: true }
 interface PStyle { namedStyleType: string; alignment: string; indentStart: number; shading?: boolean }
 interface Para { k: 'p'; chars: Ch[]; ps: PStyle; bullet?: { listId: string; nestingLevel: number } }
 interface Table { k: 't'; rows: Para[][][] }
@@ -60,8 +60,32 @@ export class FakeDoc {
   body: El[] = [newPara()];
   footnotes = new Map<string, El[]>();
   lists = new Map<string, boolean>();   // id → ordered
+  namedRanges = new Map<string, { name: string; ids: number[] }>();
   revision = 1;
   constructor(public id: string, public title: string) {}
+
+  /** Seed a converted document from an actual documents.get fixture. */
+  load(raw: DocsDocument): void {
+    const walk = (content: DocsStructural[]): El[] => content.flatMap<El>(s => {
+      if (s.table) return [{ k: 't' as const, rows: s.table.tableRows.map(r => r.tableCells.map(c => walk(c.content) as Para[])) }];
+      if (!s.paragraph) return [];
+      const p = newPara({ namedStyleType: s.paragraph.paragraphStyle?.namedStyleType ?? 'NORMAL_TEXT', alignment: s.paragraph.paragraphStyle?.alignment ?? 'START', indentStart: s.paragraph.paragraphStyle?.indentStart?.magnitude ?? 0 });
+      p.bullet = s.paragraph.bullet ? { listId: s.paragraph.bullet.listId, nestingLevel: s.paragraph.bullet.nestingLevel ?? 0 } : undefined;
+      for (const e of s.paragraph.elements) {
+        if (e.equation || e.inlineObjectElement) {
+          const width = e.endIndex - e.startIndex;
+          p.chars.push({ ch: '￼', id: ++charIds, style: {}, native: { width, ...(e.equation ? { equation: {} } : { inlineObjectElement: e.inlineObjectElement }) } });
+          for (let i = 1; i < width; i++) p.chars.push({ ch: '\u2060', id: ++charIds, style: {}, continuation: true });
+        } else if (e.footnoteReference) p.chars.push({ ch: '￼', id: ++charIds, style: {}, foot: e.footnoteReference.footnoteId });
+        else if (e.textRun) for (const ch of e.textRun.content.split('')) p.chars.push({ ch, id: ++charIds, style: { ...e.textRun.textStyle } });
+      }
+      if (p.chars.at(-1)?.ch === '\n') p.chars.pop();
+      return [p];
+    });
+    this.body = walk(raw.body.content);
+    this.footnotes = new Map(Object.entries(raw.footnotes ?? {}).map(([id, fn]) => [id, walk(fn.content)]));
+    for (const [id, list] of Object.entries(raw.lists ?? {})) this.lists.set(id, !!list.listProperties?.nestingLevels?.[0]?.glyphType);
+  }
 
   /* ---- writing (batchUpdate requests) ---- */
 
@@ -78,7 +102,7 @@ export class FakeDoc {
     let p = list[i] as Para;
     let off = index - start;
     const inherit = { ...(p.chars[off - 1]?.style ?? p.chars[off]?.style ?? {}) };
-    for (const c of text.replace(/[\u0000-\u0008\u000c-\u001f]/g, m => (m === '\n' ? m : ''))) {
+    for (const c of text.replace(/[\u0000-\u0008\u000c-\u001f]/g, m => (m === '\n' ? m : '')).split('')) {
       if (c === '\n') {
         const q: Para = { k: 'p', chars: p.chars.slice(off), ps: { ...p.ps }, bullet: p.bullet ? { ...p.bullet } : undefined };
         p.chars = p.chars.slice(0, off);
@@ -237,6 +261,11 @@ export class FakeDoc {
         return {};
       case 'insertTable': this.insertTable(r.location.index, r.rows, r.columns); return {};
       case 'createFootnote': return { createFootnote: { footnoteId: this.createFootnote(r.location.index) } };
+      case 'createNamedRange': {
+        const id = 'range' + (this.namedRanges.size + 1);
+        this.namedRanges.set(id, { name: r.name, ids: this.charsIn(r.range.startIndex, r.range.endIndex).map(c => c.id) });
+        return { createNamedRange: { namedRangeId: id } };
+      }
       default: throw new GoogleApiError('Unknown request ' + kind, 400);
     }
   }
@@ -249,6 +278,8 @@ export class FakeDoc {
     let run: { content: string; style: DocsTextStyle; start: number } | null = null;
     const flush = () => { if (run) { elements.push({ startIndex: run.start, endIndex: run.start + run.content.length, textRun: { content: run.content, textStyle: { ...run.style } } }); run = null; } };
     for (const c of p.chars) {
+      if (c.native) { flush(); elements.push({ startIndex: at, endIndex: at + c.native.width, ...(c.native.equation ? { equation: {} } : { inlineObjectElement: c.native.inlineObjectElement! }) }); at++; continue; }
+      if (c.continuation) { at++; continue; }
       if (c.foot) { flush(); elements.push({ startIndex: at, endIndex: at + 1, footnoteReference: { footnoteId: c.foot } }); at++; continue; }
       if (run && JSON.stringify(run.style) === JSON.stringify(c.style)) run.content += c.ch;
       else { flush(); run = { content: c.ch, style: c.style, start: at }; }
@@ -290,7 +321,18 @@ export class FakeDoc {
     for (const [id, ordered] of this.lists) lists[id] = { listProperties: { nestingLevels: Array.from({ length: 9 }, () => (ordered ? { glyphType: 'DECIMAL' } : { glyphSymbol: '●' })) } };
     const footnotes: DocsDocument['footnotes'] = {};
     for (const [id, els] of this.footnotes) footnotes[id] = { footnoteId: id, content: this.contentJson(els, 0) };
-    return { documentId: this.id, title: this.title, revisionId: 'rev' + this.revision, body: { content: [{ endIndex: 1, sectionBreak: {} } as DocsStructural, ...this.contentJson(this.body, 1)] }, lists, footnotes };
+    const namedRanges: DocsDocument['namedRanges'] = {};
+    const positions = new Map<number, number>();
+    for (const { list, base } of paraLists(this.body, 1)) {
+      let at = base;
+      for (const e of list) { if (e.k === 'p') e.chars.forEach((c, i) => positions.set(c.id, at + i)); at += elSize(e); }
+    }
+    for (const [id, range] of this.namedRanges) {
+      const indices = range.ids.flatMap(id => positions.has(id) ? [positions.get(id)!] : []);
+      if (!indices.length) continue;
+      (namedRanges[range.name] ??= { namedRanges: [] }).namedRanges.push({ ranges: [{ startIndex: Math.min(...indices), endIndex: Math.max(...indices) + 1 }] });
+    }
+    return { documentId: this.id, title: this.title, revisionId: 'rev' + this.revision, body: { content: [{ endIndex: 1, sectionBreak: {} } as DocsStructural, ...this.contentJson(this.body, 1)] }, lists, footnotes, namedRanges };
   }
 
   /** the body as text lines (tests) */
@@ -313,6 +355,7 @@ interface FakeComment extends GComment { anchorChars?: Ch[] }
 
 /** The Docs and Drive APIs for any number of documents, acting as one Google account ("me"). */
 export class FakeGoogle implements GoogleApi {
+  importDocument?: GoogleApi['importDocument'];
   docs = new Map<string, FakeDoc>();
   files = new Map<string, GFile & { version: string }>();
   comments = new Map<string, FakeComment[]>();
@@ -345,7 +388,7 @@ export class FakeGoogle implements GoogleApi {
     const d = this.doc(id);
     if (requiredRevisionId && requiredRevisionId !== 'rev' + d.revision) throw new GoogleApiError('The document was changed since the revision', 400, 'FAILED_PRECONDITION');
     // all or nothing, like the real API
-    const backup = JSON.stringify({ body: d.body, footnotes: [...d.footnotes], lists: [...d.lists] });
+    const backup = JSON.stringify({ body: d.body, footnotes: [...d.footnotes], lists: [...d.lists], namedRanges: [...d.namedRanges] });
     const replies: Record<string, unknown>[] = [];
     try {
       for (const r of requests) {
@@ -361,7 +404,7 @@ export class FakeGoogle implements GoogleApi {
       }
     } catch (e) {
       const b = JSON.parse(backup);
-      d.body = b.body; d.footnotes = new Map(b.footnotes); d.lists = new Map(b.lists);
+      d.body = b.body; d.footnotes = new Map(b.footnotes); d.lists = new Map(b.lists); d.namedRanges = new Map(b.namedRanges);
       throw e;
     }
     d.revision++;
@@ -411,7 +454,7 @@ export class FakeGoogle implements GoogleApi {
     const raw = this.doc(id).json();
     for (const s of raw.body.content) {
       if (!s.paragraph) continue;
-      const t = s.paragraph.elements.map(e => e.textRun?.content ?? '￼').join('');
+      const t = s.paragraph.elements.map(e => e.textRun?.content ?? '￼'.repeat(e.endIndex - e.startIndex)).join('');
       const k = t.indexOf(text);
       if (k >= 0) return (s.startIndex ?? 0) + k;
     }

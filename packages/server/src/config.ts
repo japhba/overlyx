@@ -16,6 +16,8 @@ export const config = {
   projectsDir: path.resolve(process.env.OVERLYX_PROJECTS_DIR ?? '/root/projects'),
   layoutDir: process.env.LYX_LAYOUT_DIR ?? (fs.existsSync('/root/lyx/lib/layouts') ? '/root/lyx/lib/layouts' : path.join(REPO_ROOT, 'lyx/lib/layouts')),
   lyxBin: process.env.OVERLYX_LYX_BIN ?? 'lyx',
+  /** first Google Docs export: Markdown → DOCX with embedded figures and native equations */
+  pandocBin: process.env.OVERLYX_PANDOC_BIN ?? 'pandoc',
   lyx2lyx: process.env.OVERLYX_LYX2LYX ?? (fs.existsSync('/root/lyx/lib/lyx2lyx/lyx2lyx') ? '/root/lyx/lib/lyx2lyx/lyx2lyx' : path.join(REPO_ROOT, 'lyx/lib/lyx2lyx/lyx2lyx')),
   publicUrl: process.env.OVERLYX_PUBLIC_URL ?? '',
   google: {

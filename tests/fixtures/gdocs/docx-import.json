@@ -1,0 +1,291 @@
+{
+  "documentId": "converted-docx-fixture",
+  "body": {
+    "content": [
+      {
+        "endIndex": 1,
+        "sectionBreak": {
+          "sectionStyle": {
+            "columnSeparatorStyle": "NONE",
+            "contentDirection": "LEFT_TO_RIGHT",
+            "sectionType": "CONTINUOUS"
+          }
+        }
+      },
+      {
+        "startIndex": 1,
+        "endIndex": 28,
+        "paragraph": {
+          "elements": [
+            {
+              "startIndex": 1,
+              "endIndex": 28,
+              "textRun": {
+                "content": "Google Docs fidelity probe\n",
+                "textStyle": {}
+              }
+            }
+          ],
+          "paragraphStyle": {
+            "namedStyleType": "HEADING_1"
+          }
+        }
+      },
+      {
+        "startIndex": 28,
+        "endIndex": 66,
+        "paragraph": {
+          "elements": [
+            {
+              "startIndex": 28,
+              "endIndex": 45,
+              "textRun": {
+                "content": "Inline equation: ",
+                "textStyle": {}
+              }
+            },
+            {
+              "startIndex": 45,
+              "endIndex": 64,
+              "equation": {}
+            },
+            {
+              "startIndex": 64,
+              "endIndex": 66,
+              "textRun": {
+                "content": ".\n",
+                "textStyle": {}
+              }
+            }
+          ],
+          "paragraphStyle": {
+            "namedStyleType": "NORMAL_TEXT",
+            "alignment": "START",
+            "indentStart": {
+              "unit": "PT"
+            }
+          }
+        }
+      },
+      {
+        "startIndex": 66,
+        "endIndex": 86,
+        "paragraph": {
+          "elements": [
+            {
+              "startIndex": 66,
+              "endIndex": 86,
+              "textRun": {
+                "content": "A display equation:\n",
+                "textStyle": {}
+              }
+            }
+          ],
+          "paragraphStyle": {
+            "namedStyleType": "NORMAL_TEXT",
+            "alignment": "START",
+            "indentStart": {
+              "unit": "PT"
+            }
+          }
+        }
+      },
+      {
+        "startIndex": 86,
+        "endIndex": 111,
+        "paragraph": {
+          "elements": [
+            {
+              "startIndex": 86,
+              "endIndex": 110,
+              "equation": {}
+            },
+            {
+              "startIndex": 110,
+              "endIndex": 111,
+              "textRun": {
+                "content": "\n",
+                "textStyle": {}
+              }
+            }
+          ],
+          "paragraphStyle": {
+            "namedStyleType": "NORMAL_TEXT",
+            "alignment": "CENTER"
+          }
+        }
+      },
+      {
+        "startIndex": 111,
+        "endIndex": 121,
+        "paragraph": {
+          "elements": [
+            {
+              "startIndex": 111,
+              "endIndex": 121,
+              "textRun": {
+                "content": "A matrix:\n",
+                "textStyle": {}
+              }
+            }
+          ],
+          "paragraphStyle": {
+            "namedStyleType": "NORMAL_TEXT",
+            "alignment": "START",
+            "indentStart": {
+              "unit": "PT"
+            }
+          }
+        }
+      },
+      {
+        "startIndex": 121,
+        "endIndex": 136,
+        "paragraph": {
+          "elements": [
+            {
+              "startIndex": 121,
+              "endIndex": 135,
+              "equation": {}
+            },
+            {
+              "startIndex": 135,
+              "endIndex": 136,
+              "textRun": {
+                "content": "\n",
+                "textStyle": {}
+              }
+            }
+          ],
+          "paragraphStyle": {
+            "namedStyleType": "NORMAL_TEXT",
+            "alignment": "CENTER"
+          }
+        }
+      },
+      {
+        "startIndex": 136,
+        "endIndex": 161,
+        "paragraph": {
+          "elements": [
+            {
+              "startIndex": 136,
+              "endIndex": 161,
+              "textRun": {
+                "content": "An embedded local image:\n",
+                "textStyle": {}
+              }
+            }
+          ],
+          "paragraphStyle": {
+            "namedStyleType": "NORMAL_TEXT",
+            "alignment": "START",
+            "indentStart": {
+              "unit": "PT"
+            }
+          }
+        }
+      },
+      {
+        "startIndex": 161,
+        "endIndex": 163,
+        "paragraph": {
+          "elements": [
+            {
+              "startIndex": 161,
+              "endIndex": 162,
+              "inlineObjectElement": {
+                "inlineObjectId": "i.0",
+                "textStyle": {
+                  "bold": false,
+                  "italic": false,
+                  "underline": false,
+                  "strikethrough": false,
+                  "smallCaps": false,
+                  "backgroundColor": {},
+                  "foregroundColor": {
+                    "color": {
+                      "rgbColor": {}
+                    }
+                  },
+                  "fontSize": {
+                    "magnitude": 12,
+                    "unit": "PT"
+                  },
+                  "weightedFontFamily": {
+                    "fontFamily": "Aptos",
+                    "weight": 400
+                  },
+                  "baselineOffset": "NONE"
+                }
+              }
+            },
+            {
+              "startIndex": 162,
+              "endIndex": 163,
+              "textRun": {
+                "content": "\n",
+                "textStyle": {}
+              }
+            }
+          ],
+          "paragraphStyle": {
+            "namedStyleType": "NORMAL_TEXT",
+            "alignment": "START",
+            "indentStart": {
+              "unit": "PT"
+            }
+          }
+        }
+      },
+      {
+        "startIndex": 163,
+        "endIndex": 175,
+        "paragraph": {
+          "elements": [
+            {
+              "startIndex": 163,
+              "endIndex": 175,
+              "textRun": {
+                "content": "Test figure\n",
+                "textStyle": {
+                  "italic": true
+                }
+              }
+            }
+          ],
+          "paragraphStyle": {
+            "namedStyleType": "NORMAL_TEXT",
+            "alignment": "START",
+            "indentStart": {
+              "unit": "PT"
+            }
+          }
+        }
+      },
+      {
+        "startIndex": 175,
+        "endIndex": 197,
+        "paragraph": {
+          "elements": [
+            {
+              "startIndex": 175,
+              "endIndex": 197,
+              "textRun": {
+                "content": "Text after the image.\n",
+                "textStyle": {}
+              }
+            }
+          ],
+          "paragraphStyle": {
+            "namedStyleType": "NORMAL_TEXT",
+            "alignment": "START",
+            "indentStart": {
+              "unit": "PT"
+            }
+          }
+        }
+      }
+    ]
+  }
+}

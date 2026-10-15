@@ -41,7 +41,7 @@ export function GoogleDocsDialog({ docId, onClose, notify }: { docId: string; on
         )}
         {st && st.configured && !link && st.account && (
           <>
-            <p>Create a Google Doc from this document in the Google Drive of <b>{st.account.email ?? 'your account'}</b>. From then on they are kept in step both ways.</p>
+            <p>Create a Google Doc with this document's images and equations in the Google Drive of <b>{st.account.email ?? 'your account'}</b>. Text edits and comments then sync both ways.</p>
             <label class="row">Title <input value={title} onInput={e => setTitle((e.target as HTMLInputElement).value)} /></label>
             {st.canEdit
               ? <button class="primary" data-gdocs-create disabled={!!busy} onClick={() => act('create', async () => { await api.gdocsLink(docId, title); notify('Linked to a new Google Doc'); })}>{busy === 'create' ? 'Creating…' : 'Create Google Doc'}</button>
@@ -53,12 +53,14 @@ export function GoogleDocsDialog({ docId, onClose, notify }: { docId: string; on
             <p><a href={link.url} target="_blank" rel="noopener" data-gdocs-open>Open in Google Docs ↗</a></p>
             <p class="hint">Last synced {ago(link.lastSync)}.{link.lastError ? '' : ' Edits made in Google Docs come back as tracked changes; comments go both ways.'}</p>
             {link.lastError && <p class="error">Last sync failed: {link.lastError}</p>}
+            {link.warnings?.map(w => <p class="hint" data-gdocs-warning>{w}</p>)}
+            {link.format !== 'docx' && <p class="hint">This link uses the older text export. To include images and equations, unlink and create a new Google Doc. The existing Google Doc and its comments stay in the old document.</p>}
             {st?.canEdit && (
               <div class="buttons-row">
                 <button class="primary" data-gdocs-sync disabled={!!busy} onClick={() => act('sync', async () => {
                   const r = await api.gdocsSync(docId);
                   const parts = [r.report.pulled ? `${r.report.pulled} characters changed in Google Docs` : '', r.report.comments.fromGoogle ? `${r.report.comments.fromGoogle} comments from Google Docs` : '', r.report.comments.toGoogle ? `${r.report.comments.toGoogle} comments sent` : ''].filter(Boolean);
-                  notify('Synced with Google Docs' + (parts.length ? ': ' + parts.join(', ') : ''));
+                  notify(r.report.warnings.length ? 'Synced with some changes left out: ' + r.report.warnings.join(' ') : 'Synced with Google Docs' + (parts.length ? ': ' + parts.join(', ') : ''));
                 })}>{busy === 'sync' ? 'Syncing…' : 'Sync now'}</button>
                 <label class="row"><input type="checkbox" checked={link.auto} disabled={!!busy} onChange={e => act('auto', () => api.gdocsAuto(docId, (e.target as HTMLInputElement).checked))} /> Sync automatically</label>
                 <button disabled={!!busy} onClick={() => act('unlink', async () => { await api.gdocsUnlink(docId); notify('No longer synced with Google Docs (the Google Doc stays)'); })}>Unlink</button>
@@ -66,6 +68,10 @@ export function GoogleDocsDialog({ docId, onClose, notify }: { docId: string; on
             )}
           </>
         )}
+        {st?.configured && (!link || link.format === 'docx') && <div data-gdocs-limitations>
+          <p class="hint">Images and equations are included when the Google Doc is created. Review complex equations after import: Google Docs can simplify their layout, including flattening matrices.</p>
+          <p class="hint">Later changes to images and equations do not sync in either direction; text around existing ones can still sync. To export new or changed images and equations, unlink and create a new Google Doc. Share the new document again; the old one keeps its original comments and history.</p>
+        </div>}
         {error && <p class="error" data-gdocs-error>{error}</p>}
         {st?.account && (
           <p class="hint">Google Drive: {st.account.email ?? 'connected'} · <a href="#" onClick={e => { e.preventDefault(); void act('disconnect', () => api.gdocsDisconnect()); }}>Disconnect</a></p>

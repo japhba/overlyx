@@ -173,7 +173,7 @@ async function req<T>(method: string, url: string, body?: unknown, raw?: BodyIni
 
 export const encId = (id: string) => encodeURIComponent(id);
 
-export interface GdocsLink { fileId: string; url: string; auto: boolean; lastSync: number | null; lastError: string | null; linkedBy: number }
+export interface GdocsLink { fileId: string; url: string; auto: boolean; lastSync: number | null; lastError: string | null; linkedBy: number; format: 'text' | 'docx'; warnings: string[] }
 export interface GdocsStatus { configured: boolean; account: { email: string | null } | null; link: GdocsLink | null; canEdit: boolean; guest: boolean }
 
 /** keys of the projects the server listed for this user (a link naming one needs no resolveId) */

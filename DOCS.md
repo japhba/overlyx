@@ -2721,8 +2721,14 @@ read, comment and edit in Google Docs.
   (the document's top heading level is Heading 1), paragraphs, bulleted / numbered lists with
   nesting, quotes (indented), code blocks (monospace lines on a grey ground), tables, text with
   bold / italic / underline / strikethrough / monospace / links / super- and subscript, real
-  footnotes. What Docs cannot hold is text that reads back: `$…$` formulas (`$$…$$` centred),
-  `[@key]` citations, `[ref: label]`, `[image: file]`. Tracked changes are shown as accepted (the
+  footnotes. New links start with a DOCX import (`gdocs/docx.ts`, Pandoc): local figures are embedded
+  and formulas become native Word equations, which Google converts to native Docs equations.
+  The export uses a disposable accepted-view copy; notes are omitted and source files stay intact.
+  Pandoc is required on the server (`apt install pandoc`, or `OVERLYX_PANDOC_BIN` for a custom binary).
+  It runs in the existing sandbox on staged project images, with no network; PDF/SVG and other
+  non-raster figures go through the existing PNG converter. Remote images must first be stored
+  inside the project. Conversion warnings or an object-count/type mismatch fail linking visibly.
+  Citations remain `[@key]` text and cross-references `[ref: label]`. Tracked changes are shown as accepted (the
   API cannot write suggestions); notes are left out; comment threads become Google comments.
 * **Writing** (`gdocs/edits.ts`): the Google Doc is diffed against the blocks and edited in place
   with `documents.batchUpdate`, back to front — a changed paragraph word by word (narrowed to the
@@ -2732,6 +2738,22 @@ read, comment and edit in Google Docs.
   lists get their bullets last (createParagraphBullets reads nesting levels from leading tabs).
   Paragraphs with suggestions pending in Google Docs are not touched. A seeded fuzz test
   (tests/gdocs.test.ts) checks that random edits always converge.
+* **Images and equations after import** (`gdocs/native.ts`). Moving Google named ranges bind each
+  imported object to its original source. The reader retains object-only paragraphs and the full
+  UTF-16 span of every equation; the writer edits the ordinary text between objects, never their
+  contents. New, deleted, reordered or edited objects cannot be recreated through the Docs API:
+  affected changes are skipped and warnings persist in the link status and dialog. The API does
+  not expose equation contents or image byte changes, so edits to those contents in Google Docs
+  do not return to the source. Changes to local image bytes also need a new export. Unmatched
+  objects, positioned images and footnotes containing native objects protect their paragraphs
+  from rewriting. Unlinking and creating a new Google Doc exports a fresh snapshot; the old Google
+  Doc keeps its original comments and history, and the new one must be shared again. Source comment
+  threads can be recreated as new comments; Google's original anchors and authorship are not transferred. Existing
+  text-only links keep their placeholders and their original file IDs; the dialog explains how
+  to create a rich replacement. No sync reimports DOCX into an existing Google Doc.
+  Google conversion can simplify complex math even when it preserves the native equation count:
+  a live PDF check flattened a two-row matrix to one row. The dialog tells users to review complex
+  equations after import; object counts verify preservation, not mathematical layout fidelity.
 * **Reading back** (`gdocs/sync.ts`). Each sync compares the Google Doc with the blocks it held after
   the previous sync; what changed there is mapped onto the document as it was then and applied
   through the agents' edit path (`docedit.ts` applyTrackedSource): tracked insertions / deletions
@@ -2751,6 +2773,9 @@ read, comment and edit in Google Docs.
   `e2e/gdocs.spec.ts` needs a server started with `OVERLYX_E2E_GOOGLE_STUB=1`: the simulation
   instead of Google, a Drive connection without the consent screen, and `/api/gdocs/e2e/*` for the
   test to play the collaborator.
+  `tests/gdocs-native.test.ts` adds a real DOCX-import readback fixture, variable-width equation
+  spans, moving object bindings, comment preservation, text pullback beside equations, skipped
+  object edits and failed conversions.
 
 ## The .tex format
 

@@ -165,6 +165,8 @@ export interface GFile { id: string; name?: string; webViewLink?: string; trashe
 
 export interface GoogleApi {
   createDocument(title: string): Promise<GFile>;
+  /** Real Google uses DOCX conversion; optional for the legacy API simulation. */
+  importDocument?(title: string, docx: Uint8Array): Promise<GFile>;
   getDocument(id: string): Promise<DocsDocument>;
   batchUpdate(id: string, requests: Request[], requiredRevisionId?: string): Promise<{ replies: Record<string, unknown>[]; revisionId?: string }>;
   getFile(id: string): Promise<GFile>;
@@ -195,6 +197,26 @@ export function googleApi(userId: number): GoogleApi {
   const DOCS = 'https://docs.googleapis.com/v1/documents/';
   const DRIVE = 'https://www.googleapis.com/drive/v3/files/';
   const api: GoogleApi = {
+    importDocument: async (title, docx) => {
+      const boundary = 'overlyx-' + crypto.randomUUID();
+      const body = Buffer.concat([
+        Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n` + JSON.stringify({ name: title, mimeType: 'application/vnd.google-apps.document' }) + `\r\n--${boundary}\r\nContent-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document\r\n\r\n`),
+        Buffer.from(docx), Buffer.from(`\r\n--${boundary}--\r\n`),
+      ]);
+      // A create with an unknown outcome must not be retried: conversion cannot use a
+      // preallocated Drive ID, so a retry could create a second document.
+      const token = await accessToken(userId);
+      const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink,mimeType', {
+        method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'multipart/related; boundary=' + boundary }, body,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { error?: { message?: string } };
+        throw new GoogleApiError(err.error?.message ?? `Google Docs import failed (${res.status})`, res.status);
+      }
+      const file = await res.json() as GFile & { mimeType?: string };
+      if (file.mimeType !== 'application/vnd.google-apps.document') throw new Error('Google did not convert the DOCX to a native Google Doc.');
+      return file;
+    },
     createDocument: async (title) => {
       const f = await call<GFile>('POST', 'https://www.googleapis.com/drive/v3/files?fields=id,name,webViewLink', { name: title, mimeType: 'application/vnd.google-apps.document' });
       return f;

@@ -21,8 +21,10 @@ import { isMarkdownPath } from '@overlyx/core/md/index.ts';
 import { resolveProjectPath } from '../projectfiles.ts';
 import { db } from '../db.ts';
 import { manager, type OpenDoc } from '../docs.ts';
-import { project, readGoogle, strip, toParagraphs, blockKey, itemRuns, type GBlock, type Projection } from './model.ts';
+import { project, readGoogle, strip, toParagraphs, blockKey, itemRuns, nativeKeys, hasUnknownObjects, MEDIA_WARNING, UNKNOWN_WARNING, type GBlock, type Projection } from './model.ts';
 import { planRound } from './edits.ts';
+import { buildDocx } from './docx.ts';
+import { attachObjectSources, bindImportedObjects, type ObjectBindings } from './native.ts';
 import { googleApi, GoogleAuthError, type GComment, type GoogleApi } from './google.ts';
 import { roleFor, atLeast } from '../access.ts';
 import { toSessionUser } from '../auth.ts';
@@ -44,19 +46,24 @@ CREATE TABLE IF NOT EXISTS gdocs_links (
   created_at INTEGER NOT NULL
 );
 `);
+const linkColumns = new Set((db.prepare('PRAGMA table_info(gdocs_links)').all() as { name: string }[]).map(c => c.name));
+for (const [name, type] of [['format', "TEXT NOT NULL DEFAULT 'text'"], ['objects', 'TEXT'], ['last_warnings', 'TEXT']]) {
+  if (!linkColumns.has(name)) db.exec(`ALTER TABLE gdocs_links ADD COLUMN ${name} ${type}`);
+}
 
 export interface LinkRow {
   doc_id: string; file_id: string; user_id: number; url: string | null;
   base_text: string | null; base_google: string | null; comments: string | null;
   auto: number; last_sync: number | null; last_error: string | null; last_version: string | null; created_at: number;
+  format: 'text' | 'docx'; objects: string | null; last_warnings: string | null;
 }
 
 export function linkOf(docId: string): LinkRow | null {
   return (db.prepare('SELECT * FROM gdocs_links WHERE doc_id = ?').get(docId) as LinkRow | undefined) ?? null;
 }
 
-export function publicLink(l: LinkRow | null): { fileId: string; url: string; auto: boolean; lastSync: number | null; lastError: string | null; linkedBy: number } | null {
-  return l ? { fileId: l.file_id, url: l.url ?? `https://docs.google.com/document/d/${l.file_id}/edit`, auto: !!l.auto, lastSync: l.last_sync, lastError: l.last_error, linkedBy: l.user_id } : null;
+export function publicLink(l: LinkRow | null) {
+  return l ? { fileId: l.file_id, url: l.url ?? `https://docs.google.com/document/d/${l.file_id}/edit`, auto: !!l.auto, lastSync: l.last_sync, lastError: l.last_error, linkedBy: l.user_id, format: l.format, warnings: l.last_warnings ? JSON.parse(l.last_warnings) as string[] : [] } : null;
 }
 
 /** the API a link syncs with (tests put a simulation here) */
@@ -68,8 +75,40 @@ export function setGoogleApiFactory(f: (userId: number) => GoogleApi): void { ap
 /* ------------------------------------------------------------------ linking */
 
 /** Link the document to a new Google Doc (in the Drive of `userId`) and write the document into it. */
-export async function linkNewGoogleDoc(docId: string, userId: number, title: string): Promise<LinkRow> {
+const linking = new Map<string, Promise<LinkRow>>();
+export function linkNewGoogleDoc(docId: string, userId: number, title: string): Promise<LinkRow> {
+  if (!linkerMayEdit({ doc_id: docId, user_id: userId })) return Promise.reject(new Error('The person who linked this document to Google Docs may not edit it any more'));
+  const pending = linking.get(docId);
+  if (pending) return pending;
+  const task = createLink(docId, userId, title);
+  linking.set(docId, task);
+  void task.finally(() => { if (linking.get(docId) === task) linking.delete(docId); }).catch(() => undefined);
+  return task;
+}
+
+async function createLink(docId: string, userId: number, title: string): Promise<LinkRow> {
+  const existing = linkOf(docId);
+  if (existing) return existing;
   const api = apiFor(userId);
+  if (api.importDocument) {
+    const doc = await manager.open(docId);
+    const snapshot = doc.toLyxDocument(), baseText = doc.textOf(snapshot);
+    const file = await api.importDocument(title, await buildDocx(snapshot, doc.project, doc.relPath));
+    let raw = await api.getDocument(file.id);
+    const { bindings, requests } = bindImportedObjects(raw, project(snapshot, true).blocks);
+    if (requests.length) {
+      await api.batchUpdate(file.id, requests, raw.revisionId || undefined);
+      raw = await api.getDocument(file.id);
+    }
+    raw = attachObjectSources(raw, bindings);
+    if (hasUnknownObjects(strip(readGoogle(raw).blocks))) throw new Error('The imported Google Doc could not be matched to its images or equations; it was left unlinked.');
+    if (!linkerMayEdit({ doc_id: docId, user_id: userId })) throw new Error('The person who linked this document to Google Docs may not edit it any more');
+    db.prepare(`INSERT INTO gdocs_links (doc_id, file_id, user_id, url, auto, created_at, format, objects, base_text, base_google) VALUES (?, ?, ?, ?, 1, ?, 'docx', ?, ?, ?)`)
+      .run(docId, file.id, userId, file.webViewLink ?? null, Date.now(), JSON.stringify(bindings), baseText, JSON.stringify(strip(readGoogle(raw).blocks)));
+    await syncDoc(docId);
+    return linkOf(docId)!;
+  }
+  // The e2e/legacy simulation has no Word converter. Real Google always takes the DOCX path.
   const file = await api.createDocument(title);
   db.prepare('INSERT OR REPLACE INTO gdocs_links (doc_id, file_id, user_id, url, auto, created_at) VALUES (?, ?, ?, ?, 1, ?)')
     .run(docId, file.id, userId, file.webViewLink ?? `https://docs.google.com/document/d/${file.id}/edit`, Date.now());
@@ -99,7 +138,7 @@ export function syncDoc(docId: string): Promise<SyncReport> {
  * Whether the person who linked the document may still edit it: a collaborator removed from the
  * project (or made a viewer) must not keep its text flowing to and from their Google Doc.
  */
-function linkerMayEdit(link: LinkRow): boolean {
+function linkerMayEdit(link: Pick<LinkRow, 'doc_id' | 'user_id'>): boolean {
   const row = db.prepare('SELECT * FROM users WHERE id = ?').get(link.user_id) as UserRow | undefined;
   if (!row) return false;
   return atLeast(roleFor(toSessionUser(row), splitDocId(link.doc_id).project), 'edit');
@@ -116,15 +155,19 @@ async function runSync(docId: string): Promise<SyncReport> {
     const markdown = isMarkdownPath(doc.relPath);
     const file = await api.getFile(link.file_id);
     if (file.trashed) throw new Error('The Google Doc is in the trash — restore it, or unlink the document');
-    let raw = await api.getDocument(link.file_id);
+    const bindings: ObjectBindings = link.objects ? JSON.parse(link.objects) : {};
+    const native = link.format === 'docx';
+    const getDocument = async () => attachObjectSources(await api.getDocument(link.file_id), bindings);
+    let raw = await getDocument();
     const gNow = strip(readGoogle(raw).blocks);
+    if (hasUnknownObjects(gNow)) report.warnings.push(UNKNOWN_WARNING);
 
     // 1. what was changed in Google Docs since the last sync: tracked changes here
     if (link.base_google && link.base_text !== null) {
       const baseG = JSON.parse(link.base_google) as GBlock[];
       if (!sameBlocks(baseG, gNow)) {
         const baseDoc = doc.parse(link.base_text);
-        const theirs = withGoogleChanges(baseDoc, project(baseDoc), baseG, gNow, markdown);
+        const theirs = withGoogleChanges(baseDoc, project(baseDoc, native), baseG, gNow, markdown, report.warnings);
         if (theirs) {
           const author = `${file.lastModifyingUser?.displayName || 'Google Docs'} (Google Docs)`;
           const tracking = isTracking(doc.getMeta().headerLines);
@@ -142,13 +185,13 @@ async function runSync(docId: string): Promise<SyncReport> {
 
     // 2. the document into the Google Doc
     const ours = doc.toLyxDocument();
-    const want = strip(project(ours).blocks);
+    const want = strip(project(ours, native).blocks);
     for (; report.rounds < 10; report.rounds++) {
-      const requests = planRound(raw, want);
+      const requests = planRound(raw, want, report.warnings);
       if (!requests.length) break;
       await api.batchUpdate(link.file_id, requests, raw.revisionId || undefined);
       report.pushed += requests.length;
-      raw = await api.getDocument(link.file_id);
+      raw = await getDocument();
     }
     if (report.rounds >= 10) report.warnings.push('The Google Doc could not be brought fully in line in one sync');
 
@@ -158,8 +201,9 @@ async function runSync(docId: string): Promise<SyncReport> {
 
     // 4. the base of the next sync: the document as written to Google (with the comment threads), the Google Doc as it is now
     const after = await api.getFile(link.file_id);
-    db.prepare('UPDATE gdocs_links SET base_text = ?, base_google = ?, comments = ?, last_sync = ?, last_error = NULL, last_version = ? WHERE doc_id = ?')
-      .run(doc.textOf(withComments), JSON.stringify(strip(readGoogle(raw).blocks)), link.comments, Date.now(), after.version ?? null, docId);
+    report.warnings = [...new Set(report.warnings)];
+    db.prepare('UPDATE gdocs_links SET base_text = ?, base_google = ?, comments = ?, last_sync = ?, last_error = NULL, last_version = ?, last_warnings = ? WHERE doc_id = ?')
+      .run(doc.textOf(withComments), JSON.stringify(strip(readGoogle(raw).blocks)), link.comments, Date.now(), after.version ?? null, JSON.stringify(report.warnings), docId);
     return report;
   } catch (e) {
     db.prepare('UPDATE gdocs_links SET last_error = ?, last_sync = ? WHERE doc_id = ?').run((e as Error).message, Date.now(), docId);
@@ -177,7 +221,7 @@ const sameBlocks = (a: GBlock[], b: GBlock[]) => a.length === b.length && a.ever
  * the blocks the base document projects to) and replaced by paragraphs made from the new blocks.
  * Null when nothing maps (no change).
  */
-export function withGoogleChanges(baseDoc: LyxDocument, proj: Projection, baseG: GBlock[], gNow: GBlock[], markdown: boolean): LyxDocument | null {
+export function withGoogleChanges(baseDoc: LyxDocument, proj: Projection, baseG: GBlock[], gNow: GBlock[], markdown: boolean, warnings: string[] = []): LyxDocument | null {
   const kBase = baseG.map(blockKey), kNow = gNow.map(blockKey), kProj = proj.blocks.map(blockKey);
   const changes = lcsRegions(kBase, kNow);
   if (!changes.length) return null;
@@ -191,6 +235,9 @@ export function withGoogleChanges(baseDoc: LyxDocument, proj: Projection, baseG:
   };
   const edits: { from: number; to: number; pars: Paragraph[] }[] = [];
   for (const { a, b, c, d } of changes) {
+    const before = baseG.slice(a, b), after = gNow.slice(c, d);
+    if (hasUnknownObjects([...before, ...after])) { warnings.push(UNKNOWN_WARNING); continue; }
+    if (JSON.stringify(nativeKeys(before)) !== JSON.stringify(nativeKeys(after))) { warnings.push(MEDIA_WARNING); continue; }
     const srcs = new Set<number>();
     for (let k = a; k < b; k++) { const p = toProj.get(k); if (p !== undefined) srcs.add(proj.blocks[p].src); }
     const pars = toParagraphs(gNow.slice(c, d), proj.headings, markdown);

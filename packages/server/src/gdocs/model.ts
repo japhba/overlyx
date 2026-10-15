@@ -3,9 +3,9 @@
  *
  * `project` turns the document model into blocks — paragraphs with a named style (headings),
  * list membership, quote / code / centring, and runs of styled text; tables of such runs — the
- * subset of a Google Doc the Docs API can write. What Docs has no counterpart for is written as
- * text that reads back: a formula as `$…$` (`$$…$$` centred on its own line), a citation as
- * `[@key]`, an image as `[image: file]`. Tracked changes are shown as they would be accepted
+ * subset of a Google Doc the Docs API can write. DOCX-backed links keep formulas and images as
+ * native objects with their source bindings; legacy links use `$…$` and `[image: file]` text.
+ * Citations remain `[@key]` text. Tracked changes are shown as they would be accepted
  * (Docs cannot hold suggestions written through the API); comment threads become Google comments.
  *
  * `readGoogle` reads a Google Doc (documents.get) into the same blocks, with the index ranges the
@@ -27,7 +27,19 @@ export interface GRun {
   sup?: true; sub?: true;
   /** a footnote reference (`text` is '' — the reference is one character in Docs); its text */
   foot?: string;
+  /** A DOCX-imported object. Its source is kept here because Docs does not expose equation content. */
+  native?: NativeSource | { kind: 'unknown'; text: string };
+  /** Actual UTF-16 span in Docs (an equation can occupy many code units); never part of identity. */
+  nativeSize?: number;
 }
+
+export interface NativeSource { kind: 'image' | 'equation'; text: string; inset: Inset }
+export const nativeKey = (r: GRun) => r.native ? JSON.stringify(r.native) : '';
+export const blockRuns = (b: GBlock): GRun[] => b.t === 'p' ? b.runs : b.cells.flat(2);
+export const nativeKeys = (blocks: GBlock[]) => blocks.flatMap(blockRuns).filter(r => r.native).map(nativeKey);
+export const hasUnknownObjects = (blocks: GBlock[]) => blocks.some(b => blockRuns(b).some(r => r.native?.kind === 'unknown'));
+export const MEDIA_WARNING = 'Image or equation changes were left out of sync. Unlink and create a new Google Doc to export them; the existing Google Doc and its comments stay.';
+export const UNKNOWN_WARNING = 'Some Google Docs objects could not be matched to their source. Their paragraphs were left unchanged in both documents.';
 
 export type ParaStyle = 'NORMAL_TEXT' | 'TITLE' | 'SUBTITLE' | 'HEADING_1' | 'HEADING_2' | 'HEADING_3' | 'HEADING_4' | 'HEADING_5' | 'HEADING_6';
 
@@ -54,7 +66,7 @@ export interface Projection {
 }
 
 /** a run as a key (the same run, whatever order its properties were set in) */
-export const runKey = (r: GRun) => JSON.stringify([r.text, !!r.b, !!r.i, !!r.u, !!r.s, !!r.code, r.link ?? '', !!r.sup, !!r.sub, r.foot ?? null]);
+export const runKey = (r: GRun) => r.native ? nativeKey(r) : JSON.stringify([r.text, !!r.b, !!r.i, !!r.u, !!r.s, !!r.code, r.link ?? '', !!r.sup, !!r.sub, r.foot ?? null]);
 const runsKey = (runs: GRun[]) => '[' + mergeRuns(runs).map(runKey).join(',') + ']';
 
 /** a block's identity for diffing: everything the Docs API writes */
@@ -74,7 +86,7 @@ export function mergeRuns(runs: GRun[]): GRun[] {
   for (const r of runs) {
     if (r.foot === undefined && !r.text) continue;
     const last = out[out.length - 1];
-    if (last && last.foot === undefined && r.foot === undefined && sameStyle(last, r)) { out[out.length - 1] = { ...last, text: last.text + r.text }; continue; }
+    if (last && !last.native && !r.native && last.foot === undefined && r.foot === undefined && sameStyle(last, r)) { out[out.length - 1] = { ...last, text: last.text + r.text }; continue; }
     out.push({ ...r });
   }
   return out;
@@ -111,7 +123,7 @@ function runStyle(f: FontState): Omit<GRun, 'text'> {
 }
 
 /** the runs of a paragraph's items (deleted text left out, as if the changes were accepted) */
-export function itemRuns(items: Item[], inherited: Omit<GRun, 'text'> = {}): GRun[] {
+export function itemRuns(items: Item[], inherited: Omit<GRun, 'text'> = {}, nativeObjects = false): GRun[] {
   const out: GRun[] = [];
   for (const it of items) {
     if (it.change?.type === 'deleted') continue;
@@ -119,23 +131,27 @@ export function itemRuns(items: Item[], inherited: Omit<GRun, 'text'> = {}): GRu
     if (it.kind === 'text') { out.push({ ...st, text: it.text.replace(/\n/g, ' ') }); continue; }
     if (it.kind === 'special') { out.push({ ...st, text: itemText(it) || (it.arg === 'LaTeX' || it.arg === 'TeX' || it.arg === 'LyX' ? it.arg : '') }); continue; }
     if (it.kind !== 'inset') continue;
-    out.push(...insetRuns(it.inset, st));
+    out.push(...insetRuns(it.inset, st, nativeObjects));
   }
   return out;
 }
 
-function insetRuns(ins: Inset, st: Omit<GRun, 'text'>): GRun[] {
+function insetRuns(ins: Inset, st: Omit<GRun, 'text'>, nativeObjects: boolean): GRun[] {
   switch (ins.type) {
     case 'Formula': {
       const f = formulaText(ins.latex);
-      return [{ ...st, text: f.display ? `$$${f.text.replace(/\s*\n\s*/g, ' ')}$$` : `$${f.text}$` }];
+      const text = f.display ? `$$${f.text.replace(/\s*\n\s*/g, ' ')}$$` : `$${f.text}$`;
+      return [{ ...st, text, ...(nativeObjects ? { native: { kind: 'equation' as const, text, inset: ins } } : {}) }];
     }
     case 'Leaf': {
       const pm = paramMap(ins.params);
       if (ins.name === 'Newline') return [{ ...st, text: '\u000b' }];
       if (ins.name === 'Quotes') return [{ ...st, text: ins.arg[2] === 's' ? (ins.arg[1] === 'l' ? '‘' : '’') : (ins.arg[1] === 'l' ? '“' : '”') }];
       if (ins.name === 'space') return [{ ...st, text: ' ' }];
-      if (ins.name === 'Graphics') return [{ ...st, text: `[image: ${(pm.get('filename') ?? '').trim()}]` }];
+      if (ins.name === 'Graphics') {
+        const text = `[image: ${(pm.get('filename') ?? '').trim()}]`;
+        return [{ ...st, text, ...(nativeObjects ? { native: { kind: 'image' as const, text, inset: ins } } : {}) }];
+      }
       if (ins.name !== 'CommandInset') return [];
       switch (ins.arg) {
         case 'href': {
@@ -156,13 +172,13 @@ function insetRuns(ins: Inset, st: Omit<GRun, 'text'>): GRun[] {
         case 'ERT': return [{ ...st, code: true, text: ins.paragraphs.map(p => p.items.map(itemText).join('')).join(' ') }];
         case 'Flex':
           if (ins.arg === 'URL') { const url = plainPars(ins.paragraphs); return [{ ...st, text: url, link: url }]; }
-          return itemRuns(flat(ins.paragraphs), st);
-        case 'script': return itemRuns(flat(ins.paragraphs), { ...st, ...(ins.arg === 'subscript' ? { sub: true } : { sup: true }) });
+          return itemRuns(flat(ins.paragraphs), st, nativeObjects);
+        case 'script': return itemRuns(flat(ins.paragraphs), { ...st, ...(ins.arg === 'subscript' ? { sub: true } : { sup: true }) }, nativeObjects);
         case 'listings': return [{ ...st, code: true, text: ins.paragraphs.map(p => p.items.map(itemText).join('')).join(' ') }];
-        default: return itemRuns(flat(ins.paragraphs), st);
+        default: return itemRuns(flat(ins.paragraphs), st, nativeObjects);
       }
     }
-    case 'Tabular': return itemRuns(ins.rows.flatMap(r => r.cells.flatMap(c => flat(c.paragraphs))), st);
+    case 'Tabular': return itemRuns(ins.rows.flatMap(r => r.cells.flatMap(c => flat(c.paragraphs))), st, nativeObjects);
     default: return [];
   }
 }
@@ -178,7 +194,7 @@ function soleInset(p: Paragraph): Inset | null {
 const isList = (l: string) => l === 'Itemize' || l === 'Enumerate' || l === 'Description' || l === 'Labeling';
 
 /** The document's body as Google Docs blocks, each with the body paragraph it came from. */
-export function project(doc: LyxDocument): Projection {
+export function project(doc: LyxDocument, nativeObjects = false): Projection {
   const body = doc.body;
   const headings = headingsOf(body);
   const blocks: Projected[] = [];
@@ -190,7 +206,7 @@ export function project(doc: LyxDocument): Projection {
     const layout = p.layout.replace(/\*$/, '');
     if (!isList(p.layout) && p.depth === 0) listBase = -1;
     const ins = soleInset(p);
-    if (ins?.type === 'Tabular') { blocks.push({ t: 'table', cells: tableCells(ins), src }); return; }
+    if (ins?.type === 'Tabular') { blocks.push({ t: 'table', cells: tableCells(ins, nativeObjects), src }); return; }
     if (ins?.type === 'Text' && ins.name === 'listings') {
       for (const line of ins.paragraphs) {
         const text = line.items.filter(i => i.change?.type !== 'deleted').map(itemText).join('');
@@ -202,7 +218,7 @@ export function project(doc: LyxDocument): Projection {
       blocks.push({ t: 'p', style: 'NORMAL_TEXT', code: true, runs: [{ text: p.items.map(itemText).join('') || ' ', code: true }], src });
       return;
     }
-    const runs = mergeRuns(itemRuns(p.items));
+    const runs = mergeRuns(itemRuns(p.items, {}, nativeObjects));
     if (!runs.some(r => r.foot !== undefined || r.text.trim())) return;   // an empty paragraph: nothing in Docs
     const block: Projected = { t: 'p', style: 'NORMAL_TEXT', runs, src };
     const level = headings.indexOf(layout);
@@ -220,8 +236,8 @@ export function project(doc: LyxDocument): Projection {
   return { blocks, headings };
 }
 
-function tableCells(t: TabularInset): GRun[][][] {
-  return t.rows.map(r => r.cells.map(c => mergeRuns(c.paragraphs.flatMap((p, i) => [...(i ? [{ text: '\u000b' }] : []), ...itemRuns(p.items)]))));
+function tableCells(t: TabularInset, nativeObjects: boolean): GRun[][][] {
+  return t.rows.map(r => r.cells.map(c => mergeRuns(c.paragraphs.flatMap((p, i) => [...(i ? [{ text: '\u000b' }] : []), ...itemRuns(p.items, {}, nativeObjects)]))));
 }
 
 /* ------------------------------------------------------------------ the Google Doc */
@@ -232,12 +248,15 @@ export interface DocsParagraphElement {
   startIndex: number; endIndex: number;
   textRun?: { content: string; textStyle?: DocsTextStyle; suggestedInsertionIds?: string[]; suggestedDeletionIds?: string[] };
   footnoteReference?: { footnoteId: string };
+  equation?: { suggestedInsertionIds?: string[]; suggestedDeletionIds?: string[] };
+  inlineObjectElement?: { inlineObjectId: string; suggestedInsertionIds?: string[]; suggestedDeletionIds?: string[] };
   [other: string]: unknown;
 }
 export interface DocsParagraph {
   elements: DocsParagraphElement[];
   paragraphStyle?: { namedStyleType?: string; indentStart?: { magnitude?: number }; alignment?: string };
   bullet?: { listId: string; nestingLevel?: number };
+  positionedObjectIds?: string[];
 }
 export interface DocsStructural { startIndex?: number; endIndex: number; paragraph?: DocsParagraph; table?: { rows: number; columns: number; tableRows: { tableCells: { content: DocsStructural[] }[] }[] }; [other: string]: unknown }
 export interface DocsDocument {
@@ -245,6 +264,9 @@ export interface DocsDocument {
   body: { content: DocsStructural[] };
   lists?: Record<string, { listProperties?: { nestingLevels?: { glyphType?: string; glyphSymbol?: string }[] } }>;
   footnotes?: Record<string, { footnoteId?: string; content: DocsStructural[] }>;
+  namedRanges?: Record<string, { namedRanges: { ranges: { startIndex: number; endIndex: number }[] }[] }>;
+  /** Attached by native.ts from the saved source bindings and Google's moving named ranges. */
+  objectSources?: Record<number, NativeSource>;
 }
 
 /** a block of the Google Doc with where it is: the paragraph's / table's index range (a code block: one per line) */
@@ -257,8 +279,17 @@ const MONO = /mono|courier|consolas|menlo|monaco|source code|inconsolata|fira co
 function readRuns(elements: DocsParagraphElement[], doc: DocsDocument): GRun[] {
   const runs: GRun[] = [];
   for (const el of elements) {
+    if (el.equation || el.inlineObjectElement) {
+      const native = doc.objectSources?.[el.startIndex] ?? { kind: 'unknown' as const, text: el.inlineObjectElement ? `[Google Docs image: ${el.inlineObjectElement.inlineObjectId}]` : '[Google Docs equation]' };
+      runs.push({ text: native.text, native, nativeSize: el.endIndex - el.startIndex });
+      continue;
+    }
     if (el.footnoteReference) {
       const fn = doc.footnotes?.[el.footnoteReference.footnoteId];
+      if (fn?.content.some(s => s.paragraph?.elements.some(e => e.equation || e.inlineObjectElement))) {
+        runs.push({ text: '[Google Docs footnote with objects]', native: { kind: 'unknown', text: '[Google Docs footnote with objects]' }, nativeSize: el.endIndex - el.startIndex });
+        continue;
+      }
       const text = fn ? fn.content.map(s => s.paragraph ? s.paragraph.elements.map(e => e.textRun?.content ?? '').join('') : '').join('').replace(/\n/g, ' ').trim() : '';
       runs.push({ text: '', foot: text });
       continue;
@@ -282,11 +313,12 @@ function readRuns(elements: DocsParagraphElement[], doc: DocsDocument): GRun[] {
   return mergeRuns(runs);
 }
 
-const hasSuggestions = (els: DocsParagraphElement[]) => els.some(e => !!(e.textRun?.suggestedInsertionIds?.length || e.textRun?.suggestedDeletionIds?.length));
+const hasSuggestions = (els: DocsParagraphElement[]) => els.some(e => [e.textRun, e.equation, e.inlineObjectElement].some(x => !!(x?.suggestedInsertionIds?.length || x?.suggestedDeletionIds?.length)));
 
 function readPara(s: DocsStructural, doc: DocsDocument): (GPara & { start: number; end: number; elements: DocsParagraphElement[]; locked?: true }) | null {
   const p = s.paragraph!;
   const runs = readRuns(p.elements, doc);
+  if (p.positionedObjectIds?.length) runs.unshift({ text: '[Google Docs positioned image]', native: { kind: 'unknown', text: '[Google Docs positioned image]' }, nativeSize: 0 });
   if (!runs.some(r => r.foot !== undefined || r.text.trim())) return null;
   const named = p.paragraphStyle?.namedStyleType ?? 'NORMAL_TEXT';
   const style: ParaStyle = /^(TITLE|SUBTITLE|HEADING_[1-6])$/.test(named) ? named as ParaStyle : 'NORMAL_TEXT';
@@ -350,6 +382,7 @@ function runFont(r: GRun): FontState {
 /** a run's text as items: formulas, citations, images and line breaks written as text become insets again */
 function runItems(r: GRun): Item[] {
   const font = runFont(r);
+  if (r.native && r.native.kind !== 'unknown') return [{ kind: 'inset', font, inset: structuredClone(r.native.inset) }];
   if (r.foot !== undefined) return [{ kind: 'inset', font: {}, inset: { type: 'Text', name: 'Foot', arg: '', params: [], status: 'collapsed', paragraphs: [{ layout: 'Plain Layout', depth: 0, params: {}, items: r.foot ? [{ kind: 'text', text: r.foot, font: {} }] : [] }] } }];
   if (r.link) {
     return [{ kind: 'inset', font, inset: { type: 'Leaf', name: 'CommandInset', arg: 'href', params: ['LatexCommand href', `name "${(r.text === r.link ? '' : r.text).replace(/"/g, '\\"')}"`, `target "${r.link.replace(/"/g, '\\"')}"`, 'literal "true"'] } }];

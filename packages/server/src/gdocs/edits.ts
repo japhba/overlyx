@@ -12,7 +12,7 @@
  * the document is what it should be.
  */
 import { tokenize, diffTokens } from '@overlyx/core';
-import { blockKey, mergeRuns, sameRuns, readGoogle, type DocsDocument, type DocsParagraphElement, type GBlock, type GPara, type GRun, type ReadBlock, type ReadDoc } from './model.ts';
+import { blockKey, mergeRuns, sameRuns, readGoogle, nativeKeys, hasUnknownObjects, MEDIA_WARNING, UNKNOWN_WARNING, type DocsDocument, type DocsParagraphElement, type GBlock, type GPara, type GRun, type ReadBlock, type ReadDoc } from './model.ts';
 
 export type Request = Record<string, unknown>;
 
@@ -74,6 +74,26 @@ interface Plan { requests: Request[]; deferredLists: boolean }
  * inserted words, then the style of the words that stayed. Footnote references are atoms.
  */
 function editText(plan: Plan, raw: DocsDocument, start: number, oldElements: DocsParagraphElement[], oldRuns: GRun[], newRuns: GRun[]): void {
+  if (oldRuns.some(r => r.native) || newRuns.some(r => r.native)) {
+    // Objects cannot be recreated by insertText. Diff only the text between them, using each
+    // object's real span for offsets (a native equation is often much wider than one code unit).
+    const segments = (runs: GRun[]) => {
+      const out: { start: number; runs: GRun[] }[] = [{ start: 0, runs: [] }];
+      let at = 0;
+      for (const r of runs) {
+        if (r.native) { at += r.nativeSize ?? 1; out.push({ start: at, runs: [] }); }
+        else { out[out.length - 1].runs.push(r); at += r.foot !== undefined ? 1 : r.text.length; }
+      }
+      return out;
+    };
+    const before = segments(oldRuns), after = segments(newRuns);
+    for (let k = before.length - 1; k >= 0; k--) {
+      const at = start + before[k].start;
+      const end = k + 1 < before.length ? start + before[k + 1].start : Infinity;
+      editText(plan, raw, at, oldElements.filter(e => e.startIndex >= at && e.startIndex < end), before[k].runs, after[k].runs);
+    }
+    return;
+  }
   const oldText = atomText(oldRuns), newText = atomText(newRuns);
   const oldAtoms = atomRuns(oldRuns), newAtoms = atomRuns(newRuns);
   const footIds: string[] = oldElements.filter(e => e.footnoteReference).map(e => e.footnoteReference!.footnoteId);
@@ -207,7 +227,8 @@ function insertParagraphs(plan: Plan, at: number, blocks: GPara[], lead: boolean
  * The requests of one round: `doc` (as read: documents.get) towards `want`. Empty when nothing is
  * left to do. Lists are made last, when everything else matches (their numbering spans paragraphs).
  */
-export function planRound(raw: DocsDocument, want: GBlock[]): Request[] {
+export function planRound(raw: DocsDocument, want: GBlock[], warnings: string[] = []): Request[] {
+  const priorWarnings = warnings.length;
   const read = readGoogle(raw);
   const plan: Plan = { requests: [], deferredLists: false };
   const old = read.blocks;
@@ -227,7 +248,23 @@ export function planRound(raw: DocsDocument, want: GBlock[]): Request[] {
     // blocks with suggestions pending in Google Docs are not touched (their indices are not the text's)
     if (olds.some(ob => ob.locked)) return;
     if (olds.length === news.length && olds.every((ob, k) => sameShape(ob, news[k]))) {
-      for (let k = olds.length - 1; k >= 0; k--) updateBlock(plan, raw, olds[k], news[k]);
+      for (let k = olds.length - 1; k >= 0; k--) {
+        if (hasUnknownObjects([olds[k], news[k]])) { warnings.push(UNKNOWN_WARNING); continue; }
+        if (JSON.stringify(nativeKeys([olds[k]])) !== JSON.stringify(nativeKeys([news[k]]))) { warnings.push(MEDIA_WARNING); continue; }
+        updateBlock(plan, raw, olds[k], news[k], warnings);
+      }
+      return;
+    }
+    // A conversion can add ordinary paragraphs (for example a figure caption). Match native
+    // paragraphs by their objects before considering a structural rewrite of the whole region.
+    for (let x = 0; x < olds.length; x++) {
+      const objects = nativeKeys([olds[x]]);
+      if (!objects.length || hasUnknownObjects([olds[x]])) continue;
+      const y = news.findIndex(nb => sameShape(olds[x], nb) && JSON.stringify(nativeKeys([nb])) === JSON.stringify(objects));
+      if (y < 0) continue;
+      planRegion(a + x + 1, b, c + y + 1, d);
+      updateBlock(plan, raw, olds[x], news[y], warnings);
+      planRegion(a, a + x, c, c + y);
       return;
     }
     // a table of the same shape on both sides stays (its cells are edited): the parts around it on their own, the later one first
@@ -236,16 +273,19 @@ export function planRound(raw: DocsDocument, want: GBlock[]): Request[] {
       const y = news.findIndex(nb => sameShape(olds[x], nb));
       if (y < 0) continue;
       planRegion(a + x + 1, b, c + y + 1, d);
-      updateBlock(plan, raw, olds[x], news[y]);
+      updateBlock(plan, raw, olds[x], news[y], warnings);
       planRegion(a, a + x, c, c + y);
       return;
     }
     if (!olds.length && !news.length) return;
+    if (hasUnknownObjects([...olds, ...news])) { warnings.push(UNKNOWN_WARNING); return; }
+    // A structural rewrite cannot move or duplicate native objects through the Docs API.
+    if (nativeKeys([...olds, ...news]).length) { warnings.push(MEDIA_WARNING); return; }
     structural = true;
     replaceRegion(plan, raw, a, olds, news, old);
   };
   for (let r = regions.length - 1; r >= 0; r--) planRegion(regions[r].a, regions[r].b, regions[r].c, regions[r].d);
-  if (plan.requests.length || structural) return plan.requests;
+  if (plan.requests.length || structural || warnings.length !== priorWarnings) return plan.requests;
   // everything else matches: the lists
   return listRequests(read, raw, want);
 }
@@ -266,11 +306,14 @@ function alignBlocks(a: string[], b: string[]): [number, number][] {
   return out;
 }
 
-function updateBlock(plan: Plan, raw: DocsDocument, ob: ReadBlock, nb: GBlock): void {
+function updateBlock(plan: Plan, raw: DocsDocument, ob: ReadBlock, nb: GBlock, warnings: string[]): void {
+  if (hasUnknownObjects([ob, nb])) { warnings.push(UNKNOWN_WARNING); return; }
+  if (JSON.stringify(nativeKeys([ob])) !== JSON.stringify(nativeKeys([nb]))) { warnings.push(MEDIA_WARNING); return; }
   if (ob.t === 'table' && nb.t === 'table') {
     for (let r = ob.cells.length - 1; r >= 0; r--) {
       for (let c = ob.cells[r].length - 1; c >= 0; c--) {
         const have = ob.cells[r][c], want = mergeRuns(nb.cells[r][c] ?? []);
+        if (JSON.stringify(have.filter(x => x.native).map(x => x.native)) !== JSON.stringify(want.filter(x => x.native).map(x => x.native))) { warnings.push(MEDIA_WARNING); continue; }
         if (sameRuns(have, want)) continue;
         const cell = ob.cellParas[r][c];
         editText(plan, raw, cell.start, cell.elements, have, want);
