@@ -41,6 +41,15 @@ reproduced byte for byte until you change them.
 - **PDF panel** (Ctrl+R): builds with your local `latexmk` next to the file, shows the PDF with
   build progress and log. SyncTeX both ways: Ctrl+Alt+J shows the cursor's place in the PDF,
   double-click in the PDF jumps to that place in the document.
+  The **PDF preview** button opens it without rebuilding, including a PDF already on disk after
+  restarting VS Code; it follows builds started from the editor while the preview is idle.
+- **Interface zoom**: the **UI zoom** button offers −, + and Reset using VS Code's window zoom.
+  It scales the whole interface, including toolbars and dialogs. The document and PDF retain
+  their separate content zoom controls.
+- **SVG editing**: right-click an SVG figure and choose **Edit SVG…** to open the layout editor
+  in an overlay. **Save SVG** writes the drawing back to its file and refreshes the figure;
+  Cancel keeps the file unchanged. Documents, layouts and whiteboards share the layout drawing
+  controls, pen settings and stroke engine.
 - **PDF files** open directly in the OverLyX PDF Viewer, using the same viewer as the website:
   page navigation, Fit width / Fit content, zoom and pinch gestures, and smart dark pages.
   Files refresh when they change on disk and work in remote workspaces. Use *Save a copy…*

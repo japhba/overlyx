@@ -34,6 +34,7 @@ import { report, rememberPage } from './report';
 import { ensureSolo } from './solo';
 import { setDarkSlides, darkSlidesChanged } from './darkpages';
 import { installReviewCss, setReview, railReview } from './review';
+import { exportPageSvg } from './svgexport';
 
 function addStyle(css: string): HTMLStyleElement {
   const s = document.createElement('style');
@@ -228,6 +229,10 @@ function onMessage(e: MessageEvent): void {
   if (!m || typeof m !== 'object' || typeof m.ol !== 'string') return;
   if (MODE === 'present' && m.ol !== 'assets' && m.ol !== 'folder') return;
   switch (m.ol) {
+    case 'exportSvg':
+      try { post({ ol: 'exportedSvg', id: m.id, svg: exportPageSvg(edit.visibleSlideEl() ?? slides()[0]) }); }
+      catch (e) { post({ ol: 'exportedSvg', id: m.id, error: String((e as Error).message ?? e) }); }
+      break;
     case 'folder': {
       setFolderBase(m.base);
       break;

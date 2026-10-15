@@ -5,7 +5,7 @@
  * pens; widths are px of a 1280 px wide slide (the strokes are SVG paths in the page, sourceops.ts
  * objectHtml), shown in points like the other line weights (units.ts). Kept in this browser (`ol.deckInk`).
  */
-import { INK_PALETTES, HIGHLIGHT_OPACITY } from '../editor/plugins/ink';
+import { INK_PALETTES, HIGHLIGHT_OPACITY } from '@overlyx/core/inkpresets.ts';
 import type { InkStyle, Nib } from './protocol';
 
 export type DeckPen = 'pen' | 'highlighter';
@@ -80,8 +80,12 @@ export function loadDeckInk(): DeckInk {
   return ink;
 }
 
+const subscribers = new Set<(ink: DeckInk) => void>();
+export function subscribeDeckInk(fn: (ink: DeckInk) => void): () => void { subscribers.add(fn); return () => subscribers.delete(fn); }
+
 export function saveDeckInk(ink: DeckInk): void {
   try { localStorage.setItem(KEY, JSON.stringify(ink)); } catch { /* private window */ }
+  for (const fn of subscribers) fn(ink);
 }
 
 export interface DeckInkPatch {

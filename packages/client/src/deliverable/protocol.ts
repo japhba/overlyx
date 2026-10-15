@@ -198,6 +198,7 @@ export interface PeerInfo { paths: Path[]; color: string; name: string; caret?: 
 
 /** editor → runtime */
 export type ToRuntime =
+  | { ol: 'exportSvg'; id: number }
   | { ol: 'source'; version: number; html: string }
   | { ol: 'assets'; urls: Record<string, string> }
   | { ol: 'folder'; base: string }
@@ -283,6 +284,7 @@ export type ToRuntime =
 
 /** runtime → editor */
 export type FromRuntime =
+  | { ol: 'exportedSvg'; id: number; svg?: string; error?: string }
   | { ol: 'offlineBoot'; opaque: true }
   /** `macros`: those of the .tex files the page links (for LyX's formula editor) */
   | { ol: 'ready'; version: number | null; kind: DeliverableKind; slides: SlideBox[]; width: number; height: number; docHeight: number; macros?: Record<string, MathJaxMacro>; solo?: Solo }

@@ -325,7 +325,7 @@ function inertSvgSource(text: string): { text: string; prefix: string } | null {
  * from its viewBox. Null when it is not an SVG, or too big to be worth inlining (then it goes in as
  * a picture).
  */
-export function inlineSvgHtml(svgText: string, at: { x: number; y: number; maxW: number } | null, prefix: string): string | null {
+export function inlineSvgHtml(svgText: string, at: { x: number; y: number; maxW: number } | null, prefix: string, retainRootStyle = false): string | null {
   if (svgText.length > 400_000) return null;
   const inert = inertSvgSource(svgText);
   if (!inert) return null;
@@ -347,7 +347,8 @@ export function inlineSvgHtml(svgText: string, at: { x: number; y: number; maxW:
       if (n.startsWith(inert.prefix) || n.startsWith('on') || (pre && !['xlink', 'xml', 'xmlns'].includes(pre)) || n.startsWith('xmlns:') && !['xmlns:xlink'].includes(n)) { el.removeAttributeNode(a); continue; }
       if (n === 'href' || n === 'xlink:href') {
         const v = a.value.trim();
-        if (!(v.startsWith('#') || SAFE_DATA.test(v))) el.removeAttributeNode(a);
+        const relativeImage = retainRootStyle && el.localName === 'image' && !/^[a-z][\w+.-]*:|^\/\//i.test(v) && !v.includes('\\');
+        if (!(v.startsWith('#') || SAFE_DATA.test(v) || relativeImage)) el.removeAttributeNode(a);
         continue;
       }
       if (/url\(\s*['"]?\s*(?!#)/i.test(a.value) && n !== 'id') el.setAttribute(a.name, a.value.replace(/url\(\s*['"]?\s*(?!#)[^)]*\)/gi, 'none'));
@@ -383,13 +384,14 @@ export function inlineSvgHtml(svgText: string, at: { x: number; y: number; maxW:
   }
   svg.removeAttribute('width');
   svg.removeAttribute('height');
+  const rootStyle = retainRootStyle ? svg.getAttribute('style') ?? '' : '';
   svg.removeAttribute('style');
-  svg.removeAttribute('class');
+  if (!retainRootStyle) svg.removeAttribute('class');
   if (at) {
     const k = w > at.maxW ? at.maxW / w : 1;
     const W = Math.max(8, w * k), H = Math.max(8, h * k);
-    svg.setAttribute('style', `position: absolute; left: ${r(at.x - W / 2)}px; top: ${r(at.y - H / 2)}px; width: ${r(W)}px; height: ${r(H)}px; overflow: visible`);
-  } else svg.setAttribute('style', `width: ${r(Math.min(w, 960))}px; max-width: 100%; height: auto`);
+    svg.setAttribute('style', `${rootStyle ? rootStyle + ';' : ''}position: absolute; left: ${r(at.x - W / 2)}px; top: ${r(at.y - H / 2)}px; width: ${r(W)}px; height: ${r(H)}px; overflow: visible`);
+  } else svg.setAttribute('style', `${rootStyle ? rootStyle + ';' : ''}width: ${r(retainRootStyle ? w : Math.min(w, 960))}px; max-width: 100%; height: ${retainRootStyle ? r(h) + 'px' : 'auto'}`);
   // Inline HTML needs unprefixed SVG element names. Keep each sanitized
   // attribute's own namespace (notably xlink/xml), geometry and children.
   for (const el of [svg, ...Array.from(svg.querySelectorAll('*'))]) {

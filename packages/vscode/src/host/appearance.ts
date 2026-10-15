@@ -19,7 +19,13 @@ export const appearance = (): Appearance => store?.get<Appearance>(KEY) ?? {};
 /** a webview that shows pages hears the changes the others make; dispose when it closes */
 export function watchAppearance(webview: vscode.Webview): vscode.Disposable {
   views.add(webview);
-  return new vscode.Disposable(() => { views.delete(webview); });
+  const messages = webview.onDidReceiveMessage((m: { type?: string; action?: string }) => {
+    if (m?.type !== 'interfaceZoom') return;
+    const commands: Record<string, string> = { in: 'workbench.action.zoomIn', out: 'workbench.action.zoomOut', reset: 'workbench.action.zoomReset' };
+    const command = commands[m.action ?? ''];
+    if (command) void vscode.commands.executeCommand(command).then(undefined, e => vscode.window.showErrorMessage('OverLyX could not change interface zoom: ' + String(e)));
+  });
+  return new vscode.Disposable(() => { messages.dispose(); views.delete(webview); });
 }
 
 /** what is kept, to a webview that just became ready */

@@ -14,20 +14,23 @@ import { inkOn } from './contrast';
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 import * as decoding from 'lib0/decoding';
-import { strokePathD, laserPathD, polylineHitsPolygon, rectHitsPolygon, splitDocId, type InkStroke } from '@overlyx/core';
+import { strokePathD, strokeRuns, laserPathD, polylineHitsPolygon, rectHitsPolygon, splitDocId, type InkStroke } from '@overlyx/core';
 import { api, fileUrl, type User } from '../api';
 import { imageFiles, imageExt, uploadBaseName, uploadUnique, isSvgMarkup, svgFile } from '../editor/imagepaste';
-import { HIGHLIGHT_OPACITY, LASER_COLOR, LASER_FADE_MS, getInk, setInk, subscribeInk, inkColorName, formatMm, mmToPx, type InkPen } from '../editor/plugins/ink';
-import { InkColorPicker, InkWidthPicker, widthDotPx } from './InkPickers';
+import { HIGHLIGHT_OPACITY, LASER_COLOR, LASER_FADE_MS, subscribeInk } from '../editor/plugins/ink';
 import { useUiMode } from './uimode';
 import { MODERN_ICONS, iconSvg } from './modernicons';
 import { hostedZoomPill } from './zoomhud';
+import { Toolbar } from './Toolbar';
+import { drawingToolbar } from '../deliverable/drawingToolbar';
+import { loadDeckInk, saveDeckInk, patchDeckInk } from '../deliverable/deckink';
+import { isScribble, type NibOpts } from '@overlyx/core/freehand.ts';
 
 export interface BoardObj {
   t: 'stroke' | 'img' | 'note';
   x: number; y: number; w: number; h: number; z?: number;
   /** stroke */
-  color?: string; sw?: number; o?: number; pts?: [number, number, number][];
+  color?: string; sw?: number; o?: number; nib?: NibOpts; pressure?: boolean; pts?: [number, number, number][];
   /** image (project-relative path) */
   src?: string;
   /** note */
@@ -36,7 +39,7 @@ export interface BoardObj {
 
 type Tool = 'select' | 'lasso' | 'pen' | 'highlighter' | 'eraser' | 'note' | 'laser';
 interface Camera { tx: number; ty: number; s: number }
-interface LiveStroke { color: string; w: number; o?: number; pts: [number, number, number][] }
+interface LiveStroke { color: string; w: number; o?: number; nib?: NibOpts; pressure?: boolean; pts: [number, number, number][] }
 /** a laser trace (board coordinates); `fadeAt` set once its owner lifted the pen */
 interface LaserTrail { pts: [number, number][]; color: string; name?: string; fadeAt: number | null }
 
@@ -45,12 +48,12 @@ const newId = () => Date.now().toString(36) + '-' + Math.random().toString(36).s
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
 /** Normalise absolute stroke points into an object: bbox at (x, y), points relative. */
-function strokeToObj(pts: [number, number, number][], color: string, sw: number, o?: number): BoardObj {
+function strokeToObj(pts: [number, number, number][], color: string, sw: number, o?: number, nib?: NibOpts, pressure?: boolean): BoardObj {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const [x, y] of pts) { minX = Math.min(minX, x); minY = Math.min(minY, y); maxX = Math.max(maxX, x); maxY = Math.max(maxY, y); }
   const w = Math.max(1, maxX - minX), h = Math.max(1, maxY - minY);
   return {
-    t: 'stroke', x: round1(minX), y: round1(minY), w: round1(w), h: round1(h), color, sw, ...(o !== undefined ? { o } : {}),
+    t: 'stroke', nib, pressure, x: round1(minX), y: round1(minY), w: round1(w), h: round1(h), color, sw, ...(o !== undefined ? { o } : {}),
     pts: pts.map(([x, y, p]) => [round1(x - minX), round1(y - minY), Math.round(p * 100) / 100] as [number, number, number]),
   };
 }
@@ -83,20 +86,14 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
   const camRef = useRef(cam); camRef.current = cam;
   const [tool, setToolState] = useState<Tool>('select');
   const toolRef = useRef(tool); toolRef.current = tool;
-  const setTool = (t: Tool) => { setToolState(t); if (t === 'pen' || t === 'highlighter') setLastPen(t); if (t !== 'select' && t !== 'lasso') setSelected(new Set()); setPick(null); };
+  const setTool = (t: Tool) => {
+    setToolState(t);
+    if ((t === 'pen' || t === 'highlighter') && loadDeckInk().pen !== t) saveDeckInk(patchDeckInk(loadDeckInk(), { pen: t }));
+    if (t !== 'select' && t !== 'lasso') setSelected(new Set());
+  };
   // pen and highlighter each keep their own colour, width and presets — the same pens as the
   // margin ink (one Goodnotes pen case per browser); the swatches show the pen in use, or the
   // last one used while another tool is active. A click on the selected preset opens its editor.
-  const pens = getInk().pens;
-  useEffect(() => subscribeInk(rerender), []);
-  const [lastPen, setLastPen] = useState<InkPen>('pen');
-  const curPen: InkPen = tool === 'highlighter' ? 'highlighter' : tool === 'pen' ? 'pen' : lastPen;
-  const [pick, setPick] = useState<{ kind: 'color' | 'width'; idx: number } | null>(null);
-  const setPenSetting = (patch: { color?: string; width?: number }) => {
-    setInk({ pen: curPen, ...patch });
-    setPick(null);
-    if (tool !== 'pen' && tool !== 'highlighter') setTool(curPen);   // picking a colour takes the pen up again
-  };
   // the laser: my trace while held, then fading; the others' from awareness, kept to fade too
   const laserRef = useRef<[number, number][] | null>(null);
   const [laserFade, setLaserFade] = useState<{ pts: [number, number][]; key: number } | null>(null);
@@ -240,18 +237,15 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     return minX > maxX ? null : { x: minX, y: minY, w: Math.max(1, maxX - minX), h: Math.max(1, maxY - minY) };
   };
 
-  /**
-   * GoodNotes' "Draw with finger": off, a finger pans and only a pen (stylus) or the mouse draws. By default
-   * on for touch screens without a pen seen yet; the first pen stroke switches it off (the pen draws, the
-   * finger pans), unless chosen with the ☝ button (kept in this browser).
-   */
-  const fingerDrawRef = useRef<boolean>((() => { try { const v = localStorage.getItem('ol.fingerDraw'); if (v !== null) return v === '1'; } catch { /* private */ } return typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches; })());
+  /** The layout pen case also owns the finger-drawing preference. */
+  const fingerDrawRef = useRef(loadDeckInk().fingersDraw);
   const [fingerDraw, setFingerDrawState] = useState(fingerDrawRef.current);
-  const setFingerDraw = (v: boolean, remember = true) => { fingerDrawRef.current = v; setFingerDrawState(v); if (remember) { try { localStorage.setItem('ol.fingerDraw', v ? '1' : '0'); } catch { /* private */ } } };
+  const setFingerDraw = (v: boolean) => { fingerDrawRef.current = v; setFingerDrawState(v); saveDeckInk(patchDeckInk(loadDeckInk(), { fingersDraw: v })); };
+  useEffect(() => subscribeInk(() => { const drawing = loadDeckInk(); fingerDrawRef.current = drawing.fingersDraw; setFingerDrawState(drawing.fingersDraw); rerender(); }), []);
 
   const onPointerDown = (e: PointerEvent) => {
     const vp = vpRef.current!;
-    if (e.pointerType === 'pen' && fingerDrawRef.current) { let chosen = false; try { chosen = localStorage.getItem('ol.fingerDraw') !== null; } catch { /* private */ } if (!chosen) setFingerDraw(false, false); }
+    if (e.pointerType === 'pen' && !loadDeckInk().pencil) saveDeckInk(patchDeckInk(loadDeckInk(), { pencil: true }));
     const finger = e.pointerType === 'touch' && fingerDrawRef.current;
     vp.focus({ preventScroll: true });
     pointers.current.set(e.pointerId, [e.clientX, e.clientY]);
@@ -272,7 +266,6 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     const origsOf = (ids: ReadonlySet<string>) => { const m = new Map<string, BoardObj>(); for (const id of ids) { const o = objects.get(id); if (o) m.set(id, { ...o, pts: o.pts?.map(p => [...p] as [number, number, number]) }); } return m; };
     const onSelBox = !!target.closest?.('.board-selbox');
     vp.setPointerCapture(e.pointerId);
-    setPick(null);
     if (t === 'laser' && (e.pointerType !== 'touch' || finger)) {
       // the laser pointer: a viewer may use it too — nothing is written
       laserRef.current = [[bx, by]];
@@ -311,8 +304,8 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
       setEditing(nid);
     } else if (drawTool) {
       const hl = t === 'highlighter';
-      const pen = getInk().pens[hl ? 'highlighter' : 'pen'];
-      liveRef.current = { color: pen.color, w: mmToPx(pen.width), ...(hl ? { o: HIGHLIGHT_OPACITY } : {}), pts: [[bx, by, e.pointerType === 'pen' ? e.pressure : 0]] };
+      const drawing = loadDeckInk(), pen = drawing.pens[hl ? 'highlighter' : 'pen'];
+      liveRef.current = { color: pen.color, w: pen.width, nib: { ...drawing.nib }, pressure: e.pointerType === 'pen', ...(hl ? { o: HIGHLIGHT_OPACITY } : {}), pts: [[bx, by, e.pointerType === 'pen' ? e.pressure : 0]] };
       dragRef.current = { kind: 'draw', start: [bx, by] };
     }
     if (dragRef.current || liveRef.current) e.preventDefault();
@@ -417,7 +410,16 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     if (live && dragRef.current?.kind === 'draw') {
       liveRef.current = null;
       try { provider.awareness.setLocalStateField('boardInk', null); } catch { /* closing */ }
-      if (live.pts.length) mutate(() => objects.set(newId(), strokeToObj(live.pts, live.color, live.w, live.o)));
+      if (live.pts.length) {
+        const polygon = live.pts.map(([x, y]) => [x, y] as [number, number]);
+        const erased: string[] = [];
+        if (loadDeckInk().scribble && live.o === undefined && isScribble(polygon, camRef.current.s)) {
+          objects.forEach((object, key) => {
+            if (object.t === 'stroke' && polylineHitsPolygon((object.pts ?? []).map(([x, y]) => [object.x + x, object.y + y]), polygon)) erased.push(key);
+          });
+        }
+        mutate(() => { if (erased.length) for (const key of erased) objects.delete(key); else objects.set(newId(), strokeToObj(live.pts, live.color, live.w, live.o, live.nib, live.pressure)); });
+      }
     }
     if (dragRef.current?.kind === 'lasso') {
       const poly = lassoRef.current;
@@ -549,8 +551,6 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
   const toolBtn = (t: Tool, label: string, title: string) => (
     <button class={'small-btn' + (tool === t ? ' active' : '')} data-tool={t} title={title} onClick={() => setTool(t)}>{face('bd-' + t, label)}</button>
   );
-  const drawingTool = tool === 'pen' || tool === 'highlighter';
-  const penSet = pens[curPen];
   /** a laser trace as SVG: a wide soft glow under a bright core, a dot at the head — all sized for the screen, not the board */
   const laserSvg = (t: LaserTrail, key: string | number, mine: boolean) => {
     const d = laserPathD(t.pts);
@@ -592,14 +592,14 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
             <svg key={key} data-obj={key} class={'board-stroke' + (selected.has(key) ? ' selected' : '')}
               style={{ left: o.x + 'px', top: o.y + 'px', width: o.w + 'px', height: o.h + 'px', overflow: 'visible' }}
               viewBox={`0 0 ${o.w} ${o.h}`} width={o.w} height={o.h}>
-              <path d={strokeD(o)} fill={o.color ?? '#000'} fill-opacity={o.o ?? 1} />
+              <BoardStroke stroke={{ color: o.color ?? '#000', w: o.sw ?? 2, pts: o.pts ?? [], nib: o.nib, pressure: o.pressure, o: o.o }} legacy={strokeD(o)} />
             </svg>
           );
         })}
         {/* in-progress strokes: mine and the other clients' (awareness) */}
         {[...remoteInks, ...(liveRef.current ? [liveRef.current] : [])].map((s, i) => (
           <svg key={'live' + i} class="board-stroke live" style={{ left: 0, top: 0, overflow: 'visible' }} width={1} height={1}>
-            <path d={strokePathD({ color: s.color, w: s.w, pts: s.pts } as InkStroke)} fill={s.color} fill-opacity={s.o ?? 1} />
+            <BoardStroke stroke={s} />
           </svg>
         ))}
         {selBB && (
@@ -623,44 +623,21 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
           </div>
         ))}
       </div>
-      <div class="board-tools" onPointerDown={e => e.stopPropagation()} onKeyDown={e => { if (e.key === 'Escape' && pick) { setPick(null); e.stopPropagation(); } }}>
+      <div class="board-tools" onPointerDown={e => e.stopPropagation()}>
         {toolBtn('select', '⤢', 'Select / move (drag empty space to pan)')}
         {toolBtn('lasso', '◌', 'Lasso — encircle things to select them together (Shift adds); drag to move, corner handles resize, Delete removes')}
-        {!readOnly && toolBtn('pen', '✏️', 'Pen')}
-        {!readOnly && toolBtn('highlighter', '🖍', 'Highlighter')}
-        {!readOnly && toolBtn('eraser', '⌫', 'Eraser (removes strokes)')}
         {toolBtn('laser', '🔴', 'Laser pointer — a glowing trace that stays while you hold the pen down and fades when you lift it; not saved, seen live by everyone on the board')}
         {!readOnly && toolBtn('note', '🗒', 'Sticky note')}
         {!readOnly && <button class="small-btn" title="Add images (or paste / drag them in)" onClick={pickImages}>{face('bd-image', '🖼')}</button>}
         <button class={'small-btn' + (fingerDraw ? ' active' : '')} data-finger-draw title={fingerDraw ? 'Drawing with a finger is on — a finger draws, two fingers pan and zoom (click to let a finger pan)' : 'Draw with a finger (otherwise only a pen or the mouse draws; a finger pans)'} onClick={() => setFingerDraw(!fingerDraw)}>{face('bd-finger', '☝')}</button>
         {!readOnly && <span class="board-sep" />}
-        {/* presets (shared with the margin ink): one click selects, a click on the selected one edits it */}
-        {!readOnly && penSet.colors.map((c, i) => {
-          const active = penSet.color === c && drawingTool;
-          return (
-            <button key={curPen + i} class={'board-color' + (active ? ' active' : '') + (curPen === 'highlighter' ? ' hl' : '')} data-color={c} data-slot={'c' + i}
-              title={`${inkColorName(c)} (${curPen}) — click the selected colour again to change it`} style={{ background: c }}
-              onClick={() => { if (active) setPick(p => (p?.kind === 'color' && p.idx === i ? null : { kind: 'color', idx: i })); else setPenSetting({ color: c }); }} />
-          );
-        })}
-        {!readOnly && penSet.widths.map((w, i) => {
-          const active = penSet.width === w && drawingTool;
-          const px = widthDotPx(curPen, w);
-          return (
-            <button key={curPen + 'w' + i} class={'small-btn board-width' + (active ? ' active' : '')} data-width={w} data-slot={'w' + i}
-              title={`${curPen === 'pen' ? 'Pen' : 'Highlighter'} ${formatMm(w)} — click the selected width again to change it`}
-              onClick={() => { if (active) setPick(p => (p?.kind === 'width' && p.idx === i ? null : { kind: 'width', idx: i })); else setPenSetting({ width: w }); }}>
-              <span style={{ width: px + 'px', height: px + 'px' }} />
-            </button>
-          );
-        })}
-        {pick && (
-          <div class="board-pop">
-            {pick.kind === 'color'
-              ? <InkColorPicker value={penSet.colors[pick.idx]} pen={curPen} onChange={v => setInk({ pen: curPen, slotColor: { idx: pick.idx, color: v } })} />
-              : <InkWidthPicker value={penSet.widths[pick.idx]} color={penSet.color} pen={curPen} onChange={v => setInk({ pen: curPen, slotWidth: { idx: pick.idx, width: v } })} />}
-          </div>
-        )}
+        {!readOnly && <Toolbar id="board-draw" groups={drawingToolbar({
+          tool: tool === 'pen' || tool === 'highlighter' ? 'pen' : tool,
+          setTool: next => { if (next === 'pen') setTool(loadDeckInk().pen); else if (next === 'eraser') setTool('eraser'); },
+          ink: { presets: loadDeckInk(), set: patch => saveDeckInk(patchDeckInk(loadDeckInk(), patch)), draw: on => setTool(on ? loadDeckInk().pen : 'select') },
+          done: false,
+        })} />}
+
       </div>
       <div class="board-zoom" onPointerDown={e => e.stopPropagation()}>
         <button class="small-btn" title="Zoom out" onClick={() => zoomAt(innerWidth / 2, innerHeight / 2, 1 / 1.25)}>−</button>
@@ -673,4 +650,10 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
       </div>
     </div>
   );
+}
+
+function BoardStroke({ stroke, legacy }: { stroke: LiveStroke; legacy?: string }) {
+  const runs = strokeRuns(stroke);
+  return runs ? <g fill="none" stroke={stroke.color} opacity={stroke.o ?? 1} stroke-linecap="round" stroke-linejoin="round">{runs.map(run => <path d={run.d} stroke-width={run.w} />)}</g>
+    : <path d={legacy ?? strokePathD(stroke)} fill={stroke.color} fill-opacity={stroke.o ?? 1} />;
 }

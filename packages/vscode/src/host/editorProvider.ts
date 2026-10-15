@@ -17,6 +17,7 @@ import { WindowUnreachable, type HandOver } from '../agents/handover.ts';
 
 export interface ProviderDeps {
   bridgeBase(): Promise<string>;
+  canvasBase?(): Promise<string>;
   layoutDir(): string;
   /** register a project root; returns its project name */
   registerRoot(root: string): string;
@@ -291,8 +292,10 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
       session.dispose();
       this.registry.remove(entry);
     });
+    const canvasBase = await this.deps.canvasBase?.();
     panel.webview.html = await webviewHtml(panel.webview, this.context.extensionUri, 'editor', {
-      page: 'editor', docId: session.docId, base, dark: isDark(),
+      page: 'editor', docId: session.docId, base, dark: isDark(), canvasBase,
+      ...(canvasBase ? { frameOrigin: new URL(canvasBase).origin } : {}),
     });
   }
 }

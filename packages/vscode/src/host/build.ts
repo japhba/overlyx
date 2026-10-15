@@ -45,7 +45,20 @@ export function publicJob(j: BuildJob): PublicJob {
   return { id: j.id, status: j.status, engine: 'overlyx', requestedBy: j.requestedBy, startedAt: j.startedAt, phaseAt: j.phaseAt, finishedAt: j.finishedAt, progress: j.progress, rerun: j.rerun };
 }
 export function currentJob(docId: string): BuildJob | undefined { return jobs.get(docId); }
-export function lastBuild(docId: string): BuildRecord | undefined { return lastBuilds.get(docId); }
+export function lastBuild(docId: string, texPath?: string): BuildRecord | undefined {
+  const known = lastBuilds.get(docId);
+  if (known || !texPath) return known;
+  // Reloading VS Code loses the in-memory build log, not the PDF on disk.
+  const pdfPath = texPath.replace(/\.tex$/i, '.pdf');
+  if (pdfPath === texPath) return undefined;
+  try {
+    const stat = fs.statSync(pdfPath);
+    if (!stat.isFile()) return undefined;
+    const restored: BuildRecord = { status: 'ok', log: '', pdf_path: pdfPath, tex_path: texPath, updated_at: Math.round(stat.mtimeMs), warnings: [] };
+    lastBuilds.set(docId, restored);
+    return restored;
+  } catch { return undefined; }
+}
 
 export function requestBuild(req: BuildRequest, requestedBy = 'you'): BuildJob {
   const cur = jobs.get(req.docId);

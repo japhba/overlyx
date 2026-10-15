@@ -11,6 +11,8 @@ import { referenceTransaction } from '@client/editor/references';
 import { inkToolbar } from '@client/app/inkToolbar';
 import { StatsDialog } from '@client/app/StatsDialog';
 import { shareTheme } from './appearance';
+import { InterfaceZoom } from './InterfaceZoom';
+import { SvgEditorHost } from '@client/app/SvgEditor';
 import { SettingsPanel } from '@client/app/Settings';
 import { HelpDialog, HELP_ROWS, DialogHost, uiPrompt } from '@client/app/Dialogs';
 import { Ruler, DEFAULT_WIDTH, MIN_WIDTH, MAX_WIDTH, NOTE_SCALE_DEFAULT } from '@client/app/Ruler';
@@ -712,6 +714,8 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       <MenuBar menus={menus} showThemeToggle={false} paletteShortcut="Ctrl+Alt+Shift+P" captureF1={false} searchEntries={helpSearchEntries} />
       <div class="editor-topbar"><strong title={docId}>{docId.split('/').pop()}</strong>
         <span class="topbar-right">
+          <InterfaceZoom />
+          <button class="small-btn" title="Open the PDF preview beside the document" onClick={() => vscode.postMessage({ type: 'openPdfPanel' })}>PDF preview</button>
           <ThemeToggle pref={themePref} dark={shownDark} onPick={pickTheme} host="VS Code" onSettings={() => setDialog({ name: 'preferences' })} />
           <EditModeSwitch mode={editModeOf(tracking, viewing)} canEdit view={view} views={allViews}
             onMode={m => applyEditMode(m, { tracking, toggleTracking: () => { void toggleTracking(); }, setViewing })} />
@@ -804,6 +808,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       <StatusBar layout={layout} status={status} chord={chord} message={message} save={{ state: 'saved', pending: false, savedAt: 0, unavailable: false }}
         tracking={tracking} trackingAs="You" change={changeInfo} stats={docStats} zoom={zoom} onZoom={setZoom} />
       {renderDialog()}
+      <SvgEditorHost />
       <DialogHost />
     </div>
   );

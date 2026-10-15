@@ -1,6 +1,7 @@
 import { recordUsage, noticeTemplate } from '../usage';
 import { editorViewMenu } from './editorViewMenu';
 import { inkToolbar } from './inkToolbar';
+import { SvgEditorHost } from './SvgEditor';
 import { StatsDialog } from './StatsDialog';
 import { GoogleDocsDialog } from './GoogleDocs';
 import { documentMenus } from './documentMenus';
@@ -1693,6 +1694,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         ctx={{ docId, ready: isLyxDoc && status.synced && !!view, docTick, layout, inMath: !!mathField, saveState: save.state, rightTab, pdfBusy: pdf.busy, pdfBuiltAt: pdf.builtAt ?? 0, shareOpen: !!shareFor, gitOpen: !!gitFor, marginMode }}
         actions={{ openExample, showRight: () => { if (!rightTab) setRightTab('comments'); }, showPdf: () => showPane('pdf'), showFiles: () => setShowFiles(true) }} />}
       {/* last: any uiPrompt/uiConfirm/uiAlert (Dialogs.tsx) stacks above every other dialog above, including Home's and Git's */}
+      <SvgEditorHost />
       <DialogHost />
     </div>
   );

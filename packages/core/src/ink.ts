@@ -9,6 +9,7 @@
  */
 
 /** [x, y, pressure 0..1]; pressure 0 means "unknown" (a mouse) and draws at half width. */
+import { inkRuns, inkPaths, type NibOpts } from './freehand.ts';
 export type InkPts = [number, number, number][];
 
 export interface InkStroke {
@@ -20,6 +21,15 @@ export interface InkStroke {
   /** opacity (highlighter), 1 when absent */
   o?: number;
   pts: InkPts;
+  /** Layout-editor pen settings; absent on older drawings, whose geometry is retained. */
+  nib?: NibOpts;
+  pressure?: boolean;
+}
+
+/** One shared stroke engine for layouts, document margins and whiteboards. */
+export function strokeRuns(stroke: InkStroke): { w: number; d: string }[] | null {
+  if (!stroke.nib) return null;
+  return inkPaths(inkRuns(stroke.pts, { width: stroke.w, highlighter: stroke.o !== undefined && stroke.o < 1, pressure: stroke.pressure, nib: stroke.nib, final: true }));
 }
 
 /** An image placed on the ink layer (pasted into the margin): document-relative file, offsets like a stroke's. */
@@ -169,6 +179,11 @@ export function inkSvg(dataJson: string, svgPath = ''): string {
     s += `<image href="${xmlEscape(relHref(svgPath, im.src))}" x="${r2(im.dx)}" y="${r2(im.dy)}" width="${r2(im.w)}" height="${r2(im.h)}" preserveAspectRatio="none"/>\n`;
   }
   for (const st of strokes) {
+    const runs = strokeRuns(st);
+    if (runs) {
+      s += `<g fill="none" stroke="${xmlEscape(st.color)}" stroke-linecap="round" stroke-linejoin="round"${st.o !== undefined && st.o < 1 ? ` opacity="${st.o}"` : ''}>${runs.map(run => `<path d="${run.d}" stroke-width="${run.w}"/>`).join('')}</g>\n`;
+      continue;
+    }
     const d = strokePathD(st);
     if (!d) continue;
     s += `<path d="${d}" fill="${xmlEscape(st.color)}"${st.o !== undefined && st.o < 1 ? ` fill-opacity="${st.o}"` : ''}/>\n`;

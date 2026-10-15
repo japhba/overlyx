@@ -26,7 +26,7 @@ import { Plugin, PluginKey } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
 import type { Awareness } from 'y-protocols/awareness';
-import { schema, strokePathD, laserPathD, polylineHitsPolygon, rectHitsPolygon, type InkStroke, type InkImage } from '@overlyx/core';
+import { schema, strokePathD, strokeRuns, laserPathD, polylineHitsPolygon, rectHitsPolygon, type InkStroke, type InkImage } from '@overlyx/core';
 import { graphicsUrl } from '../../api';
 import { viewProject, viewDocDir, resolveDocPath } from '../context';
 import { imageFiles, imageExt, uploadBaseName, uploadUnique, isSvgMarkup, svgFile } from '../imagepaste';
@@ -49,13 +49,13 @@ export interface InkUiState {
   /** the pen the colour / width buttons belong to: the drawing tool in use, or the last one used */
   pen: InkPen;
   pens: Record<InkPen, PenSettings>;
+  drawing: DeckInk;
 }
 
-/** Default colour presets per pen (the highlighter's are drawn at HIGHLIGHT_OPACITY). */
-export const INK_PALETTES: Record<InkPen, [string, string][]> = {
-  pen: [['#202124', 'Black'], ['#1a73e8', 'Blue'], ['#d93025', 'Red'], ['#188038', 'Green'], ['#f29900', 'Orange'], ['#a142f4', 'Purple']],
-  highlighter: [['#fbbc04', 'Yellow'], ['#f29900', 'Orange'], ['#e8467c', 'Pink'], ['#34a853', 'Green'], ['#4285f4', 'Blue'], ['#a142f4', 'Purple']],
-};
+export { INK_PALETTES, HIGHLIGHT_OPACITY } from '@overlyx/core/inkpresets.ts';
+import { INK_PALETTES, HIGHLIGHT_OPACITY } from '@overlyx/core/inkpresets.ts';
+import { loadDeckInk, saveDeckInk, patchDeckInk, subscribeDeckInk, type DeckInk } from '../../deliverable/deckink';
+import { isScribble } from '@overlyx/core/freehand.ts';
 /**
  * Widths are millimetres on the page, as Goodnotes shows them; the strokes themselves are stored
  * in px at 100 % zoom (the SVG sidecars' units), converted with the ruler's 96 dpi scale.
@@ -129,6 +129,7 @@ let ui: InkUiState = {
   tool: storedTool,
   pen: storedTool === 'highlighter' ? 'highlighter' : 'pen',
   pens: loadPens(),
+  drawing: loadDeckInk(),
 };
 const subs = new Set<() => void>();
 export function getInk(): InkUiState { return ui; }
@@ -178,9 +179,41 @@ export function setInk(patch: InkPatch): void {
     localStorage.setItem('ol.inkTool', JSON.stringify(ui.tool));
     localStorage.setItem('ol.inkPensMm', JSON.stringify(ui.pens));
   } catch { /* private mode */ }
+  if (settings || patch.pen || patch.tool === 'pen' || patch.tool === 'highlighter') {
+    const p = patch.pen ?? ui.pen, pen = ui.pens[p];
+    saveDeckInk(patchDeckInk(loadDeckInk(), { pen: p,
+      ...(patch.color ? { color: pen.color } : {}), ...(patch.width !== undefined ? { width: mmToPx(pen.width) } : {}),
+      ...(patch.slotColor ? { slotColor: { idx: patch.slotColor.idx, color: pen.colors[patch.slotColor.idx] } } : {}),
+      ...(patch.slotWidth ? { slotWidth: { idx: patch.slotWidth.idx, width: mmToPx(pen.widths[patch.slotWidth.idx]) } } : {}),
+    }));
+    return;
+  }
   for (const s of subs) s();
 }
 export function subscribeInk(fn: () => void): () => void { subs.add(fn); return () => subs.delete(fn); }
+
+/** Use the layout editor's pen case everywhere, migrating document presets once. */
+const syncDrawing = (drawing: DeckInk) => {
+  const pens = Object.fromEntries((['pen', 'highlighter'] as const).map(p => {
+    const pen = drawing.pens[p];
+    return [p, { ...pen, width: pxToMm(pen.width), widths: pen.widths.map(pxToMm) }];
+  })) as Record<InkPen, PenSettings>;
+  ui = { ...ui, drawing, pen: drawing.pen, pens,
+    tool: ui.tool === 'pen' || ui.tool === 'highlighter' ? drawing.pen : ui.tool };
+  for (const fn of subs) fn();
+};
+try {
+  if (localStorage.getItem('ol.deckInk')) syncDrawing(loadDeckInk());
+  else {
+    const drawing = loadDeckInk();
+    if (localStorage.getItem('ol.inkPensMm') || localStorage.getItem('ol.inkPens')) {
+      for (const p of ['pen', 'highlighter'] as const) drawing.pens[p] = { ...ui.pens[p], width: mmToPx(ui.pens[p].width), widths: ui.pens[p].widths.map(mmToPx) };
+      drawing.pen = ui.pen;
+    }
+    saveDeckInk(drawing); syncDrawing(drawing);
+  }
+} catch { /* storage unavailable */ }
+subscribeDeckInk(syncDrawing);
 
 /**
  * Should the drawing toolbar switch itself on? Tablets: a coarse pointer with touch — not a phone (as
@@ -191,7 +224,6 @@ export function isTabletClient(): boolean {
   try { return matchMedia('(any-pointer: coarse)').matches && navigator.maxTouchPoints > 0 && !matchMedia('(max-width: 700px), (max-height: 500px)').matches; } catch { return false; }
 }
 
-export const HIGHLIGHT_OPACITY = 0.35;
 /** The laser pointer: the colour of one's own trace (the others' trails take their presence colour) and how long a lifted trace lingers. */
 export const LASER_COLOR = '#ff2d55';
 export const LASER_FADE_MS = 700;
@@ -222,7 +254,7 @@ export function paintLaser(ctx: CanvasRenderingContext2D, pts: readonly (readonl
 interface InkData { v: 1; strokes: InkStroke[]; imgs: InkImage[] }
 interface SketchEntry { pos: number; blockPos: number; src: string; data: InkData }
 /** what streams over awareness while a stroke is drawn */
-interface LiveInk { src: string; side: 'left' | 'right'; color: string; w: number; o?: number; pts: [number, number, number][] }
+interface LiveInk extends InkStroke { src: string; side: 'left' | 'right' }
 /** what streams over awareness while the laser is held: offsets from (left column edge, top of the `b`-th top-level block) / zoom */
 interface LiveLaser { b: number; pts: [number, number][] }
 /** another client's laser trail, kept after its field vanished so it can fade out here too */
@@ -235,6 +267,7 @@ interface Rect { x: number; y: number; w: number; h: number }
 
 const parseCache = new Map<string, InkData>();
 const pathCache = new WeakMap<InkStroke, Path2D>();
+const runCache = new WeakMap<InkStroke, { w: number; path: Path2D }[]>();
 function parseData(json: string | null): InkData {
   if (!json) return { v: 1, strokes: [], imgs: [] };
   let d = parseCache.get(json);
@@ -278,7 +311,7 @@ class InkLayer {
   private ro: ResizeObserver | null = null;
   private unsub: (() => void)[] = [];
   /** the stroke being drawn here right now (content coordinates of the scroller) */
-  private live: { src: string; side: 'left' | 'right'; edgeX: number; anchorTop: number; color: string; w: number; o?: number; pts: [number, number, number][] } | null = null;
+  private live: (LiveInk & { edgeX: number; anchorTop: number }) | null = null;
   /** the laser trace being held (content coordinates) and the one fading after a lift */
   private laser: { b: number; edgeX: number; top: number; pts: [number, number][] } | null = null;
   private laserFade: { pts: [number, number][]; start: number } | null = null;
@@ -551,7 +584,12 @@ class InkLayer {
       enter(edgeX, top, sel);
       ctx.globalAlpha = stroke.o !== undefined ? stroke.o : 1;
       ctx.fillStyle = stroke.color;
-      ctx.fill(pathFor(stroke));
+      let runs = runCache.get(stroke);
+      if (!runs && stroke.nib) { runs = (strokeRuns(stroke) ?? []).map(run => ({ w: run.w, path: new Path2D(run.d) })); runCache.set(stroke, runs); }
+      if (runs) {
+        ctx.strokeStyle = stroke.color; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        for (const run of runs) { ctx.lineWidth = run.w; ctx.stroke(run.path); }
+      } else ctx.fill(pathFor(stroke));
       ctx.restore();
     };
 
@@ -578,12 +616,12 @@ class InkLayer {
       if (!entry) return;
       const top = this.blockTop(entry.blockPos, g);
       if (top === null) return;
-      drawStroke({ color: ink.color, w: ink.w, o: ink.o, pts: ink.pts }, this.edgeX(ink.side, g), top);
+      drawStroke(ink, this.edgeX(ink.side, g), top);
     });
     // the local stroke being drawn (content coordinates, not yet relativised)
     if (this.live && this.live.pts.length) {
       const l = this.live;
-      const rel: InkStroke = { color: l.color, w: l.w, o: l.o, pts: l.pts.map(([x, y, p]) => [(x - l.edgeX) / z, (y - l.anchorTop) / z, p] as [number, number, number]) };
+      const rel: InkStroke = { color: l.color, w: l.w, o: l.o, nib: l.nib, pressure: l.pressure, pts: l.pts.map(([x, y, p]) => [(x - l.edgeX) / z, (y - l.anchorTop) / z, p] as [number, number, number]) };
       drawStroke(rel, l.edgeX, l.anchorTop);
     }
     // the lasso being drawn: always shown closed (a segment back to the start), lightly filled —
@@ -737,7 +775,8 @@ class InkLayer {
 
   private onDown = (e: PointerEvent) => {
     if (!ui.active || !this.scroller) return;
-    if (e.pointerType === 'touch') return;   // fingers pan (touch-action), the pen and mouse draw
+    if (e.pointerType === 'touch' && !ui.drawing.fingersDraw) return;
+    if (e.pointerType === 'pen' && !ui.drawing.pencil) saveDeckInk({ ...ui.drawing, pencil: true });
     if (e.button !== 0 && !(e.pointerType === 'pen' && e.buttons & 32)) return;
     const g = this.geom();
     const [cx, cy] = this.toContent(e, g);
@@ -792,8 +831,9 @@ class InkLayer {
       edgeX: this.edgeX(side, g),
       anchorTop: top,
       color: pen.color,
-      w: mmToPx(pen.width),
+      w: ui.drawing.pens[hl ? 'highlighter' : 'pen'].width,
       o: hl ? HIGHLIGHT_OPACITY : undefined,
+      nib: { ...ui.drawing.nib }, pressure: e.pointerType === 'pen',
       pts: [],
     };
     this.pointerId = e.pointerId;
@@ -804,7 +844,8 @@ class InkLayer {
 
   private addPoint(e: PointerEvent, g: ReturnType<InkLayer['geom']>) {
     if (!this.live) return;
-    const events = e.getCoalescedEvents?.() ?? [e];
+    const coalesced = e.getCoalescedEvents?.();
+    const events = coalesced?.length ? coalesced : [e];
     for (const ev of events) {
       const [x, y] = this.toContent(ev, g);
       const p = ev.pointerType === 'pen' ? ev.pressure : 0;
@@ -816,7 +857,7 @@ class InkLayer {
       this.lastAwarenessSend = now;
       const l = this.live;
       const z = zoom();
-      const liveMsg: LiveInk = { src: l.src, side: l.side, color: l.color, w: l.w, o: l.o, pts: l.pts.map(([x, y, p]) => [round4((x - l.edgeX) / z), round4((y - l.anchorTop) / z), Math.round(p * 100) / 100] as [number, number, number]) };
+      const liveMsg: LiveInk = { src: l.src, side: l.side, color: l.color, w: l.w, o: l.o, nib: l.nib, pressure: l.pressure, pts: l.pts.map(([x, y, p]) => [round4((x - l.edgeX) / z), round4((y - l.anchorTop) / z), Math.round(p * 100) / 100] as [number, number, number]) };
       try { this.awareness.setLocalStateField('ink', liveMsg); } catch { /* not connected */ }
     }
   }
@@ -887,9 +928,21 @@ class InkLayer {
     const z = zoom();
     const stroke: InkStroke = {
       side: l.side, color: l.color, w: l.w,
+      nib: l.nib, pressure: l.pressure,
       ...(l.o !== undefined ? { o: l.o } : {}),
       pts: l.pts.map(([x, y, p]) => [round4((x - l.edgeX) / z), round4((y - l.anchorTop) / z), Math.round(p * 100) / 100] as [number, number, number]),
     };
+    if (ui.drawing.scribble && l.o === undefined && isScribble(l.pts.map(([x, y]) => [x, y]))) {
+      const hits = this.lassoSelect(l.pts.map(([x, y]) => [x, y]))?.filter(item => item.kind === 'stroke') ?? [];
+      if (hits.length) {
+        const remove = new Map<string, { strokes: Set<number>; imgs: Set<number> }>();
+        for (const item of hits) {
+          if (!remove.has(item.src)) remove.set(item.src, { strokes: new Set(), imgs: new Set() });
+          remove.get(item.src)!.strokes.add(item.idx);
+        }
+        this.rewrite(remove, []); this.schedule(); return;
+      }
+    }
     const found = this.findBySrc(l.src);
     if (!found) { this.schedule(); return; }   // the anchor vanished mid-stroke (remote delete)
     const data = parseData(found.node.attrs.data);

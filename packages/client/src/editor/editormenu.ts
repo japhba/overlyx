@@ -22,6 +22,7 @@ import { getPrefs, setPref } from '../prefs';
 import { effectiveShortcut } from '../app/keybindings';
 import { openRewrite, REWRITE_KEY } from './ai/rewrite';
 import { openLinkBox, openLink, hrefOf, unlinkText, LINK_KEY } from './links';
+import { openSvgEditor } from './svgEditorEvents';
 import { addToDictionary, ignoreWord } from './spell/plugin';
 import { foldMenuItems, sectionFoldState, foldedCount, itemFoldMenuItems, itemFoldState, foldedItemCount } from './plugins/fold';
 
@@ -140,6 +141,9 @@ export function editorContextMenu(view: EditorView, ev: MouseEvent, spelling?: {
       const rel = resolveDocPath(file, docDir);
       items.push(
         { label: `Graphics ${file}`, info: true },
+        ...(/\.svg$/i.test(rel) ? [{ label: 'Edit SVG…', icon: 'edit' as const, action: () => openSvgEditor({ project, path: rel, readOnly: !view.editable, onSaved: () => {
+          window.dispatchEvent(new CustomEvent('ol:svg-saved', { detail: { project, path: rel } }));
+        } }) }] : []),
         { label: 'Graphics settings…', icon: 'image', shortcut: 'double-click', action: dialog('inset', pos) },
         { label: 'Open original in new browser tab', icon: 'open', action: () => window.open(fileUrl(project, rel), '_blank') },
         { label: 'Export as PNG…', icon: 'image', action: () => window.open(graphicsUrl(project, rel, 2400) + '&download=1', '_blank') },

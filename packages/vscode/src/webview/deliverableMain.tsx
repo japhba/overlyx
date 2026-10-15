@@ -10,6 +10,7 @@ import { relayAppearance, setHostDark } from './appearance';
 import { render } from 'preact';
 import { useHostTheme } from '@client/app/theme';
 import { DeliverableCanvas } from '@client/deliverable/DeliverableEditor';
+import { InterfaceZoom } from './InterfaceZoom';
 import type { DeliverableHost, ChangeOrigin, Splice } from '@client/deliverable/host';
 import type { HostToDeliverable } from '../host/deliverables';
 import '@client/styles.css';
@@ -118,7 +119,7 @@ const onInit = (ev: MessageEvent<HostToDeliverable>) => {
   if (m?.type !== 'dlInit') return;
   removeEventListener('message', onInit);
   setHostDark(m.dark);
-  render(<DeliverableCanvas host={vscodeHost(m)} notify={notify} />, document.getElementById('app')!);
+  render(<DeliverableCanvas host={vscodeHost(m)} notify={notify} chrome={<InterfaceZoom />} />, document.getElementById('app')!);
 };
 addEventListener('message', onInit);
 vscode.postMessage({ type: 'ready' });

@@ -35,7 +35,7 @@ import { rebasedSplices, rebaseObjectPaths, objectHtml, imageHtml, insertPlace, 
 import { GUIDES_ATTR, LAYOUT_MARGINS_ATTR, layoutMarginGuides, parseGuides, masterGuides, formatGuides, withGuide, type Guide } from './guides';
 import { sizePt, stepPt } from './units';
 import { deckToolbar, quickGroups, type DeckTextActions } from './decktoolbar';
-import { loadDeckInk, saveDeckInk, patchDeckInk, deckInkStyle, type DeckInk, type DeckInkPatch } from './deckink';
+import { loadDeckInk, saveDeckInk, subscribeDeckInk, patchDeckInk, deckInkStyle, type DeckInk, type DeckInkPatch } from './deckink';
 import { QuickBar } from './QuickBar';
 import { loadTextDrafts, saveTextDrafts, draftWords, pendingDraftKey, loadPendingTextDrafts, forgetPendingTextDraft, type TextDraft } from './recovery';
 import { BgRemoveDialog } from './BgRemoveDialog';
@@ -127,7 +127,7 @@ export function DeliverableEditor({ id, user, notify }: { id: string; user: User
 }
 
 /** The editor around the page, wherever it runs (`host`: the web app's, the VS Code extension's). */
-export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; notify: Notify }) {
+export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableHost; notify: Notify; chrome?: ComponentChildren }) {
   const path = host.path;
   const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
   const [, bump] = useState(0);
@@ -315,6 +315,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   /** Draw: the pen's and the highlighter's presets, which of them is in hand (deckink.ts) */
   const [ink, setInkState] = useState<DeckInk>(loadDeckInk);
   const inkRef = useRef(ink); inkRef.current = ink;
+  useEffect(() => subscribeDeckInk(next => { inkRef.current = next; setInkState(next); }), []);
   const setInk = (p: DeckInkPatch) => { const v = patchDeckInk(inkRef.current, p); inkRef.current = v; setInkState(v); saveDeckInk(v); };
   /** the slide rail and the speaker notes, hidden or not (their « / ▾ buttons) */
   const [railShown, setRailShownState] = useState(() => loadShown('ol.deckSlides', true));
@@ -358,6 +359,22 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   const toFrame = (f: HTMLIFrameElement | null, msg: ToRuntime) => { try { f?.contentWindow?.postMessage(msg, '*'); } catch { /* gone */ } };
   const toCanvas = (msg: ToRuntime) => toFrame(canvasFrame.current, msg);
   const toRail = (msg: ToRuntime) => toFrame(railFrame.current, msg);
+  const svgExport = useRef<{ id: number; resolve(svg: string): void; reject(e: Error): void; timer: ReturnType<typeof setTimeout> } | null>(null);
+  const svgExportId = useRef(0);
+  useEffect(() => {
+    const off = host.bindSvgExporter?.(() => new Promise<string>((resolve, reject) => {
+      if (!canvasReady.current) { reject(new Error('The drawing is still opening.')); return; }
+      if (svgExport.current) { reject(new Error('The drawing is already being saved.')); return; }
+      const id = ++svgExportId.current;
+      const timer = setTimeout(() => { svgExport.current = null; reject(new Error('The drawing did not finish exporting. Please try again.')); }, 10000);
+      svgExport.current = { id, resolve, reject, timer };
+      toCanvas({ ol: 'exportSvg', id });
+    }));
+    return () => {
+      off?.();
+      if (svgExport.current) { clearTimeout(svgExport.current.timer); svgExport.current.reject(new Error('The drawing was closed.')); svgExport.current = null; }
+    };
+  }, [host]);
 
   // A valid link does not prove that its document and runtime actually started.
   // Watch each intentional opening; ordinary link renewal leaves drafts alone.
@@ -426,7 +443,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
           setOfflineRevisions(prev => ({ edit: prev.edit + 1, thumb: prev.thumb + 1, present: prev.present + 1 }));
           restartOpening.current = false; opened = true;
         }
-        const base = new URL('.', new URL(l.entry.split('/').map(encodeURIComponent).join('/'), new URL(l.base, location.href))).href;
+        const base = host.folderBase ?? new URL('.', new URL(l.entry.split('/').map(encodeURIComponent).join('/'), new URL(l.base, location.href))).href;
         for (const frame of [canvasFrame.current, railFrame.current, presentFrame.current]) toFrame(frame, { ol: 'folder', base });
         void host.offlineResources?.().then(urls => {
           if (stopped) return;
@@ -718,6 +735,15 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
         return;
       }
       switch (m.ol) {
+        case 'exportedSvg': {
+          const request = svgExport.current;
+          if (fromCanvas && request?.id === m.id) {
+            clearTimeout(request.timer); svgExport.current = null;
+            if (m.error || !m.svg) request.reject(new Error(m.error || 'The drawing could not be exported.'));
+            else request.resolve(m.svg);
+          }
+          break;
+        }
         case 'ready':
           if (fromCanvas) {
             if (!canvasReady.current) {
@@ -1020,7 +1046,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     return so && soloRef.current ? viewLevels(boxRef.current, so.rect, so.content ?? null, MAX_ZOOM) : { fit: fitRef.current };
   };
   /** a level as the zoom menu names it */
-  const levelName = (k: ViewFit) => k !== 'fit' ? VIEW_FIT_NAMES[k] : kindRef.current === 'poster' ? 'Fit poster' : kindRef.current === 'page' ? 'Fit width' : 'Fit slide';
+  const levelName = (k: ViewFit) => k !== 'fit' ? VIEW_FIT_NAMES[k] : host.bindSvgExporter ? 'Fit drawing' : kindRef.current === 'poster' ? 'Fit poster' : kindRef.current === 'page' ? 'Fit width' : 'Fit slide';
   const showZoom = (s: number) => {
     const l = levelsNow(), k = heldAt.current ?? levelAt(l, s);
     pill.show(k ? l[k] ?? s : s, k ? VIEW_FIT_NAMES[k] : null);
@@ -2205,6 +2231,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     if (!open && seq.ordering) toCanvas({ ol: 'steps', cmd: { how: 'order', kind: null } });
   };
   const bars = deckToolbar({
+    pageLabel: host.bindSvgExporter ? 'SVG' : undefined,
     guides: { shown: guidesShown, items: () => guideItems(currentRef.current, null).filter(m => !m.sep && !m.disabled && m.action).map(m => ({ label: m.label!, action: m.action!, active: m.checked })) },
     // (over selected words, the text tools show how the words look: their size, bold …, not the box's)
     kind, tool, setTool, readOnly: locked, sel: editingText && words?.style && sel.length === 1 ? [{ ...sel[0], style: { ...sel[0].style, ...words.style } }] : sel, editingText: !!editingText,
@@ -2328,6 +2355,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
       {/* (the context tools, when they float below the bar, start right of the slide rail: its header stays clear) */}
       <div ref={barRef} class={'dl-toolbar' + (ctxRow ? ' dl-ctx-row' : '')} role="toolbar" style={`--ctx-left: ${railOpen ? railW + 8 : 8}px`}>
         <span class="dl-title" title={path}>{title}</span>
+        {chrome}
         <Toolbar id="deck-tools" groups={bars.tools} />
         <input ref={fileInput} type="file" accept="image/*,.svg" multiple hidden onChange={e => { const fs = Array.from((e.target as HTMLInputElement).files ?? []); (e.target as HTMLInputElement).value = ''; void uploadImages(fs.map(f => ({ name: f.name, type: f.type, data: f })), null); }} />
         <input ref={replaceInput} type="file" accept="image/*,.svg" hidden onChange={e => { const fs = Array.from((e.target as HTMLInputElement).files ?? []); (e.target as HTMLInputElement).value = ''; void replacePicture(fs); }} />
@@ -2353,7 +2381,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
         <button class={'dl-btn dl-objects-btn' + (objOpen ? ' on' : '')} data-tb="dk-objects" onClick={() => toggleObjects()}
           title="Objects: what is on the slide as a tree — open groups and drawings, select a letter of a logo, rename, lock, restack (Inkscape's Objects, PowerPoint's Selection Pane)"
           dangerouslySetInnerHTML={{ __html: ICONS['dk-objects'] ?? '' }} />
-        <button class={'dl-btn' + (codeOpen ? ' on' : '')} title="The page's code" data-dl-code onClick={() => setCodeOpen(o => !o)}>&lt;/&gt;</button>
+        {!host.bindSvgExporter && <button class={'dl-btn' + (codeOpen ? ' on' : '')} title="The page's code" data-dl-code onClick={() => setCodeOpen(o => !o)}>&lt;/&gt;</button>}
         <button class={'dl-btn dl-review-btn' + (reviewOpen ? ' on' : '')} data-dl-review-toggle onClick={() => { setReviewOpen(!reviewOpen); if (reviewOpen) { setDraft(null); setFocus(null); } }}
           title={`Comments and suggestions${openComments || review.changes.length ? ` — ${openComments} open comment${openComments === 1 ? '' : 's'}, ${review.changes.length} suggestion${review.changes.length === 1 ? '' : 's'}` : ''}`}>
           <svg class="dl-rv-icon-svg" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 2.5h12v8.5H6.5L2 14z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" /></svg>
@@ -2361,11 +2389,11 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
         </button>
         <EditModeSwitch mode={viewing ? 'viewing' : suggesting ? 'suggesting' : 'editing'} canEdit={!readOnly} view={null} views={() => []} onMode={setMode}
           changes={{ ins: showIns, del: showDel, set: setChanges }} shortcuts={false} />
-        {kind !== 'page' && <button class="dl-btn dl-present" title="Present from this slide (Shift+F5) — F5 from the first" data-dl-present onClick={() => startPresenting(false)}>▶ Present</button>}
-        <button class="dl-btn" title="Download" data-dl-download onClick={e => {
+        {kind !== 'page' && !host.bindSvgExporter && <button class="dl-btn dl-present" title="Present from this slide (Shift+F5) — F5 from the first" data-dl-present onClick={() => startPresenting(false)}>▶ Present</button>}
+        {!host.bindSvgExporter && <button class="dl-btn" title="Download" data-dl-download onClick={e => {
           const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
           showContextMenu(r.left, r.bottom + 4, host.downloads(m => src(m === 'view' && kind === 'deck' ? 'present' : m)));
-        }}>⤓</button>
+        }}>⤓</button>}
         <span role="status" aria-live="polite" class={'dl-status' + (online ? '' : ' off')} title={saveState?.localError ? 'Browser storage failed: ' + saveState.localError : saveState?.pending ? saveState.localPending === false ? 'Changes are kept in this browser and will sync when connected.' : 'Changes are still being written. Keep this tab open until Saved appears.' : undefined}>
           {saveState?.state === 'stale' ? 'Older local copy' : !synced ? 'Loading…' : readOnly ? 'View only' : saveState?.state === 'offline' || !online ? (saveState?.pending ? saveState.localPending === false && !saveState.localError ? 'Offline — saved in this browser' : 'Offline — keep this tab open' : 'Offline') : saveState?.state === 'saving' ? 'Saving…' : saveState?.state === 'saved' ? 'Saved' : ''}
         </span>

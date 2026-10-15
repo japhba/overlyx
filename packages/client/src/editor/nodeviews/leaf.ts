@@ -43,8 +43,16 @@ export class GraphicsView implements NodeView {
     this.render();
     this.dom.addEventListener('dblclick', (ev) => { ev.preventDefault(); editorContext.openInsetDialog?.(this.view, this.getPos()); });
     this.watchFile();
+    window.addEventListener('ol:svg-saved', this.svgSaved);
     this.unsubscribePrefs = subscribePrefs(() => this.applyInvert());
   }
+
+  private svgSaved = (event: Event) => {
+    const target = (event as CustomEvent<{ project: string; path: string }>).detail;
+    if (target.project === viewProject(this.view) && target.path === resolveDocPath(params(this.node).get('filename') ?? '', viewDocDir(this.view))) {
+      this.version = Date.now(); this.render();
+    }
+  };
 
   /** the file was rewritten on disk (the server watches the project): reload it */
   private watchFile() {
@@ -73,7 +81,7 @@ export class GraphicsView implements NodeView {
     const scale = p.get('scale');
     const lyxscale = p.get('lyxscale');
     this.img.alt = file;
-    this.img.title = `${file}\nwidth: ${width ?? 'auto'}${scale ? `, scale ${scale}%` : ''} — double-click to edit, right-click to export as PNG`;
+    this.img.title = `${file}\nwidth: ${width ?? 'auto'}${scale ? `, scale ${scale}%` : ''} — double-click for settings, right-click${/\.svg$/i.test(file) ? ' to edit SVG or' : ' to'} export as PNG`;
     if (project && file) {
       const url = graphicsUrl(project, resolveDocPath(file, viewDocDir(this.view)), 1600) + (this.version ? `&v=${this.version}` : '');
       if (this.img.dataset.src !== url) { this.img.dataset.src = url; this.img.src = url; }
@@ -116,6 +124,7 @@ export class GraphicsView implements NodeView {
   deselectNode() { this.dom.classList.remove('ProseMirror-selectednode'); }
   ignoreMutation() { return true; }
   destroy() {
+    window.removeEventListener('ol:svg-saved', this.svgSaved);
     this.unsubscribeEvents?.(); this.unsubscribeEvents = null;
     this.unsubscribePrefs?.(); this.unsubscribePrefs = null;
   }

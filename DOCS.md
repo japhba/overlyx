@@ -2198,6 +2198,21 @@ wheel's notch with Ctrl/⌘ steps 10 %; every step (Ctrl ±, the status bar's �
 mouse coordinates and layout into different scales in Chromium — drags stopped following the pointer
 and selection highlights disagreed with the selection as soon as the document was zoomed.
 
+**Drawing and SVG figures.** The layout editor's `deliverable/drawingToolbar.tsx`, `deckink.ts`
+and `core/src/freehand.ts` supply the drawing controls, presets and stroke geometry for layouts,
+document margins and whiteboards. Older strokes retain their geometry; new document strokes keep
+their nib settings in their sketch data and SVG sidecars. Right-click an SVG figure → *Edit SVG…*
+opens `app/SvgEditor.tsx`: the same `DeliverableCanvas` in a lightbox, backed by a local undo history.
+The canvas's sandboxed `svg-frame.html` loads the shared runtime. Save exports vectors back to the
+original SVG, checks for external file changes first and refreshes the figure; Cancel discards
+the draft. It works in the web editor and VS Code, with each figure's own project and directory.
+
+**VS Code interface zoom and PDF.** The *UI zoom* button in document, layout and PDF toolbars uses
+VS Code's native window zoom, scaling the whole window with correct pointer coordinates. Content
+zoom stays independent. *PDF preview* opens the compiled PDF without rebuilding; PDFs already on
+disk are rediscovered after a host reload. The PDF panel continues polling while idle so builds
+started in the document appear there too (`webview/pdfPolling.ts`).
+
 **How the extension syncs the file.** The TextDocument is authoritative. The webview sends its whole
 ProseMirror document (debounced, `update` with the `base` it changed from and a sequence number
 `sync`); the host (`host/session.ts writePmUpdate`) three-way merges it onto the file's current parse

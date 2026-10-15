@@ -5,15 +5,17 @@
  */
 import { G, vscode } from './globals';
 import { render } from 'preact';
-import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useMemo, useState } from 'preact/hooks';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';   // the same build as PdfViewer (one GlobalWorkerOptions)
 import { api } from '@client/api';
 import { PdfViewer, type PdfTarget } from '@client/app/PdfViewer';
-import { stateFromBuild, jobActive, type PdfState } from '@client/app/PdfPanel';
+import { stateFromBuild, type PdfState } from '@client/app/PdfPanel';
 import { pdfStatus, useTicker } from '@client/app/pdfstatus';
 import type { HostToPdf } from '../shared/protocol';
 import { useHostTheme } from '@client/app/theme';
 import { relayAppearance, setHostDark } from './appearance';
+import { InterfaceZoom } from './InterfaceZoom';
+import { watchPdfBuild } from './pdfPolling';
 import '@client/styles.css';
 
 // the theme switch's choices from the editors (smart invert, the text tone, the theme — host/appearance.ts)
@@ -27,7 +29,7 @@ async function fixPdfWorker(): Promise<void> {
   try {
     const src = pdfjs.GlobalWorkerOptions.workerSrc;
     if (!src) return;
-    const code = await fetch(src).then(r => r.text());
+    const code = await fetch(src, { signal: AbortSignal.timeout(10000) }).then(r => { if (!r.ok) throw new Error(`PDF worker: HTTP ${r.status}`); return r.text(); });
     pdfjs.GlobalWorkerOptions.workerSrc = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
   } catch (e) { console.warn('pdf.js worker fallback (main thread):', e); }
 }
@@ -49,6 +51,7 @@ function PdfFileApp() {
   return <div class="pdf-tab" style="height:100vh"><PdfViewer url={url} withCredentials={false} toolbar={<>
     <button class="small-btn" onClick={() => vscode.postMessage({ type: 'refreshPdf' })}>Refresh</button>
     <button class="small-btn" onClick={() => vscode.postMessage({ type: 'savePdfCopy' })}>Save a copy…</button>
+    <InterfaceZoom />
   </>} /></div>;
 }
 
@@ -57,19 +60,12 @@ function PdfApp() {
   const [target, setTarget] = useState<PdfTarget | null>(null);
   const [showLog, setShowLog] = useState(false);
   const [, tick] = useState(0);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const poll = (announce: boolean) => {
-    if (timer.current) clearTimeout(timer.current);
-    const step = async () => {
-      let r: Awaited<ReturnType<typeof api.build>>;
-      try { r = await api.build(G.docId); } catch { timer.current = setTimeout(step, 3000); return; }
-      setPdf(p => stateFromBuild(p, r));
-      if (jobActive(r.job)) { timer.current = setTimeout(step, 1000); return; }
-      if (announce && r.job && r.job.status !== 'ok') vscode.postMessage({ type: 'notify', text: r.job.status === 'cancelled' ? 'PDF build cancelled' : 'PDF build failed — see the log in the PDF panel', kind: 'error' });
-    };
-    void step();
-  };
+  const watcher = useMemo(() => watchPdfBuild({
+    fetch: () => api.build(G.docId),
+    receive: r => setPdf(p => stateFromBuild(p, r)),
+    failed: r => vscode.postMessage({ type: 'notify', text: r.job?.status === 'cancelled' ? 'PDF build cancelled' : 'PDF build failed — see the log in the PDF panel', kind: 'error' }),
+  }), []);
+  const poll = (announce: boolean) => watcher.poll(announce);
 
   const build = async () => {
     setPdf(p => ({ ...p, busy: true }));
@@ -90,7 +86,7 @@ function PdfApp() {
       else if (m?.type === 'theme') setHostDark(m.dark);
     };
     window.addEventListener('message', onMsg);
-    return () => { window.removeEventListener('message', onMsg); if (timer.current) clearTimeout(timer.current); };
+    return () => { window.removeEventListener('message', onMsg); watcher.dispose(); };
   }, []);
 
   useEffect(() => { if (!pdf.busy) return; const t = setInterval(() => tick(x => x + 1), 1000); return () => clearInterval(t); }, [pdf.busy]);
@@ -113,6 +109,7 @@ function PdfApp() {
         {pdf.busy && <button class="small-btn" onClick={() => { void api.cancelBuild(G.docId).then(() => poll(true)); }}>Cancel</button>}
         <button class="small-btn" onClick={() => setShowLog(s => !s)}>{showLog ? 'Hide log' : 'Log'}</button>
         <span class={'pdf-age ' + st.kind} title={st.title}>{st.label}</span>
+        <InterfaceZoom />
       </div>
       {pdf.url
         ? <PdfViewer url={pdf.url} target={target} onSync={(page, x, y) => vscode.postMessage({ type: 'inverse', page, x, y })} hint="Double-click the PDF to jump to that place in the document" busy={pdf.busy} overlay={progress} />

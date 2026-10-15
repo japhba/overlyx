@@ -16,6 +16,7 @@ vi.hoisted(() => {
   g.localStorage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, v); }, removeItem: (k: string) => { store.delete(k); } };
 });
 import { getInk, setInk, currentPen, INK_PALETTES, INK_WIDTHS, INK_WIDTH_RANGE, PX_PER_MM, mmToPx, pxToMm, formatMm, inkColorName } from '../packages/client/src/editor/plugins/ink.ts';
+import { loadDeckInk, patchDeckInk, saveDeckInk } from '../packages/client/src/deliverable/deckink';
 
 describe('the pen case', () => {
   it('mm ↔ px at the ruler\'s 96 dpi; widths print without trailing zeros', () => {
@@ -88,5 +89,16 @@ describe('the pen case', () => {
     expect(getInk().pens.highlighter.width).toBe(6);
     setInk({ pen: 'highlighter', slotWidth: { idx: 0, width: 0.2 } });
     expect(getInk().pens.highlighter.widths[0]).toBe(INK_WIDTH_RANGE.highlighter.min);
+  });
+  it('shares the layout pen case and nib settings with document drawing in both directions', () => {
+    const before = loadDeckInk();
+    saveDeckInk(patchDeckInk(before, { pen: 'pen', width: 8, color: '#123456', nib: { ball: true, sensitivity: 0.75 } }));
+    expect(getInk().drawing.nib).toMatchObject({ ball: true, sensitivity: 0.75 });
+    expect(getInk().pens.pen.color).toBe('#123456');
+    setInk({ tool: 'pen' });
+    expect(loadDeckInk().pens.pen.width).toBe(8);
+    setInk({ color: '#3268a8' });
+    expect(loadDeckInk().pens.pen.color).toBe('#3268a8');
+    saveDeckInk(before);
   });
 });

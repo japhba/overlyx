@@ -2,6 +2,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { applySource, guard } from '../packages/client/src/deliverable/runtime/reconcile.ts';
 import { state, srcOf, pathOf } from '../packages/client/src/deliverable/runtime/env.ts';
+import { svgCanvasSource } from '../packages/client/src/deliverable/svgSource';
+import { readFileSync } from 'node:fs';
 const wrap = (body: string) => `<html><head></head><body><section class="slide">${body}</section></body></html>`;
 function open(body: string) {
   state.src = null; state.version = null; guard.editing = null;
@@ -15,6 +17,19 @@ function open(body: string) {
 afterEach(() => { delete window.__OL; });
 beforeEach(() => { (window as any).happyDOM.settings.disableJavaScriptFileLoading = true; });
 describe('active text target identity', () => {
+  it('loads an SVG into the empty drawing frame on the first host version', () => {
+    state.src = null; state.version = null; guard.editing = null;
+    const html = readFileSync('packages/client/src/deliverable/svg-frame.html', 'utf8');
+    document.documentElement.innerHTML = new DOMParser().parseFromString(html, 'text/html').documentElement.innerHTML;
+    const boot = document.querySelector('script[data-ol-runtime]')!.textContent!;
+    new Function(boot)();
+    document.dispatchEvent(new Event('DOMContentLoaded'));
+    expect(window.__OL?.source).toContain('class="slide"');
+    expect(window.__OL?.source).not.toContain('runtime.js');
+    applySource(svgCanvasSource('<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><path d="M10 10L40 40"/></svg>'), 1);
+    expect(document.querySelector('.slide svg path')?.getAttribute('d')).toBe('M10 10L40 40');
+    expect((document.querySelector('.slide') as HTMLElement).style.width).toBe('640px');
+  });
   it('renders a newer cached first version while preserving script-generated unsourced content', () => {
     state.src = null; guard.editing = null;
     const served = wrap('<p>Server baseline.</p><div id="chart"></div>');

@@ -90,6 +90,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
     if (opts?.open !== false) pdfPanels.show(session.docId);
   };
 
+  const knownBuild = (docId: string) => {
+    const known = build.lastBuild(docId);
+    if (known) return known;
+    const l = locate(docId);
+    const texPath = /\.tex$/i.test(l.relPath) ? l.session?.buildTarget().absPath ?? path.join(l.root, l.relPath) : undefined;
+    return build.lastBuild(docId, texPath);
+  };
+
   const onInverse = (docId: string, page: number, x: number, y: number): void => {
     void build.synctexEdit(docId, page, x, y).then(r => {
       const e = registry.byDocId(docId);
@@ -200,13 +208,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
         return { ok: true, job: build.publicJob(job) };
       },
       buildStatus: (docId, withTex) => {
-        const b = build.lastBuild(docId);
+        const b = knownBuild(docId);
         const job = build.currentJob(docId);
         const tex = withTex && b?.tex_path && fs.existsSync(b.tex_path) ? fs.readFileSync(b.tex_path, 'utf8') : undefined;
         let pdfAt: number | null = null;
         try { if (b?.pdf_path) pdfAt = Math.round(fs.statSync(b.pdf_path).mtimeMs); } catch { /* gone */ }
         return {
-          build: b ? { ...b, pdf: pdfAt !== null ? `${webviewBase}/api/docs/${encodeURIComponent(docId)}/pdf?t=${b.updated_at}` : null, pdf_at: pdfAt, tex } : null,
+          build: b ? { ...b, pdf: pdfAt !== null ? `${webviewBase}/api/docs/${encodeURIComponent(docId)}/pdf?t=${pdfAt}` : null, pdf_at: pdfAt, tex } : null,
           job: job ? build.publicJob(job) : null,
           now: Date.now(),
         };
@@ -221,7 +229,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
         } catch { return { params: null, boxes: [] }; }
       },
       cancelBuild: (docId) => build.cancelBuild(docId),
-      pdfPath: (docId) => build.lastBuild(docId)?.pdf_path ?? null,
+      pdfPath: (docId) => knownBuild(docId)?.pdf_path ?? null,
       synctexView: (docId, line, column) => build.synctexView(docId, line, column),
       synctexEdit: (docId, page, x, y) => build.synctexEdit(docId, page, x, y),
       cacheDir: () => path.join(context.globalStorageUri.fsPath, 'graphics'),
@@ -259,6 +267,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
 
   const provider = new OverlyxEditorProvider(context, registry, {
     bridgeBase,
+    canvasBase: async () => {
+      await deliverableServer.start();
+      const origin = (await vscode.env.asExternalUri(vscode.Uri.parse(deliverableServer.origin))).toString().replace(/\/$/, '');
+      return origin + '/_ol/';
+    },
     layoutDir,
     registerRoot,
     startBuild,
