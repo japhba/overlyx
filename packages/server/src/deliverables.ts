@@ -28,7 +28,7 @@ import { staysInside } from './projectfiles.ts';
 import { manager, HtmlDoc } from './docs.ts';
 import { isHtmlPath, deliverableInfo } from '@overlyx/core/html/deliverable.ts';
 import { publishedText } from '@overlyx/core/html/review.ts';
-import { RUNTIME_MODES, runtimeTags, injectRuntime, resolveInProject, SANDBOX_CSP, type RuntimeMode } from '@overlyx/core/html/serve.ts';
+import { RUNTIME_MODES, runtimeTags, injectRuntime, resolveInProject, SANDBOX_CSP, OFFLINE_FRAME_CSP, type RuntimeMode } from '@overlyx/core/html/serve.ts';
 import { toPng, toSvg } from './graphics.ts';
 import { deckExtras, type DeckExtras } from '@overlyx/core/html/deckextras.ts';
 import { cachedBib } from './bibcache.ts';
@@ -111,7 +111,11 @@ export function runtimeSrc(dist = config.clientDist): string {
 
 export function mountDeliverables(app: Express): void {
   // the runtime and its MathJax: public code, fetched by opaque-origin frames
-  app.use('/_ol', (_req, res, next) => { res.setHeader('Access-Control-Allow-Origin', '*'); res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin'); next(); });
+  app.use('/_ol', (req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*'); res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    if (req.path === '/offline-frame.html') res.setHeader('Content-Security-Policy', OFFLINE_FRAME_CSP);
+    next();
+  });
 
   app.get(/^\/ol-d\/([^/]+)\/(.*)$/, (req: Request, res: Response) => {
     const params = req.params as unknown as Record<string, string>;
@@ -170,7 +174,7 @@ export async function resolveDeliverable(token: string, rawRest: string, query: 
     let html: string;
     try { html = await liveHtml(grant.project, rel); } catch { return { status: 404, type: 'text/plain', body: 'Not found.' }; }
     const mode = (RUNTIME_MODES as readonly string[]).includes(String(query.ol)) ? String(query.ol) as RuntimeMode : 'view';
-    return { status: 200, type: 'text/html; charset=utf-8', body: injectRuntime(html, runtimeTags(mode, { ...extrasOf(grant.project, rel, html) }, runtimeSrc())), headers: { 'Cache-Control': 'no-store' } };
+    return { status: 200, type: 'text/html; charset=utf-8', body: injectRuntime(html, runtimeTags(mode, { ...extrasOf(grant.project, rel, html), ...((mode === 'edit' || mode === 'thumb') ? { source: html } : {}) }, runtimeSrc())), headers: { 'Cache-Control': 'no-store' } };
   }
 
   let st: fs.Stats;

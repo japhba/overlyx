@@ -5,9 +5,64 @@
  * html/source.ts), so it is tested without a browser.
  */
 import { GUIDES_ATTR } from './guides';
-import { parseSource, opSplices, mapOffset, elementAt, elementChildren, outerRange, attr, hasClass, type HtmlOp, type Path, type Splice, type HElement } from '@overlyx/core/html/source.ts';
+import { parseSource, opSplices, mapOffset, elementAt, elementStartingAt, elementChildren, walk, outerRange, attr, hasClass, pathOf, type HtmlOp, type Path, type Splice, type HElement } from '@overlyx/core/html/source.ts';
+import { textChanges, mapTextOffset } from '@overlyx/core/html/textedit.ts';
 import { slideElements } from '@overlyx/core/html/deliverable.ts';
 import type { Rect, Tool, DeliverableKind, InkStyle, InkRunD } from './protocol';
+
+/** Follow an object from the canvas's source into the current source, preserving identity. */
+function mappedObjectPath(base: string, cur: string, src: ReturnType<typeof parseSource>, current: ReturnType<typeof parseSource>, changes: Splice[], path: Path): Path | null {
+  const old = elementAt(src.doc, path), start = old?.sourceCodeLocation?.startTag;
+  if (!old || !start) return null;
+  const end = old.sourceCodeLocation?.endTag;
+  if (end && changes.some(s => Math.max(s.from, end.startOffset) < Math.min(s.to, end.endOffset))) return null;
+  // A changed opening tag can survive; a replaced whole object cannot become its neighbour.
+  const replacement = changes.find(s => s.from <= start.startOffset && start.startOffset < s.to);
+  const openingLost = replacement && (replacement.from !== start.startOffset || replacement.to > start.endOffset)
+    || changes.some(s => s.from < start.endOffset && s.to > start.endOffset);
+  if (openingLost) {
+    // Deleting a preceding sibling and restyling this tag can be one diff. A surviving
+    // closing tag and unique unchanged contents still identify the selected object.
+    if (!end) return null;
+    const inner = base.slice(start.endOffset, end.startOffset);
+    if (!inner.trim() || changes.some(s => Math.max(s.from, start.endOffset) < Math.min(s.to, end.startOffset)
+      || s.from === s.to && start.endOffset <= s.from && s.from <= end.startOffset)) return null;
+    const matches = (doc: ReturnType<typeof parseSource>['doc'], text: string) => [...walk(doc)].filter(el => {
+      const loc = el.sourceCodeLocation;
+      return el.tagName === old.tagName && loc?.startTag && loc.endTag
+        && text.slice(loc.startTag.endOffset, loc.endTag.startOffset) === inner;
+    });
+    const oldMatches = matches(src.doc, base), currentMatches = matches(current.doc, cur);
+    const target = currentMatches[0];
+    if (oldMatches.length !== 1 || currentMatches.length !== 1
+      || target.sourceCodeLocation?.endTag?.startOffset !== mapTextOffset(changes, end.startOffset)) return null;
+    return pathOf(target);
+  }
+  const mapped = mapTextOffset(changes, start.startOffset);
+  if (mapped === null) return null;
+  const target = elementStartingAt(current.doc, mapped);
+  if (!target || target.tagName !== old.tagName) return null;
+  const targetTag = target.sourceCodeLocation?.startTag;
+  // Void elements lack a closing tag that would distinguish repeated siblings.
+  if (!end && targetTag && old.parentNode && target.parentNode
+    && 'tagName' in old.parentNode && 'tagName' in target.parentNode
+    && elementChildren(old.parentNode).length !== elementChildren(target.parentNode).length
+    && base.slice(start.startOffset, start.endOffset) !== cur.slice(targetTag.startOffset, targetTag.endOffset)) return null;
+  return pathOf(target);
+}
+
+/** Source-side toolbar actions follow selected objects, not their old sibling indices. */
+export function rebaseObjectPaths(base: string, cur: string, paths: readonly Path[]): Path[] | null {
+  if (base === cur) return paths.map(path => [...path]);
+  const src = parseSource(base), current = parseSource(cur), changes = textChanges(base, cur);
+  const out: Path[] = [];
+  for (const path of paths) {
+    const mapped = mappedObjectPath(base, cur, src, current, changes, path);
+    if (!mapped) return null;
+    out.push(mapped);
+  }
+  return out;
+}
 
 /**
  * Splices of `cur` that make the operations — made on `base` — or null when one of them touched
@@ -15,6 +70,24 @@ import type { Rect, Tool, DeliverableKind, InkStyle, InkRunD } from './protocol'
  */
 export function rebasedSplices(base: string, cur: string, ops: HtmlOp[]): Splice[] | null {
   const src = parseSource(base);
+  // Text carries its local baseline; styles name just the properties being changed.
+  // Apply both against the same surviving object in the current source. Offset-only
+  // rebasing drops rapid nudges after their own first style edit changes the tag.
+  const semantic = ops.filter((op): op is Extract<HtmlOp, { t: 'inner' | 'style' }> => op.t === 'style' || op.t === 'inner' && op.before !== undefined);
+  if (base !== cur && semantic.length) {
+    const current = parseSource(cur), changes = textChanges(base, cur);
+    const other = ops.filter(op => !semantic.includes(op as Extract<HtmlOp, { t: 'inner' | 'style' }>));
+    const splices = rebasedSplices(base, cur, other);
+    if (!splices) return null;
+    try {
+      for (const op of semantic) {
+        const path = mappedObjectPath(base, cur, src, current, changes, op.path);
+        if (!path) return null;
+        splices.push(...opSplices(current, { ...op, path }));
+      }
+    } catch { return null; }
+    return splices.sort((a, b) => a.from - b.from || a.to - b.to);
+  }
   let splices: Splice[];
   try { splices = ops.flatMap(op => opSplices(src, op)); } catch { return null; }
   // overlapping splices (two operations on one element): the first wins
@@ -160,6 +233,91 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 const XLINK_NS = 'http://www.w3.org/1999/xlink';
 const SAFE_DATA = /^data:image\/(png|jpe?g|gif|webp|avif);/i;
 
+/** Neutralize event names before browser parsing, retaining XML syntax and values for validation. */
+function inertSvgSource(text: string): { text: string; prefix: string } | null {
+  const occupied = new Set<number>();
+  const edits: { from: number; to: number; name: string }[] = [];
+  const space = (c: string | undefined) => c === ' ' || c === '\t' || c === '\r' || c === '\n' || c === '\f';
+  const after = (at: number, delimiter: string) => {
+    const end = text.indexOf(delimiter, at);
+    return end < 0 ? text.length : end + delimiter.length;
+  };
+  let position = 0;
+  while (position < text.length) {
+    const start = text.indexOf('<', position);
+    if (start < 0) break;
+    if (text.startsWith('<!--', start)) { position = after(start + 4, '-->'); continue; }
+    if (text.startsWith('<![CDATA[', start)) { position = after(start + 9, ']]>'); continue; }
+    if (text.startsWith('<?', start)) { position = after(start + 2, '?>'); continue; }
+    if (text.startsWith('<!', start)) {
+      // Ordinary external SVG doctypes are inert. An internal subset could
+      // expand handlers into markup not present as literal source tags.
+      let quote = '', end = start + 2;
+      for (; end < text.length; end++) {
+        const c = text[end];
+        if (quote) { if (c === quote) quote = ''; }
+        else if (c === '"' || c === "'") quote = c;
+        else if (c === '[' || text.startsWith('<!ENTITY', start)) return null;
+        else if (c === '>') { end++; break; }
+      }
+      position = end;
+      continue;
+    }
+    // Find the complete raw tag, including '>' inside quoted values. XML does
+    // not have HTML's raw-text elements: nested style/textarea tags count too.
+    let quote = '', end = start + 1;
+    for (; end < text.length; end++) {
+      const c = text[end];
+      if (quote) { if (c === quote) quote = ''; }
+      else if (c === '"' || c === "'") quote = c;
+      else if (c === '>') { end++; break; }
+    }
+    position = end;
+    if (text[start + 1] === '/') continue;
+    let i = start + 1;
+    while (i < end && !space(text[i]) && text[i] !== '/' && text[i] !== '>') i++;
+    const names = new Set<string>();
+    while (i < end) {
+      while (space(text[i])) i++;
+      if (i >= end || text[i] === '/' || text[i] === '>') break;
+      const from = i;
+      while (i < end && !space(text[i]) && !['=', '/', '>'].includes(text[i])) i++;
+      if (i === from) break; // malformed syntax remains for the native XML parser
+      const name = text.slice(from, i);
+      if (names.has(name)) return null;
+      names.add(name);
+      const reserved = /^data-ol-svg-inert-(\d+)-/i.exec(name);
+      if (reserved) occupied.add(Number(reserved[1]));
+      if (!name.includes(':') && name.toLowerCase().startsWith('on')) edits.push({ from, to: i, name });
+      while (space(text[i])) i++;
+      if (text[i] !== '=') continue;
+      i++;
+      while (space(text[i])) i++;
+      const delimiter = text[i];
+      if (delimiter === '"' || delimiter === "'") {
+        i++;
+        while (i < end && text[i] !== delimiter) i++;
+        if (text[i] === delimiter) i++;
+      } else {
+        while (i < end && !space(text[i]) && text[i] !== '/' && text[i] !== '>') i++;
+      }
+    }
+  }
+  let index = 0;
+  while (occupied.has(index)) index++;
+  const prefix = `data-ol-svg-inert-${index}-`;
+  // Preserve all original syntax/values for native XML validation. Build once
+  // so many small handler attributes cannot cause quadratic string copying.
+  const parts: string[] = [];
+  let cursor = 0;
+  for (const edit of edits) {
+    parts.push(text.slice(cursor, edit.from), prefix, edit.name);
+    cursor = edit.to;
+  }
+  parts.push(text.slice(cursor));
+  return { text: parts.join(''), prefix };
+}
+
 /**
  * An SVG file made a drawing on the page (inline, so its shapes can be selected, moved and painted
  * one by one): scripts, event handlers, foreign content, links out of the file and editor-private
@@ -169,9 +327,11 @@ const SAFE_DATA = /^data:image\/(png|jpe?g|gif|webp|avif);/i;
  */
 export function inlineSvgHtml(svgText: string, at: { x: number; y: number; maxW: number } | null, prefix: string): string | null {
   if (svgText.length > 400_000) return null;
+  const inert = inertSvgSource(svgText);
+  if (!inert) return null;
   let doc: Document;
-  try { doc = new DOMParser().parseFromString(svgText, 'image/svg+xml'); } catch { return null; }
-  const svg = doc.documentElement;
+  try { doc = new DOMParser().parseFromString(inert.text, 'image/svg+xml'); } catch { return null; }
+  let svg: Element = doc.documentElement;
   if (!svg || svg.localName !== 'svg' || svg.namespaceURI !== SVG_NS || doc.getElementsByTagName('parsererror').length) return null;
   // what must not be in a page
   for (const el of Array.from(svg.querySelectorAll('*'))) {
@@ -184,7 +344,7 @@ export function inlineSvgHtml(svgText: string, at: { x: number; y: number; maxW:
     for (const a of Array.from(el.attributes)) {
       const n = a.name.toLowerCase();
       const pre = a.prefix ?? (n.includes(':') ? n.split(':')[0] : null);
-      if (n.startsWith('on') || (pre && !['xlink', 'xml', 'xmlns'].includes(pre)) || n.startsWith('xmlns:') && !['xmlns:xlink'].includes(n)) { el.removeAttributeNode(a); continue; }
+      if (n.startsWith(inert.prefix) || n.startsWith('on') || (pre && !['xlink', 'xml', 'xmlns'].includes(pre)) || n.startsWith('xmlns:') && !['xmlns:xlink'].includes(n)) { el.removeAttributeNode(a); continue; }
       if (n === 'href' || n === 'xlink:href') {
         const v = a.value.trim();
         if (!(v.startsWith('#') || SAFE_DATA.test(v))) el.removeAttributeNode(a);
@@ -230,6 +390,16 @@ export function inlineSvgHtml(svgText: string, at: { x: number; y: number; maxW:
     const W = Math.max(8, w * k), H = Math.max(8, h * k);
     svg.setAttribute('style', `position: absolute; left: ${r(at.x - W / 2)}px; top: ${r(at.y - H / 2)}px; width: ${r(W)}px; height: ${r(H)}px; overflow: visible`);
   } else svg.setAttribute('style', `width: ${r(Math.min(w, 960))}px; max-width: 100%; height: auto`);
+  // Inline HTML needs unprefixed SVG element names. Keep each sanitized
+  // attribute's own namespace (notably xlink/xml), geometry and children.
+  for (const el of [svg, ...Array.from(svg.querySelectorAll('*'))]) {
+    if (el.namespaceURI !== SVG_NS || !el.prefix) continue;
+    const plain = doc.createElementNS(SVG_NS, el.localName);
+    for (const attribute of Array.from(el.attributes)) plain.setAttributeNS(attribute.namespaceURI, attribute.name, attribute.value);
+    while (el.firstChild) plain.appendChild(el.firstChild);
+    el.replaceWith(plain);
+    if (el === svg) svg = plain;
+  }
   let out = new XMLSerializer().serializeToString(svg);
   // what the HTML parser does not need
   out = out.replace(/\sxmlns(:\w+)?="[^"]*"/g, (m, p1) => (p1 === ':xlink' ? m : '')).replace(/<!--[\s\S]*?-->/g, '');

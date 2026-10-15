@@ -197,7 +197,7 @@ function DraftCard({ draft, me, submitDraft, cancelDraft }: Props & { draft: Com
   const ta = useRef<HTMLTextAreaElement>(null);
   // the keyboard here at once: what is typed after Ctrl+Alt+M is the comment, not more of the text
   useLayoutEffect(() => { ta.current?.focus(); }, [draft.path?.join('.'), draft.quote]);
-  const send = () => { const v = text.trim(); if (v) submitDraft(v); };
+  const send = () => { const v = (ta.current?.value ?? text).trim(); if (v) submitDraft(v); };
   return (
     <div class="dl-rv-card thread draft" data-rv-draft>
       <div class="dl-rv-who"><Avatar name={me} /><b>{me}</b></div>

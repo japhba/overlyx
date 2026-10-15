@@ -13,6 +13,7 @@ import { getPrefs, setPref, subscribePrefs, type Prefs } from '../prefs';
 import { openRewrite, REWRITE_KEY } from '../editor/ai/rewrite';
 import { Login } from './Login';
 import { DocPanel } from './DocPanel';
+import { DRAWER_LAYOUT_QUERY, foldDrawersOnNarrow } from './drawerLayout';
 import { Home, projectDocs, ProjectRootPanel } from './Home';
 import { pendingImportFlag } from './pendingImport';
 import { TextEditor } from './TextEditor';
@@ -25,7 +26,7 @@ import { GuestCallout } from './Guest';
 import { GitDialog } from './Git';
 import { MenuBar, openPalette, PALETTE_LABEL, PALETTE_DEFAULT, type MenuDef } from './MenuBar';
 import { setThemePref, useTheme } from './theme';
-import { useUiMode, setUiMode, adoptAccountUi } from './uimode';
+import { useUiMode, setUiMode, adoptAccountUi, uiChoiceVersion } from './uimode';
 import { usePresentation } from './presentation';
 import { Toolbar, NAMED_COLORS, type ToolButton } from './Toolbar';
 import { buildToolbars, loadToolbarPrefs, mathExecutor, useMathPanels, toolbarClipboard, markValue, MODERN_COLLAPSE, type ToolbarId, type ToolbarMode, type ToolbarPrefs } from './toolbars';
@@ -116,9 +117,16 @@ export function App() {
     void rekeyLocalCopies().then(canonicalHash).finally(() => { if (live) setLinkChecked(user.id); });
     return () => { live = false; };
   }, [user?.id]);
+  const acceptLogin = (u: User) => {
+    // A native sign-in does not rerun the initial identity effect. Remember this
+    // authenticated user too, and replace the worker's pre-login anonymous cache.
+    try { localStorage.setItem('ol.user', JSON.stringify(u)); } catch { /* private mode */ }
+    setUser(u);
+    void api.me().catch(() => {});
+  };
   if (!ready || (user && linkChecked !== user.id)) return <div style="padding:40px;color:#666">Loading…</div>;
-  if (!user) return <Login google={google} onLogin={setUser} note={linkNote} />;
-  if (user.guest && wantLogin) return <Login google={google} onLogin={u => { setUser(u); setWantLogin(false); }} onBack={() => setWantLogin(false)} note="Sign in to keep the shared project in your account." />;
+  if (!user) return <Login google={google} onLogin={acceptLogin} note={linkNote} />;
+  if (user.guest && wantLogin) return <Login google={google} onLogin={u => { acceptLogin(u); setWantLogin(false); }} onBack={() => setWantLogin(false)} note="Sign in to keep the shared project in your account." />;
   return <Workspace user={user} google={google} onSignIn={() => setWantLogin(true)} onLogout={() => api.logout().then(clearLocalData).then(() => { try { localStorage.removeItem('ol.user'); } catch { /* ignore */ } setUser(null); })} />;
 }
 
@@ -306,8 +314,17 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   // panels; shown / hidden state is kept per browser (a hidden sidebar leaves a rail to bring it back)
   // (a phone-width screen starts with the documents panel folded into its rail: the panel took 270 of an
   // iPhone's 393 pixels and left the text a column one letter wide)
-  const [showFiles, setShowFiles] = useState(() => { const v = stored('ol.files'); return v !== null ? v !== '0' : !(typeof matchMedia === 'function' && matchMedia(NARROW_PANES).matches); });
+  const [showFiles, setShowFiles] = useState(() => { const v = stored('ol.files'); return v !== null ? v !== '0' : !(typeof matchMedia === 'function' && matchMedia(DRAWER_LAYOUT_QUERY).matches); });
   const [rightTab, setRightTab] = useState<RightTab | null>(() => { const v = stored('ol.right'); return v !== null && (RIGHT_TABS as readonly string[]).includes(v) ? v as RightTab : null; });
+  // Entering the phone/tablet drawer layout must expose the canvas and recovery controls.
+  // This listens to the breakpoint, not each resize: a drawer opened there by hand stays open.
+  useLayoutEffect(() => {
+    if (typeof matchMedia !== 'function') return;
+    return foldDrawersOnNarrow(matchMedia(DRAWER_LAYOUT_QUERY), () => {
+      setShowFiles(false);
+      setRightTab(null);
+    });
+  }, []);
   // the LaTeX source is a panel below the writing area with its own switch
   useEffect(() => { try { localStorage.setItem('ol.files', showFiles ? '1' : '0'); localStorage.setItem('ol.right', rightTab ?? ''); } catch { /* ignore */ } }, [showFiles, rightTab]);
   // dragged sidebar widths from the last visit (SidebarGrip)
@@ -418,6 +435,12 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   // guests came for somebody's document, not for a tour (it is offered once they have an account)
   // (and not over an import that is about to run — Home.tsx picks it up; the tour is offered on the next visit)
   const [tour, setTour] = useState<'intro' | 'steps' | null>(() => (!user.guest && tourWanted() && !pendingImportFlag() ? 'intro' : null));
+  const [tourRequest, setTourRequest] = useState(0);
+  // Every explicit opening is a new walkthrough, including Help while one is open.
+  const openTour = useCallback((mode: 'intro' | 'steps') => {
+    setTour(mode);
+    setTourRequest(n => n + 1);
+  }, []);
   // a new account arriving with an Overleaf import skips the welcome card for now, but still picks its interface
   const [askInterface, setAskInterface] = useState(() => !user.guest && tourWanted() && pendingImportFlag());
   const [viewOnly, setViewOnly] = useState(false);
@@ -430,7 +453,15 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   const { pref: themePref } = useTheme();
   const ui = useUiMode();
   // the account's interface (chosen in another browser) once its settings arrive
-  useEffect(() => { if (!user.guest) api.settings().then(r => adoptAccountUi(r.settings.interface)).catch(() => undefined); }, [user.username]);
+  useEffect(() => {
+    if (user.guest) return;
+    let current = true;
+    const choice = uiChoiceVersion();
+    api.settings().then(r => {
+      if (current && choice === uiChoiceVersion()) adoptAccountUi(r.settings.interface);
+    }).catch(() => undefined);
+    return () => { current = false; };
+  }, [user.username, user.guest]);
   usePresentation();   // View ▸ Presentation mode: Shift+F11 toggles, Esc leaves
   // per-browser preferences (spell checking, AI assistance) and whether the server can answer AI requests
   const [prefs, setPrefsState] = useState<Prefs>(getPrefs);
@@ -1105,7 +1136,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   // Help is available everywhere (the start screen has no other menus; feedback must be reachable there)
   const helpMenu: MenuDef = { title: 'Help', search: true, items: [
     { label: PALETTE_LABEL, shortcut: PALETTE_DEFAULT, action: openPalette },
-    { label: 'Take the tour', action: () => setTour('intro') },
+    { label: 'Take the tour', action: () => openTour('intro') },
     { label: 'Keyboard shortcuts', action: () => setDialog({ name: 'help' }) },
     { sep: true },
     { label: 'Report a problem / send feedback…', action: () => setDialog({ name: 'feedback' }) },
@@ -1593,7 +1624,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
                   register={(cid, h) => { if (h) childRefs.current.set(cid, h); else childRefs.current.delete(cid); rerender(); }} />
               ))}
             </div>
-          ) : <Home user={user} refreshKey={refreshKey} onOpen={id => openInTab(id)} onStartTour={id => { openInTab(id); setTour('steps'); }} onShare={p => setShareFor(p)} onGit={p => setGitFor(p)} onChanged={() => setRefreshKey(k => k + 1)} onBrowse={() => setShowFiles(true)} onSignIn={signIn} notify={notify} />}
+          ) : <Home user={user} refreshKey={refreshKey} onOpen={id => openInTab(id)} onStartTour={id => { openInTab(id); openTour('steps'); }} onShare={p => setShareFor(p)} onGit={p => setGitFor(p)} onChanged={() => setRefreshKey(k => k + 1)} onBrowse={() => setShowFiles(true)} onSignIn={signIn} notify={notify} />}
         </div>
         {isLyxDoc && <SourcePane key={docId!} fill style={paneStyle('tex')} target={sourceTarget} tick={docTick} selTick={selTick} mathField={mathField} onNotify={notify} onClose={() => showPane('tex', false)} />}
         {isLyxDoc && pdfMounted && (
@@ -1651,7 +1682,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       {newLayoutFor && <NewLayoutDialog project={newLayoutFor} dir={textId ? docPathOf(textId).split('/').slice(0, -1).join('/') : ''} notify={notify} onClose={() => setNewLayoutFor(null)} onCreated={id => { location.hash = '#/' + id; setRefreshKey(k => k + 1); }} />}
       {gitFor && <GitDialog project={gitFor} user={user} onClose={() => setGitFor(null)} />}
       {askInterface && !tour && <InterfacePrompt onDone={() => setAskInterface(false)} />}
-      {tour && <Tour intro={tour === 'intro'} onEnd={endTour}
+      {tour && <Tour key={tourRequest} intro={tour === 'intro'} onEnd={endTour}
         ctx={{ docId, ready: isLyxDoc && status.synced && !!view, docTick, layout, inMath: !!mathField, saveState: save.state, rightTab, pdfBusy: pdf.busy, pdfBuiltAt: pdf.builtAt ?? 0, shareOpen: !!shareFor, gitOpen: !!gitFor, marginMode }}
         actions={{ openExample, showRight: () => { if (!rightTab) setRightTab('comments'); }, showPdf: () => showPane('pdf'), showFiles: () => setShowFiles(true) }} />}
       {/* last: any uiPrompt/uiConfirm/uiAlert (Dialogs.tsx) stacks above every other dialog above, including Home's and Git's */}

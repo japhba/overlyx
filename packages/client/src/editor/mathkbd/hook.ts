@@ -10,6 +10,7 @@
  * it is wanted.
  */
 import { getPrefs } from '../../prefs';
+import { recordReliability } from '../../usage';
 import type { LyxMathField } from '../lyxmath/field';
 
 /** a key of a hardware keyboard was typed into a formula (this session) */
@@ -53,12 +54,50 @@ let ui: Ui | null = null;
 let loading: Promise<void> | null = null;
 let pending: LyxMathField | null = null;
 
+/** A slow or failed optional panel must leave the focused formula writable. */
+function useFallbackKeyboard(): boolean {
+  const field = pending;
+  if (!ui && field?.hasFocus() && field.dom.isConnected && !systemKeyboard()) { field.useSystemKeyboard(true); return true; }
+  return false;
+}
+
+/** Forget only this field's ownership; a newly focused formula keeps its panel. */
+export function mathKbdDestroyed(field: LyxMathField): void {
+  if (pending !== field) return;
+  if (loading) recordReliability('keyboard.owner-disposed', { context: 'math' });
+  pending = null;
+  ui?.focus(null);
+}
+
 /** a formula took the cursor (or `null`: lost it) */
 export function mathKbdFocus(field: LyxMathField | null): void {
-  if (ui) { ui.focus(field); return; }
   pending = field;
+  if (ui) { ui.focus(field); return; }
   if (!field || !mathKeyboardEnabled() || loading) return;
-  loading = import('./keyboard').then(m => { ui = m.mathKeyboardUi(); ui.focus(pending); }).catch(e => { loading = null; console.warn('math keyboard', e); });
+  // Leave the import running after the grace period. When it arrives, the panel
+  // offers its usual button while the writer can continue with the system keys.
+  const startedAt = Date.now();
+  let timedOut = false;
+  recordReliability('keyboard.load-start', { context: 'math' });
+  const timer = setTimeout(() => {
+    timedOut = true;
+    if (useFallbackKeyboard()) recordReliability('keyboard.fallback-timeout', { context: 'math', durationMs: Date.now() - startedAt });
+  }, 3000);
+  loading = import('./keyboard').then(m => {
+    clearTimeout(timer);
+    ui = m.mathKeyboardUi();
+    ui.focus(pending?.dom.isConnected ? pending : null);
+    recordReliability(timedOut ? 'keyboard.late-ready' : 'keyboard.ready', { context: 'math', durationMs: Date.now() - startedAt });
+  }).catch(e => {
+    clearTimeout(timer);
+    // Keep the in-flight guard while refocusing: useSystemKeyboard calls this
+    // hook again synchronously. Do not steal focus from a popup or stale field.
+    try {
+      useFallbackKeyboard();
+      recordReliability('keyboard.fallback-error', { context: 'math', durationMs: Date.now() - startedAt });
+    } finally { loading = null; }
+    console.warn('math keyboard', e);
+  });
 }
 
 /** a key from a hardware keyboard reached a formula whose input asked for no system keyboard */

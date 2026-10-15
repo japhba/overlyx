@@ -190,7 +190,9 @@ test('a formula from the toolbar takes spaces as TeX spaces: "E = mc^2" stays on
   const errors = collectErrors(page);
   writeFileSync(`${DIR}/spaces.tex`, texDoc('Einstein wrote'));
   await login(page);
-  await page.request.get('/api/projects');
+  // Node may reuse a socket just as the server closes it between serial fixtures.
+  // Playwright retries only ECONNRESET here; HTTP failures still fail normally.
+  expect((await page.request.get('/api/projects', { maxRetries: 2 })).ok()).toBeTruthy();
   await page.goto(`/#/${PROJECT}/spaces.tex`);
   await page.waitForSelector('.lyx-editor .lyx-par', { timeout: 30000 });
   await page.locator('.lyx-editor .lyx-par', { hasText: 'Einstein wrote' }).click();

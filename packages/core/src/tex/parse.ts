@@ -2087,6 +2087,12 @@ export function parseTex(text: string, opts: ParseTexOptions = {}): ParseTexResu
   mergeCommentErts(pars, (into, from) => { const e = parser.ends.get(from); if (e !== undefined) parser.ends.set(into, e); });
   const bodyRange = split.bodyStart >= 0 ? { start: split.bodyStart, end: split.bodyStart + body.length } : null;
   const sources = sourcesOf(pars, parser, body, bodyRange);
+  // A freshly created document can contain only its title block. Give it an empty
+  // body paragraph to type in; its null source keeps the untouched LaTeX unchanged.
+  if (split.hasDocument && pars.length && pars.every(p => dc.styles.get(p.layout)?.inTitle === true)) {
+    pars.push({ layout: dc.defaultStyle, depth: 0, params: {}, items: [] });
+    sources.push(null);
+  }
 
   const authors = [...parser.authors.entries()].map(([id, a]) => ({ id, name: a.name, email: a.email }));
   if (!split.hasDocument && opts.masterHeader) {

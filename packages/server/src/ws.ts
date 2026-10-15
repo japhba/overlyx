@@ -232,6 +232,9 @@ async function handleConnection(conn: WebSocket, docId: string, user: SessionUse
     const enc0 = encoding.createEncoder();
     encoding.writeVarUint(enc0, MSG_EPOCH);
     encoding.writeVarString(enc0, doc.epoch);
+    // Old clients ignore trailing capability flags. New clients can keep a
+    // local split/join stable until a canonical server record adopts it.
+    encoding.writeVarUint(enc0, 1);
     send(doc, conn, encoding.toUint8Array(enc0));
   }
   // initial sync step 1 + awareness

@@ -18,7 +18,7 @@
  * (resolveOps). Pure string work on the source, tested without a browser.
  */
 import { parseFragment, type DefaultTreeAdapterMap } from 'parse5';
-import { parseSource, elementAt, elementChildren, attr, hasClass, innerRange, outerRange, editStyle, parseStyle, pathOf, walk, isElement, type HElement, type HNode, type HDocument, type HtmlOp, type Path, type SourceDoc } from './source.ts';
+import { parseSource, elementAt, elementChildren, attr, hasClass, innerRange, outerRange, editStyle, parseStyle, pathOf, walk, isElement, opSplices, applySplices, type HElement, type HNode, type HDocument, type HtmlOp, type Path, type SourceDoc } from './source.ts';
 import { slideElements } from './deliverable.ts';
 import { formatTimestamp } from '../comments.ts';
 import { diffTokens } from '../lyx/tokendiff.ts';
@@ -701,7 +701,16 @@ export function reviewOps(src: SourceDoc, ops: HtmlOp[], st: string | null): Htm
         if (pendingDel(el)) break;
         const r = innerRange(el);
         if (!r) { out.push(op); break; }
-        out.push({ ...op, html: trackInner(text.slice(r.from, r.to), op.html, st) });
+        const current = text.slice(r.from, r.to);
+        // Merge a local typing delta before tracking it: remote words aren't this author's deletions.
+        const target = op.before === undefined ? op.html : (() => {
+          const edited = applySplices(text, opSplices(src, op));
+          const next = elementAt(parseSource(edited).doc, op.path);
+          const range = next && innerRange(next);
+          if (!range) throw new Error('The edited text is no longer there');
+          return edited.slice(range.from, range.to);
+        })();
+        out.push({ ...op, html: trackInner(current, target, st), ...(op.before === undefined ? {} : { before: current }) });
         break;
       }
       case 'outer': {

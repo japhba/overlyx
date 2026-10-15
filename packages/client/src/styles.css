@@ -1564,6 +1564,9 @@ textarea::selection, .dialog pre::selection, .dialog input::selection { backgrou
 .tour-card.interface-prompt { left: 50%; top: 50%; transform: translate(-50%, -55%); width: 420px; }
 .tour-spot { position: fixed; z-index: 45; pointer-events: none; border-radius: 5px; box-shadow: 0 0 0 9999px rgba(20,30,50,0.28), 0 0 0 2px var(--accent), 0 0 14px 2px rgba(59,110,165,0.6); transition: left 0.15s, top 0.15s, width 0.15s, height 0.15s; }
 .tour-card { position: fixed; z-index: 95; width: 340px; max-width: calc(100vw - 24px); background: var(--surface); border: 1px solid var(--accent-border); border-radius: 8px; box-shadow: 0 10px 40px rgba(0,0,0,0.3); padding: 12px 14px; font-family: var(--ui-font); font-size: 13px; line-height: 1.45; color: var(--ui-fg); }
+/* Intrinsic centering updates in the same layout when the optional choice expands.
+   The extra bottom inset keeps the welcome card 40px above the viewport center. */
+.tour-card.tour-intro { inset: 12px 12px 92px; margin: auto; height: fit-content; max-height: calc(100vh - 104px); overflow: auto; }
 .tour-card h3 { margin: 0; font-size: 14px; color: var(--accent); }
 .tour-card p { margin: 6px 0; }
 .tour-card code { font-family: "DejaVu Sans Mono", Menlo, monospace; font-size: 12px; background: var(--code-bg); padding: 0 3px; border-radius: 2px; }
@@ -2606,6 +2609,9 @@ select.dl-zoom { appearance: none; -webkit-appearance: none; text-align: center;
 .dl-rail-grip:hover::after, .dl-rail-grip.on::after { background: var(--accent); }
 .dl-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .dl-canvas { flex: 1; position: relative; overflow: hidden; background: #d9dbe0; touch-action: none; }   /* (fingers beside the slide move it: DeliverableEditor canvasTouch — the iPad zoomed the page) */
+.dl-opening { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px; text-align: center; color: var(--ui-fg); }
+.dl-opening p { max-width: 36rem; margin: 0; }
+.dl-opening .dl-btn { min-width: 128px; height: 44px; border-color: var(--ui-border); background: var(--surface); }
 .dl-frame { position: absolute; top: 0; border: 0; transform-origin: 0 0; background: #fff; }
 .dl-editor[data-kind="deck"] .dl-frame, .dl-editor[data-kind="poster"] .dl-frame { background: transparent; }
 /* one slide on the canvas: placed by a transform from its corner (deliverable/viewport.ts) */
@@ -2627,7 +2633,7 @@ select.dl-zoom { appearance: none; -webkit-appearance: none; text-align: center;
 /* the contextual tools in sections named as the selection's label on the canvas */
 .dl-ctx-secs { display: flex; align-items: center; width: max-content; }
 /* the quick menu beside the selection on the canvas (deliverable/QuickBar.tsx) */
-.dl-quick { position: fixed; left: 0; top: 0; z-index: 70; display: flex; align-items: center; padding: 2px 4px; background: var(--surface); border: 1px solid var(--ui-border); border-radius: 8px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16); }
+.dl-quick { position: fixed; left: 0; top: 0; z-index: 40; display: flex; align-items: center; padding: 2px 4px; background: var(--surface); border: 1px solid var(--ui-border); border-radius: 8px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16); }
 .dl-quick .toolbar { background: none; border: 0; padding: 0; flex-wrap: nowrap; }
 .dl-ctx-secs > .toolbar + .toolbar { margin-left: 6px; padding-left: 6px; border-left: 1px solid var(--ui-border); }
 .dl-ctx-secs .tb-label { white-space: nowrap; }
@@ -2678,6 +2684,9 @@ html[data-theme="dark"] .dl-canvas { background: #2a2c31; }
 .dl-toolbar { position: relative; }
 .dl-toolbar.dl-ctx-row > .dl-ctx { position: absolute; left: var(--ctx-left, 8px); top: calc(100% + 4px); z-index: 6; max-width: calc(100% - var(--ctx-left, 8px) - 8px); flex: none; padding: 3px 6px; background: var(--surface); border: 1px solid var(--ui-border); border-radius: 6px; box-shadow: 0 2px 10px rgba(0,0,0,.14); }
 .dl-toolbar.dl-ctx-row > .dl-ctx:empty { display: none; }
+/* Fixed palettes still inherit this row's stacking context; lift an open palette above
+   the selection's floating QuickBar so every colour and control can receive the pointer. */
+.dl-toolbar.dl-ctx-row > .dl-ctx:has(.tb-popup) { z-index: 60; }
 .dl-toolbar.dl-ctx-row > .dl-ctx::before { display: none; }
 .dl-toolbar.dl-ctx-row > .dl-ctx + * { margin-left: auto; }
 .dl-ctx .toolbar { width: max-content; }
@@ -2686,6 +2695,60 @@ html[data-theme="dark"] .dl-canvas { background: #2a2c31; }
 .dl-zoomgroup { display: inline-flex; align-items: center; flex: none; }
 .dl-toolbar > .dl-btn, .dl-toolbar > .dl-status { flex: none; }
 @media (max-width: 900px) { .dl-title { display: none; } }
+/* On touch-sized layouts the panels must not take width away from the slide. Keep their
+   persisted open/closed state, but present them as drawers over the work area instead. */
+@media (max-width: 900px) {
+  .main > .sidebar.left {
+    position: absolute; z-index: 20; inset: 0 auto 0 0;
+    width: min(var(--left-width, 272px), calc(100vw - 48px));
+    max-width: calc(100vw - 48px); box-shadow: 4px 0 18px rgba(0,0,0,.2);
+  }
+  .main > .sidebar.right {
+    position: absolute; z-index: 20; inset: 0 0 0 auto;
+    width: min(var(--right-width, 360px), calc(100vw - 48px));
+    max-width: calc(100vw - 48px); box-shadow: -4px 0 18px rgba(0,0,0,.2);
+  }
+  .main > .sidebar-grip { display: none; }
+  .dl-body { position: relative; min-width: 0; }
+  .dl-rail {
+    position: absolute; z-index: 8; inset: 0 auto 0 0;
+    width: min(170px, 64vw) !important; max-width: calc(100% - 48px);
+    box-shadow: 3px 0 14px rgba(0,0,0,.18);
+  }
+  /* This drawer has a fixed responsive width; do not offer an inert resize handle. */
+  .dl-rail-grip { display: none; }
+  .dl-main { width: 100%; flex: 1 1 100%; }
+  .dl-body > .dl-rv, .dl-body > .dl-anim, .dl-body > .dl-objects {
+    position: absolute; z-index: 16; inset: 0 0 0 auto;
+    width: min(288px, calc(100% - 48px)); max-width: calc(100% - 48px);
+    box-shadow: -4px 0 18px rgba(0,0,0,.2);
+  }
+
+  /* Put every tool within reach without shrinking it to an unusable icon. The tool
+     row scrolls horizontally; the zoom and view actions wrap below and stay visible.
+     Palette popups are portaled to body, so they remain unclipped by the scroller. */
+  .dl-toolbar { flex-wrap: wrap; gap: 3px; padding: 4px 6px; }
+  .dl-toolbar > .toolbar-deck-tools {
+    order: 0; flex: 1 1 100% !important; width: 100%; max-width: 100%;
+    overflow-x: auto; overflow-y: visible; scrollbar-width: thin;
+    touch-action: pan-x; overscroll-behavior-x: contain;
+  }
+  .dl-toolbar > .toolbar-deck-tools::-webkit-scrollbar { height: 3px; }
+  .dl-toolbar > .toolbar-deck-tools::-webkit-scrollbar-thumb { background: var(--ui-border); border-radius: 3px; }
+  .dl-toolbar > .dl-ctx { order: 1; flex: 1 1 100%; max-width: 100%; }
+  .dl-toolbar.dl-ctx-row > .dl-ctx {
+    position: relative; inset: auto; order: 1; flex: 1 1 100%; width: 100%;
+    max-width: 100%; margin: 0; padding: 2px 0; background: transparent;
+    border: 0; border-radius: 0; box-shadow: none;
+  }
+  .dl-toolbar > .dl-ctx:not(:empty) { min-height: 28px; }
+  .dl-toolbar > .dl-zoomgroup { order: 2; }
+  .dl-toolbar > .dl-btn, .dl-toolbar > .edit-mode { order: 3; }
+  .dl-toolbar > .dl-present { order: 4; }
+  .dl-toolbar > .dl-status { order: 5; max-width: 100%; white-space: normal; }
+  .dl-toolbar > .dl-status:empty { display: none; }
+  .dl-toolbar .toolbar { flex-wrap: nowrap; }
+}
 .toolbar-deck-tools .tb-popup.list .tb-popup-grid, .toolbar-deck-context .tb-popup.list .tb-popup-grid { grid-template-columns: minmax(190px, max-content); }
 .toolbar-deck-context .tb-popup.list .tb-pal-sym { min-width: 40px; }
 .dk-font-face { font-size: 12px; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; min-width: 64px; text-align: left; }
@@ -2741,6 +2804,8 @@ html[data-theme="dark"] .dl-canvas { background: #2a2c31; }
 .dl-mathedit.closing .lm-field { outline-color: transparent; }
 .dl-mathedit.closing .lm-overlay { display: none; }
 .dl-mathedit .lm-field { padding: 0; border: 0; border-radius: 2px; outline: 1.5px solid var(--accent); outline-offset: 3px; background: transparent; }
+/* Paint the nominal rule height without enlarging the slide formula editor's fraction layout. */
+.dl-mathedit .lm-content mjx-line { border-top-width: 0 !important; min-height: 0; background: currentColor; }
 /* the reference picker (deck toolbar's Ref while typing: the page's equation labels) */
 .dk-refs { display: flex; flex-direction: column; min-width: 180px; max-height: 50vh; overflow: auto; padding: 4px 0; }
 .dk-ref-item { text-align: left; border: 0; background: none; padding: 6px 12px; font: inherit; font-family: ui-monospace, "DejaVu Sans Mono", monospace; font-size: 12.5px; color: var(--ui-fg); cursor: pointer; border-radius: 4px; }

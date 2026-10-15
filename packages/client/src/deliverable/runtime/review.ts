@@ -9,7 +9,7 @@
  * In every other mode (presenting, the PDF, agents' renders, a page opened by a link) the page shows
  * with the suggestions accepted: what was deleted is hidden, what was added plain.
  */
-import type { Path, ReviewView } from '../protocol';
+import type { FromRuntime, Path, ReviewView } from '../protocol';
 import { MODE, post, pathOf, slides, slideOf, docRect } from './env';
 import { parseThreads, parseWas, parseStamp, stampOf, reviewHue, COMMENTS, INS, DEL, CHG, WAS, BY } from '@overlyx/core/html/review.ts';
 
@@ -420,8 +420,8 @@ export function railReview(s: Element): { comments: number; changed: string | nu
 
 /* ------------------------------------------------------------------ a new comment */
 
-/** what a new comment is on: the text being retyped (and its selected words), the selection, else the slide shown */
-export function commentTarget(editing: Element | null, selected: Element[], slide: Element | null): void {
+/** Capture the comment's target and words before its text receiver gives up the keyboard. */
+export function captureCommentTarget(editing: Element | null, selected: Element[], slide: Element | null): Extract<FromRuntime, { ol: 'comment' }> {
   let el: Element | null = editing ?? (selected.length ? selected[0] : null) ?? slide;
   let quote: string | undefined;
   if (editing) {
@@ -432,6 +432,7 @@ export function commentTarget(editing: Element | null, selected: Element[], slid
   // a part of a drawing, a word: the object it is in
   if (el && !pathOf(el)) el = slide;
   const s = el ? slideOf(el) : null;
-  post({ ol: 'comment', path: el ? pathOf(el) : null, quote, slide: s ? slides().indexOf(s) : -1, open: false });
+  const path = el ? pathOf(el) : null;
+  return { ol: 'comment', path: path ? [...path] : null, quote, slide: s ? slides().indexOf(s) : -1, open: false };
 }
 

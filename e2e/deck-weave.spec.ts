@@ -73,7 +73,7 @@ test('a crossing woven from the right-click menu: the ring over the bar there on
   await page.request.get('/api/projects');
   await page.goto(`/#/${PROJECT}/knot/index.html`);
   await page.frameLocator('.dl-frame').locator('section.slide').first().waitFor({ timeout: 30000 });
-  await page.waitForTimeout(900);
+  await expect(page.locator('.dl-opening')).toHaveCount(0, { timeout: 25000 });
 
   // the bar crosses the ring on the left (x = 12) and on the right (x = 52): on top at both
   const left = await at(page, 12, 32), right = await at(page, 52, 32);
@@ -111,7 +111,7 @@ test('a drawing\'s empty area is nothing to a click: it deselects; a click on (o
   await page.request.get('/api/projects');
   await page.goto(`/#/${PROJECT}/knot2/index.html`);
   await page.frameLocator('.dl-frame').locator('section.slide').first().waitFor({ timeout: 30000 });
-  await page.waitForTimeout(900);
+  await expect(page.locator('.dl-opening')).toHaveCount(0, { timeout: 25000 });
   const selectedNow = () => page.locator('.dl-toolbar [data-tb="dk-delete"]').count();
 
   // the bar: the drawing selected

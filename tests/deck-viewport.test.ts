@@ -330,6 +330,33 @@ describe('a swipe sideways turns the page (Safari\'s swipe between pages)', () =
     expect(turned).toEqual([1, -1]);
   });
 
+  it('a canceled short flick settles without paging, while a normal lift still pages', () => {
+    const { v, turned } = make();
+    const home = v.place();
+    v.panBy(-40, 0);
+    vi.advanceTimersByTime(70);
+    v.release(true);
+    expect(turned).toEqual([]);
+    expect(v.place()).toEqual(home);
+    // Canceling discards the swipe: the next gesture starts afresh.
+    v.panBy(-40, 0);
+    vi.advanceTimersByTime(70);
+    v.release();
+    expect(turned).toEqual([1]);
+  });
+
+  it.each(['zoom', 'wheel'])('a new finger swipe supersedes a pending %s release instead of losing its first motion', previous => {
+    const { v, turned } = make();
+    if (previous === 'zoom') v.zoomTo(0.5, 500, 350); // Releases in 160ms.
+    else v.scroll(-20, 0); // The wheel releases in 140ms, with its own swipe identity.
+    vi.advanceTimersByTime(100);
+    v.panBy(-20, 0);
+    vi.advanceTimersByTime(70); // The older input timer would release this unfinished swipe.
+    v.panBy(-20, 0);
+    v.release();
+    expect(turned).toEqual([1]);
+  });
+
   it('a poster (one page), or a slide pulled loose: sideways it pulls as ever', () => {
     const { v, turned, free, letGo } = make(0.7, false);
     for (let i = 0; i < 20; i++) v.scroll(-30, 0);

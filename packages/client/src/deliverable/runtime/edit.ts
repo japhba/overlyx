@@ -23,9 +23,10 @@
  * the frame); a pen works like the mouse. The pointer is captured, so a
  * drag that leaves the frame keeps going.
  */
-import type { Path, SelItem, SelStyle, Tool, Rect, HtmlOp, ObjKind, KeyPress, InkStyle, PeerInfo, TextCaret, WordsStyle } from '../protocol';
+import type { Path, SelItem, SelStyle, Tool, Rect, HtmlOp, ObjKind, KeyPress, InkStyle, PeerInfo, TextCaret, WordsStyle, ReliabilityEvent, ReliabilityPointer } from '../protocol';
 import { inkOn } from '../../app/contrast';
-import { MODE, post, state, srcOf, pathOf, liveAt, sourced, slides, slideOf, docRect, isForeign, sendLayout } from './env';
+import { MODE, post, state, srcOf, link, pathOf, liveAt, sourced, slides, slideOf, docRect, isForeign, sendLayout } from './env';
+import { mapAssets, restoreMappedAssets } from '../offlineassets';
 import { guard, linkTree } from './reconcile';
 import { typeset } from './math';
 import { renderCites, refreshCites } from './cite';
@@ -33,18 +34,22 @@ import { stepOf } from '@overlyx/core/html/refs.ts';
 import { refreshView } from './view';
 import { badges, isOrdering, orderClick, stopOrdering, postSequence, stepsChanged, STEPS_CSS } from './animate';
 import { startCrop, isCropping, endCrop, cropNow, cropTarget, setCropAspect, redrawCrop, type CropContext } from './crop';
-import { chipify, unchip, openChip, openChipEl, chipOpening, holdKey, holdAfter, keyPress, isModifierKey, typeKeysHere, chipHooks, flushAfter, insertRefChip, shownChip, setChip, doneChip, displayChip, closeChip, trackChip, insertChip, chipBeside, CHIP_CSS } from './mathedit';
-import { initPaths, isNodeEditing, nodesAfterSource, nodesTargetOf, startNodesOrConvert, endNodes, redrawNodes, penDown, penMove, penUp, penKey, penDouble, penCancel, isPenDrawing, setMenuShape } from './pathedit';
+import { chipify, unchip, openChip, openChipEl, chipOpening, holdKey, holdAfter, holdIfLeaving, keyPress, isModifierKey, typeKeysHere, chipHooks, flushAfter, insertRefChip, shownChip, setChip, doneChip, displayChip, closeChip, trackChip, insertChip, chipBeside, recoverChipCaret, CHIP_CSS } from './mathedit';
+import { initPaths, isNodeEditing, nodesAfterSource, nodesTargetOf, startNodesOrConvert, endNodes, redrawNodes, penDown, penMove, penUp, penCancelPress, penKey, penDouble, penCancel, isPenDrawing, setMenuShape } from './pathedit';
 import { isSolo, showSlide, soloIndex, revealSlideOf } from './solo';
 import { inkRuns, inkPaths, runsBox, freshPoint, isScribble, type FreePt, type InkRun } from './freehand';
 import { pinchFactor, pinchLock, triGesture, type PinchLock } from '../gestures';
 import { offsetOf, caretBox, selectionBoxes, safeColor } from './carets';
 import { postObjects } from './objects';
-import { reviewOverlay, bindPins, setReviewHover, showGhost, lockDeletions, trackInput, commentTarget, setLiveAt, styleAuthors, REVIEW_OVERLAY_CSS } from './review';
+import { reviewOverlay, bindPins, setReviewHover, showGhost, lockDeletions, trackInput, captureCommentTarget, setLiveAt, styleAuthors, REVIEW_OVERLAY_CSS } from './review';
 import { initListDrag, hoverList, notePointer, listParts, bindListGrips, listDragging, stepItem, LIST_DRAG_CSS } from './listdrag';
 import { clipOf, postClip, paste } from './clip';
+import { bufferedTextHtml } from '../recovery';
 import { weaveMenu } from './weave';
 import { initGuides, guideSlide, guideAt, guideSnaps, guideParts, startGuideDrag, moveGuideDrag, endGuideDrag, GUIDES_CSS } from './guides';
+import { listInkBox } from './listmarkers';
+import { replaceEditingHost, editingTextStyle, carryEditingTextStyle } from './editinghost';
+import { textBoundary, textListItem } from './textnavigation';
 
 const NS = 'http://www.w3.org/1999/xhtml';
 let host: HTMLElement;
@@ -57,6 +62,8 @@ let inkStyle: InkStyle = { color: '#1d2433', width: 4, opacity: 1 };
 let selected: Element[] = [];
 let peers: PeerInfo[] = [];
 let editing: HTMLElement | null = null;
+/** A list promotion's explicit style delta, saved once with its tag conversion. */
+const promotedTextStyles = new WeakMap<HTMLElement, Record<string, string>>();
 /** the selected object showing rotation arrows instead of resize handles (Inkscape: a click on the selected object switches them) */
 let rotating: Element | null = null;
 let editTimer: ReturnType<typeof setTimeout> | null = null;
@@ -153,6 +160,8 @@ export function startEditing(): void {
   addEventListener('pointermove', onHover, true);
   addEventListener('pointerup', onTouchUp, true);
   addEventListener('pointercancel', onTouchUp, true);
+  addEventListener('lostpointercapture', onTouchUp, true);
+  addEventListener('blur', onWindowBlur);
   addEventListener('click', swallow, true);
   addEventListener('dblclick', onDblClick, true);
   addEventListener('contextmenu', onContextMenu, true);
@@ -192,11 +201,15 @@ export function setScale(s: number, anchor?: { docY: number; screenY: number }):
   redrawNodes();
 }
 export function setTool(t: Tool, style?: InkStyle): void {
+  if (t !== tool && drag) cancelDrag();
   tool = t;
   if (style) inkStyle = style;
   document.documentElement.classList.toggle('ol-tool-draw', t !== 'select' && t !== 'eraser');
   document.documentElement.classList.toggle('ol-tool-erase', t === 'eraser');
-  if (t !== 'bezier') penCancel();
+  if (t !== 'bezier') {
+    penCancel();
+    clearBezierPointer();
+  }
   if (t !== 'select') { stopText(); if (isCropping()) endCrop(true); endNodes(); }
   // drawing: stroke after stroke on top of the slide, nothing selected in between (GoodNotes)
   if ((t === 'pen' || t === 'eraser') && selected.length) { selected = []; report(); draw(); }
@@ -378,11 +391,32 @@ export function selectAllOnSlide(): void {
 export function selection(): Element[] { return selected.filter(e => e.isConnected); }
 export function setSelection(els: Element[]): void { selected = els; report(); draw(); }
 
+/** Use the current canvas selection, also when host shortcuts arrive before its selection reply. */
+export function removeSelected(): void {
+  if (editing || isCropping() || isNodeEditing()) return;
+  const free = selected.filter(s => !isLocked(s));
+  const paths = free.map(pathOf).filter((p): p is Path => !!p);
+  if (!paths.length) return;
+  const refit = refitGroups(free, new Set(free));
+  selected = selected.filter(isLocked);
+  report();
+  commit([...refit, { t: 'remove', paths }]);
+}
+
 /** after a new version of the text: the selection found again, the frame redrawn */
 export function afterSource(): void {
   inkArrived();
   selected = selected.map(e => (e.isConnected ? e : null)).filter((e): e is Element => !!e && !!pathOf(e));
-  if (editing && !editing.isConnected) { editing = null; post({ ol: 'editing', path: null }); }
+  if (editing && !editing.isConnected) {
+    // A coauthor removed the object while it held a local draft. Preserve that
+    // draft explicitly rather than leave a detached editor or silently lose it.
+    const html = cleanHtml(editing);
+    if (html.trim()) post({ ol: 'recoveredText', html, reason: 'The text box was removed while you were editing it.' });
+    if (editTimer) { clearTimeout(editTimer); editTimer = null; }
+    editing = null; guard.editing = null;
+    post({ ol: 'textPending', on: false });
+    post({ ol: 'editing', path: null });
+  }
   stepsChanged();
   styleAuthors();
   report();
@@ -397,13 +431,66 @@ export function afterSource(): void {
  */
 let drawAhead: KeyPress[] | null = null;
 let drawAheadTimer: ReturnType<typeof setTimeout> | null = null;
+let drawInput: HTMLTextAreaElement | null = null;
+let drawComposing = false;
+let drawEdit: { path: Path; selectAll: boolean; math: boolean } | null = null;
+function clearDrawInput(): void {
+  drawInput?.remove(); drawInput = null; drawComposing = false; drawEdit = null;
+}
+function rememberDrawKeys(keys: KeyPress[]): void {
+  if (!drawAhead) return;
+  drawAhead.push(...keys);
+  post({ ol: 'textPending', on: true, html: bufferedTextHtml(drawAhead) });
+}
+function drawInputExpired(force = false): void {
+  if (!drawAhead) return;
+  if (drawComposing && !force) { drawAheadTimer = setTimeout(drawInputExpired, 500); return; }
+  const html = bufferedTextHtml(drawComposing && drawInput?.value ? [...drawAhead, { key: '', text: drawInput.value }] : drawAhead);
+  if (html) post({ ol: 'recoveredText', html, reason: 'The new text box could not finish opening. Your text was kept here.' });
+  post({ ol: 'textPending', on: false });
+  drawAhead = null; drawAheadTimer = null; clearDrawInput();
+}
 function expectNewText(): void {
+  if (drawAhead?.length || drawComposing) drawInputExpired(true);
   drawAhead = [];
+  clearDrawInput();
   if (drawAheadTimer) clearTimeout(drawAheadTimer);
-  drawAheadTimer = setTimeout(() => { drawAhead = null; }, 4000);
+  drawAheadTimer = setTimeout(drawInputExpired, 4000);
+  // Pointer handling suppresses the browser's normal focus change. Keep the
+  // whole initial keystroke stream in this frame before the asynchronous draw
+  // reply creates the editable box; otherwise its first letter can reach a
+  // toolbar shortcut in the parent and later letters can overtake queued ones.
+  // Unicode insertion and IME input have no printable keydown. A real editable
+  // receiver keeps those events available while the new object travels to the host.
+  const input = document.createElement('textarea');
+  input.setAttribute('aria-label', 'New text box');
+  input.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none;';
+  input.addEventListener('beforeinput', event => {
+    if (!drawAhead || drawComposing || !event.data || !event.inputType.startsWith('insert')) return;
+    event.preventDefault(); rememberDrawKeys([{ key: '', text: event.data }]);
+  });
+  input.addEventListener('paste', event => {
+    if (!drawAhead) return;
+    const pasted = event.clipboardData?.getData('text/plain');
+    if (pasted === undefined) return;
+    event.preventDefault(); event.stopPropagation(); rememberDrawKeys([{ key: '', text: pasted }]);
+  });
+  input.addEventListener('compositionstart', () => { drawComposing = true; });
+  input.addEventListener('input', () => {
+    if (drawComposing && drawAhead) post({ ol: 'textPending', on: true, html: bufferedTextHtml([...drawAhead, { key: '', text: input.value }]) });
+  });
+  input.addEventListener('compositionend', event => {
+    drawComposing = false;
+    if (drawAhead && event.data) rememberDrawKeys([{ key: '', text: event.data }]);
+    input.value = '';
+    const pending = drawEdit;
+    if (pending) editTextAt(pending.path, pending.selectAll, pending.math);
+  });
+  drawInput = input; root.append(input); input.focus({ preventScroll: true });
 }
 
 export function editTextAt(path: Path, selectAll = false, math = false): void {
+  if (drawInput && drawComposing) { drawEdit = { path, selectAll, math }; return; }
   const el = liveAt(path);
   if (!el) return;
   if (revealSlideOf(el)) afterReveal();
@@ -414,6 +501,7 @@ export function editTextAt(path: Path, selectAll = false, math = false): void {
   if (drawAhead && editing === el) {
     const keys = drawAhead;
     drawAhead = null;
+    clearDrawInput();
     if (drawAheadTimer) { clearTimeout(drawAheadTimer); drawAheadTimer = null; }
     if (keys.length) typeKeysHere(keys, stopText);
   }
@@ -430,12 +518,16 @@ let leaving: Promise<unknown> = Promise.resolve();
 chipHooks.stop = () => stopText();
 export function typeKeys(keys: KeyPress[]): void {
   // a text box is on its way: the keys wait for it
-  if (drawAhead && !editing) { drawAhead.push(...keys); return; }
+  if (drawAhead && !editing) { rememberDrawKeys(keys); return; }
+  if (holdIfLeaving(keys)) return;
   void leaving.then(() => { if (editing && keys.length) { editing.focus({ preventScroll: true }); typeKeysHere(keys, stopText); } });
 }
-export function mathDone(id: number, tex: string, dir: 'forward' | 'backward' | null, putBack?: string): void {
-  const el = editing;
-  leaving = doneChip(id, tex, dir, el, putBack).then(kept => {
+export function mathDone(id: number, tex: string, dir: 'forward' | 'backward' | null, putBack?: string, keys?: KeyPress[]): void {
+  const chip = openChipEl();
+  // A delayed answer belongs to its original formula, never whichever empty
+  // text box happens to be editing when this message reaches the frame.
+  const el = chip && Number(chip.dataset.olChip) === id && editing?.contains(chip) ? editing : null;
+  leaving = doneChip(id, tex, dir, el, putBack, keys).then(kept => {
     if (!el || editing !== el) return;
     // the formula emptied and nothing else left in its box: the box goes too (as an empty formula in LyX)
     if (!kept && !cleanHtml(el).replace(/<[^>]*>|&nbsp;|\s/g, '')) {
@@ -458,8 +550,49 @@ export function exec(command: string, value?: string): void {
   editing.focus();
   if (command === 'fontSize' && value) styleRun('font-size', value);
   else if (command === 'lineHeight' && value) { editing.style.setProperty('line-height', value); scheduleCommit(); return; }
-  else document.execCommand(command, false, value);
+  else {
+    const listCommand = command === 'insertUnorderedList' || command === 'insertOrderedList';
+    const originalTag = editing.localName;
+    // Firefox rejects a list inside a P/H1 editing host. A DIV is a valid block host;
+    // the existing incremental commit records that source-tag conversion with the list.
+    const promoted = listCommand && PHRASING_BOXES.has(originalTag);
+    const originalStyle = editing.getAttribute('style');
+    if (promoted) {
+      const beforeStyle = editingTextStyle(editing);
+      replaceTextHost('div');
+      const carried = carryEditingTextStyle(editing!, beforeStyle);
+      if (Object.keys(carried).length) promotedTextStyles.set(editing!, carried);
+    }
+    document.execCommand(command, false, value);
+    // A changed innerHTML alone is not success: native commands can normalize inline
+    // markup without making a list. Without a real list, restore the original host.
+    if (promoted && !editing!.querySelector('ul, ol')) {
+      promotedTextStyles.delete(editing!);
+      replaceTextHost(originalTag);
+      if (originalStyle === null) editing!.removeAttribute('style');
+      else editing!.setAttribute('style', originalStyle);
+    }
+  }
   scheduleCommit();
+}
+
+/** Keep the editor/source pairing and listeners when a list needs a block-capable host. */
+function replaceTextHost(tag: string): void {
+  const old = editing!;
+  const src = srcOf.get(old);
+  old.removeEventListener('input', scheduleCommit);
+  old.removeEventListener('beforeinput', onBeforeInput);
+  old.removeEventListener('paste', pastePlain);
+  const next = replaceEditingHost(old, tag);
+  if (src) link(next, src);
+  editing = next;
+  guard.editing = next;
+  selected = selected.map(el => el === old ? next : el);
+  if (rotating === old) rotating = next;
+  if (hoverEl === old) hoverEl = next;
+  next.addEventListener('input', scheduleCommit);
+  next.addEventListener('beforeinput', onBeforeInput);
+  next.addEventListener('paste', pastePlain);
 }
 
 /** the selected part of the text being retyped wrapped in a span with one style (inner ones of that style dropped) */
@@ -586,7 +719,14 @@ export function kindOf(el: Element): ObjKind {
   const c = cs(el);
   const painted = c.backgroundColor !== 'rgba(0, 0, 0, 0)' || c.backgroundImage !== 'none' || (c.borderTopStyle !== 'none' && parseFloat(c.borderTopWidth) > 0);
   const src = srcOf.get(el);
-  if (src && /\\\[|\\\(|\$\$/.test(src.textContent ?? '') && !painted && isTextual(el)) return 'formula';
+  // A text box can contain inline TeX without becoming a Formula object. Only classify it as a
+  // formula when removing the complete math expressions leaves no ordinary text behind.
+  const sourceText = src?.textContent ?? '';
+  const withoutMath = sourceText
+    .replace(/\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|\$\$[\s\S]*?\$\$|\$(?:\\.|[^$])+\$/g, '')
+    .replace(/\\begin\{[^}]+\}[\s\S]*?\\end\{[^}]+\}/g, '')
+    .trim();
+  if (src && !withoutMath && /\\\[|\\\(|\$\$|\$[^$]+\$|\\begin\{/.test(sourceText) && !painted && isTextual(el)) return 'formula';
   if (isTextual(el)) return painted ? 'shape' : 'text';
   if (canType(el)) return 'shape';
   if (src && src.children.length) return 'group';
@@ -612,6 +752,7 @@ function flipsOf(el: Element): { x: boolean; y: boolean } {
 
 /** an object's own box: its centre (document px), its size before rotation, its angle */
 export interface Box { cx: number; cy: number; w: number; h: number; a: number }
+
 export function boxOf(el: Element): Box {
   if (isSvgPart(el)) { const p = partBox(el); if (p) return p.box; }
   const r = docRect(el);
@@ -620,6 +761,11 @@ export function boxOf(el: Element): Box {
   const he = el as HTMLElement;
   const w = he.offsetWidth ?? el.clientWidth, h = he.offsetHeight ?? el.clientHeight;
   return { cx: r.x + r.w / 2, cy: r.y + r.h / 2, w: w || r.w, h: h || r.h, a };
+}
+
+/** Selection ink includes list markers; manipulation handles keep the source element's true CSS box. */
+function selectionBoxOf(el: Element): Box {
+  return listInkBox(el, boxOf(el));
 }
 
 /* ------------------------------------------------------------------ a part of a drawing: its own transform */
@@ -990,7 +1136,7 @@ export function draw(): void {
   if (ctx && selected.every(el => groupOf(el) === ctx)) parts.push(frameAt('frame ctx', boxOf(ctx), `border-width:${bw}px`));
   for (const el of selected) {
     if (!el.isConnected) continue;
-    const b = boxOf(el);
+    const b = selectionBoxOf(el);
     const locked = isLocked(el);
     parts.push(frameAt(`frame${el === editing ? ' editing' : ''}${locked ? ' locked' : ''}`, b, `border-width:${bw}px`));
     if (locked) { const [x, y] = handleAt(b, 1, 0); parts.push(`<div class="lock" style="left:${x}px;top:${y}px">🔒</div>`); }
@@ -999,7 +1145,7 @@ export function draw(): void {
   const live = selected.filter(e => e.isConnected);
   if (live.length && !(drag?.moved && drag.kind !== 'marquee')) {
     let x = Infinity, y = Infinity;
-    for (const el of live) { const c = cornersOf(boxOf(el)); for (const [cx, cy] of c) { x = Math.min(x, cx); y = Math.min(y, cy); } }
+    for (const el of live) { const c = cornersOf(selectionBoxOf(el)); for (const [cx, cy] of c) { x = Math.min(x, cx); y = Math.min(y, cy); } }
     const cls = live.some(e => e === editing) ? ' editing' : live.every(isLocked) ? ' locked' : '';
     parts.push(`<div class="tag${cls}" data-ol-kind style="left:${x}px;top:${y}px">${esc(selectionLabel(live))}</div>`);
   }
@@ -1126,15 +1272,20 @@ interface Drag {
   hold?: ReturnType<typeof setTimeout>;
 }
 let drag: Drag | null = null;
+/** Synthetic pointercancel used to end an interrupted gesture; it is not a browser cancellation. */
+let endingInterruptedDrag = false;
 
 /**
  * The pointer kept by the page while it is held (a drag leaving the frame keeps going) — captured by
  * the element pressed, not by <html>: a capturing element becomes the target of the click and the
  * double click that follow, and those must still land on the object (double-click to retype it).
  */
-function grab(e: PointerEvent): void {
+function grab(e: PointerEvent, stable = false): void {
   const t = e.composedPath()[0];
-  const el = t instanceof Element ? t : document.documentElement;
+  // Handles are rebuilt on every redraw. Capture their drag on the permanent
+  // overlay host so removing a handle does not cancel a real pointer gesture.
+  // Ordinary object clicks still capture their object for subsequent double-clicks.
+  const el = stable ? host : t instanceof Element ? t : document.documentElement;
   try { el.setPointerCapture(e.pointerId); } catch { /* not capturable (synthetic) */ }
 }
 
@@ -1146,10 +1297,10 @@ function onPointerDown(e: PointerEvent): void {
   if (e.pointerType === 'pen') penLands(e);
   if (e.pointerType === 'touch') {
     // the hand resting on the screen while the Pencil writes: not a finger (palm rejection)
-    if (isPalm(e)) { palms.add(e.pointerId); e.preventDefault(); e.stopPropagation(); return; }
+    if (isPalm(e)) { ignorePalmContact(e.pointerId); e.preventDefault(); e.stopPropagation(); return; }
     const now = performance.now();
     // three fingers come down together; one coming down well after two others is the hand
-    if (touches.size === 2 && !tri && fingersPan() && now - Math.min(...[...touches.values()].map(t => t.t0 ?? now)) > 250) { palms.add(e.pointerId); e.preventDefault(); e.stopPropagation(); return; }
+    if (touches.size === 2 && !tri && fingersPan() && now - Math.min(...[...touches.values()].map(t => t.t0 ?? now)) > 250) { ignorePalmContact(e.pointerId); e.preventDefault(); e.stopPropagation(); return; }
     touches.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.screenX, sy: e.screenY, t0: now });
     if (touches.size >= 3 || tri) { e.preventDefault(); e.stopPropagation(); if (!tri) startTri(); return; }
     if (touches.size >= 2) { e.preventDefault(); e.stopPropagation(); startPinch(); return; }
@@ -1170,7 +1321,14 @@ function onPointerDown(e: PointerEvent): void {
   // same click as the one before; Ctrl / ⌘: the part of a drawing under the pointer) — animate.ts
   if (isOrdering()) { const el = objectFor(t, e.ctrlKey || e.metaKey); if (el && slideOf(el)) orderClick(el, e.shiftKey); return; }
   // the Bézier pen: a node per press (pathedit.ts)
-  if (tool === 'bezier') { penDown(e, el => slideOf(el)); addEventListener('pointerup', penUpOnce, true); return; }
+  if (tool === 'bezier') {
+    penDown(e, el => slideOf(el));
+    bezierPointerId = e.pointerId;
+    addEventListener('pointerup', penUpOnce, true);
+    addEventListener('pointercancel', penUpOnce, true);
+    addEventListener('lostpointercapture', penUpOnce, true);
+    return;
+  }
   grab(e);
   const x = e.pageX, y = e.pageY;
   const base = { x0: x, y0: y, els: [], moved: false, pointerId: e.pointerId, pointerType: e.pointerType, last: { x: e.clientX, y: e.clientY }, ls: { x: e.screenX, y: e.screenY } };
@@ -1290,7 +1448,7 @@ function onHandleDown(e: PointerEvent, handle: string): void {
   if (e.button !== 0 || selected.length !== 1) return;
   e.preventDefault();
   e.stopPropagation();
-  grab(e);
+  grab(e, true);
   const el = selected[0] as HTMLElement;
   const base = { x0: e.pageX, y0: e.pageY, els: [start(el)], handle, moved: false, pointerId: e.pointerId, pointerType: e.pointerType };
   if (handle === 'rot') {
@@ -1351,12 +1509,14 @@ function capture(): void {
   addEventListener('pointermove', onDragMove, true);
   addEventListener('pointerup', onDragEnd, true);
   addEventListener('pointercancel', onDragEnd, true);
+  addEventListener('lostpointercapture', onDragEnd, true);
 }
 
 function release(): void {
   removeEventListener('pointermove', onDragMove, true);
   removeEventListener('pointerup', onDragEnd, true);
   removeEventListener('pointercancel', onDragEnd, true);
+  removeEventListener('lostpointercapture', onDragEnd, true);
   document.documentElement.classList.remove('ol-dragging');
   if (dragCss) dragCss.textContent = '';
 }
@@ -1578,7 +1738,14 @@ function resizeLive(d: DragEl, h: string, dx: number, dy: number, keepRatio: boo
 }
 
 function onDragEnd(e: PointerEvent): void {
-  if (drag && drag.pointerId !== undefined && e.pointerId !== drag.pointerId) return;
+  const owner = drag;
+  // The capture-phase handler only belongs to a drag while its owner is active.
+  // In particular, an unrelated/stale cancellation must not create telemetry.
+  if (!owner || owner.pointerId === undefined || e.pointerId !== owner.pointerId) return;
+  const canceled = e.type !== 'pointerup';
+  if (canceled && !endingInterruptedDrag) {
+    postGestureReliability(e.type === 'lostpointercapture' ? 'gesture.capture-lost' : 'gesture.cancelled', owner.pointerType);
+  }
   release();
   const d = drag;
   drag = null;
@@ -1586,24 +1753,24 @@ function onDragEnd(e: PointerEvent): void {
   if (!d) return;
   if (d.hold) clearTimeout(d.hold);
   if (d.told) post({ ol: 'dragging', on: false });
-  if (d.kind === 'guide') { endGuideDrag(e.type === 'pointercancel' || state.version === null); return; }
+  if (d.kind === 'guide') { endGuideDrag(canceled || state.version === null); return; }
   if (d.kind === 'pan') {
-    if (d.moved && isSolo()) post({ ol: 'panEnd' });
+    if (d.moved && isSolo()) post({ ol: 'panEnd', cancel: canceled });
     // a tap on nothing: the selection goes; on an object: that one is selected
-    if (!d.moved && !e.shiftKey && e.type !== 'pointercancel') { selected = d.tap ? [d.tap] : []; report(); }
+    if (!d.moved && !e.shiftKey && !canceled) { selected = d.tap ? [d.tap] : []; report(); }
     draw();
     return;
   }
   if (d.kind === 'erase') {
     const gone = d.erased ?? [];
-    if (e.type === 'pointercancel' || state.version === null) { for (const el of gone) (el as HTMLElement | SVGElement).style.visibility = ''; return; }
+    if (canceled || state.version === null) { for (const el of gone) (el as HTMLElement | SVGElement).style.visibility = ''; return; }
     // one change for the whole rub (one undo brings them all back)
     const paths = gone.map(pathOf).filter((p): p is Path => !!p);
     if (paths.length) commit([{ t: 'remove', paths }]);
     return;
   }
-  if (d.kind === 'pen') { if (e.type === 'pointercancel') dropInk(); else endInk(e); return; }
-  if (e.type === 'pointercancel') { for (const x of d.els) revertLive(x); drawBox = null; draw(); return; }
+  if (d.kind === 'pen') { if (canceled) dropInk(); else endInk(e); return; }
+  if (canceled) { for (const x of d.els) revertLive(x); drawBox = null; draw(); return; }
   if (d.kind === 'draw') {
     const box = drawBox;
     drawBox = null;
@@ -1667,6 +1834,17 @@ function onDragEnd(e: PointerEvent): void {
   // an object of a group moved or resized: the group fits around its objects again
   commit([...ops, ...refitGroups(d.els.map(x => x.el))]);
   draw();
+}
+
+/** A tool switch or lost window focus ends the in-flight gesture as a cancellation. */
+function cancelDrag(): void {
+  if (!drag) return;
+  const pointerType = drag.pointerType;
+  const wasEndingInterrupted = endingInterruptedDrag;
+  endingInterruptedDrag = true;
+  try { onDragEnd(new PointerEvent('pointercancel', { pointerId: drag.pointerId ?? -1 })); }
+  finally { endingInterruptedDrag = wasEndingInterrupted; }
+  postGestureReliability('gesture.interrupted', pointerType);
 }
 
 /** Alt+drag: copies where the drag ended, the originals back where they were */
@@ -1736,12 +1914,25 @@ function touchGeom(): { d: number; mx: number; my: number; smx: number; smy: num
 /** a drag the first finger began is given up (a second finger came) */
 function dropDrag(): void {
   if (!drag) return;
+  postGestureReliability('gesture.interrupted', drag.pointerType);
   if (drag.kind === 'pen') dropInk();
   for (const x of drag.els) revertLive(x);
   if (drag.kind === 'erase') for (const el of drag.erased ?? []) (el as HTMLElement | SVGElement).style.visibility = '';
   if (drag.hold) clearTimeout(drag.hold);
-  if (drag.kind === 'pan' && drag.moved) post({ ol: 'panEnd' });
+  if (drag.told) post({ ol: 'dragging', on: false });
+  if (drag.kind === 'pan' && drag.moved) post({ ol: 'panEnd', cancel: true });
   release(); drag = null; drawBox = null; guides = []; draw();
+}
+
+function onWindowBlur(): void {
+  const interruptedPointer = drag?.pointerType;
+  const interruptedTouch = touches.size > 0 || pinch !== null || tri !== null;
+  cancelDrag();
+  if (interruptedTouch && interruptedPointer !== 'touch') postGestureReliability('gesture.interrupted', 'touch');
+  if (bezierPointerId !== null) { clearBezierPointer(); penCancelPress(); }
+  if (penOn !== null) { penOn = null; penOffAt = performance.now(); post({ ol: 'penDown', down: false }); }
+  if (pinch) { if (isSolo()) post({ ol: 'pinch', phase: 'cancel', pts: [] }); pinch = null; pinch0 = null; }
+  tri = null; touches.clear(); palms.clear();
 }
 
 /** the two fingers of a pinch: in the frame's px and on the screen */
@@ -1776,6 +1967,21 @@ function onTouchUp(e: PointerEvent): void {
   if (e.pointerType === 'pen' && e.pointerId === penOn) { penOn = null; penOffAt = performance.now(); post({ ol: 'penDown', down: false }); }
   if (e.pointerType !== 'touch') return;
   palms.delete(e.pointerId);
+  // Implicit capture loss after a normal lift is not a new interruption.
+  if (!touches.has(e.pointerId)) return;
+  if (e.type !== 'pointerup') {
+    // A drag's later-registered capture handler reports the same terminal event.
+    // Touch-only pinch/tri contacts have no drag owner, so this handler reports them.
+    if (!(drag && drag.pointerId === e.pointerId && drag.pointerType === e.pointerType)) {
+      postGestureReliability(e.type === 'lostpointercapture' ? 'gesture.capture-lost' : 'gesture.cancelled', e.pointerType);
+    }
+    // Interruption discards every contact. In particular, the last cancellation
+    // must not turn a partial pinch into a committed zoom or a three-finger Undo.
+    if (pinch && isSolo()) post({ ol: 'pinch', phase: 'cancel', pts: [] });
+    touches.clear();
+    pinch = null; pinch0 = null; tri = null;
+    return;
+  }
   touches.delete(e.pointerId);
   if (tri) { if (!touches.size) endTri(); return; }
   if (touches.size < 2 && pinch) {
@@ -1792,6 +1998,7 @@ const triMid = () => { const ps = [...touches.values()]; return { x: ps.reduce((
 
 function startTri(): void {
   dropDrag();
+  if (pinch) postGestureReliability('gesture.interrupted', 'touch');
   if (pinch && isSolo()) post({ ol: 'pinch', phase: 'cancel', pts: [] });
   pinch = null; pinch0 = null;
   const m = triMid();
@@ -1832,6 +2039,21 @@ let penOn: number | null = null, penOffAt = -1e9;
 const palms = new Set<number>();
 const PALM_AFTER = 400;
 
+type GestureReliabilityEvent = Extract<ReliabilityEvent, 'gesture.cancelled' | 'gesture.capture-lost' | 'gesture.interrupted' | 'gesture.palm-ignored'>;
+
+/** The only reliability payload this opaque runtime sends: a fixed event and finite pointer class. */
+function postGestureReliability(event: GestureReliabilityEvent, pointerType?: string): void {
+  const pointer: ReliabilityPointer = pointerType === 'touch' || pointerType === 'pen' || pointerType === 'mouse' ? pointerType : 'none';
+  post({ ol: 'reliability', event, pointer });
+}
+
+/** Record one ignored touch per active pointer contact; repeated downs cannot inflate the count. */
+function ignorePalmContact(pointerId: number): void {
+  if (palms.has(pointerId)) return;
+  palms.add(pointerId);
+  postGestureReliability('gesture.palm-ignored', 'touch');
+}
+
 function isPalm(e: PointerEvent): boolean {
   if (penOn !== null || performance.now() - penOffAt < PALM_AFTER) return true;
   // (a contact as broad as a palm, where the browser says how broad: the iPad's)
@@ -1843,7 +2065,8 @@ function penLands(e: PointerEvent): void {
   penOn = e.pointerId;
   post({ ol: 'penDown', down: true });
   if (!touches.size) return;
-  for (const id of touches.keys()) palms.add(id);
+  if (drag?.pointerType !== 'touch') postGestureReliability('gesture.interrupted', 'touch');
+  for (const id of touches.keys()) ignorePalmContact(id);
   touches.clear();
   tri = null;
   if (pinch) { if (isSolo()) post({ ol: 'pinch', phase: 'cancel', pts: [] }); pinch = null; pinch0 = null; }
@@ -2229,7 +2452,18 @@ function guessType(name: string): string {
 
 /* ------------------------------------------------------------------ text */
 
-function penUpOnce(): void { removeEventListener('pointerup', penUpOnce, true); penUp(); }
+let bezierPointerId: number | null = null;
+function clearBezierPointer(): void {
+  removeEventListener('pointerup', penUpOnce, true);
+  removeEventListener('pointercancel', penUpOnce, true);
+  removeEventListener('lostpointercapture', penUpOnce, true);
+  bezierPointerId = null;
+}
+function penUpOnce(e: PointerEvent): void {
+  if (bezierPointerId !== null && e.pointerId !== bezierPointerId) return;
+  clearBezierPointer();
+  if (e.type === 'pointerup') penUp(); else penCancelPress();
+}
 
 function onDblClick(e: MouseEvent): void {
   if (isCropping() || isNodeEditing()) return;
@@ -2276,6 +2510,7 @@ function beginText(el: HTMLElement, at: { x: number; y: number } | null, selectA
   guard.editing = el;
   // the text as written, its formulas chips (typeset, edited with LyX's formula editor: mathedit.ts)
   el.innerHTML = src.innerHTML;
+  if (window.__OL?.assetUrls) mapAssets(el, window.__OL.assetUrls, document.baseURI);
   // (suggested deletions keep the caret out: what is typed never goes into them)
   lockDeletions(el);
   el.classList.add('ol-notex');
@@ -2333,6 +2568,7 @@ function onBeforeInput(e: Event): void {
 }
 
 function scheduleCommit(): void {
+  post({ ol: 'textPending', on: true, html: editing ? cleanHtml(editing) : undefined });
   if (editTimer) clearTimeout(editTimer);
   editTimer = setTimeout(() => { commitText(); sendCaret(); }, 350);
   redrawSoon();
@@ -2342,6 +2578,7 @@ function scheduleCommit(): void {
 /** the retyped text's markup, cleaned of what contenteditable adds */
 function cleanHtml(el: HTMLElement): string {
   const c = el.cloneNode(true) as HTMLElement;
+  restoreMappedAssets(c, el);
   for (const x of Array.from(c.querySelectorAll('[data-ol-runtime]'))) x.remove();
   for (const x of Array.from(c.querySelectorAll('[data-ol-texwait]'))) x.removeAttribute('data-ol-texwait');
   // (the suggested deletions locked while retyping)
@@ -2373,22 +2610,38 @@ function commitText(final = false): void {
   // a closed tab) left the list at the slide's corner. The box being retyped stays as it is meanwhile
   // (reconcile's guard); its source is the <div> from then on.
   const toDiv = !!src && PHRASING_BOXES.has(src.localName) && BLOCK_INSIDE.test(html);
-  if (!path || (html === editStartHtml && !toDiv)) return;
+  if (!path) {
+    if (html.trim()) post({ ol: 'recoveredText', html, reason: 'This text box is no longer in the saved document.' });
+    post({ ol: 'textPending', on: false }); return;
+  }
+  if (html === editStartHtml && !toDiv) { post({ ol: 'textPending', on: false }); return; }
+  const before = editStartHtml;
   editStartHtml = html;
-  const attrs = toDiv ? Array.from(src!.attributes).map(a => ` ${a.name}="${a.value.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"`).join('') : '';
-  const ops: HtmlOp[] = [toDiv ? { t: 'outer', path, html: `<div${attrs}>${html}</div>` } : { t: 'inner', path, html }];
+  // Only this author's before→after delta is an edit. The source may already
+  // contain remote words which the active contenteditable deliberately doesn't.
+  const ops: HtmlOp[] = [{ t: 'inner', path, html, before, ...(toDiv ? { as: 'div' as const } : {}) }];
+  const promotedStyle = promotedTextStyles.get(editing);
+  if (promotedStyle) {
+    ops.push({ t: 'style', path, set: promotedStyle });
+    promotedTextStyles.delete(editing);
+  }
   // a box-wide change made while typing (the line spacing)
   const lh = editing.style.getPropertyValue('line-height');
   const srcLh = (srcOf.get(editing) as HTMLElement | undefined)?.style?.getPropertyValue('line-height') ?? '';
   if (lh && lh !== srcLh) ops.push({ t: 'style', path, set: { 'line-height': lh } });
   commit(ops);
+  post({ ol: 'textPending', on: false });
 }
 
 /** end retyping: what was typed sent, the element shown as the text has it (math typeset) */
-export function stopText(): void {
+export function stopText(save = true): void {
   if (!editing) return;
   closeChip();
-  commitText(true);
+  if (save) commitText(true);
+  else {
+    if (editTimer) { clearTimeout(editTimer); editTimer = null; }
+    post({ ol: 'textPending', on: false });
+  }
   const el = editing;
   editing = null;
   guard.editing = null;
@@ -2404,6 +2657,7 @@ export function stopText(): void {
   const src = srcOf.get(el);
   if (src && el.isConnected) {
     el.innerHTML = src.innerHTML;
+    if (window.__OL?.assetUrls) mapAssets(el, window.__OL.assetUrls, document.baseURI);
     // (its elements paired with the source's: else the next version would add them again beside these)
     linkTree(el, src);
     renderCites([el]);
@@ -2419,9 +2673,20 @@ export function stopText(): void {
 
 export function isEditingText(): boolean { return !!editing; }
 
+/** A host-forwarded Escape follows the focused canvas context, including math, crop and nodes. */
+export function escapeCanvas(shift = false): void {
+  (document.activeElement ?? document).dispatchEvent(new KeyboardEvent('keydown', {
+    key: 'Escape', code: 'Escape', shiftKey: shift, bubbles: true, cancelable: true,
+  }));
+}
+
 /** what a new comment is on, to the editor (the text being retyped and its selected words, the selection, the slide) */
 export function newComment(): void {
-  commentTarget(editing, selection(), visibleSlideEl());
+  const target = captureCommentTarget(editing, selection(), visibleSlideEl());
+  // Finish and release the old text/selection owner before the host focuses its comment draft.
+  // The target and quote were captured above; pending text commits precede the comment message.
+  stopText();
+  post(target);
 }
 
 /** the caret is in code (a $ there is a dollar) */
@@ -2435,7 +2700,16 @@ function inCode(): boolean {
 
 function onKeyDown(e: KeyboardEvent): void {
   if (isCropping() || isNodeEditing()) return;
-  if (drawAhead && !editing && !e.ctrlKey && !e.metaKey && !e.altKey && (e.key.length === 1 || e.key === 'Backspace' || e.key === 'Enter')) { e.preventDefault(); drawAhead.push(keyPress(e)); return; }
+  // Shadow-root focus retargets to the overlay host. A pending text receiver is
+  // still a text context: composing or deleting there must never delete the old selection.
+  if (drawAhead && !editing) {
+    if (drawComposing || e.isComposing) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === 'Tab') { e.preventDefault(); return; }
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && (e.key.length === 1 || ['Backspace', 'Delete', 'Enter', 'ArrowLeft', 'ArrowRight'].includes(e.key))) {
+      e.preventDefault(); rememberDrawKeys([keyPress(e)]); return;
+    }
+  }
   if (isPenDrawing() && penKey(e)) { e.preventDefault(); e.stopPropagation(); return; }
   if (isOrdering() && e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); stopOrdering(); return; }
   const mod = e.ctrlKey || e.metaKey;
@@ -2444,6 +2718,16 @@ function onKeyDown(e: KeyboardEvent): void {
     if (chipOpening() && !isModifierKey(e)) { e.preventDefault(); holdKey(keyPress(e)); return; }
     // the formula editor gave the keyboard back (it left the formula): typed once the caret is beside the formula
     if (openChipEl() && !isModifierKey(e)) { e.preventDefault(); holdAfter(keyPress(e)); return; }
+    // A native End/Home can put Firefox's caret inside a noneditable MathJax SVG.
+    // Recover before its next editing key; never disturb an in-progress composition.
+    if (!e.isComposing && !isModifierKey(e)) recoverChipCaret(editing, e.key === 'ArrowRight' || e.key === 'Delete' || e.key === 'Home' ? 'before' : 'after');
+    // In Firefox a focused live slide textbox can receive Ctrl+End without moving
+    // its native caret. Honor the textbox boundary explicitly, including selection
+    // extension, so subsequent typing cannot silently land inside an earlier word.
+    if (mod && !e.altKey && !e.isComposing && (e.key === 'Home' || e.key === 'End')) {
+      if (textBoundary(editing, e.key === 'End', e.shiftKey)) e.preventDefault();
+      return;
+    }
     if (e.key === 'Escape') { e.preventDefault(); stopText(); return; }
     // Alt+↑ / Alt+↓: the list item the caret is in moves up / down (as in documents)
     if (e.altKey && !mod && !e.shiftKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown') && stepItem(e.key === 'ArrowUp' ? -1 : 1)) { e.preventDefault(); return; }
@@ -2477,7 +2761,7 @@ function onKeyDown(e: KeyboardEvent): void {
     // text — the browser moved the focus out of the frame, and the next words went into the speaker notes
     if (e.key === 'Tab' && !mod && !e.altKey) {
       e.preventDefault();
-      if (getSelection()?.anchorNode?.parentElement?.closest('li')) exec(e.shiftKey ? 'outdent' : 'indent');
+      if (textListItem(editing, getSelection()?.anchorNode)) exec(e.shiftKey ? 'outdent' : 'indent');
       return;
     }
     // Enter in a text box that is a paragraph or a heading: a line break — a paragraph inside it would be
@@ -2500,13 +2784,7 @@ function onKeyDown(e: KeyboardEvent): void {
   const free = selected.filter(s => !isLocked(s));
   if ((e.key === 'Delete' || e.key === 'Backspace') && selected.length) {
     e.preventDefault();
-    const paths = free.map(pathOf).filter((p): p is Path => !!p);
-    if (!paths.length) return;
-    // (the groups they were in fitted to what is left — before the removal, while the paths hold)
-    const refit = refitGroups(free, new Set(free));
-    selected = selected.filter(isLocked);
-    report();
-    commit([...refit, { t: 'remove', paths }]);
+    removeSelected();
     return;
   }
   if (e.key === 'Enter' && selected.length === 1 && canType(selected[0])) { e.preventDefault(); beginText(selected[0] as HTMLElement, null, true); return; }
@@ -2574,6 +2852,7 @@ function fwd(e: KeyboardEvent): void {
 /* the clipboard (clip.ts): with the keyboard in the frame — mostly it is in the editor, which does the same */
 
 function onCopy(e: ClipboardEvent): void {
+  if (drawInput && drawAhead) return;
   if (isCropping()) return;
   if (editing || !selected.length || !e.clipboardData) return;
   const c = clipOf(selected);
@@ -2584,6 +2863,7 @@ function onCopy(e: ClipboardEvent): void {
 }
 
 function onCut(e: ClipboardEvent): void {
+  if (drawInput && drawAhead) return;
   if (isCropping()) return;
   if (editing || !selected.length) return;
   onCopy(e);
@@ -2594,6 +2874,7 @@ function onCut(e: ClipboardEvent): void {
 }
 
 function onPaste(e: ClipboardEvent): void {
+  if (drawInput && drawAhead) return;
   if (isCropping()) return;
   if (editing || !e.clipboardData) return;
   e.preventDefault();

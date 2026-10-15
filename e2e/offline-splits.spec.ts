@@ -7,28 +7,43 @@
  * (the service worker keeps the offline page alive):
  *   OVERLYX_E2E_BASE=http://127.0.0.1:3001 npx playwright test e2e/offline-splits.spec.ts
  */
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page, type WebSocketRoute } from '@playwright/test';
 import { mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { login, collectErrors, adminCredentials, PROJECTS_DIR, shareProject, userCredentials, browserName } from './helpers';
+import * as decoding from 'lib0/decoding';
+import { expectedOfflineAuthConsole, expectedOfflineAuthRequest, expectedOfflineTexConsole, expectedOfflineTexRequest, pairedOfflineTexConsoleCount } from './offline-auth-errors';
 
 const PROJECT = 'admin/e2e-offline-splits';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
 const FILE = `${DIR}/doc.tex`;
+const UNDO_FILE = `${DIR}/delete-undo.tex`;
+const PENDING_FILE = `${DIR}/pending-move.tex`;
+const numbered = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => `w${String(from + i).padStart(3, '0')}`).join(' ');
+const UNDO_PARAGRAPH = 'ORIONA ORIONB ORIONC ORIOND ORIONE $u^2$ ORIONF ORIONG ORIONH ORIONI ORIONJ ORIONK ORIONL.';
 const PARAGRAPH = 'Alpha beta gamma: the encoder $E$ maps keys $k_i$ and values $v_i$ into one space, where every query $q$ meets them before the softmax.';
 
 test.describe.configure({ mode: 'serial' });
 test.beforeAll(() => {
   mkdirSync(DIR, { recursive: true });
   writeFileSync(FILE, `\\documentclass{article}\n\\begin{document}\n${PARAGRAPH}\n\nClosing paragraph stays.\n\\end{document}\n`);
+  writeFileSync(UNDO_FILE, `\\documentclass{article}\n\\begin{document}\n${UNDO_PARAGRAPH}\n\nClosing paragraph stays.\n\\end{document}\n`);
+  writeFileSync(PENDING_FILE, `\\documentclass{article}\n\\begin{document}\n${numbered(1, 6)} $a+b$ ${numbered(7, 14)} $c$ ${numbered(15, 19)} \n\n${numbered(20, 29)} \n\n${numbered(30, 33)} $x^2$ ${numbered(34, 37)} \n\\end{document}\n`);
 });
 test.afterAll(() => { rmSync(DIR, { recursive: true, force: true }); });
 
 const saveState = (page: Page) => page.locator('.statusbar .save-state');
 /** the paragraphs' text, formulas as their LaTeX, without remote cursors */
 const paragraphs = (page: Page) => page.evaluate(() => Array.from(document.querySelectorAll('.lyx-editor > .lyx-par')).map(p => {
+  // Node views render the formula without the static serializer's data-latex
+  // attribute. Read its canonical node value before cloning the paragraph.
+  const formulas = Array.from(p.querySelectorAll('.lyx-math-inline')).map(node => {
+    const latex = (node as HTMLElement & { pmViewDesc?: { node?: { attrs: { latex?: unknown } } } }).pmViewDesc?.node?.attrs.latex;
+    if (typeof latex !== 'string') throw new Error('Inline formula has no canonical LaTeX value');
+    return latex;
+  });
   const c = p.cloneNode(true) as HTMLElement;
   c.querySelectorAll('.ProseMirror-yjs-cursor').forEach(x => x.remove());
-  c.querySelectorAll('.lyx-math-inline').forEach(m => m.replaceWith(` $${m.getAttribute('data-latex') ?? ''}$ `));
+  c.querySelectorAll('.lyx-math-inline').forEach((m, i) => m.replaceWith(` $${formulas[i]}$ `));
   return (c.textContent ?? '').replace(/\s+/g, ' ').trim();
 }).filter(Boolean));
 
@@ -55,6 +70,85 @@ async function deleteWords(page: Page, inPar: string, words: string) {
   await page.keyboard.press('Delete');
   await page.waitForTimeout(80);
 }
+
+test('an in-flight join keeps its visible word order when a coauthor splits its prefix, including typing and reload', async ({ page, context, browser }) => {
+  test.setTimeout(120000);
+  await shareProject(browser, PROJECT, ['u1']);
+  let holdUpdates = false, remoteUpdates = 0;
+  const held: { server: WebSocketRoute; bytes: string | Buffer }[] = [];
+  const isUpdate = (bytes: string | Buffer) => {
+    if (typeof bytes === 'string') return false;
+    const decoder = decoding.createDecoder(bytes);
+    return decoding.readVarUint(decoder) === 0 && decoding.readVarUint(decoder) === 2;
+  };
+  await context.routeWebSocket(url => url.pathname.startsWith('/ws'), client => {
+    const server = client.connectToServer();
+    client.onMessage(bytes => {
+      if (holdUpdates && isUpdate(bytes)) held.push({ server, bytes });
+      else server.send(bytes);
+    });
+    server.onMessage(bytes => {
+      if (holdUpdates && isUpdate(bytes)) remoteUpdates++;
+      client.send(bytes);
+    });
+  });
+  const errors = collectErrors(page);
+  const other = await browser.newContext({ viewport: { width: 1200, height: 800 } });
+  try {
+    await login(page);
+    await page.goto('/#/' + `${PROJECT}/pending-move.tex`);
+    await expect(saveState(page)).toHaveText(/All changes saved/, { timeout: 30000 });
+    const page2 = await other.newPage(), errors2 = collectErrors(page2);
+    await login(page2, userCredentials('u1'));
+    await page2.goto('/#/' + `${PROJECT}/pending-move.tex`);
+    await expect(saveState(page2)).toHaveText(/All changes saved/, { timeout: 30000 });
+    holdUpdates = true;
+    await caretBefore(page, 'w020', 'w020');
+    await page.keyboard.press('Backspace');
+    // TeX discards paragraph-end blanks; type the word separator at the join.
+    await page.keyboard.press('Space');
+    await expect.poll(async () => (await paragraphs(page)).length).toBe(2);
+    await expect.poll(() => held.length).toBeGreaterThan(0);
+    const local = await paragraphs(page);
+    await caretBefore(page2, 'w001', 'w013');
+    await page2.keyboard.press('Enter');
+    await expect(saveState(page2)).toHaveText(/All changes saved/, { timeout: 15000 });
+    await expect.poll(() => remoteUpdates).toBeGreaterThan(0);
+    expect(await paragraphs(page)).toEqual(local);
+    await caretBefore(page, 'w001', 'w018');
+    await page.keyboard.type('PENDING ');
+    const pending = (await paragraphs(page)).join(' ');
+    expect(pending).toContain('w017 PENDING w018');
+    expect(pending.indexOf('w013')).toBeLessThan(pending.indexOf('w029'));
+    holdUpdates = false;
+    for (const packet of held.splice(0)) packet.server.send(packet.bytes);
+    await expect(saveState(page)).toHaveText(/All changes saved/, { timeout: 30000 });
+    await expect.poll(async () => JSON.stringify(await paragraphs(page2))).toBe(JSON.stringify(await paragraphs(page)));
+    const final = await paragraphs(page), text = final.join(' ');
+    expect(final).toHaveLength(3);
+    expect(final[0]).toMatch(/^w001.*w012$/);
+    expect(final[1]).toMatch(/^w013.*w029$/);
+    expect(final[2]).toMatch(/^w030.*w037$/);
+    const tokens = text.split(/[\s$]+/);
+    let previous = -1;
+    for (let i = 1; i <= 37; i++) {
+      const word = `w${String(i).padStart(3, '0')}`;
+      expect(tokens.filter(token => token === word), word).toHaveLength(1);
+      expect(tokens.indexOf(word), word).toBeGreaterThan(previous);
+      previous = tokens.indexOf(word);
+    }
+    expect(tokens.filter(token => token === 'PENDING')).toHaveLength(1);
+    expect(text.match(/\$([^$]+)\$/g)).toEqual(['$a+b$', '$c$', '$x^2$']);
+    await expect.poll(() => readFileSync(PENDING_FILE, 'utf8')).toContain('w017 PENDING w018');
+    await page.reload(); await page2.reload();
+    await expect(saveState(page)).toHaveText(/All changes saved/, { timeout: 30000 });
+    await expect(saveState(page2)).toHaveText(/All changes saved/, { timeout: 30000 });
+    expect(await paragraphs(page)).toEqual(final);
+    expect(await paragraphs(page2)).toEqual(final);
+    expect(errors.filter(error => !/favicon/.test(error))).toEqual([]);
+    expect(errors2.filter(error => !/favicon/.test(error))).toEqual([]);
+  } finally { await other.close(); }
+});
 
 test('both press Enter in one paragraph, one of them offline, and type in both halves: every word once, both splits hold', async ({ page, context, browser }) => {
   test.skip(browserName(page) === 'webkit', 'Playwright WebKit opens WebSockets while emulated offline (offline.spec)');
@@ -127,4 +221,116 @@ test('both press Enter in one paragraph, one of them offline, and type in both h
   expect(errors.filter(e => !/favicon|ERR_INTERNET_DISCONNECTED|Failed to fetch|NetworkError when attempting|Load failed|WebSocket|can’t establish a connection to the server at ws|connection to ws:\/\/\S+ was interrupted/.test(e))).toEqual([]);
   expect(errors2.filter(e => !/favicon/.test(e))).toEqual([]);
   await other.close();
+});
+
+test('offline deletion follows a coauthor split and remains undoable and redoable at the moved position', async ({ page, context, browser }, info) => {
+  test.setTimeout(120000);
+  const coauthor = userCredentials('u1');
+  await shareProject(browser, PROJECT, ['u1']);
+  let intentionallyOffline = false, offlineAuthConsoleErrors = 0, offlineAuthRequests = 0, offlineTexConsoleErrors = 0;
+  const offlineTexConsoleUrls: string[] = [], offlineTexFailedGetUrls: string[] = [];
+  const origin = () => new URL(page.url()).origin;
+  page.on('requestfailed', request => {
+    if (expectedOfflineAuthRequest(request, origin(), intentionallyOffline)) offlineAuthRequests++;
+    else if (expectedOfflineTexRequest(request, origin(), intentionallyOffline)) offlineTexFailedGetUrls.push(request.url());
+  });
+  // Closing and rejecting the document socket makes the offline boundary
+  // deterministic even in engines that keep WebSockets alive in offline mode.
+  let blockSocket = false;
+  const channels = new Set<{ client: WebSocketRoute; server: WebSocketRoute }>();
+  await context.routeWebSocket(url => url.pathname.startsWith('/ws'), async client => {
+    if (blockSocket) { await client.close(); return; }
+    const server = client.connectToServer();
+    const channel = { client, server }; channels.add(channel);
+    client.onClose(async () => { channels.delete(channel); await server.close(); });
+  });
+  const errors = collectErrors(page, { allowConsole: message => {
+    if (expectedOfflineAuthConsole(message, origin(), intentionallyOffline)) { offlineAuthConsoleErrors++; return true; }
+    if (!expectedOfflineTexConsole(message, origin(), intentionallyOffline)) return false;
+    offlineTexConsoleErrors++;
+    offlineTexConsoleUrls.push(message.location().url);
+    return true;
+  } });
+  await login(page);
+  await page.goto('/#/' + `${PROJECT}/delete-undo.tex`);
+  await page.waitForSelector('.lyx-editor .lyx-par', { timeout: 30000 });
+  await expect(saveState(page)).toHaveText(/All changes saved/, { timeout: 15000 });
+
+  const other = await browser.newContext({ viewport: { width: 1200, height: 800 } });
+  try {
+    const page2 = await other.newPage();
+    const errors2 = collectErrors(page2);
+    await login(page2, coauthor);
+    await page2.goto('/#/' + `${PROJECT}/delete-undo.tex`);
+    await page2.waitForSelector('.lyx-editor .lyx-par', { timeout: 30000 });
+    await expect(saveState(page2)).toHaveText(/All changes saved/, { timeout: 15000 });
+
+    blockSocket = true;
+    await Promise.all([...channels].map(async ({ client, server }) => { await client.close(); await server.close(); }));
+    intentionallyOffline = true;
+    await context.setOffline(true);
+    await expect(saveState(page)).toHaveText(/Offline/, { timeout: 15000 });
+    await deleteWords(page, 'ORIONA', 'ORIONC ');
+    await expect(saveState(page)).toHaveText(/kept on this device/, { timeout: 15000 });
+    // The shorter prefix, including the deleted word, moves to a new copy.
+    await caretBefore(page2, 'ORIONA', 'ORIONE');
+    await page2.keyboard.press('Enter');
+    await expect(saveState(page2)).toHaveText(/All changes saved/, { timeout: 15000 });
+    await expect.poll(() => paragraphs(page2)).toEqual([
+      'ORIONA ORIONB ORIONC ORIOND',
+      'ORIONE $u^2$ ORIONF ORIONG ORIONH ORIONI ORIONJ ORIONK ORIONL.',
+      'Closing paragraph stays.',
+    ]);
+    expect(readFileSync(UNDO_FILE, 'utf8')).toContain('ORIONC');
+
+    blockSocket = false;
+    intentionallyOffline = false;
+    await context.setOffline(false);
+    const verify = async (restored: boolean) => {
+      const expected = [
+        restored ? 'ORIONA ORIONB ORIONC ORIOND' : 'ORIONA ORIONB ORIOND',
+        'ORIONE $u^2$ ORIONF ORIONG ORIONH ORIONI ORIONJ ORIONK ORIONL.',
+        'Closing paragraph stays.',
+      ];
+      for (const editor of [page, page2]) {
+        await expect(saveState(editor)).toHaveText(/All changes saved/, { timeout: 30000 });
+        await expect.poll(() => paragraphs(editor), { timeout: 20000 }).toEqual(expected);
+        expect(await editor.locator('.lyx-editor .lyx-math-inline').evaluateAll(nodes => nodes.map(node => {
+          const latex = (node as HTMLElement & { pmViewDesc?: { node?: { attrs: { latex?: unknown } } } }).pmViewDesc?.node?.attrs.latex;
+          if (typeof latex !== 'string') throw new Error('Inline formula has no canonical LaTeX value');
+          return latex;
+        }))).toEqual(['u^2']);
+      }
+      const tokens = Array.from({ length: 12 }, (_, i) => `ORION${String.fromCharCode(65 + i)}`).filter(token => restored || token !== 'ORIONC');
+      await expect.poll(() => readFileSync(UNDO_FILE, 'utf8').match(/\bORION[A-L]\b/g) ?? [], { timeout: 20000 }).toEqual(tokens);
+      const saved = readFileSync(UNDO_FILE, 'utf8');
+      expect(saved.match(/\$u\^2\$/g)).toEqual(['$u^2$']);
+      expect(saved.indexOf('ORIONE')).toBeLessThan(saved.indexOf('$u^2$'));
+      expect(saved.indexOf('$u^2$')).toBeLessThan(saved.indexOf('ORIONF'));
+      expect(saved).toContain('Closing paragraph stays.');
+    };
+    await verify(false);
+    // Keep this page open: its own UndoManager must follow the remote split.
+    await caretBefore(page, 'ORIONA', 'ORIOND');
+    await page.keyboard.press('Control+z');
+    await verify(true);
+    await info.attach('deletion-restored-after-remote-split', { body: await page.screenshot(), contentType: 'image/png' });
+    await page.keyboard.press('Control+y');
+    await verify(false);
+    await page.reload();
+    await page.waitForSelector('.lyx-editor .lyx-par', { timeout: 30000 });
+    await verify(false);
+    const pairedTexConsoleErrors = pairedOfflineTexConsoleCount(offlineTexConsoleUrls, offlineTexFailedGetUrls);
+    expect(pairedTexConsoleErrors, 'each allowed offline TeX console error has its same-URL failed GET').toBe(offlineTexConsoleErrors);
+    await info.attach('expected-offline-tex-source-errors', { body: JSON.stringify({ consoleErrors: offlineTexConsoleErrors, failedGets: offlineTexFailedGetUrls.length, paired: pairedTexConsoleErrors }), contentType: 'application/json' });
+    expect(offlineAuthConsoleErrors, 'allowed offline auth console errors have matching GET requestfailed events').toBeLessThanOrEqual(offlineAuthRequests);
+    await info.attach('expected-offline-auth-errors', { body: JSON.stringify({ consoleErrors: offlineAuthConsoleErrors, failedGetRequests: offlineAuthRequests }), contentType: 'application/json' });
+    expect(errors.filter(error => !/favicon|ERR_INTERNET_DISCONNECTED|Failed to fetch|NetworkError when attempting|Load failed|WebSocket|can’t establish a connection to the server at ws|connection to ws:\/\/\S+ was interrupted/.test(error))).toEqual([]);
+    expect(errors2.filter(error => !/favicon/.test(error))).toEqual([]);
+  } finally {
+    blockSocket = false;
+    intentionallyOffline = false;
+    await context.setOffline(false);
+    await other.close();
+  }
 });

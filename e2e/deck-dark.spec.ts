@@ -156,7 +156,10 @@ test('a layout document in the dark theme: dark grey canvas, pages smart-inverte
 async function shownPixel(page: Page, sel: string, x: number, y: number): Promise<number[]> {
   const shot = (await page.locator(sel).screenshot()).toString('base64');
   return page.evaluate(async ([b64, x, y]) => {
-    const bmp = await createImageBitmap(await (await fetch('data:image/png;base64,' + b64)).blob());
+    // Decode the screenshot locally: the production CSP intentionally forbids
+    // data: fetches through connect-src, while permitting data: images.
+    const bytes = Uint8Array.from(atob(String(b64)), char => char.charCodeAt(0));
+    const bmp = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
     const c = document.createElement('canvas'); c.width = bmp.width; c.height = bmp.height;
     const g = c.getContext('2d')!; g.drawImage(bmp, 0, 0);
     const k = devicePixelRatio || 1;

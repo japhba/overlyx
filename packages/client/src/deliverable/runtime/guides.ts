@@ -6,7 +6,7 @@
  * slide. A guide is taken before the object under it when the pointer is right on it (4 px; a finger
  * 10), so that one over a picture that fills the slide can be moved too.
  */
-import { GUIDES_ATTR, parseGuides, masterGuides, formatGuides, movedGuide, withoutGuide, guideLabel, type Guide } from '../guides';
+import { GUIDES_ATTR, LAYOUT_MARGINS_ATTR, parseGuides, masterGuides, layoutMarginGuides, formatGuides, movedGuide, withoutGuide, guideLabel, type Guide } from '../guides';
 import type { HtmlOp } from '../protocol';
 import { docRect, pathOf, srcPath, srcOf, state, slides, slideOf, isForeign } from './env';
 import { isSolo, soloIndex } from './solo';
@@ -43,6 +43,11 @@ function frameOf(slide: HTMLElement) {
  */
 const masterAttr = (): string | null => state.src?.body?.getAttribute(GUIDES_ATTR) ?? null;
 const ownAttr = (slide: Element): string | null => (srcOf.get(slide) ?? slide).getAttribute(GUIDES_ATTR);
+const layoutAttr = (slide: Element): string | null => {
+  const source = srcOf.get(slide) ?? slide;
+  if (source.hasAttribute(LAYOUT_MARGINS_ATTR)) return source.getAttribute(LAYOUT_MARGINS_ATTR);
+  return state.src?.body?.getAttribute(LAYOUT_MARGINS_ATTR) ?? document.body.getAttribute(LAYOUT_MARGINS_ATTR);
+};
 
 /** the master's guides and the slide's own (one of each place) */
 export function guidesOf(slide: HTMLElement): SlideGuide[] {
@@ -52,12 +57,18 @@ export function guidesOf(slide: HTMLElement): SlideGuide[] {
   return [...master, ...own.filter(o => !master.some(m => m.axis === o.axis && Math.abs(m.at - o.at) < 0.5))];
 }
 
+/** The template's fixed margins: they are shown and snap to objects, never exposed to guide dragging/reset. */
+export function layoutGuidesOf(slide: HTMLElement): Guide[] {
+  const { w, h } = frameOf(slide);
+  return layoutMarginGuides(layoutAttr(slide), w, h);
+}
+
 /** where moved and resized objects snap besides the slide and the other objects (doc px): the guides shown */
 export function guideSnaps(slide: HTMLElement | null): { xs: number[]; ys: number[] } {
   const xs: number[] = [], ys: number[] = [];
   if (!shown || !slide) return { xs, ys };
   const f = frameOf(slide);
-  for (const g of guidesOf(slide)) {
+  for (const g of [...layoutGuidesOf(slide), ...guidesOf(slide)]) {
     if (g.axis === 'x') xs.push(f.r.x + g.at * f.kx); else ys.push(f.r.y + g.at * f.ky);
   }
   return { xs, ys };
@@ -97,6 +108,7 @@ export function moveGuideDrag(x: number, y: number, free: boolean): void {
   if (!m.off && !free) {
     // onto the slide's edges and middle, and the objects' edges and middles, nearby
     const targets = [lo, lo + len / 2, lo + len];
+    for (const g of layoutGuidesOf(m.slide)) if ((vertical && g.axis === 'x') || (!vertical && g.axis === 'y')) targets.push(lo + g.at * k);
     for (const c of Array.from(m.slide.children)) {
       if (isForeign(c)) continue;
       const q = docRect(c);
@@ -131,10 +143,11 @@ export function endGuideDrag(cancel: boolean): void {
 export function guideParts(slide: HTMLElement | null): string {
   if (!shown || !slide || !slide.isConnected) return '';
   const f = frameOf(slide);
-  const line = (g: SlideGuide, at: number, cls: string) => g.axis === 'x'
-    ? `<div class="uguide x ${cls}" style="left:${f.r.x + at * f.kx}px;top:${f.r.y}px;height:${f.r.h}px"></div>`
-    : `<div class="uguide y ${cls}" style="left:${f.r.x}px;top:${f.r.y + at * f.ky}px;width:${f.r.w}px"></div>`;
+  const line = (g: Guide, at: number, cls: string, title = '') => g.axis === 'x'
+    ? `<div class="uguide x ${cls}" ${title ? `title="${title}"` : ''} style="left:${f.r.x + at * f.kx}px;top:${f.r.y}px;height:${f.r.h}px"></div>`
+    : `<div class="uguide y ${cls}" ${title ? `title="${title}"` : ''} style="left:${f.r.x}px;top:${f.r.y + at * f.ky}px;width:${f.r.w}px"></div>`;
   const parts: string[] = [];
+  for (const g of layoutGuidesOf(slide)) parts.push(line(g, g.at, 'layout', 'Fixed layout margin'));
   const m = moving && moving.slide === slide ? moving : null;
   for (const g of guidesOf(slide)) {
     if (m && !m.copy && g.axis === m.g.axis && g.own === m.g.own && Math.abs(g.at - m.g.at) < 0.5) continue;
@@ -155,6 +168,7 @@ export const GUIDES_CSS = `
   .uguide.y { height: 0; border-top: calc(1px * var(--s)) solid; }
   .uguide.master { border-color: #e8833a; border-style: dashed; }
   .uguide.own { border-color: #14a3b8; }
+  .uguide.layout { border-color: #8b6fbd; border-style: dotted; }
   .uguide.moving { border-style: solid; }
   .uguide.off { opacity: .35; }
   .ulabel { position: absolute; transform: translate(calc(12px * var(--s)), calc(12px * var(--s))); background: #333; color: #fff; padding: calc(2px * var(--s)) calc(6px * var(--s)); border-radius: calc(3px * var(--s)); white-space: nowrap; pointer-events: none; font: 500 calc(11px * var(--s)) / 1.3 system-ui, -apple-system, sans-serif; }

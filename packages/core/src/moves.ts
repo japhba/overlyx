@@ -35,7 +35,7 @@ export const MOVES_ORIGIN = 'moves';
 export const KEPT = 0;
 /** the copy is in another paragraph */
 export const MOVED = 1;
-/** no copy: a formatting mark or attribute value that was taken into account */
+/** no copy: a processed mark/attribute, or a propagated explicit deletion */
 export const HANDLED = 2;
 /** moved by the server next to the copy of its neighbour (a late edit): follows that neighbour, never competes */
 export const PLACED = 3;
@@ -64,6 +64,8 @@ export interface MoveRecord {
    * no late edit. Appended after the entries, so older readers ignore it.
    */
   sv?: Map<number, number>;
+  /** a join removed an old paragraph into another existing paragraph */
+  joined?: boolean;
 }
 
 /** `id` was there for the author of `r` when it wrote the record */
@@ -99,9 +101,12 @@ export function encodeRecord(r: Omit<MoveRecord, 'key'>): Uint8Array {
     if (e[i + 4] < 0) encoding.writeVarUint(enc, 0);
     else { encoding.writeVarUint(enc, ci(e[i + 4]) + 1); encoding.writeVarUint(enc, e[i + 5]); }
   }
-  if (r.sv) {
-    encoding.writeVarUint(enc, r.sv.size);
-    for (const [client, clock] of r.sv) { encoding.writeVarUint(enc, client); encoding.writeVarUint(enc, clock); }
+  if (r.sv || r.joined !== undefined) {
+    encoding.writeVarUint(enc, r.sv?.size ?? 0);
+    for (const [client, clock] of r.sv ?? []) { encoding.writeVarUint(enc, client); encoding.writeVarUint(enc, clock); }
+    // Older v1 readers consume the state vector and ignore trailing metadata.
+    // Preserve unknown (absent) state vectors through the compatibility envelope.
+    if (r.joined !== undefined) encoding.writeVarUint(enc, (r.joined ? 1 : 0) | (r.sv ? 0 : 2));
   }
   return encoding.toUint8Array(enc);
 }
@@ -133,7 +138,12 @@ export function decodeRecord(key: string, bytes: unknown): MoveRecord | null {
       sv = new Map();
       for (let n = decoding.readVarUint(dec); n > 0; n--) { const client = decoding.readVarUint(dec); sv.set(client, decoding.readVarUint(dec)); }
     }
-    return { key, t, server, size, protect, adopt, entries, ...(sv ? { sv } : {}) };
+    let joined: boolean | undefined;
+    if (decoding.hasContent(dec)) {
+      const flags = decoding.readVarUint(dec); joined = !!(flags & 1);
+      if (flags & 2) sv = undefined;
+    }
+    return { key, t, server, size, protect, adopt, entries, ...(sv ? { sv } : {}), ...(joined !== undefined ? { joined } : {}) };
   } catch { return null; }
 }
 
@@ -350,9 +360,36 @@ export class MoveIndex {
 export function protectMoves(ydoc: Y.Doc): MoveIndex {
   const index = new MoveIndex();
   const map = ydoc.getMap<unknown>(MOVES_MAP);
+  const keepCopiedRuns = (records: Iterable<MoveRecord>) => {
+    // Older records protected only deleted originals. Their copied runs can
+    // themselves be emptied before another author's typing arrives. Retain
+    // those parents in the main document and in persistence-worker mirrors.
+    for (const record of records) {
+      const entries = record.entries;
+      for (let i = 0; i < entries.length; i += 6) {
+        const client = entries[i + 4], clock = entries[i + 5];
+        if (client < 0) continue;
+        forEachStruct(ydoc, client, clock, clock + entries[i + 2], item => {
+          const run = item.parent;
+          if (run instanceof Y.XmlText && run._item) index.protect(run._item.id);
+        });
+      }
+    }
+  };
   index.load(map);
+  keepCopiedRuns(index.records.values());
   // observers run before the transaction's garbage collection
-  map.observe(ev => index.sync(map, ev.keysChanged));
+  map.observe(ev => {
+    index.sync(map, ev.keysChanged);
+    const keys = [...ev.keysChanged];
+    // Pruning rebuilds the index and drops inferred guards. Restore them for
+    // surviving records; additions ordinarily inspect only the new keys.
+    const reloaded = keys.some(key => !map.has(key) && ![...index.records.values()].some(record => record.adopt.includes(key)));
+    keepCopiedRuns(reloaded ? index.records.values() : keys.flatMap(key => {
+      const record = index.records.get(key);
+      return record ? [record] : [];
+    }));
+  });
   const prev = ydoc.gcFilter;
   ydoc.gcFilter = item => !index.keeps(item) && prev(item);
   return index;
@@ -685,6 +722,8 @@ export function recordCopies(tr: Y.Transaction, opts: { containers?: ReadonlySet
     key: `c${doc.clientID}-${Y.getState(doc.store, doc.clientID)}`,
     t: Math.floor((opts.now ?? Date.now()) / 1000), server: false, size,
     protect: [...uniq.values()], adopt: [], entries: out.entries, sv,
+    joined: pairs.some(([source, destination]) => source.cont !== destination.cont && source.cont._item?.deleted
+      && !isNew(source.cont._item.id) && destination.cont._item && !isNew(destination.cont._item.id)),
   };
   doc.getMap(MOVES_MAP).set(rec.key, encodeRecord(rec));
   return rec;
@@ -697,6 +736,40 @@ export function recordCopies(tr: Y.Transaction, opts: { containers?: ReadonlySet
  */
 export function followMoves(ydoc: Y.Doc): () => void {
   const map = ydoc.getMap<unknown>(MOVES_MAP);
+  const keep = (item: Y.Item) => {
+    for (let current: Y.Item | null = item; current; current = current.parent instanceof Y.AbstractType ? current.parent._item : null) current.keep = true;
+  };
+  const beforeUndo = (tr: Y.Transaction) => {
+    const undo = tr.origin;
+    if (!(undo instanceof Y.UndoManager) || !undo.undoing && !undo.redoing) return;
+    const stack = undo.undoing ? undo.undoStack : undo.redoStack;
+    const rebase = (source: ReturnType<typeof Y.createDeleteSet>) => {
+      const out = Y.createDeleteSet();
+      for (const [client, ranges] of source.clients) for (const range of ranges) {
+        for (let clock = range.clock; clock < range.clock + range.len;) {
+          let id = Y.createID(client, clock), len = range.clock + range.len - clock;
+          for (let depth = 0; depth < 64 && Y.getState(ydoc.store, id.client) > id.clock; depth++) {
+            const item = Y.getItem(ydoc.store, id);
+            len = Math.min(len, item.id.clock + item.length - id.clock);
+            if (!(item instanceof Y.Item) || !item.redone) break;
+            id = Y.createID(item.redone.client, item.redone.clock + id.clock - item.id.clock);
+          }
+          const final = Y.getState(ydoc.store, id.client) > id.clock ? Y.getItem(ydoc.store, id) : null;
+          // UndoManager's redoItem returns a redone item immediately, even if
+          // that copy was subsequently deleted. Restore the final tombstone
+          // itself, while an already live copy needs no second insertion.
+          if (!(final instanceof Y.Item) || !final.deleted) id = Y.createID(client, clock);
+          const ranges = out.clients.get(id.client) ?? [];
+          ranges.push({ clock: id.clock, len }); out.clients.set(id.client, ranges);
+          clock += len;
+        }
+      }
+      return Y.mergeDeleteSets([out]);
+    };
+    // Both sets must follow the same copies: text created and deleted in one
+    // capture interval still must not be restored by undoing that interval.
+    for (const item of stack) { item.insertions = rebase(item.insertions); item.deletions = rebase(item.deletions); }
+  };
   const on = (tr: Y.Transaction) => {
     if (tr.local) return;
     const keys = tr.changed.get(map as unknown as Y.AbstractType<any>);
@@ -718,12 +791,21 @@ export function followMoves(ydoc: Y.Doc): () => void {
             const item = Y.getItemCleanStart(tr, Y.createID(sc, k));
             if (!(item instanceof Y.Item)) break;
             if (item.redone === null) item.redone = Y.createID(dc, dk + (k - sk));
+            if (item.keep) {
+              const end = Math.min(sk + len, k + item.length);
+              const startCopy = dk + (k - sk), endCopy = dk + (end - sk);
+              // Keep only this undo range, rather than a whole merged string.
+              if (Y.getState(ydoc.store, dc) > endCopy) Y.getItemCleanStart(tr, Y.createID(dc, endCopy));
+              Y.getItemCleanStart(tr, Y.createID(dc, startCopy));
+              forEachStruct(ydoc, dc, startCopy, endCopy, keep);
+            }
             k += item.length;
           }
         } catch { /* a garbage-collected original: nothing to follow */ }
       }
     }
   };
+  ydoc.on('beforeTransaction', beforeUndo);
   ydoc.on('beforeObserverCalls', on);
-  return () => ydoc.off('beforeObserverCalls', on);
+  return () => { ydoc.off('beforeTransaction', beforeUndo); ydoc.off('beforeObserverCalls', on); };
 }

@@ -19,6 +19,10 @@ const PRECACHE = __PRECACHE__;
 /** each MathJax font other than the precached default: its files (assets/mathjax/<font>/) */
 const FONTS = __FONTS__;
 const SHELL = 'overlyx-shell-' + VERSION;
+// Content-hashed public assets remain usable by pages running an earlier build,
+// including pages restored from the back/forward cache. They cannot be retired
+// just because the old shell or its window is no longer visible to this worker.
+const ASSETS = 'overlyx-public-assets';
 const API = 'overlyx-api';
 const API_CACHED = /^\/api\/(auth\/me$|projects$|users\/\d+\/avatar$|docs\/[^/]+\/(meta|versions)$|projects\/[^/]+\/(graphics|file)\/)/;
 
@@ -28,9 +32,61 @@ self.addEventListener('install', (e) => {
 
 self.addEventListener('activate', (e) => {
   e.waitUntil(caches.keys()
-    .then((keys) => Promise.all(keys.filter((k) => k.startsWith('overlyx-shell-') && k !== SHELL).map((k) => caches.delete(k))))
+    .then(async (keys) => {
+      for (const key of keys.filter(k => k.startsWith('overlyx-shell-'))) {
+        // On quota/copy failure keep the old cache as the durable fallback.
+        const copied = await preserveAssets(key).catch(() => false);
+        if (copied && key !== SHELL) await caches.delete(key);
+      }
+    })
     .then(() => self.clients.claim()));
 });
+
+function fingerprintedAsset(req) {
+  const url = new URL(typeof req === 'string' ? req : req.url, self.location.origin);
+  return url.origin === self.location.origin && url.pathname.startsWith('/assets/')
+    && /\/[^/]+-[A-Za-z0-9_-]{8,}\.[A-Za-z0-9]+$/.test(url.pathname);
+}
+
+function usableAsset(req, res) {
+  if (!res?.ok) return false;
+  const path = new URL(typeof req === 'string' ? req : req.url, self.location.origin).pathname;
+  const type = (res.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
+  if (path.endsWith('.js')) return /^(?:text|application)\/(?:javascript|ecmascript)$/.test(type);
+  if (path.endsWith('.css')) return type === 'text/css';
+  return !!type && type !== 'text/html' && type !== 'application/xhtml+xml';
+}
+
+async function preserveAssets(name) {
+  const source = await caches.open(name), assets = await caches.open(ASSETS);
+  for (const req of await source.keys()) {
+    if (!fingerprintedAsset(req)) continue;
+    const res = await source.match(req);
+    if (!usableAsset(req, res)) continue;
+    if (!usableAsset(req, await assets.match(req))) await assets.put(req, res);
+  }
+  return true;
+}
+
+async function publicAsset(req) {
+  const shell = await caches.open(SHELL);
+  const hit = await shell.match(req);
+  if (usableAsset(req, hit)) return hit;
+  if (fingerprintedAsset(req)) {
+    const assets = await caches.open(ASSETS).catch(() => null);
+    const retained = await assets?.match(req);
+    if (usableAsset(req, retained)) return retained;
+    // A quota failure during activation deliberately leaves the old shell.
+    for (const name of await caches.keys()) {
+      if (!name.startsWith('overlyx-shell-') || name === SHELL) continue;
+      const old = await (await caches.open(name)).match(req);
+      if (usableAsset(req, old)) return old;
+    }
+  }
+  const res = await fetch(req);
+  if (usableAsset(req, res)) await shell.put(req, res.clone()).catch(() => {});
+  return res;
+}
 
 self.addEventListener('message', (e) => {
   const files = e.data && e.data.type === 'math-font' ? FONTS[e.data.font] : undefined;
@@ -58,9 +114,9 @@ async function networkFirst(req, cacheName, fallbackUrl) {
   return res;
 }
 
-async function cacheFirst(req, cacheName) {
+async function cacheFirst(req, cacheName, ignoreSearch = false) {
   const cache = await caches.open(cacheName);
-  const hit = await cache.match(req);
+  const hit = await cache.match(req, { ignoreSearch });
   if (hit) return hit;
   const res = await fetch(req);
   if (res.ok) cache.put(req, res.clone()).catch(() => {});
@@ -73,7 +129,10 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith('/pdf/')) return;   // a public PDF link: the file itself, never the app shell
+  // Select the cached opaque response before the navigation's app-shell fallback.
+  if (url.pathname === '/_ol/offline-frame.html') { e.respondWith(cacheFirst(req, SHELL, true)); return; }
   if (req.mode === 'navigate') { e.respondWith(networkFirst(req, SHELL, '/index.html')); return; }
-  if (url.pathname.startsWith('/assets/')) { e.respondWith(cacheFirst(req, SHELL)); return; }
+  if (url.pathname.startsWith('/assets/')) { e.respondWith(publicAsset(req)); return; }
+  if (url.pathname.startsWith('/_ol/')) { e.respondWith(cacheFirst(req, SHELL, true)); return; }
   if (API_CACHED.test(url.pathname)) { e.respondWith(networkFirst(req, API)); return; }
 });

@@ -119,6 +119,20 @@ test('the start screen starts the tour directly; ✕ leaves it; the tour is not 
   await page.locator('.home-card.example [data-start-tour]').click();
   await expect(step(page, 'type')).toBeVisible();
   await page.waitForSelector('.lyx-editor .lyx-par', { timeout: 30000 });
+  // First restart changes App's mode from steps to intro. After starting again,
+  // App is already in intro while Tour has advanced locally: Help must restart
+  // that same mode too, replacing its task/step state rather than resuming it.
+  for (let restart = 0; restart < 2; restart++) {
+    await page.locator('.menubar .menu button', { hasText: 'Help' }).click();
+    await page.locator('.menu-item', { hasText: 'Take the tour' }).click();
+    await expect(step(page, 'intro')).toBeVisible();
+    await expect(page.locator('.tour')).toHaveCount(1);
+    await expect(step(page, 'type')).toHaveCount(0);
+    await expect(step(page, 'intro').locator('details')).not.toHaveAttribute('open', '');
+    await step(page, 'intro').getByRole('button', { name: 'Take the tour', exact: true }).click();
+    await expect(step(page, 'type')).toBeVisible();
+    await expect(done(page)).toHaveCount(0);
+  }
   await page.locator('.tour-close').click();
   await expect(page.locator('.tour')).toHaveCount(0);
   expect(await page.evaluate(() => localStorage.getItem('ol.tour'))).toBe('left');

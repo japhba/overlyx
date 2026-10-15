@@ -15,6 +15,7 @@ import { post } from './env';
 import { typeset, untypeset } from './math';
 import { refreshCites } from './cite';
 import { citeRegExp, hasCite } from '@overlyx/core/html/refs.ts';
+import { bufferedTextHtml } from '../recovery';
 
 /**
  * What a retyped text shows as chips: formulas (\( \), \[ \], $$ $$, environments — equation,
@@ -31,6 +32,8 @@ let seq = 0;
 /** the chip whose formula is open in the editor */
 let open: HTMLElement | null = null;
 let openedAt = 0;
+/** Keep both native and host-returned prose behind the same caret handoff. */
+let closing: { id: number; finish: (stopping?: boolean) => void } | null = null;
 
 export const isChip = (n: Node | null | undefined): n is HTMLElement => n instanceof HTMLElement && n.classList.contains('ol-mathchip');
 
@@ -97,6 +100,9 @@ export function chipify(el: HTMLElement): { chips: HTMLElement[]; ready: Promise
 
 /** a reference or citation put at the caret of the text being retyped (the toolbar's pickers) */
 export function insertRefChip(editing: HTMLElement, src: string): void {
+  // Native End/Home can leave the caret inside an atomic citation/reference.
+  // Picker insertion must use its boundary, or unchip would discard a nested chip.
+  recoverChipCaret(editing, 'after');
   const c = refChip(src);
   const sel = getSelection();
   let r = sel && sel.rangeCount ? sel.getRangeAt(0) : null;
@@ -112,7 +118,12 @@ export function insertRefChip(editing: HTMLElement, src: string): void {
 export function chipText(c: HTMLElement): string {
   if (c.classList.contains('ol-refchip')) return c.dataset.olSrc ?? '';
   const tex = c.dataset.olTex ?? '';
-  if (!tex.trim()) return '';
+  // A newly drawn Formula already has an empty TeX placeholder in the source.
+  // Keep it in the initial before snapshot: dropping it would make a later
+  // incremental edit append its real formula beside a supposedly remote one.
+  // doneChip removes an empty chip when editing finishes; a nonempty original
+  // cleared by its author must still serialize as empty, never resurrected.
+  if (!tex.trim()) return c.dataset.olSrcTex === '' ? c.dataset.olSrc ?? '' : '';
   if (c.dataset.olSrc !== undefined && c.dataset.olSrcTex === tex) return c.dataset.olSrc;
   if (c.dataset.olDelim === 'env') return tex.trim();
   const [a, b] = DELIMS[c.dataset.olDelim ?? '('] ?? DELIMS['('];
@@ -180,6 +191,9 @@ function boxOf(c: HTMLElement): MathBox {
 
 /** the editor opens LyX's formula editor on the chip (`at`: a click there, frame client px) */
 export function openChip(c: HTMLElement, at: { x: number; y: number } | null, where: 'start' | 'end' = 'end', dollar?: '$' | '$$'): void {
+  // Even reopening the same chip must settle the previous close first: its
+  // later render must not close the new field or reset the new caret.
+  closing?.finish();
   if (open && open !== c) closeChip();
   open = c;
   openedAt = performance.now();
@@ -202,14 +216,28 @@ let after: KeyPress[] = [];
 let afterTimer: ReturnType<typeof setTimeout> | null = null;
 export function holdAfter(k: KeyPress): void {
   after.push(k);
-  if (!afterTimer) afterTimer = setTimeout(flushAfter, 600);
+  if (!afterTimer) afterTimer = setTimeout(() => {
+    afterTimer = null;
+    // A slow MathJax render is not permission to type at the old math caret.
+    if (!closing) flushAfter();
+  }, 600);
 }
-/** the keys typed ahead after a formula applied now (a click or a new retyping comes after them) */
-export function flushAfter(): void {
+/** Host-returned keys join native keys rather than a separate Promise queue. */
+export function holdIfLeaving(keys: KeyPress[]): boolean {
+  if (!closing) return false;
+  for (const key of keys) holdAfter(key);
+  return true;
+}
+function takeAfter(): KeyPress[] {
   if (afterTimer) { clearTimeout(afterTimer); afterTimer = null; }
   const keys = after;
   after = [];
-  typeKeysHere(keys, chipHooks.stop);
+  return keys;
+}
+/** A click or new retyping explicitly settles the old caret before moving it. */
+export function flushAfter(): void {
+  if (closing) { closing.finish(); return; }
+  typeKeysHere(takeAfter(), chipHooks.stop);
 }
 /** edit.ts's end of retyping (an Escape typed ahead) */
 export const chipHooks = { stop: () => {} };
@@ -219,7 +247,8 @@ export function typeKeysHere(keys: KeyPress[], stop?: () => void): void {
   const sel = getSelection();
   for (const k of keys) {
     if (k.ctrl || k.meta) continue;
-    if (k.key.length === 1 && !k.alt) document.execCommand('insertText', false, k.key);
+    if (k.text !== undefined) document.execCommand('insertText', false, k.text);
+    else if (k.key.length === 1 && !k.alt) document.execCommand('insertText', false, k.key);
     else if (k.key === 'Backspace') document.execCommand('delete');
     else if (k.key === 'Delete') document.execCommand('forwardDelete');
     else if (k.key === 'Enter') document.execCommand(k.shift ? 'insertLineBreak' : 'insertParagraph');
@@ -260,40 +289,84 @@ async function render(c: HTMLElement, tex: string): Promise<void> {
  * The formula editor left the formula: the chip shown again (gone when the formula was emptied),
  * the caret beside it on the side it was left by. Returns whether the chip is still there.
  */
-export async function doneChip(id: number, tex: string, dir: 'forward' | 'backward' | null, editing: HTMLElement | null, putBack = ''): Promise<boolean> {
-  const c = chipById(id);
-  if (open === c) open = null;
-  if (!c) { post({ ol: 'mathClose', id }); return false; }
-  await render(c, tex);
-  c.removeAttribute('data-ol-mathediting');
-  // the formula is there again: the editor's field can go
-  post({ ol: 'mathClose', id });
-  const keep = !!tex.trim();
-  if (!editing || !editing.contains(c)) { if (!keep) c.remove(); return keep; }
-  editing.focus({ preventScroll: true });
-  const sel = getSelection();
-  if (dir || !keep) {
-    const r = document.createRange();
-    if (keep && dir === 'forward') r.setStartAfter(c); else r.setStartBefore(c);
-    r.collapse(true);
-    if (!keep && putBack) {
-      // Backspace in the empty formula `$` opened: the typed dollar back as text, the caret after it
-      const t = document.createTextNode(putBack);
-      // (the space typed before it was the end of the text then: a browser made it a no-break space)
-      const p = c.previousSibling;
-      if (p?.nodeType === Node.TEXT_NODE && p.nodeValue?.endsWith('\u00a0')) p.nodeValue = p.nodeValue.slice(0, -1) + ' ';
-      c.replaceWith(t);
-      r.setStart(t, putBack.length); r.collapse(true);
-    } else if (!keep) c.remove();
-    sel?.removeAllRanges();
-    sel?.addRange(r);
+export function doneChip(id: number, tex: string, dir: 'forward' | 'backward' | null, editing: HTMLElement | null, putBack = '', rest: KeyPress[] = []): Promise<boolean> {
+  if ((closing && closing.id !== id) || (open && Number(open.dataset.olChip) !== id)) {
+    // A delayed reply from the old field cannot finish the current field's job.
+    const html = bufferedTextHtml(rest);
+    if (html) post({ ol: 'recoveredText', html, reason: 'The formula changed before its following text arrived. Your text was kept here.' });
+    post({ ol: 'mathClose', id });
+    return Promise.resolve(true);
   }
-  flushAfter();
-  return keep;
+  closing?.finish();
+  const c = chipById(id);
+  if (!c) {
+    const keys = open && Number(open.dataset.olChip) === id ? [...rest, ...takeAfter()] : rest;
+    if (open && Number(open.dataset.olChip) === id) open = null;
+    const html = bufferedTextHtml(keys);
+    if (html) post({ ol: 'recoveredText', html, reason: 'The formula was removed before its following text arrived. Your text was kept here.' });
+    post({ ol: 'mathClose', id });
+    return Promise.resolve(false);
+  }
+  // These keys were already typed in the host before it returned focus. Send
+  // them with mathDone so a later native Escape cannot overtake a second message.
+  after.unshift(...rest);
+  const keep = !!tex.trim();
+  let handoffDone!: (keep: boolean) => void;
+  const handoff = new Promise<boolean>(resolve => { handoffDone = resolve; });
+  let settled = false;
+  const job = { id, finish(stopping = false) {
+    if (settled) return;
+    // Clear the barrier before replay: Escape may end retyping recursively.
+    settled = true;
+    if (closing === job) closing = null;
+    if (open === c) open = null;
+    c.removeAttribute('data-ol-mathediting');
+    post({ ol: 'mathClose', id });
+    // This is the caret handoff, not the rendering promise. A click can finish
+    // it while MathJax is still busy: subsequent host keys must not be stranded.
+    handoffDone(keep);
+    const keys = takeAfter();
+    if (!editing || !editing.isConnected || !editing.contains(c)) {
+      if (!keep) c.remove();
+      const html = bufferedTextHtml(keys);
+      if (html) post({ ol: 'recoveredText', html, reason: 'The text box closed before the formula finished. Your following text was kept here.' });
+      return;
+    }
+    editing.focus({ preventScroll: true });
+    const sel = getSelection();
+    if (dir || !keep) {
+      const r = document.createRange();
+      if (keep && dir === 'forward') r.setStartAfter(c); else r.setStartBefore(c);
+      r.collapse(true);
+      if (!keep && putBack) {
+        // Backspace in the empty formula `$` opened: restore the typed dollar.
+        const t = document.createTextNode(putBack);
+        const p = c.previousSibling;
+        if (p?.nodeType === Node.TEXT_NODE && p.nodeValue?.endsWith('\u00a0')) p.nodeValue = p.nodeValue.slice(0, -1) + ' ';
+        c.replaceWith(t);
+        r.setStart(t, putBack.length); r.collapse(true);
+      } else if (!keep) c.remove();
+      sel?.removeAllRanges();
+      sel?.addRange(r);
+    }
+    // closeChip is already inside stopText: an ahead Escape must not reenter it.
+    typeKeysHere(keys, stopping ? undefined : chipHooks.stop);
+  } };
+  closing = job;
+  void render(c, tex).then(() => job.finish(), () => {
+    // Keep the editable source visible and the input path usable even if an
+    // unexpected renderer failure escapes MathJax's ordinary parse fallback.
+    c.removeAttribute('data-ol-texwait');
+    for (const child of c.querySelectorAll('[data-ol-texwait]')) child.removeAttribute('data-ol-texwait');
+    console.warn('Formula rendering failed; the editable TeX was retained.');
+    job.finish();
+  });
+  return handoff;
 }
 
 /** the chip open in the editor: closed without its answer (the retyping ended) */
 export function closeChip(): void {
+  if (closing) { closing.finish(true); return; }
   if (!open) return;
   open.removeAttribute('data-ol-mathediting');
   open = null;
@@ -302,7 +375,7 @@ export function closeChip(): void {
 
 export function openChipEl(): HTMLElement | null { return open && open.isConnected ? open : null; }
 /** a formula opened that LyX's formula editor has not taken yet (keys typed meanwhile are the formula's) */
-export function chipOpening(): boolean { return !!open && open.isConnected && !open.hasAttribute('data-ol-mathediting') && performance.now() - openedAt < 1500; }
+export function chipOpening(): boolean { return !closing && !!open && open.isConnected && !open.hasAttribute('data-ol-mathediting') && performance.now() - openedAt < 1500; }
 
 /** where the open chip is now (the page scrolled, the text reflowed) */
 export function trackChip(): void {
@@ -324,6 +397,7 @@ export function insertChip(editing: HTMLElement, display: boolean, dollar?: '$' 
 
 /** `$$` typed: the open (empty, inline) formula made a displayed one, opened again */
 export function displayChip(id: number): void {
+  closing?.finish();
   const c = chipById(id);
   if (!c || c !== open || c.dataset.olDelim !== '(') return;
   const d = chip('', '[', null);
@@ -350,6 +424,27 @@ export function chipBeside(dir: 'before' | 'after'): HTMLElement | null {
   } else sib = n.childNodes[dir === 'before' ? o - 1 : o] ?? null;
   while (sib && sib.nodeType === Node.TEXT_NODE && !sib.nodeValue) sib = dir === 'before' ? sib.previousSibling : sib.nextSibling;
   return isChip(sib) ? sib : null;
+}
+
+/**
+ * Firefox can put a collapsed End/Home caret inside a generated SVG descendant of a
+ * noneditable chip. Typing there has no input event and silently loses the key. Move
+ * only that invalid caret to the chip boundary before the next native editing action;
+ * ordinary prose selections and a chip opened in the formula editor are unchanged.
+ */
+export function recoverChipCaret(editing: HTMLElement, side: 'before' | 'after'): boolean {
+  const sel = getSelection();
+  if (!sel?.isCollapsed || !sel.rangeCount || !sel.anchorNode) return false;
+  const node = sel.anchorNode;
+  const el = node.nodeType === Node.ELEMENT_NODE ? node as Element : node.parentElement;
+  const c = el?.closest<HTMLElement>('.ol-mathchip, .ol-refchip');
+  if (!c || !c.isConnected || !editing.contains(c)) return false;
+  const range = document.createRange();
+  if (side === 'before') range.setStartBefore(c); else range.setStartAfter(c);
+  range.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(range);
+  return true;
 }
 
 export const CHIP_CSS = `.ol-mathchip { cursor: pointer !important; border-radius: 3px; -webkit-user-select: all; user-select: all; }

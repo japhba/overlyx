@@ -17,6 +17,7 @@
 import { test, expect, type Page, type Frame } from '@playwright/test';
 import { readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { login, collectErrors, fillDialog, BASE_URL, PROJECTS_DIR } from './helpers';
+import { nativeSvgGeometry, sameSvgGeometry, roundSvgPosition } from './native-style-geometry';
 
 const RUN = Date.now().toString(36);
 const NAME = `e2e-decktools-${RUN}`;
@@ -58,7 +59,7 @@ const DECK = `<!doctype html>
 
 const SVG = `<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><script>alert(1)</script><rect id="r1" x="10" y="10" width="80" height="80" fill="#123456" onclick="alert(2)"/><circle cx="150" cy="50" r="40" fill="url(#g)"/><defs><linearGradient id="g"><stop offset="0" stop-color="#f00"/><stop offset="1" stop-color="#00f"/></linearGradient></defs></svg>`;
 // a 2×2 PNG
-const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP4z8DwHwyBNANDzP///wEA8wgD/Y0vVUQAAAAASUVORK5CYII=';
+const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR42mP4z8Dw/z+IYABiAC3gBfvs873ZAAAAAElFTkSuQmCC';
 
 test.describe.configure({ mode: 'serial' });
 test.afterAll(() => rmSync(`${PROJECTS_DIR}/${PROJECT}`, { recursive: true, force: true }));
@@ -378,6 +379,8 @@ test('the parts of a drawing resized and turned with handles; the Objects pane s
   await page.request.post(BASE_URL + '/api/projects', { data: { name: NAME } });
   await setup(page, LOGO_DECK);
   const transformOf = (id: string) => new RegExp(`id="${id}"[^>]*transform="([^"]*)"`).exec(fileText())?.[1] ?? '';
+  const geometryOf = (id: string) => frameLoc(page).locator(`[id="${id}"]`)
+    .evaluate(nativeSvgGeometry, transformOf(id));
   /** a corner (fx, fy in 0…1) of a part's own box, on the page */
   const corner = async (id: string, fx: number, fy: number) => {
     const fb = (await page.locator('.dl-frame').boundingBox())!;
@@ -391,12 +394,25 @@ test('the parts of a drawing resized and turned with handles; the Objects pane s
   // a letter selected from it: resize handles on its turned box; the se one dragged out
   await rows.filter({ hasText: 'glyph-A' }).click();
   await expect(rows.filter({ hasText: 'glyph-A' })).toHaveClass(/sel/);
+  const beforeResize = await geometryOf('glyph-A');
+  expect(sameSvgGeometry(beforeResize.saved, beforeResize.live)).toBe(true);
   const se = await corner('glyph-A', 1, 1);
   await page.mouse.move(se.x, se.y); await page.mouse.down();
   await page.mouse.move(se.x + 20, se.y + 15, { steps: 4 }); await page.mouse.move(se.x + 40, se.y + 30, { steps: 4 });
   await page.mouse.up();
   await expect.poll(() => transformOf('glyph-A'), { timeout: 15000 }).not.toContain('scale(0.03)');
-  expect(transformOf('glyph-A')).toMatch(/^translate\([\d.]+ [\d.]+\) rotate\(-12\) scale\([\d.]+ [\d.]+\) translate\(-250 -350\)$/);
+  await expect.poll(async () => {
+    const geometry = await geometryOf('glyph-A');
+    return {
+      savedMatchesLive: sameSvgGeometry(geometry.saved, geometry.live),
+      angle: geometry.saved.angle,
+      growsX: geometry.saved.sx > beforeResize.saved.sx,
+      growsY: geometry.saved.sy > beforeResize.saved.sy,
+      positiveX: geometry.saved.centerX > 0, positiveY: geometry.saved.centerY > 0,
+    };
+  }, { timeout: 15000 }).toEqual({ savedMatchesLive: true, angle: -12,
+    growsX: true, growsY: true, positiveX: true, positiveY: true });
+  const resized = await geometryOf('glyph-A');
   // a click on it again: rotation arrows; the ne one dragged round clockwise
   const c = await corner('glyph-A', 0.5, 0.5);
   await page.mouse.click(c.x, c.y);
@@ -406,12 +422,28 @@ test('the parts of a drawing resized and turned with handles; the Objects pane s
   await page.mouse.move(ax, ay); await page.mouse.down();
   await page.mouse.move(ax + 30, ay + 40, { steps: 5 }); await page.mouse.move(ax + 40, ay + 90, { steps: 5 });
   await page.mouse.up();
-  await expect.poll(() => transformOf('glyph-A'), { timeout: 15000 }).not.toContain('rotate(-12)');
-  expect(Number(/rotate\((-?[\d.]+)\)/.exec(transformOf('glyph-A'))![1])).toBeGreaterThan(0);
+  await expect.poll(async () => {
+    const geometry = await geometryOf('glyph-A');
+    return {
+      savedMatchesLive: sameSvgGeometry(geometry.saved, geometry.live),
+      clockwise: geometry.saved.angle > 0,
+      sx: geometry.saved.sx, sy: geometry.saved.sy,
+    };
+  }, { timeout: 15000 }).toEqual({ savedMatchesLive: true, clockwise: true,
+    sx: resized.saved.sx, sy: resized.saved.sy });
   // another part moved: its chain of transforms tidied into one
   await rows.filter({ hasText: 'glyph-B' }).click();
+  const beforeMove = await geometryOf('glyph-B');
+  expect(sameSvgGeometry(beforeMove.saved, beforeMove.live)).toBe(true);
+  const expectedMove = { ...beforeMove.saved,
+    centerX: roundSvgPosition(beforeMove.saved.centerX + beforeMove.shiftDown.x),
+    centerY: roundSvgPosition(beforeMove.saved.centerY + beforeMove.shiftDown.y),
+  };
   await page.keyboard.press('Shift+ArrowDown');
-  await expect.poll(() => transformOf('glyph-B'), { timeout: 15000 }).toBe('translate(32 34) scale(0.03) translate(-250 -350)');
+  await expect.poll(async () => {
+    const geometry = await geometryOf('glyph-B');
+    return { saved: geometry.saved, live: geometry.live };
+  }, { timeout: 15000 }).toEqual({ saved: expectedMove, live: expectedMove });
   // dragged onto glyph-B's upper half: glyph-A in front of it (after it in the drawing)
   await rows.filter({ hasText: 'glyph-A' }).dragTo(rows.filter({ hasText: 'glyph-B' }), { targetPosition: { x: 30, y: 3 } });
   await expect.poll(() => fileText().indexOf('id="glyph-A"') > fileText().indexOf('id="glyph-B"'), { timeout: 15000 }).toBe(true);
@@ -462,17 +494,64 @@ test('new shapes, a line drawn backwards, an SVG dropped in and a crop preset', 
   expect(t).toMatch(/<linearGradient id="s[a-z0-9]+-g">/);
   expect(t).toMatch(/fill="url\(#s[a-z0-9]+-g\)"/);
   // one of its shapes selected through the drawing (Ctrl+click) and dragged: a translate of its own
+  const importedRect = frameLoc(page).locator('svg rect[id$="-r1"]');
+  const importedRectId = (await importedRect.getAttribute('id'))!;
+  const persistedRectTransform = () => new RegExp(`id="${importedRectId}"[^>]*transform="([^"]*)"`).exec(fileText())?.[1] ?? '';
+  const importedGeometry = () => importedRect.evaluate(nativeSvgGeometry, persistedRectTransform() || 'matrix(1, 0, 0, 1, 0, 0)');
+  const beforeImportedDrag = await importedGeometry();
+  expect(sameSvgGeometry(beforeImportedDrag.saved, beforeImportedDrag.live)).toBe(true);
   const r = await at(page, 640 - 100 + 50, 300 - 50 + 50);
   await page.keyboard.down('Control');
   await page.mouse.click(r.x, r.y);
   await page.keyboard.up('Control');
+  type ImportedDragInput = { clientDelta: { x: number; y: number } | null; modifiersReleased: boolean };
+  await importedRect.evaluate(() => {
+    const state: ImportedDragInput = { clientDelta: null, modifiersReleased: false };
+    const registry = window as unknown as { __overlyxImportedDragInput?: ImportedDragInput };
+    registry.__overlyxImportedDragInput = state;
+    let start: { x: number; y: number; pointerId: number } | null = null;
+    const down = (event: PointerEvent) => { start = { x: event.clientX, y: event.clientY, pointerId: event.pointerId }; };
+    const move = (event: PointerEvent) => {
+      if (!start || event.pointerId !== start.pointerId) return;
+      state.clientDelta = { x: event.clientX - start.x, y: event.clientY - start.y };
+      state.modifiersReleased = !event.ctrlKey && !event.metaKey && !event.shiftKey;
+    };
+    const up = () => {
+      window.removeEventListener('pointerdown', down, true);
+      window.removeEventListener('pointermove', move, true);
+      window.removeEventListener('pointerup', up, true);
+    };
+    window.addEventListener('pointerdown', down, { capture: true, passive: true, once: true });
+    window.addEventListener('pointermove', move, { capture: true, passive: true });
+    window.addEventListener('pointerup', up, { capture: true, passive: true, once: true });
+  });
   await page.mouse.move(r.x, r.y); await page.mouse.down(); await page.mouse.move(r.x + 40, r.y + 20, { steps: 5 }); await page.mouse.up();
-  await expect.poll(fileText, { timeout: 15000 }).toMatch(/<rect id="s[a-z0-9]+-r1"[^>]*transform="translate\(/);
+  await expect.poll(async () => {
+    const geometry = await importedGeometry();
+    const input = await editFrame(page).evaluate(() =>
+      (window as unknown as { __overlyxImportedDragInput: ImportedDragInput }).__overlyxImportedDragInput);
+    return {
+      savedMatchesLive: sameSvgGeometry(geometry.saved, geometry.live),
+      positiveClientX: !!input.clientDelta && input.clientDelta.x > 0,
+      positiveClientY: !!input.clientDelta && input.clientDelta.y > 0,
+      modifiersReleased: input.modifiersReleased,
+      movedRight: geometry.saved.centerX > beforeImportedDrag.saved.centerX,
+      movedDown: geometry.saved.centerY > beforeImportedDrag.saved.centerY,
+      angle: geometry.saved.angle, sx: geometry.saved.sx, sy: geometry.saved.sy,
+    };
+  }, { timeout: 15000 }).toEqual({ savedMatchesLive: true, positiveClientX: true, positiveClientY: true,
+    modifiersReleased: true, movedRight: true, movedDown: true,
+    angle: beforeImportedDrag.saved.angle, sx: beforeImportedDrag.saved.sx, sy: beforeImportedDrag.saved.sy });
 
   // a picture dropped in, cropped to a square from the toolbar
   await dropFile(page, 'dot.png', 'image/png', PNG, 300, 600);
   await expect.poll(fileText, { timeout: 15000 }).toContain('src="images/dot.png"');
-  await page.waitForTimeout(500);
+  await expect(page.locator('.dl-status')).toHaveText('Saved', { timeout: 15000 });
+  // Upload must select the new picture; a manual canvas click would hide a lost handoff.
+  await expect(slides(page).first().locator(':scope > img')).toHaveCount(1);
+  await expect(slides(page).first().locator(':scope > img')).toBeVisible();
+  await expect(page.locator('.dl-ctx .tb-label', { hasText: /^Picture$/ })).toBeVisible();
+  await expect(page.locator('[data-tb="dk-cropshape"]')).toBeVisible();
   await page.locator('[data-tb="dk-cropshape"]').click();
   await page.locator('[data-palette="dk-cropshape"] .tb-pal-item', { hasText: 'Square 1:1' }).click();
   await expect.poll(fileText, { timeout: 15000 }).toContain('class="ol-crop"');
@@ -565,13 +644,20 @@ test('Draw: strokes one after the other in the pen\'s colour, the highlighter, t
   expect(real(errors)).toEqual([]);
 });
 
-test("Draw: the pen's settings (GoodNotes'), a ball pen kept for the next visit; a scribble over strokes erases them, over nothing it stays", async ({ page, context }) => {
+test("Draw: the pen's settings (GoodNotes'), a ball pen kept for the next visit; a scribble over strokes erases them, over nothing it stays", async ({ page, context, browserName }) => {
   const errors = collectErrors(page);
   await login(page);
   await setup(page);
   const strokes = () => (fileText().match(/<svg class="ol-ink"/g) ?? []).length;
-  const cdp = await context.newCDPSession(page);
-  const pen = (type: string, x: number, y: number, force: number) => cdp.send('Input.dispatchMouseEvent', { type, x, y, button: 'left', buttons: type === 'mouseReleased' ? 0 : 1, clickCount: 1, force, pointerType: 'pen' });
+  const cdp = browserName === 'chromium' ? await context.newCDPSession(page) : null;
+  const pen = cdp
+    ? (type: string, x: number, y: number, force: number) => cdp.send('Input.dispatchMouseEvent', { type, x, y, button: 'left', buttons: type === 'mouseReleased' ? 0 : 1, clickCount: 1, force, pointerType: 'pen' })
+    : async (type: string, x: number, y: number, _force: number) => {
+      // Native mouse input reaches the same samples; these engines expose no CDP pen force.
+      await page.mouse.move(x, y);
+      if (type === 'mousePressed') await page.mouse.down();
+      else if (type === 'mouseReleased') await page.mouse.up();
+    };
   const mouseLine = async (pts: [number, number][]) => {
     const ps = await Promise.all(pts.map(([x, y]) => at(page, x, y)));
     await page.mouse.move(ps[0].x, ps[0].y); await page.mouse.down();
@@ -593,7 +679,7 @@ test("Draw: the pen's settings (GoodNotes'), a ball pen kept for the next visit;
   await expect(page.locator('[data-tb="dk-ink-pen"]')).toHaveAttribute('title', /^Ball pen/);
   await page.locator('.dl-zoom').click();
   await expect(ps).toHaveCount(0);
-  // drawn with the Pencil, pressed lightly then hard: one even line
+  // Chromium varies native pen pressure; every engine draws the same ball-pen path.
   const p0 = await at(page, 300, 260);
   await pen('mousePressed', p0.x, p0.y, 0.1);
   for (let i = 1; i <= 20; i++) await pen('mouseMoved', p0.x + i * 10, p0.y + Math.sin(i / 3) * 8, 0.1 + 0.8 * i / 20);
@@ -624,7 +710,8 @@ test("Draw: the pen's settings (GoodNotes'), a ball pen kept for the next visit;
   expect(real(errors)).toEqual([]);
 });
 
-test('touch: a pinch zooms smoothly about the fingers, two fingers that pan do not zoom, fingers beside the slide move it too, three fingers undo, a Pencil draws and fingers then move the slide, the resting hand does nothing, a swipe turns the page', async ({ browser }) => {
+test('touch: a pinch zooms smoothly about the fingers, two fingers that pan do not zoom, fingers beside the slide move it too, three fingers undo, a Pencil draws and fingers then move the slide, the resting hand does nothing, a swipe turns the page', async ({ browser, browserName }) => {
+  test.skip(browserName !== 'chromium', "Requires Chromium CDP Input.dispatchTouchEvent for this native gesture; equivalent Firefox/WebKit harness input is not provided.");
   const ctx = await browser.newContext({ baseURL: BASE_URL, hasTouch: true, viewport: { width: 1280, height: 900 } });
   const page = await ctx.newPage();
   const errors = collectErrors(page);
@@ -983,7 +1070,8 @@ test('guides: shown from the slide\'s menu (its middle lines), added where right
   const g = Number(/ x(\d+(?:\.5)?) y/.exec(master()!)![1]);
   // an object moved near it snaps to it (its right edge on the guide)
   await dragFrom(850, 450, 850 + (g - 3 - 900), 450);
-  await expect.poll(() => styleOf('c'), { timeout: 10000 }).toContain(`left: ${g - 100}px`);
+  // Guides/live snapping use half px; saved px coordinates use whole source px.
+  await expect.poll(() => styleOf('c'), { timeout: 10000 }).toContain(`left: ${Math.round(g - 100)}px`);
   await page.keyboard.press('Escape');   // (its quick menu floats over the slide above it)
   // Alt: a copy of the middle line, the original stays
   await dragFrom(640, 650, 320, 650, true);
@@ -997,7 +1085,7 @@ test('guides: shown from the slide\'s menu (its middle lines), added where right
   await menu(1000, 620, 'Reset this slide’s guides to every slide’s');
   await expect.poll(own, { timeout: 10000 }).toBeNull();
   // all reset: the middle lines again (nothing written), one undo brings them back
-  await menu(1000, 620, 'Reset all guides (the slide’s middle lines)');
+  await menu(1000, 620, 'Reset custom guides (the slide’s middle lines)');
   await expect.poll(master, { timeout: 10000 }).toBeNull();
   await page.keyboard.press('Control+z');
   await expect.poll(master, { timeout: 10000 }).not.toBeNull();
@@ -1008,7 +1096,7 @@ test('guides: shown from the slide\'s menu (its middle lines), added where right
     await page.locator(`[data-palette="dk-guides"] [data-guides-item="${item}"]`).click();
   };
   await expect(page.locator('[data-tb="dk-guides"]')).toHaveClass(/active/);
-  await pick('Remove all guides');
+  await pick('Remove custom guides');
   await expect.poll(master, { timeout: 10000 }).toBe('');
   await pick('Add a horizontal guide (every slide)');
   await expect.poll(master, { timeout: 10000 }).toBe('y360');
@@ -1113,7 +1201,8 @@ test('one slide per canvas: fitted edge to edge; the rail, Page Down and a swipe
   expect(real(errors)).toEqual([]);
 });
 
-test('a finger moves a text box on a touch screen', async ({ browser }) => {
+test('a finger moves a text box on a touch screen', async ({ browser, browserName }) => {
+  test.skip(browserName !== 'chromium', "Requires Chromium CDP Input.dispatchTouchEvent for this native gesture; equivalent Firefox/WebKit harness input is not provided.");
   const ctx = await browser.newContext({ baseURL: BASE_URL, hasTouch: true, viewport: { width: 1280, height: 900 } });
   const page = await ctx.newPage();
   const errors = collectErrors(page);
@@ -1133,7 +1222,8 @@ test('a finger moves a text box on a touch screen', async ({ browser }) => {
   await ctx.close();
 });
 
-test('a finger swiped over an object turns the page, as in Keynote on an iPad: a tap selects it, held still a moment it is picked up', async ({ browser }) => {
+test('a finger swiped over an object turns the page, as in Keynote on an iPad: a tap selects it, held still a moment it is picked up', async ({ browser, browserName }) => {
+  test.skip(browserName !== 'chromium', "Requires Chromium CDP Input.dispatchTouchEvent for this native gesture; equivalent Firefox/WebKit harness input is not provided.");
   const ctx = await browser.newContext({ baseURL: BASE_URL, hasTouch: true, viewport: { width: 1280, height: 900 } });
   const page = await ctx.newPage();
   const errors = collectErrors(page);
@@ -1264,9 +1354,33 @@ test("formulas on a slide are edited with LyX's formula editor", async ({ page }
   // are the formula's), the closing $ leaves it; an inline formula's editor lies over it too
   await page.mouse.dblclick(t.x, t.y);
   await page.keyboard.press('End');
+  if (process.env.OVERLYX_E2E_MATH_TRACE) {
+    const observe = () => {
+      const events: unknown[] = [];
+      (window as any).__mathHandoffTrace = events;
+      const add = (value: object) => events.push({ time: performance.timeOrigin + performance.now(), ...value });
+      window.addEventListener('message', event => {
+        const m = event.data;
+        if (!m || !/^(?:mathEdit|mathShown|mathSet|mathDone|mathKeys|mathClose|typeKeys|editing|key)$/.test(m.ol)) return;
+        add({ event: 'message', ol: m.ol, id: m.id, dir: m.dir, key: m.key, keys: m.keys?.map((k: any) => ({ key: k.key, text: k.text })) });
+      });
+      document.addEventListener('keydown', event => add({ event: 'keydown', key: event.key, target: (event.target as Element)?.localName }), true);
+      document.addEventListener('input', event => add({ event: 'input', data: (event as InputEvent).data }), true);
+    };
+    await page.evaluate(observe);
+    await editFrame(page).evaluate(observe);
+  }
   await page.keyboard.type(' $x^2$ ok');
   await page.keyboard.press('Escape');
-  await expect.poll(fileText, { timeout: 15000 }).toContain('holds \\(x^{2}\\) ok</p>');
+  try {
+    await expect.poll(fileText, { timeout: 15000 }).toContain('holds \\(x^{2}\\) ok</p>');
+  } finally {
+    if (process.env.OVERLYX_E2E_MATH_TRACE) {
+      const host = await page.evaluate(() => (window as any).__mathHandoffTrace);
+      const frame = await editFrame(page).evaluate(() => (window as any).__mathHandoffTrace);
+      await test.info().attach('math-handoff-events', { body: JSON.stringify({ host, frame }, null, 2), contentType: 'application/json' });
+    }
+  }
   const xf = await at(page, 160, 520, 1);
   await page.mouse.dblclick(xf.x + 20, xf.y);
   await page.keyboard.press('End');
@@ -1365,6 +1479,39 @@ test("LaTeX on slides: a citation from the project's .bib, a numbered equation w
   await page.keyboard.press('Escape');
   await expect.poll(fileText, { timeout: 15000 }).toMatch(/\\citep\{knuth84\}(?: |&nbsp;)*\\eqref\{eq:sum\}/);
 
+  // A picker hands its text back asynchronously. Immediate Escape must save
+  // the selected insertion, including repeated references and modal citations.
+  const inlineSource = () => /<p\b[^>]*\bid="t"[^>]*>([\s\S]*?)<\/p>/.exec(fileText())?.[1] ?? '';
+  const expectedInline = ['\\citep{knuth84}', '\\eqref{eq:sum}'];
+  const checkInline = async () => {
+    await expect(frameLoc(page).locator('#t[data-ol-editing], #t[contenteditable="true"]')).toHaveCount(0);
+    await expect.poll(() => inlineSource().match(/\\(?:citep|eqref)\{[^}]+\}/g) ?? [], { timeout: 15000 }).toEqual(expectedInline);
+    // Only optional native spaces may separate the exact sequence of chips.
+    await expect.poll(() => inlineSource().replace(/(?: |&nbsp;)+/g, ''), { timeout: 15000 }).toBe('Known' + expectedInline.join(''));
+    await expect.poll(() => (fileText().match(/\\eqref\{eq:sum\}/g) ?? []).length, { timeout: 15000 }).toBe(expectedInline.filter(x => x === '\\eqref{eq:sum}').length);
+    await expect.poll(() => (fileText().match(/\\citep\{knuth84\}/g) ?? []).length, { timeout: 15000 }).toBe(expectedInline.filter(x => x === '\\citep{knuth84}').length);
+    await expect(page.locator('.dl-status')).toHaveText('Saved', { timeout: 15000 });
+  };
+  for (let i = 0; i < 10; i++) {
+    await page.mouse.dblclick(t.x, t.y);
+    await page.keyboard.press('End');
+    await page.locator('[data-tb="dk-ref"]').click();
+    await page.locator('.dk-ref-item', { hasText: 'eq:sum' }).click();
+    await page.keyboard.press('Escape');
+    expectedInline.push('\\eqref{eq:sum}');
+    await checkInline();
+  }
+  for (let i = 0; i < 3; i++) {
+    await page.mouse.dblclick(t.x, t.y);
+    await page.keyboard.press('End');
+    await page.locator('[data-tb="dk-cite"]').click();
+    await page.locator('.dialog input[placeholder^="author"]').fill('knuth');
+    await page.locator('.dialog .list div', { hasText: 'knuth84' }).click();
+    await page.locator('[data-cite-insert]').click();
+    await page.keyboard.press('Escape');
+    expectedInline.push('\\citep{knuth84}');
+    await checkInline();
+  }
   // the References tool: the works cited, listed
   await page.locator('[data-tb="dk-references"]').click();
   const r = await at(page, 640, 120, 1);
@@ -1406,6 +1553,13 @@ test("LaTeX on slides: a citation from the project's .bib, a numbered equation w
   await present.keyboard.press('ArrowLeft');
   await expect.poll(() => present.evaluate('location.hash')).toBe('#1');
   await present.close();
+  // Reload after the original presentation checks; prior frame aliases stay valid above.
+  await page.reload();
+  await slides(page).first().waitFor({ timeout: 30000 });
+  await gotoSlide(page, 1);
+  await checkInline();
+  const reloadedFrame = editFrame(page);
+  await expect.poll(() => reloadedFrame.evaluate(`document.querySelectorAll('#t ol-cite').length`)).toBe(4);
   expect(real(errors)).toEqual([]);
 });
 
@@ -1438,11 +1592,75 @@ test('Inkscape: union, editing the points of a path, the Bézier pen', async ({ 
   await page.mouse.dblclick(u.x, u.y);
   await expect(page.locator('[data-tb="dk-node-done"]')).toBeVisible();
   const n0 = await at(page, 100, 400), n1 = await at(page, 60, 360);
-  await page.mouse.move(n0.x, n0.y); await page.mouse.down(); await page.mouse.move(n1.x, n1.y, { steps: 6 }); await page.mouse.up();
-  await expect.poll(fileText, { timeout: 15000 }).toMatch(/[ML]-40 -40[LZ]/);
+  // Native pointer coordinates can be quantized before they enter a scaled iframe.
+  // Observe the delivered input, independently map it with DOMPoint, and require
+  // the edited node to follow it exactly at the path format's two-decimal precision.
+  const observation = await editFrame(page).evaluateHandle(() => {
+    const path = document.querySelector<SVGPathElement>('section.slide > svg > path')!;
+    const before = path.getAttribute('d');
+    const sample = (event: PointerEvent) => {
+      const matrix = path.getScreenCTM()!;
+      const point = new DOMPoint(event.pageX - scrollX, event.pageY - scrollY).matrixTransform(matrix.inverse());
+      return { trusted: event.isTrusted, pointerId: event.pointerId, buttons: event.buttons,
+        page: [event.pageX, event.pageY], scroll: [scrollX, scrollY], local: [point.x, point.y],
+        matrix: [matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f] };
+    };
+    type Sample = ReturnType<typeof sample>;
+    const state = { before, down: null as Sample | null, last: null as Sample | null, up: null as Sample | null, moves: 0 };
+    const down = (event: PointerEvent) => { if (event.button === 0) state.down = sample(event); };
+    const move = (event: PointerEvent) => {
+      if (state.down && event.pointerId === state.down.pointerId && (event.buttons & 1)) {
+        state.last = sample(event); state.moves++;
+      }
+    };
+    const up = (event: PointerEvent) => { if (state.down && event.pointerId === state.down.pointerId) state.up = sample(event); };
+    const options = { capture: true, passive: true };
+    window.addEventListener('pointerdown', down, options);
+    window.addEventListener('pointermove', move, options);
+    window.addEventListener('pointerup', up, options);
+    return { finish: () => {
+      window.removeEventListener('pointerdown', down, options);
+      window.removeEventListener('pointermove', move, options);
+      window.removeEventListener('pointerup', up, options);
+      return state;
+    } };
+  });
+  const finishObservation = () => observation.evaluate(value => value.finish());
+  let nativeDrag: Awaited<ReturnType<typeof finishObservation>>;
+  try {
+    await page.mouse.move(n0.x, n0.y); await page.mouse.down(); await page.mouse.move(n1.x, n1.y, { steps: 6 }); await page.mouse.up();
+    nativeDrag = await finishObservation();
+  } finally {
+    await finishObservation().catch(() => {});
+    await observation.dispose();
+  }
+  expect(nativeDrag.before).toBe(d);
+  expect(nativeDrag.down).not.toBeNull(); expect(nativeDrag.last).not.toBeNull(); expect(nativeDrag.up).not.toBeNull();
+  const down = nativeDrag.down!, last = nativeDrag.last!, up = nativeDrag.up!;
+  expect(down.trusted && last.trusted && up.trusted).toBe(true);
+  expect(down.buttons & 1).toBe(1); expect(last.buttons & 1).toBe(1); expect(up.buttons).toBe(0);
+  expect(last.pointerId).toBe(down.pointerId); expect(up.pointerId).toBe(down.pointerId);
+  expect(nativeDrag.moves).toBeGreaterThan(0);
+  expect(last.matrix).toEqual(down.matrix); expect(up.matrix).toEqual(down.matrix);
+  const delta = [last.local[0] - down.local[0], last.local[1] - down.local[1]];
+  expect(delta.every(Number.isFinite)).toBe(true);
+  expect(delta[0]).toBeLessThan(0); expect(delta[1]).toBeLessThan(0);
+  const round2 = (value: number) => Math.round(value * 100) / 100;
+  const [nx, ny] = delta.map(round2);
+  const expectedPath = d.replace(/([ML])0 0(?=[LZ])/, (_match, command) => `${command}${nx} ${ny}`);
+  expect(expectedPath).not.toBe(d);
+  const savedPath = () => /viewBox="0 0 151 151"><path d="([^"]+)"/.exec(fileText())?.[1];
+  await test.info().attach('node-drag-native-input', { body: JSON.stringify({ ...nativeDrag, expectedNode: [nx, ny] }), contentType: 'application/json' });
+  await expect.poll(savedPath, { timeout: 15000 }).toBe(expectedPath);
+  expect(await editFrame(page).evaluate(() => document.querySelector('section.slide > svg > path')?.getAttribute('d'))).toBe(expectedPath);
+  // The complete path comparison also requires the other seven union corners unchanged.
+  // No stroke: refit pads these known line bounds by .5 in the original 151/151 space.
+  const bx = round2(nx - 0.5), by = round2(ny - 0.5);
+  const bw = round2(151 - nx), bh = round2(151 - ny);
+  const expectedBox = `left: ${round2(100 + bx)}px; top: ${round2(400 + by)}px; width: ${bw}px; height: ${bh}px; overflow: visible" viewBox="${bx} ${by} ${bw} ${bh}"`;
   await page.keyboard.press('Escape');
   await expect(page.locator('[data-tb="dk-node-done"]')).toHaveCount(0);
-  await expect.poll(fileText, { timeout: 15000 }).toMatch(/left: 59\.5px; top: 359\.5px; width: 191px; height: 191px; overflow: visible" viewBox="-40\.5 -40\.5 191 191"/);
+  await expect.poll(fileText, { timeout: 15000 }).toContain(expectedBox);
 
   // a right-click on the drawing: named "SVG" (at its corner, in the toolbar), its menu edits its points
   await page.mouse.click(u.x, u.y, { button: 'right' });

@@ -108,7 +108,7 @@ export class DeliverableServer {
       const mode = (RUNTIME_MODES as readonly string[]).includes(url.searchParams.get('ol') ?? '') ? url.searchParams.get('ol') as RuntimeMode : 'view';
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       res.setHeader('Cache-Control', 'no-store');
-      res.end(injectRuntime(html, runtimeTags(mode, { ...extrasOf(root, rel, html) })));
+      res.end(injectRuntime(html, runtimeTags(mode, { ...extrasOf(root, rel, html), ...((mode === 'edit' || mode === 'thumb') ? { source: html } : {}) })));
       return;
     }
     let st: fs.Stats;

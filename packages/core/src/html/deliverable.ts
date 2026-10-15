@@ -67,6 +67,7 @@ export const DELIVERABLE_GUIDE = `Slide decks, posters and web pages are HTML de
 The conventions OverLyX relies on (everything else is up to you):
 - <meta name="overlyx" content="deck"> in <head> — or content="poster" / "page" — says what it is.
 - Deck: every slide is an element of class "slide", all of one fixed size set in CSS, e.g. .slide { width: 1280px; height: 720px; position: relative; overflow: hidden }. Poster: a single .slide the size of the poster (e.g. width: 841mm; height: 1189mm for A0 portrait). Page: an ordinary responsive web page, no .slide.
+- Optional <body data-ol-layout-margins="72px 96px"> marks a template safe area (CSS margin shorthand: top/right/bottom/left; px, pt, mm, cm, in or %). The editor shows these as fixed purple dotted lines and objects snap to them while editing; unlike guides they cannot be dragged or reset. A slide may override the body's margins with its own data-ol-layout-margins.
 - Write no navigation or presentation code and never hide slides: OverLyX stacks the slides while editing, shows one at a time when presenting, and prints one per PDF page. Speaker notes go in <aside class="notes"> inside the slide (not shown on it).
 - Math: TeX between \\( \\) inline, \\[ \\] or $$ $$ displayed. OverLyX typesets it with MathJax — no script needed. Numbered equations as in LaTeX: \\begin{equation}\\label{eq:name} … \\end{equation} (align etc. too), referred to by \\eqref{eq:name} or \\ref{eq:name} anywhere in the text; numbers count through the whole deck.
 - Macros: <link rel="overlyx-macros" href="../paper/macros.tex"> in <head> gives every formula the \\newcommand / \\def / \\DeclareMathOperator definitions of that .tex file of the project (and of the files it \\inputs) — use the paper's own notation.
@@ -105,7 +106,7 @@ export function starterDeck(title: string): string {
   .bar { background: var(--accent); }
 </style>
 </head>
-<body>
+<body data-ol-layout-margins="72px 96px">
 
 <section class="slide">
   <div class="bar" style="position: absolute; left: 0; top: 0; width: 24px; height: 720px"></div>
@@ -154,7 +155,7 @@ export function starterPoster(title: string): string {
   p { font-size: 30pt; line-height: 1.4; margin: 0 0 10mm; }
 </style>
 </head>
-<body>
+<body data-ol-layout-margins="40mm">
 
 <section class="slide">
   <div class="band" style="position: absolute; left: 0; top: 0; width: 841mm; height: 190mm">

@@ -38,6 +38,8 @@ export interface Prefs {
   darkTone: 'white' | 'sepia' | 'gray';
   /** anonymous usage statistics (usage.ts): which actions are taken and which go wrong — never content or identity */
   usageStats: boolean;
+  /** opt-in content-free beta reliability diagnostics; also requires usageStats and no GPC */
+  betaDiagnostics: boolean;
   /**
    * Build the PDF by itself after the document was saved (Overleaf's auto compile): never, while the
    * PDF pane is shown, or always (keeps a public PDF link current). Web client; a build is a
@@ -66,7 +68,7 @@ export interface Prefs {
   autoCorrectChosen?: boolean;
 }
 
-export const DEFAULT_PREFS: Prefs = { spellcheck: true, spellEngine: 'overlyx', autoCorrect: false, aiButton: false, aiRewrite: false, aiCompleteText: false, aiCompleteMath: false, aiCompleteDelay: 200, darkPages: true, invertFigures: true, aiModel: '', aiCompletionModel: '', darkTone: 'white', usageStats: true, autoBuild: 'shown', autoBuildDelay: 1, editorFont: 'cm', editorMathFont: 'match', shortcutTips: true, mathKeyboard: 'auto', aiInk: false };
+export const DEFAULT_PREFS: Prefs = { spellcheck: true, spellEngine: 'overlyx', autoCorrect: false, aiButton: false, aiRewrite: false, aiCompleteText: false, aiCompleteMath: false, aiCompleteDelay: 200, darkPages: true, invertFigures: true, aiModel: '', aiCompletionModel: '', darkTone: 'white', usageStats: true, betaDiagnostics: false, autoBuild: 'shown', autoBuildDelay: 1, editorFont: 'cm', editorMathFont: 'match', shortcutTips: true, mathKeyboard: 'auto', aiInk: false };
 /** delays that were the default in earlier builds: a stored one of these follows the current default */
 const OLD_DEFAULT_DELAYS = new Set([600, 450]);
 const STORAGE = 'ol.prefs';

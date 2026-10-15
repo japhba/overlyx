@@ -7,6 +7,7 @@ import { api } from './api';
 import { isBenignBrowserError } from './error-reporting';
 import { initUsage, recordUsage, noticeTemplate } from './usage';
 import { currentMathFont, onMathRendererChange } from './editor/lyxmath/mathjax';
+import { warmOfflineResponses } from './offline-warm';
 import './styles.css';
 import 'prosemirror-view/style/prosemirror.css';
 import 'prosemirror-gapcursor/style/gapcursor.css';
@@ -49,15 +50,9 @@ initUsage();   // anonymous usage statistics (usage.ts): the session, screen cha
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   // Requests made before the worker controls the page are not in its cache: once it does, fetch the
   // responses needed to start offline (who am I, project list, metadata of the open document).
-  const warm = () => {
-    const urls = ['/api/auth/me', '/api/projects'];
-    // (the document's id without the hash's view prefix — raw:, text:, pdf: asked for a document that
-    // does not exist, a 403 in the console and nothing cached; a share link names no document)
-    let id = '';
-    try { id = decodeURIComponent(location.hash.replace(/^#\/?/, '').split('?')[0]).replace(/^(raw|text|pdf):/, ''); } catch { /* malformed */ }
-    if (id && !id.startsWith('share/') && id.includes('/')) urls.push(`/api/docs/${encodeURIComponent(id)}/meta`);
-    for (const u of urls) fetch(u, { credentials: 'same-origin' }).catch(() => {});
-  };
+  // The landing page can become controlled before sign-in. Do not warm protected
+  // project/document endpoints with an anonymous session (a real pre-login 401).
+  const warm = () => { void warmOfflineResponses(location.hash); };
   // the math font in use is cached whole (sw.js 'math-font'), by the worker that controls the page — a new one after a deployment starts with an empty cache
   const cacheMathFont = () => navigator.serviceWorker.controller?.postMessage({ type: 'math-font', font: currentMathFont() });
   onMathRendererChange(cacheMathFont);

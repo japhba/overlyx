@@ -1,0 +1,15 @@
+<!doctype html>
+<meta charset="utf-8">
+<script>
+// The response's CSP makes this trusted bootstrap opaque before any document
+// content arrives. Its own navigation creates an intrinsically opaque blob;
+// the host also restores the editor's iframe sandbox before sending content.
+if (self.origin === 'null' && parent !== self) {
+  addEventListener('message', function openOffline(event) {
+    if (event.source !== parent || !event.data || event.data.ol !== 'offlineDocument' || typeof event.data.html !== 'string') return;
+    removeEventListener('message', openOffline);
+    location.replace(URL.createObjectURL(new Blob([event.data.html], { type: 'text/html' })));
+  });
+  parent.postMessage({ ol: 'offlineBoot', opaque: true }, '*');
+}
+</script>

@@ -23,7 +23,7 @@
  * Undo / redo in the pane is our own (codearea.ts, the browser's breaks when the text is
  * regenerated), and the bracket pair at the cursor is marked in the colours.
  */
-import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { EditorView } from 'prosemirror-view';
 import type { Node as PMNode, ResolvedPos } from 'prosemirror-model';
 import type * as Y from 'yjs';
@@ -177,6 +177,9 @@ function offsetNamed(text: string, message: string): number | null {
 /** The LaTeX source beside the document (Ctrl+Alt+S / the "[raw]" tab), with synchronized scrolling, cursor and selection, and live apply. */
 export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose, onSave, fill, style }: { target: SourceTarget | null; tick: number; selTick?: number; /** the formula being edited, if any */ mathField?: LyxMathField | null; onNotify: (msg: string, kind?: 'info' | 'error') => void; onClose?: () => void; onSave?: () => void; /** a pane of the web client's pane row (app/panes.ts): its width comes from there, no own width or grip */ fill?: boolean; style?: Record<string, string | number> }) {
   const [text, setText] = useState('');
+  const [refreshFailed, setRefreshFailed] = useState(false);
+  const refreshFailedRef = useRef(false);
+  const markRefreshFailed = (failed: boolean) => { refreshFailedRef.current = failed; setRefreshFailed(failed); };
   /** the text as typed, ahead of the render (a live apply scheduled by a keystroke must send it, not the previous render's) */
   const textRef = useRef('');
   /** the source map for `textRef.current`: the range of every top-level paragraph, carried through the edits typed (null: none) */
@@ -214,6 +217,23 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
   const selPre = useRef<HTMLPreElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const seq = useRef(0);
+  const targetRef = useRef(target);
+  targetRef.current = target;
+  const sourceOwner = useRef<SourceTarget | null>(target);
+  const sameTarget = (a: SourceTarget | null, b: SourceTarget | null) => !!a && !!b
+    && a.docId === b.docId && a.view === b.view && a.ydoc === b.ydoc;
+  const ownsSource = () => sameTarget(sourceOwner.current, target) && sameTarget(targetRef.current, target);
+  const holdPreviousSource = () => {
+    const note = 'Source belongs to a previous editor. Return to it, or revert to load the current source.';
+    setApplied('held'); setApplyNote(note); setProblems([{ note, at: null }]);
+  };
+  // A response belongs to this target only, including before deferred effects run.
+  useLayoutEffect(() => {
+    seq.current++;
+    if (!textRef.current && !dirtyRef.current) sourceOwner.current = target;
+    markRefreshFailed(!!textRef.current);
+    return () => { seq.current++; };
+  }, [target?.docId, target?.view, target?.ydoc]);
   const undo = useRef(new UndoStack({ value: '', start: 0, end: 0 }));
   /** the textarea's selection while it has the focus (null otherwise) */
   const [sel, setSel] = useState<{ start: number; end: number } | null>(null);
@@ -234,14 +254,14 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
       for (const at of [match.open, match.close]) for (let k = 0; k < match.len; k++) marks.set(at + k, cls);
     }
     // the document cursor as a thin bar before the character at its offset (after the last one of a line)
-    if (curOff !== null && !dirty && text) {
+    if (curOff !== null && !dirty && !refreshFailed && text) {
       marks ??= new Map();
       const at = Math.min(curOff, text.length);
       if (at < text.length && text[at] !== '\n') { if (!marks.has(at)) marks.set(at, 'hl-caret'); }
       else if (at > 0 && text[at - 1] !== '\n' && !marks.has(at - 1)) marks.set(at - 1, 'hl-caret-after');
     }
     return highlightLineList(highlightTexBlocks(text, marks));
-  }, [text, match, curOff, dirty]);
+  }, [text, match, curOff, dirty, refreshFailed]);
   const shownLines = useRef<string[]>([]);
   useEffect(() => {
     const code = pre.current?.firstElementChild as HTMLElement | null;
@@ -263,9 +283,9 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
     const code = pre.current?.firstElementChild as HTMLElement | null;
     if (!code) return;
     code.querySelector('.l.cur')?.classList.remove('cur');
-    const want = dirty ? null : curLine;
+    const want = dirty || refreshFailed ? null : curLine;
     if (want !== null && code.children[want]) code.children[want].classList.add('cur');
-  }, [curLine, dirty, lineHtml]);
+  }, [curLine, dirty, lineHtml, refreshFailed]);
   const updateSel = () => { const el = ta.current; if (el) setSel(document.activeElement === el ? { start: el.selectionStart, end: el.selectionEnd } : null); };
   useEffect(() => {
     const h = () => { if (document.activeElement === ta.current) updateSel(); };
@@ -293,6 +313,9 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
       try { const r = await api.texMap(target.docId); t = r.text; spans = r.spans; }
       catch { t = await api.texText(target.docId); }   // a server without the map
       if (my !== seq.current) return;
+      if (dirtyRef.current || focused.current) { pendingReload.current = true; return; }
+      sourceOwner.current = target;
+      markRefreshFailed(false);
       const el = ta.current;
       const e = editRange(textRef.current, t);
       const s0 = el ? mapOffset(el.selectionStart, e) : 0, s1 = el ? mapOffset(el.selectionEnd, e, el.selectionStart !== el.selectionEnd) : 0;
@@ -301,12 +324,18 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
       setText(t);
       if (el) { el.value = t; try { el.setSelectionRange(Math.min(s0, s1), Math.max(s0, s1)); } catch { /* ignore */ } el.scrollTop = scroll; syncScroll(); }
       undo.current.reset({ value: t, start: s0, end: s1 });
-    } catch (e) { if (my === seq.current) { const msg = '% could not generate source: ' + (e as Error).message; setText(msg); textRef.current = msg; spansRef.current = null; } }
+    } catch {
+      if (my !== seq.current) return;
+      if (dirtyRef.current || focused.current) { pendingReload.current = true; return; }
+      // An unavailable server is not source text: keep the last preview and its history.
+      markRefreshFailed(true);
+    }
   };
   /** the exact map for the text as it stands (after a live apply) — only when the server writes exactly what was typed; else the spans carried along stay */
   const refreshMap = async (forText: string) => {
     if (!target) return;
-    try { const r = await api.texMap(target.docId); if (textRef.current === forText && r.text === forText && r.spans) spansRef.current = r.spans; } catch { /* keep what we have */ }
+    const my = seq.current;
+    try { const r = await api.texMap(target.docId); if (my === seq.current && ownsSource() && textRef.current === forText && r.text === forText && r.spans) spansRef.current = r.spans; } catch { /* keep what we have */ }
   };
 
   // the document settings change the source too (class, packages, the preamble): they live in the
@@ -335,7 +364,7 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
   // the textarea's own selection put there — not while the source is being edited or has the keyboard
   // (then the source leads and the document follows, below)
   useEffect(() => {
-    if (!target || dirty || !text) return;
+    if (!target || dirty || !text || refreshFailedRef.current) return;
     if (caretLock.current > Date.now()) return;   // the document cursor was just set from the source caret
     const el = ta.current;
     if (el && document.activeElement === el) return;
@@ -356,14 +385,15 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
     if (head !== null && el && el.value === text) {
       try { range ? el.setSelectionRange(range.from, range.to, head === range.to ? 'forward' : 'backward') : el.setSelectionRange(head, head); } catch { /* ignore */ }
     }
-  }, [selTick, text, dirty, mathField]);
+  }, [selTick, text, dirty, mathField, refreshFailed]);
   // the other way: the caret / selection in the source (a click, arrow keys, a drag) puts the document's
   // selection at those words and scrolls it into view; the editor keeps drawing it as a mirror while it has no focus
   useEffect(() => {
-    if (!target || !sel || !text) return;
+    if (!target || !sel || !text || refreshFailedRef.current) return;
     const el = ta.current;
     if (!el || document.activeElement !== el) return;
     const t = setTimeout(() => {
+      if (refreshFailedRef.current) return;
       const view = target.view;
       const spans = spansRef.current;
       const blocks = blocksOf(view);
@@ -389,7 +419,12 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
       } catch { /* not a valid position any more */ }
     }, 120);
     return () => clearTimeout(t);
-  }, [sel, text]);
+  }, [sel, text, refreshFailed]);
+  // A stale source preview cannot locate a caret in the current document.
+  useEffect(() => {
+    if (!refreshFailed || !target) return;
+    try { setMirrorCaret(target.view, null); } catch { /* the view may have gone */ }
+  }, [refreshFailed, target?.view]);
   // the mirror caret goes when the pane is left
   useEffect(() => () => { const v = target?.view; if (v && v.dom.isConnected) { try { setMirrorCaret(v, null); } catch { /* ignore */ } } }, [target?.docId]);
   // keep the marked line in view (once it is rendered; lines wrap, so it is measured, not computed)
@@ -400,7 +435,7 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
     if (y < el.scrollTop + h || y + h > el.scrollTop + el.clientHeight - h) scrollSrc(Math.max(0, y - el.clientHeight / 3));
   }, [curLine, lineHtml]);
   // the selection overlay is laid out like the textarea: scroll it along once it exists
-  const overlay = curSel && !dirty && !hasFocus ? curSel : null;
+  const overlay = curSel && !dirty && !hasFocus && !refreshFailed ? curSel : null;
   useEffect(() => { syncScroll(); }, [overlay]);
 
   useEffect(() => { try { localStorage.setItem('ol.source.w', String(Math.round(width))); } catch { /* ignore */ } }, [width]);
@@ -422,6 +457,7 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
    */
   const apply = async (force = false): Promise<boolean> => {
     if (!target) return false;
+    if (!ownsSource()) { holdPreviousSource(); return false; }
     if (inFlight.current) { try { await inFlight.current; } catch { /* reflected below */ } return apply(force); }
     const current = textRef.current;
     // the structure must be sound first (lintTex: braces, environments, $ and \[ \] with their lines; the health
@@ -437,6 +473,7 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
       const request = api.applySource(target.docId, current);
       inFlight.current = request;
       const r = await request;
+      if (!ownsSource()) { holdPreviousSource(); return false; }
       if (textRef.current !== current) { setApplied('waiting'); scheduleApply(); return false; }   // typed on meanwhile: apply again
       markDirty(false);
       setApplied('ok'); setApplyNote(r.warnings.length ? `${r.warnings.length} note${r.warnings.length > 1 ? 's' : ''}` : '');
@@ -458,6 +495,8 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
   const onBlur = () => { focused.current = false; setHasFocus(false); setSel(null); if (pendingReload.current && !dirtyRef.current) { pendingReload.current = false; void load(); } };
   /** the text was edited (typed, an editing key, undo, an AI rewrite): the map follows the edit, the document a moment later */
   const changed = (el: HTMLTextAreaElement, record = true) => {
+    seq.current++;
+    pendingReload.current = true;
     const prev = textRef.current, v = el.value;
     if (record) undo.current.record({ value: v, start: el.selectionStart, end: el.selectionEnd });
     if (spansRef.current) spansRef.current = mapSpans(spansRef.current, editRange(prev, v));
@@ -495,9 +534,11 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
     const own = (side: 'doc' | 'src', value: number): boolean => { const e = expected.current; const mine = e[side] >= 0 && Math.abs(e[side] - value) < 1.5; e[side] = -1; return mine; };
     // document → source
     const onDocScroll = () => {
+      if (refreshFailedRef.current) return;
       if (own('doc', scrollEl.scrollTop)) return;
       cancelAnimationFrame(rafDoc);
       rafDoc = requestAnimationFrame(() => {
+        if (refreshFailedRef.current) return;
         const text = textRef.current;
         if (!text) return;
         const top = scrollEl.getBoundingClientRect().top + 4;
@@ -532,9 +573,11 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
     };
     // source → document
     const onSrcScroll = () => {
+      if (refreshFailedRef.current) return;
       if (own('src', el.scrollTop)) return;
       cancelAnimationFrame(rafSrc);
       rafSrc = requestAnimationFrame(() => {
+        if (refreshFailedRef.current) return;
         const text = textRef.current;
         if (!text) return;
         const lines = lineEls();
@@ -585,6 +628,8 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
         <span class="small-btn active" title="The LaTeX source of the document (its .tex file)">LaTeX</span>
         <span class="name" title={target?.docId}>{name}</span>
         <span style="flex:1" />
+        {refreshFailed && <span class="apply-state error" role="status" data-source-refresh="stale">{ownsSource() ? 'Source preview out of date' : 'Source belongs to a previous editor'}</span>}
+        {refreshFailed && <button class="small-btn" disabled={dirty} onClick={() => { void load(); }} title="Retry the source refresh. Existing text is kept if the server is unavailable.">Retry source</button>}
         {dirty && <span class={'apply-state ' + applied} title={applyNote} data-apply-state={applied}>{applied === 'waiting' ? 'editing…' : applied === 'applying' ? 'applying…' : applied === 'held' ? 'not applied: ' + applyNote : applied === 'error' ? 'not applied: ' + applyNote : ''}</span>}
         {dirty && <button class="small-btn" onClick={revert} title="Drop the edits and regenerate the source from the document">Revert</button>}
         {!dirty && applied === 'ok' && <span class="apply-state ok" data-apply-state="ok" title={applyNote}>applied ✓{applyNote ? ' · ' + applyNote : ''}</span>}

@@ -1,4 +1,5 @@
 import type { LayoutCheck } from '@overlyx/core';
+import { offlineGet } from './offline-api';
 
 export interface User {
   id: number; username: string; name: string; color: string; isAdmin: boolean; avatar?: string | null;
@@ -257,14 +258,24 @@ export const api = {
   /** a new HTML deliverable (deck / poster / web page): the folder `dir` with its index.html */
   newDeliverable: (project: string, dir: string, kind: 'deck' | 'poster' | 'page', title?: string) => req<{ id: string; path: string }>('POST', `/api/projects/${encodeURIComponent(project)}/deliverables`, { dir, kind, title }),
   /** the sandboxed address of a deliverable's folder (server deliverables.ts) */
-  deliverableLink: (project: string, path: string) => req<{ base: string; entry: string; expires: number }>('GET', `/api/projects/${encodeURIComponent(project)}/deliverable-link?path=${encodeURIComponent(path)}`),
+  deliverableLink: async (project: string, path: string) => {
+    const url = `/api/projects/${encodeURIComponent(project)}/deliverable-link?path=${encodeURIComponent(path)}`;
+    let network = false;
+    const link = await offlineGet(API_BASE + url, async () => { const value = await req<{ base: string; entry: string; expires: number }>('GET', url); network = true; return value; });
+    // A cached folder identifies this account's local copy; no server token is
+    // used for an offline srcdoc, so its old expiry must not block local opening.
+    return network ? link : { ...link, expires: 0 };
+  },
   readText: (project: string, path: string) => req<{ text: string; mtime: number; size: number; role: Role }>('GET', `/api/projects/${encodeURIComponent(project)}/text/${path.split('/').map(encodeURIComponent).join('/')}`),
   writeText: (project: string, path: string, text: string, mtime?: number) => req<{ ok: boolean; mtime: number; size: number }>('PUT', `/api/projects/${encodeURIComponent(project)}/text/${path.split('/').map(encodeURIComponent).join('/')}`, mtime !== undefined ? { text, mtime } : { text }),
   upload: (project: string, path: string, file: Blob, opts?: { overwrite?: boolean }) => req<{ ok: boolean; path: string }>('POST', `/api/projects/${encodeURIComponent(project)}/upload?path=${encodeURIComponent(path)}${opts?.overwrite === false ? '&overwrite=0' : ''}`, undefined, file),
   fileOp: (project: string, body: { op: 'rename' | 'delete' | 'mkdir' | 'copy'; from?: string; to?: string }) => req<{ ok: boolean }>('POST', `/api/projects/${encodeURIComponent(project)}/fileops`, body),
-  meta: (id: string) => req<DocMeta>('GET', `/api/docs/${encId(id)}/meta`),
+  meta: (id: string) => {
+    const url = `/api/docs/${encId(id)}/meta`;
+    return offlineGet(API_BASE + url, () => req<DocMeta>('GET', url));
+  },
   /** the document's LaTeX source (what its .tex file contains) */
-  texText: (id: string) => fetch(`${API_BASE}/api/docs/${encId(id)}/tex`).then(r => r.text()),
+  texText: (id: string) => fetch(`${API_BASE}/api/docs/${encId(id)}/tex`).then(async r => { if (!r.ok) throw Object.assign(new Error(`${r.status} ${r.statusText}`), { status: r.status }); return r.text(); }),
   /** the LaTeX source with its source map: the character range of every top-level paragraph (null: the server has none) */
   texMap: (id: string) => req<{ text: string; spans: ({ start: number; end: number } | null)[] | null }>('GET', `/api/docs/${encId(id)}/tex?map=1`),
   /** replace the document by hand-edited LaTeX source */

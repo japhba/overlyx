@@ -7,6 +7,8 @@
 import type { Splice } from '@overlyx/core/html/source.ts';
 import type { Path, PeerInfo, TextCaret } from './protocol';
 import type { MenuItem } from '../editor/contextmenu';
+import type { RuntimeMode } from '@overlyx/core/html/serve.ts';
+import type { AssetUrls } from './offlineassets';
 
 export type { Splice };
 
@@ -14,14 +16,15 @@ export type { Splice };
 export type ChangeOrigin = 'canvas' | 'code' | 'remote';
 
 export type Peer = PeerInfo;
+export interface DeliverableSaveState { pending: boolean; localPending?: boolean; localError?: string; state: 'saved' | 'saving' | 'offline' | 'connecting' | 'stale' }
 
 export interface DeliverableHost {
   /** project-relative path of the page (folder of uploads, the title) */
   readonly path: string;
   /** the text now */
   text(): string;
-  /** splices of the text as it is now, applied as one change (one undo step) */
-  apply(splices: Splice[], origin: 'canvas' | 'code'): void;
+  /** One change; discrete actions get a separate undo step, while typing may continue a group. */
+  apply(splices: Splice[], origin: 'canvas' | 'code', separateUndo?: boolean): void;
   /** after every change of the text */
   onChange(cb: (origin: ChangeOrigin) => void): () => void;
   undo(): void;
@@ -33,8 +36,16 @@ export interface DeliverableHost {
   online(): boolean;
   onStatus(cb: () => void): () => void;
   readOnly(): boolean;
+  /** Confirmed disk-write status (hosts without autosave may omit it). */
+  saveState?(): DeliverableSaveState;
+  onSaveState?(cb: () => void): () => void;
+  discardLocal?(): Promise<void>;
   /** where the page's folder is served to the sandboxed frames: `base` + `entry` + `?ol=<mode>` */
   link(): Promise<{ base: string; entry: string; expires?: number }>;
+  /** A locally rendered sandbox document when its server cannot be reached. */
+  offlineFrame?(mode: RuntimeMode, link?: { base: string; entry: string }): Promise<string | null>;
+  offlineResources?(): Promise<AssetUrls>;
+  onOfflineResources?(callback: (assets: AssetUrls) => void): () => void;
   /** a file put into the project (project-relative path); rejects when the name is taken */
   upload(rel: string, data: Blob): Promise<void>;
   /** a file of the project changed on disk (project-relative path, a version stamp) */

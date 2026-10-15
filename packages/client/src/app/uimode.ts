@@ -5,7 +5,8 @@
  * is all the stylesheet looks at (modern.css); toolbars.tsx builds the Modern row from the same
  * buttons. Kept in this browser (`ol.ui`, applied before the first paint — main.tsx imports this
  * module early) and in the account (users.settings.interface), so a new browser follows the choice;
- * a new account chooses in the welcome card (Tour.tsx), anyone in Settings ▸ Interface or View ▸ Interface.
+ * new accounts start in Modern; the welcome card (Tour.tsx), Settings ▸ Interface and View ▸ Interface
+ * let anyone choose Classic.
  */
 import { useEffect, useState } from 'preact/hooks';
 import { api } from '../api';
@@ -15,15 +16,20 @@ export type UiMode = 'classic' | 'modern';
 const KEY = 'ol.ui';
 const listeners = new Set<() => void>();
 let mode: UiMode = load();
+// A choice made here takes precedence over settings requested before that choice.
+let localChoiceVersion = 0;
 
 function load(): UiMode {
-  try { return localStorage.getItem(KEY) === 'modern' ? 'modern' : 'classic'; } catch { return 'classic'; }
+  try { return localStorage.getItem(KEY) === 'classic' ? 'classic' : 'modern'; } catch { return 'modern'; }
 }
 
 export function uiMode(): UiMode { return mode; }
+export function uiChoiceVersion(): number { return localChoiceVersion; }
 
 /** switch the interface (`save`: also for the account, so other browsers follow) */
 export function setUiMode(m: UiMode, save = true): void {
+  // Even choosing the current mode is an explicit preference. Account adoption is not.
+  if (save) localChoiceVersion++;
   mode = m;
   try { localStorage.setItem(KEY, m); } catch { /* private window */ }
   apply();

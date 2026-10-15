@@ -22,7 +22,7 @@
  *
  * `interface`: how the web app looks for this account — 'classic' (LyX's toolbars) or 'modern' (a
  * Google Docs-like interface whose tools appear as needed), chosen in the welcome card of a new
- * account or in Settings ▸ Interface; null until chosen (the app shows Classic then).
+ * account or in Settings ▸ Interface; null until chosen (the app starts in Modern then).
  */
 import { db } from './db.ts';
 import { config } from './config.ts';

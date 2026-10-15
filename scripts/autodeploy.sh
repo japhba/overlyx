@@ -8,7 +8,7 @@
 #   1. fetches origin; nothing to do when production already is at origin/master;
 #   2. reports a "deploy/overlyx.app" commit status on GitHub (pending → success / failure), so the
 #      pusher sees the outcome with `gh api repos/<repo>/commits/<sha>/status`;
-#   3. checks the commit in a throwaway worktree — client + extension typecheck and `npm test`,
+#   3. checks the commit in a throwaway worktree — both typechecks, strict unit tests and browser workflows,
 #      with the production node_modules unless the lockfile changed;
 #   4. on green: fast-forwards the production checkout, `npm ci` when the lockfile changed, builds
 #      the client, restarts the unit and verifies that the site serves that commit (/api/version).
@@ -23,7 +23,6 @@ STATE=${OVERLYX_AUTODEPLOY_STATE:-/var/lib/overlyx-autodeploy}
 LOCK=${OVERLYX_DEPLOY_LOCK:-/run/lock/overlyx-deploy.lock}
 CONTEXT=deploy/overlyx.app
 export LYX_LAYOUT_DIR=${LYX_LAYOUT_DIR:-/root/lyx/lib/layouts}
-export HOME=${HOME:-/root}
 mkdir -p "$STATE"
 
 log() { printf '%s %s\n' "$(date -u +%H:%M:%S)" "$*"; }
@@ -71,7 +70,7 @@ if [ "$lockfile_changed" = 0 ]; then
   done
 else
   log "lockfile changed: npm ci in the worktree"
-  (cd "$WT" && npm ci --no-audit --no-fund > "$STATE/$target-npm-ci.log" 2>&1) || { status "$target" failure "npm ci failed"; touch "$STATE/failed-$target"; tail -20 "$STATE/$target-npm-ci.log"; exit 1; }
+  (cd "$WT" && npm ci --no-audit --no-fund > "$STATE/$target-npm-ci.log" 2>&1) || { status "$target" failure "npm ci failed"; touch "$STATE/failed-$target"; log "npm ci failed; inspect $STATE/$target-npm-ci.log"; exit 1; }
 fi
 
 check() {   # name command...
@@ -80,7 +79,6 @@ check() {   # name command...
   log "check: $name"
   if ! (cd "$WT" && "$@" > "$logf" 2>&1); then
     log "FAILED: $name — $(wc -l < "$logf") lines in $logf"
-    tail -30 "$logf"
     status "$target" failure "$name failed on the production server"
     touch "$STATE/failed-$target"
     exit 1
@@ -88,22 +86,32 @@ check() {   # name command...
 }
 check "client typecheck" npx tsc -p packages/client/tsconfig.json --noEmit
 check "extension typecheck" npx tsc -p packages/vscode/tsconfig.json --noEmit
-check "unit tests" npx vitest run
+check "unit tests" bash scripts/check-unit-release.sh
+check "browser workflows" env OVERLYX_BETA_REPORT_DIR="$STATE/$target-browser" OVERLYX_BETA_BUILD_DIR="$WT/packages/client/dist.beta" OVERLYX_BETA_ASSET_PROOF="$WT/packages/client/dist.beta-proof.json" node scripts/check-beta.mjs
 rm -f "$STATE/$target-"*.log
 
 log "checks passed — deploying ${target:0:10}"
 status "$target" pending "checks passed — deploying"
 git -C "$PROD" merge --ff-only --quiet "$target"
 if [ "$lockfile_changed" = 1 ]; then (cd "$PROD" && npm ci --no-audit --no-fund); fi
-(cd "$PROD/packages/client" && npx vite build --outDir dist.new > "$STATE/$target-build.log" 2>&1 && OVERLYX_RUNTIME_OUT=dist.new/_ol npx vite build -c runtime.vite.config.ts >> "$STATE/$target-build.log" 2>&1 && rm -rf dist && mv dist.new dist) \
-  || { tail -20 "$STATE/$target-build.log"; status "$target" failure "client build failed"; touch "$STATE/failed-$target"; exit 1; }
-rm -f "$STATE/$target-build.log"
+# Publish the same compiled assets exercised by the isolated browser gate.
+(cd "$PROD/packages/client" && rm -rf dist.new && cp -a "$WT/packages/client/dist.beta" dist.new && rm -rf dist && mv dist.new dist) \
+  || { status "$target" failure "could not publish tested client assets"; touch "$STATE/failed-$target"; exit 1; }
 systemctl restart "$UNIT"
 for i in $(seq 1 20); do
   sleep 3
   systemctl is-active --quiet "$UNIT" || continue
   served=$(curl -s --max-time 5 "$SITE/api/version" | sed -n 's/.*"commit":"\([0-9a-f]*\)".*/\1/p')
-  [ "$served" = "$target" ] && { log "deployed ${target:0:10}: $SITE serves it"; status "$target" success "deployed to $SITE"; exit 0; }
+  if [ "$served" = "$target" ]; then
+    if ! node "$WT/scripts/verify-release-assets.mjs" "$WT/packages/client/dist.beta" "$SITE" "$WT/packages/client/dist.beta-proof.json"; then
+      status "$target" failure "served assets differ from the tested candidate"
+      touch "$STATE/failed-$target"
+      exit 1
+    fi
+    log "deployed ${target:0:10}: $SITE serves the tested assets"
+    status "$target" success "deployed to $SITE"
+    exit 0
+  fi
 done
 log "restarted, but $SITE/api/version reports '${served:-nothing}' instead of ${target:0:10}"
 status "$target" failure "restarted, but the site does not report the new commit"

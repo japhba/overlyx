@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import zlib from 'node:zlib';
-import type { Page, BrowserContext, Browser, BrowserContextOptions } from '@playwright/test';
+import type { Page, BrowserContext, Browser, BrowserContextOptions, ConsoleMessage } from '@playwright/test';
 
 /**
  * Root of the projects served by the server under test (an isolated copy when OVERLYX_PROJECTS_DIR
@@ -29,7 +29,12 @@ export function adminCredentials(): { username: string; password: string } {
   return { username, password };
 }
 
-export async function login(page: Page, creds = adminCredentials(), opts: { tour?: boolean } = {}): Promise<void> {
+export async function login(page: Page, creds = adminCredentials(), opts: { tour?: boolean; ui?: 'classic' | 'modern' | 'default' } = {}): Promise<void> {
+  // Existing editor regressions exercise Classic's menus and toolbar positions explicitly.
+  // New-user checks pass ui: 'default' to exercise the product's actual onboarding default.
+  if (opts.ui !== 'default') await page.addInitScript(ui => {
+    try { if (!localStorage.getItem('ol.ui')) localStorage.setItem('ol.ui', ui); } catch { /* sandboxed canvas frame */ }
+  }, opts.ui ?? 'classic');
   // the interactive tour is offered once per browser; keep it out of the way unless a spec wants it
   if (!opts.tour) await page.addInitScript(TOUR_SEEN_SCRIPT);
   await page.addInitScript(AUTOCORRECT_OFF_SCRIPT);
@@ -68,10 +73,10 @@ export async function fillDialog(page: Page, value: string, opts: { submit?: boo
   if (opts.submit !== false) await dlg.locator('button.primary').click();
 }
 
-export function collectErrors(page: Page): string[] {
+export function collectErrors(page: Page, opts: { allowConsole?: (message: ConsoleMessage) => boolean } = {}): string[] {
   const errors: string[] = [];
   page.on('pageerror', e => errors.push('pageerror: ' + e.message));
-  page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
+  page.on('console', m => { if (m.type() === 'error' && !opts.allowConsole?.(m)) errors.push('console: ' + m.text()); });
   return errors;
 }
 

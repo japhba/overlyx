@@ -95,7 +95,7 @@ function step(net: Net, ps: Peer[], line: string): boolean {
 export function generate(seed: number, steps: number, peers: number, opts: { joins?: boolean } = {}): string[] {
   const r = rng(seed);
   const pick = <T>(a: T[]) => a[Math.floor(r() * a.length)];
-  const net = new Net(baseDoc());
+  const net = new Net(baseDoc(), { pendingMoves: true });
   const ps = ['a', 'b', 'c'].slice(0, peers).map((n, i) => net.peer(n, 100 * (i + 1)));
   const counter = new Map<Peer, number>();
   const log: string[] = [];
@@ -123,7 +123,8 @@ export function generate(seed: number, steps: number, peers: number, opts: { joi
 /** run a script; the problems found (none: all invariants hold) */
 export function replay(script: string[], peers: number, opts: { dumpAt?: number } = {}): { problems: string[]; final: string[] } {
   // OVERLYX_FUZZ_REPAIR=0: the server applies updates as they are (the behaviour before moves.ts)
-  const net = new Net(baseDoc(), { repair: process.env.OVERLYX_FUZZ_REPAIR !== '0' });
+  const repair = process.env.OVERLYX_FUZZ_REPAIR !== '0';
+  const net = new Net(baseDoc(), { repair, pendingMoves: repair });
   const ps = ['a', 'b', 'c'].slice(0, peers).map((n, i) => net.peer(n, 100 * (i + 1)));
   const base = allWords(net.converged());
   const typed = new Set<string>(), deleted = new Set<string>();
@@ -136,7 +137,17 @@ export function replay(script: string[], peers: number, opts: { dumpAt?: number 
     const d = /^\S+ deletes (\S+)/.exec(line); if (d) deleted.add(d[1]);
     // what its author saw when acting (a view between a sync message and the repair that follows it is passing)
     const actor = ps.find(q => line.startsWith(q.name + ' '));
-    if (actor && actor.inbox.length === 0 && / (types|Enter|joins|deletes) /.test(line)) views.push(allWords(actor.pars()));
+    if (actor && actor.inbox.length === 0 && / (types|Enter|joins|deletes) /.test(line)) {
+      const shown = allWords(actor.pars());
+      const counts = new Map<string, number>();
+      for (const word of shown) counts.set(word, (counts.get(word) ?? 0) + 1);
+      // Receiving another split before sending our own can briefly display both
+      // copies. Their repeated word labels do not identify which copy survives;
+      // enforcing both orders would require the final unique word to precede itself.
+      // Final uniqueness is still checked below, and every unique shown anchor
+      // continues to constrain the result's order.
+      views.push(shown.filter(word => counts.get(word) === 1));
+    }
     for (const q of ps) q.view.dispatch(q.view.state.tr.setSelection(TextSelection.atStart(q.view.state.doc)));
   });
   for (const p of ps) if (!p.online) net.online(p);
@@ -164,7 +175,15 @@ export function replay(script: string[], peers: number, opts: { dumpAt?: number 
   return { problems, final };
 }
 
-const fails = (script: string[], peers: number) => { try { return replay(script, peers).problems.length > 0; } catch { return true; } };
+const fails = (script: string[], peers: number) => {
+  try {
+    const problems = replay(script, peers).problems;
+    // Target only minimization: the final debug assertion and full matrices
+    // still report every invariant, including failures outside this substring.
+    const target = process.env.OVERLYX_FUZZ_TARGET;
+    return target ? problems.some(problem => problem.includes(target)) : problems.length > 0;
+  } catch { return true; }
+};
 
 /** the shortest script found (greedily) that still fails */
 export function shrink(script: string[], peers: number): string[] {
@@ -194,6 +213,7 @@ describe.skipIf(!process.env.OVERLYX_FUZZ_DEBUG)('one seed, shrunk', () => {
     console.log(small.map((l, i) => `${i}: ${l}`).join('\n'));
     const { problems, final } = replay(small, peers, { dumpAt });
     console.log(problems, JSON.stringify(final, null, 1));
+    expect(problems, `seed ${seed} still violates collaboration invariants`).toEqual([]);
   }, 600000);
 });
 
@@ -213,6 +233,7 @@ describe.skipIf(!!process.env.OVERLYX_FUZZ_DEBUG)('randomized splits and joins w
       if (limits) console.log(`${peers} editors: ${limits} of ${count} seeds hit a known limit (a deleted word back, or words out of the order shown); OVERLYX_FUZZ_STRICT=1 fails them`);
       if (process.env.OVERLYX_FUZZ_LIST) {
         console.log('failing:', failures.map(f => f.split(':')[0].slice(5)).join(' '));
+        if (process.env.OVERLYX_FUZZ_LIST === '2') console.log(failures.join('\n'));
         const kinds = { lost: 0, doubled: 0, undeleted: 0, order: 0 };
         for (const f of failures) {
           if (/present 0×/.test(f)) kinds.lost++;

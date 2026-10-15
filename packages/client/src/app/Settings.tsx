@@ -15,6 +15,7 @@ import type { ComponentChildren } from 'preact';
 import { api, type AiStatus, type AiModelInfo, type User, type UserSettings, type AdminUser, type DeletionPreview, type AdminReport } from '../api';
 import { clearLocalData } from './localData';
 import { getPrefs, setPref, subscribePrefs, type Prefs } from '../prefs';
+import { recordReliability } from '../usage';
 import { resetShortcutTips } from '../shortcuttips';
 import { stashLyxBind, ctrlINow, ctrlIPlan, CTRLI_COMMANDS, type CtrlI } from './lyxbind';
 import { resetAllBindings, getBindings, setBinding, subscribeBindings } from './keybindings';
@@ -115,8 +116,8 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
     if (section === 'account' && user.isAdmin && users === null) api.users().then(r => setUsers(r.users)).catch(e => setErr((e as Error).message));
   }, [section]);
 
-  const check = (key: 'spellcheck' | 'autoCorrect' | 'invertFigures' | 'aiButton' | 'aiRewrite' | 'aiCompleteText' | 'aiCompleteMath' | 'aiInk' | 'usageStats' | 'shortcutTips' | 'darkPages', label: string, hint: string, disabled = false) => (
-    <label class={'pref' + (disabled ? ' disabled' : '')}><input type="checkbox" data-pref={key} checked={p[key]} disabled={disabled} onChange={e => setPref(key, (e.target as HTMLInputElement).checked)} /><span>{label}<span class="sub">{hint}</span></span></label>
+  const check = (key: 'spellcheck' | 'autoCorrect' | 'invertFigures' | 'aiButton' | 'aiRewrite' | 'aiCompleteText' | 'aiCompleteMath' | 'aiInk' | 'usageStats' | 'betaDiagnostics' | 'shortcutTips' | 'darkPages', label: string, hint: string, disabled = false) => (
+    <label class={'pref' + (disabled ? ' disabled' : '')}><input type="checkbox" data-pref={key} checked={p[key]} disabled={disabled} onChange={e => { const checked = (e.target as HTMLInputElement).checked; setPref(key, checked); if (key === 'betaDiagnostics' && checked) recordReliability('diagnostics.enabled'); }} /><span>{label}<span class="sub">{hint}</span></span></label>
   );
   // smart invert and the text tone (app/darkpages.ts): Appearance, or the editor's section where a shell has no Appearance (VS Code)
   const darkTheme = <div data-settings-dark>
@@ -233,6 +234,8 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
             <h3>Usage statistics</h3>
             {check('usageStats', 'Send anonymous usage statistics', 'Which menu entries, buttons, shortcuts and dialogs are used, and which of them do nothing, are undone right away or end in an error message — so that confusing parts of the editor can be found and fixed.')}
             <div class="sub" data-setting="usage-what">What is sent: the kind of action (for example “Edit ▸ Text Style ▸ Bold”, “toolbar m-frac”, “Ctrl+Shift+K unbound”, “Citation dialog dismissed”), where it happened (text, formula, table, dialog), the template of an error message with its data removed, the kind of screen, and a random id for this page load. Never your name or account, document or project names, text, formulas or file names — quoted strings, file names and numbers are removed before anything leaves the browser, and again on the server. The browser’s Global Privacy Control signal switches it off as well. Kept in this browser.</div>
+            <h3>Beta reliability diagnostics</h3>
+            {check('betaDiagnostics', 'Send beta reliability diagnostics', 'Optional: keyboard-load fallback, cancelled touch/pen gestures, canvas recovery, save-state transitions and background/orientation changes. Only fixed event names, pointer kind, coarse context, duration buckets and a random ID for this page load; never text, formulas, coordinates, pressure, file names, document or account identifiers. Kept on this server for 30 days. Usage statistics, Global Privacy Control and the server’s statistics switch still apply.', !p.usageStats)}
             <h3>Problem reports</h3>
             <div class="sub">What you send with Help ▸ Report a problem, and errors the app runs into, stay on this server — read by its operator, never published. Never the content of your documents.</div>
             <h3>Privacy notice</h3>

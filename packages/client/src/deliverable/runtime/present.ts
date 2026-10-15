@@ -4,7 +4,8 @@
  * appear and disappear) —;
  * ←, PageUp, Backspace go back (to the slide before as it ends); Home / End; a number and Enter jumps; Escape asks
  * the editor to end the presentation. The slide shown is in the URL's hash (#3), so a reload or a
- * shared link keeps it. A poster is shown whole, a web page as it is.
+ * shared link keeps it. B / . and W / , pause on a black or white screen; the next navigation
+ * resumes the same slide and step. A poster is shown whole, a web page as it is.
  *
  * The laser pointer (L), pinch to zoom and pan, and the control bar are app/presentkit.ts's: zoomed,
  * a click does not go on, Escape first goes back to the whole slide.
@@ -34,12 +35,21 @@ export function startPresenting(): void {
     .slide[data-ol-current] { position: absolute !important; left: 50% !important; top: 50% !important; margin: 0 !important;
       transform: translate(var(--ol-ztx, 0px), var(--ol-zty, 0px)) scale(var(--ol-zs, 1)) scale(var(--ol-fit, 1)) translate(-50%, -50%) !important;
       transform-origin: 0 0 !important; box-shadow: none !important; }
+    html.ol-present-blank, html.ol-present-blank body { background: #000 !important; }
+    html.ol-present-white, html.ol-present-white body { background: #fff !important; }
+    html.ol-present-blank .slide { opacity: 0 !important; visibility: hidden !important; }
+    html.ol-present-blank ol-present-ui { display: none !important; }
     html.ol-hide-cursor, html.ol-hide-cursor * { cursor: none !important; }
     [data-ol-unshown] { visibility: hidden !important; }
     html.ol-steps-dim [data-ol-unshown] { visibility: visible !important; opacity: .18 !important; }`;
   // <meta name="overlyx-steps" content="dim">: what comes later shows faintly (beamer's \setbeamercovered{transparent})
   if (/^dim/i.test(document.querySelector('meta[name="overlyx-steps"]')?.getAttribute('content') ?? '')) document.documentElement.classList.add('ol-steps-dim');
   document.head.appendChild(css);
+  // A paused screen's click resumes before the zoom / ink tools can consume it or advance a step.
+  addEventListener('click', e => {
+    if (!resumeScreen()) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+  }, true);
   kit = new PresentKit({
     root: document.documentElement,
     base: () => {
@@ -86,6 +96,20 @@ function zoom(v: ZoomView): void {
 
 /* ------------------------------------------------------------------ steps */
 
+/** A pause changes only the presenting view: the slide, its step and its saved source stay put. */
+function resumeScreen(): boolean {
+  if (!document.documentElement.classList.contains('ol-present-blank')) return false;
+  document.documentElement.classList.remove('ol-present-blank', 'ol-present-white');
+  return true;
+}
+
+function blankScreen(white: boolean): void {
+  if (resumeScreen()) return;
+  kit?.setTool(null);
+  document.documentElement.classList.add('ol-present-blank');
+  document.documentElement.classList.toggle('ol-present-white', white);
+}
+
 /**
  * The objects of a slide that show on some steps only (any element, an SVG's paths too): those with
  * `data-step` (a beamer overlay specification: "3" from step 3 on, "-3" until step 3, "2-4"…), and
@@ -113,11 +137,13 @@ function showStep(): void {
 
 /** on: the next step of the slide, or the next slide */
 function forward(): void {
+  if (resumeScreen()) return;
   if (step < lastStep(slides()[current])) { step++; showStep(); return; }
   go(current + 1);
 }
 /** back: the step before, or the slide before as it ends */
 function back(): void {
+  if (resumeScreen()) return;
   if (step > 1) { step--; showStep(); return; }
   if (current > 0) go(current - 1, true);
 }
@@ -125,6 +151,7 @@ function back(): void {
 export function go(i: number, atEnd = false): void {
   const ss = slides();
   if (!ss.length) return;
+  resumeScreen();
   current = Math.max(0, Math.min(ss.length - 1, i));
   step = atEnd ? lastStep(ss[current]) : 1;
   showStep();
@@ -146,6 +173,11 @@ function fit(): void {
 function onKey(e: KeyboardEvent): void {
   const t = e.target as Element | null;
   if (t && /^(input|textarea|select)$/i.test(t.localName)) return;
+  if (!e.ctrlKey && !e.metaKey && !e.altKey && /^[bw.,]$/i.test(e.key)) {
+    typed = '';
+    blankScreen(/^[w,]$/i.test(e.key));
+    e.preventDefault(); e.stopPropagation(); return;
+  }
   if (kit?.key(e, typed !== '')) { e.preventDefault(); e.stopPropagation(); return; }
   const k = e.key;
   let handled = true;

@@ -69,7 +69,7 @@ export function MathOverlay({ st, frame, scale, macros, onSet, onDone, onShown, 
   frame: HTMLIFrameElement | null;
   scale: number;
   onSet(tex: string): void;
-  onDone(tex: string, dir: 'forward' | 'backward' | null, putBack?: string): void;
+  onDone(tex: string, dir: 'forward' | 'backward' | null, putBack?: string, rest?: KeyPress[]): void;
   /** the field is drawn over the formula */
   onShown(): void;
   /** `$$` typed into the empty inline formula `$` opened: a displayed formula instead */
@@ -107,11 +107,13 @@ export function MathOverlay({ st, frame, scale, macros, onSet, onDone, onShown, 
     let initial = '';
     /** `$$` made it a displayed formula: what is typed after that is the new formula's */
     let toDisplay = false;
+    /** The rest of a replay batch belongs to the same atomic caret handoff. */
+    let restOnFinish: KeyPress[] | undefined;
     const texNow = () => { const t = field ? stripMathDelims(field.latex) : st.tex; return t === initial ? st.tex : t; };
     const finish = (dir: 'forward' | 'backward' | null, putBack?: string) => {
       if (done) return;
       done = true;
-      cb.current.onDone(texNow(), dir, putBack);
+      cb.current.onDone(texNow(), dir, putBack, restOnFinish);
     };
     field = new LyxMathField({
       // (a numbered formula is its environment, as written)
@@ -153,8 +155,14 @@ export function MathOverlay({ st, frame, scale, macros, onSet, onDone, onShown, 
           return;
         }
         const k = keys[i];
-        if (k.key.length === 1 && !k.ctrl && !k.meta && !k.alt) f.typeText(k.key);
-        else f.pressKey({ key: k.key, shiftKey: !!k.shift, ctrlKey: !!k.ctrl, altKey: !!k.alt, metaKey: !!k.meta });
+        restOnFinish = keys.slice(i + 1);
+        try {
+          if (k.key.length === 1 && !k.ctrl && !k.meta && !k.alt) f.typeText(k.key);
+          else f.pressKey({ key: k.key, shiftKey: !!k.shift, ctrlKey: !!k.ctrl, altKey: !!k.alt, metaKey: !!k.meta });
+        } finally { restOnFinish = undefined; }
+        // finish already sent the remaining prose with mathDone, before focus
+        // returns to the frame. Do not send it again in a later typeKeys message.
+        if (done && !toDisplay) return;
       }
     };
     // (keys typed in the editor before the field opened — a formula placed, then typed into at once — come first)

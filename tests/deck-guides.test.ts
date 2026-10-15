@@ -4,8 +4,9 @@
  * slide's own, one added, moved, copied, taken away.
  */
 import { describe, it, expect } from 'vitest';
-import { parseGuides, formatGuides, masterGuides, withGuide, withoutGuide, movedGuide, guideLabel } from '../packages/client/src/deliverable/guides.ts';
+import { parseGuides, formatGuides, masterGuides, layoutMarginGuides, LAYOUT_MARGINS_ATTR, withGuide, withoutGuide, movedGuide, guideLabel } from '../packages/client/src/deliverable/guides.ts';
 import { guidesIn } from '../packages/client/src/deliverable/sourceops.ts';
+import { starterDeck, starterPoster } from '../packages/core/src/html/deliverable.ts';
 
 describe('guides', () => {
   it('are read from and written to `data-ol-guides`: vertical first, each axis in order, on half px, one of each place', () => {
@@ -20,6 +21,34 @@ describe('guides', () => {
     expect(masterGuides(null, 1280, 720)).toEqual([{ axis: 'x', at: 640 }, { axis: 'y', at: 360 }]);
     expect(masterGuides('', 1280, 720)).toEqual([]);
     expect(masterGuides('x100', 1280, 720)).toEqual([{ axis: 'x', at: 100 }]);
+  });
+
+  it('parses fixed template margins independently of draggable guide attributes', () => {
+    expect(LAYOUT_MARGINS_ATTR).toBe('data-ol-layout-margins');
+    expect(layoutMarginGuides('72px 96px', 1280, 720)).toEqual([
+      { axis: 'x', at: 96 }, { axis: 'x', at: 1184 }, { axis: 'y', at: 72 }, { axis: 'y', at: 648 },
+    ]);
+    expect(layoutMarginGuides('40mm', 841 * 96 / 25.4, 1189 * 96 / 25.4)[0].at).toBeCloseTo(40 * 96 / 25.4, 4);
+    expect(layoutMarginGuides('10% 5%', 1280, 720)).toEqual([
+      { axis: 'x', at: 64 }, { axis: 'x', at: 1216 }, { axis: 'y', at: 72 }, { axis: 'y', at: 648 },
+    ]);
+    expect(layoutMarginGuides('10%', 1280, 720)).toEqual([
+      { axis: 'x', at: 128 }, { axis: 'x', at: 1152 }, { axis: 'y', at: 72 }, { axis: 'y', at: 648 },
+    ]);
+    expect(layoutMarginGuides('10% 5% 20%', 1280, 720)).toEqual([
+      { axis: 'x', at: 64 }, { axis: 'x', at: 1216 }, { axis: 'y', at: 72 }, { axis: 'y', at: 576 },
+    ]);
+    expect(layoutMarginGuides('640px', 1280, 720)).toEqual([]);
+    expect(layoutMarginGuides('auto', 1280, 720)).toEqual([]);
+    expect(layoutMarginGuides('100px 100px 100px 100px 1px', 1280, 720)).toEqual([]);
+  });
+
+  it('defines explicit safe areas in the starter deck and A0 poster, not in draggable guide data', () => {
+    const deck = starterDeck('A deck');
+    const poster = starterPoster('A poster');
+    expect(deck).toContain('<body data-ol-layout-margins="72px 96px">');
+    expect(poster).toContain('<body data-ol-layout-margins="40mm">');
+    expect(deck + poster).not.toContain('data-ol-guides');
   });
 
   it('one added (not twice), moved, copied, taken away', () => {

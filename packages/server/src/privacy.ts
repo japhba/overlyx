@@ -15,10 +15,10 @@
  */
 import type { Request, Response } from 'express';
 import { config } from './config.ts';
-import { RETENTION_DAYS as USAGE_DAYS } from './usage.ts';
+import { RELIABILITY_RETENTION_DAYS, RETENTION_DAYS as USAGE_DAYS } from './usage.ts';
 import { TRASH_DAYS } from './accounts.ts';
 
-export const PRIVACY_UPDATED = '11 October 2026';
+export const PRIVACY_UPDATED = '13 October 2026';
 
 const esc = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 
@@ -75,6 +75,7 @@ ${google
 <p>Mail you send to privacy@ or contact@${esc(site)} is received by this server and kept there; it is never forwarded to anyone's inbox. Only the operator reads it, in the app. It contains what you wrote, your address and the subject; attachments are not kept (only their names). It is deleted a year after it arrived.</p>
 <h3>Anonymous usage statistics</h3>
 <p>To find what is confusing or broken, the app counts which menu items, buttons and shortcuts are used and which ones fail. These counts are not linked to you. They carry no name, account, document or file name and no text, only a random id that changes with each page load. They are kept for ${USAGE_DAYS} days.</p>
+<p>Separate reliability diagnostics are sent only if you give separate consent. They count a fixed list of events and pointer types, coarse contexts and duration buckets — never document text, account details, URLs, coordinates, or free text. They use the same short-lived random page-load id and are kept for ${RELIABILITY_RETENTION_DAYS} days. They are not sent when usage statistics are switched off or your browser sends Global Privacy Control.</p>
 <p>You can switch them off in <b>Settings ▸ Privacy</b>. Your browser's Global Privacy Control signal also switches them off.</p>
 <h3>Server logs</h3>
 <p>The server's logs record events such as “user X opened project Y” or “a build failed”, together with user names and project or file names. For requests that fail, they also record the IP address and browser. The logs help us keep the service running and secure. They are deleted automatically, oldest first, once they reach a fixed size — currently after a few months.</p>
@@ -118,6 +119,7 @@ ${google ? `<tr><td>Google</td><td>Signs you in. With Google Docs sync, the link
 <tr><td>Mail to privacy@ / contact@</td><td>A year</td></tr>
 <tr><td>Server logs</td><td>A few months (deleted oldest first at a fixed size)</td></tr>
 <tr><td>Anonymous usage statistics</td><td>${USAGE_DAYS} days</td></tr>
+<tr><td>Consent-only reliability diagnostics</td><td>${RELIABILITY_RETENTION_DAYS} days</td></tr>
 <tr><td>Guest accounts</td><td>About a month</td></tr>
 </table>
 

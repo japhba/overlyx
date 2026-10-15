@@ -442,6 +442,9 @@ export class SlideView {
 
   /** pulled by a finger (screen px); past the range on the rubber band, and loose when pulled far enough */
   panBy(dx: number, dy: number): void {
+    // A finger owns its release. An older zoom/wheel timer must not settle it
+    // halfway through, discard its motion, or retain the wheel's swipe identity.
+    if (this.idle) { clearTimeout(this.idle); this.idle = null; this.swipe = null; }
     if (!this.swipe) this.swipe = { x: 0, y: 0, x0: this.raw.x, t0: performance.now(), finger: true, axis: null, pages: false, paged: false };
     this.armed = true;
     if (this.steer(dx, dy)) return;
@@ -549,12 +552,12 @@ export class SlideView {
     this.idle = setTimeout(() => { this.idle = null; this.release(); }, 160);
   }
 
-  /** let go: back into the pan range (the middle when the slide fits), on a spring — or, loose, where it is (snapped back in near its place) */
-  release(): void {
+  /** let go: settle in the pan range; an interrupted gesture must not become a page-turning flick */
+  release(cancelled = false): void {
     const v = this.input();
     const s = this.swipe;
     this.swipe = null;
-    if (v && s?.finger && s.pages && !s.paged) {
+    if (!cancelled && v && s?.finger && s.pages && !s.paged) {
       const fast = performance.now() - s.t0 < 250 && Math.abs(s.x) > 30;
       if (fast || Math.abs(s.x) >= PAGE_FINGER * v.box.w) this.turn(s);
     }

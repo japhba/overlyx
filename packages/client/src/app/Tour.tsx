@@ -72,7 +72,8 @@ export const TOUR_STEPS: Step[] = [
     target: ['.lyx-editor'],
     ready: s => s.ready,
     body: (now) => now.ready ? <>
-      <p>What you see is your personal example project: an ordinary <code>.tex</code> file, rendered as you type — no compiling needed to read it, and any LaTeX editor (or Overleaf) opens the same file.</p>
+      <p>This example is yours to edit. Text and formulas render as you type, and the underlying <code>.tex</code> file opens in other LaTeX editors too.</p>
+      <p>Use the PDF view to check the final page layout. LaTeX that the editor cannot render stays available in a <i>TeX Code</i> block.</p>
       <p><b>Click into the text and type a few words.</b></p>
     </> : <p>Opening your example document…</p>,
     done: (now, base) => now.docTick > base.docTick,
@@ -81,7 +82,7 @@ export const TOUR_STEPS: Step[] = [
     id: 'layout', title: 'Paragraph styles',
     target: ['.toolbar-standard [data-style-picker]', '[data-style-picker]'],
     body: () => <>
-      <p>Headings, lists, theorems and the like are styles of the paragraph — LaTeX's sections and environments — not formatting. This box shows the style of the paragraph under the cursor; click it and type to search.</p>
+      <p>Use paragraph styles to organize your text into headings, lists and theorems. This box shows the current paragraph's style; click it and type to search.</p>
       <p><b>Press {kbd('Enter')} for a new paragraph and make it a <i>Section</i></b> — pick it from this box or press {kbd(MOD + '+2')}{uiMode() === 'classic' && <> (or {kbd('Alt+P')} then {kbd('2')}, LyX's shortcut)</>}.</p>
     </>,
     // a new heading (or list item, …) appeared, or the paragraph under the cursor got another layout
@@ -98,7 +99,7 @@ export const TOUR_STEPS: Step[] = [
   },
   {
     id: 'save', title: 'Everything is saved for you',
-    target: ['.statusbar .save-state'],
+    target: ['.menubar .save-state', '.statusbar .save-state'],
     body: (now) => <>
       <p>There is no Save button: every edit goes to the server at once and is written to the <code>.tex</code> file a moment later; this indicator turns green when the file is up to date. If the connection drops you keep editing offline and your changes sync when it is back.</p>
       <p><b>Wait for “All changes saved”.</b>{now.saveState === 'saved' && <> ✓</>}</p>
@@ -125,7 +126,7 @@ export const TOUR_STEPS: Step[] = [
     done: (now, base) => now.pdfBusy || now.pdfBuiltAt !== base.pdfBuiltAt,
   },
   {
-    id: 'versions', title: 'Nothing is ever lost',
+    id: 'versions', title: 'Versions and recovery',
     target: ['[data-tab="versions"]', '.sidebar.right .panel-tabs'],
     enter: a => a.showRight(),
     body: <>
@@ -206,11 +207,11 @@ export function UiChoice() {
   );
   return (
     <div class="ui-choice" role="radiogroup" aria-label="Interface">
+      <button type="button" role="radio" aria-checked={cur === 'modern'} class={cur === 'modern' ? 'on' : ''} data-ui-choice="modern" onClick={() => setUiMode('modern')}>
+        {modern}<b class="uc-name">Modern</b><span>A single toolbar, with formula, table and picture tools appearing when you need them. The default for new users.</span>
+      </button>
       <button type="button" role="radio" aria-checked={cur === 'classic'} class={cur === 'classic' ? 'on' : ''} data-ui-choice="classic" onClick={() => setUiMode('classic')}>
         {classic}<b class="uc-name">Classic</b><span>LyX’s toolbars, menus, names and keys, everything in view — for people coming from desktop LyX.</span>
-      </button>
-      <button type="button" role="radio" aria-checked={cur === 'modern'} class={cur === 'modern' ? 'on' : ''} data-ui-choice="modern" onClick={() => setUiMode('modern')}>
-        {modern}<b class="uc-name">Modern</b><span>Calm and simple — one toolbar; the tools for a formula, a table or a picture appear when you need them.</span>
       </button>
     </div>
   );
@@ -218,8 +219,8 @@ export function UiChoice() {
 
 /**
  * The interface choice on its own: a new account that arrives through the Overleaf import goes
- * straight to its imported document (no welcome card, no tour then) — it still chooses Classic or
- * Modern first. The tour waits for a later visit.
+ * straight to its imported document (no welcome card, no tour then). It starts with the account's
+ * interface or Modern and offers the optional Classic choice. The tour waits for a later visit.
  */
 export function InterfacePrompt({ onDone }: { onDone: () => void }) {
   return (
@@ -227,8 +228,8 @@ export function InterfacePrompt({ onDone }: { onDone: () => void }) {
       <div class="tour-backdrop" />
       <div class="tour-card interface-prompt" role="dialog" aria-label="Choose the interface" onMouseDown={e => e.preventDefault()}>
         <h3>Welcome to OverLyX 👋</h3>
-        <p>Choose how OverLyX looks — the same functions either way; switch any time in <i>View ▸ Interface</i> or <i>Settings</i>:</p>
-        <UiChoice />
+        <p>Your imported document is ready. Start writing, check the PDF, and share the project when you want to work with others.</p>
+        <details><summary>Change the interface</summary><UiChoice /></details>
         <div class="tour-buttons"><button class="btn primary" data-interface-done onClick={onDone}>Continue</button></div>
       </div>
     </div>
@@ -265,10 +266,18 @@ export function Tour({ ctx, actions, intro, onEnd }: { ctx: TourCtx; actions: To
     go(0);
   };
 
-  // position the spotlight and the card imperatively (no state → no render loops)
+  // The intro is positioned by its intrinsic CSS size: opening its details must
+  // not wait for the next tour tick and move a button during a click.
+  // Guided steps still follow their target without state or render loops.
   useLayoutEffect(() => {
     const card = cardRef.current, spot = spotRef.current;
     if (!card) return;
+    if (step < 0) {
+      // A reused card may still carry offsets from the guided steps.
+      card.style.removeProperty('left');
+      card.style.removeProperty('top');
+      return;
+    }
     const el = step >= 0 ? findTarget(cur?.target) : null;
     const r = el?.getBoundingClientRect() ?? null;
     const vw = window.innerWidth, vh = window.innerHeight, W = card.offsetWidth, H = card.offsetHeight, m = 12;
@@ -277,8 +286,7 @@ export function Tour({ ctx, actions, intro, onEnd }: { ctx: TourCtx; actions: To
       else spot.style.display = 'none';
     }
     let left: number, top: number;
-    if (step < 0) { left = (vw - W) / 2; top = Math.max(m, (vh - H) / 2 - 40); }
-    else if (!r) { left = vw - W - 24; top = vh - H - 40; }
+    if (!r) { left = vw - W - 24; top = vh - H - 40; }
     else if (r.height > vh * 0.45) { left = Math.min(r.right, vw) - W - 24; top = Math.min(r.bottom, vh) - H - 40; }   // a big area (the page): sit in its lower right corner
     else if (r.bottom + 10 + H < vh) { left = r.left + r.width / 2 - W / 2; top = r.bottom + 10; }
     else { left = r.left + r.width / 2 - W / 2; top = r.top - H - 10; }
@@ -292,13 +300,13 @@ export function Tour({ ctx, actions, intro, onEnd }: { ctx: TourCtx; actions: To
       {step < 0 && <div class="tour-backdrop" />}
       {step >= 0 && <div class="tour-spot" ref={spotRef} />}
       {/* never take the focus: the user keeps typing in the editor, and Enter/Space there must not activate a tour button */}
-      <div class="tour-card" ref={cardRef} role="dialog" aria-label="Tour" onMouseDown={e => e.preventDefault()}>
+      <div class={'tour-card' + (step < 0 ? ' tour-intro' : '')} ref={cardRef} role="dialog" aria-label="Tour" onMouseDown={e => e.preventDefault()}>
         {step < 0 ? (
           <>
             <h3>Welcome to OverLyX 👋</h3>
-            <p>First, choose how OverLyX looks — the same functions either way; switch any time in <i>View ▸ Interface</i> or <i>Settings</i>:</p>
-            <UiChoice />
-            <p>Then a three-minute hands-on tour: it opens your example document and asks you to try the essentials — typing, layouts, a formula, a comment, a PDF build, versions and sharing.</p>
+            <p>Create a document with <b>+ New</b>, or bring an existing project with <b>Import from Overleaf</b>. Write in the editor, check the PDF, and share the project with a colleague.</p>
+            <p>The hands-on tour opens an example you can edit and guides you through writing, a formula, a comment, PDF output and sharing.</p>
+            <details><summary>Change the interface</summary><UiChoice /></details>
             <p class="tour-muted">Every step can be skipped and you can leave at any time; restart it from <i>Help ▸ Take the tour</i>.</p>
             {noExample && <p class="tour-error">You have no document to practise on — create a project and a document first, or open one shared with you, then start the tour from the Help menu.</p>}
             <div class="tour-buttons">

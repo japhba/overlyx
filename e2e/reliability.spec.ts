@@ -39,6 +39,8 @@ test('a delayed save acknowledgment does not confirm a newer deletion', async ({
   expect(readFileSync(`${dir}/save.tex`, 'utf8')).not.toContain('SAVED-A');
 });
 
+test.describe(() => {
+  test.use({ serviceWorkers: 'block' });
 test('delayed LaTeX paste stays at its original target after moving the cursor', async ({ page }) => {
   await login(page); await openDoc(page, 'admin/e2e-reliability/paste.tex');
   let release!: () => void, requested = false;
@@ -58,6 +60,7 @@ test('delayed LaTeX paste stays at its original target after moving the cursor',
   await expect(paragraphs.nth(1).locator('.lyx-math-inline')).toHaveCount(0);
   await page.keyboard.type(' still here');
   await expect(paragraphs.nth(1)).toContainText('still here');
+});
 });
 
 test('view modes, automatic reference labels and accessible narrow dialogs', async ({ page }) => {

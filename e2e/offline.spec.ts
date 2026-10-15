@@ -150,7 +150,18 @@ const withoutTokens = (t: string) => t.replace(TOKEN, ' ').replace(/\s+/g, ' ').
 
 /** caret right before `needle` (null: at the end) in the paragraph that contains `inPar` */
 async function caretAt(page: Page, inPar: string, needle: string | null) {
-  await page.locator('.lyx-editor .lyx-par', { hasText: inPar }).first().click({ position: { x: 4, y: 4 } });
+  const paragraph = page.locator('.lyx-editor .lyx-par', { hasText: inPar }).first();
+  // The list gutter contains its drag grip. Focus the first content line instead.
+  const position = await paragraph.evaluate(el => {
+    const style = getComputedStyle(el);
+    const number = (value: string) => { const n = parseFloat(value); return Number.isFinite(n) ? n : 0; };
+    const lineHeight = number(style.lineHeight) || number(style.fontSize) * 1.2;
+    return {
+      x: Math.min(Math.max(1, el.clientWidth - 1), number(style.paddingLeft) + Math.max(0, number(style.textIndent)) + 4),
+      y: Math.min(Math.max(1, el.clientHeight - 1), number(style.paddingTop) + lineHeight / 2),
+    };
+  });
+  await paragraph.click({ position });
   await page.evaluate(([inPar, needle]) => {
     const par = [...document.querySelectorAll('.lyx-editor .lyx-par')].find(p => (p.textContent ?? '').includes(inPar!));
     if (!par) throw new Error('no paragraph with ' + inPar);
@@ -196,8 +207,10 @@ test('a minute offline beside another writer in the same paragraph and list: eve
     ['Shared paragraph', 'queries'], ['previous decoder layer', 'queries'], ['Shared paragraph', 'queries'],
     ['previous decoder layer', 'queries'], ['Shared paragraph', null], ['previous decoder layer', null], ['Shared paragraph', 'the encoder'],
   ];
-  const writer = async (p: Page, tag: string, until: number) => {
-    for (let i = 0; Date.now() < until; i++) {
+  // Keep the token workload fixed and the offline period at least one minute.
+  // A busy test host must still reach the full token-accounting assertions.
+  const writer = async (p: Page, tag: string) => {
+    for (let i = 0; i < 30; i++) {
       const [inPar, needle] = spots[i % spots.length];
       await caretAt(p, inPar, needle);
       const token = `Z${tag}q${String(i).padStart(4, '0')}Z`;
@@ -211,7 +224,8 @@ test('a minute offline beside another writer in the same paragraph and list: eve
     }
   };
   const until = Date.now() + 60000;
-  await Promise.all([writer(page, 'za', until), writer(page2, 'zb', until)]);
+  await Promise.all([writer(page, 'za'), writer(page2, 'zb')]);
+  await page.waitForTimeout(Math.max(0, until - Date.now()));
   await expect(saveState(page)).toHaveText(/kept on this device/, { timeout: 15000 });
   await expect(saveState(page2)).toHaveText(/All changes saved/, { timeout: 15000 });
 

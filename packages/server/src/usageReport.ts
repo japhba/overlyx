@@ -13,8 +13,9 @@
  *   errors        uncaught errors, by template
  */
 import type Database from 'better-sqlite3';
+import { isReliabilityContext, isReliabilityDurationBucket, parseReliabilityDetail } from '@overlyx/core/reliability.ts';
 
-export const USAGE_NAMES = ['session', 'view', 'menu', 'palette', 'shortcut', 'toolbar', 'key', 'chord', 'key-unbound', 'dialog', 'notice', 'error', 'undo', 'redo'] as const;
+export const USAGE_NAMES = ['session', 'view', 'menu', 'palette', 'shortcut', 'toolbar', 'key', 'chord', 'key-unbound', 'dialog', 'notice', 'error', 'undo', 'redo', 'reliability'] as const;
 export type UsageName = (typeof USAGE_NAMES)[number];
 /** the kinds that are an action taken on purpose */
 export const ACTION_NAMES: ReadonlySet<string> = new Set(['menu', 'palette', 'shortcut', 'toolbar', 'key', 'chord']);
@@ -26,9 +27,10 @@ export const REPEAT_WINDOW_MS = 4000;
 export const REPEAT_MIN = 3;
 
 /**
- * The client scrubs every detail before queueing (src/usage.ts scrub); the server does it again
- * so that nothing a modified client sends can carry a name, a file or a number into the table.
- * Keep the two in step (tests/usage.test.ts compares them).
+ * Legacy usage details are scrubbed client-side and scrubbed again here so a modified client
+ * cannot carry names, files or numbers into the table. Reliability details deliberately do not
+ * pass through this lossy scrubber: they must exactly match the shared finite schema below.
+ * Keep legacy client/server scrubbers in step (tests/usage.test.ts compares them).
  */
 export function scrubDetail(s: unknown, max = DETAIL_MAX): string {
   return String(s ?? '')
@@ -78,6 +80,8 @@ export interface UsageSummary {
   notices: Count[];
   errors: Count[];
   undo: { total: number; soonAfterAction: number };
+  /** Consent-only fixed-vocabulary diagnostics; never part of action ranking. */
+  reliability: { events: number; sessions: number; details: Count[]; contexts: Count[]; durations: Count[] };
 }
 
 const isUndoAction = (name: string, detail: string) => /(^|[^a-z])(undo|redo)([^a-z]|$)/i.test(detail) || (name === 'key' && /^(Shift-)?Mod-[zy]$/.test(detail));
@@ -114,6 +118,9 @@ export function summarise(rows: UsageRow[], o: { since: number; until: number; t
   const byName: Record<string, number> = {};
   const sessions = new Set<string>();
   const clients = new Counter(), views = new Counter(), unbound = new Counter(), notices = new Counter(), errors = new Counter();
+  const reliabilityDetails = new Counter(), reliabilityContexts = new Counter(), reliabilityDurations = new Counter();
+  const reliabilitySessions = new Set<string>();
+  let reliabilityEvents = 0;
   const actions = new Map<string, { name: string; detail: string; count: number; sessions: Set<string>; failed: number; undone: number; repeated: number; where: Record<string, number> }>();
   const dialogs = new Map<string, { count: number; sessions: Set<string>; applied: number; dismissed: number; dismissedQuickly: number; open: number[] }>();
   let undoTotal = 0, undoSoon = 0;
@@ -124,8 +131,20 @@ export function summarise(rows: UsageRow[], o: { since: number; until: number; t
   let run: { key: string; at: number; n: number; counted: boolean } | null = null;
 
   for (const r of rows) {
+    // Defensively validate again at read time: an older or manually altered row must not make
+    // free text visible in either the JSON admin summary or the text report.
+    const reliabilityDetail = r.name === 'reliability' ? parseReliabilityDetail(r.detail) : null;
+    if (r.name === 'reliability' && !reliabilityDetail) continue;
     byName[r.name] = (byName[r.name] ?? 0) + 1;
     sessions.add(r.session);
+    if (r.name === 'reliability' && reliabilityDetail) {
+      reliabilityEvents++;
+      reliabilitySessions.add(r.session);
+      reliabilityDetails.add(`${reliabilityDetail.event} ${reliabilityDetail.pointer}`, r.session);
+      reliabilityContexts.add(isReliabilityContext(r.place) ? r.place : 'unknown', r.session);
+      reliabilityDurations.add(isReliabilityDurationBucket(r.dt) ? String(r.dt) : 'unknown', r.session);
+      continue;
+    }
     if (r.session !== curSession) { curSession = r.session; last = null; run = null; }
     if (r.name === 'session') { clients.add(r.detail, r.session); continue; }
     if (r.name === 'view') { views.add(r.detail, r.session); continue; }
@@ -181,6 +200,12 @@ export function summarise(rows: UsageRow[], o: { since: number; until: number; t
     unboundKeys: unbound.list(o.top), dialogs: dialogList.slice(0, o.top),
     notices: notices.list(o.top), errors: errors.list(o.top),
     undo: { total: undoTotal, soonAfterAction: undoSoon },
+    reliability: {
+      events: reliabilityEvents, sessions: reliabilitySessions.size,
+      // All are finite schema vocabularies; don't truncate a complete reliability breakdown to the
+      // legacy action-report `top` limit.
+      details: reliabilityDetails.list(500), contexts: reliabilityContexts.list(500), durations: reliabilityDurations.list(500),
+    },
   };
 }
 
@@ -222,6 +247,15 @@ export function formatUsageReport(s: UsageSummary): string {
   if (s.errors.length) {
     section('Uncaught errors (templates)');
     for (const n of s.errors.slice(0, 20)) out.push(`${rpad(n.count, 6)}  ${n.key}  (${n.sessions} session${n.sessions === 1 ? '' : 's'})`);
+  }
+  if (s.reliability.events) {
+    section('Reliability diagnostics (consent-only, fixed categories)');
+    out.push(`${s.reliability.events} events in ${s.reliability.sessions} session${s.reliability.sessions === 1 ? '' : 's'}`);
+    for (const [label, counts] of [
+      ['event / pointer', s.reliability.details], ['context', s.reliability.contexts], ['duration bucket (ms)', s.reliability.durations],
+    ] as const) {
+      out.push(`${label}: ${counts.map(c => `${c.key} ${c.count}`).join(', ')}`);
+    }
   }
   section(`Undo: ${s.undo.total} in total, ${s.undo.soonAfterAction} within 5 s of a deliberate action`);
   if (s.actions.length) {

@@ -6,7 +6,7 @@
  * change (deliverable/runtime/reconcile.ts).
  */
 import { describe, it, expect, beforeAll } from 'vitest';
-import { rebasedSplices, applyTo, objectHtml, insertPlace, newSlideHtml, slidePaths, slideNotes, notesOp } from '../packages/client/src/deliverable/sourceops.ts';
+import { rebasedSplices, rebaseObjectPaths, applyTo, objectHtml, insertPlace, newSlideHtml, slidePaths, slideNotes, notesOp } from '../packages/client/src/deliverable/sourceops.ts';
 import { applyOp, parseSource, elementAt } from '../packages/core/src/html/source.ts';
 import { starterDeck } from '../packages/core/src/html/deliverable.ts';
 
@@ -39,6 +39,52 @@ describe('the editor changes the text', () => {
     expect(sp).toHaveLength(2);
     const out = applyTo(DECK, sp);
     expect(out.match(/left: 100px/g)).toHaveLength(2);
+  });
+
+  it('rapid nudges based on the same frame version retain every step and another author’s colour change', () => {
+    const path = [1, 0, 1];
+    let current = applyOp(DECK, { t: 'style', path, set: { color: 'teal' } });
+    for (let step = 1; step <= 10; step++) {
+      const splices = rebasedSplices(DECK, current, [{ t: 'style', path, set: { left: `${120 + step * 10}px` } }]);
+      expect(splices, `nudge ${step} applies after the preceding style edit`).not.toBeNull();
+      current = applyTo(current, splices!);
+    }
+    const style = elementAt(parseSource(current).doc, path)!.attrs.find(a => a.name === 'style')!.value;
+    expect(style).toContain('left: 220px');
+    expect(style).toContain('color: teal');
+  });
+
+  it.each(['one.png', 'two.png'])('a stale picture move cannot change the next picture after the original %s is deleted', image => {
+    const original = `<img src="${image}" style="left: 10px">`;
+    const source = `<html><head></head><body><section class="slide">${original}<img src="two.png" style="left: 20px"></section></body></html>`;
+    const current = source.replace(original, '');
+    expect(rebasedSplices(source, current, [{ t: 'style', path: [1, 0, 0], set: { left: '30px' } }])).toBeNull();
+  });
+
+  it('successive toolbar styles follow a selected box after an earlier sibling is deleted', () => {
+    const first = '<p style="font-size: 18pt">FIRST</p>';
+    const source = `<html><head></head><body><section class="slide">${first}<p style="font-size: 18pt">SECOND</p><p style="font-size: 18pt">THIRD</p></section></body></html>`;
+    const originalPath = [1, 0, 1];
+    let current = source.replace(first, '');
+    expect(rebaseObjectPaths(source, current, [originalPath])).toEqual([[1, 0, 0]]);
+    current = applyOp(current, { t: 'style', path: [1, 0, 0], set: { 'font-size': '26pt' } });
+    expect(rebaseObjectPaths(source, current, [originalPath])).toEqual([[1, 0, 0]]);
+    const next = rebasedSplices(source, current, [{ t: 'style', path: originalPath, set: { color: '#cc0000' } }]);
+    expect(next).not.toBeNull();
+    const saved = parseSource(applyTo(current, next!)).doc;
+    expect(elementAt(saved, [1, 0, 0])!.attrs.find(a => a.name === 'style')!.value).toContain('font-size: 26pt');
+    expect(elementAt(saved, [1, 0, 0])!.attrs.find(a => a.name === 'style')!.value).toContain('color: #cc0000');
+    expect(elementAt(saved, [1, 0, 1])!.attrs.find(a => a.name === 'style')!.value).toBe('font-size: 18pt');
+  });
+
+  it('does not follow a deleted selected box into its restyled neighbour or an ambiguous repeated box', () => {
+    for (const neighbour of ['THIRD', 'SECOND']) {
+      const selected = '<p style="font-size: 18pt">SECOND</p>';
+      const source = `<html><head></head><body><section class="slide">${selected}<p style="font-size: 18pt">${neighbour}</p></section></body></html>`;
+      const current = source.replace(selected, '').replace('font-size: 18pt', 'font-size: 26pt');
+      expect(rebaseObjectPaths(source, current, [[1, 0, 0]])).toBeNull();
+      expect(rebasedSplices(source, current, [{ t: 'style', path: [1, 0, 0], set: { color: '#cc0000' } }])).toBeNull();
+    }
   });
 
   it('new objects go at the end of their slide, before the notes', () => {

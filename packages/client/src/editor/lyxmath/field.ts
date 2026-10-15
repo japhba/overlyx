@@ -20,7 +20,7 @@ import { graphicsUrl } from '../../api';
 import { editorContext, resolveDocPath } from '../context';
 import { getPrefs } from '../../prefs';
 import { renderMath, onMathRendererChange } from './mathjax';
-import { inputModeFor, mathKbdFocus, noteHardwareKey, setSystemKeyboard } from '../mathkbd/hook';
+import { inputModeFor, mathKbdFocus, mathKbdDestroyed, noteHardwareKey, setSystemKeyboard } from '../mathkbd/hook';
 
 export type MoveOutDirection = 'backward' | 'forward' | 'upward' | 'downward';
 
@@ -314,7 +314,15 @@ export class LyxMathField {
     const cr = this.caretRect(c.owner, c.idx, c.pos);
     return cr ? { left: cr.x, top: cr.top, bottom: cr.bottom } : null;
   }
-  destroy(): void { cancelAnimationFrame(this.raf); this.offRenderer(); this.renderStamp++; for (const [t, l] of this.windowListeners) window.removeEventListener(t, l as EventListener); this.windowListeners = []; this.dom.remove(); }
+  destroy(): void {
+    cancelAnimationFrame(this.raf); this.offRenderer(); this.renderStamp++;
+    for (const [t, l] of this.windowListeners) window.removeEventListener(t, l as EventListener);
+    this.windowListeners = [];
+    this.focused = false;
+    if (active === this) { active = null; notifyFocus(); }
+    mathKbdDestroyed(this);
+    this.dom.remove();
+  }
 
   /** Commands for menus, toolbars and shortcuts. */
   execute(cmd: string, ...args: unknown[]): boolean {

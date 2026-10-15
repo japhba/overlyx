@@ -86,7 +86,8 @@ export function OverleafImport({ existing, onClose, onImported, notify, initial,
     setBusy(true);
     const okNames: string[] = [];
     for (const z of todo) {
-      setZips(list => list.map(x => (x === z ? { ...x, status: 'working' } : x)));
+      // Row objects are replaced as status changes; the selected File is stable.
+      setZips(list => list.map(x => (x.file === z.file ? { ...x, status: 'working', message: undefined } : x)));
       try {
         const r = await api.importZip(z.name.trim(), z.file);
         const made = r.projects?.length ? r.projects : [{ name: r.name, files: r.files, skipped: r.skipped }];
@@ -95,8 +96,8 @@ export function OverleafImport({ existing, onClose, onImported, notify, initial,
         const message = made.length === 1 && !failed.length
           ? `${made[0].name !== z.name.trim() ? `as “${made[0].name}”, ` : ''}${made[0].files} file${made[0].files === 1 ? '' : 's'}${made[0].skipped.length ? `, ${made[0].skipped.length} skipped` : ''}`
           : `${made.length} project${made.length === 1 ? '' : 's'}: ${made.map(p => `“${p.name}”`).join(', ')}${failed.length ? ` — not imported: ${failed.map(f => `“${f.name}” (${f.error})`).join(', ')}` : ''}`;
-        setZips(list => list.map(x => (x === z ? { ...x, status: 'ok', message, imported: made.map(p => p.name) } : x)));
-      } catch (e) { setZips(list => list.map(x => (x === z ? { ...x, status: 'error', message: (e as Error).message } : x))); }
+        setZips(list => list.map(x => (x.file === z.file ? { ...x, status: 'ok', message, imported: made.map(p => p.name) } : x)));
+      } catch (e) { setZips(list => list.map(x => (x.file === z.file ? { ...x, status: 'error', message: (e as Error).message } : x))); }
     }
     setBusy(false);
     if (okNames.length) { onImported(); notify(`${okNames.length} project${okNames.length === 1 ? '' : 's'} imported`); }

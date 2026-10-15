@@ -16,11 +16,13 @@ import { diffLines } from './diff';
 import { recordUsage, dialogKey } from '../usage';
 import { DOCUMENT_FONT_SETS, matchFontSet, fontSetValues } from '../fonts/catalog';
 
-export function Dialog({ title, onClose, children, buttons, wide }: { title: string; onClose: () => void; children: ComponentChildren; buttons?: ComponentChildren; wide?: boolean }) {
+export function Dialog({ title, onClose, children, buttons, wide, restoreFocus }: { title: string; onClose: () => void; children: ComponentChildren; buttons?: ComponentChildren; wide?: boolean; restoreFocus?: () => boolean }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
+  const restoreFocusRef = useRef(restoreFocus);
+  restoreFocusRef.current = restoreFocus;
   // usage statistics: the dialog's kind, whether its primary button was used, how long it was open (usage.ts)
   const usage = useRef({ key: dialogKey(title), opened: performance.now(), applied: false });
   useEffect(() => () => { const u = usage.current; recordUsage('dialog', u.key, { ok: u.applied, dt: performance.now() - u.opened, where: 'dialog' }); }, []);
@@ -55,7 +57,7 @@ export function Dialog({ title, onClose, children, buttons, wide }: { title: str
       document.removeEventListener('keydown', k, true);
       document.removeEventListener('focusin', contain);
       const now = document.activeElement;
-      if (previous?.isConnected && !(now && previous.contains(now))) previous.focus();
+      if (restoreFocusRef.current?.() !== false && previous?.isConnected && !(now && previous.contains(now))) previous.focus();
     };
   }, []);
   return (
@@ -238,14 +240,17 @@ export function RefDialog({ labels, useRefstyle, view, initial, onInsert, onClos
 }
 
 /* ----------------------------------------------------------------- cite */
-export function CiteDialog({ meta, docId, project, initial, onInsert, onAdded, onClose, search }: {
+export function CiteDialog({ meta, docId, project, initial, onInsert, onAdded, onClose, search, restoreFocusOnInsert = true }: {
   meta: DocMeta | null; docId?: string; project?: string; initial?: { keys: string[]; cmd: string; before: string; after: string };
   /** the bibliography is only searched on the server, its size unknown (a slide deck: every .bib file of the project) */
   search?: boolean;
+  /** a queued canvas command takes focus when delivered; cancellation still restores it */
+  restoreFocusOnInsert?: boolean;
   onInsert: (keys: string[], cmd: string, before: string, after: string, entries: BibItem[]) => void;
   /** a paper was added to the project's cited.bib (the caller updates the bibliography inset and its metadata) */
   onAdded?: (r: BibAddResult) => void; onClose: () => void;
 }) {
+  const inserted = useRef(false);
   const [tab, setTab] = useState<'project' | 'online'>('project');
   const [q, setQ] = useState('');
   const [keys, setKeys] = useState<string[]>(initial?.keys ?? []);
@@ -278,7 +283,7 @@ export function CiteDialog({ meta, docId, project, initial, onInsert, onAdded, o
   }, [q, local, hits, remote]);
   const toggle = (k: string) => setKeys(keys.includes(k) ? keys.filter(x => x !== k) : [...keys, k]);
   const cmds = meta?.citeEngine === 'natbib' ? ['citep', 'citet', 'citealp', 'citealt', 'citeauthor', 'citeyear', 'citeyearpar', 'nocite'] : meta?.citeEngine === 'biblatex' ? ['cite', 'parencite', 'textcite', 'autocite', 'citeauthor', 'citeyear', 'nocite'] : ['cite', 'nocite'];
-  const insert = () => { onInsert(keys, cmd, before, after, keys.map(k => known.get(k)).filter((e): e is BibItem => !!e)); onClose(); };
+  const insert = () => { onInsert(keys, cmd, before, after, keys.map(k => known.get(k)).filter((e): e is BibItem => !!e)); inserted.current = true; onClose(); };
 
   // --- find online (OpenAlex, DBLP, doi.org) and paste from Google Scholar
   const [oq, setOq] = useState('');
@@ -323,7 +328,7 @@ export function CiteDialog({ meta, docId, project, initial, onInsert, onAdded, o
   const authorsOf = (h: LitHit) => (h.authors.length > 3 ? h.authors.slice(0, 3).join(', ') + ' et al.' : h.authors.join(', '));
 
   return (
-    <Dialog title="Citation" onClose={onClose} wide buttons={<button class="btn primary" disabled={!keys.length} onClick={insert} data-cite-insert>{initial ? 'Apply' : 'Insert'}</button>}>
+    <Dialog title="Citation" onClose={onClose} restoreFocus={() => restoreFocusOnInsert || !inserted.current} wide buttons={<button class="btn primary" disabled={!keys.length} onClick={insert} data-cite-insert>{initial ? 'Apply' : 'Insert'}</button>}>
       <div class="dlg-tabs">
         <button class={tab === 'project' ? 'active' : ''} onClick={() => setTab('project')}>In this project</button>
         <button class={tab === 'online' ? 'active' : ''} onClick={() => setTab('online')} data-cite-online disabled={!project}>Find online / paste BibTeX</button>

@@ -7,6 +7,7 @@
 import { defineConfig, type Plugin } from 'vite';
 import path from 'node:path';
 import fs from 'node:fs';
+import { finalizeOfflineRuntime } from './offline-manifest';
 
 const NM = path.resolve(__dirname, '../../node_modules');
 const OUT = path.resolve(__dirname, process.env.OVERLYX_RUNTIME_OUT ?? 'dist/_ol');
@@ -34,6 +35,8 @@ function mathjax(): Plugin {
       // the font's per-block data, loaded when a formula needs it (fonts/mathjax-newcm-font/svg/dynamic/*.js)
       const font = path.join(NM, '@mathjax/mathjax-newcm-font');
       copyDir(path.join(font, 'svg'), path.join(out, 'fonts/mathjax-newcm-font/svg'), f => f.endsWith('.js'));
+      fs.copyFileSync(path.resolve(__dirname, 'src/deliverable/offline-frame.html'), path.join(OUT, 'offline-frame.html'));
+      finalizeOfflineRuntime(path.dirname(OUT));
     },
   };
 }

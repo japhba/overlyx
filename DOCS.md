@@ -433,6 +433,24 @@ blend.
   the raw summary) and `GET /api/admin/usage` rank actions by how often they failed, were undone
   within 5 s or were repeated in bursts, list the unanswered shortcuts, the dismissed dialogs and the
   error templates.
+* **Opt-in beta reliability diagnostics** share that collector, but require a separate
+  *Settings ▸ Privacy ▸ Send beta reliability diagnostics* checkbox (off by default in each
+  browser). They record only a shared finite event/pointer vocabulary, coarse context and optional
+  duration buckets under a random ID for this page load: keyboard-load fallback, cancelled/lost touch or pen capture, canvas recovery,
+  save-state changes, background/resume and portrait/landscape. They contain no document text,
+  formulas, file or project identifiers, URLs, coordinates, pressure, typed keys or exception text.
+  Usage-statistics opt-out, Global Privacy Control and the server statistics switch still apply;
+  the VS Code webview sends nothing. Withdrawing consent discards pending diagnostic events,
+  including batches whose failed request is still in flight; already-sent batches cannot be recalled.
+  The authenticated collector independently validates the finite schema and explicit batch consent.
+  Diagnostic rows expire after 30 days (legacy usage remains 180 days). The administrator-only
+  `GET /api/admin/usage?days=30` and existing `scripts/usage-report.ts --days 30` include separate
+  event/pointer, context and duration-bucket counts and session counts, not document or account data.
+  For an iPad beta session, enable the checkbox on that iPad, reproduce the interaction, and note
+  its approximate time separately for the operator. These counts aid investigation; they do not
+  verify real Pencil/palm rejection, native keyboard behaviour or OS interruption handling.
+  The portrait/landscape category describes the app viewport observed at startup and browser
+  orientation-change events, not a physical orientation sensor or a continuous window-resize trace.
 * **Files panel, one project at a time** (`app/DocPanel.tsx`, Google-Docs style, left; `Ctrl+Alt+O`; it was
   the "documents panel" — there is no separate list of documents, and no separate way to make one):
   the project switcher at the top lists your projects and the ones shared with you — choosing another
@@ -490,6 +508,17 @@ blend.
     document's text) with the runtime injected first in `<head>` (`deliverable/runtime/`, built by
     `runtime.vite.config.ts` into `dist/_ol/runtime.js` with MathJax in `dist/_ol/mathjax/`; the
     deploy scripts build it after the app).
+  * **Cold offline reopening** uses the latest locally persisted HTML, with a versioned runtime
+    manifest and cached project pictures, styles and MathJax modules (`offlineframes.ts`,
+    `offlineassets.ts`). API and project caches belong to the signed-in account; an HTTP access
+    denial never falls back to a cached grant. Display-only asset URLs are restored to their
+    original source paths before an edit is saved. A cached `/_ol/offline-frame.html` response
+    carries its own CSP sandbox: it is requested before the iframe sandbox attribute is set,
+    becomes opaque through the response policy, and creates the offline document from that
+    opaque origin. The parent restores the iframe sandbox before sending any authored HTML;
+    neither the app CSP nor the document's access to app cookies/storage is relaxed.
+    A canvas that has not reported ready within 20 seconds offers **Retry** and **Open Code**,
+    so its current source remains reachable even when the frame cannot start.
   * **The runtime** (modes `?ol=edit|thumb|present|print|check|view`) pairs the live page with the
     source it was rendered from (`srcOf` / `liveOf`) and takes each new version of the text in
     place (`reconcile.ts`): an unchanged element keeps its live state (typeset math, what the page's
@@ -860,11 +889,17 @@ blend.
     (`ol.deckGuides`, off at first). The slide's right-click menu (and the canvas's) ▸ *Guides*: show,
     add a vertical / horizontal guide where it was right-clicked (every slide's, or this slide's only),
     reset this slide's to every slide's, make this slide's every slide's, reset all (the middle lines),
-    remove all — the toolbar's Slide section has the same (`dk-guides`, through the slide's middle: an
+    remove custom guides — the toolbar's Slide section has the same (`dk-guides`, through the slide's middle: an
     iPad has no right-click). A guide is dragged where the pointer is right on it (4 px, a finger 10 —
     before the object under it, so one over a full-slide picture moves too; the cursor says so), snapping
     to the slide's middle and edges and the objects' (Ctrl / ⌘: freely), with its place in points; Alt /
-    Ctrl drags a copy; dragged off the slide it goes. The runtime reads the guides from the parsed source
+    Ctrl drags a copy; dragged off the slide it goes. **Fixed layout margins** are a separate set of
+    purple dotted safe-area lines, from `data-ol-layout-margins` on the template's `<body>` (new decks:
+    `72px 96px`; A0 posters: `40mm`). The Guides menu sets margins for every slide or overrides one
+    slide, in CSS margin shorthand with px/pt/mm/cm/in/% units; blank disables them and *Use master
+    margins on this slide* removes an override. These lines snap objects, but cannot be dragged;
+    removing/resetting custom guides leaves them unchanged. They share *Show guides* visibility and
+    are editor-only, never printed/exported. The runtime reads the guides from the parsed source
     (`state.src`: the live `<body>` is the page's own and does not follow the text) and writes them to
     the source body's path. Guide edits are never suggestions (Suggesting): `applyRuntimeOps` and the
     menu's `applyOps(…, true)` pass them as they are.
@@ -899,7 +934,9 @@ blend.
     and fades on release, clicks do not advance while it is on) and **pinch to zoom / pan** (Ctrl+wheel,
     Safari's gestures, two fingers; while zoomed a drag pans and a click does not advance; 0, a
     double click or Escape goes back to the whole slide — Escape leaving full screen first only
-    zooms out); *Download* gives the **PDF** (headless Chromium,
+    zooms out); **B / .** pauses on black and **W / ,** on white, as in the LaTeX presenter.
+    The same shortcut, a click or forward / backward navigation resumes the current slide and
+    animation step; Home / End or a slide number jumps directly. *Download* gives the **PDF** (headless Chromium,
     `print` mode: a deck one slide per page at its size, a poster one page, a web page on A4) and a
     **website `.zip`** that works without OverLyX (the runtime and MathJax under `_overlyx/`, a deck
     opening presenting, files from elsewhere in the project copied into `_assets/`, PDF figures as
@@ -1357,6 +1394,9 @@ blend.
   start page speak of LaTeX; the Classic choice in the welcome card is "for people coming from
   desktop LyX", and Settings ▸ Shortcuts' *Coming from LyX* block is Classic-only.
 * **Two interfaces: Classic and Modern** (`app/uimode.ts`, `modern.css`, `app/modernicons.ts`):
+  New accounts start in Modern; explicit browser and account choices are remembered. The welcome
+  card offers Classic under the optional *Change the interface* disclosure. The tour explains that
+  unsupported LaTeX remains editable as code and the PDF shows the final typesetting.
   Classic is LyX's (its toolbar rows, menus and status bar); **Modern** is OverLyX's own quiet look
   (Dieter Rams / Bauhaus): warm paper grey around the work, graphite ink, hairlines, a 4/8 px grid,
   and the wordmark's three colours with one job each — red (LyX's X) for what is on and the one thing
@@ -2174,19 +2214,37 @@ document. Tests: `tests/security-limits.test.ts`, `tests/pdffetch.test.ts`.
 systemd unit's `WorkingDirectory`), and the VS Code extension is released by
 `.github/workflows/extension-release.yml` from `origin/master` (`packages/vscode/RELEASING.md`), so
 both must come from the same commit: `scripts/deploy.sh` refuses a diverged `master`/`origin/master`,
-pushes (which starts the extension release), fast-forwards the production checkout, runs `npm ci`
-when the lockfile changed, builds the client, restarts the unit and checks that https://overlyx.app
-serves the new bundle (`/api/version` reports the running commit). Run the checks below first — the
-script deploys, it does not test. Pushes from any other machine deploy themselves:
+typechecks the client and extension, runs the unit suite with strict collaboration fuzz invariants,
+and builds and browser-tests an isolated candidate before pushing (which starts the extension
+release). It then fast-forwards the production checkout, runs `npm ci` when the lockfile changed,
+promotes the exact tested client/runtime assets, restarts the unit and checks that https://overlyx.app
+serves the new bundle (`/api/version` reports the running commit). Pushes from any other machine deploy themselves:
 `deploy/overlyx-autodeploy.timer` runs `scripts/autodeploy.sh` every two minutes on the server, which
 fetches origin and, when origin/master is ahead of production, typechecks the client and the
-extension and runs `npm test` in a throwaway worktree, then fast-forwards, builds, restarts and
+extension, runs the strict unit suite and the same isolated browser gate in a throwaway worktree,
+then fast-forwards, promotes the tested assets, restarts and
 verifies — reporting a `deploy/overlyx.app` commit status on GitHub (pending → success / failure;
 `gh api repos/japhba/overlyx/commits/<sha>/status --jq '.statuses[] | "\(.state) \(.description)"'`, or
 `curl -s https://overlyx.app/api/version` once it is live). A failed commit is not retried; the next push is.
 Both scripts share one lock. Install the units with `cp deploy/overlyx-autodeploy.* /etc/systemd/system/
 && systemctl daemon-reload && systemctl enable --now overlyx-autodeploy.timer`; logs in
 `journalctl -u overlyx-autodeploy`.
+
+`npm run test:beta` runs the browser release gate locally: it builds the app and runtime, seeds
+disposable accounts, starts a localhost-only server with temporary data/projects, exercises creating,
+editing, sharing, saving, recovering offline work and exporting documents/decks/posters, and cleans
+up that instance. Reports, failure screenshots and traces remain under `test-results/beta-*`.
+It requires no production credentials. `OVERLYX_E2E_BROWSERS=all npm run test:beta` also runs
+Firefox and WebKit; the deployment gate defaults to Chromium. Set `OVERLYX_BETA_REPORT_DIR`
+to retain evidence elsewhere and `OVERLYX_BETA_BUILD_DIR` to keep the tested assets for promotion.
+The gate records immutable hashes for every public file, including lazy modules, fonts and images,
+and rejects added, missing or changed files before and after the browsers run. It also verifies the
+served app and every offline runtime file and checks the offline bootstrap's exact sandbox CSP.
+A stopped server or a document-worker/native-repair failure also fails the gate.
+Deployment promotes those tested bytes and verifies their hashes from the running server.
+`npm run test:release` runs the unit suite with strict collaboration invariants, then repeats the
+randomized collaboration matrix with paragraph joins enabled. It clears inherited fuzz debugging
+or reduced-matrix settings. Both deployment paths use it before the browser gate.
 *Help ▸ OverLyX for VS Code* (`/api/vscode-extension`) redirects to the latest GitHub release's
 `overlyx-vscode.vsix` (the build the extension's self-updater installs); a `.vsix` packaged into
 `packages/vscode` of the running checkout is the fallback (`OVERLYX_VSIX_SOURCE=local` forces it).

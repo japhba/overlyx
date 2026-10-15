@@ -2,6 +2,12 @@
 
 How to run, test and deploy: [DOCS.md](DOCS.md). The file format: [README.md](README.md).
 
+## Batch fixes before testing
+
+Batch related fixes, then run focused checks for the combined changes. Avoid rebuilding or
+rerunning the full suite after every edit. Use extra targeted checks when needed to diagnose a
+failure or resolve uncertainty; run the full release checks once the batch is stable.
+
 ## Keyboard shortcuts are contextual (VS Code's model)
 
 A key may do different things in different places, as VS Code's keybindings carry a `when`

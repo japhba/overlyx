@@ -19,6 +19,8 @@ import { Toolbar, ICONS, type ToolButton } from '../app/Toolbar';
 import { ColorGrid } from '../app/ColorGrid';
 import type { DeliverableHost, Peer } from './host';
 import { webHost } from './webHost';
+import { createLinkOpener, type LinkState } from './link-opening';
+import { capturePointerDrag } from './pointerdrag';
 import type { FromRuntime, ToRuntime, SelItem, SlideBox, Tool, Path, HtmlOp, DeliverableKind, Rect, ArrangeHow, Paint, CanvasView, KeyPress, Solo, ObjNode, InkRunD, WordsStyle } from './protocol';
 import { SlideView, viewLevels, viewDetents, levelAt, levelAnchor, VIEW_FIT_NAMES, type ViewFit, type ViewLevels } from './viewport';
 import { pinchFactor, pinchLock, triGesture, type PinchLock } from './gestures';
@@ -29,17 +31,18 @@ import { keepAwake } from '../app/wakelock';
 import { presentFingersDraw, savePresentFingersDraw } from '../app/presentkit';
 import { createPortal } from 'preact/compat';
 import { isFromRuntime } from './protocol';
-import { rebasedSplices, objectHtml, imageHtml, insertPlace, newSlideHtml, slidePaths, slideNotes, notesOp, sourceRange, inlineSvgHtml, guidesIn } from './sourceops';
-import { GUIDES_ATTR, parseGuides, masterGuides, formatGuides, withGuide, type Guide } from './guides';
+import { rebasedSplices, rebaseObjectPaths, objectHtml, imageHtml, insertPlace, newSlideHtml, slidePaths, slideNotes, notesOp, sourceRange, inlineSvgHtml, guidesIn } from './sourceops';
+import { GUIDES_ATTR, LAYOUT_MARGINS_ATTR, layoutMarginGuides, parseGuides, masterGuides, formatGuides, withGuide, type Guide } from './guides';
 import { sizePt, stepPt } from './units';
 import { deckToolbar, quickGroups, type DeckTextActions } from './decktoolbar';
 import { loadDeckInk, saveDeckInk, patchDeckInk, deckInkStyle, type DeckInk, type DeckInkPatch } from './deckink';
 import { QuickBar } from './QuickBar';
+import { loadTextDrafts, saveTextDrafts, draftWords, pendingDraftKey, loadPendingTextDrafts, forgetPendingTextDraft, type TextDraft } from './recovery';
 import { BgRemoveDialog } from './BgRemoveDialog';
 import { MathOverlay, type MathEditState, type MathOps } from './MathOverlay';
 import { AnimationPane, type Sequence } from './AnimationPane';
 import { ObjectsPane } from './ObjectsPane';
-import { CiteDialog, uiPrompt } from '../app/Dialogs';
+import { CiteDialog, Dialog, uiPrompt } from '../app/Dialogs';
 import type { DocMeta } from '../api';
 import { citedKeys, citeEntry, type CiteEntry } from '@overlyx/core/html/refs.ts';
 import type { MathJaxMacro } from '@overlyx/core/html/deckextras.ts';
@@ -50,11 +53,14 @@ import { setLayoutMathFont } from '../fonts/editorfont';
 import { useMathPanels } from '../app/toolbars';
 import { parseSource, opSplices, elementAt, elementChildren, attr } from '@overlyx/core/html/source.ts';
 import { reviewOps, resolveOps, resolveAll, reviewOf, isSuggesting, suggestingOp, stampOf, threadsOp, parseThreads, newThreadId, describe as describeObject, COMMENTS, type ReviewChange, type ReviewThread, type Thread } from '@overlyx/core/html/review.ts';
-import { slideElements } from '@overlyx/core/html/deliverable.ts';
+import { deliverableInfo, slideElements } from '@overlyx/core/html/deliverable.ts';
 import { formatTimestamp } from '@overlyx/core';
 import { ReviewPane, type CommentDraft } from './ReviewPane';
 import { EditModeSwitch, type EditMode } from '../app/EditModeSwitch';
 import { useDarkPagesState, toggleDarkPages, invertedColor, DARK_DESK } from '../app/darkpages';
+import { recordReliability } from '../usage';
+import { saveReliabilityEvent } from './reliability';
+import { makeReliabilityDetail, type ReliabilityEvent } from '@overlyx/core/reliability.ts';
 
 const PAD = 48;
 /** the slide rail's width: by default, and as far as its edge can be dragged */
@@ -130,6 +136,37 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
 
   const [synced, setSynced] = useState(host.ready());
   const [online, setOnline] = useState(true);
+  const [saveState, setSaveState] = useState(() => host.saveState?.() ?? null);
+  const unsentText = useRef(false);
+  const lastTypedDraft = useRef<string | null>(null);
+  const bufferStorageWarned = useRef(false);
+  const bufferedDraft = useRef<{ id: string; pending: boolean } | null>(null);
+  const clearDurableBuffer = () => {
+    const state = host.saveState?.();
+    const buffer = bufferedDraft.current;
+    if (buffer && !buffer.pending && (!state?.pending || state.localPending === false && !state.localError)) {
+      forgetPendingTextDraft(recoveryKey, buffer.id); bufferedDraft.current = null;
+    }
+  };
+  useEffect(() => {
+    const off = host.onSaveState?.(() => {
+      const state = host.saveState?.(); setSaveState(state ?? null);
+      if (state?.state === 'stale') {
+        if (lastTypedDraft.current && unsentText.current) keepDraft(lastTypedDraft.current, 'This file was replaced before this text could be saved. The older local source is still available to download.', false);
+        lastTypedDraft.current = null; toCanvas({ ol: 'stopText', save: false });
+      } else if (host.readOnly() && lastTypedDraft.current && (unsentText.current || state?.pending)) {
+        keepDraft(lastTypedDraft.current, 'Your editing permission changed before this text was saved. Copy the draft or ask the owner to restore editing access.');
+        lastTypedDraft.current = null; toCanvas({ ol: 'stopText', save: false });
+      } else if (!unsentText.current && !state?.pending) lastTypedDraft.current = null;
+      clearDurableBuffer();
+    });
+    const protect = (event: BeforeUnloadEvent) => {
+      const state = host.saveState?.();
+      if (unsentText.current || state?.pending && (state.localPending !== false || !!state.localError)) { event.preventDefault(); event.returnValue = ''; }
+    };
+    window.addEventListener('beforeunload', protect);
+    return () => { off?.(); window.removeEventListener('beforeunload', protect); };
+  }, [host]);
   const [readOnly, setReadOnly] = useState(false);
   /** the mode switch's Viewing: this editor only reads (the page may still be editable) */
   const [viewing, setViewing] = useState(false);
@@ -160,16 +197,53 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   /** every version of the text sent to the frames, kept a little while for rebasing their operations */
   const versions = useRef(new Map<number, string>());
   const version = useRef(0);
+  const recoveryKey = 'ol.textRecovery:' + (host.docId ?? host.path);
+  const [recovered, setRecovered] = useState<TextDraft[]>(() => [...loadTextDrafts(recoveryKey), ...loadPendingTextDrafts(recoveryKey)]);
+  const recoveredRef = useRef(recovered); recoveredRef.current = recovered;
+  const [recoveryOpen, setRecoveryOpen] = useState(false);
+  const keepDraft = (html: string, reason: string, open = true) => {
+    const previous = recoveredRef.current;
+    if (!previous.some(d => d.html === html)) {
+      const next = [...previous, { id: Date.now().toString(36) + Math.random().toString(36).slice(2), html, reason }];
+      recoveredRef.current = next; setRecovered(next);
+      if (!saveTextDrafts(recoveryKey, next)) {
+        recordReliability('save.storage-warning', { context: kindRef.current });
+        notify('Your recovered text is available here, but browser storage is full. Copy it before closing this tab.', 'error');
+      }
+    }
+    if (open) setRecoveryOpen(true);
+  };
 
   /* ------------------------------------------------------------- the frames */
 
   const [link, setLink] = useState<Link | null>(null);
+  const [frameLink, setFrameLink] = useState<Link | null>(null);
+  const [offlineDocs, setOfflineDocs] = useState<Partial<Record<'edit' | 'thumb' | 'present', string>>>({});
+  const [offlineRevisions, setOfflineRevisions] = useState({ edit: 0, thumb: 0, present: 0 });
+  const offlineDocsRef = useRef(offlineDocs); offlineDocsRef.current = offlineDocs;
+  const currentLink = useRef(link); currentLink.current = link;
+  const [linkState, setLinkState] = useState<LinkState>('opening');
+  const [canvasState, setCanvasState] = useState<'opening' | 'ready' | 'failed'>('opening');
+  const canvasOpeningAt = useRef(Date.now());
+  const canvasHadFailure = useRef(false);
+  const lastSaveDiagnostic = useRef<ReturnType<typeof saveReliabilityEvent>>(null);
+  const savePendingAt = useRef<number | null>(null);
+  const restartOpening = useRef(false);
+  const retryLink = useRef<() => void>(() => {});
   const canvasBox = useRef<HTMLDivElement>(null);
   const canvasFrame = useRef<HTMLIFrameElement>(null);
   const railBox = useRef<HTMLDivElement>(null);
   const railFrame = useRef<HTMLIFrameElement>(null);
   const presentFrame = useRef<HTMLIFrameElement>(null);
   const [kind, setKind] = useState<DeliverableKind>('deck');
+  useEffect(() => {
+    const event = saveReliabilityEvent(saveState);
+    if (!event || event === lastSaveDiagnostic.current) return;
+    lastSaveDiagnostic.current = event;
+    if (event === 'save.pending' && savePendingAt.current === null) savePendingAt.current = Date.now();
+    recordReliability(event, { context: kind, ...(event === 'save.saved' && savePendingAt.current !== null ? { durationMs: Date.now() - savePendingAt.current } : {}) });
+    if (event === 'save.saved') savePendingAt.current = null;
+  }, [host, saveState, kind]);
   const [slides, setSlides] = useState<SlideBox[]>([]);
   /** a deck's or poster's one slide on the canvas (runtime solo.ts): the frame is sized to it and panned here (viewport.ts) */
   const [solo, setSolo] = useState<Solo | null>(null);
@@ -199,6 +273,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   const [device, setDevice] = useState<'desktop' | 'mobile'>('desktop');
   const [current, setCurrent] = useState(0);
   const [sel, setSel] = useState<SelItem[]>([]);
+  const canvasSelection = useRef<{ version: number; items: SelItem[] }>({ version: 0, items: [] });
   /** something selected is being dragged on the canvas (the quick menu steps aside) */
   const [dragging, setDragging] = useState(false);
   const [editingText, setEditingText] = useState<Path | null>(null);
@@ -284,17 +359,112 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   const toCanvas = (msg: ToRuntime) => toFrame(canvasFrame.current, msg);
   const toRail = (msg: ToRuntime) => toFrame(railFrame.current, msg);
 
+  // A valid link does not prove that its document and runtime actually started.
+  // Watch each intentional opening; ordinary link renewal leaves drafts alone.
+  useLayoutEffect(() => {
+    if (!link || !synced) return;
+    canvasReady.current = false;
+    canvasOpeningAt.current = Date.now();
+    setCanvasState('opening');
+    const timer = setTimeout(() => {
+      if (!canvasReady.current) {
+        canvasHadFailure.current = true;
+        recordReliability('canvas.timeout', { context: kindRef.current, durationMs: Date.now() - canvasOpeningAt.current });
+        setCanvasState('failed');
+      }
+    }, 20_000);
+    return () => clearTimeout(timer);
+  }, [host, !!link, synced, frameLink?.base, offlineRevisions.edit]);
+  const retryOpening = () => {
+    recordReliability('canvas.retry', { context: kindRef.current });
+    if (canvasState === 'failed') restartOpening.current = true;
+    retryLink.current();
+  };
+
+  useEffect(() => host.onOfflineResources?.(urls => {
+    for (const frame of [canvasFrame.current, railFrame.current, presentFrame.current]) toFrame(frame, { ol: 'assets', urls });
+  }), [host]);
+
   /** the address of the folder; renewed before it expires */
   useEffect(() => {
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout>;
-    const get = () => host.link().then(l => {
-      if (cancelled) return;
-      setLink(prev => prev ?? { expires: 0, ...l });
-      if (l.expires) timer = setTimeout(get, Math.max(60000, l.expires - Date.now() - 10 * 60000));
-    }).catch(e => { if (!cancelled) notify('Could not open the page: ' + (e as Error).message, 'error'); });
-    void get();
-    return () => { cancelled = true; clearTimeout(timer); };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let stopped = false;
+    let offlineOpened = false, denied = false, recovering = false, opened = false;
+    let waitingForSource: Promise<void> | undefined;
+    let stopWaiting = () => {};
+    const waitForSource = () => host.ready() ? Promise.resolve() : waitingForSource ??= new Promise<void>(resolve => {
+      let off = () => {};
+      const finish = () => { off(); resolve(); };
+      off = host.onReady(() => { if (host.ready()) finish(); });
+      stopWaiting = finish;
+      if (host.ready()) finish();
+    });
+    const opener = createLinkOpener({
+      host: { link: async () => {
+        const l = await host.link();
+        if (host.offlineFrame) { await waitForSource(); if (stopped) throw new Error('Opening was cancelled'); }
+        const documentKind = host.ready() ? deliverableInfo(host.text()).kind : undefined;
+        // A large picture appears both in the document and its asset map. Build
+        // only frames that will open; unused poster/presentation snapshots can
+        // otherwise retain hundreds of megabytes of encoded resources.
+        const modes = documentKind === 'deck' || !documentKind ? ['edit', 'thumb'] as const : ['edit'] as const;
+        const frames = await Promise.all(modes.map(mode => host.offlineFrame?.(mode, l)));
+        const docs = Object.fromEntries(modes.flatMap((mode, i) => frames[i] ? [[mode, frames[i]]] : []));
+        return { ...l, ...(Object.keys(docs).length ? { expires: 0 } : {}), docs, documentKind };
+      } },
+      onReady: l => {
+        if (stopped) return;
+        offlineOpened = Object.keys(l.docs).length > 0; recovering = false;
+        const nextLink: Link = { base: l.base, entry: l.entry, expires: l.expires ?? 0 };
+        setLink(nextLink);
+        if (l.documentKind) setKind(l.documentKind);
+        // Renew capability links without interrupting an active text draft.
+        if (!opened || restartOpening.current) {
+          if (l.docs.edit) { canvasFrame.current?.removeAttribute('sandbox'); railFrame.current?.removeAttribute('sandbox'); }
+          setFrameLink(nextLink);
+          setOfflineDocs(l.docs);
+          setOfflineRevisions(prev => ({ edit: prev.edit + 1, thumb: prev.thumb + 1, present: prev.present + 1 }));
+          restartOpening.current = false; opened = true;
+        }
+        const base = new URL('.', new URL(l.entry.split('/').map(encodeURIComponent).join('/'), new URL(l.base, location.href))).href;
+        for (const frame of [canvasFrame.current, railFrame.current, presentFrame.current]) toFrame(frame, { ol: 'folder', base });
+        void host.offlineResources?.().then(urls => {
+          if (stopped) return;
+          for (const frame of [canvasFrame.current, railFrame.current, presentFrame.current]) toFrame(frame, { ol: 'assets', urls });
+        }).catch(() => {});
+        clearTimeout(timer);
+        if (l.expires && l.expires > 0) timer = setTimeout(opener.retry, Math.max(60000, l.expires - Date.now() - 10 * 60000));
+      },
+      onState: state => {
+        setLinkState(state);
+        if (state === 'failed' || state === 'denied') canvasHadFailure.current = true;
+        if (state === 'denied' && !denied) recordReliability('canvas.denied', { context: kindRef.current });
+        denied = state === 'denied';
+        if (state === 'failed' || denied) recovering = false;
+        if (state === 'denied') clearTimeout(timer);
+      },
+    });
+    retryLink.current = opener.retry;
+    const recover = () => {
+      if (offlineOpened && !denied) {
+        if (!recovering) { recovering = true; opener.retry(); }
+      } else opener.resume();
+    };
+    let wasOnline = host.online();
+    const offStatus = host.onStatus(() => {
+      const online = host.online();
+      if (online && !wasOnline) recover();
+      wasOnline = online;
+    });
+    window.addEventListener('online', recover);
+    opener.start();
+    return () => {
+      stopped = true;
+      stopWaiting();
+      opener.stop(); clearTimeout(timer); offStatus();
+      window.removeEventListener('online', recover);
+      if (retryLink.current === opener.retry) retryLink.current = () => {};
+    };
   }, [host]);
 
   // LyX's formula editor draws in the slides' math font (the runtime's MathJax: New Computer
@@ -361,9 +531,9 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   /* ------------------------------------------------------------- changes of the text */
 
   /** splices of the text, as one undo step */
-  const applySplices = (splices: { from: number; to: number; insert: string }[], origin: 'canvas' | 'code' = 'canvas') => {
+  const applySplices = (splices: { from: number; to: number; insert: string }[], origin: 'canvas' | 'code' = 'canvas', separateUndo = origin === 'canvas') => {
     if (readOnlyRef.current || !splices.length) return;
-    host.apply(splices, origin);
+    host.apply(splices, origin, separateUndo);
   };
 
   /** who and when, while suggesting (null: edits are direct) */
@@ -374,6 +544,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
    * made suggestions (core reviewOps); `raw`: as they are (comments, accepting / rejecting, notes)
    */
   const applyOps = (ops: HtmlOp[], raw = false): boolean => {
+    if (readOnlyRef.current || host.readOnly()) { notify('You can only view this page.', 'error'); return false; }
     const cur = text.toString();
     const src = parseSource(cur);
     try {
@@ -385,16 +556,36 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
 
   /** operations the canvas made on version `v` */
   const applyRuntimeOps = (v: number, ops: HtmlOp[]): boolean => {
+    if (readOnlyRef.current || host.readOnly()) {
+      const typing = ops.filter((op): op is Extract<HtmlOp, { t: 'inner' }> => op.t === 'inner' && op.before !== undefined);
+      const stale = host.saveState?.()?.state === 'stale';
+      for (const op of typing) keepDraft(op.html, stale ? 'This file was replaced before this text could be saved. The older local source is still available to download.' : 'Your editing permission changed before this text was saved.', !stale);
+      if (typing.length) toCanvas({ ol: 'stopText', save: false });
+      notify('You can only view this page.', 'error'); sendSource(true); return false;
+    }
     const base = versions.current.get(v);
     const cur = text.toString();
-    if (base === undefined) { notify('The page changed meanwhile — try again.', 'error'); return false; }
+    if (base === undefined) {
+      for (const op of ops) if (op.t === 'inner' && op.before !== undefined) keepDraft(op.html, 'The page changed before this edit could be applied.');
+      toCanvas({ ol: 'stopText', save: false });
+      sendSource(true);
+      notify('The page changed meanwhile. Your text is available in Recover text.', 'error'); return false;
+    }
     let reviewed: HtmlOp[];
     // (a guide moved is no suggestion: guides are the editor's, not the slides')
     if (ops.every(o => o.t === 'attr' && o.name === GUIDES_ATTR)) reviewed = ops;
     else try { reviewed = reviewOps(parseSource(base), ops, suggestStamp()); } catch { reviewed = ops; }
     const sp = rebasedSplices(base, cur, reviewed);
-    if (!sp) { notify('Somebody changed that object meanwhile — try again.', 'error'); sendSource(true); return false; }
-    applySplices(sp);
+    if (!sp) {
+      const typing = ops.filter((op): op is Extract<HtmlOp, { t: 'inner' }> => op.t === 'inner' && op.before !== undefined);
+      for (const op of typing) keepDraft(op.html, 'Your changes overlap with another edit, or the original box was removed. The latest saved version was kept.');
+      if (typing.length) toCanvas({ ol: 'stopText', save: false });
+      notify(typing.length ? 'The latest version was kept. Your draft is available in Recover text.' : 'Somebody changed that object meanwhile — try again.', 'error');
+      sendSource(true); return false;
+    }
+    // Text input can share its recent typing group. A paste, transform, group or
+    // other discrete gesture must not consume its neighbour when undone.
+    applySplices(sp, 'canvas', !ops.every(op => op.t === 'inner' && op.before !== undefined));
     return true;
   };
 
@@ -498,6 +689,23 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
       if (!fromCanvas && !fromRail && !fromPresent) return;
       if (!isFromRuntime(e.data)) return;
       const m = e.data as FromRuntime;
+      if (m.ol === 'offlineBoot') {
+        const mode = fromCanvas ? 'edit' : fromRail ? 'thumb' : 'present';
+        const frame = fromCanvas ? canvasFrame.current : fromRail ? railFrame.current : presentFrame.current;
+        const html = offlineDocsRef.current[mode];
+        if (m.opaque === true && frame && html) {
+          frame.setAttribute('sandbox', mode === 'edit' ? 'allow-scripts allow-modals allow-popups allow-forms' : mode === 'present' ? 'allow-scripts allow-popups' : 'allow-scripts');
+          frame.contentWindow?.postMessage({ ol: 'offlineDocument', html }, '*');
+        }
+        return;
+      }
+      if (m.ol === 'ready' && host.offlineResources) {
+        const frame = fromCanvas ? canvasFrame.current : fromRail ? railFrame.current : presentFrame.current;
+        const source = e.source;
+        void host.offlineResources().then(urls => {
+          if (frame?.contentWindow === source && frame.isConnected) toFrame(frame, { ol: 'assets', urls });
+        }).catch(() => {});
+      }
       if (fromPresent) {
         if (m.ol === 'presentZoom') presentZoomed.current = m.zoomed;
         if (m.ol === 'exit') stopPresenting();
@@ -512,7 +720,12 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
       switch (m.ol) {
         case 'ready':
           if (fromCanvas) {
+            if (!canvasReady.current) {
+              recordReliability(canvasHadFailure.current ? 'canvas.recovered' : 'canvas.ready', { context: m.kind, durationMs: Date.now() - canvasOpeningAt.current });
+              canvasHadFailure.current = false;
+            }
             canvasReady.current = true;
+            setCanvasState('ready');
             setKind(m.kind);
             kindRef.current = m.kind;
             if (m.width) setPageW(m.width);
@@ -547,18 +760,28 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
             if (m.height) setPageH(m.height);
             setSolo(prev => sameSolo(prev, m.solo ?? null) ? prev : m.solo ?? null);
             const p = pending.current;
-            if (p) {
+            // An older layout cannot acknowledge an insertion the canvas has not applied yet.
+            if (p && m.version === version.current) {
               pending.current = null;
               if (p.select) toCanvas({ ol: 'select', paths: p.select });
               if (p.editText) toCanvas({ ol: 'editText', path: p.editText, selectAll: true, math: p.math });
             }
           }
           break;
-        case 'selection': if (fromCanvas) { setSel(m.items); host.setSelection(m.items.map(i => i.path)); } break;
+        case 'selection': if (fromCanvas) {
+          canvasSelection.current = { version: m.version, items: m.items };
+          setSel(m.items); host.setSelection(m.items.map(i => i.path));
+        } break;
         case 'caret': if (fromCanvas) host.setCaret?.(m.caret); break;
         case 'clip': if (fromCanvas) clipRef.current = m.html ? { html: m.html, plain: m.plain ?? '' } : null; break;
         case 'pasteText': if (fromCanvas) pasteText(m.version, m.slide, m.after, m.text); break;
         case 'dragging': if (fromCanvas) setDragging(m.on); break;
+        case 'reliability':
+          if (fromCanvas && makeReliabilityDetail(m.event, m.pointer)
+            && ['gesture.cancelled', 'gesture.capture-lost', 'gesture.interrupted', 'gesture.palm-ignored'].includes(m.event)) {
+            recordReliability(m.event, { pointer: m.pointer, context: kindRef.current });
+          }
+          break;
         case 'words': if (fromCanvas) setWords(m.rect || m.choosing ? { rect: m.rect, style: m.style, choosing: m.choosing } : null); break;
         case 'editing':
           if (!fromCanvas) break;
@@ -568,6 +791,25 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
           // the new text box is being retyped: what was typed meanwhile goes into it
           if (m.path) textAhead.current = false;
           break;
+        case 'recoveredText': if (fromCanvas) keepDraft(m.html, m.reason); break;
+        case 'textPending':
+          if (!fromCanvas) break;
+          unsentText.current = m.on === true;
+          if (m.on && typeof m.html === 'string') {
+            lastTypedDraft.current = m.html;
+            const buffer = bufferedDraft.current ?? { id: crypto.randomUUID(), pending: true };
+            buffer.pending = true; bufferedDraft.current = buffer;
+            if (!saveTextDrafts(pendingDraftKey(recoveryKey, buffer.id), [{ id: buffer.id, html: m.html, reason: 'This text edit was interrupted before it finished saving.' }])) {
+              if (!bufferStorageWarned.current) {
+                recordReliability('save.storage-warning', { context: kindRef.current });
+                notify('Browser storage is full. Keep this tab open until Saved appears.', 'error');
+              }
+              bufferStorageWarned.current = true;
+            } else bufferStorageWarned.current = false;
+          } else if (bufferedDraft.current) {
+            bufferedDraft.current.pending = false; clearDurableBuffer();
+          }
+          break;
         case 'mathEdit': if (fromCanvas) setMathEdit({ id: m.id, tex: m.tex, display: m.display, box: m.box, color: m.color, at: m.at, where: m.where, dollar: m.dollar }); break;
         case 'mathKeys': if (fromCanvas) mathKeysIn.current?.(m.id, m.keys); break;
         case 'mathRect': if (fromCanvas) setMathEdit(st => st && st.id === m.id ? { ...st, box: m.box } : st); break;
@@ -575,7 +817,6 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
         case 'visible': if (fromCanvas && m.slide >= 0) { setCurrent(m.slide); toRail({ ol: 'current', slide: m.slide }); } break;
         case 'goto': setCurrent(m.slide); toCanvas({ ol: 'scrollTo', slide: m.slide, smooth: false }); toRail({ ol: 'current', slide: m.slide }); break;
         case 'ops': {
-          if (readOnlyRef.current) { notify('You can only view this page.', 'error'); sendSource(true); break; }
           const before = text.toString();
           const ok = applyRuntimeOps(m.version, m.ops);
           if (ok && Array.isArray(m.select)) pending.current = { select: m.select };
@@ -638,11 +879,27 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
         case 'pencil': if (fromCanvas && !inkRef.current.pencil) setInk({ pencil: true }); break;
         case 'penDown': if (fromCanvas) penOnCanvas(m.down); break;
         case 'history': if (fromCanvas) historyGesture(m.redo); break;
-        case 'panEnd': if (fromCanvas) slideView.release(); break;
+        case 'panEnd': if (fromCanvas) slideView.release(!!m.cancel); break;
         case 'colors': if (fromCanvas) setColors({ desk: m.desk, page: m.page }); break;
         case 'cropping': if (fromCanvas) setCropping(m.path); break;
         case 'scroll': if (fromCanvas) { scrollRef.current = m.y; setScrollY(m.y); } break;
-        case 'reload': canvasReady.current = canvasReady.current && !fromCanvas; if (fromRail) railReady.current = false; break;
+        case 'reload': {
+          canvasReady.current = canvasReady.current && !fromCanvas; if (fromRail) railReady.current = false;
+          if (fromCanvas) setCanvasState('opening');
+          const mode = fromCanvas ? 'edit' : 'thumb';
+          if (host.offlineFrame) {
+            void host.offlineFrame?.(mode, currentLink.current ?? undefined).then(doc => {
+              if (doc) {
+                const frame = mode === 'edit' ? canvasFrame.current : railFrame.current;
+                frame?.removeAttribute('sandbox');
+                setOfflineDocs(prev => ({ ...prev, [mode]: doc }));
+                setOfflineRevisions(prev => ({ ...prev, [mode]: prev[mode] + 1 }));
+              }
+              else if (currentLink.current) setFrameLink(currentLink.current);
+            }).catch(() => notify('The page could not reopen. Your source is still available in Code.', 'error'));
+          } else if (currentLink.current) setFrameLink(currentLink.current);
+          break;
+        }
       }
     };
     addEventListener('message', onMessage);
@@ -654,16 +911,35 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   /* ------------------------------------------------------------- sizes, zoom and panning */
 
   useEffect(() => {
-    const ro = new ResizeObserver(() => {
+    let frame: number | null = null;
+    let active = true;
+    const measure = () => {
+      frame = null;
+      if (!active) return;
       const b = canvasBox.current;
-      if (b) setBox({ w: b.clientWidth, h: b.clientHeight });
+      if (b) {
+        const w = b.clientWidth, h = b.clientHeight;
+        setBox(prev => prev.w === w && prev.h === h ? prev : { w, h });
+      }
       const rb = railBox.current;
       if (rb) setRailH(Math.max(0, rb.clientHeight - RAIL_HEAD));
+    };
+    // A state update can mount the rail and reobserve it during this delivery.
+    // Measure once in the next frame, outside ResizeObserver's delivery loop.
+    const ro = new ResizeObserver(() => {
+      if (active && frame === null) frame = requestAnimationFrame(measure);
     });
     if (canvasBox.current) ro.observe(canvasBox.current);
     if (railBox.current) ro.observe(railBox.current);
-    return () => ro.disconnect();
-  }, [canvasBox.current, railBox.current]);
+    return () => {
+      active = false;
+      ro.disconnect();
+      if (frame !== null) cancelAnimationFrame(frame);
+    };
+  // Refs are assigned after render; depending on ref.current recreates the observer
+  // during its initial size notification. Only the conditional rail mounting changes
+  // the observed nodes. Keep one observer while those nodes remain mounted.
+  }, [showRail, railShown]);
   const scaleRef = useRef(scale); scaleRef.current = scale;
   useEffect(() => { const anchor = anchorRef.current ?? undefined; anchorRef.current = null; toCanvas({ ol: 'scale', scale, anchor }); }, [scale]);
   // one slide on the canvas: the frame's place (viewport.ts), set outside renders
@@ -939,7 +1215,37 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
    * and pinch, three undo or redo. Not the browser's: the iPad's Safari zoomed the whole page.
    */
   const canvasFingers = useRef(new Map<number, { x: number; y: number }>());
+  const canvasIgnoredPalms = useRef(new Set<number>());
   const canvasGesture = useRef<{ kind: 'pan' | 'pinch' | 'tri' | 'done'; x: number; y: number; x0: number; y0: number; t0: number; moving?: boolean } | null>(null);
+  const cancelCanvasTouch = (event: Extract<ReliabilityEvent, 'gesture.cancelled' | 'gesture.capture-lost' | 'gesture.interrupted'> = 'gesture.interrupted') => {
+    const ids = [...canvasFingers.current.keys()], g = canvasGesture.current;
+    if (ids.length) recordReliability(event, { pointer: 'touch', context: kindRef.current });
+    canvasIgnoredPalms.current.clear();
+    // Clear ownership first: releasePointerCapture may synchronously report capture loss.
+    canvasFingers.current.clear();
+    canvasGesture.current = null;
+    if (g?.kind === 'pinch') pinchEnd(true);
+    else if (g?.kind === 'pan' && g.moving) slideView.release(true);
+    // A canceled three-finger gesture must not become Undo/Redo when the final contact goes.
+    const canvas = canvasBox.current;
+    for (const id of ids) {
+      try { if (canvas?.hasPointerCapture(id)) canvas.releasePointerCapture(id); } catch { /* gone */ }
+    }
+  };
+  const cancelCanvasRef = useRef(cancelCanvasTouch); cancelCanvasRef.current = cancelCanvasTouch;
+  useEffect(() => {
+    const cancel = () => cancelCanvasRef.current();
+    const hidden = () => { if (document.hidden) cancel(); };
+    window.addEventListener('blur', cancel);
+    window.addEventListener('resize', cancel);
+    document.addEventListener('visibilitychange', hidden);
+    return () => {
+      window.removeEventListener('blur', cancel);
+      window.removeEventListener('resize', cancel);
+      document.removeEventListener('visibilitychange', hidden);
+      cancel();
+    };
+  }, [tool]);
   const fingerMid = () => {
     const ps = [...canvasFingers.current.values()];
     return { x: ps.reduce((a, p) => a + p.x, 0) / ps.length, y: ps.reduce((a, p) => a + p.y, 0) / ps.length };
@@ -950,7 +1256,8 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     penState.current = { down, off: down ? penState.current.off : performance.now() };
     const g = canvasGesture.current;
     if (!down || !g) return;
-    if (g.kind === 'pan') slideView.release();
+    if (g.kind !== 'done') recordReliability('gesture.interrupted', { pointer: 'touch', context: kindRef.current });
+    if (g.kind === 'pan') slideView.release(true);
     else if (g.kind === 'pinch') pinchEnd(true);
     g.kind = 'done';
   };
@@ -962,8 +1269,15 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     if (e.type === 'pointerdown') {
       if (e.target !== e.currentTarget && !fingers.size) return;
       e.preventDefault();
-      if (penState.current.down || performance.now() - penState.current.off < 400) return;
+      if (penState.current.down || performance.now() - penState.current.off < 400) {
+        if (!canvasIgnoredPalms.current.has(e.pointerId)) {
+          canvasIgnoredPalms.current.add(e.pointerId);
+          recordReliability('gesture.palm-ignored', { pointer: 'touch', context: kindRef.current });
+        }
+        return;
+      }
       fingers.set(e.pointerId, at);
+      try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* synthetic or unavailable */ }
       const g = canvasGesture.current, m = fingerMid();
       if (fingers.size === 1) canvasGesture.current = { kind: 'pan', x: at.x, y: at.y, x0: at.x, y0: at.y, t0: performance.now() };
       else if (fingers.size === 2 && g?.kind === 'pan') {
@@ -976,7 +1290,11 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
       }
       return;
     }
+    if (e.type === 'pointerup' || e.type === 'pointercancel' || e.type === 'lostpointercapture') canvasIgnoredPalms.current.delete(e.pointerId);
     if (!fingers.has(e.pointerId)) return;
+    if (e.type === 'pointercancel' || e.type === 'lostpointercapture') {
+      cancelCanvasTouch(e.type === 'lostpointercapture' ? 'gesture.capture-lost' : 'gesture.cancelled'); return;
+    }
     const g = canvasGesture.current;
     if (e.type === 'pointermove') {
       fingers.set(e.pointerId, at);
@@ -990,7 +1308,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
       else if (g?.kind === 'tri' && fingers.size >= 3) { const m = fingerMid(); g.x = m.x; g.y = m.y; }
       return;
     }
-    // up or cancelled: the gesture ends with the first finger to lift (the others do nothing till they lift too)
+    // A normal lift commits; interruption above rolls back and discards every contact.
     fingers.delete(e.pointerId);
     if (g?.kind === 'pan') { if (g.moving) slideView.release(); }
     else if (g?.kind === 'pinch') pinchEnd(false);
@@ -1050,20 +1368,25 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     setRailW(v);
     try { if (v === RAIL_W) localStorage.removeItem('ol.deckRail'); else localStorage.setItem('ol.deckRail', String(v)); } catch { /* private window */ }
   };
+  const railDrag = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    if (!railOpen) railDrag.current?.();
+    return () => { railDrag.current?.(); };
+  }, [railOpen]);
   const onRailGrip = (e: PointerEvent) => {
-    if (e.button !== 0) return;
+    if (e.button !== 0 || railDrag.current) return;
     e.preventDefault();
     const g = e.currentTarget as HTMLElement;
-    try { g.setPointerCapture(e.pointerId); } catch { /* synthetic */ }
     const x0 = e.clientX, w0 = railW;
     g.classList.add('on');
-    const move = (ev: PointerEvent) => setRailW(Math.round(Math.max(RAIL_MIN, Math.min(RAIL_MAX, w0 + ev.clientX - x0))));
-    const up = (ev: PointerEvent) => {
-      g.removeEventListener('pointermove', move); g.removeEventListener('pointerup', up); g.removeEventListener('pointercancel', up);
-      g.classList.remove('on');
-      setRail(w0 + ev.clientX - x0);
-    };
-    g.addEventListener('pointermove', move); g.addEventListener('pointerup', up); g.addEventListener('pointercancel', up);
+    railDrag.current = capturePointerDrag(g, e,
+      ev => setRailW(Math.round(Math.max(RAIL_MIN, Math.min(RAIL_MAX, w0 + ev.clientX - x0)))),
+      (cancelled, ev) => {
+        railDrag.current = null;
+        g.classList.remove('on');
+        if (cancelled || !ev) setRailW(w0);
+        else setRail(w0 + ev.clientX - x0);
+      });
   };
 
   /* ------------------------------------------------------------- the canvas around the pages */
@@ -1189,14 +1512,25 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   /** the suggestion on the one object selected (or on what it is in) */
   const selChange = sel.length === 1 ? review.changes.find(c => samePath(c.path, sel[0].path)) ?? review.changes.find(c => within(c.path, sel[0].path)) ?? null : null;
 
+  const sourceSelection = (): SelItem[] => {
+    const snapshot = canvasSelection.current;
+    if (!snapshot.items.length) return [];
+    const base = versions.current.get(snapshot.version);
+    const paths = base === undefined ? null : rebaseObjectPaths(base, text.toString(), snapshot.items.map(item => item.path));
+    if (!paths) {
+      notify('The selected objects changed meanwhile — select them again.', 'error');
+      sendSource(true); return [];
+    }
+    return snapshot.items.map((item, i) => ({ ...item, path: paths[i] }));
+  };
   const styleSel = (set: Record<string, string | null>) => {
-    if (!sel.length) return;
-    applyOps(sel.map(s => ({ t: 'style', path: s.path, set })));
+    const selected = sourceSelection();
+    if (selected.length) applyOps(selected.map(s => ({ t: 'style', path: s.path, set })));
   };
   // (in points, as the size box shows them)
   const fontSize = (delta: number) => {
-    if (!sel.length) return;
-    applyOps(sel.map(s => ({ t: 'style', path: s.path, set: { 'font-size': `${stepPt(sizePt(parseFloat(s.style.fontSize) || 16), delta > 0 ? 1 : -1)}pt` } })));
+    const selected = sourceSelection();
+    if (selected.length) applyOps(selected.map(s => ({ t: 'style', path: s.path, set: { 'font-size': `${stepPt(sizePt(parseFloat(s.style.fontSize) || 16), delta > 0 ? 1 : -1)}pt` } })));
   };
   const exec = (command: string, value?: string) => toCanvas({ ol: 'exec', command, value });
   /** a web font used for the first time: its stylesheet linked in the page's head */
@@ -1238,8 +1572,8 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   const paint = (p: Paint) => toCanvas({ ol: 'paint', paint: p });
   const arrangeSel = (how: ArrangeHow) => toCanvas({ ol: 'arrange', how });
 
-  const removeSel = () => { const free = sel.filter(s => !s.locked); if (free.length) applyOps([{ t: 'remove', paths: free.map(s => s.path) }]); };
-  const duplicateSel = () => { if (sel.length) applyOps([{ t: 'duplicate', paths: sel.map(s => s.path) }]); };
+  const removeSel = () => { const free = sourceSelection().filter(s => !s.locked); if (free.length) applyOps([{ t: 'remove', paths: free.map(s => s.path) }]); };
+  const duplicateSel = () => { const selected = sourceSelection(); if (selected.length) applyOps([{ t: 'duplicate', paths: selected.map(s => s.path) }]); };
 
   /* ------------------------------------------------------------- pictures */
 
@@ -1436,8 +1770,25 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     const ownOp = (path: Path, gs: Guide[]): HtmlOp => ({ t: 'attr', path, name: GUIDES_ATTR, value: gs.length ? formatGuides(gs) : null });
     const owned = g.slides.filter(x => x.own !== null);
     const clearOwn = owned.map(x => ownOp(x.path, []));
+    const source = parseSource(text.toString());
+    const templateMargins = g.body ? attr(elementAt(source.doc, g.body)!, LAYOUT_MARGINS_ATTR) : null;
+    const slideMargins = sp ? attr(elementAt(source.doc, sp.path)!, LAYOUT_MARGINS_ATTR) : null;
+    const editMargins = async (thisSlide: boolean) => {
+      const path = thisSlide ? sp?.path : g.body;
+      if (!path) return;
+      const value = await uiPrompt('Layout margins', 'Fixed, non-draggable safe-area guides. Enter top/right/bottom/left (or 1–3 shorthand values), e.g. 72px 96px or 40mm. Blank disables these margins.',
+        (thisSlide ? slideMargins ?? templateMargins : templateMargins) ?? '72px 96px', {
+          okLabel: 'Set margins',
+          validate: value => !value.trim() || layoutMarginGuides(value, w, h).length ? null : 'Enter 1–4 non-negative lengths (px, pt, mm, cm, in or %) that leave space inside the slide.',
+        });
+      if (value !== null) write([{ t: 'attr', path, name: LAYOUT_MARGINS_ATTR, value }]);
+    };
     return [
       { label: 'Show guides', checked: guidesRef.current, action: () => showGuides(!guidesRef.current) },
+      { sep: true },
+      { label: 'Layout margins (every slide)…', disabled: ro, action: () => { void editMargins(false); } },
+      { label: 'Layout margins (this slide)…', disabled: ro || !sp, action: () => { void editMargins(true); } },
+      { label: 'Use master margins on this slide', disabled: ro || !sp || slideMargins === null, action: () => write([{ t: 'attr', path: sp!.path, name: LAYOUT_MARGINS_ATTR, value: null }]) },
       { sep: true },
       { label: `Add a vertical guide${where} (every slide)`, disabled: ro, action: () => write([masterOp(withGuide(master, { axis: 'x', at: at.x }))]) },
       { label: `Add a horizontal guide${where} (every slide)`, disabled: ro, action: () => write([masterOp(withGuide(master, { axis: 'y', at: at.y }))]) },
@@ -1446,8 +1797,8 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
       { sep: true },
       { label: 'Reset this slide’s guides to every slide’s', disabled: ro || !own.length, action: () => write([ownOp(sp!.path, [])]) },
       { label: 'Make this slide’s guides every slide’s', disabled: ro || !own.length, action: () => write([masterOp([...master, ...own]), ownOp(sp!.path, [])]) },
-      { label: 'Reset all guides (the slide’s middle lines)', disabled: ro || (g.master === null && !owned.length), action: () => write([{ t: 'attr', path: g.body!, name: GUIDES_ATTR, value: null }, ...clearOwn]) },
-      { label: 'Remove all guides', disabled: ro || (!master.length && !owned.length), action: () => write([masterOp([]), ...clearOwn]) },
+      { label: 'Reset custom guides (the slide’s middle lines)', disabled: ro || (g.master === null && !owned.length), action: () => write([{ t: 'attr', path: g.body!, name: GUIDES_ATTR, value: null }, ...clearOwn]) },
+      { label: 'Remove custom guides', disabled: ro || (!master.length && !owned.length), action: () => write([masterOp([]), ...clearOwn]) },
     ];
   };
   const canvasMenu = (x: number, y: number) => showContextMenu(x, y, [
@@ -1612,7 +1963,11 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
       else if (mod && e.key.toLowerCase() === 'd' && selRef.current.length) { e.preventDefault(); duplicateSel(); }
       // the keyboard is in the editor, not the canvas (a click on the canvas leaves it here): Ctrl+A selects the slide's objects, not the page's text
       else if (mod && !e.altKey && e.key.toLowerCase() === 'a' && kindRef.current !== 'page') { e.preventDefault(); toCanvas({ ol: 'selectAll' }); }
-      else if ((e.key === 'Delete' || e.key === 'Backspace') && selRef.current.length) { e.preventDefault(); removeSel(); }
+      else if ((e.key === 'Delete' || e.key === 'Backspace') && !readOnlyRef.current && !presenting) {
+        // Ctrl+A's selection reply is asynchronous. Send both shortcuts to the
+        // canvas in order rather than dropping Delete against an old host selection.
+        e.preventDefault(); toCanvas({ ol: 'canvasKey', key: e.key, shift: e.shiftKey });
+      }
       else if (!mod && !e.altKey && e.key.length === 1 && !readOnlyRef.current) {
         // a text box selected: typing retypes it (as in the canvas) — the letters are not the tools' then
         // (a co-author typing over a selected title drew a line with L)
@@ -1631,7 +1986,18 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
         if (letterKey(e.key)) e.preventDefault();
       }
       // Escape: the tool back to Select, then a level up (out of a group); arrows nudge — the canvas's keys
-      else if (e.key === 'Escape') { if (tool !== 'select') setToolState('select'); else if (selRef.current.length && !presenting) toCanvas({ ol: 'canvasKey', key: 'Escape', shift: false }); }
+      else if (e.key === 'Escape') {
+        if (e.defaultPrevented) return;
+        if (tool !== 'select') setToolState('select');
+        else if (!presenting) {
+          // A queued object selection must not overtake Escape. Deferred text
+          // and formula editing retain their own keyboard context.
+          if (pending.current?.select && !pending.current.editText) pending.current = null;
+          // The canvas owns its selection; its reply may not have rendered here.
+          e.preventDefault();
+          toCanvas({ ol: 'canvasKey', key: 'Escape', shift: false });
+        }
+      }
       else if (!mod && !e.altKey && e.key.startsWith('Arrow') && selRef.current.length && !readOnlyRef.current && !presenting) { e.preventDefault(); toCanvas({ ol: 'canvasKey', key: e.key as 'ArrowLeft', shift: e.shiftKey }); }
     };
     addEventListener('keydown', onKey);
@@ -1694,10 +2060,14 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   const presentFrom = useRef(0);
   /** the presenting frame was told this browser's presenting settings */
   const presentPrefsSent = useRef(false);
-  const startPresenting = (fromStart = false) => {
+  const startPresenting = async (fromStart = false) => {
     presentZoomed.current = false;
     presentPrefsSent.current = false;
     presentFrom.current = fromStart ? 0 : presentIndexOf(currentRef.current);
+    if (offlineDocsRef.current.edit) {
+      const doc = await host.offlineFrame?.('present', currentLink.current ?? undefined);
+      setOfflineDocs(prev => ({ ...prev, present: doc ?? undefined }));
+    }
     if (link && host.present?.(src('present') + `#${presentFrom.current + 1}`)) return;
     setPresenting(true);
     setTimeout(() => {
@@ -1707,6 +2077,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   };
   const stopPresenting = () => {
     setPresenting(false);
+    setOfflineDocs(({ present: _present, ...active }) => active);
     if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
   };
   useEffect(() => {
@@ -1787,7 +2158,11 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
 
   /* ------------------------------------------------------------- render */
 
-  const src = (mode: string) => (link ? `${link.base}${link.entry.split('/').map(encodeURIComponent).join('/')}?ol=${mode}` : 'about:blank');
+  const src = (mode: string) => {
+    const target = mode === 'present' ? link : frameLink;
+    return target ? `${target.base}${target.entry.split('/').map(encodeURIComponent).join('/')}?ol=${mode}` : 'about:blank';
+  };
+  const offlineSrc = (mode: 'edit' | 'thumb' | 'present') => `/_ol/offline-frame.html?ol=${mode}&revision=${offlineRevisions[mode]}`;
   const frameH = Math.max(100, box.h / scale);
   const left = leftFor(scale, panX);
   const title = path.split('/').slice(-2).join('/');
@@ -1805,7 +2180,8 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     if (!labels.length) { notify('No equation has a label yet: open a displayed formula and give it one (Label in its toolbar).', 'info'); return; }
     pickAt(b ? b.left : 200, b ? b.bottom + 4 : 120, 'Reference to', close => (
       <div class="dk-refs">
-        {labels.map(l => <button type="button" class="dk-ref-item" key={l} onClick={() => { close(); canvasFrame.current?.focus(); toCanvas({ ol: 'insertRef', src: `\\eqref{${l}}` }); }}>{l}</button>)}
+        {/* The runtime focuses as it inserts: early iframe focus lets Escape overtake this message. */}
+        {labels.map(l => <button type="button" class="dk-ref-item" key={l} onClick={() => { close(); toCanvas({ ol: 'insertRef', src: `\\eqref{${l}}` }); }}>{l}</button>)}
       </div>
     ));
   };
@@ -1866,23 +2242,27 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   // the contextual tools on a row of their own when they do not fit beside the others (nothing hidden)
   const barRef = useRef<HTMLDivElement>(null);
   const [ctxRow, setCtxRow] = useState(false);
-  useLayoutEffect(() => {
+  const checkContextRow = () => {
     const bar = barRef.current;
     if (!bar) return;
-    const check = () => {
-      const ctx = bar.querySelector<HTMLElement>(':scope > .dl-ctx');
-      const need = (ctx?.firstElementChild as HTMLElement | null)?.scrollWidth ?? 0;
-      let others = 0;
-      for (const k of Array.from(bar.children) as HTMLElement[]) if (k !== ctx && k.offsetParent !== null) others += k.offsetWidth + 4;
-      const cs = getComputedStyle(bar);
-      const room = bar.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0) - others - 16;
-      setCtxRow(need > room);
-    };
-    check();
-    const ro = new ResizeObserver(check);
+    const ctx = bar.querySelector<HTMLElement>(':scope > .dl-ctx');
+    const need = (ctx?.firstElementChild as HTMLElement | null)?.scrollWidth ?? 0;
+    let others = 0;
+    for (const k of Array.from(bar.children) as HTMLElement[]) if (k !== ctx && k.offsetParent !== null) others += k.offsetWidth + 4;
+    const cs = getComputedStyle(bar);
+    const room = bar.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0) - others - 16;
+    setCtxRow(need > room);
+  };
+  // Remeasure changing tools before paint, without disconnecting/re-observing the
+  // same toolbar after every render (which creates fresh initial notifications).
+  useLayoutEffect(checkContextRow);
+  useEffect(() => {
+    const bar = barRef.current;
+    if (!bar) return;
+    const ro = new ResizeObserver(checkContextRow);
     ro.observe(bar);
     return () => ro.disconnect();
-  });
+  }, []);
 
   // the slide in view: is enough of it on the screen? (zoomed into a corner, or scrolled away from it)
   const curBox = slides[current]?.rect;
@@ -1915,9 +2295,36 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     )}
   </> : null;
 
+  const insertRecoveredCopy = () => {
+    const draft = recoveredRef.current[0];
+    if (!draft || locked) return;
+    const place = insertPlace(text.toString(), curSlidePath, null, kind);
+    if (!place) { notify('Choose a slide to insert the recovered copy.', 'error'); return; }
+    const html = `<div style="position: absolute; left: 80px; top: 120px; width: ${Math.min(1000, Math.max(240, pageW - 160))}px; font-size: 28px; color: #1d2433; background: #fff">${draft.html}</div>`;
+    if (!applyOps([{ t: 'insert', parent: place.parent, index: place.index, html }])) return;
+    const next = recoveredRef.current.filter(d => d.id !== draft.id);
+    recoveredRef.current = next; setRecovered(next); saveTextDrafts(recoveryKey, next);
+    forgetPendingTextDraft(recoveryKey, draft.id);
+    setRecoveryOpen(false);
+    notify('Recovered text inserted as a separate box. The existing box was not overwritten.');
+  };
+
   return (
     <div class={'dl-editor' + (presenting ? ' presenting' : '')} data-kind={kind}>
-      {quick.length > 0 && quickRect && <QuickBar groups={quick} rect={quickRect} box={onWords ? sel[0]?.rect : undefined} frame={() => canvasFrame.current} scrollY={() => (soloOn ? 0 : scrollRef.current)} />}
+      {saveState?.state === 'stale' && <div role="alert" data-dl-stale-notice style="padding:8px 12px;background:#fff5d8;color:#342700">
+        This file was replaced while this browser had an older copy. Download the local source before reopening the latest file.
+        <button class="btn" onClick={() => {
+          const url = URL.createObjectURL(new Blob([host.text()], { type: 'text/html' }));
+          const a = document.createElement('a'); a.href = url; a.download = path.split('/').pop() ?? 'recovered.html'; a.click();
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }}>Download local source</button>
+        <button class="btn" onClick={() => { void host.discardLocal?.().then(() => location.reload()).catch(error => notify(String(error), 'error')); }}>Reopen latest file</button>
+      </div>}
+      {!!recovered.length && !presenting && <div role="status" data-dl-recovery-notice style="padding:6px 10px;background:#fff5d8;color:#342700;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <span>{recovered.length} recovered text draft{recovered.length === 1 ? '' : 's'} — the saved document was kept.</span>
+        <button class="btn" onClick={() => setRecoveryOpen(true)}>Recover text</button>
+      </div>}
+      {tool === 'select' && quick.length > 0 && quickRect && <QuickBar groups={quick} rect={quickRect} box={onWords ? sel[0]?.rect : undefined} frame={() => canvasFrame.current} scrollY={() => (soloOn ? 0 : scrollRef.current)} />}
       {/* (the context tools, when they float below the bar, start right of the slide rail: its header stays clear) */}
       <div ref={barRef} class={'dl-toolbar' + (ctxRow ? ' dl-ctx-row' : '')} role="toolbar" style={`--ctx-left: ${railOpen ? railW + 8 : 8}px`}>
         <span class="dl-title" title={path}>{title}</span>
@@ -1959,7 +2366,9 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
           const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
           showContextMenu(r.left, r.bottom + 4, host.downloads(m => src(m === 'view' && kind === 'deck' ? 'present' : m)));
         }}>⤓</button>
-        <span class={'dl-status' + (online ? '' : ' off')}>{!synced ? 'Loading…' : !online ? 'Offline' : readOnly ? 'View only' : ''}</span>
+        <span role="status" aria-live="polite" class={'dl-status' + (online ? '' : ' off')} title={saveState?.localError ? 'Browser storage failed: ' + saveState.localError : saveState?.pending ? saveState.localPending === false ? 'Changes are kept in this browser and will sync when connected.' : 'Changes are still being written. Keep this tab open until Saved appears.' : undefined}>
+          {saveState?.state === 'stale' ? 'Older local copy' : !synced ? 'Loading…' : readOnly ? 'View only' : saveState?.state === 'offline' || !online ? (saveState?.pending ? saveState.localPending === false && !saveState.localError ? 'Offline — saved in this browser' : 'Offline — keep this tab open' : 'Offline') : saveState?.state === 'saving' ? 'Saving…' : saveState?.state === 'saved' ? 'Saved' : ''}
+        </span>
       </div>
       <div class="dl-body">
         {showRail && railShown && (
@@ -1968,7 +2377,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
                 <span class="dl-rail-count" title="The slide shown, of all slides">{slides.length ? `Slide ${current + 1} of ${slides.length}` : 'Slides'}</span>
                 <button class="dl-btn dl-rail-hide" title="Hide the slides (more room for the slide)" aria-label="Hide the slides" data-dl-rail-hide onClick={() => setRailShown(false)}>«</button>
               </div>
-              {link && synced && <iframe ref={railFrame} class="dl-railframe" title="Slides" sandbox="allow-scripts" src={src('thumb')}
+              {link && synced && <iframe ref={railFrame} class="dl-railframe" title="Slides" sandbox={offlineDocs.thumb ? undefined : 'allow-scripts'} src={offlineDocs.thumb ? offlineSrc('thumb') : src('thumb')}
                 style={{ top: `${RAIL_HEAD}px`, width: `${frameW}px`, height: `${railH / railScale}px`, transform: `scale(${railScale})` }} />}
               <div class="dl-rail-grip" role="separator" aria-orientation="vertical" aria-label="Slide rail width" title="Drag to make the slides wider or narrower (double-click: back to the usual width)"
                 data-dl-railgrip onPointerDown={onRailGrip} onDblClick={() => setRail(RAIL_W)} />
@@ -1980,7 +2389,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
         <div class="dl-main">
           <div class="dl-canvas" ref={canvasBox} style={deskCss ? { background: deskCss } : undefined} data-desk={view.deskChecker ? 'checker' : view.desk ? 'custom' : 'page'}
             onContextMenu={e => { if (e.target === e.currentTarget) { e.preventDefault(); canvasMenu(e.clientX, e.clientY); } }}
-            onPointerDown={canvasTouch} onPointerMove={canvasTouch} onPointerUp={canvasTouch} onPointerCancel={canvasTouch}
+            onPointerDown={canvasTouch} onPointerMove={canvasTouch} onPointerUp={canvasTouch} onPointerCancel={canvasTouch} onLostPointerCapture={canvasTouch}
             onWheel={e => {
               if (e.target !== e.currentTarget) return;
               const k = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;
@@ -1997,8 +2406,20 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
             }}
             onDragOver={e => { if (e.dataTransfer?.types.includes('Files')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } }}
             onDrop={e => { if (!e.dataTransfer?.files.length) return; e.preventDefault(); const fs = Array.from(e.dataTransfer.files); void placeFiles(fs.map(f => ({ name: f.name, type: f.type, data: f })), null, null); }}>
-            {link && synced && <iframe ref={canvasFrame} class={'dl-frame' + (soloOn ? ' solo' : '')} title="Page" sandbox="allow-scripts allow-modals allow-popups allow-forms" src={src('edit')}
+            {link && synced && <iframe ref={canvasFrame} class={'dl-frame' + (soloOn ? ' solo' : '')} title="Page" sandbox={offlineDocs.edit ? undefined : 'allow-scripts allow-modals allow-popups allow-forms'} src={offlineDocs.edit ? offlineSrc('edit') : src('edit')}
               style={soloOn ? { width: `${frameW}px`, height: `${solo!.height}px`, left: '0px' } : { width: `${frameW}px`, height: `${frameH}px`, transform: `scale(${scale})`, left: `${left}px` }} />}
+            {(!link || !synced || canvasState !== 'ready') && <div class="dl-opening" data-dl-opening={canvasState === 'failed' ? 'failed' : linkState}
+              role={canvasState === 'failed' || linkState === 'failed' || linkState === 'denied' ? 'alert' : 'status'}>
+              <p>{linkState === 'denied'
+                ? 'This page is unavailable or your access has changed. Check your account or ask the owner, then try again.'
+                : canvasState === 'failed' ? 'The canvas could not start. Retry opening, or open Code to recover its source.'
+                : linkState === 'failed'
+                  ? 'Could not open the canvas. Reconnect to the network or try again.'
+                  : !synced ? 'Loading the document…' : 'Opening the canvas…'}</p>
+              {(canvasState === 'failed' || linkState === 'failed' || linkState === 'denied') && <button type="button" class="dl-btn" data-dl-retry-open
+                onClick={retryOpening}>Retry opening</button>}
+              {canvasState === 'failed' && <button type="button" class="dl-btn" onClick={() => setCodeOpen(true)}>Open Code</button>}
+            </div>}
             {soloOn && (
               <div ref={pullRing} class="dl-pull" data-dl-pull aria-hidden="true">
                 <svg viewBox="0 0 32 32">
@@ -2056,11 +2477,11 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
       </div>
       {corner && (cornerSlot ? createPortal(corner, cornerSlot) : <div class="dl-foot">{corner}</div>)}
       {floatPop && <FloatPopover {...floatPop} onClose={() => setFloatPop(null)} />}
-      {citeOpen && host.docId && <CiteDialog meta={CITE_META} search docId={host.docId} project={host.docId.split('/').slice(0, 2).join('/')}
+      {citeOpen && host.docId && <CiteDialog meta={CITE_META} search docId={host.docId} project={host.docId.split('/').slice(0, 2).join('/')} restoreFocusOnInsert={false}
         onInsert={(keys, cmd, before, after) => {
           if (!keys.length) return;
           const opt = before || after ? `[${before}][${after}]` : '';
-          canvasFrame.current?.focus();
+          // Keep keys in the host until the runtime focuses and inserts in one turn.
           toCanvas({ ol: 'insertRef', src: `\\${cmd}${opt}{${keys.join(',')}}` });
         }}
         onAdded={r => { bibAsked.current.delete(r.key); setTimeout(() => syncBibRef.current?.(), 500); }}
@@ -2070,18 +2491,27 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
         onShown={() => toCanvas({ ol: 'mathShown', id: mathEdit.id })}
         onDisplay={() => toCanvas({ ol: 'mathDisplay', id: mathEdit.id })}
         onRest={keys => toCanvas({ ol: 'typeKeys', keys })} keysIn={mathKeysIn} ops={mathOps} macros={deckMacros}
-        onDone={(tex, dir, putBack) => {
+        onDone={(tex, dir, putBack, keys) => {
           const id = mathEdit.id;
           // the field stays (still) until the formula is shown again under it (the runtime's mathClose)
           setMathEdit(st => st && st.id === id ? { ...st, closing: true } : st);
           setTimeout(() => setMathEdit(st => st && st.id === id && st.closing ? null : st), 800);
           if (dir) canvasFrame.current?.focus();
-          toCanvas({ ol: 'mathDone', id, tex, dir, putBack });
+          toCanvas({ ol: 'mathDone', id, tex, dir, putBack, keys });
         }} />}
+      {recoveryOpen && recovered[0] && <Dialog title="Recover text" onClose={() => setRecoveryOpen(false)} buttons={<>
+        <button class="btn" onClick={() => setRecoveryOpen(false)}>Keep for later</button>
+        <button class="btn primary" disabled={locked || !curSlidePath} onClick={insertRecoveredCopy}>Insert recovered copy</button>
+      </>}>
+        <p>{recovered[0].reason}</p>
+        <p>Copy this draft or insert it as a separate text box. Neither action overwrites the latest saved text.</p>
+        <label>Recovered draft<textarea readOnly value={draftWords(recovered[0].html)} style="width:100%;min-height:160px" /></label>
+      </Dialog>}
       {bgFor && <BgRemoveDialog src={bgFor.url} name={bgFor.name} onDone={b => { void saveNoBg(b); }} onClose={() => setBgFor(null)} />}
       {presenting && link && (
         <div class="dl-presenting" ref={presentBox}>
-          <iframe ref={presentFrame} title="Presentation" sandbox="allow-scripts allow-popups" src={src('present') + `#${presentFrom.current + 1}`} />
+          <iframe ref={presentFrame} title="Presentation" sandbox={offlineDocs.present ? undefined : 'allow-scripts allow-popups'} src={offlineDocs.present ? offlineSrc('present') : src('present') + `#${presentFrom.current + 1}`}
+            onLoad={() => { if (offlineDocsRef.current.present) presentFrame.current?.contentWindow?.postMessage({ ol: 'go', slide: presentFrom.current }, '*'); }} />
         </div>
       )}
     </div>

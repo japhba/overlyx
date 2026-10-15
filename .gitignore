@@ -5,6 +5,9 @@ data/
 credentials.txt
 test-results/
 playwright-report/
+# Private beta fixtures, browser traces and generated review artifacts.
+/scratch/beta-fix-20261013/
+/scratch/slide-audit/
 .env
 dist.new/
 deploy/secrets.env

@@ -9,6 +9,8 @@ const device = { chromium: devices['Desktop Chrome'], firefox: devices['Desktop 
 
 export default defineConfig({
   testDir: 'e2e',
+  // Historical/fault-injection probes use their explicit candidate and fixture configs.
+  testIgnore: '**/diagnostic-*.spec.ts',
   timeout: 90000,
   retries: 0,
   workers: 1,

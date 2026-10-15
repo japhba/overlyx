@@ -16,8 +16,8 @@
 #      systemd unit): fast-forwarded to the same commit, dependencies installed when the lockfile
 #      changed, client built, server restarted, site checked.
 #
-# Run the checks first (DOCS.md "Tests"): client + extension typecheck, `npm test`, the affected
-# e2e specs against the isolated instance. This script deploys, it does not test.
+# Both typechecks, strict unit tests and isolated browser workflows must pass before the
+# push or production checkout changes. The compiled client tested there is the one deployed.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 DEV=$(pwd)
@@ -35,7 +35,7 @@ flock -n 9 || { echo "another deploy is running (the autodeploy timer?) — wait
 
 step "development checkout: $DEV"
 [ "$(git rev-parse --abbrev-ref HEAD)" = master ] || { echo "deploy from master (on $(git rev-parse --abbrev-ref HEAD))" >&2; exit 1; }
-git diff --quiet && git diff --cached --quiet || { echo "commit your changes first" >&2; git status --short | head -20; exit 1; }
+node scripts/release-guards.mjs clean "$DEV"
 git fetch origin --quiet
 if ! git merge-base --is-ancestor origin/master master; then
   echo "master and origin/master have diverged — merge origin/master (git merge origin/master), test, then deploy again" >&2
@@ -45,16 +45,25 @@ fi
 HEAD=$(git rev-parse HEAD)
 echo "commit $HEAD"
 
+step "check the release candidate before pushing or changing production"
+npx tsc -p packages/client/tsconfig.json --noEmit
+npx tsc -p packages/vscode/tsconfig.json --noEmit
+bash scripts/check-unit-release.sh
+candidate=$(mktemp -d /tmp/overlyx-deploy-candidate.XXXXXX)
+trap 'rm -rf "$candidate"' EXIT
+OVERLYX_BETA_BUILD_DIR="$candidate/dist" OVERLYX_BETA_ASSET_PROOF="$candidate/asset-proof.json" node scripts/check-beta.mjs
+node scripts/release-guards.mjs clean "$DEV" "$HEAD"
+
 if [ "$PUSH" = 1 ]; then
   step "origin: push master (starts the extension release workflow)"
-  git push origin master
+  git push origin "$HEAD:refs/heads/master"
 else
   step "origin: not pushed (--no-push): the extension keeps its last release"
 fi
 
 step "production checkout: $PROD"
 [ -d "$PROD/.git" ] || { echo "$PROD is not a git checkout" >&2; exit 1; }
-git -C "$PROD" fetch --quiet "$DEV" master
+git -C "$PROD" fetch --quiet "$DEV" "$HEAD"
 git -C "$PROD" merge --ff-only FETCH_HEAD
 [ "$(git -C "$PROD" rev-parse HEAD)" = "$HEAD" ] || { echo "production is at $(git -C "$PROD" rev-parse HEAD), not $HEAD" >&2; exit 1; }
 if [ ! -d "$PROD/node_modules" ] || { git -C "$PROD" rev-parse -q --verify ORIG_HEAD >/dev/null 2>&1 && [ -n "$(git -C "$PROD" diff --name-only ORIG_HEAD HEAD -- package-lock.json)" ]; }; then
@@ -62,13 +71,13 @@ if [ ! -d "$PROD/node_modules" ] || { git -C "$PROD" rev-parse -q --verify ORIG_
   (cd "$PROD" && npm ci --no-audit --no-fund)
 fi
 
-step "production: build the client"
-(cd "$PROD/packages/client" && npx vite build --outDir dist.new && OVERLYX_RUNTIME_OUT=dist.new/_ol npx vite build -c runtime.vite.config.ts && rm -rf dist && mv dist.new dist)
+step "production: publish the tested client"
+(cd "$PROD/packages/client" && rm -rf dist.new && cp -a "$candidate/dist" dist.new && rm -rf dist && mv dist.new dist)
 
 step "production: restart $UNIT"
 systemctl restart "$UNIT"
 sleep 2
-systemctl is-active --quiet "$UNIT" || { echo "$UNIT is not active" >&2; systemctl status "$UNIT" --no-pager | tail -20 >&2; exit 1; }
+systemctl is-active --quiet "$UNIT" || { echo "$UNIT is not active; inspect its private service log" >&2; exit 1; }
 
 step "check $SITE"
 # the restarted server takes a moment to listen; the reverse proxy answers 502 until then
@@ -88,6 +97,7 @@ for i in 1 2 3 4 5; do
   sleep 2
 done
 [ "$live" = "$HEAD" ] || { echo "$SITE/api/version reports '${live:-nothing}', not $HEAD" >&2; exit 1; }
+node scripts/verify-release-assets.mjs "$candidate/dist" "$SITE" "$candidate/asset-proof.json"
 echo "site OK: $served, commit $live"
 
 if [ "$PUSH" = 1 ] && command -v gh >/dev/null 2>&1; then

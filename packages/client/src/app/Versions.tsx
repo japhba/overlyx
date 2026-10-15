@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api, type VersionInfo } from '../api';
-import { uiPrompt, uiConfirm } from './Dialogs';
+import { uiPrompt, uiConfirm, uiAlert } from './Dialogs';
 
 function diffLines(a: string, b: string): { type: 'same' | 'add' | 'del'; text: string }[] {
   // simple LCS-based line diff (documents are small enough)
@@ -40,9 +40,14 @@ export function Versions({ docId, refreshKey }: { docId: string; refreshKey: num
     load();
   };
   const showDiff = async (v: VersionInfo) => {
-    const [old, cur] = await Promise.all([api.getVersion(docId, v.id), api.texText(docId)]);
-    const lines = diffLines(old.lyx, cur).filter((l, i, arr) => l.type !== 'same' || arr.slice(Math.max(0, i - 2), i + 3).some(x => x.type !== 'same'));
-    setDiff({ name: v.name, lines });
+    try {
+      const [old, cur] = await Promise.all([api.getVersion(docId, v.id), api.texText(docId)]);
+      const lines = diffLines(old.lyx, cur).filter((l, i, arr) => l.type !== 'same' || arr.slice(Math.max(0, i - 2), i + 3).some(x => x.type !== 'same'));
+      setDiff({ name: v.name, lines });
+    } catch {
+      setDiff(null);
+      await uiAlert('Could Not Compare Versions', 'The comparison could not be loaded. Try again when the server is available.');
+    }
   };
   const del = async (v: VersionInfo) => { if (await uiConfirm('Delete Version', 'Delete this version?', { danger: true, okLabel: 'Delete' })) { await api.deleteVersion(docId, v.id); load(); } };
 

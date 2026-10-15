@@ -56,12 +56,18 @@ function sandboxedChrome(): string | undefined {
 async function getBrowser(): Promise<Browser> {
   if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
   if (!browser) {
-    browser = chromium.launch({
+    const launched = chromium.launch({
       executablePath: sandboxedChrome(),
       args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--font-render-hinting=none', '--disable-background-networking', '--disable-component-update', '--no-first-run'],
       timeout: 30000,
     });
-    browser.then(b => b.on('disconnected', () => { browser = null; }), () => { browser = null; });
+    browser = launched;
+    // An idle/shutdown close can finish after a replacement has already started.
+    // Only callbacks belonging to the current launch may invalidate the pool.
+    launched.then(
+      b => b.on('disconnected', () => { if (browser === launched) browser = null; }),
+      () => { if (browser === launched) browser = null; },
+    );
   }
   return browser;
 }

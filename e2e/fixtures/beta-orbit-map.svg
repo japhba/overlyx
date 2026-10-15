@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" role="img" aria-label="Orbit track over a blue planet">
+  <defs>
+    <linearGradient id="ocean" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#4fc3cf"/><stop offset="1" stop-color="#123e69"/></linearGradient>
+    <linearGradient id="sun" x1="0" x2="1"><stop stop-color="#ffe084"/><stop offset="1" stop-color="#ff8c55"/></linearGradient>
+  </defs>
+  <rect width="640" height="360" rx="28" fill="#10283f"/>
+  <circle cx="320" cy="470" r="300" fill="url(#ocean)" stroke="#98ecdc" stroke-width="5"/>
+  <ellipse cx="320" cy="115" rx="240" ry="54" fill="none" stroke="#c9f36b" stroke-width="5" transform="rotate(-12 320 115)"/>
+  <circle cx="153" cy="143" r="14" fill="url(#sun)"/>
+  <circle cx="326" cy="112" r="14" fill="url(#sun)"/>
+  <circle cx="513" cy="84" r="14" fill="url(#sun)"/>
+  <path d="M154 143L326 112L512 84" fill="none" stroke="#ff9c72" stroke-width="4" stroke-dasharray="10 9"/>
+  <text x="35" y="322" fill="#fff" font-family="Arial,sans-serif" font-size="22">FIELD SATELLITE · COASTAL PASS 17</text>
+</svg>

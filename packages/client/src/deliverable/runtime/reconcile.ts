@@ -6,9 +6,10 @@
  * own text changed (or that changed into another element) is made anew and its math typeset.
  * A change of any script reloads the page instead: scripts cannot be run twice safely.
  */
-import { state, srcOf, liveOf, link, isForeign, post } from './env';
+import { state, setFolderBase, srcOf, liveOf, link, isForeign, post } from './env';
 import { typeset, untypeset } from './math';
 import { renderCites, refreshCites } from './cite';
+import { mapAssets, setMappedAttribute, rememberMappedSource } from '../offlineassets';
 
 /** the element being retyped (contenteditable): left alone until that ends */
 export const guard = { editing: null as Element | null };
@@ -24,6 +25,7 @@ export function pairAll(src: Document): number {
   let missing = 0;
   const pair = (live: Element, s: Element) => {
     link(live, s);
+    if (window.__OL?.assetUrls) rememberMappedSource(live, s, window.__OL.assetUrls, document.baseURI);
     const lk = kids(live);
     let j = 0;
     for (const c of Array.from(s.children)) {
@@ -45,7 +47,14 @@ function scriptsOf(d: Document): string {
 /** Take a new version of the text: true when the page was updated in place, false when it reloads. */
 export function applySource(html: string, version: number): boolean {
   const next = parser.parseFromString(html, 'text/html');
-  const prev = state.src;
+  let prev = state.src;
+  // The first host version can be newer than the HTML served into this frame
+  // (particularly an offline cached edit). Pair the actual loaded source first
+  // so that its changes are reconciled instead of labelling stale DOM as current.
+  if (!prev && typeof window.__OL?.source === 'string') {
+    prev = parser.parseFromString(window.__OL.source, 'text/html');
+    pairAll(prev);
+  }
   state.html = html;
   state.version = version;
   if (!prev) {
@@ -62,6 +71,10 @@ export function applySource(html: string, version: number): boolean {
   state.src = next;
   const added: Element[] = [];
   reconcile(document.documentElement, prev.documentElement, next.documentElement, added);
+  if (window.__OL?.folderBase) {
+    setFolderBase(window.__OL.folderBase);
+    if (window.__OL.assetUrls) mapAssets(document.documentElement, window.__OL.assetUrls, document.baseURI);
+  }
   // citations at once (their numbers may have changed anywhere), formulas typeset
   renderCites(added);
   refreshCites();
@@ -96,11 +109,15 @@ function relink(live: Element, s0: Element, s1: Element): void {
 export function linkTree(live: Element, src: Element): void {
   const a = [src, ...Array.from(src.querySelectorAll('*'))];
   const b = [live, ...Array.from(live.querySelectorAll('*'))];
-  for (let i = 0; i < a.length && i < b.length; i++) if (a[i].localName === b[i].localName) link(b[i], a[i]);
+  for (let i = 0; i < a.length && i < b.length; i++) if (a[i].localName === b[i].localName) {
+    link(b[i], a[i]);
+    if (window.__OL?.assetUrls) rememberMappedSource(b[i], a[i], window.__OL.assetUrls, document.baseURI);
+  }
 }
 
 function fresh(s1: Element): Element {
   const el = document.importNode(s1, true);
+  if (window.__OL?.assetUrls) mapAssets(el, window.__OL.assetUrls, document.baseURI);
   const a = [s1, ...Array.from(s1.querySelectorAll('*'))];
   const b = [el, ...Array.from(el.querySelectorAll('*'))];
   for (let i = 0; i < a.length; i++) link(b[i], a[i]);
@@ -119,7 +136,11 @@ function syncAttributes(live: Element, s0: Element, s1: Element): void {
   // only what the source changed: attributes the page's scripts set stay
   for (const a of Array.from(s0.attributes)) if (!s1.hasAttribute(a.name) && synced(a.name)) live.removeAttribute(a.name);
   for (const a of Array.from(s1.attributes)) if (s0.getAttribute(a.name) !== a.value && synced(a.name)) {
-    try { live.setAttribute(a.name, a.value); } catch { /* an attribute name the DOM refuses */ }
+    const assets = window.__OL?.assetUrls;
+    try {
+      if (assets) setMappedAttribute(live, a.name, a.value, assets, document.baseURI);
+      else live.setAttribute(a.name, a.value);
+    } catch { /* an attribute name the DOM refuses */ }
   }
 }
 
@@ -174,17 +195,30 @@ function reconcileChildren(live: Element, s0: Element, s1: Element, added: Eleme
     const l = liveOf.get(a[i]);
     if (l && l.parentElement === live) { relink(l, a[i], b[j]); result[j] = l; }
   }
+  // Exact siblings moved outside the LCS still represent the same object. Keep
+  // their live state, especially an active draft, instead of removing/recreating it.
+  for (let j = 0; j < b.length; j++) {
+    if (result[j]) continue;
+    const i = a.findIndex((old, i) => !usedA.has(i) && old.outerHTML === b[j].outerHTML);
+    if (i < 0) continue;
+    const l = liveOf.get(a[i]);
+    if (l && l.parentElement === live) { usedA.add(i); relink(l, a[i], b[j]); result[j] = l; }
+  }
   // the changed ones between two matched ones: in pairs by position (same name) or anew
   const bounds = [...pairs, [a.length, b.length] as [number, number]];
   let pa = 0, pb = 0;
   for (const [ea, eb] of bounds) {
     const ga: number[] = [], gb: number[] = [];
     for (let i = pa; i < ea; i++) if (!usedA.has(i)) ga.push(i);
-    for (let j = pb; j < eb; j++) gb.push(j);
+    for (let j = pb; j < eb; j++) if (!result[j]) gb.push(j);
     const n = Math.min(ga.length, gb.length);
     for (let k = 0; k < n; k++) {
       const s0c = a[ga[k]], s1c = b[gb[k]];
       const l = liveOf.get(s0c);
+      // After an insertion/deletion, positional pairing can assign an edited
+      // neighbour to the guarded object. A draft needs an unambiguous target;
+      // detach it for recovery rather than write into that neighbour.
+      if (l && ga.length !== gb.length && guard.editing && l.contains(guard.editing)) continue;
       if (l && l.parentElement === live) { result[gb[k]] = reconcile(l, s0c, s1c, added); usedA.add(ga[k]); }
     }
     pa = ea + 1; pb = eb + 1;

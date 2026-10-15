@@ -8,7 +8,8 @@
  * the file. Every edit is a list of splices in the coordinates of the text it was made on; text
  * outside them stays byte for byte.
  */
-import { parse, type DefaultTreeAdapterMap } from 'parse5';
+import { parse, parseFragment, serialize, type DefaultTreeAdapterMap } from 'parse5';
+import { mergedTextSplices, textChanges, spliceText, balancedInlineHtml } from './textedit.ts';
 
 export type HNode = DefaultTreeAdapterMap['node'];
 export type HElement = DefaultTreeAdapterMap['element'];
@@ -281,7 +282,8 @@ export type HtmlOp =
   | { t: 'style'; path: Path; set: Record<string, string | null> }
   /** (`q`: the quotes of a new attribute — single ones for a JSON value) */
   | { t: 'attr'; path: Path; name: string; value: string | null; q?: "'" }
-  | { t: 'inner'; path: Path; html: string }
+  /** before: the last local editing snapshot; concurrent additions must not become deletions. */
+  | { t: 'inner'; path: Path; html: string; before?: string; as?: 'div' }
   | { t: 'outer'; path: Path; html: string }
   | { t: 'remove'; paths: Path[] }
   | { t: 'insert'; parent: Path; index: number; html: string }
@@ -311,7 +313,32 @@ export function opSplices(src: SourceDoc, op: HtmlOp): Splice[] {
   switch (op.t) {
     case 'style': { const s = styleSplice(text, need(doc, op.path), op.set); return s ? [s] : []; }
     case 'attr': { const s = attrSplice(text, need(doc, op.path), op.name, op.value, op.q); return s ? [s] : []; }
-    case 'inner': return [innerSplice(need(doc, op.path), op.html)];
+    case 'inner': {
+      const el = need(doc, op.path), range = innerRange(el);
+      if (!range) throw new Error(`<${el.tagName}> has no content to replace`);
+      const raw = text.slice(range.from, range.to);
+      let splices: Splice[];
+      if (op.before === undefined) splices = [innerSplice(el, op.html)];
+      else {
+        const current = serialize(parseFragment(raw));
+        const before = serialize(parseFragment(op.before)), after = serialize(parseFragment(op.html));
+        const edits = mergedTextSplices(before, after, current);
+        if (!edits) throw new Error('Concurrent text edits overlap');
+        const merged = spliceText(current, edits);
+        if (!balancedInlineHtml(merged)) throw new Error('Concurrent formatting edits overlap');
+        splices = textChanges(raw, merged).map(s => ({ from: range.from + s.from, to: range.from + s.to, insert: s.insert }));
+      }
+      if (op.as && el.tagName !== op.as) {
+        const loc = el.sourceCodeLocation!;
+        const start = loc.startTag!;
+        // Change only the tag names, so a line-height/style edit in this same
+        // commit can coexist instead of overlapping a replacement opening tag.
+        splices.push({ from: start.startOffset + 1, to: start.startOffset + 1 + el.tagName.length, insert: op.as });
+        if (loc.endTag) splices.push({ from: loc.endTag.startOffset + 2, to: loc.endTag.startOffset + 2 + el.tagName.length, insert: op.as });
+        else splices.push({ from: range.to, to: range.to, insert: `</${op.as}>` });
+      }
+      return splices;
+    }
     case 'outer': { const r = outerRange(need(doc, op.path)); return [{ ...r, insert: op.html }]; }
     case 'remove': {
       // an element inside another one removed as well is gone with it

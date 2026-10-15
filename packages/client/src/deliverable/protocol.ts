@@ -11,8 +11,10 @@
 import type { HtmlOp, Path } from '@overlyx/core/html/source.ts';
 import type { CiteEntry } from '@overlyx/core/html/refs.ts';
 import type { MathJaxMacro } from '@overlyx/core/html/deckextras.ts';
+import type { ReliabilityEvent, ReliabilityPointer } from '@overlyx/core/reliability.ts';
 
 export type { HtmlOp, Path };
+export type { ReliabilityEvent, ReliabilityPointer };
 
 export type DeliverableKind = 'deck' | 'poster' | 'page';
 /**
@@ -91,7 +93,7 @@ export interface Rect { x: number; y: number; w: number; h: number }
  * x-height), and the side it grows from as it changes (a centred line grows both ways).
  */
 /** a key typed (the formula editor's type-ahead: keys typed while a formula opened or was left) */
-export interface KeyPress { key: string; shift?: boolean; ctrl?: boolean; alt?: boolean; meta?: boolean }
+export interface KeyPress { key: string; text?: string; shift?: boolean; ctrl?: boolean; alt?: boolean; meta?: boolean }
 
 export interface MathBox { rect: Rect; baseline: number; em: number; align: 'left' | 'center' | 'right' }
 
@@ -197,11 +199,13 @@ export interface PeerInfo { paths: Path[]; color: string; name: string; caret?: 
 /** editor → runtime */
 export type ToRuntime =
   | { ol: 'source'; version: number; html: string }
+  | { ol: 'assets'; urls: Record<string, string> }
+  | { ol: 'folder'; base: string }
   | { ol: 'select'; paths: Path[] }
   /** `math`: its first formula opened in LyX's formula editor at once (a new formula object) */
   | { ol: 'editText'; path: Path; selectAll?: boolean; math?: boolean }
   /** end the retyping of a text (before an undo from the toolbar: the box being retyped does not take new versions) */
-  | { ol: 'stopText' }
+  | { ol: 'stopText'; save?: boolean }
   | { ol: 'scrollTo'; slide: number; smooth?: boolean }
   | { ol: 'scale'; scale: number; anchor?: { docY: number; screenY: number } }
   | { ol: 'tool'; tool: Tool; ink?: InkStyle }
@@ -241,7 +245,7 @@ export type ToRuntime =
   /** the formula open in LyX's formula editor changed (runtime/mathedit.ts: the chip follows) */
   | { ol: 'mathSet'; id: number; tex: string }
   /** LyX's formula editor left the formula (`dir`: by an arrow key / Escape, the caret goes that side; null: elsewhere; `putBack`: Backspace in the empty formula `$` opened gives the typed dollar back as text) */
-  | { ol: 'mathDone'; id: number; tex: string; dir: 'forward' | 'backward' | null; putBack?: string }
+  | { ol: 'mathDone'; id: number; tex: string; dir: 'forward' | 'backward' | null; putBack?: string; keys?: KeyPress[] }
   /** `$$` typed: the empty inline formula `$` opened becomes a displayed one (as in documents) */
   | { ol: 'mathDisplay'; id: number }
   /** LyX's formula editor is drawn over the formula: the formula itself hidden meanwhile (the runtime answers with mathKeys) */
@@ -266,8 +270,8 @@ export type ToRuntime =
   | { ol: 'hover'; path: Path | null }
   /** the Objects pane's drag: `path` in front of (or behind) its sibling `ref` */
   | { ol: 'restack'; path: Path; ref: Path; front: boolean }
-  /** Escape (a level up: out of a group) or an arrow (a nudge) with the keyboard in the editor */
-  | { ol: 'canvasKey'; key: 'Escape' | 'ArrowLeft' | 'ArrowRight' | 'ArrowUp' | 'ArrowDown'; shift: boolean }
+  /** Object shortcuts with the keyboard in the host: use the canvas's current selection. */
+  | { ol: 'canvasKey'; key: 'Escape' | 'Delete' | 'Backspace' | 'ArrowLeft' | 'ArrowRight' | 'ArrowUp' | 'ArrowDown'; shift: boolean }
   /** how the review is shown, Suggesting on or off */
   | { ol: 'review'; view: ReviewView }
   /** Ctrl+Alt+M or the Comment button: what a new comment is on (the runtime answers with `comment`) */
@@ -279,9 +283,10 @@ export type ToRuntime =
 
 /** runtime → editor */
 export type FromRuntime =
+  | { ol: 'offlineBoot'; opaque: true }
   /** `macros`: those of the .tex files the page links (for LyX's formula editor) */
   | { ol: 'ready'; version: number | null; kind: DeliverableKind; slides: SlideBox[]; width: number; height: number; docHeight: number; macros?: Record<string, MathJaxMacro>; solo?: Solo }
-  | { ol: 'layout'; kind: DeliverableKind; slides: SlideBox[]; width: number; height: number; docHeight: number; solo?: Solo }
+  | { ol: 'layout'; version: number | null; kind: DeliverableKind; slides: SlideBox[]; width: number; height: number; docHeight: number; solo?: Solo }
   | { ol: 'selection'; version: number; items: SelItem[] }
   /** something selected is being moved, resized or turned (`on`), or that is over: the editor's quick menu steps aside */
   | { ol: 'dragging'; on: boolean }
@@ -289,10 +294,16 @@ export type FromRuntime =
   /** a new object drawn: its box (slide px), and for lines / the pen the points (slide px, in drawing order) */
   | { ol: 'draw'; version: number; tool: Tool; slide: Path | null; rect: Rect; after?: Path | null; pts?: [number, number][]; d?: string; closed?: boolean; runs?: InkRunD[] }
   | { ol: 'editing'; path: Path | null }
+  /** A local draft whose target disappeared: the host keeps it available for recovery. */
+  | { ol: 'recoveredText'; html: string; reason: string }
+  /** Keystrokes still buffered in the iframe: protect navigation before they reach the host. */
+  | { ol: 'textPending'; on: boolean; html?: string }
   /** a Pencil drew (the first time on this page): fingers move the slide in this browser from now on */
   | { ol: 'pencil' }
   /** the Pencil is on the screen, or has lifted: the hand resting beside the slide moves nothing meanwhile */
   | { ol: 'penDown'; down: boolean }
+  /** content-free, allowlisted gesture reliability signal (never pointer coordinates or object/source data) */
+  | { ol: 'reliability'; event: ReliabilityEvent; pointer: ReliabilityPointer }
   /** words pasted on the canvas: a new text box with them (`after`: the object selected on that slide) */
   | { ol: 'pasteText'; version: number; slide: Path | null; after: Path | null; text: string }
   /** what Ctrl+C copies of the selection now (null: nothing), for the editor to answer a copy at once (runtime/clip.ts) */
@@ -328,8 +339,8 @@ export type FromRuntime =
   | { ol: 'pinch'; phase: 'start' | 'move' | 'end' | 'cancel'; pts: { x: number; y: number; sx: number; sy: number }[] }
   /** three fingers: a tap or a swipe left undoes, a swipe right redoes */
   | { ol: 'history'; redo: boolean }
-  /** the finger that panned was lifted (the editor lets the canvas spring back) */
-  | { ol: 'panEnd' }
+  /** the finger that panned was lifted or interrupted; cancellation settles without a release flick */
+  | { ol: 'panEnd'; cancel?: boolean }
   /** the page's own colours: what is around its slides (the body's background) and the slides' usual one */
   | { ol: 'colors'; desk: string; page: string }
   /** crop mode started (the picture's path) or ended (null) */

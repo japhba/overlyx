@@ -151,7 +151,10 @@ test('comments on slides: Ctrl+Alt+M on an object and on words while typing, ans
   await click(page, 200, 475);
   await page.keyboard.press('Control+Alt+KeyM');
   await expect(page.locator('[data-rv-draft]')).toBeVisible();
+  // No focus click or wait: the shortcut must hand the next key to its draft.
+  expect(await page.evaluate(() => document.activeElement?.matches('[data-rv-comment]') === true)).toBe(true);
   await page.keyboard.type("Isn't this too green?");
+  expect(await page.locator('[data-rv-comment]').inputValue()).toBe("Isn't this too green?");
   await page.keyboard.press('Control+Enter');
   await expect.poll(() => threadsOf('box').map((t: { by: string; text: string }) => `${t.by}: ${t.text}`), { timeout: 15000 }).toEqual(["Admin: Isn't this too green?"]);
   // (an apostrophe in the single-quoted attribute is a JSON escape)
@@ -176,11 +179,20 @@ test('comments on slides: Ctrl+Alt+M on an object and on words while typing, ans
   await page.keyboard.press('Control+Shift+ArrowLeft');
   await page.keyboard.press('Control+Alt+KeyM');
   await expect(page.locator('[data-rv-draft] .dl-rv-quote')).toHaveText('fox');
+  const commentTarget = page.locator('[data-rv-draft] .dl-rv-what');
+  expect(await commentTarget.textContent()).toBe('On “The quick brown fox”');
+  expect(await page.evaluate(() => document.activeElement?.matches('[data-rv-comment]') === true)).toBe(true);
   await page.keyboard.type('Which fox?');
+  // Immediate reads catch a wrong owner or a lost first character before submission.
+  expect(await page.locator('[data-rv-comment]').inputValue()).toBe('Which fox?');
+  expect(await page.locator('[data-rv-draft] .dl-rv-quote').textContent()).toBe('fox');
+  expect(await commentTarget.textContent()).toBe('On “The quick brown fox”');
+  expect(await page.frameLocator('.dl-frame').locator('#p').textContent()).toBe('The quick brown fox');
   await page.keyboard.press('Control+Enter');
   await expect.poll(() => threadsOf('p').map((t: { quote?: string; text: string }) => `${t.quote}: ${t.text}`), { timeout: 15000 }).toEqual(['fox: Which fox?']);
-  // (typing went to the comment, not into the text)
+  // (typing went to the comment, not into the text; the earlier object target stayed intact)
   expect(/<p id="p"[^>]*>([\s\S]*?)<\/p>/.exec(fileText())?.[1]).toBe('The quick brown fox');
+  expect(threadsOf('box').map((t: { text: string }) => t.text)).toEqual(["Isn't this too green?"]);
 
   // the resolved one shown again, then deleted: its attribute goes
   await page.locator('[data-rv-resolved]').check();

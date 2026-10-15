@@ -56,7 +56,7 @@ const VscodeIcon = () => (
 
 interface Clip { name: string; title: string; note: string; extra?: ComponentChildren }
 const CLIPS: Clip[] = [
-  { name: 'wysiwyg', title: 'Text and formulas, as they will print', note: 'Formulas render while you type them, with LyX’s formula editor.' },
+  { name: 'wysiwyg', title: 'Text and formulas, as you write', note: 'Formulas render while you type. Check the PDF for the final page layout.' },
   { name: 'tex', title: 'A real .tex file underneath', note: 'Plain LaTeX, kept byte for byte. Edit the page or the source; they stay in sync.' },
   { name: 'slides', title: 'Slides and posters', note: 'Move and retype anything, edit formulas in place, present with a laser pointer.' },
   { name: 'drawing', title: 'Inkscape’s tools on the slide', note: 'Combine shapes, drag their nodes, draw curves or by hand.' },
@@ -73,7 +73,7 @@ const FEATURES: { title: string; text: string }[] = [
   { title: 'WYSIWYG LaTeX', text: 'Text and formulas render as you type. The file stays plain .tex, so it compiles anywhere.' },
   { title: 'Slides and posters', text: 'On a canvas, with the same formula editor and Inkscape’s drawing tools.' },
   { title: 'Together', text: 'Write live with others, comment and suggest changes, keep going offline.' },
-  { title: 'Your tools', text: 'Git, your Overleaf projects and a VS Code extension. Your preamble and packages just work.' },
+  { title: 'Your tools', text: 'Git, your Overleaf projects and a VS Code extension. Keep your LaTeX preamble and packages; use the PDF for final layout.' },
 ];
 
 /**

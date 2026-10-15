@@ -13,10 +13,37 @@
 import { BASE } from './env';
 import { hasCite } from '@overlyx/core/html/refs.ts';
 import { CITE_WAIT } from './cite';
+import type { AssetUrls } from '../offlineassets';
 
 let loading: Promise<void> | null = null;
 let own = false;
 let pageDone: Promise<void> | null = null;
+
+/** SVG glyphs use surrounding ex units; breakable inter-chunk glue must use the same math em. */
+export function inlineBreakFontSize(xHeight: number): string | null {
+  return Number.isFinite(xHeight) && xHeight > 0 ? `${+(1 / xHeight).toFixed(6)}ex` : null;
+}
+
+function sizeInlineBreaks(): void {
+  const size = inlineBreakFontSize(window.MathJax?.startup?.document?.outputJax?.font?.params?.x_height);
+  if (!size) return;
+  let style = document.querySelector<HTMLStyleElement>('style[data-ol-math-break-size]');
+  if (!style) {
+    style = document.createElement('style');
+    style.setAttribute('data-ol-runtime', '');
+    style.setAttribute('data-ol-math-break-size', '');
+    document.head.append(style);
+  }
+  // MathJax 4 breaks inline SVG math into SVGs separated by zero-font spaces.
+  // Their em glue otherwise inherits the prose font size, while SVG glyphs are
+  // scaled to its x-height. The CHTML editor uses the actual math em, so opening
+  // e^{iπ}+1=0 changed the gaps and shifted the later glyphs by about 3 px.
+  // ex in font-size refers to the parent's font: this remains responsive to
+  // author font/size changes and preserves browser-driven inline wrapping.
+  // Keep the invisible zero-font space's advance fractional as well: default
+  // text hinting rounded each gap and left another one-pixel transition drift.
+  style.textContent = `mjx-container[jax="SVG"] mjx-break { font-size: ${size}; text-rendering: geometricPrecision; }`;
+}
 
 /** TeX MathJax typesets: \( \), \[ \], $$ $$, environments (equation, align …), \ref and \eqref in the text */
 const TEX = /\\\(|\\\[|\$\$|\\begin\{[A-Za-z]+\*?\}|\\(?:eq)?ref\{/;
@@ -172,10 +199,34 @@ export function typesetPage(): Promise<void> {
   })();
 }
 
+function cachedRequire(assets: AssetUrls): ((url: string) => Promise<void>) | undefined {
+  // Private pictures alone are not an offline MathJax installation.
+  if (!assets[BASE + 'mathjax/tex-svg.js']) return undefined;
+  return (url: string) => new Promise<void>((loaded, failed) => {
+    const asset = assets[url];
+    if (!asset) { failed(new Error('This math component is not available offline')); return; }
+    const script = document.createElement('script');
+    script.setAttribute('data-ol-runtime', ''); script.src = asset;
+    script.onload = () => loaded(); script.onerror = () => failed(new Error('Could not load the cached math component'));
+    document.head.appendChild(script);
+  });
+}
+
+/** An already-open opaque frame cannot use the parent's service worker. */
+export function useCachedMath(assets: AssetUrls): void {
+  const require = cachedRequire(assets), mj = window.MathJax;
+  if (!require || !mj) return;
+  if (mj.loader) mj.loader.require = require;
+  if (mj.config?.loader) mj.config.loader.require = require;
+}
+
 function load(): Promise<void> {
   return new Promise<void>((resolve) => {
+    const assets = window.__OL?.assetUrls;
+    const require = assets && cachedRequire(assets);
     window.MathJax = {
-      loader: { load: [], paths: { mathjax: BASE + 'mathjax', fonts: BASE + 'mathjax/fonts' } },
+      loader: { load: [], paths: { mathjax: BASE + 'mathjax', fonts: BASE + 'mathjax/fonts' },
+        ...(require ? { require } : {}) },
       // equations numbered as LaTeX's (equation, align …), \label / \ref / \eqref anywhere on the page;
       // the macros of the .tex files the page links (server: core html/deckextras.ts)
       tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]'], ['$$', '$$']], processEscapes: true, tags: 'ams', macros: window.__OL?.macros ?? {} },
@@ -191,12 +242,12 @@ function load(): Promise<void> {
         typeset: false,
         ready() {
           window.MathJax.startup.defaultReady();
-          window.MathJax.startup.promise.then(() => resolve(), () => resolve());
+          window.MathJax.startup.promise.then(() => { sizeInlineBreaks(); resolve(); }, () => resolve());
         },
       },
     };
     const s = document.createElement('script');
-    s.src = BASE + 'mathjax/tex-svg.js';
+    s.src = assets?.[BASE + 'mathjax/tex-svg.js'] ?? BASE + 'mathjax/tex-svg.js';
     s.async = true;
     s.setAttribute('data-ol-runtime', '');
     s.onerror = () => { showRaw(null); resolve(); };

@@ -133,6 +133,7 @@ describe('the sandboxed folder', () => {
 
   it('serves the page live with the runtime injected, sandboxed, and its files', async () => {
     writeFileSync(file('talk/style.css'), 'h1 { color: red }');
+    const live = ((await manager.open('owner/p/talk/index.html')) as InstanceType<typeof HtmlDoc>).html.toString();
     const t = deliverableToken('owner/p', 'talk', owner.id);
     const r = await fetch(`${base}/ol-d/${t}/index.html?ol=edit`);
     expect(r.status).toBe(200);
@@ -140,8 +141,12 @@ describe('the sandboxed folder', () => {
     expect(r.headers.get('content-security-policy')).not.toMatch(/allow-same-origin/);
     expect(r.headers.get('referrer-policy')).toBe('no-referrer');
     const html = await r.text();
-    expect(html).toMatch(/<head><meta name="referrer" content="no-referrer" data-ol-runtime><script data-ol-runtime>window.__OL=\{"mode":"edit"\}<\/script><script data-ol-runtime src="\/_ol\/runtime.js(\?v=[0-9a-z]+)?"><\/script>/);   // (versioned by the built runtime's time, when there is one: server deliverables.ts runtimeSrc)
-    expect(html).toContain('Only One message per slide');   // the live text, not the file
+    const bootstrap = /<head><meta name="referrer" content="no-referrer" data-ol-runtime><script data-ol-runtime>window.__OL=(\{[^\n]*\})<\/script><script data-ol-runtime src="(\/_ol\/runtime\.js(?:\?v=[0-9a-z]+)?)"><\/script>/.exec(html);
+    expect(bootstrap).not.toBeNull();
+    // Editing/recovery must start from the exact live source, including unsaved changes.
+    expect(JSON.parse(bootstrap![1])).toMatchObject({ mode: 'edit', source: live });
+    expect(html.replace(bootstrap![0], '<head>')).toBe(live);
+    expect(live).toContain('Only One message per slide');
     const css = await fetch(`${base}/ol-d/${t}/style.css`);
     expect(await css.text()).toBe('h1 { color: red }');
     expect(css.headers.get('access-control-allow-origin')).toBe('*');

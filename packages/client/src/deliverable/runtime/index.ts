@@ -14,10 +14,11 @@
  * turns true once fonts, math and pictures have settled (the renderer waits for it).
  */
 import type { ToRuntime, Path, PeerInfo } from '../protocol';
-import { MODE, post, state, detectKind, slideBoxes, pageSize, sendLayout, slides, srcOf, pathOf, docRect, isForeign, layoutHooks, liveAt, slideOf } from './env';
+import { MODE, post, state, setFolderBase, detectKind, slideBoxes, pageSize, sendLayout, slides, srcOf, pathOf, docRect, isForeign, layoutHooks, liveAt, slideOf } from './env';
 import { safeColor } from './carets';
 import { inkOn } from '../../app/contrast';
-import { startMath, typesetPage } from './math';
+import { startMath, typesetPage, useCachedMath } from './math';
+import { mapAssets, mappedAttribute, setMappedAttribute } from '../offlineassets';
 import { renderCites, refreshCites, addEntries, CITE_CSS } from './cite';
 import { applySource, whenTypeset } from './reconcile';
 import * as edit from './edit';
@@ -225,7 +226,18 @@ function onMessage(e: MessageEvent): void {
   if (e.source !== window.parent) return;
   const m = e.data as ToRuntime;
   if (!m || typeof m !== 'object' || typeof m.ol !== 'string') return;
+  if (MODE === 'present' && m.ol !== 'assets' && m.ol !== 'folder') return;
   switch (m.ol) {
+    case 'folder': {
+      setFolderBase(m.base);
+      break;
+    }
+    case 'assets':
+      if (!window.__OL) window.__OL = {};
+      window.__OL.assetUrls = m.urls;
+      useCachedMath(m.urls);
+      mapAssets(document.documentElement, m.urls, document.baseURI);
+      break;
     case 'source': {
       const first = state.src === null;
       const ok = applySource(m.html, m.version);
@@ -241,7 +253,7 @@ function onMessage(e: MessageEvent): void {
     }
     case 'select': if (MODE === 'edit') edit.selectPaths(m.paths as Path[]); break;
     case 'editText': if (MODE === 'edit') edit.editTextAt(m.path, m.selectAll, m.math); break;
-    case 'stopText': if (MODE === 'edit') edit.stopText(); break;
+    case 'stopText': if (MODE === 'edit') edit.stopText(m.save !== false); break;
     case 'scrollTo': if (MODE === 'edit') edit.scrollToSlide(m.slide, m.smooth); else if (MODE === 'thumb') railShow(m.slide); break;
     case 'scale': if (MODE === 'edit') edit.setScale(m.scale, m.anchor); else { railScale = m.scale; drawRail(); } break;
     case 'tool': if (MODE === 'edit') edit.setTool(m.tool, m.ink); break;
@@ -261,7 +273,7 @@ function onMessage(e: MessageEvent): void {
     case 'endCrop': if (MODE === 'edit') edit.endCrop(m.commit); break;
     case 'mathShown': if (MODE === 'edit') edit.mathShown(m.id); break;
     case 'mathSet': if (MODE === 'edit') edit.mathSet(m.id, m.tex); break;
-    case 'mathDone': if (MODE === 'edit') edit.mathDone(m.id, m.tex, m.dir, m.putBack); break;
+    case 'mathDone': if (MODE === 'edit') edit.mathDone(m.id, m.tex, m.dir, m.putBack, m.keys); break;
     case 'mathDisplay': if (MODE === 'edit') edit.mathDisplay(m.id); break;
     case 'typeKeys': if (MODE === 'edit') edit.typeKeys(m.keys); break;
     case 'bib': addEntries(m.entries); break;
@@ -273,7 +285,7 @@ function onMessage(e: MessageEvent): void {
     case 'objects': if (MODE === 'edit') wantObjects(m.on); break;
     case 'hover': if (MODE === 'edit') edit.hoverPath(m.path); break;
     case 'restack': if (MODE === 'edit') restack(m.path, m.ref, m.front); break;
-    case 'canvasKey': if (MODE === 'edit') { if (m.key === 'Escape') edit.selectParent(); else edit.nudge(m.key, m.shift); } break;
+    case 'canvasKey': if (MODE === 'edit') { if (m.key === 'Escape') edit.escapeCanvas(m.shift); else if (m.key === 'Delete' || m.key === 'Backspace') edit.removeSelected(); else edit.nudge(m.key, m.shift); } break;
     case 'review': if (MODE === 'edit') { setReview(m.view); edit.report(); edit.draw(); } break;
     case 'newComment': if (MODE === 'edit') edit.newComment(); break;
     case 'paste': if (MODE === 'edit') edit.pasteHere(m); break;
@@ -283,20 +295,33 @@ function onMessage(e: MessageEvent): void {
 
 /** a file the page uses changed: stylesheets and pictures fetched again in place, anything else reloads the page */
 function refreshAsset(path: string, v: number): void {
+  const base = document.baseURI;
   const matches = (url: string | null) => {
-    if (!url || /^(data|blob):/i.test(url) || (/^https?:/i.test(url) && !url.includes('/ol-d/'))) return false;
-    try { return decodeURIComponent(new URL(url, location.href).pathname).endsWith('/' + path); } catch { return false; }
+    if (!url || /^(data|blob):/i.test(url)) return false;
+    try {
+      const u = new URL(url, base);
+      return u.origin === new URL(base).origin && decodeURIComponent(u.pathname).endsWith('/' + path);
+    } catch { return false; }
   };
-  const bust = (url: string) => { const u = new URL(url, location.href); u.searchParams.set('olv', String(v)); return u.pathname + u.search; };
+  const refresh = (el: Element, name: string) => {
+    const raw = mappedAttribute(el, name);
+    if (!matches(raw)) return false;
+    const url = new URL(raw!, base), fresh = new URL(url.href);
+    fresh.searchParams.set('olv', String(v));
+    // Keep the source and selected DOM node unchanged. The next assets message
+    // can replace this temporary fetch URL with its newly cached data URL.
+    setMappedAttribute(el, name, raw!, { [url.href]: fresh.href }, base);
+    return true;
+  };
   let hit = false;
-  for (const l of Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel~="stylesheet"][href]'))) if (matches(l.getAttribute('href'))) { l.href = bust(l.getAttribute('href')!); hit = true; }
+  for (const l of Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel~="stylesheet"][href]'))) if (refresh(l, 'href')) hit = true;
   for (const i of Array.from(document.querySelectorAll<HTMLImageElement>('img[src], image[href], source[src]'))) {
     const a = i.hasAttribute('src') ? 'src' : 'href';
-    if (matches(i.getAttribute(a))) { i.setAttribute(a, bust(i.getAttribute(a)!)); hit = true; }
+    if (refresh(i, a)) hit = true;
   }
   if (hit) return;
   // a script, data a script loads, a font, an @import: only a reload is sure to take it
-  const used = Array.from(document.querySelectorAll('script[src]')).some(sc => matches(sc.getAttribute('src'))) || performance.getEntriesByType('resource').some(e => matches(e.name));
+  const used = Array.from(document.querySelectorAll('script[src]')).some(sc => matches(mappedAttribute(sc, 'src'))) || performance.getEntriesByType('resource').some(e => matches(e.name));
   if (used) location.reload();
 }
 
@@ -343,6 +368,7 @@ function init(): void {
   if (MODE === 'present') startPresenting();
   if (MODE === 'edit') { edit.startEditing(); ensureSolo(); }
   if (MODE === 'thumb') startThumb();
+  if (MODE === 'present') addEventListener('message', onMessage);
   if (MODE === 'edit' || MODE === 'thumb') {
     addEventListener('message', onMessage);
     const sz = pageSize();

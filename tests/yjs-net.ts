@@ -16,6 +16,8 @@ import { schema } from '@overlyx/core';
 import { typingAnchorPlugin } from '../packages/client/src/editor/plugins/typinganchor';
 import { MoveRepair } from '../packages/server/src/moves';
 import { decodeRecord } from '../packages/core/src/moves';
+import { PendingMoves } from '../packages/core/src/pendingmoves';
+import { RemoteUpdates } from '../packages/client/src/editor/remoteupdates';
 
 export type Json = Record<string, unknown>;
 export const par = (...content: Json[]): Json => ({ type: 'paragraph', content });
@@ -34,9 +36,15 @@ export class Peer {
   inbox: Uint8Array[] = [];
   /** this peer → server, not delivered yet */
   outbox: Uint8Array[] = [];
+  pendingMoves: PendingMoves | null = null;
+  remoteUpdates: RemoteUpdates | null = null;
   constructor(public net: Net, public name: string, id: number, state: Uint8Array) {
     this.ydoc.clientID = id;
     Y.applyUpdate(this.ydoc, state, NET);
+    if (net.pendingMoves) {
+      this.pendingMoves = new PendingMoves(this.ydoc); this.pendingMoves.enable();
+      this.remoteUpdates = new RemoteUpdates(this.ydoc, this.pendingMoves, NET, Symbol('agent'));
+    }
     const fragment = this.ydoc.getXmlFragment('prosemirror');
     const { doc, mapping } = initProseMirrorDoc(fragment, schema);
     const plugins = [ySyncPlugin(fragment, { mapping }), typingAnchorPlugin()];
@@ -100,8 +108,12 @@ export class Net {
   peers: Peer[] = [];
   /** the state vector each peer reported in its last sync step 1 */
   knows = new Map<Peer, Map<number, number>>();
+  readonly pendingMoves: boolean;
 
-  constructor(doc: Json, opts: { repair?: boolean } = {}) {
+  constructor(doc: Json, opts: { repair?: boolean; pendingMoves?: boolean } = {}) {
+    // Server repair regressions also replay deliberately unbuffered legacy
+    // clients. Client-view tests opt into the editor's canonical-ack boundary.
+    this.pendingMoves = opts.pendingMoves ?? false;
     this.server.clientID = 1;
     prosemirrorJSONToYXmlFragment(schema, doc, this.server.getXmlFragment('prosemirror'));
     this.repair = opts.repair === false ? null : new MoveRepair(this.server, { log: process.env.OVERLYX_MOVES_DEBUG ? (...a) => console.log(...a) : undefined });
@@ -135,10 +147,20 @@ export class Net {
     else Y.applyUpdate(this.server, u, p);
   }
 
+  private applyToPeer(p: Peer, u: Uint8Array) {
+    if (p.remoteUpdates) p.remoteUpdates.receive(u);
+    else Y.applyUpdate(p.ydoc, u, NET);
+  }
+
   /** deliver one peer's queued updates to the server */
   send(p: Peer) { const out = p.outbox; p.outbox = []; for (const u of out) this.toServer(p, u, false); }
   /** deliver what the server sent to one peer */
-  receive(p: Peer) { const inb = p.inbox; p.inbox = []; for (const u of inb) Y.applyUpdate(p.ydoc, u, NET); }
+  receive(p: Peer) {
+    const inb = p.inbox; p.inbox = [];
+    for (const u of inb) {
+      this.applyToPeer(p, u);
+    }
+  }
 
   /** deliver everything until nothing is in flight */
   flush() {
@@ -165,11 +187,11 @@ export class Net {
     // like ws.ts: a peer with edits the server has not seen gets the server's step 2 once its own is applied
     const news = [...known].some(([client, clock]) => clock > Y.getState(this.server.store, client));
     if (news || !this.repair) {
-      if (news) { this.toServer(p, fromPeer, true); Y.applyUpdate(p.ydoc, Y.encodeStateAsUpdate(this.server, peerSV), NET); return; }
+      if (news) { this.toServer(p, fromPeer, true); this.applyToPeer(p, Y.encodeStateAsUpdate(this.server, peerSV)); return; }
     }
     const fromServer = Y.encodeStateAsUpdate(this.server, peerSV);
-    if (order === 'peer-first') { this.toServer(p, fromPeer, true); Y.applyUpdate(p.ydoc, fromServer, NET); }
-    else { Y.applyUpdate(p.ydoc, fromServer, NET); this.toServer(p, fromPeer, true); }
+    if (order === 'peer-first') { this.toServer(p, fromPeer, true); this.applyToPeer(p, fromServer); }
+    else { this.applyToPeer(p, fromServer); this.toServer(p, fromPeer, true); }
   }
 
   /** every online peer and the server show the same document; returns its paragraphs */

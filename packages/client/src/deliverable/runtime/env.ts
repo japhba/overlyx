@@ -7,17 +7,19 @@
  */
 import type { FromRuntime, DeliverableKind, Path, SlideBox, Solo } from '../protocol';
 import type { DeckExtras } from '@overlyx/core/html/deckextras.ts';
+import type { AssetUrls } from '../offlineassets';
 
 export type Mode = 'edit' | 'thumb' | 'present' | 'print' | 'check' | 'view';
 
 declare global {
   /** `__OL`: what the page's server gives the runtime — its mode, and the cited entries, citation style and macros (core html/deckextras.ts) */
-  interface Window { __OL?: { mode?: Mode } & DeckExtras; __olReady?: boolean; __ol?: unknown; MathJax?: any }
+  interface Window { __OL?: { mode?: Mode; source?: string; runtimeBase?: string; folderBase?: string; assetUrls?: AssetUrls } & DeckExtras; __olReady?: boolean; __ol?: unknown; MathJax?: any }
 }
 
 export const MODE: Mode = (window.__OL?.mode ?? 'view') as Mode;
 /** the runtime's own files (its script's folder) */
 export const BASE: string = (() => {
+  if (window.__OL?.runtimeBase) return window.__OL.runtimeBase;
   const s = document.currentScript as HTMLScriptElement | null;
   try { return new URL('.', s?.src || location.href).href; } catch { return '/_ol/'; }
 })();
@@ -43,6 +45,23 @@ export const state = {
   html: '',
   kind: 'page' as DeliverableKind,
 };
+
+/** Renew the document folder while preserving an authored HTML base element. */
+export function setFolderBase(folder: string): void {
+  if (!window.__OL) window.__OL = {};
+  window.__OL.folderBase = folder;
+  const source = state.src ?? (typeof window.__OL.source === 'string' ? new DOMParser().parseFromString(window.__OL.source, 'text/html') : null);
+  const authored = document.querySelector<HTMLBaseElement>('base:not([data-ol-runtime])[href]');
+  let fallback = document.querySelector<HTMLBaseElement>('base[data-ol-runtime]');
+  if (authored) {
+    const raw = source?.querySelector('base[href]')?.getAttribute('href');
+    if (raw !== null && raw !== undefined) { try { authored.href = new URL(raw, folder).href; } catch { /* Invalid authored base. */ } }
+    fallback?.remove();
+  } else {
+    if (!fallback) { fallback = document.createElement('base'); fallback.setAttribute('data-ol-runtime', ''); document.head.prepend(fallback); }
+    fallback.href = folder;
+  }
+}
 
 /** live element → the source element it was made from */
 export const srcOf = new WeakMap<Element, Element>();
@@ -151,5 +170,5 @@ export const layoutHooks: { solo?: () => Solo | undefined } = {};
 
 export function sendLayout(): void {
   const sz = pageSize();
-  post({ ol: 'layout', kind: state.kind, slides: slideBoxes(), width: sz.width, height: sz.height, docHeight: document.documentElement.scrollHeight, solo: layoutHooks.solo?.() });
+  post({ ol: 'layout', version: state.version, kind: state.kind, slides: slideBoxes(), width: sz.width, height: sz.height, docHeight: document.documentElement.scrollHeight, solo: layoutHooks.solo?.() });
 }

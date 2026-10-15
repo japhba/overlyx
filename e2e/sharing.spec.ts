@@ -25,6 +25,9 @@ test.describe.configure({ mode: 'serial' });
 
 async function asUser(browser: Browser, username?: string): Promise<BrowserContext> {
   const ctx = await browser.newContext();
+  // These existing menu/status-bar checks exercise Classic. New-user Modern
+  // defaults and account choices are covered by beta-onboarding.spec.ts.
+  await ctx.addInitScript(() => { try { localStorage.setItem('ol.ui', 'classic'); } catch { /* sandboxed frame */ } });
   await apiLogin(ctx, username ? userCredentials(username) : adminCredentials());
   return ctx;
 }

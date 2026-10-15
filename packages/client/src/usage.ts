@@ -25,11 +25,12 @@
  * telemetry is limited to crash diagnostics — packages/vscode/src/host/telemetry.ts).
  */
 import { API_BASE } from './api';
-import { getPrefs } from './prefs';
+import { getPrefs, subscribePrefs } from './prefs';
 import { editorContext } from './editor/context';
+import { isReliabilityContext, isReliabilityDurationBucket, makeReliabilityDetail, parseReliabilityDetail, reliabilityDurationBucket, type ReliabilityEvent, type ReliabilityPointer, type ReliabilityContext } from '@overlyx/core/reliability.ts';
 
-export type UsageName = 'session' | 'view' | 'menu' | 'palette' | 'shortcut' | 'toolbar' | 'key' | 'chord' | 'key-unbound' | 'dialog' | 'notice' | 'error' | 'undo' | 'redo';
-export const USAGE_NAMES: readonly UsageName[] = ['session', 'view', 'menu', 'palette', 'shortcut', 'toolbar', 'key', 'chord', 'key-unbound', 'dialog', 'notice', 'error', 'undo', 'redo'];
+export type UsageName = 'session' | 'view' | 'menu' | 'palette' | 'shortcut' | 'toolbar' | 'key' | 'chord' | 'key-unbound' | 'dialog' | 'notice' | 'error' | 'undo' | 'redo' | 'reliability';
+export const USAGE_NAMES: readonly UsageName[] = ['session', 'view', 'menu', 'palette', 'shortcut', 'toolbar', 'key', 'chord', 'key-unbound', 'dialog', 'notice', 'error', 'undo', 'redo', 'reliability'];
 /** the action kinds the report treats as "the user did something on purpose" */
 export const ACTION_NAMES: readonly UsageName[] = ['menu', 'palette', 'shortcut', 'toolbar', 'key', 'chord'];
 
@@ -157,6 +158,7 @@ let timer: ReturnType<typeof setTimeout> | null = null;
 /** the server answered that statistics are off (204) or the route does not exist: stop for this page load */
 let stopped = false;
 let inited = false;
+let reliabilityEpoch = 0;
 
 function newSessionId(): string {
   try { return crypto.randomUUID().replace(/-/g, '').slice(0, 16); } catch { return Math.random().toString(16).slice(2, 18).padEnd(16, '0'); }
@@ -169,11 +171,38 @@ export function usageEnabled(): boolean {
   return getPrefs().usageStats !== false;
 }
 
+/** Separate, explicit beta consent. Existing usage consent alone is not enough. */
+export function reliabilityEnabled(): boolean { return usageEnabled() && getPrefs().betaDiagnostics === true; }
+
+/** Finite event/context vocabulary; never accepts or scrubs document data. */
+export function recordReliability(event: ReliabilityEvent, extra: { pointer?: ReliabilityPointer; context?: ReliabilityContext; durationMs?: number } = {}): void {
+  try {
+    if (!reliabilityEnabled()) return;
+    const detail = makeReliabilityDetail(event, extra.pointer === undefined ? 'none' : extra.pointer);
+    const context = extra.context === undefined ? 'ui' : extra.context;
+    const bucket = extra.durationMs === undefined ? undefined : reliabilityDurationBucket(extra.durationMs);
+    if (!detail || !isReliabilityContext(context) || bucket === null) return;
+    recordUsage('reliability', detail, { where: context, ...(bucket === undefined ? {} : { dt: bucket }) });
+  } catch { /* Diagnostics must never change the editing or recovery path. */ }
+}
+
+function allowedQueue(events: (UsageEvent & { at: number })[]): (UsageEvent & { at: number })[] {
+  if (!usageEnabled()) return [];
+  return reliabilityEnabled() ? events : events.filter(e => e.name !== 'reliability');
+}
+
+// Revocation discards pending diagnostics immediately, even if consent is
+// switched on again before the next flush. Already-sent batches cannot be recalled.
+subscribePrefs(() => { if (!reliabilityEnabled()) reliabilityEpoch++; queue = allowedQueue(queue); });
+
 /** Queue one event (no-op when statistics are off). `detail` is scrubbed here. */
 export function recordUsage(name: UsageName, detail = '', extra: { ok?: boolean; dt?: number; where?: string } = {}): void {
   if (!usageEnabled()) return;
-  const ev: UsageEvent & { at: number } = { at: Date.now(), ago: 0, name, detail: scrub(detail), where: extra.where ?? whereNow() };
-  if (extra.ok !== undefined) ev.ok = extra.ok;
+  if (name === 'reliability' && (!reliabilityEnabled() || !parseReliabilityDetail(detail)
+    || extra.where !== undefined && !isReliabilityContext(extra.where)
+    || extra.dt !== undefined && !isReliabilityDurationBucket(extra.dt))) return;
+  const ev: UsageEvent & { at: number } = { at: Date.now(), ago: 0, name, detail: name === 'reliability' ? detail : scrub(detail), where: extra.where ?? (name === 'reliability' ? 'ui' : whereNow()) };
+  if (name !== 'reliability' && extra.ok !== undefined) ev.ok = extra.ok;
   if (extra.dt !== undefined && Number.isFinite(extra.dt)) ev.dt = Math.max(0, Math.round(extra.dt));
   queue.push(ev);
   if (queue.length > QUEUE_MAX) queue.splice(0, queue.length - QUEUE_MAX);
@@ -182,10 +211,10 @@ export function recordUsage(name: UsageName, detail = '', extra: { ok?: boolean;
 }
 
 /** the queued events, for tests */
-export function pendingUsage(): UsageEvent[] { return queue.map(({ at: _at, ...e }) => e); }
+export function pendingUsage(): UsageEvent[] { queue = allowedQueue(queue); return queue.map(({ at: _at, ...e }) => e); }
 
 function batchBody(events: (UsageEvent & { at: number })[], now: number): string {
-  return JSON.stringify({ session: sessionId, events: events.map(({ at, ...e }) => ({ ...e, ago: Math.max(0, now - at) })) });
+  return JSON.stringify({ session: sessionId, reliabilityConsent: reliabilityEnabled(), events: events.map(({ at, ...e }) => ({ ...e, ago: Math.max(0, now - at) })) });
 }
 
 /**
@@ -194,9 +223,15 @@ function batchBody(events: (UsageEvent & { at: number })[], now: number): string
  */
 export async function flushUsage(beacon = false): Promise<void> {
   if (timer) { clearTimeout(timer); timer = null; }
+  queue = allowedQueue(queue);
   if (!queue.length || !usageEnabled()) { if (!usageEnabled()) queue = []; return; }
   const events = queue;
+  const sentEpoch = reliabilityEpoch;
   queue = [];
+  const requeue = () => {
+    const retained = sentEpoch === reliabilityEpoch ? events : events.filter(e => e.name !== 'reliability');
+    queue = allowedQueue([...retained, ...queue]).slice(-QUEUE_MAX);
+  };
   if (!sessionId) sessionId = newSessionId();
   const body = batchBody(events, Date.now());
   if (beacon && typeof navigator !== 'undefined' && navigator.sendBeacon) {
@@ -204,10 +239,10 @@ export async function flushUsage(beacon = false): Promise<void> {
   }
   try {
     const res = await fetch(API_BASE + '/api/usage', { method: 'POST', headers: { 'content-type': 'application/json' }, body, credentials: 'same-origin', keepalive: true });
-    if (res.status === 204 || res.status === 403 || res.status === 404) stopped = true;
-    else if (!res.ok && res.status !== 400 && res.status !== 429) queue = [...events, ...queue].slice(-QUEUE_MAX);   // a server hiccup: keep them for the next attempt
+    if (res.status === 204 || res.status === 403 || res.status === 404) { stopped = true; queue = []; }
+    else if (!res.ok && res.status !== 400 && res.status !== 429) requeue();   // a server hiccup: keep them for the next attempt
   } catch {
-    queue = [...events, ...queue].slice(-QUEUE_MAX);   // offline: retry with the next batch
+    requeue();   // offline: retry with the next batch
   }
 }
 
@@ -232,7 +267,14 @@ export function initUsage(): void {
   const view = () => { const k = viewKind(location.hash); if (k !== lastView) { lastView = k; recordUsage('view', k, { where: 'ui' }); } };
   view();
   window.addEventListener('hashchange', view);
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') void flushUsage(true); });
+  const orientation = () => recordReliability('screen.orientation', { context: window.innerHeight > window.innerWidth ? 'portrait' : 'landscape' });
+  orientation();
+  window.addEventListener('orientationchange', orientation);
+  let hiddenAt: number | null = null;
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') { hiddenAt = Date.now(); recordReliability('app.hidden'); void flushUsage(true); }
+    else { recordReliability('app.resumed', hiddenAt === null ? {} : { durationMs: Date.now() - hiddenAt }); hiddenAt = null; }
+  });
   window.addEventListener('pagehide', () => void flushUsage(true));
 }
 

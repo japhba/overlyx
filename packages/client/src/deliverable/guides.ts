@@ -10,12 +10,43 @@
  *   lines (PowerPoint's guides when first shown); an empty one: none.
  * - on a slide's <section>, that slide's own, besides the master's.
  * Reset: a slide's own go (the master's stay); all reset, the master's are the middle lines again.
+ * A separate `data-ol-layout-margins` CSS margin shorthand on the body (or a slide override) describes
+ * fixed template safe-area lines. They are runtime overlays and snapping targets, never guide data.
  */
 
 export type Axis = 'x' | 'y';
 export interface Guide { axis: Axis; at: number }
 
 export const GUIDES_ATTR = 'data-ol-guides';
+/** A template's fixed safe-area margins. Unlike guides, these are visible/snappable but never moved or reset. */
+export const LAYOUT_MARGINS_ATTR = 'data-ol-layout-margins';
+
+/** CSS margin shorthand in slide units (bare/px, pt, mm, cm, in, or %); returns its four safe-area lines. */
+export function layoutMarginGuides(value: string | null | undefined, w: number, h: number): Guide[] {
+  if (value == null || !value.trim() || !(w > 0) || !(h > 0)) return [];
+  const tokens = value.trim().split(/\s+/);
+  if (tokens.length > 4) return [];
+  const sides = tokens.length === 1 ? [tokens[0], tokens[0], tokens[0], tokens[0]]
+    : tokens.length === 2 ? [tokens[0], tokens[1], tokens[0], tokens[1]]
+      : tokens.length === 3 ? [tokens[0], tokens[1], tokens[2], tokens[1]]
+        : tokens;
+  const values = sides.map((token, i) => {
+    const m = /^(\d+(?:\.\d+)?)(px|pt|mm|cm|in|%)?$/i.exec(token);
+    if (!m) return NaN;
+    const n = Number(m[1]), unit = (m[2] ?? 'px').toLowerCase();
+    const ref = i % 2 === 0 ? h : w;
+    const px = unit === '%' ? ref * n / 100 : unit === 'pt' ? n * 96 / 72 : unit === 'mm' ? n * 96 / 25.4 : unit === 'cm' ? n * 96 / 2.54 : unit === 'in' ? n * 96 : n;
+    return Number.isFinite(px) && px >= 0 ? px : NaN;
+  });
+  if (values.some(n => !Number.isFinite(n))) return [];
+  const [top, right, bottom, left] = values;
+  if (left + right >= w || top + bottom >= h) return [];
+  const guides = [
+    { axis: 'x' as const, at: left }, { axis: 'x' as const, at: w - right },
+    { axis: 'y' as const, at: top }, { axis: 'y' as const, at: h - bottom },
+  ];
+  return dedupe(guides);
+}
 
 /** two guides this near (slide px) are one */
 const SAME = 0.5;

@@ -311,6 +311,7 @@ interface Ed {
   wrap: HTMLElement;
   svg: SVGSVGElement;
   drag: null | { kind: 'nodes'; last: Pt; moved: boolean } | { kind: 'handle'; s: number; k: number; which: 'i' | 'o'; moved: boolean } | { kind: 'marquee'; from: Pt; to: Pt; add: boolean; moved: boolean };
+  beforeDrag: SubPath[] | null;
   off: () => void;
 }
 let ed: Ed | null = null;
@@ -386,18 +387,21 @@ function startNodes(el: SVGGraphicsElement): void {
   svg.setAttribute('width', '1'); svg.setAttribute('height', '1');
   wrap.append(style, svg);
   ctx.root.appendChild(wrap);
-  const e: Ed = { el, path, subs: P.parseD(el.getAttribute('d') ?? ''), sel: new Set(), wrap, svg, drag: null, off: () => undefined };
+  const e: Ed = { el, path, subs: P.parseD(el.getAttribute('d') ?? ''), sel: new Set(), wrap, svg, drag: null, beforeDrag: null, off: () => undefined };
   ed = e;
   const opts = { capture: true, passive: false } as AddEventListenerOptions;
   const onScroll = () => render();
   addEventListener('pointerdown', onDown, opts);
   addEventListener('pointermove', onMove, opts);
   addEventListener('pointerup', onUp, opts);
+  addEventListener('pointercancel', onUp, opts);
+  addEventListener('lostpointercapture', onUp, opts);
   addEventListener('dblclick', onDbl, opts);
   addEventListener('keydown', onKey, opts);
   addEventListener('scroll', onScroll, { passive: true });
   e.off = () => {
     removeEventListener('pointerdown', onDown, opts); removeEventListener('pointermove', onMove, opts); removeEventListener('pointerup', onUp, opts);
+    removeEventListener('pointercancel', onUp, opts); removeEventListener('lostpointercapture', onUp, opts);
     removeEventListener('dblclick', onDbl, opts); removeEventListener('keydown', onKey, opts); removeEventListener('scroll', onScroll);
   };
   draw();
@@ -526,7 +530,10 @@ function onDown(ev: PointerEvent): void {
   ev.preventDefault(); ev.stopPropagation();
   const q: Pt = [ev.pageX, ev.pageY];
   const h = hit(q);
-  try { (ev.target as Element).setPointerCapture?.(ev.pointerId); } catch { /* fine */ }
+  // Node/handle SVGs are redrawn while dragging; their permanent shadow host
+  // keeps pointer capture when the pressed handle is replaced.
+  try { ctx?.root.host.setPointerCapture?.(ev.pointerId); } catch { /* fine */ }
+  e.beforeDrag = e.subs.map(sp => ({ closed: sp.closed, nodes: sp.nodes.map(n => ({ ...n, p: [...n.p] as Pt, i: n.i ? [...n.i] as Pt : null, o: n.o ? [...n.o] as Pt : null })) }));
   if (h?.kind === 'handle') { e.drag = { kind: 'handle', s: h.s, k: h.k, which: h.which, moved: false }; return; }
   if (h?.kind === 'node') {
     const id = key(h.s, h.k);
@@ -589,6 +596,14 @@ function onUp(ev: PointerEvent): void {
   ev.preventDefault(); ev.stopPropagation();
   const d = e.drag;
   e.drag = null;
+  const canceled = ev.type !== 'pointerup';
+  if (canceled) {
+    if (d.moved && e.beforeDrag) e.subs = e.beforeDrag;
+    e.beforeDrag = null;
+    render();
+    return;
+  }
+  e.beforeDrag = null;
   if (d.kind === 'marquee') {
     if (!d.moved) { endNodes(); return; }   // a click beside the path: done
     const m = ctm(e.el)!;
@@ -742,7 +757,7 @@ export function nodeCommand(cmd: NodeCmd): void {
 
 /* ------------------------------------------------------------------ the Bézier pen */
 
-interface Pen { nodes: PNode[]; slide: HTMLElement | null; drag: number | null; hover: Pt | null; wrap: HTMLElement; svg: SVGSVGElement }
+interface Pen { nodes: PNode[]; slide: HTMLElement | null; drag: number | null; downCount?: number; hover: Pt | null; wrap: HTMLElement; svg: SVGSVGElement }
 let pen: Pen | null = null;
 
 export function isPenDrawing(): boolean { return !!pen; }
@@ -764,6 +779,7 @@ export function penDown(ev: PointerEvent, slideAt: (t: Element) => HTMLElement |
   }
   const sc = ctx.scale();
   if (pen.nodes.length > 2 && Math.hypot(pen.nodes[0].p[0] - q[0], pen.nodes[0].p[1] - q[1]) < 8 / sc) { penFinish(true); return; }
+  pen.downCount = pen.nodes.length;
   pen.nodes.push({ p: q, i: null, o: null });
   pen.drag = pen.nodes.length - 1;
   penRender();
@@ -781,7 +797,16 @@ export function penMove(ev: PointerEvent): void {
   penRender();
 }
 
-export function penUp(): void { if (pen) { pen.drag = null; penRender(); } }
+export function penUp(): void { if (pen) { pen.drag = null; pen.downCount = undefined; penRender(); } }
+
+/** a platform took the pointer: discard the node whose press was canceled, keep the path so far */
+export function penCancelPress(): void {
+  if (!pen) return;
+  if (pen.downCount !== undefined) pen.nodes.splice(pen.downCount);
+  pen.drag = null;
+  pen.downCount = undefined;
+  if (!pen.nodes.length) penCancel(); else penRender();
+}
 
 export function penKey(ev: KeyboardEvent): boolean {
   if (!pen) return false;
