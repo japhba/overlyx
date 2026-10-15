@@ -44,6 +44,10 @@ describe('scientific starter refresh', () => {
       expect(changed).not.toBe(old);
       expect(isLightlyEditedStarter(changed, 'talk')).toBe(false);
     }
+    const page = original('site').replaceAll('Your Name', 'A Researcher');
+    expect(isLightlyEditedStarter(page, 'site')).toBe(true);
+    expect(isLightlyEditedStarter(page.replace('Why the sky is blue', 'New research'), 'site')).toBe(false);
+    expect(isLightlyEditedStarter(page.replace('author = {A Researcher}', 'author = {Someone Else}'), 'site')).toBe(false);
   });
 
   it('refreshes eligible examples once, retains versions and adds variants without overwriting an existing folder', () => {
@@ -102,6 +106,12 @@ describe('scientific starter refresh', () => {
       mkdirSync(join(dir, 'site'));
       writeFileSync(join(dir, 'site/index.html'), html);
     }
+    const personalised = html.replaceAll('Your Name', 'A Researcher');
+    writeFileSync(join(cases[0].dir, 'site/index.html'), personalised);
+    const legacyDoc = new Y.Doc();
+    legacyDoc.getText('html').insert(0, personalised);
+    db.prepare('INSERT INTO ydocs (id,state,file_hash,updated_at) VALUES (?,?,?,?)').run(cases[0].project + '/site/index.html', Buffer.from(Y.encodeStateAsUpdate(legacyDoc)), 'old', Date.now());
+    legacyDoc.destroy();
     db.prepare('UPDATE projects SET title=? WHERE name=?').run('Example: scientific slides and posters', cases[0].project);
     db.prepare('UPDATE projects SET title=? WHERE name=?').run('My project', cases[3].project);
     const edited = html.replace('Why the sky is blue', 'My research page');
@@ -119,7 +129,7 @@ describe('scientific starter refresh', () => {
     expect(existsSync(join(cases[0].dir, 'site'))).toBe(false);
     expect(db.prepare('SELECT title FROM projects WHERE name=?').get(cases[0].project)).toEqual({ title: 'Example: slides and posters' });
     expect(db.prepare('SELECT title FROM projects WHERE name=?').get(cases[3].project)).toEqual({ title: 'My project' });
-    expect(db.prepare('SELECT name,lyx,kind FROM versions WHERE doc_id=?').all(id)).toEqual([{ name: 'Before removing web-page example', lyx: html, kind: 'manual' }]);
+    expect(db.prepare('SELECT name,lyx,kind FROM versions WHERE doc_id=?').all(id)).toEqual([{ name: 'Before removing web-page example', lyx: personalised, kind: 'manual' }]);
     expect(readFileSync(join(cases[1].dir, 'site/index.html'), 'utf8')).toBe(edited);
     expect(readFileSync(join(cases[2].dir, 'site/index.html'), 'utf8')).toBe(html);
     expect(readFileSync(join(cases[3].dir, 'site/data.csv'), 'utf8')).toBe('my,data');

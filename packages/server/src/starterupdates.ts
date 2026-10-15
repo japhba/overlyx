@@ -16,7 +16,16 @@ const oldSources = (folder: string) => ['web', 'scientific-v1', 'mit-v1'].map(ve
   .filter(file => fs.existsSync(file)).map(file => fs.readFileSync(file, 'utf8'));
 const compact = (s: string) => s.replace(/\s+/g, ' ').trim();
 
-function signature(text: string): string {
+function signature(text: string, folder: string): string {
+  if (folder === 'site') {
+    // Older account seeding personalised both placeholders. They are still the shipped example.
+    const byline = /(<p\b[^>]*>)([^<]*?)( · an OverLyX example project page\s*<\/p>)/.exec(text);
+    if (byline) {
+      text = text.replace(byline[0], `${byline[1]}Your Name${byline[3]}`);
+      text = text.replace(/^(\s*author\s*=\s*\{)([^{}\r\n]*)(\},\s*)$/m,
+        (line, start, name, end) => compact(name) === compact(byline[2]) ? `${start}Your Name${end}` : line);
+    }
+  }
   const node = (n: HNode): unknown => {
     if ('value' in n) return compact(n.value) || null;
     if ('tagName' in n) {
@@ -42,8 +51,8 @@ function signature(text: string): string {
 const oldSignatures = new Map<string, string[]>();
 export function isLightlyEditedStarter(text: string, folder: string): boolean {
   let expected = oldSignatures.get(folder);
-  if (!expected) { expected = oldSources(folder).map(signature); oldSignatures.set(folder, expected); }
-  return expected.includes(signature(text));
+  if (!expected) { expected = oldSources(folder).map(source => signature(source, folder)); oldSignatures.set(folder, expected); }
+  return expected.includes(signature(text, folder));
 }
 
 export function refreshScientificStarters(dryRun = false): { updated: string[]; removed: string[]; renamed: number; preserved: number } {
