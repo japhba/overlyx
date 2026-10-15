@@ -3,6 +3,7 @@
 #
 #   scripts/deploy.sh              # deploy the current master of this checkout
 #   scripts/deploy.sh --no-push    # web only (the extension release needs the push)
+#   scripts/deploy.sh --no-checks  # skip the typechecks and unit tests (the client is still built)
 #
 # What runs where:
 #   1. this checkout (development, /root/lyx/overlyx): master must be committed and must contain
@@ -19,7 +20,9 @@
 # Both typechecks and the unit tests must pass before the push or production checkout changes;
 # the client built for that check is the one deployed. Testing is kept to a minimum unless asked
 # for: OVERLYX_DEPLOY_FULL=1 adds the strict unit matrix (npm run test:release) and the isolated
-# browser workflows (npm run test:beta, ~35 min).
+# browser workflows (npm run test:beta, ~35 min). An agent reasonably confident of its change may
+# skip the typechecks and unit tests with --no-checks; the build, the clean/diverged-tree guards and
+# the check that the site serves the new commit still run.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 DEV=$(pwd)
@@ -27,7 +30,8 @@ PROD=${OVERLYX_PRODUCTION:-/root/lyx/overlyx-production}
 SITE=${OVERLYX_SITE_URL:-https://overlyx.app}
 UNIT=${OVERLYX_UNIT:-overlyx}
 PUSH=1
-for a in "$@"; do case "$a" in --no-push) PUSH=0 ;; *) echo "unknown option $a" >&2; exit 2 ;; esac; done
+CHECKS=1
+for a in "$@"; do case "$a" in --no-push) PUSH=0 ;; --no-checks) CHECKS=0 ;; *) echo "unknown option $a" >&2; exit 2 ;; esac; done
 
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 
@@ -47,11 +51,15 @@ fi
 HEAD=$(git rev-parse HEAD)
 echo "commit $HEAD"
 
-step "check the release candidate before pushing or changing production"
-npx tsc -p packages/client/tsconfig.json --noEmit
-npx tsc -p packages/vscode/tsconfig.json --noEmit
 FULL=${OVERLYX_DEPLOY_FULL:-0}
-if [ "$FULL" = 1 ]; then bash scripts/check-unit-release.sh; else npx vitest run; fi
+if [ "$CHECKS" = 1 ] || [ "$FULL" = 1 ]; then
+  step "check the release candidate before pushing or changing production"
+  npx tsc -p packages/client/tsconfig.json --noEmit
+  npx tsc -p packages/vscode/tsconfig.json --noEmit
+  if [ "$FULL" = 1 ]; then bash scripts/check-unit-release.sh; else npx vitest run; fi
+else
+  step "build the release candidate (--no-checks: typechecks and unit tests skipped)"
+fi
 candidate=$(mktemp -d /tmp/overlyx-deploy-candidate.XXXXXX)
 trap 'rm -rf "$candidate"' EXIT
 OVERLYX_BETA_BROWSER="$FULL" OVERLYX_BETA_BUILD_DIR="$candidate/dist" OVERLYX_BETA_ASSET_PROOF="$candidate/asset-proof.json" node scripts/check-beta.mjs

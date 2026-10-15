@@ -10,7 +10,9 @@
 #      pusher sees the outcome with `gh api repos/<repo>/commits/<sha>/status`;
 #   3. checks the commit in a throwaway worktree — both typechecks, the unit tests and the client build
 #      (OVERLYX_DEPLOY_FULL=1 in the unit's environment: the strict unit matrix and the browser workflows too),
-#      with the production node_modules unless the lockfile changed;
+#      with the production node_modules unless the lockfile changed; a `Deploy: no-checks` trailer
+#      on the pushed commit (origin/master's tip) skips the typechecks and unit tests — the build
+#      and the verification still run;
 #   4. on green: fast-forwards the production checkout, `npm ci` when the lockfile changed, builds
 #      the client, restarts the unit and verifies that the site serves that commit (/api/version).
 # A commit that fails is not retried (a marker under $OVERLYX_AUTODEPLOY_STATE); the next push is.
@@ -85,11 +87,17 @@ check() {   # name command...
     exit 1
   fi
 }
-check "client typecheck" npx tsc -p packages/client/tsconfig.json --noEmit
-check "extension typecheck" npx tsc -p packages/vscode/tsconfig.json --noEmit
-# testing is kept to a minimum unless asked for (OVERLYX_DEPLOY_FULL=1)
+# testing is kept to a minimum unless asked for (OVERLYX_DEPLOY_FULL=1); a pusher reasonably
+# confident of the change skips the typechecks and unit tests with a `Deploy: no-checks` trailer
 FULL=${OVERLYX_DEPLOY_FULL:-0}
-if [ "$FULL" = 1 ]; then check "unit tests" bash scripts/check-unit-release.sh; else check "unit tests" npx vitest run; fi
+trailer=$(git -C "$PROD" log -1 --format='%(trailers:key=Deploy,valueonly)' "$target" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+if [ "$trailer" = no-checks ] && [ "$FULL" != 1 ]; then
+  log "Deploy: no-checks — typechecks and unit tests skipped"
+else
+  check "client typecheck" npx tsc -p packages/client/tsconfig.json --noEmit
+  check "extension typecheck" npx tsc -p packages/vscode/tsconfig.json --noEmit
+  if [ "$FULL" = 1 ]; then check "unit tests" bash scripts/check-unit-release.sh; else check "unit tests" npx vitest run; fi
+fi
 check "$([ "$FULL" = 1 ] && echo "browser workflows" || echo "client build")" env OVERLYX_BETA_BROWSER="$FULL" OVERLYX_BETA_REPORT_DIR="$STATE/$target-browser" OVERLYX_BETA_BUILD_DIR="$WT/packages/client/dist.beta" OVERLYX_BETA_ASSET_PROOF="$WT/packages/client/dist.beta-proof.json" node scripts/check-beta.mjs
 rm -f "$STATE/$target-"*.log
 

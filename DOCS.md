@@ -2284,7 +2284,10 @@ Both scripts share one lock. Install the units with `cp deploy/overlyx-autodeplo
 `journalctl -u overlyx-autodeploy`. Testing is kept to a minimum unless the user asks for more (15 Oct
 2026: deploys took ~45 min with the browser gate on every push): `OVERLYX_DEPLOY_FULL=1
 scripts/deploy.sh` (or that variable in the autodeploy unit's environment) adds the strict unit
-matrix and the browser release gate below.
+matrix and the browser release gate below. The other way, an agent reasonably confident of its change
+may skip the typechecks and unit tests: `scripts/deploy.sh --no-checks`, or a `Deploy: no-checks`
+trailer on the last commit of a push the autodeploy timer deploys. Both still build the client, refuse
+an unclean or diverged tree and verify that the site serves the new commit.
 
 `npm run test:beta` runs the browser release gate locally: it builds the app and runtime, seeds
 disposable accounts, starts a localhost-only server with temporary data/projects, exercises creating,

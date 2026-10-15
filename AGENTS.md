@@ -13,6 +13,9 @@ uncertainty.
 Deploys (`scripts/deploy.sh`, the autodeploy timer) run both typechecks, the unit suite and the
 client build — nothing more. The browser release gate (`npm run test:beta`, ~35 min) and the strict
 unit matrix (`npm run test:release`) run only when the user asks (`OVERLYX_DEPLOY_FULL=1`).
+When you are reasonably confident of a change, bypass those checks: `scripts/deploy.sh --no-checks`,
+or the trailer `Deploy: no-checks` on the last commit of a push that the autodeploy timer deploys.
+The client is still built and the site still verified.
 
 ## Keyboard shortcuts are contextual (VS Code's model)
 
