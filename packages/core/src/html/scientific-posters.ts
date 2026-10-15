@@ -20,7 +20,10 @@ function profiles(x: number, y: number, w: number, h: number, horizontal = false
     const points = Array.from({ length: 81 }, (_, j) => {
       const u = j / 80, a = Math.exp(-time), b = .45 * Math.exp(-4 * time);
       if (type === 'phase') return `${(xx + 100 + 72 * Math.exp(-3 * u) * Math.cos(17 * u + i)).toFixed(2)},${(yy + 80 - 60 * Math.exp(-3 * u) * Math.sin(17 * u + i)).toFixed(2)}`;
-      if (type === 'calibration') return `${(xx + 15 + 175 * u).toFixed(2)},${(yy + 125 - 100 * Math.pow(u, [.5, .75, 1][i])).toFixed(2)}`;
+      if (type === 'calibration') {
+        const power = [2, 1.5, 1][i], a = u ** power, b = (1 - u) ** power;
+        return `${(xx + 15 + 175 * u).toFixed(2)},${(yy + 125 - 100 * a / (a + b)).toFixed(2)}`;
+      }
       return `${(xx + 15 + u * 175).toFixed(2)},${(yy + 94 - 48 * (a * Math.cos(u * Math.PI * 2) + b * Math.cos(u * Math.PI * 4))).toFixed(2)}`;
     }).join(' ');
     const label = type === 'phase' ? `Initial phase ${i + 1}` : type === 'calibration' ? ['Underconfident', 'Intermediate', 'Calibrated'][i] : `t / τ₁ = ${time}`;

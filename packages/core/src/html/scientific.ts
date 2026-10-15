@@ -72,10 +72,10 @@ function chart(type: 'decay' | 'phase' | 'calibration', x: number, y: number, w:
     content += `<circle cx="315" cy="180" r="5" fill="currentColor"/>` + labelText(320, 375, 'State x₁', 'middle') + labelText(80, 28, 'State x₂') + labelText(335, 170, 'stable fixed point');
     content += labelText(65, 340, '−1') + labelText(560, 340, '1', 'end');
   } else {
-    label = 'Analytical reliability diagram: the identity line is perfectly calibrated; a square-root curve is underconfident.';
+    label = 'Analytical reliability diagram: the identity line is perfectly calibrated; an odds-squared curve depicts underconfident forecasts.';
     content = [0, .5, 1].map(v => `<line x1="65" x2="570" y1="${310 - v * 260}" y2="${310 - v * 260}" stroke="currentColor" opacity=".15"/>${labelText(53, 316 - v * 260, String(v), 'end')}${labelText(65 + v * 505, 338, String(v), 'middle')}`).join('');
     content += line('65,310 570,50', 'var(--muted)', '7 6');
-    content += line(path(t => [65 + 505 * t, 310 - 260 * Math.sqrt(t)]), 'var(--accent)');
+    content += line(path(t => [65 + 505 * t, 310 - 260 * t * t / (t * t + (1 - t) * (1 - t))]), 'var(--accent)');
     content += labelText(80, 28, 'Event frequency') + labelText(320, 375, 'Predicted probability', 'middle') + labelText(295, 285, 'perfect calibration') + labelText(95, 100, 'underconfident');
   }
   return `  <svg role="img" aria-label="${label}" viewBox="0 0 600 400" style="position: absolute; left: ${x}px; top: ${y}px; width: ${w}px; height: ${h}px">${content}</svg>`;
@@ -230,8 +230,8 @@ export function scientificDeck(title = '', id?: string): string {
     ], 'Define P as the forecast and Y as the binary outcome. Calibration is a property of a collection of predictions.'));
     pages.push(section(3, 'II / The evidence', 'A reliability diagram reveals the mismatch', [
       chart('calibration', 96, 230, wide, 470),
-      p(96, 720, wide, 'Illustrative analytical curves. Dashed: y = p. Solid: y = √p, an underconfident forecast. No empirical samples or confidence intervals are implied.', 'caption'),
-    ], 'Read probability on the horizontal axis and event frequency on the vertical axis. Explain why the curve above the identity is underconfident.'));
+      p(96, 720, wide, 'Analytical curves. Dashed: y = p. Solid: y = p² / [p² + (1 − p)²], an underconfident forecast. No empirical samples or confidence intervals are implied.', 'caption'),
+    ], 'Read probability on the horizontal axis and event frequency on the vertical axis. Underconfident probabilities lie closer to 0.5 than the observed frequencies, on both sides of 0.5.'));
     pages.push(section(4, 'III / A counterexample', 'Perfect calibration can carry little information', [
       p(96, 260, wide, 'Suppose the event rate is 20%. Predicting 0.2 for every case is calibrated in a population with that rate.'),
       equation(96, 425, wide, String.raw`P\equiv 0.2,\qquad \mathbb{E}[Y]=0.2`),
