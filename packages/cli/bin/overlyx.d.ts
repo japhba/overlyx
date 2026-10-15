@@ -29,6 +29,8 @@ export interface SyncEngineOptions {
   remote: string;
   auth: SyncAuth;
   client?: string;
+  /** what runs the engine, sent to the server (the web interface shows it): 'cli' unless said */
+  app?: 'vscode' | 'cli';
   isBusy?: (rel: string) => boolean;
   onStatus?: (status: SyncStatus) => void;
   log?: (line: string) => void;

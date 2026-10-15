@@ -178,6 +178,10 @@ export const encId = (id: string) => encodeURIComponent(id);
 export interface GdocsLink { fileId: string; tabId: string | null; url: string; auto: boolean; lastSync: number | null; lastError: string | null; linkedBy: number; format: 'text' | 'docx'; warnings: string[] }
 export interface GdocsStatus { configured: boolean; picker: boolean; account: { email: string | null } | null; link: GdocsLink | null; canEdit: boolean; guest: boolean }
 /** what Google's file picker needs (app/gpicker.ts); the e2e stub offers the simulated account's Google Docs */
+/** a synced clone of the project working right now (server syncPeers.ts) — `host` only for the viewer's own */
+export interface SyncClone { name: string; username: string; app: 'vscode' | 'cli' | 'other'; host: string | null; mine: boolean; since: number; lastSeen: number }
+/** what keeps a document in step from elsewhere: synced clones of its project, its Google Docs link */
+export interface ExternalSync { clones: SyncClone[]; google: { url: string; auto: boolean; lastSync: number | null; lastError: string | null } | null }
 export type GdocsPicker = { stub: true; files: { id: string; name: string }[] } | { stub?: false; apiKey: string; appId: string; token: string };
 export interface GdocsTab { id: string; title: string; level: number; parent: string | null }
 
@@ -345,6 +349,7 @@ export const api = {
   /** a layout document's text boxes as TeX set them in the last build (the editor's check against the PDF) */
   layoutCheck: (id: string) => req<LayoutCheck>('GET', `/api/docs/${encId(id)}/layoutcheck`),
   // the Google Docs sync (server gdocs/)
+  externalSync: (id: string) => req<ExternalSync>('GET', `/api/docs/${encId(id)}/external`),
   gdocsStatus: (id: string) => req<GdocsStatus>('GET', `/api/gdocs/status?doc=${encId(id)}`),
   gdocsLink: (id: string, title: string) => req<{ link: GdocsLink }>('POST', `/api/docs/${encId(id)}/gdocs/link`, { title }),
   /** link the document to a Google Doc that exists (picked): its differences come in as tracked changes */

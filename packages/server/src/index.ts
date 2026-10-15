@@ -54,6 +54,7 @@ import { searchLiterature, bibtexFor, addToCitedBib, sourcesAvailable, type Hit 
 import { fetchPdfForEntry } from './pdffetch.ts';
 import { gitRouter, ensureAllRepos, ensureRepo, repoInfo, cloneUrl, commitProject, restoreProject, touchProject, createToken, listTokens, deleteToken, flushCommits } from './git.ts';
 import { syncRouter } from './sync.ts';
+import { externalSyncOf } from './syncPeers.ts';
 import { texHeadings, parseBibtex, lyxToPm, splitDocId, projectOfDoc, docPathOf, splitProjectKey } from '@overlyx/core';
 
 const app = express();
@@ -176,7 +177,7 @@ const needProject = (min: Role) => (req: express.Request, res: express.Response,
  */
 api.all('/docs/*', (req, res, next) => {
   const full = String((req.params as any)[0] ?? '');
-  const m = /^(.*?)(?:\/(meta|tex|outline|source|bib|reset|save|header|versions(?:\/\d+(?:\/restore)?)?|export(?:\/cancel)?|pdf|build|folds|synctex\/(?:view|edit)))?$/.exec(full)!;
+  const m = /^(.*?)(?:\/(meta|tex|outline|source|bib|reset|save|header|versions(?:\/\d+(?:\/restore)?)?|export(?:\/cancel)?|pdf|build|folds|external|synctex\/(?:view|edit)))?$/.exec(full)!;
   // an id from before a project moved (namespaces.ts) names the document under its current key
   const id = canonicalDocId(decodeURIComponent(m[1]));
   const action = m[2] ?? '';
@@ -190,6 +191,14 @@ api.all('/docs/*', (req, res, next) => {
 
 // the Google Docs sync (gdocs/): after the document access rules above
 api.use(gdocsRoutes());
+
+// what keeps the document in step from elsewhere right now — synced clones of its project, its
+// Google Docs link (syncPeers.ts): the web interface's "⇄ in sync" chip
+api.get('/docs/*/external', (req, res) => {
+  const id = docId(req);
+  res.setHeader('Cache-Control', 'no-store');
+  res.json(externalSyncOf(id, projectOfDoc(id), req.user!));
+});
 
 /* ---------------------------------------------------------------- projects */
 

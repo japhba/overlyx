@@ -913,6 +913,11 @@ html[data-theme="dark"] { --cm-accent: #f4c03c; --cm-chip-bg: #8a6b12; --cm-chip
 .statusbar .pdf-status:hover { border-color: var(--ui-border); background: var(--surface); }
 .statusbar .pdf-status.outdated { color: var(--warn-fg); }
 .statusbar .pdf-status.error { color: var(--err); }
+/* "⇄ In sync with VS Code / Google Docs" (app/SyncChip.tsx): the document is kept in step with a copy elsewhere */
+.sync-chip { display: inline-flex; flex-shrink: 0; align-items: center; gap: 5px; font: inherit; color: var(--accent); background: none; border: 1px solid transparent; border-radius: 3px; padding: 0 6px; line-height: 18px; cursor: pointer; white-space: nowrap; }
+.sync-chip:hover { border-color: var(--ui-border); background: var(--surface); }
+.sync-chip .sync-glyph { font-weight: 600; }
+.sync-chip.error { color: var(--warn-fg); background: var(--warn-bg); }
 .statusbar .save-state.saving { color: var(--ui-muted); }
 .statusbar .save-state.offline { color: var(--warn-fg); background: var(--warn-bg); padding: 0 8px; border-radius: 3px; }
 .statusbar .update-hint { font: inherit; color: var(--accent, #1a5fb4); background: transparent; border: 1px solid currentColor; border-radius: 3px; padding: 0 8px; margin-right: 10px; cursor: pointer; line-height: 18px; }

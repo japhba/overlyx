@@ -328,7 +328,13 @@ blend.
   handler serves without its usual commit-before-fetch, then `reset --mixed`: files untouched, index
   and branch on the server's commit), and a commit made in the clone becomes one on the server with
   its message (`POST /git/api/sync/commit`, once every file is in step). Protocol, all under
-  `/git/api/sync/` with git's credentials and roles: `state` (open documents saved first, then every
+  `/git/api/sync/` with git's credentials and roles (each request says what the clone is and where:
+  `X-OverLyX-Sync-App: vscode|cli`, `X-OverLyX-Sync-Host`; the web interface shows **"⇄ In sync with
+  VS Code"** beside a document's save state while a clone of its project is at work — its long poll
+  open or a request in the last 75 s — and for a document linked to a Google Doc, `server/syncPeers.ts`,
+  `GET /api/docs/<id>/external`, `client/app/SyncChip.tsx`, polled every 20 s; the computer's name is
+  shown to the clone's own account only, an engine from before the headers is told by its
+  credential's name): `state` (open documents saved first, then every
   file as `git ls-files --cached --others --exclude-per-directory=.gitignore` lists it — the
   project's own .gitignore files on both sides, never a machine's global excludes — with its git
   blob hash, the branch, its head, the caller's role and a change cursor), `wait` (long poll: answers

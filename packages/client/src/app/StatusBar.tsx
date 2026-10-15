@@ -95,7 +95,7 @@ function BuildVersion() {
   return <span class="build-version" title={`OverLyX build (UTC): ${version}`}>{version}</span>;
 }
 
-export function StatusBar({ layout, status, chord, message, save, tracking, trackingAs, change, docLabel, readOnly, quiet, updateReady, aiBusy, stats, zoom, onZoom, pdf, corner }: {
+export function StatusBar({ layout, status, chord, message, save, tracking, trackingAs, change, docLabel, readOnly, quiet, updateReady, aiBusy, stats, zoom, onZoom, pdf, corner, sync }: {
   layout: string; status: Status; chord: string | null; message: { text: string; kind: 'info' | 'error' } | null; save: SaveState;
   tracking: boolean; trackingAs?: string; change?: string | null; docLabel?: string | null; readOnly?: boolean;
   /** no document editor is open (start screen, text file): only messages and the build version */
@@ -112,10 +112,12 @@ export function StatusBar({ layout, status, chord, message, save, tracking, trac
   pdf?: { state: PdfStatusInput; onClick: (rebuild: boolean) => void };
   /** the buttons of the panels folded away (the files): in the screen's bottom-left corner, never over the page */
   corner?: ComponentChildren;
+  /** "⇄ In sync with VS Code" (SyncChip.tsx): the document is kept in step with a copy elsewhere */
+  sync?: ComponentChildren;
 }) {
   // (after them, `data-statusbar-slot`: an open slide deck's folded slides and notes, DeliverableEditor's portal)
   const start = <><span class="statusbar-corner">{corner}</span><span class="statusbar-slot" data-statusbar-slot /></>;
-  if (quiet) return <div class="statusbar">{start}{message && <span class={'msg ' + message.kind}>{message.text}</span>}<span class="spacer" /><BuildVersion /></div>;
+  if (quiet) return <div class="statusbar">{start}{message && <span class={'msg ' + message.kind}>{message.text}</span>}<span class="spacer" />{sync}<BuildVersion /></div>;
   return (
     <div class="statusbar">
       {start}
@@ -136,6 +138,7 @@ export function StatusBar({ layout, status, chord, message, save, tracking, trac
         </span>
       )}
       <SaveIndicator save={save} />
+      {sync}
       {pdf && <PdfStatusChip pdf={pdf.state} savedAt={save.savedAt} onClick={pdf.onClick} />}
       {zoom !== undefined && onZoom && <ZoomControl zoom={zoom} onZoom={onZoom} />}
       <BuildVersion />

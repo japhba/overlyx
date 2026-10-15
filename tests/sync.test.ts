@@ -5,13 +5,13 @@
  * (unsaved ones included) reach the clone — without a commit per sync; concurrent edits merge
  * (documents paragraph by paragraph, the clone's text as a tracked change where both changed the same
  * paragraph; text by lines; binary files as conflict copies); deletions, viewers, the local branch
- * following the server's commits, a local commit recorded on the server, links in the clone, and the
- * watcher with its lock.
+ * following the server's commits, a local commit recorded on the server, links in the clone, the
+ * watcher with its lock, and the clones at work as the web interface hears of them (syncPeers.ts).
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { tmpdir, hostname } from 'node:os';
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
@@ -27,6 +27,7 @@ process.env.OVERLYX_DATA_DIR = join(ROOT, 'data');
 process.env.OVERLYX_PROJECTS_DIR = join(ROOT, 'projects');
 process.env.OVERLYX_GIT_COMMIT_MS = String(3600_000);   // no automatic commits during the tests: every commit is one a test made
 process.env.OVERLYX_SYNC_WAIT_MS = '1500';
+process.env.OVERLYX_SYNC_PEER_TTL_MS = '2500';
 writeFileSync(join(ROOT, 'gitconfig'), '');
 
 const { config } = await import('../packages/server/src/config.ts');
@@ -38,6 +39,7 @@ const { createOwnedProject } = await import('../packages/server/src/projectCreat
 const { addMember } = await import('../packages/server/src/access.ts');
 const { manager } = await import('../packages/server/src/docs.ts');
 const { db } = await import('../packages/server/src/db.ts');
+const { clonesOf, externalSyncOf } = await import('../packages/server/src/syncPeers.ts');
 
 const CLI = fileURLToPath(new URL('../packages/cli/bin/overlyx.js', import.meta.url));
 const execFileP = promisify(execFile);
@@ -289,6 +291,9 @@ describe('overlyx sync: a clone in step with the server', () => {
       await until(() => p.local('notes.txt') === 'from the server\n');
       writeFileSync(join(p.clone, 'notes.txt'), 'from the clone\n');
       await until(() => p.server('notes.txt') === 'from the clone\n');
+      // the web interface hears of it: the CLI's clone, on this computer (said to its own account only)
+      expect(clonesOf(p.key, toSessionUser(ada))).toMatchObject([{ app: 'cli', host: hostname(), mine: true }]);
+      expect(clonesOf(p.key, toSessionUser(bob))).toMatchObject([{ app: 'cli', host: null, mine: false, name: 'Ada Lovelace' }]);
       // a second sync of the same clone waits for the first — a second watcher too, quietly (no request after request)
       await expect(sync(p.clone)).rejects.toThrow(/synced by another process/);
       const second = spawn(process.execPath, [CLI, 'sync', p.clone, '--watch'], { env: env(), stdio: 'ignore' });
@@ -304,4 +309,20 @@ describe('overlyx sync: a clone in step with the server', () => {
     }
     expect(existsSync(join(p.clone, '.git', 'overlyx-sync', 'lock'))).toBe(false);
   }, 30_000);
+
+  it('the web interface hears which clones are at work, and forgets them a while after they stop', async () => {
+    const p = await project('peers', { 'main.tex': doc('One.') });
+    const state = (auth: string, headers: Record<string, string> = {}) => fetch(`${host}/git/api/sync/state?project=${encodeURIComponent(p.key)}`, { headers: { Authorization: auth, ...headers } }).then(r => r.json());
+    const as = toSessionUser(ada);
+    expect(externalSyncOf(`${p.key}/main.tex`, p.key, as)).toEqual({ clones: [], google: null });
+    await state(basic('ada', adaToken), { 'X-OverLyX-Sync-App': 'vscode', 'X-OverLyX-Sync-Host': encodeURIComponent('Ada’s Mac') });
+    expect(externalSyncOf(`${p.key}/main.tex`, p.key, as).clones).toMatchObject([{ app: 'vscode', host: 'Ada’s Mac', mine: true, username: 'ada' }]);
+    // an engine from before the headers: its credential's name tells
+    const old = gitmod.createToken(ada.id, 'OverLyX CLI on old-laptop').token;
+    await state(basic('ada', old));
+    expect(clonesOf(p.key, as).map(c => [c.app, c.host])).toEqual([['vscode', 'Ada’s Mac'], ['cli', 'old-laptop']]);
+    // once nothing asks for a while, they are gone
+    await sleep(2800);
+    expect(clonesOf(p.key, as)).toEqual([]);
+  }, 20_000);
 });

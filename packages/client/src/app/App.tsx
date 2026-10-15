@@ -42,6 +42,7 @@ import { Ruler, NOTE_SCALE_DEFAULT, NOTE_SCALE_MIN, NOTE_SCALE_MAX } from './Rul
 import { useNotesPane, NotesSash } from './notespane';
 import { StatusBar, SaveIndicator, ZoomControl, type Status } from './StatusBar';
 import { CornerButton } from './CornerButton';
+import { SyncChip, useExternalSync } from './SyncChip';
 import { SourcePane, type SourceTarget, cursorLine, docBlocks, blockPos } from './SourcePane';
 import { activeMathField, mathFocusListeners, mathCursorListeners, type LyxMathField } from '../editor/lyxmath/field';
 import { Tour, InterfacePrompt, tourWanted, rememberTour, type TourEnd } from './Tour';
@@ -1514,6 +1515,10 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       onMode={m => applyEditMode(m, { tracking, toggleTracking: () => { void toggleTracking(); }, setViewing })} />
   );
 
+  // "⇄ In sync with VS Code / Google Docs": the document is kept in step with a copy elsewhere (SyncChip.tsx)
+  const externalSync = useExternalSync(textId);
+  const syncChip = <SyncChip ext={externalSync} onOpen={g => { if (g && isLyxDoc) setDialog({ name: 'gdocs' }); else if (textId) setGitFor(projectOfDoc(textId)); }} />;
+
   // a guest signs in: with Google directly (back to this document afterwards), else on the sign-in page
   const signIn = () => { if (google) location.assign(googleSignInUrl()); else onSignIn(); };
 
@@ -1530,6 +1535,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
             <span class="mt-name" title={docId}>{docPathOf(docId.replace(/^(text|pdf):/, '')).split('/').pop()}</span>
             <span class="mt-project">{curProject?.title ?? projectShortName(projectOfDoc(docId.replace(/^(text|pdf):/, '')))}</span>
             {isLyxDoc && <SaveIndicator save={save} />}
+            {syncChip}
           </>
         ) : undefined} />
       {user.guest && <GuestCallout user={user} project={curProject} google={google} onSignIn={signIn} />}
@@ -1676,6 +1682,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         readOnly={!!docId && viewOnly} updateReady={updateReady} aiBusy={aiBusy > 0}
         quiet={!!docId && !isLyxDoc} stats={docStats} zoom={zoom} onZoom={setZoom}
         corner={!showFiles && <CornerButton icon="files" title={LEFT_TITLE} data-rail="outline" onClick={() => setShowFiles(true)}>Files</CornerButton>}
+        sync={syncChip}
         pdf={isLyxDoc ? { state: pdf, onClick: rebuild => { if (rebuild && !pdf.busy) void build(); else if (!pdfPaneVisible) changePanes(l => (narrowPanes ? { ...setPaneShown(l, 'pdf', true), order: ['pdf', ...l.order.filter(p => p !== 'pdf')] } : setPaneShown(l, 'pdf', true))); } } : undefined} />
       {renderDialog()}
       {shareFor && <ShareDialog project={shareFor} user={user} onClose={() => setShareFor(null)} onChanged={() => setRefreshKey(k => k + 1)} />}

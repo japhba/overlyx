@@ -179,6 +179,7 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
     if (f.engine || !enabled() || paused(f.dir) || !syncs.has(f.dir)) { render(f); return; }
     const r = await syncEngineFor(f.dir, {
       client: os.hostname(),
+      app: 'vscode',
       isBusy: busy(f.dir),
       log: line => log(f.dir, line),
     });

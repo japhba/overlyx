@@ -10,7 +10,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execFileP = promisify(execFile);
-const VERSION = '0.8.0';
+const VERSION = '0.8.1';
 const DEFAULT_HOST = 'https://overlyx.app';
 
 const HELP = `OverLyX CLI ${VERSION}
@@ -1375,8 +1375,8 @@ class SyncHttpError extends Error {
 
 /**
  * The sync of one clone. `opts`: dir, host, project, remote, auth {username, token}, client (a name
- * for this computer), isBusy(rel) → true while an editor holds unsaved changes of the file,
- * onStatus(status), log(line).
+ * for this computer), app ('vscode' | 'cli': what runs it, told to the server), isBusy(rel) → true
+ * while an editor holds unsaved changes of the file, onStatus(status), log(line).
  */
 export class SyncEngine {
   constructor(opts) {
@@ -1401,7 +1401,9 @@ export class SyncEngine {
     const url = `${this.o.host}/git/api/sync/${pathname}`;
     let res;
     try {
-      res = await fetch(url, { ...init, headers: { Authorization: basic(this.o.auth.username, this.o.auth.token), ...(init.body ? { 'Content-Type': 'application/json' } : {}), ...init.headers }, signal: init.signal ?? AbortSignal.timeout(init.timeout ?? 120000) });
+      // what this clone is and where (the web interface shows "in sync with VS Code / a clone on <host>")
+      const who = { 'X-OverLyX-Sync-App': this.o.app ?? 'cli', 'X-OverLyX-Sync-Host': encodeURIComponent(this.o.client ?? os.hostname()) };
+      res = await fetch(url, { ...init, headers: { Authorization: basic(this.o.auth.username, this.o.auth.token), ...who, ...(init.body ? { 'Content-Type': 'application/json' } : {}), ...init.headers }, signal: init.signal ?? AbortSignal.timeout(init.timeout ?? 120000) });
     } catch (e) { throw new SyncHttpError(0, `cannot reach ${this.o.host}: ${e.cause?.message ?? e.message}`); }
     if (init.raw && res.ok) return res;
     const text = await res.text();

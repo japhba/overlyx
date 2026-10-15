@@ -35,6 +35,7 @@ import { projectDir, isDocumentFile, assertWritableRelPath } from './projects.ts
 import { readFileIn, writeFileIn, removeIn, lstatIn } from './confined.ts';
 import { git, gitEnv, ensureRepo, touchProject, commitProject, commitListeners, authenticateBasic, cliTarget } from './git.ts';
 import { logAccess, roleFor } from './access.ts';
+import { notePeer } from './syncPeers.ts';
 import type { SessionUser } from './auth.ts';
 
 const execFileP = promisify(execFile);
@@ -241,6 +242,8 @@ function target(req: Request, res: Response, need: 'view' | 'edit'): { user: Ses
   if (!user) return null;
   const t = cliTarget(req, res, user, need, false);
   if (!t) return null;
+  // a synced clone at work: the web interface says so while its requests (the long poll too) go on
+  res.on('close', notePeer(t.project, user, req));
   return { user, project: t.project };
 }
 
