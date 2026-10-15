@@ -49,8 +49,11 @@ html[data-ui="modern"][data-theme="dark"]:not([data-dark-pages]) .editor-page:no
   --m-line2: #e3e0d9;
   --m-line-strong: #c3beb4;
   --m-hover: rgba(28, 27, 25, 0.06);
-  --m-press: var(--m-blue);  /* a key that is on, the open menu, the item under the pointer */
+  --m-press: var(--m-blue);  /* the open menu, the item under the pointer */
   --m-on-press: #ffffff;
+  /* a key that is on: a blue tint, the icon in blue — legible, where solid blue washed the icons out */
+  --m-key-on: color-mix(in srgb, var(--m-blue) 17%, var(--m-ground));
+  --m-on-key-on: var(--m-blue);
   --m-on-yellow: #1c1b19;    /* ink on a yellow key, in both themes */
   /* the colours: one signal, the selection, the marks */
   --m-signal: #d6402b;       /* the wordmark's red (LyX's X): the one thing to press */
@@ -109,6 +112,7 @@ html[data-ui="modern"][data-theme="dark"] {
   --m-hover: rgba(236, 235, 230, 0.07);
   --m-press: var(--m-blue);
   --m-on-press: #1b1a18;
+  --m-key-on: color-mix(in srgb, var(--m-blue) 24%, var(--m-ground));
   --m-signal: #ec5a43;
   --m-signal-hover: #ff7058;
   --m-on-signal: #1b1a18;
@@ -271,7 +275,7 @@ html[data-ui="modern"] .tb-modern-row > .toolbar::-webkit-scrollbar { display: n
 html[data-ui="modern"] .tb-modern-end { display: flex; align-items: center; gap: 6px; flex: none; padding-left: 6px; border-left: 1px solid var(--m-line-strong); height: 22px; }
 html[data-ui="modern"] .toolbar .tb-btn { height: 30px; min-width: 30px; padding: 0 5px; border: 0; border-radius: var(--m-radius); color: var(--m-ink2); }
 html[data-ui="modern"] .toolbar .tb-btn:hover:not(:disabled) { background: var(--m-hover); color: var(--m-ink); border: 0; }
-html[data-ui="modern"] .toolbar .tb-btn.active { background: var(--m-press); color: var(--m-on-press); border: 0; }
+html[data-ui="modern"] .toolbar .tb-btn.active { background: var(--m-key-on); color: var(--m-on-key-on); border: 0; }
 html[data-ui="modern"] .toolbar .tb-btn:disabled { opacity: 0.35; }
 html[data-ui="modern"] .toolbar .tb-pal.open > .tb-btn { background: var(--m-hover); border: 0; }
 html[data-ui="modern"] .toolbar .tb-sep { width: 1px; height: 18px; background: var(--m-line-strong); margin: 0 6px; opacity: 0.8; }
@@ -356,7 +360,7 @@ html[data-ui="modern"] .rail { width: 48px; padding: 8px 0; gap: 4px; align-item
 html[data-ui="modern"] .rail button { writing-mode: horizontal-tb; transform: none !important; width: 36px; height: 36px; margin: 0; padding: 0; border-radius: 8px; font-size: 0; color: var(--m-ink2); display: flex; align-items: center; justify-content: center; }
 html[data-ui="modern"] .rail button::before { content: ''; width: 18px; height: 18px; background: currentColor; -webkit-mask: var(--icon) center / 18px no-repeat; mask: var(--icon) center / 18px no-repeat; }
 html[data-ui="modern"] .rail button:hover { background: var(--m-hover); color: var(--m-ink); }
-html[data-ui="modern"] .rail button.active { background: var(--m-press); color: var(--m-on-press); }
+html[data-ui="modern"] .rail button.active { background: var(--m-key-on); color: var(--m-on-key-on); }
 html[data-ui="modern"] .panel-tabs { background: transparent; border-bottom: 1px solid var(--m-line2); padding: 6px 8px 0; gap: 4px; }
 html[data-ui="modern"] .panel-tabs button { border-radius: 0; font-size: 12.5px; color: var(--m-ink2); }
 html[data-ui="modern"] .panel-tabs button.active { background: transparent; color: var(--m-ink); font-weight: 600; border-bottom-color: var(--m-blue); border-bottom-width: 2px; }
@@ -433,7 +437,7 @@ html[data-ui="modern"] .dl-toolbar > .toolbar { background: none; border: 0; pad
 html[data-ui="modern"] .dl-title { display: none; }
 html[data-ui="modern"] .dl-btn { border-radius: var(--m-radius); border: 0; height: 30px; color: var(--m-ink2); }
 html[data-ui="modern"] .dl-btn:hover:not(:disabled) { background: var(--m-hover); color: var(--m-ink); }
-html[data-ui="modern"] .dl-btn.on { background: var(--m-press); color: var(--m-on-press); }
+html[data-ui="modern"] .dl-btn.on { background: var(--m-key-on); color: var(--m-on-key-on); }
 html[data-ui="modern"] .dl-zoom { font-variant-numeric: tabular-nums; font-size: 12px; }
 html[data-ui="modern"] .dl-present { height: 30px; border-radius: var(--m-radius); padding: 0 14px; background: var(--m-signal); color: var(--m-on-signal) !important; font-weight: 600; font-size: 13px; }
 html[data-ui="modern"] .dl-present:hover:not(:disabled) { background: var(--m-signal-hover) !important; }
@@ -442,7 +446,7 @@ html[data-ui="modern"] .dl-rail-actions { background: linear-gradient(transparen
 html[data-ui="modern"] .dl-notes { border-top: 1px solid var(--m-line2); background: var(--ui-bg); }
 html[data-ui="modern"] .dl-notes textarea { background: var(--m-paper); border: 1px solid var(--m-line2); border-radius: 8px; margin: 8px 12px; width: calc(100% - 24px); height: calc(100% - 16px); }
 html[data-ui="modern"] .dl-notes-hide { top: 12px; right: 18px; }
-html[data-ui="modern"] .tb-btn.active .tb-ink-width { background: currentColor; }   /* the width dot on the inverted (dark) active button */
+html[data-ui="modern"] .tb-btn.active .tb-ink-width { background: currentColor; }   /* the width dot on the active (tinted) button */
 html[data-ui="modern"] .dk-size { border-radius: 5px; border-color: var(--m-line); background: var(--m-field); }
 html[data-ui="modern"] .dl-refocus { border-radius: var(--m-radius); border-color: var(--m-line); background: var(--m-paper); box-shadow: var(--m-shadow); font-size: 12.5px; }
 html[data-ui="modern"] .dl-refocus.lost { background: var(--m-press); color: var(--m-on-press); }
@@ -458,7 +462,7 @@ html[data-ui="modern"] .ol-refocus { border-radius: var(--m-radius); }
 /* ------------------------------------------------------------ whiteboards (app/BoardEditor.tsx): a floating palette */
 html[data-ui="modern"] .board-tools { border-radius: 10px; border: 1px solid var(--m-line); box-shadow: var(--m-shadow); background: var(--m-paper); padding: 5px 8px; gap: 4px; }
 html[data-ui="modern"] .board-tools .small-btn { border: 0; border-radius: var(--m-radius); font-size: 12.5px; padding: 5px 9px; }
-html[data-ui="modern"] .board-tools .small-btn.active { background: var(--m-press); color: var(--m-on-press); }
+html[data-ui="modern"] .board-tools .small-btn.active { background: var(--m-key-on); color: var(--m-on-key-on); }
 html[data-ui="modern"] .board-sep { background: var(--m-line-strong); }
 
 /* ------------------------------------------------------------ the tour card */
