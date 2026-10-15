@@ -6,7 +6,10 @@ How to run, test and deploy: [DOCS.md](DOCS.md). The file format: [README.md](RE
 
 Batch related fixes, then run focused checks for the combined changes. Avoid rebuilding or
 rerunning the full suite after every edit. Use extra targeted checks when needed to diagnose a
-failure or resolve uncertainty; run the full release checks once the batch is stable.
+failure or resolve uncertainty.
+
+When handling deployment, run only tests covering changed code and directly affected behavior.
+Skip unrelated tests and full-suite deployment gates unless the user explicitly requests them.
 
 ## Keyboard shortcuts are contextual (VS Code's model)
 
