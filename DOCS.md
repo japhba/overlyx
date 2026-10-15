@@ -67,6 +67,17 @@ blend.
   slides / poster as an HTML deliverable in `slides/` or `poster/`) and opened right away. It replaced
   a "+ New project" prompt that left newcomers looking for where slides come from. A project without
   documents (`ProjectRootPanel`) offers *+ New document*, *+ New slides* and *+ New poster*.
+  Slides and posters offer three open scientific styles each, also available in File ▸ New:
+  BetterPoster (A0 landscape, finding first), Figure first (A0 landscape), Research portrait (A0),
+  Minimal research (16:9), Dark seminar (16:9), and Serif colloquium (4:3). The original HTML
+  templates are MIT licensed, contain analytical teaching examples, and need no external fonts,
+  images or theme packages. BetterPoster credits Mike Morrison's communication approach.
+  `core/src/html/scientific.ts` is their shared source; `npx tsx scripts/gen-scientific-starters.ts`
+  refreshes the six files in `templates/starters/web` (`--previews` also renders chooser thumbnails
+  using the built runtime). On startup, registered old HTML starters whose text, equations,
+  figures and styling still match the shipped example (allowing whitespace, author-placeholder
+  and guide changes) are refreshed, with the previous source kept in version history. Meaningfully
+  edited files and deleted projects or documents are preserved; new variants never overwrite a folder.
 * **The start page** lists the user's projects, then those shared with them, each most recent first:
   the later of when they last opened a document of it (`user_doc_state` *opened*, every open; the
   activity log for older history) and when a file of it last changed; the card says which

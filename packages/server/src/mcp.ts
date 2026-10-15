@@ -722,19 +722,20 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
   }, async ({ project: p, path }) => { try { return ok(buildStatus(need(p, 'view'), path)); } catch (e) { return fail(e); } });
 
   register('create_deliverable', {
-    description: 'Start a slide deck, a poster or a web page: a new folder with an index.html (a plain, conventional starting point — restyle or rewrite it completely). Then edit it with read_file / edit_file / write_file and look at it with render_page.\n\n' + DELIVERABLE_GUIDE,
+    description: 'Start a slide deck, a poster or a web page: a new folder with an index.html. Posters: betterposter (default, A0 landscape), figure-first (A0 landscape), research-portrait (A0 portrait). Decks: research (default, 16:9), dark-seminar (16:9), serif-colloquium (4:3). These are open MIT-licensed scientific examples; restyle or rewrite them completely. Then edit with read_file / edit_file / write_file and look with render_page.\n\n' + DELIVERABLE_GUIDE,
     inputSchema: {
       ...projArg,
       folder: z.string().describe('The new folder, project-relative, e.g. "talk" or "posters/neurips"'),
       kind: z.enum(DELIVERABLE_KINDS as [DeliverableKind, ...DeliverableKind[]]).describe('deck (slides), poster, or page (a web page)'),
       title: z.string().optional(),
+      template: z.string().optional().describe('Scientific template id for the selected kind; omit for the default. Not used for web pages.'),
     },
-  }, async ({ project: p, folder, kind, title }) => {
+  }, async ({ project: p, folder, kind, title, template }) => {
     try {
       const project = need(p, 'edit');
       const dir = String(folder).replace(/^\/+|\/+$/g, '');
       if (dir) assertWritableRelPath(dir + '/index.html');
-      const rel = createDeliverable(project, dir, starterFor(kind, title ?? ''));
+      const rel = createDeliverable(project, dir, starterFor(kind, title ?? '', template));
       touchProject(project, userId);
       return ok({ path: rel, kind, next: 'read_file it, rewrite it to the design you want with write_file / edit_file, then render_page to look at it.' });
     } catch (e) { return fail(e); }

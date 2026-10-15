@@ -9,41 +9,43 @@ import { useState } from 'preact/hooks';
 import { PAGE_PRESETS } from '@overlyx/core';
 import { api } from '../api';
 import { Dialog } from './Dialogs';
+import { ScientificTemplates } from './ScientificTemplates';
 
 type Kind = 'deck' | 'poster' | 'page';
 const KINDS: { id: Kind; label: string; hint: string; w: number; h: number; dir: string }[] = [
-  { id: 'deck', label: 'Slide deck', hint: '16:9 slides, presented full screen', w: 16, h: 9, dir: 'talk' },
-  { id: 'poster', label: 'Poster', hint: 'A0 portrait, printed as PDF', w: 841, h: 1189, dir: 'poster' },
+  { id: 'deck', label: 'Slide deck', hint: '16:9 or 4:3, presented full screen', w: 16, h: 9, dir: 'talk' },
+  { id: 'poster', label: 'Poster', hint: 'A0 landscape or portrait, printed as PDF', w: 1189, h: 841, dir: 'poster' },
   { id: 'page', label: 'Web page', hint: 'A project page or a small site', w: 12, h: 9, dir: 'site' },
 ];
 
 export function NewLayoutDialog({ project, dir, onClose, onCreated, notify }: { project: string; dir?: string; onClose: () => void; onCreated: (id: string) => void; notify: (t: string, k?: 'info' | 'error') => void }) {
   const [latex, setLatex] = useState(false);
   const [kind, setKind] = useState<Kind>('deck');
+  const [template, setTemplate] = useState<string>();
   const [folder, setFolder] = useState('talk');
   const [title, setTitle] = useState('');
   const [touched, setTouched] = useState(false);
   const [busy, setBusy] = useState(false);
   if (latex) return <LatexLayoutDialog project={project} dir={dir} onClose={onClose} onCreated={onCreated} notify={notify} onBack={() => setLatex(false)} />;
-  const choose = (k: Kind) => { setKind(k); if (!touched) setFolder(KINDS.find(x => x.id === k)!.dir); };
-  const create = () => {
-    const f = folder.trim().replace(/^\/+|\/+$/g, '') || KINDS.find(x => x.id === kind)!.dir;
+  const choose = (k: Kind) => { setKind(k); setTemplate(undefined); if (!touched) setFolder(KINDS.find(x => x.id === k)!.dir); };
+  const create = (selectedKind = kind) => {
+    const f = (touched || selectedKind === kind ? folder.trim().replace(/^\/+|\/+$/g, '') : '') || KINDS.find(x => x.id === selectedKind)!.dir;
     setBusy(true);
-    api.newDeliverable(project, (dir ? dir + '/' : '') + f, kind, title.trim() || undefined)
+    api.newDeliverable(project, (dir ? dir + '/' : '') + f, selectedKind, title.trim() || undefined, selectedKind === kind ? template : undefined)
       .then(r => { onClose(); onCreated(r.id); })
       .catch(e => { setBusy(false); notify('Could not create it: ' + (e as Error).message, 'error'); });
   };
   return (
     <Dialog title="New slides, poster or web page" onClose={onClose} buttons={<>
       <button type="button" class="small-btn" onClick={onClose}>Cancel</button>
-      <button type="button" class="small-btn primary" disabled={busy} onClick={create} data-create-deliverable>Create</button>
+      <button type="button" class="small-btn primary" disabled={busy} onClick={() => create()} data-create-deliverable>Create</button>
     </>}>
       <p class="dialog-hint">A folder with a web page (<code>index.html</code>) that you and agents can design any way you like. Edit it on the canvas or in its code, present it, and download it as a PDF or a website.</p>
       <div class="ol-newkinds">
         {KINDS.map(k => {
           const s = 48 / Math.max(k.w, k.h);
           return (
-            <button key={k.id} type="button" class={'ol-newkind' + (k.id === kind ? ' active' : '')} onClick={() => choose(k.id)} onDblClick={create} data-kind={k.id}>
+            <button key={k.id} type="button" class={'ol-newkind' + (k.id === kind ? ' active' : '')} onClick={() => choose(k.id)} onDblClick={() => create(k.id)} data-kind={k.id}>
               <span class="ol-newthumb" style={{ width: `${k.w * s}px`, height: `${k.h * s}px` }} />
               <span>{k.label}</span>
               <small>{k.hint}</small>
@@ -51,6 +53,7 @@ export function NewLayoutDialog({ project, dir, onClose, onCreated, notify }: { 
           );
         })}
       </div>
+      {kind !== 'page' && <ScientificTemplates kind={kind} value={template} onChange={setTemplate} />}
       <label class="dialog-row">Title <input value={title} placeholder="Untitled" onInput={e => setTitle((e.target as HTMLInputElement).value)} onKeyDown={e => { if (e.key === 'Enter') create(); }} data-deliverable-title /></label>
       <label class="dialog-row">Folder <input value={folder} onInput={e => { setTouched(true); setFolder((e.target as HTMLInputElement).value); }} onKeyDown={e => { if (e.key === 'Enter') create(); }} data-deliverable-folder /></label>
       <p class="dialog-hint">Ask your agent to design it — it is told what kind of deliverable this is. <a href="#" onClick={e => { e.preventDefault(); setLatex(true); }} data-latex-layout>A LaTeX (beamer) layout document instead…</a></p>

@@ -8,9 +8,11 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { rebasedSplices, rebaseObjectPaths, applyTo, objectHtml, insertPlace, newSlideHtml, slidePaths, slideNotes, notesOp } from '../packages/client/src/deliverable/sourceops.ts';
 import { applyOp, parseSource, elementAt } from '../packages/core/src/html/source.ts';
-import { starterDeck } from '../packages/core/src/html/deliverable.ts';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
-const DECK = starterDeck('Waves');
+// A stable editing fixture: tests of source paths must not depend on the current visual defaults.
+const DECK = readFileSync(join(import.meta.dirname, 'fixtures/editable-deck.html'), 'utf8');
 
 describe('the editor changes the text', () => {
   it('rebases an operation made on an older version', () => {

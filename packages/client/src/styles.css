@@ -2676,6 +2676,15 @@ select.dl-zoom { appearance: none; -webkit-appearance: none; text-align: center;
 .ol-newkind .ol-newthumb { background: #eef3fd; border: 1px solid var(--accent-border); border-radius: 3px; }
 .ol-newkind small { color: var(--ui-muted); font-size: 11px; text-align: center; }
 .ol-newkinds.four { grid-template-columns: repeat(4, 1fr); }
+.ol-scientific-templates { border: 0; padding: 0; margin: 12px 0 18px; min-width: 0; }
+.ol-scientific-templates legend { font-size: 12px; color: var(--ui-muted); margin-bottom: 8px; }
+.ol-template-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.ol-template-card { display: flex; flex-direction: column; align-items: stretch; gap: 6px; min-width: 0; padding: 8px; border: 1px solid var(--ui-border); border-radius: 6px; background: var(--surface); color: var(--ui-fg); font: 12px var(--ui-font); text-align: left; cursor: pointer; }
+.ol-template-card:hover { background: var(--row-hover); }
+.ol-template-card.active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-border); }
+.ol-template-card small { color: var(--ui-muted); font-size: 11px; }
+.ol-template-preview { display: flex; align-items: center; justify-content: center; height: 92px; background: #e1e4e7; border-radius: 3px; overflow: hidden; }
+.ol-template-preview img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; box-shadow: 0 1px 3px #0002; }
 .ol-newkind { min-height: 116px; justify-content: flex-end; }
 .ol-newkind .ol-newthumb.empty { width: 34px; height: 26px; background: none; border: 1.5px dashed var(--ui-border); }
 .dialog-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }

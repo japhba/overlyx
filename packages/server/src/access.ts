@@ -513,8 +513,8 @@ const STARTER_DIR = path.resolve(path.dirname(new URL(import.meta.url).pathname)
 /** The starters every account gets besides the welcome project (templates/starters/<id>, scripts/gen-starters.ts). */
 export const STARTERS: { id: string; title: string }[] = [
   { id: 'slides', title: 'Example: beamer slides' },
-  // slides, a poster and a project page as HTML deliverables (talk/, poster/, site/)
-  { id: 'web', title: 'Example: slides, poster and web page' },
+  // Three scientific decks, three posters and a project page as editable HTML deliverables.
+  { id: 'web', title: 'Example: scientific slides and posters' },
   { id: 'paper', title: 'Example: paper' },
 ];
 

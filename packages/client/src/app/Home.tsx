@@ -16,6 +16,7 @@ import { uiConfirm, Dialog } from './Dialogs';
 import { promptNewFile } from './newfile';
 import { useUiMode } from './uimode';
 import { KIND_ICONS, iconSvg } from './modernicons';
+import { ScientificTemplates } from './ScientificTemplates';
 
 const isBackup = (name: string) => name.endsWith('~') || name.startsWith('#') || name.endsWith('.emergency');
 const mainFirst = (a: string, b: string) => Number(!/(^|\/)main\.tex$/.test(a)) - Number(!/(^|\/)main\.tex$/.test(b)) || a.split('/').length - b.split('/').length || a.localeCompare(b);
@@ -258,8 +259,8 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
 type NewKind = 'doc' | 'deck' | 'poster' | 'empty';
 const NEW_KINDS: { id: NewKind; label: string; hint: string; w: number; h: number; name: string }[] = [
   { id: 'doc', label: 'Document', hint: 'A paper, thesis or notes', w: 210, h: 297, name: 'Untitled document' },
-  { id: 'deck', label: 'Slides', hint: '16:9, presented full screen', w: 16, h: 9, name: 'Untitled slides' },
-  { id: 'poster', label: 'Poster', hint: 'A0 portrait', w: 841, h: 1189, name: 'Untitled poster' },
+  { id: 'deck', label: 'Slides', hint: '16:9 or 4:3, presented full screen', w: 16, h: 9, name: 'Untitled slides' },
+  { id: 'poster', label: 'Poster', hint: 'A0 landscape or portrait', w: 1189, h: 841, name: 'Untitled poster' },
   { id: 'empty', label: 'Empty project', hint: 'Add files later', w: 0, h: 0, name: '' },
 ];
 
@@ -269,21 +270,23 @@ const NEW_KINDS: { id: NewKind; label: string; hint: string; w: number; h: numbe
  */
 export function NewProjectDialog({ onClose, onCreated, notify }: { onClose: () => void; onCreated: (id: string | null, name: string) => void; notify: (text: string, kind?: 'info' | 'error') => void }) {
   const [kind, setKind] = useState<NewKind>('doc');
+  const [template, setTemplate] = useState<string>();
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const k = NEW_KINDS.find(x => x.id === kind)!;
   const typed = name.trim();
   const invalid = typed && !isProjectName(typed) ? 'Only letters, digits, space, . _ - are allowed.' : null;
-  const create = async () => {
-    const n = typed || k.name;
+  const create = async (selectedKind = kind) => {
+    const n = typed || NEW_KINDS.find(k => k.id === selectedKind)!.name;
     if (!n || invalid) return;
     setBusy(true);
     try {
       const { project } = await api.createProject(n);
       const key = project.name;
-      const id = kind === 'doc' ? (await api.newDoc(key, 'main.tex', { title: n })).id
-        : kind === 'deck' ? (await api.newDeliverable(key, 'slides', 'deck', n)).id
-        : kind === 'poster' ? (await api.newDeliverable(key, 'poster', 'poster', n)).id
+      const chosenTemplate = selectedKind === kind ? template : undefined;
+      const id = selectedKind === 'doc' ? (await api.newDoc(key, 'main.tex', { title: n })).id
+        : selectedKind === 'deck' ? (await api.newDeliverable(key, 'slides', 'deck', n, chosenTemplate)).id
+        : selectedKind === 'poster' ? (await api.newDeliverable(key, 'poster', 'poster', n, chosenTemplate)).id
         : null;
       onCreated(id, n);
     } catch (e) { setBusy(false); notify((e as Error).message, 'error'); }
@@ -297,7 +300,7 @@ export function NewProjectDialog({ onClose, onCreated, notify }: { onClose: () =
           const s = x.w ? 44 / Math.max(x.w, x.h) : 0;
           return (
             <button key={x.id} type="button" role="radio" aria-checked={x.id === kind} class={'ol-newkind' + (x.id === kind ? ' active' : '')} data-new-kind={x.id}
-              onClick={() => setKind(x.id)} onDblClick={() => { setKind(x.id); if (x.id !== 'empty') void create(); }}>
+              onClick={() => { setKind(x.id); setTemplate(undefined); }} onDblClick={() => { if (x.id !== 'empty') void create(x.id); }}>
               <span class={'ol-newthumb' + (x.w ? '' : ' empty')} style={x.w ? { width: `${x.w * s}px`, height: `${x.h * s}px` } : undefined} />
               <span>{x.label}</span>
               <small>{x.hint}</small>
@@ -305,6 +308,7 @@ export function NewProjectDialog({ onClose, onCreated, notify }: { onClose: () =
           );
         })}
       </div>
+      {(kind === 'deck' || kind === 'poster') && <ScientificTemplates kind={kind} value={template} onChange={setTemplate} />}
       <label class="dialog-row">Name <input type="text" value={name} autofocus placeholder={k.name || 'Name of the project'} data-new-name
         onInput={e => setName((e.target as HTMLInputElement).value)} onKeyDown={e => { if (e.key === 'Enter') void create(); }} /></label>
       {invalid && <p class="dialog-hint error">{invalid}</p>}

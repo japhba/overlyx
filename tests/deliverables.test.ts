@@ -65,6 +65,14 @@ const json = (r: any) => { try { return JSON.parse(r.content[0].text); } catch {
 const token = createMcpToken(owner.id, 'test-agent').token;
 
 describe('agents make and edit deliverables', () => {
+  it('creates a selected scientific template and rejects a style of the wrong kind', async () => {
+    await callTool(token, 'create_deliverable', { folder: 'portrait', kind: 'poster', template: 'research-portrait', title: 'Calibration' });
+    const html = readFileSync(file('portrait/index.html'), 'utf8');
+    expect(html).toContain('content="research-portrait"');
+    expect(html).toContain('<title>Calibration</title>');
+    await expect(callTool(token, 'create_deliverable', { folder: 'invalid-style', kind: 'poster', template: 'dark-seminar' })).rejects.toThrow(/Unknown poster template/);
+    expect(existsSync(file('invalid-style/index.html'))).toBe(false);
+  });
   it('create_deliverable starts a folder of the kind asked for, list_documents shows it', async () => {
     const r = json(await callTool(token, 'create_deliverable', { folder: 'talk', kind: 'deck', title: 'Waves' }));
     expect(r.path).toBe('talk/index.html');
@@ -77,6 +85,8 @@ describe('agents make and edit deliverables', () => {
   });
 
   it('read_file and edit_file reach the live text of a page open in an editor, and it is saved', async () => {
+    // Source editing checks use a stable fixture independent of the selectable visual defaults.
+    writeFileSync(file('talk/index.html'), readFileSync(new URL('./fixtures/editable-deck.html', import.meta.url), 'utf8'));
     const doc = await manager.open('owner/p/talk/index.html');
     expect(doc).toBeInstanceOf(HtmlDoc);
     const h = doc as InstanceType<typeof HtmlDoc>;

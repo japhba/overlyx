@@ -22,6 +22,7 @@ const { createUser, createGuest, toSessionUser } = await import('../packages/ser
 const { parseDocumentText, writeDocumentText } = await import('../packages/server/src/texdoc.ts');
 const { parseTex, writeTex } = await import('../packages/core/src/tex/index.ts');
 const { walkInsets } = await import('../packages/core/src/index.ts');
+const { SCIENTIFIC_TEMPLATES } = await import('../packages/core/src/html/scientific.ts');
 
 const TPL = join(import.meta.dirname, '../packages/server/templates/starters');
 const HAVE_LATEXMK = spawnSync('which', ['latexmk']).status === 0;
@@ -39,7 +40,7 @@ describe('starter projects', () => {
     expect(mine.map(p => [p.name, p.kind, p.title, p.role])).toEqual(expect.arrayContaining([
       ['ada/welcome', 'example', 'Welcome to OverLyX', 'owner'],
       ['ada/example-slides', 'project', 'Example: beamer slides', 'owner'],
-      ['ada/example-web', 'project', 'Example: slides, poster and web page', 'owner'],
+      ['ada/example-web', 'project', 'Example: scientific slides and posters', 'owner'],
       ['ada/example-paper', 'project', 'Example: paper', 'owner'],
     ]));
     // the welcome project stays the one example the client looks for
@@ -57,6 +58,12 @@ describe('starter projects', () => {
       expect(html).toContain(`<meta name="overlyx" content="${kind}">`);
       expect(html).not.toContain('Lovelace');
       expect(html).not.toContain('@@');
+    }
+    for (const t of SCIENTIFIC_TEMPLATES) {
+      const folder = t.id === 'research' ? 'talk' : t.id === 'betterposter' ? 'poster' : `${t.kind === 'deck' ? 'talk' : 'poster'}-${t.id}`;
+      const html = readFileSync(join(ROOT, 'projects', 'ada', 'example-web', folder, 'index.html'), 'utf8');
+      expect(html).toContain(`<meta name="overlyx-template" content="${t.id}">`);
+      expect(html).not.toContain('Lovelace');
     }
     expect(readdirSync(join(ROOT, 'projects', 'ada', 'example-paper')).sort()).toEqual(['figures', 'paper.tex', 'refs.bib']);
   });

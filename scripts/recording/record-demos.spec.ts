@@ -181,16 +181,16 @@ for (const theme of ['light', 'dark'] as const) {
     await page.mouse.move(640, 760);
     const t0 = Date.now();
     await page.waitForTimeout(400);
-    // the sun: picked up, carried down towards the horizon
-    const sun = await slidePoint(page, 1040, 200);
-    await glide(page, { x: 640, y: 760 }, sun, 600);
+    // the title rule: picked up and moved on the canvas
+    const titleRule = await slidePoint(page, 136, 157);
+    await glide(page, { x: 640, y: 760 }, titleRule, 600);
     await page.mouse.down();
     await page.waitForTimeout(120);
-    const low = await slidePoint(page, 1010, 420);
-    await glide(page, sun, low, 900);
+    const low = await slidePoint(page, 160, 175);
+    await glide(page, titleRule, low, 900);
     await page.mouse.up();
     await page.waitForTimeout(500);
-    await snap(page, 'sun');
+    await snap(page, 'title-rule');
     // the title: retyped in place
     const title = await slidePoint(page, 840, 320);
     await glide(page, low, title, 450);
@@ -214,7 +214,7 @@ for (const theme of ['light', 'dark'] as const) {
     await page.mouse.dblclick(fx.x, fx.y);
     await expect(page.locator('[data-dl-mathedit] .lm-field')).toBeVisible({ timeout: 10000 });
     await page.waitForTimeout(400);
-    await page.keyboard.type(' \\propto \\omega^4', { delay: 90 });
+    await page.keyboard.type(' \\quad (k>0)', { delay: 90 });
     await page.waitForTimeout(500);
     await snap(page, 'formula');
     await page.keyboard.press('Escape');
@@ -241,16 +241,16 @@ for (const theme of ['light', 'dark'] as const) {
     const posterFile = page.locator('[data-file="poster/index.html"]');
     if (!(await posterFile.isVisible())) await page.locator('.tree-row.folder > .fname:text-is("poster")').click();
     await posterFile.click();
-    await expect(page.frameLocator('.dl-frame').locator('h1', { hasText: 'Why the sky is blue' })).toBeVisible({ timeout: 30000 });
+    await expect(page.frameLocator('.dl-frame').locator('h1', { hasText: 'Diffusion erases small patterns first' })).toBeVisible({ timeout: 30000 });
     await page.waitForTimeout(1200);
-    const pf = page.frameLocator('.dl-frame').locator('section.slide .card').nth(1).locator('mjx-container svg').first();
+    const pf = page.frameLocator('.dl-frame').locator('section.slide .equation').first().locator('mjx-container svg').first();
     const pb = (await pf.boundingBox())!;
     const px = { x: pb.x + pb.width - 3, y: pb.y + pb.height * 0.5 };
     await glide(page, { x: 640, y: 400 }, px, 600);
     await page.mouse.dblclick(px.x, px.y);
     await expect(page.locator('[data-dl-mathedit] .lm-field')).toBeVisible({ timeout: 10000 });
     await page.waitForTimeout(300);
-    await page.keyboard.type(' \\propto \\omega^4', { delay: 90 });
+    await page.keyboard.type(' \\quad (D>0)', { delay: 90 });
     await page.waitForTimeout(500);
     await snap(page, 'poster-formula');
     await page.keyboard.press('Escape');

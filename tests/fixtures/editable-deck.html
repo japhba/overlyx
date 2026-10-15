@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="overlyx" content="deck">
+<title>Waves</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  :root { --ink: #1d2433; --muted: #5b6475; --accent: #2f6fde; --paper: #ffffff; }
+  body { margin: 0; background: #e9ebef; font-family: Inter, system-ui, sans-serif; color: var(--ink); }
+  .slide { width: 1280px; height: 720px; position: relative; overflow: hidden; background: var(--paper); margin: 0 auto 40px; }
+  .slide h1 { font-size: 64px; font-weight: 800; line-height: 1.1; margin: 0; }
+  .slide h2 { font-size: 44px; font-weight: 800; margin: 0; }
+  .slide p, .slide li { font-size: 28px; line-height: 1.45; margin: 0 0 14px; }
+  .slide ul { margin: 0; padding-left: 1.1em; }
+  .muted { color: var(--muted); }
+  .bar { background: var(--accent); }
+</style>
+</head>
+<body data-ol-layout-margins="72px 96px">
+
+<section class="slide">
+  <div class="bar" style="position: absolute; left: 0; top: 0; width: 24px; height: 720px"></div>
+  <h1 style="position: absolute; left: 120px; top: 250px; width: 1040px">Waves</h1>
+  <p class="muted" style="position: absolute; left: 120px; top: 420px; width: 1040px">Your name · Venue · Date</p>
+</section>
+
+<section class="slide">
+  <h2 style="position: absolute; left: 96px; top: 72px; width: 1088px">The idea</h2>
+  <ul style="position: absolute; left: 96px; top: 190px; width: 620px">
+    <li>One message per slide</li>
+    <li>Math is TeX: \(e^{i\pi} + 1 = 0\)</li>
+    <li>Pictures carry the argument</li>
+  </ul>
+  <div style="position: absolute; left: 780px; top: 190px; width: 400px; height: 400px; border-radius: 24px; background: #eef3fd"></div>
+  <aside class="notes">Speaker notes go here.</aside>
+</section>
+
+</body>
+</html>

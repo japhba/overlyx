@@ -5,6 +5,7 @@
  * the kind (`<meta name="overlyx" content="deck|poster|page">`), pages as elements of class
  * `slide` of a fixed size, TeX math between \( \) / \[ \]. DELIVERABLE_GUIDE says it to agents.
  */
+import { scientificDeck, scientificPoster } from './scientific.ts';
 import { parseSource, walk, attr, hasClass, pathOf, elementChildren, type HElement, type HDocument, type Path } from './source.ts';
 
 export type DeliverableKind = 'deck' | 'poster' | 'page';
@@ -83,94 +84,9 @@ Tools: create_deliverable starts a folder for a kind; read_file / edit_file / wr
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-/** A deck to start from: a title slide and a content slide in a plain, readable design. */
-export function starterDeck(title: string): string {
-  const t = esc(title || 'Untitled talk');
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="overlyx" content="deck">
-<title>${t}</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
-<style>
-  :root { --ink: #1d2433; --muted: #5b6475; --accent: #2f6fde; --paper: #ffffff; }
-  body { margin: 0; background: #e9ebef; font-family: Inter, system-ui, sans-serif; color: var(--ink); }
-  .slide { width: 1280px; height: 720px; position: relative; overflow: hidden; background: var(--paper); margin: 0 auto 40px; }
-  .slide h1 { font-size: 64px; font-weight: 800; line-height: 1.1; margin: 0; }
-  .slide h2 { font-size: 44px; font-weight: 800; margin: 0; }
-  .slide p, .slide li { font-size: 28px; line-height: 1.45; margin: 0 0 14px; }
-  .slide ul { margin: 0; padding-left: 1.1em; }
-  .muted { color: var(--muted); }
-  .bar { background: var(--accent); }
-</style>
-</head>
-<body data-ol-layout-margins="72px 96px">
-
-<section class="slide">
-  <div class="bar" style="position: absolute; left: 0; top: 0; width: 24px; height: 720px"></div>
-  <h1 style="position: absolute; left: 120px; top: 250px; width: 1040px">${t}</h1>
-  <p class="muted" style="position: absolute; left: 120px; top: 420px; width: 1040px">Your name · Venue · Date</p>
-</section>
-
-<section class="slide">
-  <h2 style="position: absolute; left: 96px; top: 72px; width: 1088px">The idea</h2>
-  <ul style="position: absolute; left: 96px; top: 190px; width: 620px">
-    <li>One message per slide</li>
-    <li>Math is TeX: \\(e^{i\\pi} + 1 = 0\\)</li>
-    <li>Pictures carry the argument</li>
-  </ul>
-  <div style="position: absolute; left: 780px; top: 190px; width: 400px; height: 400px; border-radius: 24px; background: #eef3fd"></div>
-  <aside class="notes">Speaker notes go here.</aside>
-</section>
-
-</body>
-</html>
-`;
-}
-
-/** An A0 portrait poster to start from: a title band and three columns. */
-export function starterPoster(title: string): string {
-  const t = esc(title || 'Untitled poster');
-  const col = (x: number, head: string, body: string) => `  <div class="block" style="position: absolute; left: ${x}mm; top: 230mm; width: 245mm">
-    <h2>${head}</h2>
-    <p>${body}</p>
-  </div>`;
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="overlyx" content="poster">
-<title>${t}</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
-<style>
-  :root { --ink: #1d2433; --muted: #5b6475; --accent: #2f6fde; }
-  body { margin: 0; background: #e9ebef; font-family: Inter, system-ui, sans-serif; color: var(--ink); }
-  .slide { width: 841mm; height: 1189mm; position: relative; overflow: hidden; background: #fff; margin: 0 auto; }
-  .band { background: var(--accent); color: #fff; }
-  h1 { font-size: 110pt; font-weight: 800; line-height: 1.05; margin: 0; }
-  h2 { font-size: 54pt; font-weight: 800; margin: 0 0 12mm; color: var(--accent); }
-  p { font-size: 30pt; line-height: 1.4; margin: 0 0 10mm; }
-</style>
-</head>
-<body data-ol-layout-margins="40mm">
-
-<section class="slide">
-  <div class="band" style="position: absolute; left: 0; top: 0; width: 841mm; height: 190mm">
-    <h1 style="position: absolute; left: 40mm; top: 40mm; width: 761mm">${t}</h1>
-    <p style="position: absolute; left: 40mm; top: 130mm; width: 761mm">Authors · Affiliations</p>
-  </div>
-${col(40, 'Question', 'What problem does this work address, and why does it matter?')}
-${col(298, 'Method', 'The approach in one picture. Math is TeX: \\(\\nabla \\cdot E = \\rho / \\varepsilon_0\\).')}
-${col(556, 'Result', 'The finding, with the figure that shows it.')}
-</section>
-
-</body>
-</html>
-`;
-}
+/** Scientific starting points; omit the template id to use the first design of its kind. */
+export const starterDeck = scientificDeck;
+export const starterPoster = scientificPoster;
 
 /** A one-page website to start from (a project page). */
 export function starterPage(title: string): string {
@@ -210,6 +126,7 @@ export function starterPage(title: string): string {
 `;
 }
 
-export function starterFor(kind: DeliverableKind, title: string): string {
-  return kind === 'deck' ? starterDeck(title) : kind === 'poster' ? starterPoster(title) : starterPage(title);
+export function starterFor(kind: DeliverableKind, title: string, template?: string): string {
+  if (kind === 'page' && template !== undefined) throw new Error('Web pages do not have scientific templates.');
+  return kind === 'deck' ? starterDeck(title, template) : kind === 'poster' ? starterPoster(title, template) : starterPage(title);
 }

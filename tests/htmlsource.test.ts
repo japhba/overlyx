@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { parseSource, elementAt, pathOf, applyOp, editStyle, parseStyle, rebasePath, rebaseOp, mapOffset, opSplices } from '../packages/core/src/html/source.ts';
 import { deliverableInfo, starterDeck, starterPoster, starterPage, slideElements } from '../packages/core/src/html/deliverable.ts';
+import { starterFor } from '../packages/core/src/html/deliverable.ts';
+import { SCIENTIFIC_TEMPLATES } from '../packages/core/src/html/scientific.ts';
 
 const DECK = `<!doctype html>
 <html>
@@ -103,9 +105,34 @@ describe('html deliverable source edits', () => {
 
   it('the starting points parse as their kind', () => {
     expect(deliverableInfo(starterDeck('A & B'))).toMatchObject({ kind: 'deck', title: 'A & B' });
-    expect(deliverableInfo(starterDeck('x')).slides).toHaveLength(2);
+    expect(deliverableInfo(starterDeck('x')).slides).toHaveLength(5);
     expect(deliverableInfo(starterPoster('x'))).toMatchObject({ kind: 'poster' });
     expect(deliverableInfo(starterPoster('x')).slides).toHaveLength(1);
     expect(deliverableInfo(starterPage('x'))).toMatchObject({ kind: 'page', slides: [] });
+  });
+
+  it.each(SCIENTIFIC_TEMPLATES)('$id is a self-contained, editable scientific design of the requested kind', t => {
+    const text = starterFor(t.kind, 'A < B & C', t.id);
+    const info = deliverableInfo(text);
+    expect(info).toMatchObject({ kind: t.kind, title: 'A < B & C' });
+    expect(info.slides).toHaveLength(t.kind === 'deck' ? 5 : 1);
+    expect(text).toContain(`<meta name="overlyx-template" content="${t.id}">`);
+    expect(text).toContain('MIT License');
+    expect(text).toContain('Analytical');
+    expect(text).not.toMatch(/<(?:script|img|link)\b/);
+    const { doc } = parseSource(text);
+    for (const slide of slideElements(doc)) {
+      for (const el of slide.childNodes) if ('tagName' in el && el.tagName !== 'aside') {
+        expect(el.attrs.find(a => a.name === 'style')?.value).toContain('position: absolute');
+      }
+    }
+  });
+
+  it('uses the scientific defaults and rejects incompatible template ids', () => {
+    expect(starterFor('deck', '')).toContain('content="research"');
+    expect(starterFor('poster', '')).toContain('content="betterposter"');
+    expect(() => starterFor('poster', '', 'dark-seminar')).toThrow(/Unknown poster template/);
+    expect(() => starterFor('deck', '', 'missing')).toThrow(/Unknown deck template/);
+    expect(() => starterFor('page', '', 'research')).toThrow(/Web pages/);
   });
 });
