@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { syncLiveCheckout, liveStatusPath } from '../packages/vscode/scripts/live-sync.mjs';
+import { syncLiveCheckout, liveStatusPath, pruneCandidates } from '../packages/vscode/scripts/live-sync.mjs';
 
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 let remote: string, local: string;
@@ -85,4 +85,27 @@ it('retries activation failures instead of later claiming an unbuilt update is c
   const result = await syncLiveCheckout(local, { validate(candidate: string) { expect(candidate).toBe(integrated); }, afterApply() { activated = true; } });
   expect(activated).toBe(true); expect(result.status).toBe('updated'); expect(result.activationPending).toBe(false);
   expect(git(local, 'rev-parse', 'HEAD')).toBe(integrated);
+});
+
+it('keeps only the validation candidates that matter: the live package\'s and a failed check\'s, nothing else of the cache', () => {
+  const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'overlyx-live-cache-'));
+  const candidate = (name: string) => {
+    const dir = path.join(cache, name);
+    fs.mkdirSync(dir);
+    git(local, 'worktree', 'add', '--detach', path.join(dir, 'source'), 'HEAD');
+    fs.writeFileSync(path.join(dir, 'validation.log'), 'checked\n');
+    return dir;
+  };
+  candidate('update-old1'); candidate('update-old2');
+  const live = candidate('update-live'), failed = candidate('update-failed');
+  fs.writeFileSync(path.join(live, 'overlyx-live.vsix'), 'vsix');
+  fs.writeFileSync(path.join(cache, 'updates.log'), 'log\n');
+  fs.mkdirSync(path.join(cache, 'vite'));
+  pruneCandidates(local, cache, [live, failed, null]);
+  expect(fs.readdirSync(cache).sort()).toEqual(['update-failed', 'update-live', 'updates.log', 'vite']);
+  const worktrees = git(local, 'worktree', 'list');
+  expect(worktrees).not.toContain('update-old');
+  expect(worktrees).toContain('update-live');
+  expect(worktrees).toContain('update-failed');
+  expect(fs.existsSync(path.join(live, 'overlyx-live.vsix'))).toBe(true);
 });
