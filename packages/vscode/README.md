@@ -21,8 +21,9 @@ reproduced byte for byte until you change them.
 - **Light / dark** button in the top bar: VS Code's theme, or a light or dark editor of your own choosing.
 - **Figures reload** when their file changes on disk (a plot script ran); in the dark theme line art is shown
   light-on-dark, photos are left alone. `$…$` and `$$` type formulas the LaTeX way; `- ` / `# ` at a
-  paragraph start make lists and headings.
-- **WYSIWYG / TeX / Split** buttons in the top bar switch views within the editor. Ctrl+S in
+  paragraph start make lists and headings. `!` / `!!` / `!!!` followed by Space make
+  unnumbered headings at the same levels as `#` / `##` / `###` for the document class.
+- **WYSIWYG / TeX / Split / PDF** buttons in the top bar switch views within the editor. Ctrl+S in
   TeX view applies the source and saves the file. The ruler above the page resizes the writing
   width; drag its handles or focus a handle and use the arrow keys.
 - **Imported math macros** from project files update when those files change, including
@@ -38,11 +39,13 @@ reproduced byte for byte until you change them.
   and images — the same templates as the web app's *File ▸ New slides / poster / page…*.
 - **Structure view** (OverLyX icon in the activity bar): the live outline — sections, floats —
   click to jump.
-- **PDF panel** (Ctrl+R): builds with your local `latexmk` next to the file, shows the PDF with
+- **PDF view** (Ctrl+R): builds with your local `latexmk` next to the file, shows the PDF with
   build progress and log. SyncTeX both ways: Ctrl+Alt+J shows the cursor's place in the PDF,
   double-click in the PDF jumps to that place in the document.
-  The **PDF preview** button opens it without rebuilding, including a PDF already on disk after
+  The **PDF** view opens it without rebuilding, including a PDF already on disk after
   restarting VS Code; it follows builds started from the editor while the preview is idle.
+  **Open beside** opens a separate VS Code PDF panel. The PDF keeps its page and zoom when
+  switching views; unfinished TeX source drafts are kept too.
 - **Interface zoom**: the **UI zoom** button offers −, + and Reset using VS Code's window zoom.
   It scales the whole interface, including toolbars and dialogs. The document and PDF retain
   their separate content zoom controls.

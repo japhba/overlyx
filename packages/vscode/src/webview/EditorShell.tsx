@@ -12,6 +12,8 @@ import { inkToolbar } from '@client/app/inkToolbar';
 import { StatsDialog } from '@client/app/StatsDialog';
 import { shareTheme } from './appearance';
 import { InterfaceZoom } from './InterfaceZoom';
+import { BuiltPdf } from './BuiltPdf';
+import type { PdfTarget } from '@client/app/PdfViewer';
 import { SvgEditorHost } from '@client/app/SvgEditor';
 import { SettingsPanel } from '@client/app/Settings';
 import { HelpDialog, HELP_ROWS, DialogHost, uiPrompt } from '@client/app/Dialogs';
@@ -22,7 +24,7 @@ import { setInk, subscribeInk } from '@client/editor/plugins/ink';
  * The OverLyX editor inside VS Code: the web client's Workspace (App.tsx) trimmed to the editor
  * itself — LyX toolbars, find & replace, contextual math/table/review rows, comments margin and
  * panel, dialogs, status bar. File browsing, git, versions and agents stay on the VS Code side;
- * the PDF lives in its own panel (pdfMain.tsx). Document sync with the extension host runs over
+ * the PDF is a view here or a separate panel (pdfMain.tsx). Document sync with the extension host runs over
  * postMessage (full ProseMirror doc, debounced), everything else over the local HTTP bridge.
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from 'preact/hooks';
@@ -90,6 +92,11 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   const [changeInfo, setChangeInfo] = useState<string | null>(null);
   const [zoom, setZoom] = useState(Number(stored('ol.zoom') || 1) || 1);
   const [viewMode, setViewMode] = useState<ViewMode>('wysiwyg');
+  const [pdfMounted, setPdfMounted] = useState(false);
+  const [sourceMounted, setSourceMounted] = useState(false);
+  const [pdfTarget, setPdfTarget] = useState<PdfTarget | null>(null);
+  useEffect(() => { if (viewMode === 'pdf') setPdfMounted(true); }, [viewMode]);
+  useEffect(() => { if (viewMode === 'tex' || viewMode === 'split') setSourceMounted(true); }, [viewMode]);
   // light / dark: VS Code's theme (Default) unless the user picked one in the theme switch (stored like the web client's ol.theme)
   const [themePref, setThemePref] = useState<'system' | 'light' | 'dark'>(() => { const v = stored('ol.theme'); return v === 'light' || v === 'dark' ? v : 'system'; });
   const hostDark = useRef(init.dark);
@@ -315,6 +322,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
           break;
         case 'metadataChanged': metaReload(); break;
         case 'navigate': {
+          setViewMode('wysiwyg');
           if (m.label !== undefined) gotoLabelIn(v, m.label);
           else if (m.heading !== undefined) {
             const heading = buildOutline(v.state.doc, false).filter(item => sectionLevel(item.layout) !== null)[m.heading];
@@ -323,6 +331,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
           break;
         }
         case 'goto': {
+          setViewMode('wysiwyg');
           try {
             const pos = Math.max(0, Math.min(m.pos, v.state.doc.content.size));
             v.dispatch(v.state.tr.setSelection(TextSelection.near(v.state.doc.resolve(pos))).scrollIntoView());
@@ -351,7 +360,12 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   const run = (cmd: (state: any, dispatch: any, view?: any) => boolean) => { const v = currentView(); if (!v) return; cmd(v.state, v.dispatch, v); v.focus(); };
   const runView = (fn: (v: EditorView) => boolean) => { const v = currentView(); if (!v) return; fn(v); };
 
-  const build = (opts?: { open?: boolean }) => { editorContext.ui?.save(); vscode.postMessage({ type: 'build', open: opts?.open ?? true }); notify('Building the PDF…'); };
+  const build = (opts?: { open?: boolean }) => {
+    editorContext.ui?.save();
+    if (opts?.open !== false) setViewMode('pdf');
+    vscode.postMessage({ type: 'build', open: false });
+    notify('Building the PDF…');
+  };
   const hostCommand = (name: Extract<import('../shared/protocol').EditorToHost, { type: 'hostCommand' }>['name']) => vscode.postMessage({ type: 'hostCommand', name, id: view ? viewDocId(view) : docId });
 
   const builtTex = async (): Promise<string | null> => {
@@ -368,8 +382,8 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       const { boxes } = await api.synctexView(docId, where.line + 1);
       if (!boxes.length) { notify(`SyncTeX has no position for line ${where.line + 1} of the built LaTeX`, 'error'); return; }
       const b = boxes[0];
-      vscode.postMessage({ type: 'openPdfPanel' });
-      vscode.postMessage({ type: 'syncTarget', target: { page: b.page, x: b.h, y: b.v - b.H, w: b.W, h: b.H, seq: Date.now() } });
+      setPdfTarget({ page: b.page, x: b.h, y: b.v - b.H, w: b.W, h: b.H, seq: Date.now() });
+      setViewMode('pdf');
     } catch (e) { notify('SyncTeX: ' + (e as Error).message, 'error'); }
   };
   const gotoTexLine = async (line: number) => {
@@ -382,8 +396,17 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
     if (!hit) { notify(`SyncTeX: line ${line} of the LaTeX source was not found in the document`, 'error'); return; }
     const b = blocks[hit.index];
     const pos = Math.min(b.kind === 'math' ? b.pos : blockPos(b, hit.offset), v.state.doc.content.size);
+    setViewMode('wysiwyg');
+    await new Promise(requestAnimationFrame);
     v.dispatch(v.state.tr.setSelection(TextSelection.near(v.state.doc.resolve(pos))).scrollIntoView());
     v.focus();
+  };
+  const syncFromPdf = async (page: number, x: number, y: number) => {
+    try {
+      const r = await api.synctexEdit(docId, page, x, y);
+      if (r.line) await gotoTexLine(r.line);
+      else notify('SyncTeX has no position for this place in the PDF');
+    } catch (e) { notify('SyncTeX: ' + (e as Error).message, 'error'); }
   };
 
   const toggleMargin = () => {
@@ -567,7 +590,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       hostItems: [
         { label: 'LaTeX source beside the document (raw view)', shortcut: 'Ctrl+Alt+S', action: () => setViewMode(mode => mode === 'wysiwyg' ? 'split' : 'wysiwyg') },
         { label: 'Outline', shortcut: 'Ctrl+Alt+O', action: () => setShowOutline(s => !s) },
-        { label: 'PDF preview', action: () => vscode.postMessage({ type: 'openPdfPanel' }) },
+        { label: 'PDF preview', checked: viewMode === 'pdf', action: () => setViewMode('pdf') },
         { label: 'Comments', checked: showComments, action: () => setShowComments(v => !v) },
         { label: 'Draw in the margins', checked: inkMode, action: () => setInkMode(v => !v) },
         { sep: true },
@@ -715,28 +738,29 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       <div class="editor-topbar"><strong title={docId}>{docId.split('/').pop()}</strong>
         <span class="topbar-right">
           <InterfaceZoom />
-          <button class="small-btn" title="Open the PDF preview beside the document" onClick={() => vscode.postMessage({ type: 'openPdfPanel' })}>PDF preview</button>
           <ThemeToggle pref={themePref} dark={shownDark} onPick={pickTheme} host="VS Code" onSettings={() => setDialog({ name: 'preferences' })} />
           <EditModeSwitch mode={editModeOf(tracking, viewing)} canEdit view={view} views={allViews}
             onMode={m => applyEditMode(m, { tracking, toggleTracking: () => { void toggleTracking(); }, setViewing })} />
           <ViewModeSwitch mode={viewMode} onChange={setViewMode} />
         </span>
       </div>
-      {tbMode('standard') !== 'off' && <Toolbar id="standard" layouts={layouts} layout={layout} onLayout={(n: string) => run(C.setLayout(n))} groups={tb.standard} />}
-      {(tbMode('viewupdate') !== 'off' || tbMode('extra') !== 'off') && (
-        <div class="tb-samerow">
-          {tbMode('viewupdate') !== 'off' && <Toolbar id="viewupdate" groups={tb.viewUpdate} />}
-          {tbMode('extra') !== 'off' && <Toolbar id="extra" groups={tb.extra} />}
-        </div>
-      )}
-      {tb.showLayout && <Toolbar id="layout" label="Layout" groups={tb.layout} />}
-      {meta && meta.health.length > 0 && (
+      {viewMode !== 'pdf' && <>
+        {tbMode('standard') !== 'off' && <Toolbar id="standard" layouts={layouts} layout={layout} onLayout={(n: string) => run(C.setLayout(n))} groups={tb.standard} />}
+        {(tbMode('viewupdate') !== 'off' || tbMode('extra') !== 'off') && (
+          <div class="tb-samerow">
+            {tbMode('viewupdate') !== 'off' && <Toolbar id="viewupdate" groups={tb.viewUpdate} />}
+            {tbMode('extra') !== 'off' && <Toolbar id="extra" groups={tb.extra} />}
+          </div>
+        )}
+        {tb.showLayout && <Toolbar id="layout" label="Layout" groups={tb.layout} />}
+      </>}
+      {viewMode !== 'pdf' && meta && meta.health.length > 0 && (
         <div class="health-bar">
           <span class="health-icon">⚠</span>
           <span>{meta.health.length === 1 ? '1 structural issue' : `${meta.health.length} structural issues`} found in this file: {meta.health.map(h => h.message).join(' ')}</span>
         </div>
       )}
-      {findOpen && (
+      {viewMode !== 'pdf' && findOpen && (
         <div class="find-bar-wrap">
           <div class="find-bar">
             <span>Find:</span><input autofocus value={findQ} onInput={e => { const v = (e.target as HTMLInputElement).value; setFindQ(v); requery({ query: v }); }} onKeyDown={e => { if (e.key === 'Enter' && view) findNext(view, e.shiftKey ? -1 : 1); if (e.key === 'Escape') { setFindOpen(false); if (view) { setQuery(view, { query: '' }); view.focus(); } } }} />
@@ -762,7 +786,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
         </div>
       )}
       <div class="main">
-        {showOutline && (
+        {viewMode !== 'pdf' && showOutline && (
           <div class="sidebar left outline-panel">
             <div class="panel-tabs">
               <button class="active" data-tab="outline">Outline</button>
@@ -771,8 +795,8 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
             <div class="panel-body"><Outline view={view} items={outline} activePos={activePos} /></div>
           </div>
         )}
-        {showOutline && <SidebarGrip side="left" />}
-        <div class={'editor-column view-' + viewMode + (viewMode === 'wysiwyg' ? '' : ' split')}>
+        {viewMode !== 'pdf' && showOutline && <SidebarGrip side="left" />}
+        <div class={'editor-column view-' + viewMode + (viewMode === 'tex' || viewMode === 'split' ? ' split' : '')}>
           <div class={'editor-scroll' + (marginMode ? ' margin-mode' : '') + (inkMode ? ' ink-mode' : '')} ref={scrollRef} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
             {showRuler && <Ruler width={textWidth} onChange={setTextWidth} notes={marginMode ? { sash: notesPane.sash, scale: noteScale, onScale: setNoteScale } : undefined} />}
             <div class="editor-page">
@@ -784,9 +808,11 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
                 onSelection={onSelection} onDocChange={() => setDocTick(t => t + 1)} />)}
             </div>
           </div>
-          {viewMode !== 'wysiwyg' && <SourcePane target={sourceTarget} tick={docTick} selTick={selTick} mathField={mathField} onNotify={notify} onClose={() => setViewMode('wysiwyg')} onSave={() => vscode.postMessage({ type: 'save' })} />}
+          {sourceMounted && <SourcePane target={sourceTarget} tick={docTick} selTick={selTick} mathField={mathField} onNotify={notify} onClose={() => setViewMode('wysiwyg')} onSave={() => vscode.postMessage({ type: 'save' })} />}
+          {pdfMounted && <BuiltPdf target={pdfTarget} onBuild={() => build()} onForward={() => { void syncToPdf(); }}
+            onInverse={(page, x, y) => { void syncFromPdf(page, x, y); }} onOpenBeside={() => vscode.postMessage({ type: 'openPdfPanel' })} />}
         </div>
-        {showComments && (
+        {viewMode !== 'pdf' && showComments && (
           <div class="sidebar right">
             <div class="panel-tabs">
               <button class="active" data-tab="comments">Comments</button>
@@ -796,7 +822,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
           </div>
         )}
       </div>
-      {(tb.showMath || tb.showTable || tb.showReview || inkMode) && (
+      {viewMode !== 'pdf' && (tb.showMath || tb.showTable || tb.showReview || inkMode) && (
         <div class="bottom-toolbars" style={{ left: showOutline ? 'var(--left-width, 220px)' : '24px', right: showComments ? 'var(--right-width, 360px)' : '24px' }}>
           {tb.showMath && <Toolbar id="math" label="Math" groups={tb.math} />}
           {tb.showMath && tbMode('mathpanels') !== 'off' && <Toolbar id="mathpanels" label="Panels" groups={tb.mathPanels} />}

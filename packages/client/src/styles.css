@@ -2025,6 +2025,9 @@ html[data-presenting] .editor-column.panes > .editor-scroll { display: block !im
 .editor-column.view-tex > .editor-scroll { display: none; }
 .editor-column.view-tex > .source-pane { width: 100% !important; max-width: none; flex: 1; }
 .editor-column.view-tex > .source-pane > .grip { display: none; }
+.editor-column.view-pdf > .editor-scroll, .editor-column.view-pdf > .source-pane { display: none; }
+.editor-column.view-pdf > .pdf-panel { flex: 1; min-height: 0; }
+.editor-column:not(.view-pdf) > .pdf-panel { display: none; }
 
 .reference-list > button { display: flex; flex-direction: column; gap: 3px; text-align: left; width: 100%; border: 0; border-bottom: 1px solid var(--ui-border); background: transparent; color: var(--ui-fg); padding: 7px 10px; cursor: pointer; }
 .reference-list > button.sel { background: var(--row-sel); }

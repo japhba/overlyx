@@ -1338,7 +1338,7 @@ blend.
 * **Dark mode**: follows the system preference by default. The theme switch in the menu bar (sun =
   light, moon = dark, half circle = default) opens a menu on a click or a right-click (both shells:
   `app/MenuBar.tsx ThemeToggle` / `themeMenuItems`): *Default (follows the system)* — in VS Code,
-  where the switch sits in the editor's top bar next to WYSIWYG / TeX / Split, *Default (follows
+  where the switch sits in the editor's top bar next to WYSIWYG / TeX / Split / PDF, *Default (follows
   VS Code)* —, *Light* or *Dark* (remembered in this browser / webview as `ol.theme`; Default
   removes it), as do *View ▸ Theme* and *Settings ▸ Appearance* in the web client. Below them
   *Smart invert in the dark theme* — *Pages* and *Figures too* (see **Smart invert** below) — then the
@@ -1388,8 +1388,11 @@ blend.
   fonts of TeX Live, built with pdfLaTeX; the fields below the set stay editable (*Custom*), and with
   non-TeX fonts the sets step aside. `tests/fonts.test.ts`, `e2e/fonts.spec.ts`.
 * **Lists, Google-Docs style** (`editor/commands.ts leaveList`, `editor/plugins/mdrules.ts`): `- ` or `* ` at
-  the start of a paragraph starts a bullet list, `1. ` a numbered one, `## ` a heading (Backspace right
-  after brings the marker back); Enter continues a list, Enter on an *empty* item ends it (a nested one
+  the start of a paragraph starts a bullet list, `1. ` a numbered one, `# ` / `## ` / … a heading,
+  and `! ` / `!! ` / … its unnumbered counterpart at the same level in the document class
+  (`Section*`, `Subsection*`, …; `Chapter*` first in books). A space triggers each shortcut;
+  unavailable levels stay literal text, and Backspace right after brings the marker back.
+  Enter continues a list; Enter on an *empty* item ends it (a nested one
   moves out one level first). **Backspace at the start of an item** takes the bullet away and keeps the
   text where it was: it becomes a paragraph *of the item above* (LyX depth + 1 — LaTeX writes it inside
   that `\item`, markdown indents it under it), as deep as LyX's nesting rule allows (`maxDepthAfter`:
@@ -1723,8 +1726,8 @@ blend.
   the PDF pane is mounted the first time it is shown and kept. On a phone-width screen one pane at a
   time (the switch works like tabs). The PDF used to be a tab of the right sidebar; that sidebar now
   has *PDF* and *Source* switches beside Comments / Versions / Agent (a stored PDF tab becomes the
-  PDF pane once). The VS Code extension keeps its WYSIWYG / TeX / Split switch — its PDF is a VS Code
-  panel of its own.
+  PDF pane once). The VS Code extension has a WYSIWYG / TeX / Split / PDF switch. PDF shows the
+  compiled document inside the same editor; *Open beside* opens a separate VS Code PDF panel.
 * **The raw view** — *View ▸ LaTeX source beside the document* (or the TeX chip) opens
   `raw:<document>`: the same editor instance with its LaTeX source in the TeX pane (`app/SourcePane.tsx`;
   the hash asks for the pane, and switching it off drops the prefix, so Back undoes it). The server sends the source with a **source map** (`GET /tex?map=1`: the character
@@ -2209,9 +2212,12 @@ the draft. It works in the web editor and VS Code, with each figure's own projec
 
 **VS Code interface zoom and PDF.** The *UI zoom* button in document, layout and PDF toolbars uses
 VS Code's native window zoom, scaling the whole window with correct pointer coordinates. Content
-zoom stays independent. *PDF preview* opens the compiled PDF without rebuilding; PDFs already on
-disk are rediscovered after a host reload. The PDF panel continues polling while idle so builds
-started in the document appear there too (`webview/pdfPolling.ts`).
+zoom stays independent. The *PDF* segment opens the compiled PDF in the same editor without
+rebuilding; PDFs already on disk are rediscovered after a host reload. *Build & View PDF* and
+forward SyncTeX also select this view, and double-clicking the PDF returns to the document.
+*Open beside* keeps a separate PDF panel available. Both use `webview/BuiltPdf.tsx` and continue
+polling while idle so builds started elsewhere appear too (`webview/pdfPolling.ts`). The document,
+source draft and PDF stay mounted when switching views, preserving their state.
 
 **How the extension syncs the file.** The TextDocument is authoritative. The webview sends its whole
 ProseMirror document (debounced, `update` with the `base` it changed from and a sequence number

@@ -70,6 +70,37 @@ describe('markdown layout triggers', () => {
     expect(layoutOf(w)).toBe('Itemize');
   });
 
+  it('! markers mirror # levels with unnumbered layouts and undo in one step', () => {
+    for (const top of ['Section', 'Chapter']) {
+      const names = [...(top === 'Chapter' ? ['Chapter'] : []), 'Section', 'Subsection', 'Subsubsection', 'Paragraph', 'Subparagraph'];
+      editorContext.meta = { layouts: names.flatMap(name => [{ name }, { name: name + '*' }]) } as never;
+      for (let level = 1; level <= names.length; level++) {
+        const v = setup('!'.repeat(level));
+        expect(type(v, ' ')).toBe(true);
+        expect(layoutOf(v)).toBe(names[level - 1] + '*');
+        expect(textOf(v)).toBe('');
+        expect(undoInputRule(v.state, v.dispatch)).toBe(true);
+        expect(layoutOf(v)).toBe('Standard');
+        expect(textOf(v)).toBe('!'.repeat(level) + ' ');
+      }
+    }
+  });
+
+  it('unnumbered markers respect missing counterparts, depth and paragraph context', () => {
+    editorContext.meta = { layouts: [{ name: 'Section' }, { name: 'Subsection' }, { name: 'Subsection*' }] } as never;
+    const missing = setup('!'); expect(type(missing, ' ')).toBe(false);
+    expect(textOf(missing)).toBe('! ');
+    const sub = setup('!!'); expect(type(sub, ' ')).toBe(true);
+    expect(layoutOf(sub)).toBe('Subsection*');
+    for (const v of [setup('!!!'), setup('before !!'), setup('!!', 'Section'), setup('!!', 'Itemize')]) {
+      const layout = layoutOf(v);
+      expect(type(v, ' ')).toBe(false);
+      expect(layoutOf(v)).toBe(layout);
+    }
+    const plain = setup('!!Title', 'Plain Layout', 3); expect(type(plain, ' ')).toBe(true);
+    expect(layoutOf(plain)).toBe('Subsection*'); expect(textOf(plain)).toBe('Title');
+  });
+
   it('only at the very start of a Standard / Plain paragraph', () => {
     const mid = setup('see -'); expect(type(mid, ' ')).toBe(false);
     const head = setup('-', 'Section'); expect(type(head, ' ')).toBe(false);

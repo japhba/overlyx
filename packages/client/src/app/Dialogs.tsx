@@ -751,6 +751,7 @@ export const HELP_ROWS: [string, string][] = [
     ['Alt+P s/1/2/3/4/i/e/d/q/t/a', 'Layout: Standard/Chapter/Section/Subsection/…/Itemize/Enumerate/Description/Quote/Title/Abstract'],
     ['Alt+P *2', 'Unnumbered section (Section*)'],
     ['- ␣, 1. ␣, # ␣ at a paragraph start', 'Bullet list, numbered list, heading (markdown-style, like Google Docs; Backspace puts the marker back)'],
+    ['! ␣, !! ␣, !!! ␣ … at a paragraph start', 'Unnumbered headings, at the same levels as #, ##, ### …; Backspace restores the marker'],
     ['Alt+Shift+→ / ←', 'Increase / decrease list depth'],
     ['Alt+↑ / ↓', 'Move paragraph up / down'],
     ['Alt+A l/r/c/j, i', 'Paragraph alignment; toggle indent'],

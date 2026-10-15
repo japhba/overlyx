@@ -2,7 +2,8 @@
  * Google-Docs-style markdown triggers at the start of a paragraph: typing `- ` or `* ` turns a
  * Standard paragraph into a bullet (Itemize), `1. ` / `1) ` into a numbered item (Enumerate),
  * `# `…`###### ` into headings (# = the class's top heading: Chapter where the class has one,
- * Section otherwise). The typed marker disappears; Backspace right after puts it back
+ * Section otherwise), `! `…`!!!!!! ` into matching unnumbered headings. The typed marker
+ * disappears; Backspace right after puts it back
  * (prosemirror-inputrules' undoInputRule, bound in keymap.ts). Only Standard / Plain paragraphs
  * change — a heading or a list item already is what it is.
  *
@@ -21,18 +22,21 @@ import { editorContext } from '../context';
 const PLAIN = new Set(['Standard', 'Plain Layout']);
 const HEADINGS = ['Chapter', 'Section', 'Subsection', 'Subsubsection', 'Paragraph', 'Subparagraph'];
 
-/** The heading layout for `#` × level in this class (null when the class has none that deep). */
-export function headingForHashes(level: number, layouts?: LayoutInfo[] | null): string | null {
+/** The heading for repeated # (numbered) or ! (unnumbered), at the same depth in this class. */
+export function headingForHashes(level: number, layouts?: LayoutInfo[] | null, unnumbered = false): string | null {
   const known = (n: string) => !layouts || !layouts.length || layouts.some(l => l.name === n);
-  const ladder = HEADINGS.filter(known);
-  return ladder[level - 1] ?? null;
+  // Keep both markers at the same depth even if a class lacks one starred counterpart.
+  const ladder = HEADINGS.filter(n => known(n) || known(n + '*'));
+  const heading = ladder[level - 1];
+  const name = heading && heading + (unnumbered ? '*' : '');
+  return name && known(name) ? name : null;
 }
 
 function layoutRule(re: RegExp, layoutFor: (m: RegExpMatchArray, layouts?: LayoutInfo[] | null) => string | null): InputRule {
   return new InputRule(re, (state, match, start, end) => {
     const $from = state.selection.$from;
     const par = $from.parent;
-    if (par.type.name !== 'paragraph' || start !== $from.start() || !PLAIN.has(String(par.attrs.layout))) return null;
+    if (par.type.name !== 'paragraph' || start !== $from.start() || !PLAIN.has(String(par.attrs.layout)) || inRawText(state)) return null;
     const layouts = editorContext.meta?.layouts;
     const layout = layoutFor(match, layouts);
     if (!layout || (layouts && layouts.length && !layouts.some(l => l.name === layout))) return null;
@@ -54,6 +58,7 @@ export function markdownRulesPlugin(): Plugin {
       layoutRule(/^[-*]\s$/, () => 'Itemize'),
       layoutRule(/^1[.)]\s$/, () => 'Enumerate'),
       layoutRule(/^(#{1,6})\s$/, (m, layouts) => headingForHashes(m[1].length, layouts)),
+      layoutRule(/^(!{1,6})\s$/, (m, layouts) => headingForHashes(m[1].length, layouts, true)),
       mathSymbolRule,
     ],
   });
