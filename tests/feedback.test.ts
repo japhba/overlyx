@@ -4,7 +4,7 @@
  * distinct message whose repeats count up; the routes enforce auth and limits; nothing is sent to
  * GitHub; error rows expire, a deleted account's reports go.
  */
-import { describe, it, expect, afterAll } from 'vitest';
+import { describe, it, expect, afterAll, vi } from 'vitest';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -49,8 +49,8 @@ describe('feedback and error reports, kept on the server', () => {
     expect(x.body).toContain('I typed `\\alpha` and it disappeared.');
     expect(x.body).toContain('TypeError: x is undefined');
     expect(x.body).not.toContain('Ada');   // who sent it is the row's account, not text
-    await new Promise(r => setTimeout(r, 20));
-    const mail = sentMails.find(m => m.subject.includes(`#${r.id}`))!;
+    // the mail goes out asynchronously: poll for it (a fixed 20 ms wait failed under the deploy's load)
+    const mail = await vi.waitFor(() => sentMails.find(m => m.subject.includes(`#${r.id}`)) ?? Promise.reject(new Error('not mailed yet')), { timeout: 5000, interval: 20 });
     expect(mail.to).toBe('owner@example.com');
     expect(mail.subject).toContain('Formula vanished');
     expect(mail.text).toContain('Ada Lovelace (ada, ada@example.com) wrote:');

@@ -10,5 +10,6 @@ Environment=LYX_LAYOUT_DIR=/root/lyx/lib/layouts
 Environment=OVERLYX_PRODUCTION=/root/lyx/overlyx-production
 Environment=OVERLYX_SITE_URL=https://overlyx.app
 ExecStart=/bin/bash /root/lyx/overlyx-production/scripts/autodeploy.sh
-TimeoutStartSec=40min
+# the release gate's browser workflows alone take ~35 min since 606c028 (134 specs, one worker)
+TimeoutStartSec=90min
 Nice=5
