@@ -367,6 +367,7 @@ function tabOf(v: unknown): string | undefined {
 /** The Docs and Drive APIs for any number of documents, acting as one Google account ("me"). */
 export class FakeGoogle implements GoogleApi {
   importDocument?: GoogleApi['importDocument'];
+  replaceWithDocx?: GoogleApi['replaceWithDocx'];
   /** each Google Doc's first tab */
   docs = new Map<string, FakeDoc>();
   /** each Google Doc's tabs, in reading order (a child tab after its parent) */

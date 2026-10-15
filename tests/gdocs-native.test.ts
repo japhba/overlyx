@@ -196,6 +196,51 @@ describe('DOCX-backed sync', async () => {
     expect(fs.readFileSync(file, 'utf8')).toContain('$x^2 + y^2 = z^2$');
   });
 
+  // Drive converting a DOCX uploaded into the Google Doc: its whole content becomes the recorded import
+  const replacer = vi.fn(async (fileId: string) => {
+    const d = google.doc(fileId);
+    d.load(converted);
+    d.namedRanges.clear();
+    d.revision++;
+  });
+
+  it('uploads the document again when its formulas differ from the Google Doc’s, and binds them anew', async () => {
+    google.replaceWithDocx = replacer;
+    try {
+      // (the equation deleted in Google Docs above: the formula here goes back as a native equation)
+      expect(nativeElements(await google.getDocument(fileId))).toHaveLength(3);
+      const report = await sync.syncDoc(id);
+      expect(replacer).toHaveBeenCalledTimes(1);
+      expect(report.warnings).not.toContain(MEDIA_WARNING);
+      expect(nativeElements(await google.getDocument(fileId))).toHaveLength(4);
+      expect(Object.keys(JSON.parse(sync.linkOf(id)!.objects!))).toHaveLength(4);
+      // in step: the next sync uploads nothing
+      expect((await sync.syncDoc(id)).pushed).toBe(0);
+      expect(replacer).toHaveBeenCalledTimes(1);
+    } finally { delete google.replaceWithDocx; replacer.mockClear(); }
+  });
+
+  it('turns an older text link (formulas as $…$) into a DOCX link with native equations', async () => {
+    const legacy = path.join(ROOT, 'projects/u/p/legacy.md'), legacyId = 'u/p/legacy.md';
+    fs.writeFileSync(legacy, PROBE);
+    const importing = google.importDocument;
+    delete google.importDocument;   // linked the old way: text, formulas written as $…$
+    const link = await sync.linkNewGoogleDoc(legacyId, owner.id, 'Legacy').finally(() => { google.importDocument = importing; });
+    expect(link.format).toBe('text');
+    expect(JSON.stringify((await google.getDocument(link.file_id)).body)).toContain('$x^2 + y^2 = z^2$');
+    google.replaceWithDocx = replacer;
+    try {
+      const report = await sync.syncDoc(legacyId);
+      expect(replacer).toHaveBeenCalledTimes(1);
+      expect(report.notes.join(' ')).toMatch(/formulas and images uploaded/);
+      expect(sync.publicLink(sync.linkOf(legacyId))?.format).toBe('docx');
+      expect(nativeElements(await google.getDocument(link.file_id))).toHaveLength(4);
+      expect(fs.readFileSync(legacy, 'utf8')).toContain('$x^2 + y^2 = z^2$');
+      await sync.syncDoc(legacyId);
+      expect(replacer).toHaveBeenCalledTimes(1);
+    } finally { delete google.replaceWithDocx; replacer.mockClear(); }
+  });
+
   it('does not create a link or a Drive file when local DOCX export fails', async () => {
     fs.writeFileSync(path.join(ROOT, 'projects/u/p/failure.md'), 'Broken export.');
     exporter.mockRejectedValueOnce(new Error('Pandoc failed'));

@@ -6,7 +6,11 @@
  *     stored then) comes into the document as tracked changes by the Google Docs editor — through
  *     the agents' edit path (docedit.ts applyTrackedSource), so edits made here meanwhile stay;
  *  2. writes the document into the Google Doc, word by word where paragraphs changed (edits.ts) —
- *     comments anchored in Google Docs stay where they are;
+ *     comments anchored in Google Docs stay where they are. Formulas and images reach Google Docs
+ *     only through a DOCX upload (the Docs API cannot insert an equation): when the ones here differ
+ *     from the Google Doc's — or an older text link still shows them as `$…$` — the whole document
+ *     is uploaded into the same Google Doc again (reexport), which turns them into native equations
+ *     and images; comments made in Google Docs keep their text there but lose their place;
  *  3. syncs comment threads: a Google comment becomes a thread at the text it quotes, a thread
  *     written here a Google comment (anchored where the API allows), replies and resolving both ways;
  *  4. remembers the document's text and the Google Doc's blocks as the base of the next sync.
@@ -198,8 +202,8 @@ async function runSync(docId: string): Promise<SyncReport> {
     const markdown = isMarkdownPath(doc.relPath);
     const file = await api.getFile(link.file_id);
     if (file.trashed) throw new Error('The Google Doc is in the trash — restore it, or unlink the document');
-    const bindings: ObjectBindings = link.objects ? JSON.parse(link.objects) : {};
-    const native = link.format === 'docx';
+    let bindings: ObjectBindings = link.objects ? JSON.parse(link.objects) : {};
+    let native = link.format === 'docx';
     // a link to a tab: the tab's body as the document to sync (every tab read: the comments are shared out by their text)
     let whole = null as DocsFile | null;
     const readRaw = async (): Promise<DocsDocument> => {
@@ -235,8 +239,10 @@ async function runSync(docId: string): Promise<SyncReport> {
       }
     }
 
-    // 2. the document into the Google Doc
+    // 2. the document into the Google Doc: formulas and images by a DOCX upload when they differ, then the text
     const ours = doc.toLyxDocument();
+    const uploaded = await reexport(api, link, doc, ours, raw, gNow, report);
+    if (uploaded) { raw = uploaded.raw; bindings = uploaded.bindings; native = true; }
     const want = strip(project(ours, native).blocks);
     for (; report.rounds < 10; report.rounds++) {
       const requests = planRound(raw, want, report.warnings);
@@ -263,6 +269,56 @@ async function runSync(docId: string): Promise<SyncReport> {
     db.prepare('UPDATE gdocs_links SET last_error = ?, last_sync = ? WHERE doc_id = ?').run((e as Error).message, Date.now(), docId);
     throw e;
   }
+}
+
+/** a DOCX upload that failed, by document: for these formulas and images (not tried again until they change) */
+const reexportFailed = new Map<string, string>();
+
+/**
+ * Upload the document into its Google Doc again as DOCX when the formulas and images here differ from
+ * the Google Doc's (an older text link: when there are any) — the only way they become native Google
+ * Docs equations and images. Never over a Google Doc this would take something from: another tab,
+ * images or equations made in Google Docs, suggestions still open there, or changes made there since
+ * `raw` was read (the next sync brings them in first). Returns the Google Doc as uploaded, with its
+ * objects bound to their sources, or null when nothing was uploaded.
+ */
+async function reexport(api: GoogleApi, link: LinkRow, doc: OpenDoc, ours: LyxDocument, raw: DocsDocument, gNow: GBlock[], report: SyncReport): Promise<{ raw: DocsDocument; bindings: ObjectBindings } | null> {
+  if (!api.replaceWithDocx) return null;
+  const blocks = project(ours, true).blocks;
+  const mine = JSON.stringify(nativeKeys(strip(blocks)));
+  if (link.format === 'docx' ? mine === JSON.stringify(nativeKeys(gNow)) : mine === '[]') return null;
+  if (link.tab_id || hasUnknownObjects(gNow)) return null;   // planRound / the pull say what was left out
+  if (/"suggested(Insertion|Deletion)Ids":\[\s*"/.test(JSON.stringify(raw.body))) { report.warnings.push('Formulas and images were not exported: the Google Doc has open suggestions — accept or reject them there first.'); return null; }
+  if (reexportFailed.get(link.doc_id) === mine) { report.warnings.push(MEDIA_WARNING); return null; }
+  const now = await api.getDocument(link.file_id);
+  if (raw.revisionId && now.revisionId !== raw.revisionId) return null;   // edited in Google Docs just now
+  try {
+    await api.replaceWithDocx(link.file_id, await buildDocx(ours, doc.project, doc.relPath));
+  } catch (e) {
+    reexportFailed.set(link.doc_id, mine);
+    report.warnings.push(`Formulas and images could not be exported to the Google Doc: ${(e as Error).message}`);
+    return null;
+  }
+  let fresh = await api.getDocument(link.file_id);
+  let bindings: ObjectBindings = {};
+  try {
+    const b = bindImportedObjects(fresh, blocks);
+    if (b.requests.length) {
+      await api.batchUpdate(link.file_id, b.requests, fresh.revisionId || undefined);
+      fresh = await api.getDocument(link.file_id);
+    }
+    bindings = b.bindings;
+  } catch {
+    // uploaded, but its objects do not line up with the document's: they stay out of the sync (unknown objects) until they change here
+    reexportFailed.set(link.doc_id, mine);
+    report.warnings.push(UNKNOWN_WARNING);
+  }
+  const objects = JSON.stringify(bindings);
+  db.prepare("UPDATE gdocs_links SET format = 'docx', objects = ? WHERE doc_id = ?").run(objects, link.doc_id);
+  link.format = 'docx';
+  link.objects = objects;
+  report.notes.push('formulas and images uploaded to the Google Doc');
+  return { raw: attachObjectSources(fresh, bindings), bindings };
 }
 
 const isTracking = (lines: string[]) => lines.includes('\\tracking_changes true');

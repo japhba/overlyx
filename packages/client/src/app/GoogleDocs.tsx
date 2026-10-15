@@ -87,7 +87,9 @@ export function GoogleDocsDialog({ docId, onClose, notify }: { docId: string; on
             <p class="hint">Last synced {ago(link.lastSync)}.{link.lastError ? '' : ' Edits made in Google Docs come back as tracked changes; comments go both ways.'}</p>
             {link.lastError && <p class="error">Last sync failed: {link.lastError}</p>}
             {link.warnings?.map(w => <p class="hint" data-gdocs-warning>{w}</p>)}
-            {link.format !== 'docx' && <p class="hint">This link uses the older text export. To include images and equations, unlink and create a new Google Doc. The existing Google Doc and its comments stay in the old document.</p>}
+            {link.format !== 'docx' && (link.tabId
+              ? <p class="hint">Equations show as <code>$…$</code> text in this Google Doc: a tab of a Google Doc with several can't be uploaded again as a whole. To include images and equations, unlink and create a new Google Doc.</p>
+              : <p class="hint">Equations still show as <code>$…$</code> text in this Google Doc (the older text export). The next sync uploads this document into it again, so they become Google Docs equations — same link and sharing.</p>)}
             {st?.canEdit && (
               <div class="buttons-row">
                 <button class="primary" data-gdocs-sync disabled={!!busy} onClick={() => act('sync', async () => {
@@ -102,8 +104,8 @@ export function GoogleDocsDialog({ docId, onClose, notify }: { docId: string; on
           </>
         )}
         {st?.configured && (!link || link.format === 'docx') && <div data-gdocs-limitations>
-          <p class="hint">Images and equations are included when the Google Doc is created. Review complex equations after import: Google Docs can simplify their layout, including flattening matrices.</p>
-          <p class="hint">Later changes to images and equations do not sync in either direction; text around existing ones can still sync. To export new or changed images and equations, unlink and create a new Google Doc. Share the new document again; the old one keeps its original comments and history.</p>
+          <p class="hint">Images and equations go to Google Docs as a Word (DOCX) upload. Review complex equations: Google Docs can simplify their layout, including flattening matrices.</p>
+          <p class="hint">When images or equations change here, the next sync uploads the whole document into the same Google Doc again (its link, sharing and version history stay). Comments made in Google Docs then keep their text but lose their place there; here they stay at theirs. Changes to images and equations made in Google Docs don't come back.</p>
         </div>}
         {error && <p class="error" data-gdocs-error>{error}</p>}
         {st?.account && (

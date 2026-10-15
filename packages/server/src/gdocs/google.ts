@@ -176,6 +176,8 @@ export interface GoogleApi {
   createDocument(title: string): Promise<GFile>;
   /** Real Google uses DOCX conversion; optional for the legacy API simulation. */
   importDocument?(title: string, docx: Uint8Array): Promise<GFile>;
+  /** The Google Doc's whole content replaced by a DOCX, converted by Drive (same file, link, sharing and history). */
+  replaceWithDocx?(id: string, docx: Uint8Array): Promise<void>;
   /** the first tab's body (a Google Doc without tabs has just that one) */
   getDocument(id: string): Promise<DocsDocument>;
   /** every tab's body (documents.get with includeTabsContent) */
@@ -228,6 +230,20 @@ export function googleApi(userId: number): GoogleApi {
       const file = await res.json() as GFile & { mimeType?: string };
       if (file.mimeType !== 'application/vnd.google-apps.document') throw new Error('Google did not convert the DOCX to a native Google Doc.');
       return file;
+    },
+    replaceWithDocx: async (id, docx) => {
+      // Not retried either: a second upload of the same content would only cost time, but an upload
+      // with an unknown outcome is better read back by the next sync than repeated blindly.
+      const token = await accessToken(userId);
+      const res = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(id)}?uploadType=media&fields=id,mimeType`, {
+        method: 'PATCH', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }, body: Buffer.from(docx),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { error?: { message?: string } };
+        throw new GoogleApiError(err.error?.message ?? `Google Docs upload failed (${res.status})`, res.status);
+      }
+      const file = await res.json() as { mimeType?: string };
+      if (file.mimeType !== 'application/vnd.google-apps.document') throw new Error('Google did not keep the upload a native Google Doc.');
     },
     createDocument: async (title) => {
       const f = await call<GFile>('POST', 'https://www.googleapis.com/drive/v3/files?fields=id,name,webViewLink', { name: title, mimeType: 'application/vnd.google-apps.document' });

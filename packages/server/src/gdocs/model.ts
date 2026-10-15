@@ -38,7 +38,7 @@ export const nativeKey = (r: GRun) => r.native ? JSON.stringify(r.native) : '';
 export const blockRuns = (b: GBlock): GRun[] => b.t === 'p' ? b.runs : b.cells.flat(2);
 export const nativeKeys = (blocks: GBlock[]) => blocks.flatMap(blockRuns).filter(r => r.native).map(nativeKey);
 export const hasUnknownObjects = (blocks: GBlock[]) => blocks.some(b => blockRuns(b).some(r => r.native?.kind === 'unknown'));
-export const MEDIA_WARNING = 'Image or equation changes were left out of sync. Unlink and create a new Google Doc to export them; the existing Google Doc and its comments stay.';
+export const MEDIA_WARNING = 'Image or equation changes were left out of sync: this Google Doc cannot be uploaded again as a whole (a tab of a Google Doc with several, images or equations made in Google Docs, or open suggestions there). Unlink and create a new Google Doc to export them; the existing Google Doc and its comments stay.';
 export const UNKNOWN_WARNING = 'Some Google Docs objects could not be matched to their source. Their paragraphs were left unchanged in both documents.';
 
 export type ParaStyle = 'NORMAL_TEXT' | 'TITLE' | 'SUBTITLE' | 'HEADING_1' | 'HEADING_2' | 'HEADING_3' | 'HEADING_4' | 'HEADING_5' | 'HEADING_6';
