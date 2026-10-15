@@ -6,6 +6,7 @@ import * as vscode from 'vscode';
 import type { DocSession } from './session.ts';
 import type { OutlineEntry } from '../shared/protocol.ts';
 import type { TextStore } from '../agents/localEdit.ts';
+import type { HandOver } from '../agents/handover.ts';
 
 export interface OpenEditor {
   session: DocSession;
@@ -17,9 +18,10 @@ export interface OpenEditor {
   /**
    * A local agent's edit of one of this view's documents (`absPath`): `run` reads and writes the
    * document's text through `store`, in turn with the webview's own updates; the result is shown
-   * and saved. Undefined when the view does not hold that document.
+   * and saved. Undefined when the view does not hold that document. `handOver` (agents/handover.ts)
+   * abandons it while nothing is applied yet: its `begin` is called right before the text is written.
    */
-  agentEdit?: <T>(absPath: string, run: (store: TextStore) => Promise<T>) => Promise<T> | undefined;
+  agentEdit?: <T>(absPath: string, run: (store: TextStore) => Promise<T>, handOver: HandOver) => Promise<T> | undefined;
 }
 
 export class Registry {
