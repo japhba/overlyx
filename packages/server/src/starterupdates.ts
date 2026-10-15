@@ -1,6 +1,6 @@
 /** Refresh known old examples at startup, before any editor can have unsaved live changes.
  * Compare structure, text, math, graphics and CSS, allowing whitespace and author-placeholder edits.
- * Every replaced source is retained as a manual version; deleted or customised files stay alone.
+ * Replaced and retired examples are retained as manual versions; customised files stay alone.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -46,20 +46,23 @@ export function isLightlyEditedStarter(text: string, folder: string): boolean {
   return expected.includes(signature(text));
 }
 
-export function refreshScientificStarters(dryRun = false): { updated: string[]; preserved: number } {
-  const result = { updated: [] as string[], preserved: 0 };
-  const rows = db.prepare("SELECT s.project, s.user_id FROM starter_projects s JOIN projects p ON p.name=s.project AND p.owner_id=s.user_id WHERE s.template='web' AND p.kind='project'").all() as { project: string; user_id: number }[];
+export function refreshScientificStarters(dryRun = false): { updated: string[]; removed: string[]; renamed: number; preserved: number } {
+  const result = { updated: [] as string[], removed: [] as string[], renamed: 0, preserved: 0 };
+  const rows = db.prepare("SELECT s.project, s.user_id, p.title FROM starter_projects s JOIN projects p ON p.name=s.project AND p.owner_id=s.user_id WHERE s.template='web' AND p.kind='project'").all() as { project: string; user_id: number; title: string | null }[];
   for (const row of rows) {
     let refreshed = false;
     let addVariants = false;
     try {
       const root = resolveProjectPath(row.project, '.');
       if (!fs.existsSync(root) || !fs.lstatSync(root).isDirectory()) continue;
-      for (const folder of folders) {
+      for (const folder of [...folders, 'site']) {
         const file = path.join(root, folder, 'index.html');
         if (!fs.existsSync(file) || !fs.lstatSync(path.dirname(file)).isDirectory() || !fs.lstatSync(file).isFile()) continue;
+        const retire = folder === 'site';
+        // An added asset makes the old web-page folder a user's project, even with an untouched index.
+        if (retire && fs.readdirSync(path.dirname(file)).some(name => name !== 'index.html')) { result.preserved++; continue; }
         const before = fs.readFileSync(file, 'utf8');
-        const replacement = fs.readFileSync(path.join(templates, 'starters/web', folder, 'index.html'), 'utf8');
+        const replacement = retire ? undefined : fs.readFileSync(path.join(templates, 'starters/web', folder, 'index.html'), 'utf8');
         if (before === replacement) continue;
         if (!isLightlyEditedStarter(before, folder)) { result.preserved++; continue; }
         const id = `${row.project}/${folder}/index.html`;
@@ -74,12 +77,18 @@ export function refreshScientificStarters(dryRun = false): { updated: string[]; 
         }
         if (!dryRun) {
           const snapshot = db.prepare('INSERT INTO versions (doc_id,name,author,kind,created_at,lyx) VALUES (?,?,?,?,?,?)');
-          snapshot.run(id, 'Before scientific template refresh', 'OverLyX', 'manual', Date.now(), before);
+          snapshot.run(id, retire ? 'Before removing web-page example' : 'Before scientific template refresh', 'OverLyX', 'manual', Date.now(), before);
           if (persisted !== before) snapshot.run(id, 'Unsaved state before scientific template refresh', 'OverLyX', 'manual', Date.now(), persisted);
-          const temp = file + '.scientific-refresh.tmp';
-          fs.writeFileSync(temp, replacement, { flag: 'wx', mode: fs.statSync(file).mode });
-          try { fs.renameSync(temp, file); } finally { if (fs.existsSync(temp)) fs.unlinkSync(temp); }
+          if (replacement === undefined) {
+            fs.unlinkSync(file);
+            fs.rmdirSync(path.dirname(file));
+          } else {
+            const temp = file + '.scientific-refresh.tmp';
+            fs.writeFileSync(temp, replacement, { flag: 'wx', mode: fs.statSync(file).mode });
+            try { fs.renameSync(temp, file); } finally { if (fs.existsSync(temp)) fs.unlinkSync(temp); }
+          }
         }
+        if (retire) { result.removed.push(id); continue; }
         result.updated.push(id);
         refreshed = true;
         if (!before.includes('name="overlyx-template"')) addVariants = true;
@@ -91,10 +100,13 @@ export function refreshScientificStarters(dryRun = false): { updated: string[]; 
           const dest = path.join(root, folder);
           if (!fs.existsSync(dest)) fs.cpSync(path.join(templates, 'starters/web', folder), dest, { recursive: true, errorOnExist: true, force: false });
         }
-        db.prepare("UPDATE projects SET title='Example: scientific slides and posters' WHERE name=? AND owner_id=? AND title='Example: slides, poster and web page'").run(row.project, row.user_id);
+      }
+      if (['Example: scientific slides and posters', 'Example: slides, poster and web page'].includes(row.title ?? '')) {
+        if (!dryRun) db.prepare("UPDATE projects SET title='Example: slides and posters' WHERE name=? AND owner_id=?").run(row.project, row.user_id);
+        result.renamed++;
       }
     } catch (e) { console.error('[starters] scientific refresh failed:', row.project, e); }
   }
-  if (!dryRun && result.updated.length) console.log(`[starters] refreshed ${result.updated.length} scientific examples; preserved ${result.preserved} customised files`);
+  if (!dryRun && (result.updated.length || result.removed.length || result.renamed)) console.log(`[starters] refreshed ${result.updated.length} slide/poster examples; removed ${result.removed.length} web-page examples; renamed ${result.renamed} projects; preserved ${result.preserved} customised files`);
   return result;
 }

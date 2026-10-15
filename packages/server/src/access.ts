@@ -513,14 +513,14 @@ const STARTER_DIR = path.resolve(path.dirname(new URL(import.meta.url).pathname)
 /** The starters every account gets besides the welcome project (templates/starters/<id>, scripts/gen-starters.ts). */
 export const STARTERS: { id: string; title: string }[] = [
   { id: 'slides', title: 'Example: beamer slides' },
-  // Three scientific decks, three posters and a project page as editable HTML deliverables.
-  { id: 'web', title: 'Example: scientific slides and posters' },
+  // Three decks and three posters as editable HTML deliverables.
+  { id: 'web', title: 'Example: slides and posters' },
   { id: 'paper', title: 'Example: paper' },
 ];
 
 
 /**
- * A beamer deck, HTML slides / poster / web page and a paper to start from, each an ordinary project of
+ * A beamer deck, HTML slides / posters and a paper to start from, each an ordinary project of
  * the account (`<user>/example-slides`, …). Each is created once per
  * account — new accounts on their first visit, older ones on their next — and never again once deleted
  * (`starter_projects` keeps a row per account and template). Guests get none.

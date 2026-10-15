@@ -1,6 +1,6 @@
 /**
  * The starter projects every account gets besides the welcome project (a beamer deck, an HTML talk /
- * poster / project page and a paper: packages/server/templates/starters, scripts/gen-starters.ts):
+ * poster and a paper: packages/server/templates/starters, scripts/gen-starters.ts):
  * created once per account, the LaTeX ones in OverLyX's canonical form (opening and saving them
  * changes nothing) and compiling.
  *   npx vitest run tests/starters.test.ts
@@ -32,7 +32,7 @@ const FILES: Record<string, string> = { slides: 'slides.tex', paper: 'paper.tex'
 describe('starter projects', () => {
   const ada = toSessionUser(createUser('ada', 'Ada Lovelace', 'pw'));
 
-  it('every account gets the beamer deck, the HTML slides / poster / page and the paper once, besides the welcome project', () => {
+  it('every account gets the beamer deck, slides and posters, and the paper once, besides the welcome project', () => {
     expect(access.ensureWelcomeProject(ada)).toBe('ada/welcome');
     expect(access.ensureStarterProjects(ada)).toEqual(['ada/example-slides', 'ada/example-web', 'ada/example-paper']);
     expect(access.ensureStarterProjects(ada)).toEqual([]);
@@ -40,7 +40,7 @@ describe('starter projects', () => {
     expect(mine.map(p => [p.name, p.kind, p.title, p.role])).toEqual(expect.arrayContaining([
       ['ada/welcome', 'example', 'Welcome to OverLyX', 'owner'],
       ['ada/example-slides', 'project', 'Example: beamer slides', 'owner'],
-      ['ada/example-web', 'project', 'Example: scientific slides and posters', 'owner'],
+      ['ada/example-web', 'project', 'Example: slides and posters', 'owner'],
       ['ada/example-paper', 'project', 'Example: paper', 'owner'],
     ]));
     // the welcome project stays the one example the client looks for
@@ -53,12 +53,13 @@ describe('starter projects', () => {
       expect(existsSync(join(dir, 'figures'))).toBe(true);
     }
     // the HTML deliverables
-    for (const [folder, kind] of [['talk', 'deck'], ['poster', 'poster'], ['site', 'page']]) {
+    for (const [folder, kind] of [['talk', 'deck'], ['poster', 'poster']]) {
       const html = readFileSync(join(ROOT, 'projects', 'ada', 'example-web', folder, 'index.html'), 'utf8');
       expect(html).toContain(`<meta name="overlyx" content="${kind}">`);
       expect(html).not.toContain('Lovelace');
       expect(html).not.toContain('@@');
     }
+    expect(existsSync(join(ROOT, 'projects', 'ada', 'example-web', 'site'))).toBe(false);
     for (const t of SCIENTIFIC_TEMPLATES) {
       const folder = t.id === 'research' ? 'talk' : t.id === 'betterposter' ? 'poster' : `${t.kind === 'deck' ? 'talk' : 'poster'}-${t.id}`;
       const html = readFileSync(join(ROOT, 'projects', 'ada', 'example-web', folder, 'index.html'), 'utf8');
