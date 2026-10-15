@@ -1,9 +1,14 @@
 /* ============================================================ the Modern interface (app/uimode.ts)
    OverLyX's own quiet look over the same app, after Dieter Rams ("less, but better") and the
    Bauhaus: warm paper greys, graphite ink, hairline rules, a strict 4 / 8 px grid and modest radii;
-   the wordmark's three colours with one job each: red for what is on or is the one thing to press
-   (the primary action, the current place), blue for the selection, focus and links, yellow for
-   comments (styles.css `--cm-*`); the same three in the small marks of what a file is. Type: Jost
+   the wordmark's three colours with one job each, always small (a bar, an underline, a fill behind a
+   line icon, a tint), never a surface: red for the one thing to press (Share, + New, Present, a
+   dialog's OK); blue for where you are and what is selected (the selection and the caret, focus,
+   links, the current file, section, tab and style, ticked boxes, the step of the tour); yellow for
+   what is worth a look (comments — styles.css `--cm-*` — find matches, hints and tips, the starter
+   examples, what is still being saved); blue and yellow again, softly, in the marks of what a file
+   is (documents blue, slides / posters / web pages yellow). A toggle that is on stays a pressed
+   graphite key. Type: Jost
    (geometric, Futura's family) for names and titles, Inter for everything one reads while working.
    Icons: Lucide's line set (modernicons.ts). html[data-ui="modern"] redefines the tokens of
    styles.css and lays out the header (one row: the wordmark, the menu button — every menu in one
@@ -46,14 +51,21 @@ html[data-ui="modern"][data-theme="dark"]:not([data-dark-pages]) .editor-page:no
   --m-press: #262521;        /* a toggle that is on: a pressed key */
   --m-on-press: #f6f5f1;
   /* the colours: one signal, the selection, the marks */
-  --m-signal: #d6402b;       /* the wordmark's red (LyX's X): on / the primary action / where you are */
+  --m-signal: #d6402b;       /* the wordmark's red (LyX's X): the one thing to press */
   --m-signal-hover: #bb3220;
   --m-on-signal: #ffffff;
-  --m-blue: #2152a3;         /* Bauhaus blue: selection, focus, links */
+  --m-blue: #2152a3;         /* Bauhaus blue (LyX's L): where you are, the selection, focus, links */
   --m-red: #d6402b;
-  --m-yellow: #efb21a;
+  --m-yellow: #efb21a;       /* LyX's Y: worth a look */
   --m-black: #1c1b19;
   --m-shadow: 0 1px 2px rgba(28, 27, 25, 0.06), 0 8px 24px rgba(28, 27, 25, 0.12);
+  /* the two accents as tints: where you are (blue), worth a look (yellow) */
+  --m-blue-soft: color-mix(in srgb, var(--m-blue) 11%, var(--m-ground));
+  --m-doc-tint: color-mix(in srgb, var(--m-blue) 24%, var(--m-field));     /* what a file is: a document */
+  --m-show-tint: color-mix(in srgb, var(--m-yellow) 40%, var(--m-paper));  /* slides, a poster, a web page */
+  --row-sel: var(--m-blue-soft);
+  --hl-bg: color-mix(in srgb, var(--m-yellow) 38%, var(--m-paper));
+  --hl-bg2: color-mix(in srgb, var(--m-yellow) 72%, var(--m-paper));
 
   /* styles.css's tokens in this material */
   --ui-bg: var(--m-ground);
@@ -73,7 +85,6 @@ html[data-ui="modern"][data-theme="dark"]:not([data-dark-pages]) .editor-page:no
   --surface2: #f5f3ef;
   --ui-hover: var(--m-hover);
   --row-hover: rgba(28, 27, 25, 0.045);
-  --row-sel: #e1ddd5;
   --active-bg: #dcd8cf;
   --active-border: transparent;
   --chip-bg: #ebe8e1;
@@ -113,7 +124,11 @@ html[data-ui="modern"][data-theme="dark"] {
   --on-accent-muted: #2a3550;
   --surface2: #201f1c;
   --row-hover: rgba(236, 235, 230, 0.05);
-  --row-sel: #33312c;
+  --m-blue-soft: color-mix(in srgb, var(--m-blue) 17%, var(--m-ground));
+  --m-doc-tint: color-mix(in srgb, var(--m-blue) 34%, var(--m-field));
+  --row-sel: var(--m-blue-soft);
+  --hl-bg: color-mix(in srgb, var(--m-yellow) 32%, var(--m-paper));
+  --hl-bg2: color-mix(in srgb, var(--m-yellow) 48%, var(--m-paper));
   --active-bg: #3a3833;
   --chip-bg: #2e2d29;
   --backdrop: rgba(0, 0, 0, 0.55);
@@ -125,6 +140,23 @@ html[data-ui="modern"] body { background: var(--ui-bg); font-family: var(--ui-fo
 html[data-ui="modern"] ::selection { background: color-mix(in srgb, var(--m-blue) 22%, transparent); }
 html[data-ui="modern"] :focus-visible { outline-color: var(--m-blue); }
 html[data-ui="modern"] * { scrollbar-color: var(--m-line-strong) transparent; scrollbar-width: thin; }
+
+/* ------------------------------------------------------------ blue and yellow in the small things (see the top) */
+/* blue: the caret, in the text and in every field */
+html[data-ui="modern"] .lyx-editor:not(.view-only), html[data-ui="modern"] :is(input, textarea):not([type=checkbox], [type=radio], [type=range]) { caret-color: var(--m-blue); }
+/* yellow: comments wherever one is added, the sun, a tip, what is still being saved */
+html[data-ui="modern"] .tb-btn:is([data-tb="comment"], [data-tb="r-comment"], [data-tb="dk-comment"]) svg { fill: color-mix(in srgb, var(--m-yellow) 45%, var(--m-paper)); }
+html[data-ui="modern"] .theme-toggle[data-pref="light"] svg circle { fill: var(--m-yellow); stroke: color-mix(in srgb, var(--m-yellow) 55%, var(--m-ink)); }
+html[data-ui="modern"] .theme-toggle[data-pref="dark"] svg path { fill: color-mix(in srgb, var(--m-yellow) 70%, transparent); stroke: var(--m-yellow); }
+html[data-ui="modern"] .shortcut-tip { background: var(--m-paper); border-color: var(--m-line); box-shadow: inset 3px 0 0 var(--m-yellow), var(--m-shadow); }
+html[data-ui="modern"] .save-state.saving::before { content: ''; display: inline-block; width: 6px; height: 6px; margin: 0 6px 1px 0; border-radius: 50%; background: var(--m-yellow); vertical-align: middle; animation: m-saving 1.1s ease-in-out infinite; }
+@keyframes m-saving { 50% { opacity: 0.3; } }
+@media (prefers-reduced-motion: reduce) { html[data-ui="modern"] .save-state.saving::before { animation: none; } }
+/* what a file is: documents on blue paper, slides, posters and web pages on yellow (opaque tints, so
+   a line icon's overlapping shapes fill evenly) */
+html[data-ui="modern"] :is(.ficon, .hglyph).icon:is([data-kind="doc"], [data-kind="tex"], [data-kind="lyx"], [data-kind="md"]) svg { fill: var(--m-doc-tint); }
+html[data-ui="modern"] :is(.ficon, .hglyph).icon:is([data-kind="deck"], [data-kind="poster"], [data-kind="page"], [data-kind="html"]) svg { fill: var(--m-show-tint); }
+html[data-ui="modern"] :is(.ficon, .hglyph).icon[data-kind="deck"] svg > :last-child { fill: none; }   /* the easel's legs */
 
 /* ------------------------------------------------------------ the wordmark: the Bauhaus one (styles.css `.ol-wordmark.bauhaus`) */
 
@@ -188,7 +220,7 @@ html[data-ui="modern"] .view-mode-switch button.active { background: var(--m-pap
 html[data-ui="modern"] .pane-menu-btn { height: 30px; border-radius: var(--m-radius); color: var(--m-muted); }
 html[data-ui="modern"] .pane-preset { border-radius: var(--m-radius); }
 html[data-ui="modern"] .pane-preset:hover { background: var(--m-hover); }
-html[data-ui="modern"] .pane-preset.active { border-color: var(--m-signal); }
+html[data-ui="modern"] .pane-preset.active { border-color: var(--m-blue); }
 
 /* Editing · Suggesting · Viewing */
 html[data-ui="modern"] .edit-mode-btn { height: 28px; border-radius: var(--m-radius); border-color: var(--m-line-strong); background: transparent; font-size: 12.5px; font-weight: 600; padding: 0 9px 0 10px; }
@@ -252,7 +284,7 @@ html[data-ui="modern"] .tb-style-pop { border-radius: 8px; border-color: var(--m
 html[data-ui="modern"] .tb-style-search { height: 30px; border-color: var(--m-line); background: var(--m-field); border-radius: 5px; font-size: 13px; color: var(--m-ink); }
 html[data-ui="modern"] .tb-style-item { border-radius: 5px; color: var(--m-ink); }
 html[data-ui="modern"] .tb-style-item.hi { background: var(--m-hover); }
-html[data-ui="modern"] .tb-style-item.current { box-shadow: inset 2px 0 0 var(--m-signal); }
+html[data-ui="modern"] .tb-style-item.current { box-shadow: inset 2px 0 0 var(--m-blue); }
 html[data-ui="modern"] .tb-modern-row .toolbar .tb-sep { margin: 0 4px; }
 html[data-ui="modern"] .tb-modern-row .fs-box .tb-btn.fs-step { width: 22px; min-width: 22px; }
 html[data-ui="modern"] .tb-modern-row .fs-box .tb-btn.fs-drop { width: 16px; min-width: 16px; }
@@ -282,13 +314,13 @@ html[data-ui="modern"] .filetree .actions { padding: 2px 10px 8px; gap: 4px; }
 html[data-ui="modern"] .filetree .section { font-size: 10.5px; font-weight: 600; letter-spacing: 0.1em; color: var(--m-muted); padding: 12px 12px 4px; }
 html[data-ui="modern"] .tree-row { min-height: 28px; font-size: 13px; border-radius: var(--m-radius); margin: 0 8px; padding-left: 8px; color: var(--m-ink); }
 html[data-ui="modern"] .tree-row:hover { background: var(--m-hover); }
-html[data-ui="modern"] .tree-row.current { background: var(--row-sel); color: var(--m-ink); font-weight: 600; box-shadow: inset 2px 0 0 var(--m-signal); border-radius: 0 var(--m-radius) var(--m-radius) 0; }
+html[data-ui="modern"] .tree-row.current { background: var(--row-sel); color: var(--m-ink); font-weight: 600; box-shadow: inset 2px 0 0 var(--m-blue); border-radius: 0 var(--m-radius) var(--m-radius) 0; }
 html[data-ui="modern"] .tree-row .twisty { color: var(--m-muted); }
 html[data-ui="modern"] .doc-outline .tree-row, html[data-ui="modern"] .doc-outline a { font-size: 12.5px; color: var(--m-ink2); }
 html[data-ui="modern"] .sidebar .small-btn, html[data-ui="modern"] .small-btn { border-radius: var(--m-radius); padding: 3px 9px; border: 1px solid var(--m-line-strong); background: transparent; color: var(--m-ink); font-size: 12px; line-height: 16px; }
 html[data-ui="modern"] .small-btn:hover:not(:disabled) { background: var(--m-hover); }
 html[data-ui="modern"] .small-btn.primary { background: var(--m-signal); border-color: var(--m-signal); color: var(--m-on-signal); }
-html[data-ui="modern"] .sidebar-grip:hover, html[data-ui="modern"] .sidebar-grip:active { background: var(--m-signal); opacity: 0.5; }
+html[data-ui="modern"] .sidebar-grip:hover, html[data-ui="modern"] .sidebar-grip:active { background: var(--m-blue); opacity: 0.5; }
 html[data-ui="modern"] .badge { border-radius: 3px; background: var(--chip-bg); color: var(--m-ink2); font-weight: 600; letter-spacing: 0.03em; }
 
 /* what a file or a project is (FileBrowser's .ficon, Home's .hglyph): Lucide line icons (modernicons.ts KIND_ICONS) */
@@ -315,8 +347,8 @@ html[data-ui="modern"] .rail button:hover { background: var(--m-hover); color: v
 html[data-ui="modern"] .rail button.active { background: var(--m-press); color: var(--m-on-press); }
 html[data-ui="modern"] .panel-tabs { background: transparent; border-bottom: 1px solid var(--m-line2); padding: 6px 8px 0; gap: 4px; }
 html[data-ui="modern"] .panel-tabs button { border-radius: 0; font-size: 12.5px; color: var(--m-ink2); }
-html[data-ui="modern"] .panel-tabs button.active { background: transparent; color: var(--m-ink); font-weight: 600; border-bottom-color: var(--m-signal); border-bottom-width: 2px; }
-html[data-ui="modern"] .panel-tabs .toggle.on { color: var(--m-ink); border-bottom-color: var(--m-signal); }
+html[data-ui="modern"] .panel-tabs button.active { background: transparent; color: var(--m-ink); font-weight: 600; border-bottom-color: var(--m-blue); border-bottom-width: 2px; }
+html[data-ui="modern"] .panel-tabs .toggle.on { color: var(--m-ink); border-bottom-color: var(--m-blue); }
 
 /* ------------------------------------------------------------ the status bar: quiet, no duplicates of the toolbar */
 html[data-ui="modern"] .statusbar { height: 26px; background: var(--ui-bg); border-top: 1px solid var(--m-line2); font-size: 11.5px; padding: 0 14px; color: var(--m-muted); font-variant-numeric: tabular-nums; }
@@ -329,7 +361,7 @@ html[data-ui="modern"] .dialog { background: var(--m-paper); border: 1px solid v
 html[data-ui="modern"] .dialog h2 { background: transparent; border-bottom: 0; padding: 20px 24px 4px; font-family: var(--m-display); font-size: 20px; font-weight: 500; letter-spacing: 0.005em; border-radius: 0; color: var(--m-ink); }
 html[data-ui="modern"] .dialog .body { padding: 12px 24px 16px; }
 html[data-ui="modern"] .dialog .buttons { border-top: 0; padding: 8px 24px 20px; }
-html[data-ui="modern"] .dlg-tabs button.active { border-bottom-color: var(--m-signal); color: var(--m-ink); }
+html[data-ui="modern"] .dlg-tabs button.active { border-bottom-color: var(--m-blue); color: var(--m-ink); }
 html[data-ui="modern"] .btn { height: 32px; border-radius: var(--m-radius); padding: 0 14px; font-weight: 500; font-size: 13px; border: 1px solid var(--m-line-strong); background: transparent; color: var(--m-ink); display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 html[data-ui="modern"] .btn.small { height: 28px; padding: 0 11px; font-size: 12.5px; }
 html[data-ui="modern"] .btn:hover:not(:disabled) { filter: none; background: var(--m-hover); }
@@ -341,7 +373,7 @@ html[data-ui="modern"] .dialog input[type=text], html[data-ui="modern"] .dialog 
   border-radius: var(--m-radius); padding: 6px 10px; border: 1px solid var(--m-line-strong); background: var(--m-field); color: var(--m-ink);
 }
 html[data-ui="modern"] .dialog :is(input, select, textarea):focus { outline: none; border-color: var(--m-blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--m-blue) 18%, transparent); }
-html[data-ui="modern"] input[type=checkbox], html[data-ui="modern"] input[type=radio], html[data-ui="modern"] input[type=range] { accent-color: var(--m-signal); }
+html[data-ui="modern"] input[type=checkbox], html[data-ui="modern"] input[type=radio], html[data-ui="modern"] input[type=range] { accent-color: var(--m-blue); }
 
 /* ------------------------------------------------------------ the start screen */
 html[data-ui="modern"] .home { max-width: 1040px; margin-top: 40px; }
@@ -352,7 +384,7 @@ html[data-ui="modern"] .home h3 { font-size: 10.5px; font-weight: 600; letter-sp
 html[data-ui="modern"] .home .meta { color: var(--m-muted); font-size: 12px; }
 html[data-ui="modern"] .home-card { border: 1px solid var(--m-line); border-radius: 10px; box-shadow: none; background: var(--m-paper); padding: 16px 18px; }
 html[data-ui="modern"] .home-card.example { background: var(--m-paper); border-color: var(--m-line); position: relative; padding-left: 22px; }
-html[data-ui="modern"] .home-card.example::before { content: ''; position: absolute; left: 0; top: 16px; bottom: 16px; width: 3px; border-radius: 0 2px 2px 0; background: var(--m-signal); }
+html[data-ui="modern"] .home-card.example::before { content: ''; position: absolute; left: 0; top: 16px; bottom: 16px; width: 3px; border-radius: 0 2px 2px 0; background: var(--m-yellow); }
 html[data-ui="modern"] .home-card .title { font-family: var(--m-display); font-size: 16px; font-weight: 500; gap: 8px; color: var(--m-ink); }
 html[data-ui="modern"] .home-card .blurb { color: var(--m-ink2); font-size: 13px; line-height: 1.55; }
 html[data-ui="modern"] .home-card .docs a { color: var(--m-ink2); font-size: 12.5px; display: flex; align-items: center; gap: 6px; }
@@ -418,9 +450,9 @@ html[data-ui="modern"] .board-tools .small-btn.active { background: var(--m-pres
 html[data-ui="modern"] .board-sep { background: var(--m-line-strong); }
 
 /* ------------------------------------------------------------ the tour card */
-html[data-ui="modern"] .tour-card { background: var(--m-paper); border: 1px solid var(--m-line); border-radius: 12px; box-shadow: 0 2px 6px rgba(28, 27, 25, 0.06), 0 24px 64px rgba(28, 27, 25, 0.2); padding: 16px 18px; }
+html[data-ui="modern"] .tour-card { background: var(--m-paper); border: 1px solid var(--m-line); border-radius: 12px; box-shadow: inset 0 3px 0 var(--m-yellow), 0 2px 6px rgba(28, 27, 25, 0.06), 0 24px 64px rgba(28, 27, 25, 0.2); padding: 16px 18px; }
 html[data-ui="modern"] .tour-card h3 { font-family: var(--m-display); font-size: 18px; font-weight: 500; color: var(--m-ink); }
-html[data-ui="modern"] .tour-dots i.on { background: var(--m-signal); }
+html[data-ui="modern"] .tour-dots i.on { background: var(--m-blue); }
 html[data-ui="modern"] .tour-task { border-radius: var(--m-radius); }
 
 /* ------------------------------------------------------------ the welcome card's interface choice (Tour.tsx; both interfaces) */
@@ -435,8 +467,8 @@ html[data-ui="modern"] .tour-task { border-radius: var(--m-radius); }
 .ui-choice span { font-size: 12px; color: var(--ui-muted); line-height: 1.4; margin: 0 2px; }
 .ui-choice svg { width: 100%; height: auto; border-radius: 6px; display: block; }
 html[data-ui="modern"] .ui-choice .uc-name { font-family: var(--m-display); font-weight: 500; font-size: 15px; }
-html[data-ui="modern"] .ui-choice button.on { border-color: var(--m-signal); box-shadow: 0 0 0 1px var(--m-signal); }
-html[data-ui="modern"] .ui-choice button.on .uc-name::before { box-shadow: inset 0 0 0 4px var(--m-signal); }
+html[data-ui="modern"] .ui-choice button.on { border-color: var(--m-blue); box-shadow: 0 0 0 1px var(--m-blue); }
+html[data-ui="modern"] .ui-choice button.on .uc-name::before { box-shadow: inset 0 0 0 4px var(--m-blue); }
 
 /* ------------------------------------------------------------ the rails' icons (Lucide, as masks) */
 html[data-ui="modern"] .rail button[data-rail="comments"] { --icon: url("data:image/svg+xml;utf8,<svg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27black%27 stroke-width=%271.7%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27><path d=%27M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z%27/></svg>"); }
