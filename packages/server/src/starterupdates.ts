@@ -11,7 +11,9 @@ import { db } from './db.ts';
 import { resolveProjectPath } from './projects.ts';
 
 const templates = path.resolve(import.meta.dirname, '../templates');
-const oldSource = (folder: string) => fs.readFileSync(path.join(templates, 'starters-legacy/web', folder, 'index.html'), 'utf8');
+const folders = SCIENTIFIC_TEMPLATES.map(t => t.id === 'research' ? 'talk' : t.id === 'betterposter' ? 'poster' : `${t.kind === 'deck' ? 'talk' : 'poster'}-${t.id}`);
+const oldSources = (folder: string) => ['web', 'scientific-v1'].map(version => path.join(templates, 'starters-legacy', version, folder, 'index.html'))
+  .filter(file => fs.existsSync(file)).map(file => fs.readFileSync(file, 'utf8'));
 const compact = (s: string) => s.replace(/\s+/g, ' ').trim();
 
 function signature(text: string): string {
@@ -37,11 +39,11 @@ function signature(text: string): string {
   return JSON.stringify(parseSource(text).doc.childNodes.map(node).filter(n => n !== null));
 }
 
-const oldSignatures = new Map<string, string>();
-export function isLightlyEditedStarter(text: string, folder: 'talk' | 'poster'): boolean {
+const oldSignatures = new Map<string, string[]>();
+export function isLightlyEditedStarter(text: string, folder: string): boolean {
   let expected = oldSignatures.get(folder);
-  if (!expected) { expected = signature(oldSource(folder)); oldSignatures.set(folder, expected); }
-  return signature(text) === expected;
+  if (!expected) { expected = oldSources(folder).map(signature); oldSignatures.set(folder, expected); }
+  return expected.includes(signature(text));
 }
 
 export function refreshScientificStarters(dryRun = false): { updated: string[]; preserved: number } {
@@ -49,10 +51,11 @@ export function refreshScientificStarters(dryRun = false): { updated: string[]; 
   const rows = db.prepare("SELECT s.project, s.user_id FROM starter_projects s JOIN projects p ON p.name=s.project AND p.owner_id=s.user_id WHERE s.template='web' AND p.kind='project'").all() as { project: string; user_id: number }[];
   for (const row of rows) {
     let refreshed = false;
+    let addVariants = false;
     try {
       const root = resolveProjectPath(row.project, '.');
       if (!fs.existsSync(root) || !fs.lstatSync(root).isDirectory()) continue;
-      for (const folder of ['talk', 'poster'] as const) {
+      for (const folder of folders) {
         const file = path.join(root, folder, 'index.html');
         if (!fs.existsSync(file) || !fs.lstatSync(path.dirname(file)).isDirectory() || !fs.lstatSync(file).isFile()) continue;
         const before = fs.readFileSync(file, 'utf8');
@@ -79,9 +82,10 @@ export function refreshScientificStarters(dryRun = false): { updated: string[]; 
         }
         result.updated.push(id);
         refreshed = true;
+        if (!before.includes('name="overlyx-template"')) addVariants = true;
       }
       if (refreshed && !dryRun) {
-        for (const t of SCIENTIFIC_TEMPLATES) {
+        for (const t of addVariants ? SCIENTIFIC_TEMPLATES : []) {
           if (t.id === 'research' || t.id === 'betterposter') continue;
           const folder = `${t.kind === 'deck' ? 'talk' : 'poster'}-${t.id}`;
           const dest = path.join(root, folder);

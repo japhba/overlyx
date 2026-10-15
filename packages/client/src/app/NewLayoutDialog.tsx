@@ -14,7 +14,7 @@ import { ScientificTemplates } from './ScientificTemplates';
 type Kind = 'deck' | 'poster' | 'page';
 const KINDS: { id: Kind; label: string; hint: string; w: number; h: number; dir: string }[] = [
   { id: 'deck', label: 'Slide deck', hint: '16:9 or 4:3, presented full screen', w: 16, h: 9, dir: 'talk' },
-  { id: 'poster', label: 'Poster', hint: 'A0 landscape or portrait, printed as PDF', w: 1189, h: 841, dir: 'poster' },
+  { id: 'poster', label: 'Poster', hint: '48 × 36 in or portrait, printed as PDF', w: 48, h: 36, dir: 'poster' },
   { id: 'page', label: 'Web page', hint: 'A project page or a small site', w: 12, h: 9, dir: 'site' },
 ];
 

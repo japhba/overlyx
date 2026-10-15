@@ -182,17 +182,17 @@ for (const theme of ['light', 'dark'] as const) {
     const t0 = Date.now();
     await page.waitForTimeout(400);
     // the title rule: picked up and moved on the canvas
-    const titleRule = await slidePoint(page, 136, 157);
+    const titleRule = await slidePoint(page, 200, 337);
     await glide(page, { x: 640, y: 760 }, titleRule, 600);
     await page.mouse.down();
     await page.waitForTimeout(120);
-    const low = await slidePoint(page, 160, 175);
+    const low = await slidePoint(page, 240, 355);
     await glide(page, titleRule, low, 900);
     await page.mouse.up();
     await page.waitForTimeout(500);
     await snap(page, 'title-rule');
     // the title: retyped in place
-    const title = await slidePoint(page, 840, 320);
+    const title = await slidePoint(page, 600, 205);
     await glide(page, low, title, 450);
     await page.mouse.dblclick(title.x, title.y);
     await page.waitForTimeout(250);

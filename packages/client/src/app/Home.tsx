@@ -260,7 +260,7 @@ type NewKind = 'doc' | 'deck' | 'poster' | 'empty';
 const NEW_KINDS: { id: NewKind; label: string; hint: string; w: number; h: number; name: string }[] = [
   { id: 'doc', label: 'Document', hint: 'A paper, thesis or notes', w: 210, h: 297, name: 'Untitled document' },
   { id: 'deck', label: 'Slides', hint: '16:9 or 4:3, presented full screen', w: 16, h: 9, name: 'Untitled slides' },
-  { id: 'poster', label: 'Poster', hint: 'A0 landscape or portrait', w: 1189, h: 841, name: 'Untitled poster' },
+  { id: 'poster', label: 'Poster', hint: '48 × 36 in or portrait', w: 48, h: 36, name: 'Untitled poster' },
   { id: 'empty', label: 'Empty project', hint: 'Add files later', w: 0, h: 0, name: '' },
 ];
 

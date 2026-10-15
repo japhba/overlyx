@@ -117,7 +117,8 @@ describe('html deliverable source edits', () => {
     expect(info).toMatchObject({ kind: t.kind, title: 'A < B & C' });
     expect(info.slides).toHaveLength(t.kind === 'deck' ? 5 : 1);
     expect(text).toContain(`<meta name="overlyx-template" content="${t.id}">`);
-    expect(text).toContain('MIT License');
+    expect(text).toContain(`<meta name="license" content="${t.license}">`);
+    expect(text).toContain(t.source);
     expect(text).toContain('Analytical');
     expect(text).not.toMatch(/<(?:script|img|link)\b/);
     const { doc } = parseSource(text);

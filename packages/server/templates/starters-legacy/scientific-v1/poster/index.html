@@ -1,0 +1,86 @@
+<!doctype html>
+<!--
+MIT License
+
+Copyright (c) 2026 OverLyX contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+Design: BetterPoster. Inspired by Mike Morrison’s BetterPoster project: https://osf.io/6ua4k/ (independent HTML implementation).
+All plots are generated from the analytical functions described in the captions.
+These are teaching examples, not experimental measurements or published research results.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="overlyx" content="poster">
+<meta name="overlyx-template" content="betterposter">
+<meta name="license" content="MIT">
+<title>Diffusion erases small patterns first</title>
+<style>
+  :root { --paper: #ffffff; --ink: #153735; --accent: #126b60; --muted: #50645f; --secondary: #bc6747; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #dce0e4; color: var(--ink); font-family: Arial, Helvetica, sans-serif; }
+  .slide { width: 1189mm; height: 841mm; position: relative; overflow: hidden; background: var(--paper); margin: 0 auto 0; }
+  h1, h2, h3, p { margin: 0; }
+  h1, h2 { font-family: Arial, Helvetica, sans-serif; font-weight: 600; }
+  h1 { font-size: 142px; line-height: 1.08; letter-spacing: -.025em; overflow-wrap: anywhere; }
+  h2 { font-size: 70px; line-height: 1.14; letter-spacing: -.015em; }
+  p { font-size: 42px; line-height: 1.45; }
+  .kicker { font-size: 30px; line-height: 1.3; text-transform: uppercase; letter-spacing: .13em; font-weight: 600; color: var(--accent); }
+  .muted, .caption, .footer { color: var(--muted); }
+  .caption { font-size: 36px; line-height: 1.45; }
+  .footer { font-size: 30px; line-height: 1.4; }
+  .equation { font-size: 54px; }
+  .notes { display: none; }
+  a { color: inherit; text-underline-offset: .18em; }
+  @media print { @page { size: 1189mm 841mm; margin: 0; } body { background: none; } .slide { margin: 0; break-after: page; break-inside: avoid; print-color-adjust: exact; -webkit-print-color-adjust: exact; } .slide:last-of-type { break-after: auto; } }
+</style>
+</head>
+<body data-ol-layout-margins="40mm">
+<section class="slide">
+  <div class="decoration" style="position: absolute; left: 1250px; top: 151px; width: 1730px; height: 2700px; background: var(--accent)"></div>
+  <h1 style="position: absolute; left: 1370px; top: 480px; width: 1490px; color: #ffffff; font-size: 162px">Diffusion erases small patterns first</h1>
+  <p class="kicker" style="position: absolute; left: 151px; top: 160px; width: 1010px">Analytical model · Open methods</p>
+  <h2 style="position: absolute; left: 151px; top: 250px; width: 1000px">The question</h2>
+  <p style="position: absolute; left: 151px; top: 370px; width: 970px">How quickly does a spatial pattern disappear when its components diffuse?</p>
+  <h2 style="position: absolute; left: 151px; top: 720px; width: 980px">The model</h2>
+  <p style="position: absolute; left: 151px; top: 840px; width: 970px">A one-dimensional field on a periodic domain. Constant diffusivity D; no forcing or advection.</p>
+  <p class="equation" style="position: absolute; left: 151px; top: 1170px; width: 970px">\[\partial_t u = D\,\partial_{xx}u\]</p>
+  <p style="position: absolute; left: 151px; top: 1490px; width: 970px">Each Fourier mode evolves independently. Its spatial frequency sets its decay rate.</p>
+  <p class="equation" style="position: absolute; left: 151px; top: 1810px; width: 970px">\[A_k(t)=A_k(0)e^{-Dk^2t}\]</p>
+  <p class="kicker" style="position: absolute; left: 151px; top: 2190px; width: 970px">Reproduce the figure</p>
+  <p style="position: absolute; left: 151px; top: 2270px; width: 970px">Plot exp(−s) and exp(−4s) for s from 0 to 3. Both start at unit amplitude. No fitted parameters.</p>
+  <p class="kicker" style="position: absolute; left: 1370px; top: 290px; width: 1490px; color: #d8f0e8">The main finding</p>
+  <p style="position: absolute; left: 1370px; top: 1300px; width: 1490px; color: #ffffff; font-size: 90px; line-height: 1.2">Double the spatial frequency.<br>Four times faster decay.</p>
+  <p style="position: absolute; left: 1370px; top: 1970px; width: 1490px; color: #e2f1ec; font-size: 60px">Small-scale structure smooths out before large-scale structure.</p>
+  <p class="caption" style="position: absolute; left: 1370px; top: 2540px; width: 1490px; color: #e2f1ec">Analytical teaching example · not measured data</p>
+  <p class="kicker" style="position: absolute; left: 3090px; top: 160px; width: 1250px">01 / Evidence</p>
+  <h2 style="position: absolute; left: 3090px; top: 250px; width: 1250px">Same start, different lifetimes</h2>
+  <svg role="img" aria-label="Analytical diffusion: normalized amplitude against dimensionless time. The second spatial mode decays four times faster." viewBox="0 0 600 400" style="position: absolute; left: 3060px; top: 510px; width: 1250px; height: 850px"><line x1="65" x2="570" y1="310" y2="310" stroke="currentColor" opacity=".15"/><text x="53" y="316" text-anchor="end" fill="currentColor" font-family="Arial, sans-serif" font-size="18">0</text><line x1="65" x2="570" y1="180" y2="180" stroke="currentColor" opacity=".15"/><text x="53" y="186" text-anchor="end" fill="currentColor" font-family="Arial, sans-serif" font-size="18">0.5</text><line x1="65" x2="570" y1="50" y2="50" stroke="currentColor" opacity=".15"/><text x="53" y="56" text-anchor="end" fill="currentColor" font-family="Arial, sans-serif" font-size="18">1</text><text x="65" y="338" text-anchor="middle" fill="currentColor" font-family="Arial, sans-serif" font-size="18">0</text><text x="233.33333333333334" y="338" text-anchor="middle" fill="currentColor" font-family="Arial, sans-serif" font-size="18">1</text><text x="401.6666666666667" y="338" text-anchor="middle" fill="currentColor" font-family="Arial, sans-serif" font-size="18">2</text><text x="570" y="338" text-anchor="middle" fill="currentColor" font-family="Arial, sans-serif" font-size="18">3</text><polyline points="65.00,50.00 70.05,57.68 75.10,65.14 80.15,72.38 85.20,79.40 90.25,86.22 95.30,92.83 100.35,99.25 105.40,105.48 110.45,111.52 115.50,117.39 120.55,123.08 125.60,128.60 130.65,133.97 135.70,139.17 140.75,144.22 145.80,149.12 150.85,153.87 155.90,158.49 160.95,162.96 166.00,167.31 171.05,171.53 176.10,175.62 181.15,179.59 186.20,183.44 191.25,187.18 196.30,190.81 201.35,194.34 206.40,197.76 211.45,201.07 216.50,204.29 221.55,207.42 226.60,210.45 231.65,213.39 236.70,216.25 241.75,219.02 246.80,221.71 251.85,224.31 256.90,226.85 261.95,229.30 267.00,231.69 272.05,234.00 277.10,236.25 282.15,238.43 287.20,240.54 292.25,242.60 297.30,244.59 302.35,246.52 307.40,248.40 312.45,250.22 317.50,251.99 322.55,253.70 327.60,255.36 332.65,256.98 337.70,258.55 342.75,260.07 347.80,261.54 352.85,262.97 357.90,264.36 362.95,265.71 368.00,267.02 373.05,268.29 378.10,269.53 383.15,270.72 388.20,271.88 393.25,273.01 398.30,274.10 403.35,275.16 408.40,276.19 413.45,277.19 418.50,278.16 423.55,279.10 428.60,280.02 433.65,280.90 438.70,281.76 443.75,282.60 448.80,283.41 453.85,284.19 458.90,284.95 463.95,285.70 469.00,286.41 474.05,287.11 479.10,287.79 484.15,288.44 489.20,289.08 494.25,289.70 499.30,290.30 504.35,290.88 509.40,291.45 514.45,291.99 519.50,292.53 524.55,293.04 529.60,293.54 534.65,294.03 539.70,294.50 544.75,294.96 549.80,295.40 554.85,295.84 559.90,296.25 564.95,296.66 570.00,297.06" fill="none" stroke="var(--accent)" stroke-width="3"/><polyline points="65.00,50.00 70.05,79.40 75.10,105.48 80.15,128.60 85.20,149.12 90.25,167.31 95.30,183.44 100.35,197.76 105.40,210.45 110.45,221.71 115.50,231.69 120.55,240.54 125.60,248.40 130.65,255.36 135.70,261.54 140.75,267.02 145.80,271.88 150.85,276.19 155.90,280.02 160.95,283.41 166.00,286.41 171.05,289.08 176.10,291.45 181.15,293.54 186.20,295.40 191.25,297.06 196.30,298.52 201.35,299.82 206.40,300.97 211.45,301.99 216.50,302.90 221.55,303.70 226.60,304.41 231.65,305.04 236.70,305.60 241.75,306.10 246.80,306.54 251.85,306.93 256.90,307.28 261.95,307.59 267.00,307.86 272.05,308.10 277.10,308.32 282.15,308.51 287.20,308.68 292.25,308.83 297.30,308.96 302.35,309.08 307.40,309.18 312.45,309.27 317.50,309.36 322.55,309.43 327.60,309.49 332.65,309.55 337.70,309.60 342.75,309.65 347.80,309.69 352.85,309.72 357.90,309.75 362.95,309.78 368.00,309.81 373.05,309.83 378.10,309.85 383.15,309.86 388.20,309.88 393.25,309.89 398.30,309.91 403.35,309.92 408.40,309.93 413.45,309.93 418.50,309.94 423.55,309.95 428.60,309.95 433.65,309.96 438.70,309.96 443.75,309.97 448.80,309.97 453.85,309.97 458.90,309.98 463.95,309.98 469.00,309.98 474.05,309.98 479.10,309.99 484.15,309.99 489.20,309.99 494.25,309.99 499.30,309.99 504.35,309.99 509.40,309.99 514.45,309.99 519.50,309.99 524.55,310.00 529.60,310.00 534.65,310.00 539.70,310.00 544.75,310.00 549.80,310.00 554.85,310.00 559.90,310.00 564.95,310.00 570.00,310.00" fill="none" stroke="var(--secondary)" stroke-width="3" stroke-dasharray="8 5"/><text x="80" y="28" text-anchor="start" fill="currentColor" font-family="Arial, sans-serif" font-size="18">Normalized amplitude</text><text x="320" y="375" text-anchor="middle" fill="currentColor" font-family="Arial, sans-serif" font-size="18">Time / τ₁</text><line x1="350" y1="72" x2="385" y2="72" stroke="var(--accent)" stroke-width="3"/><text x="398" y="78" text-anchor="start" fill="currentColor" font-family="Arial, sans-serif" font-size="18">mode 1</text><line x1="350" y1="104" x2="385" y2="104" stroke="var(--secondary)" stroke-width="3" stroke-dasharray="8 5"/><text x="398" y="110" text-anchor="start" fill="currentColor" font-family="Arial, sans-serif" font-size="18">mode 2</text></svg>
+  <p class="caption" style="position: absolute; left: 3090px; top: 1400px; width: 1200px">Normalized mode amplitudes. Time is measured in the lifetime of the first mode, τ₁ = 1/(Dk₁²).</p>
+  <h2 style="position: absolute; left: 3090px; top: 1820px; width: 1200px">What this does not show</h2>
+  <p style="position: absolute; left: 3090px; top: 1950px; width: 1200px">Variable diffusivity, boundaries and nonlinear coupling can change this picture. Test those assumptions before interpreting measured data.</p>
+  <p class="kicker" style="position: absolute; left: 3090px; top: 2430px; width: 1200px">Background</p>
+  <p class="footer" style="position: absolute; left: 3090px; top: 2510px; width: 1200px"><a href="https://doi.org/10.1017/CBO9781139086967">J. R. Cannon, The One-Dimensional Heat Equation (1984)</a></p>
+  <div class="decoration" style="position: absolute; left: 151px; top: 2960px; width: 4190px; height: 2px; background: var(--accent)"></div>
+  <p class="footer" style="position: absolute; left: 151px; top: 3010px; width: 4190px">Your Name · Department / Institution · Conference / Year</p>
+</section>
+</body>
+</html>

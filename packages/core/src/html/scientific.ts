@@ -1,8 +1,10 @@
 /**
- * Original, self-contained scientific HTML templates. MIT licensed (see the generated source).
- * BetterPoster follows Mike Morrison's finding-first communication idea; no third-party theme
- * code, logos, figures, fonts or research results are bundled. All plotted data are analytical.
+ * Editable adaptations of published BetterPoster layouts and open Beamer themes.
+ * Source geometry, colours, attribution and license are recorded with each design.
+ * Example figures are our own analytical illustrations, replacing third-party example artwork.
  */
+import { mitPosterObjects } from './scientific-posters.ts';
+import { TEMPLATE_FONTS, TEMPLATE_FONT_LICENSE } from './scientific-fonts.ts';
 export type ScientificKind = 'deck' | 'poster';
 export interface ScientificTemplate {
   id: string;
@@ -17,15 +19,18 @@ export interface ScientificTemplate {
   ink: string;
   accent: string;
   muted: string;
+  source: string;
+  author: string;
+  license: string;
 }
 
 export const SCIENTIFIC_TEMPLATES: readonly ScientificTemplate[] = [
-  { id: 'betterposter', kind: 'poster', name: 'BetterPoster', description: 'One large takeaway, with methods and evidence at the sides.', size: 'A0 landscape', width: 1189, height: 841, exampleTitle: 'Diffusion erases small patterns first', background: '#ffffff', ink: '#153735', accent: '#126b60', muted: '#50645f' },
-  { id: 'figure-first', kind: 'poster', name: 'Figure first', description: 'A large phase portrait, short captions and a clear reading path.', size: 'A0 landscape', width: 1189, height: 841, exampleTitle: 'Damping turns cycles into stable states', background: '#faf8f2', ink: '#302f39', accent: '#9d4935', muted: '#66616a' },
-  { id: 'research-portrait', kind: 'poster', name: 'Research portrait', description: 'Two columns for a question, model, results and limitations.', size: 'A0 portrait', width: 841, height: 1189, exampleTitle: 'Calibration is more than a single score', background: '#ffffff', ink: '#242e47', accent: '#4355a0', muted: '#596278' },
-  { id: 'research', kind: 'deck', name: 'Minimal research', description: 'Light, spacious slides with a large plot and one claim per slide.', size: '16:9 · 5 slides', width: 1280, height: 720, exampleTitle: 'Diffusion across spatial scales', background: '#ffffff', ink: '#193833', accent: '#126b60', muted: '#526861' },
-  { id: 'dark-seminar', kind: 'deck', name: 'Dark seminar', description: 'A dark canvas, bright trajectories and a technical model walkthrough.', size: '16:9 · 5 slides', width: 1280, height: 720, exampleTitle: 'Stability in two dimensions', background: '#14232e', ink: '#f3f5f4', accent: '#7de2cf', muted: '#b4c7cf' },
-  { id: 'serif-colloquium', kind: 'deck', name: 'Serif colloquium', description: 'Warm paper, serif titles, an analytical argument and discussion.', size: '4:3 · 5 slides', width: 1200, height: 900, exampleTitle: 'What a calibrated forecast tells us', background: '#faf7ef', ink: '#342e28', accent: '#9a4434', muted: '#6a6055' },
+  { id: 'betterposter', kind: 'poster', name: 'MIT EvenBetter landscape', description: 'The published 48 × 36 in PowerPoint layout: graphical-abstract sidebar, take-home band and four figure panels.', size: '48 × 36 in · landscape', width: 1219.2, height: 914.4, exampleTitle: 'Diffusion erases small patterns first', background: '#ffffff', ink: '#111111', accent: '#317f59', muted: '#565656', source: 'https://mit-becl.github.io/Poster_Resources/PowerPoint_Templates/', author: 'MIT Biological Engineering Communication Lab', license: 'CC0-1.0' },
+  { id: 'figure-first', kind: 'poster', name: 'MIT EvenBetter figure sketch', description: 'The published Illustrator landscape sketch, including its numbered figures, green graphical abstract and footer blocks.', size: '48 × 36 in · landscape', width: 1219.2, height: 914.4, exampleTitle: 'Damping stabilizes oscillations', background: '#ffffff', ink: '#111111', accent: '#317f59', muted: '#565656', source: 'https://mit-becl.github.io/Poster_Resources/Illustrator_Templates/', author: 'Charlie Hirst and the MIT BE Communication Lab', license: 'CC0-1.0' },
+  { id: 'research-portrait', kind: 'poster', name: 'MIT EvenBetter portrait', description: 'The published 36 × 48 in PowerPoint layout: title, wide graphical abstract, takeaway band and a two-column evidence grid.', size: '36 × 48 in · portrait', width: 914.4, height: 1219.2, exampleTitle: 'Calibration is more than a single score', background: '#ffffff', ink: '#111111', accent: '#317f59', muted: '#565656', source: 'https://mit-becl.github.io/Poster_Resources/PowerPoint_Templates/', author: 'MIT Biological Engineering Communication Lab', license: 'CC0-1.0' },
+  { id: 'research', kind: 'deck', name: 'Metropolis', description: 'Fira Sans, dark-teal frame titles, an orange title separator and light slides.', size: '16:9 · 5 slides', width: 1280, height: 720, exampleTitle: 'Diffusion across spatial scales', background: '#fafafa', ink: '#23373b', accent: '#eb811b', muted: '#55676a', source: 'https://github.com/matze/mtheme', author: 'Matthias Vogelgesang and contributors', license: 'CC-BY-SA-4.0' },
+  { id: 'dark-seminar', kind: 'deck', name: 'Focus', description: 'The original charcoal-and-grey theme: split title page, small caps and a numbered progress bar.', size: '16:9 · 5 slides', width: 1280, height: 720, exampleTitle: 'Stability in two dimensions', background: '#efefef', ink: '#404040', accent: '#404040', muted: '#666666', source: 'https://github.com/pcafrica/focus-beamertheme', author: 'Pasquale Claudio Africa and contributors', license: 'GPL-3.0-or-later' },
+  { id: 'serif-colloquium', kind: 'deck', name: 'CambridgeUS', description: 'Classic Beamer: Computer Modern Sans, red-and-grey navigation bands and a three-part footer.', size: '4:3 · 5 slides', width: 1200, height: 900, exampleTitle: 'What a calibrated forecast tells us', background: '#ffffff', ink: '#000000', accent: '#cc0000', muted: '#595959', source: 'https://github.com/josephwright/beamer/blob/main/base/themes/theme/beamerthemeCambridgeUS.sty', author: 'Madhusudan Singh and the Beamer contributors', license: 'GPL-3.0-or-later' },
 ];
 
 export function scientificTemplate(kind: ScientificKind, id?: string): ScientificTemplate {
@@ -35,28 +40,6 @@ export function scientificTemplate(kind: ScientificKind, id?: string): Scientifi
 }
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-const license = `MIT License
-
-Copyright (c) 2026 OverLyX contributors
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.`;
-
 /** Every text block and figure is a direct, freely editable child of the slide. */
 function object(tag: string, x: number, y: number, w: number, content: string, extra = '', cls = ''): string {
   return `  <${tag}${cls ? ` class="${cls}"` : ''} style="position: absolute; left: ${x}px; top: ${y}px; width: ${w}px${extra ? '; ' + extra : ''}">${content}</${tag}>`;
@@ -98,31 +81,47 @@ function chart(type: 'decay' | 'phase' | 'calibration', x: number, y: number, w:
   return `  <svg role="img" aria-label="${label}" viewBox="0 0 600 400" style="position: absolute; left: ${x}px; top: ${y}px; width: ${w}px; height: ${h}px">${content}</svg>`;
 }
 
-function document(t: ScientificTemplate, title: string, pages: string[]): string {
+function document(t: ScientificTemplate, title: string, pages: string[], css = ''): string {
   const poster = t.kind === 'poster';
-  const serif = t.id === 'serif-colloquium' || t.id === 'figure-first';
+  const font = poster ? 'Carlito' : t.id === 'serif-colloquium' ? 'CMU Sans' : 'Fira Sans';
   return `<!doctype html>
 <!--
-${license}
-
-Design: ${t.name}. ${t.id === 'betterposter' ? 'Inspired by Mike Morrison’s BetterPoster project: https://osf.io/6ua4k/ (independent HTML implementation).' : 'Original OverLyX scientific template.'}
+Design: ${t.name}
+Original authors: ${t.author}
+Source: ${t.source}
+Template license: ${t.license}
+Editable HTML adaptation by OverLyX contributors, 2026.
+Changes: replaced placeholder content with analytical examples; retained the source layout,
+panel proportions, colours and hierarchy. MIT's Calibri is replaced by its metric-compatible open Carlito.
+No MIT logos, identities, or third-party example artwork are included.
+Metropolis: copyright 2014-2017 Matthias Vogelgesang and contributors, CC BY-SA 4.0,
+https://creativecommons.org/licenses/by-sa/4.0/ (applies to the Metropolis adaptation).
+Focus: copyright 2018-2024 Pasquale Claudio Africa and contributors, GPL v3 or later,
+https://www.gnu.org/licenses/gpl-3.0.html (applies to the Focus adaptation).
+CambridgeUS: copyright 2004 Madhusudan Singh and the Beamer contributors, GPL v3 or later
+(upstream GPL/LPPL dual license; applies to the CambridgeUS adaptation).
+MIT poster templates: CC0 1.0, https://github.com/MIT-BECL/Poster_Resources/blob/master/License-Templates
+Carlito, Fira Sans and CMU Sans fonts: SIL Open Font License 1.1, https://openfontlicense.org/
 All plots are generated from the analytical functions described in the captions.
 These are teaching examples, not experimental measurements or published research results.
+
+${TEMPLATE_FONT_LICENSE}
 -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="overlyx" content="${t.kind}">
 <meta name="overlyx-template" content="${t.id}">
-<meta name="license" content="MIT">
+<meta name="license" content="${t.license}">
 <title>${esc(title)}</title>
 <style>
+  ${TEMPLATE_FONTS[font]}
   :root { --paper: ${t.background}; --ink: ${t.ink}; --accent: ${t.accent}; --muted: ${t.muted}; --secondary: ${t.id === 'dark-seminar' ? '#f1be75' : '#bc6747'}; }
   * { box-sizing: border-box; }
-  body { margin: 0; background: #dce0e4; color: var(--ink); font-family: Arial, Helvetica, sans-serif; }
+  body { margin: 0; background: #dce0e4; color: var(--ink); font-family: "${font}", Arial, Helvetica, sans-serif; }
   .slide { width: ${t.width}${poster ? 'mm' : 'px'}; height: ${t.height}${poster ? 'mm' : 'px'}; position: relative; overflow: hidden; background: var(--paper); margin: 0 auto ${poster ? '0' : '40px'}; }
   h1, h2, h3, p { margin: 0; }
-  h1, h2 { font-family: ${serif ? 'Georgia, "Times New Roman", serif' : 'Arial, Helvetica, sans-serif'}; font-weight: ${serif ? '400' : '600'}; }
+  h1, h2 { font-family: inherit; font-weight: 700; }
   h1 { font-size: ${poster ? '142' : '64'}px; line-height: 1.08; letter-spacing: -.025em; overflow-wrap: anywhere; }
   h2 { font-size: ${poster ? '70' : '42'}px; line-height: 1.14; letter-spacing: -.015em; }
   p { font-size: ${poster ? '42' : '26'}px; line-height: 1.45; }
@@ -134,9 +133,10 @@ These are teaching examples, not experimental measurements or published research
   .notes { display: none; }
   a { color: inherit; text-underline-offset: .18em; }
   @media print { @page { size: ${t.width}${poster ? 'mm' : 'px'} ${t.height}${poster ? 'mm' : 'px'}; margin: 0; } body { background: none; } .slide { margin: 0; break-after: page; break-inside: avoid; print-color-adjust: exact; -webkit-print-color-adjust: exact; } .slide:last-of-type { break-after: auto; } }
+${css}
 </style>
 </head>
-<body data-ol-layout-margins="${poster ? '40mm' : '72px 96px'}">
+<body data-ol-layout-margins="${poster ? t.id === 'research-portrait' ? '1in' : '0.5in' : t.id === 'research' ? '84px 80px 48px' : t.id === 'dark-seminar' ? '84px 60px 36px' : '128px 36px 40px'}">
 ${pages.map(page => `<section class="slide">\n${page}\n</section>`).join('\n\n')}
 </body>
 </html>
@@ -148,82 +148,7 @@ const calibrationReference = '<a href="https://doi.org/10.1175/1520-0493(1950)07
 
 export function scientificPoster(title = '', id?: string): string {
   const t = scientificTemplate('poster', id);
-  const name = esc(title || t.exampleTitle);
-  const byline = 'Your Name · Department / Institution · Conference / Year';
-  let objects: string[];
-  if (t.id === 'betterposter') {
-    // A0 landscape, three zones: a deliberately dominant finding and two supporting sidebars.
-    objects = [
-      rule(1250, 151, 1730, 'var(--accent)', 2700),
-      object('h1', 1370, 480, 1490, name, 'color: #ffffff; font-size: 162px'),
-      p(151, 160, 1010, 'Analytical model · Open methods', 'kicker'),
-      heading(151, 250, 1000, 'The question'),
-      p(151, 370, 970, 'How quickly does a spatial pattern disappear when its components diffuse?'),
-      heading(151, 720, 980, 'The model'),
-      p(151, 840, 970, 'A one-dimensional field on a periodic domain. Constant diffusivity D; no forcing or advection.'),
-      equation(151, 1170, 970, String.raw`\partial_t u = D\,\partial_{xx}u`),
-      p(151, 1490, 970, 'Each Fourier mode evolves independently. Its spatial frequency sets its decay rate.'),
-      equation(151, 1810, 970, String.raw`A_k(t)=A_k(0)e^{-Dk^2t}`),
-      p(151, 2190, 970, 'Reproduce the figure', 'kicker'),
-      p(151, 2270, 970, 'Plot exp(−s) and exp(−4s) for s from 0 to 3. Both start at unit amplitude. No fitted parameters.'),
-      p(1370, 290, 1490, 'The main finding', 'kicker', 'color: #d8f0e8'),
-      p(1370, 1300, 1490, 'Double the spatial frequency.<br>Four times faster decay.', '', 'color: #ffffff; font-size: 90px; line-height: 1.2'),
-      p(1370, 1970, 1490, 'Small-scale structure smooths out before large-scale structure.', '', 'color: #e2f1ec; font-size: 60px'),
-      p(1370, 2540, 1490, 'Analytical teaching example · not measured data', 'caption', 'color: #e2f1ec'),
-      p(3090, 160, 1250, '01 / Evidence', 'kicker'),
-      heading(3090, 250, 1250, 'Same start, different lifetimes'),
-      chart('decay', 3060, 510, 1250, 850),
-      p(3090, 1400, 1200, 'Normalized mode amplitudes. Time is measured in the lifetime of the first mode, τ₁ = 1/(Dk₁²).', 'caption'),
-      heading(3090, 1820, 1200, 'What this does not show'),
-      p(3090, 1950, 1200, 'Variable diffusivity, boundaries and nonlinear coupling can change this picture. Test those assumptions before interpreting measured data.'),
-      p(3090, 2430, 1200, 'Background', 'kicker'),
-      p(3090, 2510, 1200, diffusionReference, 'footer'),
-      rule(151, 2960, 4190),
-      p(151, 3010, 4190, byline, 'footer'),
-    ];
-  } else if (t.id === 'figure-first') {
-    objects = [
-      p(151, 151, 4100, 'Dynamics / An analytical study', 'kicker'),
-      object('h1', 151, 270, 4100, name),
-      p(151, 650, 4100, byline, 'muted'),
-      rule(151, 800, 4190),
-      heading(151, 950, 2540, 'Three paths. One fixed point.'),
-      chart('phase', 151, 1160, 2550, 1400),
-      p(151, 2670, 2450, 'Exact trajectories: x₁ = e⁻ᵅᵗ cos(ωt + φ), x₂ = e⁻ᵅᵗ sin(ωt + φ). Three initial phases, identical damping; axes shown in arbitrary state units.', 'caption'),
-      p(2940, 950, 1370, '01 / Question', 'kicker'),
-      heading(2940, 1030, 1370, 'When do oscillations settle?'),
-      p(2940, 1260, 1370, 'Consider a linear system with rotation rate ω and damping α. The origin is a stable fixed point when α is positive.'),
-      equation(2940, 1600, 1370, String.raw`\dot{\mathbf{x}}=\begin{pmatrix}-\alpha&-\omega\\\omega&-\alpha\end{pmatrix}\mathbf{x}`),
-      p(2940, 1980, 1370, '02 / Interpretation', 'kicker'),
-      p(2940, 2070, 1370, 'The eigenvalues −α ± iω separate stability from oscillation. The envelope decays as e⁻ᵅᵗ; the angular frequency remains ω.'),
-      p(2940, 2460, 1370, '03 / Limitations', 'kicker'),
-      p(2940, 2550, 1370, 'A local linear model does not establish global stability in a nonlinear system.', 'caption'),
-      rule(151, 2960, 4190),
-      p(151, 3010, 4190, 'Analytical teaching example · Parameters: α = 1, ω = 17/3; 0 ≤ t ≤ 3 · No experimental data', 'footer'),
-    ];
-  } else {
-    objects = [
-      p(151, 151, 2850, 'Statistical methods / Analytical example', 'kicker'),
-      object('h1', 151, 280, 2850, name),
-      p(151, 800, 2850, byline, 'muted'),
-      rule(151, 970, 2875),
-      heading(151, 1110, 1320, '01 / The question'),
-      p(151, 1250, 1320, 'When a forecast assigns probability p, does the event occur with frequency p? Reliability diagrams inspect this relationship directly.'),
-      heading(1690, 1110, 1320, '02 / Definition'),
-      equation(1690, 1310, 1320, String.raw`\mathbb{E}[Y\mid P=p]=p`),
-      p(1690, 1580, 1320, 'Y is a binary outcome. P is its predicted probability. Calibration describes agreement, rather than how sharp the forecasts are.'),
-      heading(151, 1930, 2850, '03 / Inspect the whole curve'),
-      chart('calibration', 300, 2110, 2510, 1450),
-      p(151, 3600, 2850, 'Analytical curves, not estimated data. The dashed identity is perfect calibration; the solid curve illustrates an underconfident forecast, with event frequency √p.', 'caption'),
-      heading(151, 3900, 1320, '04 / Report uncertainty'),
-      p(151, 4040, 1320, 'With measured data, show bin counts and uncertainty intervals. Sparse bins can make an apparently smooth curve misleading.'),
-      heading(1690, 3900, 1320, '05 / Go beyond calibration'),
-      p(1690, 4040, 1320, 'A constant forecast at the base rate can be calibrated. Report discrimination and a proper score alongside reliability.'),
-      rule(151, 4330, 2875),
-      p(151, 4370, 2875, calibrationReference, 'footer'),
-    ];
-  }
-  return document(t, title || t.exampleTitle, [objects.join('\n')]);
+  return document(t, title || t.exampleTitle, [mitPosterObjects(t, title, chart).join('\n')]);
 }
 
 export function scientificDeck(title = '', id?: string): string {
@@ -233,20 +158,46 @@ export function scientificDeck(title = '', id?: string): string {
   const dark = t.id === 'dark-seminar';
   const right = t.width - 96;
   const wide = t.width - 192;
-  const footerY = t.height - 54;
-  const foot = (n: number) => p(96, footerY, wide, `Analytical teaching example <span style="float: right">${String(n).padStart(2, '0')} / 05</span>`, 'footer');
-  const section = (n: number, label: string, head: string, objects: string[], notes: string) => [p(96, 66, wide, label, 'kicker'), heading(96, 112, wide, head), ...objects, foot(n), `<aside class="notes">${notes}</aside>`].join('\n');
-  const pages = [
-    [
-      rule(96, 155, 80, 'var(--accent)', 5),
-      p(96, 200, wide, dark ? 'Dynamical systems / Research seminar' : serif ? 'Probability / Colloquium' : 'Transport / Research talk', 'kicker'),
-      object('h1', 96, 270, wide, name),
-      p(96, serif ? 565 : 500, wide, 'Your Name · Department / Institution', 'muted'),
-      p(96, serif ? 620 : 545, wide, 'Conference / Seminar · Date', 'caption'),
-      foot(1),
-      '<aside class="notes">State the scientific question and define the scope. All plots in this deck are analytical illustrations. Replace the example with your own study, including evidence and uncertainty.</aside>',
-    ].join('\n'),
+  const foot = (n: number): string => serif ? [
+    rule(0, 870, 400, '#a30000', 30), rule(400, 870, 400, '#ececec', 30), rule(800, 870, 400, '#d9d9d9', 30),
+    p(18, 874, 370, 'Your Name (Institution)', 'footer', 'color: #ffffff; text-align: center; font-size: 20px'),
+    p(414, 874, 370, 'Scientific presentation', 'footer', 'color: #8f0000; text-align: center; font-size: 20px'),
+    p(818, 874, 365, `Conference / Date <span style="float: right">${n} / 5</span>`, 'footer', 'color: #7a0000; font-size: 20px'),
+  ].join('\n') : dark ? n === 1 ? '' : [
+    rule(0, 692, n === 5 ? 1280 : 40 + 1200 * (n - 1) / 4, '#404040', 28),
+    p(n === 5 ? 1198 : 40 + 1200 * (n - 1) / 4 - 34, 696, n === 5 ? 70 : 24, n === 5 ? '4 / 4' : String(n - 1), 'footer', 'color: #efefef; text-align: right'),
+    ...(n < 5 ? [rule(1240, 692, 40, '#404040', 28), p(1245, 696, 24, '4', 'footer', 'color: #efefef')] : []),
+  ].join('\n') : p(1175, 672, 72, String(n), 'footer', 'text-align: right; font-weight: 300');
+  const navigation = (label: string) => [rule(0, 0, 600, '#a30000', 36), rule(600, 0, 600, '#d9d9d9', 36), p(30, 4, 540, 'Research', 'footer', 'color: white; text-align: right; font-size: 22px'), p(620, 4, 540, esc(label.replace(/^.*?\/ /, '')), 'footer', 'color: #7a0000; font-size: 22px')];
+  const section = (n: number, label: string, head: string, objects: string[], notes: string) => [
+    ...(serif ? [...navigation(label), rule(0, 36, 1200, '#f2f2f2', 92), object('h2', 30, 60, 1140, head, 'color: #cc0000; font-size: 44px; font-weight: 400')]
+      : [rule(0, 0, 1280, dark ? '#404040' : '#23373b', 84), object('h2', dark ? 60 : 30, dark ? 6 : 22, dark ? 1160 : 1220, head, `color: ${dark ? '#efefef' : '#fafafa'}; font-size: ${dark ? 40 : 36}px; font-weight: 400${dark ? '; font-variant-caps: small-caps' : ''}`)]),
+    ...objects, foot(n), `<aside class="notes">${notes}</aside>`,
+  ].join('\n');
+  const titleObjects = serif ? [
+    ...navigation(''),
+    object('div', 36, 228, 1128, '', 'height: 170px; background: white; border-radius: 0 0 16px 16px; box-shadow: 6px 8px 6px #0006', 'decoration'),
+    object('h1', 60, 260, 1080, name, 'font-size: 46px; font-weight: 400; color: #cc0000; text-align: center'),
+    p(60, 340, 1080, 'A scientific colloquium', '', 'font-size: 34px; color: #cc0000; text-align: center'),
+    p(60, 455, 1080, 'Your Name', '', 'font-size: 36px; text-align: center'),
+    p(60, 540, 1080, 'Department / Institution', '', 'font-size: 30px; text-align: center'),
+    p(60, 625, 1080, 'Conference / Date', '', 'font-size: 36px; text-align: center'), foot(1),
+  ] : dark ? [
+    rule(0, 0, 1280, '#404040', 324),
+    object('h1', 60, 178, 1160, name, 'font-size: 58px; color: #efefef; font-variant-caps: small-caps'),
+    p(60, 255, 1160, 'A research seminar', '', 'font-size: 40px; color: #efefef; font-variant-caps: small-caps'),
+    p(60, 340, 1160, 'Your Name', '', 'font-size: 40px; font-variant-caps: small-caps'),
+    p(60, 427, 1160, 'Department / Institution', '', 'font-size: 34px; font-variant-caps: small-caps'),
+    p(60, 504, 1160, 'Conference / Date', '', 'font-size: 34px; font-variant-caps: small-caps'),
+  ] : [
+    object('h1', 80, 182, 1120, name, 'font-size: 42px; font-weight: 400'),
+    p(80, 255, 1120, 'A scientific research talk', '', 'font-size: 34px; font-weight: 300'),
+    rule(80, 337, 1120, '#eb811b', 1),
+    p(80, 414, 1120, 'Your Name', '', 'font-size: 28px; font-weight: 300'),
+    p(80, 460, 1120, 'Conference / Date', '', 'font-size: 28px; font-weight: 300'),
+    p(80, 518, 1120, 'Department / Institution', '', 'font-size: 24px; font-weight: 300'), foot(1),
   ];
+  const pages = [titleObjects.join('\n')];
   if (dark) {
     pages.push(section(2, '01 / Model', 'Rotation and damping are separate ingredients', [
       p(96, 230, 480, 'A two-dimensional state evolves under a constant linear operator. Damping α controls the envelope; ω sets the rotation rate.'),
@@ -303,7 +254,7 @@ export function scientificDeck(title = '', id?: string): string {
     pages.push(section(3, '02 / Result', 'Double the frequency. Four times faster decay.', [
       chart('decay', 96, 215, 720, 415),
       equation(850, 265, 335, String.raw`\tau_k=\frac{1}{Dk^2}`),
-      p(850, 425, 335, 'Small-scale structure disappears first.', '', 'color: var(--accent)'),
+      p(850, 425, 335, 'Small-scale structure disappears first.'),
     ], 'The curves show exp(−s) and exp(−4s), with s = t/τ₁. Both modes start at unit amplitude.'));
     pages.push(section(4, '03 / Scope', 'The conclusion depends on the model assumptions', [
       heading(96, 245, 490, 'What follows'),
@@ -320,5 +271,8 @@ export function scientificDeck(title = '', id?: string): string {
       p(96, 555, wide, diffusionReference, 'caption'),
     ], 'Close with the single result. The plot has no fitted parameters; all functions and the sampling grid are given on the slide.'));
   }
-  return document(t, title || t.exampleTitle, pages);
+  return document(t, title || t.exampleTitle, pages, t.id === 'research'
+    ? '.slide p { font-weight: 300; } .slide h2 { font-weight: 400; }'
+    : serif ? '.slide p { font-size: 32px; } .slide .caption, .slide .footer { font-size: 22px; } .slide h2 { font-weight: 400; }'
+      : '.slide p { font-size: 28px; } .slide .caption { font-size: 20px; } .slide .footer { font-size: 20px; }');
 }

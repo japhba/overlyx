@@ -163,7 +163,9 @@ export function guideParts(slide: HTMLElement | null): string {
 
 /** (the overlay's styles: edit.ts) */
 export const GUIDES_CSS = `
-  .uguide { position: absolute; pointer-events: none; box-sizing: border-box; }
+  /* Reset all four widths before a guide's border style is set: otherwise the unused opposite
+     border gets CSS's default medium width and draws a second line beside the intended one. */
+  .uguide { position: absolute; pointer-events: none; box-sizing: border-box; border: 0 solid transparent; }
   .uguide.x { width: 0; border-left: calc(1px * var(--s)) solid; }
   .uguide.y { height: 0; border-top: calc(1px * var(--s)) solid; }
   .uguide.master { border-color: #e8833a; border-style: dashed; }

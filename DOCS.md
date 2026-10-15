@@ -68,16 +68,30 @@ blend.
   a "+ New project" prompt that left newcomers looking for where slides come from. A project without
   documents (`ProjectRootPanel`) offers *+ New document*, *+ New slides* and *+ New poster*.
   Slides and posters offer three open scientific styles each, also available in File ▸ New:
-  BetterPoster (A0 landscape, finding first), Figure first (A0 landscape), Research portrait (A0),
-  Minimal research (16:9), Dark seminar (16:9), and Serif colloquium (4:3). The original HTML
-  templates are MIT licensed, contain analytical teaching examples, and need no external fonts,
-  images or theme packages. BetterPoster credits Mike Morrison's communication approach.
-  `core/src/html/scientific.ts` is their shared source; `npx tsx scripts/gen-scientific-starters.ts`
+  MIT EvenBetter landscape (48 × 36 in PowerPoint), MIT EvenBetter figure sketch (48 × 36 in
+  Illustrator), MIT EvenBetter portrait (36 × 48 in PowerPoint), Metropolis (16:9), Focus (16:9)
+  and CambridgeUS (4:3). Posters reproduce the published bands, figure panels, colours and
+  typography from [MIT BE Communication Lab's EvenBetterPoster resources](https://github.com/MIT-BECL/Poster_Resources)
+  (CC0-1.0, `License-Templates`), described in [their article](https://mitcommlab.mit.edu/be/2023/09/27/toward-an-evenbetterposter-improving-the-betterposter-template/).
+  Slides reproduce [Metropolis](https://github.com/matze/mtheme) (CC BY-SA 4.0),
+  [Focus](https://github.com/pcafrica/focus-beamertheme) and
+  [CambridgeUS](https://github.com/josephwright/beamer/blob/main/base/themes/theme/beamerthemeCambridgeUS.sty)
+  (GPL v3 or later). Every HTML file credits its source and license. Analytical teaching examples
+  replace source placeholder artwork; there are no MIT logos or copied research results.
+  Bundled open fonts (Carlito, Fira Sans and CMU Sans, SIL OFL) make each HTML file portable;
+  Carlito replaces the posters' Calibri with matching metrics. `scripts/gen-template-fonts.py`
+  regenerates their embedded font faces. `core/src/html/scientific.ts` and `scientific-posters.ts`
+  are the shared source; `npx tsx scripts/gen-scientific-starters.ts`
   refreshes the six files in `templates/starters/web` (`--previews` also renders chooser thumbnails
   using the built runtime). On startup, registered old HTML starters whose text, equations,
   figures and styling still match the shipped example (allowing whitespace, author-placeholder
   and guide changes) are refreshed, with the previous source kept in version history. Meaningfully
   edited files and deleted projects or documents are preserved; new variants never overwrite a folder.
+  Baselines in `templates/starters-legacy` cover both the original web examples and the first
+  scientific release. Deleted variants are not recreated during a scientific-to-scientific refresh.
+  Real poster references include MIT's [annotated acetate-metabolism poster](https://github.com/MIT-BECL/Poster_Resources/blob/master/Annotated_Examples/48x36_Vertical_Example_withAnnotations.pdf),
+  [four annotated undergraduate posters](https://mitcommlab.mit.edu/be/wp-content/uploads/sites/2/2016/08/Annotated-Undergraduate-Poster-Examples-2024.pdf)
+  and [bend-forming space structures](https://mitcommlab.mit.edu/aeroastro/wp-content/uploads/sites/11/2025/10/Research-Poster-Annotated-Example-1.pdf).
 * **The start page** lists the user's projects, then those shared with them, each most recent first:
   the later of when they last opened a document of it (`user_doc_state` *opened*, every open; the
   activity log for older history) and when a file of it last changed; the card says which
@@ -423,8 +437,9 @@ blend.
   in `server/access.ts`): *Example: beamer slides* (`<user>/example-slides`, an ordinary linear beamer
   deck that demos frames, `[<+->]`, `\item<2->`, `\pause`, `\only` / `\uncover` / `\alert` / `\alt`,
   columns, blocks, a theorem, a figure, a table and speaker notes, and says how to present it),
-  *Example: slides, poster and web page* (`example-web`: HTML deliverables — `talk/`, a six-slide talk
-  on why the sky is blue with SVG drawings, a plot and formulas; `poster/`, an A0 poster on the same;
+  *Example: scientific slides and posters* (`example-web`: HTML deliverables — `talk/`, a five-slide
+  Metropolis talk on diffusion; `poster/`, MIT's 48 × 36 in landscape layout with analytical figures;
+  two more slide themes and two more MIT poster layouts, as described above;
   `site/`, a project page) and
   *Example: paper* (`example-paper`, an article with equations and cross-references, a theorem and
   proof, a figure, a table and natbib citations from `refs.bib`); the author is "Your Name" (the
@@ -438,7 +453,8 @@ blend.
   LaTeX starters from `scripts/starters-src/` through OverLyX's own parser and writer, so they are in
   the canonical form and opening or saving one changes nothing; `--figures` recompiles the
   pgfplots/TikZ figures reproducibly, and naming starters (`… gen-starters.ts paper`) regenerates only
-  those. The HTML example is written by hand (`templates/starters/web/`). `tests/starters.test.ts`
+  those. The HTML scientific examples are generated by `scripts/gen-scientific-starters.ts`;
+  the web page remains hand-written (`templates/starters/web/site/`). `tests/starters.test.ts`
   checks the seeding, the canonical form and that the LaTeX ones compile.
 * **Interactive tour** (`packages/client/src/app/Tour.tsx`): on the first visit (once per browser,
   `localStorage.ol.tour`) OverLyX offers a three-minute hands-on walkthrough that opens the example

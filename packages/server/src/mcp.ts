@@ -722,7 +722,7 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
   }, async ({ project: p, path }) => { try { return ok(buildStatus(need(p, 'view'), path)); } catch (e) { return fail(e); } });
 
   register('create_deliverable', {
-    description: 'Start a slide deck, a poster or a web page: a new folder with an index.html. Posters: betterposter (default, A0 landscape), figure-first (A0 landscape), research-portrait (A0 portrait). Decks: research (default, 16:9), dark-seminar (16:9), serif-colloquium (4:3). These are open MIT-licensed scientific examples; restyle or rewrite them completely. Then edit with read_file / edit_file / write_file and look with render_page.\n\n' + DELIVERABLE_GUIDE,
+    description: 'Start a slide deck, a poster or a web page: a new folder with an index.html. Posters reproduce MIT BE Communication Lab\'s CC0 EvenBetterPoster source layouts: betterposter (48x36 in landscape), figure-first (48x36 in Illustrator figure sketch), research-portrait (36x48 in portrait). Decks reproduce published open Beamer themes: research (Metropolis, 16:9, CC BY-SA 4.0), dark-seminar (Focus, 16:9, GPL v3+), serif-colloquium (CambridgeUS, 4:3, GPL v3+). The historical ids remain compatible. Every source includes attribution and license. Restyle or rewrite freely within the source license, then render_page to look.\n\n' + DELIVERABLE_GUIDE,
     inputSchema: {
       ...projArg,
       folder: z.string().describe('The new folder, project-relative, e.g. "talk" or "posters/neurips"'),

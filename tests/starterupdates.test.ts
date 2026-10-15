@@ -60,6 +60,7 @@ describe('scientific starter refresh', () => {
     const versions = db.prepare('SELECT lyx,kind FROM versions WHERE doc_id=?').all(project + '/talk/index.html');
     expect(versions).toEqual([{ lyx: original('talk'), kind: 'manual' }]);
     expect(refreshScientificStarters().updated).toEqual([]);
+    rmSync(dir, { recursive: true });
   });
 
   it('preserves meaningful persisted edits, deleted files and deleted projects', () => {
@@ -76,5 +77,20 @@ describe('scientific starter refresh', () => {
     rmSync(dir, { recursive: true });
     expect(refreshScientificStarters().updated).toEqual([]);
     expect(existsSync(dir)).toBe(false);
+  });
+
+  it('upgrades pristine first-release scientific variants but keeps edited and deleted variants', () => {
+    const { dir } = seed('previous');
+    const previous = (folder: string) => readFileSync(join(templates, 'starters-legacy/scientific-v1', folder, 'index.html'), 'utf8');
+    for (const folder of ['talk', 'poster', 'talk-dark-seminar', 'poster-figure-first']) {
+      mkdirSync(join(dir, folder), { recursive: true });
+      writeFileSync(join(dir, folder, 'index.html'), previous(folder));
+    }
+    const changed = previous('talk-dark-seminar').replace('Stability in two dimensions', 'My own research');
+    writeFileSync(join(dir, 'talk-dark-seminar/index.html'), changed);
+    expect(refreshScientificStarters().updated).toHaveLength(3);
+    expect(readFileSync(join(dir, 'poster-figure-first/index.html'), 'utf8')).toBe(latest('poster-figure-first'));
+    expect(readFileSync(join(dir, 'talk-dark-seminar/index.html'), 'utf8')).toBe(changed);
+    expect(existsSync(join(dir, 'talk-serif-colloquium'))).toBe(false);
   });
 });

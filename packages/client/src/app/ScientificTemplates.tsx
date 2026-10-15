@@ -15,6 +15,6 @@ export function ScientificTemplates({ kind, value, onChange }: { kind: Scientifi
       </button>)}
     </div>
     <p class="dialog-hint">{selected.description}</p>
-    <p class="dialog-hint">Open templates · MIT license · Editable text, equations and vector figures.{selected.id === 'betterposter' && <> Inspired by <a href="https://osf.io/6ua4k/" target="_blank" rel="noopener noreferrer">Mike Morrison’s BetterPoster</a>.</>}</p>
+    <p class="dialog-hint">Editable adaptation of <a href={selected.source} target="_blank" rel="noopener noreferrer">{selected.kind === 'poster' ? 'MIT’s published template' : selected.name}</a> · {selected.license}.</p>
   </fieldset>;
 }

@@ -43,11 +43,11 @@ describe('guides', () => {
     expect(layoutMarginGuides('100px 100px 100px 100px 1px', 1280, 720)).toEqual([]);
   });
 
-  it('defines explicit safe areas in the starter deck and A0 poster, not in draggable guide data', () => {
+  it('defines source-template safe areas separately from draggable guide data', () => {
     const deck = starterDeck('A deck');
     const poster = starterPoster('A poster');
-    expect(deck).toContain('<body data-ol-layout-margins="72px 96px">');
-    expect(poster).toContain('<body data-ol-layout-margins="40mm">');
+    expect(deck).toContain('<body data-ol-layout-margins="84px 80px 48px">');
+    expect(poster).toContain('<body data-ol-layout-margins="0.5in">');
     expect(deck + poster).not.toContain('data-ol-guides');
   });
 
