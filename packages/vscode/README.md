@@ -41,6 +41,10 @@ reproduced byte for byte until you change them.
 - **PDF panel** (Ctrl+R): builds with your local `latexmk` next to the file, shows the PDF with
   build progress and log. SyncTeX both ways: Ctrl+Alt+J shows the cursor's place in the PDF,
   double-click in the PDF jumps to that place in the document.
+- **PDF files** open directly in the OverLyX PDF Viewer, using the same viewer as the website:
+  page navigation, Fit width / Fit content, zoom and pinch gestures, and smart dark pages.
+  Files refresh when they change on disk and work in remote workspaces. Use *Save a copy…*
+  to export a PDF, or *Open With… ▸ OverLyX PDF Viewer* to choose it explicitly.
 - **Comments & notes** live in the file as `%%` comment blocks (any other LaTeX tool ignores
   them); show them in the margin or the comments panel. Change tracking uses LyX's
   `\lyxadded`/`\lyxdeleted` macros.

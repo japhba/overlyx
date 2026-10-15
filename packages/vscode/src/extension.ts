@@ -15,6 +15,7 @@ import { DocSession } from './host/session.ts';
 import { OverlyxEditorProvider } from './host/editorProvider.ts';
 import { OutlineTree } from './host/outlineTree.ts';
 import { PdfPanels } from './host/pdfPanel.ts';
+import { PdfEditorProvider } from './host/pdfEditor.ts';
 import { resolveLayoutDir } from './host/lyxlib.ts';
 import { Updater, type CheckResult } from './host/updater.ts';
 import { registerTexSymbols } from './host/symbols.ts';
@@ -253,7 +254,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
     const abs = path.extname(resolved) ? resolved : resolved + '.tex';
     if (!fs.existsSync(abs)) { void vscode.window.showErrorMessage(`OverLyX: ${rel} does not exist`); return; }
     if (opts?.goto !== undefined || opts?.heading !== undefined) provider.navigateTo(`${registerRoot(root)}/${path.relative(root, abs)}`, { type: 'navigate', label: opts.goto, heading: opts.heading });
-    void vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(abs), abs.endsWith('.tex') ? 'overlyx.texEditor' : 'default', { preview: false, viewColumn: opts?.beside ? vscode.ViewColumn.Beside : vscode.ViewColumn.Active });
+    void vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(abs), /\.pdf$/i.test(abs) ? 'overlyx.pdfViewer' : abs.endsWith('.tex') ? 'overlyx.texEditor' : 'default', { preview: false, viewColumn: opts?.beside ? vscode.ViewColumn.Beside : vscode.ViewColumn.Active });
   };
 
   const provider = new OverlyxEditorProvider(context, registry, {
@@ -277,6 +278,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
   void vscode.commands.executeCommand('setContext', 'overlyx.active', false);
 
   context.subscriptions.push(
+    vscode.window.registerCustomEditorProvider('overlyx.pdfViewer', new PdfEditorProvider(context.extensionUri, bridgeBase, (error, area) => telemetry.report(error, area)), {
+      webviewOptions: { retainContextWhenHidden: true },
+      supportsMultipleEditorsPerDocument: true,
+    }),
     vscode.window.registerCustomEditorProvider('overlyx.texEditor', provider, {
       webviewOptions: { retainContextWhenHidden: true },
       supportsMultipleEditorsPerDocument: false,
@@ -299,6 +304,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
     vscode.commands.registerCommand('overlyx.openInOverlyx', (uri?: vscode.Uri) => {
       const target = uri ?? vscode.window.activeTextEditor?.document.uri;
       if (target) void vscode.commands.executeCommand('vscode.openWith', target, 'overlyx.texEditor');
+    }),
+    vscode.commands.registerCommand('overlyx.openPdf', (uri?: vscode.Uri) => {
+      const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+      const target = uri ?? (input instanceof vscode.TabInputText || input instanceof vscode.TabInputCustom ? input.uri : undefined);
+      if (target) void vscode.commands.executeCommand('vscode.openWith', target, 'overlyx.pdfViewer');
     }),
     // ⌘K (link), ⌘J (rewrite with AI), ⌘\ (clear formatting), ⌘B (bold), ⌘M / ⌘⇧M (formula), F5 (present slides) belong
     // to the editor in the webview, which handles them itself; bound here so that VS Code does not also start its ⌘K chord,

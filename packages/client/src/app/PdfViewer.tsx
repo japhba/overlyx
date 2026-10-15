@@ -96,7 +96,7 @@ const topsOf = (geo: Geo[]): number[] => {
   return out;
 };
 
-export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay }: { url: string; target?: PdfTarget | null; onSync?: (page: number, x: number, y: number) => void; toolbar?: ComponentChildren; hint?: string; busy?: boolean; overlay?: ComponentChildren }) {
+export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay, withCredentials = true }: { url: string; target?: PdfTarget | null; onSync?: (page: number, x: number, y: number) => void; toolbar?: ComponentChildren; hint?: string; busy?: boolean; overlay?: ComponentChildren; withCredentials?: boolean }) {
   const host = useRef<HTMLDivElement>(null);
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null);
   const [pages, setPages] = useState<PageInfo[]>([]);
@@ -176,7 +176,7 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay }:
   // load the document; the old one stays on screen until the new one is ready
   useEffect(() => {
     let cancelled = false;
-    const task = pdfjs.getDocument({ url, withCredentials: true, worker: worker(), ...(appleWebKit ? { isOffscreenCanvasSupported: false } : {}) });
+    const task = pdfjs.getDocument({ url, withCredentials, worker: worker(), ...(appleWebKit ? { isOffscreenCanvasSupported: false } : {}) });
     task.promise.then(async d => {
       if (cancelled) return;
       const infos: PageInfo[] = [];
@@ -191,7 +191,7 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay }:
     }).catch(e => { if (!cancelled) setError(String((e as Error).message ?? e)); });
     // a URL replaced before its document arrived is dropped; the shown one lives until its successor is up
     return () => { cancelled = true; if (shownTask.current !== task) void task.destroy(); };
-  }, [url]);
+  }, [url, withCredentials]);
   useEffect(() => () => {
     for (const s of rendered.current.values()) s.task?.cancel();
     for (const t of retired.current) void t.destroy();

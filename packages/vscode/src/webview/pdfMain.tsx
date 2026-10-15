@@ -5,7 +5,7 @@
  */
 import { G, vscode } from './globals';
 import { render } from 'preact';
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';   // the same build as PdfViewer (one GlobalWorkerOptions)
 import { api } from '@client/api';
 import { PdfViewer, type PdfTarget } from '@client/app/PdfViewer';
@@ -33,6 +33,24 @@ async function fixPdfWorker(): Promise<void> {
 }
 
 const PHASE: Record<string, string> = { queued: 'waiting for a free build slot', exporting: 'saving the document', compiling: 'running latexmk' };
+
+function PdfFileApp() {
+  const [url, setUrl] = useState(G.pdfUrl!);
+  useLayoutEffect(() => {
+    const onMsg = (ev: MessageEvent<HostToPdf>) => {
+      const m = ev.data;
+      if (m?.type === 'pdfFile') setUrl(m.url);
+      else if (m?.type === 'theme') setHostDark(m.dark);
+    };
+    window.addEventListener('message', onMsg);
+    return () => window.removeEventListener('message', onMsg);
+  }, []);
+  // VS Code's resource loader serves with wildcard CORS; these URLs need no cookies.
+  return <div class="pdf-tab" style="height:100vh"><PdfViewer url={url} withCredentials={false} toolbar={<>
+    <button class="small-btn" onClick={() => vscode.postMessage({ type: 'refreshPdf' })}>Refresh</button>
+    <button class="small-btn" onClick={() => vscode.postMessage({ type: 'savePdfCopy' })}>Save a copy…</button>
+  </>} /></div>;
+}
 
 function PdfApp() {
   const [pdf, setPdf] = useState<PdfState>({ url: null, log: '', busy: false, ok: null, warnings: [] });
@@ -107,6 +125,6 @@ function PdfApp() {
 }
 
 void fixPdfWorker().then(() => {
-  render(<PdfApp />, document.getElementById('app')!);
+  render(G.pdfUrl ? <PdfFileApp /> : <PdfApp />, document.getElementById('app')!);
   vscode.postMessage({ type: 'ready' });
 });

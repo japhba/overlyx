@@ -71,6 +71,7 @@ export type EditorToHost =
 /** host → PDF webview */
 export type HostToPdf =
   | { type: 'init'; docId: string; base: string; dark: boolean }
+  | { type: 'pdfFile'; url: string }
   | { type: 'syncTarget'; target: { page: number; x: number; y: number; w?: number; h?: number; seq: number } }
   | { type: 'theme'; dark: boolean }
   | { type: 'appearance'; appearance: Appearance };
@@ -78,6 +79,8 @@ export type HostToPdf =
 /** PDF webview → host */
 export type PdfToHost =
   | { type: 'ready' }
+  | { type: 'refreshPdf' }
+  | { type: 'savePdfCopy' }
   /** double-click in the PDF: inverse search at this point (PDF points from the page's top-left) */
   | { type: 'inverse'; page: number; x: number; y: number }
   | { type: 'notify'; text: string; kind?: 'info' | 'error'; stack?: string }

@@ -23,6 +23,12 @@
   "contributes": {
     "customEditors": [
       {
+        "viewType": "overlyx.pdfViewer",
+        "displayName": "OverLyX PDF Viewer",
+        "selector": [{ "filenamePattern": "*.pdf" }],
+        "priority": "default"
+      },
+      {
         "viewType": "overlyx.texEditor",
         "displayName": "OverLyX Editor",
         "selector": [
@@ -53,6 +59,12 @@
       }
     ],
     "commands": [
+      {
+        "command": "overlyx.openPdf",
+        "title": "Open in OverLyX PDF Viewer",
+        "category": "OverLyX",
+        "icon": "$(file-pdf)"
+      },
       {
         "command": "overlyx.newSlides",
         "title": "New Slide Deck…",
@@ -227,6 +239,9 @@
       ]
     },
     "menus": {
+      "explorer/context": [
+        { "command": "overlyx.openPdf", "when": "resourceExtname =~ /^\\.[pP][dD][fF]$/", "group": "open" }
+      ],
       "file/newFile": [
         { "command": "overlyx.newSlides", "group": "file" },
         { "command": "overlyx.newPoster", "group": "file" },
@@ -234,6 +249,11 @@
         { "command": "overlyx.newDocument", "group": "file" }
       ],
       "editor/title": [
+        {
+          "command": "overlyx.openPdf",
+          "when": "resourceExtname =~ /^\\.[pP][dD][fF]$/ && activeCustomEditorId != overlyx.pdfViewer",
+          "group": "navigation"
+        },
         {
           "command": "overlyx.openInOverlyx",
           "when": "resourceExtname =~ /^\\.(tex|md|markdown)$/ && activeCustomEditorId != overlyx.texEditor",

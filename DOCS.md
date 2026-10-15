@@ -1613,7 +1613,12 @@ blend.
   worker, so no worker start-up per build), each page is rendered off-screen and copied onto its
   canvas in one step, and the view stays on the same page at the same offset into it (not the
   scroll fraction, so pages added above do not move it). A project's `.pdf` files open in a tab of their own from the file browser (ids
-  `pdf:<project>/<file>`), like an editor tab in VS Code. latexmk runs with `-synctex=1`; *Navigate ▸
+  `pdf:<project>/<file>`). In VS Code, `.pdf` files open in the **OverLyX PDF Viewer** custom editor
+  (`host/pdfEditor.ts`): the same `PdfViewer`, with page navigation, fits, zoom and smart dark
+  pages. VS Code serves the file through its resource loader, including in remote workspaces;
+  changes on disk refresh it in place. *Refresh* reloads it manually and *Save a copy…* uses
+  VS Code's file dialog. It is also available through *Open With…* and the file context menu.
+  latexmk runs with `-synctex=1`; *Navigate ▸
   Sync to PDF* (`Ctrl+Alt+J`, the panel's ⇄ Sync button) finds the cursor's line in the LaTeX as
   built (`app/sourcelocate.ts`) and asks `synctex view` (server, `export.ts`) where it is — the
   viewer scrolls there and flashes the box; a double-click on the PDF asks `synctex edit` for the

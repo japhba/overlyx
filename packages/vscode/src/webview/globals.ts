@@ -2,6 +2,8 @@
 export interface VsCodeGlobals {
   page: 'editor' | 'pdf' | 'deliverable';
   docId: string;
+  /** A standalone PDF file, exposed through VS Code's local/remote resource loader. */
+  pdfUrl?: string;
   /** the local HTTP bridge: http://127.0.0.1:<port>/t/<token> */
   base: string;
   /** webview URI of dist/webview/ (static assets: LyX icons) */
