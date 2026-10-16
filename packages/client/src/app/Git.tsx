@@ -45,29 +45,19 @@ function CopyMini({ value }: { value: string }) {
   return <button class="mini" data-token-copy title="Copy this token (re-copy is enabled for your account)" onClick={() => void copy()}>{copied ? 'Copied ✓' : 'Copy'}</button>;
 }
 
-export function GitDialog({ project, onClose }: { project: string; user: User; onClose: () => void }) {
-  const [info, setInfo] = useState<GitInfo | null>(null);
+/**
+ * The account's own credentials: its access token and every sign-in / OAuth connection, each with
+ * Copy (where token re-copy kept its text) and Revoke. The Git dialog and Settings ▸ Account show them.
+ */
+export function useAccountTokens() {
   const [tokens, setTokens] = useState<GitToken[] | null>(null);
-  const [err, setErr] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [newToken, setNewToken] = useState<{ id: number; token: string } | null>(null);
-  const [message, setMessage] = useState('');
   const [mcpTokens, setMcpTokens] = useState<GitToken[] | null>(null);
-  const [mirror, setMirror] = useState<MirrorStatus | null>(null);
-  const [mirrorBusy, setMirrorBusy] = useState(false);
-
-  const load = () => Promise.all([
-    api.gitInfo(project).then(setInfo),
-    api.gitTokens().then(r => setTokens(r.tokens)),
-    api.mcpTokens().then(r => setMcpTokens(r.tokens)),
-    api.mirrorStatus(project).then(setMirror).catch(() => setMirror(null)),
-  ]).catch(e => setErr((e as Error).message));
-  useEffect(() => { setInfo(null); void load(); }, [project]);
+  const [newToken, setNewToken] = useState<{ id: number; token: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
   useEffect(() => {
-    const t = setInterval(() => { if (!document.hidden) { api.gitInfo(project).then(setInfo).catch(() => {}); api.mirrorStatus(project).then(setMirror).catch(() => {}); } }, 5000);
-    return () => clearInterval(t);
-  }, [project]);
-
+    Promise.all([api.gitTokens().then(r => setTokens(r.tokens)), api.mcpTokens().then(r => setMcpTokens(r.tokens))]).catch(e => setErr((e as Error).message));
+  }, []);
   const createToken = async () => {
     if (busy) return;
     if (tokens?.length && !(await uiConfirm('Rotate Access Token', 'Rotate your account access token? Every Git, CLI and manual MCP client using the current token will need the new one.'))) return;
@@ -88,6 +78,73 @@ export function GitDialog({ project, onClose }: { project: string; user: User; o
     try { setMcpTokens((await api.deleteMcpToken(t.id)).tokens); }
     catch (e) { setErr((e as Error).message); }
   };
+
+  return { tokens, mcpTokens, newToken, busy, err, createToken, revoke, revokeMcpToken };
+}
+type AccountTokens = ReturnType<typeof useAccountTokens>;
+
+/** the account access token: its row (Copy, Revoke), a new one to copy now, Create / Rotate */
+export function AccountTokenList({ t }: { t: AccountTokens }) {
+  return <>
+    {t.err && <div class="err">{t.err}</div>}
+    {t.newToken && (
+      <div class="git-newtoken">
+        <div><b>Your new account token</b> — copy it now; unless token re-copy is enabled for your account, it is not shown again:</div>
+        <CopyField value={t.newToken.token} />
+      </div>
+    )}
+    <div class="git-tokens" data-account-tokens>
+      {(t.tokens ?? []).map(k => (
+        <div class="git-token" key={k.id}>
+          <span class="name">🔑 Account access token</span>
+          <span class="meta">created {fmtDate(k.created_at)}{k.last_used_at ? ` · last used ${ago(k.last_used_at)}` : ' · never used'}</span>
+          {k.token && <CopyMini value={k.token} />}
+          <button class="mini" title="Revoke this token" onClick={() => void t.revoke(k)}>Revoke</button>
+        </div>
+      ))}
+      {t.tokens === null && !t.err && <div class="hint">Loading…</div>}
+      {t.tokens && !t.tokens.length && <div class="hint">No account token yet.</div>}
+    </div>
+    <button class="btn" disabled={t.busy} onClick={() => void t.createToken()}>{t.tokens?.length ? 'Rotate token' : 'Create token'}</button>
+  </>;
+}
+
+/** every CLI sign-in, OAuth connection and older agent token: what it reaches, Copy, Revoke */
+export function SignInList({ t }: { t: AccountTokens }) {
+  return (
+    <div class="git-tokens" data-signin-tokens>
+      {(t.mcpTokens ?? []).map(k => (
+        <div class="git-token" key={k.id}>
+          <span class="name">🤖 {k.name}</span>
+          <span class="meta">created {fmtDate(k.created_at)}{k.expires_at ? ` · expires ${fmtDate(k.expires_at)}` : ''}{k.last_used_at ? ` · last used ${ago(k.last_used_at)}` : ' · never used'}{k.scope && <span data-token-scope> · {k.scope.projects ? `only ${k.scope.projects.join(', ') || 'no projects'}` : 'all projects'}{k.scope.readonly ? ', read only' : ''}</span>}</span>
+          {k.token && <CopyMini value={k.token} />}
+          <button class="mini" title="Revoke this token" onClick={() => void t.revokeMcpToken(k)}>Revoke</button>
+        </div>
+      ))}
+      {t.mcpTokens === null && !t.err && <div class="hint">Loading…</div>}
+      {t.mcpTokens && !t.mcpTokens.length && <div class="hint">No sign-ins or OAuth connections.</div>}
+    </div>
+  );
+}
+
+export function GitDialog({ project, onClose }: { project: string; user: User; onClose: () => void }) {
+  const [info, setInfo] = useState<GitInfo | null>(null);
+  const accountTokens = useAccountTokens();
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+  const [mirror, setMirror] = useState<MirrorStatus | null>(null);
+  const [mirrorBusy, setMirrorBusy] = useState(false);
+
+  const load = () => Promise.all([
+    api.gitInfo(project).then(setInfo),
+    api.mirrorStatus(project).then(setMirror).catch(() => setMirror(null)),
+  ]).catch(e => setErr((e as Error).message));
+  useEffect(() => { setInfo(null); void load(); }, [project]);
+  useEffect(() => {
+    const t = setInterval(() => { if (!document.hidden) { api.gitInfo(project).then(setInfo).catch(() => {}); api.mirrorStatus(project).then(setMirror).catch(() => {}); } }, 5000);
+    return () => clearInterval(t);
+  }, [project]);
 
   const commit = async () => {
     if (busy) return;
@@ -177,24 +234,7 @@ bearer_token_env_var = "OVERLYX_TOKEN"`}</pre>
 
           <h4>Your account access token — Git, CLI and MCP</h4>
           <div class="hint">Your account has one manually-managed token, shared by every project and client. Use it as the password for Git or the OverLyX CLI, or as an MCP Bearer token. Rotating it replaces the old token everywhere.</div>
-          {newToken && (
-            <div class="git-newtoken">
-              <div><b>Your new account token</b> — copy it now; unless token re-copy is enabled for your account, it is not shown again:</div>
-              <CopyField value={newToken.token} />
-            </div>
-          )}
-          <div class="git-tokens">
-            {(tokens ?? []).map(t => (
-              <div class="git-token" key={t.id}>
-                <span class="name">🔑 Account access token</span>
-                <span class="meta">created {fmtDate(t.created_at)}{t.last_used_at ? ` · last used ${ago(t.last_used_at)}` : ' · never used'}</span>
-                {t.token && <CopyMini value={t.token} />}
-                <button class="mini" title="Revoke this token" onClick={() => void revoke(t)}>Revoke</button>
-              </div>
-            ))}
-            {tokens && !tokens.length && <div class="hint">No account token yet.</div>}
-          </div>
-          <button class="btn" disabled={busy} onClick={() => void createToken()}>{tokens?.length ? 'Rotate token' : 'Create token'}</button>
+          <AccountTokenList t={accountTokens} />
 
           <h4>MCP connector — let an AI agent read, comment and edit</h4>
           <div class="hint">
@@ -212,17 +252,7 @@ bearer_token_env_var = "OVERLYX_TOKEN"`}</pre>
           <div class="hint">To pin a client to just this project, give it <code>{location.origin}/mcp/{project.split('/').map(encodeURIComponent).join('/')}</code> instead.</div>
           <h4>Sign-ins, OAuth connections and agent tokens</h4>
           <div class="hint">Each CLI sign-in (<code>overlyx auth login</code>) and each OAuth client keeps a credential of its own, so you can disconnect one without rotating your account token. Older manually-created agent tokens remain usable and can be revoked here, but new manual connections use the account token above. With Settings ▸ Account ▸ Fine-grained access, a new sign-in can be limited to some projects or to reading.</div>
-          <div class="git-tokens">
-            {(mcpTokens ?? []).map(t => (
-              <div class="git-token" key={t.id}>
-                <span class="name">🤖 {t.name}</span>
-                <span class="meta">created {fmtDate(t.created_at)}{t.expires_at ? ` · expires ${fmtDate(t.expires_at)}` : ''}{t.last_used_at ? ` · last used ${ago(t.last_used_at)}` : ' · never used'}{t.scope && <span data-token-scope> · {t.scope.projects ? `only ${t.scope.projects.join(', ') || 'no projects'}` : 'all projects'}{t.scope.readonly ? ', read only' : ''}</span>}</span>
-                {t.token && <CopyMini value={t.token} />}
-                <button class="mini" title="Revoke this token" onClick={() => void revokeMcpToken(t)}>Revoke</button>
-              </div>
-            ))}
-            {mcpTokens && !mcpTokens.length && <div class="hint">No sign-ins or OAuth connections.</div>}
-          </div>
+          <SignInList t={accountTokens} />
 
           <h4>Off-site mirror</h4>
           {mirror?.configured ? (

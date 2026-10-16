@@ -5,7 +5,8 @@
  *   Editor       the editor's font, spell checking, automatic PDF builds (this browser, prefs.ts)
  *   AI           the AI features and models        (this browser, prefs.ts)
  *   Appearance   light / dark / follow the system  (this browser, theme.ts)
- *   Account      who is signed in, and the per-account server settings (userSettings.ts):
+ *   Account      who is signed in, the account's own access token and sign-ins (Git.tsx, as in
+ *                File ▸ Git repository), and the per-account server settings (userSettings.ts):
  *                fine-grained access for new sign-ins (the user's own switch); token re-copy —
  *                administrators switch it per account right here.
  */
@@ -17,6 +18,7 @@ import { clearLocalData } from './localData';
 import { getPrefs, setPref, subscribePrefs, type Prefs } from '../prefs';
 import { recordReliability } from '../usage';
 import { resetShortcutTips } from '../shortcuttips';
+import { useAccountTokens, AccountTokenList, SignInList } from './Git';
 import { stashLyxBind, ctrlINow, ctrlIPlan, CTRLI_COMMANDS, type CtrlI } from './lyxbind';
 import { resetAllBindings, getBindings, setBinding, subscribeBindings } from './keybindings';
 import { useUiMode } from './uimode';
@@ -245,9 +247,7 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
           {section === 'account' && <>
             <h3>Signed in</h3>
             <div data-setting="whoami">{user.name} ({user.username}){user.isAdmin ? ' — administrator' : ''}</div>
-            <h3>Sign-ins</h3>
-            <div class="sub">Signing in the OverLyX CLI on a computer (<code>overlyx auth login</code>) gives it — git, builds, the AI agents there — a credential of its own; so does connecting an OAuth client such as ChatGPT. It reaches all your projects, with your role in each, and is revoked in File ▸ Git repository.</div>
-            {!user.guest && <label class="pref"><input type="checkbox" data-setting="fine-grained" disabled={settings === null} checked={!!settings?.fineGrainedAccess} onChange={e => void toggleAccountSetting({ fineGrainedAccess: (e.target as HTMLInputElement).checked })} /><span>Fine-grained access<span class="sub">When you authorize a new sign-in, choose which projects it reaches and whether it may only read (clone, pull, read and build — no push, edits or comments). Sign-ins made before keep their access; switching this off does not widen narrowed ones.</span></span></label>}
+            {!user.guest && <AccountCredentials><label class="pref"><input type="checkbox" data-setting="fine-grained" disabled={settings === null} checked={!!settings?.fineGrainedAccess} onChange={e => void toggleAccountSetting({ fineGrainedAccess: (e.target as HTMLInputElement).checked })} /><span>Fine-grained access<span class="sub">When you authorize a new sign-in, choose which projects it reaches and whether it may only read (clone, pull, read and build — no push, edits or comments). Sign-ins made before keep their access; switching this off does not widen narrowed ones.</span></span></label></AccountCredentials>}
             {!user.guest && <>
               <h3>New documents</h3>
               <label class="pref"><input type="checkbox" data-setting="paragraph-skip" disabled={settings === null} checked={!!settings?.paragraphSkip} onChange={e => void toggleAccountSetting({ paragraphSkip: (e.target as HTMLInputElement).checked })} /><span>No paragraph indentation<span class="sub">Documents you create separate paragraphs by vertical space instead of indenting their first line, in the editor and in the PDF (Document ▸ Settings ▸ Paragraph separation, which each document can change). Documents that exist already keep their setting.</span></span></label>
@@ -369,5 +369,19 @@ function AdminReports() {
         </div>
       ))}
     </div>
+  </>;
+}
+
+/** Settings ▸ Account: the account's own access token and sign-ins — never anybody else's */
+function AccountCredentials({ children }: { children: ComponentChildren }) {
+  const t = useAccountTokens();
+  return <>
+    <h3>Access token</h3>
+    <div class="sub">Your account access token is the password for Git and the OverLyX CLI, and an MCP Bearer token. Its text can be copied again only with token re-copy (below); otherwise it was shown once, when it was made.</div>
+    <AccountTokenList t={t} />
+    <h3>Sign-ins</h3>
+    <div class="sub">Signing in the OverLyX CLI on a computer (<code>overlyx auth login</code>) gives it — git, builds, the AI agents there — a credential of its own; so does connecting an OAuth client such as ChatGPT. Each reaches your projects with your role in each, unless it was narrowed; revoke one here.</div>
+    <SignInList t={t} />
+    {children}
   </>;
 }
