@@ -96,7 +96,7 @@ blend.
   and guide changes) are refreshed, with the previous source kept in version history. Meaningfully
   edited files and deleted projects or documents are preserved; new variants never overwrite a folder.
   Baselines in `templates/starters-legacy` cover both the original web examples and the first
-  scientific release. Deleted variants are not recreated during a scientific-to-scientific refresh.
+  scientific release. Deleted variants are not recreated during a scientific-to-scientific refresh. The Bernstein and ICML 2026 poster examples are added once to existing example projects, with per-account markers in `starter_projects`; existing folders are preserved and later deletions are respected.
   The default project is named *Example: slides and posters*. Its retired web-page example is
   removed from unchanged existing copies (including checking persisted edits), with a manual
   version retained; edited web pages or folders with added files are preserved. Custom project

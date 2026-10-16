@@ -55,8 +55,8 @@ export function isLightlyEditedStarter(text: string, folder: string): boolean {
   return expected.includes(signature(text, folder));
 }
 
-export function refreshScientificStarters(dryRun = false): { updated: string[]; removed: string[]; renamed: number; preserved: number } {
-  const result = { updated: [] as string[], removed: [] as string[], renamed: 0, preserved: 0 };
+export function refreshScientificStarters(dryRun = false): { updated: string[]; added: string[]; removed: string[]; renamed: number; preserved: number } {
+  const result = { updated: [] as string[], added: [] as string[], removed: [] as string[], renamed: 0, preserved: 0 };
   const rows = db.prepare("SELECT s.project, s.user_id, p.title FROM starter_projects s JOIN projects p ON p.name=s.project AND p.owner_id=s.user_id WHERE s.template='web' AND p.kind='project'").all() as { project: string; user_id: number; title: string | null }[];
   for (const row of rows) {
     let refreshed = false;
@@ -110,12 +110,24 @@ export function refreshScientificStarters(dryRun = false): { updated: string[]; 
           if (!fs.existsSync(dest)) fs.cpSync(path.join(templates, 'starters/web', folder), dest, { recursive: true, errorOnExist: true, force: false });
         }
       }
+      // These layouts shipped after existing accounts received the scientific examples.
+      // Record each addition independently so subsequent starts respect deletions.
+      for (const folder of ['poster-bernstein-2026', 'poster-icml-2026']) {
+        const marker = `web:${folder}`;
+        if (db.prepare('SELECT 1 FROM starter_projects WHERE user_id=? AND template=?').get(row.user_id, marker)) continue;
+        const dest = path.join(root, folder);
+        if (!fs.existsSync(dest)) {
+          if (!dryRun) fs.cpSync(path.join(templates, 'starters/web', folder), dest, { recursive: true, errorOnExist: true, force: false });
+          result.added.push(`${row.project}/${folder}/index.html`);
+        }
+        if (!dryRun) db.prepare('INSERT OR IGNORE INTO starter_projects (user_id,template,project,created_at) VALUES (?,?,?,?)').run(row.user_id, marker, row.project, Date.now());
+      }
       if (['Example: scientific slides and posters', 'Example: slides, poster and web page'].includes(row.title ?? '')) {
         if (!dryRun) db.prepare("UPDATE projects SET title='Example: slides and posters' WHERE name=? AND owner_id=?").run(row.project, row.user_id);
         result.renamed++;
       }
     } catch (e) { console.error('[starters] scientific refresh failed:', row.project, e); }
   }
-  if (!dryRun && (result.updated.length || result.removed.length || result.renamed)) console.log(`[starters] refreshed ${result.updated.length} slide/poster examples; removed ${result.removed.length} web-page examples; renamed ${result.renamed} projects; preserved ${result.preserved} customised files`);
+  if (!dryRun && (result.updated.length || result.added.length || result.removed.length || result.renamed)) console.log(`[starters] refreshed ${result.updated.length} slide/poster examples; added ${result.added.length} project poster examples; removed ${result.removed.length} web-page examples; renamed ${result.renamed} projects; preserved ${result.preserved} customised files`);
   return result;
 }

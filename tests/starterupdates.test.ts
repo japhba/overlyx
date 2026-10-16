@@ -99,6 +99,22 @@ describe('scientific starter refresh', () => {
     rmSync(dir, { recursive: true });
   });
 
+  it('adds project posters to current examples once, preserving edits and later deletions', () => {
+    const { dir } = seed('project-posters');
+    for (const folder of ['talk', 'poster']) writeFileSync(join(dir, folder, 'index.html'), latest(folder));
+    mkdirSync(join(dir, 'poster-bernstein-2026'));
+    writeFileSync(join(dir, 'poster-bernstein-2026/index.html'), 'My edited poster');
+    expect(refreshScientificStarters(true).added).toContain('project-posters/example-web/poster-icml-2026/index.html');
+    expect(existsSync(join(dir, 'poster-icml-2026'))).toBe(false);
+    refreshScientificStarters();
+    expect(readFileSync(join(dir, 'poster-icml-2026/index.html'), 'utf8')).toBe(latest('poster-icml-2026'));
+    expect(readFileSync(join(dir, 'poster-bernstein-2026/index.html'), 'utf8')).toBe('My edited poster');
+    rmSync(join(dir, 'poster-icml-2026'), { recursive: true });
+    refreshScientificStarters();
+    expect(existsSync(join(dir, 'poster-icml-2026'))).toBe(false);
+    rmSync(dir, { recursive: true });
+  });
+
   it('renames default titles and retires only unchanged web pages, retaining backups, edits and added files', () => {
     const cases = ['retire', 'edited', 'persisted', 'assets'].map(name => seed('site-' + name));
     const html = original('site');

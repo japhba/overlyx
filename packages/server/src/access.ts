@@ -513,7 +513,7 @@ const STARTER_DIR = path.resolve(path.dirname(new URL(import.meta.url).pathname)
 /** The starters every account gets besides the welcome project (templates/starters/<id>, scripts/gen-starters.ts). */
 export const STARTERS: { id: string; title: string }[] = [
   { id: 'slides', title: 'Example: beamer slides' },
-  // Three decks and three posters as editable HTML deliverables.
+  // Three decks and five posters as editable HTML deliverables.
   { id: 'web', title: 'Example: slides and posters' },
   { id: 'paper', title: 'Example: paper' },
 ];
@@ -540,6 +540,11 @@ export function ensureStarterProjects(user: SessionUser): string[] {
       fs.mkdirSync(resolveProjectPath(name, '.'), { recursive: true });
       copyTemplate(src, resolveProjectPath(name, '.'));
       registerProject(name, user.id, { title: s.title, kind: 'project' });
+      if (s.id === 'web') {
+        for (const folder of ['poster-bernstein-2026', 'poster-icml-2026']) {
+          db.prepare('INSERT OR IGNORE INTO starter_projects (user_id,template,project,created_at) VALUES (?,?,?,?)').run(user.id, `web:${folder}`, name, Date.now());
+        }
+      }
       created.push(name);
     } catch (e) {
       db.prepare('DELETE FROM starter_projects WHERE user_id = ? AND template = ?').run(user.id, s.id);   // try again next time
