@@ -2228,17 +2228,17 @@ grows a plugin list, a toolbar button or one of those helpers of its own again �
 extension once lacked autocorrect, markdown headings, image paste and the delimiter buttons. Zoom is
 one of those helpers (`applyEditorZoom`: the `--editor-zoom` variable the editor's font size is
 computed from; a change is said over the text for a moment, as every zoom is — `app/zoomhud.ts`,
-also a board's). **A pinch zooms the document view** (`useTextPinch`): text, column, ruler and
+also a board's). **Document view zoom**: text, column, ruler and
 figures enlarge together, including figures with physical or intrinsic sizes. This is a browser
 view preference; document font sizes, graphics parameters and exported files stay unchanged.
-A trackpad's pinch (Ctrl + wheel,
-Safari's gesture events) or two fingers on a touch screen (`.editor-scroll:has(… .lyx-editor) {
-touch-action: pan-x pan-y }`, their middle scrolls) — never the browser's page; the character under
+Two fingers on a touch screen zoom the document view (`useTextPinch`, `.editor-scroll:has(… .lyx-editor) {
+touch-action: pan-x pan-y }`, their middle scrolls); the character under
 the fingers stays under them while the text reflows (a figure anchors in both axes;
 `caretPositionFromPoint` anchors text, the scroll is set again
-each frame), and 100 % is a level it stops at and holds (×1.25), as the canvases' fits. A mouse
-wheel's notch with Ctrl/⌘ steps 10 %; every step (Ctrl ±, the status bar's − / +) stops at 100 %
-(`stepTextZoom`). Not on a layout document's canvas, which zooms itself. The extension used to zoom with CSS `zoom` on its scroll container instead, which puts
+each frame), and 100 % is a level it stops at and holds (×1.25), as the canvases' fits. Trackpad
+pinches and Ctrl/⌘ + wheel use the browser's default behavior. The document's zoom buttons,
+percentage menu and Ctrl ± shortcuts remain; every step stops at 100 % (`stepTextZoom`).
+Not on a layout document's canvas, which zooms itself. The extension used to zoom with CSS `zoom` on its scroll container instead, which puts
 mouse coordinates and layout into different scales in Chromium — drags stopped following the pointer
 and selection highlights disagreed with the selection as soon as the document was zoomed.
 

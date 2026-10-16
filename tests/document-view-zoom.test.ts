@@ -10,7 +10,7 @@ import { resetUsageForTests } from '../packages/client/src/usage.ts';
 afterEach(() => { render(null, document.body); document.body.replaceChildren(); resetUsageForTests(); });
 
 describe('document view zoom', () => {
-  it('handles a trackpad/wheel gesture in the document pane margin without editing the model', async () => {
+  it('leaves trackpad/wheel gestures to the browser without changing document zoom or the model', async () => {
     const doc = schema.nodes.doc.create(null, schema.nodes.paragraph.create(null, [schema.text('Text'), schema.nodes.graphics.create({ params: JSON.stringify(['filename plot.png', 'width 6cm']) })]));
     const before = doc.toJSON();
     function Harness() {
@@ -28,8 +28,8 @@ describe('document view zoom', () => {
     // happy-dom's WheelEvent omits MouseEvent modifier fields; browsers provide these.
     Object.defineProperty(wheel, 'ctrlKey', { value: true });
     await act(() => pane.dispatchEvent(wheel));
-    expect(wheel.defaultPrevented).toBe(true);
-    expect(document.documentElement.style.getPropertyValue('--editor-zoom')).toBe('1.3');
+    expect(wheel.defaultPrevented).toBe(false);
+    expect(document.documentElement.style.getPropertyValue('--editor-zoom')).toBe('1.2');
     expect(doc.toJSON()).toEqual(before);
   });
 });

@@ -62,7 +62,7 @@ export function ZoomControl({ zoom, onZoom }: { zoom: number; onZoom: (z: number
   const pct = Math.round(zoom * 100);
   const presets = [50, 75, 90, 100, 110, 125, 150, 175, 200, 250];
   return (
-    <span class="zoom" title="Zoom the document view — text and figures (pinch, Ctrl+Plus / Ctrl+Minus; 100% resets). Document font sizes stay the same.">
+    <span class="zoom" title="Zoom the document view — text and figures (Ctrl+Plus / Ctrl+Minus; 100% resets). Document font sizes stay the same.">
       <button type="button" class="zoom-btn" data-zoom-out onClick={() => onZoom(stepTextZoom(zoom, -1))}>−</button>
       <select class="zoom-select" data-zoom value={String(pct)} onChange={e => onZoom(Number((e.target as HTMLSelectElement).value) / 100)}>
         {(presets.includes(pct) ? presets : [...presets, pct].sort((a, b) => a - b)).map(p => <option key={p} value={String(p)}>{p}%</option>)}
