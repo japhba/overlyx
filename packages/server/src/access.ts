@@ -267,7 +267,7 @@ export interface ShareInfo {
   title: string | null;
   owner: { id: number; name: string; username: string } | null;
   members: { id: number; role: string; via: string; email: string | null; user: { id: number; name: string; username: string; color: string; avatar: string | null } | null }[];
-  link: { token: string; role: 'view' | 'edit' } | null;
+  link: { token: string; role: 'view' | 'edit'; createdAt: number | null } | null;
 }
 
 export function shareInfo(project: string): ShareInfo {
@@ -277,7 +277,7 @@ export function shareInfo(project: string): ShareInfo {
     const u = m.user_id != null ? db.prepare('SELECT id, display_name AS name, username, color, avatar_url FROM users WHERE id = ?').get(m.user_id) as { id: number; name: string; username: string; color: string; avatar_url: string | null } | undefined : undefined;
     return { id: m.id, role: m.role, via: m.via, email: m.email, user: u ? { id: u.id, name: u.name, username: u.username, color: u.color, avatar: u.avatar_url ? `/api/users/${u.id}/avatar` : null } : null };
   });
-  return { name: project, title: row?.title ?? null, owner: owner ?? null, members, link: row?.link_token && isRole(row.link_role) ? { token: row.link_token, role: row.link_role } : null };
+  return { name: project, title: row?.title ?? null, owner: owner ?? null, members, link: row?.link_token && isRole(row.link_role) ? { token: row.link_token, role: row.link_role, createdAt: row.link_created_at } : null };
 }
 
 /** Share with a person: `who` is a username or an e-mail address. */
@@ -335,15 +335,30 @@ export function setLink(project: string, role: 'view' | 'edit' | null): ShareInf
   const row = projectRow(project);
   if (!row) throw new Error('project not found');
   if (!role) {
-    db.prepare('UPDATE projects SET link_token = NULL, link_role = NULL WHERE name = ?').run(project);
+    db.prepare('UPDATE projects SET link_token = NULL, link_role = NULL, link_created_at = NULL WHERE name = ?').run(project);
     db.prepare("DELETE FROM project_members WHERE project = ? AND via = 'link'").run(project);
     return null;
   }
   const token = row.link_token ?? crypto.randomBytes(18).toString('base64url');
-  db.prepare('UPDATE projects SET link_token = ?, link_role = ? WHERE name = ?').run(token, role, project);
+  const createdAt = row.link_token ? row.link_created_at : Date.now();
+  db.prepare('UPDATE projects SET link_token = ?, link_role = ?, link_created_at = ? WHERE name = ?').run(token, role, createdAt, project);
   // people who came in through the link follow the link's role
   db.prepare("UPDATE project_members SET role = ? WHERE project = ? AND via = 'link'").run(role, project);
-  return { token, role };
+  return { token, role, createdAt };
+}
+
+/**
+ * A new share link in place of the current one (same role): the old address stops working. People
+ * who already came in through it keep their access — Restricted removes them, or one by one.
+ */
+export function resetLink(project: string): NonNullable<ShareInfo['link']> {
+  const row = projectRow(project);
+  if (!row) throw new Error('project not found');
+  if (!row.link_token || !isRole(row.link_role)) throw new Error('link sharing is off');
+  const token = crypto.randomBytes(18).toString('base64url');
+  const createdAt = Date.now();
+  db.prepare('UPDATE projects SET link_token = ?, link_created_at = ? WHERE name = ?').run(token, createdAt, project);
+  return { token, role: row.link_role, createdAt };
 }
 
 /** The project a share link opens, if the link is live. */
@@ -478,7 +493,7 @@ export function trashProject(project: string): string {
   db.prepare('DELETE FROM project_aliases WHERE name = ?').run(project);
   // a deleted example project is not re-created: keep a tombstone row, under a hidden name that no
   // project can take (core isProjectName)
-  if (row?.kind === 'example') db.prepare("UPDATE projects SET name = ?, kind = 'example-gone', link_token = NULL, link_role = NULL WHERE name = ?").run(project.replace('/', '/.deleted-') + '-' + Date.now(), project);
+  if (row?.kind === 'example') db.prepare("UPDATE projects SET name = ?, kind = 'example-gone', link_token = NULL, link_role = NULL, link_created_at = NULL WHERE name = ?").run(project.replace('/', '/.deleted-') + '-' + Date.now(), project);
   else db.prepare('DELETE FROM projects WHERE name = ?').run(project);
   return dest;
 }

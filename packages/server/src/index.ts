@@ -39,7 +39,7 @@ import { toPng, isDirectImage } from './graphics.ts';
 import { buildPdf, exportTex, texExportDir, lastBuild, requestBuild, currentJob, cancelBuild, publicJob, cleanupProjectData, synctexView, synctexEdit, layoutCheckOf } from './export.ts';
 import { sendFileAt, readFileAt, isRegularFileAt } from './confined.ts';
 import { db } from './db.ts';
-import { accessibleProjects, adoptProjects, roleFor, atLeast, isRole, registerProject, projectRow, shareInfo, addMember, setMemberRole, removeMember, memberRow, linkMemberIds, setLink, linkProject, acceptLink, newOwner, setOwner, trashProject, ensureWelcomeProject, ensureStarterProjects, type Role } from './access.ts';
+import { accessibleProjects, adoptProjects, roleFor, atLeast, isRole, registerProject, projectRow, shareInfo, addMember, setMemberRole, removeMember, memberRow, linkMemberIds, setLink, resetLink, linkProject, acceptLink, newOwner, setOwner, trashProject, ensureWelcomeProject, ensureStarterProjects, type Role } from './access.ts';
 import { canonicalProject, canonicalDocId } from './namespaces.ts';
 import { gdocsRoutes } from './gdocs/routes.ts';
 import { startAutoSync } from './gdocs/sync.ts';
@@ -427,6 +427,14 @@ api.post('/projects/:project/share/link', needProject('owner'), (req, res) => {
     const link = setLink(req.params.project, role);
     if (affected.length) manager.kick(req.params.project, affected);
     logAccess(req.params.project, req.user!.id, 'share', role ? `turned on link sharing (${role === 'edit' ? 'editors' : 'viewers'})` : 'turned off link sharing');
+    res.json({ link, share: shareInfo(req.params.project) });
+  } catch (e) { res.status(400).json({ error: (e as Error).message }); }
+});
+/** A new share link: the old one stops working; who came in through it keeps access. */
+api.post('/projects/:project/share/link/reset', needProject('owner'), (req, res) => {
+  try {
+    const link = resetLink(req.params.project);
+    logAccess(req.params.project, req.user!.id, 'share', 'reset the share link (the old one no longer works)');
     res.json({ link, share: shareInfo(req.params.project) });
   } catch (e) { res.status(400).json({ error: (e as Error).message }); }
 });

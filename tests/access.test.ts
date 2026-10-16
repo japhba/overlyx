@@ -216,6 +216,25 @@ describe('link sharing', () => {
     expect(access.roleFor(old, 'jan/paper')).toBeNull();
     access.setLink('jan/paper', null);
   });
+
+  it('reset: a new link replaces the old one, people who came in keep access; the link knows when it was made', () => {
+    const before = Date.now();
+    const link = access.setLink('jan/paper', 'edit')!;
+    expect(link.createdAt).toBeGreaterThanOrEqual(before);
+    expect(access.setLink('jan/paper', 'view')?.createdAt).toBe(link.createdAt);   // a new role is not a new link
+    access.acceptLink(link.token, bob);
+    const fresh = access.resetLink('jan/paper');
+    expect(fresh.token).not.toBe(link.token);
+    expect(fresh.role).toBe('view');
+    expect(fresh.createdAt).toBeGreaterThanOrEqual(link.createdAt!);
+    expect(access.shareInfo('jan/paper').link).toEqual(fresh);
+    expect(() => access.acceptLink(link.token, bob)).toThrow(/not valid/);
+    expect(access.roleFor(bob, 'jan/paper')).toBe('view');
+    expect(access.acceptLink(fresh.token, bob).role).toBe('view');
+    access.setLink('jan/paper', null);
+    expect(access.roleFor(bob, 'jan/paper')).toBeNull();
+    expect(() => access.resetLink('jan/paper')).toThrow(/off/);
+  });
 });
 
 describe('example project and deletion', () => {

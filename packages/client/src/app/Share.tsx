@@ -81,6 +81,11 @@ export function ShareDialog({ project, user, doc, onClose, onChanged }: { projec
     catch (e) { setErr((e as Error).message); }
     finally { setBusy(false); }
   };
+  // a new link in place of the current one: the old address stops working (it went too far, say)
+  const resetLink = async () => {
+    if (!await uiConfirm('Reset the Link?', 'The current link stops working and a new one replaces it. People who already joined through the old link keep their access — remove them above, or switch to Restricted to remove them all.', { okLabel: 'Reset link' })) return;
+    if (await update(() => api.resetLink(project))) setCopied(false);
+  };
   const add = async () => { if (!who.trim() || busy) return; if (await update(() => api.addMember(project, who.trim(), role))) setWho(''); };
   const copy = async () => {
     if (!info?.link) return;
@@ -185,6 +190,12 @@ export function ShareDialog({ project, user, doc, onClose, onChanged }: { projec
                   </select>
                 : <b data-link-file>{linkFiles[0]}</b>}
               {' '}— and gives access to the whole project.
+            </div>
+          )}
+          {info.link && (
+            <div class="share-link-meta hint" data-link-created={info.link.createdAt ?? ''}>
+              {info.link.createdAt && <span title={new Date(info.link.createdAt).toLocaleString()}>Link created {new Date(info.link.createdAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}.</span>}
+              <button type="button" class="btn small" disabled={busy} data-link-reset title="Make a new link — the current one stops working" onClick={() => void resetLink()}>Reset link</button>
             </div>
           )}
           <h4>Public PDF link</h4>

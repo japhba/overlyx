@@ -154,6 +154,15 @@ db.exec('CREATE UNIQUE INDEX IF NOT EXISTS git_tokens_user ON git_tokens(user_id
 // guests: temporary accounts for visitors who open a share link without signing in (auth.ts
 // createGuest); their memberships move to the real account at sign-in (access.ts adoptGuest)
 try { db.exec('ALTER TABLE users ADD COLUMN is_guest INTEGER NOT NULL DEFAULT 0'); } catch { /* column exists */ }
+// 2026-10-16: when the share link was made (the Share dialog shows it; Reset link makes a new one).
+// Links from before: the first "turned on link sharing" in the activity log since it was last off
+try {
+  db.exec('ALTER TABLE projects ADD COLUMN link_created_at INTEGER');
+  db.exec(`UPDATE projects SET link_created_at = (
+      SELECT MIN(a.at) FROM access_log a WHERE a.project = projects.name AND a.action = 'share' AND a.detail LIKE 'turned on link sharing%'
+        AND a.at > COALESCE((SELECT MAX(b.at) FROM access_log b WHERE b.project = projects.name AND b.action = 'share' AND b.detail = 'turned off link sharing'), 0))
+    WHERE link_token IS NOT NULL`);
+} catch { /* column exists */ }
 
 // 2026-09-01: MCP tokens became user-scoped (one token, every project its account can access —
 // mcpTokens.ts). Databases from before have project-scoped rows: rebuild the table, attributing
@@ -185,6 +194,8 @@ export interface ProjectRow {
   /** 'project' | 'example' (the personal welcome project) | 'example-gone' (deleted by its owner: not re-created) */
   kind: string;
   link_token: string | null; link_role: string | null; created_at: number;
+  /** when the share link was made (null: before this was recorded, and nothing in the activity log) */
+  link_created_at: number | null;
 }
 export interface MemberRow {
   id: number; project: string; user_id: number | null; email: string | null; role: string;
