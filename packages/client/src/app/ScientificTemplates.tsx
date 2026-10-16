@@ -15,6 +15,6 @@ export function ScientificTemplates({ kind, value, onChange }: { kind: Scientifi
       </button>)}
     </div>
     <p class="dialog-hint">{selected.description}</p>
-    <p class="dialog-hint">Editable adaptation of <a href={selected.source} target="_blank" rel="noopener noreferrer">{selected.kind === 'poster' ? 'MIT’s published template' : selected.name}</a> · {selected.license}.</p>
+    <p class="dialog-hint">Editable adaptation of <a href={selected.source} target="_blank" rel="noopener noreferrer">{selected.name}</a> · {selected.license}.</p>
   </fieldset>;
 }

@@ -75,10 +75,10 @@ blend.
   slides / poster as an HTML deliverable in `slides/` or `poster/`) and opened right away. It replaced
   a "+ New project" prompt that left newcomers looking for where slides come from. A project without
   documents (`ProjectRootPanel`) offers *+ New document*, *+ New slides* and *+ New poster*.
-  Slides and posters offer three open styles each, also available in File ▸ New:
+  Slides offer three open styles and posters offer five, also available in File ▸ New:
   MIT EvenBetter landscape (48 × 36 in PowerPoint), MIT EvenBetter figure sketch (48 × 36 in
   Illustrator), MIT EvenBetter portrait (36 × 48 in PowerPoint), Metropolis (16:9), Focus (16:9)
-  and CambridgeUS (4:3). Posters reproduce the published bands, figure panels, colours and
+  and CambridgeUS (4:3). Two additional project-derived poster layouts reproduce the 2026 Bernstein A0 portrait and ICML 1210 × 910 mm landscape designs, with replacement analytical content. Their millimetre geometry is recorded in `core/src/html/project-posters.ts`. Posters reproduce the published bands, figure panels, colours and
   typography from [MIT BE Communication Lab's EvenBetterPoster resources](https://github.com/MIT-BECL/Poster_Resources)
   (CC0-1.0, `License-Templates`), described in [their article](https://mitcommlab.mit.edu/be/2023/09/27/toward-an-evenbetterposter-improving-the-betterposter-template/).
   Slides reproduce [Metropolis](https://github.com/matze/mtheme) (CC BY-SA 4.0),
@@ -90,7 +90,7 @@ blend.
   Carlito replaces the posters' Calibri with matching metrics. `scripts/gen-template-fonts.py`
   regenerates their embedded font faces. `core/src/html/scientific.ts` and `scientific-posters.ts`
   are the shared source; `npx tsx scripts/gen-scientific-starters.ts`
-  refreshes the six files in `templates/starters/web` (`--previews` also renders chooser thumbnails
+  refreshes the scientific example files in `templates/starters/web` (`--previews` also renders chooser thumbnails
   using the built runtime). On startup, registered old HTML starters whose text, equations,
   figures and styling still match the shipped example (allowing whitespace, author-placeholder
   and guide changes) are refreshed, with the previous source kept in version history. Meaningfully

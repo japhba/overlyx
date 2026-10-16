@@ -1,4 +1,4 @@
-/** Regenerate the six scientific examples; --previews also refreshes the chooser thumbnails.
+/** Regenerate the scientific examples; --previews also refreshes the chooser thumbnails.
  * npx tsx scripts/gen-scientific-starters.ts [--previews]
  * Preview generation uses the built runtime (npm run build) to typeset math and check layouts.
  */
