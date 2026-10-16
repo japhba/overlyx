@@ -7,7 +7,7 @@
  * is set up). On a server with the e2e Google stub, a prompt offers the simulated account's Google Docs.
  */
 import { api } from '../api';
-import { uiPrompt } from './Dialogs';
+import { uiPrompt, uiConfirm, uiConfirmCheck } from './Dialogs';
 
 let loading: Promise<void> | null = null;
 function loadPicker(): Promise<void> {
@@ -47,4 +47,29 @@ export async function pickGoogleDoc(title = 'Choose a Google Doc'): Promise<stri
       .build()
       .setVisible(true);
   });
+}
+
+const SYNC_KEY = 'ol.gdocsImportSync';
+
+/**
+ * *Import from Google Docs…* (the start page, the file browser): Google Drive connected (or off to
+ * connect it, back to `next`), kept in sync or a copy (the choice is remembered in this browser), a
+ * Google Doc picked. Null when anything was cancelled.
+ */
+export async function chooseGoogleImport(next = location.hash.replace(/\?.*$/, '')): Promise<{ fileId: string; sync: boolean } | null> {
+  const st = await api.gdocsAccount();
+  if (!st.account) {
+    if (await uiConfirm('Import from Google Docs', 'Connect Google Drive first — OverLyX then opens only the Google Docs you pick.', { okLabel: 'Connect Google Drive…' })) location.href = '/api/gdocs/connect?next=' + encodeURIComponent(next);
+    return null;
+  }
+  let remembered = true;
+  try { remembered = localStorage.getItem(SYNC_KEY) !== '0'; } catch { /* the default */ }
+  const sync = await uiConfirmCheck('Import from Google Docs',
+    'Choose a Google Doc in Google’s picker. It comes in as a document; a Google Doc with several tabs as a group with a document per tab.',
+    { label: 'Keep in sync with the Google Doc — edits and comments go both ways', checked: remembered },
+    { okLabel: 'Choose a Google Doc…' });
+  if (sync === null) return null;
+  try { localStorage.setItem(SYNC_KEY, sync ? '1' : '0'); } catch { /* not remembered */ }
+  const fileId = await pickGoogleDoc('Import a Google Doc');
+  return fileId ? { fileId, sync } : null;
 }

@@ -201,6 +201,18 @@ describe('importing and syncing a Google Doc with tabs', async () => {
     await expect(importGoogleDoc('u/p', '', f.id, owner.id)).rejects.toThrow(/already/);
   });
 
+  it('imported without sync, a Google Doc is a copy: no link, and it can come in again', async () => {
+    const f = await g.createDocument('Copy me');
+    g.tabDoc(f.id).insertText(1, 'Only a copy.');
+    const before = g.batches;
+    const r = await importGoogleDoc('u/p', 'copies', f.id, owner.id, { sync: false });
+    expect(r).toEqual({ docs: ['u/p/copies/Copy me.md'], group: null });
+    expect(md('copies/Copy me.md')).toBe('Only a copy.\n');
+    expect(sync.linkOf(r.docs[0])).toBeNull();
+    expect(g.batches).toBe(before);
+    expect((await importGoogleDoc('u/p', 'copies', f.id, owner.id, { sync: false })).docs).toEqual(['u/p/copies/Copy me 2.md']);
+  });
+
   it('linking a document to a Google Doc that exists brings its differences as tracked changes, and leaves the Google Doc', async () => {
     writeFileSync(join(P, 'mine.md'), '# Plan\n\nWe write the paper.\n\nThen we submit.\n');
     const f = await g.createDocument('Theirs');

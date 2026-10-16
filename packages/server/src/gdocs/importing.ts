@@ -3,7 +3,8 @@
  * markdown document; one with several tabs a document group (core/docgroup.ts) — a folder named
  * after it with a document per tab, in tab order, titled and nested like the tabs. Each document
  * is linked to its tab (sync.ts) with what the tab holds now as its base, so the first sync (run
- * right away) changes nothing on either side but brings the Google comments over.
+ * right away) changes nothing on either side but brings the Google comments over. Imported without
+ * sync, the documents are a copy of what the Google Doc holds now: no link, no comments.
  *
  * reconcileGroup keeps a group in step with the Google Doc's tabs afterwards (after each sync of
  * one of its documents): a tab made there becomes a document of the group, and the group's order,
@@ -43,10 +44,11 @@ function tabMarkdown(whole: DocsFile, tabId: string): string {
 
 interface Source { fileId: string; userId: number; url: string | null; version: string | null }
 
-/** the tab's document written at `rel` and linked to the tab, its base what both sides hold now */
-async function addTabDocument(projectKey: string, rel: string, whole: DocsFile, tab: FlatTab, src: Source): Promise<string> {
+/** the tab's document written at `rel` and (with a `src`) linked to the tab, its base what both sides hold now */
+async function addTabDocument(projectKey: string, rel: string, whole: DocsFile, tab: FlatTab, src: Source | null): Promise<string> {
   fs.writeFileSync(resolveProjectPath(projectKey, rel), tabMarkdown(whole, tab.id), 'utf8');
   const docId = `${projectKey}/${rel}`;
+  if (!src) return docId;
   const doc = await manager.open(docId);
   insertLink({ docId, fileId: src.fileId, userId: src.userId, url: src.url, tabId: tab.id, baseText: doc.textOf(doc.toLyxDocument()), baseGoogle: strip(readGoogle(tabDocument(whole, tab.id)!).blocks), version: src.version });
   return docId;
@@ -54,19 +56,20 @@ async function addTabDocument(projectKey: string, rel: string, whole: DocsFile, 
 
 /**
  * Import the Google Doc `fileId` (one the account picked) into `dir` of the project: its documents
- * (the first is the one to open) and the group's folder, if it became one.
+ * (the first is the one to open) and the group's folder, if it became one. `sync: false` makes a
+ * copy that is not linked to the Google Doc.
  */
-export async function importGoogleDoc(projectKey: string, dir: string, fileId: string, userId: number): Promise<{ docs: string[]; group: string | null }> {
+export async function importGoogleDoc(projectKey: string, dir: string, fileId: string, userId: number, { sync = true }: { sync?: boolean } = {}): Promise<{ docs: string[]; group: string | null }> {
   const api = googleApiFor(userId);
   const [file, whole] = await Promise.all([api.getFile(fileId), api.getDocumentTabs(fileId)]);
   if (file.trashed) throw new Error('That Google Doc is in the trash');
-  if (linksOfFile(fileId).some(l => splitDocId(l.doc_id).project === projectKey)) throw new Error('That Google Doc is synced with a document of this project already');
+  if (sync && linksOfFile(fileId).some(l => splitDocId(l.doc_id).project === projectKey)) throw new Error('That Google Doc is synced with a document of this project already');
   const tabs = flatTabs(whole);
   if (!tabs.length) throw new Error('That Google Doc has no tabs to import');
   const title = (file.name || whole.title || '').trim() || 'Google Doc';
   const dirAbs = resolveProjectPath(projectKey, dir);
   fs.mkdirSync(dirAbs, { recursive: true });
-  const src: Source = { fileId, userId, url: file.webViewLink ?? null, version: file.version ?? null };
+  const src: Source | null = sync ? { fileId, userId, url: file.webViewLink ?? null, version: file.version ?? null } : null;
   const docs: string[] = [];
   let group: string | null = null;
   if (tabs.length === 1) {
@@ -88,7 +91,7 @@ export async function importGoogleDoc(projectKey: string, dir: string, fileId: s
   }
   touchProject(projectKey, userId);
   // the first syncs: the Google comments come over (each to the tab it quotes)
-  for (const id of docs) await syncDoc(id);
+  if (sync) for (const id of docs) await syncDoc(id);
   return { docs, group };
 }
 

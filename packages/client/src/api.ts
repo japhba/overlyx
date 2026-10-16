@@ -375,7 +375,7 @@ export const api = {
   gdocsPicker: () => req<GdocsPicker>('GET', '/api/gdocs/picker'),
   gdocsFile: (fileId: string) => req<{ id: string; name: string; tabs: GdocsTab[] }>('GET', `/api/gdocs/file?id=${encodeURIComponent(fileId)}`),
   /** a picked Google Doc into the project: a document, or a document group of its tabs (the first document to open) */
-  gdocsImport: (project: string, fileId: string, dir: string) => req<{ id: string; docs: string[]; group: string | null }>('POST', `/api/projects/${encodeURIComponent(project)}/gdocs/import`, { fileId, dir }),
+  gdocsImport: (project: string, fileId: string, dir: string, sync = true) => req<{ id: string; docs: string[]; group: string | null }>('POST', `/api/projects/${encodeURIComponent(project)}/gdocs/import`, { fileId, dir, sync }),
   gdocsSync: (id: string) => req<{ link: GdocsLink; report: { pulled: number; pushed: number; comments: { fromGoogle: number; toGoogle: number }; warnings: string[]; notes: string[] } }>('POST', `/api/docs/${encId(id)}/gdocs/sync`),
   gdocsAuto: (id: string, auto: boolean) => req<{ link: GdocsLink }>('POST', `/api/docs/${encId(id)}/gdocs/auto`, { auto }),
   gdocsUnlink: (id: string) => req<{ ok: boolean }>('POST', `/api/docs/${encId(id)}/gdocs/unlink`),

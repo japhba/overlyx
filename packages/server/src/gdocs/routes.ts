@@ -7,7 +7,8 @@
  *   POST /gdocs/disconnect          forget (and revoke) the account's Drive authorisation
  *   GET  /gdocs/picker              what Google's file picker needs: the API key, the app id, an access token
  *   GET  /gdocs/file?id=<fileId>    a Google Doc the account may open: its title and tabs (to pick one)
- *   POST /projects/<p>/gdocs/import { fileId, dir }  a picked Google Doc into the project: a document, or a group of its tabs
+ *   POST /projects/<p>/gdocs/import { fileId, dir, sync? }  a picked Google Doc into the project: a document, or a group of
+ *                                   its tabs — linked to it, or (sync: false) a copy
  *   POST /docs/<id>/gdocs/link      create a Google Doc in the account's Drive and link the document to it;
  *                                   with { fileId, tabId? }: link it to a Google Doc that exists (picked)
  *   POST /docs/<id>/gdocs/sync      sync now
@@ -78,7 +79,7 @@ export function gdocsRoutes(): express.Router {
       if (!driveAccount(req.user!.id)) { res.status(409).json({ error: 'Connect Google Drive first' }); return; }
       const dir = String(req.body?.dir ?? '').replace(/^\/+|\/+$/g, '');
       if (dir) assertWritableRelPath(dir + '/x.md');
-      const r = await importGoogleDoc(key, dir, String(req.body?.fileId ?? ''), req.user!.id);
+      const r = await importGoogleDoc(key, dir, String(req.body?.fileId ?? ''), req.user!.id, { sync: req.body?.sync !== false });
       res.json({ id: r.docs[0], docs: r.docs, group: r.group });
     } catch (e) { failure(res, e); }
   });

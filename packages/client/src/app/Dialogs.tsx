@@ -890,7 +890,7 @@ export function ChildDocDialog({ meta, project, docDir, onInsert, onClose }: {
  */
 type UiDialogRequest =
   | { id: number; kind: 'alert'; title: string; message: string; resolve: () => void }
-  | { id: number; kind: 'confirm'; title: string; message: string; okLabel?: string; danger?: boolean; resolve: (ok: boolean) => void }
+  | { id: number; kind: 'confirm'; title: string; message: string; okLabel?: string; danger?: boolean; check?: { label: string; checked: boolean }; resolve: (ok: boolean, checked?: boolean) => void }
   | { id: number; kind: 'prompt'; title: string; message?: string; value: string; placeholder?: string; okLabel?: string; validate?: (v: string) => string | null; resolve: (v: string | null) => void };
 
 let uiDialogSeq = 0;
@@ -905,6 +905,10 @@ export function uiAlert(title: string, message: string): Promise<void> {
 /** A themed replacement for `window.confirm`. `danger` styles the primary button for a destructive action. */
 export function uiConfirm(title: string, message: string, opts: { okLabel?: string; danger?: boolean } = {}): Promise<boolean> {
   return new Promise(resolve => setUiDialogRequest({ id: ++uiDialogSeq, kind: 'confirm', title, message, ...opts, resolve }));
+}
+/** `uiConfirm` with a checkbox under the message: what it was set to on OK, `null` on cancel. */
+export function uiConfirmCheck(title: string, message: string, check: { label: string; checked: boolean }, opts: { okLabel?: string } = {}): Promise<boolean | null> {
+  return new Promise(resolve => setUiDialogRequest({ id: ++uiDialogSeq, kind: 'confirm', title, message, check, ...opts, resolve: (ok, checked) => resolve(ok ? !!checked : null) }));
 }
 /**
  * A themed replacement for `window.prompt`. `value` is pre-filled and pre-selected; resolves with
@@ -928,13 +932,14 @@ export function DialogHost() {
 
 function UiDialogBody({ req }: { req: UiDialogRequest }) {
   const [value, setValue] = useState(req.kind === 'prompt' ? req.value : '');
+  const [checked, setChecked] = useState(req.kind === 'confirm' && !!req.check?.checked);
   const inputRef = useRef<HTMLInputElement>(null);
   const trimmed = value.trim();
   const error = req.kind === 'prompt' ? req.validate?.(trimmed) ?? null : null;
   const finish = (result?: string | boolean) => {
     setUiDialogRequest(null);
     if (req.kind === 'alert') req.resolve();
-    else if (req.kind === 'confirm') req.resolve(result === true);
+    else if (req.kind === 'confirm') req.resolve(result === true, checked);
     else req.resolve(typeof result === 'string' ? result : null);
   };
   const cancel = () => finish(req.kind === 'prompt' ? undefined : false);
@@ -949,6 +954,7 @@ function UiDialogBody({ req }: { req: UiDialogRequest }) {
     return (
       <Dialog title={req.title} onClose={cancel} buttons={<button class={'btn primary' + (req.danger ? ' danger' : '')} autofocus onClick={() => finish(true)}>{req.okLabel ?? 'OK'}</button>}>
         <p style="white-space:pre-wrap">{req.message}</p>
+        {req.check && <label class="row" data-ui-check><input type="checkbox" checked={checked} onChange={e => setChecked((e.target as HTMLInputElement).checked)} /> {req.check.label}</label>}
       </Dialog>
     );
   }

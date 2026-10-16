@@ -21,7 +21,7 @@ import { uiPrompt, uiConfirm, uiAlert } from './Dialogs';
 import { promptNewFile } from './newfile';
 import { useUiMode } from './uimode';
 import { KIND_ICONS, iconSvg } from './modernicons';
-import { pickGoogleDoc } from './gpicker';
+import { chooseGoogleImport } from './gpicker';
 
 /**
  * Subscribe to the server's change stream for one project (SSE): `onChange` fires whenever files
@@ -184,14 +184,9 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
   const importGoogle = async (dir = '') => {
     if (!project) return;
     try {
-      const st = await api.gdocsAccount();
-      if (!st.account) {
-        if (await uiConfirm('Import from Google Docs', 'Connect Google Drive first — OverLyX then opens only the Google Docs you pick.', { okLabel: 'Connect Google Drive…' })) location.href = '/api/gdocs/connect?next=' + encodeURIComponent(location.hash.replace(/\?.*$/, ''));
-        return;
-      }
-      const fileId = await pickGoogleDoc('Import a Google Doc');
-      if (!fileId) return;
-      const r = await api.gdocsImport(project.name, fileId, dir);
+      const choice = await chooseGoogleImport();
+      if (!choice) return;
+      const r = await api.gdocsImport(project.name, choice.fileId, dir, choice.sync);
       reveal((r.group ?? dir) + '/');
       await load();
       onOpen(r.id);

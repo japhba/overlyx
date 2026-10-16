@@ -8,11 +8,12 @@ import { useEffect, useState } from 'preact/hooks';
 import { inkOn } from './contrast';
 import { api, zipUrl, type AdminProjectInfo, type Project, type ProjectPerson, type User } from '../api';
 import { AvatarContent, initials } from './Avatar';
-import { OverleafImport, type ImportInitial } from './OverleafImport';
+import { OverleafImport, projectNameFrom, type ImportInitial } from './OverleafImport';
+import { chooseGoogleImport } from './gpicker';
 import { takePendingImport } from './pendingImport';
 import { sortByRecency, recencyLabel } from './recency';
 import { projectShortName, splitProjectKey, isProjectName } from '@overlyx/core';
-import { uiConfirm, Dialog } from './Dialogs';
+import { uiConfirm, uiAlert, Dialog } from './Dialogs';
 import { promptNewFile } from './newfile';
 import { useUiMode } from './uimode';
 import { KIND_ICONS, iconSvg } from './modernicons';
@@ -73,6 +74,28 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
   const [adminList, setAdminList] = useState<AdminProjectInfo[] | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [importSource, setImportSource] = useState<'overleaf' | 'lyx'>('overleaf');
+  // Google's picker is set up on this server: Import from Google Docs is offered
+  const [gdocs, setGdocs] = useState(false);
+  useEffect(() => { if (!user.guest) api.gdocsAccount().then(s => setGdocs(s.picker)).catch(() => setGdocs(false)); }, [user.guest]);
+  /** a picked Google Doc as a project of its own, named after it — its document opened */
+  const importGoogle = async () => {
+    try {
+      const choice = await chooseGoogleImport();
+      if (!choice) return;
+      const file = await api.gdocsFile(choice.fileId);
+      const base = /[A-Za-z0-9]/.test(file.name) ? projectNameFrom(file.name) : 'Google Doc';
+      let key = '';
+      for (let k = 1; !key; k++) {
+        try { key = (await api.createProject(k > 1 ? `${base} ${k}` : base)).project.name; }
+        catch (e) { if (k >= 50 || !/exists already/.test((e as Error).message)) throw e; }
+      }
+      try {
+        const r = await api.gdocsImport(key, choice.fileId, '', choice.sync);
+        void load(); onChanged();
+        onOpen(r.id);
+      } catch (e) { await api.deleteProject(key).catch(() => undefined); throw e; }
+    } catch (e) { await uiAlert('Import Failed', (e as Error).message); }
+  };
   const [view, setView] = useState<HomeView>(storedView);
   const switchView = () => {
     const next: HomeView = view === 'rows' ? 'grid' : 'rows';
@@ -224,6 +247,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
           : <button class="btn primary" data-new-project onClick={() => setNewOpen(true)} title="A new document, slide deck or poster — each in a project of its own">+ New</button>}
         {!user.guest && <button class="btn" data-import-overleaf onClick={() => { setImportSource('overleaf'); setImportOpen(true); }} title="Bring projects over from Overleaf — through its Git access, or from a downloaded zip">Import from Overleaf…</button>}
         {!user.guest && <button class="btn" data-import-lyx onClick={() => { setImportSource('lyx'); setImportOpen(true); }}>Import from LyX…</button>}
+        {!user.guest && gdocs && <button class="btn" data-import-gdocs onClick={() => void importGoogle()} title="Bring a Google Doc over as a project of its own — kept in sync with it, or as a copy">Import from Google Docs…</button>}
         <button class="btn" onClick={onBrowse}>Show the files panel</button>
         <button class="home-view-switch" data-home-view-switch={view === 'rows' ? 'grid' : 'rows'} onClick={switchView}
           title={view === 'rows' ? 'Show projects as a grid of cards' : 'Show projects as a list'} aria-label={view === 'rows' ? 'Grid view' : 'List view'}>
