@@ -7,6 +7,7 @@
  */
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { SashProps } from './notespane';
+import { documentViewScale } from '../editor/viewscale';
 
 const PX_PER_CM = 96 / 2.54;
 export const MIN_WIDTH = 400, MAX_WIDTH = 1600, DEFAULT_WIDTH = 720;
@@ -26,9 +27,9 @@ export function Ruler({ width, onChange, notes }: { width: number; onChange: (w:
   useEffect(() => {
     const el = bandRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => setBandPx(el.getBoundingClientRect().width));
+    const ro = new ResizeObserver(() => setBandPx(el.offsetWidth));
     ro.observe(el);
-    setBandPx(el.getBoundingClientRect().width);
+    setBandPx(el.offsetWidth);
     return () => ro.disconnect();
   }, [width, !!notes]);
 
@@ -39,7 +40,7 @@ export function Ruler({ width, onChange, notes }: { width: number; onChange: (w:
     const rect = band.getBoundingClientRect();
     const centre = rect.left + rect.width / 2;
     const move = (e: PointerEvent) => {
-      const w = Math.round(Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, 2 * Math.abs(e.clientX - centre))));   // centred column: symmetric
+      const w = Math.round(Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, 2 * Math.abs(e.clientX - centre) / documentViewScale(band))));
       setDrag({ side, width: w });
       onChange(w);
     };

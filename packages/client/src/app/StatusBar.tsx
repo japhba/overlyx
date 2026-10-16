@@ -7,6 +7,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { styleLabel } from './stylenames';
 import { layoutZoom, layoutZoomStep, onLayoutZoom } from '../editor/layout/controller';
 import { stepTextZoom } from './shellutil';
+import { viewportZoom, onViewportZoom, resetViewportZoom } from './documentviewport';
 
 export interface Status { connected: boolean; synced: boolean; users: PresenceUser[] }
 
@@ -39,7 +40,18 @@ export function UserAvatars({ users, onJump }: { users: PresenceUser[]; onJump?:
   );
 }
 
-/** LyX-style zoom control (bottom right): −, a percentage menu, + (Ctrl+Plus / Ctrl+Minus do the same; 100% resets). */
+/** The separate viewport magnifier and its reset, displayed beside the text-size menu. */
+export function ViewportZoomIndicator() {
+  const [scale, setScale] = useState(viewportZoom);
+  useEffect(() => { const read = () => setScale(viewportZoom()); const off = onViewportZoom(read); read(); return off; }, []);
+  if (scale === null) return null;
+  const pct = Math.round(scale * 100);
+  return <span class="viewport-zoom-control"><button type="button" data-viewport-zoom-reset disabled={pct === 100}
+    title="Viewport magnification (trackpad pinch). Click to reset to 100%. Text size and line breaks stay the same."
+    aria-label={`Viewport zoom ${pct}%. Reset viewport zoom`} onClick={resetViewportZoom}>View {pct}%{pct !== 100 && ' ↺'}</button></span>;
+}
+
+/** Text size, plus the independent viewport level; layout canvases keep their own fit controls. */
 export function ZoomControl({ zoom, onZoom }: { zoom: number; onZoom: (z: number) => void }) {
   // a layout document's canvas has its own zoom (pinch, Ctrl + wheel): "Fit" is the whole page
   const [canvas, setCanvas] = useState(layoutZoom());
@@ -63,11 +75,13 @@ export function ZoomControl({ zoom, onZoom }: { zoom: number; onZoom: (z: number
   const presets = [50, 75, 90, 100, 110, 125, 150, 175, 200, 250];
   return (
     <span class="zoom" title="Rendered text size (Ctrl+Plus / Ctrl+Minus; 100% resets). Exported font sizes stay the same.">
+      <span class="zoom-label">Text</span>
       <button type="button" class="zoom-btn" data-zoom-out onClick={() => onZoom(stepTextZoom(zoom, -1))}>−</button>
       <select class="zoom-select" data-zoom value={String(pct)} onChange={e => onZoom(Number((e.target as HTMLSelectElement).value) / 100)}>
         {(presets.includes(pct) ? presets : [...presets, pct].sort((a, b) => a - b)).map(p => <option key={p} value={String(p)}>{p}%</option>)}
       </select>
       <button type="button" class="zoom-btn" data-zoom-in onClick={() => onZoom(stepTextZoom(zoom, 1))}>+</button>
+      <ViewportZoomIndicator />
     </span>
   );
 }

@@ -17,13 +17,13 @@ export interface ZoomPill {
 }
 
 /** the pill in the element `el` gives (the view's own) */
-export function zoomPill(el: () => HTMLElement | null, ms = 800): ZoomPill {
+export function zoomPill(el: () => HTMLElement | null, ms = 800, label = ''): ZoomPill {
   let timer: ReturnType<typeof setTimeout> | null = null;
   return {
     show(scale, fit) {
       const e = el();
       if (!e) return;
-      e.textContent = zoomText(Math.round(scale * 100), fit);
+      e.textContent = (label ? label + ' · ' : '') + zoomText(Math.round(scale * 100), fit);
       e.classList.toggle('fit', !!fit);
       e.classList.add('on');
       if (timer) clearTimeout(timer);
@@ -37,7 +37,9 @@ export function zoomPill(el: () => HTMLElement | null, ms = 800): ZoomPill {
  * A pill of its own for a view outside Preact (a layout document's canvas, the text): on the page
  * (fixed, in <body>, as the view may scroll), at the top centre of the element `host` gives.
  */
-export function hostedZoomPill(host: () => HTMLElement | null, attr: string): ZoomPill {
+const activeHostedPills = new WeakMap<HTMLElement, HTMLElement>();
+
+export function hostedZoomPill(host: () => HTMLElement | null, attr: string, label = ''): ZoomPill {
   let made: HTMLElement | null = null;
   const pill = zoomPill(() => {
     const h = host();
@@ -49,10 +51,13 @@ export function hostedZoomPill(host: () => HTMLElement | null, attr: string): Zo
       made.setAttribute(attr, '');
       document.body.appendChild(made);
     }
+    const previous = activeHostedPills.get(h);
+    if (previous !== made) previous?.classList.remove('on');
+    activeHostedPills.set(h, made);
     const r = h.getBoundingClientRect();
     made.style.left = `${r.left + r.width / 2}px`;
     made.style.top = `${r.top + 14}px`;
     return made;
-  });
+  }, 800, label);
   return { show: pill.show, dispose() { pill.dispose(); made?.remove(); made = null; } };
 }

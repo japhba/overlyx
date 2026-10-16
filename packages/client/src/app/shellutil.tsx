@@ -5,8 +5,8 @@
  * paragraph layout picker, word counts. One copy for both shells (tests/parity.test.ts).
  */
 import { hostedZoomPill } from './zoomhud';
-import { DetentPinch, stepOnto, type Detent } from './zoomdetent';
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { stepOnto, type Detent } from './zoomdetent';
+import { useEffect, useState } from 'preact/hooks';
 import { styleLabel, styleSearchText } from './stylenames';
 import type { EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
@@ -29,11 +29,11 @@ export function applyEditorZoom(zoom: number): void {
   textZoomShown = zoom;
 }
 let textZoomShown: number | null = null;
-const textZoomPill = hostedZoomPill(() => document.querySelector<HTMLElement>('.editor-scroll'), 'data-text-zoomhud');
+const textZoomPill = hostedZoomPill(() => document.querySelector<HTMLElement>('.editor-scroll'), 'data-text-zoomhud', 'Text');
 
-/** how far the text zooms (the status bar's, Ctrl + / −'s, a pinch's) */
+/** how far the rendered text size changes (the percentage menu and Ctrl + / −) */
 export const TEXT_ZOOM_MIN = 0.5, TEXT_ZOOM_MAX = 2.5;
-/** the text's own size: a level a pinch stops at and holds, and a step does not pass (zoomdetent.ts) */
+/** a text-size step stops at 100 % (zoomdetent.ts) */
 const TEXT_LEVELS: Detent<'own'>[] = [{ key: 'own', z: 1, hold: Math.log(1.25) }];
 
 /** the text zoom a step from `z` goes to (Ctrl + / −, the status bar's − / +: `d` ±1; 0: 100 %): 10 % on, not past 100 % */
@@ -43,139 +43,7 @@ export function stepTextZoom(z: number, d: number): number {
   return Math.max(TEXT_ZOOM_MIN, Math.min(TEXT_ZOOM_MAX, +to.toFixed(2)));
 }
 
-/** the scroller of the document text under `t`, if a pinch there zooms the text (a layout document's canvas zooms itself) */
-function textScroller(t: EventTarget | null): HTMLElement | null {
-  const el = t instanceof Element ? t : null;
-  const sc = el?.closest<HTMLElement>('.editor-scroll');
-  const ed = sc?.querySelector('.lyx-editor');
-  return sc && ed && !ed.classList.contains('ol-layout') ? sc : null;
-}
-
-/**
- * What a zoom keeps where it is: the character under the screen point (x, y) — its middle's screen y,
- * read again once the text has reflowed — and how far from the point it was.
- */
-function textAnchor(x: number, y: number): { mid: () => number | null; off: number } | null {
-  const d = document as Document & { caretPositionFromPoint?(x: number, y: number): { offsetNode: Node; offset: number } | null; caretRangeFromPoint?(x: number, y: number): Range | null };
-  const pos = d.caretPositionFromPoint?.(x, y);
-  const r = pos ? { node: pos.offsetNode, at: pos.offset } : (() => { const q = d.caretRangeFromPoint?.(x, y); return q ? { node: q.startContainer, at: q.startOffset } : null; })();
-  if (!r) return null;
-  const mid = (): number | null => {
-    if (!r.node.isConnected) return null;
-    let box: DOMRect | undefined;
-    const len = r.node.nodeType === Node.TEXT_NODE ? r.node.textContent?.length ?? 0 : 0;
-    if (len) {
-      // (a character's box: a collapsed range has none at a line's start in some browsers)
-      const q = document.createRange(), i = Math.min(r.at, len - 1);
-      q.setStart(r.node, i); q.setEnd(r.node, i + 1);
-      box = q.getClientRects()[0] ?? q.getBoundingClientRect();
-    } else box = (r.node instanceof Element ? r.node : r.node.parentElement)?.getBoundingClientRect();
-    return box && (box.width || box.height) ? box.top + box.height / 2 : null;
-  };
-  const m = mid();
-  return m === null ? null : { mid, off: m - y };
-}
-
-/**
- * Two fingers on a touch screen zoom the document text (their middle pans as it moves; one finger
- * scrolls as ever). The line under the fingers stays under them while the text reflows. It stops at
- * the text's own size (100 %) and holds there till pinched well past it (zoomdetent.ts), giving a
- * little meanwhile and settling back once let go; let go near it, it settles on it. Said over the
- * text as it goes (the pill). Both shells (App, VS Code's EditorShell): `zoom` and `setZoom` are their text zoom.
- * Unhandled trackpad pinches are swallowed so they cannot magnify the whole interface instead.
- */
-export function useTextPinch(zoom: number, setZoom: (z: number) => void): void {
-  const zoomRef = useRef(zoom); zoomRef.current = zoom;
-  const setRef = useRef(setZoom); setRef.current = setZoom;
-  useEffect(() => {
-    /** the zoom shown now, ahead of the shell's while a touch pinch goes on (`--editor-zoom`) */
-    const shown = () => parseFloat(document.documentElement.style.getPropertyValue('--editor-zoom')) || zoomRef.current;
-    /** show zoom `z` (the text reflows), the anchor's character back at (its offset from) the screen y `y`; `held`: said as 100 % */
-    const show = (sc: HTMLElement, a: ReturnType<typeof textAnchor>, z0: number, z: number, y: number, held: boolean) => {
-      document.documentElement.style.setProperty('--editor-zoom', String(z));
-      textZoomPill.show(held ? 1 : z);
-      textZoomShown = z;
-      const m = a?.mid();
-      if (a && m !== null && m !== undefined) sc.scrollTop += m - (y + a.off * (z / z0));
-    };
-    const commit = (z: number) => { const v = Math.abs(z - 1) < 0.005 ? 1 : +z.toFixed(2); if (v !== zoomRef.current) recordInteraction('zoom', 'changed', { target: 'text' }); textZoomShown = v; setRef.current(v); };
-
-    let g: { sc: HTMLElement; p: DetentPinch<'own'>; a: ReturnType<typeof textAnchor>; z0: number; z: number; held: boolean; x: number; y: number } | null = null;
-    let raf = 0, settling = 0;
-    const draw = () => { raf = 0; if (g) show(g.sc, g.a, g.z0, g.z, g.y, g.held); };
-    const begin = (sc: HTMLElement, x: number, y: number) => {
-      cancelAnimationFrame(settling); settling = 0;
-      const z0 = shown();
-      g = { sc, p: new DetentPinch<'own'>(Math.abs(z0 - 1) < 0.005 ? 'own' : z0, z0, [TEXT_ZOOM_MIN, TEXT_ZOOM_MAX]), a: textAnchor(x, y), z0, z: z0, held: false, x, y };
-    };
-    const by = (d: number, x: number, y: number) => {
-      if (!g) return;
-      const sh = g.p.by(d, TEXT_LEVELS);
-      g.held = typeof sh.zoom === 'string';
-      g.z = typeof sh.zoom === 'string' ? sh.stretch : sh.zoom;
-      g.x = x; g.y = y;
-      if (!raf) raf = requestAnimationFrame(draw);
-    };
-    const end = () => {
-      const p = g;
-      g = null;
-      if (!p) return;
-      cancelAnimationFrame(raf); raf = 0;
-      const e = p.p.end(TEXT_LEVELS);
-      if (!e) { show(p.sc, p.a, p.z0, p.z, p.y, false); commit(p.z); return; }
-      // onto 100 % on a short spring
-      const t0 = performance.now();
-      const frame = () => {
-        const t = Math.min(1, (performance.now() - t0) / 200), k = 1 - (1 - t) ** 3;
-        show(p.sc, p.a, p.z0, e.from + (1 - e.from) * k, p.y, true);
-        if (t < 1) { settling = requestAnimationFrame(frame); return; }
-        settling = 0;
-        commit(1);
-      };
-      frame();
-    };
-    let touch: { d: number; x: number; y: number } | null = null;
-    const two = (t: TouchList) => ({ d: Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY), x: (t[0].clientX + t[1].clientX) / 2, y: (t[0].clientY + t[1].clientY) / 2 });
-    const onTouch = (e: TouchEvent) => {
-      if (e.type === 'touchstart') {
-        if (e.touches.length !== 2 || touch) return;
-        const sc = textScroller(e.target);
-        if (!sc) return;
-        e.preventDefault();
-        touch = two(e.touches);
-        begin(sc, touch.x, touch.y);
-        return;
-      }
-      if (!touch) return;
-      if (e.type === 'touchmove') {
-        if (e.touches.length < 2 || !g) return;
-        e.preventDefault();
-        const now = two(e.touches);
-        g.sc.scrollTop -= now.y - touch.y;
-        g.sc.scrollLeft -= now.x - touch.x;
-        if (now.d > 0 && touch.d > 0) by(Math.log(now.d / touch.d), now.x, now.y);
-        touch = now;
-        return;
-      }
-      if (e.touches.length < 2) { touch = null; end(); }
-    };
-    const opts = { passive: false } as AddEventListenerOptions;
-    // Trackpad pinches must not fall through to Chrome's zoom of the whole app. Cancel only the
-    // browser action: PDF/canvas handlers run first, ordinary scrolling passes through, and the
-    // document zoom buttons/keys still work.
-    const onWheel = (e: WheelEvent) => { if (e.ctrlKey || e.metaKey) e.preventDefault(); };
-    const onGesture = (e: Event) => e.preventDefault();
-    window.addEventListener('wheel', onWheel, opts);
-    for (const t of ['gesturestart', 'gesturechange', 'gestureend']) window.addEventListener(t, onGesture, opts);
-    for (const t of ['touchstart', 'touchmove', 'touchend', 'touchcancel']) document.addEventListener(t, onTouch as EventListener, opts);
-    return () => {
-      window.removeEventListener('wheel', onWheel);
-      for (const t of ['gesturestart', 'gesturechange', 'gestureend']) window.removeEventListener(t, onGesture);
-      for (const t of ['touchstart', 'touchmove', 'touchend', 'touchcancel']) document.removeEventListener(t, onTouch as EventListener);
-      cancelAnimationFrame(raf); cancelAnimationFrame(settling);
-    };
-  }, []);
-}
+export { useDocumentViewportZoom } from './documentviewport';
 
 export function debounce<T extends (...a: any[]) => void>(fn: T, ms: number): T & { cancel(): void } {
   let t: ReturnType<typeof setTimeout> | null = null;

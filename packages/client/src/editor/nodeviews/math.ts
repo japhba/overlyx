@@ -16,6 +16,7 @@ import { clipboardMenuItems, selectionCovers } from '../clipmenu';
 import { toggleMathDisplay, countLabelRefs, renameLabelRefs } from '../commands';
 import { editorContext, viewDocDir, viewProject } from '../context';
 import { getPrefs } from '../../prefs';
+import { documentViewScale } from '../viewscale';
 import { openRewriteMath, REWRITE_KEY } from '../ai/rewrite';
 import { openMathLinkBox, openLink, mathLinkUrl, LINK_KEY } from '../links';
 import { applyChangeAttrs } from '../plugins/changes';
@@ -606,7 +607,7 @@ export class MathDisplayView implements NodeView {
       const r = rects[numberedRowsIdx[k]];
       const sp = document.createElement('span');
       sp.textContent = t;
-      sp.style.top = `${(r.top + r.bottom) / 2 - base.top}px`;
+      sp.style.top = `${((r.top + r.bottom) / 2 - base.top) / documentViewScale(this.dom)}px`;
       return sp;
     }));
   }
@@ -634,8 +635,9 @@ export class MathDisplayView implements NodeView {
     const metaW = this.metaEl.offsetWidth;
     const need = contentW + metaW + 10;
     this.layoutNumbers();
-    const pageLeft = scroll.getBoundingClientRect().left + 6;
-    const left = dom.getBoundingClientRect().left + scroll.scrollLeft - (parseFloat(dom.style.marginLeft) || 0);
+    const scale = documentViewScale(dom);
+    const pageLeft = (scroll.getBoundingClientRect().left + 6) / scale;
+    const left = (dom.getBoundingClientRect().left + scroll.scrollLeft) / scale - (parseFloat(dom.style.marginLeft) || 0);
     const leftRoom = Math.max(0, left - pageLeft);
     if (need <= avail) {
       if (shifted) { dom.style.marginLeft = ''; dom.style.width = ''; dom.style.gridTemplateColumns = ''; }
@@ -657,7 +659,7 @@ export class MathDisplayView implements NodeView {
   private placeLabel(marginRoom: number, content: HTMLElement) {
     const chipW = this.labelEl.offsetWidth;
     if (!chipW) { delete this.dom.dataset.labelPos; return; }
-    const inside = content.getBoundingClientRect().left - this.dom.getBoundingClientRect().left;
+    const inside = (content.getBoundingClientRect().left - this.dom.getBoundingClientRect().left) / documentViewScale(this.dom);
     const pos = marginRoom >= chipW + 12 ? 'margin' : inside >= chipW + 8 ? 'inside' : 'above';
     if (this.dom.dataset.labelPos !== pos) this.dom.dataset.labelPos = pos;
   }

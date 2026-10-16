@@ -16,6 +16,7 @@
  * line, and a position is found on the line nearest the pointer.
  */
 import { atomCells, nargs, isHull, type Atom, type CellRef, type Owner, type Slice, type Hull } from '@overlyx/core';
+import { documentViewScale } from '../viewscale';
 
 export interface Box { left: number; right: number; top: number; bottom: number }
 
@@ -305,7 +306,7 @@ export class MathGeometry implements GeomLookup {
   private fontSize(el: HTMLElement): number {
     if (!this.fs0) this.fs0 = parseFloat(getComputedStyle(this.content.querySelector('mjx-math') ?? this.content).fontSize) || 16;
     const sl = Math.min(2, Math.max(0, Number(el.getAttribute('data-sl')) || 0));
-    return this.fs0 * [1, 0.707, 0.5][sl];
+    return this.fs0 * documentViewScale(this.content) * [1, 0.707, 0.5][sl];
   }
 
   private measure(ref: CellRef, parts: HTMLElement[]): CellGeom {

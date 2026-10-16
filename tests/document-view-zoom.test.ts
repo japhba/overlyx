@@ -2,22 +2,22 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { h, render } from 'preact';
 import { act } from 'preact/test-utils';
-import { useEffect, useState } from 'preact/hooks';
-import { applyEditorZoom, useTextPinch } from '../packages/client/src/app/shellutil.tsx';
-import { schema } from '../packages/core/src/schema.ts';
+import { useEffect, useRef, useState } from 'preact/hooks';
+import { applyEditorZoom, useDocumentViewportZoom } from '../packages/client/src/app/shellutil.tsx';
+import { viewportZoom } from '../packages/client/src/app/documentviewport.ts';
+import { ZoomControl } from '../packages/client/src/app/StatusBar.tsx';
 import { resetUsageForTests } from '../packages/client/src/usage.ts';
 
 afterEach(() => { render(null, document.body); document.body.replaceChildren(); resetUsageForTests(); });
 
 describe('document view zoom', () => {
-  it('blocks browser pinch zoom without changing document zoom or the model, and still allows scrolling', async () => {
-    const doc = schema.nodes.doc.create(null, schema.nodes.paragraph.create(null, [schema.text('Text'), schema.nodes.graphics.create({ params: JSON.stringify(['filename plot.png', 'width 6cm']) })]));
-    const before = doc.toJSON();
+  it('magnifies the viewport separately from text size, shows its level, and resets without changing text size', async () => {
     function Harness() {
       const [zoom, setZoom] = useState(1.2);
-      useTextPinch(zoom, setZoom);
+      const ref = useRef<HTMLDivElement>(null);
+      useDocumentViewportZoom(ref, 'sample');
       useEffect(() => applyEditorZoom(zoom), [zoom]);
-      return h('div', { class: 'editor-scroll' }, h('div', { class: 'editor-page' }, h('div', { class: 'lyx-editor' }, 'Text')));
+      return h('div', {}, h('div', { class: 'editor-scroll', ref }, h('div', { class: 'editor-page' }, h('div', { class: 'lyx-editor' }, 'Text'))), h(ZoomControl, {zoom, onZoom: setZoom}));
     }
     await act(() => render(h(Harness, {}), document.body));
     const pane = document.querySelector('.editor-scroll')!;
@@ -38,7 +38,14 @@ describe('document view zoom', () => {
         expect(gesture.defaultPrevented).toBe(true);
       }
     }
+    await act(async () => { await new Promise(requestAnimationFrame); });
+    expect(viewportZoom()).toBeGreaterThan(1);
+    expect(document.querySelector('[data-viewport-zoom-reset]')?.textContent).toMatch(/View 1\d\d%/);
+    expect((document.querySelector('[data-zoom]') as HTMLSelectElement).value).toBe('120');
     expect(document.documentElement.style.getPropertyValue('--editor-zoom')).toBe('1.2');
-    expect(doc.toJSON()).toEqual(before);
+    await act(() => (document.querySelector('[data-viewport-zoom-reset]') as HTMLButtonElement).click());
+    expect(viewportZoom()).toBe(1);
+    expect(document.querySelector<HTMLElement>('.editor-page')!.style.transform).toBe('');
+    expect(document.documentElement.style.getPropertyValue('--editor-zoom')).toBe('1.2');
   });
 });

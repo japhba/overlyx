@@ -372,7 +372,7 @@ html[data-theme="dark"] .tb-btn .tb-img { filter: invert(0.85) hue-rotate(180deg
 
 .editor-column { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .editor-scroll { flex: 1; min-height: 0; overflow: auto; background: var(--page-bg); position: relative; scroll-padding-bottom: 90px; /* keep the caret above the bottom-docked toolbars */ }
-/* two fingers on a document's text: its own pinch, the text's zoom (shellutil.tsx useTextPinch) — not the browser's (a layout document's canvas zooms itself) */
+/* Two fingers magnify the document viewport (app/documentviewport.ts); one finger still scrolls. */
 .editor-scroll:has(> .editor-page .lyx-editor:not(.ol-layout)) { touch-action: pan-x pan-y; }
 /* "infinite margin": the page fills the viewport; text stays in a left-bound column of readable width,
    while wide objects (display math, tables, floats) may overflow the column and are centred on it */

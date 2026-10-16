@@ -2232,14 +2232,18 @@ also a board's). **Rendered text size**: the document's zoom menu changes the fo
 formulas in the editor. Text reflows within the existing column; page width, padding, ruler and
 figure sizing do not scale with the menu. This is a browser view preference; document font sizes,
 graphics parameters and exported files stay unchanged.
-Two fingers on a touch screen zoom the rendered text (`useTextPinch`, `.editor-scroll:has(… .lyx-editor) {
-touch-action: pan-x pan-y }`, their middle scrolls); the character under
-the fingers stays under them while the text reflows (`caretPositionFromPoint` anchors text, the scroll is set again
-each frame), and 100 % is a level it stops at and holds (×1.25), as the canvases' fits. Trackpad
-pinches and Ctrl/⌘ + wheel do not zoom the document or magnify the whole interface. A non-passive
-window listener cancels the browser action after PDF/canvas handlers have had their turn; ordinary
-scrolling still works. The document's zoom buttons,
-percentage menu and Ctrl ± shortcuts remain; every step stops at 100 % (`stepTextZoom`).
+**Viewport magnification** (`app/documentviewport.ts`, both shells): a trackpad pinch or Ctrl/⌘ +
+wheel enlarges the rendered page and ruler from 100 % to 400 %, about the pointer. The page's
+logical width is held while a CSS transform magnifies it, so computed font sizes and line breaks
+stay the same; figures and formulas enlarge with the rest of the page. The interface and browser
+page scale stay unchanged. Two fingers on a touch screen magnify and pan the same viewport;
+ordinary scrolling still works. The toolbar labels its two levels **Text** and **View**, and the
+View percentage resets magnification to 100 % when clicked. A temporary pill labels each change
+Text or View too. Magnification resets on a document switch. Formula overlays, comment placement,
+ink and ruler dragging convert between screen and document coordinates through `editor/viewscale.ts`.
+The text-size menu and Ctrl ± still change the rendered font size independently and stop at 100 %
+on each step (`stepTextZoom`). Unhandled pinches outside the document cancel the browser action;
+PDF and layout canvases keep their own zoom handlers.
 Not on a layout document's canvas, which zooms itself. The extension used to zoom with CSS `zoom` on its scroll container instead, which puts
 mouse coordinates and layout into different scales in Chromium — drags stopped following the pointer
 and selection highlights disagreed with the selection as soon as the document was zoomed.

@@ -56,6 +56,7 @@ export { INK_PALETTES, HIGHLIGHT_OPACITY } from '@overlyx/core/inkpresets.ts';
 import { INK_PALETTES, HIGHLIGHT_OPACITY } from '@overlyx/core/inkpresets.ts';
 import { loadDeckInk, saveDeckInk, patchDeckInk, subscribeDeckInk, type DeckInk } from '../../deliverable/deckink';
 import { isScribble } from '@overlyx/core/freehand.ts';
+import { documentViewScale } from '../viewscale';
 /**
  * Widths are millimetres on the page, as Goodnotes shows them; the strokes themselves are stored
  * in px at 100 % zoom (the SVG sidecars' units), converted with the ruler's 96 dpi scale.
@@ -289,7 +290,8 @@ function pathFor(stroke: InkStroke): Path2D {
   return p;
 }
 
-const zoom = () => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--editor-zoom')) || 1;
+const zoom = () => (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--editor-zoom')) || 1)
+  * documentViewScale(document.querySelector('.lyx-editor') ?? document.documentElement);
 const round4 = (n: number) => Math.round(n * 4) / 4;
 const newSrc = () => `figures/ink-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}.svg`;
 
@@ -349,8 +351,9 @@ class InkLayer {
     const onScroll = () => this.schedule();
     const onResize = () => this.schedule();
     this.scroller.addEventListener('scroll', onScroll, { passive: true });
+    this.scroller.addEventListener('ol:viewport-zoom', onResize);
     window.addEventListener('resize', onResize);
-    this.unsub.push(() => this.scroller?.removeEventListener('scroll', onScroll), () => window.removeEventListener('resize', onResize));
+    this.unsub.push(() => this.scroller?.removeEventListener('scroll', onScroll), () => this.scroller?.removeEventListener('ol:viewport-zoom', onResize), () => window.removeEventListener('resize', onResize));
     this.ro = new ResizeObserver(() => this.schedule());
     this.ro.observe(view.dom);
     const onAwareness = () => this.schedule();

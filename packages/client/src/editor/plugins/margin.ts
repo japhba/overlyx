@@ -9,6 +9,7 @@
  */
 import { Plugin, PluginKey } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
+import { documentViewScale } from '../viewscale';
 
 export const marginKey = new PluginKey<boolean>('lyx-margin');
 
@@ -80,15 +81,16 @@ export function layout(view: EditorView): void {
   // split) the cards go just right of the text column
   const page = root.closest('.editor-page') as HTMLElement | null;
   const scroll = root.closest('.editor-scroll') as HTMLElement | null;
+  const scale = documentViewScale(root);
   const paneWidth = page ? parseFloat(getComputedStyle(page).getPropertyValue('--notes-col')) : NaN;
   let columnLeft: number, cardWidth: number;
   if (page && paneWidth > 0 && !view.dom.classList.contains('ol-layout')) {
     const gutter = scroll ? Math.max(0, (page.offsetWidth - scroll.clientWidth) / 2) : 0;
-    const paneRight = page.getBoundingClientRect().right - gutter;
-    columnLeft = paneRight - paneWidth + PANE_PAD;
+    const paneRight = page.getBoundingClientRect().right - gutter * scale;
+    columnLeft = paneRight - (paneWidth - PANE_PAD) * scale;
     cardWidth = Math.max(120, Math.min(CARD_MAX, paneWidth - 2 * PANE_PAD));
   } else {
-    columnLeft = view.dom.getBoundingClientRect().right + 28;
+    columnLeft = view.dom.getBoundingClientRect().right + 28 * scale;
     cardWidth = 320;
   }
   // cards in folded-away sections (plugins/fold.ts) have no box: they must not push the others down
@@ -104,10 +106,10 @@ export function layout(view: EditorView): void {
     // coordinates must be relative to the box's offset parent (nearest positioned ancestor)
     const op = (box.offsetParent as HTMLElement | null) ?? root;
     const opRect = op.getBoundingClientRect();
-    const topV = Math.max(it.anchorTop - 2, nextTop);
-    box.style.top = `${topV - opRect.top + op.scrollTop}px`;
-    box.style.left = `${columnLeft - opRect.left}px`;
-    nextTop = topV + box.getBoundingClientRect().height + 8;
+    const topV = Math.max(it.anchorTop - 2 * scale, nextTop);
+    box.style.top = `${(topV - opRect.top) / scale + op.scrollTop}px`;
+    box.style.left = `${(columnLeft - opRect.left) / scale}px`;
+    nextTop = topV + box.getBoundingClientRect().height + 8 * scale;
   }
   for (const c of cards) if (!top.includes(c)) c.classList.remove('in-margin');
 }
@@ -117,14 +119,15 @@ function placePopover(view: EditorView, card: HTMLElement, box: HTMLElement): vo
   const chip = card.querySelector<HTMLElement>(':scope > .inset-anchor') ?? card;
   const c = chip.getBoundingClientRect();
   const col = view.dom.getBoundingClientRect();
-  const width = Math.max(220, Math.min(360, col.width));
+  const scale = documentViewScale(card);
+  const width = Math.max(220, Math.min(360, col.width / scale));
   card.classList.add('cm-placed');
   box.style.width = width + 'px';
   const op = (box.offsetParent as HTMLElement | null) ?? view.dom;
   const opRect = op.getBoundingClientRect();
-  const left = Math.max(col.left, Math.min(c.left - 16, col.right - width));
-  box.style.left = `${left - opRect.left + op.scrollLeft}px`;
-  box.style.top = `${c.bottom + 6 - opRect.top + op.scrollTop}px`;
+  const left = Math.max(col.left, Math.min(c.left - 16 * scale, col.right - width * scale));
+  box.style.left = `${(left - opRect.left) / scale + op.scrollLeft}px`;
+  box.style.top = `${(c.bottom + 6 * scale - opRect.top) / scale + op.scrollTop}px`;
 }
 
 export function setMarginMode(view: EditorView, on: boolean): void {

@@ -1,0 +1,5 @@
+.zoom-label { font-size: 11px; color: var(--ui-muted); margin: 0 3px; }
+.viewport-zoom-control { margin-left: 6px; padding-left: 6px; border-left: 1px solid var(--ui-border); }
+.viewport-zoom-control button { border: 0; border-radius: 4px; background: transparent; color: var(--ui-fg); font: inherit; font-size: 11px; font-variant-numeric: tabular-nums; width: 90px; padding: 3px 5px; white-space: nowrap; cursor: pointer; }
+.viewport-zoom-control button:hover:not(:disabled) { background: var(--ui-hover); }
+.viewport-zoom-control button:disabled { color: var(--ui-muted); cursor: default; }

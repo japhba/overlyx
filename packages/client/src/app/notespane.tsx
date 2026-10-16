@@ -14,6 +14,7 @@
  * all read it.
  */
 import { useLayoutEffect, useState } from 'preact/hooks';
+import { documentViewScale } from '../editor/viewscale';
 import type { RefObject } from 'preact';
 
 export const NOTES_SHARE_DEFAULT = 0.3, NOTES_SHARE_MIN = 0.15, NOTES_SHARE_MAX = 0.6;
@@ -87,7 +88,8 @@ export function useNotesPane(scrollRef: RefObject<HTMLElement>, on: boolean): { 
       let last = share;
       const root = document.documentElement;
       root.classList.add('pane-resizing', 'notes-resizing');
-      const move = (e: PointerEvent) => { last = clampShare((w0 + x0 - e.clientX) / pane); setShare(last); };
+      const scale = documentViewScale(scroll);
+      const move = (e: PointerEvent) => { last = clampShare((w0 + (x0 - e.clientX) / scale) / pane); setShare(last); };
       const up = () => {
         window.removeEventListener('pointermove', move);
         window.removeEventListener('pointerup', up);

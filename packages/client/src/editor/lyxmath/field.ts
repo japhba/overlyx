@@ -19,6 +19,7 @@ import { MathGeometry, editXY, moveToClosestEdge, partOfAnchor, insetAt, boundar
 import { graphicsUrl } from '../../api';
 import { editorContext, resolveDocPath } from '../context';
 import { getPrefs } from '../../prefs';
+import { documentViewScale } from '../viewscale';
 import { renderMath, onMathRendererChange } from './mathjax';
 import { inputModeFor, mathKbdFocus, mathKbdDestroyed, noteHardwareKey, setSystemKeyboard } from '../mathkbd/hook';
 
@@ -482,6 +483,7 @@ export class LyxMathField {
     const ov = this.overlay;
     ov.replaceChildren();
     const base = this.dom.getBoundingClientRect();
+    const scale = documentViewScale(this.dom);
     const c = this.cursor;
     const g = this.geometry();
     // the inset under the mouse pointer is marked (Color_mathframe), also when not editing
@@ -495,7 +497,7 @@ export class LyxMathField {
       const paint = (x1: number, x2: number, top: number, bottom: number) => {
         const d = document.createElement('span');
         d.className = 'lm-sel';
-        d.style.cssText = `left:${x1 - base.left}px;top:${top - base.top}px;width:${Math.max(2, x2 - x1)}px;height:${bottom - top}px`;
+        d.style.cssText = `left:${(x1 - base.left) / scale}px;top:${(top - base.top) / scale}px;width:${Math.max(2, (x2 - x1) / scale)}px;height:${(bottom - top) / scale}px`;
         ov.appendChild(d);
       };
       if (sel.idx1 === sel.idx2) {
@@ -511,10 +513,10 @@ export class LyxMathField {
       this.caretY = (cr.top + cr.bottom) / 2;
       const d = document.createElement('span');
       d.className = 'lm-caret';
-      d.style.cssText = `left:${cr.x - base.left - 0.5}px;top:${cr.top - base.top}px;height:${cr.bottom - cr.top}px`;
+      d.style.cssText = `left:${(cr.x - base.left) / scale - 0.5}px;top:${(cr.top - base.top) / scale}px;height:${(cr.bottom - cr.top) / scale}px`;
       ov.appendChild(d);
       // keep the hidden input near the caret so IME popups appear in place
-      this.input.style.left = `${cr.x - base.left}px`; this.input.style.top = `${cr.top - base.top}px`;
+      this.input.style.left = `${(cr.x - base.left) / scale}px`; this.input.style.top = `${(cr.top - base.top) / scale}px`;
     }
     // LyX corner markers around every inset on the cursor's path — the anchor's path while the
     // mouse selects (Inset::editing: no flicker from the moving cursor)
@@ -525,6 +527,19 @@ export class LyxMathField {
       if (!r) continue;
       this.corners(ov, base, r, markerKind(inset), inset.t === 'macro' ? '\\' + inset.n : undefined);
     }
+    // At viewport magnification the end of a formula can move beyond the clipped page. Keep
+    // the active caret visible using screen-pixel scrolling, without changing the formula layout.
+    if (this.focused && scale > 1 && cr) {
+      const sc = this.dom.closest<HTMLElement>('.editor-scroll');
+      if (sc) {
+        const r = sc.getBoundingClientRect();
+        const top = r.top + (sc.querySelector('.ruler')?.getBoundingClientRect().height ?? 0) + 8;
+        const dx = cr.x < r.left + 12 ? cr.x - r.left - 12 : cr.x > r.right - 12 ? cr.x - r.right + 12 : 0;
+        const dy = cr.top < top ? cr.top - top : cr.bottom > r.bottom - 24 ? cr.bottom - r.bottom + 24 : 0;
+        if (dx) sc.scrollLeft += dx;
+        if (dy) { const before = sc.scrollTop; sc.scrollTop += dy; if (this.caretY !== undefined) this.caretY -= sc.scrollTop - before; }
+      }
+    }
   }
 
   /**
@@ -533,8 +548,9 @@ export class LyxMathField {
    * insets); the lower pair always, the upper pair for MARKER2 insets.
    */
   private corners(ov: HTMLElement, base: DOMRect, r: AtomGeom, kind: 'lower' | 'both', label?: string): void {
-    const l = r.glyphLeft - base.left - 1, rt = r.glyphRight - base.left;
-    const t = r.top - base.top - 1, b = r.bottom - base.top + 1;
+    const scale = documentViewScale(this.dom);
+    const l = (r.glyphLeft - base.left) / scale - 1, rt = (r.glyphRight - base.left) / scale;
+    const t = (r.top - base.top) / scale - 1, b = (r.bottom - base.top) / scale + 1;
     const corner = (x: number, y: number, h: 'left' | 'right', v: 'top' | 'bottom') => {
       const d = document.createElement('span');
       d.className = 'lm-corner';

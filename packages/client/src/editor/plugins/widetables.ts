@@ -11,6 +11,7 @@
  * (core schema.ts lyxLengthCss).
  */
 import { Plugin, PluginKey, type EditorState, type Transaction } from 'prosemirror-state';
+import { documentViewScale } from '../viewscale';
 import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
 
@@ -168,7 +169,7 @@ function measure(view: EditorView): void {
     const padL = parseFloat(cs.paddingLeft) || 0;
     const avail = par.clientWidth - padL - (parseFloat(cs.paddingRight) || 0);
     const w = el.offsetWidth;
-    const leftRoom = par.getBoundingClientRect().left + padL - pageLeft;
+    const leftRoom = (par.getBoundingClientRect().left - pageLeft) / documentViewScale(par) + padL;
     const spill = w > avail + 1 ? Math.round(Math.max(0, Math.min(leftRoom, (w - avail) / 2))) : 0;
     if (Math.abs(spill - (d.spec as Spec).spill) > 1) changes.push([d.from, spill]);
   }
