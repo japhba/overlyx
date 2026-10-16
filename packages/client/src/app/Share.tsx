@@ -1,8 +1,9 @@
 /**
  * Share dialog (Google-Docs style): people with access and their roles, invite by username or
  * e-mail, and "anyone with the link" with a copyable link (which also lets people in without an
- * account, as guests — app/Guest.tsx). Only the owner (or an administrator) sees it — the server
- * refuses everything else.
+ * account, as guests — app/Guest.tsx). The link shares the whole project and names the file it
+ * opens — the one open when the dialog was, or another document picked under the link. Only the
+ * owner (or an administrator) sees it — the server refuses everything else.
  */
 import { useEffect, useState } from 'preact/hooks';
 import { inkOn } from './contrast';
@@ -10,9 +11,12 @@ import { AvatarContent, initials } from './Avatar';
 import { api, pdfLinkUrl, type ActivityEntry, type PdfLinkInfo, type PdfLinksInfo, type PdfPublishInfo, type ShareInfo, type User } from '../api';
 import { ago } from './Git';
 import { Dialog, uiConfirm } from './Dialogs';
-import { projectShortName } from '@overlyx/core';
+import { docPathOf, projectOfDoc, projectShortName } from '@overlyx/core';
 
-export function shareUrl(token: string): string { return `${location.origin}/#/share/${token}`; }
+/** A share link; with `path`, the file of the project it opens (the main document otherwise). */
+export function shareUrl(token: string, path?: string | null): string {
+  return `${location.origin}/#/share/${token}${path ? '/' + path.split('/').map(encodeURIComponent).join('/') : ''}`;
+}
 
 /** One activity entry as a sentence fragment after the person's name. */
 export function describe(e: ActivityEntry): string {
@@ -29,8 +33,11 @@ export function describe(e: ActivityEntry): string {
 
 const ROLE_LABEL: Record<string, string> = { view: 'Viewer', edit: 'Editor' };
 
-export function ShareDialog({ project, user, onClose, onChanged }: { project: string; user: User; onClose: () => void; onChanged?: () => void }) {
+export function ShareDialog({ project, user, doc, onClose, onChanged }: { project: string; user: User; doc?: string | null; onClose: () => void; onChanged?: () => void }) {
   const [info, setInfo] = useState<ShareInfo | null>(null);
+  // the file the link opens: the one open in the workspace, else (from the start screen) the main document
+  const openPath = doc && projectOfDoc(doc) === project ? docPathOf(doc) : null;
+  const [linkPath, setLinkPath] = useState<string | null>(openPath);
   const [err, setErr] = useState('');
   const [who, setWho] = useState('');
   const [role, setRole] = useState<'view' | 'edit'>('edit');
@@ -77,11 +84,14 @@ export function ShareDialog({ project, user, onClose, onChanged }: { project: st
   const add = async () => { if (!who.trim() || busy) return; if (await update(() => api.addMember(project, who.trim(), role))) setWho(''); };
   const copy = async () => {
     if (!info?.link) return;
-    const url = shareUrl(info.link.token);
+    const url = shareUrl(info.link.token, linkPath);
     try { await navigator.clipboard.writeText(url); } catch { const el = document.querySelector<HTMLInputElement>('.share-link input'); el?.select(); document.execCommand('copy'); }
     setCopied(true); setTimeout(() => setCopied(false), 2000);
   };
   const title = info?.title ?? projectShortName(project);
+  // what the link can open: the file open now and the project's documents (main document first)
+  const linkFiles = [...new Set([...(openPath ? [openPath] : []), ...(pdf?.docs ?? [])])];
+  useEffect(() => { if (linkPath === null && pdf?.docs.length) setLinkPath(pdf.docs[0]); }, [pdf]);
   const updatePdf = async (fn: () => Promise<{ links: PdfLinkInfo[] }>) => {
     setBusy(true); setErr('');
     try { const r = await fn(); setPdf(p => p ? { ...p, links: r.links } : p); onChanged?.(); }
@@ -162,8 +172,19 @@ export function ShareDialog({ project, user, onClose, onChanged }: { project: st
           </div>
           {info.link && (
             <div class="share-link">
-              <input type="text" readonly value={shareUrl(info.link.token)} onFocus={e => (e.target as HTMLInputElement).select()} />
+              <input type="text" readonly value={shareUrl(info.link.token, linkPath)} onFocus={e => (e.target as HTMLInputElement).select()} />
               <button class="btn" onClick={() => void copy()}>{copied ? 'Copied ✓' : 'Copy link'}</button>
+            </div>
+          )}
+          {info.link && linkFiles.length > 0 && (
+            <div class="share-link-file hint">
+              Opens{' '}
+              {linkFiles.length > 1
+                ? <select value={linkPath ?? ''} disabled={busy} data-link-file onChange={e => setLinkPath((e.target as HTMLSelectElement).value)}>
+                    {linkFiles.map(p => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                : <b data-link-file>{linkFiles[0]}</b>}
+              {' '}— and gives access to the whole project.
             </div>
           )}
           <h4>Public PDF link</h4>

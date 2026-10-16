@@ -12,7 +12,7 @@
  */
 import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { api, fileUrl, isAuxFile, isTextFile, type Project, type ProjectFile } from '../api';
+import { api, fileTabId, fileUrl, isAuxFile, isTextFile, type Project, type ProjectFile } from '../api';
 import { subscribeProjectEvents } from '../projectevents';
 import { showContextMenu, type MenuItem } from '../editor/contextmenu';
 import { chooseLyxImport } from './lyximport';
@@ -408,7 +408,7 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
     const isHtml = f.kind === 'html';
     const kind = isHtml && f.deliverable ? f.deliverable : f.name.toLowerCase().endsWith('.md') ? 'md' : f.kind;
     const inTab = isDoc || isLyx || isPdf || isBoard || isHtml || isTextFile(f.name);
-    const tabId = isDoc || isBoard || isHtml ? id : isPdf ? 'pdf:' + id : 'text:' + id;
+    const tabId = fileTabId(project!.name, f) ?? 'text:' + id;
     const href = isLyx ? '#' : inTab ? '#/' + tabId : fileUrl(project!.name, f.path);
     const importLyx = async () => {
       if (!(await uiConfirm('Import LyX File', `Import ${f.name} into a .tex document (${f.name.replace(/\.lyx$/, '.tex')})? The .lyx file is kept; child documents it includes are imported too.`, { okLabel: 'Import' }))) return;

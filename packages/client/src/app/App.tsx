@@ -9,7 +9,7 @@ import { referenceTransaction } from '../editor/references';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from 'preact/hooks';
 import type { EditorView } from 'prosemirror-view';
 import { NodeSelection, TextSelection } from 'prosemirror-state';
-import { api, googleSignInUrl, knownProjects, type AiStatus, type BibAddResult, type DocMeta, type Project, type User, fileUrl } from '../api';
+import { api, googleSignInUrl, knownProjects, type AiStatus, type BibAddResult, type DocMeta, type Project, type User, fileUrl, fileTabId } from '../api';
 import { getPrefs, setPref, subscribePrefs, type Prefs } from '../prefs';
 import { openRewrite, REWRITE_KEY } from '../editor/ai/rewrite';
 import { Login } from './Login';
@@ -97,7 +97,7 @@ export function App() {
       // to the document — signing in later keeps the project (Workspace's guest callout)
       const token = u ? null : parseHash().share;
       if (token) {
-        try { const a = await api.acceptShare(token); if (a.user) { u = a.user; location.hash = a.doc ? '#/' + a.doc : ''; } }
+        try { const a = await api.acceptShare(token, parseHash().sharePath); if (a.user) { u = a.user; location.hash = shareLanding(a); } }
         catch (e) { setLinkNote((e as Error).message); }
       }
       setUser(u); setGoogle(r.google);
@@ -158,17 +158,30 @@ const LEFT_TITLE = 'The project\'s files; documents expand into their outlines (
 const SOURCE_TITLE = 'LaTeX source beside the text (Ctrl+Alt+S)';
 const stored = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
 
-/** `#/project/path.tex?goto=label` or `?heading=<n>` (the n-th heading), or a share link `#/share/<token>` */
-function parseHash(): { id: string | null; goto: string | null; heading: number | null; share: string | null } {
+/**
+ * `#/project/path.tex?goto=label` or `?heading=<n>` (the n-th heading), or a share link
+ * `#/share/<token>` — `#/share/<token>/<path>` when it names the file of the project to land on
+ */
+function parseHash(): { id: string | null; goto: string | null; heading: number | null; share: string | null; sharePath: string | null } {
   const raw = location.hash.replace(/^#\/?/, '');
   const q = raw.indexOf('?');
   const idPart = decodeURIComponent(q >= 0 ? raw.slice(0, q) : raw);
-  if (idPart.startsWith('share/')) return { id: null, goto: null, heading: null, share: idPart.slice('share/'.length) };
+  if (idPart.startsWith('share/')) {
+    const rest = idPart.slice('share/'.length);
+    const cut = rest.indexOf('/');
+    return { id: null, goto: null, heading: null, share: cut < 0 ? rest : rest.slice(0, cut), sharePath: cut < 0 ? null : rest.slice(cut + 1) || null };
+  }
   const params = q >= 0 ? new URLSearchParams(raw.slice(q + 1)) : null;
   const h = params?.get('heading');
   // markdown files opened in the plain text editor before they were documents: links stay valid
   const id = idPart.startsWith('text:') && isMarkdownDoc(idPart) ? idPart.slice(5) : idPart;
-  return { id: id || null, goto: params?.get('goto') ?? null, heading: h !== null && h !== undefined && /^\d+$/.test(h) ? Number(h) : null, share: null };
+  return { id: id || null, goto: params?.get('goto') ?? null, heading: h !== null && h !== undefined && /^\d+$/.test(h) ? Number(h) : null, share: null, sharePath: null };
+}
+
+/** Where a share link lands (the hash): the linked file when it opens in a tab, else the project's main document. */
+function shareLanding(r: { project: string; doc: string | null; file: Parameters<typeof fileTabId>[1] | null }): string {
+  const id = (r.file && fileTabId(r.project, r.file)) || r.doc;
+  return id ? '#/' + id : '';
 }
 
 /**
@@ -530,15 +543,15 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
   useEffect(() => navHistory.subscribe(rerender), []);
-  // a share link (#/share/<token>): join the project, then open its main document
+  // a share link (#/share/<token>[/<path>]): join the project, then open the linked file (or its main document)
   useEffect(() => {
     const check = () => {
-      const token = parseHash().share;
+      const { share: token, sharePath } = parseHash();
       if (!token) return;
-      api.acceptShare(token).then(r => {
+      api.acceptShare(token, sharePath).then(r => {
         notify(`You can now ${r.role === 'view' ? 'view' : 'edit'} “${r.title ?? projectShortName(r.project)}”`);
         setRefreshKey(k => k + 1);
-        location.hash = r.doc ? '#/' + r.doc : '';
+        location.hash = shareLanding(r);
       }).catch(e => { notify((e as Error).message, 'error'); location.hash = ''; });
     };
     check();
@@ -1679,7 +1692,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         sync={syncChip}
         pdf={isLyxDoc ? { state: pdf, onClick: rebuild => { if (rebuild && !pdf.busy) void build(); else if (!pdfPaneVisible) changePanes(l => (narrowPanes ? { ...setPaneShown(l, 'pdf', true), order: ['pdf', ...l.order.filter(p => p !== 'pdf')] } : setPaneShown(l, 'pdf', true))); } } : undefined} />
       {renderDialog()}
-      {shareFor && <ShareDialog project={shareFor} user={user} onClose={() => setShareFor(null)} onChanged={() => setRefreshKey(k => k + 1)} />}
+      {shareFor && <ShareDialog project={shareFor} user={user} doc={docId?.replace(/^(text|pdf):/, '') ?? null} onClose={() => setShareFor(null)} onChanged={() => setRefreshKey(k => k + 1)} />}
       {newLayoutFor && <NewLayoutDialog project={newLayoutFor} dir={textId ? docPathOf(textId).split('/').slice(0, -1).join('/') : ''} notify={notify} onClose={() => setNewLayoutFor(null)} onCreated={id => { location.hash = '#/' + id; setRefreshKey(k => k + 1); }} />}
       {gitFor && <GitDialog project={gitFor} user={user} onClose={() => setGitFor(null)} />}
       {askInterface && !tour && <InterfacePrompt onDone={() => setAskInterface(false)} />}

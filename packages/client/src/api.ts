@@ -244,9 +244,12 @@ export const api = {
   removeMember: (project: string, id: number) => req<{ share: ShareInfo }>('DELETE', `/api/projects/${encodeURIComponent(project)}/share/members/${id}`),
   setLink: (project: string, role: 'view' | 'edit' | null) => req<{ link: ShareInfo['link']; share: ShareInfo }>('POST', `/api/projects/${encodeURIComponent(project)}/share/link`, { role }),
   setOwner: (project: string, username: string) => req<{ share: ShareInfo }>('POST', `/api/projects/${encodeURIComponent(project)}/share/owner`, { username }),
-  /** open a share link (#/share/<token>): join the project; `doc` is the document to open */
-  /** join through a share link; without a session the server opens a guest session and returns its `user` */
-  acceptShare: (token: string) => req<{ project: string; title: string | null; role: Role; doc: string | null; user?: User }>('POST', `/api/share/${encodeURIComponent(token)}/accept`),
+  /**
+   * open a share link (#/share/<token>[/<path>]): join the project; `doc` is its main document, `file`
+   * the linked file when the project has it. Without a session the server opens a guest session and
+   * returns its `user`.
+   */
+  acceptShare: (token: string, path?: string | null) => req<{ project: string; title: string | null; role: Role; doc: string | null; file: Pick<ProjectFile, 'path' | 'name' | 'kind'> | null; user?: User }>('POST', `/api/share/${encodeURIComponent(token)}/accept${path ? '?path=' + encodeURIComponent(path) : ''}`),
   // git: every project is a repository (clone URL, history); the account token is the HTTPS password
   gitInfo: (project: string) => req<GitInfo>('GET', `/api/projects/${encodeURIComponent(project)}/git`),
   gitRestore: (project: string, commit: string) => req<{ restored: boolean; files: string[] } & Omit<GitInfo, 'url' | 'username' | 'role' | 'hasPassword'>>('POST', `/api/projects/${encodeURIComponent(project)}/git/restore`, { commit }),
@@ -388,6 +391,13 @@ export function isTextFile(name: string): boolean {
   if (TEXT_NAMES.has(base.toLowerCase())) return true;
   const ext = base.includes('.') ? base.slice(base.lastIndexOf('.') + 1).toLowerCase() : '';
   return TEXT_EXTS.has(ext);
+}
+/** The tab a project file opens in (`#/<id>`): documents as they are, PDFs in the viewer, text files in the text editor; null for files that open elsewhere (LyX files are imported, images in a browser tab). */
+export function fileTabId(project: string, f: Pick<ProjectFile, 'path' | 'name' | 'kind'>): string | null {
+  const id = `${project}/${f.path}`;
+  if (f.kind === 'doc' || f.kind === 'board' || f.kind === 'html') return id;
+  if (f.kind === 'pdf') return 'pdf:' + id;
+  return f.kind !== 'lyx' && isTextFile(f.name) ? 'text:' + id : null;
 }
 const AUX_EXTS = new Set(['olx', 'olsrc', 'aux', 'log', 'bbl', 'blg', 'fls', 'fdb_latexmk', 'out', 'toc', 'lof', 'lot', 'nav', 'snm', 'bcf', 'dvi', 'xdv', 'spl', 'idx', 'ind', 'ilg', 'glo', 'gls', 'glg', 'acn', 'acr', 'alg', 'ist', 'loa', 'lol', 'thm', 'vrb', 'xcp', 'upa', 'upb', 'synctex']);
 /** LaTeX build products — hidden in the file browser unless "all files" is on. */

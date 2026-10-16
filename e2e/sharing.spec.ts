@@ -201,7 +201,7 @@ test('link sharing: joining through the link, revoked when the link is turned of
   await expect(dlg.locator('[data-link-role]')).toBeVisible();
   await dlg.locator('[data-link-role]').selectOption('edit');
   const url = await dlg.locator('.share-link input').inputValue();
-  expect(url).toMatch(/#\/share\/[A-Za-z0-9_-]{20,}$/);
+  expect(url).toMatch(/#\/share\/[A-Za-z0-9_-]{20,}\/main\.tex$/);   // the link names the open file
 
   const carol = await asUser(browser, 'carol');
   expect((await projectsOf(carol)).map(p => p.name)).not.toContain(PROJECT);

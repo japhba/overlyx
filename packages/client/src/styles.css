@@ -1516,6 +1516,8 @@ a.btn { display: inline-block; color: var(--ui-fg); text-decoration: none; line-
 .share-general select:first-child { flex: 1; }
 .share-link { display: flex; gap: 6px; }
 .share-link input { flex: 1; font-size: 12px; padding: 4px 6px; border: 1px solid var(--ui-border); border-radius: 3px; background: var(--surface2); }
+.share-link-file { margin-top: 4px; }
+.share-link-file select { max-width: 60%; font-size: 12px; }
 .tree-row .owner { color: var(--muted2); font-weight: 400; font-size: 11px; }
 /* ---- git dialog */
 .git-dialog { display: flex; flex-direction: column; gap: 6px; max-height: 70vh; overflow: auto; padding-right: 4px; }
