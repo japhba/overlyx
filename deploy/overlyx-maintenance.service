@@ -1,0 +1,22 @@
+[Unit]
+Description=OverLyX: screen issues and logs, fix and deploy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/root/lyx/overlyx-production
+Environment=LYX_LAYOUT_DIR=/root/lyx/lib/layouts
+Environment=OVERLYX_PRODUCTION=/root/lyx/overlyx-production
+Environment=OVERLYX_MAINTENANCE_SOURCE=/root/lyx/overlyx
+Environment=OVERLYX_MAINTENANCE_CHECKOUT=/root/lyx/overlyx-maintenance
+Environment=OVERLYX_MAINTENANCE_DB=/root/lyx/overlyx/data/overlyx.sqlite
+StateDirectory=overlyx-maintenance
+StateDirectoryMode=0700
+UMask=0077
+ExecStart=/bin/bash /root/lyx/overlyx-production/scripts/maintenance.sh
+TimeoutStartSec=25min
+KillMode=control-group
+Nice=10
+IOSchedulingClass=idle

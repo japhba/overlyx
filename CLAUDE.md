@@ -17,6 +17,14 @@ When you are reasonably confident of a change, bypass those checks: `scripts/dep
 or the trailer `Deploy: no-checks` on the last commit of a push that the autodeploy timer deploys.
 The client is still built and the site still verified.
 
+## Unattended maintenance
+
+The owner authorizes the maintenance worker to screen GitHub issues and private reports/logs,
+implement clear fixes, run minimal focused checks, and deploy without supervision (16 Oct 2026).
+`scripts/maintenance.sh`, run by `overlyx-maintenance.timer` every ten minutes, uses its own
+checkout and private persistent state. The runner commits and deploys with `--no-checks`; do not
+add review stages or broader test gates. See DOCS.md for operation and pause/resume commands.
+
 ## Keyboard shortcuts are contextual (VS Code's model)
 
 A key may do different things in different places, as VS Code's keybindings carry a `when`

@@ -1,0 +1,10 @@
+[Unit]
+Description=Screen OverLyX issues and user logs every ten minutes
+
+[Timer]
+OnCalendar=*:0/10
+Persistent=true
+AccuracySec=20s
+
+[Install]
+WantedBy=timers.target
