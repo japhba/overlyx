@@ -377,12 +377,6 @@ html[data-theme="dark"] .tb-btn .tb-img { filter: invert(0.85) hue-rotate(180deg
 /* "infinite margin": the page fills the viewport; text stays in a left-bound column of readable width,
    while wide objects (display math, tables, floats) may overflow the column and are centred on it */
 .editor-page { position: relative; background: var(--page-bg); min-height: 100%; width: 100%; padding: 36px 48px 120px 48px; }
-/* View zoom scales the column and figures along with its text. Layout canvases have their own
-   coordinate scale. No document font or graphics setting is changed by this view preference. */
-.editor-page:has(.lyx-editor:not(.ol-layout)) { width: max(100%, calc(100% * var(--editor-zoom))); }
-.editor-scroll:not(.margin-mode):not(.ink-pan) > .editor-page:has(.lyx-editor:not(.ol-layout)) { padding: calc(36px * var(--editor-zoom)) calc(48px * var(--editor-zoom)) calc(120px * var(--editor-zoom)); }
-.lyx-editor:not(.ol-layout) { max-width: calc(var(--text-width, 720px) * var(--editor-zoom)); }
-.lyx-editor.ol-layout { --figure-zoom: 1; }
 /* the text column is centred; its width is a View setting (--text-width, "Text width" menu) */
 .lyx-editor { max-width: var(--text-width, 720px); margin: 0 auto; }
 /* with annotations in the margin, keep room for a 320px card column right of the text and centre both */
@@ -1066,9 +1060,6 @@ pre.hl .l.cur { background: color-mix(in srgb, var(--active-bg) 45%, transparent
 .ruler { position: sticky; top: 0; z-index: 6; height: 24px; background: var(--ui-bg); border-bottom: 1px solid var(--ui-border); user-select: none; font-family: var(--ui-font); }
 .ruler-inner { position: relative; margin: 0 48px; height: 100%; }
 .ruler-band { position: relative; height: 100%; max-width: var(--text-width, 720px); margin: 0 auto; background: var(--page-bg); border-left: 1px solid var(--ui-border); border-right: 1px solid var(--ui-border); box-sizing: border-box; }
-.editor-scroll:has(.lyx-editor:not(.ol-layout)) > .ruler { width: max(100%, calc(100% * var(--editor-zoom))); }
-.editor-scroll:has(.lyx-editor:not(.ol-layout)) .ruler-band { max-width: calc(var(--text-width, 720px) * var(--editor-zoom)); }
-.editor-scroll:not(.margin-mode):not(.ink-pan):has(.lyx-editor:not(.ol-layout)) > .ruler > .ruler-inner { margin-inline: calc(48px * var(--editor-zoom)); }
 /* margin mode: the band centred in the text part, then the notes pane with its sash (the page's split, app/notespane.tsx) */
 .margin-mode > .ruler > .ruler-inner { margin-left: calc(48px + var(--notes-inset)); margin-right: calc(48px + var(--notes-inset) + var(--notes-col, 340px)); }
 .ruler-notes-pane { position: absolute; top: 0; bottom: 0; right: var(--notes-inset, 0px); width: var(--notes-col, 340px); background: var(--notes-bg); }

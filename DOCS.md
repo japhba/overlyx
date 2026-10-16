@@ -2228,13 +2228,13 @@ grows a plugin list, a toolbar button or one of those helpers of its own again �
 extension once lacked autocorrect, markdown headings, image paste and the delimiter buttons. Zoom is
 one of those helpers (`applyEditorZoom`: the `--editor-zoom` variable the editor's font size is
 computed from; a change is said over the text for a moment, as every zoom is — `app/zoomhud.ts`,
-also a board's). **Document view zoom**: text, column, ruler and
-figures enlarge together, including figures with physical or intrinsic sizes. This is a browser
-view preference; document font sizes, graphics parameters and exported files stay unchanged.
-Two fingers on a touch screen zoom the document view (`useTextPinch`, `.editor-scroll:has(… .lyx-editor) {
+also a board's). **Rendered text size**: the document's zoom menu changes the font size of text and
+formulas in the editor. Text reflows within the existing column; page width, padding, ruler and
+figure sizing do not scale with the menu. This is a browser view preference; document font sizes,
+graphics parameters and exported files stay unchanged.
+Two fingers on a touch screen zoom the rendered text (`useTextPinch`, `.editor-scroll:has(… .lyx-editor) {
 touch-action: pan-x pan-y }`, their middle scrolls); the character under
-the fingers stays under them while the text reflows (a figure anchors in both axes;
-`caretPositionFromPoint` anchors text, the scroll is set again
+the fingers stays under them while the text reflows (`caretPositionFromPoint` anchors text, the scroll is set again
 each frame), and 100 % is a level it stops at and holds (×1.25), as the canvases' fits. Trackpad
 pinches and Ctrl/⌘ + wheel do not zoom the document or magnify the whole interface. A non-passive
 window listener cancels the browser action after PDF/canvas handlers have had their turn; ordinary

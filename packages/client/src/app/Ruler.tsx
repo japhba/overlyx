@@ -17,8 +17,7 @@ export const NOTE_SCALE_MIN = 60, NOTE_SCALE_MAX = 130, NOTE_SCALE_DEFAULT = 90,
 /** Margin mode's part of the ruler: the notes pane's sash, and − / + for the text size of notes and comments. */
 export interface RulerNotes { sash: SashProps; scale: number; onScale(pct: number): void }
 
-export function Ruler({ width, onChange, notes, zoom = 1 }: { width: number; onChange: (w: number) => void; notes?: RulerNotes; zoom?: number }) {
-  zoom = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+export function Ruler({ width, onChange, notes }: { width: number; onChange: (w: number) => void; notes?: RulerNotes }) {
   const bandRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<{ side: 'left' | 'right'; width: number } | null>(null);
   const [bandPx, setBandPx] = useState(0);
@@ -31,7 +30,7 @@ export function Ruler({ width, onChange, notes, zoom = 1 }: { width: number; onC
     ro.observe(el);
     setBandPx(el.getBoundingClientRect().width);
     return () => ro.disconnect();
-  }, [width, !!notes, zoom]);
+  }, [width, !!notes]);
 
   const startDrag = (side: 'left' | 'right') => (ev: PointerEvent) => {
     ev.preventDefault();
@@ -40,7 +39,7 @@ export function Ruler({ width, onChange, notes, zoom = 1 }: { width: number; onC
     const rect = band.getBoundingClientRect();
     const centre = rect.left + rect.width / 2;
     const move = (e: PointerEvent) => {
-      const w = Math.round(Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, 2 * Math.abs(e.clientX - centre) / zoom)));   // source width, independent of view zoom
+      const w = Math.round(Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, 2 * Math.abs(e.clientX - centre))));   // centred column: symmetric
       setDrag({ side, width: w });
       onChange(w);
     };
@@ -49,16 +48,16 @@ export function Ruler({ width, onChange, notes, zoom = 1 }: { width: number; onC
     window.addEventListener('pointerup', up);
   };
 
-  const shown = drag?.width ?? Math.round(bandPx / zoom);
+  const shown = drag?.width ?? Math.round(bandPx);
   const keyboardWidth = (e: KeyboardEvent) => {
     const value = width || shown;
     const next = e.key === 'ArrowRight' ? value + 20 : e.key === 'ArrowLeft' ? value - 20 : e.key === 'Home' ? MIN_WIDTH : e.key === 'End' ? MAX_WIDTH : null;
     if (next !== null) { e.preventDefault(); onChange(Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, next))); }
   };
   const ticks: { x: number; major: boolean; label?: string }[] = [];
-  for (let cm = 0; cm * PX_PER_CM * zoom <= bandPx + 1; cm += 0.5) {
+  for (let cm = 0; cm * PX_PER_CM <= bandPx + 1; cm += 0.5) {
     const major = Number.isInteger(cm);
-    ticks.push({ x: cm * PX_PER_CM * zoom, major, label: major && cm > 0 ? String(cm) : undefined });
+    ticks.push({ x: cm * PX_PER_CM, major, label: major && cm > 0 ? String(cm) : undefined });
   }
   return (
     <div class={'ruler' + (drag ? ' dragging' : '')}>

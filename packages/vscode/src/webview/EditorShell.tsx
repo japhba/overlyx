@@ -822,7 +822,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
         {!pdfOnly && showOutline && <SidebarGrip side="left" />}
         <div class={'editor-column panes' + (shownPanes.length > 1 ? ' split' : '')}>
           <div class={'editor-scroll' + (marginMode ? ' margin-mode' : '') + (inkMode ? ' ink-mode' : '')} ref={scrollRef} data-pane="doc" style={paneStyle('doc')} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
-            {showRuler && <Ruler width={textWidth} zoom={zoom} onChange={setTextWidth} notes={marginMode ? { sash: notesPane.sash, scale: noteScale, onScale: setNoteScale } : undefined} />}
+            {showRuler && <Ruler width={textWidth} onChange={setTextWidth} notes={marginMode ? { sash: notesPane.sash, scale: noteScale, onScale: setNoteScale } : undefined} />}
             <div class="editor-page">
               {marginMode && <NotesSash sash={notesPane.sash} />}
               {visibleIds.map(id => id === docId ? <div key={id}>

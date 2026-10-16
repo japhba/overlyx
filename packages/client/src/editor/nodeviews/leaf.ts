@@ -36,7 +36,7 @@ export class GraphicsView implements NodeView {
     // the pixels are read back for the dark-theme classification: ask for CORS so a canvas copy is
     // allowed when the images come from another origin (the VS Code extension's local bridge)
     this.img.crossOrigin = 'anonymous';
-    this.img.addEventListener('load', () => { this.kind = classifyImage(this.img); this.applyInvert(); this.render(); });
+    this.img.addEventListener('load', () => { this.kind = classifyImage(this.img); this.applyInvert(); });
     this.caption = document.createElement('span');
     this.caption.className = 'graphics-caption';
     this.dom.append(this.img, this.caption);
@@ -105,11 +105,7 @@ export class GraphicsView implements NodeView {
       cssWidth = '';
       this.img.style.transform = '';
     }
-    // Physical and intrinsic sizes follow the view zoom just as text does. Percentages follow the
-    // zoomed column; em/ex already follow its font. The saved graphics parameters stay untouched.
-    this.img.style.width = cssWidth && !/(%|em|ex)$/.test(cssWidth)
-      ? `calc(${cssWidth} * var(--figure-zoom, var(--editor-zoom, 1)))`
-      : cssWidth || (!scale && this.img.naturalWidth ? `calc(${this.img.naturalWidth}px * var(--figure-zoom, var(--editor-zoom, 1)))` : '');
+    this.img.style.width = cssWidth;
     this.img.style.maxWidth = '100%';
     const shrink = lyxscale ? Math.max(10, Math.min(100, Number(lyxscale))) : 100;
     if (!cssWidth && scale) this.img.style.width = `${Math.min(100, Number(scale))}%`;

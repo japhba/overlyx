@@ -15,7 +15,8 @@ import { editorContext, onMetaChange } from '../editor/context';
 import { recordInteraction } from '../usage';
 
 /**
- * Zoom the document view: text, column and graphics share a CSS scale, remembered per browser.
+ * Zoom the rendered text with a font-size variable, remembered per browser. The column, ruler
+ * and graphics keep their sizes; the text reflows within the column.
  * Both shells use this — never CSS `zoom` on a container,
  * which puts mouse coordinates and the layout into different scales in Chromium (hit tests miss,
  * drags jump, selections and their highlights disagree).
@@ -54,13 +55,7 @@ function textScroller(t: EventTarget | null): HTMLElement | null {
  * What a zoom keeps where it is: the character under the screen point (x, y) — its middle's screen y,
  * read again once the text has reflowed — and how far from the point it was.
  */
-function textAnchor(x: number, y: number): { mid: () => number | null; off: number; midX?: () => number; offX?: number } | null {
-  const figure = document.elementFromPoint?.(x, y)?.closest<HTMLElement>('.lyx-graphics');
-  if (figure) {
-    const box = figure.getBoundingClientRect();
-    return { mid: () => figure.isConnected ? figure.getBoundingClientRect().top + figure.getBoundingClientRect().height / 2 : null,
-      off: box.top + box.height / 2 - y, midX: () => { const b = figure.getBoundingClientRect(); return b.left + b.width / 2; }, offX: box.left + box.width / 2 - x };
-  }
+function textAnchor(x: number, y: number): { mid: () => number | null; off: number } | null {
   const d = document as Document & { caretPositionFromPoint?(x: number, y: number): { offsetNode: Node; offset: number } | null; caretRangeFromPoint?(x: number, y: number): Range | null };
   const pos = d.caretPositionFromPoint?.(x, y);
   const r = pos ? { node: pos.offsetNode, at: pos.offset } : (() => { const q = d.caretRangeFromPoint?.(x, y); return q ? { node: q.startContainer, at: q.startOffset } : null; })();
@@ -96,19 +91,18 @@ export function useTextPinch(zoom: number, setZoom: (z: number) => void): void {
     /** the zoom shown now, ahead of the shell's while a touch pinch goes on (`--editor-zoom`) */
     const shown = () => parseFloat(document.documentElement.style.getPropertyValue('--editor-zoom')) || zoomRef.current;
     /** show zoom `z` (the text reflows), the anchor's character back at (its offset from) the screen y `y`; `held`: said as 100 % */
-    const show = (sc: HTMLElement, a: ReturnType<typeof textAnchor>, z0: number, z: number, y: number, held: boolean, x?: number) => {
+    const show = (sc: HTMLElement, a: ReturnType<typeof textAnchor>, z0: number, z: number, y: number, held: boolean) => {
       document.documentElement.style.setProperty('--editor-zoom', String(z));
       textZoomPill.show(held ? 1 : z);
       textZoomShown = z;
       const m = a?.mid();
       if (a && m !== null && m !== undefined) sc.scrollTop += m - (y + a.off * (z / z0));
-      if (a?.midX && x !== undefined) sc.scrollLeft += a.midX() - (x + (a.offX ?? 0) * (z / z0));
     };
     const commit = (z: number) => { const v = Math.abs(z - 1) < 0.005 ? 1 : +z.toFixed(2); if (v !== zoomRef.current) recordInteraction('zoom', 'changed', { target: 'text' }); textZoomShown = v; setRef.current(v); };
 
     let g: { sc: HTMLElement; p: DetentPinch<'own'>; a: ReturnType<typeof textAnchor>; z0: number; z: number; held: boolean; x: number; y: number } | null = null;
     let raf = 0, settling = 0;
-    const draw = () => { raf = 0; if (g) show(g.sc, g.a, g.z0, g.z, g.y, g.held, g.x); };
+    const draw = () => { raf = 0; if (g) show(g.sc, g.a, g.z0, g.z, g.y, g.held); };
     const begin = (sc: HTMLElement, x: number, y: number) => {
       cancelAnimationFrame(settling); settling = 0;
       const z0 = shown();
@@ -128,12 +122,12 @@ export function useTextPinch(zoom: number, setZoom: (z: number) => void): void {
       if (!p) return;
       cancelAnimationFrame(raf); raf = 0;
       const e = p.p.end(TEXT_LEVELS);
-      if (!e) { show(p.sc, p.a, p.z0, p.z, p.y, false, p.x); commit(p.z); return; }
+      if (!e) { show(p.sc, p.a, p.z0, p.z, p.y, false); commit(p.z); return; }
       // onto 100 % on a short spring
       const t0 = performance.now();
       const frame = () => {
         const t = Math.min(1, (performance.now() - t0) / 200), k = 1 - (1 - t) ** 3;
-        show(p.sc, p.a, p.z0, e.from + (1 - e.from) * k, p.y, true, p.x);
+        show(p.sc, p.a, p.z0, e.from + (1 - e.from) * k, p.y, true);
         if (t < 1) { settling = requestAnimationFrame(frame); return; }
         settling = 0;
         commit(1);
