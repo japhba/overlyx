@@ -3,11 +3,92 @@
  * The web client's pane layout (app/panes.ts) and what the PDF pane / status bar say about the PDF
  * (app/pdfstatus.ts).
  */
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { h, render } from 'preact';
+import { useState } from 'preact/hooks';
+import { act } from 'preact/test-utils';
+import { PaneSwitch } from '../packages/client/src/app/PaneSwitch';
+import { PaneDividers } from '../packages/client/src/app/PaneDividers';
 import { DEFAULT_LAYOUT, ARRANGEMENTS, applyArrangement, arrangementMatches, applyPreset, loadLayout, mirrorPanes, movePane, normalizeLayout, paneGrow, presetMatches, resizeBetween, saveLayout, setPaneShown, soloPane, togglePane, visiblePanes } from '../packages/client/src/app/panes';
 import { formatAge, pdfStatus } from '../packages/client/src/app/pdfstatus';
 
 beforeEach(() => localStorage.clear());
+
+describe('shared pane controls', () => {
+  let root: HTMLDivElement;
+  let current = normalizeLayout(null);
+  const committed = vi.fn();
+  const chip = (id: string) => root.querySelector<HTMLButtonElement>(`[data-pane-chip="${id}"]`)!;
+  const pane = (id: string) => root.querySelector<HTMLTextAreaElement>(`[data-pane="${id}"]`)!;
+  const pointer = (target: EventTarget, type: string, x: number) => act(() => {
+    target.dispatchEvent(new PointerEvent(type, { button: 0, clientX: x, pointerId: 1, bubbles: true }));
+  });
+  async function mount() {
+    function Workspace() {
+      const [layout, setLayout] = useState(() => normalizeLayout(null));
+      current = layout;
+      return h('div', {}, h(PaneSwitch, { layout, onChange: setLayout }),
+        h('div', { class: 'editor-column panes' },
+          ...layout.order.slice().sort().map(id => h('textarea', { key: id, 'data-pane': id,
+            style: { order: 2 * layout.order.indexOf(id), display: layout.shown[id] ? '' : 'none' } })),
+          h(PaneDividers, { layout, onChange: setLayout, onResizeEnd: committed })));
+    }
+    committed.mockClear();
+    root = document.createElement('div'); document.body.append(root);
+    await act(() => render(h(Workspace, {}), root));
+    for (const id of ['doc', 'tex', 'pdf']) {
+      vi.spyOn(chip(id), 'getBoundingClientRect').mockImplementation(() => new DOMRect(current.order.indexOf(id) * 60, 0, 58, 24));
+      vi.spyOn(pane(id), 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 400, 500));
+    }
+  }
+  afterEach(async () => {
+    if (root) { await act(() => render(null, root)); root.remove(); }
+    vi.restoreAllMocks();
+  });
+
+  it('shows all three, moves PDF before the document, and keeps drafts when hiding or moving panes', async () => {
+    await mount();
+    await act(() => chip('tex').click());
+    await act(() => chip('pdf').click());
+    expect(visiblePanes(current)).toEqual(['doc', 'tex', 'pdf']);
+    const source = pane('tex'); source.value = 'unfinished source draft';
+    await pointer(chip('pdf'), 'pointerdown', 149);
+    await pointer(window, 'pointermove', 0);
+    await pointer(window, 'pointerup', 0);
+    // A drag suppresses the browser's trailing click until the next event turn.
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(visiblePanes(current)).toEqual(['pdf', 'doc', 'tex']);
+    expect(pane('pdf').style.order).toBe('0');
+    expect(pane('tex')).toBe(source);
+    await act(() => chip('tex').click());
+    expect(pane('tex').style.display).toBe('none');
+    await act(() => chip('tex').click());
+    expect(pane('tex').value).toBe('unfinished source draft');
+    await act(() => chip('doc').dispatchEvent(new MouseEvent('dblclick', { bubbles: true })));
+    expect(visiblePanes(current)).toEqual(['doc']);
+    expect(root.querySelectorAll('.pane-grip')).toHaveLength(0);
+  });
+
+  it('resizes only the neighbouring panes and releases a cancelled or unmounted drag', async () => {
+    await mount();
+    await act(() => chip('tex').click());
+    await act(() => chip('pdf').click());
+    const before = current.weights;
+    await pointer(root.querySelector('.pane-grip')!, 'pointerdown', 400);
+    await pointer(window, 'pointermove', 500);
+    expect(current.weights.doc / current.weights.tex).toBeCloseTo(500 / 300);
+    expect(current.weights.pdf).toBe(before.pdf);
+    await pointer(window, 'pointercancel', 500);
+    expect(document.documentElement.classList.contains('pane-resizing')).toBe(false);
+    expect(committed).toHaveBeenLastCalledWith(current);
+    await pointer(root.querySelector('.pane-grip')!, 'pointerdown', 400);
+    await act(() => render(null, root));
+    expect(document.documentElement.classList.contains('pane-resizing')).toBe(false);
+    const last = current;
+    await pointer(window, 'pointermove', 1000);
+    expect(current).toBe(last);
+  });
+});
 
 describe('pane layout', () => {
   it('shows the WYSIWYG document alone by default', () => {

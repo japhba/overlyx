@@ -1732,6 +1732,8 @@ textarea::selection, .dialog pre::selection, .dialog input::selection { backgrou
 html.pane-resizing, html.pane-resizing * { cursor: col-resize !important; user-select: none !important; }
 html.pane-resizing canvas, html.pane-resizing textarea { pointer-events: none; }
 @media (max-width: 760px) { .pane-grip { display: none; } }
+/* A narrow VS Code editor group still supports multiple resizable panes. */
+.app[data-vscode] .pane-grip { display: block; }
 /* presentation mode shows the document alone */
 html[data-presenting] .editor-column.panes > :not(.editor-scroll) { display: none !important; }
 html[data-presenting] .editor-column.panes > .editor-scroll { display: block !important; flex: 1 1 auto !important; }

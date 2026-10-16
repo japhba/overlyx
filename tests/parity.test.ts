@@ -92,6 +92,10 @@ describe('one toolbar definition for both front ends', () => {
       // Editing · Suggesting · Viewing and the shown changes: one switch (app/EditModeSwitch.tsx)
       expect(src, `${file} must show the mode switch from app/EditModeSwitch.tsx`).toMatch(/<EditModeSwitch /);
       expect(src, `${file} must switch modes through applyEditMode`).toMatch(/applyEditMode\(m, /);
+      // Pane controls and resizing stay shared too: all three views in any order and width.
+      expect(src, `${file} must use the shared pane switch`).toContain('<PaneSwitch ');
+      expect(src, `${file} must use the shared pane dividers`).toContain('<PaneDividers ');
+      expect(src, `${file} must not fall back to the old exclusive view modes`).not.toContain('<ViewModeSwitch ');
     });
   }
 

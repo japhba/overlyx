@@ -39,7 +39,9 @@ import { buildOutline, Outline, type OutlineItem } from '@client/app/Outline';
 import { Comments } from '@client/app/Comments';
 import { StatusBar, type Status } from '@client/app/StatusBar';
 import { SourcePane, cursorLine, docBlocks, blockPos } from '@client/app/SourcePane';
-import { ViewModeSwitch, type ViewMode } from '@client/app/ViewModeSwitch';
+import { PaneSwitch } from '@client/app/PaneSwitch';
+import { PaneDividers } from '@client/app/PaneDividers';
+import { loadLayout, normalizeLayout, saveLayout, setPaneShown, togglePane, visiblePanes, paneGrow, type PaneId, type PaneLayout } from '@client/app/panes';
 import { EditModeSwitch, editModeOf, applyEditMode } from '@client/app/EditModeSwitch';
 import { locateSourceLine } from '@client/app/sourcelocate';
 import { activeMathField, mathFocusListeners, mathCursorListeners, type LyxMathField } from '@client/editor/lyxmath/field';
@@ -91,12 +93,34 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   const [chord, setChord] = useState<string | null>(null);
   const [changeInfo, setChangeInfo] = useState<string | null>(null);
   const [zoom, setZoom] = useState(Number(stored('ol.zoom') || 1) || 1);
-  const [viewMode, setViewMode] = useState<ViewMode>('wysiwyg');
-  const [pdfMounted, setPdfMounted] = useState(false);
-  const [sourceMounted, setSourceMounted] = useState(false);
+  const [panes, setPanes] = useState<PaneLayout>(() => {
+    const state = vscode.getState() as { panes?: unknown } | null;
+    return state?.panes ? normalizeLayout(state.panes) : loadLayout();
+  });
+  const panesRef = useRef(panes);
+  panesRef.current = panes;
+  const changePanes = (next: PaneLayout | ((l: PaneLayout) => PaneLayout)) => {
+    const cur = panesRef.current;
+    const n = typeof next === 'function' ? next(cur) : next;
+    if (n === cur) return;
+    panesRef.current = n;
+    setPanes(n);
+  };
+  useEffect(() => {
+    saveLayout(panes);
+    const state = vscode.getState();
+    vscode.setState({ ...(state && typeof state === 'object' ? state : {}), panes });
+  }, [panes]);
+  const showPane = (id: PaneId, on = true) => changePanes(l => setPaneShown(l, id, on));
+  const flipPane = (id: PaneId) => changePanes(l => togglePane(l, id));
+  const shownPanes = visiblePanes(panes);
+  const pdfOnly = shownPanes.length === 1 && shownPanes[0] === 'pdf';
+  // CSS order moves panes without recreating editors, drafts or the PDF's scroll/zoom state.
+  const paneStyle = (id: PaneId) => ({ order: 2 * panes.order.indexOf(id), flex: `${paneGrow(panes, id, shownPanes)} 1 0px`, ...(panes.shown[id] ? {} : { display: 'none' }) });
+  const pdfMounted = useRef(false), sourceMounted = useRef(false);
+  if (panes.shown.pdf) pdfMounted.current = true;
+  if (panes.shown.tex) sourceMounted.current = true;
   const [pdfTarget, setPdfTarget] = useState<PdfTarget | null>(null);
-  useEffect(() => { if (viewMode === 'pdf') setPdfMounted(true); }, [viewMode]);
-  useEffect(() => { if (viewMode === 'tex' || viewMode === 'split') setSourceMounted(true); }, [viewMode]);
   // light / dark: VS Code's theme (Default) unless the user picked one in the theme switch (stored like the web client's ol.theme)
   const [themePref, setThemePref] = useState<'system' | 'light' | 'dark'>(() => { const v = stored('ol.theme'); return v === 'light' || v === 'dark' ? v : 'system'; });
   const hostDark = useRef(init.dark);
@@ -322,7 +346,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
           break;
         case 'metadataChanged': metaReload(); break;
         case 'navigate': {
-          setViewMode('wysiwyg');
+          showPane('doc');
           if (m.label !== undefined) gotoLabelIn(v, m.label);
           else if (m.heading !== undefined) {
             const heading = buildOutline(v.state.doc, false).filter(item => sectionLevel(item.layout) !== null)[m.heading];
@@ -331,7 +355,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
           break;
         }
         case 'goto': {
-          setViewMode('wysiwyg');
+          showPane('doc');
           try {
             const pos = Math.max(0, Math.min(m.pos, v.state.doc.content.size));
             v.dispatch(v.state.tr.setSelection(TextSelection.near(v.state.doc.resolve(pos))).scrollIntoView());
@@ -362,7 +386,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
 
   const build = (opts?: { open?: boolean }) => {
     editorContext.ui?.save();
-    if (opts?.open !== false) setViewMode('pdf');
+    if (opts?.open !== false) showPane('pdf');
     vscode.postMessage({ type: 'build', open: false });
     notify('Building the PDF…');
   };
@@ -383,7 +407,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       if (!boxes.length) { notify(`SyncTeX has no position for line ${where.line + 1} of the built LaTeX`, 'error'); return; }
       const b = boxes[0];
       setPdfTarget({ page: b.page, x: b.h, y: b.v - b.H, w: b.W, h: b.H, seq: Date.now() });
-      setViewMode('pdf');
+      showPane('pdf');
     } catch (e) { notify('SyncTeX: ' + (e as Error).message, 'error'); }
   };
   const gotoTexLine = async (line: number) => {
@@ -396,7 +420,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
     if (!hit) { notify(`SyncTeX: line ${line} of the LaTeX source was not found in the document`, 'error'); return; }
     const b = blocks[hit.index];
     const pos = Math.min(b.kind === 'math' ? b.pos : blockPos(b, hit.offset), v.state.doc.content.size);
-    setViewMode('wysiwyg');
+    showPane('doc');
     await new Promise(requestAnimationFrame);
     v.dispatch(v.state.tr.setSelection(TextSelection.near(v.state.doc.resolve(pos))).scrollIntoView());
     v.focus();
@@ -496,7 +520,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       openDialog: (name, arg) => setDialog({ name, arg }),
       toggleTrackChanges: () => { void toggleTracking(); },
       toggleOutline: () => setShowOutline(s => !s),
-      toggleSource: () => setViewMode(mode => mode === 'wysiwyg' ? 'split' : 'wysiwyg'),
+      toggleSource: () => flipPane('tex'),
       toggleCombined: () => setCombined(value => !value),
       acceptAll: () => run(acceptAllChanges()),
       rejectAll: () => run(rejectAllChanges()),
@@ -588,9 +612,9 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
     editingMenus.edit,
     editorViewMenu({ combined, setCombined, marginMode, toggleMargin, run, showRuler, setShowRuler, tbMode, setToolbar, textWidth, setTextWidth, stepTextWidth,
       hostItems: [
-        { label: 'LaTeX source beside the document (raw view)', shortcut: 'Ctrl+Alt+S', action: () => setViewMode(mode => mode === 'wysiwyg' ? 'split' : 'wysiwyg') },
+        { label: 'LaTeX source beside the document (raw view)', shortcut: 'Ctrl+Alt+S', checked: panes.shown.tex, action: () => flipPane('tex') },
         { label: 'Outline', shortcut: 'Ctrl+Alt+O', action: () => setShowOutline(s => !s) },
-        { label: 'PDF preview', checked: viewMode === 'pdf', action: () => setViewMode('pdf') },
+        { label: 'PDF preview', checked: panes.shown.pdf, action: () => flipPane('pdf') },
         { label: 'Comments', checked: showComments, action: () => setShowComments(v => !v) },
         { label: 'Draw in the margins', checked: inkMode, action: () => setInkMode(v => !v) },
         { sep: true },
@@ -741,10 +765,10 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
           <ThemeToggle pref={themePref} dark={shownDark} onPick={pickTheme} host="VS Code" onSettings={() => setDialog({ name: 'preferences' })} />
           <EditModeSwitch mode={editModeOf(tracking, viewing)} canEdit view={view} views={allViews}
             onMode={m => applyEditMode(m, { tracking, toggleTracking: () => { void toggleTracking(); }, setViewing })} />
-          <ViewModeSwitch mode={viewMode} onChange={setViewMode} />
+          <PaneSwitch layout={panes} onChange={changePanes} markdown={/\.(md|markdown)$/i.test(docId)} />
         </span>
       </div>
-      {viewMode !== 'pdf' && <>
+      {!pdfOnly && <>
         {tbMode('standard') !== 'off' && <Toolbar id="standard" layouts={layouts} layout={layout} onLayout={(n: string) => run(C.setLayout(n))} groups={tb.standard} />}
         {(tbMode('viewupdate') !== 'off' || tbMode('extra') !== 'off') && (
           <div class="tb-samerow">
@@ -754,13 +778,13 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
         )}
         {tb.showLayout && <Toolbar id="layout" label="Layout" groups={tb.layout} />}
       </>}
-      {viewMode !== 'pdf' && meta && meta.health.length > 0 && (
+      {!pdfOnly && meta && meta.health.length > 0 && (
         <div class="health-bar">
           <span class="health-icon">⚠</span>
           <span>{meta.health.length === 1 ? '1 structural issue' : `${meta.health.length} structural issues`} found in this file: {meta.health.map(h => h.message).join(' ')}</span>
         </div>
       )}
-      {viewMode !== 'pdf' && findOpen && (
+      {!pdfOnly && findOpen && (
         <div class="find-bar-wrap">
           <div class="find-bar">
             <span>Find:</span><input autofocus value={findQ} onInput={e => { const v = (e.target as HTMLInputElement).value; setFindQ(v); requery({ query: v }); }} onKeyDown={e => { if (e.key === 'Enter' && view) findNext(view, e.shiftKey ? -1 : 1); if (e.key === 'Escape') { setFindOpen(false); if (view) { setQuery(view, { query: '' }); view.focus(); } } }} />
@@ -786,7 +810,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
         </div>
       )}
       <div class="main">
-        {viewMode !== 'pdf' && showOutline && (
+        {!pdfOnly && showOutline && (
           <div class="sidebar left outline-panel">
             <div class="panel-tabs">
               <button class="active" data-tab="outline">Outline</button>
@@ -795,9 +819,9 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
             <div class="panel-body"><Outline view={view} items={outline} activePos={activePos} /></div>
           </div>
         )}
-        {viewMode !== 'pdf' && showOutline && <SidebarGrip side="left" />}
-        <div class={'editor-column view-' + viewMode + (viewMode === 'tex' || viewMode === 'split' ? ' split' : '')}>
-          <div class={'editor-scroll' + (marginMode ? ' margin-mode' : '') + (inkMode ? ' ink-mode' : '')} ref={scrollRef} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
+        {!pdfOnly && showOutline && <SidebarGrip side="left" />}
+        <div class={'editor-column panes' + (shownPanes.length > 1 ? ' split' : '')}>
+          <div class={'editor-scroll' + (marginMode ? ' margin-mode' : '') + (inkMode ? ' ink-mode' : '')} ref={scrollRef} data-pane="doc" style={paneStyle('doc')} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
             {showRuler && <Ruler width={textWidth} zoom={zoom} onChange={setTextWidth} notes={marginMode ? { sash: notesPane.sash, scale: noteScale, onScale: setNoteScale } : undefined} />}
             <div class="editor-page">
               {marginMode && <NotesSash sash={notesPane.sash} />}
@@ -808,11 +832,14 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
                 onSelection={onSelection} onDocChange={() => setDocTick(t => t + 1)} />)}
             </div>
           </div>
-          {sourceMounted && <SourcePane target={sourceTarget} tick={docTick} selTick={selTick} mathField={mathField} onNotify={notify} onClose={() => setViewMode('wysiwyg')} onSave={() => vscode.postMessage({ type: 'save' })} />}
-          {pdfMounted && <BuiltPdf target={pdfTarget} onBuild={() => build()} onForward={() => { void syncToPdf(); }}
-            onInverse={(page, x, y) => { void syncFromPdf(page, x, y); }} onOpenBeside={() => vscode.postMessage({ type: 'openPdfPanel' })} />}
+          {sourceMounted.current && <SourcePane fill style={paneStyle('tex')} target={sourceTarget} tick={docTick} selTick={selTick} mathField={mathField} onNotify={notify} onClose={() => showPane('tex', false)} onSave={() => vscode.postMessage({ type: 'save' })} />}
+          {pdfMounted.current && <div class="pdf-pane" data-pane="pdf" style={paneStyle('pdf')}>
+            <BuiltPdf target={pdfTarget} onBuild={() => build()} onForward={() => { void syncToPdf(); }}
+              onInverse={(page, x, y) => { void syncFromPdf(page, x, y); }} onOpenBeside={() => vscode.postMessage({ type: 'openPdfPanel' })} onClose={() => showPane('pdf', false)} />
+          </div>}
+          <PaneDividers layout={panes} onChange={changePanes} />
         </div>
-        {viewMode !== 'pdf' && showComments && (
+        {!pdfOnly && showComments && (
           <div class="sidebar right">
             <div class="panel-tabs">
               <button class="active" data-tab="comments">Comments</button>
@@ -822,7 +849,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
           </div>
         )}
       </div>
-      {viewMode !== 'pdf' && (tb.showMath || tb.showTable || tb.showReview || inkMode) && (
+      {!pdfOnly && (tb.showMath || tb.showTable || tb.showReview || inkMode) && (
         <div class="bottom-toolbars" style={{ left: showOutline ? 'var(--left-width, 220px)' : '24px', right: showComments ? 'var(--right-width, 360px)' : '24px' }}>
           {tb.showMath && <Toolbar id="math" label="Math" groups={tb.math} />}
           {tb.showMath && tbMode('mathpanels') !== 'off' && <Toolbar id="mathpanels" label="Panels" groups={tb.mathPanels} />}

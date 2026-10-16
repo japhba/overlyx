@@ -1,5 +1,5 @@
 /**
- * The writing area's panes (web client): the WYSIWYG document, its LaTeX source and the PDF, side
+ * The writing area's panes (browser and VS Code): the WYSIWYG document, its LaTeX source and the PDF, side
  * by side — any one, two or all three, in any order, with draggable widths (Overleaf's split view,
  * with a third pane). The layout is kept per browser (`ol.panes`); the `raw:` prefix of a document
  * hash asks for the source pane (links and the View menu's LaTeX-source switch use it).

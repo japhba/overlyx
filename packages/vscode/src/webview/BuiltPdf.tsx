@@ -28,12 +28,13 @@ async function fixPdfWorker(): Promise<void> {
 const PHASE: Record<string, string> = { queued: 'waiting for a free build slot', exporting: 'saving the document', compiling: 'running latexmk' };
 
 /** The same built-PDF view in the editor switch and in a separate VS Code panel. */
-export function BuiltPdf({ target: requestedTarget, onBuild, onInverse, onForward, onOpenBeside }: {
+export function BuiltPdf({ target: requestedTarget, onBuild, onInverse, onForward, onOpenBeside, onClose }: {
   target?: PdfTarget | null;
   onBuild?: () => void;
   onInverse?: (page: number, x: number, y: number) => void;
   onForward?: () => void;
   onOpenBeside?: () => void;
+  onClose?: () => void;
 }) {
   const [ready, setReady] = useState(false);
   useEffect(() => { let mounted = true; void preparePdfWorker().then(() => { if (mounted) setReady(true); }); return () => { mounted = false; }; }, []);
@@ -94,6 +95,7 @@ export function BuiltPdf({ target: requestedTarget, onBuild, onInverse, onForwar
         {onForward && <button class="small-btn" onClick={onForward} title="Show the cursor in the PDF (Ctrl+Alt+J)">⇄ Sync</button>}
         {onOpenBeside && <button class="small-btn" onClick={onOpenBeside} title="Open the PDF in a separate VS Code panel">Open beside</button>}
         {!onOpenBeside && <InterfaceZoom />}
+        {onClose && <button class="small-btn" onClick={onClose} title="Hide the PDF pane">✕</button>}
       </div>
       {pdf.url && ready
         ? <PdfViewer url={pdf.url} target={requestedTarget ?? target} onSync={onInverse ?? ((page, x, y) => vscode.postMessage({ type: 'inverse', page, x, y }))} hint="Double-click the PDF to jump to that place in the document" busy={pdf.busy} overlay={progress} />

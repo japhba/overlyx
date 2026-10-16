@@ -20,8 +20,9 @@ import { pendingImportFlag } from './pendingImport';
 import { TextEditor } from './TextEditor';
 import { isMarkdownDoc } from '../editor/markdown';
 import { PaneSwitch } from './PaneSwitch';
+import { PaneDividers } from './PaneDividers';
 import { EditModeSwitch, editModeOf, applyEditMode } from './EditModeSwitch';
-import { loadLayout, saveLayout, setPaneShown, togglePane, visiblePanes, resizeBetween, paneGrow, type PaneId, type PaneLayout } from './panes';
+import { loadLayout, saveLayout, setPaneShown, togglePane, visiblePanes, paneGrow, type PaneId, type PaneLayout } from './panes';
 import { ShareDialog } from './Share';
 import { GuestCallout } from './Guest';
 import { GitDialog } from './Git';
@@ -260,25 +261,6 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   const pdfMountedRef = useRef(false);
   if (panes.shown.pdf) pdfMountedRef.current = true;
   const pdfMounted = pdfMountedRef.current;
-  const columnRef = useRef<HTMLDivElement>(null);
-  /** a divider between two panes dragged: their widths change, the others keep theirs */
-  const startPaneResize = (a: PaneId, b: PaneId, e: PointerEvent) => {
-    if (e.button !== 0) return;
-    const col = columnRef.current;
-    const ea = col?.querySelector<HTMLElement>(`:scope > [data-pane="${a}"]`), eb = col?.querySelector<HTMLElement>(`:scope > [data-pane="${b}"]`);
-    if (!ea || !eb) return;
-    e.preventDefault();
-    const widths: [number, number] = [ea.getBoundingClientRect().width, eb.getBoundingClientRect().width];
-    const base = panes, x0 = e.clientX;
-    document.documentElement.classList.add('pane-resizing');
-    const move = (ev: PointerEvent) => setPanesState(resizeBetween(base, a, b, widths, ev.clientX - x0));
-    const up = () => {
-      window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up);
-      document.documentElement.classList.remove('pane-resizing');
-      setPanesState(l => { saveLayout(l); return l; });
-    };
-    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); window.addEventListener('pointercancel', up);
-  };
   // .tex and markdown documents open in the collaborative editor, other text files in a plain text
   // editor (ids prefixed with "text:"), a project's PDF files in the PDF viewer ("pdf:")
   const isTextTab = !!docId && docId.startsWith('text:');
@@ -1630,7 +1612,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
           </div>
         )}
         {showFiles && <SidebarGrip side="left" />}
-        <div class={'editor-column panes' + (isLyxDoc && shownPanes.length > 1 ? ' split' : '')} ref={columnRef}>
+        <div class={'editor-column panes' + (isLyxDoc && shownPanes.length > 1 ? ' split' : '')}>
         <div class={'editor-scroll' + (marginMode && isLyxDoc ? ' margin-mode' : '') + (inkMode && isLyxDoc ? ' ink-pan' : '')} ref={scrollRef} data-pane="doc" style={isLyxDoc ? paneStyle('doc') : undefined} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
           {(isLyxDoc || isTextTab) && showRuler && <Ruler width={textWidth} zoom={isLyxDoc ? zoom : 1} onChange={setTextWidth} notes={isLyxDoc && marginMode ? { sash: notesPane.sash, scale: noteScale, onScale: setNoteScale } : undefined} />}
           {docId ? (isPdfTab ? <div class="pdf-tab"><PdfViewer key={docId} url={fileUrl(projectOfDoc(textId!), docPathOf(textId!))} toolbar={<a class="small-btn" href={fileUrl(projectOfDoc(textId!), docPathOf(textId!)) + '?download=1'}>Download</a>} /></div> : isBoardTab ? <BoardEditor key={docId} id={docId} user={user} notify={notify} /> : isHtmlTab ? <DeliverableEditor key={docId} id={docId} user={user} notify={notify} /> : isProjectRoot ? <ProjectRootPanel key={docId} project={docId} notify={notify} onCreated={id => { openInTab(id); setRefreshKey(k => k + 1); }} /> : !isLyxDoc ? <TextEditor key={docId} id={textId!} notify={notify} /> :
@@ -1651,7 +1633,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
               onPublicLink={shareProject ? () => setShareFor(shareProject) : undefined} onClose={() => showPane('pdf', false)} />
           </div>
         )}
-        {isLyxDoc && shownPanes.slice(0, -1).map((a, i) => <div key={a + '|' + shownPanes[i + 1]} class="pane-grip" style={{ order: 2 * panes.order.indexOf(a) + 1 }} title="Drag to resize the panes" onPointerDown={e => startPaneResize(a, shownPanes[i + 1], e as unknown as PointerEvent)} />)}
+        {isLyxDoc && !narrowPanes && <PaneDividers layout={panes} onChange={setPanesState} onResizeEnd={saveLayout} />}
         </div>
         {isLyxDoc && !rightTab && (
           <div class="rail right">

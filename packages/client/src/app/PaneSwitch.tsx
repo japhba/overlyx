@@ -1,5 +1,5 @@
 /**
- * The pane control in the menu bar (web client): WYSIWYG · TeX · PDF, left to right in the order
+ * The pane control shared by browser and VS Code: WYSIWYG · TeX · PDF, left to right in the order
  * the panes stand. A click shows or hides a pane (the last one stays), a double-click shows it
  * alone, dragging a chip sideways moves its pane; ▾ lists the useful arrangements in words
  * ("Document and PDF"), and swap sides / equal widths. On a phone-width screen one pane at a time: a click shows that one.

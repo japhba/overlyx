@@ -210,12 +210,12 @@ try {
   const macroState = await editorFrame.evaluate(() => ({ macros: window.overlyx?.meta?.macros, errors: [...document.querySelectorAll('.lm-error:not(.lm-pending), .lm-undefined')].map(n => n.textContent), math: [...document.querySelectorAll('.lyx-math-inline')].map(n => n.innerText) }));
   log('macro state', JSON.stringify(macroState));
   if (!macroState.macros?.bx || macroState.math.some(t => t.includes('\\bx'))) fail('imported bx macro did not render');
-  await editorFrame.getByRole('button', { name: 'Split', exact: true }).click();
+  await editorFrame.locator('[data-pane-chip="tex"]').click();
   await editorFrame.locator('textarea.source').waitFor({ state: 'visible' });
   await until(() => editorFrame.locator('textarea.source').inputValue().then(s => s.includes('Introduction')), 15000, 'source text');
-  await editorFrame.getByRole('button', { name: 'TeX', exact: true }).click();
+  await editorFrame.locator('[data-pane-chip="tex"]').dblclick();
   if (await editorFrame.locator('.editor-scroll').isVisible()) fail('TeX mode did not hide the writing area');
-  await editorFrame.getByRole('button', { name: 'WYSIWYG', exact: true }).click();
+  await editorFrame.locator('[data-pane-chip="doc"]').dblclick();
   if (!await editorFrame.locator('.ruler').isVisible()) fail('ruler missing');
   fs.writeFileSync(path.join(ws, 'macros.tex'), String.raw`\newcommand{\bx}{\boldsymbol{y}}`);
   await until(() => editorFrame.evaluate(() => window.overlyx?.meta?.macros?.bx?.def === String.raw`\boldsymbol{y}`), 15000, 'macro dependency refresh');
@@ -231,7 +231,7 @@ try {
   await until(() => fs.readFileSync(path.join(ws, 'main.tex'), 'utf8').includes('Source edit: inline math'), 15000, 'saving directly from TeX mode');
   await sleep(750); // let a delayed visual-editor echo, if any, arrive after the save
   if (await page.locator('.tabs-container .tab.dirty').count()) fail('TeX save was followed by another unsaved visual-editor rewrite');
-  await editorFrame.getByRole('button', { name: 'WYSIWYG', exact: true }).click();
+  await editorFrame.locator('[data-pane-chip="doc"]').dblclick();
   await until(() => editorFrame.locator('.lyx-editor').innerText().then(t => t.includes('Source edit: inline math')), 10000, 'source edit in WYSIWYG mode');
   log('view modes, ruler and imported macro refresh OK');
 

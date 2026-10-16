@@ -42,10 +42,15 @@ reproduced byte for byte until you change them.
 - **PDF view** (Ctrl+R): builds with your local `latexmk` next to the file, shows the PDF with
   build progress and log. SyncTeX both ways: Ctrl+Alt+J shows the cursor's place in the PDF,
   double-click in the PDF jumps to that place in the document.
-  The **PDF** view opens it without rebuilding, including a PDF already on disk after
+  The **PDF** pane opens it without rebuilding, including a PDF already on disk after
   restarting VS Code; it follows builds started from the editor while the preview is idle.
   **Open beside** opens a separate VS Code PDF panel. The PDF keeps its page and zoom when
   switching views; unfinished TeX source drafts are kept too.
+- **Arrange your views** with the same **WYSIWYG · TeX · PDF** controls as the website:
+  click to show or hide each pane, double-click to show one alone, drag its button to
+  move it, and drag the dividers to resize. The ▾ menu offers combinations, including
+  all three together, **Swap sides** and **Equal widths**. Layouts survive editor reloads;
+  building or syncing to the PDF keeps the other views open.
 - **Interface zoom**: the **UI zoom** button offers −, + and Reset using VS Code's window zoom.
   It scales the whole interface, including toolbars and dialogs. The document and PDF retain
   their separate content zoom controls.
