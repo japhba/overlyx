@@ -2,7 +2,9 @@ import type { Response } from 'express';
 
 /**
  * Google's file picker (gdocs/google.ts pickerConfigured: linking / importing Google Docs that exist)
- * runs Google's script and opens Google's frame in the page — allowed only where it is set up. (The
+ * runs Google's script and opens Google's frame in the page — allowed only where it is set up. Google
+ * checks the picker's API key against the page that opened the frame, so there other sites are told
+ * the origin (never the path: public PDF links carry their token there) instead of nothing. (The
  * environment is read here, not config.ts: importing that would fix the configuration at whatever
  * moment this module is first loaded — before a test has pointed it at its scratch directories.)
  */
@@ -12,8 +14,9 @@ const googleOrigins = () => (process.env.GOOGLE_PICKER_API_KEY && process.env.GO
 
 /** Only OAuth consent pages pass an already-validated client redirect URI. */
 export function setSecurityHeaders(res: Response, formRedirectUri?: string): void {
+  const G = googleOrigins();
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
-  res.setHeader('Referrer-Policy', 'same-origin');
+  res.setHeader('Referrer-Policy', G.frame ? 'strict-origin-when-cross-origin' : 'same-origin');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   // the site is served over https only: browsers keep to it (ignored on plain-http responses, e.g. in development)
   res.setHeader('Strict-Transport-Security', 'max-age=31536000');
@@ -23,6 +26,5 @@ export function setSecurityHeaders(res: Response, formRedirectUri?: string): voi
   // must allow that client's callback origin before the user clicks Allow or Deny.
   // The editor's fonts are served with the client (fonts/web), so style-src and font-src stay 'self'.
   const formAction = formRedirectUri ? `'self' ${new URL(formRedirectUri).origin}` : "'self'";
-  const G = googleOrigins();
   res.setHeader('Content-Security-Policy', `default-src 'self'; script-src 'self'${G.script}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:${G.img}; font-src 'self' data:; connect-src 'self' ws: wss:${G.connect}; frame-src 'self' blob:${G.frame}; worker-src 'self' blob:; object-src 'self'; base-uri 'self'; form-action ${formAction}; frame-ancestors 'self'`);
 }
