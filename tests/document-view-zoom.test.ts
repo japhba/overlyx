@@ -10,7 +10,7 @@ import { resetUsageForTests } from '../packages/client/src/usage.ts';
 afterEach(() => { render(null, document.body); document.body.replaceChildren(); resetUsageForTests(); });
 
 describe('document view zoom', () => {
-  it('leaves trackpad/wheel gestures to the browser without changing document zoom or the model', async () => {
+  it('blocks browser pinch zoom without changing document zoom or the model, and still allows scrolling', async () => {
     const doc = schema.nodes.doc.create(null, schema.nodes.paragraph.create(null, [schema.text('Text'), schema.nodes.graphics.create({ params: JSON.stringify(['filename plot.png', 'width 6cm']) })]));
     const before = doc.toJSON();
     function Harness() {
@@ -24,11 +24,20 @@ describe('document view zoom', () => {
     const ordinary = new WheelEvent('wheel', { deltaY: 10, bubbles: true, cancelable: true });
     pane.dispatchEvent(ordinary);
     expect(ordinary.defaultPrevented).toBe(false);
-    const wheel = new WheelEvent('wheel', { deltaY: -100, ctrlKey: true, bubbles: true, cancelable: true });
-    // happy-dom's WheelEvent omits MouseEvent modifier fields; browsers provide these.
-    Object.defineProperty(wheel, 'ctrlKey', { value: true });
-    await act(() => pane.dispatchEvent(wheel));
-    expect(wheel.defaultPrevented).toBe(false);
+    for (const target of [pane, document.body]) {
+      for (const modifier of ['ctrlKey', 'metaKey']) {
+        const wheel = new WheelEvent('wheel', { deltaY: -10, bubbles: true, cancelable: true });
+        // happy-dom's WheelEvent omits MouseEvent modifier fields; browsers provide these.
+        Object.defineProperty(wheel, modifier, { value: true });
+        await act(() => target.dispatchEvent(wheel));
+        expect(wheel.defaultPrevented).toBe(true);
+      }
+      for (const type of ['gesturestart', 'gesturechange', 'gestureend']) {
+        const gesture = new Event(type, { bubbles: true, cancelable: true });
+        target.dispatchEvent(gesture);
+        expect(gesture.defaultPrevented).toBe(true);
+      }
+    }
     expect(document.documentElement.style.getPropertyValue('--editor-zoom')).toBe('1.2');
     expect(doc.toJSON()).toEqual(before);
   });

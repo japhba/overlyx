@@ -87,6 +87,7 @@ function textAnchor(x: number, y: number): { mid: () => number | null; off: numb
  * the text's own size (100 %) and holds there till pinched well past it (zoomdetent.ts), giving a
  * little meanwhile and settling back once let go; let go near it, it settles on it. Said over the
  * text as it goes (the pill). Both shells (App, VS Code's EditorShell): `zoom` and `setZoom` are their text zoom.
+ * Unhandled trackpad pinches are swallowed so they cannot magnify the whole interface instead.
  */
 export function useTextPinch(zoom: number, setZoom: (z: number) => void): void {
   const zoomRef = useRef(zoom); zoomRef.current = zoom;
@@ -165,8 +166,17 @@ export function useTextPinch(zoom: number, setZoom: (z: number) => void): void {
       if (e.touches.length < 2) { touch = null; end(); }
     };
     const opts = { passive: false } as AddEventListenerOptions;
+    // Trackpad pinches must not fall through to Chrome's zoom of the whole app. Cancel only the
+    // browser action: PDF/canvas handlers run first, ordinary scrolling passes through, and the
+    // document zoom buttons/keys still work.
+    const onWheel = (e: WheelEvent) => { if (e.ctrlKey || e.metaKey) e.preventDefault(); };
+    const onGesture = (e: Event) => e.preventDefault();
+    window.addEventListener('wheel', onWheel, opts);
+    for (const t of ['gesturestart', 'gesturechange', 'gestureend']) window.addEventListener(t, onGesture, opts);
     for (const t of ['touchstart', 'touchmove', 'touchend', 'touchcancel']) document.addEventListener(t, onTouch as EventListener, opts);
     return () => {
+      window.removeEventListener('wheel', onWheel);
+      for (const t of ['gesturestart', 'gesturechange', 'gestureend']) window.removeEventListener(t, onGesture);
       for (const t of ['touchstart', 'touchmove', 'touchend', 'touchcancel']) document.removeEventListener(t, onTouch as EventListener);
       cancelAnimationFrame(raf); cancelAnimationFrame(settling);
     };

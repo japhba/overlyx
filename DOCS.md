@@ -2236,7 +2236,9 @@ touch-action: pan-x pan-y }`, their middle scrolls); the character under
 the fingers stays under them while the text reflows (a figure anchors in both axes;
 `caretPositionFromPoint` anchors text, the scroll is set again
 each frame), and 100 % is a level it stops at and holds (×1.25), as the canvases' fits. Trackpad
-pinches and Ctrl/⌘ + wheel use the browser's default behavior. The document's zoom buttons,
+pinches and Ctrl/⌘ + wheel do not zoom the document or magnify the whole interface. A non-passive
+window listener cancels the browser action after PDF/canvas handlers have had their turn; ordinary
+scrolling still works. The document's zoom buttons,
 percentage menu and Ctrl ± shortcuts remain; every step stops at 100 % (`stepTextZoom`).
 Not on a layout document's canvas, which zooms itself. The extension used to zoom with CSS `zoom` on its scroll container instead, which puts
 mouse coordinates and layout into different scales in Chromium — drags stopped following the pointer
