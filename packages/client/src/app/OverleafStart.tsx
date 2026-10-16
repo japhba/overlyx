@@ -18,6 +18,8 @@ export function OverleafStart({ google, onSignIn, googleIcon, onChange }: {
   /** how many projects are waiting (0 = nothing chosen) */
   onChange?: (count: number) => void;
 }) {
+  const [source, setSource] = useState<'overleaf' | 'lyx'>('overleaf');
+  const lyx = source === 'lyx';
   const [zips, setZips] = useState<File[]>([]);
   const [links, setLinks] = useState('');
   const [token, setToken] = useState('');
@@ -32,19 +34,19 @@ export function OverleafStart({ google, onSignIn, googleIcon, onChange }: {
   // whatever is chosen is parked at once, so any of the page's sign-in buttons brings it along
   useEffect(() => {
     onChange?.(count);
-    const t = setTimeout(() => { void stashPendingImport({ links, token, zips }).catch(() => {}); }, 150);
+    const t = setTimeout(() => { void stashPendingImport({ source, links, token, zips }).catch(() => {}); }, 150);
     return () => clearTimeout(t);
-  }, [zips, links, token]);
+  }, [zips, links, token, source]);
 
   const add = (files: FileList | File[] | null) => {
     if (!files) return;
-    const list = Array.from(files).filter(f => /\.zip$/i.test(f.name) || f.type === 'application/zip' || f.type === 'application/x-zip-compressed');
+    const list = Array.from(files).filter(f => (lyx ? /\.(lyx|zip)$/i : /\.zip$/i).test(f.name) || f.type === 'application/zip' || f.type === 'application/x-zip-compressed');
     setZips(z => [...z, ...list.filter(f => !z.some(x => x.name === f.name && x.size === f.size))]);
   };
   const go = async () => {
     if (!count || needToken || busy) return;
     setBusy(true);
-    try { await stashPendingImport({ links, token, zips }); }
+    try { await stashPendingImport({ source, links, token, zips }); }
     catch { /* the sign-in page still works; the import has to be repeated from the start page */ }
     setBusy(false);
     onSignIn();
@@ -52,19 +54,22 @@ export function OverleafStart({ google, onSignIn, googleIcon, onChange }: {
   const label = count ? `Import ${count} project${count === 1 ? '' : 's'} & ${google ? 'continue with Google' : 'continue'}` : google ? 'Import & continue with Google' : 'Import & continue';
 
   return (
-    <section class="overleaf-start" id="overleaf" aria-label="Coming from Overleaf?" data-overleaf-start>
+    <section class="overleaf-start" id="overleaf" aria-label="Coming from Overleaf or LyX?" data-overleaf-start>
       <div class="copy">
-        <h2>Coming from Overleaf?</h2>
+        <h2>Coming from Overleaf or LyX?</h2>
+        <div class="row" role="group" aria-label="Import source">
+          {(['overleaf', 'lyx'] as const).map(s => <button type="button" class="btn" aria-pressed={source === s} data-import-source={s} onClick={() => { setSource(s); setZips([]); setLinks(''); setToken(''); }}>{s === 'lyx' ? 'LyX documents' : 'Overleaf projects'}</button>)}
+        </div>
         <p>Bring your projects along — they stay plain LaTeX, and Overleaf, git and your other tools keep working on the same files.</p>
-        <ol>
+        {lyx ? <p>Bring a <b>.lyx file</b>, or zip your project folder with its child documents, figures and bibliography. Sign in to open and edit it. Download <b>.lyx</b> files or a complete LyX project from <b>File ▸ Export</b>.</p> : <ol>
           <li>In Overleaf open the project and choose <b>Menu ▸ Download ▸ Source</b> — or tick several projects in your project list and click <b>Download</b> to get them all in one zip.</li>
           <li>Drop the zip here.</li>
           <li>Sign in — the import runs by itself and your document opens.</li>
-        </ol>
-        <button type="button" class="git-toggle" data-overleaf-start-git onClick={() => setGitOpen(o => !o)}>
+        </ol>}
+        <button type="button" hidden={lyx} class="git-toggle" data-overleaf-start-git onClick={() => setGitOpen(o => !o)}>
           {gitOpen ? '▾' : '▸'} Have Overleaf's Git access (paid plans)? Paste project links and a Git token instead.
         </button>
-        {gitOpen && (
+        {!lyx && gitOpen && (
           <div class="git">
             <textarea data-overleaf-start-links rows={3} placeholder={'https://www.overleaf.com/project/5f1a…\nhttps://www.overleaf.com/project/60b3…'} value={links} onInput={e => setLinks((e.target as HTMLTextAreaElement).value)} />
             <input type="password" data-overleaf-start-token placeholder="Overleaf Git token (olp_…) — used once for the import, never stored" value={token} onInput={e => setToken((e.target as HTMLInputElement).value)} autocomplete="off" />
@@ -77,9 +82,9 @@ export function OverleafStart({ google, onSignIn, googleIcon, onChange }: {
           onClick={() => input.current?.click()} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.current?.click(); } }}
           onDragOver={e => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)}
           onDrop={e => { e.preventDefault(); setOver(false); add(e.dataTransfer?.files ?? null); }}>
-          <strong>Drop your Overleaf zip here</strong>
+          <strong>{lyx ? 'Drop your .lyx file or project zip here' : 'Drop your Overleaf zip here'}</strong>
           <span>or click to choose it — several at once is fine</span>
-          <input ref={input} type="file" accept=".zip,application/zip" multiple hidden data-overleaf-start-zip onChange={e => { add((e.target as HTMLInputElement).files); (e.target as HTMLInputElement).value = ''; }} />
+          <input ref={input} type="file" accept={lyx ? '.lyx,.zip,application/zip' : '.zip,application/zip'} multiple hidden data-overleaf-start-zip onChange={e => { add((e.target as HTMLInputElement).files); (e.target as HTMLInputElement).value = ''; }} />
         </div>
         {zips.length > 0 && (
           <ul class="files" data-overleaf-start-files>

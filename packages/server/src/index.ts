@@ -29,6 +29,7 @@ import { listProjects, resolveProjectPath, assertWritableRelPath, projectDir, cr
 import { isMarkdownPath } from '@overlyx/core/md/index.ts';
 import { snippetSvg, snippetFile } from './snippets.ts';
 import { importLyxFile, parseFragmentText, newLayoutDocumentText, withDocumentSettings, NO_INDENT_SETTINGS } from './texdoc.ts';
+import { importLyxUpload } from './lyximport.ts';
 import { toPdf } from './graphics.ts';
 import { extractZip, bundledZips, projectNameFromZip, writeZip } from './zip.ts';
 import { pdfLinkByToken, pdfLinksOf, createPdfLink, deletePdfLink, countHit, pdfForLink, pdfLinkFileName, linkableDocs } from './pdflinks.ts';
@@ -50,13 +51,13 @@ import { feedbackRoutes, vscodeTelemetryRoutes, reportServerError, pruneReports,
 import { startInboxImport } from './inbox.ts';
 import { deletionPreview, deleteAccount, pruneTrash } from './accounts.ts';
 import { privacyPage } from './privacy.ts';
-import { usageRoutes } from './usage.ts';
+import { usageRoutes, vscodeUsageRoutes } from './usage.ts';
 import { searchLiterature, bibtexFor, addToCitedBib, sourcesAvailable, type Hit } from './bibsearch.ts';
 import { fetchPdfForEntry } from './pdffetch.ts';
 import { gitRouter, ensureAllRepos, ensureRepo, repoInfo, cloneUrl, commitProject, restoreProject, touchProject, createToken, listTokens, deleteToken, flushCommits } from './git.ts';
 import { syncRouter } from './sync.ts';
 import { externalSyncOf } from './syncPeers.ts';
-import { texHeadings, parseBibtex, lyxToPm, splitDocId, projectOfDoc, docPathOf, splitProjectKey } from '@overlyx/core';
+import { texHeadings, parseBibtex, lyxToPm, exportLyx, splitDocId, projectOfDoc, docPathOf, splitProjectKey } from '@overlyx/core';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -71,6 +72,7 @@ app.use(cliLoginRoutes());   // `overlyx auth login` through the browser (after 
 // The desktop extension has no OverLyX account/session. Its narrow, rate-limited error endpoint
 // therefore lives outside the authenticated API; all ordinary feedback remains authenticated.
 app.use('/api', vscodeTelemetryRoutes());
+app.use('/api', vscodeUsageRoutes());
 
 // a guest who signs in: their open editors hold the guest's identity — reconnect them as the account
 app.use('/api/auth', authRouter({ onGuestAdopted: (projects, guestId) => { for (const p of projects) manager.kick(p, [guestId], 'signed in'); } }));
@@ -178,7 +180,7 @@ const needProject = (min: Role) => (req: express.Request, res: express.Response,
  */
 api.all('/docs/*', (req, res, next) => {
   const full = String((req.params as any)[0] ?? '');
-  const m = /^(.*?)(?:\/(meta|tex|outline|source|bib|reset|save|header|versions(?:\/\d+(?:\/restore)?)?|export(?:\/cancel)?|pdf|build|folds|external|synctex\/(?:view|edit)))?$/.exec(full)!;
+  const m = /^(.*?)(?:\/(meta|tex|lyx|outline|source|bib|reset|save|header|versions(?:\/\d+(?:\/restore)?)?|export(?:\/cancel)?|pdf|build|folds|external|synctex\/(?:view|edit)))?$/.exec(full)!;
   // an id from before a project moved (namespaces.ts) names the document under its current key
   const id = canonicalDocId(decodeURIComponent(m[1]));
   const action = m[2] ?? '';
@@ -272,6 +274,34 @@ api.post('/import/overleaf', async (req, res) => {
   }
   res.json({ results });
 });
+api.post('/import/lyx', express.raw({ type: '*/*', limit: '300mb' }), async (req, res) => {
+  try {
+    const name = ownProjectKey(req.user!.id, String(req.query.name ?? ''));
+    if (projectRow(name) || fs.existsSync(projectDir(name))) { res.status(409).json({ error: 'A project with this name already exists' }); return; }
+    if (!Buffer.isBuffer(req.body)) { res.status(400).json({ error: 'No file received' }); return; }
+    const r = await importLyxUpload(name, String(req.query.filename ?? ''), req.body, toPdf);
+    registerProject(name, req.user!.id);
+    await ensureRepo(name).catch(e => console.error('[git] init after LyX import failed:', e));
+    touchProject(name, req.user!.id);
+    res.json({ ok: true, name, ...r });
+  } catch (e) { res.status(400).json({ error: (e as Error).message }); }
+});
+
+api.post('/projects/:project/import-lyx', needProject('edit'), express.raw({ type: '*/*', limit: '300mb' }), async (req, res) => {
+  try {
+    if (!Buffer.isBuffer(req.body)) { res.status(400).json({ error: 'No file received' }); return; }
+    const filename = String(req.query.filename ?? '');
+    const base = filename.replace(/\.(lyx|zip)$/i, '').replace(/[^A-Za-z0-9._ -]/g, '-').replace(/^[. ]+|[. ]+$/g, '') || 'lyx-import';
+    const dir = String(req.query.dir ?? '');
+    let folder = path.posix.join(dir, base);
+    for (let i = 2; fs.existsSync(resolveProjectPath(req.params.project, folder)); i++) folder = path.posix.join(dir, `${base}-${i}`);
+    assertWritableRelPath(folder);
+    const r = await importLyxUpload(req.params.project, filename, req.body, toPdf, folder);
+    touchProject(req.params.project, req.user!.id);
+    res.json(r);
+  } catch (e) { res.status(400).json({ error: (e as Error).message }); }
+});
+
 api.post('/import/zip', express.raw({ type: '*/*', limit: '300mb' }), (req, res) => {
   let name: string;
   try { name = ownProjectKey(req.user!.id, String(req.query.name ?? '')); } catch { res.status(400).json({ error: 'invalid project name (letters, digits, space, . _ -)' }); return; }
@@ -773,15 +803,26 @@ api.get('/projects/:project/file/*', needProject('view'), (req, res) => {
  * the PDF itself stays in, since that is usually exactly what someone downloading a backup wants.
  */
 const ZIP_EXCLUDE_EXT = new Set(['olx', 'olsrc', 'aux', 'log', 'bbl', 'blg', 'fls', 'fdb_latexmk', 'out', 'toc', 'lof', 'lot', 'nav', 'snm', 'bcf', 'dvi', 'xdv', 'spl', 'idx', 'ind', 'ilg', 'glo', 'gls', 'glg', 'acn', 'acr', 'alg', 'ist', 'loa', 'lol', 'thm', 'vrb', 'xcp', 'upa', 'upb', 'synctex']);
-api.get('/projects/:project/zip', needProject('view'), (req, res) => {
+api.get('/projects/:project/zip', needProject('view'), async (req, res) => {
   try {
-    const dir = projectDir(req.params.project);
     const project = listProjects().find(p => p.name === req.params.project);
     if (!project) { res.status(404).json({ error: 'not found' }); return; }
     const files = project.files.filter(f => f.kind !== 'dir' && !ZIP_EXCLUDE_EXT.has(path.extname(f.name).slice(1).toLowerCase()) && !isBackupFile(f.name));
-    const entries = files.map(f => ({ name: f.path, data: fs.readFileSync(path.join(dir, f.path)) }));
+    const native = req.query.format === 'lyx';
+    const documents = new Map(files.filter(f => native && (f.kind === 'doc' || isDocumentFile(project.name, f.path))).map(f => [f.path, f.path.replace(/\.[^.]+$/, '.lyx')]));
+    if (native && !documents.size) { res.status(400).json({ error: 'This project has no LaTeX or Markdown documents to export to LyX' }); return; }
+    const entries = await Promise.all(files.filter(f => !native || ![...documents.values()].includes(f.path)).map(async f => {
+      if (!documents.has(f.path)) return { name: f.path, data: fs.readFileSync(resolveProjectPath(project.name, f.path)) };
+      const doc = await manager.open(`${project.name}/${f.path}`);
+      const text = exportLyx(doc.toLyxDocument(), fn => {
+        const rel = path.posix.normalize(path.posix.join(path.posix.dirname(f.path), fn));
+        const target = documents.get(rel) ?? documents.get(rel + '.tex');
+        return target ? path.posix.relative(path.posix.dirname(f.path), target) : undefined;
+      });
+      return { name: documents.get(f.path)!, data: Buffer.from(text) };
+    }));
     const buf = writeZip(entries);
-    res.setHeader('Content-Disposition', `attachment; filename="${splitProjectKey(req.params.project).name.replace(/[^A-Za-z0-9._ -]+/g, '-')}.zip"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${splitProjectKey(req.params.project).name.replace(/[^A-Za-z0-9._ -]+/g, '-')}${native ? '-lyx' : ''}.zip"`);
     res.setHeader('Content-Type', 'application/zip');
     res.end(buf);
   } catch (e) { res.status(400).json({ error: String(e) }); }
@@ -1136,6 +1177,14 @@ api.get('/docs/*/tex', async (req, res) => {
   } catch (e) { res.status(400).json({ error: String(e) }); }
 });
 
+api.get('/docs/*/lyx', async (req, res) => {
+  try {
+    const doc = await manager.open(docId(req));
+    res.attachment(path.basename(doc.relPath).replace(/\.[^.]+$/, '.lyx'));
+    res.type('application/x-lyx').send(exportLyx(doc.toLyxDocument()));
+  } catch (e) { res.status(400).json({ error: (e as Error).message }); }
+});
+
 /** The headings of a document from its file on disk (no parse, no loading): the document panel's outline of documents that are not open. */
 api.get('/docs/*/outline', (req, res) => {
   try {
@@ -1167,7 +1216,7 @@ api.post('/docs/*/source', async (req, res) => {
 api.post('/projects/:project/import', needProject('edit'), async (req, res) => {
   try {
     const rel = String(req.body?.path ?? '');
-    if (!rel.endsWith('.lyx') || rel.includes('..')) { res.status(400).json({ error: 'a .lyx file of the project is expected' }); return; }
+    if (!/\.lyx$/i.test(rel) || rel.includes('..')) { res.status(400).json({ error: 'a .lyx file of the project is expected' }); return; }
     const abs = resolveProjectPath(req.params.project, rel);
     if (!fs.existsSync(abs)) { res.status(404).json({ error: 'not found' }); return; }
     const r = await importLyxFile(req.params.project, rel, toPdf);

@@ -13,9 +13,11 @@ import type { EditorToHost, HostToEditor } from '../shared/protocol.ts';
 import type { TexContext } from './texdoc.ts';
 import { projectDirFor } from './project.ts';
 import type { TextStore } from '../agents/localEdit.ts';
+import type { InteractionAction, InteractionOutcome } from '@overlyx/core/interactions.ts';
 import { WindowUnreachable, type HandOver } from '../agents/handover.ts';
 
 export interface ProviderDeps {
+  track?(action: InteractionAction, outcome: InteractionOutcome, durationMs?: number): void;
   bridgeBase(): Promise<string>;
   canvasBase?(): Promise<string>;
   layoutDir(): string;
@@ -42,6 +44,8 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
   constructor(private context: vscode.ExtensionContext, private registry: Registry, private deps: ProviderDeps) {}
 
   async resolveCustomTextEditor(document: vscode.TextDocument, panel: vscode.WebviewPanel, token: vscode.CancellationToken): Promise<void> {
+    const openedAt = performance.now();
+    this.deps.track?.('extension-open', 'attempt');
     const base = await this.deps.bridgeBase();
     if (token.isCancellationRequested) return;
     // the project is the directory that holds the file, not the whole workspace (a child
@@ -122,6 +126,8 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
     let updateErrorShown = 0;
     /** The webview's Ctrl+S: every document of the view, merged with what changed on disk; failures are shown, with a retry. */
     const save = () => {
+      const started = performance.now();
+      this.deps.track?.('extension-save', 'attempt');
       this.applyChain = this.applyChain.then(async () => {
         for (const target of [session, ...related.values()]) {
           if (await target.syncFromDisk()) pushSnapshot(target);
@@ -130,7 +136,9 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
           if (how === 'merged') vscode.window.setStatusBarMessage(`OverLyX: saved ${name} — merged with the change made to the file outside VS Code`, 8000);
           else if (how === 'merged-dirty') void vscode.window.showWarningMessage(`OverLyX saved ${name} (merged with the change made to it outside VS Code), but VS Code still marks it as modified. If VS Code asks about a conflict when you save it again, choose Overwrite: the file already holds this text.`);
         }
+        this.deps.track?.('extension-save', 'success', performance.now() - started);
       }).catch((e: Error & { target?: DocSession }) => {
+        this.deps.track?.('extension-save', 'failed', performance.now() - started);
         console.error('overlyx save failed', e);
         const name = e.target ? path.basename(e.target.relPath) : relPath;
         void vscode.window.showErrorMessage(`OverLyX could not save ${name}: ${e.message}. Your changes are still in the editor.`, 'Retry', 'Open as Text').then(a => {
@@ -204,7 +212,9 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
         case 'update':
           this.applyChain = this.applyChain.then(async () => {
             if (await session.applyPmUpdate(msg.pmDoc as never, msg.headerLines, msg.base, msg.sync)) pushSnapshot(session);
+            this.deps.track?.('extension-edit', 'success');
           }).catch(e => {
+            this.deps.track?.('extension-edit', 'failed');
             console.error('overlyx apply failed', e);
             // the editor keeps the text and sends the whole document with the next change; say so once, not per keystroke
             if (Date.now() - updateErrorShown > 30000) { updateErrorShown = Date.now(); void vscode.window.showErrorMessage(`OverLyX could not write your last edit into ${relPath}: ${String(e)}. The editor keeps it — it is written with your next change or save.`, 'Save now').then(a => { if (a) save(); }); }
@@ -285,6 +295,7 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
     subs.push(vscode.window.onDidChangeActiveColorTheme(() => post({ type: 'theme', dark: isDark() })), watchAppearance(panel.webview));
 
     panel.onDidDispose(() => {
+      this.deps.track?.('extension-close', 'success');
       for (const timer of relatedTimers.values()) clearTimeout(timer);
       clearTimeout(externalTimer);
       clearTimeout(metadataTimer);
@@ -297,5 +308,6 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
       page: 'editor', docId: session.docId, base, dark: isDark(), canvasBase,
       ...(canvasBase ? { frameOrigin: new URL(canvasBase).origin } : {}),
     });
+    this.deps.track?.('extension-open', 'success', performance.now() - openedAt);
   }
 }

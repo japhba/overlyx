@@ -15,6 +15,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { api, fileUrl, isAuxFile, isTextFile, type Project, type ProjectFile } from '../api';
 import { subscribeProjectEvents } from '../projectevents';
 import { showContextMenu, type MenuItem } from '../editor/contextmenu';
+import { chooseLyxImport } from './lyximport';
 import { projectOfDoc, splitDocId, projectShortName, type DocGroup, type DocGroupMember } from '@overlyx/core';
 import { uiPrompt, uiConfirm, uiAlert } from './Dialogs';
 import { promptNewFile } from './newfile';
@@ -332,6 +333,7 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
     { label: 'New File…', action: () => void newFile(dir) },
     { label: 'New Folder…', action: () => void newFolder(dir) },
     { label: 'Upload…', action: () => void upload(dir) },
+    { label: 'Import from LyX…', action: () => chooseLyxImport(project!.name, dir, r => { reveal(r.created[0] ?? ''); void load(); onOpen(r.id); }) },
     ...(gdocs ? [{ label: 'Import from Google Docs…', action: () => void importGoogle(dir) }] : []),
   ] : [];
   const fileCtx = (f: ProjectFile, openIt: () => void) => (e: MouseEvent) => {
@@ -339,6 +341,7 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
     showContextMenu(e.clientX, e.clientY, [
       { label: 'Open', action: openIt },
       { label: 'Download', action: () => download(f.path) },
+      ...(f.kind === 'doc' ? [{ label: 'Download LyX (.lyx)', action: () => window.open(`/api/docs/${encodeURIComponent(project!.name + '/' + f.path)}/lyx`) }] : []),
       ...ctxCommon(f.path, false),
     ]);
   };
@@ -462,6 +465,7 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
         {canEdit && project && <button class="small-btn" onClick={() => void newFile()} title="New file in this project — the ending decides what it is: .tex a LaTeX document, .md a Markdown document, .board a whiteboard, .bib, .sty … a text file">+ File</button>}
         {canEdit && project && <button class="small-btn" onClick={() => void newFolder()} title="New folder in this project (also in the right-click menu of any folder)">+ Folder</button>}
         {canEdit && project && <button class="small-btn" onClick={() => void upload()} title="Upload files (figures, .bib, .sty …) — or drag them from your computer onto the file list">⇧</button>}
+        {canEdit && project && <button class="small-btn" data-lyx-import onClick={() => chooseLyxImport(project.name, '', r => { void load(); onOpen(r.id); })} title="Import a .lyx document or a zipped LyX project">LyX⇩</button>}
         {canEdit && project && gdocs && <button class="small-btn" data-gdocs-import onClick={() => void importGoogle()} title="Import a Google Doc (picked in Google's picker) — one with tabs becomes a document group; it stays in step with the Google Doc">G⇩</button>}
         {role === 'owner' && via !== 'admin' && project && onShare && <button class="small-btn" data-share={project.name} onClick={() => onShare(project.name)} title="Share this project…">👥</button>}
         <button class="small-btn" onClick={() => setShowAll(!showAll)} title="Show LaTeX build files (.aux, .log, .bbl …) and LyX backups (~, #, .emergency)">{showAll ? 'Fewer' : 'All files'}</button>

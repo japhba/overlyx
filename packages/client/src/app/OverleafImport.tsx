@@ -24,7 +24,7 @@ export function parseOverleafRefs(text: string): string[] {
 }
 /** a legal project name from a file or link name */
 export function projectNameFrom(s: string): string {
-  const base = s.replace(/\.zip$/i, '').replace(/[^A-Za-z0-9._ -]+/g, '-').replace(/^[-. ]+|[-. ]+$/g, '').slice(0, 60);
+  const base = s.replace(/\.(zip|lyx)$/i, '').replace(/[^A-Za-z0-9._ -]+/g, '-').replace(/^[-. ]+|[-. ]+$/g, '').slice(0, 60);
   return base || 'overleaf-project';
 }
 /** Overleaf's project-list download ("Overleaf Projects -2 items.zip") holds one zip per project */
@@ -36,7 +36,8 @@ export type ZipRow = { file: File; name: string; status?: Status; message?: stri
 
 export interface ImportInitial { links?: string; token?: string; zips?: File[] }
 
-export function OverleafImport({ existing, onClose, onImported, notify, initial, autostart, onDone }: {
+export function OverleafImport({ existing, onClose, onImported, notify, initial, autostart, onDone, source = 'overleaf' }: {
+  source?: 'overleaf' | 'lyx';
   existing: string[]; onClose: () => void; onImported: () => void; notify: (text: string, kind?: 'info' | 'error') => void;
   /** what the visitor chose on the landing page before signing in */
   initial?: ImportInitial;
@@ -45,6 +46,7 @@ export function OverleafImport({ existing, onClose, onImported, notify, initial,
   /** an auto-started import finished: the names of the projects that came in */
   onDone?: (names: string[]) => void;
 }) {
+  const lyx = source === 'lyx';
   const [links, setLinks] = useState(initial?.links ?? '');
   const [token, setToken] = useState(initial?.token ?? '');
   const [names, setNames] = useState<Record<string, string>>({});
@@ -89,14 +91,15 @@ export function OverleafImport({ existing, onClose, onImported, notify, initial,
       // Row objects are replaced as status changes; the selected File is stable.
       setZips(list => list.map(x => (x.file === z.file ? { ...x, status: 'working', message: undefined } : x)));
       try {
-        const r = await api.importZip(z.name.trim(), z.file);
+        const imported = lyx ? await api.importLyxProject(z.name.trim(), z.file) : null;
+        const r = imported ? { ...imported, projects: [{ name: imported.name, files: imported.files, skipped: imported.skipped }], errors: [] } : await api.importZip(z.name.trim(), z.file);
         const made = r.projects?.length ? r.projects : [{ name: r.name, files: r.files, skipped: r.skipped }];
         okNames.push(...made.map(p => p.name));
         const failed = r.errors ?? [];
         const message = made.length === 1 && !failed.length
           ? `${made[0].name !== z.name.trim() ? `as “${made[0].name}”, ` : ''}${made[0].files} file${made[0].files === 1 ? '' : 's'}${made[0].skipped.length ? `, ${made[0].skipped.length} skipped` : ''}`
           : `${made.length} project${made.length === 1 ? '' : 's'}: ${made.map(p => `“${p.name}”`).join(', ')}${failed.length ? ` — not imported: ${failed.map(f => `“${f.name}” (${f.error})`).join(', ')}` : ''}`;
-        setZips(list => list.map(x => (x.file === z.file ? { ...x, status: 'ok', message, imported: made.map(p => p.name) } : x)));
+        setZips(list => list.map(x => (x.file === z.file ? { ...x, status: 'ok', message: message + (imported?.warnings.length ? ' · ' + imported.warnings.join('; ') : ''), imported: made.map(p => p.name) } : x)));
       } catch (e) { setZips(list => list.map(x => (x.file === z.file ? { ...x, status: 'error', message: (e as Error).message } : x))); }
     }
     setBusy(false);
@@ -119,14 +122,15 @@ export function OverleafImport({ existing, onClose, onImported, notify, initial,
   const pendingZips = zips.filter(z => z.status !== 'ok');
 
   return (
-    <Dialog title="Import from Overleaf" onClose={onClose} wide>
+    <Dialog title={lyx ? 'Import from LyX' : 'Import from Overleaf'} onClose={onClose} wide>
       <div class="overleaf-import" data-overleaf-import>
         <section>
-          <h3>From a downloaded zip</h3>
-          <div class="hint">Works with every Overleaf account: in Overleaf open the project, Menu ▸ Download ▸ Source, then choose the zip here (several at once is fine — each becomes a project). The download of your whole project list (<i>Overleaf Projects -N items.zip</i>) works too: every project in it comes in on its own.</div>
+          <h3>{lyx ? 'LyX documents and project archives' : 'From a downloaded zip'}</h3>
+          {lyx && <div class="hint">Choose a .lyx document, or a .zip containing LyX documents, child documents, figures and bibliography. Each selected file becomes a private project. Original LyX files are kept. Export back to LyX from File ▸ Export.</div>}
+          <div class="hint" hidden={lyx}>Works with every Overleaf account: in Overleaf open the project, Menu ▸ Download ▸ Source, then choose the zip here (several at once is fine — each becomes a project). The download of your whole project list (<i>Overleaf Projects -N items.zip</i>) works too: every project in it comes in on its own.</div>
           <div class="row">
-            <input type="file" accept=".zip,application/zip" multiple data-overleaf-zip disabled={busy} onChange={e => { addZips((e.target as HTMLInputElement).files); (e.target as HTMLInputElement).value = ''; }} />
-            <button class="btn primary" data-overleaf-import-zip disabled={busy || !pendingZips.length || pendingZips.some(z => taken(z.name.trim()) && !isOverleafBundle(z.file.name))} onClick={() => void importZips()}>Import {pendingZips.length || ''} zip{pendingZips.length === 1 ? '' : 's'}</button>
+            <input type="file" accept={lyx ? '.lyx,.zip,application/zip' : '.zip,application/zip'} multiple data-overleaf-zip disabled={busy} onChange={e => { addZips((e.target as HTMLInputElement).files); (e.target as HTMLInputElement).value = ''; }} />
+            <button class="btn primary" data-overleaf-import-zip disabled={busy || !pendingZips.length || pendingZips.some(z => taken(z.name.trim()) && (lyx || !isOverleafBundle(z.file.name)))} onClick={() => void importZips().then(names => { if (lyx) onDone?.(names); })}>Import {pendingZips.length || ''} {lyx ? 'file' : 'zip'}{pendingZips.length === 1 ? '' : 's'}</button>
           </div>
           {zips.length > 0 && (
             <table class="import-rows">
@@ -134,7 +138,7 @@ export function OverleafImport({ existing, onClose, onImported, notify, initial,
               <tbody>{zips.map((z, i) => (
                 <tr key={i} class={z.status ?? ''} data-zip-row={z.file.name}>
                   <td title={z.file.name}>{z.file.name} <span class="size">({Math.max(1, Math.round(z.file.size / 1e6))} MB)</span></td>
-                  <td>{isOverleafBundle(z.file.name)
+                  <td>{!lyx && isOverleafBundle(z.file.name)
                     ? <span class="size" title="A download of your project list: every project in it keeps its own name">one project per zip inside</span>
                     : <input type="text" value={z.name} disabled={busy || z.status === 'ok'} class={taken(z.name.trim()) ? 'taken' : ''} title={taken(z.name.trim()) ? 'A project with this name exists already' : ''} onInput={e => { const v = (e.target as HTMLInputElement).value; setZips(list => list.map(x => (x === z ? { ...x, name: v } : x))); }} />}</td>
                   <td>{status(z.status, z.message)}</td>
@@ -142,7 +146,7 @@ export function OverleafImport({ existing, onClose, onImported, notify, initial,
             </table>
           )}
         </section>
-        <section>
+        {!lyx && <section>
           <h3>From Overleaf's Git access</h3>
           <div class="hint">Paste the links of the projects to bring over — one per line, as copied from the browser's address bar (<code>https://www.overleaf.com/project/…</code>). Overleaf's Git access is part of its paid and institutional plans; the token comes from <a href="https://www.overleaf.com/user/settings" target="_blank" rel="noopener">Account settings ▸ Git integration</a>. It is used once for the import and not stored.</div>
           <textarea data-overleaf-links rows={3} placeholder={'https://www.overleaf.com/project/5f1a…\nhttps://www.overleaf.com/project/60b3…'} value={links} onInput={e => setLinks((e.target as HTMLTextAreaElement).value)} disabled={busy} />
@@ -164,7 +168,7 @@ export function OverleafImport({ existing, onClose, onImported, notify, initial,
               Import {selected.length ? `${selected.length} selected` : 'selected'}
             </button>
           </div>
-        </section>
+        </section>}
       </div>
     </Dialog>
   );

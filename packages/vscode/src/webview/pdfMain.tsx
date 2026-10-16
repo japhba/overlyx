@@ -4,6 +4,7 @@
  * extension host).
  */
 import { G, vscode } from './globals';
+import { initUsage } from '@client/usage';
 import { render } from 'preact';
 import { useLayoutEffect, useState } from 'preact/hooks';
 import { PdfViewer } from '@client/app/PdfViewer';
@@ -16,6 +17,7 @@ import '@client/styles.css';
 
 // the theme switch's choices from the editors (smart invert, the text tone, the theme — host/appearance.ts)
 useHostTheme();
+initUsage();
 relayAppearance();
 setHostDark(G.dark);
 

@@ -32,6 +32,17 @@
     }
   },
   "events": {
+    "usage": {
+      "comment": "Anonymous bounded action/outcome events, enabled only at VS Code telemetry level All and with overlyx.usageStatistics. Batched to /api/vscode-usage; no built-in common identifiers.",
+      "session": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "comment": "Random activation or webview-load ID, never persisted." },
+      "name": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "comment": "Allowed event category." },
+      "detail": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "comment": "Fixed action/outcome/state categories, or a scrubbed legacy command template." },
+      "where": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "comment": "Coarse UI surface, never a document or file." },
+      "ago": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "comment": "Bounded event age within this batch." },
+      "dt": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "comment": "Duration bucket for diagnostics; bounded legacy dialog duration." },
+      "ok": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "comment": "Whether a legacy command applied." },
+      "reliabilityConsent": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "comment": "Separate explicit consent for beta reliability categories." }
+    },
     "error": {
       "comment": "A handled extension error shown to the user.",
       "area": {

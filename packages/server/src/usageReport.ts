@@ -12,10 +12,12 @@
  *   notices       error messages shown in the status bar, by template
  *   errors        uncaught errors, by template
  */
+import { scrubUsageDetail } from '@overlyx/core/usagePayload.ts';
 import type Database from 'better-sqlite3';
 import { isReliabilityContext, isReliabilityDurationBucket, parseReliabilityDetail } from '@overlyx/core/reliability.ts';
+import { parseInteractionDetail, isInteractionTarget, isClientBuildVersion } from '@overlyx/core/interactions.ts';
 
-export const USAGE_NAMES = ['session', 'view', 'menu', 'palette', 'shortcut', 'toolbar', 'key', 'chord', 'key-unbound', 'dialog', 'notice', 'error', 'undo', 'redo', 'reliability'] as const;
+export const USAGE_NAMES = ['session', 'view', 'menu', 'palette', 'shortcut', 'toolbar', 'key', 'chord', 'key-unbound', 'dialog', 'notice', 'error', 'undo', 'redo', 'reliability', 'interaction'] as const;
 export type UsageName = (typeof USAGE_NAMES)[number];
 /** the kinds that are an action taken on purpose */
 export const ACTION_NAMES: ReadonlySet<string> = new Set(['menu', 'palette', 'shortcut', 'toolbar', 'key', 'chord']);
@@ -32,19 +34,9 @@ export const REPEAT_MIN = 3;
  * pass through this lossy scrubber: they must exactly match the shared finite schema below.
  * Keep legacy client/server scrubbers in step (tests/usage.test.ts compares them).
  */
-export function scrubDetail(s: unknown, max = DETAIL_MAX): string {
-  return String(s ?? '')
-    .replace(/[\u0000-\u001f\u007f]+/g, ' ')
-    .replace(/“[^”]*”|"[^"]*"|‘[^’]*’|`[^`]*`|'[^']{2,}'/g, '“…”')
-    .replace(/\S+@\S+/g, '<email>')
-    .replace(/\S*?(?:\/|\\|\.(?:tex|lyx|bib|pdf|png|jpe?g|svg|gif|eps|md|txt|board|json|zip|csv|sty|cls))\b[^\s:;,!?()[\]]*/gi, '<file>')
-    .replace(/\d+(?:[.,]\d+)?/g, '#')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, max);
-}
+export function scrubDetail(s: unknown, max = DETAIL_MAX): string { return scrubUsageDetail(s, max); }
 
-export interface UsageRow { session: string; at: number; name: string; detail: string; ok: number | null; place: string | null; dt: number | null }
+export interface UsageRow { session: string; at: number; name: string; detail: string; ok: number | null; place: string | null; dt: number | null; version?: string | null }
 
 export interface Count { key: string; count: number; sessions: number }
 export interface ActionStat extends Count {
@@ -71,6 +63,7 @@ export interface UsageSummary {
   byName: Record<string, number>;
   /** platform / browser / width / touch of the sessions */
   clients: Count[];
+  releases: Count[];
   views: Count[];
   actions: ActionStat[];
   /** actions ranked by how often they went wrong (failed + undone + repeated), for the "what confuses people" list */
@@ -82,6 +75,7 @@ export interface UsageSummary {
   undo: { total: number; soonAfterAction: number };
   /** Consent-only fixed-vocabulary diagnostics; never part of action ranking. */
   reliability: { events: number; sessions: number; details: Count[]; contexts: Count[]; durations: Count[] };
+  interactions: { events: number; details: Count[]; contexts: Count[]; durations: Count[]; problemTrails: Count[] };
 }
 
 const isUndoAction = (name: string, detail: string) => /(^|[^a-z])(undo|redo)([^a-z]|$)/i.test(detail) || (name === 'key' && /^(Shift-)?Mod-[zy]$/.test(detail));
@@ -109,7 +103,7 @@ const median = (xs: number[]): number | null => {
 export function usageSummary(db: Database.Database, opts: { sinceMs: number; untilMs?: number; top?: number }): UsageSummary {
   const until = opts.untilMs ?? Date.now();
   const top = opts.top ?? 40;
-  const rows = db.prepare('SELECT session, at, name, detail, ok, place, dt FROM usage_events WHERE at >= ? AND at < ? ORDER BY session, at, id').all(opts.sinceMs, until) as UsageRow[];
+  const rows = db.prepare('SELECT session, at, name, detail, ok, place, dt, version FROM usage_events WHERE at >= ? AND at < ? ORDER BY session, at, id').all(opts.sinceMs, until) as UsageRow[];
   return summarise(rows, { since: opts.sinceMs, until, top });
 }
 
@@ -118,8 +112,14 @@ export function summarise(rows: UsageRow[], o: { since: number; until: number; t
   const byName: Record<string, number> = {};
   const sessions = new Set<string>();
   const clients = new Counter(), views = new Counter(), unbound = new Counter(), notices = new Counter(), errors = new Counter();
+  const releases = new Counter();
   const reliabilityDetails = new Counter(), reliabilityContexts = new Counter(), reliabilityDurations = new Counter();
   const reliabilitySessions = new Set<string>();
+  const interactionDetails = new Counter(), interactionContexts = new Counter(), interactionDurations = new Counter(), trails = new Counter();
+  let interactionEvents = 0;
+  let trailSession = '';
+  let trailClient = 'unknown client', trailBuild = 'unknown build';
+  let trail: { at: number; label: string }[] = [];
   let reliabilityEvents = 0;
   const actions = new Map<string, { name: string; detail: string; count: number; sessions: Set<string>; failed: number; undone: number; repeated: number; where: Record<string, number> }>();
   const dialogs = new Map<string, { count: number; sessions: Set<string>; applied: number; dismissed: number; dismissedQuickly: number; open: number[] }>();
@@ -135,8 +135,34 @@ export function summarise(rows: UsageRow[], o: { since: number; until: number; t
     // free text visible in either the JSON admin summary or the text report.
     const reliabilityDetail = r.name === 'reliability' ? parseReliabilityDetail(r.detail) : null;
     if (r.name === 'reliability' && !reliabilityDetail) continue;
+    const interaction = r.name === 'interaction' ? parseInteractionDetail(r.detail) : null;
+    if (r.name === 'interaction' && (!interaction || !isInteractionTarget(r.place))) continue;
+    if (r.session !== trailSession) { trailSession = r.session; trail = []; trailClient = 'unknown client'; trailBuild = 'unknown build'; }
+    if (r.name === 'session') {
+      if (/^(ios|android|mac|windows|linux|other) (firefox|edge|chrome|safari|other) (narrow|medium|wide)( touch)?$/.test(r.detail)) trailClient = r.detail;
+      const desktop = /^vscode (linux|darwin|win32|freebsd|openbsd|aix|sunos|android) [a-z#0-9]{1,12} (local|remote) (web|desktop)$/.exec(r.detail);
+      if (desktop) trailClient = `vscode ${desktop[1]} ${desktop[2]} ${desktop[3]}`;
+      if (isClientBuildVersion(r.version) || typeof r.version === 'string' && /^[a-f0-9]{7,40}$/.test(r.version)) trailBuild = r.version;
+    }
+    const prefix = `[${trailClient}; ${trailBuild}] `;
+    trail = trail.filter(t => r.at - t.at <= 30000).slice(-7);
+    if (interaction) {
+      const label = `${r.place}: ${r.detail}`;
+      interactionEvents++;
+      interactionDetails.add(label, r.session); interactionContexts.add(r.place!, r.session);
+      if (isReliabilityDurationBucket(r.dt)) interactionDurations.add(String(r.dt), r.session);
+      trail.push({ at: r.at, label });
+      const problem = ['failed', 'denied', 'missing', 'conflict', 'invalid', 'offline'].includes(interaction.outcome)
+        || interaction.outcome === 'unchanged' && ['backspace', 'delete', 'cut'].includes(interaction.action);
+      const repeated = ['click', 'backspace', 'delete'].includes(interaction.action) && trail.filter(t => t.label === label && r.at - t.at <= REPEAT_WINDOW_MS).length >= REPEAT_MIN;
+      if (problem || repeated) trails.add(prefix + trail.map(t => t.label).join(' → '), r.session);
+    } else if ((r.name === 'error' || r.name === 'notice' || r.name === 'undo') && trail.length) {
+      // Do not copy any legacy free-text error or command label into diagnostic trails.
+      trails.add(prefix + [...trail.map(t => t.label), r.name].join(' → '), r.session);
+    }
     byName[r.name] = (byName[r.name] ?? 0) + 1;
     sessions.add(r.session);
+    if (interaction) continue;
     if (r.name === 'reliability' && reliabilityDetail) {
       reliabilityEvents++;
       reliabilitySessions.add(r.session);
@@ -146,7 +172,7 @@ export function summarise(rows: UsageRow[], o: { since: number; until: number; t
       continue;
     }
     if (r.session !== curSession) { curSession = r.session; last = null; run = null; }
-    if (r.name === 'session') { clients.add(r.detail, r.session); continue; }
+    if (r.name === 'session') { clients.add(r.detail, r.session); if (isClientBuildVersion(r.version) || typeof r.version === 'string' && /^[a-f0-9]{7,40}$/.test(r.version)) releases.add(r.version, r.session); continue; }
     if (r.name === 'view') { views.add(r.detail, r.session); continue; }
     if (r.name === 'key-unbound') { unbound.add(r.detail, r.session); continue; }
     if (r.name === 'notice') { notices.add(r.detail, r.session); continue; }
@@ -195,7 +221,7 @@ export function summarise(rows: UsageRow[], o: { since: number; until: number; t
 
   return {
     since: o.since, until: o.until, sessions: sessions.size, events: rows.length, byName,
-    clients: clients.list(o.top), views: views.list(o.top),
+    clients: clients.list(o.top), releases: releases.list(o.top), views: views.list(o.top),
     actions: byCount.slice(0, o.top), suspicious: suspicious.slice(0, o.top),
     unboundKeys: unbound.list(o.top), dialogs: dialogList.slice(0, o.top),
     notices: notices.list(o.top), errors: errors.list(o.top),
@@ -206,6 +232,7 @@ export function summarise(rows: UsageRow[], o: { since: number; until: number; t
       // legacy action-report `top` limit.
       details: reliabilityDetails.list(500), contexts: reliabilityContexts.list(500), durations: reliabilityDurations.list(500),
     },
+    interactions: { events: interactionEvents, details: interactionDetails.list(o.top), contexts: interactionContexts.list(100), durations: interactionDurations.list(20), problemTrails: trails.list(o.top) },
   };
 }
 
@@ -257,6 +284,16 @@ export function formatUsageReport(s: UsageSummary): string {
       out.push(`${label}: ${counts.map(c => `${c.key} ${c.count}`).join(', ')}`);
     }
   }
+  if (s.interactions.events) {
+    section('Detailed interactions (fixed categories; 30-day retention)');
+    out.push(`${s.interactions.events} events; states: selection, content, display, access, tracking, pointer`);
+    for (const d of s.interactions.details) out.push(`${rpad(d.count, 6)}  ${d.key} (${d.sessions} sessions)`);
+    out.push('surfaces: ' + s.interactions.contexts.map(c => `${c.key} ${c.count}`).join(', '));
+    if (s.interactions.problemTrails.length) {
+      section('Action trails before errors or unchanged deletion attempts (up to 8 events within 30 s; signals to investigate)');
+      for (const t of s.interactions.problemTrails) out.push(`${rpad(t.count, 6)}  ${t.key} (${t.sessions} sessions)`);
+    }
+  }
   section(`Undo: ${s.undo.total} in total, ${s.undo.soonAfterAction} within 5 s of a deliberate action`);
   if (s.actions.length) {
     section('Most used actions');
@@ -266,6 +303,7 @@ export function formatUsageReport(s: UsageSummary): string {
     section('Screens and clients');
     out.push('screens: ' + s.views.map(v => `${v.key} ${v.count}`).join(', '));
     out.push('clients: ' + s.clients.map(c => `${c.key} ×${c.count}`).join(', '));
+    if (s.releases.length) out.push('app builds: ' + s.releases.map(c => `${c.key} ×${c.count}`).join(', '));
   }
   return out.join('\n') + '\n';
 }

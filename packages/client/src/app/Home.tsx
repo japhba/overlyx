@@ -72,6 +72,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [adminList, setAdminList] = useState<AdminProjectInfo[] | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [importSource, setImportSource] = useState<'overleaf' | 'lyx'>('overleaf');
   const [view, setView] = useState<HomeView>(storedView);
   const switchView = () => {
     const next: HomeView = view === 'rows' ? 'grid' : 'rows';
@@ -82,7 +83,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
   const [pending, setPending] = useState<ImportInitial | null>(null);
   useEffect(() => {
     if (user.guest) return;
-    void takePendingImport().then(p => { if (p) { setPending({ links: p.links, token: p.token, zips: p.zips }); setImportOpen(true); } });
+    void takePendingImport().then(p => { if (p) { setPending({ links: p.links, token: p.token, zips: p.zips }); setImportSource(p.source ?? 'overleaf'); setImportOpen(true); } });
   }, []);
   const openImported = async (names: string[]) => {
     if (names.length !== 1) return;
@@ -158,6 +159,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
       {p.role === 'owner' && p.via !== 'admin' && <button class="btn small" onClick={() => onShare(p.name)} data-share={p.name}>Share…</button>}
       <button class="btn small" onClick={() => onGit(p.name)} data-git={p.name} title="Clone, pull and push this project with git">Git…</button>
       <a class="btn small" data-download-zip={p.name} href={zipUrl(p.name)} title="Download the whole project as a .zip">Download</a>
+      {p.files.some(f => f.kind === 'doc') && <a class="btn small" data-download-lyx={p.name} href={zipUrl(p.name, 'lyx')} title="Download the project as LyX documents with figures and bibliography">LyX</a>}
       {p.role === 'owner' && <button class="btn small danger" title="Move this project to the trash" onClick={() => void remove(p)}>Delete</button>}
     </div>
   );
@@ -220,7 +222,8 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
         {user.guest
           ? <button class="btn primary" data-guest-signin onClick={onSignIn}>Sign in</button>
           : <button class="btn primary" data-new-project onClick={() => setNewOpen(true)} title="A new document, slide deck or poster — each in a project of its own">+ New</button>}
-        {!user.guest && <button class="btn" data-import-overleaf onClick={() => setImportOpen(true)} title="Bring projects over from Overleaf — through its Git access, or from a downloaded zip">Import from Overleaf…</button>}
+        {!user.guest && <button class="btn" data-import-overleaf onClick={() => { setImportSource('overleaf'); setImportOpen(true); }} title="Bring projects over from Overleaf — through its Git access, or from a downloaded zip">Import from Overleaf…</button>}
+        {!user.guest && <button class="btn" data-import-lyx onClick={() => { setImportSource('lyx'); setImportOpen(true); }}>Import from LyX…</button>}
         <button class="btn" onClick={onBrowse}>Show the files panel</button>
         <button class="home-view-switch" data-home-view-switch={view === 'rows' ? 'grid' : 'rows'} onClick={switchView}
           title={view === 'rows' ? 'Show projects as a grid of cards' : 'Show projects as a list'} aria-label={view === 'rows' ? 'Grid view' : 'List view'}>
@@ -229,7 +232,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
       </div>
       {newOpen && <NewProjectDialog onClose={() => setNewOpen(false)} notify={notify}
         onCreated={(id, name) => { setNewOpen(false); void load(); onChanged(); if (id) onOpen(id); else notify(`Project "${name}" created — add a document with + File in the files panel`); }} />}
-      {importOpen && <OverleafImport existing={(projects ?? []).filter(p => splitProjectKey(p.name).owner === user.username).map(p => projectShortName(p.name))} onClose={() => { setImportOpen(false); setPending(null); }} onImported={() => { void load(); onChanged(); }} notify={notify}
+      {importOpen && <OverleafImport source={importSource} existing={(projects ?? []).filter(p => splitProjectKey(p.name).owner === user.username).map(p => projectShortName(p.name))} onClose={() => { setImportOpen(false); setPending(null); }} onImported={() => { void load(); onChanged(); }} notify={notify}
         initial={pending ?? undefined} autostart={!!pending} onDone={names => void openImported(names)} />}
       {projects === null && <div class="meta">Loading your projects…</div>}
       {example && <div class="cards">{card(example)}</div>}

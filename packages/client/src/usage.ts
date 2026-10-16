@@ -21,16 +21,20 @@
  * same scrubbing again. Events go in batches to POST /api/usage (packages/server/src/usage.ts);
  * scripts/usage-report.ts and GET /api/admin/usage summarise them.
  *
- * The VS Code extension shares this code but sends nothing (it has no OverLyX account and its
- * telemetry is limited to crash diagnostics — packages/vscode/src/host/telemetry.ts).
+ * VS Code webviews send only to their token-protected local bridge when the host explicitly
+ * enables collection; the host applies VS Code's telemetry level and overlyx.usageStatistics
+ * before forwarding anonymous batches (packages/vscode/src/host/telemetry.ts).
  */
+import { scrubUsageDetail } from '@overlyx/core/usagePayload.ts';
 import { API_BASE } from './api';
 import { getPrefs, subscribePrefs } from './prefs';
 import { editorContext } from './editor/context';
+import { isBenignBrowserError } from './error-reporting';
+import { makeInteractionDetail, parseInteractionDetail, isInteractionTarget, isClientBuildVersion, type InteractionAction, type InteractionOutcome, type InteractionState, type InteractionTarget } from '@overlyx/core/interactions.ts';
 import { isReliabilityContext, isReliabilityDurationBucket, makeReliabilityDetail, parseReliabilityDetail, reliabilityDurationBucket, type ReliabilityEvent, type ReliabilityPointer, type ReliabilityContext } from '@overlyx/core/reliability.ts';
 
-export type UsageName = 'session' | 'view' | 'menu' | 'palette' | 'shortcut' | 'toolbar' | 'key' | 'chord' | 'key-unbound' | 'dialog' | 'notice' | 'error' | 'undo' | 'redo' | 'reliability';
-export const USAGE_NAMES: readonly UsageName[] = ['session', 'view', 'menu', 'palette', 'shortcut', 'toolbar', 'key', 'chord', 'key-unbound', 'dialog', 'notice', 'error', 'undo', 'redo', 'reliability'];
+export type UsageName = 'session' | 'view' | 'menu' | 'palette' | 'shortcut' | 'toolbar' | 'key' | 'chord' | 'key-unbound' | 'dialog' | 'notice' | 'error' | 'undo' | 'redo' | 'reliability' | 'interaction';
+export const USAGE_NAMES: readonly UsageName[] = ['session', 'view', 'menu', 'palette', 'shortcut', 'toolbar', 'key', 'chord', 'key-unbound', 'dialog', 'notice', 'error', 'undo', 'redo', 'reliability', 'interaction'];
 /** the action kinds the report treats as "the user did something on purpose" */
 export const ACTION_NAMES: readonly UsageName[] = ['menu', 'palette', 'shortcut', 'toolbar', 'key', 'chord'];
 
@@ -57,17 +61,7 @@ export const DETAIL_MAX = 120;
  * numbers. What remains is the template of the message. Applied on the client before queueing
  * and again on the server before storing.
  */
-export function scrub(s: string, max = DETAIL_MAX): string {
-  return String(s ?? '')
-    .replace(/[\u0000-\u001f\u007f]+/g, ' ')
-    .replace(/“[^”]*”|"[^"]*"|‘[^’]*’|`[^`]*`|'[^']{2,}'/g, '“…”')
-    .replace(/\S+@\S+/g, '<email>')
-    .replace(/\S*?(?:\/|\\|\.(?:tex|lyx|bib|pdf|png|jpe?g|svg|gif|eps|md|txt|board|json|zip|csv|sty|cls))\b[^\s:;,!?()[\]]*/gi, '<file>')
-    .replace(/\d+(?:[.,]\d+)?/g, '#')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, max);
-}
+export function scrub(s: string, max = DETAIL_MAX): string { return scrubUsageDetail(s, max); }
 
 /** An error message shown to the user, reduced to its template: scrubbed, and cut after the first ": " (what follows is the data — an exception's text, a server answer). */
 export function noticeTemplate(msg: string): string {
@@ -159,20 +153,34 @@ let timer: ReturnType<typeof setTimeout> | null = null;
 let stopped = false;
 let inited = false;
 let reliabilityEpoch = 0;
+let usageEpoch = 0;
 
 function newSessionId(): string {
   try { return crypto.randomUUID().replace(/-/g, '').slice(0, 16); } catch { return Math.random().toString(16).slice(2, 18).padEnd(16, '0'); }
 }
 
-/** Statistics are sent only from the web app (not the VS Code webview), when the preference is on and the browser does not signal Global Privacy Control. */
+/** Usage preference and GPC apply everywhere; a VS Code bridge also needs explicit host enablement. */
 export function usageEnabled(): boolean {
-  if (stopped || API_BASE !== '' || typeof window === 'undefined') return false;
+  if (stopped || typeof window === 'undefined') return false;
+  if (API_BASE !== '' && (globalThis as { OVERLYX_USAGE_ENABLED?: boolean }).OVERLYX_USAGE_ENABLED !== true) return false;
   if ((navigator as unknown as { globalPrivacyControl?: boolean }).globalPrivacyControl) return false;
   return getPrefs().usageStats !== false;
 }
 
 /** Separate, explicit beta consent. Existing usage consent alone is not enough. */
 export function reliabilityEnabled(): boolean { return usageEnabled() && getPrefs().betaDiagnostics === true; }
+
+/** Detailed actions and outcomes, with bounded state rather than document data. */
+export function recordInteraction(action: InteractionAction, outcome: InteractionOutcome, extra: InteractionState & { target?: InteractionTarget; durationMs?: number } = {}): void {
+  try {
+    if (!usageEnabled()) return;
+    const detail = makeInteractionDetail(action, outcome, extra);
+    const target = extra.target ?? 'ui';
+    if (!detail || !isInteractionTarget(target)) return;
+    const dt = extra.durationMs === undefined ? null : reliabilityDurationBucket(extra.durationMs);
+    recordUsage('interaction', detail, { where: target, ...(dt === null ? {} : { dt }) });
+  } catch { /* Collection must never interfere with an action. */ }
+}
 
 /** Finite event/context vocabulary; never accepts or scrubs document data. */
 export function recordReliability(event: ReliabilityEvent, extra: { pointer?: ReliabilityPointer; context?: ReliabilityContext; durationMs?: number } = {}): void {
@@ -193,15 +201,16 @@ function allowedQueue(events: (UsageEvent & { at: number })[]): (UsageEvent & { 
 
 // Revocation discards pending diagnostics immediately, even if consent is
 // switched on again before the next flush. Already-sent batches cannot be recalled.
-subscribePrefs(() => { if (!reliabilityEnabled()) reliabilityEpoch++; queue = allowedQueue(queue); });
+subscribePrefs(() => { if (!reliabilityEnabled()) reliabilityEpoch++; if (!usageEnabled()) usageEpoch++; queue = allowedQueue(queue); });
 
 /** Queue one event (no-op when statistics are off). `detail` is scrubbed here. */
 export function recordUsage(name: UsageName, detail = '', extra: { ok?: boolean; dt?: number; where?: string } = {}): void {
   if (!usageEnabled()) return;
+  if (name === 'interaction' && (!parseInteractionDetail(detail) || !isInteractionTarget(extra.where) || extra.dt !== undefined && !isReliabilityDurationBucket(extra.dt))) return;
   if (name === 'reliability' && (!reliabilityEnabled() || !parseReliabilityDetail(detail)
     || extra.where !== undefined && !isReliabilityContext(extra.where)
     || extra.dt !== undefined && !isReliabilityDurationBucket(extra.dt))) return;
-  const ev: UsageEvent & { at: number } = { at: Date.now(), ago: 0, name, detail: name === 'reliability' ? detail : scrub(detail), where: extra.where ?? (name === 'reliability' ? 'ui' : whereNow()) };
+  const ev: UsageEvent & { at: number } = { at: Date.now(), ago: 0, name, detail: name === 'reliability' || name === 'interaction' ? detail : scrub(detail), where: extra.where ?? (name === 'reliability' ? 'ui' : whereNow()) };
   if (name !== 'reliability' && extra.ok !== undefined) ev.ok = extra.ok;
   if (extra.dt !== undefined && Number.isFinite(extra.dt)) ev.dt = Math.max(0, Math.round(extra.dt));
   queue.push(ev);
@@ -214,7 +223,8 @@ export function recordUsage(name: UsageName, detail = '', extra: { ok?: boolean;
 export function pendingUsage(): UsageEvent[] { queue = allowedQueue(queue); return queue.map(({ at: _at, ...e }) => e); }
 
 function batchBody(events: (UsageEvent & { at: number })[], now: number): string {
-  return JSON.stringify({ session: sessionId, reliabilityConsent: reliabilityEnabled(), events: events.map(({ at, ...e }) => ({ ...e, ago: Math.max(0, now - at) })) });
+  const version = import.meta.env?.VITE_BUILD_VERSION;
+  return JSON.stringify({ session: sessionId, ...(isClientBuildVersion(version) ? { clientVersion: version } : {}), reliabilityConsent: reliabilityEnabled(), events: events.map(({ at, ...e }) => ({ ...e, ago: Math.max(0, now - at) })) });
 }
 
 /**
@@ -225,10 +235,12 @@ export async function flushUsage(beacon = false): Promise<void> {
   if (timer) { clearTimeout(timer); timer = null; }
   queue = allowedQueue(queue);
   if (!queue.length || !usageEnabled()) { if (!usageEnabled()) queue = []; return; }
-  const events = queue;
+  const events = queue.slice(0, 200);
   const sentEpoch = reliabilityEpoch;
-  queue = [];
+  const sentUsageEpoch = usageEpoch;
+  queue = queue.slice(events.length);
   const requeue = () => {
+    if (sentUsageEpoch !== usageEpoch) return;
     const retained = sentEpoch === reliabilityEpoch ? events : events.filter(e => e.name !== 'reliability');
     queue = allowedQueue([...retained, ...queue]).slice(-QUEUE_MAX);
   };
@@ -243,6 +255,8 @@ export async function flushUsage(beacon = false): Promise<void> {
     else if (!res.ok && res.status !== 400 && res.status !== 429) requeue();   // a server hiccup: keep them for the next attempt
   } catch {
     requeue();   // offline: retry with the next batch
+  } finally {
+    if (queue.length && usageEnabled() && !timer) timer = setTimeout(() => { timer = null; void flushUsage(); }, FLUSH_MS);
   }
 }
 
@@ -252,6 +266,25 @@ export function sessionDetail(ua = navigator.userAgent, width = window.innerWidt
   const browser = /Firefox\//.test(ua) ? 'firefox' : /Edg\//.test(ua) ? 'edge' : /Chrome\//.test(ua) ? 'chrome' : /Safari\//.test(ua) ? 'safari' : 'other';
   const size = width < 700 ? 'narrow' : width < 1200 ? 'medium' : 'wide';
   return `${platform} ${browser} ${size}${touch ? ' touch' : ''}`;
+}
+
+/** Classify a UI surface without reading labels, text, URLs, ids, or input values. */
+export function interactionTarget(target: EventTarget | null): InteractionTarget {
+  const el = target instanceof Element ? target : null;
+  if (!el) return 'ui';
+  const note = el.closest('.lyx-inset-note');
+  if (note) return note.classList.contains('lyx-inset-note-comment') ? 'comment' : note.classList.contains('lyx-inset-note-greyedout') ? 'greyedout' : 'note';
+  const surfaces: [string, InteractionTarget][] = [
+    ['.lyx-graphics', 'figure'], ['.lm-field, .lyx-math-inline, .lyx-math-display', 'math'],
+    ['.lyx-editor td, .lyx-editor th', 'table'], ['.lyx-inset', 'inset'],
+    ['[role="dialog"], .dialog', 'dialog'], ['.ctx-menu, .menubar, [role="menu"]', 'menu'],
+    ['.toolbar, .math-toolbar', 'toolbar'], ['.file-browser, .filebrowser, .filetree, [data-file]', 'files'],
+    ['.doc-tabs, .doc-tab, .tabbar, .tabs, [role="tab"]', 'tabs'], ['.pdf-pages, .pdf-toolbar', 'pdf'],
+    ['.dl-canvas, .board-canvas, .ol-layout', 'canvas'], ['.source-pane, .codearea', 'source'],
+    ['.lyx-editor, .editor-page, .editor-scroll', 'text'], ['.sidebar, .panel-body, .rail', 'sidebar'],
+    ['.home, .landing', 'home'], ['input, textarea, select, form', 'form'],
+  ];
+  return surfaces.find(([selector]) => el.closest(selector))?.[1] ?? 'ui';
 }
 
 /**
@@ -264,7 +297,7 @@ export function initUsage(): void {
   sessionId = newSessionId();
   recordUsage('session', sessionDetail(), { where: 'ui' });
   let lastView = '';
-  const view = () => { const k = viewKind(location.hash); if (k !== lastView) { lastView = k; recordUsage('view', k, { where: 'ui' }); } };
+  const view = () => { const host = (globalThis as { OVERLYX_VIEW_KIND?: string }).OVERLYX_VIEW_KIND; const k = API_BASE && ['editor', 'pdf', 'deliverable'].includes(host ?? '') ? host! : viewKind(location.hash); if (k !== lastView) { lastView = k; recordUsage('view', k, { where: 'ui' }); } };
   view();
   window.addEventListener('hashchange', view);
   const orientation = () => recordReliability('screen.orientation', { context: window.innerHeight > window.innerWidth ? 'portrait' : 'landscape' });
@@ -276,6 +309,37 @@ export function initUsage(): void {
     else { recordReliability('app.resumed', hiddenAt === null ? {} : { durationMs: Date.now() - hiddenAt }); hiddenAt = null; }
   });
   window.addEventListener('pagehide', () => void flushUsage(true));
+  window.addEventListener('ol:usage-policy', () => {
+    queue = []; usageEpoch++; reliabilityEpoch++; stopped = false; sessionId = newSessionId();
+    if (usageEnabled()) { recordUsage('session', sessionDetail(), { where: 'ui' }); lastView = ''; view(); }
+  });
+  // Semantic interactions only: never pointer movement, coordinates, typed characters or values.
+  for (const [event, action] of [['click', 'click'], ['dblclick', 'double-click'], ['contextmenu', 'context-menu'], ['dragstart', 'drag'], ['drop', 'drop'], ['change', 'change']] as const) {
+    document.addEventListener(event, ev => {
+      if (!usageEnabled()) return;
+      const el = ev.target instanceof Element ? ev.target : null;
+      const pointer = 'pointerType' in ev && ['mouse', 'touch', 'pen'].includes(String(ev.pointerType)) ? ev.pointerType as 'mouse' | 'touch' | 'pen' : 'none';
+      recordInteraction(action, el?.closest('[disabled], [aria-disabled="true"]') ? 'denied' : 'attempt', { target: interactionTarget(ev.target), pointer });
+    }, true);
+  }
+  window.addEventListener('online', () => recordInteraction('connection', 'online'));
+  window.addEventListener('offline', () => recordInteraction('connection', 'offline'));
+  window.addEventListener('error', ev => {
+    if (ev.message && isBenignBrowserError(ev.message)) return;
+    const resource = ev.target instanceof HTMLImageElement;
+    recordInteraction(resource ? 'image-load' : 'app-error', 'failed', { target: resource ? 'figure' : 'ui' });
+  }, true);
+  window.addEventListener('unhandledrejection', () => recordInteraction('app-error', 'failed'));
+  // Sample stalls, with only a duration bucket. No performance entry names or attribution.
+  try {
+    let lastStall = -Infinity;
+    const observer = new PerformanceObserver(list => {
+      for (const entry of list.getEntries()) if (entry.duration >= 100 && performance.now() - lastStall > 5000) {
+        lastStall = performance.now(); recordInteraction('long-task', 'changed', { durationMs: entry.duration });
+      }
+    });
+    observer.observe({ type: 'longtask' });
+  } catch { /* not supported by every browser */ }
 }
 
 /** tests: forget the queue and the stop flag */

@@ -9,6 +9,7 @@ import type { EditorView } from 'prosemirror-view';
 import { schema, commentHeader, formatTimestamp, unquote, paramMap, FONT_KEYS } from '@overlyx/core';
 import { nextLayout, isHeadingLayout, isListLayout, isEnvironmentLayout } from './layouts';
 import { editorContext } from './context';
+import { recordInteraction } from '../usage';
 import { MathInlineView, MathDisplayView, pendingFocus } from './nodeviews/math';
 import { setValueMarkIn } from './fontsize';
 import { isLayoutDoc, pageAt } from './layout/commands';
@@ -1201,6 +1202,10 @@ export function dissolveInset(pos: number): Command {
     });
     const tr = state.tr.replaceWith(pos, pos + node.nodeSize, content);
     dispatch(tr.setSelection(TextSelection.near(tr.doc.resolve(pos))));
+    if (node.attrs.name === 'Note') recordInteraction('note-dissolve', 'removed', {
+      target: node.attrs.arg === 'Comment' ? 'comment' : node.attrs.arg === 'Greyedout' ? 'greyedout' : 'note',
+      content: node.content.size <= 2 ? 'empty' : 'filled', display: node.attrs.status === 'collapsed' ? 'collapsed' : 'inline', tracking: editorContext.trackChanges ? 'on' : 'off',
+    });
     return true;
   };
 }

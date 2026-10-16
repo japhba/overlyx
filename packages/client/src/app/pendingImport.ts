@@ -10,10 +10,10 @@
 const DB = 'overlyx:pending-import', STORE = 'import', KEY = 'current', FLAG = 'ol.pendingImport';
 const MAX_AGE = 60 * 60 * 1000;
 
-export interface PendingImport { links: string; token: string; zips: File[]; at: number }
+export interface PendingImport { source?: 'overleaf' | 'lyx'; links: string; token: string; zips: File[]; at: number }
 /** A zip as stored: its bytes and what makes it a File again. */
 interface StoredZip { name: string; type: string; lastModified: number; bytes: ArrayBuffer }
-interface Stored { links: string; token: string; zips: (StoredZip | File)[]; at: number }
+interface Stored { source?: 'overleaf' | 'lyx'; links: string; token: string; zips: (StoredZip | File)[]; at: number }
 
 function open(): Promise<IDBDatabase> {
   return new Promise((res, rej) => {
@@ -39,12 +39,12 @@ const setFlag = (on: boolean) => { try { if (on) sessionStorage.setItem(FLAG, '1
 export function pendingImportFlag(): boolean { try { return sessionStorage.getItem(FLAG) === '1'; } catch { return false; } }
 
 /** Park what the visitor chose; nothing chosen clears the stash. */
-export async function stashPendingImport(p: { links: string; token: string; zips: File[] }): Promise<void> {
+export async function stashPendingImport(p: { source?: 'overleaf' | 'lyx'; links: string; token: string; zips: File[] }): Promise<void> {
   const empty = !p.zips.length && !p.links.trim();
   setFlag(!empty);
   if (empty) { await tx('readwrite', s => s.delete(KEY)).catch(() => {}); return; }
   const zips = await Promise.all(p.zips.map(async f => ({ name: f.name, type: f.type, lastModified: f.lastModified, bytes: await f.arrayBuffer() })));
-  const rec: Stored = { links: p.links, token: p.token, zips, at: Date.now() };
+  const rec: Stored = { source: p.source, links: p.links, token: p.token, zips, at: Date.now() };
   await tx('readwrite', s => s.put(rec, KEY));
 }
 
@@ -58,5 +58,5 @@ export async function takePendingImport(): Promise<PendingImport | null> {
   if (Date.now() - rec.at > MAX_AGE) return null;
   // (a stash written before the zips were kept as bytes holds File objects; one that lost them yields nothing usable)
   const zips = (rec.zips ?? []).flatMap(z => z instanceof Blob ? [z] : z?.bytes instanceof ArrayBuffer ? [new File([z.bytes], z.name, { type: z.type, lastModified: z.lastModified })] : []);
-  return zips.length || rec.links.trim() ? { links: rec.links, token: rec.token, zips, at: rec.at } : null;
+  return zips.length || rec.links.trim() ? { source: rec.source === 'lyx' ? 'lyx' : 'overleaf', links: rec.links, token: rec.token, zips, at: rec.at } : null;
 }

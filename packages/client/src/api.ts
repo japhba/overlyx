@@ -1,5 +1,7 @@
 import type { LayoutCheck, DocGroup } from '@overlyx/core';
 import { offlineGet } from './offline-api';
+import { recordInteraction } from './usage';
+import { apiInteraction, requestOutcome } from '@overlyx/core/interactions.ts';
 
 export interface User {
   id: number; username: string; name: string; color: string; isAdmin: boolean; avatar?: string | null;
@@ -42,6 +44,7 @@ export interface ProjectPerson { name: string; username: string; color: string; 
 export interface ShareMember { id: number; role: 'view' | 'edit'; via: string; email: string | null; user: { id: number; name: string; username: string; color: string; avatar: string | null } | null }
 /** a zip import: `projects` lists every project the archive produced (several for an Overleaf bundle of zips), `errors` the ones that failed */
 export interface ZipImportResult { ok: boolean; name: string; files: number; skipped: string[]; projects: { name: string; files: number; skipped: string[] }[]; errors: { name: string; error: string }[] }
+export interface LyxImportResult { id: string; created: string[]; warnings: string[]; files: number; skipped: string[] }
 /** a public PDF link of a document (Share dialog); the address is `/pdf/<token>/<fileName>` on this origin */
 export interface PdfLinkInfo { doc: string; token: string; hits: number; lastHitAt: number | null; createdAt: number; fileName: string; built: boolean }
 export const pdfLinkUrl = (l: { token: string; fileName: string }) => `${location.origin}/pdf/${l.token}/${encodeURIComponent(l.fileName)}`;
@@ -159,13 +162,19 @@ export type ExternalAgentEvent = { kind: 'agents'; agents: ExternalAgent[] } | {
 export const API_BASE: string = (globalThis as unknown as { OVERLYX_API_BASE?: string }).OVERLYX_API_BASE ?? '';
 
 async function req<T>(method: string, url: string, body?: unknown, raw?: BodyInit, signal?: AbortSignal): Promise<T> {
-  const res = await fetch(API_BASE + url, {
+  const action = apiInteraction(method, url), start = performance.now();
+  let res: Response;
+  try { res = await fetch(API_BASE + url, {
     method,
-    headers: body !== undefined ? { 'content-type': 'application/json' } : undefined,
+    headers: body !== undefined ? { 'content-type': 'application/json' } : raw instanceof Blob ? { 'content-type': raw.type || 'application/octet-stream' } : undefined,
     body: raw ?? (body !== undefined ? JSON.stringify(body) : undefined),
     credentials: 'same-origin',
     signal,
-  });
+  }); } catch (e) {
+    if (action) recordInteraction(action, signal?.aborted ? 'cancelled' : 'offline', { target: 'api', durationMs: performance.now() - start });
+    throw e;
+  }
+  if (action) recordInteraction(action, requestOutcome(res.status), { target: 'api', durationMs: performance.now() - start });
   const text = await res.text();
   let data: any = {};
   try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
@@ -218,6 +227,8 @@ export const api = {
   /** Overleaf import: clone the selected projects with the user's Overleaf Git token (per-project results), or unpack a downloaded zip */
   importOverleaf: (body: { token: string; projects: { id: string; name: string }[] }) => req<{ results: { id: string; name: string; ok: boolean; error?: string }[] }>('POST', '/api/import/overleaf', body),
   importZip: (name: string, file: Blob) => req<ZipImportResult>('POST', `/api/import/zip?name=${encodeURIComponent(name)}`, undefined, file),
+  importLyxProject: (name: string, file: File) => req<LyxImportResult & { ok: boolean; name: string }>('POST', `/api/import/lyx?name=${encodeURIComponent(name)}&filename=${encodeURIComponent(file.name)}`, undefined, file),
+  uploadLyx: (project: string, file: File, dir = '') => req<LyxImportResult>('POST', `/api/projects/${encodeURIComponent(project)}/import-lyx?filename=${encodeURIComponent(file.name)}&dir=${encodeURIComponent(dir)}`, undefined, file),
   // public PDF links (owner only): a stable address that serves a document's latest build to anyone
   pdfLinks: (project: string) => req<PdfLinksInfo>('GET', `/api/projects/${encodeURIComponent(project)}/pdf-links`),
   setPdfPublish: (project: string, body: { doc: string; repo: string; path: string; branch?: string | null }) => req<{ publish: PdfPublishInfo[] }>('POST', `/api/projects/${encodeURIComponent(project)}/pdf-publish`, body),
@@ -395,6 +406,6 @@ export function fileUrl(project: string, path: string): string {
   return `${API_BASE}/api/projects/${encodeURIComponent(project)}/file/${encodeURIComponent(path)}`;
 }
 /** The whole project as a downloadable .zip (the project card's "Download" and the Git dialog). */
-export function zipUrl(project: string): string {
-  return `${API_BASE}/api/projects/${encodeURIComponent(project)}/zip`;
+export function zipUrl(project: string, format?: 'lyx'): string {
+  return `${API_BASE}/api/projects/${encodeURIComponent(project)}/zip${format ? '?format=lyx' : ''}`;
 }

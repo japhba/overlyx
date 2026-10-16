@@ -6,6 +6,7 @@
  * VS Code's (the document's), presenting and printing happen in the browser.
  */
 import { G, vscode } from './globals';   // must come first: sets OVERLYX_API_BASE
+import { initUsage } from '@client/usage';
 import { relayAppearance, setHostDark } from './appearance';
 import { render } from 'preact';
 import { useHostTheme } from '@client/app/theme';
@@ -16,6 +17,7 @@ import type { HostToDeliverable } from '../host/deliverables';
 import '@client/styles.css';
 
 useHostTheme();
+initUsage();
 // the theme switch's choices from the editors (smart invert, the text tone, the theme — host/appearance.ts)
 relayAppearance();
 setHostDark(G.dark);

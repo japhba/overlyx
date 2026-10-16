@@ -225,7 +225,7 @@ export function Login({ onLogin, google, note, onBack }: {
               </div>
             )}
             {onBack && <button type="button" class="fallback-link" data-login-back onClick={onBack}>← Continue as a guest for now</button>}
-            <a class="demos-hint" href="#overleaf" data-overleaf-hint onClick={e => { e.preventDefault(); scrollTo('#overleaf'); }}>Coming from Overleaf? Bring your projects along ↓</a>
+            <a class="demos-hint" href="#overleaf" data-overleaf-hint onClick={e => { e.preventDefault(); scrollTo('#overleaf'); }}>Coming from Overleaf or LyX? Bring your projects along ↓</a>
           </form>
           </div>
         </header>

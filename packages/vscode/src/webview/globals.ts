@@ -10,12 +10,20 @@ export interface VsCodeGlobals {
   assetBase: string;
   canvasBase?: string;
   dark: boolean;
+  usageStats?: boolean;
 }
 export const G: VsCodeGlobals = (window as unknown as { __OVERLYX_VSCODE__: VsCodeGlobals }).__OVERLYX_VSCODE__;
 
 // The client's api.ts reads this before building any URL.
 (globalThis as unknown as { OVERLYX_API_BASE?: string }).OVERLYX_API_BASE = G.base;
 (globalThis as unknown as { OVERLYX_CANVAS_BASE?: string }).OVERLYX_CANVAS_BASE = G.canvasBase;
+(globalThis as { OVERLYX_USAGE_ENABLED?: boolean }).OVERLYX_USAGE_ENABLED = G.usageStats === true;
+(globalThis as { OVERLYX_VIEW_KIND?: string }).OVERLYX_VIEW_KIND = G.page;
+window.addEventListener('message', ev => {
+  if (ev.data?.type !== 'usageStats' || typeof ev.data.enabled !== 'boolean') return;
+  (globalThis as { OVERLYX_USAGE_ENABLED?: boolean }).OVERLYX_USAGE_ENABLED = ev.data.enabled;
+  window.dispatchEvent(new Event('ol:usage-policy'));
+});
 
 export interface VsCodeApi { postMessage(msg: unknown): void; getState(): unknown; setState(s: unknown): void }
 declare function acquireVsCodeApi(): VsCodeApi;

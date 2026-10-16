@@ -12,6 +12,7 @@ import { URL } from 'node:url';
 import { isDirectImage, isGraphicsFile, resolveGraphicsPath, toPng } from './graphics.ts';
 
 export interface BridgeDelegate {
+  usageBatch?(value: unknown): number;
   /** project name → absolute root directory (undefined: unknown project) */
   projectRoot(project: string): string | undefined;
   /** all projects with their files (the client's GET /api/projects shape, roughly) */
@@ -96,6 +97,11 @@ export class Bridge {
 
     if (!p.startsWith('/api/')) { send(res, 404, { error: 'not found' }); return; }
     const api = p.slice(4);
+    if (api === '/usage' && req.method === 'POST') {
+      const stored = d.usageBatch?.(await body(req, 64 * 1024)) ?? 0;
+      if (!stored) { res.statusCode = 204; res.end(); } else send(res, 200, { stored });
+      return;
+    }
 
     /* ---- stubs the client UI expects to exist ---- */
     if (api === '/auth/me') { send(res, 200, { user: { id: 1, username: 'you', name: 'You', color: '#3b6ea5', isAdmin: false }, google: false }); return; }
@@ -276,11 +282,11 @@ function send(res: http.ServerResponse, status: number, data: unknown): void {
   res.end(JSON.stringify(data));
 }
 
-function body(req: http.IncomingMessage): Promise<any> {
+function body(req: http.IncomingMessage, limit = JSON_LIMIT): Promise<any> {
   return new Promise((resolve, reject) => {
     let size = 0;
     const chunks: Buffer[] = [];
-    req.on('data', (c: Buffer) => { size += c.length; if (size > JSON_LIMIT) { reject(new Error('body too large')); req.destroy(); } else chunks.push(c); });
+    req.on('data', (c: Buffer) => { size += c.length; if (size > limit) { reject(new Error('body too large')); req.destroy(); } else chunks.push(c); });
     req.on('end', () => { try { resolve(chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {}); } catch (e) { reject(e); } });
     req.on('error', reject);
   });

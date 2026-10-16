@@ -396,6 +396,13 @@
           "default": [],
           "markdownDescription": "Further OverLyX servers (e.g. `https://latex.example.org`) whose project clones are synced, besides overlyx.app and the servers the OverLyX CLI is signed in to."
         },
+        "overlyx.usageStatistics": {
+          "type": "boolean",
+          "default": true,
+          "scope": "application",
+          "description": "Send anonymous action, outcome and performance categories to overlyx.app to diagnose editing, PDF, canvas, build and sync problems. Requires VS Code's telemetry level All. Uses random IDs only for this activation or webview load; never sends document text, clipboard contents, filenames, workspace paths, URLs, accounts or persistent device IDs. Detailed events are kept for 30 days. Switching off clears queued events immediately.",
+          "tags": ["telemetry", "usesOnlineServices"]
+        },
         "overlyx.errorReports": {
           "type": "boolean",
           "default": true,

@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { BENIGN_BROWSER_ERROR } from '@client/error-reporting';
+import { usageStatisticsEnabled } from './telemetry.ts';
 
 export async function webviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, page: 'editor' | 'pdf' | 'deliverable', globals: Record<string, unknown>): Promise<string> {
   const config = vscode.workspace.getConfiguration('overlyx');
@@ -52,7 +53,7 @@ export async function webviewHtml(webview: vscode.Webview, extensionUri: vscode.
     // (not ResizeObserver's scheduling notice, which is no error)
     `<script nonce="${nonce}">
       window.__OVERLYX_VSCAPI = acquireVsCodeApi();
-      window.__OVERLYX_VSCODE__ = ${JSON.stringify({ ...globals, assetBase: base + '/' })};
+      window.__OVERLYX_VSCODE__ = ${JSON.stringify({ ...globals, usageStats: usageStatisticsEnabled(), assetBase: base + '/' })};
       window.addEventListener('error', e => { if (!e.message || ${BENIGN_BROWSER_ERROR}.test(e.message.trim())) return; try { window.__OVERLYX_VSCAPI.postMessage({ type: 'notify', kind: 'error', text: 'webview: ' + e.message + ' @ ' + (e.filename || '?') + ':' + (e.lineno || 0), stack: e.error && e.error.stack ? String(e.error.stack).slice(0, 4000) : '' }); } catch {} }, true);
       window.addEventListener('unhandledrejection', e => { try { const r = e.reason; window.__OVERLYX_VSCAPI.postMessage({ type: 'notify', kind: 'error', text: 'webview promise: ' + String(r && r.message ? r.message : r).slice(0, 300), stack: r && r.stack ? String(r.stack).slice(0, 4000) : '' }); } catch {} });
     </script>`;

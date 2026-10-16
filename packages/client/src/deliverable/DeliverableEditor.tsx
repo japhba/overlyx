@@ -58,7 +58,8 @@ import { formatTimestamp } from '@overlyx/core';
 import { ReviewPane, type CommentDraft } from './ReviewPane';
 import { EditModeSwitch, type EditMode } from '../app/EditModeSwitch';
 import { useDarkPagesState, toggleDarkPages, invertedColor, DARK_DESK } from '../app/darkpages';
-import { recordReliability } from '../usage';
+import { recordReliability, recordInteraction } from '../usage';
+import { canvasInteraction, type InteractionOutcome } from '@overlyx/core/interactions.ts';
 import { saveReliabilityEvent } from './reliability';
 import { makeReliabilityDetail, type ReliabilityEvent } from '@overlyx/core/reliability.ts';
 
@@ -560,20 +561,27 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
    * operations on the current text (from this side: the toolbar, the rail's menu) — while suggesting
    * made suggestions (core reviewOps); `raw`: as they are (comments, accepting / rejecting, notes)
    */
+  const recordOps = (ops: HtmlOp[], outcome: InteractionOutcome) => {
+    // A sandboxed canvas cannot bubble UI events to the shell. Only operation kinds cross into
+    // diagnostics here: never HTML, element paths, style values, text, coordinates or IDs.
+    for (const action of new Set(ops.map(op => canvasInteraction(op.t)))) if (action) recordInteraction(action, outcome, { target: 'canvas', access: outcome === 'denied' ? 'view' : 'edit' });
+  };
   const applyOps = (ops: HtmlOp[], raw = false): boolean => {
-    if (readOnlyRef.current || host.readOnly()) { notify('You can only view this page.', 'error'); return false; }
+    if (readOnlyRef.current || host.readOnly()) { recordOps(ops, 'denied'); notify('You can only view this page.', 'error'); return false; }
     const cur = text.toString();
     const src = parseSource(cur);
     try {
       const sp = (raw ? ops : reviewOps(src, ops, suggestStamp())).flatMap(op => opSplices(src, op));
       applySplices(sp);
+      recordOps(ops, text.toString() === cur ? 'unchanged' : 'changed');
       return true;
-    } catch (e) { notify(String((e as Error).message ?? e), 'error'); return false; }
+    } catch (e) { recordOps(ops, 'failed'); notify(String((e as Error).message ?? e), 'error'); return false; }
   };
 
   /** operations the canvas made on version `v` */
   const applyRuntimeOps = (v: number, ops: HtmlOp[]): boolean => {
     if (readOnlyRef.current || host.readOnly()) {
+      recordOps(ops, 'denied');
       const typing = ops.filter((op): op is Extract<HtmlOp, { t: 'inner' }> => op.t === 'inner' && op.before !== undefined);
       const stale = host.saveState?.()?.state === 'stale';
       for (const op of typing) keepDraft(op.html, stale ? 'This file was replaced before this text could be saved. The older local source is still available to download.' : 'Your editing permission changed before this text was saved.', !stale);
@@ -583,6 +591,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     const base = versions.current.get(v);
     const cur = text.toString();
     if (base === undefined) {
+      recordOps(ops, 'conflict');
       for (const op of ops) if (op.t === 'inner' && op.before !== undefined) keepDraft(op.html, 'The page changed before this edit could be applied.');
       toCanvas({ ol: 'stopText', save: false });
       sendSource(true);
@@ -594,6 +603,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     else try { reviewed = reviewOps(parseSource(base), ops, suggestStamp()); } catch { reviewed = ops; }
     const sp = rebasedSplices(base, cur, reviewed);
     if (!sp) {
+      recordOps(ops, 'conflict');
       const typing = ops.filter((op): op is Extract<HtmlOp, { t: 'inner' }> => op.t === 'inner' && op.before !== undefined);
       for (const op of typing) keepDraft(op.html, 'Your changes overlap with another edit, or the original box was removed. The latest saved version was kept.');
       if (typing.length) toCanvas({ ol: 'stopText', save: false });
@@ -603,6 +613,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     // Text input can share its recent typing group. A paste, transform, group or
     // other discrete gesture must not consume its neighbour when undone.
     applySplices(sp, 'canvas', !ops.every(op => op.t === 'inner' && op.before !== undefined));
+    recordOps(ops, text.toString() === cur ? 'unchanged' : 'changed');
     return true;
   };
 

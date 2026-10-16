@@ -100,7 +100,7 @@ export async function nestedClones(root: string): Promise<string[]> {
   return found;
 }
 
-export function setupSync(context: vscode.ExtensionContext, report: (e: unknown, area: string) => void): void {
+export function setupSync(context: vscode.ExtensionContext, report: (e: unknown, area: string) => void, track?: (outcome: 'success' | 'failed' | 'conflict', durationMs: number) => void): void {
   const out = vscode.window.createOutputChannel('OverLyX Sync');
   const syncs = new Map<string, FolderSync>();
   const config = () => vscode.workspace.getConfiguration('overlyx');
@@ -189,10 +189,14 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
     engine.o.onStatus = s => onStatus(f, s);
     const round = engine.round.bind(engine);
     engine.round = async () => {
-      const c = await round();
-      for (const l of describeChanges(c)) log(f.dir, l);
-      noticeConflicts(f, c);
-      return c;
+      const started = performance.now();
+      try {
+        const c = await round();
+        track?.(c.conflicts.length ? 'conflict' : 'success', performance.now() - started);
+        for (const l of describeChanges(c)) log(f.dir, l);
+        noticeConflicts(f, c);
+        return c;
+      } catch (e) { track?.('failed', performance.now() - started); throw e; }
     };
     f.engine = engine;
     f.unasked = false;

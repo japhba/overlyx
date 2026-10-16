@@ -12,10 +12,11 @@ import type { EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
 import { currentParagraph } from '../editor/commands';
 import { editorContext, onMetaChange } from '../editor/context';
+import { recordInteraction } from '../usage';
 
 /**
- * Zoom the document text: a CSS variable the editor's font size is computed from (styles.css
- * `.lyx-editor`), remembered per browser. Both shells use this — never CSS `zoom` on a container,
+ * Zoom the document view: text, column and graphics share a CSS scale, remembered per browser.
+ * Both shells use this — never CSS `zoom` on a container,
  * which puts mouse coordinates and the layout into different scales in Chromium (hit tests miss,
  * drags jump, selections and their highlights disagree).
  */
@@ -23,7 +24,7 @@ export function applyEditorZoom(zoom: number): void {
   document.documentElement.style.setProperty('--editor-zoom', String(zoom));
   try { localStorage.setItem('ol.zoom', String(zoom)); } catch { /* storage unavailable */ }
   // a change (not the zoom a document opens with): said over the text for a moment, as every zoom is (zoomhud.ts)
-  if (textZoomShown !== null && textZoomShown !== zoom) textZoomPill.show(zoom);
+  if (textZoomShown !== null && textZoomShown !== zoom) { textZoomPill.show(zoom); recordInteraction('zoom', 'changed', { target: 'text' }); }
   textZoomShown = zoom;
 }
 let textZoomShown: number | null = null;
@@ -46,14 +47,20 @@ function textScroller(t: EventTarget | null): HTMLElement | null {
   const el = t instanceof Element ? t : null;
   const sc = el?.closest<HTMLElement>('.editor-scroll');
   const ed = sc?.querySelector('.lyx-editor');
-  return sc && ed && !ed.classList.contains('ol-layout') && el!.closest('.editor-page') ? sc : null;
+  return sc && ed && !ed.classList.contains('ol-layout') ? sc : null;
 }
 
 /**
  * What a zoom keeps where it is: the character under the screen point (x, y) — its middle's screen y,
  * read again once the text has reflowed — and how far from the point it was.
  */
-function textAnchor(x: number, y: number): { mid: () => number | null; off: number } | null {
+function textAnchor(x: number, y: number): { mid: () => number | null; off: number; midX?: () => number; offX?: number } | null {
+  const figure = document.elementFromPoint?.(x, y)?.closest<HTMLElement>('.lyx-graphics');
+  if (figure) {
+    const box = figure.getBoundingClientRect();
+    return { mid: () => figure.isConnected ? figure.getBoundingClientRect().top + figure.getBoundingClientRect().height / 2 : null,
+      off: box.top + box.height / 2 - y, midX: () => { const b = figure.getBoundingClientRect(); return b.left + b.width / 2; }, offX: box.left + box.width / 2 - x };
+  }
   const d = document as Document & { caretPositionFromPoint?(x: number, y: number): { offsetNode: Node; offset: number } | null; caretRangeFromPoint?(x: number, y: number): Range | null };
   const pos = d.caretPositionFromPoint?.(x, y);
   const r = pos ? { node: pos.offsetNode, at: pos.offset } : (() => { const q = d.caretRangeFromPoint?.(x, y); return q ? { node: q.startContainer, at: q.startOffset } : null; })();
@@ -90,18 +97,19 @@ export function useTextPinch(zoom: number, setZoom: (z: number) => void): void {
     /** the zoom shown now, ahead of the shell's while a pinch goes on (`--editor-zoom`) */
     const shown = () => parseFloat(document.documentElement.style.getPropertyValue('--editor-zoom')) || zoomRef.current;
     /** show zoom `z` (the text reflows), the anchor's character back at (its offset from) the screen y `y`; `held`: said as 100 % */
-    const show = (sc: HTMLElement, a: ReturnType<typeof textAnchor>, z0: number, z: number, y: number, held: boolean) => {
+    const show = (sc: HTMLElement, a: ReturnType<typeof textAnchor>, z0: number, z: number, y: number, held: boolean, x?: number) => {
       document.documentElement.style.setProperty('--editor-zoom', String(z));
       textZoomPill.show(held ? 1 : z);
       textZoomShown = z;
       const m = a?.mid();
       if (a && m !== null && m !== undefined) sc.scrollTop += m - (y + a.off * (z / z0));
+      if (a?.midX && x !== undefined) sc.scrollLeft += a.midX() - (x + (a.offX ?? 0) * (z / z0));
     };
-    const commit = (z: number) => { const v = Math.abs(z - 1) < 0.005 ? 1 : +z.toFixed(2); textZoomShown = v; setRef.current(v); };
+    const commit = (z: number) => { const v = Math.abs(z - 1) < 0.005 ? 1 : +z.toFixed(2); if (v !== zoomRef.current) recordInteraction('zoom', 'changed', { target: 'text' }); textZoomShown = v; setRef.current(v); };
 
     let g: { sc: HTMLElement; p: DetentPinch<'own'>; a: ReturnType<typeof textAnchor>; z0: number; z: number; held: boolean; x: number; y: number; timer: ReturnType<typeof setTimeout> | null } | null = null;
     let raf = 0, settling = 0;
-    const draw = () => { raf = 0; if (g) show(g.sc, g.a, g.z0, g.z, g.y, g.held); };
+    const draw = () => { raf = 0; if (g) show(g.sc, g.a, g.z0, g.z, g.y, g.held, g.x); };
     const begin = (sc: HTMLElement, x: number, y: number) => {
       cancelAnimationFrame(settling); settling = 0;
       const z0 = shown();
@@ -122,12 +130,12 @@ export function useTextPinch(zoom: number, setZoom: (z: number) => void): void {
       if (p.timer) clearTimeout(p.timer);
       cancelAnimationFrame(raf); raf = 0;
       const e = p.p.end(TEXT_LEVELS);
-      if (!e) { show(p.sc, p.a, p.z0, p.z, p.y, false); commit(p.z); return; }
+      if (!e) { show(p.sc, p.a, p.z0, p.z, p.y, false, p.x); commit(p.z); return; }
       // onto 100 % on a short spring
       const t0 = performance.now();
       const frame = () => {
         const t = Math.min(1, (performance.now() - t0) / 200), k = 1 - (1 - t) ** 3;
-        show(p.sc, p.a, p.z0, e.from + (1 - e.from) * k, p.y, true);
+        show(p.sc, p.a, p.z0, e.from + (1 - e.from) * k, p.y, true, p.x);
         if (t < 1) { settling = requestAnimationFrame(frame); return; }
         settling = 0;
         commit(1);
@@ -138,7 +146,7 @@ export function useTextPinch(zoom: number, setZoom: (z: number) => void): void {
     const step = (sc: HTMLElement, dir: number, x: number, y: number) => {
       const z0 = shown(), z = stepTextZoom(z0, dir);
       if (Math.abs(z - z0) < 1e-3) return;
-      show(sc, textAnchor(x, y), z0, z, y, Math.abs(z - 1) < 0.005);
+      show(sc, textAnchor(x, y), z0, z, y, Math.abs(z - 1) < 0.005, x);
       commit(z);
     };
 
@@ -150,7 +158,7 @@ export function useTextPinch(zoom: number, setZoom: (z: number) => void): void {
       const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
       if (!dy) return;
       // a mouse wheel's notch (lines, or a hundred px or so at once): a step; a trackpad sends many small deltas — a pinch
-      if (e.deltaMode !== 0 || Math.abs(dy) >= 50) { if (!g) step(sc, dy < 0 ? 1 : -1, e.clientX, e.clientY); return; }
+      if (!g && (e.deltaMode !== 0 || Math.abs(dy) >= 50)) { step(sc, dy < 0 ? 1 : -1, e.clientX, e.clientY); return; }
       if (!g) begin(sc, e.clientX, e.clientY);
       if (g!.timer) clearTimeout(g!.timer);
       g!.timer = setTimeout(end, 220);

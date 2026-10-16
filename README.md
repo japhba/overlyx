@@ -22,6 +22,9 @@
    unchanged blocks are saved byte for byte.
 7. **Google Docs sync** — link a document to a Google Doc: edits made there come back as tracked
    changes, comments and replies go both ways.
+8. **LyX import and export** — bring a `.lyx` file or zipped LyX project from the landing page,
+   project list or File menu. Download a native `.lyx` document or a LyX project archive with
+   figures, bibliography and child documents from File ▸ Export.
 
 ## Try it
 

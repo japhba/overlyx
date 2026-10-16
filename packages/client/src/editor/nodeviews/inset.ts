@@ -9,6 +9,8 @@ import { insetLabel, argumentLabel } from '../layouts';
 import { parseHeader, commentHeader, formatTimestamp } from '@overlyx/core';
 import { editorContext } from '../context';
 import { toggleCommentResolved } from '../commentops';
+import { recordInteraction } from '../../usage';
+import type { InteractionAction, InteractionOutcome } from '@overlyx/core/interactions.ts';
 
 export class InsetView implements NodeView {
   dom: HTMLElement;
@@ -64,6 +66,16 @@ export class InsetView implements NodeView {
   }
 
   private isComment(): boolean { return this.node.attrs.name === 'Note' && this.node.attrs.arg === 'Comment'; }
+
+  private recordAction(action: InteractionAction, outcome: InteractionOutcome): void {
+    if (this.node.attrs.name !== 'Note') return;
+    recordInteraction(action, outcome, {
+      target: this.isComment() ? 'comment' : this.node.attrs.arg === 'Greyedout' ? 'greyedout' : 'note',
+      content: this.node.content.size <= 2 ? 'empty' : 'filled',
+      display: this.dom.classList.contains('in-margin') ? 'margin' : this.node.attrs.status === 'collapsed' ? 'collapsed' : 'inline',
+      access: this.view.editable ? 'edit' : 'view', tracking: editorContext.trackChanges ? 'on' : 'off',
+    });
+  }
 
   private argumentOwner(): string | null {
     try {
@@ -156,6 +168,7 @@ export class InsetView implements NodeView {
     if (cur.attrs.status !== 'collapsed' && empty) {
       this.view.dispatch(this.view.state.tr.setSelection(TextSelection.near(this.view.state.doc.resolve(pos + 2))));
       this.view.focus();
+      this.recordAction('note-toggle', 'unchanged');
       return;
     }
     const status = cur.attrs.status === 'collapsed' ? 'open' : 'collapsed';
@@ -169,6 +182,7 @@ export class InsetView implements NodeView {
       tr = tr.setSelection(TextSelection.near(tr.doc.resolve(pos + 2)));
     }
     this.view.dispatch(tr);
+    this.recordAction('note-toggle', 'changed');
     if (status === 'open') this.view.focus();
   }
 
@@ -184,6 +198,7 @@ export class InsetView implements NodeView {
       const inLast = pos + cur.nodeSize - 1 - last.nodeSize + 1;
       this.view.dispatch(this.view.state.tr.setSelection(TextSelection.create(this.view.state.doc, inLast)));
       this.view.focus();
+      this.recordAction('comment-reply', 'unchanged');
       return;
     }
     const schema = this.view.state.schema;
@@ -196,6 +211,7 @@ export class InsetView implements NodeView {
     tr = tr.setSelection(TextSelection.create(tr.doc, end + header.nodeSize + 1));
     this.view.dispatch(tr);
     this.view.focus();
+    this.recordAction('comment-reply', 'changed');
   }
 
   toggleResolved() {
@@ -203,6 +219,7 @@ export class InsetView implements NodeView {
     if (pos === undefined) return;
     const resolving = !this.dom.classList.contains('resolved');
     toggleCommentResolved(this.view, pos);
+    this.recordAction('comment-resolve', 'success');
     if (resolving) {
       // the card goes away: the cursor waits right after the thread's marker, in the text
       const cur = this.view.state.doc.nodeAt(pos);

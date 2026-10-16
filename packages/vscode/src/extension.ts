@@ -31,6 +31,7 @@ import { runTool, toolTarget, TOOL_NAMES, type ToolName, type TextStore } from '
 import { inEditor } from './agents/handover.ts';
 import * as build from './host/build.ts';
 import { initAppearance } from './host/appearance.ts';
+import type { InteractionAction } from '@overlyx/core/interactions.ts';
 import type { HostToEditor } from './shared/protocol.ts';
 
 /** What activate() returns — consumed by the integration test (test/suite/index.cjs). */
@@ -40,6 +41,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
   initAppearance(context);
   const telemetry = new OverlyxTelemetry(context);
   context.subscriptions.push(telemetry);
+  telemetry.track('extension-activate', 'success');
+  const registerCommand = (id: string, run: (...args: any[]) => unknown): vscode.Disposable => {
+    const action: InteractionAction = /build/i.test(id) ? 'extension-build' : /open/i.test(id) ? 'extension-open' : /sync/i.test(id) ? 'extension-sync' : /update/i.test(id) ? 'extension-update' : 'extension-command';
+    return vscode.commands.registerCommand(id, (...args: unknown[]) => {
+      if (id === 'overlyx.editorKey') return run(...args);
+      const started = performance.now();
+      telemetry.track(action, 'attempt');
+      try {
+        const result = run(...args);
+        if (result && typeof (result as PromiseLike<unknown>).then === 'function') return Promise.resolve(result).then(value => {
+          telemetry.track(action, 'success', performance.now() - started); return value;
+        }, error => { telemetry.track(action, 'failed', performance.now() - started); throw error; });
+        telemetry.track(action, 'success', performance.now() - started); return result;
+      } catch (error) { telemetry.track(action, 'failed', performance.now() - started); throw error; }
+    });
+  };
   const registry = new Registry();
   /**
    * project key → root directory (each open file's own directory — projectDirFor —, plus the
@@ -87,6 +104,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
         if (!await vscode.workspace.saveAll(false)) throw new Error('Resolve the unsaved file changes before building the PDF.');
       },
     });
+    telemetry.track('extension-build', 'attempt');
     if (opts?.open !== false) pdfPanels.show(session.docId);
   };
 
@@ -110,7 +128,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
 
   const bridge = new Bridge(makeDelegate());
   // a finished build: the document's editor fetches the check of its layout text boxes
-  context.subscriptions.push({ dispose: build.onBuilt(docId => { const e = registry.byDocId(docId); if (e) void e.panel.webview.postMessage({ type: 'built' } satisfies HostToEditor); }) });
+  context.subscriptions.push({ dispose: build.onBuilt(docId => { telemetry.track('extension-build', build.lastBuild(docId)?.status === 'ok' ? 'success' : 'failed'); const e = registry.byDocId(docId); if (e) void e.panel.webview.postMessage({ type: 'built' } satisfies HostToEditor); }) });
   context.subscriptions.push({ dispose: () => bridge.dispose() });
   let webviewBase: string;
   // Resolve again when opening a webview, since the user can close a forwarding tunnel.
@@ -129,6 +147,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
   function makeDelegate(): BridgeDelegate {
     const DICT_PKG: Record<string, string> = { en: 'dictionary-en', 'en-gb': 'dictionary-en-gb', de: 'dictionary-de', fr: 'dictionary-fr' };
     return {
+      usageBatch: value => telemetry.usageBatch(value),
       projectRoot: (project) => projectRoots.get(project),
       projects: () => [...projectRoots.entries()].map(([name, root]) => ({ name, files: collectFiles(root) })),
       meta: async (docId) => {
@@ -242,6 +261,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
         return fs.existsSync(dev) ? dev : null;
       },
       agentTool: async (call) => {
+        telemetry.track('extension-agent', 'attempt');
         if (!(TOOL_NAMES as readonly string[]).includes(call.tool)) return { error: `unknown tool ${call.tool}` };
         const target = toolTarget(call.args, call.cwd);
         const run = (store: TextStore) => runTool(call.tool as ToolName, call.args, {
@@ -249,10 +269,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
         });
         // only while this window answers (with Remote-SSH: while the user's computer is connected) and
         // begins the edit in time; else — or closed meanwhile — `gone`: the tool server edits the file (agents/handover.ts)
-        return inEditor(() => vscode.commands.getCommands(true), h => {
+        const answer = await inEditor(() => vscode.commands.getCommands(true), h => {
           for (const e of registry.all()) { const job = e.agentEdit?.(target, run, h); if (job) return job; }
           return undefined;
         });
+        telemetry.track('extension-agent', answer.gone ? 'offline' : answer.error ? 'failed' : 'success');
+        return answer;
       },
     };
   }
@@ -280,6 +302,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
     postToPdf: (docId, msg) => pdfPanels.post(docId, msg as never),
     openDoc,
     reportError: (error, area) => telemetry.report(error, area),
+    track: (action, outcome, ms) => telemetry.track(action, outcome, ms),
   });
 
   const deliverableServer = new DeliverableServer(vscode.Uri.joinPath(context.extensionUri, 'dist/ol').fsPath, path.join(context.globalStorageUri.fsPath, 'cache'));
@@ -309,16 +332,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
       supportsMultipleEditorsPerDocument: false,
     }),
     { dispose: () => deliverableServer.dispose() },
-    vscode.commands.registerCommand('overlyx.openDeliverable', (uri?: vscode.Uri) => {
+    registerCommand('overlyx.openDeliverable', (uri?: vscode.Uri) => {
       const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
       const target = uri ?? (input instanceof vscode.TabInputText ? input.uri : undefined);
       if (target) void vscode.commands.executeCommand('vscode.openWith', target, 'overlyx.htmlEditor');
     }),
-    vscode.commands.registerCommand('overlyx.openInOverlyx', (uri?: vscode.Uri) => {
+    registerCommand('overlyx.openInOverlyx', (uri?: vscode.Uri) => {
       const target = uri ?? vscode.window.activeTextEditor?.document.uri;
       if (target) void vscode.commands.executeCommand('vscode.openWith', target, 'overlyx.texEditor');
     }),
-    vscode.commands.registerCommand('overlyx.openPdf', (uri?: vscode.Uri) => {
+    registerCommand('overlyx.openPdf', (uri?: vscode.Uri) => {
       const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
       const target = uri ?? (input instanceof vscode.TabInputText || input instanceof vscode.TabInputCustom ? input.uri : undefined);
       if (target) void vscode.commands.executeCommand('vscode.openWith', target, 'overlyx.pdfViewer');
@@ -326,34 +349,34 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
     // ⌘K (link), ⌘J (rewrite with AI), ⌘\ (clear formatting), ⌘B (bold), ⌘M / ⌘⇧M (formula), F5 (present slides) belong
     // to the editor in the webview, which handles them itself; bound here so that VS Code does not also start its ⌘K chord,
     // toggle the panel or the side bar, split, switch Tab to moving the focus or open the Problems panel
-    vscode.commands.registerCommand('overlyx.editorKey', () => undefined),
-    vscode.commands.registerCommand('overlyx.openAsText', () => {
+    registerCommand('overlyx.editorKey', () => undefined),
+    registerCommand('overlyx.openAsText', () => {
       const doc = registry.active?.session.document;
       if (doc) void vscode.commands.executeCommand('vscode.openWith', doc.uri, 'default');
     }),
-    vscode.commands.registerCommand('overlyx.buildPdf', () => {
+    registerCommand('overlyx.buildPdf', () => {
       const e = registry.active;
       if (e) void e.panel.webview.postMessage({ type: 'command', name: 'buildPdf' } satisfies HostToEditor);
       else void vscode.window.showInformationMessage('OverLyX: open a .tex document in the OverLyX editor first');
     }),
-    vscode.commands.registerCommand('overlyx.syncToPdf', () => {
+    registerCommand('overlyx.syncToPdf', () => {
       const e = registry.active;
       if (e) void e.panel.webview.postMessage({ type: 'command', name: 'syncToPdf' } satisfies HostToEditor);
     }),
-    vscode.commands.registerCommand('overlyx.toggleCombined', () => {
+    registerCommand('overlyx.toggleCombined', () => {
       const e = registry.active;
       if (e) void e.panel.webview.postMessage({ type: 'command', name: 'toggleCombined' } satisfies HostToEditor);
     }),
-    vscode.commands.registerCommand('overlyx.toggleMargin', () => {
+    registerCommand('overlyx.toggleMargin', () => {
       const e = registry.active;
       if (e) void e.panel.webview.postMessage({ type: 'command', name: 'toggleMargin' } satisfies HostToEditor);
     }),
-    vscode.commands.registerCommand('overlyx.refreshOutline', () => outlineTree.refresh()),
-    vscode.commands.registerCommand('overlyx.checkForUpdates', () => void updater.check({ interactive: true }).catch(e => {
+    registerCommand('overlyx.refreshOutline', () => outlineTree.refresh()),
+    registerCommand('overlyx.checkForUpdates', () => void updater.check({ interactive: true }).catch(e => {
       telemetry.report(e, 'update.manual');
       return vscode.window.showErrorMessage('OverLyX update check failed: ' + String(e));
     })),
-    vscode.commands.registerCommand('overlyx.gotoOutline', (pos: number) => {
+    registerCommand('overlyx.gotoOutline', (pos: number) => {
       const e = registry.active;
       if (e) void e.panel.webview.postMessage({ type: 'goto', pos } satisfies HostToEditor);
     }),
@@ -393,7 +416,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
   });
 
   // a clone of an OverLyX project in the workspace: kept in step with the server (host/sync.ts)
-  setupSync(context, (e, area) => telemetry.report(e, area));
+  setupSync(context, (e, area) => telemetry.report(e, area), (outcome, ms) => telemetry.track('extension-sync', outcome, ms));
 
   return { registry, bridgeBase: () => bridge.base, checkForUpdates: (opts) => updater.check(opts ?? { interactive: true }) };
 }

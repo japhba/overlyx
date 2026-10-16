@@ -15,8 +15,16 @@ blend.
   file as LyX's `\lyxadded{author}{time}{…}` / `\lyxdeleted{…}` macros (defined in a managed
   block of the preamble, shown or hidden in the PDF by a setting), notes and comment threads as
   `%% @note` / `%% @comment` comment blocks that every other LaTeX tool ignores. See *The .tex
-  format* below. Existing `.lyx` documents are imported once (file browser ▸ click the file, or
-  `scripts/import-lyx.ts`); the `.lyx` file is kept but no longer used.
+  format* below. Import `.lyx` files or zipped LyX projects from the landing page's **LyX documents**
+  tab, **Import from LyX** on the project list, **File ▸ Import from LyX**, or the file browser's
+  **LyX⇩** button / folder menu. Before sign-in, the selected files wait in the browser through
+  the sign-in round trip. A zip retains child documents, graphics and bibliography paths; originals
+  are kept and editable documents become `.tex`. Imports into existing projects get a new folder;
+  output collisions are rejected. Compressed `.lyx` files work too. **File ▸ Export ▸ Download LyX**
+  exports the current live document; **LyX project with figures** exports the project's live documents,
+  rewrites child references to `.lyx`, and includes its assets. The project list has the same LyX
+  download. Exports use the LyX 2.4 format and omit OverLyX-only settings. Existing `.lyx` files
+  in the file browser and `scripts/import-lyx.ts` remain importable as before.
 * **WYSIWYG without compiling.** Text, insets, floats, tables and math render as you type.
   Formulas (inline and display, `equation`/`align`/`gather`/`multline`/…) are edited in place
   and rendered with MathJax 4; document macros (`FormulaMacro` insets, preamble `\newcommand`/`\def`,
@@ -515,11 +523,40 @@ blend.
   become `<heading>`. Batches go to `POST /api/usage` (authenticated, rate-limited per account, the
   account is not stored); rows are kept 180 days. *Settings ▸ Privacy* switches it off per browser
   (the browser's Global Privacy Control signal does too), `OVERLYX_USAGE_STATS=off` for the whole
-  instance. The VS Code extension sends nothing. The point is to find counter-intuitive parts of the
+  instance. The VS Code extension uses the gated host channel below. The point is to find counter-intuitive parts of the
   interface: `npx tsx scripts/usage-report.ts [--days 30]` (read-only on the database; `--json` for
   the raw summary) and `GET /api/admin/usage` rank actions by how often they failed, were undone
   within 5 s or were repeated in bursts, list the unanswered shortcuts, the dismissed dialogs and the
   error templates.
+* **Detailed interaction diagnostics** extend ordinary anonymous usage statistics with a shared
+  finite schema (`core/interactions.ts`), validated before queueing and again before storage.
+  Clicks, context menus, drag/drop, paste/cut, deletion/Enter/Escape outcomes, annotation controls,
+  canvas operation kinds, HTTP outcomes, connectivity, resource errors and sampled slow tasks are
+  recorded as categories. Deletion events distinguish removed / emptied / changed / unchanged /
+  read-only, with selection kind, empty/filled note, inline/margin/collapsed display, access and
+  tracking state. No DOM labels, input values, clipboard contents, text, HTML, element paths,
+  coordinates, file names, URLs, account IDs or document IDs enter this schema. Events use the
+  existing random page-load session, usage switch and Global Privacy Control. VS Code uses the host-gated channel described below.
+  They expire after 30 days. `/api/admin/usage` and `scripts/usage-report.ts` include counts by
+  action/state/surface and trails of at most eight events within 30 seconds before errors,
+  unchanged deletions, repeated attempts and undo. These are investigation signals, not confirmed
+  bugs. Legacy action statistics retain their existing 180-day retention. The separate beta
+  diagnostics below keep their own opt-in.
+* **VS Code anonymous usage** (`vscode/src/host/telemetry.ts`, `core/usagePayload.ts`): the
+  editor, PDF and deliverable webviews use the same collector through the token-protected local
+  bridge. Native activation, command, open/close, save/edit, PDF build, sync-round and agent-handoff
+  outcomes add fixed categories and duration buckets. Events pass through VS Code's
+  `TelemetryLogger` with built-in common properties disabled; they require telemetry level **All**
+  and `overlyx.usageStatistics` (on by default). Error/crash-only levels send no usage. The separate
+  `overlyx.errorReports` setting continues to control sanitized crash reports. No account, file,
+  project, workspace path, host name, command arguments, document/clipboard content or persistent
+  machine ID enters a usage event. Only release versions, OS/architecture, local/remote and
+  desktop/web categories accompany random activation / webview-load IDs. The host and receiver
+  independently validate the bounded schema; no telemetry queue is written to disk. Disabling
+  usage clears host queues, rotates its ID and immediately updates all open webviews. The public
+  `POST /api/vscode-usage` needs no app sign-in, uses transient IP rate limits without storing IPs,
+  and obeys the server statistics switch. The same administrator report includes these events:
+  detailed categories expire after 30 days, ordinary action statistics after 180 days.
 * **Opt-in beta reliability diagnostics** share that collector, but require a separate
   *Settings ▸ Privacy ▸ Send beta reliability diagnostics* checkbox (off by default in each
   browser). They record only a shared finite event/pointer vocabulary, coarse context and optional
@@ -527,7 +564,7 @@ blend.
   save-state changes, background/resume and portrait/landscape. They contain no document text,
   formulas, file or project identifiers, URLs, coordinates, pressure, typed keys or exception text.
   Usage-statistics opt-out, Global Privacy Control and the server statistics switch still apply;
-  the VS Code webview sends nothing. Withdrawing consent discards pending diagnostic events,
+  VS Code additionally requires its global telemetry level All and the extension usage setting. Withdrawing consent discards pending diagnostic events,
   including batches whose failed request is still in flight; already-sent batches cannot be recalled.
   The authenticated collector independently validates the finite schema and explicit batch consent.
   Diagnostic rows expire after 30 days (legacy usage remains 180 days). The administrator-only
@@ -2191,10 +2228,14 @@ grows a plugin list, a toolbar button or one of those helpers of its own again �
 extension once lacked autocorrect, markdown headings, image paste and the delimiter buttons. Zoom is
 one of those helpers (`applyEditorZoom`: the `--editor-zoom` variable the editor's font size is
 computed from; a change is said over the text for a moment, as every zoom is — `app/zoomhud.ts`,
-also a board's). **A pinch zooms the text** (`useTextPinch`, 12 Oct 2026): a trackpad's (Ctrl + wheel,
+also a board's). **A pinch zooms the document view** (`useTextPinch`): text, column, ruler and
+figures enlarge together, including figures with physical or intrinsic sizes. This is a browser
+view preference; document font sizes, graphics parameters and exported files stay unchanged.
+A trackpad's pinch (Ctrl + wheel,
 Safari's gesture events) or two fingers on a touch screen (`.editor-scroll:has(… .lyx-editor) {
 touch-action: pan-x pan-y }`, their middle scrolls) — never the browser's page; the character under
-the fingers stays under them while the text reflows (`caretPositionFromPoint`, the scroll set again
+the fingers stays under them while the text reflows (a figure anchors in both axes;
+`caretPositionFromPoint` anchors text, the scroll is set again
 each frame), and 100 % is a level it stops at and holds (×1.25), as the canvases' fits. A mouse
 wheel's notch with Ctrl/⌘ steps 10 %; every step (Ctrl ±, the status bar's − / +) stops at 100 %
 (`stepTextZoom`). Not on a layout document's canvas, which zooms itself. The extension used to zoom with CSS `zoom` on its scroll container instead, which puts

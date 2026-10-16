@@ -4,7 +4,8 @@
  * away or ended in an error message — and posts it here. Separately, consent-only reliability
  * diagnostics accept a fixed event/pointer vocabulary and coarse context/duration buckets. Stored
  * without the user: rows carry only a random per-page-load session id and bounded categories. The
- * user id is used only for the in-memory rate limit, the IP not at all.
+ * web user's id is used only for an in-memory rate limit. The public extension receiver uses
+ * a transient IP rate limit; neither identity is written to usage rows.
  *
  *   POST /api/usage           { session, reliabilityConsent?, events: [{ ago, name, detail, ok?, where?, dt? }] } — 204 when off/GPC
  *   GET  /api/admin/usage     the summary (administrators; ?days=30&top=40) — usageReport.ts
@@ -19,6 +20,8 @@ import { config } from './config.ts';
 import { allow, appVersion } from './feedback.ts';
 import { USAGE_NAMES, scrubDetail, usageSummary, DETAIL_MAX } from './usageReport.ts';
 import { isReliabilityContext, isReliabilityDurationBucket, parseReliabilityDetail } from '@overlyx/core/reliability.ts';
+import { parseInteractionDetail, isInteractionTarget, isClientBuildVersion } from '@overlyx/core/interactions.ts';
+import { sanitizeUsageEvents, validUsageSession, vscodeUsageMeta } from '@overlyx/core/usagePayload.ts';
 
 db.exec(`CREATE TABLE IF NOT EXISTS usage_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,7 +50,7 @@ const WHERE_RE = /^[a-z]{1,12}$/;
 const insert = db.prepare('INSERT INTO usage_events (session, at, name, detail, ok, place, dt, version) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
 
 /** Validate and store one batch; unknown kinds and malformed events are dropped. Returns how many were stored. */
-export const storeUsage = db.transaction((session: string, events: unknown[], now = Date.now(), reliabilityConsent = false): number => {
+export const storeUsage = db.transaction((session: string, events: unknown[], now = Date.now(), reliabilityConsent = false, clientVersion?: unknown): number => {
   if (!SESSION_RE.test(session)) return 0;
   let n = 0;
   for (const raw of events.slice(0, MAX_EVENTS_PER_BATCH)) {
@@ -58,7 +61,14 @@ export const storeUsage = db.transaction((session: string, events: unknown[], no
     let ok: number | null;
     let place: string | null;
     let dt: number | null;
-    if (e.name === 'reliability') {
+    if (e.name === 'interaction') {
+      if (!parseInteractionDetail(e.detail) || !isInteractionTarget(e.where)) continue;
+      if (e.dt !== undefined && !isReliabilityDurationBucket(e.dt)) continue;
+      detail = e.detail as string;
+      ok = null;
+      place = e.where;
+      dt = isReliabilityDurationBucket(e.dt) ? e.dt : null;
+    } else if (e.name === 'reliability') {
       if (reliabilityConsent !== true) continue;
       const parsed = parseReliabilityDetail(e.detail);
       if (!parsed) continue;
@@ -76,7 +86,7 @@ export const storeUsage = db.transaction((session: string, events: unknown[], no
       dt = typeof e.dt === 'number' && Number.isFinite(e.dt) && e.dt >= 0 ? Math.min(Math.round(e.dt), 24 * 60 * 60 * 1000) : null;
     }
     const ago = typeof e.ago === 'number' && Number.isFinite(e.ago) ? Math.min(Math.max(0, e.ago), MAX_AGO_MS) : 0;
-    insert.run(session, now - Math.round(ago), e.name, detail, ok, place, dt, e.name === 'session' ? appVersion : null);
+    insert.run(session, now - Math.round(ago), e.name, detail, ok, place, dt, e.name === 'session' ? isClientBuildVersion(clientVersion) ? clientVersion : appVersion : null);
     n++;
   }
   return n;
@@ -85,8 +95,8 @@ export const storeUsage = db.transaction((session: string, events: unknown[], no
 /** Delete what is older than the retention period. */
 export function pruneUsage(now = Date.now()): number {
   return db.prepare(`DELETE FROM usage_events
-    WHERE (name = 'reliability' AND at < ?)
-       OR (name <> 'reliability' AND at < ?)`)
+    WHERE (name IN ('reliability', 'interaction') AND at < ?)
+       OR (name NOT IN ('reliability', 'interaction') AND at < ?)`)
     .run(now - RELIABILITY_RETENTION_DAYS * 24 * 60 * 60 * 1000, now - RETENTION_DAYS * 24 * 60 * 60 * 1000).changes;
 }
 pruneUsage();
@@ -101,7 +111,7 @@ export function usageRoutes(): express.Router {
     if (!allow(`usage:${u.id}`, 240)) { res.status(429).json({ error: 'rate limited' }); return; }
     const b = req.body ?? {};
     if (typeof b.session !== 'string' || !SESSION_RE.test(b.session) || !Array.isArray(b.events)) { res.status(400).json({ error: 'a session id and an events array are required' }); return; }
-    res.json({ stored: storeUsage(b.session, b.events, Date.now(), b.reliabilityConsent === true) });
+    res.json({ stored: storeUsage(b.session, b.events, Date.now(), b.reliabilityConsent === true, b.clientVersion) });
   });
   r.get('/admin/usage', (req, res) => {
     if (!req.user?.isAdmin) { res.status(403).json({ error: 'admin only' }); return; }
@@ -109,6 +119,21 @@ export function usageRoutes(): express.Router {
     const top = Math.min(500, Math.max(1, Number(req.query.top ?? 40) || 40));
     res.json({ enabled: config.usageStats, retentionDays: RETENTION_DAYS, reliabilityRetentionDays: RELIABILITY_RETENTION_DAYS,
       ...usageSummary(db, { sinceMs: Date.now() - days * 24 * 60 * 60 * 1000, top }) });
+  });
+  return r;
+}
+
+/** VS Code has no app cookie. Its host gates this channel through TelemetryLogger and sends no identity. */
+export function vscodeUsageRoutes(): express.Router {
+  const r = express.Router();
+  r.post('/vscode-usage', express.json({ limit: '64kb' }), (req, res) => {
+    if (!config.usageStats || req.get('Sec-GPC') === '1') { res.status(204).end(); return; }
+    if (!allow('vscode-usage', 2000) || !allow(`vscode-usage:${req.ip ?? 'x'}`, 240)) { res.status(429).end(); return; }
+    const b = req.body ?? {}, meta = vscodeUsageMeta(b);
+    if (b.schema !== 1 || !meta || !validUsageSession(b.session) || !Array.isArray(b.events)) { res.status(400).json({ error: 'Invalid anonymous usage schema' }); return; }
+    const consent = b.reliabilityConsent === true;
+    const events = sanitizeUsageEvents(b.events, consent).map(e => e.name === 'session' ? { ...e, detail: meta.detail } : e);
+    res.json({ stored: storeUsage(b.session, events, Date.now(), consent, meta.version) });
   });
   return r;
 }

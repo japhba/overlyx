@@ -32,6 +32,7 @@ import { usePresentation } from './presentation';
 import { Toolbar, NAMED_COLORS, type ToolButton } from './Toolbar';
 import { buildToolbars, loadToolbarPrefs, mathExecutor, useMathPanels, toolbarClipboard, markValue, MODERN_COLLAPSE, type ToolbarId, type ToolbarMode, type ToolbarPrefs } from './toolbars';
 import { debounce, hashAuthor, applyAuthorColors, bcp47, suggestLabel, LayoutPicker, documentStats, applyEditorZoom, stepTextZoom, useTextPinch, SidebarGrip, restoreSidebarWidths } from './shellutil';
+import { chooseLyxImport } from './lyximport';
 import { setDocumentFonts } from '../fonts/editorfont';
 import { setDocumentParagraphs } from '../editor/paragraphsep';
 import { Outline, buildOutline, type OutlineItem } from './Outline';
@@ -1148,10 +1149,16 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   ] };
   /** File ▸ New slides / poster / page…, wherever a project is open (a document, a text file, the project's page) */
   const newSlidesItem = { label: 'New slides / poster / page…', action: () => { const p = docId ? projectOfDoc(textId ?? docId) : null; if (p) setNewLayoutFor(p); } };
+  const importLyxItem = { label: 'Import from LyX…', disabled: curProject?.role === 'view', action: () => {
+    const p = docId ? projectOfDoc(textId ?? docId) : null;
+    if (p) chooseLyxImport(p, '', r => { setRefreshKey(k => k + 1); location.hash = '#/' + r.id; });
+  } };
   const projectRootMenus: MenuDef[] = docId ? [
     { title: 'File', items: [
       { label: 'New…', shortcut: 'Ctrl+N', action: () => editorContext.ui?.newFile() },
       newSlidesItem,
+      importLyxItem,
+      { label: 'Download LyX project (.zip)', action: () => window.open(`/api/projects/${encodeURIComponent(projectOfDoc(docId))}/zip?format=lyx`) },
       { label: 'Share project…', action: () => setShareFor(projectOfDoc(docId)) },
       { label: 'Git repository…', action: () => setGitFor(projectOfDoc(docId)) },
       { sep: true },
@@ -1162,6 +1169,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     { title: 'File', items: [
       { label: 'New…', shortcut: 'Ctrl+N', action: () => editorContext.ui?.newFile() },
       newSlidesItem,
+      importLyxItem,
       { label: 'Open… (files panel)', shortcut: 'Ctrl+O', action: () => setShowFiles(true) },
       ...(isPdfTab ? [] : [{ label: 'Saved automatically (Ctrl+S saves now)', disabled: true, action: () => {} }]),
       { sep: true },
@@ -1218,6 +1226,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     { title: 'File', items: [
       { label: 'New…', shortcut: 'Ctrl+N', action: () => editorContext.ui?.newFile() },
       newSlidesItem,
+      importLyxItem,
       { label: 'New whiteboard…', action: () => {
         const p = textId ? projectOfDoc(textId) : null;
         if (!p) return;
@@ -1237,6 +1246,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         { label: 'PDF (latexmk)', shortcut: 'Ctrl+R', action: () => build() },
         { label: 'LaTeX source (as built)…', action: async () => { const r = await api.export(docId, 'tex'); setDialog({ name: 'tex', arg: r.tex ?? '' }); } },
         { label: 'Download .tex', action: () => window.open(`/api/docs/${encodeURIComponent(docId)}/tex?download=1`) },
+        { label: 'Download LyX (.lyx)', action: () => window.open(`/api/docs/${encodeURIComponent(docId)}/lyx`) },
+        { label: 'LyX project with figures (.zip)', action: () => window.open(`/api/projects/${encodeURIComponent(projectOfDoc(docId))}/zip?format=lyx`) },
         { label: 'Download PDF', action: () => window.open(`/api/docs/${encodeURIComponent(docId)}/pdf?download=1`) },
       ] },
       { label: 'Versions…', action: () => setRightTab('versions') },
@@ -1621,7 +1632,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         {showFiles && <SidebarGrip side="left" />}
         <div class={'editor-column panes' + (isLyxDoc && shownPanes.length > 1 ? ' split' : '')} ref={columnRef}>
         <div class={'editor-scroll' + (marginMode && isLyxDoc ? ' margin-mode' : '') + (inkMode && isLyxDoc ? ' ink-pan' : '')} ref={scrollRef} data-pane="doc" style={isLyxDoc ? paneStyle('doc') : undefined} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
-          {(isLyxDoc || isTextTab) && showRuler && <Ruler width={textWidth} onChange={setTextWidth} notes={isLyxDoc && marginMode ? { sash: notesPane.sash, scale: noteScale, onScale: setNoteScale } : undefined} />}
+          {(isLyxDoc || isTextTab) && showRuler && <Ruler width={textWidth} zoom={isLyxDoc ? zoom : 1} onChange={setTextWidth} notes={isLyxDoc && marginMode ? { sash: notesPane.sash, scale: noteScale, onScale: setNoteScale } : undefined} />}
           {docId ? (isPdfTab ? <div class="pdf-tab"><PdfViewer key={docId} url={fileUrl(projectOfDoc(textId!), docPathOf(textId!))} toolbar={<a class="small-btn" href={fileUrl(projectOfDoc(textId!), docPathOf(textId!)) + '?download=1'}>Download</a>} /></div> : isBoardTab ? <BoardEditor key={docId} id={docId} user={user} notify={notify} /> : isHtmlTab ? <DeliverableEditor key={docId} id={docId} user={user} notify={notify} /> : isProjectRoot ? <ProjectRootPanel key={docId} project={docId} notify={notify} onCreated={id => { openInTab(id); setRefreshKey(k => k + 1); }} /> : !isLyxDoc ? <TextEditor key={docId} id={textId!} notify={notify} /> :
             <div class="editor-page">
               {marginMode && <NotesSash sash={notesPane.sash} />}

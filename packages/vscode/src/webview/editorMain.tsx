@@ -9,6 +9,7 @@ import { LYX_ICONS } from '@client/app/lyxicons';
 import { editorContext } from '@client/editor/context';
 import { isBenignBrowserError } from '@client/error-reporting';
 import { EditorShell } from './EditorShell';
+import { initUsage } from '@client/usage';
 import { relayAppearance } from './appearance';
 import type { HostToEditor } from '../shared/protocol';
 import '@client/styles.css';
@@ -18,6 +19,7 @@ import 'prosemirror-tables/style/tables.css';
 
 useHostTheme();
 applyTheme(G.dark);
+initUsage();
 // the theme switch's choices made in another OverLyX webview (host/appearance.ts) — before the shell
 // mounts too (the host sends them before `init`): the shell reads ol.theme when it starts
 relayAppearance(t => {

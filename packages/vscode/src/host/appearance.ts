@@ -12,6 +12,11 @@ const KEY = 'overlyx.appearance';
 let store: vscode.Memento | undefined;
 const views = new Set<vscode.Webview>();
 
+/** Privacy changes take effect in every open webview immediately. */
+export function broadcastUsageStats(enabled: boolean): void {
+  for (const view of views) void view.postMessage({ type: 'usageStats', enabled });
+}
+
 export function initAppearance(context: vscode.ExtensionContext): void { store = context.globalState; }
 
 export const appearance = (): Appearance => store?.get<Appearance>(KEY) ?? {};

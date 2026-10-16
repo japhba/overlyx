@@ -288,6 +288,15 @@ Pushing extension-affecting changes to `master` automatically runs the extension
 publishes a new VSIX release. A local F5 session always uses your current working tree, so you do
 not need to publish while iterating.
 
+Anonymous usage diagnostics follow **VS Code Settings ▸ Telemetry Level** and
+**OverLyX: Usage Statistics** (`overlyx.usageStatistics`). Usage requires telemetry level **All**;
+error/crash-only levels send no usage. The editor, PDF and slide/poster views report action and
+outcome categories, while the host reports commands, saves, builds and sync results. Only coarse
+runtime/release information and random IDs for this activation or view load accompany them.
+No document or clipboard content, file paths, account details, host names or persistent device IDs
+are sent. Detailed events expire after 30 days. Disabling the setting clears pending events and
+updates open views immediately. **OverLyX: Error Reports** separately controls sanitized crashes.
+
 ### Persistent live install and upstream updates
 
 `npm run dev:service -w packages/vscode` installs the persistent live development server and a

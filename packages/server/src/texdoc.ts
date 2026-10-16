@@ -5,6 +5,7 @@
 import type { WriteTexResult } from '@overlyx/core/tex/index.ts';
 import fs from 'node:fs';
 import path from 'node:path';
+import { gunzipSync } from 'node:zlib';
 import { parseTex, writeTex, writeTexPreserving, importLyx, type ParseTexResult, type PreserveCache } from '@overlyx/core/tex/index.ts';
 import type { LyxDocument } from '@overlyx/core';
 import { layoutTemplate, setHeaderValue } from '@overlyx/core';
@@ -124,6 +125,14 @@ export function markdownAsTex(doc: LyxDocument, project: string, relPath: string
 
 export interface ImportResult { id: string; created: string[]; warnings: string[]; graphics: { src: string; dest: string; ok: boolean; error?: string }[] }
 
+/** LyX can save gzip-compressed .lyx files without changing their extension. */
+export function readLyxText(abs: string): string {
+  const data = fs.readFileSync(abs);
+  const bytes = data[0] === 0x1f && data[1] === 0x8b ? gunzipSync(data, { maxOutputLength: 20_000_000 }) : data;
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
+  catch { return bytes.toString('latin1'); }
+}
+
 /**
  * Import a .lyx file (and the child documents it includes) into .tex files next to them. The
  * .lyx files are left untouched. Graphics pdflatex cannot include are converted to PDF.
@@ -132,14 +141,14 @@ export async function importLyxFile(project: string, relPath: string, toPdf: (sr
   const abs = resolveProjectPath(project, relPath);
   const proj = projectDir(project);
   const dir = path.dirname(abs);
-  const text = readTextFile(abs);
+  const text = readLyxText(abs);
   const result: ImportResult = { id: `${project}/${relPath.replace(/\.lyx$/i, '.tex')}`, created: [], warnings: [], graphics: [] };
   seen.add(relPath);
   // children first (their .tex files must exist for the master's requirement collection)
   const children: string[] = [];
-  for (const m of text.matchAll(/^filename "([^"]+\.lyx)"$/gm)) {
+  for (const m of text.matchAll(/^filename "([^"]+\.lyx)"\r?$/gim)) {
     const childAbs = path.resolve(dir, m[1]);
-    if (!childAbs.startsWith(proj + path.sep) || !fs.existsSync(childAbs)) continue;
+    if (!childAbs.startsWith(proj + path.sep) || !fs.existsSync(childAbs)) { result.warnings.push(`${relPath}: child document ${m[1]} is missing or outside the project; include it in a project zip`); continue; }
     const childRel = path.relative(proj, childAbs);
     if (seen.has(childRel)) continue;
     children.push(childRel);
@@ -152,7 +161,7 @@ export async function importLyxFile(project: string, relPath: string, toPdf: (sr
   const { parseLyx } = await import('@overlyx/core');
   const r = importLyx(text, {
     layoutDir: config.layoutDir, localDirs: [proj, dir], readFile: readerFor(project, abs), fragment: isChild, sourceName: path.basename(relPath),
-    resolveInclude: (fn) => { try { const p = path.resolve(dir, fn); if (!p.startsWith(proj + path.sep) || !fs.existsSync(p)) return undefined; return parseLyx(readTextFile(p)); } catch { return undefined; } },
+    resolveInclude: (fn) => { try { const p = path.resolve(dir, fn); if (!p.startsWith(proj + path.sep) || !fs.existsSync(p)) return undefined; return parseLyx(readLyxText(p)); } catch { return undefined; } },
   });
   const out = abs.replace(/\.lyx$/i, '.tex');
   fs.writeFileSync(out + '.overlyx-tmp', r.tex, 'utf8');
@@ -179,12 +188,12 @@ function isIncludedByAnyLyx(project: string, relPath: string): boolean {
       if (e.name.startsWith('.')) continue;
       const p = path.join(d, e.name);
       if (e.isDirectory()) { if (walk(p, depth + 1)) return true; continue; }
-      if (!e.name.endsWith('.lyx') || e.name.endsWith('~')) continue;
+      if (!/\.lyx$/i.test(e.name)) continue;
       const rel = path.relative(proj, p);
       if (rel === relPath) continue;
       let t: string;
-      try { t = fs.readFileSync(p, 'utf8'); } catch { continue; }
-      for (const m of t.matchAll(/^filename "([^"]+\.lyx)"$/gm)) {
+      try { t = readLyxText(p); } catch { continue; }
+      for (const m of t.matchAll(/^filename "([^"]+\.lyx)"\r?$/gim)) {
         if (path.normalize(path.join(path.dirname(rel), m[1])) === relPath) return true;
       }
     }
