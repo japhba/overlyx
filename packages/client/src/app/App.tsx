@@ -160,7 +160,8 @@ const stored = (k: string) => { try { return localStorage.getItem(k); } catch { 
 
 /**
  * `#/project/path.tex?goto=label` or `?heading=<n>` (the n-th heading), or a share link
- * `#/share/<token>` — `#/share/<token>/<path>` when it names the file of the project to land on
+ * `#/<owner>/<project>/<path>?share=<token>` — the file it lands on, the token joins the project
+ * (from before: `#/share/<token>` and `#/share/<token>/<path>`)
  */
 function parseHash(): { id: string | null; goto: string | null; heading: number | null; share: string | null; sharePath: string | null } {
   const raw = location.hash.replace(/^#\/?/, '');
@@ -172,6 +173,8 @@ function parseHash(): { id: string | null; goto: string | null; heading: number 
     return { id: null, goto: null, heading: null, share: cut < 0 ? rest : rest.slice(0, cut), sharePath: cut < 0 ? null : rest.slice(cut + 1) || null };
   }
   const params = q >= 0 ? new URLSearchParams(raw.slice(q + 1)) : null;
+  const token = params?.get('share');
+  if (token) return { id: null, goto: null, heading: null, share: token, sharePath: docPathOf(idPart.replace(/^(raw|text|pdf):/, '')) || null };
   const h = params?.get('heading');
   // markdown files opened in the plain text editor before they were documents: links stay valid
   const id = idPart.startsWith('text:') && isMarkdownDoc(idPart) ? idPart.slice(5) : idPart;
@@ -195,7 +198,7 @@ async function canonicalHash(): Promise<boolean> {
   const q = raw.indexOf('?');
   let idPart: string;
   try { idPart = decodeURIComponent(q >= 0 ? raw.slice(0, q) : raw); } catch { return false; }
-  if (!idPart || idPart.startsWith('share/')) return false;
+  if (!idPart || idPart.startsWith('share/') || parseHash().share) return false;
   const prefix = /^(raw|text|pdf):/.exec(idPart)?.[0] ?? '';
   const id = idPart.slice(prefix.length);
   if (knownProjects.has(projectOfDoc(id))) return false;
@@ -543,7 +546,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
   useEffect(() => navHistory.subscribe(rerender), []);
-  // a share link (#/share/<token>[/<path>]): join the project, then open the linked file (or its main document)
+  // a share link (#/<owner>/<project>/<path>?share=<token>): join the project, then open the linked file (or its main document)
   useEffect(() => {
     const check = () => {
       const { share: token, sharePath } = parseHash();

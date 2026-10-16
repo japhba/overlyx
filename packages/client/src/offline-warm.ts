@@ -8,6 +8,6 @@ export async function warmOfflineResponses(hash: string, request: typeof fetch =
   // View prefixes and shared links are not document IDs; preserve the normal deep-link route.
   let id = '';
   try { id = decodeURIComponent(hash.replace(/^#\/?/, '').split('?')[0]).replace(/^(raw|text|pdf):/, ''); } catch { /* malformed */ }
-  if (id && !id.startsWith('share/') && id.includes('/')) urls.push(`/api/docs/${encodeURIComponent(id)}/meta`);
+  if (id && !id.startsWith('share/') && !/[?&]share=/.test(hash) && id.includes('/')) urls.push(`/api/docs/${encodeURIComponent(id)}/meta`);
   await Promise.all(urls.map(url => request(url, { credentials: 'same-origin' }).catch(() => undefined)));
 }

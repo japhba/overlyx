@@ -13,9 +13,13 @@ import { ago } from './Git';
 import { Dialog, uiConfirm } from './Dialogs';
 import { docPathOf, projectOfDoc, projectShortName } from '@overlyx/core';
 
-/** A share link; with `path`, the file of the project it opens (the main document otherwise). */
-export function shareUrl(token: string, path?: string | null): string {
-  return `${location.origin}/#/share/${token}${path ? '/' + path.split('/').map(encodeURIComponent).join('/') : ''}`;
+/**
+ * A share link: the address of the file it opens (`#/<owner>/<project>/<path>`; the main document
+ * without `path`) with the token that joins the project.
+ */
+export function shareUrl(token: string, project: string, path?: string | null): string {
+  const seg = (s: string) => s.split('/').map(encodeURIComponent).join('/');
+  return `${location.origin}/#/${seg(project)}${path ? '/' + seg(path) : ''}?share=${token}`;
 }
 
 /** One activity entry as a sentence fragment after the person's name. */
@@ -89,7 +93,7 @@ export function ShareDialog({ project, user, doc, onClose, onChanged }: { projec
   const add = async () => { if (!who.trim() || busy) return; if (await update(() => api.addMember(project, who.trim(), role))) setWho(''); };
   const copy = async () => {
     if (!info?.link) return;
-    const url = shareUrl(info.link.token, linkPath);
+    const url = shareUrl(info.link.token, project, linkPath);
     try { await navigator.clipboard.writeText(url); } catch { const el = document.querySelector<HTMLInputElement>('.share-link input'); el?.select(); document.execCommand('copy'); }
     setCopied(true); setTimeout(() => setCopied(false), 2000);
   };
@@ -177,7 +181,7 @@ export function ShareDialog({ project, user, doc, onClose, onChanged }: { projec
           </div>
           {info.link && (
             <div class="share-link">
-              <input type="text" readonly value={shareUrl(info.link.token, linkPath)} onFocus={e => (e.target as HTMLInputElement).select()} />
+              <input type="text" readonly value={shareUrl(info.link.token, project, linkPath)} onFocus={e => (e.target as HTMLInputElement).select()} />
               <button class="btn" onClick={() => void copy()}>{copied ? 'Copied ✓' : 'Copy link'}</button>
             </div>
           )}

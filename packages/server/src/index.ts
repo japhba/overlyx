@@ -114,7 +114,7 @@ app.post('/api/share/:token/accept', (req, res) => {
     const { project, role } = acceptLink(token, user);
     const files = listProjects().find(p => p.name === project.name)?.files ?? [];
     const lyx = files.filter(f => f.kind === 'doc' && !isBackupFile(f.name)).sort((a, b) => Number(!/(^|\/)main\.tex$/.test(a.path)) - Number(!/(^|\/)main\.tex$/.test(b.path)) || Number(!a.path.endsWith('.tex')) - Number(!b.path.endsWith('.tex')) || a.path.length - b.path.length || a.path.localeCompare(b.path));
-    // a link to one file of the project (`#/share/<token>/<path>`): the whole project is shared, the
+    // a link to one file of the project (`#/<owner>/<project>/<path>?share=<token>`): the whole project is shared, the
     // file is where the visitor lands — named only when the project has it (moved or deleted: the main document)
     const wanted = typeof req.query.path === 'string' ? req.query.path : '';
     const f = wanted ? files.find(x => x.path === wanted && x.kind !== 'dir') : undefined;
