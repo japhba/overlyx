@@ -2311,7 +2311,8 @@ npm start            # production server (serves the built client)
 
 Environment: `PORT` (default 3000), `OVERLYX_PROJECTS_DIR` (default `/root/projects`; one
 sub-directory per account, named by its username, and in it one directory per project holding
-`.tex` files, figures and `.bib`s — `<dir>/<owner>/<name>`), `OVERLYX_DATA_DIR`
+`.tex` files, figures and `.bib`s — `<dir>/<owner>/<name>`; on overlyx.app since 16 Oct 2026
+`/mnt/HC_Volume_107166861/projects` on the 500 GB volume, `/root/projects` a symlink to it), `OVERLYX_DATA_DIR`
 (SQLite, caches, builds, `credentials.txt`), `OVERLYX_CLIENT_DIST` (built client to serve, default
 `packages/client/dist`), `OVERLYX_UNLOAD_MS` (how long an idle document stays loaded, default 6 h),
 `OVERLYX_MAX_BUILDS` (parallel PDF builds, default 2), `OVERLYX_BUILD_NICE` (niceness of latexmk,
@@ -2496,15 +2497,17 @@ tokens) nor `secrets.env`; those come from the nightly backup below. `OVERLYX_MI
 mirrors into bare repositories on disk instead (tests, or a second disk).
 
 **Nightly backup.** `deploy/overlyx-backup.timer` runs `scripts/backup.sh` every night (SQLite online backup, `secret.key`,
-a tarball of the projects without build products; the newest 14 are kept). Restoring — do the drill
-once in a while:
+a tarball of the projects without build products; the newest 14 are kept) into `OVERLYX_BACKUP_DIR` —
+on overlyx.app `/mnt/HC_Volume_107166861/backups` (the volume; `data/backups` is a symlink to it).
+Restoring — do the drill once in a while:
 
 ```bash
 B=data/backups/$(ls data/backups | tail -1)
 scripts/restore.sh $B /tmp/restore/data /tmp/restore/projects            # integrity check, counts
 OVERLYX_DATA_DIR=/tmp/restore/data OVERLYX_PROJECTS_DIR=/tmp/restore/projects OVERLYX_GIT=off PORT=3002 HOST=127.0.0.1 npx tsx packages/server/src/index.ts
 # log in with a real password (hashes are in the database), list projects, open a document; then
-# for a real restore: systemctl stop overlyx; scripts/restore.sh $B data /root/projects --force; systemctl start overlyx
+# for a real restore: systemctl stop overlyx; scripts/restore.sh $B data /mnt/HC_Volume_107166861/projects --force; systemctl start overlyx
+# (the real directory, never the /root/projects symlink: --force would move the symlink aside and restore onto the root disk)
 ```
 
 `--force` moves the existing database and projects directory aside (`*.before-restore-<timestamp>`)
@@ -2522,7 +2525,7 @@ projects in the admin's namespace (`admin/e2e-…`); to keep them away from the 
 its data, run them against an isolated instance:
 
 ```bash
-S=/tmp/overlyx-e2e; mkdir -p $S/projects $S/data
+S=/mnt/HC_Volume_107166861/scratch/overlyx-e2e; mkdir -p $S/projects $S/data   # on overlyx.app: the volume, not /tmp (test leftovers filled the root disk on 16 Oct 2026)
 mkdir -p $S/projects/admin && rsync -a --exclude _build --exclude .git /root/projects/jan/recurrent_feature /root/projects/jan/bayesian_chaos $S/projects/admin/   # features.spec compiles bayesian_chaos; landing.spec opens recurrent_feature
 OVERLYX_DATA_DIR=$S/data npx tsx packages/server/src/seed.ts admin Admin bob Bob carol Carol u1 U1 u2 U2 u3 U3 u4 U4 u5 U5 u6 U6
 OVERLYX_DATA_DIR=$S/data OVERLYX_PROJECTS_DIR=$S/projects OVERLYX_CLIENT_DIST=$S/dist PORT=3001 npx tsx packages/server/src/index.ts &

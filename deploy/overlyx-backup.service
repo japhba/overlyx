@@ -1,9 +1,11 @@
 [Unit]
 Description=OverLyX nightly backup (database + projects)
+RequiresMountsFor=/mnt/HC_Volume_107166861
 
 [Service]
 Type=oneshot
 Environment=OVERLYX_DATA_DIR=/root/lyx/overlyx/data
-Environment=OVERLYX_PROJECTS_DIR=/root/projects
+Environment=OVERLYX_PROJECTS_DIR=/mnt/HC_Volume_107166861/projects
+Environment=OVERLYX_BACKUP_DIR=/mnt/HC_Volume_107166861/backups
 ExecStart=/root/lyx/overlyx/scripts/backup.sh
 Nice=10

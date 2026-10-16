@@ -1,6 +1,9 @@
 [Unit]
 Description=OverLyX collaborative LyX/LaTeX editor
 After=network.target
+# the projects live on the 500 GB volume (fstab: nofail) — never start without it, or the server
+# would make an empty projects directory on the root disk
+RequiresMountsFor=/mnt/HC_Volume_107166861
 
 [Service]
 Type=simple
@@ -8,7 +11,7 @@ WorkingDirectory=/root/lyx/overlyx
 Environment=PORT=8080
 Environment=HOST=127.0.0.1
 Environment=OVERLYX_DATA_DIR=/root/lyx/overlyx/data
-Environment=OVERLYX_PROJECTS_DIR=/root/projects
+Environment=OVERLYX_PROJECTS_DIR=/mnt/HC_Volume_107166861/projects
 Environment=LYX_LAYOUT_DIR=/root/lyx/lib/layouts
 Environment=NODE_ENV=production
 # Fronted by Caddy (deploy/Caddyfile): app binds localhost:8080, Caddy serves https://overlyx.app on 443
