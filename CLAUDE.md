@@ -17,6 +17,13 @@ When you are reasonably confident of a change, bypass those checks: `scripts/dep
 or the trailer `Deploy: no-checks` on the last commit of a push that the autodeploy timer deploys.
 The client is still built and the site still verified.
 
+## Deploy by default
+
+After completing application changes, commit and deploy them by default unless the user explicitly
+says otherwise. The owner authorizes this as part of the requested work; do not ask for deployment
+confirmation. Use `scripts/deploy.sh --no-checks` after appropriate focused verification, following
+the deployment guidance above, and verify that the live site serves the deployed commit.
+
 ## Unattended maintenance
 
 The owner authorizes the maintenance worker to screen GitHub issues and private reports/logs,
