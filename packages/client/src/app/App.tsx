@@ -2,6 +2,7 @@ import { recordUsage, noticeTemplate } from '../usage';
 import { editorViewMenu } from './editorViewMenu';
 import { inkToolbar } from './inkToolbar';
 import { SvgEditorHost } from './SvgEditor';
+import { ToolbarDock } from './tbdock';
 import { StatsDialog } from './StatsDialog';
 import { GoogleDocsDialog } from './GoogleDocs';
 import { documentMenus } from './documentMenus';
@@ -57,7 +58,7 @@ import { clearLocalData } from './localData';
 import { createEditor, moveLocalCopies, type EditorHandle, type SaveState } from '../editor/editor';
 import { refreshMacros } from '../editor/macrodefs';
 import { describeChange } from '../editor/assembly';
-import { useProjectEvents } from './FileBrowser';
+import { useProjectEvents, deletedHere, siblingDocument } from './FileBrowser';
 import { newerVersionAvailable } from './update';
 import { generateLyx } from './SourcePane';
 import { editorContext, viewDocId } from '../editor/context';
@@ -763,8 +764,17 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       onGone: (reason) => {
         if (cancelled) return;
         if (/reset/.test(reason)) return;   // handled by the epoch / stale-history flow
-        notify(`${docId}: ${reason} — the document was closed (a copy is in the project's versions)`, 'error');
-        closeDoc();
+        // deleted in the explorer here: no alarm; elsewhere: say so. Either way the tab goes on to
+        // another document of the folder (the start screen only when the project has none left)
+        const mine = deletedHere.delete(docId);
+        if (!mine) notify(`${docId}: ${reason} — the document was closed (a copy is in the project's versions)`, 'error');
+        const key = projectOfDoc(docId);
+        void api.projects().then(r => {
+          if (cancelled || editorContext.docId !== docId) return;
+          const p = r.projects.find(x => x.name === key);
+          const next = p ? siblingDocument(p, docId) : null;
+          if (next) location.hash = '#/' + next; else closeDoc();
+        }).catch(() => { if (!cancelled) closeDoc(); });
       },
     });
     editorRef.current = handle; activeViewRef.current = handle.view; editorContext.activeView = handle.view;
@@ -1143,7 +1153,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     { label: 'Report a problem / send feedback…', action: () => setDialog({ name: 'feedback' }) },
     { label: 'Privacy notice', action: () => void window.open('/privacy', '_blank', 'noopener') },
     { label: 'OverLyX for VS Code (.vsix download)', action: () => { const a = document.createElement('a'); a.href = '/api/vscode-extension'; a.download = ''; document.body.appendChild(a); a.click(); a.remove(); notify('Downloading the extension — install it in VS Code with “Extensions: Install from VSIX…”'); } },
-    { label: 'About OverLyX', action: () => void uiAlert('About OverLyX', 'OverLyX — a LyX-like collaborative WYSIWYG editor for LaTeX documents.\nDocuments are ordinary .tex files (change tracking and comments live in the file as macros and comment blocks); formulas are edited with a port of LyX\'s math editor; collaboration via Yjs CRDTs.') },
+    { label: 'About OverLyX', action: () => void uiAlert('About OverLyX', 'OverLyX — a collaborative WYSIWYM editor for LaTeX documents (LyX’s “what you see is what you mean”).\nDocuments are ordinary .tex files (change tracking and comments live in the file as macros and comment blocks); formulas are edited with a port of LyX\'s math editor; collaboration via Yjs CRDTs.') },
   ] };
   /** File ▸ New slides / poster / page…, wherever a project is open (a document, a text file, the project's page) */
   const newSlidesItem = { label: 'New slides / poster / page…', action: () => { const p = docId ? projectOfDoc(textId ?? docId) : null; if (p) setNewLayoutFor(p); } };
@@ -1261,7 +1271,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       { label: 'LaTeX source beside the document (raw view)', shortcut: 'Ctrl+Alt+S', checked: panes.shown.tex, action: toggleRawSplit },
       { label: 'Outline', shortcut: 'Ctrl+Alt+O', checked: showFiles, action: () => setShowFiles(!showFiles) },
       { label: 'PDF preview', checked: panes.shown.pdf, action: () => flipPane('pdf') },
-      { label: 'WYSIWYG document', checked: panes.shown.doc, action: () => flipPane('doc') },
+      { label: 'WYSIWYM document', checked: panes.shown.doc, action: () => flipPane('doc') },
       { label: 'Versions', checked: rightTab === 'versions', action: () => setRightTab(rightTab === 'versions' ? null : 'versions') },
       { sep: true },
       ],
@@ -1366,7 +1376,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       navigation: [{ id: 'navback', title: 'Navigate back (Ctrl+Alt+←)', icon: 'navback', action: navBack }],
       sidebars: [{ id: 'outline', title: LEFT_TITLE, icon: 'outline', action: () => setShowFiles(s => !s), active: showFiles }],
       tools: [
-        { id: 'ink', title: inkMode ? 'Margin drawing is on — click to put the pen away' : 'Draw in the margins (pen, highlighter; pans sideways for more space)', icon: 'ink', action: () => setInkMode(m => !m), active: inkMode },
+        { id: 'ink', title: inkMode ? 'Margin drawing is on — click to put the pen away' : 'Draw in the margins — pen, highlighter, lines and shapes (pans sideways for more space)', icon: 'ink', action: () => setInkMode(m => !m), active: inkMode },
         // the ✦ button exists only once it is enabled in the preferences; it switches autocomplete (text + formulas) on and off
         ...(prefs.aiButton ? [{ id: 'ai', title: aiComplete ? 'AI autocomplete is on — click to switch it off' : 'AI autocomplete is off — click to switch it on (ghost text after a pause while typing; Tab inserts it)', icon: 'ai', action: () => { setPref('aiCompleteText', !aiComplete); setPref('aiCompleteMath', !aiComplete); notify(!aiComplete ? 'AI autocomplete on' : 'AI autocomplete off'); }, active: aiComplete } as ToolButton] : []),
       ],
@@ -1532,6 +1542,37 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   // a guest signs in: with Google directly (back to this document afterwards), else on the sign-in page
   const signIn = () => { if (google) location.assign(googleSignInUrl()); else onSignIn(); };
 
+  // the toolbar rows (Modern's one row; Classic's Standard, View/Update + Extra, VCS; a layout page's Layout row)
+  const toolbarRows = (<>
+    {/* the Modern interface: one rounded row (toolbars.tsx `modern`), the mode switch at its end, as in Google Docs */}
+    {isLyxDoc && ui === 'modern' && (
+      <div class="tb-modern-row">
+        <Toolbar id="modern" layouts={layouts} layout={layout} onLayout={n => run(C.setLayout(n))} layoutsAt={2} groups={tb.modern} collapse={MODERN_COLLAPSE} />
+        <span class="tb-modern-end">
+          <ZoomControl zoom={zoom} onZoom={setZoom} />
+          <button type="button" class="tb-pdf-btn" title="Build and show the PDF (Ctrl+R)" onClick={() => { void build(); }}>PDF</button>
+          {modeSwitch}
+        </span>
+      </div>
+    )}
+    {/* the mode switch (Editing · Suggesting · Viewing) ends the first toolbar row, as in Google Docs */}
+    {isLyxDoc && ui !== 'modern' && (modeRow === 'standard' || modeRow === 'own') && (
+      <div class="tb-toprow">
+        {modeRow === 'standard' && <Toolbar id="standard" layouts={layouts} layout={layout} onLayout={n => run(C.setLayout(n))} groups={tb.standard} />}
+        {modeSwitch}
+      </div>
+    )}
+    {/* LyX's default.ui puts View/Update and Extra on one row ("samerow") */}
+    {isLyxDoc && ui !== 'modern' && (tbMode('viewupdate') !== 'off' || tbMode('extra') !== 'off') && (
+      <div class="tb-samerow">
+        {tbMode('viewupdate') !== 'off' && <Toolbar id="viewupdate" groups={tb.viewUpdate} />}
+        {tbMode('extra') !== 'off' && <Toolbar id="extra" groups={tb.extra} />}
+        {modeRow === 'samerow' && modeSwitch}
+      </div>
+    )}
+    {isLyxDoc && ui !== 'modern' && tbMode('vcs') === 'on' && <Toolbar id="vcs" label="Version Control" groups={vcsGroups} />}
+    {isLyxDoc && tb.showLayout && <Toolbar id="layout" label="Layout" groups={tb.layout} />}
+  </>);
   return (
     <div class="app">
       <MenuBar menus={menus} user={user} onLogout={onLogout} onSettings={() => setDialog({ name: 'preferences' })} onAppearance={() => setDialog({ name: 'preferences', arg: 'appearance' })} onHome={() => { location.hash = '#/'; }} searchEntries={helpSearchEntries}
@@ -1549,34 +1590,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
           </>
         ) : undefined} />
       {user.guest && <GuestCallout user={user} project={curProject} google={google} onSignIn={signIn} />}
-      {/* the Modern interface: one rounded row (toolbars.tsx `modern`), the mode switch at its end, as in Google Docs */}
-      {isLyxDoc && ui === 'modern' && (
-        <div class="tb-modern-row">
-          <Toolbar id="modern" layouts={layouts} layout={layout} onLayout={n => run(C.setLayout(n))} layoutsAt={2} groups={tb.modern} collapse={MODERN_COLLAPSE} />
-          <span class="tb-modern-end">
-            <ZoomControl zoom={zoom} onZoom={setZoom} />
-            <button type="button" class="tb-pdf-btn" title="Build and show the PDF (Ctrl+R)" onClick={() => { void build(); }}>PDF</button>
-            {modeSwitch}
-          </span>
-        </div>
-      )}
-      {/* the mode switch (Editing · Suggesting · Viewing) ends the first toolbar row, as in Google Docs */}
-      {isLyxDoc && ui !== 'modern' && (modeRow === 'standard' || modeRow === 'own') && (
-        <div class="tb-toprow">
-          {modeRow === 'standard' && <Toolbar id="standard" layouts={layouts} layout={layout} onLayout={n => run(C.setLayout(n))} groups={tb.standard} />}
-          {modeSwitch}
-        </div>
-      )}
-      {/* LyX's default.ui puts View/Update and Extra on one row ("samerow") */}
-      {isLyxDoc && ui !== 'modern' && (tbMode('viewupdate') !== 'off' || tbMode('extra') !== 'off') && (
-        <div class="tb-samerow">
-          {tbMode('viewupdate') !== 'off' && <Toolbar id="viewupdate" groups={tb.viewUpdate} />}
-          {tbMode('extra') !== 'off' && <Toolbar id="extra" groups={tb.extra} />}
-          {modeRow === 'samerow' && modeSwitch}
-        </div>
-      )}
-      {isLyxDoc && ui !== 'modern' && tbMode('vcs') === 'on' && <Toolbar id="vcs" label="Version Control" groups={vcsGroups} />}
-      {isLyxDoc && tb.showLayout && <Toolbar id="layout" label="Layout" groups={tb.layout} />}
+      {/* the toolbar rows: along the top, or in a column beside the document (app/tbdock.tsx; inside .main below) */}
+      <ToolbarDock at="top">{toolbarRows}</ToolbarDock>
       {/* the contextual math / table / review rows are docked at the bottom (before the StatusBar below) */}
       {docId && meta && meta.health.length > 0 && (
         <div class="health-bar">
@@ -1628,6 +1643,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
           </div>
         )}
         {showFiles && <SidebarGrip side="left" />}
+        {isLyxDoc && <ToolbarDock at="left">{toolbarRows}</ToolbarDock>}
         <div class={'editor-column panes' + (isLyxDoc && shownPanes.length > 1 ? ' split' : '')}>
         <div class={'editor-scroll' + (marginMode && isLyxDoc ? ' margin-mode' : '') + (inkMode && isLyxDoc ? ' ink-pan' : '')} ref={scrollRef} data-pane="doc" style={isLyxDoc ? paneStyle('doc') : undefined} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
           {(isLyxDoc || isTextTab) && showRuler && <Ruler width={textWidth} onChange={setTextWidth} notes={isLyxDoc && marginMode ? { sash: notesPane.sash, scale: noteScale, onScale: setNoteScale } : undefined} />}
@@ -1651,6 +1667,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         )}
         {isLyxDoc && !narrowPanes && <PaneDividers layout={panes} onChange={setPanesState} onResizeEnd={saveLayout} />}
         </div>
+        {isLyxDoc && <ToolbarDock at="right">{toolbarRows}</ToolbarDock>}
         {isLyxDoc && !rightTab && (
           <div class="rail right">
             {RIGHT_TABS.filter(t => t !== 'agent' || agentTab).map(t => <button key={t} data-rail={t} title={RIGHT_TAB_TITLES[t]} onClick={() => { setRightTab(t); if (t === 'versions') setSelVersion(v => v + 1); }}>{RIGHT_TAB_LABELS[t]}</button>)}

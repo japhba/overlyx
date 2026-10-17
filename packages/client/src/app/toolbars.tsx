@@ -532,7 +532,7 @@ export function buildToolbars(ctx: ToolbarContext): Toolbars {
   const btn = (groups: ToolButton[][], id: string) => groups.flat().find(b => b.id === id);
   const pick = (groups: ToolButton[][], ids: string[]) => ids.map(id => btn(groups, id)).filter((b): b is ToolButton => !!b).map(plainTitle);
   const inModern = new Set(['undo', 'redo', 'spellcheck', 'fontfamily', 'fontsize', 'bold', 'italic', 'underline', 'textcolor', 'href', 'comment', 'footnote',
-    'ref', 'cite', 'label', 'graphics', 'float', 'table', 'math', 'dmath', 'ert', 'l-itemize', 'l-enumerate', 'depthout', 'depthin']);
+    'ref', 'cite', 'label', 'graphics', 'float', 'table', 'math', 'dmath', 'ert', 'l-itemize', 'l-enumerate', 'depthout', 'depthin', 'ink']);
   const moreItems = [...standard, ...extra].flat().filter(b => !inModern.has(b.id) && b.action && !b.widget && !b.palette).map(plainTitle)
     .map(b => ({ label: b.title.replace(/\s*\(.*\)\s*$/, ''), title: b.title, html: MODERN_SVG(b.id) ?? undefined, action: b.action!, active: b.active }));
   const modern: ToolButton[][] = [
@@ -542,7 +542,8 @@ export function buildToolbars(ctx: ToolbarContext): Toolbars {
     pick(standard, ['bold', 'italic', 'underline', 'textcolor']),
     pick(extra, ['href', 'comment']),
     pick(extra, ['ref', 'cite']),   // LaTeX's own: cross-reference, citation
-    [...pick(standard, ['graphics']), ...pick(extra, ['float']), ...pick(standard, ['table', 'math', 'dmath'])],
+    // the inserts, and Draw (margin ink, lines, shapes) beside them — it used to hide under ⋮
+    [...pick(standard, ['graphics']), ...pick(extra, ['float']), ...pick(standard, ['table', 'math', 'dmath', 'ink'])],
     pick(extra, ['footnote', 'label', 'ert']),
     [...pick(extra, ['l-itemize', 'l-enumerate', 'depthout', 'depthin']), { id: 'font-clear', title: 'Clear formatting (Ctrl+Space)', icon: 'Tx', action: () => run(C.fontDefault) }],
     [{ id: 'modern-more', title: 'More tools', icon: '⋮', palette: { title: 'More tools', list: true, cols: 1, items: moreItems } }],

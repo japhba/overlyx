@@ -1,6 +1,7 @@
 import type { Command } from 'prosemirror-state';
 import { darkThemeMenuEntries, type MenuDef, type MenuEntry } from './MenuBar';
 import type { ToolbarId, ToolbarMode } from './toolbars';
+import { tbDockMenuEntries } from './tbdock';
 import { editorContext } from '../editor/context';
 import * as C from '../editor/commands';
 import { foldAllSections, unfoldAllSections, toggleSectionAtCursor, toggleLevelAtCursor, toggleItemAtCursor, foldAllItems, unfoldAllItems } from '../editor/plugins/fold';
@@ -45,6 +46,9 @@ export function editorViewMenu({ hostItems, themeItems, hostToolbars, combined, 
       // smart invert of the pages and figures, the text tone (app/darkpages.ts; also the theme switch's menu)
       ...darkThemeMenuEntries(),
       { label: 'Toolbars ▸', sub: [
+        // where they sit: along the top or in a column beside the document (app/tbdock.tsx; also a toolbar's right-click menu)
+        ...tbDockMenuEntries(),
+        { sep: true },
         // the LyX toolbar set (stdtoolbars.inc); the contextual ones are docked at the bottom of the window
         { label: 'Standard', checked: tbMode('standard') !== 'off', action: () => setToolbar('standard', tbMode('standard') === 'off' ? 'on' : 'off') },
         { label: 'View/Update', checked: tbMode('viewupdate') !== 'off', action: () => setToolbar('viewupdate', tbMode('viewupdate') === 'off' ? 'on' : 'off') },

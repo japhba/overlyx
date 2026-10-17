@@ -70,7 +70,7 @@ const CLIPS: Clip[] = [
 
 /** what it does, in four lines (the bar over each takes one of the wordmark's colours) */
 const FEATURES: { title: string; text: string }[] = [
-  { title: 'WYSIWYG LaTeX', text: 'Text and formulas render as you type. The file stays plain .tex, so it compiles anywhere.' },
+  { title: 'WYSIWYM LaTeX', text: 'What you see is what you mean: text and formulas render as you type. The file stays plain .tex, so it compiles anywhere.' },
   { title: 'Slides and posters', text: 'On a canvas, with the same formula editor and Inkscape’s drawing tools.' },
   { title: 'Together', text: 'Write live with others, comment and suggest changes, keep going offline.' },
   { title: 'Your tools', text: 'Git, your Overleaf projects and a VS Code extension. Keep your LaTeX preamble and packages; use the PDF for final layout.' },

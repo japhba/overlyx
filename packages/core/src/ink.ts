@@ -24,12 +24,64 @@ export interface InkStroke {
   /** Layout-editor pen settings; absent on older drawings, whose geometry is retained. */
   nib?: NibOpts;
   pressure?: boolean;
+  /** a line or a shape (Lines / Shapes in the Draw row): `pts` is its outline, drawn exactly — corners kept, nothing smoothed */
+  poly?: true;
 }
 
 /** One shared stroke engine for layouts, document margins and whiteboards. */
 export function strokeRuns(stroke: InkStroke): { w: number; d: string }[] | null {
+  if (stroke.poly) return stroke.pts.length ? [{ w: stroke.w, d: stroke.pts.map(([x, y], i) => `${i ? 'L' : 'M'}${r2(x)} ${r2(y)}`).join('') + (stroke.pts.length === 1 ? `L${r2(stroke.pts[0][0])} ${r2(stroke.pts[0][1])}` : '') }] : null;
   if (!stroke.nib) return null;
   return inkPaths(inkRuns(stroke.pts, { width: stroke.w, highlighter: stroke.o !== undefined && stroke.o < 1, pressure: stroke.pressure, nib: stroke.nib, final: true }));
+}
+
+/** The lines and shapes of the Draw row: the layout editor's (deck toolbar's Lines and Shapes). */
+export const INK_SHAPES = ['line', 'arrow', 'rect', 'roundrect', 'ellipse', 'triangle', 'diamond', 'star', 'hexagon'] as const;
+export type InkShape = typeof INK_SHAPES[number];
+
+/**
+ * The outline of a line or shape dragged from `a` to `b` (an arrow's head and a closed shape's
+ * return to its start included), as the points of a `poly` stroke of width `w`. `constrain` (Shift):
+ * a line in steps of 45°, a shape as wide as high.
+ */
+export function shapePoints(kind: InkShape, a: [number, number], b: [number, number], w: number, constrain = false): InkPts {
+  let [x1, y1] = a, [x2, y2] = b;
+  if (constrain) {
+    const dx = x2 - x1, dy = y2 - y1;
+    if (kind === 'line' || kind === 'arrow') {
+      const len = Math.hypot(dx, dy), ang = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4);
+      x2 = x1 + len * Math.cos(ang); y2 = y1 + len * Math.sin(ang);
+    } else {
+      const m = Math.max(Math.abs(dx), Math.abs(dy));
+      x2 = x1 + Math.sign(dx || 1) * m; y2 = y1 + Math.sign(dy || 1) * m;
+    }
+  }
+  const P = (x: number, y: number): [number, number, number] => [r2(x), r2(y), 0];
+  if (kind === 'line') return [P(x1, y1), P(x2, y2)];
+  if (kind === 'arrow') {
+    const len = Math.hypot(x2 - x1, y2 - y1) || 1, ux = (x2 - x1) / len, uy = (y2 - y1) / len;
+    const head = Math.min(len * 0.45, Math.max(9, w * 4.5)), spread = 0.45;
+    const h1 = P(x2 - head * (ux * Math.cos(spread) - uy * Math.sin(spread)), y2 - head * (uy * Math.cos(spread) + ux * Math.sin(spread)));
+    const h2 = P(x2 - head * (ux * Math.cos(spread) + uy * Math.sin(spread)), y2 - head * (uy * Math.cos(spread) - ux * Math.sin(spread)));
+    return [P(x1, y1), P(x2, y2), h1, P(x2, y2), h2];
+  }
+  const L = Math.min(x1, x2), T = Math.min(y1, y2), W = Math.abs(x2 - x1), H = Math.abs(y2 - y1);
+  // a unit-box outline (0..1) placed into the dragged box, closed
+  const box = (u: [number, number][]) => { const pts = u.map(([x, y]) => P(L + x * W, T + y * H)); return [...pts, pts[0]]; };
+  const round = (n: number) => Array.from({ length: n }, (_, i) => { const t = (i / n) * 2 * Math.PI; return [0.5 + 0.5 * Math.cos(t), 0.5 + 0.5 * Math.sin(t)] as [number, number]; });
+  switch (kind) {
+    case 'rect': return box([[0, 0], [1, 0], [1, 1], [0, 1]]);
+    case 'ellipse': return box(round(64));
+    case 'roundrect': {
+      const rx = Math.min(0.2 * Math.min(W, H), 24) / (W || 1), ry = Math.min(0.2 * Math.min(W, H), 24) / (H || 1);
+      const arc = (cx: number, cy: number, from: number): [number, number][] => Array.from({ length: 7 }, (_, i) => { const t = from + (i / 6) * Math.PI / 2; return [cx + rx * Math.cos(t), cy + ry * Math.sin(t)]; });
+      return box([...arc(1 - rx, 1 - ry, 0), ...arc(rx, 1 - ry, Math.PI / 2), ...arc(rx, ry, Math.PI), ...arc(1 - rx, ry, 1.5 * Math.PI)]);
+    }
+    case 'triangle': return box([[0.5, 0], [1, 1], [0, 1]]);
+    case 'diamond': return box([[0.5, 0], [1, 0.5], [0.5, 1], [0, 0.5]]);
+    case 'hexagon': return box([[0.25, 0], [0.75, 0], [1, 0.5], [0.75, 1], [0.25, 1], [0, 0.5]]);
+    case 'star': return box(Array.from({ length: 10 }, (_, i) => { const t = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? 0.2 : 0.5; return [0.5 + rr * Math.cos(t), 0.52 + rr * Math.sin(t)] as [number, number]; }));
+  }
 }
 
 /** An image placed on the ink layer (pasted into the margin): document-relative file, offsets like a stroke's. */

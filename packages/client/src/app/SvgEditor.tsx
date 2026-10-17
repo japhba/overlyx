@@ -79,6 +79,7 @@ function SvgEditor({ target, onClose }: { target: SvgTarget; onClose(): void }) 
       save: () => saveRef.current(),
     };
   }, [source, target]);
+  const saved = useRef(false);
   const save = async () => {
     if (!host || !exporter.current || saving || target.readOnly) return;
     setSaving(true); setError('');
@@ -87,12 +88,15 @@ function SvgEditor({ target, onClose }: { target: SvgTarget; onClose(): void }) 
       const response = await fetch(fileUrl(target.project, target.path), { credentials: 'include', cache: 'no-store' });
       if (!response.ok || await response.text() !== original.current) throw new Error('The SVG changed on disk while this editor was open. Reopen it before saving your changes.');
       await api.upload(target.project, target.path, new Blob([svg], { type: 'image/svg+xml' }));
+      saved.current = true;
       if (active.current) { original.current = svg; target.onSaved?.(); onClose(); }
     } catch (e) { if (active.current) setError(String((e as Error).message)); }
     finally { if (active.current) setSaving(false); }
   };
   saveRef.current = () => { void save(); };
-  const close = () => { if (saving) return; if (!dirty) onClose(); else void uiConfirm('Discard SVG changes?', 'Close this drawing without saving?').then(ok => { if (ok) onClose(); }); };
+  // closed without saving: a drawing made a moment ago (Insert ▸ Drawing) goes again
+  const leave = () => { if (!saved.current) target.onDiscard?.(); onClose(); };
+  const close = () => { if (saving) return; if (!dirty) leave(); else void uiConfirm('Discard SVG changes?', 'Close this drawing without saving?').then(ok => { if (ok) leave(); }); };
   closeRef.current = close;
   return <div class="dialog-backdrop svg-lightbox" onMouseDown={e => { if (e.target === e.currentTarget) close(); }}>
     <div ref={panel} class="svg-lightbox-panel" role="dialog" aria-modal="true" aria-label={`SVG editor — ${target.path}`}>

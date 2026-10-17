@@ -15,6 +15,7 @@ import { InterfaceZoom } from './InterfaceZoom';
 import { BuiltPdf } from './BuiltPdf';
 import type { PdfTarget } from '@client/app/PdfViewer';
 import { SvgEditorHost } from '@client/app/SvgEditor';
+import { ToolbarDock } from '@client/app/tbdock';
 import { SettingsPanel } from '@client/app/Settings';
 import { HelpDialog, HELP_ROWS, DialogHost, uiPrompt } from '@client/app/Dialogs';
 import { Ruler, DEFAULT_WIDTH, MIN_WIDTH, MAX_WIDTH, NOTE_SCALE_DEFAULT } from '@client/app/Ruler';
@@ -584,7 +585,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       leading: [{ id: 'new', title: 'New document', icon: 'new', action: () => hostCommand('newFile') }, { id: 'open', title: 'Open', icon: 'open', action: () => hostCommand('openFile') }],
       navigation: [{ id: 'navback', title: 'Navigate back', icon: 'navback', action: () => hostCommand('back') }],
       sidebars: [{ id: 'outline', title: 'Outline (sections: click to jump, move and promote / demote them)', icon: 'outline', action: () => setShowOutline(s => !s), active: showOutline }],
-      tools: [{ id: 'ink', title: 'Draw in the margins', icon: 'ink', action: () => setInkMode(m => !m), active: inkMode }, { id: 'comments-panel', title: 'Comments', icon: 'notes', action: () => setShowComments(s => !s), active: showComments }],
+      tools: [{ id: 'ink', title: 'Draw in the margins — pen, highlighter, lines and shapes', icon: 'ink', action: () => setInkMode(m => !m), active: inkMode }, { id: 'comments-panel', title: 'Comments', icon: 'notes', action: () => setShowComments(s => !s), active: showComments }],
       pdf: activeMeta?.master ? [{ id: 'pdfmaster', title: 'View master document', icon: 'viewmaster', action: () => vscode.postMessage({ type: 'openDoc', id: activeMeta.master! }) }] : [],
     },
   });
@@ -756,6 +757,17 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
     setQuery(view, { query: findQ, caseSensitive: findCase, wholeWord: findWord, regex: findRegex, searchMath: findMath, selectionOnly: findSel, ...patch, ...(useSelection !== undefined ? { useSelection } : {}) } as any);
   };
 
+  // the toolbar rows (Standard, View/Update + Extra, a layout page's Layout row)
+  const toolbarRows = (<>
+    {tbMode('standard') !== 'off' && <Toolbar id="standard" layouts={layouts} layout={layout} onLayout={(n: string) => run(C.setLayout(n))} groups={tb.standard} />}
+    {(tbMode('viewupdate') !== 'off' || tbMode('extra') !== 'off') && (
+      <div class="tb-samerow">
+        {tbMode('viewupdate') !== 'off' && <Toolbar id="viewupdate" groups={tb.viewUpdate} />}
+        {tbMode('extra') !== 'off' && <Toolbar id="extra" groups={tb.extra} />}
+      </div>
+    )}
+    {tb.showLayout && <Toolbar id="layout" label="Layout" groups={tb.layout} />}
+  </>);
   return (
     <div class="app" data-vscode="1">
       <MenuBar menus={menus} showThemeToggle={false} paletteShortcut="Ctrl+Alt+Shift+P" captureF1={false} searchEntries={helpSearchEntries} />
@@ -768,16 +780,8 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
           <PaneSwitch layout={panes} onChange={changePanes} markdown={/\.(md|markdown)$/i.test(docId)} />
         </span>
       </div>
-      {!pdfOnly && <>
-        {tbMode('standard') !== 'off' && <Toolbar id="standard" layouts={layouts} layout={layout} onLayout={(n: string) => run(C.setLayout(n))} groups={tb.standard} />}
-        {(tbMode('viewupdate') !== 'off' || tbMode('extra') !== 'off') && (
-          <div class="tb-samerow">
-            {tbMode('viewupdate') !== 'off' && <Toolbar id="viewupdate" groups={tb.viewUpdate} />}
-            {tbMode('extra') !== 'off' && <Toolbar id="extra" groups={tb.extra} />}
-          </div>
-        )}
-        {tb.showLayout && <Toolbar id="layout" label="Layout" groups={tb.layout} />}
-      </>}
+      {/* the toolbar rows: along the top, or in a column beside the document (app/tbdock.tsx; inside .main below) */}
+      {!pdfOnly && <ToolbarDock at="top">{toolbarRows}</ToolbarDock>}
       {!pdfOnly && meta && meta.health.length > 0 && (
         <div class="health-bar">
           <span class="health-icon">⚠</span>
@@ -820,6 +824,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
           </div>
         )}
         {!pdfOnly && showOutline && <SidebarGrip side="left" />}
+        {!pdfOnly && <ToolbarDock at="left">{toolbarRows}</ToolbarDock>}
         <div class={'editor-column panes' + (shownPanes.length > 1 ? ' split' : '')}>
           <div class={'editor-scroll' + (marginMode ? ' margin-mode' : '') + (inkMode ? ' ink-mode' : '')} ref={scrollRef} data-pane="doc" style={paneStyle('doc')} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
             {showRuler && <Ruler width={textWidth} onChange={setTextWidth} notes={marginMode ? { sash: notesPane.sash, scale: noteScale, onScale: setNoteScale } : undefined} />}
@@ -839,6 +844,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
           </div>}
           <PaneDividers layout={panes} onChange={changePanes} />
         </div>
+        {!pdfOnly && <ToolbarDock at="right">{toolbarRows}</ToolbarDock>}
         {!pdfOnly && showComments && (
           <div class="sidebar right">
             <div class="panel-tabs">

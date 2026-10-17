@@ -11,6 +11,7 @@ import { subscribeProjectEvents, sameGraphicsFile } from '../../projectevents';
 import { editorContext, onMetaChange, resolveDocPath, viewDocDir, viewProject } from '../context';
 import { applyChangeAttrs } from '../plugins/changes';
 import { classifyImage, type FigureKind } from '../figureinvert';
+import { editSvgFile } from '../svgEditorEvents';
 
 function params(node: PMNode): Map<string, string> {
   try { return paramMap(JSON.parse(node.attrs.params || '[]')); } catch { return new Map(); }
@@ -39,12 +40,31 @@ export class GraphicsView implements NodeView {
     this.img.addEventListener('load', () => { this.kind = classifyImage(this.img); this.applyInvert(); });
     this.caption = document.createElement('span');
     this.caption.className = 'graphics-caption';
-    this.dom.append(this.img, this.caption);
+    // an SVG figure: ✎ over its corner (on hover) opens the drawing in the SVG editor, as a double-click does
+    this.editBtn = document.createElement('button');
+    this.editBtn.type = 'button';
+    this.editBtn.className = 'gfx-edit';
+    this.editBtn.textContent = '✎ Edit drawing';
+    this.editBtn.title = 'Edit this SVG drawing — the layout editor\'s shapes, lines, pen, text and formulas in a pop-up (or double-click the figure)';
+    this.editBtn.addEventListener('mousedown', ev => { ev.preventDefault(); ev.stopPropagation(); });
+    this.editBtn.addEventListener('click', ev => { ev.preventDefault(); ev.stopPropagation(); this.editSvg(); });
+    this.dom.append(this.img, this.caption, this.editBtn);
     this.render();
-    this.dom.addEventListener('dblclick', (ev) => { ev.preventDefault(); editorContext.openInsetDialog?.(this.view, this.getPos()); });
+    this.dom.addEventListener('dblclick', (ev) => { ev.preventDefault(); if (this.svgRel()) this.editSvg(); else editorContext.openInsetDialog?.(this.view, this.getPos()); });
     this.watchFile();
     window.addEventListener('ol:svg-saved', this.svgSaved);
     this.unsubscribePrefs = subscribePrefs(() => this.applyInvert());
+  }
+
+  private editBtn: HTMLButtonElement;
+  /** the figure's file when it is an SVG drawing (project-relative), else null */
+  private svgRel(): string | null {
+    const file = params(this.node).get('filename') ?? '';
+    return /\.svg$/i.test(file) ? resolveDocPath(unquote(file), viewDocDir(this.view)) : null;
+  }
+  private editSvg() {
+    const rel = this.svgRel(), project = viewProject(this.view) || editorContext.project;
+    if (rel && project) editSvgFile(project, rel, !this.view.editable);
   }
 
   private svgSaved = (event: Event) => {
@@ -81,7 +101,9 @@ export class GraphicsView implements NodeView {
     const scale = p.get('scale');
     const lyxscale = p.get('lyxscale');
     this.img.alt = file;
-    this.img.title = `${file}\nwidth: ${width ?? 'auto'}${scale ? `, scale ${scale}%` : ''} — double-click for settings, right-click${/\.svg$/i.test(file) ? ' to edit SVG or' : ' to'} export as PNG`;
+    const svg = /\.svg$/i.test(file);
+    this.img.title = `${file}\nwidth: ${width ?? 'auto'}${scale ? `, scale ${scale}%` : ''} — ${svg ? 'double-click to edit the drawing, right-click for its settings or to' : 'double-click for settings, right-click to'} export as PNG`;
+    this.editBtn.hidden = !svg;
     if (project && file) {
       const url = graphicsUrl(project, resolveDocPath(file, viewDocDir(this.view)), 1600) + (this.version ? `&v=${this.version}` : '');
       if (this.img.dataset.src !== url) { this.img.dataset.src = url; this.img.src = url; }

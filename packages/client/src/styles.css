@@ -180,6 +180,12 @@ button, select, input, textarea { font: inherit; }
 button { cursor: pointer; }
 #app { height: 100%; }
 .interface-zoom, .interface-zoom > [role="group"] { display: inline-flex; gap: 3px; align-items: center; }
+/* an SVG figure's ✎ Edit drawing (GraphicsView): over its top right corner while the pointer is on it */
+.lyx-graphics { position: relative; }
+.lyx-graphics .gfx-edit { position: absolute; top: 6px; right: 6px; z-index: 2; padding: 3px 9px; border: 1px solid var(--ui-border); border-radius: 999px; background: var(--surface); color: var(--fg); font: 500 12px/1.4 var(--sf-font, system-ui), sans-serif; box-shadow: 0 1px 4px rgba(0,0,0,.18); cursor: pointer; opacity: 0; transition: opacity .12s; }
+.lyx-graphics:hover .gfx-edit, .lyx-graphics.ProseMirror-selectednode .gfx-edit, .lyx-graphics .gfx-edit:focus-visible { opacity: 1; }
+.lyx-graphics .gfx-edit[hidden] { display: none; }
+.ProseMirror[contenteditable="false"] .lyx-graphics .gfx-edit { display: none; }
 .dialog-backdrop.svg-lightbox { position: fixed; inset: 0; z-index: 90; padding: 3vh 3vw; background: #0009; display: flex; align-items: stretch; justify-content: stretch; }
 .svg-lightbox-panel { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--surface); color: var(--fg); border: 1px solid var(--ui-border); border-radius: 10px; overflow: hidden; box-shadow: 0 12px 60px #0006; }
 .svg-lightbox-bar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--ui-border); }
@@ -1146,7 +1152,7 @@ pre.hl .l.cur { background: color-mix(in srgb, var(--active-bg) 45%, transparent
 /* Whiteboard (.board documents, app/BoardEditor.tsx): an infinite pan/zoom canvas. */
 .board { position: relative; flex: 1; min-height: 0; height: 100%; overflow: hidden; outline: none; background: var(--page-bg);
   background-image: radial-gradient(var(--ui-border) 1px, transparent 1px); background-size: 24px 24px; touch-action: none; }
-.board[data-tool="pen"], .board[data-tool="highlighter"] { cursor: crosshair; }
+.board[data-tool="pen"], .board[data-tool="highlighter"], .board:is([data-tool="line"], [data-tool="arrow"], [data-tool="rect"], [data-tool="roundrect"], [data-tool="ellipse"], [data-tool="triangle"], [data-tool="diamond"], [data-tool="star"], [data-tool="hexagon"]) { cursor: crosshair; }
 .board[data-tool="lasso"] { cursor: default; }
 .board-lasso, .board-lasso polyline { pointer-events: none; }
 .board[data-tool="eraser"] { cursor: cell; }
@@ -1217,6 +1223,9 @@ pre.hl .l.cur { background: color-mix(in srgb, var(--active-bg) 45%, transparent
 .tree-row.current { background: var(--row-sel); }
 .tree-row.project { font-weight: 700; }
 .tree-row.folder { color: var(--fg2); }
+/* a folder's files that are not documents, folded into one row (FileBrowser renderChildren) */
+.tree-row.other-files { color: var(--ui-muted); }
+.tree-row.other-files .group-count { margin-left: 2px; padding: 0 5px; border-radius: 8px; font-size: 10.5px; line-height: 15px; color: var(--ui-muted); background: color-mix(in srgb, var(--ui-muted) 14%, transparent); }
 /* a document group (core/docgroup.ts: the tabs of a Google Doc): one entry, its documents under it, tied together by a rule */
 .doc-group { margin: 1px 0 2px 3px; border-left: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); border-radius: 0 4px 4px 0; }
 .doc-group.open { background: color-mix(in srgb, var(--accent) 5%, transparent); padding-bottom: 2px; }
@@ -1300,6 +1309,16 @@ pre.hl .l.cur { background: color-mix(in srgb, var(--active-bg) 45%, transparent
 .dialog { background: var(--surface); border-radius: 6px; box-shadow: 0 10px 40px rgba(0,0,0,0.3); width: 520px; min-width: 0; max-width: calc(100vw - 24px); max-height: calc(100dvh - 24px); display: flex; flex-direction: column; }
 .dialog.wide { width: 760px; }
 .dialog .row > input, .dialog .row > select, .dialog .row > textarea { min-width: 0; }
+/* nothing in a dialog runs past its right edge (Modern clips the dialog's corners, so it was cut off
+   there; Classic scrolled sideways): rows, fields, long option texts, tables, code and pictures shrink
+   to the dialog's width and wrap — a select with long options (Settings ▸ AI models), a table of keys
+   with a word of slashes (Keyboard shortcuts), a textarea of LaTeX */
+.dialog .body > *, .dialog .row > div, .dialog .row > span, .dialog .row > label + * { min-width: 0; max-width: 100%; }
+.dialog select, .dialog textarea, .dialog input:not([type=checkbox]):not([type=radio]):not([type=color]):not([type=range]) { max-width: 100%; box-sizing: border-box; }
+.dialog table { max-width: 100%; }
+.dialog td, .dialog th, .dialog li, .dialog p, .dialog .hint, .dialog .sub { overflow-wrap: anywhere; }
+.dialog pre { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 100%; }
+.dialog img, .dialog svg:not(.icon) { max-width: 100%; }
 @media (max-width: 540px) {
   .dialog .row { flex-wrap: wrap; }
   .dialog .row > label { flex-basis: 100%; }
@@ -1322,7 +1341,7 @@ pre.hl .l.cur { background: color-mix(in srgb, var(--active-bg) 45%, transparent
 .btn:hover { filter: brightness(0.95); }
 .help-table { border-collapse: collapse; font-size: 12px; }
 .help-table td { padding: 2px 10px; border-bottom: 1px solid var(--ui-border2); }
-.help-table td:first-child { font-family: monospace; white-space: nowrap; }
+.help-table td:first-child { font-family: monospace; white-space: nowrap; overflow-wrap: normal; }
 
 /* login */
 .login { height: 100%; overflow: auto; display: flex; align-items: center; justify-content: center; background: var(--login-bg); }
@@ -1377,6 +1396,39 @@ pre.hl .l.cur { background: color-mix(in srgb, var(--active-bg) 45%, transparent
 .tb-toprow { display: flex; align-items: flex-start; background: var(--ui-bg); border-bottom: 1px solid var(--ui-border); }
 .tb-toprow > .toolbar { flex: 1 1 auto; min-width: 0; border-bottom: none; }
 .tb-toprow > .edit-mode, .tb-samerow > .edit-mode { margin: 3px 8px 3px auto; align-self: flex-start; }
+/* the toolbar rows' wrapper at the top (app/tbdock.tsx): no box of its own */
+.tb-dock-top { display: contents; }
+/* … or docked in a column beside the document (View ▸ Toolbars, or right-click a toolbar): the same
+   rows, their buttons wrapping two or three abreast, groups parted by a line across, the wide controls
+   (paragraph style, font, size, zoom, the mode switch) the column's width */
+:root { --tb-side-w: 84px; }
+html[data-ui="modern"] { --tb-side-w: 96px; }
+html[data-ui] .tb-side { flex: none; width: var(--tb-side-w); min-height: 0; display: flex; flex-direction: column; overflow: hidden auto; background: var(--ui-bg); scrollbar-width: thin; }
+html[data-ui] .tb-side.left { border-right: 1px solid var(--ui-border); }
+html[data-ui] .tb-side.right { border-left: 1px solid var(--ui-border); }
+html[data-ui] .tb-side > * { flex: none; }   /* (the column scrolls; its rows never shrink into each other) */
+html[data-ui] .tb-side :is(.tb-toprow, .tb-samerow, .tb-modern-row) { display: flex; flex-direction: column; align-items: stretch; flex-wrap: nowrap; flex: none; margin: 0; padding: 0; min-height: 0; border: 0; border-radius: 0; background: none; gap: 0; }
+html[data-ui] .tb-side .toolbar, html[data-ui] .tb-side :is(.tb-toprow, .tb-samerow, .tb-modern-row) > .toolbar { display: flex; flex-direction: row; flex-wrap: wrap; justify-content: center; align-items: center; gap: 2px; padding: 4px 3px; margin: 0; border: 0; border-bottom: 1px solid var(--ui-border); background: none; overflow: visible; min-width: 0; flex: none; }
+html[data-ui] .tb-side .tb-samerow .toolbar + .toolbar { border-left: 0; }
+html[data-ui] .tb-side .tb-sep { flex-basis: 100%; width: auto; height: 1px; margin: 3px 4px; }
+html[data-ui] .tb-side .tb-label { flex-basis: 100%; text-align: center; padding: 2px 0; }
+html[data-ui] .tb-side .tb-widget, html[data-ui] .tb-side .tb-pal:has(.tb-face), html[data-ui] .tb-side [data-style-picker] { flex-basis: 100%; max-width: 100%; min-width: 0; justify-content: center; }
+html[data-ui] .tb-side [data-style-picker], html[data-ui] .tb-side .tb-face { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+html[data-ui] .tb-side .tb-pal:has(.tb-face) > .tb-btn { width: 100%; justify-content: space-between; }
+html[data-ui] .tb-side .edit-mode { margin: 6px auto; align-self: center; max-width: 100%; }
+html[data-ui] .tb-side .tb-modern-end { display: flex; flex-direction: column; align-items: center; gap: 6px; height: auto; padding: 8px 0; margin: 0; border: 0; }
+html[data-ui] .tb-side .tb-modern-end > * { max-width: 100%; }
+html[data-ui] .tb-side :is(.zoom, .viewport-zoom-control) { display: flex; flex-wrap: wrap; justify-content: center; max-width: 100%; }
+html[data-ui] .tb-side .tb-style { flex-basis: 100%; min-width: 0; display: flex; }
+html[data-ui] .tb-side .tb-style-btn, html[data-ui="modern"] .tb-side .tb-modern-row .tb-style-btn { width: 100%; max-width: 100%; min-width: 0; }
+html[data-ui] .tb-side .tb-style-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; text-align: left; }
+html[data-ui] .tb-side .fs-box { display: inline-flex; max-width: 100%; }
+html[data-ui] .tb-side .fs-box .tb-btn { min-width: 16px; padding: 0 2px; }
+html[data-ui] .tb-side .fs-input { width: 34px; min-width: 0; }
+html[data-ui] .tb-side .edit-mode-btn { max-width: calc(var(--tb-side-w) - 8px); overflow: hidden; text-overflow: ellipsis; }
+/* the contextual rows at the bottom stay beside the column */
+html[data-tb-dock="left"] .bottom-toolbars { margin-left: var(--tb-side-w); }
+html[data-tb-dock="right"] .bottom-toolbars { margin-right: var(--tb-side-w); }
 /* The contextual rows (math / panels / table / review) are docked at the bottom like in LyX, laid
    over the content flush above the status bar — appearing and disappearing with the cursor must
    never shift the document. Their palettes open upward. */

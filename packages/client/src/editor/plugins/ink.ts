@@ -26,12 +26,14 @@ import { Plugin, PluginKey } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
 import type { Awareness } from 'y-protocols/awareness';
-import { schema, strokePathD, strokeRuns, laserPathD, polylineHitsPolygon, rectHitsPolygon, type InkStroke, type InkImage } from '@overlyx/core';
+import { schema, strokePathD, strokeRuns, laserPathD, polylineHitsPolygon, rectHitsPolygon, shapePoints, INK_SHAPES, type InkShape, type InkStroke, type InkImage } from '@overlyx/core';
 import { graphicsUrl } from '../../api';
 import { viewProject, viewDocDir, resolveDocPath } from '../context';
 import { imageFiles, imageExt, uploadBaseName, uploadUnique, isSvgMarkup, svgFile } from '../imagepaste';
 
-export type InkTool = 'pen' | 'highlighter' | 'eraser' | 'lasso' | 'laser';
+/** the pens, eraser, lasso and laser — and the layout editor's lines and shapes (core INK_SHAPES), drawn in the pen's colour and width */
+export type InkTool = 'pen' | 'highlighter' | 'eraser' | 'lasso' | 'laser' | InkShape;
+export const isShapeTool = (t: string): t is InkShape => (INK_SHAPES as readonly string[]).includes(t);
 /** the tools that draw — each remembers its own colour and width (Goodnotes: switching pens switches both) */
 export type InkPen = 'pen' | 'highlighter';
 export interface PenSettings {
@@ -314,6 +316,8 @@ class InkLayer {
   private unsub: (() => void)[] = [];
   /** the stroke being drawn here right now (content coordinates of the scroller) */
   private live: (LiveInk & { edgeX: number; anchorTop: number }) | null = null;
+  /** a line or shape being dragged out: its kind and where the drag began (content coordinates) */
+  private shape: { kind: InkShape; x: number; y: number } | null = null;
   /** the laser trace being held (content coordinates) and the one fading after a lift */
   private laser: { b: number; edgeX: number; top: number; pts: [number, number][] } | null = null;
   private laserFade: { pts: [number, number][]; start: number } | null = null;
@@ -588,7 +592,7 @@ class InkLayer {
       ctx.globalAlpha = stroke.o !== undefined ? stroke.o : 1;
       ctx.fillStyle = stroke.color;
       let runs = runCache.get(stroke);
-      if (!runs && stroke.nib) { runs = (strokeRuns(stroke) ?? []).map(run => ({ w: run.w, path: new Path2D(run.d) })); runCache.set(stroke, runs); }
+      if (!runs && (stroke.nib || stroke.poly)) { runs = (strokeRuns(stroke) ?? []).map(run => ({ w: run.w, path: new Path2D(run.d) })); runCache.set(stroke, runs); }
       if (runs) {
         ctx.strokeStyle = stroke.color; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
         for (const run of runs) { ctx.lineWidth = run.w; ctx.stroke(run.path); }
@@ -624,7 +628,7 @@ class InkLayer {
     // the local stroke being drawn (content coordinates, not yet relativised)
     if (this.live && this.live.pts.length) {
       const l = this.live;
-      const rel: InkStroke = { color: l.color, w: l.w, o: l.o, nib: l.nib, pressure: l.pressure, pts: l.pts.map(([x, y, p]) => [(x - l.edgeX) / z, (y - l.anchorTop) / z, p] as [number, number, number]) };
+      const rel: InkStroke = { color: l.color, w: l.w, o: l.o, nib: l.nib, pressure: l.pressure, poly: l.poly, pts: l.pts.map(([x, y, p]) => [(x - l.edgeX) / z, (y - l.anchorTop) / z, p] as [number, number, number]) };
       drawStroke(rel, l.edgeX, l.anchorTop);
     }
     // the lasso being drawn: always shown closed (a segment back to the start), lightly filled —
@@ -829,6 +833,18 @@ class InkLayer {
     }
     const hl = ui.tool === 'highlighter';
     const pen = ui.pens[hl ? 'highlighter' : 'pen'];
+    if (isShapeTool(ui.tool)) {
+      // a line or a shape: dragged from here, in the pen's colour and width, drawn exactly
+      const [x, y] = this.toContent(e, g);
+      this.shape = { kind: ui.tool, x, y };
+      this.live = { src, side, edgeX: this.edgeX(side, g), anchorTop: top, color: ui.pens.pen.color, w: ui.drawing.pens.pen.width, poly: true, pts: [[x, y, 0]] };
+      this.pointerId = e.pointerId;
+      this.canvas.setPointerCapture(e.pointerId);
+      this.schedule();
+      e.preventDefault();
+      return;
+    }
+    this.shape = null;
     this.live = {
       src, side,
       edgeX: this.edgeX(side, g),
@@ -847,12 +863,18 @@ class InkLayer {
 
   private addPoint(e: PointerEvent, g: ReturnType<InkLayer['geom']>) {
     if (!this.live) return;
-    const coalesced = e.getCoalescedEvents?.();
-    const events = coalesced?.length ? coalesced : [e];
-    for (const ev of events) {
-      const [x, y] = this.toContent(ev, g);
-      const p = ev.pointerType === 'pen' ? ev.pressure : 0;
-      if (this.live.pts.length < 4000) this.live.pts.push([x, y, p]);
+    if (this.shape) {
+      // the outline from the drag's start to here (Shift: 45° steps, as wide as high)
+      const [x, y] = this.toContent(e, g);
+      this.live.pts = shapePoints(this.shape.kind, [this.shape.x, this.shape.y], [x, y], this.live.w * zoom(), e.shiftKey);
+    } else {
+      const coalesced = e.getCoalescedEvents?.();
+      const events = coalesced?.length ? coalesced : [e];
+      for (const ev of events) {
+        const [x, y] = this.toContent(ev, g);
+        const p = ev.pointerType === 'pen' ? ev.pressure : 0;
+        if (this.live.pts.length < 4000) this.live.pts.push([x, y, p]);
+      }
     }
     this.schedule();
     const now = performance.now();
@@ -860,7 +882,7 @@ class InkLayer {
       this.lastAwarenessSend = now;
       const l = this.live;
       const z = zoom();
-      const liveMsg: LiveInk = { src: l.src, side: l.side, color: l.color, w: l.w, o: l.o, nib: l.nib, pressure: l.pressure, pts: l.pts.map(([x, y, p]) => [round4((x - l.edgeX) / z), round4((y - l.anchorTop) / z), Math.round(p * 100) / 100] as [number, number, number]) };
+      const liveMsg: LiveInk = { src: l.src, side: l.side, color: l.color, w: l.w, o: l.o, nib: l.nib, pressure: l.pressure, ...(l.poly ? { poly: true as const } : {}), pts: l.pts.map(([x, y, p]) => [round4((x - l.edgeX) / z), round4((y - l.anchorTop) / z), Math.round(p * 100) / 100] as [number, number, number]) };
       try { this.awareness.setLocalStateField('ink', liveMsg); } catch { /* not connected */ }
     }
   }
@@ -926,16 +948,19 @@ class InkLayer {
     }
     const l = this.live;
     this.live = null;
+    this.shape = null;
     try { this.awareness.setLocalStateField('ink', null); } catch { /* closing */ }
     if (!l || !l.pts.length) { this.schedule(); return; }
+    // a click with a line or shape tool, no drag: nothing
+    if (l.poly) { const xs = l.pts.map(p => p[0]), ys = l.pts.map(p => p[1]); if (Math.max(...xs) - Math.min(...xs) < 3 && Math.max(...ys) - Math.min(...ys) < 3) { this.schedule(); return; } }
     const z = zoom();
     const stroke: InkStroke = {
       side: l.side, color: l.color, w: l.w,
-      nib: l.nib, pressure: l.pressure,
+      ...(l.poly ? { poly: true as const } : { nib: l.nib, pressure: l.pressure }),
       ...(l.o !== undefined ? { o: l.o } : {}),
       pts: l.pts.map(([x, y, p]) => [round4((x - l.edgeX) / z), round4((y - l.anchorTop) / z), Math.round(p * 100) / 100] as [number, number, number]),
     };
-    if (ui.drawing.scribble && l.o === undefined && isScribble(l.pts.map(([x, y]) => [x, y]))) {
+    if (ui.drawing.scribble && l.o === undefined && !l.poly && isScribble(l.pts.map(([x, y]) => [x, y]))) {
       const hits = this.lassoSelect(l.pts.map(([x, y]) => [x, y]))?.filter(item => item.kind === 'stroke') ?? [];
       if (hits.length) {
         const remove = new Map<string, { strokes: Set<number>; imgs: Set<number> }>();
@@ -958,6 +983,7 @@ class InkLayer {
     if (this.pointerId !== e.pointerId) return;
     this.pointerId = null;
     this.live = null;
+    this.shape = null;
     this.lasso = null;
     if (this.laser) { this.laserFade = { pts: this.laser.pts, start: performance.now() }; this.laser = null; }
     try { this.awareness.setLocalStateField('ink', null); this.awareness.setLocalStateField('laser', null); } catch { /* closing */ }

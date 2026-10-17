@@ -68,9 +68,9 @@ test('view modes, automatic reference labels and accessible narrow dialogs', asy
   // the pane switch: TeX beside the document, then WYSIWYG off (the source alone), then on again
   await page.getByRole('button', { name: 'TeX', exact: true }).click();
   await expect(page.locator('textarea.source')).toBeVisible();
-  await page.getByRole('button', { name: 'WYSIWYG', exact: true }).click();
+  await page.getByRole('button', { name: 'WYSIWYM', exact: true }).click();
   await expect(page.locator('.editor-scroll')).toBeHidden();
-  await page.getByRole('button', { name: 'WYSIWYG', exact: true }).click();
+  await page.getByRole('button', { name: 'WYSIWYM', exact: true }).click();
   await expect(page.locator('.editor-scroll')).toBeVisible();
   await page.locator('.lyx-editor > .lyx-par').first().click(); await page.keyboard.press('End');
   await page.evaluate(() => (window as any).overlyx.openDialog('ref'));

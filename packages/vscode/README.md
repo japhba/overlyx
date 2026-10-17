@@ -1,7 +1,7 @@
 # OverLyX for VS Code
 
 The [OverLyX](https://overlyx.app) editor as a VS Code custom editor for `.tex` files: LyX-style
-WYSIWYG editing of plain LaTeX documents — rendered text, formulas edited in place (MathJax 4,
+WYSIWYM editing (LyX’s “what you see is what you mean”) of plain LaTeX documents — rendered text, formulas edited in place (MathJax 4,
 LyX cursor model), LyX toolbars and keybindings, change tracking, notes and comment threads,
 tables, floats, citations and cross-references — while **file browsing, git, search and coding
 agents stay VS Code's own**. No server and no account: the extension embeds the OverLyX engine
@@ -23,7 +23,7 @@ reproduced byte for byte until you change them.
   light-on-dark, photos are left alone. `$…$` and `$$` type formulas the LaTeX way; `- ` / `# ` at a
   paragraph start make lists and headings. `!` / `!!` / `!!!` followed by Space make
   unnumbered headings at the same levels as `#` / `##` / `###` for the document class.
-- **WYSIWYG / TeX / Split / PDF** buttons in the top bar switch views within the editor. Ctrl+S in
+- **WYSIWYM / TeX / Split / PDF** buttons in the top bar switch views within the editor. Ctrl+S in
   TeX view applies the source and saves the file. The ruler above the page resizes the writing
   width; drag its handles or focus a handle and use the arrow keys.
 - **Imported math macros** from project files update when those files change, including
@@ -46,7 +46,7 @@ reproduced byte for byte until you change them.
   restarting VS Code; it follows builds started from the editor while the preview is idle.
   **Open beside** opens a separate VS Code PDF panel. The PDF keeps its page and zoom when
   switching views; unfinished TeX source drafts are kept too.
-- **Arrange your views** with the same **WYSIWYG · TeX · PDF** controls as the website:
+- **Arrange your views** with the same **WYSIWYM · TeX · PDF** controls as the website:
   click to show or hide each pane, double-click to show one alone, drag its button to
   move it, and drag the dividers to resize. The ▾ menu offers combinations, including
   all three together, **Swap sides** and **Equal widths**. Layouts survive editor reloads;

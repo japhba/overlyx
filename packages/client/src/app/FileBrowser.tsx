@@ -3,7 +3,9 @@
  * own projects, shared ones, and for administrators all others). Every file is just a file: + File
  * makes any of them, the name's ending deciding what it becomes (app/newfile.ts); documents, text
  * files, PDFs and whiteboards open in place, images in a browser tab. LaTeX build products and LyX
- * backups are hidden unless "all files" is on. Under the files panel a document row expands into its
+ * backups are hidden unless "all files" is on. What is not a document — pictures, .bib, .sty, scripts,
+ * data, PDFs, and folders holding no document — waits in a folded "other files" row under a folder's
+ * documents (open it with a click; it opens by itself for the file being shown or one just added). Under the files panel a document row expands into its
  * outline. A document group (a folder with core/docgroup.ts's manifest — the tabs of an imported
  * Google Doc) shows as one entry: its title, then its documents in the group's order under the titles
  * the group gives them (nested ones indented), the folder's other files after them.
@@ -37,7 +39,10 @@ export function useProjectEvents(project: string | null | undefined, onChange: (
   }, [project]);
 }
 
-interface TreeNode { name: string; path: string; children: TreeNode[]; file?: ProjectFile; group?: DocGroup }
+interface TreeNode { name: string; path: string; children: TreeNode[]; file?: ProjectFile; group?: DocGroup; /** a document, or a folder holding one (or nothing yet) */ docs?: boolean }
+
+/** what the tree shows first: documents (LaTeX, LyX, markdown, whiteboards, slides / posters / pages) */
+const isDocFile = (f: ProjectFile) => f.kind === 'doc' || f.kind === 'lyx' || f.kind === 'board' || (f.kind === 'html' && !!f.deliverable) || /\.(md|markdown)$/i.test(f.name);
 
 function buildTree(files: ProjectFile[]): TreeNode[] {
   const root: TreeNode = { name: '', path: '', children: [] };
@@ -62,12 +67,43 @@ function buildTree(files: ProjectFile[]): TreeNode[] {
     n.children.forEach(sort);
   };
   sort(root);
+  const mark = (n: TreeNode): boolean => {
+    const inside = n.children.map(mark).some(Boolean);
+    n.docs = n.file ? isDocFile(n.file) : inside || !!n.group || !n.children.length;
+    return n.docs;
+  };
+  root.children.forEach(mark);
   return root.children;
 }
 
 const ICON: Record<string, string> = { doc: '📄', lyx: '📥', bib: '📚', image: '🖼', tex: '𝓣', pdf: '📕', board: '🖍', html: '🌐', other: '·' };
 /** an HTML deliverable: slides, a poster, a web page */
 const DELIVERABLE_ICON = { deck: '🎞', poster: '🪧', page: '🌐' } as const;
+/**
+ * Documents deleted here, in the explorer: when the open one is among them its tab goes to another
+ * document of its folder quietly (App's onGone), not to the start screen with an error.
+ */
+export const deletedHere = new Set<string>();
+
+/**
+ * Where to go when the document `goneId` is gone: the next document of its folder (its group's order,
+ * else the folder's), else the one before, else the project's main document — null: none is left.
+ */
+export function siblingDocument(project: Project, goneId: string): string | null {
+  const rel = goneId.slice(project.name.length + 1);
+  const dir = rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : '';
+  const docs = project.files.filter(f => f.kind !== 'dir' && f.path !== rel && isDocFile(f) && !isBackup(f.name));
+  const here = docs.filter(f => (f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) : '') === dir);
+  const order = project.files.find(f => f.kind === 'dir' && f.path === dir)?.group?.members.map(m => m.file) ?? [];
+  const rank = (f: ProjectFile) => { const i = order.indexOf(f.name); return i < 0 ? order.length : i; };
+  here.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name, undefined, { numeric: true }));
+  const name = rel.split('/').pop()!;
+  const gone = order.indexOf(name);
+  const next = gone >= 0 ? here.find(f => rank(f) > gone) ?? [...here].reverse().find(f => rank(f) < gone) : here[0];
+  const pick = next ?? here[0] ?? docs.find(f => /(^|\/)main\.tex$/.test(f.path)) ?? docs.find(f => f.kind === 'doc') ?? docs[0];
+  return pick ? fileTabId(project.name, pick) : null;
+}
+
 /** the explorer's cut/copy clipboard (paths within one project; survives re-renders) */
 let fileClip: { project: string; path: string; cut: boolean } | null = null;
 const isBackup = (name: string) => name.endsWith('~') || name.startsWith('#') || name.endsWith('.emergency');
@@ -164,9 +200,14 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
     if (!project) return;
     const parts = rel.split('/');
     const open: Record<string, boolean> = {};
-    for (let i = 1; i < parts.length; i++) open[project.name + ':' + parts.slice(0, i).join('/')] = false;
+    for (let i = 0; i < parts.length; i++) {
+      if (i) open[project.name + ':' + parts.slice(0, i).join('/')] = false;
+      open[otherKey(parts.slice(0, i).join('/'))] = false;   // what was added may be no document: its folder's other files open
+    }
     setCollapsed(c => ({ ...c, ...open }));
   };
+  /** the folded row of a folder's other files (not documents) */
+  const otherKey = (dir: string) => project!.name + ':' + dir + ':#other';
 
   /** a new file of any kind — a document, a whiteboard, a .bib … (app/newfile.ts: the name's ending decides); a taken name asks again, never replaces */
   const newFile = async (dir = '') => {
@@ -200,7 +241,7 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
       for (const f of Array.from(input.files ?? [])) {
         try { await api.upload(project.name, (dir ? dir + '/' : '') + f.name, f); } catch (e) { await uiAlert('Upload Failed', String((e as Error).message)); }
       }
-      if (dir) reveal(dir + '/');
+      reveal(dir ? dir + '/' : '');
       load();
     };
     input.click();
@@ -255,7 +296,7 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
     const errors: string[] = [];
     for (const d of emptyDirs) { try { await api.fileOp(project.name, { op: 'mkdir', to: d }); } catch (e) { errors.push(`${d}: ${(e as Error).message}`); } }
     for (const { rel, file } of keep) { try { await api.upload(project.name, rel, file); } catch (e) { errors.push(`${rel}: ${(e as Error).message}`); } }
-    if (dir) reveal(dir + '/');
+    reveal(dir ? dir + '/' : '');
     await load();
     if (errors.length) await uiAlert('Upload Failed', 'Not everything could be uploaded:\n' + errors.slice(0, 10).join('\n'));
   };
@@ -293,6 +334,9 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
   };
   const deletePath = async (p: string, isDir: boolean) => {
     if (!(await uiConfirm('Delete', `Delete ${p}${isDir ? ' and everything in it' : ''}? It waits 30 days in the server's trash — ask the people who run OverLyX (Help ▸ Report a problem) to bring it back.`, { danger: true, okLabel: 'Delete' }))) return;
+    const id = `${project!.name}/${p}`;
+    const shown = current?.replace(/^[a-z]+:/, '');
+    if (shown && (shown === id || shown.startsWith(id + '/'))) deletedHere.add(shown);
     await doOp({ op: 'delete', from: p });
   };
   const newFolder = async (dir = '') => {
@@ -355,6 +399,31 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
     ]);
   };
 
+  /** the file being shown, as a project path (its tab id without the viewer's prefix) */
+  const shownPath = current ? current.replace(/^[a-z]+:/, '') : null;
+  /**
+   * A folder's entries: its documents (and the folders holding some), then one folded row for the rest
+   * — unless the folder holds no document at all, then everything as it is.
+   */
+  const renderChildren = (dir: string, children: TreeNode[], depth: number): ComponentChildren => {
+    const docs = children.filter(c => c.docs), other = children.filter(c => !c.docs);
+    if (!docs.length || !other.length) return children.map(c => renderNode(c, depth));
+    const key = otherKey(dir);
+    const holdsShown = !!shownPath && other.some(c => shownPath === project!.name + '/' + c.path || shownPath.startsWith(project!.name + '/' + c.path + '/'));
+    const closed = (collapsed[key] ?? true) && !holdsShown;
+    const folders = other.filter(c => !c.file).length, files = other.length - folders;
+    const what = [files && `${files} file${files === 1 ? '' : 's'}`, folders && `${folders} folder${folders === 1 ? '' : 's'}`].filter(Boolean).join(', ');
+    return [
+      ...docs.map(c => renderNode(c, depth)),
+      <div key={key} class={'tree-row other-files' + (closed ? '' : ' open')} data-other-files={dir} style={{ paddingLeft: 6 + depth * 14 + 'px' }}
+        role="button" aria-expanded={!closed} onClick={() => toggle(key, true)} onContextMenu={dir ? folderCtx(dir) : bgCtx}
+        title={`Not documents: pictures, bibliographies, styles, scripts, data, PDFs — ${what}. ${closed ? 'Click to show them' : 'Click to fold them away'}${holdsShown ? ' (open: the file shown is one of them)' : ''}`}>
+        <span class="twisty">{closed ? '▸' : '▾'}</span><span class="fname">Other files</span><span class="group-count">{other.length}</span>
+      </div>,
+      ...(closed ? [] : other.map(c => renderNode(c, depth))),
+    ];
+  };
+
   const renderNode = (node: TreeNode, depth: number, member?: DocGroupMember) => {
     const key = project!.name + ':' + node.path;
     if (!node.file && node.group) {
@@ -390,7 +459,7 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
               <button class="mini" title="Upload files here" onClick={e => { e.stopPropagation(); void upload(node.path); }}>⇧</button>
             </span>}
           </div>
-          {!isCollapsed && node.children.map(c => renderNode(c, depth + 1))}
+          {!isCollapsed && renderChildren(node.path, node.children, depth + 1)}
         </div>
       );
     }
@@ -465,7 +534,7 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
         {role === 'owner' && via !== 'admin' && project && onShare && <button class="small-btn" data-share={project.name} onClick={() => onShare(project.name)} title="Share this project…">👥</button>}
         <button class="small-btn" onClick={() => setShowAll(!showAll)} title="Show LaTeX build files (.aux, .log, .bbl …) and LyX backups (~, #, .emergency)">{showAll ? 'Fewer' : 'All files'}</button>
       </div>
-      {project && tree.map(n => renderNode(n, 0))}
+      {project && renderChildren('', tree, 0)}
       {project && !tree.length && <div class="empty">No files yet — make one with + File (main.tex is a document), or upload files.</div>}
       {!projects.length && <div class="empty">No projects yet.</div>}
     </div>

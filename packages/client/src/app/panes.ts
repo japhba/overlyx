@@ -9,9 +9,9 @@
 
 export type PaneId = 'doc' | 'tex' | 'pdf';
 export const PANES: readonly PaneId[] = ['doc', 'tex', 'pdf'];
-export const PANE_LABELS: Record<PaneId, string> = { doc: 'WYSIWYG', tex: 'TeX', pdf: 'PDF' };
+export const PANE_LABELS: Record<PaneId, string> = { doc: 'WYSIWYM', tex: 'TeX', pdf: 'PDF' };
 export const PANE_TITLES: Record<PaneId, string> = {
-  doc: 'The rendered document, edited in place',
+  doc: 'WYSIWYM — LyX’s “what you see is what you mean”: the document rendered and edited in place, its structure (sections, formulas, references) shown as it means, the final pages left to LaTeX',
   tex: 'The LaTeX source of the document (Ctrl+Alt+S)',
   pdf: 'The PDF built from the document (Ctrl+R builds it)',
 };

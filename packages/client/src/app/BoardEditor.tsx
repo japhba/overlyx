@@ -25,21 +25,25 @@ import { Toolbar } from './Toolbar';
 import { drawingToolbar } from '../deliverable/drawingToolbar';
 import { loadDeckInk, saveDeckInk, patchDeckInk } from '../deliverable/deckink';
 import { isScribble, type NibOpts } from '@overlyx/core/freehand.ts';
+import { shapePoints, INK_SHAPES, type InkShape } from '@overlyx/core';
+const isShapeTool = (t: string): t is InkShape => (INK_SHAPES as readonly string[]).includes(t);
 
 export interface BoardObj {
   t: 'stroke' | 'img' | 'note';
   x: number; y: number; w: number; h: number; z?: number;
   /** stroke */
   color?: string; sw?: number; o?: number; nib?: NibOpts; pressure?: boolean; pts?: [number, number, number][];
+  /** a line or shape of the Draw row's Lines / Shapes: `pts` is its exact outline (core InkStroke.poly) */
+  poly?: true;
   /** image (project-relative path) */
   src?: string;
   /** note */
   text?: string;
 }
 
-type Tool = 'select' | 'lasso' | 'pen' | 'highlighter' | 'eraser' | 'note' | 'laser';
+type Tool = 'select' | 'lasso' | 'pen' | 'highlighter' | 'eraser' | 'note' | 'laser' | InkShape;
 interface Camera { tx: number; ty: number; s: number }
-interface LiveStroke { color: string; w: number; o?: number; nib?: NibOpts; pressure?: boolean; pts: [number, number, number][] }
+interface LiveStroke { color: string; w: number; o?: number; nib?: NibOpts; pressure?: boolean; poly?: true; pts: [number, number, number][] }
 /** a laser trace (board coordinates); `fadeAt` set once its owner lifted the pen */
 interface LaserTrail { pts: [number, number][]; color: string; name?: string; fadeAt: number | null }
 
@@ -48,12 +52,12 @@ const newId = () => Date.now().toString(36) + '-' + Math.random().toString(36).s
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
 /** Normalise absolute stroke points into an object: bbox at (x, y), points relative. */
-function strokeToObj(pts: [number, number, number][], color: string, sw: number, o?: number, nib?: NibOpts, pressure?: boolean): BoardObj {
+function strokeToObj(pts: [number, number, number][], color: string, sw: number, o?: number, nib?: NibOpts, pressure?: boolean, poly?: true): BoardObj {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const [x, y] of pts) { minX = Math.min(minX, x); minY = Math.min(minY, y); maxX = Math.max(maxX, x); maxY = Math.max(maxY, y); }
   const w = Math.max(1, maxX - minX), h = Math.max(1, maxY - minY);
   return {
-    t: 'stroke', nib, pressure, x: round1(minX), y: round1(minY), w: round1(w), h: round1(h), color, sw, ...(o !== undefined ? { o } : {}),
+    t: 'stroke', ...(poly ? { poly } : { nib, pressure }), x: round1(minX), y: round1(minY), w: round1(w), h: round1(h), color, sw, ...(o !== undefined ? { o } : {}),
     pts: pts.map(([x, y, p]) => [round1(x - minX), round1(y - minY), Math.round(p * 100) / 100] as [number, number, number]),
   };
 }
@@ -302,6 +306,11 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
       setTool('select');
       setSelected(new Set([nid]));
       setEditing(nid);
+    } else if (isShapeTool(t) && (e.pointerType !== 'touch' || finger) && !readOnlyRef.current) {
+      // a line or a shape: dragged out from here in the pen's colour and width
+      const pen = loadDeckInk().pens.pen;
+      liveRef.current = { color: pen.color, w: pen.width, poly: true, pts: [[bx, by, 0]] };
+      dragRef.current = { kind: 'draw', start: [bx, by] };
     } else if (drawTool) {
       const hl = t === 'highlighter';
       const drawing = loadDeckInk(), pen = drawing.pens[hl ? 'highlighter' : 'pen'];
@@ -383,6 +392,10 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
       });
     } else if (d?.kind === 'erase') {
       eraseAt(bx, by);
+    } else if (liveRef.current?.poly && d?.kind === 'draw' && isShapeTool(toolRef.current)) {
+      liveRef.current.pts = shapePoints(toolRef.current, d.start, [bx, by], liveRef.current.w, e.shiftKey);
+      try { provider.awareness.setLocalStateField('boardInk', liveRef.current); } catch { /* closing */ }
+      rerender();
     } else if (liveRef.current) {
       const events = (e.getCoalescedEvents?.() ?? [e]);
       for (const ev of events) {
@@ -410,15 +423,17 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     if (live && dragRef.current?.kind === 'draw') {
       liveRef.current = null;
       try { provider.awareness.setLocalStateField('boardInk', null); } catch { /* closing */ }
-      if (live.pts.length) {
+      const xs = live.pts.map(p => p[0]), ys = live.pts.map(p => p[1]);
+      const tiny = live.poly && Math.max(...xs) - Math.min(...xs) < 3 / camRef.current.s && Math.max(...ys) - Math.min(...ys) < 3 / camRef.current.s;
+      if (live.pts.length && !tiny) {
         const polygon = live.pts.map(([x, y]) => [x, y] as [number, number]);
         const erased: string[] = [];
-        if (loadDeckInk().scribble && live.o === undefined && isScribble(polygon, camRef.current.s)) {
+        if (loadDeckInk().scribble && live.o === undefined && !live.poly && isScribble(polygon, camRef.current.s)) {
           objects.forEach((object, key) => {
             if (object.t === 'stroke' && polylineHitsPolygon((object.pts ?? []).map(([x, y]) => [object.x + x, object.y + y]), polygon)) erased.push(key);
           });
         }
-        mutate(() => { if (erased.length) for (const key of erased) objects.delete(key); else objects.set(newId(), strokeToObj(live.pts, live.color, live.w, live.o, live.nib, live.pressure)); });
+        mutate(() => { if (erased.length) for (const key of erased) objects.delete(key); else objects.set(newId(), strokeToObj(live.pts, live.color, live.w, live.o, live.nib, live.pressure, live.poly)); });
       }
     }
     if (dragRef.current?.kind === 'lasso') {
@@ -592,7 +607,7 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
             <svg key={key} data-obj={key} class={'board-stroke' + (selected.has(key) ? ' selected' : '')}
               style={{ left: o.x + 'px', top: o.y + 'px', width: o.w + 'px', height: o.h + 'px', overflow: 'visible' }}
               viewBox={`0 0 ${o.w} ${o.h}`} width={o.w} height={o.h}>
-              <BoardStroke stroke={{ color: o.color ?? '#000', w: o.sw ?? 2, pts: o.pts ?? [], nib: o.nib, pressure: o.pressure, o: o.o }} legacy={strokeD(o)} />
+              <BoardStroke stroke={{ color: o.color ?? '#000', w: o.sw ?? 2, pts: o.pts ?? [], nib: o.nib, pressure: o.pressure, o: o.o, poly: o.poly }} legacy={strokeD(o)} />
             </svg>
           );
         })}
@@ -636,6 +651,7 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
           setTool: next => { if (next === 'pen') setTool(loadDeckInk().pen); else if (next === 'eraser') setTool('eraser'); },
           ink: { presets: loadDeckInk(), set: patch => saveDeckInk(patchDeckInk(loadDeckInk(), patch)), draw: on => setTool(on ? loadDeckInk().pen : 'select') },
           done: false,
+          shapes: { tool: isShapeTool(tool) ? tool : null, set: kind => setTool(kind) },
         })} />}
 
       </div>

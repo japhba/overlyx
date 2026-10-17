@@ -1744,7 +1744,7 @@ blend.
   and slide editors (`webview/appearance.ts`); a PDF panel or slide editor follows the editor's
   Light / Dark too. `tests/darkpages.test.ts`, `e2e/smartinvert.spec.ts`, `e2e/deck-dark.spec.ts`,
   `e2e/darkpdf.spec.ts`, the GUI test's step 6b.
-* **Panes: WYSIWYG · TeX · PDF** (web client, `app/panes.ts`, `app/PaneSwitch.tsx`): the writing
+* **Panes: WYSIWYM · TeX · PDF** (web client, `app/panes.ts`, `app/PaneSwitch.tsx`): the writing
   area shows the rendered document, its LaTeX source and the PDF side by side — any one, two or all
   three, in any order (Overleaf's split view with a third pane). The switch in the middle of the menu
   bar has a chip per pane, standing in the panes' order: a click shows or hides one (the last one
@@ -2251,11 +2251,39 @@ and selection highlights disagreed with the selection as soon as the document wa
 **Drawing and SVG figures.** The layout editor's `deliverable/drawingToolbar.tsx`, `deckink.ts`
 and `core/src/freehand.ts` supply the drawing controls, presets and stroke geometry for layouts,
 document margins and whiteboards. Older strokes retain their geometry; new document strokes keep
-their nib settings in their sketch data and SVG sidecars. Right-click an SVG figure → *Edit SVG…*
-opens `app/SvgEditor.tsx`: the same `DeliverableCanvas` in a lightbox, backed by a local undo history.
-The canvas's sandboxed `svg-frame.html` loads the shared runtime. Save exports vectors back to the
-original SVG, checks for external file changes first and refreshes the figure; Cancel discards
-the draft. It works in the web editor and VS Code, with each figure's own project and directory.
+their nib settings in their sketch data and SVG sidecars. Double-click an SVG figure, its ✎ *Edit
+drawing* (on hover) or right-click → *Edit drawing (SVG)…* opens `app/SvgEditor.tsx`: the same
+`DeliverableCanvas` in a lightbox, backed by a local undo history. The canvas's sandboxed
+`svg-frame.html` loads the shared runtime; the server serves it (like `offline-frame.html`) with
+`OFFLINE_FRAME_CSP` — under the app's `script-src 'self'` its inline bootstrap never ran and the web
+editor hung at "Opening the canvas…" (17 Oct 2026). Save exports vectors back to the original SVG,
+checks for external file changes first and refreshes the figure; Cancel discards the draft. *Insert ▸
+Drawing (SVG)…* (`editor/svgdrawing.ts`) makes `figures/drawing.svg` (-2, …), inserts it at the
+cursor and opens it; closed without saving, the figure and the file go again (`SvgTarget.onDiscard`).
+It works in the web editor and VS Code, with each figure's own project and directory.
+
+The Draw row of documents and whiteboards also has the layout editor's **Lines** (line, arrow) and
+**Shapes** (rectangle, rounded rectangle, ellipse, triangle, diamond, star, hexagon), dragged out in
+the pen's colour and width (Shift: 45° steps / as wide as high). They are ink strokes with
+`poly: true` (`core/ink.ts` `shapePoints`, `strokeRuns`): `pts` is the exact outline, drawn without
+smoothing, so the eraser, lasso, scribble-erase, live collaboration and the SVG sidecars handle them
+like any stroke. Every Draw row picks its colours from the layout editor's palette (`ColorGrid`:
+Google's grid, a seaborn row, custom colours). In Modern, *Draw* sits beside the inserts (it was under
+⋮), and the paper page stays centred between the drawing gutters (it used to scroll out of view).
+
+**Toolbars at a side** (`app/tbdock.tsx`): View ▸ Toolbars, or right-click any toolbar, puts the
+toolbar rows along the top (default), or in a column left or right of the document (`ol.tbDock`, this
+browser), in the web client and VS Code. The rows reflow there (`.tb-side` in styles.css): buttons
+two or three abreast, groups parted by a line, the paragraph style, font, size, zoom and mode switch
+at the column's width; their popups open beside the button (`app/popup.ts`). `pinUnder` also takes
+out the offset of a transformed ancestor: Modern centres the bottom rows (Draw, Math, Table, Review)
+with `translateX(-50%)`, and their popups opened far off to the right and below the window.
+
+**Page estimate.** The status bar's word count ends with the pages the document (or the selection)
+would fill at 11pt — `app/pagecount.ts`, LaTeX's article class at 11pt on A4 (43 lines of ~70
+characters, measured on a built paper); headings, the title, display formulas, figures (5:8 of their
+width), tables, theorems, lists, footnotes and the bibliography (2.6 lines per cited work) by the room
+they take, plus 6 % for page breaking. Within ~10 % of the built PDFs it was checked against.
 
 **VS Code interface zoom and PDF.** The *UI zoom* button in document, layout and PDF toolbars uses
 VS Code's native window zoom, scaling the whole window with correct pointer coordinates. Content
@@ -3018,7 +3046,19 @@ clones and VS Code (there it is an ordinary folder). The file listing reads the 
 entry — its title, a count, a coloured rule tying its documents together — with its documents in the
 group's order under their titles (nested ones indented) and the folder's other files after them. A
 manifest that does not parse leaves an ordinary folder. Groups are made by importing a Google Doc
-with tabs (above), which keeps them in step with the tabs.
+with tabs (above), which keeps them in step with the tabs. A member deleted or renamed in the
+explorer leaves the manifest or is renamed in it (`server/docgroups.ts`); a Google Docs tab whose
+document was deleted (or unlinked) here is remembered in `gdocs_dropped_tabs` (per folder) and not
+brought back — before, every sync re-created it as "Proposal 2.md", "Proposal 3.md" (17 Oct 2026). A
+renamed document keeps its link (`gdocs/sync.ts filesMoved`). When the open document is deleted the
+tab goes on to another document of its folder (`FileBrowser siblingDocument`), not to the start
+screen; deleted from the explorer there is no error toast.
+
+**The file explorer** shows documents first (LaTeX, LyX, markdown, whiteboards, slides / posters /
+pages, and the folders holding them); what is not a document — pictures, .bib, .sty, scripts, data,
+PDFs, folders without a document — waits in a folded **Other files (n)** row at the end of each folder
+(`FileBrowser renderChildren`; opens by itself for the file being shown, or one just uploaded or
+created).
 
 ## The .tex format
 

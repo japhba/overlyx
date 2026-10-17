@@ -1,8 +1,8 @@
 # OverLyX
 
-**OverLyX = Overleaf + LyX** — a collaborative, LyX-style WYSIWYG editor for LaTeX documents.
+**OverLyX = Overleaf + LyX** — a collaborative, LyX-style WYSIWYM editor for LaTeX documents.
 
-1. **WYSIWYG editing** — text, formulas, tables and floats render as you type, no compile loop;
+1. **WYSIWYM editing** (LyX’s “what you see is what you mean”) — text, formulas, tables and floats render as you type, no compile loop;
    LyX's keybindings, toolbars and math editor.
 2. **Native .tex** — plain LaTeX files are the source of truth, reproduced byte for byte:
    git, `latexmk`, Overleaf and your other editors keep working on the same files.

@@ -9,7 +9,8 @@ import { stepOnto, type Detent } from './zoomdetent';
 import { useEffect, useState } from 'preact/hooks';
 import { styleLabel, styleSearchText } from './stylenames';
 import type { EditorView } from 'prosemirror-view';
-import type { Node as PMNode } from 'prosemirror-model';
+import { NodeSelection } from 'prosemirror-state';
+import { estimatePages } from './pagecount';
 import { currentParagraph } from '../editor/commands';
 import { editorContext, onMetaChange } from '../editor/context';
 import { recordInteraction } from '../usage';
@@ -110,18 +111,23 @@ export function suggestLabel(view: EditorView): string {
   return prefix + (text || 'label');
 }
 
-export interface DocStats { words: number; chars: number; /** the numbers describe the selection, not the whole document */ sel: boolean }
+export interface DocStats { words: number; chars: number; /** the numbers describe the selection, not the whole document */ sel: boolean; /** estimated pages at 11pt (app/pagecount.ts) */ pages?: number }
 
 /**
  * Word / character count for the status bar: the selection when there is one, else the whole
- * document (like LyX's statistics; a math formula or other inset counts as a word boundary).
+ * document (like LyX's statistics; a math formula or other inset counts as a word boundary), and
+ * the pages they would fill at 11pt. A selected object (a picture, a formula) is no text to count:
+ * the document's numbers stay.
  */
 export function documentStats(view: EditorView): DocStats {
-  const { from, to, empty } = view.state.selection;
-  const doc: PMNode = view.state.doc;
+  const { selection, doc } = view.state;
+  const { from, to } = selection;
+  const empty = selection.empty || (selection instanceof NodeSelection && !/\S/.test(doc.textBetween(from, to, '\n', ' ')));
   const text = doc.textBetween(empty ? 0 : from, empty ? doc.content.size : to, '\n', ' ');
   const words = (text.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) ?? []).length;
-  return { words, chars: text.replace(/\s+/g, '').length, sel: !empty };
+  let pages: number | undefined;
+  try { pages = doc.firstChild?.type.name === 'ol_page' ? undefined : empty ? estimatePages(doc) : estimatePages(doc.cut(from, to), false); } catch { pages = undefined; }
+  return { words, chars: text.replace(/\s+/g, '').length, sel: !empty, pages };
 }
 
 /** The paragraph layout picker (Alt+P Space or the layout menu): type to filter, Enter takes the first match. */

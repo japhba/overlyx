@@ -120,7 +120,7 @@ export const TOUR_STEPS: Step[] = [
     target: ['[data-tb="pdf"]'],
     enter: a => a.showPdf(),
     body: <>
-      <p>PDF builds run in the background on the server (<code>latexmk</code>) — keep editing while they run. The <i>PDF</i> pane beside the text shows the progress, the result, how old it is and the log; once it is open it rebuilds by itself a moment after you stop typing (the ▾ beside <i>View PDF</i> sets that). <i>WYSIWYG · TeX · PDF</i> at the top arranges the panes.</p>
+      <p>PDF builds run in the background on the server (<code>latexmk</code>) — keep editing while they run. The <i>PDF</i> pane beside the text shows the progress, the result, how old it is and the log; once it is open it rebuilds by itself a moment after you stop typing (the ▾ beside <i>View PDF</i> sets that). <i>WYSIWYM · TeX · PDF</i> at the top arranges the panes.</p>
       <p><b>Press {kbd(MOD + '+R')}</b> or this button to build the PDF.</p>
     </>,
     done: (now, base) => now.pdfBusy || now.pdfBuiltAt !== base.pdfBuiltAt,

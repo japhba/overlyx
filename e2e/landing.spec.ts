@@ -52,7 +52,7 @@ test.describe('landing page', () => {
     await expect(page.locator('.login .lede')).toHaveText('LaTeX documents, slides and posters, edited and rendered in the same place.');
     await expect(page.locator('.login .formula')).toContainText('OverLyX=Overleaf+LyX');
     await expect(page.locator('.login .formula')).toContainText('Complexity');
-    await expect(page.locator('.login .flist strong')).toHaveText(['WYSIWYG LaTeX', 'Slides and posters', 'Together', 'Your tools']);
+    await expect(page.locator('.login .flist strong')).toHaveText(['WYSIWYM LaTeX', 'Slides and posters', 'Together', 'Your tools']);
     await expect(page.locator('.login')).not.toContainText('web page');
     // inside the Modern interface the wordmark keeps its tilted letters, without speed lines too (bob: an
     // account that never chose an interface, so the browser's choice holds)

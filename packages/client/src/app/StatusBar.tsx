@@ -5,6 +5,7 @@ import { inkOn } from './contrast';
 import { pdfStatus, useTicker, type PdfStatusInput } from './pdfstatus';
 import { useEffect, useState } from 'preact/hooks';
 import { styleLabel } from './stylenames';
+import { formatPages } from './pagecount';
 import { layoutZoom, layoutZoomStep, onLayoutZoom } from '../editor/layout/controller';
 import { stepTextZoom } from './shellutil';
 import { viewportZoom, onViewportZoom, resetViewportZoom } from './documentviewport';
@@ -86,7 +87,7 @@ export function ZoomControl({ zoom, onZoom }: { zoom: number; onZoom: (z: number
   );
 }
 
-export interface DocStats { words: number; chars: number; sel: boolean }
+export interface DocStats { words: number; chars: number; sel: boolean; pages?: number }
 
 /**
  * How old the PDF is, and whether the document has changed since (app/pdfstatus.ts) — in the
@@ -147,8 +148,10 @@ export function StatusBar({ layout, status, chord, message, save, tracking, trac
       <span class="spacer" />
       {updateReady && <button type="button" class="update-hint" title="A newer version of OverLyX is deployed. Reloading takes a second; your document is kept." onClick={() => location.reload()}>↻ new version — reload</button>}
       {stats && (
-        <span class="stats" data-stats title={stats.sel ? 'Words and characters in the selection' : 'Words and characters in the document'}>
+        <span class="stats" data-stats title={(stats.sel ? 'Words and characters in the selection' : 'Words and characters in the document')
+          + (stats.pages !== undefined ? `, and the pages ${stats.sel ? 'it' : 'they'} would fill at 11pt — estimated for LaTeX's article class on A4 (43 lines of about 70 characters; headings, formulas, figures, tables and the references by the room they take). The PDF decides.` : '')}>
           {stats.sel ? 'selection: ' : ''}{stats.words.toLocaleString('en-US')} words, {stats.chars.toLocaleString('en-US')} characters
+          {stats.pages !== undefined && <span class="stats-pages" data-stats-pages>{' · '}{formatPages(stats.pages)} at 11pt</span>}
         </span>
       )}
       <SaveIndicator save={save} />

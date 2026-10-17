@@ -1,5 +1,5 @@
 /**
- * The pane control shared by browser and VS Code: WYSIWYG · TeX · PDF, left to right in the order
+ * The pane control shared by browser and VS Code: WYSIWYM · TeX · PDF, left to right in the order
  * the panes stand. A click shows or hides a pane (the last one stays), a double-click shows it
  * alone, dragging a chip sideways moves its pane; ▾ lists the useful arrangements in words
  * ("Document and PDF"), and swap sides / equal widths. On a phone-width screen one pane at a time: a click shows that one.
@@ -70,7 +70,7 @@ export function PaneSwitch({ layout, onChange, narrow = false, markdown = false 
 
   return (
     <div class="pane-switch-wrap" ref={wrap}>
-      <div class={'pane-switch view-mode-switch' + (drag ? ' dragging' : '')} role="group" aria-label="Panes: WYSIWYG, TeX and PDF" ref={row}>
+      <div class={'pane-switch view-mode-switch' + (drag ? ' dragging' : '')} role="group" aria-label="Panes: WYSIWYM, TeX and PDF" ref={row}>
         {layout.order.map(id => {
           const shift = drag && drag.id !== id ? (dropOrder.indexOf(id) - layout.order.indexOf(id)) * drag.w : 0;
           return (

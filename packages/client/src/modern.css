@@ -352,6 +352,15 @@ html[data-ui="modern"] .editor-scroll:not(.margin-mode) > .editor-page:not(:has(
   padding: 64px 96px 120px; box-shadow: 0 0 0 1px var(--m-line2), 0 1px 3px rgba(28, 27, 25, 0.05); border-radius: 2px;
 }
 html[data-ui="modern"][data-theme="dark"] .editor-scroll:not(.margin-mode) > .editor-page:not(:has(.ol-layout)) { box-shadow: 0 0 0 1px var(--m-line); }
+/* Draw (margin ink) adds a gutter on each side of the strip (styles.css .ink-pan) and scrolls to its middle:
+   the paper sits in that middle — it stayed at the strip's left, scrolled out of view, and the page vanished */
+html[data-ui="modern"] .editor-scroll.ink-pan:not(.margin-mode) > .editor-page:not(:has(.ol-layout)) {
+  --paper-w: min(calc(100% - 16px), calc(var(--text-width, 720px) + 192px));
+  width: var(--paper-w); max-width: none;
+  margin-left: calc(var(--ink-gutter, 85vw) + (100% - var(--paper-w)) / 2);
+  margin-right: calc(var(--ink-gutter, 85vw) + (100% - var(--paper-w)) / 2);
+}
+html[data-ui="modern"] .editor-scroll.ink-pan:not(.margin-mode) > .editor-page:not(:has(.ol-layout)) .editor-host > .lyx-editor { max-width: min(var(--text-width, 720px), 100%); }
 @media (max-width: 900px) { html[data-ui="modern"] .editor-scroll:not(.margin-mode) > .editor-page:not(:has(.ol-layout)) { padding: 32px 24px 120px; margin: 0; max-width: none; box-shadow: none; } }
 html[data-ui="modern"] .ruler { background: var(--m-canvas); }
 

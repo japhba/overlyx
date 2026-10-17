@@ -1,4 +1,5 @@
 /** Editing commands shared by the browser and VS Code. Add document features here once. */
+import { insertDrawing } from '../editor/svgdrawing';
 import type { EditorView } from 'prosemirror-view';
 import type { Command } from 'prosemirror-state';
 import { undo, redo } from 'y-prosemirror';
@@ -247,6 +248,7 @@ export function documentMenus({ view, meta, run, runView, setDialog, textColor, 
       { label: 'Comment thread', shortcut: 'Ctrl+Alt+C', action: () => run(C.insertComment) },
       { sep: true },
       { label: 'Graphics…', shortcut: 'Ctrl+Shift+G', action: () => setDialog({ name: 'graphics' }) },
+      { label: 'Drawing (SVG)…', action: () => runView(v => { void insertDrawing(v); return true; }) },
       { label: 'Table…', shortcut: 'Ctrl+Alt+T', action: () => setDialog({ name: 'table' }) },
       { label: 'Caption', action: () => run(C.insertCaption) },
       { sep: true },
