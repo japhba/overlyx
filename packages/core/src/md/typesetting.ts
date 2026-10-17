@@ -5,7 +5,7 @@
  *   mainfont, sansfont, monofont, mathfont   OpenType fonts by name (fontspec, unicode-math); the
  *                                            settings dialog offers MD_FONTS, each with its math font
  *   fontsize: 11pt         papersize: a4        geometry: margin=2cm (or a list of geometry's options)
- *   linestretch: 1.25      numbersections: true
+ *   linestretch: 1.25      numbersections: true      justify: true (OverLyX's; ragged right without)
  *   headings               how headings are set (titlesec; the editor draws them alike): `run-in`, or
  *                          keys for every level — display (block | run-in), font, size (small | normal
  *                          | large | larger | huge), weight (bold | normal), shape (upright | italic),
@@ -180,6 +180,8 @@ export interface MdTypesetting {
   /** 0: single */
   linestretch: number;
   numbersections: boolean;
+  /** justified text (hyphenated) — a markdown document is set ragged right otherwise */
+  justify: boolean;
   /** null: LaTeX's own */
   headings: HeadingStyles | null;
   headerIncludes: string[];
@@ -204,6 +206,7 @@ export function mdTypesetting(lines: string[]): MdTypesetting {
     geometry: list(v.geometry).filter(o => /^[\w.-]+(=[\w.\s-]+)?$/.test(o)),
     linestretch: stretch > 0 && stretch < 5 ? stretch : 0,
     numbersections: one(v.numbersections) === 'true',
+    justify: one(v.justify) === 'true',
     headings: headingStyles(v.headings),
     headerIncludes: list(v['header-includes']).filter(l => !/^\s*\\documentclass/.test(l)),
   };
@@ -219,6 +222,8 @@ export function applyTypesetting(h: Header, t: MdTypesetting): void {
   if (t.fontsize) set('paperfontsize', String(t.fontsize));
   if (t.linestretch) set('spacing', `other ${t.linestretch}`);
   if (t.numbersections) set('secnumdepth', '3');
+  // (the editor justifies on \overlyx_justify: a .tex document's \justification true is LaTeX's default, not a choice)
+  if (t.justify) { set('justification', 'true'); set('overlyx_justify', 'true'); }
   if (t.mainfont || t.sansfont || t.monofont) {
     set('use_non_tex_fonts', 'true');
     if (t.mainfont) set('font_roman', `"default" "${t.mainfont}"`);
@@ -230,7 +235,7 @@ export function applyTypesetting(h: Header, t: MdTypesetting): void {
 }
 
 /** the header keys the typesetting decides */
-const TYPESET_KEYS = ['papersize', 'paperfontsize', 'spacing', 'secnumdepth', 'use_non_tex_fonts', 'font_roman', 'font_sans', 'font_typewriter', 'overlyx_headings'];
+const TYPESET_KEYS = ['papersize', 'paperfontsize', 'spacing', 'secnumdepth', 'use_non_tex_fonts', 'font_roman', 'font_sans', 'font_typewriter', 'overlyx_headings', 'justification', 'overlyx_justify'];
 
 /** A markdown document's header after its front matter changed: those keys as a markdown document has them, then as the front matter says. */
 export function withTypesetting(headerLines: string[], preamble: string[]): string[] {

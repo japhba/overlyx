@@ -21,7 +21,7 @@ export function MarkdownSettingsDialog({ docId, onClose, onSaved }: { docId: str
   const [fonts, setFonts] = useState<Font[]>([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [v, setV] = useState({ main: '', math: '', size: '', paper: '', margins: '', stretch: '', numbered: false, runIn: false, headingFont: '', headingColor: '', spacing: '' });
+  const [v, setV] = useState({ main: '', math: '', size: '', paper: '', margins: '', stretch: '', numbered: false, justify: false, runIn: false, headingFont: '', headingColor: '', spacing: '' });
   const [headings, setHeadings] = useState<HeadingKeys>({});
   useEffect(() => {
     api.mdFrontMatter(docId).then(r => {
@@ -33,7 +33,7 @@ export function MarkdownSettingsDialog({ docId, onClose, onSaved }: { docId: str
       const h = headingKeys(vars.headings);
       setHeadings(h);
       setV({ main: one(vars.mainfont), math: one(vars.mathfont), size: one(vars.fontsize), paper: one(vars.papersize).toLowerCase(), margins, stretch: one(vars.linestretch),
-        numbered: one(vars.numbersections) === 'true', runIn: one(h.display) === 'run-in', headingFont: one(h.font), headingColor: one(h.color),
+        numbered: one(vars.numbersections) === 'true', justify: one(vars.justify) === 'true', runIn: one(h.display) === 'run-in', headingFont: one(h.font), headingColor: one(h.color),
         spacing: !h['space-above'] && !h['space-below'] ? '' : Object.keys(SPACINGS).find(k => SPACINGS[k][0] === one(h['space-above']) && SPACINGS[k][1] === one(h['space-below'])) ?? 'custom' });
     }).catch(e => setError((e as Error).message));
   }, [docId]);
@@ -59,6 +59,7 @@ export function MarkdownSettingsDialog({ docId, onClose, onSaved }: { docId: str
         geometry: !margins ? null : margins.includes('=') ? margins.split(/\s*,\s*/).filter(Boolean) : `margin=${margins}`,
         linestretch: v.stretch && v.stretch !== '1' ? v.stretch : null,
         numbersections: v.numbered ? true : null,
+        justify: v.justify ? true : null,
         headings: !keys.length ? null : keys.length === 1 && h.display === 'run-in' ? 'run-in' : h,
       });
       onSaved?.();
@@ -98,6 +99,7 @@ export function MarkdownSettingsDialog({ docId, onClose, onSaved }: { docId: str
           {['1', '1.15', '1.25', '1.5', '2'].map(s => <option key={s} value={s}>{s === '1' ? 'Single' : s === '2' ? 'Double' : s}</option>)}
           {v.stretch && !['1', '1.15', '1.25', '1.5', '2'].includes(v.stretch) && <option value={v.stretch}>{v.stretch}</option>}
         </select>)}
+        <label class="md-set-check"><input type="checkbox" data-md-justify checked={v.justify} onChange={e => set({ justify: (e.target as HTMLInputElement).checked })} /> Justified text (hyphenated, as LaTeX sets it)</label>
         <label class="md-set-check"><input type="checkbox" data-md-numbered checked={v.numbered} onChange={e => set({ numbered: (e.target as HTMLInputElement).checked })} /> Numbered sections</label>
         <label class="md-set-check"><input type="checkbox" data-md-runin checked={v.runIn} onChange={e => set({ runIn: (e.target as HTMLInputElement).checked })} /> Headings run into their paragraph</label>
         {row('Heading font', <select data-md-heading-font value={v.headingFont} onChange={e => set({ headingFont: (e.target as HTMLSelectElement).value })}>

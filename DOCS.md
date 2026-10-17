@@ -3010,7 +3010,10 @@ can hold (`core/src/md/`, `client/src/editor/markdown.ts`):
   variables where pandoc has one, so the file comes out alike with `pandoc --pdf-engine=lualatex`:
   `mainfont` / `sansfont` / `monofont` / `mathfont` (OpenType fonts by name: fontspec, unicode-math),
   `fontsize`, `papersize`, `geometry` (geometry's options, `margin=2cm` or a list), `linestretch`,
-  `numbersections`, `header-includes` (preamble LaTeX, `- |` blocks and ```` ```{=latex} ```` fences
+  `numbersections`, `justify: true` (OverLyX's: justified, hyphenated — LaTeX's own way, so the PDF
+  just drops the ragged right; the editor justifies on `\overlyx_justify true`, `html[data-justify]`,
+  since a .tex document's `\justification true` is the default, not a choice), `header-includes`
+  (preamble LaTeX, `- |` blocks and ```` ```{=latex} ```` fences
   too) — and OverLyX's `headings`: `run-in`, or keys for every level (display block | run-in, font,
   size small | normal | large | larger | huge, weight, shape upright | italic, case normal | smallcaps |
   uppercase, color #rrggbb, align left | center, rule none | below | above, space-above / space-below:

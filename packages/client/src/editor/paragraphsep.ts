@@ -23,6 +23,8 @@ export function setDocumentParagraphs(headerLines: readonly string[]): void {
   const skip = paragraphSkip(headerLines);
   const root = document.documentElement;
   if (skip) root.dataset.parSep = skip; else delete root.dataset.parSep;
+  // a markdown document's `justify: true` (core md/typesetting.ts): justified and hyphenated, as its PDF (styles.css html[data-justify])
+  if (headerLines.includes('\\overlyx_justify true')) root.dataset.justify = ''; else delete root.dataset.justify;
 }
 
 /**

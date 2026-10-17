@@ -443,6 +443,8 @@ html[data-theme="dark"]:not([data-dark-pages]) .editor-scroll.margin-mode > .edi
 .lyx-par[data-spacing="onehalf"] { line-height: 1.8; }
 .lyx-par[data-spacing="double"] { line-height: 2.4; }
 .lyx-par[data-spacing="single"] { line-height: 1.35; }
+/* a markdown document set justified (editor/paragraphsep.ts): paragraphs without an alignment of their own */
+html[data-justify] .lyx-editor > .lyx-par:not([data-align]):is([data-layout="Standard"], [data-layout="Itemize"], [data-layout="Enumerate"], [data-layout="Quotation"], [data-layout="Quote"]) { text-align: justify; hyphens: auto; }
 .lyx-par[data-align="center"] { text-align: center; }
 .lyx-par[data-align="right"] { text-align: right; }
 .lyx-par[data-align="left"] { text-align: left; }

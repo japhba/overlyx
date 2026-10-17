@@ -107,4 +107,14 @@ describe('heading styles (headings: in the front matter)', () => {
     expect(pre).toContain('\\titlespacing*{\\section}{0pt}{2em plus .2ex}{3pt}');
     expect(pre).toContain('\\titlespacing*{\\subsection}{0pt}{3.25ex plus 1ex minus .2ex}{0.4ex}');
   });
+
+  it('justify: justified text in the PDF and the editor; ragged right without, as before', () => {
+    const on = preambleOf('---\njustify: true\n---\n\nText.\n');
+    // (justified is LaTeX's own way: the ragged-right setting just goes)
+    expect(on).not.toContain('\\RaggedRight');
+    expect(preambleOf('Text.\n')).toContain('\\RaggedRight');
+    const { doc } = parseMarkdown('---\njustify: true\n---\n\nText.\n');
+    expect(doc.header.lines).toContain('\\overlyx_justify true');
+  });
 });
+
