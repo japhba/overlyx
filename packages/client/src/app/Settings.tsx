@@ -120,7 +120,7 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
     if (section === 'account' && user.isAdmin && users === null) api.users().then(r => setUsers(r.users)).catch(e => setErr((e as Error).message));
   }, [section]);
 
-  const check = (key: 'spellcheck' | 'autoCorrect' | 'invertFigures' | 'aiButton' | 'aiRewrite' | 'aiCompleteText' | 'aiCompleteMath' | 'aiInk' | 'usageStats' | 'betaDiagnostics' | 'shortcutTips' | 'darkPages', label: string, hint: string, disabled = false) => (
+  const check = (key: 'spellcheck' | 'autoCorrect' | 'invertFigures' | 'aiButton' | 'aiRewrite' | 'aiCompleteText' | 'aiCompleteMath' | 'aiInk' | 'usageStats' | 'betaDiagnostics' | 'shortcutTips' | 'selectionBar' | 'darkPages', label: string, hint: string, disabled = false) => (
     <label class={'pref' + (disabled ? ' disabled' : '')}><input type="checkbox" data-pref={key} checked={p[key]} disabled={disabled} onChange={e => { const checked = (e.target as HTMLInputElement).checked; setPref(key, checked); if (key === 'betaDiagnostics' && checked) recordReliability('diagnostics.enabled'); }} /><span>{label}<span class="sub">{hint}</span></span></label>
   );
   // smart invert and the text tone (app/darkpages.ts): Appearance, or the editor's section where a shell has no Appearance (VS Code)
@@ -173,6 +173,7 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
               <option value="overlyx">OverLyX — instant, knows LaTeX (skips formulas, commands, code), suggestions in the menu; English, British, German, French</option>
               <option value="browser">Browser — the browser's own checker (checks slowly after a click; suggestions only via {/Mac/.test(navigator.platform) ? '⇧' : 'Shift+'}right-click)</option>
             </select></Row>
+            {check('selectionBar', 'Quick menu over selected text', 'Selecting words brings up a small bar right above them: font, size, bold / italic / underline, colour, link, comment — the toolbar’s own buttons, where the words are. Escape puts it away.')}
             <h3>Formulas</h3>
             <Row label="Math keyboard"><select data-pref="mathKeyboard" value={p.mathKeyboard} onChange={e => setPref('mathKeyboard', (e.target as HTMLSelectElement).value as Prefs['mathKeyboard'])}>
               <option value="auto">On touch screens — until a hardware keyboard is used</option>

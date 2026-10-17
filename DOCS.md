@@ -2955,6 +2955,17 @@ How it works, in order of what happens when you open a document:
   replacement (deletion + insertion) or a suggestion across a paragraph break is one decision; hovering
   ✓ / ✗ shades what it applies to. Not on read-only editors. The bar and the shading are drawn outside
   the editor's DOM. `tests/changes-actions.test.ts`, `e2e/toolbar.spec.ts` "accept / reject in the text".
+* **Quick menu over selected words** (`app/SelectionBar.tsx`, both shells; the deck's QuickBar in a
+  document): selecting words brings up a small bar right above them — below them when there is no room
+  above, kept inside the document pane, following it while it scrolls — with the text menu's own
+  buttons (`toolbars.tsx` `quick`, re-id'd `q-…`): font, size, bold / italic / underline, colour, link,
+  comment; in a markdown document markdown's (font, bold, emphasis, strikethrough, code, link,
+  comment). It comes up once the selection settles (the mouse button released; 250 ms after the last
+  Shift+arrow), goes with the selection, typing over it, Escape (unless one of its own lists is open:
+  that one closes) or the focus leaving for elsewhere (its own lists and fields may have it); not over a
+  node selection, cells, a formula being edited, a read-only document or a layout document (its canvas
+  has its own). It looks like the deck's (`.dl-quick`) and lives in `<body>`. Settings ▸ Editor ▸ Text
+  ▸ "Quick menu over selected text" (`prefs.selectionBar`, on by default). `tests/parity.test.ts`.
 * **Paragraph separation** (Document ▸ Settings): "Vertical space" (`\paragraph_separation skip`) is drawn
   as the PDF has it — paragraphs flush left, `\defskip` between them (`editor/paragraphsep.ts`, both
   shells via `setDocumentParagraphs(headerLines)`; markdown documents are always this way). Settings ▸

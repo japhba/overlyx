@@ -33,6 +33,7 @@ import { useUiMode, setUiMode, adoptAccountUi, uiChoiceVersion } from './uimode'
 import { usePresentation } from './presentation';
 import { Toolbar, NAMED_COLORS, type ToolButton } from './Toolbar';
 import { buildToolbars, loadToolbarPrefs, mathExecutor, useMathPanels, toolbarClipboard, markValue, MODERN_COLLAPSE, type ToolbarId, type ToolbarMode, type ToolbarPrefs } from './toolbars';
+import { SelectionBar } from './SelectionBar';
 import { debounce, hashAuthor, applyAuthorColors, bcp47, suggestLabel, LayoutPicker, documentStats, applyEditorZoom, stepTextZoom, useDocumentViewportZoom, SidebarGrip, restoreSidebarWidths } from './shellutil';
 import { chooseLyxImport } from './lyximport';
 import { setDocumentFonts } from '../fonts/editorfont';
@@ -1713,6 +1714,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
           {inkMode && <Toolbar id="ink" label="Draw" groups={inkGroups} />}
         </div>
       )}
+      {/* the quick menu over selected words (toolbars.tsx `quick`) */}
+      {isLyxDoc && <SelectionBar view={view} groups={tb.quick} />}
       <StatusBar layout={layout} status={status} chord={chord} message={message} save={save} tracking={tracking} trackingAs={user.name} change={changeInfo}
         docLabel={view && masterView && view !== masterView ? viewDocId(view).split('/').pop() ?? null : null}
         readOnly={!!docId && viewOnly} updateReady={updateReady} aiBusy={aiBusy > 0}

@@ -3,6 +3,7 @@ import { setLayoutHeader, layoutZoomStep, refreshLayoutCheck } from '@client/edi
 import { documentMenus } from '@client/app/documentMenus';
 import { editorViewMenu } from '@client/app/editorViewMenu';
 import { buildToolbars, loadToolbarPrefs, mathExecutor, useMathPanels, toolbarClipboard, markValue, type ToolbarId, type ToolbarMode, type ToolbarPrefs } from '@client/app/toolbars';
+import { SelectionBar } from '@client/app/SelectionBar';
 import { debounce, hashAuthor, applyAuthorColors, bcp47, suggestLabel, LayoutPicker, documentStats, applyEditorZoom, stepTextZoom, useDocumentViewportZoom, SidebarGrip, restoreSidebarWidths } from '@client/app/shellutil';
 import { setDocumentFonts } from '@client/fonts/editorfont';
 import { setDocumentParagraphs, setDocumentHeadings } from '@client/editor/paragraphsep';
@@ -875,6 +876,8 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
           {inkMode && <Toolbar id="ink" label="Draw" groups={inkGroups} />}
         </div>
       )}
+      {/* the quick menu over selected words (toolbars.tsx `quick`) */}
+      {!pdfOnly && <SelectionBar view={view} groups={tb.quick} />}
       <StatusBar layout={layout} status={status} chord={chord} message={message} save={{ state: 'saved', pending: false, savedAt: 0, unavailable: false }}
         tracking={tracking} trackingAs="You" change={changeInfo} stats={docStats} zoom={zoom} onZoom={setZoom} />
       {renderDialog()}
