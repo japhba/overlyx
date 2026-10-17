@@ -50,6 +50,14 @@ describe('scientific starter refresh', () => {
     expect(isLightlyEditedStarter(page.replace('author = {A Researcher}', 'author = {Someone Else}'), 'site')).toBe(false);
   });
 
+  it('recognises every previously shipped scientific example, the project posters included', () => {
+    for (const folder of ['talk', 'talk-dark-seminar', 'talk-serif-colloquium', 'poster', 'poster-figure-first', 'poster-research-portrait', 'poster-bernstein-2026', 'poster-icml-2026']) {
+      const shipped = readFileSync(join(templates, 'starters-legacy/scientific-v2', folder, 'index.html'), 'utf8');
+      expect(shipped).not.toBe(latest(folder));
+      expect(isLightlyEditedStarter(shipped, folder)).toBe(true);
+    }
+  });
+
   it('refreshes eligible examples once, retains versions and adds variants without overwriting an existing folder', () => {
     const { dir, project } = seed('refresh');
     mkdirSync(join(dir, 'talk-dark-seminar'));

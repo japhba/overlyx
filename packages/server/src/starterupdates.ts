@@ -12,7 +12,7 @@ import { resolveProjectPath } from './projects.ts';
 
 const templates = path.resolve(import.meta.dirname, '../templates');
 const folders = SCIENTIFIC_TEMPLATES.map(t => t.id === 'research' ? 'talk' : t.id === 'betterposter' ? 'poster' : `${t.kind === 'deck' ? 'talk' : 'poster'}-${t.id}`);
-const oldSources = (folder: string) => ['web', 'scientific-v1', 'mit-v1'].map(version => path.join(templates, 'starters-legacy', version, folder, 'index.html'))
+const oldSources = (folder: string) => ['web', 'scientific-v1', 'mit-v1', 'scientific-v2'].map(version => path.join(templates, 'starters-legacy', version, folder, 'index.html'))
   .filter(file => fs.existsSync(file)).map(file => fs.readFileSync(file, 'utf8'));
 const compact = (s: string) => s.replace(/\s+/g, ' ').trim();
 

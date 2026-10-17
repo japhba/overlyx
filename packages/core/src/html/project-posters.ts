@@ -2,7 +2,7 @@
  * Research text, author identities, institutional marks and data are replaced with editable examples.
  */
 import type { ScientificTemplate } from './scientific.ts';
-type Chart = (type: 'decay' | 'phase' | 'calibration', x: number, y: number, w: number, h: number) => string;
+import type { Chart, ChartType } from './scientific-charts.ts';
 const px = (n: number) => +(n * 96 / 25.4).toFixed(3);
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const colors: Record<string, string> = { jblue: '#023d6b', jbluedark: '#012848', jbluemid: '#0070b4', paleblue: '#ecf2f8', accred: '#d62728', ink: '#1c2026', white: '#ffffff' };
@@ -37,13 +37,13 @@ const copy: Record<string, string> = {
   'Equation 4': String.raw`\[a_k(t)=a_k(0)e^{-t/\tau_k},\quad \tau_k=(Dk^2)^{-1}\]`,
   Punchline: 'Scale sets lifetime.', 'Punchline text': 'Doubling the spatial frequency produces four times faster relaxation.',
   'Punchline formula': String.raw`\[\tau_{2k}=\tau_k/4\]`,
-  'Section 4 title': '4 · Exact decay curves', 'Section 4 text': 'Normalized amplitudes collapse when time is measured in units of each mode’s lifetime.',
-  'Section 5 title': '5 · Fine structure fades first', 'Section 5 text': 'Compare exact mode amplitudes under the same diffusivity.',
-  'Figure 5a caption': 'Analytical exponential decay; solid and dashed curves denote the first and second modes.',
+  'Section 4 title': '4 · Lifetime falls as k⁻²', 'Section 4 text': 'On logarithmic axes the lifetimes of successive modes lie on a straight line of slope −2.',
+  'Section 5 title': '5 · Fine structure fades first', 'Section 5 text': 'The same profile at three times: the cos 2x ripple is gone long before the broad mode.',
+  'Figure 5a caption': 'Analytical profiles u(x, t) = e<sup>−t</sup> cos x + 0.45 e<sup>−4t</sup> cos 2x at t / τ₁ = 0, 0.25 and 1.',
   'Section 5 transition': 'The amplitude ratio isolates the additional decay of the higher-frequency mode.',
   'Equation 5': String.raw`\[\frac{a_{2k}(t)}{a_k(t)}=\frac{a_{2k}(0)}{a_k(0)}e^{-3Dk^2t}\]`,
   'Section 5 alignment': 'The long-time profile is dominated by the slowest nonconstant mode.',
-  'Figure 5b caption': 'Analytical teaching illustration, rather than measured data.',
+  'Figure 5b caption': 'Analytical amplitude ratio on a logarithmic axis: a straight line of slope −3. Not measured data.',
   'Section 6 title': '6 · Interpret with assumptions',
   'Section 6 text': 'Constant diffusivity and periodic boundaries make the solution exact.<br><br>With forcing, nonlinear transport, or heterogeneous materials, modes may couple.<br><br>For measured data, report spatial resolution, fit uncertainty, and boundary conditions.',
   'Conclusion heading': 'Conclusion', Conclusion: 'Spatial scale determines relaxation time. The exact heat-equation solution provides a baseline for separating diffusion from other transport mechanisms.',
@@ -122,32 +122,40 @@ const portraitGeometry = [
   {"kind": "olbox", "x": "623.56mm", "y": "1118mm", "w": "187.44mm", "h": "62mm", "font": "42pt", "leading": "1.143", "fill": "jblue", "radius": "4.94mm", "color": "white", "align": "center", "name": "Structure to function"},
 ] as const;
 
+/** each figure of the portrait poster its own analytical plot */
+const FIGURES: Record<string, ChartType> = { 'Figure 1': 'decay', 'Figure 4': 'lifetime', 'Figure 5a': 'profiles', 'Figure 5b': 'ratio', 'Figure 6': 'spectrum' };
+/** where a logo or a QR code goes: an outline the author replaces */
+const placeholder = (x: number, y: number, w: number, h: number, value: string) =>
+  box(x, y, w, h, 'transparent', 'border: 3px dashed #8fa3b5; border-radius: 12px;') + text(x, y + h / 2 - 6, w, value, 26, 'color: #56697c; text-align: center; line-height: 1.2;');
+
 export function projectPosterObjects(t: ScientificTemplate, title: string, chart: Chart): string[] {
   const name = esc(title || t.exampleTitle);
-  const fig = (type: Parameters<Chart>[0], x: number, y: number, w: number, h: number) => chart(type, px(x), px(y), px(w), px(h));
+  const fig = (type: ChartType, x: number, y: number, w: number, h: number) => chart(type, px(x), px(y), px(w), px(h), { text: 28 });
   if (t.id === 'bernstein-2026') return portraitGeometry.map(raw => {
     const o: Record<string, string> = raw;
     const n = (key: string) => parseFloat(o[key] || '0');
     const x = n('x'), y = n('y'), w = n('w'), h = n('h');
     if (o.kind === 'olshape' || !copy[o.name] && o.fill) return box(x, y, w, h, color(o.fill || 'white'), `border-radius: ${px(n('radius'))}px; ${o.draw ? `border: 3px solid ${color(o.draw)};` : ''}`);
     if (o.kind === 'olimage') {
-      if (o.name.startsWith('Figure')) return fig('decay', x, y, w, h);
-      return text(x, y + h / 4, w, o.name.includes('Gatsby') ? 'RESEARCH<br>INSTITUTE' : 'UNIVERSITY', o.name.includes('Gatsby') ? 42 : 36, 'font-weight: 700; color: #023d6b; text-align: center');
+      if (o.name.startsWith('Figure')) return fig(FIGURES[o.name] ?? 'decay', x, y, w, h);
+      return placeholder(x, y + 4, w, h - 8, 'Logo');
     }
-    if (o.kind === 'olraw') return box(x, y, w, h, '#ecf2f8') + text(x + 5, y + 25, w - 10, 'Project<br>website', 30, 'text-align: center; color: #023d6b');
+    if (o.kind === 'olraw') return placeholder(x, y, w, h, 'QR code');
     const content = o.name === 'Title' ? name : copy[o.name] || '';
-    return (o.fill ? box(x, y, w, h, color(o.fill), `border-radius: ${px(n('radius'))}px;`) : '') + text(x, y + (o.name === 'Punchline text' ? 4 : 0), w, content, o.name === 'Funding' ? 19 : n('font') || 25, `color: ${color(o.color || 'ink')}; line-height: ${o.leading || '1.2'}; text-align: ${o.align || 'left'}; ${/title|heading|Punchline$|Title/.test(o.name) ? 'font-weight: 700;' : ''}`, o.name === 'Title' ? 'h1' : /title/.test(o.name) ? 'h2' : 'p');
+    // a formula sits in the middle of its card (the cards keep the source poster's heights)
+    const centred = /^Equation|^Punchline formula/.test(o.name) ? `height: ${px(h)}px; display: flex; flex-direction: column; justify-content: center;` : '';
+    return (o.fill ? box(x, y, w, h, color(o.fill), `border-radius: ${px(n('radius'))}px;`) : '') + text(x, y + (o.name === 'Punchline text' ? 4 : 0), w, content, o.name === 'Funding' ? 19 : centred ? 30 : n('font') || 25, `color: ${color(o.color || 'ink')}; line-height: ${o.leading || '1.2'}; text-align: ${o.align || 'left'}; ${centred}${/title|heading|Punchline$|Title/.test(o.name) ? 'font-weight: 700;' : ''}`, o.name === 'Title' ? 'h1' : /title/.test(o.name) ? 'h2' : 'p');
   });
   // ICML source: 1210 × 910 mm; 24 mm margins, columns .305/.35/.305 of 1162 mm.
-  const out: string[] = [text(24, 4, 866, title ? name : 'Diffusion reveals the timescales <br>of spatial structure', 90, 'font-weight: 700; color: #023d6b; line-height: 1.02', 'h1'), text(24, 75, 866, copy.Authors, 42, 'line-height: 1.1'), text(24, 94, 866, 'Centre for Applied Mathematics · Institute for Quantitative Science · research@example.org', 27), text(918, 25, 268, 'RESEARCH INSTITUTE<br>UNIVERSITY', 42, 'font-weight: 700; text-align: center; color: #023d6b'), box(24, 108, 1162, 35, '#023d6b'), text(29, 111, 1152, '<b>TL;DR:</b> ' + copy.TLDR, 33, 'color: white; line-height: 1.27')];
+  const out: string[] = [placeholder(918, 18, 128, 72, 'Logo'), placeholder(1058, 18, 128, 72, 'Logo'), text(24, 4, 866, title ? name : 'Diffusion reveals the timescales <br>of spatial structure', 90, 'font-weight: 700; color: #023d6b; line-height: 1.02', 'h1'), text(24, 75, 866, copy.Authors, 42, 'line-height: 1.1'), text(24, 94, 866, 'Centre for Applied Mathematics · Institute for Quantitative Science · research@example.org', 27), box(24, 108, 1162, 35, '#023d6b'), text(29, 111, 1152, '<b>TL;DR:</b> ' + copy.TLDR, 33, 'color: white; line-height: 1.27')];
   const head = (x: number, y: number, w: number, label: string) => { out.push(text(x, y, w, label, 44, 'font-weight: 700; line-height: 1.14; color: #023d6b', 'h2'), box(x, y + (label.length > 46 ? 47 : 29), w, .7, '#023d6b')); };
   const para = (x: number, y: number, w: number, value: string, size = 30) => out.push(text(x, y, w, value, size));
-  const eq = (x: number, y: number, w: number, h: number, value: string) => out.push(box(x, y, w, h, '#eef3f8', 'border: 2px solid #023d6b'), text(x + 5, y + 5, w - 10, value, 30));
-  head(24, 166, 354.41, '1 · Modes separate spatial scales'); para(24, 203, 354.41, copy['Section 1 text']); para(24, 250, 354.41, copy['Equation 1']); out.push(fig('decay', 77, 307, 248, 183)); para(24, 505, 354.41, copy['Figure 1 caption'], 25);
+  const eq = (x: number, y: number, w: number, h: number, value: string) => out.push(box(x, y, w, h, '#eef3f8', 'border: 2px solid #023d6b'), text(x + 5, y, w - 10, value, 34, `height: ${px(h)}px; display: flex; flex-direction: column; justify-content: center;`));
+  head(24, 166, 354.41, '1 · Modes separate spatial scales'); para(24, 203, 354.41, copy['Section 1 text']); para(24, 250, 354.41, copy['Equation 1']); out.push(fig('decay', 24, 302, 354.41, 196)); para(24, 505, 354.41, copy['Figure 1 caption'], 25);
   head(24, 540, 354.41, '2 · The heat equation'); para(24, 578, 354.41, copy['Section 2 text']); para(24, 627, 354.41, copy['Equation 2']); para(24, 667, 354.41, copy['Section 2 scaling']);
   head(24, 697, 354.41, '3 · One timescale for each mode'); para(24, 735, 354.41, copy['Section 3 text']); eq(24, 771, 354.41, 57, copy['Equation 4']); out.push(box(24, 834, 354.41, 64, '#fff5f5', 'border: 2px solid #d62728')); para(29, 839, 344, '<b>Frequency sets the lifetime.</b><br>' + copy['Punchline text'], 27);
-  head(401.65, 166, 406.7, '4 · Exact decay curves'); para(401.65, 245, 244, copy['Section 4 text']); out.push(fig('decay', 675, 200, 130, 135));
-  head(401.65, 347, 406.7, '5 · Fine structure fades first'); para(401.65, 398, 406.7, copy['Section 5 text']); out.push(fig('decay', 448, 437, 313, 100)); para(401.65, 540, 406.7, copy['Figure 5a caption'], 25); para(401.65, 580, 406.7, copy['Section 5 transition']); eq(401.65, 625, 406.7, 92, copy['Equation 5']); para(401.65, 724, 406.7, copy['Section 5 alignment']); out.push(fig('decay', 450, 760, 308, 82)); para(401.65, 849, 406.7, copy['Figure 5b caption'], 25); out.push(box(401.65, 876, 406.7, .35, '#023d6b')); para(401.65, 882, 406.7, copy.Funding, 20);
-  head(831.59, 166, 354.41, '6 · Interpret the model’s assumptions'); para(831.59, 220, 354.41, 'The exact solution provides a baseline for testing transport mechanisms.'); out.push(fig('decay', 920, 266, 177, 270)); para(831.59, 545, 354.41, copy['Section 6 text'], 25); head(831.59, 680, 354.41, '7 · Takeaways'); para(831.59, 720, 354.41, '• Fourier modes evolve independently.<br><br>• Fine patterns relax faster.<br><br>• State boundary conditions and uncertainty.', 28); out.push(box(979, 838, 65, 57, '#ecf2f8')); para(983, 849, 57, 'Project<br>website', 25);
+  head(401.65, 166, 406.7, copy['Section 4 title']); para(401.65, 215, 236, copy['Section 4 text']); out.push(fig('lifetime', 652, 205, 156, 132));
+  head(401.65, 347, 406.7, '5 · Fine structure fades first'); para(401.65, 398, 406.7, copy['Section 5 text']); out.push(fig('profiles', 401.65, 432, 406.7, 104)); para(401.65, 540, 406.7, copy['Figure 5a caption'], 25); para(401.65, 580, 406.7, copy['Section 5 transition']); eq(401.65, 625, 406.7, 92, copy['Equation 5']); para(401.65, 724, 406.7, copy['Section 5 alignment']); out.push(fig('ratio', 401.65, 756, 406.7, 88)); para(401.65, 849, 406.7, copy['Figure 5b caption'], 25); out.push(box(401.65, 876, 406.7, .35, '#023d6b')); para(401.65, 882, 406.7, copy.Funding, 20);
+  head(831.59, 166, 354.41, '6 · Interpret the model’s assumptions'); para(831.59, 220, 354.41, 'The exact solution provides a baseline for testing transport mechanisms.'); out.push(fig('spectrum', 831.59, 262, 354.41, 270)); para(831.59, 545, 354.41, copy['Section 6 text'], 25); head(831.59, 680, 354.41, '7 · Takeaways'); para(831.59, 720, 354.41, '• Fourier modes evolve independently.<br><br>• Fine patterns relax faster.<br><br>• State boundary conditions and uncertainty.', 28); out.push(placeholder(979, 832, 72, 66, 'QR code'));
   return out;
 }
