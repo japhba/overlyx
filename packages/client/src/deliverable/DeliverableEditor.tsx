@@ -15,6 +15,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/ho
 import type { ComponentChildren } from 'preact';
 import { type User } from '../api';
 import { showContextMenu, closeContextMenu, type MenuItem } from '../editor/contextmenu';
+import { editSvgFile } from '../editor/svgEditorEvents';
 import { Toolbar, ICONS, type ToolButton } from '../app/Toolbar';
 import { ColorGrid } from '../app/ColorGrid';
 import type { DeliverableHost, Peer } from './host';
@@ -769,7 +770,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
             if (m.height) setPageH(m.height);
             setSolo(m.solo ?? null);
             toCanvas({ ol: 'scale', scale });
-            toCanvas({ ol: 'tool', tool, ink: deckInkStyle(inkRef.current, pageWRef.current) });
+            toCanvas({ ol: 'tool', tool, ink: { ...deckInkStyle(inkRef.current, pageWRef.current), penInks: inkRef.current.penInks && !readOnlyRef.current } });
             toCanvas({ ol: 'guides', show: guidesRef.current });
             toCanvas({ ol: 'view', view: shownView(viewRef.current) });
             toCanvas({ ol: 'dark', invert: darkRef.current.invert, figures: darkRef.current.figures, desk: null });
@@ -869,7 +870,8 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
           }
           break;
         }
-        case 'draw': onDraw(m.version, m.tool, m.slide, m.rect, m.after ?? null, m.pts, m.runs ? { d: '', closed: false, runs: m.runs } : m.d !== undefined ? { d: m.d, closed: !!m.closed } : undefined); break;
+        case 'draw': onDraw(m.version, m.tool, m.slide, m.rect, m.after ?? null, m.pts, m.runs ? { d: '', closed: false, runs: m.runs } : m.d !== undefined ? { d: m.d, closed: !!m.closed } : undefined, m.scratch); break;
+        case 'penInks': if (fromCanvas) setToolState('pen'); break;
         case 'sequence': if (fromCanvas) setSeq({ slide: m.slide, rows: m.rows, steps: m.steps, ordering: m.ordering }); break;
         case 'objects': if (fromCanvas) setObjects({ slide: m.slide, items: m.items }); break;
         case 'comment': {
@@ -919,6 +921,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
         case 'panEnd': if (fromCanvas) slideView.release(!!m.cancel); break;
         case 'colors': if (fromCanvas) setColors({ desk: m.desk, page: m.page }); break;
         case 'cropping': if (fromCanvas) setCropping(m.path); break;
+        case 'editSvg': if (fromCanvas) { const rel = svgOf(m.src); if (rel) editSvgPicture(rel); } break;
         case 'scroll': if (fromCanvas) { scrollRef.current = m.y; setScrollY(m.y); } break;
         case 'reload': {
           canvasReady.current = canvasReady.current && !fromCanvas; if (fromRail) railReady.current = false;
@@ -1030,8 +1033,9 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   useLayoutEffect(() => { if (soloOn) slideView.refit(); }, [box.w, box.h, solo?.rect.w, solo?.rect.h]);
   useEffect(() => { toRail({ ol: 'scale', scale: railScale }); }, [railScale]);
   // (the Bézier pen takes Enter / Esc / Backspace: the keyboard goes to the canvas)
-  const inkStyle = deckInkStyle(ink, pageW);
-  useEffect(() => { toCanvas({ ol: 'tool', tool, ink: inkStyle }); if (tool === 'bezier') canvasFrame.current?.focus(); }, [tool, inkStyle.color, inkStyle.width, inkStyle.opacity, JSON.stringify(inkStyle.nib ?? null), inkStyle.fingers, inkStyle.scribble]);
+  // (the pen draws right away only where the page can be changed)
+  const inkStyle = { ...deckInkStyle(ink, pageW), penInks: ink.penInks && !locked };
+  useEffect(() => { toCanvas({ ol: 'tool', tool, ink: inkStyle }); if (tool === 'bezier') canvasFrame.current?.focus(); }, [tool, inkStyle.color, inkStyle.width, inkStyle.opacity, JSON.stringify(inkStyle.nib ?? null), inkStyle.fingers, inkStyle.scribble, inkStyle.penInks]);
   // the rail folded away: its frame goes, and says it is ready again when it comes back
   useEffect(() => { if (!railOpen) railReady.current = false; }, [railOpen]);
 
@@ -1357,13 +1361,16 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   /** three fingers (runtime): undo, redo — said for a moment on the canvas, as the gesture shows nothing itself */
   const [hud, setHud] = useState<{ text: string; n: number } | null>(null);
   const hudTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showHud = (text: string, ms = 900) => {
+    setHud(h => ({ text, n: (h?.n ?? 0) + 1 }));
+    if (hudTimer.current) clearTimeout(hudTimer.current);
+    hudTimer.current = setTimeout(() => setHud(null), ms);
+  };
   const historyGesture = (redo: boolean) => {
     if (readOnlyRef.current) return;
     toCanvas({ ol: 'stopText' });
     setTimeout(() => (redo ? host.redo() : host.undo()), 30);
-    setHud(h => ({ text: redo ? '↷ Redo' : '↶ Undo', n: (h?.n ?? 0) + 1 }));
-    if (hudTimer.current) clearTimeout(hudTimer.current);
-    hudTimer.current = setTimeout(() => setHud(null), 900);
+    showHud(redo ? '↷ Redo' : '↶ Undo');
   };
   const zoomStep = (factor: number) => {
     if (soloRef.current) { const b = boxRef.current; stepSolo(factor, b.w / 2, b.h / 2); return; }
@@ -1447,7 +1454,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
 
   const setTool = (t: Tool) => { setToolState(t); };
 
-  const onDraw = (v: number, t: Tool, slide: Path | null, rect: Rect, after: Path | null, pts?: [number, number][], bez?: { d: string; closed: boolean; runs?: InkRunD[] }) => {
+  const onDraw = (v: number, t: Tool, slide: Path | null, rect: Rect, after: Path | null, pts?: [number, number][], bez?: { d: string; closed: boolean; runs?: InkRunD[] }, scratch?: Path[]) => {
     // Draw: the pen stays in hand and the stroke is not selected — the next one follows (GoodNotes)
     const drawing = t === 'pen';
     if (!drawing) setToolState('select');
@@ -1460,6 +1467,13 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     const html = objectHtml(t, rect, k, pageW / 1280, pts, bez, drawing ? deckInkStyle(inkRef.current, pageWRef.current) : undefined);
     if (!html) return;
     if (!applyOps([{ t: 'insert', parent: place.parent, index: place.index, html }])) return;
+    if (scratch?.length) {
+      // a scribble over strokes (core/scratchout.ts): they and it go, a step after it came — so the first
+      // undo brings them back with the scribble as ink, in case it was drawing (OneNote)
+      const moved = scratch.map(p => shiftedBy(p, place.parent, place.index));
+      if (applyOps([{ t: 'remove', paths: [...moved, place.path] }])) showHud(`Scribbled out ${scratch.length} stroke${scratch.length > 1 ? 's' : ''} · Undo brings ${scratch.length > 1 ? 'them' : 'it'} back`, 2200);
+      return;
+    }
     pending.current = drawing ? null : t === 'formula' ? { editText: place.path, math: true } : t === 'text' ? { editText: place.path } : { select: [place.path] };
     if (t === 'text') {
       textAhead.current = true;
@@ -1626,6 +1640,20 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     const p = one.cropped ? [...one.path, 0] : one.path;
     applyOps([{ t: 'attr', path: p, name: 'src', value: rel }]);
   };
+  /** a project path of a src written relative to the page's folder (./ and ../ resolved), null when it leaves the project */
+  const resolveRel = (src: string): string | null => {
+    const parts = (dir ? dir.split('/') : []);
+    for (const seg of src.split('?')[0].split('#')[0].split('/')) {
+      if (!seg || seg === '.') continue;
+      if (seg === '..') { if (!parts.length) return null; parts.pop(); } else parts.push(decodeURIComponent(seg));
+    }
+    return parts.join('/');
+  };
+  /** a picture's src when it is an SVG drawing in the project: its project path (to edit it in the drawing editor), else null */
+  const svgOf = (src: string | undefined): string | null =>
+    src && host.docId && /\.svg([?#]|$)/i.test(src) && !/^([a-z]+:|\/)/i.test(src) ? resolveRel(src) : null;
+  /** the documents' drawing editor (app/SvgEditor.tsx) over the deck; the picture reloads when it is saved (the project's graphics event) */
+  const editSvgPicture = (rel: string) => editSvgFile(host.docId!.split('/').slice(0, 2).join('/'), rel, readOnlyRef.current);
   const imageTools = {
     cropping: !!cropping,
     crop: () => { const one = imagePath(); if (one) toCanvas({ ol: 'crop', path: one.path }); },
@@ -1637,15 +1665,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     done: (commit: boolean) => toCanvas({ ol: 'endCrop', commit }),
     removeBackground: () => { const one = imagePath(); if (one) removeBackground(one); },
     replace: () => replaceInput.current?.click(),
-  };
-  /** a project path of a src written relative to the page's folder (./ and ../ resolved), null when it leaves the project */
-  const resolveRel = (src: string): string | null => {
-    const parts = (dir ? dir.split('/') : []);
-    for (const seg of src.split('?')[0].split('#')[0].split('/')) {
-      if (!seg || seg === '.') continue;
-      if (seg === '..') { if (!parts.length) return null; parts.pop(); } else parts.push(decodeURIComponent(seg));
-    }
-    return parts.join('/');
+    editSvg: (() => { const rel = svgOf(imagePath()?.src); return rel ? () => editSvgPicture(rel) : null; })(),
   };
   /** Remove background (BgRemoveDialog): the picture fetched where the frames get it (CORS *), the result saved next to it */
   const removeBackground = (it: SelItem) => {
@@ -1750,6 +1770,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
       // a drawing: its points, Inkscape's node editor (the shape right-clicked, when the drawing has several)
       ...(one && (one.kind === 'svg' || one.kind === 'svgpart' || one.kind === 'line') && !one.locked ? [{ label: 'Edit points', shortcut: 'N', action: () => arrangeSel('edit-nodes') }] : []),
       ...(one && one.kind === 'image' ? [
+        ...(imageTools.editSvg ? [{ label: 'Edit drawing (SVG)…', shortcut: 'double-click', action: imageTools.editSvg }] : []),
         { label: 'Crop', action: imageTools.crop },
         { label: 'Remove background', action: imageTools.removeBackground },
         { label: 'Replace picture…', action: imageTools.replace },
@@ -2583,6 +2604,14 @@ function FloatPopover({ x, y, title, render, onClose }: { x: number; y: number; 
 }
 
 export default DeliverableEditor;
+
+/** `p` once an element is inserted at `index` of `parent` (a later sibling of it, or inside one, moves along by one) */
+function shiftedBy(p: Path, parent: Path, index: number): Path {
+  if (p.length <= parent.length || parent.some((v, i) => p[i] !== v) || p[parent.length] < index) return p;
+  const out = [...p];
+  out[parent.length]++;
+  return out;
+}
 
 /** the citation dialog's view of a deck: the project's bibliography searched on the server, natbib's commands */
 const CITE_META = { bib: [], citeEngine: 'natbib' } as unknown as DocMeta;

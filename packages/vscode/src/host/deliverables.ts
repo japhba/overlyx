@@ -20,7 +20,7 @@ import crypto from 'node:crypto';
 import { URL } from 'node:url';
 import { runtimeTags, injectRuntime, resolveInProject, SANDBOX_CSP, RUNTIME_MODES, type RuntimeMode } from '@overlyx/core/html/serve.ts';
 import { starterFor, type DeliverableKind } from '@overlyx/core/html/deliverable.ts';
-import { SCIENTIFIC_TEMPLATES } from '@overlyx/core/html/scientific.ts';
+import { SCIENTIFIC_TEMPLATES, templateLabel } from '@overlyx/core/html/scientific.ts';
 import { deckExtras, type DeckExtras } from '@overlyx/core/html/deckextras.ts';
 import { parseBibtex, type BibEntry } from '@overlyx/core/bib.ts';
 import { webviewHtml } from './webviewHtml.ts';
@@ -260,7 +260,7 @@ export async function newDeliverable(kind: DeliverableKind, startDir: string): P
   let template: string | undefined;
   if (kind !== 'page') {
     const style = await vscode.window.showQuickPick(SCIENTIFIC_TEMPLATES.filter(t => t.kind === kind).map(t => ({
-      label: t.name, description: t.size, detail: t.description, id: t.id,
+      label: templateLabel(t), description: t.size, detail: t.description, id: t.id,
     })), { title: `New ${KIND_LABEL[kind]} — choose a scientific style`, placeHolder: 'Open MIT-licensed templates' });
     if (!style) return;
     template = style.id;

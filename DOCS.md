@@ -737,11 +737,8 @@ blend.
     and what they began is undone (a pinch put back, a pull let go, three fingers no undo); a third
     touch well after two others is the hand too. The editor hears `penDown` and does the same for
     the hand resting on the grey canvas beside the slide (which moves the slide only after 10 px).
-    **Scribble to erase** (`isScribble`: four legs or more, each going back the way the last came,
-    turns measured over ~5 and ~8 screen px — a quick hand turns round — by more than 100°, a zig-zag
-    struck through a word too; `scribbledOut`: the strokes under it, each point probed 3 screen px
-    round, if it was over strokes for a fifth of its length — shape alone cannot tell a small m from a
-    rounded zig-zag, being over ink does; a scribble over nothing stays as written). Selected,
+    **Scribble to erase** (`core/scratchout.ts`, the same in documents' margins and on whiteboards;
+    see *Scratch-out and the pen's flow* below). Selected,
     a stroke's toolbar is its ink colour (kind `ink`). The eraser hides the strokes — Draw's, and open
     unfilled paths — it passes over and removes them in one change on release); handles as in Inkscape: a click selects with the
     resize box, a click on the selected object again turns its handles into rotation arrows off the
@@ -2260,16 +2257,62 @@ editor hung at "Opening the canvas…" (17 Oct 2026). Save exports vectors back 
 checks for external file changes first and refreshes the figure; Cancel discards the draft. *Insert ▸
 Drawing (SVG)…* (`editor/svgdrawing.ts`) makes `figures/drawing.svg` (-2, …), inserts it at the
 cursor and opens it; closed without saving, the figure and the file go again (`SvgTarget.onDiscard`).
-It works in the web editor and VS Code, with each figure's own project and directory.
+It works in the web editor and VS Code, with each figure's own project and directory. The same
+pop-up opens an `.svg` from the file explorer (a click; Ctrl+click opens the file in a browser tab)
+and a slide's or poster's SVG picture (double-click, *Edit drawing (SVG)…* in its menu, or the
+Picture section's pen button; runtime `editSvg` message → `DeliverableEditor` `editSvgPicture`); the
+picture reloads through the project's graphics event when it is saved.
 
-The Draw row of documents and whiteboards also has the layout editor's **Lines** (line, arrow) and
-**Shapes** (rectangle, rounded rectangle, ellipse, triangle, diamond, star, hexagon), dragged out in
-the pen's colour and width (Shift: 45° steps / as wide as high). They are ink strokes with
-`poly: true` (`core/ink.ts` `shapePoints`, `strokeRuns`): `pts` is the exact outline, drawn without
-smoothing, so the eraser, lasso, scribble-erase, live collaboration and the SVG sidecars handle them
-like any stroke. Every Draw row picks its colours from the layout editor's palette (`ColorGrid`:
+The template choosers (+ New, File ▸ New, VS Code's quick pick) call the designs **Poster 1…5** and
+**Slides 1…3** (`templateLabel`, in `SCIENTIFIC_TEMPLATES` order); `name` stays the source design's,
+for the attribution line and the generated file's header.
+
+Documents draw freehand only: the same pens, highlighter, eraser and settings as the slide editor's
+Draw (`deliverable/drawingToolbar.tsx`, `deckink.ts`, `core/freehand.ts`), plus the lasso and the
+laser. Whiteboards' Draw row also has the layout editor's **Lines** (line, arrow) and **Shapes**
+(rectangle, rounded rectangle, ellipse, triangle, diamond, star, hexagon), dragged out in the pen's
+colour and width (Shift: 45° steps / as wide as high). They are ink strokes with `poly: true`
+(`core/ink.ts` `shapePoints`, `strokeRuns`): `pts` is the exact outline, drawn without smoothing, so
+the eraser, lasso, scribble-erase and live collaboration handle them like any stroke (documents still
+render such strokes). Every Draw row picks its colours from the layout editor's palette (`ColorGrid`:
 Google's grid, a seaborn row, custom colours). In Modern, *Draw* sits beside the inserts (it was under
 ⋮), and the paper page stays centred between the drawing gutters (it used to scroll out of view).
+
+**Scratch-out and the pen's flow** (17 Oct 2026, after the user doubted both; designed from a web
+review of the apps and the HCI literature):
+- *Scribble to erase* is a shortcut, the eraser stays the main way (`core/scratchout.ts`
+  `scratchOut`, used by the slide runtime, `editor/plugins/ink.ts` and `BoardEditor.tsx`):
+  - Shape (Zeleznik & Miller, "Fluid Inking", GI 2006; Microsoft's scratch-out: ≥ 3 back-and-forth
+    strokes): cusps (turns ≥ 110° over ~5 and ~10 screen px, then over a fifth of the median leg), at
+    least three inside, and *tight*: three in four of those between two turns farther from each
+    neighbour than 1.5 × the neighbours are apart — legs ~3 × as long as the scribble advances with
+    each. An m, a w, a v v v are not; loops are not.
+  - Coverage from the ink's side (Microsoft's sample): the region is the triangles of each three
+    consecutive cusps widened by half the pen and 4 screen px; a stroke goes when half its length is
+    in it. Before, each stroke had to lie under a fifth of the *scribble's* length (± 3 px), and a
+    scribble over a word mostly crosses the paper between its letters: "quite insensitive".
+  - Context: two in three triangles must hold ink, else the scribble stays as ink; lifted ~1 cm
+    (40 screen px) away from what it would erase, it is cancelled (Apple's Scribble).
+  - *Scratch and hold* (Apple Notes): the pen resting 400 ms at the end lowers the bars (two cusps,
+    half tight with legs longer than their ends are apart, a third of the triangles, a third of a stroke).
+  - Feedback while drawing (judged every ~80 ms and when the pen rests): what would go fades to 30 %,
+    the scribble turns grey. Undo (OneNote): the scribble is added, then it and its targets removed as
+    a step of their own (`stopCapturing` / the deck editor's `scratch` paths in the `draw` message),
+    so the first undo brings the strokes back with the scribble as ink; a notice says so.
+- *Pen draws right away* (`deckink.ts` `penInks`, default on; the pen settings' checkbox once a
+  Pencil has drawn): Apple's HIG ("let people make a mark the moment Apple Pencil touches the
+  screen… avoid requiring a special mode"), Office and Keynote: a pen-type pointer on a slide with
+  Select in hand draws (runtime → `penInks` → the editor's Draw; a stale Select from the editor is
+  ignored meanwhile, `penInksPending`); on a document's margin (the scroller or the page around the
+  text, not the text, chips or buttons) it draws and Draw comes on when it lifts (the shells' Draw
+  widens Modern's strip: switched on mid-stroke the page moved under the pen); on a whiteboard it
+  takes the last pen. Fingers and the mouse still select (Hinckley et al. 2010: the pen writes,
+  touch manipulates). Never where the page can't be changed.
+- The pen's eraser end (`buttons & 32`) erases while turned round on slides and whiteboards too
+  (Li et al. 2005: the fewest mode errors). While a pen draws in a document, the margins' stylus
+  touches are `preventDefault`ed so Safari neither scrolls with it (the canvas lets fingers pan) nor
+  takes it for Scribble.
+- Not done (web pages don't get them): Pencil double-tap and squeeze.
 
 **Toolbars at a side** (`app/tbdock.tsx`): View ▸ Toolbars, or right-click any toolbar, puts the
 toolbar rows along the top (default), or in a column left or right of the document (`ol.tbDock`, this

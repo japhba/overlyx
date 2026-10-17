@@ -37,6 +37,11 @@ export const SCIENTIFIC_TEMPLATES: readonly ScientificTemplate[] = [
   { id: 'serif-colloquium', kind: 'deck', name: 'CambridgeUS', description: 'Classic Beamer: Computer Modern Sans, red-and-grey navigation bands and a three-part footer.', size: '4:3 · 5 slides', width: 1200, height: 900, exampleTitle: 'What a calibrated forecast tells us', background: '#ffffff', ink: '#000000', accent: '#cc0000', muted: '#595959', source: 'https://github.com/josephwright/beamer/blob/main/base/themes/theme/beamerthemeCambridgeUS.sty', author: 'Madhusudan Singh and the Beamer contributors', license: 'GPL-3.0-or-later' },
 ];
 
+/** What the choosers call a design: "Poster 1" … "Slides 3", in the list's order (`name` is the source design's, for the attribution). */
+export function templateLabel(t: ScientificTemplate): string {
+  return `${t.kind === 'poster' ? 'Poster' : 'Slides'} ${SCIENTIFIC_TEMPLATES.filter(x => x.kind === t.kind).indexOf(t) + 1}`;
+}
+
 export function scientificTemplate(kind: ScientificKind, id?: string): ScientificTemplate {
   const t = id === undefined ? SCIENTIFIC_TEMPLATES.find(t => t.kind === kind) : SCIENTIFIC_TEMPLATES.find(t => t.kind === kind && t.id === id);
   if (!t) throw new Error(`Unknown ${kind} template: ${id}`);

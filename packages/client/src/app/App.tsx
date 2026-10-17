@@ -71,7 +71,7 @@ import { STANDARD_LAYOUTS, sectionLevel } from '../editor/layouts';
 import { chordKey } from '../editor/keymap';
 import * as C from '../editor/commands';
 import { setMarginMode } from '../editor/plugins/margin';
-import { setInk, subscribeInk, isTabletClient } from '../editor/plugins/ink';
+import { setInk, getInk, subscribeInk, isTabletClient } from '../editor/plugins/ink';
 import { BoardEditor } from './BoardEditor';
 import { DeliverableEditor } from '../deliverable/DeliverableEditor';
 import { NewLayoutDialog } from './NewLayoutDialog';
@@ -407,7 +407,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   const [inkMode, setInkModeState] = useState(() => { const v = localStorage.getItem('ol.ink'); return v !== null ? v === '1' : isTabletClient(); });
   const setInkMode = (fn: (m: boolean) => boolean) => setInkModeState(m => { const next = fn(m); localStorage.setItem('ol.ink', next ? '1' : '0'); return next; });
   const [, inkTick] = useState(0);
-  useEffect(() => subscribeInk(() => inkTick(t => t + 1)), []);
+  // (a pen that drew on a margin turns Draw on: editor/plugins/ink.ts onPenInMargin)
+  useEffect(() => subscribeInk(() => { inkTick(t => t + 1); if (getInk().active) setInkMode(() => true); }), []);
   useEffect(() => { setInk({ active: inkMode }); }, [inkMode]);
   // entering ink mode adds wide gutters: keep the column centred (the snap point)
   useLayoutEffect(() => {
@@ -1376,7 +1377,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       navigation: [{ id: 'navback', title: 'Navigate back (Ctrl+Alt+←)', icon: 'navback', action: navBack }],
       sidebars: [{ id: 'outline', title: LEFT_TITLE, icon: 'outline', action: () => setShowFiles(s => !s), active: showFiles }],
       tools: [
-        { id: 'ink', title: inkMode ? 'Margin drawing is on — click to put the pen away' : 'Draw in the margins — pen, highlighter, lines and shapes (pans sideways for more space)', icon: 'ink', action: () => setInkMode(m => !m), active: inkMode },
+        { id: 'ink', title: inkMode ? 'Margin drawing is on — click to put the pen away' : 'Draw in the margins — pen, highlighter, eraser, lasso (pans sideways for more space); a pen draws on a margin right away', icon: 'ink', action: () => setInkMode(m => !m), active: inkMode },
         // the ✦ button exists only once it is enabled in the preferences; it switches autocomplete (text + formulas) on and off
         ...(prefs.aiButton ? [{ id: 'ai', title: aiComplete ? 'AI autocomplete is on — click to switch it off' : 'AI autocomplete is off — click to switch it on (ghost text after a pause while typing; Tab inserts it)', icon: 'ai', action: () => { setPref('aiCompleteText', !aiComplete); setPref('aiCompleteMath', !aiComplete); notify(!aiComplete ? 'AI autocomplete on' : 'AI autocomplete off'); }, active: aiComplete } as ToolButton] : []),
       ],

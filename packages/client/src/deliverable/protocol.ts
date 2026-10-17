@@ -40,6 +40,8 @@ export interface InkStyle {
   fingers?: 'pan' | 'draw';
   /** scribbling over strokes erases them (GoodNotes) */
   scribble?: boolean;
+  /** a pen (the Pencil, a stylus) draws as soon as it touches the slide, Draw or not (its settings; never when the page can't be changed) */
+  penInks?: boolean;
 }
 
 /** what kind of object the toolbar is showing tools for */
@@ -294,7 +296,10 @@ export type FromRuntime =
   | { ol: 'dragging'; on: boolean }
   | { ol: 'ops'; version: number; ops: HtmlOp[]; select?: 'inserted' | 'keep' | Path[]; then?: 'editText' }
   /** a new object drawn: its box (slide px), and for lines / the pen the points (slide px, in drawing order) */
-  | { ol: 'draw'; version: number; tool: Tool; slide: Path | null; rect: Rect; after?: Path | null; pts?: [number, number][]; d?: string; closed?: boolean; runs?: InkRunD[] }
+  /** `scratch`: the stroke was a scribble over these strokes (core/scratchout.ts) — it is added, then they and it go, as a step of its own */
+  | { ol: 'draw'; version: number; tool: Tool; slide: Path | null; rect: Rect; after?: Path | null; pts?: [number, number][]; d?: string; closed?: boolean; runs?: InkRunD[]; scratch?: Path[] }
+  /** a pen touched the slide with nothing but Select in hand: it draws (InkStyle.penInks), the editor shows Draw */
+  | { ol: 'penInks' }
   | { ol: 'editing'; path: Path | null }
   /** A local draft whose target disappeared: the host keeps it available for recovery. */
   | { ol: 'recoveredText'; html: string; reason: string }
@@ -347,6 +352,8 @@ export type FromRuntime =
   | { ol: 'colors'; desk: string; page: string }
   /** crop mode started (the picture's path) or ended (null) */
   | { ol: 'cropping'; path: Path | null }
+  /** a double click on a picture that is an SVG file: the editor opens it in the drawing editor (`src` as written) */
+  | { ol: 'editSvg'; src: string }
   /** presenting: the slide is zoomed in (or not any more) */
   | { ol: 'presentZoom'; zoomed: boolean }
   /** presenting: the bar's "Fingers draw" switched */

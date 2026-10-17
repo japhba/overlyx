@@ -18,8 +18,8 @@ export interface DrawingContext {
   extras?: ToolButton[];
   done?: boolean;
   /**
-   * The layout editor's Lines and Shapes, drawn in the pen's colour and width: in documents' margins
-   * and on whiteboards (the deck has them in its own tool row). `tool`: the one in use, if any.
+   * The layout editor's Lines and Shapes, drawn in the pen's colour and width: on whiteboards (the
+   * deck has them in its own tool row; documents draw freehand only). `tool`: the one in use, if any.
    */
   shapes?: { tool: string | null; set(kind: InkShape): void };
 }
@@ -49,7 +49,7 @@ export function drawingToolbar(c: DrawingContext): ToolButton[][] {
       { id: 'dk-ink-pen', title: `${ink.nib.ball ? 'Ball pen' : 'Fountain pen'} (P) — with its own colour and width; click it again for its settings: fountain or ball pen, tip, pressure, stabilization`,
         icon: ink.nib.ball ? 'inkball' : 'inkpen', active: c.tool === 'pen' && !hl, action: () => takePen({ pen: 'pen' }),
         paletteWhenActive: true,
-        palette: { title: 'Pen', render: () => <PenSettings nib={ink.nib} color={ink.pens.pen.color} width={ink.pens.pen.width} habits={{ scribble: ink.scribble, fingersDraw: ink.fingersDraw, pencil: ink.pencil }}
+        palette: { title: 'Pen', render: () => <PenSettings nib={ink.nib} color={ink.pens.pen.color} width={ink.pens.pen.width} habits={{ scribble: ink.scribble, fingersDraw: ink.fingersDraw, pencil: ink.pencil, penInks: ink.penInks }}
           onChange={nib => takePen({ pen: 'pen', nib })} onHabits={h => c.ink.set(h)} /> } },
       { id: 'dk-ink-hl', title: 'Highlighter — with its own colour and width; what is under it shows through', icon: 'inkhl', active: c.tool === 'pen' && hl, action: () => takePen({ pen: 'highlighter' }) },
       { id: 'dk-ink-eraser', title: 'Eraser (E) — removes the strokes it passes over (drawn ones: shapes and text stay)', icon: 'inkeraser', active: erasing, action: () => c.setTool('eraser') },

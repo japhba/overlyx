@@ -20,6 +20,8 @@ export interface DeckInk {
   fingersDraw: boolean;
   /** scribbling over strokes erases them */
   scribble: boolean;
+  /** a pen (the Pencil, a stylus) draws as soon as it touches the page or a document's margin, without Draw turned on (Apple's HIG) */
+  penInks: boolean;
 }
 
 /** the width presets (px of a 1280 px slide: 1½, 3, 6 pt; the highlighter's 10½, 18, 30 pt) and what the width picker offers */
@@ -49,6 +51,7 @@ export function defaultDeckInk(): DeckInk {
     pencil: false,
     fingersDraw: false,
     scribble: true,
+    penInks: true,
     pens: {
       pen: { color: INK_PALETTES.pen[0][0], width: DECK_INK_WIDTHS.pen[1], colors: INK_PALETTES.pen.map(c => c[0]), widths: [...DECK_INK_WIDTHS.pen] },
       highlighter: { color: INK_PALETTES.highlighter[0][0], width: DECK_INK_WIDTHS.highlighter[1], colors: INK_PALETTES.highlighter.map(c => c[0]), widths: [...DECK_INK_WIDTHS.highlighter] },
@@ -67,7 +70,7 @@ export function loadDeckInk(): DeckInk {
     if (!s || typeof s !== 'object') return ink;
     if (s.pen === 'pen' || s.pen === 'highlighter') ink.pen = s.pen;
     if (s.nib && typeof s.nib === 'object') ink.nib = nibWith(ink.nib, s.nib);
-    for (const k of ['pencil', 'fingersDraw', 'scribble'] as const) if (typeof s[k] === 'boolean') ink[k] = s[k]!;
+    for (const k of ['pencil', 'fingersDraw', 'scribble', 'penInks'] as const) if (typeof s[k] === 'boolean') ink[k] = s[k]!;
     for (const p of ['pen', 'highlighter'] as DeckPen[]) {
       const v = s.pens?.[p];
       if (!v) continue;
@@ -101,6 +104,7 @@ export interface DeckInkPatch {
   pencil?: boolean;
   fingersDraw?: boolean;
   scribble?: boolean;
+  penInks?: boolean;
 }
 
 /** the presets after a change (a new object: the old one is left as it was) */
@@ -117,8 +121,8 @@ export function patchDeckInk(ink: DeckInk, p: DeckInkPatch): DeckInk {
     cur.widths[p.slotWidth.idx] = p.slotWidth.width;
     cur.width = p.slotWidth.width;
   }
-  const flag = (k: 'pencil' | 'fingersDraw' | 'scribble') => (typeof p[k] === 'boolean' ? p[k]! : ink[k]);
-  return { pen, pens: { ...ink.pens, [pen]: cur }, nib: nibWith(ink.nib, p.nib), pencil: flag('pencil'), fingersDraw: flag('fingersDraw'), scribble: flag('scribble') };
+  const flag = (k: 'pencil' | 'fingersDraw' | 'scribble' | 'penInks') => (typeof p[k] === 'boolean' ? p[k]! : ink[k]);
+  return { pen, pens: { ...ink.pens, [pen]: cur }, nib: nibWith(ink.nib, p.nib), pencil: flag('pencil'), fingersDraw: flag('fingersDraw'), scribble: flag('scribble'), penInks: flag('penInks') };
 }
 
 /** the ink of the next stroke: the pen in hand, its width for a page `pageW` px wide (a poster's strokes as thick, seen whole, as a slide's) */
@@ -128,7 +132,7 @@ export function deckInkStyle(ink: DeckInk, pageW = 1280): InkStyle {
   const fingers = ink.fingersDraw ? 'draw' as const : ink.pencil ? 'pan' as const : undefined;
   return {
     color: p.color, width: Math.round(p.width * Math.max(0.25, pageW / 1280) * 10) / 10, opacity: hl ? HIGHLIGHT_OPACITY : 1,
-    ...(hl ? {} : { nib: { ...ink.nib } }), ...(fingers ? { fingers } : {}), scribble: ink.scribble,
+    ...(hl ? {} : { nib: { ...ink.nib } }), ...(fingers ? { fingers } : {}), scribble: ink.scribble, penInks: ink.penInks,
   };
 }
 

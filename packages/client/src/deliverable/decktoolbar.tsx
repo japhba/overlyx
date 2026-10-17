@@ -48,6 +48,8 @@ export interface DeckCtx {
     /** crop mode is on (the picture's frame, Done / Cancel) */
     cropping: boolean;
     crop(): void; resetCrop(): void; removeBackground(): void; replace(): void;
+    /** the picture is an SVG drawing in the project: open it in the drawing editor (the documents' pop-up), else null */
+    editSvg: (() => void) | null;
     /** cropped at once to an aspect / a round frame (crop mode: the frame changed) */
     shape(aspect: number | null, shape?: 'rect' | 'circle'): void;
     done(commit: boolean): void;
@@ -417,6 +419,7 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
         palette: { title: 'Crop to', list: true, cols: 1, items: [...shapes, ...(im?.cropped ? [{ label: 'Reset crop', html: ICON('dk-crop'), action: c.image.resetCrop }] : [])] } },
       { id: 'dk-nobg', title: 'Remove background', icon: 'dk-nobg', action: c.image.removeBackground },
       { id: 'dk-replace', title: 'Replace picture…', icon: 'dk-replace', action: c.image.replace },
+      ...(c.image.editSvg ? [{ id: 'dk-editsvg', title: 'Edit drawing — the SVG in the drawing editor (double-click the picture)', icon: 'dk-pen', action: c.image.editSvg }] : []),
     ]);
   }
 

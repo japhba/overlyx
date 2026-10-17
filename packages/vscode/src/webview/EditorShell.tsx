@@ -20,7 +20,7 @@ import { SettingsPanel } from '@client/app/Settings';
 import { HelpDialog, HELP_ROWS, DialogHost, uiPrompt } from '@client/app/Dialogs';
 import { Ruler, DEFAULT_WIDTH, MIN_WIDTH, MAX_WIDTH, NOTE_SCALE_DEFAULT } from '@client/app/Ruler';
 import { useNotesPane, NotesSash } from '@client/app/notespane';
-import { setInk, subscribeInk } from '@client/editor/plugins/ink';
+import { setInk, getInk, subscribeInk } from '@client/editor/plugins/ink';
 /**
  * The OverLyX editor inside VS Code: the web client's Workspace (App.tsx) trimmed to the editor
  * itself — LyX toolbars, find & replace, contextual math/table/review rows, comments margin and
@@ -146,7 +146,8 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   useEffect(() => { document.documentElement.style.setProperty('--note-size', noteScale / 100 + 'em'); localStorage.setItem('ol.noteScale', String(noteScale)); }, [noteScale]);
   useEffect(() => { localStorage.setItem('ol.ruler', showRuler ? '1' : '0'); }, [showRuler]);
   useEffect(() => { setInk({ active: inkMode }); localStorage.setItem('ol.ink', inkMode ? '1' : '0'); }, [inkMode]);
-  useEffect(() => subscribeInk(() => force(t => t + 1)), []);
+  // (a pen that drew on a margin turns Draw on: editor/plugins/ink.ts onPenInMargin)
+  useEffect(() => subscribeInk(() => { force(t => t + 1); if (getInk().active) setInkMode(true); }), []);
   const stepTextWidth = (direction: number) => setTextWidth(w => direction === 0 ? DEFAULT_WIDTH : Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, (w || DEFAULT_WIDTH) + direction * 80)));
   useLayoutEffect(() => {
     const el = scrollRef.current;
@@ -585,7 +586,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       leading: [{ id: 'new', title: 'New document', icon: 'new', action: () => hostCommand('newFile') }, { id: 'open', title: 'Open', icon: 'open', action: () => hostCommand('openFile') }],
       navigation: [{ id: 'navback', title: 'Navigate back', icon: 'navback', action: () => hostCommand('back') }],
       sidebars: [{ id: 'outline', title: 'Outline (sections: click to jump, move and promote / demote them)', icon: 'outline', action: () => setShowOutline(s => !s), active: showOutline }],
-      tools: [{ id: 'ink', title: 'Draw in the margins — pen, highlighter, lines and shapes', icon: 'ink', action: () => setInkMode(m => !m), active: inkMode }, { id: 'comments-panel', title: 'Comments', icon: 'notes', action: () => setShowComments(s => !s), active: showComments }],
+      tools: [{ id: 'ink', title: 'Draw in the margins — pen, highlighter, eraser, lasso; a pen draws on a margin right away', icon: 'ink', action: () => setInkMode(m => !m), active: inkMode }, { id: 'comments-panel', title: 'Comments', icon: 'notes', action: () => setShowComments(s => !s), active: showComments }],
       pdf: activeMeta?.master ? [{ id: 'pdfmaster', title: 'View master document', icon: 'viewmaster', action: () => vscode.postMessage({ type: 'openDoc', id: activeMeta.master! }) }] : [],
     },
   });

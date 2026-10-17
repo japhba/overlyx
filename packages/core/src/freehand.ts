@@ -51,49 +51,6 @@ export function freshPoint(pts: FreePt[], lastT: number, t: number, p: FreePt): 
 }
 
 /**
- * Whether a stroke is a scribble (GoodNotes' scribble to erase): back and forth — four legs or more,
- * each going back the way the last came, the whole half as long again as its box is across. Turns are
- * measured over ~5 screen px either side (a quick hand turns round, not on a point). Writing turns
- * back too (a w, an m's foot), but an m's arches all go on and loops go round; what tells the rest
- * from a scribble is that a scribble is over strokes — the runtime's `scribbledOut`. `zoom`: screen px
- * per px of the points.
- */
-export function isScribble(pts: [number, number][], zoom = 1): boolean {
-  const step = 1.5 / zoom, minLeg = 8 / zoom;
-  // the path, a point every `step` px or so
-  const q: [number, number][] = [];
-  let total = 0, x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-  for (const p of pts) {
-    x0 = Math.min(x0, p[0]); y0 = Math.min(y0, p[1]); x1 = Math.max(x1, p[0]); y1 = Math.max(y1, p[1]);
-    const l = q[q.length - 1];
-    if (!l) { q.push(p); continue; }
-    const d = Math.hypot(p[0] - l[0], p[1] - l[1]);
-    if (d >= step) { q.push(p); total += d; }
-  }
-  const n = q.length, W = Math.max(2, Math.ceil(5 / zoom / step)), W2 = Math.max(W + 1, Math.ceil(8 / zoom / step));
-  if (n < 2 * W + 4 || total < 1.5 * Math.hypot(x1 - x0, y1 - y0)) return false;
-  const unit = (a: number, b: number) => { const dx = q[b][0] - q[a][0], dy = q[b][1] - q[a][1], l = Math.hypot(dx, dy) || 1; return [dx / l, dy / l]; };
-  const cosAt = (i: number, w: number) => { const a = unit(Math.max(0, i - w), i), b = unit(i, Math.min(n - 1, i + w)); return a[0] * b[0] + a[1] * b[1]; };
-  // the way in and the way out, over ~5 screen px and over ~8 (a quick turn round a radius of a few px; an m's arch is wider)
-  const back = (i: number) => Math.min(cosAt(i, W), cosAt(i, W2));
-  // the turns: the sharpest point of each stretch where they differ by more than 100°
-  const TURN = -0.17;
-  const marks = [0];
-  for (let i = W; i < n - W; i++) {
-    if (back(i) >= TURN) continue;
-    let best = i;
-    while (i + 1 < n - W && back(i + 1) < TURN) { i++; if (back(i) < back(best)) best = i; }
-    marks.push(best);
-  }
-  marks.push(n - 1);
-  const legs = marks.slice(1).map((m, i) => [q[m][0] - q[marks[i]][0], q[m][1] - q[marks[i]][1]]).filter(([a, b]) => Math.hypot(a, b) >= minLeg);
-  if (legs.length < 4) return false;
-  let goesBack = 0;
-  for (let i = 1; i < legs.length; i++) if (legs[i][0] * legs[i - 1][0] + legs[i][1] * legs[i - 1][1] < 0) goesBack++;
-  return goesBack >= 0.75 * (legs.length - 1);
-}
-
-/**
  * The width at a pressure, as a part of the nominal one, at a pressure sensitivity (0..1): the
  * Pencil's usual writing (~0.25) the nominal width whatever the sensitivity; at full sensitivity a
  * light touch two fifths of it and pressed hard twice it, at a quarter (the default) 0.79–1.19.

@@ -21,7 +21,7 @@ const LEVELS: { key: 'sharpness' | 'sensitivity' | 'flatness' | 'stabilization';
   { key: 'stabilization', label: 'Stroke stabilization', low: 'as drawn', high: 'smooth', fountain: false },
 ];
 
-export interface PenHabits { scribble: boolean; fingersDraw: boolean; pencil: boolean }
+export interface PenHabits { scribble: boolean; fingersDraw: boolean; pencil: boolean; penInks: boolean }
 
 export function PenSettings({ nib, color, width, habits, onChange, onHabits }: { nib: Nib; color: string; width: number; habits: PenHabits; onChange: (p: Partial<Nib>) => void; onHabits: (p: Partial<PenHabits>) => void }) {
   const w = Math.max(1.5, Math.min(7, width * 1.1));
@@ -51,9 +51,14 @@ export function PenSettings({ nib, color, width, habits, onChange, onHabits }: {
         );
       })}
       {nib.ball && <div class="pen-set-note">A ball pen's line is even and round, whatever the pressure.</div>}
-      <label class="pen-set-check" title="Scribble back and forth over strokes to erase them; a scribble over nothing stays">
+      <label class="pen-set-check" title="Scribble tightly back and forth over strokes to erase them: what it would erase fades as you scribble, and goes when the pen lifts (lifted away from it, nothing goes; resting the pen at the end makes a short scribble count). Undo brings the strokes back, with the scribble as ink. A scribble over nothing stays.">
         <input type="checkbox" checked={habits.scribble} data-pen-scribble onChange={e => onHabits({ scribble: (e.target as HTMLInputElement).checked })} /> Scribble to erase
       </label>
+      {habits.pencil && (
+        <label class="pen-set-check" title="The pen draws as soon as it touches a slide or a document's margin, without Draw turned on; fingers and the mouse select and move. Off: the pen selects too until Draw is on">
+          <input type="checkbox" checked={habits.penInks} data-pen-inks onChange={e => onHabits({ penInks: (e.target as HTMLInputElement).checked })} /> Pen draws right away
+        </label>
+      )}
       {habits.pencil && (
         <label class="pen-set-check" title="Since a Pencil has drawn in this browser, fingers move the slide and the resting hand is ignored">
           <input type="checkbox" checked={habits.fingersDraw} data-pen-fingers onChange={e => onHabits({ fingersDraw: (e.target as HTMLInputElement).checked })} /> Fingers draw too

@@ -37,7 +37,8 @@ import { startCrop, isCropping, endCrop, cropNow, cropTarget, setCropAspect, red
 import { chipify, unchip, openChip, openChipEl, chipOpening, holdKey, holdAfter, holdIfLeaving, keyPress, isModifierKey, typeKeysHere, chipHooks, flushAfter, insertRefChip, shownChip, setChip, doneChip, displayChip, closeChip, trackChip, insertChip, chipBeside, recoverChipCaret, CHIP_CSS } from './mathedit';
 import { initPaths, isNodeEditing, nodesAfterSource, nodesTargetOf, startNodesOrConvert, endNodes, redrawNodes, penDown, penMove, penUp, penCancelPress, penKey, penDouble, penCancel, isPenDrawing, setMenuShape } from './pathedit';
 import { isSolo, showSlide, soloIndex, revealSlideOf } from './solo';
-import { inkRuns, inkPaths, runsBox, freshPoint, isScribble, type FreePt, type InkRun } from './freehand';
+import { inkRuns, inkPaths, runsBox, freshPoint, type FreePt, type InkRun } from './freehand';
+import { scratchOut, SCRATCH_HOLD_MS, SCRATCH_HOLD_PX } from '@overlyx/core/scratchout.ts';
 import { pinchFactor, pinchLock, triGesture, type PinchLock } from '../gestures';
 import { offsetOf, caretBox, selectionBoxes, safeColor } from './carets';
 import { postObjects } from './objects';
@@ -200,7 +201,11 @@ export function setScale(s: number, anchor?: { docY: number; screenY: number }):
   redrawCrop();
   redrawNodes();
 }
+/** the pen took the pen itself (InkStyle.penInks) and the editor has not said so yet: a Select it sends meanwhile is from before */
+let penInksPending = false;
 export function setTool(t: Tool, style?: InkStyle): void {
+  if (penInksPending && t === 'select') { if (style) inkStyle = style; return; }
+  if (t === 'pen') penInksPending = false;
   if (t !== tool && drag) cancelDrag();
   tool = t;
   if (style) inkStyle = style;
@@ -1305,7 +1310,9 @@ function onPointerDown(e: PointerEvent): void {
     if (touches.size >= 3 || tri) { e.preventDefault(); e.stopPropagation(); if (!tri) startTri(); return; }
     if (touches.size >= 2) { e.preventDefault(); e.stopPropagation(); startPinch(); return; }
   }
-  if (e.button !== 0) return;
+  // (a pen's eraser end presses button 5)
+  const eraserEnd = e.pointerType === 'pen' && (e.buttons & 32) !== 0;
+  if (e.button !== 0 && !eraserEnd) return;
   const t = e.target as Element;
   if (t === host) return;   // a handle (in the shadow root) handles itself
   if (editing) {
@@ -1332,6 +1339,21 @@ function onPointerDown(e: PointerEvent): void {
   grab(e);
   const x = e.pageX, y = e.pageY;
   const base = { x0: x, y0: y, els: [], moved: false, pointerId: e.pointerId, pointerType: e.pointerType, last: { x: e.clientX, y: e.clientY }, ls: { x: e.screenX, y: e.screenY } };
+  // the pen's eraser end erases while it is turned round, whatever the tool (Li et al. 2005: the fewest mode errors)
+  if (eraserEnd) {
+    drag = { ...base, kind: 'erase', slide: slideOf(t), erased: [] };
+    eraseAt(e, drag);
+    capture();
+    return;
+  }
+  // a pen (the Pencil, a stylus) draws the moment it touches the slide, with no Draw to turn on first
+  // (Apple's HIG; Office and Keynote do so): fingers and the mouse select and move. The editor shows
+  // the Draw row; the pen's settings can make the pen select instead.
+  if (e.pointerType === 'pen' && tool === 'select' && inkStyle.penInks) {
+    setTool('pen');
+    penInksPending = true;
+    post({ ol: 'penInks' });
+  }
   // drawing with a Pencil: fingers move the slide, they do not draw (GoodNotes)
   if ((tool === 'pen' || tool === 'eraser') && e.pointerType === 'touch' && fingersPan()) {
     drag = { ...base, kind: 'pan', slide: slideOf(t) };
@@ -2078,7 +2100,11 @@ function penLands(e: PointerEvent): void {
  * the pen's points (`t`: the time of the last) and whether they all came in whole px. (Not where the
  * browser expects the pen next: drawn ahead of the pen, the line drew back when it lifted.)
  */
-let ink: { slide: HTMLElement | null; pts: FreePt[]; client: [number, number][]; pressure: boolean; svg: SVGSVGElement; g: SVGGElement; frame: number; t: number; whole: boolean } | null = null;
+let ink: {
+  slide: HTMLElement | null; pts: FreePt[]; client: [number, number][]; pressure: boolean; svg: SVGSVGElement; g: SVGGElement; frame: number; t: number; whole: boolean;
+  /** scratch-out (core/scratchout.ts): where and since when the pen rests, when the scribble was last judged, the strokes it could erase */
+  rest: { x: number; y: number; t: number; timer: ReturnType<typeof setTimeout> | null }; judged: number; cands: { el: Element; pts: [number, number][] }[] | null;
+} | null = null;
 /** strokes drawn and sent to the editor, shown until the page has them (`count`: that many strokes the slide will have then) */
 const sentInk: { svg: SVGSVGElement; slide: HTMLElement | null; count: number; timer: ReturnType<typeof setTimeout> }[] = [];
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -2104,7 +2130,8 @@ function startInk(e: PointerEvent, slide: HTMLElement | null): void {
   for (const [k, v] of Object.entries(inkPaint())) g.setAttribute(k, v);
   svg.append(g);
   (slide ?? document.body).append(svg);
-  ink = { slide, pts: [inkPoint(e, slide)], client: [[e.clientX, e.clientY]], pressure: e.pointerType === 'pen', svg, g, frame: 0, t: e.timeStamp, whole: wholePx(e) };
+  ink = { slide, pts: [inkPoint(e, slide)], client: [[e.clientX, e.clientY]], pressure: e.pointerType === 'pen', svg, g, frame: 0, t: e.timeStamp, whole: wholePx(e),
+    rest: { x: e.clientX, y: e.clientY, t: performance.now(), timer: null }, judged: 0, cands: null };
   paintInk(true);
 }
 
@@ -2121,6 +2148,62 @@ function moveInk(e: PointerEvent): void {
   const evs = e.getCoalescedEvents?.() ?? [];
   for (const ev of evs.length ? evs : [e]) takeInk(ev);
   if (!ink.frame) ink.frame = requestAnimationFrame(() => { if (ink) { ink.frame = 0; paintInk(false); } });
+  if (!scribbles()) return;
+  // what the scribble would erase fades as it goes (every ~80 ms); resting the pen asks for it (scratch and hold)
+  const now = performance.now(), r = ink.rest;
+  if (Math.hypot(e.clientX - r.x, e.clientY - r.y) * scale > SCRATCH_HOLD_PX) {
+    if (r.timer) clearTimeout(r.timer);
+    ink.rest = { x: e.clientX, y: e.clientY, t: now, timer: setTimeout(() => judgeScratch(true), SCRATCH_HOLD_MS) };
+  }
+  if (now - ink.judged > 80) judgeScratch(false);
+}
+
+/** scribbling over strokes erases them: on, and the pen (not the highlighter) in hand */
+const scribbles = () => inkStyle.scribble !== false && inkStyle.opacity >= 1;
+
+/**
+ * The strokes on the scribble's slide it could erase — Draw's, and open unfilled paths, as the eraser
+ * takes —, each line sampled every ~3 screen px in the frame's client px (the scribble's).
+ */
+function scratchCandidates(slide: HTMLElement | null): { el: Element; pts: [number, number][] }[] {
+  const out: { el: Element; pts: [number, number][] }[] = [];
+  for (const el of Array.from((slide ?? document.body).children)) {
+    if (el.localName !== 'svg' || el.hasAttribute('data-ol-runtime') || !srcOf.has(el) || isLocked(el) || !isStrokeArt(el)) continue;
+    const pts: [number, number][] = [];
+    for (const g of Array.from(el.querySelectorAll('path, polyline'))) {
+      const geo = g as SVGGeometryElement, m = geo.getScreenCTM();
+      if (!m) continue;
+      let len = 0;
+      try { len = geo.getTotalLength(); } catch { continue; }
+      const n = Math.min(600, Math.max(2, Math.ceil((len * Math.hypot(m.a, m.b) * scale) / 3)));
+      for (let i = 0; i <= n; i++) { const q = geo.getPointAtLength((len * i) / n).matrixTransform(m); pts.push([q.x, q.y]); }
+    }
+    if (pts.length) out.push({ el, pts });
+  }
+  return out;
+}
+
+/** the strokes faded because the scribble would erase them, with the opacity each had */
+const scratchFaded = new Map<Element, string>();
+function fadeScratch(els: Element[]): void {
+  for (const [el, was] of [...scratchFaded]) if (!els.includes(el)) { (el as SVGElement).style.opacity = was; scratchFaded.delete(el); }
+  for (const el of els) if (!scratchFaded.has(el)) { scratchFaded.set(el, (el as SVGElement).style.opacity); (el as SVGElement).style.opacity = '0.3'; }
+  // the scribble itself grey while it is one (Fluid Inking's feedback)
+  if (ink) ink.g.setAttribute('stroke', els.length ? '#8a9099' : inkStyle.color);
+}
+
+/** what the scribble drawn so far would erase (`hold`: the pen rests at its end) */
+function scratchTargets(hold: boolean): Element[] {
+  if (!ink || !scribbles() || ink.client.length < 12) return [];
+  ink.cands ??= scratchCandidates(ink.slide);
+  if (!ink.cands.length) return [];
+  const hits = scratchOut(ink.client, ink.cands.map(c => c.pts), { zoom: scale, width: inkStyle.width, hold });
+  return hits ? hits.map(i => ink!.cands![i].el) : [];
+}
+function judgeScratch(hold: boolean): void {
+  if (!ink) return;
+  ink.judged = performance.now();
+  fadeScratch(scratchTargets(hold));
 }
 
 /** a point the pen passed — unless it gave it before (freehand.ts freshPoint: Safari's coalesced events) */
@@ -2157,16 +2240,10 @@ function endInk(e: PointerEvent): void {
   // where it lifted, if not where it last was — with the pressure it had (a Pencil lifting reports none)
   const up = inkPoint(e, ink.slide), last = ink.pts[ink.pts.length - 1];
   if (e.timeStamp >= ink.t && Math.hypot(up[0] - last[0], up[1] - last[1]) > 0.5) ink.pts.push([up[0], up[1], last[2]]);
-  // a scribble over strokes erases them (GoodNotes): the scribble goes, and they do
-  const gone = inkStyle.scribble !== false && inkStyle.opacity >= 1 && isScribble(ink.pts.map(p => [p[0], p[1]]), scale) ? scribbledOut(ink.client) : [];
-  if (gone.length && state.version !== null) {
-    if (ink.frame) cancelAnimationFrame(ink.frame);
-    ink.svg.remove();
-    ink = null;
-    for (const el of gone) (el as HTMLElement | SVGElement).style.visibility = 'hidden';
-    commit([{ t: 'remove', paths: gone.map(pathOf).filter((p): p is Path => !!p) }]);
-    return;
-  }
+  // a scribble over strokes erases them (core/scratchout.ts; the pen resting at its end: scratch and hold)
+  if (ink.rest.timer) clearTimeout(ink.rest.timer);
+  const gone = scratchTargets(performance.now() - ink.rest.t >= SCRATCH_HOLD_MS);
+  fadeScratch([]);
   const runs = paintInk(true);
   const b = runsBox(runs);
   const { slide, svg } = ink;
@@ -2177,50 +2254,23 @@ function endInk(e: PointerEvent): void {
   const rect = { x, y, w: Math.max(1, Math.ceil(b.x + b.w) - x), h: Math.max(1, Math.ceil(b.y + b.h) - y) };
   const waiting = sentInk.filter(s => s.slide === slide).length;
   const entry = { svg, slide, count: inkCount(slide) + waiting + 1, timer: setTimeout(() => { svg.remove(); const i = sentInk.indexOf(entry); if (i >= 0) sentInk.splice(i, 1); }, 4000) };
-  sentInk.push(entry);
-  post({ ol: 'draw', version: state.version, tool: 'pen', slide: slide ? pathOf(slide) : null, rect, after: null, runs: inkPaths(runs, -x, -y) });
-}
-
-/**
- * The strokes a scribble went over (Draw's, and open unfilled paths, as the eraser takes) — if it was
- * over strokes for a fifth of its length or more, each point of it taken as a few screen px across
- * (thin strokes are hard to land on exactly): a zig-zag across one line crosses it at each leg, a
- * scribble over a word is over it all along; writing that only crosses a line (an m over an underline)
- * is not, and stays — as does a scribble over nothing.
- */
-function scribbledOut(client: [number, number][]): Element[] {
-  const found: Element[] = [];
-  let samples = 0, hits = 0, carry = 0;
-  const step = 3 / scale, r = 3 / scale;
-  const probe = (x: number, y: number) => {
-    let hit = false;
-    for (const h of document.elementsFromPoint(x, y)) {
-      if (!(h instanceof SVGGeometryElement) || h.localName === 'svg') continue;
-      const obj = objectFor(h, false);
-      if (!obj || isLocked(obj) || !isStrokeArt(obj)) continue;
-      hit = true;
-      if (!found.includes(obj)) found.push(obj);
-    }
-    return hit;
-  };
-  const at = (x: number, y: number) => {
-    samples++;
-    // (each probe, not only the first that hits: all the strokes under the scribble go)
-    const hit = [probe(x, y), probe(x - r, y), probe(x + r, y), probe(x, y - r), probe(x, y + r)].some(Boolean);
-    if (hit) hits++;
-  };
-  at(client[0][0], client[0][1]);
-  for (let i = 1; i < client.length; i++) {
-    const [ax, ay] = client[i - 1], [bx, by] = client[i], l = Math.hypot(bx - ax, by - ay);
-    for (carry += l; carry >= step; carry -= step) { const f = 1 - (carry - step) / Math.max(l, 1e-6); at(ax + (bx - ax) * f, ay + (by - ay) * f); }
-  }
-  return hits >= Math.max(2, samples / 5) ? found : [];
+  const scratch = gone.map(pathOf).filter((p): p is Path => !!p);
+  if (scratch.length) {
+    // the editor adds the scribble as ink and then takes it and what it covers away, two steps: the
+    // first undo brings the strokes back with the scribble as ink, in case it was drawing (OneNote)
+    clearTimeout(entry.timer);
+    svg.remove();
+    for (const el of gone) (el as SVGElement).style.visibility = 'hidden';
+  } else sentInk.push(entry);
+  post({ ol: 'draw', version: state.version, tool: 'pen', slide: slide ? pathOf(slide) : null, rect, after: null, runs: inkPaths(runs, -x, -y), ...(scratch.length ? { scratch } : {}) });
 }
 
 /** the stroke being drawn given up (a second finger, a cancelled pointer) */
 function dropInk(): void {
   if (!ink) return;
   if (ink.frame) cancelAnimationFrame(ink.frame);
+  if (ink.rest.timer) clearTimeout(ink.rest.timer);
+  fadeScratch([]);
   ink.svg.remove();
   ink = null;
 }
@@ -2465,6 +2515,12 @@ function penUpOnce(e: PointerEvent): void {
   if (e.type === 'pointerup') penUp(); else penCancelPress();
 }
 
+/** the src of a picture (or of the one in its crop frame) as the source has it, when it is an .svg file, else null (the frame shows it inlined) */
+function svgSrc(el: Element): string | null {
+  const src = cropTarget(el) ? pictureSrc(el) ?? '' : '';
+  return /\.svg([?#]|$)/i.test(src) && !src.startsWith('data:') ? src : null;
+}
+
 function onDblClick(e: MouseEvent): void {
   if (isCropping() || isNodeEditing()) return;
   rotating = null;   // (its two clicks switched the handles twice: a double click means points or text)
@@ -2478,6 +2534,9 @@ function onDblClick(e: MouseEvent): void {
   const cur = selected.length === 1 ? selected[0] : null;
   // a picture: PowerPoint's crop (drag the picture inside its frame)
   const pic = cur && cur.contains(t) ? cur : objectFor(t, false);
+  // a picture that is an SVG drawing: the documents' drawing editor, over the deck
+  const svg = pic ? svgSrc(pic) : null;
+  if (svg) { selected = [pic!]; report(); draw(); post({ ol: 'editSvg', src: svg }); return; }
   if (pic && cropTarget(pic) && !isLocked(pic)) { selected = [pic]; report(); if (startCrop(pic, cropCtx())) post({ ol: 'cropping', path: pathOf(pic) }); draw(); return; }
   // a path (or a drawing that is one shape): Inkscape's node editor
   const shape = cur ? nodesTargetOf(t, cur) : null;

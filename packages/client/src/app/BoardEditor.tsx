@@ -24,7 +24,8 @@ import { hostedZoomPill } from './zoomhud';
 import { Toolbar } from './Toolbar';
 import { drawingToolbar } from '../deliverable/drawingToolbar';
 import { loadDeckInk, saveDeckInk, patchDeckInk } from '../deliverable/deckink';
-import { isScribble, type NibOpts } from '@overlyx/core/freehand.ts';
+import type { NibOpts } from '@overlyx/core/freehand.ts';
+import { scratchOut, SCRATCH_HOLD_MS, SCRATCH_HOLD_PX } from '@overlyx/core/scratchout.ts';
 import { shapePoints, INK_SHAPES, type InkShape } from '@overlyx/core';
 const isShapeTool = (t: string): t is InkShape => (INK_SHAPES as readonly string[]).includes(t);
 
@@ -111,6 +112,8 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
   const [readOnly, setReadOnly] = useState(false);
   const readOnlyRef = useRef(readOnly); readOnlyRef.current = readOnly;
   const liveRef = useRef<LiveStroke | null>(null);
+  /** scratch-out while the pen draws (core/scratchout.ts): the strokes it would erase now (faded), where and since when the pen rests */
+  const scratchRef = useRef<{ hits: Set<string>; rest: { x: number; y: number; t: number; timer: ReturnType<typeof setTimeout> | null }; judged: number } | null>(null);
   const [peerTick, setPeerTick] = useState(0);
 
   /** Yjs document + provider, once per board. */
@@ -247,6 +250,26 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
   const setFingerDraw = (v: boolean) => { fingerDrawRef.current = v; setFingerDrawState(v); saveDeckInk(patchDeckInk(loadDeckInk(), { fingersDraw: v })); };
   useEffect(() => subscribeInk(() => { const drawing = loadDeckInk(); fingerDrawRef.current = drawing.fingersDraw; setFingerDrawState(drawing.fingersDraw); rerender(); }), []);
 
+  /** the strokes the scribble drawn so far would erase (`hold`: the pen rests at its end) */
+  const scratchTargets = (hold: boolean): string[] => {
+    const live = liveRef.current;
+    if (!live || live.pts.length < 12) return [];
+    const keys: string[] = [], lines: [number, number][][] = [];
+    objects.forEach((o, key) => { if (o.t === 'stroke' && o.pts?.length) { keys.push(key); lines.push(o.pts.map(([x, y]) => [o.x + x, o.y + y])); } });
+    const hits = lines.length ? scratchOut(live.pts.map(([x, y]) => [x, y]), lines, { zoom: camRef.current.s, width: live.w, hold }) : null;
+    return hits ? hits.map(i => keys[i]) : [];
+  };
+  const judgeScratch = (hold: boolean) => {
+    const sc = scratchRef.current;
+    if (!sc) return;
+    sc.judged = performance.now();
+    sc.hits = new Set(scratchTargets(hold));
+  };
+  const endScratch = () => {
+    if (scratchRef.current?.rest.timer) clearTimeout(scratchRef.current.rest.timer);
+    scratchRef.current = null;
+  };
+
   const onPointerDown = (e: PointerEvent) => {
     const vp = vpRef.current!;
     if (e.pointerType === 'pen' && !loadDeckInk().pencil) saveDeckInk(patchDeckInk(loadDeckInk(), { pencil: true }));
@@ -265,7 +288,11 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     const target = e.target as HTMLElement;
     const objId = target.closest?.('[data-obj]')?.getAttribute('data-obj') ?? null;
     const corner = target.getAttribute?.('data-corner') ?? undefined;
-    const t = toolRef.current;
+    // a pen draws the moment it touches the board, with Select in hand (Apple's HIG; the pen's settings can turn it off)
+    if (e.pointerType === 'pen' && toolRef.current === 'select' && loadDeckInk().penInks && !readOnlyRef.current && !corner && !target.closest?.('.board-selbox')) { const pen = loadDeckInk().pen; setTool(pen); toolRef.current = pen; }
+    // its eraser end erases while it is turned round
+    const eraserEnd = e.pointerType === 'pen' && (e.buttons & 32) !== 0;
+    const t = eraserEnd ? 'eraser' : toolRef.current;
     const drawTool = (t === 'pen' || t === 'highlighter') && (e.pointerType !== 'touch' || finger) && !readOnlyRef.current;
     const origsOf = (ids: ReadonlySet<string>) => { const m = new Map<string, BoardObj>(); for (const id of ids) { const o = objects.get(id); if (o) m.set(id, { ...o, pts: o.pts?.map(p => [...p] as [number, number, number]) }); } return m; };
     const onSelBox = !!target.closest?.('.board-selbox');
@@ -314,6 +341,8 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     } else if (drawTool) {
       const hl = t === 'highlighter';
       const drawing = loadDeckInk(), pen = drawing.pens[hl ? 'highlighter' : 'pen'];
+      endScratch();
+      if (drawing.scribble && !hl) scratchRef.current = { hits: new Set(), rest: { x: e.clientX, y: e.clientY, t: performance.now(), timer: null }, judged: 0 };
       liveRef.current = { color: pen.color, w: pen.width, nib: { ...drawing.nib }, pressure: e.pointerType === 'pen', ...(hl ? { o: HIGHLIGHT_OPACITY } : {}), pts: [[bx, by, e.pointerType === 'pen' ? e.pressure : 0]] };
       dragRef.current = { kind: 'draw', start: [bx, by] };
     }
@@ -402,6 +431,16 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
         const [x, y] = toBoard(ev.clientX, ev.clientY);
         if (liveRef.current.pts.length < 4000) liveRef.current.pts.push([x, y, ev.pointerType === 'pen' ? ev.pressure : 0]);
       }
+      const sc = scratchRef.current;
+      if (sc) {
+        // what the scribble would erase fades as it goes (every ~80 ms); resting the pen asks for it (scratch and hold)
+        const now = performance.now(), r = sc.rest;
+        if (Math.hypot(e.clientX - r.x, e.clientY - r.y) > SCRATCH_HOLD_PX) {
+          if (r.timer) clearTimeout(r.timer);
+          sc.rest = { x: e.clientX, y: e.clientY, t: now, timer: setTimeout(() => { judgeScratch(true); rerender(); }, SCRATCH_HOLD_MS) };
+        }
+        if (now - sc.judged > 80) judgeScratch(false);
+      }
       try { provider.awareness.setLocalStateField('boardInk', { ...liveRef.current, pts: liveRef.current.pts.map(([x, y, p]) => [round1(x), round1(y), Math.round(p * 100) / 100]) }); } catch { /* closing */ }
       rerender();
     }
@@ -425,15 +464,20 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
       try { provider.awareness.setLocalStateField('boardInk', null); } catch { /* closing */ }
       const xs = live.pts.map(p => p[0]), ys = live.pts.map(p => p[1]);
       const tiny = live.poly && Math.max(...xs) - Math.min(...xs) < 3 / camRef.current.s && Math.max(...ys) - Math.min(...ys) < 3 / camRef.current.s;
+      // a scribble over strokes erases them (core/scratchout.ts; the pen resting at its end: scratch and hold)
+      const sc = scratchRef.current;
+      const erased = sc && !live.poly ? scratchTargets(performance.now() - sc.rest.t >= SCRATCH_HOLD_MS) : [];
+      endScratch();
       if (live.pts.length && !tiny) {
-        const polygon = live.pts.map(([x, y]) => [x, y] as [number, number]);
-        const erased: string[] = [];
-        if (loadDeckInk().scribble && live.o === undefined && !live.poly && isScribble(polygon, camRef.current.s)) {
-          objects.forEach((object, key) => {
-            if (object.t === 'stroke' && polylineHitsPolygon((object.pts ?? []).map(([x, y]) => [object.x + x, object.y + y]), polygon)) erased.push(key);
-          });
+        const sid = newId();
+        // (a scribble's own undo step, and the erasing another: the first undo brings the strokes back with the scribble as ink, in case it was drawing — OneNote)
+        if (erased.length) undo.stopCapturing();
+        mutate(() => objects.set(sid, strokeToObj(live.pts, live.color, live.w, live.o, live.nib, live.pressure, live.poly)));
+        if (erased.length) {
+          undo.stopCapturing();
+          mutate(() => { for (const key of [...erased, sid]) objects.delete(key); });
+          notify(`Scribbled out ${erased.length} stroke${erased.length > 1 ? 's' : ''} — Undo brings ${erased.length > 1 ? 'them' : 'it'} back`);
         }
-        mutate(() => { if (erased.length) for (const key of erased) objects.delete(key); else objects.set(newId(), strokeToObj(live.pts, live.color, live.w, live.o, live.nib, live.pressure, live.poly)); });
       }
     }
     if (dragRef.current?.kind === 'lasso') {
@@ -605,14 +649,14 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
           }
           return (
             <svg key={key} data-obj={key} class={'board-stroke' + (selected.has(key) ? ' selected' : '')}
-              style={{ left: o.x + 'px', top: o.y + 'px', width: o.w + 'px', height: o.h + 'px', overflow: 'visible' }}
+              style={{ left: o.x + 'px', top: o.y + 'px', width: o.w + 'px', height: o.h + 'px', overflow: 'visible', ...(scratchRef.current?.hits.has(key) ? { opacity: 0.3 } : {}) }}
               viewBox={`0 0 ${o.w} ${o.h}`} width={o.w} height={o.h}>
               <BoardStroke stroke={{ color: o.color ?? '#000', w: o.sw ?? 2, pts: o.pts ?? [], nib: o.nib, pressure: o.pressure, o: o.o, poly: o.poly }} legacy={strokeD(o)} />
             </svg>
           );
         })}
         {/* in-progress strokes: mine and the other clients' (awareness) */}
-        {[...remoteInks, ...(liveRef.current ? [liveRef.current] : [])].map((s, i) => (
+        {[...remoteInks, ...(liveRef.current ? [scratchRef.current?.hits.size ? { ...liveRef.current, color: '#8a9099' } : liveRef.current] : [])].map((s, i) => (
           <svg key={'live' + i} class="board-stroke live" style={{ left: 0, top: 0, overflow: 'visible' }} width={1} height={1}>
             <BoardStroke stroke={s} />
           </svg>

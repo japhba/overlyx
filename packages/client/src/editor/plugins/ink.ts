@@ -26,14 +26,12 @@ import { Plugin, PluginKey } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
 import type { Awareness } from 'y-protocols/awareness';
-import { schema, strokePathD, strokeRuns, laserPathD, polylineHitsPolygon, rectHitsPolygon, shapePoints, INK_SHAPES, type InkShape, type InkStroke, type InkImage } from '@overlyx/core';
+import { schema, strokePathD, strokeRuns, laserPathD, polylineHitsPolygon, rectHitsPolygon, type InkStroke, type InkImage } from '@overlyx/core';
 import { graphicsUrl } from '../../api';
-import { viewProject, viewDocDir, resolveDocPath } from '../context';
+import { viewProject, viewDocDir, resolveDocPath, editorContext } from '../context';
 import { imageFiles, imageExt, uploadBaseName, uploadUnique, isSvgMarkup, svgFile } from '../imagepaste';
 
-/** the pens, eraser, lasso and laser — and the layout editor's lines and shapes (core INK_SHAPES), drawn in the pen's colour and width */
-export type InkTool = 'pen' | 'highlighter' | 'eraser' | 'lasso' | 'laser' | InkShape;
-export const isShapeTool = (t: string): t is InkShape => (INK_SHAPES as readonly string[]).includes(t);
+export type InkTool = 'pen' | 'highlighter' | 'eraser' | 'lasso' | 'laser';
 /** the tools that draw — each remembers its own colour and width (Goodnotes: switching pens switches both) */
 export type InkPen = 'pen' | 'highlighter';
 export interface PenSettings {
@@ -57,7 +55,8 @@ export interface InkUiState {
 export { INK_PALETTES, HIGHLIGHT_OPACITY } from '@overlyx/core/inkpresets.ts';
 import { INK_PALETTES, HIGHLIGHT_OPACITY } from '@overlyx/core/inkpresets.ts';
 import { loadDeckInk, saveDeckInk, patchDeckInk, subscribeDeckInk, type DeckInk } from '../../deliverable/deckink';
-import { isScribble } from '@overlyx/core/freehand.ts';
+import { scratchOut, SCRATCH_HOLD_MS, SCRATCH_HOLD_PX } from '@overlyx/core/scratchout.ts';
+import { yUndoPluginKey } from 'y-prosemirror';
 import { documentViewScale } from '../viewscale';
 /**
  * Widths are millimetres on the page, as Goodnotes shows them; the strokes themselves are stored
@@ -316,11 +315,14 @@ class InkLayer {
   private unsub: (() => void)[] = [];
   /** the stroke being drawn here right now (content coordinates of the scroller) */
   private live: (LiveInk & { edgeX: number; anchorTop: number }) | null = null;
-  /** a line or shape being dragged out: its kind and where the drag began (content coordinates) */
-  private shape: { kind: InkShape; x: number; y: number } | null = null;
   /** the laser trace being held (content coordinates) and the one fading after a lift */
   private laser: { b: number; edgeX: number; top: number; pts: [number, number][] } | null = null;
   private laserFade: { pts: [number, number][]; start: number } | null = null;
+  /**
+   * Scratch-out while the pen draws (core/scratchout.ts): the strokes the scribble could erase (content
+   * coordinates), those it would now (`src:idx`, drawn faded), where and since when the pen rests.
+   */
+  private scratch: { cands: { item: SelItem; pts: [number, number][] }[] | null; hits: Set<string>; rest: { x: number; y: number; t: number; timer: ReturnType<typeof setTimeout> | null }; judged: number } | null = null;
   private remoteLasers = new Map<number, RemoteLaser>();
   private lasso: [number, number][] | null = null;
   private selection: SelItem[] | null = null;
@@ -370,6 +372,19 @@ class InkLayer {
     }));
 
     this.canvas.addEventListener('pointerdown', this.onDown);
+    // a pen touching a margin draws, Draw on or not (Apple's HIG: a mark the moment the Pencil touches)
+    this.scroller.addEventListener('pointerdown', this.onPenInMargin, true);
+    // while the pen draws, Safari must neither scroll with it (the canvas lets fingers pan) nor take it for Scribble
+    const onTouch = (e: TouchEvent) => {
+      if (this.pointerId !== null && Array.from(e.changedTouches).some(t => (t as Touch & { touchType?: string }).touchType === 'stylus')) e.preventDefault();
+    };
+    this.scroller.addEventListener('touchstart', onTouch, { passive: false });
+    this.scroller.addEventListener('touchmove', onTouch, { passive: false });
+    this.unsub.push(() => {
+      this.scroller?.removeEventListener('pointerdown', this.onPenInMargin, true);
+      this.scroller?.removeEventListener('touchstart', onTouch);
+      this.scroller?.removeEventListener('touchmove', onTouch);
+    });
     this.canvas.addEventListener('pointermove', this.onMove);
     this.canvas.addEventListener('pointerup', this.onUp);
     this.canvas.addEventListener('pointercancel', this.onCancel);
@@ -612,7 +627,11 @@ class InkLayer {
         try { ctx.drawImage(el, im.dx, im.dy, im.w, im.h); } catch { /* decoding */ }
         ctx.restore();
       });
-      e.data.strokes.forEach((s, i) => drawStroke(s, this.edgeX(s.side, g), top, this.isSelected(e.src, 'stroke', i)));
+      e.data.strokes.forEach((s, i) => {
+        // what the scribble being drawn would erase: faded
+        const gone = this.scratch?.hits.has(`${e.src}:${i}`);
+        drawStroke(gone ? { ...s, o: (s.o ?? 1) * 0.3 } : s, this.edgeX(s.side, g), top, this.isSelected(e.src, 'stroke', i));
+      });
     }
     // other clients' in-progress strokes (awareness), drawn against the same anchors
     this.awareness.getStates().forEach((state, clientId) => {
@@ -628,7 +647,7 @@ class InkLayer {
     // the local stroke being drawn (content coordinates, not yet relativised)
     if (this.live && this.live.pts.length) {
       const l = this.live;
-      const rel: InkStroke = { color: l.color, w: l.w, o: l.o, nib: l.nib, pressure: l.pressure, poly: l.poly, pts: l.pts.map(([x, y, p]) => [(x - l.edgeX) / z, (y - l.anchorTop) / z, p] as [number, number, number]) };
+      const rel: InkStroke = { color: this.scratch?.hits.size ? '#8a9099' : l.color, w: l.w, o: l.o, nib: l.nib, pressure: l.pressure, pts: l.pts.map(([x, y, p]) => [(x - l.edgeX) / z, (y - l.anchorTop) / z, p] as [number, number, number]) };
       drawStroke(rel, l.edgeX, l.anchorTop);
     }
     // the lasso being drawn: always shown closed (a segment back to the start), lightly filled —
@@ -664,6 +683,8 @@ class InkLayer {
   }
 
   private blank = false;
+  /** a stroke a pen began on a margin while Draw was off (onPenInMargin) */
+  private penDraw = false;
   private nothingToDraw(): boolean {
     if (ui.active || this.live || this.lasso || this.selection || this.laser || this.laserFade || this.remoteLasers.size) return false;
     if (this.entries.some(e => e.data.strokes.length || e.data.imgs.length)) return false;
@@ -780,8 +801,39 @@ class InkLayer {
     if (a && a !== document.body) a.blur();
   }
 
+  /**
+   * A pen (the Pencil, a stylus) on a margin while Draw is off: Draw comes on and the stroke starts —
+   * on the margin itself (the scroller, the page around the text), not on the text, a chip or a button.
+   * Fingers and the mouse still need Draw; the pen's settings can turn this off (`penInks`).
+   */
+  private onPenInMargin = (e: PointerEvent) => {
+    if (ui.active || e.pointerType !== 'pen' || e.button !== 0 || !ui.drawing.penInks || !this.editable() || !this.scroller) return;
+    const t = e.target as Element;
+    if (!(t === this.scroller || (t !== this.view.dom && this.scroller.contains(t) && t.contains(this.view.dom)))) return;
+    const g = this.geom();
+    const [cx] = this.toContent(e, g);
+    if (cx >= g.edgeL - 2 && cx <= g.edgeR + 2) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (ui.tool !== ui.drawing.pen) setInk({ tool: ui.drawing.pen });
+    if (this.blank) { this.canvas.style.display = ''; this.blank = false; }
+    // this stroke is drawn as in Draw; Draw itself comes on when the pen lifts (the shells' Draw widens
+    // the strip in Modern: the page would move under the pen)
+    this.penDraw = true;
+    this.canvas.style.pointerEvents = 'auto';
+    this.onDown(e);
+    if (this.pointerId === null) this.endPenDraw(false);
+  };
+  /** the stroke a pen began on a margin with Draw off is over: Draw on (`activate`) */
+  private endPenDraw(activate: boolean) {
+    if (!this.penDraw) return;
+    this.penDraw = false;
+    this.canvas.style.pointerEvents = '';
+    if (activate) setInk({ active: true });
+  }
+
   private onDown = (e: PointerEvent) => {
-    if (!ui.active || !this.scroller) return;
+    if (!(ui.active || this.penDraw) || !this.scroller) return;
     if (e.pointerType === 'touch' && !ui.drawing.fingersDraw) return;
     if (e.pointerType === 'pen' && !ui.drawing.pencil) saveDeckInk({ ...ui.drawing, pencil: true });
     if (e.button !== 0 && !(e.pointerType === 'pen' && e.buttons & 32)) return;
@@ -833,18 +885,6 @@ class InkLayer {
     }
     const hl = ui.tool === 'highlighter';
     const pen = ui.pens[hl ? 'highlighter' : 'pen'];
-    if (isShapeTool(ui.tool)) {
-      // a line or a shape: dragged from here, in the pen's colour and width, drawn exactly
-      const [x, y] = this.toContent(e, g);
-      this.shape = { kind: ui.tool, x, y };
-      this.live = { src, side, edgeX: this.edgeX(side, g), anchorTop: top, color: ui.pens.pen.color, w: ui.drawing.pens.pen.width, poly: true, pts: [[x, y, 0]] };
-      this.pointerId = e.pointerId;
-      this.canvas.setPointerCapture(e.pointerId);
-      this.schedule();
-      e.preventDefault();
-      return;
-    }
-    this.shape = null;
     this.live = {
       src, side,
       edgeX: this.edgeX(side, g),
@@ -855,6 +895,8 @@ class InkLayer {
       nib: { ...ui.drawing.nib }, pressure: e.pointerType === 'pen',
       pts: [],
     };
+    this.endScratch();
+    if (ui.drawing.scribble && !hl) this.scratch = { cands: null, hits: new Set(), rest: { x: e.clientX, y: e.clientY, t: performance.now(), timer: null }, judged: 0 };
     this.pointerId = e.pointerId;
     this.canvas.setPointerCapture(e.pointerId);
     this.addPoint(e, g);
@@ -863,18 +905,21 @@ class InkLayer {
 
   private addPoint(e: PointerEvent, g: ReturnType<InkLayer['geom']>) {
     if (!this.live) return;
-    if (this.shape) {
-      // the outline from the drag's start to here (Shift: 45° steps, as wide as high)
-      const [x, y] = this.toContent(e, g);
-      this.live.pts = shapePoints(this.shape.kind, [this.shape.x, this.shape.y], [x, y], this.live.w * zoom(), e.shiftKey);
-    } else {
-      const coalesced = e.getCoalescedEvents?.();
-      const events = coalesced?.length ? coalesced : [e];
-      for (const ev of events) {
-        const [x, y] = this.toContent(ev, g);
-        const p = ev.pointerType === 'pen' ? ev.pressure : 0;
-        if (this.live.pts.length < 4000) this.live.pts.push([x, y, p]);
+    const coalesced = e.getCoalescedEvents?.();
+    const events = coalesced?.length ? coalesced : [e];
+    for (const ev of events) {
+      const [x, y] = this.toContent(ev, g);
+      const p = ev.pointerType === 'pen' ? ev.pressure : 0;
+      if (this.live.pts.length < 4000) this.live.pts.push([x, y, p]);
+    }
+    if (this.scratch) {
+      // what the scribble would erase fades as it goes (every ~80 ms); resting the pen asks for it (scratch and hold)
+      const now = performance.now(), r = this.scratch.rest;
+      if (Math.hypot(e.clientX - r.x, e.clientY - r.y) > SCRATCH_HOLD_PX) {
+        if (r.timer) clearTimeout(r.timer);
+        this.scratch.rest = { x: e.clientX, y: e.clientY, t: now, timer: setTimeout(() => this.judgeScratch(true), SCRATCH_HOLD_MS) };
       }
+      if (now - this.scratch.judged > 80) this.judgeScratch(false);
     }
     this.schedule();
     const now = performance.now();
@@ -882,7 +927,7 @@ class InkLayer {
       this.lastAwarenessSend = now;
       const l = this.live;
       const z = zoom();
-      const liveMsg: LiveInk = { src: l.src, side: l.side, color: l.color, w: l.w, o: l.o, nib: l.nib, pressure: l.pressure, ...(l.poly ? { poly: true as const } : {}), pts: l.pts.map(([x, y, p]) => [round4((x - l.edgeX) / z), round4((y - l.anchorTop) / z), Math.round(p * 100) / 100] as [number, number, number]) };
+      const liveMsg: LiveInk = { src: l.src, side: l.side, color: l.color, w: l.w, o: l.o, nib: l.nib, pressure: l.pressure, pts: l.pts.map(([x, y, p]) => [round4((x - l.edgeX) / z), round4((y - l.anchorTop) / z), Math.round(p * 100) / 100] as [number, number, number]) };
       try { this.awareness.setLocalStateField('ink', liveMsg); } catch { /* not connected */ }
     }
   }
@@ -930,6 +975,7 @@ class InkLayer {
   private onUp = (e: PointerEvent) => {
     if (this.pointerId !== e.pointerId) return;
     this.pointerId = null;
+    this.endPenDraw(true);
     try { this.canvas.releasePointerCapture(e.pointerId); } catch { /* gone */ }
     if (this.laser) {
       // lifted: the trace lingers and fades; the others fade their copy when the field vanishes
@@ -947,43 +993,84 @@ class InkLayer {
       return;
     }
     const l = this.live;
+    // a scribble over strokes erases them (core/scratchout.ts; the pen resting at its end: scratch and hold)
+    const scratched = this.scratch ? this.scratchTargets(performance.now() - this.scratch.rest.t >= SCRATCH_HOLD_MS) : [];
+    this.endScratch();
     this.live = null;
-    this.shape = null;
     try { this.awareness.setLocalStateField('ink', null); } catch { /* closing */ }
     if (!l || !l.pts.length) { this.schedule(); return; }
-    // a click with a line or shape tool, no drag: nothing
-    if (l.poly) { const xs = l.pts.map(p => p[0]), ys = l.pts.map(p => p[1]); if (Math.max(...xs) - Math.min(...xs) < 3 && Math.max(...ys) - Math.min(...ys) < 3) { this.schedule(); return; } }
     const z = zoom();
     const stroke: InkStroke = {
       side: l.side, color: l.color, w: l.w,
-      ...(l.poly ? { poly: true as const } : { nib: l.nib, pressure: l.pressure }),
+      nib: l.nib, pressure: l.pressure,
       ...(l.o !== undefined ? { o: l.o } : {}),
       pts: l.pts.map(([x, y, p]) => [round4((x - l.edgeX) / z), round4((y - l.anchorTop) / z), Math.round(p * 100) / 100] as [number, number, number]),
     };
-    if (ui.drawing.scribble && l.o === undefined && !l.poly && isScribble(l.pts.map(([x, y]) => [x, y]))) {
-      const hits = this.lassoSelect(l.pts.map(([x, y]) => [x, y]))?.filter(item => item.kind === 'stroke') ?? [];
-      if (hits.length) {
-        const remove = new Map<string, { strokes: Set<number>; imgs: Set<number> }>();
-        for (const item of hits) {
-          if (!remove.has(item.src)) remove.set(item.src, { strokes: new Set(), imgs: new Set() });
-          remove.get(item.src)!.strokes.add(item.idx);
-        }
-        this.rewrite(remove, []); this.schedule(); return;
-      }
-    }
     const found = this.findBySrc(l.src);
     if (!found) { this.schedule(); return; }   // the anchor vanished mid-stroke (remote delete)
     const data = parseData(found.node.attrs.data);
     const next: InkData = { v: 1, strokes: [...data.strokes, stroke].slice(-300), imgs: data.imgs };
+    // (a scribble's own undo step: see below)
+    if (scratched.length) this.stopCapturing();
     this.view.dispatch(this.view.state.tr.setNodeMarkup(found.pos, undefined, { ...found.node.attrs, data: serializeData(next) }));
+    if (scratched.length) {
+      // it and what it covers go, a step after it came: the first undo brings them back with the
+      // scribble as ink, in case it was drawing (OneNote)
+      this.stopCapturing();
+      const remove = new Map<string, { strokes: Set<number>; imgs: Set<number> }>([[l.src, { strokes: new Set([next.strokes.length - 1]), imgs: new Set() }]]);
+      for (const item of scratched) {
+        if (!remove.has(item.src)) remove.set(item.src, { strokes: new Set(), imgs: new Set() });
+        remove.get(item.src)!.strokes.add(item.idx);
+      }
+      this.rewrite(remove, []);
+      editorContext.notify?.(`Scribbled out ${scratched.length} stroke${scratched.length > 1 ? 's' : ''} — Undo brings ${scratched.length > 1 ? 'them' : 'it'} back`);
+    }
     this.schedule();
   };
+
+  /** the pen's scratch-out tracking ended: nothing faded any more */
+  private endScratch() {
+    if (this.scratch?.rest.timer) clearTimeout(this.scratch.rest.timer);
+    this.scratch = null;
+  }
+
+  /** the strokes the scribble drawn so far would erase (`hold`: the pen rests at its end) */
+  private scratchTargets(hold: boolean): SelItem[] {
+    const l = this.live, sc = this.scratch;
+    if (!l || !sc || l.pts.length < 12) return [];
+    if (!sc.cands) {
+      const g = this.geom(), z = zoom();
+      sc.cands = [];
+      for (const e of this.entries) {
+        const top = this.blockTop(e.blockPos, g);
+        if (top === null) continue;
+        e.data.strokes.forEach((st, i) => {
+          const edge = this.edgeX(st.side, g);
+          sc.cands!.push({ item: { src: e.src, kind: 'stroke', idx: i }, pts: st.pts.map(([px, py]) => [edge + px * z, top + py * z] as [number, number]) });
+        });
+      }
+    }
+    if (!sc.cands.length) return [];
+    const hits = scratchOut(l.pts.map(([x, y]) => [x, y]), sc.cands.map(c => c.pts), { width: l.w * zoom(), hold });
+    return hits ? hits.map(i => sc.cands![i].item) : [];
+  }
+  private judgeScratch(hold: boolean) {
+    if (!this.scratch) return;
+    this.scratch.judged = performance.now();
+    const hits = new Set(this.scratchTargets(hold).map(it => `${it.src}:${it.idx}`));
+    if (hits.size !== this.scratch.hits.size || [...hits].some(k => !this.scratch!.hits.has(k))) { this.scratch.hits = hits; this.schedule(); }
+  }
+  /** the next change is an undo step of its own (yUndoPlugin's Y.UndoManager) */
+  private stopCapturing() {
+    try { (yUndoPluginKey.getState(this.view.state) as { undoManager?: { stopCapturing(): void } } | undefined)?.undoManager?.stopCapturing(); } catch { /* no undo manager */ }
+  }
 
   private onCancel = (e: PointerEvent) => {
     if (this.pointerId !== e.pointerId) return;
     this.pointerId = null;
+    this.endPenDraw(false);
+    this.endScratch();
     this.live = null;
-    this.shape = null;
     this.lasso = null;
     if (this.laser) { this.laserFade = { pts: this.laser.pts, start: performance.now() }; this.laser = null; }
     try { this.awareness.setLocalStateField('ink', null); this.awareness.setLocalStateField('laser', null); } catch { /* closing */ }

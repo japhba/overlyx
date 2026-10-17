@@ -24,6 +24,7 @@ import { promptNewFile } from './newfile';
 import { useUiMode } from './uimode';
 import { KIND_ICONS, iconSvg } from './modernicons';
 import { chooseGoogleImport } from './gpicker';
+import { editSvgFile } from '../editor/svgEditorEvents';
 
 /**
  * Subscribe to the server's change stream for one project (SSE): `onChange` fires whenever files
@@ -474,6 +475,9 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
     const inTab = isDoc || isLyx || isPdf || isBoard || isHtml || isTextFile(f.name);
     const tabId = fileTabId(project!.name, f) ?? 'text:' + id;
     const href = isLyx ? '#' : inTab ? '#/' + tabId : fileUrl(project!.name, f.path);
+    // an SVG drawing opens in the drawing editor over the page (as a figure's double-click does); Ctrl+click: the file in a browser tab
+    const isSvg = /\.svg$/i.test(f.name);
+    const editSvg = () => editSvgFile(project!.name, f.path, !canEdit);
     const importLyx = async () => {
       if (!(await uiConfirm('Import LyX File', `Import ${f.name} into a .tex document (${f.name.replace(/\.lyx$/, '.tex')})? The .lyx file is kept; child documents it includes are imported too.`, { okLabel: 'Import' }))) return;
       try { const r = await api.importLyx(project!.name, f.path); await load(); onOpen(r.id); if (r.warnings.length) await uiAlert('Imported with Warnings', r.warnings.slice(0, 10).join('\n')); }
@@ -483,12 +487,12 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
     const open = outlined && outlines!.open(id);
     const row = (
       <a key={key} class={'tree-row file' + (id === current ? ' current' : '') + (outlined ? ' doc-name' : '') + (member ? ' group-member' : '')} style={{ paddingLeft: 6 + (depth + (member?.level ?? 0)) * 14 + 'px' }}
-        href={href} target={inTab ? undefined : '_blank'} title={`${f.path} · ${(f.size / 1024).toFixed(0)} KB${isLyx ? ' · click to import as .tex' : inTab && isPdf ? ' · opens in the PDF viewer' : inTab && !isDoc ? ' · opens in the text editor' : ''}`}
+        href={href} target={inTab ? undefined : '_blank'} title={`${f.path} · ${(f.size / 1024).toFixed(0)} KB${isLyx ? ' · click to import as .tex' : inTab && isPdf ? ' · opens in the PDF viewer' : isSvg ? ' · opens in the drawing editor (Ctrl+click: in a browser tab)' : inTab && !isDoc ? ' · opens in the text editor' : ''}`}
         data-file={f.path}
         onDragOver={dragOver(f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) : '')}
         onDrop={drop(f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) : '')}
-        onContextMenu={fileCtx(f, () => { if (isLyx) void importLyx(); else if (inTab) onOpen(tabId); else window.open(href, '_blank'); })}
-        onClick={e => { if (isLyx) { e.preventDefault(); void importLyx(); return; } if (inTab && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) { e.preventDefault(); onOpen(tabId); } }}>
+        onContextMenu={fileCtx(f, () => { if (isLyx) void importLyx(); else if (inTab) onOpen(tabId); else if (isSvg) editSvg(); else window.open(href, '_blank'); })}
+        onClick={e => { if (isLyx) { e.preventDefault(); void importLyx(); return; } if (isSvg && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) { e.preventDefault(); editSvg(); return; } if (inTab && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) { e.preventDefault(); onOpen(tabId); } }}>
         {outlines && (outlined
           ? <span class="twisty" role="button" title={open ? 'Hide the outline' : 'Show the outline'} onClick={e => { e.preventDefault(); e.stopPropagation(); outlines.toggle(id); }}>{open ? '▾' : '▸'}</span>
           : <span class="twisty" />)}

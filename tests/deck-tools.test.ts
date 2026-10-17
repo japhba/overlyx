@@ -8,7 +8,7 @@
 import { describe, it, expect } from 'vitest';
 import { objectHtml, inlineSvgHtml, penPathD } from '../packages/client/src/deliverable/sourceops.ts';
 import { loadDeckInk, saveDeckInk, patchDeckInk, deckInkStyle, defaultDeckInk, DEFAULT_NIB } from '../packages/client/src/deliverable/deckink.ts';
-import { inkRuns, runPathD, runsBox, inkPaths, freshPoint, pressureWidth, isScribble, type FreePt, type InkRun } from '../packages/client/src/deliverable/runtime/freehand.ts';
+import { inkRuns, runPathD, runsBox, inkPaths, freshPoint, pressureWidth, type FreePt, type InkRun } from '../packages/client/src/deliverable/runtime/freehand.ts';
 import { applyOp, opSplices, parseSource, rebaseOp } from '../packages/core/src/html/source.ts';
 
 describe('objects drawn on a slide', () => {
@@ -172,29 +172,6 @@ describe("Draw's strokes as GoodNotes draws them (runtime/freehand.ts)", () => {
     expect(full).toBeLessThan(as * 0.45);
   });
 
-  it('tells a scribble (back and forth over one place) from writing', () => {
-    const pts = (f: (t: number) => [number, number], n = 400) => Array.from({ length: n + 1 }, (_, i) => f(i / n));
-    // a zig-zag across a word: six legs or more, along one axis
-    expect(isScribble(pts(t => [100 + 60 * Math.abs(((t * 7) % 2) - 1), 50 + t * 20]))).toBe(true);
-    // a tighter, slanted one
-    expect(isScribble(pts(t => { const a = 40 * Math.abs(((t * 9) % 2) - 1); return [a + t * 30, a * 0.6 + 100]; }))).toBe(true);
-    // a zig-zag struck through a word (its legs at ±55°, five of them), and four legs back and forth along a line
-    expect(isScribble(pts(t => [t * 90, 30 * Math.abs(((t * 5) % 2) - 1)]))).toBe(true);
-    expect(isScribble(pts(t => [80 * Math.abs(((t * 4) % 2) - 1), 50 + t * 6]))).toBe(true);
-    // a quick hand's: the turns round (a radius of 4 px), not on a point
-    expect(isScribble(pts(t => { const a = t * Math.PI * 6; return [40 + 40 * Math.tanh(4 * Math.sin(a)) / Math.tanh(4), 50 + 4 * Math.cos(a) + t * 10]; }))).toBe(true);
-    // writing: m m m (down-strokes retraced, arches over), loops (e e e), a straight line, a few zig-zags
-    // (an m's arches, six of them: from the baseline up, over and down, turning back up at each foot)
-    const m = pts(t => { const u = t * 6, k = Math.min(5, Math.floor(u)), a = Math.PI * (u - k); return [k * 24 + 12 - 12 * Math.cos(a), 40 - 40 * Math.sin(a)]; });
-    expect(isScribble(m)).toBe(false);
-    expect(isScribble(pts(t => [t * 120 + 10 * Math.cos(t * 30), 50 + 10 * Math.sin(t * 30)]))).toBe(false);
-    expect(isScribble(pts(t => [t * 200, 30]))).toBe(false);
-    expect(isScribble(pts(t => [60 * Math.abs(((t * 3) % 2) - 1), t * 20]))).toBe(false);
-    // a circle round and round, an s
-    expect(isScribble(pts(t => [50 + 20 * Math.cos(t * 12), 50 + 20 * Math.sin(t * 12)]))).toBe(false);
-    expect(isScribble(pts(t => [30 * Math.sin(t * Math.PI * 2), t * 60]))).toBe(false);
-  });
-
   it("takes each of the pen's points once, in order: Safari's coalesced events repeat the last move's (A B A C D C)", () => {
     const pts: FreePt[] = [];
     let t = -1;
@@ -243,12 +220,14 @@ describe("Draw's pens (deckink.ts)", () => {
 
   it("the stroke's ink: the highlighter translucent, widths scaled to the page (a poster's as thick, seen whole, as a slide's)", () => {
     const ink = defaultDeckInk();
-    expect(deckInkStyle(ink)).toEqual({ color: ink.pens.pen.color, width: 4, opacity: 1, nib: DEFAULT_NIB, scribble: true });
+    expect(deckInkStyle(ink)).toEqual({ color: ink.pens.pen.color, width: 4, opacity: 1, nib: DEFAULT_NIB, scribble: true, penInks: true });
     // a Pencil has drawn in this browser: fingers move the slide — unless they are to draw too
     expect(deckInkStyle(patchDeckInk(ink, { pencil: true })).fingers).toBe('pan');
     expect(deckInkStyle(patchDeckInk(ink, { pencil: true, fingersDraw: true })).fingers).toBe('draw');
     expect(deckInkStyle(ink, 2560).width).toBe(8);
     expect(deckInkStyle(patchDeckInk(ink, { pen: 'highlighter' })).opacity).toBeLessThan(1);
+    // the pen draws right away unless its settings say otherwise
+    expect(deckInkStyle(patchDeckInk(ink, { penInks: false })).penInks).toBe(false);
     // the pen's settings go with the pen, not the highlighter
     expect(deckInkStyle(patchDeckInk(ink, { pen: 'highlighter' })).nib).toBeUndefined();
   });
