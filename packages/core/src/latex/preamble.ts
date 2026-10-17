@@ -4,6 +4,7 @@
  */
 import { LAYOUT_MACROS } from '../layout/latex.ts';
 import { OLFONT_DEF } from '../fontface.ts';
+import { stylesOfHeader, texMainFace } from '../textstyles.ts';
 import type { ExportContext } from './context.ts';
 import { latexLength } from './lengths.ts';
 import { colorToRgb } from './params.ts';
@@ -143,7 +144,10 @@ export function fontsCode(ctx: ExportContext): string {
   if (bp.useNonTexFonts) {
     let out = '';
     const map = 'Ligatures=TeX';
-    if (bp.fontRoman !== 'default') out += `\\setmainfont[${bp.fontRomanOpts ? bp.fontRomanOpts + ',' : ''}${map}${bp.fontRomanOsf ? ',Numbers=OldStyle' : ''}]{${bp.fontRoman}}\n`;
+    // (Text styles' Normal text: a weight, axes or features of its own — \olmainfont, core textstyles.ts)
+    const face = texMainFace(stylesOfHeader(ctx.doc.header.lines).body, bp);
+    if (face) out += face + '\n';
+    else if (bp.fontRoman !== 'default') out += `\\setmainfont[${bp.fontRomanOpts ? bp.fontRomanOpts + ',' : ''}${map}${bp.fontRomanOsf ? ',Numbers=OldStyle' : ''}]{${bp.fontRoman}}\n`;
     if (bp.fontSans !== 'default') {
       const o: string[] = [];
       if (bp.fontSfScale !== 100) o.push(`Scale=${bp.fontSfScale / 100}`);

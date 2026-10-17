@@ -261,20 +261,26 @@ export function fontFaces(f: GoogleFont): { regular: string; bold?: string; ital
 
 /** the families \olfont / \olfontset name in a LaTeX text (core fontface.ts; text styles' fonts: textstyles.ts) */
 export function olfontFamilies(tex: string): string[] {
-  return [...new Set([...tex.matchAll(/\\olfont(?:set)?(?:\[[^\]\n]*\]){0,2}\{([^}\n]+)\}/g)].map(m => m[1].trim()).filter(validFamily))];
+  const named = [...tex.matchAll(/\\ol(?:font(?:set)?|mainfont)(?:\[[^\]\n]*\]){0,2}\{([^}\n]+)\}/g)].map(m => m[1].trim());
+  // (and the document's fonts by name — non-TeX fonts, Text styles' Normal text: \setmainfont)
+  const set = [...tex.matchAll(/\\set(?:main|sans|mono)font(?:\[[^\]\n]*\])?\{([^}\n]+)\}/g)].map(m => m[1].trim());
+  return [...new Set([...named, ...set].filter(validFamily))];
 }
 
 /**
- * The Google fonts a LaTeX text names with \olfont, copied into `<buildDir>/ol-fonts/<slug>/`: the
- * folder the build's OSFONTDIR names, where LuaTeX finds them by name. Returns the folder (null: none).
+ * The Google fonts a LaTeX text names (\olfont, \olmainfont, \setmainfont …), copied into
+ * `<buildDir>/ol-fonts/<slug>/`: the folder the build's OSFONTDIR names, where LuaTeX finds them by
+ * name. Returns the folder (null: none of them is a Google font).
  */
 export async function provideFaceFonts(tex: string, buildDir: string): Promise<string | null> {
   const families = olfontFamilies(tex);
   if (!families.length) return null;
   const root = path.join(buildDir, 'ol-fonts');
+  let provided = 0;
   for (const name of families) {
     const g = await googleFont(name);
     if (!g) continue;
+    provided++;
     const sub = path.join(root, g.slug);
     fs.mkdirSync(sub, { recursive: true });
     for (const f of g.files) {
@@ -283,7 +289,7 @@ export async function provideFaceFonts(tex: string, buildDir: string): Promise<s
       fs.copyFileSync(path.join(g.dir, f.file), dest);
     }
   }
-  return root;
+  return provided ? root : null;
 }
 
 /* ------------------------------------------------------------------ what a family offers */

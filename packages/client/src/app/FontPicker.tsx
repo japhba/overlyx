@@ -18,7 +18,7 @@ import { pinUnder } from './popup';
 
 interface CatalogFamily { f: string; c: string; a: { t: string; min: number; max: number; d: number }[]; w: number[]; i: boolean; p: number }
 interface Catalog { axisNames: Record<string, string>; families: CatalogFamily[] }
-interface FontInfo {
+export interface FontInfo {
   family: string; category: string;
   axes: { tag: string; name: string; min: number; def: number; max: number }[];
   instances: { name: string; coords: Record<string, number> }[];
@@ -28,7 +28,7 @@ interface FontInfo {
 let catalogP: Promise<Catalog> | null = null;
 const catalog = () => (catalogP ??= fetch('/api/fonts/catalog', { credentials: 'same-origin' }).then(r => (r.ok ? r.json() : { axisNames: {}, families: [] })).catch(() => ({ axisNames: {}, families: [] })));
 const infos = new Map<string, Promise<FontInfo | null>>();
-const fontInfo = (family: string) => {
+export const fontInfo = (family: string) => {
   let p = infos.get(family);
   if (!p) { p = fetch('/api/fonts/info?family=' + encodeURIComponent(family), { credentials: 'same-origin' }).then(r => (r.ok ? r.json() : null)).catch(() => null); infos.set(family, p); }
   return p;
@@ -161,11 +161,16 @@ export interface FontListProps {
   onPick: (family: string) => void;
   /** the document's own families (null: the default); none given: the list does not offer them */
   onFamily?: (family: string | null) => void;
+  /** lists of their own, first (the style editor's: the document's font sets, the editor's faces) */
+  sections?: FontSection[];
   close: () => void;
 }
 
+/** a list of fonts of the style editor's own above Google's (app/TextStyles.tsx) */
+export interface FontSection { title: string; items: { key: string; label: string; hint?: string; fontFamily?: string; active: boolean; pick: () => void }[] }
+
 /** the font list: the document's families, recent and in-document fonts, Google's popular ones, a search through all */
-export function FontList({ family, current, markdown, documentFonts, inDocument: inDoc, onPick, onFamily, close }: FontListProps) {
+export function FontList({ family, current, markdown, documentFonts, inDocument: inDoc, onPick, onFamily, sections, close }: FontListProps) {
   const [query, setQuery] = useState('');
   const [cat, setCat] = useState<Catalog | null>(null);
   useEffect(() => { let live = true; void catalog().then(c => { if (live) setCat(c); }); return () => { live = false; }; }, []);
@@ -200,6 +205,15 @@ export function FontList({ family, current, markdown, documentFonts, inDocument:
               <button key={f} type="button" class={'tb-pal-item ff-item' + (!current && family === f ? ' active' : '')} style={{ fontFamily: f === 'roman' ? 'var(--editor-font), serif' : f === 'sans' ? 'var(--editor-sans-font, system-ui), sans-serif' : 'var(--editor-mono-font, monospace), monospace' }}
                 onMouseDown={e => e.preventDefault()} onClick={() => onFamily(f)}>{FAMILY_NAMES[f]}</button>
             ))}
+            {sections?.map(sec => (
+              <div key={sec.title}>
+                <div class="tb-popup-title">{sec.title}</div>
+                {sec.items.map(it => (
+                  <button key={it.key} type="button" class={'tb-pal-item ff-item' + (it.active ? ' active' : '')} title={it.hint ?? it.label} style={it.fontFamily ? { fontFamily: it.fontFamily } : undefined}
+                    onMouseDown={e => e.preventDefault()} onClick={() => { it.pick(); close(); }}>{it.label}</button>
+                ))}
+              </div>
+            ))}
             {documentFonts && <button type="button" class="tb-pal-item ff-item ff-more" onMouseDown={e => e.preventDefault()} onClick={() => { close(); documentFonts(); }}>{markdown ? 'Typesetting…' : 'Document fonts…'}</button>}
             {inDoc.length > 0 && <><div class="tb-popup-title">In this document</div>{inDoc.map(n => row(n, 'd' + n))}</>}
             {recent.filter(n => !inDoc.includes(n)).length > 0 && <><div class="tb-popup-title">Recent</div>{recent.filter(n => !inDoc.includes(n)).map(n => row(n, 'r' + n))}</>}
@@ -227,8 +241,11 @@ function FontRow({ name, entry, active, onPick }: { name: string; entry: Catalog
 
 /* ------------------------------------------------------------------ axes and features of the font at the cursor */
 
-/** a font's axes as sliders with rungs and its OpenType features as switches; `onChange` with the face as it is set now */
-export function FacePanel({ face, onChange }: { face: FontFace; onChange: (f: FontFace) => void }) {
+/**
+ * a font's axes as sliders with rungs and its OpenType features as switches; `onChange` with the face
+ * as it is set now (`noWeight`: the weight is set elsewhere — the style editor's own slider)
+ */
+export function FacePanel({ face, onChange, noWeight }: { face: FontFace; onChange: (f: FontFace) => void; noWeight?: boolean }) {
   const [info, setInfo] = useState<FontInfo | null | undefined>(undefined);
   const [f, setF] = useState(face);
   useEffect(() => { let live = true; void fontInfo(face.family).then(i => { if (live) setInfo(i); }); return () => { live = false; }; }, [face.family]);
@@ -258,14 +275,14 @@ export function FacePanel({ face, onChange }: { face: FontFace; onChange: (f: Fo
   const slider = (a: FontInfo['axes'][number]) => <AxisSlider key={a.tag} name={a.name} min={a.min} max={a.max} def={a.def} rungs={rungsOf(a, info)} value={f.axes[a.tag] ?? a.def}
     onChange={v => setAxis(a.tag, v === a.def && a.tag !== 'wght' ? null : v === 400 && a.tag === 'wght' ? null : v)} />;
   const order = (a: FontInfo['axes'][number]) => ['wght', 'wdth', 'opsz', 'slnt', 'ital'].indexOf(a.tag) + 1 || 9;
-  const main = info.axes.filter(a => a.tag === a.tag.toLowerCase()).sort((a, b) => order(a) - order(b));
+  const main = info.axes.filter(a => a.tag === a.tag.toLowerCase() && !(noWeight && a.tag === 'wght')).sort((a, b) => order(a) - order(b));
   const more = info.axes.filter(a => a.tag !== a.tag.toLowerCase());
   return (
     <div class="ff-panel">
       <div class="tb-popup-title">{face.family}{info.axes.length ? ' — variable' : ''}</div>
       {info.axes.length
         ? main.map(slider)
-        : info.weights.length > 1 && <WeightRungs weights={info.weights} value={f.axes.wght ?? 400} onChange={v => setAxis('wght', v === 400 ? null : v)} />}
+        : !noWeight && info.weights.length > 1 && <WeightRungs weights={info.weights} value={f.axes.wght ?? 400} onChange={v => setAxis('wght', v === 400 ? null : v)} />}
       {more.length > 0 && (
         <details class="ff-more-axes" open={more.some(a => f.axes[a.tag] !== undefined)}>
           <summary class="ff-sub" title={more.map(a => a.name).join(', ')}>More axes ({more.length})</summary>

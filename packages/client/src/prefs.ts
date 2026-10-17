@@ -6,6 +6,8 @@
  * which is something a user should switch on knowingly (the server also has to be configured
  * with a key — Tools ▸ AI says so when it is not).
  */
+import type { TextStyles } from '@overlyx/core';
+
 export interface Prefs {
   /** spell checking on the text (red underlines) */
   spellcheck: boolean;
@@ -49,10 +51,18 @@ export interface Prefs {
   /** seconds to wait after the save before an automatic build starts (the save follows the last keystroke by 1.5 s) */
   autoBuildDelay: number;
   /**
-   * the editor's text face (fonts/catalog.ts EDITOR_FACES), or 'document' for the face closest to the open
-   * document's roman font; independent of the PDF's fonts (Document ▸ Settings ▸ Fonts)
+   * the editor's text face (fonts/catalog.ts EDITOR_FACES; `gf:Family|axes|features`: a Google font),
+   * or 'document' (the default) for the face closest to the open document's roman font. Anything else
+   * is the person's own: Text styles ▸ Normal text in "My editor" (app/TextStyles.tsx), never the PDF's
    */
   editorFont: string;
+  /** editorFont was set by the person (not the old default 'cm', see load) */
+  editorFontChosen?: boolean;
+  /**
+   * Text styles for this editor only (core textstyles.ts: the "my editor" layer over the document's
+   * and its LaTeX's): every document is drawn with them, the PDF never (app/TextStyles.tsx)
+   */
+  screenStyles: TextStyles;
   /** the editor's math font (fonts/catalog.ts MATH_FONTS), or 'match' for the one drawn for the text face */
   editorMathFont: string;
   /** a tip with the shortcut after an action was taken with the mouse a few times (shortcuttips.ts) */
@@ -70,7 +80,7 @@ export interface Prefs {
   autoCorrectChosen?: boolean;
 }
 
-export const DEFAULT_PREFS: Prefs = { spellcheck: true, spellEngine: 'overlyx', autoCorrect: false, aiButton: false, aiRewrite: false, aiCompleteText: false, aiCompleteMath: false, aiCompleteDelay: 200, darkPages: true, invertFigures: true, aiModel: '', aiCompletionModel: '', darkTone: 'white', usageStats: true, betaDiagnostics: false, autoBuild: 'shown', autoBuildDelay: 1, editorFont: 'cm', editorMathFont: 'match', shortcutTips: true, selectionBar: true, mathKeyboard: 'auto', aiInk: false };
+export const DEFAULT_PREFS: Prefs = { spellcheck: true, spellEngine: 'overlyx', autoCorrect: false, aiButton: false, aiRewrite: false, aiCompleteText: false, aiCompleteMath: false, aiCompleteDelay: 200, darkPages: true, invertFigures: true, aiModel: '', aiCompletionModel: '', darkTone: 'white', usageStats: true, betaDiagnostics: false, autoBuild: 'shown', autoBuildDelay: 1, editorFont: 'document', editorMathFont: 'match', screenStyles: {}, shortcutTips: true, selectionBar: true, mathKeyboard: 'auto', aiInk: false };
 /** delays that were the default in earlier builds: a stored one of these follows the current default */
 const OLD_DEFAULT_DELAYS = new Set([600, 450]);
 const STORAGE = 'ol.prefs';
@@ -90,6 +100,10 @@ function load(): Prefs {
       if (!('darkPages' in v)) v.darkPages = v.darkPdf !== false;
       delete v.darkPdf; delete v.invertSlides;
     }
+    // 17 Oct 2026: the editor draws the document's own font unless the person chose another (Text
+    // styles' "My editor" layer): Computer Modern, the old default, stored but never chosen, goes
+    if (v && typeof v === 'object' && v.editorFont === 'cm' && !v.editorFontChosen) delete v.editorFont;
+    if (v && typeof v === 'object' && (!v.screenStyles || typeof v.screenStyles !== 'object' || Array.isArray(v.screenStyles))) delete v.screenStyles;
     return v && typeof v === 'object' ? { ...DEFAULT_PREFS, ...v } : { ...DEFAULT_PREFS };
   } catch { return { ...DEFAULT_PREFS }; }
 }
@@ -100,7 +114,7 @@ const listeners = new Set<(p: Prefs) => void>();
 export function getPrefs(): Prefs { return prefs; }
 export function setPref<K extends keyof Prefs>(key: K, value: Prefs[K]): void {
   if (prefs[key] === value) return;
-  prefs = { ...prefs, [key]: value, ...(key === 'autoCorrect' ? { autoCorrectChosen: true } : {}) };
+  prefs = { ...prefs, [key]: value, ...(key === 'autoCorrect' ? { autoCorrectChosen: true } : {}), ...(key === 'editorFont' ? { editorFontChosen: true } : {}) };
   try { localStorage.setItem(STORAGE, JSON.stringify(prefs)); } catch { /* ignore */ }
   for (const l of listeners) { try { l(prefs); } catch { /* ignore */ } }
 }

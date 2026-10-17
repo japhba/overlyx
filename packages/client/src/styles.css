@@ -353,7 +353,7 @@ html[data-theme="dark"] .ol-wordmark.bauhaus, html[data-ui="modern"][data-theme=
 .tb-style-more { margin-top: 4px; padding: 6px 8px; border: 0; border-top: 1px solid var(--ui-border); background: none; color: var(--ui-muted); font: 12px var(--ui-font); text-align: left; cursor: pointer; }
 .tb-style-more:hover { color: var(--ui-fg); background: var(--ui-hover); }
 /* Text styles (app/TextStyles.tsx): a floating panel at the right, the page in view */
-.ts-panel { position: fixed; right: 16px; top: 96px; z-index: 70; width: 340px; max-height: calc(100vh - 112px); display: flex; flex-direction: column; background: var(--surface); color: var(--ui-fg); border: 1px solid var(--ui-border); border-radius: 8px; box-shadow: 0 10px 32px rgba(0,0,0,0.2); font: 13px var(--ui-font); }
+.ts-panel { position: fixed; right: 16px; top: 96px; z-index: 70; width: 360px; max-height: calc(100vh - 112px); display: flex; flex-direction: column; background: var(--surface); color: var(--ui-fg); border: 1px solid var(--ui-border); border-radius: 8px; box-shadow: 0 10px 32px rgba(0,0,0,0.2); font: 13px var(--ui-font); }
 .ts-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px 6px 14px; border-bottom: 1px solid var(--ui-border); }
 .ts-close { border: 0; background: none; color: var(--ui-muted); font-size: 14px; cursor: pointer; padding: 2px 6px; border-radius: 4px; }
 .ts-close:hover { background: var(--ui-hover); color: var(--ui-fg); }
@@ -388,6 +388,33 @@ html[data-theme="dark"] .ol-wordmark.bauhaus, html[data-ui="modern"][data-theme=
 .ts-font-pop { z-index: 120; }
 .ts-foot { display: flex; flex-wrap: wrap; gap: 6px; justify-content: space-between; padding: 8px 14px 10px; border-top: 1px solid var(--ui-border); }
 .ts-foot > button { font: 12px var(--ui-font); }
+.ts-scope { padding: 8px 12px 6px; border-bottom: 1px solid var(--ui-border); }
+.ts-scope-seg { display: flex; }
+.ts-scope-seg > button { flex: 1 1 50%; padding: 5px 8px; font-size: 12.5px; }
+.ts-panel[data-scope="screen"] .ts-scope-seg > button.on { background: color-mix(in srgb, #2a62d6 16%, var(--surface)); }
+.ts-scope-say { margin-top: 5px; color: var(--ui-muted); font-size: 11.5px; line-height: 1.35; }
+.ts-type { display: flex; align-items: center; gap: 6px; }
+.ts-type-name { overflow: hidden; text-overflow: ellipsis; }
+.ts-dot { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; }
+.ts-dot-tex { background: #d08a00; }
+.ts-dot-own { background: #2a62d6; }
+.ts-label { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.ts-chip { display: inline-block; padding: 0 5px; border-radius: 8px; font: 600 9.5px/15px var(--ui-font); letter-spacing: 0.2px; vertical-align: 1px; white-space: nowrap; }
+.ts-chip-tex { background: color-mix(in srgb, #d08a00 18%, var(--surface)); color: color-mix(in srgb, #9a6200 85%, var(--ui-fg)); }
+.ts-chip-tex.custom { outline: 1px dashed currentColor; outline-offset: -1px; }
+.ts-chip-own { background: color-mix(in srgb, #2a62d6 16%, var(--surface)); color: color-mix(in srgb, #1d4fb8 85%, var(--ui-fg)); }
+.ts-row[data-origin="default"] .ts-slider-val { opacity: 0.85; }
+.ts-own { margin-top: 3px; font-size: 11.5px; color: color-mix(in srgb, #1d4fb8 80%, var(--ui-fg)); }
+.ts-banner { margin: 8px 12px 0; padding: 8px 10px; border-radius: 6px; background: color-mix(in srgb, #d08a00 10%, var(--surface)); border: 1px solid color-mix(in srgb, #d08a00 35%, var(--ui-border)); font-size: 12px; line-height: 1.4; }
+.ts-banner-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.ts-banner-acts > button, .ts-notice > button:not(.ts-close) { font: 12px var(--ui-font); }
+.ts-tex { margin: 6px 0 0; padding: 6px 8px; max-height: 140px; overflow: auto; background: var(--page-bg, #fff); border-radius: 4px; font: 11px/1.4 var(--mono-font, ui-monospace, monospace); white-space: pre-wrap; word-break: break-all; }
+.ts-notice { display: flex; align-items: center; gap: 6px; margin: 8px 12px 0; padding: 6px 8px; border-radius: 6px; background: var(--active-bg); font-size: 12px; }
+.ts-notice > span { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ts-notice code { font-size: 11px; }
+.ts-face { margin-top: 6px; }
+.ts-face > summary { cursor: pointer; color: var(--ui-muted); font-size: 12px; }
+.ts-face .ff-panel { border-top: 0; max-height: none; }
 .tb-btn { height: 24px; min-width: 26px; padding: 0 6px; border: 1px solid transparent; background: none; border-radius: 3px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; color: var(--fg2); }
 .tb-btn:hover { background: var(--ui-hover); border-color: var(--ui-border); }
 .tb-btn.active { background: var(--active-bg); border-color: var(--active-border); }
@@ -458,7 +485,7 @@ html[data-theme="dark"]:not([data-dark-pages]) .editor-scroll.margin-mode > .edi
 .notes-unfold > button { position: absolute; right: 0; top: 0; writing-mode: vertical-rl; padding: 10px 5px; border: 1px solid var(--ui-border); border-right: none; border-radius: 8px 0 0 8px; background: var(--notes-bg, var(--panel-bg, var(--page-bg))); color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
 .notes-unfold > button:hover, .notes-unfold > button:focus-visible { color: var(--ui-fg); border-color: var(--accent); }
 /* MathLive shades the inset that contains the caret; the LyX corner markers replace that */
-.lyx-editor { outline: none; font-family: var(--editor-font); font-size: calc(15.5px * var(--editor-zoom)); line-height: 1.45; color: var(--editor-fg); min-height: 300px; }
+.lyx-editor { outline: none; font-family: var(--editor-font); font-size: calc(15.5px * var(--editor-zoom)); line-height: calc(1.45 * var(--ol-line-stretch, 1)); color: var(--editor-fg); min-height: 300px; }
 .lyx-editor:focus-visible { outline: none; }
 
 /* ------------------------------------------------------------ paragraphs */

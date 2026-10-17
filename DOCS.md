@@ -3138,38 +3138,59 @@ selection at once.
 
 *Format ▸ Text styles…*, the ✎ beside a style in the paragraph style list, or the list's last line
 (*Text styles — fonts, sizes, colours…*) open `app/TextStyles.tsx`: a floating panel (the page stays
-in view) where each kind of text — Title, Heading 1–4, Normal text, Quote — gets its font (the
-toolbar's font list, with a variable font's axes and features), size (a slider with rungs at LaTeX's
-sizes, any point size between), bold / italic / small capitals / capitals, colour, alignment, the
-space above and below (sliders with rungs), and for headings whether they run into their paragraph
-and a rule. Changes show at once (the page's style element) and are saved a moment later. *Match the
-text at the cursor* takes the font, size, weight, italics and colour of the text where the cursor is
-(Google Docs' "Update to match").
+in view) where each kind of text — Title, Heading 1–4, Normal text, Quote — gets its font (any Google
+font, the document's serif / sans serif / monospace or, for normal text, its LaTeX font sets; a
+variable font's axes and OpenType features under *Axes & features*), weight (a slider with rungs at
+Thin … Black: continuous for a variable font, its weights for a static one, Regular / Bold for
+LaTeX's own fonts), size (rungs at LaTeX's sizes, any point size between), italic / small capitals /
+capitals, colour, alignment, normal text's line spacing (rungs Single, 1.15, 1½, Double), the space
+above and below, and for headings whether they run into their paragraph and a rule. Changes show at
+once (`previewTextStyles`) and are saved a moment later. *Match the text at the cursor* takes the
+font, size, weight, italics and colour of the text where the cursor is (Google Docs' "Update to match").
 
-* **The model** (`core/textstyles.ts`): `TextStyle` per `TextType`, carried to the editor by the
-  header line `\overlyx_styles {json}` (`client editor/paragraphsep.ts stylesCss`), and to the PDF by
-  `stylesLatex`: titlesec for the headings, titling's \pretitle / \posttitle for the title, etoolbox's
-  \AtBeginEnvironment for quote / quotation, \color for the body; fonts with `\olfontset` (the
-  declaration form of \olfont, `fontface.ts`; the build finds Google fonts by name, OSFONTDIR).
-* **Markdown**: the front matter — `headings:` for the levels (as before), `styles:` for `title`,
-  `body` (its colour) and `quote`; the body's font, size, line spacing and alignment are pandoc's
-  `mainfont`, `fontsize`, `linestretch`, `justify`. The styles' LaTeX goes before header-includes.
-* **.tex**: the settings line's `overlyx_styles` (SETTINGS_KEYS), written into the managed block; the
-  body's size, line spacing and alignment are `paperfontsize`, `spacing`, `justification`.
-* **Hand-written LaTeX** (an agent's or a person's header-includes, the user's case of 17 Oct 2026):
-  `stylesFromIncludes` reads `\justifying`, \titleformat / \titlespacing for the four levels and a
-  patched \@maketitle, so the editor shows what that PDF looks like (justified text, small section
-  headings); editing such a style takes over from the LaTeX (`takeOverIncludes` drops the lines it
-  replaces, and ragged2e when nothing else uses it). The MCP instructions and set_markdown_style's
-  description tell agents to use the keys (`justify`, `headings`, `styles`), not header-includes, for
-  these.
-* **Justification in the editor** (`justified`, `html[data-justify]`): a markdown document says it in
-  `\overlyx_justify` (always set by `applyTypesetting`: its `justify`, a body style, or \justifying in
-  its header-includes); a .tex document is justified unless its `justification` is false — as LaTeX
-  and LyX set it (until 17 Oct 2026 the editor showed every .tex document ragged right).
-* Front matter values are read with YAML's escapes undone (`\\` and `\"` in double quotes, `''` in
-  single): the writer escapes backslashes, and header-includes rewritten by the settings dialog or an
-  agent came back with doubled backslashes before.
+**Three layers** (`core/textstyles.ts`), the later winning — PDF = LaTeX's look ⊕ document ⊕ LaTeX
+in the preamble; editor = PDF ⊕ my editor:
+
+* **Document** (the panel's *Document & PDF*): the file's settings. Markdown: the front matter —
+  `headings:` for the levels, `styles:` for `title`, `quote` and the body's colour, weight and font by
+  name (axes, features); the body's family, size, line spacing and alignment are pandoc's `mainfont`,
+  `fontsize`, `linestretch`, `justify`. .tex: the settings line's `overlyx_styles` (SETTINGS_KEYS),
+  written into the managed block, and `paperfontsize`, `spacing`, `justification`, the fonts
+  (a Google font for normal text: non-TeX fonts' `font_roman`). `stylesLatex` writes titlesec /
+  titling / etoolbox / \color; a font by name is `\olfontset[weight,axes][features]{Family}`, the
+  body's with a weight, axes or features `\olmainfont` (`fontface.ts`), regular and bold stay the
+  font's own series (\bfseries). The build finds Google fonts by name (\olfont, \olmainfont,
+  \setmainfont: OSFONTDIR, LuaLaTeX).
+* **LaTeX in the preamble** (header-includes; a .tex file's own preamble — a person's or an
+  agent's): `readTexStyles` reads its top-level statements and \AtBeginDocument's — \titleformat,
+  \titlespacing, sectsty, a \renewcommand of a sectioning command or \@maketitle (with
+  \@startsection read), titling's \pretitle, a patched \@maketitle, quotes' \AtBeginEnvironment,
+  \justifying / \RaggedRight, setspace (\setstretch, \onehalfspacing, its package options),
+  \linespread, \baselinestretch, \setmainfont, \color — not comments or other definitions. LaTeX
+  says more than the keys, so it has the last word in the PDF: the managed block and a markdown
+  document's preamble leave out OverLyX's LaTeX for what it sets (`stylesLatex`'s `tex`; with sectsty
+  or a sectioning command of its own no titlesec at all; `nativeSettings` leaves spacing and
+  justification to it). The exception: a setting chosen explicitly in a .tex document's Document ▸
+  Settings (`\overlyx_managed_settings`) is written after the preamble and wins (`settingsOverTex`).
+  The editor draws what it reads; the panel marks those settings *LaTeX* (a banner: *Show the
+  LaTeX*, *Use these settings instead*). Setting such a setting in the document — or *Reset* —
+  replaces the LaTeX: `takeOver` names its statements and what they set (every type they touch),
+  the document keeps those values, `removeStatements` takes them out of the preamble (a
+  `\usepackage[onehalfspacing]{setspace}` keeps its package); the panel offers *Undo*. A markdown
+  header carries header-includes as `\overlyx_includes` for the editor.
+* **My editor** (the panel's *Only my editor*): `prefs.screenStyles` (every document, this browser),
+  normal text's font `prefs.editorFont` (Settings ▸ Editor ▸ Text font; `gf:Family|axes|features`
+  for a Google font). Never the PDF, never another person's editor; the panel marks such settings
+  *Mine* and says in the document's view what your editor shows instead. Since 17 Oct 2026 the
+  editor's text font follows the document unless chosen (`editorFont` 'document' by default; a
+  stored 'cm', the old default, not chosen is dropped).
+
+The editor (`editor/paragraphsep.ts editorStyleLayers`, `stylesCss`): headings, title, quotes as
+before; the body's weight, axes / features, colour and line spacing (`--ol-line-stretch`, the editor's
+1.45 times the stretch: setspace's one-and-a-half is 1.25, double 1.667); justification
+`html[data-justify]` (a markdown document is ragged right unless `\overlyx_justify`, a .tex document
+justified unless its `justification` is false). Front matter values are read with YAML's escapes
+undone (`\\` and `\"` in double quotes, `''` in single).
 
 ## Google Docs sync
 

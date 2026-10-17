@@ -10,7 +10,8 @@
  * (tests/parity.test.ts).
  */
 import { getPrefs, subscribePrefs, type Prefs } from '../prefs';
-import { editorFace, documentFace, resolvedMathFont, mathScale, mathFont, FOLLOW_DOCUMENT, GOOGLE_FACE } from './catalog';
+import { editorFace, documentFace, faceForFontName, resolvedMathFont, mathScale, mathFont, FOLLOW_DOCUMENT, GOOGLE_FACE } from './catalog';
+import { readTexStyles, headerPreamble, FAMILY_FONTS, validFontFamily } from '@overlyx/core';
 import { loadGoogleFont } from './googlefont';
 import { setMathFont } from '../editor/lyxmath/mathjax';
 
@@ -49,7 +50,9 @@ function apply(p: Prefs): void {
 
 /** The open document's settings (header lines): "As in the document" shows the face closest to its roman font. */
 export function setDocumentFonts(headerLines: string[]): void {
-  const face = documentFace(headerLines);
+  // (a \setmainfont of the preamble's own has the last word in the PDF: core textstyles.ts)
+  const tex = readTexStyles(headerPreamble(headerLines)).body?.set.font;
+  const face = tex && !FAMILY_FONTS[tex] ? faceForFontName(tex)?.id ?? (validFontFamily(tex) ? GOOGLE_FACE + tex : documentFace(headerLines)) : documentFace(headerLines);
   if (face === docFace) return;
   docFace = face;
   apply(getPrefs());

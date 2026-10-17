@@ -29,7 +29,7 @@ import { setThemePref, useTheme, DARK_TONES, type ThemePref } from './theme';
 import { REWRITE_KEY } from '../editor/ai/rewrite';
 import { Dialog, uiAlert } from './Dialogs';
 import { AUTO_BUILD_CHOICES, AUTO_BUILD_DELAYS } from './pdfstatus';
-import { EDITOR_FACES, MATH_FONTS, FOLLOW_DOCUMENT, MATCH_TEXT, editorFace, mathFont } from '../fonts/catalog';
+import { EDITOR_FACES, MATH_FONTS, FOLLOW_DOCUMENT, MATCH_TEXT, GOOGLE_FACE, editorFace, mathFont } from '../fonts/catalog';
 import { resolvedFace, resolvedMath } from '../fonts/editorfont';
 import { renderMath } from '../editor/lyxmath/mathjax';
 import { useMathRendererVersion } from '../editor/lyxmath/usemath';
@@ -156,10 +156,11 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
         <div class="settings-content">
           {section === 'editor' && <>
             <h3>Font</h3>
-            <div class="sub">How the editor shows the text and formulas, in this browser; the PDF has its own fonts (Document ▸ Settings ▸ Fonts). The fonts come with OverLyX and are loaded once chosen. Formulas are laid out by MathJax from the math font’s own data, as TeX does from an OpenType math font; text inside formulas is in the text font.</div>
+            <div class="sub">How the editor shows the text and formulas, in this browser; the PDF has its own fonts (Document ▸ Settings ▸ Fonts). The fonts come with OverLyX and are loaded once chosen; Format ▸ Text styles ▸ Only my editor sets this and the rest of how your editor shows text. Formulas are laid out by MathJax from the math font’s own data, as TeX does from an OpenType math font; text inside formulas is in the text font.</div>
             <Row label="Text font"><select data-pref="editorFont" value={p.editorFont === FOLLOW_DOCUMENT ? p.editorFont : editorFace(p.editorFont).id} onChange={e => setPref('editorFont', (e.target as HTMLSelectElement).value)}>
               <option value={FOLLOW_DOCUMENT}>As in the document — the closest of these to the PDF’s font (now {editorFace(resolvedFace(FOLLOW_DOCUMENT)).label})</option>
               {EDITOR_FACES.map(f => <option key={f.id} value={f.id}>{f.label} — {f.hint}</option>)}
+              {p.editorFont.startsWith(GOOGLE_FACE) && <option value={p.editorFont}>{editorFace(p.editorFont).label} — a Google font (Format ▸ Text styles)</option>}
             </select></Row>
             <Row label="Math font"><select data-pref="editorMathFont" value={p.editorMathFont === MATCH_TEXT ? p.editorMathFont : mathFont(p.editorMathFont).id} onChange={e => setPref('editorMathFont', (e.target as HTMLSelectElement).value)}>
               <option value={MATCH_TEXT}>Matching the text font (now {mathFont(resolvedMath({ editorFont: p.editorFont, editorMathFont: MATCH_TEXT })).label})</option>

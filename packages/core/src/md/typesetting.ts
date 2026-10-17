@@ -10,15 +10,17 @@
  *                          keys for every level — display (block | run-in), font (a name, or a font
  *                          by name with axes: `Inter|300`), size (small | normal | large | larger |
  *                          huge, or 14pt), weight (bold | normal), shape (upright | italic), case
- *                          (normal | smallcaps | uppercase), color (#rrggbb), align (left | center |
+ *                          huge, or 14pt), weight (100 … 900; bold | normal), shape (upright | italic),
+ *                          case (normal | smallcaps | uppercase), color (#rrggbb), align (left | center |
  *                          right), rule (none | below | above), space-above / space-below (a length:
  *                          0.5ex, 4pt, 1em) — and under section: … paragraph: a level's own
  *                          (`section: { size: larger, rule: below }`)
- *   styles                 the same keys for `title` (titling), `body` (its colour; its font, size and
- *                          alignment are mainfont / fontsize / justify) and `quote` (core textstyles.ts)
- *   header-includes        LaTeX for the preamble, after all of the above — for what no key says: the
- *                          editor cannot draw it (it reads \justifying, \titleformat, \titlespacing and a
- *                          patched \@maketitle: textstyles.ts stylesFromIncludes)
+ *   styles                 the same keys for `title` (titling), `body` (its colour, weight, and its font
+ *                          by name with axes and features — the family is mainfont; its size, spacing
+ *                          and alignment are fontsize / linestretch / justify) and `quote` (core textstyles.ts)
+ *   header-includes        LaTeX for the preamble, after all of the above — for what no key says. It has
+ *                          the last word in the PDF; the editor shows what it can read of it
+ *                          (textstyles.ts readTexStyles), and setting the same in Text styles replaces it
  *
  * Parsing a markdown document turns these into its settings (header lines: the editor shows the
  * fonts, the numbering and the run-in headings; `applyTypesetting`), and its PDF's preamble gets the
@@ -28,7 +30,7 @@
  */
 import type { Header } from '../lyx/ast.ts';
 import { markdownHeader } from './common.ts';
-import { HEADING_LEVELS, textStyleOf, stylesFromIncludes, stylesLatex, stylesUseFonts, stylesJson, mergeStyles, type HeadingLevel, type TextStyle, type TextStyles } from '../textstyles.ts';
+import { HEADING_LEVELS, textStyleOf, readTexStyles, stylesLatex, stylesUseFonts, stylesJson, mergeStyles, bodyFace, type HeadingLevel, type TextStyle, type TextStyles } from '../textstyles.ts';
 import { OLFONT_DEF } from '../fontface.ts';
 
 export { HEADING_LEVELS, type HeadingLevel } from '../textstyles.ts';
@@ -254,11 +256,10 @@ export function applyTypesetting(h: Header, t: MdTypesetting): void {
   if (t.fontsize) set('paperfontsize', String(t.fontsize));
   if (t.linestretch) set('spacing', `other ${t.linestretch}`);
   if (t.numbersections) set('secnumdepth', '3');
-  // what hand-written LaTeX in header-includes does, under what the keys say: the editor shows it too
-  const hand = stylesFromIncludes(t.headerIncludes);
   // (the editor justifies on \overlyx_justify: a .tex document's \justification true is LaTeX's default, not a choice)
   // (always said: a markdown document is ragged right unless it says otherwise — the editor tells it from a .tex document so)
-  const justify = t.justify || hand.justify || t.styles.body?.align === 'justify';
+  // (\justifying in header-includes is the LaTeX's own: the managed block leaves justification to it — tex/settings.ts)
+  const justify = t.justify || t.styles.body?.align === 'justify';
   if (justify) set('justification', 'true');
   set('overlyx_justify', String(justify));
   if (t.mainfont || t.sansfont || t.monofont) {
@@ -267,13 +268,15 @@ export function applyTypesetting(h: Header, t: MdTypesetting): void {
     if (t.sansfont) set('font_sans', `"default" "${t.sansfont}"`);
     if (t.monofont) set('font_typewriter', `"default" "${t.monofont}"`);
   }
-  // (OverLyX's own: the LyX export leaves \overlyx_ lines out; the editor draws its text styles so)
-  const styles = mergeStyles(hand.styles, mdStyles(t));
+  // (OverLyX's own: the LyX export leaves \overlyx_ lines out; the editor draws its text styles so,
+  // and what header-includes sets over them — textstyles.ts styleLayers)
+  const styles = mdStyles(t);
   if (Object.keys(styles).length) set('overlyx_styles', stylesJson(styles));
+  if (t.headerIncludes.length) set('overlyx_includes', JSON.stringify(t.headerIncludes));
 }
 
 /** the header keys the typesetting decides */
-const TYPESET_KEYS = ['papersize', 'paperfontsize', 'spacing', 'secnumdepth', 'use_non_tex_fonts', 'font_roman', 'font_sans', 'font_typewriter', 'overlyx_headings', 'overlyx_styles', 'justification', 'overlyx_justify'];
+const TYPESET_KEYS = ['papersize', 'paperfontsize', 'spacing', 'secnumdepth', 'use_non_tex_fonts', 'font_roman', 'font_sans', 'font_typewriter', 'overlyx_headings', 'overlyx_styles', 'overlyx_includes', 'justification', 'overlyx_justify'];
 
 /** A markdown document's header after its front matter changed: those keys as a markdown document has them, then as the front matter says. */
 export function withTypesetting(headerLines: string[], preamble: string[]): string[] {
@@ -293,17 +296,28 @@ export function withTypesetting(headerLines: string[], preamble: string[]): stri
  */
 export function typesettingPreamble(t: MdTypesetting, files: Record<string, LocalFont> = {}): string[] {
   const out: string[] = [];
-  const local = ([['setmainfont', t.mainfont], ['setsansfont', t.sansfont], ['setmonofont', t.monofont]] as const).filter(([, name]) => name && files[name]);
+  const styles = mdStyles(t);
+  // the body's font with a weight, axes or features of its own: by name (\olmainfont, below)
+  const main = mdBodyFace(t);
+  const local = ([['setmainfont', main ? '' : t.mainfont], ['setsansfont', t.sansfont], ['setmonofont', t.monofont]] as const).filter(([, name]) => name && files[name]);
   if (local.length) out.push('\\usepackage{fontspec}', ...local.map(([cmd, name]) => `\\${cmd}{${name}}[${fontspecFiles(files[name])}${cmd === 'setmainfont' ? ', Ligatures=TeX' : ''}]`));
   if (t.geometry.length) out.push(`\\usepackage[${t.geometry.join(',')}]{geometry}`);
   // (unicode-math after amsmath, which the generated block would load after this)
   if (t.mathfont) out.push('\\usepackage{amsmath}', '\\usepackage{unicode-math}', `\\setmathfont{${t.mathfont}}`);
-  // the text styles (fonts by name: \olfontset, defined here — the managed block may define it again: a no-op)
-  const styles = mdStyles(t);
-  if (stylesUseFonts(styles)) out.push('\\makeatletter', OLFONT_DEF, '\\makeatother');
-  out.push(...stylesLatex(styles));
+  // the text styles (fonts by name: \olfontset, defined here — the managed block may define it again: a no-op);
+  // what header-includes sets is its own (it has the last word: OverLyX's LaTeX for the same is left out)
+  if (stylesUseFonts(styles) || main) out.push('\\makeatletter', OLFONT_DEF, '\\makeatother');
+  if (main) out.push(main);
+  out.push(...stylesLatex(styles, { tex: readTexStyles(t.headerIncludes.join('\n')), bodyFont: styles.body?.font ?? (t.mainfont || undefined) }));
   out.push(...t.headerIncludes);
   return out;
+}
+
+/** the body's font as \olmainfont, when its style gives it a weight, axes or features (null: mainfont alone says it) */
+export function mdBodyFace(t: MdTypesetting): string | null {
+  const body = t.styles.body ?? {};
+  const font = body.font && body.font.split('|')[0] === t.mainfont ? body.font : t.mainfont;
+  return font ? bodyFace({ ...body, font }) : null;
 }
 
 /** a value as a front matter line's (quoted when YAML would read it otherwise) */

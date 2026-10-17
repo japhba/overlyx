@@ -181,7 +181,8 @@ const ROMAN_FACES: Record<string, string> = {
 export const GOOGLE_FACE = 'gf:';
 
 export function editorFace(id: string): EditorFace {
-  if (id.startsWith(GOOGLE_FACE)) { const name = id.slice(GOOGLE_FACE.length); return { id, label: name, hint: 'Google Fonts', text: `${JSON.stringify(name)}, ${CM}`, math: 'newcm', xHeight: 0.47 }; }
+  // (`gf:Inter|wdth=90|+onum`: the family, its axes and features drawn by the text styles — editor/paragraphsep.ts)
+  if (id.startsWith(GOOGLE_FACE)) { const name = id.slice(GOOGLE_FACE.length).split('|')[0]; return { id, label: name, hint: 'Google Fonts', text: `${JSON.stringify(name)}, ${CM}`, math: 'newcm', xHeight: 0.47 }; }
   id = FORMER_FACES[id] ?? id;
   return EDITOR_FACES.find(f => f.id === id) ?? EDITOR_FACES[0];
 }

@@ -2,6 +2,7 @@ import type { ExportContext } from '../latex/context.ts';
 import { fontsCode } from '../latex/preamble.ts';
 import { latexLength } from '../latex/lengths.ts';
 import { EARLY_BEGIN, EARLY_END } from './preamble.ts';
+import { readTexStyles } from '../textstyles.ts';
 
 /** Package options that must be supplied before a user's own \\usepackage{hyperref}. */
 export function nativeEarlySettings(ctx: ExportContext, settings: Record<string, unknown>): string {
@@ -38,14 +39,20 @@ export function nativeSettings(ctx: ExportContext, settings: Record<string, unkn
   const has = (key: string) => key in settings;
   const use = (pkg: string, options = '') => { if (!loaded.has(pkg)) { out += `\\usepackage${options ? '[' + options + ']' : ''}{${pkg}}\n`; loaded.add(pkg); } };
   const begin = (s: string) => { out += '\\AtBeginDocument{' + s + '}\n'; };
-  if (has('spacing')) {
+  // the body's spacing and alignment the preamble's own LaTeX sets are its (it has the last word: core
+  // textstyles.ts) — unless they were chosen here explicitly (Document ▸ Settings: markEditedSettings)
+  let managed: string[] = [];
+  try { const v = JSON.parse(String(settings.overlyx_managed_settings ?? '[]')); if (Array.isArray(v)) managed = v.map(String); } catch { /* old file */ }
+  const tex = readTexStyles(bp.preamble).body;
+  const own = (key: 'lineSpacing' | 'align') => !!tex?.keys.includes(key) && !managed.includes(key === 'lineSpacing' ? 'spacing' : 'justification');
+  if (has('spacing') && !own('lineSpacing')) {
     use('setspace');
     begin(bp.spacing === 'onehalf' ? '\\onehalfspacing' : bp.spacing === 'double' ? '\\doublespacing' : bp.spacing === 'other' ? `\\setstretch{${bp.spacingValue}}` : '\\singlespacing');
   }
   for (const [key, value] of [['secnumdepth', bp.secNumDepth], ['tocdepth', bp.tocDepth]] as const) if (has(key)) begin(`\\setcounter{${key}}{${value}}`);
   if (has('use_lineno')) { use('lineno', bp.linenoOptions); begin(bp.useLineno ? '\\linenumbers' : '\\nolinenumbers'); }
   if (has('suppress_date')) out += bp.suppressDate ? '\\date{}\n' : '\\date{\\today}\n';
-  if (has('justification') && settings.justification !== 'default') { use('ragged2e'); begin(settings.justification === 'false' ? '\\RaggedRight' : '\\justifying'); }
+  if (has('justification') && settings.justification !== 'default' && !own('align')) { use('ragged2e'); begin(settings.justification === 'false' ? '\\RaggedRight' : '\\justifying'); }
   if (has('paragraph_separation') || has('defskip')) {
     const skip = ({ smallskip: '\\smallskipamount', medskip: '\\medskipamount', bigskip: '\\bigskipamount', halfline: '0.5\\baselineskip', fullline: '\\baselineskip' } as Record<string, string>)[bp.defSkip] ?? (bp.defSkip ? latexLength(bp.defSkip) : '0.5\\baselineskip');
     begin(bp.paragraphSeparation === 'skip' ? `\\setlength{\\parskip}{${skip}}\\setlength{\\parindent}{0pt}` : '\\setlength{\\parskip}{0pt}\\setlength{\\parindent}{1.5em}');

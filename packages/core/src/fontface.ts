@@ -129,7 +129,8 @@ export function faceLatexOpen(f: FontFace): string {
  * is taken by their names ("Inter Light", "Libertinus Serif Semibold Italic"), each only if it
  * exists (fontspec stops at a face that is missing); a variable font (no such names) by its axes,
  * set per face — bold text is the weight's bold (700, or 900 from 700 on), which a setting for the
- * whole font would override. \olfontset is the same as a declaration (heading formats: textstyles.ts).
+ * whole font would override. \olfontset is the same as a declaration (heading formats: textstyles.ts),
+ * \olmainfont the body's font with the same options (\setmainfont: Normal text's style).
  * Under pdflatex the text is printed as it is. Defined once, whoever asks first (the managed block,
  * a markdown document's styles); the managed block's macros are inside \makeatletter.
  */
@@ -210,10 +211,18 @@ export const OLFONT_DEF = String.raw`\def\ol@loadfontspec{\let\ol@enc\encodingde
         \use:e { \exp_not:N \fontspec { \exp_not:n {#3} } [ \exp_not:V \l__olfont_opts_tl ] }
       }
     \DeclareDocumentCommand \olfont { O{} O{} m +m } { \group_begin: \olfontset [#1] [#2] {#3} #4 \group_end: }
+    % the body's font (text styles: Normal text), TeX's ligatures as \setmainfont's usual
+    \DeclareDocumentCommand \olmainfont { O{} O{} m }
+      {
+        \__olfont_opts:nnn {#1} {#2} {#3}
+        \cs_set:Npn \encodingdefault {TU}
+        \use:e { \exp_not:N \setmainfont { \exp_not:n {#3} } [ \exp_not:V \l__olfont_opts_tl Ligatures = TeX ] }
+      }
   }
   {
     \DeclareDocumentCommand \olfontset { O{} O{} m } { }
     \DeclareDocumentCommand \olfont { O{} O{} m +m } {#4}
+    \DeclareDocumentCommand \olmainfont { O{} O{} m } { }
   }
 }
 \ExplSyntaxOff`;

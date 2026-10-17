@@ -14,7 +14,7 @@ import { babelName } from '../latex/text.ts';
 import type { ExportContext, ExportOptions } from '../latex/context.ts';
 import { nativeClassOptions, nativeEarlySettings, nativeSettings } from './settings.ts';
 import { LAYOUT_PACKAGES } from '../layout/latex.ts';
-import { parseStyles, stylesLatex, stylesUseFonts } from '../textstyles.ts';
+import { parseStyles, stylesLatex, stylesUseFonts, readTexStyles, texMainFace } from '../textstyles.ts';
 import { MANAGED_BEGIN, MANAGED_END, preambleFacts, providedFeatures, settingsFromHeader, settingsLine } from './preamble.ts';
 
 export interface WriteTexOptions {
@@ -63,7 +63,9 @@ function managedBlock(ctx: ExportContext, provided: Set<string>, settings: Recor
   const { bp, dc } = c;
   // the text styles (Format ▸ Text styles: core textstyles.ts) — fonts by name need \olfontset
   const styles = parseStyles(typeof settings.overlyx_styles === 'string' ? settings.overlyx_styles : '');
-  if (stylesUseFonts(styles)) f.require('olfont');
+  // (what the preamble's own LaTeX sets is its: the managed block leaves it out — textstyles.ts)
+  const tex = readTexStyles(bp.preamble);
+  if (stylesUseFonts(styles) || texMainFace(styles.body, bp)) f.require('olfont');
   let s = '';
   for (const [pkg, po] of dc.packageOptions) if (f.mustProvide(pkg)) s += `\\PassOptionsToPackage{${po}}{${pkg}}\n`;
   if (f.mustProvide('fix-cm')) s += '\\RequirePackage{fix-cm}\n';
@@ -86,7 +88,7 @@ function managedBlock(ctx: ExportContext, provided: Set<string>, settings: Recor
   if (tc.trim()) at += tc + (tc.endsWith('\n') ? '' : '\n');
   if (f.mustProvide('footmisc')) at += '\\usepackage{footmisc}\n';
   if (f.mustProvide('subfig')) at += '\\ifdefined\\showcaptionsetup\n % Caption package is used. Advise subfig not to load it again.\n \\PassOptionsToPackage{caption=false}{subfig}\n\\fi\n\\usepackage{subfig}\n';
-  const styled = stylesLatex(styles);
+  const styled = stylesLatex(styles, { tex, bodyFont: styles.body?.font ?? (bp.useNonTexFonts && bp.fontRoman !== 'default' ? bp.fontRoman : undefined) });
   if (styled.length) at += '%% text styles\n' + styled.join('\n') + '\n';
   if (at) s += '\\makeatletter\n' + at + '\\makeatother\n';
   // other languages used in the text
