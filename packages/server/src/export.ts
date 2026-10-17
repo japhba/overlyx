@@ -16,7 +16,7 @@ import { toPdf } from './graphics.ts';
 import { sandboxed, sandboxHome, removeSandboxHome, type SandboxSpec } from './sandbox.ts';
 import { lstatIn, listIn, readFileIn, readTextIn, writeFileIn, isRegularFileAt } from './confined.ts';
 import { readTextFile, markdownAsTex } from './texdoc.ts';
-import { googleFont, fontFaces } from './googlefonts.ts';
+import { googleFont, fontFaces, provideFaceFonts } from './googlefonts.ts';
 import { mdTypesetting, textFontsOf, TEXLIVE_FONTS, type LocalFont } from '@overlyx/core/md/typesetting.ts';
 import { isMarkdownPath } from '@overlyx/core/md/index.ts';
 import { rewriteParentPaths } from './texpaths.ts';
@@ -509,8 +509,13 @@ async function buildViaLatexmk(job: BuildJob): Promise<BuildResult> {
   // a TeX magic comment at the top of the file (`%!TEX TS-program = lualatex`, `% !TeX program =
   // xelatex` — what TeXShop, Overleaf and LaTeX Workshop read) names the engine the author builds with
   const magic = magicEngine(doc.fileText ?? await doc.textAsync());
+  // fonts by name on runs of text (\olfont, core fontface.ts): the Google ones copied into the build
+  // directory, where LuaTeX finds them by name (OSFONTDIR) — such a document is built with LuaLaTeX
+  // (fontspec; XeTeX would not see the folder) unless the author named XeTeX
+  const faceFonts = await provideFaceFonts(exp.tex, exp.dir).catch(() => null);
+  const faces = /\\olfont[[{]/.test(exp.tex);
   // markdown is UTF-8 through and through (emoji, arrows, any script): LuaTeX takes it as it is
-  const engineFlag = isMarkdownPath(doc.relPath) ? '-pdflua' : magic ?? (outFmt === 'pdf5' ? '-pdflua' : outFmt === 'pdf4' || nonTex ? '-pdfxe' : '-pdf');
+  const engineFlag = isMarkdownPath(doc.relPath) ? '-pdflua' : magic ?? (outFmt === 'pdf5' ? '-pdflua' : outFmt === 'pdf4' ? '-pdfxe' : faces ? '-pdflua' : nonTex ? '-pdfxe' : '-pdf');
   // build products must be real files in the build directory, never links into the project
   for (const ext of ['.pdf', '.synctex.gz', '.aux', '.log', '.out', '.bbl', '.blg', '.toc', '.fls', '.fdb_latexmk']) {
     const f = path.join(exp.dir, base + ext);
@@ -529,7 +534,7 @@ async function buildViaLatexmk(job: BuildJob): Promise<BuildResult> {
   // and the reruns every citation and reference is "??" until the next build
   args.push(engineFlag, '-pvc-', '-g', '-f', '-interaction=nonstopmode', '-file-line-error', '-synctex=1', base + '.tex');
   const proc = run('latexmk', args, {
-    cwd: exp.dir, env: texInputs(docDir, exp.dir, projectDir(project)), timeoutMs: 420000, nice: true,
+    cwd: exp.dir, env: { ...texInputs(docDir, exp.dir, projectDir(project)), ...(faceFonts ? { OSFONTDIR: faceFonts } : {}) }, timeoutMs: 420000, nice: true,
     // the build directory is the only writable place (the svg package's cache is a copy in it); the
     // shared cache is not readable (it holds every user's converted pictures and parsed bibliographies)
     sandbox: { rw: [exp.dir], ro: [projectDir(project)], home: sandboxHome(project), cgroup: BUILD_CGROUP },

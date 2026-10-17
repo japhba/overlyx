@@ -11,6 +11,7 @@
  */
 import { Schema, type NodeSpec, type MarkSpec, type DOMOutputSpec } from 'prosemirror-model';
 import { toMm } from './layout/model.ts';
+import { parseFace, faceCss, faceWeight, boldWeightOf } from './fontface.ts';
 
 const jsonAttr = (def: unknown) => ({ default: JSON.stringify(def) });
 const attr = (d: HTMLElement, name: string, def: string) => d.getAttribute(name) ?? def;
@@ -506,6 +507,13 @@ const fontStyle = (style: string, re: RegExp, value: string) => [{ style, getAtt
 
 const marks: Record<string, MarkSpec> = {
   emph: valueMark('emph', v => ['span', { class: 'lyx-emph-' + v, 'data-emph': v }, 0], { parseDOM: [{ tag: 'span[data-emph]', getAttrs: (d: HTMLElement) => ({ value: d.getAttribute('data-emph') }) }, ...foreign(['em', 'i'], 'on'), ...fontStyle('font-style', /italic/, 'on')] }),
+  // a font by name (fontface.ts): the family's CSS, a weight / axes, OpenType features — outside
+  // series, so bold text inside it is bold (heavier still in a heavy face: data-heavy)
+  face: valueMark('face', v => {
+    const f = parseFace(v);
+    const css = f ? faceCss(f, 'var(--editor-font)') : {};
+    return ['span', { class: 'lyx-face', 'data-face': v, ...(f && boldWeightOf(faceWeight(f)) > 700 ? { 'data-heavy': '' } : {}), style: Object.entries(css).map(([k, x]) => `${k}: ${x}`).join('; ') }, 0];
+  }),
   series: valueMark('series', v => ['span', { class: 'lyx-series-' + v, 'data-series': v }, 0], { parseDOM: [{ tag: 'span[data-series]', getAttrs: (d: HTMLElement) => ({ value: d.getAttribute('data-series') }) }, ...foreign(['b', 'strong'], 'bold'), ...fontStyle('font-weight', /^(bold|bolder|[6-9]00)$/, 'bold')] }),
   shape: valueMark('shape', v => ['span', { class: 'lyx-shape-' + v, 'data-shape': v }, 0]),
   family: valueMark('family', v => ['span', { class: 'lyx-family-' + v, 'data-family': v }, 0], { parseDOM: [{ tag: 'span[data-family]', getAttrs: (d: HTMLElement) => ({ value: d.getAttribute('data-family') }) }, ...foreign(['code', 'tt', 'kbd', 'samp'], 'typewriter')] }),
@@ -551,7 +559,7 @@ for (const [name, spec] of Object.entries(nodes)) {
   }
 }
 
-export const FONT_MARKS = ['family', 'series', 'shape', 'size', 'emph', 'numeric', 'nospellcheck', 'bar', 'strikeout', 'xout', 'uuline', 'uwave', 'noun', 'color', 'lang'] as const;
+export const FONT_MARKS = ['family', 'face', 'series', 'shape', 'size', 'emph', 'numeric', 'nospellcheck', 'bar', 'strikeout', 'xout', 'uuline', 'uwave', 'noun', 'color', 'lang'] as const;
 
 export const schema = new Schema({ nodes, marks });
 export type LyxSchema = typeof schema;

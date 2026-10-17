@@ -26,5 +26,6 @@ export { texHeadings, headingPlainText, type TexHeading } from './tex/headings.t
 export { moduleWarnings, type ModuleInfo } from './modules.ts';
 export { markEditedSettings, hasSettingsLine, MANAGED_BEGIN, MANAGED_END } from './tex/preamble.ts';
 export * from './projectKey.ts';
+export * from './fontface.ts';
 export { isMarkdownPath, MARKDOWN_LAYOUTS, HEADING_LAYOUTS, markdownLayoutFor, headingLevel, markdownHeader } from './md/common.ts';
 export { GROUP_MANIFEST, parseDocGroup, writeDocGroup, type DocGroup, type DocGroupMember } from './docgroup.ts';

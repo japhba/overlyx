@@ -8,6 +8,7 @@ import type { FontState } from '../lyx/ast.ts';
 import type { ExportContext, RunParams } from './context.ts';
 import type { TexStream } from './stream.ts';
 import { isForced } from './unicode.ts';
+import { parseFace, faceLatexOpen } from '../fontface.ts';
 
 /* ------------------------------------------------------------ characters */
 
@@ -180,7 +181,7 @@ const SERIES_CMDS: Record<string, string> = { medium: 'textmd', bold: 'textbf' }
 const SHAPE_CMDS: Record<string, string> = { up: 'textup', italic: 'textit', slanted: 'textsl', smallcaps: 'textsc' };
 
 export interface EffectiveFont {
-  family?: string; series?: string; shape?: string; size?: string; color?: string;
+  family?: string; face?: string; series?: string; shape?: string; size?: string; color?: string;
   emph: boolean; noun: boolean; underbar: boolean; uuline: boolean; strikeout: boolean; xout: boolean; uwave: boolean;
   lang: string;
 }
@@ -199,7 +200,7 @@ export function effectiveFont(f: FontState, base: RunParams['baseFont'], parLang
   const baseShape = base.shape ?? 'up';
   const baseSize = base.size ?? 'normal';
   return {
-    family: norm(f.family, baseFamily), series: norm(f.series, baseSeries), shape: norm(f.shape, baseShape),
+    family: norm(f.family, baseFamily), face: f.face && f.face !== 'default' ? f.face : undefined, series: norm(f.series, baseSeries), shape: norm(f.shape, baseShape),
     size: norm(f.size, baseSize),
     color: f.color === undefined || f.color === 'none' || f.color === 'inherit' || f.color === 'default' ? undefined : f.color,
     emph: f.emph === 'on' || f.emph === 'toggle', noun: f.noun === 'on', underbar: f.bar === 'under',
@@ -209,13 +210,13 @@ export function effectiveFont(f: FontState, base: RunParams['baseFont'], parLang
 }
 
 export function fontsEqualEff(a: EffectiveFont, b: EffectiveFont): boolean {
-  return a.family === b.family && a.series === b.series && a.shape === b.shape && a.size === b.size && a.color === b.color
+  return a.family === b.family && a.face === b.face && a.series === b.series && a.shape === b.shape && a.size === b.size && a.color === b.color
     && a.emph === b.emph && a.noun === b.noun && a.underbar === b.underbar && a.uuline === b.uuline && a.strikeout === b.strikeout
     && a.xout === b.xout && a.uwave === b.uwave && a.lang === b.lang;
 }
 
 export function isPlainFont(f: EffectiveFont, parLang: string): boolean {
-  return !f.family && !f.series && !f.shape && !f.size && !f.color && !f.emph && !f.noun && !f.underbar && !f.uuline
+  return !f.family && !f.face && !f.series && !f.shape && !f.size && !f.color && !f.emph && !f.noun && !f.underbar && !f.uuline
     && !f.strikeout && !f.xout && !f.uwave && f.lang === parLang;
 }
 
@@ -258,6 +259,8 @@ export function openFont(ctx: ExportContext, os: TexStream, rp: RunParams, f: Ef
       if (abs) { os.write(`{\\fontsize{${abs.size}}{${abs.skip}}\\selectfont`); os.termcmd(); count++; }
     }
   }
+  // a font by name: \olfont[axes][features]{Family}{…} (the managed block defines it: OLFONT_DEF)
+  if (f.face) { const face = parseFace(f.face); if (face) { ctx.features.require('olfont'); w(faceLatexOpen(face)); } }
   if (f.family) { const cmd = FAMILY_CMDS[f.family]; if (cmd) w('\\' + cmd + '{'); }
   if (f.series) { const cmd = SERIES_CMDS[f.series]; if (cmd) w('\\' + cmd + '{'); }
   if (f.shape) { const cmd = SHAPE_CMDS[f.shape]; if (cmd) w('\\' + cmd + '{'); }

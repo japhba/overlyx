@@ -12,6 +12,7 @@ import type { Change, FontState, Header, Inset, Item, LyxDocument, Paragraph, Ta
 import { getAuthors, itemText, paramMap, unquote } from '../lyx/ast.ts';
 import { align } from '../lyx/merge.ts';
 import { headingLevel } from './common.ts';
+import { parseFace, faceSpan } from '../fontface.ts';
 import { normalize, parseMarkdown, type ParseMarkdownResult } from './parse.ts';
 
 export type Span = { start: number; end: number } | null;
@@ -130,6 +131,8 @@ const MARK_ORDER = ['strong', 'em', 'strike', 'u'];
 
 function fontMarks(f: FontState): string[] {
   const out: string[] = [];
+  // a font by name: <span style="font-family: …"> (fontface.ts), outside the others
+  if (f.face && parseFace(f.face)) out.push('face:' + f.face);
   if (f.series === 'bold') out.push('strong');
   if (f.emph === 'on' || f.shape === 'italic' || f.shape === 'slanted') out.push('em');
   if (f.strikeout === 'on' || f.xout === 'on') out.push('strike');
@@ -337,7 +340,7 @@ function renderSegs(segs: Seg[], o: InlineOpts, html: boolean): string {
   const toks: Tok[] = [];
   let stack: string[] = [];
   const changeKey = (c?: Change) => (c ? `change:${c.type}:${c.author}:${c.time}` : '');
-  const want = (s: Seg) => [...(s.change ? [changeKey(s.change)] : []), ...MARK_ORDER.filter(m => s.marks.includes(m))];
+  const want = (s: Seg) => [...(s.change ? [changeKey(s.change)] : []), ...s.marks.filter(m => m.startsWith('face:')), ...MARK_ORDER.filter(m => s.marks.includes(m))];
   const changes = new Map<string, Change>();
   const openTag = (k: string) => {
     if (k.startsWith('change:')) {
@@ -345,9 +348,10 @@ function renderSegs(segs: Seg[], o: InlineOpts, html: boolean): string {
       const tag = c.type === 'inserted' ? 'ins' : 'del';
       return `<${tag} author="${attrQ(authorName(c.author))}"${c.time ? ` datetime="${iso(c.time)}"` : ''}>`;
     }
+    if (k.startsWith('face:')) return faceSpan(parseFace(k.slice(5))!);
     return OPEN[k][html ? 1 : 0];
   };
-  const closeTag = (k: string) => (k.startsWith('change:') ? (k.startsWith('change:inserted') ? '</ins>' : '</del>') : CLOSE[k][html ? 1 : 0]);
+  const closeTag = (k: string) => (k.startsWith('change:') ? (k.startsWith('change:inserted') ? '</ins>' : '</del>') : k.startsWith('face:') ? '</span>' : CLOSE[k][html ? 1 : 0]);
   const authorName = (id: number) => currentAuthors.get(id) ?? 'Unknown';
   const wants = segs.map(want);
   /** how many segments from `at` on carry `k` */

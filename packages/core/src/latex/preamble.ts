@@ -3,6 +3,7 @@
  * LaTeXFeatures::getPackages/getMacros/getColorOptions.
  */
 import { LAYOUT_MACROS } from '../layout/latex.ts';
+import { OLFONT_DEF } from '../fontface.ts';
 import type { ExportContext } from './context.ts';
 import { latexLength } from './lengths.ts';
 import { colorToRgb } from './params.ts';
@@ -372,6 +373,7 @@ export function lyxMacros(ctx: ExportContext): string {
   if (f.mustProvide('lyxdot')) m += LYXDOT_DEF + '\n';
   if (f.mustProvide('olayout')) m += LAYOUT_MACROS + '\n';
   if (f.mustProvide('olsketch')) m += OLSKETCH_DEF + '\n';
+  if (f.mustProvide('olfont')) m += OLFONT_DEF + '\n';
   m += floatDefinitions(ctx);
   if (f.mustProvide('refstyle')) m += LYXREF_DEF + '\n';
   if (f.mustProvide('ct-xcolor-ulem')) {

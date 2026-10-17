@@ -3020,10 +3020,10 @@ can hold (`core/src/md/`, `client/src/editor/markdown.ts`):
   variables where pandoc has one, so the file comes out alike with `pandoc --pdf-engine=lualatex`:
   `mainfont` / `sansfont` / `monofont` / `mathfont` (OpenType fonts by name: fontspec, unicode-math;
   a text or heading font TeX Live does not have — not in `MD_FONTS` — is any **Google Fonts** family:
-  `server/googlefonts.ts` fetches it once from the css2 API, which answers a non-browser with one
-  static TrueType file per weight and style, keeps it in `data/cache/google-fonts/<slug>/`, copies it
-  into the build directory (`ol-fonts/`, `exportTex`) and the preamble loads it by file
-  (`markdownForLatex` `fontFiles`, `fontspecFiles`; a missing bold or italic is faked); the editor gets
+  `server/googlefonts.ts` fetches it once (see *Fonts by name* below), keeps it in
+  `data/cache/google-fonts/<slug>/`, copies it into the build directory (`ol-fonts/`, `exportTex`) and
+  the preamble loads it by file (`markdownForLatex` `fontFiles`, `fontspecFiles`; a variable font's
+  faces by axis, a missing bold or italic is faked); the editor gets
   @font-face rules from `/api/fonts/google.css` and the files from this server (`fonts/googlefont.ts`,
   a `gf:<family>` face for Text font ▸ "As in the document", heading fonts always) — only the family
   name ever reaches Google; `OVERLYX_GOOGLE_FONTS=off` switches it off; VS Code builds with its own
@@ -3064,6 +3064,51 @@ can hold (`core/src/md/`, `client/src/editor/markdown.ts`):
   later, and a markdown document showed LaTeX's default numbers until its first edit.
 * **VS Code**: the extension opens `.md` with *Open With… ▸ OverLyX Editor* (VS Code's own
   markdown editor stays the default), with the same parser and writer.
+
+## Fonts by name
+
+The toolbar's font list (`app/FontPicker.tsx`, both shells and markdown) works like Google Docs':
+the document's own families (Serif / Sans serif / Monospace — LaTeX documents), the fonts used
+lately and in this document, Google's most popular ones and a search through all of Google Fonts
+(each name drawn in its own face: `/api/fonts/sample`, a few glyphs from the css2 API's `text=`).
+Below the list, for the font at the cursor: its design axes as sliders and the OpenType features it
+has as switches (`/api/fonts/info`, read from the font file by `server/fontinfo.ts`: GSUB/GPOS
+feature tags, `fvar` axes and named instances, OS/2). A variable font's axes are continuous, with
+rungs at its named instances (Thin … Black, the registered width stops, optical sizes) that the
+knob snaps to within 1.5 % of the range; the registered axes (lower-case tags) are shown, a font's
+own parametric ones (Roboto Flex's grade, stroke and height axes) fold under *More axes*. A family
+of static faces gets a weight slider that only stops at its weights. Everything applies to the
+selection at once.
+
+* **The model**: the `face` font attribute (`FontState.face`, the `face` mark, `core/fontface.ts`),
+  `Family|axes|features` — `Inter`, `Inter|350`, `Inter|wght=350,opsz=32|+onum;-liga`. It replaces a
+  serif / sans / monospace family (`setFontFace` / `setFontFamily`: `\textsf` inside it would win).
+  A .lyx file goes without it (LyX has no such attribute).
+* **.tex**: `\olfont[axes][features]{Family}{text}` (`[350]` is the weight). The managed block
+  defines it (`OLFONT_DEF`): with LuaTeX / XeTeX it loads fontspec unless the preamble did, saving
+  and restoring the document's encoding and default families (fontspec would turn a Times document
+  Latin Modern); static faces are taken by name ("Inter Light", "Libertinus Serif Semibold
+  Italic") only where `\IfFontExistsTF` finds them (fontspec stops at a missing face, and the text
+  vanishes); a variable font by its axes, set per face (`UprightFeatures` / `BoldFeatures` …: a
+  setting for the whole font would hold for bold text too — bold is 700, or 900 from weight 700 on,
+  `boldWeightOf`, the editor's `data-heavy`). Under pdflatex the text prints in the document's font.
+  A document using \olfont is built with LuaLaTeX unless it names XeTeX (`pdf4`); the Google fonts
+  it names are copied into `ol-fonts/` in the build directory, which the build's `OSFONTDIR` names
+  — luaotfload finds them by family name there, as a desktop TeX finds installed fonts (the first
+  build with a new font re-indexes the names: about a minute; later ones take seconds).
+* **Markdown**: `<span style="font-family: 'Inter'; font-weight: 350; font-variation-settings:
+  'opsz' 32; font-feature-settings: 'onum' 1">…</span>` (`faceSpan` / `faceFromCss`); a `<span>`
+  without a font family stays raw HTML.
+* **Which files** (`server/googlefonts.ts`): Google's catalogue (`fonts.google.com/metadata/fonts`,
+  kept a week in `data/cache/google-fonts/catalog.json`) says which families exist and their axes
+  and weights. A variable family comes as its variable font files (upright, italic) from the
+  google/fonts repository on GitHub (`ofl|apache|ufl/<name>/<Name>[axes].ttf`, else the directory
+  listing from the GitHub API); a static one as the faces of its directory there; the css2 API's
+  TrueType files are only the fallback — they lack most OpenType features (Inter's: 11 of 43).
+  A family cached before (static css2 files) is fetched again (manifest `v`). The browser loads the
+  same files (`/api/fonts/google.css`: a variable font's @font-face has weight and width ranges;
+  `editor/plugins/fontfaces.ts` loads the families a document uses). The font routes need a signed-in
+  user; the VS Code webview has none of them (the list then has the document's families only).
 
 ## Google Docs sync
 

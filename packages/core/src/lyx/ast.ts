@@ -11,6 +11,8 @@
 /** Font state as LyX names it. `undefined` means "inherit/default". */
 export interface FontState {
   family?: string;      // roman | sans | typewriter | default
+  /** OverLyX's: a font by name, `Family|axes|features` (fontface.ts) — LyX has no such attribute */
+  face?: string;
   series?: string;      // medium | bold | default
   shape?: string;       // up | italic | slanted | smallcaps | default
   size?: string;        // tiny ... giant | default
@@ -28,7 +30,7 @@ export interface FontState {
 }
 
 export const FONT_KEYS: (keyof FontState)[] = [
-  'family', 'series', 'shape', 'size', 'emph', 'numeric', 'nospellcheck', 'bar',
+  'family', 'face', 'series', 'shape', 'size', 'emph', 'numeric', 'nospellcheck', 'bar',
   'strikeout', 'xout', 'uuline', 'uwave', 'noun', 'color', 'lang',
 ];
 

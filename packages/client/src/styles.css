@@ -2497,6 +2497,42 @@ html[data-theme="dark"][data-dark-pages] .lyx-par[data-layout="FrameTitle"] { co
 .fs-list { position: absolute; top: 100%; left: 0; z-index: 50; min-width: 150px; max-height: 60vh; overflow-y: auto; }
 .fs-list .tb-pal-item { display: flex; justify-content: space-between; gap: 12px; width: 100%; }
 .fs-pt { color: var(--ui-muted); font-size: 11px; }
+/* the font list (app/FontPicker.tsx): fonts by name, their axes as sliders with rungs, their OpenType features */
+.ff-box { position: relative; display: inline-flex; margin: 0 2px; }
+.ff-button { width: auto; min-width: 96px; max-width: 150px; display: inline-flex; align-items: center; justify-content: space-between; gap: 4px; padding: 0 4px 0 6px; }
+.ff-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.ff-caret { font-size: 9px; color: var(--ui-muted); }
+.tb-popup.ff-pop { width: 360px; display: flex; flex-direction: column; gap: 4px; padding: 6px; max-height: 82vh; overflow: hidden; z-index: 100; }
+.ff-list { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
+.ff-search { width: 100%; box-sizing: border-box; height: 26px; padding: 0 6px; margin-bottom: 4px; border: 1px solid var(--ui-border); border-radius: 3px; background: var(--surface); color: var(--ui-fg); font: 13px var(--ui-font); }
+.ff-scroll { overflow-y: auto; max-height: 36vh; }
+.tb-pal-item.ff-item { width: 100%; justify-content: space-between; height: 28px; font-size: 15px; }
+.ff-item-name { overflow: hidden; text-overflow: ellipsis; }
+.ff-tag { color: var(--ui-muted); font: 11px var(--ui-font); }
+.tb-pal-item.ff-more { font: 12px var(--ui-font); color: var(--ui-muted); }
+.ff-empty { padding: 6px; color: var(--ui-muted); font: 12px var(--ui-font); }
+.ff-panel { border-top: 1px solid var(--ui-border); padding-top: 4px; overflow-y: auto; max-height: 40vh; flex: 0 0 auto; }
+.ff-sub { font: 12px var(--ui-font); color: var(--ui-fg); }
+.ff-axis { padding: 2px 6px 16px; }
+.ff-axis-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.ff-axis-val { font: 11px var(--ui-font); color: var(--ui-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ff-range { width: 100%; margin: 4px 0 0; accent-color: var(--accent, #2a62d6); }
+/* (inset by half the knob, so a rung's tick lies under the knob at that value) */
+.ff-rungs { position: relative; height: 16px; margin: 0 8px; }
+.ff-rung { position: absolute; top: 0; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; padding: 0; border: 0; background: none; color: var(--ui-muted); font: 10px/1.1 var(--ui-font); white-space: nowrap; cursor: pointer; }
+.ff-rung::before { content: ''; width: 1px; height: 5px; margin-bottom: 1px; background: currentColor; }
+.ff-rung:hover, .ff-rung.on { color: var(--ui-fg); }
+.ff-rung.on { font-weight: 600; }
+.ff-features { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 8px; padding: 2px 6px 4px; }
+.ff-features .ff-sub { grid-column: 1 / -1; margin-bottom: 2px; }
+.ff-feature { display: flex; align-items: center; gap: 4px; font: 12px var(--ui-font); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ff-reset { margin: 4px 6px; font: 12px var(--ui-font); }
+.ff-more-axes { padding: 2px 6px 4px; }
+.ff-more-axes > summary { cursor: pointer; color: var(--ui-muted); margin-bottom: 4px; }
+.ff-more-axes .ff-axis { padding-left: 0; padding-right: 0; }
+html[data-ui] .tb-side .ff-button { min-width: 0; max-width: 100%; }
+/* a font by name (core fontface.ts): bold in a heavy face is heavier still, as in the PDF */
+.lyx-face[data-heavy] .lyx-series-bold { font-weight: 900; }
 /* a page is paper: the editing markers of spaces stay off it */
 .ol-page .lyx-space { background: none; }
 /* in the slideshow the page is only what the PDF shows: no editing aids */

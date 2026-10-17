@@ -32,6 +32,7 @@ import { typingAnchorPlugin } from './plugins/typinganchor';
 import { insetCaretPlugin } from './plugins/insetcaret';
 import { envFocusPlugin } from './plugins/envfocus';
 import { wideTablesPlugin } from './plugins/widetables';
+import { fontFacesPlugin } from './plugins/fontfaces';
 import { tabularxPlugin } from './plugins/tabularx';
 import { dragSelectPlugin } from './plugins/dragselect';
 import { findPlugin } from './plugins/find';
@@ -145,6 +146,7 @@ export function assemblePlugins(o: AssemblyOptions): Plugin[] {
     tableEditing(),
     envFocusPlugin(),
     wideTablesPlugin(),   // tables alone on their line: centred, a wide one spills into both margins
+    fontFacesPlugin(),    // fonts by name the document uses: loaded into the page
     tabularxPlugin(),   // X columns (variable width) share what the other columns leave of the table width
     numberingPlugin(),
     marginPlugin(o.marginMode),

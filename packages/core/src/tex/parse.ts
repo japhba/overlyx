@@ -17,6 +17,7 @@ import { loadUnicodeSymbols, type UnicodeDB } from '../latex/unicode.ts';
 import { loadLanguages, type LanguageDB } from '../latex/languages.ts';
 import { Scanner, groupEnd, type Tok } from './scanner.ts';
 import { extractInkData } from '../ink.ts';
+import { parseFace, faceValue } from '../fontface.ts';
 import { makeHeaderLines, preambleFacts, splitDocument, type PreambleFacts } from './preamble.ts';
 import { parseTabular } from './table.ts';
 import { PAGE_LAYOUT, GROUP_LAYOUT, PAGE_PROPS_INSET, NOTES_INSET } from '../layout/model.ts';
@@ -70,7 +71,7 @@ function sizeGroup(s: string, pos: number): boolean {
 /** commands whose first brace arguments are no text (sizes, colours, angles): kept raw with the command */
 const RAW_LEADING_ARGS: Record<string, number> = {
   resizebox: 2, 'resizebox*': 2, scalebox: 1, rotatebox: 1, colorbox: 1, fcolorbox: 2, textcolor: 1, raisebox: 1,
-  adjustbox: 1, hyperlink: 1, hypertarget: 1,
+  adjustbox: 1, hyperlink: 1, hypertarget: 1, olfont: 1,
 };
 /** raw environments whose content is LaTeX code (they may nest), not verbatim text */
 const CODE_ENVS = new Set(['tikzpicture', 'tikzcd', 'pgfpicture', 'algorithmic', 'algorithmic*']);
@@ -812,6 +813,23 @@ class BodyParser {
     if (decl) { Object.assign(st.font, decl); if (name === 'em') st.font.emph = st.font.emph === 'on' ? 'off' : 'on'; return null; }
     const size = SIZE_DECLS[name];
     if (size) { st.font.size = size; return null; }
+    if (name === 'olfont') {
+      // a font by name, \olfont[axes][features]{Family}{text} (fontface.ts): the `face` font attribute
+      const save = s.pos;
+      const axes = s.readOptional();
+      const feats = axes !== null ? s.readOptional() : null;
+      const family = s.readGroup();
+      s.skipBlanks();
+      const face = family !== null && s.peekChar() === '{' ? parseFace([family, axes ?? '', feats ?? ''].join('|')) : null;
+      if (face) {
+        const inner: State = { font: { ...st.font, face: faceValue(face) }, change: st.change };
+        s.pos++;
+        const r = this.parseText(s, ctx, inner, { ...stop, close: true, item: false });
+        if (r !== 'close' && r !== 'eof') return r;
+        return null;
+      }
+      s.pos = save;
+    }
     if (name === 'textcolor' || name === 'color') {
       // \textcolor{name} (LyX's named colours) or \textcolor[HTML|rgb|RGB|gray]{spec} (the colour
       // picker): custom colours are kept as '#rrggbb' in the font

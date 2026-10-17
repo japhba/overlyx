@@ -418,7 +418,7 @@ interface Outer {
 /** The names a managed block defines; \tabularnewline is LaTeX's own (LyX provides it for old versions). */
 function definedIn(block: string): Set<string> {
   const out = new Set<string>();
-  const re = /\\(?:newcommand|renewcommand|providecommand|DeclareRobustCommand|ProvideTextCommandDefault|DeclareTextSymbolDefault|DeclareTextCommandDefault|newenvironment|renewenvironment|def)\*?\s*\{?\\?([A-Za-z@]+)\}?/g;
+  const re = /\\(?:newcommand|renewcommand|providecommand|DeclareRobustCommand|DeclareDocumentCommand|NewDocumentCommand|ProvideDocumentCommand|RenewDocumentCommand|ProvideTextCommandDefault|DeclareTextSymbolDefault|DeclareTextCommandDefault|newenvironment|renewenvironment|def)\*?\s*\{?\\?([A-Za-z@]+)\}?/g;
   for (const m of maskComments(block).matchAll(re)) if (m[1] !== 'tabularnewline') out.add(m[1]);
   return out;
 }

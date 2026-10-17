@@ -44,11 +44,21 @@ export type FMValue = string | string[] | { [key: string]: FMValue };
 /** the font names TeX Live's LuaLaTeX finds itself (MD_FONTS); any other is fetched from Google Fonts by the server */
 export const TEXLIVE_FONTS = new Set(MD_FONTS.flatMap(f => [f.main, f.math]));
 
-/** a font the build has as files (a Google font, fetched by the server): its folder in the build directory and each face's file */
-export interface LocalFont { path: string; regular: string; bold?: string; italic?: string; boldItalic?: string }
+/**
+ * a font the build has as files (a Google font, fetched by the server): its folder in the build
+ * directory and each face's file — `variable`: the files are variable fonts, a face is a weight of them
+ */
+export interface LocalFont { path: string; regular: string; bold?: string; italic?: string; boldItalic?: string; variable?: boolean }
 
 /** fontspec's options loading a LocalFont by file (a face it lacks: drawn from the others, bolder or slanted) */
 export function fontspecFiles(f: LocalFont): string {
+  if (f.variable) {
+    // one file per style, each face its weight (a setting for the whole font would hold for bold too)
+    const axis = (w: number) => `RawFeature={axis={wght=${w}}}`;
+    const it = f.italic ?? f.regular, fake = f.italic ? '' : ', FakeSlant=0.2';
+    return [`Path=${f.path}`, `UprightFont=${f.regular}`, `UprightFeatures={${axis(400)}}`, `BoldFont=${f.bold ?? f.regular}`, `BoldFeatures={${axis(700)}}`,
+      `ItalicFont=${it}`, `ItalicFeatures={${axis(400)}${fake}}`, `BoldItalicFont=${f.boldItalic ?? it}`, `BoldItalicFeatures={${axis(700)}${fake}}`].join(', ');
+  }
   const o = [`Path=${f.path}`, `UprightFont=${f.regular}`];
   o.push(f.bold ? `BoldFont=${f.bold}` : `BoldFont=${f.regular}, BoldFeatures={FakeBold=2}`);
   o.push(f.italic ? `ItalicFont=${f.italic}` : `ItalicFont=${f.regular}, ItalicFeatures={FakeSlant=0.2}`);

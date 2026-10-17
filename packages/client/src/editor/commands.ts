@@ -349,6 +349,44 @@ export function setValueMark(markName: string, value: string | null): Command {
   };
 }
 
+/**
+ * A font by name on the selection (core fontface.ts: `Family|axes|features`), or none (null). It
+ * takes the place of a serif / sans / monospace family: the two do not stack (\textsf inside
+ * \olfont would win over it).
+ */
+export function setFontFace(value: string | null): Command {
+  return (state, dispatch) => {
+    if (!dispatch) return true;
+    const face = schema.marks.face, family = schema.marks.family;
+    const { empty, $cursor } = state.selection as TextSelection;
+    if (empty && $cursor) {
+      const marks = (state.storedMarks ?? $cursor.marks()).filter(m => m.type !== face && (!value || m.type !== family));
+      dispatch(state.tr.setStoredMarks(value ? marks.concat([face.create({ value })]) : marks));
+      return true;
+    }
+    let tr = state.tr;
+    for (const r of state.selection.ranges) {
+      if (value) tr = setValueMarkIn(tr, r.$from.pos, r.$to.pos, 'family', null);
+      tr = setValueMarkIn(tr, r.$from.pos, r.$to.pos, 'face', value);
+    }
+    dispatch(tr);
+    return true;
+  };
+}
+
+/** A LaTeX family (roman / sans / typewriter; null: the paragraph's) on the selection, in place of a font by name. */
+export function setFontFamily(value: string | null): Command {
+  return (state, dispatch) => {
+    if (!dispatch) return true;
+    let st = state, tr = state.tr;
+    setFontFace(null)(st, t => { tr = t; });
+    st = state.apply(tr);
+    setValueMark('family', value)(st, t => { t.steps.forEach(step => tr.step(step)); if (t.storedMarksSet) tr.setStoredMarks(t.storedMarks); });
+    dispatch(tr);
+    return true;
+  };
+}
+
 export const fontCommands = {
   emph: toggleValueMark('emph', 'on', undefined),
   bold: toggleValueMark('series', 'bold', undefined),
@@ -371,7 +409,7 @@ export const fontDefault: Command = (state, dispatch) => {
   if (!dispatch) return true;
   if (empty) { dispatch(state.tr.setStoredMarks([])); return true; }
   let tr = state.tr;
-  for (const name of ['family', 'series', 'shape', 'size', 'emph', 'bar', 'strikeout', 'xout', 'uuline', 'uwave', 'noun', 'color', 'numeric']) tr = tr.removeMark(from, to, schema.marks[name]);
+  for (const name of ['family', 'face', 'series', 'shape', 'size', 'emph', 'bar', 'strikeout', 'xout', 'uuline', 'uwave', 'noun', 'color', 'numeric']) tr = tr.removeMark(from, to, schema.marks[name]);
   dispatch(tr);
   return true;
 };

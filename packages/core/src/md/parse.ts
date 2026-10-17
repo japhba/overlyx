@@ -21,6 +21,7 @@ import type { Change, FontState, Inset, Item, LyxDocument, Paragraph } from '../
 import { addAuthor, lyxAuthorId, FONT_KEYS } from '../lyx/ast.ts';
 import { markdownHeader, HEADING_LAYOUTS } from './common.ts';
 import { applyTypesetting, mdTypesetting } from './typesetting.ts';
+import { faceFromCss, faceValue } from '../fontface.ts';
 
 export interface MdSourceNode {
   /** character range in the source */
@@ -517,6 +518,12 @@ class Converter {
             change = { type: name === 'ins' ? 'inserted' : 'deleted', author: id, time: Number.isFinite(time) ? time : 0 };
             break;
           }
+          // a font by name: <span style="font-family: …; font-weight: …"> (fontface.ts)
+          if (name === 'span' && !closing) {
+            const face = faceFromCss(htmlAttrs(raw).style ?? '');
+            if (face) { open('face', faceValue(face), 'html:span'); break; }
+          }
+          if (name === 'span' && closing && fontStack.some(f => f.tag === 'html:span')) { close('html:span'); break; }
           if (name && FONT_TAGS[name] && raw.toLowerCase() === (closing ? `</${name}>` : `<${name}>`)) {
             if (closing) close('html:' + name); else open(FONT_TAGS[name][0], FONT_TAGS[name][1], 'html:' + name);
             break;

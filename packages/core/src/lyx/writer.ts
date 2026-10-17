@@ -5,7 +5,9 @@
 import type { Change, FontState, Inset, LyxDocument, Paragraph, TabularInset } from './ast.ts';
 import { FONT_KEYS, changesEqual } from './ast.ts';
 
+// (a font by name, `face`, is OverLyX's: a .lyx file goes without it)
 const FONT_CMD: Record<keyof FontState, string> = {
+  face: '',
   family: '\\family', series: '\\series', shape: '\\shape', size: '\\size', emph: '\\emph', numeric: '\\numeric',
   nospellcheck: '\\nospellcheck', bar: '\\bar', strikeout: '\\strikeout', xout: '\\xout', uuline: '\\uuline',
   uwave: '\\uwave', noun: '\\noun', color: '\\color', lang: '\\lang',
@@ -55,7 +57,7 @@ function writeFontChanges(prev: FontState, cur: FontState): string {
   let s = '\n';
   for (const k of FONT_KEYS) {
     const a = prev[k], b = cur[k];
-    if (a === b) continue;
+    if (a === b || k === 'face') continue;
     if (k === 'lang' && (b === undefined || b === 'latex')) {
       // "latex" pseudo-language (ERT & co.) is never written explicitly; inherited language
       // reverts are not expressible either ("\lang default" does not exist).
@@ -76,7 +78,7 @@ const BREAK_ALWAYS = new Set(['\u2014', '\u3002', '\uFF01', '\uFF1F', '\uFF1A', 
 
 function fontDiffers(a: FontState, b: FontState): boolean {
   for (const k of FONT_KEYS) {
-    if (k === 'lang' && b[k] === undefined) continue;
+    if ((k === 'lang' && b[k] === undefined) || k === 'face') continue;
     if (a[k] !== b[k]) return true;
   }
   return false;

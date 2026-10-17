@@ -35,6 +35,7 @@ import { pasteFromClipboard } from '../editor/clipmenu';
 import { openLinkBoxFor, LINK_KEY } from '../editor/links';
 import { layoutToolbar } from './layouttoolbar';
 import { FontSizeBox } from './fontsize';
+import { FontPicker } from './FontPicker';
 import { isLayoutDoc } from '../editor/layout/commands';
 import { isMarkdownDoc, insertCodeBlock, insertRule } from '../editor/markdown';
 
@@ -294,19 +295,12 @@ export function buildToolbars(ctx: ToolbarContext): Toolbars {
   const outputChanges = ctx.headerLines.some(l => l === '\\output_changes true');
 
   // the text menu's buttons (the Classic standard row and the Modern row share them)
+  // the font list (app/FontPicker.tsx): the document's families, Google fonts with their axes and features
   const family = markValue(view, 'family');
-  const FAMILY: Record<string, string> = { roman: 'Serif', sans: 'Sans serif', typewriter: 'Monospace' };
-  const face = (css: string) => `<span class="tb-face-sample" style="font-family:${css}">Aa</span>`;
   const fontFamilyBtn: ToolButton = {
-    id: 'fontfamily', title: 'Font: serif, sans serif or monospace (the document’s fonts: Document ▸ Settings ▸ Fonts)', icon: '',
-    html: `<span class="tb-face">${family ? FAMILY[family] ?? family : 'Default'}</span>`,
-    palette: { title: 'Font', list: true, cols: 1, items: [
-      { label: 'Default — the paragraph’s font', html: face('inherit'), active: !family, action: () => run(C.setValueMark('family', null)) },
-      { label: 'Serif (Roman)', html: face('var(--editor-font), serif'), active: family === 'roman', action: () => run(C.setValueMark('family', 'roman')) },
-      { label: 'Sans serif', html: face('var(--sf-font, system-ui), sans-serif'), active: family === 'sans', action: () => run(C.setValueMark('family', 'sans')) },
-      { label: 'Monospace (Typewriter)', html: face('ui-monospace, monospace'), active: family === 'typewriter', action: () => run(C.setValueMark('family', 'typewriter')) },
-      ...(docId ? [{ label: 'The document’s fonts…', html: face('var(--editor-font), serif'), action: () => setDialog(isMarkdownDoc(docId) ? { name: 'mdsettings' } : { name: 'settings', arg: 'fonts' }) }] : []),
-    ] },
+    id: 'fontfamily', title: 'Font', icon: '',
+    ...(view ? { widget: () => <FontPicker view={view} family={family} face={markValue(view, 'face')} markdown={isMarkdownDoc(docId) || meta?.format === 'markdown'}
+      documentFonts={docId ? () => setDialog(isMarkdownDoc(docId) ? { name: 'mdsettings' } : { name: 'settings', arg: 'fonts' }) : undefined} /> } : { action: () => undefined }),
   };
   const boldBtn: ToolButton = { id: 'bold', title: 'Bold (Ctrl+B)', icon: 'bold', action: () => run(C.fontCommands.bold), active: markActive('series', 'bold') };
   const underlineBtn: ToolButton = { id: 'underline', title: 'Underline (Ctrl+U)', icon: 'underline', action: () => run(C.fontCommands.underline), active: markActive('bar', 'under') };
@@ -589,8 +583,10 @@ function markdownToolbars(bars: Toolbars, ctx: ToolbarContext): Toolbars {
     { id: 'md-codeblock', title: 'Code block (``` + Enter)', icon: 'codeblock', action: () => run(insertCodeBlock) },
     { id: 'md-rule', title: 'Horizontal rule (--- + Enter)', icon: 'hrule', action: () => run(insertRule) },
   ];
-  const standard = keep(bars.standard).map(g => (g.some(b => b.id === 'emph') ? inline : g));
+  // the font list (fonts by name are <span style> in markdown), before the inline styles
+  const font = bars.standard.flat().find(b => b.id === 'fontfamily');
+  const standard = keep(bars.standard).map(g => (g.some(b => b.id === 'emph') ? [...(font ? [font] : []), ...inline] : g));
   const extra = keep(bars.extra).map(g => (g.some(b => b.id === 'l-standard') ? [...g.filter(b => b.id !== 'l-section'), ...blocks] : g));
-  const modern = keep(bars.modern).map(g => (g.some(b => b.id === 'bold') ? inline : g)).filter(g => !g.some(b => b.id === 'fontfamily'));
+  const modern = keep(bars.modern).map(g => (g.some(b => b.id === 'bold') ? inline : g));
   return { ...bars, standard, extra, modern, viewUpdate: keep(bars.viewUpdate), table: keep(bars.table), review: keep(bars.review) };
 }
