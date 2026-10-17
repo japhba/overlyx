@@ -309,6 +309,8 @@ function headingsLatex(styles: HeadingStyles, files: Record<string, LocalFont>):
   const out = ['\\usepackage{titlesec}'];
   if (HEADING_LEVELS.some(l => styles[l].color)) out.push('\\usepackage{xcolor}');
   const fonts = [...new Set(HEADING_LEVELS.map(l => styles[l].font).filter((f): f is string => !!f))];
+  // (\newfontfamily is fontspec's — loaded here too when the body font is TeX's own; a second \usepackage is a no-op)
+  if (fonts.length) out.push('\\usepackage{fontspec}');
   fonts.forEach((f, k) => out.push(`\\newfontfamily\\olheadingfont${'abcdefgh'[k]}{${f}}${files[f] ? `[${fontspecFiles(files[f])}]` : ''}`));
   for (const level of HEADING_LEVELS) {
     const st = styles[level], def = LEVEL_DEFAULTS[level];

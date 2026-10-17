@@ -87,7 +87,7 @@ describe('heading styles (headings: in the front matter)', () => {
   });
   it('becomes titlesec in the PDF', () => {
     const pre = preambleOf(fm.join('\n') + '\n\n# A\n\nText.\n');
-    expect(pre).toContain('\\newfontfamily\\olheadingfonta{Fira Sans}');
+    expect(pre).toContain('\\usepackage{fontspec}\n\\newfontfamily\\olheadingfonta{Fira Sans}');
     expect(pre).toContain('\\titleformat{\\section}[hang]{\\normalfont\\olheadingfonta\\Large\\bfseries\\scshape\\color[HTML]{1F4E79}}{\\thesection}{1em}{}[\\vspace{.4ex}\\titlerule]');
     // (the subsection runs in, as all levels but the section do: a run-in heading is not centred)
     expect(pre).toContain('\\titleformat{\\subsection}[runin]{\\normalfont\\olheadingfonta\\normalsize\\bfseries\\itshape\\scshape\\color[HTML]{1F4E79}}');
