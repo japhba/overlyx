@@ -28,5 +28,6 @@ export { markEditedSettings, hasSettingsLine, MANAGED_BEGIN, MANAGED_END } from 
 export * from './projectKey.ts';
 export * from './fontface.ts';
 export * from './textstyles.ts';
+export * from './pagebreaks.ts';
 export { isMarkdownPath, MARKDOWN_LAYOUTS, HEADING_LAYOUTS, markdownLayoutFor, headingLevel, markdownHeader } from './md/common.ts';
 export { GROUP_MANIFEST, parseDocGroup, writeDocGroup, type DocGroup, type DocGroupMember } from './docgroup.ts';

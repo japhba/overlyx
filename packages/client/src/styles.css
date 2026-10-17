@@ -3160,3 +3160,22 @@ html[data-presenting] .ol-refocus { display: none; }
 .md-set-check { display: flex; align-items: center; gap: 6px; }
 .md-set-inline { display: flex; align-items: center; gap: 8px; }
 
+
+/* ------------------------------------------------------------ the Pages view (editor/plugins/pages.ts)
+   the PDF's pages behind the text: sheets painted on the editor host where the last build broke the
+   pages, the text column at the PDF's line width and baseline distance, the desk around them */
+.editor-host.ol-pages { position: relative; background-repeat: no-repeat; --pg-sheet: var(--page-bg); --pg-edge: color-mix(in srgb, var(--page-bg) 78%, #000); }
+.editor-scroll:has(> .editor-page > .editor-host.ol-pages) { --pg-desk: color-mix(in srgb, var(--page-bg) 88%, #6a7080); }
+html[data-ui] .editor-scroll:has(> .editor-page > .editor-host.ol-pages), html[data-ui] .editor-scroll:has(> .editor-page > .editor-host.ol-pages) > .ruler { background: var(--pg-desk); }
+html[data-ui] .editor-scroll > .editor-page:has(> .editor-host.ol-pages) { background: var(--pg-desk); overflow-x: clip; box-shadow: none; }
+/* (the page box is the desk, the pane wide: the sheets are not cut at the text's sides — with the notes pane or Draw's gutters the page keeps its box) */
+html[data-ui] .editor-scroll:not(.margin-mode):not(.ink-pan) > .editor-page:has(> .editor-host.ol-pages) { width: auto; max-width: none; margin: 0; padding-left: 0; padding-right: 0; border-radius: 0; }
+/* the PDF sets the text width here: the ruler's would mislead */
+.editor-scroll:not(.margin-mode):has(> .editor-page > .editor-host.ol-pages) > .ruler { display: none; }
+.lyx-editor.ol-paged { max-width: min(100%, calc(var(--pg-text-w, 345) * var(--ol-pt))) !important; line-height: calc(var(--pg-lead-pt, 12) / var(--ol-basept, 10)); min-height: 0; }
+.ol-pagebreak { display: block; position: relative; height: 0; line-height: 0; text-indent: 0; pointer-events: none; user-select: none; -webkit-user-select: none; }
+.ol-pg-label { position: absolute; height: 14px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: center; font: 11px/14px var(--ui-font, system-ui, sans-serif); font-style: normal; font-weight: normal; letter-spacing: 0; color: var(--muted, #888); }
+.ol-pg-label:empty { display: none; }
+.ol-pg-gap { text-align: right; font-size: 10.5px; opacity: 0.85; }
+.ol-pagebreak.stale .ol-pg-foot, .ol-pagebreak.stale .ol-pg-head { opacity: 0.45; }
+.ol-pagebreak.stale .ol-pg-gap { font-style: italic; }

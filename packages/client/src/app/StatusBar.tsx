@@ -110,8 +110,8 @@ function BuildVersion() {
   return <span class="build-version" title={`OverLyX build (UTC): ${version}`}>{version}</span>;
 }
 
-export function StatusBar({ layout, status, chord, message, save, tracking, trackingAs, change, docLabel, readOnly, quiet, updateReady, aiBusy, stats, zoom, onZoom, pdf, corner, sync }: {
-  layout: string; status: Status; chord: string | null; message: { text: string; kind: 'info' | 'error' } | null; save: SaveState;
+export function StatusBar({ layout, markdown, status, chord, message, save, tracking, trackingAs, change, docLabel, readOnly, quiet, updateReady, aiBusy, stats, pageInfo, zoom, onZoom, pdf, corner, sync }: {
+  layout: string; /** a markdown document: headings are Heading 1 … */ markdown?: boolean; status: Status; chord: string | null; message: { text: string; kind: 'info' | 'error' } | null; save: SaveState;
   tracking: boolean; trackingAs?: string; change?: string | null; docLabel?: string | null; readOnly?: boolean;
   /** no document editor is open (start screen, text file): only messages and the build version */
   quiet?: boolean;
@@ -121,6 +121,8 @@ export function StatusBar({ layout, status, chord, message, save, tracking, trac
   aiBusy?: boolean;
   /** word / character count of the selection (sel) or of the whole document */
   stats?: DocStats | null;
+  /** the Pages view: the cursor's page in the last build, and the build's page count */
+  pageInfo?: { page: number; pages: number; stale: boolean } | null;
   zoom?: number;
   onZoom?: (z: number) => void;
   /** the PDF's age / state (a document with a PDF pane) */
@@ -138,7 +140,7 @@ export function StatusBar({ layout, status, chord, message, save, tracking, trac
       {start}
       <span><span class={'dot' + (status.connected ? ' on' : '')} />{status.connected ? (status.synced ? 'connected' : 'syncing…') : save.state === 'connecting' ? 'connecting…' : 'offline'}</span>
       {docLabel && <span class="doclabel" title="Document under the cursor">{docLabel}</span>}
-      {document.documentElement.dataset.ui === 'modern' ? <span title="Paragraph style at the cursor">{styleLabel(layout, 'modern')}</span> : <span title="Current paragraph layout">{layout}</span>}
+      {document.documentElement.dataset.ui === 'modern' ? <span title="Paragraph style at the cursor">{styleLabel(layout, 'modern', markdown)}</span> : <span title="Current paragraph layout">{styleLabel(layout, 'classic', markdown)}</span>}
       {readOnly && <span class="readonly-badge" title="This project was shared with you for viewing: you can read and compile it, but not change it">👁 view only</span>}
       {aiBusy && <span class="ai-busy" title="Asking the model for a continuation…" data-ai-busy>✦ AI…</span>}
       {chord && <span class="chord">{chord} …</span>}
@@ -151,7 +153,8 @@ export function StatusBar({ layout, status, chord, message, save, tracking, trac
         <span class="stats" data-stats title={(stats.sel ? 'Words and characters in the selection' : 'Words and characters in the document')
           + (stats.pages !== undefined ? `, and the pages ${stats.sel ? 'it' : 'they'} would fill at 11pt — estimated for LaTeX's article class on A4 (43 lines of about 70 characters; headings, formulas, figures, tables and the references by the room they take). The PDF decides.` : '')}>
           {stats.sel ? 'selection: ' : ''}{stats.words.toLocaleString('en-US')} words, {stats.chars.toLocaleString('en-US')} characters
-          {stats.pages !== undefined && <span class="stats-pages" data-stats-pages>{' · '}{formatPages(stats.pages)} at 11pt</span>}
+          {pageInfo ? <span class="stats-pages" data-stats-pages title={'In the last PDF build' + (pageInfo.stale ? ' — edited above since, so the page may have changed' : '')}>{' · '}page {pageInfo.page} of {pageInfo.pages}</span>
+            : stats.pages !== undefined && <span class="stats-pages" data-stats-pages>{' · '}{formatPages(stats.pages)} at 11pt</span>}
         </span>
       )}
       <SaveIndicator save={save} />

@@ -284,7 +284,6 @@ const PLAIN_TITLES: Record<string, string> = {
   'l-enumerate': 'Numbered list (or type “1. ”)',
   'l-labeling': 'Labelled list',
   'l-description': 'Description list',
-  'l-section': 'Heading 1 (Ctrl+2)',
 };
 const plainTitle = (b: ToolButton): ToolButton => (PLAIN_TITLES[b.id] ? { ...b, title: PLAIN_TITLES[b.id] } : b);
 

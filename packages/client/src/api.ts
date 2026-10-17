@@ -1,4 +1,4 @@
-import type { LayoutCheck, DocGroup } from '@overlyx/core';
+import type { LayoutCheck, DocGroup, PageBreaks } from '@overlyx/core';
 import { offlineGet } from './offline-api';
 import { recordInteraction } from './usage';
 import { apiInteraction, requestOutcome } from '@overlyx/core/interactions.ts';
@@ -377,6 +377,8 @@ export const api = {
   /** headings of a document from its file (the document panel's outline of documents that are not open) */
   docOutline: (id: string) => req<{ headings: TexHeading[]; mtime: number }>('GET', `/api/docs/${encId(id)}/outline`),
   synctexView: (id: string, line: number) => req<{ boxes: SyncBox[] }>('GET', `/api/docs/${encId(id)}/synctex/view?line=${line}`),
+  /** the Pages view: where the last build's pages begin in the built .tex, with their geometry (core pagebreaks.ts); null before a build */
+  synctexPages: (id: string) => req<{ breaks: PageBreaks | null }>('GET', `/api/docs/${encId(id)}/synctex/pages`),
   synctexEdit: (id: string, page: number, x: number, y: number) => req<{ file?: string; line: number | null; column?: number }>('GET', `/api/docs/${encId(id)}/synctex/edit?page=${page}&x=${x.toFixed(2)}&y=${y.toFixed(2)}`),
   /** a layout document's text boxes as TeX set them in the last build (the editor's check against the PDF) */
   layoutCheck: (id: string) => req<LayoutCheck>('GET', `/api/docs/${encId(id)}/layoutcheck`),

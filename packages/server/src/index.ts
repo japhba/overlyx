@@ -38,7 +38,7 @@ import { pdfLinkByToken, pdfLinksOf, createPdfLink, deletePdfLink, countHit, pdf
 import { publishAvailable, publishTargetsOf, setPublishTarget, deletePublishTarget, publishPdf, startPublishing } from './pdfpublish.ts';
 import { overleafProjectId, cloneOverleafProject } from './overleaf.ts';
 import { toPng, isDirectImage } from './graphics.ts';
-import { buildPdf, exportTex, texExportDir, lastBuild, requestBuild, currentJob, cancelBuild, publicJob, cleanupProjectData, synctexView, synctexEdit, layoutCheckOf } from './export.ts';
+import { buildPdf, exportTex, texExportDir, lastBuild, requestBuild, currentJob, cancelBuild, publicJob, cleanupProjectData, synctexView, synctexEdit, synctexPages, layoutCheckOf } from './export.ts';
 import { sendFileAt, readFileAt, isRegularFileAt } from './confined.ts';
 import { db } from './db.ts';
 import { accessibleProjects, adoptProjects, roleFor, atLeast, isRole, registerProject, projectRow, shareInfo, addMember, setMemberRole, removeMember, memberRow, linkMemberIds, setLink, resetLink, linkProject, acceptLink, newOwner, setOwner, trashProject, ensureWelcomeProject, ensureStarterProjects, type Role } from './access.ts';
@@ -191,7 +191,7 @@ const needProject = (min: Role) => (req: express.Request, res: express.Response,
  */
 api.all('/docs/*', (req, res, next) => {
   const full = String((req.params as any)[0] ?? '');
-  const m = /^(.*?)(?:\/(meta|tex|lyx|outline|source|bib|reset|save|header|frontmatter|versions(?:\/\d+(?:\/restore)?)?|export(?:\/cancel)?|pdf|build|folds|external|synctex\/(?:view|edit)))?$/.exec(full)!;
+  const m = /^(.*?)(?:\/(meta|tex|lyx|outline|source|bib|reset|save|header|frontmatter|versions(?:\/\d+(?:\/restore)?)?|export(?:\/cancel)?|pdf|build|folds|external|synctex\/(?:view|edit|pages)))?$/.exec(full)!;
   // an id from before a project moved (namespaces.ts) names the document under its current key
   const id = canonicalDocId(decodeURIComponent(m[1]));
   const action = m[2] ?? '';
@@ -1420,6 +1420,12 @@ api.get('/docs/*/synctex/edit', async (req, res) => {
   const page = Number(req.query.page), x = Number(req.query.x), y = Number(req.query.y);
   if (!(page >= 1) || !Number.isFinite(x) || !Number.isFinite(y)) { res.status(400).json({ error: 'page, x, y required' }); return; }
   try { res.json(await synctexEdit(docId(req), Math.floor(page), x, y) ?? { line: null }); }
+  catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+/** The Pages view: where each page of the last build begins in the built .tex, with the pages' geometry (core pagebreaks.ts); null before a build. */
+api.get('/docs/*/synctex/pages', async (req, res) => {
+  try { res.json({ breaks: await synctexPages(docId(req)) }); }
   catch (e) { res.status(500).json({ error: String(e) }); }
 });
 

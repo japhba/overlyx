@@ -5,8 +5,9 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import zlib from 'node:zlib';
 import { spawn, execFile, type ChildProcess } from 'node:child_process';
-import { headerValue, layoutCheck, MANAGED_BEGIN, MANAGED_END, type LayoutCheck } from '@overlyx/core';
+import { headerValue, layoutCheck, MANAGED_BEGIN, MANAGED_END, pageBreaks, parsePdfWords, type LayoutCheck, type PageBreaks } from '@overlyx/core';
 import { config } from './config.ts';
 import { db } from './db.ts';
 import { buildDirPath } from './namespaces.ts';
@@ -725,6 +726,42 @@ export async function synctexEdit(docId: string, page: number, x: number, y: num
   const column = Number(/^Column:(-?\d+)/m.exec(out)?.[1] ?? -1);
   if (!Number.isFinite(line) || line < 1) return null;
   return { file: path.basename(file), line, column };
+}
+
+/**
+ * The pages of the last build for the editor's Pages view (core pagebreaks.ts): where each page
+ * begins in the built .tex, the first words of each page, the running heads and feet, the paper and
+ * text block — from the .synctex.gz and the PDF's words (`pdftotext -bbox`, in the sandbox). Kept per
+ * PDF file (path, size, time), so every editor of the document asks once per build.
+ */
+const pagesCache = new Map<string, { key: string; value: PageBreaks }>();
+export async function synctexPages(docId: string): Promise<PageBreaks | null> {
+  const f = synctexFiles(docId);
+  if (!f) return null;
+  const st = lstatIn(f.dir, f.pdf);
+  if (!st?.isFile()) return null;
+  const key = `${f.dir}/${f.pdf}:${st.size}:${st.mtimeMs}`;
+  const hit = pagesCache.get(docId);
+  if (hit?.key === key) return hit.value;
+  const gz = readFileIn(f.dir, f.pdf.replace(/\.pdf$/, '.synctex.gz'), 64 * 1024 * 1024);
+  if (!gz) return null;
+  let text: string;
+  try { text = zlib.gunzipSync(gz, { maxOutputLength: 512 * 1024 * 1024 }).toString('utf8'); } catch { return null; }
+  const tex = readTextIn(f.dir, f.tex, 64 * 1024 * 1024) ?? '';
+  const bodyLine = tex.split('\n').findIndex(l => /^[^%]*\\begin\{document\}/.test(l)) + 1;
+  let words: ReturnType<typeof parsePdfWords> | null = null;
+  try {
+    const s = sandboxed('pdftotext', ['-bbox', f.pdf, '-'], { rw: [], ro: [f.dir], cwd: f.dir, env: {}, home: false });
+    const out = await new Promise<string>((resolve, reject) => {
+      execFile(s.cmd, s.args, { cwd: f.dir, env: s.env, timeout: 20000, maxBuffer: 256 * 1024 * 1024 }, (err, o) => (err ? reject(err) : resolve(String(o))));
+    });
+    words = parsePdfWords(out);
+  } catch { /* no words: the pages begin where the lines say, without their first words */ }
+  const value = pageBreaks(text, f.tex, bodyLine, words);
+  pagesCache.delete(docId);
+  pagesCache.set(docId, { key, value });
+  while (pagesCache.size > 32) pagesCache.delete(pagesCache.keys().next().value!);
+  return value;
 }
 
 /**

@@ -1716,6 +1716,22 @@ blend.
   built (`app/sourcelocate.ts`) and asks `synctex view` (server, `export.ts`) where it is — the
   viewer scrolls there and flashes the box; a double-click on the PDF asks `synctex edit` for the
   source line and puts the cursor into the paragraph or formula with those words (inverse search).
+  **Pages** (*View ▸ Pages (breaks as in the PDF)*, web client, .tex and markdown; 17 Oct 2026): the
+  document on the last build's pages, like Google Docs' print layout but with TeX deciding. The
+  server reads the build's `.synctex.gz` and the PDF's words (`pdftotext -bbox`, sandboxed) once
+  per PDF (`synctexPages`, `GET /api/docs/*/synctex/pages`, core `pagebreaks.ts`). That gives each
+  page's text block, paper, running head and foot, and where the page begins: the paragraph's
+  source line, how many of its lines came earlier, and the words of the page's first line. A float
+  moved to the top of a page is not where the page begins. The client
+  (`editor/plugins/pages.ts`, in the shared assembly; the shell supplies the data through
+  `setPageBreaks`) finds those words in the paragraphs as inverse search does. It places a widget
+  there, inside the paragraph when the page splits it, that holds the room for the foot, the gap
+  and the next head. The sheets are painted on the editor host behind the text. The column takes
+  the PDF's line width and baseline distance. A page holding less in the editor than in the PDF is
+  filled out to its text height, and one holding more grows. Breaks after the first edit since the
+  build fade ("may move") until the next build places them again. While the view is on, the PDF is
+  rebuilt automatically as if its pane were shown, and the status bar shows the cursor's page,
+  "page 3 of 8". Line breaks inside a paragraph stay the browser's; the PDF is the exact view.
   *Document ▸ Start Appendix Here* marks the cursor's paragraph as the start of the appendix
   (LyX's `\start_of_appendix`, written as `\appendix`).
   **Dark pages** (`app/pdfdark.ts`, like PDF Expert's night mode): in the dark theme the pages are

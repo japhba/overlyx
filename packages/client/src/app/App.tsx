@@ -75,6 +75,7 @@ import { STANDARD_LAYOUTS, sectionLevel } from '../editor/layouts';
 import { chordKey } from '../editor/keymap';
 import * as C from '../editor/commands';
 import { setMarginMode } from '../editor/plugins/margin';
+import { setPagesView, setPageBreaks, pageAtCursor } from '../editor/plugins/pages';
 import { setInk, getInk, subscribeInk, isTabletClient } from '../editor/plugins/ink';
 import { BoardEditor } from './BoardEditor';
 import { DeliverableEditor } from '../deliverable/DeliverableEditor';
@@ -346,6 +347,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   const [dialog, setDialog] = useState<Dialog>(null);
   const [message, setMessage] = useState<{ text: string; kind: 'info' | 'error' } | null>(null);
   const [marginMode, setMarginModeState] = useState(localStorage.getItem('ol.margin') === '1');
+  // View ▸ Pages (editor/plugins/pages.ts): the document on the last build's pages
+  const [pagesOn, setPagesOn] = useState(localStorage.getItem('ol.pages') === '1');
   const [combined, setCombined] = useState(localStorage.getItem('ol.combined') === '1');
   const [childIds, setChildIds] = useState<string[]>([]);
   const [tracking, setTracking] = useState(false);
@@ -976,7 +979,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   const pdfPaneVisible = isLyxDoc && panes.shown.pdf && (!narrowPanes || visiblePanes(panes)[0] === 'pdf');
   useEffect(() => {
     const mode = prefs.autoBuild;
-    if (!docId || !isLyxDoc || mode === 'off' || (mode === 'shown' && !pdfPaneVisible)) return;
+    // (the Pages view shows the PDF's page breaks: it keeps the PDF up to date like the PDF pane does)
+    if (!docId || !isLyxDoc || mode === 'off' || (mode === 'shown' && !pdfPaneVisible && !pagesOn)) return;
     if (!pdf.known || pdf.busy) return;
     const saved = save.savedAt;
     if (!saved || saved <= lastAutoFor.current) return;
@@ -984,7 +988,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     if (pdf.ok === false && pdf.builtAt && saved <= pdf.builtAt) return;   // the failed build already tried it
     const t = setTimeout(() => { lastAutoFor.current = saved; void build({ open: false, auto: true }); }, Math.max(0, prefs.autoBuildDelay) * 1000);
     return () => clearTimeout(t);
-  }, [docId, save.savedAt, pdf.known, pdf.busy, pdf.pdfAt, pdf.builtAt, pdf.ok, prefs.autoBuild, prefs.autoBuildDelay, pdfPaneVisible]);
+  }, [docId, save.savedAt, pdf.known, pdf.busy, pdf.pdfAt, pdf.builtAt, pdf.ok, prefs.autoBuild, prefs.autoBuildDelay, pdfPaneVisible, pagesOn]);
   // The PDF opened beside the document (Ctrl+R, the PDF button) must not squeeze the writing into a
   // strip on a laptop: while the document pane is narrower than READABLE_DOC the side panels fold
   // away, the right one first, and come back when the PDF is hidden again. Only right after the PDF
@@ -1055,6 +1059,26 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       view.dispatch(view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(pos))).scrollIntoView());
       view.focus();
     } catch (e) { notify('SyncTeX: ' + (e as Error).message, 'error'); }
+  };
+  // the Pages view: on in the document's editor, and the pages of each new PDF placed in it
+  useEffect(() => { if (masterView) setPagesView(masterView, pagesOn && isLyxDoc); }, [masterView, pagesOn, isLyxDoc]);
+  useEffect(() => {
+    const v = masterView;
+    if (!v || !docId || !pagesOn || !isLyxDoc || !pdf.pdfAt) return;
+    let gone = false;
+    void (async () => {
+      try {
+        const [{ breaks }, tex] = await Promise.all([api.synctexPages(docId), builtTex()]);
+        if (!gone && editorRef.current?.view === v) { setPageBreaks(v, breaks, tex); rerender(); }   // (the status bar's page of the cursor)
+      } catch { /* the pages stay as they were */ }
+    })();
+    return () => { gone = true; };
+  }, [masterView, docId, pagesOn, isLyxDoc, pdf.pdfAt]);
+  const togglePages = () => {
+    const next = !pagesOn;
+    setPagesOn(next);
+    localStorage.setItem('ol.pages', next ? '1' : '0');
+    if (next && docId && isLyxDoc && !pdf.pdfAt && !pdf.busy) { notify('Building the PDF to see where its pages break…'); void build({ open: false, auto: true }); }
   };
   const showTex = async () => {
     if (!docId) return;
@@ -1278,6 +1302,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       { label: 'LaTeX source beside the document (raw view)', shortcut: 'Ctrl+Alt+S', checked: panes.shown.tex, action: toggleRawSplit },
       { label: 'Outline', shortcut: 'Ctrl+Alt+O', checked: showFiles, action: () => setShowFiles(!showFiles) },
       { label: 'PDF preview', checked: panes.shown.pdf, action: () => flipPane('pdf') },
+      // (Google Docs' print layout, with TeX's page breaks: editor/plugins/pages.ts)
+      { label: 'Pages (breaks as in the PDF)', checked: pagesOn, action: togglePages },
       { label: 'WYSIWYM document', checked: panes.shown.doc, action: () => flipPane('doc') },
       { label: 'Versions', checked: rightTab === 'versions', action: () => setRightTab(rightTab === 'versions' ? null : 'versions') },
       { sep: true },
@@ -1716,10 +1742,10 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       )}
       {/* the quick menu over selected words (toolbars.tsx `quick`) */}
       {isLyxDoc && <SelectionBar view={view} groups={tb.quick} />}
-      <StatusBar layout={layout} status={status} chord={chord} message={message} save={save} tracking={tracking} trackingAs={user.name} change={changeInfo}
+      <StatusBar layout={layout} markdown={isMarkdownDoc(docId)} status={status} chord={chord} message={message} save={save} tracking={tracking} trackingAs={user.name} change={changeInfo}
         docLabel={view && masterView && view !== masterView ? viewDocId(view).split('/').pop() ?? null : null}
         readOnly={!!docId && viewOnly} updateReady={updateReady} aiBusy={aiBusy > 0}
-        quiet={!!docId && !isLyxDoc} stats={docStats} zoom={zoom} onZoom={setZoom}
+        quiet={!!docId && !isLyxDoc} stats={docStats} pageInfo={pagesOn && masterView && isLyxDoc ? pageAtCursor(masterView.state) : null} zoom={zoom} onZoom={setZoom}
         corner={!showFiles && <CornerButton icon="files" title={LEFT_TITLE} data-rail="outline" onClick={() => setShowFiles(true)}>Files</CornerButton>}
         sync={syncChip}
         pdf={isLyxDoc ? { state: pdf, onClick: rebuild => { if (rebuild && !pdf.busy) void build(); else if (!pdfPaneVisible) changePanes(l => (narrowPanes ? { ...setPaneShown(l, 'pdf', true), order: ['pdf', ...l.order.filter(p => p !== 'pdf')] } : setPaneShown(l, 'pdf', true))); } } : undefined} />

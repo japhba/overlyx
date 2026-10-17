@@ -2,7 +2,8 @@ import type { EditorView } from 'prosemirror-view';
 import { TextSelection } from 'prosemirror-state';
 import { sectionLevel } from '../editor/layouts';
 import { navHistory } from './navhistory';
-import { editorContext } from '../editor/context';
+import { editorContext, viewDocId } from '../editor/context';
+import { isMarkdownDoc } from '../editor/markdown';
 import { moveSection, shiftSection, canMoveSection, canShiftSection } from '../editor/outline';
 import type { Node as PMNode } from 'prosemirror-model';
 
@@ -99,7 +100,7 @@ export function Outline({ view, items, activePos }: { view: EditorView | null; i
   const tools = (it: OutlineItem) => {
     if (!view || it.level === 99) return null;
     const st = view.state, pos = it.pos + 1;
-    const [upper, lower] = document.documentElement.dataset.ui === 'modern' ? ['Heading 1', 'Heading 2'] : ['section', 'subsection'];
+    const [upper, lower] = isMarkdownDoc(viewDocId(view)) ? ['Heading 1', 'Heading 2'] : ['section', 'subsection'];
     return (
       <span class="outline-tools" onClick={e => e.stopPropagation()}>
         <button title="Move this section up (before the previous one)" disabled={!canMoveSection(st, pos, -1)} data-outline="up" onClick={() => run(it, 'up')}>▲</button>
@@ -117,7 +118,7 @@ export function Outline({ view, items, activePos }: { view: EditorView | null; i
           {tools(it)}
         </div>
       ))}
-      {!items.length && <div style="color:#888;padding:6px">No headings yet.</div>}
+      {!items.length && <div style="color:#888;padding:6px">No sections yet.</div>}
     </div>
   );
 }

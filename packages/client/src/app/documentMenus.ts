@@ -114,7 +114,7 @@ export function documentMenus({ view, meta, run, runView, setDialog, textColor, 
       ...tex<MenuEntry>([{ label: 'Paragraph style ▸', sub: [
         { ...plain('Standard', 'Normal text'), shortcut: 'Alt+P S', action: () => run(C.setKnownLayout('Standard')) },
         { sep: true },
-        ...SECTION_LAYOUTS.map(([digit, name]) => ({ ...plain(name, styleLabel(name, 'modern')), shortcut: 'Ctrl+' + digit, action: () => run(C.setKnownLayout(name)) })),
+        ...SECTION_LAYOUTS.map(([digit, name]) => ({ label: name, shortcut: 'Ctrl+' + digit, action: () => run(C.setKnownLayout(name)) })),
         { sep: true },
         ...SECTION_LAYOUTS.map(([digit, name]) => ({ ...plain(name + '* (unnumbered)', styleLabel(name + '*', 'modern')), shortcut: 'Ctrl+Alt+' + digit, action: () => run(C.setKnownLayout(name + '*')) })),
         { sep: true },

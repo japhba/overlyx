@@ -24,6 +24,7 @@ import { numberingPlugin } from './plugins/numbering';
 import { foldPlugin } from './plugins/fold';
 import { listDragPlugin } from './plugins/listdrag';
 import { marginPlugin } from './plugins/margin';
+import { pagesPlugin } from './plugins/pages';
 import { commentUiPlugin } from './plugins/commentui';
 import { changeTrackingPlugin, changesFilterPlugin, changeAuthorName } from './plugins/changes';
 import { changeActionsPlugin } from './plugins/changeactions';
@@ -150,6 +151,7 @@ export function assemblePlugins(o: AssemblyOptions): Plugin[] {
     tabularxPlugin(),   // X columns (variable width) share what the other columns leave of the table width
     numberingPlugin(),
     marginPlugin(o.marginMode),
+    pagesPlugin(),   // View ▸ Pages: the last build's page breaks and sheets (the shell supplies them: setPageBreaks)
     ...(o.ink ? [o.ink] : []),
     changeTrackingPlugin(),
     changesFilterPlugin(),

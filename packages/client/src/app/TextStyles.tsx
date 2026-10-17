@@ -39,8 +39,8 @@ import { EDITOR_FACES, DOCUMENT_FONT_SETS, FOLLOW_DOCUMENT, GOOGLE_FACE, editorF
 import { pinUnder } from './popup';
 import { styleLabel } from './stylenames';
 
-/** a kind's name: its paragraph style's, as the style list shows it (Modern: Heading 1 …, Normal text; Classic: Section …, Standard) */
-const typeName = (t: TextType) => styleLabel(TYPE_LAYOUTS[t][0], document.documentElement.dataset.ui === 'modern' ? 'modern' : 'classic');
+/** a kind's name: its paragraph style's, as the style list shows it (.tex: Section …; markdown: Heading 1 …; Modern: Normal text) */
+const typeName = (t: TextType, markdown: boolean) => styleLabel(TYPE_LAYOUTS[t][0], document.documentElement.dataset.ui === 'modern' ? 'modern' : 'classic', markdown);
 const SIZE_NAMES: Record<string, string> = { small: 'Small', normal: 'Normal', large: 'Large', larger: 'Larger', huge: 'Huge' };
 const COLORS = ['#000000', '#444444', '#1f4e79', '#2a62d6', '#0b7a75', '#2e7d32', '#b8860b', '#c0392b', '#8e44ad'];
 const SPACE_RUNGS = [0, 3, 6, 9, 12, 18, 24, 36];
@@ -458,7 +458,7 @@ export function TextStylesPanel({ docId, headerLines, view, markdown, layout, on
                 fontVariant: s.case === 'smallcaps' ? 'small-caps' : undefined, textTransform: s.case === 'uppercase' ? 'uppercase' : undefined,
                 fontSize: t === 'body' ? '1em' : `${Math.min(1.35, Math.max(0.85, sizePt(s.size ?? d.size, 10) / 10))}em`,
               }}>
-              <span class="ts-type-name">{typeName(t)}</span>
+              <span class="ts-type-name">{typeName(t, markdown)}</span>
               {tex[t] && <span class="ts-dot ts-dot-tex" title="LaTeX in the preamble sets some of this" />}
               {(screen[t] || (t === 'body' && ownFont !== FOLLOW_DOCUMENT)) && <span class="ts-dot ts-dot-own" title="Your editor shows some of this its own way" />}
             </button>
@@ -542,7 +542,7 @@ export function TextStylesPanel({ docId, headerLines, view, markdown, layout, on
         <button type="button" data-ts-reset onClick={resetType}
           disabled={scope === 'screen' ? !screen[type] && !ownBodyFont : !doc[type] && !texOf}
           title={scope === 'screen' ? 'Your editor shows the document’s again' : texOf ? 'LaTeX’s default look — removes the preamble’s LaTeX for it too' : 'LaTeX’s default look'}>
-          {scope === 'screen' ? `Reset ${typeName(type)} in my editor` : `Reset ${typeName(type)}`}
+          {scope === 'screen' ? `Reset ${typeName(type, markdown)} in my editor` : `Reset ${typeName(type, markdown)}`}
         </button>
       </div>
     </div>

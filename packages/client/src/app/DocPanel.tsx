@@ -117,7 +117,7 @@ export function DocPanel({ current, currentDoc, refreshKey, outline, activePos, 
   const staticOutline = (id: string) => {
     const hs = statics[id];
     if (!hs) return <div class="outline-loading">Loading…</div>;
-    if (!hs.length) return <div class="outline-empty">No headings.</div>;
+    if (!hs.length) return <div class="outline-empty">No sections.</div>;
     return hs.map(h => (
       <div key={h.n} class={'outline-item static l' + Math.min(5, h.level)} title={h.text} data-heading={h.n} onMouseDown={e => e.preventDefault()} onClick={() => onOpen(id, { heading: h.n })}>
         <span class="outline-text">{h.num && <span class="num">{h.num}</span>}{h.text}</span>
