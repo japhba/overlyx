@@ -15,8 +15,8 @@ export function ScientificTemplates({ kind, value, onChange }: { kind: Scientifi
       </button>)}
     </div>
     <p class="dialog-hint">{selected.description}</p>
-    {/* the source design's name and authors stay with it (its license asks for the attribution); a layout of this server's own has no public page */}
-    <p class="dialog-hint">{selected.source.startsWith('/') ? <>An original layout · {selected.license}.</>
+    {/* the source design's name and authors stay with it (its license asks for the attribution); a layout with no public page says where it comes from */}
+    <p class="dialog-hint">{selected.source.startsWith('/') ? <>{selected.author} · {selected.license}.</>
       : <>Editable adaptation of <a href={selected.source} target="_blank" rel="noopener noreferrer">{selected.name}</a> by {selected.author} · {selected.license}.</>}</p>
   </fieldset>;
 }

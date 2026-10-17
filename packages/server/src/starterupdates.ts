@@ -10,6 +10,7 @@ import path from 'node:path';
 import * as Y from 'yjs';
 import { parseSource, parseStyle, type HNode } from '@overlyx/core/html/source.ts';
 import { SCIENTIFIC_TEMPLATES, templateFolder, type ScientificTemplate } from '@overlyx/core/html/scientific.ts';
+import { SYMPOSIUM_POSTERS } from '@overlyx/core/html/symposium-posters.ts';
 import { db } from './db.ts';
 import { resolveProjectPath } from './projects.ts';
 
@@ -17,14 +18,23 @@ const templates = path.resolve(import.meta.dirname, '../templates');
 /**
  * Posters that shipped after accounts had received the examples: each is added once to every
  * account's example project (a `web:poster-<id>` marker records it, so a deleted one stays deleted);
- * new accounts get them with the project and are marked at once (access.ts).
+ * new accounts get them with the project and are marked at once (access.ts). A poster whose folder
+ * holds something else (a customised copy of a retired example) waits until the folder is free.
  */
-export const LATER_POSTERS = ['bernstein-2026', 'icml-2026', 'statement-2026'];
+export const LATER_POSTERS = ['bernstein-2026', 'icml-2026', ...SYMPOSIUM_POSTERS];
+
+/**
+ * Examples taken out of the gallery, with the folder they were copied into: an untouched copy goes at
+ * startup (kept as a version), a customised one stays. Their files stay in starters-legacy (under
+ * `poster-<id>`) so that "untouched" can be told. Poster 6 of 17 Oct 2026 (a central-statement
+ * layout) gave way to the symposium posters the same day.
+ */
+const RETIRED = [{ folder: 'poster-6', id: 'statement-2026' }];
 
 /** a design's example folder before 17 Oct 2026 (and in starters-legacy) */
 export const legacyFolder = (t: ScientificTemplate) => t.id === 'research' ? 'talk' : t.id === 'betterposter' ? 'poster' : `${t.kind === 'deck' ? 'talk' : 'poster'}-${t.id}`;
 /** each example's folder now, and the one its old versions are kept under (starters-legacy) */
-const examples = [...SCIENTIFIC_TEMPLATES.map(t => ({ folder: templateFolder(t), legacy: legacyFolder(t) })), { folder: 'site', legacy: 'site' }];
+const examples = [...SCIENTIFIC_TEMPLATES.map(t => ({ folder: templateFolder(t), legacy: legacyFolder(t), id: t.id })), { folder: 'site', legacy: 'site', id: '' }];
 const oldSources = (folder: string) => ['web', 'scientific-v1', 'mit-v1', 'scientific-v2', 'scientific-v3'].map(version => path.join(templates, 'starters-legacy', version, folder, 'index.html'))
   .filter(file => fs.existsSync(file)).map(file => fs.readFileSync(file, 'utf8'));
 const compact = (s: string) => s.replace(/\s+/g, ' ').trim();
@@ -78,6 +88,15 @@ function moveDocIds(project: string, from: string, to: string): void {
   })();
 }
 
+/** the document's text as its saved CRDT has it (a process stopped between persisting and saving the file can have newer edits), else the file's */
+function persistedText(id: string, file: string): string {
+  const stored = db.prepare('SELECT state FROM ydocs WHERE id=?').get(id) as { state: Buffer } | undefined;
+  if (!stored) return file;
+  const doc = new Y.Doc();
+  try { Y.applyUpdate(doc, stored.state); return doc.getText('html').toString(); }
+  finally { doc.destroy(); }
+}
+
 export function refreshScientificStarters(dryRun = false): { updated: string[]; added: string[]; removed: string[]; renamed: number; preserved: number; moved: number } {
   const result = { updated: [] as string[], added: [] as string[], removed: [] as string[], renamed: 0, preserved: 0, moved: 0 };
   const rows = db.prepare("SELECT s.project, s.user_id, p.title FROM starter_projects s JOIN projects p ON p.name=s.project AND p.owner_id=s.user_id WHERE s.template='web' AND p.kind='project'").all() as { project: string; user_id: number; title: string | null }[];
@@ -97,26 +116,40 @@ export function refreshScientificStarters(dryRun = false): { updated: string[]; 
         else at.set(templateFolder(t), legacyFolder(t));
         result.moved++;
       }
-      for (const { folder, legacy } of examples) {
+      // retired examples: untouched copies go (a version kept); `gone`: their folders, free now (a dry run's too)
+      const gone = new Set<string>();
+      for (const r of RETIRED) {
+        const dir = path.join(root, r.folder), file = path.join(dir, 'index.html');
+        if (!fs.existsSync(file) || !fs.lstatSync(dir).isDirectory() || !fs.lstatSync(file).isFile()) continue;
+        const before = fs.readFileSync(file, 'utf8');
+        if (!before.includes(`<meta name="overlyx-template" content="${r.id}">`)) continue;   // the folder holds another example by now
+        const id = `${row.project}/${r.folder}/index.html`, legacy = `poster-${r.id}`;
+        if (fs.readdirSync(dir).some(name => name !== 'index.html') || !isLightlyEditedStarter(before, legacy) || !isLightlyEditedStarter(persistedText(id, before), legacy)) { result.preserved++; continue; }
+        if (!dryRun) {
+          db.prepare('INSERT INTO versions (doc_id,name,author,kind,created_at,lyx) VALUES (?,?,?,?,?,?)').run(id, 'Before removing a retired example poster', 'OverLyX', 'manual', Date.now(), before);
+          fs.unlinkSync(file);
+          fs.rmdirSync(dir);
+        }
+        gone.add(r.folder);
+        result.removed.push(id);
+      }
+      for (const { folder, legacy, id: template } of examples) {
+        if (gone.has(folder)) continue;
         const file = path.join(root, at.get(folder) ?? folder, 'index.html');
         if (!fs.existsSync(file) || !fs.lstatSync(path.dirname(file)).isDirectory() || !fs.lstatSync(file).isFile()) continue;
         const retire = folder === 'site';
         // An added asset makes the old web-page folder a user's project, even with an untouched index.
         if (retire && fs.readdirSync(path.dirname(file)).some(name => name !== 'index.html')) { result.preserved++; continue; }
         const before = fs.readFileSync(file, 'utf8');
+        // (another example in its folder — a customised retired one — is not this one's to refresh)
+        const holds = /<meta name="overlyx-template" content="([^"]+)">/.exec(before)?.[1];
+        if (template && holds && holds !== template) continue;
         const replacement = retire ? undefined : fs.readFileSync(path.join(templates, 'starters/web', folder, 'index.html'), 'utf8');
         if (before === replacement) continue;
         if (!isLightlyEditedStarter(before, legacy)) { result.preserved++; continue; }
         const id = `${row.project}/${folder}/index.html`;
-        // A process stopped between persisting its CRDT and saving the file can have newer edits.
-        const stored = db.prepare('SELECT state FROM ydocs WHERE id=?').get(id) as { state: Buffer } | undefined;
-        let persisted = before;
-        if (stored) {
-          const doc = new Y.Doc();
-          try { Y.applyUpdate(doc, stored.state); persisted = doc.getText('html').toString(); }
-          finally { doc.destroy(); }
-          if (!isLightlyEditedStarter(persisted, legacy)) { result.preserved++; continue; }
-        }
+        const persisted = persistedText(id, before);
+        if (persisted !== before && !isLightlyEditedStarter(persisted, legacy)) { result.preserved++; continue; }
         if (!dryRun) {
           const snapshot = db.prepare('INSERT INTO versions (doc_id,name,author,kind,created_at,lyx) VALUES (?,?,?,?,?,?)');
           snapshot.run(id, retire ? 'Before removing web-page example' : 'Before scientific template refresh', 'OverLyX', 'manual', Date.now(), before);
@@ -149,9 +182,13 @@ export function refreshScientificStarters(dryRun = false): { updated: string[]; 
         const marker = `web:${legacyFolder(t)}`, folder = templateFolder(t);
         if (db.prepare('SELECT 1 FROM starter_projects WHERE user_id=? AND template=?').get(row.user_id, marker)) continue;
         const dest = path.join(root, at.get(folder) ?? folder);
-        if (!fs.existsSync(dest)) {
+        if (!fs.existsSync(dest) || gone.has(folder)) {
           if (!dryRun) fs.cpSync(path.join(templates, 'starters/web', folder), dest, { recursive: true, errorOnExist: true, force: false });
           result.added.push(`${row.project}/${folder}/index.html`);
+        } else {
+          const index = path.join(dest, 'index.html');
+          const holds = fs.existsSync(index) ? /<meta name="overlyx-template" content="([^"]+)">/.exec(fs.readFileSync(index, 'utf8'))?.[1] : undefined;
+          if (holds && holds !== t.id) continue;   // another example there (a customised retired one): this poster waits until the folder is free
         }
         if (!dryRun) db.prepare('INSERT OR IGNORE INTO starter_projects (user_id,template,project,created_at) VALUES (?,?,?,?)').run(row.user_id, marker, row.project, Date.now());
       }
@@ -161,6 +198,6 @@ export function refreshScientificStarters(dryRun = false): { updated: string[]; 
       }
     } catch (e) { console.error('[starters] scientific refresh failed:', row.project, e); }
   }
-  if (!dryRun && (result.updated.length || result.added.length || result.removed.length || result.renamed || result.moved)) console.log(`[starters] moved ${result.moved} example folders to their new names; refreshed ${result.updated.length} slide/poster examples; added ${result.added.length} project poster examples; removed ${result.removed.length} web-page examples; renamed ${result.renamed} projects; preserved ${result.preserved} customised files`);
+  if (!dryRun && (result.updated.length || result.added.length || result.removed.length || result.renamed || result.moved)) console.log(`[starters] moved ${result.moved} example folders to their new names; refreshed ${result.updated.length} slide/poster examples; added ${result.added.length} later poster examples; removed ${result.removed.length} retired examples; renamed ${result.renamed} projects; preserved ${result.preserved} customised files`);
   return result;
 }

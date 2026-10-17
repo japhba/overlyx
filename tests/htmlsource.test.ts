@@ -119,7 +119,8 @@ describe('html deliverable source edits', () => {
     expect(text).toContain(`<meta name="overlyx-template" content="${t.id}">`);
     expect(text).toContain(`<meta name="license" content="${t.license}">`);
     expect(text).toContain(t.source);
-    expect(text).toContain('Analytical');
+    // (its figures say what they are: exact analytical curves, or placeholders with made-up values — the lorem-ipsum posters)
+    expect(text).toMatch(/Analytical|Placeholder/);
     expect(text).not.toMatch(/<(?:script|img|link)\b/);
     const { doc } = parseSource(text);
     for (const slide of slideElements(doc)) {
