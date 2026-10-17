@@ -76,7 +76,7 @@ import { db, type UserRow } from './db.ts';
 import { showAgent, presenceIn, type AgentLook, type PresentPerson } from './agentPresence.ts';
 import { changedRange, findPassage, type Cursor } from './ycursor.ts';
 import {
-  agentFor, knownAgent, agentRow, agentLabel, agentColor, noteToolCall, wantsSession, recordSession, sessionRow, touchSession, dropSession,
+  agentFor, knownAgent, agentRow, agentLabel, agentColor, agentOwner, noteToolCall, wantsSession, recordSession, sessionRow, touchSession, dropSession,
   registerPusher, unregisterPusher, streamChanged, waitForInstructions, replyFromAgent, forAgent,
   type AgentRow, type ClientInfo, type TokenIdentity,
 } from './mcpAgents.ts';
@@ -581,7 +581,9 @@ Messages from OverLyX: the user can write to you from OverLyX (the Agent panel).
 export interface Caller { agent: AgentRow | null; look: AgentLook | null; sessionId: string | null }
 
 function callerFor(agent: AgentRow | null, sessionId: string | null = null): Caller {
-  return { agent, sessionId, look: agent ? { key: `agent:${agent.id}`, name: agentLabel(agent), color: agentColor(agent), userId: agent.user_id } : null };
+  if (!agent) return { agent, sessionId, look: null };
+  const owner = agentOwner(agent.user_id);
+  return { agent, sessionId, look: { key: `agent:${agent.id}`, name: agentLabel(agent), color: owner?.color ?? agentColor(agent), userId: agent.user_id, owner } };
 }
 
 /** How long wait_for_instructions waits by default and at most (below the clients' tool timeouts: Codex gives a tool 60 s). */

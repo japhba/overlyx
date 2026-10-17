@@ -84,6 +84,11 @@ export function agentLabel(row: AgentRow): string {
   return first ? `${agentTitle(row)} (${first})` : agentTitle(row);
 }
 export const agentColor = (row: Pick<AgentRow, 'id'>): string => AGENT_COLORS[row.id % AGENT_COLORS.length];
+/** The account an agent acts for, as its avatar shows it in a document: the owner's colour and face (agentPresence.ts). */
+export function agentOwner(userId: number): { name: string; username: string; color: string; avatar: string | null } | null {
+  const u = db.prepare('SELECT display_name, username, color, avatar_url FROM users WHERE id = ?').get(userId) as { display_name: string | null; username: string; color: string | null; avatar_url: string | null } | undefined;
+  return u ? { name: u.display_name || u.username, username: u.username, color: u.color ?? '#888', avatar: u.avatar_url ? `/api/users/${userId}/avatar` : null } : null;
+}
 export const agentRow = (id: number): AgentRow | undefined => db.prepare('SELECT * FROM mcp_agents WHERE id = ?').get(id) as AgentRow | undefined;
 
 /**

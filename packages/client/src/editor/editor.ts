@@ -4,6 +4,7 @@
  */
 import { EditorState, TextSelection } from 'prosemirror-state';
 import { inkOn } from '../app/contrast';
+import { ROBOT_SVG } from '../app/Avatar';
 import { EditorView } from 'prosemirror-view';
 import * as Y from 'yjs';
 import { snapshotCovers, localWritesCommitted } from './savedstate';
@@ -75,7 +76,13 @@ function checkedAwareness(aw: Awareness): Awareness {
 }
 
 /** A user connected to the document (one entry per browser tab / awareness client). */
-export interface PresenceUser { name: string; color: string; username?: string; /** profile picture URL (Google sign-in), if any */ avatar?: string | null; clientId: number; /** has a known cursor position in this document */ hasCursor: boolean; self: boolean; /** an agent connected over MCP (the server's agentPresence.ts) */ agent?: boolean }
+export interface PresenceUser { name: string; color: string; username?: string; /** profile picture URL (Google sign-in), if any */ avatar?: string | null; clientId: number; /** has a known cursor position in this document */ hasCursor: boolean; self: boolean; /** an agent connected over MCP (the server's agentPresence.ts) */ agent?: boolean; /** the account the agent works for (its avatar shows them) */ owner?: { name: string; username: string } }
+
+/** an agent's `owner` field, if it is one (awareness states are not trusted, core awareness.ts) */
+const ownerOf = (v: unknown): { name: string; username: string } | undefined => {
+  const o = v as { name?: unknown; username?: unknown } | null;
+  return o && typeof o === 'object' && typeof o.name === 'string' && typeof o.username === 'string' ? { name: o.name, username: o.username } : undefined;
+};
 
 /**
  * Where the user's edits are: `saved` = the .lyx file on the server contains everything, `saving` =
@@ -334,7 +341,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
     sync: [
       ySyncPlugin(fragment, { mapping }),
       yCursorPlugin(checkedAwareness(provider.awareness), {
-        cursorBuilder: (user: { name: string; color: string }, clientId?: number) => {
+        cursorBuilder: (user: { name: string; color: string; agent?: unknown }, clientId?: number) => {
           const cursor = document.createElement('span');
           cursor.className = 'ProseMirror-yjs-cursor';
           if (clientId !== undefined) cursor.dataset.client = String(clientId);
@@ -343,6 +350,8 @@ export function createEditor(opts: EditorOptions): EditorHandle {
           label.style.backgroundColor = user.color;
           label.style.color = inkOn(user.color);
           label.textContent = user.name;
+          // an agent wears its owner's colour: the robot tells its caret from theirs
+          if (user.agent === true) { label.insertAdjacentHTML('afterbegin', ROBOT_SVG); label.classList.add('agent'); }
           cursor.appendChild(label);
           return cursor;
         },
@@ -389,7 +398,11 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   const status = { connected: false, synced: false, users: [] as PresenceUser[] };
   const pushStatus = () => {
     const users: PresenceUser[] = [];
-    checkedStates(provider.awareness).forEach((s, clientId) => { if (s.user) users.push({ name: s.user.name, color: s.user.color, username: s.user.username, avatar: s.user.avatar ?? null, clientId, hasCursor: !!s.cursor, self: clientId === ydoc.clientID, ...(s.user.agent === true ? { agent: true } : {}) }); });
+    checkedStates(provider.awareness).forEach((s, clientId) => {
+      if (!s.user) return;
+      const owner = s.user.agent === true ? ownerOf(s.user.owner) : undefined;
+      users.push({ name: s.user.name, color: s.user.color, username: s.user.username, avatar: s.user.avatar ?? null, clientId, hasCursor: !!s.cursor, self: clientId === ydoc.clientID, ...(s.user.agent === true ? { agent: true } : {}), ...(owner ? { owner } : {}) });
+    });
     status.users = users;
     opts.onStatus?.({ ...status });
   };

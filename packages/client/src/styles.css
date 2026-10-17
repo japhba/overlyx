@@ -1596,7 +1596,11 @@ button.tb-cw:hover:not(:disabled) { background: var(--row-hover); border-color: 
 .menubar .users .avatar { padding: 0; cursor: pointer; font-family: inherit; transition: transform 0.1s; position: relative; }
 .menubar .users .avatar:hover { transform: scale(1.15); z-index: 1; box-shadow: 0 0 0 1.5px var(--muted2); }
 .menubar .users .avatar.self { cursor: default; }
-.menubar .users .avatar.agent { border-radius: 6px; }   /* an agent connected over MCP: a rounded square, not a circle */
+/* an agent connected over MCP: the avatar of the account it works for, a robot in the lower right corner */
+.menubar .users .avatar.agent { overflow: visible; }
+.avatar .agent-badge { position: absolute; right: -4px; bottom: -4px; z-index: 2; width: 12px; height: 12px; border-radius: 50%; background: var(--ui-bg); color: var(--ui-fg); box-shadow: 0 0 0 1px var(--ui-border); display: flex; align-items: center; justify-content: center; pointer-events: none; }
+.avatar .agent-badge .ol-robot { width: 9px; height: 9px; display: block; }
+.ProseMirror-yjs-cursor > div.agent .ol-robot { width: 1.1em; height: 1.1em; vertical-align: -0.2em; margin-right: 3px; }
 .menubar .users .avatar:not(.has-cursor) { opacity: 0.6; }
 .ProseMirror-yjs-cursor.flash > div { animation: ol-cursor-flash 0.4s ease-in-out 4; }
 @keyframes ol-cursor-flash { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.35); } }

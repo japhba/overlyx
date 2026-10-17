@@ -1,6 +1,6 @@
 import type { ComponentChildren } from 'preact';
 import type { SaveState, PresenceUser } from '../editor/editor';
-import { AvatarContent, initials } from './Avatar';
+import { AvatarContent, AgentBadge, initials } from './Avatar';
 import { inkOn } from './contrast';
 import { pdfStatus, useTicker, type PdfStatusInput } from './pdfstatus';
 import { useEffect, useState } from 'preact/hooks';
@@ -28,15 +28,33 @@ export function SaveIndicator({ save }: { save: SaveState }) {
   }
 }
 
-/** Presence avatars (top right of the menubar): one per connected client; click to jump to where that user is editing. */
+/** Agents placed right after the person they work for (when that person is here too). */
+function withAgentsByOwners(users: PresenceUser[]): PresenceUser[] {
+  const people = users.filter(u => !u.agent), agents = users.filter(u => u.agent);
+  const out: PresenceUser[] = [];
+  people.forEach((p, i) => {
+    out.push(p);
+    // after the owner's last tab
+    if (p.username && !people.slice(i + 1).some(q => q.username === p.username)) out.push(...agents.filter(a => a.owner?.username === p.username));
+  });
+  return [...out, ...agents.filter(a => !out.includes(a))];
+}
+
+/**
+ * Presence avatars (top right of the menubar): one per connected client; click to jump to where that
+ * user is editing. An agent wears the avatar of the account it works for, with a robot in the corner.
+ */
 export function UserAvatars({ users, onJump }: { users: PresenceUser[]; onJump?: (u: PresenceUser) => void }) {
   return (
     <span class="users" title={users.map(u => u.name).join(', ')}>
-      {users.map(u => (
-        <button key={u.clientId} type="button" class={'avatar' + (u.self ? ' self' : '') + (u.hasCursor ? ' has-cursor' : '') + (u.agent ? ' agent' : '')} style={{ background: u.color, color: inkOn(u.color) }}
-          title={u.self ? `${u.name} (you)` : `${u.name}${u.agent ? ' — an agent connected from elsewhere' : ''}${u.hasCursor ? ' — click to jump to ' + (u.agent ? 'its' : 'their') + ' cursor' : ' — no cursor in this document yet'}`}
-          data-client={u.clientId} data-username={u.username ?? ''} data-initials={u.avatar ? undefined : initials(u.name).length} onMouseDown={e => e.preventDefault()} onClick={() => onJump?.(u)}><AvatarContent name={u.name} src={u.avatar} /></button>
-      ))}
+      {withAgentsByOwners(users).map(u => {
+        const face = u.owner?.name ?? u.name;
+        return (
+          <button key={u.clientId} type="button" class={'avatar' + (u.self ? ' self' : '') + (u.hasCursor ? ' has-cursor' : '') + (u.agent ? ' agent' : '')} style={{ background: u.color, color: inkOn(u.color) }}
+            title={u.self ? `${u.name} (you)` : `${u.name}${u.agent ? ' — an agent connected from elsewhere' + (u.owner ? `, working for ${u.owner.name}` : '') : ''}${u.hasCursor ? ' — click to jump to ' + (u.agent ? 'its' : 'their') + ' cursor' : ' — no cursor in this document yet'}`}
+            data-client={u.clientId} data-username={u.username ?? ''} data-initials={u.avatar ? undefined : initials(face).length} onMouseDown={e => e.preventDefault()} onClick={() => onJump?.(u)}><AvatarContent name={face} src={u.avatar} />{u.agent && <AgentBadge />}</button>
+        );
+      })}
     </span>
   );
 }

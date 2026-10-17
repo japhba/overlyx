@@ -2,10 +2,12 @@
  * Presence in a document, both ways, for agents connected over MCP.
  *
  * People see agents: an external agent working in a document gets an awareness client of its own
- * on the server — a state `{ user: { name: "Claude Code (Jan)", color, agent: true }, cursor }` in
- * the document's Awareness, relayed by ws.ts like any browser's — so the web client and the VS Code
+ * on the server — a state `{ user: { name: "Claude Code (Jan)", color, avatar, agent: true, owner }, cursor }`
+ * in the document's Awareness, relayed by ws.ts like any browser's — so the web client and the VS Code
  * extension show it with their ordinary collaborator rendering: an avatar in the presence list and a
  * caret / highlight where it last edited, or at the passage it points at (the `highlight` tool).
+ * The agent wears the face of the account it acts for (colour, picture, initials — `owner`); the
+ * clients add a small robot to its avatar and caret label.
  * The state is renewed while the agent is active (the Awareness drops a state after 30 s without an
  * update) and removed after AGENT_IDLE_MS without a tool call touching the document. Browsers cannot
  * overwrite these client ids (ws.ts sanitizeAwarenessUpdate, isAgentClient).
@@ -36,6 +38,8 @@ export interface AgentLook {
   color: string;
   /** the account the agent acts for */
   userId: number;
+  /** that account as people know it: the agent's avatar is the owner's, with a robot badge */
+  owner?: { name: string; username: string; avatar: string | null } | null;
 }
 
 interface Entry { doc: OpenDoc; look: AgentLook; clientId: number; clock: number; cursor: Cursor | null; lastActive: number }
@@ -44,7 +48,11 @@ const entries = new Map<string, Entry>();
 const entryKey = (agentKey: string, docId: string) => `${agentKey}\n${docId}`;
 
 function stateOf(e: Entry): Record<string, unknown> {
-  return { user: { name: e.look.name, color: e.look.color, agent: true }, ...(e.cursor ? { cursor: e.cursor } : {}) };
+  const o = e.look.owner;
+  return {
+    user: { name: e.look.name, color: e.look.color, agent: true, ...(o ? { avatar: o.avatar, owner: { name: o.name, username: o.username } } : {}) },
+    ...(e.cursor ? { cursor: e.cursor } : {}),
+  };
 }
 
 /** Apply a state (null: remove) for the entry's client id, as if a client had sent it. */
