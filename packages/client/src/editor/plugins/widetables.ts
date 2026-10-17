@@ -2,13 +2,16 @@
  * Tables on a line of their own: a LyX tabular, or a formula that is one matrix / array (a table
  * typed as `$\begin{matrix}…\end{matrix}$`), alone in its paragraph. They are centred on the text
  * column, as `\centering` prints them. One wider than the column spills out into both margins by
- * the same amount, as far as the page reaches on the left; the rest overflows to the right and the
- * page scrolls. That is the rule for wide display formulas too (nodeviews/math.ts relayout).
+ * the same amount, centred on the canvas, as far as the document pane reaches (the notes pane
+ * left out); one wider than that is drawn smaller to fit it (`--ol-fit`, at least 35 %), so a big
+ * table is seen whole instead of running off the right edge. That is the rule for wide display
+ * formulas too (nodeviews/math.ts relayout), but for the shrinking.
  *
- * The paragraph gets the class `ol-solo-table` and, when its table spills, `--ol-spill: <px>` (a node
- * decoration: ProseMirror owns the paragraph's DOM); styles.css does the rest. The editor root gets
- * `--ol-column`, the text column's width, which the p{…} columns given relative to the text width use
- * (core schema.ts lyxLengthCss).
+ * The paragraph gets the class `ol-solo-table` and, when its table spills, `--ol-spill: <px>` — when
+ * it is shrunk also the class `ol-fit`, `--ol-fit` and the margins that take its box in to the
+ * drawn size (a node decoration: ProseMirror owns the paragraph's DOM); styles.css does the rest. The
+ * editor root gets `--ol-column`, the text column's width, which the p{…} columns given relative to
+ * the text width use (core schema.ts lyxLengthCss).
  */
 import { Plugin, PluginKey, type EditorState, type Transaction } from 'prosemirror-state';
 import { documentViewScale } from '../viewscale';
@@ -43,14 +46,21 @@ export function isSoloTable(par: PMNode): boolean {
   return !!table && !other;
 }
 
-interface Spec { soloTable: true; spill: number; blank?: true }
-const deco = (from: number, to: number, spill: number) =>
-  Decoration.node(from, to, spill ? { class: 'ol-solo-table', style: `--ol-spill: ${spill}px` } : { class: 'ol-solo-table' }, { soloTable: true, spill } satisfies Spec);
+/** how a solo table is set: spilled into the margins (px), and shrunk to `fit` of its size (w × h: its full size, px) */
+interface Fit { spill: number; fit: number; w: number; h: number }
+interface Spec extends Fit { soloTable: true; blank?: true }
+const NO_FIT: Fit = { spill: 0, fit: 1, w: 0, h: 0 };
+/** the smallest a table is drawn (narrower panes scroll sideways) */
+const MIN_FIT = 0.35;
+const deco = (from: number, to: number, f: Fit) => {
+  const style = [f.spill ? `--ol-spill: ${f.spill}px` : '', f.fit < 1 ? `--ol-fit: ${f.fit}; --ol-fit-dx: ${-Math.round(f.w * (1 - f.fit))}px; --ol-fit-dy: ${-Math.round(f.h * (1 - f.fit))}px` : ''].filter(Boolean).join('; ');
+  return Decoration.node(from, to, { class: 'ol-solo-table' + (f.fit < 1 ? ' ol-fit' : ''), ...(style ? { style } : {}) }, { soloTable: true, ...f } satisfies Spec);
+};
 
 function scan(doc: PMNode, from: number, to: number, out: Decoration[]): void {
   doc.nodesBetween(from, to, (node, pos) => {
     if (node.isTextblock && isSoloTable(node)) {
-      out.push(deco(pos, pos + node.nodeSize, 0));
+      out.push(deco(pos, pos + node.nodeSize, NO_FIT));
       // a blank beside the table (before the caption) would push it off the centre by its width
       node.forEach((child, off) => { if (child.isText) out.push(Decoration.inline(pos + 1 + off, pos + 1 + off + child.nodeSize, { class: 'ol-solo-blank' }, { soloTable: true, blank: true })); });
     }
@@ -82,17 +92,17 @@ function remap(tr: Transaction, prev: DecorationSet): DecorationSet {
     const end = $to.depth ? $to.after(Math.max(1, $to.depth)) : to;
     // (find() also returns the neighbours that only touch the range: they stay)
     const old = set.find(start, end, s => (s as Spec).soloTable).filter(d => d.from >= start && d.to <= end);
-    const spillAt = new Map(old.filter(d => !d.spec.blank).map(d => [d.from, (d.spec as Spec).spill]));
+    const fitAt = new Map(old.filter(d => !d.spec.blank).map(d => [d.from, d.spec as Spec]));
     set = set.remove(old);
     const found: Decoration[] = [];
     scan(tr.doc, start, end, found);
-    set = set.add(tr.doc, found.map(d => (d.spec.blank ? d : deco(d.from, d.to, spillAt.get(d.from) ?? 0))));
+    set = set.add(tr.doc, found.map(d => (d.spec.blank ? d : deco(d.from, d.to, fitAt.get(d.from) ?? NO_FIT))));
   }
   return set;
 }
 
-/** measured spills: [paragraph position, px] */
-type SpillMeta = [number, number][];
+/** measured settings: [paragraph position, how it is set] */
+type SpillMeta = [number, Fit][];
 
 export function wideTablesPlugin(): Plugin<DecorationSet> {
   return new Plugin<DecorationSet>({
@@ -102,9 +112,9 @@ export function wideTablesPlugin(): Plugin<DecorationSet> {
       apply(tr, prev) {
         let set = tr.docChanged ? remap(tr, prev) : prev;
         const spills = tr.getMeta(wideTablesKey) as SpillMeta | undefined;
-        if (spills) for (const [pos, spill] of spills) {
+        if (spills) for (const [pos, fit] of spills) {
           const old = set.find(pos, pos + 1, s => (s as Spec).soloTable && !s.blank).find(d => d.from === pos);
-          if (old) set = set.remove([old]).add(tr.doc, [deco(old.from, old.to, spill)]);
+          if (old) set = set.remove([old]).add(tr.doc, [deco(old.from, old.to, fit)]);
         }
         return set;
       },
@@ -150,8 +160,9 @@ function soloElement(view: EditorView, pos: number): HTMLElement | null {
 }
 
 /**
- * How far each solo table spills into the left margin: half of what it is wider than its paragraph,
- * but never past the page's left edge (6px short of it). Dispatched only when something changed.
+ * How each solo table is set: drawn smaller when it is wider than the document pane (the notes pane
+ * left out, 16px either side), then spilled into the left margin by half of what it is wider than its
+ * paragraph, but never past the pane's left edge (6px short of it). Dispatched only when something changed.
  */
 function measure(view: EditorView): void {
   if (view.isDestroyed) return;
@@ -160,6 +171,7 @@ function measure(view: EditorView): void {
   if (column && root.style.getPropertyValue('--ol-column') !== column + 'px') root.style.setProperty('--ol-column', column + 'px');
   const scroll = root.closest('.editor-scroll') as HTMLElement | null;
   const pageLeft = scroll ? scroll.getBoundingClientRect().left - scroll.scrollLeft + 6 : 6 - window.scrollX;
+  const pane = scroll ? scroll.clientWidth - (parseFloat(scroll.style.getPropertyValue('--notes-col')) || 0) : window.innerWidth;
   const changes: SpillMeta = [];
   for (const d of solos(view.state)) {
     const par = view.nodeDOM(d.from) as HTMLElement | null;
@@ -168,10 +180,18 @@ function measure(view: EditorView): void {
     const cs = getComputedStyle(par);
     const padL = parseFloat(cs.paddingLeft) || 0;
     const avail = par.clientWidth - padL - (parseFloat(cs.paddingRight) || 0);
-    const w = el.offsetWidth;
-    const leftRoom = (par.getBoundingClientRect().left - pageLeft) / documentViewScale(par) + padL;
-    const spill = w > avail + 1 ? Math.round(Math.max(0, Math.min(leftRoom, (w - avail) / 2))) : 0;
-    if (Math.abs(spill - (d.spec as Spec).spill) > 1) changes.push([d.from, spill]);
+    // (offsetWidth / Height: its own size, the scale aside)
+    const w = el.offsetWidth, h = el.offsetHeight;
+    const scale = documentViewScale(par);
+    const room = pane / scale - 32;
+    // (a formula table is not shrunk — a display formula is not either —, nor one in a box on a slide or poster)
+    const fit = el.classList.contains('lyx-tabular') && !par.closest('.ol-page') && room > 0 && w > room ? Math.max(MIN_FIT, Math.floor(room / w * 1000) / 1000) : 1;
+    const drawn = w * fit;
+    const leftRoom = (par.getBoundingClientRect().left - pageLeft) / scale + padL;
+    const spill = drawn > avail + 1 ? Math.round(Math.max(0, Math.min(leftRoom, (drawn - avail) / 2))) : 0;
+    const was = d.spec as Spec;
+    const next: Fit = { spill, fit, w: fit < 1 ? w : 0, h: fit < 1 ? h : 0 };
+    if (Math.abs(spill - was.spill) > 1 || Math.abs(fit - was.fit) > 0.004 || Math.abs(next.h - was.h) > 1 || Math.abs(next.w - was.w) > 1) changes.push([d.from, next]);
   }
   if (changes.length) view.dispatch(view.state.tr.setMeta(wideTablesKey, changes).setMeta('addToHistory', false));
 }

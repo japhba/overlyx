@@ -1597,9 +1597,13 @@ blend.
   tabular, or a formula that is one `matrix` / `pmatrix` / `array` … (a table typed as
   `$\begin{matrix}…\end{matrix}$`) alone in its paragraph, blanks, labels, a caption, a display formula
   or a figure beside it allowed (`editor/plugins/widetables.ts`) — is centred on the text column; one
-  wider than the column spills into both margins by the same amount, as far as the page reaches on
-  the left, and the rest overflows to the right (the page scrolls) — the rule of wide display
-  formulas. A table amid text stays in the line; a paragraph set flush left / right keeps its alignment.
+  wider than the column spills into both margins by the same amount, as far as the document pane
+  reaches on the left (the notes pane left out) — the rule of wide display formulas. A tabular wider
+  than the pane even so is drawn smaller to fit it, 16px short of either edge, down to 35 % (17 Oct
+  2026: before, it ran off the right edge): `ol-fit`, `--ol-fit` (a `transform: scale`) and the
+  negative margins `--ol-fit-dx` / `-dy` that take its box in to the drawn size. Formula tables and
+  tables in a slide's or poster's boxes are not shrunk; the PDF is set as LaTeX sets it. A table amid
+  text stays in the line; a paragraph set flush left / right keeps its alignment.
   The dotted cell grid (LyX's hint for boundaries without a line) and the boxes of a formula's empty
   cells show only while the cursor is in that table / formula (`editor/plugins/envfocus.ts` marks the
   table with `ol-editing`; the static formula rendering hides its `lm-empty` outlines) — a document
@@ -1908,7 +1912,11 @@ blend.
   page margin and the split are separate settings. The cards fill the pane (up to 560px), stacked
   without overlap and anchored by small coloured dots in the text (`editor/plugins/margin.ts`). A
   folded note is a card with its label and a one-line excerpt; its label unfolds it (and the cards
-  below move down). The − / + buttons on the ruler over the notes pane make the text of notes and
+  below move down). The pane folds away like a VS Code side panel (17 Oct 2026): the » at the top of
+  its sash (sticky as the page scrolls), or the sash dragged nearly shut, turns margin mode off and
+  leaves a *Notes* tab on the document pane's right edge that brings it back (`useNotesFold`,
+  `NotesUnfoldTab`, `localStorage.ol.notesFolded`; the View menu's switch clears it). The − / +
+  buttons on the ruler over the notes pane make the text of notes and
   comments smaller / larger (`localStorage.ol.noteScale`, 60–130 % of the document text, 90 % by
   default; double-click the label to reset; inline notes follow the same setting). Layout pages
   (slides, posters) have no notes pane: there the cards sit just right of the page. Notes and
@@ -2996,6 +3004,10 @@ can hold (`core/src/md/`, `client/src/editor/markdown.ts`):
   not available. The source pane is labelled *Markdown*.
 * **PDF**: the model is written as LaTeX (`markdownForLatex`: images on the web become links, raw
   HTML is left out, code languages listings does not know are dropped) and built with LuaLaTeX.
+  The page follows pandoc's variables in the YAML front matter (`frontMatterVars`), so the file
+  comes out alike with `pandoc -o x.pdf`: `geometry` (geometry's options, `margin=2cm` or a list),
+  `papersize` (`a4`, `letter`…), `fontsize` (`11pt`), `linestretch`, `header-includes` (preamble
+  LaTeX, `- |` blocks and ```` ```{=latex} ```` fences too). Without them: article's defaults.
 * **VS Code**: the extension opens `.md` with *Open With… ▸ OverLyX Editor* (VS Code's own
   markdown editor stays the default), with the same parser and writer.
 

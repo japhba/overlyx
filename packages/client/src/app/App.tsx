@@ -43,7 +43,7 @@ import { Versions } from './Versions';
 import { AgentPanel, askAgentAbout } from './AgentPanel';
 import { PdfPanel, stateFromBuild, jobActive, EMPTY_PDF, type PdfState } from './PdfPanel';
 import { Ruler, NOTE_SCALE_DEFAULT, NOTE_SCALE_MIN, NOTE_SCALE_MAX } from './Ruler';
-import { useNotesPane, NotesSash } from './notespane';
+import { useNotesPane, useNotesFold, NotesSash, NotesUnfoldTab } from './notespane';
 import { StatusBar, SaveIndicator, ZoomControl, type Status } from './StatusBar';
 import { CornerButton } from './CornerButton';
 import { SyncChip, useExternalSync } from './SyncChip';
@@ -387,7 +387,9 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   // move the page below them: keep what is on screen where it is by scrolling the same amount.
   const scrollRef = useRef<HTMLDivElement>(null);
   // margin mode splits the document pane: text | sash | notes & comments (app/notespane.tsx)
-  const notesPane = useNotesPane(scrollRef, marginMode && isLyxDoc);
+  // (toggleMargin is called on a click, by when it is defined below)
+  const notesFold = useNotesFold(marginMode, () => toggleMargin());
+  const notesPane = useNotesPane(scrollRef, marginMode && isLyxDoc, notesFold.fold);
   const scrollTop = useRef<number | null>(null);
   const scrollDoc = useRef<string | null>(null);
   useLayoutEffect(() => {
@@ -1648,9 +1650,10 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         <div class={'editor-column panes' + (isLyxDoc && shownPanes.length > 1 ? ' split' : '')}>
         <div class={'editor-scroll' + (marginMode && isLyxDoc ? ' margin-mode' : '') + (inkMode && isLyxDoc ? ' ink-pan' : '')} ref={scrollRef} data-pane="doc" style={isLyxDoc ? paneStyle('doc') : undefined} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
           {(isLyxDoc || isTextTab) && showRuler && <Ruler width={textWidth} onChange={setTextWidth} notes={isLyxDoc && marginMode ? { sash: notesPane.sash, scale: noteScale, onScale: setNoteScale } : undefined} />}
+          {isLyxDoc && notesFold.folded && <NotesUnfoldTab onUnfold={notesFold.unfold} />}
           {docId ? (isPdfTab ? <div class="pdf-tab"><PdfViewer key={docId} url={fileUrl(projectOfDoc(textId!), docPathOf(textId!))} toolbar={<a class="small-btn" href={fileUrl(projectOfDoc(textId!), docPathOf(textId!)) + '?download=1'}>Download</a>} /></div> : isBoardTab ? <BoardEditor key={docId} id={docId} user={user} notify={notify} /> : isHtmlTab ? <DeliverableEditor key={docId} id={docId} user={user} notify={notify} /> : isProjectRoot ? <ProjectRootPanel key={docId} project={docId} notify={notify} onCreated={id => { openInTab(id); setRefreshKey(k => k + 1); }} /> : !isLyxDoc ? <TextEditor key={docId} id={textId!} notify={notify} /> :
             <div class="editor-page">
-              {marginMode && <NotesSash sash={notesPane.sash} />}
+              {marginMode && <NotesSash sash={notesPane.sash} onFold={notesFold.fold} />}
               <div class="editor-host" ref={containerRef} />
               {combined && childIds.map(id => (
                 <ChildEditor key={id + ':' + reloadKey} id={id} user={user} marginMode={marginMode} readOnly={viewOnly || viewing} onSelection={onSelection} onDocChange={() => { setDocTick(t => t + 1); }} onStale={resolveStale}

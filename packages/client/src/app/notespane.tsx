@@ -12,8 +12,12 @@
  * and put <NotesSash> into the page. The hook sets --notes-col (px) on the scroll element. The
  * page's padding and tint (styles.css), the ruler (Ruler.tsx) and the cards (plugins/margin.ts)
  * all read it.
+ *
+ * The pane folds away like a VS Code side panel: the » on its sash (or the sash dragged nearly shut)
+ * turns margin mode off and leaves a "Notes" tab at the right edge that brings it back
+ * (useNotesFold, <NotesUnfoldTab>; kept in this browser as `ol.notesFolded`).
  */
-import { useLayoutEffect, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useState } from 'preact/hooks';
 import { documentViewScale } from '../editor/viewscale';
 import type { RefObject } from 'preact';
 
@@ -55,7 +59,8 @@ export interface SashProps {
   onKeyDown(ev: KeyboardEvent): void;
 }
 
-export function useNotesPane(scrollRef: RefObject<HTMLElement>, on: boolean): { share: number; sash: SashProps } {
+/** `onCollapse`: the sash was dragged (nearly) shut — the pane folds away */
+export function useNotesPane(scrollRef: RefObject<HTMLElement>, on: boolean, onCollapse?: () => void): { share: number; sash: SashProps } {
   const [share, setShare] = useState(storedShare);
   // before paint (layout effect, ResizeObserver), so the page never shows a frame with the old split
   useLayoutEffect(() => {
@@ -85,16 +90,18 @@ export function useNotesPane(scrollRef: RefObject<HTMLElement>, on: boolean): { 
       // relative to where the drag started: the pane may be scrolled sideways (ink mode's gutters)
       const pane = scroll.clientWidth, x0 = ev.clientX;
       const w0 = parseFloat(scroll.style.getPropertyValue('--notes-col')) || notesColumnWidth(pane, share);
-      let last = share;
+      let last = share, want = w0;
       const root = document.documentElement;
       root.classList.add('pane-resizing', 'notes-resizing');
       const scale = documentViewScale(scroll);
-      const move = (e: PointerEvent) => { last = clampShare((w0 + (x0 - e.clientX) / scale) / pane); setShare(last); };
+      const move = (e: PointerEvent) => { want = w0 + (x0 - e.clientX) / scale; last = clampShare(want / pane); setShare(last); };
       const up = () => {
         window.removeEventListener('pointermove', move);
         window.removeEventListener('pointerup', up);
         window.removeEventListener('pointercancel', up);
         root.classList.remove('pane-resizing', 'notes-resizing');
+        // dragged well past its narrowest: folded away (its width stays what it was before)
+        if (onCollapse && want < NOTES_MIN_PX / 2) { setShare(share); onCollapse(); return; }
         saveShare(last);
       };
       window.addEventListener('pointermove', move);
@@ -114,7 +121,39 @@ export function useNotesPane(scrollRef: RefObject<HTMLElement>, on: boolean): { 
   return { share, sash };
 }
 
-/** The sash on the page, between the text and the notes pane (full height; styles.css places it at --notes-col). */
-export function NotesSash({ sash }: { sash: SashProps }) {
-  return <div class="notes-sash" data-sash="page" {...sash} />;
+/** The sash on the page, between the text and the notes pane (full height; styles.css places it at --notes-col), with the pane's fold button at the top. */
+export function NotesSash({ sash, onFold }: { sash: SashProps; onFold?: () => void }) {
+  const stop = (e: Event) => e.stopPropagation();
+  return (
+    <div class="notes-sash" data-sash="page" {...sash}>
+      {onFold && <button type="button" class="notes-fold" data-notes-fold title="Fold the notes & comments pane away (the Notes tab at the right brings it back)" aria-label="Fold the notes & comments pane"
+        onPointerDown={stop} onDblClick={stop} onKeyDown={stop} onClick={e => { e.stopPropagation(); onFold(); }}>»</button>}
+    </div>
+  );
+}
+
+const FOLD_KEY = 'ol.notesFolded';
+/**
+ * Folding the notes pane away: margin mode goes off (comments open as pop-ups, notes sit in the
+ * text) and a tab at the pane's right edge brings it back. Turned on or off from the View menu, it
+ * is not folded any more. `toggleMargin`: the shell's margin-mode switch.
+ */
+export function useNotesFold(marginMode: boolean, toggleMargin: () => void): { folded: boolean; fold(): void; unfold(): void } {
+  const [folded, setFolded] = useState(() => { try { return localStorage.getItem(FOLD_KEY) === '1'; } catch { return false; } });
+  const save = (v: boolean) => { setFolded(v); try { localStorage.setItem(FOLD_KEY, v ? '1' : '0'); } catch { /* storage unavailable */ } };
+  useEffect(() => { if (marginMode && folded) save(false); }, [marginMode]);
+  return {
+    folded: folded && !marginMode,
+    fold: () => { if (!marginMode) return; save(true); toggleMargin(); },
+    unfold: () => { save(false); if (!marginMode) toggleMargin(); },
+  };
+}
+
+/** The folded notes pane: a tab at the document pane's right edge (sticky under the ruler) that unfolds it. */
+export function NotesUnfoldTab({ onUnfold }: { onUnfold: () => void }) {
+  return (
+    <div class="notes-unfold">
+      <button type="button" data-notes-unfold title="Show the notes & comments pane again" onClick={onUnfold}>Notes</button>
+    </div>
+  );
 }

@@ -19,7 +19,7 @@ import { ToolbarDock } from '@client/app/tbdock';
 import { SettingsPanel } from '@client/app/Settings';
 import { HelpDialog, HELP_ROWS, DialogHost, uiPrompt } from '@client/app/Dialogs';
 import { Ruler, DEFAULT_WIDTH, MIN_WIDTH, MAX_WIDTH, NOTE_SCALE_DEFAULT } from '@client/app/Ruler';
-import { useNotesPane, NotesSash } from '@client/app/notespane';
+import { useNotesPane, useNotesFold, NotesSash, NotesUnfoldTab } from '@client/app/notespane';
 import { setInk, getInk, subscribeInk } from '@client/editor/plugins/ink';
 /**
  * The OverLyX editor inside VS Code: the web client's Workspace (App.tsx) trimmed to the editor
@@ -173,7 +173,9 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   // margin mode splits the document pane: text | sash | notes & comments (app/notespane.tsx)
-  const notesPane = useNotesPane(scrollRef, marginMode);
+  // (toggleMargin is called on a click, by when it is defined below)
+  const notesFold = useNotesFold(marginMode, () => toggleMargin());
+  const notesPane = useNotesPane(scrollRef, marginMode, notesFold.fold);
   const currentView = () => activeViewRef.current ?? handleRef.current?.view ?? null;
   const view = currentView();
   const allViews = () => [handleRef.current?.view, ...[...relatedRefs.current.values()].map(h => h.view)].filter((v): v is EditorView => !!v);
@@ -829,8 +831,9 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
         <div class={'editor-column panes' + (shownPanes.length > 1 ? ' split' : '')}>
           <div class={'editor-scroll' + (marginMode ? ' margin-mode' : '') + (inkMode ? ' ink-mode' : '')} ref={scrollRef} data-pane="doc" style={paneStyle('doc')} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
             {showRuler && <Ruler width={textWidth} onChange={setTextWidth} notes={marginMode ? { sash: notesPane.sash, scale: noteScale, onScale: setNoteScale } : undefined} />}
+            {notesFold.folded && <NotesUnfoldTab onUnfold={notesFold.unfold} />}
             <div class="editor-page">
-              {marginMode && <NotesSash sash={notesPane.sash} />}
+              {marginMode && <NotesSash sash={notesPane.sash} onFold={notesFold.fold} />}
               {visibleIds.map(id => id === docId ? <div key={id}>
                 {combined && <div class="child-doc-header"><span class="name">{id.split('/').pop()}</span><button class="small-btn" onClick={() => setCombined(false)}>Show this document only</button></div>}
                 <div class="editor-host" ref={containerRef} />
