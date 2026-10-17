@@ -3,7 +3,7 @@ import { api, fileUrl } from '../api';
 import { DeliverableCanvas } from '../deliverable/DeliverableEditor';
 import type { ChangeOrigin, DeliverableHost } from '../deliverable/host';
 import { applyTo } from '../deliverable/sourceops';
-import { svgCanvasSource } from '../deliverable/svgSource';
+import { svgCanvasSource, svgFileFromCanvas, SVG_FILE_ROOT } from '../deliverable/svgSource';
 import { uiConfirm } from './Dialogs';
 import type { SvgTarget } from '../editor/svgEditorEvents';
 
@@ -25,7 +25,7 @@ function SvgEditor({ target, onClose }: { target: SvgTarget; onClose(): void }) 
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const original = useRef('');
-  const exporter = useRef<(() => Promise<string>) | null>(null);
+  const exporter = useRef<((except?: string) => Promise<string>) | null>(null);
   const saveRef = useRef<() => void>(() => {});
   const active = useRef(true);
   const panel = useRef<HTMLDivElement>(null);
@@ -84,7 +84,8 @@ function SvgEditor({ target, onClose }: { target: SvgTarget; onClose(): void }) 
     if (!host || !exporter.current || saving || target.readOnly) return;
     setSaving(true); setError('');
     try {
-      const svg = await exporter.current();
+      // the file as it was with the edits made to it (the page as drawn only when the drawing is gone)
+      const svg = svgFileFromCanvas(original.current, host.text(), await exporter.current(`[${SVG_FILE_ROOT}]`)) ?? await exporter.current();
       const response = await fetch(fileUrl(target.project, target.path), { credentials: 'include', cache: 'no-store' });
       if (!response.ok || await response.text() !== original.current) throw new Error('The SVG changed on disk while this editor was open. Reopen it before saving your changes.');
       await api.upload(target.project, target.path, new Blob([svg], { type: 'image/svg+xml' }));

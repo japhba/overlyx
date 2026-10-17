@@ -230,7 +230,7 @@ function onMessage(e: MessageEvent): void {
   if (MODE === 'present' && m.ol !== 'assets' && m.ol !== 'folder') return;
   switch (m.ol) {
     case 'exportSvg':
-      try { post({ ol: 'exportedSvg', id: m.id, svg: exportPageSvg(edit.visibleSlideEl() ?? slides()[0]) }); }
+      try { post({ ol: 'exportedSvg', id: m.id, svg: exportPageSvg(edit.visibleSlideEl() ?? slides()[0], m.except) }); }
       catch (e) { post({ ol: 'exportedSvg', id: m.id, error: String((e as Error).message ?? e) }); }
       break;
     case 'folder': {

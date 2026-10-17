@@ -364,13 +364,13 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   const svgExport = useRef<{ id: number; resolve(svg: string): void; reject(e: Error): void; timer: ReturnType<typeof setTimeout> } | null>(null);
   const svgExportId = useRef(0);
   useEffect(() => {
-    const off = host.bindSvgExporter?.(() => new Promise<string>((resolve, reject) => {
+    const off = host.bindSvgExporter?.((except?: string) => new Promise<string>((resolve, reject) => {
       if (!canvasReady.current) { reject(new Error('The drawing is still opening.')); return; }
       if (svgExport.current) { reject(new Error('The drawing is already being saved.')); return; }
       const id = ++svgExportId.current;
       const timer = setTimeout(() => { svgExport.current = null; reject(new Error('The drawing did not finish exporting. Please try again.')); }, 10000);
       svgExport.current = { id, resolve, reject, timer };
-      toCanvas({ ol: 'exportSvg', id });
+      toCanvas({ ol: 'exportSvg', id, except });
     }));
     return () => {
       off?.();

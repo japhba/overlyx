@@ -200,7 +200,7 @@ export interface PeerInfo { paths: Path[]; color: string; name: string; caret?: 
 
 /** editor → runtime */
 export type ToRuntime =
-  | { ol: 'exportSvg'; id: number }
+  | { ol: 'exportSvg'; id: number; except?: string }
   | { ol: 'source'; version: number; html: string }
   | { ol: 'assets'; urls: Record<string, string> }
   | { ol: 'folder'; base: string }

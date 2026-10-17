@@ -10,7 +10,8 @@ const make = (tag: string, attrs: Record<string, string | number> = {}) => {
   return el;
 };
 
-export function exportPageSvg(page: Element | null | undefined): string {
+/** `except`: a selector for the page's objects to leave out */
+export function exportPageSvg(page: Element | null | undefined, except?: string): string {
   if (!page) throw new Error('There is no drawing to export.');
   const style = getComputedStyle(page);
   const width = number(style.width, page.clientWidth || 800), height = number(style.height, page.clientHeight || 600);
@@ -75,6 +76,6 @@ export function exportPageSvg(page: Element | null | undefined): string {
     }
     return group;
   };
-  for (const el of Array.from(page.children)) { const object = copy(el); if (object) out.append(object); }
+  for (const el of Array.from(page.children)) { if (except && el.matches(except)) continue; const object = copy(el); if (object) out.append(object); }
   return new XMLSerializer().serializeToString(out);
 }

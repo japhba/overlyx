@@ -34,7 +34,8 @@ function kidsOf(el: Element): Element[] {
 }
 
 function labelOf(el: Element, word: string): { label: string; named: boolean } {
-  const name = el.getAttribute('data-ol-name') ?? ((el.localName === 'svg' || isSvgPart(el)) && el.id ? el.id : '');
+  // (an SVG's own names: Inkscape's labels, else ids)
+  const name = el.getAttribute('data-ol-name') ?? ((el.localName === 'svg' || isSvgPart(el)) ? el.getAttribute('inkscape:label') ?? el.id : '');
   if (name) return { label: name, named: true };
   const k = kindOf(el);
   if (k === 'text' || k === 'formula' || k === 'shape') {
@@ -56,6 +57,8 @@ export function objectTree(root: Element): ObjNode[] {
   const out: ObjNode[] = [];
   const walk = (el: Element, depth: number) => {
     for (const k of kidsOf(el).reverse()) {
+      // (the SVG editor's drawing is the page: its layers and objects come first)
+      if (k.hasAttribute('data-ol-svgfile')) { walk(k, depth); continue; }
       const path = pathOf(k);
       if (!path) continue;
       const kids = kidsOf(k);

@@ -2357,8 +2357,22 @@ drawing* (on hover) or right-click → *Edit drawing (SVG)…* opens `app/SvgEdi
 `DeliverableCanvas` in a lightbox, backed by a local undo history. The canvas's sandboxed
 `svg-frame.html` loads the shared runtime; the server serves it (like `offline-frame.html`) with
 `OFFLINE_FRAME_CSP` — under the app's `script-src 'self'` its inline bootstrap never ran and the web
-editor hung at "Opening the canvas…" (17 Oct 2026). Save exports vectors back to the original SVG,
-checks for external file changes first and refreshes the figure; Cancel discards the draft. *Insert ▸
+editor hung at "Opening the canvas…" (17 Oct 2026). The file is the canvas's one drawing
+(`deliverable/svgSource.ts`, `inlineSvgHtml` `asFile`, up to 20 MB): Inkscape's layers and labels,
+Sodipodi/TextExt attributes, metadata, comments, ids and the root's size stay; only scripts, frames,
+handlers and links out of the file go. Save writes the file back from the edited markup
+(`svgFileFromCanvas`: names re-spelled and re-namespaced after the HTML parser lowercased `rdf:RDF`,
+the root's units and prolog restored, `data-ol-name`/`data-ol-locked` as `inkscape:label` /
+`sodipodi:insensitive`); objects drawn on top (pen, shapes, text boxes) are exported by the frame
+(`exportSvg` `except`) and appended as a layer "Drawn in OverLyX" in user units. An unchanged save is
+the same document node for node (checked on the 2 MB COSYNE figure, 17 Oct 2026; before, files over
+400 KB did not open and saves lost layers and TextExt data). On that canvas the drawing is the page,
+as Inkscape's: a click takes the object in its layer (`edit.ts` `fileObject`, locked layers skipped;
+Ctrl+A and the marquee too), Ctrl+click the innermost part, a double-click goes into a group, a
+double-click on a text retypes it in a field over it (`retypeSvgText`: the change goes into the text
+nodes it was in, so tspans stay). Small objects' handles stand off their box (`handleOut`), or
+dragging a dot resized it. Save checks for external file changes first and refreshes the figure;
+Cancel discards the draft. *Insert ▸
 Drawing (SVG)…* (`editor/svgdrawing.ts`) makes `figures/drawing.svg` (-2, …), inserts it at the
 cursor and opens it; closed without saving, the figure and the file go again (`SvgTarget.onDiscard`).
 It works in the web editor and VS Code, with each figure's own project and directory. The same

@@ -389,7 +389,7 @@ function afterReveal(): void {
 export function selectAllOnSlide(): void {
   if (editing || state.kind === 'page') return;
   const s = selected[0]?.isConnected ? slideOf(selected[0]) : visibleSlideEl();
-  if (s) { selected = Array.from(s.children).filter(c => srcOf.has(c) && !isForeign(c) && !c.classList.contains('notes')); report(); draw(); }
+  if (s) { selected = objectsOn(s); report(); draw(); }
 }
 
 /** the selection, for the arrangement commands (arrange.ts) */
@@ -878,6 +878,39 @@ function blankOfDrawing(t: Element, x: number, y: number): boolean {
   return true;
 }
 
+/**
+ * The SVG editor's drawing (svgSource.ts SVG_FILE_ROOT) is the page, as Inkscape's canvas is: what a
+ * click takes is the object in it, in its layer (Inkscape's layers are no objects), never the drawing.
+ */
+function svgFileOf(el: Element): Element | null { return el.closest('svg[data-ol-svgfile]'); }
+const isLayer = (el: Element | null): boolean => el?.localName === 'g' && el.getAttribute('inkscape:groupmode') === 'layer';
+const layerLocked = (el: Element): boolean => isLocked(el) || el.getAttribute('sodipodi:insensitive') === 'true';
+function fileObject(el: Element, root: Element): Element | null {
+  for (let e: Element | null = el; e && e !== root; e = e.parentElement) {
+    const p = e.parentElement;
+    if (!isLayer(e) && (p === root || isLayer(p))) {
+      for (let l = p; l && l !== root; l = l.parentElement) if (layerLocked(l)) return null;
+      return srcOf.has(e) && SVG_SHAPES.has(e.localName) && e.localName !== 'tspan' ? e : null;
+    }
+  }
+  return null;
+}
+/** the objects of a slide (Ctrl+A, a marquee): those of the SVG editor's drawing, in its open layers */
+function objectsOn(slide: Element): Element[] {
+  const out: Element[] = [];
+  const take = (p: Element, file: boolean) => {
+    for (const k of Array.from(p.children)) {
+      if (!srcOf.has(k) || isForeign(k) || k.classList.contains('notes')) continue;
+      if (!file && k.hasAttribute('data-ol-svgfile')) take(k, true);
+      else if (!file) out.push(k);
+      else if (isLayer(k)) { if (!layerLocked(k) && cs(k).display !== 'none') take(k, true); }
+      else if (SVG_SHAPES.has(k.localName) && k.localName !== 'tspan') out.push(k);
+    }
+  };
+  take(slide, false);
+  return out;
+}
+
 /** the object a pointer at `target` selects (see the header); `at`: where (client px) — a drawing's empty area is nothing there */
 function objectFor(target: Element, deep: boolean, at?: { x: number; y: number }): Element | null {
   if (at && blankOfDrawing(target, at.x, at.y)) return null;
@@ -886,12 +919,14 @@ function objectFor(target: Element, deep: boolean, at?: { x: number; y: number }
   if (deep) return memberAt(el) ?? objectFor(target, false);
   // inside the selection's group: the child of that group
   const scope = selected.length === 1 ? selected[0].parentElement ?? (selected[0].parentNode as Element | null) : null;
-  if (scope && scope.contains(el) && !scope.classList?.contains('slide') && scope !== document.body) {
+  const file = svgFileOf(el);
+  if (scope && scope.contains(el) && !scope.classList?.contains('slide') && scope !== document.body && !(file && (scope === file || isLayer(scope)))) {
     for (let e: Element | null = el; e; e = e.parentElement ?? (e.parentNode as Element | null)) if ((e.parentElement ?? e.parentNode) === scope) return e;
   }
   const slide = slideOf(el);
   if (slide) {
     if (el === slide) return null;
+    if (file) return fileObject(el, file);
     for (let e: Element | null = el; e; e = e.parentElement) if (e.parentElement === slide) return sourced(e);
     return null;
   }
@@ -1056,6 +1091,13 @@ const handleAt = (b: Box, fx: number, fy: number): [number, number] => {
   return [b.cx + x, b.cy + y];
 };
 
+/** a resize handle `h` px big: on the box's edge, off it when the box is too small to keep its middle free to drag (a marker, a dot: Inkscape's handles are outside) */
+const handleOut = (b: Box, fx: number, fy: number, h: number): [number, number] => {
+  const ox = Math.max(0, h - b.w / 2) * (fx - 0.5) * 2, oy = Math.max(0, h - b.h / 2) * (fy - 0.5) * 2;
+  const [x, y] = rot((fx - 0.5) * b.w + ox, (fy - 0.5) * b.h + oy, b.a);
+  return [b.cx + x, b.cy + y];
+};
+
 /** the four corners of a (rotated) box */
 const cornersOf = (b: Box): [number, number][] => [handleAt(b, 0, 0), handleAt(b, 1, 0), handleAt(b, 0, 1), handleAt(b, 1, 1)];
 
@@ -1087,7 +1129,7 @@ export function selectionLabel(els: Element[]): string {
 /** a word for what an element is (the Objects pane's), "Path", "Group", "Text" */
 export function kindWord(el: Element): string {
   const k = kindOf(el);
-  if (k === 'svgpart') { const n = SVG_PART_NAMES[el.localName] ?? el.localName; return n[0].toUpperCase() + n.slice(1); }
+  if (k === 'svgpart') { const n = isLayer(el) ? 'layer' : SVG_PART_NAMES[el.localName] ?? el.localName; return n[0].toUpperCase() + n.slice(1); }
   if (k === 'line' && el.localName === 'svg' && !lineOf(el)) return 'Drawing';
   if (k === 'other') return OTHER_NAMES[el.localName] ?? 'Object';
   return KIND_NAMES[k][0];
@@ -1175,7 +1217,7 @@ export function draw(): void {
           parts.push(`<div class="handle rot4" data-h="rot" data-corner="${k}" style="left:${x + ox}px;top:${y + oy}px;transform:rotate(${a + b.a}deg)"></div>`);
         }
         parts.push(`<div class="rot-centre" style="left:${b.cx}px;top:${b.cy}px"></div>`);
-      } else if (!isSvgPart(el) || partBox(el)) for (const [k, fx, fy] of hs) { const [x, y] = handleAt(b, fx, fy); parts.push(`<div class="handle" data-h="${k}" style="left:${x}px;top:${y}px;cursor:${cursorFor(k, b.a)};border-width:${bw}px"></div>`); }
+      } else if (!isSvgPart(el) || partBox(el)) for (const [k, fx, fy] of hs) { const [x, y] = handleOut(b, fx, fy, h); parts.push(`<div class="handle" data-h="${k}" style="left:${x}px;top:${y}px;cursor:${cursorFor(k, b.a)};border-width:${bw}px"></div>`); }
     }
   }
   // the guides one places (guides.ts), under the snapping lines of a drag
@@ -1805,7 +1847,7 @@ function onDragEnd(e: PointerEvent): void {
     drawBox = null;
     const scope = d.slide ?? (state.kind !== 'page' ? null : document.body);
     if (box && d.moved && scope) {
-      const inside = Array.from(scope.children).filter(c => srcOf.has(c) && !isForeign(c) && !c.classList.contains('notes')).filter(c => { const r = docRect(c); return r.w && r.h && r.x < box.x + box.w && r.x + r.w > box.x && r.y < box.y + box.h && r.y + r.h > box.y; });
+      const inside = (scope === document.body ? Array.from(scope.children).filter(c => srcOf.has(c) && !isForeign(c) && !c.classList.contains('notes')) : objectsOn(scope)).filter(c => { const r = docRect(c); return r.w && r.h && r.x < box.x + box.w && r.x + r.w > box.x && r.y < box.y + box.h && r.y + r.h > box.y; });
       selected = e.shiftKey ? [...new Set([...selected, ...inside])] : inside;
       report();
     }
@@ -2538,6 +2580,9 @@ function onDblClick(e: MouseEvent): void {
   const svg = pic ? svgSrc(pic) : null;
   if (svg) { selected = [pic!]; report(); draw(); post({ ol: 'editSvg', src: svg }); return; }
   if (pic && cropTarget(pic) && !isLocked(pic)) { selected = [pic]; report(); if (startCrop(pic, cropCtx())) post({ ol: 'cropping', path: pathOf(pic) }); draw(); return; }
+  // a drawing's text: retyped where it is (Inkscape's text tool)
+  const run = svgRunAt(t);
+  if (run && !isLocked(run) && !(cur && isLocked(cur))) { retypeSvgText(run); return; }
   // a path (or a drawing that is one shape): Inkscape's node editor
   const shape = cur ? nodesTargetOf(t, cur) : null;
   if (shape && !isLocked(cur!)) { startNodesOrConvert(shape); return; }
@@ -2558,6 +2603,79 @@ function onDblClick(e: MouseEvent): void {
   }
   if (target) { selected = [target]; report(); beginText(target as HTMLElement, { x: e.clientX, y: e.clientY }); }
   draw();
+}
+
+/** the run of an SVG text under the pointer: its <tspan>, else the <text> */
+function svgRunAt(t: Element): Element | null {
+  const s = sourced(t);
+  const run = s?.closest('tspan, text');
+  return run && isSvgPart(run) && (run.textContent ?? '').trim() ? run : null;
+}
+
+let svgTyping: { el: Element; input: HTMLInputElement; before: string; away(e: Event): void } | null = null;
+
+/**
+ * An SVG text retyped in a field over it. What changed is put into the text nodes it was in, so
+ * the runs (tspans: sub/superscripts, other fonts, Inkscape's lines) stay. Enter, Tab or a click
+ * elsewhere keep it, Escape not.
+ */
+function retypeSvgText(el: Element): void {
+  finishSvgText(true);
+  stopText();
+  const src = srcOf.get(el);
+  if (!src || !pathOf(el)) return;
+  selected = [el.closest('text') ?? el]; report(); draw();
+  const r = docRect(el), c = cs(el);
+  let k = 1;
+  try { const b = (el as SVGGraphicsElement).getBBox(); k = b.width ? r.w / b.width : b.height ? r.h / b.height : 1; } catch { /* not rendered */ }
+  const size = (parseFloat(c.fontSize) || 12) * k;
+  const input = document.createElement('input');
+  input.value = src.textContent ?? '';
+  input.spellcheck = false;
+  input.setAttribute('style', `position:absolute;left:${r.x - 3}px;top:${r.y + r.h / 2 - size * 0.7}px;width:${Math.max(r.w + size * 2, 60)}px;height:${size * 1.4}px;font-family:${c.fontFamily.replace(/"/g, "'")};font-size:${size}px;font-weight:${c.fontWeight};font-style:${c.fontStyle};color:${/^(rgb|#)/.test(c.fill) ? c.fill : '#000'};background:#fff;border:1.5px solid #e8a33d;border-radius:2px;padding:0 2px;margin:0;box-sizing:border-box;outline:none;pointer-events:auto`);
+  const away = (e: Event) => { if (!e.composedPath().includes(input)) finishSvgText(true); };
+  svgTyping = { el, input, before: input.value, away };
+  addEventListener('pointerdown', away, true);
+  input.addEventListener('blur', () => finishSvgText(true));
+  root.appendChild(input);
+  input.focus();
+  input.select();
+}
+
+function svgTypingKey(e: KeyboardEvent): void {
+  // (the keys are the field's: none moves or deletes the selection)
+  e.stopPropagation();
+  if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); finishSvgText(true); }
+  else if (e.key === 'Escape') { e.preventDefault(); finishSvgText(false); }
+}
+
+function finishSvgText(keep: boolean): void {
+  const t = svgTyping;
+  if (!t) return;
+  svgTyping = null;
+  removeEventListener('pointerdown', t.away, true);
+  t.input.remove();
+  const next = t.input.value, old = t.before;
+  const src = srcOf.get(t.el), path = t.el.isConnected ? pathOf(t.el) : null;
+  if (!keep || next === old || !src || !path) return;
+  // the stretch that changed, put into the text nodes it was in (what is typed into the first)
+  let a = 0;
+  while (a < old.length && a < next.length && old[a] === next[a]) a++;
+  let b = 0;
+  while (b < old.length - a && b < next.length - a && old[old.length - 1 - b] === next[next.length - 1 - b]) b++;
+  const from = a, to = old.length - b, insert = next.slice(a, next.length - b);
+  const copy = src.cloneNode(true) as Element;
+  const walker = copy.ownerDocument.createTreeWalker(copy, NodeFilter.SHOW_TEXT);
+  let at = 0, placed = false;
+  for (let n = walker.nextNode() as Text | null; n; n = walker.nextNode() as Text | null) {
+    const s = at, e = at + n.data.length;
+    at = e;
+    const lo = Math.max(from, s), hi = Math.min(to, e);
+    if (!placed && from <= e) { n.data = n.data.slice(0, from - s) + insert + n.data.slice(Math.max(hi, from) - s); placed = true; }
+    else if (placed && lo < hi) n.data = n.data.slice(0, lo - s) + n.data.slice(hi - s);
+  }
+  if (!placed) copy.textContent = next;
+  commit([{ t: 'inner', path, html: copy.innerHTML, before: src.innerHTML }]);
 }
 
 function beginText(el: HTMLElement, at: { x: number; y: number } | null, selectAll = false, openMath = false): void {
@@ -2758,6 +2876,7 @@ function inCode(): boolean {
 /* ------------------------------------------------------------------ keys, clipboard, menu */
 
 function onKeyDown(e: KeyboardEvent): void {
+  if (svgTyping) { svgTypingKey(e); return; }
   if (isCropping() || isNodeEditing()) return;
   // Shadow-root focus retargets to the overlay host. A pending text receiver is
   // still a text context: composing or deleting there must never delete the old selection.

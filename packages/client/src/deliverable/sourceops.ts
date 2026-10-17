@@ -324,9 +324,15 @@ function inertSvgSource(text: string): { text: string; prefix: string } | null {
  * markup (Inkscape's, Sodipodi's) removed; its ids prefixed so two drawings never share one; sized
  * from its viewBox. Null when it is not an SVG, or too big to be worth inlining (then it goes in as
  * a picture).
+ *
+ * `asFile`: the drawing is the SVG file being edited (svgSource.ts), saved back from this markup, so
+ * everything another editor put there stays: Inkscape's layers and labels, Sodipodi's and TextExt's
+ * attributes, metadata, titles, comments, foreign content, the ids as they are, the root's class and
+ * style. Only what could run (scripts, frames, handlers) and links out of the file still go.
  */
-export function inlineSvgHtml(svgText: string, at: { x: number; y: number; maxW: number } | null, prefix: string, retainRootStyle = false): string | null {
-  if (svgText.length > 400_000) return null;
+export const SVG_FILE_LIMIT = 20_000_000;
+export function inlineSvgHtml(svgText: string, at: { x: number; y: number; maxW: number } | null, prefix: string, asFile = false): string | null {
+  if (svgText.length > (asFile ? SVG_FILE_LIMIT : 400_000)) return null;
   const inert = inertSvgSource(svgText);
   if (!inert) return null;
   let doc: Document;
@@ -336,7 +342,7 @@ export function inlineSvgHtml(svgText: string, at: { x: number; y: number; maxW:
   // what must not be in a page
   for (const el of Array.from(svg.querySelectorAll('*'))) {
     const ln = el.localName.toLowerCase();
-    if (el.namespaceURI !== SVG_NS || ['script', 'foreignobject', 'iframe', 'object', 'embed', 'metadata', 'title', 'desc'].includes(ln)) { el.remove(); continue; }
+    if (asFile ? ['script', 'iframe', 'object', 'embed', 'frame', 'frameset', 'link', 'meta', 'base'].includes(ln) : el.namespaceURI !== SVG_NS || ['script', 'foreignobject', 'iframe', 'object', 'embed', 'metadata', 'title', 'desc'].includes(ln)) { el.remove(); continue; }
     if ((ln === 'set' || ln === 'animate') && /^(xlink:)?href$|^on/i.test(el.getAttribute('attributeName') ?? '')) { el.remove(); continue; }
   }
   const idMap = new Map<string, string>();
@@ -344,17 +350,17 @@ export function inlineSvgHtml(svgText: string, at: { x: number; y: number; maxW:
     for (const a of Array.from(el.attributes)) {
       const n = a.name.toLowerCase();
       const pre = a.prefix ?? (n.includes(':') ? n.split(':')[0] : null);
-      if (n.startsWith(inert.prefix) || n.startsWith('on') || (pre && !['xlink', 'xml', 'xmlns'].includes(pre)) || n.startsWith('xmlns:') && !['xmlns:xlink'].includes(n)) { el.removeAttributeNode(a); continue; }
-      if (n === 'href' || n === 'xlink:href') {
+      if (n.startsWith(inert.prefix) || n.startsWith('on') || !asFile && ((pre && !['xlink', 'xml', 'xmlns'].includes(pre)) || n.startsWith('xmlns:') && !['xmlns:xlink'].includes(n))) { el.removeAttributeNode(a); continue; }
+      if (n === 'href' || n === 'xlink:href' || asFile && (n === 'src' || n === 'action' || n === 'formaction')) {
         const v = a.value.trim();
-        const relativeImage = retainRootStyle && el.localName === 'image' && !/^[a-z][\w+.-]*:|^\/\//i.test(v) && !v.includes('\\');
-        if (!(v.startsWith('#') || SAFE_DATA.test(v) || relativeImage)) el.removeAttributeNode(a);
+        const relativeImage = asFile && el.localName === 'image' && !/^[a-z][\w+.-]*:|^\/\//i.test(v) && !v.includes('\\');
+        if (!(v.startsWith('#') || SAFE_DATA.test(v) || relativeImage || asFile && /^data:image\/svg\+xml[;,]/i.test(v) && el.localName === 'image')) el.removeAttributeNode(a);
         continue;
       }
       if (/url\(\s*['"]?\s*(?!#)/i.test(a.value) && n !== 'id') el.setAttribute(a.name, a.value.replace(/url\(\s*['"]?\s*(?!#)[^)]*\)/gi, 'none'));
     }
     const id = el.getAttribute('id');
-    if (id) { const nid = `${prefix}-${id}`; idMap.set(id, nid); el.setAttribute('id', nid); }
+    if (id && !asFile) { const nid = `${prefix}-${id}`; idMap.set(id, nid); el.setAttribute('id', nid); }
   }
   // references to the renamed ids
   const swap = (v: string) => v.replace(/url\(\s*(['"]?)#([^)'"]+)\1\s*\)/g, (m, q, id) => (idMap.has(id) ? `url(#${idMap.get(id)})` : m));
@@ -384,14 +390,14 @@ export function inlineSvgHtml(svgText: string, at: { x: number; y: number; maxW:
   }
   svg.removeAttribute('width');
   svg.removeAttribute('height');
-  const rootStyle = retainRootStyle ? svg.getAttribute('style') ?? '' : '';
+  const rootStyle = asFile ? svg.getAttribute('style') ?? '' : '';
   svg.removeAttribute('style');
-  if (!retainRootStyle) svg.removeAttribute('class');
+  if (!asFile) svg.removeAttribute('class');
   if (at) {
     const k = w > at.maxW ? at.maxW / w : 1;
     const W = Math.max(8, w * k), H = Math.max(8, h * k);
     svg.setAttribute('style', `${rootStyle ? rootStyle + ';' : ''}position: absolute; left: ${r(at.x - W / 2)}px; top: ${r(at.y - H / 2)}px; width: ${r(W)}px; height: ${r(H)}px; overflow: visible`);
-  } else svg.setAttribute('style', `${rootStyle ? rootStyle + ';' : ''}width: ${r(retainRootStyle ? w : Math.min(w, 960))}px; max-width: 100%; height: ${retainRootStyle ? r(h) + 'px' : 'auto'}`);
+  } else svg.setAttribute('style', `${rootStyle ? rootStyle + ';' : ''}width: ${r(asFile ? w : Math.min(w, 960))}px; max-width: 100%; height: ${asFile ? r(h) + 'px' : 'auto'}`);
   // Inline HTML needs unprefixed SVG element names. Keep each sanitized
   // attribute's own namespace (notably xlink/xml), geometry and children.
   for (const el of [svg, ...Array.from(svg.querySelectorAll('*'))]) {
@@ -404,7 +410,8 @@ export function inlineSvgHtml(svgText: string, at: { x: number; y: number; maxW:
   }
   let out = new XMLSerializer().serializeToString(svg);
   // what the HTML parser does not need
-  out = out.replace(/\sxmlns(:\w+)?="[^"]*"/g, (m, p1) => (p1 === ':xlink' ? m : '')).replace(/<!--[\s\S]*?-->/g, '');
+  out = out.replace(/\sxmlns(:[\w.-]+)?="[^"]*"/g, (m, p1) => (p1 === ':xlink' ? m : ''));
+  if (!asFile) out = out.replace(/<!--[\s\S]*?-->/g, '');
   return out.replace(/^<svg/, '<svg xmlns="http://www.w3.org/2000/svg"');
 }
 

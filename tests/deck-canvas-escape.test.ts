@@ -89,7 +89,7 @@ function runtime(options: { editing?: boolean; math?: 'opening' | 'closing'; own
     editing: options.editing ? text : null,
     selected: [text],
     srcOf: new WeakMap([[group, group.cloneNode(false)]]),
-    drawAhead: null, drawComposing: false, tool: 'select',
+    drawAhead: null, drawComposing: false, tool: 'select', svgTyping: null,
     isCropping: () => options.owner === 'crop',
     isNodeEditing: () => options.owner === 'nodes',
     isPenDrawing: () => false, isOrdering: () => false,
