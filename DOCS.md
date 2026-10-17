@@ -1732,6 +1732,17 @@ blend.
   build fade ("may move") until the next build places them again. While the view is on, the PDF is
   rebuilt automatically as if its pane were shown, and the status bar shows the cursor's page,
   "page 3 of 8". Line breaks inside a paragraph stay the browser's; the PDF is the exact view.
+  A document of two (or more) columns (`twocolumn`) is shown as its columns one after another.
+  Each is a strip at the PDF's column width, breaking where TeX ends the column ("Page 1 ·
+  column 2"), because the editor writes in one column and cannot stand two side by side. The
+  parser tells columns from lines of a column's width standing side by side in the text block;
+  a figure* or title as wide as the block counts with the first column. The line width is
+  measured on lines from the text's left edge (list items stand indented), and the leading leaves
+  out float lines (a long caption in \footnotesize). A float that TeX set on another page or
+  column than the one the editor shows it in shows only its first lines and "TeX set it at the
+  top of page 2, across the columns" (`PageFloat`, matched to the Float insets in order, or by
+  caption); with the cursor in it, it shows whole. Margins cannot be dragged on column strips,
+  but the line spacing can.
   The sheet is centred and the column sits on it where the PDF's margins put it. In a pane narrower
   than the paper, the page scrolls sideways (the host is at least the paper wide), centred on the
   column; squeezed, the column could not sit at its margins, and one margin's drag moved the other. Hold Ctrl (⌘)
@@ -1955,6 +1966,11 @@ blend.
   its previous / next sibling, never leaving its parent; promote / demote change the level of its
   heading and of every sub-heading in it by one step of the class's ladder (an article has no
   Chapter, so Section promotes to Part).
+* **Contextual toolbars at any edge** (`app/ctxdock.tsx`, both shells): the Math, Panels,
+  Table, Review and Draw bars sit at the bottom by default. Drag one by its name and it follows
+  the pointer; the nearest edge of the document area lights up, and the bar snaps there when let
+  go (top, bottom, left or right, standing upright at the sides). A right-click on a bar names the
+  four places too. Kept per bar in `localStorage.ol.ctxDock`.
 * **Notes & comments in the margin** (*View* menu / toolbar): the document pane splits like VS
   Code's side-by-side editor groups (`app/notespane.tsx`): the text on the left, a tinted notes &
   comments pane on the right, and between them a sash that looks like the WYSIWYG / TeX / PDF pane

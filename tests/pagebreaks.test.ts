@@ -45,6 +45,25 @@ describe('where the pages of a build begin (SyncTeX)', () => {
     expect(r.lineWidth).toBe(345);
   });
 
+  it('two columns: each column begins after the one before; a figure* over both is where TeX set it', () => {
+    // columns of 263pt, 16pt apart, in a 542pt block from 36pt (left edge 36pt = 2359296sp)
+    const at = (src: number, v: number, hPt: number, wPt: number) => `(1,${src}:${Math.round(hPt * SP)},${Math.round(v * SP)}:${Math.round(wPt * SP)},455111,127431\nx1,${src}:${Math.round((hPt + 5) * SP)},${Math.round(v * SP)}\ng1,${src}:${Math.round((hPt + 9) * SP)},${Math.round(v * SP)}\n)`;
+    const L = 36, R = 36 + 263 + 16;
+    const pg = (n: number, body: string[]) => [`{${n}`, '[1,10:2359296,51000000:35520000,47360000,0', '[1,10:2359296,49800000:35520000,47360000,0', ...body, ']', ']', `}${n}`].join('\n');
+    const st = [
+      'SyncTeX Version:1', 'Input:1:/b/./doc.tex', 'Output:pdf', 'Magnification:1000', 'Unit:1', 'X Offset:0', 'Y Offset:0', 'Content:',
+      // page 1: the left column holds paragraph 5, the right one 5's end and 7; the figure* (lines 3–4) waits for page 2
+      pg(1, [at(5, 60, L, 263), at(5, 72, L, 263), at(5, 84, L, 263), at(5, 60, R, 263), at(7, 72, R, 263), at(7, 84, R, 263)]),
+      pg(2, [at(3, 60, L, 542), at(3, 72, L, 542), at(7, 120, L, 263), at(9, 132, L, 263), at(9, 144, L, 263), at(11, 120, R, 263), at(11, 132, R, 263)]),
+    ].join('\n');
+    const tex = ['\\begin{document}', '\\begin{figure*}', '\\caption{Both}', '\\end{figure*}', 'five', 'x', 'seven', 'x', 'nine', 'x', 'eleven'].join('\n');
+    const r = pageBreaks(st, 'doc.tex', 1, null, tex);
+    expect(r.columns).toBe(2);
+    expect(r.lineWidth).toBeCloseTo(263, 0);
+    expect(r.starts.map(s => [s.page, s.column ?? 0, s.line, s.before])).toEqual([[1, 1, 5, 3], [2, 0, 7, 2], [2, 1, 11, 0]]);
+    expect(r.floats).toEqual([{ line: 2, page: 2, at: 'top', span: true }]);
+  });
+
   it('reads pdftotext -bbox', () => {
     const w = parsePdfWords('<doc><page width="612.000000" height="792.000000"><word xMin="1" yMin="2" xMax="3" yMax="4">a&amp;b</word></page><page width="595" height="842"></page></doc>');
     expect(w).toEqual([{ w: 612, h: 792, words: [{ x0: 1, y0: 2, x1: 3, y1: 4, text: 'a&b' }] }, { w: 595, h: 842, words: [] }]);

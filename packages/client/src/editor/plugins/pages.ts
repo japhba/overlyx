@@ -12,16 +12,20 @@
 import { Plugin, PluginKey, type EditorState } from 'prosemirror-state';
 import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
-import type { PageBreaks, PageFrame, PageStart } from '@overlyx/core';
+import type { PageBreaks, PageFrame, PageStart, PageFloat } from '@overlyx/core';
 import { locateSourceLine, plainWords, type LocateBlock } from '../../app/sourcelocate';
 
 /** where a page begins in the document: before a block, or inside a paragraph (`inline`) */
-export interface PageMark { pos: number; page: number; inline: boolean }
+export interface PageMark { pos: number; page: number; inline: boolean; /** the column it begins (multi-column documents; none: the page's first) */ col?: number }
+
+/** a float of the document (its inset's position) and where TeX set it */
+export interface FloatMark extends PageFloat { pos: number }
 
 interface PagesState {
   on: boolean;
   data: PageBreaks | null;
   marks: PageMark[];
+  floats: FloatMark[];
   /** the first place edited since the breaks were placed: breaks after it may have moved */
   editedFrom: number | null;
   /** the LaTeX the build compiled, and the document's size when the breaks were placed in it */
@@ -226,9 +230,53 @@ export function placeBreaks(doc: PMNode, tex: string, data: PageBreaks): PageMar
     try { m = placeStart(doc, lines, tex, blocks, s, marks.length ? marks[marks.length - 1].pos : 0); } catch { m = null; }
     if (!m || m.pos <= 0 || m.pos > doc.content.size) continue;
     if (marks.length && m.pos <= marks[marks.length - 1].pos) continue;   // out of order: the words were found in the wrong place
+    if (s.column) m.col = s.column;
     marks.push(m);
   }
   return marks;
+}
+
+/**
+ * The document's floats and where TeX set them: the float environments of the build in order are the
+ * Float insets of the document in order; when the counts differ (a float in an included file …),
+ * a float is found by its caption.
+ */
+export function placeFloats(doc: PMNode, tex: string, data: PageBreaks): FloatMark[] {
+  if (!data.floats?.length) return [];
+  const insets: number[] = [];
+  doc.descendants((n, pos) => { if (n.type.name === 'inset' && n.attrs.name === 'Float') { insets.push(pos); return false; } return true; });
+  if (insets.length === data.floats.length) return data.floats.map((f, i) => ({ ...f, pos: insets[i] }));
+  const lines = tex.split('\n'), out: FloatMark[] = [];
+  for (const f of data.floats) {
+    const cap = floatCaption(lines, f.line - 1);
+    if (!cap || cap.length < 3) continue;
+    const pos = insets.find(p => doc.nodeAt(p)!.textContent.replace(/\s+/g, ' ').includes(cap.slice(0, 30)));
+    if (pos !== undefined) out.push({ ...f, pos });
+  }
+  return out;
+}
+
+/**
+ * A float TeX set on another page or column than the one the editor shows it in (it stands where it
+ * is written): its first lines and where it is, so that its stretch is no taller than the PDF's; the
+ * cursor in it shows it whole.
+ */
+function elsewhere(state: EditorState, st: PagesState): Decoration[] {
+  const out: Decoration[] = [];
+  const sel = state.selection, n = Math.max(1, st.data?.columns ?? 1);
+  for (const f of st.floats) {
+    const node = state.doc.nodeAt(f.pos);
+    if (!node || node.type.name !== 'inset' || node.attrs.name !== 'Float') continue;
+    const end = f.pos + node.nodeSize;
+    if (sel.from > f.pos && sel.to < end || (sel.from === f.pos && sel.to === end)) continue;
+    let page = 1, col = 0;
+    for (const m of st.marks) if (m.pos <= f.pos) { page = m.page; col = m.col ?? 0; }
+    if (page === f.page && (f.span || n === 1 || col === (f.column ?? 0))) continue;
+    const at = f.at === 'top' ? 'at the top of ' : f.at === 'bottom' ? 'at the bottom of ' : 'on ';
+    const where = `TeX set it ${at}page ${f.page}${f.span && n > 1 ? ', across the columns' : n > 1 ? `, column ${(f.column ?? 0) + 1}` : ''} — click into it to see it all`;
+    out.push(Decoration.node(f.pos, end, { class: 'ol-pg-elsewhere', 'data-pg-where': where }));
+  }
+  return out;
 }
 
 /* ------------------------------------------------------------------ the widgets */
@@ -238,6 +286,7 @@ function breakDom(mark: PageMark): () => HTMLElement {
     const el = document.createElement('span');
     el.className = 'ol-pagebreak' + (mark.inline ? ' inline' : '');
     el.dataset.page = String(mark.page);
+    if (mark.col) el.dataset.col = String(mark.col);
     el.setAttribute('aria-hidden', 'true');
     for (const k of ['foot', 'gap', 'head']) { const l = document.createElement('span'); l.className = 'ol-pg-label ol-pg-' + k; el.appendChild(l); }
     return el;
@@ -257,7 +306,7 @@ const isLayoutDoc = (doc: PMNode) => doc.firstChild?.type.name === 'ol_page';
 function decorations(doc: PMNode, st: Omit<PagesState, 'deco'>): DecorationSet {
   if (!st.on || !st.data?.pages || isLayoutDoc(doc)) return DecorationSet.empty;
   // (whether a break may have moved is the layout's business: the widget stays as it is)
-  const ws = st.marks.map(m => Decoration.widget(m.pos, breakDom(m), { side: -1, ignoreSelection: true, key: `pg${m.page}${m.inline ? 'i' : 'b'}` }));
+  const ws = st.marks.map(m => Decoration.widget(m.pos, breakDom(m), { side: -1, ignoreSelection: true, key: `pg${m.page}c${m.col ?? 0}${m.inline ? 'i' : 'b'}` }));
   ws.push(Decoration.widget(doc.content.size, endDom, { side: 1, ignoreSelection: true, key: 'pg-end' }));
   return DecorationSet.create(doc, ws);
 }
@@ -275,8 +324,16 @@ function adjusted(f: PageFrame, a: PageAdjust | null): PageFrame {
   return { ...f, left, top, width: f.paperW - left - right, height: f.paperH - top - bottom };
 }
 
-/** a sheet as laid out (px from the editor host's top-left): its first page and frame */
-interface Sheet { page: number; x: number; y: number; w: number; h: number; f: PageFrame }
+/**
+ * A sheet as laid out (px from the editor host's top-left): its first page and frame, its text's
+ * place (tx/ty/tw/th). A page of paper — or, in a document of two columns, a strip of one column:
+ * the editor writes in one column, which cannot stand beside the other, so the columns follow each
+ * other, each at the PDF's column width and breaking where TeX ends it.
+ */
+interface Sheet { page: number; x: number; y: number; w: number; h: number; f: PageFrame; tx: number; ty: number; tw: number; th: number; paper: boolean }
+
+/** around a column strip (px) */
+const PAD = 20;
 
 /** size the widgets (each page filled out to its text height) and paint the sheets behind the text */
 function layout(view: EditorView, ui: PagesUi | null): void {
@@ -296,11 +353,16 @@ function layout(view: EditorView, ui: PagesUi | null): void {
   const ptpx = parseFloat(cs.fontSize) / (Number(cs.getPropertyValue('--ol-basept')) || 10);
   const frame = (page: number) => adjusted(frameOf(data, Math.min(data.pages, Math.max(1, page)))!, st!.adjust);
   const first = frame(1);
+  const n = Math.max(1, data.columns ?? 1), multi = n > 1;
+  // a stretch's head and foot: a page's margins — a column strip's padding, and room for the page's foot under its last column
+  const headOf = (f: PageFrame) => (multi ? PAD : f.top * ptpx);
+  const footOf = (f: PageFrame) => (multi ? PAD + (f.footer ? 18 : 0) : Math.max(0, ((f.paperH ?? f.top + f.height + f.top * 0.8) - f.top - f.height) * ptpx));
+  const stripW = (data.lineWidth ?? first.width) * ptpx + 2 * PAD;
   // the room of page 1's head; and the sheet at its size in a pane narrower than the paper (the page
   // scrolls sideways, as Google Docs' does): squeezed, its column could not sit where the margins put
   // it, and dragging one margin moved the other side
-  setStyle(host, 'padding-top', `${GAP + first.top * ptpx}px`);
-  setStyle(host, 'min-width', `${Math.ceil((first.paperW ?? first.left * 2 + first.width) * ptpx + 2 * GAP)}px`);
+  setStyle(host, 'padding-top', `${GAP + headOf(first)}px`);
+  setStyle(host, 'min-width', `${Math.ceil((multi ? stripW : (first.paperW ?? first.left * 2 + first.width) * ptpx) + 2 * GAP)}px`);
   const hostR = host.getBoundingClientRect(), colR = view.dom.getBoundingClientRect();
   if (!colR.height) return;   // hidden
   const colLeft = colR.left - hostR.left, colW = colR.width;
@@ -317,42 +379,48 @@ function layout(view: EditorView, ui: PagesUi | null): void {
   // read everything first (the positions as they are), then write: a widget's new height moves what follows by the difference
   const rects = widgets.map(w => w.getBoundingClientRect());
   const sheets: Sheet[] = [];
-  let shift = 0, start = colR.top - hostR.top, page = 1;
-  const sheetX = (f: PageFrame) => colLeft - f.left * ptpx;
-  const sheetW = (f: PageFrame) => (f.paperW ?? f.left * 2 + f.width) * ptpx;
+  // the stretch being laid out: its page and column, where its text begins, its head
+  let shift = 0, start = colR.top - hostR.top, page = 1, col = 0, head0 = headOf(first);
+  const index = (p: number, c: number) => (p - 1) * n + c;
   for (let i = 0; i < widgets.length; i++) {
     const w = widgets[i], r = rects[i];
     const end = w.classList.contains('ol-pageend');
-    const next = end ? data.pages + 1 : Number(w.dataset.page) || page + 1;
-    const f = frame(next - 1), g = frame(next);
+    const nextPage = end ? data.pages + 1 : Number(w.dataset.page) || page + 1;
+    const nextCol = end ? 0 : Number(w.dataset.col) || 0;
+    // a column ends, the page goes on
+    const colBreak = !end && nextPage === page;
+    const f = frame(page), g = frame(nextPage);
     const top = r.top - hostR.top + shift;
-    // the page(s) above: at least their text height (a page the editor could not place shares the sheet before it)
-    const fill = Math.max(0, Math.max(1, next - page) * f.height * ptpx - (top - start));
-    const foot = Math.max(0, ((f.paperH ?? f.top + f.height + f.top * 0.8) - f.top - f.height) * ptpx);
-    const head = end ? 0 : g.top * ptpx;
+    // the stretch(es) above: at least their text height (one the editor could not place shares the sheet before it)
+    const fill = Math.max(0, Math.max(1, index(nextPage, nextCol) - index(page, col)) * f.height * ptpx - (top - start));
+    const foot = colBreak ? PAD : footOf(f);
+    const head = end ? 0 : colBreak ? PAD : headOf(g);
     const height = fill + foot + (end ? GAP : GAP + head);
     shift += height - r.height;
     setStyle(w, 'height', `${height}px`);
     const x = colLeft - (r.left - hostR.left);
-    const sy = start - frame(page).top * ptpx;
-    sheets.push({ page, x: sheetX(f), y: sy, w: sheetW(f), h: Math.max(0, top + fill + foot - sy), f: frame(page) });
+    const sy = start - head0;
+    sheets.push(multi
+      ? { page, x: colLeft - PAD, y: sy, w: colW + 2 * PAD, h: Math.max(0, top + fill + foot - sy), f, tx: colLeft, ty: start, tw: colW, th: f.height * ptpx, paper: false }
+      : { page, x: colLeft - f.left * ptpx, y: sy, w: (f.paperW ?? f.left * 2 + f.width) * ptpx, h: Math.max(0, top + fill + foot - sy), f, tx: colLeft, ty: start, tw: f.width * ptpx, th: f.height * ptpx, paper: true });
     const labels = w.children as HTMLCollectionOf<HTMLElement>;
     const label = (el: HTMLElement | undefined, text: string, y: number) => {
       if (!el) return;
       if (el.textContent !== text) el.textContent = text;
       setStyle(el, 'top', `${y}px`); setStyle(el, 'left', `${x}px`); setStyle(el, 'width', `${colW}px`);
     };
-    label(labels[0], f.footer ?? '', fill + foot / 2 - 7);
+    label(labels[0], colBreak ? '' : f.footer ?? '', fill + (multi ? PAD + 2 : foot / 2 - 7));
     if (!end) {
       // edited above the break since the build (or the page setup changed): TeX may break the page elsewhere now
-      const mark = st!.marks.find(m => m.page === next);
+      const mark = st!.marks.find(m => m.page === nextPage && (m.col ?? 0) === nextCol);
       const stale = !!st!.adjust?.pending || (!!mark && st!.editedFrom !== null && st!.editedFrom <= mark.pos);
       w.classList.toggle('stale', stale);
-      label(labels[1], `Page ${next} of ${data.pages}` + (stale ? ' · may move: changed since the PDF was built' : ''), fill + foot + GAP / 2 - 7);
-      label(labels[2], g.header ?? '', fill + foot + GAP + head / 2 - 7);
+      const where = colBreak ? `Page ${nextPage} · column ${nextCol + 1}` : `Page ${nextPage} of ${data.pages}`;
+      label(labels[1], where + (stale ? ' · may move: changed since the PDF was built' : ''), fill + foot + GAP / 2 - 7);
+      label(labels[2], colBreak ? '' : g.header ?? '', fill + foot + GAP + head / 2 - 7);
     }
     start = top + height;
-    page = next;
+    page = nextPage; col = nextCol; head0 = head;
   }
   setStyle(host, 'background-image', sheets.flatMap(() => ['linear-gradient(var(--pg-sheet), var(--pg-sheet))', 'linear-gradient(var(--pg-edge), var(--pg-edge))']).join(', '));
   setStyle(host, 'background-position', sheets.flatMap(s => [`${s.x}px ${s.y}px`, `${s.x - 1}px ${s.y - 1}px`]).join(', '));
@@ -388,7 +456,6 @@ class PagesUi {
   private guides: HTMLElement[] = [];
   private grip = document.createElement('div');
   private tag = document.createElement('div');
-  private hint = document.createElement('div');
   private sheets: Sheet[] = [];
   private ptpx = 1;
   private drag: Drag | null = null;
@@ -400,9 +467,7 @@ class PagesUi {
     this.grip.className = 'ol-pg-spacing';
     this.grip.title = 'Drag up or down: the line spacing';
     this.tag.className = 'ol-pg-tag';
-    this.hint.className = 'ol-pg-hint';
-    this.hint.textContent = `Hold ${/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl'} to drag the margins and the line spacing`;
-    this.dom.append(this.hint, this.grip, this.tag);
+    this.dom.append(this.grip, this.tag);
     this.dom.addEventListener('pointerdown', this.down);
     window.addEventListener('keydown', this.key, true);
     window.addEventListener('keyup', this.keyUp, true);
@@ -429,15 +494,16 @@ class PagesUi {
     this.sheets = sheets; this.ptpx = ptpx;
     const host = this.host;
     if (host && this.dom.parentElement !== host) host.appendChild(this.dom);
-    const can = !!pagesHost && sheets.some(s => s.f.paperW && s.f.paperH);
+    // margins on pages of paper (a column strip has none to drag); the line spacing on either
+    const margins = !!pagesHost && sheets.length > 0 && sheets.every(s => s.paper && s.f.paperW && s.f.paperH);
     this.dom.hidden = !sheets.length;
-    this.hint.hidden = !can;
-    const n = can ? sheets.length * 4 : 0;
+    const n = margins ? sheets.length * 4 : 0;
     while (this.guides.length < n) { const g = document.createElement('div'); g.className = 'ol-pg-guide'; this.dom.appendChild(g); this.guides.push(g); }
     while (this.guides.length > n) this.guides.pop()!.remove();
-    if (!can) return;
+    if (!this.drag && sheets.length) this.placeGrip(null);
+    if (!margins) return;
     sheets.forEach((s, i) => {
-      const tx = s.x + s.f.left * ptpx, tw = s.f.width * ptpx, ty = s.y + s.f.top * ptpx, th = s.f.height * ptpx;
+      const { tx, tw, ty, th } = s;
       const place = (g: HTMLElement, edge: Edge, l: number, t: number, w: number, h: number) => {
         g.dataset.edge = edge; g.dataset.sheet = String(i);
         g.title = `Drag: the ${edge} margin`;
@@ -449,9 +515,6 @@ class PagesUi {
       place(gt, 'top', s.x, ty - 5, s.w, 10);
       place(gb, 'bottom', s.x, ty + th - 5, s.w, 10);
     });
-    const s1 = sheets[0];
-    setStyle(this.hint, 'left', `${s1.x}px`); setStyle(this.hint, 'top', `${s1.y + 8}px`); setStyle(this.hint, 'width', `${s1.w - 14}px`);
-    if (!this.drag) this.placeGrip(null);
   }
 
   /** the grip in the left margin, beside the line under the pointer (or where it was) */
@@ -461,10 +524,9 @@ class PagesUi {
     const hr = host.getBoundingClientRect();
     const y = clientY === null ? Number(this.grip.dataset.y ?? NaN) : clientY - hr.top;
     const s = this.sheets.find(x => y >= x.y && y < x.y + x.h) ?? this.sheets[0];
-    const top = s.y + s.f.top * this.ptpx;
-    const at = Number.isFinite(y) ? Math.min(Math.max(y, top), top + s.f.height * this.ptpx - 20) : top + 40;
+    const at = Number.isFinite(y) ? Math.min(Math.max(y, s.ty), s.ty + s.th - 20) : s.ty + 40;
     this.grip.dataset.y = String(at); this.grip.dataset.sheet = String(this.sheets.indexOf(s));
-    setStyle(this.grip, 'left', `${s.x + s.f.left * this.ptpx - 30}px`); setStyle(this.grip, 'top', `${at - 10}px`);
+    setStyle(this.grip, 'left', `${s.tx - 30}px`); setStyle(this.grip, 'top', `${at - 10}px`);
     const st = pagesKey.getState(this.view.state);
     this.grip.textContent = '↕ ' + (st?.adjust?.stretch ?? pagesHost?.stretch() ?? 1).toFixed(2).replace(/0$/, '');
   }
@@ -479,13 +541,13 @@ class PagesUi {
     const t = e.target as HTMLElement;
     const kind = t.classList.contains('ol-pg-spacing') ? 'spacing' : (t.dataset.edge as Edge | undefined);
     const st = pagesKey.getState(this.view.state);
-    if (!kind || !st?.data || !pagesHost) return;
+    if (!kind || !st?.data || !pagesHost || (kind !== 'spacing' && !this.sheets[Number(t.dataset.sheet) || 0]?.paper)) return;
     const sheet = this.sheets[Number(t.dataset.sheet) || 0];
     if (!sheet) return;
     e.preventDefault(); e.stopPropagation();
     t.setPointerCapture(e.pointerId);
     const hr = this.host!.getBoundingClientRect();
-    const textTop = sheet.y + sheet.f.top * this.ptpx;
+    const textTop = sheet.ty;
     const stretch0 = st.adjust?.stretch0 ?? pagesHost.stretch();
     this.drag = { kind, el: t, sheet, ptpx: this.ptpx, startY: e.clientY, base: { ...(st.adjust ?? {}), stretch0, pending: false }, d0: Math.max(160, e.clientY - hr.top - textTop), id: e.pointerId };
     this.host!.classList.add('ol-pg-dragging');
@@ -575,20 +637,22 @@ export function pagesPlugin(): Plugin<PagesState> {
   return new Plugin<PagesState>({
     key: pagesKey,
     state: {
-      init: () => ({ on: false, data: null, marks: [], editedFrom: null, tex: null, placedSize: 0, adjust: null, deco: DecorationSet.empty }),
+      init: () => ({ on: false, data: null, marks: [], floats: [], editedFrom: null, tex: null, placedSize: 0, adjust: null, deco: DecorationSet.empty }),
       apply(tr, prev, _old, state) {
         const meta = tr.getMeta(pagesKey) as PagesMeta | undefined;
-        let { on, data, marks, editedFrom, tex, placedSize, adjust } = prev;
+        let { on, data, marks, floats, editedFrom, tex, placedSize, adjust } = prev;
         if (meta && 'on' in meta) on = meta.on;
         if (meta && 'adjust' in meta) adjust = meta.adjust;
         // a new build — or the document arrived after its pages did (it was still loading: placed in next to nothing)
         if ((meta && 'data' in meta) || (tr.docChanged && data && tex && state.doc.content.size > 2 * placedSize + 50)) {
           if (meta && 'data' in meta) { data = meta.data; tex = meta.tex; adjust = null; }
           marks = data && tex ? placeBreaks(state.doc, tex, data) : [];
+          floats = data && tex ? placeFloats(state.doc, tex, data) : [];
           placedSize = state.doc.content.size;
           editedFrom = null;
         } else if (tr.docChanged) {
           marks = marks.map(m => ({ ...m, pos: tr.mapping.map(m.pos, -1) }));
+          floats = floats.map(f => ({ ...f, pos: tr.mapping.map(f.pos, 1) }));
           let from = editedFrom === null ? null : tr.mapping.map(editedFrom, -1);
           tr.mapping.maps.forEach((map, i) => map.forEach((_a, _b, start) => {
             const at = tr.mapping.slice(i + 1).map(start, -1);
@@ -596,12 +660,17 @@ export function pagesPlugin(): Plugin<PagesState> {
           }));
           editedFrom = from;
         } else if (!meta) return prev;
-        const next = { on, data, marks, editedFrom, tex, placedSize, adjust };
+        const next = { on, data, marks, floats, editedFrom, tex, placedSize, adjust };
         return { ...next, deco: meta && 'adjust' in meta && !tr.docChanged ? prev.deco : decorations(state.doc, next) };
       },
     },
     props: {
-      decorations: state => pagesKey.getState(state)?.deco,
+      decorations: state => {
+        const st = pagesKey.getState(state);
+        if (!st?.on || !st.data?.pages || !st.floats.length || isLayoutDoc(state.doc)) return st?.deco;
+        const fl = elsewhere(state, st);
+        return fl.length ? st.deco.add(state.doc, fl) : st.deco;
+      },
       attributes: (state): Record<string, string> => {
         const st = pagesKey.getState(state);
         if (!st?.on || !st.data?.pages || isLayoutDoc(state.doc)) return {};
@@ -611,7 +680,9 @@ export function pagesPlugin(): Plugin<PagesState> {
         const f = f0 ? adjusted(f0, st.adjust) : null;
         const w = (d.lineWidth ?? f0?.width ?? 0) * (f && f0 && f0.width ? f.width / f0.width : 1);
         if (w) vars.push(`--pg-text-w: ${w.toFixed(2)}`);
-        if (f?.paperW) vars.push(`--pg-paper-w: ${f.paperW.toFixed(2)}`, `--pg-left: ${f.left.toFixed(2)}`);
+        // (two columns: the column strip centred — as wide a "paper" as the column, no margin)
+        if ((d.columns ?? 1) > 1) vars.push(`--pg-paper-w: ${w.toFixed(2)}`, '--pg-left: 0');
+        else if (f?.paperW) vars.push(`--pg-paper-w: ${f.paperW.toFixed(2)}`, `--pg-left: ${f.left.toFixed(2)}`);
         // (the baseline distance, with the line spacing as dragged; the CSS divides it by the document's base size, the editor's font size)
         if (d.lead) vars.push(`--pg-lead-pt: ${(d.lead * (st.adjust?.stretch && st.adjust.stretch0 ? st.adjust.stretch / st.adjust.stretch0 : 1)).toFixed(2)}`);
         return { class: 'ol-paged', style: vars.join('; ') };

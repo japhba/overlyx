@@ -21,6 +21,7 @@ import { BuiltPdf } from './BuiltPdf';
 import type { PdfTarget } from '@client/app/PdfViewer';
 import { SvgEditorHost } from '@client/app/SvgEditor';
 import { ToolbarDock } from '@client/app/tbdock';
+import { ContextBars, contextBars } from '@client/app/ctxdock';
 import { SettingsPanel } from '@client/app/Settings';
 import { HelpDialog, HELP_ROWS, DialogHost, uiPrompt } from '@client/app/Dialogs';
 import { Ruler, DEFAULT_WIDTH, MIN_WIDTH, MAX_WIDTH, NOTE_SCALE_DEFAULT } from '@client/app/Ruler';
@@ -867,15 +868,14 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
           </div>
         )}
       </div>
-      {!pdfOnly && (tb.showMath || tb.showTable || tb.showReview || inkMode) && (
-        <div class="bottom-toolbars" style={{ left: showOutline ? 'var(--left-width, 220px)' : '24px', right: showComments ? 'var(--right-width, 360px)' : '24px' }}>
-          {tb.showMath && <Toolbar id="math" label="Math" groups={tb.math} />}
-          {tb.showMath && tbMode('mathpanels') !== 'off' && <Toolbar id="mathpanels" label="Panels" groups={tb.mathPanels} />}
-          {tb.showTable && <Toolbar id="table" label="Table" groups={tb.table} />}
-          {tb.showReview && <Toolbar id="review" label="Review" groups={tb.review} />}
-          {inkMode && <Toolbar id="ink" label="Draw" groups={inkGroups} />}
-        </div>
-      )}
+      {/* (each can be dragged by its name to another edge of the document: app/ctxdock.tsx) */}
+      {!pdfOnly && <ContextBars style={{ left: showOutline ? 'var(--left-width, 220px)' : '24px', right: showComments ? 'var(--right-width, 360px)' : '24px' }} bars={contextBars([
+        [tb.showMath, 'math', <Toolbar id="math" label="Math" groups={tb.math} />],
+        [tb.showMath && tbMode('mathpanels') !== 'off', 'mathpanels', <Toolbar id="mathpanels" label="Panels" groups={tb.mathPanels} />],
+        [tb.showTable, 'table', <Toolbar id="table" label="Table" groups={tb.table} />],
+        [tb.showReview, 'review', <Toolbar id="review" label="Review" groups={tb.review} />],
+        [inkMode, 'ink', <Toolbar id="ink" label="Draw" groups={inkGroups} />],
+      ])} />}
       {/* the quick menu over selected words (toolbars.tsx `quick`) */}
       {!pdfOnly && <SelectionBar view={view} groups={tb.quick} />}
       <StatusBar layout={layout} status={status} chord={chord} message={message} save={{ state: 'saved', pending: false, savedAt: 0, unavailable: false }}

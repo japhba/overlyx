@@ -3196,8 +3196,28 @@ html[data-ui] .editor-scroll:not(.margin-mode):not(.ink-pan) > .editor-page:has(
 .ol-pg-adjust .ol-pg-spacing, .ol-pg-dragging .ol-pg-spacing { display: block; }
 .ol-pg-tag { position: absolute; display: none; padding: 2px 7px; border-radius: 4px; background: var(--ui-fg, #222); color: var(--ui-bg, #fff); font: 11.5px/16px var(--ui-font, system-ui, sans-serif); white-space: nowrap; }
 .ol-pg-tag.on { display: block; }
-.ol-pg-hint { position: absolute; text-align: right; font: 10.5px/14px var(--ui-font, system-ui, sans-serif); color: var(--muted, #888); opacity: 0.55; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ol-pg-adjust .ol-pg-hint { display: none; }
 .ol-pg-dragging { user-select: none; }
 /* spaces at a line's end hang in the margin (ProseMirror's break-spaces would start the next line with one: a ragged left edge in justified text) */
 .lyx-editor.ProseMirror { white-space: pre-wrap; }
+/* a float TeX set on another page or column (Pages view): its first lines and where it is; the cursor in it shows it all */
+.lyx-inset-float.ol-pg-elsewhere > .inset-box > .inset-content { max-height: 4.5em; overflow: hidden; -webkit-mask-image: linear-gradient(#000 35%, transparent); mask-image: linear-gradient(#000 35%, transparent); }
+.lyx-inset-float.ol-pg-elsewhere::after { content: attr(data-pg-where); display: block; margin-top: 2px; font: italic 11px/14px var(--ui-font, system-ui, sans-serif); color: var(--muted, #888); }
+/* the contextual toolbars at another edge than the bottom (app/ctxdock.tsx): each dragged by its name, snapping to the nearest edge */
+.ctx-bars .tb-label { cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
+.ctx-bars .toolbar.ctx-dragging { position: relative; z-index: 70; opacity: 0.85; }
+.ctx-bars .toolbar.ctx-dragging .tb-label { cursor: grabbing; }
+.ctx-top { position: absolute; z-index: 40; box-shadow: 0 3px 10px rgba(0, 0, 0, 0.12); }
+.ctx-top .toolbar { border-top: none; border-bottom: 1px solid var(--ui-border); }
+html[data-ui] .ctx-bars.tb-side { position: absolute; z-index: 40; overflow: visible; }
+.ctx-left { box-shadow: 3px 0 10px rgba(0, 0, 0, 0.12); border-right: 1px solid var(--ui-border); }
+.ctx-right { box-shadow: -3px 0 10px rgba(0, 0, 0, 0.12); border-left: 1px solid var(--ui-border); }
+.ctx-left .tb-popup { top: 0; left: 100%; margin: 0 0 0 2px; }
+.ctx-right .tb-popup { top: 0; left: auto; right: 100%; margin: 0 2px 0 0; }
+/* where the dragged bar would go */
+.ctx-drop { position: absolute; z-index: 65; pointer-events: none; }
+.ctx-drop > div { position: absolute; border-radius: 3px; background: var(--accent, #2a62d6); opacity: 0.12; transition: opacity 0.1s; }
+.ctx-drop > .on { opacity: 0.5; }
+.ctx-drop-top { left: 0; right: 0; top: 0; height: 6px; }
+.ctx-drop-bottom { left: 0; right: 0; bottom: 0; height: 6px; }
+.ctx-drop-left { top: 0; bottom: 0; left: 0; width: 6px; }
+.ctx-drop-right { top: 0; bottom: 0; right: 0; width: 6px; }

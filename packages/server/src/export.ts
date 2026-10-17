@@ -757,7 +757,7 @@ export async function synctexPages(docId: string): Promise<PageBreaks | null> {
     });
     words = parsePdfWords(out);
   } catch { /* no words: the pages begin where the lines say, without their first words */ }
-  const value = pageBreaks(text, f.tex, bodyLine, words);
+  const value = pageBreaks(text, f.tex, bodyLine, words, tex);
   pagesCache.delete(docId);
   pagesCache.set(docId, { key, value });
   while (pagesCache.size > 32) pagesCache.delete(pagesCache.keys().next().value!);

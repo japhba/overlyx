@@ -12,6 +12,7 @@
  * ended). Floats and footnotes break source order: a page begins with the first of its
  * lines that does not come before the last line of the page before — a figure deferred to this page
  * from a paragraph before is not where the page begins; a paragraph running on from the page before is.
+ * On a page of two (or more) columns, each column begins the same way, after the one before.
  */
 
 /** a line of text in the PDF: its source line and its box, in TeX points from the page's top-left (v: baseline) */
@@ -31,6 +32,8 @@ export interface PageFrame {
 /** where page `page` begins: in the paragraph of built-.tex line `line` (1-based) */
 export interface PageStart {
   page: number;
+  /** the column it begins (0-based; a page begins with its first): multi-column documents */
+  column?: number;
   line: number;
   /** that paragraph's lines on earlier pages (0: the page begins with the paragraph) */
   before: number;
@@ -38,6 +41,16 @@ export interface PageStart {
   total: number;
   /** the words of the page's first line, as the PDF has them (a hyphenated word's second half first) */
   words?: string[];
+}
+
+/** where TeX set a float (figure, table): the line of its \begin (1-based), the page, the column, top or bottom */
+export interface PageFloat {
+  line: number;
+  page: number;
+  column?: number;
+  /** across the columns (figure*) */
+  span?: boolean;
+  at: 'top' | 'bottom' | 'middle';
 }
 
 export interface PageBreaks {
@@ -49,6 +62,10 @@ export interface PageBreaks {
   lead: number | null;
   /** the width of a line of body text (pt; a column of a two-column page), or null */
   lineWidth: number | null;
+  /** columns of text on a page (twocolumn: 2); `starts` then has where each column begins */
+  columns: number;
+  /** the floats of the built .tex, where TeX set them (when the .tex was given) */
+  floats?: PageFloat[];
 }
 
 /** a word of a PDF page, in PDF points (bp) from the page's top-left */
@@ -165,9 +182,9 @@ const mode = (xs: number[]): number | null => {
 /**
  * The pages of a build: `synctex` the file's text (gunzipped), `mainName` the built .tex's file name,
  * `bodyLine` the line of \begin{document} in it (lines up to there are the preamble's), `words` the
- * PDF's words when read.
+ * PDF's words when read, `tex` the built .tex (for where its floats went).
  */
-export function pageBreaks(synctex: string, mainName: string, bodyLine = 0, words: PdfPageWords[] | null = null): PageBreaks {
+export function pageBreaks(synctex: string, mainName: string, bodyLine = 0, words: PdfPageWords[] | null = null, tex: string | null = null): PageBreaks {
   const { pages } = parseSynctex(synctex, mainName);
   const nums = [...pages.keys()].sort((a, b) => a - b);
   const frames: PageFrame[] = [];
@@ -183,6 +200,9 @@ export function pageBreaks(synctex: string, mainName: string, bodyLine = 0, word
     bodies.set(p, { body, lines });
     if (vIsTop === null && lines.length) vIsTop = body.v <= Math.min(...lines.map(l => l.v - l.H)) + 0.5;
   }
+  // (the body text's leading and line width: the lines of floats — a long caption in \footnotesize — left out)
+  const inFloat = floatRanges(tex);
+  const bodyText = (line: number) => !inFloat.some(([a, b]) => line >= a && line <= b);
   for (const p of nums) {
     const got = bodies.get(p);
     if (!got) continue;
@@ -205,38 +225,101 @@ export function pageBreaks(synctex: string, mainName: string, bodyLine = 0, word
       ls.push({ page: p, line, h: b.h, v: b.v, W: b.W, H: b.H, D: b.D });
     }
     ls.sort((a, b) => a.v - b.v || a.h - b.h);
-    for (let k = 1; k < ls.length; k++) if (ls[k].line === ls[k - 1].line && Math.abs(ls[k].h - ls[k - 1].h) < 1) leads.push(ls[k].v - ls[k - 1].v);
-    for (const l of ls) if (l.W > 0) widths.push(l.W);
+    for (let k = 1; k < ls.length; k++) if (ls[k].line === ls[k - 1].line && Math.abs(ls[k].h - ls[k - 1].h) < 1 && bodyText(ls[k].line)) leads.push(ls[k].v - ls[k - 1].v);
+    // (a line from the text's left edge: list items stand indented, as narrower lines)
+    for (const l of ls) if (l.W > 0 && bodyText(l.line) && Math.abs(l.h - body.h) < 1.5) widths.push(l.W);
     pageLines.set(p, ls);
   }
-  // how many lines each paragraph has on each page
-  const count = new Map<number, Map<number, number>>();
-  for (const [p, ls] of pageLines) for (const l of ls) { const m = count.get(l.line) ?? new Map<number, number>(); m.set(p, (m.get(p) ?? 0) + 1); count.set(l.line, m); }
-  const starts: PageStart[] = [];
-  let end = 0;
-  for (const p of nums) {
-    const ls = pageLines.get(p) ?? [];
-    if (!ls.length) continue;
-    if (p > nums[0]) {
-      const flow = ls.filter(l => l.line >= end);
-      const first = flow.length ? Math.min(...flow.map(l => l.line)) : null;
-      if (first !== null) {
-        const m = count.get(first)!;
-        let before = 0, total = 0;
-        for (const [q, k] of m) { total += k; if (q < p) before += k; }
-        const start: PageStart = { page: p, line: first, before, total };
-        const box = ls.filter(l => l.line === first).sort((a, b) => a.v - b.v)[0];
-        const ws = words?.[p - 1];
-        if (ws && box) {
-          const top = (box.v - box.H) * BP - 1, bottom = (box.v + box.D) * BP + 1, left = box.h * BP - 1, right = (box.h + box.W) * BP + 1;
-          const first = ws.words.filter(w => { const y = (w.y0 + w.y1) / 2, x = (w.x0 + w.x1) / 2; return y >= top && y <= bottom && x >= left && x <= right; })
-            .sort((a, b) => a.x0 - b.x0).slice(0, 12).map(w => w.text);
-          if (first.length) start.words = first;
-        }
-        starts.push(start);
-      }
-    }
-    end = Math.max(end, ...ls.map(l => l.line));
+  // columns: lines of a column's width standing side by side in the text block (twocolumn's \@outputdblcol;
+  // a figure* or the title over both columns is as wide as the block and counts with the first column)
+  const lineWidth = mode(widths), f0 = frames[0];
+  let columns = 1;
+  if (lineWidth && f0 && f0.width > 1.6 * lineWidth) {
+    const n = Math.max(2, Math.round(f0.width / lineWidth)), step = (f0.width - lineWidth) / (n - 1);
+    const all = [...pageLines.values()].flat().filter(l => Math.abs(l.W - lineWidth) < 0.15 * lineWidth);
+    const right = all.filter(l => l.h - f0.left > step / 2).length;
+    if (right >= Math.max(3, 0.1 * all.length)) columns = n;
   }
-  return { pages: nums.length ? nums[nums.length - 1] : 0, frames, starts, lead: mode(leads), lineWidth: mode(widths) };
+  const colOf = (l: PdfLine): number => {
+    if (columns === 1 || !f0 || !lineWidth || l.W > 1.3 * lineWidth) return 0;
+    const step = (f0.width - lineWidth) / (columns - 1);
+    return Math.min(columns - 1, Math.max(0, Math.round((l.h - (frames.find(f => f.page === l.page) ?? f0).left) / step)));
+  };
+  // a page's columns in reading order are the stretches of text (one per page with one column)
+  const seg = (l: PdfLine) => (l.page - 1) * columns + colOf(l);
+  // how many lines each paragraph has in each stretch
+  const count = new Map<number, Map<number, number>>();
+  for (const ls of pageLines.values()) for (const l of ls) { const m = count.get(l.line) ?? new Map<number, number>(); const k = seg(l); m.set(k, (m.get(k) ?? 0) + 1); count.set(l.line, m); }
+  const starts: PageStart[] = [];
+  let end = 0, firstSeg = true;
+  for (const p of nums) {
+    const lines = pageLines.get(p) ?? [];
+    for (let c = 0; c < columns; c++) {
+      const ls = columns === 1 ? lines : lines.filter(l => colOf(l) === c);
+      if (!ls.length) continue;
+      if (!firstSeg) {
+        const flow = ls.filter(l => l.line >= end);
+        const first = flow.length ? Math.min(...flow.map(l => l.line)) : null;
+        if (first !== null) {
+          const m = count.get(first)!, here = (p - 1) * columns + c;
+          let before = 0, total = 0;
+          for (const [q, k] of m) { total += k; if (q < here) before += k; }
+          const start: PageStart = { page: p, line: first, before, total };
+          if (columns > 1) start.column = c;
+          const box = ls.filter(l => l.line === first).sort((a, b) => a.v - b.v)[0];
+          const ws = words?.[p - 1];
+          if (ws && box) {
+            const top = (box.v - box.H) * BP - 1, bottom = (box.v + box.D) * BP + 1, left = box.h * BP - 1, right = (box.h + box.W) * BP + 1;
+            const first = ws.words.filter(w => { const y = (w.y0 + w.y1) / 2, x = (w.x0 + w.x1) / 2; return y >= top && y <= bottom && x >= left && x <= right; })
+              .sort((a, b) => a.x0 - b.x0).slice(0, 12).map(w => w.text);
+            if (first.length) start.words = first;
+          }
+          starts.push(start);
+        }
+      }
+      firstSeg = false;
+      end = Math.max(end, ...ls.map(l => l.line));
+    }
+  }
+  const out: PageBreaks = { pages: nums.length ? nums[nums.length - 1] : 0, frames, starts, lead: mode(leads), lineWidth, columns };
+  if (tex) out.floats = floatsOf(tex, pageLines, frames, lineWidth, colOf);
+  return out;
 }
+
+/** the float environments of the .tex: their first and last lines (1-based) */
+function floatRanges(tex: string | null): [number, number][] {
+  if (!tex) return [];
+  const lines = tex.split('\n'), out: [number, number][] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const b = /^[^%]*\\begin\{(figure|table)(\*?)\}/.exec(lines[i]);
+    if (!b) continue;
+    let j = i;
+    const close = '\\end{' + b[1] + b[2] + '}';
+    while (j < lines.length - 1 && !lines[j].includes(close)) j++;
+    out.push([i + 1, j + 1]);
+    i = j;
+  }
+  return out;
+}
+
+/** the float environments of the .tex and where their lines are in the PDF */
+function floatsOf(tex: string, pageLines: Map<number, PdfLine[]>, frames: PageFrame[], lineWidth: number | null, colOf: (l: PdfLine) => number): PageFloat[] {
+  const out: PageFloat[] = [];
+  const all = [...pageLines.values()].flat();
+  for (const [a, z] of floatRanges(tex)) {
+    const ls = all.filter(l => l.line >= a && l.line <= z);
+    if (!ls.length) continue;
+    const page = Math.min(...ls.map(l => l.page));
+    const on = ls.filter(l => l.page === page);
+    const f = frames.find(x => x.page === page);
+    const top = Math.min(...on.map(l => l.v - l.H)), bottom = Math.max(...on.map(l => l.v + l.D));
+    const at: PageFloat['at'] = !f ? 'middle' : top - f.top < 0.25 * f.height ? 'top' : f.top + f.height - bottom < 0.25 * f.height ? 'bottom' : 'middle';
+    const fl: PageFloat = { line: a, page, at };
+    const span = !!lineWidth && on.some(l => l.W > 1.3 * lineWidth);
+    if (span) fl.span = true;
+    else { const c = colOf(on[0]); if (c) fl.column = c; }
+    out.push(fl);
+  }
+  return out;
+}
+
