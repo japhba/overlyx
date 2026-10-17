@@ -3167,8 +3167,9 @@ html[data-presenting] .ol-refocus { display: none; }
 .editor-host.ol-pages { position: relative; background-repeat: no-repeat; --pg-sheet: var(--page-bg); --pg-edge: color-mix(in srgb, var(--page-bg) 78%, #000); }
 .editor-scroll:has(> .editor-page > .editor-host.ol-pages) { --pg-desk: color-mix(in srgb, var(--page-bg) 88%, #6a7080); }
 html[data-ui] .editor-scroll:has(> .editor-page > .editor-host.ol-pages), html[data-ui] .editor-scroll:has(> .editor-page > .editor-host.ol-pages) > .ruler { background: var(--pg-desk); }
-html[data-ui] .editor-scroll > .editor-page:has(> .editor-host.ol-pages) { background: var(--pg-desk); overflow-x: clip; box-shadow: none; }
-/* (the page box is the desk, the pane wide: the sheets are not cut at the text's sides — with the notes pane or Draw's gutters the page keeps its box) */
+html[data-ui] .editor-scroll > .editor-page:has(> .editor-host.ol-pages) { background: var(--pg-desk); box-shadow: none; }
+/* (the page box is the desk, the pane wide: the sheets are not cut at the text's sides — with the notes pane or Draw's gutters the page keeps its box;
+   the host is at least the paper wide, pages.ts: a narrower pane scrolls sideways) */
 html[data-ui] .editor-scroll:not(.margin-mode):not(.ink-pan) > .editor-page:has(> .editor-host.ol-pages) { width: auto; max-width: none; margin: 0; padding-left: 0; padding-right: 0; border-radius: 0; }
 /* the PDF sets the text width here: the ruler's would mislead */
 .editor-scroll:not(.margin-mode):has(> .editor-page > .editor-host.ol-pages) > .ruler { display: none; }

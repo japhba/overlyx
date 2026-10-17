@@ -1732,7 +1732,9 @@ blend.
   build fade ("may move") until the next build places them again. While the view is on, the PDF is
   rebuilt automatically as if its pane were shown, and the status bar shows the cursor's page,
   "page 3 of 8". Line breaks inside a paragraph stay the browser's; the PDF is the exact view.
-  The sheet is centred and the column sits on it where the PDF's margins put it. Hold Ctrl (⌘)
+  The sheet is centred and the column sits on it where the PDF's margins put it. In a pane narrower
+  than the paper, the page scrolls sideways (the host is at least the paper wide), centred on the
+  column; squeezed, the column could not sit at its margins, and one margin's drag moved the other. Hold Ctrl (⌘)
   a moment (alone: Ctrl+S etc. do not flash it), and dashed guides appear on each sheet's text
   block edges, with a grip in the left margin beside the line under the pointer (`PagesUi`). Drag
   a guide to set that margin (whole millimetres) or the grip to set the line spacing (hundredths,

@@ -286,27 +286,38 @@ function layout(view: EditorView, ui: PagesUi | null): void {
   const data = st?.on && !isLayoutDoc(view.state.doc) ? st.data : null;
   host.classList.toggle('ol-pages', !!data?.pages);
   if (!data?.pages) {
-    for (const p of ['background-image', 'background-position', 'background-size', 'padding-top']) host.style.removeProperty(p);
+    for (const p of ['background-image', 'background-position', 'background-size', 'padding-top', 'min-width']) host.style.removeProperty(p);
+    delete host.dataset.pgCentred;
     ui?.draw([], 0, view);
     return;
   }
-  const hostR = host.getBoundingClientRect(), colR = view.dom.getBoundingClientRect();
-  if (!colR.height) return;   // hidden
   // (px per pt: the editor's font size is the document's base size, --ol-basept, as editor/fontsize.ts reads it)
   const cs = getComputedStyle(view.dom);
   const ptpx = parseFloat(cs.fontSize) / (Number(cs.getPropertyValue('--ol-basept')) || 10);
   const frame = (page: number) => adjusted(frameOf(data, Math.min(data.pages, Math.max(1, page)))!, st!.adjust);
   const first = frame(1);
-  const padTop = GAP + first.top * ptpx;
-  // (the column's top moves with the padding: measure as if it were set already)
-  const dy = padTop - (parseFloat(host.style.paddingTop) || 0);
-  setStyle(host, 'padding-top', `${padTop}px`);
+  // the room of page 1's head; and the sheet at its size in a pane narrower than the paper (the page
+  // scrolls sideways, as Google Docs' does): squeezed, its column could not sit where the margins put
+  // it, and dragging one margin moved the other side
+  setStyle(host, 'padding-top', `${GAP + first.top * ptpx}px`);
+  setStyle(host, 'min-width', `${Math.ceil((first.paperW ?? first.left * 2 + first.width) * ptpx + 2 * GAP)}px`);
+  const hostR = host.getBoundingClientRect(), colR = view.dom.getBoundingClientRect();
+  if (!colR.height) return;   // hidden
   const colLeft = colR.left - hostR.left, colW = colR.width;
+  // wider than the pane: the text column in the middle of it, once for each width of pane and paper
+  const pane = host.closest<HTMLElement>('.editor-scroll');
+  if (pane && pane.scrollWidth > pane.clientWidth + 1) {
+    const key = `${pane.clientWidth}:${host.style.minWidth}`;
+    if (host.dataset.pgCentred !== key && !host.classList.contains('ol-pg-dragging')) {
+      host.dataset.pgCentred = key;
+      pane.scrollLeft = colR.left - pane.getBoundingClientRect().left + pane.scrollLeft + colW / 2 - pane.clientWidth / 2;
+    }
+  } else if (host.dataset.pgCentred) delete host.dataset.pgCentred;
   const widgets = Array.from(view.dom.querySelectorAll<HTMLElement>('.ol-pagebreak')).filter(w => w.offsetParent !== null);
   // read everything first (the positions as they are), then write: a widget's new height moves what follows by the difference
   const rects = widgets.map(w => w.getBoundingClientRect());
   const sheets: Sheet[] = [];
-  let shift = dy, start = colR.top - hostR.top + dy, page = 1;
+  let shift = 0, start = colR.top - hostR.top, page = 1;
   const sheetX = (f: PageFrame) => colLeft - f.left * ptpx;
   const sheetW = (f: PageFrame) => (f.paperW ?? f.left * 2 + f.width) * ptpx;
   for (let i = 0; i < widgets.length; i++) {
