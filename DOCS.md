@@ -1716,7 +1716,7 @@ blend.
   built (`app/sourcelocate.ts`) and asks `synctex view` (server, `export.ts`) where it is — the
   viewer scrolls there and flashes the box; a double-click on the PDF asks `synctex edit` for the
   source line and puts the cursor into the paragraph or formula with those words (inverse search).
-  **Pages** (*View ▸ Pages (breaks as in the PDF)*, web client, .tex and markdown; 17 Oct 2026): the
+  **Pages** (*View ▸ Pages (breaks as in the PDF)*, web client, .tex and markdown; 17 Oct 2026; off by default, remembered per document in `ol.pages:<doc>`): the
   document on the last build's pages, like Google Docs' print layout but with TeX deciding. The
   server reads the build's `.synctex.gz` and the PDF's words (`pdftotext -bbox`, sandboxed) once
   per PDF (`synctexPages`, `GET /api/docs/*/synctex/pages`, core `pagebreaks.ts`). That gives each

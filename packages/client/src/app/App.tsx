@@ -348,8 +348,14 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   const [dialog, setDialog] = useState<Dialog>(null);
   const [message, setMessage] = useState<{ text: string; kind: 'info' | 'error' } | null>(null);
   const [marginMode, setMarginModeState] = useState(localStorage.getItem('ol.margin') === '1');
-  // View ▸ Pages (editor/plugins/pages.ts): the document on the last build's pages
-  const [pagesOn, setPagesOn] = useState(localStorage.getItem('ol.pages') === '1');
+  // View ▸ Pages (editor/plugins/pages.ts): the document on the last build's pages — per document
+  // (`ol.pages:<doc>`): every document opens in the normal view until Pages is turned on for it
+  const pagesKeyOf = (id: string | null) => 'ol.pages:' + (id ?? '');
+  const readPages = (id: string | null) => { try { return !!id && localStorage.getItem(pagesKeyOf(id)) === '1'; } catch { return false; } };
+  // (the switch belongs to its document: another one is never shown on pages until its own is read)
+  const [pagesFor, setPagesFor] = useState<{ doc: string | null; on: boolean }>(() => { try { localStorage.removeItem('ol.pages'); } catch { /* (the old setting for all documents) */ } return { doc: docId, on: readPages(docId) }; });
+  useEffect(() => { setPagesFor({ doc: docId, on: readPages(docId) }); }, [docId]);
+  const pagesOn = pagesFor.doc === docId && pagesFor.on;
   const [combined, setCombined] = useState(localStorage.getItem('ol.combined') === '1');
   const [childIds, setChildIds] = useState<string[]>([]);
   const [tracking, setTracking] = useState(false);
@@ -1118,8 +1124,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   }, [docId, isLyxDoc]);
   const togglePages = () => {
     const next = !pagesOn;
-    setPagesOn(next);
-    localStorage.setItem('ol.pages', next ? '1' : '0');
+    setPagesFor({ doc: docId, on: next });
+    try { if (next) localStorage.setItem(pagesKeyOf(docId), '1'); else localStorage.removeItem(pagesKeyOf(docId)); } catch { /* private window: for this visit */ }
     if (next && docId && isLyxDoc && !pdf.pdfAt && !pdf.busy) { notify('Building the PDF to see where its pages break…'); void build({ open: false, auto: true }); }
   };
   const showTex = async () => {
