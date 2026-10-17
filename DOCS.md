@@ -3013,7 +3013,9 @@ can hold (`core/src/md/`, `client/src/editor/markdown.ts`):
   `numbersections`, `header-includes` (preamble LaTeX, `- |` blocks and ```` ```{=latex} ```` fences
   too) — and OverLyX's `headings`: `run-in`, or keys for every level (display block | run-in, font,
   size small | normal | large | larger | huge, weight, shape upright | italic, case normal | smallcaps |
-  uppercase, color #rrggbb, align left | center, rule none | below | above) and under `section:` …
+  uppercase, color #rrggbb, align left | center, rule none | below | above, space-above / space-below:
+  a length — ex em pt mm cm, a plain number em; Document ▸ Settings ▸ Heading spacing writes Compact
+  2ex / 0.8ex or Tight 1.2ex / 0.3ex) and under `section:` …
   `paragraph:` a level's own, nested or `{ … }` (`headingStyles`; titlesec in the PDF, `headingsLatex`;
   the editor draws them from `\overlyx_headings {json}` with one generated <style>, `headingCss` in
   editor/paragraphsep.ts — note `:has()` cannot be nested: a sibling chain inside one `:has()`). They are
@@ -3035,7 +3037,9 @@ can hold (`core/src/md/`, `client/src/editor/markdown.ts`):
   top) write them; the dialog keeps heading keys it does not show. Agents set them with the MCP tool
   `set_markdown_style` (server/mdstyle.ts, typesetting keys only; `style: {}` reads them; the
   server instructions point markdown styling there) — so a claude.ai connector or any MCP agent can
-  restyle a document. Without them: article's defaults.
+  restyle a document. Without them: article's defaults. Section numbers in the editor follow the live
+  settings (`setDocumentNumbering`, both shells): before, they came from the metadata only, which loads
+  later, and a markdown document showed LaTeX's default numbers until its first edit.
 * **VS Code**: the extension opens `.md` with *Open With… ▸ OverLyX Editor* (VS Code's own
   markdown editor stays the default), with the same parser and writer.
 
@@ -3175,6 +3179,14 @@ after the import and came back unlinked; the tab lived on in "Proposal 2/3.md", 
 dropped it — nothing synced Proposal.md. When the open document is deleted the
 tab goes on to another document of its folder (`FileBrowser siblingDocument`), not to the start
 screen; deleted from the explorer there is no error toast.
+
+A document of a group folder that syncs with none of the Google Doc's tabs shows a ⚠ *Not synced with
+Google Docs* chip (`folderSyncsTabs`, the database only; `externalSyncOf` `googleUnlinked`) that opens
+File ▸ Google Docs, where the tab is offered.
+
+**One white surface** (17 Oct 2026): a document's canvas is the page's colour in Modern too — no warm
+canvas round the sheet, no sheet edge — and the notes pane is not tinted; the sash's line shows on
+hover only. Slides, posters and the start page keep their canvas.
 
 **The file explorer** shows documents first (LaTeX, LyX, markdown, whiteboards, slides / posters /
 pages, and the folders holding them); what is not a document — pictures, .bib, .sty, scripts, data,

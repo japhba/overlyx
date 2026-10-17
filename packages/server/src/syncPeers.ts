@@ -17,7 +17,7 @@
 import crypto from 'node:crypto';
 import type { Request } from 'express';
 import { verifyAccessToken } from './tokenAuth.ts';
-import { linkOf, publicLink } from './gdocs/sync.ts';
+import { linkOf, publicLink, folderSyncsTabs } from './gdocs/sync.ts';
 import type { SessionUser } from './auth.ts';
 
 /** a clone is shown this long after its last request (its next long poll follows within a second) */
@@ -119,6 +119,8 @@ export function clonesOf(project: string, viewer: SessionUser): ClonePeer[] {
 export interface ExternalSync {
   clones: ClonePeer[];
   google: { url: string; auto: boolean; lastSync: number | null; lastError: string | null } | null;
+  /** not linked, though the other documents of its folder sync with a Google Doc's tabs (File ▸ Google Docs offers the tab) */
+  googleUnlinked?: boolean;
 }
 
 /** Everything `docId` is kept in step with, for the web interface's sync chip. */
@@ -127,6 +129,7 @@ export function externalSyncOf(docId: string, project: string, viewer: SessionUs
   return {
     clones: clonesOf(project, viewer),
     google: l ? { url: l.url, auto: l.auto, lastSync: l.lastSync, lastError: l.lastError } : null,
+    ...(!l && folderSyncsTabs(docId) ? { googleUnlinked: true } : {}),
   };
 }
 

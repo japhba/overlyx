@@ -12,6 +12,7 @@ import { parseFormula } from '@overlyx/core';
 import { editorContext } from '../context';
 import { authorInitials, authorHue } from '../commentops';
 
+import type { EditorView } from 'prosemirror-view';
 export const numberingKey = new PluginKey<DecorationSet>('lyx-numbering');
 
 interface Counters { sec: number[]; enumr: number[]; enumOpen: boolean[]; figure: number; table: number; foot: number; eq: number; theorem: number }
@@ -103,7 +104,7 @@ function build(doc: PMNode): DecorationSet {
         const idx = lvl + 1;
         c.sec[idx]++;
         for (let i = idx + 1; i < c.sec.length; i++) c.sec[i] = 0;
-        if (lvl <= (editorContext.meta?.secnumdepth ?? 3)) attrs['data-label'] = secLabel(lvl);
+        if (lvl <= (liveDepth ?? editorContext.meta?.secnumdepth ?? 3)) attrs['data-label'] = secLabel(lvl);
       }
     }
     // An enumerate environment at depth d stays open across deeper paragraphs (a nested list or a
@@ -157,13 +158,30 @@ function build(doc: PMNode): DecorationSet {
 }
 
 
+/**
+ * The open document's \secnumdepth, from its settings as the shells report them (setDocumentNumbering,
+ * next to setDocumentFonts) — the metadata arrives later, and a markdown document (unnumbered) showed
+ * LaTeX's default numbers until its first edit; Document ▸ Settings changes it while it is open.
+ */
+let liveDepth: number | null = null;
+const views = new Set<EditorView>();
+export function setDocumentNumbering(headerLines: readonly string[]): void {
+  const line = headerLines.find(l => l.startsWith('\\secnumdepth '));
+  const d = line ? Number(line.slice(13)) : NaN;
+  const next = Number.isFinite(d) ? d : null;
+  if (next === liveDepth) return;
+  liveDepth = next;
+  for (const view of views) if (!view.isDestroyed) view.dispatch(view.state.tr.setMeta(numberingKey, true).setMeta('addToHistory', false));
+}
+
 export function numberingPlugin(): Plugin<DecorationSet> {
   return new Plugin<DecorationSet>({
     key: numberingKey,
     state: {
       init: (_c, state) => build(state.doc),
-      apply: (tr, old, _o, newState) => (tr.docChanged ? build(newState.doc) : old),
+      apply: (tr, old, _o, newState) => (tr.docChanged || tr.getMeta(numberingKey) ? build(newState.doc) : old),
     },
     props: { decorations: (state) => numberingKey.getState(state) ?? null },
+    view: view => { views.add(view); return { destroy: () => { views.delete(view); } }; },
   });
 }

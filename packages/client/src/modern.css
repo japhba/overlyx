@@ -207,7 +207,7 @@ html[data-ui="modern"] .menubar-title .save-state.offline { color: var(--warn-fg
 /* in step with a copy elsewhere (SyncChip.tsx): blue, a live connection's colour */
 html[data-ui="modern"] .menubar-title .sync-chip { align-self: center; font-size: 12px; line-height: 20px; color: var(--m-blue); background: var(--m-blue-soft); border: 0; border-radius: 4px; padding: 0 8px; }
 html[data-ui="modern"] .menubar-title .sync-chip:hover { background: color-mix(in srgb, var(--m-blue) 18%, var(--m-ground)); }
-html[data-ui="modern"] .menubar-title .sync-chip.error { color: var(--warn-fg); background: var(--warn-bg); }
+html[data-ui="modern"] .menubar-title :is(.sync-chip.error, .sync-chip.unlinked) { color: var(--warn-fg); background: var(--warn-bg); }
 html[data-ui="modern"] .menubar:has(> .menubar-title) .menubar-menus { grid-area: menus; display: flex; align-items: center; min-width: 0; }
 html[data-ui="modern"] .menubar-menus { display: flex; align-items: center; }
 html[data-ui="modern"] .menubar .menu > button { font: inherit; font-size: 13px; color: var(--m-ink2); padding: 2px 8px; border-radius: 4px; line-height: 20px; }
@@ -363,6 +363,14 @@ html[data-ui="modern"] .editor-scroll.ink-pan:not(.margin-mode) > .editor-page:n
 html[data-ui="modern"] .editor-scroll.ink-pan:not(.margin-mode) > .editor-page:not(:has(.ol-layout)) .editor-host > .lyx-editor { max-width: min(var(--text-width, 720px), 100%); }
 @media (max-width: 900px) { html[data-ui="modern"] .editor-scroll:not(.margin-mode) > .editor-page:not(:has(.ol-layout)) { padding: 32px 24px 120px; margin: 0; max-width: none; box-shadow: none; } }
 html[data-ui="modern"] .ruler { background: var(--m-canvas); }
+/* a document is one white surface (17 Oct 2026, the user: "don't separate them visually"): the canvas
+   around the sheet is the page's colour and the sheet's edge is not drawn, notes folded or not — the
+   column keeps its width and place. Slides, posters and the start page keep the warm canvas. */
+/* (two :has() side by side: one inside another is not allowed, and the rule would be dropped) */
+html[data-ui="modern"] .editor-scroll:has(> .editor-page):not(:has(.ol-layout)) { background: var(--page-bg); }
+html[data-ui="modern"] .editor-scroll:has(> .editor-page):not(:has(.ol-layout)) > .ruler { background: var(--page-bg); }
+html[data-ui="modern"] .editor-scroll:not(.margin-mode) > .editor-page:not(:has(.ol-layout)),
+html[data-ui="modern"][data-theme="dark"] .editor-scroll:not(.margin-mode) > .editor-page:not(:has(.ol-layout)) { box-shadow: none; }
 
 /* ------------------------------------------------------------ the side rails: square keys */
 html[data-ui="modern"] .rail { width: 48px; padding: 8px 0; gap: 4px; align-items: center; background: var(--ui-bg); border: 0; border-left: 1px solid var(--m-line2); }

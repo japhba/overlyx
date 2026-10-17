@@ -6,6 +6,7 @@ import { buildToolbars, loadToolbarPrefs, mathExecutor, useMathPanels, toolbarCl
 import { debounce, hashAuthor, applyAuthorColors, bcp47, suggestLabel, LayoutPicker, documentStats, applyEditorZoom, stepTextZoom, useDocumentViewportZoom, SidebarGrip, restoreSidebarWidths } from '@client/app/shellutil';
 import { setDocumentFonts } from '@client/fonts/editorfont';
 import { setDocumentParagraphs, setDocumentHeadings } from '@client/editor/paragraphsep';
+import { setDocumentNumbering } from '@client/editor/plugins/numbering';
 import { MarkdownSettingsDialog } from '@client/app/MarkdownSettings';
 import { usePresentation } from '@client/app/presentation';
 import { referenceTransaction } from '@client/editor/references';
@@ -213,7 +214,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   useEffect(() => applyEditorZoom(zoom), [zoom]);
   useDocumentViewportZoom(scrollRef, docId);
   // Settings ▸ Editor ▸ Font ▸ "As in the document" follows the document's roman font
-  useEffect(() => { setDocumentFonts(headerLines); setDocumentParagraphs(headerLines); setDocumentHeadings(headerLines); setLayoutHeader(headerLines); }, [headerLines]);
+  useEffect(() => { setDocumentFonts(headerLines); setDocumentParagraphs(headerLines); setDocumentHeadings(headerLines); setDocumentNumbering(headerLines); setLayoutHeader(headerLines); }, [headerLines]);
   usePresentation();   // View ▸ Presentation mode: Shift+F11 toggles, Esc leaves
   useEffect(() => { editorContext.combined = combined; localStorage.setItem('ol.vscode.combined', combined ? '1' : '0'); }, [combined]);
   useEffect(() => { try { localStorage.setItem('ol.vscode.comments', showComments ? '1' : '0'); } catch { /* ignore */ } }, [showComments]);

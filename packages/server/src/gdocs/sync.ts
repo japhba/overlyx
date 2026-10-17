@@ -202,6 +202,13 @@ export async function linkExistingGoogleDoc(docId: string, userId: number, fileI
   return linkOf(docId)!;
 }
 
+/** whether other documents of `docId`'s folder sync with tabs of a Google Doc (a document group) — the database only, no Google call */
+export function folderSyncsTabs(docId: string): boolean {
+  const folder = folderOf(docId);
+  return (db.prepare('SELECT doc_id FROM gdocs_links WHERE substr(doc_id, 1, ?) = ? AND tab_id IS NOT NULL').all(folder.length + 1, folder + '/') as { doc_id: string }[])
+    .some(l => l.doc_id !== docId && folderOf(l.doc_id) === folder);
+}
+
 /**
  * The Google Doc the other documents of `docId`'s folder sync with as its tabs (a document group),
  * and its tabs no document syncs with — what an unlinked document of the folder can be linked to.

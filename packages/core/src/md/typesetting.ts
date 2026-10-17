@@ -10,7 +10,8 @@
  *                          keys for every level — display (block | run-in), font, size (small | normal
  *                          | large | larger | huge), weight (bold | normal), shape (upright | italic),
  *                          case (normal | smallcaps | uppercase), color (#rrggbb), align (left |
- *                          center), rule (none | below | above) — and under section: … paragraph: a
+ *                          center), rule (none | below | above), space-above / space-below (a
+ *                          length: 0.5ex, 4pt, 1em) — and under section: … paragraph: a
  *                          level's own (`section: { size: larger, rule: below }`)
  *   header-includes        LaTeX for the preamble, after all of the above
  *
@@ -128,18 +129,26 @@ export interface HeadingStyle {
   color?: string;
   align?: 'left' | 'center';
   rule?: 'none' | 'below' | 'above';
+  /** the space above / below the heading (front matter `space-above` / `space-below`): a length, ex em pt mm cm (a plain number: em) */
+  spaceAbove?: string;
+  spaceBelow?: string;
 }
 /** each level's style: `headings`' own keys for all levels, then the level's */
 export type HeadingStyles = Record<HeadingLevel, HeadingStyle>;
 
-const HEADING_CHOICES: { [K in keyof HeadingStyle]-?: readonly string[] | null } = {
+const HEADING_CHOICES: { [K in Exclude<keyof HeadingStyle, 'spaceAbove' | 'spaceBelow'>]-?: readonly string[] | null } = {
   display: ['block', 'run-in'], font: null, size: ['small', 'normal', 'large', 'larger', 'huge'], weight: ['bold', 'normal'],
   shape: ['upright', 'italic'], case: ['normal', 'smallcaps', 'uppercase'], color: null, align: ['left', 'center'], rule: ['none', 'below', 'above'],
 };
 function headingStyleOf(v: FMValue | undefined): HeadingStyle {
   const out: HeadingStyle = {};
   if (!v || typeof v === 'string' || Array.isArray(v)) return out;
-  for (const k of Object.keys(HEADING_CHOICES) as (keyof HeadingStyle)[]) {
+  // a length LaTeX and CSS both take
+  for (const [key, prop] of [['space-above', 'spaceAbove'], ['space-below', 'spaceBelow']] as const) {
+    const m = typeof v[key] === 'string' ? /^\s*(\d{1,2}(?:\.\d{1,3})?)\s*(ex|em|pt|mm|cm)?\s*$/.exec(v[key] as string) : null;
+    if (m) out[prop] = m[1] + (m[2] ?? 'em');
+  }
+  for (const k of Object.keys(HEADING_CHOICES) as (keyof typeof HEADING_CHOICES)[]) {
     const raw = v[k];
     if (typeof raw !== 'string') continue;
     const val = raw.trim(), choices = HEADING_CHOICES[k];
@@ -279,7 +288,9 @@ function headingsLatex(styles: HeadingStyles): string[] {
     const before = st.case === 'uppercase' ? '\\MakeUppercase' : '';
     const after = !runIn && st.rule === 'below' ? '[\\vspace{.4ex}\\titlerule]' : '';
     out.push(`\\titleformat{\\${level}}[${shape}]{${format}}{\\the${level}}{${runIn ? '0.6em' : '1em'}}{${before}}${after}`);
-    out.push(`\\titlespacing*{\\${level}}{0pt}{${runIn ? '1.6ex plus .3ex minus .2ex' : def.above}}{${runIn ? '0.8em' : def.below}}`);
+    // (a length given is kept to, with a little stretch above; run in, the space after is the gap before the text)
+    const above = st.spaceAbove ? `${st.spaceAbove} plus .2ex` : runIn ? '1.6ex plus .3ex minus .2ex' : def.above;
+    out.push(`\\titlespacing*{\\${level}}{0pt}{${above}}{${runIn ? '0.8em' : st.spaceBelow ?? def.below}}`);
   }
   return out;
 }

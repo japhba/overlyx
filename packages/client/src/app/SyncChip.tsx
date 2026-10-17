@@ -20,7 +20,7 @@ export function useExternalSync(docId: string | null): ExternalSync | null {
     let stop = false;
     const look = () => {
       if (document.visibilityState === 'hidden') return;
-      api.externalSync(docId).then(r => { if (!stop) setExt(r.clones.length || r.google ? r : null); }).catch(() => { /* offline: keep what was said */ });
+      api.externalSync(docId).then(r => { if (!stop) setExt(r.clones.length || r.google || r.googleUnlinked ? r : null); }).catch(() => { /* offline: keep what was said */ });
     };
     look();
     const iv = setInterval(look, SYNC_POLL_MS);
@@ -44,9 +44,13 @@ function longName(c: SyncClone): string {
   return `${c.mine ? 'Your' : `${c.name}’s`} ${what}${c.host ? ` on ${c.host}` : ''}`;
 }
 
-export interface SyncDescription { short: string; title: string; kind: 'live' | 'google' | 'error' }
+export interface SyncDescription { short: string; title: string; kind: 'live' | 'google' | 'error' | 'unlinked' }
 
 export function describeSync(ext: ExternalSync): SyncDescription {
+  // a document of a Google Doc's group that syncs with none of its tabs (its tab's document was deleted, say)
+  if (ext.googleUnlinked && !ext.google && !ext.clones.length) {
+    return { short: 'Not synced with Google Docs', kind: 'unlinked', title: 'The other documents of this folder are tabs of a Google Doc; this one syncs with none. Click to sync it with one of its tabs (File ▸ Google Docs…).' };
+  }
   const parts: string[] = [];
   const lines: string[] = [];
   if (ext.clones.length === 1) parts.push(shortName(ext.clones[0]));
@@ -73,8 +77,8 @@ export function SyncChip({ ext, onOpen }: { ext: ExternalSync | null; onOpen?: (
   if (!ext) return null;
   const d = describeSync(ext);
   return (
-    <button type="button" class={'sync-chip ' + d.kind} data-sync-chip={d.kind} title={d.title} onClick={() => onOpen?.(!!ext.google)}>
-      <span class="sync-glyph" aria-hidden="true">{d.kind === 'error' ? '⚠' : '⇄'}</span>{d.short}
+    <button type="button" class={'sync-chip ' + d.kind} data-sync-chip={d.kind} title={d.title} onClick={() => onOpen?.(!!ext.google || !!ext.googleUnlinked)}>
+      <span class="sync-glyph" aria-hidden="true">{d.kind === 'error' || d.kind === 'unlinked' ? '⚠' : '⇄'}</span>{d.short}
     </button>
   );
 }

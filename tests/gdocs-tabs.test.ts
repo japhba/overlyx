@@ -218,6 +218,9 @@ describe('importing and syncing a Google Doc with tabs', async () => {
   it('another document of the folder can sync with that dropped tab, its text replacing the tab\'s; one tab, one document', async () => {
     // the real Budget was written here, under another name; its tab in Google Docs is the old one
     writeFileSync(join(P, 'Grant proposal', 'Budget plan.md'), '# Budget\n\nTwo GPUs for a year, and a cluster.\n');
+    // its sync chip says it is not synced, while its folder's other documents are tabs (no Google call)
+    expect(sync.folderSyncsTabs('u/p/Grant proposal/Budget plan.md')).toBe(true);
+    expect(sync.folderSyncsTabs('u/p/elsewhere.md')).toBe(false);
     const folder = await sync.folderGoogleDoc('u/p/Grant proposal/Budget plan.md', owner.id);
     expect(folder!.fileId).toBe(fileId);
     const budget = folder!.tabs.find(t => t.title === 'Budget')!;

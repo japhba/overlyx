@@ -97,4 +97,14 @@ describe('heading styles (headings: in the front matter)', () => {
     expect(setFrontMatter(['---', 'title: x', 'headings: run-in', '---'], { headings: { display: 'block', color: '#336699', section: { size: 'huge' } } }))
       .toEqual(['---', 'title: x', 'headings:', '  display: block', '  color: "#336699"', '  section:', '    size: huge', '---']);
   });
+
+  it('space above and below a heading: kept to in the PDF, the editor too', () => {
+    const fm = ['---', 'headings:', '  space-below: 0.4ex', '  section: { space-above: 2, space-below: 3pt }', '  subsection: { space-below: lots }', '---'];
+    const h = headingStyles(frontMatterVars(fm).headings)!;
+    expect(h.section).toEqual({ spaceAbove: '2em', spaceBelow: '3pt' });
+    expect(h.subsection).toEqual({ spaceBelow: '0.4ex' });
+    const pre = preambleOf(fm.join('\n') + '\n\n# A\n\nText.\n');
+    expect(pre).toContain('\\titlespacing*{\\section}{0pt}{2em plus .2ex}{3pt}');
+    expect(pre).toContain('\\titlespacing*{\\subsection}{0pt}{3.25ex plus 1ex minus .2ex}{0.4ex}');
+  });
 });

@@ -54,6 +54,12 @@ export function headingCss(styles: HeadingStyles): string {
     if (!runIn && st.align === 'center') d.push('text-align: center');
     if (!runIn && st.rule === 'below') d.push('border-bottom: 1px solid currentColor', 'padding-bottom: 0.15em');
     if (!runIn && st.rule === 'above') d.push('border-top: 1px solid currentColor', 'padding-top: 0.25em');
+    if (st.spaceAbove) d.push(`margin-top: ${st.spaceAbove}`);
+    if (!runIn && st.spaceBelow) {
+      d.push(`margin-bottom: ${st.spaceBelow}`);
+      // the space below is the heading's alone (the paragraph's own gap above would collapse into it, the larger winning)
+      out.push(`html ${sel} + .lyx-par { margin-top: 0 !important; }`);
+    }
     if (d.length) out.push(`${sel} { ${d.join('; ')}; }`);
     // the number is the heading's, in its colour (styles.css greys section numbers)
     if (st.color) out.push(`${sel}[data-label]::before { color: inherit; }`);
@@ -64,7 +70,7 @@ export function headingCss(styles: HeadingStyles): string {
         `${next}::after { content: ''; display: block; height: 0.9em; }`,
         // (over the paragraph spacing's own rules: the space above the heading is this paragraph's)
         // (one chain of siblings: :has() inside :has() is not allowed, and the rule would be dropped)
-        `html .lyx-editor > .lyx-par:has(+ .lyx-par[data-layout="${LAYOUT[level]}"] + .lyx-par[data-layout="Standard"]) { margin-bottom: 0.9em !important; }`);
+        `html .lyx-editor > .lyx-par:has(+ .lyx-par[data-layout="${LAYOUT[level]}"] + .lyx-par[data-layout="Standard"]) { margin-bottom: ${st.spaceAbove ?? '0.9em'} !important; }`);
     }
   }
   return out.join('\n');

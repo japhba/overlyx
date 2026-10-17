@@ -194,7 +194,7 @@ export interface GdocsStatus {
 /** a synced clone of the project working right now (server syncPeers.ts) — `host` only for the viewer's own */
 export interface SyncClone { name: string; username: string; app: 'vscode' | 'cli' | 'other'; host: string | null; mine: boolean; since: number; lastSeen: number }
 /** what keeps a document in step from elsewhere: synced clones of its project, its Google Docs link */
-export interface ExternalSync { clones: SyncClone[]; google: { url: string; auto: boolean; lastSync: number | null; lastError: string | null } | null }
+export interface ExternalSync { clones: SyncClone[]; google: { url: string; auto: boolean; lastSync: number | null; lastError: string | null } | null; googleUnlinked?: boolean }
 export type GdocsPicker = { stub: true; files: { id: string; name: string }[] } | { stub?: false; apiKey: string; appId: string; token: string };
 /** a front matter value of a markdown document (core md/typesetting.ts FMValue) */
 export type MdFrontMatterValue = string | string[] | { [key: string]: MdFrontMatterValue };
