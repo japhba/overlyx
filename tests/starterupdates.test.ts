@@ -52,8 +52,9 @@ describe('scientific starter refresh', () => {
   });
 
   it('recognises every previously shipped scientific example, the project posters included', () => {
-    expect(SCIENTIFIC_TEMPLATES.map(templateFolder)).toEqual(['poster-1', 'poster-2', 'poster-3', 'poster-4', 'poster-5', 'slides-1', 'slides-2', 'slides-3']);
-    for (const t of SCIENTIFIC_TEMPLATES) {
+    expect(SCIENTIFIC_TEMPLATES.map(templateFolder)).toEqual(['poster-1', 'poster-2', 'poster-3', 'poster-4', 'poster-5', 'poster-6', 'slides-1', 'slides-2', 'slides-3']);
+    // (Poster 6 shipped after that version: it has none)
+    for (const t of SCIENTIFIC_TEMPLATES.filter(t => t.id !== 'statement-2026')) {
       const shipped = readFileSync(join(templates, 'starters-legacy/scientific-v2', legacyFolder(t), 'index.html'), 'utf8');
       expect(shipped).not.toBe(latest(templateFolder(t)));
       expect(isLightlyEditedStarter(shipped, legacyFolder(t))).toBe(true);
@@ -120,10 +121,11 @@ describe('scientific starter refresh', () => {
     for (const [folder, now] of [['talk', 'slides-1'], ['poster', 'poster-1']]) writeFileSync(join(dir, folder, 'index.html'), latest(now));
     mkdirSync(join(dir, 'poster-bernstein-2026'));
     writeFileSync(join(dir, 'poster-bernstein-2026/index.html'), 'My edited poster');
-    expect(refreshScientificStarters(true).added).toContain('project-posters/example-web/poster-5/index.html');
+    expect(refreshScientificStarters(true).added).toEqual(['project-posters/example-web/poster-5/index.html', 'project-posters/example-web/poster-6/index.html']);
     expect(existsSync(join(dir, 'poster-5'))).toBe(false);
     refreshScientificStarters();
     expect(readFileSync(join(dir, 'poster-5/index.html'), 'utf8')).toBe(latest('poster-5'));
+    expect(readFileSync(join(dir, 'poster-6/index.html'), 'utf8')).toBe(latest('poster-6'));
     expect(readFileSync(join(dir, 'poster-4/index.html'), 'utf8')).toBe('My edited poster');
     rmSync(join(dir, 'poster-5'), { recursive: true });
     refreshScientificStarters();

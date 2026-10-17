@@ -5,6 +5,7 @@
  */
 import { projectPosterObjects } from './project-posters.ts';
 import { mitPosterObjects } from './scientific-posters.ts';
+import { statementPosterObjects } from './statement-poster.ts';
 import { TEMPLATE_FONTS, TEMPLATE_FONT_LICENSE } from './scientific-fonts.ts';
 import { chart } from './scientific-charts.ts';
 export type ScientificKind = 'deck' | 'poster';
@@ -24,6 +25,10 @@ export interface ScientificTemplate {
   source: string;
   author: string;
   license: string;
+  /** the typeface (TEMPLATE_FONTS) when not the kind's usual one (posters: Carlito; decks: Fira Sans) */
+  font?: string;
+  /** the charts' second colour (--secondary) */
+  secondary?: string;
 }
 
 export const SCIENTIFIC_TEMPLATES: readonly ScientificTemplate[] = [
@@ -32,6 +37,8 @@ export const SCIENTIFIC_TEMPLATES: readonly ScientificTemplate[] = [
   { id: 'research-portrait', kind: 'poster', name: 'MIT EvenBetter portrait', description: 'The published 36 × 48 in PowerPoint layout: title, wide graphical abstract, takeaway band and a two-column evidence grid.', size: '36 × 48 in · portrait', width: 914.4, height: 1219.2, exampleTitle: 'Calibration is more than a single score', background: '#ffffff', ink: '#111111', accent: '#317f59', muted: '#565656', source: 'https://mit-becl.github.io/Poster_Resources/PowerPoint_Templates/', author: 'MIT Biological Engineering Communication Lab', license: 'CC0-1.0' },
   {"id": "bernstein-2026", "kind": "poster", "name": "Bernstein 2026 \u00b7 two columns", "description": "A0 portrait: split abstract band, two unequal columns, blue equation cards, red takeaway and conclusion footer.", "size": "841 \u00d7 1189 mm \u00b7 portrait", "width": 841, "height": 1189, "exampleTitle": "Diffusion reveals the timescales of spatial structure", "background": "#ffffff", "ink": "#1c2026", "accent": "#023d6b", "muted": "#565656", "source": "/#/jan/recurrent_feature/poster_bernstein26/poster_bernstein26_layout.tex", "author": "Project layout adapted with permission", "license": "GPL-3.0-or-later"},
   {"id": "icml-2026", "kind": "poster", "name": "ICML 2026 \u00b7 three columns", "description": "Landscape: wide title, blue takeaway band, three columns with a wider middle column and a narrow final figure.", "size": "1210 \u00d7 910 mm \u00b7 landscape", "width": 1210, "height": 910, "exampleTitle": "Diffusion reveals the timescales of spatial structure", "background": "#ffffff", "ink": "#1c2026", "accent": "#023d6b", "muted": "#565656", "source": "/#/jan/recurrent_feature/poster_icml26.tex", "author": "Project layout adapted with permission", "license": "GPL-3.0-or-later"},
+  // a #betterposter landscape: the source's Arial is Fira Sans here (an Arial-metric face would add ~0.4 MB to every page and the app)
+  { id: 'statement-2026', kind: 'poster', name: 'Project 2026 · central statement', description: 'Landscape after #betterposter: title band, one large plain-language statement with a QR code, a two-step explainer beneath it and numbered evidence panels down both sides.', size: '48 × 36 in · landscape', width: 1219.2, height: 914.4, exampleTitle: 'Fine Detail Fades First: Mode Lifetimes under Diffusion', background: '#ffffff', ink: '#241a44', accent: '#6d28d9', muted: '#5f5873', source: '/templates/statement-2026.png', author: 'Project layout adapted with permission', license: 'GPL-3.0-or-later', font: 'Fira Sans', secondary: '#1e88e5' },
   { id: 'research', kind: 'deck', name: 'Metropolis', description: 'Fira Sans, dark-teal frame titles, an orange title separator and light slides.', size: '16:9 · 5 slides', width: 1280, height: 720, exampleTitle: 'Diffusion across spatial scales', background: '#fafafa', ink: '#23373b', accent: '#eb811b', muted: '#55676a', source: 'https://github.com/matze/mtheme', author: 'Matthias Vogelgesang and contributors', license: 'CC-BY-SA-4.0' },
   { id: 'dark-seminar', kind: 'deck', name: 'Focus', description: 'The original charcoal-and-grey theme: split title page, small caps and a numbered progress bar.', size: '16:9 · 5 slides', width: 1280, height: 720, exampleTitle: 'Stability in two dimensions', background: '#efefef', ink: '#404040', accent: '#404040', muted: '#666666', source: 'https://github.com/pcafrica/focus-beamertheme', author: 'Pasquale Claudio Africa and contributors', license: 'GPL-3.0-or-later' },
   { id: 'serif-colloquium', kind: 'deck', name: 'CambridgeUS', description: 'Classic Beamer: Computer Modern Sans, red-and-grey navigation bands and a three-part footer.', size: '4:3 · 5 slides', width: 1200, height: 900, exampleTitle: 'What a calibrated forecast tells us', background: '#ffffff', ink: '#000000', accent: '#cc0000', muted: '#595959', source: 'https://github.com/josephwright/beamer/blob/main/base/themes/theme/beamerthemeCambridgeUS.sty', author: 'Madhusudan Singh and the Beamer contributors', license: 'GPL-3.0-or-later' },
@@ -65,7 +72,7 @@ const equation = (x: number, y: number, w: number, tex: string) => p(x, y, w, `\
 
 function document(t: ScientificTemplate, title: string, pages: string[], css = ''): string {
   const poster = t.kind === 'poster';
-  const font = poster ? 'Carlito' : t.id === 'serif-colloquium' ? 'CMU Sans' : 'Fira Sans';
+  const font = t.font ?? (poster ? 'Carlito' : t.id === 'serif-colloquium' ? 'CMU Sans' : 'Fira Sans');
   return `<!doctype html>
 <!--
 Design: ${t.name}
@@ -99,7 +106,7 @@ ${TEMPLATE_FONT_LICENSE}
 <title>${esc(title)}</title>
 <style>
   ${TEMPLATE_FONTS[font]}
-  :root { --paper: ${t.background}; --ink: ${t.ink}; --accent: ${t.accent}; --muted: ${t.muted}; --secondary: ${t.id === 'dark-seminar' ? '#f1be75' : '#bc6747'}; }
+  :root { --paper: ${t.background}; --ink: ${t.ink}; --accent: ${t.accent}; --muted: ${t.muted}; --secondary: ${t.secondary ?? (t.id === 'dark-seminar' ? '#f1be75' : '#bc6747')}; }
   * { box-sizing: border-box; }
   body { margin: 0; background: #dce0e4; color: var(--ink); font-family: "${font}", Arial, Helvetica, sans-serif; }
   .slide { width: ${t.width}${poster ? 'mm' : 'px'}; height: ${t.height}${poster ? 'mm' : 'px'}; position: relative; overflow: hidden; background: var(--paper); margin: 0 auto ${poster ? '0' : '40px'}; }
@@ -131,7 +138,8 @@ const calibrationReference = '<a href="https://doi.org/10.1175/1520-0493(1950)07
 
 export function scientificPoster(title = '', id?: string): string {
   const t = scientificTemplate('poster', id);
-  return document(t, title || t.exampleTitle, [(t.id === 'bernstein-2026' || t.id === 'icml-2026' ? projectPosterObjects(t, title, chart) : mitPosterObjects(t, title, chart)).join('\n')]);
+  const objects = t.id === 'statement-2026' ? statementPosterObjects(t, title, chart) : t.id === 'bernstein-2026' || t.id === 'icml-2026' ? projectPosterObjects(t, title, chart) : mitPosterObjects(t, title, chart);
+  return document(t, title || t.exampleTitle, [objects.join('\n')]);
 }
 
 export function scientificDeck(title = '', id?: string): string {
