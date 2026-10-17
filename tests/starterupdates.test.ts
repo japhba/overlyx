@@ -12,7 +12,8 @@ process.env.OVERLYX_PROJECTS_DIR = join(root, 'projects');
 const { db } = await import('../packages/server/src/db.ts');
 const { createUser } = await import('../packages/server/src/auth.ts');
 const { registerProject } = await import('../packages/server/src/access.ts');
-const { isLightlyEditedStarter, refreshScientificStarters } = await import('../packages/server/src/starterupdates.ts');
+const { isLightlyEditedStarter, refreshScientificStarters, legacyFolder } = await import('../packages/server/src/starterupdates.ts');
+const { SCIENTIFIC_TEMPLATES, templateFolder } = await import('../packages/core/src/html/scientific.ts');
 const templates = join(import.meta.dirname, '../packages/server/templates');
 const original = (folder: string) => readFileSync(join(templates, 'starters-legacy/web', folder, 'index.html'), 'utf8');
 const latest = (folder: string) => readFileSync(join(templates, 'starters/web', folder, 'index.html'), 'utf8');
@@ -51,10 +52,11 @@ describe('scientific starter refresh', () => {
   });
 
   it('recognises every previously shipped scientific example, the project posters included', () => {
-    for (const folder of ['talk', 'talk-dark-seminar', 'talk-serif-colloquium', 'poster', 'poster-figure-first', 'poster-research-portrait', 'poster-bernstein-2026', 'poster-icml-2026']) {
-      const shipped = readFileSync(join(templates, 'starters-legacy/scientific-v2', folder, 'index.html'), 'utf8');
-      expect(shipped).not.toBe(latest(folder));
-      expect(isLightlyEditedStarter(shipped, folder)).toBe(true);
+    expect(SCIENTIFIC_TEMPLATES.map(templateFolder)).toEqual(['poster-1', 'poster-2', 'poster-3', 'poster-4', 'poster-5', 'slides-1', 'slides-2', 'slides-3']);
+    for (const t of SCIENTIFIC_TEMPLATES) {
+      const shipped = readFileSync(join(templates, 'starters-legacy/scientific-v2', legacyFolder(t), 'index.html'), 'utf8');
+      expect(shipped).not.toBe(latest(templateFolder(t)));
+      expect(isLightlyEditedStarter(shipped, legacyFolder(t))).toBe(true);
     }
   });
 
@@ -62,14 +64,17 @@ describe('scientific starter refresh', () => {
     const { dir, project } = seed('refresh');
     mkdirSync(join(dir, 'talk-dark-seminar'));
     writeFileSync(join(dir, 'talk-dark-seminar/index.html'), 'Custom file');
+    expect(refreshScientificStarters(true)).toMatchObject({ moved: 3 });
     expect(refreshScientificStarters(true).updated).toHaveLength(2);
     expect(readFileSync(join(dir, 'talk/index.html'), 'utf8')).toBe(original('talk'));
+    // the folders take their designs' names (the customised one too), then the untouched examples are refreshed
     expect(refreshScientificStarters().updated).toHaveLength(2);
-    expect(readFileSync(join(dir, 'talk/index.html'), 'utf8')).toBe(latest('talk'));
-    expect(readFileSync(join(dir, 'poster/index.html'), 'utf8')).toBe(latest('poster'));
-    expect(readFileSync(join(dir, 'talk-dark-seminar/index.html'), 'utf8')).toBe('Custom file');
-    expect(existsSync(join(dir, 'poster-figure-first/index.html'))).toBe(true);
-    const versions = db.prepare('SELECT lyx,kind FROM versions WHERE doc_id=?').all(project + '/talk/index.html');
+    expect(existsSync(join(dir, 'talk'))).toBe(false);
+    expect(readFileSync(join(dir, 'slides-1/index.html'), 'utf8')).toBe(latest('slides-1'));
+    expect(readFileSync(join(dir, 'poster-1/index.html'), 'utf8')).toBe(latest('poster-1'));
+    expect(readFileSync(join(dir, 'slides-2/index.html'), 'utf8')).toBe('Custom file');
+    expect(existsSync(join(dir, 'poster-2/index.html'))).toBe(true);
+    const versions = db.prepare('SELECT lyx,kind FROM versions WHERE doc_id=?').all(project + '/slides-1/index.html');
     expect(versions).toEqual([{ lyx: original('talk'), kind: 'manual' }]);
     expect(refreshScientificStarters().updated).toEqual([]);
     rmSync(dir, { recursive: true });
@@ -83,9 +88,12 @@ describe('scientific starter refresh', () => {
     db.prepare('INSERT INTO ydocs (id,state,file_hash,updated_at) VALUES (?,?,?,?)').run(project + '/talk/index.html', Buffer.from(Y.encodeStateAsUpdate(doc)), 'old', Date.now());
     doc.destroy();
     rmSync(join(dir, 'poster'), { recursive: true });
-    expect(refreshScientificStarters()).toMatchObject({ updated: [], preserved: 1 });
-    expect(readFileSync(join(dir, 'talk/index.html'), 'utf8')).toBe(original('talk'));
-    expect(existsSync(join(dir, 'poster'))).toBe(false);
+    // (the saved state moved with the folder, and its edits keep the file as it is)
+    expect(refreshScientificStarters()).toMatchObject({ updated: [], preserved: 1, moved: 1 });
+    expect(readFileSync(join(dir, 'slides-1/index.html'), 'utf8')).toBe(original('talk'));
+    expect(db.prepare('SELECT 1 FROM ydocs WHERE id=?').get(project + '/talk/index.html')).toBeUndefined();
+    expect(db.prepare('SELECT 1 FROM ydocs WHERE id=?').get(project + '/slides-1/index.html')).toBeTruthy();
+    expect(existsSync(join(dir, 'poster-1'))).toBe(false);
     rmSync(dir, { recursive: true });
     expect(refreshScientificStarters().updated).toEqual([]);
     expect(existsSync(dir)).toBe(false);
@@ -101,25 +109,25 @@ describe('scientific starter refresh', () => {
     const changed = previous('talk-dark-seminar').replace('Stability in two dimensions', 'My own research');
     writeFileSync(join(dir, 'talk-dark-seminar/index.html'), changed);
     expect(refreshScientificStarters().updated).toHaveLength(3);
-    expect(readFileSync(join(dir, 'poster-figure-first/index.html'), 'utf8')).toBe(latest('poster-figure-first'));
-    expect(readFileSync(join(dir, 'talk-dark-seminar/index.html'), 'utf8')).toBe(changed);
-    expect(existsSync(join(dir, 'talk-serif-colloquium'))).toBe(false);
+    expect(readFileSync(join(dir, 'poster-2/index.html'), 'utf8')).toBe(latest('poster-2'));
+    expect(readFileSync(join(dir, 'slides-2/index.html'), 'utf8')).toBe(changed);
+    expect(existsSync(join(dir, 'slides-3'))).toBe(false);
     rmSync(dir, { recursive: true });
   });
 
   it('adds project posters to current examples once, preserving edits and later deletions', () => {
     const { dir } = seed('project-posters');
-    for (const folder of ['talk', 'poster']) writeFileSync(join(dir, folder, 'index.html'), latest(folder));
+    for (const [folder, now] of [['talk', 'slides-1'], ['poster', 'poster-1']]) writeFileSync(join(dir, folder, 'index.html'), latest(now));
     mkdirSync(join(dir, 'poster-bernstein-2026'));
     writeFileSync(join(dir, 'poster-bernstein-2026/index.html'), 'My edited poster');
-    expect(refreshScientificStarters(true).added).toContain('project-posters/example-web/poster-icml-2026/index.html');
-    expect(existsSync(join(dir, 'poster-icml-2026'))).toBe(false);
+    expect(refreshScientificStarters(true).added).toContain('project-posters/example-web/poster-5/index.html');
+    expect(existsSync(join(dir, 'poster-5'))).toBe(false);
     refreshScientificStarters();
-    expect(readFileSync(join(dir, 'poster-icml-2026/index.html'), 'utf8')).toBe(latest('poster-icml-2026'));
-    expect(readFileSync(join(dir, 'poster-bernstein-2026/index.html'), 'utf8')).toBe('My edited poster');
-    rmSync(join(dir, 'poster-icml-2026'), { recursive: true });
+    expect(readFileSync(join(dir, 'poster-5/index.html'), 'utf8')).toBe(latest('poster-5'));
+    expect(readFileSync(join(dir, 'poster-4/index.html'), 'utf8')).toBe('My edited poster');
+    rmSync(join(dir, 'poster-5'), { recursive: true });
     refreshScientificStarters();
-    expect(existsSync(join(dir, 'poster-icml-2026'))).toBe(false);
+    expect(existsSync(join(dir, 'poster-5'))).toBe(false);
     rmSync(dir, { recursive: true });
   });
 

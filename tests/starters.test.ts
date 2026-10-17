@@ -22,7 +22,7 @@ const { createUser, createGuest, toSessionUser } = await import('../packages/ser
 const { parseDocumentText, writeDocumentText } = await import('../packages/server/src/texdoc.ts');
 const { parseTex, writeTex } = await import('../packages/core/src/tex/index.ts');
 const { walkInsets } = await import('../packages/core/src/index.ts');
-const { SCIENTIFIC_TEMPLATES } = await import('../packages/core/src/html/scientific.ts');
+const { SCIENTIFIC_TEMPLATES, templateFolder } = await import('../packages/core/src/html/scientific.ts');
 
 const TPL = join(import.meta.dirname, '../packages/server/templates/starters');
 const HAVE_LATEXMK = spawnSync('which', ['latexmk']).status === 0;
@@ -53,7 +53,7 @@ describe('starter projects', () => {
       expect(existsSync(join(dir, 'figures'))).toBe(true);
     }
     // the HTML deliverables
-    for (const [folder, kind] of [['talk', 'deck'], ['poster', 'poster']]) {
+    for (const [folder, kind] of [['slides-1', 'deck'], ['poster-1', 'poster']]) {
       const html = readFileSync(join(ROOT, 'projects', 'ada', 'example-web', folder, 'index.html'), 'utf8');
       expect(html).toContain(`<meta name="overlyx" content="${kind}">`);
       expect(html).not.toContain('Lovelace');
@@ -61,7 +61,7 @@ describe('starter projects', () => {
     }
     expect(existsSync(join(ROOT, 'projects', 'ada', 'example-web', 'site'))).toBe(false);
     for (const t of SCIENTIFIC_TEMPLATES) {
-      const folder = t.id === 'research' ? 'talk' : t.id === 'betterposter' ? 'poster' : `${t.kind === 'deck' ? 'talk' : 'poster'}-${t.id}`;
+      const folder = templateFolder(t);
       const html = readFileSync(join(ROOT, 'projects', 'ada', 'example-web', folder, 'index.html'), 'utf8');
       expect(html).toContain(`<meta name="overlyx-template" content="${t.id}">`);
       expect(html).not.toContain('Lovelace');

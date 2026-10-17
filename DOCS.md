@@ -2289,7 +2289,11 @@ picture reloads through the project's graphics event when it is saved.
 
 The template choosers (+ New, File ▸ New, VS Code's quick pick) call the designs **Poster 1…5** and
 **Slides 1…3** (`templateLabel`, in `SCIENTIFIC_TEMPLATES` order); `name` stays the source design's,
-for the attribution line and the generated file's header.
+for the attribution line and the generated file's header. The example project's folders have the
+same names (`templateFolder`: `slides-1`, `poster-4`, …; `templates/starters/web`); at startup
+`starterupdates.ts` renames the old ones (`talk`, `poster-bernstein-2026`, … — `legacyFolder`, also
+the keys of `starters-legacy` and of the `web:poster-…` markers) in every account, customised or not,
+moving their `ydocs`, `versions` and `user_doc_state` rows along.
 
 Documents draw freehand only: the same pens, highlighter, eraser and settings as the slide editor's
 Draw (`deliverable/drawingToolbar.tsx`, `deckink.ts`, `core/freehand.ts`), plus the lasso and the

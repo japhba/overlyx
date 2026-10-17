@@ -137,7 +137,7 @@ async function freshWebProject(ctx: BrowserContext, name: string): Promise<void>
   await ctx.request.delete(BASE_URL + '/api/projects/' + encodeURIComponent(name)).catch(() => {});
   for (const d of ['talk', 'poster']) {
     mkdirSync(path.join(PROJECTS_DIR, name, d), { recursive: true });
-    writeFileSync(path.join(PROJECTS_DIR, name, d, 'index.html'), readFileSync(path.join(STARTERS, d, 'index.html'), 'utf8'));
+    writeFileSync(path.join(PROJECTS_DIR, name, d, 'index.html'), readFileSync(path.join(STARTERS, d === 'talk' ? 'slides-1' : 'poster-1', 'index.html'), 'utf8'));
   }
   await ctx.request.get(BASE_URL + '/api/projects');
 }

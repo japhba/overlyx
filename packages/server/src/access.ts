@@ -556,6 +556,7 @@ export function ensureStarterProjects(user: SessionUser): string[] {
       copyTemplate(src, resolveProjectPath(name, '.'));
       registerProject(name, user.id, { title: s.title, kind: 'project' });
       if (s.id === 'web') {
+        // (starterupdates.ts adds these two to older accounts once; the markers keep the folders' old names)
         for (const folder of ['poster-bernstein-2026', 'poster-icml-2026']) {
           db.prepare('INSERT OR IGNORE INTO starter_projects (user_id,template,project,created_at) VALUES (?,?,?,?)').run(user.id, `web:${folder}`, name, Date.now());
         }

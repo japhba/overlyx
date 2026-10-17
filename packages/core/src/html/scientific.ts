@@ -42,6 +42,11 @@ export function templateLabel(t: ScientificTemplate): string {
   return `${t.kind === 'poster' ? 'Poster' : 'Slides'} ${SCIENTIFIC_TEMPLATES.filter(x => x.kind === t.kind).indexOf(t) + 1}`;
 }
 
+/** The example project's folder of a design: "poster-1" … "slides-3" (its label's; starters/web, the example projects). */
+export function templateFolder(t: ScientificTemplate): string {
+  return templateLabel(t).toLowerCase().replace(' ', '-');
+}
+
 export function scientificTemplate(kind: ScientificKind, id?: string): ScientificTemplate {
   const t = id === undefined ? SCIENTIFIC_TEMPLATES.find(t => t.kind === kind) : SCIENTIFIC_TEMPLATES.find(t => t.kind === kind && t.id === id);
   if (!t) throw new Error(`Unknown ${kind} template: ${id}`);

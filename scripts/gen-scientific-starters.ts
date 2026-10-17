@@ -5,12 +5,12 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve, dirname, extname, sep } from 'node:path';
 import { createServer } from 'node:http';
-import { SCIENTIFIC_TEMPLATES, scientificDeck, scientificPoster } from '../packages/core/src/html/scientific.ts';
+import { SCIENTIFIC_TEMPLATES, scientificDeck, scientificPoster, templateFolder } from '../packages/core/src/html/scientific.ts';
 
 const root = resolve(import.meta.dirname, '..');
 const out = resolve(root, 'packages/server/templates/starters/web');
 for (const t of SCIENTIFIC_TEMPLATES) {
-  const folder = t.id === 'research' ? 'talk' : t.id === 'betterposter' ? 'poster' : `${t.kind === 'deck' ? 'talk' : 'poster'}-${t.id}`;
+  const folder = templateFolder(t);
   const dest = resolve(out, folder, 'index.html');
   mkdirSync(dirname(dest), { recursive: true });
   writeFileSync(dest, t.kind === 'deck' ? scientificDeck('', t.id) : scientificPoster('', t.id));
