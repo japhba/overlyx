@@ -15,8 +15,8 @@ export const MIN_WIDTH = 400, MAX_WIDTH = 1600, DEFAULT_WIDTH = 720;
 /** text size of notes and comments in % of the document text */
 export const NOTE_SCALE_MIN = 60, NOTE_SCALE_MAX = 130, NOTE_SCALE_DEFAULT = 90, NOTE_SCALE_STEP = 5;
 
-/** Margin mode's part of the ruler: the notes pane's sash, and − / + for the text size of notes and comments. */
-export interface RulerNotes { sash: SashProps; scale: number; onScale(pct: number): void }
+/** Margin mode's part of the ruler: the notes pane's sash, − / + for the text size of notes and comments, and » to fold the pane away. */
+export interface RulerNotes { sash: SashProps; scale: number; onScale(pct: number): void; onFold?(): void }
 
 export function Ruler({ width, onChange, notes }: { width: number; onChange: (w: number) => void; notes?: RulerNotes }) {
   const bandRef = useRef<HTMLDivElement>(null);
@@ -78,6 +78,7 @@ export function Ruler({ width, onChange, notes }: { width: number; onChange: (w:
             <span class="label" onDblClick={() => notes.onScale(NOTE_SCALE_DEFAULT)}>Notes {notes.scale} %</span>
             <button type="button" data-notes="bigger" disabled={notes.scale >= NOTE_SCALE_MAX} onClick={() => notes.onScale(Math.min(NOTE_SCALE_MAX, notes.scale + NOTE_SCALE_STEP))} title="Larger note text">+</button>
           </span>
+          {notes.onFold && <button type="button" class="ruler-notes-fold" data-notes-fold-ruler onClick={notes.onFold} title="Fold the notes & comments pane away (the Notes tab at the right brings it back)" aria-label="Fold the notes & comments pane">»</button>}
         </div>
       )}
     </div>

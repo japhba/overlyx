@@ -1651,7 +1651,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         {isLyxDoc && <ToolbarDock at="left">{toolbarRows}</ToolbarDock>}
         <div class={'editor-column panes' + (isLyxDoc && shownPanes.length > 1 ? ' split' : '')}>
         <div class={'editor-scroll' + (marginMode && isLyxDoc ? ' margin-mode' : '') + (inkMode && isLyxDoc ? ' ink-pan' : '')} ref={scrollRef} data-pane="doc" style={isLyxDoc ? paneStyle('doc') : undefined} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
-          {(isLyxDoc || isTextTab) && showRuler && <Ruler width={textWidth} onChange={setTextWidth} notes={isLyxDoc && marginMode ? { sash: notesPane.sash, scale: noteScale, onScale: setNoteScale } : undefined} />}
+          {(isLyxDoc || isTextTab) && showRuler && <Ruler width={textWidth} onChange={setTextWidth} notes={isLyxDoc && marginMode ? { sash: notesPane.sash, scale: noteScale, onScale: setNoteScale, onFold: notesFold.fold } : undefined} />}
           {isLyxDoc && notesFold.folded && <NotesUnfoldTab onUnfold={notesFold.unfold} />}
           {docId ? (isPdfTab ? <div class="pdf-tab"><PdfViewer key={docId} url={fileUrl(projectOfDoc(textId!), docPathOf(textId!))} toolbar={<a class="small-btn" href={fileUrl(projectOfDoc(textId!), docPathOf(textId!)) + '?download=1'}>Download</a>} /></div> : isBoardTab ? <BoardEditor key={docId} id={docId} user={user} notify={notify} /> : isHtmlTab ? <DeliverableEditor key={docId} id={docId} user={user} notify={notify} /> : isProjectRoot ? <ProjectRootPanel key={docId} project={docId} notify={notify} onCreated={id => { openInTab(id); setRefreshKey(k => k + 1); }} /> : !isLyxDoc ? <TextEditor key={docId} id={textId!} notify={notify} /> :
             <div class="editor-page">
