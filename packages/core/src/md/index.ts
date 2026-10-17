@@ -7,3 +7,4 @@ export { parseMarkdown, frontMatterEnd, markdownIt, type ParseMarkdownResult, ty
 export { writeMarkdown, writeMarkdownPreserving, markdownWarnings, type WriteMarkdownResult, type MarkdownPreserveCache } from './write.ts';
 export { MARKDOWN_LAYOUTS, HEADING_LAYOUTS, headingLevel, markdownLayoutFor, isMarkdownPath, markdownHeader } from './common.ts';
 export { markdownForLatex } from './latex.ts';
+export { MD_FONTS, mdTypesetting, setFrontMatter, frontMatterVars, type MdFont, type MdTypesetting } from './typesetting.ts';

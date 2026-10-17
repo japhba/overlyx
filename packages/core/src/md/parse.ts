@@ -20,6 +20,7 @@ import type { Token, StateBlock, StateInline } from 'markdown-it';
 import type { Change, FontState, Inset, Item, LyxDocument, Paragraph } from '../lyx/ast.ts';
 import { addAuthor, lyxAuthorId, FONT_KEYS } from '../lyx/ast.ts';
 import { markdownHeader, HEADING_LAYOUTS } from './common.ts';
+import { applyTypesetting, mdTypesetting } from './typesetting.ts';
 
 export interface MdSourceNode {
   /** character range in the source */
@@ -653,8 +654,11 @@ export function parseMarkdown(text: string): ParseMarkdownResult {
   if (!conv.pars.length) { conv.curNode = -1; conv.par('Standard', 0, []); }
   const header = markdownHeader();
   for (const [name, id] of conv.authors) addAuthor(header, id, name, '');
+  const preamble = fmEnd ? text.slice(0, fmEnd).replace(/\r?\n$/, '').split(LINE_RE) : [];
+  // the typesetting the front matter sets, as the document's settings (md/typesetting.ts): the editor shows it
+  applyTypesetting(header, mdTypesetting(preamble));
   return {
-    doc: { preamble: fmEnd ? text.slice(0, fmEnd).replace(/\r?\n$/, '').split(LINE_RE) : [], format: 643, header, body: conv.pars, trailer: [] },
+    doc: { preamble, format: 643, header, body: conv.pars, trailer: [] },
     nodes, parNode: conv.parNode, parSpans: conv.parSpans, warnings: conv.warnings,
   };
 }

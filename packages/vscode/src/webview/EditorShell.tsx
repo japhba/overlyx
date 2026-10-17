@@ -5,7 +5,8 @@ import { editorViewMenu } from '@client/app/editorViewMenu';
 import { buildToolbars, loadToolbarPrefs, mathExecutor, useMathPanels, toolbarClipboard, markValue, type ToolbarId, type ToolbarMode, type ToolbarPrefs } from '@client/app/toolbars';
 import { debounce, hashAuthor, applyAuthorColors, bcp47, suggestLabel, LayoutPicker, documentStats, applyEditorZoom, stepTextZoom, useDocumentViewportZoom, SidebarGrip, restoreSidebarWidths } from '@client/app/shellutil';
 import { setDocumentFonts } from '@client/fonts/editorfont';
-import { setDocumentParagraphs } from '@client/editor/paragraphsep';
+import { setDocumentParagraphs, setDocumentHeadings } from '@client/editor/paragraphsep';
+import { MarkdownSettingsDialog } from '@client/app/MarkdownSettings';
 import { usePresentation } from '@client/app/presentation';
 import { referenceTransaction } from '@client/editor/references';
 import { inkToolbar } from '@client/app/inkToolbar';
@@ -212,7 +213,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   useEffect(() => applyEditorZoom(zoom), [zoom]);
   useDocumentViewportZoom(scrollRef, docId);
   // Settings ▸ Editor ▸ Font ▸ "As in the document" follows the document's roman font
-  useEffect(() => { setDocumentFonts(headerLines); setDocumentParagraphs(headerLines); setLayoutHeader(headerLines); }, [headerLines]);
+  useEffect(() => { setDocumentFonts(headerLines); setDocumentParagraphs(headerLines); setDocumentHeadings(headerLines); setLayoutHeader(headerLines); }, [headerLines]);
   usePresentation();   // View ▸ Presentation mode: Shift+F11 toggles, Esc leaves
   useEffect(() => { editorContext.combined = combined; localStorage.setItem('ol.vscode.combined', combined ? '1' : '0'); }, [combined]);
   useEffect(() => { try { localStorage.setItem('ol.vscode.comments', showComments ? '1' : '0'); } catch { /* ignore */ } }, [showComments]);
@@ -727,6 +728,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
         return <CiteDialog meta={targetMeta} docId={targetId} project={undefined} onClose={close} onAdded={() => {}} onInsert={(keys: string[], cmd: string, b: string, a: string) => { run(C.insertCite(keys, cmd, b, a)); }} />;
       }
       case 'href': return <HrefDialog onClose={close} onInsert={(t: string, n: string) => run(C.insertHref(t, n))} />;
+      case 'mdsettings': return <MarkdownSettingsDialog docId={targetId} onClose={close} onSaved={() => { void api.header(targetId).then(h => updateHeader(targetId, h.headerLines)); }} />;
       case 'settings': return <SettingsDialog docId={targetId} meta={targetMeta} headerLines={docHeaders(targetId)} onClose={close} onSaved={() => api.meta(targetId).then(m => { updateMeta(targetId, m); refreshMacros(view, m.macros); void api.header(targetId).then(h => updateHeader(targetId, h.headerLines)); })} />;
       case 'macros': return <MacrosDialog meta={targetMeta} onClose={close} />;
       case 'tex': return <TexDialog tex={String(dialog.arg ?? '')} onClose={close} />;

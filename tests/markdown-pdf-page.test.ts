@@ -1,7 +1,7 @@
 /** Markdown's PDF: pandoc's page variables in the front matter set the page (core/md/latex.ts). */
 import { describe, it, expect } from 'vitest';
 import { parseMarkdown, markdownForLatex } from '../packages/core/src/md/index.ts';
-import { frontMatterVars } from '../packages/core/src/md/latex.ts';
+import { frontMatterVars, mdTypesetting, setFrontMatter, MD_FONTS } from '../packages/core/src/md/typesetting.ts';
 import { writeTex } from '../packages/core/src/tex/write.ts';
 
 const preambleOf = (md: string) => writeTex(markdownForLatex(parseMarkdown(md).doc), { basename: 'x' }).text.split('\\begin{document}')[0];
@@ -26,5 +26,48 @@ describe('markdown PDF page settings', () => {
     const plain = preambleOf('# Hello\n\nText\n');
     expect(plain).toContain('\\documentclass{article}');
     expect(plain).not.toContain('geometry');
+  });
+
+  it('fonts, math, numbering and run-in headings: the settings the editor reads, and the PDF\'s preamble', () => {
+    const md = '---\nmainfont: Libertinus Serif\nmathfont: Libertinus Math\nnumbersections: true\nheadings: run-in\n---\n\n# Background\n\nText.\n';
+    const { doc } = parseMarkdown(md);
+    // the header the editor gets: fonts, section numbers, run-in headings
+    expect(doc.header.lines).toContain('\\use_non_tex_fonts true');
+    expect(doc.header.lines).toContain('\\font_roman "default" "Libertinus Serif"');
+    expect(doc.header.lines).toContain('\\secnumdepth 3');
+    expect(doc.header.lines).toContain('\\overlyx_headings run-in');
+    const pre = preambleOf(md);
+    expect(pre).toMatch(/\\usepackage\{amsmath\}\n\\usepackage\{unicode-math\}\n\\setmathfont\{Libertinus Math\}/);
+    expect(pre).toContain('\\setmainfont[Ligatures=TeX]{Libertinus Serif}');
+    expect(pre).toContain('\\titleformat{\\section}[runin]');
+    // a name that is not a font name is not written into the LaTeX
+    expect(mdTypesetting(['---', 'mainfont: "x}\\input{/etc/passwd"', '---']).mainfont).toBe('');
+    expect(MD_FONTS.every(f => f.main && f.math)).toBe(true);
+  });
+
+  it('the settings dialog writes keys into the front matter and leaves the rest as it was', () => {
+    const fm = ['---', 'title: My notes', '# a comment', 'geometry:', '  - left=2cm', '  - top=1cm', 'tags: [a, b]', '---'];
+    expect(setFrontMatter(fm, { geometry: 'margin=2cm', mainfont: 'STIX Two Text', mathfont: 'STIX Two Math', headings: 'run-in', numbersections: true }))
+      .toEqual(['---', 'title: My notes', '# a comment', 'geometry: margin=2cm', 'tags: [a, b]', 'mainfont: STIX Two Text', 'mathfont: STIX Two Math', 'headings: run-in', 'numbersections: true', '---']);
+    expect(setFrontMatter(fm, { geometry: null })).toEqual(['---', 'title: My notes', '# a comment', 'tags: [a, b]', '---']);
+    // none yet: one is made; nothing left: it goes
+    expect(setFrontMatter([], { fontsize: '11pt' })).toEqual(['---', 'fontsize: 11pt', '---']);
+    expect(setFrontMatter(['---', 'fontsize: 11pt', '---'], { fontsize: null })).toEqual([]);
+    // values YAML would read as something else are quoted
+    expect(setFrontMatter([], { headings: 'yes' })).toEqual(['---', 'headings: "yes"', '---']);
+  });
+});
+
+
+describe('markdown typesetting changes', () => {
+  it('recomputes the settings from the front matter, back to a markdown document\'s when a key goes', async () => {
+    const { withTypesetting } = await import('../packages/core/src/md/typesetting.ts');
+    const { doc } = parseMarkdown('---\nmainfont: XITS\nnumbersections: true\nheadings: run-in\n---\n\nText\n');
+    const after = withTypesetting(doc.header.lines, ['---', 'fontsize: 12pt', '---']);
+    expect(after).toContain('\\use_non_tex_fonts false');
+    expect(after).toContain('\\secnumdepth -1');
+    expect(after).toContain('\\paperfontsize 12');
+    expect(after.some(l => l.startsWith('\\overlyx_headings'))).toBe(false);
+    expect(after.find(l => l.startsWith('\\font_roman'))).toBe('\\font_roman "default" "default"');
   });
 });

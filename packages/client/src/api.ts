@@ -321,6 +321,10 @@ export const api = {
   /** convert a .lyx file of the project (and its children) to .tex documents */
   importLyx: (project: string, path: string) => req<{ id: string; created: string[]; warnings: string[]; graphics: { src: string; dest: string; ok: boolean; error?: string }[] }>('POST', `/api/projects/${encodeURIComponent(project)}/import`, { path }),
   save: (id: string) => req<{ ok: boolean }>('POST', `/api/docs/${encId(id)}/save`),
+  /** a markdown document's front matter keys (core md/typesetting.ts) and the font pairs offered */
+  mdFrontMatter: (id: string) => req<{ vars: Record<string, string | string[]>; fonts: { label: string; main: string; math: string; hint: string }[] }>('GET', `/api/docs/${encId(id)}/frontmatter`),
+  /** set front matter keys (null takes one out); the document's settings follow */
+  setMdFrontMatter: (id: string, set: Record<string, string | string[] | boolean | null>) => req<{ ok: boolean; vars: Record<string, string | string[]>; headerLines: string[] }>('POST', `/api/docs/${encId(id)}/frontmatter`, { set }),
   setHeader: (id: string, body: { headerLines?: string[]; preamble?: string; set?: Record<string, string> }) => req<{ ok: boolean; headerLines: string[] }>('POST', `/api/docs/${encId(id)}/header`, body),
   /** Mend mechanically-fixable structural damage (managed-block markers); returns what was fixed and what remains. */
   repair: (id: string) => req<{ fixed: string[]; remaining: HealthIssue[] }>('POST', `/api/docs/${encId(id)}/repair`),

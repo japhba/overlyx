@@ -21,6 +21,10 @@ import { Updater, type CheckResult } from './host/updater.ts';
 import { registerTexSymbols } from './host/symbols.ts';
 import { collectFiles, readTextFile } from './host/project.ts';
 import { cachedParseFile, parseFragmentText, masterHeaderFor, type TexContext } from './host/texdoc.ts';
+import { frontMatterEnd, frontMatterVars, setFrontMatter, MD_FONTS, isMarkdownPath } from '@overlyx/core/md/index.ts';
+import { withTypesetting } from '@overlyx/core/md/typesetting.ts';
+/** the front matter's lines at the top of a markdown text (none: []) */
+const frontMatterLines = (text: string) => { const end = frontMatterEnd(text); return end ? text.slice(0, end).replace(/\r?\n$/, '').split(/\r?\n/) : []; };
 import { buildMeta, bibEntriesFor } from './host/meta.ts';
 import { OverlyxTelemetry } from './host/telemetry.ts';
 import { setupAgents } from './host/agents.ts';
@@ -198,6 +202,28 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
           registry.relatedSessions(owner).set(docId, session);
         }
         return { ok: true, headerLines: await session.setHeader(body) };
+      },
+      frontMatterGet: async (docId) => {
+        const l = locate(docId);
+        const text = l.session ? l.session.document.getText() : readTextFile(path.join(l.root, l.relPath));
+        return { vars: frontMatterVars(frontMatterLines(text)), fonts: MD_FONTS };
+      },
+      // the front matter is the top of the file: rewritten there (only the keys set), and the session
+      // takes the file's change up like any other (its settings follow: core md/typesetting.ts)
+      frontMatterSet: async (docId, set) => {
+        const l = locate(docId);
+        if (!isMarkdownPath(l.relPath)) throw new Error('Only markdown documents keep their settings in front matter');
+        const document = await vscode.workspace.openTextDocument(vscode.Uri.file(path.join(l.root, l.relPath)));
+        const text = document.getText();
+        const end = frontMatterEnd(text);
+        const lines = setFrontMatter(frontMatterLines(text), set);
+        const eol = document.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n';
+        const head = lines.length ? lines.join(eol) + eol + (end ? '' : eol) : '';
+        const edit = new vscode.WorkspaceEdit();
+        edit.replace(document.uri, new vscode.Range(document.positionAt(0), document.positionAt(end)), end && !lines.length ? '' : head);
+        await vscode.workspace.applyEdit(edit);
+        const headerLines = withTypesetting(l.session ? l.session.getHeaderLines() : cachedParseFile(l.ctx, l.relPath).doc.header.lines, lines);
+        return { ok: true, vars: frontMatterVars(lines), headerLines };
       },
       outline: (docId) => {
         const l = locate(docId);

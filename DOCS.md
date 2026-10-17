@@ -3006,10 +3006,28 @@ can hold (`core/src/md/`, `client/src/editor/markdown.ts`):
   not available. The source pane is labelled *Markdown*.
 * **PDF**: the model is written as LaTeX (`markdownForLatex`: images on the web become links, raw
   HTML is left out, code languages listings does not know are dropped) and built with LuaLaTeX.
-  The page follows pandoc's variables in the YAML front matter (`frontMatterVars`), so the file
-  comes out alike with `pandoc -o x.pdf`: `geometry` (geometry's options, `margin=2cm` or a list),
-  `papersize` (`a4`, `letter`…), `fontsize` (`11pt`), `linestretch`, `header-includes` (preamble
-  LaTeX, `- |` blocks and ```` ```{=latex} ```` fences too). Without them: article's defaults.
+  The typesetting is set by keys of the YAML front matter (`core/md/typesetting.ts`), pandoc's
+  variables where pandoc has one, so the file comes out alike with `pandoc --pdf-engine=lualatex`:
+  `mainfont` / `sansfont` / `monofont` / `mathfont` (OpenType fonts by name: fontspec, unicode-math),
+  `fontsize`, `papersize`, `geometry` (geometry's options, `margin=2cm` or a list), `linestretch`,
+  `numbersections`, `header-includes` (preamble LaTeX, `- |` blocks and ```` ```{=latex} ```` fences
+  too) — and OverLyX's `headings: run-in` (titlesec runin: a heading runs into its paragraph). They are
+  plain keys, safe to edit by hand; nothing generated sits in the file (17 Oct 2026: the user's idea
+  of a do-not-edit comment block was turned into this — one place, pandoc-compatible, readable).
+  The parse turns them into the document's settings (`applyTypesetting`: `\use_non_tex_fonts` and
+  `\font_roman "default" "Name"`, `\paperfontsize`, `\papersize`, `\spacing other`, `\secnumdepth 3`,
+  `\overlyx_headings run-in`, which the LyX export leaves out), so the editor shows the numbering,
+  the run-in headings (`setDocumentHeadings`, `html[data-headings]`: the heading and its paragraph
+  inline, a block pseudo-element ending the line) and, with Text font ▸ "As in the document", the font;
+  `markdownForLatex` adds the preamble (`typesettingPreamble`: geometry, amsmath + unicode-math,
+  titlesec). *Document ▸ Settings…* of a markdown document (`app/MarkdownSettings.tsx`, and the
+  toolbar's "The document's fonts…") offers `MD_FONTS` — the text faces TeX Live's LuaLaTeX finds by
+  name, each with its math font (Latin Modern, New Computer Modern 10, Libertinus, STIX Two, XITS,
+  XCharter, Erewhon, EB Garamond + Garamond-Math, Fira Sans + Fira Math; TeX Gyre's are not installed
+  as OpenType here) — size, paper, margins, line spacing, numbering and run-in headings; the server's
+  `/docs/*/frontmatter` (`setFrontMatter`: only the keys set change, the rest of the front matter stays
+  as written; `withTypesetting` recomputes the settings) and the VS Code host's (an edit of the file's
+  top) write them. Without them: article's defaults.
 * **VS Code**: the extension opens `.md` with *Open With… ▸ OverLyX Editor* (VS Code's own
   markdown editor stays the default), with the same parser and writer.
 

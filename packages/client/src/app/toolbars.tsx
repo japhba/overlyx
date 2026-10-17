@@ -304,7 +304,7 @@ export function buildToolbars(ctx: ToolbarContext): Toolbars {
       { label: 'Serif (Roman)', html: face('var(--editor-font), serif'), active: family === 'roman', action: () => run(C.setValueMark('family', 'roman')) },
       { label: 'Sans serif', html: face('var(--sf-font, system-ui), sans-serif'), active: family === 'sans', action: () => run(C.setValueMark('family', 'sans')) },
       { label: 'Monospace (Typewriter)', html: face('ui-monospace, monospace'), active: family === 'typewriter', action: () => run(C.setValueMark('family', 'typewriter')) },
-      ...(docId ? [{ label: 'The document’s fonts…', html: face('var(--editor-font), serif'), action: () => setDialog({ name: 'settings', arg: 'fonts' }) }] : []),
+      ...(docId ? [{ label: 'The document’s fonts…', html: face('var(--editor-font), serif'), action: () => setDialog(isMarkdownDoc(docId) ? { name: 'mdsettings' } : { name: 'settings', arg: 'fonts' }) }] : []),
     ] },
   };
   const boldBtn: ToolButton = { id: 'bold', title: 'Bold (Ctrl+B)', icon: 'bold', action: () => run(C.fontCommands.bold), active: markActive('series', 'bold') };

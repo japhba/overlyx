@@ -36,7 +36,8 @@ import { buildToolbars, loadToolbarPrefs, mathExecutor, useMathPanels, toolbarCl
 import { debounce, hashAuthor, applyAuthorColors, bcp47, suggestLabel, LayoutPicker, documentStats, applyEditorZoom, stepTextZoom, useDocumentViewportZoom, SidebarGrip, restoreSidebarWidths } from './shellutil';
 import { chooseLyxImport } from './lyximport';
 import { setDocumentFonts } from '../fonts/editorfont';
-import { setDocumentParagraphs } from '../editor/paragraphsep';
+import { setDocumentParagraphs, setDocumentHeadings } from '../editor/paragraphsep';
+import { MarkdownSettingsDialog } from './MarkdownSettings';
 import { Outline, buildOutline, type OutlineItem } from './Outline';
 import { Comments } from './Comments';
 import { Versions } from './Versions';
@@ -569,7 +570,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   useEffect(() => applyEditorZoom(zoom), [zoom]);
   useDocumentViewportZoom(scrollRef, docId);
   // Settings ▸ Editor ▸ Font ▸ "As in the document" follows the document's roman font
-  useEffect(() => { setDocumentFonts(headerLines); setDocumentParagraphs(headerLines); setLayoutHeader(headerLines); }, [headerLines]);
+  useEffect(() => { setDocumentFonts(headerLines); setDocumentParagraphs(headerLines); setDocumentHeadings(headerLines); setLayoutHeader(headerLines); }, [headerLines]);
   // Ctrl/Cmd +/- zoom the document text, never the browser chrome — wherever the focus is (formula
   // fields, panels). Ctrl+0 is a paragraph style now (Part, like LyX's Alt+P 0); reset via the status bar.
   useEffect(() => {
@@ -1484,6 +1485,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         return <CiteDialog meta={meta} docId={docId} project={viewOnly ? undefined : project} onClose={close} onAdded={onBibAdded} onInsert={(keys, cmd, b, a, entries) => { rememberBib(entries); run(C.insertCite(keys, cmd, b, a)); noBibliographyHint(); }} />;
       }
       case 'href': return <HrefDialog onClose={close} onInsert={(t, n) => run(C.insertHref(t, n))} />;
+      case 'mdsettings': return <MarkdownSettingsDialog docId={docId} onClose={close} />;
       case 'settings': return <SettingsDialog docId={docId} meta={meta} headerLines={headerLines} tab={typeof dialog.arg === 'string' ? dialog.arg : undefined} onClose={close} onSaved={() => api.meta(docId).then(m => { setMeta(m); editorContext.meta = m; if (masterView) refreshMacros(masterView, m.macros); })} />;
       case 'macros': return <MacrosDialog meta={meta} onClose={close} />;
       case 'airepair': return docId ? <AiRepairDialog docId={docId} onClose={close} onApplied={() => api.meta(docId).then(m => { setMeta(m); editorContext.meta = m; })} /> : null;

@@ -279,6 +279,8 @@ export function documentMenus({ view, meta, run, runView, setDialog, textColor, 
         { label: 'Start Appendix Here', checked: !!(view && C.currentParagraph(view.state)?.node.attrs.appendix), action: () => run(C.toggleAppendix) },
         { label: 'Math macros…', action: () => setDialog({ name: 'macros' }) },
       ]),
+      // a markdown document's typesetting: its front matter's keys (app/MarkdownSettings.tsx)
+      ...md<MenuEntry>([{ label: 'Settings…', action: () => setDialog({ name: 'mdsettings' }) }]),
       { label: 'Statistics (word count)…', action: () => setDialog({ name: 'stats' }) },
       { label: 'Change tracking', shortcut: 'Ctrl+Shift+E', checked: tracking, action: toggleTracking },
       { sep: true },

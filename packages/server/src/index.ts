@@ -26,7 +26,8 @@ import { deliverablePdf } from './render.ts';
 import { starterFor, isHtmlPath, DELIVERABLE_KINDS, type DeliverableKind } from '@overlyx/core/html/deliverable.ts';
 import { refreshScientificStarters } from './starterupdates.ts';
 import { listProjects, resolveProjectPath, assertWritableRelPath, projectDir, createProject, newDocumentText, newMarkdownText, fileKind, isBackupFile, isDocumentFile } from './projects.ts';
-import { isMarkdownPath } from '@overlyx/core/md/index.ts';
+import { isMarkdownPath, frontMatterVars, setFrontMatter, MD_FONTS } from '@overlyx/core/md/index.ts';
+import { withTypesetting } from '@overlyx/core/md/typesetting.ts';
 import { snippetSvg, snippetFile } from './snippets.ts';
 import { importLyxFile, parseFragmentText, newLayoutDocumentText, withDocumentSettings, NO_INDENT_SETTINGS } from './texdoc.ts';
 import { importLyxUpload } from './lyximport.ts';
@@ -187,7 +188,7 @@ const needProject = (min: Role) => (req: express.Request, res: express.Response,
  */
 api.all('/docs/*', (req, res, next) => {
   const full = String((req.params as any)[0] ?? '');
-  const m = /^(.*?)(?:\/(meta|tex|lyx|outline|source|bib|reset|save|header|versions(?:\/\d+(?:\/restore)?)?|export(?:\/cancel)?|pdf|build|folds|external|synctex\/(?:view|edit)))?$/.exec(full)!;
+  const m = /^(.*?)(?:\/(meta|tex|lyx|outline|source|bib|reset|save|header|frontmatter|versions(?:\/\d+(?:\/restore)?)?|export(?:\/cancel)?|pdf|build|folds|external|synctex\/(?:view|edit)))?$/.exec(full)!;
   // an id from before a project moved (namespaces.ts) names the document under its current key
   const id = canonicalDocId(decodeURIComponent(m[1]));
   const action = m[2] ?? '';
@@ -1308,6 +1309,46 @@ api.post('/docs/*/header', async (req, res) => {
     doc.ydoc.transact(() => { doc.meta.set('header', JSON.stringify(lines)); }, 'header');
     res.json({ ok: true, headerLines: lines });
   } catch (e) { res.status(400).json({ error: String(e) }); }
+  });
+  headerQueue.set(id, job);
+  await job;
+  if (headerQueue.get(id) === job) headerQueue.delete(id);
+});
+
+/**
+ * A markdown document's typesetting (core md/typesetting.ts): its front matter's keys — GET them, or
+ * POST `{ set: { key: value | null } }` (null takes a key out). The front matter is rewritten around
+ * them (the rest stays as written) and the settings it amounts to follow, in one change: the editor
+ * shows the fonts, numbering and headings at once, and the file is saved with the new front matter.
+ */
+api.get('/docs/*/frontmatter', async (req, res) => {
+  try {
+    const id = docId(req);
+    if (!isMarkdownPath(id)) { res.status(400).json({ error: 'Only markdown documents keep their settings in front matter' }); return; }
+    const doc = await manager.open(id);
+    res.json({ vars: frontMatterVars(doc.getMeta().preamble), fonts: MD_FONTS });
+  } catch (e) { res.status(400).json({ error: String(e) }); }
+});
+api.post('/docs/*/frontmatter', async (req, res) => {
+  const id = docId(req);
+  const prev = headerQueue.get(id) ?? Promise.resolve();
+  const job = prev.catch(() => {}).then(async () => {
+    try {
+      if (!isMarkdownPath(id)) { res.status(400).json({ error: 'Only markdown documents keep their settings in front matter' }); return; }
+      const set = req.body?.set;
+      if (!set || typeof set !== 'object') { res.status(400).json({ error: 'nothing to set' }); return; }
+      const values: Record<string, string | string[] | boolean | null> = {};
+      for (const [k, v] of Object.entries(set as Record<string, unknown>)) {
+        if (!/^[A-Za-z][\w-]{0,40}$/.test(k)) continue;
+        values[k] = v === null || typeof v === 'boolean' ? v : Array.isArray(v) ? v.map(String).slice(0, 40) : String(v).slice(0, 200);
+      }
+      const doc = await manager.open(id);
+      const meta = doc.getMeta();
+      const preamble = setFrontMatter(meta.preamble, values);
+      const headerLines = withTypesetting(meta.headerLines, preamble);
+      doc.ydoc.transact(() => { doc.meta.set('preamble', JSON.stringify(preamble)); doc.meta.set('header', JSON.stringify(headerLines)); }, 'header');
+      res.json({ ok: true, vars: frontMatterVars(preamble), headerLines });
+    } catch (e) { res.status(400).json({ error: String(e) }); }
   });
   headerQueue.set(id, job);
   await job;

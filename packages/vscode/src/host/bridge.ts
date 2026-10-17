@@ -26,6 +26,9 @@ export interface BridgeDelegate {
   clip(docId: string, latex: string): Promise<{ blocks: unknown[]; warnings: string[] }>;
   headerGet(docId: string): Promise<{ headerLines: string[] }>;
   headerSet(docId: string, body: { headerLines?: string[]; preamble?: string; set?: Record<string, string> }): Promise<{ ok: boolean; headerLines: string[] }>;
+  /** a markdown document's front matter keys (core md/typesetting.ts): read them, set some (null takes one out) */
+  frontMatterGet(docId: string): Promise<{ vars: Record<string, string | string[]>; fonts: unknown[] }>;
+  frontMatterSet(docId: string, set: Record<string, string | string[] | boolean | null>): Promise<{ ok: boolean; vars: Record<string, string | string[]>; headerLines: string[] }>;
   outline(docId: string): { headings: unknown[]; mtime: number };
   bibSearch(docId: string, q: string, keys: string[], limit: number): Promise<{ entries: unknown[]; total: number; matches?: number }>;
   exportDoc(docId: string, format: string): Promise<Record<string, unknown>>;
@@ -135,6 +138,8 @@ export class Bridge {
       if (kind === 'outline') { send(res, 200, d.outline(docId)); return; }
       if (kind === 'header' && req.method === 'GET') { send(res, 200, await d.headerGet(docId)); return; }
       if (kind === 'header' && req.method === 'POST') { send(res, 200, await d.headerSet(docId, await body(req))); return; }
+      if (kind === 'frontmatter' && req.method === 'GET') { send(res, 200, await d.frontMatterGet(docId)); return; }
+      if (kind === 'frontmatter' && req.method === 'POST') { const b = await body(req); send(res, 200, await d.frontMatterSet(docId, b?.set && typeof b.set === 'object' ? b.set : {})); return; }
       if (kind === 'clip' && req.method === 'POST') {
         const b = await body(req);
         const latex = String(b?.latex ?? '');
