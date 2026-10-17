@@ -53,6 +53,7 @@ import { replaceInSource } from './docedit.ts';
 import { canonicalProject, canonicalDocId } from './namespaces.ts';
 import nodePath from 'node:path';
 import { manager, HtmlDoc } from './docs.ts';
+import { markdownStyle, setMarkdownStyle } from './mdstyle.ts';
 import { isHtmlPath, deliverableInfo, starterFor, DELIVERABLE_GUIDE, DELIVERABLE_KINDS, type DeliverableKind } from '@overlyx/core/html/deliverable.ts';
 import { createDeliverable } from './deliverables.ts';
 import { renderPages, type DeliverableReport } from './render.ts';
@@ -557,7 +558,7 @@ async function fetchDoc(user: SessionUser, id: string) {
  * changes are the default (reviewable), but they must never leave a document broken or an agent
  * stuck: on any problem it falls back to direct edits, and the git history is the way back.
  */
-export const MCP_INSTRUCTIONS = `OverLyX projects are LaTeX documents that people may be editing in a browser at the same time. You edit the files on the OverLyX server directly through these tools; there is nothing to sync.
+export const MCP_INSTRUCTIONS = `OverLyX projects are LaTeX documents that people may be editing in a browser at the same time. You edit the files on the OverLyX server directly through these tools; there is nothing to sync. A markdown (.md) document's look — fonts, margins, numbering, heading styles — is set with set_markdown_style (its front matter), not by LaTeX in the text.
 
 Workflow: list_projects → list_documents / list_files → read_document (a document's full LaTeX source) or read_file (other text files) → edit → build_pdf.
 
@@ -827,6 +828,28 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
       tracked: z.boolean().optional().describe('true (default): a tracked change for review. false: applied directly, no tracked-change marks — the fallback whenever tracked editing runs into any problem (see the server instructions); the previous state stays in the project history'),
     },
   }, async ({ project: p, path, tex, tracked }) => { try { const project = need(p, 'edit'); return ok(await traced(project, path, () => writeDocument(project, userId, agentName, path, tex, tracked ?? trackedDefault(project)))); } catch (e) { return fail(e); } });
+
+  register('set_markdown_style', {
+    description: "Change how a markdown (.md) document is typeset — in the editor and its PDF — by setting keys of its YAML front matter (pandoc's variables, so the file comes out alike with pandoc --pdf-engine=lualatex; only these keys change, the rest of the front matter stays). Call it with style {} to read the current keys and the fonts on offer. Keys (null removes one): " +
+      "mainfont / sansfont / monofont / mathfont: OpenType fonts by name — pairs that work: Latin Modern Roman + Latin Modern Math, New Computer Modern 10 + New Computer Modern Math, Libertinus Serif + Libertinus Math, STIX Two Text + STIX Two Math, XITS + XITS Math, XCharter + XCharter Math, Erewhon + Erewhon Math, EB Garamond + Garamond-Math, Fira Sans + Fira Math; " +
+      "fontsize: 10pt | 11pt | 12pt; papersize: a4 | letter | a5 …; geometry: geometry's options, e.g. \"margin=2cm\" or [\"left=3cm\", \"top=2cm\"]; linestretch: e.g. 1.15; numbersections: true; header-includes: [LaTeX lines for the preamble]; " +
+      "headings: \"run-in\" | \"block\", or an object of heading keys for every level — display (block | run-in), font (an OpenType name, e.g. \"Fira Sans\"), size (small | normal | large | larger | huge), weight (bold | normal), shape (upright | italic), case (normal | smallcaps | uppercase), color (\"#rrggbb\"), align (left | center), rule (none | below | above) — plus section / subsection / subsubsection / paragraph objects with a level's own keys, e.g. {\"font\": \"Fira Sans\", \"color\": \"#1f4e79\", \"section\": {\"size\": \"larger\", \"rule\": \"below\", \"case\": \"uppercase\"}, \"subsection\": {\"display\": \"run-in\", \"shape\": \"italic\"}}. " +
+      "A headings object replaces the whole headings key. Not a tracked change (like a LaTeX preamble); the project history keeps the previous front matter.",
+    inputSchema: {
+      ...projArg,
+      path: z.string().describe('Project-relative path of a .md document'),
+      style: z.record(z.string(), z.any()).describe('Front matter keys to set (see the description); {} to read them'),
+    },
+  }, async ({ project: p, path, style }) => {
+    try {
+      const keys = Object.keys(style ?? {});
+      const project = need(p, keys.length ? 'edit' : 'view');
+      const id = `${project}/${String(path).replace(/^\/+/, '')}`;
+      if (!keys.length) return ok(await markdownStyle(id));
+      const r = await setMarkdownStyle(id, style as Record<string, unknown>, true);
+      return ok({ vars: r.vars, note: 'The editor shows the new look at once; build_pdf for the PDF.' });
+    } catch (e) { return fail(e); }
+  });
 
   register('create_document', {
     description: 'Create a new .tex document from the standard template (write_document with full source also creates).',

@@ -196,6 +196,8 @@ export interface SyncClone { name: string; username: string; app: 'vscode' | 'cl
 /** what keeps a document in step from elsewhere: synced clones of its project, its Google Docs link */
 export interface ExternalSync { clones: SyncClone[]; google: { url: string; auto: boolean; lastSync: number | null; lastError: string | null } | null }
 export type GdocsPicker = { stub: true; files: { id: string; name: string }[] } | { stub?: false; apiKey: string; appId: string; token: string };
+/** a front matter value of a markdown document (core md/typesetting.ts FMValue) */
+export type MdFrontMatterValue = string | string[] | { [key: string]: MdFrontMatterValue };
 export interface GdocsTab { id: string; title: string; level: number; parent: string | null }
 
 /** keys of the projects the server listed for this user (a link naming one needs no resolveId) */
@@ -322,9 +324,9 @@ export const api = {
   importLyx: (project: string, path: string) => req<{ id: string; created: string[]; warnings: string[]; graphics: { src: string; dest: string; ok: boolean; error?: string }[] }>('POST', `/api/projects/${encodeURIComponent(project)}/import`, { path }),
   save: (id: string) => req<{ ok: boolean }>('POST', `/api/docs/${encId(id)}/save`),
   /** a markdown document's front matter keys (core md/typesetting.ts) and the font pairs offered */
-  mdFrontMatter: (id: string) => req<{ vars: Record<string, string | string[]>; fonts: { label: string; main: string; math: string; hint: string }[] }>('GET', `/api/docs/${encId(id)}/frontmatter`),
+  mdFrontMatter: (id: string) => req<{ vars: Record<string, MdFrontMatterValue>; fonts: { label: string; main: string; math: string; hint: string }[] }>('GET', `/api/docs/${encId(id)}/frontmatter`),
   /** set front matter keys (null takes one out); the document's settings follow */
-  setMdFrontMatter: (id: string, set: Record<string, string | string[] | boolean | null>) => req<{ ok: boolean; vars: Record<string, string | string[]>; headerLines: string[] }>('POST', `/api/docs/${encId(id)}/frontmatter`, { set }),
+  setMdFrontMatter: (id: string, set: Record<string, unknown>) => req<{ ok: boolean; vars: Record<string, MdFrontMatterValue>; headerLines: string[] }>('POST', `/api/docs/${encId(id)}/frontmatter`, { set }),
   setHeader: (id: string, body: { headerLines?: string[]; preamble?: string; set?: Record<string, string> }) => req<{ ok: boolean; headerLines: string[] }>('POST', `/api/docs/${encId(id)}/header`, body),
   /** Mend mechanically-fixable structural damage (managed-block markers); returns what was fixed and what remains. */
   repair: (id: string) => req<{ fixed: string[]; remaining: HealthIssue[] }>('POST', `/api/docs/${encId(id)}/repair`),

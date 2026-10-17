@@ -1,7 +1,7 @@
 /** Markdown's PDF: pandoc's page variables in the front matter set the page (core/md/latex.ts). */
 import { describe, it, expect } from 'vitest';
 import { parseMarkdown, markdownForLatex } from '../packages/core/src/md/index.ts';
-import { frontMatterVars, mdTypesetting, setFrontMatter, MD_FONTS } from '../packages/core/src/md/typesetting.ts';
+import { frontMatterVars, mdTypesetting, setFrontMatter, headingStyles, MD_FONTS } from '../packages/core/src/md/typesetting.ts';
 import { writeTex } from '../packages/core/src/tex/write.ts';
 
 const preambleOf = (md: string) => writeTex(markdownForLatex(parseMarkdown(md).doc), { basename: 'x' }).text.split('\\begin{document}')[0];
@@ -35,7 +35,7 @@ describe('markdown PDF page settings', () => {
     expect(doc.header.lines).toContain('\\use_non_tex_fonts true');
     expect(doc.header.lines).toContain('\\font_roman "default" "Libertinus Serif"');
     expect(doc.header.lines).toContain('\\secnumdepth 3');
-    expect(doc.header.lines).toContain('\\overlyx_headings run-in');
+    expect(JSON.parse(doc.header.lines.find(l => l.startsWith('\\overlyx_headings '))!.slice(18)).section).toEqual({ display: 'run-in' });
     const pre = preambleOf(md);
     expect(pre).toMatch(/\\usepackage\{amsmath\}\n\\usepackage\{unicode-math\}\n\\setmathfont\{Libertinus Math\}/);
     expect(pre).toContain('\\setmainfont[Ligatures=TeX]{Libertinus Serif}');
@@ -69,5 +69,32 @@ describe('markdown typesetting changes', () => {
     expect(after).toContain('\\paperfontsize 12');
     expect(after.some(l => l.startsWith('\\overlyx_headings'))).toBe(false);
     expect(after.find(l => l.startsWith('\\font_roman'))).toBe('\\font_roman "default" "default"');
+  });
+});
+
+describe('heading styles (headings: in the front matter)', () => {
+  const fm = ['---', 'title: x', 'headings:', '  display: run-in', '  font: Fira Sans', '  color: "#1F4E79"', '  case: smallcaps', '  section:', '    display: block', '    size: larger', '    rule: below', '  subsection: { shape: italic, align: center }', 'mainfont: XITS', '---'];
+  it('reads keys of their own, nested or as { … }, next to the plain ones', () => {
+    expect(frontMatterVars(fm)).toEqual({ title: 'x', mainfont: 'XITS', headings: { display: 'run-in', font: 'Fira Sans', color: '#1F4E79', case: 'smallcaps', section: { display: 'block', size: 'larger', rule: 'below' }, subsection: { shape: 'italic', align: 'center' } } });
+  });
+  it('every level takes the keys for all, then its own; unknown values are left out', () => {
+    const h = headingStyles(frontMatterVars(fm).headings)!;
+    expect(h.section).toEqual({ display: 'block', font: 'Fira Sans', color: '#1f4e79', case: 'smallcaps', size: 'larger', rule: 'below' });
+    expect(h.paragraph).toEqual({ display: 'run-in', font: 'Fira Sans', color: '#1f4e79', case: 'smallcaps' });
+    expect(headingStyles({ size: 'gigantic', color: 'red', font: 'x}\\bad' })).toBeNull();
+    expect(headingStyles('run-in')!.subsection).toEqual({ display: 'run-in' });
+    expect(headingStyles(undefined)).toBeNull();
+  });
+  it('becomes titlesec in the PDF', () => {
+    const pre = preambleOf(fm.join('\n') + '\n\n# A\n\nText.\n');
+    expect(pre).toContain('\\newfontfamily\\olheadingfonta{Fira Sans}');
+    expect(pre).toContain('\\titleformat{\\section}[hang]{\\normalfont\\olheadingfonta\\Large\\bfseries\\scshape\\color[HTML]{1F4E79}}{\\thesection}{1em}{}[\\vspace{.4ex}\\titlerule]');
+    // (the subsection runs in, as all levels but the section do: a run-in heading is not centred)
+    expect(pre).toContain('\\titleformat{\\subsection}[runin]{\\normalfont\\olheadingfonta\\normalsize\\bfseries\\itshape\\scshape\\color[HTML]{1F4E79}}');
+    expect(pre).toContain('\\titleformat{\\subsubsection}[runin]{\\normalfont\\olheadingfonta\\normalsize\\bfseries\\scshape\\color[HTML]{1F4E79}}');
+  });
+  it('is written back as keys of their own', () => {
+    expect(setFrontMatter(['---', 'title: x', 'headings: run-in', '---'], { headings: { display: 'block', color: '#336699', section: { size: 'huge' } } }))
+      .toEqual(['---', 'title: x', 'headings:', '  display: block', '  color: "#336699"', '  section:', '    size: huge', '---']);
   });
 });

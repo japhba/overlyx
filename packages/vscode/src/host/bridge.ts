@@ -27,8 +27,8 @@ export interface BridgeDelegate {
   headerGet(docId: string): Promise<{ headerLines: string[] }>;
   headerSet(docId: string, body: { headerLines?: string[]; preamble?: string; set?: Record<string, string> }): Promise<{ ok: boolean; headerLines: string[] }>;
   /** a markdown document's front matter keys (core md/typesetting.ts): read them, set some (null takes one out) */
-  frontMatterGet(docId: string): Promise<{ vars: Record<string, string | string[]>; fonts: unknown[] }>;
-  frontMatterSet(docId: string, set: Record<string, string | string[] | boolean | null>): Promise<{ ok: boolean; vars: Record<string, string | string[]>; headerLines: string[] }>;
+  frontMatterGet(docId: string): Promise<{ vars: Record<string, unknown>; fonts: unknown[] }>;
+  frontMatterSet(docId: string, set: Record<string, unknown>): Promise<{ ok: boolean; vars: Record<string, unknown>; headerLines: string[] }>;
   outline(docId: string): { headings: unknown[]; mtime: number };
   bibSearch(docId: string, q: string, keys: string[], limit: number): Promise<{ entries: unknown[]; total: number; matches?: number }>;
   exportDoc(docId: string, format: string): Promise<Record<string, unknown>>;

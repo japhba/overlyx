@@ -5,18 +5,22 @@
  * keys changed here and the settings follow at once (the editor's fonts, numbering, run-in headings).
  */
 import { useEffect, useState } from 'preact/hooks';
-import { api } from '../api';
+import { api, type MdFrontMatterValue } from '../api';
 import { Dialog } from './Dialogs';
 
-type Vars = Record<string, string | string[]>;
+type Vars = Record<string, MdFrontMatterValue>;
 type Font = { label: string; main: string; math: string; hint: string };
-const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] ?? '' : v ?? '').trim();
+type HeadingKeys = { [key: string]: MdFrontMatterValue };
+const one = (v: MdFrontMatterValue | undefined) => (typeof v === 'string' ? v : Array.isArray(v) ? v[0] ?? '' : '').trim();
+/** `headings` as keys (`run-in` is { display: run-in }) — the levels' own and the rest an agent or the file set stay */
+const headingKeys = (v: MdFrontMatterValue | undefined): HeadingKeys => (typeof v === 'string' ? (/^run-in$/i.test(v.trim()) ? { display: 'run-in' } : {}) : v && !Array.isArray(v) ? { ...v } : {});
 
 export function MarkdownSettingsDialog({ docId, onClose, onSaved }: { docId: string; onClose: () => void; onSaved?: () => void }) {
   const [fonts, setFonts] = useState<Font[]>([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [v, setV] = useState({ main: '', math: '', size: '', paper: '', margins: '', stretch: '', numbered: false, runIn: false });
+  const [v, setV] = useState({ main: '', math: '', size: '', paper: '', margins: '', stretch: '', numbered: false, runIn: false, headingFont: '', headingColor: '' });
+  const [headings, setHeadings] = useState<HeadingKeys>({});
   useEffect(() => {
     api.mdFrontMatter(docId).then(r => {
       const vars: Vars = r.vars;
@@ -24,8 +28,10 @@ export function MarkdownSettingsDialog({ docId, onClose, onSaved }: { docId: str
       const geometry = Array.isArray(vars.geometry) ? vars.geometry : one(vars.geometry) ? one(vars.geometry).split(/,\s*/) : [];
       // `margin=2cm` alone shows as "2cm"; other geometry options as they are
       const margins = geometry.length === 1 && /^margin=/.test(geometry[0]) ? geometry[0].slice(7) : geometry.join(', ');
+      const h = headingKeys(vars.headings);
+      setHeadings(h);
       setV({ main: one(vars.mainfont), math: one(vars.mathfont), size: one(vars.fontsize), paper: one(vars.papersize).toLowerCase(), margins, stretch: one(vars.linestretch),
-        numbered: one(vars.numbersections) === 'true', runIn: one(vars.headings).toLowerCase() === 'run-in' });
+        numbered: one(vars.numbersections) === 'true', runIn: one(h.display) === 'run-in', headingFont: one(h.font), headingColor: one(h.color) });
     }).catch(e => setError((e as Error).message));
   }, [docId]);
   const set = (p: Partial<typeof v>) => setV(x => ({ ...x, ...p }));
@@ -34,6 +40,11 @@ export function MarkdownSettingsDialog({ docId, onClose, onSaved }: { docId: str
     setBusy(true); setError('');
     try {
       const margins = v.margins.trim();
+      // the heading keys changed here, the others (a level's own, case, rule… — Document ▸ Settings does not show them all) kept
+      const h: HeadingKeys = { ...headings };
+      const put = (k: string, val: string) => { if (val) h[k] = val; else delete h[k]; };
+      put('display', v.runIn ? 'run-in' : ''); put('font', v.headingFont); put('color', v.headingColor);
+      const keys = Object.keys(h);
       await api.setMdFrontMatter(docId, {
         mainfont: v.main || null,
         // the math font drawn for the text font, written out (pandoc needs it named)
@@ -43,7 +54,7 @@ export function MarkdownSettingsDialog({ docId, onClose, onSaved }: { docId: str
         geometry: !margins ? null : margins.includes('=') ? margins.split(/\s*,\s*/).filter(Boolean) : `margin=${margins}`,
         linestretch: v.stretch && v.stretch !== '1' ? v.stretch : null,
         numbersections: v.numbered ? true : null,
-        headings: v.runIn ? 'run-in' : null,
+        headings: !keys.length ? null : keys.length === 1 && h.display === 'run-in' ? 'run-in' : h,
       });
       onSaved?.();
       onClose();
@@ -84,6 +95,14 @@ export function MarkdownSettingsDialog({ docId, onClose, onSaved }: { docId: str
         </select>)}
         <label class="md-set-check"><input type="checkbox" data-md-numbered checked={v.numbered} onChange={e => set({ numbered: (e.target as HTMLInputElement).checked })} /> Numbered sections</label>
         <label class="md-set-check"><input type="checkbox" data-md-runin checked={v.runIn} onChange={e => set({ runIn: (e.target as HTMLInputElement).checked })} /> Headings run into their paragraph</label>
+        {row('Heading font', <select data-md-heading-font value={v.headingFont} onChange={e => set({ headingFont: (e.target as HTMLSelectElement).value })}>
+          <option value="">As the text</option>
+          {fonts.map(f => <option key={f.main} value={f.main}>{f.label}</option>)}
+          {v.headingFont && !fonts.some(f => f.main === v.headingFont) && <option value={v.headingFont}>{v.headingFont}</option>}
+        </select>)}
+        {row('Heading colour', <span class="md-set-inline"><input type="color" data-md-heading-color value={v.headingColor || '#000000'} onInput={e => set({ headingColor: (e.target as HTMLInputElement).value })} />
+          {v.headingColor ? <button type="button" class="small-btn" onClick={() => set({ headingColor: '' })}>As the text</button> : <small class="hint">as the text</small>}</span>)}
+        <p class="hint">More heading styles — size, small capitals, a rule, centring, each level its own — go in the front matter's <code>headings</code> (see DOCS), or ask an agent: it sets them with <code>set_markdown_style</code>.</p>
         {error && <p class="error">{error}</p>}
       </div>
     </Dialog>

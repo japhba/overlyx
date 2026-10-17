@@ -164,6 +164,7 @@ const ROMAN_FACES: Record<string, string> = {
   palatino: 'pagella', ppl: 'pagella', pplj: 'pagella', mathpple: 'pagella', tgpagella: 'pagella', 'tex gyre pagella': 'pagella', 'palatino linotype': 'palatino', p052: 'pagella',
   bookman: 'bonum', pbk: 'bonum', tgbonum: 'bonum', 'tex gyre bonum': 'bonum', newcent: 'schola', pnc: 'schola', tgschola: 'schola', 'tex gyre schola': 'schola', 'century schoolbook': 'schola',
   dejavuserif: 'dejavu', 'dejavu serif': 'dejavu', dejavuserifcondensed: 'dejavu',
+  'fira sans': 'fira', 'new computer modern 10': 'newcm', 'latin modern': 'cm',
   charter: 'xcharter', xcharter: 'xcharter', 'md-charter': 'xcharter', mdbch: 'xcharter', 'bitstream charter': 'xcharter', 'charis sil': 'charis',
   utopia: 'erewhon', futs: 'erewhon', futj: 'erewhon', 'md-utopia': 'erewhon', mdput: 'erewhon', erewhon: 'erewhon', heuristica: 'erewhon',
   cochineal: 'crimson', crimson: 'crimson', crimsonpro: 'crimson', crimsonpromedium: 'crimson', crimsonprolight: 'crimson', 'crimson pro': 'crimson', 'crimson text': 'crimson',
@@ -210,6 +211,12 @@ function headerValue(headerLines: string[], key: string): string {
  * The editor face closest to a document's roman font: its font set's face, else a known relative,
  * else Computer Modern. With non-TeX fonts (fontspec) the system font name counts.
  */
+/** the editor face drawn for a font name (a markdown document's front matter: mainfont, headings' font), or null */
+export function faceForFontName(name: string): EditorFace | null {
+  const id = ROMAN_FACES[name.trim().toLowerCase()];
+  return id ? editorFace(id) : null;
+}
+
 export function documentFace(headerLines: string[]): string {
   const [tex = 'default', nonTex = 'default'] = fontValues(headerValue(headerLines, 'font_roman'));
   const name = headerValue(headerLines, 'use_non_tex_fonts') === 'true' ? nonTex : tex;

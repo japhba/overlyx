@@ -3011,7 +3011,12 @@ can hold (`core/src/md/`, `client/src/editor/markdown.ts`):
   `mainfont` / `sansfont` / `monofont` / `mathfont` (OpenType fonts by name: fontspec, unicode-math),
   `fontsize`, `papersize`, `geometry` (geometry's options, `margin=2cm` or a list), `linestretch`,
   `numbersections`, `header-includes` (preamble LaTeX, `- |` blocks and ```` ```{=latex} ```` fences
-  too) — and OverLyX's `headings: run-in` (titlesec runin: a heading runs into its paragraph). They are
+  too) — and OverLyX's `headings`: `run-in`, or keys for every level (display block | run-in, font,
+  size small | normal | large | larger | huge, weight, shape upright | italic, case normal | smallcaps |
+  uppercase, color #rrggbb, align left | center, rule none | below | above) and under `section:` …
+  `paragraph:` a level's own, nested or `{ … }` (`headingStyles`; titlesec in the PDF, `headingsLatex`;
+  the editor draws them from `\overlyx_headings {json}` with one generated <style>, `headingCss` in
+  editor/paragraphsep.ts — note `:has()` cannot be nested: a sibling chain inside one `:has()`). They are
   plain keys, safe to edit by hand; nothing generated sits in the file (17 Oct 2026: the user's idea
   of a do-not-edit comment block was turned into this — one place, pandoc-compatible, readable).
   The parse turns them into the document's settings (`applyTypesetting`: `\use_non_tex_fonts` and
@@ -3027,7 +3032,10 @@ can hold (`core/src/md/`, `client/src/editor/markdown.ts`):
   as OpenType here) — size, paper, margins, line spacing, numbering and run-in headings; the server's
   `/docs/*/frontmatter` (`setFrontMatter`: only the keys set change, the rest of the front matter stays
   as written; `withTypesetting` recomputes the settings) and the VS Code host's (an edit of the file's
-  top) write them. Without them: article's defaults.
+  top) write them; the dialog keeps heading keys it does not show. Agents set them with the MCP tool
+  `set_markdown_style` (server/mdstyle.ts, typesetting keys only; `style: {}` reads them; the
+  server instructions point markdown styling there) — so a claude.ai connector or any MCP agent can
+  restyle a document. Without them: article's defaults.
 * **VS Code**: the extension opens `.md` with *Open With… ▸ OverLyX Editor* (VS Code's own
   markdown editor stays the default), with the same parser and writer.
 

@@ -3033,12 +3033,5 @@ html[data-presenting] .ol-refocus { display: none; }
 .md-set-control { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .md-set-control select, .md-set-control input { max-width: 100%; }
 .md-set-check { display: flex; align-items: center; gap: 6px; }
+.md-set-inline { display: flex; align-items: center; gap: 8px; }
 
-/* a markdown document's `headings: run-in` (editor/paragraphsep.ts setDocumentHeadings): a heading with a
-   paragraph after it runs into that paragraph at the text's size, as the PDF sets it (titlesec runin);
-   the space above it moves to the paragraph before */
-html[data-headings="run-in"] .lyx-editor > .lyx-par:is([data-layout="Section"], [data-layout="Subsection"], [data-layout="Subsubsection"], [data-layout="Paragraph"]):has(+ .lyx-par[data-layout="Standard"]) { display: inline; font-size: 1em; margin: 0 0.7em 0 0; padding-top: 0; padding-bottom: 0; }
-html[data-headings="run-in"] .lyx-editor > .lyx-par:is([data-layout="Section"], [data-layout="Subsection"], [data-layout="Subsubsection"], [data-layout="Paragraph"]) + .lyx-par[data-layout="Standard"] { display: inline; margin: 0; }
-/* (and ends the line, with the space a paragraph has after it: the next heading or paragraph starts below) */
-html[data-headings="run-in"] .lyx-editor > .lyx-par:is([data-layout="Section"], [data-layout="Subsection"], [data-layout="Subsubsection"], [data-layout="Paragraph"]) + .lyx-par[data-layout="Standard"]::after { content: ''; display: block; height: 0.9em; }
-html[data-headings="run-in"] .lyx-editor > .lyx-par:has(+ .lyx-par:is([data-layout="Section"], [data-layout="Subsection"], [data-layout="Subsubsection"], [data-layout="Paragraph"]):has(+ .lyx-par[data-layout="Standard"])) { margin-bottom: 0.9em; }

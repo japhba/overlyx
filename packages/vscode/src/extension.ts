@@ -22,7 +22,7 @@ import { registerTexSymbols } from './host/symbols.ts';
 import { collectFiles, readTextFile } from './host/project.ts';
 import { cachedParseFile, parseFragmentText, masterHeaderFor, type TexContext } from './host/texdoc.ts';
 import { frontMatterEnd, frontMatterVars, setFrontMatter, MD_FONTS, isMarkdownPath } from '@overlyx/core/md/index.ts';
-import { withTypesetting } from '@overlyx/core/md/typesetting.ts';
+import { withTypesetting, type FMSet } from '@overlyx/core/md/typesetting.ts';
 /** the front matter's lines at the top of a markdown text (none: []) */
 const frontMatterLines = (text: string) => { const end = frontMatterEnd(text); return end ? text.slice(0, end).replace(/\r?\n$/, '').split(/\r?\n/) : []; };
 import { buildMeta, bibEntriesFor } from './host/meta.ts';
@@ -216,7 +216,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
         const document = await vscode.workspace.openTextDocument(vscode.Uri.file(path.join(l.root, l.relPath)));
         const text = document.getText();
         const end = frontMatterEnd(text);
-        const lines = setFrontMatter(frontMatterLines(text), set);
+        const lines = setFrontMatter(frontMatterLines(text), set as Record<string, FMSet>);
         const eol = document.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n';
         const head = lines.length ? lines.join(eol) + eol + (end ? '' : eol) : '';
         const edit = new vscode.WorkspaceEdit();

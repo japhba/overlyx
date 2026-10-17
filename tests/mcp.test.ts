@@ -122,6 +122,23 @@ describe('auth', () => {
   });
 });
 
+describe('set_markdown_style', () => {
+  it('reads and sets a markdown document\'s typesetting keys, heading styles included; other keys are refused', async () => {
+    writeFileSync(file('notes.md'), '---\ntitle: Notes\n---\n\n# Background\n\nText.\n');
+    const t = createMcpToken(owner.id, 'style-agent');
+    expect((await callTool(t.token, 'set_markdown_style', { path: 'notes.md', style: {} })).vars).toEqual({ title: 'Notes' });
+    const r = await callTool(t.token, 'set_markdown_style', { path: 'notes.md', style: { mainfont: 'Fira Sans', mathfont: 'Fira Math', headings: { color: '#1f4e79', section: { rule: 'below', case: 'uppercase' } } } });
+    expect(r.vars).toEqual({ title: 'Notes', mainfont: 'Fira Sans', mathfont: 'Fira Math', headings: { color: '#1f4e79', section: { rule: 'below', case: 'uppercase' } } });
+    const doc = await manager.open('owner/p/notes.md');
+    const header = doc.getMeta().headerLines;
+    expect(header).toContain('\\font_roman "default" "Fira Sans"');
+    expect(JSON.parse(header.find(l => l.startsWith('\\overlyx_headings '))!.slice(18)).section).toEqual({ color: '#1f4e79', rule: 'below', case: 'uppercase' });
+    await expect(callTool(t.token, 'set_markdown_style', { path: 'notes.md', style: { title: 'Other' } })).rejects.toThrow(/not a typesetting key/);
+    await expect(callTool(t.token, 'set_markdown_style', { path: 'a.tex', style: { mainfont: 'XITS' } })).rejects.toThrow(/markdown/);
+    rmSync(file('notes.md'));
+  });
+});
+
 describe('tools/list', () => {
   it('tells the agent in its instructions to fall back to direct edits on any problem', async () => {
     const t = createMcpToken(owner.id, 'test-agent');
@@ -139,7 +156,7 @@ describe('tools/list', () => {
     const names = body.result.tools.map((x: any) => x.name).sort();
     expect(names).toEqual(['add_comment', 'build_pdf', 'build_status', 'create_deliverable', 'create_document', 'delete_paragraph', 'edit_document', 'edit_file', 'fetch', 'get_presence', 'highlight', 'insert_paragraphs', 'list_comments',
       'list_documents', 'list_files', 'list_projects', 'project_history', 'propose_edit', 'read_document', 'read_file', 'render_page', 'replace_paragraph', 'reply', 'resolve_comment', 'restore_project', 'search',
-      'wait_for_instructions', 'write_document', 'write_file']);
+      'set_markdown_style', 'wait_for_instructions', 'write_document', 'write_file']);
   });
 
   it('creates a project from the account-wide MCP endpoint', async () => {

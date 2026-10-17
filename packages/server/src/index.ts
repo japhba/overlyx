@@ -26,8 +26,8 @@ import { deliverablePdf } from './render.ts';
 import { starterFor, isHtmlPath, DELIVERABLE_KINDS, type DeliverableKind } from '@overlyx/core/html/deliverable.ts';
 import { refreshScientificStarters } from './starterupdates.ts';
 import { listProjects, resolveProjectPath, assertWritableRelPath, projectDir, createProject, newDocumentText, newMarkdownText, fileKind, isBackupFile, isDocumentFile } from './projects.ts';
-import { isMarkdownPath, frontMatterVars, setFrontMatter, MD_FONTS } from '@overlyx/core/md/index.ts';
-import { withTypesetting } from '@overlyx/core/md/typesetting.ts';
+import { isMarkdownPath } from '@overlyx/core/md/index.ts';
+import { markdownStyle, setMarkdownStyle } from './mdstyle.ts';
 import { snippetSvg, snippetFile } from './snippets.ts';
 import { importLyxFile, parseFragmentText, newLayoutDocumentText, withDocumentSettings, NO_INDENT_SETTINGS } from './texdoc.ts';
 import { importLyxUpload } from './lyximport.ts';
@@ -1322,33 +1322,18 @@ api.post('/docs/*/header', async (req, res) => {
  * shows the fonts, numbering and headings at once, and the file is saved with the new front matter.
  */
 api.get('/docs/*/frontmatter', async (req, res) => {
-  try {
-    const id = docId(req);
-    if (!isMarkdownPath(id)) { res.status(400).json({ error: 'Only markdown documents keep their settings in front matter' }); return; }
-    const doc = await manager.open(id);
-    res.json({ vars: frontMatterVars(doc.getMeta().preamble), fonts: MD_FONTS });
-  } catch (e) { res.status(400).json({ error: String(e) }); }
+  try { res.json(await markdownStyle(docId(req))); }
+  catch (e) { res.status(400).json({ error: (e as Error).message ?? String(e) }); }
 });
 api.post('/docs/*/frontmatter', async (req, res) => {
   const id = docId(req);
   const prev = headerQueue.get(id) ?? Promise.resolve();
   const job = prev.catch(() => {}).then(async () => {
     try {
-      if (!isMarkdownPath(id)) { res.status(400).json({ error: 'Only markdown documents keep their settings in front matter' }); return; }
       const set = req.body?.set;
       if (!set || typeof set !== 'object') { res.status(400).json({ error: 'nothing to set' }); return; }
-      const values: Record<string, string | string[] | boolean | null> = {};
-      for (const [k, v] of Object.entries(set as Record<string, unknown>)) {
-        if (!/^[A-Za-z][\w-]{0,40}$/.test(k)) continue;
-        values[k] = v === null || typeof v === 'boolean' ? v : Array.isArray(v) ? v.map(String).slice(0, 40) : String(v).slice(0, 200);
-      }
-      const doc = await manager.open(id);
-      const meta = doc.getMeta();
-      const preamble = setFrontMatter(meta.preamble, values);
-      const headerLines = withTypesetting(meta.headerLines, preamble);
-      doc.ydoc.transact(() => { doc.meta.set('preamble', JSON.stringify(preamble)); doc.meta.set('header', JSON.stringify(headerLines)); }, 'header');
-      res.json({ ok: true, vars: frontMatterVars(preamble), headerLines });
-    } catch (e) { res.status(400).json({ error: String(e) }); }
+      res.json({ ok: true, ...(await setMarkdownStyle(id, set as Record<string, unknown>)) });
+    } catch (e) { res.status(400).json({ error: (e as Error).message ?? String(e) }); }
   });
   headerQueue.set(id, job);
   await job;

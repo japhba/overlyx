@@ -6,7 +6,12 @@
  *                                            settings dialog offers MD_FONTS, each with its math font
  *   fontsize: 11pt         papersize: a4        geometry: margin=2cm (or a list of geometry's options)
  *   linestretch: 1.25      numbersections: true
- *   headings: run-in       section headings run into their paragraph (titlesec)
+ *   headings               how headings are set (titlesec; the editor draws them alike): `run-in`, or
+ *                          keys for every level — display (block | run-in), font, size (small | normal
+ *                          | large | larger | huge), weight (bold | normal), shape (upright | italic),
+ *                          case (normal | smallcaps | uppercase), color (#rrggbb), align (left |
+ *                          center), rule (none | below | above) — and under section: … paragraph: a
+ *                          level's own (`section: { size: larger, rule: below }`)
  *   header-includes        LaTeX for the preamble, after all of the above
  *
  * Parsing a markdown document turns these into its settings (header lines: the editor shows the
@@ -32,37 +37,129 @@ export const MD_FONTS: MdFont[] = [
   { label: 'Fira', main: 'Fira Sans', math: 'Fira Math', hint: 'sans-serif' },
 ];
 
+/** a front matter value: text, a list, or keys of their own (`headings:` and its levels) */
+export type FMValue = string | string[] | { [key: string]: FMValue };
+
 /**
- * The front matter's top-level keys (`---` … `---` / `...`): a value, a list (`[a, b]` or `- a` lines)
- * or a block (`|` / `>` and indented lines). Enough YAML for pandoc's variables; quotes are taken off.
+ * The front matter's keys (`---` … `---` / `...`): a value, a list (`[a, b]` or `- a` lines), a
+ * block (`|` / `>` and indented lines, and pandoc's `- |` items), or keys of their own (indented
+ * `key: value` lines, or `{ a: b, c: d }`). Enough YAML for pandoc's variables and `headings`;
+ * quotes are taken off, comments left out.
  */
-export function frontMatterVars(lines: string[]): Record<string, string | string[]> {
-  const out: Record<string, string | string[]> = {};
-  if (!/^---\s*$/.test(lines[0] ?? '')) return out;
-  const unquote = (v: string) => v.trim().replace(/^(['"])(.*)\1$/, '$2');
-  let key: string | null = null, block = false;
-  for (const line of lines.slice(1)) {
-    if (/^(---|\.\.\.)\s*$/.test(line)) break;
-    const top = /^([A-Za-z][\w-]*):\s*(.*?)\s*$/.exec(line);
-    if (top) {
-      key = top[1]; block = false;
-      const v = top[2].replace(/\s+#.*$/, '');
-      if (v === '|' || v === '>' || v === '|-' || v === '>-') { out[key] = []; block = true; }
-      else if (/^\[.*\]$/.test(v)) out[key] = v.slice(1, -1).split(',').map(unquote).filter(Boolean);
-      else out[key] = v ? unquote(v) : [];
-      continue;
-    }
-    if (!key || !Array.isArray(out[key])) continue;
-    const arr = out[key] as string[];
-    const item = block ? null : /^\s+-\s+(.*)$/.exec(line);
-    // `- |`: a block of lines as the item (pandoc's header-includes)
-    if (item && /^[|>]-?$/.test(item[1].trim())) { block = true; continue; }
-    if (item) { arr.push(unquote(item[1])); continue; }
-    const text = /^\s+(.*)$/.exec(line);
-    // (a raw-LaTeX fence round them, as pandoc's examples write it, is not LaTeX)
-    if (text && block && !/^```/.test(text[1])) arr.push(text[1]);
+export function frontMatterVars(lines: string[]): Record<string, FMValue> {
+  if (!/^---\s*$/.test(lines[0] ?? '')) return {};
+  const end = lines.findIndex((l, i) => i > 0 && /^(---|\.\.\.)\s*$/.test(l));
+  const body = lines.slice(1, end > 0 ? end : lines.length);
+  return parseMap(body, 0, 0).map;
+}
+
+const unquote = (v: string) => v.trim().replace(/^(['"])(.*)\1$/, '$2');
+const indentOf = (l: string) => l.length - l.trimStart().length;
+const blank = (l: string) => !l.trim() || /^\s*#/.test(l);
+
+/** `{ a: b, c: d }` (one level, no nesting inside) */
+function flowMap(v: string): Record<string, FMValue> {
+  const out: Record<string, FMValue> = {};
+  for (const part of v.slice(1, -1).split(',')) {
+    const m = /^\s*([A-Za-z][\w-]*)\s*:\s*(.*?)\s*$/.exec(part);
+    if (m) out[m[1]] = /^\[.*\]$/.test(m[2]) ? m[2].slice(1, -1).split(';').map(unquote).filter(Boolean) : unquote(m[2]);
   }
   return out;
+}
+
+function parseMap(lines: string[], i: number, indent: number): { map: Record<string, FMValue>; i: number } {
+  const map: Record<string, FMValue> = {};
+  while (i < lines.length) {
+    if (blank(lines[i])) { i++; continue; }
+    const ind = indentOf(lines[i]);
+    if (ind < indent) break;
+    const m = /^\s*([A-Za-z][\w-]*):(?:\s+(.*?))?\s*$/.exec(lines[i]);
+    i++;
+    if (ind > indent || !m) continue;
+    const key = m[1], v = (m[2] ?? '').replace(/\s+#.*$/, '');
+    if (/^[|>]-?$/.test(v)) {
+      // a block: its indented lines as they are
+      const text: string[] = [];
+      while (i < lines.length && (blank(lines[i]) || indentOf(lines[i]) > indent)) { if (lines[i].trim()) text.push(lines[i].trim()); i++; }
+      map[key] = text.filter(t => !/^```/.test(t));
+    } else if (/^\[.*\]$/.test(v)) map[key] = v.slice(1, -1).split(',').map(unquote).filter(Boolean);
+    else if (/^\{.*\}$/.test(v)) map[key] = flowMap(v);
+    else if (v) map[key] = unquote(v);
+    else {
+      // what follows, further in: a list, or keys of their own
+      let j = i; while (j < lines.length && blank(lines[j])) j++;
+      if (j >= lines.length || indentOf(lines[j]) <= indent) { map[key] = []; continue; }
+      if (/^\s*-(\s|$)/.test(lines[j])) {
+        const items: string[] = [];
+        const at = indentOf(lines[j]);
+        while (i < lines.length && (blank(lines[i]) || indentOf(lines[i]) >= at)) {
+          const item = /^\s*-\s*(.*)$/.exec(lines[i]);
+          if (item && indentOf(lines[i]) === at) {
+            i++;
+            // `- |`: a block of lines as the item (pandoc's header-includes)
+            if (/^[|>]-?$/.test(item[1].trim())) {
+              while (i < lines.length && (blank(lines[i]) || indentOf(lines[i]) > at)) { const t = lines[i].trim(); if (t && !/^```/.test(t)) items.push(t); i++; }
+            } else if (item[1].trim()) items.push(unquote(item[1]));
+          } else i++;
+        }
+        map[key] = items;
+      } else {
+        const sub = parseMap(lines, j, indentOf(lines[j]));
+        map[key] = sub.map; i = sub.i;
+      }
+    }
+  }
+  return { map, i };
+}
+
+/* --------------------------------------------------------------- headings */
+
+/** the heading levels a markdown document has (# … ####), as their LaTeX commands */
+export const HEADING_LEVELS = ['section', 'subsection', 'subsubsection', 'paragraph'] as const;
+export type HeadingLevel = typeof HEADING_LEVELS[number];
+/** how a heading is set (each key optional: the level's default) */
+export interface HeadingStyle {
+  display?: 'block' | 'run-in';
+  font?: string;
+  size?: 'small' | 'normal' | 'large' | 'larger' | 'huge';
+  weight?: 'bold' | 'normal';
+  shape?: 'upright' | 'italic';
+  case?: 'normal' | 'smallcaps' | 'uppercase';
+  color?: string;
+  align?: 'left' | 'center';
+  rule?: 'none' | 'below' | 'above';
+}
+/** each level's style: `headings`' own keys for all levels, then the level's */
+export type HeadingStyles = Record<HeadingLevel, HeadingStyle>;
+
+const HEADING_CHOICES: { [K in keyof HeadingStyle]-?: readonly string[] | null } = {
+  display: ['block', 'run-in'], font: null, size: ['small', 'normal', 'large', 'larger', 'huge'], weight: ['bold', 'normal'],
+  shape: ['upright', 'italic'], case: ['normal', 'smallcaps', 'uppercase'], color: null, align: ['left', 'center'], rule: ['none', 'below', 'above'],
+};
+function headingStyleOf(v: FMValue | undefined): HeadingStyle {
+  const out: HeadingStyle = {};
+  if (!v || typeof v === 'string' || Array.isArray(v)) return out;
+  for (const k of Object.keys(HEADING_CHOICES) as (keyof HeadingStyle)[]) {
+    const raw = v[k];
+    if (typeof raw !== 'string') continue;
+    const val = raw.trim(), choices = HEADING_CHOICES[k];
+    if (k === 'font') { if (fontName(val)) out.font = fontName(val); continue; }
+    if (k === 'color') { const c = /^#?([0-9a-fA-F]{6})$/.exec(val); if (c) out.color = '#' + c[1].toLowerCase(); continue; }
+    if (choices!.includes(val.toLowerCase())) (out as Record<string, string>)[k] = val.toLowerCase();
+  }
+  return out;
+}
+
+/**
+ * The heading styles the front matter's `headings` asks for, or null (LaTeX's own): `run-in` / `block`
+ * for every level, or keys (HeadingStyle) for all levels and, under `section:` … `paragraph:`, a level's.
+ */
+export function headingStyles(v: FMValue | undefined): HeadingStyles | null {
+  if (v === undefined || Array.isArray(v)) return null;
+  const all: HeadingStyle = typeof v === 'string' ? (/^run-in$/i.test(v.trim()) ? { display: 'run-in' } : {}) : headingStyleOf(v);
+  const out = {} as HeadingStyles;
+  for (const level of HEADING_LEVELS) out[level] = { ...all, ...(typeof v === 'object' ? headingStyleOf(v[level]) : {}) };
+  return HEADING_LEVELS.some(l => Object.keys(out[l]).length) ? out : null;
 }
 
 export interface MdTypesetting {
@@ -74,14 +171,15 @@ export interface MdTypesetting {
   /** 0: single */
   linestretch: number;
   numbersections: boolean;
-  headings: 'block' | 'run-in';
+  /** null: LaTeX's own */
+  headings: HeadingStyles | null;
   headerIncludes: string[];
 }
 
-const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v)?.trim() ?? '';
-const list = (v: string | string[] | undefined) => (Array.isArray(v) ? v : v ? v.split(/,\s*/) : []).map(x => x.trim()).filter(Boolean);
+const one = (v: FMValue | undefined) => (typeof v === 'string' ? v : Array.isArray(v) ? v[0] ?? '' : '').trim();
+const list = (v: FMValue | undefined) => (Array.isArray(v) ? v : typeof v === 'string' && v ? v.split(/,\s*/) : []).map(x => x.trim()).filter(Boolean);
 /** a font name as fontspec takes it (no braces, backslashes or the like) */
-const fontName = (v: string | string[] | undefined) => { const s = one(v); return /^[\p{L}\p{N} ._+-]{1,80}$/u.test(s) ? s : ''; };
+function fontName(v: FMValue | undefined): string { const s = one(v); return /^[\p{L}\p{N} ._+-]{1,80}$/u.test(s) ? s : ''; }
 
 /** the document's typesetting as its front matter (`lines`: the document's preamble — the front matter as written) says */
 export function mdTypesetting(lines: string[]): MdTypesetting {
@@ -97,7 +195,7 @@ export function mdTypesetting(lines: string[]): MdTypesetting {
     geometry: list(v.geometry).filter(o => /^[\w.-]+(=[\w.\s-]+)?$/.test(o)),
     linestretch: stretch > 0 && stretch < 5 ? stretch : 0,
     numbersections: one(v.numbersections) === 'true',
-    headings: one(v.headings).toLowerCase() === 'run-in' ? 'run-in' : 'block',
+    headings: headingStyles(v.headings),
     headerIncludes: list(v['header-includes']).filter(l => !/^\s*\\documentclass/.test(l)),
   };
 }
@@ -118,8 +216,8 @@ export function applyTypesetting(h: Header, t: MdTypesetting): void {
     if (t.sansfont) set('font_sans', `"default" "${t.sansfont}"`);
     if (t.monofont) set('font_typewriter', `"default" "${t.monofont}"`);
   }
-  // (OverLyX's own: the LyX export leaves \overlyx_ lines out)
-  if (t.headings === 'run-in') set('overlyx_headings', 'run-in');
+  // (OverLyX's own: the LyX export leaves \overlyx_ lines out; the editor draws its headings so)
+  if (t.headings) set('overlyx_headings', JSON.stringify(t.headings));
 }
 
 /** the header keys the typesetting decides */
@@ -142,13 +240,47 @@ export function typesettingPreamble(t: MdTypesetting): string[] {
   if (t.geometry.length) out.push(`\\usepackage[${t.geometry.join(',')}]{geometry}`);
   // (unicode-math after amsmath, which the generated block would load after this)
   if (t.mathfont) out.push('\\usepackage{amsmath}', '\\usepackage{unicode-math}', `\\setmathfont{${t.mathfont}}`);
-  if (t.headings === 'run-in') {
-    out.push('\\usepackage{titlesec}');
-    for (const [cmd, shape, above, after] of [['section', '\\bfseries', '1.6ex', '0.8em'], ['subsection', '\\bfseries', '1.3ex', '0.7em'], ['subsubsection', '\\bfseries\\itshape', '1.1ex', '0.6em'], ['paragraph', '\\itshape', '0.9ex', '0.6em']]) {
-      out.push(`\\titleformat{\\${cmd}}[runin]{\\normalfont${shape}}{\\the${cmd}}{0.6em}{}`, `\\titlespacing*{\\${cmd}}{0pt}{${above} plus .3ex minus .2ex}{${after}}`);
-    }
-  }
+  if (t.headings) out.push(...headingsLatex(t.headings));
   out.push(...t.headerIncludes);
+  return out;
+}
+
+/** LaTeX's own look of each level (article): its size, and whether it runs in */
+const LEVEL_DEFAULTS: Record<HeadingLevel, { size: NonNullable<HeadingStyle['size']>; display: 'block' | 'run-in'; above: string; below: string }> = {
+  section: { size: 'larger', display: 'block', above: '3.5ex plus 1ex minus .2ex', below: '2.3ex plus .2ex' },
+  subsection: { size: 'large', display: 'block', above: '3.25ex plus 1ex minus .2ex', below: '1.5ex plus .2ex' },
+  subsubsection: { size: 'normal', display: 'block', above: '3.25ex plus 1ex minus .2ex', below: '1.5ex plus .2ex' },
+  paragraph: { size: 'normal', display: 'run-in', above: '3.25ex plus 1ex minus .2ex', below: '1em' },
+};
+const SIZE_CMD = { small: '\\small', normal: '\\normalsize', large: '\\large', larger: '\\Large', huge: '\\LARGE' } as const;
+
+/** titlesec for the heading styles (a run-in heading at the text's size unless it says otherwise) */
+function headingsLatex(styles: HeadingStyles): string[] {
+  const out = ['\\usepackage{titlesec}'];
+  if (HEADING_LEVELS.some(l => styles[l].color)) out.push('\\usepackage{xcolor}');
+  const fonts = [...new Set(HEADING_LEVELS.map(l => styles[l].font).filter((f): f is string => !!f))];
+  fonts.forEach((f, k) => out.push(`\\newfontfamily\\olheadingfont${'abcdefgh'[k]}{${f}}`));
+  for (const level of HEADING_LEVELS) {
+    const st = styles[level], def = LEVEL_DEFAULTS[level];
+    const runIn = (st.display ?? def.display) === 'run-in';
+    const size = st.size ?? (runIn ? 'normal' : def.size);
+    let format = '\\normalfont';
+    if (st.font) format += `\\olheadingfont${'abcdefgh'[fonts.indexOf(st.font)]}`;
+    format += SIZE_CMD[size];
+    if ((st.weight ?? 'bold') === 'bold') format += '\\bfseries';
+    if (st.shape === 'italic') format += '\\itshape';
+    if (st.case === 'smallcaps') format += '\\scshape';
+    if (st.color) format += `\\color[HTML]{${st.color.slice(1).toUpperCase()}}`;
+    const center = !runIn && st.align === 'center';
+    if (center) format += '\\filcenter';
+    if (!runIn && st.rule === 'above') format = `\\titlerule\\vspace{.8ex}${format}`;
+    const shape = runIn ? 'runin' : center || st.rule === 'above' ? 'block' : 'hang';
+    // (the title is the argument of the last command of "before")
+    const before = st.case === 'uppercase' ? '\\MakeUppercase' : '';
+    const after = !runIn && st.rule === 'below' ? '[\\vspace{.4ex}\\titlerule]' : '';
+    out.push(`\\titleformat{\\${level}}[${shape}]{${format}}{\\the${level}}{${runIn ? '0.6em' : '1em'}}{${before}}${after}`);
+    out.push(`\\titlespacing*{\\${level}}{0pt}{${runIn ? '1.6ex plus .3ex minus .2ex' : def.above}}{${runIn ? '0.8em' : def.below}}`);
+  }
   return out;
 }
 
@@ -162,18 +294,21 @@ function yamlScalar(v: string): string {
  * block lines), a new one goes at the end, null takes one out; everything else stays as written. No
  * front matter: one is made; nothing left in it: it goes.
  */
-export function setFrontMatter(lines: string[], values: Record<string, string | string[] | boolean | number | null>): string[] {
+export type FMSet = string | string[] | boolean | number | null | { [key: string]: string | string[] | boolean | number | { [key: string]: string } };
+export function setFrontMatter(lines: string[], values: Record<string, FMSet>): string[] {
   const has = /^---\s*$/.test(lines[0] ?? '');
   let end = has ? lines.findIndex((l, i) => i > 0 && /^(---|\.\.\.)\s*$/.test(l)) : -1;
   const body = has && end > 0 ? lines.slice(1, end) : [];
   const closing = has && end > 0 ? lines[end] : '---';
-  const render = (key: string, v: string | string[] | boolean | number): string[] =>
-    Array.isArray(v) ? [`${key}:`, ...v.map(x => `  - ${yamlScalar(x)}`)] : [`${key}: ${typeof v === 'string' ? yamlScalar(v) : String(v)}`];
+  const render = (key: string, v: Exclude<FMSet, null>, pad = ''): string[] =>
+    Array.isArray(v) ? [`${pad}${key}:`, ...v.map(x => `${pad}  - ${yamlScalar(x)}`)]
+      : typeof v === 'object' ? [`${pad}${key}:`, ...Object.entries(v).filter(([, x]) => x !== null && x !== '').flatMap(([k, x]) => render(k, x as Exclude<FMSet, null>, pad + '  '))]
+      : [`${pad}${key}: ${typeof v === 'string' ? yamlScalar(v) : String(v)}`];
   for (const [key, v] of Object.entries(values)) {
     const at = body.findIndex(l => l.startsWith(key + ':') && /^\s*$|^\s/.test(l.slice(key.length + 1)));
     let to = at;
     if (at >= 0) while (to + 1 < body.length && (/^\s/.test(body[to + 1]) || body[to + 1] === '')) to++;
-    const repl = v === null || v === '' || (Array.isArray(v) && !v.length) ? [] : render(key, v);
+    const repl = v === null || v === '' || (Array.isArray(v) && !v.length) || (typeof v === 'object' && !Array.isArray(v) && !Object.keys(v).length) ? [] : render(key, v);
     if (at >= 0) body.splice(at, to - at + 1, ...repl);
     else body.push(...repl);
   }
