@@ -14,6 +14,7 @@ const { createUser } = await import('../packages/server/src/auth.ts');
 const { registerProject } = await import('../packages/server/src/access.ts');
 const { isLightlyEditedStarter, refreshScientificStarters, legacyFolder } = await import('../packages/server/src/starterupdates.ts');
 const { SCIENTIFIC_TEMPLATES, templateFolder } = await import('../packages/core/src/html/scientific.ts');
+const { SYMPOSIUM_POSTERS } = await import('../packages/core/src/html/symposium-posters.ts');
 const templates = join(import.meta.dirname, '../packages/server/templates');
 const original = (folder: string) => readFileSync(join(templates, 'starters-legacy/web', folder, 'index.html'), 'utf8');
 const latest = (folder: string) => readFileSync(join(templates, 'starters/web', folder, 'index.html'), 'utf8');
@@ -52,9 +53,9 @@ describe('scientific starter refresh', () => {
   });
 
   it('recognises every previously shipped scientific example, the project posters included', () => {
-    expect(SCIENTIFIC_TEMPLATES.map(templateFolder)).toEqual(['poster-1', 'poster-2', 'poster-3', 'poster-4', 'poster-5', 'poster-6', 'slides-1', 'slides-2', 'slides-3']);
-    // (Poster 6 shipped after that version: it has none)
-    for (const t of SCIENTIFIC_TEMPLATES.filter(t => t.id !== 'statement-2026')) {
+    expect(SCIENTIFIC_TEMPLATES.map(templateFolder)).toEqual([...Array.from({ length: 12 }, (_, i) => `poster-${i + 1}`), 'slides-1', 'slides-2', 'slides-3']);
+    // (the symposium posters shipped after that version: they have none)
+    for (const t of SCIENTIFIC_TEMPLATES.filter(t => !(SYMPOSIUM_POSTERS as readonly string[]).includes(t.id))) {
       const shipped = readFileSync(join(templates, 'starters-legacy/scientific-v2', legacyFolder(t), 'index.html'), 'utf8');
       expect(shipped).not.toBe(latest(templateFolder(t)));
       expect(isLightlyEditedStarter(shipped, legacyFolder(t))).toBe(true);
@@ -128,7 +129,7 @@ describe('scientific starter refresh', () => {
     for (const [folder, now] of [['talk', 'slides-1'], ['poster', 'poster-1']]) writeFileSync(join(dir, folder, 'index.html'), latest(now));
     mkdirSync(join(dir, 'poster-bernstein-2026'));
     writeFileSync(join(dir, 'poster-bernstein-2026/index.html'), 'My edited poster');
-    expect(refreshScientificStarters(true).added).toEqual(['project-posters/example-web/poster-5/index.html', 'project-posters/example-web/poster-6/index.html']);
+    expect(refreshScientificStarters(true).added).toEqual([5, 6, 7, 8, 9, 10, 11, 12].map(n => `project-posters/example-web/poster-${n}/index.html`));
     expect(existsSync(join(dir, 'poster-5'))).toBe(false);
     refreshScientificStarters();
     expect(readFileSync(join(dir, 'poster-5/index.html'), 'utf8')).toBe(latest('poster-5'));
@@ -138,6 +139,41 @@ describe('scientific starter refresh', () => {
     refreshScientificStarters();
     expect(existsSync(join(dir, 'poster-5'))).toBe(false);
     rmSync(dir, { recursive: true });
+  });
+
+  it('retires untouched copies of the withdrawn Poster 6 and puts the new Poster 6 in its place; a customised copy stays, and the new one waits', () => {
+    const loracle = readFileSync(join(templates, 'starters-legacy/scientific-v3/poster-statement-2026/index.html'), 'utf8');
+    const later = (user: number, marker: string) => db.prepare('INSERT INTO starter_projects (user_id,template,project,created_at) VALUES (?,?,?,?)').run(user, marker, '', Date.now());
+    const accounts = ['retired-plain', 'retired-edited'].map(name => {
+      const s = seed(name);
+      for (const [folder, now] of [['talk', 'slides-1'], ['poster', 'poster-1']]) writeFileSync(join(s.dir, folder, 'index.html'), latest(now));
+      const user = (db.prepare('SELECT id FROM users WHERE username=?').get(name) as { id: number }).id;
+      for (const m of ['web:poster-bernstein-2026', 'web:poster-icml-2026', 'web:poster-statement-2026']) later(user, m);
+      mkdirSync(join(s.dir, 'poster-6'));
+      return { ...s, user };
+    });
+    writeFileSync(join(accounts[0].dir, 'poster-6/index.html'), loracle.replace(/\n/g, '\r\n'));
+    writeFileSync(join(accounts[1].dir, 'poster-6/index.html'), loracle.replace('Fine Detail Fades First', 'My own statement'));
+    const r = refreshScientificStarters();
+    expect(r.removed).toContain(`${accounts[0].project}/poster-6/index.html`);
+    // untouched: gone (kept as a version), the new Poster 6 and the others in their folders
+    expect(readFileSync(join(accounts[0].dir, 'poster-6/index.html'), 'utf8')).toBe(latest('poster-6'));
+    expect(existsSync(join(accounts[0].dir, 'poster-12/index.html'))).toBe(true);
+    expect(db.prepare('SELECT name FROM versions WHERE doc_id=?').all(`${accounts[0].project}/poster-6/index.html`)).toEqual([{ name: 'Before removing a retired example poster' }]);
+    // customised: it stays, and the new Poster 6 waits (no marker) while the rest arrive
+    expect(readFileSync(join(accounts[1].dir, 'poster-6/index.html'), 'utf8')).toContain('My own statement');
+    expect(existsSync(join(accounts[1].dir, 'poster-7/index.html'))).toBe(true);
+    const marked = (user: number, id: string) => !!db.prepare('SELECT 1 FROM starter_projects WHERE user_id=? AND template=?').get(user, `web:poster-${id}`);
+    expect(marked(accounts[1].user, 'symposium-steps')).toBe(false);
+    expect(marked(accounts[1].user, 'symposium-twin')).toBe(true);
+    // once the folder is free, the next start adds it; a later deletion is respected
+    rmSync(join(accounts[1].dir, 'poster-6'), { recursive: true });
+    refreshScientificStarters();
+    expect(readFileSync(join(accounts[1].dir, 'poster-6/index.html'), 'utf8')).toBe(latest('poster-6'));
+    rmSync(join(accounts[1].dir, 'poster-6'), { recursive: true });
+    refreshScientificStarters();
+    expect(existsSync(join(accounts[1].dir, 'poster-6'))).toBe(false);
+    for (const a of accounts) rmSync(a.dir, { recursive: true });
   });
 
   it('renames default titles and retires only unchanged web pages, retaining backups, edits and added files', () => {

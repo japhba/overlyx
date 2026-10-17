@@ -39,7 +39,7 @@ describe('starter projects', () => {
     // the posters added later to older accounts are this one's already (starterupdates.ts LATER_POSTERS)
     const { db } = await import('../packages/server/src/db.ts');
     expect((db.prepare("SELECT template FROM starter_projects WHERE user_id=? AND template LIKE 'web:%' ORDER BY template").all(ada.id) as { template: string }[]).map(r => r.template))
-      .toEqual(['web:poster-bernstein-2026', 'web:poster-icml-2026', 'web:poster-statement-2026']);
+      .toEqual(['web:poster-bernstein-2026', 'web:poster-icml-2026', ...['banner', 'cards', 'dark', 'editorial', 'portrait', 'steps', 'twin'].map(k => `web:poster-symposium-${k}`)]);
     const mine = access.accessibleProjects(ada);
     expect(mine.map(p => [p.name, p.kind, p.title, p.role])).toEqual(expect.arrayContaining([
       ['ada/welcome', 'example', 'Welcome to OverLyX', 'owner'],
