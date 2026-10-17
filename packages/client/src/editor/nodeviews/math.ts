@@ -17,6 +17,7 @@ import { toggleMathDisplay, countLabelRefs, renameLabelRefs } from '../commands'
 import { editorContext, viewDocDir, viewProject } from '../context';
 import { getPrefs } from '../../prefs';
 import { documentViewScale } from '../viewscale';
+import { wideRoom, onWideWidth } from '../widecontent';
 import { openRewriteMath, REWRITE_KEY } from '../ai/rewrite';
 import { openMathLinkBox, openLink, mathLinkUrl, LINK_KEY } from '../links';
 import { applyChangeAttrs } from '../plugins/changes';
@@ -506,6 +507,8 @@ export class MathDisplayView implements NodeView {
     // wide formulas: centre on the text column and let them overflow into the margins symmetrically
     this.ro = new ResizeObserver(() => this.scheduleRelayout());
     this.ro.observe(this.dom);
+    // the ruler's second track (editor/widecontent.ts): how far a wide formula may reach
+    this.offWide = onWideWidth(() => this.scheduleRelayout());
     mathViews.add(this);
     if (pendingFocus.pos !== null && pendingFocus.pos === getPos()) this.upgrade();
     else { this.renderStaticOrDefer(); watchLazy(this); }
@@ -613,10 +616,12 @@ export class MathDisplayView implements NodeView {
   }
 
   private relayoutRaf = 0;
+  private offWide: (() => void) | null = null;
   private scheduleRelayout() { cancelAnimationFrame(this.relayoutRaf); this.relayoutRaf = requestAnimationFrame(() => this.relayout()); }
 
   /** Wide formulas: size the middle grid track to the content and centre the whole block on the text
-   *  column, letting it overflow symmetrically into the margins (never past the page's left edge). */
+   *  column, letting it overflow symmetrically into the margins — as far as the ruler's second track
+   *  allows (editor/widecontent.ts), never past the page's left edge. */
   private relayout() {
     const dom = this.dom;
     const scroll = dom.closest('.editor-scroll') as HTMLElement | null;
@@ -644,7 +649,7 @@ export class MathDisplayView implements NodeView {
       this.placeLabel(leftRoom, content);
       return;
     }
-    const shift = Math.round(Math.min(leftRoom, (need - avail) / 2));
+    const shift = Math.round(Math.min(leftRoom, (need - avail) / 2, Math.max(0, (wideRoom(dom, avail) - avail) / 2)));
     dom.style.gridTemplateColumns = `0 ${contentW}px auto`;
     dom.style.marginLeft = shift > 0 ? `-${shift}px` : '';
     dom.style.width = shift > 0 ? `calc(100% + ${shift}px)` : '';
@@ -668,7 +673,8 @@ export class MathDisplayView implements NodeView {
 
   /**
    * The room a one-line formula has before MathJax breaks it into lines, in em of its font: the
-   * text column, less room for the equation number on both sides (the formula stays centred).
+   * room for wide content (the ruler's second track, at least the text column: widecontent.ts), less
+   * room for the equation number on both sides (the formula stays centred).
    * Formulas of several rows (align, gather …) and cells with a grid are laid out as they are.
    */
   private breakWidth(): number | undefined {
@@ -677,7 +683,7 @@ export class MathDisplayView implements NodeView {
     if (!this.breakable || !this.dom.isConnected) return undefined;
     const avail = this.dom.style.gridTemplateColumns ? this.dom.parentElement!.clientWidth : this.dom.clientWidth;
     if (!avail) return undefined;
-    const room = avail - 2 * (this.metaEl.offsetWidth + 14) - 8;
+    const room = wideRoom(this.dom, avail) - 2 * (this.metaEl.offsetWidth + 14) - 8;
     const box = (this.field?.dom ?? this.staticEl ?? this.dom).querySelector('mjx-container') ?? this.field?.dom ?? this.staticEl ?? this.dom;
     const fs = parseFloat(getComputedStyle(box).fontSize) * (box.tagName === 'MJX-CONTAINER' ? 1 : (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--math-scale')) || 1));
     if (!fs) return undefined;
@@ -782,7 +788,7 @@ export class MathDisplayView implements NodeView {
   stopEvent(ev: Event) { return (!!this.field && this.field.dom.contains(ev.target as Node)) || this.metaEl.contains(ev.target as Node); }
   ignoreMutation() { return true; }
   focus(where: 'start' | 'end' = 'end') { this.ensureField().focus(where); }
-  destroy() { this.review.destroy(); mathViews.delete(this); unwatchLazy(this); cancelAnimationFrame(this.relayoutRaf); this.ro?.disconnect(); this.mo?.disconnect(); this.field?.destroy(); }
+  destroy() { this.review.destroy(); mathViews.delete(this); unwatchLazy(this); cancelAnimationFrame(this.relayoutRaf); this.offWide?.(); this.ro?.disconnect(); this.mo?.disconnect(); this.field?.destroy(); }
 }
 
 /* ------------------------------------------------ macro definitions */

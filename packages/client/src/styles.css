@@ -382,7 +382,10 @@ html[data-theme="dark"] .tb-btn .tb-img { filter: invert(0.85) hue-rotate(180deg
 .editor-scroll:has(> .editor-page .lyx-editor:not(.ol-layout)) { touch-action: pan-x pan-y; }
 /* "infinite margin": the page fills the viewport; text stays in a left-bound column of readable width,
    while wide objects (display math, tables, floats) may overflow the column and are centred on it */
-.editor-page { position: relative; background: var(--page-bg); min-height: 100%; width: 100%; padding: 36px 48px 120px 48px; }
+/* (the page's side padding gives way, down to 12px, when the text column is wider than the pane allows
+   with 48px: the ruler's handles reach out to the pane's edges — `--page-pad-x`, also the ruler's) */
+:root { --page-pad-x: clamp(12px, calc((100% - var(--text-width, 720px)) / 2), 48px); }
+.editor-page { position: relative; background: var(--page-bg); min-height: 100%; width: 100%; padding: 36px var(--page-pad-x) 120px; }
 /* the text column is centred; its width is a View setting (--text-width, "Text width" menu) */
 .lyx-editor { max-width: var(--text-width, 720px); margin: 0 auto; }
 /* with annotations in the margin, keep room for a 320px card column right of the text and centre both */
@@ -405,10 +408,10 @@ html[data-theme="dark"]:not([data-dark-pages]) .editor-scroll.margin-mode > .edi
 .margin-mode > .editor-page:has(> .editor-host > .ol-layout) > .notes-sash { display: none; }
 /* the pane's fold button: at the top of the sash, staying in view as the page scrolls — below the sticky
    ruler (24px), which hid it once the page had scrolled (app/notespane.tsx); the ruler has one too */
-.notes-fold { position: sticky; top: 34px; display: grid; place-items: center; width: 20px; height: 20px; margin-left: -6px; padding: 0; border: 1px solid var(--ui-border); border-radius: 50%; background: var(--page-bg); color: var(--muted); font-size: 13px; line-height: 1; cursor: pointer; opacity: 0.75; z-index: 5; }
+.notes-fold { position: sticky; top: 44px; display: grid; place-items: center; width: 20px; height: 20px; margin-left: -6px; padding: 0; border: 1px solid var(--ui-border); border-radius: 50%; background: var(--page-bg); color: var(--muted); font-size: 13px; line-height: 1; cursor: pointer; opacity: 0.75; z-index: 5; }
 .notes-fold:hover, .notes-fold:focus-visible { opacity: 1; color: var(--ui-fg); border-color: var(--accent); }
 /* the folded pane: a tab on the document pane's right edge */
-.notes-unfold { position: sticky; top: 34px; height: 0; z-index: 6; }
+.notes-unfold { position: sticky; top: 44px; height: 0; z-index: 6; }
 .notes-unfold > button { position: absolute; right: 0; top: 0; writing-mode: vertical-rl; padding: 10px 5px; border: 1px solid var(--ui-border); border-right: none; border-radius: 8px 0 0 8px; background: var(--notes-bg, var(--panel-bg, var(--page-bg))); color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
 .notes-unfold > button:hover, .notes-unfold > button:focus-visible { color: var(--ui-fg); border-color: var(--accent); }
 /* MathLive shades the inset that contains the caret; the LyX corner markers replace that */
@@ -1075,8 +1078,8 @@ pre.hl .l.cur { background: color-mix(in srgb, var(--active-bg) 45%, transparent
 .editor-host { position: relative; }
 
 /* ------------------------------------------------------------ ruler (text width) */
-.ruler { position: sticky; top: 0; z-index: 6; height: 24px; background: var(--ui-bg); border-bottom: 1px solid var(--ui-border); user-select: none; font-family: var(--ui-font); }
-.ruler-inner { position: relative; margin: 0 48px; height: 100%; }
+.ruler { position: sticky; top: 0; z-index: 6; height: 34px; background: var(--ui-bg); border-bottom: 1px solid var(--ui-border); user-select: none; font-family: var(--ui-font); }
+.ruler-inner { position: relative; margin: 0 var(--page-pad-x, 48px); height: 24px; }
 .ruler-band { position: relative; height: 100%; max-width: var(--text-width, 720px); margin: 0 auto; background: var(--page-bg); border-left: 1px solid var(--ui-border); border-right: 1px solid var(--ui-border); box-sizing: border-box; }
 /* margin mode: the band centred in the text part, then the notes pane with its sash (the page's split, app/notespane.tsx) */
 .margin-mode > .ruler > .ruler-inner { margin-left: calc(48px + var(--notes-inset)); margin-right: calc(48px + var(--notes-inset) + var(--notes-col, 340px)); }
@@ -1098,6 +1101,19 @@ pre.hl .l.cur { background: color-mix(in srgb, var(--active-bg) 45%, transparent
 .ruler .ruler-notes .label { cursor: default; }
 .ruler .handle:hover, .ruler.dragging .handle { border-top-color: var(--accent-strong); }
 .ruler .readout { position: absolute; top: 3px; left: 50%; transform: translateX(-50%); font-size: 10px; color: var(--ui-fg); background: var(--hl-bg); padding: 0 6px; border-radius: 3px; white-space: nowrap; }
+/* the second track (Ruler.tsx, editor/widecontent.ts): how far formulas and tables may reach — the
+   text column in the middle, the spill zone tinted either side, a bracket handle at each end */
+.ruler-wide { position: relative; height: 10px; border-top: 1px solid var(--ui-border); }
+.ruler-wide .wide-band { position: absolute; top: 2px; bottom: 2px; border-radius: 2px; background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.ruler-wide .wide-column { position: absolute; top: 2px; bottom: 2px; background: var(--page-bg); box-shadow: inset 0 0 0 1px var(--ui-border); }
+.ruler-wide .wide-handle { position: absolute; top: 0; bottom: 0; width: 9px; margin-left: -4.5px; cursor: ew-resize; z-index: 2; touch-action: none; outline: none; }
+.ruler-wide .wide-handle::before { content: ''; position: absolute; top: 1px; bottom: 1px; left: 3px; width: 3px; border-radius: 1px; background: var(--accent); }
+.ruler-wide .wide-handle:hover::before, .ruler-wide .wide-handle:focus-visible::before, .ruler.dragging .wide-handle::before { background: var(--accent-strong); left: 2px; width: 5px; }
+.ruler .readout.wide-readout { top: -15px; z-index: 3; }
+/* where a dragged handle snaps (the View menu's widths, the text column, the full width) */
+.ruler-rung { position: absolute; top: 0; height: 24px; width: 0; border-left: 1px dashed color-mix(in srgb, var(--accent) 45%, transparent); pointer-events: none; z-index: 1; }
+.ruler-rung.wide { top: 24px; height: 10px; }
+.ruler-rung.on { border-left: 1px solid var(--accent-strong); }
 
 /* Margin ink (editor/plugins/ink.ts): the drawing canvas overlays the scroll viewport, clipped to
    the margins by a keyhole clip-path set from JS (the text column is a hole, so clicks there reach
