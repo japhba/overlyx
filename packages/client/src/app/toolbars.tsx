@@ -126,6 +126,13 @@ export interface Toolbars {
    * rows (math, table, review) and the Layout row are the same in both interfaces.
    */
   modern: ToolButton[][];
+  /**
+   * The quick menu over selected words (app/SelectionBar.tsx): the text menu's own buttons — font,
+   * size, bold / italic / underline, colour, link, comment (markdown: what markdownToolbars keeps) —
+   * as the deck's QuickBar offers them (deliverable/decktoolbar.tsx QUICK_WORDS); empty when switched
+   * off (Settings ▸ Editor) or in a layout document (its canvas has its own)
+   */
+  quick: ToolButton[][];
   showLayout: boolean;
   /** the contextual toolbars' visibility: their mode, or (automatic) the cursor's context */
   showMath: boolean;
@@ -545,8 +552,22 @@ export function buildToolbars(ctx: ToolbarContext): Toolbars {
     [{ id: 'modern-more', title: 'More tools', icon: '⋮', palette: { title: 'More tools', list: true, cols: 1, items: moreItems } }],
   ].filter(g => g.length);
 
-  const bars = { standard, viewUpdate, extra, math, mathPanels, table, review, layout: layoutRow, modern, showLayout, showMath, showTable, showReview };
-  return isMarkdownDoc(docId) || meta?.format === 'markdown' ? markdownToolbars(bars, ctx) : bars;
+  const bars = { standard, viewUpdate, extra, math, mathPanels, table, review, layout: layoutRow, modern, quick: [] as ToolButton[][], showLayout, showMath, showTable, showReview };
+  const markdown = isMarkdownDoc(docId) || meta?.format === 'markdown';
+  const out = markdown ? markdownToolbars(bars, ctx) : bars;
+  return { ...out, quick: prefs.selectionBar && !showLayout ? quickGroups(out, markdown) : [] };
+}
+
+/** the quick menu's buttons, by id from the rows (re-id'd q-…: each toolbar button stays one of a kind on the page) */
+const QUICK_TEX = [['fontfamily', 'fontsize'], ['bold', 'italic', 'underline', 'textcolor'], ['href', 'comment']];
+const QUICK_MD = [['fontfamily'], ['bold', 'emph', 'strike', 'code'], ['href', 'comment']];
+function quickGroups(bars: Toolbars, markdown: boolean): ToolButton[][] {
+  const all = new Map<string, ToolButton>();
+  // (the classic rows first: their titles carry the shortcuts)
+  for (const b of [...bars.standard, ...bars.extra, ...bars.modern].flat()) if (!all.has(b.id)) all.set(b.id, b);
+  return (markdown ? QUICK_MD : QUICK_TEX)
+    .map(ids => ids.map(id => all.get(id)).filter((b): b is ToolButton => !!b).map(b => ({ ...b, id: 'q-' + b.id })))
+    .filter(g => g.length);
 }
 
 /** the Modern row folds into its ⋮ when the window is narrow: lists / indent / clear first, then

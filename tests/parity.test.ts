@@ -93,6 +93,8 @@ describe('one toolbar definition for both front ends', () => {
       expect(src, `${file} must show the mode switch from app/EditModeSwitch.tsx`).toMatch(/<EditModeSwitch /);
       expect(src, `${file} must switch modes through applyEditMode`).toMatch(/applyEditMode\(m, /);
       // Pane controls and resizing stay shared too: all three views in any order and width.
+      // the quick menu over selected words (app/SelectionBar.tsx) takes toolbars.tsx's own buttons
+      expect(src, `${file} must mount the shared selection quick menu`).toMatch(/<SelectionBar view=\{view\} groups=\{tb\.quick\} \/>/);
       expect(src, `${file} must use the shared pane switch`).toContain('<PaneSwitch ');
       expect(src, `${file} must use the shared pane dividers`).toContain('<PaneDividers ');
       expect(src, `${file} must not fall back to the old exclusive view modes`).not.toContain('<ViewModeSwitch ');
@@ -118,6 +120,13 @@ describe('one toolbar definition for both front ends', () => {
     expect([tb.showMath, tb.showTable, tb.showReview]).toEqual([false, false, false]);
     expect(buildToolbars(ctx(undefined, { tracking: true })).showReview).toBe(true);
     expect(buildToolbars(ctx(undefined, { tbMode: () => 'on' })).showMath).toBe(true);
+  });
+
+  it('the quick menu over selected words has the text menu\'s own buttons — markdown\'s in a markdown document, none when switched off', () => {
+    const on = { prefs: { spellcheck: true, selectionBar: true } as any };
+    expect(ids(buildToolbars(ctx(undefined, on)).quick)).toEqual(['q-fontfamily', 'q-bold', 'q-italic', 'q-underline', 'q-textcolor', 'q-href', 'q-comment']);
+    expect(ids(buildToolbars(ctx(undefined, { ...on, docId: 'p/a.md' })).quick)).toEqual(['q-fontfamily', 'q-bold', 'q-emph', 'q-strike', 'q-code', 'q-href', 'q-comment']);
+    expect(buildToolbars(ctx(undefined, { prefs: { spellcheck: true, selectionBar: false } as any })).quick).toEqual([]);
   });
 
   it('shell-specific buttons land in their slots, around the shared ones', () => {
