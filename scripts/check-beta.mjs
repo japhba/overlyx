@@ -70,8 +70,10 @@ async function cleanup() {
 for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, async () => { await cleanup(); process.exit(signal === 'SIGINT' ? 130 : 143); });
 
 try {
-  await run('build', process.platform === 'win32' ? 'npx.cmd' : 'npx', ['vite', 'build', '--outDir', dist, '--emptyOutDir'], path.join(repo, 'packages/client'));
-  await run('runtime', process.platform === 'win32' ? 'npx.cmd' : 'npx', ['vite', 'build', '-c', 'runtime.vite.config.ts'], path.join(repo, 'packages/client'), { OVERLYX_RUNTIME_OUT: path.join(dist, '_ol') });
+  // (the client's bundle renders at about node's default 2 GB heap: builds died of it on 17 Oct 2026)
+  const heap = { NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --max-old-space-size=4096`.trim() };
+  await run('build', process.platform === 'win32' ? 'npx.cmd' : 'npx', ['vite', 'build', '--outDir', dist, '--emptyOutDir'], path.join(repo, 'packages/client'), heap);
+  await run('runtime', process.platform === 'win32' ? 'npx.cmd' : 'npx', ['vite', 'build', '-c', 'runtime.vite.config.ts'], path.join(repo, 'packages/client'), { ...heap, OVERLYX_RUNTIME_OUT: path.join(dist, '_ol') });
   const snapshot = createAssetSnapshot(dist);
   const app = getReleaseAppEntry(dist, snapshot);
   const runtime = snapshot.files.find(file => file.path === '/_ol/runtime.js');
