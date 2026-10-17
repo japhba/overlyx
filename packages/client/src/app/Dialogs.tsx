@@ -749,7 +749,7 @@ export const HELP_ROWS: [string, string][] = [
     ['Alt+M f, s, x, e, (, [', 'In math: fraction, root, subscript, superscript, delimiters'],
     ['Alt+M n', 'In math: toggle equation numbering'],
     ['Esc', 'Leave formula / inset'],
-    ['Ctrl+0 … Ctrl+6', 'Heading level: Part, Chapter, Section, Subsection, Subsubsection, Paragraph, Subparagraph (LyX\u2019s Alt+P digits)'],
+    ['Ctrl+0 … Ctrl+6', 'Heading level: Part, Chapter, Heading 1 … Heading 5 (LaTeX\u2019s Section, Subsection, Subsubsection, Paragraph, Subparagraph; LyX\u2019s Alt+P digits)'],
     ['Ctrl+Alt+0 … Ctrl+Alt+6', 'The unnumbered heading (Part*, Chapter*, Section*, …)'],
     ['Alt+P s/1/2/3/4/i/e/d/q/t/a', 'Layout: Standard/Chapter/Section/Subsection/…/Itemize/Enumerate/Description/Quote/Title/Abstract'],
     ['Alt+P *2', 'Unnumbered section (Section*)'],

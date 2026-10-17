@@ -83,7 +83,7 @@ export const TOUR_STEPS: Step[] = [
     target: ['.toolbar-standard [data-style-picker]', '[data-style-picker]'],
     body: () => <>
       <p>Use paragraph styles to organize your text into headings, lists and theorems. This box shows the current paragraph's style; click it and type to search.</p>
-      <p><b>Press {kbd('Enter')} for a new paragraph and make it a <i>Section</i></b> — pick it from this box or press {kbd(MOD + '+2')}{uiMode() === 'classic' && <> (or {kbd('Alt+P')} then {kbd('2')}, LyX's shortcut)</>}.</p>
+      <p><b>Press {kbd('Enter')} for a new paragraph and make it a <i>{uiMode() === 'classic' ? 'Section' : 'Heading 1'}</i></b> — pick it from this box or press {kbd(MOD + '+2')}{uiMode() === 'classic' && <> (or {kbd('Alt+P')} then {kbd('2')}, LyX's shortcut)</>}.</p>
     </>,
     // a new heading (or list item, …) appeared, or the paragraph under the cursor got another layout
     done: (now, base) => now.styled > base.styled || (now.docTick > base.docTick && now.layout !== base.layout && now.layout !== 'Standard'),

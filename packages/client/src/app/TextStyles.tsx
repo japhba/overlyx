@@ -25,7 +25,7 @@ import type { EditorView } from 'prosemirror-view';
 import {
   TEXT_TYPES, NAMED_SIZES, SIZE_EM, TYPE_DEFAULTS, FAMILY_FONTS, ONEHALF_STRETCH, DOUBLE_STRETCH, WEIGHT_LABELS,
   styleLayers, readTexStyles, settingsOverTex, managedSettings, pdfStyles, mergeStyles, takeOver, removeStatements, headerPreamble, bodyDefaults, spacingValue,
-  stylesJson, parseFace, faceValue, isHeading, typeOfLayout,
+  stylesJson, parseFace, faceValue, isHeading, typeOfLayout, TYPE_LAYOUTS,
   type TextStyle, type TextStyles, type TextType, type StyleKey, type TexLayer, type TexStatement, type FontFace,
 } from '@overlyx/core';
 import { MD_FONTS } from '@overlyx/core/md/typesetting.ts';
@@ -37,8 +37,10 @@ import { loadGoogleFont } from '../fonts/googlefont';
 import { getPrefs, setPref, subscribePrefs } from '../prefs';
 import { EDITOR_FACES, DOCUMENT_FONT_SETS, FOLLOW_DOCUMENT, GOOGLE_FACE, editorFace, matchFontSet, fontSetValues, fontValues, type DocumentFontSet } from '../fonts/catalog';
 import { pinUnder } from './popup';
+import { styleLabel } from './stylenames';
 
-const NAMES: Record<TextType, string> = { title: 'Title', section: 'Heading 1', subsection: 'Heading 2', subsubsection: 'Heading 3', paragraph: 'Heading 4', body: 'Normal text', quote: 'Quote' };
+/** a kind's name: its paragraph style's, as the style list shows it (Modern: Heading 1 …, Normal text; Classic: Section …, Standard) */
+const typeName = (t: TextType) => styleLabel(TYPE_LAYOUTS[t][0], document.documentElement.dataset.ui === 'modern' ? 'modern' : 'classic');
 const SIZE_NAMES: Record<string, string> = { small: 'Small', normal: 'Normal', large: 'Large', larger: 'Larger', huge: 'Huge' };
 const COLORS = ['#000000', '#444444', '#1f4e79', '#2a62d6', '#0b7a75', '#2e7d32', '#b8860b', '#c0392b', '#8e44ad'];
 const SPACE_RUNGS = [0, 3, 6, 9, 12, 18, 24, 36];
@@ -456,7 +458,7 @@ export function TextStylesPanel({ docId, headerLines, view, markdown, layout, on
                 fontVariant: s.case === 'smallcaps' ? 'small-caps' : undefined, textTransform: s.case === 'uppercase' ? 'uppercase' : undefined,
                 fontSize: t === 'body' ? '1em' : `${Math.min(1.35, Math.max(0.85, sizePt(s.size ?? d.size, 10) / 10))}em`,
               }}>
-              <span class="ts-type-name">{NAMES[t]}</span>
+              <span class="ts-type-name">{typeName(t)}</span>
               {tex[t] && <span class="ts-dot ts-dot-tex" title="LaTeX in the preamble sets some of this" />}
               {(screen[t] || (t === 'body' && ownFont !== FOLLOW_DOCUMENT)) && <span class="ts-dot ts-dot-own" title="Your editor shows some of this its own way" />}
             </button>
@@ -540,7 +542,7 @@ export function TextStylesPanel({ docId, headerLines, view, markdown, layout, on
         <button type="button" data-ts-reset onClick={resetType}
           disabled={scope === 'screen' ? !screen[type] && !ownBodyFont : !doc[type] && !texOf}
           title={scope === 'screen' ? 'Your editor shows the document’s again' : texOf ? 'LaTeX’s default look — removes the preamble’s LaTeX for it too' : 'LaTeX’s default look'}>
-          {scope === 'screen' ? `Reset ${NAMES[type]} in my editor` : `Reset ${NAMES[type]}`}
+          {scope === 'screen' ? `Reset ${typeName(type)} in my editor` : `Reset ${typeName(type)}`}
         </button>
       </div>
     </div>

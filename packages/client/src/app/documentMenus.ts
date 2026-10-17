@@ -15,6 +15,7 @@ import { moveSection, shiftSection } from '../editor/outline';
 import { changeAt, resolveChange, acceptAllChanges, rejectAllChanges } from '../editor/plugins/changes';
 import { openLinkBoxFor, LINK_KEY } from '../editor/links';
 import { uiPrompt } from './Dialogs';
+import { styleLabel } from './stylenames';
 import { isMarkdownDoc, insertCodeBlock, insertRule } from '../editor/markdown';
 import { viewDocId } from '../editor/context';
 
@@ -113,9 +114,9 @@ export function documentMenus({ view, meta, run, runView, setDialog, textColor, 
       ...tex<MenuEntry>([{ label: 'Paragraph style ▸', sub: [
         { ...plain('Standard', 'Normal text'), shortcut: 'Alt+P S', action: () => run(C.setKnownLayout('Standard')) },
         { sep: true },
-        ...SECTION_LAYOUTS.map(([digit, name]) => ({ label: name, shortcut: 'Ctrl+' + digit, action: () => run(C.setKnownLayout(name)) })),
+        ...SECTION_LAYOUTS.map(([digit, name]) => ({ ...plain(name, styleLabel(name, 'modern')), shortcut: 'Ctrl+' + digit, action: () => run(C.setKnownLayout(name)) })),
         { sep: true },
-        ...SECTION_LAYOUTS.map(([digit, name]) => ({ label: name + '* (unnumbered)', shortcut: 'Ctrl+Alt+' + digit, action: () => run(C.setKnownLayout(name + '*')) })),
+        ...SECTION_LAYOUTS.map(([digit, name]) => ({ ...plain(name + '* (unnumbered)', styleLabel(name + '*', 'modern')), shortcut: 'Ctrl+Alt+' + digit, action: () => run(C.setKnownLayout(name + '*')) })),
         { sep: true },
         { ...plain('Itemize (bullet list — or type “- ”)', 'Bullet list (or type “- ”)'), shortcut: 'Alt+P I', action: () => run(C.setKnownLayout('Itemize')) },
         { ...plain('Enumerate (numbered list — or type “1. ”)', 'Numbered list (or type “1. ”)'), shortcut: 'Alt+P E', action: () => run(C.setKnownLayout('Enumerate')) },

@@ -99,12 +99,13 @@ export function Outline({ view, items, activePos }: { view: EditorView | null; i
   const tools = (it: OutlineItem) => {
     if (!view || it.level === 99) return null;
     const st = view.state, pos = it.pos + 1;
+    const [upper, lower] = document.documentElement.dataset.ui === 'modern' ? ['Heading 1', 'Heading 2'] : ['section', 'subsection'];
     return (
       <span class="outline-tools" onClick={e => e.stopPropagation()}>
         <button title="Move this section up (before the previous one)" disabled={!canMoveSection(st, pos, -1)} data-outline="up" onClick={() => run(it, 'up')}>▲</button>
         <button title="Move this section down (after the next one)" disabled={!canMoveSection(st, pos, 1)} data-outline="down" onClick={() => run(it, 'down')}>▼</button>
-        <button title="Promote: one heading level up (subsection → section)" disabled={!canShiftSection(st, pos, -1, layouts)} data-outline="out" onClick={() => run(it, 'out')}>◀</button>
-        <button title="Demote: one heading level down (section → subsection)" disabled={!canShiftSection(st, pos, 1, layouts)} data-outline="in" onClick={() => run(it, 'in')}>▶</button>
+        <button title={`Promote: one heading level up (${lower} → ${upper})`} disabled={!canShiftSection(st, pos, -1, layouts)} data-outline="out" onClick={() => run(it, 'out')}>◀</button>
+        <button title={`Demote: one heading level down (${upper} → ${lower})`} disabled={!canShiftSection(st, pos, 1, layouts)} data-outline="in" onClick={() => run(it, 'in')}>▶</button>
       </span>
     );
   };
@@ -116,7 +117,7 @@ export function Outline({ view, items, activePos }: { view: EditorView | null; i
           {tools(it)}
         </div>
       ))}
-      {!items.length && <div style="color:#888;padding:6px">No sections yet.</div>}
+      {!items.length && <div style="color:#888;padding:6px">No headings yet.</div>}
     </div>
   );
 }

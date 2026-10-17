@@ -279,6 +279,12 @@ const PLAIN_TITLES: Record<string, string> = {
   noun: 'Name / small caps (Ctrl+Shift+N)',
   depthin: 'Nest deeper (Alt+Shift+→)',
   depthout: 'Nest less deep (Alt+Shift+←)',
+  'l-standard': 'Normal text',
+  'l-itemize': 'Bullet list (or type “- ”)',
+  'l-enumerate': 'Numbered list (or type “1. ”)',
+  'l-labeling': 'Labelled list',
+  'l-description': 'Description list',
+  'l-section': 'Heading 1 (Ctrl+2)',
 };
 const plainTitle = (b: ToolButton): ToolButton => (PLAIN_TITLES[b.id] ? { ...b, title: PLAIN_TITLES[b.id] } : b);
 
