@@ -100,7 +100,9 @@ ${google ? `<tr><td>Google</td><td>Signs you in. With Google Docs sync, the link
 <tr><td>OpenRouter (USA), and the AI company whose model is used (Google by default; also Anthropic, OpenAI and others you can choose)</td><td>The text around your cursor or your selection, your instruction, and your document's LaTeX source as context. “Escalate to AI” for a document that will not build sends the whole <code>.tex</code> file. Writing a formula with the math keyboard’s pen sends a picture of the handwriting and the formula around the cursor. No account details</td><td>Only when you use an AI feature. All AI features are off until you switch them on in Settings</td></tr>
 <tr><td>OpenAI, through your own ChatGPT account</td><td>What the Agent panel's agent reads and writes in the project you give it. Its sign-in and conversations are stored on our server in your account's folder</td><td>Only if you use the Agent panel and sign in to ChatGPT there</td></tr>
 <tr><td>AI apps you connect (e.g. Claude Code, ChatGPT)</td><td>Whatever you let them read or change through the sign-in you give them</td><td>Only if you connect one</td></tr>
-<tr><td>OpenAlex, DBLP, doi.org (Crossref, DataCite), and Semantic Scholar or SerpApi where enabled</td><td>The words you search for when you look up a citation, and DOIs</td><td>When you search for literature</td></tr>
+<tr><td>OpenAlex, DBLP, doi.org (Crossref, DataCite), arXiv, OpenReview, bioRxiv, PubMed (NCBI), the ACL Anthology, HAL, Semantic Scholar, Open Library, and SerpApi where enabled</td><td>The words you search for when you look up a citation, and the DOIs, arXiv ids and other identifiers you enter</td><td>When you search for literature</td></tr>
+<tr><td>The website of a paper link you paste into the citation search</td><td>A request for that page from our server, to read the paper's title, authors and DOI. It does not get your IP address or account</td><td>Only when you paste such a link</td></tr>
+<tr><td>Zotero (Corporation for Digital Scholarship, USA)</td><td>Your Zotero API key and the words you search for, to find the matching items in your Zotero library and its groups. We keep the key, encrypted, until you disconnect Zotero or delete your account; we never write to your library</td><td>Only if you connect Zotero (Settings ▸ Account)</td></tr>
 <tr><td>Google Fonts and other font or script hosts</td><td>Slides, posters and web pages can load fonts or libraries from these services. The browser of whoever views them then contacts the service, which sees that viewer's IP address</td><td>When you view a slide deck, poster or page that uses them</td></tr>
 </table>
 <p>Some of these companies process data in the USA, under their standard data-protection terms (such as the EU–US Data Privacy Framework or the EU's standard contractual clauses). We do not sell your data, and we do not use it for advertising.</p>
@@ -109,7 +111,7 @@ ${google ? `<tr><td>Google</td><td>Signs you in. With Google Docs sync, the link
 <ul>
 <li><b>To provide the service you signed up for</b> (contract): your account, your projects, sharing, building PDFs and the backups that protect your work.</li>
 <li><b>Our legitimate interests</b>: keeping the service secure, finding and fixing errors (error reports, logs) and improving it (anonymous statistics). You can object, see <a href="#rights">your rights</a>.</li>
-<li><b>Your consent</b> for the optional features you switch on: the AI features, Google Drive, the Agent panel and connected AI apps. Switching them off withdraws it.</li>
+<li><b>Your consent</b> for the optional features you switch on: the AI features, Google Drive, Zotero, the Agent panel and connected AI apps. Switching them off withdraws it.</li>
 </ul>
 
 <h2>How long we keep it</h2>

@@ -9,7 +9,7 @@
  *  - memberships in other people's projects end; what the person wrote there stays (it is part of
  *    those documents), as does their name in those projects' history and comments;
  *  - sign-ins (git, MCP, OAuth grants, connected agents), the Agent panel's codex home and threads,
- *    the Google Drive connection, folded-section state, reports they sent, the cached avatar and
+ *    the Google Drive and Zotero connections, folded-section state, reports they sent, the cached avatar and
  *    the account row go; activity-log entries and error reports keep no link to the account.
  *  - the nightly backups (scripts/backup.sh, 14 kept) still hold the account until they roll off.
  *
@@ -27,6 +27,7 @@ import { deleteMirror, deleteArchivedMirror } from './mirror.ts';
 import { removeWorkspace } from './agentwork.ts';
 import { forgetAgentUser } from './agent.ts';
 import { disconnectDrive } from './gdocs/google.ts';
+import { disconnectZotero } from './zotero.ts';
 import './gdocs/sync.ts';   // its gdocs_links table
 import { forgetUserReports } from './feedback.ts';
 
@@ -127,6 +128,7 @@ export async function deleteAccount(user: SessionUser, live: LiveDocs): Promise<
   forgetAgentUser(id);
   for (const t of db.prepare('SELECT thread_id FROM agent_threads WHERE user_id = ?').all(id) as { thread_id: string }[]) removeWorkspace(t.thread_id);
   await disconnectDrive(id).catch(() => undefined);
+  disconnectZotero(id);
   db.transaction(() => {
     const agents = (db.prepare('SELECT id FROM mcp_agents WHERE user_id = ?').all(id) as { id: number }[]).map(a => a.id);
     for (const a of agents) db.prepare('DELETE FROM mcp_sessions WHERE agent_id = ?').run(a);

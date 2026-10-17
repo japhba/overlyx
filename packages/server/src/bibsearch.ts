@@ -4,7 +4,8 @@
  * Google Scholar has no API and blocks servers within minutes, so the search runs against the open
  * indexes that cover the same literature: OpenAlex (everything incl. arXiv, with citation counts) and
  * DBLP (computer science, with excellent BibTeX). A DOI, an arXiv id or a URL of either is looked up
- * directly. BibTeX comes from DBLP when it has the record, else from doi.org content negotiation
+ * directly — as is any paper link (arXiv, OpenReview, PubMed, publisher pages, any page with citation
+ * metadata: citelinks.ts). BibTeX comes from DBLP when it has the record, else from doi.org content negotiation
  * (Crossref / DataCite), else it is generated from the metadata. Keys are rewritten Scholar-style
  * (`vaswani2017attention`) and made unique within the project; an entry whose DOI or title is already
  * in one of the project's .bib files is not added twice — its existing key is returned.
@@ -16,6 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseBibtex, cleanTex, type BibEntry } from '@overlyx/core';
 import { config } from './config.ts';
+import { identify, resolveLink } from './citelinks.ts';
 
 export interface Hit {
   /** stable id for the client (doi, dblp key or openalex id) */
@@ -36,6 +38,8 @@ export interface Hit {
   bibtex?: string;
   /** Google Scholar result id (SerpApi) — its "cite" endpoint gives the BibTeX */
   scholarId?: string;
+  /** what the hit is, shown under it: "Published version", "arXiv preprint", "Your Zotero library" */
+  note?: string;
 }
 
 /** Which indexes this server can use, best first (the dialog shows them). */
@@ -67,13 +71,13 @@ export function parseQuery(q: string): { kind: 'doi'; doi: string } | { kind: 'a
 }
 
 const stripHtml = (s: string) => s.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&apos;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
-const normTitle = (s: string) => cleanTex(s).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+export const normTitle = (s: string) => cleanTex(s).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 
 /**
  * OpenAlex, scoped to titles + abstracts (`search=` would match full text: a mean-field query then
  * returns LeCun 1998). `mode` 'title' is the razor-precise variant, used alongside.
  */
-async function openalex(q: string, limit: number, mode: 'title' | 'title_and_abstract' = 'title_and_abstract'): Promise<Hit[]> {
+export async function openalex(q: string, limit: number, mode: 'title' | 'title_and_abstract' = 'title_and_abstract'): Promise<Hit[]> {
   const url = `https://api.openalex.org/works?filter=${mode}.search:${encodeURIComponent(q)}&per-page=${limit}&select=id,doi,display_name,publication_year,authorships,primary_location,cited_by_count,type,ids${config.contactEmail ? '&mailto=' + encodeURIComponent(config.contactEmail) : ''}`;
   const r = await fetchImpl(url);
   if (!r.ok) throw new Error(`OpenAlex ${r.status}`);
@@ -89,7 +93,7 @@ async function openalex(q: string, limit: number, mode: 'title' | 'title_and_abs
   });
 }
 
-async function dblp(q: string, limit: number): Promise<Hit[]> {
+export async function dblp(q: string, limit: number): Promise<Hit[]> {
   const r = await fetchImpl(`https://dblp.org/search/publ/api?q=${encodeURIComponent(q)}&format=json&h=${limit}`);
   if (!r.ok) throw new Error(`DBLP ${r.status}`);
   const d: any = await r.json();
@@ -152,16 +156,19 @@ async function semanticScholar(q: string, limit: number): Promise<Hit[]> {
   const r = await fetchImpl(`https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(q)}&limit=${limit}&fields=title,authors,year,venue,externalIds,citationCount,publicationTypes,citationStyles`, { headers: { 'x-api-key': config.s2ApiKey } });
   if (!r.ok) throw new Error(`Semantic Scholar ${r.status}`);
   const d: any = await r.json();
-  return (d.data ?? []).map((p: any): Hit => {
-    const ids = p.externalIds ?? {};
-    const doi = ids.DOI ? String(ids.DOI) : null;
-    return {
-      id: doi ?? `s2:${p.paperId}`, title: p.title ?? '', authors: (p.authors ?? []).map((a: any) => a.name).filter(Boolean), year: p.year ?? null,
-      venue: p.venue ?? '', type: (p.publicationTypes ?? []).join(','), doi, arxiv: ids.ArXiv ?? null,
-      url: doi ? `https://doi.org/${doi}` : (ids.ArXiv ? `https://arxiv.org/abs/${ids.ArXiv}` : `https://www.semanticscholar.org/paper/${p.paperId}`),
-      citations: p.citationCount ?? null, sources: ['semanticscholar'], dblp: ids.DBLP ?? undefined, bibtex: p.citationStyles?.bibtex ?? undefined,
-    };
-  });
+  return (d.data ?? []).map(s2Hit);
+}
+
+/** a Semantic Scholar paper record (search results, or one paper: citelinks.ts) as a hit */
+export function s2Hit(p: any): Hit {
+  const ids = p.externalIds ?? {};
+  const doi = ids.DOI ? String(ids.DOI) : null;
+  return {
+    id: doi ?? `s2:${p.paperId}`, title: p.title ?? '', authors: (p.authors ?? []).map((a: any) => a.name).filter(Boolean), year: p.year ?? null,
+    venue: p.venue ?? '', type: (p.publicationTypes ?? []).join(','), doi, arxiv: ids.ArXiv ?? null,
+    url: doi ? `https://doi.org/${doi}` : (ids.ArXiv ? `https://arxiv.org/abs/${ids.ArXiv}` : `https://www.semanticscholar.org/paper/${p.paperId}`),
+    citations: p.citationCount ?? null, sources: ['semanticscholar'], dblp: ids.DBLP ?? undefined, bibtex: p.citationStyles?.bibtex ?? undefined,
+  };
 }
 
 /** Google Scholar through SerpApi (needs SERPAPI_KEY): the real thing, incl. "cited by" counts. */
@@ -238,6 +245,9 @@ export interface SearchResult { hits: Hit[]; /** an index that should have answe
 
 /** Search (or look a DOI / arXiv id up). A failing open index is ignored; a failing Scholar-grade index becomes a warning. */
 export async function searchLiterature(q: string, limit = 10): Promise<SearchResult> {
+  // an identifier or a paper's link: that paper (and its published version), as Zotero's translators find it
+  const link = identify(q);
+  if (link) return resolveLink(link);
   const p = parseQuery(q);
   if (p.kind === 'doi') { const h = await hitFromDoi(p.doi); return { hits: h ? [h] : [], warnings: h ? [] : [`doi.org has no BibTeX for ${p.doi}`] }; }
   if (p.kind === 'arxiv') { const h = await hitFromDoi(`10.48550/arXiv.${p.id}`); return { hits: h ? [h] : [], warnings: h ? [] : [`arXiv:${p.id} could not be looked up`] }; }
@@ -256,17 +266,17 @@ export async function searchLiterature(q: string, limit = 10): Promise<SearchRes
   return { hits: mergeHits(lists, p.text, limit, { trusted: !!trusted && settled[0].status === 'fulfilled' }), warnings };
 }
 
-async function hitFromDoi(doi: string): Promise<Hit | null> {
+export async function hitFromDoi(doi: string): Promise<Hit | null> {
   const bib = await bibtexFromDoi(doi);
   if (!bib) return null;
   const e = parseBibtex(bib)[0];
   if (!e) return null;
   const arxiv = /^10\.48550\/arxiv\./i.test(doi) ? doi.replace(/^10\.48550\/arxiv\./i, '') : null;
   return { id: doi, title: cleanTex(e.title), authors: (e.fields.author ?? '').split(/\s+and\s+/i).map(a => cleanTex(a)).filter(Boolean), year: e.year ? Number(e.year) : null,
-    venue: cleanTex(e.fields.journal ?? e.fields.booktitle ?? e.fields.publisher ?? ''), type: e.type, doi, arxiv, url: `https://doi.org/${doi}`, citations: null, sources: ['doi'] };
+    venue: cleanTex(e.fields.journal ?? e.fields.booktitle ?? e.fields.publisher ?? ''), type: e.type, doi, arxiv, url: `https://doi.org/${doi}`, citations: null, sources: ['doi'], bibtex: bib };
 }
 
-async function bibtexFromDoi(doi: string): Promise<string | null> {
+export async function bibtexFromDoi(doi: string): Promise<string | null> {
   try {
     const r = await fetchImpl(`https://doi.org/${encodeURI(doi)}`, { headers: { accept: 'application/x-bibtex' }, redirect: 'follow' });
     if (!r.ok) return null;

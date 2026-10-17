@@ -1679,6 +1679,16 @@ textarea::selection, .dialog pre::selection, .dialog input::selection { backgrou
 .lit-hit .lit-main b { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lit-hit .sub { color: var(--ui-muted); font-size: 11px; }
 .lit-hit .small-btn { flex: none; }
+/* what a hit is: "Published version", "arXiv preprint", "Your Zotero library" */
+.lit-hit .lit-tag { display: inline-block; margin-right: 6px; padding: 0 5px; border-radius: 3px; background: var(--ui-hover); color: var(--fg2); font-size: 10.5px; line-height: 15px; }
+.lit-hit .lit-tag.zotero { background: color-mix(in srgb, #cc2936 14%, transparent); color: #a8202c; }
+html[data-theme="dark"] .lit-hit .lit-tag.zotero { background: color-mix(in srgb, #e5485a 24%, transparent); color: #f2a3ac; }
+.lit-zotero { margin: 2px 0 4px; }
+button.lit-link { border: 0; background: none; padding: 0; color: var(--accent); font: inherit; font-size: 12px; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.zotero-connect { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.zotero-connect.form { display: block; }
+.zotero-connect .zotero-key { display: flex; gap: 6px; margin-top: 4px; }
+.zotero-connect .zotero-key input { flex: 1; min-width: 0; }
 
 /* ------------------------------------------------------------ AI assistance (editor/ai) */
 /* ghost text: the suggested continuation, rendered like real content but faint */

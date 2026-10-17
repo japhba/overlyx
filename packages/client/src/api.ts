@@ -197,7 +197,10 @@ export interface GdocsTab { id: string; title: string; level: number; parent: st
 /** keys of the projects the server listed for this user (a link naming one needs no resolveId) */
 export const knownProjects = new Set<string>();
 
-export interface LitHit { id: string; title: string; authors: string[]; year: number | null; venue: string; type: string; doi: string | null; arxiv: string | null; url: string | null; citations: number | null; sources: string[]; dblp?: string }
+/** a paper found online, a paper link resolved, or an item of the account's Zotero library (server bibsearch.ts, citelinks.ts, zotero.ts) */
+export interface LitHit { id: string; title: string; authors: string[]; year: number | null; venue: string; type: string; doi: string | null; arxiv: string | null; url: string | null; citations: number | null; sources: string[]; dblp?: string; bibtex?: string; note?: string }
+/** the account's Zotero connection (server zotero.ts); the key itself never comes back */
+export interface ZoteroStatus { connected: boolean; username?: string; libraries?: string[] }
 export interface BibAddResult { key: string; file: string; existed: boolean; bibtex: string; entry: BibItem }
 export interface FeedbackInfo { version: string; errorReports: boolean }
 /** a problem report, error record or mail for the administrators (server feedback.ts listReports) */
@@ -205,8 +208,11 @@ export interface AdminReport { id: number; kind: string; title: string; body: st
 /** what deleting the account erases (server accounts.ts deletionPreview) */
 export interface DeletionPreview { owned: { project: string; title: string | null; people: number }[]; memberOf: number; refused: string | null }
 export const api = {
-  literatureSearch: (q: string) => req<{ hits: LitHit[]; sources: string[]; warnings: string[] }>('GET', `/api/bib/search?q=${encodeURIComponent(q)}`),
-  literatureSources: () => req<{ enabled: boolean; sources: string[] }>('GET', '/api/bib/sources'),
+  literatureSearch: (q: string) => req<{ hits: LitHit[]; sources: string[]; warnings: string[]; zotero?: boolean }>('GET', `/api/bib/search?q=${encodeURIComponent(q)}`),
+  literatureSources: () => req<{ enabled: boolean; sources: string[]; zotero?: ZoteroStatus }>('GET', '/api/bib/sources'),
+  zotero: () => req<ZoteroStatus>('GET', '/api/zotero'),
+  connectZotero: (key: string) => req<ZoteroStatus>('POST', '/api/zotero', { key }),
+  disconnectZotero: () => req<ZoteroStatus>('DELETE', '/api/zotero'),
   bibAdd: (project: string, data: { hit?: LitHit; bibtex?: string }) => req<BibAddResult>('POST', `/api/projects/${encodeURIComponent(project)}/bib/add`, data),
   feedbackInfo: () => req<FeedbackInfo>('GET', '/api/feedback/info'),
   feedback: (data: { kind: 'bug' | 'idea' | 'question'; title: string; body: string; doc?: string | null; error?: string | null }) => req<{ id: number }>('POST', '/api/feedback', data),
