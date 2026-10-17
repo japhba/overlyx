@@ -2603,7 +2603,7 @@ Restoring — do the drill once in a while:
 ```bash
 B=data/backups/$(ls data/backups | tail -1)
 scripts/restore.sh $B /tmp/restore/data /tmp/restore/projects            # integrity check, counts
-OVERLYX_DATA_DIR=/tmp/restore/data OVERLYX_PROJECTS_DIR=/tmp/restore/projects OVERLYX_GIT=off PORT=3002 HOST=127.0.0.1 npx tsx packages/server/src/index.ts
+OVERLYX_DATA_DIR=/tmp/restore/data OVERLYX_PROJECTS_DIR=/tmp/restore/projects OVERLYX_MAIL_INBOX=/tmp/restore/mailin OVERLYX_GIT=off PORT=3002 HOST=127.0.0.1 npx tsx packages/server/src/index.ts
 # log in with a real password (hashes are in the database), list projects, open a document; then
 # for a real restore: systemctl stop overlyx; scripts/restore.sh $B data /mnt/HC_Volume_107166861/projects --force; systemctl start overlyx
 # (the real directory, never the /root/projects symlink: --force would move the symlink aside and restore onto the root disk)
@@ -2627,7 +2627,8 @@ its data, run them against an isolated instance:
 S=/mnt/HC_Volume_107166861/scratch/overlyx-e2e; mkdir -p $S/projects $S/data   # on overlyx.app: the volume, not /tmp (test leftovers filled the root disk on 16 Oct 2026)
 mkdir -p $S/projects/admin && rsync -a --exclude _build --exclude .git /root/projects/jan/recurrent_feature /root/projects/jan/bayesian_chaos $S/projects/admin/   # features.spec compiles bayesian_chaos; landing.spec opens recurrent_feature
 OVERLYX_DATA_DIR=$S/data npx tsx packages/server/src/seed.ts admin Admin bob Bob carol Carol u1 U1 u2 U2 u3 U3 u4 U4 u5 U5 u6 U6
-OVERLYX_DATA_DIR=$S/data OVERLYX_PROJECTS_DIR=$S/projects OVERLYX_CLIENT_DIST=$S/dist PORT=3001 npx tsx packages/server/src/index.ts &
+# (OVERLYX_MAIL_INBOX: its own — the default is production's /var/lib/overlyx-mailin, whose mail a test server would import and delete)
+OVERLYX_DATA_DIR=$S/data OVERLYX_PROJECTS_DIR=$S/projects OVERLYX_CLIENT_DIST=$S/dist OVERLYX_MAIL_INBOX=$S/mailin PORT=3001 npx tsx packages/server/src/index.ts &
 (cd packages/client && OVERLYX_API_PORT=3001 npx vite --port 5174 &)
 export OVERLYX_PROJECTS_DIR=$S/projects OVERLYX_E2E_CREDENTIALS=$S/data/credentials.txt
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/smoke.spec.ts e2e/editing.spec.ts e2e/features.spec.ts e2e/dialogs.spec.ts e2e/fonts.spec.ts
