@@ -59,6 +59,13 @@ describe('scientific starter refresh', () => {
       expect(shipped).not.toBe(latest(templateFolder(t)));
       expect(isLightlyEditedStarter(shipped, legacyFolder(t))).toBe(true);
     }
+    // the project posters as shipped before their file header lost a private project path (17 Oct 2026)
+    for (const folder of ['poster-bernstein-2026', 'poster-icml-2026']) {
+      const shipped = readFileSync(join(templates, 'starters-legacy/scientific-v3', folder, 'index.html'), 'utf8');
+      expect(shipped).toContain('/#/jan/');
+      expect(isLightlyEditedStarter(shipped, folder)).toBe(true);
+    }
+    for (const t of SCIENTIFIC_TEMPLATES) expect(latest(templateFolder(t))).not.toMatch(/#\/jan\b/);
   });
 
   it('refreshes eligible examples once, retains versions and adds variants without overwriting an existing folder', () => {

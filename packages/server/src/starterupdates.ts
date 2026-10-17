@@ -25,7 +25,7 @@ export const LATER_POSTERS = ['bernstein-2026', 'icml-2026', 'statement-2026'];
 export const legacyFolder = (t: ScientificTemplate) => t.id === 'research' ? 'talk' : t.id === 'betterposter' ? 'poster' : `${t.kind === 'deck' ? 'talk' : 'poster'}-${t.id}`;
 /** each example's folder now, and the one its old versions are kept under (starters-legacy) */
 const examples = [...SCIENTIFIC_TEMPLATES.map(t => ({ folder: templateFolder(t), legacy: legacyFolder(t) })), { folder: 'site', legacy: 'site' }];
-const oldSources = (folder: string) => ['web', 'scientific-v1', 'mit-v1', 'scientific-v2'].map(version => path.join(templates, 'starters-legacy', version, folder, 'index.html'))
+const oldSources = (folder: string) => ['web', 'scientific-v1', 'mit-v1', 'scientific-v2', 'scientific-v3'].map(version => path.join(templates, 'starters-legacy', version, folder, 'index.html'))
   .filter(file => fs.existsSync(file)).map(file => fs.readFileSync(file, 'utf8'));
 const compact = (s: string) => s.replace(/\s+/g, ' ').trim();
 
