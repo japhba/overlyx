@@ -51,6 +51,8 @@ export function markdownForLatex(doc: LyxDocument, opts: { fontFiles?: Record<st
   const t = mdTypesetting(copy.preamble);
   const files = opts.fontFiles ?? {};
   applyTypesetting(copy.header, t);
+  // (the styles are the preamble's below, before header-includes — the managed block must not set them again after it)
+  copy.header.lines = copy.header.lines.filter(l => !l.startsWith('\\overlyx_styles '));
   // a font loaded by file (the preamble's) is not named in the header as well: LuaLaTeX would look for it by name
   for (const [key, name] of [['font_roman', t.mainfont], ['font_sans', t.sansfont], ['font_typewriter', t.monofont]] as const) {
     if (!name || !files[name]) continue;

@@ -10,7 +10,7 @@ import { withTypesetting, type FMSet, type FMValue } from '@overlyx/core/md/type
 import { manager } from './docs.ts';
 
 /** the keys of the front matter that set the typesetting (others — a title, tags — are left to the file) */
-export const STYLE_KEYS = ['mainfont', 'sansfont', 'monofont', 'mathfont', 'fontsize', 'papersize', 'geometry', 'linestretch', 'numbersections', 'justify', 'headings', 'header-includes'];
+export const STYLE_KEYS = ['mainfont', 'sansfont', 'monofont', 'mathfont', 'fontsize', 'papersize', 'geometry', 'linestretch', 'numbersections', 'justify', 'headings', 'styles', 'header-includes'];
 
 export async function markdownStyle(docId: string): Promise<{ vars: Record<string, FMValue>; fonts: typeof MD_FONTS }> {
   if (!isMarkdownPath(docId)) throw new Error('Only markdown documents keep their settings in front matter');

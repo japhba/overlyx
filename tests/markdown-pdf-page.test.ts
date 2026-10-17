@@ -35,7 +35,7 @@ describe('markdown PDF page settings', () => {
     expect(doc.header.lines).toContain('\\use_non_tex_fonts true');
     expect(doc.header.lines).toContain('\\font_roman "default" "Libertinus Serif"');
     expect(doc.header.lines).toContain('\\secnumdepth 3');
-    expect(JSON.parse(doc.header.lines.find(l => l.startsWith('\\overlyx_headings '))!.slice(18)).section).toEqual({ display: 'run-in' });
+    expect(JSON.parse(doc.header.lines.find(l => l.startsWith('\\overlyx_styles '))!.slice(16)).section).toEqual({ display: 'run-in' });
     const pre = preambleOf(md);
     expect(pre).toMatch(/\\usepackage\{amsmath\}\n\\usepackage\{unicode-math\}\n\\setmathfont\{Libertinus Math\}/);
     expect(pre).toContain('\\setmainfont[Ligatures=TeX]{Libertinus Serif}');
@@ -87,11 +87,12 @@ describe('heading styles (headings: in the front matter)', () => {
   });
   it('becomes titlesec in the PDF', () => {
     const pre = preambleOf(fm.join('\n') + '\n\n# A\n\nText.\n');
-    expect(pre).toContain('\\usepackage{fontspec}\n\\newfontfamily\\olheadingfonta{Fira Sans}');
-    expect(pre).toContain('\\titleformat{\\section}[hang]{\\normalfont\\olheadingfonta\\Large\\bfseries\\scshape\\color[HTML]{1F4E79}}{\\thesection}{1em}{}[\\vspace{.4ex}\\titlerule]');
+    // (the heading font by name: \olfontset, defined in the preamble — core fontface.ts)
+    expect(pre).toContain('\\DeclareDocumentCommand \\olfontset');
+    expect(pre).toContain('\\titleformat{\\section}[hang]{\\normalfont\\olfontset{Fira Sans}\\Large\\bfseries\\scshape\\color[HTML]{1F4E79}}{\\thesection}{1em}{}[\\vspace{.4ex}\\titlerule]');
     // (the subsection runs in, as all levels but the section do: a run-in heading is not centred)
-    expect(pre).toContain('\\titleformat{\\subsection}[runin]{\\normalfont\\olheadingfonta\\normalsize\\bfseries\\itshape\\scshape\\color[HTML]{1F4E79}}');
-    expect(pre).toContain('\\titleformat{\\subsubsection}[runin]{\\normalfont\\olheadingfonta\\normalsize\\bfseries\\scshape\\color[HTML]{1F4E79}}');
+    expect(pre).toContain('\\titleformat{\\subsection}[runin]{\\normalfont\\olfontset{Fira Sans}\\normalsize\\bfseries\\itshape\\scshape\\color[HTML]{1F4E79}}');
+    expect(pre).toContain('\\titleformat{\\subsubsection}[runin]{\\normalfont\\olfontset{Fira Sans}\\normalsize\\bfseries\\scshape\\color[HTML]{1F4E79}}');
   });
   it('is written back as keys of their own', () => {
     expect(setFrontMatter(['---', 'title: x', 'headings: run-in', '---'], { headings: { display: 'block', color: '#336699', section: { size: 'huge' } } }))
@@ -117,15 +118,15 @@ describe('heading styles (headings: in the front matter)', () => {
     expect(doc.header.lines).toContain('\\overlyx_justify true');
   });
 
-  it('a font the build has as files (a Google font) is loaded by file, and named nowhere else', () => {
+  it('a body font the build has as files (a Google font) is loaded by file, and named nowhere else; a heading font by name', () => {
     const md = '---\nmainfont: Lora\nheadings: { font: Inter }\n---\n\n# A\n\nText.\n';
     const tex = writeTex(markdownForLatex(parseMarkdown(md).doc, { fontFiles: {
       Lora: { path: './ol-fonts/lora/', regular: 'lora-400.ttf', bold: 'lora-700.ttf', italic: 'lora-400i.ttf', boldItalic: 'lora-700i.ttf' },
       Inter: { path: './ol-fonts/inter/', regular: 'inter-400.ttf' },
     } }), { basename: 'x' }).text;
     expect(tex).toContain('\\setmainfont{Lora}[Path=./ol-fonts/lora/, UprightFont=lora-400.ttf, BoldFont=lora-700.ttf, ItalicFont=lora-400i.ttf, BoldItalicFont=lora-700i.ttf, Ligatures=TeX]');
-    // (a face the family lacks is drawn from the regular one)
-    expect(tex).toContain('\\newfontfamily\\olheadingfonta{Inter}[Path=./ol-fonts/inter/, UprightFont=inter-400.ttf, BoldFont=inter-400.ttf, BoldFeatures={FakeBold=2}');
+    // (the heading's: by name — the build puts the Google fonts \olfontset names where LuaTeX finds them, OSFONTDIR)
+    expect(tex).toContain('\\titleformat{\\section}[hang]{\\normalfont\\olfontset{Inter}\\Large\\bfseries}');
     expect(tex).not.toContain('\\setmainfont[Ligatures=TeX]{Lora}');
   });
 });

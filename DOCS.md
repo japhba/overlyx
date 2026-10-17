@@ -3110,6 +3110,43 @@ selection at once.
   `editor/plugins/fontfaces.ts` loads the families a document uses). The font routes need a signed-in
   user; the VS Code webview has none of them (the list then has the document's families only).
 
+## Text styles
+
+*Format ▸ Text styles…*, the ✎ beside a style in the paragraph style list, or the list's last line
+(*Text styles — fonts, sizes, colours…*) open `app/TextStyles.tsx`: a floating panel (the page stays
+in view) where each kind of text — Title, Heading 1–4, Normal text, Quote — gets its font (the
+toolbar's font list, with a variable font's axes and features), size (a slider with rungs at LaTeX's
+sizes, any point size between), bold / italic / small capitals / capitals, colour, alignment, the
+space above and below (sliders with rungs), and for headings whether they run into their paragraph
+and a rule. Changes show at once (the page's style element) and are saved a moment later. *Match the
+text at the cursor* takes the font, size, weight, italics and colour of the text where the cursor is
+(Google Docs' "Update to match").
+
+* **The model** (`core/textstyles.ts`): `TextStyle` per `TextType`, carried to the editor by the
+  header line `\overlyx_styles {json}` (`client editor/paragraphsep.ts stylesCss`), and to the PDF by
+  `stylesLatex`: titlesec for the headings, titling's \pretitle / \posttitle for the title, etoolbox's
+  \AtBeginEnvironment for quote / quotation, \color for the body; fonts with `\olfontset` (the
+  declaration form of \olfont, `fontface.ts`; the build finds Google fonts by name, OSFONTDIR).
+* **Markdown**: the front matter — `headings:` for the levels (as before), `styles:` for `title`,
+  `body` (its colour) and `quote`; the body's font, size, line spacing and alignment are pandoc's
+  `mainfont`, `fontsize`, `linestretch`, `justify`. The styles' LaTeX goes before header-includes.
+* **.tex**: the settings line's `overlyx_styles` (SETTINGS_KEYS), written into the managed block; the
+  body's size, line spacing and alignment are `paperfontsize`, `spacing`, `justification`.
+* **Hand-written LaTeX** (an agent's or a person's header-includes, the user's case of 17 Oct 2026):
+  `stylesFromIncludes` reads `\justifying`, \titleformat / \titlespacing for the four levels and a
+  patched \@maketitle, so the editor shows what that PDF looks like (justified text, small section
+  headings); editing such a style takes over from the LaTeX (`takeOverIncludes` drops the lines it
+  replaces, and ragged2e when nothing else uses it). The MCP instructions and set_markdown_style's
+  description tell agents to use the keys (`justify`, `headings`, `styles`), not header-includes, for
+  these.
+* **Justification in the editor** (`justified`, `html[data-justify]`): a markdown document says it in
+  `\overlyx_justify` (always set by `applyTypesetting`: its `justify`, a body style, or \justifying in
+  its header-includes); a .tex document is justified unless its `justification` is false — as LaTeX
+  and LyX set it (until 17 Oct 2026 the editor showed every .tex document ragged right).
+* Front matter values are read with YAML's escapes undone (`\\` and `\"` in double quotes, `''` in
+  single): the writer escapes backslashes, and header-includes rewritten by the settings dialog or an
+  agent came back with doubled backslashes before.
+
 ## Google Docs sync
 
 *File ▸ Google Docs (sync, comments)…* links a document — markdown or `.tex` — to a Google Doc

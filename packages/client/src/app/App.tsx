@@ -37,6 +37,7 @@ import { debounce, hashAuthor, applyAuthorColors, bcp47, suggestLabel, LayoutPic
 import { chooseLyxImport } from './lyximport';
 import { setDocumentFonts } from '../fonts/editorfont';
 import { setDocumentParagraphs, setDocumentHeadings } from '../editor/paragraphsep';
+import { TextStylesPanel } from './TextStyles';
 import { setDocumentNumbering } from '../editor/plugins/numbering';
 import { MarkdownSettingsDialog } from './MarkdownSettings';
 import { Outline, buildOutline, type OutlineItem } from './Outline';
@@ -1487,6 +1488,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       }
       case 'href': return <HrefDialog onClose={close} onInsert={(t, n) => run(C.insertHref(t, n))} />;
       case 'mdsettings': return <MarkdownSettingsDialog docId={docId} onClose={close} />;
+      case 'textstyles': return <TextStylesPanel docId={docId} headerLines={headerLines} view={view} markdown={isMarkdownDoc(docId)} layout={typeof dialog.arg === 'string' ? dialog.arg : undefined} onClose={close} />;
       case 'settings': return <SettingsDialog docId={docId} meta={meta} headerLines={headerLines} tab={typeof dialog.arg === 'string' ? dialog.arg : undefined} onClose={close} onSaved={() => api.meta(docId).then(m => { setMeta(m); editorContext.meta = m; if (masterView) refreshMacros(masterView, m.macros); })} />;
       case 'macros': return <MacrosDialog meta={meta} onClose={close} />;
       case 'airepair': return docId ? <AiRepairDialog docId={docId} onClose={close} onApplied={() => api.meta(docId).then(m => { setMeta(m); editorContext.meta = m; })} /> : null;
@@ -1553,7 +1555,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     {/* the Modern interface: one rounded row (toolbars.tsx `modern`), the mode switch at its end, as in Google Docs */}
     {isLyxDoc && ui === 'modern' && (
       <div class="tb-modern-row">
-        <Toolbar id="modern" layouts={layouts} layout={layout} onLayout={n => run(C.setLayout(n))} layoutsAt={2} groups={tb.modern} collapse={MODERN_COLLAPSE} />
+        <Toolbar id="modern" layouts={layouts} layout={layout} onLayout={n => run(C.setLayout(n))} onEditStyle={n => setDialog({ name: 'textstyles', arg: n })} layoutsAt={2} groups={tb.modern} collapse={MODERN_COLLAPSE} />
         <span class="tb-modern-end">
           <ZoomControl zoom={zoom} onZoom={setZoom} />
           <button type="button" class="tb-pdf-btn" title="Build and show the PDF (Ctrl+R)" onClick={() => { void build(); }}>PDF</button>
@@ -1564,7 +1566,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     {/* the mode switch (Editing · Suggesting · Viewing) ends the first toolbar row, as in Google Docs */}
     {isLyxDoc && ui !== 'modern' && (modeRow === 'standard' || modeRow === 'own') && (
       <div class="tb-toprow">
-        {modeRow === 'standard' && <Toolbar id="standard" layouts={layouts} layout={layout} onLayout={n => run(C.setLayout(n))} groups={tb.standard} />}
+        {modeRow === 'standard' && <Toolbar id="standard" layouts={layouts} layout={layout} onLayout={n => run(C.setLayout(n))} onEditStyle={n => setDialog({ name: 'textstyles', arg: n })} groups={tb.standard} />}
         {modeSwitch}
       </div>
     )}

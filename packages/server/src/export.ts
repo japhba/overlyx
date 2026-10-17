@@ -513,7 +513,7 @@ async function buildViaLatexmk(job: BuildJob): Promise<BuildResult> {
   // directory, where LuaTeX finds them by name (OSFONTDIR) — such a document is built with LuaLaTeX
   // (fontspec; XeTeX would not see the folder) unless the author named XeTeX
   const faceFonts = await provideFaceFonts(exp.tex, exp.dir).catch(() => null);
-  const faces = /\\olfont[[{]/.test(exp.tex);
+  const faces = /\\olfont(?:set)?[[{]/.test(exp.tex);
   // markdown is UTF-8 through and through (emoji, arrows, any script): LuaTeX takes it as it is
   const engineFlag = isMarkdownPath(doc.relPath) ? '-pdflua' : magic ?? (outFmt === 'pdf5' ? '-pdflua' : outFmt === 'pdf4' ? '-pdfxe' : faces ? '-pdflua' : nonTex ? '-pdfxe' : '-pdf');
   // build products must be real files in the build directory, never links into the project

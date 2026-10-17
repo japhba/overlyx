@@ -345,6 +345,49 @@ html[data-theme="dark"] .ol-wordmark.bauhaus, html[data-ui="modern"][data-theme=
 .tb-style-item.current { box-shadow: inset 2px 0 0 var(--accent); }
 .tb-style-alt { font-size: 11px; font-weight: 400; color: var(--ui-muted); }
 .tb-style-none { padding: 6px 8px; font-size: 12px; color: var(--ui-muted); }
+/* ✎ beside a style in the list: its text style (app/TextStyles.tsx); the list's last line opens them all */
+.tb-style-item { position: relative; }
+.tb-style-edit { margin-left: auto; padding: 0 4px; border-radius: 3px; color: var(--ui-muted); font-size: 12px; font-weight: 400; font-style: normal; opacity: 0; }
+.tb-style-item:hover .tb-style-edit, .tb-style-item.hi .tb-style-edit { opacity: 1; }
+.tb-style-edit:hover { background: var(--active-bg); color: var(--ui-fg); }
+.tb-style-more { margin-top: 4px; padding: 6px 8px; border: 0; border-top: 1px solid var(--ui-border); background: none; color: var(--ui-muted); font: 12px var(--ui-font); text-align: left; cursor: pointer; }
+.tb-style-more:hover { color: var(--ui-fg); background: var(--ui-hover); }
+/* Text styles (app/TextStyles.tsx): a floating panel at the right, the page in view */
+.ts-panel { position: fixed; right: 16px; top: 96px; z-index: 70; width: 340px; max-height: calc(100vh - 112px); display: flex; flex-direction: column; background: var(--surface); color: var(--ui-fg); border: 1px solid var(--ui-border); border-radius: 8px; box-shadow: 0 10px 32px rgba(0,0,0,0.2); font: 13px var(--ui-font); }
+.ts-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px 6px 14px; border-bottom: 1px solid var(--ui-border); }
+.ts-close { border: 0; background: none; color: var(--ui-muted); font-size: 14px; cursor: pointer; padding: 2px 6px; border-radius: 4px; }
+.ts-close:hover { background: var(--ui-hover); color: var(--ui-fg); }
+.ts-types { display: flex; flex-direction: column; gap: 1px; padding: 6px; border-bottom: 1px solid var(--ui-border); max-height: 34vh; overflow-y: auto; }
+.ts-type { text-align: left; border: 0; border-radius: 5px; background: none; padding: 4px 10px; cursor: pointer; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--fg); }
+.ts-type:hover { background: var(--ui-hover); }
+.ts-type.on { background: var(--active-bg); box-shadow: inset 3px 0 0 var(--accent); }
+.ts-body { padding: 6px 14px 4px; overflow-y: auto; flex: 1 1 auto; }
+.ts-row { display: grid; grid-template-columns: 86px 1fr; align-items: start; gap: 8px; padding: 6px 0; }
+.ts-label { color: var(--ui-muted); font-size: 12px; padding-top: 4px; }
+.ts-ctl { min-width: 0; }
+.ts-note { color: var(--ui-muted); font-size: 12px; }
+.ts-seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--ui-border); border-radius: 5px; overflow: hidden; }
+.ts-seg > button { border: 0; border-right: 1px solid var(--ui-border); background: none; color: var(--ui-fg); padding: 3px 8px; font: 12px var(--ui-font); cursor: pointer; }
+.ts-seg > button:last-child { border-right: 0; }
+.ts-seg > button.on { background: var(--active-bg); font-weight: 600; }
+.ts-toggles { display: inline-flex; gap: 4px; }
+.ts-tog { min-width: 30px; height: 26px; border: 1px solid var(--ui-border); border-radius: 5px; background: none; color: var(--ui-fg); cursor: pointer; font: 13px var(--editor-font, serif); }
+.ts-tog.on { background: var(--active-bg); border-color: var(--accent); }
+.ts-colors { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.ts-swatch { position: relative; width: 20px; height: 20px; border-radius: 50%; border: 1px solid rgba(0,0,0,0.2); padding: 0; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; color: var(--ui-muted); background: var(--surface); }
+.ts-swatch.on { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ts-custom input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+.ts-slider { min-width: 0; }
+.ts-slider-val { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ui-muted); font-variant-numeric: tabular-nums; }
+.ts-slider input[type=range] { width: 100%; margin: 2px 0 0; accent-color: var(--accent, #2a62d6); }
+.ts-slider .ff-rungs { margin: 0 8px; height: 15px; }
+.ts-reset { border: 0; background: none; color: var(--ui-muted); cursor: pointer; padding: 0 4px; border-radius: 3px; font-size: 12px; }
+.ts-reset:hover { color: var(--ui-fg); background: var(--ui-hover); }
+.ts-font { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; }
+.ts-font-btn { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 1px solid var(--ui-border); border-radius: 5px; background: var(--surface); color: var(--ui-fg); padding: 3px 8px; font-size: 13px; cursor: pointer; }
+.ts-font-pop { z-index: 120; }
+.ts-foot { display: flex; flex-wrap: wrap; gap: 6px; justify-content: space-between; padding: 8px 14px 10px; border-top: 1px solid var(--ui-border); }
+.ts-foot > button { font: 12px var(--ui-font); }
 .tb-btn { height: 24px; min-width: 26px; padding: 0 6px; border: 1px solid transparent; background: none; border-radius: 3px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; color: var(--fg2); }
 .tb-btn:hover { background: var(--ui-hover); border-color: var(--ui-border); }
 .tb-btn.active { background: var(--active-bg); border-color: var(--active-border); }

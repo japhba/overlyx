@@ -7,13 +7,18 @@
  *   fontsize: 11pt         papersize: a4        geometry: margin=2cm (or a list of geometry's options)
  *   linestretch: 1.25      numbersections: true      justify: true (OverLyX's; ragged right without)
  *   headings               how headings are set (titlesec; the editor draws them alike): `run-in`, or
- *                          keys for every level — display (block | run-in), font, size (small | normal
- *                          | large | larger | huge), weight (bold | normal), shape (upright | italic),
- *                          case (normal | smallcaps | uppercase), color (#rrggbb), align (left |
- *                          center), rule (none | below | above), space-above / space-below (a
- *                          length: 0.5ex, 4pt, 1em) — and under section: … paragraph: a
- *                          level's own (`section: { size: larger, rule: below }`)
- *   header-includes        LaTeX for the preamble, after all of the above
+ *                          keys for every level — display (block | run-in), font (a name, or a font
+ *                          by name with axes: `Inter|300`), size (small | normal | large | larger |
+ *                          huge, or 14pt), weight (bold | normal), shape (upright | italic), case
+ *                          (normal | smallcaps | uppercase), color (#rrggbb), align (left | center |
+ *                          right), rule (none | below | above), space-above / space-below (a length:
+ *                          0.5ex, 4pt, 1em) — and under section: … paragraph: a level's own
+ *                          (`section: { size: larger, rule: below }`)
+ *   styles                 the same keys for `title` (titling), `body` (its colour; its font, size and
+ *                          alignment are mainfont / fontsize / justify) and `quote` (core textstyles.ts)
+ *   header-includes        LaTeX for the preamble, after all of the above — for what no key says: the
+ *                          editor cannot draw it (it reads \justifying, \titleformat, \titlespacing and a
+ *                          patched \@maketitle: textstyles.ts stylesFromIncludes)
  *
  * Parsing a markdown document turns these into its settings (header lines: the editor shows the
  * fonts, the numbering and the run-in headings; `applyTypesetting`), and its PDF's preamble gets the
@@ -23,6 +28,10 @@
  */
 import type { Header } from '../lyx/ast.ts';
 import { markdownHeader } from './common.ts';
+import { HEADING_LEVELS, textStyleOf, stylesFromIncludes, stylesLatex, stylesUseFonts, stylesJson, mergeStyles, type HeadingLevel, type TextStyle, type TextStyles } from '../textstyles.ts';
+import { OLFONT_DEF } from '../fontface.ts';
+
+export { HEADING_LEVELS, type HeadingLevel } from '../textstyles.ts';
 
 /** a text face with the math font drawn for it — the ones TeX Live's LuaLaTeX finds by these names */
 export interface MdFont { label: string; main: string; math: string; hint: string }
@@ -84,7 +93,18 @@ export function frontMatterVars(lines: string[]): Record<string, FMValue> {
   return parseMap(body, 0, 0).map;
 }
 
-const unquote = (v: string) => v.trim().replace(/^(['"])(.*)\1$/, '$2');
+/**
+ * a scalar without its quotes: YAML's escapes undone — `\\` and `\"` in double quotes (what yamlScalar
+ * writes), `''` in single ones; any other backslash stays (`"\usepackage{…}"`, as people write
+ * header-includes, is not YAML but means the backslash)
+ */
+const unquote = (v: string) => {
+  const t = v.trim();
+  const d = /^"(.*)"$/.exec(t);
+  if (d) return d[1].replace(/\\(["\\])/g, '$1');
+  const q = /^'(.*)'$/.exec(t);
+  return q ? q[1].replace(/''/g, "'") : t;
+};
 const indentOf = (l: string) => l.length - l.trimStart().length;
 const blank = (l: string) => !l.trim() || /^\s*#/.test(l);
 
@@ -145,48 +165,14 @@ function parseMap(lines: string[], i: number, indent: number): { map: Record<str
 
 /* --------------------------------------------------------------- headings */
 
-/** the heading levels a markdown document has (# … ####), as their LaTeX commands */
-export const HEADING_LEVELS = ['section', 'subsection', 'subsubsection', 'paragraph'] as const;
-export type HeadingLevel = typeof HEADING_LEVELS[number];
-/** how a heading is set (each key optional: the level's default) */
-export interface HeadingStyle {
-  display?: 'block' | 'run-in';
-  font?: string;
-  size?: 'small' | 'normal' | 'large' | 'larger' | 'huge';
-  weight?: 'bold' | 'normal';
-  shape?: 'upright' | 'italic';
-  case?: 'normal' | 'smallcaps' | 'uppercase';
-  color?: string;
-  align?: 'left' | 'center';
-  rule?: 'none' | 'below' | 'above';
-  /** the space above / below the heading (front matter `space-above` / `space-below`): a length, ex em pt mm cm (a plain number: em) */
-  spaceAbove?: string;
-  spaceBelow?: string;
-}
+/** how a heading is set (each key optional: the level's default) — a text style (core textstyles.ts) */
+export type HeadingStyle = TextStyle;
 /** each level's style: `headings`' own keys for all levels, then the level's */
 export type HeadingStyles = Record<HeadingLevel, HeadingStyle>;
 
-const HEADING_CHOICES: { [K in Exclude<keyof HeadingStyle, 'spaceAbove' | 'spaceBelow'>]-?: readonly string[] | null } = {
-  display: ['block', 'run-in'], font: null, size: ['small', 'normal', 'large', 'larger', 'huge'], weight: ['bold', 'normal'],
-  shape: ['upright', 'italic'], case: ['normal', 'smallcaps', 'uppercase'], color: null, align: ['left', 'center'], rule: ['none', 'below', 'above'],
-};
+/** the front matter's keys of a style (`space-above` …) as a text style */
 function headingStyleOf(v: FMValue | undefined): HeadingStyle {
-  const out: HeadingStyle = {};
-  if (!v || typeof v === 'string' || Array.isArray(v)) return out;
-  // a length LaTeX and CSS both take
-  for (const [key, prop] of [['space-above', 'spaceAbove'], ['space-below', 'spaceBelow']] as const) {
-    const m = typeof v[key] === 'string' ? /^\s*(\d{1,2}(?:\.\d{1,3})?)\s*(ex|em|pt|mm|cm)?\s*$/.exec(v[key] as string) : null;
-    if (m) out[prop] = m[1] + (m[2] ?? 'em');
-  }
-  for (const k of Object.keys(HEADING_CHOICES) as (keyof typeof HEADING_CHOICES)[]) {
-    const raw = v[k];
-    if (typeof raw !== 'string') continue;
-    const val = raw.trim(), choices = HEADING_CHOICES[k];
-    if (k === 'font') { if (fontName(val)) out.font = fontName(val); continue; }
-    if (k === 'color') { const c = /^#?([0-9a-fA-F]{6})$/.exec(val); if (c) out.color = '#' + c[1].toLowerCase(); continue; }
-    if (choices!.includes(val.toLowerCase())) (out as Record<string, string>)[k] = val.toLowerCase();
-  }
-  return out;
+  return !v || typeof v === 'string' || Array.isArray(v) ? {} : textStyleOf(v);
 }
 
 /**
@@ -199,6 +185,19 @@ export function headingStyles(v: FMValue | undefined): HeadingStyles | null {
   const out = {} as HeadingStyles;
   for (const level of HEADING_LEVELS) out[level] = { ...all, ...(typeof v === 'object' ? headingStyleOf(v[level]) : {}) };
   return HEADING_LEVELS.some(l => Object.keys(out[l]).length) ? out : null;
+}
+
+/** the front matter's `styles`: the title's, the body's and quotes' */
+function otherStyles(v: FMValue | undefined): TextStyles {
+  const out: TextStyles = {};
+  if (!v || typeof v === 'string' || Array.isArray(v)) return out;
+  for (const t of ['title', 'body', 'quote'] as const) { const st = headingStyleOf(v[t]); if (Object.keys(st).length) out[t] = st; }
+  return out;
+}
+
+/** all styles the front matter sets (headings and `styles`) */
+export function mdStyles(t: MdTypesetting): TextStyles {
+  return mergeStyles(t.headings ?? {}, t.styles);
 }
 
 export interface MdTypesetting {
@@ -214,6 +213,8 @@ export interface MdTypesetting {
   justify: boolean;
   /** null: LaTeX's own */
   headings: HeadingStyles | null;
+  /** `styles`: the title, the body, quotes */
+  styles: TextStyles;
   headerIncludes: string[];
 }
 
@@ -238,6 +239,7 @@ export function mdTypesetting(lines: string[]): MdTypesetting {
     numbersections: one(v.numbersections) === 'true',
     justify: one(v.justify) === 'true',
     headings: headingStyles(v.headings),
+    styles: otherStyles(v.styles),
     headerIncludes: list(v['header-includes']).filter(l => !/^\s*\\documentclass/.test(l)),
   };
 }
@@ -252,20 +254,26 @@ export function applyTypesetting(h: Header, t: MdTypesetting): void {
   if (t.fontsize) set('paperfontsize', String(t.fontsize));
   if (t.linestretch) set('spacing', `other ${t.linestretch}`);
   if (t.numbersections) set('secnumdepth', '3');
+  // what hand-written LaTeX in header-includes does, under what the keys say: the editor shows it too
+  const hand = stylesFromIncludes(t.headerIncludes);
   // (the editor justifies on \overlyx_justify: a .tex document's \justification true is LaTeX's default, not a choice)
-  if (t.justify) { set('justification', 'true'); set('overlyx_justify', 'true'); }
+  // (always said: a markdown document is ragged right unless it says otherwise — the editor tells it from a .tex document so)
+  const justify = t.justify || hand.justify || t.styles.body?.align === 'justify';
+  if (justify) set('justification', 'true');
+  set('overlyx_justify', String(justify));
   if (t.mainfont || t.sansfont || t.monofont) {
     set('use_non_tex_fonts', 'true');
     if (t.mainfont) set('font_roman', `"default" "${t.mainfont}"`);
     if (t.sansfont) set('font_sans', `"default" "${t.sansfont}"`);
     if (t.monofont) set('font_typewriter', `"default" "${t.monofont}"`);
   }
-  // (OverLyX's own: the LyX export leaves \overlyx_ lines out; the editor draws its headings so)
-  if (t.headings) set('overlyx_headings', JSON.stringify(t.headings));
+  // (OverLyX's own: the LyX export leaves \overlyx_ lines out; the editor draws its text styles so)
+  const styles = mergeStyles(hand.styles, mdStyles(t));
+  if (Object.keys(styles).length) set('overlyx_styles', stylesJson(styles));
 }
 
 /** the header keys the typesetting decides */
-const TYPESET_KEYS = ['papersize', 'paperfontsize', 'spacing', 'secnumdepth', 'use_non_tex_fonts', 'font_roman', 'font_sans', 'font_typewriter', 'overlyx_headings', 'justification', 'overlyx_justify'];
+const TYPESET_KEYS = ['papersize', 'paperfontsize', 'spacing', 'secnumdepth', 'use_non_tex_fonts', 'font_roman', 'font_sans', 'font_typewriter', 'overlyx_headings', 'overlyx_styles', 'justification', 'overlyx_justify'];
 
 /** A markdown document's header after its front matter changed: those keys as a markdown document has them, then as the front matter says. */
 export function withTypesetting(headerLines: string[], preamble: string[]): string[] {
@@ -290,51 +298,11 @@ export function typesettingPreamble(t: MdTypesetting, files: Record<string, Loca
   if (t.geometry.length) out.push(`\\usepackage[${t.geometry.join(',')}]{geometry}`);
   // (unicode-math after amsmath, which the generated block would load after this)
   if (t.mathfont) out.push('\\usepackage{amsmath}', '\\usepackage{unicode-math}', `\\setmathfont{${t.mathfont}}`);
-  if (t.headings) out.push(...headingsLatex(t.headings, files));
+  // the text styles (fonts by name: \olfontset, defined here — the managed block may define it again: a no-op)
+  const styles = mdStyles(t);
+  if (stylesUseFonts(styles)) out.push('\\makeatletter', OLFONT_DEF, '\\makeatother');
+  out.push(...stylesLatex(styles));
   out.push(...t.headerIncludes);
-  return out;
-}
-
-/** LaTeX's own look of each level (article): its size, and whether it runs in */
-const LEVEL_DEFAULTS: Record<HeadingLevel, { size: NonNullable<HeadingStyle['size']>; display: 'block' | 'run-in'; above: string; below: string }> = {
-  section: { size: 'larger', display: 'block', above: '3.5ex plus 1ex minus .2ex', below: '2.3ex plus .2ex' },
-  subsection: { size: 'large', display: 'block', above: '3.25ex plus 1ex minus .2ex', below: '1.5ex plus .2ex' },
-  subsubsection: { size: 'normal', display: 'block', above: '3.25ex plus 1ex minus .2ex', below: '1.5ex plus .2ex' },
-  paragraph: { size: 'normal', display: 'run-in', above: '3.25ex plus 1ex minus .2ex', below: '1em' },
-};
-const SIZE_CMD = { small: '\\small', normal: '\\normalsize', large: '\\large', larger: '\\Large', huge: '\\LARGE' } as const;
-
-/** titlesec for the heading styles (a run-in heading at the text's size unless it says otherwise) */
-function headingsLatex(styles: HeadingStyles, files: Record<string, LocalFont>): string[] {
-  const out = ['\\usepackage{titlesec}'];
-  if (HEADING_LEVELS.some(l => styles[l].color)) out.push('\\usepackage{xcolor}');
-  const fonts = [...new Set(HEADING_LEVELS.map(l => styles[l].font).filter((f): f is string => !!f))];
-  // (\newfontfamily is fontspec's — loaded here too when the body font is TeX's own; a second \usepackage is a no-op)
-  if (fonts.length) out.push('\\usepackage{fontspec}');
-  fonts.forEach((f, k) => out.push(`\\newfontfamily\\olheadingfont${'abcdefgh'[k]}{${f}}${files[f] ? `[${fontspecFiles(files[f])}]` : ''}`));
-  for (const level of HEADING_LEVELS) {
-    const st = styles[level], def = LEVEL_DEFAULTS[level];
-    const runIn = (st.display ?? def.display) === 'run-in';
-    const size = st.size ?? (runIn ? 'normal' : def.size);
-    let format = '\\normalfont';
-    if (st.font) format += `\\olheadingfont${'abcdefgh'[fonts.indexOf(st.font)]}`;
-    format += SIZE_CMD[size];
-    if ((st.weight ?? 'bold') === 'bold') format += '\\bfseries';
-    if (st.shape === 'italic') format += '\\itshape';
-    if (st.case === 'smallcaps') format += '\\scshape';
-    if (st.color) format += `\\color[HTML]{${st.color.slice(1).toUpperCase()}}`;
-    const center = !runIn && st.align === 'center';
-    if (center) format += '\\filcenter';
-    if (!runIn && st.rule === 'above') format = `\\titlerule\\vspace{.8ex}${format}`;
-    const shape = runIn ? 'runin' : center || st.rule === 'above' ? 'block' : 'hang';
-    // (the title is the argument of the last command of "before")
-    const before = st.case === 'uppercase' ? '\\MakeUppercase' : '';
-    const after = !runIn && st.rule === 'below' ? '[\\vspace{.4ex}\\titlerule]' : '';
-    out.push(`\\titleformat{\\${level}}[${shape}]{${format}}{\\the${level}}{${runIn ? '0.6em' : '1em'}}{${before}}${after}`);
-    // (a length given is kept to, with a little stretch above; run in, the space after is the gap before the text)
-    const above = st.spaceAbove ? `${st.spaceAbove} plus .2ex` : runIn ? '1.6ex plus .3ex minus .2ex' : def.above;
-    out.push(`\\titlespacing*{\\${level}}{0pt}{${above}}{${runIn ? '0.8em' : st.spaceBelow ?? def.below}}`);
-  }
   return out;
 }
 

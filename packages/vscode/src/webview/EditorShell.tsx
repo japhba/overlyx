@@ -8,6 +8,8 @@ import { setDocumentFonts } from '@client/fonts/editorfont';
 import { setDocumentParagraphs, setDocumentHeadings } from '@client/editor/paragraphsep';
 import { setDocumentNumbering } from '@client/editor/plugins/numbering';
 import { MarkdownSettingsDialog } from '@client/app/MarkdownSettings';
+import { TextStylesPanel } from '@client/app/TextStyles';
+import { isMarkdownDoc } from '@client/editor/markdown';
 import { usePresentation } from '@client/app/presentation';
 import { referenceTransaction } from '@client/editor/references';
 import { inkToolbar } from '@client/app/inkToolbar';
@@ -730,6 +732,8 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       }
       case 'href': return <HrefDialog onClose={close} onInsert={(t: string, n: string) => run(C.insertHref(t, n))} />;
       case 'mdsettings': return <MarkdownSettingsDialog docId={targetId} onClose={close} onSaved={() => { void api.header(targetId).then(h => updateHeader(targetId, h.headerLines)); }} />;
+      case 'textstyles': return <TextStylesPanel docId={targetId} headerLines={docHeaders(targetId)} view={view} markdown={isMarkdownDoc(targetId)} layout={typeof dialog.arg === 'string' ? dialog.arg : undefined} onClose={close}
+        onSaved={() => { void api.header(targetId).then(h => updateHeader(targetId, h.headerLines)); }} />;
       case 'settings': return <SettingsDialog docId={targetId} meta={targetMeta} headerLines={docHeaders(targetId)} onClose={close} onSaved={() => api.meta(targetId).then(m => { updateMeta(targetId, m); refreshMacros(view, m.macros); void api.header(targetId).then(h => updateHeader(targetId, h.headerLines)); })} />;
       case 'macros': return <MacrosDialog meta={targetMeta} onClose={close} />;
       case 'tex': return <TexDialog tex={String(dialog.arg ?? '')} onClose={close} />;
@@ -765,7 +769,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
 
   // the toolbar rows (Standard, View/Update + Extra, a layout page's Layout row)
   const toolbarRows = (<>
-    {tbMode('standard') !== 'off' && <Toolbar id="standard" layouts={layouts} layout={layout} onLayout={(n: string) => run(C.setLayout(n))} groups={tb.standard} />}
+    {tbMode('standard') !== 'off' && <Toolbar id="standard" layouts={layouts} layout={layout} onLayout={(n: string) => run(C.setLayout(n))} onEditStyle={(n: string) => setDialog({ name: 'textstyles', arg: n })} groups={tb.standard} />}
     {(tbMode('viewupdate') !== 'off' || tbMode('extra') !== 'off') && (
       <div class="tb-samerow">
         {tbMode('viewupdate') !== 'off' && <Toolbar id="viewupdate" groups={tb.viewUpdate} />}

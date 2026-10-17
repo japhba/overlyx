@@ -34,6 +34,8 @@ export const SETTINGS_KEYS = [
   'pdf_title', 'pdf_author', 'pdf_subject', 'pdf_keywords', 'pdf_bookmarks', 'pdf_bookmarksnumbered', 'pdf_bookmarksopen', 'pdf_breaklinks', 'pdf_pdfborder', 'pdf_backref', 'pdf_pdfusetitle', 'pdf_quoted_options',
   // layout documents: the guides (`x20 y45.5`, mm) and the grid's spacing (mm) of the editor's canvas
   'overlyx_guides', 'overlyx_grid',
+  // the text styles (core textstyles.ts): written into the managed block
+  'overlyx_styles',
   'overlyx_managed_settings',
 ];
 

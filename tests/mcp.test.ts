@@ -132,7 +132,7 @@ describe('set_markdown_style', () => {
     const doc = await manager.open('owner/p/notes.md');
     const header = doc.getMeta().headerLines;
     expect(header).toContain('\\font_roman "default" "Fira Sans"');
-    expect(JSON.parse(header.find(l => l.startsWith('\\overlyx_headings '))!.slice(18)).section).toEqual({ color: '#1f4e79', rule: 'below', case: 'uppercase' });
+    expect(JSON.parse(header.find(l => l.startsWith('\\overlyx_styles '))!.slice(16)).section).toEqual({ color: '#1f4e79', rule: 'below', case: 'uppercase' });
     await expect(callTool(t.token, 'set_markdown_style', { path: 'notes.md', style: { title: 'Other' } })).rejects.toThrow(/not a typesetting key/);
     await expect(callTool(t.token, 'set_markdown_style', { path: 'a.tex', style: { mainfont: 'XITS' } })).rejects.toThrow(/markdown/);
     rmSync(file('notes.md'));

@@ -285,6 +285,8 @@ export function documentMenus({ view, meta, run, runView, setDialog, textColor, 
       ]),
       // a markdown document's typesetting: its front matter's keys (app/MarkdownSettings.tsx)
       ...md<MenuEntry>([{ label: 'Settings…', action: () => setDialog({ name: 'mdsettings' }) }]),
+      // how titles, headings, body text and quotes look (app/TextStyles.tsx)
+      { label: 'Text styles…', action: () => setDialog({ name: 'textstyles' }) },
       { label: 'Statistics (word count)…', action: () => setDialog({ name: 'stats' }) },
       { label: 'Change tracking', shortcut: 'Ctrl+Shift+E', checked: tracking, action: toggleTracking },
       { sep: true },

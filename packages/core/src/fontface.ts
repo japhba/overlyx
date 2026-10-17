@@ -129,8 +129,9 @@ export function faceLatexOpen(f: FontFace): string {
  * is taken by their names ("Inter Light", "Libertinus Serif Semibold Italic"), each only if it
  * exists (fontspec stops at a face that is missing); a variable font (no such names) by its axes,
  * set per face — bold text is the weight's bold (700, or 900 from 700 on), which a setting for the
- * whole font would override. Under pdflatex the text is printed as it is. (The managed block's
- * macros are inside \makeatletter.)
+ * whole font would override. \olfontset is the same as a declaration (heading formats: textstyles.ts).
+ * Under pdflatex the text is printed as it is. Defined once, whoever asks first (the managed block,
+ * a markdown document's styles); the managed block's macros are inside \makeatletter.
  */
 export const OLFONT_DEF = String.raw`\def\ol@loadfontspec{\let\ol@enc\encodingdefault\let\ol@rm\rmdefault\let\ol@sf\sfdefault\let\ol@tt\ttdefault\let\ol@fam\familydefault
   \RequirePackage[no-math]{fontspec}%
@@ -138,6 +139,7 @@ export const OLFONT_DEF = String.raw`\def\ol@loadfontspec{\let\ol@enc\encodingde
 \@ifpackageloaded{fontspec}{}{\ifdefined\directlua\let\ol@tu\@firstofone\else\ifdefined\XeTeXrevision\let\ol@tu\@firstofone\else\let\ol@tu\@gobble\fi\fi
   \ol@tu{\ol@loadfontspec}}
 \ExplSyntaxOn
+\cs_if_exist:NF \olfontset {
 \cs_if_exist:NTF \fontspec
   {
     \prop_const_from_keyval:Nn \c__olfont_weights_prop
@@ -169,9 +171,9 @@ export const OLFONT_DEF = String.raw`\def\ol@loadfontspec{\let\ol@enc\encodingde
           { \str_if_eq:nnF {##1} {wght} { \tl_put_right:Nn \l__olfont_axis_tl { , ##1 = ##2 } } }
       }
     \cs_new_protected:Npn \__olfont_put:n #1 { \tl_put_right:Ne \l__olfont_opts_tl { #1 , } }
-    \DeclareDocumentCommand \olfont { O{} O{} m +m }
+    % fontspec's options for family #3 with axes #1 and features #2, into \l__olfont_opts_tl
+    \cs_new_protected:Npn \__olfont_opts:nnn #1#2#3
       {
-        \group_begin:
         \tl_clear:N \l__olfont_opts_tl
         \prop_clear:N \l__olfont_axes_prop
         \tl_if_in:nnTF {#1} {=}
@@ -200,10 +202,18 @@ export const OLFONT_DEF = String.raw`\def\ol@loadfontspec{\let\ol@enc\encodingde
         \__olfont_put:n { BoldFeatures = { RawFeature = { axis = { \l__olfont_axis_tl } } } }
         \__olfont_put:n { BoldItalicFeatures = { RawFeature = { axis = { \l__olfont_axis_tl } } } }
         \tl_if_blank:nF {#2} { \__olfont_put:n { RawFeature = { \exp_not:n {#2} } } }
-        \use:e { \exp_not:N \fontspec { \exp_not:n {#3} } [ \exp_not:V \l__olfont_opts_tl ] }
-        #4
-        \group_end:
       }
+    % the font for what follows (a declaration: headings' formats, \olfont)
+    \DeclareDocumentCommand \olfontset { O{} O{} m }
+      {
+        \__olfont_opts:nnn {#1} {#2} {#3}
+        \use:e { \exp_not:N \fontspec { \exp_not:n {#3} } [ \exp_not:V \l__olfont_opts_tl ] }
+      }
+    \DeclareDocumentCommand \olfont { O{} O{} m +m } { \group_begin: \olfontset [#1] [#2] {#3} #4 \group_end: }
   }
-  { \DeclareDocumentCommand \olfont { O{} O{} m +m } {#4} }
+  {
+    \DeclareDocumentCommand \olfontset { O{} O{} m } { }
+    \DeclareDocumentCommand \olfont { O{} O{} m +m } {#4}
+  }
+}
 \ExplSyntaxOff`;

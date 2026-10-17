@@ -14,6 +14,7 @@ import { babelName } from '../latex/text.ts';
 import type { ExportContext, ExportOptions } from '../latex/context.ts';
 import { nativeClassOptions, nativeEarlySettings, nativeSettings } from './settings.ts';
 import { LAYOUT_PACKAGES } from '../layout/latex.ts';
+import { parseStyles, stylesLatex, stylesUseFonts } from '../textstyles.ts';
 import { MANAGED_BEGIN, MANAGED_END, preambleFacts, providedFeatures, settingsFromHeader, settingsLine } from './preamble.ts';
 
 export interface WriteTexOptions {
@@ -60,6 +61,9 @@ function managedBlock(ctx: ExportContext, provided: Set<string>, settings: Recor
   const f = ctx.features.withProvides(provided);
   const c: ExportContext = { ...ctx, features: f, dc: f.dc };
   const { bp, dc } = c;
+  // the text styles (Format ▸ Text styles: core textstyles.ts) — fonts by name need \olfontset
+  const styles = parseStyles(typeof settings.overlyx_styles === 'string' ? settings.overlyx_styles : '');
+  if (stylesUseFonts(styles)) f.require('olfont');
   let s = '';
   for (const [pkg, po] of dc.packageOptions) if (f.mustProvide(pkg)) s += `\\PassOptionsToPackage{${po}}{${pkg}}\n`;
   if (f.mustProvide('fix-cm')) s += '\\RequirePackage{fix-cm}\n';
@@ -82,6 +86,8 @@ function managedBlock(ctx: ExportContext, provided: Set<string>, settings: Recor
   if (tc.trim()) at += tc + (tc.endsWith('\n') ? '' : '\n');
   if (f.mustProvide('footmisc')) at += '\\usepackage{footmisc}\n';
   if (f.mustProvide('subfig')) at += '\\ifdefined\\showcaptionsetup\n % Caption package is used. Advise subfig not to load it again.\n \\PassOptionsToPackage{caption=false}{subfig}\n\\fi\n\\usepackage{subfig}\n';
+  const styled = stylesLatex(styles);
+  if (styled.length) at += '%% text styles\n' + styled.join('\n') + '\n';
   if (at) s += '\\makeatletter\n' + at + '\\makeatother\n';
   // other languages used in the text
   if (c.useBabel && !f.isProvided('babel')) {

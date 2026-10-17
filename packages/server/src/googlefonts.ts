@@ -259,9 +259,9 @@ export function fontFaces(f: GoogleFont): { regular: string; bold?: string; ital
   return { regular, bold: pick('normal', 700), italic: pick('italic', 400), boldItalic: pick('italic', 700) };
 }
 
-/** the families \olfont names in a LaTeX text (core fontface.ts) */
+/** the families \olfont / \olfontset name in a LaTeX text (core fontface.ts; text styles' fonts: textstyles.ts) */
 export function olfontFamilies(tex: string): string[] {
-  return [...new Set([...tex.matchAll(/\\olfont(?:\[[^\]\n]*\]){0,2}\{([^}\n]+)\}/g)].map(m => m[1].trim()).filter(validFamily))];
+  return [...new Set([...tex.matchAll(/\\olfont(?:set)?(?:\[[^\]\n]*\]){0,2}\{([^}\n]+)\}/g)].map(m => m[1].trim()).filter(validFamily))];
 }
 
 /**

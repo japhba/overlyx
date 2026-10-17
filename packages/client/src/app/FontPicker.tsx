@@ -63,7 +63,7 @@ function rememberFont(family: string): void {
 }
 
 /** the font families used in the document */
-function documentFaces(view: EditorView): string[] {
+export function documentFaces(view: EditorView): string[] {
   const out = new Set<string>();
   view.state.doc.descendants(n => { for (const m of n.marks) if (m.type.name === 'face') { const f = parseFace(m.attrs.value); if (f) out.add(f.family); } });
   return [...out];
@@ -138,26 +138,43 @@ export function FontPicker({ view, family, face, markdown, documentFonts }: Font
       </button>
       {open && (
         <div ref={popRef} class="tb-popup ff-pop" role="dialog" aria-label="Font">
-          <FontList view={view} family={family} current={current} markdown={markdown} documentFonts={documentFonts} close={() => { setOpen(false); view.focus(); }} />
-          {current && <FacePanel key={current.family} view={view} face={current} />}
+          <FontList family={family} current={current} markdown={markdown} documentFonts={documentFonts} inDocument={documentFaces(view)}
+            onPick={name => setFontFace(faceValue({ family: name, axes: {}, features: [] }))(view.state, view.dispatch)}
+            onFamily={f => { setFontFamily(f)(view.state, view.dispatch); setOpen(false); view.focus(); }}
+            close={() => { setOpen(false); view.focus(); }} />
+          {current && <FacePanel key={current.family} face={current} onChange={f => setFontFace(faceValue(f))(view.state, view.dispatch)} />}
         </div>
       )}
     </span>
   );
 }
 
-function FontList({ view, family, current, markdown, documentFonts, close }: { view: EditorView; family: string | null; current: FontFace | null; markdown: boolean; documentFonts?: () => void; close: () => void }) {
+export interface FontListProps {
+  /** the LaTeX family at the cursor (roman / sans / typewriter), when the list offers them */
+  family: string | null;
+  current: FontFace | null;
+  markdown: boolean;
+  documentFonts?: () => void;
+  /** families the document uses already */
+  inDocument: string[];
+  /** a Google font picked (another family keeps no axes or features: they were the old font's) */
+  onPick: (family: string) => void;
+  /** the document's own families (null: the default); none given: the list does not offer them */
+  onFamily?: (family: string | null) => void;
+  close: () => void;
+}
+
+/** the font list: the document's families, recent and in-document fonts, Google's popular ones, a search through all */
+export function FontList({ family, current, markdown, documentFonts, inDocument: inDoc, onPick, onFamily, close }: FontListProps) {
   const [query, setQuery] = useState('');
   const [cat, setCat] = useState<Catalog | null>(null);
   useEffect(() => { let live = true; void catalog().then(c => { if (live) setCat(c); }); return () => { live = false; }; }, []);
-  const inDoc = useMemo(() => documentFaces(view), []);
   const recent = useMemo(() => recentFonts(), []);
   const pick = (name: string) => {
     const entry = cat?.families.find(f => f.f === name);
     rememberFont(name);
     loadGoogleFont(name);
-    // (another family keeps no axes or features: they are the old font's)
-    setFontFace(faceValue({ family: entry?.f ?? name, axes: {}, features: [] }))(view.state, view.dispatch);
+    onPick(entry?.f ?? name);
   };
   const q = query.trim().toLowerCase();
   const results = useMemo(() => {
@@ -177,11 +194,11 @@ function FontList({ view, family, current, markdown, documentFonts, close }: { v
           results.length ? results.map(f => row(f.f, 'q' + f.f)) : <div class="ff-empty">{cat ? 'No Google font of that name' : 'Loading the fonts…'}</div>
         ) : (
           <>
-            <div class="tb-popup-title">{markdown ? 'The document’s font' : 'The document’s fonts'}</div>
-            <button type="button" class={'tb-pal-item ff-item' + (!current && !family ? ' active' : '')} onMouseDown={e => e.preventDefault()} onClick={() => { setFontFamily(null)(view.state, view.dispatch); close(); }}>Default</button>
-            {!markdown && (['roman', 'sans', 'typewriter'] as const).map(f => (
+            {onFamily && <div class="tb-popup-title">{markdown ? 'The document’s font' : 'The document’s fonts'}</div>}
+            {onFamily && <button type="button" class={'tb-pal-item ff-item' + (!current && !family ? ' active' : '')} onMouseDown={e => e.preventDefault()} onClick={() => onFamily(null)}>Default</button>}
+            {onFamily && !markdown && (['roman', 'sans', 'typewriter'] as const).map(f => (
               <button key={f} type="button" class={'tb-pal-item ff-item' + (!current && family === f ? ' active' : '')} style={{ fontFamily: f === 'roman' ? 'var(--editor-font), serif' : f === 'sans' ? 'var(--editor-sans-font, system-ui), sans-serif' : 'var(--editor-mono-font, monospace), monospace' }}
-                onMouseDown={e => e.preventDefault()} onClick={() => { setFontFamily(f)(view.state, view.dispatch); close(); }}>{FAMILY_NAMES[f]}</button>
+                onMouseDown={e => e.preventDefault()} onClick={() => onFamily(f)}>{FAMILY_NAMES[f]}</button>
             ))}
             {documentFonts && <button type="button" class="tb-pal-item ff-item ff-more" onMouseDown={e => e.preventDefault()} onClick={() => { close(); documentFonts(); }}>{markdown ? 'Typesetting…' : 'Document fonts…'}</button>}
             {inDoc.length > 0 && <><div class="tb-popup-title">In this document</div>{inDoc.map(n => row(n, 'd' + n))}</>}
@@ -210,7 +227,8 @@ function FontRow({ name, entry, active, onPick }: { name: string; entry: Catalog
 
 /* ------------------------------------------------------------------ axes and features of the font at the cursor */
 
-function FacePanel({ view, face }: { view: EditorView; face: FontFace }) {
+/** a font's axes as sliders with rungs and its OpenType features as switches; `onChange` with the face as it is set now */
+export function FacePanel({ face, onChange }: { face: FontFace; onChange: (f: FontFace) => void }) {
   const [info, setInfo] = useState<FontInfo | null | undefined>(undefined);
   const [f, setF] = useState(face);
   useEffect(() => { let live = true; void fontInfo(face.family).then(i => { if (live) setInfo(i); }); return () => { live = false; }; }, [face.family]);
@@ -219,7 +237,7 @@ function FacePanel({ view, face }: { view: EditorView; face: FontFace }) {
   const apply = (next: FontFace) => {
     setF(next);
     cancelAnimationFrame(raf.current);
-    raf.current = requestAnimationFrame(() => setFontFace(faceValue(next))(view.state, view.dispatch));
+    raf.current = requestAnimationFrame(() => onChange(next));
   };
   if (info === undefined) return <div class="ff-panel"><div class="ff-empty">Loading {face.family}…</div></div>;
   if (!info) return null;
