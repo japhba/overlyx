@@ -198,7 +198,8 @@ export async function linkExistingGoogleDoc(docId: string, userId: number, fileI
   const baseGoogle = keep === 'ours' ? strip(readGoogle(attachObjectSources(tabDoc, {})).blocks) : strip(project(ours).blocks);
   insertLink({ docId, fileId, userId, url: file.webViewLink ?? null, tabId: tab, baseText: doc.textOf(ours), baseGoogle, version: null });
   undropTab(fileId, docId, tab);
-  await syncDoc(docId);
+  // (merged: what the Google Doc holds differently is for review, whatever the document's mode)
+  await syncDoc(docId, { pullTracked: keep === 'merge' });
   return linkOf(docId)!;
 }
 
@@ -255,9 +256,10 @@ export interface SyncReport { pulled: number; pushed: number; rounds: number; co
 const running = new Map<string, Promise<SyncReport>>();
 
 /** Sync a linked document now (a sync already running is waited for, then this one runs). */
-export function syncDoc(docId: string): Promise<SyncReport> {
+/** `pullTracked`: what changed in Google Docs comes in as tracked changes whatever the document's mode (a link to a Google Doc that exists, merged for review) */
+export function syncDoc(docId: string, opts: { pullTracked?: boolean } = {}): Promise<SyncReport> {
   const prev = running.get(docId) ?? Promise.resolve(null);
-  const p = prev.catch(() => null).then(() => runSync(docId));
+  const p = prev.catch(() => null).then(() => runSync(docId, opts));
   running.set(docId, p);
   void p.catch(() => null).finally(() => { if (running.get(docId) === p) running.delete(docId); });
   return p;
@@ -273,7 +275,7 @@ function linkerMayEdit(link: Pick<LinkRow, 'doc_id' | 'user_id'>): boolean {
   return atLeast(roleFor(toSessionUser(row), splitDocId(link.doc_id).project), 'edit');
 }
 
-async function runSync(docId: string): Promise<SyncReport> {
+async function runSync(docId: string, opts: { pullTracked?: boolean } = {}): Promise<SyncReport> {
   const link = linkOf(docId);
   if (!link) throw new Error('This document is not linked to a Google Doc');
   if (!linkerMayEdit(link)) { unlink(docId); throw new Error('The person who linked this document to Google Docs may not edit it any more: the link is removed'); }
@@ -308,10 +310,14 @@ async function runSync(docId: string): Promise<SyncReport> {
         const theirs = withGoogleChanges(baseDoc, project(baseDoc, native), baseG, gNow, markdown, report.warnings);
         if (theirs) {
           const author = `${file.lastModifyingUser?.displayName || 'Google Docs'} (Google Docs)`;
+          // an edit made in Google Docs is an edit (a suggestion there stays there until it is accepted):
+          // it comes in as this document takes its own edits — directly while Editing, as a tracked change
+          // by whoever made it while Suggesting (the document's change tracking)
           const tracking = isTracking(doc.getMeta().headerLines);
-          const r = await doc.agentEdit('tracked', link.base_text, { after: doc.textOf(theirs) }, { author });
-          report.pulled = r.result.inserted + r.result.deleted;
-          // the agents' edit path turns change tracking on; Google's changes are tracked, the document's mode stays
+          const after = doc.textOf(theirs);
+          const r = await doc.agentEdit(tracking || opts.pullTracked ? 'tracked' : 'plain', link.base_text, { after }, { author });
+          report.pulled = 'inserted' in r.result ? r.result.inserted + r.result.deleted : changedChars(link.base_text, after);
+          // the agents' edit path may switch change tracking; the document's mode stays as it was
           const lines = doc.getMeta().headerLines;
           if (isTracking(lines) !== tracking) {
             const fixed = lines.map(l => (/^\\tracking_changes\b/.test(l) ? `\\tracking_changes ${tracking}` : l));
@@ -351,6 +357,15 @@ async function runSync(docId: string): Promise<SyncReport> {
     db.prepare('UPDATE gdocs_links SET last_error = ?, last_sync = ? WHERE doc_id = ?').run((e as Error).message, Date.now(), docId);
     throw e;
   }
+}
+
+/** how many characters an edit changed, roughly: the span between the common start and end */
+function changedChars(a: string, b: string): number {
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i++;
+  let j = 0;
+  while (j < a.length - i && j < b.length - i && a[a.length - 1 - j] === b[b.length - 1 - j]) j++;
+  return Math.max(a.length, b.length) - i - j;
 }
 
 /** a DOCX upload that failed, by document: for these formulas and images (not tried again until they change) */

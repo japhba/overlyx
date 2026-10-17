@@ -5,7 +5,7 @@
  * then come in as tracked changes, or which this document's text replaces (`keep`) — and they stay in
  * step both ways. A document of a folder whose other documents are a Google Doc's tabs is offered
  * that Google Doc's tabs nothing syncs with (the one of its title first). Edits made in Google Docs come
- * back as tracked changes by whoever made them, comment threads, replies and resolving go both ways,
+ * back as edits (as tracked changes by whoever made them while Suggesting), comment threads, replies and resolving go both ways,
  * on their own every minute, or with Sync now.
  */
 import { useEffect, useState } from 'preact/hooks';
@@ -66,7 +66,7 @@ export function GoogleDocsDialog({ docId, onClose, notify }: { docId: string; on
         {st && !st.configured && <p>Google is not set up on this server, so documents cannot be synced with Google Docs.</p>}
         {st && st.configured && !link && !st.account && (
           <>
-            <p>Sync this document with a Google Doc: write here, collaborators comment and edit in Google Docs. Their edits come back as tracked changes you can accept or reject; comments, replies and resolving go both ways.</p>
+            <p>Sync this document with a Google Doc: write here, collaborators comment and edit in Google Docs. Their edits come back as they made them — as tracked changes to accept or reject while you are Suggesting; comments, replies and resolving go both ways.</p>
             {st.guest ? <p class="hint">Sign in to connect Google Drive.</p> : st.canEdit ? <button class="primary" data-gdocs-connect onClick={connect}>Connect Google Drive…</button> : <p class="hint">You can only view this project.</p>}
             <p class="hint">OverLyX only gets access to the Google Docs it creates and the ones you pick (Drive's “files this app uses” permission).</p>
           </>
@@ -114,7 +114,7 @@ export function GoogleDocsDialog({ docId, onClose, notify }: { docId: string; on
         {link && (
           <>
             <p><a href={link.url} target="_blank" rel="noopener" data-gdocs-open>Open in Google Docs ↗</a></p>
-            <p class="hint">Last synced {ago(link.lastSync)}.{link.lastError ? '' : ' Edits made in Google Docs come back as tracked changes; comments go both ways.'}</p>
+            <p class="hint">Last synced {ago(link.lastSync)}.{link.lastError ? '' : ' Edits made in Google Docs come back as edits (tracked while Suggesting); comments go both ways.'}</p>
             {link.lastError && <p class="error">Last sync failed: {link.lastError}</p>}
             {link.warnings?.map(w => <p class="hint" data-gdocs-warning>{w}</p>)}
             {link.format !== 'docx' && (link.tabId

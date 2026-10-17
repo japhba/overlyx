@@ -3078,7 +3078,7 @@ read, comment and edit in Google Docs.
   Google's script and frame (`security.ts`; only where the picker is set up). Two ways in:
   *Link an existing Google Doc…* in the dialog (`linkExistingGoogleDoc`; a Google Doc with tabs:
   the tab to be) — the base is the document as it is, so the first sync brings what the Google Doc
-  holds differently as tracked changes by the Google side and writes nothing there; and
+  holds differently as tracked changes by the Google side (whatever the mode) and writes nothing there; and
   *Import from Google Docs…* in the file browser (`gdocs/importing.ts`, `POST /api/projects/<p>/gdocs/import`)
   — the Google Doc becomes a markdown document, one with several tabs a **document group** (below),
   each document linked to its tab with what the tab holds as its base (the first sync, run at once,
@@ -3137,9 +3137,13 @@ read, comment and edit in Google Docs.
   equations after import; object counts verify preservation, not mathematical layout fidelity.
 * **Reading back** (`gdocs/sync.ts`). Each sync compares the Google Doc with the blocks it held after
   the previous sync; what changed there is mapped onto the document as it was then and applied
-  through the agents' edit path (`docedit.ts` applyTrackedSource): tracked insertions / deletions
-  by “Name (Google Docs)” (Drive's last modifier), merged with edits made here meanwhile. Accepting
-  them changes nothing in Google Docs; rejecting them takes the Google Doc back.
+  through the agents' edit path (`docedit.ts`), merged with edits made here meanwhile. How they
+  arrive follows the document's mode (`isTracking`, the header's `\tracking_changes`): while
+  Editing they are applied as they were made (plain edits; the user's report of 17 Oct 2026: every
+  Google edit had arrived as a tracked change); while Suggesting they are tracked insertions /
+  deletions by “Name (Google Docs)” (Drive's last modifier) — accepting them changes nothing in
+  Google Docs, rejecting them takes the Google Doc back. Linking an existing Google Doc with 'merge'
+  always brings its differences in tracked (`syncDoc(…, { pullTracked })`): they are for review.
 * **Comments** both ways: a Google comment becomes a thread right after the text it quotes, its
   replies messages; a thread written here becomes a Google comment (anchored to the text before it
   with the Docs API's `insertComment` where the project has it — it is in preview — else a Drive

@@ -2,7 +2,7 @@
  * The Google Docs sync (server/src/gdocs/) against a simulation of the Docs and Drive APIs
  * (tests/gdocs-fake.ts): a document written into a Google Doc reads back as the same blocks; an
  * edit changes only the words that changed (comments anchored in Google Docs keep their text);
- * random edits always converge; changes made in Google Docs come back as tracked changes by their
+ * random edits always converge; changes made in Google Docs come back as edits (as tracked changes by their
  * editor; comment threads, replies and resolving go both ways.
  */
 import { describe, it, expect, beforeAll, vi } from 'vitest';
@@ -183,18 +183,28 @@ describe('the sync of a document', async () => {
     expect(g.batches).toBe(before);   // nothing changed: nothing written
   });
 
-  it('an edit in Google Docs comes back as a tracked change by its editor; the Google Doc is left as it is', async () => {
-    const at = g.indexOf(fileId, 'something');
+  it('an edit in Google Docs comes back as an edit while Editing, and as a tracked change by its editor while Suggesting', async () => {
+    let at = g.indexOf(fileId, 'something');
     await g.batchUpdate(fileId, [{ deleteContentRange: { range: { startIndex: at, endIndex: at + 'something'.length } } }, { insertText: { location: { index: at }, text: 'a lot' } }], undefined, 'Kirsten');
     const batches = g.batches;
     const r = await sync.syncDoc(ID);
     expect(r.pulled).toBeGreaterThan(0);
     expect(g.batches).toBe(batches);   // nothing to write back
+    expect(text()).toContain('The first paragraph says a lot.');
+    expect(text()).not.toContain('<ins');
+    // Suggesting (the document's change tracking): Google's edits arrive for review, by whoever made them
+    const doc = await manager.open(ID);
+    doc.ydoc.transact(() => { doc.meta.set('header', JSON.stringify(doc.getMeta().headerLines.map(l => (l.startsWith('\\tracking_changes') ? '\\tracking_changes true' : l)))); }, 'header');
+    await doc.saveToFile();
+    await sync.syncDoc(ID);
+    at = g.indexOf(fileId, 'a lot');
+    await g.batchUpdate(fileId, [{ deleteContentRange: { range: { startIndex: at, endIndex: at + 'a lot'.length } } }, { insertText: { location: { index: at }, text: 'plenty' } }], undefined, 'Kirsten');
+    await sync.syncDoc(ID);
     // (word by word, as tracked changes are: the full stop is part of the word)
-    expect(text()).toMatch(/The first paragraph says <del author="Kirsten \(Google Docs\)" datetime="[^"]+">something\.?<\/del><ins author="Kirsten \(Google Docs\)" datetime="[^"]+">a lot\.?<\/ins>/);
-    expect(g.doc(fileId).text()).toContain('The first paragraph says a lot.');
-    // the document does not start tracking its own edits because of it
-    expect((await manager.open(ID)).getMeta().headerLines).toContain('\\tracking_changes false');
+    expect(text()).toMatch(/The first paragraph says <del author="Kirsten \(Google Docs\)" datetime="[^"]+">a lot\.?<\/del><ins author="Kirsten \(Google Docs\)" datetime="[^"]+">plenty\.?<\/ins>/);
+    expect(g.doc(fileId).text()).toContain('The first paragraph says plenty.');
+    // the document's mode stays as it is
+    expect((await manager.open(ID)).getMeta().headerLines).toContain('\\tracking_changes true');
   });
 
   it('paragraphs added, removed and changed in Google Docs, and a new list item, come back too — and the next sync writes nothing', async () => {
@@ -326,8 +336,9 @@ describe('the sync of a document', async () => {
     await g.batchUpdate(link.file_id, [{ insertText: { location: { index: at }, text: 'Total ' } }], undefined, 'Kirsten');
     await sync.syncDoc('u/p/note.tex');
     const saved = readFileSync(tex, 'utf8');
-    expect(saved).toContain('\\lyxadded{Kirsten (Google Docs)}');
-    expect(saved).toContain('Total');
+    // (the document is not Suggesting: the edit is applied as it was made)
+    expect(saved).not.toContain('\\lyxadded');
+    expect(saved).toContain('Total Energy');
     expect(saved).toContain('$E=mc^2$');
     expect(saved).toContain('\\cite{einstein}');
   });
