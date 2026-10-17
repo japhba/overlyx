@@ -375,6 +375,12 @@ export function TableSizePicker({ onPick, close, max = 10 }: { onPick: (rows: nu
 
 /** a column width kind, as tablecommands.ts ColumnWidthKind has it */
 export type ColumnWidthChoice = 'natural' | 'variable' | 'fixed';
+/** the whole table's widths (Word's AutoFit), as the palette and the menus name them */
+export const TABLE_WIDTHS: [ColumnWidthChoice, string, string][] = [
+  ['natural', 'Fit to contents', 'every column as wide as its text, no wrapping'],
+  ['variable', 'Fit to the page width', 'the columns share the text width, the text wraps'],
+  ['fixed', 'Fixed column widths', 'each column keeps the width it has now (fitted to the page), the text wraps in it'],
+];
 
 /**
  * Popup of the table toolbar's column width button: the three ways LaTeX makes a column as wide as
@@ -384,7 +390,12 @@ export type ColumnWidthChoice = 'natural' | 'variable' | 'fixed';
  * a multi-column cell the width is the cell's own, which cannot be an X column. In a table typed as a
  * formula (a matrix) nothing can wrap: `onConvert` makes it a table.
  */
-export function ColumnWidthPicker({ kind, width, multicolumn, valid, onPick, onConvert, close }: { kind: string | null; width: string; multicolumn: boolean; valid: (w: string) => boolean; onPick: (kind: ColumnWidthChoice, width?: string) => void; onConvert?: () => void; close: () => void }) {
+/**
+ * The table toolbar's Column width palette: the cursor's column (or the selected ones) natural, X or
+ * p{…}; and `table`, the whole table at once (Word's AutoFit): every column natural, X, or fixed at
+ * the width it has now — `kind` is how its columns are now ('mixed' when they differ).
+ */
+export function ColumnWidthPicker({ kind, width, multicolumn, valid, onPick, onConvert, table, close }: { kind: string | null; width: string; multicolumn: boolean; valid: (w: string) => boolean; onPick: (kind: ColumnWidthChoice, width?: string) => void; onConvert?: () => void; table?: { kind: string | null; onPick: (kind: ColumnWidthChoice) => void }; close: () => void }) {
   const [w, setW] = useState(width || '5cm');
   const pick = (k: ColumnWidthChoice, wd?: string) => { close(); onPick(k, wd); };
   const special = kind === 'special' || kind === null;
@@ -408,6 +419,14 @@ export function ColumnWidthPicker({ kind, width, multicolumn, valid, onPick, onC
         ? (onConvert ? 'This table is a formula (a matrix): LaTeX sets formulas on one line, so its cells cannot wrap. As a table they can.' : 'Put the cursor in a table: the width is set for its column.')
         : special ? 'This column has its own LaTeX column spec (Table settings), which decides its width.' : multicolumn ? 'In a multi-column cell: the width of this cell.' : 'For the cursor’s column, or every selected column.'}</div>
       {kind === null && onConvert && <button type="button" class="small-btn tb-cw-convert" data-colwidth="convert" onMouseDown={e => e.preventDefault()} onClick={() => { close(); onConvert(); }}>Convert the formula to a table</button>}
+      {table && table.kind !== null && <>
+        <div class="tb-cw-head">Whole table</div>
+        {TABLE_WIDTHS.map(([k, name, what]) => (
+          <button key={k} type="button" class={'tb-cw' + (table.kind === k ? ' active' : '')} data-tablewidth={k} onMouseDown={e => e.preventDefault()} onClick={() => { close(); table.onPick(k); }}>
+            <code>{k === 'natural' ? '↔' : k === 'variable' ? '⇤⇥' : '▥'}</code><span><b>{name}</b> — {what}</span>
+          </button>
+        ))}
+      </>}
     </div>
   );
 }

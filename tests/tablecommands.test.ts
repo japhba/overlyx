@@ -15,6 +15,7 @@ import { lyxToPmNode, pmToLyxBody } from '../packages/core/src/convert.ts';
 import { exportLatex } from '../packages/core/src/latex/export.ts';
 import { insertTable, setTableAttrs } from '../packages/client/src/editor/commands.ts';
 import * as tc from '../packages/client/src/editor/tablecommands.ts';
+import { fitColumnWidths, widthsAsLengths } from '../packages/client/src/editor/tablefit.ts';
 
 /* ------------------------------------------------------------------ helpers */
 
@@ -641,6 +642,44 @@ describe('column width: natural (l c r), variable (X), fixed (p{…})', () => {
     expect(columnWidthLength('\\textwidth')).toBe('100text%');
     for (const bad of [undefined, null, '', 'wide', '0pt', '12px', '-3cm', '3', '\\hsize']) expect(columnWidthLength(bad)).toBeNull();
   });
+
+  it('the whole table at once (Word\'s AutoFit): every column, wherever the cursor is; a spec of its own stays', () => {
+    let s = cursorIn(mkState(), 1, 1);
+    expect(tc.tableToolbarState(s).tableWidth).toBe('natural');
+    expect(run(s, tc.setTableColumnWidths('natural')).ok).toBe(false);   // nothing to change
+    // fixed: one width per column, the text wraps (p{…}); the cursor stays where it was
+    s = apply(s, tc.setTableColumnWidths('fixed', ['20col%', '35.5col%', '3cm']));
+    expect(table(s).columns.map(c => get(c, 'width'))).toEqual(['20col%', '35.5col%', '3cm']);
+    expect(specOf(s)).toMatch(/p\{0\.2\\columnwidth\}.*p\{0\.355\\columnwidth\}.*p\{3cm\}/);
+    expect(tc.tableToolbarState(s)).toMatchObject({ tableWidth: 'fixed', colWidth: 'fixed', width: '35.5col%' });
+    expect(run(s, tc.setTableColumnWidths('fixed', ['20col%', 'wide', '3cm'])).ok).toBe(false);
+    expect(run(s, tc.setTableColumnWidths('fixed', ['20col%'])).ok).toBe(false);
+    // one column differs: mixed
+    s = apply(cursorIn(s, 0, 2), tc.setColumnWidth('natural'));
+    expect(tc.tableToolbarState(s).tableWidth).toBe('mixed');
+    // fit to the page width: all X, a tabularx as wide as the text
+    s = apply(s, tc.setTableColumnWidths('variable'));
+    expect(table(s).columns.map(c => get(c, 'varwidth') ?? null)).toEqual(['true', 'true', 'true']);
+    expect(texOf(s)).toMatch(/^\\begin\{tabularx\}\{\\columnwidth\}/);
+    expect(tc.tableToolbarState(s).tableWidth).toBe('variable');
+    // fit to contents: back to l / c / r
+    s = apply(s, tc.setTableColumnWidths('natural'));
+    expect(specOf(s)).toBe(specOf(mkState()));
+    // a column with its own spec is left out
+    s = cursorIn(s, 0, 1);
+    setTableAttrs({ column: [['special', 'S']] })(s, tr => { s = s.apply(tr); });
+    s = apply(s, tc.setTableColumnWidths('fixed', ['2cm', 'ignored', '2cm']));
+    expect(table(s).columns.map(c => get(c, 'width') ?? get(c, 'special'))).toEqual(['2cm', 'S', '2cm']);
+    expect(tc.tableToolbarState(s).tableWidth).toBe('fixed');
+  });
+
+  it('fixed column widths: the drawn widths, fitted into the line (narrow columns keep theirs), as shares of the text column', () => {
+    expect(fitColumnWidths([100, 200], 400)).toEqual([100, 200]);
+    // 80 is under an equal third of 600: it stays; the two wide ones share the rest
+    expect(fitColumnWidths([80, 1000, 2000], 600)).toEqual([80, 260, 260]);
+    expect(fitColumnWidths([300, 300, 300], 600)).toEqual([200, 200, 200]);
+    expect(widthsAsLengths([80, 260, 2], 720)).toEqual(['11.1col%', '36.1col%', '4col%']);
+  });
 });
 
 describe('tableToolbarState', () => {
@@ -649,7 +688,7 @@ describe('tableToolbarState', () => {
     expect(tc.tableToolbarState(cursorIn(s, 0, 0))).toEqual({
       inTable: true, rotateCell: false, rotateTable: false, multicolumn: false, multirow: false,
       lines: { top: true, bottom: true, left: true, right: true }, borderLines: true, innerLines: false, allLines: false,
-      booktabs: false, align: 'center', valign: 'top', colWidth: 'natural', width: '', multicolumnWidth: false,
+      booktabs: false, align: 'center', valign: 'top', colWidth: 'natural', width: '', multicolumnWidth: false, tableWidth: 'natural',
     });
     expect(tc.tableToolbarState(cursorIn(s, 1, 1)).lines).toEqual({ top: false, bottom: true, left: false, right: true });
   });

@@ -6,9 +6,10 @@ import { undo, redo } from 'y-prosemirror';
 import { addColumnAfter, addColumnBefore, addRowAfter, addRowBefore, deleteColumn, deleteRow, deleteTable, mergeCells, splitCell } from 'prosemirror-tables';
 import type { DocMeta } from '../api';
 import type { MenuDef, MenuEntry } from './MenuBar';
-import { NAMED_COLORS } from './Toolbar';
+import { NAMED_COLORS, TABLE_WIDTHS } from './Toolbar';
 import * as C from '../editor/commands';
 import * as T from '../editor/tablecommands';
+import { fixTableColumnWidths } from '../editor/tablefit';
 import { isMac } from '../editor/keymap';
 import { moveSection, shiftSection } from '../editor/outline';
 import { changeAt, resolveChange, acceptAllChanges, rejectAllChanges } from '../editor/plugins/changes';
@@ -33,6 +34,7 @@ export function documentMenus({ view, meta, run, runView, setDialog, textColor, 
   // a markdown document: only what markdown can write (editor/markdown.ts)
   const markdown = meta?.format === 'markdown' || (!!view && isMarkdownDoc(viewDocId(view)));
   const tex = <T,>(entries: T[]): T[] => (markdown ? [] : entries);
+  const tableWidth = view && !markdown ? T.tableToolbarState(view.state).tableWidth : null;
   const md = <T,>(entries: T[]): T[] => (markdown ? entries : []);
   // the Modern interface assumes nobody comes from LyX: plain names (the Classic label stays the
   // entry's id, so custom keys and the statistics carry over), and LyX's own devices are left out
@@ -138,6 +140,8 @@ export function documentMenus({ view, meta, run, runView, setDialog, textColor, 
           { sep: true },
           { label: 'Column: natural width (l c r, no wrapping)', action: () => run(T.setColumnWidth('natural')) },
           { label: 'Column: wrap text, filling the table width (X)', action: () => run(T.setColumnWidth('variable')) },
+          // the whole table at once (Word's AutoFit)
+          ...TABLE_WIDTHS.map(([k, name]): MenuEntry => ({ label: 'Table: ' + name.toLowerCase(), checked: tableWidth === k, action: () => (k === 'fixed' ? runView(fixTableColumnWidths) : run(T.setTableColumnWidths(k))) })),
         ]),
         { sep: true },
         { label: 'Delete table', action: () => run(deleteTable) },

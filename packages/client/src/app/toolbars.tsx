@@ -28,6 +28,7 @@ import { activeMathField, type LyxMathField } from '../editor/lyxmath/field';
 import { useMathRendererVersion } from '../editor/lyxmath/usemath';
 import * as C from '../editor/commands';
 import * as T from '../editor/tablecommands';
+import { fixTableColumnWidths } from '../editor/tablefit';
 import { formulaTableGrid } from '../editor/formulatable';
 import { acceptAllChanges, rejectAllChanges, gotoChange, resolveSelectionChanges, hasChanges, changesFilterKey, setChangesFilter } from '../editor/plugins/changes';
 import { pasteFromClipboard } from '../editor/clipmenu';
@@ -483,8 +484,9 @@ export function buildToolbars(ctx: ToolbarContext): Toolbars {
       { id: 't-vb', title: 'Align bottom', icon: 'valignbottom', active: tableSt?.valign === 'bottom', action: () => run(T.setVAlignment('bottom')) },
     ],
     [
-      { id: 't-width', title: 'Column width — wrap text: natural (l c r), wrap to fill the table (X), or wrap at a fixed width (p{…})', icon: 'colwidth', active: tableSt?.colWidth === 'variable' || tableSt?.colWidth === 'fixed',
-        palette: { title: 'Column width', render: close => <ColumnWidthPicker kind={tableSt?.colWidth ?? null} width={tableSt?.width ?? ''} multicolumn={!!tableSt?.multicolumnWidth} valid={w => !!columnWidthLength(w)} close={close} onPick={(k, w) => run(T.setColumnWidth(k, w))} onConvert={toTable} /> } },
+      { id: 't-width', title: 'Column width — wrap text: natural (l c r), wrap to fill the table (X), or wrap at a fixed width (p{…}); or the whole table: fit to contents, to the page width, or fixed column widths', icon: 'colwidth', active: tableSt?.colWidth === 'variable' || tableSt?.colWidth === 'fixed',
+        palette: { title: 'Column width', render: close => <ColumnWidthPicker kind={tableSt?.colWidth ?? null} width={tableSt?.width ?? ''} multicolumn={!!tableSt?.multicolumnWidth} valid={w => !!columnWidthLength(w)} close={close} onPick={(k, w) => run(T.setColumnWidth(k, w))} onConvert={toTable}
+          table={{ kind: tableSt?.tableWidth ?? null, onPick: k => (k === 'fixed' ? runView(fixTableColumnWidths) : run(T.setTableColumnWidths(k))) }} /> } },
     ],
     [
       { id: 't-rotcell', title: 'Rotate cell by 90° or unset rotation', icon: 'rotatecell', active: !!tableSt?.rotateCell, action: () => run(T.toggleRotateCell) },

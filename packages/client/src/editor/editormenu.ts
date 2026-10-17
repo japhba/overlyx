@@ -10,10 +10,13 @@ import { NodeSelection, TextSelection, type Command } from 'prosemirror-state';
 import type { Node as PMNode } from 'prosemirror-model';
 import { paramMap, unquote } from '@overlyx/core';
 import type { MenuItem } from './contextmenu';
-import { editorContext, viewDocDir, viewProject } from './context';
+import { editorContext, viewDocDir, viewProject, viewDocId } from './context';
 import { clipboardMenuItems, selectionCovers, MOD } from './clipmenu';
 import * as C from './commands';
-import { tableToolbarState, setColumnWidth } from './tablecommands';
+import { tableToolbarState, setColumnWidth, setTableColumnWidths } from './tablecommands';
+import { fixTableColumnWidths } from './tablefit';
+import { isMarkdownDoc } from './markdown';
+import { TABLE_WIDTHS, type ColumnWidthChoice } from '../app/Toolbar';
 import { changeAt, resolveChange, changeAuthorName } from './plugins/changes';
 import { fileUrl, graphicsUrl } from '../api';
 import { STANDARD_LAYOUTS } from './layouts';
@@ -254,12 +257,17 @@ export function editorContextMenu(view: EditorView, ev: MouseEvent, spelling?: {
   return items;
 }
 
-/** in a table: wrapping the column's text on and off (an X column, or back to l / c / r), the settings */
+/**
+ * in a table: wrapping the column's text on and off (an X column, or back to l / c / r), the whole
+ * table's column widths (Word's AutoFit; not in markdown, whose tables have none), the settings
+ */
 function tableItems(view: EditorView, run: (cmd: Command) => () => void): MenuItem[] {
   const st = tableToolbarState(view.state);
   const wraps = st.colWidth === 'variable' || st.colWidth === 'fixed';
+  const fit = (kind: ColumnWidthChoice) => () => { if (kind === 'fixed') fixTableColumnWidths(view); else setTableColumnWidths(kind)(view.state, view.dispatch, view); view.focus(); };
   return [
     ...(st.colWidth === 'special' || (st.multicolumnWidth && !wraps) ? [] : [{ label: 'Wrap text in this column', checked: wraps, action: run(setColumnWidth(wraps ? 'natural' : 'variable')) }]),
+    ...(st.tableWidth === null || isMarkdownDoc(viewDocId(view)) ? [] : [{ label: 'Column widths', icon: 'table' as const, sub: TABLE_WIDTHS.map(([k, name]) => ({ label: name, checked: st.tableWidth === k, action: fit(k) })) }]),
     { label: 'Table settings…', icon: 'table', action: () => editorContext.openDialog?.('tablesettings') },
   ];
 }

@@ -1588,6 +1588,16 @@ blend.
   wraps to fill the table) and fixed (`p{…}`, a width typed as `5cm`, `30%` or `0.4\linewidth`,
   stored as the LyX length) — with `Tabular::setColumnPWidth`'s side effects
   (`tablecommands.ts setColumnWidth`); a multi-column cell takes a width of its own (never `X`).
+  **The whole table at once** (Word's AutoFit; the palette's *Whole table* section, Edit ▸ Table ▸
+  *Table: …*, the right-click menu's *Column widths*; not in markdown): *Fit to contents* (every
+  column natural), *Fit to the page width* (every column `X`) and *Fixed column widths*
+  (`tablecommands.ts setTableColumnWidths`, the palette marks how the columns are now, or none when
+  they are mixed). Fixed freezes the columns at the widths they are drawn (`editor/tablefit.ts`
+  measures a single-column cell of each); a table wider than its line is fitted into it first —
+  the narrow columns keep theirs, the wide ones share the rest equally, less 3.5 % of the text width
+  per column for the `2\tabcolsep` LaTeX adds — and stored as shares of the text column
+  (`23.5col%` → `p{0.235\columnwidth}`), so the PDF holds the same proportions as the editor. Columns
+  with a LaTeX spec of their own and multi-column cells' widths are left alone.
   A table typed as a formula (one `matrix` / `smallmatrix` / `array` alone in the formula) cannot
   wrap — LaTeX sets math on one line — so the palette says so there and offers **Convert to table**
   (also the formula's right-click menu and the math toolbar's `m-totable`): `editor/formulatable.ts`

@@ -748,15 +748,64 @@ export function setColumnWidth(kind: ColumnWidthKind, width?: string): Command {
       return { r: cur.r, c: cur.c, keepOffset: true };
     }
     for (let c = cs; c <= ce; c++) if (columnWidthKind(T, c) === 'special') return false;
-    for (let c = cs; c <= ce; c++) {
-      const a = T.columns[c].attrs;
-      set(a, 'width', len, COLUMN_ORDER);
-      set(a, 'varwidth', kind === 'variable' ? 'true' : null, COLUMN_ORDER);
-      if (!len) set(a, 'valignment', 'top', COLUMN_ORDER);
-      const align = get(a, 'alignment') ?? 'center';
-      for (let r = 0; r < nrows(T); r++) if (isMultiRow(T, r, c)) setAlignmentT(T, r, c, align, !!len);
-      if (kind === 'natural' && align === 'block') setColumnAlignmentT(T, c, 'center', false);
+    for (let c = cs; c <= ce; c++) setColumnWidthT(T, c, kind, len);
+    return { r: cur.r, c: cur.c, keepOffset: true, sel: sameSel(C) };
+  });
+}
+
+/** column c natural, variable or fixed at `len` (a LyX length; null unless fixed) — setColumnWidth's rules */
+function setColumnWidthT(T: Tab, c: number, kind: ColumnWidthKind, len: string | null): void {
+  const a = T.columns[c].attrs;
+  set(a, 'width', len, COLUMN_ORDER);
+  set(a, 'varwidth', kind === 'variable' ? 'true' : null, COLUMN_ORDER);
+  if (!len) set(a, 'valignment', 'top', COLUMN_ORDER);
+  const align = get(a, 'alignment') ?? 'center';
+  for (let r = 0; r < nrows(T); r++) if (isMultiRow(T, r, c)) setAlignmentT(T, r, c, align, !!len);
+  if (kind === 'natural' && align === 'block') setColumnAlignmentT(T, c, 'center', false);
+}
+
+/**
+ * How the table's columns take their widths, all of them together (Word's AutoFit): natural (fit to
+ * contents), variable (fit to the page width) or fixed (each at a width of its own, the text wrapping
+ * in it); 'mixed' when they differ. Columns with their own LaTeX spec are left out; null when every
+ * column has one.
+ */
+export type TableWidthKind = ColumnWidthKind | 'mixed';
+function tableWidthKindT(T: Tab): TableWidthKind | null {
+  let kind: TableWidthKind | null = null;
+  for (let c = 0; c < ncols(T); c++) {
+    const k = columnWidthKind(T, c);
+    if (k === 'special') continue;
+    kind = kind === null || kind === k ? k : 'mixed';
+  }
+  return kind;
+}
+
+/**
+ * Every column of the table at the cursor — not only the selected ones — natural ("Fit to
+ * contents"), variable ("Fit to the page width": X columns sharing the table width) or fixed, column
+ * c at `widths[c]` ("Fixed column widths": a LyX length per column, as tablefit.ts measures them).
+ * Columns with their own LaTeX spec keep it; multicolumn cells keep their own widths. Does not apply
+ * when there is nothing to change.
+ */
+export function setTableColumnWidths(kind: ColumnWidthKind, widths?: readonly string[]): Command {
+  return feature(C => {
+    const { T, cur } = C;
+    const lens: (string | null)[] = [];
+    for (let c = 0; c < ncols(T); c++) {
+      if (kind !== 'fixed') { lens.push(null); continue; }
+      const len = columnWidthLength(widths?.[c]);
+      if (!len && columnWidthKind(T, c) !== 'special') return false;
+      lens.push(len);
     }
+    let changed = false;
+    for (let c = 0; c < ncols(T); c++) {
+      if (columnWidthKind(T, c) === 'special') continue;
+      const before = JSON.stringify(T.columns[c].attrs);
+      setColumnWidthT(T, c, kind, lens[c]);
+      if (JSON.stringify(T.columns[c].attrs) !== before) changed = true;
+    }
+    if (!changed) return false;
     return { r: cur.r, c: cur.c, keepOffset: true, sel: sameSel(C) };
   });
 }
@@ -785,12 +834,14 @@ export interface TableToolbarState {
   width: string;
   /** the cursor cell is a multicolumn (its width is its own; it cannot be variable) */
   multicolumnWidth: boolean;
+  /** how all the table's columns take their widths (Word's AutoFit) */
+  tableWidth: TableWidthKind | null;
 }
 
 const NOT_IN_TABLE: TableToolbarState = {
   inTable: false, rotateCell: false, rotateTable: false, multicolumn: false, multirow: false,
   lines: { top: false, bottom: false, left: false, right: false }, borderLines: false, innerLines: false, allLines: false,
-  booktabs: false, align: null, valign: null, colWidth: null, width: '', multicolumnWidth: false,
+  booktabs: false, align: null, valign: null, colWidth: null, width: '', multicolumnWidth: false, tableWidth: null,
 };
 
 /** On/off state of the table toolbar buttons (InsetTabular::getFeatureStatus). */
@@ -813,6 +864,7 @@ export function tableToolbarState(state: EditorState): TableToolbarState {
     align: getAlignment(T, cur.r, cur.c),
     valign: getVAlignment(T, cur.r, cur.c),
     ...cursorWidth(T, cur.r, cur.c),
+    tableWidth: tableWidthKindT(T),
   };
 }
 
