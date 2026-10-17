@@ -10,6 +10,7 @@ import { parseTex, writeTex, writeTexPreserving, importLyx, type ParseTexResult,
 import type { LyxDocument } from '@overlyx/core';
 import { layoutTemplate, setHeaderValue } from '@overlyx/core';
 import { markEditedSettings } from '@overlyx/core/tex/preamble.ts';
+import type { LocalFont } from '@overlyx/core/md/typesetting.ts';
 import { parseMarkdown, writeMarkdown, writeMarkdownPreserving, isMarkdownPath, markdownForLatex, type MarkdownPreserveCache } from '@overlyx/core/md/index.ts';
 import { config } from './config.ts';
 import { projectDir, findMaster, resolveProjectPath } from './projectfiles.ts';
@@ -116,9 +117,9 @@ export function looksLikeDocument(text: string, fragment: boolean): boolean {
 }
 
 /** A markdown document as a complete .tex file (its PDF is built from it; core md/latex.ts). */
-export function markdownAsTex(doc: LyxDocument, project: string, relPath: string): string {
+export function markdownAsTex(doc: LyxDocument, project: string, relPath: string, opts: { fontFiles?: Record<string, LocalFont> } = {}): string {
   const abs = resolveProjectPath(project, relPath);
-  return writeTex(markdownForLatex(doc), { layoutDir: config.layoutDir, localDirs: [projectDir(project), path.dirname(abs)], readFile: readerFor(project, abs), basename: path.basename(relPath).replace(/\.[^.]+$/, '') }).text;
+  return writeTex(markdownForLatex(doc, opts), { layoutDir: config.layoutDir, localDirs: [projectDir(project), path.dirname(abs)], readFile: readerFor(project, abs), basename: path.basename(relPath).replace(/\.[^.]+$/, '') }).text;
 }
 
 /* -------------------------------------------------------------- import */

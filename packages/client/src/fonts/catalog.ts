@@ -173,7 +173,15 @@ const ROMAN_FACES: Record<string, string> = {
   'gfs neohellenic': 'neohellenic', ibmplexserif: 'plex', 'ibm plex serif': 'plex',
 };
 
+/**
+ * A font a document names that the editor does not carry — a Google font, which the server fetches
+ * and serves (server googlefonts.ts; fonts/googlefont.ts loads it): `gf:<family>`, drawn in that
+ * family, Computer Modern while it loads (or where it is no Google font).
+ */
+export const GOOGLE_FACE = 'gf:';
+
 export function editorFace(id: string): EditorFace {
+  if (id.startsWith(GOOGLE_FACE)) { const name = id.slice(GOOGLE_FACE.length); return { id, label: name, hint: 'Google Fonts', text: `${JSON.stringify(name)}, ${CM}`, math: 'newcm', xHeight: 0.47 }; }
   id = FORMER_FACES[id] ?? id;
   return EDITOR_FACES.find(f => f.id === id) ?? EDITOR_FACES[0];
 }
@@ -207,21 +215,23 @@ function headerValue(headerLines: string[], key: string): string {
   return headerLines.find(l => l.startsWith('\\' + key + ' '))?.slice(key.length + 2) ?? '';
 }
 
-/**
- * The editor face closest to a document's roman font: its font set's face, else a known relative,
- * else Computer Modern. With non-TeX fonts (fontspec) the system font name counts.
- */
 /** the editor face drawn for a font name (a markdown document's front matter: mainfont, headings' font), or null */
 export function faceForFontName(name: string): EditorFace | null {
   const id = ROMAN_FACES[name.trim().toLowerCase()];
   return id ? editorFace(id) : null;
 }
 
+/**
+ * The editor face closest to a document's roman font: its font set's face, else a known relative,
+ * else Computer Modern. With non-TeX fonts (fontspec) the system font name counts.
+ */
 export function documentFace(headerLines: string[]): string {
   const [tex = 'default', nonTex = 'default'] = fontValues(headerValue(headerLines, 'font_roman'));
-  const name = headerValue(headerLines, 'use_non_tex_fonts') === 'true' ? nonTex : tex;
+  const nonTexFonts = headerValue(headerLines, 'use_non_tex_fonts') === 'true';
+  const name = nonTexFonts ? nonTex : tex;
   const set = DOCUMENT_FONT_SETS.find(s => s.roman === name);
-  return set?.face ?? ROMAN_FACES[name.toLowerCase()] ?? DEFAULT_EDITOR_FACE;
+  // a font by name the editor does not carry: the Google font of that name, if it is one
+  return set?.face ?? ROMAN_FACES[name.toLowerCase()] ?? (nonTexFonts && name !== 'default' && /^[A-Za-z0-9][A-Za-z0-9 ]{0,59}$/.test(name) ? GOOGLE_FACE + name : DEFAULT_EDITOR_FACE);
 }
 
 /** The font set a document's settings amount to, or undefined when they are something else. */

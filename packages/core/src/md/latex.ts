@@ -9,7 +9,7 @@
  */
 import type { Item, LyxDocument, Paragraph } from '../lyx/ast.ts';
 import { setHeaderBlock } from '../lyx/ast.ts';
-import { mdTypesetting, applyTypesetting, typesettingPreamble } from './typesetting.ts';
+import { mdTypesetting, applyTypesetting, typesettingPreamble, type LocalFont } from './typesetting.ts';
 export { frontMatterVars } from './typesetting.ts';
 
 /** listings' names of the languages a fenced code block may name (others are set without highlighting) */
@@ -19,7 +19,8 @@ const LISTINGS_LANGUAGES: Record<string, string> = {
   fortran: 'Fortran', make: 'make', makefile: 'make', lua: 'Lua', octave: 'Octave', ocaml: '[Objective]Caml', erlang: 'erlang', gnuplot: 'Gnuplot', csharp: '[Sharp]C', 'c#': '[Sharp]C',
 };
 
-export function markdownForLatex(doc: LyxDocument): LyxDocument {
+/** `fontFiles`: fonts the build has as files (Google fonts the server fetched), by name — loaded by file */
+export function markdownForLatex(doc: LyxDocument, opts: { fontFiles?: Record<string, LocalFont> } = {}): LyxDocument {
   const copy: LyxDocument = JSON.parse(JSON.stringify(doc));
   const fix = (pars: Paragraph[]) => {
     for (const p of pars) {
@@ -48,8 +49,15 @@ export function markdownForLatex(doc: LyxDocument): LyxDocument {
   // the typesetting the front matter sets (md/typesetting.ts): the settings again (idempotent — the parse
   // put them in the header already, but a model may come from elsewhere), and what the preamble needs
   const t = mdTypesetting(copy.preamble);
+  const files = opts.fontFiles ?? {};
   applyTypesetting(copy.header, t);
-  const preamble = typesettingPreamble(t);
+  // a font loaded by file (the preamble's) is not named in the header as well: LuaLaTeX would look for it by name
+  for (const [key, name] of [['font_roman', t.mainfont], ['font_sans', t.sansfont], ['font_typewriter', t.monofont]] as const) {
+    if (!name || !files[name]) continue;
+    const i = copy.header.lines.findIndex(l => l.startsWith(`\\${key} `));
+    if (i >= 0) copy.header.lines[i] = `\\${key} "default" "default"`;
+  }
+  const preamble = typesettingPreamble(t, files);
   if (preamble.length) setHeaderBlock(copy.header, 'preamble', preamble);
   copy.preamble = [];
   return copy;

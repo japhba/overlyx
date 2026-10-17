@@ -16,6 +16,8 @@ import { toPdf } from './graphics.ts';
 import { sandboxed, sandboxHome, removeSandboxHome, type SandboxSpec } from './sandbox.ts';
 import { lstatIn, listIn, readFileIn, readTextIn, writeFileIn, isRegularFileAt } from './confined.ts';
 import { readTextFile, markdownAsTex } from './texdoc.ts';
+import { googleFont, fontFaces } from './googlefonts.ts';
+import { mdTypesetting, textFontsOf, TEXLIVE_FONTS, type LocalFont } from '@overlyx/core/md/typesetting.ts';
 import { isMarkdownPath } from '@overlyx/core/md/index.ts';
 import { rewriteParentPaths } from './texpaths.ts';
 export { rewriteParentPaths };
@@ -313,8 +315,19 @@ export async function exportTex(docId: string, opts: { into?: string } = {}): Pr
   sweepBuildDir(dir, projectDir(doc.project));
   linkDocumentAssets(docDir, dir);
   if (isMarkdownPath(doc.relPath)) {
-    // a markdown document is built from its LaTeX: the editor's model written as a .tex file
-    const tex = markdownAsTex(doc.toLyxDocument(), doc.project, doc.relPath);
+    // a markdown document is built from its LaTeX: the editor's model written as a .tex file — with the
+    // Google fonts its front matter names in the build directory (googlefonts.ts), loaded from there
+    const lyx = doc.toLyxDocument();
+    const fontFiles: Record<string, LocalFont> = {};
+    for (const name of textFontsOf(mdTypesetting(lyx.preamble)).filter(n => !TEXLIVE_FONTS.has(n))) {
+      const g = await googleFont(name);
+      if (!g) continue;
+      const sub = path.join('ol-fonts', g.slug);
+      fs.mkdirSync(path.join(dir, sub), { recursive: true });
+      for (const f of g.files) fs.copyFileSync(path.join(g.dir, f.file), path.join(dir, sub, f.file));
+      fontFiles[name] = { path: `./${sub}/`, ...fontFaces(g) };
+    }
+    const tex = markdownAsTex(lyx, doc.project, doc.relPath, { fontFiles });
     const main = path.join(dir, path.basename(doc.relPath).replace(/\.[^.]+$/, '') + '.tex');
     const rewritten = await rewriteGraphics(tex, docDir, dir, warnings);
     fs.writeFileSync(main, rewritten, 'utf8');

@@ -3008,7 +3008,16 @@ can hold (`core/src/md/`, `client/src/editor/markdown.ts`):
   HTML is left out, code languages listings does not know are dropped) and built with LuaLaTeX.
   The typesetting is set by keys of the YAML front matter (`core/md/typesetting.ts`), pandoc's
   variables where pandoc has one, so the file comes out alike with `pandoc --pdf-engine=lualatex`:
-  `mainfont` / `sansfont` / `monofont` / `mathfont` (OpenType fonts by name: fontspec, unicode-math),
+  `mainfont` / `sansfont` / `monofont` / `mathfont` (OpenType fonts by name: fontspec, unicode-math;
+  a text or heading font TeX Live does not have — not in `MD_FONTS` — is any **Google Fonts** family:
+  `server/googlefonts.ts` fetches it once from the css2 API, which answers a non-browser with one
+  static TrueType file per weight and style, keeps it in `data/cache/google-fonts/<slug>/`, copies it
+  into the build directory (`ol-fonts/`, `exportTex`) and the preamble loads it by file
+  (`markdownForLatex` `fontFiles`, `fontspecFiles`; a missing bold or italic is faked); the editor gets
+  @font-face rules from `/api/fonts/google.css` and the files from this server (`fonts/googlefont.ts`,
+  a `gf:<family>` face for Text font ▸ "As in the document", heading fonts always) — only the family
+  name ever reaches Google; `OVERLYX_GOOGLE_FONTS=off` switches it off; VS Code builds with its own
+  fonts),
   `fontsize`, `papersize`, `geometry` (geometry's options, `margin=2cm` or a list), `linestretch`,
   `numbersections`, `justify: true` (OverLyX's: justified, hyphenated — LaTeX's own way, so the PDF
   just drops the ragged right; the editor justifies on `\overlyx_justify true`, `html[data-justify]`,

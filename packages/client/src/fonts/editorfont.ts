@@ -10,7 +10,8 @@
  * (tests/parity.test.ts).
  */
 import { getPrefs, subscribePrefs, type Prefs } from '../prefs';
-import { editorFace, documentFace, resolvedMathFont, mathScale, mathFont, FOLLOW_DOCUMENT } from './catalog';
+import { editorFace, documentFace, resolvedMathFont, mathScale, mathFont, FOLLOW_DOCUMENT, GOOGLE_FACE } from './catalog';
+import { loadGoogleFont } from './googlefont';
 import { setMathFont } from '../editor/lyxmath/mathjax';
 
 let docFace = 'cm';
@@ -29,6 +30,7 @@ export function resolvedMath(p: Pick<Prefs, 'editorFont' | 'editorMathFont'> = g
 
 function apply(p: Prefs): void {
   const face = editorFace(resolvedFace(p.editorFont));
+  if (face.id.startsWith(GOOGLE_FACE)) loadGoogleFont(face.id.slice(GOOGLE_FACE.length));
   const math = layoutMath ? mathFont(layoutMath) : resolvedMathFont(p.editorMathFont, face.id);
   setMathFont(math.id);
   if (typeof document === 'undefined') return;

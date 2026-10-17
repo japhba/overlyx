@@ -51,7 +51,7 @@ export function MarkdownSettingsDialog({ docId, onClose, onSaved }: { docId: str
       if (v.spacing !== 'custom') { put('space-above', SPACINGS[v.spacing]?.[0] ?? ''); put('space-below', SPACINGS[v.spacing]?.[1] ?? ''); }
       const keys = Object.keys(h);
       await api.setMdFrontMatter(docId, {
-        mainfont: v.main || null,
+        mainfont: v.main.trim() || null,
         // the math font drawn for the text font, written out (pandoc needs it named)
         mathfont: v.math || null,
         fontsize: v.size || null,
@@ -73,16 +73,10 @@ export function MarkdownSettingsDialog({ docId, onClose, onSaved }: { docId: str
     <Dialog title="Document Settings" onClose={onClose} buttons={<button class="btn primary" data-md-settings-apply disabled={busy} onClick={() => void save()}>Apply</button>}>
       <div class="md-settings" data-md-settings>
         <p class="hint">Kept in the document's front matter (pandoc's keys, so <code>pandoc --pdf-engine=lualatex</code> sets it alike); you can also edit them there.</p>
-        {row('Font', <select data-md-font value={pair ? pair.main : v.main ? '__other' : ''} onChange={e => {
-          const val = (e.target as HTMLSelectElement).value;
-          if (val === '__other') return;
-          const f = fonts.find(x => x.main === val);
-          set({ main: f?.main ?? '', math: f?.math ?? '' });
-        }}>
-          <option value="">Computer Modern — LaTeX’s default</option>
-          {fonts.map(f => <option key={f.main} value={f.main}>{f.label} — {f.hint}</option>)}
-          {v.main && !pair && <option value="__other">{v.main} (from the front matter)</option>}
-        </select>)}
+        {row('Font', <input type="text" list="md-font-names" data-md-font value={v.main} placeholder="Computer Modern — LaTeX’s default"
+          onInput={e => { const main = (e.target as HTMLInputElement).value; const f = fonts.find(x => x.main.toLowerCase() === main.trim().toLowerCase()); set(f ? { main: f.main, math: f.math } : { main }); }} />,
+          'one of these, or any Google Fonts family by its name (Inter, Source Serif 4, Lora …): the server fetches it once')}
+        <datalist id="md-font-names">{fonts.map(f => <option key={f.main} value={f.main}>{f.label} — {f.hint}</option>)}</datalist>
         {row('Math font', <select data-md-math value={v.math} onChange={e => set({ math: (e.target as HTMLSelectElement).value })}>
           <option value="">{v.main ? 'As LaTeX has it (Computer Modern)' : 'Computer Modern'}</option>
           {fonts.map(f => <option key={f.math} value={f.math}>{f.math}{pair?.math === f.math ? ' — drawn for the text font' : ''}</option>)}
@@ -102,11 +96,7 @@ export function MarkdownSettingsDialog({ docId, onClose, onSaved }: { docId: str
         <label class="md-set-check"><input type="checkbox" data-md-justify checked={v.justify} onChange={e => set({ justify: (e.target as HTMLInputElement).checked })} /> Justified text (hyphenated, as LaTeX sets it)</label>
         <label class="md-set-check"><input type="checkbox" data-md-numbered checked={v.numbered} onChange={e => set({ numbered: (e.target as HTMLInputElement).checked })} /> Numbered sections</label>
         <label class="md-set-check"><input type="checkbox" data-md-runin checked={v.runIn} onChange={e => set({ runIn: (e.target as HTMLInputElement).checked })} /> Headings run into their paragraph</label>
-        {row('Heading font', <select data-md-heading-font value={v.headingFont} onChange={e => set({ headingFont: (e.target as HTMLSelectElement).value })}>
-          <option value="">As the text</option>
-          {fonts.map(f => <option key={f.main} value={f.main}>{f.label}</option>)}
-          {v.headingFont && !fonts.some(f => f.main === v.headingFont) && <option value={v.headingFont}>{v.headingFont}</option>}
-        </select>)}
+        {row('Heading font', <input type="text" list="md-font-names" data-md-heading-font value={v.headingFont} placeholder="As the text" onInput={e => set({ headingFont: (e.target as HTMLInputElement).value.trim() })} />)}
         {row('Heading spacing', <select data-md-heading-spacing value={v.spacing} onChange={e => set({ spacing: (e.target as HTMLSelectElement).value })}>
           <option value="">LaTeX’s</option><option value="compact">Compact — less space above and below</option><option value="tight">Tight</option>
           {v.spacing === 'custom' && <option value="custom">As the front matter has it</option>}

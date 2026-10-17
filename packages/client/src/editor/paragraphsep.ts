@@ -7,6 +7,7 @@
  */
 import { HEADING_LEVELS, headingStyles, type HeadingLevel, type HeadingStyles } from '@overlyx/core/md/typesetting.ts';
 import { faceForFontName } from '../fonts/catalog';
+import { loadGoogleFont } from '../fonts/googlefont';
 
 const SKIPS = new Set(['smallskip', 'medskip', 'bigskip', 'halfline', 'fullline']);
 
@@ -84,6 +85,8 @@ export function setDocumentHeadings(headerLines: readonly string[]): void {
   let styles: HeadingStyles | null = null;
   try { styles = line === 'run-in' ? headingStyles('run-in') : line ? JSON.parse(line) as HeadingStyles : null; } catch { styles = null; }
   const css = styles ? headingCss(styles) : '';
+  // a heading font the editor does not carry: the Google font of that name (fonts/googlefont.ts)
+  for (const level of HEADING_LEVELS) { const f = styles?.[level].font; if (f && !faceForFontName(f)) loadGoogleFont(f); }
   let el = document.getElementById('ol-heading-styles') as HTMLStyleElement | null;
   if (!css) { el?.remove(); return; }
   if (!el) { el = document.createElement('style'); el.id = 'ol-heading-styles'; document.head.appendChild(el); }

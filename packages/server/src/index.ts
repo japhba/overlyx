@@ -28,6 +28,7 @@ import { refreshScientificStarters } from './starterupdates.ts';
 import { listProjects, resolveProjectPath, assertWritableRelPath, projectDir, createProject, newDocumentText, newMarkdownText, fileKind, isBackupFile, isDocumentFile } from './projects.ts';
 import { isMarkdownPath } from '@overlyx/core/md/index.ts';
 import { markdownStyle, setMarkdownStyle } from './mdstyle.ts';
+import { googleFontRoutes } from './googlefonts.ts';
 import { snippetSvg, snippetFile } from './snippets.ts';
 import { importLyxFile, parseFragmentText, newLayoutDocumentText, withDocumentSettings, NO_INDENT_SETTINGS } from './texdoc.ts';
 import { importLyxUpload } from './lyximport.ts';
@@ -154,6 +155,8 @@ api.use((req, res, next) => {
 });
 api.use(express.json({ limit: '5mb' }));
 api.use(feedbackRoutes());
+// Google fonts a markdown document names, served to the editor from here (googlefonts.ts)
+api.use(googleFontRoutes());
 api.use(usageRoutes());
 api.use(agentRoutes());
 // agents connected over MCP from elsewhere: the account's list, and messages to them (mcpAgents.ts)

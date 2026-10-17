@@ -116,5 +116,17 @@ describe('heading styles (headings: in the front matter)', () => {
     const { doc } = parseMarkdown('---\njustify: true\n---\n\nText.\n');
     expect(doc.header.lines).toContain('\\overlyx_justify true');
   });
+
+  it('a font the build has as files (a Google font) is loaded by file, and named nowhere else', () => {
+    const md = '---\nmainfont: Lora\nheadings: { font: Inter }\n---\n\n# A\n\nText.\n';
+    const tex = writeTex(markdownForLatex(parseMarkdown(md).doc, { fontFiles: {
+      Lora: { path: './ol-fonts/lora/', regular: 'lora-400.ttf', bold: 'lora-700.ttf', italic: 'lora-400i.ttf', boldItalic: 'lora-700i.ttf' },
+      Inter: { path: './ol-fonts/inter/', regular: 'inter-400.ttf' },
+    } }), { basename: 'x' }).text;
+    expect(tex).toContain('\\setmainfont{Lora}[Path=./ol-fonts/lora/, UprightFont=lora-400.ttf, BoldFont=lora-700.ttf, ItalicFont=lora-400i.ttf, BoldItalicFont=lora-700i.ttf, Ligatures=TeX]');
+    // (a face the family lacks is drawn from the regular one)
+    expect(tex).toContain('\\newfontfamily\\olheadingfonta{Inter}[Path=./ol-fonts/inter/, UprightFont=inter-400.ttf, BoldFont=inter-400.ttf, BoldFeatures={FakeBold=2}');
+    expect(tex).not.toContain('\\setmainfont[Ligatures=TeX]{Lora}');
+  });
 });
 

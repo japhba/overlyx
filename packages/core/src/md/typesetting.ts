@@ -41,6 +41,26 @@ export const MD_FONTS: MdFont[] = [
 /** a front matter value: text, a list, or keys of their own (`headings:` and its levels) */
 export type FMValue = string | string[] | { [key: string]: FMValue };
 
+/** the font names TeX Live's LuaLaTeX finds itself (MD_FONTS); any other is fetched from Google Fonts by the server */
+export const TEXLIVE_FONTS = new Set(MD_FONTS.flatMap(f => [f.main, f.math]));
+
+/** a font the build has as files (a Google font, fetched by the server): its folder in the build directory and each face's file */
+export interface LocalFont { path: string; regular: string; bold?: string; italic?: string; boldItalic?: string }
+
+/** fontspec's options loading a LocalFont by file (a face it lacks: drawn from the others, bolder or slanted) */
+export function fontspecFiles(f: LocalFont): string {
+  const o = [`Path=${f.path}`, `UprightFont=${f.regular}`];
+  o.push(f.bold ? `BoldFont=${f.bold}` : `BoldFont=${f.regular}, BoldFeatures={FakeBold=2}`);
+  o.push(f.italic ? `ItalicFont=${f.italic}` : `ItalicFont=${f.regular}, ItalicFeatures={FakeSlant=0.2}`);
+  o.push(f.boldItalic ? `BoldItalicFont=${f.boldItalic}` : f.bold ? `BoldItalicFont=${f.bold}, BoldItalicFeatures={FakeSlant=0.2}` : `BoldItalicFont=${f.regular}, BoldItalicFeatures={FakeBold=2, FakeSlant=0.2}`);
+  return o.join(', ');
+}
+
+/** the text fonts a document's typesetting names (body, sans, mono, headings) — the ones the server may fetch */
+export function textFontsOf(t: MdTypesetting): string[] {
+  return [...new Set([t.mainfont, t.sansfont, t.monofont, ...(t.headings ? HEADING_LEVELS.map(l => t.headings![l].font ?? '') : [])].filter(Boolean))];
+}
+
 /**
  * The front matter's keys (`---` … `---` / `...`): a value, a list (`[a, b]` or `- a` lines), a
  * block (`|` / `>` and indented lines, and pandoc's `- |` items), or keys of their own (indented
@@ -248,13 +268,19 @@ export function withTypesetting(headerLines: string[], preamble: string[]): stri
   return h.lines;
 }
 
-/** the PDF's preamble for what the header does not say: margins, the math font, run-in headings, header-includes */
-export function typesettingPreamble(t: MdTypesetting): string[] {
+/**
+ * the PDF's preamble for what the header does not say: margins, the math font, heading styles,
+ * header-includes — and the fonts the build has as files (`files`, by name: Google fonts), loaded by
+ * file (the header then names none of them: md/latex.ts)
+ */
+export function typesettingPreamble(t: MdTypesetting, files: Record<string, LocalFont> = {}): string[] {
   const out: string[] = [];
+  const local = ([['setmainfont', t.mainfont], ['setsansfont', t.sansfont], ['setmonofont', t.monofont]] as const).filter(([, name]) => name && files[name]);
+  if (local.length) out.push('\\usepackage{fontspec}', ...local.map(([cmd, name]) => `\\${cmd}{${name}}[${fontspecFiles(files[name])}${cmd === 'setmainfont' ? ', Ligatures=TeX' : ''}]`));
   if (t.geometry.length) out.push(`\\usepackage[${t.geometry.join(',')}]{geometry}`);
   // (unicode-math after amsmath, which the generated block would load after this)
   if (t.mathfont) out.push('\\usepackage{amsmath}', '\\usepackage{unicode-math}', `\\setmathfont{${t.mathfont}}`);
-  if (t.headings) out.push(...headingsLatex(t.headings));
+  if (t.headings) out.push(...headingsLatex(t.headings, files));
   out.push(...t.headerIncludes);
   return out;
 }
@@ -269,11 +295,11 @@ const LEVEL_DEFAULTS: Record<HeadingLevel, { size: NonNullable<HeadingStyle['siz
 const SIZE_CMD = { small: '\\small', normal: '\\normalsize', large: '\\large', larger: '\\Large', huge: '\\LARGE' } as const;
 
 /** titlesec for the heading styles (a run-in heading at the text's size unless it says otherwise) */
-function headingsLatex(styles: HeadingStyles): string[] {
+function headingsLatex(styles: HeadingStyles, files: Record<string, LocalFont>): string[] {
   const out = ['\\usepackage{titlesec}'];
   if (HEADING_LEVELS.some(l => styles[l].color)) out.push('\\usepackage{xcolor}');
   const fonts = [...new Set(HEADING_LEVELS.map(l => styles[l].font).filter((f): f is string => !!f))];
-  fonts.forEach((f, k) => out.push(`\\newfontfamily\\olheadingfont${'abcdefgh'[k]}{${f}}`));
+  fonts.forEach((f, k) => out.push(`\\newfontfamily\\olheadingfont${'abcdefgh'[k]}{${f}}${files[f] ? `[${fontspecFiles(files[f])}]` : ''}`));
   for (const level of HEADING_LEVELS) {
     const st = styles[level], def = LEVEL_DEFAULTS[level];
     const runIn = (st.display ?? def.display) === 'run-in';
