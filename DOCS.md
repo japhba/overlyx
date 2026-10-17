@@ -1732,6 +1732,21 @@ blend.
   build fade ("may move") until the next build places them again. While the view is on, the PDF is
   rebuilt automatically as if its pane were shown, and the status bar shows the cursor's page,
   "page 3 of 8". Line breaks inside a paragraph stay the browser's; the PDF is the exact view.
+  The sheet is centred and the column sits on it where the PDF's margins put it. Hold Ctrl (⌘)
+  a moment (alone: Ctrl+S etc. do not flash it), and dashed guides appear on each sheet's text
+  block edges, with a grip in the left margin beside the line under the pointer (`PagesUi`). Drag
+  a guide to set that margin (whole millimetres) or the grip to set the line spacing (hundredths,
+  caught at 1, 1.15, 1.25, 1.5 and 2). The editor shows the result as you drag, and Esc cancels.
+  Let go, and the shell (`setPagesHost`, App.tsx) writes it into the document. A .tex document
+  gets `use_geometry` and the four margins, and `\spacing other …`: LyX's header keys, written
+  into the managed block. A markdown document gets front matter `geometry` (its other options
+  kept) and `linestretch`. The shell then builds the PDF, and the breaks show "may move" until
+  that build places them. A `\geometry` or `\linespread` of the document's own LaTeX after the
+  managed block still wins in the PDF; the next build shows that.
+  A paragraph's LaTeX line is read past `\olfont{Family}`, `\textcolor{…}`, `\href{url}` and the
+  like (sourcelocate.ts `plainWords`; a document in a font by name has every paragraph wrapped in
+  `\olfont`). When the source line still points elsewhere, the page's first words are looked for
+  in the paragraphs after the previous break.
   *Document ▸ Start Appendix Here* marks the cursor's paragraph as the start of the appendix
   (LyX's `\start_of_appendix`, written as `\appendix`).
   **Dark pages** (`app/pdfdark.ts`, like PDF Expert's night mode): in the dark theme the pages are

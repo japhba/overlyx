@@ -71,4 +71,12 @@ describe('where that is in the document', () => {
     expect(marks[0]).toEqual({ pos: second, page: 2, inline: false });
     expect(marks[1]).toEqual({ pos: third + 1 + 'Third one runs on and the '.length, page: 3, inline: true });
   });
+
+  it('reads past a font\'s name in the LaTeX (every paragraph of a document in a font by name is \\olfont{Family}{…})', () => {
+    const par = (t: string, layout = 'Standard') => schema.nodes.paragraph.create({ layout }, schema.text(t));
+    const doc = schema.nodes.doc.create(null, [par('Open latent reasoning at scale', 'Section'), par('Some text of the first page.'), par('Limitations and broader impact', 'Subsection'), par('The last words.')]);
+    const tex = ['\\begin{document}', '\\section{\\olfont{Open Sans}{Open latent reasoning at scale}}', '\\olfont{Open Sans}{Some text of the first page.}', '\\subsection{\\olfont{Open Sans}{Limitations and broader impact}}', '\\olfont{Open Sans}{The last words.}'].join('\n');
+    const marks = placeBreaks(doc, tex, { pages: 2, frames: [], lead: null, lineWidth: null, starts: [{ page: 2, line: 4, before: 0, total: 1, words: ['Limitations', 'and', 'broader', 'impact'] }] });
+    expect(marks).toEqual([{ pos: doc.child(0).nodeSize + doc.child(1).nodeSize, page: 2, inline: false }]);
+  });
 });

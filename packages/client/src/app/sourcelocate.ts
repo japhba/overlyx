@@ -109,6 +109,8 @@ export function plainWords(latex: string): string {
     .replace(/\\ /g, ' ')
     .replace(/\$[^$]*\$/g, ' ')
     .replace(/\\(label|ref|eqref|cite[a-z]*|includegraphics|caption|footnote)\*?(\[[^\]]*\])?\{[^}]*\}/g, ' ')
+    // a command's first argument that is not text: a font's or colour's name, a link's address, a language (the text follows in the next)
+    .replace(/\\(olfont|olfontset|textcolor|colorbox|fcolorbox|foreignlanguage|href)\*?(\[[^\]]*\])?\{[^}]*\}/g, ' ')
     .replace(/\\[A-Za-z]+\*?(\[[^\]]*\])?/g, ' ')
     .replace(/[{}~]/g, ' ')
     .replace(/\s+/g, ' ')

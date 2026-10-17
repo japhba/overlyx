@@ -75,7 +75,7 @@ import { STANDARD_LAYOUTS, sectionLevel } from '../editor/layouts';
 import { chordKey } from '../editor/keymap';
 import * as C from '../editor/commands';
 import { setMarginMode } from '../editor/plugins/margin';
-import { setPagesView, setPageBreaks, pageAtCursor } from '../editor/plugins/pages';
+import { setPagesView, setPageBreaks, pageAtCursor, setPagesHost } from '../editor/plugins/pages';
 import { setInk, getInk, subscribeInk, isTabletClient } from '../editor/plugins/ink';
 import { BoardEditor } from './BoardEditor';
 import { DeliverableEditor } from '../deliverable/DeliverableEditor';
@@ -85,7 +85,7 @@ import { acceptAllChanges, rejectAllChanges, changeAt, hasChanges, changesFilter
 import * as T from '../editor/tablecommands';
 import type { PresenceUser } from '../editor/editor';
 import { setQuery, findNext, replaceCurrent, replaceAll, findKey } from '../editor/plugins/find';
-import { schema, unquote, projectOfDoc, docPathOf, docDirOf, projectShortName } from '@overlyx/core';
+import { schema, unquote, projectOfDoc, docPathOf, docDirOf, projectShortName, spacingStretch, spacingValue } from '@overlyx/core';
 
 type Dialog = { name: string; arg?: unknown } | null;
 
@@ -1074,6 +1074,47 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     })();
     return () => { gone = true; };
   }, [masterView, docId, pagesOn, isLyxDoc, pdf.pdfAt]);
+  // margins and line spacing dragged on the sheets (Ctrl held): into the document's settings — a .tex
+  // document's geometry and \spacing (LyX's header keys, written into the managed block), a markdown
+  // document's front matter (geometry, linestretch) — then the PDF that shows them
+  const headerRef = useRef(headerLines);
+  headerRef.current = headerLines;
+  const buildRef = useRef(build);
+  buildRef.current = build;
+  useEffect(() => {
+    if (!docId || !isLyxDoc) { setPagesHost(null); return; }
+    const id = docId, md = isMarkdownDoc(docId);
+    const cm = (pt: number) => `${(pt / (72.27 / 2.54)).toFixed(1)}cm`;
+    setPagesHost({
+      stretch: () => spacingStretch(headerRef.current.find(l => l.startsWith('\\spacing '))?.slice(9)),
+      save: async c => {
+        try {
+          if (md) {
+            const set: Record<string, unknown> = {};
+            if (c.stretch !== undefined) set.linestretch = Math.abs(c.stretch - 1) > 0.004 ? c.stretch : null;
+            if (c.margins) {
+              // the margins replaced, the geometry's other options (paper, head height …) kept, in the form the file had
+              const g = (await api.mdFrontMatter(id)).vars.geometry;
+              const list = Array.isArray(g) ? g.map(String) : typeof g === 'string' && g.trim() ? g.split(/\s*,\s*/) : [];
+              const rest = list.filter(o => !/^\s*(margin|[lrtbhv]?margin|left|right|top|bottom|inner|outer)\s*=/.test(o));
+              const m = [`top=${cm(c.margins.top)}`, `bottom=${cm(c.margins.bottom)}`, `left=${cm(c.margins.left)}`, `right=${cm(c.margins.right)}`];
+              set.geometry = Array.isArray(g) ? [...rest, ...m] : [...rest, ...m].join(', ');
+            }
+            await api.setMdFrontMatter(id, set);
+          } else {
+            const set: Record<string, string> = {};
+            if (c.stretch !== undefined) set.spacing = spacingValue(c.stretch);
+            if (c.margins) Object.assign(set, { use_geometry: 'true', leftmargin: cm(c.margins.left), rightmargin: cm(c.margins.right), topmargin: cm(c.margins.top), bottommargin: cm(c.margins.bottom) });
+            await api.setHeader(id, { set });
+          }
+          // (not as an automatic build: one running already, from the last drag, builds once more after)
+          void buildRef.current({ open: false });
+          return true;
+        } catch (e) { notify('Could not change the page setup: ' + (e as Error).message, 'error'); return false; }
+      },
+    });
+    return () => setPagesHost(null);
+  }, [docId, isLyxDoc]);
   const togglePages = () => {
     const next = !pagesOn;
     setPagesOn(next);
