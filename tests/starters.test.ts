@@ -32,10 +32,14 @@ const FILES: Record<string, string> = { slides: 'slides.tex', paper: 'paper.tex'
 describe('starter projects', () => {
   const ada = toSessionUser(createUser('ada', 'Ada Lovelace', 'pw'));
 
-  it('every account gets the beamer deck, slides and posters, and the paper once, besides the welcome project', () => {
+  it('every account gets the beamer deck, slides and posters, and the paper once, besides the welcome project', async () => {
     expect(access.ensureWelcomeProject(ada)).toBe('ada/welcome');
     expect(access.ensureStarterProjects(ada)).toEqual(['ada/example-slides', 'ada/example-web', 'ada/example-paper']);
     expect(access.ensureStarterProjects(ada)).toEqual([]);
+    // the posters added later to older accounts are this one's already (starterupdates.ts LATER_POSTERS)
+    const { db } = await import('../packages/server/src/db.ts');
+    expect((db.prepare("SELECT template FROM starter_projects WHERE user_id=? AND template LIKE 'web:%' ORDER BY template").all(ada.id) as { template: string }[]).map(r => r.template))
+      .toEqual(['web:poster-bernstein-2026', 'web:poster-icml-2026', 'web:poster-statement-2026']);
     const mine = access.accessibleProjects(ada);
     expect(mine.map(p => [p.name, p.kind, p.title, p.role])).toEqual(expect.arrayContaining([
       ['ada/welcome', 'example', 'Welcome to OverLyX', 'owner'],

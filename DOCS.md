@@ -75,10 +75,10 @@ blend.
   slides / poster as an HTML deliverable in `slides/` or `poster/`) and opened right away. It replaced
   a "+ New project" prompt that left newcomers looking for where slides come from. A project without
   documents (`ProjectRootPanel`) offers *+ New document*, *+ New slides* and *+ New poster*.
-  Slides offer three open styles and posters offer five, also available in File ▸ New:
+  Slides offer three open styles and posters offer six, also available in File ▸ New:
   MIT EvenBetter landscape (48 × 36 in PowerPoint), MIT EvenBetter figure sketch (48 × 36 in
   Illustrator), MIT EvenBetter portrait (36 × 48 in PowerPoint), Metropolis (16:9), Focus (16:9)
-  and CambridgeUS (4:3). Two additional project-derived poster layouts reproduce the 2026 Bernstein A0 portrait and ICML 1210 × 910 mm landscape designs, with replacement analytical content. Their millimetre geometry is recorded in `core/src/html/project-posters.ts`. Posters reproduce the published bands, figure panels, colours and
+  and CambridgeUS (4:3). Two additional project-derived poster layouts reproduce the 2026 Bernstein A0 portrait and ICML 1210 × 910 mm landscape designs, with replacement analytical content. Their millimetre geometry is recorded in `core/src/html/project-posters.ts`. A third, Poster 6 (`statement-2026`, `core/src/html/statement-poster.ts`), is a 2026 project poster's 48 × 36 in #betterposter landscape measured in inches from its PDF: title band, one large plain-language statement in a coloured box with a QR placeholder, a two-step explainer of editable boxes beneath it and numbered panels down both sides; its Arial is Fira Sans (an Arial-metric face would add ~0.4 MB to every page and to the app, which bundles the template fonts), and its eight figures are distinct analytical plots (`scientific-charts.ts` gained `kernel`, `msd` and `variance`). Posters reproduce the published bands, figure panels, colours and
   typography from [MIT BE Communication Lab's EvenBetterPoster resources](https://github.com/MIT-BECL/Poster_Resources)
   (CC0-1.0, `License-Templates`), described in [their article](https://mitcommlab.mit.edu/be/2023/09/27/toward-an-evenbetterposter-improving-the-betterposter-template/).
   Slides reproduce [Metropolis](https://github.com/matze/mtheme) (CC BY-SA 4.0),
@@ -91,7 +91,7 @@ blend.
   regenerates their embedded font faces. `core/src/html/scientific.ts` and `scientific-posters.ts`
   are the shared source; `npx tsx scripts/gen-scientific-starters.ts`
   refreshes the scientific example files in `templates/starters/web` (`--previews` also renders chooser thumbnails
-  using the built runtime). On startup, registered old HTML starters whose text, equations,
+  using the built runtime, `--previews=<id>,…` only those templates' — its layout check, `report()`, should list no issues). On startup, registered old HTML starters whose text, equations,
   figures and styling still match the shipped example (allowing whitespace, author-placeholder
   and guide changes) are refreshed, with the previous source kept in version history. Meaningfully
   edited files and deleted projects or documents are preserved; new variants never overwrite a folder.
@@ -2301,7 +2301,9 @@ for the attribution line and the generated file's header. The example project's 
 same names (`templateFolder`: `slides-1`, `poster-4`, …; `templates/starters/web`); at startup
 `starterupdates.ts` renames the old ones (`talk`, `poster-bernstein-2026`, … — `legacyFolder`, also
 the keys of `starters-legacy` and of the `web:poster-…` markers) in every account, customised or not,
-moving their `ydocs`, `versions` and `user_doc_state` rows along.
+moving their `ydocs`, `versions` and `user_doc_state` rows along. Posters added after accounts got
+their examples (`LATER_POSTERS`: Poster 4–6) are copied into each account's example project once,
+a `web:poster-<id>` marker recording it (new accounts are marked when the project is made).
 
 Documents draw freehand only: the same pens, highlighter, eraser and settings as the slide editor's
 Draw (`deliverable/drawingToolbar.tsx`, `deckink.ts`, `core/freehand.ts`), plus the lasso and the

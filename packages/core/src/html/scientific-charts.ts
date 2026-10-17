@@ -4,7 +4,7 @@
  * labels in the page's own typeface, at a size that stays legible whatever the box's size.
  * Every curve is an exact function stated in the figure's aria-label; none is data.
  */
-export type ChartType = 'decay' | 'phase' | 'calibration' | 'lifetime' | 'profiles' | 'ratio' | 'envelope' | 'sharpness' | 'spectrum';
+export type ChartType = 'decay' | 'phase' | 'calibration' | 'lifetime' | 'profiles' | 'ratio' | 'envelope' | 'sharpness' | 'spectrum' | 'kernel' | 'msd' | 'variance';
 export type Chart = (type: ChartType, x: number, y: number, w: number, h: number, opts?: ChartOptions) => string;
 export interface ChartOptions {
   /** the labels' size on the page, px (within what keeps the plot readable: 12–30 units of the 600-unit viewBox) */
@@ -82,6 +82,9 @@ const CAPTIONS: Record<ChartType, string> = {
   envelope: 'Analytical damped oscillation x₁(t) = e^(−t) cos(17t/3) inside its envelope ±e^(−t).',
   spectrum: 'Analytical mode amplitudes aₖ(0) = 1/k and aₖ(t) = e^(−k²t/τ₁)/k at t = τ₁/4: diffusion empties the high frequencies first.',
   sharpness: 'Analytical forecast distributions of two calibrated forecasters: a constant base rate and a sharp, discriminating forecast.',
+  kernel: 'Analytical heat kernel G(x, t) = e^(−x²/4Dt) / √(4πDt) at t = 0.25, 1 and 4 (D = 1): a point source spreads as √t.',
+  msd: 'Analytical mean squared displacement ⟨x²⟩ = 2Dt for D = 0.5, 1 and 2: straight lines whose slope is 2D.',
+  variance: 'Analytical total variance Σ aₖ² e^(−2k²t/τ₁) with aₖ = 1/k (k = 1…20), normalized, against the slowest mode alone e^(−2t/τ₁) / Σ aₖ².',
 };
 
 /** An example figure as an absolutely positioned inline SVG the size of its box (px). */
@@ -136,6 +139,22 @@ export function chart(type: ChartType, x: number, y: number, w: number, h: numbe
       y: { min: 0, max: 1.25, ticks: [[0, '0'], [.5, '0.5'], [1, '1']], title: 'Amplitude  |aₖ|' } },
       [{ pts: [], colour: muted, label: 't = 0', box: true }, { pts: [], colour: accent, label: 't = τ₁ / 4', box: true }],
       { bars: ks.flatMap(k => [{ x: k - .17, w: .3, v: 1 / k, colour: muted, opacity: .55 }, { x: k + .17, w: .3, v: Math.exp(-k * k / 4) / k, colour: accent }]) });
+  } else if (type === 'kernel') {
+    const g = (x: number, t: number) => Math.exp(-x * x / (4 * t)) / Math.sqrt(4 * Math.PI * t);
+    content = plot(W, H, fs, { x: { min: -6, max: 6, ticks: [[-6, '−6'], [-3, '−3'], [0, '0'], [3, '3'], [6, '6']], title: 'Position  x' },
+      y: { min: 0, max: .7, ticks: [[0, '0'], [.25, '0.25'], [.5, '0.5']], title: 'Density  G(x, t)' } },
+      [.25, 1, 4].map((t, i) => ({ pts: sample(160, s => [-6 + 12 * s, g(-6 + 12 * s, t)]), colour: [accent, second, muted][i], dash: i === 2 ? '7 6' : undefined, label: `t = ${t}` })), { legend: 'tr' });
+  } else if (type === 'msd') {
+    content = plot(W, H, fs, { x: { min: 0, max: 3, ticks: [[0, '0'], [1, '1'], [2, '2'], [3, '3']], title: 'Time  t' },
+      y: { min: 0, max: 13, ticks: [[0, '0'], [4, '4'], [8, '8'], [12, '12']], title: 'Mean squared displacement' } },
+      [2, 1, .5].map((d, i) => ({ pts: [[0, 0], [3, 6 * d]] as [number, number][], colour: [accent, second, muted][i], dash: i === 2 ? '7 6' : undefined, label: `D = ${d}` })), { legend: 'tl' });
+  } else if (type === 'variance') {
+    const ks = Array.from({ length: 20 }, (_, i) => i + 1), v0 = ks.reduce((a, k) => a + 1 / (k * k), 0);
+    content = plot(W, H, fs, { x: { min: 0, max: 3, ticks: [[0, '0'], [1, '1'], [2, '2'], [3, '3']], title: 'Time  t / τ₁' },
+      y: { min: 1e-3, max: 1.5, log: true, ticks: [[1, '1'], [1e-1, '10⁻¹'], [1e-2, '10⁻²'], [1e-3, '10⁻³']], title: 'Total variance  V(t) / V(0)' } }, [
+      { pts: sample(120, s => [3 * s, ks.reduce((a, k) => a + Math.exp(-2 * k * k * 3 * s) / (k * k), 0) / v0]), colour: accent, label: 'all modes' },
+      { pts: sample(60, s => [3 * s, Math.exp(-6 * s) / v0]), colour: muted, dash: '7 6', label: 'slowest mode' },
+    ]);
   } else {
     // both calibrated for a base rate near 0.2: the constant forecast, and one that tells cases apart
     const sharp: [number, number][] = [[.05, .58], [.15, .2], [.25, .05], [.75, .04], [.85, .06], [.95, .07]];

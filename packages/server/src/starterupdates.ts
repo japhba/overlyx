@@ -14,6 +14,13 @@ import { db } from './db.ts';
 import { resolveProjectPath } from './projects.ts';
 
 const templates = path.resolve(import.meta.dirname, '../templates');
+/**
+ * Posters that shipped after accounts had received the examples: each is added once to every
+ * account's example project (a `web:poster-<id>` marker records it, so a deleted one stays deleted);
+ * new accounts get them with the project and are marked at once (access.ts).
+ */
+export const LATER_POSTERS = ['bernstein-2026', 'icml-2026', 'statement-2026'];
+
 /** a design's example folder before 17 Oct 2026 (and in starters-legacy) */
 export const legacyFolder = (t: ScientificTemplate) => t.id === 'research' ? 'talk' : t.id === 'betterposter' ? 'poster' : `${t.kind === 'deck' ? 'talk' : 'poster'}-${t.id}`;
 /** each example's folder now, and the one its old versions are kept under (starters-legacy) */
@@ -136,10 +143,9 @@ export function refreshScientificStarters(dryRun = false): { updated: string[]; 
           if (!fs.existsSync(dest)) fs.cpSync(path.join(templates, 'starters/web', folder), dest, { recursive: true, errorOnExist: true, force: false });
         }
       }
-      // These layouts shipped after existing accounts received the scientific examples.
-      // Record each addition independently so subsequent starts respect deletions.
+      // LATER_POSTERS, each recorded on its own so that later starts respect deletions
       // (the markers keep the folders' old names)
-      for (const t of SCIENTIFIC_TEMPLATES.filter(x => x.id === 'bernstein-2026' || x.id === 'icml-2026')) {
+      for (const t of SCIENTIFIC_TEMPLATES.filter(x => LATER_POSTERS.includes(x.id))) {
         const marker = `web:${legacyFolder(t)}`, folder = templateFolder(t);
         if (db.prepare('SELECT 1 FROM starter_projects WHERE user_id=? AND template=?').get(row.user_id, marker)) continue;
         const dest = path.join(root, at.get(folder) ?? folder);

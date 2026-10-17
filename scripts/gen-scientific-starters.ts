@@ -1,5 +1,6 @@
-/** Regenerate the scientific examples; --previews also refreshes the chooser thumbnails.
- * npx tsx scripts/gen-scientific-starters.ts [--previews]
+/** Regenerate the scientific examples; --previews also refreshes the chooser thumbnails
+ * (--previews=<id>,<id>: only those templates').
+ * npx tsx scripts/gen-scientific-starters.ts [--previews[=ids]]
  * Preview generation uses the built runtime (npm run build) to typeset math and check layouts.
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -17,7 +18,9 @@ for (const t of SCIENTIFIC_TEMPLATES) {
   console.log(`${folder}/index.html`);
 }
 
-if (process.argv.includes('--previews')) {
+const previewArg = process.argv.find(a => a === '--previews' || a.startsWith('--previews='));
+const only = previewArg?.includes('=') ? previewArg.slice(previewArg.indexOf('=') + 1).split(',') : null;
+if (previewArg) {
   const { chromium } = await import('@playwright/test');
   const server = createServer((req, res) => {
     const url = new URL(req.url!, 'http://localhost');
@@ -42,7 +45,7 @@ if (process.argv.includes('--previews')) {
   const previews = resolve(root, 'packages/client/public/templates');
   mkdirSync(previews, { recursive: true });
   try {
-    for (const t of SCIENTIFIC_TEMPLATES) {
+    for (const t of SCIENTIFIC_TEMPLATES.filter(t => !only || only.includes(t.id))) {
       const page = await browser.newPage({ viewport: { width: 1600, height: 1000 }, deviceScaleFactor: 1 });
       await page.goto(`http://127.0.0.1:${address.port}/preview?template=${t.id}`);
       await page.waitForFunction(() => (window as any).__olReady === true, undefined, { timeout: 30000 });

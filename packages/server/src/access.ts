@@ -27,6 +27,7 @@ import { config } from './config.ts';
 import type { SessionUser } from './auth.ts';
 import { listProjects, namespaces, resolveProjectPath, type Project } from './projects.ts';
 import { canonicalProject, freeKey, moveFlatProjects, moveProject } from './namespaces.ts';
+import { LATER_POSTERS } from './starterupdates.ts';
 
 export type Role = 'owner' | 'edit' | 'view';
 const RANK: Record<Role, number> = { view: 1, edit: 2, owner: 3 };
@@ -556,9 +557,9 @@ export function ensureStarterProjects(user: SessionUser): string[] {
       copyTemplate(src, resolveProjectPath(name, '.'));
       registerProject(name, user.id, { title: s.title, kind: 'project' });
       if (s.id === 'web') {
-        // (starterupdates.ts adds these two to older accounts once; the markers keep the folders' old names)
-        for (const folder of ['poster-bernstein-2026', 'poster-icml-2026']) {
-          db.prepare('INSERT OR IGNORE INTO starter_projects (user_id,template,project,created_at) VALUES (?,?,?,?)').run(user.id, `web:${folder}`, name, Date.now());
+        // (starterupdates.ts adds these to older accounts once; the markers keep the folders' old names)
+        for (const id of LATER_POSTERS) {
+          db.prepare('INSERT OR IGNORE INTO starter_projects (user_id,template,project,created_at) VALUES (?,?,?,?)').run(user.id, `web:poster-${id}`, name, Date.now());
         }
       }
       created.push(name);
