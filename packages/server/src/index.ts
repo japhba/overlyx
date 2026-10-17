@@ -53,7 +53,9 @@ import { startInboxImport } from './inbox.ts';
 import { deletionPreview, deleteAccount, pruneTrash } from './accounts.ts';
 import { privacyPage } from './privacy.ts';
 import { usageRoutes, vscodeUsageRoutes } from './usage.ts';
-import { searchLiterature, bibtexFor, addToCitedBib, sourcesAvailable, type Hit } from './bibsearch.ts';
+import { searchLiterature, bibtexFor, addToCitedBib, sourcesAvailable, normTitle, type Hit } from './bibsearch.ts';
+import { identify } from './citelinks.ts';
+import { zoteroRoutes, zoteroStatus, searchZotero } from './zotero.ts';
 import { fetchPdfForEntry } from './pdffetch.ts';
 import { gitRouter, ensureAllRepos, ensureRepo, repoInfo, cloneUrl, commitProject, restoreProject, touchProject, createToken, listTokens, deleteToken, flushCommits } from './git.ts';
 import { syncRouter } from './sync.ts';
@@ -199,6 +201,8 @@ api.all('/docs/*', (req, res, next) => {
 
 // the Google Docs sync (gdocs/): after the document access rules above
 api.use(gdocsRoutes());
+// the account's Zotero library for the citation dialog (zotero.ts)
+api.use(zoteroRoutes());
 
 // what keeps the document in step from elsewhere right now — synced clones of its project, its
 // Google Docs link (syncPeers.ts): the web interface's "⇄ in sync" chip
@@ -867,14 +871,29 @@ api.get('/projects/:project/text/*', needProject('view'), (req, res) => {
  * Save a text file. `mtime` is the modification time the client loaded; if the file changed since
  * (someone else, desktop LyX, git), the save is refused with 409 and the current content.
  */
-api.get('/bib/sources', (_req, res) => { res.json({ enabled: config.literature, sources: config.literature ? sourcesAvailable() : [] }); });
-/** Literature search for the citation dialog (open indexes; see bibsearch.ts). */
+api.get('/bib/sources', (req, res) => { res.json({ enabled: config.literature, sources: config.literature ? sourcesAvailable() : [], zotero: zoteroStatus(req.user!.id) }); });
+/**
+ * Literature search for the citation dialog: the open indexes, or the one paper an identifier or a
+ * link names (bibsearch.ts, citelinks.ts) — with the account's Zotero library alongside, its items first (zotero.ts).
+ */
 api.get('/bib/search', async (req, res) => {
   if (!config.literature) { res.status(503).json({ error: 'Literature search is switched off on this server (OVERLYX_LITERATURE=off).' }); return; }
   const q = String(req.query.q ?? '').trim().slice(0, 300);
   if (!q) { res.json({ hits: [] }); return; }
-  try { const r = await searchLiterature(q, Math.min(25, Number(req.query.limit) || 10)); res.json({ hits: r.hits, warnings: r.warnings, sources: sourcesAvailable() }); }
-  catch (e) { res.status(502).json({ error: (e as Error).message }); }
+  const limit = Math.min(25, Number(req.query.limit) || 10);
+  const [lit, zot] = await Promise.all([
+    searchLiterature(q, limit).then(r => ({ ok: true as const, r }), (e: Error) => ({ ok: false as const, e })),
+    // (a link names one paper: Zotero is not asked)
+    identify(q) ? null : searchZotero(req.user!.id, q).catch((e: Error) => ({ hits: [] as Hit[], warnings: [`Your Zotero library did not answer: ${e.message}`] })),
+  ]);
+  if (!lit.ok && !zot?.hits.length) { res.status(502).json({ error: lit.e.message }); return; }
+  const mine = zot?.hits ?? [];
+  const known = (h: Hit) => mine.some(z => (z.doi && h.doi && z.doi.toLowerCase() === h.doi.toLowerCase()) || normTitle(z.title) === normTitle(h.title));
+  res.json({
+    hits: [...mine, ...(lit.ok ? lit.r.hits.filter(h => !known(h)) : [])],
+    warnings: [...(zot?.warnings ?? []), ...(lit.ok ? lit.r.warnings : [lit.e.message])],
+    sources: sourcesAvailable(), zotero: !!zot,
+  });
 });
 /** Add a paper to the project's cited.bib: either a search hit (BibTeX fetched here) or pasted BibTeX. */
 api.post('/projects/:project/bib/add', needProject('edit'), async (req, res) => {

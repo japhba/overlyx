@@ -5,7 +5,8 @@ import type { DocMeta, ProjectFile, BibItem } from '../api';
 import type { GraphicsOpts, TableChanges } from '../editor/commands';
 import type { ColumnWidthKind } from '../editor/tablecommands';
 import { api, graphicsUrl } from '../api';
-import type { LitHit, BibAddResult } from '../api';
+import type { LitHit, BibAddResult, ZoteroStatus } from '../api';
+import { ZoteroConnect } from './ZoteroConnect';
 import type { Node as PMNode } from 'prosemirror-model';
 import { paramMap, unquote, moduleWarnings, markEditedSettings, columnWidthLength } from '@overlyx/core';
 import { resolveDocPath, toDocRel as docRelPath } from '../editor/context';
@@ -285,7 +286,7 @@ export function CiteDialog({ meta, docId, project, initial, onInsert, onAdded, o
   const cmds = meta?.citeEngine === 'natbib' ? ['citep', 'citet', 'citealp', 'citealt', 'citeauthor', 'citeyear', 'citeyearpar', 'nocite'] : meta?.citeEngine === 'biblatex' ? ['cite', 'parencite', 'textcite', 'autocite', 'citeauthor', 'citeyear', 'nocite'] : ['cite', 'nocite'];
   const insert = () => { onInsert(keys, cmd, before, after, keys.map(k => known.get(k)).filter((e): e is BibItem => !!e)); inserted.current = true; onClose(); };
 
-  // --- find online (OpenAlex, DBLP, doi.org) and paste from Google Scholar
+  // --- find online (OpenAlex, DBLP, doi.org; a paper's link; the account's Zotero library) and paste from Google Scholar
   const [oq, setOq] = useState('');
   const [ohits, setOhits] = useState<LitHit[]>([]);
   const [osearching, setOsearching] = useState(false);
@@ -295,7 +296,8 @@ export function CiteDialog({ meta, docId, project, initial, onInsert, onAdded, o
   const [paste, setPaste] = useState('');
   const [status, setStatus] = useState<string | null>(null);
   const [sources, setSources] = useState<string[]>([]);
-  useEffect(() => { if (tab === 'online' && !sources.length) api.literatureSources().then(r => setSources(r.sources)).catch(() => {}); }, [tab]);
+  const [zotero, setZotero] = useState<ZoteroStatus | null>(null);
+  useEffect(() => { if (tab === 'online' && !sources.length) api.literatureSources().then(r => { setSources(r.sources); setZotero(r.zotero ?? null); }).catch(() => {}); }, [tab]);
   useEffect(() => {
     if (tab !== 'online') return;
     const t = oq.trim();
@@ -303,7 +305,7 @@ export function CiteDialog({ meta, docId, project, initial, onInsert, onAdded, o
     setOsearching(true); setOerror(null);
     const h = setTimeout(() => { api.literatureSearch(t).then(r => { setOhits(r.hits); setOerror(r.warnings?.length ? r.warnings.join(' · ') : null); }).catch(e => { setOhits([]); setOerror((e as Error).message); }).finally(() => setOsearching(false)); }, 450);
     return () => clearTimeout(h);
-  }, [oq, tab]);
+  }, [oq, tab, zotero?.connected]);
   const took = (r: BibAddResult) => {
     setAdded(a => (a.some(e => e.key === r.key) ? a : [r.entry, ...a]));
     setKeys(k => (k.includes(r.key) ? k : [...k, r.key]));
@@ -345,21 +347,22 @@ export function CiteDialog({ meta, docId, project, initial, onInsert, onAdded, o
         </>
       ) : (
         <>
-          <Row label="Find"><input type="text" autofocus value={oq} onInput={e => setOq((e.target as HTMLInputElement).value)} placeholder="title, authors, DOI, arXiv id or URL" data-cite-query /><span class="sub" style="color:#888;font-size:11px;white-space:nowrap">{osearching ? 'searching…' : sources.join(' · ') || '…'}</span></Row>
+          <Row label="Find"><input type="text" autofocus value={oq} onInput={e => setOq((e.target as HTMLInputElement).value)} placeholder="title, authors, DOI, arXiv id — or a paper’s link" data-cite-query /><span class="sub" style="color:#888;font-size:11px;white-space:nowrap">{osearching ? 'searching…' : [...(zotero?.connected ? ['Zotero'] : []), ...sources].join(' · ') || '…'}</span></Row>
           <div class="list lit-list" style="max-height:260px" data-cite-hits>
             {ohits.map(h => (
               <div key={h.id} class="lit-hit" onClick={() => { if (!busyId && !addedIds.has(h.id)) void cite(h); }}>
                 <div class="lit-main">
                   <b>{h.title}</b>
-                  <div class="sub">{authorsOf(h)}{h.year ? ` · ${h.year}` : ''}{h.venue ? ` · ${h.venue}` : ''}{h.citations != null ? ` · cited by ${h.citations}` : ''}{h.arxiv ? ` · arXiv:${h.arxiv}` : ''}</div>
+                  <div class="sub">{h.note && <span class={'lit-tag' + (h.sources.includes('zotero') ? ' zotero' : '')}>{h.note}</span>}{authorsOf(h)}{h.year ? ` · ${h.year}` : ''}{h.venue ? ` · ${h.venue}` : ''}{h.citations != null ? ` · cited by ${h.citations}` : ''}{h.arxiv ? ` · arXiv:${h.arxiv}` : ''}</div>
                 </div>
                 <button class="small-btn" disabled={busyId === h.id || addedIds.has(h.id)} onClick={ev => { ev.stopPropagation(); void cite(h); }}>{addedIds.has(h.id) ? `✓ ${addedIds.get(h.id)}` : busyId === h.id ? 'Adding…' : 'Cite'}</button>
               </div>
             ))}
             {oerror && <div class="sub" style="color:#b00;padding:4px 6px" data-cite-error>⚠ {oerror}</div>}
             {!ohits.length && !osearching && oq.trim().length >= 3 && !oerror && <div class="sub" style="padding:4px 6px">Nothing found — try the Google Scholar link and paste the BibTeX below.</div>}
-            {oq.trim().length < 3 && <div class="sub" style="padding:4px 6px;color:#888">Type a title, author names, a DOI or an arXiv id. Picking a result adds its BibTeX to <code>cited.bib</code> in this project and selects it.{sources.length > 0 && !sources.includes('Google Scholar') && !sources.includes('Semantic Scholar') && <> Relevance is best with a Semantic Scholar or SerpApi key on the server (see README ▸ Secrets).</>}</div>}
+            {oq.trim().length < 3 && <div class="sub" style="padding:4px 6px;color:#888">Type a title or author names, a DOI, an arXiv id or a PMID — or paste a paper’s link: arXiv, OpenReview, bioRxiv, PubMed, the ACL Anthology, DBLP, a journal’s or a conference’s page. Picking a result adds its BibTeX to <code>cited.bib</code> in this project and selects it.{sources.length > 0 && !sources.includes('Google Scholar') && !sources.includes('Semantic Scholar') && <> Relevance is best with a Semantic Scholar or SerpApi key on the server (see README ▸ Secrets).</>}</div>}
           </div>
+          {zotero && !zotero.connected && <div class="lit-zotero"><ZoteroConnect compact status={zotero} onChange={setZotero} /></div>}
           <div class="row" style="justify-content:space-between">
             <span class="sub"><a href={scholarUrl} target="_blank" rel="noopener">Search Google Scholar ↗</a> — there: <i>Cite ▸ BibTeX</i>, then paste it here:</span>
           </div>

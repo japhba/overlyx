@@ -6,11 +6,13 @@
  *   AI           the AI features and models        (this browser, prefs.ts)
  *   Appearance   light / dark / follow the system  (this browser, theme.ts)
  *   Account      who is signed in, the account's own access token and sign-ins (Git.tsx, as in
- *                File ▸ Git repository), and the per-account server settings (userSettings.ts):
+ *                File ▸ Git repository), the Zotero connection (ZoteroConnect.tsx), and the
+ *                per-account server settings (userSettings.ts):
  *                fine-grained access for new sign-ins (the user's own switch); token re-copy —
  *                administrators switch it per account right here.
  */
 import { UiChoice } from './Tour';
+import { ZoteroConnect } from './ZoteroConnect';
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import { api, type AiStatus, type AiModelInfo, type User, type UserSettings, type AdminUser, type DeletionPreview, type AdminReport } from '../api';
@@ -251,6 +253,8 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
             {!user.guest && <>
               <h3>New documents</h3>
               <label class="pref"><input type="checkbox" data-setting="paragraph-skip" disabled={settings === null} checked={!!settings?.paragraphSkip} onChange={e => void toggleAccountSetting({ paragraphSkip: (e.target as HTMLInputElement).checked })} /><span>No paragraph indentation<span class="sub">Documents you create separate paragraphs by vertical space instead of indenting their first line, in the editor and in the PDF (Document ▸ Settings ▸ Paragraph separation, which each document can change). Documents that exist already keep their setting.</span></span></label>
+              <h3>Zotero</h3>
+              <div data-setting="zotero"><ZoteroConnect /></div>
             </>}
             {err && !user.isAdmin && <div class="err">{err}</div>}
             <h3>Token re-copy</h3>

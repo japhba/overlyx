@@ -2165,7 +2165,31 @@ blend.
   their [API form](https://www.semanticscholar.org/product/api#api-key-form); relevance close to
   Scholar's, BibTeX included) — the first available leads the ranking. Without keys the open indexes
   **OpenAlex** (title/abstract search, citation counts) and **DBLP** (computer science) are used, with
-  noticeably weaker relevance. DOIs / arXiv ids are looked up directly. One click
+  noticeably weaker relevance. DOIs / arXiv ids are looked up directly, and so is **any paper's
+  link**, the way Zotero's translators read them (`packages/server/src/citelinks.ts`): arXiv and its
+  mirrors (ar5iv, alphaXiv, Hugging Face papers; old-style ids too), OpenReview (the note's own
+  BibTeX), bioRxiv / medRxiv, PubMed / PMC / Europe PMC (NCBI E-utilities → the DOI), the ACL
+  Anthology, DBLP and Semantic Scholar records, PsyArXiv / SocArXiv / OSF, SSRN, Zenodo, HAL, ISBNs
+  (Open Library), Elsevier PIIs (Crossref), a DOI anywhere in a publisher's address (ACM, Springer,
+  Wiley, Nature, Science, PNAS, APS, IOP, Frontiers, PLOS, …), proceedings PDFs mapped to their pages
+  (PMLR, NeurIPS, CVF, JMLR). A preprint lists its **published version first** (the DOI the authors
+  gave arXiv, bioRxiv's record, DBLP, Semantic Scholar with a key, or a non-preprint OpenAlex work
+  with the same title and first author), the preprint second, each marked. Any other page is read
+  for its **embedded metadata** like Zotero's "Embedded Metadata" translator — Highwire
+  `citation_*` tags, Dublin Core, JSON-LD, Open Graph: a DOI it declares wins, then a BibTeX the page
+  shows inline or links to with the page's title, then DBLP / OpenAlex by title, else an entry
+  written from the tags (a web page becomes a `@misc` with `url` and `urldate`). Pasted pages are
+  fetched through `netguard.ts` (public hosts only, every redirect checked, 2 MB cap); a site that
+  answers servers with a bot check (DBLP, OpenReview, IEEE Xplore and HAL's pages from the production
+  box, October 2026) is reported as such, never taken for the paper. **Zotero**: Settings ▸ Account ▸
+  Zotero (or *Connect Zotero…* in the dialog) takes a Zotero Web API key with library read access
+  (zotero.org/settings/keys); the search then lists the matching items of the user's library and of
+  the groups the key reads first, marked, and cites them with Zotero's BibTeX (abstract, keywords and
+  file links dropped). The key is checked with `GET /keys/current`, kept sealed per account
+  (`zotero.ts`, `sealed.ts`), never sent back to the browser, and removed by *Disconnect* or account
+  deletion. Zotero's OAuth 1.0a flow would spare users copying a key, but needs the server
+  registered as a Zotero application (client key + secret, `/oauth/request`, `/oauth/authorize`,
+  `/oauth/access` handing back the key): not set up. One click
   fetches the BibTeX (DBLP's record, else doi.org content negotiation, else generated from the
   metadata), gives it a Google-Scholar-style key (`vaswani2017attention`, made unique), appends it
   to the project's **`cited.bib`** (created on demand), adds `cited` to the document's BibTeX inset
