@@ -185,7 +185,11 @@ async function req<T>(method: string, url: string, body?: unknown, raw?: BodyIni
 export const encId = (id: string) => encodeURIComponent(id);
 
 export interface GdocsLink { fileId: string; tabId: string | null; url: string; auto: boolean; lastSync: number | null; lastError: string | null; linkedBy: number; format: 'text' | 'docx'; warnings: string[] }
-export interface GdocsStatus { configured: boolean; picker: boolean; account: { email: string | null } | null; link: GdocsLink | null; canEdit: boolean; guest: boolean }
+export interface GdocsStatus {
+  configured: boolean; picker: boolean; account: { email: string | null } | null; link: GdocsLink | null; canEdit: boolean; guest: boolean;
+  /** an unlinked document of a folder whose other documents are a Google Doc's tabs: that Google Doc, and its tabs nothing syncs with */
+  folder?: { fileId: string; name: string; tabs: { id: string; title: string }[] } | null;
+}
 /** what Google's file picker needs (app/gpicker.ts); the e2e stub offers the simulated account's Google Docs */
 /** a synced clone of the project working right now (server syncPeers.ts) — `host` only for the viewer's own */
 export interface SyncClone { name: string; username: string; app: 'vscode' | 'cli' | 'other'; host: string | null; mine: boolean; since: number; lastSeen: number }
@@ -375,7 +379,8 @@ export const api = {
   gdocsStatus: (id: string) => req<GdocsStatus>('GET', `/api/gdocs/status?doc=${encId(id)}`),
   gdocsLink: (id: string, title: string) => req<{ link: GdocsLink }>('POST', `/api/docs/${encId(id)}/gdocs/link`, { title }),
   /** link the document to a Google Doc that exists (picked): its differences come in as tracked changes */
-  gdocsLinkExisting: (id: string, fileId: string, tabId: string | null) => req<{ link: GdocsLink }>('POST', `/api/docs/${encId(id)}/gdocs/link`, { fileId, tabId }),
+  /** `keep` 'ours': this document's text replaces the Google Doc's (tab's); 'merge': the Google Doc's differences come in as tracked changes */
+  gdocsLinkExisting: (id: string, fileId: string, tabId: string | null, keep: 'merge' | 'ours' = 'merge') => req<{ link: GdocsLink }>('POST', `/api/docs/${encId(id)}/gdocs/link`, { fileId, tabId, keep }),
   /** the account's Drive connection, without a document */
   gdocsAccount: () => req<GdocsStatus>('GET', '/api/gdocs/status'),
   gdocsPicker: () => req<GdocsPicker>('GET', '/api/gdocs/picker'),

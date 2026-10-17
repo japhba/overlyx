@@ -128,7 +128,10 @@ async function reconcile(docId: string, link: LinkRow, whole: DocsFile): Promise
   const dropped = droppedTabs(link.file_id, docId);
   const fresh = tabs.filter(t => !known.has(t.id) && !dropped.has(t.id));
   const group = fs.existsSync(manifestAbs) ? parseDocGroup(fs.readFileSync(manifestAbs, 'utf8')) : null;
-  if (!group || !group.members.some(m => m.file === path.posix.basename(rel))) {
+  // the folder's group is this Google Doc's when one of its documents syncs with a tab of it (the one
+  // syncing now may have just been linked to one: it joins)
+  const tabFiles = new Set(inFolder().values());
+  if (!group || !group.members.some(m => m.file === path.posix.basename(rel) || tabFiles.has(m.file))) {
     return { notes: [], warnings: fresh.length ? [`The Google Doc has ${fresh.length === 1 ? 'a tab' : `${fresh.length} tabs`} not synced here (${fresh.map(t => `“${t.title}”`).join(', ')}) — import it again to get every tab as a document group`] : [] };
   }
   const notes: string[] = [];

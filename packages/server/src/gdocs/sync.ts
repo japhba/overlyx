@@ -174,17 +174,48 @@ async function createLink(docId: string, userId: number, title: string): Promise
  * overwritten: the base is the document as it is on both sides, so the first sync brings what the
  * Google Doc holds differently as tracked changes by the Google side, to accept or reject here.
  */
-export async function linkExistingGoogleDoc(docId: string, userId: number, fileId: string, tabId: string | null): Promise<LinkRow> {
+/**
+ * Link the document to a Google Doc that exists (a tab of it: `tabId`, else its first). `keep`:
+ * - 'merge' (the default): what the Google Doc holds differently comes in as tracked changes;
+ * - 'ours': this document's text replaces the Google Doc's (tab's) — for a tab that only held its
+ *   outline, or that a document here was meant to be all along (a tab document deleted here, and
+ *   another document of the folder that is the real one).
+ * A tab another document already syncs with is refused; a tab remembered as dropped is not any more.
+ */
+export async function linkExistingGoogleDoc(docId: string, userId: number, fileId: string, tabId: string | null, keep: 'merge' | 'ours' = 'merge'): Promise<LinkRow> {
   const api = apiFor(userId);
   const [file, whole] = await Promise.all([api.getFile(fileId), api.getDocumentTabs(fileId)]);
   if (file.trashed) throw new Error('That Google Doc is in the trash');
   const tab = tabId ?? flatTabs(whole)[0]?.id ?? null;
-  if (!tab || !tabDocument(whole, tab)) throw new Error('That Google Doc has no such tab');
+  const tabDoc = tab ? tabDocument(whole, tab) : null;
+  if (!tab || !tabDoc) throw new Error('That Google Doc has no such tab');
+  const taken = linksOfFile(fileId).find(l => l.doc_id !== docId && (l.tab_id ?? flatTabs(whole)[0]?.id) === tab);
+  if (taken) throw new Error(`That tab already syncs with ${taken.doc_id.split('/').pop()} — unlink that document first`);
   const doc = await manager.open(docId);
   const ours = doc.toLyxDocument();
-  insertLink({ docId, fileId, userId, url: file.webViewLink ?? null, tabId: tab, baseText: doc.textOf(ours), baseGoogle: strip(project(ours).blocks), version: null });
+  // the base: what both sides "held at the last sync" — the Google Doc as it is now (nothing to bring in:
+  // ours goes over), or this document as it is (the Google Doc's differences come in)
+  const baseGoogle = keep === 'ours' ? strip(readGoogle(attachObjectSources(tabDoc, {})).blocks) : strip(project(ours).blocks);
+  insertLink({ docId, fileId, userId, url: file.webViewLink ?? null, tabId: tab, baseText: doc.textOf(ours), baseGoogle, version: null });
+  undropTab(fileId, docId, tab);
   await syncDoc(docId);
   return linkOf(docId)!;
+}
+
+/**
+ * The Google Doc the other documents of `docId`'s folder sync with as its tabs (a document group),
+ * and its tabs no document syncs with — what an unlinked document of the folder can be linked to.
+ */
+export async function folderGoogleDoc(docId: string, userId: number): Promise<{ fileId: string; name: string; tabs: { id: string; title: string }[] } | null> {
+  const folder = folderOf(docId);
+  const sibling = (db.prepare('SELECT * FROM gdocs_links WHERE substr(doc_id, 1, ?) = ? AND tab_id IS NOT NULL').all(folder.length + 1, folder + '/') as LinkRow[])
+    .find(l => l.doc_id !== docId && folderOf(l.doc_id) === folder);
+  if (!sibling) return null;
+  const api = apiFor(userId);
+  const [file, whole] = await Promise.all([api.getFile(sibling.file_id), api.getDocumentTabs(sibling.file_id)]);
+  if (file.trashed) return null;
+  const linked = new Set(linksOfFile(sibling.file_id).map(l => l.tab_id));
+  return { fileId: sibling.file_id, name: file.name ?? whole.title ?? '', tabs: flatTabs(whole).filter(t => !linked.has(t.id)).map(t => ({ id: t.id, title: t.title })) };
 }
 
 /** Stop syncing the document; a tab's document is remembered as dropped, so its tab does not come back as a new document. */

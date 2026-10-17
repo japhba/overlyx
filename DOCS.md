@@ -3136,7 +3136,17 @@ with tabs (above), which keeps them in step with the tabs. A member deleted or r
 explorer leaves the manifest or is renamed in it (`server/docgroups.ts`); a Google Docs tab whose
 document was deleted (or unlinked) here is remembered in `gdocs_dropped_tabs` (per folder) and not
 brought back — before, every sync re-created it as "Proposal 2.md", "Proposal 3.md" (17 Oct 2026). A
-renamed document keeps its link (`gdocs/sync.ts filesMoved`). When the open document is deleted the
+renamed document keeps its link (`gdocs/sync.ts filesMoved`). Such a tab can be given to another
+document of the folder: *File ▸ Google Docs* on an unlinked document of a group folder offers the
+group's Google Doc's tabs nothing syncs with (`folderGoogleDoc`; the one of its title first), and
+linking to an existing Google Doc asks whose text to keep (`linkExistingGoogleDoc` `keep`): 'ours'
+takes the Google Doc as it is now as the base, so the sync writes this document over the tab; 'merge'
+(as before) takes this document as the base, so the Google Doc's differences come in as tracked
+changes. A tab another document syncs with is refused; an explicit link un-drops the tab, and its
+document joins the group (`reconcile` takes a folder as the Google Doc's group when any member syncs
+with one of its tabs). The user's case (17 Oct 2026): the import's Proposal.md vanished from disk 40 s
+after the import and came back unlinked; the tab lived on in "Proposal 2/3.md", whose deletion
+dropped it — nothing synced Proposal.md. When the open document is deleted the
 tab goes on to another document of its folder (`FileBrowser siblingDocument`), not to the start
 screen; deleted from the explorer there is no error toast.
 

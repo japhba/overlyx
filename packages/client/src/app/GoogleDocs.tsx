@@ -2,7 +2,9 @@
  * File ▸ Google Docs…: the document's link to a Google Doc (server gdocs/). Connect the account's
  * Google Drive once, create a Google Doc from the document — or link it to one that exists, picked
  * in Google's picker (app/gpicker.ts; a Google Doc with tabs: one of its tabs), whose differences
- * then come in as tracked changes — and they stay in step both ways: edits made in Google Docs come
+ * then come in as tracked changes, or which this document's text replaces (`keep`) — and they stay in
+ * step both ways. A document of a folder whose other documents are a Google Doc's tabs is offered
+ * that Google Doc's tabs nothing syncs with (the one of its title first). Edits made in Google Docs come
  * back as tracked changes by whoever made them, comment threads, replies and resolving go both ways,
  * on their own every minute, or with Sync now.
  */
@@ -30,20 +32,33 @@ export function GoogleDocsDialog({ docId, onClose, notify }: { docId: string; on
   };
   const connect = () => { location.href = '/api/gdocs/connect?next=' + encodeURIComponent(location.hash.replace(/\?.*$/, '') + '?gdocs=connected'); };
   const link = st?.link;
-  // a picked Google Doc with tabs: which tab this document is to be
+  // a picked Google Doc: which of its tabs this document is to be, and whose text the two keep
   const [picked, setPicked] = useState<{ id: string; name: string; tabs: GdocsTab[]; tab: string } | null>(null);
-  const linkExisting = (fileId: string, name: string, tabId: string | null) => act('existing', async () => {
-    await api.gdocsLinkExisting(docId, fileId, tabId);
+  const [keep, setKeep] = useState<'merge' | 'ours'>('merge');
+  const linkExisting = (fileId: string, name: string, tabId: string | null, how: 'merge' | 'ours') => act('existing', async () => {
+    await api.gdocsLinkExisting(docId, fileId, tabId, how);
     setPicked(null);
-    notify(`Linked to “${name}”: what it holds differently comes in as tracked changes`);
+    notify(how === 'ours' ? `Linked to “${name}”: it now holds this document's text` : `Linked to “${name}”: what it holds differently comes in as tracked changes`);
   });
   const pickExisting = () => act('pick', async () => {
     const id = await pickGoogleDoc('Link this document to a Google Doc');
     if (!id) return;
     const f = await api.gdocsFile(id);
-    if (f.tabs.length > 1) setPicked({ ...f, tab: f.tabs[0].id });
-    else await linkExisting(id, f.name, null);
+    setKeep('merge');
+    setPicked({ ...f, tab: f.tabs[0]?.id ?? '' });
   });
+  // the folder's Google Doc (the other documents are its tabs): the tab of this document's title first
+  const folder = st?.folder?.tabs.length ? st.folder : null;
+  const [folderTab, setFolderTab] = useState<string | null>(null);
+  const ownTitle = (docId.split('/').pop() ?? '').replace(/\.[^.]+$/, '').toLowerCase();
+  const folderPick = folderTab ?? folder?.tabs.find(t => t.title.trim().toLowerCase() === ownTitle)?.id ?? folder?.tabs[0]?.id ?? null;
+  const keepChoice = (value: 'merge' | 'ours', set: (v: 'merge' | 'ours') => void) => (
+    <div class="gdocs-keep" role="radiogroup" aria-label="Which text to keep">
+      <label class="row"><input type="radio" name="gdocs-keep" checked={value === 'ours'} data-gdocs-keep="ours" onChange={() => set('ours')} /> This document's text — it replaces the Google Doc's</label>
+      <label class="row"><input type="radio" name="gdocs-keep" checked={value === 'merge'} data-gdocs-keep="merge" onChange={() => set('merge')} /> Both — what the Google Doc holds differently comes in here as tracked changes</label>
+    </div>
+  );
+  const [folderKeep, setFolderKeep] = useState<'merge' | 'ours'>('ours');
   return (
     <Dialog title="Google Docs" onClose={onClose}>
       <div class="gdocs-dialog" data-gdocs>
@@ -56,24 +71,39 @@ export function GoogleDocsDialog({ docId, onClose, notify }: { docId: string; on
             <p class="hint">OverLyX only gets access to the Google Docs it creates and the ones you pick (Drive's “files this app uses” permission).</p>
           </>
         )}
+        {st && st.configured && !link && st.account && folder && folderPick && st.canEdit && (
+          <div class="gdocs-folder" data-gdocs-folder>
+            <p>The other documents of this folder are tabs of the Google Doc <b>{folder.name}</b>. Sync this document as its tab</p>
+            <select data-gdocs-folder-tab value={folderPick} onChange={e => setFolderTab((e.target as HTMLSelectElement).value)}>
+              {folder.tabs.map(t => <option key={t.id} value={t.id}>{t.title}</option>)}
+            </select>
+            {keepChoice(folderKeep, setFolderKeep)}
+            <div class="buttons-row">
+              <button class="primary" data-gdocs-folder-link disabled={!!busy} onClick={() => linkExisting(folder.fileId, folder.name, folderPick, folderKeep)}>{busy === 'existing' ? 'Linking…' : 'Sync with this tab'}</button>
+            </div>
+          </div>
+        )}
         {st && st.configured && !link && st.account && (
           <>
-            <p>Create a Google Doc with this document's images and equations in the Google Drive of <b>{st.account.email ?? 'your account'}</b>. Text edits and comments then sync both ways.</p>
+            <p>{folder ? 'Or create' : 'Create'} a Google Doc with this document's images and equations in the Google Drive of <b>{st.account.email ?? 'your account'}</b>. Text edits and comments then sync both ways.</p>
             <label class="row">Title <input value={title} onInput={e => setTitle((e.target as HTMLInputElement).value)} /></label>
             {st.canEdit
               ? <button class="primary" data-gdocs-create disabled={!!busy} onClick={() => act('create', async () => { await api.gdocsLink(docId, title); notify('Linked to a new Google Doc'); })}>{busy === 'create' ? 'Creating…' : 'Create Google Doc'}</button>
               : <p class="hint">You can only view this project.</p>}
             {st.canEdit && st.picker && !picked && (
-              <p>Or <button data-gdocs-existing disabled={!!busy} onClick={pickExisting}>{busy === 'pick' ? 'Opening Google’s picker…' : 'Link an existing Google Doc…'}</button> — nothing is overwritten: what it holds differently comes in here as tracked changes.</p>
+              <p>Or <button data-gdocs-existing disabled={!!busy} onClick={pickExisting}>{busy === 'pick' ? 'Opening Google’s picker…' : 'Link an existing Google Doc…'}</button> — you choose whether this document's text replaces its text, or what it holds differently comes in here as tracked changes.</p>
             )}
             {picked && (
               <>
-                <p><b>{picked.name}</b> has {picked.tabs.length} tabs. This document is to be the tab</p>
-                <select data-gdocs-tab value={picked.tab} onChange={e => setPicked({ ...picked, tab: (e.target as HTMLSelectElement).value })}>
-                  {picked.tabs.map(t => <option key={t.id} value={t.id}>{'\u2003'.repeat(t.level)}{t.title}</option>)}
-                </select>
+                {picked.tabs.length > 1 ? <>
+                  <p><b>{picked.name}</b> has {picked.tabs.length} tabs. This document is to be the tab</p>
+                  <select data-gdocs-tab value={picked.tab} onChange={e => setPicked({ ...picked, tab: (e.target as HTMLSelectElement).value })}>
+                    {picked.tabs.map(t => <option key={t.id} value={t.id}>{'\u2003'.repeat(t.level)}{t.title}</option>)}
+                  </select>
+                </> : <p>Link this document to <b>{picked.name}</b></p>}
+                {keepChoice(keep, setKeep)}
                 <div class="buttons-row">
-                  <button class="primary" disabled={!!busy} onClick={() => linkExisting(picked.id, picked.name, picked.tab)}>{busy === 'existing' ? 'Linking…' : 'Link'}</button>
+                  <button class="primary" data-gdocs-link-picked disabled={!!busy} onClick={() => linkExisting(picked.id, picked.name, picked.tabs.length > 1 ? picked.tab : null, keep)}>{busy === 'existing' ? 'Linking…' : 'Link'}</button>
                   <button disabled={!!busy} onClick={() => setPicked(null)}>Cancel</button>
                 </div>
                 <p class="hint">To have every tab as a document, import the Google Doc instead (file list ▸ right click ▸ Import from Google Docs…): it becomes a document group.</p>

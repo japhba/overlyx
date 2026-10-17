@@ -215,6 +215,36 @@ describe('importing and syncing a Google Doc with tabs', async () => {
     docs[1] = 'u/p/Grant proposal/Specific aims.md';
   });
 
+  it('another document of the folder can sync with that dropped tab, its text replacing the tab\'s; one tab, one document', async () => {
+    // the real Budget was written here, under another name; its tab in Google Docs is the old one
+    writeFileSync(join(P, 'Grant proposal', 'Budget plan.md'), '# Budget\n\nTwo GPUs for a year, and a cluster.\n');
+    const folder = await sync.folderGoogleDoc('u/p/Grant proposal/Budget plan.md', owner.id);
+    expect(folder!.fileId).toBe(fileId);
+    const budget = folder!.tabs.find(t => t.title === 'Budget')!;
+    expect(folder!.tabs.map(t => t.title)).toEqual(['Budget']);
+    await sync.linkExistingGoogleDoc('u/p/Grant proposal/Budget plan.md', owner.id, fileId, budget.id, 'ours');
+    expect(md('Grant proposal/Budget plan.md')).toBe('# Budget\n\nTwo GPUs for a year, and a cluster.\n');
+    expect(g.tabDoc(fileId, budget.id).text()).toContain('Two GPUs for a year, and a cluster.');
+    // and it is one of the group's documents again, where its tab is
+    expect(parseDocGroup(readFileSync(join(P, 'Grant proposal', GROUP_MANIFEST), 'utf8'))!.members.map(m => m.file)).toEqual(['Summary.md', 'Specific aims.md', 'Aim 1 decoding.md', 'Budget plan.md']);
+    // offered no more, not dropped any more: a sync makes no "Budget 2.md"
+    expect((await sync.folderGoogleDoc('u/p/Grant proposal/Other.md', owner.id))!.tabs).toEqual([]);
+    g.doc(fileId).revision++;
+    await sync.syncDoc(docs[0]);
+    expect(existsSync(join(P, 'Grant proposal', 'Budget 2.md'))).toBe(false);
+    // edits here keep going to the tab
+    const doc = await manager.open('u/p/Grant proposal/Budget plan.md');
+    const lyx = doc.toLyxDocument();
+    lyx.body[1].items = [{ kind: 'text', text: 'Three GPUs for a year, and a cluster.', font: {} }];
+    doc.loadFromLyx(lyx, 'test');
+    await doc.saveToFile();
+    await sync.syncDoc('u/p/Grant proposal/Budget plan.md');
+    expect(g.tabDoc(fileId, budget.id).text()).toContain('Three GPUs');
+    // a second document cannot take the same tab
+    writeFileSync(join(P, 'Grant proposal', 'Other.md'), 'Other.\n');
+    await expect(sync.linkExistingGoogleDoc('u/p/Grant proposal/Other.md', owner.id, fileId, budget.id, 'ours')).rejects.toThrow(/already syncs/);
+  });
+
   it('a Google Doc with one tab is imported as a plain document', async () => {
     const f = await g.createDocument('Notes');
     g.tabDoc(f.id).insertText(1, 'Just notes.');

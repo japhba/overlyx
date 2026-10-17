@@ -22,7 +22,7 @@ import { canonicalDocId, canonicalProject } from '../namespaces.ts';
 import { config } from '../config.ts';
 import { assertWritableRelPath } from '../projects.ts';
 import { driveAccount, driveConfigured, disconnectDrive, startConnect, accessToken, pickerConfigured, pickerAppId, GoogleApiError, GOOGLE_STUB } from './google.ts';
-import { linkOf, linkNewGoogleDoc, linkExistingGoogleDoc, publicLink, setAuto, syncDoc, unlink, setGoogleApiFactory, googleApiFor } from './sync.ts';
+import { linkOf, linkNewGoogleDoc, linkExistingGoogleDoc, folderGoogleDoc, publicLink, setAuto, syncDoc, unlink, setGoogleApiFactory, googleApiFor } from './sync.ts';
 import { importGoogleDoc } from './importing.ts';
 import { flatTabs } from './model.ts';
 import { FakeGoogle } from './fake.ts';
@@ -42,11 +42,16 @@ function failure(res: express.Response, e: unknown): void {
 export function gdocsRoutes(): express.Router {
   const r = express.Router();
 
-  r.get('/gdocs/status', (req, res) => {
+  r.get('/gdocs/status', async (req, res) => {
     const doc = typeof req.query.doc === 'string' ? canonicalDocId(req.query.doc) : '';
     const role = doc ? roleFor(req.user!, projectOfDoc(doc)) : null;
     const link = doc && atLeast(role, 'view') ? linkOf(doc) : null;
-    res.json({ configured: driveConfigured(), picker: pickerConfigured(), account: driveAccount(req.user!.id), link: publicLink(link), canEdit: !!doc && atLeast(role, 'edit'), guest: !!req.user!.guest });
+    const account = driveAccount(req.user!.id);
+    const canEdit = !!doc && atLeast(role, 'edit');
+    // an unlinked document of a folder whose other documents are a Google Doc's tabs: those tabs nothing syncs with
+    let folder = null;
+    if (!link && canEdit && account) { try { folder = await folderGoogleDoc(doc, req.user!.id); } catch { /* Google did not answer: only the picker then */ } }
+    res.json({ configured: driveConfigured(), picker: pickerConfigured(), account, link: publicLink(link), canEdit, guest: !!req.user!.guest, folder });
   });
 
   // Google's picker in the browser, with the account's own Drive authorisation (a short-lived access token):
@@ -101,7 +106,7 @@ export function gdocsRoutes(): express.Router {
       const existing = linkOf(id);
       if (existing) { res.json({ link: publicLink(existing) }); return; }
       if (req.body?.fileId) {
-        const link = await linkExistingGoogleDoc(id, req.user!.id, String(req.body.fileId), req.body.tabId ? String(req.body.tabId) : null);
+        const link = await linkExistingGoogleDoc(id, req.user!.id, String(req.body.fileId), req.body.tabId ? String(req.body.tabId) : null, req.body.keep === 'ours' ? 'ours' : 'merge');
         res.json({ link: publicLink(link) });
         return;
       }
