@@ -192,6 +192,29 @@ describe('importing and syncing a Google Doc with tabs', async () => {
     expect(existsSync(join(P, 'Grant proposal', 'Aims.md'))).toBe(true);
   });
 
+  it('a tab\'s document deleted here stays deleted: its tab is not synced back in as "Budget 2.md"; a renamed one keeps its link', async () => {
+    const { groupFileMoved } = await import('../packages/server/src/docgroups.ts');
+    // deleted in the explorer (index.ts fileops): the file goes, its link and its group entry with it
+    rmSync(join(P, 'Grant proposal', 'Budget.md'));
+    sync.filesMoved('u/p', 'Grant proposal/Budget.md', null); groupFileMoved('u/p', 'Grant proposal/Budget.md', null);
+    expect(sync.linkOf('u/p/Grant proposal/Budget.md')).toBeNull();
+    g.doc(fileId).revision++;
+    const r = await sync.syncDoc(docs[0]);
+    expect(r.notes).toEqual([]);
+    expect(existsSync(join(P, 'Grant proposal', 'Budget 2.md'))).toBe(false);
+    expect(parseDocGroup(readFileSync(join(P, 'Grant proposal', GROUP_MANIFEST), 'utf8'))!.members.map(m => m.file)).toEqual(['Summary.md', 'Aims.md', 'Aim 1 decoding.md']);
+    // renamed in the explorer: still synced, still in the group, under its new name
+    const { renameSync } = await import('node:fs');
+    renameSync(join(P, 'Grant proposal', 'Aims.md'), join(P, 'Grant proposal', 'Specific aims.md'));
+    sync.filesMoved('u/p', 'Grant proposal/Aims.md', 'Grant proposal/Specific aims.md'); groupFileMoved('u/p', 'Grant proposal/Aims.md', 'Grant proposal/Specific aims.md');
+    expect(sync.linkOf('u/p/Grant proposal/Specific aims.md')!.tab_id).toBe(aims);
+    g.doc(fileId).revision++;
+    expect((await sync.syncDoc(docs[0])).notes).toEqual([]);
+    expect(existsSync(join(P, 'Grant proposal', 'Aims 2.md'))).toBe(false);
+    expect(parseDocGroup(readFileSync(join(P, 'Grant proposal', GROUP_MANIFEST), 'utf8'))!.members.map(m => m.file)).toEqual(['Summary.md', 'Specific aims.md', 'Aim 1 decoding.md']);
+    docs[1] = 'u/p/Grant proposal/Specific aims.md';
+  });
+
   it('a Google Doc with one tab is imported as a plain document', async () => {
     const f = await g.createDocument('Notes');
     g.tabDoc(f.id).insertText(1, 'Just notes.');

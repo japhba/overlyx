@@ -42,7 +42,8 @@ import { db } from './db.ts';
 import { accessibleProjects, adoptProjects, roleFor, atLeast, isRole, registerProject, projectRow, shareInfo, addMember, setMemberRole, removeMember, memberRow, linkMemberIds, setLink, resetLink, linkProject, acceptLink, newOwner, setOwner, trashProject, ensureWelcomeProject, ensureStarterProjects, type Role } from './access.ts';
 import { canonicalProject, canonicalDocId } from './namespaces.ts';
 import { gdocsRoutes } from './gdocs/routes.ts';
-import { startAutoSync } from './gdocs/sync.ts';
+import { startAutoSync, filesMoved } from './gdocs/sync.ts';
+import { groupFileMoved } from './docgroups.ts';
 import { ownProjectKey } from './projectCreate.ts';
 import { sandboxAvailable } from './sandbox.ts';
 import { grantAdminAccess, projectsForAdmin, activityOf, logAccess, pruneAccessLog, pruneGuests, projectPeople } from './access.ts';
@@ -779,13 +780,16 @@ api.post('/projects/:project/fileops', needProject('edit'), (req, res) => {
       const abs = guard(rel);
       if (!fs.existsSync(abs)) throw new Error('not found');
       moveOut(abs, rel);
+      // a Google Docs tab's document stays deleted (its tab is not synced back in); its group forgets it
+      filesMoved(project, rel, null); groupFileMoved(project, rel, null);
     } else if (op === 'rename' || op === 'copy') {
-      const from = guard(String(req.body?.from ?? ''));
-      const to = guard(String(req.body?.to ?? ''));
+      const fromRel = String(req.body?.from ?? ''), toRel = String(req.body?.to ?? '');
+      const from = guard(fromRel);
+      const to = guard(toRel);
       if (!fs.existsSync(from)) throw new Error('not found');
       if (fs.existsSync(to)) { res.status(409).json({ error: 'a file with that name exists' }); return; }
       fs.mkdirSync(path.dirname(to), { recursive: true });
-      if (op === 'rename') fs.renameSync(from, to);
+      if (op === 'rename') { fs.renameSync(from, to); filesMoved(project, fromRel, toRel); groupFileMoved(project, fromRel, toRel); }
       else fs.cpSync(from, to, { recursive: true });
     } else throw new Error('unknown operation');
     touchProject(req.params.project, req.user!.id);

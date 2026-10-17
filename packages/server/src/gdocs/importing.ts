@@ -9,7 +9,9 @@
  * reconcileGroup keeps a group in step with the Google Doc's tabs afterwards (after each sync of
  * one of its documents): a tab made there becomes a document of the group, and the group's order,
  * titles and nesting follow the tabs. A file keeps its name when its tab is renamed (links and
- * paths to it stay); documents of the folder that are no tab's stay in the group after the tabs.
+ * paths to it stay); documents of the folder that are no tab's stay in the group after the tabs. A
+ * tab whose document was deleted here stays out (sync.ts gdocs_dropped_tabs): deleting one used to
+ * bring it back on the next sync as "Proposal 2.md", then "Proposal 3.md".
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -19,7 +21,7 @@ import { resolveProjectPath } from '../projectfiles.ts';
 import { touchProject } from '../git.ts';
 import { manager } from '../docs.ts';
 import { flatTabs, tabDocument, readGoogle, strip, toParagraphs, project, type DocsFile, type FlatTab } from './model.ts';
-import { googleApiFor, insertLink, linksOfFile, syncDoc, type LinkRow } from './sync.ts';
+import { googleApiFor, insertLink, linksOfFile, syncDoc, droppedTabs, undropTab, type LinkRow } from './sync.ts';
 
 /** a file name from a title: no path separators or characters file systems and URLs trip over, short */
 export function fileStem(title: string): string {
@@ -50,6 +52,7 @@ async function addTabDocument(projectKey: string, rel: string, whole: DocsFile, 
   const docId = `${projectKey}/${rel}`;
   if (!src) return docId;
   const doc = await manager.open(docId);
+  undropTab(src.fileId, docId, tab.id);
   insertLink({ docId, fileId: src.fileId, userId: src.userId, url: src.url, tabId: tab.id, baseText: doc.textOf(doc.toLyxDocument()), baseGoogle: strip(readGoogle(tabDocument(whole, tab.id)!).blocks), version: src.version });
   return docId;
 }
@@ -121,7 +124,9 @@ async function reconcile(docId: string, link: LinkRow, whole: DocsFile): Promise
   // the documents of this Google Doc's tabs in this folder (read again: another sync may have added some)
   const inFolder = () => new Map(linksOfFile(link.file_id).filter(l => l.tab_id && splitDocId(l.doc_id).project === key && path.posix.dirname(splitDocId(l.doc_id).path) === (folderRel || '.')).map(l => [l.tab_id!, path.posix.basename(splitDocId(l.doc_id).path)]));
   const known = new Set(linksOfFile(link.file_id).filter(l => splitDocId(l.doc_id).project === key).map(l => l.tab_id));
-  const fresh = tabs.filter(t => !known.has(t.id));
+  // (a tab whose document was deleted or unlinked here stays out)
+  const dropped = droppedTabs(link.file_id, docId);
+  const fresh = tabs.filter(t => !known.has(t.id) && !dropped.has(t.id));
   const group = fs.existsSync(manifestAbs) ? parseDocGroup(fs.readFileSync(manifestAbs, 'utf8')) : null;
   if (!group || !group.members.some(m => m.file === path.posix.basename(rel))) {
     return { notes: [], warnings: fresh.length ? [`The Google Doc has ${fresh.length === 1 ? 'a tab' : `${fresh.length} tabs`} not synced here (${fresh.map(t => `“${t.title}”`).join(', ')}) — import it again to get every tab as a document group`] : [] };
@@ -137,7 +142,8 @@ async function reconcile(docId: string, link: LinkRow, whole: DocsFile): Promise
   }
   const files = inFolder();
   const ordered: DocGroupMember[] = tabs.filter(t => files.has(t.id)).map(t => ({ file: files.get(t.id)!, title: t.title, ...(t.level ? { level: t.level } : {}) }));
-  const next = { ...group, members: [...ordered, ...group.members.filter(m => !ordered.some(o => o.file === m.file))] };
+  // documents of the folder that are no tab's stay after the tabs' — those still there
+  const next = { ...group, members: [...ordered, ...group.members.filter(m => !ordered.some(o => o.file === m.file) && fs.existsSync(path.join(folderAbs, m.file)))] };
   if (writeDocGroup(next) !== writeDocGroup(group)) fs.writeFileSync(manifestAbs, writeDocGroup(next), 'utf8');
   if (fresh.length || writeDocGroup(next) !== writeDocGroup(group)) touchProject(key, link.user_id);
   return { warnings: [], notes };

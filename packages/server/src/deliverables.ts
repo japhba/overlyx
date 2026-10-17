@@ -113,7 +113,9 @@ export function mountDeliverables(app: Express): void {
   // the runtime and its MathJax: public code, fetched by opaque-origin frames
   app.use('/_ol', (req, res, next) => {
     res.setHeader('Access-Control-Allow-Origin', '*'); res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-    if (req.path === '/offline-frame.html') res.setHeader('Content-Security-Policy', OFFLINE_FRAME_CSP);
+    // the two bootstrap pages run an inline script of their own: an opaque sandbox instead of the app's CSP
+    // (the SVG editor's canvas, svg-frame.html, never opened under script-src 'self')
+    if (req.path === '/offline-frame.html' || req.path === '/svg-frame.html') res.setHeader('Content-Security-Policy', OFFLINE_FRAME_CSP);
     next();
   });
 

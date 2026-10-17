@@ -65,6 +65,29 @@ for (const [name, type] of [['format', "TEXT NOT NULL DEFAULT 'text'"], ['object
   if (!linkColumns.has(name)) db.exec(`ALTER TABLE gdocs_links ADD COLUMN ${name} ${type}`);
 }
 
+// Tabs whose document was deleted here (or unlinked): reconcileGroup does not bring them back as a new
+// document ("Proposal 2.md", "Proposal 3.md" … after each delete). Per folder: importing the Google Doc
+// again elsewhere makes every tab a document again.
+db.exec(`
+CREATE TABLE IF NOT EXISTS gdocs_dropped_tabs (
+  file_id TEXT NOT NULL,
+  folder TEXT NOT NULL,
+  tab_id TEXT NOT NULL,
+  dropped_at INTEGER NOT NULL,
+  PRIMARY KEY (file_id, folder, tab_id)
+);
+`);
+/** a document's folder as the dropped tabs key it: <project>/<dir> */
+const folderOf = (docId: string) => { const { project: p, path: rel } = splitDocId(docId); const dir = rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : ''; return p + '/' + dir; };
+/** the tabs of `fileId` dropped in the folder of `docId` */
+export function droppedTabs(fileId: string, docId: string): Set<string> {
+  return new Set((db.prepare('SELECT tab_id FROM gdocs_dropped_tabs WHERE file_id = ? AND folder = ?').all(fileId, folderOf(docId)) as { tab_id: string }[]).map(r => r.tab_id));
+}
+/** a tab made a document of the folder of `docId` again (an import) */
+export function undropTab(fileId: string, docId: string, tabId: string): void {
+  db.prepare('DELETE FROM gdocs_dropped_tabs WHERE file_id = ? AND folder = ? AND tab_id = ?').run(fileId, folderOf(docId), tabId);
+}
+
 export interface LinkRow {
   doc_id: string; file_id: string; user_id: number; url: string | null;
   base_text: string | null; base_google: string | null; comments: string | null;
@@ -164,7 +187,26 @@ export async function linkExistingGoogleDoc(docId: string, userId: number, fileI
   return linkOf(docId)!;
 }
 
-export function unlink(docId: string): void { db.prepare('DELETE FROM gdocs_links WHERE doc_id = ?').run(docId); }
+/** Stop syncing the document; a tab's document is remembered as dropped, so its tab does not come back as a new document. */
+export function unlink(docId: string): void {
+  const l = linkOf(docId);
+  if (l?.tab_id) db.prepare('INSERT OR IGNORE INTO gdocs_dropped_tabs (file_id, folder, tab_id, dropped_at) VALUES (?, ?, ?, ?)').run(l.file_id, folderOf(docId), l.tab_id, Date.now());
+  db.prepare('DELETE FROM gdocs_links WHERE doc_id = ?').run(docId);
+}
+
+/**
+ * Files of a project deleted or renamed in the explorer (`to` null: deleted; a folder: everything in
+ * it): a deleted document is not synced any more (and its tab not brought back), a renamed one keeps
+ * its link under its new name.
+ */
+export function filesMoved(projectKey: string, from: string, to: string | null): void {
+  const old = `${projectKey}/${from}`;
+  const rows = db.prepare('SELECT doc_id FROM gdocs_links WHERE doc_id = ? OR substr(doc_id, 1, ?) = ?').all(old, old.length + 1, old + '/') as { doc_id: string }[];
+  for (const { doc_id } of rows) {
+    if (to === null) unlink(doc_id);
+    else db.prepare('UPDATE gdocs_links SET doc_id = ? WHERE doc_id = ?').run(`${projectKey}/${to}` + doc_id.slice(old.length), doc_id);
+  }
+}
 export function setAuto(docId: string, auto: boolean): void { db.prepare('UPDATE gdocs_links SET auto = ? WHERE doc_id = ?').run(auto ? 1 : 0, docId); }
 
 /* ------------------------------------------------------------------ the sync */
