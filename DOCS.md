@@ -1443,6 +1443,19 @@ blend.
   floats it away from the item anyway; markdown has none).
 * **Ruler**: a Google-Docs-style ruler above the page (*View ▸ Ruler*) with draggable margin
   handles sets the text width (also *View ▸ Text width*, `Ctrl+Alt+±`); double-click resets it.
+  The handles reach out to the document pane's edges: dragged there the column is the full width
+  (the page's side padding gives way down to 12px, `--page-pad-x` / Modern's page padding), and on
+  the way they snap to the View menu's widths (dashed rungs while dragging). Its **second track**,
+  the thin bar under it (`editor/widecontent.ts`, 17 Oct 2026), is the width display formulas and
+  tables alone on their line may take — centred on the text column, the spill zone tinted either
+  side: a solo table wider than it is drawn smaller (`plugins/widetables.ts`), a long one-line
+  formula breaks at it and a wider one spills no further than it (`nodeviews/math.ts` breakWidth /
+  relayout). Its ends snap to the text column (no spill: `WIDE_TEXT`) and to the full pane (the
+  default, `WIDE_FULL`: as far as the pane reaches, the notes pane left out, 16px either side — what
+  tables did before; long one-line formulas, which used to break at the text column, now break at
+  this width too); also *View ▸ Formula & table width*; double-click resets it. A view setting per
+  user (`ol.wideWidth`, like `ol.textWidth`): the PDF does not change — the text ruler is no
+  document setting either (LaTeX's text width is the class's / geometry's).
   In margin mode it shows the split as well: the text column centred in the text part, and over
   the notes pane its sash and the notes' text size.
 * **LyX math editor**: formulas are edited with our own port of LyX's mathed (`packages/core/src/math`:

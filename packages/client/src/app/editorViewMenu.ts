@@ -6,6 +6,8 @@ import { editorContext } from '../editor/context';
 import * as C from '../editor/commands';
 import { foldAllSections, unfoldAllSections, toggleSectionAtCursor, toggleLevelAtCursor, toggleItemAtCursor, foldAllItems, unfoldAllItems } from '../editor/plugins/fold';
 import { isPresenting, togglePresentation, PRESENTATION_KEY } from './presentation';
+import { TEXT_WIDTH_RUNGS } from './Ruler';
+import { wideWidth, setWideWidth, WIDE_FULL, WIDE_TEXT } from '../editor/widecontent';
 
 export interface ViewMenuContext {
   hostItems: MenuEntry[]; themeItems: MenuEntry[]; hostToolbars: MenuEntry[];
@@ -64,10 +66,18 @@ export function editorViewMenu({ hostItems, themeItems, hostToolbars, combined, 
         { label: 'Math panels (with the math toolbar)', checked: tbMode('mathpanels') !== 'off', action: () => setToolbar('mathpanels', tbMode('mathpanels') === 'off' ? 'on' : 'off') },
       ] },
       { label: 'Text width ▸', sub: [
-        ...[['Narrow', 560], ['Normal', 720], ['Wide', 880], ['Extra wide', 1080], ['Full width', 0]].map(([l, w]) => ({ label: String(l), checked: textWidth === w, action: () => setTextWidth(w as number) })),
+        ...[...TEXT_WIDTH_RUNGS, ['Full width', 0] as [string, number]].map(([l, w]) => ({ label: l, checked: textWidth === w, action: () => setTextWidth(w) })),
         { sep: true },
         { label: 'Wider', shortcut: 'Ctrl+Alt++', action: () => stepTextWidth(1) },
         { label: 'Narrower', shortcut: 'Ctrl+Alt+-', action: () => stepTextWidth(-1) },
+      ] },
+      // how far display formulas and tables may reach into the margins (the ruler's second track: editor/widecontent.ts)
+      { label: 'Formula & table width ▸', sub: [
+        { label: 'Full width (into the margins)', checked: wideWidth() === WIDE_FULL, action: () => setWideWidth(WIDE_FULL) },
+        { label: 'Same as the text', checked: wideWidth() === WIDE_TEXT, action: () => setWideWidth(WIDE_TEXT) },
+        ...(wideWidth() > 0 ? [{ label: `As set on the ruler (${(wideWidth() * 2.54 / 96).toFixed(1)} cm)`, checked: true, action: () => undefined }] : []),
+        { sep: true },
+        { label: 'Any width: drag the ends of the ruler’s second track', disabled: true },
       ] },
     ] };
 }

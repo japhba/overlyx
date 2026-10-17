@@ -3,8 +3,9 @@
  * typed as `$\begin{matrix}…\end{matrix}$`), alone in its paragraph. They are centred on the text
  * column, as `\centering` prints them. One wider than the column spills out into both margins by
  * the same amount, centred on the canvas, as far as the document pane reaches (the notes pane
- * left out); one wider than that is drawn smaller to fit it (`--ol-fit`, at least 35 %), so a big
- * table is seen whole instead of running off the right edge. That is the rule for wide display
+ * left out) — or as far as the ruler's second track allows (editor/widecontent.ts); one wider than
+ * that is drawn smaller to fit it (`--ol-fit`, at least 35 %), so a big table is seen whole instead
+ * of running off the right edge. That is the rule for wide display
  * formulas too (nodeviews/math.ts relayout), but for the shrinking.
  *
  * The paragraph gets the class `ol-solo-table` and, when its table spills, `--ol-spill: <px>` — when
@@ -15,6 +16,7 @@
  */
 import { Plugin, PluginKey, type EditorState, type Transaction } from 'prosemirror-state';
 import { documentViewScale } from '../viewscale';
+import { wideRoom, onWideWidth } from '../widecontent';
 import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
 
@@ -142,9 +144,11 @@ export function wideTablesPlugin(): Plugin<DecorationSet> {
       };
       watch();
       if (!ro) schedule();
+      // the ruler's second track moved: the room changed, nothing resized
+      const offWide = onWideWidth(schedule);
       return {
         update(v, prevState) { if (wideTablesKey.getState(v.state) !== wideTablesKey.getState(prevState)) watch(); },
-        destroy() { cancelAnimationFrame(raf); ro?.disconnect(); },
+        destroy() { cancelAnimationFrame(raf); ro?.disconnect(); offWide(); },
       };
     },
   });
@@ -160,9 +164,10 @@ function soloElement(view: EditorView, pos: number): HTMLElement | null {
 }
 
 /**
- * How each solo table is set: drawn smaller when it is wider than the document pane (the notes pane
- * left out, 16px either side), then spilled into the left margin by half of what it is wider than its
- * paragraph, but never past the pane's left edge (6px short of it). Dispatched only when something changed.
+ * How each solo table is set: drawn smaller when it is wider than the room for wide content (the
+ * ruler's second track — at most the document pane, the notes pane left out, 16px either side:
+ * widecontent.ts), then spilled into the left margin by half of what it is wider than its paragraph,
+ * but never past the pane's left edge (6px short of it). Dispatched only when something changed.
  */
 function measure(view: EditorView): void {
   if (view.isDestroyed) return;
@@ -171,7 +176,6 @@ function measure(view: EditorView): void {
   if (column && root.style.getPropertyValue('--ol-column') !== column + 'px') root.style.setProperty('--ol-column', column + 'px');
   const scroll = root.closest('.editor-scroll') as HTMLElement | null;
   const pageLeft = scroll ? scroll.getBoundingClientRect().left - scroll.scrollLeft + 6 : 6 - window.scrollX;
-  const pane = scroll ? scroll.clientWidth - (parseFloat(scroll.style.getPropertyValue('--notes-col')) || 0) : window.innerWidth;
   const changes: SpillMeta = [];
   for (const d of solos(view.state)) {
     const par = view.nodeDOM(d.from) as HTMLElement | null;
@@ -183,7 +187,7 @@ function measure(view: EditorView): void {
     // (offsetWidth / Height: its own size, the scale aside)
     const w = el.offsetWidth, h = el.offsetHeight;
     const scale = documentViewScale(par);
-    const room = pane / scale - 32;
+    const room = wideRoom(par, avail);
     // (a formula table is not shrunk — a display formula is not either —, nor one in a box on a slide or poster)
     const fit = el.classList.contains('lyx-tabular') && !par.closest('.ol-page') && room > 0 && w > room ? Math.max(MIN_FIT, Math.floor(room / w * 1000) / 1000) : 1;
     const drawn = w * fit;

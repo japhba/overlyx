@@ -45,7 +45,7 @@ import { Comments } from './Comments';
 import { Versions } from './Versions';
 import { AgentPanel, askAgentAbout } from './AgentPanel';
 import { PdfPanel, stateFromBuild, jobActive, EMPTY_PDF, type PdfState } from './PdfPanel';
-import { Ruler, NOTE_SCALE_DEFAULT, NOTE_SCALE_MIN, NOTE_SCALE_MAX } from './Ruler';
+import { Ruler, NOTE_SCALE_DEFAULT, NOTE_SCALE_MIN, NOTE_SCALE_MAX, MIN_WIDTH, MAX_WIDTH } from './Ruler';
 import { useNotesPane, useNotesFold, NotesSash, NotesUnfoldTab } from './notespane';
 import { StatusBar, SaveIndicator, ZoomControl, type Status } from './StatusBar';
 import { CornerButton } from './CornerButton';
@@ -379,7 +379,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   const [zoom, setZoom] = useState(Number(localStorage.getItem('ol.zoom') || 1));
   // width of the text column in px (0 = full width), see View ▸ Text width
   const [textWidth, setTextWidth] = useState<number>(() => { const v = Number(localStorage.getItem('ol.textWidth')); return Number.isFinite(v) && localStorage.getItem('ol.textWidth') !== null ? v : 720; });
-  const stepTextWidth = (d: number) => setTextWidth(w => (d === 0 ? 720 : Math.min(1600, Math.max(400, (w || 1200) + d * 60))));
+  const stepTextWidth = (d: number) => setTextWidth(w => (d === 0 ? 720 : Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, (w || 1200) + d * 60))));
   // text size of notes and comments, in % of the document text (the ruler's − / + buttons in margin mode)
   const [noteScale, setNoteScale] = useState<number>(() => { const v = Number(localStorage.getItem('ol.noteScale')); return v >= NOTE_SCALE_MIN && v <= NOTE_SCALE_MAX ? v : NOTE_SCALE_DEFAULT; });
   useEffect(() => {

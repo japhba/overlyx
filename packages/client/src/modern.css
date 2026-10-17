@@ -349,7 +349,8 @@ html[data-ui="modern"] .editor-scroll { background: var(--m-canvas); }
 html[data-ui="modern"] .editor-scroll:has(> .home) { background: var(--ui-bg); }
 html[data-ui="modern"] .editor-scroll:not(.margin-mode) > .editor-page:not(:has(.ol-layout)) {
   width: auto; max-width: calc(var(--text-width, 720px) + 192px); margin: 8px auto 48px; min-height: calc(100% - 56px);
-  padding: 64px 96px 120px; box-shadow: 0 0 0 1px var(--m-line2), 0 1px 3px rgba(28, 27, 25, 0.05); border-radius: 2px;
+  /* (the sides give way, down to 12px, for a text column as wide as the pane: the ruler reaches its edges) */
+  padding: 64px clamp(12px, calc((100% - var(--text-width, 720px)) / 2), 96px) 120px; box-shadow: 0 0 0 1px var(--m-line2), 0 1px 3px rgba(28, 27, 25, 0.05); border-radius: 2px;
 }
 html[data-ui="modern"][data-theme="dark"] .editor-scroll:not(.margin-mode) > .editor-page:not(:has(.ol-layout)) { box-shadow: 0 0 0 1px var(--m-line); }
 /* Draw (margin ink) adds a gutter on each side of the strip (styles.css .ink-pan) and scrolls to its middle:
