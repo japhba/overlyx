@@ -586,7 +586,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   const insertInMath = (latex: string) => { const field = activeMathField(); if (field) { field.execute('insert', latex); field.focus(); } else mathExec('insert', latex); };
   const docStats = useMemo(() => view ? documentStats(view) : null, [view, docTick, selTick]);
   const tb = buildToolbars({
-    view, docId: activeId, meta: activeMeta, headerLines: docHeaders(activeId), prefs: { ...prefs, aiButton: false }, layout, mathField, tracking, marginMode,
+    view, docId: activeId, meta: activeMeta, headerLines: docHeaders(activeId), prefs: { ...prefs, aiButton: false }, layout, mathField, tracking, viewing, marginMode,
     tbMode, setToolbar, run, runView, mathExec, mathPanels, clipboard, setDialog, openFind: () => setFindOpen(true), notify,
     toggleTracking: () => { void toggleTracking(); }, toggleMargin, build: () => build(), updatePdf: () => build({ open: false }), syncToPdf: () => { void syncToPdf(); },
     onHeaderLines: lines => { updateHeader(activeId, lines); setDocTick(t => t + 1); },

@@ -116,9 +116,10 @@ describe('one toolbar definition for both front ends', () => {
     expect(new Set(all).size).toBe(all.length);
     for (const id of SHARED_IDS) expect(all, id).toContain(id);
     expect(ids(tb.mathPanels)).toEqual(['mp-latex_greek']);
-    // without a formula, a table or tracked changes the contextual toolbars stay hidden in automatic mode
+    // outside a formula and a table, and unless Suggesting, the contextual toolbars stay hidden in automatic mode
     expect([tb.showMath, tb.showTable, tb.showReview]).toEqual([false, false, false]);
     expect(buildToolbars(ctx(undefined, { tracking: true })).showReview).toBe(true);
+    expect(buildToolbars(ctx(undefined, { tracking: true, viewing: true })).showReview).toBe(false);
     expect(buildToolbars(ctx(undefined, { tbMode: () => 'on' })).showMath).toBe(true);
   });
 

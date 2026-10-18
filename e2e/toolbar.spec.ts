@@ -210,18 +210,21 @@ test('the mode switch at the top right: Editing · Suggesting · Viewing, and wh
   await page.keyboard.type('zzz');
   await page.waitForTimeout(1500);
   expect(file()).toBe(before);
-  await expect(tb(page, 'r-track')).toHaveClass(/active/);
+  // the review toolbar comes up only while Suggesting
+  await expect(page.locator('.toolbar-review')).toHaveCount(0);
 
-  // back to Editing: editable again, untracked; rejecting the suggestion leaves the plain edit
+  // back to Editing: editable again, untracked, no review toolbar; rejecting the suggestion leaves the plain edit
   await pick('[data-mode="editing"]');
   await expect(sw).toHaveAttribute('data-edit-mode', 'editing');
   await expect(page.locator('.lyx-editor').first()).toHaveAttribute('contenteditable', 'true');
-  await expect(tb(page, 'r-track')).not.toHaveClass(/active/);
+  await expect(page.locator('.toolbar-review')).toHaveCount(0);
   await typeAtEnd(' plain');
   await expect.poll(() => file().includes(' plain')).toBe(true);
+  await pick('[data-mode="suggesting"]');
   await tb(page, 'r-rejectall').click();
   await acceptDialog(page);
   await expect.poll(() => file().includes('\\lyxadded{')).toBe(false);
+  await pick('[data-mode="editing"]');
   expect(file()).not.toContain('suggested');
   expect(file()).toContain(' plain');
   expect(file()).not.toContain('zzz');

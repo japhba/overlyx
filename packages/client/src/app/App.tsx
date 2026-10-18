@@ -1460,7 +1460,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   // The LyX toolbars (toolbars.tsx — one definition with the VS Code extension); what only the web
   // client has (files, navigation history, the outline sidebar, ink, AI, the master's PDF) goes into the slots.
   const tb = buildToolbars({
-    view, docId, meta, headerLines, prefs, layout, mathField, tracking, marginMode, tbMode, setToolbar,
+    view, docId, meta, headerLines, prefs, layout, mathField, tracking, viewing, marginMode, tbMode, setToolbar,
     run, runView, mathExec, mathPanels, clipboard, setDialog, openFind: () => setFindOpen(true), notify,
     toggleTracking: () => { void toggleTracking(); }, toggleMargin,
     build: () => { void build(); }, updatePdf: () => { void build({ open: false }); }, syncToPdf: () => { void syncToPdf(); },

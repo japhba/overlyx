@@ -9,7 +9,7 @@
  */
 import { useEffect, useMemo, useRef } from 'preact/hooks';
 import type { EditorView } from 'prosemirror-view';
-import type { Mark, Node as PMNode } from 'prosemirror-model';
+import type { Mark } from 'prosemirror-model';
 import { undo, redo } from 'y-prosemirror';
 import { llanglePreamble, hasLlangleSnippet, definesLlangle, columnWidthLength } from '@overlyx/core';
 import { api, type DocMeta } from '../api';
@@ -30,7 +30,7 @@ import * as C from '../editor/commands';
 import * as T from '../editor/tablecommands';
 import { fixTableColumnWidths } from '../editor/tablefit';
 import { formulaTableGrid } from '../editor/formulatable';
-import { acceptAllChanges, rejectAllChanges, gotoChange, resolveSelectionChanges, hasChanges, changesFilterKey, setChangesFilter } from '../editor/plugins/changes';
+import { acceptAllChanges, rejectAllChanges, gotoChange, resolveSelectionChanges, changesFilterKey, setChangesFilter } from '../editor/plugins/changes';
 import { pasteFromClipboard } from '../editor/clipmenu';
 import { openLinkBoxFor, LINK_KEY } from '../editor/links';
 import { layoutToolbar } from './layouttoolbar';
@@ -46,7 +46,16 @@ export type ToolbarPrefs = Partial<Record<ToolbarId, ToolbarMode>>;
 export const DEFAULT_TOOLBARS: ToolbarPrefs = { standard: 'on', viewupdate: 'on', extra: 'on', vcs: 'off', math: 'auto', mathpanels: 'on', table: 'auto', review: 'auto' };
 /** The toolbar modes kept in this browser (`ol.toolbars`), over the defaults. */
 export function loadToolbarPrefs(): ToolbarPrefs {
-  try { return { ...DEFAULT_TOOLBARS, ...JSON.parse(localStorage.getItem('ol.toolbars') || '{}') }; } catch { return { ...DEFAULT_TOOLBARS }; }
+  try {
+    const saved: ToolbarPrefs = JSON.parse(localStorage.getItem('ol.toolbars') || '{}');
+    // once (18 Oct 2026): the contextual rows set to "always shown" come and go again — a Table row
+    // switched on from inside a formula had stayed up for weeks
+    if (!localStorage.getItem('ol.toolbars.auto1')) {
+      for (const id of ['math', 'table', 'review'] as ToolbarId[]) if (saved[id] === 'on') saved[id] = 'auto';
+      localStorage.setItem('ol.toolbars.auto1', '1');
+    }
+    return { ...DEFAULT_TOOLBARS, ...saved };
+  } catch { return { ...DEFAULT_TOOLBARS }; }
 }
 
 /** Button faces of the math panels (LyX shows a representative symbol) */
@@ -87,6 +96,8 @@ export interface ToolbarContext {
   /** the focused formula, if any */
   mathField: LyxMathField | null;
   tracking: boolean;
+  /** the document is in Viewing mode (EditModeSwitch) */
+  viewing?: boolean;
   marginMode: boolean;
   tbMode(id: ToolbarId): ToolbarMode;
   setToolbar(id: ToolbarId, mode: ToolbarMode): void;
@@ -237,14 +248,6 @@ export function tbTogglePalette(ctx: Pick<ToolbarContext, 'tbMode' | 'setToolbar
   };
 }
 
-// whether a document has tracked changes: a linear scan, remembered per document version
-const changesByDoc = new WeakMap<PMNode, boolean>();
-export function docHasChanges(doc: PMNode): boolean {
-  let v = changesByDoc.get(doc);
-  if (v === undefined) { v = hasChanges(doc); changesByDoc.set(doc, v); }
-  return v;
-}
-
 /**
  * The Text colour palette: text gets the colour mark; in a formula (focused when the palette
  * opened) its selection is coloured as LyX does, `{\color{c} …}`. The formula is held while the
@@ -303,7 +306,8 @@ export function buildToolbars(ctx: ToolbarContext): Toolbars {
   const changesFilterSt = view ? changesFilterKey.getState(view.state) : null;
   const showMath = tbMode('math') === 'on' || (tbMode('math') === 'auto' && !!mathField);
   const showTable = tbMode('table') === 'on' || (tbMode('table') === 'auto' && inTable);
-  const showReview = tbMode('review') === 'on' || (tbMode('review') === 'auto' && (tracking || (!!view && docHasChanges(view.state.doc))));
+  // automatic: while Suggesting — in Editing mode a suggestion's ✓/✗ come up over it (plugins/changeactions.ts)
+  const showReview = tbMode('review') === 'on' || (tbMode('review') === 'auto' && tracking && !ctx.viewing);
   const outputChanges = ctx.headerLines.some(l => l === '\\output_changes true');
 
   // the text menu's buttons (the Classic standard row and the Modern row share them)

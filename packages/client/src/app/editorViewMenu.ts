@@ -58,7 +58,7 @@ export function editorViewMenu({ hostItems, themeItems, hostToolbars, combined, 
         ...hostToolbars,
         { sep: true },
         ...([['math', 'Math'], ['table', 'Table'], ['review', 'Review']] as [ToolbarId, string][]).flatMap(([id, name]) => [
-          { label: `${name}: automatic (when the cursor is in ${id === 'math' ? 'a formula' : id === 'table' ? 'a table' : 'a document with tracked changes'})`, checked: tbMode(id) === 'auto', action: () => setToolbar(id, 'auto') },
+          { label: `${name}: automatic (${id === 'math' ? 'when the cursor is in a formula' : id === 'table' ? 'when the cursor is in a table' : 'while suggesting'})`, checked: tbMode(id) === 'auto', action: () => setToolbar(id, 'auto') },
           { label: `${name}: always shown`, checked: tbMode(id) === 'on', action: () => setToolbar(id, 'on') },
           { label: `${name}: hidden`, checked: tbMode(id) === 'off', action: () => setToolbar(id, 'off') },
         ]),
