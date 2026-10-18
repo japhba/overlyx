@@ -23,6 +23,8 @@ export interface PdfStatusInput {
   ok: boolean | null;
   /** when the PDF file was written (server clock) */
   pdfAt?: number | null;
+  /** when the last build read the document (server clock) */
+  sourceAt?: number | null;
   /** server clock − browser clock, ms */
   skew?: number;
 }
@@ -59,7 +61,8 @@ export function pdfStatus(s: PdfStatusInput, savedAt: number, now = Date.now()):
   const serverNow = now + (s.skew ?? 0);
   const age = s.url && s.pdfAt ? Math.max(0, serverNow - s.pdfAt) : null;
   const when = s.pdfAt ? new Date(s.pdfAt - (s.skew ?? 0)).toLocaleTimeString() : '';
-  const behind = !!s.pdfAt && savedAt > s.pdfAt + SLACK;
+  // a save after the build read the document is not in its PDF (a build recorded before that was kept: after the PDF was written)
+  const behind = s.ok && s.sourceAt ? savedAt > s.sourceAt : !!s.pdfAt && savedAt > s.pdfAt + SLACK;
   const behindNote = behind ? ` The document was changed after it (saved ${new Date(savedAt - (s.skew ?? 0)).toLocaleTimeString()}).` : '';
   if (s.busy) {
     return { kind: 'building', age, label: age !== null ? `building… · last PDF ${ago(age)}` : 'building…', short: 'PDF building…',

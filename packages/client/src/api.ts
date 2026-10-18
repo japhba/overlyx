@@ -86,7 +86,7 @@ export interface DocMeta {
 /** a folded heading (editor/plugins/fold.ts): its layout, text, and which of the equal headings it is */
 export interface SavedFold { l: string; t: string; n: number }
 export interface BuildJob { id: number; status: 'queued' | 'exporting' | 'compiling' | 'ok' | 'error' | 'cancelled'; engine: string; requestedBy: string; startedAt: number; phaseAt: number; finishedAt?: number; progress: string; rerun: boolean }
-export interface BuildInfo { status: string; log: string; pdf: string | null; pdf_path: string | null; tex_path: string | null; updated_at: number; warnings: string[]; tex?: string; /** when the PDF file was written (server clock) */ pdf_at?: number | null }
+export interface BuildInfo { status: string; log: string; pdf: string | null; pdf_path: string | null; tex_path: string | null; updated_at: number; warnings: string[]; tex?: string; /** when the PDF file was written (server clock) */ pdf_at?: number | null; /** when that build read the document (server clock; null: an older build) */ source_at?: number | null }
 export interface VersionInfo { id: number; name: string; author: string; kind: string; created_at: number; size: number }
 export interface GitCommit { hash: string; author: string; date: number; message: string }
 export interface GitInfo { url: string; username: string; role: Role; hasPassword: boolean; branch: string; commits: GitCommit[]; pending: number; pendingFiles: string[]; head: string | null }

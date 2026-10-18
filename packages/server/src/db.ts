@@ -139,6 +139,8 @@ CREATE TABLE IF NOT EXISTS pdf_publish (
 try { db.exec('ALTER TABLE ydocs ADD COLUMN epoch TEXT'); } catch { /* column exists */ }
 try { db.exec('ALTER TABLE users ADD COLUMN avatar_url TEXT'); } catch { /* column exists */ }
 try { db.exec('ALTER TABLE builds ADD COLUMN warnings TEXT'); } catch { /* column exists */ }
+// when the build read the document (export.ts BuildJob.sourceAt): a save after it is not in that build
+try { db.exec('ALTER TABLE builds ADD COLUMN source_at INTEGER'); } catch { /* column exists */ }
 // per-account server-side settings (userSettings.ts) and re-copyable tokens (plaintext kept only
 // for accounts with the allowRecopyTokens setting)
 try { db.exec('ALTER TABLE users ADD COLUMN settings TEXT'); } catch { /* column exists */ }

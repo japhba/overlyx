@@ -20,6 +20,8 @@ export interface PdfState {
   builtAt?: number;
   /** when the PDF file shown was written (server time; a failed build can leave the previous PDF) */
   pdfAt?: number | null;
+  /** when the last build read the document (server time): a save after it is not in that build */
+  sourceAt?: number | null;
   /** server clock − browser clock (ms), from the build status */
   skew?: number;
   /** the running / last build was started by the auto-build setting, not by the user */
@@ -51,8 +53,7 @@ export function PdfPanel({ docId, state, savedAt, onBuild, onCancel, onShowTex, 
   useEffect(() => subscribePrefs(setPrefs), []);
   const menuRef = useRef<HTMLDivElement>(null);
   const job = state.job;
-  const st = pdfStatus(state, savedAt, useTicker(state.busy));
-  const elapsed = job ? Math.max(0, Math.round((Date.now() - job.startedAt) / 1000)) : 0;
+  const st = pdfStatus(state, savedAt, useTicker());
 
   // a build you asked for that failed opens the log; the next good build closes it again (an automatic one never opens it)
   const openedByError = useRef(false);
@@ -71,10 +72,11 @@ export function PdfPanel({ docId, state, savedAt, onBuild, onCancel, onShowTex, 
     return () => { window.removeEventListener('mousedown', down, true); window.removeEventListener('keydown', key, true); };
   }, [menu]);
 
+  // nothing moves while a build runs (no spinner, no running seconds or LaTeX output): it would pull
+  // the eye from the writing; latexmk's last line is in the tooltip
   const progress = state.busy ? (
     <div class="build-progress" title={job?.progress}>
-      <i class="spinner" /> {job ? `${PHASE[job.status] ?? job.status} · ${elapsed} s${job.rerun ? ' · then again with your latest changes' : ''}` : 'starting the build…'}
-      {job?.progress && <i class="progress-line">{job.progress}</i>}
+      {job ? `Building the PDF · ${PHASE[job.status] ?? job.status}${job.rerun ? ' · then again with your latest changes' : ''}` : 'Building the PDF…'}
     </div>
   ) : null;
   const autoLabel = AUTO_BUILD_CHOICES.find(c => c[0] === prefs.autoBuild)?.[1] ?? 'Off';
@@ -113,7 +115,7 @@ export function PdfPanel({ docId, state, savedAt, onBuild, onCancel, onShowTex, 
         {onPublicLink && <button class="small-btn" data-pdf-public-link onClick={onPublicLink} title="A stable public address for this PDF — link it from your web page (Share dialog ▸ Public PDF link)">🔗</button>}
         {onClose && <button class="small-btn close" onClick={onClose} title="Hide the PDF pane">✕</button>}
       </div>
-      {state.url ? <PdfViewer url={state.url} target={syncTarget} onSync={onInverse} hint="Double-click the PDF to jump to that place in the document" busy={state.busy} overlay={progress}
+      {state.url ? <PdfViewer url={state.url} target={syncTarget} onSync={onInverse} hint="Double-click the PDF to jump to that place in the document" overlay={progress}
         toolbar={onForward && <button class="small-btn" onClick={onForward} title="Show the cursor's place in the PDF (SyncTeX forward search, Ctrl+Alt+J)" data-pdf-sync>⇄ Sync</button>} />
         : <div class="pdf-empty">{progress}{state.busy ? 'Building the PDF in the background — you can keep editing.' : state.ok === false ? 'The build failed — see the log.' : 'No PDF yet — click “View PDF” (Ctrl+R).'}</div>}
       {showLog && (
@@ -137,7 +139,7 @@ export function stateFromBuild(prev: PdfState, r: { build: BuildInfo | null; job
   if (!b) return { ...prev, busy: false, job: r.job ?? null, skew };
   // a build without a PDF (the first run failed) keeps whatever is in view
   return {
-    url: b.pdf ?? prev.url, pdfAt: b.pdf ? b.pdf_at ?? b.updated_at : prev.pdfAt, log: b.log, busy: false, ok: b.status === 'ok', warnings: b.warnings ?? [],
+    url: b.pdf ?? prev.url, pdfAt: b.pdf ? b.pdf_at ?? b.updated_at : prev.pdfAt, sourceAt: b.source_at ?? null, log: b.log, busy: false, ok: b.status === 'ok', warnings: b.warnings ?? [],
     tex: b.tex ?? (b.tex_path === prev.tex ? prev.tex : undefined), job: r.job ?? null, builtAt: b.updated_at, skew, auto: prev.auto, known: prev.known,
   };
 }

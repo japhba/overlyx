@@ -43,6 +43,9 @@ export interface BuildJob {
   finishedAt?: number;
   /** when the export began (the content the build compiles is from then) */
   exportedAt?: number;
+  /** when the export read the documents, right after the open ones were saved: a save the clients
+   *  were told about up to then is in this build, a later one is not (recorded as builds.source_at) */
+  sourceAt?: number;
   /** last line of latexmk output */
   progress: string;
   rerun: boolean;
@@ -306,9 +309,10 @@ export function freshManagedBlock(text: string, current: string): string {
 }
 
 /** Put the document and its children into the build dir (graphics converted) and return the main file. */
-export async function exportTex(docId: string, opts: { into?: string } = {}): Promise<{ dir: string; main: string; warnings: string[]; tex: string }> {
+export async function exportTex(docId: string, opts: { into?: string } = {}): Promise<{ dir: string; main: string; warnings: string[]; tex: string; readAt: number }> {
   const doc = await manager.open(docId);
   await manager.saveProject(doc.project);   // the files on disk match what is being built
+  const readAt = Date.now();
   const dir = opts.into ?? buildDir(docId);
   fs.mkdirSync(dir, { recursive: true });
   const docDir = path.dirname(doc.absPath);
@@ -332,7 +336,7 @@ export async function exportTex(docId: string, opts: { into?: string } = {}): Pr
     const main = path.join(dir, path.basename(doc.relPath).replace(/\.[^.]+$/, '') + '.tex');
     const rewritten = await rewriteGraphics(tex, docDir, dir, warnings);
     fs.writeFileSync(main, rewritten, 'utf8');
-    return { dir, main, warnings, tex: rewritten };
+    return { dir, main, warnings, tex: rewritten, readAt };
   }
   const files = [doc.relPath, ...childDocuments(doc.project, doc.relPath)];
   const proj = projectDir(doc.project);
@@ -356,7 +360,7 @@ export async function exportTex(docId: string, opts: { into?: string } = {}): Pr
   // boxes against the PDF (layoutCheckOf: which boxes are unchanged since)
   const olsrc = path.join(dir, path.basename(doc.relPath, '.tex') + '.olsrc');
   if (mainSource.includes('\\begin{olbox}')) fs.writeFileSync(olsrc, mainSource, 'utf8'); else fs.rmSync(olsrc, { force: true });
-  return { dir, main: path.join(dir, path.basename(doc.relPath)), warnings, tex: mainText };
+  return { dir, main: path.join(dir, path.basename(doc.relPath)), warnings, tex: mainText, readAt };
 }
 
 /**
@@ -496,9 +500,10 @@ async function buildViaLatexmk(job: BuildJob): Promise<BuildResult> {
     exp = await exportTex(docId);
   } catch (e) {
     const r: BuildResult = { ok: false, log: 'export failed: ' + String(e), warnings: [] };
-    record(requestedId, r);
+    record(requestedId, r, job.exportedAt);
     return r;
   }
+  job.sourceAt = exp.readAt;
   if (isCancelled(job)) return { ok: false, log: 'cancelled', warnings: [] };
   setPhase(job, 'compiling');
   const base = path.basename(exp.main, '.tex');
@@ -577,8 +582,8 @@ async function buildViaLatexmk(job: BuildJob): Promise<BuildResult> {
   const ok = !realErrors && havePdf;
   if (masterRel) log = `(built master document ${masterRel})\n` + log;
   const res: BuildResult = { ok, log, pdfPath: havePdf ? pdf : undefined, texPath: exp.main, warnings, tex: exp.tex };
-  record(requestedId, res);
-  if (docId !== requestedId) record(docId, res);
+  record(requestedId, res, job.sourceAt);
+  if (docId !== requestedId) record(docId, res, job.sourceAt);
   notifyBuilt(requestedId, res);
   if (docId !== requestedId) notifyBuilt(docId, res);
   return res;
@@ -596,14 +601,15 @@ export function magicEngine(text: string): '-pdf' | '-pdfxe' | '-pdflua' | null 
   return null;
 }
 
-function record(docId: string, r: BuildResult): void {
-  db.prepare('INSERT INTO builds (doc_id, status, log, pdf_path, tex_path, updated_at, warnings) VALUES (?,?,?,?,?,?,?) ON CONFLICT(doc_id) DO UPDATE SET status=excluded.status, log=excluded.log, pdf_path=excluded.pdf_path, tex_path=excluded.tex_path, updated_at=excluded.updated_at, warnings=excluded.warnings')
-    .run(docId, r.ok ? 'ok' : 'error', r.log.slice(-200000), r.pdfPath ?? null, r.texPath ?? null, Date.now(), JSON.stringify(r.warnings ?? []));
+/** `sourceAt`: when the build read the document (BuildJob.sourceAt) */
+function record(docId: string, r: BuildResult, sourceAt?: number): void {
+  db.prepare('INSERT INTO builds (doc_id, status, log, pdf_path, tex_path, updated_at, warnings, source_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(doc_id) DO UPDATE SET status=excluded.status, log=excluded.log, pdf_path=excluded.pdf_path, tex_path=excluded.tex_path, updated_at=excluded.updated_at, warnings=excluded.warnings, source_at=excluded.source_at')
+    .run(docId, r.ok ? 'ok' : 'error', r.log.slice(-200000), r.pdfPath ?? null, r.texPath ?? null, Date.now(), JSON.stringify(r.warnings ?? []), sourceAt ?? null);
 }
 
-export interface BuildRow { status: string; log: string; pdf_path: string | null; tex_path: string | null; updated_at: number; warnings: string[] }
+export interface BuildRow { status: string; log: string; pdf_path: string | null; tex_path: string | null; updated_at: number; warnings: string[]; /** when the build read the document (null: recorded before this was kept) */ source_at: number | null }
 export function lastBuild(docId: string): BuildRow | undefined {
-  const row = db.prepare('SELECT status, log, pdf_path, tex_path, updated_at, warnings FROM builds WHERE doc_id = ?').get(docId) as (Omit<BuildRow, 'warnings'> & { warnings: string | null }) | undefined;
+  const row = db.prepare('SELECT status, log, pdf_path, tex_path, updated_at, warnings, source_at FROM builds WHERE doc_id = ?').get(docId) as (Omit<BuildRow, 'warnings'> & { warnings: string | null }) | undefined;
   if (!row) return undefined;
   let warnings: string[] = [];
   try { warnings = row.warnings ? JSON.parse(row.warnings) : []; } catch { /* ignore */ }

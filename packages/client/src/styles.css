@@ -1298,10 +1298,7 @@ pre.hl .l.cur { background: color-mix(in srgb, var(--active-bg) 45%, transparent
 /* a build in progress floats over the pages (it never pushes them down): a small note top right */
 .pdf-panel .build-progress { position: absolute; top: 8px; right: 14px; z-index: 3; display: flex; align-items: center; gap: 6px; max-width: calc(100% - 28px); padding: 3px 10px; font-size: 11px; color: var(--fg2); background: var(--surface); border: 1px solid var(--ui-border); border-radius: 12px; box-shadow: 0 1px 6px rgba(0, 0, 0, 0.15); white-space: nowrap; overflow: hidden; opacity: 0.94; pointer-events: none; }
 .pdf-panel .build-progress i { font-style: normal; }
-.pdf-panel .build-progress .progress-line { color: var(--muted2); font-family: monospace; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .pdf-panel .pdf-empty .build-progress { position: static; margin-bottom: 10px; }
-.pdf-panel .spinner, .statusbar .pdf-status .spinner { display: inline-block; width: 10px; height: 10px; border: 2px solid var(--ui-border); border-top-color: var(--accent); border-radius: 50%; animation: ol-spin 0.8s linear infinite; flex: none; }
-@keyframes ol-spin { to { transform: rotate(360deg); } }
 .editor-loading { color: var(--muted2); font-family: var(--ui-font); padding: 20px 0; }
 .child-doc { margin-top: 28px; border-top: 2px solid var(--ui-border); }
 .child-doc-header { display: flex; align-items: center; gap: 10px; padding: 6px 0 10px; font-family: var(--ui-font); font-size: 12px; color: var(--accent); }
@@ -1851,11 +1848,8 @@ button.lit-link { border: 0; background: none; padding: 0; color: var(--accent);
 .pdf-toolbar .pdf-count { color: var(--muted2); }
 .pdf-toolbar .pdf-sep { width: 1px; height: 14px; background: var(--ui-border); margin: 0 4px; }
 .pdf-toolbar .pdf-hint { flex: 1 1 0; min-width: 0; margin-left: 6px; text-align: right; color: var(--muted2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* the pages and what floats over them (a build's progress); a thin line runs along the top while building */
+/* the pages and what floats over them (a build's progress) */
 .pdf-stage { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.pdf-busy-line { position: absolute; top: 0; left: 0; right: 0; height: 2px; z-index: 3; overflow: hidden; pointer-events: none; }
-.pdf-busy-line::before { content: ''; position: absolute; top: 0; bottom: 0; width: 30%; background: var(--accent); animation: pdf-busy 1.3s ease-in-out infinite; }
-@keyframes pdf-busy { 0% { left: -30%; } 100% { left: 100%; } }
 .pdf-pages { flex: 1; overflow: auto; padding: 12px 0; position: relative; touch-action: pan-x pan-y; }   /* (two fingers: the viewer's pinch, PdfViewer.tsx — never the browser's zoom of the whole app) */
 /* fitted, the pages never need a scroll bar sideways (one coming and going while a pinch pulls at a fit would change the fit) */
 .pdf-pages.fitted { overflow-x: hidden; }
@@ -1866,6 +1860,9 @@ button.lit-link { border: 0; background: none; padding: 0; color: var(--accent);
 /* PdfViewer: the sharp part in view of a page whose own canvas is drawn coarser (placed in % of the page box) */
 .pdf-page-box canvas.pdf-detail { position: absolute; display: none; pointer-events: none; }
 .pdf-page-box canvas.pdf-detail.ready { display: block; }
+/* a link of the PDF (PdfViewer.tsx): invisible until the pointer is over it */
+.pdf-link { position: absolute; display: block; cursor: pointer; border-radius: 2px; }
+.pdf-link:hover { background: rgba(59, 110, 165, 0.14); }
 /* dark pages (app/pdfdark.ts, drawn into the canvases): paper → the editor's page colour, ink → its text tone */
 .pdf-viewer.dark-pages { background: #0a0a0d; }
 .pdf-viewer.dark-pages .pdf-page-box { background: var(--page-bg); box-shadow: 0 0 0 1px rgba(255,255,255,0.07), 0 1px 6px rgba(0,0,0,0.6); }

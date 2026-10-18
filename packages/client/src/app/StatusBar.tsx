@@ -118,7 +118,7 @@ export function PdfStatusChip({ pdf, savedAt, onClick }: { pdf: PdfStatusInput; 
   const rebuild = st.kind === 'outdated' || st.kind === 'error';
   return (
     <button type="button" class={'pdf-status ' + st.kind} data-pdf-status={st.kind} title={st.title + (rebuild ? ' Click to show and rebuild the PDF.' : ' Click to show the PDF.')} onClick={() => onClick(rebuild)}>
-      {st.kind === 'building' && <i class="spinner" />}{st.short}
+      {st.short}
     </button>
   );
 }

@@ -9,7 +9,11 @@
  * the old pages stay on screen, every page is rendered off-screen and copied onto its canvas in
  * one step, and the reader stays on the same page at the same place in it (the page and the
  * offset into it are kept, not the scroll fraction, so pages added above do not move the view).
- * `busy` draws a thin progress line along the top; `overlay` floats over the pages.
+ * `overlay` floats over the pages.
+ *
+ * Links (the PDF's link annotations — hyperref's citations, references, contents, URLs): an
+ * invisible area over each; a web or mail address opens in a new tab, a place in the document is
+ * scrolled to, and Back returns to where the reader was.
  *
  * Zoom: Fit width and Fit content (past the margins: the pages cropped to what is painted on them, as
  * big as the pane takes them — pdfzoom.ts) and the steps between, from the
@@ -57,6 +61,38 @@ export interface PdfTarget { page: number; x: number; y: number; w?: number; h?:
 
 interface PageInfo { width: number; height: number }
 
+/** a link on a page: its area (pt from the page's top-left), and an address to open or a destination in the document */
+interface PdfLink { x: number; y: number; w: number; h: number; url?: string; dest?: unknown }
+
+/** The links of a page (its Link annotations with a web / mail address or a destination). */
+async function linksOf(page: PDFPageProxy): Promise<PdfLink[]> {
+  const viewport = page.getViewport({ scale: 1 });
+  const out: PdfLink[] = [];
+  for (const a of await page.getAnnotations({ intent: 'display' }) as { subtype?: string; rect?: number[]; url?: string; dest?: unknown }[]) {
+    if (a.subtype !== 'Link' || !a.rect) continue;
+    const url = typeof a.url === 'string' && /^(https?|mailto):/i.test(a.url) ? a.url : undefined;
+    if (!url && a.dest == null) continue;
+    const [x1, y1] = viewport.convertToViewportPoint(a.rect[0], a.rect[1]) as number[], [x2, y2] = viewport.convertToViewportPoint(a.rect[2], a.rect[3]) as number[];
+    out.push({ x: Math.min(x1, x2), y: Math.min(y1, y2), w: Math.abs(x2 - x1), h: Math.abs(y2 - y1), ...(url ? { url } : { dest: a.dest }) });
+  }
+  return out;
+}
+
+/** Where a destination points: the page (1-based) and the point of it to show at the top (pt from its top), if it says. */
+async function placeOf(d: PDFDocumentProxy, dest: unknown): Promise<{ page: number; y: number | null } | null> {
+  const explicit = typeof dest === 'string' ? await d.getDestination(dest) : dest;
+  if (!Array.isArray(explicit) || !explicit.length) return null;
+  const ref = explicit[0];
+  const index = typeof ref === 'number' ? ref : ref && typeof ref === 'object' ? await d.getPageIndex(ref as never) : -1;
+  if (!(index >= 0 && index < d.numPages)) return null;
+  // [ref, {name: 'XYZ'}, left, top, zoom] / [ref, {name: 'FitH' | 'FitBH'}, top]: the top in PDF space (from the bottom)
+  const kind = (explicit[1] as { name?: string } | undefined)?.name;
+  const top = kind === 'XYZ' ? explicit[3] : kind === 'FitH' || kind === 'FitBH' ? explicit[2] : null;
+  if (typeof top !== 'number') return { page: index + 1, y: null };
+  const viewport = (await d.getPage(index + 1)).getViewport({ scale: 1 });
+  return { page: index + 1, y: viewport.convertToViewportPoint(0, top)[1] };
+}
+
 /** what is drawn on a page's canvas: at which scale, the render under way or `done`, whether coarser than the scale (then with a detail canvas over `rect`, CSS px of the page) */
 interface PageState { scale: number; task: RenderTask | null; done?: boolean; coarse?: boolean; detail?: { scale: number; rect: Box; task: RenderTask | null; done?: boolean } }
 
@@ -96,7 +132,7 @@ const topsOf = (geo: Geo[]): number[] => {
   return out;
 };
 
-export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay, withCredentials = true }: { url: string; target?: PdfTarget | null; onSync?: (page: number, x: number, y: number) => void; toolbar?: ComponentChildren; hint?: string; busy?: boolean; overlay?: ComponentChildren; withCredentials?: boolean }) {
+export function PdfViewer({ url, target, onSync, toolbar, hint, overlay, withCredentials = true }: { url: string; target?: PdfTarget | null; onSync?: (page: number, x: number, y: number) => void; toolbar?: ComponentChildren; hint?: string; overlay?: ComponentChildren; withCredentials?: boolean }) {
   const host = useRef<HTMLDivElement>(null);
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null);
   const [pages, setPages] = useState<PageInfo[]>([]);
@@ -110,6 +146,10 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay, w
   const width = pane.width;
   const [current, setCurrent] = useState(1);
   const [flash, setFlash] = useState<{ page: number; x: number; y: number; w: number; h: number } | null>(null);
+  /** each page's links (by page number), for the document shown */
+  const [links, setLinks] = useState<Map<number, PdfLink[]>>(() => new Map());
+  /** where the reader was before following links in the document (Back) */
+  const [back, setBack] = useState<{ page: number; y: number }[]>([]);
   /** the zoom said over the pages while it changes */
   const hudEl = useRef<HTMLDivElement>(null);
   const hud = useMemo(() => zoomPill(() => hudEl.current), []);
@@ -211,6 +251,43 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay, w
     measure();
     return () => ro.disconnect();
   }, []);
+
+  // the links of the document shown (after its pages are up: a rebuilt PDF is not held back for them)
+  useEffect(() => {
+    if (!doc) return;
+    let cancelled = false;
+    setLinks(new Map());
+    void (async () => {
+      const found = new Map<number, PdfLink[]>();
+      for (let n = 1; n <= doc.numPages && !cancelled; n++) {
+        try { const l = await linksOf(await doc.getPage(n)); if (l.length) found.set(n, l); } catch { /* a page without readable annotations */ }
+      }
+      if (!cancelled) setLinks(found);
+    })();
+    return () => { cancelled = true; };
+  }, [doc]);
+
+  /** Show a point of a page (pt from its top) at the top of the pane; `from`: remember where the reader was, for Back. */
+  const showPlace = (page: number, y: number | null, from?: { page: number; y: number } | null) => {
+    const el = host.current;
+    const { geo: g, tops: t } = layoutRef.current;
+    if (!el || page < 1 || page > g.length) return;
+    if (from) setBack(b => [...b.slice(-19), from]);
+    const i = page - 1;
+    el.scrollTo({ top: Math.max(0, y === null ? t[i] - PAD : t[i] + (y - g[i].crop.y) * g[i].scale - 24) });
+  };
+  const follow = async (dest: unknown) => {
+    if (!doc) return;
+    const from = readAnchor();
+    const place = await placeOf(doc, dest).catch(() => null);
+    if (place) showPlace(place.page, place.y, from && { page: from.page + 1, y: from.y });
+  };
+  const goBack = () => {
+    const last = back[back.length - 1];
+    if (!last) return;
+    setBack(back.slice(0, -1));
+    showPlace(last.page, last.y);
+  };
 
   // what is painted on the pages (Fit content, and where it lies among the levels): measured small in
   // idle moments, the page read first, then the others in reach
@@ -584,6 +661,7 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay, w
           {ZOOMS.map(z => <option key={z} value={String(z)}>{Math.round(z * 100)}%</option>)}
         </select>
         <button class="small-btn" title="Zoom in" onClick={() => step(1)}>+</button>
+        {back.length > 0 && <button class="small-btn" data-pdf-back title="Back to where you were before following a link" onClick={goBack}>↩ Back</button>}
         {themeDark && <button class={'small-btn pdf-dark-toggle' + (dark ? ' active' : '')} data-pdf-dark aria-pressed={dark} onClick={() => setPref('darkPages', !dark)}
           title={dark ? 'Smart invert: the pages light on dark, photographs in their colours — documents, PDFs and slides alike. Click for their own colours' : 'The pages’ own colours — click to smart-invert them (documents, PDFs and slides alike)'}>◐</button>}
         {toolbar && <span class="pdf-sep" />}
@@ -591,7 +669,6 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay, w
         {hint && <span class="pdf-hint">{hint}</span>}
       </div>
       <div class="pdf-stage">
-        {busy && <div class="pdf-busy-line" aria-hidden="true" />}
         {overlay}
         <div ref={hudEl} class="zoom-hud" aria-hidden="true" data-pdf-zoomhud />
         <div class={'pdf-pages' + (typeof zoom === 'string' ? ' fitted' : '')} ref={host} data-zoom={typeof zoom === 'string' ? zoom : undefined}>
@@ -605,6 +682,10 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay, w
                 <div class="pdf-sheet" style={{ width: `${p.width * s}px`, height: `${p.height * s}px`, left: `${-g.crop.x * s}px`, top: `${-g.crop.y * s}px` }}>
                   <canvas ref={c => { if (c) canvases.current.set(n, c); else canvases.current.delete(n); }} />
                   <canvas class="pdf-detail" ref={c => { if (c) details.current.set(n, c); else details.current.delete(n); }} />
+                  {links.get(n)?.map((l, k) => (
+                    <a key={k} class="pdf-link" style={{ left: `${l.x * s}px`, top: `${l.y * s}px`, width: `${l.w * s}px`, height: `${l.h * s}px` }}
+                      {...(l.url ? { href: l.url, target: '_blank', rel: 'noopener noreferrer', title: l.url } : { href: '#', onClick: (e: MouseEvent) => { e.preventDefault(); void follow(l.dest); } })} />
+                  ))}
                   {flash && flash.page === n && <div class="pdf-flash" style={{ left: `${flash.x * s - 4}px`, top: `${flash.y * s - 3}px`, width: `${Math.max(24, flash.w * s + 8)}px`, height: `${flash.h * s + 6}px` }} />}
                 </div>
               </div>

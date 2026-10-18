@@ -991,8 +991,14 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     if (!pdf.known || pdf.busy) return;
     const saved = save.savedAt;
     if (!saved || saved <= lastAutoFor.current) return;
-    if (pdf.pdfAt && saved <= pdf.pdfAt + 1500) return;               // the PDF already has this save
-    if (pdf.ok === false && pdf.builtAt && saved <= pdf.builtAt) return;   // the failed build already tried it
+    // the last build has this save (it read the document after it) — or, when it failed, already tried
+    // it. Not judged by when the PDF was written: a save that lands while a build compiles (an agent's
+    // next edit) is not in that PDF, and must be built again.
+    if (pdf.sourceAt) { if (saved <= pdf.sourceAt) return; }
+    else {
+      if (pdf.pdfAt && saved <= pdf.pdfAt + 1500) return;               // (a build recorded before source_at was kept)
+      if (pdf.ok === false && pdf.builtAt && saved <= pdf.builtAt) return;
+    }
     const t = setTimeout(() => { lastAutoFor.current = saved; void build({ open: false, auto: true }); }, Math.max(0, prefs.autoBuildDelay) * 1000);
     return () => clearTimeout(t);
   }, [docId, save.savedAt, pdf.known, pdf.busy, pdf.pdfAt, pdf.builtAt, pdf.ok, prefs.autoBuild, prefs.autoBuildDelay, pdfPaneVisible, pagesOn]);

@@ -41,7 +41,6 @@ export function BuiltPdf({ target: requestedTarget, onBuild, onInverse, onForwar
   const [pdf, setPdf] = useState<PdfState>({ url: null, log: '', busy: false, ok: null, warnings: [] });
   const [target, setTarget] = useState<PdfTarget | null>(null);
   const [showLog, setShowLog] = useState(false);
-  const [, tick] = useState(0);
   const watcher = useMemo(() => watchPdfBuild({
     fetch: () => api.build(G.docId),
     receive: r => setPdf(p => stateFromBuild(p, r)),
@@ -72,16 +71,14 @@ export function BuiltPdf({ target: requestedTarget, onBuild, onInverse, onForwar
     return () => { window.removeEventListener('message', onMsg); watcher.dispose(); };
   }, []);
 
-  useEffect(() => { if (!pdf.busy) return; const t = setInterval(() => tick(x => x + 1), 1000); return () => clearInterval(t); }, [pdf.busy]);
   const job = pdf.job;
-  const elapsed = job ? Math.max(0, Math.round((Date.now() - job.startedAt) / 1000)) : 0;
   // how old the PDF is (the file's time; the editor saves the file itself, so "outdated" is not known here)
-  const st = pdfStatus(pdf, 0, useTicker(pdf.busy));
-  // floats over the pages while a build runs (nothing moves)
+  const st = pdfStatus(pdf, 0, useTicker());
+  // floats over the pages while a build runs — nothing moves (no spinner, running seconds or LaTeX
+  // output; latexmk's last line is in the tooltip)
   const progress = pdf.busy && job ? (
     <div class="build-progress" title={job.progress}>
-      <i class="spinner" /> {PHASE[job.status] ?? job.status} · {elapsed} s{job.rerun ? ' · will build again with your latest changes' : ''}
-      {job.progress && <i class="progress-line">{job.progress}</i>}
+      Building the PDF · {PHASE[job.status] ?? job.status}{job.rerun ? ' · will build again with your latest changes' : ''}
     </div>
   ) : null;
 
@@ -98,7 +95,7 @@ export function BuiltPdf({ target: requestedTarget, onBuild, onInverse, onForwar
         {onClose && <button class="small-btn" onClick={onClose} title="Hide the PDF pane">✕</button>}
       </div>
       {pdf.url && ready
-        ? <PdfViewer url={pdf.url} target={requestedTarget ?? target} onSync={onInverse ?? ((page, x, y) => vscode.postMessage({ type: 'inverse', page, x, y }))} hint="Double-click the PDF to jump to that place in the document" busy={pdf.busy} overlay={progress} />
+        ? <PdfViewer url={pdf.url} target={requestedTarget ?? target} onSync={onInverse ?? ((page, x, y) => vscode.postMessage({ type: 'inverse', page, x, y }))} hint="Double-click the PDF to jump to that place in the document" overlay={progress} />
         : <div class="pdf-empty">{progress}{pdf.url && !ready ? 'Loading the PDF viewer…' : pdf.busy ? 'Building the PDF in the background — you can keep editing.' : 'No PDF yet — click “Build PDF” (Ctrl+R in the editor).'}</div>}
       {(showLog || pdf.ok === false) && (
         <div class="log">{pdf.warnings.length ? 'Warnings:\n' + pdf.warnings.join('\n') + '\n\n' : ''}{pdf.log || '(no log)'}</div>
