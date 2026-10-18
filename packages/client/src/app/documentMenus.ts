@@ -36,6 +36,9 @@ export function documentMenus({ view, meta, run, runView, setDialog, textColor, 
   const markdown = meta?.format === 'markdown' || (!!view && isMarkdownDoc(viewDocId(view)));
   const tex = <T,>(entries: T[]): T[] => (markdown ? [] : entries);
   const tableWidth = view && !markdown ? T.tableToolbarState(view.state).tableWidth : null;
+  // the Table entries act on the table the cursor is in: greyed out anywhere else
+  const inTable = !!view && !!C.tableContext(view.state);
+  const tableOnly = (entries: MenuEntry[]): MenuEntry[] => (inTable ? entries : entries.map(e => (e.sep ? e : { ...e, disabled: true })));
   const md = <T,>(entries: T[]): T[] => (markdown ? entries : []);
   // the Modern interface assumes nobody comes from LyX: plain names (the Classic label stays the
   // entry's id, so custom keys and the statistics carry over), and LyX's own devices are left out
@@ -124,7 +127,7 @@ export function documentMenus({ view, meta, run, runView, setDialog, textColor, 
         { label: 'Quote', shortcut: 'Alt+P Q', action: () => run(C.setKnownLayout('Quote')) },
         { ...plain('LyX-Code', 'Code'), shortcut: 'Alt+P C', action: () => run(C.setKnownLayout('LyX-Code')) },
       ] }]),
-      { label: 'Table ▸', sub: [
+      { label: 'Table ▸', sub: tableOnly([
         { label: 'Add row above', action: () => run(addRowBefore) }, { label: 'Add row below', action: () => run(addRowAfter) },
         { label: 'Add column before', action: () => run(addColumnBefore) }, { label: 'Add column after', action: () => run(addColumnAfter) },
         { label: 'Delete row', action: () => run(deleteRow) }, { label: 'Delete column', action: () => run(deleteColumn) },
@@ -150,7 +153,7 @@ export function documentMenus({ view, meta, run, runView, setDialog, textColor, 
           { sep: true },
           { label: 'Table settings…', action: () => setDialog({ name: 'tablesettings' }) },
         ]),
-      ] },
+      ]) },
       { label: 'Track Changes ▸', sub: [
         { label: 'Track changes', shortcut: 'Ctrl+Shift+E', checked: tracking, action: toggleTracking },
         { label: 'Accept change at cursor', disabled: !changeInfo, action: () => { const v = view; if (!v) return; const ch = changeAt(v.state, v.state.selection.from); if (ch) run(resolveChange(ch, true)); } },

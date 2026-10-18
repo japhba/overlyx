@@ -579,6 +579,11 @@ export function resolveChanges(ranges: readonly ChangeRange[], accept: boolean):
 }
 
 const changesOfDoc = new WeakMap<PMNode, ChangeRange[]>();
+function cachedChanges(doc: PMNode): ChangeRange[] {
+  let all = changesOfDoc.get(doc);
+  if (!all) changesOfDoc.set(doc, all = allChanges(doc));
+  return all;
+}
 
 /**
  * The change run at `pos` (`boundary`: the paragraph break that ends there) together with the runs
@@ -587,14 +592,28 @@ const changesOfDoc = new WeakMap<PMNode, ChangeRange[]>();
  * no change is there.
  */
 export function changeGroupAt(doc: PMNode, pos: number, boundary = false): ChangeRange[] | null {
-  let all = changesOfDoc.get(doc);
-  if (!all) changesOfDoc.set(doc, all = allChanges(doc));
+  const all = cachedChanges(doc);
   const i = all.findIndex(r => boundary ? r.boundary && r.from === pos : !r.boundary && r.from <= pos && pos < r.to);
   if (i < 0) return null;
   let a = i, b = i;
   while (a > 0 && all[a - 1].to === all[a].from && all[a - 1].author === all[i].author) a--;
   while (b + 1 < all.length && all[b + 1].from === all[b].to && all[b + 1].author === all[i].author) b++;
   return all.slice(a, b + 1);
+}
+
+/**
+ * The suggestions (`changeGroupAt` groups, in document order) that a selection from `from` to `to`
+ * touches: what ✓ / ✗ settles for a selection of tracked and untracked text alike.
+ */
+export function changeGroupsIn(doc: PMNode, from: number, to: number): ChangeRange[][] {
+  const groups: ChangeRange[][] = [];
+  for (const r of cachedChanges(doc)) {
+    if (r.from >= to || r.to <= from) continue;
+    if (groups.some(g => g.includes(r))) continue;
+    const g = changeGroupAt(doc, r.from, !!r.boundary);
+    if (g) groups.push(g);
+  }
+  return groups;
 }
 
 /* ------------------------------------------------ display filter (insertions / deletions) */

@@ -87,6 +87,12 @@ export function SelectionBar({ view, groups }: { view: EditorView | null; groups
           if (y < pane.top + 4) y = bottom + gap;
           if (y + h > pane.bottom - 4) y = Math.max(pane.top + 4, top - h - gap);
           const left = Math.max(pane.left + 4, Math.min(a.left - 6, pane.right - w - 4));
+          // the ✓ / ✗ of the tracked changes in the selection (editor/plugins/changeactions.ts) stays right at the text: go past it
+          const changes = document.querySelector<HTMLElement>('body > .change-actions');
+          if (changes && changes.style.visibility !== 'hidden') {
+            const r = changes.getBoundingClientRect();
+            if (left < r.right && left + w > r.left && y < r.bottom + 2 && y + h > r.top - 2) y = y + h / 2 <= (r.top + r.bottom) / 2 ? r.top - h - 4 : r.bottom + 4;
+          }
           // (left / top, not a transform: a transformed parent would carry the palettes' fixed popups along)
           el.style.left = `${Math.round(left)}px`;
           el.style.top = `${Math.round(y)}px`;

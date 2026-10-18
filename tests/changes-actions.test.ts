@@ -3,14 +3,15 @@
  * Accept / reject in the text (editor/plugins/changeactions.ts): the bar over a tracked change
  * shows its author and date, and one click settles the change together with the runs touching it
  * by the same author (`changeGroupAt`) — a replacement or a suggestion across a paragraph break is
- * one decision. Not on a read-only editor.
+ * one decision. A selection of tracked and untracked text brings it up for every suggestion it
+ * touches (`changeGroupsIn`). Not on a read-only editor.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { EditorState } from 'prosemirror-state';
+import { EditorState, TextSelection } from 'prosemirror-state';
 import { EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
 import { schema } from '../packages/core/src/schema.ts';
-import { changeGroupAt, resolveChanges } from '../packages/client/src/editor/plugins/changes.ts';
+import { changeGroupAt, changeGroupsIn, resolveChanges } from '../packages/client/src/editor/plugins/changes.ts';
 import { changeActionsPlugin, shortChangeDate } from '../packages/client/src/editor/plugins/changeactions.ts';
 import { editorContext } from '../packages/client/src/editor/context.ts';
 
@@ -58,6 +59,14 @@ describe('changeGroupAt: what one ✓ / ✗ settles', () => {
     expect(plain(settle(doc, 7, false))).toEqual(['Keep gone', 'also gone rest']);
   });
 
+  it('a selection touches whole suggestions: the replacement it cuts into, the other author\'s insertion, not untracked text', () => {
+    const doc = replacement();   // Hello |old|new|!| world: "old" 7–10, "new" 10–13, "!" 13–14
+    const texts = (from: number, to: number) => changeGroupsIn(doc, from, to).map(g => g.map(r => doc.textBetween(r.from, r.to)));
+    expect(texts(2, 8)).toEqual([['old', 'new']]);
+    expect(texts(2, 16)).toEqual([['old', 'new'], ['!']]);
+    expect(texts(14, 18)).toEqual([]);
+  });
+
   it('unchanged text between two changes separates them', () => {
     const doc = docOf(par([text('a', change('inserted')), text(' b '), text('c', change('inserted'))]));
     expect(changeGroupAt(doc, 1)!.length).toBe(1);
@@ -102,6 +111,34 @@ describe('the bar over a change', () => {
     expect(bar.querySelector('.change-action.reject')!.getAttribute('title')).toBe('Reject this insertion');
     (bar.querySelector('.change-action.reject') as HTMLElement).click();
     expect(plain(view.state.doc)).toEqual(['Hello oldnew world']);
+  });
+
+  const select = (from: number, to: number) => { view.focus(); view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, from, to))); };
+
+  it('over a selection of tracked and untracked text, once the mouse is released: ✓ accepts every suggestion it touches', () => {
+    view.dom.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }));
+    select(2, 16);   // "ello oldnew! wo"
+    expect(document.querySelector('.change-actions')).toBeNull();   // still selecting
+    window.dispatchEvent(new PointerEvent('pointerup', { button: 0 }));
+    const bar = document.querySelector('.change-actions')!;
+    expect(bar).not.toBeNull();
+    expect(bar.querySelector('.change-actions-author')!.textContent).toBe('Ada Lovelace, Bob');
+    expect(bar.querySelector('.change-actions-date')!.textContent).toBe('2 changes');
+    expect(bar.querySelector('.change-action.accept')!.getAttribute('title')).toBe('Accept the 2 changes in the selection');
+    (bar.querySelector('.change-action.accept') as HTMLElement).click();
+    expect(plain(view.state.doc)).toEqual(['Hello new! world']);
+    expect(document.querySelector('.change-actions')).toBeNull();
+  });
+
+  it('a selection taking in one suggestion is that suggestion\'s bar; untracked text alone brings none', () => {
+    select(2, 8);
+    const bar = document.querySelector('.change-actions')!;
+    expect(bar.querySelector('.change-actions-author')!.textContent).toBe('Ada Lovelace');
+    expect(bar.querySelector('.change-action.reject')!.getAttribute('title')).toBe('Reject this change');
+    (bar.querySelector('.change-action.reject') as HTMLElement).click();
+    expect(plain(view.state.doc)).toEqual(['Hello old! world']);
+    select(12, 16);   // "worl"
+    expect(document.querySelector('.change-actions')).toBeNull();
   });
 
   it('not on a read-only document', () => {

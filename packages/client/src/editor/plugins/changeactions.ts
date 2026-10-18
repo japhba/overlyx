@@ -5,12 +5,15 @@
  * once the caret got there by a click or a key (not while typing: every typed suggestion would
  * bring it up). One click settles the change and the runs touching it by the same author, so a
  * replacement (the deletion and its insertion) or a suggestion across paragraph breaks is one
- * decision (`changeGroupAt`); hovering ✓ or ✗ shades what it applies to. Not while the document is
- * read-only. The bar lives outside the editor's DOM, so it never shifts the text.
+ * decision (`changeGroupAt`); hovering ✓ or ✗ shades what it applies to. A selection of text
+ * that takes in tracked changes — untracked text around and between them too — brings the bar up at
+ * its start once the mouse button is released, for every suggestion the selection touches (Word's
+ * Accept / Reject on a selection; app/SelectionBar.tsx steps aside above it). Not while the
+ * document is read-only. The bar lives outside the editor's DOM, so it never shifts the text.
  */
-import { Plugin, PluginKey, type EditorState } from 'prosemirror-state';
+import { Plugin, PluginKey, TextSelection, type EditorState } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
-import { changeAt, changeGroupAt, changeAuthorName, resolveChanges, type ChangeRange } from './changes';
+import { changeAt, changeGroupAt, changeGroupsIn, changeAuthorName, resolveChanges, type ChangeRange } from './changes';
 import { menuIcon } from '../menuicons';
 
 /** whether the last document change was made here (typing, a paste…) rather than arriving from a collaborator */
@@ -58,6 +61,8 @@ class ChangeActions {
   /** the caret may bring the bar up: it moved by a click or a key since the last edit made here */
   private caret = false;
   private overBar = false;
+  /** the mouse button is down in the text: a selection is still being made */
+  private choosing = false;
   private hideTimer: ReturnType<typeof setTimeout> | undefined;
   private shades: HTMLElement[] = [];
 
@@ -66,6 +71,9 @@ class ChangeActions {
     view.dom.addEventListener('mouseout', this.onOut);
     view.dom.addEventListener('blur', this.onBlur);
     view.dom.addEventListener('contextmenu', this.onContextMenu);
+    view.dom.addEventListener('pointerdown', this.onDown);
+    window.addEventListener('pointerup', this.onUp);
+    window.addEventListener('pointercancel', this.onUp);
     window.addEventListener('scroll', this.onScroll, true);
     window.addEventListener('resize', this.onScroll);
   }
@@ -83,6 +91,9 @@ class ChangeActions {
     dom.removeEventListener('mouseout', this.onOut);
     dom.removeEventListener('blur', this.onBlur);
     dom.removeEventListener('contextmenu', this.onContextMenu);
+    dom.removeEventListener('pointerdown', this.onDown);
+    window.removeEventListener('pointerup', this.onUp);
+    window.removeEventListener('pointercancel', this.onUp);
     window.removeEventListener('scroll', this.onScroll, true);
     window.removeEventListener('resize', this.onScroll);
     clearTimeout(this.hideTimer);
@@ -114,6 +125,8 @@ class ChangeActions {
 
   private onBlur = () => { setTimeout(() => this.render(), 0); };
   private onContextMenu = () => { this.hover = null; this.caret = false; this.hide(); };
+  private onDown = (ev: PointerEvent) => { if (ev.button === 0) this.choosing = true; };
+  private onUp = () => { if (!this.choosing) return; this.choosing = false; this.render(); };
   private onScroll = () => { if (this.bar) this.place(); if (this.shades.length) this.shade(true); };
 
   private scheduleHide(): void {
@@ -125,11 +138,19 @@ class ChangeActions {
     }, 300);
   }
 
-  /** Show the bar for what is under the pointer, else for the caret's change, else nothing. */
+  /** The suggestions a settled text selection touches (none for a caret, while the mouse is still selecting, or before a click or key). */
+  private selected(): ChangeRange[][] {
+    const view = this.view, sel = view.state.selection;
+    if (!this.caret || this.choosing || sel.empty || !(sel instanceof TextSelection) || !view.hasFocus()) return [];
+    return changeGroupsIn(view.state.doc, sel.from, sel.to);
+  }
+
+  /** Show the bar for what is under the pointer, else for the selection's changes, else for the caret's change, else nothing. */
   private render(): void {
     const view = this.view;
     if (!view.editable) { this.hover = null; this.hide(); return; }
     let group: ChangeRange[] | null = null, anchor: (() => Rect | null) | null = null;
+    const selected = this.selected();
     if (this.hover && !this.hover.el.isConnected) {
       // the paragraph was drawn again (an edit, a collaborator): the change still under the pointer
       const again = this.ownChange(document.elementFromPoint(this.hover.x, this.hover.y));
@@ -137,9 +158,18 @@ class ChangeActions {
     }
     if (this.hover) {
       const run = runOfElement(view, this.hover.el);
-      group = run && changeGroupAt(view.state.doc, run.pos, run.boundary);
-      const { el, line } = this.hover;
-      anchor = () => { const r = el.getClientRects(); return r[Math.min(line, r.length - 1)] ?? null; };
+      const hovered = run && changeGroupAt(view.state.doc, run.pos, run.boundary);
+      // (a change the selection takes in keeps the selection's bar)
+      if (hovered && !selected.some(g => g[0] === hovered[0])) {
+        group = hovered;
+        const { el, line } = this.hover;
+        anchor = () => { const r = el.getClientRects(); return r[Math.min(line, r.length - 1)] ?? null; };
+      }
+    }
+    if (!group && selected.length) {
+      const from = view.state.selection.from;
+      this.show(selected.flat(), () => { try { return view.coordsAtPos(from, 1); } catch { return null; } }, selected.length);
+      return;
     }
     if (!group && this.caret && view.hasFocus() && view.state.selection.empty) {
       const at = changeAt(view.state, view.state.selection.from);
@@ -151,14 +181,15 @@ class ChangeActions {
     this.show(group, anchor);
   }
 
-  private show(group: ChangeRange[], anchor: () => Rect | null): void {
+  /** `count`: how many suggestions `group` holds (a selection's); their authors are named, and their number stands for the date. */
+  private show(group: ChangeRange[], anchor: () => Rect | null, count = 1): void {
     this.group = group;
     this.anchor = anchor;
     const last = group.reduce((t, r) => Math.max(t, r.time || 0), 0);
-    const author = group[0].author;
+    const authors = [...new Set(group.map(r => r.author))];
     const kinds = new Set(group.map(r => r.type));
     const kind = kinds.size > 1 ? 'change' : kinds.has('deleted') ? 'deletion' : 'insertion';
-    const key = `${author}:${last}:${kind}`;
+    const key = `${authors.join(',')}:${last}:${kind}:${count}`;
     if (!this.bar) this.bar = this.build();
     const bar = this.bar;
     if (bar.dataset.key !== key) {
@@ -166,16 +197,20 @@ class ChangeActions {
       const who = bar.querySelector('.change-actions-author') as HTMLElement;
       const dot = bar.querySelector('.change-actions-dot') as HTMLElement;
       const when = bar.querySelector('.change-actions-date') as HTMLElement;
-      const name = changeAuthorName(author);
+      const names = authors.map(changeAuthorName);
+      const name = names.length > 2 ? `${names.length} people` : names.join(', ');
       who.textContent = name;
-      dot.dataset.author = String(author);
+      // (one author's colour; the kind's when there are several)
+      if (authors.length === 1) dot.dataset.author = String(authors[0]); else delete dot.dataset.author;
       dot.dataset.kind = kind;
-      when.textContent = shortChangeDate(last);
-      const full = `${kind === 'deletion' ? 'Deleted' : kind === 'insertion' ? 'Inserted' : 'Changed'} by ${name}${last ? ' on ' + new Date(last * 1000).toLocaleString() : ''}`;
+      when.textContent = count > 1 ? `${count} changes` : shortChangeDate(last);
+      const full = count > 1
+        ? `${count} changes by ${names.join(', ')} in the selection`
+        : `${kind === 'deletion' ? 'Deleted' : kind === 'insertion' ? 'Inserted' : 'Changed'} by ${name}${last ? ' on ' + new Date(last * 1000).toLocaleString() : ''}`;
       (bar.querySelector('.change-actions-info') as HTMLElement).title = full;
       for (const [cls, verb] of [['accept', 'Accept'], ['reject', 'Reject']] as const) {
         const b = bar.querySelector('.change-action.' + cls) as HTMLElement;
-        b.title = `${verb} this ${kind}`;
+        b.title = count > 1 ? `${verb} the ${count} changes in the selection` : `${verb} this ${kind}`;
         b.setAttribute('aria-label', b.title);
       }
     }
@@ -240,19 +275,26 @@ class ChangeActions {
     bar.style.top = y + 'px';
   }
 
-  /** Shade what ✓ / ✗ applies to (drawn over the page, not in the editor's DOM). */
+  /** Shade what ✓ / ✗ applies to (drawn over the page, not in the editor's DOM): each stretch of touching runs, not the text between. */
   private shade(on: boolean): void {
     for (const s of this.shades) s.remove();
     this.shades = [];
     const group = this.group;
     if (!on || !group) return;
+    const stretches: [number, number][] = [];
+    for (const r of group) {
+      const last = stretches[stretches.length - 1];
+      if (last && r.from <= last[1]) last[1] = Math.max(last[1], r.to); else stretches.push([r.from, r.to]);
+    }
     let rects: DOMRect[] = [];
     try {
-      const s = this.view.domAtPos(group[0].from), e = this.view.domAtPos(group[group.length - 1].to);
-      const range = document.createRange();
-      range.setStart(s.node, s.offset);
-      range.setEnd(e.node, e.offset);
-      rects = Array.from(range.getClientRects()).filter(r => r.width > 0 && r.height > 0);
+      for (const [from, to] of stretches) {
+        const s = this.view.domAtPos(from), e = this.view.domAtPos(to);
+        const range = document.createRange();
+        range.setStart(s.node, s.offset);
+        range.setEnd(e.node, e.offset);
+        rects.push(...Array.from(range.getClientRects()).filter(r => r.width > 0 && r.height > 0));
+      }
     } catch { return; }
     // the boxes of elements inside the range repeat their text's boxes: keep the outermost
     rects.sort((p, q) => q.width * q.height - p.width * p.height);
