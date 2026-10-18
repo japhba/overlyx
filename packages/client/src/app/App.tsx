@@ -526,6 +526,15 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   const [findRegex, setFindRegex] = useState(false), [findMath, setFindMath] = useState(false), [findSel, setFindSel] = useState(false);
   const [findAdv, setFindAdv] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  // the documents panel reports the project (and so the Share button); while it is hidden (closed,
+  // folded beside the PDF, a phone's drawer) the open document's project is looked up here instead
+  const docProject = docId ? projectOfDoc(docId.replace(/^(text|pdf):/, '')) : null;
+  useEffect(() => {
+    if (showFiles || !docProject || curProject?.name === docProject) return;
+    let live = true;
+    api.projects().then(r => { if (live) setCurProject(r.projects.find(p => p.name === docProject) ?? null); }).catch(() => {});
+    return () => { live = false; };
+  }, [showFiles, docProject, curProject?.name, refreshKey]);
   const [selVersion, setSelVersion] = useState(0);
   const [docTick, setDocTick] = useState(0);
   const [selTick, setSelTick] = useState(0);
