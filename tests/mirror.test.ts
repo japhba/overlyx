@@ -45,6 +45,14 @@ describe('mirror', () => {
     expect(mirror.mirrorConfigured()).toBe(true);
   });
 
+  it('projects whose plain names coincide get repositories of their own (a force push must not replace another backup)', async () => {
+    // `jan/a b` and `jan/a-b` both come out as jan-a-b
+    const first = await mirror.statusOf('jan/a b'), second = await mirror.statusOf('jan/a-b');
+    expect(first.repo).toBe('jan-a-b');
+    expect(second.repo).toMatch(/^jan-a-b-[0-9a-f]{8}$/);
+    expect((await mirror.statusOf('jan/a b')).repo).toBe('jan-a-b');   // a row keeps its name
+  });
+
   it('pushes the project with its history and records what was pushed', async () => {
     const st = await mirror.pushProject(PROJECT);
     expect(st.lastError).toBeNull();

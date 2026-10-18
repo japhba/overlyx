@@ -131,7 +131,8 @@ ${error ? `<p class="err">${esc(error)}</p>` : ''}<form method="post" action="/o
   r.get('/authorize', (req, res) => {
     const v = checkAuthorize(req, res);
     if (!v) return;
-    if (!req.user) {
+    // a guest (in through a share link) has no projects of their own to hand out
+    if (!req.user || req.user.guest) {
       page(res, 200, `<h2>Sign in first</h2><p><b>${esc(v.client.name)}</b> asks to connect to your OverLyX projects, but this browser is not signed in.</p><p><a class="btn" href="/" target="_blank" rel="noreferrer">Open OverLyX and sign in</a></p><p><a class="btn primary" href="${esc(req.originalUrl)}">I signed in — continue</a></p>`);
       return;
     }
@@ -141,7 +142,7 @@ ${error ? `<p class="err">${esc(error)}</p>` : ''}<form method="post" action="/o
   r.post('/authorize', (req, res) => {
     const v = checkAuthorize(req, res);
     if (!v) return;
-    if (!req.user) { page(res, 401, '<h2>Not signed in</h2><p class="muted">The session expired — reopen the authorization link.</p>'); return; }
+    if (!req.user || req.user.guest) { page(res, 401, '<h2>Not signed in</h2><p class="muted">The session expired — reopen the authorization link.</p>'); return; }
     const u = new URL(v.redirectUri);
     if (v.state) u.searchParams.set('state', v.state);
     u.searchParams.set('iss', oauthBase(req));   // RFC 9207 — lets ChatGPT use its stable redirect URI

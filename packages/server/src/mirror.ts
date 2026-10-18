@@ -18,6 +18,7 @@
  *
  * Status per project is kept in the `mirrors` table and shown in the Git dialog.
  */
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
@@ -26,6 +27,7 @@ import { config } from './config.ts';
 import { db } from './db.ts';
 import { listProjects } from './projects.ts';
 import { projectRow } from './access.ts';
+import { canonicalProject } from './namespaces.ts';
 import { git, gitEnv, ensureRepo, commitProject, withRepoLock, hasRepo } from './git.ts';
 
 const execFileP = promisify(execFile);
@@ -63,8 +65,35 @@ export function mirrorRow(project: string): MirrorRow | undefined {
   return db.prepare('SELECT * FROM mirrors WHERE project = ?').get(project) as MirrorRow | undefined;
 }
 function ensureRow(project: string): MirrorRow {
-  db.prepare('INSERT OR IGNORE INTO mirrors (project, repo, enabled) VALUES (?, ?, 1)').run(project, repoNameFor(project));
+  const row = mirrorRow(project);
+  if (row) return row;
+  db.prepare('INSERT OR IGNORE INTO mirrors (project, repo, enabled) VALUES (?, ?, 1)').run(project, freeRepoName(project));
   return mirrorRow(project)!;
+}
+
+/** the repository name with a part of the key's hash: what a project gets whose plain name is another's */
+function hashedRepoName(project: string): string {
+  return `${repoNameFor(project)}-${crypto.createHash('sha1').update(project).digest('hex').slice(0, 8)}`;
+}
+
+/**
+ * A repository name no other project's mirror has. `repoNameFor` is not one-to-one (`a-b/c`,
+ * `a/b-c` and `a/b c` all give `a-b-c`), and a force push to a shared name would replace one
+ * project's backup with another's history.
+ */
+function freeRepoName(project: string): string {
+  const plain = repoNameFor(project);
+  return db.prepare('SELECT 1 FROM mirrors WHERE repo = ? AND project != ?').get(plain, project) ? hashedRepoName(project) : plain;
+}
+
+/**
+ * Whether a repository on GitHub was made for another project: the description it was created with
+ * names a project that is neither this one nor a former key of it (namespaces.ts). A repository
+ * without that description is not claimed by anyone.
+ */
+function madeForAnother(description: unknown, project: string): boolean {
+  const m = /^OverLyX mirror of "(.*)"$/.exec(typeof description === 'string' ? description : '');
+  return !!m && m[1] !== project && canonicalProject(m[1]) !== project;
 }
 
 export function setMirrorEnabled(project: string, enabled: boolean): void {
@@ -89,11 +118,14 @@ async function gh(method: string, pathname: string, body?: unknown): Promise<{ s
   return { status: res.status, json };
 }
 
-/** repositories verified (or created) in this process */
+/** repositories verified (or created) in this process, as `<repo> <project>` */
 const known = new Set<string>();
 
+/** A repository of another project (madeForAnother): this project's mirror goes elsewhere. */
+class RepoTaken extends Error {}
+
 async function ensureRemoteRepo(repo: string, project: string): Promise<void> {
-  if (known.has(repo)) return;
+  if (known.has(`${repo} ${project}`)) return;
   if (config.mirror.urlTemplate) {
     const url = remoteUrl(repo);
     if (url.startsWith('file://')) {
@@ -103,18 +135,20 @@ async function ensureRemoteRepo(repo: string, project: string): Promise<void> {
         await execFileP('git', ['init', '-q', '--bare', '-b', 'main', dir], { env: gitEnv() });
       }
     }
-    known.add(repo);
+    known.add(`${repo} ${project}`);
     return;
   }
   const org = config.mirror.org;
   const r = await gh('GET', `/repos/${org}/${repo}`);
   if (r.status === 200) {
+    // (an archived one of a deleted project too: it stays that project's until its trash expires)
+    if (madeForAnother(r.json?.description, project)) throw new RepoTaken(`${org}/${repo} is the mirror of another project`);
     // a project deleted earlier and created again: its archived mirror is reopened
     if (r.json?.archived) {
       const u = await gh('PATCH', `/repos/${org}/${repo}`, { archived: false });
       if (u.status !== 200) throw new Error(`GitHub: cannot unarchive ${org}/${repo}: ${u.status} ${u.json?.message ?? ''}`);
     }
-    known.add(repo);
+    known.add(`${repo} ${project}`);
     return;
   }
   if (r.status !== 404) throw new Error(`GitHub: ${r.status} ${r.json?.message ?? 'cannot read the repository'}`);
@@ -124,7 +158,22 @@ async function ensureRemoteRepo(repo: string, project: string): Promise<void> {
   });
   if (c.status !== 201) throw new Error(`GitHub: cannot create ${org}/${repo}: ${c.status} ${c.json?.message ?? ''}`);
   console.log(`[mirror] created ${org}/${repo}`);
-  known.add(repo);
+  known.add(`${repo} ${project}`);
+}
+
+/** The project's repository on GitHub, made if missing — under the hashed name when the plain one is another project's. */
+async function claimRemoteRepo(row: MirrorRow): Promise<string> {
+  try {
+    await ensureRemoteRepo(row.repo, row.project);
+    return row.repo;
+  } catch (e) {
+    const alt = hashedRepoName(row.project);
+    if (!(e instanceof RepoTaken) || row.repo === alt) throw e;
+    await ensureRemoteRepo(alt, row.project);
+    db.prepare('UPDATE mirrors SET repo = ? WHERE project = ?').run(alt, row.project);
+    console.log(`[mirror] "${row.project}" mirrors to ${alt}: ${row.repo} belongs to another project`);
+    return alt;
+  }
 }
 
 /** Archive the mirror of a deleted project (best effort): restorable while the project is in the trash. */
@@ -142,7 +191,7 @@ export async function archiveMirror(project: string): Promise<void> {
 
 /** Remove a mirror repository for good (best effort; a failure is logged for the operator to finish by hand). */
 async function deleteRepo(repo: string): Promise<boolean> {
-  known.delete(repo);
+  for (const k of known) if (k.startsWith(repo + ' ')) known.delete(k);
   if (config.mirror.urlTemplate) {
     const u = remoteUrl(repo);
     if (u.startsWith('file://')) fs.rmSync(new URL(u).pathname, { recursive: true, force: true });
@@ -161,7 +210,15 @@ async function deleteRepo(repo: string): Promise<boolean> {
 export async function deleteMirror(project: string): Promise<void> {
   const row = mirrorRow(project);
   db.prepare('DELETE FROM mirrors WHERE project = ?').run(project);
-  await deleteRepo(row?.repo ?? repoNameFor(project));
+  if (row) { await deleteRepo(row.repo); return; }
+  // no row (archived when the project was deleted): only a repository made for this project
+  for (const repo of [repoNameFor(project), hashedRepoName(project)]) {
+    if (config.mirror.urlTemplate) { if (repo === repoNameFor(project)) await deleteRepo(repo); continue; }
+    try {
+      const r = await gh('GET', `/repos/${config.mirror.org}/${repo}`);
+      if (r.status === 200 && !madeForAnother(r.json?.description, project)) await deleteRepo(repo);
+    } catch { /* gone, or GitHub unreachable: left to delete by hand */ }
+  }
 }
 
 /**
@@ -170,14 +227,16 @@ export async function deleteMirror(project: string): Promise<void> {
  */
 export async function deleteArchivedMirror(project: string): Promise<void> {
   if (mirrorRow(project)) return;   // a live project of that name
-  const repo = repoNameFor(project);
-  if (!config.mirror.urlTemplate && mirrorConfigured()) {
-    try {
-      const r = await gh('GET', `/repos/${config.mirror.org}/${repo}`);
-      if (r.status !== 200 || !r.json?.archived) return;
-    } catch { return; }
+  for (const repo of [repoNameFor(project), hashedRepoName(project)]) {
+    if (!config.mirror.urlTemplate && mirrorConfigured()) {
+      try {
+        const r = await gh('GET', `/repos/${config.mirror.org}/${repo}`);
+        // (one of the same name made for another project is that project's)
+        if (r.status !== 200 || !r.json?.archived || madeForAnother(r.json?.description, project)) continue;
+      } catch { continue; }
+    } else if (repo !== repoNameFor(project)) continue;
+    await deleteRepo(repo);
   }
-  await deleteRepo(repo);
 }
 
 /* -------------------------------------------------------------------- push */
@@ -197,9 +256,9 @@ export async function pushProject(project: string, opts: { force?: boolean } = {
   if (!head) return statusOf(project);
   if (head === row.last_head && !row.last_error && !opts.force) return statusOf(project);
   try {
-    await ensureRemoteRepo(row.repo, project);
+    const repo = await claimRemoteRepo(row);
     await withRepoLock(project, async () => {
-      const url = remoteUrl(row.repo);
+      const url = remoteUrl(repo);
       const remotes = (await git(project, ['remote'])).split('\n').map(s => s.trim());
       await git(project, remotes.includes('mirror') ? ['remote', 'set-url', 'mirror', url] : ['remote', 'add', 'mirror', url]);
       const env = { OVERLYX_MIRROR_TOKEN: config.mirror.token };
@@ -207,7 +266,7 @@ export async function pushProject(project: string, opts: { force?: boolean } = {
       await git(project, [...CREDENTIALS, 'push', '--quiet', '--force', '--tags', 'mirror'], { env });
     });
     db.prepare('UPDATE mirrors SET last_head = ?, last_push_at = ?, last_attempt_at = ?, last_error = NULL WHERE project = ?').run(head, Date.now(), Date.now(), project);
-    console.log(`[mirror] pushed "${project}" → ${row.repo} (${head.slice(0, 7)})`);
+    console.log(`[mirror] pushed "${project}" → ${repo} (${head.slice(0, 7)})`);
   } catch (e) {
     const msg = String((e as Error).message ?? e).replace(/x-access-token:[^@\s]*@/g, '').slice(0, 500);
     db.prepare('UPDATE mirrors SET last_attempt_at = ?, last_error = ? WHERE project = ?').run(Date.now(), msg, project);

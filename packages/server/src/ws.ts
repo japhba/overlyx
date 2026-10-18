@@ -120,14 +120,21 @@ export function attachWebSocket(server: Server): void {
     if (!originAllowed(req)) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); socket.destroy(); return; }
     const user = userFromCookieHeader(req.headers.cookie);
     if (!user) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); socket.destroy(); return; }
-    // an id from before its project moved (namespaces.ts) joins the document under its current key
-    const docId = canonicalDocId(decodeURIComponent(url.searchParams.get('doc') ?? ''));
-    const { project, path: rel } = splitDocId(docId);
-    const role = roleFor(user, project);
-    if (!role) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); socket.destroy(); return; }
-    logAccess(project, user.id, 'open', rel || null);
-    markDocOpened(user.id, docId);
-    wss.handleUpgrade(req, socket, head, (ws) => void handleConnection(ws, docId, user, role === 'view'));
+    // (an exception in this listener would take the whole server down: answer it instead)
+    try {
+      // an id from before its project moved (namespaces.ts) joins the document under its current key
+      // (searchParams decodes it already: a second decode broke on a '%' in a file name)
+      const docId = canonicalDocId(url.searchParams.get('doc') ?? '');
+      const { project, path: rel } = splitDocId(docId);
+      const role = roleFor(user, project);
+      if (!role) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); socket.destroy(); return; }
+      logAccess(project, user.id, 'open', rel || null);
+      markDocOpened(user.id, docId);
+      wss.handleUpgrade(req, socket, head, (ws) => void handleConnection(ws, docId, user, role === 'view'));
+    } catch (e) {
+      console.error('[ws] upgrade failed:', e);
+      try { socket.write('HTTP/1.1 400 Bad Request\r\n\r\n'); socket.destroy(); } catch { /* gone */ }
+    }
   });
 
   wss.on('error', (e) => console.error('wss error', e));
@@ -142,6 +149,14 @@ export function originAllowed(req: IncomingMessage): boolean {
   if (host === req.headers.host) return true;
   if (config.publicUrl) { try { if (host === new URL(config.publicUrl).host) return true; } catch { /* ignore */ } }
   return /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host) && process.env.NODE_ENV !== 'production';
+}
+
+/** Whether the user still has the role a connection was opened with (an error counts as no). */
+function roleStillHolds(user: SessionUser, project: string, readOnly: boolean): boolean {
+  try {
+    const role = roleFor(user, project);
+    return !!role && (role === 'view') === readOnly;
+  } catch { return false; }
 }
 
 async function handleConnection(conn: WebSocket, docId: string, user: SessionUser, readOnly: boolean): Promise<void> {
@@ -217,6 +232,10 @@ async function handleConnection(conn: WebSocket, docId: string, user: SessionUse
     if (!doc.conns.has(conn)) { clearInterval(ping); return; }
     tick++;
     if (tick % 3 === 0) {
+      // the role was decided at the upgrade: whatever ended or changed it since (an administrator's
+      // grant running out, an e-mail invitation withdrawn, …) closes the connection like a kick —
+      // the client reconnects and learns its new role, or that it has none
+      if (!roleStillHolds(user, doc.project, readOnly)) { try { conn.close(4003, 'access changed'); } catch { /* ignore */ } closeConn(doc, conn); clearInterval(ping); return; }
       if (!pongReceived) { closeConn(doc, conn); clearInterval(ping); return; }
       pongReceived = false;
       try { conn.ping(); } catch { closeConn(doc, conn); clearInterval(ping); return; }

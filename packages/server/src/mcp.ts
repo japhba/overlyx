@@ -1169,14 +1169,14 @@ async function handle(req: Request, res: Response): Promise<void> {
   const identity = verifyMcpToken(m[1]);
   if (!identity) { res.setHeader('WWW-Authenticate', wwwAuthenticate(req)); res.status(401).json({ error: 'invalid or expired token' }); return; }
   const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(identity.userId) as UserRow | undefined;
-  if (!userRow) { res.status(403).json({ error: 'the account behind this token no longer exists' }); return; }
-  const user: SessionUser = { ...toSessionUser(userRow), ...(identity.scope ? { scope: identity.scope } : {}) };
+  if (!userRow || userRow.is_guest) { res.status(403).json({ error: 'the account behind this token no longer exists' }); return; }
+  // no agent ever works through an administrator's temporary grant on someone else's project: that
+  // holds in the browser only, where it was asked for and is logged (access.ts adminGrantActive)
+  const user: SessionUser = { ...toSessionUser(userRow), isAdmin: false, ...(identity.scope ? { scope: identity.scope } : {}) };
   if (identity.name === PANEL_AGENT) {
     // the Agent panel's own agent: one credential per account, narrowed per thread — to the
-    // thread's project when the user chose so (agent.ts panelThreadScope) — and never through an
-    // administrator's temporary grant on someone else's project
+    // thread's project when the user chose so (agent.ts panelThreadScope)
     const scope = panelThreadScope(identity.userId, req.header('x-overlyx-thread'));
-    user.isAdmin = false;
     if (scope) user.scope = scope;
   }
   if (project !== null) {

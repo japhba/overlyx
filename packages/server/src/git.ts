@@ -34,6 +34,7 @@ import { createOwnedProject } from './projectCreate.ts';
 import { buildIncluding, buildErrors, errorLocations, lastBuild } from './export.ts';
 import { canonicalProject } from './namespaces.ts';
 import { verifyAccessToken } from './tokenAuth.ts';
+import { PANEL_AGENT } from './agentwork.ts';
 import { sendFileAt } from './confined.ts';
 
 const execFileP = promisify(execFile);
@@ -443,11 +444,15 @@ export function deleteToken(userId: number, id: number): boolean {
  */
 export function userForCredentials(username: string, secret: string): SessionUser | null {
   const row = db.prepare('SELECT * FROM users WHERE username = ?').get(username.trim().toLowerCase()) as UserRow | undefined;
-  if (!row || !secret) return null;
+  if (!row || !secret || row.is_guest) return null;
+  // an administrator's temporary grant on somebody else's project holds in the browser only, where
+  // it was asked for and is logged — never through git, the CLI or a sync (access.ts adminGrantActive)
+  const user: SessionUser = { ...toSessionUser(row), isAdmin: false };
   const token = verifyAccessToken(secret);
-  if (token) return token.userId === row.id ? { ...toSessionUser(row), ...(token.scope ? { scope: token.scope } : {}) } : null;
+  // the Agent panel's credential is narrowed per thread on /mcp only (agent.ts panelThreadScope): here it would be the whole account
+  if (token) return token.userId === row.id && token.name !== PANEL_AGENT ? { ...user, ...(token.scope ? { scope: token.scope } : {}) } : null;
   if (secret.startsWith('olx_') || secret.startsWith('olxmcp_')) return null; // invalid/revoked token: never try it as a password
-  return verifyPassword(secret, row.password_hash) ? toSessionUser(row) : null;
+  return verifyPassword(secret, row.password_hash) ? user : null;
 }
 
 /* ------------------------------------------------------------------ smart HTTP */

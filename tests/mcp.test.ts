@@ -880,16 +880,19 @@ describe("what the Agent panel's agent reaches (its thread's scope: agent.ts pan
     await expect(callAs(panel, null, 'read_document', { project: 'owner/p', path: 'main.tex' })).rejects.toThrow(/no access/);
   });
 
-  it("an administrator's temporary grant on someone else's project does not reach the panel's agent", async () => {
-    const { grantAdminAccess } = await import('../packages/server/src/access.ts');
+  it("an administrator's temporary grant on someone else's project reaches no agent (it holds in the browser only)", async () => {
+    const { grantAdminAccess, roleFor } = await import('../packages/server/src/access.ts');
     const { toSessionUser } = await import('../packages/server/src/auth.ts');
-    grantAdminAccess(toSessionUser(db.prepare('SELECT * FROM users WHERE id = ?').get(admin.id) as never), 'bobmcp/private', 30);
+    const adminUser = toSessionUser(db.prepare('SELECT * FROM users WHERE id = ?').get(admin.id) as never);
+    grantAdminAccess(adminUser, 'bobmcp/private', 30);
+    expect(roleFor(adminUser, 'bobmcp/private')).toBe('owner');   // in the browser, where it was asked for
     thread('t-admin', admin.id, 'owner/p', null);
     const adminPanel = createMcpToken(admin.id, 'Agent panel').token;
     const other = createMcpToken(admin.id, 'agent').token;
-    expect(names(await callAs(other, null, 'list_projects', {}))).toContain('bobmcp/private');   // the admin's own connection
-    expect(names(await callAs(adminPanel, 'key-t-admin', 'list_projects', {}))).not.toContain('bobmcp/private');
-    await expect(callAs(adminPanel, 'key-t-admin', 'read_document', { project: 'bobmcp/private', path: 'main.tex' })).rejects.toThrow(/no access/);
+    for (const [token, key] of [[other, null], [adminPanel, 'key-t-admin']] as const) {
+      expect(names(await callAs(token, key, 'list_projects', {}))).not.toContain('bobmcp/private');
+      await expect(callAs(token, key, 'read_document', { project: 'bobmcp/private', path: 'main.tex' })).rejects.toThrow(/no access/);
+    }
   });
 });
 
