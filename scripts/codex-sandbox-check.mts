@@ -20,6 +20,13 @@ import os from 'node:os';
 import path from 'node:path';
 
 const BIN = process.argv[2] || process.env.OVERLYX_CODEX_BIN || 'codex';
+// this host's real places, probed from inside the sandbox too (the scratch tree alone would not
+// notice a profile that only works because the real projects and data live elsewhere)
+// (not /var/lib itself: the TeX distribution's files below it are readable on purpose)
+const realOf = (p: string) => { try { return fs.realpathSync(p); } catch { return p; } };
+const HOST_PATHS = [...new Set([process.env.OVERLYX_PROJECTS_DIR, process.env.OVERLYX_DATA_DIR, path.resolve(path.dirname(new URL(import.meta.url).pathname), '../data'),
+  path.join(os.homedir(), 'projects'), realOf(path.join(os.homedir(), 'projects')), os.homedir(), '/root', '/home', '/mnt', '/srv', '/var/lib/overlyx-maintenance']
+  .filter((p): p is string => !!p && fs.existsSync(p)))];
 // a scratch OverLyX: agent.ts must never see the real data directory (it opens the database on import)
 const R = fs.mkdtempSync(path.join(process.env.OVERLYX_SCRATCH ?? os.tmpdir(), 'codex-sandbox-check-'));
 process.env.OVERLYX_DATA_DIR = path.join(R, 'data');
@@ -179,6 +186,8 @@ try {
     { cmd: `cat ${other}/notes.tex`, escalate: true },
     { tool: 'view_image', args: { path: path.join(other, 'img.png') } },
     { cmd: pdflatex ? 'pdflatex -interaction=nonstopmode -halt-on-error paper.tex >/dev/null 2>&1; echo PDFLATEX=$?' : 'echo PDFLATEX=0' },
+    // (only whether: nothing of what might be there is printed)
+    { cmd: `for p in ${HOST_PATHS.map(p => `'${p}'`).join(' ')}; do ls "$p" >/dev/null 2>&1 && echo "LISTED $p"; done; grep -l SECRET-TOKEN /proc/[0-9]*/environ 2>/dev/null | sed 's/^/ENVLEAK /'; echo PROBED` },
   ]);
   const listing = out[0]?.split('LISTING')[1] ?? '';
   check('another user\'s project is invisible', !!out[0]?.includes('NO-NOTES') && !out[0].includes('SECRET-BOB') && /\balice\b/.test(listing) && !/\bbob\b/.test(listing), out[0]);
@@ -187,6 +196,7 @@ try {
   check('no escalation out of the sandbox', out[3] !== undefined && !out[3].includes('SECRET-BOB') && !approvalsAsked.length, `${out[3]} approvals: ${approvalsAsked.join(', ')}`);
   check('codex\'s own file tools stay in the sandbox (view_image)', out[4] !== undefined && !/image_url|data:image/.test(out[4]) && /unable|no such|not found|denied/i.test(out[4]), out[4]);
   check('LaTeX builds in the working copy', out[5] !== undefined && out[5].includes('PDFLATEX=0'), out[5]);
+  check(`this host's projects, data and home directories are out of reach, and no process's environment shows the token (${HOST_PATHS.join(', ')})`, !!out[6]?.includes('PROBED') && !/LISTED|ENVLEAK/.test(out[6]), out[6]);
   check('the MCP server learns which thread calls', mcpThreads.length > 0 && mcpThreads.every(k => k === KEY), mcpThreads.join(','));
   // a resumed thread (after a codex restart — a deploy, an update) gets the same sandbox
   await stop();
