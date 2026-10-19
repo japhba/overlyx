@@ -281,6 +281,8 @@ export function trackedDelete(dir: -1 | 1): Command {
   return (state, dispatch) => {
     if (!editorContext.trackChanges || editorContext.changeAuthorId === undefined) return false;
     const sel = state.selection;
+    // Comments are edited directly, including keyboard deletions (as in appendTransaction).
+    if (inComment(state.doc, sel.from) && inComment(state.doc, sel.to)) return false;
     if (!sel.empty && !sel.$from.sameParent(sel.$to)) return false;
     let from: number, to: number;
     if (!sel.empty) { from = sel.from; to = sel.to; }
@@ -300,6 +302,7 @@ export function trackedDelete(dir: -1 | 1): Command {
     state.doc.nodesBetween(from, to, (node, pos) => {
       if (!node.isInline) return true;
       const s = Math.max(from, pos), e = Math.min(to, pos + node.nodeSize);
+      if (isComment(node)) { removals.push([s, e]); return false; }
       const ch = node.marks.find(m => m.type === schema.marks.change);
       if (ch && ch.attrs.type === 'inserted') removals.push([s, e]);
       else if (!(ch && ch.attrs.type === 'deleted')) {
