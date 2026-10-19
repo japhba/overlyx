@@ -142,7 +142,8 @@ function prepareCheckout() {
   const lock = digest(fs.readFileSync(path.join(checkout, 'package-lock.json'), 'utf8'));
   const marker = path.join(checkout, '.git', 'maintenance-dependencies');
   if (!fs.existsSync(marker) || fs.readFileSync(marker, 'utf8') !== lock) {
-    const modules = [path.join(checkout, 'node_modules'), ...fs.readdirSync(path.join(checkout, 'packages')).map(name => path.join(checkout, 'packages', name, 'node_modules'))];
+    const modules = [path.join(checkout, 'node_modules'), ...fs.readdirSync(path.join(checkout, 'packages'), { withFileTypes: true })
+      .filter(entry => entry.isDirectory()).map(entry => path.join(checkout, 'packages', entry.name, 'node_modules'))];
     for (const dir of modules) fs.rmSync(dir, { recursive: true, force: true });
     let linked = false;
     try {   // an unprivileged worker may not hardlink production's files: it installs its own
