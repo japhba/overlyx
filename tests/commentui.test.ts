@@ -1,15 +1,16 @@
 /**
  * Comment threads while writing (client editor/plugins/commentui.ts): the thread under the cursor is
  * marked, Ctrl+Enter leaves it, and a message left empty goes when the cursor leaves the thread — the
- * user's own only.
+ * user's own only. A resolved thread is not in the text (unless shown): the caret steps over it.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
-import { EditorState, TextSelection } from 'prosemirror-state';
+import { EditorState, TextSelection, type Transaction } from 'prosemirror-state';
 import type { Node as PMNode } from 'prosemirror-model';
 import { schema } from '../packages/core/src/schema.ts';
 import { commentHeader } from '../packages/core/src/index.ts';
-import { commentUiPlugin, emptyTail, threadAt } from '../packages/client/src/editor/plugins/commentui.ts';
+import { commentUiPlugin, emptyTail, threadAt, hiddenThreadsPlugin } from '../packages/client/src/editor/plugins/commentui.ts';
 import { editorContext } from '../packages/client/src/editor/context.ts';
+import { setPref } from '../packages/client/src/prefs.ts';
 
 const plain = (text = '') => schema.nodes.paragraph.create({ layout: 'Plain Layout' }, text ? schema.text(text) : undefined);
 const header = (who: string) => plain(commentHeader(who, '2026-10-10 12:00'));
@@ -69,3 +70,44 @@ describe('the plugin', () => {
     expect(b.doc.nodeAt(start)?.type.name).toBe('inset');
   });
 });
+
+describe('resolved threads are not in the text', () => {
+  const resolved = thread(plain(commentHeader('Bob', '2026-10-10 12:00', true)), plain('Old remark.'));
+  const setup = () => {
+    const doc = docWith(resolved);
+    let start = -1;
+    doc.descendants((n, pos) => { if (n.type.name === 'inset') { start = pos; return false; } return true; });
+    const plugin = hiddenThreadsPlugin();
+    const view = { state: EditorState.create({ doc, plugins: [plugin] }), dispatch(tr: Transaction) { view.state = view.state.apply(tr); } };
+    const key = (k: string) => (plugin.props.handleKeyDown as any)(view, { key: k, shiftKey: false });
+    const at = (pos: number) => { view.state = view.state.applyTransaction(view.state.tr.setSelection(TextSelection.create(view.state.doc, pos))).state; };
+    return { view, key, at, start, end: start + doc.nodeAt(start)!.nodeSize };
+  };
+  it('Backspace and Delete next to one go past it first (the key then takes the character beyond)', () => {
+    const { view, key, at, start, end } = setup();
+    at(end);
+    expect(key('Backspace')).toBe(false);
+    expect(view.state.selection.head).toBe(start);
+    expect(key('Delete')).toBe(false);
+    expect(view.state.selection.head).toBe(end);
+    expect(key('ArrowLeft')).toBe(false);
+    expect(view.state.selection.head).toBe(start);
+  });
+  it('a cursor put inside one waits right after it', () => {
+    const { view, at, start, end } = setup();
+    at(start + 3);
+    expect(view.state.selection.head).toBe(end);
+  });
+  it('shown in the text (View ▸ Resolved comments in the text), it is an inset like any other', () => {
+    setPref('showResolvedComments', true);
+    try {
+      const { view, key, at, start, end } = setup();
+      at(start + 3);
+      expect(view.state.selection.head).toBe(start + 3);
+      at(end);
+      key('Backspace');
+      expect(view.state.selection.head).toBe(end);
+    } finally { setPref('showResolvedComments', false); }
+  });
+});
+

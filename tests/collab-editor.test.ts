@@ -10,7 +10,7 @@ import { EditorState, Plugin, TextSelection } from 'prosemirror-state';
 import type { Node as PMNode } from 'prosemirror-model';
 import { EditorView } from 'prosemirror-view';
 import * as Y from 'yjs';
-import { Awareness } from 'y-protocols/awareness';
+import { Awareness, encodeAwarenessUpdate, applyAwarenessUpdate } from 'y-protocols/awareness';
 import { schema } from '@overlyx/core';
 import { Reader, writeDocument, REMOTE_META, type RemoteMeta } from '@overlyx/core/collab/index.ts';
 import { assemblePlugins, editorViewProps } from '../packages/client/src/editor/assembly.ts';
@@ -226,5 +226,31 @@ Some words here
     exchange();
     expect(a.view.state.selection.from).toBe(before + 'zero '.length);
     expect(a.view.state.doc.textBetween(a.view.state.selection.from, a.view.state.selection.from + 5)).toBe('three');
+  });
+
+  it('a cursor in a formula: its place and the cursor inside go to the other editor, whose formula draws it with the name', async () => {
+    const [a, b, exchange] = pair('Before after.');
+    a.at(' after'); a.key('m', { ctrl: true }); a.check('Ctrl+M');
+    exchange();
+    a.awareness.setLocalStateField('user', { name: 'Ada', color: '#aa3355' });
+    let pos = -1;
+    a.view.state.doc.descendants((n, p) => { if (n.type.name === 'math_inline') pos = p; });
+    const field = ((a.view.nodeDOM(pos) as any).pmViewDesc.spec).ensureField();
+    field.focus('start');
+    field.typeText('x+y');
+    exchange();
+    const cursor = a.awareness.getLocalState()?.cursor as { inner?: { head: number[][] } } | null;
+    expect(cursor?.inner?.head, 'a publishes the cursor inside the formula').toEqual([[0, 3]]);
+    applyAwarenessUpdate(b.awareness, encodeAwarenessUpdate(a.awareness, [a.awareness.clientID]), 'net');
+    await new Promise(r => setTimeout(r, 50));
+    const formula = b.view.nodeDOM(pos) as HTMLElement;
+    expect(formula.querySelector('.lm-peer .ProseMirror-yjs-cursor')?.textContent, 'b draws Ada\'s caret in the formula').toBe('Ada');
+    expect(b.view.dom.querySelectorAll('.ProseMirror-yjs-cursor').length, 'and not in the text').toBe(1);
+    // a leaves the formula: the caret goes
+    field.blur();
+    a.awareness.setLocalStateField('cursor', null);
+    applyAwarenessUpdate(b.awareness, encodeAwarenessUpdate(a.awareness, [a.awareness.clientID]), 'net');
+    await new Promise(r => setTimeout(r, 50));
+    expect(formula.querySelector('.lm-peer')).toBeNull();
   });
 });

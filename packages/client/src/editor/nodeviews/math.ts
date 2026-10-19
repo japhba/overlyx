@@ -6,9 +6,10 @@
 import type { Node as PMNode } from 'prosemirror-model';
 import { NodeSelection, TextSelection } from 'prosemirror-state';
 import { dragFromAtom, shiftClickAt } from '../plugins/dragselect';
-import type { EditorView, NodeView } from 'prosemirror-view';
+import type { Decoration, EditorView, NodeView } from 'prosemirror-view';
 import { macroFromLyxLines, parseFormula, renderHullSource, numberedType, type HullType } from '@overlyx/core';
-import { LyxMathField, renderStaticInto, activeMathField, rowRectsOf } from '../lyxmath/field';
+import { LyxMathField, renderStaticInto, activeMathField, rowRectsOf, mathCursorListeners, mathFocusListeners, type PeerCaret } from '../lyxmath/field';
+import { addInnerCursorSource, peerCursorsOf } from '../collab';
 import { onMathRendererChange } from '../lyxmath/mathjax';
 import { macroTableFor, mathViews, macroVersion, macrosReady } from '../lyxmath/macrotable';
 import { showContextMenu, type MenuItem } from '../contextmenu';
@@ -122,6 +123,31 @@ onMathRendererChange(() => {
     for (const v of near) if (macrosReady(v.view)) v.renderPending();
   }
   schedulePump();
+});
+
+/* ------------------------------------------------ cursors of others in formulas */
+
+/** where each field's formula is (its editor and position) */
+const fieldPlaces = new WeakMap<LyxMathField, { view: EditorView; pos: () => number | undefined }>();
+
+/**
+ * While a formula has the keyboard, the cursor shared with the other editors of the document is the
+ * formula's place and the cursor inside it (editor/collab.ts); theirs come back as decorations
+ * on the formula, which its field draws (peerCursorsOf).
+ */
+addInnerCursorSource({
+  local(view) {
+    const f = activeMathField();
+    const place = f && fieldPlaces.get(f);
+    if (!f || !place || place.view !== view) return null;
+    const pos = place.pos();
+    return pos === undefined ? null : { pos, cursor: f.cursorData() };
+  },
+  subscribe(cb) {
+    const f = () => cb();
+    mathCursorListeners.add(f); mathFocusListeners.add(f);
+    return () => { mathCursorListeners.delete(f); mathFocusListeners.delete(f); };
+  },
 });
 
 /* ------------------------------------------------ shared */
@@ -296,8 +322,9 @@ export class MathInlineView implements NodeView {
   /** rendered with a math font no longer chosen: rendered again in idle time */
   stale = false;
   private renderStamp = 0;
+  private peers: PeerCaret[] = [];
 
-  constructor(private node: PMNode, public view: EditorView, private getPos: () => number | undefined) {
+  constructor(private node: PMNode, public view: EditorView, private getPos: () => number | undefined, decorations?: readonly Decoration[]) {
     this.dom = document.createElement('span');
     this.dom.className = 'lyx-math-inline';
     this.review = new FormulaReview(view, getPos, false, node.attrs.editClock);
@@ -308,6 +335,15 @@ export class MathInlineView implements NodeView {
     if (pendingFocus.pos !== null && pendingFocus.pos === getPos()) this.upgrade();
     else { this.renderStaticOrDefer(); watchLazy(this); }
     this.dom.addEventListener('pointerenter', () => this.upgrade());
+    this.setPeers(peerCursorsOf(decorations));
+  }
+
+  /** others' cursors in this formula: drawn by its field */
+  private setPeers(peers: PeerCaret[]) {
+    if (!peers.length && !this.peers.length) return;
+    this.peers = peers;
+    if (peers.length) this.upgrade();
+    this.field?.setPeers(peers);
   }
 
   private ensureStaticEl(): HTMLElement {
@@ -375,6 +411,8 @@ export class MathInlineView implements NodeView {
     (f as any)._toggleDisplay = () => { this.selectSelf(); toggleMathDisplay(this.view.state, this.view.dispatch); };
     (f as any)._toTable = () => toTable(this.view, this.getPos);
     this.field = f;
+    fieldPlaces.set(f, { view: this.view, pos: this.getPos });
+    if (this.peers.length) f.setPeers(this.peers);
     this.dom.replaceChildren(f.dom);
     this.staticEl = null;
     wire(f, () => this.formulaMenu(), () => selectedFormulaItems(this.view, this.getPos, f));
@@ -412,12 +450,13 @@ export class MathInlineView implements NodeView {
     else if (this.staticKey !== key) this.renderStatic();
   }
   private selectSelf() { const pos = this.getPos(); if (pos !== undefined) this.view.dispatch(this.view.state.tr.setSelection(NodeSelection.create(this.view.state.doc, pos))); }
-  update(node: PMNode): boolean {
+  update(node: PMNode, decorations?: readonly Decoration[]): boolean {
     if (node.type !== this.node.type) return false;
     this.node = node;
     applyChangeAttrs(this.dom, node);
     const latex = String(node.attrs.latex);
     this.review.received(latex, node.attrs.editClock, !!this.field?.hasFocus());
+    this.setPeers(peerCursorsOf(decorations));
     if (this.field) {
       this.refreshMacros();
       if (latex !== this.lastLatex && !this.field.hasFocus()) {
@@ -476,8 +515,9 @@ export class MathDisplayView implements NodeView {
   /** rendered with a math font no longer chosen: rendered again in idle time */
   stale = false;
   private renderStamp = 0;
+  private peers: PeerCaret[] = [];
 
-  constructor(private node: PMNode, public view: EditorView, private getPos: () => number | undefined) {
+  constructor(private node: PMNode, public view: EditorView, private getPos: () => number | undefined, decorations?: readonly Decoration[]) {
     this.review = new FormulaReview(view, getPos, true, node.attrs.editClock);
     this.lastLatex = String(node.attrs.latex);
     this.dom = document.createElement('span');
@@ -513,6 +553,15 @@ export class MathDisplayView implements NodeView {
     if (pendingFocus.pos !== null && pendingFocus.pos === getPos()) this.upgrade();
     else { this.renderStaticOrDefer(); watchLazy(this); }
     this.dom.addEventListener('pointerenter', () => this.upgrade());
+    this.setPeers(peerCursorsOf(decorations));
+  }
+
+  /** others' cursors in this formula: drawn by its field */
+  private setPeers(peers: PeerCaret[]) {
+    if (!peers.length && !this.peers.length) return;
+    this.peers = peers;
+    if (peers.length) this.upgrade();
+    this.field?.setPeers(peers);
   }
 
   private contentEl(): HTMLElement { return this.field?.dom ?? this.staticEl!; }
@@ -572,6 +621,8 @@ export class MathDisplayView implements NodeView {
     (f as any)._toggleDisplay = () => { this.selectSelf(); toggleMathDisplay(this.view.state, this.view.dispatch); };
     (f as any)._toTable = () => toTable(this.view, this.getPos);
     this.field = f;
+    fieldPlaces.set(f, { view: this.view, pos: this.getPos });
+    if (this.peers.length) f.setPeers(this.peers);
     if (this.staticEl) { this.staticEl.replaceWith(f.dom); this.staticEl = null; } else this.dom.insertBefore(f.dom, this.metaEl);
     this.ro?.observe(f.dom);
     wire(f, () => this.formulaMenu(), () => selectedFormulaItems(this.view, this.getPos, f));
@@ -767,12 +818,13 @@ export class MathDisplayView implements NodeView {
     this.renderMeta();
   }
 
-  update(node: PMNode): boolean {
+  update(node: PMNode, decorations?: readonly Decoration[]): boolean {
     if (node.type !== this.node.type) return false;
     this.node = node;
     applyChangeAttrs(this.dom, node);
     const latex = String(node.attrs.latex);
     this.review.received(latex, node.attrs.editClock, !!this.field?.hasFocus());
+    this.setPeers(peerCursorsOf(decorations));
     if (this.field) this.refreshMacros();
     if (latex !== this.lastLatex) {
       this.lastLatex = latex;

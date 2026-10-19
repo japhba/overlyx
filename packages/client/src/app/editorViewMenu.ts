@@ -8,6 +8,7 @@ import { foldAllSections, unfoldAllSections, toggleSectionAtCursor, toggleLevelA
 import { isPresenting, togglePresentation, PRESENTATION_KEY } from './presentation';
 import { TEXT_WIDTH_RUNGS } from './Ruler';
 import { wideWidth, setWideWidth, WIDE_FULL, WIDE_TEXT } from '../editor/widecontent';
+import { getPrefs, setPref } from '../prefs';
 
 export interface ViewMenuContext {
   hostItems: MenuEntry[]; themeItems: MenuEntry[]; hostToolbars: MenuEntry[];
@@ -25,6 +26,8 @@ export function editorViewMenu({ hostItems, themeItems, hostToolbars, combined, 
       ...hostItems,
       { ...plain('Master + child documents in one view', 'Included documents in one view'), checked: combined, action: () => setCombined(!combined) },
       { label: 'Notes & comments in the margin', checked: marginMode, action: toggleMargin },
+      // resolved threads leave the text; on, a small marker stays where each was (the Comments panel lists them either way)
+      { label: 'Resolved comments in the text', checked: getPrefs().showResolvedComments, action: () => setPref('showResolvedComments', !getPrefs().showResolvedComments) },
       { ...plain('Open all insets', 'Open all footnotes, notes and boxes'), action: () => run(C.setAllInsets('open')) },
       { ...plain('Close all insets', 'Close all footnotes, notes and boxes'), action: () => run(C.setAllInsets('collapsed')) },
       // Google-Docs-style section folding (editor/plugins/fold.ts): the arrow left of a heading does it for one

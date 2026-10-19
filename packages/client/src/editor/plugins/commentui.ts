@@ -12,6 +12,7 @@ import { Decoration, DecorationSet } from 'prosemirror-view';
 import { parseHeader } from '@overlyx/core';
 import { isCommentNode } from '../commentops';
 import { editorContext } from '../context';
+import { getPrefs } from '../../prefs';
 
 export const commentUiKey = new PluginKey('ol-comment-ui');
 
@@ -81,6 +82,49 @@ export function commentUiPlugin(): Plugin {
       if (cut === 'thread') tr.delete(pos, pos + node.nodeSize);
       else tr.delete(pos + cut.from, pos + cut.to);
       return tr;
+    },
+  });
+}
+
+/** a thread marked resolved (its first message's header says so) */
+export const isResolvedThread = (n: PMNode): boolean => isCommentNode(n) && !!parseHeader((n.firstChild?.textContent ?? '').trim())?.resolved;
+const hidden = (n: PMNode | null | undefined): n is PMNode => !!n && !getPrefs().showResolvedComments && isResolvedThread(n);
+
+/**
+ * Resolved threads are not drawn in the text unless View ▸ Resolved comments in the text is on
+ * (`showResolvedComments`: the editor's `show-resolved` class, styles.css): the caret goes past one
+ * as past nothing — Backspace and Delete take the character beyond it, an arrow moves one character
+ * on — and a cursor put inside one (resolving it, the Comments panel) waits right after it.
+ */
+export function hiddenThreadsPlugin(): Plugin {
+  return new Plugin({
+    props: {
+      handleKeyDown(view, ev) {
+        const dir = ev.key === 'Backspace' || ev.key === 'ArrowLeft' ? -1 : ev.key === 'Delete' || ev.key === 'ArrowRight' ? 1 : 0;
+        if (!dir || getPrefs().showResolvedComments) return false;
+        const sel = view.state.selection;
+        const extend = ev.shiftKey && ev.key.startsWith('Arrow');
+        if (!(sel instanceof TextSelection) || (!sel.empty && !extend)) return false;
+        let p = sel.head;
+        for (;;) {
+          const $p = view.state.doc.resolve(p);
+          const n = dir < 0 ? $p.nodeBefore : $p.nodeAfter;
+          if (!hidden(n)) break;
+          p += dir * n.nodeSize;
+        }
+        if (p === sel.head) return false;
+        // past the hidden threads; the key then does what it does there
+        view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, extend ? sel.anchor : p, p)));
+        return false;
+      },
+    },
+    appendTransaction(trs, _old, state) {
+      if (getPrefs().showResolvedComments || !trs.some(tr => tr.selectionSet || tr.docChanged)) return null;
+      const $h = state.selection.$head;
+      for (let d = 1; d <= $h.depth; d++) {
+        if (hidden($h.node(d))) return state.tr.setSelection(TextSelection.near(state.doc.resolve($h.after(d))));
+      }
+      return null;
     },
   });
 }

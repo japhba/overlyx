@@ -1,17 +1,21 @@
 /**
  * Comments panel (right sidebar): every comment thread of the open editors — the open ones
  * first, the resolved ones in an archive below, as Google Docs keeps its comment history.
- * A resolved thread leaves the text (only a small grey marker stays where it was anchored); from
- * here it can be found again and reopened.
+ * A resolved thread leaves the text — a small grey marker stays where it was anchored only with
+ * "In the text" ticked here (View ▸ Resolved comments in the text); from here it can be found
+ * again and reopened.
  */
-import { useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useState } from 'preact/hooks';
 import type { EditorView } from 'prosemirror-view';
 import { collectComments, gotoComment, setCommentResolved, authorInitials, authorHue, type CommentInfo } from '../editor/commentops';
 import { viewDocId } from '../editor/context';
 import { navHistory } from './navhistory';
+import { getPrefs, setPref, subscribePrefs } from '../prefs';
 
 export function Comments({ views, tick }: { views: EditorView[]; /** bumps when a document changed */ tick: number }) {
   const [showResolved, setShowResolved] = useState(true);
+  const [inText, setInText] = useState(getPrefs().showResolvedComments);
+  useEffect(() => subscribePrefs(p => setInText(p.showResolvedComments)), []);
   const items = useMemo(() => views.flatMap(v => collectComments(v)), [views, tick]);
   const open = items.filter(i => !i.resolved);
   const resolved = items.filter(i => i.resolved);
@@ -38,6 +42,9 @@ export function Comments({ views, tick }: { views: EditorView[]; /** bumps when 
       {open.length ? open.map(row) : <div class="empty">No open comments.</div>}
       <div class="section-title archive" onClick={() => setShowResolved(s => !s)} title="Resolved comments are kept here">
         <span class="chev">{showResolved ? '▾' : '▸'}</span> Resolved <span class="count">{resolved.length}</span>
+        <label class="in-text" title="A small marker in the text where each resolved thread was (View ▸ Resolved comments in the text)" onClick={e => e.stopPropagation()}>
+          <input type="checkbox" checked={inText} onChange={e => setPref('showResolvedComments', (e.currentTarget as HTMLInputElement).checked)} /> In the text
+        </label>
       </div>
       {showResolved && (resolved.length ? resolved.map(row) : <div class="empty">Nothing resolved yet.</div>)}
     </div>

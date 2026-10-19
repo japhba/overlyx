@@ -2021,9 +2021,14 @@ blend.
   finger pans, as with an Apple Pencil), two fingers always pan and zoom.
 * **Comments panel** (right sidebar, *Comments* tab; `app/Comments.tsx`, `editor/commentops.ts`):
   every comment thread of the open editors — open ones first, then the *Resolved* archive, like
-  Google Docs' comment history. A resolved thread leaves the text and the margin: only a small grey
-  marker stays where it was anchored (its title says so); the panel shows author, time, excerpt and
-  reply count, jumps to a thread on click and can resolve / reopen it.
+  Google Docs' comment history. A resolved thread leaves the text and the margin; a small grey
+  marker stays where it was anchored only with *View ▸ Resolved comments in the text* (or *In the
+  text* in the panel's Resolved header; the preference `showResolvedComments`, the editor's
+  `show-resolved` class). Hidden, the marker has no size but stays in the layout (Chrome's own
+  Backspace / Delete beside an element with `display: none` deleted the thread with the character),
+  and the caret steps over it: Backspace / Delete take the character beyond, an arrow moves past,
+  a cursor put inside it waits after it (`plugins/commentui.ts` hiddenThreadsPlugin). The panel
+  shows author, time, excerpt and reply count, jumps to a thread on click and can resolve / reopen it.
 * **Ruler resizes keep the cursor in place**: changing the text width (handles, *View ▸ Text width*)
   reflows the document; the scroll position is corrected so the cursor stays where it was on screen.
 * **Toolbars that come and go** (the math rows when the cursor enters a formula, the table and
@@ -2953,6 +2958,12 @@ How it works, in order of what happens when you open a document:
      to a change — a connector letting go of a deleted shape — is undone with it); an agent's edit is
      in the history of the editor it was asked in.
    - Other people's cursors: awareness carries Yjs relative positions into the flows (`positions.ts`).
+     While a formula has the keyboard, both are the formula's place and `inner` carries the cursor
+     inside it (`{ head, anchor }`: LyX cursor paths of cell and position per level,
+     `LyxMathField.cursorData`); the other editors hand it to that formula as a node decoration and
+     its field draws the caret, the name flag and the selection over its own layout (client
+     `editor/collab.ts` InnerCursorSource / peerCursorsOf, `nodeviews/math.ts`, `lyxmath/field.ts`
+     setPeers). A path the formula there does not have (both are editing it) draws nothing.
    - **Migration from model 1.** The server converts a document stored in model 1 when it opens it
      (`server/src/collabdoc.ts` `convertModel1`, `docs.ts`): the same document, a new history
      (epoch), the old state kept 45 days in the table `ydocs_model1`. An editor's local copy of

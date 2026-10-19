@@ -25,7 +25,7 @@ import { foldPlugin } from './plugins/fold';
 import { listDragPlugin } from './plugins/listdrag';
 import { marginPlugin } from './plugins/margin';
 import { pagesPlugin } from './plugins/pages';
-import { commentUiPlugin } from './plugins/commentui';
+import { commentUiPlugin, hiddenThreadsPlugin } from './plugins/commentui';
 import { changeTrackingPlugin, changesFilterPlugin, changeAuthorName } from './plugins/changes';
 import { changeActionsPlugin } from './plugins/changeactions';
 import { fontCarryPlugin } from './plugins/fontcarry';
@@ -87,8 +87,8 @@ export function guarded(node: PMNode, make: () => NodeView): NodeView {
 /** The node views of the LyX schema (formulas, macros, insets, graphics, commands, leaves). */
 export function editorNodeViews(): NonNullable<EditorProps['nodeViews']> {
   return {
-    math_inline: (node, view, getPos) => guarded(node, () => new MathInlineView(node, view, getPos as () => number | undefined)),
-    math_display: (node, view, getPos) => guarded(node, () => new MathDisplayView(node, view, getPos as () => number | undefined)),
+    math_inline: (node, view, getPos, decorations) => guarded(node, () => new MathInlineView(node, view, getPos as () => number | undefined, decorations)),
+    math_display: (node, view, getPos, decorations) => guarded(node, () => new MathDisplayView(node, view, getPos as () => number | undefined, decorations)),
     macro: (node, view, getPos) => guarded(node, () => new MacroView(node, view, getPos as () => number | undefined)),
     inset: (node, view, getPos) => guarded(node, () => new InsetView(node, view, getPos as () => number | undefined)),
     graphics: (node, view, getPos) => guarded(node, () => new GraphicsView(node, view, getPos as () => number | undefined)),
@@ -100,8 +100,9 @@ export function editorNodeViews(): NonNullable<EditorProps['nodeViews']> {
 }
 
 /** The editable element's attributes; the browser's spell checker only when it is the chosen engine (two sets of underlines otherwise). */
-export function editorAttributes(child: boolean, p: { spellcheck: boolean; spellEngine: string }): Record<string, string> {
-  return { class: 'lyx-editor' + (child ? ' lyx-editor-child' : ''), spellcheck: p.spellcheck && p.spellEngine === 'browser' ? 'true' : 'false' };
+export function editorAttributes(child: boolean, p: { spellcheck: boolean; spellEngine: string; showResolvedComments?: boolean }): Record<string, string> {
+  // show-resolved: resolved comment threads keep a marker in the text (View ▸ Resolved comments in the text)
+  return { class: 'lyx-editor' + (child ? ' lyx-editor-child' : '') + (p.showResolvedComments ? ' show-resolved' : ''), spellcheck: p.spellcheck && p.spellEngine === 'browser' ? 'true' : 'false' };
 }
 
 export interface AssemblyOptions {
@@ -136,6 +137,7 @@ export function assemblePlugins(o: AssemblyOptions): Plugin[] {
     foldPlugin(),   // section folding (before the keymap: ↑ / ↓ beside a fold skip the hidden text)
     listDragPlugin(),   // list items move by drag and drop, with their sub-items (the grip left of the bullet)
     commentUiPlugin(),   // the thread under the cursor opens; Ctrl+Enter leaves it (before the keymap); empty messages go when it is left
+    hiddenThreadsPlugin(),   // resolved threads are not in the text (unless shown): the caret steps over them (before the keymap)
     lyxKeymap(),
     fontCarryPlugin(),
     insetCaretPlugin(),

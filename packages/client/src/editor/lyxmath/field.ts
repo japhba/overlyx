@@ -82,6 +82,18 @@ export function maskImageGlyphs(root: ParentNode): void {
 
 interface Parent { owner: Owner; idx: number; pos: number }
 
+/** somebody else's cursor in this formula (editor/collab.ts PeerCursor, drawn by the field) */
+export interface PeerCaret {
+  key: string;
+  /** their cursor and selection anchor as LyxMathField.cursorData gives them */
+  cursor: unknown;
+  color: string;
+  /** their caret with its name flag (as in the text) */
+  build(): HTMLElement;
+}
+type CursorPath = number[][];
+const isPath = (p: unknown): p is CursorPath => Array.isArray(p) && p.length > 0 && p.length < 64 && p.every(s => Array.isArray(s) && s.length === 2 && s.every(n => Number.isInteger(n) && n >= 0));
+
 const MARKER_COLOR = '#c000c0';   // LyX Color_mathframe
 
 /** LyX math.bind Alt+M bindings: key → LaTeX to insert (`#0` marks the cursor cell) */
@@ -159,6 +171,9 @@ export class LyxMathField {
   /** the y of the caret's line (up/down into a cell broken into lines keep to it) */
   private caretY: number | undefined;
   private offRenderer: () => void;
+  /** others' cursors in this formula (drawn whether or not it has the keyboard) */
+  private peers: PeerCaret[] = [];
+  private peersKey = '';
   readonly id = ++seq;
 
   constructor(opts: FieldOptions) {
@@ -243,6 +258,19 @@ export class LyxMathField {
   cellLatexAround(): { before: string; after: string } { const c = this.cursor; const cell = atomCells(c.owner)[c.idx] ?? []; return { before: writeCellLatex(cell.slice(0, c.pos)), after: writeCellLatex(cell.slice(c.pos)) }; }
   /** a string identifying the cursor position (to check that nothing moved while a request was in flight) */
   cursorPath(): string { return this.pathOf(this.cursor.slices).join(';'); }
+  /** the cursor and the selection's anchor as data (published for the other editors of the document, editor/collab.ts) */
+  cursorData(): { head: CursorPath; anchor: CursorPath | null } {
+    const c = this.cursor;
+    return { head: this.pathOf(c.slices), anchor: c.selection && c.anchor ? this.pathOf(c.anchor) : null };
+  }
+  /** others' cursors in this formula (cursorData of their field): drawn with their name flag, and their selections */
+  setPeers(peers: PeerCaret[]): void {
+    const key = JSON.stringify(peers.map(p => [p.key, p.color, p.cursor]));
+    this.peers = peers;
+    if (key === this.peersKey) return;
+    this.peersKey = key;
+    this.scheduleLayout();
+  }
   /** show (or clear) an autocomplete suggestion after the caret; it is rendered like the formula, in the ghost colour */
   setGhost(latex: string | null): void { const g = latex && latex.trim() ? latex.trim() : null; if (g === this.ghost) return; this.ghost = g; this.render(); }
   get ghostText(): string | null { return this.ghost; }
@@ -299,7 +327,7 @@ export class LyxMathField {
     if (!this.held) return;
     this.held = false;
     if (refocus) { this.focusInput(); this.scheduleLayout(); }
-    else if (!this.focused) { this.overlay.replaceChildren(); this.opts.onBlur?.(); }
+    else if (!this.focused) { this.overlay.replaceChildren(); if (this.peers.length) this.scheduleLayout(); this.opts.onBlur?.(); }
   }
   /** the colour the cursor is in (the Text colour button shows it), null for the default */
   colorAtCursor(): string | null { return this.cursor.colorAt(); }
@@ -490,24 +518,9 @@ export class LyxMathField {
     // the inset under the mouse pointer is marked (Color_mathframe), also when not editing
     const hover = this.hoverAtom;
     if (hover && !(this.focused && c.slices.some(s => s.owner === hover))) { const r = g.atom(hover); if (r) this.corners(ov, base, r, markerKind(hover)); }
+    for (const p of this.peers) this.drawPeer(ov, base, scale, g, p);
     if (!this.focused && !this.held) return;
-    // selection (MathData::drawSelection): inside one cell from boundary to boundary over the
-    // cell's height; whole cells when it spans cells
-    const sel = c.selRange();
-    if (sel) {
-      const paint = (x1: number, x2: number, top: number, bottom: number) => {
-        const d = document.createElement('span');
-        d.className = 'lm-sel';
-        d.style.cssText = `left:${(x1 - base.left) / scale}px;top:${(top - base.top) / scale}px;width:${Math.max(2, (x2 - x1) / scale)}px;height:${(bottom - top) / scale}px`;
-        ov.appendChild(d);
-      };
-      if (sel.idx1 === sel.idx2) {
-        const cg = g.cell(sel.owner, sel.idx1);
-        if (cg) for (const b of selectionBoxes(cg, sel.from, sel.to)) paint(b.left, b.right, b.top, b.bottom);
-      } else {
-        for (const row of c.selCells(sel)) for (const idx of row) { const cg = g.cell(sel.owner, idx); if (cg) paint(cg.left, cg.right, cg.top, cg.bottom); }
-      }
-    }
+    this.drawSelection(ov, base, scale, g, c, 'lm-sel');
     // caret
     const cr = this.caretRect(c.owner, c.idx, c.pos);
     if (cr) {
@@ -544,6 +557,49 @@ export class LyxMathField {
   }
 
   /**
+   * The selection of `c` (MathData::drawSelection): inside one cell from boundary to boundary over
+   * the cell's height; whole cells when it spans cells.
+   */
+  private drawSelection(ov: HTMLElement, base: DOMRect, scale: number, g: MathGeometry, c: MathCursor, className: string, background?: string): void {
+    const sel = c.selRange();
+    if (!sel) return;
+    const paint = (x1: number, x2: number, top: number, bottom: number) => {
+      const d = document.createElement('span');
+      d.className = className;
+      d.style.cssText = `left:${(x1 - base.left) / scale}px;top:${(top - base.top) / scale}px;width:${Math.max(2, (x2 - x1) / scale)}px;height:${(bottom - top) / scale}px`;
+      if (background) d.style.background = background;
+      ov.appendChild(d);
+    };
+    if (sel.idx1 === sel.idx2) {
+      const cg = g.cell(sel.owner, sel.idx1);
+      if (cg) for (const b of selectionBoxes(cg, sel.from, sel.to)) paint(b.left, b.right, b.top, b.bottom);
+    } else {
+      for (const row of c.selCells(sel)) for (const idx of row) { const cg = g.cell(sel.owner, idx); if (cg) paint(cg.left, cg.right, cg.top, cg.bottom); }
+    }
+  }
+
+  /** somebody else's cursor (and selection) in this formula, in their colour; nothing where their path is not one of this formula */
+  private drawPeer(ov: HTMLElement, base: DOMRect, scale: number, g: MathGeometry, p: PeerCaret): void {
+    const data = p.cursor as { head?: unknown; anchor?: unknown } | null;
+    const head = isPath(data?.head) ? this.slicesOf(data.head) : null;
+    if (!head) return;
+    const anchor = isPath(data?.anchor) ? this.slicesOf(data.anchor) : null;
+    if (anchor) {
+      const sel = new MathCursor(this.hull, this.macros);
+      sel.setSlices(anchor); sel.resetAnchor(); sel.setSlices(head); sel.setSelection();
+      this.drawSelection(ov, base, scale, g, sel, 'lm-peer-sel', /^#[0-9a-f]{6}$/i.test(p.color) ? p.color + '40' : undefined);
+    }
+    const top = head[head.length - 1];
+    const cr = this.caretRect(top.owner, top.idx, top.pos);
+    if (!cr) return;
+    const d = document.createElement('span');
+    d.className = 'lm-peer';
+    d.style.cssText = `left:${(cr.x - base.left) / scale - 1}px;top:${(cr.top - base.top) / scale}px;height:${(cr.bottom - cr.top) / scale}px`;
+    d.append(p.build());
+    ov.appendChild(d);
+  }
+
+  /**
    * MathRow drawMarkers: 3px hooks in the corners of the inset's box — one pixel left of its
    * content, at its right edge, one pixel above and below (LyX reserves that margin around marked
    * insets); the lower pair always, the upper pair for MARKER2 insets.
@@ -566,17 +622,23 @@ export class LyxMathField {
   /* ------------------------------------------------------------ cursor paths (for undo and clicks) */
   private pathOf(slices: Slice[]): number[][] { return slices.map(s => [s.idx, s.pos]); }
   private restorePath(path: number[][]): boolean {
+    const slices = this.slicesOf(path);
+    if (!slices) return false;
+    this.cursor.slices = slices;
+    return true;
+  }
+  /** the cursor slices a path stands for in the current formula (cut where the formula has no such inset; null: no such cell) */
+  private slicesOf(path: number[][]): Slice[] | null {
     const slices: Slice[] = [{ owner: this.hull, idx: 0, pos: 0 }];
     for (let i = 0; i < path.length; i++) {
       const [idx, pos] = path[i];
       const owner = slices[i].owner;
       const cells = atomCells(owner);
-      if (idx >= cells.length) return false;
+      if (idx >= cells.length) return null;
       slices[i].idx = idx; slices[i].pos = Math.min(pos, cells[idx].length);
-      if (i + 1 < path.length) { const atom = cells[idx][pos]; if (!atom || nargs(atom) === 0) { this.cursor.slices = slices; return true; } slices.push({ owner: atom, idx: 0, pos: 0 }); }
+      if (i + 1 < path.length) { const atom = cells[idx][pos]; if (!atom || nargs(atom) === 0) return slices; slices.push({ owner: atom, idx: 0, pos: 0 }); }
     }
-    this.cursor.slices = slices;
-    return true;
+    return slices;
   }
 
   /* ------------------------------------------------------------ editing plumbing */
@@ -634,6 +696,7 @@ export class LyxMathField {
       // a command typed last (\gamma with nothing after it) becomes its symbol when the formula is left, not at the next keystroke
       const closed = this.cursor.macroModeClose();
       this.overlay.replaceChildren();
+      if (this.peers.length) this.scheduleLayout();   // others' cursors stay
       if (closed) this.commit(); else if (this.clearGhost()) this.render();
       // held by a popup (the link box): the cursor and selection stay, drawn as they are, until endHold
       if (this.held) this.scheduleLayout(); else this.opts.onBlur?.();

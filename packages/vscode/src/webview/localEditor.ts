@@ -76,7 +76,7 @@ export function createLocalEditor(opts: LocalEditorOptions): LocalEditorHandle {
 
   const state = session.state ? session.state.reconfigure({ plugins }) : EditorState.create({ schema, doc: collab.doc, plugins });
   const readOnly = () => opts.readOnly?.() ?? false;
-  const attributes = (prefs: { spellcheck: boolean; spellEngine: string }) => ({ ...editorAttributes(opts.child ?? false, prefs), 'data-doc-id': opts.docId, 'data-project': projectOfDoc(opts.docId), 'data-doc-dir': docDirOf(opts.docId) });
+  const attributes = (prefs: { spellcheck: boolean; spellEngine: string; showResolvedComments?: boolean }) => ({ ...editorAttributes(opts.child ?? false, prefs), 'data-doc-id': opts.docId, 'data-project': projectOfDoc(opts.docId), 'data-doc-dir': docDirOf(opts.docId) });
   const view: EditorView = new EditorView(opts.container, {
     state,
     dispatchTransaction: dispatchTransactionProp(() => view, readOnly),

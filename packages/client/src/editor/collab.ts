@@ -8,7 +8,9 @@
  *   (an agent's edit excepted: Ctrl+Z reverts it like one's own). The CRDT is the truth: should a
  *   write not read back as written, the editor takes the CRDT's reading.
  * - cursors (cursorPlugin): one's own selection is published in the awareness as two Yjs relative
- *   positions ({ anchor, head }); everybody else's are drawn as decorations.
+ *   positions ({ anchor, head }); everybody else's are drawn as decorations. While a widget of the
+ *   document has the keyboard (a formula being edited), both are the widget's place and `inner` is
+ *   its own cursor; the same widget draws it in the other editors (InnerCursorSource, peerCursorsOf).
  * - undo (undoPlugin, undo, redo): ProseMirror's history. Undoing is a local change like any other,
  *   mapped over what others did meanwhile: it never brings back text somebody else has since
  *   joined or moved, and restores deleted text in one piece.
@@ -135,6 +137,39 @@ export function closeUndoGroup(view: EditorView): void {
 
 export const yCursorPluginKey = new PluginKey<DecorationSet>('yjs-cursor');
 
+/**
+ * Widgets of the document with a cursor of their own — a formula being edited (nodeviews/math.ts
+ * registers them): the cursor plugin publishes that cursor while one of them has the keyboard.
+ */
+export interface InnerCursorSource {
+  /** the widget of `view` that has the keyboard: the position of its node and its cursor (JSON) */
+  local(view: EditorView): { pos: number; cursor: unknown } | null;
+  /** `f` is called whenever that cursor moves, and when the keyboard goes into or out of a widget */
+  subscribe(f: () => void): () => void;
+}
+const innerSources: InnerCursorSource[] = [];
+export function addInnerCursorSource(s: InnerCursorSource): void { innerSources.push(s); }
+function localInner(view: EditorView): { pos: number; cursor: unknown } | null {
+  for (const s of innerSources) { const c = s.local(view); if (c) return c; }
+  return null;
+}
+
+/** somebody else's cursor inside a widget, handed to the widget's node view as a node decoration's spec */
+export interface PeerCursor {
+  /** the other client (stable while they stay) */
+  key: string;
+  /** what their widget published (InnerCursorSource.local) */
+  cursor: unknown;
+  color: string;
+  /** their caret with its name flag, as drawn in the text */
+  build(): HTMLElement;
+}
+const PEER_CURSOR = 'olPeerCursor';
+/** the cursors of others inside a node view's widget (from its outer decorations) */
+export function peerCursorsOf(decorations: readonly Decoration[] | undefined): PeerCursor[] {
+  return (decorations ?? []).flatMap(d => (d.spec as Record<string, unknown>)?.[PEER_CURSOR] ? [(d.spec as Record<string, PeerCursor>)[PEER_CURSOR]] : []);
+}
+
 export interface CursorOptions {
   cursorBuilder?: (user: { name: string; color: string; agent?: unknown }, clientId: number) => HTMLElement;
   selectionBuilder?: (user: { name: string; color: string }, clientId: number) => Record<string, string>;
@@ -162,7 +197,7 @@ export function cursorPlugin(awareness: Awareness, opts: CursorOptions = {}): Pl
     const out: Decoration[] = [];
     awareness.getStates().forEach((st, clientId) => {
       if (clientId === sync.doc.clientID) return;
-      const cursor = st?.cursor as { anchor?: unknown; head?: unknown } | null | undefined;
+      const cursor = st?.cursor as { anchor?: unknown; head?: unknown; inner?: unknown } | null | undefined;
       const user = st?.user as { name: string; color: string; agent?: unknown } | undefined;
       if (!cursor || !user) return;
       let anchor: number | null, head: number | null;
@@ -173,6 +208,13 @@ export function cursorPlugin(awareness: Awareness, opts: CursorOptions = {}): Pl
       if (anchor === null || head === null) return;
       const max = doc.content.size;
       anchor = Math.min(anchor, max); head = Math.min(head, max);
+      // inside a widget (a formula): the widget draws the caret where it is in it
+      const node = cursor.inner != null && anchor === head ? doc.nodeAt(head) : null;
+      if (node && node.isAtom && !node.isText) {
+        const peer: PeerCursor = { key: String(clientId), cursor: cursor.inner, color: user.color, build: () => build(user, clientId) };
+        out.push(Decoration.node(head, head + node.nodeSize, {}, { [PEER_CURSOR]: peer }));
+        return;
+      }
       out.push(Decoration.widget(head, () => build(user, clientId), { key: String(clientId), side: 10 }));
       if (anchor !== head) {
         const from = Math.min(anchor, head), to = Math.max(anchor, head);
@@ -195,15 +237,25 @@ export function cursorPlugin(awareness: Awareness, opts: CursorOptions = {}): Pl
         const sync = syncOf(view.state);
         if (!sync) return;
         const current = awareness.getLocalState()?.cursor ?? null;
-        if (!view.hasFocus()) {
+        // a formula of this editor has the keyboard: its place, and its own cursor
+        const inner = localInner(view);
+        if (!view.hasFocus() && !inner) {
           if (current !== null) { last = ''; awareness.setLocalStateField('cursor', null); }
           return;
         }
-        const { anchor, head } = view.state.selection;
-        const a = relativePosition(schema, sync.doc, view.state.doc, anchor, anchor > head ? -1 : 0);
-        const h = relativePosition(schema, sync.doc, view.state.doc, head, head > anchor ? -1 : 0);
-        if (!a || !h) return;
-        const next = { anchor: Y.relativePositionToJSON(a), head: Y.relativePositionToJSON(h) };
+        let next: { anchor: unknown; head: unknown; inner?: unknown };
+        if (inner) {
+          // before the widget's node, staying with it when text is typed in front of it
+          const at = relativePosition(schema, sync.doc, view.state.doc, inner.pos, 0);
+          if (!at) return;
+          next = { anchor: Y.relativePositionToJSON(at), head: Y.relativePositionToJSON(at), inner: inner.cursor };
+        } else {
+          const { anchor, head } = view.state.selection;
+          const a = relativePosition(schema, sync.doc, view.state.doc, anchor, anchor > head ? -1 : 0);
+          const h = relativePosition(schema, sync.doc, view.state.doc, head, head > anchor ? -1 : 0);
+          if (!a || !h) return;
+          next = { anchor: Y.relativePositionToJSON(a), head: Y.relativePositionToJSON(h) };
+        }
         const key = JSON.stringify(next);
         if (key === last && current) return;
         last = key;
@@ -220,9 +272,11 @@ export function cursorPlugin(awareness: Awareness, opts: CursorOptions = {}): Pl
       awareness.on('change', changed);
       view.dom.addEventListener('focusin', publish);
       view.dom.addEventListener('focusout', publish);
+      const offInner = innerSources.map(s => s.subscribe(publish));
       return {
         update: (_v, prev) => { if (prev.selection !== view.state.selection || prev.doc !== view.state.doc) publish(); },
         destroy: () => {
+          for (const off of offInner) off();
           awareness.off('change', changed);
           view.dom.removeEventListener('focusin', publish);
           view.dom.removeEventListener('focusout', publish);

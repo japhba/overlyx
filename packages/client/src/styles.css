@@ -706,6 +706,9 @@ html[data-theme="dark"][data-dark-pages] .lyx-inset-note-note > .inset-box > .in
 .comments-panel .section-title { font-family: var(--ui-font); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; color: var(--ui-muted); padding: 8px 8px 4px; }
 .comments-panel .section-title.archive { cursor: pointer; border-top: 1px solid var(--ui-border); margin-top: 8px; padding-top: 8px; }
 .comments-panel .section-title .count { font-weight: 400; margin-left: 4px; }
+.comments-panel .section-title.archive { display: flex; align-items: center; gap: 2px; }
+.comments-panel .section-title .in-text { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-weight: 400; text-transform: none; letter-spacing: 0; cursor: pointer; }
+.comments-panel .section-title .in-text input { margin: 0; }
 .comments-panel .empty { color: var(--muted2); padding: 4px 8px 8px; }
 .comments-panel .comment-row { margin: 4px 8px; padding: 6px 8px; border: 1px solid var(--comment-border); background: var(--comment-bg); border-radius: 4px; cursor: pointer; }
 .comments-panel .comment-row:hover { box-shadow: 0 1px 4px rgba(0,0,0,0.15); }
@@ -759,11 +762,15 @@ html[data-theme="dark"] { --cm-accent: #f4c03c; --cm-chip-bg: #8a6b12; --cm-chip
 .lyx-inset-note-comment > .inset-anchor::before { content: attr(data-count); }
 .lyx-inset-note-comment > .inset-anchor:hover, .lyx-inset-note-comment.cm-active > .inset-anchor, .margin-mode .lyx-inset-note-comment.in-margin:hover > .inset-anchor { transform: scale(1.12); box-shadow: 0 0 0 2px color-mix(in srgb, var(--cm-accent) 45%, transparent); }
 .margin-mode .lyx-inset-note-comment > .inset-anchor { width: auto; height: 1.25em; border-radius: 0.62em 0.62em 0.62em 0.12em; background: var(--cm-chip-bg); }
-/* resolved: the card goes, a small grey dot stays (the Comments panel lists the thread) */
+/* resolved: the card goes, and a small grey dot stays where it was with View ▸ Resolved comments in
+   the text (the editor's show-resolved class); otherwise the dot has no size (the Comments panel
+   lists the thread). It stays in the layout: Chrome's own Backspace / Delete beside an element that
+   is not drawn at all (display: none) took the thread with the character */
 .lyx-inset-note-comment.resolved > .inset-box { display: none !important; }
 .lyx-inset-note-comment.resolved > .inset-anchor, .margin-mode .lyx-inset-note-comment.resolved > .inset-anchor { display: inline-block; min-width: 0; width: 8px; height: 8px; padding: 0; margin: 0 2px; border-radius: 50%; background: var(--muted2); opacity: 0.7; vertical-align: middle; box-shadow: none; transform: none; }
 .lyx-inset-note-comment.resolved > .inset-anchor::before { content: none; }
 .lyx-inset-note-comment.resolved.highlight > .inset-anchor { box-shadow: 0 0 0 3px var(--hl-bg2); }
+.lyx-editor:not(.show-resolved) .lyx-inset-note-comment.resolved > .inset-anchor { width: 0; height: 0; margin: 0; padding: 0; border: 0; background: none; box-shadow: none; pointer-events: none; }
 /* the card */
 .lyx-inset-note-comment > .inset-box { position: relative; display: flex; flex-direction: column; box-sizing: border-box; min-width: 220px; padding: 10px 12px 10px 14px; text-indent: 0; white-space: normal;
   font-family: var(--ui-font); font-size: 13px; line-height: 1.45; color: var(--ui-fg); background: var(--cm-card); border: 1px solid var(--cm-line); border-left: 3px solid var(--cm-accent); border-radius: 8px;
@@ -887,6 +894,10 @@ html[data-theme="dark"] { --cm-accent: #f4c03c; --cm-chip-bg: #8a6b12; --cm-chip
 .lm-caret { position: absolute; width: 1px; background: var(--caret); animation: lm-blink 1.1s steps(2, start) infinite; }
 @keyframes lm-blink { to { visibility: hidden; } }
 .lm-sel { position: absolute; background: rgba(90, 140, 220, 0.28); }
+/* somebody else's cursor in the formula (editor/collab.ts → LyxMathField.setPeers): their caret and name flag, as in the text */
+.lm-peer { position: absolute; width: 0; pointer-events: none; }
+.lm-peer > .ProseMirror-yjs-cursor { display: block; height: 100%; margin: 0; }
+.lm-peer-sel { position: absolute; background: rgba(90, 140, 220, 0.18); }
 .lm-corner { position: absolute; box-sizing: border-box; width: 4px; height: 4px; }
 .lm-macro-name { position: absolute; font: 8px/10px system-ui, sans-serif; color: var(--math-arg); background: var(--math-arg-bg); padding: 0 2px; border-radius: 2px; white-space: nowrap; }
 /* (16px: Safari on an iPhone zooms the page into a focused text field whose letters are smaller — on every tap into a formula) */
