@@ -255,7 +255,8 @@ export function CiteDialog({ meta, docId, project, initial, onInsert, onAdded, o
   const [tab, setTab] = useState<'project' | 'online'>('project');
   const [q, setQ] = useState('');
   const [keys, setKeys] = useState<string[]>(initial?.keys ?? []);
-  const [cmd, setCmd] = useState(initial?.cmd ?? (meta?.citeEngine === 'natbib' || meta?.citeEngine === 'biblatex' ? 'citep' : 'cite'));
+  // a command the engine has: \citep is natbib's, biblatex's parenthetical citation is \parencite
+  const [cmd, setCmd] = useState(initial?.cmd ?? (meta?.citeEngine === 'natbib' ? 'citep' : meta?.citeEngine === 'biblatex' ? 'parencite' : 'cite'));
   const [before, setBefore] = useState(initial?.before ?? ''), [after, setAfter] = useState(initial?.after ?? '');
   const [added, setAdded] = useState<BibItem[]>([]);
   const local = useMemo(() => [...added, ...(meta?.bib ?? [])], [meta, added]);
@@ -315,14 +316,14 @@ export function CiteDialog({ meta, docId, project, initial, onInsert, onAdded, o
   const cite = async (h: LitHit) => {
     if (!project) return;
     setBusyId(h.id); setStatus(null);
-    try { const r = await api.bibAdd(project, { hit: h }); setAddedIds(m => new Map(m).set(h.id, r.key)); took(r); }
+    try { const r = await api.bibAdd(project, { hit: h, doc: docId }); setAddedIds(m => new Map(m).set(h.id, r.key)); took(r); }
     catch (e) { setStatus('Could not add: ' + (e as Error).message); }
     finally { setBusyId(null); }
   };
   const addPasted = async () => {
     if (!project || !paste.trim()) return;
     setBusyId('paste'); setStatus(null);
-    try { const r = await api.bibAdd(project, { bibtex: paste }); took(r); setPaste(''); }
+    try { const r = await api.bibAdd(project, { bibtex: paste, doc: docId }); took(r); setPaste(''); }
     catch (e) { setStatus('Could not add: ' + (e as Error).message); }
     finally { setBusyId(null); }
   };

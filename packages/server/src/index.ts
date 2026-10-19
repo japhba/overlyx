@@ -153,7 +153,17 @@ api.use((req, res, next) => {
   if (req.user!.guest && (GUEST_DENIED.test(req.path) || (req.method === 'POST' && req.path === '/projects'))) { res.status(403).json({ error: 'Sign in to do this' }); return; }
   next();
 });
-api.use(express.json({ limit: '5mb' }));
+// a text file saved from the built-in text editor may be bigger (TEXT_MAX); everything else is small
+const smallJson = express.json({ limit: '5mb' }), textJson = express.json({ limit: '24mb' });
+api.use((req, res, next) => (req.method === 'PUT' && /^\/projects\/[^/]+\/text\//.test(req.path) ? textJson : smallJson)(req, res, next));
+// a request body that could not be read (too large, not JSON) is logged with who sent it where — it
+// used to reach Express's default handler and the person only saw "Could not save"
+api.use((err: { type?: string; status?: number; message?: string }, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (!err || typeof err.type !== 'string' || !err.type.startsWith('entity.')) { next(err); return; }
+  const status = err.status ?? 400;
+  console.warn(`[http] ${req.user?.username ?? '?'} ${req.method} ${req.originalUrl.slice(0, 200)}: ${status} ${err.message ?? err.type}`);
+  res.status(status).json({ error: status === 413 ? 'This is too large to send to the server' : 'The request could not be read' });
+});
 api.use(feedbackRoutes());
 // Google fonts a markdown document names, served to the editor from here (googlefonts.ts)
 api.use(googleFontRoutes());
@@ -854,7 +864,19 @@ api.get('/projects/:project/zip', needProject('view'), async (req, res) => {
 
 /* ------------------------------------------------------------ text files */
 
-const TEXT_MAX = 4 * 1024 * 1024;
+const TEXT_MAX = 16 * 1024 * 1024;
+const MB = (n: number) => `${(n / 1024 / 1024).toFixed(1)} MB`;
+/** when a text file's saves were last logged (per person and file): one line per five minutes of editing, every failure */
+const textSaveLogged = new Map<string, number>();
+function logText(req: express.Request, rel: string, what: string, failed = false): void {
+  const line = `[text] ${req.user?.username ?? '?'} → "${req.params.project}": ${rel} ${what}`;
+  if (failed) { console.warn(line); return; }
+  const k = `${req.user?.id}\0${req.params.project}\0${rel}`, now = Date.now();
+  if (now - (textSaveLogged.get(k) ?? 0) < 5 * 60_000) return;
+  textSaveLogged.set(k, now);
+  if (textSaveLogged.size > 2000) textSaveLogged.clear();
+  console.log(line);
+}
 
 /** A text file of the project (.tex, .bib, .sty, …) for the built-in text editor. */
 api.get('/projects/:project/text/*', needProject('view'), (req, res) => {
@@ -864,7 +886,7 @@ api.get('/projects/:project/text/*', needProject('view'), (req, res) => {
     const abs = resolveProjectPath(req.params.project, rel);
     if (!fs.existsSync(abs) || fs.statSync(abs).isDirectory()) { res.status(404).json({ error: 'not found' }); return; }
     const st = fs.statSync(abs);
-    if (st.size > TEXT_MAX) { res.status(413).json({ error: 'file too large for the text editor (4 MB)' }); return; }
+    if (st.size > TEXT_MAX) { logText(req, rel, `not opened: ${MB(st.size)}, more than the text editor takes (${MB(TEXT_MAX)})`, true); res.status(413).json({ error: `file too large for the text editor (${MB(st.size)}; at most ${MB(TEXT_MAX)})` }); return; }
     const buf = fs.readFileSync(abs);
     if (buf.includes(0)) { res.status(415).json({ error: 'not a text file' }); return; }
     res.json({ text: buf.toString('utf8'), mtime: st.mtimeMs, size: st.size, role: req.role ?? 'edit' });
@@ -911,7 +933,12 @@ api.post('/projects/:project/bib/add', needProject('edit'), async (req, res) => 
     }
     if (!bibtex.trim()) { res.status(400).json({ error: 'No BibTeX entry given' }); return; }
     if (bibtex.length > 20000) { res.status(413).json({ error: 'BibTeX entry too long' }); return; }
-    const r = addToCitedBib(dir, bibtex, { commit: () => touchProject(project, req.user!.id) });
+    // the document it is cited in: the entry goes into the cited.bib beside it
+    const doc = typeof req.body?.doc === 'string' && req.body.doc.startsWith(project + '/') ? req.body.doc.slice(project.length + 1) : '';
+    if (doc) resolveProjectPath(project, doc);   // (inside the project, or it throws)
+    const r = addToCitedBib(dir, bibtex, { docDir: doc ? path.posix.dirname(doc) : '', commit: () => touchProject(project, req.user!.id) });
+    console.log(`[bib] ${req.user!.username} → "${project}"${doc ? ` (${doc})` : ''}: ${r.existed ? `${r.key} is in ${r.file} already` : `${r.key} added to ${r.file}${r.copiedFrom ? ` (the entry ${r.copiedFrom} has)` : ''}`}`);
+    if (!r.existed) logAccess(project, req.user!.id, 'bib-add', `${r.key} → ${r.file}`);
     // fetch the paper's PDF into <project>/pdf/ in the background (additive; open copies only)
     if (config.literature) {
       void fetchPdfForEntry(dir, bibtex, req.body?.hit as Hit | undefined)
@@ -919,7 +946,10 @@ api.post('/projects/:project/bib/add', needProject('edit'), async (req, res) => 
         .catch(e => console.warn('[pdffetch]', (e as Error).message));
     }
     res.json(r);
-  } catch (e) { res.status(400).json({ error: (e as Error).message }); }
+  } catch (e) {
+    console.warn(`[bib] ${req.user?.username ?? '?'} → "${req.params.project}": could not add a reference — ${(e as Error).message}`);
+    res.status(400).json({ error: (e as Error).message });
+  }
 });
 
 api.put('/projects/:project/text/*', needProject('edit'), (req, res) => {
@@ -931,12 +961,13 @@ api.put('/projects/:project/text/*', needProject('edit'), (req, res) => {
     assertWritableRelPath(rel);
     const abs = resolveProjectPath(req.params.project, rel);
     const text = req.body?.text;
-    if (typeof text !== 'string') { res.status(400).json({ error: 'text missing' }); return; }
-    if (Buffer.byteLength(text) > TEXT_MAX) { res.status(413).json({ error: 'file too large (4 MB)' }); return; }
+    if (typeof text !== 'string') { logText(req, rel, 'not saved: no text in the request', true); res.status(400).json({ error: 'text missing' }); return; }
+    if (Buffer.byteLength(text) > TEXT_MAX) { logText(req, rel, `not saved: ${MB(Buffer.byteLength(text))}, more than ${MB(TEXT_MAX)}`, true); res.status(413).json({ error: `file too large (at most ${MB(TEXT_MAX)})` }); return; }
     const expected = typeof req.body?.mtime === 'number' ? req.body.mtime : undefined;
     if (expected !== undefined && fs.existsSync(abs)) {
       const cur = fs.statSync(abs);
       if (Math.abs(cur.mtimeMs - expected) > 1) {
+        logText(req, rel, 'not saved: changed on the server since it was loaded (the editor offers both versions)', true);
         res.status(409).json({ error: 'The file was changed on the server since you loaded it', text: fs.readFileSync(abs, 'utf8'), mtime: cur.mtimeMs });
         return;
       }
@@ -947,8 +978,13 @@ api.put('/projects/:project/text/*', needProject('edit'), (req, res) => {
     fs.renameSync(tmp, abs);
     const st = fs.statSync(abs);
     touchProject(req.params.project, req.user!.id);
+    logText(req, rel, `saved (${MB(st.size)})`);
+    logAccess(req.params.project, req.user!.id, 'write', rel);
     res.json({ ok: true, mtime: st.mtimeMs, size: st.size });
-  } catch (e) { res.status(400).json({ error: String(e) }); }
+  } catch (e) {
+    logText(req, decodeURIComponent((req.params as any)[0] ?? ''), `not saved: ${(e as Error).message ?? e}`, true);
+    res.status(400).json({ error: String(e) });
+  }
 });
 
 /** Graphics rendered to PNG for the editor (svg/pdf/eps/... converted; png/jpg passed through). */

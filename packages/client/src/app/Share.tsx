@@ -31,6 +31,8 @@ export function describe(e: ActivityEntry): string {
     case 'git-push': return 'pushed with git';
     case 'share': return e.detail ?? 'changed the sharing';
     case 'admin-access': return `opened the project as administrator${e.detail ? ` (${e.detail})` : ''}`;
+    case 'write': return e.detail ? `edited ${e.detail}` : 'edited a file';
+    case 'bib-add': return e.detail ? `added a reference: ${e.detail}` : 'added a reference';
     default: return e.detail ?? e.action;
   }
 }

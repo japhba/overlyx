@@ -158,7 +158,11 @@ async function runJob(job: BuildJob): Promise<void> {
   } catch (e) {
     finish(job, { ok: false, log: 'build failed: ' + String(e), warnings: [] }, 'error');
   }
-  console.log(`[build] ${job.docId} ${job.status} in ${Math.round((Date.now() - t0) / 1000)} s`);
+  // a failed build says why (19 Oct 2026 the journal showed only "error in 5 s" for 40 minutes of
+  // builds stopped by one \citep the document's biblatex does not have)
+  let why = '';
+  if (job.status === 'error' && job.result) { try { const first = buildErrors(job.result.log, 1)[0] ?? job.result.log.split('\n').find(l => l.trim()); if (first) why = ` — ${first.slice(0, 200)}`; } catch { /* no reason then */ } }
+  console.log(`[build] ${job.docId} ${job.status} in ${Math.round((Date.now() - t0) / 1000)} s${why}`);
 }
 
 /** Forget the build products and versions of a project's documents (the project was deleted). */

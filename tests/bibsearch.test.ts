@@ -131,4 +131,24 @@ describe('literature search', () => {
     expect(() => bs.addToCitedBib(dir, DBLP_BIB + '\n' + CROSSREF_BIB)).toThrow(/one BibTeX entry/);
     expect(existsSync(join(dir, 'cited.bib.overlyx-tmp'))).toBe(false);
   });
+
+  it('a document in a sub-folder gets its references in the cited.bib beside it', () => {
+    // 19 Oct 2026: cosyne_27/main.tex's references went into the project's root cited.bib (5.4 MB)
+    const dir = join(ROOT, 'projects', 'nested');
+    mkdirSync(join(dir, 'abstract'), { recursive: true });
+    writeFileSync(join(dir, 'cited.bib'), '@article{lecun2015deep, title={Deep learning}, author={LeCun, Yann}, year={2015}, doi={10.1038/nature14539}}\n');
+    writeFileSync(join(dir, 'abstract', 'refs.bib'), '@article{hubel1962receptive, title={Receptive fields}, author={Hubel, David}, year={1962}}\n');
+    const r1 = bs.addToCitedBib(dir, DBLP_BIB, { docDir: 'abstract' });
+    expect(r1).toMatchObject({ key: 'vaswani2017attention', file: 'abstract/cited.bib', bib: 'cited.bib', existed: false });
+    expect(parseBibtex(readFileSync(join(dir, 'abstract', 'cited.bib'), 'utf8')).map(e => e.key)).toEqual(['vaswani2017attention']);
+    expect(readFileSync(join(dir, 'cited.bib'), 'utf8')).not.toContain('vaswani');
+    // a paper the folder has already: that entry, in that file
+    const r2 = bs.addToCitedBib(dir, '@misc{x, title={Receptive fields}, author={Hubel, D.}, year={1962}}', { docDir: 'abstract' });
+    expect(r2).toMatchObject({ key: 'hubel1962receptive', file: 'abstract/refs.bib', bib: 'refs.bib', existed: true });
+    // a paper only the root's cited.bib has: copied beside the document under the same key
+    const r3 = bs.addToCitedBib(dir, CROSSREF_BIB, { docDir: 'abstract' });
+    expect(r3).toMatchObject({ key: 'lecun2015deep', file: 'abstract/cited.bib', existed: false, copiedFrom: 'cited.bib' });
+    expect(parseBibtex(readFileSync(join(dir, 'abstract', 'cited.bib'), 'utf8')).map(e => e.key)).toEqual(['vaswani2017attention', 'lecun2015deep']);
+    expect(() => bs.addToCitedBib(dir, DBLP_BIB, { docDir: '../elsewhere' })).toThrow(/bad document folder/);
+  });
 });

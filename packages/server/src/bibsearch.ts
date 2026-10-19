@@ -339,7 +339,18 @@ export function rewriteEntry(bibtex: string, key: string): string {
   return t + '\n';
 }
 
-export interface AddResult { key: string; file: string; existed: boolean; bibtex: string; entry: { key: string; author: string; year: string; title: string } }
+export interface AddResult {
+  key: string;
+  /** the .bib file that has the entry (relative to the project) */
+  file: string;
+  /** its name as the document lists it in its bibliography (relative to the document) */
+  bib: string;
+  existed: boolean;
+  /** the paper was in another .bib of the project (`file` now has it too, under the same key) */
+  copiedFrom?: string;
+  bibtex: string;
+  entry: { key: string; author: string; year: string; title: string };
+}
 
 /** All entries of the project's .bib files (small projects; large ones are searched by key below). */
 function projectEntries(projectDir: string): { file: string; entry: BibEntry }[] {
@@ -360,23 +371,37 @@ function projectEntries(projectDir: string): { file: string; entry: BibEntry }[]
 }
 
 /**
- * Add one BibTeX entry to `<project>/cited.bib` (created on demand). Returns the existing key
- * instead when the project already has that paper (same DOI, or same title and year).
+ * Add one BibTeX entry to the cited.bib next to the document (`docDir`, relative to the project; the
+ * project's root by default), created on demand — the file the document's \addbibresource{cited.bib}
+ * or \bibliography{cited} names. Returns the existing key instead when a .bib file beside the
+ * document has that paper already (same DOI, or same title and year); a paper only some other .bib
+ * of the project has is copied in under the key it has there.
+ *
+ * 19 Oct 2026: references added from a document in a sub-folder (cosyne_27/main.tex) went into the
+ * project's root cited.bib, a 5.4 MB file of 10,000 entries the document then read through the
+ * search path on every build (+20 s) — or did not find at all where that path is not set.
  */
-export function addToCitedBib(projectDir: string, bibtex: string, opts: { file?: string; commit?: (rel: string) => void } = {}): AddResult {
+export function addToCitedBib(projectDir: string, bibtex: string, opts: { file?: string; docDir?: string; commit?: (rel: string) => void } = {}): AddResult {
   const parsed = parseBibtex(bibtex);
   if (parsed.length !== 1) throw new Error(parsed.length ? 'Paste one BibTeX entry at a time' : 'That is not a BibTeX entry (it should start with @article{…, @inproceedings{…, …)');
   const e = parsed[0];
   const existing = projectEntries(projectDir);
-  const doi = (e.fields.doi ?? '').toLowerCase().replace(/^https?:\/\/doi\.org\//, '');
-  const t = normTitle(e.title);
-  const same = existing.find(x => (doi && (x.entry.fields.doi ?? '').toLowerCase().replace(/^https?:\/\/doi\.org\//, '') === doi) || (t && normTitle(x.entry.title) === t && (!e.year || !x.entry.year || e.year === x.entry.year)));
-  if (same) return { key: same.entry.key, file: same.file, existed: true, bibtex: '', entry: item(same.entry) };
+  const doiOf = (x: BibEntry) => (x.fields.doi ?? '').toLowerCase().replace(/^https?:\/\/doi\.org\//, '');
+  const doi = doiOf(e), t = normTitle(e.title);
+  const isSame = (x: { entry: BibEntry }) => (doi && doiOf(x.entry) === doi) || (t && normTitle(x.entry.title) === t && (!e.year || !x.entry.year || e.year === x.entry.year));
+  const docDir = path.posix.normalize((opts.docDir ?? '').split(path.sep).join('/')).replace(/^\.$/, '').replace(/\/$/, '');
+  if (docDir.startsWith('..') || path.posix.isAbsolute(docDir)) throw new Error('bad document folder');
+  const rel = opts.file ?? (docDir ? `${docDir}/cited.bib` : 'cited.bib');
+  const bib = path.posix.relative(docDir || '.', rel) || path.posix.basename(rel);
+  const beside = (file: string) => (path.posix.dirname(file.split(path.sep).join('/')) === (docDir || '.'));
+  const mine = existing.find(x => beside(x.file) && isSame(x));
+  if (mine) return { key: mine.entry.key, file: mine.file, bib: path.posix.relative(docDir || '.', mine.file.split(path.sep).join('/')), existed: true, bibtex: '', entry: item(mine.entry) };
+  const elsewhere = existing.find(isSame);
   const keys = new Set(existing.map(x => x.entry.key));
-  let key = scholarKey(e);
-  if (keys.has(key)) { let i = 0; while (keys.has(key + 'abcdefghijklmnopqrstuvwxyz'[i])) i++; key = key + 'abcdefghijklmnopqrstuvwxyz'[i]; }
+  // (the key the paper has elsewhere, unless a file beside the document uses it for another paper)
+  let key = elsewhere && !existing.some(x => beside(x.file) && x.entry.key === elsewhere.entry.key) ? elsewhere.entry.key : scholarKey(e);
+  if (key !== elsewhere?.entry.key && keys.has(key)) { let i = 0; while (keys.has(key + 'abcdefghijklmnopqrstuvwxyz'[i])) i++; key = key + 'abcdefghijklmnopqrstuvwxyz'[i]; }
   const text = rewriteEntry(bibtex, key);
-  const rel = opts.file ?? 'cited.bib';
   const abs = path.join(projectDir, rel);
   if (!abs.startsWith(projectDir + path.sep) && abs !== projectDir) throw new Error('bad file name');
   const prev = fs.existsSync(abs) ? fs.readFileSync(abs, 'utf8') : '';
@@ -386,7 +411,7 @@ export function addToCitedBib(projectDir: string, bibtex: string, opts: { file?:
   fs.renameSync(tmp, abs);
   opts.commit?.(rel);
   const entry = parseBibtex(text)[0];
-  return { key, file: rel, existed: false, bibtex: text, entry: item(entry) };
+  return { key, file: rel, bib, existed: false, ...(elsewhere ? { copiedFrom: elsewhere.file } : {}), bibtex: text, entry: item(entry) };
 }
 
 const item = (e: BibEntry) => ({ key: e.key, author: e.authorShort, year: e.year, title: cleanTex(e.title) });

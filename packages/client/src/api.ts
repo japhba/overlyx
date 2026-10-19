@@ -98,7 +98,7 @@ export interface UserSettings { allowRecopyTokens: boolean; fineGrainedAccess: b
 export interface AdminUser { id: number; username: string; name: string; color: string; isAdmin: number; email: string | null; allowRecopyTokens: boolean }
 /** the project's off-site mirror (a private repository in the instance's GitHub organisation) */
 export interface MirrorStatus { configured: boolean; org: string | null; repo: string | null; url: string | null; enabled: boolean; head: string | null; lastHead: string | null; lastPushAt: number | null; lastAttemptAt: number | null; lastError: string | null; behind: boolean; intervalMs: number }
-export type AccessAction = 'open' | 'build' | 'git-fetch' | 'git-push' | 'share' | 'admin-access';
+export type AccessAction = 'open' | 'build' | 'git-fetch' | 'git-push' | 'share' | 'admin-access' | 'write' | 'bib-add';
 export interface ActivityEntry { id: number; action: AccessAction; detail: string | null; at: number; user: { id: number; name: string; username: string } | null }
 export interface AdminProjectInfo { name: string; title: string | null; kind: string; owner: { id: number; name: string; username: string } | null; access: 'owner' | 'member' | 'granted' | null; grantUntil: number | null }
 
@@ -207,7 +207,8 @@ export const knownProjects = new Set<string>();
 export interface LitHit { id: string; title: string; authors: string[]; year: number | null; venue: string; type: string; doi: string | null; arxiv: string | null; url: string | null; citations: number | null; sources: string[]; dblp?: string; bibtex?: string; note?: string }
 /** the account's Zotero connection (server zotero.ts); the key itself never comes back */
 export interface ZoteroStatus { connected: boolean; username?: string; libraries?: string[] }
-export interface BibAddResult { key: string; file: string; existed: boolean; bibtex: string; entry: BibItem }
+/** `file`: the .bib that has the entry (in the project); `bib`: its name as the document lists it (beside the document) */
+export interface BibAddResult { key: string; file: string; bib?: string; existed: boolean; copiedFrom?: string; bibtex: string; entry: BibItem }
 export interface FeedbackInfo { version: string; errorReports: boolean }
 /** a problem report, error record or mail for the administrators (server feedback.ts listReports) */
 export interface AdminReport { id: number; kind: string; title: string; body: string; count: number; createdAt: number; lastAt: number; from: string | null }
@@ -219,7 +220,8 @@ export const api = {
   zotero: () => req<ZoteroStatus>('GET', '/api/zotero'),
   connectZotero: (key: string) => req<ZoteroStatus>('POST', '/api/zotero', { key }),
   disconnectZotero: () => req<ZoteroStatus>('DELETE', '/api/zotero'),
-  bibAdd: (project: string, data: { hit?: LitHit; bibtex?: string }) => req<BibAddResult>('POST', `/api/projects/${encodeURIComponent(project)}/bib/add`, data),
+  /** `doc`: the document it is for — the entry goes into the cited.bib beside it */
+  bibAdd: (project: string, data: { hit?: LitHit; bibtex?: string; doc?: string }) => req<BibAddResult>('POST', `/api/projects/${encodeURIComponent(project)}/bib/add`, data),
   feedbackInfo: () => req<FeedbackInfo>('GET', '/api/feedback/info'),
   feedback: (data: { kind: 'bug' | 'idea' | 'question'; title: string; body: string; doc?: string | null; error?: string | null }) => req<{ id: number }>('POST', '/api/feedback', data),
   clientError: (data: { message: string; stack?: string | null }) => req<{ id: number | null }>('POST', '/api/client-error', data),

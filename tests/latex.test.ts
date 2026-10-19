@@ -354,7 +354,8 @@ describe('insets', () => {
     const basic = tex(lyx(par('Standard', cite('citep')), ['\\cite_engine basic']));
     expect(body(basic)).toContain('\\cite{a,b}');
     const biblatex = tex(lyx(par('Standard', cite('citet') + bib), ['\\cite_engine biblatex', '\\biblatex_bibstyle authoryear', '\\biblatex_citestyle authoryear']));
-    expect(body(biblatex)).toContain('\\citet{a,b}\\printbibliography');
+    // plain biblatex has no \\citet: LyX writes its biblatex command (lib/citeengines/biblatex.citeengine Citet=textcite)
+    expect(body(biblatex)).toContain('\\textcite{a,b}\\printbibliography');
     expect(biblatex.tex).toContain('\\usepackage[style=authoryear]{biblatex}');
     expect(biblatex.tex).toContain('\\addbibresource{refs.bib}');
   });

@@ -1071,6 +1071,19 @@ const BIBLATEX_CMDS = new Set(['cite', 'Cite', 'citet', 'citep', 'citeauthor', '
   'footcite', 'footcitetext', 'autocite', 'Autocite', 'textcite', 'Textcite', 'parencite', 'Parencite', 'supercite', 'nocite',
   'citealt', 'citealp', 'Citet', 'Citep', 'citeyearpar', 'smartcite', 'Smartcite', 'citedate', 'citeurl', 'cite*', 'citeauthor*', 'Citeauthor*', 'citet*', 'citep*', 'citealt*', 'citealp*']);
 
+/**
+ * natbib's names under plain biblatex (no natbib=true): biblatex has no \citep or \citet, so a
+ * citation chosen with one (the citation dialog's natbib-style default, a document that switched
+ * engines) is written with biblatex's own command — as LyX does. 19 Oct 2026: a \citep inserted into a
+ * biblatex abstract stopped every build of it with "Undefined control sequence".
+ */
+const NATBIB_TO_BIBLATEX: Record<string, string> = {
+  citep: 'parencite', Citep: 'Parencite', 'citep*': 'parencite', 'Citep*': 'Parencite',
+  citet: 'textcite', Citet: 'Textcite', 'citet*': 'textcite', 'Citet*': 'Textcite',
+  citealp: 'cite', citealt: 'cite', 'citealp*': 'cite', 'citealt*': 'cite', Citealp: 'Cite', Citealt: 'Cite',
+  citeyearpar: 'parencite*',
+};
+
 function latexCommand(ctx: ExportContext, os: TexStream, rp: RunParams, inset: LeafInset, pos: InsetPosition): void {
   const p = paramMap(inset.params);
   const g = (k: string) => unquote(p.get(k));
@@ -1094,7 +1107,7 @@ function latexCommand(ctx: ExportContext, os: TexStream, rp: RunParams, inset: L
       const engine = ctx.bp.citeEngine;
       if (c === 'keyonly') { os.write(key); return; }
       if (engine === 'natbib' || engine === 'biblatex-natbib') { if (!NATBIB_CMDS.has(c) && !(engine === 'biblatex-natbib' && BIBLATEX_CMDS.has(c))) c = 'cite'; }
-      else if (engine === 'biblatex') { if (!BIBLATEX_CMDS.has(c)) c = 'cite'; }
+      else if (engine === 'biblatex') { c = NATBIB_TO_BIBLATEX[c] ?? c; if (!BIBLATEX_CMDS.has(c) && c !== 'parencite*') c = 'cite'; }
       else if (engine === 'jurabib') { if (!['cite', 'citet', 'citep', 'citealt', 'citealp', 'citeauthor', 'citeyear', 'citeyearpar', 'nocite', 'fullcite', 'footcite'].includes(c)) c = 'cite'; }
       else if (c !== 'nocite') c = 'cite';
       if (engine === 'natbib' || engine === 'biblatex-natbib') ctx.features.require('natbib');

@@ -136,7 +136,7 @@ function AddBibButton({ r, project, notify }: { r: BibRef; project: string; noti
     setState('busy');
     const data = r.bibtex ? { bibtex: r.bibtex }
       : { hit: hit ?? { id: r.doi!, title: '', authors: [], year: null, venue: '', type: '', doi: r.doi!, arxiv: null, url: null, citations: null, sources: [] } };
-    api.bibAdd(project, data)
+    api.bibAdd(project, { ...data, doc: editorContext.docId?.replace(/^(text|pdf):/, '') })
       .then(res => { setState('done'); notify(res.existed ? `${res.key} was already in ${res.file}` : `Added ${res.key} to ${res.file}`); })
       .catch(e => { setState('idle'); notify(errText(e), 'error'); });
   };

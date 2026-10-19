@@ -230,14 +230,14 @@ export function projectsForAdmin(user: SessionUser): AdminProjectInfo[] {
 
 /* ------------------------------------------------------------ activity log */
 
-export type AccessAction = 'open' | 'build' | 'git-fetch' | 'git-push' | 'share' | 'admin-access';
+export type AccessAction = 'open' | 'build' | 'git-fetch' | 'git-push' | 'share' | 'admin-access' | 'write' | 'bib-add';
 /** repeated opens / pulls by the same person are one entry per 10 minutes */
 const DEDUPE_MS = 10 * 60 * 1000;
 
 /** Record who did what in a project (never throws — logging must not break the action). */
 export function logAccess(project: string, userId: number | null, action: AccessAction, detail: string | null = null): void {
   try {
-    if (action === 'open' || action === 'git-fetch' || action === 'git-push') {
+    if (action === 'open' || action === 'git-fetch' || action === 'git-push' || action === 'write') {
       const last = db.prepare('SELECT at FROM access_log WHERE project = ? AND user_id IS ? AND action = ? AND detail IS ? ORDER BY at DESC LIMIT 1').get(project, userId, action, detail) as { at: number } | undefined;
       if (last && Date.now() - last.at < DEDUPE_MS) return;
     }

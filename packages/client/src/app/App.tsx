@@ -1426,9 +1426,10 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     rememberBib([r.entry]);
     if (r.existed) return;
     const where = masterView ?? view;
-    const st = where ? C.ensureBibFile(where, r.file) : 'none';
-    if (st === 'added') notify(`Added ${r.file} to the document's bibliography`);
-    else if (st === 'none') notify(`${r.file} has the entry — add a BibTeX bibliography with "${r.file.replace(/\.bib$/, '')}" (Insert ▸ BibTeX bibliography…) so that it is printed`, 'error');
+    const bib = r.bib ?? r.file;
+    const st = where ? C.ensureBibFile(where, bib) : 'none';
+    if (st === 'added') notify(`Added ${bib} to the document's bibliography`);
+    else if (st === 'none') notify(`${r.file} has the entry — add a BibTeX bibliography with "${bib.replace(/\.bib$/, '')}" (Insert ▸ BibTeX bibliography…) so that it is printed`, 'error');
     if (docId) api.meta(docId).then(m => { setMeta(m); editorContext.meta = m; }).catch(() => {});
   };
   /** Entries picked in the citation dialog become known to the editor (for rendering author/year) even if they were not cited before. */
