@@ -89,40 +89,70 @@ function ytextString(t: Y.XmlText): string | null {
   return s;
 }
 
+/** A Yjs type and the document node(s) it now stands for (y-prosemirror's `mapping` entry). */
+export type Synced = [Y.AbstractType<any>, PMNode | PMNode[]];
+
 /**
  * Apply the change of the text run around the cursor of `doc` to its Y.XmlText, anchored at the
  * cursor — when the Yjs structure down to that run still matches the document's (it does while
- * one types; a split paragraph or a new node is left to y-prosemirror).
+ * one types; a split paragraph or a new node is left to y-prosemirror). Returns the Yjs types on the
+ * way to the run with their new nodes when it changed the run (null otherwise): the caller records
+ * them in y-prosemirror's `mapping` once y-prosemirror has synced the document.
+ *
+ * "Matches" is checked child by child: on every level down to the run, each child other than the one
+ * on the cursor's path must still be the very node its Yjs counterpart was last synced with
+ * (y-prosemirror's `mapping`), or a run with its text. Counting children and comparing node names was
+ * not enough: with an inset deleted or added elsewhere in the paragraph, the cursor's comment thread
+ * could line up with another thread's Yjs element, and the cursor run's text was written into that
+ * other thread.
  */
-export function anchorTypedText(fragment: Y.XmlFragment, doc: PMNode, head: number): void {
+export function anchorTypedText(fragment: Y.XmlFragment, doc: PMNode, head: number, mapping: SyncBinding['mapping']): Synced[] | null {
   const $head = doc.resolve(head);
-  if (!$head.parent.inlineContent) return;
+  if (!$head.parent.inlineContent) return null;
+  /**
+   * every child of `node` but the `keep`th stands for its Yjs child: a node is the one that child was
+   * synced with, a run of text has that child's text (y-prosemirror renders runs afresh, it maps nodes)
+   */
+  const aligned = (y: Y.XmlFragment | Y.XmlElement, node: PMNode, keep: number): boolean => {
+    const ps = normalized(node), ys = y.toArray();
+    if (ys.length !== ps.length) return false;
+    for (let j = 0; j < ps.length; j++) {
+      if (j === keep) continue;
+      const yj = ys[j], pj = ps[j];
+      if (yj instanceof Y.XmlText ? !Array.isArray(pj) || ytextString(yj) !== pj.map(t => t.text).join('') : !sameSynced(mapping.get(yj), pj)) return false;
+    }
+    return true;
+  };
+  const path: Synced[] = [];
   let y: Y.XmlFragment | Y.XmlElement = fragment;
   for (let d = 0; d < $head.depth; d++) {
     const node = $head.node(d), i = $head.index(d);
     const groups = groupsOf(node);
-    if (y.length !== groups.length) return;
+    if (y.length !== groups.length) return null;
     const g = groups.findIndex(gr => gr.firstChild <= i && i <= gr.lastChild);
     const child = y.get(g);
-    if (!(child instanceof Y.XmlElement) || child.nodeName !== node.child(i).type.name) return;
+    if (!(child instanceof Y.XmlElement) || child.nodeName !== node.child(i).type.name || !aligned(y, node, g)) return null;
+    path.push([child, node.child(i)]);
     y = child;
   }
   const block = $head.parent, offset = $head.parentOffset;
   const groups = groupsOf(block);
-  if (y.length !== groups.length) return;
+  if (y.length !== groups.length) return null;
   const g = groups.findIndex(gr => gr.text && gr.from <= offset && offset <= gr.to);
-  if (g < 0) return;
+  if (g < 0 || !aligned(y, block, g)) return null;
   const ytext = y.get(g);
-  if (!(ytext instanceof Y.XmlText)) return;
+  if (!(ytext instanceof Y.XmlText)) return null;
   const before = ytextString(ytext);
-  if (before === null) return;
+  if (before === null) return null;
   const after = block.textBetween(groups[g].from, groups[g].to);
-  if (before === after) return;
+  if (before === after) return null;
   const edit = anchoredEdit(before, after, offset - groups[g].from);
-  if (!edit) return;
+  if (!edit) return null;
   // the inserted text takes the formatting on its left; y-prosemirror sets the marks the document has
   if (edit.remove) ytext.delete(edit.index, edit.remove);
   if (edit.insert) ytext.insert(edit.index, edit.insert);
+  path.push([ytext, normalized(block)[g]]);
+  return path;
 }
 
 /** A node's children as y-prosemirror stores them: runs of adjacent text nodes, other nodes one by one. */
@@ -143,9 +173,10 @@ const sameSynced = (mapped: PMNode | PMNode[] | undefined, p: PMNode | PMNode[])
  * Find a paragraph split in `doc` against the Yjs tree (the one element whose synced node is now two
  * nodes of its type, the halves' content together the old content) and apply it with the first
  * half kept in place. Descends through the one changed child of each level, so splits inside table
- * cells and insets are found too. True when it applied one.
+ * cells and insets are found too. Returns the elements it descended through with their new nodes
+ * when it applied one (for y-prosemirror's `mapping`, as anchorTypedText), null when it did not.
  */
-export function anchorSplit(binding: SyncBinding, y: Y.XmlFragment | Y.XmlElement, node: PMNode): boolean {
+export function anchorSplit(binding: SyncBinding, y: Y.XmlFragment | Y.XmlElement, node: PMNode): Synced[] | null {
   const ys = y.toArray(), ps = normalized(node);
   const min = Math.min(ys.length, ps.length);
   let left = 0;
@@ -154,31 +185,35 @@ export function anchorSplit(binding: SyncBinding, y: Y.XmlFragment | Y.XmlElemen
   while (right < min - left && sameSynced(binding.mapping.get(ys[ys.length - 1 - right]), ps[ps.length - 1 - right])) right++;
   const yMid = ys.length - left - right, pMid = ps.length - left - right;
   const el = ys[left], a = ps[left], b = ps[left + 1];
-  if (!(el instanceof Y.XmlElement) || Array.isArray(a)) return false;
-  if (yMid === 1 && pMid === 1) return el.nodeName === a.type.name && anchorSplit(binding, el, a);
-  if (yMid !== 1 || pMid !== 2 || Array.isArray(b)) return false;
+  if (!(el instanceof Y.XmlElement) || Array.isArray(a)) return null;
+  if (yMid === 1 && pMid === 1) {
+    if (el.nodeName !== a.type.name) return null;
+    const inner = anchorSplit(binding, el, a);
+    return inner && [[el, a], ...inner];
+  }
+  if (yMid !== 1 || pMid !== 2 || Array.isArray(b)) return null;
   const old = binding.mapping.get(el);
-  if (!old || Array.isArray(old) || !old.inlineContent || a.type !== old.type || b.type !== old.type) return false;
-  if (!a.content.append(b.content).eq(old.content)) return false;
+  if (!old || Array.isArray(old) || !old.inlineContent || a.type !== old.type || b.type !== old.type) return null;
+  if (!a.content.append(b.content).eq(old.content)) return null;
   const doc = y.doc!;
   if (b.content.size <= a.content.size) {
     updateYFragment(doc, el, a, binding);   // the first half: same element, the split run trimmed, what follows it deleted
     const second = new Y.XmlElement(b.type.name);
     y.insert(left + 1, [second]);
     updateYFragment(doc, second, b, binding);
-    return true;
+    return [];
   }
   // the second half is the larger one (Enter near the start): it stays, the first half is copied
   const at = splitPoint(old, a.content.size);
   const kids = el.toArray();
-  if (!at || kids.length !== normalized(old).length || (at.offset > 0 && !(kids[at.index] instanceof Y.XmlText))) return false;
+  if (!at || kids.length !== normalized(old).length || (at.offset > 0 && !(kids[at.index] instanceof Y.XmlText))) return null;
   if (at.offset > 0) (kids[at.index] as Y.XmlText).delete(0, at.offset);
   if (at.index > 0) el.delete(0, at.index);
   updateYFragment(doc, el, b, binding);
   const first = new Y.XmlElement(a.type.name);
   y.insert(left, [first]);
   updateYFragment(doc, first, a, binding);
-  return true;
+  return [];
 }
 
 /** Where content offset `pos` of a textblock falls among its children as Yjs stores them: before child `index`, `offset` characters into it (a text run only). */
@@ -277,13 +312,22 @@ export function typingAnchorPlugin(): Plugin {
         // one Yjs transaction with y-prosemirror's own origin (the undo manager tracks it as a local edit)
         binding.type.doc!.transact(tr => {
           const sel = binding.prosemirrorView?.state.selection;
+          let typed: Synced[] | null = null;
           if (doc !== synced) {
             try {
-              if (!anchorSplit(binding, binding.type, doc) && sel instanceof TextSelection) anchorTypedText(binding.type, doc, sel.head);
+              typed = anchorSplit(binding, binding.type, doc);
+              if (!typed && sel instanceof TextSelection) typed = anchorTypedText(binding.type, doc, sel.head, binding.mapping);
             } catch (e) { console.warn('[typing anchor]', e); }
           }
           synced = doc;
           sync(doc);
+          // With the run (or the split paragraph) already brought up to date, y-prosemirror finds the
+          // outermost changed paragraph equal and records only that one: the inset, the inner paragraph
+          // and the run inside it kept the nodes from before the keystroke. The next change from
+          // elsewhere in that paragraph re-rendered the inset from those, the keystrokes (or the new
+          // paragraph) vanished from the screen, and the next local edit wrote the old text back —
+          // characters typed into comments and footnotes were lost.
+          if (typed) for (const [type, node] of typed) binding.mapping.set(type, node);
           // a split, a join or a run cut by an inline node copied text: recorded, for the server to place what others typed into the original
           try { recordCopies(tr); } catch (e) { console.warn('[moves]', e); }
         }, ySyncPluginKey);
