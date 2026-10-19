@@ -10,6 +10,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { styleLabel, styleSearchText } from './stylenames';
 import type { EditorView } from 'prosemirror-view';
 import { NodeSelection } from 'prosemirror-state';
+import type { Node as PMNode } from 'prosemirror-model';
 import { estimatePages } from './pagecount';
 import { currentParagraph } from '../editor/commands';
 import { editorContext, onMetaChange } from '../editor/context';
@@ -113,17 +114,36 @@ export function suggestLabel(view: EditorView): string {
 
 export interface DocStats { words: number; chars: number; /** the numbers describe the selection, not the whole document */ sel: boolean; /** estimated pages at 11pt (app/pagecount.ts) */ pages?: number }
 
+/** a note box or comment: text the PDF does not print (greyed-out text it does, as LyX counts it) */
+export const isUnprintedNote = (n: PMNode): boolean => n.type.name === 'inset' && n.attrs.name === 'Note' && n.attrs.arg !== 'Greyedout';
+
+/**
+ * The text between `from` and `to` as `doc.textBetween(from, to, '\n', ' ')` gives it, without the
+ * notes and comments that start in the range (a selection inside one counts its text).
+ */
+export function countedText(doc: PMNode, from: number, to: number): string {
+  let text = '', first = true;
+  doc.nodesBetween(from, to, (node, pos) => {
+    if (pos >= from && isUnprintedNote(node)) return false;
+    const t = node.isText ? node.text!.slice(Math.max(from, pos) - pos, to - pos) : node.isLeaf ? ' ' : '';
+    if (node.isBlock && (node.isLeaf || node.isTextblock)) { if (first) first = false; else text += '\n'; }
+    text += t;
+    return true;
+  });
+  return text;
+}
+
 /**
  * Word / character count for the status bar: the selection when there is one, else the whole
- * document (like LyX's statistics; a math formula or other inset counts as a word boundary), and
- * the pages they would fill at 11pt. A selected object (a picture, a formula) is no text to count:
- * the document's numbers stay.
+ * document (like LyX's statistics; a math formula or other inset counts as a word boundary, note
+ * boxes and comments are left out), and the pages they would fill at 11pt. A selected object (a
+ * picture, a formula, a comment) is no text to count: the document's numbers stay.
  */
 export function documentStats(view: EditorView): DocStats {
   const { selection, doc } = view.state;
   const { from, to } = selection;
-  const empty = selection.empty || (selection instanceof NodeSelection && !/\S/.test(doc.textBetween(from, to, '\n', ' ')));
-  const text = doc.textBetween(empty ? 0 : from, empty ? doc.content.size : to, '\n', ' ');
+  const empty = selection.empty || (selection instanceof NodeSelection && !/\S/.test(countedText(doc, from, to)));
+  const text = countedText(doc, empty ? 0 : from, empty ? doc.content.size : to);
   const words = (text.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) ?? []).length;
   let pages: number | undefined;
   try { pages = doc.firstChild?.type.name === 'ol_page' ? undefined : empty ? estimatePages(doc) : estimatePages(doc.cut(from, to), false); } catch { pages = undefined; }

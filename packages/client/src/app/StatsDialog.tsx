@@ -1,9 +1,10 @@
 import { useMemo } from 'preact/hooks';
 import type { EditorView } from 'prosemirror-view';
 import { nodeText } from '../editor/cliptext';
+import { isUnprintedNote } from './shellutil';
 import { Dialog } from './Dialogs';
 
-/** Document ▸ Statistics: words and characters of the selection or the whole document (notes and comments excluded, like LyX's default). */
+/** Document ▸ Statistics: words and characters of the selection or the whole document (note boxes and comments excluded, like LyX's default). */
 export function StatsDialog({ view, onClose }: { view: EditorView; onClose: () => void }) {
   const stats = useMemo(() => {
     const sel = view.state.selection;
@@ -11,7 +12,7 @@ export function StatsDialog({ view, onClose }: { view: EditorView; onClose: () =
     const textOf = (from: number, to: number) => {
       let out = '';
       view.state.doc.nodesBetween(from, to, (node, pos) => {
-        if (node.type.name === 'inset' && /^Note$/.test(node.attrs.name)) return false;   // LyX notes / comments are not counted
+        if (pos >= from && isUnprintedNote(node)) return false;   // note boxes / comments are not counted (greyed-out text is printed)
         if (node.isText) out += node.text!.slice(Math.max(0, from - pos), Math.max(0, to - pos));
         else if (node.isAtom && node.isInline) out += nodeText(node);
         else if (node.isTextblock) out += '\n';
@@ -25,7 +26,7 @@ export function StatsDialog({ view, onClose }: { view: EditorView; onClose: () =
   return <Dialog title="Statistics" onClose={onClose} buttons={<button onClick={onClose}>Close</button>}>
     <table class="stats"><thead><tr><th></th><th>Words</th><th>Characters</th><th>Characters (with spaces)</th></tr></thead>
       <tbody>{stats.selection && row('Selection', stats.selection)}{row('Document', stats.document)}</tbody></table>
-    <p class="hint">Formulas count as one word each; LyX notes and comments are not counted.</p>
+    <p class="hint">Formulas count as one word each; note boxes and comments are not counted.</p>
   </Dialog>;
 }
 
