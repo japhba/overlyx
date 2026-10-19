@@ -20,7 +20,7 @@
  * (privacy.ts) says the same — keep the two in step.
  */
 import express from 'express';
-import { execFile } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import { db } from './db.ts';
 import { config, REPO_ROOT } from './config.ts';
@@ -43,12 +43,15 @@ CREATE TABLE IF NOT EXISTS reports (
 );
 CREATE INDEX IF NOT EXISTS reports_last ON reports(kind, last_at);`);
 
-/** short git commit of the running code (read once, asynchronously) */
-export let appVersion = 'unknown';
+// Read synchronously at startup: an asynchronous git call lost to its own timeout while the server's
+// modules were still loading (the event loop busy for longer than 5 s), and /api/version said 'unknown'.
+const gitHead = (...args: string[]): string => {
+  try { return execFileSync('git', ['rev-parse', ...args, 'HEAD'], { cwd: REPO_ROOT, timeout: 5000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { return ''; }
+};
+/** short git commit of the running code (read once at startup) */
+export const appVersion = gitHead('--short') || 'unknown';
 /** the full commit hash this server runs (GET /api/version; scripts/autodeploy.sh checks it after a deploy) */
-export let appCommit = 'unknown';
-execFile('git', ['rev-parse', '--short', 'HEAD'], { cwd: REPO_ROOT, timeout: 5000 }, (err, out) => { if (!err && out.trim()) appVersion = out.trim(); });
-execFile('git', ['rev-parse', 'HEAD'], { cwd: REPO_ROOT, timeout: 5000 }, (err, out) => { if (!err && out.trim()) appCommit = out.trim(); });
+export const appCommit = gitHead() || 'unknown';
 
 export interface Reporter { id: number; name: string; username: string; email?: string | null }
 export interface FeedbackInput {
