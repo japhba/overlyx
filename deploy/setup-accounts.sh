@@ -6,7 +6,7 @@
 #
 #   root           the administrator — no agents run here
 #   jan            development and every agent you start: its own projects, no other user's data;
-#                  no sudo but `sudo overlyx-deploy`
+#                  no sudo but `sudo overlyx-deploy` and `sudo overlyx-telemetry`
 #   overlyx-maint  the unattended maintenance worker (its timer is left as it is)
 #
 # Logins it cannot make for you are printed at the end. Personal files for jan (its CLAUDE.md files,
@@ -36,6 +36,9 @@ step "users' data: root's alone"
 for d in "$PROJECTS" "$VOL/backups" "$VOL/scratch" "$DATA" /root/lyx/overlyx-production/data; do
   if [ -e "$d" ]; then chmod 700 "$d"; fi
 done
+# the code stays readable for the worker's read-only bind (installs made under UMask=0077 were not)
+P=/root/lyx/overlyx-production
+find "$P" -path "$P/data" -prune -o \( -type d ! -perm -o+rx -o -type f ! -perm -o+r \) -exec chmod go+rX {} +
 # leftovers of root's sessions and tests in /tmp, copies of documents among them (root keeps them)
 find /tmp /var/tmp -maxdepth 1 -mindepth 1 -user root ! -type s ! -name '.*' ! -name 'systemd-private-*' ! -name 'snap-private-tmp' -perm /o+rwx -exec chmod go-rwx {} +
 
@@ -76,8 +79,9 @@ step "AppArmor: user namespaces for bubblewrap and Codex's sandbox"
 install -m 644 "$SRC/deploy/apparmor-overlyx-userns" /etc/apparmor.d/overlyx-userns
 apparmor_parser -r /etc/apparmor.d/overlyx-userns
 
-step "deploying from $DEV: sudo overlyx-deploy"
+step "deploying and telemetry from $DEV: sudo overlyx-deploy, sudo overlyx-telemetry"
 install -m 755 "$SRC/deploy/overlyx-deploy" /usr/local/sbin/overlyx-deploy
+install -m 755 "$SRC/deploy/overlyx-telemetry" /usr/local/sbin/overlyx-telemetry
 rule=$(mktemp)
 sed "s/^jan /$DEV /" "$SRC/deploy/sudoers-overlyx-deploy" > "$rule"
 visudo -cqf "$rule"
@@ -191,7 +195,9 @@ fi
 as "$DEV" bwrap --ro-bind / / --proc /proc --dev /dev --unshare-all true && ok "bubblewrap works for $DEV" || bad "bubblewrap fails for $DEV"
 as "$DEV" codex sandbox -- /bin/true >/dev/null 2>&1 && ok "Codex's sandbox works for $DEV" || bad "Codex's sandbox fails for $DEV"
 rules=$(sudo -l -U "$DEV" | grep -E '^[[:space:]]+\(' || true)
-[ "$(printf '%s\n' "$rules" | grep -c .)" = 1 ] && grep -q /usr/local/sbin/overlyx-deploy <<<"$rules" && ok "$DEV's only sudo: overlyx-deploy" || bad "$DEV's sudo rights: $rules"
+[ "$(printf '%s\n' "$rules" | grep -c .)" = 2 ] && grep -q /usr/local/sbin/overlyx-deploy <<<"$rules" && grep -q /usr/local/sbin/overlyx-telemetry <<<"$rules" &&
+  ok "$DEV's only sudo: overlyx-deploy, overlyx-telemetry" || bad "$DEV's sudo rights: $rules"
+as "$DEV" sudo -n /usr/local/sbin/overlyx-telemetry usage 1 >/dev/null && ok "$DEV reads telemetry" || bad "$DEV cannot run overlyx-telemetry"
 # the worker's unit sandbox as the unit sets it up: the runner bound in, Codex's sandbox working,
 # /root, /home and /mnt gone
 systemd-run --quiet --wait --pipe --collect -p User="$MAINT" -p Group="$MAINT" -p NoNewPrivileges=yes \

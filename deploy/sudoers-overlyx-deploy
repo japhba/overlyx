@@ -1,3 +1,5 @@
-# /etc/sudoers.d/overlyx-deploy — the development account deploys origin/master through the production
-# server's autodeploy: that one command, without arguments, and nothing else as root.
+# /etc/sudoers.d/overlyx-deploy — what the development account may do as root, and nothing else:
+# deploy origin/master through the production server's autodeploy (that command, without arguments),
+# and read telemetry without users' identities (the command checks its own few arguments).
 jan ALL=(root) NOPASSWD: /usr/local/sbin/overlyx-deploy ""
+jan ALL=(root) NOPASSWD: /usr/local/sbin/overlyx-telemetry

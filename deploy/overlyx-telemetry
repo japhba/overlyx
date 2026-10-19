@@ -1,0 +1,20 @@
+#!/bin/bash
+# /usr/local/sbin/overlyx-telemetry — telemetry for the development account, without users' identities:
+#
+#   sudo overlyx-telemetry usage [days]        the anonymous usage summary (default 30 days)
+#   sudo overlyx-telemetry reports [days]      problem reports, without who sent them
+#   sudo overlyx-telemetry report <id>         one report in full
+#   sudo overlyx-telemetry logs [hours] [overlyx|autodeploy|maintenance]   a service's log (default 6 h)
+#
+# scripts/telemetry.ts does the work, as root from the production checkout: e-mail addresses and
+# credentials removed, other accounts and their projects pseudonymized. deploy/sudoers-overlyx-deploy
+# allows it to the development account; anything but these words and plain numbers is refused here.
+set -euo pipefail
+help="usage: overlyx-telemetry usage [days] | reports [days] | report <id> | logs [hours] [overlyx|autodeploy|maintenance]"
+[ $# -le 3 ] || { echo "$help" >&2; exit 2; }
+case "${1:-usage}" in usage|reports|report|logs) ;; *) echo "$help" >&2; exit 2 ;; esac
+[ -z "${2:-}" ] || [[ "$2" =~ ^[0-9]{1,9}$ ]] || { echo "$help" >&2; exit 2; }
+[ -z "${3:-}" ] || { [ "$1" = logs ] && [[ "$3" =~ ^(overlyx|autodeploy|maintenance)$ ]]; } || { echo "$help" >&2; exit 2; }
+cd /root/lyx/overlyx-production
+exec env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=/root LANG=C.UTF-8 OVERLYX_DATA_DIR=/root/lyx/overlyx/data \
+  OVERLYX_PROJECTS_DIR=/mnt/HC_Volume_107166861/projects /usr/bin/node --import tsx scripts/telemetry.ts "$@"

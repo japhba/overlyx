@@ -2611,7 +2611,11 @@ root, and none can read other users' projects:
   deploy key for this repository only; its own OverLyX projects at `~/projects` (a bind mount of
   `projects/jan`, read/write through an ACL); bulky scratch data in `/mnt/HC_Volume_107166861/jan`.
   No sudo but `sudo overlyx-deploy` (`deploy/overlyx-deploy`, `deploy/sudoers-overlyx-deploy`): run
-  from here, `scripts/deploy.sh` checks and pushes, and the server's autodeploy deploys at once. Its
+  from here, `scripts/deploy.sh` checks and pushes, and the server's autodeploy deploys at once. And
+  `sudo overlyx-telemetry usage|reports [days] | report <id> | logs [hours] [overlyx|autodeploy|maintenance]`
+  (`deploy/overlyx-telemetry`, `scripts/telemetry.ts`): the usage summary, problem reports and service
+  logs for bug fixing, without identities — e-mail addresses and credentials removed, other accounts
+  and their projects under stable pseudonyms (`u-…/p-…`, keyed by `data/telemetry-pseudonyms.key`). Its
   SSH sessions get no forwarded agent (an sshd `Match` block), so the owner's laptop key can't be
   used from it to log in as root.
 - `overlyx-maint` — the maintenance worker (above): its own checkout, state and inbox; systemd hides
