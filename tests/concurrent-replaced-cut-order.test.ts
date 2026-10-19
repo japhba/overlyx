@@ -67,10 +67,9 @@ for (const pendingMoves of [false, true]) it(`a replaced split container retains
     for (const peer of [a, b, c]) {
       expect(clean(peer.pars())).toEqual(clean(final));
       expect(peer.formulas()).toEqual(['a+b', 'c', 'x^2']);
-      expect(peer.pendingMoves?.waiting ?? false).toBe(false);
     }
   } finally {
-    for (const p of net.peers) { p.remoteUpdates?.destroy(); p.pendingMoves?.destroy(); p.view.destroy(); p.ydoc.destroy(); }
+    for (const p of net.peers) { p.view.destroy(); p.ydoc.destroy(); }
     net.server.destroy();
   }
 });

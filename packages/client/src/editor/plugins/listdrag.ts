@@ -422,7 +422,7 @@ class ListDragView {
     if (sp.scrollTop !== d.scrollTop) { this.measure(d); this.track(d); }
   }
 
-  /** a collaborator's change arrived while dragging: the item found again (y-prosemirror keeps unchanged paragraphs), else the drag ends */
+  /** a collaborator's change arrived while dragging: the item found again (the CRDT's reading keeps unchanged paragraphs' nodes), else the drag ends */
   private refind(): void {
     const d = this.drag!;
     let at = -1;

@@ -17,7 +17,7 @@ import type { Node as PMNode } from 'prosemirror-model';
 import { gapCursor } from 'prosemirror-gapcursor';
 import { dropCursor } from 'prosemirror-dropcursor';
 import { tableEditing } from 'prosemirror-tables';
-import { ySyncPluginKey } from 'y-prosemirror';
+import { ySyncPluginKey } from './collab';
 import { unquote, paramMap, projectOfDoc, docDirOf } from '@overlyx/core';
 import { lyxKeymap, chordPlugin } from './keymap';
 import { numberingPlugin } from './plugins/numbering';
@@ -29,7 +29,6 @@ import { commentUiPlugin } from './plugins/commentui';
 import { changeTrackingPlugin, changesFilterPlugin, changeAuthorName } from './plugins/changes';
 import { changeActionsPlugin } from './plugins/changeactions';
 import { fontCarryPlugin } from './plugins/fontcarry';
-import { typingAnchorPlugin } from './plugins/typinganchor';
 import { insetCaretPlugin } from './plugins/insetcaret';
 import { envFocusPlugin } from './plugins/envfocus';
 import { wideTablesPlugin } from './plugins/widetables';
@@ -106,7 +105,7 @@ export function editorAttributes(child: boolean, p: { spellcheck: boolean; spell
 }
 
 export interface AssemblyOptions {
-  /** how the document is synced: the front end's ySyncPlugin, yCursorPlugin and yUndoPlugin, in that order (they come first) */
+  /** how the document is synced: the front end's sync, cursor and undo plugins (editor/collab.ts), in that order (they come first) */
   sync: Plugin[];
   marginMode: boolean;
   /** margin ink — only where a collaboration awareness carries the strokes (the web client's master editor) */
@@ -124,7 +123,6 @@ export function assemblePlugins(o: AssemblyOptions): Plugin[] {
   installLinks();   // ⌘K and the link bubble inside formulas, ⌘/Ctrl+click on their links
   return [
     ...o.sync,
-    typingAnchorPlugin(),   // typed text joins the Yjs history where it was typed (wraps the ySyncPlugin's PM → Yjs step)
     undoGroupsPlugin(),     // undo steps per word / kind of edit, not per half-second of activity
     // AI preview / ghost text come first: their Tab / Escape must win over the LyX bindings and table navigation
     aiRewritePlugin(),
@@ -213,7 +211,7 @@ export function flushDomSelection(view: EditorView | null | undefined): void {
 }
 
 /**
- * Decoration-only transactions (y-prosemirror re-renders the remote cursors from a setTimeout
+ * Decoration-only transactions (the cursor plugin re-renders the remote cursors from a setTimeout
  * after every awareness change) make ProseMirror write its *state* selection back into the DOM.
  * Right after a mouse click the DOM selection is ahead of the state (the browser's
  * `selectionchange` event has not been processed yet), so the click would be lost: read the

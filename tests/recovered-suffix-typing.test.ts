@@ -27,7 +27,7 @@ function ordered(paragraphs: string[], typed?: { word: string; left: string; rig
 }
 
 function close(net: Net) {
-  for (const peer of net.peers) { peer.pendingMoves?.destroy(); peer.view.destroy(); peer.ydoc.destroy(); }
+  for (const peer of net.peers) { peer.view.destroy(); peer.ydoc.destroy(); }
   net.server.destroy();
 }
 
@@ -46,8 +46,6 @@ for (const pendingMoves of [false, true]) {
       const final = net.converged();
       ordered(final, typed);
       for (const peer of [a, b]) ordered(peer.pars(), typed);
-      expect(a.pendingMoves?.waiting ?? false).toBe(false);
-      expect(b.pendingMoves?.waiting ?? false).toBe(false);
     } finally { close(net); }
   });
 }

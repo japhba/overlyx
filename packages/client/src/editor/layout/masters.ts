@@ -18,7 +18,7 @@ import type { Mark, Node as PMNode } from 'prosemirror-model';
 import type { EditorState, Transaction } from 'prosemirror-state';
 import { Decoration } from 'prosemirror-view';
 import type { EditorView } from 'prosemirror-view';
-import { ySyncPluginKey } from 'y-prosemirror';
+import { ySyncPluginKey } from '../collab';
 import { schema } from '@overlyx/core';
 import { pages, isMasterPage, defaultParagraph, pageFill, type Attrs } from './commands';
 import { color } from './geom';

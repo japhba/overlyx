@@ -2,7 +2,7 @@
 import { insertDrawing } from '../editor/svgdrawing';
 import type { EditorView } from 'prosemirror-view';
 import type { Command } from 'prosemirror-state';
-import { undo, redo } from 'y-prosemirror';
+import { undo, redo } from '../editor/collab';
 import { addColumnAfter, addColumnBefore, addRowAfter, addRowBefore, deleteColumn, deleteRow, deleteTable, mergeCells, splitCell } from 'prosemirror-tables';
 import type { DocMeta } from '../api';
 import type { MenuDef, MenuEntry } from './MenuBar';

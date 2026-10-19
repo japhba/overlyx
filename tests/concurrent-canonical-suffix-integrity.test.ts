@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { expect, it } from 'vitest';
 import { TextSelection } from 'prosemirror-state';
-import { Net, par, text, math } from './yjs-net';
+import { Net, par, text, math, expectTokens } from './yjs-net';
 
 const words = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => `w${String(from + i).padStart(3, '0')}`).join(' ');
 const content = { type: 'doc', content: [
@@ -54,7 +54,7 @@ for (const pendingMoves of [false, true]) {
         expect(all.indexOf(left)).toBeLessThan(all.indexOf(`$${formula}$`));
         expect(all.indexOf(`$${formula}$`)).toBeLessThan(all.indexOf(right));
       }
-      expect(clean(final)).toEqual([
+      expectTokens(clean(final), [
         words(1, 2), 'Tb2 w003', 'w004', `${words(5, 6)} $a+b$ w007`,
         `${words(8, 14)} $c$`, words(15, 19), words(20, 29), `${words(30, 33)} $x^2$ ${words(34, 37)}`,
       ]);
@@ -65,10 +65,9 @@ for (const pendingMoves of [false, true]) {
       for (const peer of net.peers) {
         expect(clean(peer.pars())).toEqual(clean(final));
         expect(peer.formulas()).toEqual(['a+b', 'c', 'x^2']);
-        expect(peer.pendingMoves?.waiting ?? false).toBe(false);
       }
     } finally {
-      for (const peer of net.peers) { peer.remoteUpdates?.destroy(); peer.pendingMoves?.destroy(); peer.view.destroy(); peer.ydoc.destroy(); }
+      for (const peer of net.peers) { peer.view.destroy(); peer.ydoc.destroy(); }
       net.server.destroy();
     }
   });

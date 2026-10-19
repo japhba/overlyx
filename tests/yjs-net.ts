@@ -1,9 +1,9 @@
 /**
- * A Yjs "network" for tests: a server Y.Doc and editors (y-prosemirror + the editor's typing anchor)
- * that talk to it the way y-websocket does — live updates while online, a sync step 1/2 exchange on
- * reconnect — with the deliveries under the test's control, so that any interleaving of edits,
- * splits and reconnects can be replayed deterministically. The server applies what it receives
- * through MoveRepair (packages/server/src/moves.ts) like ws.ts does, unless `repair: false`.
+ * A Yjs "network" for tests: a server Y.Doc and editors (ProseMirror views bound to their CRDTs by
+ * the editor's sync, client editor/collab.ts) that talk to it the way y-websocket does — live
+ * updates while online, a sync step 1/2 exchange on reconnect — with the deliveries under the test's
+ * control, so that any interleaving of edits, splits and reconnects can be replayed
+ * deterministically. The server applies what it receives as ws.ts does: as it is.
  */
 import { expect } from 'vitest';
 import { EditorState, TextSelection } from 'prosemirror-state';
@@ -11,13 +11,9 @@ import { splitBlock, joinBackward } from 'prosemirror-commands';
 import { EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
 import * as Y from 'yjs';
-import { ySyncPlugin, initProseMirrorDoc, prosemirrorJSONToYXmlFragment, yXmlFragmentToProseMirrorRootNode } from 'y-prosemirror';
 import { schema } from '@overlyx/core';
-import { typingAnchorPlugin } from '../packages/client/src/editor/plugins/typinganchor';
-import { MoveRepair } from '../packages/server/src/moves';
-import { decodeRecord } from '../packages/core/src/moves';
-import { PendingMoves } from '../packages/core/src/pendingmoves';
-import { RemoteUpdates } from '../packages/client/src/editor/remoteupdates';
+import { Reader, writeDocument, BODY } from '@overlyx/core/collab/index.ts';
+import { collabSync, undoPlugin, undo, redo } from '../packages/client/src/editor/collab';
 
 export type Json = Record<string, unknown>;
 export const par = (...content: Json[]): Json => ({ type: 'paragraph', content });
@@ -36,27 +32,16 @@ export class Peer {
   inbox: Uint8Array[] = [];
   /** this peer → server, not delivered yet */
   outbox: Uint8Array[] = [];
-  /** what this peer had when it made each of them (the editor reports it before each update, ws.ts MSG_KNOWS) */
+  /** (kept for the scenario tests that clear it: the server no longer asks what an editor had) */
   outKnows: Map<number, number>[] = [];
-  pendingMoves: PendingMoves | null = null;
-  remoteUpdates: RemoteUpdates | null = null;
   constructor(public net: Net, public name: string, id: number, state: Uint8Array) {
     this.ydoc.clientID = id;
     Y.applyUpdate(this.ydoc, state, NET);
-    if (net.pendingMoves) {
-      this.pendingMoves = new PendingMoves(this.ydoc); this.pendingMoves.enable();
-      this.remoteUpdates = new RemoteUpdates(this.ydoc, this.pendingMoves, NET, Symbol('agent'));
-    }
-    const fragment = this.ydoc.getXmlFragment('prosemirror');
-    const { doc, mapping } = initProseMirrorDoc(fragment, schema);
-    const plugins = [ySyncPlugin(fragment, { mapping }), typingAnchorPlugin()];
-    this.view = new EditorView(document.createElement('div'), { state: EditorState.create({ doc, plugins }) });
+    const sync = collabSync(this.ydoc);
+    this.view = new EditorView(document.createElement('div'), { state: EditorState.create({ doc: sync.doc, plugins: [sync.plugin, undoPlugin()] }) });
     this.ydoc.on('update', (u: Uint8Array, origin: unknown) => {
       if (origin === NET || !this.online) return;
       this.outbox.push(u);
-      const had = Y.decodeStateVector(Y.encodeStateVector(this.ydoc));
-      had.delete(this.ydoc.clientID);
-      this.outKnows.push(had);
     });
   }
 
@@ -93,6 +78,9 @@ export class Peer {
     const node = this.view.state.doc.nodeAt(at)!;
     this.view.dispatch(this.view.state.tr.setNodeMarkup(at, undefined, { ...node.attrs, latex: next }));
   }
+  /** Ctrl+Z, Ctrl+Y */
+  undo(): boolean { return undo(this.view.state, this.view.dispatch, this.view); }
+  redo(): boolean { return redo(this.view.state, this.view.dispatch, this.view); }
   /** the paragraphs' text (formulas as $latex$) */
   pars(): string[] { return parsOf(this.view.state.doc); }
   formulas(): string[] { const out: string[] = []; this.view.state.doc.descendants(n => { if (n.type.name === 'math_inline') out.push(n.attrs.latex); }); return out; }
@@ -112,32 +100,21 @@ export function parsOf(doc: PMNode): string[] {
 
 export class Net {
   server = new Y.Doc();
-  repair: MoveRepair | null;
   peers: Peer[] = [];
-  /** the state vector each peer reported in its last sync step 1 */
-  knows = new Map<Peer, Map<number, number>>();
-  readonly pendingMoves: boolean;
 
-  constructor(doc: Json, opts: { repair?: boolean; pendingMoves?: boolean } = {}) {
-    // Server repair regressions also replay deliberately unbuffered legacy
-    // clients. Client-view tests opt into the editor's canonical-ack boundary.
-    this.pendingMoves = opts.pendingMoves ?? false;
+  /** (options of the move repair's time, accepted and ignored: nothing is repaired any more) */
+  constructor(doc: Json, _opts: { repair?: boolean; pendingMoves?: boolean } = {}) {
     this.server.clientID = 1;
-    prosemirrorJSONToYXmlFragment(schema, doc, this.server.getXmlFragment('prosemirror'));
-    this.repair = opts.repair === false ? null : new MoveRepair(this.server, { log: process.env.OVERLYX_MOVES_DEBUG ? (...a) => console.log(...a) : undefined });
+    this.server.transact(() => writeDocument(schema, this.server, schema.nodeFromJSON(doc)));
     this.server.on('update', (u: Uint8Array) => { for (const p of this.peers) if (p.online) p.inbox.push(u); });
   }
 
-  /**
-   * The server restarts: its document is loaded from the persisted state (as docs.ts does, origin
-   * 'db'), garbage collection included; every peer loses its connection.
-   */
+  /** The server restarts: its document is loaded from the persisted state (as docs.ts does, origin 'db'); every peer loses its connection. */
   restart(): void {
     for (const p of this.peers) if (p.online) this.offline(p);
     const state = Y.encodeStateAsUpdate(this.server);
     this.server = new Y.Doc();
     this.server.clientID = 2;
-    this.repair = this.repair ? new MoveRepair(this.server) : null;
     Y.applyUpdate(this.server, state, 'db');
     this.server.on('update', (u: Uint8Array) => { for (const p of this.peers) if (p.online) p.inbox.push(u); });
   }
@@ -150,31 +127,19 @@ export class Net {
     return p;
   }
 
-  /** `had`: what the peer had when it made a live update (step 2: its sync step 1 says) */
-  private toServer(p: Peer, u: Uint8Array, step2: boolean, had?: Map<number, number>) {
-    const knows = step2 ? this.knows.get(p) ?? null : null;
-    if (this.repair) this.repair.receive(u, p, { step2, knows, sent: step2 ? knows : had ?? null });
-    else Y.applyUpdate(this.server, u, p);
-  }
-
-  private applyToPeer(p: Peer, u: Uint8Array) {
-    if (p.remoteUpdates) p.remoteUpdates.receive(u);
-    else Y.applyUpdate(p.ydoc, u, NET);
-  }
+  private toServer(p: Peer, u: Uint8Array) { Y.applyUpdate(this.server, u, p); }
+  private applyToPeer(p: Peer, u: Uint8Array) { Y.applyUpdate(p.ydoc, u, NET); }
 
   /** deliver one peer's queued updates to the server */
   send(p: Peer) {
-    const out = p.outbox, had = p.outKnows;
+    const out = p.outbox;
     p.outbox = []; p.outKnows = [];
-    // (updates merged by a test: what was had when the first of them was made)
-    out.forEach((u, i) => this.toServer(p, u, false, had.length === out.length ? had[i] : had[0]));
+    for (const u of out) this.toServer(p, u);
   }
   /** deliver what the server sent to one peer */
   receive(p: Peer) {
     const inb = p.inbox; p.inbox = [];
-    for (const u of inb) {
-      this.applyToPeer(p, u);
-    }
+    for (const u of inb) this.applyToPeer(p, u);
   }
 
   /** deliver everything until nothing is in flight */
@@ -195,28 +160,33 @@ export class Net {
    */
   online(p: Peer, order: 'peer-first' | 'server-first' = 'peer-first') {
     const peerSV = Y.encodeStateVector(p.ydoc), serverSV = Y.encodeStateVector(this.server);
-    const known = Y.decodeStateVector(peerSV);
-    this.knows.set(p, known);
     const fromPeer = Y.encodeStateAsUpdate(p.ydoc, serverSV);
-    p.online = true;
-    // like ws.ts: a peer with edits the server has not seen gets the server's step 2 once its own is applied
-    const news = [...known].some(([client, clock]) => clock > Y.getState(this.server.store, client));
-    if (news || !this.repair) {
-      if (news) { this.toServer(p, fromPeer, true); this.applyToPeer(p, Y.encodeStateAsUpdate(this.server, peerSV)); return; }
-    }
     const fromServer = Y.encodeStateAsUpdate(this.server, peerSV);
-    if (order === 'peer-first') { this.toServer(p, fromPeer, true); this.applyToPeer(p, fromServer); }
-    else { this.applyToPeer(p, fromServer); this.toServer(p, fromPeer, true); }
+    p.online = true;
+    if (order === 'peer-first') { this.toServer(p, fromPeer); this.applyToPeer(p, fromServer); }
+    else { this.applyToPeer(p, fromServer); this.toServer(p, fromPeer); }
   }
+
+  /** the document the server's CRDT reads as */
+  serverDoc(): PMNode { return new Reader(schema, this.server).read(); }
 
   /** every online peer and the server show the same document; returns its paragraphs */
   converged(): string[] {
     this.flush();
-    const serverDoc = yXmlFragmentToProseMirrorRootNode(this.server.getXmlFragment('prosemirror'), schema);
-    const expected = parsOf(serverDoc);
+    const expected = parsOf(this.serverDoc());
     for (const p of this.peers) if (p.online) expect(p.pars(), p.name).toEqual(expected);
     return expected;
   }
+}
+
+/**
+ * The same words in the same order, where paragraphs break aside: an Enter and a word typed at the
+ * same place at the same time come in either order (the CRDT's tie-break), and two people pressing
+ * Enter at one place make two breaks (an empty paragraph between).
+ */
+export function expectTokens(actual: string[], expected: string[]): void {
+  const flat = (ps: string[]) => ps.join(' ').split(/\s+/).filter(Boolean).join(' ');
+  expect(flat(actual)).toBe(flat(expected));
 }
 
 /** `s` occurs exactly once in `t` */
@@ -239,14 +209,15 @@ export function dumpDoc(d: Y.Doc): void {
       const o = it.origin ? `${it.origin.client}:${it.origin.clock}` : '-';
       const ro = it.rightOrigin ? `${it.rightOrigin.client}:${it.rightOrigin.clock}` : '-';
       const del = it.deleted ? 'X' : ' ';
-      if (c instanceof Y.ContentType) { out.push(`${ind}${del} ${id} <${(c.type as any).nodeName ?? 'text'}> o=${o} ro=${ro}`); walk(c.type, ind + '  '); }
-      else if (c instanceof Y.ContentString) out.push(`${ind}${del} ${id} "${c.str}" o=${o} ro=${ro}`);
+      if (c instanceof Y.ContentType && c.type instanceof Y.Map) {
+        out.push(`${ind}${del} ${id} <${(c.type as Y.Map<unknown>).get('$t')}> o=${o} ro=${ro}`);
+        const b = (c.type as Y.Map<unknown>).get('$body');
+        if (b instanceof Y.Text) walk(b, ind + '  ');
+      } else if (c instanceof Y.ContentString) out.push(`${ind}${del} ${id} "${c.str}" o=${o} ro=${ro}`);
       else if (c instanceof Y.ContentFormat) out.push(`${ind}${del} ${id} fmt ${c.key}=${JSON.stringify(c.value)}`);
       else out.push(`${ind}${del} ${id} ${c.constructor.name} len=${it.length}`);
     }
   };
-  walk(d.getXmlFragment('prosemirror'), '');
+  walk(d.getText(BODY), '');
   console.log(out.join('\n'));
-  const m = d.getMap('moves');
-  for (const k of m.keys()) { const r = decodeRecord(k, m.get(k)); console.log(k, r ? `protect ${r.protect.map(p => p.client + ':' + p.clock).join(',')} adopt ${r.adopt.join(',')}\n   ${r.entries.join(' ')}` : '?'); }
 }

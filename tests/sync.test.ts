@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 import http from 'node:http';
 import express from 'express';
 import * as Y from 'yjs';
+import { BODY, isMarkerItem } from '@overlyx/core/collab/index.ts';
 
 const ROOT = join(process.env.OVERLYX_SCRATCH ?? tmpdir(), `overlyx-sync-test-${process.pid}`);
 rmSync(ROOT, { recursive: true, force: true });
@@ -93,12 +94,18 @@ async function project(name: string, files: Record<string, string | Buffer>, use
   };
 }
 
-/** Type into a paragraph of the live document, the way an editor's update arrives (not saved). */
+/** Type at the start of a paragraph of the live document, the way an editor's update arrives (not saved). */
 function type(d: Awaited<ReturnType<typeof manager.open>>, index: number, text: string): void {
   d.ydoc.transact(() => {
-    const p = d.fragment.get(index) as Y.XmlElement;
-    const t = p.toArray().find(x => x instanceof Y.XmlText) as Y.XmlText;
-    t.insert(0, text);
+    // right after the paragraph's marker in the CRDT's body (core collab/model.ts)
+    const body = d.ydoc.getText(BODY);
+    let n = -1, at = 0, i = 0;
+    for (let it = body._start; it; it = it.right) {
+      if (it.deleted || !it.countable) continue;
+      if (isMarkerItem(it)) { n++; at = i + 1; if (n === index) break; }
+      i += it.length;
+    }
+    body.insert(at, text);
   });
 }
 

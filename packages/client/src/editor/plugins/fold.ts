@@ -18,10 +18,10 @@
  * left of its bullet that folds them away. Enter at the end of a folded item starts the next item
  * after its hidden sub-items, not between them.
  *
- * The folded headings and items are kept as positions and mapped through every transaction. A
- * collaborator's change arrives from y-prosemirror as a replacement of the whole document, which
- * deletes every position; y-prosemirror keeps the node objects of unchanged paragraphs, so such a
- * heading is found again by identity, and a recreated one by its layout and text.
+ * The folded headings and items are kept as positions and mapped through every transaction, a
+ * collaborator's change included (steps at the places it changed: core collab/steps.ts). Where one
+ * replaced a range with a heading in it, the CRDT's reading keeps the node objects of unchanged
+ * paragraphs, so the heading is found again by identity, and a recreated one by its layout and text.
  */
 import { Plugin, PluginKey, Selection, TextSelection, type Command, type EditorState, type Transaction } from 'prosemirror-state';
 import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
@@ -288,7 +288,7 @@ export function foldPlugin(): Plugin<FoldState> {
             if (v.state.doc === prev.doc || !foldUnits(v.state.doc).length) return;
             restored = true;
             const docId = viewDocId(v);
-            // after this update (the first content usually arrives inside y-prosemirror's own dispatch)
+            // after this update (the first content usually arrives inside the sync's own dispatch)
             void Promise.resolve().then(() => {
               if (v.isDestroyed) return;
               const local = readLocal(docId);

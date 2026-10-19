@@ -68,10 +68,9 @@ for (const pendingMoves of [false, true]) {
       for (const peer of net.peers) {
         expect(clean(peer.pars())).toEqual(clean(final));
         expect(peer.formulas()).toEqual(['a+b', 'c', 'x^2']);
-        expect(peer.pendingMoves?.waiting ?? false).toBe(false);
       }
     } finally {
-      for (const peer of net.peers) { peer.remoteUpdates?.destroy(); peer.pendingMoves?.destroy(); peer.view.destroy(); peer.ydoc.destroy(); }
+      for (const peer of net.peers) { peer.view.destroy(); peer.ydoc.destroy(); }
       net.server.destroy();
     }
   });

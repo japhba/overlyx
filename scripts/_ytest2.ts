@@ -1,12 +1,14 @@
 import { readFileSync } from 'node:fs';
 import * as Y from 'yjs';
-import { prosemirrorJSONToYDoc, yDocToProsemirrorJSON } from 'y-prosemirror';
+import { Reader, writeDocument } from '/root/lyx/overlyx/packages/core/src/collab/index.ts';
 import { parseLyx, writeLyx, lyxToPm, pmToLyxBody, schema } from '/root/lyx/overlyx/packages/core/src/index.ts';
 const f = process.argv[2];
 const src = readFileSync(f, 'utf8');
 const doc = parseLyx(src);
-const ydoc = prosemirrorJSONToYDoc(schema, lyxToPm(doc), 'prosemirror');
-const json = yDocToProsemirrorJSON(ydoc, 'prosemirror');
+// through the CRDT (model 2) and back
+const ydoc = new Y.Doc();
+ydoc.transact(() => writeDocument(schema, ydoc, schema.nodeFromJSON(lyxToPm(doc))));
+const json = new Reader(schema, ydoc).read();
 const out = writeLyx({ ...doc, body: pmToLyxBody(json) });
 const a = src.split('\n'), b = out.split('\n');
 let i = 0; while (i < a.length && i < b.length && a[i] === b[i]) i++;

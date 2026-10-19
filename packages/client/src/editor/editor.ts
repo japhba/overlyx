@@ -1,5 +1,5 @@
 /**
- * Editor assembly: ProseMirror view bound to a Yjs document (y-prosemirror), LyX keymap,
+ * Editor assembly: ProseMirror view bound to a Yjs document (model 2: editor/collab.ts), LyX keymap,
  * node views (MathLive, insets, graphics, commands), decorations and collaboration cursors.
  */
 import { EditorState, TextSelection } from 'prosemirror-state';
@@ -11,12 +11,11 @@ import { snapshotCovers, localWritesCommitted } from './savedstate';
 import { WebsocketProvider } from 'y-websocket';
 import { IndexeddbPersistence } from 'y-indexeddb';
 import * as decoding from 'lib0/decoding';
-import * as encoding from 'lib0/encoding';
 import * as syncProtocol from 'y-protocols/sync';
-import { PendingMoves } from '@overlyx/core/pendingmoves.ts';
-import { RemoteUpdates } from './remoteupdates';
-import { ySyncPlugin, yCursorPlugin, yUndoPlugin, initProseMirrorDoc, ySyncPluginKey, relativePositionToAbsolutePosition } from 'y-prosemirror';
+import { collabSync, cursorPlugin, undoPlugin, cursorPosition } from './collab';
+import { salvageLegacyCopy, LEGACY_DB_PREFIX } from './legacycopy';
 import { schema, sanitizeAwarenessState } from '@overlyx/core';
+import { BODY, PAGES } from '@overlyx/core/collab/model.ts';
 import type { Awareness } from 'y-protocols/awareness';
 import { inkPlugin } from './plugins/ink';
 import { editorContext } from './context';
@@ -51,9 +50,9 @@ export interface EditorHandle {
 const checkedCache = new WeakMap<object, Record<string, unknown> | null>();
 /**
  * Other clients' awareness states with malformed fields removed (`sanitizeAwarenessState`): a
- * cursor that was not two relative positions made y-prosemirror's cursor plugin throw inside the
- * Yjs update handler, the binding fell out of step, and the next keystroke saved a nearly empty
- * document. Our own state is ours and passes as it is.
+ * cursor that was not two relative positions made the cursor plugin of the time (y-prosemirror's)
+ * throw inside the Yjs update handler, the binding fell out of step, and the next keystroke saved a
+ * nearly empty document. Our own state is ours and passes as it is.
  */
 function checkedStates(aw: Awareness): Map<number, Record<string, any>> {
   const out = new Map<number, Record<string, any>>();
@@ -134,25 +133,27 @@ export interface EditorOptions {
   initialCursor?: () => SavedCursor | null;
 }
 
-/** IndexedDB database name of a document's local copy */
-export const localDbName = (docId: string) => 'overlyx:' + docId;
+/** IndexedDB database name of a document's local copy (model 2; model 1's were LEGACY_DB_PREFIX + id, editor/legacycopy.ts) */
+export const localDbName = (docId: string) => 'overlyx2:' + docId;
+const legacyDbName = (docId: string) => LEGACY_DB_PREFIX + docId;
 
 /**
  * Local copies kept under a document's old id — from before projects lived in their owner's
  * namespace (`thesis/main.tex`, now `jan/thesis/main.tex`) — are copied to its current id, offline
  * edits the server has not seen yet included; the old copy stays. `ids`: old id → current id.
+ * (Those copies are all model 1: they are moved under the model-1 name, which the editor salvages.)
  */
 export async function moveLocalCopies(ids: Record<string, string>): Promise<void> {
   const dbs = await (indexedDB as any).databases?.() as { name?: string }[] | undefined;
   const have = new Set((dbs ?? []).map(d => d.name));
   for (const [from, to] of Object.entries(ids)) {
-    if (!have.has(localDbName(from)) || have.has(localDbName(to))) continue;
+    if (!have.has(legacyDbName(from)) || have.has(legacyDbName(to))) continue;
     const ydoc = new Y.Doc();
-    const src = new IndexeddbPersistence(localDbName(from), ydoc);
+    const src = new IndexeddbPersistence(legacyDbName(from), ydoc);
     try {
       await src.whenSynced;
       const [epoch, pending] = await Promise.all([src.get('epoch'), src.get('pending')]);
-      const dst = new IndexeddbPersistence(localDbName(to), ydoc);   // stores the loaded state under the new name
+      const dst = new IndexeddbPersistence(legacyDbName(to), ydoc);   // stores the loaded state under the new name
       await dst.whenSynced;
       if (epoch !== undefined) await dst.set('epoch', epoch);
       if (pending !== undefined) await dst.set('pending', pending);
@@ -160,38 +161,6 @@ export async function moveLocalCopies(ids: Record<string, string>): Promise<void
     } catch (e) { console.warn(`[offline] could not move the local copy of ${from}:`, e); }
     finally { await src.destroy(); ydoc.destroy(); }
   }
-}
-
-/** OverLyX message type 6 (ws.ts MSG_KNOWS): what this editor had when it made the update that follows */
-const MSG_KNOWS = 6;
-
-/**
- * Before each local change goes out, tell the server what this editor had (per client the highest
- * clock, only what changed since the last report on this connection; the change itself follows on
- * the same socket). The server repairs paragraph moves only in updates made without something it
- * already had (server/moves.ts `concurrent`): without the report it has to assume that whatever it
- * had sent had arrived, and two people typing in the same paragraph within a round trip would not
- * be told apart from one person typing alone.
- */
-function reportKnowledge(ydoc: Y.Doc, provider: WebsocketProvider): void {
-  let reported = new Map<number, number>();
-  provider.on('status', ({ status }: { status: string }) => { if (status === 'connected') reported = new Map(); });
-  ydoc.on('beforeTransaction', (tr: Y.Transaction) => {
-    const ws = provider.ws;
-    if (!tr.local || !provider.wsconnected || !ws || ws.readyState !== WebSocket.OPEN) return;
-    const changed: number[] = [];
-    for (const client of ydoc.store.clients.keys()) {
-      if (client === ydoc.clientID) continue;
-      const clock = Y.getState(ydoc.store, client);
-      if (clock > (reported.get(client) ?? 0)) { changed.push(client, clock); reported.set(client, clock); }
-    }
-    if (!changed.length) return;
-    const enc = encoding.createEncoder();
-    encoding.writeVarUint(enc, MSG_KNOWS);
-    encoding.writeVarUint(enc, changed.length / 2);
-    for (const n of changed) encoding.writeVarUint(enc, n);
-    try { ws.send(encoding.toUint8Array(enc)); } catch { /* the update that follows is not sent either */ }
-  });
 }
 
 export function createEditor(opts: EditorOptions): EditorHandle {
@@ -202,10 +171,11 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   // the combined master+child view into each other. Documents are only synced through the server.
   // y-websocket appends the room name to the url; we pass the doc as a query param instead.
   // The connection is opened once the local copy has been loaded (see below).
-  const provider = new WebsocketProvider(wsUrl, '', ydoc, { params: { doc: opts.docId }, disableBc: true, connect: false });
-  reportKnowledge(ydoc, provider);
-  const pendingMoves = new PendingMoves(ydoc);
+  // model=2: this editor holds the document as flows (core collab/model.ts); the server refuses older editors
+  const provider = new WebsocketProvider(wsUrl, '', ydoc, { params: { doc: opts.docId, model: '2' }, disableBc: true, connect: false });
   let destroyed = false;
+  /** the document is empty here (nothing loaded or synced yet) */
+  const isEmpty = () => ydoc.getText(BODY).length === 0 && ydoc.getMap(PAGES).size === 0;
 
   /* ---------------------------------------------------------------- offline copy + save state
    * Every document is mirrored in IndexedDB (y-indexeddb): it renders instantly on the next open,
@@ -277,7 +247,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
       emitSaveState();
     }).catch(error => { if (!destroyed) { localError = String(error); emitSaveState(); } });
   });
-  ydoc.on('update', () => { localEmpty = ydoc.getXmlFragment('prosemirror').length === 0; });
+  ydoc.on('update', () => { localEmpty = isEmpty(); });
   (provider as any).messageHandlers[3] = (_enc: unknown, dec: decoding.Decoder) => {
     savedAt = decoding.readVarUint(dec);
     decoding.readVarUint8Array(dec);   // legacy state vector
@@ -306,26 +276,23 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   provider.on('connection-error', () => { lastConnInfo = 'connection attempt failed'; noteDisconnected(); emitSaveState(); });
   // A remote update dispatched between a mouse click and the browser's (asynchronous)
   // `selectionchange` event would make ProseMirror write its stale state selection back into the
-  // DOM and the click would be lost (y-prosemirror restores the *state* selection after applying
-  // remote changes). Reading the DOM selection before applying any sync message closes that gap.
+  // DOM and the click would be lost (the editor's selection is mapped through the remote change and
+  // written back). Reading the DOM selection before applying any sync message closes that gap.
   // (Both document updates and awareness updates: remote cursors are decorations, and ProseMirror
   // re-writes the DOM selection whenever decorations change, unless the mouse button is still down.)
   const flushDomSelection = () => flushSelection(viewRef);
-  let pendingSync = false;
-  const remoteUpdates = new RemoteUpdates(ydoc, pendingMoves, provider, AGENT_EDIT_ORIGIN, flushDomSelection);
   {
     const orig = (provider as any).messageHandlers[0];
     (provider as any).messageHandlers[0] = (enc: unknown, dec: decoding.Decoder, peer: WebsocketProvider, emitSynced: boolean, type: number) => {
       const start = dec.pos;
       const kind = decoding.readVarUint(dec);
+      flushDomSelection();
       if (kind !== syncProtocol.messageYjsSyncStep2 && kind !== syncProtocol.messageYjsUpdate) {
         dec.pos = start;
-        flushDomSelection();
         return orig(enc, dec, peer, emitSynced, type);
       }
-      if (emitSynced && kind === syncProtocol.messageYjsSyncStep2) pendingSync = true;
-      if (!remoteUpdates.receive(decoding.readVarUint8Array(dec))) return;
-      if (pendingSync) { pendingSync = false; if (!provider.synced) provider.synced = true; }
+      Y.applyUpdate(ydoc, decoding.readVarUint8Array(dec), provider);
+      if (emitSynced && kind === syncProtocol.messageYjsSyncStep2 && !provider.synced) provider.synced = true;
     };
   }
   // Message type 5 = an edit by the embedded agent (OverLyX extension): the same update bytes the
@@ -333,7 +300,8 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   // like one's own typing (yUndoPlugin below tracks this origin; the MSG_SYNC copy that follows
   // is an idempotent no-op). Other collaborators' edits remain un-undoable, as they should be.
   (provider as any).messageHandlers[5] = (_enc: unknown, dec: decoding.Decoder) => {
-    remoteUpdates.receiveAgent(decoding.readVarUint8Array(dec));
+    flushDomSelection();
+    Y.applyUpdate(ydoc, decoding.readVarUint8Array(dec), AGENT_EDIT_ORIGIN);
   };
   (provider as any).messageHandlers[2] = (_enc: unknown, dec: decoding.Decoder) => {
     const e = decoding.readVarString(dec);
@@ -345,7 +313,6 @@ export function createEditor(opts: EditorOptions): EditorHandle {
       return;
     }
     if (epoch !== e) { epoch = e; void persistence.set('epoch', e).catch(() => {}); }
-    if (decoding.hasContent(dec) && (decoding.readVarUint(dec) & 1)) pendingMoves.enable();
   };
   const connectAfterLocalLoad = async () => {
     try {
@@ -355,7 +322,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
       pendingFromStore = pending === 1;
     } catch { /* no IndexedDB (private mode, …): work without a local copy */ }
     localSynced = true;
-    localEmpty = ydoc.getXmlFragment('prosemirror').length === 0;
+    localEmpty = isEmpty();
     if (destroyed) return;
     performance.mark('ol:local-loaded');
     if (!localEmpty) restoreCursor();
@@ -363,18 +330,20 @@ export function createEditor(opts: EditorOptions): EditorHandle {
     // always try — navigator.onLine is unreliable (Chrome reports "offline" behind some VPNs / network
     // setups); a failing attempt just makes y-websocket retry with backoff
     provider.connect();
+    // a copy kept by an editor of the old model (before 20 Oct 2026): its unsaved edits go to the server to be merged
+    void salvageLegacyCopy(opts.docId);
   };
   void connectAfterLocalLoad();
-  const fragment = ydoc.getXmlFragment('prosemirror');
-  const { doc: initialDoc, mapping } = initProseMirrorDoc(fragment, schema);
+  const sync = collabSync(ydoc, { agentOrigin: AGENT_EDIT_ORIGIN });
+  const initialDoc = sync.doc;
 
   provider.awareness.setLocalStateField('user', { name: opts.user.name, color: opts.user.color, username: opts.user.username, avatar: opts.user.avatar ?? null });
 
   const plugins = assemblePlugins({
     markdown: isMarkdownDoc(opts.docId),
     sync: [
-      ySyncPlugin(fragment, { mapping }),
-      yCursorPlugin(checkedAwareness(provider.awareness), {
+      sync.plugin,
+      cursorPlugin(checkedAwareness(provider.awareness), {
         cursorBuilder: (user: { name: string; color: string; agent?: unknown }, clientId?: number) => {
           const cursor = document.createElement('span');
           cursor.className = 'ProseMirror-yjs-cursor';
@@ -390,7 +359,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
           return cursor;
         },
       }),
-      yUndoPlugin({ trackedOrigins: [AGENT_EDIT_ORIGIN] }),
+      undoPlugin(),
     ],
     marginMode: opts.marginMode ?? false,
     // margin ink: one layer per document view (child editors of a combined view share the master's margins)
@@ -441,16 +410,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
     opts.onStatus?.({ ...status });
   };
   /** Absolute document position of another client's cursor head, if it is in this document. */
-  const userCursorPos = (clientId: number): number | null => {
-    const st = checkedStates(provider.awareness).get(clientId);
-    if (!st?.cursor) return null;
-    const ystate = ySyncPluginKey.getState(view.state);
-    if (!ystate || ystate.binding.mapping.size === 0) return null;
-    try {
-      const pos = relativePositionToAbsolutePosition(ystate.doc, ystate.type, Y.createRelativePositionFromJSON(st.cursor.head), ystate.binding.mapping);
-      return pos === null ? null : Math.min(pos, view.state.doc.content.size - 1);
-    } catch { return null; }
-  };
+  const userCursorPos = (clientId: number): number | null => cursorPosition(view.state, checkedAwareness(provider.awareness), clientId);
   provider.on('status', (e: { status: string }) => {
     status.connected = e.status === 'connected';
     if (status.connected) { disconnectedAt = 0; if (graceTimer) { clearTimeout(graceTimer); graceTimer = null; } } else noteDisconnected();
@@ -577,10 +537,9 @@ export function createEditor(opts: EditorOptions): EditorHandle {
       document.removeEventListener('visibilitychange', onVisible);
       heartbeat?.terminate();
       if (graceTimer) clearTimeout(graceTimer);
-      // the view first: its Yjs binding must be gone before the provider/awareness fire their last events
+      // the view and its binding first: they must be gone before the provider/awareness fire their last events
       view.destroy();
-      remoteUpdates.destroy();
-      pendingMoves.destroy();
+      sync.destroy();
       provider.awareness.setLocalState(null);
       provider.destroy();
       persistence.destroy();

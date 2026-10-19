@@ -25,7 +25,7 @@ export function isRelativePositionJSON(v: unknown): boolean {
   return v.type != null || v.item != null || v.tname != null;
 }
 
-/** y-prosemirror's cursor field: `{ anchor, head }`, both relative positions. */
+/** the cursor field (editor/collab.ts cursorPlugin): `{ anchor, head }`, both relative positions. */
 export function isCursorState(v: unknown): boolean {
   return isObject(v) && isRelativePositionJSON(v.anchor) && isRelativePositionJSON(v.head);
 }

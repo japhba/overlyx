@@ -15,7 +15,7 @@
  */
 import type { EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
-import { undo, redo } from 'y-prosemirror';
+import { undo, redo } from '../collab';
 import { PAGE_TRANSITIONS } from '@overlyx/core';
 import * as L from './commands';
 import { showContextMenu, closeContextMenu, type MenuItem } from '../contextmenu';
@@ -667,8 +667,8 @@ export class SlideRail {
     else if (mod && k.toLowerCase() === 'c') this.copy(i, false);
     else if (mod && k.toLowerCase() === 'x') this.copy(i, true);
     else if (mod && k.toLowerCase() === 'v') this.paste(i);
-    else if (mod && k.toLowerCase() === 'z' && !e.shiftKey) { this.step(); undo(this.view.state); this.schedule(); }
-    else if (mod && (k.toLowerCase() === 'y' || (k.toLowerCase() === 'z' && e.shiftKey))) { redo(this.view.state); this.schedule(); }
+    else if (mod && k.toLowerCase() === 'z' && !e.shiftKey) { this.step(); undo(this.view.state, this.view.dispatch, this.view); this.schedule(); }
+    else if (mod && (k.toLowerCase() === 'y' || (k.toLowerCase() === 'z' && e.shiftKey))) { redo(this.view.state, this.view.dispatch, this.view); this.schedule(); }
     else if (k === 'F5') startPresentation(this.view, { fromCurrent: e.shiftKey });
     else if (k === 'Escape') { closeContextMenu(); this.view.focus(); }
     else if (k === 'ContextMenu' || (k === 'F10' && e.shiftKey)) { const r = this.items[i]?.el.getBoundingClientRect(); if (r) showContextMenu(r.left + 20, r.top + 20, this.menu(i)); }

@@ -1,30 +1,30 @@
 /**
  * Cursors and selections in a document's CRDT, in the terms the MCP tools use. A collaborator's
- * awareness `cursor` is two Yjs relative positions (y-prosemirror's cursor plugin: anchor and head
- * inside the `prosemirror` XmlFragment); an agent addresses a document by paragraph — the index in
- * read_document's `paragraphs`, which are the fragment's top-level blocks — and by plain text.
+ * awareness `cursor` is two Yjs relative positions (client editor/collab.ts: anchor and head in the
+ * CRDT's flows, core collab/positions.ts); an agent addresses a document by paragraph — the index in
+ * read_document's `paragraphs`, which are the document's top-level paragraphs — and by plain text.
  *
  * describeCursor() resolves a cursor to the paragraph, the character offset into that paragraph's
  * text as read_document lists it, an excerpt with a caret, and the selected text verbatim. The text
  * is produced by the same conversion read_document uses (editor nodes → document model → itemText):
- * the paragraph is serialized with private-use marker characters at the cursor's places, and where
+ * the paragraph is converted with private-use marker characters at the cursor's places, and where
  * the markers come out of the conversion is the answer — formulas, footnotes, quotes and special
  * characters count exactly as they do in read_document. Inside a table (whose cells read_document's
  * paragraph text leaves out) the excerpt comes from a deeper rendering with the cells, and the
  * offset is null.
  *
- * findQuote() goes the other way (the MCP `highlight` tool: an agent points at a passage it quotes),
- * and changedRange() turns the CRDT events of an agent's edit into the range it changed — where the
- * agent's own cursor is shown to the people in the document.
+ * findPassage() goes the other way (the MCP `highlight` tool: an agent points at a passage it
+ * quotes), and changedRange() turns the documents before and after an agent's edit into the range it
+ * changed — where the agent's own cursor is shown to the people in the document.
  */
 import * as Y from 'yjs';
-import { pmBlocksToParagraphs, itemText, type Item, type PMJSON } from '@overlyx/core';
+import { Fragment, Slice, type Node as PMNode } from 'prosemirror-model';
+import { pmBlocksToParagraphs, itemText, schema, type Item } from '@overlyx/core';
+import { relativePosition, documentPosition } from '@overlyx/core/collab/index.ts';
+import { readPm } from './collabdoc.ts';
 
 export type RelJSON = Record<string, unknown>;
 export interface Cursor { anchor: RelJSON; head: RelJSON }
-
-/** A resolved position: the Yjs type and index, and its path of child indices from the fragment (document order). */
-interface YPos { type: Y.AbstractType<any>; index: number; key: number[] }
 
 const CARET = '', FROM = '', TO = '';
 const MARKERS = /[-]/g;
@@ -33,97 +33,15 @@ const EXCERPT_SIDE = 70;
 /** the longest selected text handed out (head and tail kept beyond that) */
 const SELECTION_MAX = 6000;
 
-const fragmentOf = (ydoc: Y.Doc): Y.XmlFragment => ydoc.getXmlFragment('prosemirror');
-
-/** Path of child indices from the fragment down to `type` (null: not inside it, or deleted). */
-function pathOf(fragment: Y.XmlFragment, type: Y.AbstractType<any>): number[] | null {
-  const path: number[] = [];
-  let t = type;
-  while (t !== fragment) {
-    const item = t._item;
-    if (!item || item.deleted) return null;
-    const parent = item.parent;
-    if (!(parent instanceof Y.XmlElement || parent instanceof Y.XmlFragment)) return null;
-    const i = parent.toArray().indexOf(t as Y.XmlElement);
-    if (i < 0) return null;
-    path.unshift(i);
-    t = parent;
-  }
-  return path;
+/** a document position for a relative position (JSON), null when it does not resolve */
+function resolve(ydoc: Y.Doc, doc: PMNode, json: unknown): number | null {
+  try { return documentPosition(schema, ydoc, doc, Y.createRelativePositionFromJSON(json)); } catch { return null; }
 }
 
-function resolve(ydoc: Y.Doc, json: unknown): YPos | null {
-  let abs: Y.AbsolutePosition | null;
-  try { abs = Y.createAbsolutePositionFromRelativePosition(Y.createRelativePositionFromJSON(json), ydoc); } catch { return null; }
-  if (!abs) return null;
-  const fragment = fragmentOf(ydoc);
-  const path = pathOf(fragment, abs.type);
-  if (!path) return null;
-  // between top-level blocks (a gap cursor, a whole-paragraph node selection): the start of the next
-  // paragraph, or the end of the last one
-  if (!path.length) {
-    const n = fragment.length;
-    if (!n) return null;
-    const k = Math.min(abs.index, n - 1);
-    const el = fragment.get(k) as Y.XmlElement;
-    const index = abs.index >= n ? el.length : 0;
-    return { type: el, index, key: [k, index] };
-  }
-  return { type: abs.type, index: abs.index, key: [...path, abs.index] };
-}
-
-/** Document order of two positions (a position before a child sorts before positions inside it). */
-function compare(a: YPos, b: YPos): number {
-  for (let i = 0; i < Math.min(a.key.length, b.key.length); i++) if (a.key[i] !== b.key[i]) return a.key[i] - b.key[i];
-  return a.key.length - b.key.length;
-}
-
-/** y-prosemirror's names for overlapping marks carry a hash suffix (sync-plugin.js yattr2markname). */
-const markName = (attr: string) => /(.*)(--[a-zA-Z0-9+/=]{8})$/.exec(attr)?.[1] ?? attr;
-
-interface Marker { type: Y.AbstractType<any>; index: number; ch: string }
-
-/** One Yjs node as editor JSON, as y-prosemirror's yXmlFragmentToProsemirrorJSON does, with marker characters inserted. */
-function serialize(t: Y.XmlElement | Y.XmlText, markers: Marker[]): PMJSON[] {
-  const mine = markers.filter(m => m.type === t).sort((a, b) => a.index - b.index);
-  if (t instanceof Y.XmlText) {
-    const out: PMJSON[] = [];
-    const push = (text: string, attrs?: Record<string, unknown>) => {
-      if (!text) return;
-      const node: PMJSON = { type: 'text', text };
-      if (attrs) node.marks = Object.keys(attrs).map(k => ({ type: markName(k), attrs: attrs[k] as Record<string, unknown> }));
-      out.push(node);
-    };
-    let mi = 0;
-    let pos = 0;
-    for (const d of t.toDelta() as { insert: unknown; attributes?: Record<string, unknown> }[]) {
-      if (typeof d.insert !== 'string') continue;
-      let s = d.insert;
-      let start = pos;
-      while (mi < mine.length && mine[mi].index <= start + s.length) {
-        const cut = Math.max(0, mine[mi].index - start);
-        push(s.slice(0, cut), d.attributes);
-        push(mine[mi].ch, d.attributes);
-        s = s.slice(cut); start += cut; mi++;
-      }
-      push(s, d.attributes);
-      pos = start + s.length;
-    }
-    for (; mi < mine.length; mi++) push(mine[mi].ch);
-    return out;
-  }
-  const node: PMJSON = { type: t.nodeName };
-  const attrs = t.getAttributes();
-  if (Object.keys(attrs).length) node.attrs = attrs;
-  const content: PMJSON[] = [];
-  let mi = 0;
-  (t.toArray() as (Y.XmlElement | Y.XmlText)[]).forEach((child, i) => {
-    for (; mi < mine.length && mine[mi].index <= i; mi++) content.push({ type: 'text', text: mine[mi].ch });
-    content.push(...serialize(child, markers));
-  });
-  for (; mi < mine.length; mi++) content.push({ type: 'text', text: mine[mi].ch });
-  if (content.length) node.content = content;
-  return [node];
+/** the top-level paragraph a position is in (the next one when it is between two) */
+function paragraphAt(doc: PMNode, pos: number): number {
+  const $p = doc.resolve(Math.max(0, Math.min(pos, doc.content.size)));
+  return Math.min($p.index(0), Math.max(0, doc.childCount - 1));
 }
 
 /** Like itemText, but tables give their cells (read_document's paragraph text leaves them out). */
@@ -139,13 +57,32 @@ function deepText(items: Item[]): string {
 
 interface Rendered { text: string; deep: string; layout: string }
 
-/** Top-level paragraph `k` as read_document's text (`text`) and with table cells (`deep`), markers included. */
-function renderParagraph(fragment: Y.XmlFragment, k: number, markers: Marker[]): Rendered {
-  const el = fragment.get(k) as Y.XmlElement | undefined;
-  if (!(el instanceof Y.XmlElement)) return { text: '', deep: '', layout: '' };
-  const par = pmBlocksToParagraphs(serialize(el, markers))[0];
-  if (!par) return { text: '', deep: '', layout: '' };
-  return { text: par.items.map(itemText).join(''), deep: deepText(par.items), layout: par.layout };
+/**
+ * Top-level paragraph `k` as read_document's text (`text`) and with table cells (`deep`), with the
+ * marker characters inserted at the given document positions (each inside a text block, else at
+ * the start of the paragraph).
+ */
+function renderParagraph(doc: PMNode, k: number, marks: { pos: number; ch: string }[]): Rendered {
+  if (k < 0 || k >= doc.childCount) return { text: '', deep: '', layout: '' };
+  let start = 0;
+  for (let i = 0; i < k; i++) start += doc.child(i).nodeSize;
+  let par = doc.child(k);
+  // from the last place: the earlier positions stay valid
+  for (const m of [...marks].sort((a, b) => b.pos - a.pos)) {
+    // relative to the paragraph's content
+    let rel = m.pos - start - 1;
+    if (rel < 0 || rel > par.content.size) rel = 0;
+    const mark = new Slice(Fragment.from(schema.text(m.ch)), 0, 0);
+    try {
+      if (!par.resolve(rel).parent.inlineContent) rel = 0;
+      par = par.replace(rel, rel, mark);
+    } catch {
+      try { par = par.replace(0, 0, mark); } catch { /* no place for it */ }
+    }
+  }
+  const p = pmBlocksToParagraphs([par.toJSON()])[0];
+  if (!p) return { text: '', deep: '', layout: '' };
+  return { text: p.items.map(itemText).join(''), deep: deepText(p.items), layout: p.layout };
 }
 
 const squash = (s: string) => s.replace(/\s+/g, ' ');
@@ -182,55 +119,55 @@ export interface CursorInfo extends Place {
 export interface SelectionInfo { from: Place; to: Place; text: string; chars: number; truncated?: true }
 
 /**
- * Where a cursor (`{ anchor, head }`, y-prosemirror's awareness field) is: the head as a place with
- * an excerpt, and the selection between anchor and head (null when it is collapsed). Null when the
+ * Where a cursor (`{ anchor, head }`, the editors' awareness field) is: the head as a place with an
+ * excerpt, and the selection between anchor and head (null when it is collapsed). Null when the
  * cursor does not resolve in this document (an old state, a deleted paragraph).
  */
 export function describeCursor(ydoc: Y.Doc, cursor: { anchor?: unknown; head?: unknown } | null | undefined): { cursor: CursorInfo; selection: SelectionInfo | null } | null {
   if (!cursor) return null;
-  const head = resolve(ydoc, cursor.head);
-  if (!head) return null;
-  const anchor = resolve(ydoc, cursor.anchor) ?? head;
-  const fragment = fragmentOf(ydoc);
   try {
-    const r = renderParagraph(fragment, head.key[0], [{ type: head.type, index: head.index, ch: CARET }]);
+    const doc = readPm(ydoc);
+    const head = resolve(ydoc, doc, cursor.head);
+    if (head === null) return null;
+    const anchor = resolve(ydoc, doc, cursor.anchor) ?? head;
+    const k = paragraphAt(doc, head);
+    const r = renderParagraph(doc, k, [{ pos: head, ch: CARET }]);
     const offset = offsetOf(r.text, CARET);
     const excerpt = excerptAt(r.deep, CARET) ?? squash(r.deep.replace(MARKERS, '').slice(0, 2 * EXCERPT_SIDE));
-    const info: CursorInfo = { paragraph: head.key[0], offset, excerpt, layout: r.layout };
+    const info: CursorInfo = { paragraph: k, offset, excerpt, layout: r.layout };
     if (offset === null) info.inside = r.deep.includes(CARET) ? 'a table' : 'an object without text (graphics, a formula, a page element)';
-    const order = compare(anchor, head);
-    if (order === 0) return { cursor: info, selection: null };
-    const [from, to] = order < 0 ? [anchor, head] : [head, anchor];
-    return { cursor: info, selection: selectionBetween(fragment, from, to) };
+    if (anchor === head) return { cursor: info, selection: null };
+    const [from, to] = anchor < head ? [anchor, head] : [head, anchor];
+    return { cursor: info, selection: selectionBetween(doc, from, to) };
   } catch {
     return null;
   }
 }
 
-function selectionBetween(fragment: Y.XmlFragment, from: YPos, to: YPos): SelectionInfo {
-  const fk = from.key[0], tk = to.key[0];
+function selectionBetween(doc: PMNode, from: number, to: number): SelectionInfo {
+  const fk = paragraphAt(doc, from), tk = paragraphAt(doc, to);
   let text: string;
   let fromOff: number | null, toOff: number | null;
   let truncated = false;
   if (fk === tk) {
-    const r = renderParagraph(fragment, fk, [{ type: from.type, index: from.index, ch: FROM }, { type: to.type, index: to.index, ch: TO }]);
+    const r = renderParagraph(doc, fk, [{ pos: from, ch: FROM }, { pos: to, ch: TO }]);
     const a = r.deep.indexOf(FROM), b = r.deep.indexOf(TO);
     text = a >= 0 && b > a ? r.deep.slice(a + 1, b) : '';
     fromOff = offsetOf(r.text, FROM); toOff = offsetOf(r.text, TO);
   } else {
-    const rf = renderParagraph(fragment, fk, [{ type: from.type, index: from.index, ch: FROM }]);
-    const rt = renderParagraph(fragment, tk, [{ type: to.type, index: to.index, ch: TO }]);
+    const rf = renderParagraph(doc, fk, [{ pos: from, ch: FROM }]);
+    const rt = renderParagraph(doc, tk, [{ pos: to, ch: TO }]);
     const first = rf.deep.includes(FROM) ? rf.deep.slice(rf.deep.indexOf(FROM) + 1) : rf.deep;
     const last = rt.deep.includes(TO) ? rt.deep.slice(0, rt.deep.indexOf(TO)) : rt.deep;
     // the paragraphs in between: from the front until there is plenty, and from the back for the tail
     const head: string[] = [first];
     let headLen = first.length;
     let k = fk + 1;
-    for (; k < tk && headLen < SELECTION_MAX; k++) { const t = renderParagraph(fragment, k, []).deep; head.push(t); headLen += t.length + 2; }
+    for (; k < tk && headLen < SELECTION_MAX; k++) { const t = renderParagraph(doc, k, []).deep; head.push(t); headLen += t.length + 2; }
     const tail: string[] = [last];
     let tailLen = last.length;
     let j = tk - 1;
-    for (; j >= k && tailLen < SELECTION_MAX / 4; j--) { const t = renderParagraph(fragment, j, []).deep; tail.unshift(t); tailLen += t.length + 2; }
+    for (; j >= k && tailLen < SELECTION_MAX / 4; j--) { const t = renderParagraph(doc, j, []).deep; tail.unshift(t); tailLen += t.length + 2; }
     if (j >= k) { truncated = true; head.push(`[… ${j - k + 1} more paragraph(s) …]`); }
     text = [...head, ...tail].join('\n\n');
     fromOff = offsetOf(rf.text, FROM); toOff = offsetOf(rt.text, TO);
@@ -243,38 +180,24 @@ function selectionBetween(fragment: Y.XmlFragment, from: YPos, to: YPos): Select
 
 /* ------------------------------------------------------------------ pointing at a passage */
 
-interface CharRef { type: Y.AbstractType<any>; index: number }
-/** A paragraph's searchable text: every character with the Yjs position before and after it. */
-interface CharMap { text: string; start: CharRef[]; end: CharRef[] }
+/** A paragraph's searchable text: every character with the document positions before and after it. */
+interface CharMap { text: string; start: number[]; end: number[] }
 
-function charMap(el: Y.XmlElement): CharMap {
+function charMap(par: PMNode, at: number): CharMap {
   const m: CharMap = { text: '', start: [], end: [] };
-  const add = (s: string, start: CharRef, end: CharRef) => { m.text += s; for (let i = 0; i < s.length; i++) { m.start.push(start); m.end.push(end); } };
-  const walk = (parent: Y.XmlElement) => {
-    (parent.toArray() as (Y.XmlElement | Y.XmlText)[]).forEach((child, i) => {
-      if (child instanceof Y.XmlText) {
-        let off = 0;
-        for (const d of child.toDelta() as { insert: unknown }[]) {
-          if (typeof d.insert !== 'string') continue;
-          for (let j = 0; j < d.insert.length; j++) { m.text += d.insert[j]; m.start.push({ type: child, index: off + j }); m.end.push({ type: child, index: off + j + 1 }); }
-          off += d.insert.length;
-        }
-        return;
-      }
-      const latex = child.getAttribute('latex');
-      if (/^math_/.test(child.nodeName) && typeof latex === 'string') {
-        add(latex.replace(/^\$|\$$/g, ''), { type: parent, index: i }, { type: parent, index: i + 1 });
-        return;
-      }
-      if (child.nodeName === 'space') { add(' ', { type: parent, index: i }, { type: parent, index: i + 1 }); return; }
-      if (child.length) {
-        add(' ', { type: parent, index: i }, { type: parent, index: i });
-        walk(child);
-        add(' ', { type: parent, index: i + 1 }, { type: parent, index: i + 1 });
-      }
+  const add = (s: string, start: number, end: number) => { m.text += s; for (let i = 0; i < s.length; i++) { m.start.push(start); m.end.push(end); } };
+  const walk = (node: PMNode, pos: number) => {
+    node.forEach((child, off) => {
+      const p = pos + off;
+      if (child.isText) { for (let j = 0; j < child.text!.length; j++) add(child.text![j], p + j, p + j + 1); return; }
+      const latex = child.attrs?.latex;
+      if (/^math_/.test(child.type.name) && typeof latex === 'string') { add(latex.replace(/^\$|\$$/g, ''), p, p + child.nodeSize); return; }
+      if (child.type.name === 'space') { add(' ', p, p + 1); return; }
+      if (child.isTextblock) { walk(child, p + 1); add(' ', p + child.nodeSize - 1, p + child.nodeSize - 1); return; }
+      if (child.content.size) { add(' ', p, p); walk(child, p + 1); add(' ', p + child.nodeSize, p + child.nodeSize); }
     });
   };
-  walk(el);
+  walk(par, at + 1);
   return m;
 }
 
@@ -303,18 +226,19 @@ function normalize(s: string): { text: string; at: number[] } {
  * paragraph. Null when not found.
  */
 export function findPassage(ydoc: Y.Doc, opts: { quote?: string; paragraph?: number }): (Cursor & { paragraph: number }) | null {
-  const fragment = fragmentOf(ydoc);
-  const n = fragment.length;
-  const rel = (r: CharRef, assoc = 0) => Y.relativePositionToJSON(Y.createRelativePositionFromTypeIndex(r.type, r.index, assoc)) as RelJSON;
-  const range = (k: number, a: CharRef, b: CharRef) => ({ anchor: rel(a), head: rel(b, -1), paragraph: k });
+  const doc = readPm(ydoc);
+  const rel = (pos: number, assoc = 0): RelJSON | null => { const r = relativePosition(schema, ydoc, doc, pos, assoc); return r ? Y.relativePositionToJSON(r) as RelJSON : null; };
+  const range = (k: number, a: number, b: number) => { const anchor = rel(a), head = rel(b, -1); return anchor && head ? { anchor, head, paragraph: k } : null; };
   const quote = normalize(opts.quote ?? '').text.trim();
-  const candidates = opts.paragraph !== undefined ? [opts.paragraph] : Array.from({ length: n }, (_, i) => i);
+  const starts: number[] = [];
+  { let p = 0; doc.forEach(c => { starts.push(p); p += c.nodeSize; }); }
+  const candidates = opts.paragraph !== undefined ? [opts.paragraph] : starts.map((_s, i) => i);
   for (const k of candidates) {
-    const el = fragment.get(k);
-    if (!(el instanceof Y.XmlElement)) continue;
-    const m = charMap(el);
+    if (k < 0 || k >= doc.childCount) continue;
+    const par = doc.child(k);
+    const m = charMap(par, starts[k]);
     if (!quote) {
-      if (!m.text.length) return range(k, { type: fragment, index: k }, { type: fragment, index: k + 1 });
+      if (!m.text.length) return range(k, starts[k] + 1, starts[k] + 1);
       return range(k, m.start[0], m.end[m.end.length - 1]);
     }
     const norm = normalize(m.text);
@@ -333,34 +257,24 @@ export function findPassage(ydoc: Y.Doc, opts: { quote?: string; paragraph?: num
   return null;
 }
 
+/** the number of top-level paragraphs (read_document's) */
+export function paragraphCount(ydoc: Y.Doc): number { return readPm(ydoc).childCount; }
+
 /* ------------------------------------------------------------------ what an edit changed */
 
 /**
- * The range a set of CRDT events changed, as a cursor (anchor at its start, head at its end) —
- * computed inside the observer callback, while the events can still be read. Null for no change.
+ * The range an edit changed (the document before it, and the CRDT after it), as a cursor (anchor at
+ * its start, head at its end). Null for no change.
  */
-export function changedRange(fragment: Y.XmlFragment, events: Y.YEvent<any>[]): Cursor | null {
-  let lo: YPos | null = null, hi: YPos | null = null;
-  for (const e of events) {
-    const t = e.target as Y.AbstractType<any>;
-    const path = pathOf(fragment, t);
-    if (!path) continue;
-    let i = 0, a = Infinity, b = -Infinity;
-    const delta = (t instanceof Y.XmlText ? (e as Y.YTextEvent).delta : e.changes.delta) as { insert?: unknown; retain?: number; delete?: number; attributes?: unknown }[];
-    for (const op of delta) {
-      if (op.retain !== undefined) { if (op.attributes) { a = Math.min(a, i); b = Math.max(b, i + op.retain); } i += op.retain; }
-      else if (op.insert !== undefined) { const len = typeof op.insert === 'string' || Array.isArray(op.insert) ? op.insert.length : 1; a = Math.min(a, i); b = Math.max(b, i + len); i += len; }
-      else if (op.delete !== undefined) { a = Math.min(a, i); b = Math.max(b, i); }
-    }
-    // a changed attribute (a paragraph's layout): the whole node
-    if (a > b && (e as Y.YXmlEvent).attributesChanged?.size && t instanceof Y.XmlElement) { a = 0; b = t.length; }
-    if (a > b) continue;
-    const s: YPos = { type: t, index: a, key: [...path, a] };
-    const f: YPos = { type: t, index: b, key: [...path, b] };
-    if (!lo || compare(s, lo) < 0) lo = s;
-    if (!hi || compare(f, hi) > 0) hi = f;
-  }
-  if (!lo || !hi) return null;
-  const rel = (p: YPos, assoc = 0) => Y.relativePositionToJSON(Y.createRelativePositionFromTypeIndex(p.type, p.index, assoc)) as RelJSON;
-  return { anchor: rel(lo), head: rel(hi, -1) };
+export function changedRange(ydoc: Y.Doc, before: PMNode): Cursor | null {
+  const after = readPm(ydoc);
+  const start = before.content.findDiffStart(after.content);
+  if (start == null) return null;
+  const end = before.content.findDiffEnd(after.content);
+  let to = end ? Math.max(end.b, start) : after.content.size;
+  to = Math.min(to, after.content.size);
+  const a = relativePosition(schema, ydoc, after, Math.min(start, after.content.size), 0);
+  const h = relativePosition(schema, ydoc, after, to, -1);
+  if (!a || !h) return null;
+  return { anchor: Y.relativePositionToJSON(a) as RelJSON, head: Y.relativePositionToJSON(h) as RelJSON };
 }

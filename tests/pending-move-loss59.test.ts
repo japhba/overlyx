@@ -41,7 +41,7 @@ for (const pendingMoves of [false, true]) {
         expect(final.indexOf(formula)).toBeLessThan(final.indexOf(right));
       }
     } finally {
-      for (const peer of net.peers) { peer.view.destroy(); peer.pendingMoves?.destroy(); peer.ydoc.destroy(); }
+      for (const peer of net.peers) { peer.view.destroy(); peer.ydoc.destroy(); }
       net.server.destroy();
     }
   });

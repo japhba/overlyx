@@ -300,7 +300,8 @@ it('late typing inside a joined prefix retains its interior words after two auth
   act(net, () => a.joinAt('w021'));
   act(net, () => a.enterBefore('w028'));
   net.online(a);
-  const final = net.converged().join(' ');
+  // (a's Enter before w028 stays: its paragraph ends after Ta6)
+  const final = net.converged().join(' ').replace(/\s+/g, ' ');
   expect(final).toContain('w027 Ta6 w028');
   expect(final.indexOf('Tb1')).toBeLessThan(final.indexOf('w021'));
   ordered(net, [20]);
@@ -333,7 +334,7 @@ it('text copied and collected while offline keeps its original gap beside joined
   act(net, () => a.joinAt('w021'));
   act(net, () => a.enterBefore('w028'));
   net.online(a);
-  const final = net.converged().join(' ');
+  const final = net.converged().join(' ').replace(/\s+/g, ' ');
   expect(final).toContain('w017 Ta4 w018');
   expect(final).toContain('w027 Ta6 w028');
   ordered(net, [20]);
@@ -350,9 +351,11 @@ it('a typed word copied before reconnect retains its source gap while a third au
   net.online(b, 'server-first'); net.flush();
   const paragraphs = net.converged(), tokens = paragraphs.join(' ').split(/[\s$]+/);
   expect(tokens.slice(tokens.indexOf('w022'), tokens.indexOf('w022') + 3)).toEqual(['w022', 'Tb2', 'w023']);
-  expect(paragraphs).toHaveLength(3);
-  expect(paragraphs[1].trim()).toBe('w020 w021 w022 Tb2');
-  expect(paragraphs[2].trim().startsWith('w023 ')).toBe(true);
+  // every author's change holds: c joined w020 to the first paragraph, b broke before w023, a joined w030
+  expect(paragraphs).toHaveLength(2);
+  expect(paragraphs[0].trim().endsWith('w019 w020 w021 w022 Tb2')).toBe(true);
+  expect(paragraphs[1].trim().startsWith('w023 ')).toBe(true);
+  expect(paragraphs[1]).toContain('w029 w030');
   ordered(net);
 });
 

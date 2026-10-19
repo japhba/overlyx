@@ -11,6 +11,6 @@ for (const batched of [false, true]) for (const pendingMoves of [false, true]) i
     a.joinAt('BETA');
     expect(net.converged().map(value => value.trim())).toEqual(['ALPHA BETA GAMMA', 'DELTA EPSILON', 'END']);
   } finally {
-    a.view.destroy(); a.pendingMoves?.destroy(); a.ydoc.destroy(); net.server.destroy();
+    a.view.destroy(); a.ydoc.destroy(); net.server.destroy();
   }
 });

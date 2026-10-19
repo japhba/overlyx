@@ -7,8 +7,8 @@
  */
 import { parentPort } from 'node:worker_threads';
 import * as Y from 'yjs';
-import { prosemirrorJSONToYXmlFragment } from 'y-prosemirror';
 import { itemText, lyxToPm, schema, type LyxDocument } from '@overlyx/core';
+import { writePm } from './collabdoc.ts';
 import { checkTexHealth, type PreserveCache } from '@overlyx/core/tex/index.ts';
 import { documentMeta } from './docmeta.ts';
 import { applyLyxDocument } from './ydiff.ts';
@@ -20,7 +20,6 @@ import {
 } from './docwork.ts';
 import { applyTrackedSource, applyPlainSource, applySyncedSource, restoreSource, foldEdits, replaceInSource, type EditableDoc } from './docedit.ts';
 import type { DocInfo, SyncEntry, WorkerRequest, WorkerResponse } from './docpool.ts';
-import { protectMoves } from '@overlyx/core/moves.ts';
 
 const mirrors = new Map<string, Mirror>();
 /** top-level blocks per step of building a document from its file (fresh) */
@@ -48,8 +47,6 @@ class Mirror implements DocState, EditableDoc {
   constructor(d: DocInfo) {
     this.id = d.id; this.project = d.project; this.relPath = d.relPath; this.absPath = d.absPath;
     this.ydoc.on('update', () => { this.seq++; });
-    // the deleted originals paragraph moves keep are kept here too: the state is persisted from the mirror
-    protectMoves(this.ydoc);
   }
 
   parse(text: string): LyxDocument {
@@ -186,7 +183,7 @@ const ops: Record<string, (doc: DocInfo | null, a: Args) => unknown> = {
     const blocks = pm.content ?? [];
     const steps: Uint8Array[] = [];
     for (let k = FRESH_STEP; k < blocks.length; k += FRESH_STEP) {
-      const { update } = capture(m, () => prosemirrorJSONToYXmlFragment(schema, { ...pm, content: blocks.slice(0, k) }, m.ydoc.getXmlFragment('prosemirror')));
+      const { update } = capture(m, () => m.ydoc.transact(() => writePm(m.ydoc, schema.nodeFromJSON({ ...pm, content: blocks.slice(0, k) })), 'file-load'));
       if (update) steps.push(update);
     }
     // the whole of it (the blocks so far are its first ones: the rest is appended) and its settings

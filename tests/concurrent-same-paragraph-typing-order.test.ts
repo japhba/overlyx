@@ -2,7 +2,7 @@
 /** A native copy of a draft must follow its winning left word within their shared paragraph. */
 import { expect, it } from 'vitest';
 import { TextSelection } from 'prosemirror-state';
-import { Net, par, text, math } from './yjs-net';
+import { Net, par, text, math, expectTokens } from './yjs-net';
 
 const words = (n: number, from = 1) => Array.from({ length: n }, (_, i) => `w${String(from + i).padStart(3, '0')}`).join(' ');
 const content = { type: 'doc', content: [
@@ -50,17 +50,16 @@ for (const pendingMoves of [false, true]) {
         const seen = paragraphs.join(' ').split(/[\s$]+/).filter(word => finalIndex.has(word));
         for (let i = 1; i < seen.length; i++) expect(finalIndex.get(seen[i]), `${seen[i - 1]} before ${seen[i]} in an actor's completed view`).toBeGreaterThan(finalIndex.get(seen[i - 1])!);
       }
-      expect(clean(final)).toEqual([
+      expectTokens(clean(final), [
         words(4), `w005 Tb3 w006 $a+b$ ${words(8, 7)} $c$ ${words(5, 15)}`,
         words(10, 20), `${words(4, 30)} $x^2$ ${words(4, 34)}`,
       ]);
       for (const peer of net.peers) {
         expect(clean(peer.pars())).toEqual(clean(final));
         expect(peer.formulas()).toEqual(['a+b', 'c', 'x^2']);
-        expect(peer.pendingMoves?.waiting ?? false).toBe(false);
       }
     } finally {
-      for (const peer of net.peers) { peer.remoteUpdates?.destroy(); peer.pendingMoves?.destroy(); peer.view.destroy(); peer.ydoc.destroy(); }
+      for (const peer of net.peers) { peer.view.destroy(); peer.ydoc.destroy(); }
       net.server.destroy();
     }
   });

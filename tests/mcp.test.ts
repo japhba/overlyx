@@ -671,7 +671,7 @@ describe('build', () => {
 const Y = await import('yjs');
 const awarenessProtocol = await import('y-protocols/awareness');
 const encoding = await import('lib0/encoding');
-const { initProseMirrorDoc, absolutePositionToRelativePosition } = await import('y-prosemirror');
+const { Reader, relativePosition } = await import('../packages/core/src/collab/index.ts');
 const { schema } = await import('@overlyx/core');
 const { describeCursor } = await import('../packages/server/src/ycursor.ts');
 const { isAgentClient } = await import('../packages/server/src/agentPresence.ts');
@@ -688,7 +688,7 @@ const allBase = `http://127.0.0.1:${port}/mcp`;
 
 /** The editor position of `needle` (+ `delta`) in the document, as the browser's ProseMirror counts it. */
 function pmPos(d: OpenDocT, needle: string, delta = 0): number {
-  const { doc: pm } = initProseMirrorDoc(d.fragment, schema);
+  const pm = new Reader(schema, d.ydoc).read();
   let found = -1;
   pm.descendants((n, pos) => {
     if (found >= 0) return false;
@@ -698,10 +698,9 @@ function pmPos(d: OpenDocT, needle: string, delta = 0): number {
   if (found < 0) throw new Error('not found: ' + needle);
   return found;
 }
-/** That position as y-prosemirror's cursor plugin publishes it (a Yjs relative position). */
+/** That position as the editors' cursor plugin publishes it (a Yjs relative position, client editor/collab.ts). */
 function relAt(d: OpenDocT, pos: number): unknown {
-  const { mapping } = initProseMirrorDoc(d.fragment, schema);
-  return Y.relativePositionToJSON(absolutePositionToRelativePosition(pos, d.fragment, mapping));
+  return Y.relativePositionToJSON(relativePosition(schema, d.ydoc, new Reader(schema, d.ydoc).read(), pos, 0)!);
 }
 let fakeClientId = 90000;
 /** A browser tab of `userId` in the document: a connection as ws.ts registers it, with its awareness state. */

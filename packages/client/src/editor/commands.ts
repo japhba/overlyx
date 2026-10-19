@@ -341,7 +341,7 @@ export function setValueMark(markName: string, value: string | null): Command {
       return true;
     }
     // every range of the selection (table cells), and inline nodes in it — formulas, insets — through
-    // their `marks` attr (y-prosemirror keeps no marks on non-text nodes)
+    // their `marks` attr (inline nodes keep their fonts there: schema.ts)
     let tr = state.tr;
     for (const r of state.selection.ranges) tr = setValueMarkIn(tr, r.$from.pos, r.$to.pos, markName, value);
     dispatch(tr);

@@ -46,7 +46,7 @@ for (const pendingMoves of [false, true]) it(`offline consecutive cuts retain a 
       `${words(9, 25)} $x^2$ ${words(4, 34)}`,
     ]);
   } finally {
-    for (const peer of net.peers) { peer.remoteUpdates?.destroy(); peer.pendingMoves?.destroy(); peer.view.destroy(); peer.ydoc.destroy(); }
+    for (const peer of net.peers) { peer.view.destroy(); peer.ydoc.destroy(); }
     net.server.destroy();
   }
 });
@@ -77,7 +77,7 @@ for (const pendingMoves of [false, true]) it(`a collected typed insertion keeps 
       `${words(4, 30)} $x^2$ ${words(4, 34)}`,
     ]);
   } finally {
-    for (const peer of [a, b, c]) { peer.remoteUpdates?.destroy(); peer.pendingMoves?.destroy(); peer.view.destroy(); peer.ydoc.destroy(); }
+    for (const peer of [a, b, c]) { peer.view.destroy(); peer.ydoc.destroy(); }
     net.server.destroy();
   }
 });

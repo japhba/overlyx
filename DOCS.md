@@ -1875,9 +1875,10 @@ blend.
   the View menu, the first block in view that stays visible) at the same place on screen — the
   browser's own scroll anchoring is off for that moment, and a fold near the end gives the page a
   blank end so the heading can stay (recomputed on the next fold change). Closing a menu gives the
-  focus back without scrolling to a cursor that is off screen. The folded headings are positions mapped through every transaction; a collaborator's
-  change arrives from y-prosemirror as a whole-document replacement, so the heading is found again by
-  node identity (unchanged paragraphs keep their node objects) or by layout and text.
+  focus back without scrolling to a cursor that is off screen. The folded headings are positions mapped through every transaction, a collaborator's
+  change included (it arrives as steps at the places it changed); where one replaced a heading's
+  range, the heading is found again by node identity (unchanged paragraphs keep their node objects)
+  or by layout and text.
 * **List items fold their sub-items** the same way (same plugin, Workflowy style): an item with
   sub-items — the deeper paragraphs right after it (nested items, and text, formulas and figures
   nested in the item) — gets an arrow just left of its bullet (left of the label box for numbers and
@@ -2516,9 +2517,7 @@ sub-directory per account, named by its username, and in it one directory per pr
 `packages/client/dist`), `OVERLYX_UNLOAD_MS` (how long an idle document stays loaded, default 6 h),
 `OVERLYX_MAX_BUILDS` (parallel PDF builds, default 2), `OVERLYX_BUILD_NICE` (niceness of latexmk,
 default 10), `OVERLYX_DOC_WORKERS` (worker threads for parsing and writing documents, default the
-cores less two, 1–4; `0`: on the main thread), `OVERLYX_MOVE_RECORD_DAYS` (how long a paragraph
-split or join is remembered, so that an editor coming back from offline after it still gets its edits
-placed, default 30; see *Offline mode*), `OVERLYX_SANDBOX` (`auto` — use bubblewrap when installed, the default; `bwrap` — required;
+cores less two, 1–4; `0`: on the main thread), `OVERLYX_SANDBOX` (`auto` — use bubblewrap when installed, the default; `bwrap` — required;
 `none`),
 `LYX_LAYOUT_DIR` (LyX `lib/layouts`), `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` +
 `OVERLYX_PUBLIC_URL` to enable Google sign-in, `GOOGLE_PICKER_API_KEY` (Google's file picker for
@@ -2895,7 +2894,7 @@ What differs, and how the specs deal with it:
 How it works, in order of what happens when you open a document:
 
 1. **Local copy first.** The editor loads the document's Yjs state from IndexedDB
-   (`overlyx:<project>/<file>`, written by `y-indexeddb`) and renders it right away, then connects
+   (`overlyx2:<project>/<file>`, written by `y-indexeddb`) and renders it right away, then connects
    to the server. The initial sync only exchanges what the two sides are missing, so re-opening a
    document is fast even on a slow connection.
 2. **Editing.** Every keystroke is a Yjs update: applied locally, appended to IndexedDB and — while
@@ -2914,84 +2913,71 @@ How it works, in order of what happens when you open a document:
 4. **Back online.** y-websocket reconnects; the Yjs sync sends the offline edits and receives
    everybody else's. Because the document is a CRDT, concurrent edits merge without conflicts
    (two people editing the same sentence simply both get their words in, one word after the other).
-   That needs every typed character anchored to the one typed before it: y-prosemirror's
-   prefix-first diff hung the rest of a word typed in front of an equal letter ("q…" before
-   "queries") off the old text, and two people typing at the same place, one of them offline, got
-   their words spliced into each other mid-word — `editor/plugins/typinganchor.ts` places such an
-   insertion at the cursor first (`tests/typing-anchor.test.ts`, the token-accounting test in
-   `e2e/offline.spec.ts`). Yjs cannot move text, so Enter in the middle of a paragraph keeps one half
-   in the paragraph's Yjs element and *copies* the other into a new one: typinganchor.ts keeps the
-   larger half (the first on a tie) with the split text run trimmed, never deleted, and copies the
-   smaller one (y-prosemirror aligned the runs from the left and, with formulas in the paragraph,
-   rewrote the first run and deleted the split one — what somebody offline had typed there was lost,
-   and two people typing at a paragraph's start and pressing Enter duplicated it).
+   **How the document is kept in the CRDT** (model 2, since 19 Oct 2026; `packages/core/src/collab/`):
+   - Every container of paragraphs — the document body, an inset's text, a table cell, a slide's
+     text box, a page's notes — is one `Y.Text`, a *flow*. A paragraph is a marker embedded in the
+     flow (a `Y.Map` with those of its attributes that differ from the defaults) followed by its
+     text; formatting is Yjs' text formatting; inline nodes (formulas, insets, tables) are embedded
+     maps, an inset's text a flow of its own, a table's rows and cells arrays of maps. Layout
+     documents: the pages in a map, in the order of the array `pageOrder`; a page's objects in a
+     flat map, ordered by `$order` arrays of ids (the page's, each group's).
+   - So Enter inserts one marker and Backspace at a paragraph's start deletes one: no text is ever
+     copied or moved, and whatever a co-author who had not seen the split typed, deleted or
+     formatted in either half stays where they did it. Model 1 (y-prosemirror's, until 19 Oct 2026)
+     kept each paragraph as an XML element and split it by *copying* one half into a new element;
+     edits that arrived for the copied half went to the deleted original — text vanished or jumped
+     (Oct 2026) — and the server-side move repair that patched this never covered every
+     interleaving.
+   - Every state reads as a valid document (`read.ts`): text before a flow's first marker is a
+     paragraph with the default attributes; ids in an order whose object is gone are skipped, an id
+     ordered twice counts once (the first), objects no order reaches come last; an embed whose update
+     has not fully arrived reads as an invisible placeholder (`collab_pending`). Reading is
+     incremental (only what the Yjs transaction touched) and gives unchanged paragraphs and objects
+     back as the same nodes, so the editor redraws only what changed.
+   - Writing (`write.ts`, through the editor's binding `binding.ts`): each change is written as the
+     smallest edit of each flow. From the editor, the steps' mapping pairs the paragraphs and nodes
+     the steps kept, and only what lies between is diffed — by words, never cutting into a word on
+     both sides (a diff of letters hangs a word typed before an equal letter off the old text). The
+     server, writing what it parsed from the file, diffs paragraphs by content (Myers), then words.
+     Every write is read back and compared; a mismatch is reported (console) and the editor takes
+     the CRDT's reading.
+   - Changes from elsewhere (`steps.ts`): the Yjs events say exactly which characters, markers and
+     embeds each flow lost and gained; they become ProseMirror steps at those positions (a marker
+     inserted is a split, a deleted one a join; formatting mark steps; attributes node-markup steps),
+     so the cursor, decorations and the undo history map through them exactly — a diff of the two
+     documents is ambiguous next to repeated letters, and an undo mapped through the wrong reading
+     restored a paragraph break inside a word. What the events cannot place (pages and objects of
+     slides, table rows and cells) is a replace of just what differs.
+   - Undo is ProseMirror's history: one's own steps only (the others' are mapped through, never
+     undone), one step per word and per kind of edit (`plugins/undogroups.ts`; what a plugin appends
+     to a change — a connector letting go of a deleted shape — is undone with it); an agent's edit is
+     in the history of the editor it was asked in.
+   - Other people's cursors: awareness carries Yjs relative positions into the flows (`positions.ts`).
+   - **Migration from model 1.** The server converts a document stored in model 1 when it opens it
+     (`server/src/collabdoc.ts` `convertModel1`, `docs.ts`): the same document, a new history
+     (epoch), the old state kept 45 days in the table `ydocs_model1`. An editor's local copy of
+     model 1 (IndexedDB `overlyx:<id>`; model 2's are `overlyx2:<id>`) with edits the server never
+     got is sent to `POST /api/docs/<id>/legacy-merge` and merged three-way against the kept old
+     state, or kept as a version *"offline changes by …"* when there is none. An editor of an older
+     version (no `model=2` on its WebSocket) is held: connected, but without sync, so its typing
+     stays in its local copy and is merged once it reloads the new version.
+   - Known limits: two people moving the same text at once (cut and paste) or undoing concurrently
+     can leave a word twice; two people pressing Enter at one place make two breaks (an empty
+     paragraph between); deleting a container (an inset, a slide object) takes the text a co-author
+     typed into it meanwhile.
+   - Tests: `tests/collab-model.test.ts` (random concurrent editing by three peers — typing,
+     deleting, Enter, Backspace, formatting, formulas, insets, moving text into notes, undo —
+     delivered in any order, offline and back; no word nobody deleted is lost, none is ever doubled
+     or put together from pieces, every incremental reading equals a fresh one, the peers agree;
+     `OVERLYX_COLLAB_SEEDS`, `OVERLYX_COLLAB_STEPS`, `OVERLYX_COLLAB_FIRST`),
+     `tests/collab-positions.test.ts`, `tests/collab-editor.test.ts` (the whole editor, keys pressed
+     on two editors), `tests/model-migration.test.ts`, the scenario tests on `tests/yjs-net.ts`
+     (`concurrent-*.test.ts`, `split-repair.test.ts`, `split-own-edits.test.ts`, `split-fuzz.test.ts`)
+     and `e2e/offline-splits.spec.ts`, `e2e/collab.spec.ts`.
 
-   A copy is still a copy: whatever a co-author who had not seen the split yet typed, deleted,
-   formatted or changed in a formula of the copied half went to the deleted original. So copies are
-   recorded and the server moves such late edits after them (`core/src/moves.ts`,
-   `server/src/moves.ts`):
-   - **The editor records what it copied.** In the same Yjs transaction as a split, a join (Backspace
-     at a paragraph's start) or any edit that moves text between paragraphs, `recordCopies` (called
-     from typinganchor.ts) aligns the text before and after and writes the pairs *original unit →
-     copy* (characters, formulas, insets) into the shared map `moves`, keyed by the client and its
-     clock. A text run that loses or receives copied characters is re-created whole, so that no run
-     ever mixes moved and unmoved text; the deleted originals are listed to be kept.
-   - **The server keeps the originals and repairs late edits.** `MoveRepair` (one per open document,
-     `docs.ts`) sees every update a client sends (`ws.ts`) and every diff of the server's own: a
-     record is restated as the server's (`s…` keys; the client's key goes), and the originals it
-     names are excluded from Yjs' garbage collection (`protectMoves`, also in the document workers'
-     mirrors, whose state is what gets persisted). An insertion into a moved original — anchored, as
-     Yjs anchors everything, to the characters it was typed between — is moved beside the copies of
-     those characters, a deletion of moved characters deletes their copies, formatting and a formula's
-     new value go to the copy. The repair is an update of its own, made after the client's update has
-     been applied and broadcast, so every client gets the same result; it is idempotent (a reconnect
-     resending the same updates changes nothing) and costs nothing for updates that touch no moved
-     text (a lookup per new item). Two people splitting or joining the same paragraph before they
-     sync both copy some text: one copy wins (fixed rules: a copy that moved over one that stayed,
-     then the one in the smaller paragraph), the other is deleted, and what was typed into either
-     ends up once in the winner. A paragraph a late editor added among
-     moved ones is put back between the paragraphs it was typed between.
-   - **Late means: by somebody who had not seen the move.** A record carries what its author had
-     (`sv`: the state vector over the clients of the touched paragraphs, appended to the encoding so
-     that older readers ignore it, and carried over when the server restates the record); an item its
-     author had is no late edit, and neither is any item of the author's own client (it either came
-     after the record or was there when the text moved). Without that the first unit after a split
-     point — whose Yjs origin is the moved unit before it, as in every paragraph loaded from the file —
-     was taken for a late insertion: Enter right after a formula or a quote pulled the rest of the
-     paragraph back up, the closing quote of "…" typed into a run moved the opening one to the end of
-     the paragraph, and undoing a split lost its first half. Editors follow only other clients' copies
-     (`followMoves`): following their own, restated by the server, Ctrl+Z after Enter restored the
-     originals as the very copies it was deleting.
-   - **Reconnecting.** A client that comes back with edits the server has not seen gets the server's
-     sync step 2 only after its own step 2 has been applied and repaired (at most 3 s later), so it
-     never starts editing on the unrepaired state.
-   - Records older than `OVERLYX_MOVE_RECORD_DAYS` (default 30) are dropped when the document is
-     opened; their originals are collected the next time it is loaded. An editor that was offline
-     longer than that gets its late edits in the deleted original, as before.
-   - Not covered: undoing a split after a late edit was moved (the undo restores the original, the
-     moved edit stays in the copy); an editor of an older version, which records nothing (its splits
-     copy as before); and some interleavings of several splits and joins of the same paragraphs,
-     which can leave words in the wrong order or bring a deleted word back (in the randomized test
-     below no word is ever lost or doubled by splits; with joins, none of the default 120 scripts lose
-     one since 6 Oct 2026 — 2–7 of 100 did before).
-   - Tests: `tests/split-repair.test.ts` (each case, both orders, both sides offline, a server restart
-     in between, the server's own diffs), `tests/split-fuzz.test.ts` (random scripts of typing,
-     deleting, Enter and Backspace on two or three editors going offline and online; every word typed
-     must be there once, in the order its author saw; `OVERLYX_FUZZ_SEEDS`, `OVERLYX_FUZZ_STEPS`,
-     `OVERLYX_FUZZ_JOINS=1`, `OVERLYX_FUZZ_STRICT=1` to fail the known limits too,
-     `OVERLYX_FUZZ_DEBUG=<seed>` to replay and shrink one),
-     `tests/yjs-net.ts` (the network they run on: real y-prosemirror editors and a server with
-     controlled deliveries), `tests/agent-edit-moves.test.ts` (Agent-panel and MCP edits through
-     docs.ts with an editor connected, which sends an agent's edit back — the deletions in it are the
-     edit's own moves, not late deletions), `tests/split-own-edits.test.ts` (one editor alone: Enter
-     beside formulas and quotes, smart quotes typed into a run, undo of splits and joins) and
-     `e2e/offline-splits.spec.ts` (both press Enter in one paragraph, one of them offline, and type
-     behind formulas in both halves).
-
-   External changes of the file are applied on the server as a *diff* (`packages/server/src/ydiff.ts`),
-   so paragraphs they did not touch keep their identity and offline edits inside them survive; a diff
-   that splits or joins paragraphs records its copies like an editor, and goes through the repair as
-   the server's own (what it saw counts as known: `applyMirrorUpdate`).
+   External changes of the file are applied on the server as a *diff* (`packages/server/src/ydiff.ts`,
+   the writer above), so paragraphs they did not touch keep their identity and offline edits inside
+   them survive.
    A formula is one value, not text: when two people change the same formula from the same version,
    the one who loses keeps their version in a comment beside it (*"Concurrent formula edit by … —
    retained for review"*, `client/src/editor/mathconflict.ts`; each formula carries an edit clock,
@@ -3735,7 +3721,7 @@ clientInfo, User-Agent). It exposes these tools:
   cursor; `layout`) and `selection` (`from`/`to` places and the selected text verbatim — across
   paragraphs joined by a blank line, long ones cut in the middle). `you: true` marks the token's own
   account, `self` the asking agent, `moved_seconds_ago` when a cursor last changed. The awareness
-  `cursor` (two Yjs relative positions, y-prosemirror's) is resolved server-side: the paragraph is
+  `cursor` (two Yjs relative positions into the flows, core collab/positions.ts) is resolved server-side: the paragraph is
   serialized with marker characters at the cursor's places through the same conversion
   read_document uses (editor nodes → document model → `itemText`), so formulas, footnotes and
   special characters count exactly as read_document shows them; inside a table (whose cells

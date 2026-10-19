@@ -6,7 +6,7 @@ import { keymap } from 'prosemirror-keymap';
 import { Plugin, PluginKey, TextSelection, type Command, type EditorState } from 'prosemirror-state';
 import { undoInputRule } from 'prosemirror-inputrules';
 import { baseKeymap, chainCommands, deleteSelection, joinBackward, selectNodeBackward, joinForward, selectNodeForward, selectAll } from 'prosemirror-commands';
-import { undo, redo } from 'y-prosemirror';
+import { undo, redo } from './collab';
 import { goToNextCell } from 'prosemirror-tables';
 import type { EditorView } from 'prosemirror-view';
 import {

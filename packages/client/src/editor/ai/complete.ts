@@ -17,7 +17,7 @@ import { Plugin, PluginKey, TextSelection, type EditorState, type Selection, typ
 import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
 import { Fragment, type Node as PMNode } from 'prosemirror-model';
 import { schema } from '@overlyx/core';
-import { ySyncPluginKey } from 'y-prosemirror';
+import { ySyncPluginKey } from '../collab';
 import { api, type PMJSON } from '../../api';
 import { getPrefs } from '../../prefs';
 import { editorContext, viewDocId } from '../context';

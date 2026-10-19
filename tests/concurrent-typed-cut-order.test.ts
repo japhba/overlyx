@@ -61,9 +61,9 @@ for (const pendingMoves of [false, true]) for (const scenario of [1037, 1027]) {
         const seen = view.join(' ').split(/[\s$]+/).filter(word => /^w\d{3}$|^Ta[123]$/.test(word));
         for (let i = 1; i < seen.length; i++) expect(index.get(seen[i]), `${seen[i - 1]} before ${seen[i]} in an actor's completed view`).toBeGreaterThan(index.get(seen[i - 1])!);
       }
-      for (const peer of net.peers) { expect(clean(peer.pars())).toEqual(clean(final)); expect(peer.formulas()).toEqual(['a+b', 'c', 'x^2']); expect(peer.pendingMoves?.waiting ?? false).toBe(false); }
+      for (const peer of net.peers) { expect(clean(peer.pars())).toEqual(clean(final)); expect(peer.formulas()).toEqual(['a+b', 'c', 'x^2']); }
     } finally {
-      for (const peer of net.peers) { peer.remoteUpdates?.destroy(); peer.pendingMoves?.destroy(); peer.view.destroy(); peer.ydoc.destroy(); } net.server.destroy();
+      for (const peer of net.peers) { peer.view.destroy(); peer.ydoc.destroy(); } net.server.destroy();
     }
   });
 }

@@ -74,7 +74,9 @@ import { ensureRepo } from './git.ts';
 import { toSessionUser, type SessionUser } from './auth.ts';
 import { db, type UserRow } from './db.ts';
 import { showAgent, presenceIn, type AgentLook, type PresentPerson } from './agentPresence.ts';
-import { changedRange, findPassage, type Cursor } from './ycursor.ts';
+import { changedRange, findPassage, paragraphCount, type Cursor } from './ycursor.ts';
+import { readPm } from './collabdoc.ts';
+import type { Node as PMNode } from 'prosemirror-model';
 import {
   agentFor, knownAgent, agentRow, agentLabel, agentColor, agentOwner, noteToolCall, wantsSession, recordSession, sessionRow, touchSession, dropSession,
   registerPusher, unregisterPusher, streamChanged, waitForInstructions, replyFromAgent, forAgent,
@@ -642,13 +644,12 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
     let doc: Awaited<ReturnType<typeof manager.open>> | null = null;
     try { if (isDocumentFile(project, path) && fs.existsSync(resolveProjectPath(project, path))) doc = await manager.open(`${project}/${path}`); } catch { doc = null; }
     if (!doc) { const r = await fn(); await present(project, path); return r; }
-    const fragment = doc.fragment;
-    let range: Cursor | null = null;
-    const observe = (events: Y.YEvent<any>[], tr: Y.Transaction) => { if (tr.origin === 'mcp') { try { range = changedRange(fragment, events) ?? range; } catch { /* best-effort */ } } };
-    fragment.observeDeep(observe);
+    let before: PMNode | null = null;
+    try { before = readPm(doc.ydoc); } catch { before = null; }
     try { return await fn(); }
     finally {
-      fragment.unobserveDeep(observe);
+      let range: Cursor | null = null;
+      try { if (before) range = changedRange(doc.ydoc, before); } catch { /* best-effort */ }
       try { if (manager.docs.get(doc.id) === doc) showAgent(doc, look, range ?? undefined); } catch { /* best-effort */ }
     }
   };
@@ -909,7 +910,7 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
       if (clear) { showAgent(doc, look, null); return ok({ ok: true, note: 'Your highlight is gone.' }); }
       if (!quote?.trim() && paragraph_index === undefined) throw new Error('Give quote (the passage) or paragraph_index.');
       const hit = findPassage(doc.ydoc, { quote, paragraph: paragraph_index });
-      if (!hit) throw new Error(quote ? `"${quote.slice(0, 80)}" was not found${paragraph_index !== undefined ? ` in paragraph ${paragraph_index}` : ''} — quote the plain text as read_document's paragraphs show it.` : `No paragraph ${paragraph_index} — this document has ${doc.fragment.length}.`);
+      if (!hit) throw new Error(quote ? `"${quote.slice(0, 80)}" was not found${paragraph_index !== undefined ? ` in paragraph ${paragraph_index}` : ''} — quote the plain text as read_document's paragraphs show it.` : `No paragraph ${paragraph_index} — this document has ${paragraphCount(doc.ydoc)}.`);
       showAgent(doc, look, { anchor: hit.anchor, head: hit.head });
       return ok({ ok: true, paragraph: hit.paragraph, note: 'Highlighted for the people in the document — it stays until you edit or point elsewhere, or 5 minutes after your last activity.' });
     } catch (e) { return fail(e); }

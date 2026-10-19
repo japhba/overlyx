@@ -13,7 +13,7 @@
  */
 import type { Node as PMNode } from 'prosemirror-model';
 import type { EditorState, Transaction } from 'prosemirror-state';
-import { ySyncPluginKey } from 'y-prosemirror';
+import { ySyncPluginKey } from '../collab';
 import { normalizePath, pathBounds, pathToString, parseViewBox, type PathSeg } from '@overlyx/core';
 import { boxOf, rotatePoint, objectBounds } from './geom';
 

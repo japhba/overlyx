@@ -56,7 +56,7 @@ export { INK_PALETTES, HIGHLIGHT_OPACITY } from '@overlyx/core/inkpresets.ts';
 import { INK_PALETTES, HIGHLIGHT_OPACITY } from '@overlyx/core/inkpresets.ts';
 import { loadDeckInk, saveDeckInk, patchDeckInk, subscribeDeckInk, type DeckInk } from '../../deliverable/deckink';
 import { scratchOut, SCRATCH_HOLD_MS, SCRATCH_HOLD_PX } from '@overlyx/core/scratchout.ts';
-import { yUndoPluginKey } from 'y-prosemirror';
+import { closeUndoGroup } from '../collab';
 import { documentViewScale } from '../viewscale';
 /**
  * Widths are millimetres on the page, as Goodnotes shows them; the strokes themselves are stored
@@ -1060,9 +1060,9 @@ class InkLayer {
     const hits = new Set(this.scratchTargets(hold).map(it => `${it.src}:${it.idx}`));
     if (hits.size !== this.scratch.hits.size || [...hits].some(k => !this.scratch!.hits.has(k))) { this.scratch.hits = hits; this.schedule(); }
   }
-  /** the next change is an undo step of its own (yUndoPlugin's Y.UndoManager) */
+  /** the next change is an undo step of its own (editor/collab.ts) */
   private stopCapturing() {
-    try { (yUndoPluginKey.getState(this.view.state) as { undoManager?: { stopCapturing(): void } } | undefined)?.undoManager?.stopCapturing(); } catch { /* no undo manager */ }
+    closeUndoGroup(this.view);
   }
 
   private onCancel = (e: PointerEvent) => {

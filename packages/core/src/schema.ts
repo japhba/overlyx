@@ -202,6 +202,16 @@ const nodes: Record<string, NodeSpec> = {
 
   text: { group: 'inline' },
 
+  /**
+   * Something of the CRDT not readable yet (collab/read.ts): an embedded item whose content waits for
+   * another update. Shown as nothing, written as nothing; it holds its place until it arrives.
+   */
+  collab_pending: {
+    inline: true, group: 'inline', atom: true, selectable: false,
+    toDOM: () => ['span', { class: 'ol-collab-pending' }],
+    parseDOM: [],
+  },
+
   /** Inline formula ($...$). `latex` is the content without delimiters. */
   math_inline: {
     inline: true, group: 'inline', atom: true,
@@ -540,8 +550,9 @@ const marks: Record<string, MarkSpec> = {
   },
 };
 
-// y-prosemirror does not persist marks on non-text nodes: inline nodes carry LyX's font/change
-// state for the inset position in a `marks` attribute (JSON list of {type, attrs}) instead.
+// Inline nodes carry LyX's font/change state for the inset position in a `marks` attribute (JSON
+// list of {type, attrs}), not as real marks (y-prosemirror, the CRDT binding until 19 Oct 2026, kept
+// no marks on non-text nodes; the .tex conversion and the editor's commands build on the attribute).
 for (const [name, spec] of Object.entries(nodes)) {
   if (name === 'doc' || name === 'text' || spec.group !== 'inline') continue;
   spec.attrs = { ...(spec.attrs ?? {}), marks: jsonAttr([]) };

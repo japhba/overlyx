@@ -3,7 +3,7 @@
  * paragraph (at different places), types into both halves — also behind formulas, in the half the
  * other side moved into a new paragraph — and deletes words there; on reconnect every word is there
  * once, where its author put it, the deleted ones are gone, both splits hold, in both editors and in
- * the saved file (core/moves.ts, server/moves.ts). Runs against the built client served by the server
+ * the saved file (the CRDT's model 2, core collab/model.ts: a split moves no text). Runs against the built client served by the server
  * (the service worker keeps the offline page alive):
  *   OVERLYX_E2E_BASE=http://127.0.0.1:3001 npx playwright test e2e/offline-splits.spec.ts
  */
@@ -114,8 +114,11 @@ test('an in-flight join keeps its visible word order when a coauthor splits its 
     await page2.keyboard.press('Enter');
     await expect(saveState(page2)).toHaveText(/All changes saved/, { timeout: 15000 });
     await expect.poll(() => remoteUpdates).toBeGreaterThan(0);
-    expect(await paragraphs(page)).toEqual(local);
-    await caretBefore(page, 'w001', 'w018');
+    // the coauthor's Enter shows at once, merged with the join that is still on its way (nothing is
+    // held back: a split moves no text, so there is no intermediate state to hide)
+    const cut = local[0].indexOf('w013');
+    await expect.poll(async () => JSON.stringify(await paragraphs(page))).toBe(JSON.stringify([local[0].slice(0, cut).trimEnd(), local[0].slice(cut), ...local.slice(1)]));
+    await caretBefore(page, 'w013', 'w018');
     await page.keyboard.type('PENDING ');
     const pending = (await paragraphs(page)).join(' ');
     expect(pending).toContain('w017 PENDING w018');

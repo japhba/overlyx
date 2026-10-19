@@ -9,8 +9,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import * as Y from 'yjs';
-import { yDocToProsemirrorJSON } from 'y-prosemirror';
-import { mergeLyx, pmToLyxBody, writeParagraphs, type LyxDocument, type PMJSON } from '@overlyx/core';
+import { mergeLyx, pmToLyxBody, writeParagraphs, type LyxDocument } from '@overlyx/core';
+import { readPm, isEmptyDoc } from './collabdoc.ts';
 import { primePreserveCache, type PreserveCache, type ParseTexResult } from '@overlyx/core/tex/index.ts';
 import { projectDir } from './projectfiles.ts';
 import { parseDocumentText, writeDocumentText, cachedParseFile } from './texdoc.ts';
@@ -61,8 +61,7 @@ export function metaOf(ydoc: Y.Doc): DocMeta {
 /** The document model of a CRDT state. */
 export function lyxDocumentOf(ydoc: Y.Doc): LyxDocument {
   const meta = metaOf(ydoc);
-  const json = yDocToProsemirrorJSON(ydoc, 'prosemirror') as PMJSON;
-  return { preamble: meta.preamble, format: meta.format, header: { lines: meta.headerLines }, body: pmToLyxBody(json), trailer: meta.trailer };
+  return { preamble: meta.preamble, format: meta.format, header: { lines: meta.headerLines }, body: pmToLyxBody(readPm(ydoc)), trailer: meta.trailer };
 }
 
 /** A child document (\\input / \\include) resolved from the live state of an open document, else parsed from disk. */
@@ -153,6 +152,6 @@ export function loadOverStored(s: DocState, text: string, sameFile: boolean, ope
       }
     }
     // sanity: the state must produce exactly the file; otherwise rebuild from scratch
-    return { ok: s.ydoc.getXmlFragment('prosemirror').length > 0 && sha1(renderDoc(s, open).text) === sha1(text), note };
+    return { ok: !isEmptyDoc(s.ydoc) && sha1(renderDoc(s, open).text) === sha1(text), note };
   } catch { return { ok: false, note }; }
 }

@@ -1,4 +1,4 @@
-import { ySyncPluginKey } from 'y-prosemirror';
+import { ySyncPluginKey } from './collab';
 import type { EditorView } from 'prosemirror-view';
 import { schema, parseFormula, writeFormula } from '@overlyx/core';
 import { editorContext } from './context';

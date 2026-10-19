@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { it, expect } from 'vitest';
-import { Net, par, text, math } from './yjs-net';
+import { Net, par, text, math, expectTokens } from './yjs-net';
 
 const words = (n: number, from = 1) => Array.from({ length: n }, (_, i) => `w${String(from + i).padStart(3, '0')}`).join(' ');
 const content = { type: 'doc', content: [
@@ -33,7 +33,7 @@ for (const pendingMoves of [false, true]) it(`a later split suffix wins its orig
       expect(final.indexOf(left)).toBeLessThan(final.indexOf(formula));
       expect(final.indexOf(formula)).toBeLessThan(final.indexOf(right));
     }
-    expect(paragraphs.map(paragraph => paragraph.replace(/\s+/g, ' ').trim())).toEqual([
+    expectTokens(paragraphs, [
       `${words(6)} $a+b$ ${words(8, 7)} $c$ ${words(5, 15)}`,
       words(10, 20),
       `${words(4, 30)} $x^2$ w034`,
@@ -41,7 +41,7 @@ for (const pendingMoves of [false, true]) it(`a later split suffix wins its orig
       'Ta1 Ta2 w036 w037',
     ]);
   } finally {
-    for (const peer of net.peers) { peer.view.destroy(); peer.pendingMoves?.destroy(); peer.ydoc.destroy(); }
+    for (const peer of net.peers) { peer.view.destroy(); peer.ydoc.destroy(); }
     net.server.destroy();
   }
 });
@@ -68,7 +68,7 @@ for (const pendingMoves of [false, true]) it(`a newly kept split side retains th
       expect(final.indexOf(left)).toBeLessThan(final.indexOf(formula));
       expect(final.indexOf(formula)).toBeLessThan(final.indexOf(right));
     }
-    expect(paragraphs.map(paragraph => paragraph.replace(/\s+/g, ' ').trim())).toEqual([
+    expectTokens(paragraphs, [
       `${words(6)} $a+b$`,
       'Tb1 Tb2',
       words(6, 7),
@@ -77,7 +77,7 @@ for (const pendingMoves of [false, true]) it(`a newly kept split side retains th
       `${words(4, 30)} $x^2$ ${words(4, 34)}`,
     ]);
   } finally {
-    for (const peer of net.peers) { peer.view.destroy(); peer.pendingMoves?.destroy(); peer.ydoc.destroy(); }
+    for (const peer of net.peers) { peer.view.destroy(); peer.ydoc.destroy(); }
     net.server.destroy();
   }
 });
@@ -103,14 +103,14 @@ for (const pendingMoves of [false, true]) it(`a joined tail follows its winning 
       expect(final.indexOf(left)).toBeLessThan(final.indexOf(formula));
       expect(final.indexOf(formula)).toBeLessThan(final.indexOf(right));
     }
-    expect(paragraphs.map(paragraph => paragraph.replace(/\s+/g, ' ').trim())).toEqual([
+    expectTokens(paragraphs, [
       `${words(6)} $a+b$ ${words(8, 7)} $c$ ${words(3, 15)}`,
       'Ta3',
       words(12, 18),
       `${words(4, 30)} $x^2$ ${words(4, 34)}`,
     ]);
   } finally {
-    for (const peer of net.peers) { peer.view.destroy(); peer.pendingMoves?.destroy(); peer.ydoc.destroy(); }
+    for (const peer of net.peers) { peer.view.destroy(); peer.ydoc.destroy(); }
     net.server.destroy();
   }
 });

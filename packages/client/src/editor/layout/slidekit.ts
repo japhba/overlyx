@@ -4,7 +4,7 @@
  */
 import type { EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
-import { yUndoPluginKey } from 'y-prosemirror';
+import { closeUndoGroup } from '../collab';
 import { clean } from './beamerslides';
 import { SLIDE_LAYOUTS, type SlideLayout } from './slidelayouts';
 
@@ -47,9 +47,9 @@ let slideClipboard: PMNode[] = [];
 export const getSlideClipboard = (): PMNode[] => slideClipboard;
 export function setSlideClipboard(pages: PMNode[]): void { slideClipboard = pages; }
 
-/** each slide command is a step of its own for Ctrl+Z (the undo manager joins changes less than 0.5 s apart) */
+/** each slide command is a step of its own for Ctrl+Z (the history joins changes less than 0.5 s apart) */
 export function undoStep(view: EditorView): void {
-  try { (yUndoPluginKey.getState(view.state) as { undoManager?: { stopCapturing(): void } } | undefined)?.undoManager?.stopCapturing(); } catch { /* no undo manager */ }
+  closeUndoGroup(view);
 }
 
 /**

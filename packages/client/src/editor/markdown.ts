@@ -17,7 +17,7 @@ import { Plugin, TextSelection, type EditorState, type Transaction, type Command
 import { Decoration, DecorationSet } from 'prosemirror-view';
 import { Fragment, Slice, type Mark, type Node as PMNode } from 'prosemirror-model';
 import type { EditorView } from 'prosemirror-view';
-import { ySyncPluginKey } from 'y-prosemirror';
+import { ySyncPluginKey } from './collab';
 import { schema, paragraphsToPm, isMarkdownPath, MARKDOWN_LAYOUTS, markdownLayoutFor } from '@overlyx/core';
 import { inRawText } from './rawtext';
 import { editorContext } from './context';

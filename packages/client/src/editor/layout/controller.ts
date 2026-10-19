@@ -29,7 +29,7 @@ import { Plugin, PluginKey, NodeSelection, TextSelection, type EditorState, type
 import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
 import { GapCursor } from 'prosemirror-gapcursor';
 import { DOMSerializer, Fragment, Slice, type Node as PMNode } from 'prosemirror-model';
-import { ySyncPluginKey } from 'y-prosemirror';
+import { ySyncPluginKey } from '../collab';
 import { schema, normalizePath, pathToString, preambleColors, pageSizeOf, pageFontsOf, rgbToHex, boxKey, SHAPE_PRESETS, type PathSeg, type LayoutCheck, type LayoutCheckBox, type OlxParams } from '@overlyx/core';
 import { setLayoutMathFont } from '../../fonts/editorfont';
 import { sizeTable, displaySkips, NAMED_SIZES } from '../fontsize';

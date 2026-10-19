@@ -5,8 +5,8 @@
  */
 import { describe, it, expect } from 'vitest';
 import * as Y from 'yjs';
-import { yDocToProsemirrorJSON } from 'y-prosemirror';
-import { parseLyx, writeLyx, pmToLyxBody, type PMJSON } from '@overlyx/core';
+import { parseLyx, writeLyx, pmToLyxBody, schema } from '@overlyx/core';
+import { Reader, BODY, isMarkerItem } from '@overlyx/core/collab/index.ts';
 import { applyLyxDocument } from '../packages/server/src/ydiff.ts';
 
 const HEADER = `#LyX 2.5 created this file. For more info see https://www.lyx.org/
@@ -31,8 +31,7 @@ const docText = (...ps: string[]) => writeLyx(parseLyx(HEADER + ps.map(par).join
 function toText(ydoc: Y.Doc): string {
   const m = ydoc.getMap<string>('meta');
   const g = (k: string) => JSON.parse(m.get(k)!);
-  const json = yDocToProsemirrorJSON(ydoc, 'prosemirror') as PMJSON;
-  return writeLyx({ preamble: g('preamble'), format: g('format'), header: { lines: g('header') }, body: pmToLyxBody(json), trailer: g('trailer') });
+  return writeLyx({ preamble: g('preamble'), format: g('format'), header: { lines: g('header') }, body: pmToLyxBody(new Reader(schema, ydoc).read()), trailer: g('trailer') });
 }
 
 describe('diff-based document reload', () => {
@@ -54,9 +53,15 @@ describe('diff-based document reload', () => {
     // a client gets a copy and goes offline
     const client = new Y.Doc();
     Y.applyUpdate(client, Y.encodeStateAsUpdate(server));
-    const firstPar = client.getXmlFragment('prosemirror').get(0) as Y.XmlElement;
-    const text = firstPar.get(0) as Y.XmlText;
-    text.insert(text.length, ' Offline addition.');
+    // at the end of the first paragraph: before the second paragraph's marker
+    const body = client.getText(BODY);
+    let at = -1, i = 0, markers = 0;
+    for (let it = body._start; it && at < 0; it = it.right) {
+      if (it.deleted || !it.countable) continue;
+      if (isMarkerItem(it) && ++markers === 2) at = i;
+      i += it.length;
+    }
+    body.insert(at, ' Offline addition.');
 
     // meanwhile the file is saved from desktop LyX with the third paragraph changed
     const b = docText('First paragraph.', 'Second paragraph.', 'Third paragraph, edited in LyX.');

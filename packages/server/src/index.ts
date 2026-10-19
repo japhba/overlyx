@@ -201,7 +201,7 @@ const needProject = (min: Role) => (req: express.Request, res: express.Response,
  */
 api.all('/docs/*', (req, res, next) => {
   const full = String((req.params as any)[0] ?? '');
-  const m = /^(.*?)(?:\/(meta|tex|lyx|outline|source|bib|reset|save|header|frontmatter|versions(?:\/\d+(?:\/restore)?)?|export(?:\/cancel)?|pdf|build|folds|external|synctex\/(?:view|edit|pages)))?$/.exec(full)!;
+  const m = /^(.*?)(?:\/(meta|tex|lyx|outline|source|bib|reset|save|header|frontmatter|versions(?:\/\d+(?:\/restore)?)?|export(?:\/cancel)?|pdf|build|folds|external|legacy-merge|synctex\/(?:view|edit|pages)))?$/.exec(full)!;
   // an id from before a project moved (namespaces.ts) names the document under its current key
   const id = canonicalDocId(decodeURIComponent(m[1]));
   const action = m[2] ?? '';
@@ -1377,6 +1377,23 @@ api.post('/docs/*/frontmatter', async (req, res) => {
   headerQueue.set(id, job);
   await job;
   if (headerQueue.get(id) === job) headerQueue.delete(id);
+});
+
+/**
+ * A local copy kept by an editor of the CRDT's old model (its whole Yjs state, client
+ * editor/legacycopy.ts): its offline edits merged into the document (docs.ts legacyMerge).
+ */
+api.post('/docs/*/legacy-merge', express.raw({ type: 'application/octet-stream', limit: '64mb' }), async (req, res) => {
+  try {
+    const body = req.body as Buffer;
+    if (!Buffer.isBuffer(body) || !body.length) { res.status(400).json({ error: 'a Yjs state is expected' }); return; }
+    const r = await manager.legacyMerge(docId(req), new Uint8Array(body), req.user!.name);
+    console.log(`[docs] legacy copy of ${docId(req)} from ${req.user!.name}: ${r.merged ? 'merged' : r.reason}`);
+    res.json(r);
+  } catch (e) {
+    console.error('[docs] legacy merge failed', e);
+    res.status(400).json({ error: String(e) });
+  }
 });
 
 /* ---------------------------------------------------------------- versions */

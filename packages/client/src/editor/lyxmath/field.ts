@@ -122,8 +122,9 @@ export class LyxMathField {
   readOnly: boolean;
   private cells: CellRef[] = [];
   private parents = new Map<Owner, Parent>();
-  private undoStack: { hull: string; path: number[][] }[] = [];
-  private redoStack: { hull: string; path: number[][] }[] = [];
+  /** the formula's states to go back to: its content, the cursor, and whether it was being typed as TeX (undoing the `\` takes that back too) */
+  private undoStack: { hull: string; path: number[][]; tex: boolean }[] = [];
+  private redoStack: { hull: string; path: number[][]; tex: boolean }[] = [];
   private lastEdit = { kind: '', time: 0 };
   private focused = false;
   private raf = 0;
@@ -582,12 +583,13 @@ export class LyxMathField {
   private snapshot(kind: string): void {
     const now = Date.now();
     if (kind === 'type' && this.lastEdit.kind === 'type' && now - this.lastEdit.time < 800) { this.lastEdit.time = now; return; }
-    this.undoStack.push({ hull: JSON.stringify(this.hull), path: this.pathOf(this.cursor.slices) });
+    this.undoStack.push({ hull: JSON.stringify(this.hull), path: this.pathOf(this.cursor.slices), tex: this.texTyped });
     if (this.undoStack.length > 200) this.undoStack.shift();
     this.redoStack = [];
     this.lastEdit = { kind, time: now };
   }
-  private restore(s: { hull: string; path: number[][] }): void {
+  private restore(s: { hull: string; path: number[][]; tex: boolean }): void {
+    this.texTyped = s.tex;
     this.hull = JSON.parse(s.hull);
     this.cursor = new MathCursor(this.hull, this.macros, { xToPos: (cell, x) => this.xToPos(cell, x) });
     if (!this.restorePath(s.path)) { this.cursor.idx = this.cursor.lastidx; this.cursor.pos = this.cursor.lastpos; }
@@ -595,14 +597,14 @@ export class LyxMathField {
   undo(): boolean {
     const s = this.undoStack.pop();
     if (!s) return false;
-    this.redoStack.push({ hull: JSON.stringify(this.hull), path: this.pathOf(this.cursor.slices) });
+    this.redoStack.push({ hull: JSON.stringify(this.hull), path: this.pathOf(this.cursor.slices), tex: this.texTyped });
     this.restore(s); this.lastEdit = { kind: '', time: 0 }; this.commit();
     return true;
   }
   redo(): boolean {
     const s = this.redoStack.pop();
     if (!s) return false;
-    this.undoStack.push({ hull: JSON.stringify(this.hull), path: this.pathOf(this.cursor.slices) });
+    this.undoStack.push({ hull: JSON.stringify(this.hull), path: this.pathOf(this.cursor.slices), tex: this.texTyped });
     this.restore(s); this.commit();
     return true;
   }

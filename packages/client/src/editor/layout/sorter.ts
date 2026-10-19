@@ -12,7 +12,7 @@
  */
 import type { EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
-import { undo, redo } from 'y-prosemirror';
+import { undo, redo } from '../collab';
 import { PAGE_TRANSITIONS } from '@overlyx/core';
 import * as L from './commands';
 import { showContextMenu, closeContextMenu, type MenuItem } from '../contextmenu';
@@ -522,8 +522,8 @@ export class SlideSorter {
     else if (mod && k.toLowerCase() === 'c') this.copy(false);
     else if (mod && k.toLowerCase() === 'x') this.copy(true);
     else if (mod && k.toLowerCase() === 'v') this.paste();
-    else if (mod && k.toLowerCase() === 'z' && !e.shiftKey) { undoStep(this.view); undo(this.view.state); this.schedule(); }
-    else if (mod && (k.toLowerCase() === 'y' || (k.toLowerCase() === 'z' && e.shiftKey))) { redo(this.view.state); this.schedule(); }
+    else if (mod && k.toLowerCase() === 'z' && !e.shiftKey) { undoStep(this.view); undo(this.view.state, this.view.dispatch, this.view); this.schedule(); }
+    else if (mod && (k.toLowerCase() === 'y' || (k.toLowerCase() === 'z' && e.shiftKey))) { redo(this.view.state, this.view.dispatch, this.view); this.schedule(); }
     else if (k === 'F5') this.present(e.shiftKey);
     else if (k === 'ContextMenu' || (k === 'F10' && e.shiftKey)) { const r = this.cards[f]?.el.getBoundingClientRect(); if (r) showContextMenu(r.left + 24, r.top + 24, this.menu()); }
     else done = false;

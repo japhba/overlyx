@@ -1,18 +1,16 @@
 // @vitest-environment happy-dom
 /**
  * A paragraph split (or join) while somebody else edits the same paragraph without having seen it yet.
- * Yjs cannot move text: the split copies one half into a new paragraph, so whatever the other side
- * typed, deleted or formatted in the copied original was misplaced or lost on reconnect. The
- * editor records what it copied (core/moves.ts) and the server moves the concurrent edits after the
- * copy (server/moves.ts): every typed word survives once, where its author put it.
+ * In the CRDT's model 1 a split copied one half into a new paragraph, and a server-side repair had
+ * to move what the other side typed into the original after the copy. In model 2 (core
+ * collab/model.ts) a split inserts a paragraph marker and moves nothing: every typed word survives
+ * once, where its author put it, with no repair. (Kept from model 1: the same scenarios.)
  */
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
-import { prosemirrorJSONToYXmlFragment } from 'y-prosemirror';
 import { schema } from '@overlyx/core';
+import { writeDocument } from '@overlyx/core/collab/index.ts';
 import { Net, par, text, math, once, absent } from './yjs-net';
-import { MoveRepair } from '../packages/server/src/moves';
-import { recordCopies } from '../packages/core/src/moves';
 
 const ENCODER = [
   text('The encoder is composed of a stack of '), math('N=6'),
@@ -153,7 +151,7 @@ describe('joins', () => {
   });
 });
 
-describe('the repair', () => {
+describe('server restarts and diffs', () => {
   it('a server restart between the split and the reconnect: the kept originals and the records are loaded again', () => {
     const net = new Net(encoder());
     const on = net.peer('online', 200), off = net.peer('offline', 100);
@@ -176,18 +174,16 @@ describe('the repair', () => {
       a.enterBefore('That is');
       a.typeBefore('the output', 'the output ');
       net.flush();
-      // the file has the paragraph whole again, without the doubled words: the diff joins the halves
-      // (copying them, recorded like an editor's copies) and drops the words
-      const diff = (d: Y.Doc) => d.transact(tr => { prosemirrorJSONToYXmlFragment(schema, encoder(), d.getXmlFragment('prosemirror')); recordCopies(tr); }, 'file-load');
+      // the file has the paragraph whole again, without the doubled words: the diff joins the halves and drops the words
+      const diff = (d: Y.Doc) => d.transact(() => writeDocument(schema, d, schema.nodeFromJSON(encoder())), 'file-load');
       if (where === 'on the document itself') diff(net.server);
       else {
         const mirror = new Y.Doc();
         Y.applyUpdate(mirror, Y.encodeStateAsUpdate(net.server));
-        const knew = Y.decodeStateVector(Y.encodeStateVector(mirror));
         const updates: Uint8Array[] = [];
         mirror.on('update', (u: Uint8Array) => updates.push(u));
         diff(mirror);
-        net.repair!.receive(Y.mergeUpdates(updates), 'file-load', { step2: false, knows: knew, server: true });
+        Y.applyUpdate(net.server, Y.mergeUpdates(updates), 'file-load');
       }
       expect(net.converged()).toEqual([
         'The encoder is composed of a stack of $N=6$ identical layers. Each layer has two sub-layers: a multi-head self-attention mechanism. That is, the output is $\\mathrm{LayerNorm}(x)$, where $f(x)$ is the function.',
@@ -195,18 +191,6 @@ describe('the repair', () => {
       ]);
     });
   }
-
-  it('records older than the retention period are dropped', () => {
-    const net = new Net(encoder());
-    const a = net.peer('a', 100);
-    a.enterBefore('That is');
-    net.flush();
-    const map = net.server.getMap('moves');
-    expect(map.size).toBe(1);
-    const later = new MoveRepair(net.server, { now: () => Date.now() + 31 * 86400000 });
-    later.prune();
-    expect(map.size).toBe(0);
-  });
 
   it('a paragraph split while another split arrives later: nothing doubled, nothing lost, repeat reconnects change nothing', () => {
     const net = new Net(encoder());

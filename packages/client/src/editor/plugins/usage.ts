@@ -7,8 +7,7 @@
 import { Plugin, NodeSelection } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
-import { yUndoPluginKey } from 'y-prosemirror';
-import type { UndoManager } from 'yjs';
+import { onUndoRedo } from '../collab';
 import { recordUsage, unboundKeyLabel, recordInteraction, usageEnabled } from '../../usage';
 import { editorContext } from '../context';
 import type { InteractionAction, InteractionState, InteractionTarget } from '@overlyx/core/interactions.ts';
@@ -66,11 +65,9 @@ export function usagePlugin(): Plugin {
       view.dom.addEventListener('paste', paste, true);
       view.dom.addEventListener('cut', cut, true);
       view.dom.addEventListener('drop', drop, true);
-      const um = (yUndoPluginKey.getState(view.state) as { undoManager?: UndoManager } | undefined)?.undoManager;
-      const popped = (e: { type: 'undo' | 'redo' }) => recordUsage(e.type === 'redo' ? 'redo' : 'undo');
-      um?.on('stack-item-popped', popped);
+      const off = onUndoRedo(kind => recordUsage(kind));
       return { destroy() {
-        um?.off('stack-item-popped', popped);
+        off();
         view.dom.removeEventListener('keydown', key, true); view.dom.removeEventListener('paste', paste, true);
         view.dom.removeEventListener('cut', cut, true); view.dom.removeEventListener('drop', drop, true);
       } };

@@ -37,9 +37,9 @@ for (const pendingMoves of [false,true]) it(`concurrent cuts keep every characte
       `${words(6,1)} $a+b$ ${words(8,7)} $c$ ${words(5,15)}`,
       words(10,20),'w030',words(2,31),`w033 $x^2$ ${words(4,34)}`,
     ]);
-    for(const peer of net.peers){ expect(clean(peer.pars())).toEqual(clean(final)); expect(peer.pendingMoves?.waiting??false).toBe(false); }
+    for(const peer of net.peers){ expect(clean(peer.pars())).toEqual(clean(final)); }
   } finally {
-    for(const peer of net.peers){peer.remoteUpdates?.destroy();peer.pendingMoves?.destroy();peer.view.destroy();peer.ydoc.destroy();}
+    for(const peer of net.peers){peer.view.destroy();peer.ydoc.destroy();}
     net.server.destroy();
   }
 });

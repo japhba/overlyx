@@ -36,15 +36,15 @@ const MSG_PING = 4;
 /** an update that came from the embedded agent (origin 'mcp'), sent additionally under this type
  *  so clients can apply it with an undo-tracked origin (see editor.ts messageHandlers[5]) */
 const MSG_AGENT_EDIT = 5;
-/**
- * OverLyX extension, client → server: what the editor had when it made the update that follows (per
- * client the highest clock; only what changed since its last report on this connection). The repair
- * of paragraph moves acts on an update only when it was made without something the server already
- * had (moves.ts `concurrent`); for an editor that does not report it, the server can only assume
- * that whatever it had sent it had arrived (`sentTo`).
- */
-const MSG_KNOWS = 6;
 const HEARTBEAT_MS = 10000;
+/**
+ * The CRDT model editors must hold the document in (core collab/model.ts), from the connection's
+ * `model` parameter. An editor of an older bundle (y-prosemirror's tree, model 1) would show the
+ * converted document as empty and its typing would go nowhere: it gets no sync at all — its
+ * connection stays open, so it shows "new version — reload", and its edits stay in its local copy,
+ * which the reloaded editor hands to the server to merge (client editor/legacycopy.ts).
+ */
+const MODEL = '2';
 
 function savedMessage(doc: OpenDoc): Uint8Array {
   const enc = encoding.createEncoder();
@@ -73,24 +73,6 @@ function closeConn(doc: OpenDoc, conn: WebSocket): void {
 }
 
 const docHandlers = new WeakSet<OpenDoc>();
-/** the state vector each connection reported in its last sync step 1 */
-const knows = new WeakMap<WebSocket, Map<number, number>>();
-/**
- * What the server has sent each connection, at most: per client the highest clock of the Yjs structs
- * in the updates and sync step 2s that went out on it. A client learns of others' edits only from
- * the server, so this, its sync step 1 and what it made itself bound what it can have had when it
- * made an edit — the evidence on which the repair of paragraph moves acts (moves.ts provablyLate).
- */
-const sentTo = new WeakMap<WebSocket, Map<number, number>>();
-/** connections sent something whose structs are not known (nothing then counts as unseen by them) */
-const sentUnknown = new WeakSet<WebSocket>();
-/** what each reporting editor had, as of its last MSG_KNOWS */
-const reported = new WeakMap<WebSocket, Map<number, number>>();
-function noteSent(conn: WebSocket, to: Map<number, number>): void {
-  let m = sentTo.get(conn);
-  if (!m) sentTo.set(conn, m = new Map());
-  for (const [client, clock] of to) if (clock > (m.get(client) ?? 0)) m.set(client, clock);
-}
 
 function ensureDocHandlers(doc: OpenDoc): void {
   if (docHandlers.has(doc)) return;
@@ -112,12 +94,7 @@ function ensureDocHandlers(doc: OpenDoc): void {
     encoding.writeVarUint(enc, MSG_SYNC);
     syncProtocol.writeUpdate(enc, update);
     const msg = encoding.toUint8Array(enc);
-    let to: Map<number, number> | null = null;
-    try { to = Y.parseUpdateMeta(update).to; } catch { to = null; }
-    for (const c of doc.conns.keys()) {
-      if (to) noteSent(c, to); else sentUnknown.add(c);
-      send(doc, c, msg);
-    }
+    for (const c of doc.conns.keys()) send(doc, c, msg);
   });
   doc.awareness.on('update', ({ added, updated, removed }: { added: number[]; updated: number[]; removed: number[] }, origin: unknown) => {
     const changed = added.concat(updated, removed);
@@ -159,7 +136,8 @@ export function attachWebSocket(server: Server): void {
       if (!role) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); socket.destroy(); return; }
       logAccess(project, user.id, 'open', rel || null);
       markDocOpened(user.id, docId);
-      wss.handleUpgrade(req, socket, head, (ws) => void handleConnection(ws, docId, user, role === 'view'));
+      const current = url.searchParams.get('model') === MODEL;
+      wss.handleUpgrade(req, socket, head, (ws) => void (current ? handleConnection(ws, docId, user, role === 'view') : holdOutdated(ws)));
     } catch (e) {
       console.error('[ws] upgrade failed:', e);
       try { socket.write('HTTP/1.1 400 Bad Request\r\n\r\n'); socket.destroy(); } catch { /* gone */ }
@@ -218,37 +196,10 @@ async function handleConnection(conn: WebSocket, docId: string, user: SessionUse
       switch (type) {
         case MSG_SYNC: {
           const kind = decoding.readVarUint(dec);
-          if (kind === syncProtocol.messageYjsSyncStep1) {
-            const sv = decoding.readVarUint8Array(dec);
-            // what the client has: its sync step 2 that follows carries every deletion it knows of, and
-            // those it learnt with a paragraph's move are not to be applied again (moves.ts)
-            let state: Map<number, number> | null = null;
-            try { state = Y.decodeStateVector(sv); knows.set(conn, state); } catch { knows.delete(conn); }
-            // a client coming back with edits the server has not seen gets its answer once its own sync
-            // step 2 (sent as soon as it has the server's step 1) is applied and repaired: it then goes
-            // from its offline state straight to the merged one, not through a state it should not edit in
-            if (!readOnly && state && [...state].some(([client, clock]) => clock > Y.getState(doc.ydoc.store, client))) {
-              deferStep1(doc, conn, sv);
-              break;
-            }
-            answerStep1(doc, conn, sv);
-          } else if (!readOnly && (kind === syncProtocol.messageYjsSyncStep2 || kind === syncProtocol.messageYjsUpdate)) {
-            // applied through the repair of paragraph moves (a viewer's are dropped: it only ever gets the document)
-            // what its client had: for its step 2 (offline edits), its step 1; for a live update, its
-            // report, or at most what was sent to it
-            const step2 = kind === syncProtocol.messageYjsSyncStep2, known = knows.get(conn) ?? null;
-            const had = step2 ? known : reported.get(conn) ?? (sentUnknown.has(conn) ? null : sentTo.get(conn) ?? new Map());
-            doc.moves.receive(decoding.readVarUint8Array(dec), conn, { step2, knows: known, sent: had });
-            if (kind === syncProtocol.messageYjsSyncStep2) releaseStep1(doc, conn);
-          }
-          break;
-        }
-        case MSG_KNOWS: {
-          let m = reported.get(conn);
-          if (!m) reported.set(conn, m = new Map());
-          for (let n = decoding.readVarUint(dec); n > 0; n--) {
-            const client = decoding.readVarUint(dec), clock = decoding.readVarUint(dec);
-            if (clock > (m.get(client) ?? 0)) m.set(client, clock);
+          if (kind === syncProtocol.messageYjsSyncStep1) answerStep1(doc, conn, decoding.readVarUint8Array(dec));
+          else if (!readOnly && (kind === syncProtocol.messageYjsSyncStep2 || kind === syncProtocol.messageYjsUpdate)) {
+            // a viewer's are dropped: it only ever gets the document
+            Y.applyUpdate(doc.ydoc, decoding.readVarUint8Array(dec), conn);
           }
           break;
         }
@@ -293,9 +244,6 @@ async function handleConnection(conn: WebSocket, docId: string, user: SessionUse
     const enc0 = encoding.createEncoder();
     encoding.writeVarUint(enc0, MSG_EPOCH);
     encoding.writeVarString(enc0, doc.epoch);
-    // Old clients ignore trailing capability flags. New clients can keep a
-    // local split/join stable until a canonical server record adopts it.
-    encoding.writeVarUint(enc0, 1);
     send(doc, conn, encoding.toUint8Array(enc0));
   }
   // initial sync step 1 + awareness
@@ -318,29 +266,19 @@ async function handleConnection(conn: WebSocket, docId: string, user: SessionUse
 
 export { Y };
 
-/** sync step 1 requests held until the client's own step 2 has been applied */
-const heldStep1 = new WeakMap<WebSocket, { sv: Uint8Array; timer: NodeJS.Timeout }>();
-/** the longest a client's sync step 2 is waited for (an old or odd client may never send it) */
-const STEP1_HOLD_MS = 3000;
-
-function deferStep1(doc: OpenDoc, conn: WebSocket, sv: Uint8Array): void {
-  const prev = heldStep1.get(conn);
-  if (prev) clearTimeout(prev.timer);
-  heldStep1.set(conn, { sv, timer: setTimeout(() => releaseStep1(doc, conn), STEP1_HOLD_MS) });
-}
-
-function releaseStep1(doc: OpenDoc, conn: WebSocket): void {
-  const held = heldStep1.get(conn);
-  if (!held) return;
-  heldStep1.delete(conn);
-  clearTimeout(held.timer);
-  if (doc.conns.has(conn)) answerStep1(doc, conn, held.sv);
+/**
+ * An editor of an older bundle (see MODEL): the connection stays open — heartbeats only, nothing it
+ * sends is applied, nothing of the document goes to it.
+ */
+function holdOutdated(conn: WebSocket): void {
+  const heartbeat = new Uint8Array([MSG_PING]);
+  const ping = setInterval(() => { try { conn.send(heartbeat); } catch { clearInterval(ping); } }, HEARTBEAT_MS);
+  conn.on('close', () => clearInterval(ping));
+  conn.on('error', () => clearInterval(ping));
 }
 
 /** sync step 2: what the client with state vector `sv` lacks */
 function answerStep1(doc: OpenDoc, conn: WebSocket, sv: Uint8Array): void {
-  // all the server has (the worker's answer for a big document is from its mirror, which has no more)
-  noteSent(conn, Y.decodeStateVector(Y.encodeStateVector(doc.ydoc)));
   if (doc.bigForSync) {
     // what the client lacks of a big document (all of it, on its first visit) takes a while
     // to encode: the document worker does it, the answer is sent when it is ready

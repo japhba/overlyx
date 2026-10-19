@@ -10,6 +10,8 @@ import { existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync 
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import * as Y from 'yjs';
+import { Reader, BODY, isMarkerItem } from '@overlyx/core/collab/index.ts';
+import { schema } from '@overlyx/core';
 
 const ROOT = join(process.env.OVERLYX_SCRATCH ?? tmpdir(), 'overlyx-docworker-test');
 rmSync(ROOT, { recursive: true, force: true });
@@ -32,15 +34,25 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 /** tracked changes carry the second they were made: two runs differ only there */
 const untimed = (t: string) => t.replace(/\\lyx(added|deleted)\{([^}]*)\}\{[^}]*\}/g, '\\lyx$1{$2}{T}');
 
-/** Type into a paragraph's first text node, the way a client's update arrives. */
-function type(doc: Doc, index: number, text: string): void {
-  doc.ydoc.transact(() => {
-    const p = doc.fragment.get(Math.min(index, doc.fragment.length - 1)) as Y.XmlElement;
-    const t = p.toArray().find(x => x instanceof Y.XmlText) as Y.XmlText | undefined;
-    if (t) t.insert(0, text);
-    else { const n = new Y.XmlText(); n.insert(0, text); p.insert(0, [n]); }
-  }, 'test-client');
+/** where paragraph `index` (the last one, beyond) begins in the CRDT's body: right after its marker */
+function paragraphStart(ydoc: Y.Doc, index: number): number {
+  const body = ydoc.getText(BODY);
+  let n = -1, at = 0, i = 0;
+  for (let it = body._start; it; it = it.right) {
+    if (it.deleted || !it.countable) continue;
+    if (isMarkerItem(it)) { n++; at = i + 1; if (n === index) break; }
+    i += it.length;
+  }
+  return at;
 }
+
+/** Type at the start of a paragraph, the way a client's update arrives. */
+function type(doc: Doc, index: number, text: string): void {
+  doc.ydoc.transact(() => { doc.ydoc.getText(BODY).insert(paragraphStart(doc.ydoc, index), text); }, 'test-client');
+}
+
+/** the document a CRDT reads as, as JSON (to compare two) */
+const docJSON = (ydoc: Y.Doc) => JSON.stringify(new Reader(schema, ydoc).read().toJSON());
 
 /** The same file in two projects: one document's work is done in a worker, its twin's on the main thread. */
 async function twins(name: string, text: string, files: Record<string, string> = {}): Promise<[Doc, Doc]> {
@@ -99,7 +111,7 @@ describe('the worker writes what the main thread writes', () => {
   it('a long document (built in steps by the worker) is the same document', async () => {
     const pars = Array.from({ length: 450 }, (_, i) => i % 50 === 0 ? `\\section{Part ${i}}` : i % 7 === 0 ? `\\begin{itemize}\n\\item one ${i}\n\\item two\n\\end{itemize}` : `Paragraph ${i} with $x_{${i}}$ and \\emph{words}.`);
     const [w, m] = await twins('long', docText(...pars));
-    expect(w.fragment.toJSON()).toBe(m.fragment.toJSON());
+    expect(docJSON(w.ydoc)).toBe(docJSON(m.ydoc));
     expect(await w.textAsync()).toBe(m.toText());
     for (const d of [w, m]) type(d, 300, 'Late in the document: ');
     expect(await w.saveToFile()).toBe(true);
@@ -213,7 +225,7 @@ describe('the worker writes what the main thread writes', () => {
     expect(w2.toText()).toContain('Stored, changed on disk.');
   });
 
-  it('a paragraph split on disk while closed, then typed into by a client that had not seen it: the mirror gets the repair', async () => {
+  it('a paragraph split on disk while closed, then typed into by a client that had not seen it: the word lands where it was typed', async () => {
     const [w] = await twins('splitdisk', docText('Alpha beta gamma delta epsilon. Zeta eta theta iota kappa lambda mu nu xi omicron.', 'Closing.'));
     // a client with the document, offline from now on
     const client = new Y.Doc();
@@ -221,13 +233,12 @@ describe('the worker writes what the main thread writes', () => {
     await w.persistStateAsync();
     await manager.unload(w.id);
     writeFileSync(w.absPath, docText('Alpha beta gamma delta epsilon.', 'Zeta eta theta iota kappa lambda mu nu xi omicron.', 'Closing.'));
-    // opened over the stored state: the worker's diff copies the second half (and records it), the
-    // main thread restates the record (an update of its own)
+    // opened over the stored state: the worker's diff splits the paragraph (a marker inserted, nothing copied)
     const w2 = await manager.open(w.id);
-    expect(w2.ydoc.getMap('moves').size).toBe(1);
-    const text = (client.getXmlFragment('prosemirror').get(0) as Y.XmlElement).toArray().find(x => x instanceof Y.XmlText) as Y.XmlText;
-    client.transact(() => text.insert(text.toString().indexOf('lambda'), 'LATE '), 'client');
-    w2.moves.receive(Y.encodeStateAsUpdate(client, Y.encodeStateVector(w2.ydoc)), {}, { step2: true, knows: Y.decodeStateVector(Y.encodeStateVector(client)) });
+    const body = client.getText(BODY);
+    // (toString leaves the paragraph markers out: one is before the text)
+    client.transact(() => body.insert(body.toString().indexOf('lambda') + 1, 'LATE '), 'client');
+    Y.applyUpdate(w2.ydoc, Y.encodeStateAsUpdate(client, Y.encodeStateVector(w2.ydoc)), 'client');
     // the late word goes where it was typed, in the new paragraph; the worker writes what the document holds
     expect(w2.toText()).toContain('\nZeta eta theta iota kappa LATE lambda mu nu xi omicron.\n');
     expect(await w2.textAsync()).toBe(w2.toText());
@@ -367,7 +378,7 @@ describe('a client connecting while its document opens', () => {
     manager.open = async (id: string) => { await sleep(300); return open(id); };
     try {
       const client = new Y.Doc();
-      const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?doc=${encodeURIComponent('u/wsopen/main.tex')}`, { headers: { cookie: `ol_session=${signSession(toSessionUser(user))}` } });
+      const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?doc=${encodeURIComponent('u/wsopen/main.tex')}&model=2`, { headers: { cookie: `ol_session=${signSession(toSessionUser(user))}` } });
       ws.binaryType = 'arraybuffer';
       const synced = new Promise<void>((resolve) => {
         ws.on('message', (data: ArrayBuffer) => {
@@ -380,7 +391,7 @@ describe('a client connecting while its document opens', () => {
       // like y-websocket: sync step 1 as soon as the socket is open — before the server has the document
       ws.on('open', () => { const enc = encoding.createEncoder(); encoding.writeVarUint(enc, 0); syncProtocol.writeSyncStep1(enc, client); ws.send(encoding.toUint8Array(enc)); });
       await Promise.race([synced, sleep(10000).then(() => { throw new Error('no sync step 2'); })]);
-      expect(JSON.stringify(client.getXmlFragment('prosemirror').toJSON())).toContain('Hello from the file.');
+      expect(docJSON(client)).toContain('Hello from the file.');
       ws.close();
       // a big document: what the client lacks is encoded by the worker — the same update
       const pars = Array.from({ length: 1200 }, (_, i) => `Paragraph ${i} of a long thesis, with $x_${i}$ and some words to make it longer than it is.`);
@@ -391,9 +402,9 @@ describe('a client connecting while its document opens', () => {
       const viaWorker = await big.missingFor(sv);
       const other = new Y.Doc();
       Y.applyUpdate(other, viaWorker);
-      expect(other.getXmlFragment('prosemirror').toJSON()).toBe(big.fragment.toJSON());
+      expect(docJSON(other)).toBe(docJSON(big.ydoc));
       const client2 = new Y.Doc();
-      const ws2 = new WebSocket(`ws://127.0.0.1:${port}/ws?doc=${encodeURIComponent('u/wsopen/big.tex')}`, { headers: { cookie: `ol_session=${signSession(toSessionUser(user))}` } });
+      const ws2 = new WebSocket(`ws://127.0.0.1:${port}/ws?doc=${encodeURIComponent('u/wsopen/big.tex')}&model=2`, { headers: { cookie: `ol_session=${signSession(toSessionUser(user))}` } });
       ws2.binaryType = 'arraybuffer';
       const synced2 = new Promise<void>((resolve) => {
         ws2.on('message', (data: ArrayBuffer) => {
@@ -404,7 +415,7 @@ describe('a client connecting while its document opens', () => {
       });
       ws2.on('open', () => { const enc = encoding.createEncoder(); encoding.writeVarUint(enc, 0); syncProtocol.writeSyncStep1(enc, client2); ws2.send(encoding.toUint8Array(enc)); });
       await Promise.race([synced2, sleep(20000).then(() => { throw new Error('no sync step 2 for the big document'); })]);
-      expect(client2.getXmlFragment('prosemirror').toJSON()).toBe(big.fragment.toJSON());
+      expect(docJSON(client2)).toBe(docJSON(big.ydoc));
       ws2.close();
     } finally {
       manager.open = open;

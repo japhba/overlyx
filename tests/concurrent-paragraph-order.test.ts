@@ -185,7 +185,7 @@ for (const pendingMoves of [false, true]) it(`a moved live bound does not revers
       expect(final.indexOf(formula)).toBeLessThan(final.indexOf(right));
     }
   } finally {
-    for (const peer of net.peers) { peer.view.destroy(); peer.pendingMoves?.destroy(); peer.ydoc.destroy(); }
+    for (const peer of net.peers) { peer.view.destroy(); peer.ydoc.destroy(); }
     net.server.destroy();
   }
 });
@@ -216,7 +216,7 @@ for (const pendingMoves of [false, true]) it(`an earlier concurrent prefix sorts
       expect(final.indexOf(formula)).toBeLessThan(final.indexOf(right));
     }
   } finally {
-    for (const peer of net.peers) { peer.view.destroy(); peer.pendingMoves?.destroy(); peer.ydoc.destroy(); }
+    for (const peer of net.peers) { peer.view.destroy(); peer.ydoc.destroy(); }
     net.server.destroy();
   }
 });
@@ -268,7 +268,7 @@ for (const pendingMoves of [false, true]) it(`a repair copy before a later middl
       `${words(4, 30)} $x^2$ ${words(4, 34)}`,
     ]);
   } finally {
-    for (const peer of net.peers) { peer.view.destroy(); peer.pendingMoves?.destroy(); peer.ydoc.destroy(); }
+    for (const peer of net.peers) { peer.view.destroy(); peer.ydoc.destroy(); }
     net.server.destroy();
   }
 });

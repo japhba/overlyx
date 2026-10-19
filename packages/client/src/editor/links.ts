@@ -96,7 +96,7 @@ export function hrefParams(url: string, name: string, literal = false): string[]
   return p;
 }
 
-/** Font marks as an inline node's `marks` attr (y-prosemirror keeps no marks on non-text nodes: schema.ts). */
+/** Font marks as an inline node's `marks` attr (inline nodes keep their fonts there: schema.ts). */
 const fontAttr = (marks: readonly Mark[]) => JSON.stringify(marks.filter(m => (FONT_KEYS as readonly string[]).includes(m.type.name)).map(m => ({ type: m.type.name, attrs: m.attrs })));
 /** …and back: the font of a hyperlink inset for the text that replaces it */
 function fontOf(node: PMNode): Mark[] {

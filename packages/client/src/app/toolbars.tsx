@@ -10,7 +10,7 @@
 import { useEffect, useMemo, useRef } from 'preact/hooks';
 import type { EditorView } from 'prosemirror-view';
 import type { Mark } from 'prosemirror-model';
-import { undo, redo } from 'y-prosemirror';
+import { undo, redo } from '../editor/collab';
 import { llanglePreamble, hasLlangleSnippet, definesLlangle, columnWidthLength } from '@overlyx/core';
 import { api, type DocMeta } from '../api';
 import { setPref, type Prefs } from '../prefs';

@@ -28,8 +28,8 @@ import { sha1, metaOf, lyxDocumentOf, renderDoc, renderModel, parseFor, mergeFil
 import { DocWorkers, WorkerGone, MirrorLost, type SyncEntry } from './docpool.ts';
 import { documentMeta, type DocumentMeta } from './docmeta.ts';
 import { applyTrackedSource, applyPlainSource, applySyncedSource, restoreSource, foldEdits, replaceInSource, type EditableDoc, type TrackedResult } from './docedit.ts';
-import { MoveRepair } from './moves.ts';
-import { MOVES_ORIGIN } from '@overlyx/core/moves.ts';
+import { convertModel1, model1Document } from './collabdoc.ts';
+import { mergeLyx, pmToLyxBody, writeParagraphs, type Paragraph } from '@overlyx/core';
 
 export type { SourceSpan, DocMeta };
 export { readTextFile, looksLikeDocument };
@@ -91,13 +91,9 @@ export class OpenDoc implements DocState, EditableDoc {
   /** dropped from memory: work still under way is discarded */
   disposed = false;
 
-  /** paragraph splits and joins: what others typed meanwhile into the originals is moved after the copies (moves.ts) */
-  readonly moves: MoveRepair;
-
   constructor(public id: string, public project: string, public relPath: string, public absPath: string) {
     this.awareness = new awarenessProtocol.Awareness(this.ydoc);
     this.awareness.setLocalState(null);
-    this.moves = new MoveRepair(this.ydoc, { ttlDays: config.moveRecordDays, log: (...a) => console.error(`[moves] ${id}:`, ...a) });
   }
 
   /** updates are counted and go to the worker's mirror (trackUpdates) */
@@ -115,7 +111,6 @@ export class OpenDoc implements DocState, EditableDoc {
     });
   }
 
-  get fragment(): Y.XmlFragment { return this.ydoc.getXmlFragment('prosemirror'); }
   get meta(): Y.Map<string> { return this.ydoc.getMap<string>('meta'); }
 
   /** the whole-document work runs in a document worker (else here) */
@@ -398,7 +393,6 @@ export class OpenDoc implements DocState, EditableDoc {
     this.applyMirrorUpdate(r.update, 'file-load', r.knew);
     if (quiet) {
       this.markSaved();
-      // (unless the repair of paragraph moves changed something after it: the worker's text is from before)
       if (r.rendered && this.updateSeq === seq + (r.update ? 1 : 0)) this.prepared = { seq: this.updateSeq, base: t, r: r.rendered };
     }
     if (base !== null && r.dirty) this.dirty = true;   // ours differs from the disk: write it
@@ -555,22 +549,12 @@ export class OpenDoc implements DocState, EditableDoc {
   private applyWorkerUpdate(update: Uint8Array | null, origin: string, seq: number, knew?: Uint8Array): boolean {
     const quiet = this.updateSeq === seq;
     this.applyMirrorUpdate(update, origin, knew);
-    // and no repair of paragraph moves after it (the worker's text is from before that)
     return quiet && this.updateSeq === seq + (update ? 1 : 0);
   }
 
-  /**
-   * An update the worker made on its mirror of the document (`knew`: the state vector it had):
-   * through the repair of paragraph moves, as the server's own diff. Before the document is
-   * registered (trackUpdates), what the repair changes goes to the mirror here: later updates
-   * would wait for it there.
-   */
-  applyMirrorUpdate(update: Uint8Array | null, origin: string, knew?: Uint8Array): void {
-    if (!update) return;
-    const repairs = this.tracking ? null : (u: Uint8Array, o: unknown) => { if (o === MOVES_ORIGIN && this.wsync.slot >= 0) this.wsync.pending.push(u); };
-    if (repairs) this.ydoc.on('update', repairs);
-    try { this.moves.receive(update, origin, { step2: false, knows: knew ? Y.decodeStateVector(knew) : null, server: true }); }
-    finally { if (repairs) this.ydoc.off('update', repairs); }
+  /** An update the worker made on its mirror of the document (`knew`: the state vector it had then). */
+  applyMirrorUpdate(update: Uint8Array | null, origin: string, _knew?: Uint8Array): void {
+    if (update) Y.applyUpdate(this.ydoc, update, origin);
   }
 
   /**
@@ -593,6 +577,19 @@ export class OpenDoc implements DocState, EditableDoc {
       this.applyWorkerUpdate(r.update, origin, seq, r.knew);
       return r.warnings;
     });
+  }
+
+  /**
+   * Offline edits of an old local copy (DocManager.legacyMerge): what changed from `base` to
+   * `theirs` merged into the document as it is now, three-way.
+   */
+  async mergeLegacy(base: Paragraph[], theirs: Paragraph[]): Promise<void> {
+    await this.exclusive(async () => {
+      const ours = this.toLyxDocument();
+      const merged = mergeLyx({ ...ours, body: base }, ours, { ...ours, body: theirs });
+      this.loadFromLyx(merged, 'legacy-merge');
+    });
+    this.scheduleSave();
   }
 
   /**
@@ -723,6 +720,28 @@ export type AgentEditSource = { after: string } | { replace: { oldText: string; 
 
 /** The open documents by id, for including a child document's live state. */
 const openDocs = (id: string): OpenDoc | undefined => manager.docs.get(id);
+
+/* ---------------------------------------- the old states of documents converted to model 2 */
+
+db.exec(`CREATE TABLE IF NOT EXISTS ydocs_model1 (
+  id TEXT PRIMARY KEY,
+  state BLOB NOT NULL,
+  converted_at INTEGER NOT NULL
+)`);
+/** how long the old states are kept for local copies to come back (days) */
+const MODEL1_KEEP_DAYS = 45;
+
+function keepModel1State(id: string, state: Uint8Array): void {
+  db.prepare('INSERT INTO ydocs_model1 (id, state, converted_at) VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state, converted_at=excluded.converted_at').run(id, Buffer.from(state), Date.now());
+  db.prepare('DELETE FROM ydocs_model1 WHERE converted_at < ?').run(Date.now() - MODEL1_KEEP_DAYS * 86400000);
+}
+function model1State(id: string): Uint8Array | null {
+  const row = db.prepare('SELECT state FROM ydocs_model1 WHERE id = ?').get(id) as { state: Buffer } | undefined;
+  return row ? new Uint8Array(row.state) : null;
+}
+function updateModel1State(id: string, state: Uint8Array): void {
+  db.prepare('UPDATE ydocs_model1 SET state = ? WHERE id = ?').run(Buffer.from(state), id);
+}
 
 /**
  * Run `op` for `doc` in the document worker of its project — the worker's mirrors of the
@@ -998,8 +1017,9 @@ export class DocManager {
     doc.fileHash = hash;
     doc.fileText = text;
     knownHashes.set(absPath, hash);
-    const row = db.prepare('SELECT state, file_hash, epoch FROM ydocs WHERE id = ?').get(id) as DbState | undefined;
+    let row = db.prepare('SELECT state, file_hash, epoch FROM ydocs WHERE id = ?').get(id) as DbState | undefined;
     if (!row) return this.openFresh(doc, text);
+    row = this.convertStored(id, row);
     const ok = await this.loadStored(doc, text, row);
     if (!ok) { doc.dispose(); doc.ydoc.destroy(); return this.openFresh(doc, text); }
     doc.markSaved();
@@ -1035,6 +1055,56 @@ export class DocManager {
       console.error(`[docs] ${doc.id}: loading the stored state failed`, e);
       return false;
     }
+  }
+
+  /**
+   * A state stored in the CRDT's model 1 (y-prosemirror's tree, before 20 Oct 2026) converted to
+   * model 2 (collabdoc.ts): a fresh history (a new epoch — local copies of the old one are merged by
+   * legacyMerge instead), the old state kept for them. A state that is model 2 already is returned
+   * as it is.
+   */
+  private convertStored(id: string, row: DbState): DbState {
+    let converted: Uint8Array | null;
+    try { converted = convertModel1(new Uint8Array(row.state)); } catch (e) { console.error(`[docs] ${id}: converting the stored state failed — the file is loaded instead`, e); return { ...row, state: Buffer.alloc(0) } as DbState; }
+    if (!converted) return row;
+    keepModel1State(id, new Uint8Array(row.state));
+    const epoch = crypto.randomBytes(8).toString('hex');
+    db.prepare('UPDATE ydocs SET state = ?, epoch = ?, updated_at = ? WHERE id = ?').run(Buffer.from(converted), epoch, Date.now(), id);
+    console.log(`[docs] ${id}: stored state converted to model 2 (${row.state.length} → ${converted.length} bytes)`);
+    return { ...row, state: Buffer.from(converted), epoch } as DbState;
+  }
+
+  /**
+   * A local copy an editor of model 1 kept (its whole Yjs state, client editor/legacycopy.ts): what
+   * it has beyond the old state the server kept (its offline edits) is merged into the document three-
+   * way, as a change of the file is; the old state then includes them (a second copy merges against
+   * that). Without the old state (converted long ago, or never stored) the copy is kept as a version.
+   */
+  async legacyMerge(id: string, copy: Uint8Array, author: string): Promise<{ merged: boolean; reason?: string }> {
+    const doc = await this.open(id);
+    if (!(doc instanceof OpenDoc) || doc instanceof BoardDoc || doc instanceof HtmlDoc) return { merged: false, reason: 'not a text document' };
+    const kept = model1State(id);
+    if (!kept) {
+      const { pm } = model1Document(copy);
+      const lyx = { ...doc.toLyxDocument(), body: pmToLyxBody(pm) };
+      const text = renderModel(doc, lyx, openDocs).text;
+      await this.createVersion(id, `offline changes by ${author} (not merged)`, author, 'offline', text);
+      return { merged: false, reason: 'kept as a version' };
+    }
+    const base = new Y.Doc({ gc: false });
+    try {
+      Y.applyUpdate(base, kept);
+      const before = Y.snapshot(base);
+      const baseDoc = model1Document(Y.encodeStateAsUpdate(base)).pm;
+      Y.applyUpdate(base, copy);
+      if (Y.equalSnapshots(before, Y.snapshot(base))) return { merged: false, reason: 'nothing new' };
+      const theirsPm = model1Document(Y.encodeStateAsUpdate(base)).pm;
+      if (writeParagraphs(pmToLyxBody(theirsPm)) === writeParagraphs(pmToLyxBody(baseDoc))) { updateModel1State(id, Y.encodeStateAsUpdate(base)); return { merged: false, reason: 'nothing new' }; }
+      await doc.mergeLegacy(pmToLyxBody(baseDoc), pmToLyxBody(theirsPm));
+      updateModel1State(id, Y.encodeStateAsUpdate(base));
+      console.log(`[docs] ${id}: merged a model-1 local copy's offline edits (${author})`);
+      return { merged: true };
+    } finally { base.destroy(); }
   }
 
   private openBoardCold(id: string, project: string, relPath: string, absPath: string): BoardDoc {
@@ -1132,9 +1202,6 @@ export class DocManager {
   private register(doc: OpenDoc): void {
     this.docs.set(doc.id, doc);
     doc.trackUpdates();
-    // records older than the retention period go (their originals are collected when it is next
-    // loaded); after trackUpdates, so that the worker's mirror, which the state is persisted from, drops them too
-    try { doc.moves.prune(); } catch (e) { console.error('[moves] pruning failed', doc.id, e); }
     doc.ydoc.on('update', (_u: Uint8Array, origin: unknown) => {
       if (origin === 'file-load' || origin === 'db') return;
       // updates from the WebSocket carry the connection as origin: remember who edited

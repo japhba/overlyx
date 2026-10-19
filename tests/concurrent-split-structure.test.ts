@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { expect, it } from 'vitest';
+import { closeHistory } from 'prosemirror-history';
 import * as Y from 'yjs';
-import { ySyncPluginKey } from 'y-prosemirror';
 import { TextSelection } from 'prosemirror-state';
 import { Net, par, text, math, emph, type Peer } from './yjs-net';
 
@@ -75,25 +75,25 @@ for (const delivery of ['split-first', 'join-first', 'restart'] as const) {
 
 it('retains explicit deletion and its Undo mapping in a recovered split suffix', () => {
   const net = new Net(content), a = net.peer('a', 100), b = net.peer('b', 200);
-  let undo: Y.UndoManager | undefined;
   try {
     act(net, () => a.joinAt('TAIL'));
     splitOffline(net, b);
-    undo = new Y.UndoManager(b.ydoc.getXmlFragment('prosemirror'), { trackedOrigins: new Set([ySyncPluginKey]) });
+    // (a new undo step: b's offline edits before it are not undone)
+    b.view.dispatch(closeHistory(b.view.state.tr));
     act(net, () => { const at = b.find('END '); b.select(at, at + 4); b.view.dispatch(b.view.state.tr.deleteSelection()); });
     net.send(a);
     net.online(b);
     expect(clean(net)).toEqual(['INTRO', 'START', 'MIDDLE', 'OMEGA $u^3$ SIGMA TAIL']);
-    act(net, () => undo!.undo());
+    act(net, () => { b.undo(); });
     expect(clean(net)).toEqual(['INTRO', 'START', 'MIDDLE', 'OMEGA $u^3$ SIGMA END TAIL']);
-    act(net, () => undo!.redo());
+    act(net, () => { b.redo(); });
     expect(clean(net)).toEqual(['INTRO', 'START', 'MIDDLE', 'OMEGA $u^3$ SIGMA TAIL']);
     for (const peer of net.peers) {
       expect(peer.formulas()).toEqual(['u^3']);
       expect(peer.marked('emph')).toBe('OMEGA');
       expect(peer.marked('series')).toBe('SIGMA');
     }
-  } finally { undo?.destroy(); close(net); }
+  } finally { close(net); }
 });
 
 for (const bold of [true, false]) {

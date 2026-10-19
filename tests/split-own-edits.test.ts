@@ -1,24 +1,15 @@
 // @vitest-environment happy-dom
 /**
- * One's own paragraph splits, joins and inline insertions, with nobody else editing: the server's
- * repair of moves (server/moves.ts) must leave them alone, and Ctrl+Z must undo them.
- *
- * - Enter right after (or before) a formula or a quote in a paragraph loaded from the file: the unit
- *   after the split point has the moved unit as its Yjs origin, and the repair took it for a late
- *   edit — the rest of the paragraph went back into the first half, an empty paragraph below it.
- *   Records now carry what their author had (`sv`).
- * - "abc" typed with smart quotes into a run: the closing quote's run split re-examined the opening
- *   quote (the author's own item next to its earlier copies) and moved it to the end of the paragraph.
- * - Ctrl+Z after Enter: the server restated the editor's record, the editor followed it to its own
- *   copies (followMoves) — undo then restored the originals as the copies it was deleting, and the
- *   paragraph lost its first half.
+ * One's own paragraph splits, joins and inline insertions, with nobody else editing: they stay as
+ * they were made, and Ctrl+Z undoes them. (Scenarios from the CRDT's model 1, whose server-side
+ * repair of moves once took such edits for late ones: Enter right after or before a formula or a
+ * quote, smart quotes typed into a run, undo after Enter. Model 2 moves nothing and repairs nothing.)
  */
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
-import { ySyncPluginKey } from 'y-prosemirror';
+import { closeHistory } from 'prosemirror-history';
 import { schema } from '@overlyx/core';
 import { Net, par, text, math, type Json, type Peer } from './yjs-net';
-import { encodeRecord, decodeRecord, sawBefore } from '../packages/core/src/moves';
 
 const quote = (kind: string): Json => ({ type: 'quotes', attrs: { kind } });
 const bold = [{ type: 'series', attrs: { value: 'bold' } }];
@@ -35,11 +26,11 @@ const why = () => ({
 });
 const loss = () => ({ type: 'doc', content: [par(text('The loss '), math('L'), text(' is minimised over '), math('\\theta'), text(' by gradient descent.')), par(text('Next.'))] });
 
-/** an editor with y-prosemirror's undo manager (yUndoPlugin tracks the sync plugin's origin) */
-function editor(doc: Json, repair = true): { net: Net; a: Peer; um: Y.UndoManager } {
-  const net = new Net(doc, { repair });
+/** an editor and its undo (ProseMirror's history, editor/collab.ts) */
+function editor(doc: Json): { net: Net; a: Peer; um: { undo(): void; redo(): void; stopCapturing(): void } } {
+  const net = new Net(doc);
   const a = net.peer('a', 200);
-  const um = new Y.UndoManager(a.ydoc.getXmlFragment('prosemirror'), { trackedOrigins: new Set([ySyncPluginKey]) });
+  const um = { undo: () => { a.undo(); }, redo: () => { a.redo(); }, stopCapturing: () => { a.view.dispatch(closeHistory(a.view.state.tr)); } };
   return { net, a, um };
 }
 
@@ -74,10 +65,10 @@ describe('smart quotes typed into a run', () => {
 });
 
 describe('undo of one\'s own split or join', () => {
-  for (const repair of [true, false]) {
-    describe(repair ? 'with the server repair' : 'without it', () => {
+  {
+    {
       it('Enter near the start, undo, redo, undo', () => {
-        const { net, a, um } = editor(testing(), repair);
+        const { net, a, um } = editor(testing());
         a.enter(a.find('sting effects'));
         expect(net.converged()).toEqual(['te', 'sting effects (testing things enhances memory more than $x$ rereading)', 'Next paragraph.']);
         um.undo();
@@ -89,7 +80,7 @@ describe('undo of one\'s own split or join', () => {
       });
 
       it('Enter near the end (the second half moves), undo', () => {
-        const { net, a, um } = editor(testing(), repair);
+        const { net, a, um } = editor(testing());
         a.enter(a.find('ading)'));
         expect(net.converged()).toEqual(['testing effects (testing things enhances memory more than $x$ rere', 'ading)', 'Next paragraph.']);
         um.undo();
@@ -97,7 +88,7 @@ describe('undo of one\'s own split or join', () => {
       });
 
       it('Enter, typing in the new paragraph, undo twice', () => {
-        const { net, a, um } = editor(testing(), repair);
+        const { net, a, um } = editor(testing());
         a.enter(a.find('things'));
         net.flush();
         um.stopCapturing();
@@ -110,7 +101,7 @@ describe('undo of one\'s own split or join', () => {
       });
 
       it('typing, Enter in the typed text, undo twice', () => {
-        const { net, a, um } = editor(testing(), repair);
+        const { net, a, um } = editor(testing());
         a.type('XYZ ', a.find('rereading'));
         net.flush();
         um.stopCapturing();
@@ -124,7 +115,7 @@ describe('undo of one\'s own split or join', () => {
       });
 
       it('a join (Backspace at the start of a paragraph), undo', () => {
-        const { net, a, um } = editor(testing(), repair);
+        const { net, a, um } = editor(testing());
         a.joinAt('Next paragraph');
         expect(net.converged()).toEqual([TESTING + 'Next paragraph.']);
         um.undo();
@@ -133,29 +124,13 @@ describe('undo of one\'s own split or join', () => {
 
       for (const [label, at] of [['right after a quote', (a: Peer) => a.find('practice')], ['before a quote', (a: Peer) => a.find('observing') - 1]] as const) {
         it(`Enter ${label} in a paragraph with quotes and bold, undo`, () => {
-          const { net, a, um } = editor(why(), repair);
+          const { net, a, um } = editor(why());
           a.enter(at(a));
           net.flush();
           um.undo();
           expect(net.converged()).toEqual([WHY, 'Next paragraph.']);
         });
       }
-    });
+    }
   }
-});
-
-describe('move records', () => {
-  const base = { t: 1, server: false, size: 2, protect: [Y.createID(1, 1)], adopt: [], entries: [1, 2, 2, 1, 200, 6] };
-  it('carry what their author had; records without it still read', () => {
-    const sv = new Map([[1, 230], [7, 3]]);
-    const r = decodeRecord('c200-9', encodeRecord({ ...base, sv }))!;
-    expect(r.entries).toEqual(base.entries);
-    expect([...r.sv!]).toEqual([...sv]);
-    expect(sawBefore(r, Y.createID(1, 229))).toBe(true);
-    expect(sawBefore(r, Y.createID(1, 230))).toBe(false);
-    expect(sawBefore(r, Y.createID(9, 0))).toBe(false);
-    const old = decodeRecord('c200-9', encodeRecord(base))!;
-    expect(old.sv).toBeUndefined();
-    expect(sawBefore(old, Y.createID(1, 0))).toBe(false);
-  });
 });

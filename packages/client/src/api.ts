@@ -319,6 +319,8 @@ export const api = {
   texMap: (id: string) => req<{ text: string; spans: ({ start: number; end: number } | null)[] | null }>('GET', `/api/docs/${encId(id)}/tex?map=1`),
   /** replace the document by hand-edited LaTeX source */
   applySource: (id: string, text: string) => req<{ ok: boolean; warnings: string[] }>('POST', `/api/docs/${encId(id)}/source`, { text }),
+  /** a local copy kept by an editor of the CRDT's old model (its whole Yjs state): what it has that the server lacks is merged in (editor/legacycopy.ts) */
+  legacyMerge: (id: string, state: Uint8Array) => req<{ merged: boolean; reason?: string }>('POST', `/api/docs/${encId(id)}/legacy-merge`, undefined, new Blob([state as unknown as BlobPart], { type: 'application/octet-stream' })),
   /** parse pasted LaTeX in the document's context: ProseMirror block JSON to insert */
   parseClip: (id: string, latex: string) => req<{ blocks: unknown[]; warnings: string[] }>('POST', `/api/docs/${encId(id)}/clip`, { latex }),
   header: (id: string) => req<{ headerLines: string[] }>('GET', `/api/docs/${encId(id)}/header`),

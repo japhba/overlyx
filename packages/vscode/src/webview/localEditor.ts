@@ -4,8 +4,9 @@ import { EditorView } from 'prosemirror-view';
 import { keymap } from 'prosemirror-keymap';
 import * as Y from 'yjs';
 import { Awareness } from 'y-protocols/awareness';
-import { ySyncPlugin, yCursorPlugin, yUndoPlugin, ySyncPluginKey, yUndoPluginKey, defaultDeleteFilter, undo, redo, initProseMirrorDoc, prosemirrorJSONToYXmlFragment } from 'y-prosemirror';
 import { schema, projectOfDoc, docDirOf } from '@overlyx/core';
+import { writeDocument } from '@overlyx/core/collab/index.ts';
+import { collabSync, cursorPlugin, undoPlugin, undo, redo } from '@client/editor/collab';
 import { assemblePlugins, editorViewProps, editorAttributes, dispatchTransactionProp, installEditorDom } from '@client/editor/assembly';
 import { isMarkdownDoc } from '@client/editor/markdown';
 import { inkPlugin } from '@client/editor/plugins/ink';
@@ -45,46 +46,22 @@ export function createLocalEditor(opts: LocalEditorOptions): LocalEditorHandle {
   let session = editorSessions.get(opts.docId);
   if (!session) {
     const ydoc = new Y.Doc();
-    const fragment = ydoc.getXmlFragment('prosemirror');
-    ydoc.transact(() => { prosemirrorJSONToYXmlFragment(schema, opts.pmDoc, fragment); }, EXTERNAL_ORIGIN);
+    ydoc.transact(() => { writeDocument(schema, ydoc, schema.nodeFromJSON(opts.pmDoc)); }, EXTERNAL_ORIGIN);
     const awareness = new Awareness(ydoc);
     awareness.setLocalStateField('user', { name: 'You', color: '#3b6ea5' });
-    const undoManager = new Y.UndoManager(fragment, {
-      trackedOrigins: new Set([ySyncPluginKey]),
-      deleteFilter: item => defaultDeleteFilter(item, new Set(['paragraph'])),
-      captureTransaction: tr => tr.meta.get('addToHistory') !== false,
-    });
-    session = { ydoc, awareness, undoManager, scrollTop: 0, headerLines: opts.headerLines, ledger: new SyncLedger(documentModel(opts.pmDoc, opts.headerLines)) };
+    session = { ydoc, awareness, scrollTop: 0, headerLines: opts.headerLines, ledger: new SyncLedger(documentModel(opts.pmDoc, opts.headerLines)) };
     editorSessions.set(opts.docId, session);
   }
-  const { ydoc, awareness, undoManager } = session;
-  const fragment = ydoc.getXmlFragment('prosemirror');
-
-  const { doc: initialDoc, mapping } = initProseMirrorDoc(fragment, schema);
+  const { ydoc, awareness } = session;
+  // the binding and the editor state (with its undo history) outlive a refreshed view
+  const collab = collabSync(ydoc, { binding: session.binding });
+  session.binding = collab.binding;
   let viewRef: EditorView | null = null;
 
   const sync: Plugin[] = [
-    ySyncPlugin(fragment, { mapping }),
-    yCursorPlugin(awareness),
-    new Plugin({
-      ...yUndoPlugin({ undoManager }).spec,
-      view: view => {
-        const binding = ySyncPluginKey.getState(view.state).binding;
-        for (const item of [...undoManager.undoStack, ...undoManager.redoStack]) {
-          if (session!.binding && item.meta.has(session!.binding)) {
-            item.meta.set(binding, item.meta.get(session!.binding));
-            item.meta.delete(session!.binding);
-          }
-        }
-        session!.binding = binding;
-        type StackItem = Y.UndoManager['undoStack'][number];
-        const added = ({ stackItem }: { stackItem: StackItem }) => { stackItem.meta.set(binding, yUndoPluginKey.getState(view.state)!.prevSel); };
-        const popped = ({ stackItem }: { stackItem: StackItem }) => { binding.beforeTransactionSelection = stackItem.meta.get(binding) || binding.beforeTransactionSelection; };
-        undoManager.on('stack-item-added', added);
-        undoManager.on('stack-item-popped', popped);
-        return { destroy() { undoManager.off('stack-item-added', added); undoManager.off('stack-item-popped', popped); } };
-      },
-    }),
+    collab.plugin,
+    cursorPlugin(awareness),
+    undoPlugin(),
     keymap({ 'Mod-z': undo, 'Mod-y': redo, 'Mod-Z': redo, 'Shift-Mod-z': redo }),
   ];
   const plugins = assemblePlugins({
@@ -97,7 +74,7 @@ export function createLocalEditor(opts: LocalEditorOptions): LocalEditorHandle {
     },
   });
 
-  const state = EditorState.create({ schema, doc: initialDoc, plugins });
+  const state = session.state ? session.state.reconfigure({ plugins }) : EditorState.create({ schema, doc: collab.doc, plugins });
   const readOnly = () => opts.readOnly?.() ?? false;
   const attributes = (prefs: { spellcheck: boolean; spellEngine: string }) => ({ ...editorAttributes(opts.child ?? false, prefs), 'data-doc-id': opts.docId, 'data-project': projectOfDoc(opts.docId), 'data-doc-dir': docDirOf(opts.docId) });
   const view: EditorView = new EditorView(opts.container, {
@@ -122,7 +99,7 @@ export function createLocalEditor(opts: LocalEditorOptions): LocalEditorHandle {
       const merged = mergeModels(session!.ledger.baseFor(ack), local, incoming);
       session!.ledger.applied(incoming);
       session!.headerLines = merged.headerLines;
-      ydoc.transact(() => { prosemirrorJSONToYXmlFragment(schema, merged.pmDoc, fragment); }, EXTERNAL_ORIGIN);
+      ydoc.transact(() => { writeDocument(schema, ydoc, schema.nodeFromJSON(merged.pmDoc)); }, EXTERNAL_ORIGIN);
       return merged.headerLines;
     },
     takeUpdate(headerLines: string[]) {
@@ -135,10 +112,11 @@ export function createLocalEditor(opts: LocalEditorOptions): LocalEditorHandle {
     },
     destroy(preserveSession = false) {
       session!.selection = view.state.selection.toJSON();
+      session!.state = view.state;
       unsubscribePrefs();
       view.destroy();
       if (!preserveSession) {
-        undoManager.destroy();
+        collab.destroy();
         awareness.destroy();
         ydoc.destroy();
         editorSessions.delete(opts.docId);
