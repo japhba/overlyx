@@ -202,7 +202,9 @@ systemd-run --quiet --wait --pipe --collect -p User="$MAINT" -p Group="$MAINT" -
     codex sandbox -- /bin/true >/dev/null 2>&1 || exit 5' && ok "the worker's unit sandbox: runner bound in, Codex sandbox works, /root /home /mnt hidden" \
   || bad "the worker's unit sandbox (exit $?: 3 runner missing, 4 a hidden path visible, 5 Codex's sandbox fails)"
 for u in "$DEV" "$MAINT"; do
-  as "$u" ssh -o BatchMode=yes -T git@github.com 2>&1 | grep -q "successfully authenticated" && ok "$u pushes to $REPO" || bad "$u: no GitHub access over ssh"
+  # (ssh -T always exits 1 at GitHub: judge its greeting, not its status — pipefail would)
+  greeting=$(as "$u" ssh -o BatchMode=yes -T git@github.com 2>&1 || true)
+  grep -q "successfully authenticated" <<<"$greeting" && ok "$u pushes to $REPO" || bad "$u: no GitHub access over ssh ($greeting)"
 done
 [ "$fail" = 0 ] || { echo; echo "some checks failed (above)" >&2; exit 1; }
 
