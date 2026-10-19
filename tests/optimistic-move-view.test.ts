@@ -95,7 +95,7 @@ it('reloading a local draft under a new client ID acknowledges its previous clie
     b.joinAt('w020'); b.typeBefore('w018', 'DRAFT ');
     // The browser closes before its outbox is sent; IndexedDB holds these bytes.
     const cached = Y.encodeStateAsUpdate(b.ydoc);
-    b.online = false; b.outbox = []; b.inbox = [];
+    b.online = false; b.outbox = []; b.outKnows = []; b.inbox = [];
     c.enterBefore('w013'); net.flush();
     const reopened = new Peer(net, 'reopened', 400, cached); net.peers.push(reopened);
     expect(reopened.pendingMoves?.waiting).toBe(true);

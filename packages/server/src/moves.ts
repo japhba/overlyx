@@ -20,6 +20,14 @@
  * The repaired items are recorded too (in the server's record), so a repair is never made twice and
  * later edits of a repaired item follow it. Only the update's own items, the units it deleted and
  * the records it brought are looked at.
+ *
+ * Live text is moved (the second point, the paragraphs reordered after it, a stale join's cut
+ * restored) only for an update that is concurrent with something: its sender had not been sent all
+ * that the server had in the paragraphs it touched (`concurrent`). Those parts of the repair go by
+ * Yjs origins and text provenance, and with nothing concurrent to repair they moved established text
+ * — 18–19 Oct 2026, cosyne_27/main.tex, one person editing alone: inserting a comment moved a
+ * sentence into the paragraph above, an Enter moved two formulas into a heading. The rest acts only
+ * on what landed in, or was done to, deleted originals, which nobody does knowingly.
  */
 import * as Y from 'yjs';
 import {
@@ -39,6 +47,14 @@ interface Incoming {
   knows: Map<number, number> | null;
   /** the server's own diff (a file changed on disk, an agent's edit), made on a mirror of the document */
   server: boolean;
+  /**
+   * What the server had sent the sender, at most (per client the highest clock that went out on its
+   * connection; the server's own diff: what its mirror held). With `knows` and what the update
+   * carries, an upper bound of what the sender can have had when it made the update — a client
+   * learns of others' edits only from the server. Undefined: not tracked (every update counts as
+   * concurrent, as before).
+   */
+  sent?: Map<number, number> | null;
   ds?: Ranges;
   had?: Map<number, number>;
 }
@@ -90,8 +106,8 @@ export class MoveRepair {
    * server's sync step 1, with the state vector of its own step 1 (`knows`). `server`: the server's
    * own diff made on a mirror of the document (docs.ts applyMirrorUpdate), `knows` what that held.
    */
-  receive(update: Uint8Array, origin: unknown, info: { step2: boolean; knows?: Map<number, number> | null; server?: boolean }): void {
-    this.incoming = { origin, update, step2: info.step2, knows: info.knows ?? null, server: !!info.server };
+  receive(update: Uint8Array, origin: unknown, info: { step2: boolean; knows?: Map<number, number> | null; server?: boolean; sent?: Map<number, number> | null }): void {
+    this.incoming = { origin, update, step2: info.step2, knows: info.knows ?? null, server: !!info.server, sent: 'sent' in info ? info.sent : info.server ? info.knows ?? undefined : undefined };
     try { Y.applyUpdate(this.ydoc, update, origin); } finally { this.incoming = null; }
   }
 
@@ -236,6 +252,57 @@ class Work {
   }
 
   private isNew(id: Y.ID): boolean { return id.clock >= (this.tr.beforeState.get(id.client) ?? 0); }
+
+  private concurrentCache: boolean | null = null;
+  /**
+   * The update was made without something the server already had in the paragraphs it touched (that
+   * it put text into or took text from, or that its records copied from or to), or among the
+   * paragraphs beside a paragraph it made: only then can anything in it be a late edit, or anything
+   * there be late for it. Unknown what the sender had: concurrent.
+   */
+  get concurrent(): boolean {
+    if (this.concurrentCache !== null) return this.concurrentCache;
+    return this.concurrentCache = this.findConcurrent();
+  }
+  private findConcurrent(): boolean {
+    const inc = this.inc;
+    if (!inc) return !this.tr.local;
+    if (inc.sent == null) return true;
+    const had = carried(inc), sent = inc.sent, knows = inc.knows;
+    const lacked = (id: Y.ID) => !this.isNew(id) && !((sent.get(id.client) ?? 0) > id.clock || (knows?.get(id.client) ?? 0) > id.clock || (had.get(id.client) ?? 0) > id.clock);
+    const conts = new Set<Y.XmlElement>(), parents = new Set<Y.XmlFragment | Y.XmlElement>();
+    const note = (it: Y.Item) => {
+      const c = containerOf(it, this.repair.containerNames);
+      if (c) conts.add(c);
+      const t = typeOf(it);
+      if (t instanceof Y.XmlElement && this.repair.containerNames.has(t.nodeName) && it.parent instanceof Y.AbstractType) parents.add(it.parent as Y.XmlElement);
+    };
+    for (const [client, after] of this.tr.afterState) {
+      const from = this.tr.beforeState.get(client) ?? 0;
+      if (after > from) forEachStruct(this.doc, client, from, after, note);
+    }
+    this.deletedInT.forEach((client, clock, len) => forEachStruct(this.doc, client, clock, clock + len, note));
+    const map = this.doc.getMap<unknown>(MOVES_MAP);
+    for (const k of this.tr.changed.get(map as unknown as Y.AbstractType<any>) ?? []) {
+      const r = typeof k === 'string' ? this.index.records.get(k) : undefined;
+      if (!r) continue;
+      for (let i = 0; i < r.entries.length; i += 6) {
+        forEachStruct(this.doc, r.entries[i], r.entries[i + 1], r.entries[i + 1] + r.entries[i + 2], note);
+        if (r.entries[i + 4] >= 0) forEachStruct(this.doc, r.entries[i + 4], r.entries[i + 5], r.entries[i + 5] + r.entries[i + 2], note);
+      }
+      for (const id of r.protect) forEachStruct(this.doc, id.client, id.clock, id.clock + 1, note);
+    }
+    for (const c of conts) {
+      if (c._item && lacked(c._item.id)) return true;
+      for (let ch = c._start; ch; ch = ch.right) {
+        if (lacked(ch.id)) return true;
+        const t = typeOf(ch);
+        if (t instanceof Y.XmlText) for (let it = t._start; it; it = it.right) if (lacked(it.id)) return true;
+      }
+    }
+    for (const p of parents) for (let ch = p._start; ch; ch = ch.right) if (lacked(ch.id)) return true;
+    return false;
+  }
   /** the sender deleted it itself (in the same update) */
   private explicit(client: number, clock: number): boolean {
     if (this.inc) return dsOf(this.inc).has(client, clock);
@@ -343,7 +410,7 @@ class Work {
         if (!skip) this.addPending({ item: it, off: k - it.id.clock, len: n });
         k += n;
       }
-    } else if (fresh && !(it.content instanceof Y.ContentFormat) && this.liveMisplaced({ item: it, off: a - it.id.clock, len: b - a })) {
+    } else if (fresh && !(it.content instanceof Y.ContentFormat) && this.concurrent && this.liveMisplaced({ item: it, off: a - it.id.clock, len: b - a })) {
       // a character of a live run: the run is re-created around it (no moved unit stays in a live run)
       if (it.parent instanceof Y.XmlText && it.parent._item) { this.dissolve.add(it.parent._item); this.misplaced.add(it); }
       else this.addPending({ item: it, off: 0, len: it.length });
@@ -352,6 +419,7 @@ class Work {
 
   /** live children of the paragraphs a record took units from that were inserted next to them before it arrived */
   private sourceNeighbours(): void {
+    if (!this.concurrent) return;
     const conts = new Set<Y.XmlElement>();
     this.adoptedSrc.forEach((client, clock, len) => forEachStruct(this.doc, client, clock, clock + len, it => { const c = containerOf(it, this.repair.containerNames); if (c && isLive(c)) conts.add(c); }));
     for (const c of conts) for (let ch = c._start; ch; ch = ch.right) if (!ch.deleted && !this.isNew(ch.id) && this.liveMisplaced({ item: ch, off: 0, len: 1 })) this.addPending({ item: ch, off: 0, len: 1 });
@@ -872,6 +940,7 @@ class Work {
   }
 
   private restoreNativeBoundaries(boundaries: NativeBoundary[]): void {
+    if (!this.concurrent) return;
     const ordered = [...boundaries].sort((first, second) => {
       const left = this.unitAt(first.left), right = this.unitAt(second.left);
       return left && right ? this.sourceOrder(left, right) ?? 0 : 0;
@@ -1647,6 +1716,7 @@ class Work {
 
   /** live children of the paragraphs this repair moved things out of, whose neighbour moved meanwhile: pending again */
   private followers(): boolean {
+    if (!this.concurrent) return false;
     const conts = new Set<Y.XmlElement>();
     const e = this.rec.entries;
     for (let i = 0; i < e.length; i += 6) {
@@ -2591,7 +2661,7 @@ class Work {
     }
     // the paragraphs this update made (an editor's new halves), and those holding the copies that won a
     // competition, find their place among the others
-    const moved = new Set<Y.Item>(this.newBlocks.filter(it => !it.deleted));
+    const moved = new Set<Y.Item>(this.concurrent ? this.newBlocks.filter(it => !it.deleted) : []);
     for (const k of this.winners) {
       const [c, cl] = k.split(':').map(Number);
       const u = this.unitAt(this.resolveId(Y.createID(c, cl)));
@@ -2614,6 +2684,7 @@ class Work {
 
   /** a paragraph the update made has others between its neighbours that its author did not see */
   concurrentBlocks(): boolean {
+    if (!this.concurrent) return false;
     return this.newBlocks.some(x => {
       if (x.deleted) return false;
       const right = x.rightOrigin ? this.unitAt(x.rightOrigin)?.item ?? null : null;

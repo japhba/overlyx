@@ -36,6 +36,14 @@ const MSG_PING = 4;
 /** an update that came from the embedded agent (origin 'mcp'), sent additionally under this type
  *  so clients can apply it with an undo-tracked origin (see editor.ts messageHandlers[5]) */
 const MSG_AGENT_EDIT = 5;
+/**
+ * OverLyX extension, client → server: what the editor had when it made the update that follows (per
+ * client the highest clock; only what changed since its last report on this connection). The repair
+ * of paragraph moves acts on an update only when it was made without something the server already
+ * had (moves.ts `concurrent`); for an editor that does not report it, the server can only assume
+ * that whatever it had sent it had arrived (`sentTo`).
+ */
+const MSG_KNOWS = 6;
 const HEARTBEAT_MS = 10000;
 
 function savedMessage(doc: OpenDoc): Uint8Array {
@@ -67,6 +75,22 @@ function closeConn(doc: OpenDoc, conn: WebSocket): void {
 const docHandlers = new WeakSet<OpenDoc>();
 /** the state vector each connection reported in its last sync step 1 */
 const knows = new WeakMap<WebSocket, Map<number, number>>();
+/**
+ * What the server has sent each connection, at most: per client the highest clock of the Yjs structs
+ * in the updates and sync step 2s that went out on it. A client learns of others' edits only from
+ * the server, so this, its sync step 1 and what it made itself bound what it can have had when it
+ * made an edit — the evidence on which the repair of paragraph moves acts (moves.ts provablyLate).
+ */
+const sentTo = new WeakMap<WebSocket, Map<number, number>>();
+/** connections sent something whose structs are not known (nothing then counts as unseen by them) */
+const sentUnknown = new WeakSet<WebSocket>();
+/** what each reporting editor had, as of its last MSG_KNOWS */
+const reported = new WeakMap<WebSocket, Map<number, number>>();
+function noteSent(conn: WebSocket, to: Map<number, number>): void {
+  let m = sentTo.get(conn);
+  if (!m) sentTo.set(conn, m = new Map());
+  for (const [client, clock] of to) if (clock > (m.get(client) ?? 0)) m.set(client, clock);
+}
 
 function ensureDocHandlers(doc: OpenDoc): void {
   if (docHandlers.has(doc)) return;
@@ -88,7 +112,12 @@ function ensureDocHandlers(doc: OpenDoc): void {
     encoding.writeVarUint(enc, MSG_SYNC);
     syncProtocol.writeUpdate(enc, update);
     const msg = encoding.toUint8Array(enc);
-    for (const c of doc.conns.keys()) send(doc, c, msg);
+    let to: Map<number, number> | null = null;
+    try { to = Y.parseUpdateMeta(update).to; } catch { to = null; }
+    for (const c of doc.conns.keys()) {
+      if (to) noteSent(c, to); else sentUnknown.add(c);
+      send(doc, c, msg);
+    }
   });
   doc.awareness.on('update', ({ added, updated, removed }: { added: number[]; updated: number[]; removed: number[] }, origin: unknown) => {
     const changed = added.concat(updated, removed);
@@ -205,8 +234,21 @@ async function handleConnection(conn: WebSocket, docId: string, user: SessionUse
             answerStep1(doc, conn, sv);
           } else if (!readOnly && (kind === syncProtocol.messageYjsSyncStep2 || kind === syncProtocol.messageYjsUpdate)) {
             // applied through the repair of paragraph moves (a viewer's are dropped: it only ever gets the document)
-            doc.moves.receive(decoding.readVarUint8Array(dec), conn, { step2: kind === syncProtocol.messageYjsSyncStep2, knows: knows.get(conn) ?? null });
+            // what its client had: for its step 2 (offline edits), its step 1; for a live update, its
+            // report, or at most what was sent to it
+            const step2 = kind === syncProtocol.messageYjsSyncStep2, known = knows.get(conn) ?? null;
+            const had = step2 ? known : reported.get(conn) ?? (sentUnknown.has(conn) ? null : sentTo.get(conn) ?? new Map());
+            doc.moves.receive(decoding.readVarUint8Array(dec), conn, { step2, knows: known, sent: had });
             if (kind === syncProtocol.messageYjsSyncStep2) releaseStep1(doc, conn);
+          }
+          break;
+        }
+        case MSG_KNOWS: {
+          let m = reported.get(conn);
+          if (!m) reported.set(conn, m = new Map());
+          for (let n = decoding.readVarUint(dec); n > 0; n--) {
+            const client = decoding.readVarUint(dec), clock = decoding.readVarUint(dec);
+            if (clock > (m.get(client) ?? 0)) m.set(client, clock);
           }
           break;
         }
@@ -297,6 +339,8 @@ function releaseStep1(doc: OpenDoc, conn: WebSocket): void {
 
 /** sync step 2: what the client with state vector `sv` lacks */
 function answerStep1(doc: OpenDoc, conn: WebSocket, sv: Uint8Array): void {
+  // all the server has (the worker's answer for a big document is from its mirror, which has no more)
+  noteSent(conn, Y.decodeStateVector(Y.encodeStateVector(doc.ydoc)));
   if (doc.bigForSync) {
     // what the client lacks of a big document (all of it, on its first visit) takes a while
     // to encode: the document worker does it, the answer is sent when it is ready

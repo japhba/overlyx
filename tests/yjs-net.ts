@@ -36,6 +36,8 @@ export class Peer {
   inbox: Uint8Array[] = [];
   /** this peer → server, not delivered yet */
   outbox: Uint8Array[] = [];
+  /** what this peer had when it made each of them (the editor reports it before each update, ws.ts MSG_KNOWS) */
+  outKnows: Map<number, number>[] = [];
   pendingMoves: PendingMoves | null = null;
   remoteUpdates: RemoteUpdates | null = null;
   constructor(public net: Net, public name: string, id: number, state: Uint8Array) {
@@ -49,7 +51,13 @@ export class Peer {
     const { doc, mapping } = initProseMirrorDoc(fragment, schema);
     const plugins = [ySyncPlugin(fragment, { mapping }), typingAnchorPlugin()];
     this.view = new EditorView(document.createElement('div'), { state: EditorState.create({ doc, plugins }) });
-    this.ydoc.on('update', (u: Uint8Array, origin: unknown) => { if (origin !== NET && this.online) this.outbox.push(u); });
+    this.ydoc.on('update', (u: Uint8Array, origin: unknown) => {
+      if (origin === NET || !this.online) return;
+      this.outbox.push(u);
+      const had = Y.decodeStateVector(Y.encodeStateVector(this.ydoc));
+      had.delete(this.ydoc.clientID);
+      this.outKnows.push(had);
+    });
   }
 
   /** text positions: the first occurrence of `needle` in a text node (offset into it) */
@@ -142,8 +150,10 @@ export class Net {
     return p;
   }
 
-  private toServer(p: Peer, u: Uint8Array, step2: boolean) {
-    if (this.repair) this.repair.receive(u, p, { step2, knows: step2 ? this.knows.get(p) ?? null : null });
+  /** `had`: what the peer had when it made a live update (step 2: its sync step 1 says) */
+  private toServer(p: Peer, u: Uint8Array, step2: boolean, had?: Map<number, number>) {
+    const knows = step2 ? this.knows.get(p) ?? null : null;
+    if (this.repair) this.repair.receive(u, p, { step2, knows, sent: step2 ? knows : had ?? null });
     else Y.applyUpdate(this.server, u, p);
   }
 
@@ -153,7 +163,12 @@ export class Net {
   }
 
   /** deliver one peer's queued updates to the server */
-  send(p: Peer) { const out = p.outbox; p.outbox = []; for (const u of out) this.toServer(p, u, false); }
+  send(p: Peer) {
+    const out = p.outbox, had = p.outKnows;
+    p.outbox = []; p.outKnows = [];
+    // (updates merged by a test: what was had when the first of them was made)
+    out.forEach((u, i) => this.toServer(p, u, false, had.length === out.length ? had[i] : had[0]));
+  }
   /** deliver what the server sent to one peer */
   receive(p: Peer) {
     const inb = p.inbox; p.inbox = [];

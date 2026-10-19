@@ -11,6 +11,7 @@ import { snapshotCovers, localWritesCommitted } from './savedstate';
 import { WebsocketProvider } from 'y-websocket';
 import { IndexeddbPersistence } from 'y-indexeddb';
 import * as decoding from 'lib0/decoding';
+import * as encoding from 'lib0/encoding';
 import * as syncProtocol from 'y-protocols/sync';
 import { PendingMoves } from '@overlyx/core/pendingmoves.ts';
 import { RemoteUpdates } from './remoteupdates';
@@ -161,6 +162,38 @@ export async function moveLocalCopies(ids: Record<string, string>): Promise<void
   }
 }
 
+/** OverLyX message type 6 (ws.ts MSG_KNOWS): what this editor had when it made the update that follows */
+const MSG_KNOWS = 6;
+
+/**
+ * Before each local change goes out, tell the server what this editor had (per client the highest
+ * clock, only what changed since the last report on this connection; the change itself follows on
+ * the same socket). The server repairs paragraph moves only in updates made without something it
+ * already had (server/moves.ts `concurrent`): without the report it has to assume that whatever it
+ * had sent had arrived, and two people typing in the same paragraph within a round trip would not
+ * be told apart from one person typing alone.
+ */
+function reportKnowledge(ydoc: Y.Doc, provider: WebsocketProvider): void {
+  let reported = new Map<number, number>();
+  provider.on('status', ({ status }: { status: string }) => { if (status === 'connected') reported = new Map(); });
+  ydoc.on('beforeTransaction', (tr: Y.Transaction) => {
+    const ws = provider.ws;
+    if (!tr.local || !provider.wsconnected || !ws || ws.readyState !== WebSocket.OPEN) return;
+    const changed: number[] = [];
+    for (const client of ydoc.store.clients.keys()) {
+      if (client === ydoc.clientID) continue;
+      const clock = Y.getState(ydoc.store, client);
+      if (clock > (reported.get(client) ?? 0)) { changed.push(client, clock); reported.set(client, clock); }
+    }
+    if (!changed.length) return;
+    const enc = encoding.createEncoder();
+    encoding.writeVarUint(enc, MSG_KNOWS);
+    encoding.writeVarUint(enc, changed.length / 2);
+    for (const n of changed) encoding.writeVarUint(enc, n);
+    try { ws.send(encoding.toUint8Array(enc)); } catch { /* the update that follows is not sent either */ }
+  });
+}
+
 export function createEditor(opts: EditorOptions): EditorHandle {
   const ydoc = new Y.Doc();
   const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
@@ -170,6 +203,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   // y-websocket appends the room name to the url; we pass the doc as a query param instead.
   // The connection is opened once the local copy has been loaded (see below).
   const provider = new WebsocketProvider(wsUrl, '', ydoc, { params: { doc: opts.docId }, disableBc: true, connect: false });
+  reportKnowledge(ydoc, provider);
   const pendingMoves = new PendingMoves(ydoc);
   let destroyed = false;
 
