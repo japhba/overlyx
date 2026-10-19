@@ -1,0 +1,15 @@
+# /etc/apparmor.d/overlyx-userns — Ubuntu 24.04 denies user namespaces to unconfined programs of
+# non-root accounts (kernel.apparmor_restrict_unprivileged_userns=1), which breaks the two sandboxes
+# OverLyX relies on when they run as the development account or the maintenance worker: bubblewrap
+# (builds, tests) and Codex's own bubblewrap (inside the codex binary). These profiles grant exactly
+# that and nothing else changes for them, like Ubuntu's own chrome profile.
+abi <abi/4.0>,
+include <tunables/global>
+
+profile overlyx-bwrap /usr/bin/bwrap flags=(unconfined) {
+  userns,
+}
+
+profile overlyx-codex "/usr/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-*/vendor/*/bin/codex" flags=(unconfined) {
+  userns,
+}

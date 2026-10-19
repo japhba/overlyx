@@ -5,18 +5,40 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-User=root
-WorkingDirectory=/root/lyx/overlyx-production
-Environment=LYX_LAYOUT_DIR=/root/lyx/lib/layouts
-Environment=OVERLYX_PRODUCTION=/root/lyx/overlyx-production
-Environment=OVERLYX_MAINTENANCE_SOURCE=/root/lyx/overlyx
-Environment=OVERLYX_MAINTENANCE_CHECKOUT=/root/lyx/overlyx-maintenance
+# The worker runs as an account of its own (DOCS.md "Accounts on the server"): users' projects, the
+# database, backups, secrets and root's logins are out of its reach. Root only gathers the evidence
+# first ("+": with full privileges) — sanitized reports and usage signals from the database, errors
+# from the service journal, open GitHub issues — into an inbox the worker may read.
+User=overlyx-maint
+Group=overlyx-maint
+# (HOME: root's gh login, never configuration from the worker's home)
+ExecStartPre=+/usr/bin/env -C /root/lyx/overlyx-production HOME=/root /usr/bin/node --import tsx scripts/maintenance.ts --collect
+# the runner is the deployed code, read-only; Codex works in the worker's own checkout and publishes
+# by pushing with the worker's deploy key — the autodeploy timer (root) deploys origin/master
+ExecStart=/bin/bash /opt/overlyx-production/scripts/maintenance.sh
+BindReadOnlyPaths=/root/lyx/overlyx-production:/opt/overlyx-production /root/lyx/lib:/opt/lyx/lib
+Environment=OVERLYX_PRODUCTION=/opt/overlyx-production
+Environment=LYX_LAYOUT_DIR=/opt/lyx/lib/layouts
 Environment=OVERLYX_MAINTENANCE_DB=/root/lyx/overlyx/data/overlyx.sqlite
+Environment=OVERLYX_MAINTENANCE_INBOX=/var/lib/overlyx-maintenance-inbox
+Environment=OVERLYX_MAINTENANCE_CHECKOUT=/var/lib/overlyx-maintenance/checkout
+Environment=OVERLYX_MAINTENANCE_ORIGIN=git@github.com:japhba/overlyx.git
+Environment=OVERLYX_SITE_URL=https://overlyx.app
 StateDirectory=overlyx-maintenance
 StateDirectoryMode=0700
 UMask=0077
-ExecStart=/bin/bash /root/lyx/overlyx-production/scripts/maintenance.sh
-TimeoutStartSec=25min
+# /root, /home and the projects volume do not exist for it; nor do other accounts' processes
+ProtectHome=yes
+InaccessiblePaths=-/mnt
+ProtectProc=invisible
+PrivateTmp=yes
+ProtectSystem=strict
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+TimeoutStartSec=45min
 KillMode=control-group
 Nice=10
 IOSchedulingClass=idle

@@ -1,0 +1,3 @@
+# /etc/sudoers.d/overlyx-deploy — the development account deploys origin/master through the production
+# server's autodeploy: that one command, without arguments, and nothing else as root.
+jan ALL=(root) NOPASSWD: /usr/local/sbin/overlyx-deploy ""

@@ -35,6 +35,10 @@ const source = process.env.OVERLYX_MAINTENANCE_SOURCE ?? '/root/lyx/overlyx';
 const checkout = process.env.OVERLYX_MAINTENANCE_CHECKOUT ?? '/root/lyx/overlyx-maintenance';
 const repo = process.env.OVERLYX_MAINTENANCE_REPO ?? 'japhba/overlyx';
 const dbFile = process.env.OVERLYX_MAINTENANCE_DB ?? path.join(process.env.OVERLYX_DATA_DIR ?? path.join(source, 'data'), 'overlyx.sqlite');
+// Set for the unprivileged worker (deploy/overlyx-maintenance.service): root screens the database, the
+// service journal and GitHub beforehand (--collect) and leaves the sanitized signals here for it.
+const inbox = process.env.OVERLYX_MAINTENANCE_INBOX;
+const site = process.env.OVERLYX_SITE_URL ?? 'https://overlyx.app';
 const log = (s: string) => console.log(`[maintenance] ${s}`);
 function command(bin: string, args: string[], cwd = root, timeout = 60000): string {
   return execFileSync(bin, args, { cwd, timeout, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -65,7 +69,7 @@ export function databaseSignals(db: Database.Database, since: number): Signal[] 
   return signals;
 }
 
-async function collect(state: State): Promise<Signal[]> {
+async function collect(lastScan: number): Promise<Signal[]> {
   const signals: Signal[] = [];
   const failures: string[] = [];
   try {
@@ -82,7 +86,7 @@ async function collect(state: State): Promise<Signal[]> {
     try { signals.push(...databaseSignals(db, Date.now() - 7 * 86400000)); } finally { db.close(); }
   } catch { failures.push('local reports/usage'); }
   try {
-    const since = new Date(state.lastScan || Date.now() - 86400000).toISOString();
+    const since = new Date(lastScan || Date.now() - 86400000).toISOString();
     const lines = command('journalctl', ['-u', 'overlyx', '--since', since, '-n', '300', '--no-pager', '-o', 'cat']);
     const groups = new Map<string, string[]>();
     for (const line of lines.split('\n')) {
@@ -97,10 +101,31 @@ async function collect(state: State): Promise<Signal[]> {
   return signals;
 }
 
+// Root's half of an unprivileged run (the unit's ExecStartPre). The inbox is root's (setgid to the
+// worker's group): the worker reads the signals and can plant nothing that root would follow.
+async function collectInto(dir: string) {
+  const mark = path.join(dir, 'collector.json');
+  const lastScan = fs.existsSync(mark) ? Number(JSON.parse(fs.readFileSync(mark, 'utf8')).lastScan) || 0 : 0;
+  const now = Date.now();
+  const signals = await collect(lastScan);
+  const file = path.join(dir, 'signals.json');
+  fs.writeFileSync(file + '.new', JSON.stringify({ at: now, signals }));
+  fs.chmodSync(file + '.new', 0o640); fs.renameSync(file + '.new', file);
+  fs.writeFileSync(mark, JSON.stringify({ lastScan: now }));
+  log(`collected ${signals.length} signals for the worker`);
+}
+
+function collected(dir: string): Signal[] {
+  const { at, signals } = JSON.parse(fs.readFileSync(path.join(dir, 'signals.json'), 'utf8'));
+  if (Date.now() - at > 3600000) log(`the collected evidence is ${Math.round((Date.now() - at) / 60000)} minutes old`);
+  return signals;
+}
+
 function prepareCheckout() {
   if (!fs.existsSync(path.join(checkout, '.git'))) {
-    command('git', ['clone', '--quiet', '--no-checkout', source, checkout]);
-    git(['remote', 'set-url', 'origin', command('git', ['remote', 'get-url', 'origin'], source)]);
+    // the worker pushes to this remote with a deploy key of its own (scripts/maintenance.sh has none)
+    const origin = process.env.OVERLYX_MAINTENANCE_ORIGIN ?? command('git', ['remote', 'get-url', 'origin'], source);
+    command('git', ['clone', '--quiet', '--no-checkout', origin, checkout]);
     git(['checkout', '-B', 'master', 'origin/master']);
     git(['config', 'user.name', 'OverLyX']); git(['config', 'user.email', 'overlyx@localhost']);
   }
@@ -117,15 +142,20 @@ function prepareCheckout() {
   const lock = digest(fs.readFileSync(path.join(checkout, 'package-lock.json'), 'utf8'));
   const marker = path.join(checkout, '.git', 'maintenance-dependencies');
   if (!fs.existsSync(marker) || fs.readFileSync(marker, 'utf8') !== lock) {
-    fs.rmSync(path.join(checkout, 'node_modules'), { recursive: true, force: true });
-    const same = fs.readFileSync(path.join(production, 'package-lock.json'), 'utf8') === fs.readFileSync(path.join(checkout, 'package-lock.json'), 'utf8');
-    if (same) {
-      command('cp', ['-al', path.join(production, 'node_modules'), path.join(checkout, 'node_modules')]);
-      for (const name of fs.readdirSync(path.join(production, 'packages'))) {
-        const from = path.join(production, 'packages', name, 'node_modules'), to = path.join(checkout, 'packages', name, 'node_modules');
-        if (fs.existsSync(from) && !fs.existsSync(to)) command('cp', ['-al', from, to]);
+    const modules = [path.join(checkout, 'node_modules'), ...fs.readdirSync(path.join(checkout, 'packages')).map(name => path.join(checkout, 'packages', name, 'node_modules'))];
+    for (const dir of modules) fs.rmSync(dir, { recursive: true, force: true });
+    let linked = false;
+    try {   // an unprivileged worker may not hardlink production's files: it installs its own
+      if (fs.readFileSync(path.join(production, 'package-lock.json'), 'utf8') === fs.readFileSync(path.join(checkout, 'package-lock.json'), 'utf8')) {
+        command('cp', ['-al', path.join(production, 'node_modules'), path.join(checkout, 'node_modules')]);
+        for (const name of fs.readdirSync(path.join(production, 'packages'))) {
+          const from = path.join(production, 'packages', name, 'node_modules'), to = path.join(checkout, 'packages', name, 'node_modules');
+          if (fs.existsSync(from) && !fs.existsSync(to)) command('cp', ['-al', from, to]);
+        }
+        linked = true;
       }
-    } else command('npm', ['ci', '--no-audit', '--no-fund'], checkout, 180000);
+    } catch { for (const dir of modules) fs.rmSync(dir, { recursive: true, force: true }); }
+    if (!linked) command('npm', ['ci', '--no-audit', '--no-fund'], checkout, 15 * 60000);
     fs.writeFileSync(marker, lock);
   }
 }
@@ -148,18 +178,49 @@ const resultSchema = { type: 'object', additionalProperties: false, properties: 
   outcome: { type: 'string', enum: ['fixed', 'no_fix', 'defer'] }, summary: { type: 'string' }, checks: { type: 'array', items: { type: 'string' } },
 }, required: ['outcome', 'summary', 'checks'] };
 
+// Publishing is a push: the production server's autodeploy (root, scripts/autodeploy.sh) deploys what
+// reaches origin/master, and `Deploy: no-checks` leaves it the build and the verification. The worker
+// holds no rights on production; it waits until the site serves its commit.
 async function deploy(state: State, runDir: string) {
-  await loggedProcess('bash', ['scripts/deploy.sh', '--no-checks'], path.join(runDir, 'deploy.log'), 8 * 60000);
+  const push = () => command('git', ['push', '--quiet', 'origin', 'HEAD:refs/heads/master'], checkout, 120000);
+  try { push(); } catch {
+    git(['fetch', 'origin', '--quiet']);
+    try { git(['rebase', 'origin/master']); } catch { git(['rebase', '--abort']); throw new Error('Concurrent changes conflict; fix retained for another attempt'); }
+    push();
+  }
+  state.pending!.commit = git(['rev-parse', 'HEAD']); save(state);
+  fs.appendFileSync(path.join(runDir, 'deploy.log'), `pushed ${state.pending!.commit}\n`);
+  await served(state.pending!.commit);
   for (const number of state.pending!.issues) {
     // Closing a fixed issue is part of the authorized workflow; never copy private logs into it.
+    // (Without a GitHub login the commit's "Fixes #n" has closed it already.)
     try { command('gh', ['issue', 'close', String(number), '-R', repo, '--reason', 'completed']); } catch { log(`could not close resolved issue #${number}`); }
   }
   log(`deployed ${state.pending!.commit.slice(0, 10)}`);
   delete state.pending; save(state);
 }
 
+async function served(commit: string) {
+  const until = Date.now() + 15 * 60000;
+  for (;;) {
+    let live = '';
+    try { live = String((await (await fetch(`${site}/api/version`, { signal: AbortSignal.timeout(10000) })).json() as { commit?: string }).commit ?? ''); } catch { /* restarting */ }
+    if (live === commit) return;
+    if (/^[0-9a-f]{40}$/.test(live)) {   // a later push deployed on top of ours
+      try { git(['fetch', 'origin', '--quiet']); git(['merge-base', '--is-ancestor', commit, live]); return; } catch { /* older, or not fetched yet */ }
+    }
+    if (Date.now() > until) throw new Error(`${site} serves ${live.slice(0, 10) || 'nothing'}, not ${commit.slice(0, 10)}: see journalctl -u overlyx-autodeploy`);
+    await new Promise(resolve => setTimeout(resolve, 20000));
+  }
+}
+
 async function main() {
-  process.umask(0o077); fs.mkdirSync(stateDir, { recursive: true, mode: 0o700 });
+  process.umask(0o077);
+  if (process.argv.includes('--collect')) {
+    if (!inbox) throw new Error('--collect needs OVERLYX_MAINTENANCE_INBOX');
+    return collectInto(inbox);
+  }
+  fs.mkdirSync(stateDir, { recursive: true, mode: 0o700 });
   const stateFile = path.join(stateDir, 'state.json');
   const state: State = fs.existsSync(stateFile) ? JSON.parse(fs.readFileSync(stateFile, 'utf8')) : { seen: {}, lastScan: 0 };
   // A restart or network failure after committing must retry deployment, not discard the fix.
@@ -177,7 +238,7 @@ async function main() {
       delete state.pending; save(state); return;
     }
   }
-  const signals = await collect(state);
+  const signals = inbox ? collected(inbox) : await collect(state.lastScan);
   const now = Date.now();
   const queue = signals.filter(s => eligible(s, state.seen[s.key], now)).sort((a, b) => a.priority - b.priority);
   log(`screened ${signals.length} signals; ${queue.length} new or retryable`);
@@ -206,7 +267,7 @@ async function main() {
     if (!['fixed', 'no_fix', 'defer'].includes(result.outcome) || !Array.isArray(result.checks)) throw new Error('Invalid worker result');
     if (result.outcome === 'fixed' && git(['status', '--porcelain'])) {
       git(['add', '-A']); git(['diff', '--cached', '--check']);
-      git(['commit', '-m', 'Fix production issue discovered by maintenance worker', '-m', 'Deploy: no-checks']);
+      git(['commit', '-m', 'Fix production issue discovered by maintenance worker', ...(signal.issue ? ['-m', `Fixes #${signal.issue}`] : []), '-m', 'Deploy: no-checks']);
       // Another agent can push while this worker investigates; rebase only our own commit.
       git(['fetch', 'origin', '--quiet']);
       try { git(['rebase', 'origin/master']); } catch { git(['rebase', '--abort']); throw new Error('Concurrent changes conflict; fix retained for another attempt'); }

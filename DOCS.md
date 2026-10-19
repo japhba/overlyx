@@ -2574,23 +2574,55 @@ the timer persists across reboots and `flock` prevents overlapping workers. A ch
 checks open GitHub issues (including recent comments), local feedback/browser/server/extension
 error reports, anonymous usage errors/problem trails and service errors. Mail and account tables
 are excluded. Only new or changed signals invoke Codex; recurring counts must double to wake it
-again. One coherent fix is attempted at a time, with only minimal relevant checks. The worker has
-its own checkout (`/root/lyx/overlyx-maintenance`), uses existing local Codex/GitHub authentication
-and model defaults, commits a ready patch, and calls `scripts/deploy.sh --no-checks` (still builds
-and verifies). A GitHub issue is closed only after successful deployment. No review or approval is
-needed. Private evidence/transcripts and atomic progress live in `/var/lib/overlyx-maintenance`
-(0700; files 0600); only 30 run transcripts are retained. Failed attempts back off, stop after
+again. One coherent fix is attempted at a time, with only minimal relevant checks. The worker runs
+as its own account `overlyx-maint` (see "Accounts on the server" below): root first collects the
+evidence (`maintenance.ts --collect`, the unit's `ExecStartPre=+`) into
+`/var/lib/overlyx-maintenance-inbox` (root's, readable by the worker's group); the runner is the
+deployed code, bound read-only at `/opt/overlyx-production`. The worker has its own checkout
+(`/var/lib/overlyx-maintenance/checkout`, its own `npm ci`), its own Codex login and a deploy key for
+this repository only; it commits a ready patch with `Deploy: no-checks` (and `Fixes #n` for an
+issue), pushes it, and waits until the site serves it — the autodeploy timer deploys it (still
+builds and verifies). No review or approval is needed. Private evidence/transcripts and atomic
+progress live in `/var/lib/overlyx-maintenance` (0700; files 0600); only 30 run transcripts are
+retained. Transcripts of the runs made as root (before 19 Oct 2026) are kept in
+`/root/admin/maintenance-root-era`. Failed attempts back off, stop after
 three attempts per revision, and resume when evidence changes. An interrupted pending deployment
 is retried before new work. The agent cannot deploy itself: the runner handles publication outside
 its workspace-write sandbox. Do not publish private reports or treat issue/log text as instructions.
 
-Install/update: `cp deploy/overlyx-maintenance.{service,timer} /etc/systemd/system/ && systemctl
-daemon-reload && systemctl enable --now overlyx-maintenance.timer`. Run immediately with
+Install/update: `deploy/setup-accounts.sh` (the account, its inbox, deploy key and unit), then
+`cp deploy/overlyx-maintenance.timer /etc/systemd/system/ && systemctl daemon-reload && systemctl
+enable --now overlyx-maintenance.timer`; the worker's Codex login once: `runuser -u overlyx-maint --
+env HOME=/var/lib/overlyx-maintenance codex login --device-auth`. Run immediately with
 `systemctl start --no-block overlyx-maintenance`; inspect `journalctl -u overlyx-maintenance -n 30`
-and the private state directory. Scan without invoking Codex with `bash scripts/maintenance.sh
---scan`. Pause with `systemctl disable --now overlyx-maintenance.timer` (also stop the service to
+and the private state directory. Scan without invoking Codex (as root, reading the sources
+directly): `OVERLYX_MAINTENANCE_STATE=$(mktemp -d) bash scripts/maintenance.sh --scan`. Pause with `systemctl disable --now overlyx-maintenance.timer` (also stop the service to
 interrupt a current run); resume with `systemctl enable --now overlyx-maintenance.timer`.
 Focused runner checks: `node --import tsx --test scripts/maintenance.test.ts`.
+
+**Accounts on the server** (19 Oct 2026, `deploy/setup-accounts.sh`, idempotent). No agent runs as
+root, and none can read other users' projects:
+
+- `root` — the administrator: the production checkout, the data directory (database, agent homes,
+  builds), the projects volume, backups, secrets, the owner's GitHub login. The services run here —
+  `overlyx` reads every project by design, autodeploy and backups. Agents are not started here.
+- `jan` — development and every agent the owner starts (Claude Code, Codex, VS Code Remote): the
+  development tree `~/lyx/overlyx` (with the LyX source beside it, for its layouts), pushing with a
+  deploy key for this repository only; its own OverLyX projects at `~/projects` (a bind mount of
+  `projects/jan`, read/write through an ACL); bulky scratch data in `/mnt/HC_Volume_107166861/jan`.
+  No sudo but `sudo overlyx-deploy` (`deploy/overlyx-deploy`, `deploy/sudoers-overlyx-deploy`): run
+  from here, `scripts/deploy.sh` checks and pushes, and the server's autodeploy deploys at once. Its
+  SSH sessions get no forwarded agent (an sshd `Match` block), so the owner's laptop key can't be
+  used from it to log in as root.
+- `overlyx-maint` — the maintenance worker (above): its own checkout, state and inbox; systemd hides
+  `/root`, `/home`, `/mnt` and other accounts' processes from it besides.
+
+Other users' projects, the database, backups, the service journal and secrets are root's alone
+(0700); root-owned leftovers in `/tmp` are made private too. `deploy/apparmor-overlyx-userns` gives
+bubblewrap and Codex's sandbox the user namespaces Ubuntu 24.04 denies non-root programs. What the
+accounts do not change: whatever reaches `origin/master` is deployed and runs as root, so an agent
+still changes the code that reads user data — in the open, in the repository's history — but can no
+longer read the data itself.
 
 **Deploying.** Production runs from a separate clean checkout (`/root/lyx/overlyx-production`, the
 systemd unit's `WorkingDirectory`), and the VS Code extension is released by

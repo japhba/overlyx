@@ -1,0 +1,17 @@
+#!/bin/bash
+# /usr/local/sbin/overlyx-deploy — `sudo overlyx-deploy` deploys what origin/master holds now, for an
+# account without rights on production (the development account; deploy/sudoers-overlyx-deploy allows
+# it exactly this, without arguments). It runs the autodeploy the timer runs every two minutes
+# (scripts/autodeploy.sh, as root, from the production checkout) and shows that run's log.
+set -uo pipefail
+[ $# -eq 0 ] || { echo "overlyx-deploy takes no arguments" >&2; exit 2; }
+since=$(date '+%Y-%m-%d %H:%M:%S')
+systemctl start overlyx-autodeploy.service
+rc=$?
+journalctl -u overlyx-autodeploy --since "$since" --no-pager -o cat
+if [ "$rc" != 0 ]; then
+  # a failed check leaves its log in the autodeploy state
+  f=$(ls -t /var/lib/overlyx-autodeploy/*.log 2>/dev/null | head -1)
+  [ -n "$f" ] && { echo "--- $f"; tail -n 80 "$f"; }
+fi
+exit "$rc"

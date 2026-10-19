@@ -23,6 +23,12 @@
 # browser workflows (npm run test:beta, ~35 min). An agent reasonably confident of its change may
 # skip the typechecks and unit tests with --no-checks; the build, the clean/diverged-tree guards and
 # the check that the site serves the new commit still run.
+#
+# An account without rights on production — the development account `jan` (DOCS.md "Accounts on the
+# server") — deploys by relay: the same checks and build here, the push, then the production server's
+# own autodeploy (scripts/autodeploy.sh, root) deploys the commit at once through `sudo overlyx-deploy`
+# (or within two minutes, by its timer). The pushed commit carries `Deploy: no-checks` so that the
+# server does not repeat the checks made (or skipped on purpose) here.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 DEV=$(pwd)
@@ -35,9 +41,15 @@ for a in "$@"; do case "$a" in --no-push) PUSH=0 ;; --no-checks) CHECKS=0 ;; *) 
 
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 
-# one deploy at a time: scripts/autodeploy.sh (the timer) takes the same lock
-exec 9>"${OVERLYX_DEPLOY_LOCK:-/run/lock/overlyx-deploy.lock}"
-flock -n 9 || { echo "another deploy is running (the autodeploy timer?) — waiting for it"; flock 9; }
+RELAY=0
+[ -w "$PROD" ] || RELAY=1
+[ "$RELAY" = 0 ] || [ "$PUSH" = 1 ] || { echo "--no-push: without rights on $PROD only a push deploys" >&2; exit 2; }
+
+# one deploy at a time: scripts/autodeploy.sh (the timer) takes the same lock — a relay leaves it to it
+if [ "$RELAY" = 0 ]; then
+  exec 9>"${OVERLYX_DEPLOY_LOCK:-/run/lock/overlyx-deploy.lock}"
+  flock -n 9 || { echo "another deploy is running (the autodeploy timer?) — waiting for it"; flock 9; }
+fi
 
 step "development checkout: $DEV"
 [ "$(git rev-parse --abbrev-ref HEAD)" = master ] || { echo "deploy from master (on $(git rev-parse --abbrev-ref HEAD))" >&2; exit 1; }
@@ -63,6 +75,12 @@ fi
 candidate=$(mktemp -d /tmp/overlyx-deploy-candidate.XXXXXX)
 trap 'rm -rf "$candidate"' EXIT
 OVERLYX_BETA_BROWSER="$FULL" OVERLYX_BETA_BUILD_DIR="$candidate/dist" OVERLYX_BETA_ASSET_PROOF="$candidate/asset-proof.json" node scripts/check-beta.mjs
+if [ "$RELAY" = 1 ] && ! git merge-base --is-ancestor HEAD origin/master &&
+   [ "$(git log -1 --format='%(trailers:key=Deploy,valueonly)' HEAD | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')" != no-checks ]; then
+  git commit --amend --no-edit --quiet --trailer 'Deploy: no-checks'
+  HEAD=$(git rev-parse HEAD)
+  echo "checked here: the trailer Deploy: no-checks spares the server a second run (commit $HEAD)"
+fi
 node scripts/release-guards.mjs clean "$DEV" "$HEAD"
 
 if [ "$PUSH" = 1 ]; then
@@ -72,6 +90,22 @@ else
   step "origin: not pushed (--no-push): the extension keeps its last release"
 fi
 
+if [ "$RELAY" = 1 ]; then
+  step "production: the server deploys $HEAD"
+  if sudo -n -l /usr/local/sbin/overlyx-deploy >/dev/null 2>&1; then trigger=1; else trigger=0; echo "(no sudo rule for overlyx-deploy: waiting for the autodeploy timer)"; fi
+  live=
+  for _ in $(seq 1 40); do
+    if [ "$trigger" = 1 ]; then
+      sudo -n /usr/local/sbin/overlyx-deploy || { echo "the server's autodeploy failed (its log is above)" >&2; exit 1; }
+    else sleep 15; fi
+    live=$(curl -s --max-time 5 "$SITE/api/version" | sed -n 's/.*"commit":"\([0-9a-f]*\)".*/\1/p')
+    [ "$live" = "$HEAD" ] && break
+    # a run that had started before the push (or failed on this commit before) deploys nothing new
+    [ "$trigger" = 1 ] && { trigger_runs=$(( ${trigger_runs:-0} + 1 )); [ "$trigger_runs" -lt 3 ] || break; sleep 5; }
+  done
+  [ "$live" = "$HEAD" ] || { echo "$SITE/api/version reports '${live:-nothing}', not $HEAD" >&2; exit 1; }
+  echo "site OK: commit $live"
+else
 step "production checkout: $PROD"
 [ -d "$PROD/.git" ] || { echo "$PROD is not a git checkout" >&2; exit 1; }
 git -C "$PROD" fetch --quiet "$DEV" "$HEAD"
@@ -110,6 +144,7 @@ done
 [ "$live" = "$HEAD" ] || { echo "$SITE/api/version reports '${live:-nothing}', not $HEAD" >&2; exit 1; }
 node scripts/verify-release-assets.mjs "$candidate/dist" "$SITE" "$candidate/asset-proof.json"
 echo "site OK: $served, commit $live"
+fi
 
 if [ "$PUSH" = 1 ] && command -v gh >/dev/null 2>&1; then
   step "extension release workflow"
