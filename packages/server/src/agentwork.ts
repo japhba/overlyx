@@ -42,7 +42,11 @@ export const AGENT_AUTHOR = `${PANEL_AGENT} (MCP)`;
 
 /** Text files mirrored as copies (others are symlinked); new files of these kinds are copied back. */
 const TEXT_EXT = new Set(['.tex', '.bib', '.sty', '.cls', '.bst', '.bbx', '.cbx', '.dtx', '.ins', '.txt', '.md', '.csv', '.tsv', '.dat', '.json', '.yaml', '.yml', '.py', '.r', '.jl', '.m', '.sh', '.lua', '.latexmkrc', '.cfg', '.def', '.clo', '.ldf']);
-/** New binary files of these kinds are copied back too (a figure the agent made) */
+/**
+ * New binary files of these kinds are copied back too — a figure the agent made, when a text file of
+ * the copy refers to it (an \includegraphics, a markdown image). What it renders only to look at stays
+ * in the copy: a pdftohtml run to check the PDF once put 99 page images (main-2_1.png …) into a paper.
+ */
 const FIGURE_EXT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.svg', '.eps', '.pdf', '.webp']);
 /** LaTeX / tool output that never goes back into the project */
 const AUX_EXT = new Set(['.olx', '.olsrc', '.aux', '.log', '.out', '.toc', '.lof', '.lot', '.fls', '.fdb_latexmk', '.bbl', '.blg', '.bcf', '.xml', '.nav', '.snm', '.vrb', '.idx', '.ind', '.ilg', '.xdv', '.dvi', '.gz', '.synctex', '.run', '.pyc', '.tmp', '.bak', '.swp']);
@@ -192,12 +196,39 @@ function isOutput(dir: string, rel: string): boolean {
   return ext === '.pdf' && !!lstatIn(dir, rel.slice(0, -4) + '.tex')?.isFile();
 }
 
+/** The text files of the copy, read once per sync (for `referenced`). */
+function textCorpus(dir: string): string {
+  let all = '';
+  for (const rel of walk(dir)) {
+    if (!TEXT_EXT.has(path.extname(rel).toLowerCase())) continue;
+    const buf = readFileIn(dir, rel, MAX_TEXT);
+    if (buf) all += buf.toString('utf8') + '\n';
+  }
+  return all;
+}
+
+/** Some text file of the copy names the file `rel` (its path or file name, with or without its extension). */
+export function referenced(corpus: string, rel: string): boolean {
+  const posix = rel.split(path.sep).join('/'), ext = path.posix.extname(posix);
+  const names = new Set([posix, posix.slice(0, posix.length - ext.length), path.posix.basename(posix), path.posix.basename(posix, ext)]);
+  const part = /[\w-]/;
+  for (const name of names) {
+    if (!name) continue;
+    // a whole name: fig1 is not named by fig10 or myfig1
+    for (let i = corpus.indexOf(name); i >= 0; i = corpus.indexOf(name, i + 1)) {
+      if (!part.test(corpus[i - 1] ?? ' ') && !part.test(corpus[i + name.length] ?? ' ')) return true;
+    }
+  }
+  return false;
+}
+
 async function syncNow(tid: string, project: string, userId: number): Promise<SyncedFile[]> {
   const dir = workspaceDir(tid, project);
   const manifest = readManifest(tid);
   if (!manifest || !fs.existsSync(dir)) return [];
   const out: SyncedFile[] = [];
   let touched = false;
+  let corpus: string | null = null;
   for (const rel of walk(dir)) {
     const kind = manifest.files[rel];
     const ext = path.extname(rel).toLowerCase() || path.basename(rel).toLowerCase();
@@ -237,6 +268,7 @@ async function syncNow(tid: string, project: string, userId: number): Promise<Sy
       // a file the agent created (or put in place of a link)
       if (isOutput(dir, rel) || st.size > MAX_NEW) continue;
       if (!TEXT_EXT.has(ext) && !FIGURE_EXT.has(ext)) continue;
+      if (!TEXT_EXT.has(ext) && !referenced(corpus ??= textCorpus(dir), rel)) continue;
       const live = resolveProjectPath(project, rel);
       const data = readFileIn(dir, rel, MAX_NEW);
       if (data === null) continue;

@@ -69,17 +69,22 @@ describe('agent working copy', () => {
     expect(text.match(/\\lyx(added|deleted)\{Agent panel \(MCP\)\}\{[^}]*\}\{(.)\}/g)?.map(m => m.slice(-3))).toEqual(['{5}', '{7}']);
   });
 
-  it('copies other files and new figures; leaves build output behind; never follows links', async () => {
+  it('copies other files and new figures; leaves build output and scratch images behind; never follows links', async () => {
     const dir = workspaceDir(T, 'owner/cv');
     writeFileSync(join(dir, 'refs.bib'), '@article{a, title={A}}\n@book{b, title={B}}\n');
     writeFileSync(join(dir, 'figs', 'new.pdf'), '%PDF-1.4 figure');
     writeFileSync(join(dir, 'cv.aux'), 'aux');
     writeFileSync(join(dir, 'cv.pdf'), '%PDF-1.4 build output');
-    writeFileSync(join(dir, 'notes.md'), '# notes\n');
+    writeFileSync(join(dir, 'notes.md'), '# notes\n\n![the new plot](figs/new.pdf)\n');
+    // what it rendered only to look at (pdftohtml's page images): no text file names them
+    writeFileSync(join(dir, 'cv-2_1.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47, 9]));
+    writeFileSync(join(dir, 'figs', 'new10.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47, 9]));
     const r = await syncWorkspace(T, 'owner/cv', 1);
     expect(r.map(f => `${f.path}:${f.action}`).sort()).toEqual(['figs/new.pdf:created', 'notes.md:created', 'refs.bib:copied']);
     expect(readFileSync(join(PROJ, 'refs.bib'), 'utf8')).toContain('@book{b');
     expect(existsSync(join(PROJ, 'figs', 'new.pdf'))).toBe(true);
+    expect(existsSync(join(PROJ, 'cv-2_1.png'))).toBe(false);
+    expect(existsSync(join(PROJ, 'figs', 'new10.png'))).toBe(false);
     expect(existsSync(join(PROJ, 'cv.aux'))).toBe(false);
     expect(existsSync(join(PROJ, 'cv.pdf'))).toBe(false);
     expect(lstatSync(join(dir, 'figs', 'new.pdf')).isSymbolicLink()).toBe(true);   // a link to the project's file from now on
