@@ -62,6 +62,7 @@ html[data-ui="modern"][data-theme="dark"]:not([data-dark-pages]) .editor-page:no
   --m-blue: #2152a3;         /* Bauhaus blue (LyX's L): where you are, the selection, focus, links */
   --m-red: #d6402b;
   --m-yellow: #efb21a;       /* LyX's Y: worth a look */
+  --m-green: #5f8a66;        /* muted sage: all is well (connected) — quiet beside the primaries */
   --m-black: #1c1b19;
   --m-shadow: 0 1px 2px rgba(28, 27, 25, 0.06), 0 8px 24px rgba(28, 27, 25, 0.12);
   /* the two accents as tints: where you are (blue), worth a look (yellow) */
@@ -117,6 +118,7 @@ html[data-ui="modern"][data-theme="dark"] {
   --m-signal-hover: #ff7058;
   --m-on-signal: #1b1a18;
   --m-blue: #85a8ea;
+  --m-green: #8bb293;
   --m-red: #ec5a43;
   --m-yellow: #f4c03c;
   --m-black: #ecebe6;
@@ -156,7 +158,7 @@ html[data-ui="modern"] .edit-mode-btn.mode-suggesting:hover, html[data-ui="moder
 /* blue: the view you are in, a live connection (red: lost), the settings page you are on */
 html[data-ui="modern"] .view-mode-switch button.active { color: var(--m-blue); }
 html[data-ui="modern"] .statusbar .dot { background: var(--m-red); }
-html[data-ui="modern"] .statusbar .dot.on { background: var(--m-blue); }
+html[data-ui="modern"] .statusbar .dot.on { background: var(--m-green); }
 html[data-ui="modern"] .panel-tabs button.active[data-tab="comments"] { border-bottom-color: var(--m-yellow); }
 html[data-ui="modern"] .statusbar .tracking { color: var(--m-ink); background: color-mix(in srgb, var(--m-yellow) 30%, var(--m-ground)); padding: 0 8px; border-radius: 4px; }
 html[data-ui="modern"] .settings-nav button.active { box-shadow: inset 2px 0 0 var(--m-blue); border-radius: 0 4px 4px 0; }
