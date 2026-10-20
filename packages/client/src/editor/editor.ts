@@ -16,6 +16,7 @@ import { collabSync, cursorPlugin, undoPlugin, cursorPosition } from './collab';
 import { salvageLegacyCopy, LEGACY_DB_PREFIX } from './legacycopy';
 import { schema, sanitizeAwarenessState } from '@overlyx/core';
 import { BODY, PAGES } from '@overlyx/core/collab/model.ts';
+import { connectParams } from '@overlyx/core/collab/connect.ts';
 import type { Awareness } from 'y-protocols/awareness';
 import { inkPlugin } from './plugins/ink';
 import { editorContext } from './context';
@@ -171,8 +172,8 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   // the combined master+child view into each other. Documents are only synced through the server.
   // y-websocket appends the room name to the url; we pass the doc as a query param instead.
   // The connection is opened once the local copy has been loaded (see below).
-  // model=2: this editor holds the document as flows (core collab/model.ts); the server refuses older editors
-  const provider = new WebsocketProvider(wsUrl, '', ydoc, { params: { doc: opts.docId, model: '2' }, disableBc: true, connect: false });
+  // model=2 (core collab/connect.ts): this editor holds the document as flows (core collab/model.ts); the server refuses older editors
+  const provider = new WebsocketProvider(wsUrl, '', ydoc, { params: connectParams(opts.docId), disableBc: true, connect: false });
   let destroyed = false;
   /** the document is empty here (nothing loaded or synced yet) */
   const isEmpty = () => ydoc.getText(BODY).length === 0 && ydoc.getMap(PAGES).size === 0;

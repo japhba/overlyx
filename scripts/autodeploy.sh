@@ -14,7 +14,8 @@
 #      on the pushed commit (origin/master's tip) skips the typechecks and unit tests — the build
 #      and the verification still run;
 #   4. on green: fast-forwards the production checkout, `npm ci` when the lockfile changed, builds
-#      the client, restarts the unit and verifies that the site serves that commit (/api/version).
+#      the client, restarts the unit and verifies that the site serves that commit (/api/version)
+#      and that documents open on it (scripts/docs-check.sh: the server's own check after its start).
 # A commit that fails is not retried (a marker under $OVERLYX_AUTODEPLOY_STATE); the next push is.
 # scripts/deploy.sh (a deploy from the development tree on this box) shares the lock, so the two
 # never run at once. Logs: `journalctl -u overlyx-autodeploy`.
@@ -119,6 +120,13 @@ for i in $(seq 1 20); do
       touch "$STATE/failed-$target"
       exit 1
     fi
+    # (deployed either way — no rollback: a version may have converted stored documents — but said loudly)
+    if ! docs=$(bash "$WT/scripts/docs-check.sh" "$SITE" 2>&1); then
+      log "deployed ${target:0:10}, but $docs"
+      status "$target" failure "deployed, but $docs"
+      exit 1
+    fi
+    log "$docs"
     log "deployed ${target:0:10}: $SITE serves the tested assets"
     status "$target" success "deployed to $SITE"
     exit 0

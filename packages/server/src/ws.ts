@@ -14,7 +14,7 @@ import { userFromCookieHeader, type SessionUser } from './auth.ts';
 import { roleFor, logAccess } from './access.ts';
 import { canonicalDocId } from './namespaces.ts';
 import { splitDocId, sanitizeAwarenessState, MAX_AWARENESS_STATE_JSON } from '@overlyx/core';
-import { isHtmlPath } from '@overlyx/core/html/deliverable.ts';
+import { hasModel, connectParams } from '@overlyx/core/collab/connect.ts';
 import { markDocOpened } from './userSettings.ts';
 import { config } from './config.ts';
 import { isAgentClient, trackMoves } from './agentPresence.ts';
@@ -38,17 +38,14 @@ const MSG_PING = 4;
  *  so clients can apply it with an undo-tracked origin (see editor.ts messageHandlers[5]) */
 const MSG_AGENT_EDIT = 5;
 const HEARTBEAT_MS = 10000;
-/**
+/*
  * The CRDT model editors must hold the document in (core collab/model.ts), from the connection's
- * `model` parameter. An editor of an older bundle (y-prosemirror's tree, model 1) would show the
- * converted document as empty and its typing would go nowhere: it gets no sync at all — its
- * connection stays open, so it shows "new version — reload", and its edits stay in its local copy,
- * which the reloaded editor hands to the server to merge (client editor/legacycopy.ts).
- * Only .tex and markdown documents have a model: an HTML page (a Y.Text of the file) and a
- * whiteboard (a Y.Map of objects) are held as they always were, and their editors send no `model`.
+ * `model` parameter (core collab/connect.ts: .tex and markdown documents only). An editor of an
+ * older bundle (y-prosemirror's tree, model 1) would show the converted document as empty and its
+ * typing would go nowhere: it gets no sync at all — its connection stays open, so it shows "new
+ * version — reload", and its edits stay in its local copy, which the reloaded editor hands to the
+ * server to merge (client editor/legacycopy.ts).
  */
-const MODEL = '2';
-const hasModel = (rel: string) => !rel.endsWith('.board') && !isHtmlPath(rel);
 
 function savedMessage(doc: OpenDoc): Uint8Array {
   const enc = encoding.createEncoder();
@@ -140,7 +137,10 @@ export function attachWebSocket(server: Server): void {
       if (!role) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); socket.destroy(); return; }
       logAccess(project, user.id, 'open', rel || null);
       markDocOpened(user.id, docId);
-      const current = !hasModel(rel) || url.searchParams.get('model') === MODEL;
+      const model = url.searchParams.get('model'), needs = connectParams(docId).model;
+      const current = !hasModel(docId) || model === needs;
+      // (the maintenance worker screens the log for "withheld": an editor of this version would be a bug)
+      if (!current) console.warn(`[ws] ${docId}: sync withheld from an outdated editor (model ${model ?? 'none'}, needs ${needs}) until it reloads`);
       wss.handleUpgrade(req, socket, head, (ws) => void (current ? handleConnection(ws, docId, user, role === 'view') : holdOutdated(ws)));
     } catch (e) {
       console.error('[ws] upgrade failed:', e);
@@ -271,7 +271,7 @@ async function handleConnection(conn: WebSocket, docId: string, user: SessionUse
 export { Y };
 
 /**
- * An editor of an older bundle (see MODEL): the connection stays open — heartbeats only, nothing it
+ * An editor of an older bundle (the model check in attachWebSocket): the connection stays open — heartbeats only, nothing it
  * sends is applied, nothing of the document goes to it.
  */
 function holdOutdated(conn: WebSocket): void {

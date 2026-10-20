@@ -105,6 +105,7 @@ if [ "$RELAY" = 1 ]; then
   done
   [ "$live" = "$HEAD" ] || { echo "$SITE/api/version reports '${live:-nothing}', not $HEAD" >&2; exit 1; }
   echo "site OK: commit $live"
+  bash scripts/docs-check.sh "$SITE" || exit 1
 else
 step "production checkout: $PROD"
 [ -d "$PROD/.git" ] || { echo "$PROD is not a git checkout" >&2; exit 1; }
@@ -144,6 +145,7 @@ done
 [ "$live" = "$HEAD" ] || { echo "$SITE/api/version reports '${live:-nothing}', not $HEAD" >&2; exit 1; }
 node scripts/verify-release-assets.mjs "$candidate/dist" "$SITE" "$candidate/asset-proof.json"
 echo "site OK: $served, commit $live"
+bash scripts/docs-check.sh "$SITE" || exit 1
 fi
 
 if [ "$PUSH" = 1 ] && command -v gh >/dev/null 2>&1; then

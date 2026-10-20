@@ -7,6 +7,7 @@
 import * as Y from 'yjs';
 import { IndexeddbPersistence } from 'y-indexeddb';
 import { WebsocketProvider } from 'y-websocket';
+import { connectParams } from '@overlyx/core/collab/connect.ts';
 import * as decoding from 'lib0/decoding';
 import { splitDocId } from '@overlyx/core';
 import { api, type User } from '../api';
@@ -52,7 +53,7 @@ export function webHost(id: string, user: User): DeliverableHost & { destroy(): 
   const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
   // Load this history before connecting: an offline reopen must not start with a
   // fresh empty document, and histories from a replaced server file must not merge.
-  const provider = new WebsocketProvider(wsUrl, '', ydoc, { params: { doc: id }, disableBc: true, connect: false });
+  const provider = new WebsocketProvider(wsUrl, '', ydoc, { params: connectParams(id), disableBc: true, connect: false });
   let persistence: IndexeddbPersistence | null = null;
   const handlers = (provider as unknown as { messageHandlers: ((enc: unknown, dec: decoding.Decoder, ...context: unknown[]) => void)[] }).messageHandlers;
   const text = ydoc.getText('html');

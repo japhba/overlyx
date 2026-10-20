@@ -13,6 +13,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { inkOn } from './contrast';
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
+import { connectParams } from '@overlyx/core/collab/connect.ts';
 import * as decoding from 'lib0/decoding';
 import { strokePathD, strokeRuns, laserPathD, polylineHitsPolygon, rectHitsPolygon, splitDocId, type InkStroke } from '@overlyx/core';
 import { api, fileUrl, type User } from '../api';
@@ -120,7 +121,7 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
   const conn0 = useMemo(() => {
     const ydoc = new Y.Doc();
     const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
-    const provider = new WebsocketProvider(wsUrl, '', ydoc, { params: { doc: id }, disableBc: true });
+    const provider = new WebsocketProvider(wsUrl, '', ydoc, { params: connectParams(id), disableBc: true });
     const handlers = (provider as unknown as { messageHandlers: ((enc: unknown, dec: decoding.Decoder) => void)[] }).messageHandlers;
     handlers[2] = (_e, dec) => { decoding.readVarString(dec); };            // epoch (no local copy: nothing to compare)
     handlers[3] = (_e, dec) => { decoding.readVarUint(dec); decoding.readVarUint8Array(dec); };  // saved

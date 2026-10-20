@@ -2647,6 +2647,16 @@ then fast-forwards, promotes the built assets, restarts and
 verifies — reporting a `deploy/overlyx.app` commit status on GitHub (pending → success / failure;
 `gh api repos/japhba/overlyx/commits/<sha>/status --jq '.statuses[] | "\(.state) \(.description)"'`, or
 `curl -s https://overlyx.app/api/version` once it is live). A failed commit is not retried; the next push is.
+After every deploy both scripts also wait for the server's own check that documents open
+(`scripts/docs-check.sh`, `GET /api/health`): a few seconds after each start the server
+(`packages/server/src/selfcheck.ts`; on with `NODE_ENV=production`, else `OVERLYX_SELF_CHECK=1`) opens
+a `.tex` document, a markdown file, an HTML deck and a whiteboard over its own websocket, with the
+parameters their editors connect with (`core collab/connect.ts`), as the password-less account
+`overlyx-check` (project `overlyx-check/docs`, kind `check`, not mirrored). A document that does not
+arrive fails the deploy's GitHub status and `scripts/deploy.sh`, and logs `[selfcheck] FAILED` for the
+maintenance worker; the deployed version stays (no rollback: a version may have converted stored
+documents). Added after decks and whiteboards stayed empty for 27 hours, 19–20 Oct 2026, with
+nothing in any log.
 Both scripts share one lock. Install the units with `cp deploy/overlyx-autodeploy.* /etc/systemd/system/
 && systemctl daemon-reload && systemctl enable --now overlyx-autodeploy.timer`; logs in
 `journalctl -u overlyx-autodeploy`. Testing is kept to a minimum unless the user asks for more (15 Oct

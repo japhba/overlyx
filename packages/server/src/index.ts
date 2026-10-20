@@ -61,6 +61,7 @@ import { zoteroRoutes, zoteroStatus, searchZotero } from './zotero.ts';
 import { fetchPdfForEntry } from './pdffetch.ts';
 import { gitRouter, ensureAllRepos, ensureRepo, repoInfo, cloneUrl, commitProject, restoreProject, touchProject, createToken, listTokens, deleteToken, flushCommits } from './git.ts';
 import { syncRouter } from './sync.ts';
+import { runSelfCheck, selfCheckEnabled, selfCheckState } from './selfcheck.ts';
 import { externalSyncOf } from './syncPeers.ts';
 import { texHeadings, parseBibtex, lyxToPm, exportLyx, splitDocId, projectOfDoc, docPathOf, splitProjectKey } from '@overlyx/core';
 
@@ -1646,6 +1647,8 @@ app.get(['/pdf/:token', '/pdf/:token/:name'], async (req, res) => {
 // which commit runs here — public, so a deploy (scripts/deploy.sh, scripts/autodeploy.sh) and a
 // developer on another machine can confirm that their push is live
 app.get('/api/version', (_req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json({ commit: appCommit, version: appVersion }); });
+// whether documents open on this server (selfcheck.ts) — scripts/docs-check.sh waits for it after a deploy
+app.get('/api/health', (_req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json({ commit: appCommit, ...selfCheckState() }); });
 app.use('/api', api);
 
 /* ------------------------------------------------------------------ static */
@@ -1688,6 +1691,7 @@ server.listen(config.port, config.host, () => {
   startAutoSync();
   console.log(`OverLyX server listening on http://${config.host}:${config.port}  (projects: ${config.projectsDir}, data: ${config.dataDir}, document workers: ${docWorkers.enabled ? docWorkers.size : 'none'})`);
   docWorkers.warm();
+  if (selfCheckEnabled()) setTimeout(() => void runSelfCheck(config.port), 3000).unref();
 });
 
 for (const sig of ['SIGINT', 'SIGTERM'] as const) {

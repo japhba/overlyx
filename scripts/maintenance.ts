@@ -90,7 +90,7 @@ async function collect(lastScan: number): Promise<Signal[]> {
     const lines = command('journalctl', ['-u', 'overlyx', '--since', since, '-n', '300', '--no-pager', '-o', 'cat']);
     const groups = new Map<string, string[]>();
     for (const line of lines.split('\n')) {
-      if (!/error|exception|unhandled|failed|fatal/i.test(line)) continue;
+      if (!/error|exception|unhandled|failed|fatal|withheld/i.test(line)) continue;
       const template = privateText(line, 500).replace(/\b[\da-f]{8,}\b/gi, '#').replace(/\d+/g, '#');
       const lines = groups.get(template) ?? []; lines.push(privateText(line, 1200)); groups.set(template, lines);
     }
