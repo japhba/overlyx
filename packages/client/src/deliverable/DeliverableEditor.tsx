@@ -32,7 +32,7 @@ import { keepAwake } from '../app/wakelock';
 import { presentFingersDraw, savePresentFingersDraw } from '../app/presentkit';
 import { createPortal } from 'preact/compat';
 import { isFromRuntime } from './protocol';
-import { rebasedSplices, rebaseObjectPaths, objectHtml, imageHtml, insertPlace, newSlideHtml, slidePaths, slideNotes, notesOp, sourceRange, inlineSvgHtml, guidesIn } from './sourceops';
+import { rebasedSplices, rebaseObjectPaths, objectHtml, imageHtml, insertPlace, newSlideHtml, slideDesigns, slidePaths, slideNotes, notesOp, sourceRange, inlineSvgHtml, guidesIn } from './sourceops';
 import { GUIDES_ATTR, LAYOUT_MARGINS_ATTR, layoutMarginGuides, parseGuides, masterGuides, formatGuides, withGuide, type Guide } from './guides';
 import { sizePt, stepPt } from './units';
 import { deckToolbar, quickGroups, type DeckTextActions } from './decktoolbar';
@@ -709,6 +709,8 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   // the slide looked at, for the others (their rails show who is where)
   useEffect(() => { if (kind !== 'page') host.setSlide?.(current); }, [current, kind, host]);
   const slidesRef = useRef(slides); slidesRef.current = slides;
+  /** when a frame last asked for a menu (the slide rail's tap or hold, a right-click on the canvas) */
+  const frameMenuAt = useRef(0);
 
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
@@ -889,6 +891,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
         case 'contextmenu': {
           const f = (fromRail ? railFrame : canvasFrame).current;
           if (!f) break;
+          frameMenuAt.current = performance.now();
           const r = f.getBoundingClientRect();
           const s = fromRail ? railScale : scale;
           const x = r.left + m.x * s, y = r.top + m.y * s;
@@ -943,7 +946,8 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
       }
     };
     addEventListener('message', onMessage);
-    const onBlur = () => setTimeout(() => { if (document.activeElement?.tagName === 'IFRAME') closeContextMenu(); }, 0);
+    // (a click into a frame closes the menu — but not the tap that opened it: iPad Safari focuses the frame as the finger lifts)
+    const onBlur = () => setTimeout(() => { if (document.activeElement?.tagName === 'IFRAME' && performance.now() - frameMenuAt.current > 500) closeContextMenu(); }, 0);
     addEventListener('blur', onBlur);
     return () => { removeEventListener('message', onMessage); removeEventListener('blur', onBlur); };
   });
@@ -1884,10 +1888,11 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
 
   /* ------------------------------------------------------------- slides */
 
-  const newSlide = (after: number, blank = false) => {
+  /** a slide after slide `after`, in slide `like`'s design (newSlideHtml) */
+  const newSlide = (after: number, blank = false, like = after) => {
     const cur = text.toString();
     const ps = slidePaths(cur);
-    const html = newSlideHtml(cur, after, blank);
+    const html = newSlideHtml(cur, like, blank);
     if (!html || !ps.length) return;
     const p = ps[Math.min(after, ps.length - 1)];
     const parent = p.slice(0, -1);
@@ -1914,11 +1919,22 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     applyOps([{ t: 'move', path: p, parent, index: d > 0 ? qi + 1 : qi }]);
     setCurrent(i + d);
   };
+  /** the layouts of a new slide after slide `after`: each of the deck's designs (this slide's first, sourceops slideDesigns), or blank */
+  const layoutItems = (after: number): MenuItem[] => {
+    const titled = (i: number) => { const t = slidesRef.current[i]?.title.trim() ?? ''; return t ? ` · ${t.length > 40 ? t.slice(0, 39) + '…' : t}` : ''; };
+    return [
+      ...slideDesigns(text.toString(), after).map(i => i === after
+        ? { label: `Like this slide${titled(i)}`, shortcut: 'Ctrl+M', action: () => newSlide(after) }
+        : { label: `Like slide ${i + 1}${titled(i)}`, action: () => newSlide(after, false, i) }),
+      { label: 'Blank slide', action: () => newSlide(after, true) },
+    ];
+  };
   const slideMenu = (x: number, y: number, i: number) => {
     const n = slides.length;
     showContextMenu(x, y, [
       { label: 'New slide', action: () => newSlide(i) },
-      { label: 'Blank slide', action: () => newSlide(i, true) },
+      // (a menu of its own, not a submenu: a submenu opens on hover, which a finger does not do)
+      { label: 'New slide in a layout…', action: () => showContextMenu(x, y, layoutItems(i)) },
       { label: 'Duplicate slide', action: () => duplicateSlide(i) },
       { sep: true },
       { label: 'Move up', disabled: i <= 0, action: () => moveSlide(i, -1) },
@@ -2279,6 +2295,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     slideBackground: c => { const sp = slidePaths(text.toString())[currentRef.current]; if (sp) applyOps([{ t: 'style', path: sp, set: { background: c } }]); },
     canvas: { view, set: setView },
     newSlide: () => newSlide(currentRef.current),
+    slideLayouts: () => layoutItems(currentRef.current).map(it => ({ label: it.label!, action: it.action! })),
     ink: { presets: ink, set: setInk, draw: on => setToolState(on ? 'pen' : 'select') },
     review: {
       comment: () => toCanvas({ ol: 'newComment' }),
@@ -2443,6 +2460,8 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
                 data-dl-railgrip onPointerDown={onRailGrip} onDblClick={() => setRail(RAIL_W)} />
               <div class="dl-rail-actions">
                 <button class="dl-btn" title="New slide after this one (Ctrl+M)" data-dl-newslide disabled={locked} onClick={() => newSlide(current)}>+ Slide</button>
+                <button class="dl-btn" title="New slide in a layout: like one of the deck’s slides, or blank" aria-label="New slide in a layout" data-dl-newslide-layouts disabled={locked}
+                  onClick={e => { const r = e.currentTarget.getBoundingClientRect(); showContextMenu(r.left, r.top, layoutItems(current)); }}>▾</button>
               </div>
           </div>
         )}

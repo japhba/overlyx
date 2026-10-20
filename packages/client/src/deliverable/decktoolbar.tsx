@@ -60,6 +60,8 @@ export interface DeckCtx {
   /** the guides (guides.ts): shown or not, and what can be done with them (the slide's right-click menu's Guides) */
   guides: { shown: boolean; items(): { label: string; action: () => void; active?: boolean }[] };
   newSlide(): void;
+  /** the layouts a new slide can take (the deck's own designs, blank) */
+  slideLayouts(): { label: string; action: () => void }[];
   /** LyX's formula editor (MathOverlay): open on a formula of the text, a new formula at the caret, its commands, the math panels; a displayed one numbered and labelled */
   math: { editing: boolean; insert(display: boolean): void; exec(cmd: string, ...args: unknown[]): void; panels: { id: string; title: string; palette: Palette }[]; display: boolean; number(): void; label(): void };
   /** LaTeX's citations, references and overlays on slides (core html/refs.ts) */
@@ -494,7 +496,19 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
           </div>
         ) } },
       // (a poster is one page: a "slide" added to it was invisible — no rail — and a blank page of the PDF)
-      ...(c.kind === 'deck' ? [{ id: 'dk-newslide', title: 'New slide (Ctrl+M)', icon: '+ Slide', action: c.newSlide }, animateButton(c)] : []),
+      ...(c.kind === 'deck' ? [{ id: 'dk-newslide', title: 'New slide (Ctrl+M)', icon: '+ Slide', action: c.newSlide },
+        // (PowerPoint's New Slide ▾: the button beside it)
+        { id: 'dk-layouts', title: 'New slide in a layout: like one of the deck’s slides, or blank', icon: 'Layouts',
+          palette: { title: 'New slide', list: true, render: (close: () => void) => (
+            <div class="tb-popup-grid">
+              {c.slideLayouts().map((it, i) => (
+                <button key={i} type="button" class="tb-pal-item" data-newslide-layout={i} onMouseDown={e => e.preventDefault()} onClick={() => { close(); it.action(); }}>
+                  <span class="tb-pal-label">{it.label}</span>
+                </button>
+              ))}
+            </div>
+          ) } },
+        animateButton(c)] : []),
     ]);
   }
   let out = sections.filter(x => x.groups.length);

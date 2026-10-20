@@ -486,7 +486,29 @@ function pathOfEl(el: HElement): Path {
 export function newSlideHtml(text: string, i: number, blank = false): string | null {
   const { doc, text: t } = parseSource(text);
   const ss = slideElements(doc);
-  const s = ss[i] ?? ss[ss.length - 1];
+  return slideDesign(t, ss, ss[i] ?? ss[ss.length - 1], blank);
+}
+
+/**
+ * The slides whose designs (newSlideHtml's) differ, words aside — `first` first: the layouts a new
+ * slide can take, as Keynote's are the theme's (an HTML deck has no masters: its slides are its layouts).
+ */
+export function slideDesigns(text: string, first = 0): number[] {
+  const { doc, text: t } = parseSource(text);
+  const ss = slideElements(doc);
+  const seen = new Set<string>(), out: number[] = [];
+  for (const i of [first, ...ss.keys()]) {
+    const html = ss[i] ? slideDesign(t, ss, ss[i], false) : null;
+    // (a page number, a date in the footer: the same design on every slide)
+    const key = html?.replace(/>[^<]*</g, '><');
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(i);
+  }
+  return out;
+}
+
+function slideDesign(t: string, ss: HElement[], s: HElement | undefined, blank: boolean): string | null {
   if (!s?.sourceCodeLocation?.startTag) return null;
   const open = t.slice(s.sourceCodeLocation.startTag.startOffset, s.sourceCodeLocation.startTag.endOffset);
   const close = `</${s.tagName}>`;

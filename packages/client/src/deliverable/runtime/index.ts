@@ -62,7 +62,7 @@ function printCss(): void {
 let railCurrent = -1;
 let railScale = 0.15;
 let railLayer: HTMLElement | null = null;
-let railDrag: { from: number; y0: number; to: number | null } | null = null;
+let railDrag: { from: number; y0: number; to: number | null; x: number; y: number; touch: boolean; hold?: ReturnType<typeof setTimeout> } | null = null;
 /** the others on the page: a dot with their initials on the slide they are at */
 let railPeers: PeerInfo[] = [];
 /** who the rail shows where (`window.__ol.railPeers()`, for tests) */
@@ -85,7 +85,7 @@ const initials = (name: string): string => {
 };
 
 function startThumb(): void {
-  addStyle(`html, body { scrollbar-width: none; } html::-webkit-scrollbar { display: none; } html, html * { cursor: pointer !important; }`);
+  addStyle(`html, body { scrollbar-width: none; } html::-webkit-scrollbar { display: none; } html, html * { cursor: pointer !important; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }`);
   const host = document.createElement('ol-overlay');
   host.setAttribute('data-ol-runtime', '');
   host.style.cssText = 'all:initial;position:absolute;left:0;top:0;width:0;height:0;z-index:2147483647;pointer-events:none;display:block;';
@@ -108,9 +108,14 @@ function startThumb(): void {
     if (e.button !== 0) return;
     const i = slideAt(e.pageY);
     if (i < 0) return;
-    railDrag = { from: i, y0: e.pageY, to: null };
+    const d: NonNullable<typeof railDrag> = { from: i, y0: e.pageY, to: null, x: e.clientX, y: e.clientY, touch: e.pointerType !== 'mouse' };
+    // a finger or a pen has no right button, and iPad Safari sends no contextmenu: a slide held
+    // still for a moment opens its menu (as the canvas picks up an object, edit.ts)
+    if (d.touch) d.hold = setTimeout(() => { if (railDrag !== d || d.to !== null) return; railEnd(); post({ ol: 'contextmenu', x: d.x, y: d.y, slide: d.from }); }, 450);
+    railDrag = d;
     addEventListener('pointermove', railMove, true);
     addEventListener('pointerup', railUp, true);
+    addEventListener('pointercancel', railEnd, true);
   }, true);
   addEventListener('contextmenu', e => {
     e.preventDefault(); e.stopPropagation();
@@ -139,6 +144,7 @@ function dropIndex(y: number): number {
 function railMove(e: PointerEvent): void {
   if (!railDrag) return;
   if (railDrag.to === null && Math.abs(e.pageY - railDrag.y0) * railScale < 6) return;
+  if (railDrag.hold) { clearTimeout(railDrag.hold); railDrag.hold = undefined; }
   railDrag.to = dropIndex(e.pageY);
   const ss = slides(), r0 = docRect(ss[0] ?? document.body);
   if (scrollY > 0 && e.clientY < 40) scrollBy(0, -20 / railScale);
@@ -147,13 +153,22 @@ function railMove(e: PointerEvent): void {
   void r0;
 }
 
-function railUp(e: PointerEvent): void {
+/** the press on the rail is over (lifted, held for the menu, or taken by the browser's scrolling) */
+function railEnd(): void {
   removeEventListener('pointermove', railMove, true);
   removeEventListener('pointerup', railUp, true);
-  const d = railDrag;
+  removeEventListener('pointercancel', railEnd, true);
+  if (railDrag?.hold) clearTimeout(railDrag.hold);
   railDrag = null;
   drawRail();
+}
+
+function railUp(e: PointerEvent): void {
+  const d = railDrag;
+  railEnd();
   if (!d) return;
+  // a tap on the slide already shown opens its menu, as in Keynote and PowerPoint on an iPad
+  if (d.to === null && d.touch && d.from === railCurrent) { post({ ol: 'contextmenu', x: e.clientX, y: e.clientY, slide: d.from }); return; }
   if (d.to === null) { post({ ol: 'goto', slide: d.from }); return; }
   const ss = slides();
   const moved = ss[d.from];

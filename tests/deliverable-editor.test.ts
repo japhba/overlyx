@@ -6,7 +6,7 @@
  * change (deliverable/runtime/reconcile.ts).
  */
 import { describe, it, expect, beforeAll } from 'vitest';
-import { rebasedSplices, rebaseObjectPaths, applyTo, objectHtml, insertPlace, newSlideHtml, slidePaths, slideNotes, notesOp } from '../packages/client/src/deliverable/sourceops.ts';
+import { rebasedSplices, rebaseObjectPaths, applyTo, objectHtml, insertPlace, newSlideHtml, slideDesigns, slidePaths, slideNotes, notesOp } from '../packages/client/src/deliverable/sourceops.ts';
 import { applyOp, parseSource, elementAt } from '../packages/core/src/html/source.ts';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -119,6 +119,21 @@ describe('the editor changes the text', () => {
     expect(ps).toEqual([[1, 0], [1, 1]]);
     const out = applyOp(DECK, { t: 'insert', parent: [1], index: 2, html });
     expect(slidePaths(out)).toHaveLength(3);
+  });
+
+  it('the layouts of a new slide: one per design among the slides, words aside, the current one first', () => {
+    const slide = (body: string) => `<section class="slide">\n  ${body}\n</section>`;
+    const bar = '<div class="decoration" style="position: absolute; left: 0; top: 84px; width: 1280px; height: 4px"></div>';
+    const deck = `<!doctype html><html><body>\n${[
+      slide(`<h1>Tea tasting</h1>\n  ${bar}`),
+      slide('<h2>Milk first</h2>\n  <p>Four cups of each.</p>'),
+      slide('<h2>Tea first</h2>\n  <svg class="ol-ink"><path d="M0 0L9 9"/></svg>'),
+      slide(`<h1>Results</h1>\n  ${bar}`),
+    ].join('\n')}\n</body></html>`;
+    // the title slide and the closing slide look alike, and so do the two content slides
+    expect(slideDesigns(deck)).toEqual([0, 1]);
+    expect(slideDesigns(deck, 2)).toEqual([2, 0]);
+    expect(newSlideHtml(deck, 3)).toContain('class="decoration"');
   });
 
   it('speaker notes: read, changed, added, removed', () => {
