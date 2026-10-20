@@ -417,6 +417,25 @@ describe('a client connecting while its document opens', () => {
       await Promise.race([synced2, sleep(20000).then(() => { throw new Error('no sync step 2 for the big document'); })]);
       expect(docJSON(client2)).toBe(docJSON(big.ydoc));
       ws2.close();
+      // an HTML page and a whiteboard have no model: their editors connect without one and are synced
+      writeFileSync(path('wsopen', 'deck.html'), '<!doctype html><section class="slide"><h1>Tea</h1></section>');
+      writeFileSync(path('wsopen', 'notes.board'), '{"overlyx":"board","v":1,"objects":{}}');
+      for (const rel of ['deck.html', 'notes.board']) {
+        const peer = new Y.Doc();
+        const ws3 = new WebSocket(`ws://127.0.0.1:${port}/ws?doc=${encodeURIComponent(`u/wsopen/${rel}`)}`, { headers: { cookie: `ol_session=${signSession(toSessionUser(user))}` } });
+        ws3.binaryType = 'arraybuffer';
+        const synced3 = new Promise<void>((resolve) => {
+          ws3.on('message', (data: ArrayBuffer) => {
+            const dec = decoding.createDecoder(new Uint8Array(data));
+            if (decoding.readVarUint(dec) !== 0) return;
+            if (syncProtocol.readSyncMessage(dec, encoding.createEncoder(), peer, 'server') === syncProtocol.messageYjsSyncStep2) resolve();
+          });
+        });
+        ws3.on('open', () => { const enc = encoding.createEncoder(); encoding.writeVarUint(enc, 0); syncProtocol.writeSyncStep1(enc, peer); ws3.send(encoding.toUint8Array(enc)); });
+        await Promise.race([synced3, sleep(10000).then(() => { throw new Error(`no sync step 2 for ${rel}`); })]);
+        if (rel === 'deck.html') expect(peer.getText('html').toString()).toContain('<h1>Tea</h1>');
+        ws3.close();
+      }
     } finally {
       manager.open = open;
       server.close();
