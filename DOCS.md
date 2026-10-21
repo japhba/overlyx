@@ -3530,7 +3530,15 @@ the ForumMagnum sources it follows (`app/api/mcp/mcpServer.ts`, `app/api/agent/*
   consent page with PKCE (scope `lesswrong:access`, resource `…/api/mcp`). The access token lasts
   90 days and has no refresh token: the dialog offers *Connect again* in its last two weeks; stored
   encrypted in `lesswrong_accounts`. The MCP server is stateless, so each tool call is one JSON-RPC
-  `tools/call` POST with the bearer token (no `initialize`).
+  `tools/call` POST with the bearer token (no `initialize`). **The way back is a POST**: LessWrong's
+  consent form answers Allow with a 307 (Next.js `NextResponse.redirect`), so the browser repeats the
+  form POST to `/api/lesswrong/callback` — cross-site, so without the `SameSite=Lax` session cookie
+  (the first try on 21 Oct got `{"error":"not authenticated"}`). The callback therefore lives outside
+  the signed-in API (`lessWrongCallbackRoutes`): the POST is sent on as a 303 GET, which carries the
+  session. The connection under way (state, PKCE verifier) is in an encrypted cookie, so a deploy
+  meanwhile does not lose it. `[lesswrong]` log lines say how a connection went.
+  `scratch/lw-oauth-fake.mjs` plays LessWrong's OAuth (307 included) for
+  `scratch/lw-connect-probe.mts` (a server with `OVERLYX_LESSWRONG_URL=http://localhost:3005`).
 * **Linking.** LessWrong's API cannot create or publish posts (its GraphQL API takes only the
   site's login cookie), so the user starts a post on LessWrong — in the normal rich-text (Lexical)
   editor: **the agent API does not work on posts in LessWrong's Markdown mode** — and pastes its

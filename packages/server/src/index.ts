@@ -46,7 +46,7 @@ import { accessibleProjects, adoptProjects, roleFor, atLeast, isRole, registerPr
 import { canonicalProject, canonicalDocId } from './namespaces.ts';
 import { gdocsRoutes } from './gdocs/routes.ts';
 import { startAutoSync, filesMoved } from './gdocs/sync.ts';
-import { lessWrongRoutes } from './lesswrong/routes.ts';
+import { lessWrongRoutes, lessWrongCallbackRoutes } from './lesswrong/routes.ts';
 import { startLessWrongAutoSync, lwFilesMoved } from './lesswrong/sync.ts';
 import { groupFileMoved } from './docgroups.ts';
 import { ownProjectKey } from './projectCreate.ts';
@@ -82,6 +82,8 @@ app.use(cliLoginRoutes());   // `overlyx auth login` through the browser (after 
 // therefore lives outside the authenticated API; all ordinary feedback remains authenticated.
 app.use('/api', vscodeTelemetryRoutes());
 app.use('/api', vscodeUsageRoutes());
+// coming back from LessWrong's consent page: a cross-site POST without the session (lesswrong/api.ts callbackPost)
+app.use('/api', lessWrongCallbackRoutes());
 
 // a guest who signs in: their open editors hold the guest's identity — reconnect them as the account
 app.use('/api/auth', authRouter({ onGuestAdopted: (projects, guestId) => { for (const p of projects) manager.kick(p, [guestId], 'signed in'); } }));

@@ -4,7 +4,8 @@
  *
  *   GET  /lesswrong/status?doc=<id>    the account's LessWrong connection, the document's link
  *   GET  /lesswrong/connect?next=#/…   to LessWrong's consent page, back to `next`
- *   GET  /lesswrong/callback           LessWrong's answer (api.ts finishConnect)
+ *   GET  /lesswrong/callback           LessWrong's answer (api.ts finishConnect) — with its POST, outside the
+ *                                      signed-in API (index.ts: LessWrong sends the browser back with a POST)
  *   POST /lesswrong/disconnect         forget (and revoke) the account's LessWrong authorisation
  *   POST /docs/<id>/lesswrong/link     { url, keep? } link the document to the draft the URL names
  *                                      (an edit URL with its link-sharing key, a post URL, an id)
@@ -17,13 +18,24 @@ import express from 'express';
 import { projectOfDoc } from '@overlyx/core';
 import { roleFor, atLeast } from '../access.ts';
 import { canonicalDocId } from '../namespaces.ts';
-import { lessWrongAccount, startConnect, finishConnect, disconnectLessWrong, parsePostRef, LESSWRONG_STUB } from './api.ts';
+import { lessWrongAccount, startConnect, finishConnect, callbackPost, disconnectLessWrong, parsePostRef, LESSWRONG_STUB } from './api.ts';
 import { lwLinkOf, publicLwLink, linkPost, setLinkKey, syncDoc, unlinkPost, setLwAuto, setLessWrongApiFactory } from './sync.ts';
 import { FakeLessWrong } from './fake.ts';
 
 const docIdOf = (req: express.Request) => canonicalDocId(decodeURIComponent(String((req.params as Record<string, string>)[0] ?? '')));
-const failure = (res: express.Response, e: unknown) => { res.status(400).json({ error: (e as Error).message }); };
+const failure = (res: express.Response, e: unknown, what = '') => {
+  if (what) console.warn(`[lesswrong] ${what}: ${(e as Error).message.slice(0, 200)}`);
+  res.status(400).json({ error: (e as Error).message });
+};
 const BAD_URL = 'Paste the draft’s address from LessWrong: its edit page (lesswrong.com/editPost?postId=…) or the post’s page (lesswrong.com/posts/…)';
+
+/** LessWrong's way back (mounted before the signed-in API: it arrives as a cross-site POST, without the session) */
+export function lessWrongCallbackRoutes(): express.Router {
+  const r = express.Router();
+  r.post('/lesswrong/callback', callbackPost);
+  r.get('/lesswrong/callback', (req, res) => { void finishConnect(req, res); });
+  return r;
+}
 
 export function lessWrongRoutes(): express.Router {
   const r = express.Router();
@@ -39,7 +51,6 @@ export function lessWrongRoutes(): express.Router {
     if (req.user!.guest) { res.status(403).send('Sign in to connect LessWrong'); return; }
     void startConnect(req, res);
   });
-  r.get('/lesswrong/callback', (req, res) => { void finishConnect(req, res); });
 
   r.post('/lesswrong/disconnect', async (req, res) => {
     await disconnectLessWrong(req.user!.id);
@@ -53,8 +64,9 @@ export function lessWrongRoutes(): express.Router {
       const ref = parsePostRef(String(req.body?.url ?? ''));
       if (!ref) { res.status(400).json({ error: BAD_URL }); return; }
       const link = await linkPost(id, req.user!.id, ref, req.body?.keep === 'merge' ? 'merge' : 'ours');
+      console.log(`[lesswrong] ${id}: linked to post ${ref.postId}${ref.key ? ' (with its link-sharing key)' : ''}`);
       res.json({ link: publicLwLink(link) });
-    } catch (e) { failure(res, e); }
+    } catch (e) { failure(res, e, `${docIdOf(req)}: linking failed`); }
   });
 
   r.post('/docs/*/lesswrong/key', async (req, res) => {
@@ -76,7 +88,7 @@ export function lessWrongRoutes(): express.Router {
       if (!lwLinkOf(id)) { res.status(404).json({ error: 'This document is not linked to a LessWrong draft' }); return; }
       const report = await syncDoc(id);
       res.json({ report, link: publicLwLink(lwLinkOf(id)) });
-    } catch (e) { failure(res, e); }
+    } catch (e) { failure(res, e, `${docIdOf(req)}: sync failed`); }
   });
 
   r.post('/docs/*/lesswrong/unlink', (req, res) => {

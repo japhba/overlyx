@@ -17,6 +17,7 @@
  */
 import crypto from 'node:crypto';
 import type { Request, Response } from 'express';
+import { parse as parseCookie } from 'cookie';
 import { db } from '../db.ts';
 import { config } from '../config.ts';
 import { sealer } from '../sealed.ts';
@@ -89,8 +90,20 @@ const back = (res: Response, next: string, msg?: string) => {
   res.redirect('/' + base + (base.includes('?') ? '&' : '?') + 'lesswrong=' + encodeURIComponent(msg ?? 'connected'));
 };
 
-/** connections under way: state → who, the PKCE verifier, where to go back to */
-const pending = new Map<string, { userId: number; verifier: string; next: string; redirectUri: string; at: number }>();
+/**
+ * A connection under way — its state, who asked, the PKCE verifier, where to go back to — in an
+ * encrypted cookie (not the server's memory: a deploy while someone is on LessWrong's consent page
+ * must not lose it).
+ */
+interface Pending { state: string; userId: number; verifier: string; next: string; redirectUri: string; at: number }
+const PENDING_COOKIE = 'ol_lw_connect';
+const pendingSeal = sealer('lesswrong-connect');
+const PENDING_MS = 30 * 60_000;
+function pendingOf(req: Request): Pending | null {
+  const raw = parseCookie(req.headers.cookie ?? '')[PENDING_COOKIE];
+  if (!raw) return null;
+  try { const p = JSON.parse(pendingSeal.unseal(raw)) as Pending; return Date.now() - p.at < PENDING_MS ? p : null; } catch { return null; }
+}
 
 /** GET /api/lesswrong/connect: to LessWrong's consent page (signed in there, or signing in first). */
 export async function startConnect(req: Request & { user?: { id: number } }, res: Response): Promise<void> {
@@ -102,8 +115,9 @@ export async function startConnect(req: Request & { user?: { id: number } }, res
     const client = await clientFor(uri);
     const state = crypto.randomBytes(16).toString('hex');
     const verifier = crypto.randomBytes(32).toString('base64url');
-    for (const [k, v] of pending) if (Date.now() - v.at > 15 * 60_000) pending.delete(k);
-    pending.set(state, { userId: req.user.id, verifier, next, redirectUri: uri, at: Date.now() });
+    const p: Pending = { state, userId: req.user.id, verifier, next, redirectUri: uri, at: Date.now() };
+    res.cookie(PENDING_COOKIE, pendingSeal.seal(JSON.stringify(p)), { httpOnly: true, sameSite: 'lax', secure: uri.startsWith('https:'), maxAge: PENDING_MS, path: '/api/lesswrong' });
+    console.log(`[lesswrong] user ${req.user.id}: to LessWrong's consent page (client ${client.id}, back to ${uri})`);
     const url = new URL(LW_URL + '/oauth/authorize');
     url.searchParams.set('response_type', 'code');
     url.searchParams.set('client_id', client.id);
@@ -114,16 +128,27 @@ export async function startConnect(req: Request & { user?: { id: number } }, res
     url.searchParams.set('code_challenge_method', 'S256');
     url.searchParams.set('resource', MCP_URL);
     res.redirect(url.toString());
-  } catch (e) { back(res, next, (e as Error).message); }
+  } catch (e) {
+    console.warn(`[lesswrong] user ${req.user.id}: connecting failed before LessWrong's consent page: ${(e as Error).message.slice(0, 200)}`);
+    back(res, next, (e as Error).message);
+  }
 }
 
-/** GET /api/lesswrong/callback: LessWrong's answer — the token kept for the account that asked. */
+/**
+ * POST /api/lesswrong/callback (outside the signed-in API): LessWrong's consent page answers its
+ * form with a 307 redirect (Next.js NextResponse.redirect), so the browser repeats the POST here —
+ * cross-site, so without the session cookie (SameSite=Lax). Sent on as a GET, it has it.
+ */
+export function callbackPost(req: Request, res: Response): void { res.redirect(303, req.originalUrl); }
+
+/** GET /api/lesswrong/callback (outside the signed-in API): LessWrong's answer — the token kept for the account that asked. */
 export async function finishConnect(req: Request & { user?: { id: number } }, res: Response): Promise<void> {
-  const p = pending.get(String(req.query.state ?? ''));
-  if (!p) { res.status(400).send('This LessWrong connection is unknown or expired — connect again from File ▸ LessWrong'); return; }
-  pending.delete(String(req.query.state));
-  if (!req.user || req.user.id !== p.userId) { res.status(401).send('Sign in with the account that connected LessWrong'); return; }
-  if (req.query.error) { back(res, p.next, 'LessWrong was not connected (' + String(req.query.error) + ')'); return; }
+  const p = pendingOf(req);
+  const fail = (status: number, msg: string, why: string) => { console.warn(`[lesswrong] callback: ${why}`); res.status(status).type('text/plain').send(msg); };
+  if (!p || p.state !== String(req.query.state ?? '')) { fail(400, 'This LessWrong connection is unknown or expired — connect again from File ▸ LessWrong.', p ? 'state does not match' : 'no connection under way (cookie missing or expired)'); return; }
+  res.clearCookie(PENDING_COOKIE, { path: '/api/lesswrong' });
+  if (!req.user || req.user.id !== p.userId) { fail(401, 'Sign in to OverLyX with the account that connected LessWrong, then connect again from File ▸ LessWrong.', req.user ? `signed in as ${req.user.id}, connection was user ${p.userId}` : 'not signed in'); return; }
+  if (req.query.error) { console.warn(`[lesswrong] user ${p.userId}: LessWrong answered ${String(req.query.error).slice(0, 60)}`); back(res, p.next, 'LessWrong was not connected (' + String(req.query.error) + ')'); return; }
   try {
     const client = await clientFor(p.redirectUri);
     const r = await fetch(LW_URL + '/oauth/token', {
@@ -132,10 +157,18 @@ export async function finishConnect(req: Request & { user?: { id: number } }, re
       body: new URLSearchParams({ grant_type: 'authorization_code', code: String(req.query.code ?? ''), redirect_uri: p.redirectUri, client_id: client.id, client_secret: client.secret, code_verifier: p.verifier, resource: MCP_URL }),
     });
     const tok = await r.json().catch(() => ({})) as { access_token?: string; expires_in?: number; scope?: string; error_description?: string; error?: string };
-    if (!tok.access_token) { back(res, p.next, 'LessWrong did not grant access (' + (tok.error_description ?? tok.error ?? r.status) + ')'); return; }
+    if (!tok.access_token) {
+      console.warn(`[lesswrong] user ${p.userId}: token exchange refused (${r.status} ${tok.error ?? ''}: ${(tok.error_description ?? '').slice(0, 200)})`);
+      back(res, p.next, 'LessWrong did not grant access (' + (tok.error_description ?? tok.error ?? r.status) + ')');
+      return;
+    }
     storeToken(p.userId, tok.access_token, tok.expires_in ?? 90 * 86400, tok.scope ?? SCOPE);
+    console.log(`[lesswrong] user ${p.userId}: connected (scope ${tok.scope ?? SCOPE}, ${Math.round((tok.expires_in ?? 0) / 86400)} days)`);
     back(res, p.next);
-  } catch (e) { back(res, p.next, 'LessWrong was not connected: ' + (e as Error).message); }
+  } catch (e) {
+    console.warn(`[lesswrong] user ${p.userId}: token exchange failed: ${(e as Error).message.slice(0, 200)}`);
+    back(res, p.next, 'LessWrong was not connected: ' + (e as Error).message);
+  }
 }
 
 function storeToken(userId: number, token: string, expiresIn: number, scope: string): void {
