@@ -5,8 +5,8 @@
  *
  * It describes this code — keep it in step when data handling changes: feedback.ts (reports),
  * accounts.ts (deletion, trash), usage.ts (statistics), access.ts (activity log, guests, admin
- * access), mirror.ts (GitHub backup), ai.ts / airepair.ts / agent.ts / bibsearch.ts / gdocs
- * (third parties), scripts/backup.sh (backups).
+ * access), mirror.ts (GitHub backup), ai.ts / airepair.ts / agent.ts / bibsearch.ts / gdocs /
+ * lesswrong (third parties), scripts/backup.sh (backups).
  *
  * Who runs the instance comes from the environment: OVERLYX_OPERATOR (a name) and
  * OVERLYX_PRIVACY_CONTACT (an e-mail address; else OVERLYX_CONTACT_EMAIL, the contact address of the
@@ -104,6 +104,7 @@ ${google ? `<tr><td>Google</td><td>Signs you in. With Google Docs sync, the link
 <tr><td>Google Fonts (fonts.googleapis.com, fonts.gstatic.com)</td><td>The name of a font a markdown document asks for, the first time any document does (the files are kept on this server and served from here: your browser does not contact Google)</td><td>When a document names a font this server does not have</td></tr>
 <tr><td>OpenAlex, DBLP, doi.org (Crossref, DataCite), arXiv, OpenReview, bioRxiv, PubMed (NCBI), the ACL Anthology, HAL, Semantic Scholar, Open Library, and SerpApi where enabled</td><td>The words you search for when you look up a citation, and the DOIs, arXiv ids and other identifiers you enter</td><td>When you search for literature</td></tr>
 <tr><td>The website of a paper link you paste into the citation search</td><td>A request for that page from our server, to read the paper's title, authors and DOI. It does not get your IP address or account</td><td>Only when you paste such a link</td></tr>
+<tr><td>LessWrong (Lightcone Infrastructure, USA)</td><td>With LessWrong sync, the linked document's text and comment threads go to the LessWrong draft you link it to, and that draft's text and comments come back. We keep LessWrong's authorisation (valid 90 days) and the draft's link-sharing key, encrypted, until you disconnect LessWrong, unlink the document or delete your account</td><td>Only if you connect LessWrong and link a document (File ▸ LessWrong)</td></tr>
 <tr><td>Zotero (Corporation for Digital Scholarship, USA)</td><td>Your Zotero API key and the words you search for, to find the matching items in your Zotero library and its groups. We keep the key, encrypted, until you disconnect Zotero or delete your account; we never write to your library</td><td>Only if you connect Zotero (Settings ▸ Account)</td></tr>
 <tr><td>Google Fonts and other font or script hosts</td><td>Slides, posters and web pages can load fonts or libraries from these services. The browser of whoever views them then contacts the service, which sees that viewer's IP address</td><td>When you view a slide deck, poster or page that uses them</td></tr>
 </table>

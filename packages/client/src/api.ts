@@ -198,8 +198,12 @@ export interface GdocsStatus {
 /** what Google's file picker needs (app/gpicker.ts); the e2e stub offers the simulated account's Google Docs */
 /** a synced clone of the project working right now (server syncPeers.ts) — `host` only for the viewer's own */
 export interface SyncClone { name: string; username: string; app: 'vscode' | 'cli' | 'other'; host: string | null; mine: boolean; since: number; lastSeen: number }
-/** what keeps a document in step from elsewhere: synced clones of its project, its Google Docs link */
-export interface ExternalSync { clones: SyncClone[]; google: { url: string; auto: boolean; lastSync: number | null; lastError: string | null } | null; googleUnlinked?: boolean }
+/** what keeps a document in step from elsewhere: synced clones of its project, its Google Docs and LessWrong links */
+export interface ExternalSync { clones: SyncClone[]; google: { url: string; auto: boolean; lastSync: number | null; lastError: string | null } | null; googleUnlinked?: boolean; lesswrong?: { url: string; auto: boolean; lastSync: number | null; lastError: string | null } }
+/** a document's link to a LessWrong draft (server lesswrong/sync.ts publicLwLink) */
+export interface LessWrongLink { postId: string; title: string | null; draft: boolean | null; url: string; comments: boolean; auto: boolean; lastSync: number | null; lastError: string | null; linkedBy: number; warnings: string[] }
+export interface LessWrongStatus { account: { expiresAt: number } | null; link: LessWrongLink | null; canEdit: boolean; guest: boolean }
+export interface LessWrongReport { pulled: number; pushed: number; rounds: number; comments: { fromLessWrong: number; toLessWrong: number }; warnings: string[]; notes: string[] }
 export type GdocsPicker = { stub: true; files: { id: string; name: string }[] } | { stub?: false; apiKey: string; appId: string; token: string };
 /** a front matter value of a markdown document (core md/typesetting.ts FMValue) */
 export type MdFrontMatterValue = string | string[] | { [key: string]: MdFrontMatterValue };
@@ -412,6 +416,16 @@ export const api = {
   gdocsAuto: (id: string, auto: boolean) => req<{ link: GdocsLink }>('POST', `/api/docs/${encId(id)}/gdocs/auto`, { auto }),
   gdocsUnlink: (id: string) => req<{ ok: boolean }>('POST', `/api/docs/${encId(id)}/gdocs/unlink`),
   gdocsDisconnect: () => req<{ ok: boolean }>('POST', '/api/gdocs/disconnect'),
+  // the LessWrong sync (server lesswrong/)
+  lwStatus: (id: string) => req<LessWrongStatus>('GET', `/api/lesswrong/status?doc=${encId(id)}`),
+  /** link to the draft `url` names; `keep` when both hold text: 'ours' replaces the draft's, 'merge' brings its differences as tracked changes */
+  lwLink: (id: string, url: string, keep: 'ours' | 'merge') => req<{ link: LessWrongLink }>('POST', `/api/docs/${encId(id)}/lesswrong/link`, { url, keep }),
+  /** the draft's link-sharing address (its comment threads then sync both ways) */
+  lwKey: (id: string, url: string) => req<{ link: LessWrongLink }>('POST', `/api/docs/${encId(id)}/lesswrong/key`, { url }),
+  lwSync: (id: string) => req<{ link: LessWrongLink; report: LessWrongReport }>('POST', `/api/docs/${encId(id)}/lesswrong/sync`),
+  lwAuto: (id: string, auto: boolean) => req<{ link: LessWrongLink }>('POST', `/api/docs/${encId(id)}/lesswrong/auto`, { auto }),
+  lwUnlink: (id: string) => req<{ ok: boolean }>('POST', `/api/docs/${encId(id)}/lesswrong/unlink`),
+  lwDisconnect: () => req<{ ok: boolean }>('POST', '/api/lesswrong/disconnect'),
   build: (id: string, withTex = false) => req<{ build: BuildInfo | null; job: BuildJob | null; /** the server's clock */ now?: number }>('GET', `/api/docs/${encId(id)}/build${withTex ? '?tex=1' : ''}`),
   users: () => req<{ users: AdminUser[] }>('GET', '/api/users'),
   createUser: (username: string, name: string, password?: string) => req<{ user: User; password: string }>('POST', '/api/users', { username, name, password }),

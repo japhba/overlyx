@@ -27,8 +27,10 @@ import { deleteMirror, deleteArchivedMirror } from './mirror.ts';
 import { removeWorkspace } from './agentwork.ts';
 import { forgetAgentUser } from './agent.ts';
 import { disconnectDrive } from './gdocs/google.ts';
+import { disconnectLessWrong } from './lesswrong/api.ts';
 import { disconnectZotero } from './zotero.ts';
 import './gdocs/sync.ts';   // its gdocs_links table
+import './lesswrong/sync.ts';   // its lesswrong_links table
 import { forgetUserReports } from './feedback.ts';
 
 export const TRASH_DAYS = 30;
@@ -77,6 +79,7 @@ async function eraseProject(project: string, live: LiveDocs): Promise<void> {
     for (const t of ['project_members', 'admin_grants', 'access_log', 'agent_threads']) db.prepare(`DELETE FROM ${t} WHERE project = ?`).run(project);
     db.prepare('DELETE FROM project_aliases WHERE name = ?').run(project);
     db.prepare('DELETE FROM gdocs_links WHERE substr(doc_id, 1, ?) = ?').run(...docPrefix(project));
+    db.prepare('DELETE FROM lesswrong_links WHERE substr(doc_id, 1, ?) = ?').run(...docPrefix(project));
     db.prepare('DELETE FROM projects WHERE name = ?').run(project);
   })();
   await deleteMirror(project);
@@ -128,12 +131,13 @@ export async function deleteAccount(user: SessionUser, live: LiveDocs): Promise<
   forgetAgentUser(id);
   for (const t of db.prepare('SELECT thread_id FROM agent_threads WHERE user_id = ?').all(id) as { thread_id: string }[]) removeWorkspace(t.thread_id);
   await disconnectDrive(id).catch(() => undefined);
+  await disconnectLessWrong(id).catch(() => undefined);
   disconnectZotero(id);
   db.transaction(() => {
     const agents = (db.prepare('SELECT id FROM mcp_agents WHERE user_id = ?').all(id) as { id: number }[]).map(a => a.id);
     for (const a of agents) db.prepare('DELETE FROM mcp_sessions WHERE agent_id = ?').run(a);
     for (const t of ['project_members', 'git_tokens', 'mcp_tokens', 'oauth_codes', 'oauth_grants', 'mcp_agent_messages', 'mcp_agents',
-      'agent_threads', 'user_doc_state', 'starter_projects', 'admin_grants', 'gdocs_links']) db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).run(id);
+      'agent_threads', 'user_doc_state', 'starter_projects', 'admin_grants', 'gdocs_links', 'lesswrong_links']) db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).run(id);
     db.prepare('UPDATE access_log SET user_id = NULL WHERE user_id = ?').run(id);
     db.prepare('UPDATE project_members SET added_by = NULL WHERE added_by = ?').run(id);
     db.prepare('UPDATE pdf_links SET created_by = NULL WHERE created_by = ?').run(id);

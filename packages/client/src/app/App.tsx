@@ -6,6 +6,7 @@ import { ToolbarDock } from './tbdock';
 import { ContextBars, contextBars } from './ctxdock';
 import { StatsDialog } from './StatsDialog';
 import { GoogleDocsDialog } from './GoogleDocs';
+import { LessWrongDialog } from './LessWrong';
 import { documentMenus } from './documentMenus';
 import { referenceTransaction } from '../editor/references';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from 'preact/hooks';
@@ -1342,6 +1343,15 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     if (what !== 'connected') notify(what, 'error');
     setDialog({ name: 'gdocs' });
   }, [docId]);
+  // back from LessWrong's consent page (File ▸ LessWrong… ▸ Connect): the dialog again
+  useEffect(() => {
+    const m = /[?&]lesswrong=([^&]*)/.exec(location.hash);
+    if (!m || !docId) return;
+    const what = decodeURIComponent(m[1]);
+    history.replaceState(null, '', location.pathname + location.search + location.hash.replace(/[?&]lesswrong=[^&]*/, ''));
+    if (what !== 'connected') notify(what, 'error');
+    setDialog({ name: 'lesswrong' });
+  }, [docId]);
   const menus: MenuDef[] = [...(isProjectRoot ? projectRootMenus : docId && !isLyxDoc ? textFileMenus : docId ? [
     { title: 'File', items: [
       { label: 'New…', shortcut: 'Ctrl+N', action: () => editorContext.ui?.newFile() },
@@ -1373,6 +1383,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       { label: 'Versions…', action: () => setRightTab('versions') },
       { label: 'Share project…', action: () => setShareFor(projectOfDoc(docId)) },
       { label: 'Google Docs (sync, comments)…', action: () => setDialog({ name: 'gdocs' }) },
+      { label: 'LessWrong (sync, comments)…', action: () => setDialog({ name: 'lesswrong' }) },
       { label: 'Git repository…', action: () => setGitFor(projectOfDoc(docId)) },
       { sep: true },
       { label: 'Close (back to the projects)', action: closeDoc },
@@ -1603,6 +1614,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       case 'airepair': return docId ? <AiRepairDialog docId={docId} onClose={close} onApplied={() => api.meta(docId).then(m => { setMeta(m); editorContext.meta = m; })} /> : null;
       case 'stats': return view ? <StatsDialog view={view} onClose={close} /> : null;
       case 'gdocs': return docId ? <GoogleDocsDialog docId={docId} onClose={close} notify={notify} /> : null;
+      case 'lesswrong': return docId ? <LessWrongDialog docId={docId} onClose={close} notify={notify} /> : null;
       case 'tex': return <TexDialog tex={String(dialog.arg ?? '')} onClose={close} />;
       case 'layout': return <LayoutPicker layouts={layouts} onClose={close} onPick={n => run(C.setLayout(n))} />;
       case 'argument': { run(C.insertArgument(String(dialog.arg ?? '1'))); setDialog(null); return null; }
@@ -1654,7 +1666,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
 
   // "⇄ In sync with VS Code / Google Docs": the document is kept in step with a copy elsewhere (SyncChip.tsx)
   const externalSync = useExternalSync(textId);
-  const syncChip = <SyncChip ext={externalSync} onOpen={g => { if (g && isLyxDoc) setDialog({ name: 'gdocs' }); else if (textId) setGitFor(projectOfDoc(textId)); }} />;
+  const syncChip = <SyncChip ext={externalSync} onOpen={what => { if (what !== 'git' && isLyxDoc) setDialog({ name: what }); else if (textId) setGitFor(projectOfDoc(textId)); }} />;
 
   // a guest signs in: with Google directly (back to this document afterwards), else on the sign-in page
   const signIn = () => { if (google) location.assign(googleSignInUrl()); else onSignIn(); };

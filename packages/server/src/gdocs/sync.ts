@@ -40,6 +40,7 @@ import { attachObjectSources, bindImportedObjects, type ObjectBindings } from '.
 import { reconcileGroup } from './importing.ts';
 import { googleApi, GoogleAuthError, type GComment, type GoogleApi } from './google.ts';
 import { roleFor, atLeast } from '../access.ts';
+import { lcsPairs, lcsRegions } from '../lcs.ts';
 import { toSessionUser } from '../auth.ts';
 import type { UserRow } from '../db.ts';
 
@@ -269,7 +270,7 @@ export function syncDoc(docId: string, opts: { pullTracked?: boolean } = {}): Pr
  * Whether the person who linked the document may still edit it: a collaborator removed from the
  * project (or made a viewer) must not keep its text flowing to and from their Google Doc.
  */
-function linkerMayEdit(link: Pick<LinkRow, 'doc_id' | 'user_id'>): boolean {
+export function linkerMayEdit(link: Pick<LinkRow, 'doc_id' | 'user_id'>): boolean {
   const row = db.prepare('SELECT * FROM users WHERE id = ?').get(link.user_id) as UserRow | undefined;
   if (!row) return false;
   return atLeast(roleFor(toSessionUser(row), splitDocId(link.doc_id).project), 'edit');
@@ -360,7 +361,7 @@ async function runSync(docId: string, opts: { pullTracked?: boolean } = {}): Pro
 }
 
 /** how many characters an edit changed, roughly: the span between the common start and end */
-function changedChars(a: string, b: string): number {
+export function changedChars(a: string, b: string): number {
   let i = 0;
   while (i < a.length && i < b.length && a[i] === b[i]) i++;
   let j = 0;
@@ -462,7 +463,7 @@ async function adoptComments(api: GoogleApi, link: LinkRow, ours: LyxDocument, b
   if (moved) report?.notes.push(`${moved} comment${moved === 1 ? '' : 's'} anchored in the Google Doc again`);
 }
 
-const isTracking = (lines: string[]) => lines.includes('\\tracking_changes true');
+export const isTracking = (lines: string[]) => lines.includes('\\tracking_changes true');
 
 const sameBlocks = (a: GBlock[], b: GBlock[]) => a.length === b.length && a.every((x, i) => blockKey(x) === blockKey(b[i]));
 
@@ -516,28 +517,6 @@ export function withGoogleChanges(baseDoc: LyxDocument, proj: Projection, baseG:
 
 const isNote = (it: Item) => it.kind === 'inset' && it.inset.type === 'Text' && it.inset.name === 'Note';
 
-function lcsPairs(a: string[], b: string[]): [number, number][] {
-  const n = a.length, m = b.length, W = m + 1;
-  const dp = new Uint32Array((n + 1) * W);
-  for (let x = n - 1; x >= 0; x--) for (let y = m - 1; y >= 0; y--) dp[x * W + y] = a[x] === b[y] ? dp[(x + 1) * W + y + 1] + 1 : Math.max(dp[(x + 1) * W + y], dp[x * W + y + 1]);
-  const out: [number, number][] = [];
-  let x = 0, y = 0;
-  while (x < n && y < m) {
-    if (a[x] === b[y]) { out.push([x, y]); x++; y++; } else if (dp[(x + 1) * W + y] >= dp[x * W + y + 1]) x++; else y++;
-  }
-  return out;
-}
-
-function lcsRegions(a: string[], b: string[]): { a: number; b: number; c: number; d: number }[] {
-  const out: { a: number; b: number; c: number; d: number }[] = [];
-  let i = 0, j = 0;
-  for (const [pi, pj] of [...lcsPairs(a, b), [a.length, b.length] as [number, number]]) {
-    if (pi > i || pj > j) out.push({ a: i, b: pi, c: j, d: pj });
-    i = pi + 1; j = pj + 1;
-  }
-  return out;
-}
-
 /* ------------------------------------------------------------------ comments */
 
 /** Which Google comments a tab's document takes (a link to a tab of a Google Doc linked tab by tab). */
@@ -579,12 +558,12 @@ interface ThreadEntry {
   closed?: boolean;
 }
 
-const msgSig = (m: { author: string; time: string; text: string }) => `${m.author}|${m.time}|${m.text.replace(/\s+/g, ' ').trim().slice(0, 60)}`;
+export const msgSig = (m: { author: string; time: string; text: string }) => `${m.author}|${m.time}|${m.text.replace(/\s+/g, ' ').trim().slice(0, 60)}`;
 
-interface ThreadRef { inset: TextInset; par: number; before: string }
+export interface ThreadRef { inset: TextInset; par: number; before: string }
 
 /** the comment threads of the body with their insets (to change them in place) */
-function threadsOf(doc: LyxDocument): ThreadRef[] {
+export function threadsOf(doc: LyxDocument): ThreadRef[] {
   const out: ThreadRef[] = [];
   doc.body.forEach((p, par) => {
     let before = '';
@@ -601,7 +580,7 @@ const gTime = (iso?: string) => formatTimestamp(iso ? new Date(iso) : new Date()
 const plain = (text: string) => ({ layout: 'Plain Layout', depth: 0, params: {}, items: text ? [{ kind: 'text', text, font: {} } as Item] : [] });
 
 /** the paragraphs of a thread (core/comments.ts: "Author (time):" headers, message lines) */
-function threadParagraphs(messages: { author: string; time: string; text: string }[], resolved: boolean): Paragraph[] {
+export function threadParagraphs(messages: { author: string; time: string; text: string }[], resolved: boolean): Paragraph[] {
   const out: Paragraph[] = [];
   messages.forEach((m, i) => {
     out.push(plain(commentHeader(m.author, m.time, resolved && i === 0)));
@@ -614,7 +593,7 @@ function threadParagraphs(messages: { author: string; time: string; text: string
 const gText = (c: { content?: string }) => (c.content ?? '').trim();
 
 /** where a comment on `quoted` goes: right after that text in the body (the end of the document when it is not found) */
-function placeThread(doc: LyxDocument, quoted: string, inset: TextInset): void {
+export function placeThread(doc: LyxDocument, quoted: string, inset: TextInset): void {
   const q = quoted.replace(/\s+/g, ' ').trim();
   const body = doc.body;
   if (q) {
@@ -649,7 +628,7 @@ function placeThread(doc: LyxDocument, quoted: string, inset: TextInset): void {
 }
 
 /** the text before a thread, as a comment's quote: the end of the sentence or phrase it follows */
-function quoteFor(before: string): string {
+export function quoteFor(before: string): string {
   const t = before.replace(/\s+/g, ' ').trimEnd();
   if (!t) return '';
   const cut = Math.max(t.lastIndexOf('. ', t.length - 2), t.lastIndexOf('; ', t.length - 2), t.length - 80);
@@ -786,7 +765,7 @@ export async function syncComments(api: GoogleApi, link: LinkRow, ours: LyxDocum
 
 /* ------------------------------------------------------------------ syncing on its own */
 
-function documentExists(docId: string): boolean {
+export function documentExists(docId: string): boolean {
   try {
     const { project, path: rel } = splitDocId(docId);
     return !!project && !!rel && fs.existsSync(resolveProjectPath(project, rel));

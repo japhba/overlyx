@@ -46,6 +46,8 @@ import { accessibleProjects, adoptProjects, roleFor, atLeast, isRole, registerPr
 import { canonicalProject, canonicalDocId } from './namespaces.ts';
 import { gdocsRoutes } from './gdocs/routes.ts';
 import { startAutoSync, filesMoved } from './gdocs/sync.ts';
+import { lessWrongRoutes } from './lesswrong/routes.ts';
+import { startLessWrongAutoSync, lwFilesMoved } from './lesswrong/sync.ts';
 import { groupFileMoved } from './docgroups.ts';
 import { ownProjectKey } from './projectCreate.ts';
 import { sandboxAvailable } from './sandbox.ts';
@@ -217,6 +219,8 @@ api.all('/docs/*', (req, res, next) => {
 
 // the Google Docs sync (gdocs/): after the document access rules above
 api.use(gdocsRoutes());
+// the LessWrong sync (lesswrong/): the same
+api.use(lessWrongRoutes());
 // the account's Zotero library for the citation dialog (zotero.ts)
 api.use(zoteroRoutes());
 
@@ -804,7 +808,7 @@ api.post('/projects/:project/fileops', needProject('edit'), (req, res) => {
       if (!fs.existsSync(abs)) throw new Error('not found');
       moveOut(abs, rel);
       // a Google Docs tab's document stays deleted (its tab is not synced back in); its group forgets it
-      filesMoved(project, rel, null); groupFileMoved(project, rel, null);
+      filesMoved(project, rel, null); lwFilesMoved(project, rel, null); groupFileMoved(project, rel, null);
     } else if (op === 'rename' || op === 'copy') {
       const fromRel = String(req.body?.from ?? ''), toRel = String(req.body?.to ?? '');
       const from = guard(fromRel);
@@ -812,7 +816,7 @@ api.post('/projects/:project/fileops', needProject('edit'), (req, res) => {
       if (!fs.existsSync(from)) throw new Error('not found');
       if (fs.existsSync(to)) { res.status(409).json({ error: 'a file with that name exists' }); return; }
       fs.mkdirSync(path.dirname(to), { recursive: true });
-      if (op === 'rename') { fs.renameSync(from, to); filesMoved(project, fromRel, toRel); groupFileMoved(project, fromRel, toRel); }
+      if (op === 'rename') { fs.renameSync(from, to); filesMoved(project, fromRel, toRel); lwFilesMoved(project, fromRel, toRel); groupFileMoved(project, fromRel, toRel); }
       else fs.cpSync(from, to, { recursive: true });
     } else throw new Error('unknown operation');
     touchProject(req.params.project, req.user!.id);
@@ -1705,6 +1709,7 @@ attachWebSocket(server);
 
 server.listen(config.port, config.host, () => {
   startAutoSync();
+  startLessWrongAutoSync();
   console.log(`OverLyX server listening on http://${config.host}:${config.port}  (projects: ${config.projectsDir}, data: ${config.dataDir}, document workers: ${docWorkers.enabled ? docWorkers.size : 'none'})`);
   docWorkers.warm();
   if (selfCheckEnabled()) setTimeout(() => void runSelfCheck(config.port), 3000).unref();

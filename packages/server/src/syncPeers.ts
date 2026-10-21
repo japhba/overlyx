@@ -10,7 +10,8 @@
  *   The engine says what it is (`X-OverLyX-Sync-App`: vscode / cli) and on which computer
  *   (`X-OverLyX-Sync-Host`); for engines from before those headers, the credential's name tells
  *   ("OverLyX for VS Code on <host>", "OverLyX CLI on <host>").
- * - **its Google Docs link** (gdocs/): synced on its own every minute, or on request.
+ * - **its Google Docs link** (gdocs/): synced on its own every minute, or on request;
+ * - **its LessWrong link** (lesswrong/): synced on its own every few minutes, or on request.
  *
  * The computer's name is shown only to the clone's own account; collaborators see whose clone it is.
  */
@@ -18,6 +19,7 @@ import crypto from 'node:crypto';
 import type { Request } from 'express';
 import { verifyAccessToken } from './tokenAuth.ts';
 import { linkOf, publicLink, folderSyncsTabs } from './gdocs/sync.ts';
+import { lwLinkOf, publicLwLink } from './lesswrong/sync.ts';
 import type { SessionUser } from './auth.ts';
 
 /** a clone is shown this long after its last request (its next long poll follows within a second) */
@@ -121,15 +123,19 @@ export interface ExternalSync {
   google: { url: string; auto: boolean; lastSync: number | null; lastError: string | null } | null;
   /** not linked, though the other documents of its folder sync with a Google Doc's tabs (File ▸ Google Docs offers the tab) */
   googleUnlinked?: boolean;
+  /** its LessWrong draft (only when linked) */
+  lesswrong?: { url: string; auto: boolean; lastSync: number | null; lastError: string | null };
 }
 
 /** Everything `docId` is kept in step with, for the web interface's sync chip. */
 export function externalSyncOf(docId: string, project: string, viewer: SessionUser): ExternalSync {
   const l = publicLink(linkOf(docId));
+  const w = publicLwLink(lwLinkOf(docId));
   return {
     clones: clonesOf(project, viewer),
     google: l ? { url: l.url, auto: l.auto, lastSync: l.lastSync, lastError: l.lastError } : null,
     ...(!l && folderSyncsTabs(docId) ? { googleUnlinked: true } : {}),
+    ...(w ? { lesswrong: { url: w.url, auto: w.auto, lastSync: w.lastSync, lastError: w.lastError } } : {}),
   };
 }
 

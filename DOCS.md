@@ -3513,6 +3513,81 @@ read, comment and edit in Google Docs.
   spans, moving object bindings, comment preservation, text pullback beside equations, skipped
   object edits and failed conversions.
 
+## LessWrong sync
+
+*File ▸ LessWrong (sync, comments)…* links a document — markdown or `.tex` — to a LessWrong draft
+and keeps the two in step both ways (`server/src/lesswrong/`, 21 Oct 2026): you write in OverLyX,
+readers comment and edit the draft on LessWrong before it is published. It goes through
+LessWrong's own agent API — its MCP server (`https://www.lesswrong.com/api/mcp`); the code cites
+the ForumMagnum sources it follows (`app/api/mcp/mcpServer.ts`, `app/api/agent/*`,
+`server/oauth/oauthProvider.ts`; a shallow clone for reference is in
+`/mnt/HC_Volume_107166861/jan/forummagnum`).
+
+* **Connecting** (`lesswrong/api.ts`). LessWrong's MCP server is behind OAuth 2.1 with dynamic
+  client registration: on the first connection OverLyX registers itself (`POST /oauth/register`,
+  redirect `<public url>/api/lesswrong/callback`; the client id and secret are kept, encrypted, in
+  `lesswrong_client` — nothing to set up on this server), then the account goes through LessWrong's
+  consent page with PKCE (scope `lesswrong:access`, resource `…/api/mcp`). The access token lasts
+  90 days and has no refresh token: the dialog offers *Connect again* in its last two weeks; stored
+  encrypted in `lesswrong_accounts`. The MCP server is stateless, so each tool call is one JSON-RPC
+  `tools/call` POST with the bearer token (no `initialize`).
+* **Linking.** LessWrong's API cannot create or publish posts (its GraphQL API takes only the
+  site's login cookie), so the user starts a post on LessWrong — in the normal rich-text (Lexical)
+  editor: **the agent API does not work on posts in LessWrong's Markdown mode** — and pastes its
+  address: `lesswrong.com/editPost?postId=…` (with `&key=…` after "Anyone with the link can:
+  Edit"), a `/posts/<id>/…` address or the id. An empty draft gets the document in one
+  `insert_block`; an empty document gets the draft; when both hold text, the document's replaces
+  the draft's (`keep: 'ours'`) or the draft's differences come in as tracked changes (`merge`).
+  One draft syncs with one document. The post's title, its publishing, and images from the
+  project stay LessWrong's (images with web addresses go along).
+* **The model** (`lesswrong/model.ts`). Both sides are compared as this server's markdown: the
+  draft's markdown (`read_post`: Lexical → HTML → Turndown) and the document's projection
+  (`projectDocument`: tracked changes as accepted; comment threads, notes, raw LaTeX / HTML,
+  labels, project images and the LaTeX title block left out) are parsed with `core/md/parse.ts`
+  and every paragraph written back with `md/write.ts` — the keys of the block diff, so `*   `
+  vs `-` bullets, `*em*` vs `_em_` and footnote labels do not count. Top-level blocks (a list is
+  one, its items its paragraphs) are the unit: `lcs.ts` regions, aligned within a region by their
+  words.
+* **Writing into the draft** (`planPush`). LessWrong edits by text, not position, so the sync
+  works in rounds, reading the draft again after each: first deletions (`delete_block` by a prefix
+  unique among block starts — a list item on its own, any other block whole), then word-level
+  replacements (`replace_text`: the differing words, widened to whole words and until the quote
+  occurs once in the draft — LessWrong folds case and punctuation — with the replacement as inline
+  markdown), then insertions (`insert_block` after the block before, or `start`/`end`; inserts are
+  top-level only, so a list that gains an item, a paragraph that changes kind, or a change in a
+  table, display equation, footnote or code block is written again: deleted, then inserted). An
+  edit LessWrong refuses is not tried again in that sync (a warning says so); a block that cannot be
+  deleted is not inserted again. After the rounds, blocks LessWrong keeps its own way with the same
+  words are remembered as the same (`settle`, the link's `equiv`), so later syncs leave them.
+* **Edits made on LessWrong** come in as edits by "LessWrong" through the agents' edit path
+  (`withLessWrongChanges` against the draft stored at the last sync) — directly while Editing, as
+  tracked changes while Suggesting (the document's mode is kept). A replaced paragraph keeps its
+  LaTeX layout when LessWrong's is its markdown form (a numbered section that is a `#` heading
+  there) and what LessWrong never showed of it (comment threads, labels, raw LaTeX).
+  **Open suggestions** on LessWrong (`<ins>`/`<del>` in its markdown) are LessWrong's until
+  accepted there: the text is read without them, and paragraphs holding one are not edited.
+* **Comment threads.** A thread written here becomes a LessWrong comment at the text it follows
+  (`comment_on_draft`, by "<author> (OverLyX)"). LessWrong's threads can only be read and answered
+  through the link-sharing routes (`/api/editPost`'s "Comment Threads" section, parsed by
+  `parseThreads`; `/api/agent/replyToComment`), which need the draft's link-sharing key: with it,
+  LessWrong's comment threads come here with their replies, replies go both ways, and a thread
+  resolved (gone from the open threads) on LessWrong is resolved here; without it only threads
+  written here go there (with their replies so far in the comment). Resolving here stays here (no
+  API for it). The key can be added later in the dialog (`POST /docs/<id>/lesswrong/key`).
+* **Syncing on its own** (`startLessWrongAutoSync`): a minute after an edit here; LessWrong is
+  read every 3 min while the document is open here, every 10 min when something changed in the
+  last day, hourly otherwise (each `read_post` opens a collaboration session on LessWrong's side).
+  The ⇄ chip shows the link (`syncPeers.ts`). Deleting a document or its project drops its link;
+  deleting the account disconnects (and revokes) LessWrong. The privacy notice lists LessWrong.
+* **Routes** (`lesswrong/routes.ts`): `GET /api/lesswrong/status?doc=`, `GET /api/lesswrong/connect`,
+  `GET /api/lesswrong/callback`, `POST /api/lesswrong/disconnect`, `POST /api/docs/<id>/lesswrong/{link,key,sync,unlink,auto}`.
+* **Tests**: `tests/lesswrong.test.ts` against `lesswrong/fake.ts`, a simulation of the agent API's
+  matching rules (it needs `LYX_LAYOUT_DIR` pointing at LyX's layouts for the `.tex` case, as every
+  `.tex` test does); `OVERLYX_E2E_LESSWRONG_STUB=1` starts a server with the simulation (connect
+  without LessWrong, `/api/lesswrong/e2e/{create,post,edit,comment}` to play the reader). **Not yet
+  run against the real LessWrong** (as of 21 Oct 2026): the request shapes follow ForumMagnum's
+  source, the quote-matching details are its documented rules.
+
 ## Document groups
 
 Documents that belong together and read as one — the tabs of a Google Doc, a report's chapters — are
