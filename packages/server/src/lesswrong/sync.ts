@@ -262,6 +262,10 @@ async function runSync(docId: string, opts: { pullTracked?: boolean }): Promise<
     db.prepare(`UPDATE lesswrong_links SET base_text = ?, base_lw = ?, equiv = ?, comments = ?, title = ?, draft = ?, last_sync = ?, last_error = NULL, last_warnings = ?${changed || threadsChanged ? ', last_change = ?' : ''} WHERE doc_id = ?`)
       .run(doc.textOf(doc.toLyxDocument()), lw.text, JSON.stringify(equiv), link.comments, post.title || link.title, post.draft === null ? link.draft : post.draft ? 1 : 0, Date.now(), JSON.stringify(report.warnings), ...(changed || threadsChanged ? [Date.now()] : []), docId);
     lastReports.set(docId, { ...report, at: Date.now() });
+    // (counts only, when something happened or what was left out changed: the service log)
+    if (report.pulled || report.pushed || skip.size || JSON.stringify(report.warnings) !== (link.last_warnings ?? '[]')) {
+      console.log(`[lesswrong] ${docId}: synced \u2014 ${report.pulled} characters in, ${report.pushed} edits out, ${skip.size} refused, ${report.warnings.length} warnings, ${report.rounds} rounds`);
+    }
     return report;
   } catch (e) {
     db.prepare('UPDATE lesswrong_links SET last_error = ?, last_sync = ? WHERE doc_id = ?').run((e as Error).message, Date.now(), docId);

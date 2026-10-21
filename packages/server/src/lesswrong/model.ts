@@ -69,6 +69,34 @@ const isListLayout = (l: string) => l === 'Itemize' || l === 'Enumerate';
 function parMarkdown(ctx: LyxDocument, p: Paragraph): string {
   return writeMarkdown({ ...ctx, body: [p] }).text.trim();
 }
+
+/**
+ * A paragraph as it looks, for its key: runs of spaces as one and outside any emphasis, formulas
+ * without the font around them (`*a $x$ b*` and `*a* $x$ *b*` show the same), footnotes as plain
+ * text (LessWrong's read API gives a footnote's text only: Turndown's footnote rule).
+ */
+function looks(p: Paragraph, plain = false): Paragraph {
+  const items: Item[] = [];
+  for (const it of p.items) {
+    if (it.kind === 'inset' && it.inset.type === 'Formula') { items.push({ ...it, font: {} }); continue; }
+    if (it.kind === 'inset' && it.inset.type === 'Text') {
+      const foot = it.inset.name === 'Foot';
+      items.push({ ...it, inset: { ...it.inset, paragraphs: it.inset.paragraphs.map(q => looks(q, plain || foot)) } });
+      continue;
+    }
+    if (it.kind !== 'text') { items.push(it); continue; }
+    const m = /^(\s*)([\s\S]*?)(\s*)$/.exec(it.text.replace(/\s+/g, ' '))!;
+    if (m[1]) items.push({ kind: 'text', text: ' ', font: {} });
+    if (m[2]) items.push(plain ? { kind: 'text', text: m[2], font: {} } : { ...it, text: m[2] });
+    if (m[3]) items.push({ kind: 'text', text: ' ', font: {} });
+  }
+  const merged = normalize(items).map(it => (it.kind === 'text' ? { ...it, text: it.text.replace(/ {2,}/g, ' ') } : it));
+  // (the paragraph's own edges: no spaces)
+  const first = merged[0], last = merged[merged.length - 1];
+  if (first?.kind === 'text') merged[0] = { ...first, text: first.text.replace(/^ +/, '') };
+  if (last?.kind === 'text') merged[merged.length - 1] = { ...last, text: (merged[merged.length - 1] as typeof last).text.replace(/ +$/, '') };
+  return { ...p, items: merged.filter(it => !(it.kind === 'text' && !it.text)) };
+}
 const keyOf = (md: string) => md.replace(/\[\^[^\]\s]*\]/g, '[^]');
 
 /** text as LessWrong's quote matching compares it: punctuation folded, case and spacing ignored */
@@ -102,7 +130,7 @@ export function readBlocks(markdown: string, src: number[] = []): { blocks: LwBl
     const suggested = p0.items.some(it => it.kind === 'text' && it.text.includes(SUGGESTION));
     const p = suggested ? { ...p0, items: normalize(p0.items.map(it => (it.kind === 'text' ? { ...it, text: it.text.split(SUGGESTION).join('') } : it))) } : p0;
     if (!p.items.some(it => shownText(it).trim() || (it.kind === 'inset' && it.inset.type !== 'Text'))) return;   // an empty paragraph (a suggested one)
-    const par: LwPar = { par: p, key: keyOf(parMarkdown(r.doc, p)), text: parText(p), src: src[i] ?? -1, suggested };
+    const par: LwPar = { par: p, key: keyOf(parMarkdown(r.doc, looks(p))), text: parText(p), src: src[i] ?? -1, suggested };
     const n = r.parNode[i] ?? -1;
     if (n !== node || !blocks.length) { blocks.push({ pars: [], key: '', list: isListLayout(p.layout) }); node = n; }
     blocks[blocks.length - 1].pars.push(par);
@@ -141,7 +169,8 @@ function shown(items: Item[], left: Set<string>): Item[] {
       out.push({ ...it, inset: { ...t, rows: t.rows.map(r => ({ ...r, cells: r.cells.map(c => ({ ...c, paragraphs: c.paragraphs.map(p => ({ ...p, items: shown(p.items, left) })) })) })) } as Inset });
       continue;
     }
-    out.push(it);
+    // (runs of spaces show as one: sent as one)
+    out.push(it.kind === 'text' && /\s{2,}/.test(it.text) ? { ...it, text: it.text.replace(/[ \t]{2,}/g, ' ') } : it);
   }
   return out;
 }
@@ -253,15 +282,21 @@ export interface Atom { item: Item; key: string; space: boolean }
 export function atoms(p: Paragraph): Atom[] {
   const out: Atom[] = [];
   for (const it of p.items) {
+    // (a formula is the same in or out of emphasis; a footnote by its text alone — model.ts looks)
+    if (it.kind === 'inset' && it.inset.type === 'Formula') { out.push({ item: it, key: JSON.stringify(it.inset), space: false }); continue; }
+    if (it.kind === 'inset' && it.inset.type === 'Text' && it.inset.name === 'Foot') { out.push({ item: it, key: 'foot:' + normText(it.inset.paragraphs.map(parText).join(' ')), space: false }); continue; }
     if (it.kind !== 'text') { out.push({ item: it, key: JSON.stringify(it), space: false }); continue; }
     for (const part of it.text.split(/(\s+)/)) {
       if (!part) continue;
       const item: Item = { ...it, text: part };
-      out.push({ item, key: JSON.stringify([part, it.font]), space: /^\s+$/.test(part) });
+      const space = /^\s+$/.test(part);
+      out.push({ item, key: space ? ' ' : JSON.stringify([part, it.font]), space });
     }
   }
   return out;
 }
+const isFoot = (a: Atom) => a.item.kind === 'inset' && a.item.inset.type === 'Text' && a.item.inset.name === 'Foot';
+const isImage = (a: Atom) => a.item.kind === 'inset' && a.item.inset.type === 'Leaf' && a.item.inset.name === 'Graphics';
 const blocky = (a: Atom) => a.item.kind === 'inset' && (a.item.inset.type === 'Tabular' || (a.item.inset.type === 'Formula' && !a.item.inset.inline)
   || (a.item.inset.type === 'Text' && (a.item.inset.name === 'Foot' || a.item.inset.name === 'listings' || a.item.inset.name === 'Float')));
 
@@ -280,12 +315,13 @@ function count(hay: string, needle: string): number {
 }
 
 /**
- * The words of `o` that differ from `n` as a quote (unique in the draft: `all`) and the markdown
- * that replaces them. 'rebuild': the difference is in something a text replacement cannot write (a
- * table, a display equation, a footnote, a code block); null: no quote is unique.
+ * The words of `O` that differ from `N` (a paragraph's, or a stretch of one between footnotes) as a
+ * quote (unique in the draft: `all`) and the markdown that replaces them. 'rebuild': the difference is
+ * in something a text replacement cannot write (a table, a display equation, a code block); 'image':
+ * the quote would take in an image LessWrong has there (replacing it would remove the image); null:
+ * no quote is unique.
  */
-function replaceOp(ctx: LyxDocument, o: LwPar, n: LwPar, all: string): LwOp | 'rebuild' | null {
-  const O = atoms(o.par), N = atoms(n.par);
+function replaceIn(ctx: LyxDocument, O: Atom[], N: Atom[], all: string, what: string): LwOp | 'rebuild' | 'image' | null {
   let p = 0;
   while (p < O.length && p < N.length && O[p].key === N[p].key) p++;
   let s = 0;
@@ -302,17 +338,79 @@ function replaceOp(ctx: LyxDocument, o: LwPar, n: LwPar, all: string): LwOp | 'r
     else break;
   }
   if (!(startOk() && endOk())) return null;
-  if (O.slice(l, rO).some(blocky) || N.slice(l, rN).some(blocky)) return 'rebuild';
+  const check = () => (O.slice(l, rO).some(isImage) ? 'image' : O.slice(l, rO).some(blocky) || N.slice(l, rN).some(blocky) ? 'rebuild' : null);
+  if (check()) return check();
   // long enough to be found once
   while (count(all, atomsText(O.slice(l, rO))) !== 1) {
     if (l >= 2) l -= 2;
     else if (rO + 2 <= O.length) { rO += 2; rN += 2; }
     else if (l > 0 || rO < O.length) { l = 0; rO = O.length; rN = N.length; }
     else return null;
-    if (O.slice(l, rO).some(blocky) || N.slice(l, rN).some(blocky)) return 'rebuild';
+    if (check()) return check();
   }
-  return { op: 'replace', quote: inlineMd(ctx, O.slice(l, rO)), replacement: inlineMd(ctx, N.slice(l, rN)), what: o.text.slice(0, 60) };
+  return { op: 'replace', quote: inlineMd(ctx, O.slice(l, rO)), replacement: inlineMd(ctx, N.slice(l, rN)), what: what.slice(0, 60) };
 }
+
+/**
+ * The replacements that turn paragraph `o` (the draft's) into `n` (the document's). A paragraph with
+ * footnotes is edited between them, stretch by stretch — never written again: LessWrong's API makes
+ * footnotes only from inserted markdown, and puts their notes right below the inserted block, not at
+ * the end of the post. 'footnote': its footnotes themselves differ (left to LessWrong's editor).
+ */
+function replaceOps(ctx: LyxDocument, o: LwPar, n: LwPar, all: string): LwOp[] | 'rebuild' | 'image' | 'footnote' | null {
+  const O = atoms(o.par), N = atoms(n.par);
+  const fo = O.filter(isFoot).map(a => a.key), fn = N.filter(isFoot).map(a => a.key);
+  if (!fo.length && !fn.length) return stretchOps(ctx, O, N, all, o.text);
+  if (fo.join('\n') !== fn.join('\n')) return 'footnote';
+  const stretches = (A: Atom[]) => A.reduce<Atom[][]>((acc, a) => { if (isFoot(a)) acc.push([]); else acc[acc.length - 1].push(a); return acc; }, [[]]);
+  const so = stretches(O), sn = stretches(N), ops: LwOp[] = [];
+  for (let k = 0; k < so.length; k++) {
+    const r = stretchOps(ctx, so[k], sn[k], all, o.text);
+    if (r === 'rebuild') return 'footnote';
+    if (!r || r === 'image') return r;
+    ops.push(...r);
+  }
+  return ops;
+}
+
+const sameAtoms = (A: Atom[], B: Atom[]) => A.length === B.length && A.every((a, k) => a.key === B[k].key);
+
+/**
+ * The replacements of one stretch of words: one per place where it differs (cut in the middle of the
+ * unchanged words between places at least eight words apart), so that what LessWrong has around them
+ * — comments anchored there — stays; the whole stretch at once when a place's quote is not unique.
+ */
+function stretchOps(ctx: LyxDocument, O: Atom[], N: Atom[], all: string, what: string): LwOp[] | 'rebuild' | 'image' | null {
+  if (sameAtoms(O, N)) return [];
+  const pieces: [Atom[], Atom[]][] = [];
+  if (O.length * N.length <= 4_000_000) {
+    const regions = lcsRegions(O.map(a => a.key), N.map(a => a.key));
+    let po = 0, pn = 0;
+    for (let k = 0; k + 1 < regions.length; k++) {
+      const gap = regions[k + 1].a - regions[k].b;
+      if (gap < 16) continue;
+      const co = regions[k].b + Math.floor(gap / 2), cn = regions[k].d + Math.floor(gap / 2);
+      pieces.push([O.slice(po, co), N.slice(pn, cn)]);
+      po = co; pn = cn;
+    }
+    pieces.push([O.slice(po), N.slice(pn)]);
+  }
+  if (pieces.length > 1) {
+    const ops: LwOp[] = [];
+    let ok = true;
+    for (const [a, b] of pieces) {
+      if (sameAtoms(a, b)) continue;
+      const r = replaceIn(ctx, a, b, all, what);
+      if (r === 'rebuild' || r === 'image') return r;
+      if (!r) { ok = false; break; }
+      ops.push(r);
+    }
+    if (ok) return ops;
+  }
+  const r = replaceIn(ctx, O, N, all, what);
+  return r && typeof r === 'object' ? [r] : r;
+}
+const hasFoot = (b: LwBlock) => b.pars.some(x => atoms(x.par).some(isFoot));
 
 /**
  * The start of a paragraph as a prefix no other paragraph of the draft starts with. A table is
@@ -370,6 +468,16 @@ function alignBlocks(H: LwBlock[], W: LwBlock[]): [number, number][] {
 }
 
 /**
+ * The draft's blocks the sync works with: not the ones without text that the document does not have
+ * — images (and embeds) added on LessWrong, which the document cannot show (its own images from the
+ * project are not sent either): those are LessWrong's, never deleted or written around.
+ */
+function ownBlocks(have: LwBlock[], want: LwBlock[], equiv: Equivalences): LwBlock[] {
+  const wk = new Set(want.map(b => b.key));
+  return have.filter(b => b.pars.some(x => x.text) || wk.has(equiv[b.key] ?? b.key));
+}
+
+/**
  * The next round of edits that bring the draft (`have`) towards the document (`want`), one kind at a
  * time \u2014 deletions, then text replacements, then insertions \u2014 since each finds its place by text the
  * others change: the sync reads the draft again after each round. A list item that came or went
@@ -377,7 +485,8 @@ function alignBlocks(H: LwBlock[], W: LwBlock[]): [number, number][] {
  * whose kind changed, or a change in a table, a display equation, a footnote or a code block.
  * Paragraphs with open LessWrong suggestions are not touched. `skip`: ops that failed already.
  */
-export function planPush(have: LwBlock[], want: LwBlock[], ctx: LyxDocument, equiv: Equivalences = {}, skip: Set<string> = new Set(), warnings: Set<string> = new Set()): LwOp[] {
+export function planPush(have0: LwBlock[], want: LwBlock[], ctx: LyxDocument, equiv: Equivalences = {}, skip: Set<string> = new Set(), warnings: Set<string> = new Set()): LwOp[] {
+  const have = ownBlocks(have0, want, equiv);
   const hk = eq(have.map(b => b.key), equiv), wk = want.map(b => b.key);
   const allPars = have.flatMap(b => b.pars);
   const all = allPars.map(x => x.text).join(' ');
@@ -414,6 +523,7 @@ export function planPush(have: LwBlock[], want: LwBlock[], ctx: LyxDocument, equ
     const location = anchorAfter(h);
     if (location === null) { wIns.add('Some paragraphs could not be placed in the LessWrong draft (the text before them is not unique there).'); return; }
     const markdown = writeMarkdown({ ...ctx, body: ws.flatMap(b => b.pars.map(x => x.par)) }).text.trim();
+    if (location !== 'end' && ws.some(hasFoot)) wIns.add('New footnotes land right below their paragraph on LessWrong (its API cannot put them at the end of the post): move them there in its editor if you like.');
     inserts.push({ op: 'insert', location, markdown, what: ws[0].pars[0]?.text.slice(0, 60) ?? '' });
   };
   for (const { a, b, c, d } of lcsRegions(hk, wk)) {
@@ -435,9 +545,11 @@ export function planPush(have: LwBlock[], want: LwBlock[], ctx: LyxDocument, equ
       if (!rebuild) {
         for (let k = 0; k < h.pars.length && !rebuild; k++) {
           if ((equiv[h.pars[k].key] ?? h.pars[k].key) === w.pars[k].key) continue;
-          const r = replaceOp(ctx, h.pars[k], w.pars[k], all);
+          const r = replaceOps(ctx, h.pars[k], w.pars[k], all);
           if (r === 'rebuild') rebuild = true;
-          else if (r) edits.push(r);
+          else if (r === 'footnote') wRep.add(`A footnote changed in \u201C${h.pars[k].text.slice(0, 60)}\u201D: change it on LessWrong too \u2014 its API puts a footnote written again right below its paragraph, not at the end of the post.`);
+          else if (r === 'image') wRep.add(`\u201C${h.pars[k].text.slice(0, 60)}\u201D holds an image on LessWrong, so it was not updated there (the edit would remove the image).`);
+          else if (r) edits.push(...r);
           else wRep.add(`A paragraph could not be updated on LessWrong (its text is not unique there): \u201C${h.pars[k].text.slice(0, 60)}\u201D`);
         }
       } else if (h.list && w.list) {
@@ -454,6 +566,13 @@ export function planPush(have: LwBlock[], want: LwBlock[], ctx: LyxDocument, equ
           });
           rebuild = false;
         }
+      }
+      if (rebuild && (hasFoot(h) || hasFoot(w))) {
+        // (written again, its footnotes would land right below it: left as it is)
+        wRep.add(`\u201C${h.pars[0]?.text.slice(0, 60) ?? ''}\u201D changed in a way LessWrong\u2019s API can only write again, and it has footnotes, which would then land right below it: change it on LessWrong.`);
+        flush();
+        anchor = h;
+        continue;
       }
       if (rebuild) {
         // written again: deleted, then inserted where it was — unless it cannot be deleted (then it stays as it is)
@@ -483,7 +602,8 @@ export function planPush(have: LwBlock[], want: LwBlock[], ctx: LyxDocument, equ
  * equal length that are the `same` (the same words); everything else stays a difference (and a
  * warning), tried again by the next sync.
  */
-export function settle(have: LwBlock[], want: LwBlock[], equiv: Equivalences, same: (h: LwBlock, w: LwBlock) => boolean = () => true): { equiv: Equivalences; unsettled: number } {
+export function settle(have0: LwBlock[], want: LwBlock[], equiv: Equivalences, same: (h: LwBlock, w: LwBlock) => boolean = () => true): { equiv: Equivalences; unsettled: number } {
+  const have = ownBlocks(have0, want, equiv);
   const out: Equivalences = {};
   const present = new Set(have.flatMap(b => [b.key, ...b.pars.map(x => x.key)]));
   for (const [k, v] of Object.entries(equiv)) if (present.has(k)) out[k] = v;

@@ -85,7 +85,7 @@ describe('writing a document into a LessWrong draft', () => {
       SAMPLE.replace('> A quoted line\n', '').replace('Some *em*', 'Some new *em*'),
       SAMPLE.replace('# Title', '## Title').replace('| 1 | **2** |', '| 1 | **3** |'),
       SAMPLE.replace('Last paragraph.', 'Last paragraph.\n\nAnother one.\n\nAnd a third.').replace('  - nested\n', ''),
-      SAMPLE.replace('E = mc^2', 'E = mc^3').replace('The footnote.', 'The changed footnote.'),
+      SAMPLE.replace('E = mc^2', 'E = mc^3'),
     ];
     for (const md of steps) {
       const before = g.edits;
@@ -119,6 +119,31 @@ describe('writing a document into a LessWrong draft', () => {
       await push(g, id, md);
       expect(keys(g.markdown(id)), `step ${step}:\n${md}`).toEqual(projectDocument(parseMarkdown(md).doc).blocks.map(b => b.key));
     }
+  });
+
+  it('a paragraph with a footnote is edited around it, never written again; a changed footnote is left to LessWrong', async () => {
+    const g = new FakeLessWrong();
+    const id = g.create('F');
+    const md = 'Intro paragraph here.\n\nA claim about models[^1] and more words after it.\n\nLast one.\n\n[^1]: The note.\n';
+    await push(g, id, md);
+    const before = g.edits;
+    await push(g, id, md.replace('A claim', 'A bold claim').replace('more words', 'many more words'));
+    expect(g.edits - before).toBe(2);   // two word replacements, no deletion and insertion
+    expect(g.markdown(id)).toMatch(/A bold claim about models\[\^\w+\] and many more words after it\.[\s\S]*Last one\.[\s\S]*\[\^\w+\]: The note\./);
+    const p = projectDocument(parseMarkdown(md.replace('The note.', 'A new note.')).doc);
+    const warnings = new Set<string>();
+    expect(planPush(readBlocks(g.markdown(id)).blocks, p.blocks, p.doc, {}, new Set(), warnings)).toEqual([]);
+    expect([...warnings].join()).toMatch(/footnote changed/);
+  });
+
+  it('images added on LessWrong stay; spacing and math in emphasis are not differences', async () => {
+    const g = new FakeLessWrong();
+    const id = g.create('I', 'Some *text with $x$ math* here  and    there.\n\n![a figure](https://example.com/f.png)\n\nAfter the figure.\n');
+    const p = projectDocument(parseMarkdown('Some *text with* $x$ *math* here and there.\n\nAfter the figure.\n').doc);
+    expect(planPush(readBlocks(g.markdown(id)).blocks, p.blocks, p.doc)).toEqual([]);
+    // the document changes: the figure stays where it is
+    await push(g, id, 'Some *text with* $x$ *math* here and there.\n\nAfter the figure, changed.\n');
+    expect(g.markdown(id)).toMatch(/!\[a figure\]\(https:\/\/example\.com\/f\.png\)[\s\S]*After the figure, changed\./);
   });
 
   it('a paragraph with an open suggestion on LessWrong is left alone', async () => {

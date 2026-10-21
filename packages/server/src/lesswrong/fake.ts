@@ -100,7 +100,8 @@ export class FakeLessWrong implements LessWrongApi {
     const A = atoms(par);
     // the words the quote covers
     for (let l = 0; l < A.length; l++) for (let r = l + 1; r <= A.length; r++) {
-      if (A[l].space || A[r - 1].space) continue;
+      // (a match starts and ends at text: spaces and what shows no text — a footnote's reference — are outside it)
+      if (A[l].space || A[r - 1].space || !shownText(A[l].item) || !shownText(A[r - 1].item)) continue;
       if (normText(A.slice(l, r).map(x => shownText(x.item)).join('')) !== q) continue;
       const repl = parseMarkdown(a.replacement).doc.body[0]?.items ?? [];
       p.blocks[bi][pi] = { ...par, items: normalize([...A.slice(0, l).map(x => x.item), ...repl, ...A.slice(r).map(x => x.item)]) };

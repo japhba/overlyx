@@ -3612,6 +3612,22 @@ the ForumMagnum sources it follows (`app/api/mcp/mcpServer.ts`, `app/api/agent/*
   edit LessWrong refuses is not tried again in that sync (a warning says so); a block that cannot be
   deleted is not inserted again. After the rounds, blocks LessWrong keeps its own way with the same
   words are remembered as the same (`settle`, the link's `equiv`), so later syncs leave them.
+  Refined after the first real draft (21 Oct 2026, a post pasted into LessWrong before it was linked):
+  * **Footnotes** — LessWrong's API makes a footnote only from inserted markdown and puts its note
+    right below the inserted block (its editor keeps the first footnote section wherever it is), so a
+    paragraph with footnotes is never written again: its words are replaced stretch by stretch
+    between the footnotes; a changed footnote is left to LessWrong's editor (a warning).
+  * **Images LessWrong has** that the document does not (it sends no images from the project) are
+    LessWrong's: blocks without text are left out of the diff (`ownBlocks`), and a replacement that
+    would take in an image is not made.
+  * **Looks, not markup**: keys compare paragraphs as they look (`looks`: runs of spaces as one and
+    outside emphasis, a formula the same in or out of emphasis, footnotes as plain text — Turndown
+    gives a footnote's text only); the projection sends runs of spaces as one.
+  * **One replacement per place**: a paragraph that differs in places at least sixteen words apart
+    gets one `replace_text` each (`stretchOps`), so comments anchored between them stay.
+  * Each sync that did something logs `[lesswrong] <doc>: synced — … characters in, … edits out, …
+    refused, … warnings, … rounds` (counts only). To see what a sync would do: read a draft's markdown with its
+    link-sharing address (`/api/editPost?postId=…&key=…`, `Accept: text/markdown`) and plan against it.
 * **Edits made on LessWrong** come in as edits by "LessWrong" through the agents' edit path
   (`withLessWrongChanges` against the draft stored at the last sync) — directly while Editing, as
   tracked changes while Suggesting (the document's mode is kept). A replaced paragraph keeps its
