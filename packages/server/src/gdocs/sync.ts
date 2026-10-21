@@ -802,7 +802,11 @@ async function tick(): Promise<void> {
       }
       if (changedHere || changedThere) await syncDoc(l.doc_id);
     } catch (e) {
-      if (e instanceof GoogleAuthError) db.prepare('UPDATE gdocs_links SET last_error = ? WHERE doc_id = ?').run(e.message, l.doc_id);
+      if (e instanceof GoogleAuthError) {
+        // (said once: it stays so every minute until the linker connects Google Drive again)
+        if (l.last_error !== e.message) console.warn(`[gdocs] ${l.doc_id}: ${e.message}`);
+        db.prepare('UPDATE gdocs_links SET last_error = ? WHERE doc_id = ?').run(e.message, l.doc_id);
+      }
       else console.warn(`[gdocs] ${l.doc_id}: ${(e as Error).message}`);
     }
   }

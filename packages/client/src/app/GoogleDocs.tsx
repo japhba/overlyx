@@ -116,6 +116,10 @@ export function GoogleDocsDialog({ docId, onClose, notify }: { docId: string; on
             <p><a href={link.url} target="_blank" rel="noopener" data-gdocs-open>Open in Google Docs ↗</a></p>
             <p class="hint">Last synced {ago(link.lastSync)}.{link.lastError ? '' : ' Edits made in Google Docs come back as edits (tracked while Suggesting); comments go both ways.'}</p>
             {link.lastError && <p class="error">Last sync failed: {link.lastError}</p>}
+            {!st?.account && st?.canEdit && !st.guest && (
+              // the Drive authorisation the link syncs with is gone (Google expired or revoked it): connect again, same link
+              <p data-gdocs-reconnect>The sync has no Google Drive authorisation any more (Google expires or revokes it). Connect the Google Drive of the account that linked this document again — the link and the Google Doc stay. <button class="primary" data-gdocs-reconnect-btn onClick={connect}>Connect Google Drive again…</button></p>
+            )}
             {link.warnings?.map(w => <p class="hint" data-gdocs-warning>{w}</p>)}
             {link.format !== 'docx' && (link.tabId
               ? <p class="hint">Equations show as <code>$…$</code> text in this Google Doc: a tab of a Google Doc with several can't be uploaded again as a whole. To include images and equations, unlink and create a new Google Doc.</p>
