@@ -55,7 +55,7 @@ import nodePath from 'node:path';
 import { manager, HtmlDoc } from './docs.ts';
 import { markdownStyle, setMarkdownStyle } from './mdstyle.ts';
 import { isHtmlPath, deliverableInfo, starterFor, DELIVERABLE_GUIDE, DELIVERABLE_KINDS, type DeliverableKind } from '@overlyx/core/html/deliverable.ts';
-import { ARTICLE_GUIDE } from '@overlyx/core/html/article.ts';
+import { ARTICLE_GUIDE, isArticleHtml } from '@overlyx/core/html/article.ts';
 import { newArticleText } from '@overlyx/core/html/articletheme.ts';
 import { createDeliverable } from './deliverables.ts';
 import { renderPages, type DeliverableReport } from './render.ts';
@@ -382,9 +382,12 @@ function writeDocument(project: string, userId: number, agentName: string, path:
 async function writeDocumentLocked(project: string, userId: number, agentName: string, path: string, tex: string, tracked: boolean) {
   if (!tex.trim()) throw new Error('tex missing');
   if (tex.length > DOC_MAX) throw new Error('too large');
-  if (!path.endsWith('.tex') && !isMarkdownPath(path)) throw new Error('a .tex or .md path is expected');
+  const article = isHtmlPath(path);
+  if (!path.endsWith('.tex') && !isMarkdownPath(path) && !article) throw new Error('a .tex, .md or .html (web article) path is expected');
   assertWritableRelPath(path);
   const abs = resolveProjectPath(project, path);
+  // an .html document is a web article; a deck, poster or page is no document (create_deliverable, write_file)
+  if (article && (fs.existsSync(abs) ? !isDocumentFile(project, path) : !isArticleHtml(tex))) throw new Error(fs.existsSync(abs) ? `${path} is an HTML deliverable, not a document — edit it with read_file / edit_file / write_file.` : 'A web article needs <meta name="overlyx" content="article"> in its <head> (create_document with an .html path starts one from the template).');
   if (!fs.existsSync(abs)) {
     const r = parseDocumentText(tex, project, path);   // validate and collect warnings before creating
     fs.mkdirSync(nodePath.dirname(abs), { recursive: true });
@@ -661,13 +664,13 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
   const external = (what: string) => { if (!caller.agent) throw new Error(`${what} is for agents connected from elsewhere; the Agent panel talks to its user in its own thread.`); return caller.agent; };
 
   register('list_documents', {
-    description: 'List the .tex documents in a project.',
+    description: 'List the documents in a project: .tex, markdown, and web articles (.html, marked as such); HTML decks, posters and pages are listed with their kind.',
     annotations: { readOnlyHint: true },
     inputSchema: { ...projArg },
   }, async ({ project: p }) => { try { return ok(listDocuments(need(p, 'view'))); } catch (e) { return fail(e); } });
 
   register('read_document', {
-    description: 'Read a document: its full LaTeX source (`text` — what edit_document edits), and its paragraphs (index, layout, depth, plain text) for the paragraph tools and add_comment.',
+    description: 'Read a document: its full source (`text` — what edit_document edits: LaTeX, markdown, or a web article\'s whole HTML page), and its paragraphs (index, layout, depth, plain text) for the paragraph tools and add_comment.',
     annotations: { readOnlyHint: true },
     inputSchema: { ...projArg, path: z.string().describe('Project-relative path, e.g. "main.tex"') },
   }, async ({ project: p, path }) => { try { const project = need(p, 'view'); if (isHtmlPath(path) && !isDocumentFile(project, path)) return ok(readFile(project, path)); const r = await readDocument(project, path); await present(project, path); return ok(r); } catch (e) { return fail(e); } });
@@ -731,7 +734,7 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
   }, async ({ project: p, path }) => { try { return ok(buildStatus(need(p, 'view'), path)); } catch (e) { return fail(e); } });
 
   register('create_deliverable', {
-    description: 'Start a slide deck, a poster or a web page: a new folder with an index.html. Posters reproduce MIT BE Communication Lab\'s CC0 EvenBetterPoster source layouts: betterposter (48x36 in landscape), figure-first (48x36 in Illustrator figure sketch), research-portrait (36x48 in portrait); project layouts: bernstein-2026 (A0 portrait, two columns), icml-2026 (landscape, three columns); lorem-ipsum replicas of 2026 symposium posters: symposium-steps (36x24 in, monospaced numbered sections, a boxed four-step method), symposium-twin (24x36 in, two studies side by side), symposium-dark (36x24 in, white on black, three numbered claims), symposium-cards (60x36 in, rounded cards on a gradient), symposium-banner (36x24 in, a full-width two-minute band over four columns), symposium-editorial (36x24 in, serif, main-result band, a game tree of cards), symposium-portrait (24x36 in, a callout band, two columns). Decks reproduce published open Beamer themes: research (Metropolis, 16:9, CC BY-SA 4.0), dark-seminar (Focus, 16:9, GPL v3+), serif-colloquium (CambridgeUS, 4:3, GPL v3+). The historical ids remain compatible. Every source includes attribution and license. Restyle or rewrite freely within the source license, then render_page to look.\n\n' + DELIVERABLE_GUIDE,
+    description: 'Start a slide deck, a poster or a web page: a new folder with an index.html (for a page of prose — a post, an essay — start a web article instead: create_document with an .html path). Posters reproduce MIT BE Communication Lab\'s CC0 EvenBetterPoster source layouts: betterposter (48x36 in landscape), figure-first (48x36 in Illustrator figure sketch), research-portrait (36x48 in portrait); project layouts: bernstein-2026 (A0 portrait, two columns), icml-2026 (landscape, three columns); lorem-ipsum replicas of 2026 symposium posters: symposium-steps (36x24 in, monospaced numbered sections, a boxed four-step method), symposium-twin (24x36 in, two studies side by side), symposium-dark (36x24 in, white on black, three numbered claims), symposium-cards (60x36 in, rounded cards on a gradient), symposium-banner (36x24 in, a full-width two-minute band over four columns), symposium-editorial (36x24 in, serif, main-result band, a game tree of cards), symposium-portrait (24x36 in, a callout band, two columns). Decks reproduce published open Beamer themes: research (Metropolis, 16:9, CC BY-SA 4.0), dark-seminar (Focus, 16:9, GPL v3+), serif-colloquium (CambridgeUS, 4:3, GPL v3+). The historical ids remain compatible. Every source includes attribution and license. Restyle or rewrite freely within the source license, then render_page to look.\n\n' + DELIVERABLE_GUIDE,
     inputSchema: {
       ...projArg,
       folder: z.string().describe('The new folder, project-relative, e.g. "talk" or "posters/neurips"'),
@@ -751,7 +754,7 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
   });
 
   register('render_page', {
-    description: 'Look at an HTML deliverable (a deck, poster or web page): pages rendered as images by a real browser, as people see them and as the PDF prints, plus a report of problems on every page — text overflowing its box, text running off the slide, text of two objects overlapping, a picture covering text, text too small to read at the deliverable\'s size, low contrast, pictures that did not load, formulas that did not typeset, script errors. Use it after every substantial change and fix what it finds. For a deck pass the slides to see (0-based); the report always covers all of them.\n\n' + DELIVERABLE_GUIDE,
+    description: 'Look at an HTML deliverable (a deck, poster or web page) or a web article: pages rendered as images by a real browser, as people see them and as the PDF prints, plus a report of problems on every page — text overflowing its box, text running off the slide, text of two objects overlapping, a picture covering text, text too small to read at the deliverable\'s size, low contrast, pictures that did not load, formulas that did not typeset, script errors. Use it after every substantial change and fix what it finds. For a deck pass the slides to see (0-based); the report always covers all of them.\n\n' + DELIVERABLE_GUIDE,
     annotations: { readOnlyHint: true },
     inputSchema: {
       ...projArg,
@@ -762,7 +765,7 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
   }, async ({ project: p, path, pages, width }) => {
     try {
       const project = need(p, 'view');
-      if (!isHtmlPath(path)) throw new Error('render_page shows HTML deliverables (an .html file); build_pdf builds LaTeX documents.');
+      if (!isHtmlPath(path)) throw new Error('render_page shows HTML deliverables and web articles (an .html file); build_pdf builds LaTeX documents.');
       if (!fs.existsSync(resolveProjectPath(project, path))) throw new Error(`No file ${path}.`);
       const r = await renderPages(project, path, userId, { pages, width });
       await present(project, path);
@@ -803,12 +806,12 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
   }, async ({ project: p, path, old_text, new_text, replace_all }) => { try { return ok(editFile(need(p, 'edit'), userId, path, old_text, new_text, !!replace_all)); } catch (e) { return fail(e); } });
 
   register('edit_document', {
-    description: "Edit a document by replacing a passage of its LaTeX source (the `text` read_document returns): old_text must occur exactly once — include enough surrounding text to make it unique, or set replace_all. Any LaTeX is allowed in new_text (formulas, citations, environments, paragraph breaks). Applied as tracked changes attributed to this agent and diffed against the live document, so only what actually changes is marked (a word, a digit, a table cell); the user reviews them in the editor. Tracked-change markup (\\lyxadded / \\lyxdeleted) may be left out of old_text; whitespace differences are tolerated. Returns now_reads: the edited lines as the document now reads, for follow-up edits; applied_directly lists what was applied without marks (the preamble is never tracked). Prefer this over the paragraph tools. With tracked: false the same edit is applied directly, without marks — use that as soon as a tracked edit fails, garbles the passage or breaks the build.",
+    description: "Edit a document by replacing a passage of its source (the `text` read_document returns: LaTeX, markdown, or a web article's HTML): old_text must occur exactly once — include enough surrounding text to make it unique, or set replace_all. Any LaTeX is allowed in new_text (formulas, citations, environments, paragraph breaks). Applied as tracked changes attributed to this agent and diffed against the live document, so only what actually changes is marked (a word, a digit, a table cell); the user reviews them in the editor. Tracked-change markup (\\lyxadded / \\lyxdeleted) may be left out of old_text; whitespace differences are tolerated. Returns now_reads: the edited lines as the document now reads, for follow-up edits; applied_directly lists what was applied without marks (the preamble is never tracked). Prefer this over the paragraph tools. With tracked: false the same edit is applied directly, without marks — use that as soon as a tracked edit fails, garbles the passage or breaks the build.",
     inputSchema: {
       ...projArg,
       path: z.string().describe('Project-relative path, e.g. "main.tex"'),
       old_text: z.string().describe('The passage to replace, copied from the document source'),
-      new_text: z.string().describe('Its replacement (raw LaTeX)'),
+      new_text: z.string().describe('Its replacement (raw LaTeX; markdown in a .md document; HTML in a web article)'),
       replace_all: z.boolean().optional().describe('Replace every occurrence (default: old_text must be unique)'),
       tracked: z.boolean().optional().describe('true (default): a tracked change for review. false: applied directly, no tracked-change marks — the fallback whenever tracked editing runs into any problem (see the server instructions); the previous state stays in the project history'),
     },
@@ -830,7 +833,7 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
   }, async ({ project: p, path, index }) => { try { const project = need(p, 'edit'); return ok(await traced(project, path, () => deleteParagraph(project, agentName, path, index))); } catch (e) { return fail(e); } });
 
   register('write_document', {
-    description: "Write a document's whole raw LaTeX source, or create the document when the path does not exist. On an existing document the new source is diffed against the current one and applied as tracked changes (only what differs is marked) — or, with tracked: false, written directly. For a local change prefer edit_document.",
+    description: "Write a document's whole raw source (LaTeX; markdown for .md; a web article's whole HTML page for .html, its head with <meta name=\"overlyx\" content=\"article\">), or create the document when the path does not exist. On an existing document the new source is diffed against the current one and applied as tracked changes (only what differs is marked) — or, with tracked: false, written directly. For a local change prefer edit_document.",
     inputSchema: {
       ...projArg, path: z.string(), tex: z.string(),
       tracked: z.boolean().optional().describe('true (default): a tracked change for review. false: applied directly, no tracked-change marks — the fallback whenever tracked editing runs into any problem (see the server instructions); the previous state stays in the project history'),

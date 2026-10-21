@@ -24,6 +24,11 @@
  * their tags stay where they are. Anything else — a widget, a canvas, an SVG, a script — is an HTML
  * block: a raw (ERT) inset holding its source, which the editor shows running (blockKey).
  *
+ * Any web page can be opened so — one OverLyX did not write, too: math another tool rendered
+ * (KaTeX, MathJax, MathML, Distill's <d-math>, pandoc's span.math) becomes a formula when its TeX is
+ * in the page (an annotation, data-latex, the element's text), and stays as it is — shown rendered —
+ * when not; a page without <article> or <main> keeps its navigation, header and footer as they are.
+ *
  * Saving writes into the file's own text (writeArticlePreserving): a block whose HTML did not change
  * keeps its bytes, an edited one keeps its own start tag (classes, ids), and the markup between
  * blocks — container tags, comments, indentation — is never touched.
@@ -39,6 +44,7 @@ import { faceFromCss, faceValue, parseFace, faceSpan } from '../fontface.ts';
 import { CITE_SRC } from './refs.ts';
 import { attr, elementChildren, hasClass, htmlElement, isElement, walk, type HDocument, type HElement, type HNode } from './source.ts';
 import { articleHead } from './articletheme.ts';
+import { injectRuntime } from './serve.ts';
 
 /* ------------------------------------------------------------------ what an article is */
 
@@ -51,6 +57,14 @@ export function isArticleHtml(text: string): boolean {
     if ((a.name ?? '').toLowerCase() === 'overlyx' && /^\s*article\b/i.test(a.content ?? '')) return true;
   }
   return false;
+}
+
+/** Any web page made an article: its `<meta name="overlyx">` says "article" (one is added when it has none). */
+export function asArticleText(html: string): string {
+  const m = /<meta\b[^>]*\bname\s*=\s*["']?overlyx["']?[^>]*>/i.exec(html.slice(0, 65536));
+  const tag = '<meta name="overlyx" content="article">';
+  if (m) return html.slice(0, m.index) + tag + html.slice(m.index + m[0].length);
+  return injectRuntime(html, tag);
 }
 
 const ATTR_RE = /([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*("([^"]*)"|'([^']*)'|[^\s"'=<>`]+)/g;
@@ -88,8 +102,12 @@ export function blockKey(source: string): string {
   return (h >>> 0).toString(36) + source.length.toString(36);
 }
 
-/** the source of an HTML block: a raw inset's lines */
-export const rawSource = (ins: TextInset): string => ins.paragraphs.map(p => p.items.map(itemText).join('')).join('\n');
+/**
+ * the source of an HTML block: a raw inset's lines — as they read with its tracked changes taken
+ * (raw HTML has no place for change marks: a suggestion inside it is written as made, and the old
+ * and the new text are never both in the page)
+ */
+export const rawSource = (ins: TextInset): string => ins.paragraphs.map(p => p.items.filter(i => i.change?.type !== 'deleted').map(itemText).join('')).join('\n');
 
 /** a paragraph that is an HTML block (a raw inset alone in it), or null */
 export function htmlBlockOf(par: Paragraph): TextInset | null {
@@ -133,7 +151,7 @@ const isComment = (n: HNode): n is HNode & CommentNode => n.nodeName === '#comme
 const locOf = (n: HNode): Loc | null => ((n as { sourceCodeLocation?: Loc | null }).sourceCodeLocation ?? null);
 const blank = (n: HNode) => isText(n) && !/[^ \t\n\r\f]/.test(n.value);
 
-/** the element prose lives in: the first <article>, else the first <main>, else <body> */
+/** the element prose lives in: the first <article>, else the first <main>, else <body> (a whole page: its chrome is no prose) */
 function articleRoot(doc: HDocument): HElement | null {
   const html = htmlElement(doc);
   const body = html ? elementChildren(html).find(e => e.tagName === 'body') ?? null : null;
@@ -149,17 +167,78 @@ function articleRoot(doc: HDocument): HElement | null {
 /** text-level elements: they continue a run of inline content (a loose paragraph) */
 const RUN_TAGS = new Set(['a', 'abbr', 'b', 'bdi', 'bdo', 'br', 'cite', 'code', 'data', 'dfn', 'em', 'i', 'kbd', 'mark', 'q', 's', 'samp', 'small', 'span', 'strong', 'sub', 'sup', 'time', 'u', 'var', 'wbr', 'del', 'ins', 'img', 'label', 'strike', 'tt', 'font']);
 /** containers whose prose is the document's (unless they hold a widget of their own) */
-const CONTAINERS = new Set(['section', 'div', 'header', 'footer', 'main', 'article', 'aside', 'hgroup', 'nav', 'address', 'center']);
+const CONTAINERS = new Set(['section', 'div', 'header', 'footer', 'main', 'article', 'aside', 'hgroup', 'address', 'center']);
+/** a page's chrome around its prose: no prose of its own where the page has no <article> or <main> */
+const CHROME = new Set(['header', 'footer', 'aside']);
 /** a container with one of these as a child is a widget: shown running, kept whole */
 const WIDGET_TAGS = new Set(['script', 'canvas', 'svg', 'iframe', 'video', 'audio', 'object', 'embed', 'input', 'button', 'select', 'textarea', 'form', 'template', 'slot', 'noscript', 'math', 'map', 'output', 'progress', 'meter']);
 const PROSE_TAGS = new Set(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'blockquote', 'pre', 'figure', 'table', 'dl']);
 /** inline elements kept whole as raw HTML (their content is no text of the document's) */
 const WHOLE_INLINE = new Set([...WIDGET_TAGS, 'picture', 'ruby', 'wbr', 'img', 'br']);
 
+/* ------------------------------------------------------------------ math other tools rendered */
+
+const TEX_ENCODING = /^(application\/(x-)?tex|text\/(x-)?tex|tex|latex)$/i;
+
+/** the TeX a MathML element carries (an annotation, data-latex, alttext), unwrapped from \displaystyle */
+function mathTeX(el: HElement): string | null {
+  for (const e of [el, ...walk(el)]) {
+    const latex = attr(e, 'data-latex');
+    if (latex) return unwrapStyle(latex);
+    if (e.tagName === 'annotation' && TEX_ENCODING.test(attr(e, 'encoding') ?? '')) return unwrapStyle(textContent(e));
+  }
+  const alt = el.tagName === 'math' ? attr(el, 'alttext') : null;
+  return alt ? unwrapStyle(alt) : null;
+}
+const unwrapStyle = (tex: string) => tex.trim().replace(/^\{\s*\\(?:displaystyle|textstyle)\s*([\s\S]*)\}$/, '$1').trim();
+
+const hasClassIn = (el: HElement, ...names: string[]) => { const c = (attr(el, 'class') ?? '').split(/\s+/); return names.some(n => c.includes(n)); };
+const firstDesc = (el: HElement, pred: (e: HElement) => boolean): HElement | null => { for (const e of walk(el)) if (pred(e)) return e; return null; };
+const isTexScript = (el: HElement) => el.tagName === 'script' && /^math\/tex\b/i.test(attr(el, 'type') ?? '');
+/** MathJax 2's rendering of a <script type="math/tex"> next to it: the script is the formula, this is skipped */
+const isMathJax2Output = (el: HElement) => el.tagName !== 'mjx-container' && hasClassIn(el, 'MathJax_Preview', 'MathJax', 'MathJax_Display', 'MathJax_SVG', 'MathJax_SVG_Display', 'MathJax_CHTML', 'MJX_Assistive_MathML');
+
+/**
+ * Math that another tool put into the page: its TeX and whether it is displayed; null when the page
+ * has the math but not its TeX (kept as it is, shown rendered); undefined when `el` is no math.
+ */
+function renderedMath(el: HElement): { tex: string; display: boolean } | null | undefined {
+  const t = el.tagName;
+  if (t === 'd-math') return { tex: textContent(el).trim(), display: el.attrs.some(a => a.name === 'block') };
+  if (isTexScript(el)) return { tex: textContent(el).trim(), display: /mode\s*=\s*display/i.test(attr(el, 'type') ?? '') };
+  if (t === 'span' && hasClassIn(el, 'math') && hasClassIn(el, 'inline', 'display')) {
+    const s = textContent(el).trim();
+    const m = /^\\\(([\s\S]*)\\\)$|^\\\[([\s\S]*)\\\]$|^\$\$?([\s\S]*?)\$?\$$/.exec(s);
+    return { tex: (m ? m[1] ?? m[2] ?? m[3] : s).trim(), display: hasClassIn(el, 'display') };
+  }
+  if (hasClassIn(el, 'katex-display', 'katex', 'mwe-math-element')) {
+    const tex = mathTeX(el);
+    const display = hasClassIn(el, 'katex-display') || !!firstDesc(el, e => hasClassIn(e, 'mwe-math-mathml-display', 'mwe-math-fallback-image-display') || (e.tagName === 'math' && attr(e, 'display') === 'block'));
+    return tex ? { tex, display } : null;
+  }
+  if (t === 'mjx-container' || t === 'math') {
+    const tex = mathTeX(el);
+    const display = attr(el, 'display') === 'true' || attr(el, 'display') === 'block';
+    return tex ? { tex, display } : null;
+  }
+  return undefined;
+}
+
+/** the formula of rendered math (TeX recovered) */
+function mathFormula(m: { tex: string; display: boolean }): Inset {
+  const tex = m.tex.trim();
+  if (!m.display) return { type: 'Formula', inline: true, latex: '$' + tex + '$' };
+  return { type: 'Formula', inline: false, latex: new RegExp(`^\\\\begin\\{(${DISPLAY_ENVS})\\*?\\}`).test(tex) ? tex : '\\[' + tex + '\\]' };
+}
+
+/** math of another tool, or what goes with it: no widget (a container holding it keeps its prose) */
+const isMathPart = (el: HElement) => renderedMath(el) !== undefined || isMathJax2Output(el);
+
 function hasProse(el: HElement): boolean {
   for (const c of el.childNodes as HNode[]) {
     if (isText(c)) { if (/[^ \t\n\r\f]/.test(c.value)) return true; continue; }
     if (!isElement(c)) continue;
+    if (isMathPart(c)) return true;
     if (WIDGET_TAGS.has(c.tagName) || c.tagName.includes('-')) continue;
     if (PROSE_TAGS.has(c.tagName) || RUN_TAGS.has(c.tagName)) return true;
     if (CONTAINERS.has(c.tagName) && hasProse(c)) return true;
@@ -168,10 +247,12 @@ function hasProse(el: HElement): boolean {
 }
 
 /** a container whose children are blocks of the document (it is not a widget, and it holds prose) */
-function transparent(el: HElement): boolean {
+function transparent(el: HElement, wholePage = false): boolean {
   if (!CONTAINERS.has(el.tagName)) return false;
+  // (a whole page's own header, footer, sidebar: as they are)
+  if (wholePage && CHROME.has(el.tagName) && !el.parentNode?.nodeName.match(/^(article|main)$/)) return false;
   if (el.attrs.some(a => /^on/i.test(a.name) || a.name === 'contenteditable')) return false;
-  for (const c of el.childNodes as HNode[]) if (isElement(c) && (WIDGET_TAGS.has(c.tagName) || c.tagName.includes('-'))) return false;
+  for (const c of el.childNodes as HNode[]) if (isElement(c) && !isMathPart(c) && (WIDGET_TAGS.has(c.tagName) || c.tagName.includes('-'))) return false;
   return hasProse(el);
 }
 
@@ -200,6 +281,8 @@ class Converter {
   warnings: string[] = [];
   authors = new Map<string, number>();
   cur = -1;
+  /** the prose is the whole <body> (no <article> or <main>): its header, footer and sidebar are the page's chrome */
+  wholePage = false;
   constructor(private text: string) {}
 
   par(layout: string, depth: number, items: Item[], span: { start: number; end: number } | null, params: Paragraph['params'] = {}): void {
@@ -246,7 +329,9 @@ class Converter {
 
   flowBlock(el: HElement): void {
     const loc = locOf(el);
-    if (transparent(el) || !loc) { this.flow(el.childNodes as HNode[]); return; }
+    // MathJax 2's rendering of a formula (its script is the formula): stays in the markup
+    if (isMathJax2Output(el)) return;
+    if (transparent(el, this.wholePage) || !loc) { this.flow(el.childNodes as HNode[]); return; }
     // an empty container (what is left of one whose text was deleted) stays in the markup — unless a
     // script may fill it (it has an id) or the runtime does (the list of references)
     if (CONTAINERS.has(el.tagName) && (el.childNodes as HNode[]).every(blank) && !attr(el, 'id') && !hasClass(el, 'ol-bibliography')) return;
@@ -290,6 +375,10 @@ class Converter {
     const tag = el.tagName;
     const span = this.span(el);
     const kids = el.childNodes as HNode[];
+    if (isMathJax2Output(el)) return;
+    // a displayed formula another tool rendered, its TeX in the page
+    const math = renderedMath(el);
+    if (math) { this.insetPar(ctx, mathFormula({ ...math, display: true }), span); return; }
     if (HEADING_OF_TAG[tag]) { this.par(ctx.quote ? 'Quote' : HEADING_OF_TAG[tag], ctx.depth, this.inline(kids), span); return; }
     switch (tag) {
       case 'p': {
@@ -304,7 +393,7 @@ class Converter {
       case 'figure': { const f = this.figure(el); if (f) { this.insetPar(ctx, f, span); return; } break; }
       case 'table': { const t = this.table(el); if (t) { this.insetPar(ctx, t, span); return; } break; }
     }
-    if (transparent(el)) { this.nested(kids, ctx); return; }
+    if (transparent(el, this.wholePage)) { this.nested(kids, ctx); return; }
     const loc = locOf(el);
     if (loc) this.insetPar(ctx, raw(this.text.slice(loc.startOffset, loc.endOffset)), span);
   }
@@ -457,6 +546,11 @@ class Converter {
   elementInto(el: HElement, items: Item[], st: InlineState): void {
     const tag = el.tagName;
     const kids = el.childNodes as HNode[];
+    // math another tool rendered: a formula when its TeX is in the page, else kept whole (shown rendered)
+    if (isMathJax2Output(el)) return;
+    const math = renderedMath(el);
+    if (math) { this.add(items, { kind: 'inset', inset: mathFormula(math), font: this.font(st) }, st); return; }
+    if (math === null) { const loc = locOf(el); if (loc) this.add(items, { kind: 'inset', inset: raw(this.text.slice(loc.startOffset, loc.endOffset)), font: this.font(st) }, st); return; }
     switch (tag) {
       case 'em': case 'i': this.withFont(el, 'emph', 'on', items, st); return;
       case 'strong': case 'b': this.withFont(el, 'series', 'bold', items, st); return;
@@ -612,6 +706,7 @@ export function parseArticle(text: string): ParseArticleResult {
     const start = loc?.startTag?.endOffset ?? firstLoc?.startOffset ?? text.length;
     const end = loc?.endTag?.startOffset ?? lastLoc?.endOffset ?? start;
     region = { start, end: Math.max(start, end) };
+    conv.wholePage = root.tagName === 'body';
     conv.flow(kids);
   }
   if (!conv.pars.length) { conv.cur = -1; conv.par('Standard', 0, [], null); }

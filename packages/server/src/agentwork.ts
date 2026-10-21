@@ -31,6 +31,7 @@ import { config } from './config.ts';
 import { db } from './db.ts';
 import { manager, docFiles, readTextFile, type OpenDoc } from './docs.ts';
 import { projectDir, resolveProjectPath, isDocumentFile, findMaster } from './projects.ts';
+import { isArticleHtml } from '@overlyx/core/html/article.ts';
 import { lastBuild, buildIncluding, buildErrors, requestBuild } from './export.ts';
 import { touchProject } from './git.ts';
 import { lstatIn, readFileIn, readTextIn, readlinkIn, writeFileIn, symlinkIn, removeIn } from './confined.ts';
@@ -267,11 +268,14 @@ async function syncNow(tid: string, project: string, userId: number): Promise<Sy
       }
       // a file the agent created (or put in place of a link)
       if (isOutput(dir, rel) || st.size > MAX_NEW) continue;
-      if (!TEXT_EXT.has(ext) && !FIGURE_EXT.has(ext)) continue;
-      if (!TEXT_EXT.has(ext) && !referenced(corpus ??= textCorpus(dir), rel)) continue;
+      // (an .html file comes back when it is a web article: a document, core html/article.ts)
+      const html = ext === '.html' || ext === '.htm';
+      if (!TEXT_EXT.has(ext) && !FIGURE_EXT.has(ext) && !html) continue;
+      if (!TEXT_EXT.has(ext) && !html && !referenced(corpus ??= textCorpus(dir), rel)) continue;
       const live = resolveProjectPath(project, rel);
       const data = readFileIn(dir, rel, MAX_NEW);
       if (data === null) continue;
+      if (html && (data.includes(0) || !isArticleHtml(data.toString('utf8')))) continue;
       const existed = fs.existsSync(live);
       if (existed && isDocumentFile(project, rel)) continue;   // never overwrite a live document untracked
       const prev = existed ? readIfFile(live) : null;
@@ -279,7 +283,7 @@ async function syncNow(tid: string, project: string, userId: number): Promise<Sy
       out.push({ path: rel, action: existed ? 'copied' : 'created' });
       touched = true;
       recordFile(tid, manifest, rel, prev, data);
-      if (TEXT_EXT.has(ext) && !data.includes(0)) { writeBase(tid, rel, data.toString('utf8')); manifest.files[rel] = 'copy'; }
+      if ((TEXT_EXT.has(ext) || html) && !data.includes(0)) { writeBase(tid, rel, data.toString('utf8')); manifest.files[rel] = 'copy'; }
       else { symlinkIn(dir, rel, live); manifest.files[rel] = 'link'; }
     } catch (e) {
       out.push({ path: rel, action: 'tracked', error: (e as Error).message });

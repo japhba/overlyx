@@ -3254,9 +3254,21 @@ not on the deliverable canvas. The file stays a plain web page that any host can
   scrolled to; a phone's width on request). Its PDF is the page printed by the renderer's headless
   Chromium (`export.ts printArticle`, `render.ts deliverablePdf`); Export ▸ LaTeX writes it as a
   markdown document is written. No automatic PDF builds.
-* **Agents.** `create_document` with an `.html` path starts an article; `read_document` /
-  `edit_document` work on the page's text; `render_page` shows it; the instructions explain the
-  conventions (`ARTICLE_GUIDE`).
+* **Any web page.** Math another tool rendered becomes a formula when the page has its TeX —
+  KaTeX (its MathML annotation), MathJax 2 (`<script type="math/tex">`, its rendering skipped),
+  MathJax 3/4 (`data-latex`), MathML with a TeX annotation (Wikipedia's too), Distill's `<d-math>`,
+  pandoc's `span.math` — and stays as it is when not, shown rendered through its MathML (cleaned to
+  MathML alone, `nodeviews/htmlblock.ts safeMathML`). A page without `<article>` or `<main>` keeps
+  its nav, header, footer and sidebar as HTML blocks. A plain page (or a deliverable web page) on the
+  canvas has **✎ Article** (web app): `POST /docs/*/as-article` (`docs.ts makeArticle`) keeps the
+  page as a version, sets the meta tag and closes its deliverable document; the client leaves the
+  canvas first so its text never syncs into the document.
+* **Agents.** `create_document` / `write_document` with an `.html` path start an article (a new
+  page must carry the meta tag); `read_document` / `edit_document` work on the page's text (inside
+  an HTML block a tracked edit is applied as made: `rawSource` writes raw HTML with suggestions
+  taken); `render_page` shows it; the MCP instructions and the Agent panel's (`agent.ts`) explain
+  the conventions (`ARTICLE_GUIDE`); a new article the panel agent writes in its working copy is
+  copied back (`agentwork.ts`). The VS Code extension's local tools are for .tex / .md only.
 * **Not yet:** the VS Code extension opens an article on the deliverable canvas; text styles of an
   article are not written into its page; tables with merged cells, figures with more than images
   and a caption, and definition lists are HTML blocks. Tests: `tests/article.test.ts`.

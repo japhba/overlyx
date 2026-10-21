@@ -17,6 +17,7 @@ import type { Path, TextCaret } from './protocol';
 import { safeColor } from './runtime/carets';
 import { localWritesCommitted, snapshotCovers } from '../editor/savedstate';
 import { offlineFrames } from './offlineframes';
+import { noteArticle } from '../articlekinds';
 
 /** Check that storage can actually be opened and written before y-indexeddb installs
  * its listeners. Its constructor leaves an unhandled rejection when private mode
@@ -247,7 +248,15 @@ export function webHost(id: string, user: User): DeliverableHost & { destroy(): 
     return peers;
   };
 
+  /** the page made an article: its editor left first (its text must not sync into the document), then reopened as a document */
+  const makeArticle = async () => {
+    const back = location.hash;
+    location.hash = '#/' + project;
+    try { await api.asArticle(id); noteArticle(id, true); location.hash = '#/' + id; }
+    catch (e) { location.hash = back; throw e; }
+  };
   return {
+    makeArticle,
     path,
     docId: id,
     author: () => user.name || user.username,

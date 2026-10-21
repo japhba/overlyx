@@ -18,7 +18,7 @@ import chokidar, { type FSWatcher } from 'chokidar';
 import { isProjectKey, splitDocId, itemText, type LyxDocument } from '@overlyx/core';
 import { isMarkdownPath } from '@overlyx/core/md/index.ts';
 import { isHtmlPath } from '@overlyx/core/html/deliverable.ts';
-import { isArticleHtml } from '@overlyx/core/html/article.ts';
+import { isArticleHtml, asArticleText } from '@overlyx/core/html/article.ts';
 import { checkTexHealth, repairTex, type HealthIssue, type PreserveCache } from '@overlyx/core/tex/index.ts';
 import { db } from './db.ts';
 import { config } from './config.ts';
@@ -1230,6 +1230,23 @@ export class DocManager {
     doc.ydoc.destroy();
     if (this.docs.get(doc.id) === doc) this.docs.delete(doc.id);
     if (![...this.docs.values()].some(d => d.project === doc.project)) docWorkers.release(doc.project);
+  }
+
+  /**
+   * A web page (a deliverable: the canvas) made an article — written in the document editor from now
+   * on (core html/article.ts): the page as it was kept as a version, its meta tag set, and its open
+   * deliverable document closed, so the next open is a document's (openCold). The client leaves the
+   * page's editor first: an editor of the page's text must not sync into the document.
+   */
+  async makeArticle(id: string, author: string): Promise<void> {
+    const doc = await this.open(id);
+    if (!(doc instanceof HtmlDoc)) return;
+    const text = doc.html.toString();
+    await this.createVersion(id, 'the page before it became an article', author, 'auto', text);
+    doc.replaceText(asArticleText(text), 'convert');
+    await doc.saveToFile();
+    for (const c of [...doc.conns.keys()]) { doc.conns.delete(c); try { c.close(4001, 'the page is an article now'); } catch { /* gone */ } }
+    this.forgetDoc(doc);
   }
 
   async unload(id: string): Promise<void> {

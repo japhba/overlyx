@@ -21,6 +21,8 @@ export interface DeliverableSaveState { pending: boolean; localPending?: boolean
 export interface DeliverableHost {
   /** project-relative path of the page (folder of uploads, the title) */
   readonly path: string;
+  /** a web page made an article — written in the document editor from now on (the web app's; core html/article.ts) */
+  makeArticle?(): Promise<void>;
   /** Embedded drawings load the runtime separately from their project's images. */
   readonly folderBase?: string;
   /** the text now */

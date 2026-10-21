@@ -4,7 +4,9 @@
  * shows it: a sandboxed frame of the page in the runtime's embed mode (deliverable/runtime/embed.ts,
  * server deliverables.ts embedHtml), which hides all of the page but this block and tells the frame's
  * height. Its source stays the inset's text: the label opens it below the frame, and the frame
- * follows what is typed there (a moment after). Everywhere else a raw inset is the usual box.
+ * follows what is typed there (a moment after). Math in an article whose TeX the page does not have
+ * (MathML another tool wrote) shows rendered — its MathML, cleaned to MathML alone — beside its
+ * source. Everywhere else a raw inset is the usual box.
  */
 import type { Node as PMNode } from 'prosemirror-model';
 import type { EditorView } from 'prosemirror-view';
@@ -29,11 +31,33 @@ function pageUrl(docId: string): Promise<string> {
   return (hit ?? make()).then(l => (fresh(l) ? l.url : make().then(x => x.url)));
 }
 
+const MATHML_NS = 'http://www.w3.org/1998/Math/MathML';
+const MATHML_TAGS = new Set(['math', 'semantics', 'mrow', 'mi', 'mn', 'mo', 'ms', 'mtext', 'mspace', 'msup', 'msub', 'msubsup', 'mfrac', 'msqrt', 'mroot', 'mover', 'munder', 'munderover', 'mtable', 'mtr', 'mtd', 'mstyle', 'mpadded', 'mphantom', 'menclose', 'mfenced', 'merror', 'mlabeledtr', 'mmultiscripts', 'mprescripts', 'none']);
+const MATHML_ATTRS = new Set(['display', 'mathvariant', 'stretchy', 'fence', 'separator', 'lspace', 'rspace', 'accent', 'accentunder', 'columnalign', 'rowalign', 'columnspacing', 'rowspacing', 'displaystyle', 'scriptlevel', 'linethickness', 'width', 'height', 'depth', 'notation', 'largeop', 'movablelimits', 'symmetric', 'minsize', 'maxsize', 'form', 'columnlines', 'rowlines', 'frame', 'framespacing', 'align', 'bevelled', 'open', 'close', 'separators']);
+
+/** the first <math> of some HTML as MathML alone: known elements, their presentation attributes, text (no links, no handlers) */
+export function safeMathML(src: string): Element | null {
+  const math = new DOMParser().parseFromString(src, 'text/html').querySelector('math');
+  const clean = (el: Element): Element | null => {
+    if (!MATHML_TAGS.has(el.localName)) return null;
+    const out = document.createElementNS(MATHML_NS, el.localName);
+    for (const a of Array.from(el.attributes)) if (MATHML_ATTRS.has(a.name)) out.setAttribute(a.name, a.value);
+    for (const c of Array.from(el.childNodes)) {
+      if (c.nodeType === Node.TEXT_NODE) out.append(c.textContent ?? '');
+      else if (c.nodeType === Node.ELEMENT_NODE) { const k = clean(c as Element); if (k) out.append(k); }
+    }
+    return out;
+  };
+  return math ? clean(math) : null;
+}
+
 /** a block that shows nothing (scripts, styles, comments only): a chip, no frame */
 const QUIET = /^(\s*(<(script|style|template|noscript)\b[\s\S]*?<\/\3\s*>|<(link|meta)\b[^>]*>|<!--[\s\S]*?-->))+\s*$/i;
 
 export class HtmlBlockView extends InsetView {
   private wrap: HTMLElement | null = null;
+  private rendered: HTMLElement | null = null;
+  private renderedSrc = '';
   private frame: HTMLIFrameElement | null = null;
   private key = '';
   private loads = 0;
@@ -57,10 +81,14 @@ export class HtmlBlockView extends InsetView {
     queueMicrotask(() => this.sync());
   }
 
-  /** the block's source: the inset's lines */
+  /** the block's source: the inset's lines, as they read with suggestions taken (core rawSource) */
   private source(): string {
     const lines: string[] = [];
-    this.node.forEach(p => lines.push(p.textContent));
+    this.node.forEach(p => {
+      let line = '';
+      p.forEach(n => { if (n.isText && !n.marks.some(m => m.type.name === 'change' && m.attrs.type === 'deleted')) line += n.text; });
+      lines.push(line);
+    });
     return lines.join('\n');
   }
 
@@ -82,6 +110,7 @@ export class HtmlBlockView extends InsetView {
     // in an article raw text is HTML (not TeX)
     if (isArticleDoc(this.view.dom.dataset.docId)) { this.label.textContent = 'HTML'; this.label.title = 'HTML — click to show or hide its source, double-click for settings'; }
     const block = this.isBlock();
+    this.syncMath(block);
     const src = block ? this.source() : '';
     const shown = block && !QUIET.test(src);
     this.dom.classList.toggle('ol-htmlblock', block);
@@ -107,6 +136,25 @@ export class HtmlBlockView extends InsetView {
     clearTimeout(this.timer);
     // the first time at once; while its source is typed, once the typing pauses (and the server has it)
     if (this.loads === 0) this.load(); else this.timer = setTimeout(() => this.load(), 700);
+  }
+
+  /** math the page has no TeX for, inline in an article: rendered beside its source (open) or alone (collapsed) */
+  private syncMath(block: boolean): void {
+    const src = !block && isArticleDoc(this.view.dom.dataset.docId) ? this.source() : '';
+    const math = /<math\b/i.test(src) ? src : '';
+    this.dom.classList.toggle('ol-rawmath', !!math);
+    if (!math) { this.rendered?.remove(); this.rendered = null; this.renderedSrc = ''; return; }
+    if (math === this.renderedSrc) return;
+    this.renderedSrc = math;
+    const el = safeMathML(math);
+    if (!this.rendered) {
+      this.rendered = document.createElement('span');
+      this.rendered.className = 'ol-rawmath-shown';
+      this.rendered.contentEditable = 'false';
+      this.rendered.title = 'A formula as the page has it (MathML, no TeX) — click the label for its source';
+      this.contentDOM.before(this.rendered);
+    }
+    this.rendered.replaceChildren(...(el ? [el] : []));
   }
 
   private load(): void {

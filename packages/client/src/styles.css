@@ -3307,3 +3307,9 @@ html body .lyx-editor.ol-article > :is(.lyx-layout-itemize, .lyx-layout-enumerat
 .article-page-view > iframe { flex: 1; border: 0; background: #fff; max-width: 100%; }
 .article-page-view.phone > iframe { flex: 0 0 auto; margin: 12px 0; border-radius: 18px; box-shadow: 0 2px 16px rgba(0, 0, 0, 0.25); }
 .editor-loading { min-height: 60vh; }
+/* math the page has no TeX for (MathML another tool wrote, editor/nodeviews/htmlblock.ts): rendered in the text, its source behind the label */
+.lyx-editor.ol-article .lyx-inset.ol-rawmath > .inset-box { position: relative; border: 0; background: none; padding: 0; margin: 0; }
+.lyx-editor.ol-article .lyx-inset.ol-rawmath > .inset-box > .inset-label { position: absolute; left: 0; bottom: 100%; font-size: 9px; line-height: 12px; padding: 0 3px; margin: 0; opacity: 0; z-index: 2; }
+.lyx-editor.ol-article .lyx-inset.ol-rawmath:hover > .inset-box > .inset-label, .lyx-editor.ol-article .lyx-inset.ol-rawmath.open > .inset-box > .inset-label { opacity: 0.8; }
+.lyx-editor.ol-article .lyx-inset.ol-rawmath.open > .inset-box > .inset-content { display: block; font-family: var(--ol-a-font-code, ui-monospace, monospace); font-size: 0.7em; background: var(--ol-art-code); padding: 0.3em 0.5em; border-radius: 4px; }
+.ol-rawmath-shown math { font-size: 1.05em; }

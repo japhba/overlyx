@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { parseArticle, writeArticlePreserving, writeArticle, isArticleHtml, blockKey, htmlBlockOf, rawSource } from '../packages/core/src/html/article.ts';
+import { parseArticle, writeArticlePreserving, writeArticle, isArticleHtml, blockKey, htmlBlockOf, rawSource, asArticleText } from '../packages/core/src/html/article.ts';
 import { newArticleText, articleVars } from '../packages/core/src/html/articletheme.ts';
 import type { Item, LyxDocument, Paragraph } from '../packages/core/src/lyx/ast.ts';
 
@@ -110,6 +110,33 @@ describe('HTML articles', () => {
     expect(plain(parseArticle(out).doc.body[1])).toBe('a < b & c[$a<b$]');
   });
 
+  it('reads math other tools rendered as formulas when the page has its TeX, and keeps the rest as it is', () => {
+    const page = `<!doctype html><html><head><meta name="overlyx" content="article"></head><body>
+<nav><ul><li><a href="/">Home</a></li></ul></nav>
+<header class="site"><b>Site</b></header>
+<p>KaTeX <span class="katex"><span class="katex-mathml"><math><semantics><mi>x</mi><annotation encoding="application/x-tex">x^2</annotation></semantics></math></span><span class="katex-html">x2</span></span>,
+MathJax 2 <span class="MathJax_Preview">a</span><span class="MathJax">a</span><script type="math/tex">a+b</script>,
+Distill <d-math>\\alpha</d-math>, pandoc <span class="math inline">\\(\\beta\\)</span>,
+Wikipedia <span class="mwe-math-element"><math alttext="{\\displaystyle \\gamma }"><semantics><mi>γ</mi><annotation encoding="application/x-tex">{\\displaystyle \\gamma }</annotation></semantics></math></span>,
+MathML alone <math><mi>y</mi></math>.</p>
+<mjx-container class="MathJax" jax="CHTML" display="true"><mjx-math>…</mjx-math><mjx-assistive-mml><math display="block" data-latex="\\sum_i x_i"><mo>∑</mo></math></mjx-assistive-mml></mjx-container>
+<footer><p>© 2026</p></footer>
+</body></html>`;
+    const { doc } = parseArticle(page);
+    expect(doc.body.map(plain)).toEqual([
+      '[ERT]', '[ERT]',
+      'KaTeX [$x^2$], MathJax 2 [$a+b$], Distill [$\\alpha$], pandoc [$\\beta$], Wikipedia [$\\gamma$], MathML alone [ERT].',
+      '[\\[\\sum_i x_i\\]]', '[ERT]',
+    ]);
+    expect(writeArticlePreserving(doc, page).text).toBe(page);
+  });
+
+  it('makes any page an article by its meta tag', () => {
+    expect(isArticleHtml(asArticleText('<!doctype html><html><head><title>A</title></head><body><p>x</p></body></html>'))).toBe(true);
+    const deck = '<html><head><meta name="overlyx" content="page"><title>A</title></head><body></body></html>';
+    expect(asArticleText(deck)).toBe('<html><head><meta name="overlyx" content="article"><title>A</title></head><body></body></html>');
+  });
+
   it('names an HTML block by its source, as the server finds it', () => {
     expect(blockKey('<div>a</div>')).toBe(blockKey('<div>a</div>'));
     expect(blockKey('<div>a</div>')).not.toBe(blockKey('<div>b</div>'));
@@ -146,13 +173,22 @@ describe('the document manager with an article', async () => {
     expect((await doc.metaAsync()).article?.vars).toEqual({ '--accent': 'teal' });
   });
 
+  it('takes an agent\'s tracked edit inside an HTML block as made (raw HTML has no place for marks)', async () => {
+    const doc = await manager.open('u/p/post/index.html');
+    await doc.agentEdit('tracked', null, { replace: { oldText: '<script>draw()</script>', newText: '<script>draw(2)</script>', all: false } }, { author: 'Agent' });
+    await doc.saveToFile();
+    const t = readFileSync(file, 'utf8');
+    expect(t).toContain('<canvas></canvas><script>draw(2)</script></div>');
+    expect(t).not.toContain('draw()');
+  });
+
   it('serves the page as it is now, and one HTML block of it marked for the editor', async () => {
     const doc = await manager.open('u/p/post/index.html');
     const lyx = doc.toLyxDocument();
     lyx.body[0] = par('Section', [text('Intro, live')]);
     doc.loadFromLyx(lyx, 'test');
     expect(await liveHtml('u/p', 'post/index.html')).toContain('<h2 class="sec">Intro, live</h2>');
-    const block = '<div class="widget" id="w"><canvas></canvas><script>draw()</script></div>';
+    const block = '<div class="widget" id="w"><canvas></canvas><script>draw(2)</script></div>';
     expect(await embedHtml('u/p', 'post/index.html', blockKey(block))).toContain(`<template data-ol-embed></template>${block}<template data-ol-embed-end></template>`);
   });
 });

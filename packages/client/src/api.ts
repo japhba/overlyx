@@ -382,6 +382,8 @@ export const api = {
   bibKeys: (id: string, keys: string[]) => req<{ entries: (BibItem & { type?: string; fields?: Record<string, string>; authorShort?: string })[] }>('GET', `/api/docs/${encId(id)}/bib?keys=${encodeURIComponent(keys.join(','))}`),
   bibSearch: (id: string, q: string, limit = 100) => req<{ entries: BibItem[]; total: number; matches: number }>('GET', `/api/docs/${encId(id)}/bib?q=${encodeURIComponent(q)}&limit=${limit}`),
   /** LaTeX export (returns the source) or a PDF build request (a background job; poll `build`) */
+  /** a web page (a deliverable) made an article: written in the document editor from now on */
+  asArticle: (id: string) => req<{ ok: boolean; id: string }>('POST', `/api/docs/${encId(id)}/as-article`),
   export: (id: string, format: 'pdf' | 'tex', opts: { auto?: boolean } = {}) => req<{ ok: boolean; log?: string; warnings?: string[]; pdf?: string | null; tex?: string; job?: BuildJob }>('POST', `/api/docs/${encId(id)}/export`, { format, ...(opts.auto ? { auto: true } : {}) }),
   cancelBuild: (id: string) => req<{ ok: boolean }>('POST', `/api/docs/${encId(id)}/export/cancel`),
   /** SyncTeX: the PDF boxes (points, origin top-left) of a 1-based line of the built .tex; inverse: the source line under a PDF point. */

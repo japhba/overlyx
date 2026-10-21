@@ -43,7 +43,7 @@ import { BgRemoveDialog } from './BgRemoveDialog';
 import { MathOverlay, type MathEditState, type MathOps } from './MathOverlay';
 import { AnimationPane, type Sequence } from './AnimationPane';
 import { ObjectsPane } from './ObjectsPane';
-import { CiteDialog, Dialog, uiPrompt } from '../app/Dialogs';
+import { CiteDialog, Dialog, uiPrompt, uiConfirm } from '../app/Dialogs';
 import type { DocMeta } from '../api';
 import { citedKeys, citeEntry, type CiteEntry } from '@overlyx/core/html/refs.ts';
 import type { MathJaxMacro } from '@overlyx/core/html/deckextras.ts';
@@ -2414,6 +2414,11 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
           <div class="dl-ctx-secs">{bars.sections.map((sec, i) => <Toolbar key={`${i}:${sec.label}`} id="deck-context" label={sec.label} groups={sec.groups} />)}</div>
         )}</div>
         {kind === 'page' && <>
+          {host.makeArticle && !readOnly && <button class="dl-btn" data-dl-article title="Write this page as an article: its prose in the document editor (comments, suggestions, formulas), everything else kept as it is and shown running" onClick={() => {
+            void uiConfirm('Write as an article', 'The page becomes a document: its text is written in the document editor — with comments, suggestions, formulas and citations — and what is not text (navigation, scripts, interactive figures) stays as it is, shown running. The page as it is now is kept as a version.', { okLabel: 'Write as article' })
+              .then(ok => { if (ok) return host.makeArticle!(); })
+              .catch(e => notify('Could not make it an article: ' + (e as Error).message, 'error'));
+          }}>✎ Article</button>}
           <button class={'dl-btn' + (device === 'desktop' ? ' on' : '')} title="Desktop width" onClick={() => setDevice('desktop')}>🖥</button>
           <button class={'dl-btn' + (device === 'mobile' ? ' on' : '')} title="Phone width" onClick={() => setDevice('mobile')}>📱</button>
         </>}

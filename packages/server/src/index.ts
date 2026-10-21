@@ -1118,6 +1118,17 @@ api.get('/docs/*/meta', async (req, res) => {
 });
 
 /** Mend mechanically-fixable structural damage (managed-block markers) left by an external edit. */
+/** A web page (a deliverable) made an article: written in the document editor from now on (docs.ts makeArticle). */
+api.post('/docs/*/as-article', async (req, res) => {
+  try {
+    if (!atLeast(req.role, 'edit')) { res.status(403).json({ error: 'view-only' }); return; }
+    const id = docId(req);
+    if (!isHtmlPath(id)) { res.status(400).json({ error: 'not an HTML page' }); return; }
+    await manager.makeArticle(id, req.user!.name);
+    res.json({ ok: true, id });
+  } catch (e) { res.status(400).json({ error: String(e) }); }
+});
+
 api.post('/docs/*/repair', async (req, res) => {
   try {
     if (!atLeast(req.role, 'edit')) { res.status(403).json({ error: 'view-only' }); return; }
