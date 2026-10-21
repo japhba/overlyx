@@ -11,6 +11,7 @@ import { snapshotCovers, localWritesCommitted } from './savedstate';
 import { WebsocketProvider } from 'y-websocket';
 import { IndexeddbPersistence } from 'y-indexeddb';
 import * as decoding from 'lib0/decoding';
+import * as encoding from 'lib0/encoding';
 import * as syncProtocol from 'y-protocols/sync';
 import { collabSync, cursorPlugin, undoPlugin, cursorPosition } from './collab';
 import { salvageLegacyCopy, LEGACY_DB_PREFIX } from './legacycopy';
@@ -27,6 +28,7 @@ import { getPrefs, subscribePrefs } from '../prefs';
 import { assemblePlugins, editorViewProps, editorAttributes, dispatchTransactionProp, installEditorDom, flushDomSelection as flushSelection } from './assembly';
 import { isMarkdownDoc } from './markdown';
 import { isArticleDoc } from '../articlekinds';
+import type { MergeEntry, MergeSource } from './plugins/mergereview';
 import type { User } from '../api';
 
 installMathAssist();
@@ -135,6 +137,9 @@ export interface EditorOptions {
   initialCursor?: () => SavedCursor | null;
 }
 
+/** OverLyX extension (server ws.ts): the state offline edits were made on, ahead of the sync step 2 */
+const MSG_OFFLINE_BASE = 7;
+
 /** IndexedDB database name of a document's local copy (model 2; model 1's were LEGACY_DB_PREFIX + id, editor/legacycopy.ts) */
 export const localDbName = (docId: string) => 'overlyx2:' + docId;
 const legacyDbName = (docId: string) => LEGACY_DB_PREFIX + docId;
@@ -232,6 +237,19 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   /** origin of updates applied via messageHandlers[5] (the embedded agent's edits): tracked by
    *  the undo manager so Ctrl+Z reverts them, skipped by the local-edit bookkeeping below */
   const AGENT_EDIT_ORIGIN = 'agent-edit';
+  /**
+   * The state of the local copy right before the first edit made without a synced connection,
+   * kept in IndexedDB until the server has those edits: sent on reconnect (MSG_OFFLINE_BASE), it
+   * lets the server find what both sides changed differently meanwhile.
+   */
+  let offlineBase: Uint8Array | null = null;
+  ydoc.on('beforeTransaction', (tr: Y.Transaction) => {
+    if (offlineBase || !tr.local || !localSynced || localEmpty || stale) return;
+    if (tr.origin === provider || tr.origin === persistence || tr.origin === AGENT_EDIT_ORIGIN) return;
+    if (provider.wsconnected && provider.synced) return;
+    const base = offlineBase = Y.encodeStateAsUpdate(ydoc);
+    void persistence.set('offlineBase', base.buffer.slice(base.byteOffset, base.byteOffset + base.byteLength) as ArrayBuffer).catch(() => {});
+  });
   ydoc.on('update', (_u: Uint8Array, origin: unknown) => {
     if (origin === provider || origin === persistence || origin === AGENT_EDIT_ORIGIN) return;
     editSeq++;
@@ -256,6 +274,8 @@ export function createEditor(opts: EditorOptions): EditorHandle {
     if (decoding.hasContent(dec) && snapshotCovers(Y.decodeSnapshot(decoding.readVarUint8Array(dec)), Y.snapshot(ydoc))) {
       savedSeq = editSeq;
       pendingFromStore = false;
+      // the server has all the offline edits (and merged them): their base is no longer needed
+      if (offlineBase) { offlineBase = null; void persistence.del('offlineBase').catch(() => {}); }
     }
     emitSaveState();
   };
@@ -315,13 +335,23 @@ export function createEditor(opts: EditorOptions): EditorHandle {
       return;
     }
     if (epoch !== e) { epoch = e; void persistence.set('epoch', e).catch(() => {}); }
+    // the same history: the state the offline edits were made on goes ahead of our sync step 2
+    // (an answer to the server's step 1, which follows the epoch), so the server can lay out for
+    // review what both sides changed differently (server offlinemerge.ts)
+    if (offlineBase && provider.ws) {
+      const enc = encoding.createEncoder();
+      encoding.writeVarUint(enc, MSG_OFFLINE_BASE);
+      encoding.writeVarUint8Array(enc, offlineBase);
+      provider.ws.send(encoding.toUint8Array(enc));
+    }
   };
   const connectAfterLocalLoad = async () => {
     try {
       await Promise.race([persistence.whenSynced, new Promise(r => setTimeout(r, 2500))]);
-      const [storedEpoch, pending] = await Promise.all([persistence.get('epoch'), persistence.get('pending')]);
+      const [storedEpoch, pending, base] = await Promise.all([persistence.get('epoch'), persistence.get('pending'), persistence.get('offlineBase')]);
       if (typeof storedEpoch === 'string') epoch = storedEpoch;
       pendingFromStore = pending === 1;
+      if ((base instanceof ArrayBuffer || base instanceof Uint8Array) && pendingFromStore) offlineBase = new Uint8Array(base);
     } catch { /* no IndexedDB (private mode, …): work without a local copy */ }
     localSynced = true;
     localEmpty = isEmpty();
@@ -341,7 +371,16 @@ export function createEditor(opts: EditorOptions): EditorHandle {
 
   provider.awareness.setLocalStateField('user', { name: opts.user.name, color: opts.user.color, username: opts.user.username, avatar: opts.user.avatar ?? null });
 
+  // offline merges the server laid out for review (server offlinemerge.ts): entries of the CRDT's `offlineMerges` map
+  const mergesMap = ydoc.getMap<string>('offlineMerges');
+  const merges: MergeSource = {
+    list: () => [...mergesMap.entries()].flatMap(([key, v]) => { try { return [{ ...JSON.parse(v), key } as MergeEntry]; } catch { return []; } }),
+    subscribe: fn => { const h = () => fn(); mergesMap.observe(h); return () => mergesMap.unobserve(h); },
+    dismiss: key => { if (!viewOnly && mergesMap.has(key)) mergesMap.delete(key); },
+  };
+
   const plugins = assemblePlugins({
+    merges,
     markdown: isMarkdownDoc(opts.docId),
     article: isArticleDoc(opts.docId),
     sync: [

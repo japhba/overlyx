@@ -70,6 +70,10 @@ export interface AiRewriteRequest { instruction: string; content: PMJSON[]; layo
 export interface AiRewriteResult { tex: string; nodes: PMJSON[]; original: string }
 export interface AiCompleteRequest { kind: 'text' | 'math'; before: string; after: string; formula?: string; paragraph?: string; model?: string }
 export interface AiCompleteResult { text: string; nodes: PMJSON[] }
+/** two versions of a paragraph after an offline merge (editor/plugins/mergereview.ts): the current text and the offline author's */
+export interface AiMergeRequest { current: PMJSON[]; offline: PMJSON[]; layout?: string; name: string; before?: string; after?: string }
+/** one version made from both, by the account's own AI (`via`: its name) */
+export interface AiMergeResult { tex: string; nodes: PMJSON[]; note: string; via: string }
 export interface DocMeta {
   availableModules?: import('@overlyx/core').ModuleInfo[];
   /** what the file is written as (a markdown document offers only what markdown can hold, an HTML article what HTML can) */
@@ -367,6 +371,9 @@ export const api = {
   aiRewrite: (id: string, body: AiRewriteRequest, signal?: AbortSignal) => req<AiRewriteResult>('POST', `/api/docs/${encId(id)}/ai/rewrite`, body, undefined, signal),
   aiComplete: (id: string, body: AiCompleteRequest, signal?: AbortSignal) => req<AiCompleteResult>('POST', `/api/docs/${encId(id)}/ai/complete`, body, undefined, signal),
   aiInk: (body: AiInkRequest, signal?: AbortSignal) => req<{ candidates: string[] }>('POST', '/api/ai/ink', body, undefined, signal),
+  /** the account's own AI (server linkedai.ts: the Agent panel's ChatGPT sign-in, or a listening MCP agent): its name, null when none is linked */
+  aiLinked: () => req<{ via: string | null }>('GET', '/api/ai/linked'),
+  aiMerge: (id: string, body: AiMergeRequest, signal?: AbortSignal) => req<AiMergeResult>('POST', `/api/docs/${encId(id)}/ai/merge`, body, undefined, signal),
   /** the embedded coding agent (Agent panel; agent.ts on the server) */
   agentStatus: () => req<AgentStatus>('GET', '/api/agent/status'),
   agentLogin: () => req<AgentLogin>('POST', '/api/agent/login'),

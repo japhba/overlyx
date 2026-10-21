@@ -18,6 +18,7 @@ import { hasModel, connectParams } from '@overlyx/core/collab/connect.ts';
 import { markDocOpened } from './userSettings.ts';
 import { config } from './config.ts';
 import { isAgentClient, trackMoves } from './agentPresence.ts';
+import { offlineBase, applyClientUpdate } from './offlinemerge.ts';
 
 const MSG_SYNC = 0;
 const MSG_AWARENESS = 1;
@@ -37,6 +38,8 @@ const MSG_PING = 4;
 /** an update that came from the embedded agent (origin 'mcp'), sent additionally under this type
  *  so clients can apply it with an undo-tracked origin (see editor.ts messageHandlers[5]) */
 const MSG_AGENT_EDIT = 5;
+/** OverLyX extension: an editor with offline edits sends the state they were made on, before its sync step 2 (offlinemerge.ts) */
+const MSG_OFFLINE_BASE = 7;
 const HEARTBEAT_MS = 10000;
 /*
  * The CRDT model editors must hold the document in (core collab/model.ts), from the connection's
@@ -203,8 +206,12 @@ async function handleConnection(conn: WebSocket, docId: string, user: SessionUse
           if (kind === syncProtocol.messageYjsSyncStep1) answerStep1(doc, conn, decoding.readVarUint8Array(dec));
           else if (!readOnly && (kind === syncProtocol.messageYjsSyncStep2 || kind === syncProtocol.messageYjsUpdate)) {
             // a viewer's are dropped: it only ever gets the document
-            Y.applyUpdate(doc.ydoc, decoding.readVarUint8Array(dec), conn);
+            applyClientUpdate(doc, conn, decoding.readVarUint8Array(dec), kind === syncProtocol.messageYjsSyncStep2);
           }
+          break;
+        }
+        case MSG_OFFLINE_BASE: {
+          if (!readOnly) offlineBase(conn, decoding.readVarUint8Array(dec), user.name);
           break;
         }
         case MSG_AWARENESS: {

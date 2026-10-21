@@ -9,7 +9,8 @@ import { config } from './config.ts';
 import { cachedBib } from './bibcache.ts';
 import { setSecurityHeaders } from './security.ts';
 import { requestAiRepair, AiRepairError } from './airepair.ts';
-import { aiStatus, aiAvailable, rewrite as aiRewrite, complete as aiComplete, recognizeInk, allow as aiAllow, AiError } from './ai.ts';
+import { aiStatus, aiAvailable, rewrite as aiRewrite, complete as aiComplete, recognizeInk, allow as aiAllow, AiError, selectionToTex, texToPm } from './ai.ts';
+import { linkedAi, combineVersions } from './linkedai.ts';
 import { mcpRouter } from './mcp.ts';
 import { mcpAgentRoutes, pruneAgents } from './mcpAgents.ts';
 import { agentRoutes, disconnectAgents } from './agent.ts';
@@ -1224,6 +1225,32 @@ api.post('/docs/*/ai/rewrite', async (req, res) => {
   } catch (e) {
     if (e instanceof AiError) { if (e.status !== 499) res.status(e.status).json({ error: e.message }); return; }
     res.status(400).json({ error: (e as Error).message ?? String(e) });
+  }
+});
+
+/** The account's own AI (linkedai.ts: the Agent panel's ChatGPT sign-in, or a listening MCP agent): its name, null when none is linked. */
+api.get('/ai/linked', (req, res) => { res.json({ via: linkedAi(req.user!)?.via ?? null }); });
+
+/** A place of an offline merge (editor plugins/mergereview.ts): one version of the paragraph made from both — by the account's own AI, never the server's key. */
+api.post('/docs/*/ai/merge', async (req, res) => {
+  try {
+    if (!atLeast(req.role, 'edit')) { res.status(403).json({ error: 'view-only' }); return; }
+    const ai = linkedAi(req.user!);
+    if (!ai) { res.status(409).json({ error: 'No AI is linked to your account: sign in with ChatGPT in the Agent panel, or connect an agent.' }); return; }
+    if (!aiAllow(`merge:${req.user!.id}`, 10)) { res.status(429).json({ error: 'Too many requests — wait a moment.' }); return; }
+    const body = req.body ?? {};
+    const doc = await manager.open(docId(req));
+    const layout = typeof body.layout === 'string' ? body.layout : 'Standard';
+    const current = selectionToTex(doc, Array.isArray(body.current) ? body.current : [], layout).slice(0, 20000);
+    const offline = selectionToTex(doc, Array.isArray(body.offline) ? body.offline : [], layout).slice(0, 20000);
+    if (!current && !offline) { res.status(400).json({ error: 'nothing to combine' }); return; }
+    const ac = new AbortController();
+    req.on('close', () => { if (!res.writableEnded) ac.abort(); });
+    const r = await combineVersions(req.user!, ai, { current, offline, name: String(body.name ?? 'a co-author').slice(0, 80), before: String(body.before ?? '').slice(0, 800), after: String(body.after ?? '').slice(0, 800) }, ac.signal);
+    res.json({ tex: r.merged, nodes: texToPm(doc, r.merged), note: r.note, via: ai.via });
+  } catch (e) {
+    if (e instanceof AiError) { if (e.status !== 499) res.status(e.status).json({ error: e.message }); return; }
+    if (!res.headersSent) res.status(502).json({ error: (e as Error).message ?? String(e) });
   }
 });
 

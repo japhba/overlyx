@@ -528,3 +528,7 @@ html[data-ui="modern"] .rail button[data-rail="source"] { --icon: url("data:imag
   html[data-ui="modern"] .home { margin-top: 20px; }
   html[data-ui="modern"] .home h1 { font-size: 26px; }
 }
+
+/* the offline-merge review card: review is yellow's job */
+html[data-ui="modern"] .merge-review { border-left-color: var(--m-yellow); box-shadow: var(--m-shadow); }
+html[data-ui="modern"] .ol-merge-focus { outline-color: color-mix(in srgb, var(--m-yellow) 70%, transparent); }

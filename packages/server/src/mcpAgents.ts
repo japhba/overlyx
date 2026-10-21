@@ -401,6 +401,20 @@ const subscribers = new Map<number, Set<(e: PanelEvent) => void>>();
 function emit(userId: number, e: PanelEvent): void {
   for (const fn of subscribers.get(userId) ?? []) { try { fn(e); } catch { /* a closed stream */ } }
 }
+/** The agent's final reply to the owner's message `messageId` (null: none within `ms`, or aborted). */
+export function finalReply(userId: number, messageId: number, ms: number, signal?: AbortSignal): Promise<string | null> {
+  return new Promise(resolve => {
+    let set = subscribers.get(userId);
+    if (!set) subscribers.set(userId, set = new Set());
+    const listeners = set;
+    const done = (v: string | null) => { clearTimeout(timer); listeners.delete(fn); signal?.removeEventListener('abort', onAbort); resolve(v); };
+    const fn = (e: PanelEvent) => { if (e.kind === 'message' && e.message.role === 'agent' && e.message.replyTo === messageId && e.message.state === 'final') done(e.message.text); };
+    const onAbort = () => done(null);
+    const timer = setTimeout(() => done(null), ms);
+    listeners.add(fn);
+    signal?.addEventListener('abort', onAbort);
+  });
+}
 const agentsTimers = new Map<number, NodeJS.Timeout>();
 /** The panel's list of agents changed (status, last seen): sent at most once a second. */
 function scheduleAgentsEvent(userId: number): void {

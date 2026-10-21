@@ -28,6 +28,7 @@ import { pagesPlugin } from './plugins/pages';
 import { commentUiPlugin, hiddenThreadsPlugin } from './plugins/commentui';
 import { changeTrackingPlugin, changesFilterPlugin, changeAuthorName } from './plugins/changes';
 import { changeActionsPlugin } from './plugins/changeactions';
+import { mergeReviewPlugin, type MergeSource } from './plugins/mergereview';
 import { fontCarryPlugin } from './plugins/fontcarry';
 import { insetCaretPlugin } from './plugins/insetcaret';
 import { envFocusPlugin } from './plugins/envfocus';
@@ -122,6 +123,8 @@ export interface AssemblyOptions {
   markdown?: boolean;
   /** an HTML article (core html/article.ts): markdown's typing, what an article can hold */
   article?: boolean;
+  /** offline merges laid out for review (server offlinemerge.ts) — where the front end syncs through the server */
+  merges?: MergeSource | null;
 }
 
 /** The ProseMirror plugins of an OverLyX editor, in the order the key bindings depend on. */
@@ -161,6 +164,7 @@ export function assemblePlugins(o: AssemblyOptions): Plugin[] {
     changeTrackingPlugin(),
     changesFilterPlugin(),
     changeActionsPlugin(),   // ✓ / ✗ with the author and date over the tracked change under the pointer or the caret
+    mergeReviewPlugin(o.merges),   // the card that goes through what offline edits and the live text changed differently
     findPlugin(),
     pasteTargetsPlugin(),
     linksPlugin(),   // the bubble under a hyperlink, the selection shown while the link box is open

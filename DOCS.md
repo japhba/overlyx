@@ -2941,7 +2941,9 @@ How it works, in order of what happens when you open a document:
    be shown offline.
 4. **Back online.** y-websocket reconnects; the Yjs sync sends the offline edits and receives
    everybody else's. Because the document is a CRDT, concurrent edits merge without conflicts
-   (two people editing the same sentence simply both get their words in, one word after the other).
+   (two people editing the same sentence simply both get their words in, one word after the other);
+   where offline edits changed the same words as somebody else, the server lays them out for review
+   (step 5).
    **How the document is kept in the CRDT** (model 2, since 19 Oct 2026; `packages/core/src/collab/`):
    - Every container of paragraphs — the document body, an inset's text, a table cell, a slide's
      text box, a page's notes — is one `Y.Text`, a *flow*. A paragraph is a marker embedded in the
@@ -3021,7 +3023,46 @@ How it works, in order of what happens when you open a document:
    (an inline matrix on one line, rows on lines of their own in the editor) with an empty clock, which
    once left a copy of an edited matrix beside itself after every deploy (`sameFormula`, compared as
    written).
-5. **Unmergeable case.** If the server's copy of the document has a *different history* (its Yjs
+5. **Offline edits that met other edits** (since 21 Oct 2026). The CRDT merges edits of different
+   words correctly, but where the offline author and somebody online changed the *same* words it
+   interleaves them ("is there" and "is everywhere" over "is here" became "is everywthere"), and
+   nobody would notice. So the editor keeps the state its local copy had right before the first edit
+   made without a synced connection (IndexedDB key `offlineBase`, `client/src/editor/editor.ts`;
+   dropped once a save acknowledgment covers everything) and sends it on reconnect, after the epoch
+   check and ahead of its sync step 2 (`MSG_OFFLINE_BASE` = 7). With it the server
+   (`server/src/offlinemerge.ts`) has the base, the live document and the offline copy (base + the
+   connection's updates). A base holding edits the server never got (typed into a dead connection
+   before the 30 s watchdog noticed) is cut down to what the server has, so those edits count as
+   the offline side's. When the step 2 arrives:
+   - if both sides changed the text, the live document is kept as a version, *"before merging …'s
+     offline edits"*;
+   - the offline edits go in as before (the CRDT merge);
+   - `core/src/lyx/merge3.ts` finds what both changed differently: paragraphs aligned as in
+     `merge.ts`, a run both changed merged by tokens (words, whitespace, insets and paragraph starts,
+     so a split on one side and an edit on the other merge) with the classic diff3; a footnote or
+     note both changed is merged inside. Each conflict gets the live version, with the offline version
+     laid over it as tracked changes by *"<name> (offline)"* (Reject keeps the live text, Accept
+     takes the offline one); paragraphs without a conflict stay as the CRDT merged them
+     (`adoptReview`). The merge is noted in the CRDT's map `offlineMerges` (`<author id>:<time>` →
+     name, reviewer, time, conflicts; kept 60 days), in the same transaction (origin
+     `offline-merge`: nobody's undo step).
+   - the editors show a card for it (`client/src/editor/plugins/mergereview.ts`, in the shared
+     assembly): it goes through the places one by one (a place = one merge's changes in one
+     paragraph), with *Keep current* / *Keep <name>'s* per place or for all, and leaves once every
+     place is settled (the entry is deleted then; × hides it until the next merge).
+   - **Combine** — only when the account has an AI of its own linked (`server/src/linkedai.ts`; never
+     the server's OpenRouter key): the Agent panel's ChatGPT sign-in (codex asked once in an
+     ephemeral thread with no tools, files, network or MCP reach and an `outputSchema`,
+     `AgentHost.ask` in `agent.ts`), else an agent connected over MCP that is listening (the question
+     goes into its Agent panel conversation; `finalReply` in `mcpAgents.ts` waits for its answer).
+     `GET /api/ai/linked` names it (`via`); `POST /api/docs/…/ai/merge` sends the paragraph's two
+     versions as LaTeX and returns the combined one as LaTeX and editor nodes, which the card shows
+     and puts in on *Use this* (a tracked change while tracking is on).
+   - Tests: `tests/merge3.test.ts`, `tests/offline-merge.test.ts`, `e2e/offline-review.spec.ts`
+     (built client served by the server; the Combine test with `OVERLYX_CODEX_BIN=scripts/codex-stub.mjs`
+     and `OVERLYX_E2E_AGENT_STUB=1` — the stub answers a question with an output schema with
+     `STUBMERGED <the offline version>`).
+6. **Unmergeable case.** If the server's copy of the document has a *different history* (its Yjs
    state was reset with *POST /api/docs/…/reset*, or its database was wiped) the local copy cannot
    be merged: the editor stores the unsynced edits as a version named *"offline changes by …"*
    (Versions panel: compare / restore), discards the local copy and reloads the server's document.

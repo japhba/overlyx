@@ -148,6 +148,32 @@ export function threadSandbox(t: { project: string; key: string; cwd: string; na
   };
 }
 
+/**
+ * A one-shot question's sandbox (AgentHost.ask): the empty start directory and the system's files
+ * read only, no network, no web search, no memories, and an MCP key no thread has — the overlyx
+ * tools reach nothing (panelThreadScope).
+ */
+function consultSandbox(): ThreadSandbox {
+  const start = startDir();
+  const fsys = baseFilesystem();
+  fsys[start] = 'read';
+  fsys[':project_roots'] = { '.': 'read' };
+  return {
+    cwd: start,
+    approvalPolicy: 'never',
+    config: {
+      default_permissions: PROFILE,
+      [`permissions.${PROFILE}`]: { filesystem: fsys, network: { enabled: false } },
+      projects: { [start]: { trust_level: 'untrusted' } },
+      'mcp_servers.overlyx.http_headers': { 'X-OverLyX-Thread': 'consult-' + crypto.randomBytes(12).toString('base64url') },
+      'tools.web_search': false,
+      'features.memories': false,
+    },
+  };
+}
+
+const CONSULT_INSTRUCTIONS = 'You answer one question for OverLyX, a collaborative LaTeX editor, and nothing else: no tools, no files, no commands. Reply only with what the question asks for, in the requested JSON shape.';
+
 /** codex answered thread/start or thread/resume: the thread must run under threadSandbox's settings, else it is not used at all. */
 function assertSandboxed(res: any, tid: string): void {
   if (res?.approvalPolicy !== 'never' || res?.activePermissionProfile?.id !== PROFILE) {
@@ -298,6 +324,8 @@ class AgentHost {
   private loaded = new Set<string>();
   private idleTimer: NodeJS.Timeout | null = null;
   private activeTurns = new Set<string>();
+  /** one-shot questions (ask): their threads' notifications go here, not to the panel */
+  private oneShots = new Map<string, (method: string, params: any) => void>();
   ready: Promise<void> | null = null;
 
   constructor(public userId: number) {
@@ -523,6 +551,8 @@ class AgentHost {
   private onNotification(msg: JsonRpcMsg): void {
     const m = msg.method!, p = msg.params ?? {};
     const tid = p.threadId ?? p.thread?.id;
+    const oneShot = tid ? this.oneShots.get(tid) : undefined;
+    if (oneShot) { oneShot(m, p); return; }
     if (m === 'turn/started' && tid) this.activeTurns.add(tid);
     if ((m === 'turn/completed' || m === 'error') && tid) {
       this.activeTurns.delete(tid);
@@ -587,6 +617,43 @@ class AgentHost {
   }
 
   markLoaded(threadId: string, project: string): void { this.loaded.add(threadId); this.threadProjects.set(threadId, project); }
+
+  /**
+   * A question answered once, outside the panel's threads: an ephemeral thread in consultSandbox,
+   * the reply in the shape `schema` gives (codex's outputSchema) — on the user's own ChatGPT sign-in.
+   */
+  async ask(text: string, schema: object, timeoutMs = 150_000): Promise<string> {
+    await this.ensure();
+    const box = consultSandbox();
+    const out = await this.request('thread/start', {
+      cwd: box.cwd, approvalPolicy: box.approvalPolicy, config: box.config, ephemeral: true,
+      developerInstructions: CONSULT_INSTRUCTIONS, ...(config.agent.model ? { model: config.agent.model } : {}),
+    });
+    const tid = String(out.thread.id);
+    assertSandboxed(out, tid);
+    let reply = '';
+    let fail: (e: Error) => void = () => {};
+    const answer = new Promise<string>((resolve, reject) => {
+      const finish = () => { clearTimeout(timer); this.oneShots.delete(tid); };
+      const timer = setTimeout(() => { finish(); reject(new Error('ChatGPT did not answer in time')); }, timeoutMs);
+      fail = e => { finish(); reject(e); };
+      this.oneShots.set(tid, (m, p) => {
+        if (m === 'item/completed' && p.item?.type === 'agentMessage' && typeof p.item.text === 'string') reply = p.item.text;
+        else if (m === 'error' && !p.willRetry) fail(new Error(p.error?.message ?? 'the agent failed'));
+        else if (m === 'turn/completed') {
+          finish();
+          if (p.turn?.status === 'failed') reject(new Error(p.turn?.error?.message ?? 'the agent failed')); else resolve(reply);
+        }
+      });
+    });
+    const input = [{ type: 'text', text, text_elements: [] }];
+    try {
+      // a quick answer is worth more than a deep one here; a model without that effort level gets its default
+      try { await this.request('turn/start', { threadId: tid, input, cwd: box.cwd, approvalPolicy: 'never', outputSchema: schema, effort: 'low' }, 60_000); }
+      catch { await this.request('turn/start', { threadId: tid, input, cwd: box.cwd, approvalPolicy: 'never', outputSchema: schema }, 60_000); }
+    } catch (e) { fail(e as Error); }
+    return await answer;
+  }
 
   private touch(): void {
     if (this.idleTimer) clearTimeout(this.idleTimer);
@@ -669,6 +736,14 @@ export function forgetAgentUser(userId: number): void {
 }
 
 export function agentAvailable(): boolean { return config.agent.enabled; }
+
+/** The user signed in to the Agent panel with their ChatGPT account (the sign-in file exists; asking codex would start it). */
+export function codexSignedIn(userId: number): boolean {
+  return config.agent.enabled && fs.existsSync(path.join(agentHomeDir(userId), 'auth.json'));
+}
+
+/** A one-shot question to the user's own codex (AgentHost.ask). */
+export function askCodex(userId: number, text: string, schema: object): Promise<string> { return host(userId).ask(text, schema); }
 
 /* ------------------------------------------------------------------ selection context */
 
