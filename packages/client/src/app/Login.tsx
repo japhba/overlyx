@@ -206,6 +206,7 @@ export function Login({ onLogin, google, note, onBack }: {
             {note ? <p class="signin-note link-note" data-login-note>{note}</p>
               : pendingCount ? <p class="signin-note link-note" data-login-note>{pendingCount} Overleaf project{pendingCount === 1 ? '' : 's'} will be imported right after you sign in.</p>
               : <p class="signin-note">{google ? 'In the browser with your Google account, or in VS Code with the extension.' : 'In the browser with your account, or in VS Code with the extension.'}</p>}
+            <p class="beta-note" data-beta-note role="note"><strong>Beta:</strong> we can't guarantee server uptime or that no data is lost. Keep your own copy of important work.</p>
             {google && <GoogleButton />}
             <a class="vscode-get" data-vscode-get href={VSCODE_URL} target="_blank" rel="noopener">
               <VscodeIcon /><span>Get the VS Code extension</span>
