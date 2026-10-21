@@ -64,6 +64,24 @@ const labelOf = (n: PMNode): string | undefined =>
 const noteEnd = (n: Note) => n.pos + n.node.nodeSize - 2;
 
 /**
+ * After a jump between a reference and its note: the reference (`to` 'text') or the note a third of
+ * the way down what the scroller shows — below its sticky ruler, which ProseMirror's own scroll
+ * leaves the caret under, and above the toolbars docked at the bottom (its scroll padding) — unless
+ * it is in view already. The end of a long note (the caret) stays in view.
+ */
+function reveal(view: EditorView, pos: number, to: 'note' | 'text'): void {
+  const dom = view.nodeDOM(pos) as HTMLElement | null;
+  const el = dom?.querySelector<HTMLElement>(to === 'note' ? ':scope > .inset-box' : ':scope > .inset-anchor');
+  const sc = view.dom.closest<HTMLElement>('.editor-scroll');
+  if (!el || !sc) return;
+  const s = sc.getBoundingClientRect(), r = el.getBoundingClientRect();
+  const top = s.top + (sc.querySelector<HTMLElement>(':scope > .ruler')?.offsetHeight ?? 0) + 8;
+  const bottom = s.top + sc.clientHeight - (parseFloat(getComputedStyle(sc).scrollPaddingBottom) || 0) - 8;
+  if (r.top >= top && r.bottom <= bottom) return;
+  sc.scrollTop += Math.max(r.top - (top + (bottom - top) / 3), r.bottom - bottom);
+}
+
+/**
  * A click on a footnote's number: in the text (`to` 'note') the caret goes to the end of the note —
  * the first of its label when the reference repeats one —, at the end ('text') back after the reference.
  */
@@ -77,8 +95,9 @@ export function footnoteJump(view: EditorView, pos: number, to: 'note' | 'text')
     if (first) target = first;
   }
   const at = to === 'note' ? noteEnd(target) : pos + node.nodeSize;
+  view.focus();   // before the dispatch: scrollIntoView follows the DOM selection, which must be in the editor
   view.dispatch(view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(at), to === 'note' ? -1 : 1)).scrollIntoView());
-  view.focus();
+  reveal(view, target.pos, to);
   const dom = view.nodeDOM(target.pos) as HTMLElement | null;
   dom?.classList.add('highlight');
   setTimeout(() => dom?.classList.remove('highlight'), 1200);
@@ -86,7 +105,7 @@ export function footnoteJump(view: EditorView, pos: number, to: 'note' | 'text')
 
 /** ← / → step over a reference; at the start / end of a note they go back into the text beside it */
 function arrow(dir: -1 | 1, extend: boolean): Command {
-  return (state, dispatch) => {
+  return (state, dispatch, view) => {
     const sel = state.selection;
     if (!(sel instanceof TextSelection) || (!sel.empty && !extend)) return false;
     const $h = sel.$head;
@@ -100,6 +119,7 @@ function arrow(dir: -1 | 1, extend: boolean): Command {
     const note = noteAround(state, $h.pos);
     if (!note || $h.pos !== (dir > 0 ? noteEnd(note) : note.pos + 2)) return false;
     dispatch?.(state.tr.setSelection(TextSelection.create(state.doc, dir > 0 ? note.pos + note.node.nodeSize : note.pos)).scrollIntoView());
+    if (dispatch && view) reveal(view, note.pos, 'text');
     return true;
   };
 }
@@ -117,7 +137,7 @@ function selectBeside(dir: -1 | 1): Command {
 }
 
 /** Escape in a note (not in a comment inside it): back to the text, after its reference */
-const leaveNote: Command = (state, dispatch) => {
+const leaveNote: Command = (state, dispatch, view) => {
   const $f = state.selection.$from;
   let inner = -1;
   for (let d = $f.depth; d > 0; d--) if ($f.node(d).type.name === 'inset') { inner = d; break; }
@@ -125,6 +145,7 @@ const leaveNote: Command = (state, dispatch) => {
   const note = noteAround(state, $f.pos);
   if (!note || note.pos !== $f.before(inner)) return false;
   dispatch?.(state.tr.setSelection(TextSelection.create(state.doc, note.pos + note.node.nodeSize)).scrollIntoView());
+  if (dispatch && view) reveal(view, note.pos, 'text');
   return true;
 };
 
