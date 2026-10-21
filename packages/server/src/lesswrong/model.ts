@@ -380,7 +380,10 @@ const sameAtoms = (A: Atom[], B: Atom[]) => A.length === B.length && A.every((a,
  * unchanged words between places at least eight words apart), so that what LessWrong has around them
  * — comments anchored there — stays; the whole stretch at once when a place's quote is not unique.
  */
-function stretchOps(ctx: LyxDocument, O: Atom[], N: Atom[], all: string, what: string): LwOp[] | 'rebuild' | 'image' | null {
+function stretchOps(ctx: LyxDocument, O0: Atom[], N0: Atom[], all: string, what: string): LwOp[] | 'rebuild' | 'image' | null {
+  // (spaces at a stretch's edges show nothing — LessWrong's paragraphs often end with one — and a quote cannot end on them)
+  const trim = (A: Atom[]) => { let i = 0, j = A.length; while (i < j && A[i].space) i++; while (j > i && A[j - 1].space) j--; return A.slice(i, j); };
+  const O = trim(O0), N = trim(N0);
   if (sameAtoms(O, N)) return [];
   const pieces: [Atom[], Atom[]][] = [];
   if (O.length * N.length <= 4_000_000) {
