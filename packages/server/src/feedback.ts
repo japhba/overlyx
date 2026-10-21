@@ -6,6 +6,9 @@
  *   POST /api/feedback       a person's report (bug / idea / question) → one row, kind `feedback`
  *   POST /api/client-error   an error that escaped in the browser → one row per distinct message
  *                            (kind `client-error`); repeats only count up and refresh `last_at`
+ *   POST /api/client-glitch  a display glitch the app noticed on a touch screen (client glitches.ts):
+ *                            measurements and fixed words only (core glitch.ts), kind `client-glitch`,
+ *                            one row per kind of glitch; the first repeats' measurements are added
  *   POST /api/vscode-telemetry  a sanitized extension error, accepted without a web-app session
  *                            (the extension obeys VS Code's telemetry setting; this route is
  *                            separately rate-limited and accepts only a fixed diagnostic schema)
@@ -25,6 +28,7 @@ import crypto from 'node:crypto';
 import { db } from './db.ts';
 import { config, REPO_ROOT } from './config.ts';
 import { notifyOwner } from './mailer.ts';
+import { glitchReport } from '@overlyx/core/glitch.ts';
 
 // error_reports held the GitHub issue of each distinct error, from when reports were issues
 db.exec(`DROP TABLE IF EXISTS error_reports;
@@ -99,17 +103,20 @@ export function errorHash(kind: string, message: string): string {
   return crypto.createHash('sha256').update(kind + '\n' + norm).digest('hex').slice(0, 16);
 }
 
-const errRow = db.prepare('SELECT id FROM reports WHERE hash = ?');
+const errRow = db.prepare('SELECT id, count FROM reports WHERE hash = ?');
 const errBump = db.prepare('UPDATE reports SET count = count + 1, last_at = ? WHERE id = ?');
+const errAgain = db.prepare("UPDATE reports SET count = count + 1, last_at = ?, body = body || ? WHERE id = ?");
 
 export interface ErrorInput {
-  kind: 'client-error' | 'server-error' | 'vscode-error';
+  kind: 'client-error' | 'server-error' | 'vscode-error' | 'client-glitch';
   message: string;
   stack?: string | null;
   userAgent?: string;
   who?: Reporter | null;
   /** Server-selected, non-identifying environment fields. */
   details?: Record<string, string>;
+  /** the details and stack of this many repeats are added to the report (each can differ) */
+  keepRepeats?: number;
 }
 
 /**
@@ -123,15 +130,18 @@ export function reportError(e: ErrorInput): number | null {
   if (!message) return null;
   const hash = errorHash(e.kind, message);
   const now = Date.now();
-  const row = errRow.get(hash) as { id: number } | undefined;
-  if (row) { errBump.run(now, row.id); return row.id; }
-  const body = [
+  const row = errRow.get(hash) as { id: number; count: number } | undefined;
+  const lines = (withMessage: boolean) => [
     ...Object.entries(e.details ?? {}).map(([key, value]) => `${clean(key, 40)}: ${clean(value, 300)}`),
-    message, e.stack ? clean(e.stack, 4000) : '',
+    withMessage ? message : '', e.stack ? clean(e.stack, 4000) : '',
   ].filter(Boolean).join('\n');
+  if (row && row.count <= (e.keepRepeats ?? 0)) { errAgain.run(now, `\n\n--- Again, ${stamp()}:\n${lines(false)}`, row.id); return row.id; }
+  if (row) { errBump.run(now, row.id); return row.id; }
+  const body = lines(true);
   const title = `[${e.kind}] ${message.split('\n')[0].slice(0, 120)}`;
   const id = Number(insertReport.run({ kind: e.kind, hash, title, body, user_id: e.who?.id ?? null, version: appVersion, user_agent: e.userAgent ? clean(e.userAgent, 300) : null, now }).lastInsertRowid);
-  if (allow('error-mail', 10, 24 * 60 * 60 * 1000)) void notifyOwner(`OverLyX ${e.kind} #${id}: ${message.split('\n')[0].slice(0, 100)}`, `${body}\n\nOverLyX ${appVersion} · ${stamp()}\nAll reports: npx tsx scripts/reports.ts\n`);
+  // (a glitch is not mailed: there are many kinds of each, and they are read together)
+  if (e.kind !== 'client-glitch' && allow('error-mail', 10, 24 * 60 * 60 * 1000)) void notifyOwner(`OverLyX ${e.kind} #${id}: ${message.split('\n')[0].slice(0, 100)}`, `${body}\n\nOverLyX ${appVersion} · ${stamp()}\nAll reports: npx tsx scripts/reports.ts\n`);
   return id;
 }
 
@@ -204,6 +214,16 @@ export function feedbackRoutes(): express.Router {
     if (!config.errorReports) { res.status(204).end(); return; }
     if (!allow('client-error', 60) || !allow(`client-error:${u.id}`, 20)) { res.status(429).json({ error: 'rate limited' }); return; }
     const id = reportError({ kind: 'client-error', message: clean(b.message, 1000), stack: b.stack ? clean(b.stack, 4000) : null, userAgent: req.get('user-agent') ?? '', who: { id: u.id, name: u.name, username: u.username } });
+    res.json({ id });
+  });
+  r.post('/client-glitch', (req, res) => {
+    const u = req.user!;
+    const b = req.body ?? {};
+    if (!config.errorReports) { res.status(204).end(); return; }
+    const g = glitchReport(b.kind, b.fields, b.trail);
+    if (!g) { res.status(400).json({ error: 'not a glitch report' }); return; }
+    if (!allow('client-glitch', 60) || !allow(`client-glitch:${u.id}`, 20)) { res.status(429).json({ error: 'rate limited' }); return; }
+    const id = reportError({ kind: 'client-glitch', message: g.message, details: g.details, stack: g.trail, keepRepeats: 4, userAgent: req.get('user-agent') ?? '', who: { id: u.id, name: u.name, username: u.username } });
     res.json({ id });
   });
   return r;

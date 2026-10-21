@@ -31,6 +31,8 @@
  */
 import { laserPathD } from '@overlyx/core/ink.ts';
 import { keepAwake } from './wakelock';
+import { strokeWatch, strokeEnded } from '../glitches';
+import type { StrokeWatch } from '@overlyx/core/glitch.ts';
 import { pinchFactor, pinchLock, type PinchLock } from '../deliverable/gestures';
 
 /** the whiteboard's laser colour and fade time (editor/plugins/ink.ts LASER_COLOR / LASER_FADE_MS — a test checks they agree) */
@@ -282,7 +284,7 @@ type Gesture =
   | { kind: 'pan'; id: number; x: number; y: number; moved: boolean; v0: ZoomView }
   | { kind: 'laser'; id: number }
   /** a drawing tool's stroke (or the eraser's sweep), with the tool it draws with; `moved`: past a tap */
-  | { kind: 'draw'; id: number; tool: InkTool; x0: number; y0: number; moved: boolean; erased: boolean; stroke: InkStroke | null; f: { k: number; ox: number; oy: number } | null }
+  | { kind: 'draw'; id: number; tool: InkTool; x0: number; y0: number; moved: boolean; erased: boolean; stroke: InkStroke | null; f: { k: number; ox: number; oy: number } | null; watch: StrokeWatch | null }
   | { kind: 'swipe'; id: number; x0: number; y0: number; t0: number; moved: boolean };
 
 /**
@@ -671,7 +673,7 @@ export class PresentKit {
       this.capture(e);
       this.render();
     } else if (tool) {
-      const g: Gesture = { kind: 'draw', id: e.pointerId, tool, x0: e.clientX, y0: e.clientY, moved: false, erased: false, stroke: null, f: inkFrame(this.view, this.host.base()) };
+      const g: Gesture = { kind: 'draw', id: e.pointerId, tool, x0: e.clientX, y0: e.clientY, moved: false, erased: false, stroke: null, f: inkFrame(this.view, this.host.base()), watch: tool === 'eraser' ? null : strokeWatch('present', e, { win: this.win }) };
       this.gesture = g;
       this.suppressClick = true;
       e.preventDefault();
@@ -725,7 +727,7 @@ export class PresentKit {
         else if (g.stroke && g.f) {
           const q = toSlide({ x: c.clientX, y: c.clientY }, g.f);
           const last = g.stroke.pts[g.stroke.pts.length - 1];
-          if (Math.hypot(q[0] - last[0], q[1] - last[1]) > 0.05) g.stroke.pts.push(q);
+          if (Math.hypot(q[0] - last[0], q[1] - last[1]) > 0.05) { g.stroke.pts.push(q); g.watch?.add(c.clientX, c.clientY, c.timeStamp, evs.length ? 'coalesced' : 'move'); }
         }
       }
       if (g.stroke) this.drawG.innerHTML = strokeSvg(g.stroke);
@@ -778,6 +780,7 @@ export class PresentKit {
     } else if (g.kind === 'draw') {
       this.drawG.replaceChildren();
       if (g.stroke) {
+        strokeEnded(g.watch);
         const key = this.host.position();
         this.ink.set(key, [...(this.ink.get(key) ?? []), g.stroke]);
         this.renderInk();

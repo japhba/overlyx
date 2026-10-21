@@ -6,6 +6,7 @@ import { editorContext } from './editor/context';
 import { api } from './api';
 import { isBenignBrowserError } from './error-reporting';
 import { initUsage, recordUsage, noticeTemplate } from './usage';
+import { initGlitchWatch } from './glitches';
 import { currentMathFont, onMathRendererChange } from './editor/lyxmath/mathjax';
 import { warmOfflineResponses } from './offline-warm';
 import './styles.css';
@@ -15,6 +16,7 @@ import 'prosemirror-tables/style/tables.css';
 
 render(<App />, document.getElementById('app')!);
 initUsage();   // anonymous usage statistics (usage.ts): the session, screen changes, flushing on leave
+initGlitchWatch();   // on a touch screen: the interface scrolled out of place, strokes that jump (glitches.ts)
 
 // Errors that escape (a node view, a promise nobody awaited) must not vanish in the console: show
 // them. The same message is shown at most once per 5 s.

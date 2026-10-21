@@ -115,6 +115,19 @@ describe('feedback and error reports, kept on the server', () => {
       const { id } = await ce.json();
       expect(row(id).kind).toBe('client-error');
       expect(row(id).user_id).toBe(user.id);
+      // a display glitch: measurements only, one row per kind, the first repeats' measurements added, not mailed
+      const glitch = (scrollY: number) => fetch(`${base}/client-glitch`, { method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ kind: 'shift', fields: { scroller: 'window', keyboard: 'down', focus: 'math', scrollY, note: 'free text' }, trail: ['50 keyboard down'] }) });
+      const g = (await (await glitch(312)).json()).id;
+      expect(row(g)).toMatchObject({ kind: 'client-glitch', user_id: user.id });
+      expect(row(g).body).toContain('scrollY: 312');
+      expect(row(g).body).not.toContain('free text');
+      expect((await (await glitch(140)).json()).id).toBe(g);
+      expect(row(g)).toMatchObject({ count: 2 });
+      expect(row(g).body).toMatch(/--- Again, .*\nscroller: window\n[^]*scrollY: 140/);
+      await new Promise(r => setTimeout(r, 50));
+      expect(JSON.stringify(sentMails)).not.toContain('client-glitch');
+      expect((await fetch(`${base}/client-glitch`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ kind: 'anything', fields: {} }) })).status).toBe(400);
     } finally { srv.close(); }
   });
 

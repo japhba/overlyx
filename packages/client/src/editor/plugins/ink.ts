@@ -58,6 +58,8 @@ import { loadDeckInk, saveDeckInk, patchDeckInk, subscribeDeckInk, type DeckInk 
 import { scratchOut, SCRATCH_HOLD_MS, SCRATCH_HOLD_PX } from '@overlyx/core/scratchout.ts';
 import { closeUndoGroup } from '../collab';
 import { documentViewScale } from '../viewscale';
+import { strokeWatch, strokeEnded } from '../../glitches';
+import type { StrokeWatch } from '@overlyx/core/glitch.ts';
 /**
  * Widths are millimetres on the page, as Goodnotes shows them; the strokes themselves are stored
  * in px at 100 % zoom (the SVG sidecars' units), converted with the ruler's 96 dpi scale.
@@ -315,6 +317,8 @@ class InkLayer {
   private unsub: (() => void)[] = [];
   /** the stroke being drawn here right now (content coordinates of the scroller) */
   private live: (LiveInk & { edgeX: number; anchorTop: number }) | null = null;
+  /** the stroke's points as the screen had them, for a point far off (glitches.ts) */
+  private watch: StrokeWatch | null = null;
   /** the laser trace being held (content coordinates) and the one fading after a lift */
   private laser: { b: number; edgeX: number; top: number; pts: [number, number][] } | null = null;
   private laserFade: { pts: [number, number][]; start: number } | null = null;
@@ -900,6 +904,7 @@ class InkLayer {
     this.pointerId = e.pointerId;
     this.canvas.setPointerCapture(e.pointerId);
     this.addPoint(e, g);
+    this.watch = strokeWatch('doc-ink', e, { ox: g.scrollLeft, oy: g.scrollTop });
     e.preventDefault();
   };
 
@@ -911,6 +916,7 @@ class InkLayer {
       const [x, y] = this.toContent(ev, g);
       const p = ev.pointerType === 'pen' ? ev.pressure : 0;
       if (this.live.pts.length < 4000) this.live.pts.push([x, y, p]);
+      this.watch?.add(ev.clientX, ev.clientY, ev.timeStamp, coalesced?.length ? 'coalesced' : 'move', g.scrollLeft, g.scrollTop);
     }
     if (this.scratch) {
       // what the scribble would erase fades as it goes (every ~80 ms); resting the pen asks for it (scratch and hold)
@@ -998,7 +1004,10 @@ class InkLayer {
     this.endScratch();
     this.live = null;
     try { this.awareness.setLocalStateField('ink', null); } catch { /* closing */ }
+    const watch = this.watch;
+    this.watch = null;
     if (!l || !l.pts.length) { this.schedule(); return; }
+    strokeEnded(watch);
     const z = zoom();
     const stroke: InkStroke = {
       side: l.side, color: l.color, w: l.w,

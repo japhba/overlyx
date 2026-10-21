@@ -344,7 +344,7 @@ function DeleteAccount({ user }: { user: User }) {
  * on the server, never forwarded), problem reports from Help ▸ Report a problem, and errors the app
  * ran into (server feedback.ts). Read here; a handled one can be deleted.
  */
-const REPORT_KINDS: [string, string][] = [['mail', 'Mail'], ['feedback', 'Problem reports'], ['client-error', 'Errors (browser)'], ['server-error', 'Errors (server)'], ['vscode-error', 'Errors (VS Code)']];
+const REPORT_KINDS: [string, string][] = [['mail', 'Mail'], ['feedback', 'Problem reports'], ['client-error', 'Errors (browser)'], ['client-glitch', 'Glitches (touch screens)'], ['server-error', 'Errors (server)'], ['vscode-error', 'Errors (VS Code)']];
 function AdminReports() {
   const [kind, setKind] = useState('mail');
   const [rows, setRows] = useState<AdminReport[] | null>(null);

@@ -483,7 +483,17 @@ blend.
   `OVERLYX_SMTP_URL`, otherwise only logged) and says the report is not published; 10 reports per
   person and hour. Uncaught browser errors (`main.tsx`) and server errors (`unhandledRejection`) are
   recorded automatically as one row per distinct message (numbers / ids normalised; repeats count up),
-  the first occurrence mailed (≤10 a day). The no-account VS Code extension uses its own narrow,
+  the first occurrence mailed (≤10 a day). On a touch screen the web app also records display
+  glitches (`client/src/glitches.ts`, `core/src/glitch.ts`, `POST /api/client-glitch`, kind
+  `client-glitch`, not mailed; asked for 21 Oct 2026 after the iPad's interface shifted up and strokes
+  shot across the screen): the window scrolled while the editor is shown (it never should: every pane
+  scrolls itself — with no keyboard up it is scrolled back, `restored: yes`), a large unscrollable
+  container scrolled, the whole page zoomed, and a stroke point further than a third of the screen
+  from the one before (every ink engine: deck canvas via a `glitch` message, presenting, whiteboard,
+  document ink, math pad). A report has measurements and fixed words only (the server's
+  `glitchReport` drops anything else) and the last 16 kinds of input before it (`down pen canvas`,
+  `focus math below`, `keyboard up` …); the first four repeats add their measurements to the row.
+  `sudo overlyx-telemetry reports` lists them. The no-account VS Code extension uses its own narrow,
   IP-rate-limited `/api/vscode-telemetry` receiver for errors when both VS Code telemetry and
   `overlyx.errorReports` are enabled. VS Code sanitizes the exception first; only extension/VS Code
   versions, OS/CPU family and local/remote host kind accompany it — never document text, filenames,

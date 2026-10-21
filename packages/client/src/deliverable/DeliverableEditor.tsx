@@ -60,6 +60,7 @@ import { ReviewPane, type CommentDraft } from './ReviewPane';
 import { EditModeSwitch, type EditMode } from '../app/EditModeSwitch';
 import { useDarkPagesState, toggleDarkPages, invertedColor, DARK_DESK } from '../app/darkpages';
 import { recordReliability, recordInteraction } from '../usage';
+import { reportJump } from '../glitches';
 import { canvasInteraction, type InteractionOutcome } from '@overlyx/core/interactions.ts';
 import { saveReliabilityEvent } from './reliability';
 import { makeReliabilityDetail, type ReliabilityEvent } from '@overlyx/core/reliability.ts';
@@ -822,6 +823,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
             recordReliability(m.event, { pointer: m.pointer, context: kindRef.current });
           }
           break;
+        case 'glitch': if (fromCanvas && m.fields?.engine === 'deck') reportJump(m.fields); break;
         case 'words': if (fromCanvas) setWords(m.rect || m.choosing ? { rect: m.rect, style: m.style, choosing: m.choosing } : null); break;
         case 'editing':
           if (!fromCanvas) break;

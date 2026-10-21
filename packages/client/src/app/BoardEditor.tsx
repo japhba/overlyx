@@ -27,6 +27,8 @@ import { drawingToolbar } from '../deliverable/drawingToolbar';
 import { loadDeckInk, saveDeckInk, patchDeckInk } from '../deliverable/deckink';
 import type { NibOpts } from '@overlyx/core/freehand.ts';
 import { scratchOut, SCRATCH_HOLD_MS, SCRATCH_HOLD_PX } from '@overlyx/core/scratchout.ts';
+import type { StrokeWatch } from '@overlyx/core/glitch.ts';
+import { strokeWatch, strokeEnded } from '../glitches';
 import { shapePoints, INK_SHAPES, type InkShape } from '@overlyx/core';
 const isShapeTool = (t: string): t is InkShape => (INK_SHAPES as readonly string[]).includes(t);
 
@@ -113,6 +115,8 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
   const [readOnly, setReadOnly] = useState(false);
   const readOnlyRef = useRef(readOnly); readOnlyRef.current = readOnly;
   const liveRef = useRef<LiveStroke | null>(null);
+  /** the pointer drawing the stroke (another's moves are not its points), and its points as the screen had them (glitches.ts) */
+  const drawingRef = useRef<{ id: number; watch: StrokeWatch | null } | null>(null);
   /** scratch-out while the pen draws (core/scratchout.ts): the strokes it would erase now (faded), where and since when the pen rests */
   const scratchRef = useRef<{ hits: Set<string>; rest: { x: number; y: number; t: number; timer: ReturnType<typeof setTimeout> | null }; judged: number } | null>(null);
   const [peerTick, setPeerTick] = useState(0);
@@ -345,6 +349,7 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
       endScratch();
       if (drawing.scribble && !hl) scratchRef.current = { hits: new Set(), rest: { x: e.clientX, y: e.clientY, t: performance.now(), timer: null }, judged: 0 };
       liveRef.current = { color: pen.color, w: pen.width, nib: { ...drawing.nib }, pressure: e.pointerType === 'pen', ...(hl ? { o: HIGHLIGHT_OPACITY } : {}), pts: [[bx, by, e.pointerType === 'pen' ? e.pressure : 0]] };
+      drawingRef.current = { id: e.pointerId, watch: strokeWatch('board', e) };
       dragRef.current = { kind: 'draw', start: [bx, by] };
     }
     if (dragRef.current || liveRef.current) e.preventDefault();
@@ -426,11 +431,11 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
       liveRef.current.pts = shapePoints(toolRef.current, d.start, [bx, by], liveRef.current.w, e.shiftKey);
       try { provider.awareness.setLocalStateField('boardInk', liveRef.current); } catch { /* closing */ }
       rerender();
-    } else if (liveRef.current) {
+    } else if (liveRef.current && (!drawingRef.current || drawingRef.current.id === e.pointerId)) {
       const events = (e.getCoalescedEvents?.() ?? [e]);
       for (const ev of events) {
         const [x, y] = toBoard(ev.clientX, ev.clientY);
-        if (liveRef.current.pts.length < 4000) liveRef.current.pts.push([x, y, ev.pointerType === 'pen' ? ev.pressure : 0]);
+        if (liveRef.current.pts.length < 4000) { liveRef.current.pts.push([x, y, ev.pointerType === 'pen' ? ev.pressure : 0]); drawingRef.current?.watch?.add(ev.clientX, ev.clientY, ev.timeStamp, ev === e ? 'move' : 'coalesced'); }
       }
       const sc = scratchRef.current;
       if (sc) {
@@ -460,7 +465,11 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
       try { provider.awareness.setLocalStateField('boardLaser', null); } catch { /* closing */ }
     }
     const live = liveRef.current;
+    const drawn = drawingRef.current;
+    if (drawn && drawn.id !== e.pointerId && live) return;
+    drawingRef.current = null;
     if (live && dragRef.current?.kind === 'draw') {
+      if (!live.poly) strokeEnded(drawn?.watch ?? null);
       liveRef.current = null;
       try { provider.awareness.setLocalStateField('boardInk', null); } catch { /* closing */ }
       const xs = live.pts.map(p => p[0]), ys = live.pts.map(p => p[1]);

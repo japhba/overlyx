@@ -39,6 +39,7 @@ import { initPaths, isNodeEditing, nodesAfterSource, nodesTargetOf, startNodesOr
 import { isSolo, showSlide, soloIndex, revealSlideOf } from './solo';
 import { inkRuns, inkPaths, runsBox, freshPoint, type FreePt, type InkRun } from './freehand';
 import { scratchOut, SCRATCH_HOLD_MS, SCRATCH_HOLD_PX } from '@overlyx/core/scratchout.ts';
+import { StrokeWatch, type InkSample } from '@overlyx/core/glitch.ts';
 import { pinchFactor, pinchLock, triGesture, type PinchLock } from '../gestures';
 import { offsetOf, caretBox, selectionBoxes, safeColor } from './carets';
 import { postObjects } from './objects';
@@ -2146,6 +2147,8 @@ let ink: {
   slide: HTMLElement | null; pts: FreePt[]; client: [number, number][]; pressure: boolean; svg: SVGSVGElement; g: SVGGElement; frame: number; t: number; whole: boolean;
   /** scratch-out (core/scratchout.ts): where and since when the pen rests, when the scribble was last judged, the strokes it could erase */
   rest: { x: number; y: number; t: number; timer: ReturnType<typeof setTimeout> | null }; judged: number; cands: { el: Element; pts: [number, number][] }[] | null;
+  /** on a touch screen: its points as the screen had them, for a point far off (core glitch.ts; the editor reports it) */
+  watch: StrokeWatch | null;
 } | null = null;
 /** strokes drawn and sent to the editor, shown until the page has them (`count`: that many strokes the slide will have then) */
 const sentInk: { svg: SVGSVGElement; slide: HTMLElement | null; count: number; timer: ReturnType<typeof setTimeout> }[] = [];
@@ -2173,7 +2176,9 @@ function startInk(e: PointerEvent, slide: HTMLElement | null): void {
   svg.append(g);
   (slide ?? document.body).append(svg);
   ink = { slide, pts: [inkPoint(e, slide)], client: [[e.clientX, e.clientY]], pressure: e.pointerType === 'pen', svg, g, frame: 0, t: e.timeStamp, whole: wholePx(e),
-    rest: { x: e.clientX, y: e.clientY, t: performance.now(), timer: null }, judged: 0, cands: null };
+    rest: { x: e.clientX, y: e.clientY, t: performance.now(), timer: null }, judged: 0, cands: null,
+    watch: navigator.maxTouchPoints > 0 ? new StrokeWatch('deck', e.pointerType, { w: innerWidth, h: innerHeight }) : null };
+  ink.watch?.add(e.clientX, e.clientY, e.timeStamp, 'down', scrollX, scrollY);
   paintInk(true);
 }
 
@@ -2188,7 +2193,7 @@ function inkPaint(): Record<string, string> {
 function moveInk(e: PointerEvent): void {
   if (!ink) return;
   const evs = e.getCoalescedEvents?.() ?? [];
-  for (const ev of evs.length ? evs : [e]) takeInk(ev);
+  for (const ev of evs.length ? evs : [e]) takeInk(ev, evs.length ? 'coalesced' : 'move');
   if (!ink.frame) ink.frame = requestAnimationFrame(() => { if (ink) { ink.frame = 0; paintInk(false); } });
   if (!scribbles()) return;
   // what the scribble would erase fades as it goes (every ~80 ms); resting the pen asks for it (scratch and hold)
@@ -2249,7 +2254,7 @@ function judgeScratch(hold: boolean): void {
 }
 
 /** a point the pen passed — unless it gave it before (freehand.ts freshPoint: Safari's coalesced events) */
-function takeInk(ev: PointerEvent): void {
+function takeInk(ev: PointerEvent, sample: InkSample): void {
   if (!ink) return;
   const p = inkPoint(ev, ink.slide);
   if (!freshPoint(ink.pts, ink.t, ev.timeStamp, p)) return;
@@ -2257,6 +2262,7 @@ function takeInk(ev: PointerEvent): void {
   ink.whole &&= wholePx(ev);
   ink.pts.push(p);
   ink.client.push([ev.clientX, ev.clientY]);
+  ink.watch?.add(ev.clientX, ev.clientY, ev.timeStamp, sample, scrollX, scrollY);
 }
 
 /** the stroke as runs of one width (freehand.ts), a path for each width as the page will have it (those that did not change left alone) */
@@ -2281,7 +2287,9 @@ function endInk(e: PointerEvent): void {
   if (ink.frame) cancelAnimationFrame(ink.frame);
   // where it lifted, if not where it last was — with the pressure it had (a Pencil lifting reports none)
   const up = inkPoint(e, ink.slide), last = ink.pts[ink.pts.length - 1];
-  if (e.timeStamp >= ink.t && Math.hypot(up[0] - last[0], up[1] - last[1]) > 0.5) ink.pts.push([up[0], up[1], last[2]]);
+  if (e.timeStamp >= ink.t && Math.hypot(up[0] - last[0], up[1] - last[1]) > 0.5) { ink.pts.push([up[0], up[1], last[2]]); ink.watch?.add(e.clientX, e.clientY, e.timeStamp, 'up', scrollX, scrollY); }
+  const glitch = ink.watch?.end();
+  if (glitch) post({ ol: 'glitch', fields: glitch });
   // a scribble over strokes erases them (core/scratchout.ts; the pen resting at its end: scratch and hold)
   if (ink.rest.timer) clearTimeout(ink.rest.timer);
   const gone = scratchTargets(performance.now() - ink.rest.t >= SCRATCH_HOLD_MS);

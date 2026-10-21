@@ -15,6 +15,8 @@ import { api } from '../../api';
 import { getPrefs, setPref } from '../../prefs';
 import { renderStaticHtml, type LyxMathField } from '../lyxmath/field';
 import { inkLayout, scratchedOut, widthAt, type InkPoint, type Stroke } from './ink';
+import { strokeWatch, strokeEnded } from '../../glitches';
+import type { StrokeWatch } from '@overlyx/core/glitch.ts';
 
 /** the pause after the last stroke before it is read (ms) */
 const PAUSE = 550;
@@ -33,7 +35,7 @@ export class InkPad {
   private consent: HTMLDivElement;
   private strokes: Stroke[] = [];
   private history: Stroke[][] = [];
-  private current: { s: Stroke; id: number } | null = null;
+  private current: { s: Stroke; id: number; watch: StrokeWatch | null } | null = null;
   private penSeen = false;
   private candidates: string[] = [];
   /** the strokes the candidates were read from (stale once the ink changed) */
@@ -130,7 +132,7 @@ export class InkPad {
       if (this.current) return;
       try { c.setPointerCapture(e.pointerId); } catch { /* synthetic */ }
       this.cancel();
-      this.current = { s: { pts: [at(e)], pen: e.pointerType === 'pen' }, id: e.pointerId };
+      this.current = { s: { pts: [at(e)], pen: e.pointerType === 'pen' }, id: e.pointerId, watch: strokeWatch('math-pad', e) };
       this.el.classList.add('mk-writing');
       this.paint();
     });
@@ -138,7 +140,7 @@ export class InkPad {
       const cur = this.current;
       if (!cur || e.pointerId !== cur.id) return;
       const evs = typeof e.getCoalescedEvents === 'function' ? e.getCoalescedEvents() : [];
-      for (const ev of evs.length ? evs : [e]) cur.s.pts.push(at(ev));
+      for (const ev of evs.length ? evs : [e]) { cur.s.pts.push(at(ev)); cur.watch?.add(ev.clientX, ev.clientY, ev.timeStamp, evs.length ? 'coalesced' : 'move'); }
       this.paint();
     });
     const up = (e: PointerEvent, keep: boolean) => {
@@ -147,6 +149,7 @@ export class InkPad {
       this.current = null;
       this.el.classList.remove('mk-writing');
       if (keep) {
+        strokeEnded(cur.watch);
         const out = scratchedOut(cur.s, this.strokes);
         this.history.push(this.strokes);
         this.strokes = out ? this.strokes.filter((_, i) => !out.includes(i)) : [...this.strokes, cur.s];

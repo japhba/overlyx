@@ -12,6 +12,7 @@ import type { HtmlOp, Path } from '@overlyx/core/html/source.ts';
 import type { CiteEntry } from '@overlyx/core/html/refs.ts';
 import type { MathJaxMacro } from '@overlyx/core/html/deckextras.ts';
 import type { ReliabilityEvent, ReliabilityPointer } from '@overlyx/core/reliability.ts';
+import type { GlitchFields } from '@overlyx/core/glitch.ts';
 
 export type { HtmlOp, Path };
 export type { ReliabilityEvent, ReliabilityPointer };
@@ -311,6 +312,8 @@ export type FromRuntime =
   | { ol: 'penDown'; down: boolean }
   /** content-free, allowlisted gesture reliability signal (never pointer coordinates or object/source data) */
   | { ol: 'reliability'; event: ReliabilityEvent; pointer: ReliabilityPointer }
+  /** a stroke with a point far off (core glitch.ts StrokeWatch: measurements only), for the editor to report (glitches.ts) */
+  | { ol: 'glitch'; fields: GlitchFields }
   /** words pasted on the canvas: a new text box with them (`after`: the object selected on that slide) */
   | { ol: 'pasteText'; version: number; slide: Path | null; after: Path | null; text: string }
   /** what Ctrl+C copies of the selection now (null: nothing), for the editor to answer a copy at once (runtime/clip.ts) */
