@@ -10,7 +10,9 @@
  * S (presenter view: notes, next page, timer — in a second window), Esc (end).
  *
  * The laser pointer, pinch to zoom and pan (+ / - / 0 too) and the control bar are app/presentkit.ts's:
- * zoomed, a click does not go on and Escape first goes back to the whole page.
+ * zoomed, a click does not go on and Escape first goes back to the whole page. Presented on other
+ * screens at the same time, the drawings, the laser and (Linked) the page go between them through the
+ * document's awareness (app/presentshare.ts).
  */
 import type { EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
@@ -21,6 +23,8 @@ import { TEX_LINE_VARS } from './geom';
 import { annotateOverlays, applyOverlays, OverlayCounter } from './overlays';
 import { beamerSlides, hasFrames, clean } from './beamerslides';
 import { PresentKit, type ZoomView } from '../../app/presentkit';
+import { PRESENT_FIELD, watchPresenters } from '../../app/presentshare';
+import { viewAwareness } from '../viewawareness';
 
 /** the page's fonts (editor/layout/controller.ts readHeader): the presentation draws with the same */
 const PAGE_FONT_VARS = ['--ol-page-font', '--ol-text-scale', '--ol-math-rel', ...TEX_LINE_VARS];
@@ -148,6 +152,8 @@ class Presentation {
     this.root.append(this.stage, this.counter);
     this.slides = slides;
     document.body.append(this.root);
+    // the other screens presenting the document: this one's state and theirs go through its awareness
+    const aw = viewAwareness(view);
     this.kit = new PresentKit({
       root: this.root,
       base: () => ({ x: this.stage.offsetLeft, y: this.stage.offsetTop, w: this.stage.offsetWidth, h: this.stage.offsetHeight }),
@@ -156,11 +162,16 @@ class Presentation {
       prev: () => this.prev(),
       exit: () => this.end(),
       position: () => { const s = this.slides[this.index]; return s ? `${this.index + 1} / ${this.slides.length}` : ''; },
+      at: () => ({ slide: this.index, step: this.step }),
+      goTo: (i, step) => this.goTo(i, step),
+      share: aw ? state => { try { aw.setLocalStateField(PRESENT_FIELD, state); } catch { /* closing */ } } : undefined,
     });
     this.cleanup.push(() => this.kit.destroy());
     this.fit();
     this.index = start;
     this.show(start, 1, null);
+    // (first: the kit's own state withdrawn as it ends is no news for it)
+    if (aw) this.cleanup.unshift(watchPresenters(aw, peers => this.kit.setPeers(peers)));
     const onKey = (e: KeyboardEvent) => this.key(e);
     const onResize = () => this.fit();
     // leaving full screen (Escape, in a real browser) ends it — zoomed, it first goes back to the whole page, windowed
@@ -244,6 +255,14 @@ class Presentation {
     const done = () => { prev.remove(); prev.classList.remove('ol-tr-out'); el.classList.remove('ol-tr-in', 'ol-tr-' + kind, 'ol-tr-back'); };
     el.addEventListener('animationend', done, { once: true });
     setTimeout(done, 900);
+  }
+
+  /** to the page and step another screen shows (the bar's "Linked") */
+  private goTo(i: number, step: number): void {
+    const index = Math.max(0, Math.min(this.slides.length - 1, i));
+    const s = Math.max(1, Math.min(this.slides[index].steps, step));
+    if (index === this.index && s === this.step) return;
+    this.show(index, s, index > this.index || (index === this.index && s > this.step) ? 1 : -1);
   }
 
   next(): void {

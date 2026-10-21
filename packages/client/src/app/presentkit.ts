@@ -22,7 +22,10 @@
  *   mouse near the bottom edge brings it, and it fades out again a few seconds later, or as soon as
  *   a stroke begins;
  * - the screen kept on while presenting (app/wakelock.ts), where the presenter is the top-level page
- *   (a sandboxed frame may not: the editor presenting it asks for it).
+ *   (a sandboxed frame may not: the editor presenting it asks for it);
+ * - several screens presenting the same document at once (an iPad and a Mac): the drawings, the laser
+ *   and, while the bar's "Linked" is on, the slide shown go from each to the others, live, through the
+ *   document's awareness (app/presentshare.ts; the presenter hands the states over: `share`, `setPeers`).
  *
  * DOM only — no framework — so the runtime bundle stays small. Everything is drawn in screen space
  * (CSS px of the window, not scaled with the slide) inside a shadow root, out of the page's styles.
@@ -34,6 +37,7 @@ import { keepAwake } from './wakelock';
 import { strokeWatch, strokeEnded } from '../glitches';
 import type { StrokeWatch } from '@overlyx/core/glitch.ts';
 import { pinchFactor, pinchLock, type PinchLock } from '../deliverable/gestures';
+import { PresentShare, slideKey, encodeStroke, encodePts, simplifyPts, TRAIL_PTS, HELD_PTS, type PresentState, type PresenterState, type Follow, type Pt } from './presentshare';
 
 /** the whiteboard's laser colour and fade time (editor/plugins/ink.ts LASER_COLOR / LASER_FADE_MS — a test checks they agree) */
 export const LASER_COLOR = '#ff2d55';
@@ -68,11 +72,21 @@ export function presentFingersDraw(): boolean {
 export function savePresentFingersDraw(on: boolean): void {
   try { localStorage.setItem(PRESENT_FINGERS_KEY, on ? '1' : '0'); } catch { /* a sandboxed frame: its editor keeps it */ }
 }
+/** the bar's "Linked" (on unless switched off: '0'), kept like "Fingers draw" */
+export const PRESENT_LINKED_KEY = 'ol.presentLinked';
+export function presentLinked(): boolean {
+  try { return localStorage.getItem(PRESENT_LINKED_KEY) !== '0'; } catch { return true; }
+}
+export function savePresentLinked(on: boolean): void {
+  try { localStorage.setItem(PRESENT_LINKED_KEY, on ? '1' : '0'); } catch { /* a sandboxed frame: its editor keeps it */ }
+}
+/** how often a presenter's state goes to the other screens at most, while a stroke or the laser moves (ms) */
+export const SHARE_MS = 50;
 
 export type PresentTool = 'laser' | 'pen' | 'marker' | 'eraser';
 type InkTool = Exclude<PresentTool, 'laser'>;
-/** a stroke drawn on a slide: points in slide units (SLIDE_UNITS), width too */
-export interface InkStroke { marker: boolean; color: string; w: number; pts: [number, number][] }
+/** a stroke drawn on a slide: points in slide units (SLIDE_UNITS), width too; `id`: who drew it and its number there (presentshare.ts) */
+export interface InkStroke { marker: boolean; color: string; w: number; pts: [number, number][]; id?: string }
 
 export interface Rect { x: number; y: number; w: number; h: number }
 /** a zoom on top of the fitted slide: screen point q → s·q + (x, y) */
@@ -228,9 +242,26 @@ export interface PresentKitHost {
   onZoom?(zoomed: boolean): void;
   /** the bar's "Fingers draw" switched (kept in this browser by the kit where it can; a sandboxed frame hands it to its editor) */
   onFingersDraw?(on: boolean): void;
+  /**
+   * Where the presentation is: the slide's index and its step. With it the drawings are kept by the
+   * slide's index (else by the position text), and the same slide on every screen has the same ones.
+   */
+  at?(): { slide: number; step: number };
+  /** show the slide and step another screen moved to (the bar's "Linked") */
+  goTo?(slide: number, step: number): void;
+  /**
+   * This presenter's state for the other screens presenting the document (presentshare.ts), null
+   * once it ends. Absent: nothing is shared. The others' come in through `setPeers`.
+   */
+  share?(state: PresentState | null): void;
+  /** the bar's "Linked" switched (kept as `onFingersDraw` is) */
+  onLinked?(on: boolean): void;
 }
 
-const DOC_CSS = `.olpk-surface, .olpk-surface * { touch-action: none !important; }
+// (nothing on the slide is selected either: on an iPad a long press or a Pencil drag brought the
+// selection loupe and the Copy / Look Up menu over the slide's text and drawings, mid-talk)
+const DOC_CSS = `.olpk-surface, .olpk-surface * { touch-action: none !important; -webkit-user-select: none !important; user-select: none !important; -webkit-touch-callout: none !important; }
+  .olpk-surface :is(input, textarea, select), .olpk-surface :is(input, textarea, select) * { -webkit-user-select: text !important; user-select: text !important; }
   .olpk-laser-on, .olpk-laser-on * { cursor: none !important; }
   .olpk-drawing, .olpk-drawing * { cursor: crosshair !important; }
   .olpk-zoomed:not(.olpk-laser-on):not(.olpk-drawing), .olpk-zoomed:not(.olpk-laser-on):not(.olpk-drawing) * { cursor: grab !important; }
@@ -275,6 +306,7 @@ const ICON = {
   clear: '<svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 4.5h10M6.3 4.5V3h3.4v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>',
   fingers: '<svg width="16" height="16" viewBox="0 0 16 16"><path d="M6.5 9.2V3a1.1 1.1 0 0 1 2.2 0v4.6M8.7 7.2a1.1 1.1 0 0 1 2.2 0v.6M10.9 7.7a1.1 1.1 0 0 1 2.2 0v2.2c0 2.6-1.6 4.6-4.4 4.6h-.6c-1.5 0-2.5-.6-3.4-1.8L3 10.2a1.1 1.1 0 0 1 1.8-1.3l1.7 1.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/></svg>',
   fit: '<svg width="16" height="16" viewBox="0 0 16 16"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  link: '<svg width="16" height="16" viewBox="0 0 16 16"><path d="M6.8 9.2a2.6 2.6 0 0 0 3.7 0l2.3-2.3a2.6 2.6 0 0 0-3.7-3.7l-.9.9M9.2 6.8a2.6 2.6 0 0 0-3.7 0L3.2 9.1a2.6 2.6 0 0 0 3.7 3.7l.9-.9" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
 };
 
 type Gesture =
@@ -290,8 +322,10 @@ type Gesture =
 /**
  * The laser, the drawing tools, the zoom and the bar on a presenting surface. The presenter keeps its
  * own keys and clicks; it asks `key()` first, calls `slideChanged()` when it shows another slide (the
- * zoom goes back to the whole slide, that slide's drawings show) and `refresh()` when its position
- * text changes. The drawings are kept by that text ("3 / 12": one set per slide, whatever its step).
+ * zoom goes back to the whole slide, that slide's drawings show), `moved()` when it shows another
+ * step, and `refresh()` when its position text changes. The drawings are kept per slide, whatever its
+ * step: by its index where the presenter tells it (`at`), else by that text ("3 / 12"). Sharing with
+ * the other screens presenting the document (`share`, `setPeers`): presentshare.ts.
  */
 export class PresentKit {
   readonly host: PresentKitHost;
@@ -315,8 +349,23 @@ export class PresentKit {
   private tool: PresentTool | null = null;
   private penColor: string = INK_COLORS[0];
   private markerColor: string = INK_COLORS[1];
-  /** the drawings, per slide (by its position text) */
+  /** this screen's drawings, per slide (slideKey) */
   private ink = new Map<string, InkStroke[]>();
+  /** what is shared with the other screens presenting the document, and what they share */
+  private share = new PresentShare();
+  /** the presenter's state goes out at most every SHARE_MS: when it is due */
+  private shareTimer: ReturnType<typeof setTimeout> | undefined;
+  private sharedAt = -1e9;
+  /** the move of another screen being followed (moved() takes its clock over) */
+  private following: Follow | null = null;
+  /** the presenter has shown its first slide (where it starts: no move) */
+  private placed = false;
+  /** the laser's points so far (its trail's numbers for the others) */
+  private laserN = 0;
+  /** the others' lasers on this screen, in slide units: the moving one's trail by when it came, the held trace */
+  private peerLasers = new Map<number, { k: string; last: number; trail: { x: number; y: number; t: number }[]; held: Pt[] | null; head: Pt | null }>();
+  private remoteG: SVGGElement;
+  private linkBtn: HTMLElement;
   /** fingers draw (and point the laser) with the tool in hand; off: only the Pencil does, fingers swipe, tap and pinch */
   private fingersDraw = false;
   /** the Pencil on the glass (its pointer), and when it last lifted */
@@ -356,7 +405,7 @@ export class PresentKit {
     this.ui.setAttribute('data-ol-runtime', '');
     this.ui.style.cssText = 'all:initial;position:fixed;left:0;top:0;width:0;height:0;z-index:2147483647;pointer-events:none;display:block;';
     const sr = this.ui.attachShadow({ mode: 'open' });
-    sr.innerHTML = `<style>${UI_CSS}</style><svg class="laser" xmlns="http://www.w3.org/2000/svg"><g class="ink"><g class="strokes"></g><g class="drawing"></g></g><g class="live"></g></svg>
+    sr.innerHTML = `<style>${UI_CSS}</style><svg class="laser" xmlns="http://www.w3.org/2000/svg"><g class="ink"><g class="strokes"></g><g class="remote"></g><g class="drawing"></g></g><g class="live"></g></svg>
       <div class="bar" role="toolbar" aria-label="Presentation">
         <button data-k="prev" title="Previous (←)" aria-label="Previous">${ICON.prev}</button>
         <span class="pos"></span>
@@ -367,6 +416,7 @@ export class PresentKit {
         <button data-k="eraser" title="Eraser (Ctrl+E)" aria-label="Eraser" aria-pressed="false">${ICON.eraser}</button>
         <button data-k="laser" title="Laser pointer (L)" aria-label="Laser pointer" aria-pressed="false"><span class="dot"></span></button>
         <button data-k="fingers" title="Fingers draw too (off: only the Apple Pencil draws; fingers swipe, tap and pinch)" aria-label="Fingers draw" aria-pressed="false" hidden>${ICON.fingers}</button>
+        <button data-k="link" title="Linked — this document is presented on another of your screens too: each goes along to the slide the other shows. Off: this screen goes its own way (the drawings and the laser still show where both show the same slide)" aria-label="Linked with the other screens" aria-pressed="true" hidden>${ICON.link}<span class="n"></span></button>
         <span class="colors" hidden>${INK_COLORS.map(c => `<button class="sw" data-k="color" data-c="${c}" style="--c:${c}" title="Colour" aria-label="Colour ${c}"></button>`).join('')}</span>
         <button data-k="clear" title="Clear the drawings on this slide (E)" aria-label="Clear the drawings on this slide" hidden>${ICON.clear}</button>
         <button data-k="zoom" title="Back to the whole slide (0)" hidden>${ICON.fit}<span class="z"></span></button>
@@ -377,12 +427,14 @@ export class PresentKit {
     this.inkG = sr.querySelector('g.ink') as SVGGElement;
     this.strokesG = sr.querySelector('g.strokes') as SVGGElement;
     this.drawG = sr.querySelector('g.drawing') as SVGGElement;
+    this.remoteG = sr.querySelector('g.remote') as SVGGElement;
     this.bar = sr.querySelector('.bar') as HTMLElement;
     this.posEl = sr.querySelector('.pos') as HTMLElement;
     this.laserBtn = sr.querySelector('[data-k="laser"]') as HTMLElement;
     this.fingersBtn = sr.querySelector('[data-k="fingers"]') as HTMLElement;
     // (only where there are fingers to draw with)
     this.fingersBtn.hidden = !(this.win.navigator.maxTouchPoints > 0);
+    this.linkBtn = sr.querySelector('[data-k="link"]') as HTMLElement;
     this.zoomBtn = sr.querySelector('[data-k="zoom"]') as HTMLElement;
     this.clearBtn = sr.querySelector('[data-k="clear"]') as HTMLElement;
     this.colorsEl = sr.querySelector('.colors') as HTMLElement;
@@ -404,6 +456,8 @@ export class PresentKit {
     on('pointercancel', e => this.up(e, true));
     on('click', e => this.click(e));
     on('dblclick', e => this.dblclick(e));
+    // no selecting the slide (DOC_CSS; Safari may start one anyway): only a form control's text
+    on('selectstart', e => { if (!(e.target as Element | null)?.closest?.('input, textarea, select')) e.preventDefault(); });
     on('wheel', e => this.wheel(e), { capture: true, passive: false });
     // Safari's trackpad pinch
     on('gesturestart' as keyof WindowEventMap, (e: Event) => { if (this.fromUi(e)) return; e.preventDefault(); this.safari = { ...this.view }; });
@@ -418,6 +472,7 @@ export class PresentKit {
     on('resize', () => { this.resetZoom(); this.scheduleInk(); });
     if (this.win === this.win.top) this.offs.push(keepAwake(this.win));
     this.setFingersDraw(presentFingersDraw(), false);
+    this.setLinked(presentLinked(), false);
     this.refresh();
   }
 
@@ -425,8 +480,18 @@ export class PresentKit {
   get laserOn(): boolean { return this.tool === 'laser'; }
   /** the drawing tool (or the laser) in hand, null: none */
   get toolOn(): PresentTool | null { return this.tool; }
-  /** the drawings on the slide shown */
-  get strokes(): readonly InkStroke[] { return this.ink.get(this.host.position()) ?? []; }
+  /** the drawings on the slide shown: this screen's and the other presenters' */
+  get strokes(): readonly InkStroke[] { return this.share.merged(this.slideNow(), this.ink.get(this.slideNow()) ?? []); }
+  get linked(): boolean { return this.share.at.linked; }
+  /** the other screens presenting the document (anyone's), and those of this account (Linked goes along with them) */
+  get presenters(): number { return this.share.presenters; }
+  get screens(): number { return this.share.screens; }
+
+  /** the slide shown, as the drawings are kept: by its index where the presenter tells it, else by its position text */
+  private slideNow(): string {
+    const a = this.host.at?.();
+    return a ? slideKey(a.slide) : this.host.position();
+  }
   get zoom(): ZoomView { return { ...this.view }; }
   get fingersDrawOn(): boolean { return this.fingersDraw; }
 
@@ -456,7 +521,64 @@ export class PresentKit {
   }
 
   /** another slide shown: the whole of it, with its drawings */
-  slideChanged(): void { this.cancelDraw(); this.resetZoom(); this.refresh(); this.renderInk(); }
+  slideChanged(): void { this.cancelDraw(); this.resetZoom(); this.refresh(); this.renderInk(); this.render(); this.moved(); }
+
+  /**
+   * The presenter showed another slide or step: the other screens are told (linked, they go along). A
+   * move of this screen's own, unless it follows another's; the first is where it starts, no move.
+   */
+  moved(): void {
+    const a = this.host.at?.();
+    if (!a) return;
+    const was = this.share.at;
+    if (!this.placed) { this.placed = true; this.share.place(a.slide, a.step); this.publish(true); return; }
+    const f = this.following;
+    if (a.slide === was.slide && a.step === was.step && (!f || f.n === was.n)) return;
+    this.share.moved(a.slide, a.step, f);
+    this.publish(true);
+  }
+
+  /**
+   * The other presenters' states, as the document's awareness has them (`state`: a client's `present`
+   * field, anyone's — checked in presentshare.ts; `mine`: a screen of this account). Their drawings,
+   * strokes being drawn and lasers show here; linked, this screen goes to where the one of this
+   * account's screens that moved last is.
+   */
+  setPeers(list: readonly PresenterState[]): void {
+    if (this.share.setPeers(list)) this.publish(true);
+    this.takeLasers();
+    const f = this.share.leader();
+    if (f) this.follow(f);
+    const mine = this.share.screens;
+    this.linkBtn.hidden = !(this.host.share && this.host.goTo && mine > 0);
+    const n = this.linkBtn.querySelector('.n');
+    if (n) n.textContent = mine > 1 ? String(mine + 1) : '';
+    this.renderInk();
+    this.render();
+  }
+
+  /** "Linked": this screen goes along with the others' moves and takes them along with its own; `tell`: kept (and the host told) */
+  setLinked(on: boolean, tell = true): void {
+    this.share.setLinked(on);
+    this.linkBtn.classList.toggle('on', on);
+    this.linkBtn.setAttribute('aria-pressed', String(on));
+    if (tell) { savePresentLinked(on); this.host.onLinked?.(on); }
+    // linked again: to where the others are
+    const f = on ? this.share.leader(true) : null;
+    if (f) this.follow(f);
+    this.publish(true);
+  }
+
+  /** to where another screen moved (its clock taken over: following is no move of this one's) */
+  private follow(f: Follow): void {
+    const a = this.host.at?.();
+    if (!a || !this.host.goTo || !this.placed) return;
+    this.following = f;
+    try {
+      if (a.slide !== f.slide || a.step !== f.step) this.host.goTo(f.slide, f.step);
+      this.moved();
+    } finally { this.following = null; }
+  }
 
   refresh(): void { this.posEl.textContent = this.host.position(); }
 
@@ -473,14 +595,14 @@ export class PresentKit {
     const root = this.host.root.classList;
     root.toggle('olpk-laser-on', t === 'laser');
     root.toggle('olpk-drawing', t === 'pen' || t === 'marker' || t === 'eraser');
-    for (const b of Array.from(this.bar.querySelectorAll<HTMLElement>('button[aria-pressed]:not([data-k="fingers"])'))) {
+    for (const b of Array.from(this.bar.querySelectorAll<HTMLElement>('button[aria-pressed]:not([data-k="fingers"]):not([data-k="link"])'))) {
       const on = b.dataset.k === t;
       b.classList.toggle('on', on);
       b.setAttribute('aria-pressed', String(on));
     }
     this.colorsEl.hidden = t !== 'pen' && t !== 'marker';
     this.markColor();
-    if (was === 'laser' && t !== 'laser') { this.endHeld(); this.tail = []; this.head = null; }
+    if (was === 'laser' && t !== 'laser') { this.endHeld(); this.tail = []; this.head = null; this.publish(true); }
     this.render();
   }
 
@@ -494,11 +616,15 @@ export class PresentKit {
     this.host.onFingersDraw?.(on);
   }
 
-  /** the slide's drawings cleared */
+  /** the slide's drawings cleared (the other presenters' too: on every screen) */
   clearInk(): void {
     this.cancelDraw();
-    this.ink.delete(this.host.position());
+    const key = this.slideNow();
+    this.share.erase(this.strokes.map(s => s.id).filter((id): id is string => !!id));
+    this.ink.delete(key);
+    this.share.inkChanged();
     this.renderInk();
+    this.publish(true);
   }
 
   resetZoom(): void { if (this.zoomed || this.view.x || this.view.y) this.setView({ ...IDENTITY }); }
@@ -510,6 +636,8 @@ export class PresentKit {
   destroy(): void {
     for (const off of this.offs) off();
     this.offs = [];
+    clearTimeout(this.shareTimer);
+    this.host.share?.(null);
     cancelAnimationFrame(this.raf);
     cancelAnimationFrame(this.inkRaf);
     clearTimeout(this.idle);
@@ -526,6 +654,7 @@ export class PresentKit {
     else if (k === 'next') this.host.next();
     else if (k === 'laser') this.setLaser(this.tool !== 'laser');
     else if (k === 'fingers') this.setFingersDraw(!this.fingersDraw);
+    else if (k === 'link') this.setLinked(!this.linked);
     else if (k === 'pen' || k === 'marker' || k === 'eraser') this.setTool(this.tool === k ? null : k);
     else if (k === 'color' && c) {
       if (this.tool === 'marker') this.markerColor = c;
@@ -667,6 +796,8 @@ export class PresentKit {
       this.held = [pt];
       this.head = pt;
       this.tail = [];
+      this.laserN++;
+      this.publish();
       this.gesture = { kind: 'laser', id: e.pointerId };
       this.suppressClick = true;
       e.preventDefault();
@@ -718,7 +849,7 @@ export class PresentKit {
         this.hideBar();
         if (g.tool !== 'eraser' && g.f) {
           const marker = g.tool === 'marker';
-          g.stroke = { marker, color: marker ? this.markerColor : this.penColor, w: (marker ? MARKER_PX : PEN_PX) / g.f.k, pts: [toSlide({ x: g.x0, y: g.y0 }, g.f)] };
+          g.stroke = { marker, color: marker ? this.markerColor : this.penColor, w: (marker ? MARKER_PX : PEN_PX) / g.f.k, pts: [toSlide({ x: g.x0, y: g.y0 }, g.f)], id: this.share.newId() };
         }
       }
       const evs = e.getCoalescedEvents?.() ?? [];
@@ -730,14 +861,16 @@ export class PresentKit {
           if (Math.hypot(q[0] - last[0], q[1] - last[1]) > 0.05) { g.stroke.pts.push(q); g.watch?.add(c.clientX, c.clientY, c.timeStamp, evs.length ? 'coalesced' : 'move'); }
         }
       }
-      if (g.stroke) this.drawG.innerHTML = strokeSvg(g.stroke);
+      if (g.stroke) { this.drawG.innerHTML = strokeSvg(g.stroke); this.publish(); }
       return;
     }
     if (g?.kind === 'laser' && g.id === e.pointerId && this.held) {
       const pt = { x: e.clientX, y: e.clientY, t: performance.now() };
       this.held.push(pt);
       this.head = pt;
+      this.laserN++;
       this.schedule();
+      this.publish();
       return;
     }
     if (g?.kind === 'pan' && g.id === e.pointerId) {
@@ -756,7 +889,9 @@ export class PresentKit {
       this.tail.push(pt);
       if (this.tail.length > 120) this.tail.splice(0, this.tail.length - 120);
       this.head = pt;
+      this.laserN++;
       this.schedule();
+      this.publish();
     }
   }
 
@@ -777,13 +912,16 @@ export class PresentKit {
       this.endHeld();
       if (e.pointerType !== 'mouse') this.head = null;
       this.render();
+      this.publish(true);
     } else if (g.kind === 'draw') {
       this.drawG.replaceChildren();
       if (g.stroke) {
         strokeEnded(g.watch);
-        const key = this.host.position();
+        const key = this.slideNow();
         this.ink.set(key, [...(this.ink.get(key) ?? []), g.stroke]);
+        this.share.inkChanged();
         this.renderInk();
+        this.publish(true);
       } else if (!g.moved && !g.erased && !cancelled && e.pointerType !== 'mouse') this.toggleBar();
     } else if (g.kind === 'pan') {
       this.host.root.classList.remove('olpk-panning');
@@ -823,31 +961,127 @@ export class PresentKit {
 
   /* -------------------------------------------------------------- drawing on the slide */
 
-  /** the eraser at (x, y) on screen: the strokes it touches go */
+  /** the eraser at (x, y) on screen: the strokes it touches go — anyone's, on every screen */
   private eraseAt(x: number, y: number, g: Extract<Gesture, { kind: 'draw' }>): void {
     if (!g.f) return;
-    const key = this.host.position();
-    const list = this.ink.get(key);
-    if (!list?.length) return;
-    const hit = strokesHit(list, toSlide({ x, y }, g.f), ERASER_PX / g.f.k);
-    if (!hit.length) return;
+    const key = this.slideNow();
+    const list = this.strokes;
+    if (!list.length) return;
+    const hit = new Set(strokesHit(list, toSlide({ x, y }, g.f), ERASER_PX / g.f.k).map(i => list[i]));
+    if (!hit.size) return;
     g.erased = true;
-    this.ink.set(key, list.filter((_, i) => !hit.includes(i)));
+    this.share.erase([...hit].map(s => s.id).filter((id): id is string => !!id));
+    const own = this.ink.get(key);
+    if (own) this.ink.set(key, own.filter(s => !hit.has(s)));
+    this.share.inkChanged();
     this.renderInk();
+    this.publish(true);
   }
 
   /** a stroke being drawn given up (another slide, a second finger, another tool) */
   private cancelDraw(): void {
+    const drawing = this.gesture?.kind === 'draw' && !!this.gesture.stroke;
     if (this.gesture?.kind === 'draw') this.gesture = null;
     this.drawG?.replaceChildren();
+    if (drawing) this.publish(true);
   }
 
-  /** the slide's drawings drawn again */
+  /** the slide's drawings drawn again, and those the others are drawing on it */
   private renderInk(): void {
-    const list = this.ink.get(this.host.position()) ?? [];
+    const key = this.slideNow();
+    const list = this.strokes;
     this.strokesG.innerHTML = list.map(strokeSvg).join('');
+    this.remoteG.innerHTML = this.share.liveOn(key).map(strokeSvg).join('');
     this.clearBtn.hidden = !list.length;
     this.placeInk();
+  }
+
+  /* -------------------------------------------------------------- the other screens */
+
+  /**
+   * This presenter's state to the other screens: at once (`now`: a stroke ended, a move), else at most
+   * every SHARE_MS while a stroke or the laser moves. Its strokes in slide units; the stroke being drawn;
+   * the laser's trail (its newest points) or held trace, in slide units too.
+   */
+  private publish(now = false): void {
+    if (!this.host.share || !this.placed) return;
+    const due = this.sharedAt + SHARE_MS - performance.now();
+    if (!now && due > 0) {
+      if (this.shareTimer === undefined) this.shareTimer = setTimeout(() => { this.shareTimer = undefined; this.publish(true); }, due);
+      return;
+    }
+    clearTimeout(this.shareTimer);
+    this.shareTimer = undefined;
+    this.sharedAt = performance.now();
+    const key = this.slideNow();
+    const g = this.gesture;
+    const live = g?.kind === 'draw' && g.stroke?.id && g.stroke.pts.length ? { k: key, s: encodeStroke(g.stroke as InkStroke & { id: string }) } : null;
+    this.host.share(this.share.state(this.ink, key, live, this.laserShare(key)));
+  }
+
+  /** the laser for the others: its newest points (held: the whole trace), in slide units */
+  private laserShare(key: string): PresentState['laser'] {
+    if (this.tool !== 'laser') return null;
+    const f = inkFrame(this.view, this.host.base());
+    if (!f) return null;
+    let pts = (this.held ?? this.tail).slice(this.held ? -HELD_PTS : -TRAIL_PTS);
+    if (!pts.length && this.head) pts = [{ ...this.head, t: 0 }];
+    if (!pts.length) return null;
+    const units = pts.map(p => toSlide(p, f));
+    return { k: key, n: Math.max(0, this.laserN - pts.length), pts: encodePts(this.held ? simplifyPts(units, 0.5) : units), held: !!this.held };
+  }
+
+  /**
+   * The others' lasers as they are now: a moving one's new points join its trail (with the time they
+   * came, so it fades here as there), a held trace is taken whole; one let go fades out.
+   */
+  private takeLasers(): void {
+    const now = performance.now();
+    const lasers = this.share.lasers();
+    for (const [client, l] of this.peerLasers) {
+      const n = lasers.get(client);
+      if (!n || n.k !== l.k || !n.held) { if (l.held) this.fadeTrace(l.held, l.k); l.held = null; }
+      if (!n) this.peerLasers.delete(client);
+    }
+    for (const [client, n] of lasers) {
+      let l = this.peerLasers.get(client);
+      if (!l || l.k !== n.k) { l = { k: n.k, last: -1, trail: [], held: null, head: null }; this.peerLasers.set(client, l); }
+      const cur = l;
+      if (n.held) cur.held = n.pts;
+      else n.pts.forEach((p, i) => { if (n.n + i > cur.last) cur.trail.push({ x: p[0], y: p[1], t: now }); });
+      cur.last = Math.max(cur.last, n.n + n.pts.length - 1);
+      if (cur.trail.length > 120) cur.trail.splice(0, cur.trail.length - 120);
+      cur.head = n.pts[n.pts.length - 1];
+    }
+  }
+
+  /** another's held trace let go: it lingers and fades, as this screen's own does */
+  private fadeTrace(pts: readonly Pt[], key: string): void {
+    const f = inkFrame(this.view, this.host.base());
+    if (!f || key !== this.slideNow() || !pts.length) return;
+    const g = this.doc.createElementNS('http://www.w3.org/2000/svg', 'g');
+    g.setAttribute('class', 'trace fade');
+    g.innerHTML = traceSvg(pts.map(([x, y]) => ({ x: f.ox + f.k * x, y: f.oy + f.k * y })), LASER_COLOR, false);
+    this.svg.insertBefore(g, this.live);
+    setTimeout(() => g.remove(), LASER_FADE_MS + 60);
+  }
+
+  /** the others' lasers on the slide shown, as SVG in screen px; `fading`: a trail still fades */
+  private peerLaserSvg(now: number): { html: string; fading: boolean } {
+    const f = inkFrame(this.view, this.host.base());
+    if (!f || !this.peerLasers.size) return { html: '', fading: false };
+    const key = this.slideNow();
+    const on = (p: readonly [number, number]) => ({ x: f.ox + f.k * p[0], y: f.oy + f.k * p[1] });
+    let html = '', fading = false;
+    for (const l of this.peerLasers.values()) {
+      if (l.k !== key) continue;
+      if (l.held) { html += `<g class="trace held">${traceSvg(l.held.map(on))}</g>`; continue; }
+      l.trail = liveTail(l.trail, now);
+      html += tailSvg(l.trail.map(p => ({ ...on([p.x, p.y]), t: p.t })), now);
+      if (l.head) { const h = on(l.head); html += dotSvg(h.x, h.y); }
+      if (l.trail.length > 1) fading = true;
+    }
+    return { html, fading };
   }
 
   /** the drawings put where the slide is now (its fit, the zoom) */
@@ -892,7 +1126,9 @@ export class PresentKit {
         if (this.head) html += dotSvg(this.head.x, this.head.y);
       }
     }
-    this.live.innerHTML = html;
-    if (this.tool === 'laser' && !this.held && this.tail.length > 1) this.schedule();
+    // the other screens' lasers, under this one's
+    const peers = this.peerLaserSvg(now);
+    this.live.innerHTML = peers.html + html;
+    if ((this.tool === 'laser' && !this.held && this.tail.length > 1) || peers.fading) this.schedule();
   }
 }

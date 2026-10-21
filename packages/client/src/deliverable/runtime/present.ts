@@ -8,7 +8,10 @@
  * resumes the same slide and step. A poster is shown whole, a web page as it is.
  *
  * The laser pointer (L), pinch to zoom and pan, and the control bar are app/presentkit.ts's: zoomed,
- * a click does not go on, Escape first goes back to the whole slide.
+ * a click does not go on, Escape first goes back to the whole slide. Presented on other screens at the
+ * same time, the drawings, the laser and (Linked) the slide go between them: the kit's state goes to
+ * the editor (`presentShare`), which shares it in the document's awareness and brings the others'
+ * (`presentPeers`; app/presentshare.ts).
  */
 import { slides, post } from './env';
 import { PresentKit, type ZoomView } from '../../app/presentkit';
@@ -68,6 +71,11 @@ export function startPresenting(): void {
     onZoom: zoomed => post({ ol: 'presentZoom', zoomed }),
     // (the frame has no storage: the editor keeps it, and hands it over as the presentation starts)
     onFingersDraw: on => post({ ol: 'presentFingers', on }),
+    // the other screens presenting the document: through the editor, which has its awareness
+    at: () => ({ slide: current, step }),
+    goTo: (slide, at) => go(slide, false, at),
+    share: state => post({ ol: 'presentShare', state }),
+    onLinked: on => post({ ol: 'presentLinked', on }),
   });
   const h = /^#(\d+)$/.exec(location.hash);
   go(h ? Number(h[1]) - 1 : 0);
@@ -82,6 +90,8 @@ export function startPresenting(): void {
     if (e.data.ol === 'go') go(Number(e.data.slide));
     else if (e.data.ol === 'unzoom') kit?.resetZoom();
     else if (e.data.ol === 'presentFingers') kit?.setFingersDraw(e.data.on === true, false);
+    else if (e.data.ol === 'presentLinked') kit?.setLinked(e.data.on !== false, false);
+    else if (e.data.ol === 'presentPeers' && Array.isArray(e.data.peers)) kit?.setPeers(e.data.peers);
   });
 }
 
@@ -138,22 +148,23 @@ function showStep(): void {
 /** on: the next step of the slide, or the next slide */
 function forward(): void {
   if (resumeScreen()) return;
-  if (step < lastStep(slides()[current])) { step++; showStep(); return; }
+  if (step < lastStep(slides()[current])) { step++; showStep(); kit?.moved(); return; }
   go(current + 1);
 }
 /** back: the step before, or the slide before as it ends */
 function back(): void {
   if (resumeScreen()) return;
-  if (step > 1) { step--; showStep(); return; }
+  if (step > 1) { step--; showStep(); kit?.moved(); return; }
   if (current > 0) go(current - 1, true);
 }
 
-export function go(i: number, atEnd = false): void {
+/** to slide `i`: at its first step, its last (`atEnd`), or the step `at` (another screen's, Linked) */
+export function go(i: number, atEnd = false, at?: number): void {
   const ss = slides();
   if (!ss.length) return;
   resumeScreen();
   current = Math.max(0, Math.min(ss.length - 1, i));
-  step = atEnd ? lastStep(ss[current]) : 1;
+  step = at !== undefined ? Math.max(1, Math.min(lastStep(ss[current]), at)) : atEnd ? lastStep(ss[current]) : 1;
   showStep();
   ss.forEach((s, k) => { if (k === current) s.setAttribute('data-ol-current', ''); else s.removeAttribute('data-ol-current'); });
   fit();

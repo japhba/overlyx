@@ -18,6 +18,7 @@ import { safeColor } from './runtime/carets';
 import { localWritesCommitted, snapshotCovers } from '../editor/savedstate';
 import { offlineFrames } from './offlineframes';
 import { noteArticle } from '../articlekinds';
+import { PRESENT_FIELD, watchPresenters } from '../app/presentshare';
 
 /** Check that storage can actually be opened and written before y-indexeddb installs
  * its listeners. Its constructor leaves an unhandled rejection when private mode
@@ -307,6 +308,8 @@ export function webHost(id: string, user: User): DeliverableHost & { destroy(): 
       provider.awareness.on('change', f);
       return () => provider.awareness.off('change', f);
     },
+    setPresent(state) { try { provider.awareness.setLocalStateField(PRESENT_FIELD, state); } catch { /* closing */ } },
+    onPresent: cb => watchPresenters(provider.awareness, cb),
     downloads(open) {
       const q = `?path=${encodeURIComponent(path)}&download=1`;
       return [

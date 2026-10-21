@@ -28,6 +28,7 @@ import { getPrefs, subscribePrefs } from '../prefs';
 import { assemblePlugins, editorViewProps, editorAttributes, dispatchTransactionProp, installEditorDom, flushDomSelection as flushSelection } from './assembly';
 import { isMarkdownDoc } from './markdown';
 import { isArticleDoc } from '../articlekinds';
+import { setViewAwareness } from './viewawareness';
 import type { MergeEntry, MergeSource } from './plugins/mergereview';
 import type { User } from '../api';
 
@@ -435,6 +436,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
     ...editorViewProps({ docId: opts.docId, viewOnly: () => viewOnly }),
   });
   viewRef = view;
+  setViewAwareness(view, provider.awareness);
   performance.mark('ol:editor-created');
   // the spell-check switch (Tools ▸ Spell checking) applies to open editors right away
   const unsubscribePrefs = subscribePrefs(p => { view.setProps({ attributes: editorAttributes(!!opts.child, p) }); });

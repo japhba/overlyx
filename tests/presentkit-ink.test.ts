@@ -305,4 +305,16 @@ describe('the kit on a presenting surface', () => {
     expect(kit.strokes).toHaveLength(0);
     expect(barShown()).toBe(true);
   });
+
+  it('nothing on the slide is selected (no iPad loupe or Copy menu over its text and drawings): only a form control\'s text', () => {
+    const css = [...document.head.querySelectorAll('style')].map(st => st.textContent ?? '').join('');
+    expect(css).toMatch(/\.olpk-surface, \.olpk-surface \* \{[^}]*-webkit-user-select: none[^}]*-webkit-touch-callout: none/);
+    const text = document.createElement('p');
+    text.textContent = 'A slide';
+    const input = document.createElement('input');
+    root.append(text, input);
+    const select = (el: Element) => { const ev = new Event('selectstart', { bubbles: true, cancelable: true }); el.dispatchEvent(ev); return ev.defaultPrevented; };
+    expect(select(text)).toBe(true);
+    expect(select(input)).toBe(false);
+  });
 });

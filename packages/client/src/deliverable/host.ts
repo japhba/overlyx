@@ -9,6 +9,7 @@ import type { Path, PeerInfo, TextCaret } from './protocol';
 import type { MenuItem } from '../editor/contextmenu';
 import type { RuntimeMode } from '@overlyx/core/html/serve.ts';
 import type { AssetUrls } from './offlineassets';
+import type { PresentState, PresenterState } from '../app/presentshare';
 
 export type { Splice };
 
@@ -60,6 +61,13 @@ export interface DeliverableHost {
   setCaret?(caret: TextCaret | null): void;
   setSlide?(slide: number): void;
   onPeers(cb: (peers: Peer[]) => void): () => void;
+  /**
+   * Presenting on several screens (app/presentshare.ts): this presenter's state for the others (null:
+   * it stopped), and the others' `present` states as they come — at once, and on every change. A
+   * host without others leaves them out.
+   */
+  setPresent?(state: PresentState | null): void;
+  onPresent?(cb: (peers: PresenterState[]) => void): () => void;
   /** the Download menu's entries (the web app: PDF, website; VS Code: print, open in the browser) */
   downloads(open: (mode: string) => string): MenuItem[];
   /** present here (a full-screen frame) — or elsewhere, returning true (VS Code: the browser) */

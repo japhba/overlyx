@@ -29,7 +29,8 @@ import { DetentPinch, stepOnto, type Detent, type Shown } from '../app/zoomdeten
 import { zoomPill } from '../app/zoomhud';
 import { CornerButton } from '../app/CornerButton';
 import { keepAwake } from '../app/wakelock';
-import { presentFingersDraw, savePresentFingersDraw } from '../app/presentkit';
+import { presentFingersDraw, savePresentFingersDraw, presentLinked, savePresentLinked } from '../app/presentkit';
+import { checkedPresent, type PresentState, type PresenterState } from '../app/presentshare';
 import { createPortal } from 'preact/compat';
 import { isFromRuntime } from './protocol';
 import { rebasedSplices, rebaseObjectPaths, objectHtml, imageHtml, insertPlace, newSlideHtml, slideDesigns, slidePaths, slideNotes, notesOp, sourceRange, inlineSvgHtml, guidesIn } from './sourceops';
@@ -742,9 +743,20 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
         if (m.ol === 'presentZoom') presentZoomed.current = m.zoomed;
         if (m.ol === 'exit') stopPresenting();
         if (m.ol === 'presentFingers') savePresentFingersDraw(m.on);
+        if (m.ol === 'presentLinked') savePresentLinked(m.on);
+        // its state for the other screens presenting the page: checked (the page's own scripts run in that frame too), then shared
+        if (m.ol === 'presentShare') {
+          const st = m.state === null ? null : checkedPresent(m.state, presentOut.current);
+          if (st || m.state === null) { presentOut.current = st; host.setPresent?.(st); }
+        }
         if (m.ol === 'visible') {
-          // (its first slide shown: the frame has no storage, so the bar's "Fingers draw" comes from here)
-          if (!presentPrefsSent.current) { presentPrefsSent.current = true; toFrame(presentFrame.current, { ol: 'presentFingers', on: presentFingersDraw() }); }
+          // (its first slide shown: the frame has no storage, so the bar's "Fingers draw" and "Linked" come from here — and the other presenters as they are)
+          if (!presentPrefsSent.current) {
+            presentPrefsSent.current = true;
+            toFrame(presentFrame.current, { ol: 'presentFingers', on: presentFingersDraw() });
+            toFrame(presentFrame.current, { ol: 'presentLinked', on: presentLinked() });
+            toFrame(presentFrame.current, { ol: 'presentPeers', peers: presentPeers.current });
+          }
           setCurrent(canvasIndexOf(m.slide));
         }
         return;
@@ -2136,6 +2148,9 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   const presentFrom = useRef(0);
   /** the presenting frame was told this browser's presenting settings */
   const presentPrefsSent = useRef(false);
+  /** the other screens presenting the page (their awareness states), and this one's state as last shared (app/presentshare.ts) */
+  const presentPeers = useRef<PresenterState[]>([]);
+  const presentOut = useRef<PresentState | null>(null);
   const startPresenting = async (fromStart = false) => {
     presentZoomed.current = false;
     presentPrefsSent.current = false;
@@ -2168,6 +2183,12 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   useEffect(() => { if (!presenting && slides[current]) { toCanvas({ ol: 'scrollTo', slide: current }); toRail({ ol: 'current', slide: current }); } }, [presenting]);
   // the screen kept on while presenting (an iPad locks mid-talk): asked for here, as the sandboxed frame may not
   useEffect(() => (presenting ? keepAwake() : undefined), [presenting]);
+  // presented on other screens too (an iPad and a Mac): their states into the frame as they change; this one's withdrawn as it ends
+  useEffect(() => {
+    if (!presenting || !host.onPresent) return;
+    const off = host.onPresent(peers => { presentPeers.current = peers; toFrame(presentFrame.current, { ol: 'presentPeers', peers }); });
+    return () => { off(); presentPeers.current = []; presentOut.current = null; host.setPresent?.(null); };
+  }, [presenting, host]);
 
   /* ------------------------------------------------------------- code view */
 

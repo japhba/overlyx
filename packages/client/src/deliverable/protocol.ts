@@ -13,6 +13,7 @@ import type { CiteEntry } from '@overlyx/core/html/refs.ts';
 import type { MathJaxMacro } from '@overlyx/core/html/deckextras.ts';
 import type { ReliabilityEvent, ReliabilityPointer } from '@overlyx/core/reliability.ts';
 import type { GlitchFields } from '@overlyx/core/glitch.ts';
+import type { PresentState, PresenterState } from '../app/presentshare';
 
 export type { HtmlOp, Path };
 export type { ReliabilityEvent, ReliabilityPointer };
@@ -246,6 +247,10 @@ export type ToRuntime =
   | { ol: 'unzoom' }
   /** presenting: fingers draw too, or only the Pencil does (app/presentkit.ts; kept by the editor, the frame has no storage) */
   | { ol: 'presentFingers'; on: boolean }
+  /** presenting: the bar's "Linked" as this browser keeps it */
+  | { ol: 'presentLinked'; on: boolean }
+  /** presenting: the other screens presenting the document, their `present` awareness states as they came (app/presentshare.ts checks them) */
+  | { ol: 'presentPeers'; peers: PresenterState[] }
   /** the formula open in LyX's formula editor changed (runtime/mathedit.ts: the chip follows) */
   | { ol: 'mathSet'; id: number; tex: string }
   /** LyX's formula editor left the formula (`dir`: by an arrow key / Escape, the caret goes that side; null: elsewhere; `putBack`: Backspace in the empty formula `$` opened gives the typed dollar back as text) */
@@ -361,6 +366,10 @@ export type FromRuntime =
   | { ol: 'presentZoom'; zoomed: boolean }
   /** presenting: the bar's "Fingers draw" switched */
   | { ol: 'presentFingers'; on: boolean }
+  /** presenting: the bar's "Linked" switched */
+  | { ol: 'presentLinked'; on: boolean }
+  /** presenting: this presenter's state for the other screens (app/presentshare.ts; null: it ended) — the editor checks it and shares it */
+  | { ol: 'presentShare'; state: PresentState | null }
   /**
    * a formula of the text being retyped to edit with LyX's formula editor (runtime/mathedit.ts):
    * where it is and how big its letters are, its colour; `at`: the click into it; `dollar`: opened
