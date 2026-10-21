@@ -5,7 +5,8 @@
  * every later one). Three locks: the viewport's scale bounds (index.html; iOS honours them in a
  * home-screen app and against zooming in on a focused input), `touch-action: pan-x pan-y` on the root
  * (styles.css; no pinch or double-tap zoom of the page, the views' own gestures unaffected), and here:
- * should the page still end up scaled, it is put back at 100 % once the fingers are off it.
+ * should the page still end up scaled by fingers, it is put back at 100 % once they are off it. The
+ * keyboard's zoom (⌘ + / −, the browser's View menu) is left alone: that size is asked for.
  */
 let locked = false;
 
@@ -27,17 +28,17 @@ export function initZoomLock(): void {
   const vv = typeof window !== 'undefined' ? window.visualViewport : null;
   if (locked || !vv || navigator.maxTouchPoints <= 0) return;
   locked = true;
-  let fingers = 0, timer: ReturnType<typeof setTimeout> | null = null;
+  let fingers = 0, touchedAt = -1e9, timer: ReturnType<typeof setTimeout> | null = null;
   const check = () => {
     if (timer) clearTimeout(timer);
     timer = null;
-    if (Math.abs(vv.scale - 1) < 0.02) return;
+    // (only a scale the fingers made: a moment after they were on the glass)
+    if (Math.abs(vv.scale - 1) < 0.02 || (!fingers && performance.now() - touchedAt > 1500)) return;
     // not while a pinch goes on: when it ends
     timer = setTimeout(() => { timer = null; if (!fingers && Math.abs(vv.scale - 1) >= 0.02) rescale(); }, 350);
   };
   const opts = { capture: true, passive: true };
-  addEventListener('touchstart', e => { fingers = e.touches.length; }, opts);
-  for (const t of ['touchend', 'touchcancel'] as const) addEventListener(t, e => { fingers = e.touches.length; if (!fingers) check(); }, opts);
+  addEventListener('touchstart', e => { fingers = e.touches.length; touchedAt = performance.now(); }, opts);
+  for (const t of ['touchend', 'touchcancel'] as const) addEventListener(t, e => { fingers = e.touches.length; touchedAt = performance.now(); if (!fingers) check(); }, opts);
   vv.addEventListener('resize', check);
-  check();
 }
