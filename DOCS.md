@@ -367,9 +367,13 @@ blend.
   its message (`POST /git/api/sync/commit`, once every file is in step). Protocol, all under
   `/git/api/sync/` with git's credentials and roles (each request says what the clone is and where:
   `X-OverLyX-Sync-App: vscode|cli`, `X-OverLyX-Sync-Host`; the web interface shows **"⇄ In sync with
-  VS Code"** beside a document's save state while a clone of its project is at work — its long poll
-  open or a request in the last 75 s — and for a document linked to a Google Doc, `server/syncPeers.ts`,
-  `GET /api/docs/<id>/external`, `client/app/SyncChip.tsx`, polled every 20 s; the computer's name is
+  VS Code"** in the status bar (both interfaces, since 21 Oct 2026) while a clone of its project is at
+  work — its long poll open or a request in the last 75 s — and for a document linked to a Google Doc
+  or a LessWrong draft, `server/syncPeers.ts`, `GET /api/docs/<id>/external`, `client/app/SyncChip.tsx`,
+  polled every 20 s (every 2 s while a LessWrong sync runs: "⟳ Syncing with LessWrong…"). A click
+  opens each connection's state: last sync or its error, whether the linker's Google Drive / LessWrong
+  authorisation is still there (LessWrong's: until when), comments one way or both, the clones, with a
+  button to each one's settings; the computer's name is
   shown to the clone's own account only, an engine from before the headers is told by its
   credential's name): `state` (open documents saved first, then every
   file as `git ls-files --cached --others --exclude-per-directory=.gitignore` lists it — the
@@ -3585,7 +3589,11 @@ the ForumMagnum sources it follows (`app/api/mcp/mcpServer.ts`, `app/api/agent/*
 * **Syncing on its own** (`startLessWrongAutoSync`): a minute after an edit here; LessWrong is
   read every 3 min while the document is open here, every 10 min when something changed in the
   last day, hourly otherwise (each `read_post` opens a collaboration session on LessWrong's side).
-  The ⇄ chip shows the link (`syncPeers.ts`). Deleting a document or its project drops its link;
+  The ⇄ chip shows the link (`syncPeers.ts`). **Progress:** linking answers once the draft is checked
+  (`read_post`, the link-sharing key) and the first sync runs on; `Sync now` answers within 15 s and
+  a longer sync runs on (proxies cut long requests) — the link's `syncing` (`LwProgress`: phase,
+  edits sent, since) is shown by the dialog (polled every 1.5 s) and the chip, `lastReport` says what
+  a finished one did. Deleting a document or its project drops its link;
   deleting the account disconnects (and revokes) LessWrong. The privacy notice lists LessWrong.
 * **Routes** (`lesswrong/routes.ts`): `GET /api/lesswrong/status?doc=`, `GET /api/lesswrong/connect`,
   `GET /api/lesswrong/callback`, `POST /api/lesswrong/disconnect`, `POST /api/docs/<id>/lesswrong/{link,key,sync,unlink,auto}`.

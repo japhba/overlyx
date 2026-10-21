@@ -199,9 +199,22 @@ export interface GdocsStatus {
 /** a synced clone of the project working right now (server syncPeers.ts) — `host` only for the viewer's own */
 export interface SyncClone { name: string; username: string; app: 'vscode' | 'cli' | 'other'; host: string | null; mine: boolean; since: number; lastSeen: number }
 /** what keeps a document in step from elsewhere: synced clones of its project, its Google Docs and LessWrong links */
-export interface ExternalSync { clones: SyncClone[]; google: { url: string; auto: boolean; lastSync: number | null; lastError: string | null } | null; googleUnlinked?: boolean; lesswrong?: { url: string; auto: boolean; lastSync: number | null; lastError: string | null } }
+export interface ExternalSync {
+  clones: SyncClone[];
+  /** `account`: the linker's Google Drive authorisation is there; `mine`: the viewer linked it */
+  google: { url: string; auto: boolean; lastSync: number | null; lastError: string | null; account: boolean; mine: boolean } | null;
+  googleUnlinked?: boolean;
+  /** `authUntil`: the linker's LessWrong authorisation (null: gone); `comments`: both ways; `syncing`: a sync under way */
+  lesswrong?: { url: string; title: string | null; auto: boolean; lastSync: number | null; lastError: string | null; authUntil: number | null; comments: boolean; mine: boolean; syncing: LessWrongProgress | null };
+}
 /** a document's link to a LessWrong draft (server lesswrong/sync.ts publicLwLink) */
-export interface LessWrongLink { postId: string; title: string | null; draft: boolean | null; url: string; comments: boolean; auto: boolean; lastSync: number | null; lastError: string | null; linkedBy: number; warnings: string[] }
+/** a LessWrong sync under way (server lesswrong/sync.ts LwProgress) */
+export interface LessWrongProgress { phase: string; edits: number; round: number; since: number }
+export interface LessWrongLink {
+  postId: string; title: string | null; draft: boolean | null; url: string; comments: boolean; auto: boolean; lastSync: number | null; lastError: string | null; linkedBy: number; warnings: string[];
+  authUntil: number | null; syncing: LessWrongProgress | null;
+  lastReport: { at: number; pulled: number; pushed: number; comments: { fromLessWrong: number; toLessWrong: number }; warnings: number } | null;
+}
 export interface LessWrongStatus { account: { expiresAt: number } | null; link: LessWrongLink | null; canEdit: boolean; guest: boolean }
 export interface LessWrongReport { pulled: number; pushed: number; rounds: number; comments: { fromLessWrong: number; toLessWrong: number }; warnings: string[]; notes: string[] }
 export type GdocsPicker = { stub: true; files: { id: string; name: string }[] } | { stub?: false; apiKey: string; appId: string; token: string };
@@ -422,7 +435,8 @@ export const api = {
   lwLink: (id: string, url: string, keep: 'ours' | 'merge') => req<{ link: LessWrongLink }>('POST', `/api/docs/${encId(id)}/lesswrong/link`, { url, keep }),
   /** the draft's link-sharing address (its comment threads then sync both ways) */
   lwKey: (id: string, url: string) => req<{ link: LessWrongLink }>('POST', `/api/docs/${encId(id)}/lesswrong/key`, { url }),
-  lwSync: (id: string) => req<{ link: LessWrongLink; report: LessWrongReport }>('POST', `/api/docs/${encId(id)}/lesswrong/sync`),
+  /** `report` null: the sync runs on (the link's `syncing`) */
+  lwSync: (id: string) => req<{ link: LessWrongLink; report: LessWrongReport | null }>('POST', `/api/docs/${encId(id)}/lesswrong/sync`),
   lwAuto: (id: string, auto: boolean) => req<{ link: LessWrongLink }>('POST', `/api/docs/${encId(id)}/lesswrong/auto`, { auto }),
   lwUnlink: (id: string) => req<{ ok: boolean }>('POST', `/api/docs/${encId(id)}/lesswrong/unlink`),
   lwDisconnect: () => req<{ ok: boolean }>('POST', '/api/lesswrong/disconnect'),

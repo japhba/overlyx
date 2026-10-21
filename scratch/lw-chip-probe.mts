@@ -1,0 +1,31 @@
+// The ⇄ chip in the status bar and its panel, after linking a draft (server with OVERLYX_E2E_LESSWRONG_STUB=1).
+import { chromium } from 'playwright';
+import { login, BASE_URL } from '../e2e/helpers';
+const OUT = process.env.SHOTS ?? '/tmp';
+const browser = await chromium.launch();
+const ctx = await browser.newContext({ baseURL: BASE_URL, viewport: { width: 1300, height: 860 } });
+const page = await ctx.newPage();
+const errors: string[] = [];
+page.on('pageerror', e => errors.push(String(e)));
+await login(page, undefined, { ui: (process.env.UI as 'modern' | 'classic') ?? 'modern' });
+await page.goto(BASE_URL + '/#/admin/lwtest/post.md');
+await page.waitForSelector('.lyx-editor', { timeout: 60000 });
+await page.evaluate(async () => {
+  await fetch('/api/lesswrong/connect?next=' + encodeURIComponent('#/admin/lwtest/post.md'), { redirect: 'manual' });
+  const made = await (await fetch('/api/lesswrong/e2e/create', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: 'My post', key: 'k3y' }) })).json();
+  const r = await fetch('/api/docs/' + encodeURIComponent('admin/lwtest/post.md') + '/lesswrong/link', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url: made.url }) });
+  console.log(r.status);
+});
+await page.reload();
+await page.waitForSelector('[data-sync-chip]', { timeout: 40000 });
+console.log('chip in status bar:', await page.locator('.statusbar [data-sync-chip]').count(), 'in title:', await page.locator('.menubar-title [data-sync-chip]').count());
+console.log('chip text:', await page.locator('[data-sync-chip]').first().textContent());
+await page.click('[data-sync-chip]');
+await page.waitForSelector('[data-sync-panel]');
+await page.screenshot({ path: OUT + '/chip-panel.png' });
+const box = await page.locator('[data-sync-panel]').boundingBox();
+console.log('panel box:', JSON.stringify(box));
+await page.keyboard.press('Escape');
+console.log('panel closed on Escape:', await page.locator('[data-sync-panel]').count() === 0);
+console.log('ERRORS:', errors);
+await browser.close();

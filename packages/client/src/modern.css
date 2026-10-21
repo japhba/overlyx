@@ -206,10 +206,6 @@ html[data-ui="modern"] .menubar-title .mt-project::before { content: ''; display
 html[data-ui="modern"] .menubar-title .save-state { font-size: 12px; color: var(--m-muted); white-space: nowrap; }
 html[data-ui="modern"] .menubar-title .save-state.saved { color: var(--m-muted); }
 html[data-ui="modern"] .menubar-title .save-state.offline { color: var(--warn-fg); background: var(--warn-bg); padding: 0 8px; border-radius: 4px; }
-/* in step with a copy elsewhere (SyncChip.tsx): blue, a live connection's colour */
-html[data-ui="modern"] .menubar-title .sync-chip { align-self: center; font-size: 12px; line-height: 20px; color: var(--m-blue); background: var(--m-blue-soft); border: 0; border-radius: 4px; padding: 0 8px; }
-html[data-ui="modern"] .menubar-title .sync-chip:hover { background: color-mix(in srgb, var(--m-blue) 18%, var(--m-ground)); }
-html[data-ui="modern"] .menubar-title :is(.sync-chip.error, .sync-chip.unlinked) { color: var(--warn-fg); background: var(--warn-bg); }
 html[data-ui="modern"] .menubar:has(> .menubar-title) .menubar-menus { grid-area: menus; display: flex; align-items: center; min-width: 0; }
 html[data-ui="modern"] .menubar-menus { display: flex; align-items: center; }
 html[data-ui="modern"] .menubar .menu > button { font: inherit; font-size: 13px; color: var(--m-ink2); padding: 2px 8px; border-radius: 4px; line-height: 20px; }
@@ -394,7 +390,11 @@ html[data-ui="modern"] .panel-tabs .toggle.on { color: var(--m-ink); border-bott
 
 /* ------------------------------------------------------------ the status bar: quiet, no duplicates of the toolbar */
 html[data-ui="modern"] .statusbar { height: 26px; background: var(--ui-bg); border-top: 1px solid var(--m-line2); font-size: 11.5px; padding: 0 14px; color: var(--m-muted); font-variant-numeric: tabular-nums; }
-html[data-ui="modern"] .statusbar .zoom, html[data-ui="modern"] .statusbar .save-state, html[data-ui="modern"] .statusbar .sync-chip { display: none; }
+html[data-ui="modern"] .statusbar .zoom, html[data-ui="modern"] .statusbar .save-state { display: none; }
+/* in step with a copy elsewhere (SyncChip.tsx): blue, a live connection's colour */
+html[data-ui="modern"] .statusbar .sync-chip { font-size: 11.5px; line-height: 18px; color: var(--m-blue); background: var(--m-blue-soft); border: 0; border-radius: 4px; padding: 0 8px; }
+html[data-ui="modern"] .statusbar .sync-chip:hover { background: color-mix(in srgb, var(--m-blue) 18%, var(--m-ground)); }
+html[data-ui="modern"] .statusbar :is(.sync-chip.error, .sync-chip.unlinked) { color: var(--warn-fg); background: var(--warn-bg); }
 html[data-ui="modern"] .statusbar .doclabel { color: var(--m-ink2); }
 html[data-ui="modern"] .statusbar .dot { width: 6px; height: 6px; }
 

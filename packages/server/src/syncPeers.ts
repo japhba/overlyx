@@ -19,7 +19,8 @@ import crypto from 'node:crypto';
 import type { Request } from 'express';
 import { verifyAccessToken } from './tokenAuth.ts';
 import { linkOf, publicLink, folderSyncsTabs } from './gdocs/sync.ts';
-import { lwLinkOf, publicLwLink } from './lesswrong/sync.ts';
+import { lwLinkOf, publicLwLink, type LwProgress } from './lesswrong/sync.ts';
+import { driveAccount } from './gdocs/google.ts';
 import type { SessionUser } from './auth.ts';
 
 /** a clone is shown this long after its last request (its next long poll follows within a second) */
@@ -120,11 +121,12 @@ export function clonesOf(project: string, viewer: SessionUser): ClonePeer[] {
 
 export interface ExternalSync {
   clones: ClonePeer[];
-  google: { url: string; auto: boolean; lastSync: number | null; lastError: string | null } | null;
+  /** `account`: the linker's Google Drive authorisation is there (without it nothing syncs until they connect again) */
+  google: { url: string; auto: boolean; lastSync: number | null; lastError: string | null; account: boolean; mine: boolean } | null;
   /** not linked, though the other documents of its folder sync with a Google Doc's tabs (File ▸ Google Docs offers the tab) */
   googleUnlinked?: boolean;
-  /** its LessWrong draft (only when linked) */
-  lesswrong?: { url: string; auto: boolean; lastSync: number | null; lastError: string | null };
+  /** its LessWrong draft (only when linked): `authUntil` the linker's authorisation (null: gone), `comments` both ways (the link-sharing key), `syncing` a sync under way */
+  lesswrong?: { url: string; title: string | null; auto: boolean; lastSync: number | null; lastError: string | null; authUntil: number | null; comments: boolean; mine: boolean; syncing: LwProgress | null };
 }
 
 /** Everything `docId` is kept in step with, for the web interface's sync chip. */
@@ -133,9 +135,9 @@ export function externalSyncOf(docId: string, project: string, viewer: SessionUs
   const w = publicLwLink(lwLinkOf(docId));
   return {
     clones: clonesOf(project, viewer),
-    google: l ? { url: l.url, auto: l.auto, lastSync: l.lastSync, lastError: l.lastError } : null,
+    google: l ? { url: l.url, auto: l.auto, lastSync: l.lastSync, lastError: l.lastError, account: !!driveAccount(l.linkedBy), mine: l.linkedBy === viewer.id } : null,
     ...(!l && folderSyncsTabs(docId) ? { googleUnlinked: true } : {}),
-    ...(w ? { lesswrong: { url: w.url, auto: w.auto, lastSync: w.lastSync, lastError: w.lastError } } : {}),
+    ...(w ? { lesswrong: { url: w.url, title: w.title, auto: w.auto, lastSync: w.lastSync, lastError: w.lastError, authUntil: w.authUntil, comments: w.comments, mine: w.linkedBy === viewer.id, syncing: w.syncing } } : {}),
   };
 }
 

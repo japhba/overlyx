@@ -8,9 +8,10 @@
  *                                      signed-in API (index.ts: LessWrong sends the browser back with a POST)
  *   POST /lesswrong/disconnect         forget (and revoke) the account's LessWrong authorisation
  *   POST /docs/<id>/lesswrong/link     { url, keep? } link the document to the draft the URL names
- *                                      (an edit URL with its link-sharing key, a post URL, an id)
+ *                                      (an edit URL with its link-sharing key, a post URL, an id); the first
+ *                                      sync runs on after the answer (the link's `syncing`)
  *   POST /docs/<id>/lesswrong/key      { url } the draft's link-sharing key (comment threads both ways); '' forgets it
- *   POST /docs/<id>/lesswrong/sync     sync now
+ *   POST /docs/<id>/lesswrong/sync     sync now (answers after 15 s at most, `report` null: still syncing — the link's `syncing`)
  *   POST /docs/<id>/lesswrong/unlink   stop syncing (the draft stays)
  *   POST /docs/<id>/lesswrong/auto     { auto: boolean } — sync on its own, or only on request
  */
@@ -86,7 +87,10 @@ export function lessWrongRoutes(): express.Router {
     try {
       const id = docIdOf(req);
       if (!lwLinkOf(id)) { res.status(404).json({ error: 'This document is not linked to a LessWrong draft' }); return; }
-      const report = await syncDoc(id);
+      // a long sync answers before it ends (proxies cut long requests): the dialog follows its progress
+      const sync = syncDoc(id);
+      const report = await Promise.race([sync, new Promise<null>(r => setTimeout(() => r(null), 15_000))]);
+      void sync.catch(e => console.warn(`[lesswrong] ${id}: sync failed: ${(e as Error).message.slice(0, 200)}`));
       res.json({ report, link: publicLwLink(lwLinkOf(id)) });
     } catch (e) { failure(res, e, `${docIdOf(req)}: sync failed`); }
   });

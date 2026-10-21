@@ -154,6 +154,10 @@ describe('the sync of a document', async () => {
     writeFileSync(file, '# Post\n\nThe first paragraph says something.\n\nThe second paragraph says more.\n\n- an item\n- another item\n');
     post = g.create('My post', '', KEY);
     await sync.linkPost(ID, owner.id, { postId: post, key: KEY });
+    // (the first sync runs on after linking)
+    expect(sync.publicLwLink(sync.lwLinkOf(ID))!.syncing).not.toBeNull();
+    await sync.lwSyncing(ID);
+    expect(sync.publicLwLink(sync.lwLinkOf(ID))!.syncing).toBeNull();
   });
   const text = () => readFileSync(file, 'utf8');
 
@@ -249,6 +253,7 @@ describe('a LaTeX document', async () => {
     const post = g.create('A Note');
     const owner = (await import('../packages/server/src/db.ts')).db.prepare("SELECT id FROM users WHERE username = 'u'").get() as { id: number };
     await sync.linkPost(ID, owner.id, { postId: post, key: null });
+    await sync.lwSyncing(ID);
     const md = g.markdown(post);
     expect(md).toContain('# Introduction');
     expect(md).toContain('We study $x^2$ here.');

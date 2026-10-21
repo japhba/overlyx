@@ -1715,7 +1715,6 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
             <span class="mt-name" title={docId}>{docPathOf(docId.replace(/^(text|pdf):/, '')).split('/').pop()}</span>
             <span class="mt-project">{curProject?.title ?? projectShortName(projectOfDoc(docId.replace(/^(text|pdf):/, '')))}</span>
             {isLyxDoc && <SaveIndicator save={save} />}
-            {syncChip}
           </>
         ) : undefined} />
       {user.guest && <GuestCallout user={user} project={curProject} google={google} onSignIn={signIn} />}

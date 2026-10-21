@@ -8,15 +8,39 @@
  * LessWrong, and with the draft's link-sharing key (its edit address after "Anyone with the link
  * can: Edit") LessWrong's comment threads come here too, replies both ways.
  */
-import { useEffect, useState } from 'preact/hooks';
-import { api, type LessWrongStatus } from '../api';
+import { useEffect, useRef, useState } from 'preact/hooks';
+import { api, type LessWrongStatus, type LessWrongLink } from '../api';
 import { Dialog } from './Dialogs';
+import './syncchip.css';
 
 const ago = (t: number | null) => {
   if (!t) return 'never';
   const s = Math.round((Date.now() - t) / 1000);
   return s < 60 ? 'just now' : s < 3600 ? `${Math.round(s / 60)} min ago` : new Date(t).toLocaleString();
 };
+
+const elapsed = (since: number) => { const s = Math.max(0, Math.round((Date.now() - since) / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+
+/** what a sync did, in words */
+function summary(r: { pulled: number; pushed: number; comments: { fromLessWrong: number; toLessWrong: number }; notes?: string[]; warnings: string[] | number }): string {
+  const n = (k: number, what: string) => (k ? `${k} ${what}${k === 1 ? '' : 's'}` : '');
+  const parts = [r.pulled ? `${r.pulled} characters changed on LessWrong` : '', n(r.pushed, 'edit') && n(r.pushed, 'edit') + ' sent', n(r.comments.fromLessWrong, 'comment') && n(r.comments.fromLessWrong, 'comment') + ' from LessWrong', n(r.comments.toLessWrong, 'comment') && n(r.comments.toLessWrong, 'comment') + ' sent', ...(r.notes ?? [])].filter(Boolean);
+  const warned = typeof r.warnings === 'number' ? r.warnings : r.warnings.length;
+  if (warned) return 'Synced with some changes left out' + (typeof r.warnings === 'number' ? ' (see File ▸ LessWrong)' : ': ' + r.warnings.join(' '));
+  return 'Synced with LessWrong' + (parts.length ? ': ' + parts.join(', ') : '');
+}
+
+/** a sync under way: what it is doing, how long it has taken, that it may take a while */
+function Progress({ link }: { link: LessWrongLink }) {
+  const p = link.syncing;
+  if (!p) return null;
+  return (
+    <div class="lw-progress" data-lw-progress>
+      <p><b>⟳ {p.phase}</b>{p.edits ? ` · ${p.edits} edit${p.edits === 1 ? '' : 's'} sent` : ''} · {elapsed(p.since)}</p>
+      <p class="hint">LessWrong takes one edit per call and the sync reads the draft again after each round, so the first sync of a long document can take a minute or two. You can close this dialog: it carries on, and the ⇄ chip in the status bar shows it.</p>
+    </div>
+  );
+}
 
 export function LessWrongDialog({ docId, onClose, notify }: { docId: string; onClose: () => void; notify: (t: string, k?: 'info' | 'error') => void }) {
   const [st, setSt] = useState<LessWrongStatus | null>(null);
@@ -27,6 +51,21 @@ export function LessWrongDialog({ docId, onClose, notify }: { docId: string; onC
   const [keep, setKeep] = useState<'ours' | 'merge'>('ours');
   const load = () => api.lwStatus(docId).then(setSt).catch(e => setError((e as Error).message));
   useEffect(() => { void load(); }, [docId]);
+  // while a sync runs (or the link is being made): its progress every second and a half
+  const syncing = !!st?.link?.syncing;
+  useEffect(() => {
+    if (!syncing && busy !== 'link') return;
+    const iv = setInterval(() => { void load(); }, 1500);
+    return () => clearInterval(iv);
+  }, [syncing, busy, docId]);
+  // a sync that ended after this dialog started waiting for it: say what it did
+  const waiting = useRef<number | null>(null);
+  useEffect(() => {
+    const r = st?.link?.lastReport;
+    if (waiting.current === null || syncing || !r || r.at < waiting.current) return;
+    waiting.current = null;
+    notify(st?.link?.lastError ? 'The LessWrong sync failed: ' + st.link.lastError : summary(r), st?.link?.lastError ? 'error' : 'info');
+  }, [st]);
   const act = async (what: string, fn: () => Promise<unknown>) => {
     setBusy(what); setError(null);
     try { await fn(); await load(); } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
@@ -55,9 +94,10 @@ export function LessWrongDialog({ docId, onClose, notify }: { docId: string; onC
               <label class="row"><input type="radio" name="lw-keep" checked={keep === 'merge'} data-lw-keep="merge" onChange={() => setKeep('merge')} /> What the draft holds differently comes in here as tracked changes</label>
             </div>
             <div class="buttons-row">
-              <button class="primary" data-lw-link disabled={!!busy || !url.trim()} onClick={() => act('link', async () => { await api.lwLink(docId, url.trim(), keep); notify('Linked to the LessWrong draft'); })}>{busy === 'link' ? 'Linking…' : 'Link'}</button>
+              <button class="primary" data-lw-link disabled={!!busy || !url.trim()} onClick={() => act('link', async () => { waiting.current = Date.now(); await api.lwLink(docId, url.trim(), keep); })}>{busy === 'link' ? 'Linking…' : 'Link'}</button>
               <a href="https://www.lesswrong.com/newPost" target="_blank" rel="noopener">New post on LessWrong ↗</a>
             </div>
+            {busy === 'link' && <p class="hint" data-lw-checking>⟳ Checking the draft on LessWrong (a few seconds)…</p>}
             <p class="hint">To have LessWrong's comments come here too, set the draft's sharing to “Anyone with the link can: Edit” and paste the edit address it then shows (with <code>&amp;key=…</code>).</p>
           </> : <p class="hint">You can only view this project.</p>
         )}
@@ -65,7 +105,8 @@ export function LessWrongDialog({ docId, onClose, notify }: { docId: string; onC
           <>
             <p><a href={link.url} target="_blank" rel="noopener" data-lw-open>{link.title ? `“${link.title}”` : 'The draft'} on LessWrong ↗</a>{link.draft === false ? ' (published: changes go to its editor; publish them there)' : ''}</p>
             <p class="hint">Last synced {ago(link.lastSync)}.{link.lastError ? '' : ' Edits made on LessWrong come back as edits (tracked while Suggesting).'}</p>
-            {link.lastError && <p class="error">Last sync failed: {link.lastError}</p>}
+            <Progress link={link} />
+            {link.lastError && !link.syncing && <p class="error">Last sync failed: {link.lastError}</p>}
             {link.warnings?.map(w => <p class="hint" data-lw-warning>{w}</p>)}
             <p class="hint">{link.comments ? 'Comment threads sync both ways; a thread resolved on LessWrong is resolved here (resolving here stays here: LessWrong’s API cannot).' : 'Comments written here go to LessWrong. For LessWrong’s comments to come here too, give the draft’s link-sharing address:'}</p>
             {st?.canEdit && !link.comments && (
@@ -76,12 +117,12 @@ export function LessWrongDialog({ docId, onClose, notify }: { docId: string; onC
             )}
             {st?.canEdit && (
               <div class="buttons-row">
-                <button class="primary" data-lw-sync disabled={!!busy} onClick={() => act('sync', async () => {
+                <button class="primary" data-lw-sync disabled={!!busy || !!link.syncing} onClick={() => act('sync', async () => {
+                  const started = Date.now();
                   const r = await api.lwSync(docId);
-                  const n = (k: number, what: string) => (k ? `${k} ${what}${k === 1 ? '' : 's'}` : '');
-                  const parts = [r.report.pulled ? `${r.report.pulled} characters changed on LessWrong` : '', n(r.report.pushed, 'edit') && n(r.report.pushed, 'edit') + ' sent', n(r.report.comments.fromLessWrong, 'comment') && n(r.report.comments.fromLessWrong, 'comment') + ' from LessWrong', n(r.report.comments.toLessWrong, 'comment') && n(r.report.comments.toLessWrong, 'comment') + ' sent', ...r.report.notes].filter(Boolean);
-                  notify(r.report.warnings.length ? 'Synced with some changes left out: ' + r.report.warnings.join(' ') : 'Synced with LessWrong' + (parts.length ? ': ' + parts.join(', ') : ''));
-                })}>{busy === 'sync' ? 'Syncing…' : 'Sync now'}</button>
+                  // (a long sync answers before it ends: its end is said when the dialog sees it)
+                  if (r.report) notify(summary(r.report)); else waiting.current = started;
+                })}>{busy === 'sync' || link.syncing ? 'Syncing…' : 'Sync now'}</button>
                 <label class="row"><input type="checkbox" checked={link.auto} disabled={!!busy} onChange={e => act('auto', () => api.lwAuto(docId, (e.target as HTMLInputElement).checked))} /> Sync automatically</label>
                 <button disabled={!!busy} onClick={() => act('unlink', async () => { await api.lwUnlink(docId); notify('No longer synced with LessWrong (the draft stays)'); })}>Unlink</button>
               </div>

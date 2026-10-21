@@ -1,0 +1,27 @@
+/* the ⇄ chip's panel (SyncChip.tsx): each connection's state, above the status bar */
+.statusbar > span.sync-chip-box, .sync-chip-box { position: relative; display: inline-flex; flex: none; overflow: visible; }
+.sync-chip.busy .sync-glyph { display: inline-block; animation: sync-turn 1.6s linear infinite; }
+@keyframes sync-turn { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .sync-chip.busy .sync-glyph { animation: none; } }
+.sync-panel {
+  position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 1000; width: min(440px, calc(100vw - 32px));
+  max-height: 70vh; overflow: auto; padding: 4px 0; text-align: left; white-space: normal;
+  font-size: 12.5px; line-height: 1.45; color: var(--ui-fg); background: var(--surface);
+  border: 1px solid var(--ui-border); border-radius: 6px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+}
+.sync-panel section { padding: 8px 12px; }
+.sync-panel section + section { border-top: 1px solid var(--ui-border); }
+.sync-panel header { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
+.sync-panel header a { font-size: 12px; white-space: nowrap; }
+.sync-line { display: flex; gap: 6px; align-items: baseline; margin: 2px 0; }
+.sync-line .sync-mark { flex: none; width: 1em; text-align: center; font-weight: 600; }
+.sync-line.ok .sync-mark { color: #2f855a; }
+.sync-line.warn { color: var(--warn-fg); }
+.sync-line.busy .sync-mark { color: var(--accent); }
+.sync-line.info { color: var(--ui-muted); }
+.sync-actions { margin-top: 6px; }
+.sync-actions button { font: inherit; font-size: 12px; }
+/* File ▸ LessWrong's progress of a sync under way (LessWrong.tsx) */
+.lw-progress { padding: 8px 10px; border: 1px solid var(--ui-border); border-radius: 4px; background: var(--ui-bg); }
+.lw-progress p { margin: 0; }
+.lw-progress p + p { margin-top: 4px; }

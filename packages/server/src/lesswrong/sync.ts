@@ -29,7 +29,7 @@ import { manager, type OpenDoc } from '../docs.ts';
 import { sealer } from '../sealed.ts';
 import { threadsOf, placeThread, quoteFor, threadParagraphs, msgSig, linkerMayEdit, documentExists, isTracking, changedChars, type ThreadRef } from '../gdocs/sync.ts';
 import { projectDocument, readBlocks, withoutSuggestions, withLessWrongChanges, planPush, settle, opKey, normText, type Equivalences, type LwBlock, type LwOp } from './model.ts';
-import { lessWrongApi, LessWrongAuthError, LW_URL, type LessWrongApi, type LwThread } from './api.ts';
+import { lessWrongApi, lessWrongAccount, LessWrongAuthError, LW_URL, type LessWrongApi, type LwThread } from './api.ts';
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS lesswrong_links (
@@ -66,13 +66,33 @@ export function lwLinkOf(docId: string): LwLinkRow | null {
 
 export function publicLwLink(l: LwLinkRow | null) {
   if (!l) return null;
+  const acc = lessWrongAccount(l.user_id);
+  const done = lastReports.get(l.doc_id);
   return {
     postId: l.post_id, title: l.title, draft: l.draft === null ? null : !!l.draft,
     url: `${LW_URL}/editPost?postId=${encodeURIComponent(l.post_id)}`,
     comments: !!l.link_key, auto: !!l.auto, lastSync: l.last_sync, lastError: l.last_error, linkedBy: l.user_id,
     warnings: l.last_warnings ? JSON.parse(l.last_warnings) as string[] : [],
+    /** the linker's LessWrong authorisation: until when (null: gone — they must connect again) */
+    authUntil: acc?.expiresAt ?? null,
+    /** a sync under way: what it is doing */
+    syncing: progress.get(l.doc_id) ?? null,
+    /** what the last sync of this server's run did (the dialog says it when a background sync ends) */
+    lastReport: done ? { at: done.at, pulled: done.pulled, pushed: done.pushed, comments: done.comments, warnings: done.warnings.length } : null,
   };
 }
+
+/** a sync under way, by document: its phase, the edits sent so far, since when (the dialog and the ⇄ chip show it) */
+export interface LwProgress { phase: string; edits: number; round: number; since: number }
+const progress = new Map<string, LwProgress>();
+const lastReports = new Map<string, LwSyncReport & { at: number }>();
+const phase = (docId: string, what: string, more: Partial<LwProgress> = {}) => {
+  const p = progress.get(docId);
+  progress.set(docId, { edits: 0, round: 0, since: Date.now(), ...p, phase: what, ...more });
+};
+
+/** the sync running now (linking starts one and does not wait for it) */
+export function lwSyncing(docId: string): Promise<LwSyncReport> | null { return running.get(docId) ?? null; }
 
 /** the API a link syncs with (tests put a simulation here) */
 let apiFor: (userId: number) => LessWrongApi = lessWrongApi;
@@ -100,6 +120,7 @@ export async function linkPost(docId: string, userId: number, ref: { postId: str
   const post = await api.readPost(ref.postId, ref.key);
   // the link-sharing routes say whether the draft is in the editor the agent API works with
   if (ref.key) await api.readThreads(ref.postId, ref.key);
+  if (lwLinkOf(docId)) return lwLinkOf(docId)!;   // (linked meanwhile: a second click)
   const doc = await manager.open(docId);
   const ours = doc.toLyxDocument();
   const proj = projectDocument(ours);
@@ -110,7 +131,9 @@ export async function linkPost(docId: string, userId: number, ref: { postId: str
   const baseLw = theirsEmpty || oursEmpty ? '' : keep === 'ours' ? lw : proj.markdown;
   db.prepare(`INSERT INTO lesswrong_links (doc_id, post_id, link_key, user_id, title, draft, base_text, base_lw, auto, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`)
     .run(docId, ref.postId, ref.key ? seal(ref.key) : null, userId, post.title || null, post.draft === null ? null : post.draft ? 1 : 0, doc.textOf(ours), baseLw, Date.now());
-  await syncDoc(docId, { pullTracked: keep === 'merge' && !theirsEmpty && !oursEmpty });
+  // the first sync can take a while (LessWrong takes one edit per call): it runs on, the dialog shows its progress
+  phase(docId, 'Starting');
+  void syncDoc(docId, { pullTracked: keep === 'merge' && !theirsEmpty && !oursEmpty }).catch(() => undefined);
   return lwLinkOf(docId)!;
 }
 
@@ -162,6 +185,7 @@ async function runSync(docId: string, opts: { pullTracked?: boolean }): Promise<
   const report: LwSyncReport = { pulled: 0, pushed: 0, rounds: 0, comments: { fromLessWrong: 0, toLessWrong: 0 }, warnings: [], notes: [] };
   const warnings = new Set<string>();
   try {
+    phase(docId, 'Reading the draft on LessWrong', { since: Date.now(), edits: 0, round: 0 });
     const doc = await manager.open(docId);
     let post = await api.readPost(link.post_id, key);
     const read = () => { const w = withoutSuggestions(post.markdown); return { text: w.text, suggestions: w.count, blocks: readBlocks(w.text).blocks }; };
@@ -177,6 +201,7 @@ async function runSync(docId: string, opts: { pullTracked?: boolean }): Promise<
         const theirs = withLessWrongChanges(baseDoc, projectDocument(baseDoc).blocks, baseLw, lw.blocks, equiv);
         const after = theirs ? doc.textOf(theirs) : link.base_text;
         if (after !== link.base_text) {
+          phase(docId, 'Bringing in edits made on LessWrong');
           const tracking = isTracking(doc.getMeta().headerLines);
           const r = await doc.agentEdit(tracking || opts.pullTracked ? 'tracked' : 'plain', link.base_text, { after }, { author: 'LessWrong' });
           report.pulled = 'inserted' in r.result ? r.result.inserted + r.result.deleted : changedChars(link.base_text, after);
@@ -204,10 +229,11 @@ async function runSync(docId: string, opts: { pullTracked?: boolean }): Promise<
       const sig = ops.map(opKey).join('\n');
       if (sig === last) { for (const o of ops) skip.add(opKey(o)); continue; }
       last = sig;
+      phase(docId, `Writing into the draft (round ${report.rounds + 1}: ${ops.length} ${ops[0].op === 'delete' ? 'removals' : ops[0].op === 'replace' ? 'word changes' : 'insertions'})`, { round: report.rounds + 1 });
       for (const op of ops) {
         try {
           const r = await apply(api, link.post_id, key, op, agentName);
-          if (r.ok) report.pushed++;
+          if (r.ok) { report.pushed++; phase(docId, progress.get(docId)?.phase ?? '', { edits: report.pushed }); }
           else { skip.add(opKey(op)); warnings.add(`LessWrong did not take an edit (“${op.what}”): ${r.note}`); }
         } catch (e) {
           if (e instanceof LessWrongAuthError) throw e;
@@ -215,6 +241,7 @@ async function runSync(docId: string, opts: { pullTracked?: boolean }): Promise<
           warnings.add(`LessWrong did not take an edit (“${op.what}”): ${(e as Error).message}`);
         }
       }
+      phase(docId, 'Reading the draft again');
       post = await api.readPost(link.post_id, key);
       lw = read();
       changed = true;
@@ -225,6 +252,7 @@ async function runSync(docId: string, opts: { pullTracked?: boolean }): Promise<
     if (lw.suggestions) report.notes.push('the draft has open suggestions on LessWrong: they come here once accepted there');
 
     // 3. comment threads (with the link-sharing key: both ways)
+    phase(docId, 'Comment threads');
     const before = doc.toLyxDocument();
     const { doc: withComments, changed: threadsChanged } = await syncComments(api, link, key, before, report, warnings);
     if (threadsChanged) await doc.agentEdit('plain', doc.textOf(before), { after: doc.textOf(withComments) });
@@ -233,10 +261,14 @@ async function runSync(docId: string, opts: { pullTracked?: boolean }): Promise<
     report.warnings = [...warnings];
     db.prepare(`UPDATE lesswrong_links SET base_text = ?, base_lw = ?, equiv = ?, comments = ?, title = ?, draft = ?, last_sync = ?, last_error = NULL, last_warnings = ?${changed || threadsChanged ? ', last_change = ?' : ''} WHERE doc_id = ?`)
       .run(doc.textOf(doc.toLyxDocument()), lw.text, JSON.stringify(equiv), link.comments, post.title || link.title, post.draft === null ? link.draft : post.draft ? 1 : 0, Date.now(), JSON.stringify(report.warnings), ...(changed || threadsChanged ? [Date.now()] : []), docId);
+    lastReports.set(docId, { ...report, at: Date.now() });
     return report;
   } catch (e) {
     db.prepare('UPDATE lesswrong_links SET last_error = ?, last_sync = ? WHERE doc_id = ?').run((e as Error).message, Date.now(), docId);
+    lastReports.set(docId, { ...report, at: Date.now() });
     throw e;
+  } finally {
+    progress.delete(docId);
   }
 }
 
