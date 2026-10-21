@@ -124,11 +124,52 @@ MathML alone <math><mi>y</mi></math>.</p>
 </body></html>`;
     const { doc } = parseArticle(page);
     expect(doc.body.map(plain)).toEqual([
-      '[ERT]', '[ERT]',
+      // (the nav and the header side by side: one block)
+      '[ERT]',
       'KaTeX [$x^2$], MathJax 2 [$a+b$], Distill [$\\alpha$], pandoc [$\\beta$], Wikipedia [$\\gamma$], MathML alone [ERT].',
       '[\\[\\sum_i x_i\\]]', '[ERT]',
     ]);
     expect(writeArticlePreserving(doc, page).text).toBe(page);
+  });
+
+  it('writes an unchanged formula as the page rendered it, a new one as MathML where the page renders math ahead of time', () => {
+    const katex = (tex: string) => `<span class="katex"><span class="katex-mathml"><math><semantics><mi>${tex}</mi><annotation encoding="application/x-tex">${tex}</annotation></semantics></math></span><span class="katex-html">${tex}</span></span>`;
+    const page = `<!doctype html><html><head><meta name="overlyx" content="article"></head><body><article>\n<p>One ${katex('x')} and ${katex('y')}.</p>\n</article></body></html>`;
+    const parsed = parseArticle(page);
+    expect(parsed.math.ahead).toBe(true);
+    const body = structuredClone(parsed.doc.body);
+    body[0].items.push(text(' More '), { kind: 'inset', inset: { type: 'Formula', inline: true, latex: '$z$' }, font: {} });
+    const mathml = (tex: string) => `<math><semantics><mi>${tex}</mi><annotation encoding="application/x-tex">${tex}</annotation></semantics></math>`;
+    const out = writeArticlePreserving(with_(parsed.doc, body), page, {}, { mathml }).text;
+    expect(out).toContain(`One ${katex('x')} and ${katex('y')}. More ${mathml('z')}</p>`);
+    expect(parseArticle(out).doc.body.map(plain)).toEqual(['One [$x$] and [$y$]. More [$z$]']);
+    // a page that typesets TeX itself (or OverLyX's runtime does): TeX
+    const typesets = page.replace('</head>', '<script src="https://cdn.jsdelivr.net/npm/katex/dist/contrib/auto-render.min.js"></script></head>');
+    const p2 = parseArticle(typesets);
+    expect(p2.math.ahead).toBe(false);
+    expect(writeArticlePreserving(with_(p2.doc, body), typesets, {}, { mathml }).text).toContain('More \\(z\\)</p>');
+  });
+
+  it('takes the page\'s main part when its <article>s are cards; joins HTML blocks side by side; leaves tables it cannot rewrite whole', () => {
+    const page = `<!doctype html><html><head><meta name="overlyx" content="article"></head><body><main>
+<h1>Title</h1>
+<p>Intro.</p>
+<article class="card"><p>Card one.</p></article>
+<article class="card"><p>Card two.</p></article>
+<div class="controls"><button id="go">Go</button></div>
+<!-- the chart -->
+<div class="chart"><svg id="c"></svg></div>
+<details><summary>More</summary><p>Hidden prose.</p></details>
+<table><tr><th>A</th><th>B</th></tr><tr><td class="num">1</td><td>2</td></tr></table>
+<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>
+</main></body></html>`;
+    const { doc } = parseArticle(page);
+    expect(doc.body.map(plain)).toEqual(['Title', 'Intro.', 'Card one.', 'Card two.', '[ERT]', 'More', 'Hidden prose.', '[ERT]', '[]']);
+    expect(rawSource(htmlBlockOf(doc.body[4])!)).toBe('<div class="controls"><button id="go">Go</button></div>\n<!-- the chart -->\n<div class="chart"><svg id="c"></svg></div>');
+    expect(writeArticlePreserving(doc, page).text).toBe(page);
+    const edited = structuredClone(doc.body);
+    edited[5].items = [text('More detail')];
+    expect(writeArticlePreserving(with_(doc, edited), page).text).toBe(page.replace('<summary>More</summary>', '<summary>More detail</summary>'));
   });
 
   it('makes any page an article by its meta tag', () => {

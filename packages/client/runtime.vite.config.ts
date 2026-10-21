@@ -43,15 +43,31 @@ function mathjax(): Plugin {
   };
 }
 
+/**
+ * The whole file in a scope of its own: esbuild puts its helpers before the bundle's function, as
+ * globals of the page — whose own script may use the same names (`let W` failed: "already declared").
+ */
+function enclosed(): Plugin {
+  return {
+    name: 'overlyx-runtime-enclosed',
+    apply: 'build',
+    generateBundle(_opts, bundle) {
+      for (const c of Object.values(bundle)) if (c.type === 'chunk') c.code = `(function(){${c.code}\n})();\n`;
+    },
+  };
+}
+
 export default defineConfig({
   publicDir: false,
-  plugins: [mathjax()],
+  plugins: [mathjax(), enclosed()],
   resolve: { alias: { '@overlyx/core': path.resolve(__dirname, '../core/src') } },
   build: {
     outDir: OUT,
     emptyOutDir: true,
     sourcemap: false,
     minify: true,
+    // (class fields as they are, not through helpers)
+    target: 'es2022',
     lib: {
       entry: path.resolve(__dirname, 'src/deliverable/runtime/index.ts'),
       formats: ['iife'],

@@ -13,6 +13,7 @@ import { markEditedSettings } from '@overlyx/core/tex/preamble.ts';
 import type { LocalFont } from '@overlyx/core/md/typesetting.ts';
 import { parseMarkdown, writeMarkdown, writeMarkdownPreserving, isMarkdownPath, markdownForLatex, type MarkdownPreserveCache } from '@overlyx/core/md/index.ts';
 import { parseArticle, writeArticle, writeArticlePreserving, type ArticlePreserveCache } from '@overlyx/core/html/article.ts';
+import { texToMathML } from './mathml.ts';
 import { isHtmlPath } from '@overlyx/core/html/deliverable.ts';
 import { config } from './config.ts';
 import { projectDir, findMaster, resolveProjectPath } from './projectfiles.ts';
@@ -93,7 +94,7 @@ export function writeDocumentText(doc: LyxDocument, project: string, relPath: st
   if (isHtmlPath(relPath)) {
     let cache: ArticlePreserveCache | undefined;
     if (preserve?.cache) { cache = articleCaches.get(preserve.cache); if (!cache) articleCaches.set(preserve.cache, cache = {}); }
-    const r = preserve ? writeArticlePreserving(doc, preserve.base, cache) : writeArticle(doc);
+    const r = preserve ? writeArticlePreserving(doc, preserve.base, cache, { mathml: texToMathML }) : writeArticle(doc);
     return { text: r.text, warnings: r.warnings, files: {}, spans: r.spans };
   }
   const abs = resolveProjectPath(project, relPath);

@@ -26,20 +26,51 @@ function labelOf(el: Element): string {
 
 const round = (n: number) => Math.round(n);
 
+/** math another tool typeset (KaTeX, MathJax's own, MathML): a formula, measured as one — not its parts as text */
+const OTHER_MATH = '.katex, .MathJax, .MathJax_Display, .MathJax_Preview, mjx-assistive-mml, math';
+/** text that shows nothing (zero-width spaces, joiners: the struts of typeset math) */
+const INVISIBLE = /^[\s\u200b-\u200d\u2060\ufeff]*$/;
+const forScreenReaders = new Map<Element, boolean>();
+/**
+ * In a box of a pixel or less that hides what overflows it (or clips it): there for screen readers
+ * only — KaTeX's copy of a formula as MathML, `.sr-only` / `.visually-hidden` text.
+ */
+function screenReaderOnly(el: Element | null): boolean {
+  if (!el || el === document.body || el === document.documentElement) return false;
+  let v = forScreenReaders.get(el);
+  if (v === undefined) {
+    const r = el.getBoundingClientRect();
+    let hidden = false;
+    if (r.width <= 1 || r.height <= 1) {
+      const c = getComputedStyle(el);
+      hidden = c.overflow !== 'visible' || c.clip !== 'auto' || c.clipPath !== 'none';
+    }
+    v = hidden || screenReaderOnly(el.parentElement);
+    forScreenReaders.set(el, v);
+  }
+  return v;
+}
+/** text to check: shown, and the page's own (not a formula's inside) */
+const skipText = (p: Element) => screenReaderOnly(p) || !!p.closest(OTHER_MATH);
+
 /** the rects of an element's text (each line of each text node) */
 function textRects(el: Element, limit = 300): DOMRect[] {
   const out: DOMRect[] = [];
   const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
   const r = document.createRange();
   for (let n = w.nextNode(); n && out.length < limit; n = w.nextNode()) {
-    if (!(n.nodeValue ?? '').trim()) continue;
+    if (INVISIBLE.test(n.nodeValue ?? '')) continue;
     const p = n.parentElement;
-    if (!p || isForeign(p) || p.closest('[data-ol-runtime], .notes, script, style')) continue;
+    if (!p || isForeign(p) || p.closest('[data-ol-runtime], .notes, script, style') || skipText(p)) continue;
     r.selectNodeContents(n);
     for (const x of Array.from(r.getClientRects())) if (x.width > 0.5 && x.height > 0.5) out.push(x);
   }
   // typeset formulas count as text
-  for (const m of Array.from(el.querySelectorAll('mjx-container'))) { const x = m.getBoundingClientRect(); if (x.width > 0.5) out.push(x); }
+  for (const m of Array.from(el.querySelectorAll(`mjx-container, ${OTHER_MATH}`))) {
+    if (m.parentElement?.closest(`mjx-container, ${OTHER_MATH}`) || screenReaderOnly(m)) continue;
+    const x = m.getBoundingClientRect();
+    if (x.width > 0.5) out.push(x);
+  }
   return out;
 }
 
@@ -88,7 +119,7 @@ function checkScope(scope: Element, frame: DOMRect, kind: 'deck' | 'poster' | 'p
   // (in the document's coordinates: the contrast check scrolls the page)
   const fx = frame.left + scrollX, fy = frame.top + scrollY;
   const rel = (r: DOMRect) => ({ x: round(r.left + scrollX - fx), y: round(r.top + scrollY - fy), w: round(r.width), h: round(r.height) });
-  const all = Array.from(scope.querySelectorAll('*')).filter(e => !isForeign(e) && !e.closest('[data-ol-runtime], .notes, mjx-container, script, style, template, svg, head'));
+  const all = Array.from(scope.querySelectorAll('*')).filter(e => !isForeign(e) && !e.closest('[data-ol-runtime], .notes, mjx-container, script, style, template, svg, head') && !skipText(e));
 
   // text overflowing its box: a box whose content needs more room than it was given (measured by
   // letting it take its natural size for a moment — glyphs reaching past a line box are no overflow)
@@ -165,9 +196,9 @@ function checkScope(scope: Element, frame: DOMRect, kind: 'deck' | 'poster' | 'p
   const seenSmall = new Set<Element>(), seenContrast = new Set<Element>();
   const w = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
   for (let n = w.nextNode(); n; n = w.nextNode()) {
-    if (!(n.nodeValue ?? '').trim()) continue;
+    if (INVISIBLE.test(n.nodeValue ?? '')) continue;
     const p = n.parentElement;
-    if (!p || p.closest('[data-ol-runtime], .notes, mjx-container, script, style, template, head') || isForeign(p)) continue;
+    if (!p || p.closest('[data-ol-runtime], .notes, mjx-container, script, style, template, head') || isForeign(p) || skipText(p)) continue;
     const c = getComputedStyle(p);
     if (c.visibility === 'hidden' || c.display === 'none' || !(p as HTMLElement).offsetParent && c.position !== 'fixed') continue;
     const fs = parseFloat(c.fontSize);
@@ -213,7 +244,7 @@ function checkScope(scope: Element, frame: DOMRect, kind: 'deck' | 'poster' | 'p
     for (let n = tw.nextNode(); n && n2 < 6; n = tw.nextNode()) {
       const v = n.nodeValue ?? '';
       const p = n.parentElement;
-      if (!p || p.closest('script, style, code, pre, textarea, [data-ol-runtime], .ol-notex, .notes')) continue;
+      if (!p || p.closest('script, style, code, pre, textarea, [data-ol-runtime], .ol-notex, .notes') || skipText(p)) continue;
       const m = /\\\(|\\\[|\$\$/.exec(v);
       if (!m) continue;
       n2++;
@@ -236,6 +267,7 @@ export function report(): { kind: 'deck' | 'poster' | 'page'; width: number; hei
 }
 
 function reportAll(): { kind: 'deck' | 'poster' | 'page'; width: number; height: number; pages: PageReport[]; errors: string[] } {
+  forScreenReaders.clear();
   const kind = state.kind;
   const ss = slides();
   if (kind === 'page' || !ss.length) {

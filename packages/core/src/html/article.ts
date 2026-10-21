@@ -141,6 +141,8 @@ export interface ParseArticleResult {
   /** the article's content in the text (between its start and end tags) */
   region: { start: number; end: number };
   warnings: string[];
+  /** the page's math: the source of each formula another tool rendered (by its LaTeX), and whether the page shows its math only so — rendered ahead of time, nothing on it typesets TeX */
+  math: { sources: Map<string, string>; ahead: boolean };
 }
 
 type Loc = { startOffset: number; endOffset: number; startTag?: { startOffset: number; endOffset: number }; endTag?: { startOffset: number; endOffset: number } };
@@ -157,17 +159,37 @@ function articleRoot(doc: HDocument): HElement | null {
   const body = html ? elementChildren(html).find(e => e.tagName === 'body') ?? null : null;
   if (!body) return null;
   let main: HElement | null = null;
+  const articles: HElement[] = [];
   for (const el of walk(body)) {
-    if (el.tagName === 'article') return el;
+    if (el.tagName === 'article' && !articles.some(a => within(el, a))) articles.push(el);
     if (!main && el.tagName === 'main') main = el;
   }
+  // one <article> holding most of the page's text is the post; several are cards of a page, or one
+  // little one a box of it: then the page's main part is the prose
+  const scope = main && articles.length === 1 && within(articles[0], main) ? main : body;
+  if (articles.length === 1 && proseLength(articles[0]) * 2 >= proseLength(scope)) return articles[0];
   return main ?? body;
+}
+
+const within = (el: HElement, outer: HElement): boolean => {
+  for (let p = el.parentNode as HElement | null; p; p = p.parentNode as HElement | null) if (p === outer) return true;
+  return false;
+};
+
+/** how much text an element shows (no scripts, styles, data) */
+function proseLength(el: HElement): number {
+  let n = 0;
+  for (const c of el.childNodes as HNode[]) {
+    if (isText(c)) n += c.value.trim().length;
+    else if (isElement(c) && !/^(script|style|template|noscript)$/.test(c.tagName)) n += proseLength(c);
+  }
+  return n;
 }
 
 /** text-level elements: they continue a run of inline content (a loose paragraph) */
 const RUN_TAGS = new Set(['a', 'abbr', 'b', 'bdi', 'bdo', 'br', 'cite', 'code', 'data', 'dfn', 'em', 'i', 'kbd', 'mark', 'q', 's', 'samp', 'small', 'span', 'strong', 'sub', 'sup', 'time', 'u', 'var', 'wbr', 'del', 'ins', 'img', 'label', 'strike', 'tt', 'font']);
 /** containers whose prose is the document's (unless they hold a widget of their own) */
-const CONTAINERS = new Set(['section', 'div', 'header', 'footer', 'main', 'article', 'aside', 'hgroup', 'address', 'center']);
+const CONTAINERS = new Set(['section', 'div', 'header', 'footer', 'main', 'article', 'aside', 'hgroup', 'address', 'center', 'details']);
 /** a page's chrome around its prose: no prose of its own where the page has no <article> or <main> */
 const CHROME = new Set(['header', 'footer', 'aside']);
 /** a container with one of these as a child is a widget: shown running, kept whole */
@@ -283,6 +305,9 @@ class Converter {
   cur = -1;
   /** the prose is the whole <body> (no <article> or <main>): its header, footer and sidebar are the page's chrome */
   wholePage = false;
+  /** formulas another tool rendered: their source by LaTeX; and how many were TeX in the text */
+  mathSources = new Map<string, string>();
+  texInText = 0;
   constructor(private text: string) {}
 
   par(layout: string, depth: number, items: Item[], span: { start: number; end: number } | null, params: Paragraph['params'] = {}): void {
@@ -318,13 +343,41 @@ class Converter {
       if (content.length && !content.every(isComment)) this.looseRun(run);
       run = [];
     };
+    // the HTML block the element before made (nothing but white space and comments since)
+    let block = -1;
     for (const n of nodes) {
-      if (isElement(n) && !RUN_TAGS.has(n.tagName)) { flush(); this.flowBlock(n); continue; }
+      if (isElement(n) && !RUN_TAGS.has(n.tagName)) {
+        flush();
+        const u = this.units.length, p = this.pars.length;
+        this.flowBlock(n);
+        const made = this.units.length === u + 1 && this.pars.length === p + 1 && !!htmlBlockOf(this.pars[p]);
+        block = made && block >= 0 ? this.joinBlocks(block) : made ? p : -1;
+        continue;
+      }
       // a comment between blocks stays in the markup between them
       if (isComment(n) && run.every(blank)) { run = []; continue; }
       run.push(n);
+      if (!blank(n)) block = -1;
     }
     flush();
+  }
+
+  /**
+   * HTML blocks side by side are one: a figure's controls and what they draw into are often
+   * neighbours, and they work together only in one frame (the editor runs each block in its own).
+   * The block of paragraph `p` takes in the one just made; returns `p`.
+   */
+  joinBlocks(p: number): number {
+    const last = this.pars.length - 1, a = this.parUnit[p], b = this.parUnit[last];
+    const ua = this.units[a], ub = this.units[b];
+    if (b !== this.units.length - 1 || a !== b - 1) return last;
+    this.units[a] = { start: ua.start, end: ub.end, tag: '' };
+    this.units.pop();
+    this.pars.pop(); this.parUnit.pop(); this.parSpans.pop();
+    this.cur = a;
+    this.pars[p] = { ...this.pars[p], items: [{ kind: 'inset', inset: raw(this.text.slice(ua.start, ub.end)), font: {} }] };
+    this.parSpans[p] = { start: ua.start, end: ub.end };
+    return p;
   }
 
   flowBlock(el: HElement): void {
@@ -378,7 +431,7 @@ class Converter {
     if (isMathJax2Output(el)) return;
     // a displayed formula another tool rendered, its TeX in the page
     const math = renderedMath(el);
-    if (math) { this.insetPar(ctx, mathFormula({ ...math, display: true }), span); return; }
+    if (math) { this.insetPar(ctx, this.rendered(mathFormula({ ...math, display: true }), el), span); return; }
     if (HEADING_OF_TAG[tag]) { this.par(ctx.quote ? 'Quote' : HEADING_OF_TAG[tag], ctx.depth, this.inline(kids), span); return; }
     switch (tag) {
       case 'p': {
@@ -386,6 +439,8 @@ class Converter {
         this.par(layout, ctx.depth, this.inline(kids), span);
         return;
       }
+      // a <details>' line: a paragraph (written back into its own tags)
+      case 'summary': this.par(ctx.quote ? 'Quote' : 'Standard', ctx.depth, this.inline(kids), span); return;
       case 'ul': case 'ol': this.list(el, ctx); return;
       case 'blockquote': this.nested(kids, { ...ctx, quote: true }); return;
       case 'pre': this.insetPar(ctx, this.pre(el), span); return;
@@ -457,17 +512,23 @@ class Converter {
     return { type: 'Text', name: 'Float', arg: 'figure', params: [`wide ${wide}`, 'sideways false'], status: 'open', paragraphs };
   }
 
-  /** a table without merged cells or blocks in its cells (else an HTML block) */
+  /**
+   * a table without merged cells or blocks in its cells, and nothing on its rows and cells a
+   * rewrite would lose — classes, ids, column widths (else an HTML block)
+   */
   table(el: HElement): TabularInset | null {
     const rows: HElement[] = [];
+    const plain = (e: HElement) => e.attrs.every(a => a.name === 'align' || a.name === 'scope' || (a.name === 'style' && /^\s*text-align\s*:\s*(left|right|center)\s*;?\s*$/i.test(a.value)));
     for (const c of elementChildren(el)) {
       if (c.tagName === 'tr') rows.push(c);
-      else if (c.tagName === 'thead' || c.tagName === 'tbody' || c.tagName === 'tfoot') rows.push(...elementChildren(c).filter(r => r.tagName === 'tr'));
-      else if (c.tagName !== 'colgroup') return null;
+      else if ((c.tagName === 'thead' || c.tagName === 'tbody' || c.tagName === 'tfoot') && plain(c)) rows.push(...elementChildren(c).filter(r => r.tagName === 'tr'));
+      else return null;
     }
-    if (!rows.length) return null;
+    if (!rows.length || !rows.every(plain)) return null;
     const cells = rows.map(r => elementChildren(r).filter(c => c.tagName === 'td' || c.tagName === 'th'));
+    if (rows.some((r, i) => elementChildren(r).length !== cells[i].length)) return null;
     for (const r of cells) for (const c of r) {
+      if (!plain(c)) return null;
       if (Number(attr(c, 'rowspan') ?? 1) > 1 || Number(attr(c, 'colspan') ?? 1) > 1) return null;
       if ((c.childNodes as HNode[]).some(k => isElement(k) && !isRunNode(k) && k.tagName !== 'p')) return null;
     }
@@ -530,6 +591,13 @@ class Converter {
     st.fonts.pop();
   }
 
+  /** a formula another tool rendered: its rendering remembered (written again where the formula is unchanged) */
+  rendered(f: Inset, el: HElement): Inset {
+    const loc = locOf(el);
+    if (loc && f.type === 'Formula' && !this.mathSources.has(f.latex)) this.mathSources.set(f.latex, this.text.slice(loc.startOffset, loc.endOffset));
+    return f;
+  }
+
   /** an element kept as its source (a whole one, or its start and end tags around its content) */
   rawInto(el: HElement, items: Item[], st: InlineState): void {
     const loc = locOf(el);
@@ -549,7 +617,7 @@ class Converter {
     // math another tool rendered: a formula when its TeX is in the page, else kept whole (shown rendered)
     if (isMathJax2Output(el)) return;
     const math = renderedMath(el);
-    if (math) { this.add(items, { kind: 'inset', inset: mathFormula(math), font: this.font(st) }, st); return; }
+    if (math) { this.add(items, { kind: 'inset', inset: this.rendered(mathFormula(math), el), font: this.font(st) }, st); return; }
     if (math === null) { const loc = locOf(el); if (loc) this.add(items, { kind: 'inset', inset: raw(this.text.slice(loc.startOffset, loc.endOffset)), font: this.font(st) }, st); return; }
     switch (tag) {
       case 'em': case 'i': this.withFont(el, 'emph', 'on', items, st); return;
@@ -629,6 +697,7 @@ class Converter {
       addText(value.slice(last, m.index));
       last = m.index! + m[0].length;
       let inset: Inset;
+      if (m[1] !== undefined || m[2] !== undefined || m[3] !== undefined || m[4] !== undefined) this.texInText++;
       if (m[1] !== undefined) inset = { type: 'Formula', inline: true, latex: '$' + m[1].trim() + '$' };
       else if (m[2] !== undefined) inset = { type: 'Formula', inline: false, latex: '\\[' + m[2].trim() + '\\]' };
       else if (m[3] !== undefined) inset = { type: 'Formula', inline: false, latex: '\\[' + m[3].trim() + '\\]' };
@@ -715,8 +784,12 @@ export function parseArticle(text: string): ParseArticleResult {
   return {
     doc: { preamble: text.slice(0, region.start).split('\n'), format: 643, header, body: conv.pars, trailer: text.slice(region.end).split('\n') },
     units: conv.units, parUnit: conv.parUnit, parSpans: conv.parSpans, region, warnings: conv.warnings,
+    math: { sources: conv.mathSources, ahead: conv.mathSources.size > 0 && !conv.texInText && !TYPESETS_TEX.test(text) },
   };
 }
+
+/** a script of the page that typesets TeX as it loads (MathJax, KaTeX's auto-render) */
+const TYPESETS_TEX = /<script\b[^>]*\bsrc\s*=\s*["']?[^"'>]*(?:mathjax|auto-render)|renderMathInElement\s*\(|MathJax\s*=\s*\{|MathJax\.Hub\.Config/i;
 
 /* ------------------------------------------------------------------ writing */
 
@@ -727,7 +800,9 @@ export interface WriteArticleResult {
   warnings: string[];
 }
 
-interface W { authors: Map<number, string>; warnings: Set<string> }
+/** how a formula is written: as the page rendered it where its LaTeX is unchanged; as MathML where the page renders its math ahead of time (`mathml`), else as TeX for the runtime to typeset */
+interface ArticleMath { sources: Map<string, string>; mathml: ((tex: string, display: boolean) => string | null) | null }
+interface W { authors: Map<number, string>; warnings: Set<string>; math?: ArticleMath }
 
 /**
  * A line break inside one element's HTML (a comment's lines, code, raw HTML): written as a newline,
@@ -755,9 +830,13 @@ function formulaInner(latex: string): { inner: string; display: boolean; env: bo
   return { inner: t, display: true, env: /^\\begin\{/.test(t) };
 }
 
-function formulaHtml(latex: string): string {
+function formulaHtml(latex: string, w: W): string {
+  const known = w.math?.sources.get(latex);
+  if (known) return oneLine(known);
   const f = formulaInner(latex);
   if (!f.inner) return '';
+  const mml = w.math?.mathml?.(f.inner, f.display);
+  if (mml) return oneLine(mml);
   if (f.env) return esc(f.inner);
   return f.display ? `\\[${esc(f.inner)}\\]` : `\\(${esc(f.inner)}\\)`;
 }
@@ -785,7 +864,7 @@ function plainText(pars: Paragraph[]): string {
 
 function insetHtml(ins: Inset, w: W, font: FontState): string {
   switch (ins.type) {
-    case 'Formula': return formulaHtml(ins.latex);
+    case 'Formula': return formulaHtml(ins.latex, w);
     case 'Leaf': {
       const pm = paramMap(ins.params);
       switch (ins.name) {
@@ -1087,8 +1166,8 @@ function groupsOf(body: Paragraph[], w: W): Group[] {
   return out;
 }
 
-function writer(doc: LyxDocument): W {
-  return { authors: new Map(getAuthors(doc.header).map(a => [a.id, a.name] as [number, string])), warnings: new Set() };
+function writer(doc: LyxDocument, math?: ArticleMath): W {
+  return { authors: new Map(getAuthors(doc.header).map(a => [a.id, a.name] as [number, string])), warnings: new Set(), math };
 }
 
 /** The <head> and the start of the <body> of an article written from scratch (the page around its prose). */
@@ -1151,6 +1230,11 @@ export function writeArticle(doc: LyxDocument): WriteArticleResult {
   return { text, spans, warnings: [...w.warnings] };
 }
 
+export interface ArticleWriteOptions {
+  /** TeX (no delimiters) as a <math> element with the TeX in it, null where it cannot: for a new formula on a page that renders its math ahead of time (server mathml.ts) */
+  mathml?: (tex: string, display: boolean) => string | null;
+}
+
 export interface ArticlePreserveCache { base?: string; parsed?: ParseArticleResult; groups?: Group[] }
 
 interface Slot { units: [number, number]; groups: number[]; start: number; end: number }
@@ -1160,15 +1244,15 @@ interface Slot { units: [number, number]; groups: number[]; start: number; end: 
  * their bytes, an edited block keeps its own start and end tags, and the markup between blocks
  * stays as it is. Writing `parseArticle(base).doc` gives `base` back.
  */
-export function writeArticlePreserving(doc: LyxDocument, base: string | null, cache: ArticlePreserveCache = {}): WriteArticleResult {
+export function writeArticlePreserving(doc: LyxDocument, base: string | null, cache: ArticlePreserveCache = {}, opts: ArticleWriteOptions = {}): WriteArticleResult {
   if (base === null || !base.trim() || !isArticleHtml(base)) return writeArticle(doc);
   if (cache.base !== base || !cache.parsed || !cache.groups) {
     cache.base = base;
     cache.parsed = parseArticle(base);
-    cache.groups = groupsOf(cache.parsed.doc.body, writer(cache.parsed.doc));
+    cache.groups = groupsOf(cache.parsed.doc.body, writer(cache.parsed.doc, { sources: cache.parsed.math.sources, mathml: null }));
   }
   const parsed = cache.parsed, bg = cache.groups;
-  const w = writer(doc);
+  const w = writer(doc, { sources: parsed.math.sources, mathml: parsed.math.ahead ? opts.mathml ?? null : null });
   const ng = groupsOf(doc.body, w);
 
   // slots: base units together with the groups written from them (a group spanning units joins them)
@@ -1203,7 +1287,7 @@ export function writeArticlePreserving(doc: LyxDocument, base: string | null, ca
   const emitNew = (g: Group, indent: string, like?: Slot) => {
     const at = text.length;
     const u = like && like.units[0] === like.units[1] ? parsed.units[like.units[0]] : null;
-    if (u && u.open && u.close && g.tag && g.tag === u.tag && g.inner) {
+    if (u && u.open && u.close && g.tag && (g.tag === u.tag || (g.tag === 'p' && u.tag === 'summary')) && g.inner) {
       const open = base.slice(u.open.start, u.open.end), close = base.slice(u.close.start, u.close.end);
       const innerText = g.text.slice(g.inner[0], g.inner[1]);
       const r = reindent(innerText, indent);
@@ -1295,4 +1379,4 @@ export function articleWarnings(doc: LyxDocument): string[] {
 }
 
 /** What agents are told about articles (the MCP instructions, create_document). */
-export const ARTICLE_GUIDE = `Web articles — a research post, an essay, a rich page of prose — are documents written as HTML: an .html file whose head has <meta name="overlyx" content="article"> (create_document with a path ending in .html starts one: index.html in a folder of its own). People write them in the document editor, with comments, suggestions and formulas; you read and edit them with read_document / edit_document like any document, and look at them with render_page. The prose is the content of the page's <article> element, in plain semantic HTML: <h1> title, <p class="byline">, <p class="abstract">, <h2>–<h6> headings, <p>, <ul>/<ol>, <blockquote>, <pre><code>, <figure><img><figcaption> (class "wide": wider than the text), simple <table>s; inline <em>, <strong>, <code>, <a href>, <sub>/<sup>, notes as <span class="sidenote">…</span>; TeX math as \\(…\\) and \\[…\\], \\cite{key} with the project's .bib (a <div class="ol-bibliography"></div> lists the references). Sections and divs around prose are fine. Anything else — an interactive figure with its own script, an SVG, a canvas, a custom element — is an HTML block: people see it running and cannot type into it, so put such pieces in their own elements (a <figure class="widget"> with its script inside) and keep prose out of them. Style the page in its <head> (its stylesheet's custom properties at :root — --font-text, --font-ui, --text-size, --measure, --ink, --accent, --paper … — also restyle the editor's view of it).`;
+export const ARTICLE_GUIDE = `Web articles — a research post, an essay, a rich page of prose — are documents written as HTML: an .html file whose head has <meta name="overlyx" content="article"> (create_document with a path ending in .html starts one: index.html in a folder of its own). People write them in the document editor, with comments, suggestions and formulas; you read and edit them with read_document / edit_document like any document, and look at them with render_page. The prose is the content of the page's <article> element, in plain semantic HTML: <h1> title, <p class="byline">, <p class="abstract">, <h2>–<h6> headings, <p>, <ul>/<ol>, <blockquote>, <pre><code>, <figure><img><figcaption> (class "wide": wider than the text), simple <table>s; inline <em>, <strong>, <code>, <a href>, <sub>/<sup>, notes as <span class="sidenote">…</span>; TeX math as \\(…\\) and \\[…\\], \\cite{key} with the project's .bib (a <div class="ol-bibliography"></div> lists the references). Sections and divs around prose are fine. Anything else — an interactive figure with its own script, an SVG, a canvas, a custom element — is an HTML block: people see it running and cannot type into it, so put such pieces in their own elements (a <figure class="widget"> with its script inside) and keep prose out of them. The editor runs each block in a frame of its own: controls and what they drive must be one block (one element, or neighbours with no prose between them). Style the page in its <head> (its stylesheet's custom properties at :root — --font-text, --font-ui, --text-size, --measure, --ink, --accent, --paper … — also restyle the editor's view of it).`;

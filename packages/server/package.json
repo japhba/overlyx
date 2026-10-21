@@ -8,6 +8,7 @@
     "seed": "tsx src/seed.ts"
   },
   "dependencies": {
+    "@mathjax/src": "^4.1.3",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@overlyx/core": "*",
     "@types/mailparser": "3.4.6",

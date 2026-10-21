@@ -3218,23 +3218,30 @@ not on the deliverable canvas. The file stays a plain web page that any host can
   lists (`client/src/articlekinds.ts`, kept in localStorage) and holds an `.html` tab blank until
   it knows which editor it is. A stored deliverable state of a page that became an article is
   ignored (`storedAsDocument`).
-* **The model** (`core/src/html/article.ts`). The prose is the content of the first `<article>`
-  (else `<main>`, else `<body>`); what is before and after it is the document's preamble and
+* **The model** (`core/src/html/article.ts`). The prose is the content of the page's `<article>`
+  when it has one holding most of the page's text (several `<article>`s are cards: then `<main>`),
+  else `<main>`, else `<body>`; what is before and after it is the document's preamble and
   trailer, verbatim. `<h1>` Title, `<h2>`…`<h6>` Section…Subparagraph, `<p class="byline">` Author,
   `date` Date, `abstract` Abstract, lists, `<blockquote>`, `<pre><code>`, `<hr>`, a `<figure>` of
   images and a caption → a figure float (`class="wide"` → `wide true`), simple tables → a tabular;
   inline marks, links, images, `<sub>`/`<sup>`, `<span class="sidenote">` (Foot; `marginnote` →
   Marginal); TeX as the runtime typesets it (`\(…\)`, `\[…\]`, `$$`, display environments,
   `\cite…{}`, `\ref{}`/`\eqref{}`); comments, notes and tracked changes as in markdown. Containers
-  that hold prose (section, div, header …) are transparent unless one of their children is a widget
-  (script, canvas, svg, iframe, a form control, a custom element): anything else is an **HTML
-  block**, a raw (ERT) inset with its source. Text that would read as TeX is written in a
-  `<span class="ol-notex">`.
+  that hold prose (section, div, header, details …) are transparent unless one of their children is
+  a widget (script, canvas, svg, iframe, a form control, a custom element): anything else is an
+  **HTML block**, a raw (ERT) inset with its source. HTML blocks side by side (only white space and
+  comments between) are one block — a figure's controls and what they draw into run in one frame.
+  Tables whose rows or cells carry classes, ids or widths are HTML blocks (a rewrite would lose
+  them). Text that would read as TeX is written in a `<span class="ol-notex">`.
 * **Saving** (`writeArticlePreserving`): blocks whose HTML did not change keep their bytes, an
   edited block keeps its own start and end tags (classes, ids), a deleted one leaves the markup
   around it, and new blocks go after the block before them (a heading after the markup that
   follows, where the next section starts). Line breaks inside one element (comments, code, raw
-  HTML) are never re-indented.
+  HTML) are never re-indented. A formula is written as the page rendered it while its LaTeX is
+  unchanged (KaTeX's markup …, `parseArticle(…).math.sources`); a new or changed one as TeX for the
+  runtime — or, on a page that renders its math ahead of time (rendered math, no TeX, no script that
+  typesets TeX: `math.ahead`), as MathML with its TeX in an annotation (`server/mathml.ts`, MathJax
+  in node), which browsers show by themselves and the parser reads back.
 * **The look.** A new article (`core/src/html/articletheme.ts`, + New ▸ Article, or a file named
   `article.html` / `post.html` …) has its stylesheet in its head: a research post's design set by
   custom properties at `:root` (`--font-text`, `--font-ui`, `--text-size`, `--measure`, `--wide`,
@@ -3262,7 +3269,11 @@ not on the deliverable canvas. The file stays a plain web page that any host can
   its nav, header, footer and sidebar as HTML blocks. A plain page (or a deliverable web page) on the
   canvas has **✎ Article** (web app): `POST /docs/*/as-article` (`docs.ts makeArticle`) keeps the
   page as a version, sets the meta tag and closes its deliverable document; the client leaves the
-  canvas first so its text never syncs into the document.
+  canvas first so its text never syncs into the document. `render_page`'s checker measures other
+  tools' math as formulas and skips text for screen readers only (a clipped box of a pixel:
+  KaTeX's MathML copy, `.sr-only`) and zero-width struts (`runtime/report.ts`). The runtime is one
+  enclosed script (es2022, wrapped: `runtime.vite.config.ts`) — it declares no globals a page's own
+  script could collide with.
 * **Links.** A link that leaves OverLyX opens in a new tab — from the page pane, a running HTML
   block or a presentation (runtime `links.ts`: never inside the frame) and from the editor. A link
   to another file of the project opens in OverLyX (`client/src/openpath.ts`): the frames post
