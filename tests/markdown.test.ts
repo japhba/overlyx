@@ -212,6 +212,16 @@ describe('writing into the file', () => {
     expect(out).toContain('Setext heading\n==============');
     expect(out).not.toContain('bullet');
   });
+
+  it('footnote definitions edited or added keep the file\'s spacing between definitions', () => {
+    const text = 'One[^a] and two[^b].\n\n[^a]: First.\n[^b]: Second.\n';
+    const doc = parseMarkdown(text).doc;
+    const items = doc.body[0].items;
+    const foot = (k: number) => (items.filter(i => i.kind === 'inset')[k] as Extract<Item, { kind: 'inset' }>).inset;
+    (foot(1).paragraphs[0].items[0] as { text: string }).text = 'Second, edited.';
+    items.push({ kind: 'text', text: ' Three', font: {} }, { kind: 'inset', inset: { type: 'Text', name: 'Foot', arg: '', params: [], status: 'open', paragraphs: [{ layout: 'Plain Layout', depth: 0, params: {}, items: [{ kind: 'text', text: 'New.', font: {} }] }] }, font: {} } as Item);
+    expect(writeMarkdownPreserving(doc, text).text).toBe('One[^a] and two[^b]. Three[^1]\n\n[^a]: First.\n[^b]: Second, edited.\n[^1]: New.\n');
+  });
 });
 
 describe('the document manager with a .md file', async () => {

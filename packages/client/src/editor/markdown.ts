@@ -8,7 +8,8 @@
  *  - what markdown cannot express does not get in: pasted or applied layouts become the closest
  *    markdown block (a chapter heading → `#`), font attributes it has no syntax for are dropped,
  *    and the LaTeX-only shortcuts (labels, citations, margin notes …) say so instead of inserting;
- *  - markdown pasted as plain text arrives as structure.
+ *  - markdown pasted as plain text arrives as structure;
+ *  - footnotes are numbers in the text, their notes written at the end (plugins/mdfootnotes.ts).
  * Active only in markdown documents (the shells pass `markdown` to assemblePlugins).
  */
 import { InputRule, inputRules } from 'prosemirror-inputrules';
@@ -24,6 +25,7 @@ import { inRawText } from './rawtext';
 import { editorContext } from './context';
 import { pasteBlocksIntoEmpty } from './plugins/paste';
 import { fontCommands } from './commands';
+import { markdownFootnotes, footnoteRule } from './plugins/mdfootnotes';
 
 /** Is this document (id or path) written as markdown? */
 export function isMarkdownDoc(docId: string | null | undefined): boolean {
@@ -281,6 +283,7 @@ export function markdownPlugins(opts: { article?: boolean } = {}): Plugin[] {
         markRule(/(?<![~\\])~~([^~\s](?:[^~]*[^~\s])?)~~$/, 'strikeout', 'on'),
         markRule(/(?<![`\\])`([^`]+)`$/, 'family', 'typewriter'),
         quoteRule,
+        ...(opts.article ? [] : [footnoteRule]),
       ],
     }),
     keymap({
@@ -297,7 +300,7 @@ export function markdownPlugins(opts: { article?: boolean } = {}): Plugin[] {
       'Alt-Mod-p': notInMarkdown('paragraph settings', fmt),
       'Shift-Mod-n': notInMarkdown('small caps', fmt),
     }),
-    ...(opts.article ? [] : [taskPlugin()]),
+    ...(opts.article ? [] : [taskPlugin(), ...markdownFootnotes()]),
     new Plugin({
       appendTransaction: (trs, _old, state) => normalizeChanged(trs, state, fmt),
       props: {

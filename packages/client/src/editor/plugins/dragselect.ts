@@ -43,10 +43,11 @@ function containerChain($p: ResolvedPos): number[] {
 
 /**
  * The comment / note card a pointer target lies in, when notes are shown in the margin
- * (plugins/margin.ts): the card sits beside the text column, outside the editor's box.
+ * (plugins/margin.ts): the card sits beside the text column, outside the editor's box; or the
+ * markdown footnote it lies in, at the end of the document far below its reference (plugins/mdfootnotes.ts).
  */
 function marginCard(target: EventTarget | null): HTMLElement | null {
-  return (target as Element | null)?.closest?.<HTMLElement>('.lyx-inset-note.in-margin > .inset-box') ?? null;
+  return (target as Element | null)?.closest?.<HTMLElement>('.lyx-inset-note.in-margin > .inset-box, .lyx-inset-foot.fn-foot > .inset-box') ?? null;
 }
 
 /**

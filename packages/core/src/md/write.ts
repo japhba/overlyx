@@ -731,15 +731,25 @@ export function writeMarkdownPreserving(doc: LyxDocument, base: string | null, c
   let text = frontMatter(doc) === frontMatter(parsed.doc) ? lead : frontMatter(doc) + (frontMatter(doc) ? '\n' : '') + lead.slice(frontMatter(parsed.doc).length).replace(/^\n+/, '');
   let wrote = false;
   let prevUnit = -1;   // the base unit written last (-1: a new block was)
+  let prevDef = false;   // what was written last is a footnote definition
   const gapKept = new Set<number>();   // gap i: between units[i] and units[i + 1]
-  const sep = (ui: number) => {
+  // footnote definitions one after the other are apart as the file has them (a line break, or a blank line)
+  let defGap = '\n\n';
+  for (let i = 1; i < units.length; i++) {
+    if (units[i].label === undefined || units[i - 1].label === undefined) continue;
+    const g = base.slice(units[i - 1].end, units[i].start);
+    if (/^\n+$/.test(g)) { defGap = g; break; }
+  }
+  const sep = (ui: number, def: boolean) => {
+    const after = prevDef;
+    prevDef = def;
     if (!wrote) { wrote = true; return; }
     if (prevUnit >= 0 && ui === prevUnit + 1) { text += base.slice(units[prevUnit].end, units[ui].start); gapKept.add(prevUnit); return; }
-    text = text.replace(/\n*$/, '') + '\n\n';
+    text = text.replace(/\n*$/, '') + (def && after ? defGap : '\n\n');
   };
   const writeBase = (ui: number, j?: number) => {
     const u = units[ui];
-    sep(ui);
+    sep(ui, u.label !== undefined);
     const at = text.length;
     text += base.slice(u.start, u.end);
     prevUnit = ui;
@@ -754,8 +764,8 @@ export function writeMarkdownPreserving(doc: LyxDocument, base: string | null, c
       }
     }
   };
-  const writeNew = (s: string, g?: Group) => {
-    sep(-1);
+  const writeNew = (s: string, g?: Group, def = false) => {
+    sep(-1, def);
     const at = text.length;
     text += s;
     prevUnit = -1;
@@ -776,7 +786,7 @@ export function writeMarkdownPreserving(doc: LyxDocument, base: string | null, c
       }
       footDone.add(u.label);
       if (bw.footnotes.get(u.label) === nw.footnotes.get(u.label)) writeBase(ui);
-      else writeNew(nw.footnotes.get(u.label)!);
+      else writeNew(nw.footnotes.get(u.label)!, undefined, true);
       return;
     }
     const at = kept.get(u);
@@ -786,7 +796,7 @@ export function writeMarkdownPreserving(doc: LyxDocument, base: string | null, c
     j = at + u.groups!.length;
   });
   flushNew(nw.groups.length);
-  for (const l of nw.order) if (!footDone.has(l)) writeNew(nw.footnotes.get(l)!);
+  for (const l of nw.order) if (!footDone.has(l)) writeNew(nw.footnotes.get(l)!, undefined, true);
   // reference link definitions in the space around blocks that went away
   const defs = units.slice(0, -1).flatMap((u, i) => (gapKept.has(i) ? [] : base.slice(u.end, units[i + 1].start).split('\n').filter(l => /^\s{0,3}\[[^\]]+\]:/.test(l))));
   if (defs.length) writeNew([...new Set(defs)].join('\n'));

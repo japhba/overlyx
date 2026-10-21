@@ -668,7 +668,7 @@ html[data-theme="dark"][data-dark-pages] .lyx-inset-note-note > .inset-box > .in
 .lyx-inset-ert > .inset-box > .inset-content > .lyx-par { white-space: pre-wrap; }
 .lyx-inset-foot > .inset-box { font-size: 0.9em; background: var(--inset-foot-bg); }
 .lyx-inset-foot > .inset-box > .inset-label { background: #6a6aa8; }
-.lyx-inset-foot[data-number] > .inset-box > .inset-label::after { content: " " attr(data-number); }
+.lyx-inset-foot[data-number] > .inset-box > .inset-label::after { content: " " var(--fn-number, ""); }
 .lyx-inset-marginal > .inset-box { font-size: 0.9em; background: var(--inset-marginal-bg); }
 .lyx-inset-float { display: block; margin: 0.6em 0; }
 .lyx-inset-float > .inset-box { display: block; padding: 6px 10px; background: var(--surface2); border-color: var(--inset-border); }
@@ -2793,6 +2793,34 @@ html[data-ui] .tb-side .ff-button { min-width: 0; max-width: 100%; }
 .md-task-box.done { background: var(--accent); border-color: var(--accent); color: white; }
 .md-task-box.done::after { content: '✓'; }
 .md-task-src { font-size: 0; letter-spacing: 0; }
+/* Markdown footnotes (editor/plugins/mdfootnotes.ts): a superscript number in the text; the notes
+   numbered at the end of the document, their boxes placed over the area kept free there (.md-fn-area) */
+.lyx-inset-foot.fn-foot { position: static; }
+.lyx-inset-foot.fn-foot > .inset-anchor { display: inline; vertical-align: super; font-size: 0.68em; line-height: 0; padding: 0 0.04em; border-radius: 3px;
+  color: var(--accent); font-weight: 600; font-style: normal; cursor: pointer; user-select: none; -webkit-user-select: none; transition: background-color 0.3s; }
+.lyx-inset-foot.fn-foot > .inset-anchor::before { content: var(--fn-number, "*"); }
+.lyx-inset-foot.fn-foot > .inset-anchor:hover { text-decoration: underline; }
+.lyx-inset-foot.fn-foot > .inset-box { position: absolute; z-index: 1; display: block; box-sizing: border-box; max-width: none; margin: 0; padding: 2px 6px 2px 2em; border: 0; border-radius: 4px; background: none;
+  font-size: 0.86em; font-weight: normal; font-style: normal; line-height: 1.45; text-indent: 0; text-align: start; letter-spacing: normal; color: var(--editor-fg); transition: background-color 0.3s; }
+.lyx-inset-foot.fn-foot > .inset-box > .inset-content, .lyx-inset-foot.fn-foot > .inset-box > .inset-content > .lyx-par:first-child { display: block; }
+.lyx-inset-foot.fn-foot.collapsed > .inset-box > .inset-content { display: block; }
+.lyx-inset-foot.fn-foot > .inset-box > .inset-label { position: absolute; left: 0; top: 2px; width: 1.5em; height: 1.45em; margin: 0; padding: 0; overflow: hidden;
+  background: none; color: transparent; font: inherit; line-height: 1.45; letter-spacing: 0; vertical-align: baseline; }
+.lyx-inset-foot.fn-foot > .inset-box > .inset-label::after { position: absolute; inset: 0; text-align: right; content: var(--fn-number, "") "."; color: var(--accent); font-variant-numeric: tabular-nums; }
+.lyx-inset-foot.fn-foot > .inset-box > .inset-label:hover::after { text-decoration: underline; }
+.lyx-inset-foot.fn-foot[data-repeat] > .inset-box { display: none; }
+.lyx-inset-foot.fn-foot.fn-active > .inset-box { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.lyx-inset-foot.fn-foot.fn-active > .inset-anchor { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.lyx-inset-foot.fn-foot.highlight > .inset-box { box-shadow: none; background: color-mix(in srgb, var(--hl-bg2) 28%, transparent); }
+.lyx-inset-foot.fn-foot.highlight > .inset-anchor { background: color-mix(in srgb, var(--hl-bg2) 45%, transparent); }
+.lyx-inset-foot.fn-foot[data-change="inserted"] > .inset-anchor { color: var(--change-color, var(--ok)); text-decoration: underline; }
+.lyx-inset-foot.fn-foot[data-change="deleted"] > .inset-anchor { color: var(--change-color, var(--err)); text-decoration: line-through; }
+.lyx-inset-foot.fn-foot[data-change="inserted"] > .inset-box { box-shadow: inset 2px 0 var(--change-color, var(--ok)); }
+.lyx-inset-foot.fn-foot[data-change="deleted"] > .inset-box { outline: 0; opacity: 0.6; text-decoration: line-through; }
+.md-fn-area { position: relative; margin-top: 1.4em; pointer-events: none; user-select: none; -webkit-user-select: none; }
+/* (prosemirror-tables clips a table: a note referred to from a cell is placed outside it) */
+.lyx-tabular table:has(.lyx-inset-foot.fn-foot) { overflow: visible; }
+.md-fn-area::before { content: ''; position: absolute; top: 8px; left: 0; width: 30%; border-top: 1px solid color-mix(in srgb, var(--editor-fg) 30%, transparent); }
 .md-task-done-text { text-decoration: line-through; color: color-mix(in srgb, var(--editor-fg) 55%, transparent); }
 
 /* a deck shows one slide at a time (editor/layout/controller.ts syncShownPage), in the middle of the window */

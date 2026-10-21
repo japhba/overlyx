@@ -3150,7 +3150,17 @@ can hold (`core/src/md/`, `client/src/editor/markdown.ts`):
   block, rule) and menus, and markdown's typing: `**bold**`, `*em*` / `_em_`, `` `code` ``,
   `~~strike~~` format as you type; `> ` starts a quote (Enter on an empty quote line ends it),
   "```lang" + Enter a code block, `---` + Enter a rule, `$$` + Enter a display formula, `- [ ]` a
-  task with a box to tick; markdown pasted as text arrives as structure. Layouts and font
+  task with a box to tick; markdown pasted as text arrives as structure. **Footnotes**
+  (`editor/plugins/mdfootnotes.ts`) read as the rendered page shows them: a superscript number in
+  the text and the notes numbered at the end of the document, where they are written. A note is
+  still the Foot inset at its reference; only its box is placed over the space a widget
+  (`.md-fn-area`) keeps free below the last paragraph, so comments, tracked changes and co-editing
+  work in it. A click on the number in the text goes to the end of the note, and the note's own
+  number goes back. Escape, → at the note's end and ← at its start go back to the text; ← / → step
+  over a reference; Backspace / Delete beside one selects it first. Typing `[^label]` makes a
+  footnote: the note of that label again when the document has one (numbering shows the same label
+  and text once, `data-repeat`), else a new one with the caret in it. Ctrl+Alt+F works too. Saving
+  keeps the file's spacing between definitions. Layouts and font
   attributes markdown lacks (pasted from LaTeX, a LaTeX shortcut) become the nearest markdown
   (Chapter → `#`, Description → bullets) or go; labels, citations and margin notes say they are
   not available. The source pane is labelled *Markdown*.

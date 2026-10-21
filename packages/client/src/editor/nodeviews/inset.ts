@@ -10,6 +10,7 @@ import { parseHeader, commentHeader, formatTimestamp } from '@overlyx/core';
 import { editorContext } from '../context';
 import { toggleCommentResolved } from '../commentops';
 import { recordInteraction } from '../../usage';
+import { footnoteJump } from '../plugins/mdfootnotes';
 import type { InteractionAction, InteractionOutcome } from '@overlyx/core/interactions.ts';
 
 export class InsetView implements NodeView {
@@ -47,11 +48,15 @@ export class InsetView implements NodeView {
       ev.preventDefault();
       ev.stopPropagation();   // PM's own mouse handling would re-place the cursor on mouseup, undoing toggle()'s selection
       if (ev.detail === 2) return;
+      // a markdown footnote's number at the end of the document: back to its reference
+      if (this.dom.classList.contains('fn-foot')) { const pos = this.getPos(); if (pos !== undefined) footnoteJump(this.view, pos, 'text'); return; }
       this.toggle();
     });
     this.label.addEventListener('dblclick', (ev) => { ev.preventDefault(); editorContext.openInsetDialog?.(this.view, this.getPos()); });
     this.anchor.addEventListener('mousedown', (ev) => {
       ev.preventDefault();
+      // a markdown footnote's number in the text: to the note at the end of the document
+      if (this.dom.classList.contains('fn-foot')) { const pos = this.getPos(); if (pos !== undefined) footnoteJump(this.view, pos, 'note'); return; }
       this.dom.classList.add('highlight');
       setTimeout(() => this.dom.classList.remove('highlight'), 1200);
       const pos = this.getPos();

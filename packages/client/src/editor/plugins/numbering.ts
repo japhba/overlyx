@@ -22,6 +22,7 @@ function build(doc: PMNode): DecorationSet {
   const c: Counters = { sec: [0, 0, 0, 0, 0, 0, 0], enumr: [0, 0, 0, 0, 0, 0, 0, 0, 0], enumOpen: [false, false, false, false, false, false, false, false, false], figure: 0, table: 0, foot: 0, eq: 0, theorem: 0 };
   let appendix = false;
   let prevLayout = '', prevDepth = 0;
+  const notes = new Map<string, { node: PMNode; n: number }>();
   const secLabel = (level: number) => {
     const parts: string[] = [];
     for (let i = 0; i <= level + 1; i++) parts.push(String(c.sec[i]));
@@ -37,8 +38,14 @@ function build(doc: PMNode): DecorationSet {
       if (child.type.name === 'inset') {
         const name = child.attrs.name as string, arg = child.attrs.arg as string;
         if (name === 'Foot') {
-          c.foot++;
-          decos.push(Decoration.node(p, p + child.nodeSize, { 'data-number': String(c.foot) }));
+          // a markdown note referred to again (`[^a]` … `[^a]`: the same label and text) keeps its number
+          const label = /^label "(.*)"$/.exec((JSON.parse(String(child.attrs.params || '[]')) as string[]).find(l => l.startsWith('label ')) ?? '')?.[1];
+          const first = label !== undefined ? notes.get(label) : undefined;
+          const again = !!first && first.node.content.eq(child.content);
+          const n = again ? first!.n : ++c.foot;
+          if (label !== undefined && !first) notes.set(label, { node: child, n });
+          // (--fn-number: the number for the label's and the reference's CSS, which attr() cannot reach from inside)
+          decos.push(Decoration.node(p, p + child.nodeSize, { 'data-number': String(n), style: `--fn-number:"${n}"`, ...(again ? { 'data-repeat': '' } : {}) }));
         } else if (name === 'Caption') {
           const ft = floatType ?? 'figure';
           let label = '';
