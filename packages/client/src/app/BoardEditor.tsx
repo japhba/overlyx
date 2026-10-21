@@ -15,7 +15,7 @@ import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 import { connectParams } from '@overlyx/core/collab/connect.ts';
 import * as decoding from 'lib0/decoding';
-import { strokePathD, strokeRuns, laserPathD, polylineHitsPolygon, rectHitsPolygon, splitDocId, type InkStroke } from '@overlyx/core';
+import { strokePathD, strokeRuns, laserPathD, polylineHitsPolygon, rectMostlyInPolygon, splitDocId, type InkStroke } from '@overlyx/core';
 import { api, fileUrl, type User } from '../api';
 import { imageFiles, imageExt, uploadBaseName, uploadUnique, isSvgMarkup, svgFile } from '../editor/imagepaste';
 import { HIGHLIGHT_OPACITY, LASER_COLOR, LASER_FADE_MS, subscribeInk } from '../editor/plugins/ink';
@@ -24,7 +24,12 @@ import { MODERN_ICONS, iconSvg } from './modernicons';
 import { hostedZoomPill } from './zoomhud';
 import { Toolbar } from './Toolbar';
 import { drawingToolbar } from '../deliverable/drawingToolbar';
-import { loadDeckInk, saveDeckInk, patchDeckInk } from '../deliverable/deckink';
+import { loadDeckInk, saveDeckInk, patchDeckInk, ERASER_PX } from '../deliverable/deckink';
+import { lassoGroups, readHandwriting, chooseReading, readingError, type LassoActions } from '../deliverable/lassobar';
+import { LassoBar, pasteGroups } from '../deliverable/InkSelectionBar';
+import { lassoTakes, usedColors, makeInkClip, holdInk, heldInk, pastedInk, rotatePts, rotationAngle, thickened, type InkClip } from '../deliverable/inkselect';
+import { snapShape, SNAP_HOLD_MS, SNAP_LEAVE_PX } from '@overlyx/core/shapesnap.ts';
+import { eraseAlong } from '@overlyx/core/inkerase.ts';
 import type { NibOpts } from '@overlyx/core/freehand.ts';
 import { scratchOut, SCRATCH_HOLD_MS, SCRATCH_HOLD_PX } from '@overlyx/core/scratchout.ts';
 import type { StrokeWatch } from '@overlyx/core/glitch.ts';
@@ -47,7 +52,8 @@ export interface BoardObj {
 
 type Tool = 'select' | 'lasso' | 'pen' | 'highlighter' | 'eraser' | 'note' | 'laser' | InkShape;
 interface Camera { tx: number; ty: number; s: number }
-interface LiveStroke { color: string; w: number; o?: number; nib?: NibOpts; pressure?: boolean; poly?: true; pts: [number, number, number][] }
+/** `raw`: the stroke as drawn, once draw and hold snapped it to a shape (`pts` is the shape then), and where the pen rested (client px) */
+interface LiveStroke { color: string; w: number; o?: number; nib?: NibOpts; pressure?: boolean; poly?: true; pts: [number, number, number][]; raw?: [number, number, number][]; restAt?: [number, number] }
 /** a laser trace (board coordinates); `fadeAt` set once its owner lifted the pen */
 interface LaserTrail { pts: [number, number][]; color: string; name?: string; fadeAt: number | null }
 
@@ -65,6 +71,13 @@ function strokeToObj(pts: [number, number, number][], color: string, sw: number,
     pts: pts.map(([x, y, p]) => [round1(x - minX), round1(y - minY), Math.round(p * 100) / 100] as [number, number, number]),
   };
 }
+
+/** a stroke object with new absolute points, its look and its place in the stacking kept */
+function restroke(o: BoardObj, pts: [number, number, number][]): BoardObj {
+  return { ...strokeToObj(pts, o.color ?? '#000', o.sw ?? 2, o.o, o.nib, o.pressure, o.poly), ...(o.z !== undefined ? { z: o.z } : {}) };
+}
+/** a stroke object's points on the board */
+const absPts = (o: BoardObj): [number, number, number][] => (o.pts ?? []).map(([x, y, p]) => [o.x + x, o.y + y, p] as [number, number, number]);
 
 const pathDCache = new WeakMap<object, string>();
 function strokeD(obj: BoardObj): string {
@@ -120,6 +133,12 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
   /** scratch-out while the pen draws (core/scratchout.ts): the strokes it would erase now (faded), where and since when the pen rests */
   const scratchRef = useRef<{ hits: Set<string>; rest: { x: number; y: number; t: number; timer: ReturnType<typeof setTimeout> | null }; judged: number } | null>(null);
   const [peerTick, setPeerTick] = useState(0);
+  /** draw and hold (core/shapesnap.ts): where the pen came to rest, and the timer that snaps the stroke when it stays there */
+  const holdRef = useRef<{ x: number; y: number; timer: ReturnType<typeof setTimeout> } | null>(null);
+  /** a tap with the lasso on nothing, something copied: the Paste bar there (board coordinates) */
+  const [pasteAt, setPasteAt] = useState<[number, number] | null>(null);
+  /** where the pointer last was on the board (a paste with the keys goes there) */
+  const lastAt = useRef<[number, number] | null>(null);
 
   /** Yjs document + provider, once per board. */
   const conn0 = useMemo(() => {
@@ -211,31 +230,58 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
   /* ------------------------------------------------------------- input */
 
   interface Drag {
-    kind: 'pan' | 'move' | 'resize' | 'draw' | 'erase' | 'lasso' | 'laser';
+    kind: 'pan' | 'move' | 'resize' | 'rotate' | 'draw' | 'erase' | 'lasso' | 'laser';
     start: [number, number]; origs?: Map<string, BoardObj>; corner?: string; base?: { x: number; y: number; w: number; h: number };
+    /** the eraser's last place (the precise eraser rubs along the way from there); whether the pen's other end erases */
+    last?: [number, number]; end?: boolean;
+    /** the rotation's centre and the angle the press began at */
+    rot?: { cx: number; cy: number; a0: number };
   }
   const dragRef = useRef<Drag | null>(null);
   const pointers = useRef(new Map<number, [number, number]>());
   const pinch = useRef<{ dist: number; s: number } | null>(null);
   const awarenessSend = useRef(0);
 
-  const eraseAt = (bx: number, by: number) => {
-    const r = 8 / camRef.current.s;
+  /**
+   * The eraser at (bx, by), come from `from`, with Draw's eraser settings: its size, whole strokes or the
+   * part under it (precise: what is left either side stays, as strokes of the same look), the
+   * highlighter's strokes alone.
+   */
+  const eraseAt = (bx: number, by: number, from?: [number, number]) => {
+    const er = loadDeckInk().eraser;
+    const r = ERASER_PX[er.size] / camRef.current.s;
+    const a = from ?? [bx, by];
     const hit: string[] = [];
+    const cut = new Map<string, [number, number, number][][]>();
     objects.forEach((o, key) => {
-      if (o.t === 'stroke') {
-        if (bx < o.x - r || bx > o.x + o.w + r || by < o.y - r || by > o.y + o.h + r) return;
-        const px = bx - o.x, py = by - o.y, rr = (r + (o.sw ?? 2)) ** 2;
-        for (let i = 1; i < (o.pts?.length ?? 0); i++) {
-          const [x1, y1] = o.pts![i - 1], [x2, y2] = o.pts![i];
-          const dx = x2 - x1, dy = y2 - y1, len2 = dx * dx + dy * dy;
-          const t = len2 ? Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / len2)) : 0;
-          if ((x1 + t * dx - px) ** 2 + (y1 + t * dy - py) ** 2 <= rr) { hit.push(key); return; }
-        }
-        if ((o.pts?.length ?? 0) === 1) { const [x1, y1] = o.pts![0]; if ((x1 - px) ** 2 + (y1 - py) ** 2 <= rr) hit.push(key); }
+      if (o.t !== 'stroke' || !o.pts?.length) return;
+      if (er.hlOnly && !(o.o !== undefined && o.o < 1)) return;
+      const R = r + (o.sw ?? 2) / 2;
+      if (Math.max(a[0], bx) < o.x - R || Math.min(a[0], bx) > o.x + o.w + R || Math.max(a[1], by) < o.y - R || Math.min(a[1], by) > o.y + o.h + R) return;
+      if (er.precise) {
+        const left = eraseAlong([absPts(o)], a, [bx, by], R).get(0);
+        if (left) cut.set(key, left);
+        return;
+      }
+      const px = bx - o.x, py = by - o.y, rr = R ** 2;
+      for (let i = 1; i < o.pts.length; i++) {
+        const [x1, y1] = o.pts[i - 1], [x2, y2] = o.pts[i];
+        const dx = x2 - x1, dy = y2 - y1, len2 = dx * dx + dy * dy;
+        const t = len2 ? Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / len2)) : 0;
+        if ((x1 + t * dx - px) ** 2 + (y1 + t * dy - py) ** 2 <= rr) { hit.push(key); return; }
+      }
+      if (o.pts.length === 1) { const [x1, y1] = o.pts[0]; if ((x1 - px) ** 2 + (y1 - py) ** 2 <= rr) hit.push(key); }
+    });
+    if (!hit.length && !cut.size) return;
+    mutate(() => {
+      for (const k of hit) objects.delete(k);
+      for (const [k, pieces] of cut) {
+        const o = objects.get(k);
+        if (!o) continue;
+        objects.delete(k);
+        for (const piece of pieces) objects.set(newId(), restroke(o, piece));
       }
     });
-    if (hit.length) mutate(() => { for (const k of hit) objects.delete(k); });
   };
 
   const groupBBox = (ids: ReadonlySet<string>): { x: number; y: number; w: number; h: number } | null => {
@@ -274,6 +320,28 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     if (scratchRef.current?.rest.timer) clearTimeout(scratchRef.current.rest.timer);
     scratchRef.current = null;
   };
+  const endHold = () => {
+    if (holdRef.current) clearTimeout(holdRef.current.timer);
+    holdRef.current = null;
+  };
+  /**
+   * The pen rested at the end of the stroke: the shape it was meant to be, at once, while the pen is
+   * still down (the stroke as drawn kept for the first undo) — unless the scribble's scratch-and-hold
+   * would erase something: that wins.
+   */
+  const snapLive = () => {
+    const at = holdRef.current;
+    holdRef.current = null;
+    const live = liveRef.current;
+    if (!live || live.poly || live.raw) return;
+    if (scratchRef.current && scratchTargets(true).length) return;
+    const shape = snapShape(live.pts, { zoom: camRef.current.s });
+    if (!shape) return;
+    liveRef.current = { ...live, raw: live.pts, poly: true, pts: shape.pts.map(([x, y]) => [x, y, 0] as [number, number, number]), restAt: at ? [at.x, at.y] : undefined };
+    const { raw: _raw, restAt: _at, ...shown } = liveRef.current;
+    try { provider.awareness.setLocalStateField('boardInk', shown); } catch { /* closing */ }
+    rerender();
+  };
 
   const onPointerDown = (e: PointerEvent) => {
     const vp = vpRef.current!;
@@ -281,23 +349,26 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     const finger = e.pointerType === 'touch' && fingerDrawRef.current;
     vp.focus({ preventScroll: true });
     pointers.current.set(e.pointerId, [e.clientX, e.clientY]);
+    setPasteAt(null);
     if (pointers.current.size === 2) {   // pinch zoom takes over
       const [a, b] = [...pointers.current.values()];
       pinch.current = { dist: Math.hypot(a[0] - b[0], a[1] - b[1]), s: camRef.current.s };
       dragRef.current = null;
       liveRef.current = null;
       laserRef.current = null;
+      endHold();
       return;
     }
     const [bx, by] = toBoard(e.clientX, e.clientY);
     const target = e.target as HTMLElement;
     const objId = target.closest?.('[data-obj]')?.getAttribute('data-obj') ?? null;
     const corner = target.getAttribute?.('data-corner') ?? undefined;
-    // a pen draws the moment it touches the board, with Select in hand (Apple's HIG; the pen's settings can turn it off)
-    if (e.pointerType === 'pen' && toolRef.current === 'select' && loadDeckInk().penInks && !readOnlyRef.current && !corner && !target.closest?.('.board-selbox')) { const pen = loadDeckInk().pen; setTool(pen); toolRef.current = pen; }
+    // a pen draws the moment it touches the board, with Select in hand (Apple's HIG; the pen's settings can turn it off) —
+    // that stroke alone: Select stays in hand (fingers select between strokes) and the Draw row as it was
+    const penTakes = e.pointerType === 'pen' && toolRef.current === 'select' && loadDeckInk().penInks && !readOnlyRef.current && !corner && !target.closest?.('.board-selbox');
     // its eraser end erases while it is turned round
     const eraserEnd = e.pointerType === 'pen' && (e.buttons & 32) !== 0;
-    const t = eraserEnd ? 'eraser' : toolRef.current;
+    const t = eraserEnd ? 'eraser' : penTakes ? loadDeckInk().pen : toolRef.current;
     const drawTool = (t === 'pen' || t === 'highlighter') && (e.pointerType !== 'touch' || finger) && !readOnlyRef.current;
     const origsOf = (ids: ReadonlySet<string>) => { const m = new Map<string, BoardObj>(); for (const id of ids) { const o = objects.get(id); if (o) m.set(id, { ...o, pts: o.pts?.map(p => [...p] as [number, number, number]) }); } return m; };
     const onSelBox = !!target.closest?.('.board-selbox');
@@ -311,15 +382,23 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     } else if (onSelBox && !corner && selectedRef.current.size && !readOnlyRef.current) {
       // dragging inside the selection box moves the whole selection
       dragRef.current = { kind: 'move', start: [bx, by], origs: origsOf(selectedRef.current) };
-    } else if (e.button === 1 || ((t === 'select' || t === 'lasso') && !objId && !corner && (t === 'select' || e.pointerType === 'touch'))) {
+    } else if (e.button === 1 || ((t === 'select' || t === 'lasso') && !objId && !corner && (t === 'select' || (e.pointerType === 'touch' && !finger)))) {
       if (selectedRef.current.size) setSelected(new Set());
       dragRef.current = { kind: 'pan', start: [e.clientX - camRef.current.tx, e.clientY - camRef.current.ty] };
     } else if (e.pointerType === 'touch' && !objId && t !== 'select' && !corner && !(finger && (t === 'pen' || t === 'highlighter' || t === 'eraser'))) {
       dragRef.current = { kind: 'pan', start: [e.clientX - camRef.current.tx, e.clientY - camRef.current.ty] };
+    } else if (corner === 'rot' && selectedRef.current.size && !readOnlyRef.current) {
+      // the rotation handle: strokes turned about the selection's middle
+      const base = groupBBox(selectedRef.current);
+      if (base) {
+        const cx = base.x + base.w / 2, cy = base.y + base.h / 2;
+        dragRef.current = { kind: 'rotate', start: [bx, by], origs: origsOf(selectedRef.current), rot: { cx, cy, a0: Math.atan2(by - cy, bx - cx) } };
+        undo.stopCapturing();
+      }
     } else if (corner && selectedRef.current.size && !readOnlyRef.current) {
       const base = groupBBox(selectedRef.current);
       if (base) dragRef.current = { kind: 'resize', corner, start: [bx, by], origs: origsOf(selectedRef.current), base };
-    } else if (t === 'lasso' && !readOnlyRef.current) {
+    } else if (t === 'lasso' && !readOnlyRef.current && (e.pointerType !== 'touch' || finger || !objId)) {
       dragRef.current = { kind: 'lasso', start: [bx, by] };
       setLassoPts([[bx, by]]);
     } else if ((t === 'select' || t === 'lasso') && objId) {
@@ -330,7 +409,8 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
       setSelected(next);
       if (!readOnlyRef.current && next.has(objId)) dragRef.current = { kind: 'move', start: [bx, by], origs: origsOf(next) };
     } else if (t === 'eraser' && !readOnlyRef.current) {
-      dragRef.current = { kind: 'erase', start: [bx, by] };
+      dragRef.current = { kind: 'erase', start: [bx, by], last: [bx, by], end: eraserEnd };
+      undo.stopCapturing();
       eraseAt(bx, by);
     } else if (t === 'note' && !readOnlyRef.current) {
       const nid = newId();
@@ -351,6 +431,8 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
       liveRef.current = { color: pen.color, w: pen.width, nib: { ...drawing.nib }, pressure: e.pointerType === 'pen', ...(hl ? { o: HIGHLIGHT_OPACITY } : {}), pts: [[bx, by, e.pointerType === 'pen' ? e.pressure : 0]] };
       drawingRef.current = { id: e.pointerId, watch: strokeWatch('board', e) };
       dragRef.current = { kind: 'draw', start: [bx, by] };
+      endHold();
+      if (drawing.snap) holdRef.current = { x: e.clientX, y: e.clientY, timer: setTimeout(snapLive, SNAP_HOLD_MS) };
     }
     if (dragRef.current || liveRef.current) e.preventDefault();
   };
@@ -370,6 +452,7 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
       const [bx, by] = toBoard(e.clientX, e.clientY);
       try { provider.awareness.setLocalStateField('boardCursor', { x: round1(bx), y: round1(by) }); } catch { /* closing */ }
     }
+    lastAt.current = toBoard(e.clientX, e.clientY);
     const d = dragRef.current;
     if (!d && !liveRef.current) return;
     const [bx, by] = toBoard(e.clientX, e.clientY);
@@ -425,13 +508,29 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
           objects.set(id, next);
         }
       });
+    } else if (d?.kind === 'rotate' && d.origs && d.rot) {
+      const { cx, cy, a0 } = d.rot;
+      const a = rotationAngle(Math.atan2(by - cy, bx - cx) - a0, e.shiftKey);
+      mutate(() => {
+        for (const [id, o0] of d.origs!) if (o0.t === 'stroke' && o0.pts) objects.set(id, restroke(o0, rotatePts(absPts(o0), cx, cy, a)));
+      });
     } else if (d?.kind === 'erase') {
-      eraseAt(bx, by);
+      eraseAt(bx, by, d.last);
+      d.last = [bx, by];
     } else if (liveRef.current?.poly && d?.kind === 'draw' && isShapeTool(toolRef.current)) {
       liveRef.current.pts = shapePoints(toolRef.current, d.start, [bx, by], liveRef.current.w, e.shiftKey);
       try { provider.awareness.setLocalStateField('boardInk', liveRef.current); } catch { /* closing */ }
       rerender();
+    } else if (liveRef.current?.raw && (!liveRef.current.restAt || Math.hypot(e.clientX - liveRef.current.restAt[0], e.clientY - liveRef.current.restAt[1]) <= SNAP_LEAVE_PX)) {
+      // snapped to a shape (draw and hold): it stays while the pen rests
     } else if (liveRef.current && (!drawingRef.current || drawingRef.current.id === e.pointerId)) {
+      // the pen moved on from where it snapped: it only paused — the stroke as drawn again
+      if (liveRef.current.raw) { const { raw, restAt: _at, poly: _poly, ...rest } = liveRef.current; liveRef.current = { ...rest, pts: raw }; }
+      const hd = holdRef.current;
+      if (!hd || Math.hypot(e.clientX - hd.x, e.clientY - hd.y) > SCRATCH_HOLD_PX) {
+        if (hd) clearTimeout(hd.timer);
+        holdRef.current = loadDeckInk().snap ? { x: e.clientX, y: e.clientY, timer: setTimeout(snapLive, SNAP_HOLD_MS) } : null;
+      }
       const events = (e.getCoalescedEvents?.() ?? [e]);
       for (const ev of events) {
         const [x, y] = toBoard(ev.clientX, ev.clientY);
@@ -469,7 +568,8 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     if (drawn && drawn.id !== e.pointerId && live) return;
     drawingRef.current = null;
     if (live && dragRef.current?.kind === 'draw') {
-      if (!live.poly) strokeEnded(drawn?.watch ?? null);
+      endHold();
+      if (!live.poly || live.raw) strokeEnded(drawn?.watch ?? null);
       liveRef.current = null;
       try { provider.awareness.setLocalStateField('boardInk', null); } catch { /* closing */ }
       const xs = live.pts.map(p => p[0]), ys = live.pts.map(p => p[1]);
@@ -481,8 +581,13 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
       if (live.pts.length && !tiny) {
         const sid = newId();
         // (a scribble's own undo step, and the erasing another: the first undo brings the strokes back with the scribble as ink, in case it was drawing — OneNote)
-        if (erased.length) undo.stopCapturing();
-        mutate(() => objects.set(sid, strokeToObj(live.pts, live.color, live.w, live.o, live.nib, live.pressure, live.poly)));
+        if (erased.length || live.raw) undo.stopCapturing();
+        if (live.raw) {
+          // snapped (draw and hold): the stroke as drawn, then its shape — the first undo brings the stroke back
+          mutate(() => objects.set(sid, strokeToObj(live.raw!, live.color, live.w, live.o, live.nib, live.pressure)));
+          undo.stopCapturing();
+          mutate(() => objects.set(sid, strokeToObj(live.pts, live.color, live.w, live.o, undefined, undefined, true)));
+        } else mutate(() => objects.set(sid, strokeToObj(live.pts, live.color, live.w, live.o, live.nib, live.pressure, live.poly)));
         if (erased.length) {
           undo.stopCapturing();
           mutate(() => { for (const key of [...erased, sid]) objects.delete(key); });
@@ -490,20 +595,26 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
         }
       }
     }
+    if (dragRef.current?.kind === 'erase' && !dragRef.current.end && toolRef.current === 'eraser' && loadDeckInk().eraser.back) setTool(loadDeckInk().pen);
     if (dragRef.current?.kind === 'lasso') {
       const poly = lassoRef.current;
       setLassoPts(null);
       if (poly && poly.length > 4) {
-        // Goodnotes semantics: the (auto-closed) lasso selects whatever it touches — a stroke with
-        // any part inside or crossing the line, an image or note it overlaps
+        // Goodnotes semantics: the (auto-closed) lasso selects a stroke it touches — any part inside or
+        // crossing the line —, a picture or note most of which it holds; of the kinds and colours its
+        // settings let it take (deckink.ts)
         const hit = new Set<string>();
         objects.forEach((o, key) => {
-          if (o.t === 'stroke' && o.pts?.length) {
-            if (polylineHitsPolygon(o.pts.map(([px, py]) => [o.x + px, o.y + py] as [number, number]), poly)) hit.add(key);
-          } else if (rectHitsPolygon(o.x, o.y, o.w, o.h, poly)) hit.add(key);
+          if (o.t === 'stroke') {
+            if (o.pts?.length && lassoTakes(o.poly ? 'shapes' : 'ink', [o.color]) && polylineHitsPolygon(absPts(o), poly)) hit.add(key);
+          } else if (lassoTakes(o.t === 'img' ? 'pictures' : 'text', o.t === 'note' ? [o.color] : []) && rectMostlyInPolygon(o.x, o.y, o.w, o.h, poly)) hit.add(key);
         });
         setSelected(e.shiftKey ? new Set([...selectedRef.current, ...hit]) : hit);
-      } else if (!e.shiftKey) setSelected(new Set());
+      } else {
+        if (!e.shiftKey) setSelected(new Set());
+        // a tap on nothing with something copied: Paste there (GoodNotes' lasso tap)
+        if (heldInk() && !readOnlyRef.current) setPasteAt(dragRef.current.start);
+      }
     }
     dragRef.current = null;
     rerender();
@@ -513,6 +624,106 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     e.preventDefault();
     if (e.ctrlKey || e.metaKey) zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.01));
     else setCam(c => ({ ...c, tx: c.tx - e.deltaX, ty: c.ty - e.deltaY }));
+  };
+
+  /* ------------------------------------------------------------- the lasso's selection */
+
+  const selObjs = () => [...selectedRef.current].map(id => [id, objects.get(id)] as const).filter((x): x is readonly [string, BoardObj] => !!x[1]);
+  /** the selection as the ink clipboard has it (deliverable/inkselect.ts) */
+  const clipOfSelection = (): InkClip | null => makeInkClip({
+    strokes: selObjs().filter(([, o]) => o.t === 'stroke' && o.pts?.length).map(([, o]) => ({
+      color: o.color ?? '#000000', w: o.sw ?? 2, ...(o.o !== undefined ? { o: o.o } : {}),
+      ...(o.poly ? { poly: true as const } : { ...(o.nib ? { nib: o.nib } : {}), ...(o.pressure !== undefined ? { pressure: o.pressure } : {}) }), pts: absPts(o),
+    })),
+    imgs: selObjs().filter(([, o]) => o.t === 'img' && o.src).map(([, o]) => ({ project, path: o.src!, x: o.x, y: o.y, w: o.w, h: o.h })),
+    notes: selObjs().filter(([, o]) => o.t === 'note').map(([, o]) => ({ text: o.text ?? '', ...(o.color ? { color: o.color } : {}), x: o.x, y: o.y, w: o.w, h: o.h })),
+  });
+  /** a clip pasted with its middle at `at` (else where the pointer was, else the middle of the view), selected with the lasso in hand */
+  const pasteClip = (clip: InkClip, at?: [number, number] | null) => {
+    if (readOnlyRef.current) return;
+    const vp = vpRef.current!.getBoundingClientRect();
+    const c = at ?? lastAt.current ?? toBoard(vp.left + vp.width / 2, vp.top + vp.height / 2);
+    const ox = c[0] - clip.w / 2, oy = c[1] - clip.h / 2;
+    const ids: string[] = [];
+    let skipped = 0;
+    undo.stopCapturing();
+    mutate(() => {
+      for (const st of clip.strokes) { const id = newId(); ids.push(id); objects.set(id, strokeToObj(st.pts.map(([x, y, p]) => [ox + x, oy + y, p] as [number, number, number]), st.color, st.w, st.o, st.nib, st.pressure, st.poly)); }
+      // (a picture is a file of its project: one copied from another project is not here)
+      for (const im of clip.imgs) { if (im.project !== project) { skipped++; continue; } const id = newId(); ids.push(id); objects.set(id, { t: 'img', x: round1(ox + im.x), y: round1(oy + im.y), w: round1(im.w), h: round1(im.h), src: im.path }); }
+      for (const n of clip.notes) { const id = newId(); ids.push(id); objects.set(id, { t: 'note', x: round1(ox + n.x), y: round1(oy + n.y), w: round1(n.w), h: round1(n.h), color: n.color ?? NOTE_COLORS[0], text: n.text }); }
+    });
+    undo.stopCapturing();
+    if (skipped) notify(`${skipped} picture${skipped > 1 ? 's' : ''} from another project left out`);
+    if (toolRef.current !== 'select' && toolRef.current !== 'lasso') setTool('lasso');
+    setSelected(new Set(ids));
+  };
+  /** one undo step of its own */
+  const change = (fn: () => void) => { undo.stopCapturing(); mutate(fn); undo.stopCapturing(); rerender(); };
+  const removeSelection = () => { change(() => { for (const id of selectedRef.current) objects.delete(id); }); setSelected(new Set()); };
+  const copySelection = (e?: ClipboardEvent): boolean => { const clip = clipOfSelection(); if (clip) holdInk(clip, e); return !!clip; };
+  const duplicateSelection = () => {
+    const clip = clipOfSelection(), bb = groupBBox(selectedRef.current);
+    if (!clip || !bb) return;
+    const d = 24 / camRef.current.s;
+    pasteClip(clip, [bb.x + bb.w / 2 + d, bb.y + bb.h / 2 + d]);
+  };
+  /** the selection's box in client px (its bar's place) */
+  const clientBox = (b: { x: number; y: number; w: number; h: number }) => {
+    const r = vpRef.current!.getBoundingClientRect(), c = camRef.current;
+    return { x: r.left + c.tx + b.x * c.s, y: r.top + c.ty + b.y * c.s, w: b.w * c.s, h: b.h * c.s };
+  };
+  /** what the lasso bar does to the selection (deliverable/lassobar.tsx) */
+  const lassoActions = (): LassoActions => {
+    const strokes = selObjs().filter(([, o]) => o.t === 'stroke' && !!o.pts?.length);
+    const freehand = strokes.filter(([, o]) => !o.poly);
+    const colors = new Set(strokes.map(([, o]) => (o.color ?? '').toLowerCase()));
+    return {
+      color: colors.size === 1 ? [...colors][0] : null,
+      ...(strokes.length ? {
+        recolor: (c: string) => change(() => { for (const [id, o] of strokes) objects.set(id, { ...o, color: c }); }),
+        thicken: (k: number) => change(() => { for (const [id, o] of strokes) objects.set(id, { ...o, sw: thickened(o.sw ?? 2, k) }); }),
+      } : {}),
+      duplicate: duplicateSelection,
+      copy: () => { if (copySelection()) notify('Copied — Ctrl+V, or a tap with the lasso on the board, pastes it'); },
+      cut: () => { if (copySelection()) removeSelection(); },
+      remove: removeSelection,
+      ...(freehand.length ? {
+        straighten: () => {
+          let n = 0;
+          change(() => {
+            for (const [id, o] of freehand) {
+              const shape = snapShape(absPts(o), { zoom: camRef.current.s });
+              if (!shape) continue;
+              n++;
+              objects.set(id, { ...strokeToObj(shape.pts.map(([x, y]) => [x, y, 0] as [number, number, number]), o.color ?? '#000', o.sw ?? 2, o.o, undefined, undefined, true), ...(o.z !== undefined ? { z: o.z } : {}) });
+            }
+          });
+          notify(n ? `${n} stroke${n > 1 ? 's' : ''} made ${n > 1 ? 'shapes' : 'a shape'} — Undo brings ${n > 1 ? 'them' : 'it'} back as drawn` : 'None of these strokes looks like a line, an arrow or a shape');
+        },
+        toText: () => void typeNotes(freehand.map(([id]) => id)),
+      } : {}),
+    };
+  };
+  /** the handwriting typed: read by the server, then a sticky note in its place (the first undo brings the handwriting back) */
+  const typeNotes = async (ids: string[]) => {
+    const strokes = ids.map(id => objects.get(id)).filter((o): o is BoardObj => !!o?.pts?.length);
+    const bb = groupBBox(new Set(ids));
+    if (!strokes.length || !bb) return;
+    notify('Reading the handwriting…');
+    let readings: string[];
+    try { readings = await readHandwriting(strokes.map(absPts), 'notes'); } catch (err) { notify(readingError(err), 'error'); return; }
+    if (!readings.length) { notify('No handwriting could be read there'); return; }
+    const at = clientBox(bb);
+    const text = await chooseReading(readings, at.x, at.y + at.h + 8);
+    if (!text) return;
+    const nid = newId();
+    change(() => {
+      for (const id of ids) objects.delete(id);
+      objects.set(nid, { t: 'note', x: round1(bb.x), y: round1(bb.y), w: round1(Math.max(160, bb.w)), h: round1(Math.max(80, bb.h)), color: NOTE_COLORS[0], text: text.slice(0, 4000) });
+    });
+    setSelected(new Set([nid]));
+    notify('Typed as a sticky note — Undo brings the handwriting back');
   };
 
   const onKeyDown = (e: KeyboardEvent) => {
@@ -526,11 +737,15 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
       }
       return;
     }
+    const mod = e.ctrlKey || e.metaKey, k = e.key.toLowerCase();
     if ((e.key === 'Delete' || e.key === 'Backspace') && selectedRef.current.size && !readOnlyRef.current) {
-      mutate(() => { for (const id of selectedRef.current) objects.delete(id); });
-      setSelected(new Set());
+      removeSelection();
       e.preventDefault();
-    } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.shiftKey ? undo.redo() : undo.undo(); e.preventDefault(); }
+    } else if (mod && (k === 'c' || k === 'x') && selectedRef.current.size) {
+      // (the copy event that follows puts it on the system clipboard too, where the browser sends one)
+      copySelection();
+      if (k === 'x' && !readOnlyRef.current) { removeSelection(); e.preventDefault(); }
+    } else if (mod && k === 'd' && selectedRef.current.size && !readOnlyRef.current) { duplicateSelection(); e.preventDefault(); } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.shiftKey ? undo.redo() : undo.undo(); e.preventDefault(); }
     else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { undo.redo(); e.preventDefault(); }
     else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') { setSelected(new Set([...objects.keys()])); setTool('select'); e.preventDefault(); }
     else if (e.key === 'Escape') { setSelected(new Set()); setTool('select'); }
@@ -561,6 +776,9 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
   };
 
   const onPaste = (e: ClipboardEvent) => {
+    // strokes, pictures and notes copied with the lasso, here or in a document's margin
+    const clip = !editing && !readOnlyRef.current ? pastedInk(e) : null;
+    if (clip) { pasteClip(clip); e.preventDefault(); return; }
     const files = imageFiles(e.clipboardData);
     const text = e.clipboardData?.getData('text/plain');
     if (!files.length && text && isSvgMarkup(text)) files.push(svgFile(text));
@@ -640,6 +858,7 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     <div class="board" ref={vpRef} tabIndex={0}
       onPointerDown={onPointerDown as never} onPointerMove={onPointerMove as never} onPointerUp={onPointerUp as never} onPointerCancel={onPointerUp as never}
       onWheel={onWheel as never} onKeyDown={onKeyDown as never} onPaste={onPaste as never}
+      onCopy={(e: ClipboardEvent) => { if (!editing && selectedRef.current.size) copySelection(e); }}
       onDragOver={e => e.preventDefault()} onDrop={onDrop as never}
       data-tool={tool}>
       <div class="board-content" style={{ transform: `translate(${cam.tx}px, ${cam.ty}px) scale(${cam.s})` }}>
@@ -674,6 +893,10 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
         {selBB && (
           <div class="board-selbox" style={{ left: selBB.x + 'px', top: selBB.y + 'px', width: selBB.w + 'px', height: selBB.h + 'px' }}>
             {['nw', 'ne', 'sw', 'se'].map(c => <span key={c} class={'board-handle ' + c} data-corner={c} style={{ transform: `scale(${1 / cam.s})` }} />)}
+            {/* strokes alone turn (Shift: in steps of 15°) */}
+            {!readOnly && [...selected].every(id => objects.get(id)?.t === 'stroke') && (
+              <span class="board-handle rot" data-corner="rot" title="Rotate (Shift: in steps of 15°)" style={{ top: -24 / cam.s + 'px', transform: `scale(${1 / cam.s})` }} />
+            )}
           </div>
         )}
         {lassoPts && lassoPts.length > 1 && (
@@ -692,9 +915,11 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
           </div>
         ))}
       </div>
+      {/* the lasso selection's bar (recolour, copy, convert …), and Paste after a tap with the lasso */}
+      {selBB && !readOnly && !editing && !dragRef.current && !liveRef.current && <LassoBar id="board-lasso-bar" groups={lassoGroups(lassoActions())} rect={clientBox(selBB)} />}
+      {pasteAt && !selBB && heldInk() && <LassoBar id="board-paste-bar" groups={pasteGroups(() => { const clip = heldInk(); const at = pasteAt; setPasteAt(null); if (clip) pasteClip(clip, at); })} rect={clientBox({ x: pasteAt[0], y: pasteAt[1], w: 0, h: 0 })} />}
       <div class="board-tools" onPointerDown={e => e.stopPropagation()}>
         {toolBtn('select', '⤢', 'Select / move (drag empty space to pan)')}
-        {toolBtn('lasso', '◌', 'Lasso — encircle things to select them together (Shift adds); drag to move, corner handles resize, Delete removes')}
         {toolBtn('laser', '🔴', 'Laser pointer — a glowing trace that stays while you hold the pen down and fades when you lift it; not saved, seen live by everyone on the board')}
         {!readOnly && toolBtn('note', '🗒', 'Sticky note')}
         {!readOnly && <button class="small-btn" title="Add images (or paste / drag them in)" onClick={pickImages}>{face('bd-image', '🖼')}</button>}
@@ -702,7 +927,8 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
         {!readOnly && <span class="board-sep" />}
         {!readOnly && <Toolbar id="board-draw" groups={drawingToolbar({
           tool: tool === 'pen' || tool === 'highlighter' ? 'pen' : tool,
-          setTool: next => { if (next === 'pen') setTool(loadDeckInk().pen); else if (next === 'eraser') setTool('eraser'); },
+          setTool: next => { if (next === 'pen') setTool(loadDeckInk().pen); else if (next === 'eraser' || next === 'lasso') setTool(next); },
+          lasso: { kinds: ['ink', 'shapes', 'pictures', 'text'], textLabel: 'Notes', colors: () => usedColors([...objects.values()].map(o => o.color)) },
           ink: { presets: loadDeckInk(), set: patch => saveDeckInk(patchDeckInk(loadDeckInk(), patch)), draw: on => setTool(on ? loadDeckInk().pen : 'select') },
           done: false,
           shapes: { tool: isShapeTool(tool) ? tool : null, set: kind => setTool(kind) },

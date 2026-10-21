@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { parseTex, writeTex } from '../packages/core/src/tex/index.ts';
-import { inkSvg, extractInkData, strokePathD, laserPathD, inkBounds, insetToPm, pmToLyxBody, lyxToPmNode, pointInPolygon, segmentsIntersect, polylineHitsPolygon, rectHitsPolygon, type InkStroke, type LyxDocument } from '../packages/core/src/index.ts';
+import { inkSvg, extractInkData, strokePathD, laserPathD, inkBounds, insetToPm, pmToLyxBody, lyxToPmNode, pointInPolygon, segmentsIntersect, polylineHitsPolygon, rectHitsPolygon, rectMostlyInPolygon, type InkStroke, type LyxDocument } from '../packages/core/src/index.ts';
 
 const DATA = JSON.stringify({
   v: 1,
@@ -157,6 +157,13 @@ describe('lasso geometry (Goodnotes semantics: touching the lasso is enough)', (
     // a narrow lasso crossing the rectangle without a vertex inside it
     const tall: [number, number][] = [[40, -50], [60, -50], [60, 150], [40, 150]];
     expect(rectHitsPolygon(0, 0, 100, 100, tall)).toBe(true);
+  });
+
+  it('the lasso takes a picture or a note when most of it is inside (a stroke: when it touches it)', () => {
+    expect(rectMostlyInPolygon(20, 20, 10, 10, square)).toBe(true);
+    expect(rectMostlyInPolygon(80, 20, 60, 20, square)).toBe(false);    // a third of it inside
+    expect(rectMostlyInPolygon(30, 20, 90, 20, square)).toBe(true);     // more than half
+    expect(rectMostlyInPolygon(-50, -50, 300, 300, square)).toBe(false); // the lasso inside a big picture: not the picture
   });
 });
 

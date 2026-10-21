@@ -1193,7 +1193,7 @@ api.post('/docs/*/ai-repair/apply', async (req, res) => {
 /** Whether ⌘K rewriting / autocomplete can work on this server (a key is configured) and with which models. */
 api.get('/ai/status', (_req, res) => { res.json(aiStatus()); });
 
-/** The math keyboard's pen: handwriting (a PNG) read as LaTeX — up to three readings, most likely first. */
+/** The math keyboard's pen: handwriting (a PNG) read as LaTeX — up to three readings, most likely first; `notes`: the lasso's Convert to text, read as text with $…$ math. */
 api.post('/ai/ink', async (req, res) => {
   try {
     if (!aiAvailable()) { res.status(503).json({ error: 'Handwriting recognition is not configured on this server (OPENROUTER_API_KEY is unset).' }); return; }
@@ -1201,7 +1201,7 @@ api.post('/ai/ink', async (req, res) => {
     const body = req.body ?? {};
     const ac = new AbortController();
     req.on('close', () => { if (!res.writableEnded) ac.abort(); });
-    const candidates = await recognizeInk({ image: String(body.image ?? ''), before: typeof body.before === 'string' ? body.before : undefined, after: typeof body.after === 'string' ? body.after : undefined, text: body.text === true, model: body.model }, ac.signal);
+    const candidates = await recognizeInk({ image: String(body.image ?? ''), before: typeof body.before === 'string' ? body.before : undefined, after: typeof body.after === 'string' ? body.after : undefined, text: body.text === true, notes: body.notes === true, model: body.model }, ac.signal);
     res.json({ candidates });
   } catch (e) {
     if (e instanceof AiError) { if (e.status !== 499) res.status(e.status).json({ error: e.message }); return; }

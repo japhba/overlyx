@@ -267,6 +267,12 @@ describe('handwriting (the math keyboard\'s pen)', () => {
     expect(await ai.recognizeInk({ image: PNG, text: true })).toEqual(['for all']);
     expect(lastRequest.messages[1].content[0].text).toContain('\\text{');
   });
+  it('handwritten notes (the lasso\'s Convert to text) are read as text, lines and $…$ math kept', async () => {
+    nextReply = '```json\n{"text": ["Lasso the ink\\nthen $x^{2}$", "Lasso the ink\\nthen $x^{2}$"]}\n```';
+    expect(await ai.recognizeInk({ image: PNG, notes: true })).toEqual(['Lasso the ink\nthen $x^{2}$']);
+    expect(lastRequest.messages[0].content).toBe(ai.NOTES_PROMPT);
+    expect(ai.parseNotesReply('just words')).toEqual(['just words']);
+  });
   it('only PNG data URLs, not too large', async () => {
     await expect(ai.recognizeInk({ image: 'https://example.com/x.png' })).rejects.toMatchObject({ status: 400 });
     await expect(ai.recognizeInk({ image: 'data:image/png;base64,' + 'A'.repeat(ai.INK_MAX_IMAGE) })).rejects.toMatchObject({ status: 413 });

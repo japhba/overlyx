@@ -12,11 +12,16 @@
  * Yjs awareness channel and are drawn live; every finished change is a normal ProseMirror
  * transaction, so undo (Ctrl+Z) and collaboration come from the existing machinery.
  *
- * Tools: pen and highlighter (each with its own colour and width, like Goodnotes' pens), eraser
- * (whole strokes), and a lasso — it closes itself and selects every stroke/image it touches, not
- * only what it encircles completely — giving a selection box with corner handles (drag inside to
- * move, handles to resize, Delete removes; moved items re-anchor to the paragraph they end up
- * beside). Clicking the canvas takes the
+ * Tools: pen and highlighter (each with its own colour and width, like Goodnotes' pens; drawn and
+ * held still at the end, a stroke becomes the shape it was meant to be — core/shapesnap.ts), eraser
+ * (whole strokes or, precise, the part under it; its size; the highlighter's alone — Draw's eraser
+ * settings), and a lasso — it closes itself and selects every stroke it touches and the pictures it
+ * mostly holds, of the kinds and colours its settings let it take — giving a selection box with
+ * corner handles (drag inside to move, handles to resize, the round one above to turn strokes,
+ * Delete removes; moved items re-anchor to the paragraph they end up beside) and a bar over it
+ * (deliverable/lassobar.tsx: colour, thinner / thicker, duplicate, copy, cut — the clipboard shared
+ * with whiteboards, deliverable/inkselect.ts —, convert to shapes or to text: a comment on the
+ * paragraph beside it). Clicking the canvas takes the
  * caret out of the text ("the canvas is focused"): a pasted image then lands on the margin
  * canvas instead of becoming a LaTeX figure in the document. The laser pointer is the one tool
  * that reaches over the text column too: its glowing trace stays while the pen is down, fades when
@@ -26,7 +31,10 @@ import { Plugin, PluginKey } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
 import type { Awareness } from 'y-protocols/awareness';
-import { schema, strokePathD, strokeRuns, laserPathD, polylineHitsPolygon, rectHitsPolygon, type InkStroke, type InkImage } from '@overlyx/core';
+import { schema, strokePathD, strokeRuns, laserPathD, polylineHitsPolygon, rectMostlyInPolygon, commentHeader, formatTimestamp, type InkStroke, type InkImage } from '@overlyx/core';
+import { Fragment } from 'prosemirror-model';
+import type { Transaction } from 'prosemirror-state';
+import { h, render } from 'preact';
 import { graphicsUrl } from '../../api';
 import { viewProject, viewDocDir, resolveDocPath, editorContext } from '../context';
 import { imageFiles, imageExt, uploadBaseName, uploadUnique, isSvgMarkup, svgFile } from '../imagepaste';
@@ -56,6 +64,12 @@ export { INK_PALETTES, HIGHLIGHT_OPACITY } from '@overlyx/core/inkpresets.ts';
 import { INK_PALETTES, HIGHLIGHT_OPACITY } from '@overlyx/core/inkpresets.ts';
 import { loadDeckInk, saveDeckInk, patchDeckInk, subscribeDeckInk, type DeckInk } from '../../deliverable/deckink';
 import { scratchOut, SCRATCH_HOLD_MS, SCRATCH_HOLD_PX } from '@overlyx/core/scratchout.ts';
+import { snapShape, SNAP_HOLD_MS, SNAP_LEAVE_PX } from '@overlyx/core/shapesnap.ts';
+import { eraseAlong } from '@overlyx/core/inkerase.ts';
+import { ERASER_PX } from '../../deliverable/deckink';
+import { lassoGroups, readHandwriting, chooseReading, readingError, type LassoActions } from '../../deliverable/lassobar';
+import { LassoBar, pasteGroups } from '../../deliverable/InkSelectionBar';
+import { lassoTakes, usedColors, makeInkClip, holdInk, heldInk, pastedInk, rotatePts, rotationAngle, thickened, type InkClip } from '../../deliverable/inkselect';
 import { closeUndoGroup } from '../collab';
 import { documentViewScale } from '../viewscale';
 import { strokeWatch, strokeEnded } from '../../glitches';
@@ -265,8 +279,8 @@ interface LiveLaser { b: number; pts: [number, number][] }
 interface RemoteLaser { b: number; pts: [number, number][]; color: string; name: string; fadeStart: number | null }
 /** one selected thing, addressed inside its sketch node */
 interface SelItem { src: string; kind: 'stroke' | 'img'; idx: number }
-/** live transform while the selection is dragged: scale about (ox, oy), then translate */
-interface Xform { dx: number; dy: number; sx: number; sy: number; ox: number; oy: number }
+/** live transform while the selection is dragged: scale about (ox, oy), then translate; or turned by `rot.a` about its middle */
+interface Xform { dx: number; dy: number; sx: number; sy: number; ox: number; oy: number; rot?: { a: number; cx: number; cy: number } }
 interface Rect { x: number; y: number; w: number; h: number }
 
 const parseCache = new Map<string, InkData>();
@@ -300,6 +314,33 @@ const newSrc = () => `figures/ink-${Date.now().toString(36)}-${Math.random().toS
 
 export const inkKey = new PluginKey('lyx-ink');
 
+/** the ink layers of the open documents (the lasso's colour filter offers the colours their strokes have) */
+const layers = new Set<InkLayer>();
+/** the colours of the strokes in the open documents' margins, the most used first */
+export function inkColorsInUse(): string[] {
+  const all: string[] = [];
+  for (const l of layers) all.push(...l.strokeColors());
+  return usedColors(all);
+}
+
+/** no text selection, loupe or callout while the pen or a finger draws on the canvas (iOS's would come up over the ink), until it lifts */
+function inking(): void {
+  const html = document.documentElement;
+  if (html.classList.contains('ol-inking')) return;
+  html.classList.add('ol-inking');
+  const off = () => { html.classList.remove('ol-inking'); removeEventListener('pointerup', off, true); removeEventListener('pointercancel', off, true); };
+  addEventListener('pointerup', off, true);
+  addEventListener('pointercancel', off, true);
+}
+
+/** `path` (project-relative) as seen from the directory `dir` (a picture's src in a document there) */
+function relativeTo(dir: string, path: string): string {
+  const d = dir.split('/').filter(Boolean), p = path.split('/').filter(Boolean);
+  let i = 0;
+  while (i < d.length && i < p.length - 1 && d[i] === p[i]) i++;
+  return [...d.slice(i).map(() => '..'), ...p.slice(i)].join('/');
+}
+
 export function inkPlugin(awareness: Awareness): Plugin {
   return new Plugin({
     key: inkKey,
@@ -315,8 +356,23 @@ class InkLayer {
   private raf = 0;
   private ro: ResizeObserver | null = null;
   private unsub: (() => void)[] = [];
-  /** the stroke being drawn here right now (content coordinates of the scroller) */
-  private live: (LiveInk & { edgeX: number; anchorTop: number }) | null = null;
+  /**
+   * the stroke being drawn here right now (content coordinates of the scroller); `raw`: the stroke as
+   * drawn once draw and hold snapped it to a shape (`pts` is the shape then)
+   */
+  private live: (LiveInk & { edgeX: number; anchorTop: number; raw?: [number, number, number][] }) | null = null;
+  /** draw and hold: where the pen came to rest, and the timer that snaps the stroke when it stays there */
+  private hold: { x: number; y: number; timer: ReturnType<typeof setTimeout> } | null = null;
+  /** where the pen rested when the stroke snapped (client px): moving on from there takes it back as drawn */
+  private snappedAt: { x: number; y: number } | null = null;
+  /** the eraser's last place (content coordinates): the precise eraser rubs along the way from there */
+  private eraseLast: [number, number] | null = null;
+  /** the eraser (not the pen's other end) is rubbing: its settings may give the pen back when it lifts */
+  private erasing = false;
+  /** the lasso selection's bar (and the Paste one), rendered by Preact outside the scroller */
+  private bar = document.createElement('div');
+  /** a tap with the lasso on nothing, something copied: the Paste bar there (content coordinates) */
+  private pasteAt: [number, number] | null = null;
   /** the stroke's points as the screen had them, for a point far off (glitches.ts) */
   private watch: StrokeWatch | null = null;
   /** the laser trace being held (content coordinates) and the one fading after a lift */
@@ -331,7 +387,7 @@ class InkLayer {
   private lasso: [number, number][] | null = null;
   private selection: SelItem[] | null = null;
   private xform: Xform | null = null;
-  private dragSel: { mode: 'move' | 'resize'; corner: string; startX: number; startY: number; base: Rect; pointerId: number } | null = null;
+  private dragSel: { mode: 'move' | 'resize' | 'rotate'; corner: string; startX: number; startY: number; base: Rect; pointerId: number } | null = null;
   private pointerId: number | null = null;
   private lastAwarenessSend = 0;
   /** the canvas was clicked (the text caret is deactivated): pasted images go to the margins */
@@ -349,13 +405,17 @@ class InkLayer {
     this.scroller.insertBefore(this.canvas, this.scroller.firstChild);
     this.selBox.className = 'ink-sel';
     this.selBox.hidden = true;
-    for (const c of ['nw', 'ne', 'sw', 'se']) {
-      const h = document.createElement('span');
-      h.className = 'ink-handle ' + c;
-      h.dataset.corner = c;
-      this.selBox.appendChild(h);
+    for (const c of ['nw', 'ne', 'sw', 'se', 'rot']) {
+      const el = document.createElement('span');
+      el.className = 'ink-handle ' + c;
+      el.dataset.corner = c;
+      if (c === 'rot') el.title = 'Rotate (Shift: in steps of 15°)';
+      this.selBox.appendChild(el);
     }
     this.scroller.appendChild(this.selBox);
+    this.bar.className = 'ink-lasso-bar';
+    document.body.appendChild(this.bar);
+    layers.add(this);
     this.collect();
 
     const onScroll = () => this.schedule();
@@ -402,7 +462,8 @@ class InkLayer {
     this.unsub.push(() => view.dom.removeEventListener('focusin', onEditorFocus));
     document.addEventListener('keydown', this.onKeyDown, true);
     document.addEventListener('paste', this.onPaste, true);
-    this.unsub.push(() => document.removeEventListener('keydown', this.onKeyDown, true), () => document.removeEventListener('paste', this.onPaste, true));
+    document.addEventListener('copy', this.onCopy, true);
+    this.unsub.push(() => document.removeEventListener('keydown', this.onKeyDown, true), () => document.removeEventListener('paste', this.onPaste, true), () => document.removeEventListener('copy', this.onCopy, true));
     this.applyMode();
     this.schedule();
   }
@@ -420,6 +481,10 @@ class InkLayer {
     cancelAnimationFrame(this.raf);
     this.canvas.remove();
     this.selBox.remove();
+    render(null, this.bar);
+    this.bar.remove();
+    layers.delete(this);
+    if (this.hold) clearTimeout(this.hold.timer);
     if (this.live) try { this.awareness.setLocalStateField('ink', null); } catch { /* closing */ }
     if (this.laser) try { this.awareness.setLocalStateField('laser', null); } catch { /* closing */ }
   }
@@ -533,7 +598,13 @@ class InkLayer {
   private applyXform(x: number, y: number): [number, number] {
     const f = this.xform;
     if (!f) return [x, y];
+    if (f.rot) return rotatePts([[x, y]], f.rot.cx, f.rot.cy, f.rot.a)[0] as [number, number];
     return [(x - f.ox) * f.sx + f.ox + f.dx, (y - f.oy) * f.sy + f.oy + f.dy];
+  }
+
+  /** the colours of this document's strokes, as often as they are used */
+  strokeColors(): string[] {
+    return this.entries.flatMap(e => e.data.strokes.map(st => st.color));
   }
 
   private isSelected(src: string, kind: 'stroke' | 'img', idx: number): boolean {
@@ -566,6 +637,7 @@ class InkLayer {
         this.canvas.getContext('2d')?.clearRect(0, 0, this.canvas.width, this.canvas.height);
         this.canvas.style.display = 'none';   // (unsized, it would take room at the top)
         this.selBox.hidden = true;
+        render(null, this.bar);
         this.blank = true;
       }
       return;
@@ -597,7 +669,12 @@ class InkLayer {
     const enter = (edgeX: number, top: number, sel: boolean) => {
       ctx.save();
       ctx.translate(-g.scrollLeft, -g.scrollTop);
-      if (sel && this.xform) {
+      if (sel && this.xform?.rot) {
+        const r = this.xform.rot;
+        ctx.translate(r.cx, r.cy);
+        ctx.rotate(r.a);
+        ctx.translate(-r.cx, -r.cy);
+      } else if (sel && this.xform) {
         const f = this.xform;
         ctx.translate(f.dx + f.ox, f.dy + f.oy);
         ctx.scale(f.sx, f.sy);
@@ -651,7 +728,7 @@ class InkLayer {
     // the local stroke being drawn (content coordinates, not yet relativised)
     if (this.live && this.live.pts.length) {
       const l = this.live;
-      const rel: InkStroke = { color: this.scratch?.hits.size ? '#8a9099' : l.color, w: l.w, o: l.o, nib: l.nib, pressure: l.pressure, pts: l.pts.map(([x, y, p]) => [(x - l.edgeX) / z, (y - l.anchorTop) / z, p] as [number, number, number]) };
+      const rel: InkStroke = { color: this.scratch?.hits.size ? '#8a9099' : l.color, w: l.w, o: l.o, ...(l.raw ? { poly: true as const } : { nib: l.nib, pressure: l.pressure }), pts: l.pts.map(([x, y, p]) => [(x - l.edgeX) / z, (y - l.anchorTop) / z, p] as [number, number, number]) };
       drawStroke(rel, l.edgeX, l.anchorTop);
     }
     // the lasso being drawn: always shown closed (a segment back to the start), lightly filled —
@@ -674,14 +751,20 @@ class InkLayer {
     // the selection box (a DOM overlay: it carries the handles and the move cursor)
     const r = this.selRect(g);
     if (r) {
-      const [x1, y1] = this.applyXform(r.x, r.y);
-      const [x2, y2] = this.applyXform(r.x + r.w, r.y + r.h);
+      // (turning: the box as it was, turned with the strokes)
+      const rot = this.xform?.rot;
+      const [x1, y1] = rot ? [r.x, r.y] : this.applyXform(r.x, r.y);
+      const [x2, y2] = rot ? [r.x + r.w, r.y + r.h] : this.applyXform(r.x + r.w, r.y + r.h);
       this.selBox.hidden = false;
       this.selBox.style.left = Math.min(x1, x2) + 'px';
       this.selBox.style.top = Math.min(y1, y2) + 'px';
       this.selBox.style.width = Math.abs(x2 - x1) + 'px';
       this.selBox.style.height = Math.abs(y2 - y1) + 'px';
+      this.selBox.style.transform = rot ? `rotate(${rot.a}rad)` : '';
+      // strokes alone turn
+      (this.selBox.querySelector('.ink-handle.rot') as HTMLElement).style.display = this.selection!.every(it => it.kind === 'stroke') ? '' : 'none';
     } else this.selBox.hidden = true;
+    this.renderBar(g, r);
     // laser traces on top of everything: the others' (fading once their field vanished), then mine
     if (this.paintLasers(ctx, g, z)) this.schedule();
   }
@@ -806,9 +889,10 @@ class InkLayer {
   }
 
   /**
-   * A pen (the Pencil, a stylus) on a margin while Draw is off: Draw comes on and the stroke starts —
-   * on the margin itself (the scroller, the page around the text), not on the text, a chip or a button.
-   * Fingers and the mouse still need Draw; the pen's settings can turn this off (`penInks`).
+   * A pen (the Pencil, a stylus) on a margin while Draw is off: the stroke is drawn — on the margin
+   * itself (the scroller, the page around the text), not on the text, a chip or a button — and Draw
+   * stays off: its row opens only when Draw (or the pen button) is tapped, and folds when it is put
+   * away. Fingers and the mouse still need Draw; the pen's settings can turn this off (`penInks`).
    */
   private onPenInMargin = (e: PointerEvent) => {
     if (ui.active || e.pointerType !== 'pen' || e.button !== 0 || !ui.drawing.penInks || !this.editable() || !this.scroller) return;
@@ -819,21 +903,18 @@ class InkLayer {
     if (cx >= g.edgeL - 2 && cx <= g.edgeR + 2) return;
     e.preventDefault();
     e.stopPropagation();
-    if (ui.tool !== ui.drawing.pen) setInk({ tool: ui.drawing.pen });
     if (this.blank) { this.canvas.style.display = ''; this.blank = false; }
-    // this stroke is drawn as in Draw; Draw itself comes on when the pen lifts (the shells' Draw widens
-    // the strip in Modern: the page would move under the pen)
+    // this stroke is drawn as in Draw, with the pen in hand; Draw itself stays off
     this.penDraw = true;
     this.canvas.style.pointerEvents = 'auto';
     this.onDown(e);
-    if (this.pointerId === null) this.endPenDraw(false);
+    if (this.pointerId === null) this.endPenDraw();
   };
-  /** the stroke a pen began on a margin with Draw off is over: Draw on (`activate`) */
-  private endPenDraw(activate: boolean) {
+  /** the stroke a pen began on a margin with Draw off is over (Draw stays off) */
+  private endPenDraw() {
     if (!this.penDraw) return;
     this.penDraw = false;
     this.canvas.style.pointerEvents = '';
-    if (activate) setInk({ active: true });
   }
 
   private onDown = (e: PointerEvent) => {
@@ -843,7 +924,7 @@ class InkLayer {
     if (e.button !== 0 && !(e.pointerType === 'pen' && e.buttons & 32)) return;
     const g = this.geom();
     const [cx, cy] = this.toContent(e, g);
-    if (ui.tool === 'laser') {
+    if (ui.tool === 'laser' && !this.penDraw) {
       // the trace is anchored to the paragraph beside the first point so the others see it in place
       const anchor = this.anchorAt(e.clientY, g);
       const blockPos = anchor?.blockPos ?? this.blockPosOfIndex(this.view.state.doc.childCount - 1);
@@ -860,17 +941,22 @@ class InkLayer {
     }
     if (!this.editable()) return;
     this.focusCanvas(cx, cy);
+    this.pasteAt = null;
+    inking();
     const side: 'left' | 'right' = cx < (g.edgeL + g.edgeR) / 2 ? 'left' : 'right';
-    if (ui.tool === 'lasso') {
+    if (ui.tool === 'lasso' && !this.penDraw) {
       this.lasso = [[cx, cy]];
       this.pointerId = e.pointerId;
       this.canvas.setPointerCapture(e.pointerId);
       e.preventDefault();
       return;
     }
-    if (ui.tool === 'eraser' || (e.pointerType === 'pen' && e.buttons & 32)) {
+    if ((ui.tool === 'eraser' && !this.penDraw) || (e.pointerType === 'pen' && e.buttons & 32)) {
       this.pointerId = e.pointerId;
       this.canvas.setPointerCapture(e.pointerId);
+      this.eraseLast = null;
+      this.erasing = ui.tool === 'eraser' && !(e.buttons & 32);
+      this.stopCapturing();
       this.eraseAt(e, g);
       e.preventDefault();
       return;
@@ -887,7 +973,7 @@ class InkLayer {
       this.view.dispatch(this.view.state.tr.insert(anchor.blockPos + 1, node).setMeta('addToHistory', true));
       this.collect();
     }
-    const hl = ui.tool === 'highlighter';
+    const hl = this.penDraw ? ui.drawing.pen === 'highlighter' : ui.tool === 'highlighter';
     const pen = ui.pens[hl ? 'highlighter' : 'pen'];
     this.live = {
       src, side,
@@ -901,6 +987,8 @@ class InkLayer {
     };
     this.endScratch();
     if (ui.drawing.scribble && !hl) this.scratch = { cands: null, hits: new Set(), rest: { x: e.clientX, y: e.clientY, t: performance.now(), timer: null }, judged: 0 };
+    this.endHold();
+    if (ui.drawing.snap) this.hold = { x: e.clientX, y: e.clientY, timer: setTimeout(() => this.snapLive(), SNAP_HOLD_MS) };
     this.pointerId = e.pointerId;
     this.canvas.setPointerCapture(e.pointerId);
     this.addPoint(e, g);
@@ -910,6 +998,19 @@ class InkLayer {
 
   private addPoint(e: PointerEvent, g: ReturnType<InkLayer['geom']>) {
     if (!this.live) return;
+    // snapped to a shape by draw and hold: it stays while the pen rests; moving on (it only paused) takes the stroke back as drawn
+    if (this.live.raw) {
+      const at = this.snappedAt;
+      if (at && Math.hypot(e.clientX - at.x, e.clientY - at.y) <= SNAP_LEAVE_PX) return;
+      this.live.pts = this.live.raw;
+      this.live.raw = undefined;
+      this.snappedAt = null;
+    }
+    const hd = this.hold;
+    if (!hd || Math.hypot(e.clientX - hd.x, e.clientY - hd.y) > SCRATCH_HOLD_PX) {
+      if (hd) clearTimeout(hd.timer);
+      this.hold = ui.drawing.snap ? { x: e.clientX, y: e.clientY, timer: setTimeout(() => this.snapLive(), SNAP_HOLD_MS) } : null;
+    }
     const coalesced = e.getCoalescedEvents?.();
     const events = coalesced?.length ? coalesced : [e];
     for (const ev of events) {
@@ -981,7 +1082,14 @@ class InkLayer {
   private onUp = (e: PointerEvent) => {
     if (this.pointerId !== e.pointerId) return;
     this.pointerId = null;
-    this.endPenDraw(true);
+    this.endPenDraw();
+    this.endHold();
+    if (this.erasing) {
+      // the eraser's settings: back to the pen after erasing (GoodNotes' auto-deselect)
+      this.erasing = false;
+      if (ui.drawing.eraser.back) setInk({ tool: ui.drawing.pen });
+    }
+    this.eraseLast = null;
     try { this.canvas.releasePointerCapture(e.pointerId); } catch { /* gone */ }
     if (this.laser) {
       // lifted: the trace lingers and fades; the others fade their copy when the field vanishes
@@ -995,12 +1103,14 @@ class InkLayer {
       const poly = this.lasso;
       this.lasso = null;
       this.selection = poly.length > 4 ? this.lassoSelect(poly) : null;
+      // a tap on nothing with something copied: Paste there (GoodNotes' lasso tap)
+      if (poly.length <= 4 && heldInk()) this.pasteAt = poly[0];
       this.schedule();
       return;
     }
     const l = this.live;
     // a scribble over strokes erases them (core/scratchout.ts; the pen resting at its end: scratch and hold)
-    const scratched = this.scratch ? this.scratchTargets(performance.now() - this.scratch.rest.t >= SCRATCH_HOLD_MS) : [];
+    const scratched = this.scratch && !l?.raw ? this.scratchTargets(performance.now() - this.scratch.rest.t >= SCRATCH_HOLD_MS) : [];
     this.endScratch();
     this.live = null;
     try { this.awareness.setLocalStateField('ink', null); } catch { /* closing */ }
@@ -1009,19 +1119,31 @@ class InkLayer {
     if (!l || !l.pts.length) { this.schedule(); return; }
     strokeEnded(watch);
     const z = zoom();
+    const rel = (pts: [number, number, number][]) => pts.map(([x, y, p]) => [round4((x - l.edgeX) / z), round4((y - l.anchorTop) / z), Math.round(p * 100) / 100] as [number, number, number]);
+    // (snapped by draw and hold: the stroke as drawn first, its shape a step later)
     const stroke: InkStroke = {
       side: l.side, color: l.color, w: l.w,
       nib: l.nib, pressure: l.pressure,
       ...(l.o !== undefined ? { o: l.o } : {}),
-      pts: l.pts.map(([x, y, p]) => [round4((x - l.edgeX) / z), round4((y - l.anchorTop) / z), Math.round(p * 100) / 100] as [number, number, number]),
+      pts: rel(l.raw ?? l.pts),
     };
     const found = this.findBySrc(l.src);
     if (!found) { this.schedule(); return; }   // the anchor vanished mid-stroke (remote delete)
     const data = parseData(found.node.attrs.data);
     const next: InkData = { v: 1, strokes: [...data.strokes, stroke].slice(-300), imgs: data.imgs };
     // (a scribble's own undo step: see below)
-    if (scratched.length) this.stopCapturing();
+    if (scratched.length || l.raw) this.stopCapturing();
     this.view.dispatch(this.view.state.tr.setNodeMarkup(found.pos, undefined, { ...found.node.attrs, data: serializeData(next) }));
+    if (l.raw) {
+      // the shape a step after the stroke: the first undo brings the stroke back as drawn
+      this.stopCapturing();
+      const now = this.findBySrc(l.src);
+      if (now) {
+        const d = parseData(now.node.attrs.data);
+        const shape: InkStroke = { side: l.side, color: l.color, w: l.w, ...(l.o !== undefined ? { o: l.o } : {}), poly: true, pts: rel(l.pts) };
+        this.view.dispatch(this.view.state.tr.setNodeMarkup(now.pos, undefined, { ...now.node.attrs, data: serializeData({ v: 1, strokes: d.strokes.map((st, i) => (i === d.strokes.length - 1 ? shape : st)), imgs: d.imgs }) }));
+      }
+    }
     if (scratched.length) {
       // it and what it covers go, a step after it came: the first undo brings them back with the
       // scribble as ink, in case it was drawing (OneNote)
@@ -1036,6 +1158,34 @@ class InkLayer {
     }
     this.schedule();
   };
+
+  private endHold() {
+    if (this.hold) clearTimeout(this.hold.timer);
+    this.hold = null;
+  }
+
+  /**
+   * The pen rested at the end of the stroke: the shape it was meant to be (core/shapesnap.ts), at
+   * once, while the pen is still down — unless the scribble's scratch-and-hold would erase something:
+   * that wins. The stroke as drawn is kept for the first undo.
+   */
+  private snapLive() {
+    const at = this.hold;
+    this.hold = null;
+    const l = this.live;
+    if (!l || l.raw || this.pointerId === null) return;
+    if (this.scratch && this.scratchTargets(true).length) return;
+    const shape = snapShape(l.pts.map(([x, y]) => [x, y] as [number, number]));
+    if (!shape) return;
+    l.raw = l.pts;
+    l.pts = shape.pts.map(([x, y]) => [x, y, 0] as [number, number, number]);
+    this.snappedAt = at ? { x: at.x, y: at.y } : null;
+    this.endScratch();
+    const z = zoom();
+    const liveMsg: LiveInk = { src: l.src, side: l.side, color: l.color, w: l.w, o: l.o, poly: true, pts: l.pts.map(([x, y]) => [round4((x - l.edgeX) / z), round4((y - l.anchorTop) / z), 0] as [number, number, number]) };
+    try { this.awareness.setLocalStateField('ink', liveMsg); } catch { /* not connected */ }
+    this.schedule();
+  }
 
   /** the pen's scratch-out tracking ended: nothing faded any more */
   private endScratch() {
@@ -1077,7 +1227,10 @@ class InkLayer {
   private onCancel = (e: PointerEvent) => {
     if (this.pointerId !== e.pointerId) return;
     this.pointerId = null;
-    this.endPenDraw(false);
+    this.endPenDraw();
+    this.endHold();
+    this.erasing = false;
+    this.eraseLast = null;
     this.endScratch();
     this.live = null;
     this.lasso = null;
@@ -1087,9 +1240,9 @@ class InkLayer {
   };
 
   /**
-   * Everything the (auto-closed) lasso touches — Goodnotes semantics: a stroke is selected when
-   * any part of it lies inside the lasso or crosses its line, an image when the lasso overlaps it;
-   * nothing has to be encircled completely.
+   * What the (auto-closed) lasso takes — Goodnotes semantics: a stroke is selected when any part of
+   * it lies inside the lasso or crosses its line, a picture when most of it is inside; of the kinds and
+   * colours Draw's lasso settings let it take (handwriting, shapes — `poly` strokes —, pictures).
    */
   private lassoSelect(poly: [number, number][]): SelItem[] | null {
     const g = this.geom();
@@ -1099,16 +1252,228 @@ class InkLayer {
       const top = this.blockTop(e.blockPos, g);
       if (top === null) continue;
       e.data.strokes.forEach((s, i) => {
+        if (!lassoTakes(s.poly ? 'shapes' : 'ink', [s.color])) return;
         const edge = this.edgeX(s.side, g);
         const abs = s.pts.map(([px, py]) => [edge + px * z, top + py * z] as [number, number]);
         if (polylineHitsPolygon(abs, poly)) out.push({ src: e.src, kind: 'stroke', idx: i });
       });
-      e.data.imgs.forEach((im, i) => {
+      if (lassoTakes('pictures', [])) e.data.imgs.forEach((im, i) => {
         const edge = this.edgeX(im.side, g);
-        if (rectHitsPolygon(edge + im.dx * z, top + im.dy * z, im.w * z, im.h * z, poly)) out.push({ src: e.src, kind: 'img', idx: i });
+        if (rectMostlyInPolygon(edge + im.dx * z, top + im.dy * z, im.w * z, im.h * z, poly)) out.push({ src: e.src, kind: 'img', idx: i });
       });
     }
     return out.length ? out : null;
+  }
+
+  /* ------------------------------------------- the lasso's bar, its clipboard, converting */
+
+  /** the bar over the selection (r: its box, content coordinates), or Paste where the lasso tapped; nothing while something is dragged or drawn */
+  private renderBar(g: ReturnType<InkLayer['geom']>, r: Rect | null) {
+    const client = (x: number, y: number, w: number, hh: number) => ({ x: x - g.scrollLeft + g.sRect.left, y: y - g.scrollTop + g.sRect.top, w, h: hh });
+    const busy = this.dragSel || this.lasso || this.live || this.pointerId !== null || !this.editable();
+    if (r && this.selection && !busy) {
+      render(h(LassoBar, { id: 'ink-lasso-bar', groups: lassoGroups(this.lassoActions()), rect: client(r.x, r.y, r.w, r.h) }), this.bar);
+    } else if (this.pasteAt && !this.selection && !busy && ui.active && heldInk()) {
+      const [px, py] = this.pasteAt;
+      render(h(LassoBar, { id: 'ink-paste-bar', groups: pasteGroups(() => { const clip = heldInk(); this.pasteAt = null; if (clip) this.pasteClip(clip, [px, py]); }), rect: client(px, py, 0, 0) }), this.bar);
+    } else render(null, this.bar);
+  }
+
+  /** the selected strokes, where they are */
+  private selectedStrokes(): { it: SelItem; s: InkStroke; edge: number; top: number }[] {
+    const g = this.geom(), out: { it: SelItem; s: InkStroke; edge: number; top: number }[] = [];
+    for (const it of this.selection ?? []) {
+      if (it.kind !== 'stroke') continue;
+      const e = this.entries.find(x => x.src === it.src), s = e?.data.strokes[it.idx];
+      const top = e ? this.blockTop(e.blockPos, g) : null;
+      if (s && top !== null) out.push({ it, s, edge: this.edgeX(s.side, g), top });
+    }
+    return out;
+  }
+
+  /** the selected strokes changed one by one (`fn` returns the stroke as it should be, or null: as it is), one undo step */
+  private editStrokes(fn: (s: InkStroke, edge: number, top: number) => InkStroke | null): number {
+    const bySrc = new Map<string, Map<number, InkStroke>>();
+    let n = 0;
+    for (const { it, s, edge, top } of this.selectedStrokes()) {
+      const next = fn(s, edge, top);
+      if (!next) continue;
+      n++;
+      if (!bySrc.has(it.src)) bySrc.set(it.src, new Map());
+      bySrc.get(it.src)!.set(it.idx, next);
+    }
+    if (!n) return 0;
+    let tr = this.view.state.tr;
+    for (const [src, changes] of bySrc) {
+      const found = this.findBySrc(src);
+      if (!found) continue;
+      const data = parseData(found.node.attrs.data);
+      tr = tr.setNodeMarkup(found.pos, undefined, { ...found.node.attrs, data: serializeData({ v: 1, strokes: data.strokes.map((st, i) => changes.get(i) ?? st), imgs: data.imgs }) });
+    }
+    this.stopCapturing();
+    this.view.dispatch(tr);
+    this.stopCapturing();
+    this.collect();
+    this.schedule();
+    return n;
+  }
+
+  private removeSelection() {
+    if (!this.selection || !this.editable()) return;
+    const removeBySrc = new Map<string, { strokes: Set<number>; imgs: Set<number> }>();
+    for (const it of this.selection) {
+      let m = removeBySrc.get(it.src);
+      if (!m) { m = { strokes: new Set(), imgs: new Set() }; removeBySrc.set(it.src, m); }
+      (it.kind === 'stroke' ? m.strokes : m.imgs).add(it.idx);
+    }
+    this.selection = null;
+    this.stopCapturing();
+    this.rewrite(removeBySrc, []);
+    this.stopCapturing();
+  }
+
+  /** the selection as the ink clipboard has it (deliverable/inkselect.ts): in px at 100 % */
+  private clipOfSelection(): InkClip | null {
+    const g = this.geom(), z = zoom();
+    const project = viewProject(this.view) ?? '', dir = viewDocDir(this.view);
+    const strokes: InkClip['strokes'] = [], imgs: InkClip['imgs'] = [];
+    for (const it of this.selection ?? []) {
+      const e = this.entries.find(x => x.src === it.src);
+      const top = e ? this.blockTop(e.blockPos, g) : null;
+      if (!e || top === null) continue;
+      if (it.kind === 'stroke') {
+        const s = e.data.strokes[it.idx];
+        if (!s) continue;
+        const ox = this.edgeX(s.side, g) / z, oy = top / z;
+        strokes.push({ color: s.color, w: s.w, ...(s.o !== undefined ? { o: s.o } : {}), ...(s.poly ? { poly: true as const } : { ...(s.nib ? { nib: s.nib } : {}), ...(s.pressure !== undefined ? { pressure: s.pressure } : {}) }),
+          pts: s.pts.map(([x, y, p]) => [ox + x, oy + y, p] as [number, number, number]) });
+      } else {
+        const im = e.data.imgs[it.idx];
+        if (!im) continue;
+        imgs.push({ project, path: resolveDocPath(im.src, dir), x: this.edgeX(im.side, g) / z + im.dx, y: top / z + im.dy, w: im.w, h: im.h });
+      }
+    }
+    return makeInkClip({ strokes, imgs });
+  }
+
+  /** a clip pasted with its middle at `at` (content coordinates; else where the canvas was last clicked), selected with the lasso in hand */
+  private pasteClip(clip: InkClip, at?: [number, number] | null) {
+    if (!this.editable()) return;
+    const g = this.geom(), z = zoom();
+    const c = at ?? (this.lastPoint ? [this.lastPoint.x, this.lastPoint.y] as [number, number] : [g.edgeR + 24 + clip.w * z / 2, g.scrollTop + 80 + clip.h * z / 2] as [number, number]);
+    const ox = c[0] - (clip.w * z) / 2, oy = c[1] - (clip.h * z) / 2;
+    const project = viewProject(this.view) ?? '', dir = viewDocDir(this.view);
+    const placed: { blockPos: number; stroke?: InkStroke; img?: InkImage }[] = [];
+    let skipped = 0;
+    for (const st of clip.strokes) {
+      const abs = st.pts.map(([x, y, p]) => [ox + x * z, oy + y * z, p] as [number, number, number]);
+      const target = this.targetFor(Math.min(...abs.map(a => a[1])), abs.reduce((sum, a) => sum + a[0], 0) / abs.length, g);
+      if (!target) continue;
+      placed.push({ blockPos: target.blockPos, stroke: {
+        side: target.side, color: st.color, w: st.w, ...(st.o !== undefined ? { o: st.o } : {}), ...(st.poly ? { poly: true as const } : { ...(st.nib ? { nib: st.nib } : {}), ...(st.pressure !== undefined ? { pressure: st.pressure } : {}) }),
+        pts: abs.map(([x, y, p]) => [round4((x - target.edge) / z), round4((y - target.top) / z), p] as [number, number, number]),
+      } });
+    }
+    for (const im of clip.imgs) {
+      // (a picture is a file of its project: one copied from another project is not here)
+      if (im.project !== project) { skipped++; continue; }
+      const x = ox + im.x * z, y = oy + im.y * z;
+      const target = this.targetFor(y, x + (im.w * z) / 2, g);
+      if (!target) continue;
+      placed.push({ blockPos: target.blockPos, img: { side: target.side, src: relativeTo(dir, im.path), dx: round4((x - target.edge) / z), dy: round4((y - target.top) / z), w: im.w, h: im.h } });
+    }
+    if (skipped) editorContext.notify?.(`${skipped} picture${skipped > 1 ? 's' : ''} from another project left out`);
+    if (!placed.length) return;
+    this.stopCapturing();
+    this.rewrite(new Map(), placed);
+    this.stopCapturing();
+    if (ui.tool !== 'lasso') setInk({ tool: 'lasso' });
+  }
+
+  /** what the lasso bar does to the selection (deliverable/lassobar.tsx) */
+  private lassoActions(): LassoActions {
+    const strokes = this.selectedStrokes(), freehand = strokes.filter(x => !x.s.poly);
+    const colors = new Set(strokes.map(x => x.s.color.toLowerCase()));
+    const notify = (m: string, kind?: 'info' | 'error') => editorContext.notify?.(m, kind);
+    return {
+      color: colors.size === 1 ? [...colors][0] : null,
+      ...(strokes.length ? {
+        recolor: (c: string) => { this.editStrokes(s => ({ ...s, color: c })); },
+        thicken: (k: number) => { this.editStrokes(s => ({ ...s, w: thickened(s.w, k) })); },
+      } : {}),
+      duplicate: () => {
+        const g = this.geom(), r = this.selRect(g);
+        if (!r) return;
+        // the copies a little below and to the right, selected
+        this.stopCapturing();
+        this.commitXform({ dx: 16, dy: 16, sx: 1, sy: 1, ox: r.x, oy: r.y }, true);
+        this.stopCapturing();
+      },
+      copy: () => { const clip = this.clipOfSelection(); if (clip) { holdInk(clip); notify('Copied — Ctrl+V, or a tap with the lasso in a margin, pastes it'); } },
+      cut: () => { const clip = this.clipOfSelection(); if (clip) { holdInk(clip); this.removeSelection(); } },
+      remove: () => this.removeSelection(),
+      ...(freehand.length ? {
+        straighten: () => {
+          const z = zoom();
+          const n = this.editStrokes((s, edge, top) => {
+            if (s.poly) return null;
+            const shape = snapShape(s.pts.map(([x, y]) => [edge + x * z, top + y * z] as [number, number]));
+            if (!shape) return null;
+            const { nib: _nib, pressure: _pressure, ...rest } = s;
+            return { ...rest, poly: true, pts: shape.pts.map(([x, y]) => [round4((x - edge) / z), round4((y - top) / z), 0] as [number, number, number]) };
+          });
+          notify(n ? `${n} stroke${n > 1 ? 's' : ''} made ${n > 1 ? 'shapes' : 'a shape'} — Undo brings ${n > 1 ? 'them' : 'it'} back as drawn` : 'None of these strokes looks like a line, an arrow or a shape');
+        },
+        toText: () => void this.typeAsComment(),
+      } : {}),
+    };
+  }
+
+  /**
+   * The selected handwriting typed (the server's handwriting reader) and made a comment on the
+   * paragraph beside it, the handwriting gone — one undo step brings it back. Where there is no
+   * paragraph to comment on, the text is copied instead.
+   */
+  private async typeAsComment() {
+    const z = zoom();
+    const picked = this.selectedStrokes().filter(x => !x.s.poly);
+    if (!picked.length) return;
+    const g = this.geom(), r = this.selRect(g);
+    const notify = (m: string, kind?: 'info' | 'error') => editorContext.notify?.(m, kind);
+    notify('Reading the handwriting…');
+    let readings: string[];
+    try { readings = await readHandwriting(picked.map(({ s, edge, top }) => s.pts.map(([x, y]) => [edge + x * z, top + y * z] as [number, number])), 'notes'); } catch (err) { notify(readingError(err), 'error'); return; }
+    if (!readings.length) { notify('No handwriting could be read there'); return; }
+    const g2 = this.geom();
+    const text = await chooseReading(readings, r ? r.x - g2.scrollLeft + g2.sRect.left : 100, r ? r.y + r.h - g2.scrollTop + g2.sRect.top + 8 : 100);
+    if (!text) return;
+    // the paragraph beside the handwriting: its first stroke's
+    const entry = this.entries.find(e => e.src === picked[0].it.src);
+    const block = entry ? this.view.state.doc.nodeAt(entry.blockPos) : null;
+    let at = -1;
+    if (block && entry) {
+      if (block.isTextblock) at = entry.blockPos + block.nodeSize - 1;
+      else block.descendants((n, rel) => { if (n.isTextblock) { at = entry.blockPos + 1 + rel + n.nodeSize - 1; return false; } return true; });
+    }
+    if (at < 0) {
+      try { await navigator.clipboard.writeText(text); notify('Typed and copied: paste it where it goes'); } catch { notify('Typed: ' + text.slice(0, 200)); }
+      return;
+    }
+    const user = editorContext.user?.name ?? 'Anonymous';
+    const header = schema.nodes.paragraph.create({ layout: 'Plain Layout' }, schema.text(commentHeader(user, formatTimestamp())));
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+    const body = (lines.length ? lines : [text.trim()]).map(l => schema.nodes.paragraph.create({ layout: 'Plain Layout' }, l ? schema.text(l) : undefined));
+    const comment = schema.nodes.inset.create({ name: 'Note', arg: 'Comment', params: '[]', status: 'open' }, Fragment.from([header, ...body]));
+    const removeBySrc = new Map<string, { strokes: Set<number>; imgs: Set<number> }>();
+    for (const { it } of picked) {
+      if (!removeBySrc.has(it.src)) removeBySrc.set(it.src, { strokes: new Set(), imgs: new Set() });
+      removeBySrc.get(it.src)!.strokes.add(it.idx);
+    }
+    this.selection = null;
+    this.stopCapturing();
+    this.rewrite(removeBySrc, [], tr => tr.insert(at, comment));
+    this.stopCapturing();
+    notify('Typed as a comment on the paragraph beside it — Undo brings the handwriting back');
   }
 
   /* ------------------------------------------- selection: move / resize / delete */
@@ -1121,8 +1486,9 @@ class InkLayer {
     const [cx, cy] = this.toContent(e, g);
     this.focusCanvas(cx, cy);
     const corner = (e.target as HTMLElement).dataset?.corner ?? '';
-    this.dragSel = { mode: corner ? 'resize' : 'move', corner, startX: cx, startY: cy, base, pointerId: e.pointerId };
-    this.xform = { dx: 0, dy: 0, sx: 1, sy: 1, ox: base.x, oy: base.y };
+    this.dragSel = { mode: corner === 'rot' ? 'rotate' : corner ? 'resize' : 'move', corner, startX: cx, startY: cy, base, pointerId: e.pointerId };
+    this.xform = corner === 'rot' ? { dx: 0, dy: 0, sx: 1, sy: 1, ox: base.x, oy: base.y, rot: { a: 0, cx: base.x + base.w / 2, cy: base.y + base.h / 2 } } : { dx: 0, dy: 0, sx: 1, sy: 1, ox: base.x, oy: base.y };
+    this.pasteAt = null;
     this.selBox.setPointerCapture(e.pointerId);
     e.preventDefault();
     e.stopPropagation();
@@ -1135,6 +1501,11 @@ class InkLayer {
     const [cx, cy] = this.toContent(e, g);
     if (d.mode === 'move') {
       this.xform = { dx: cx - d.startX, dy: cy - d.startY, sx: 1, sy: 1, ox: d.base.x, oy: d.base.y };
+    } else if (d.mode === 'rotate') {
+      // turned about the box's middle by the angle the pointer went round it (Shift: steps of 15°)
+      const mx = d.base.x + d.base.w / 2, my = d.base.y + d.base.h / 2;
+      const a = rotationAngle(Math.atan2(cy - my, cx - mx) - Math.atan2(d.startY - my, d.startX - mx), e.shiftKey);
+      this.xform = { dx: 0, dy: 0, sx: 1, sy: 1, ox: d.base.x, oy: d.base.y, rot: { a, cx: mx, cy: my } };
     } else {
       // the corner opposite the dragged one stays put
       const ox = d.corner.includes('w') ? d.base.x + d.base.w : d.base.x;
@@ -1156,7 +1527,7 @@ class InkLayer {
     try { this.selBox.releasePointerCapture(e.pointerId); } catch { /* gone */ }
     const f = this.xform;
     this.xform = null;
-    if (f && (Math.abs(f.dx) > 0.5 || Math.abs(f.dy) > 0.5 || Math.abs(f.sx - 1) > 0.005 || Math.abs(f.sy - 1) > 0.005)) this.commitXform(f);
+    if (f && (Math.abs(f.dx) > 0.5 || Math.abs(f.dy) > 0.5 || Math.abs(f.sx - 1) > 0.005 || Math.abs(f.sy - 1) > 0.005 || Math.abs(f.rot?.a ?? 0) > 0.002)) this.commitXform(f);
     else this.schedule();
   };
 
@@ -1166,12 +1537,13 @@ class InkLayer {
    * migrates it into that paragraph's sketch node, creating one when needed) — all in one
    * transaction, so Ctrl+Z undoes the whole gesture.
    */
-  private commitXform(f: Xform) {
+  private commitXform(f: Xform, keep = false) {
     this.xform = f;   // applyXform reads it; cleared again below
-    try { this.commitXformInner(f); } finally { this.xform = null; }
+    try { this.commitXformInner(f, keep); } finally { this.xform = null; }
   }
 
-  private commitXformInner(f: Xform) {
+  /** (`keep`: the originals stay — a duplicate) */
+  private commitXformInner(f: Xform, keep: boolean) {
     const g = this.geom();
     const z = zoom();
     const scaleW = Math.sqrt(Math.abs(f.sx * f.sy));
@@ -1197,11 +1569,12 @@ class InkLayer {
         const midX = abs.reduce((sum, a) => sum + a[0], 0) / abs.length;
         const target = this.targetFor(minY, midX, g);
         if (!target) continue;
-        mark(it.src).strokes.add(it.idx);
+        if (!keep) mark(it.src).strokes.add(it.idx);
         placed.push({
           blockPos: target.blockPos, side: target.side,
           stroke: {
-            side: target.side, color: s.color, w: round4(Math.max(0.5, s.w * scaleW)), ...(s.o !== undefined ? { o: s.o } : {}),
+            // (its look kept: the pen's settings, its pressure, a line or shape drawn exactly)
+            ...s, side: target.side, w: round4(Math.max(0.5, s.w * scaleW)),
             pts: abs.map(([x, y, p]) => [round4((x - target.edge) / z), round4((y - target.top) / z), p] as [number, number, number]),
           },
         });
@@ -1213,7 +1586,7 @@ class InkLayer {
         const [x2, y2] = this.applyXform(edge + (im.dx + im.w) * z, top + (im.dy + im.h) * z);
         const target = this.targetFor(Math.min(y1, y2), (x1 + x2) / 2, g);
         if (!target) continue;
-        mark(it.src).imgs.add(it.idx);
+        if (!keep) mark(it.src).imgs.add(it.idx);
         placed.push({
           blockPos: target.blockPos, side: target.side,
           img: {
@@ -1243,7 +1616,7 @@ class InkLayer {
    * One transaction that removes items from their nodes and adds the placed ones to their target
    * paragraphs' nodes (created when missing; emptied nodes are deleted). Re-selects the results.
    */
-  private rewrite(removeBySrc: Map<string, { strokes: Set<number>; imgs: Set<number> }>, placed: { blockPos: number; stroke?: InkStroke; img?: InkImage }[]) {
+  private rewrite(removeBySrc: Map<string, { strokes: Set<number>; imgs: Set<number> }>, placed: { blockPos: number; stroke?: InkStroke; img?: InkImage }[], pre?: (tr: Transaction) => Transaction) {
     const doc = this.view.state.doc;
     // final data per node: start from the current content minus the removed items
     const bySrc = new Map<string, { pos: number | null; blockPos: number; data: InkData }>();
@@ -1280,7 +1653,8 @@ class InkLayer {
       if (p.img) { data.imgs.push(p.img); newSelection.push({ src, kind: 'img', idx: data.imgs.length - 1 }); }
       bySrc.get(src)!.data = data;
     }
-    let tr = this.view.state.tr;
+    // (`pre`: what else the same step changes, first)
+    let tr = pre ? pre(this.view.state.tr) : this.view.state.tr;
     // existing nodes first (mapped through the accumulating transaction), then the new ones
     for (const [src, v] of bySrc) {
       if (v.pos === null) continue;
@@ -1310,21 +1684,36 @@ class InkLayer {
     if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable || this.view.dom.contains(a))) return;
     if (e.key === 'Escape' && (this.selection || this.canvasFocused)) {
       this.selection = null;
+      this.pasteAt = null;
       this.canvasFocused = false;
       this.schedule();
       return;
     }
     if ((e.key === 'Delete' || e.key === 'Backspace') && this.selection && this.editable()) {
-      const removeBySrc = new Map<string, { strokes: Set<number>; imgs: Set<number> }>();
-      for (const it of this.selection) {
-        let m = removeBySrc.get(it.src);
-        if (!m) { m = { strokes: new Set(), imgs: new Set() }; removeBySrc.set(it.src, m); }
-        (it.kind === 'stroke' ? m.strokes : m.imgs).add(it.idx);
-      }
-      this.selection = null;
-      this.rewrite(removeBySrc, []);
+      this.removeSelection();
+      e.preventDefault();
+      return;
+    }
+    const mod = e.ctrlKey || e.metaKey, k = e.key.toLowerCase();
+    if (!mod || !this.selection) return;
+    if (k === 'c' || k === 'x') {
+      // (the copy event that follows puts it on the system clipboard too, where the browser sends one: onCopy)
+      const clip = this.clipOfSelection();
+      if (clip) holdInk(clip);
+      if (k === 'x' && clip && this.editable()) { this.removeSelection(); e.preventDefault(); }
+    } else if (k === 'd' && this.editable()) {
+      this.lassoActions().duplicate?.();
       e.preventDefault();
     }
+  };
+
+  /** Ctrl+C with strokes selected on the canvas: they go onto the system clipboard as the ink clipboard's text */
+  private onCopy = (e: ClipboardEvent) => {
+    if (!ui.active || !this.canvasFocused || !this.selection) return;
+    const a = document.activeElement as HTMLElement | null;
+    if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable || this.view.dom.contains(a))) return;
+    const clip = this.clipOfSelection();
+    if (clip) holdInk(clip, e);
   };
 
   /**
@@ -1335,6 +1724,9 @@ class InkLayer {
     if (!ui.active || !this.canvasFocused || !this.editable()) return;
     const a = document.activeElement as HTMLElement | null;
     if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable || this.view.dom.contains(a))) return;
+    // strokes and pictures copied with the lasso, here or on a whiteboard
+    const clip = pastedInk(e);
+    if (clip) { e.preventDefault(); e.stopPropagation(); this.pasteClip(clip); return; }
     const files = imageFiles(e.clipboardData);
     const text = e.clipboardData?.getData('text/plain');
     if (!files.length && text && isSvgMarkup(text)) files.push(svgFile(text));
@@ -1398,17 +1790,35 @@ class InkLayer {
     this.schedule();
   }
 
-  /** Remove strokes near the pointer; an emptied sketch (no strokes, no images) loses its anchor node too. */
+  /**
+   * Remove strokes near the pointer — with Draw's eraser settings: its size, whole strokes or (precise)
+   * the part of a stroke it rubs along the way from its last place (what is left either side stays, as
+   * strokes of the same look), the highlighter's strokes alone. An emptied sketch (no strokes, no
+   * images) loses its anchor node too.
+   */
   private eraseAt(e: PointerEvent, g: ReturnType<InkLayer['geom']>) {
     const [cx, cy] = this.toContent(e, g);
-    const z = zoom();
+    const from = this.eraseLast ?? [cx, cy];
+    this.eraseLast = [cx, cy];
+    const z = zoom(), er = ui.drawing.eraser, r = ERASER_PX[er.size] / z;
     let tr = this.view.state.tr;
     let changed = false;
     for (const entry of [...this.entries]) {
       const top = this.blockTop(entry.blockPos, g);
       if (top === null || !entry.data.strokes.length) continue;
-      const keep = entry.data.strokes.filter(s => !strokeHit(s, (cx - this.edgeX(s.side, g)) / z, (cy - top) / z, Math.max(6, s.w)));
-      if (keep.length === entry.data.strokes.length) continue;
+      const keep: InkStroke[] = [];
+      let hit = false;
+      for (const s of entry.data.strokes) {
+        const edge = this.edgeX(s.side, g);
+        if (er.hlOnly && !(s.o !== undefined && s.o < 1)) { keep.push(s); continue; }
+        const b: [number, number] = [(cx - edge) / z, (cy - top) / z];
+        if (!er.precise) { if (strokeHit(s, b[0], b[1], r)) hit = true; else keep.push(s); continue; }
+        const left = eraseAlong([s.pts], [(from[0] - edge) / z, (from[1] - top) / z], b, r + s.w / 2).get(0);
+        if (!left) { keep.push(s); continue; }
+        hit = true;
+        for (const piece of left) keep.push({ ...s, pts: piece.map(([x, y, p]) => [round4(x), round4(y), p] as [number, number, number]) });
+      }
+      if (!hit) continue;
       const mapped = tr.mapping.map(entry.pos);
       const node = tr.doc.nodeAt(mapped);
       if (!node || node.type.name !== 'sketch') continue;

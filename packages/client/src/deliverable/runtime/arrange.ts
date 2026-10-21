@@ -392,6 +392,11 @@ function svgPaint(el: Element, path: Path, p: Paint, ops: HtmlOp[]): void {
     const attr = (name: string, value: string | null) => ops.push({ t: 'attr', path: sp, name, value });
     // Draw's ink: its runs' stroke — or, drawn before, its outline's fill
     if (p.ink !== undefined) attr(s.getAttribute('fill') === 'none' ? 'stroke' : 'fill', p.ink);
+    // thinner or thicker (the lasso's): each of its runs' widths
+    if (p.inkScale !== undefined && root?.classList.contains('ol-ink') && s.localName === 'path' && s.getAttribute('fill') === 'none') {
+      const w = parseFloat(s.getAttribute('stroke-width') ?? '');
+      if (w > 0) attr('stroke-width', String(Math.max(0.3, Math.min(400, r2(w * p.inkScale)))));
+    }
     const usesCurrent = (s.getAttribute('stroke') ?? '') === 'currentColor';
     if (p.fill !== undefined && !(s.localName === 'line' || s.localName === 'polyline' || (s.getAttribute('fill') === 'none' && s.localName === 'path' && p.fill !== null && isOpenPath(s)))) attr('fill', p.fill ?? 'none');
     if (p.stroke !== undefined) {

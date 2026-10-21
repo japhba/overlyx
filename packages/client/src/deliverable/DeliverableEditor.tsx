@@ -38,6 +38,7 @@ import { GUIDES_ATTR, LAYOUT_MARGINS_ATTR, layoutMarginGuides, parseGuides, mast
 import { sizePt, stepPt } from './units';
 import { deckToolbar, quickGroups, type DeckTextActions } from './decktoolbar';
 import { loadDeckInk, saveDeckInk, subscribeDeckInk, patchDeckInk, deckInkStyle, type DeckInk, type DeckInkPatch } from './deckink';
+import { readHandwriting, chooseReading, readingError } from './lassobar';
 import { QuickBar } from './QuickBar';
 import { loadTextDrafts, saveTextDrafts, draftWords, pendingDraftKey, loadPendingTextDrafts, forgetPendingTextDraft, type TextDraft } from './recovery';
 import { BgRemoveDialog } from './BgRemoveDialog';
@@ -124,6 +125,9 @@ function saveFlag(key: string, on: boolean): void {
 interface Link { base: string; entry: string; expires: number }
 
 /** The deliverable editor of the web app: its host keeps the text in a Y.Text synced with the server (webHost.ts). */
+/** what a held stroke became, said for a moment (core/shapesnap.ts SnapKind) */
+const SNAP_NAMES: Record<string, string> = { line: 'Line', arrow: 'Arrow', polyline: 'Lines', triangle: 'Triangle', rect: 'Rectangle', square: 'Square', quad: 'Four-sided shape', polygon: 'Polygon', ellipse: 'Ellipse', circle: 'Circle' };
+
 export function DeliverableEditor({ id, user, notify }: { id: string; user: User; notify: Notify }) {
   const host = useMemo(() => webHost(id, user), [id]);
   useEffect(() => () => host.destroy(), [host]);
@@ -316,6 +320,16 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   const [nodeEd, setNodeEd] = useState<{ selected: number; total: number } | null>(null);
   const nodeEdRef = useRef(false); nodeEdRef.current = !!nodeEd;
   const [tool, setToolState] = useState<Tool>('select');
+  /**
+   * Draw opened (its button, P, E, S): its row of pens, colours and widths shows. A Pencil that draws by
+   * itself (InkStyle.penInks) does not open it: the row only comes when asked for, and folds when the
+   * pen is put away (Done, Esc, V, another tool).
+   */
+  const [drawOpen, setDrawOpen] = useState(false);
+  const drawOpenRef = useRef(drawOpen); drawOpenRef.current = drawOpen;
+  useEffect(() => { if (tool !== 'pen' && tool !== 'eraser' && tool !== 'lasso') setDrawOpen(false); }, [tool]);
+  /** the colours used on the slide shown (runtime notetools.ts), for the lasso's colour filter */
+  const slideColors = useRef<string[]>([]);
   /** Draw: the pen's and the highlighter's presets, which of them is in hand (deckink.ts) */
   const [ink, setInkState] = useState<DeckInk>(loadDeckInk);
   const inkRef = useRef(ink); inkRef.current = ink;
@@ -785,7 +799,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
             if (m.height) setPageH(m.height);
             setSolo(m.solo ?? null);
             toCanvas({ ol: 'scale', scale });
-            toCanvas({ ol: 'tool', tool, ink: { ...deckInkStyle(inkRef.current, pageWRef.current), penInks: inkRef.current.penInks && !readOnlyRef.current } });
+            toCanvas({ ol: 'tool', tool, ink: { ...deckInkStyle(inkRef.current, pageWRef.current), penInks: inkRef.current.penInks && !readOnlyRef.current }, held: drawOpenRef.current });
             toCanvas({ ol: 'guides', show: guidesRef.current });
             toCanvas({ ol: 'view', view: shownView(viewRef.current) });
             toCanvas({ ol: 'dark', invert: darkRef.current.invert, figures: darkRef.current.figures, desk: null });
@@ -886,8 +900,13 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
           }
           break;
         }
-        case 'draw': onDraw(m.version, m.tool, m.slide, m.rect, m.after ?? null, m.pts, m.runs ? { d: '', closed: false, runs: m.runs } : m.d !== undefined ? { d: m.d, closed: !!m.closed } : undefined, m.scratch); break;
-        case 'penInks': if (fromCanvas) setToolState('pen'); break;
+        case 'draw': onDraw(m.version, m.tool, m.slide, m.rect, m.after ?? null, m.pts, m.runs ? { d: '', closed: false, runs: m.runs } : m.d !== undefined ? { d: m.d, closed: !!m.closed } : undefined, m.scratch, m.snap); break;
+        // the Pencil drew with Select in hand: the pen for its stroke, then Select again — the Draw row stays as it was
+        case 'penInks': if (fromCanvas && !drawOpenRef.current) setToolState(m.done ? 'select' : 'pen'); break;
+        case 'toolBack': if (fromCanvas) setToolState(m.tool); break;
+        case 'slideColors': if (fromCanvas) { slideColors.current = m.colors; rerender(); } break;
+        case 'inkRead': if (fromCanvas) void readInk(m.as, m.lines, m.rect); break;
+        case 'inkConverted': if (fromCanvas) showHud(m.count ? `${m.count === m.of ? '' : `${m.count} of ${m.of} strokes `}straightened · Undo brings ${m.count > 1 ? 'them' : 'it'} back` : 'No shape in these strokes', 1800); break;
         case 'sequence': if (fromCanvas) setSeq({ slide: m.slide, rows: m.rows, steps: m.steps, ordering: m.ordering }); break;
         case 'objects': if (fromCanvas) setObjects({ slide: m.slide, items: m.items }); break;
         case 'comment': {
@@ -1053,7 +1072,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   // (the Bézier pen takes Enter / Esc / Backspace: the keyboard goes to the canvas)
   // (the pen draws right away only where the page can be changed)
   const inkStyle = { ...deckInkStyle(ink, pageW), penInks: ink.penInks && !locked };
-  useEffect(() => { toCanvas({ ol: 'tool', tool, ink: inkStyle }); if (tool === 'bezier') canvasFrame.current?.focus(); }, [tool, inkStyle.color, inkStyle.width, inkStyle.opacity, JSON.stringify(inkStyle.nib ?? null), inkStyle.fingers, inkStyle.scribble, inkStyle.penInks]);
+  useEffect(() => { toCanvas({ ol: 'tool', tool, ink: inkStyle, held: drawOpen }); if (tool === 'bezier') canvasFrame.current?.focus(); }, [tool, drawOpen, inkStyle.color, inkStyle.width, inkStyle.opacity, JSON.stringify(inkStyle.nib ?? null), inkStyle.fingers, inkStyle.scribble, inkStyle.penInks, inkStyle.snap, JSON.stringify(inkStyle.eraser ?? null), JSON.stringify(inkStyle.lasso ?? null)]);
   // the rail folded away: its frame goes, and says it is ready again when it comes back
   useEffect(() => { if (!railOpen) railReady.current = false; }, [railOpen]);
 
@@ -1384,6 +1403,18 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     if (hudTimer.current) clearTimeout(hudTimer.current);
     hudTimer.current = setTimeout(() => setHud(null), ms);
   };
+  /** the lasso's Convert to text / formula: the handwriting read by the server (its readings offered beside it when unsure), then typed in its place */
+  const readInk = async (as: 'notes' | 'formula', lines: [number, number][][], rect: Rect) => {
+    showHud('Reading the handwriting…', 8000);
+    try {
+      const readings = await readHandwriting(lines, as);
+      setHud(null);
+      if (!readings.length) { notify('Nothing legible in the handwriting'); return; }
+      const f = canvasFrame.current, r = f?.getBoundingClientRect(), k = f && r && f.offsetWidth ? r.width / f.offsetWidth : 1;
+      const text = await chooseReading(readings, (r?.left ?? 0) + rect.x * k, (r?.top ?? 0) + (rect.y + rect.h) * k + 8, as === 'formula' ? 'As a formula' : 'Typed as');
+      if (text) toCanvas({ ol: 'inkTyped', text, as });
+    } catch (e) { setHud(null); notify(readingError(e), 'error'); }
+  };
   const historyGesture = (redo: boolean) => {
     if (readOnlyRef.current) return;
     toCanvas({ ol: 'stopText' });
@@ -1472,7 +1503,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
 
   const setTool = (t: Tool) => { setToolState(t); };
 
-  const onDraw = (v: number, t: Tool, slide: Path | null, rect: Rect, after: Path | null, pts?: [number, number][], bez?: { d: string; closed: boolean; runs?: InkRunD[] }, scratch?: Path[]) => {
+  const onDraw = (v: number, t: Tool, slide: Path | null, rect: Rect, after: Path | null, pts?: [number, number][], bez?: { d: string; closed: boolean; runs?: InkRunD[] }, scratch?: Path[], snap?: { kind: string; rect: Rect; runs: InkRunD[] }) => {
     // Draw: the pen stays in hand and the stroke is not selected — the next one follows (GoodNotes)
     const drawing = t === 'pen';
     if (!drawing) setToolState('select');
@@ -1490,6 +1521,12 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
       // undo brings them back with the scribble as ink, in case it was drawing (OneNote)
       const moved = scratch.map(p => shiftedBy(p, place.parent, place.index));
       if (applyOps([{ t: 'remove', paths: [...moved, place.path] }])) showHud(`Scribbled out ${scratch.length} stroke${scratch.length > 1 ? 's' : ''} · Undo brings ${scratch.length > 1 ? 'them' : 'it'} back`, 2200);
+      return;
+    }
+    if (snap && /^[a-z]+$/.test(snap.kind)) {
+      // draw and hold (core/shapesnap.ts): the stroke becomes its shape a step after it came — Undo brings the stroke back as drawn
+      const shaped = objectHtml('pen', snap.rect, k, pageW / 1280, undefined, { d: '', closed: false, runs: snap.runs }, deckInkStyle(inkRef.current, pageWRef.current));
+      if (shaped && applyOps([{ t: 'outer', path: place.path, html: shaped.replace('<svg class="ol-ink"', `<svg class="ol-ink" data-ol-shape="${snap.kind}"`) }])) showHud(`${SNAP_NAMES[snap.kind] ?? 'Shape'} · Undo brings the stroke back`, 1400);
       return;
     }
     pending.current = drawing ? null : t === 'formula' ? { editText: place.path, math: true } : t === 'text' ? { editText: place.path } : { select: [place.path] };
@@ -1980,8 +2017,9 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
       return true;
     }
     const k = key.toLowerCase();
-    const map: Record<string, Tool> = { t: 'text', r: 'rect', o: 'ellipse', l: 'line', a: 'arrow', p: 'pen', e: 'eraser', b: 'bezier', v: 'select' };
-    if (map[k]) { setToolState(map[k]); return true; }
+    const map: Record<string, Tool> = { t: 'text', r: 'rect', o: 'ellipse', l: 'line', a: 'arrow', p: 'pen', e: 'eraser', s: 'lasso', b: 'bezier', v: 'select' };
+    // (P, E and S open Draw: its row shows)
+    if (map[k]) { setToolState(map[k]); setDrawOpen(k === 'p' || k === 'e' || k === 's'); return true; }
     if (k === 'n' && selRef.current.length) { nodesTimer.current = setTimeout(() => { nodesTimer.current = null; arrangeSel('edit-nodes'); }, 600); return true; }
     return false;
   };
@@ -2319,7 +2357,12 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     canvas: { view, set: setView },
     newSlide: () => newSlide(currentRef.current),
     slideLayouts: () => layoutItems(currentRef.current).map(it => ({ label: it.label!, action: it.action! })),
-    ink: { presets: ink, set: setInk, draw: on => setToolState(on ? 'pen' : 'select') },
+    ink: {
+      presets: ink, set: setInk, draw: on => { setDrawOpen(on); setToolState(on ? 'pen' : 'select'); }, open: drawOpen,
+      lassoColors: () => slideColors.current,
+      thicken: k => paint({ inkScale: k }),
+      convert: as => toCanvas({ ol: 'inkConvert', as }),
+    },
     review: {
       comment: () => toCanvas({ ol: 'newComment' }),
       suggestion: selChange ? { by: selChange.by, summary: selChange.summary, accept: () => resolveChange(selChange, true), reject: () => resolveChange(selChange, false) } : null,
@@ -2330,7 +2373,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   // over the words selected in the text being retyped (wherever that text sits: in a group, a table, a page's section) the word tools
   const onWords = !!editingText && !!words?.rect;
   const comment: ToolButton = { id: 'dk-comment', title: 'Comment (Ctrl+Alt+M)', icon: 'dk-comment', action: () => toCanvas({ ol: 'newComment' }) };
-  const quick = !locked && !dragging && !presenting && tool === 'select' && sel.length && !nodeEd && !mathEdit && !cropping && !words?.choosing
+  const quick = !locked && !dragging && !presenting && (tool === 'select' || tool === 'lasso') && sel.length && !nodeEd && !mathEdit && !cropping && !words?.choosing
     ? onWords ? quickGroups(bars.sections, [comment], true)
     : quickGroups(bars.sections, [{ id: 'dk-dup', title: 'Duplicate (Ctrl+D)', icon: 'dk-duplicate', action: duplicateSel }, comment]) : [];
   const quickRect = onWords ? words!.rect : sel.length ? sel.map(s => s.rect).reduce((a, r) => {
@@ -2423,7 +2466,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
         <span>{recovered.length} recovered text draft{recovered.length === 1 ? '' : 's'} — the saved document was kept.</span>
         <button class="btn" onClick={() => setRecoveryOpen(true)}>Recover text</button>
       </div>}
-      {tool === 'select' && quick.length > 0 && quickRect && <QuickBar groups={quick} rect={quickRect} box={onWords ? sel[0]?.rect : undefined} frame={() => canvasFrame.current} scrollY={() => (soloOn ? 0 : scrollRef.current)} />}
+      {(tool === 'select' || tool === 'lasso') && quick.length > 0 && quickRect && <QuickBar groups={quick} rect={quickRect} box={onWords ? sel[0]?.rect : undefined} frame={() => canvasFrame.current} scrollY={() => (soloOn ? 0 : scrollRef.current)} />}
       {/* (the context tools, when they float below the bar, start right of the slide rail: its header stays clear) */}
       <div ref={barRef} class={'dl-toolbar' + (ctxRow ? ' dl-ctx-row' : '')} role="toolbar" style={`--ctx-left: ${railOpen ? railW + 8 : 8}px`}>
         <span class="dl-title" title={path}>{title}</span>

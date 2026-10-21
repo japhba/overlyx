@@ -65,7 +65,7 @@ export interface PMJSON { type: string; attrs?: Record<string, any>; content?: P
 export interface AiModelInfo { id: string; label: string; note: string; /** Artificial Analysis Intelligence Index */ aa?: number; /** measured rewrite (⌘J) response time */ speed: string }
 export interface AiStatus { available: boolean; model: string; completionModel: string; inkModel?: string; models: AiModelInfo[] }
 /** the math keyboard's pen: the handwriting as a PNG data URL, the formula around the cursor */
-export interface AiInkRequest { image: string; before?: string; after?: string; text?: boolean }
+export interface AiInkRequest { image: string; before?: string; after?: string; text?: boolean; /** handwritten notes (the lasso's Convert to text): text with $…$ math, not a formula */ notes?: boolean }
 export interface AiRewriteRequest { instruction: string; content: PMJSON[]; layout?: string; before?: string; after?: string; model?: string; math?: { latex: string; display: boolean; selection?: string }; source?: { text: string; before?: string; after?: string }; history?: { instruction: string; tex: string }[] }
 export interface AiRewriteResult { tex: string; nodes: PMJSON[]; original: string }
 export interface AiCompleteRequest { kind: 'text' | 'math'; before: string; after: string; formula?: string; paragraph?: string; model?: string }

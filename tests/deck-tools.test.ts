@@ -7,7 +7,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { objectHtml, inlineSvgHtml, penPathD } from '../packages/client/src/deliverable/sourceops.ts';
-import { loadDeckInk, saveDeckInk, patchDeckInk, deckInkStyle, defaultDeckInk, DEFAULT_NIB } from '../packages/client/src/deliverable/deckink.ts';
+import { loadDeckInk, saveDeckInk, patchDeckInk, deckInkStyle, defaultDeckInk, DEFAULT_NIB, hexColor, colorsPass, setLassoColors } from '../packages/client/src/deliverable/deckink.ts';
 import { inkRuns, runPathD, runsBox, inkPaths, freshPoint, pressureWidth, type FreePt, type InkRun } from '../packages/client/src/deliverable/runtime/freehand.ts';
 import { applyOp, opSplices, parseSource, rebaseOp } from '../packages/core/src/html/source.ts';
 
@@ -218,9 +218,34 @@ describe("Draw's pens (deckink.ts)", () => {
     expect(patchDeckInk(b, { slotWidth: { idx: 9, width: 3 } })).toEqual(b);   // no such preset
   });
 
+  it('the eraser, the lasso and draw-and-hold are kept with the pens; the lasso takes something of every kind, and a colour filter only for this visit', () => {
+    const ink = defaultDeckInk();
+    const p = patchDeckInk(ink, { eraser: { precise: true, size: 2 }, lasso: ['ink'], snap: false });
+    expect(p.eraser).toEqual({ precise: true, size: 2, hlOnly: false, back: false });
+    expect(p.lasso).toEqual(['ink']);
+    expect(p.snap).toBe(false);
+    // nothing is not a choice: the lasso keeps what it took
+    expect(patchDeckInk(p, { lasso: [] }).lasso).toEqual(['ink']);
+    saveDeckInk(p);
+    expect(loadDeckInk().eraser.size).toBe(2);
+    setLassoColors(['#FF0000']);
+    expect(deckInkStyle(loadDeckInk()).lasso).toEqual({ kinds: ['ink'], colors: ['#ff0000'] });
+    setLassoColors([]);
+    saveDeckInk(defaultDeckInk());
+    expect(hexColor('rgb(255, 0, 16)')).toBe('#ff0010');
+    expect(hexColor('rgba(0, 0, 0, 0)')).toBeNull();
+    expect(hexColor('#abc')).toBe('#aabbcc');
+    expect(colorsPass([], [])).toBe(true);
+    expect(colorsPass(['#ff0010'], ['rgb(255, 0, 16)'])).toBe(true);
+    expect(colorsPass(['#ff0010'], ['#000000', null])).toBe(false);
+  });
+
   it("the stroke's ink: the highlighter translucent, widths scaled to the page (a poster's as thick, seen whole, as a slide's)", () => {
     const ink = defaultDeckInk();
-    expect(deckInkStyle(ink)).toEqual({ color: ink.pens.pen.color, width: 4, opacity: 1, nib: DEFAULT_NIB, scribble: true, penInks: true });
+    expect(deckInkStyle(ink)).toEqual({
+      color: ink.pens.pen.color, width: 4, opacity: 1, nib: DEFAULT_NIB, scribble: true, penInks: true,
+      snap: true, eraser: { precise: false, size: 1, hlOnly: false, back: false }, lasso: { kinds: ['ink', 'shapes', 'pictures', 'text'], colors: [] },
+    });
     // a Pencil has drawn in this browser: fingers move the slide — unless they are to draw too
     expect(deckInkStyle(patchDeckInk(ink, { pencil: true })).fingers).toBe('pan');
     expect(deckInkStyle(patchDeckInk(ink, { pencil: true, fingersDraw: true })).fingers).toBe('draw');

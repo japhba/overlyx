@@ -442,6 +442,8 @@ export interface InkRequest {
   after?: string;
   /** the cursor is in a \text{} part of the formula */
   text?: boolean;
+  /** handwritten notes, not a formula (the lasso's Convert to text): plain text, its math as $…$ */
+  notes?: boolean;
   model?: unknown;
 }
 
@@ -477,6 +479,40 @@ export function parseInkReply(reply: string): string[] {
   return out;
 }
 
+export const NOTES_PROMPT = `You read handwritten notes. The image shows ink written with a pen or a finger on a tablet — words, a few lines of notes, perhaps with some mathematics — that will replace the handwriting with typed text.
+
+Transcribe exactly what is written:
+- Plain text, in the language it is written in; one line of text for each line of handwriting (keep the line breaks, join a word split across lines), bullets or numbers at the start of a line as "- " or "1. ".
+- Mathematics written among the words as LaTeX between single dollar signs ($x^{2}+1$), a formula on a line of its own between $$ and $$. Use the conventions of LaTeX math (braced sub- and superscripts, \\frac, Greek letters as \\alpha …).
+- Do not correct, complete or rephrase anything; keep the writer's spelling, abbreviations and punctuation. Do not add anything that is not written (no title, no explanation). Arrows written between words: → or ←.
+- Ambiguous letters: decide from the words and the context, as a reader would.
+
+Reply with JSON only: {"text": ["<most likely reading>", "<second reading>"]} — a second reading only where the handwriting is genuinely ambiguous (otherwise one entry).`;
+
+/** The readings of handwritten notes in a model's reply: JSON `{"text": [...]}` (or the bare text), distinct, at most three. */
+export function parseNotesReply(reply: string): string[] {
+  const t = cleanReply(reply);
+  let list: unknown[] = [];
+  const m = /\{[\s\S]*\}/.exec(t);
+  if (m) {
+    try {
+      const j = JSON.parse(m[0]) as { text?: unknown; candidates?: unknown };
+      const c = j.text ?? j.candidates;
+      list = Array.isArray(c) ? c : typeof c === 'string' ? [c] : [];
+    } catch { /* not JSON: the reply itself */ }
+  }
+  if (!list.length && t && !t.startsWith('{')) list = [t];
+  const out: string[] = [];
+  for (const x of list) {
+    if (typeof x !== 'string') continue;
+    const s = x.replace(/\r\n/g, '\n').trim();
+    if (!s || s.length > 4000 || out.includes(s)) continue;
+    out.push(s);
+    if (out.length === 3) break;
+  }
+  return out;
+}
+
 /** Up to three LaTeX readings of the handwriting, most likely first (empty: nothing legible). */
 export async function recognizeInk(req: InkRequest, signal?: AbortSignal): Promise<string[]> {
   const image = String(req.image ?? '');
@@ -486,6 +522,13 @@ export async function recognizeInk(req: InkRequest, signal?: AbortSignal): Promi
   const where = before || after
     ? `The formula around the cursor, ⟦INK⟧ marking where the handwriting goes: ${before}⟦INK⟧${after}`
     : 'The cursor is in an empty formula.';
+  if (req.notes) {
+    const reply = await chat([
+      { role: 'system', content: NOTES_PROMPT },
+      { role: 'user', content: [{ type: 'text', text: 'The handwritten notes:' }, { type: 'image_url', image_url: { url: image } }] },
+    ], { model: pickModel(req.model, config.ai.inkModel), temperature: 0, maxTokens: 1200, signal, title: 'OverLyX ink notes' });
+    return parseNotesReply(reply);
+  }
   const mode = req.text ? ' The cursor is inside \\text{…}: transcribe what is written as plain text (no math commands).' : '';
   const reply = await chat([
     { role: 'system', content: INK_PROMPT },

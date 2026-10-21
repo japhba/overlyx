@@ -122,7 +122,7 @@ test('the lasso selects strokes for moving, resizing and deleting', async ({ pag
   await expect(page.locator('.lyx-editor .lyx-sketch')).toHaveCount(1);
 
   // encircle the squiggle with the lasso: a selection box with handles appears
-  await page.click('[data-tb="i-lasso"]');
+  await page.click('[data-tb="dk-ink-lasso"]');
   await page.mouse.move(sx - 18, sy - 18);
   await page.mouse.down();
   for (const [x, y] of [[sx + 60, sy - 18], [sx + 60, sy + 28], [sx - 18, sy + 28], [sx - 18, sy - 18]] as const) await page.mouse.move(x, y, { steps: 4 });
@@ -173,7 +173,7 @@ test('the lasso closes itself and selects what it touches; pen and highlighter k
 
   // an OPEN lasso path (three sides of a box) over the left third of the first squiggle: it closes
   // itself, and touching the stroke is enough — Goodnotes semantics, not "most points inside"
-  await page.click('[data-tb="i-lasso"]');
+  await page.click('[data-tb="dk-ink-lasso"]');
   await page.mouse.move(sx - 12, sy - 22);
   await page.mouse.down();
   for (const [x, y] of [[sx + 12, sy - 22], [sx + 12, sy + 26], [sx - 12, sy + 26]] as const) await page.mouse.move(x, y, { steps: 4 });
@@ -217,7 +217,7 @@ test('the lasso closes itself and selects what it touches; pen and highlighter k
   await page.click('[data-tb="i-pen"]');
   await expect(page.locator('[data-tb="i-c-1"]')).toHaveClass(/active/);
   // clean up the strokes for the tests that follow on this document (the page scrolled on reload: re-measure)
-  await page.click('[data-tb="i-lasso"]');
+  await page.click('[data-tb="dk-ink-lasso"]');
   await expect(page.locator('.lyx-editor .lyx-sketch')).toHaveCount(1);   // the strokes are back from the server
   // …once it has settled: the restored cursor is scrolled to again a moment after the reload (editor.ts restoreCursor),
   // which came after the measuring in Firefox
@@ -288,7 +288,7 @@ test('clicking the selected colour or width again opens a picker that replaces t
   await expect(page.locator('[data-tb="i-w-2"] .tb-ink-width')).toHaveAttribute('data-width', '5');
 
   // clean up the stroke for the tests that follow on this document
-  await page.click('[data-tb="i-lasso"]');
+  await page.click('[data-tb="dk-ink-lasso"]');
   const box2 = (await page.locator('.lyx-editor .lyx-par').first().boundingBox())!;
   const tx = box2.x + box2.width + 60, ty = box2.y + 10;
   await page.mouse.move(tx - 30, ty - 40);
@@ -351,7 +351,7 @@ test('with the canvas focused (caret deactivated), a pasted image lands in the m
   await expect(page.locator('.ink-canvas.draw')).toBeVisible();
 
   // click into the margin with the lasso: the text caret goes away, the canvas is the paste target
-  await page.click('[data-tb="i-lasso"]');
+  await page.click('[data-tb="dk-ink-lasso"]');
   const par = page.locator('.lyx-editor .lyx-par').nth(1);
   const box = (await par.boundingBox())!;
   await page.mouse.click(box.x + box.width + 80, box.y + 6);

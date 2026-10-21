@@ -14,7 +14,8 @@ import type { SelItem, Tool, Paint, ArrangeHow, DeliverableKind, CanvasView, Nod
 import { ASPECTS } from './runtime/crop';
 import { fmtPt, ptToPx, pxToPt, sizePt, stepPt } from './units';
 import { drawingToolbar } from './drawingToolbar';
-import { type DeckInk, type DeckInkPatch } from './deckink';
+import { type DeckInk, type DeckInkPatch, LASSO_KINDS } from './deckink';
+import { lassoGroups } from './lassobar';
 import './deckicons';
 
 export interface DeckTextActions {
@@ -79,8 +80,15 @@ export interface DeckCtx {
   nodes: { editing: boolean; selected: number; total: number; cmd(c: NodeCmd): void };
   /** comments and suggestions (ReviewPane): a new comment, the selected object's suggestion to accept or reject */
   review?: { comment(): void; suggestion: { by: string; summary: string; accept(): void; reject(): void } | null };
-  /** Draw: the pen's and the highlighter's presets (deckink.ts); `draw(true)` takes the pen in hand, `draw(false)` puts it away */
-  ink: { presets: DeckInk; set(p: DeckInkPatch): void; draw(on: boolean): void };
+  /**
+   * Draw: the pen's and the highlighter's presets (deckink.ts); `draw(true)` takes the pen in hand and
+   * opens Draw's row (`open`), `draw(false)` puts it away; the colours used on the slide (the lasso's
+   * filter offers them); the selected strokes thinner or thicker, converted (the lasso's Convert)
+   */
+  ink: {
+    presets: DeckInk; set(p: DeckInkPatch): void; draw(on: boolean): void; open?: boolean;
+    lassoColors?(): string[]; thicken?(k: number): void; convert?(as: 'shapes' | 'notes' | 'formula'): void;
+  };
 }
 
 /** the node editor's row: Inkscape's node toolbar */
@@ -240,7 +248,7 @@ function paintLabel(items: SelItem[]): string {
  * then group / ungroup and arrange, `extra` (duplicate, comment) and delete. Empty while points, a formula or a crop are edited.
  * Over `words` selected in a text being retyped: what is done to words — font, size, bold … highlight, a link —, then `extra`.
  */
-const QUICK: string[][] = [['dk-b', 'dk-i', 'dk-color', 'dk-size'], ['dk-align'], ['dk-inkcolor', 'dk-fill', 'dk-stroke'], ['dk-linecolor', 'dk-lineweight', 'dk-tips'], ['dk-crop', 'dk-nobg'], ['dk-group', 'dk-ungroup', 'dk-arrange']];
+const QUICK: string[][] = [['dk-b', 'dk-i', 'dk-color', 'dk-size'], ['dk-align'], ['dk-inkcolor', 'dk-ink-thinner', 'dk-ink-thicker', 'dk-ink-convert', 'dk-fill', 'dk-stroke'], ['dk-linecolor', 'dk-lineweight', 'dk-tips'], ['dk-crop', 'dk-nobg'], ['dk-group', 'dk-ungroup', 'dk-arrange']];
 const QUICK_WORDS: string[][] = [['dk-font', 'dk-size'], ['dk-b', 'dk-i', 'dk-u', 'dk-color', 'dk-hl'], ['dk-href']];
 export function quickGroups(sections: ToolSection[], extra: ToolButton[], words = false): ToolButton[][] {
   const all = new Map<string, ToolButton>();
@@ -261,7 +269,9 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
   const one = sel.length === 1 ? sel[0] : null;
   const shapeTool = SHAPES.find(s => s.tool === c.tool);
   const lineTool = LINES.find(s => s.tool === c.tool);
-  const drawing = c.tool === 'pen' || c.tool === 'eraser';
+  // Draw's row: while Draw is open (its button, P, E, S) — not when the Pencil just drew by itself
+  const drawTool = c.tool === 'pen' || c.tool === 'eraser' || c.tool === 'lasso';
+  const drawing = drawTool && c.ink.open !== false;
 
   const tools: ToolButton[][] = [
     [
@@ -275,7 +285,7 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
         palette: { title: 'Shapes', cols: 4, items: SHAPES.map(s => ({ label: s.label, html: ICON(`dk-${s.tool}`), active: c.tool === s.tool, action: () => c.setTool(s.tool) })) } },
       { id: 'dk-lines', title: 'Lines (L line, A arrow, B Bézier path)', icon: lineTool ? `dk-${lineTool.tool}` : 'dk-line', active: !!lineTool, disabled: ro,
         palette: { title: 'Lines', cols: 4, items: LINES.map(s => ({ label: s.label, html: ICON(`dk-${s.tool}`), active: c.tool === s.tool, action: () => c.setTool(s.tool) })) } },
-      { id: 'dk-draw', title: drawing ? 'Done drawing (Esc)' : 'Draw (P) — pen, highlighter and eraser, stroke after stroke until Esc', icon: 'dk-draw', active: drawing, disabled: ro, action: () => c.ink.draw(!drawing) },
+      { id: 'dk-draw', title: drawing ? 'Done drawing (Esc)' : 'Draw (P) — pen, highlighter, eraser and lasso, stroke after stroke until Esc (a Pencil draws without it)', icon: 'dk-draw', active: drawing, disabled: ro, action: () => c.ink.draw(!drawing) },
       { id: 'dk-image', title: 'Picture… (or drop a picture or an SVG on the slide)', icon: 'dk-image', action: c.insertImage, disabled: ro },
       { id: 'dk-formula', title: c.editingText ? 'Formula here, in the text (Ctrl+M or $; Ctrl+Shift+M displayed)' : 'Formula — click or drag on the slide; while typing a text, Ctrl+M or $ puts one in it', icon: 'dk-formula',
         action: () => { if (c.editingText) c.math.insert(false); else c.setTool('formula'); }, active: c.tool === 'formula' || c.math.editing, disabled: ro },
@@ -289,7 +299,9 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
   if (ro) return { tools, context: [], sections: [] };
   if (c.math.editing) { const g = mathGroups(c); return { tools, context: g, sections: [{ label: 'Formula', groups: g }] }; }
   if (c.nodes.editing) { const g = nodeGroups(c); return { tools, context: g, sections: [{ label: 'Points', groups: g }] }; }
-  if (drawing) { const g = drawingToolbar(c); return { tools, context: g, sections: [{ label: 'Draw', groups: g }] }; }
+  const drawRow = drawing ? drawingToolbar({ ...c, lasso: { kinds: [...LASSO_KINDS], colors: () => c.ink.lassoColors?.() ?? [] } }) : null;
+  // (the lasso's catch: its own tools after Draw's)
+  if (drawRow && !(c.tool === 'lasso' && sel.length)) return { tools, context: drawRow, sections: [{ label: 'Draw', groups: drawRow }] };
   const sections: ToolSection[] = [];
   let context: ToolButton[][] = [];
   // the selected object's suggestion: accepted or rejected here, before its own tools
@@ -402,9 +414,15 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
     // Draw's strokes: their ink's colour (the outline is filled with it)
     section(inks.length > 1 ? 'Strokes' : 'Ink');
     const st = inks[0].style, ink = st.stroke ?? st.fill;
+    // thinner, thicker, Convert (to text, a formula, clean shapes): the lasso's (lassobar.tsx)
+    const more = c.ink.thicken && c.ink.convert ? lassoGroups({
+      color: null, remove: c.remove, thicken: c.ink.thicken,
+      straighten: () => c.ink.convert!('shapes'), toText: () => c.ink.convert!('notes'), toFormula: () => c.ink.convert!('formula'),
+    }, 'dk-ink')[0] ?? [] : [];
     context.push([
       { id: 'dk-inkcolor', title: 'Ink colour', icon: '', html: swatchIcon(ICONSVG.stroke, ink),
         palette: { title: 'Ink colour', render: close => <ColorGrid current={ink} close={close} onPick={col => { if (col) c.paint({ ink: col }); }} /> } },
+      ...more,
     ]);
   }
   if (images.length === 1 || c.image.cropping) {
@@ -520,6 +538,7 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
   // (a suggestion on it before anything)
   const sugSec = out.find(x => x.groups[0]?.[0]?.id === 'dk-accept');
   if (sugSec && out[0] !== sugSec) out = [sugSec, ...out.filter(x => x !== sugSec)];
+  if (drawRow) out = [{ label: 'Draw', groups: drawRow }, ...out];
   return { tools, context: out.flatMap(x => x.groups), sections: out };
 }
 

@@ -10,6 +10,16 @@ import type { InkStyle, Nib } from './protocol';
 
 export type DeckPen = 'pen' | 'highlighter';
 export interface DeckPenSet { color: string; width: number; colors: string[]; widths: number[] }
+/**
+ * The eraser's settings (GoodNotes'): whole strokes or only the part under it (precise), its size, the
+ * highlighter's strokes alone (the writing under them kept), and back to the pen after each erasing
+ */
+export interface EraserSet { precise: boolean; size: 0 | 1 | 2; hlOnly: boolean; back: boolean }
+/** what the lasso takes (GoodNotes' lasso settings): handwriting, shapes, pictures, text — or of these the ones listed */
+export type LassoKind = 'ink' | 'shapes' | 'pictures' | 'text';
+export const LASSO_KINDS: LassoKind[] = ['ink', 'shapes', 'pictures', 'text'];
+/** the eraser's radius at each size (screen px) */
+export const ERASER_PX = [5, 10, 20] as const;
 export interface DeckInk {
   pen: DeckPen;
   pens: Record<DeckPen, DeckPenSet>;
@@ -22,6 +32,11 @@ export interface DeckInk {
   scribble: boolean;
   /** a pen (the Pencil, a stylus) draws as soon as it touches the page or a document's margin, without Draw turned on (Apple's HIG) */
   penInks: boolean;
+  /** a stroke drawn and held still at its end becomes the shape it was meant to be (core/shapesnap.ts) */
+  snap: boolean;
+  eraser: EraserSet;
+  /** the kinds of thing the lasso takes */
+  lasso: LassoKind[];
 }
 
 /** the width presets (px of a 1280 px slide: 1½, 3, 6 pt; the highlighter's 10½, 18, 30 pt) and what the width picker offers */
@@ -52,6 +67,9 @@ export function defaultDeckInk(): DeckInk {
     fingersDraw: false,
     scribble: true,
     penInks: true,
+    snap: true,
+    eraser: { precise: false, size: 1, hlOnly: false, back: false },
+    lasso: [...LASSO_KINDS],
     pens: {
       pen: { color: INK_PALETTES.pen[0][0], width: DECK_INK_WIDTHS.pen[1], colors: INK_PALETTES.pen.map(c => c[0]), widths: [...DECK_INK_WIDTHS.pen] },
       highlighter: { color: INK_PALETTES.highlighter[0][0], width: DECK_INK_WIDTHS.highlighter[1], colors: INK_PALETTES.highlighter.map(c => c[0]), widths: [...DECK_INK_WIDTHS.highlighter] },
@@ -70,7 +88,9 @@ export function loadDeckInk(): DeckInk {
     if (!s || typeof s !== 'object') return ink;
     if (s.pen === 'pen' || s.pen === 'highlighter') ink.pen = s.pen;
     if (s.nib && typeof s.nib === 'object') ink.nib = nibWith(ink.nib, s.nib);
-    for (const k of ['pencil', 'fingersDraw', 'scribble', 'penInks'] as const) if (typeof s[k] === 'boolean') ink[k] = s[k]!;
+    for (const k of ['pencil', 'fingersDraw', 'scribble', 'penInks', 'snap'] as const) if (typeof s[k] === 'boolean') ink[k] = s[k]!;
+    if (s.eraser && typeof s.eraser === 'object') ink.eraser = eraserWith(ink.eraser, s.eraser);
+    if (Array.isArray(s.lasso)) { const k = LASSO_KINDS.filter(x => s.lasso!.includes(x)); if (k.length) ink.lasso = k; }
     for (const p of ['pen', 'highlighter'] as DeckPen[]) {
       const v = s.pens?.[p];
       if (!v) continue;
@@ -81,6 +101,13 @@ export function loadDeckInk(): DeckInk {
     }
   } catch { /* private window, or not ours */ }
   return ink;
+}
+
+function eraserWith(e: EraserSet, p: Partial<EraserSet>): EraserSet {
+  const out = { ...e };
+  for (const k of ['precise', 'hlOnly', 'back'] as const) if (typeof p[k] === 'boolean') out[k] = p[k]!;
+  if (p.size === 0 || p.size === 1 || p.size === 2) out.size = p.size;
+  return out;
 }
 
 const subscribers = new Set<(ink: DeckInk) => void>();
@@ -105,6 +132,9 @@ export interface DeckInkPatch {
   fingersDraw?: boolean;
   scribble?: boolean;
   penInks?: boolean;
+  snap?: boolean;
+  eraser?: Partial<EraserSet>;
+  lasso?: LassoKind[];
 }
 
 /** the presets after a change (a new object: the old one is left as it was) */
@@ -121,8 +151,12 @@ export function patchDeckInk(ink: DeckInk, p: DeckInkPatch): DeckInk {
     cur.widths[p.slotWidth.idx] = p.slotWidth.width;
     cur.width = p.slotWidth.width;
   }
-  const flag = (k: 'pencil' | 'fingersDraw' | 'scribble' | 'penInks') => (typeof p[k] === 'boolean' ? p[k]! : ink[k]);
-  return { pen, pens: { ...ink.pens, [pen]: cur }, nib: nibWith(ink.nib, p.nib), pencil: flag('pencil'), fingersDraw: flag('fingersDraw'), scribble: flag('scribble'), penInks: flag('penInks') };
+  const flag = (k: 'pencil' | 'fingersDraw' | 'scribble' | 'penInks' | 'snap') => (typeof p[k] === 'boolean' ? p[k]! : ink[k]);
+  const lasso = p.lasso ? LASSO_KINDS.filter(k => p.lasso!.includes(k)) : ink.lasso;
+  return {
+    pen, pens: { ...ink.pens, [pen]: cur }, nib: nibWith(ink.nib, p.nib), pencil: flag('pencil'), fingersDraw: flag('fingersDraw'), scribble: flag('scribble'), penInks: flag('penInks'),
+    snap: flag('snap'), eraser: p.eraser ? eraserWith(ink.eraser, p.eraser) : ink.eraser, lasso: lasso.length ? lasso : ink.lasso,
+  };
 }
 
 /** the ink of the next stroke: the pen in hand, its width for a page `pageW` px wide (a poster's strokes as thick, seen whole, as a slide's) */
@@ -133,7 +167,44 @@ export function deckInkStyle(ink: DeckInk, pageW = 1280): InkStyle {
   return {
     color: p.color, width: Math.round(p.width * Math.max(0.25, pageW / 1280) * 10) / 10, opacity: hl ? HIGHLIGHT_OPACITY : 1,
     ...(hl ? {} : { nib: { ...ink.nib } }), ...(fingers ? { fingers } : {}), scribble: ink.scribble, penInks: ink.penInks,
+    snap: ink.snap, eraser: { ...ink.eraser }, lasso: { kinds: [...ink.lasso], colors: [...lassoColors] },
   };
+}
+
+/**
+ * The lasso's colour filter: only what has one of these colours (lower-case #rrggbb) is taken; none:
+ * any colour. Picked from the colours used where the lasso is (a slide, a board, a margin) and kept
+ * for this visit only — another slide has other colours.
+ */
+let lassoColors: string[] = [];
+export function getLassoColors(): string[] { return lassoColors; }
+/** (told as a change of the presets: what shows them and what draws with them follow) */
+export function setLassoColors(colors: string[]): void {
+  lassoColors = [...new Set(colors.map(c => c.toLowerCase()))];
+  const ink = loadDeckInk();
+  for (const fn of subscribers) fn(ink);
+}
+
+/** a CSS colour as lower-case #rrggbb (rgb() / rgba() / #rgb / #rrggbb), null for none, transparent or what can't be read */
+export function hexColor(c: string | null | undefined): string | null {
+  if (!c) return null;
+  const t = c.trim().toLowerCase();
+  let m = /^#([0-9a-f]{6})$/.exec(t);
+  if (m) return '#' + m[1];
+  m = /^#([0-9a-f])([0-9a-f])([0-9a-f])$/.exec(t);
+  if (m) return '#' + m[1] + m[1] + m[2] + m[2] + m[3] + m[3];
+  m = /^rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)(?:[\s,/]+([\d.]+%?))?\s*\)$/.exec(t);
+  if (m) {
+    if (m[4] !== undefined && parseFloat(m[4]) === 0) return null;
+    return '#' + [m[1], m[2], m[3]].map(v => Math.min(255, Number(v)).toString(16).padStart(2, '0')).join('');
+  }
+  return null;
+}
+
+/** whether something of these colours passes the lasso's colour filter */
+export function colorsPass(filter: readonly string[], colors: readonly (string | null | undefined)[]): boolean {
+  if (!filter.length) return true;
+  return colors.some(c => { const h = hexColor(c); return !!h && filter.includes(h); });
 }
 
 /** the size of a width preset's dot in the toolbar (screen px) */

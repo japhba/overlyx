@@ -46,6 +46,7 @@ function makeState(touchIds: number[], options: { tri?: boolean; pinch?: boolean
     touches: new Map(touchIds.map(id => [id, { x: id, y: id, sx: id, sy: id }])),
     palms: new Set<number>(),
     tri: options.tri ? { t0: 1, x0: 0, y0: 0, x: 20, y: 30 } : null,
+    twoTap: null,
     pinch: options.pinch ? { active: true } : null,
     pinch0: options.pinch ? { active: true } : null,
     penOn: null as number | null,
@@ -111,6 +112,19 @@ describe('runtime touch-up cancellation semantics (actual source handlers)', () 
     expect([...state.touches.keys()]).toEqual([11]);
     expect(state.context.pinch).toBeNull();
     expect(state.context.pinch0).toBeNull();
+  });
+
+  it('two fingers tapped together undo; moved, they do not', () => {
+    const tap = makeState([10, 11], { pinch: true });
+    (tap.context as unknown as { twoTap: unknown }).twoTap = { t0: performance.now(), at: new Map(), moved: false };
+    tap.handler(pointer('pointerup', 10));
+    tap.handler(pointer('pointerup', 11));
+    expect(tap.messages).toContainEqual({ ol: 'history', redo: false });
+    const moved = makeState([10, 11], { pinch: true });
+    (moved.context as unknown as { twoTap: unknown }).twoTap = { t0: performance.now(), at: new Map(), moved: true };
+    moved.handler(pointer('pointerup', 10));
+    moved.handler(pointer('pointerup', 11));
+    expect(moved.messages).not.toContainEqual({ ol: 'history', redo: false });
   });
 
   it('normal three-finger final lift still completes the history gesture exactly once', () => {

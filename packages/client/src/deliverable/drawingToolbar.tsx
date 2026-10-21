@@ -1,8 +1,9 @@
 /** The layout editor's drawing controls, shared by every drawing surface. */
 import type { ToolButton } from '../app/Toolbar';
 import type { Tool } from './protocol';
-import type { DeckInk, DeckInkPatch } from './deckink';
-import { DECK_INK_WIDTH_CHOICES, deckInkDot } from './deckink';
+import type { DeckInk, DeckInkPatch, LassoKind } from './deckink';
+import { DECK_INK_WIDTH_CHOICES, deckInkDot, getLassoColors, setLassoColors } from './deckink';
+import { EraserSettings, LassoSettings } from './DrawSettings';
 import { ColorGrid } from '../app/ColorGrid';
 import { ICONS } from '../app/Toolbar';
 import type { InkShape } from '@overlyx/core';
@@ -22,6 +23,11 @@ export interface DrawingContext {
    * deck has them in its own tool row; documents draw freehand only). `tool`: the one in use, if any.
    */
   shapes?: { tool: string | null; set(kind: InkShape): void };
+  /**
+   * The lasso, where the surface has one: the kinds of thing it can take there, the colours used there
+   * now (its settings' colour filter offers them), what its text is called (a whiteboard's notes)
+   */
+  lasso?: { kinds: LassoKind[]; colors(): string[]; textLabel?: string };
 }
 
 /** the deck toolbar's Lines and Shapes (decktoolbar.tsx LINES / SHAPES), with its icons */
@@ -46,13 +52,17 @@ export function drawingToolbar(c: DrawingContext): ToolButton[][] {
   const takePen = (p: DeckInkPatch) => { c.ink.set(p); c.setTool('pen'); };
   return [
     [
-      { id: 'dk-ink-pen', title: `${ink.nib.ball ? 'Ball pen' : 'Fountain pen'} (P) — with its own colour and width; click it again for its settings: fountain or ball pen, tip, pressure, stabilization`,
+      { id: 'dk-ink-pen', title: `${ink.nib.ball ? 'Ball pen' : 'Fountain pen'} (P) — with its own colour and width; click it again for its settings: fountain or ball pen, tip, pressure, stabilization, draw and hold for shapes`,
         icon: ink.nib.ball ? 'inkball' : 'inkpen', active: c.tool === 'pen' && !hl, action: () => takePen({ pen: 'pen' }),
         paletteWhenActive: true,
-        palette: { title: 'Pen', render: () => <PenSettings nib={ink.nib} color={ink.pens.pen.color} width={ink.pens.pen.width} habits={{ scribble: ink.scribble, fingersDraw: ink.fingersDraw, pencil: ink.pencil, penInks: ink.penInks }}
+        palette: { title: 'Pen', render: () => <PenSettings nib={ink.nib} color={ink.pens.pen.color} width={ink.pens.pen.width} habits={{ scribble: ink.scribble, fingersDraw: ink.fingersDraw, pencil: ink.pencil, penInks: ink.penInks, snap: ink.snap }}
           onChange={nib => takePen({ pen: 'pen', nib })} onHabits={h => c.ink.set(h)} /> } },
-      { id: 'dk-ink-hl', title: 'Highlighter — with its own colour and width; what is under it shows through', icon: 'inkhl', active: c.tool === 'pen' && hl, action: () => takePen({ pen: 'highlighter' }) },
-      { id: 'dk-ink-eraser', title: 'Eraser (E) — removes the strokes it passes over (drawn ones: shapes and text stay)', icon: 'inkeraser', active: erasing, action: () => c.setTool('eraser') },
+      { id: 'dk-ink-hl', title: 'Highlighter — with its own colour and width; what is under it shows through (draw and hold: a straight one)', icon: 'inkhl', active: c.tool === 'pen' && hl, action: () => takePen({ pen: 'highlighter' }) },
+      { id: 'dk-ink-eraser', title: `Eraser (E) — ${ink.eraser.precise ? 'rubs out the part of a stroke it passes over' : 'removes the strokes it passes over'} (drawn ones: shapes and text stay); click it again for its settings: precise, size, highlighter only`,
+        icon: 'inkeraser', active: erasing, action: () => c.setTool('eraser'),
+        paletteWhenActive: true,
+        palette: { title: 'Eraser', render: () => <EraserSettings eraser={ink.eraser} onChange={p => c.ink.set({ eraser: p })} /> } },
+      ...(c.lasso ? [lassoButton(c.tool === 'lasso', ink, c.lasso, c.setTool, p => c.ink.set(p))] : []),
     ],
     ...(c.shapes ? [shapeButtons(c.shapes)] : []),
     pen.colors.map((col, i) => ({
@@ -79,6 +89,18 @@ export function drawingToolbar(c: DrawingContext): ToolButton[][] {
   ];
 }
 
+
+/** the lasso: a loop drawn round things selects them; clicked again, what it takes and of which colours */
+function lassoButton(active: boolean, ink: DeckInk, l: NonNullable<DrawingContext['lasso']>, setTool: (t: Tool) => void, set: (p: DeckInkPatch) => void): ToolButton {
+  const kinds = l.kinds.filter(k => ink.lasso.includes(k));
+  const some = kinds.length < l.kinds.length || getLassoColors().length > 0;
+  return {
+    id: 'dk-ink-lasso', title: `Lasso (S) — draw a loop round things to select them: move, resize, recolour, copy or convert them${some ? ' (only some things: click it again to see which)' : ''}; click it again for what it takes`,
+    icon: 'inklasso', active, action: () => setTool('lasso'),
+    paletteWhenActive: true,
+    palette: { title: 'Lasso', render: () => <LassoSettings kinds={l.kinds} value={ink.lasso} onChange={k => set({ lasso: k })} colors={l.colors()} picked={getLassoColors()} onPick={setLassoColors} textLabel={l.textLabel} /> },
+  };
+}
 
 /** Lines and Shapes, as in the layout editor's tool row: the one in use shows on its button */
 function shapeButtons(sh: NonNullable<DrawingContext['shapes']>): ToolButton[] {

@@ -1251,6 +1251,14 @@ pre.hl .l.cur { background: color-mix(in srgb, var(--active-bg) 45%, transparent
 .ink-handle.ne { right: -7px; top: -7px; cursor: nesw-resize; }
 .ink-handle.sw { left: -7px; bottom: -7px; cursor: nesw-resize; }
 .ink-handle.se { right: -7px; bottom: -7px; cursor: nwse-resize; }
+/* the round handle above the selection turns strokes (plugins/ink.ts) */
+.ink-handle.rot { left: 50%; top: -30px; margin-left: -6px; width: 12px; height: 12px; border-radius: 50%; cursor: grab; }
+.ink-handle.rot::after, .board-handle.rot::after { content: ""; position: absolute; left: 50%; top: 100%; width: 1.5px; height: 14px; margin-left: -0.75px; background: var(--accent); }
+.board-handle.rot::after { height: 12px; }
+.ink-sel { transform-origin: 50% 50%; }
+/* no text selection, loupe or callout over the ink on a touch screen (iOS's "drag to select" menu) */
+.ink-canvas, .ink-sel, .ink-lasso-bar { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+html.ol-inking, html.ol-inking * { -webkit-user-select: none !important; user-select: none !important; -webkit-touch-callout: none !important; }
 .lyx-sketch { display: inline-block; width: 5px; height: 5px; margin: 0 1px; border-radius: 50%; background: var(--accent); opacity: 0.3; }
 .lyx-sketch:hover { opacity: 0.8; }
 /* ink toolbar colour swatches / width dots */
@@ -1285,6 +1293,23 @@ pre.hl .l.cur { background: color-mix(in srgb, var(--active-bg) 45%, transparent
 .pen-set-check input { margin: 0; accent-color: var(--accent); }
 .pen-set-reset { padding: 1px 8px; border: 1px solid var(--ui-border); border-radius: 4px; background: none; color: var(--ui-fg); font: inherit; cursor: pointer; }
 .pen-set-reset:disabled { opacity: 0.45; cursor: default; }
+/* Draw's eraser and lasso settings (deliverable/DrawSettings.tsx) */
+.eraser-sizes { display: flex; gap: 6px; align-items: center; }
+.eraser-size { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; padding: 0; border: 1px solid var(--ui-border); border-radius: 6px; background: none; cursor: pointer; }
+.eraser-size span { display: block; border-radius: 50%; border: 1.5px solid var(--ui-fg); box-sizing: border-box; }
+.eraser-size:hover { background: var(--ui-hover, rgba(127, 127, 127, 0.12)); }
+.eraser-size.active { outline: 2px solid var(--accent); outline-offset: -1px; }
+.lasso-set { width: 236px; }
+.lasso-kinds, .lasso-colors { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.lasso-kind { padding: 3px 8px; border: 1px solid var(--ui-border); border-radius: 12px; background: none; color: var(--ui-fg); font: inherit; cursor: pointer; }
+.lasso-kind:hover { background: var(--ui-hover, rgba(127, 127, 127, 0.12)); }
+.lasso-kind.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.lasso-colors .ink-pick-sw { width: 22px; height: 22px; }
+/* the lasso's selection bar and its readings (deliverable/lassobar.tsx) */
+.lz-conv { display: inline-block; min-width: 16px; text-align: center; font: 600 12px/16px var(--ui-font); }
+.lz-readings { display: flex; flex-direction: column; gap: 3px; padding: 6px 8px 8px; max-width: 300px; }
+.lz-reading { text-align: left; padding: 4px 8px; border: 1px solid var(--ui-border); border-radius: 4px; background: none; color: var(--ui-fg); font: 12px/1.35 var(--ui-font); white-space: pre-wrap; cursor: pointer; }
+.lz-reading:hover, .lz-reading.active { border-color: var(--accent); }
 
 /* Whiteboard (.board documents, app/BoardEditor.tsx): an infinite pan/zoom canvas. */
 .board { position: relative; flex: 1; min-height: 0; height: 100%; overflow: hidden; outline: none; background: var(--page-bg);
@@ -1312,6 +1337,10 @@ pre.hl .l.cur { background: color-mix(in srgb, var(--active-bg) 45%, transparent
 .board-handle.ne { right: -5px; top: -5px; cursor: nesw-resize; }
 .board-handle.sw { left: -5px; bottom: -5px; cursor: nesw-resize; }
 .board-handle.se { right: -5px; bottom: -5px; cursor: nwse-resize; }
+.board-handle.rot { left: 50%; margin-left: -5px; border-radius: 50%; cursor: grab; }
+/* nothing on the board is text to select: no loupe or callout on a touch screen (a note's text box is) */
+.board, .board * { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.board .board-note-edit { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
 .board-peer { pointer-events: none; z-index: 3; }
 .board-peer .dot { display: block; width: 8px; height: 8px; border-radius: 50%; transform-origin: center; }
 .board-peer .name { position: absolute; left: 10px; top: 8px; padding: 1px 6px; border-radius: 3px; color: #fff; font-family: var(--ui-font); font-size: 11px; white-space: nowrap; transform-origin: 0 0; }
@@ -2900,7 +2929,7 @@ select.dl-zoom { appearance: none; -webkit-appearance: none; text-align: center;
 .dl-rail-grip::after { content: ''; position: absolute; top: 0; bottom: 0; right: 0; width: 2px; background: transparent; transition: background .12s; }
 .dl-rail-grip:hover::after, .dl-rail-grip.on::after { background: var(--accent); }
 .dl-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-.dl-canvas { flex: 1; position: relative; overflow: hidden; background: #d9dbe0; touch-action: none; }   /* (fingers beside the slide move it: DeliverableEditor canvasTouch — the iPad zoomed the page) */
+.dl-canvas { flex: 1; position: relative; overflow: hidden; background: #d9dbe0; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }   /* (fingers beside the slide move it: DeliverableEditor canvasTouch — the iPad zoomed the page; a long press selects nothing: no iOS loupe or callout) */
 .dl-opening { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px; text-align: center; color: var(--ui-fg); }
 .dl-opening p { max-width: 36rem; margin: 0; }
 .dl-opening .dl-btn { min-width: 128px; height: 44px; border-color: var(--ui-border); background: var(--surface); }

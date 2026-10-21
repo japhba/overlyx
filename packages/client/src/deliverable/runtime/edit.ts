@@ -39,6 +39,9 @@ import { initPaths, isNodeEditing, nodesAfterSource, nodesTargetOf, startNodesOr
 import { isSolo, showSlide, soloIndex, revealSlideOf } from './solo';
 import { inkRuns, inkPaths, runsBox, freshPoint, type FreePt, type InkRun } from './freehand';
 import { scratchOut, SCRATCH_HOLD_MS, SCRATCH_HOLD_PX } from '@overlyx/core/scratchout.ts';
+import { snapShape, SNAP_HOLD_MS, SNAP_LEAVE_PX, type Snapped } from '@overlyx/core/shapesnap.ts';
+import { lassoTakes, cutStroke, cutOps, uncut, straightened, handwriting, letterHeight, typedHtml, colorsUsed, type Cut } from './notetools';
+import { ERASER_PX } from '../deckink';
 import { StrokeWatch, type InkSample } from '@overlyx/core/glitch.ts';
 import { pinchFactor, pinchLock, triGesture, type PinchLock } from '../gestures';
 import { offsetOf, caretBox, selectionBoxes, safeColor } from './carets';
@@ -143,6 +146,7 @@ export function startEditing(): void {
   css.setAttribute('data-ol-runtime', '');
   css.textContent = `[data-ol-editing] { outline: none !important; cursor: text !important; caret-color: auto; }
     html.ol-edit, html.ol-edit body { touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+    html.ol-edit svg, html.ol-edit svg *, html.ol-edit img { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }   /* (drawings and pictures: never the iPad's selection or its callout) */
     html.ol-edit [data-ol-editing], html.ol-edit [data-ol-editing] * { -webkit-user-select: text; user-select: text; }
     html.ol-tool-draw, html.ol-tool-draw * { cursor: crosshair !important; }
     html.ol-tool-erase, html.ol-tool-erase * { cursor: ${ERASER_CURSOR} !important; }
@@ -204,12 +208,19 @@ export function setScale(s: number, anchor?: { docY: number; screenY: number }):
 }
 /** the pen took the pen itself (InkStyle.penInks) and the editor has not said so yet: a Select it sends meanwhile is from before */
 let penInksPending = false;
-export function setTool(t: Tool, style?: InkStyle): void {
+/** the pen took the pen itself with Draw not open: Select again once its stroke is done (the Draw row stays folded) */
+let penTook = false;
+/** `held`: Draw is open in the editor — the tool stays in hand */
+export function setTool(t: Tool, style?: InkStyle, held = false): void {
   if (penInksPending && t === 'select') { if (style) inkStyle = style; return; }
   if (t === 'pen') penInksPending = false;
+  if (held) penTook = false;
   if (t !== tool && drag) cancelDrag();
+  const was = tool;
   tool = t;
   if (style) inkStyle = style;
+  // the lasso's colour filter offers the colours used on the slide
+  if (t === 'lasso' && was !== 'lasso') postSlideColors();
   document.documentElement.classList.toggle('ol-tool-draw', t !== 'select' && t !== 'eraser');
   document.documentElement.classList.toggle('ol-tool-erase', t === 'eraser');
   if (t !== 'bezier') {
@@ -409,9 +420,51 @@ export function removeSelected(): void {
   commit([...refit, { t: 'remove', paths }]);
 }
 
+/**
+ * The lasso's Convert, on the selected strokes: `shapes` straightens each into the shape it was meant
+ * to be (those that are none stay); `notes` / `formula` sends their lines to the editor, which has
+ * them read and answers with what to type (inkTyped).
+ */
+export function inkConvert(as: 'shapes' | 'notes' | 'formula'): void {
+  const strokes = selected.filter(el => el.isConnected && kindOf(el) === 'ink' && !isLocked(el));
+  if (!strokes.length) return;
+  if (as === 'shapes') {
+    const ops = strokes.map(el => straightened(el, scale)).filter((o): o is HtmlOp => !!o);
+    if (ops.length) commit(ops, { select: 'keep' });
+    post({ ol: 'inkConverted', as, count: ops.length, of: strokes.length });
+    return;
+  }
+  const hw = handwriting(strokes);
+  if (!hw) return;
+  const r = (n: number) => Math.round(n * 10) / 10;
+  post({ ol: 'inkRead', as, lines: hw.lines.map(l => l.map(([x, y]) => [r(x), r(y)] as [number, number])), rect: { x: hw.box.x - scrollX, y: hw.box.y - scrollY, w: hw.box.w, h: hw.box.h } });
+}
+
+/** what the editor had the handwriting read as: the selected strokes give way to it — a text box or a formula where they were, selected */
+export function inkTyped(text: string, as: 'notes' | 'formula'): void {
+  const strokes = selected.filter(el => el.isConnected && kindOf(el) === 'ink' && !isLocked(el));
+  const hw = handwriting(strokes);
+  const slide = strokes.length ? slideOf(strokes[0]) : null;
+  const parent = slide ?? (state.kind === 'page' ? document.body : null);
+  const paths = strokes.map(pathOf).filter((p): p is Path => !!p);
+  const pp = parent && (parent === document.body ? [] as Path : pathOf(parent));
+  if (!hw || !parent || !pp || !paths.length || !text.trim()) return;
+  // in the slide's own px
+  const [x0, y0] = slide ? slidePoint(slide, hw.box.x, hw.box.y) : [hw.box.x, hw.box.y];
+  const [x1, y1] = slide ? slidePoint(slide, hw.box.x + hw.box.w, hw.box.y + hw.box.h) : [hw.box.x + hw.box.w, hw.box.y + hw.box.h];
+  const k = hw.box.w ? (x1 - x0) / hw.box.w : 1;
+  const html = typedHtml(text.trim(), as, { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }, letterHeight(hw.lines) * k, hw.color);
+  // where the last of the strokes on the slide itself was, the strokes before it gone
+  const own = paths.filter(p => p.length === pp.length + 1 && pp.every((v, i) => p[i] === v)).map(p => p[p.length - 1]);
+  const index = own.length ? Math.max(...own) + 1 : parent.children.length;
+  const at = index - own.filter(i => i < index).length;
+  commit([{ t: 'remove', paths }, { t: 'insert', parent: pp, index, html }], { select: [[...pp, at]] });
+}
+
 /** after a new version of the text: the selection found again, the frame redrawn */
 export function afterSource(): void {
   inkArrived();
+  if (tool === 'lasso') postSlideColors();
   selected = selected.map(e => (e.isConnected ? e : null)).filter((e): e is Element => !!e && !!pathOf(e));
   if (editing && !editing.isConnected) {
     // A coauthor removed the object while it held a local draft. Preserve that
@@ -708,7 +761,7 @@ export function lineOf(el: Element): SVGLineElement | null {
 }
 
 /** an SVG drawn with the pen: Draw's ink (an outline, filled), or open paths only, no fill */
-function isStrokeArt(el: Element): boolean {
+export function isStrokeArt(el: Element): boolean {
   if (el.localName !== 'svg') return false;
   if (el.classList.contains('ol-ink')) return true;
   const shapes = Array.from(el.querySelectorAll('path, polyline')).filter(s => !s.closest('defs, marker, symbol'));
@@ -897,7 +950,7 @@ function fileObject(el: Element, root: Element): Element | null {
   return null;
 }
 /** the objects of a slide (Ctrl+A, a marquee): those of the SVG editor's drawing, in its open layers */
-function objectsOn(slide: Element): Element[] {
+export function objectsOn(slide: Element): Element[] {
   const out: Element[] = [];
   const take = (p: Element, file: boolean) => {
     for (const k of Array.from(p.children)) {
@@ -1221,6 +1274,19 @@ export function draw(): void {
       } else if (!isSvgPart(el) || partBox(el)) for (const [k, fx, fy] of hs) { const [x, y] = handleOut(b, fx, fy, h); parts.push(`<div class="handle" data-h="${k}" style="left:${x}px;top:${y}px;cursor:${cursorFor(k, b.a)};border-width:${bw}px"></div>`); }
     }
   }
+  // several selected (a lasso's catch): the box round them, its corners resizing them together and an arrow above turning them
+  const many = !drag?.moved ? manyMovable() : null;
+  if (many) {
+    const u = union(many.map(docRect)), b: Box = { cx: u.x + u.w / 2, cy: u.y + u.h / 2, w: u.w, h: u.h, a: 0 };
+    parts.push(frameAt('frame ctx', b, `border-width:${bw}px`));
+    for (const [k, fx, fy] of [['mnw', 0, 0], ['mne', 1, 0], ['msw', 0, 1], ['mse', 1, 1]] as [string, number, number][]) { const [x, y] = handleOut(b, fx, fy, h); parts.push(`<div class="handle" data-h="${k}" style="left:${x}px;top:${y}px;cursor:${cursorFor(k.slice(1), 0)};border-width:${bw}px"></div>`); }
+    parts.push(`<div class="handle rot4" data-h="mrot" title="Turn" style="left:${b.cx}px;top:${u.y - 16 / scale}px"></div>`);
+  }
+  // the lasso's loop as it is drawn
+  if (drag && drag.kind === 'lasso' && drag.pts && drag.pts.length > 1) {
+    const d = 'M' + drag.pts.map(([x, y]) => `${Math.round(x * 10) / 10} ${Math.round(y * 10) / 10}`).join('L') + 'Z';
+    parts.push(`<svg class="ink" width="1" height="1"><path d="${d}" fill="rgba(47,111,222,.07)" stroke="#2f6fde" stroke-width="${1.5 / scale}" stroke-dasharray="${5 / scale} ${4 / scale}" stroke-linejoin="round"/></svg>`);
+  }
   // the guides one places (guides.ts), under the snapping lines of a drag
   parts.push(guideParts(guideSlide(null)));
   for (const g of guides) {
@@ -1291,9 +1357,13 @@ interface DragEl {
   part?: { box: Box; form: PartForm; P: DOMMatrix; Pinv: DOMMatrix; flip: number };
 }
 interface Drag {
-  kind: 'move' | 'resize' | 'rotate' | 'end' | 'draw' | 'pen' | 'erase' | 'marquee' | 'pan' | 'guide';
+  kind: 'move' | 'resize' | 'rotate' | 'end' | 'draw' | 'pen' | 'erase' | 'marquee' | 'pan' | 'guide' | 'lasso';
   /** the eraser's strokes so far (hidden until the release removes them) */
   erased?: Element[];
+  /** the precise eraser's: the paths it cut, as they were */
+  cut?: Cut;
+  /** several objects resized or turned together: their box (document px) */
+  multi?: Rect;
   x0: number; y0: number;
   els: DragEl[];
   handle?: string;
@@ -1335,6 +1405,37 @@ function grab(e: PointerEvent, stable = false): void {
   // Ordinary object clicks still capture their object for subsequent double-clicks.
   const el = stable ? host : t instanceof Element ? t : document.documentElement;
   try { el.setPointerCapture(e.pointerId); } catch { /* not capturable (synthetic) */ }
+}
+
+/** (x, y) (document px) within the box round what is selected, or a few screen px from it */
+function insideSelection(x: number, y: number): boolean {
+  const live = selected.filter(e => e.isConnected);
+  if (!live.length) return false;
+  const u = union(live.map(docRect)), m = 6 / scale;
+  return x >= u.x - m && x <= u.x + u.w + m && y >= u.y - m && y <= u.y + u.h + m;
+}
+
+/** the colours used on the slide shown (or the page), for the lasso's colour filter */
+function postSlideColors(): void {
+  const scope = isSolo() ? slides()[soloIndex()] : state.kind === 'page' ? document.body : slides()[0];
+  post({ ol: 'slideColors', colors: scope ? colorsUsed(scope) : [] });
+}
+
+/** the lasso let go: what its loop took (of the kinds and colours its settings let it take) is selected; a tap selects what is under it */
+function endLasso(d: Drag, e: PointerEvent): void {
+  const scope = d.slide ?? (state.kind === 'page' ? document.body : null);
+  if (d.moved && d.pts && d.pts.length > 4 && scope) {
+    const objs = scope === document.body ? Array.from(scope.children).filter(c => srcOf.has(c) && !isForeign(c) && !c.classList.contains('notes')) : objectsOn(scope);
+    const took = objs.filter(el => lassoTakes(el, d.pts!, inkStyle.lasso, scale));
+    selected = e.shiftKey ? [...new Set([...selected, ...took])] : took;
+    report();
+  } else if (!d.moved) {
+    const el = objectFor(e.target as Element, false, { x: e.clientX, y: e.clientY });
+    if (e.shiftKey) { if (el) selected = selected.includes(el) ? selected.filter(s => s !== el) : [...selected, el]; }
+    else selected = el ? [el] : [];
+    report();
+  }
+  draw();
 }
 
 function onPointerDown(e: PointerEvent): void {
@@ -1395,6 +1496,7 @@ function onPointerDown(e: PointerEvent): void {
   if (e.pointerType === 'pen' && tool === 'select' && inkStyle.penInks) {
     setTool('pen');
     penInksPending = true;
+    penTook = true;
     post({ ol: 'penInks' });
   }
   // drawing with a Pencil: fingers move the slide, they do not draw (GoodNotes)
@@ -1413,6 +1515,24 @@ function onPointerDown(e: PointerEvent): void {
   if (tool === 'eraser') {
     drag = { ...base, kind: 'erase', slide: slideOf(t), erased: [] };
     eraseAt(e, drag);
+    capture();
+    return;
+  }
+  // the lasso (Draw): a loop round things selects them; a press inside what it took moves that (GoodNotes)
+  if (tool === 'lasso') {
+    if (e.pointerType === 'touch' && fingersPan()) {
+      drag = { ...base, kind: 'pan', slide: slideOf(t) };
+      capture();
+      return;
+    }
+    if (selected.length && !e.shiftKey && insideSelection(x, y)) {
+      drag = { ...base, kind: 'move', els: selected.filter(s => movable(s) && !isLocked(s)).map(s => start(s as HTMLElement)), copy: e.altKey };
+      capture();
+      return;
+    }
+    if (!e.shiftKey && selected.length) { selected = []; report(); }
+    drag = { ...base, kind: 'lasso', slide: slideOf(t) ?? (isSolo() ? slides()[soloIndex()] ?? null : null), pts: [[x, y]] };
+    draw();
     capture();
     return;
   }
@@ -1509,7 +1629,87 @@ export function revertLive(d: DragEl): void {
   if (!d.el.getAttribute('style')) d.el.removeAttribute('style');
 }
 
+/** what a resize or a turn of several objects at once moves: those on the slide, positioned, not locked, not parts of a drawing */
+function manyMovable(): Element[] | null {
+  const live = selected.filter(e => e.isConnected);
+  if (live.length < 2 || editing || live.some(el => isLocked(el) || isSvgPart(el) || !movable(el) || cs(el).position !== 'absolute')) return null;
+  return live;
+}
+
+/** a handle of the box round several selected objects: resized together (its corners) or turned about its centre */
+function onManyHandleDown(e: PointerEvent, handle: string): void {
+  const live = manyMovable();
+  if (e.button !== 0 || !live) return;
+  e.preventDefault();
+  e.stopPropagation();
+  grab(e, true);
+  const els = live.map(el => { const d = start(el as HTMLElement); if (isGroup(el)) d.members = membersOf(el, true).map(start); return d; });
+  const u = union(els.map(d => d.r0));
+  const base = { x0: e.pageX, y0: e.pageY, els, handle, moved: false, pointerId: e.pointerId, pointerType: e.pointerType, multi: u };
+  if (handle === 'mrot') {
+    const cx = u.x + u.w / 2, cy = u.y + u.h / 2;
+    drag = { ...base, kind: 'rotate', rot: { cx, cy, a0: 0, p0: Math.atan2(e.pageY - cy, e.pageX - cx) * 180 / Math.PI } };
+  } else drag = { ...base, kind: 'resize' };
+  capture();
+}
+
+/** document px per CSS px of what an object is positioned in (a slide shown smaller than its size) */
+function docScale(el: Element): number {
+  const s = slideOf(el);
+  return s && s.offsetWidth ? docRect(s).w / s.offsetWidth : 1;
+}
+
+/**
+ * Several objects resized at once by a corner of their box: scaled about the opposite corner, all
+ * keeping their shape (Shift: stretched), each staying where it was in the box — as GoodNotes
+ * resizes what the lasso took. A group's objects grow with it.
+ */
+function resizeMany(d: Drag, dx: number, dy: number, free: boolean): void {
+  const u = d.multi!, h = d.handle!.slice(1);
+  const ax = h.includes('w') ? u.x + u.w : u.x, ay = h.includes('n') ? u.y + u.h : u.y;
+  let kx = Math.max(0.05, (u.w + (h.includes('e') ? dx : -dx)) / (u.w || 1));
+  let ky = Math.max(0.05, (u.h + (h.includes('s') ? dy : -dy)) / (u.h || 1));
+  if (!free) { const k = Math.max(0.05, (kx * u.w * u.w + ky * u.h * u.h) / (u.w * u.w + u.h * u.h || 1)); kx = ky = k; }
+  for (const m of d.els) {
+    const k = docScale(m.el), r = m.r0, st = m.el.style;
+    const w = m.w0 * kx, fixed = fixedHeight(m.el), hh = m.h0 * ky;
+    st.setProperty('width', `${w}px`);
+    if (fixed) st.setProperty('height', `${hh}px`);
+    // its centre where the scaling takes it (a text's top: its height follows its text)
+    const cx = ax + (r.x + r.w / 2 - ax) * kx;
+    st.setProperty('left', `${m.left0 + (cx - (r.x + r.w / 2)) / k - (w - m.w0) / 2}px`);
+    if (fixed) { const cy = ay + (r.y + r.h / 2 - ay) * ky; st.setProperty('top', `${m.top0 + (cy - (r.y + r.h / 2)) / k - (hh - m.h0) / 2}px`); }
+    else st.setProperty('top', `${m.top0 + (ay + (r.y - ay) * ky - r.y) / k}px`);
+    for (const g of m.members ?? []) {
+      const gs = g.el.style;
+      gs.setProperty('left', `${g.left0 * kx}px`);
+      gs.setProperty('top', `${g.top0 * ky}px`);
+      gs.setProperty('width', `${g.w0 * kx}px`);
+      if (fixedHeight(g.el)) gs.setProperty('height', `${g.h0 * ky}px`);
+    }
+  }
+}
+
+/** several objects turned at once about the centre of their box, each turning with it (Shift: 15° steps) */
+function rotateMany(d: Drag, e: PointerEvent): void {
+  const r = d.rot!;
+  let a = Math.atan2(e.pageY - r.cy, e.pageX - r.cx) * 180 / Math.PI - r.p0;
+  a = ((a % 360) + 540) % 360 - 180;
+  if (e.shiftKey) a = Math.round(a / 15) * 15;
+  const t = a * Math.PI / 180, cos = Math.cos(t), sin = Math.sin(t);
+  for (const m of d.els) {
+    const k = docScale(m.el);
+    const ox = m.r0.x + m.r0.w / 2 - r.cx, oy = m.r0.y + m.r0.h / 2 - r.cy;
+    const nx = ox * cos - oy * sin, ny = ox * sin + oy * cos;
+    m.el.style.setProperty('left', `${m.left0 + (nx - ox) / k}px`);
+    m.el.style.setProperty('top', `${m.top0 + (ny - oy) / k}px`);
+    const na = ((m.angle + a) % 360 + 540) % 360 - 180;
+    m.el.style.setProperty('rotate', `${Math.round(na * 10) / 10}deg`);
+  }
+}
+
 function onHandleDown(e: PointerEvent, handle: string): void {
+  if (handle[0] === 'm' && selected.length > 1) { onManyHandleDown(e, handle); return; }
   if (e.button !== 0 || selected.length !== 1) return;
   e.preventDefault();
   e.stopPropagation();
@@ -1622,6 +1822,15 @@ function onDragMove(e: PointerEvent): void {
   if (pinch) return;
   if (drag.kind === 'erase') { eraseAt(e, drag); return; }
   if (drag.kind === 'pen') { if (Math.hypot(e.pageX - drag.x0, e.pageY - drag.y0) * scale >= 1) drag.moved = true; moveInk(e); return; }
+  if (drag.kind === 'lasso') {
+    const p = drag.pts!;
+    for (const ev of e.getCoalescedEvents?.() ?? [e]) {
+      const q = p[p.length - 1];
+      if (Math.hypot(ev.pageX - q[0], ev.pageY - q[1]) * scale >= 3) { p.push([ev.pageX, ev.pageY]); drag.moved = true; }
+    }
+    draw();
+    return;
+  }
   // (a guide follows the pointer from the start: it does not wait for the few px a drag needs; Ctrl / ⌘ held: no snapping)
   if (drag.kind === 'guide') { drag.moved = true; moveGuideDrag(e.pageX, e.pageY, e.ctrlKey || e.metaKey); return; }
   const dx = e.pageX - drag.x0, dy = e.pageY - drag.y0;
@@ -1634,7 +1843,7 @@ function onDragMove(e: PointerEvent): void {
       document.documentElement.classList.add('ol-dragging');
       // the cursor of what is dragged stays on wherever the pointer goes (Safari keeps the cursor it had at the press)
       const b = drag.kind === 'resize' && drag.els[0] ? boxOf(drag.els[0].el) : null;
-      const cur = drag.kind === 'move' || drag.kind === 'end' ? MOVE_CURSOR : drag.kind === 'rotate' ? ROT_CURSOR : b && drag.handle ? cursorFor(drag.handle, b.a) : drag.kind === 'draw' ? 'crosshair' : '';
+      const cur = drag.kind === 'move' || drag.kind === 'end' ? MOVE_CURSOR : drag.kind === 'rotate' ? ROT_CURSOR : b && drag.handle ? cursorFor(drag.multi ? drag.handle.slice(1) : drag.handle, drag.multi ? 0 : b.a) : drag.kind === 'draw' ? 'crosshair' : '';
       if (dragCss && cur) dragCss.textContent = `html.ol-dragging, html.ol-dragging * { cursor: ${cur} !important; }`;
     }
   }
@@ -1669,9 +1878,13 @@ function onDragMove(e: PointerEvent): void {
       ddx += s.dx; ddy += s.dy;
     } else guides = [];
     for (const d of drag.els) placeLive(d, ddx, ddy);
+  } else if (drag.kind === 'resize' && drag.multi) {
+    resizeMany(drag, dx, dy, e.shiftKey);
   } else if (drag.kind === 'resize') {
     const d = drag.els[0];
     resizeLive(d, drag.handle!, dx, dy, e.shiftKey || d.el.localName === 'img' || d.el.classList.contains('ol-crop') || !!d.members, e.ctrlKey || e.metaKey);
+  } else if (drag.kind === 'rotate' && drag.multi) {
+    rotateMany(drag, e);
   } else if (drag.kind === 'rotate') {
     const r = drag.rot!;
     let a = r.a0 + Math.atan2(e.pageY - r.cy, e.pageX - r.cx) * 180 / Math.PI - r.p0;
@@ -1826,12 +2039,19 @@ function onDragEnd(e: PointerEvent): void {
     draw();
     return;
   }
+  if (d.kind === 'lasso') { if (!canceled) endLasso(d, e); else draw(); return; }
   if (d.kind === 'erase') {
     const gone = d.erased ?? [];
-    if (canceled || state.version === null) { for (const el of gone) (el as HTMLElement | SVGElement).style.visibility = ''; return; }
-    // one change for the whole rub (one undo brings them all back)
+    if (canceled || state.version === null) { for (const el of gone) (el as HTMLElement | SVGElement).style.visibility = ''; if (d.cut) uncut(d.cut); return; }
+    // one change for the whole rub (one undo brings them all back): what it cut of strokes, the strokes it took whole
+    if (d.cut) for (const p of [...d.cut.keys()]) if (gone.some(g => g.contains(p))) d.cut.delete(p);
+    const ops = d.cut ? cutOps(d.cut) : [];
     const paths = gone.map(pathOf).filter((p): p is Path => !!p);
-    if (paths.length) commit([{ t: 'remove', paths }]);
+    const rm = ops.find(o => o.t === 'remove');
+    if (rm && rm.t === 'remove') rm.paths.push(...paths); else if (paths.length) ops.push({ t: 'remove', paths });
+    if (ops.length) commit(ops);
+    // back to the pen after erasing (GoodNotes' auto-deselect), with the eraser in hand (not the pen's other end)
+    if (tool === 'eraser' && inkStyle.eraser?.back && (ops.length || d.moved)) { setTool('pen'); post({ ol: 'toolBack', tool: 'pen' }); }
     return;
   }
   if (d.kind === 'pen') { if (canceled) dropInk(); else endInk(e); return; }
@@ -1860,6 +2080,18 @@ function onDragEnd(e: PointerEvent): void {
     if (d.kind === 'move' && d.clicked && selected.length > 1 && !e.shiftKey) { selected = [d.clicked]; report(); }
     // a click on the object already selected: resize handles ⇄ rotation arrows (Inkscape)
     else if (d.kind === 'move' && d.again && d.clicked && !e.shiftKey && rotatable(d.clicked) && !lineOf(d.clicked) && !isLocked(d.clicked)) rotating = rotating === d.clicked ? null : d.clicked;
+    draw();
+    return;
+  }
+  if (d.kind === 'rotate' && d.multi) {
+    const ops: HtmlOp[] = [];
+    for (const x of d.els) {
+      const op = styleOp(x);
+      if (op) ops.push(op);
+      const path = pathOf(x.el), a = parseFloat(x.el.style.getPropertyValue('rotate')) || 0;
+      if (path) ops.push({ t: 'style', path, set: { rotate: a ? `${Math.round(a * 10) / 10}deg` : null } });
+    }
+    commit([...ops, ...refitGroups(d.els.map(x => x.el))]);
     draw();
     return;
   }
@@ -2003,8 +2235,13 @@ function onWindowBlur(): void {
 /** the two fingers of a pinch: in the frame's px and on the screen */
 const pinchPts = () => [...touches.values()].slice(0, 2).map(p => ({ x: p.x, y: p.y, sx: p.sx, sy: p.sy }));
 
+/** two fingers tapped together undo (GoodNotes'): when the second came down, where both were (screen px), whether either moved */
+let twoTap: { t0: number; at: Map<number, { sx: number; sy: number }>; moved: boolean } | null = null;
+
 function startPinch(): void {
   dropDrag();
+  const ts = [...touches.values()];
+  twoTap = ts.length === 2 && Math.abs((ts[0].t0 ?? 0) - (ts[1].t0 ?? 0)) < 150 ? { t0: performance.now(), at: new Map([...touches].map(([id, p]) => [id, { sx: p.sx, sy: p.sy }])), moved: false } : null;
   pinch = touchGeom();
   pinch0 = pinch && { d: pinch.d, smx: pinch.smx, smy: pinch.smy, f: 1, lock: pinchLock() };
   // one slide: the editor zooms and moves it, from where the fingers were at the start (absolute — no step undoes the last)
@@ -2014,6 +2251,7 @@ function startPinch(): void {
 function onTouchMove(e: PointerEvent): void {
   if (!touches.has(e.pointerId)) return;
   touches.set(e.pointerId, { ...touches.get(e.pointerId)!, x: e.clientX, y: e.clientY, sx: e.screenX, sy: e.screenY });
+  if (twoTap && !twoTap.moved) { const o = twoTap.at.get(e.pointerId); if (o && Math.hypot(e.screenX - o.sx, e.screenY - o.sy) > 10) twoTap.moved = true; }
   if (tri) { moveTri(); return; }
   if (!pinch) return;
   if (isSolo()) { post({ ol: 'pinch', phase: 'move', pts: pinchPts() }); return; }
@@ -2044,11 +2282,13 @@ function onTouchUp(e: PointerEvent): void {
     // must not turn a partial pinch into a committed zoom or a three-finger Undo.
     if (pinch && isSolo()) post({ ol: 'pinch', phase: 'cancel', pts: [] });
     touches.clear();
-    pinch = null; pinch0 = null; tri = null;
+    pinch = null; pinch0 = null; tri = null; twoTap = null;
     return;
   }
   touches.delete(e.pointerId);
   if (tri) { if (!touches.size) endTri(); return; }
+  // both fingers up again at once, neither having moved: undo
+  if (twoTap && !touches.size) { const g = twoTap; twoTap = null; if (!g.moved && performance.now() - g.t0 < 320) post({ ol: 'history', redo: false }); }
   if (touches.size < 2 && pinch) {
     if (isSolo()) post({ ol: 'pinch', phase: 'end', pts: [] });
     pinch = null; pinch0 = null;
@@ -2067,6 +2307,7 @@ function startTri(): void {
   if (pinch && isSolo()) post({ ol: 'pinch', phase: 'cancel', pts: [] });
   pinch = null; pinch0 = null;
   const m = triMid();
+  twoTap = null;
   tri = { t0: performance.now(), x0: m.x, y0: m.y, x: m.x, y: m.y };
 }
 
@@ -2133,7 +2374,7 @@ function penLands(e: PointerEvent): void {
   if (drag?.pointerType !== 'touch') postGestureReliability('gesture.interrupted', 'touch');
   for (const id of touches.keys()) ignorePalmContact(id);
   touches.clear();
-  tri = null;
+  tri = null; twoTap = null;
   if (pinch) { if (isSolo()) post({ ol: 'pinch', phase: 'cancel', pts: [] }); pinch = null; pinch0 = null; }
   if (drag && drag.pointerType === 'touch') dropDrag();
 }
@@ -2149,6 +2390,8 @@ let ink: {
   rest: { x: number; y: number; t: number; timer: ReturnType<typeof setTimeout> | null }; judged: number; cands: { el: Element; pts: [number, number][] }[] | null;
   /** on a touch screen: its points as the screen had them, for a point far off (core glitch.ts; the editor reports it) */
   watch: StrokeWatch | null;
+  /** draw and hold (core/shapesnap.ts): the timer of the pen at rest, the shape it became */
+  snapTimer: ReturnType<typeof setTimeout> | null; snapped: Snapped | null;
 } | null = null;
 /** strokes drawn and sent to the editor, shown until the page has them (`count`: that many strokes the slide will have then) */
 const sentInk: { svg: SVGSVGElement; slide: HTMLElement | null; count: number; timer: ReturnType<typeof setTimeout> }[] = [];
@@ -2176,7 +2419,7 @@ function startInk(e: PointerEvent, slide: HTMLElement | null): void {
   svg.append(g);
   (slide ?? document.body).append(svg);
   ink = { slide, pts: [inkPoint(e, slide)], client: [[e.clientX, e.clientY]], pressure: e.pointerType === 'pen', svg, g, frame: 0, t: e.timeStamp, whole: wholePx(e),
-    rest: { x: e.clientX, y: e.clientY, t: performance.now(), timer: null }, judged: 0, cands: null,
+    rest: { x: e.clientX, y: e.clientY, t: performance.now(), timer: null }, judged: 0, cands: null, snapTimer: null, snapped: null,
     watch: navigator.maxTouchPoints > 0 ? new StrokeWatch('deck', e.pointerType, { w: innerWidth, h: innerHeight }) : null };
   ink.watch?.add(e.clientX, e.clientY, e.timeStamp, 'down', scrollX, scrollY);
   paintInk(true);
@@ -2194,16 +2437,39 @@ function moveInk(e: PointerEvent): void {
   if (!ink) return;
   const evs = e.getCoalescedEvents?.() ?? [];
   for (const ev of evs.length ? evs : [e]) takeInk(ev, evs.length ? 'coalesced' : 'move');
+  // snapped into a shape: it stays while the pen rests; moving on (it only paused, at a corner say) takes the stroke back as drawn
+  if (ink.snapped) {
+    if (Math.hypot(e.clientX - ink.rest.x, e.clientY - ink.rest.y) * scale <= SNAP_LEAVE_PX) return;
+    ink.snapped = null;
+  }
   if (!ink.frame) ink.frame = requestAnimationFrame(() => { if (ink) { ink.frame = 0; paintInk(false); } });
-  if (!scribbles()) return;
-  // what the scribble would erase fades as it goes (every ~80 ms); resting the pen asks for it (scratch and hold)
+  // what the scribble would erase fades as it goes (every ~80 ms); resting the pen asks for it (scratch
+  // and hold) — or, over nothing to erase, makes the stroke the shape it was meant to be (draw and hold)
   const now = performance.now(), r = ink.rest;
   if (Math.hypot(e.clientX - r.x, e.clientY - r.y) * scale > SCRATCH_HOLD_PX) {
     if (r.timer) clearTimeout(r.timer);
-    ink.rest = { x: e.clientX, y: e.clientY, t: now, timer: setTimeout(() => judgeScratch(true), SCRATCH_HOLD_MS) };
+    if (ink.snapTimer) clearTimeout(ink.snapTimer);
+    ink.rest = { x: e.clientX, y: e.clientY, t: now, timer: scribbles() ? setTimeout(() => judgeScratch(true), SCRATCH_HOLD_MS) : null };
+    ink.snapTimer = inkStyle.snap !== false ? setTimeout(holdSnap, SNAP_HOLD_MS) : null;
   }
-  if (now - ink.judged > 80) judgeScratch(false);
+  if (scribbles() && now - ink.judged > 80) judgeScratch(false);
 }
+
+/** the pen rested at the end of its stroke: the stroke becomes the shape it was meant to be (core/shapesnap.ts) — not over strokes the scribble would erase */
+function holdSnap(): void {
+  if (!ink || ink.snapped) return;
+  ink.snapTimer = null;
+  if (scribbles() && scratchTargets(true).length) return;
+  const s = snapShape(ink.pts, { zoom: docScale(ink.slide ?? document.body) * scale });
+  if (!s) return;
+  ink.snapped = s;
+  if (ink.frame) { cancelAnimationFrame(ink.frame); ink.frame = 0; }
+  fadeScratch([]);
+  setInkPaths(inkPaths(snappedRuns()));
+}
+
+/** the snapped shape as the runs of the stroke: one, in the pen's width (the highlighter's straight band) */
+const snappedRuns = (): InkRun[] => (ink?.snapped ? [{ w: inkStyle.width, pts: ink.snapped.pts }] : []);
 
 /** scribbling over strokes erases them: on, and the pen (not the highlighter) in hand */
 const scribbles = () => inkStyle.scribble !== false && inkStyle.opacity >= 1;
@@ -2267,9 +2533,18 @@ function takeInk(ev: PointerEvent, sample: InkSample): void {
 
 /** the stroke as runs of one width (freehand.ts), a path for each width as the page will have it (those that did not change left alone) */
 function paintInk(final: boolean): InkRun[] {
+  const runs = inkRunsNow(final);
+  setInkPaths(inkPaths(runs));
+  return runs;
+}
+function inkRunsNow(final: boolean): InkRun[] {
   if (!ink) return [];
-  const runs = inkRuns(ink.pts, { width: inkStyle.width, highlighter: inkStyle.opacity < 1, pressure: ink.pressure, zoom: scale, coarse: ink.whole && ink.pts.length > 4, nib: inkStyle.nib, final });
-  const paths = inkPaths(runs), kids = ink.g.children;
+  return inkRuns(ink.pts, { width: inkStyle.width, highlighter: inkStyle.opacity < 1, pressure: ink.pressure, zoom: scale, coarse: ink.whole && ink.pts.length > 4, nib: inkStyle.nib, final });
+}
+/** the live stroke's paths made these (those that did not change left alone) */
+function setInkPaths(paths: { w: number; d: string }[]): void {
+  if (!ink) return;
+  const kids = ink.g.children;
   paths.forEach((p, i) => {
     let el = kids[i];
     if (!el) { el = document.createElementNS(SVG_NS, 'path'); ink!.g.append(el); }
@@ -2278,7 +2553,6 @@ function paintInk(final: boolean): InkRun[] {
     if (el.getAttribute('stroke-width') !== w) el.setAttribute('stroke-width', w);
   });
   while (kids.length > paths.length) kids[kids.length - 1].remove();
-  return runs;
 }
 
 /** the pen lifted: the stroke drawn to its end, sent; it stays shown until the page has it */
@@ -2292,16 +2566,24 @@ function endInk(e: PointerEvent): void {
   if (glitch) post({ ol: 'glitch', fields: glitch });
   // a scribble over strokes erases them (core/scratchout.ts; the pen resting at its end: scratch and hold)
   if (ink.rest.timer) clearTimeout(ink.rest.timer);
-  const gone = scratchTargets(performance.now() - ink.rest.t >= SCRATCH_HOLD_MS);
+  if (ink.snapTimer) clearTimeout(ink.snapTimer);
+  const shape = ink.snapped;
+  const gone = shape ? [] : scratchTargets(performance.now() - ink.rest.t >= SCRATCH_HOLD_MS);
   fadeScratch([]);
-  const runs = paintInk(true);
-  const b = runsBox(runs);
+  // (snapped: the stroke as drawn is written too, a step before its shape, so that Undo brings it back)
+  const runs = shape ? inkRunsNow(true) : paintInk(true);
+  const shapeRuns = shape ? snappedRuns() : [];
   const { slide, svg } = ink;
   ink = null;
+  penPutAway();
   if (state.version === null || !runs.length) { svg.remove(); return; }
   // whole px for its place, the runs moved into its own box
-  const x = Math.floor(b.x), y = Math.floor(b.y);
-  const rect = { x, y, w: Math.max(1, Math.ceil(b.x + b.w) - x), h: Math.max(1, Math.ceil(b.y + b.h) - y) };
+  const boxed = (rs: InkRun[]) => {
+    const b = runsBox(rs), x = Math.floor(b.x), y = Math.floor(b.y);
+    return { x, y, rect: { x, y, w: Math.max(1, Math.ceil(b.x + b.w) - x), h: Math.max(1, Math.ceil(b.y + b.h) - y) } };
+  };
+  const { x, y, rect } = boxed(runs);
+  const snap = shape ? (() => { const sb = boxed(shapeRuns); return { kind: shape.kind, rect: sb.rect, runs: inkPaths(shapeRuns, -sb.x, -sb.y) }; })() : undefined;
   const waiting = sentInk.filter(s => s.slide === slide).length;
   const entry = { svg, slide, count: inkCount(slide) + waiting + 1, timer: setTimeout(() => { svg.remove(); const i = sentInk.indexOf(entry); if (i >= 0) sentInk.splice(i, 1); }, 4000) };
   const scratch = gone.map(pathOf).filter((p): p is Path => !!p);
@@ -2312,7 +2594,17 @@ function endInk(e: PointerEvent): void {
     svg.remove();
     for (const el of gone) (el as SVGElement).style.visibility = 'hidden';
   } else sentInk.push(entry);
-  post({ ol: 'draw', version: state.version, tool: 'pen', slide: slide ? pathOf(slide) : null, rect, after: null, runs: inkPaths(runs, -x, -y), ...(scratch.length ? { scratch } : {}) });
+  post({ ol: 'draw', version: state.version, tool: 'pen', slide: slide ? pathOf(slide) : null, rect, after: null, runs: inkPaths(runs, -x, -y), ...(scratch.length ? { scratch } : {}), ...(snap ? { snap } : {}) });
+}
+
+/** the pen's stroke done that took the pen itself with Draw not open: Select in hand again, fingers and the mouse selecting (the editor's Draw row stays folded) */
+function penPutAway(): void {
+  if (!penTook) return;
+  penTook = false;
+  penInksPending = false;
+  tool = 'select';
+  document.documentElement.classList.remove('ol-tool-draw', 'ol-tool-erase');
+  post({ ol: 'penInks', done: true });
 }
 
 /** the stroke being drawn given up (a second finger, a cancelled pointer) */
@@ -2320,6 +2612,8 @@ function dropInk(): void {
   if (!ink) return;
   if (ink.frame) cancelAnimationFrame(ink.frame);
   if (ink.rest.timer) clearTimeout(ink.rest.timer);
+  if (ink.snapTimer) clearTimeout(ink.snapTimer);
+  penPutAway();
   fadeScratch([]);
   ink.svg.remove();
   ink = null;
@@ -2466,24 +2760,44 @@ export function slidePoint(slide: HTMLElement, x: number, y: number): [number, n
 /* ------------------------------------------------------------------ drawing new objects */
 
 /**
- * The eraser (Draw): the hand-drawn strokes under the pointer, a few screen px around it, go —
- * hidden at once, removed on the release. Only strokes (open paths without a fill: the pen's, the
- * highlighter's, an open Bézier path), as GoodNotes' eraser takes whole strokes; their painted line is
- * what it must touch, not their box.
+ * The eraser (Draw): the hand-drawn strokes under the pointer, as far round it as its size, go —
+ * hidden at once, removed on the release; precise (its settings), only the part of Draw's strokes under
+ * it goes (notetools.ts). Only strokes (open paths without a fill: the pen's, the highlighter's, an open
+ * Bézier path), as GoodNotes' eraser takes them — of the highlighter alone when so set; their painted
+ * line is what it must touch, not their box. A quick rub is followed all along the way it went.
  */
 function eraseAt(e: PointerEvent, d: Drag): void {
-  const rad = 7 / scale;
-  const pts: [number, number][] = [[0, 0]];
-  for (let i = 0; i < 8; i++) pts.push([Math.cos(i * Math.PI / 4) * rad, Math.sin(i * Math.PI / 4) * rad]);
-  for (const [dx, dy] of pts) {
-    for (const hit of document.elementsFromPoint(e.clientX + dx, e.clientY + dy)) {
-      if (!(hit instanceof SVGGeometryElement) || hit.localName === 'svg') continue;
-      const obj = objectFor(hit, false);
-      if (!obj || d.erased!.includes(obj) || isLocked(obj) || !isStrokeArt(obj)) continue;
-      (obj as HTMLElement | SVGElement).style.visibility = 'hidden';
-      d.erased!.push(obj);
+  const es = inkStyle.eraser;
+  const rad = (es ? ERASER_PX[es.size] : 7) / scale;
+  const n = Math.max(8, Math.ceil((2 * Math.PI * rad * scale) / 6));
+  const ring: [number, number][] = [[0, 0]];
+  for (let i = 0; i < n; i++) ring.push([Math.cos(i * 2 * Math.PI / n) * rad, Math.sin(i * 2 * Math.PI / n) * rad]);
+  if (rad * scale > 12) for (let i = 0; i < 8; i++) ring.push([Math.cos(i * Math.PI / 4) * rad / 2, Math.sin(i * Math.PI / 4) * rad / 2]);
+  const from = d.last ?? { x: e.clientX, y: e.clientY };
+  const steps = Math.max(1, Math.ceil(Math.hypot(e.clientX - from.x, e.clientY - from.y) / (rad / 2)));
+  for (let k = 1; k <= steps; k++) {
+    const cx = from.x + ((e.clientX - from.x) * k) / steps, cy = from.y + ((e.clientY - from.y) * k) / steps;
+    const seen = new Set<Element>();
+    for (const [dx, dy] of ring) {
+      for (const hit of document.elementsFromPoint(cx + dx, cy + dy)) {
+        if (!(hit instanceof SVGGeometryElement) || hit.localName === 'svg') continue;
+        const obj = objectFor(hit, false);
+        if (!obj || seen.has(obj) || d.erased!.includes(obj) || isLocked(obj) || !isStrokeArt(obj)) continue;
+        seen.add(obj);
+        if (es?.hlOnly && !isHighlight(obj)) continue;
+        if (es?.precise && cutStroke(obj, cx, cy, rad, (d.cut ??= new Map()))) continue;
+        (obj as HTMLElement | SVGElement).style.visibility = 'hidden';
+        d.erased!.push(obj);
+      }
     }
   }
+  d.last = { x: e.clientX, y: e.clientY };
+}
+
+/** a highlighter's stroke (translucent, multiplied over what is under it) */
+function isHighlight(el: Element): boolean {
+  const g = el.querySelector('g');
+  return parseFloat(g?.getAttribute('stroke-opacity') ?? g?.getAttribute('fill-opacity') ?? '1') < 1 || cs(el).mixBlendMode === 'multiply';
 }
 
 function finishDraw(d: Drag, box: Rect | null, e: PointerEvent): void {

@@ -279,7 +279,9 @@ function onMessage(e: MessageEvent): void {
     case 'stopText': if (MODE === 'edit') edit.stopText(m.save !== false); break;
     case 'scrollTo': if (MODE === 'edit') edit.scrollToSlide(m.slide, m.smooth); else if (MODE === 'thumb') railShow(m.slide); break;
     case 'scale': if (MODE === 'edit') edit.setScale(m.scale, m.anchor); else { railScale = m.scale; drawRail(); } break;
-    case 'tool': if (MODE === 'edit') edit.setTool(m.tool, m.ink); break;
+    case 'tool': if (MODE === 'edit') edit.setTool(m.tool, m.ink, m.held); break;
+    case 'inkConvert': if (MODE === 'edit') edit.inkConvert(m.as); break;
+    case 'inkTyped': if (MODE === 'edit') edit.inkTyped(m.text, m.as); break;
     case 'guides': if (MODE === 'edit') setGuidesShown(m.show); break;
     case 'exec': if (MODE === 'edit') edit.exec(m.command, m.value); break;
     case 'peers': if (MODE === 'edit') edit.setPeers(m.peers); else if (MODE === 'thumb') { railPeers = m.peers; drawRail(); } break;

@@ -314,6 +314,16 @@ export function polylineHitsPolygon(pts: readonly (readonly [number, number, ...
 }
 
 /** Does a lasso touch this axis-aligned rectangle (an image, a sticky note)? Overlap of any kind counts. */
+/**
+ * Whether most of the box lies inside the polygon (a lasso round a picture, a text, a shape: taken when
+ * it holds the better part of it) — sampled on a 5 × 5 grid.
+ */
+export function rectMostlyInPolygon(x: number, y: number, w: number, h: number, poly: Polygon): boolean {
+  let n = 0;
+  for (let i = 0; i < 5; i++) for (let j = 0; j < 5; j++) if (pointInPolygon(x + ((i + 0.5) / 5) * w, y + ((j + 0.5) / 5) * h, poly)) n++;
+  return n >= 13;
+}
+
 export function rectHitsPolygon(x: number, y: number, w: number, h: number, poly: Polygon): boolean {
   if (poly.length < 3) return false;
   const corners: [number, number][] = [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];

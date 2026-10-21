@@ -103,7 +103,7 @@ test('the lasso selects several things at once: group move and group delete', as
   const count0 = await page.locator('.board-stroke:not(.live)').count();
 
   // lasso around both: one selection box
-  await page.click('[data-tool="lasso"]');
+  await page.click('[data-tb="dk-ink-lasso"]');
   await page.mouse.move(cx - 70, cy - 170);
   await page.mouse.down();
   for (const [x, y] of [[cx + 70, cy - 170], [cx + 70, cy - 80], [cx - 70, cy - 80], [cx - 70, cy - 170]] as const) await page.mouse.move(x, y, { steps: 4 });

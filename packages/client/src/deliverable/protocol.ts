@@ -22,9 +22,10 @@ export type DeliverableKind = 'deck' | 'poster' | 'page';
 /**
  * `references`: a list of the works cited (an element of class ol-bibliography, runtime/cite.ts);
  * `pen`: Draw — freehand strokes in the pen's or the highlighter's ink (InkStyle), one after the
- * other; `eraser`: removes the strokes it passes over
+ * other; `eraser`: removes the strokes it passes over; `lasso`: a loop drawn round things selects them
+ * (Draw's: the kinds and colours InkStyle.lasso lets it take)
  */
-export type Tool = 'select' | 'text' | 'rect' | 'roundrect' | 'ellipse' | 'triangle' | 'diamond' | 'star' | 'hexagon' | 'line' | 'arrow' | 'pen' | 'eraser' | 'bezier' | 'formula' | 'references';
+export type Tool = 'select' | 'lasso' | 'text' | 'rect' | 'roundrect' | 'ellipse' | 'triangle' | 'diamond' | 'star' | 'hexagon' | 'line' | 'arrow' | 'pen' | 'eraser' | 'bezier' | 'formula' | 'references';
 
 /** the ink a stroke is drawn in (Draw): colour, width in slide px, opacity (the highlighter's < 1, laid over what is under it as a highlighter is) */
 /**
@@ -44,6 +45,12 @@ export interface InkStyle {
   scribble?: boolean;
   /** a pen (the Pencil, a stylus) draws as soon as it touches the slide, Draw or not (its settings; never when the page can't be changed) */
   penInks?: boolean;
+  /** draw and hold: a stroke held still at its end becomes a shape (core/shapesnap.ts) */
+  snap?: boolean;
+  /** the eraser's settings (deckink.ts EraserSet) */
+  eraser?: { precise: boolean; size: 0 | 1 | 2; hlOnly: boolean; back: boolean };
+  /** what the lasso takes, and of which colours (lower-case #rrggbb; none: any) */
+  lasso?: { kinds: ('ink' | 'shapes' | 'pictures' | 'text')[]; colors: string[] };
 }
 
 /** what kind of object the toolbar is showing tools for */
@@ -69,6 +76,8 @@ export interface InkRunD { w: number; d: string }
 export interface Paint {
   /** Draw's ink, whichever way the stroke is painted (a filled outline before, stroked runs now) */
   ink?: string;
+  /** Draw's strokes thinner (< 1) or thicker (> 1): their widths times this */
+  inkScale?: number;
   fill?: string | null;
   stroke?: string | null;
   strokeWidth?: number | null;
@@ -213,7 +222,12 @@ export type ToRuntime =
   | { ol: 'stopText'; save?: boolean }
   | { ol: 'scrollTo'; slide: number; smooth?: boolean }
   | { ol: 'scale'; scale: number; anchor?: { docY: number; screenY: number } }
-  | { ol: 'tool'; tool: Tool; ink?: InkStyle }
+  /** (`held`: Draw is open — the pen does not go back to Select after a stroke it took itself) */
+  | { ol: 'tool'; tool: Tool; ink?: InkStyle; held?: boolean }
+  /** the lasso's Convert on the selected strokes (runtime notetools.ts): shapes, or the handwriting read (it answers inkRead) */
+  | { ol: 'inkConvert'; as: 'shapes' | 'notes' | 'formula' }
+  /** what the handwriting was read as: the selected strokes give way to it */
+  | { ol: 'inkTyped'; text: string; as: 'notes' | 'formula' }
   /** the guides shown on the slides (guides.ts) or not */
   | { ol: 'guides'; show: boolean }
   | { ol: 'exec'; command: string; value?: string }
@@ -303,9 +317,19 @@ export type FromRuntime =
   | { ol: 'ops'; version: number; ops: HtmlOp[]; select?: 'inserted' | 'keep' | Path[]; then?: 'editText' }
   /** a new object drawn: its box (slide px), and for lines / the pen the points (slide px, in drawing order) */
   /** `scratch`: the stroke was a scribble over these strokes (core/scratchout.ts) — it is added, then they and it go, as a step of its own */
-  | { ol: 'draw'; version: number; tool: Tool; slide: Path | null; rect: Rect; after?: Path | null; pts?: [number, number][]; d?: string; closed?: boolean; runs?: InkRunD[]; scratch?: Path[] }
-  /** a pen touched the slide with nothing but Select in hand: it draws (InkStyle.penInks), the editor shows Draw */
-  | { ol: 'penInks' }
+  | { ol: 'draw'; version: number; tool: Tool; slide: Path | null; rect: Rect; after?: Path | null; pts?: [number, number][]; d?: string; closed?: boolean; runs?: InkRunD[]; scratch?: Path[];
+      /** draw and hold: the shape the stroke became (core/shapesnap.ts), written a step after the stroke as drawn */
+      snap?: { kind: string; rect: Rect; runs: InkRunD[] } }
+  /** a pen touched the slide with nothing but Select in hand: it draws (InkStyle.penInks); `done`: its stroke is over and Select is in hand again (Draw was not open) */
+  | { ol: 'penInks'; done?: boolean }
+  /** the eraser's "back to the pen after erasing" */
+  | { ol: 'toolBack'; tool: Tool }
+  /** the colours used on the slide shown (the lasso's colour filter offers them) */
+  | { ol: 'slideColors'; colors: string[] }
+  /** the selected handwriting to be read (inkConvert): its lines in document px, its box in the frame's client px */
+  | { ol: 'inkRead'; as: 'notes' | 'formula'; lines: [number, number][][]; rect: Rect }
+  /** Convert ▸ Shapes done: so many of the strokes became shapes */
+  | { ol: 'inkConverted'; as: 'shapes'; count: number; of: number }
   | { ol: 'editing'; path: Path | null }
   /** A local draft whose target disappeared: the host keeps it available for recovery. */
   | { ol: 'recoveredText'; html: string; reason: string }
