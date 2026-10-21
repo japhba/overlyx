@@ -175,6 +175,8 @@ html[data-theme="dark"] .pdf-panel iframe { background: #2a2a30; }
 
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
+/* the page never pinch- or double-tap-zooms: each view zooms its own content (zoomlock.ts) */
+html { touch-action: pan-x pan-y; }
 body { font-family: var(--ui-font); font-size: 13px; color: var(--ui-fg); background: var(--ui-bg); }
 button, select, input, textarea { font: inherit; }
 button { cursor: pointer; }
