@@ -37,6 +37,7 @@ import { setDarkSlides, darkSlidesChanged } from './darkpages';
 import { installReviewCss, setReview, railReview } from './review';
 import { exportPageSvg } from './svgexport';
 import { startEmbed, embedSettled, startViewSync, viewSettled } from './embed';
+import { startLinks } from './links';
 
 function addStyle(css: string): HTMLStyleElement {
   const s = document.createElement('style');
@@ -392,6 +393,8 @@ function init(): void {
   if (MODE === 'thumb') startThumb();
   if (MODE === 'embed') startEmbed();
   if (MODE === 'view') startViewSync();
+  // links that leave OverLyX: a new tab; to the project's files: OverLyX (links.ts)
+  if (MODE === 'view' || MODE === 'embed' || MODE === 'present') startLinks(MODE !== 'present');
   if (MODE === 'present') addEventListener('message', onMessage);
   if (MODE === 'edit' || MODE === 'thumb') {
     addEventListener('message', onMessage);

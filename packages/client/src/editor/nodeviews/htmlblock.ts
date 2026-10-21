@@ -14,6 +14,7 @@ import { blockKey } from '@overlyx/core/html/article.ts';
 import { InsetView } from './inset';
 import { isArticleDoc } from '../../articlekinds';
 import { api } from '../../api';
+import { openProjectPath } from '../../openpath';
 
 /** an article's page in the sandbox (/ol-d/<token>/…): its address for this account, while the token holds */
 const links = new Map<string, Promise<{ url: string; expires: number }>>();
@@ -65,7 +66,9 @@ export class HtmlBlockView extends InsetView {
   private retries = 0;
   private readonly onMessage = (e: MessageEvent) => {
     if (!this.frame || e.source !== this.frame.contentWindow) return;
-    const d = e.data as { ol?: string; height?: number; found?: boolean } | null;
+    const d = e.data as { ol?: string; height?: number; found?: boolean; path?: string } | null;
+    // a link in the block to another file of the project: opened in OverLyX (runtime/links.ts)
+    if (d?.ol === 'openPath' && typeof d.path === 'string') { const id = this.view.dom.dataset.docId ?? ''; const cut = id.indexOf('/', id.indexOf('/') + 1); if (cut > 0) openProjectPath(id.slice(0, cut), d.path); return; }
     if (d?.ol !== 'embedSize') return;
     // the server has not got the block's newest text yet: ask again in a moment
     if (!d.found && this.retries < 6) { this.retries++; clearTimeout(this.timer); this.timer = setTimeout(() => this.load(), 500 + 300 * this.retries); return; }

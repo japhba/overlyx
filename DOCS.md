@@ -3263,6 +3263,11 @@ not on the deliverable canvas. The file stays a plain web page that any host can
   canvas has **✎ Article** (web app): `POST /docs/*/as-article` (`docs.ts makeArticle`) keeps the
   page as a version, sets the meta tag and closes its deliverable document; the client leaves the
   canvas first so its text never syncs into the document.
+* **Links.** A link that leaves OverLyX opens in a new tab — from the page pane, a running HTML
+  block or a presentation (runtime `links.ts`: never inside the frame) and from the editor. A link
+  to another file of the project opens in OverLyX (`client/src/openpath.ts`): the frames post
+  `openPath`, and an article's own links without a scheme are relative to the page, as in a browser
+  (`editor/links.ts`). A page opened in a tab of its own keeps its links as they are.
 * **Agents.** `create_document` / `write_document` with an `.html` path start an article (a new
   page must carry the meta tag); `read_document` / `edit_document` work on the page's text (inside
   an HTML block a tracked edit is applied as made: `rawSource` writes raw HTML with suggestions

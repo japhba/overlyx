@@ -8,6 +8,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { api } from '../api';
 import { projectOfDoc, docPathOf } from '@overlyx/core';
+import { openProjectPath } from '../openpath';
 
 const PHONE = 390;
 
@@ -46,12 +47,14 @@ export function ArticlePage({ docId, savedAt, onClose }: {
       if (!frame.current || e.source !== frame.current.contentWindow) return;
       const d = e.data as { ol?: string; y?: number } | null;
       if (d?.ol === 'viewScroll' && typeof d.y === 'number') scrolled.current = d.y;
+      // a link of the page to another file of the project: opened in OverLyX (one leaving OverLyX opens a tab itself, runtime/links.ts)
+      if (d?.ol === 'openPath' && typeof (d as { path?: unknown }).path === 'string') openProjectPath(project, (d as { path: string }).path);
       // (loaded: back where the reader was)
       if (d?.ol === 'viewReady' && scrolled.current) frame.current.contentWindow?.postMessage({ ol: 'viewScrollTo', y: scrolled.current }, '*');
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, []);
+  }, [project]);
 
   const src = url ? `${url}?ol=view&n=${n}` : null;
   const pdfHref = `/api/projects/${encodeURIComponent(project)}/deliverable-pdf?path=${encodeURIComponent(path)}`;

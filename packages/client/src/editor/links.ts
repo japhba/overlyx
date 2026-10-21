@@ -6,6 +6,8 @@
  * formulas (`\href{…}{…}` in the math model — a link in a table's `\text{…}` cell, say).
  */
 import type { EditorView } from 'prosemirror-view';
+import { isArticleDoc } from '../articlekinds';
+import { openProjectPath, resolveInDocument } from '../openpath';
 import { NodeSelection, Plugin, PluginKey, TextSelection, type EditorState } from 'prosemirror-state';
 import { Decoration, DecorationSet } from 'prosemirror-view';
 import type { Node as PMNode, Mark } from 'prosemirror-model';
@@ -37,8 +39,27 @@ export function openableUrl(target: string): string | null {
   return 'https://' + t.replace(/^\/+/, '');
 }
 
-/** Open a link in a new tab — by a click on an anchor, which the VS Code webview also passes on to the system browser. */
+/**
+ * An HTML article's link without a scheme (`../talk/index.html`, `#results`) is relative to the page,
+ * as in a browser: it stays in OverLyX (openpath.ts); null when the link is no such link.
+ */
+function articleRelative(target: string): string | null {
+  const doc = editorContext.docId;
+  const t = target.trim();
+  if (!doc || !isArticleDoc(doc) || !t || /^[a-z][a-z0-9+.-]*:/i.test(t) || t.startsWith('//')) return null;
+  return t;
+}
+
+/** Open a link: one leaving OverLyX in a new tab (by a click on an anchor, which the VS Code webview passes on to the system browser); an article's link to a file of its project in OverLyX. */
 export function openLink(target: string): void {
+  const rel = articleRelative(target);
+  if (rel !== null) {
+    if (rel.startsWith('#')) { editorContext.notify?.('A link to a place on this page'); return; }
+    const to = resolveInDocument(editorContext.docId!, rel);
+    if (!to) { editorContext.notify?.('This link leads out of the project', 'error'); return; }
+    openProjectPath(to.project, to.path);
+    return;
+  }
   const url = openableUrl(target);
   if (!url) { editorContext.notify?.('This link cannot be opened from the editor', 'error'); return; }
   const a = document.createElement('a');
@@ -463,7 +484,8 @@ function showBubble(owner: object, url: string, anchor: () => Anchor | null, act
   a.className = 'link-bubble-url';
   a.textContent = url.replace(/^mailto:/i, '');
   a.title = url;
-  if (openable) { a.href = openable; a.target = '_blank'; a.rel = 'noopener noreferrer'; }
+  if (articleRelative(url) !== null) { a.href = '#'; a.addEventListener('click', ev => { ev.preventDefault(); openLink(url); }); }
+  else if (openable) { a.href = openable; a.target = '_blank'; a.rel = 'noopener noreferrer'; }
   el.appendChild(a);
   const sep = document.createElement('span'); sep.className = 'link-bubble-sep'; el.appendChild(sep);
   el.appendChild(iconButton('copy', 'Copy link', () => {
