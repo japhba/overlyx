@@ -104,8 +104,9 @@ function viewport(): Viewport {
   const vv = window.visualViewport;
   const layoutHeight = document.documentElement.clientHeight;
   const viewportHeight = vv ? vv.height : innerHeight, zoom = vv ? vv.scale : 1;
+  // Both heights are in CSS pixels. Scaling just the visual height invents a keyboard at zoom < 1.
   // iOS shrinks the visual viewport, not the layout, for the keyboard: a hardware keyboard's bar of shortcuts is the small one
-  const gap = layoutHeight - viewportHeight * Math.min(1, zoom);
+  const gap = layoutHeight - viewportHeight;
   return { layoutHeight, viewportHeight, viewportTop: vv ? vv.offsetTop : 0, zoom, keyboard: zoom > 1.05 ? 'down' : gap > 150 ? 'up' : gap > 24 ? 'bar' : 'down' };
 }
 
@@ -121,17 +122,20 @@ function check(): void {
   if (!app || document.visibilityState !== 'visible') { shift = null; zoomed = null; return; }
   const v = viewport();
   const sy = Math.round(scrollY), sx = Math.round(scrollX);
+  const el = document.activeElement;
+  // A small viewport gap can remain after focus has gone. Nothing then needs the window moved
+  // for the shortcut bar, but a focused field or a zoomed-in page may still need its current pan.
+  const canRestore = v.zoom < 1.02 && (v.keyboard === 'down' || v.keyboard === 'bar' && focusKind(el) === 'none');
   // the window moved, or (with no keyboard to make room for) the visible part of the page did
-  const out = sy > 1 || sx > 1 || (v.keyboard === 'down' && v.zoom < 1.02 && v.viewportTop > 1);
+  const out = sy > 1 || sx > 1 || (canRestore && v.viewportTop > 1);
   if (!out) shift = null;
   else {
-    const key = `${v.keyboard}`;
+    const key = `${v.keyboard} ${canRestore}`;
     if (!shift || shift.key !== key) shift = { since: now, key, done: false };
     else if (!shift.done && now - shift.since >= SETTLE_MS) {
       shift.done = true;
-      const el = document.activeElement;
       // nothing to make room for: back where it belongs
-      const restore = v.keyboard === 'down' && (sy > 1 || sx > 1);
+      const restore = canRestore && (sy > 1 || sx > 1);
       const fields: GlitchFields = {
         scroller: 'window', scrollY: sy, scrollX: sx, appTop: Math.round(app.getBoundingClientRect().top),
         viewportTop: Math.round(v.viewportTop), viewportHeight: Math.round(v.viewportHeight), layoutHeight: v.layoutHeight, zoom: Math.round(v.zoom * 100) / 100,
