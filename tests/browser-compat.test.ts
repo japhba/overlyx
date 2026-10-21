@@ -4,7 +4,7 @@
  * Firefox, and of probes of what a Safari / iPad user does (scratch/browsers/). One block per fix.
  */
 import { describe, it, expect, afterEach } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { schema } from '../packages/core/src/schema.ts';
 import { editorContext } from '../packages/client/src/editor/context.ts';
 import { CommandView } from '../packages/client/src/editor/nodeviews/leaf.ts';
@@ -24,13 +24,12 @@ afterEach(() => { editorContext.openInTab = undefined; editorContext.openInsetDi
  * app from starting in older Safari (`Iterator` is evaluated when pdf.js is imported).
  */
 describe('pdf.js', () => {
-  it('the web client and the VS Code PDF panel load the legacy build (and its worker), never the default one', () => {
-    for (const f of ['packages/client/src/app/PdfViewer.tsx', 'packages/vscode/src/webview/pdfMain.tsx']) {
-      const src = readFileSync(f, 'utf8');
-      const imports = [...src.matchAll(/from '(pdfjs-dist[^']*)'|'(pdfjs-dist\/[^']*worker[^']*)'/g)].map(m => m[1] ?? m[2]);
-      expect(imports.length, f).toBeGreaterThan(0);
-      for (const i of imports) expect(i, f).toMatch(/^pdfjs-dist\/legacy\/build\//);
-    }
+  it('every pdf.js import of the web client and the VS Code extension is the legacy build (and its worker), never the default one', () => {
+    const sources = ['packages/client/src', 'packages/vscode/src'].flatMap(d => (readdirSync(d, { recursive: true }) as string[]).filter(f => /\.tsx?$/.test(f)).map(f => `${d}/${f}`));
+    const users = new Map(sources.map(f => [f, [...readFileSync(f, 'utf8').matchAll(/from '(pdfjs-dist[^']*)'|'(pdfjs-dist\/[^']*worker[^']*)'/g)].map(m => m[1] ?? m[2])] as const).filter(([, i]) => i.length));
+    // the web client's viewer (the VS Code PDF panel shows it too) and the extension's built-PDF view
+    expect([...users.keys()]).toEqual(expect.arrayContaining(['packages/client/src/app/PdfViewer.tsx', 'packages/vscode/src/webview/BuiltPdf.tsx']));
+    for (const [f, imports] of users) for (const i of imports) expect(i, f).toMatch(/^pdfjs-dist\/legacy\/build\//);
   });
 });
 

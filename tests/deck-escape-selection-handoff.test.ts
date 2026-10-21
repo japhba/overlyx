@@ -70,7 +70,7 @@ function setup() {
   runtime = createContext({
     exports: {}, window: win, document: doc, KeyboardEvent: win.KeyboardEvent, Node: win.Node, MODE: 'edit',
     state: { src, kind: 'deck', version: 7 }, srcOf, liveOf, selected: [image], editing: null,
-    drawAhead: null, drawComposing: false, tool: 'select', active: null, ed: null,
+    drawAhead: null, drawComposing: false, tool: 'select', active: null, ed: null, svgTyping: null,
     isCropping: () => !!runtime.active, isNodeEditing: () => !!runtime.ed,
     isPenDrawing: () => false, isOrdering: () => false, chipOpening: () => false, openChipEl: () => null,
     isModifierKey: () => false, recoverChipCaret: vi.fn(), stopText, holdKey, holdAfter,
