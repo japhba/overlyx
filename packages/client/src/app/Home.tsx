@@ -18,6 +18,7 @@ import { promptNewFile } from './newfile';
 import { useUiMode } from './uimode';
 import { KIND_ICONS, iconSvg } from './modernicons';
 import { ScientificTemplates } from './ScientificTemplates';
+import { BetaNote } from './Login';
 
 const isBackup = (name: string) => name.endsWith('~') || name.startsWith('#') || name.endsWith('.emergency');
 const mainFirst = (a: string, b: string) => Number(!/(^|\/)main\.tex$/.test(a)) - Number(!/(^|\/)main\.tex$/.test(b)) || a.split('/').length - b.split('/').length || a.localeCompare(b);
@@ -244,6 +245,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
     <div class="home">
       <h1>Welcome</h1>
       <div class="sub">{user.guest ? 'You are here as a guest, through a link somebody shared. Sign in to keep those projects in an account of your own — and to create projects.' : 'OverLyX edits LaTeX documents, slides and posters in the browser, together with others. Projects are private until you share them.'}</div>
+      <BetaNote />
       <div class="home-actions">
         {user.guest
           ? <button class="btn primary" data-guest-signin onClick={onSignIn}>Sign in</button>

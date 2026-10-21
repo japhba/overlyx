@@ -421,6 +421,7 @@ html[data-ui="modern"] input[type=checkbox], html[data-ui="modern"] input[type=r
 html[data-ui="modern"] .home { max-width: 1040px; margin-top: 40px; }
 html[data-ui="modern"] .home h1 { font-family: var(--m-display); font-size: 34px; font-weight: 500; letter-spacing: -0.005em; color: var(--m-ink); margin-bottom: 6px; }
 html[data-ui="modern"] .home .sub { font-size: 14px; color: var(--m-muted); margin-bottom: 20px; }
+html[data-ui="modern"] .home .beta-note { margin-bottom: 20px; color: var(--m-ink); background: color-mix(in srgb, var(--m-red) 10%, transparent); border-left-color: var(--m-red); border-radius: 0; }
 html[data-ui="modern"] .home .home-actions { gap: 8px; margin-bottom: 28px; }
 html[data-ui="modern"] .home h3 { font-size: 10.5px; font-weight: 600; letter-spacing: 0.12em; color: var(--m-muted); margin: 28px 0 10px; }
 html[data-ui="modern"] .home .meta { color: var(--m-muted); font-size: 12px; }

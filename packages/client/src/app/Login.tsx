@@ -46,6 +46,11 @@ const GoogleButton = () => (
   <a class="google" href={googleSignInUrl(useHash())} data-google-login><GoogleG /><span>Continue with Google</span></a>
 );
 
+/** the beta caveat: on the landing page's sign-in card and on the signed-in start page (Home.tsx) */
+export const BetaNote = () => (
+  <p class="beta-note" data-beta-note role="note"><strong>Beta:</strong> we can't guarantee server uptime or that no data is lost. Keep your own copy of important work.</p>
+);
+
 const VSCODE_URL = GITHUB_URL + '/releases/latest';
 
 const VscodeIcon = () => (
@@ -206,7 +211,7 @@ export function Login({ onLogin, google, note, onBack }: {
             {note ? <p class="signin-note link-note" data-login-note>{note}</p>
               : pendingCount ? <p class="signin-note link-note" data-login-note>{pendingCount} Overleaf project{pendingCount === 1 ? '' : 's'} will be imported right after you sign in.</p>
               : <p class="signin-note">{google ? 'In the browser with your Google account, or in VS Code with the extension.' : 'In the browser with your account, or in VS Code with the extension.'}</p>}
-            <p class="beta-note" data-beta-note role="note"><strong>Beta:</strong> we can't guarantee server uptime or that no data is lost. Keep your own copy of important work.</p>
+            <BetaNote />
             {google && <GoogleButton />}
             <a class="vscode-get" data-vscode-get href={VSCODE_URL} target="_blank" rel="noopener">
               <VscodeIcon /><span>Get the VS Code extension</span>
