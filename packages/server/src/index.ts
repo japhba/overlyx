@@ -24,6 +24,7 @@ import { manager, docWorkers, projectChangedListeners, graphicsChangedListeners 
 import { mountDeliverables, deliverableToken, splitEntry, createDeliverable, deliverableZip } from './deliverables.ts';
 import { deliverablePdf } from './render.ts';
 import { starterFor, isHtmlPath, DELIVERABLE_KINDS, type DeliverableKind } from '@overlyx/core/html/deliverable.ts';
+import { newArticleText } from '@overlyx/core/html/articletheme.ts';
 import { refreshScientificStarters } from './starterupdates.ts';
 import { listProjects, resolveProjectPath, assertWritableRelPath, projectDir, createProject, newDocumentText, newMarkdownText, fileKind, isBackupFile, isDocumentFile } from './projects.ts';
 import { isMarkdownPath } from '@overlyx/core/md/index.ts';
@@ -689,13 +690,16 @@ api.post('/projects/:project/new', needProject('edit'), (req, res) => {
     let rel = String(req.body?.path ?? 'untitled.tex');
     if (rel.endsWith('.lyx')) rel = rel.slice(0, -4) + '.tex';
     const markdown = isMarkdownPath(rel);
-    if (!rel.endsWith('.tex') && !markdown) rel += '.tex';
+    // an .html document is an article (core html/article.ts): a web page written in the document editor
+    const article = isHtmlPath(rel);
+    if (!rel.endsWith('.tex') && !markdown && !article) rel += '.tex';
     assertWritableRelPath(rel);
     const abs = resolveProjectPath(req.params.project, rel);
     if (fs.existsSync(abs)) { res.status(409).json({ error: 'file exists' }); return; }
     fs.mkdirSync(path.dirname(abs), { recursive: true });
     const layout = typeof req.body?.layout === 'string' ? req.body.layout : null;
     if (markdown) fs.writeFileSync(abs, newMarkdownText(req.body?.title), 'utf8');
+    else if (article) fs.writeFileSync(abs, newArticleText({ title: req.body?.title, author: req.user?.name }), 'utf8');
     else if (layout) fs.writeFileSync(abs, newLayoutDocumentText(req.params.project, rel, layout, { title: req.body?.title, author: req.user?.name }), 'utf8');
     else {
       const text = newDocumentText({ textclass: req.body?.textclass, title: req.body?.title, author: req.user?.name });
@@ -1089,6 +1093,7 @@ api.get('/docs/*/meta', async (req, res) => {
     res.json({
       id, project: doc.project, path: doc.relPath, master: m.master,
       format: m.format,
+      ...(m.article ? { article: m.article } : {}),
       role: req.role ?? 'edit',
       labels: m.labels,
       textclass: m.textclass, modules: m.modules,

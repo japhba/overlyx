@@ -19,6 +19,7 @@ import { Fragment, Slice, type Mark, type Node as PMNode } from 'prosemirror-mod
 import type { EditorView } from 'prosemirror-view';
 import { ySyncPluginKey } from './collab';
 import { schema, paragraphsToPm, isMarkdownPath, MARKDOWN_LAYOUTS, markdownLayoutFor } from '@overlyx/core';
+import { ARTICLE_LAYOUTS, articleLayoutFor } from '@overlyx/core/html/article.ts';
 import { inRawText } from './rawtext';
 import { editorContext } from './context';
 import { pasteBlocksIntoEmpty } from './plugins/paste';
@@ -28,6 +29,15 @@ import { fontCommands } from './commands';
 export function isMarkdownDoc(docId: string | null | undefined): boolean {
   return !!docId && isMarkdownPath(docId);
 }
+
+/**
+ * What a document written in a web format can hold: markdown's paragraph layouts, or an HTML
+ * article's (core html/article.ts: markdown's, and a title, byline, date and abstract), and the
+ * layout one it cannot hold becomes. The font marks are the same: what both can write.
+ */
+interface WebFormat { name: string; layouts: readonly string[]; layoutFor: (layout: string) => string }
+const MARKDOWN: WebFormat = { name: 'Markdown', layouts: MARKDOWN_LAYOUTS, layoutFor: markdownLayoutFor };
+const ARTICLE: WebFormat = { name: 'An HTML article', layouts: ARTICLE_LAYOUTS, layoutFor: articleLayoutFor };
 
 /* ------------------------------------------------------------------ marks markdown has */
 
@@ -64,7 +74,7 @@ function cleanMarks(marks: readonly Mark[]): readonly Mark[] | null {
 }
 
 /** a pasted fragment as markdown can hold it: layouts mapped, unsupported font marks dropped */
-function cleanFragment(f: Fragment): Fragment {
+function cleanFragment(f: Fragment, fmt: WebFormat = MARKDOWN): Fragment {
   const nodes: PMNode[] = [];
   f.forEach(n => {
     if (n.isText) {
@@ -73,10 +83,10 @@ function cleanFragment(f: Fragment): Fragment {
       return;
     }
     let node = n;
-    if (n.type.name === 'paragraph' && !MARKDOWN_LAYOUTS.includes(String(n.attrs.layout)) && n.attrs.layout !== 'Plain Layout') {
-      node = n.type.create({ ...n.attrs, layout: markdownLayoutFor(String(n.attrs.layout)) }, n.content, n.marks);
+    if (n.type.name === 'paragraph' && !fmt.layouts.includes(String(n.attrs.layout)) && n.attrs.layout !== 'Plain Layout') {
+      node = n.type.create({ ...n.attrs, layout: fmt.layoutFor(String(n.attrs.layout)) }, n.content, n.marks);
     }
-    if (node.content.size) node = node.copy(cleanFragment(node.content));
+    if (node.content.size) node = node.copy(cleanFragment(node.content, fmt));
     nodes.push(node);
   });
   return Fragment.fromArray(nodes);
@@ -87,7 +97,7 @@ function cleanFragment(f: Fragment): Fragment {
  * local edits (a collaborator's arrive cleaned already); a top-level paragraph whose layout markdown
  * lacks — Ctrl+1 (Chapter), Alt+P D (Description), a toolbar's layout box — becomes the closest one.
  */
-function normalizeChanged(transactions: readonly Transaction[], state: EditorState): Transaction | null {
+function normalizeChanged(transactions: readonly Transaction[], state: EditorState, fmt: WebFormat = MARKDOWN): Transaction | null {
   if (!transactions.some(t => t.docChanged && !t.getMeta(ySyncPluginKey))) return null;
   const ranges: [number, number][] = [];
   for (const t of transactions) {
@@ -108,9 +118,9 @@ function normalizeChanged(transactions: readonly Transaction[], state: EditorSta
     state.doc.nodesBetween(Math.max(0, from - 1), Math.min(state.doc.content.size, to + 1), (node, pos) => {
       if (node.type.name === 'paragraph') {
         const layout = String(node.attrs.layout);
-        if (layout !== 'Plain Layout' && !MARKDOWN_LAYOUTS.includes(layout)) {
+        if (layout !== 'Plain Layout' && !fmt.layouts.includes(layout)) {
           tr ??= state.tr;
-          tr.setNodeMarkup(pos, undefined, { ...node.attrs, layout: markdownLayoutFor(layout) });
+          tr.setNodeMarkup(pos, undefined, { ...node.attrs, layout: fmt.layoutFor(layout) });
         }
         return true;
       }
@@ -250,11 +260,17 @@ export const insertRule: Command = (state, dispatch) => {
 };
 
 /** the LaTeX-only shortcuts: a word instead of an inset markdown cannot hold */
-function notInMarkdown(what: string): Command {
-  return () => { editorContext.notify?.(`Markdown has no ${what} — this is a markdown document`, 'info'); return true; };
+function notInMarkdown(what: string, fmt: WebFormat = MARKDOWN): Command {
+  return () => { editorContext.notify?.(fmt === MARKDOWN ? `Markdown has no ${what} — this is a markdown document` : `${fmt.name} has no ${what}`, 'info'); return true; };
 }
 
-export function markdownPlugins(): Plugin[] {
+/**
+ * Markdown's typing (`**bold**`, ``` + Enter, `> ` …) and what the document can hold — a markdown
+ * document's, or (`article`) an HTML article's: the same typing, its own layouts, and citations,
+ * cross-references and margin notes, which it writes as the page's TeX and notes.
+ */
+export function markdownPlugins(opts: { article?: boolean } = {}): Plugin[] {
+  const fmt = opts.article ? ARTICLE : MARKDOWN;
   return [
     inputRules({
       rules: [
@@ -272,18 +288,20 @@ export function markdownPlugins(): Plugin[] {
       // italic is markdown's emphasis (the toolbar's italic button too): Ctrl+I's italic shape became
       // emphasis as it was typed, so it could switch italic on but never off again
       'Mod-i': fontCommands.emph,
-      'Alt-Mod-m': notInMarkdown('margin notes'),
-      'Alt-Mod-l': notInMarkdown('labels'),
-      'Shift-Mod-i': notInMarkdown('cross-references'),
-      'Shift-Mod-c': notInMarkdown('citations'),
-      'Alt-Mod-p': notInMarkdown('paragraph settings'),
-      'Shift-Mod-n': notInMarkdown('small caps'),
+      ...(opts.article ? {} : {
+        'Alt-Mod-m': notInMarkdown('margin notes'),
+        'Shift-Mod-i': notInMarkdown('cross-references'),
+        'Shift-Mod-c': notInMarkdown('citations'),
+      }),
+      'Alt-Mod-l': notInMarkdown('labels', fmt),
+      'Alt-Mod-p': notInMarkdown('paragraph settings', fmt),
+      'Shift-Mod-n': notInMarkdown('small caps', fmt),
     }),
-    taskPlugin(),
+    ...(opts.article ? [] : [taskPlugin()]),
     new Plugin({
-      appendTransaction: (trs, _old, state) => normalizeChanged(trs, state),
+      appendTransaction: (trs, _old, state) => normalizeChanged(trs, state, fmt),
       props: {
-        transformPasted: (slice: Slice) => new Slice(cleanFragment(slice.content), slice.openStart, slice.openEnd),
+        transformPasted: (slice: Slice) => new Slice(cleanFragment(slice.content, fmt), slice.openStart, slice.openEnd),
       },
     }),
   ];

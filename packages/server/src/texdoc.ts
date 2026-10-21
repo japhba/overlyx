@@ -12,6 +12,8 @@ import { layoutTemplate, setHeaderValue } from '@overlyx/core';
 import { markEditedSettings } from '@overlyx/core/tex/preamble.ts';
 import type { LocalFont } from '@overlyx/core/md/typesetting.ts';
 import { parseMarkdown, writeMarkdown, writeMarkdownPreserving, isMarkdownPath, markdownForLatex, type MarkdownPreserveCache } from '@overlyx/core/md/index.ts';
+import { parseArticle, writeArticle, writeArticlePreserving, type ArticlePreserveCache } from '@overlyx/core/html/article.ts';
+import { isHtmlPath } from '@overlyx/core/html/deliverable.ts';
 import { config } from './config.ts';
 import { projectDir, findMaster, resolveProjectPath } from './projectfiles.ts';
 
@@ -56,6 +58,8 @@ export function masterHeaderFor(project: string, relPath: string, depth = 0): st
 export function parseDocumentText(text: string, project: string, relPath: string, depth = 0): ParseTexResult {
   // a markdown document: no preamble of its own (written as a fragment), no master
   if (isMarkdownPath(relPath)) { const r = parseMarkdown(text); return { doc: r.doc, warnings: r.warnings, fragment: true, sources: r.parSpans, bodyRange: null }; }
+  // an HTML article (an .html file that reached the document editor is one: docs.ts): the page around its prose kept verbatim
+  if (isHtmlPath(relPath)) { const r = parseArticle(text); return { doc: r.doc, warnings: r.warnings, fragment: true, sources: r.parSpans, bodyRange: null }; }
   const abs = resolveProjectPath(project, relPath);
   const opts = { layoutDir: config.layoutDir, localDirs: [projectDir(project), path.dirname(abs)], readFile: readerFor(project, abs) };
   const first = parseTex(text, opts);
@@ -72,6 +76,7 @@ export function parseFragmentText(latex: string, project: string, relPath: strin
 
 /** a markdown document's parse of the file text between saves (the counterpart of the .tex PreserveCache) */
 const mdCaches = new WeakMap<PreserveCache, MarkdownPreserveCache>();
+const articleCaches = new WeakMap<PreserveCache, ArticlePreserveCache>();
 
 /**
  * The document as .tex text. With `preserve`, written into the text the file holds now (`base`):
@@ -83,6 +88,12 @@ export function writeDocumentText(doc: LyxDocument, project: string, relPath: st
     let cache: MarkdownPreserveCache | undefined;
     if (preserve?.cache) { cache = mdCaches.get(preserve.cache); if (!cache) mdCaches.set(preserve.cache, cache = {}); }
     const r = preserve ? writeMarkdownPreserving(doc, preserve.base, cache) : writeMarkdown(doc);
+    return { text: r.text, warnings: r.warnings, files: {}, spans: r.spans };
+  }
+  if (isHtmlPath(relPath)) {
+    let cache: ArticlePreserveCache | undefined;
+    if (preserve?.cache) { cache = articleCaches.get(preserve.cache); if (!cache) articleCaches.set(preserve.cache, cache = {}); }
+    const r = preserve ? writeArticlePreserving(doc, preserve.base, cache) : writeArticle(doc);
     return { text: r.text, warnings: r.warnings, files: {}, spans: r.spans };
   }
   const abs = resolveProjectPath(project, relPath);

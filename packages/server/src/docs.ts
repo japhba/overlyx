@@ -18,6 +18,7 @@ import chokidar, { type FSWatcher } from 'chokidar';
 import { isProjectKey, splitDocId, itemText, type LyxDocument } from '@overlyx/core';
 import { isMarkdownPath } from '@overlyx/core/md/index.ts';
 import { isHtmlPath } from '@overlyx/core/html/deliverable.ts';
+import { isArticleHtml } from '@overlyx/core/html/article.ts';
 import { checkTexHealth, repairTex, type HealthIssue, type PreserveCache } from '@overlyx/core/tex/index.ts';
 import { db } from './db.ts';
 import { config } from './config.ts';
@@ -29,6 +30,7 @@ import { DocWorkers, WorkerGone, MirrorLost, type SyncEntry } from './docpool.ts
 import { documentMeta, type DocumentMeta } from './docmeta.ts';
 import { applyTrackedSource, applyPlainSource, applySyncedSource, restoreSource, foldEdits, replaceInSource, type EditableDoc, type TrackedResult } from './docedit.ts';
 import { convertModel1, model1Document } from './collabdoc.ts';
+import { isModel2 } from '@overlyx/core/collab/model.ts';
 import { mergeLyx, pmToLyxBody, writeParagraphs, type Paragraph } from '@overlyx/core';
 
 export type { SourceSpan, DocMeta };
@@ -187,7 +189,7 @@ export class OpenDoc implements DocState, EditableDoc {
    * `fileText === null` (never loaded) means nothing to check yet.
    */
   health(): HealthIssue[] {
-    return this.fileText === null || isMarkdownPath(this.relPath) ? [] : checkTexHealth(this.fileText, { isFragment: this.isChild });
+    return this.fileText === null || isMarkdownPath(this.relPath) || isHtmlPath(this.relPath) ? [] : checkTexHealth(this.fileText, { isFragment: this.isChild });
   }
 
   /**
@@ -968,6 +970,12 @@ const GRAPHICS_FILE = /\.(png|jpe?g|gif|webp|avif|svgz?|pdf|eps|ps|tiff?|bmp|css
 
 type DbState = { state: Buffer; file_hash: string; epoch: string | null };
 
+/** Is a stored Yjs state a document's (model 2), rather than a deliverable's text? */
+function storedAsDocument(state: Uint8Array): boolean {
+  const y = new Y.Doc();
+  try { Y.applyUpdate(y, new Uint8Array(state)); return isModel2(y); } catch { return false; } finally { y.destroy(); }
+}
+
 export class DocManager {
   docs = new Map<string, OpenDoc>();
   /** documents being opened (the first open of a big one takes a moment): later requests wait for it */
@@ -1009,7 +1017,9 @@ export class DocManager {
     const absPath = resolveProjectPath(project, relPath);
     if (!fs.existsSync(absPath)) throw new Error('file not found: ' + id);
     if (relPath.endsWith('.board')) return this.openBoardCold(id, project, relPath, absPath);
-    if (isHtmlPath(relPath)) return this.openHtmlCold(id, project, relPath, absPath);
+    // an HTML page is a deliverable (its text in a Y.Text, the canvas) unless it is an article: a document
+    const article = isHtmlPath(relPath) && isArticleHtml(readTextFile(absPath));
+    if (isHtmlPath(relPath) && !article) return this.openHtmlCold(id, project, relPath, absPath);
     const doc = new OpenDoc(id, project, relPath, absPath);
     const text = readTextFile(absPath);
     if (text.includes('\0')) throw new Error('not a text document: ' + id);
@@ -1018,6 +1028,8 @@ export class DocManager {
     doc.fileText = text;
     knownHashes.set(absPath, hash);
     let row = db.prepare('SELECT state, file_hash, epoch FROM ydocs WHERE id = ?').get(id) as DbState | undefined;
+    // a page that was a deck or a plain page before it became an article: its stored text is no document
+    if (row && article && !storedAsDocument(row.state)) row = undefined;
     if (!row) return this.openFresh(doc, text);
     row = this.convertStored(id, row);
     const ok = await this.loadStored(doc, text, row);

@@ -25,7 +25,8 @@ import { toSessionUser, type SessionUser } from './auth.ts';
 import { roleFor } from './access.ts';
 import { projectDir } from './projects.ts';
 import { staysInside } from './projectfiles.ts';
-import { manager, HtmlDoc } from './docs.ts';
+import { manager, HtmlDoc, BoardDoc, OpenDoc } from './docs.ts';
+import { parseArticle, htmlBlockOf, blockKey, rawSource } from '@overlyx/core/html/article.ts';
 import { isHtmlPath, deliverableInfo } from '@overlyx/core/html/deliverable.ts';
 import { publishedText } from '@overlyx/core/html/review.ts';
 import { RUNTIME_MODES, runtimeTags, injectRuntime, resolveInProject, SANDBOX_CSP, OFFLINE_FRAME_CSP, type RuntimeMode } from '@overlyx/core/html/serve.ts';
@@ -88,7 +89,32 @@ export async function liveHtml(project: string, rel: string): Promise<string> {
   const id = `${project}/${rel}`;
   const open = manager.docs.get(id);
   if (open instanceof HtmlDoc) return open.html.toString();
+  // an article (core html/article.ts) open in the document editor: its text as it would be saved now
+  if (open instanceof OpenDoc && !(open instanceof BoardDoc)) return open.textAsync();
   return fs.readFileSync(path.join(projectDir(project), rel), 'utf8');
+}
+
+/**
+ * An article's page with one of its HTML blocks — the one whose source has `key` (blockKey) — between
+ * two markers: the runtime's embed mode shows only that block, the page around it loaded as it is (its
+ * styles, its scripts, which may draw into the block). The document editor shows the block running so.
+ */
+export async function embedHtml(project: string, rel: string, key: string): Promise<string> {
+  const id = `${project}/${rel}`;
+  const open = manager.docs.get(id);
+  let text: string, body: ReturnType<typeof parseArticle>['doc']['body'], spans: ({ start: number; end: number } | null)[];
+  if (open instanceof OpenDoc && !(open instanceof HtmlDoc) && !(open instanceof BoardDoc)) {
+    const r = await open.textMapAsync();
+    text = r.text; spans = r.spans; body = open.toLyxDocument().body;
+  } else {
+    text = fs.readFileSync(path.join(projectDir(project), rel), 'utf8');
+    const p = parseArticle(text);
+    body = p.doc.body; spans = p.parSpans;
+  }
+  const i = body.findIndex(p => { const b = htmlBlockOf(p); return !!b && blockKey(rawSource(b)) === key; });
+  const sp = i >= 0 ? spans[i] : null;
+  if (!sp) return text;
+  return text.slice(0, sp.start) + '<template data-ol-embed></template>' + text.slice(sp.start, sp.end) + '<template data-ol-embed-end></template>' + text.slice(sp.end);
 }
 
 
@@ -122,7 +148,7 @@ export function mountDeliverables(app: Express): void {
   app.get(/^\/ol-d\/([^/]+)\/(.*)$/, (req: Request, res: Response) => {
     const params = req.params as unknown as Record<string, string>;
     const token = params[0], rest = params[1];
-    void resolveDeliverable(token, rest ?? '', { ol: req.query.ol, as: req.query.as }, req.headers['sec-fetch-dest'] as string | undefined).then(r => {
+    void resolveDeliverable(token, rest ?? '', { ol: req.query.ol, as: req.query.as, b: req.query.b }, req.headers['sec-fetch-dest'] as string | undefined).then(r => {
       commonHeaders(res);
       for (const [k, v] of Object.entries(r.headers ?? {})) res.setHeader(k, v);
       if (r.file) { res.status(r.status); if (r.type) res.type(r.type); res.sendFile(r.file, { dotfiles: 'allow', lastModified: true }); return; }
@@ -158,7 +184,7 @@ export interface Served { status: number; type?: string; body?: string | Buffer;
  * A request of `/ol-d/<token>/<rest>` — the route's and the renderer's (render.ts serves its
  * headless browser in-process, without any network).
  */
-export async function resolveDeliverable(token: string, rawRest: string, query: { ol?: unknown; as?: unknown }, fetchDest?: string): Promise<Served> {
+export async function resolveDeliverable(token: string, rawRest: string, query: { ol?: unknown; as?: unknown; b?: unknown }, fetchDest?: string): Promise<Served> {
   const grant = verifyDeliverableToken(token);
   if (!grant) return { status: 403, type: 'text/plain', body: 'This link has expired — reload the page.' };
   const user = userById(grant.userId);
@@ -174,8 +200,8 @@ export async function resolveDeliverable(token: string, rawRest: string, query: 
 
   if (isHtmlPath(rel)) {
     let html: string;
-    try { html = await liveHtml(grant.project, rel); } catch { return { status: 404, type: 'text/plain', body: 'Not found.' }; }
     const mode = (RUNTIME_MODES as readonly string[]).includes(String(query.ol)) ? String(query.ol) as RuntimeMode : 'view';
+    try { html = mode === 'embed' ? await embedHtml(grant.project, rel, String(query.b ?? '')) : await liveHtml(grant.project, rel); } catch { return { status: 404, type: 'text/plain', body: 'Not found.' }; }
     return { status: 200, type: 'text/html; charset=utf-8', body: injectRuntime(html, runtimeTags(mode, { ...extrasOf(grant.project, rel, html), ...((mode === 'edit' || mode === 'thumb') ? { source: html } : {}) }, runtimeSrc())), headers: { 'Cache-Control': 'no-store' } };
   }
 

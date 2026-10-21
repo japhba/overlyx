@@ -8,7 +8,8 @@
  * - present: one slide at a time (present.ts);
  * - print: one slide per PDF page (the export);
  * - check: the agents' render_page — the page as it is, and `__ol.report()` (report.ts);
- * - view: math typeset, nothing else (a page reached by a link from another).
+ * - view: math typeset, nothing else (a page reached by a link from another);
+ * - embed: one HTML block of an article, the page around it hidden (embed.ts: the document editor's).
  *
  * In every mode TeX math is typeset (math.ts) and speaker notes are hidden; `window.__olReady`
  * turns true once fonts, math and pictures have settled (the renderer waits for it).
@@ -35,6 +36,7 @@ import { ensureSolo } from './solo';
 import { setDarkSlides, darkSlidesChanged } from './darkpages';
 import { installReviewCss, setReview, railReview } from './review';
 import { exportPageSvg } from './svgexport';
+import { startEmbed, embedSettled, startViewSync, viewSettled } from './embed';
 
 function addStyle(css: string): HTMLStyleElement {
   const s = document.createElement('style');
@@ -388,6 +390,8 @@ function init(): void {
   if (MODE === 'present') startPresenting();
   if (MODE === 'edit') { edit.startEditing(); ensureSolo(); }
   if (MODE === 'thumb') startThumb();
+  if (MODE === 'embed') startEmbed();
+  if (MODE === 'view') startViewSync();
   if (MODE === 'present') addEventListener('message', onMessage);
   if (MODE === 'edit' || MODE === 'thumb') {
     addEventListener('message', onMessage);
@@ -402,6 +406,8 @@ function init(): void {
       if (location.hash === '#print') setTimeout(() => print(), 300);
     }
     window.__olReady = true;
+    if (MODE === 'embed') embedSettled();
+    if (MODE === 'view') viewSettled();
     if (MODE === 'edit' || MODE === 'thumb') { sendLayout(); if (MODE === 'edit') { edit.visibleSlide(); refreshView(); reportColors(); } }
   });
   void isForeign;

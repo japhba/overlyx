@@ -55,6 +55,8 @@ import nodePath from 'node:path';
 import { manager, HtmlDoc } from './docs.ts';
 import { markdownStyle, setMarkdownStyle } from './mdstyle.ts';
 import { isHtmlPath, deliverableInfo, starterFor, DELIVERABLE_GUIDE, DELIVERABLE_KINDS, type DeliverableKind } from '@overlyx/core/html/deliverable.ts';
+import { ARTICLE_GUIDE } from '@overlyx/core/html/article.ts';
+import { newArticleText } from '@overlyx/core/html/articletheme.ts';
 import { createDeliverable } from './deliverables.ts';
 import { renderPages, type DeliverableReport } from './render.ts';
 import { listProjects, projectDir, resolveProjectPath, assertWritableRelPath, isDocumentFile, newDocumentText, newMarkdownText, findMaster } from './projects.ts';
@@ -125,7 +127,7 @@ function commitEdit(doc: Awaited<ReturnType<typeof manager.open>>, lyx: LyxDocum
 
 function listDocuments(project: string): { path: string; size: number; kind?: string }[] {
   const p = listProjects().find(x => x.name === project);
-  const docs: { path: string; size: number; kind?: string }[] = (p?.files ?? []).filter(f => f.kind === 'doc').map(f => ({ path: f.path, size: f.size }));
+  const docs: { path: string; size: number; kind?: string }[] = (p?.files ?? []).filter(f => f.kind === 'doc').map(f => ({ path: f.path, size: f.size, ...(f.format === 'article' ? { kind: 'html article — a document: read_document / edit_document, render_page' } : {}) }));
   // HTML deliverables (decks, posters, web pages): edited with the file tools, looked at with render_page
   for (const f of p?.files ?? []) {
     if (f.kind !== 'html') continue;
@@ -442,13 +444,14 @@ async function editDocumentLocked(project: string, userId: number, agentName: st
 function createDocument(project: string, userId: number, accountName: string, relPath: string, title?: string) {
   let rel = relPath;
   if (rel.endsWith('.lyx')) rel = rel.slice(0, -4) + '.tex';
-  if (!rel.endsWith('.tex') && !isMarkdownPath(rel)) rel += '.tex';
+  const article = isHtmlPath(rel);
+  if (!rel.endsWith('.tex') && !isMarkdownPath(rel) && !article) rel += '.tex';
   assertWritableRelPath(rel);
   const abs = resolveProjectPath(project, rel);
   if (fs.existsSync(abs)) throw new Error('file exists — write_document replaces an existing document');
   fs.mkdirSync(nodePath.dirname(abs), { recursive: true });
-  let text = isMarkdownPath(rel) ? newMarkdownText(title) : newDocumentText({ title, author: accountName });
-  if (!isMarkdownPath(rel) && userSettings(userId).paragraphSkip) text = withDocumentSettings(text, project, rel, NO_INDENT_SETTINGS);
+  let text = isMarkdownPath(rel) ? newMarkdownText(title) : article ? newArticleText({ title, author: accountName }) : newDocumentText({ title, author: accountName });
+  if (!isMarkdownPath(rel) && !article && userSettings(userId).paragraphSkip) text = withDocumentSettings(text, project, rel, NO_INDENT_SETTINGS);
   fs.writeFileSync(abs, text, 'utf8');
   touchProject(project, userId);
   return { ok: true, path: rel };
@@ -568,6 +571,8 @@ Editing documents: edit_document (replace a passage) and write_document (a whole
 
 Other text files (refs.bib, macros, .sty) are always edited directly: edit_file (replace a passage) or write_file.
 
+${ARTICLE_GUIDE}
+
 Slides, posters and web pages are HTML deliverables, not LaTeX: a folder with an index.html you design freely (create_deliverable starts one; read_file / edit_file / write_file edit it, live in people's editors; render_page shows you a page as an image with a list of problems). Its <meta name="overlyx" content="deck|poster|page"> says which kind it is. Read the deliverable guide in create_deliverable's or render_page's description before working on one.
 
 After every change run build_pdf and never leave a document that does not compile: fix the error, or step back. project_history lists the project's commits (OverLyX commits every edit shortly after it happens, and right before each of your direct edits); restore_project puts the whole project back to one of them as a new commit, so nothing is lost.
@@ -665,7 +670,7 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
     description: 'Read a document: its full LaTeX source (`text` — what edit_document edits), and its paragraphs (index, layout, depth, plain text) for the paragraph tools and add_comment.',
     annotations: { readOnlyHint: true },
     inputSchema: { ...projArg, path: z.string().describe('Project-relative path, e.g. "main.tex"') },
-  }, async ({ project: p, path }) => { try { const project = need(p, 'view'); if (isHtmlPath(path)) return ok(readFile(project, path)); const r = await readDocument(project, path); await present(project, path); return ok(r); } catch (e) { return fail(e); } });
+  }, async ({ project: p, path }) => { try { const project = need(p, 'view'); if (isHtmlPath(path) && !isDocumentFile(project, path)) return ok(readFile(project, path)); const r = await readDocument(project, path); await present(project, path); return ok(r); } catch (e) { return fail(e); } });
 
   register('propose_edit', {
     description: 'Replace the text of one plain-text paragraph. Always applied as a tracked change (insertions/deletions attributed to this agent) — never a silent overwrite. Only works on paragraphs with no formulas/insets and uniform formatting; read_document first to get paragraph indices and check the content is plain.',
@@ -857,7 +862,7 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
   });
 
   register('create_document', {
-    description: 'Create a new .tex document from the standard template (write_document with full source also creates).',
+    description: 'Create a new document from the standard template: a .tex file, a markdown (.md) file, or a web article (.html, e.g. "post/index.html": see the server instructions). write_document with full source also creates.',
     inputSchema: { ...projArg, path: z.string(), title: z.string().optional() },
   }, async ({ project: p, path, title }) => { try { return ok(createDocument(need(p, 'edit'), userId, user.name, path, title)); } catch (e) { return fail(e); } });
 

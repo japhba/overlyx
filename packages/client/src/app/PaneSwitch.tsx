@@ -10,9 +10,9 @@ import { PANE_LABELS, PANE_TITLES, ARRANGEMENTS, applyArrangement, arrangementMa
 
 const MINI: Record<PaneId, string> = { doc: 'Doc', tex: 'TeX', pdf: 'PDF' };
 
-export function PaneSwitch({ layout, onChange, narrow = false, markdown = false }: { layout: PaneLayout; onChange: (l: PaneLayout) => void; narrow?: boolean; /** a markdown document: its source pane holds markdown */ markdown?: boolean }) {
-  const LABELS: Record<PaneId, string> = markdown ? { ...PANE_LABELS, tex: 'Markdown' } : PANE_LABELS;
-  const TITLES: Record<PaneId, string> = markdown ? { ...PANE_TITLES, tex: 'The markdown source of the document (Ctrl+Alt+S)' } : PANE_TITLES;
+export function PaneSwitch({ layout, onChange, narrow = false, markdown = false, article = false }: { layout: PaneLayout; onChange: (l: PaneLayout) => void; narrow?: boolean; /** a markdown document: its source pane holds markdown */ markdown?: boolean; /** an HTML article: its source is the page's HTML, its output the page (app/ArticlePage.tsx) */ article?: boolean }) {
+  const LABELS: Record<PaneId, string> = article ? { ...PANE_LABELS, tex: 'HTML', pdf: 'Page' } : markdown ? { ...PANE_LABELS, tex: 'Markdown' } : PANE_LABELS;
+  const TITLES: Record<PaneId, string> = article ? { ...PANE_TITLES, tex: 'The page\'s HTML source (Ctrl+Alt+S)', pdf: 'The page as it is published, running (its scripts too)' } : markdown ? { ...PANE_TITLES, tex: 'The markdown source of the document (Ctrl+Alt+S)' } : PANE_TITLES;
   const row = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<{ id: PaneId; dx: number; to: number; w: number } | null>(null);
   const suppressClick = useRef(false);
@@ -89,7 +89,7 @@ export function PaneSwitch({ layout, onChange, narrow = false, markdown = false 
       {menu && (
         <div class="pane-menu" role="menu">
           <div class="pane-menu-title">Show</div>
-          {ARRANGEMENTS.map(a => <PresetButton key={a.panes.join('-')} preset={a.panes} label={markdown ? a.label.replace('LaTeX', 'Markdown') : a.label} active={arrangementMatches(layout, a.panes)} onPick={() => { onChange(applyArrangement(layout, a.panes)); setMenu(false); }} />)}
+          {ARRANGEMENTS.map(a => <PresetButton key={a.panes.join('-')} preset={a.panes} label={article ? a.label.replace('LaTeX', 'HTML').replace('PDF', 'page') : markdown ? a.label.replace('LaTeX', 'Markdown') : a.label} active={arrangementMatches(layout, a.panes)} onPick={() => { onChange(applyArrangement(layout, a.panes)); setMenu(false); }} />)}
           <div class="pane-menu-actions">
             <button type="button" disabled={vis.length < 2} data-pane-swap onClick={() => { onChange(mirrorPanes(layout)); setMenu(false); }} title="Reverse the order of the panes that are shown">⇄ Swap sides</button>
             <button type="button" disabled={vis.length < 2} onClick={() => { onChange(resetWidths(layout)); setMenu(false); }} title="Give the panes their default widths again">Equal widths</button>

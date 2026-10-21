@@ -18,7 +18,8 @@ export type CiteStyle = 'numeric' | 'authoryear';
 /** a citation command as written: `\citep[see][p.~5]{a,b}` */
 export interface CiteMatch { cmd: string; pre: string; post: string; keys: string[]; index: number; src: string }
 
-const CITE_SRC = String.raw`\\(cite|citep|citet|citealp|citealt|citeauthor|citeyear|citeyearpar|nocite|parencite|textcite|autocite)\*?(?:\[([^\]]*)\])?(?:\[([^\]]*)\])?\{([^}]*)\}`;
+/** a citation command's pattern: 1 command, 2–3 optional arguments, 4 keys */
+export const CITE_SRC = String.raw`\\(cite|citep|citet|citealp|citealt|citeauthor|citeyear|citeyearpar|nocite|parencite|textcite|autocite)\*?(?:\[([^\]]*)\])?(?:\[([^\]]*)\])?\{([^}]*)\}`;
 /** citation commands (a fresh RegExp each time: it is global) */
 export const citeRegExp = (): RegExp => new RegExp(CITE_SRC, 'g');
 /** a text has a citation command in it */

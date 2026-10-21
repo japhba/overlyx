@@ -3233,3 +3233,77 @@ html[data-ui] .ctx-bars.tb-side { position: absolute; z-index: 40; overflow: vis
 .ctx-drop-bottom { left: 0; right: 0; bottom: 0; height: 6px; }
 .ctx-drop-left { top: 0; bottom: 0; left: 0; width: 6px; }
 .ctx-drop-right { top: 0; bottom: 0; right: 0; width: 6px; }
+
+/* ------------------------------------------------------------ HTML articles
+   (core html/article.ts, editor/article.ts) — the page's look in the editor: its stylesheet's custom
+   properties at :root arrive as --ol-a-<name> on the pane (.ol-article-host); the defaults are a new
+   article's (core html/articletheme.ts ARTICLE_VARS). The colours are the page's paper and ink unless
+   pages are inverted in the dark (app/darkpages.ts); fonts, sizes and the measure always. */
+html:not([data-theme="dark"][data-dark-pages]) .editor-scroll.ol-article-host,
+html:not([data-theme="dark"][data-dark-pages]) .editor-scroll.ol-article-host > .editor-page {
+  color-scheme: light;
+  --page-bg: var(--ol-a-paper, #fbfaf7);
+  --editor-fg: var(--ol-a-ink, #1b1d21);
+  --ol-art-muted: var(--ol-a-muted, #5f646d);
+  --ol-art-accent: var(--ol-a-accent, #b4532a);
+  --ol-art-rule: var(--ol-a-rule, #e4e0d6);
+  --ol-art-code: var(--ol-a-code-bg, #f2f0ea);
+}
+.editor-scroll.ol-article-host { --ol-art-muted: var(--fg2); --ol-art-accent: var(--accent); --ol-art-rule: var(--ui-border); --ol-art-code: var(--code-bg); }
+html .lyx-editor.ol-article {
+  max-width: calc(var(--ol-a-measure, 680px) * var(--editor-zoom, 1));
+  font-family: var(--ol-a-font-text, "Source Serif 4", "Iowan Old Style", Georgia, serif);
+  font-size: calc(var(--ol-a-text-size, 19px) * var(--editor-zoom, 1));
+  line-height: var(--ol-a-leading, 1.68);
+  padding-top: 2.4em;
+}
+html body .lyx-editor.ol-article > .lyx-par { padding-top: 0; padding-bottom: 0; margin: 0 0 1.05em; text-indent: 0; text-align: left; }
+html body .lyx-editor.ol-article > .lyx-par:is(.lyx-layout-title, .lyx-layout-section, .lyx-layout-sectionstar, .lyx-layout-subsection, .lyx-layout-subsectionstar, .lyx-layout-subsubsection, .lyx-layout-subsubsectionstar, .lyx-layout-paragraph, .lyx-layout-subparagraph, .lyx-layout-author, .lyx-layout-date) {
+  font-family: var(--ol-a-font-ui, Inter, system-ui, sans-serif); line-height: 1.2; text-align: left; font-style: normal;
+}
+html body .lyx-editor.ol-article > .lyx-layout-title { font-size: 2.6em; font-weight: 700; letter-spacing: -0.025em; line-height: 1.08; margin: 0 0 0.5em; }
+html body .lyx-editor.ol-article > :is(.lyx-layout-author, .lyx-layout-date) { font-size: 0.78em; color: var(--ol-art-muted); margin: 0 0 0.4em; }
+html body .lyx-editor.ol-article > .lyx-layout-abstract { font-size: 1.12em; line-height: 1.6; color: var(--ol-art-muted); margin: 2.2em 0 2.6em; }
+html body .lyx-editor.ol-article > .lyx-layout-abstract::before { display: none; }
+html body .lyx-editor.ol-article > :is(.lyx-layout-section, .lyx-layout-sectionstar) { font-size: 1.4em; font-weight: 650; letter-spacing: -0.012em; margin: 2.4em 0 0.7em; }
+html body .lyx-editor.ol-article > :is(.lyx-layout-subsection, .lyx-layout-subsectionstar) { font-size: 1.12em; font-weight: 600; margin: 2em 0 0.55em; }
+html body .lyx-editor.ol-article > :is(.lyx-layout-subsubsection, .lyx-layout-subsubsectionstar, .lyx-layout-paragraph, .lyx-layout-subparagraph) { display: block; font-size: 0.95em; font-weight: 600; margin: 1.6em 0 0.4em; }
+html body .lyx-editor.ol-article > :is(.lyx-layout-paragraph, .lyx-layout-subparagraph) { color: var(--ol-art-muted); }
+html body .lyx-editor.ol-article > .lyx-layout-quote { margin: 0 0 0.6em; padding-left: 1.1em; border-left: 2px solid var(--ol-art-accent); color: var(--ol-art-muted); font-style: normal; }
+html body .lyx-editor.ol-article > :is(.lyx-layout-itemize, .lyx-layout-enumerate) { margin-bottom: 0.3em; }
+html body .lyx-editor.ol-article > :is(.lyx-layout-itemize, .lyx-layout-enumerate)[data-label]::before { color: var(--ol-art-muted); }
+.lyx-editor.ol-article .lyx-tabular { font-family: var(--ol-a-font-ui, Inter, system-ui, sans-serif); font-size: 0.8em; font-variant-numeric: tabular-nums; }
+.lyx-editor.ol-article .lyx-family-typewriter { font-family: var(--ol-a-font-code, "JetBrains Mono", ui-monospace, monospace); font-size: 0.82em; background: var(--ol-art-code); padding: 0.12em 0.32em; border-radius: 4px; }
+.lyx-editor.ol-article .lyx-inset-listings > .inset-box { font-family: var(--ol-a-font-code, "JetBrains Mono", ui-monospace, monospace); font-size: 0.78em; line-height: 1.6; background: var(--ol-art-code); border: 0; border-radius: 8px; padding: 1em 1.2em; }
+.lyx-editor.ol-article a, .lyx-editor.ol-article .lyx-command-href { color: var(--ol-art-accent); }
+/* figures: no box, the caption small under the picture; a wide one reaches out of the column */
+.lyx-editor.ol-article .lyx-inset-float { margin: 2.2em 0; }
+.lyx-editor.ol-article .lyx-inset-float > .inset-box { background: none; border-color: transparent; padding: 0; }
+.lyx-editor.ol-article .lyx-inset-float > .inset-box > .inset-label, .lyx-editor.ol-article .lyx-inset-caption > .inset-box > .inset-label { position: absolute; right: 0; top: 0; opacity: 0; transition: opacity 0.15s; z-index: 2; }
+.lyx-editor.ol-article .lyx-inset-float:hover > .inset-box > .inset-label, .lyx-editor.ol-article .lyx-inset-caption:hover > .inset-box > .inset-label { opacity: 0.85; }
+.editor-scroll.ol-article-host > .editor-page { container-type: inline-size; }
+.lyx-editor.ol-article .lyx-inset-float[data-wide] { width: min(calc(var(--ol-a-wide, 1040px) * var(--editor-zoom, 1)), calc(100cqw - 48px)); margin-left: 50%; transform: translateX(-50%); }
+.lyx-editor.ol-article .lyx-inset-caption > .inset-box { display: block; background: none; border: 0; padding: 0; margin-top: 0.6em; font-family: var(--ol-a-font-ui, Inter, system-ui, sans-serif); font-size: 0.74em; line-height: 1.55; color: var(--ol-art-muted); }
+/* notes: the page shows them in its margin; here they stay chips in the text, in its accent */
+.lyx-editor.ol-article .lyx-inset-foot > .inset-box > .inset-label { background: var(--ol-art-accent); }
+.lyx-editor.ol-article .lyx-inset-foot > .inset-box { font-family: var(--ol-a-font-ui, Inter, system-ui, sans-serif); font-size: 0.74em; line-height: 1.5; color: var(--ol-art-muted); background: none; }
+/* HTML blocks (editor/nodeviews/htmlblock.ts): the block running, full width, its source below while open */
+.lyx-editor.ol-article .lyx-inset.ol-htmlblock { display: block; position: relative; margin: 1.4em 0; }
+.lyx-editor.ol-article .lyx-inset.ol-htmlblock > .inset-box { display: block; position: relative; padding: 0; margin: 0; border: 1px dashed transparent; border-radius: 6px; background: none; }
+.lyx-editor.ol-article .lyx-inset.ol-htmlblock:hover > .inset-box, .lyx-editor.ol-article .lyx-inset.ol-htmlblock.open > .inset-box { border-color: var(--ol-art-rule); }
+.lyx-editor.ol-article .lyx-inset.ol-htmlblock > .inset-box > .inset-label { position: absolute; right: 6px; top: 6px; z-index: 3; opacity: 0; transition: opacity 0.15s; }
+.lyx-editor.ol-article .lyx-inset.ol-htmlblock:hover > .inset-box > .inset-label, .lyx-editor.ol-article .lyx-inset.ol-htmlblock.open > .inset-box > .inset-label { opacity: 0.9; }
+.lyx-editor.ol-article .lyx-inset.ol-htmlblock > .inset-box > .inset-content { display: block; font-family: var(--ol-a-font-code, "JetBrains Mono", ui-monospace, monospace); font-size: 0.72em; line-height: 1.5; background: var(--ol-art-code); border-top: 1px solid var(--ol-art-rule); padding: 0.6em 0.9em; border-radius: 0 0 6px 6px; }
+.lyx-editor.ol-article .lyx-inset.ol-htmlblock.collapsed > .inset-box > .inset-content { display: none; }
+.lyx-editor.ol-article .lyx-inset.ol-htmlblock.wide { width: min(calc(var(--ol-a-wide, 1040px) * var(--editor-zoom, 1)), calc(100cqw - 48px)); margin-left: 50%; transform: translateX(-50%); }
+.ol-block-frame { display: block; }
+.ol-block-frame > iframe { display: block; width: 100%; height: 48px; border: 0; background: transparent; color-scheme: light; }
+.ol-htmlblock-empty .ol-block-frame > iframe { height: 8px; }
+/* a block that shows nothing (a script, a style): the usual chip */
+.lyx-editor.ol-article .lyx-inset.ol-htmlblock.ol-htmlblock-quiet { margin: 0.4em 0; }
+.lyx-editor.ol-article .lyx-inset.ol-htmlblock.ol-htmlblock-quiet > .inset-box > .inset-label { position: static; opacity: 0.7; }
+/* the page pane (app/ArticlePage.tsx): the page at the pane's width, or a phone's */
+.article-page-view { flex: 1; min-height: 0; display: flex; justify-content: center; background: var(--muted2); }
+.article-page-view > iframe { flex: 1; border: 0; background: #fff; max-width: 100%; }
+.article-page-view.phone > iframe { flex: 0 0 auto; margin: 12px 0; border-radius: 18px; box-shadow: 0 2px 16px rgba(0, 0, 0, 0.25); }
+.editor-loading { min-height: 60vh; }

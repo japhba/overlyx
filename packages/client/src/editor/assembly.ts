@@ -49,6 +49,8 @@ import { usagePlugin } from './plugins/usage';
 import { linksPlugin, installLinks, openLink, openLinkBox, pasteLinkOverSelection } from './links';
 import { MathInlineView, MathDisplayView, MacroView } from './nodeviews/math';
 import { InsetView } from './nodeviews/inset';
+import { HtmlBlockView } from './nodeviews/htmlblock';
+import { isArticleDoc } from '../articlekinds';
 import { GraphicsView, CommandView, LeafView } from './nodeviews/leaf';
 import { editorContext, viewDocDir, viewProject } from './context';
 import { imageFiles, insertImageFiles, isSvgMarkup, looksLikeImageFileName, svgFile } from './imagepaste';
@@ -90,7 +92,8 @@ export function editorNodeViews(): NonNullable<EditorProps['nodeViews']> {
     math_inline: (node, view, getPos, decorations) => guarded(node, () => new MathInlineView(node, view, getPos as () => number | undefined, decorations)),
     math_display: (node, view, getPos, decorations) => guarded(node, () => new MathDisplayView(node, view, getPos as () => number | undefined, decorations)),
     macro: (node, view, getPos) => guarded(node, () => new MacroView(node, view, getPos as () => number | undefined)),
-    inset: (node, view, getPos) => guarded(node, () => new InsetView(node, view, getPos as () => number | undefined)),
+    // (a raw inset alone in an article's paragraph is an HTML block, shown running: nodeviews/htmlblock.ts)
+    inset: (node, view, getPos) => guarded(node, () => (node.attrs.name === 'ERT' ? new HtmlBlockView(node, view, getPos as () => number | undefined) : new InsetView(node, view, getPos as () => number | undefined))),
     graphics: (node, view, getPos) => guarded(node, () => new GraphicsView(node, view, getPos as () => number | undefined)),
     command: (node, view, getPos) => guarded(node, () => new CommandView(node, view, getPos as () => number | undefined)),
     leaf: (node, view, getPos) => guarded(node, () => new LeafView(node, view, getPos as () => number | undefined)),
@@ -117,6 +120,8 @@ export interface AssemblyOptions {
   onUpdate?: (view: EditorView, info: { docChanged: boolean; selectionChanged: boolean }) => void;
   /** a markdown document (editor/markdown.ts: markdown's editing primitives, only what markdown can hold) */
   markdown?: boolean;
+  /** an HTML article (core html/article.ts): markdown's typing, what an article can hold */
+  article?: boolean;
 }
 
 /** The ProseMirror plugins of an OverLyX editor, in the order the key bindings depend on. */
@@ -130,7 +135,7 @@ export function assemblePlugins(o: AssemblyOptions): Plugin[] {
     aiCompletePlugin(),
     spellPlugin(),
     markdownRulesPlugin(),   // `- ` / `1. ` / `# ` at a paragraph start, before autocorrect looks at the space
-    ...(o.markdown ? markdownPlugins() : []),   // `**bold**`, ``` + Enter …; markdown's blocks and marks only (before the LyX keymap)
+    ...(o.markdown || o.article ? markdownPlugins({ article: !!o.article }) : []),   // `**bold**`, ``` + Enter …; markdown's blocks and marks only (before the LyX keymap)
     autocorrectPlugin(),
     chordPlugin(),
     layoutPlugin(),   // layout documents: object selection, handles, drawing tools (before the keymap and the mouse selection)
@@ -348,7 +353,7 @@ export function editorViewProps(o: ViewPropsOptions): Pick<EditorProps, 'nodeVie
           return true;
         }
         // a markdown document: markdown pasted as text arrives as structure
-        if (!viewOnly() && isMarkdownDoc(view.dom.dataset.docId ?? o.docId) && looksLikeMarkdown(text)) {
+        if (!viewOnly() && (isMarkdownDoc(view.dom.dataset.docId ?? o.docId) || isArticleDoc(view.dom.dataset.docId ?? o.docId)) && looksLikeMarkdown(text)) {
           void pasteMarkdown(view, text);
           return true;
         }
@@ -416,6 +421,8 @@ export function installEditorDom(view: EditorView, docId: string): void {
   const createdAt = performance.now();
   view.dom.addEventListener('dblclick', (ev) => { if (performance.now() - createdAt < 600) { ev.stopPropagation(); ev.preventDefault(); } }, true);
   view.dom.dataset.docId = docId;
+  // an HTML article: the page's look (editor/article.ts sets its properties once the meta is in)
+  view.dom.classList.toggle('ol-article', isArticleDoc(docId));
   view.dom.dataset.project = projectOfDoc(docId);
   view.dom.dataset.docDir = docDirOf(docId);
   view.dom.addEventListener('mouseover', (ev) => {

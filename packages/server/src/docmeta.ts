@@ -13,14 +13,17 @@ import {
 } from '@overlyx/core';
 import { applyDocumentTheorems, loadDocumentClass, describeLayouts, flexInsetNames } from '@overlyx/core/latex/layouts.ts';
 import { isMarkdownPath, MARKDOWN_LAYOUTS } from '@overlyx/core/md/index.ts';
+import { isHtmlPath } from '@overlyx/core/html/deliverable.ts';
+import { ARTICLE_LAYOUTS } from '@overlyx/core/html/article.ts';
+import { articleVars } from '@overlyx/core/html/articletheme.ts';
 import { config } from './config.ts';
 import { projectDir, findMaster } from './projectfiles.ts';
 import { cachedParseFile } from './texdoc.ts';
 import { lyxDocumentOf, type DocState, type OpenDocs } from './docwork.ts';
 
 export interface DocumentMeta {
-  /** what the file is written as: LaTeX, or markdown (the editor offers only what markdown can hold) */
-  format: 'tex' | 'markdown';
+  /** what the file is written as: LaTeX, markdown or an HTML article (the editor offers only what the format can hold) */
+  format: 'tex' | 'markdown' | 'article';
   master: string | null;
   labels: { name: string; context: string; file: string }[];
   /** bibliography files the document tree names (as written), and the keys it cites */
@@ -40,6 +43,8 @@ export interface DocumentMeta {
   macroList: { name: string; args: number; def: string; display?: string; source?: string }[];
   layouts: unknown;
   flexInsets: unknown;
+  /** an HTML article: the custom properties its page sets at :root (its look, which the editor takes on) */
+  article?: { vars: Record<string, string> };
   /** where the time went (ms) */
   timings: Record<string, number>;
 }
@@ -51,6 +56,8 @@ export function documentMeta(s: DocState, open: OpenDocs): DocumentMeta {
   const lyx = lyxDocumentOf(s.ydoc);
   lap('toLyx');
   const markdown = isMarkdownPath(s.relPath);
+  // an .html file open as a document is an article (docs.ts)
+  const article = isHtmlPath(s.relPath);
   const proj = projectDir(s.project);
   // child documents inherit macros, bibliography and labels from their master
   const masterRel = findMaster(s.project, s.relPath);
@@ -138,13 +145,15 @@ export function documentMeta(s: DocState, open: OpenDocs): DocumentMeta {
     const dc = applyDocumentTheorems(loadDocumentClass(getTextClass(lyx), getModules(lyx), config.layoutDir, [proj, docDir]), userPre, config.layoutDir, [proj, docDir]);
     layouts = describeLayouts(dc);
     if (markdown && Array.isArray(layouts)) layouts = (layouts as { name: string }[]).filter(l => MARKDOWN_LAYOUTS.includes(l.name));
+    if (article && Array.isArray(layouts)) layouts = (layouts as { name: string }[]).filter(l => ARTICLE_LAYOUTS.includes(l.name));
     flexInsets = dc.insetLayouts ? flexInsetNames(dc) : null;
   } catch {
     layouts = null;
   }
   lap('layouts');
   return {
-    format: markdown ? 'markdown' : 'tex',
+    format: markdown ? 'markdown' : article ? 'article' : 'tex',
+    ...(article ? { article: { vars: articleVars(lyx.preamble.join('\n'), fn => { const abs = safe(fn); try { return abs && fs.statSync(abs).size < 1e6 ? fs.readFileSync(abs, 'utf8') : undefined; } catch { return undefined; } }) } } : {}),
     master: masterRel ? `${s.project}/${masterRel}` : null,
     labels, bibFiles: [...bibFiles], citedKeys: [...citedKeys],
     textclass: getTextClass(lyx), modules: getModules(lyx),

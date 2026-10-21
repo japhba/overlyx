@@ -8,14 +8,16 @@
 import { useState } from 'preact/hooks';
 import { PAGE_PRESETS } from '@overlyx/core';
 import { api } from '../api';
+import { noteArticle } from '../articlekinds';
 import { Dialog } from './Dialogs';
 import { ScientificTemplates } from './ScientificTemplates';
 
-type Kind = 'deck' | 'poster' | 'page';
+type Kind = 'deck' | 'poster' | 'page' | 'article';
 const KINDS: { id: Kind; label: string; hint: string; w: number; h: number; dir: string }[] = [
   { id: 'deck', label: 'Slide deck', hint: '16:9 or 4:3, presented full screen', w: 16, h: 9, dir: 'talk' },
   { id: 'poster', label: 'Poster', hint: '48 × 36 in or portrait, printed as PDF', w: 48, h: 36, dir: 'poster' },
   { id: 'page', label: 'Web page', hint: 'A project page or a small site', w: 12, h: 9, dir: 'site' },
+  { id: 'article', label: 'Article', hint: 'A research post or an essay: written like a document', w: 9, h: 12, dir: 'article' },
 ];
 
 export function NewLayoutDialog({ project, dir, onClose, onCreated, notify }: { project: string; dir?: string; onClose: () => void; onCreated: (id: string) => void; notify: (t: string, k?: 'info' | 'error') => void }) {
@@ -31,12 +33,15 @@ export function NewLayoutDialog({ project, dir, onClose, onCreated, notify }: { 
   const create = (selectedKind = kind) => {
     const f = (touched || selectedKind === kind ? folder.trim().replace(/^\/+|\/+$/g, '') : '') || KINDS.find(x => x.id === selectedKind)!.dir;
     setBusy(true);
-    api.newDeliverable(project, (dir ? dir + '/' : '') + f, selectedKind, title.trim() || undefined, selectedKind === kind ? template : undefined)
-      .then(r => { onClose(); onCreated(r.id); })
+    // an article is a document (core html/article.ts), written in the document editor: its folder's index.html
+    const made = selectedKind === 'article'
+      ? api.newDoc(project, (dir ? dir + '/' : '') + f + '/index.html', { title: title.trim() || undefined }).then(r => { noteArticle(r.id, true); return r; })
+      : api.newDeliverable(project, (dir ? dir + '/' : '') + f, selectedKind, title.trim() || undefined, selectedKind === kind ? template : undefined);
+    made.then(r => { onClose(); onCreated(r.id); })
       .catch(e => { setBusy(false); notify('Could not create it: ' + (e as Error).message, 'error'); });
   };
   return (
-    <Dialog title="New slides, poster or web page" onClose={onClose} buttons={<>
+    <Dialog title="New slides, poster, web page or article" onClose={onClose} buttons={<>
       <button type="button" class="small-btn" onClick={onClose}>Cancel</button>
       <button type="button" class="small-btn primary" disabled={busy} onClick={() => create()} data-create-deliverable>Create</button>
     </>}>
@@ -53,7 +58,8 @@ export function NewLayoutDialog({ project, dir, onClose, onCreated, notify }: { 
           );
         })}
       </div>
-      {kind !== 'page' && <ScientificTemplates kind={kind} value={template} onChange={setTemplate} />}
+      {kind !== 'page' && kind !== 'article' && <ScientificTemplates kind={kind} value={template} onChange={setTemplate} />}
+      {kind === 'article' && <p class="dialog-hint">Prose, formulas, citations and figures, written with comments and suggestions like any document — and published as a web page, with interactive figures your agent can build.</p>}
       <label class="dialog-row">Title <input value={title} placeholder="Untitled" onInput={e => setTitle((e.target as HTMLInputElement).value)} onKeyDown={e => { if (e.key === 'Enter') create(); }} data-deliverable-title /></label>
       <label class="dialog-row">Folder <input value={folder} onInput={e => { setTouched(true); setFolder((e.target as HTMLInputElement).value); }} onKeyDown={e => { if (e.key === 'Enter') create(); }} data-deliverable-folder /></label>
       <p class="dialog-hint">Ask your agent to design it — it is told what kind of deliverable this is. <a href="#" onClick={e => { e.preventDefault(); setLatex(true); }} data-latex-layout>A LaTeX (beamer) layout document instead…</a></p>

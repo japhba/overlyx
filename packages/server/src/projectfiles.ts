@@ -14,6 +14,8 @@ export interface ProjectFile {
   path: string; name: string; size: number; mtime: number; kind: 'doc' | 'lyx' | 'bib' | 'image' | 'tex' | 'pdf' | 'board' | 'html' | 'dir' | 'other';
   /** an HTML file: the kind of deliverable it is (its `<meta name="overlyx">`; none: a plain web page) */
   deliverable?: 'deck' | 'poster' | 'page';
+  /** a document that is an HTML article (core html/article.ts): kind 'doc', opened in the document editor */
+  format?: 'article';
   /** a directory that is a document group (its GROUP_MANIFEST, core/docgroup.ts): its documents in order */
   group?: DocGroup;
 }
@@ -64,12 +66,12 @@ export function texInfo(abs: string, st: fs.Stats): { hasDocument: boolean; auth
 }
 
 /** What an HTML file is (its meta tag, read from its head), cached by mtime + size. */
-const htmlKindCache = new Map<string, { key: string; kind: ProjectFile['deliverable'] }>();
-export function htmlKind(abs: string, st: fs.Stats): ProjectFile['deliverable'] {
+const htmlKindCache = new Map<string, { key: string; kind: ProjectFile['deliverable'] | 'article' }>();
+export function htmlKind(abs: string, st: fs.Stats): ProjectFile['deliverable'] | 'article' {
   const key = `${st.mtimeMs}:${st.size}`;
   const hit = htmlKindCache.get(abs);
   if (hit && hit.key === key) return hit.kind;
-  let kind: ProjectFile['deliverable'];
+  let kind: ProjectFile['deliverable'] | 'article';
   try {
     const fd = fs.openSync(abs, 'r');
     const buf = Buffer.alloc(Math.min(st.size, 16384));
@@ -77,11 +79,17 @@ export function htmlKind(abs: string, st: fs.Stats): ProjectFile['deliverable'] 
     fs.closeSync(fd);
     const m = /<meta\b[^>]*\bname\s*=\s*["']?overlyx["']?[^>]*>/i.exec(buf.toString('utf8'));
     const c = m && /\bcontent\s*=\s*["']?\s*([a-z]+)/i.exec(m[0])?.[1]?.toLowerCase();
-    kind = c === 'deck' || c === 'slides' ? 'deck' : c === 'poster' ? 'poster' : c === 'page' || c === 'webpage' ? 'page' : undefined;
+    kind = c === 'deck' || c === 'slides' ? 'deck' : c === 'poster' ? 'poster' : c === 'page' || c === 'webpage' ? 'page' : c === 'article' ? 'article' : undefined;
   } catch { kind = undefined; }
   if (htmlKindCache.size > 2000) htmlKindCache.clear();
   htmlKindCache.set(abs, { key, kind });
   return kind;
+}
+
+/** Is the project file at `abs` an HTML article (a document, not a deliverable)? */
+export function isArticleFile(abs: string): boolean {
+  if (!/\.html?$/i.test(abs)) return false;
+  try { const st = fs.statSync(abs); return st.isFile() && htmlKind(abs, st) === 'article'; } catch { return false; }
 }
 
 export function collect(root: string, dir: string, out: ProjectFile[], depth: number): ProjectFile[] {
@@ -104,7 +112,11 @@ export function collect(root: string, dir: string, out: ProjectFile[], depth: nu
     const st = fs.statSync(full);
     const kind = fileKind(e.name);
     const f: ProjectFile = { path: path.relative(root, full), name: e.name, size: st.size, mtime: st.mtimeMs, kind };
-    if (kind === 'html') { const d = htmlKind(full, st); if (d) f.deliverable = d; }
+    if (kind === 'html') {
+      const d = htmlKind(full, st);
+      // an article is a document (the document editor), a deck / poster / page a deliverable (the canvas)
+      if (d === 'article') { f.kind = 'doc'; f.format = 'article'; } else if (d) f.deliverable = d;
+    }
     out.push(f);
   }
   return out.sort((a, b) => a.path.localeCompare(b.path));

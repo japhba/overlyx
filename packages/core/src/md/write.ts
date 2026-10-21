@@ -108,11 +108,11 @@ function formulaInner(latex: string): { inner: string; display: boolean } {
 }
 
 /** the lines of a note's paragraphs (plain text; empty paragraphs dropped: a blank line would end the markdown paragraph) */
-function noteLines(pars: Paragraph[]): string[] {
+export function noteLines(pars: Paragraph[]): string[] {
   return pars.map(p => p.items.map(itemText).join('').replace(/\n/g, ' ')).filter(l => l.trim() !== '');
 }
 
-function htmlComment(kind: string, lines: string[], single: boolean): string {
+export function htmlComment(kind: string, lines: string[], single: boolean): string {
   const tag = kind === 'Comment' ? '@comment' : kind === 'Greyedout' ? '@greyedout' : '';
   const safe = lines.map(l => l.replace(/-->/g, '--&gt;'));
   if (single || (!tag && safe.length <= 1)) {

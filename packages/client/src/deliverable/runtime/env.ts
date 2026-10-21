@@ -9,7 +9,7 @@ import type { FromRuntime, DeliverableKind, Path, SlideBox, Solo } from '../prot
 import type { DeckExtras } from '@overlyx/core/html/deckextras.ts';
 import type { AssetUrls } from '../offlineassets';
 
-export type Mode = 'edit' | 'thumb' | 'present' | 'print' | 'check' | 'view';
+export type Mode = 'edit' | 'thumb' | 'present' | 'print' | 'check' | 'view' | 'embed';
 
 declare global {
   /** `__OL`: what the page's server gives the runtime — its mode, and the cited entries, citation style and macros (core html/deckextras.ts) */

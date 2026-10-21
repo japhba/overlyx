@@ -3205,6 +3205,62 @@ can hold (`core/src/md/`, `client/src/editor/markdown.ts`):
 * **VS Code**: the extension opens `.md` with *Open With… ▸ OverLyX Editor* (VS Code's own
   markdown editor stays the default), with the same parser and writer.
 
+## HTML articles
+
+A web page of prose — a research post, an essay, the kind of page Distill-style blogs publish — is
+a document too: an `.html` file whose head says `<meta name="overlyx" content="article">` opens in
+the document editor (comments, Suggesting, versions, formulas, citations, agents' tracked edits),
+not on the deliverable canvas. The file stays a plain web page that any host can serve.
+
+* **Which editor.** Only the file says, so the server classifies `.html` files by their meta tag
+  (`projectfiles.ts htmlKind`: an article is kind `doc`, `format: 'article'`); `docs.ts` opens an
+  article as an `OpenDoc` (a deck as an `HtmlDoc`). The client learns the kinds from the project
+  lists (`client/src/articlekinds.ts`, kept in localStorage) and holds an `.html` tab blank until
+  it knows which editor it is. A stored deliverable state of a page that became an article is
+  ignored (`storedAsDocument`).
+* **The model** (`core/src/html/article.ts`). The prose is the content of the first `<article>`
+  (else `<main>`, else `<body>`); what is before and after it is the document's preamble and
+  trailer, verbatim. `<h1>` Title, `<h2>`…`<h6>` Section…Subparagraph, `<p class="byline">` Author,
+  `date` Date, `abstract` Abstract, lists, `<blockquote>`, `<pre><code>`, `<hr>`, a `<figure>` of
+  images and a caption → a figure float (`class="wide"` → `wide true`), simple tables → a tabular;
+  inline marks, links, images, `<sub>`/`<sup>`, `<span class="sidenote">` (Foot; `marginnote` →
+  Marginal); TeX as the runtime typesets it (`\(…\)`, `\[…\]`, `$$`, display environments,
+  `\cite…{}`, `\ref{}`/`\eqref{}`); comments, notes and tracked changes as in markdown. Containers
+  that hold prose (section, div, header …) are transparent unless one of their children is a widget
+  (script, canvas, svg, iframe, a form control, a custom element): anything else is an **HTML
+  block**, a raw (ERT) inset with its source. Text that would read as TeX is written in a
+  `<span class="ol-notex">`.
+* **Saving** (`writeArticlePreserving`): blocks whose HTML did not change keep their bytes, an
+  edited block keeps its own start and end tags (classes, ids), a deleted one leaves the markup
+  around it, and new blocks go after the block before them (a heading after the markup that
+  follows, where the next section starts). Line breaks inside one element (comments, code, raw
+  HTML) are never re-indented.
+* **The look.** A new article (`core/src/html/articletheme.ts`, + New ▸ Article, or a file named
+  `article.html` / `post.html` …) has its stylesheet in its head: a research post's design set by
+  custom properties at `:root` (`--font-text`, `--font-ui`, `--text-size`, `--measure`, `--wide`,
+  `--ink`, `--accent`, `--paper` …), sidenotes numbered by a small script. The meta carries the
+  page's `:root` properties (`articleVars`, also from linked local stylesheets); the editor sets
+  them as `--ol-a-*` on the pane and draws the article with them (`.ol-article` in styles.css,
+  `client/src/editor/article.ts`), its Google fonts loaded through the server. Rules of the page's
+  own beyond those properties show in the page pane only.
+* **HTML blocks run in the editor** (`client/src/editor/nodeviews/htmlblock.ts`): a sandboxed frame
+  of `/ol-d/<token>/<path>?ol=embed&b=<blockKey>` — the server writes the open document's current
+  text with the block between two `<template>` markers (`deliverables.ts embedHtml`), the runtime's
+  embed mode (`runtime/embed.ts`) hides the rest of the page and reports the block's height. The
+  whole page loads, so its scripts may draw into the block. The label (HTML) opens the source below
+  the frame; the frame follows what is typed there.
+* **The page pane.** Where a LaTeX document has its PDF, an article has the page as published
+  (`client/src/app/ArticlePage.tsx`, runtime `view` mode; reloaded after saves, where it was
+  scrolled to; a phone's width on request). Its PDF is the page printed by the renderer's headless
+  Chromium (`export.ts printArticle`, `render.ts deliverablePdf`); Export ▸ LaTeX writes it as a
+  markdown document is written. No automatic PDF builds.
+* **Agents.** `create_document` with an `.html` path starts an article; `read_document` /
+  `edit_document` work on the page's text; `render_page` shows it; the instructions explain the
+  conventions (`ARTICLE_GUIDE`).
+* **Not yet:** the VS Code extension opens an article on the deliverable canvas; text styles of an
+  article are not written into its page; tables with merged cells, figures with more than images
+  and a caption, and definition lists are HTML blocks. Tests: `tests/article.test.ts`.
+
 ## Fonts by name
 
 The toolbar's font list (`app/FontPicker.tsx`, both shells and markdown) works like Google Docs':

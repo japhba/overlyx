@@ -17,6 +17,7 @@ import { openLinkBoxFor, LINK_KEY } from '../editor/links';
 import { uiPrompt } from './Dialogs';
 import { styleLabel } from './stylenames';
 import { isMarkdownDoc, insertCodeBlock, insertRule } from '../editor/markdown';
+import { isArticleDoc } from '../articlekinds';
 import { viewDocId } from '../editor/context';
 
 const SECTION_LAYOUTS: [string, string][] = [['0', 'Part'], ['1', 'Chapter'], ['2', 'Section'], ['3', 'Subsection'], ['4', 'Subsubsection'], ['5', 'Paragraph'], ['6', 'Subparagraph']];
@@ -32,14 +33,18 @@ export interface DocumentMenuContext {
 }
 
 export function documentMenus({ view, meta, run, runView, setDialog, textColor, tracking, changeInfo, toggleTracking, toggleCellLine, healthItems, reloadMetadata, setFindOpen }: DocumentMenuContext): { edit: MenuDef; insert: MenuDef; document: MenuDef } {
-  // a markdown document: only what markdown can write (editor/markdown.ts)
-  const markdown = meta?.format === 'markdown' || (!!view && isMarkdownDoc(viewDocId(view)));
+  // a markdown document: only what markdown can write (editor/markdown.ts); an HTML article
+  // (core html/article.ts) can write the same and a little more (citations, figures, margin notes)
+  const article = meta?.format === 'article' || (!!view && isArticleDoc(viewDocId(view)));
+  const mdOnly = !article && (meta?.format === 'markdown' || (!!view && isMarkdownDoc(viewDocId(view))));
+  const markdown = mdOnly || article;
   const tex = <T,>(entries: T[]): T[] => (markdown ? [] : entries);
   const tableWidth = view && !markdown ? T.tableToolbarState(view.state).tableWidth : null;
   // the Table entries act on the table the cursor is in: greyed out anywhere else
   const inTable = !!view && !!C.tableContext(view.state);
   const tableOnly = (entries: MenuEntry[]): MenuEntry[] => (inTable ? entries : entries.map(e => (e.sep ? e : { ...e, disabled: true })));
-  const md = <T,>(entries: T[]): T[] => (markdown ? entries : []);
+  const md = <T,>(entries: T[]): T[] => (mdOnly ? entries : []);
+  const html = <T,>(entries: T[]): T[] => (article ? entries : []);
   // the Modern interface assumes nobody comes from LyX: plain names (the Classic label stays the
   // entry's id, so custom keys and the statistics carry over), and LyX's own devices are left out
   const modern = typeof document !== 'undefined' && document.documentElement.dataset.ui === 'modern';
@@ -190,13 +195,18 @@ export function documentMenus({ view, meta, run, runView, setDialog, textColor, 
       { label: 'Link…', shortcut: LINK_KEY, action: () => runView(openLinkBoxFor) },
       { label: 'Image…', shortcut: 'Ctrl+Shift+G', action: () => setDialog({ name: 'graphics' }) },
       { label: 'Table…', shortcut: 'Ctrl+Alt+T', action: () => setDialog({ name: 'table' }) },
-      { label: 'Footnote', shortcut: 'Ctrl+Alt+F', action: () => run(C.insertFootnote) },
+      { label: article ? 'Sidenote' : 'Footnote', shortcut: 'Ctrl+Alt+F', action: () => run(C.insertFootnote) },
+      ...html<MenuEntry>([
+        { label: 'Figure', action: () => run(C.insertFloat('figure')) },
+        { label: 'Citation…', shortcut: 'Ctrl+Shift+C', action: () => setDialog({ name: 'cite' }) },
+        { label: 'Cross-reference…', shortcut: 'Ctrl+Shift+I', action: () => setDialog({ name: 'ref' }) },
+      ]),
       { label: 'Code block', action: () => run(insertCodeBlock) },
       { label: 'Horizontal rule', action: () => run(insertRule) },
       { sep: true },
       { label: 'Comment thread', shortcut: 'Ctrl+Alt+C', action: () => run(C.insertComment) },
       { label: 'Hidden note (HTML comment)', shortcut: 'Ctrl+Alt+Shift+N', action: () => run(C.insertNote('Note')) },
-      { label: 'Raw HTML', shortcut: 'Ctrl+L', action: () => run(C.insertERT) },
+      { label: article ? 'HTML block (a widget, an SVG …)' : 'Raw HTML', shortcut: 'Ctrl+L', action: () => run(C.insertERT) },
     ] } : { title: 'Insert', items: [
       { label: 'Math ▸', sub: [
         { label: 'Inline formula', shortcut: 'Ctrl+M', action: () => runView(C.insertMathFromUi(false)) },

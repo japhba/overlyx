@@ -24,7 +24,7 @@ export class InsetView implements NodeView {
   /** what the action buttons were built for: '' (no comment), 'open' or 'resolved' */
   private controls = '';
 
-  constructor(private node: PMNode, private view: EditorView, private getPos: () => number | undefined) {
+  constructor(protected node: PMNode, protected view: EditorView, protected getPos: () => number | undefined) {
     this.dom = document.createElement('span');
     this.anchor = document.createElement('span');
     this.anchor.className = 'inset-anchor';
@@ -100,6 +100,8 @@ export class InsetView implements NodeView {
     this.own = own;
     this.dom.dataset.name = name;
     this.dom.dataset.arg = arg;
+    // a float as wide as the page (figure*; an article's `<figure class="wide">`)
+    if (name === 'Float' && String(a.params ?? '').includes('wide true')) this.dom.dataset.wide = ''; else delete this.dom.dataset.wide;
     this.label.textContent = insetLabel(name, arg, JSON.parse(a.params || '[]'));
     if (name === 'Argument') {
       // whose argument: the paragraph's layout, or the inset whose first paragraph holds it (LyX's label)

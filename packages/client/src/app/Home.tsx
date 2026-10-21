@@ -46,8 +46,11 @@ function Glyph({ kind, emoji }: { kind: string; emoji: string }) {
 /** how a document is listed: an HTML deliverable by its folder (an index.html) and what it is */
 function docLabel(p: Project, d: string) {
   if (!/\.html?$/i.test(d)) return <><Glyph kind="doc" emoji="📄" /> {d}</>;
-  const kind = p.files.find(f => f.path === d)?.deliverable;
+  const file = p.files.find(f => f.path === d);
+  const kind = file?.deliverable;
   const name = /(^|\/)index\.html?$/i.test(d) && d.includes('/') ? d.slice(0, d.lastIndexOf('/')) : d;
+  // an article (core html/article.ts): a document, named by its folder
+  if (file?.format === 'article') return <><Glyph kind="doc" emoji="📰" /> {name}{name.toLowerCase().includes('article') ? '' : ' (article)'}</>;
   const what = kind && !name.toLowerCase().includes(DELIVERABLE_NAME[kind].split(' ')[0]) ? ` (${DELIVERABLE_NAME[kind]})` : '';
   return <><Glyph kind={kind ?? 'page'} emoji={kind === 'deck' ? '🎞' : kind === 'poster' ? '🪧' : '🌐'} /> {name}{what}</>;
 }

@@ -9,8 +9,8 @@ export const SANDBOX_CSP = 'sandbox allow-scripts allow-popups allow-popups-to-e
 /** The offline editor keeps its canvas permissions even when its blob is opened directly. */
 export const OFFLINE_FRAME_CSP = 'sandbox allow-scripts allow-modals allow-popups allow-forms';
 
-/** The modes of the runtime: the editor's frame, its slide rail, a presentation, a print (PDF), a check (render_page), a plain view. */
-export const RUNTIME_MODES = ['edit', 'thumb', 'present', 'print', 'check', 'view'] as const;
+/** The modes of the runtime: the editor's frame, its slide rail, a presentation, a print (PDF), a check (render_page), a plain view, one HTML block of an article (the document editor's). */
+export const RUNTIME_MODES = ['edit', 'thumb', 'present', 'print', 'check', 'view', 'embed'] as const;
 export type RuntimeMode = typeof RUNTIME_MODES[number];
 
 /** the runtime's tags, first thing in <head> (`src`: where runtime.js is served) */

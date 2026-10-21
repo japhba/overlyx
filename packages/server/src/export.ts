@@ -20,6 +20,7 @@ import { readTextFile, markdownAsTex } from './texdoc.ts';
 import { googleFont, fontFaces, provideFaceFonts } from './googlefonts.ts';
 import { mdTypesetting, textFontsOf, TEXLIVE_FONTS, type LocalFont } from '@overlyx/core/md/typesetting.ts';
 import { isMarkdownPath } from '@overlyx/core/md/index.ts';
+import { isHtmlPath } from '@overlyx/core/html/deliverable.ts';
 import { rewriteParentPaths } from './texpaths.ts';
 export { rewriteParentPaths };
 
@@ -323,8 +324,9 @@ export async function exportTex(docId: string, opts: { into?: string } = {}): Pr
   const warnings: string[] = [];
   sweepBuildDir(dir, projectDir(doc.project));
   linkDocumentAssets(docDir, dir);
-  if (isMarkdownPath(doc.relPath)) {
-    // a markdown document is built from its LaTeX: the editor's model written as a .tex file — with the
+  if (isMarkdownPath(doc.relPath) || isHtmlPath(doc.relPath)) {
+    // a markdown document is built from its LaTeX (an HTML article exported as LaTeX too, though its PDF
+    // is the page printed: printArticle): the editor's model written as a .tex file — with the
     // Google fonts its front matter names in the build directory (googlefonts.ts), loaded from there
     const lyx = doc.toLyxDocument();
     const fontFiles: Record<string, LocalFont> = {};
@@ -492,6 +494,7 @@ async function buildViaLatexmk(job: BuildJob): Promise<BuildResult> {
   // a child document is built through its master; the child's live content is used because open
   // documents are written to disk first
   const { project, relPath } = DocManager.parseId(requestedId);
+  if (isHtmlPath(relPath)) return printArticle(job);
   const masterRel = findMaster(project, relPath);
   const docId = masterRel ? `${project}/${masterRel}` : requestedId;
   const doc = await manager.open(docId);
@@ -590,6 +593,40 @@ async function buildViaLatexmk(job: BuildJob): Promise<BuildResult> {
   if (docId !== requestedId) record(docId, res, job.sourceAt);
   notifyBuilt(requestedId, res);
   if (docId !== requestedId) notifyBuilt(docId, res);
+  return res;
+}
+
+/**
+ * An HTML article's PDF (an .html document is one, docs.ts): no LaTeX — the page as a browser prints
+ * it, by the renderer's headless Chromium (render.ts), on behalf of the project's owner.
+ */
+async function printArticle(job: BuildJob): Promise<BuildResult> {
+  const docId = job.docId;
+  const doc = await manager.open(docId);
+  setPhase(job, 'exporting');
+  job.exportedAt = Date.now();
+  job.cancel = () => { /* the print cannot be interrupted; its result is discarded */ };
+  await manager.saveProject(doc.project);
+  job.sourceAt = Date.now();
+  if (isCancelled(job)) return { ok: false, log: 'cancelled', warnings: [] };
+  setPhase(job, 'compiling');
+  let res: BuildResult;
+  try {
+    const { projectRow } = await import('./access.ts');
+    const owner = projectRow(doc.project)?.owner_id;
+    if (owner == null) throw new Error('the project has no owner to print it for');
+    const { deliverablePdf } = await import('./render.ts');
+    const pdf = await deliverablePdf(doc.project, doc.relPath, owner);
+    const dir = buildDir(docId);
+    const name = path.basename(doc.relPath).replace(/\.[^.]+$/, '') + '.pdf';
+    writeFileIn(dir, name, pdf);
+    res = { ok: true, log: `${doc.relPath} printed as a web page (${pdf.length} bytes)`, pdfPath: path.join(dir, name), warnings: [] };
+  } catch (e) {
+    res = { ok: false, log: 'printing the page failed: ' + String((e as Error)?.message ?? e), warnings: [] };
+  }
+  if (isCancelled(job)) return { ok: false, log: 'cancelled', warnings: [] };
+  record(docId, res, job.sourceAt);
+  notifyBuilt(docId, res);
   return res;
 }
 

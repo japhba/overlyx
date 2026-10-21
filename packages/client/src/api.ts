@@ -1,5 +1,6 @@
 import type { LayoutCheck, DocGroup, PageBreaks } from '@overlyx/core';
 import { offlineGet } from './offline-api';
+import { noteProjectFiles } from './articlekinds';
 import { recordInteraction } from './usage';
 import { apiInteraction, requestOutcome } from '@overlyx/core/interactions.ts';
 
@@ -18,6 +19,8 @@ export interface ProjectFile {
   path: string; name: string; size: number; mtime: number; kind: 'doc' | 'lyx' | 'bib' | 'image' | 'tex' | 'pdf' | 'board' | 'html' | 'dir' | 'other';
   /** an HTML file: the kind of deliverable it is (none: a plain web page) */
   deliverable?: 'deck' | 'poster' | 'page';
+  /** a document that is an HTML article (core html/article.ts): kind 'doc', written in the document editor */
+  format?: 'article';
   /** a directory that is a document group (core/docgroup.ts): its documents in order, their titles */
   group?: DocGroup;
 }
@@ -69,8 +72,10 @@ export interface AiCompleteRequest { kind: 'text' | 'math'; before: string; afte
 export interface AiCompleteResult { text: string; nodes: PMJSON[] }
 export interface DocMeta {
   availableModules?: import('@overlyx/core').ModuleInfo[];
-  /** what the file is written as (a markdown document offers only what markdown can hold) */
-  format?: 'tex' | 'markdown';
+  /** what the file is written as (a markdown document offers only what markdown can hold, an HTML article what HTML can) */
+  format?: 'tex' | 'markdown' | 'article';
+  /** an HTML article: the custom properties its page sets at :root (editor/article.ts shows it in them) */
+  article?: { vars: Record<string, string> };
   id: string; project: string; path: string; role?: Role; textclass: string; modules: string[]; language: string;
   useRefstyle: boolean; citeEngine: string; citeEngineType: string; trackingChanges: boolean; secnumdepth: number; tocdepth: number;
   /** number of entries in the bibliography (meta.bib only holds the cited ones when it is large) */
@@ -235,7 +240,7 @@ export const api = {
   me: () => req<{ user: User | null; google: boolean; signup?: 'open' | 'invited' }>('GET', '/api/auth/me'),
   login: (username: string, password: string) => req<{ user: User }>('POST', '/api/auth/login', { username, password }),
   logout: () => req<{ ok: boolean }>('POST', '/api/auth/logout'),
-  projects: () => req<{ projects: Project[] }>('GET', '/api/projects').then(r => { for (const p of r.projects) knownProjects.add(p.name); return r; }),
+  projects: () => req<{ projects: Project[] }>('GET', '/api/projects').then(r => { for (const p of r.projects) knownProjects.add(p.name); noteProjectFiles(r.projects); return r; }),
   createProject: (name: string) => req<{ project: Project }>('POST', '/api/projects', { name }),
   /** the current id of a document (or project) an old link names — before projects lived in their owner's namespace */
   resolveId: (id: string) => req<{ id: string }>('GET', `/api/resolve?id=${encodeURIComponent(id)}`),

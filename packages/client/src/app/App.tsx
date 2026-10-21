@@ -21,6 +21,9 @@ import { Home, projectDocs, ProjectRootPanel } from './Home';
 import { pendingImportFlag } from './pendingImport';
 import { TextEditor } from './TextEditor';
 import { isMarkdownDoc } from '../editor/markdown';
+import { isArticleDoc, htmlKindKnown, htmlKindsUnsure, onArticleKinds } from '../articlekinds';
+import { applyArticleLook } from '../editor/article';
+import { ArticlePage } from './ArticlePage';
 import { PaneSwitch } from './PaneSwitch';
 import { PaneDividers } from './PaneDividers';
 import { EditModeSwitch, editModeOf, applyEditMode } from './EditModeSwitch';
@@ -289,10 +292,14 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   const isTextTab = !!docId && docId.startsWith('text:');
   const isPdfTab = !!docId && docId.startsWith('pdf:');
   const textId = docId ? docId.replace(/^(text|pdf):/, '') : null;
-  const isLyxDoc = !!docId && !isTextTab && !isPdfTab && (docId.endsWith('.tex') || isMarkdownDoc(docId));
+  // an .html file is an article (core html/article.ts: written in this editor) or a deliverable; which,
+  // the project's file list says (articlekinds.ts) — until it has, neither editor opens
+  const isArticle = !!docId && !isTextTab && !isPdfTab && isArticleDoc(docId);
+  const htmlPending = !!docId && !isTextTab && !isPdfTab && !htmlKindKnown(docId);
+  const isLyxDoc = !!docId && !isTextTab && !isPdfTab && (docId.endsWith('.tex') || isMarkdownDoc(docId) || isArticle);
   const isBoardTab = !!docId && !isTextTab && !isPdfTab && docId.endsWith('.board');
   // an HTML deliverable (a deck, a poster, a web page): the deliverable editor (deliverable/)
-  const isHtmlTab = !!docId && !isTextTab && !isPdfTab && /\.html?$/i.test(docId);
+  const isHtmlTab = !!docId && !isTextTab && !isPdfTab && /\.html?$/i.test(docId) && !isArticle && !htmlPending;
   // a bare project link (`#/owner/project`, no file): a brand-new project has nowhere else to send
   // you yet. Shown as a small landing in the editor area (its file tree is already the left sidebar)
   // instead of falling through to the plain-text editor, which would 404 trying to load it as a file.
@@ -546,6 +553,14 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   const pendingHeading = useRef<number | null>(parseHash().heading);
   const [, force] = useState(0);
   const rerender = () => force(x => x + 1);
+  // an .html file's kind comes with its project's file list: the right editor opens then
+  useEffect(() => onArticleKinds(rerender), []);
+  useEffect(() => {
+    if (!htmlPending || !docId) return;
+    let live = true;
+    void api.projects().then(() => { if (live && !htmlKindKnown(docId)) htmlKindsUnsure(); }, () => { if (live) htmlKindsUnsure(); });
+    return () => { live = false; };
+  }, [htmlPending, docId]);
 
   const notify = useCallback((text: string, kind: 'info' | 'error' = 'info') => {
     setMessage({ text, kind });
@@ -819,6 +834,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     });
     const withMeta = (m: DocMeta | null) => {
       if (cancelled) return;
+      // an HTML article: the page's look (its stylesheet's custom properties) on the editor
+      applyArticleLook(h.view, isArticleDoc(docId) ? m?.article?.vars ?? {} : null);
       if (m) {
         setMeta(m); editorContext.meta = m;
         // the browser's spell checker picks its dictionary from the lang attribute
@@ -996,7 +1013,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   useEffect(() => {
     const mode = prefs.autoBuild;
     // (the Pages view shows the PDF's page breaks: it keeps the PDF up to date like the PDF pane does)
-    if (!docId || !isLyxDoc || mode === 'off' || (mode === 'shown' && !pdfPaneVisible && !pagesOn)) return;
+    // (an article's pane is the page itself, not its PDF: printed only when asked for)
+    if (!docId || !isLyxDoc || isArticle || mode === 'off' || (mode === 'shown' && !pdfPaneVisible && !pagesOn)) return;
     if (!pdf.known || pdf.busy) return;
     const saved = save.savedAt;
     if (!saved || saved <= lastAutoFor.current) return;
@@ -1678,7 +1696,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         users={isLyxDoc ? status.users : undefined} onJumpToUser={jumpToUser}
         onShare={shareProject ? () => setShareFor(shareProject) : null} shareTitle={shareProject ? `Share “${curProject?.title ?? projectShortName(shareProject)}”: invite people or turn on a link` : undefined}
         onSignIn={user.guest ? signIn : undefined}
-        primary={isLyxDoc && <PaneSwitch layout={panes} onChange={changePanes} narrow={narrowPanes} markdown={isMarkdownDoc(docId)} />}
+        primary={isLyxDoc && <PaneSwitch layout={panes} onChange={changePanes} narrow={narrowPanes} markdown={isMarkdownDoc(docId)} article={isArticle} />}
         right={docId && <span class="doc-title" title={docId}>{docLabel}{meta?.master && !combined && <> · child of <a href={'#/' + meta.master} onClick={e => { e.preventDefault(); openInTab(meta.master!); }}>{meta.master.split('/').pop()}</a></>}</span>}
         title={docId && ui === 'modern' ? (
           <>
@@ -1747,7 +1765,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         <div class={'editor-scroll' + (marginMode && isLyxDoc ? ' margin-mode' : '') + (inkMode && isLyxDoc ? ' ink-pan' : '')} ref={scrollRef} data-pane="doc" style={isLyxDoc ? paneStyle('doc') : undefined} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
           {(isLyxDoc || isTextTab) && showRuler && <Ruler width={textWidth} onChange={setTextWidth} notes={isLyxDoc && marginMode ? { sash: notesPane.sash, scale: noteScale, onScale: setNoteScale, onFold: notesFold.fold } : undefined} />}
           {isLyxDoc && notesFold.folded && <NotesUnfoldTab onUnfold={notesFold.unfold} />}
-          {docId ? (isPdfTab ? <div class="pdf-tab"><PdfViewer key={docId} url={fileUrl(projectOfDoc(textId!), docPathOf(textId!))} toolbar={<a class="small-btn" href={fileUrl(projectOfDoc(textId!), docPathOf(textId!)) + '?download=1'}>Download</a>} /></div> : isBoardTab ? <BoardEditor key={docId} id={docId} user={user} notify={notify} /> : isHtmlTab ? <DeliverableEditor key={docId} id={docId} user={user} notify={notify} /> : isProjectRoot ? <ProjectRootPanel key={docId} project={docId} notify={notify} onCreated={id => { openInTab(id); setRefreshKey(k => k + 1); }} /> : !isLyxDoc ? <TextEditor key={docId} id={textId!} notify={notify} /> :
+          {docId ? (isPdfTab ? <div class="pdf-tab"><PdfViewer key={docId} url={fileUrl(projectOfDoc(textId!), docPathOf(textId!))} toolbar={<a class="small-btn" href={fileUrl(projectOfDoc(textId!), docPathOf(textId!)) + '?download=1'}>Download</a>} /></div> : isBoardTab ? <BoardEditor key={docId} id={docId} user={user} notify={notify} /> : isHtmlTab ? <DeliverableEditor key={docId} id={docId} user={user} notify={notify} /> : htmlPending ? <div class="editor-loading" aria-busy="true" /> : isProjectRoot ? <ProjectRootPanel key={docId} project={docId} notify={notify} onCreated={id => { openInTab(id); setRefreshKey(k => k + 1); }} /> : !isLyxDoc ? <TextEditor key={docId} id={textId!} notify={notify} /> :
             <div class="editor-page">
               {marginMode && <NotesSash sash={notesPane.sash} onFold={notesFold.fold} />}
               <div class="editor-host" ref={containerRef} />
@@ -1761,8 +1779,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         {isLyxDoc && <SourcePane key={docId!} fill style={paneStyle('tex')} target={sourceTarget} tick={docTick} selTick={selTick} mathField={mathField} onNotify={notify} onClose={() => showPane('tex', false)} />}
         {isLyxDoc && pdfMounted && (
           <div class="pdf-pane" data-pane="pdf" style={paneStyle('pdf')}>
-            <PdfPanel key={docId} docId={docId} state={pdf} savedAt={save.savedAt} onBuild={build} onCancel={cancelBuild} onShowTex={showTex} syncTarget={syncTarget} onForward={() => { void syncToPdf(); }} onInverse={(pg, x, y) => { void syncFromPdf(pg, x, y); }}
-              onPublicLink={shareProject ? () => setShareFor(shareProject) : undefined} onClose={() => showPane('pdf', false)} />
+            {isArticle ? <ArticlePage key={docId} docId={docId!} savedAt={save.savedAt} onClose={() => showPane('pdf', false)} /> : <PdfPanel key={docId} docId={docId} state={pdf} savedAt={save.savedAt} onBuild={build} onCancel={cancelBuild} onShowTex={showTex} syncTarget={syncTarget} onForward={() => { void syncToPdf(); }} onInverse={(pg, x, y) => { void syncFromPdf(pg, x, y); }}
+              onPublicLink={shareProject ? () => setShareFor(shareProject) : undefined} onClose={() => showPane('pdf', false)} />}
           </div>
         )}
         {isLyxDoc && !narrowPanes && <PaneDividers layout={panes} onChange={setPanesState} onResizeEnd={saveLayout} />}
@@ -1805,7 +1823,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       ])} />}
       {/* the quick menu over selected words (toolbars.tsx `quick`) */}
       {isLyxDoc && <SelectionBar view={view} groups={tb.quick} />}
-      <StatusBar layout={layout} markdown={isMarkdownDoc(docId)} status={status} chord={chord} message={message} save={save} tracking={tracking} trackingAs={user.name} change={changeInfo}
+      <StatusBar layout={layout} markdown={isMarkdownDoc(docId) || isArticle} status={status} chord={chord} message={message} save={save} tracking={tracking} trackingAs={user.name} change={changeInfo}
         docLabel={view && masterView && view !== masterView ? viewDocId(view).split('/').pop() ?? null : null}
         readOnly={!!docId && viewOnly} updateReady={updateReady} aiBusy={aiBusy > 0}
         quiet={!!docId && !isLyxDoc} stats={docStats} pageInfo={pagesOn && masterView && isLyxDoc ? pageAtCursor(masterView.state) : null} zoom={zoom} onZoom={setZoom}

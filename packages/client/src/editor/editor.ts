@@ -26,6 +26,7 @@ import { installMathAssist } from './ai/mathassist';
 import { getPrefs, subscribePrefs } from '../prefs';
 import { assemblePlugins, editorViewProps, editorAttributes, dispatchTransactionProp, installEditorDom, flushDomSelection as flushSelection } from './assembly';
 import { isMarkdownDoc } from './markdown';
+import { isArticleDoc } from '../articlekinds';
 import type { User } from '../api';
 
 installMathAssist();
@@ -342,6 +343,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
 
   const plugins = assemblePlugins({
     markdown: isMarkdownDoc(opts.docId),
+    article: isArticleDoc(opts.docId),
     sync: [
       sync.plugin,
       cursorPlugin(checkedAwareness(provider.awareness), {

@@ -236,7 +236,7 @@ function unescapeSingle(s: string): string[] {
 const COMMENT_RE = /^<!--([\s\S]*?)-->/;
 
 /** an HTML comment as a LyX note: `@comment` → a comment thread, `@greyedout` → greyed out, else a note */
-function noteInset(raw: string, base: string): Inset | null {
+export function noteInset(raw: string, base: string): Inset | null {
   const m = COMMENT_RE.exec(raw);
   if (!m) return null;
   let body = m[1];

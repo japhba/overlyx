@@ -4,7 +4,7 @@ import { isProjectKey } from '@overlyx/core';
 import { isMarkdownPath } from '@overlyx/core/md/index.ts';
 import { config } from './config.ts';
 import { db } from './db.ts';
-import { type ProjectFile, texInfo, collect, resolveProjectPath, projectDir, isBackupFile } from './projectfiles.ts';
+import { type ProjectFile, texInfo, collect, resolveProjectPath, projectDir, isBackupFile, isArticleFile } from './projectfiles.ts';
 
 export { type ProjectFile, fileKind, resolveProjectPath, projectDir, isBackupFile, findMaster } from './projectfiles.ts';
 
@@ -70,6 +70,7 @@ function classifyDocs(root: string, files: ProjectFile[]): ProjectFile[] {
 /** Is the project file a document (opened in the document editor, never served as plain text)? */
 export function isDocumentFile(project: string, relPath: string): boolean {
   if (isMarkdownPath(relPath)) return true;
+  if (/\.html?$/i.test(relPath)) { try { return isArticleFile(resolveProjectPath(project, relPath)); } catch { return false; } }
   if (!relPath.endsWith('.tex')) return false;
   const root = projectDir(project);
   const rel = path.normalize(relPath);

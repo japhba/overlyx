@@ -619,13 +619,15 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
   }, [target?.docId]);
 
   const name = target?.docId.split('/').pop() ?? '';
+  // what the file is written in: LaTeX, markdown, or an HTML article's page
+  const lang = /\.html?$/i.test(name) ? 'HTML' : /\.(md|markdown)$/i.test(name) ? 'Markdown' : 'LaTeX';
   const showProblems = (applied === 'held' || applied === 'error') && problems.length > 0;
   const showNotes = !showProblems && !dirty && notes.length > 0;
   return (
     <div class={'source-pane right' + (fill ? ' fill' : '')} data-pane={fill ? 'tex' : undefined} style={fill ? style : { width: width + 'px' }}>
       {!fill && <div class="grip v" title="Drag to resize" onPointerDown={startResizeW} />}
       <div class="bar">
-        <span class="small-btn active" title="The LaTeX source of the document (its .tex file)">LaTeX</span>
+        <span class="small-btn active" title={lang === 'LaTeX' ? 'The LaTeX source of the document (its .tex file)' : `The ${lang === 'HTML' ? 'page\'s HTML' : 'markdown'} source of the document (its file)`}>{lang}</span>
         <span class="name" title={target?.docId}>{name}</span>
         <span style="flex:1" />
         {refreshFailed && <span class="apply-state error" role="status" data-source-refresh="stale">{ownsSource() ? 'Source preview out of date' : 'Source belongs to a previous editor'}</span>}
@@ -681,7 +683,7 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
       <div class={'hint' + (showProblems ? ' problem' : showNotes ? ' notes' : '')}>
         {showProblems ? <>{'Not applied: '}{remarkList(problems)}</>
           : showNotes ? <>{'Applied — '}{remarkList(notes)}</>
-          : dirty ? 'Edits are applied to the document as you type (once the LaTeX is well-formed; Ctrl+Enter applies at once).' : 'The LaTeX source beside the document: cursor, selection and scrolling are mirrored; edit here and the document follows.'}
+          : dirty ? `Edits are applied to the document as you type (once the ${lang} is well-formed; Ctrl+Enter applies at once).` : `The ${lang} source beside the document: cursor, selection and scrolling are mirrored; edit here and the document follows.`}
       </div>
     </div>
   );
