@@ -603,12 +603,11 @@ export function planPush(have0: LwBlock[], want: LwBlock[], ctx: LyxDocument, eq
  * warning), tried again by the next sync.
  */
 export function settle(have0: LwBlock[], want: LwBlock[], equiv: Equivalences, same: (h: LwBlock, w: LwBlock) => boolean = () => true): { equiv: Equivalences; unsettled: number } {
+  // (worked out again from the two as they are, not carried over: a pair that differs after all is not kept)
   const have = ownBlocks(have0, want, equiv);
   const out: Equivalences = {};
-  const present = new Set(have.flatMap(b => [b.key, ...b.pars.map(x => x.key)]));
-  for (const [k, v] of Object.entries(equiv)) if (present.has(k)) out[k] = v;
   let unsettled = 0;
-  for (const { a, b, c, d } of lcsRegions(eq(have.map(x => x.key), out), want.map(x => x.key))) {
+  for (const { a, b, c, d } of lcsRegions(have.map(x => x.key), want.map(x => x.key))) {
     if (b - a !== d - c) { unsettled += Math.max(b - a, d - c); continue; }
     for (let k = 0; k < b - a; k++) {
       const h = have[a + k], w = want[c + k];

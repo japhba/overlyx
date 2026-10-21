@@ -277,9 +277,9 @@ async function runSync(docId: string, opts: { pullTracked?: boolean }): Promise<
 }
 
 const sameKeys = (a: LwBlock[], b: LwBlock[]) => a.length === b.length && a.every((x, i) => x.key === b[i].key);
-/** the same words (LessWrong holds the block its own way: markup, escaping, numbering) */
+/** the same text, spaces and punctuation included (LessWrong holds the block its own way: markup, escaping, numbering) */
 const sameText = (a: LwBlock, b: LwBlock) => {
-  const t = (x: LwBlock) => normText(x.pars.map(p => p.text).join(' ')).replace(/[^\p{L}\p{N}]+/gu, '');
+  const t = (x: LwBlock) => normText(x.pars.map(p => p.text).join(' '));
   return t(a) === t(b);
 };
 
