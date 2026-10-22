@@ -1,0 +1,24 @@
+/* the whiteboard's minimap (app/BoardMinimap.tsx): bottom left of the board (the zoom pill has the right), a
+   translucent card the board shows through; its size is set inline (at most 180 × 120, the frame's shape) */
+.board-minimap { position: absolute; left: 14px; bottom: 12px; z-index: 10; box-sizing: content-box; overflow: hidden;
+  border: 1px solid var(--ui-border); border-radius: 8px; color: var(--ui-fg);
+  background: color-mix(in srgb, var(--surface) 86%, transparent);
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+  box-shadow: var(--m-shadow, 0 2px 10px rgba(0, 0, 0, 0.15)); touch-action: none; cursor: pointer; }
+html[data-ui="modern"] .board-minimap { border-radius: 10px; }
+.board-minimap canvas { display: block; width: 100%; height: 100%; }
+/* the view: an accent frame, a breath of the accent inside */
+.board-minimap-view { position: absolute; left: 0; top: 0; box-sizing: border-box; border: 1.5px solid var(--accent); border-radius: 2px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent); pointer-events: none; }
+.board-minimap.dragging { cursor: grabbing; }
+.board-minimap.dragging .board-minimap-view { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+/* − folds it away (always shown: a tablet has no hover); the folded card is a button in the same corner */
+.board-minimap-fold { position: absolute; top: 2px; right: 2px; display: grid; place-items: center; width: 22px; height: 22px; padding: 0;
+  border: 0; border-radius: 6px; color: var(--ui-muted); background: color-mix(in srgb, var(--surface) 75%, transparent); cursor: pointer; }
+.board-minimap-fold:hover { color: var(--ui-fg); background: var(--ui-hover); }
+.board-minimap-open { position: absolute; left: 14px; bottom: 12px; z-index: 10; display: grid; place-items: center; width: 32px; height: 32px; padding: 0;
+  border: 1px solid var(--ui-border); border-radius: 8px; color: var(--ui-muted);
+  background: color-mix(in srgb, var(--surface) 86%, transparent); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+  box-shadow: var(--m-shadow, 0 2px 10px rgba(0, 0, 0, 0.15)); cursor: pointer; }
+.board-minimap-open:hover { color: var(--ui-fg); }
+html[data-ui="modern"] .board-minimap-open { border-radius: 10px; }

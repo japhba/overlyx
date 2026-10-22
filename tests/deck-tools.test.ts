@@ -8,7 +8,7 @@
 import { describe, it, expect } from 'vitest';
 import { objectHtml, inlineSvgHtml, penPathD } from '../packages/client/src/deliverable/sourceops.ts';
 import { loadDeckInk, saveDeckInk, patchDeckInk, deckInkStyle, defaultDeckInk, DEFAULT_NIB, hexColor, colorsPass, setLassoColors } from '../packages/client/src/deliverable/deckink.ts';
-import { inkRuns, runPathD, runsBox, inkPaths, freshPoint, pressureWidth, usualPressure, type FreePt, type InkRun } from '../packages/client/src/deliverable/runtime/freehand.ts';
+import { inkRuns, runPathD, runsBox, inkPaths, chunkPaths, freshPoint, pressureWidth, usualPressure, type FreePt, type InkRun } from '../packages/client/src/deliverable/runtime/freehand.ts';
 import { pointPressure, pressed } from '../packages/client/src/deliverable/runtime/pressure.ts';
 import { applyOp, opSplices, parseSource, rebaseOp } from '../packages/core/src/html/source.ts';
 
@@ -71,6 +71,49 @@ describe("Draw's strokes as GoodNotes draws them (runtime/freehand.ts)", () => {
     const start = drawn(runs).filter(([x, y]) => Math.hypot(x - 120, y - 100) < 5);
     expect(start.length).toBeGreaterThan(2);
     for (const [x, y] of start) expect(Math.abs(Math.hypot(x - 100, y - 100) - 20)).toBeLessThan(0.35);
+  });
+
+  it('drawn in chunks, the line drawn so far stays as it was frame after frame: only its end is painted again', () => {
+    // handwriting-like loops from a Pencil at 120 Hz in whole px (Safari 17), pressure varying
+    const pen = (n: number): FreePt[] => Array.from({ length: n }, (_, i) => [Math.round(40 + i * 1.6 + 9 * Math.sin(i / 5)), Math.round(80 + 14 * Math.sin(i / 3.2)), 0.25 + 0.15 * Math.sin(i / 11)]);
+    const opts = { width: 2.4, pressure: true, coarse: true, zoom: 1.5, nib: { sensitivity: 0.25 } };
+    let before = chunkPaths(inkRuns(pen(200), { ...opts, chunk: 96 }));
+    for (let n = 201; n < 400; n += 3) {
+      const now = chunkPaths(inkRuns(pen(n), { ...opts, chunk: 96 }));
+      const same = now.findIndex((p, i) => !before[i] || before[i].d !== p.d || before[i].w !== p.w);
+      // (the paths that changed: those of the last chunk or two, a small part of the whole)
+      expect(same < 0 ? now.length : same).toBeGreaterThan(now.length - 12);
+      expect(now.length - (same < 0 ? now.length : same)).toBeLessThan(0.35 * now.length);
+      before = now;
+    }
+    // the chunks only cut the runs: the same widths along the line, the same points (to the simplification's hair)
+    const whole = inkRuns(pen(399), opts), cut = inkRuns(pen(399), { ...opts, chunk: 96 });
+    expect([...new Set(cut.map(r => r.w))].sort()).toEqual([...new Set(whole.map(r => r.w))].sort());
+    const seg = ([x, y]: [number, number], [ax, ay]: [number, number], [bx, by]: [number, number]) => {
+      const l2 = (bx - ax) ** 2 + (by - ay) ** 2, t = l2 ? Math.max(0, Math.min(1, ((x - ax) * (bx - ax) + (y - ay) * (by - ay)) / l2)) : 0;
+      return Math.hypot(x - ax - t * (bx - ax), y - ay - t * (by - ay));
+    };
+    const off = (p: [number, number]) => Math.min(...whole.flatMap(r => r.pts.slice(1).map((q, i) => seg(p, r.pts[i], q))));
+    expect(Math.max(...all(cut).map(off))).toBeLessThan(0.11);
+  });
+
+  it('worked out frame after frame from what the last frame made of it: the same line as worked out afresh', () => {
+    const pen = (n: number, whole: boolean): FreePt[] => Array.from({ length: n }, (_, i) => {
+      const x = 40 + i * 1.3 + 9 * Math.sin(i / 5) + (i > 150 && i < 160 ? 25 : 0), y = 80 + 14 * Math.sin(i / 3.2);
+      return [whole ? Math.round(x) : x, whole ? Math.round(y) : y, i < 2 ? 0 : 0.25 + 0.15 * Math.sin(i / 11)];
+    });
+    const nibs = [{}, { sensitivity: 0.8 }, { sharpness: 0.6, flatness: 0.5 }, { stabilization: 0.5, rounding: 0.3 }, { ball: true }, { rounding: 0 }];
+    for (const whole of [true, false]) for (const nib of nibs) for (const chunk of [0, 64]) {
+      const opts = { width: 2.4, pressure: true, coarse: whole ? 0.8 : false, zoom: 1.5, nib, chunk };
+      const cache = {};
+      for (let n = 1; n < 260; n += n < 20 ? 1 : 7) expect(inkRuns(pen(n, whole), { ...opts, cache })).toEqual(inkRuns(pen(n, whole), opts));
+      // the highlighter, and the pen lifted (its end tapered)
+      expect(inkRuns(pen(260, whole), { ...opts, highlighter: true, cache })).toEqual(inkRuns(pen(260, whole), { ...opts, highlighter: true }));
+      expect(inkRuns(pen(260, whole), { ...opts, final: true, cache })).toEqual(inkRuns(pen(260, whole), { ...opts, final: true }));
+      // (whiteboards and margins draw the live stroke as lifted: its end tapered at every frame)
+      const lifted = {};
+      for (let n = 1; n < 200; n += 5) expect(inkRuns(pen(n, whole), { ...opts, final: true, cache: lifted })).toEqual(inkRuns(pen(n, whole), { ...opts, final: true }));
+    }
   });
 
   it("keeps the pen's sharp turns sharp (a v's point): a curve through them rounded them", () => {

@@ -14,7 +14,7 @@
  * In every mode TeX math is typeset (math.ts) and speaker notes are hidden; `window.__olReady`
  * turns true once fonts, math and pictures have settled (the renderer waits for it).
  */
-import type { ToRuntime, Path, PeerInfo } from '../protocol';
+import { RAIL_NUM, type ToRuntime, type Path, type PeerInfo } from '../protocol';
 import { MODE, post, state, setFolderBase, detectKind, slideBoxes, pageSize, sendLayout, slides, srcOf, pathOf, docRect, isForeign, layoutHooks, liveAt, slideOf } from './env';
 import { safeColor } from './carets';
 import { inkOn } from '../../app/contrast';
@@ -32,7 +32,7 @@ import { stepCommand } from './animate';
 import { setView, refreshView, reportColors } from './view';
 import { startPresenting } from './present';
 import { report, rememberPage } from './report';
-import { ensureSolo } from './solo';
+import { ensureSolo, notePageBackground, PAGE_BG, SOLO_PAD } from './solo';
 import { setDarkSlides, darkSlidesChanged } from './darkpages';
 import { installReviewCss, setReview, railReview } from './review';
 import { exportPageSvg } from './svgexport';
@@ -87,18 +87,32 @@ const initials = (name: string): string => {
   return ((w[0]?.[0] ?? '?') + (w.length > 1 ? w[w.length - 1][0] : '')).toUpperCase();
 };
 
+/** the gap (screen px) between two thumbnails */
+const RAIL_GAP = 12;
+
 function startThumb(): void {
   addStyle(`html, body { scrollbar-width: none; } html::-webkit-scrollbar { display: none; } html, html * { cursor: pointer !important; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }`);
+  // the slides one under the other, a gap between, each with its edge, on the rail's own colour
+  // (railDesk; solo.ts PAGE_BG) — their numbers in the room left of them (RAIL_NUM)
+  document.documentElement.classList.add('ol-thumb');
+  addStyle(`html.ol-thumb { padding: ${SOLO_PAD}px ${SOLO_PAD}px ${SOLO_PAD}px calc(${SOLO_PAD}px + var(--ol-num, 0px)) !important; margin: 0 !important; box-sizing: content-box !important; height: auto !important; min-height: 0 !important; scroll-snap-type: none !important; }
+    html.ol-thumb :is(body, :has(> .slide)) { display: block !important; gap: 0 !important; padding: 0 !important; margin: 0 !important; transform: none !important; zoom: 1 !important;
+      height: auto !important; min-height: 0 !important; max-height: none !important; overflow: visible !important; scroll-snap-type: none !important; }
+    html.ol-thumb .slide { margin: 0 0 var(--ol-gap, 40px) 0 !important; transform: none !important;
+      box-shadow: 0 0 0 var(--ol-hair, 1px) rgba(0, 0, 0, 0.2), 0 var(--ol-hair, 1px) calc(4 * var(--ol-hair, 1px)) rgba(0, 0, 0, 0.18) !important; }
+    :where(html.ol-thumb .slide) { ${PAGE_BG} }`);
+  notePageBackground();
   const host = document.createElement('ol-overlay');
   host.setAttribute('data-ol-runtime', '');
   host.style.cssText = 'all:initial;position:absolute;left:0;top:0;width:0;height:0;z-index:2147483647;pointer-events:none;display:block;';
   const root = host.attachShadow({ mode: 'closed' });
   root.innerHTML = `<style>
-    .n { position: absolute; font: 600 calc(12px / var(--s)) system-ui, sans-serif; color: #fff; background: rgba(40,44,52,.82); padding: calc(1px / var(--s)) calc(6px / var(--s)); border-radius: calc(4px / var(--s)); transform: translate(calc(4px / var(--s)), calc(4px / var(--s))); }
-    .cur { position: absolute; box-sizing: border-box; border: calc(3px / var(--s)) solid #2f6fde; border-radius: calc(3px / var(--s)); }
+    .n { position: absolute; width: calc(${RAIL_NUM - 6}px / var(--s)); transform: translateX(calc(-100% - 6px / var(--s))); text-align: right; font: 500 calc(11px / var(--s)) / 1 system-ui, sans-serif; font-variant-numeric: tabular-nums; color: #8a8f98; }
+    .n.on { color: #2f6fde; font-weight: 700; }
+    .cur { position: absolute; box-sizing: border-box; border: calc(2.5px / var(--s)) solid #2f6fde; border-radius: calc(4px / var(--s)); }
     .drop { position: absolute; height: calc(3px / var(--s)); background: #2f6fde; }
     .c { position: absolute; transform: translate(calc(-100% - 4px / var(--s)), calc(4px / var(--s))); display: flex; align-items: center; gap: calc(2px / var(--s)); font: 700 calc(11px / var(--s)) system-ui, sans-serif; color: #3a2a00; background: #f6b400; padding: calc(1px / var(--s)) calc(5px / var(--s)); border-radius: calc(8px / var(--s)) calc(8px / var(--s)) calc(8px / var(--s)) calc(2px / var(--s)); }
-    .chg { position: absolute; width: calc(4px / var(--s)); transform: translateX(calc(-7px / var(--s))); border-radius: calc(2px / var(--s)); }
+    .chg { position: absolute; width: calc(3px / var(--s)); transform: translateX(calc(-5px / var(--s))); border-radius: calc(2px / var(--s)); }
     .del { position: absolute; transform: translate(-50%, -50%); font: 700 calc(12px / var(--s)) system-ui, sans-serif; color: #fff; background: #d2453c; padding: calc(2px / var(--s)) calc(8px / var(--s)); border-radius: calc(4px / var(--s)); }
     .who { position: absolute; display: flex; gap: calc(2px / var(--s)); transform: translate(calc(-100% - 4px / var(--s)), calc(-100% - 4px / var(--s))); }
     .who span { display: grid; place-items: center; width: calc(18px / var(--s)); height: calc(18px / var(--s)); border-radius: 50%; font: 700 calc(9px / var(--s)) system-ui, sans-serif; box-shadow: 0 0 0 calc(1.5px / var(--s)) #fff; }
@@ -193,18 +207,24 @@ function railUp(e: PointerEvent): void {
 function drawRail(): void {
   if (!railLayer) return;
   railLayer.style.setProperty('--s', String(railScale));
+  const st = document.documentElement.style;
+  st.setProperty('--ol-num', `${RAIL_NUM / railScale}px`);
+  st.setProperty('--ol-gap', `${RAIL_GAP / railScale}px`);
+  st.setProperty('--ol-hair', `${1 / railScale}px`);
   const ss = slides();
   const parts: string[] = [];
   railDrawn = [];
   ss.forEach((s, i) => {
     const r = docRect(s);
-    parts.push(`<div class="n" style="left:${r.x}px;top:${r.y}px">${i + 1}</div>`);
+    parts.push(`<div class="n${i === railCurrent ? ' on' : ''}" style="left:${r.x}px;top:${r.y}px">${i + 1}</div>`);
     // the slide's open comments and suggestions (review.ts)
     const rv = railReview(s);
     if (rv.changed) parts.push(`<div class="chg" style="left:${r.x}px;top:${r.y}px;height:${r.h}px;background:${rv.changed}" title="Suggested changes"></div>`);
     if (rv.deleted) parts.push(`<div class="del" style="left:${r.x + r.w / 2}px;top:${r.y + r.h / 2}px">Deleted</div>`);
     if (rv.comments) parts.push(`<div class="c" style="left:${r.x + r.w}px;top:${r.y}px">💬 ${rv.comments}</div>`);
-    if (i === railCurrent) parts.push(`<div class="cur" style="left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px"></div>`);
+    // (a ring round it, a hair apart from its edge)
+    const o = 4 / railScale;
+    if (i === railCurrent) parts.push(`<div class="cur" style="left:${r.x - o}px;top:${r.y - o}px;width:${r.w + 2 * o}px;height:${r.h + 2 * o}px"></div>`);
     const here = railPeers.filter(p => peerSlide(p, ss) === i).slice(0, 4);
     for (const p of here) railDrawn.push({ slide: i, name: p.name });
     if (here.length) {
@@ -215,7 +235,7 @@ function drawRail(): void {
   if (railDrag && railDrag.to !== null) {
     const t = railDrag.to;
     const r = t < ss.length ? docRect(ss[t]) : docRect(ss[ss.length - 1]);
-    const y = t < ss.length ? r.y - 12 / railScale : r.y + r.h + 12 / railScale;
+    const y = t < ss.length ? r.y - (RAIL_GAP / 2 + 1.5) / railScale : r.y + r.h + (RAIL_GAP / 2 - 1.5) / railScale;
     parts.push(`<div class="drop" style="left:${r.x}px;top:${y}px;width:${r.w}px"></div>`);
   }
   railLayer.innerHTML = parts.join('');
@@ -233,10 +253,10 @@ function railShow(i: number): void {
 /* ------------------------------------------------------------------ slides light on dark (darkpages.ts) */
 
 let railDeskCss: HTMLStyleElement | null = null;
-/** the rail's background between the thumbnails: the dark theme's canvas, or the page's own (null) */
+/** the rail's background between the thumbnails: the editor's rail's own colour (or the page's own: null) */
 function railDesk(desk: string | null): void {
   if (!railDeskCss) { railDeskCss = document.createElement('style'); railDeskCss.setAttribute('data-ol-runtime', ''); document.head.appendChild(railDeskCss); }
-  railDeskCss.textContent = desk && /^#[0-9a-f]{3,8}$/i.test(desk) ? `html, body { background: ${desk} !important; }` : '';
+  railDeskCss.textContent = desk && /^(#[0-9a-f]{3,8}|rgba?\([\d.,\s]+\))$/i.test(desk) ? `html:not(.ol-bg-read), html:not(.ol-bg-read) body { background: ${desk} !important; }` : '';
 }
 
 /* ------------------------------------------------------------------ messages */
@@ -268,7 +288,7 @@ function onMessage(e: MessageEvent): void {
       // (the kind as the text has it now: the page first served may have been another version)
       state.kind = detectKind();
       if (MODE === 'edit') { ensureSolo(); edit.afterSource(); void whenTypeset().then(() => edit.draw()); }
-      if (MODE === 'thumb') drawRail();
+      if (MODE === 'thumb') { notePageBackground(); drawRail(); }
       darkSlidesChanged();
       if (first) void settle().then(() => { sendLayout(); if (MODE === 'edit') { refreshView(); reportColors(); } });
       else requestAnimationFrame(() => { sendLayout(); if (MODE === 'thumb') drawRail(); if (MODE === 'edit') { refreshView(); reportColors(); } });

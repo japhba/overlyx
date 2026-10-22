@@ -14,7 +14,7 @@ import { takePendingImport } from './pendingImport';
 import { sortByRecency, recencyLabel } from './recency';
 import { projectShortName, splitProjectKey, isProjectName } from '@overlyx/core';
 import { uiConfirm, uiAlert, Dialog } from './Dialogs';
-import { promptNewFile } from './newfile';
+import { promptNewFile, createProjectFile } from './newfile';
 import { useUiMode } from './uimode';
 import { KIND_ICONS, iconSvg } from './modernicons';
 import { ScientificTemplates } from './ScientificTemplates';
@@ -249,7 +249,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
       <div class="home-actions">
         {user.guest
           ? <button class="btn primary" data-guest-signin onClick={onSignIn}>Sign in</button>
-          : <button class="btn primary" data-new-project onClick={() => setNewOpen(true)} title="A new document, slide deck or poster — each in a project of its own">+ New</button>}
+          : <button class="btn primary" data-new-project onClick={() => setNewOpen(true)} title="A new document, slide deck, poster or whiteboard — each in a project of its own">+ New</button>}
         {!user.guest && <button class="btn" data-import-overleaf onClick={() => { setImportSource('overleaf'); setImportOpen(true); }} title="Bring projects over from Overleaf — through its Git access, or from a downloaded zip">Import from Overleaf…</button>}
         {!user.guest && <button class="btn" data-import-lyx onClick={() => { setImportSource('lyx'); setImportOpen(true); }}>Import from LyX…</button>}
         {!user.guest && gdocs && <button class="btn" data-import-gdocs onClick={() => void importGoogle()} title="Bring a Google Doc over as a project of its own — kept in sync with it, or as a copy">Import from Google Docs…</button>}
@@ -288,17 +288,19 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
   );
 }
 
-type NewKind = 'doc' | 'deck' | 'poster' | 'empty';
+type NewKind = 'doc' | 'deck' | 'poster' | 'board' | 'empty';
 const NEW_KINDS: { id: NewKind; label: string; hint: string; w: number; h: number; name: string }[] = [
   { id: 'doc', label: 'Document', hint: 'A paper, thesis or notes', w: 210, h: 297, name: 'Untitled document' },
   { id: 'deck', label: 'Slides', hint: '16:9 or 4:3, presented full screen', w: 16, h: 9, name: 'Untitled slides' },
   { id: 'poster', label: 'Poster', hint: '48 × 36 in or portrait', w: 48, h: 36, name: 'Untitled poster' },
+  // (no page: its thumbnail is a patch of the endless dotted canvas, styles.css .ol-newthumb.board)
+  { id: 'board', label: 'Whiteboard', hint: 'An endless canvas to draw and think on', w: 0, h: 0, name: 'Untitled whiteboard' },
   { id: 'empty', label: 'Empty project', hint: 'Add files later', w: 0, h: 0, name: '' },
 ];
 
 /**
- * The start page's + New: a document, slides or a poster, each in a project of its own (named like
- * it), opened right away — or an empty project. Inside a project, + File and File ▸ New … add more.
+ * The start page's + New: a document, slides, a poster or a whiteboard, each in a project of its own
+ * (named like it), opened right away — or an empty project. Inside a project, + File and File ▸ New … add more.
  */
 export function NewProjectDialog({ onClose, onCreated, notify }: { onClose: () => void; onCreated: (id: string | null, name: string) => void; notify: (text: string, kind?: 'info' | 'error') => void }) {
   const [kind, setKind] = useState<NewKind>('doc');
@@ -319,6 +321,7 @@ export function NewProjectDialog({ onClose, onCreated, notify }: { onClose: () =
       const id = selectedKind === 'doc' ? (await api.newDoc(key, 'main.tex', { title: n })).id
         : selectedKind === 'deck' ? (await api.newDeliverable(key, 'slides', 'deck', n, chosenTemplate)).id
         : selectedKind === 'poster' ? (await api.newDeliverable(key, 'poster', 'poster', n, chosenTemplate)).id
+        : selectedKind === 'board' ? await createProjectFile(key, 'whiteboard.board')
         : null;
       onCreated(id, n);
     } catch (e) { setBusy(false); notify((e as Error).message, 'error'); }
@@ -327,13 +330,15 @@ export function NewProjectDialog({ onClose, onCreated, notify }: { onClose: () =
     <Dialog title="New" onClose={onClose} buttons={
       <button type="button" class="small-btn primary" disabled={busy || !!invalid || (kind === 'empty' && !typed)} onClick={() => void create()} data-new-create>Create</button>
     }>
-      <div class="ol-newkinds four" role="radiogroup" aria-label="What to make">
+      <div class="ol-newkinds five" role="radiogroup" aria-label="What to make">
         {NEW_KINDS.map(x => {
           const s = x.w ? 44 / Math.max(x.w, x.h) : 0;
           return (
             <button key={x.id} type="button" role="radio" aria-checked={x.id === kind} class={'ol-newkind' + (x.id === kind ? ' active' : '')} data-new-kind={x.id}
               onClick={() => { setKind(x.id); setTemplate(undefined); }} onDblClick={() => { if (x.id !== 'empty') void create(x.id); }}>
-              <span class={'ol-newthumb' + (x.w ? '' : ' empty')} style={x.w ? { width: `${x.w * s}px`, height: `${x.h * s}px` } : undefined} />
+              <span class={'ol-newthumb' + (x.id === 'board' ? ' board' : x.w ? '' : ' empty')} style={x.w ? { width: `${x.w * s}px`, height: `${x.h * s}px` } : undefined}>
+                {x.id === 'board' && <svg viewBox="0 0 44 34" aria-hidden="true"><path d="M10 22c4-9 8-11 11-6s6 4 8-2 4-5 6-1" /></svg>}
+              </span>
               <span>{x.label}</span>
               <small>{x.hint}</small>
             </button>
@@ -344,7 +349,7 @@ export function NewProjectDialog({ onClose, onCreated, notify }: { onClose: () =
       <label class="dialog-row">Name <input type="text" value={name} autofocus placeholder={k.name || 'Name of the project'} data-new-name
         onInput={e => setName((e.target as HTMLInputElement).value)} onKeyDown={e => { if (e.key === 'Enter') void create(); }} /></label>
       {invalid && <p class="dialog-hint error">{invalid}</p>}
-      <p class="dialog-hint">{kind === 'empty' ? 'A project holds documents, slides, figures and a bibliography together. Share it to work on it with others.' : `It gets a project of its own, “${typed || k.name}”, where figures and a bibliography can go too.`}</p>
+      <p class="dialog-hint">{kind === 'empty' ? 'A project holds documents, slides, figures and a bibliography together. Share it to work on it with others.' : kind === 'board' ? `It gets a project of its own, “${typed || k.name}”, where the pictures you put on it are kept too.` : `It gets a project of its own, “${typed || k.name}”, where figures and a bibliography can go too.`}</p>
     </Dialog>
   );
 }

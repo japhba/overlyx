@@ -1,8 +1,9 @@
 /**
  * Whiteboard editor for .board documents: an infinite pan/zoom canvas with freehand ink
  * (pen/highlighter, pressure-sensitive), images (paste, drop or upload — move/resize like Miro)
- * and sticky notes. State is a Yjs map synced through the same websocket layer as the text
- * editor (docs.ts BoardDoc on the server), so everything is live-collaborative: finished objects
+ * and sticky notes; a minimap of the whole board in a corner finds the way (BoardMinimap.tsx).
+ * State is a Yjs map synced through the same websocket layer as the text editor (docs.ts
+ * BoardDoc on the server), so everything is live-collaborative: finished objects
  * flow through the CRDT, in-progress strokes and cursors through the awareness channel.
  *
  * Objects live in Y.Map('objects'): id → { t, x, y, w, h, ... } (whole-object last-writer-wins;
@@ -22,6 +23,7 @@ import { HIGHLIGHT_OPACITY, LASER_COLOR, LASER_FADE_MS, subscribeInk } from '../
 import { useUiMode } from './uimode';
 import { MODERN_ICONS, iconSvg } from './modernicons';
 import { hostedZoomPill } from './zoomhud';
+import { BoardMinimap } from './BoardMinimap';
 import { Toolbar } from './Toolbar';
 import { drawingToolbar } from '../deliverable/drawingToolbar';
 import { loadDeckInk, saveDeckInk, patchDeckInk, ERASER_PX } from '../deliverable/deckink';
@@ -30,9 +32,9 @@ import { LassoBar, pasteGroups } from '../deliverable/InkSelectionBar';
 import { lassoTakes, usedColors, makeInkClip, holdInk, heldInk, pastedInk, rotatePts, rotationAngle, thickened, type InkClip } from '../deliverable/inkselect';
 import { snapShape, SNAP_HOLD_MS, SNAP_LEAVE_PX } from '@overlyx/core/shapesnap.ts';
 import { eraseAlong } from '@overlyx/core/inkerase.ts';
-import { freshPoint, type NibOpts } from '@overlyx/core/freehand.ts';
+import { freshPoint, type NibOpts, type InkCache } from '@overlyx/core/freehand.ts';
 import { pointPressure, pressed, watchForce } from '../deliverable/runtime/pressure';
-import { scratchOut, SCRATCH_HOLD_MS, SCRATCH_HOLD_PX } from '@overlyx/core/scratchout.ts';
+import { scratchOut, scribbleCusps, SCRATCH_HOLD_MS, SCRATCH_HOLD_PX } from '@overlyx/core/scratchout.ts';
 import type { StrokeWatch } from '@overlyx/core/glitch.ts';
 import { strokeWatch, strokeEnded } from '../glitches';
 import { shapePoints, INK_SHAPES, type InkShape } from '@overlyx/core';
@@ -81,6 +83,17 @@ function restroke(o: BoardObj, pts: [number, number, number][]): BoardObj {
 const absPts = (o: BoardObj): [number, number, number][] => (o.pts ?? []).map(([x, y, p]) => [o.x + x, o.y + y, p] as [number, number, number]);
 
 const pathDCache = new WeakMap<object, string>();
+/** a stroke object's runs, worked out once (the board renders at every move of a pen drawing: every stroke worked out again each time made the line lag behind the pen) */
+const runsCache = new WeakMap<object, { w: number; d: string }[] | null>();
+function objRuns(o: BoardObj): { w: number; d: string }[] | null {
+  let r = runsCache.get(o);
+  if (r === undefined) {
+    r = strokeRuns({ color: o.color ?? '#000', w: o.sw ?? 2, pts: o.pts ?? [], nib: o.nib, pressure: o.pressure, o: o.o, poly: o.poly } as InkStroke);
+    runsCache.set(o, r);
+  }
+  return r;
+}
+
 function strokeD(obj: BoardObj): string {
   let d = pathDCache.get(obj as object);
   if (d === undefined) {
@@ -129,6 +142,9 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
   const [readOnly, setReadOnly] = useState(false);
   const readOnlyRef = useRef(readOnly); readOnlyRef.current = readOnly;
   const liveRef = useRef<LiveStroke | null>(null);
+  /** what the last frame made of the stroke being drawn (freehand.ts InkCache): only its end is worked out again; when it was last sent to the others */
+  const liveCache = useRef<InkCache>({});
+  const liveSent = useRef(0);
   /** when the live stroke's last point was given (freehand.ts freshPoint); its pointer kind and first pressure (a trackpad's counts once it changes, pressure.ts) */
   const liveT = useRef(-Infinity);
   const liveFirst = useRef({ kind: '', p: 0.5 });
@@ -233,6 +249,12 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     });
   };
 
+  /** the minimap's press or drag (BoardMinimap.tsx): the middle of the view at that board point, the zoom kept */
+  const centreAt = (x: number, y: number) => {
+    const vp = vpRef.current;
+    if (vp) setCam(c => ({ ...c, tx: vp.clientWidth / 2 - x * c.s, ty: vp.clientHeight / 2 - y * c.s }));
+  };
+
   /* ------------------------------------------------------------- input */
 
   interface Drag {
@@ -311,9 +333,12 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
   const scratchTargets = (hold: boolean): string[] => {
     const live = liveRef.current;
     if (!live || live.pts.length < 12) return [];
+    // (every stroke on the board looked at only once the line is shaped as a scribble)
+    const scribble = live.pts.map(([x, y]) => [x, y] as [number, number]);
+    if (!scribbleCusps(scribble, { zoom: camRef.current.s, width: live.w, hold })) return [];
     const keys: string[] = [], lines: [number, number][][] = [];
     objects.forEach((o, key) => { if (o.t === 'stroke' && o.pts?.length) { keys.push(key); lines.push(o.pts.map(([x, y]) => [o.x + x, o.y + y])); } });
-    const hits = lines.length ? scratchOut(live.pts.map(([x, y]) => [x, y]), lines, { zoom: camRef.current.s, width: live.w, hold }) : null;
+    const hits = lines.length ? scratchOut(scribble, lines, { zoom: camRef.current.s, width: live.w, hold }) : null;
     return hits ? hits.map(i => keys[i]) : [];
   };
   const judgeScratch = (hold: boolean) => {
@@ -560,7 +585,13 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
         }
         if (now - sc.judged > 80) judgeScratch(false);
       }
-      try { provider.awareness.setLocalStateField('boardInk', { ...liveRef.current, pts: liveRef.current.pts.map(([x, y, p]) => [round1(x), round1(y), Math.round(p * 100) / 100]) }); } catch { /* closing */ }
+      // (to the others ~25 times a second, as the margins do: every point of the stroke at every move was a
+      // message as long as the stroke, and a render of the board more)
+      const now = performance.now();
+      if (now - liveSent.current > 40) {
+        liveSent.current = now;
+        try { provider.awareness.setLocalStateField('boardInk', { ...liveRef.current, pts: liveRef.current.pts.map(([x, y, p]) => [round1(x), round1(y), Math.round(p * 100) / 100]) }); } catch { /* closing */ }
+      }
       rerender();
     }
   };
@@ -894,14 +925,14 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
             <svg key={key} data-obj={key} class={'board-stroke' + (selected.has(key) ? ' selected' : '')}
               style={{ left: o.x + 'px', top: o.y + 'px', width: o.w + 'px', height: o.h + 'px', overflow: 'visible', ...(scratchRef.current?.hits.has(key) ? { opacity: 0.3 } : {}) }}
               viewBox={`0 0 ${o.w} ${o.h}`} width={o.w} height={o.h}>
-              <BoardStroke stroke={{ color: o.color ?? '#000', w: o.sw ?? 2, pts: o.pts ?? [], nib: o.nib, pressure: o.pressure, o: o.o, poly: o.poly }} legacy={strokeD(o)} />
+              <BoardStroke stroke={{ color: o.color ?? '#000', w: o.sw ?? 2, pts: o.pts ?? [], nib: o.nib, pressure: o.pressure, o: o.o, poly: o.poly }} runs={objRuns(o)} legacy={strokeD(o)} />
             </svg>
           );
         })}
         {/* in-progress strokes: mine and the other clients' (awareness) */}
         {[...remoteInks, ...(liveRef.current ? [scratchRef.current?.hits.size ? { ...liveRef.current, color: '#8a9099' } : liveRef.current] : [])].map((s, i) => (
           <svg key={'live' + i} class="board-stroke live" style={{ left: 0, top: 0, overflow: 'visible' }} width={1} height={1}>
-            <BoardStroke stroke={s} />
+            <BoardStroke stroke={s} live={i === remoteInks.length ? liveCache.current : undefined} />
           </svg>
         ))}
         {selBB && (
@@ -958,12 +989,15 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
           {conn === 'online' ? (readOnly ? '👁 view only' : '✓ live') : conn === 'offline' ? 'offline' : '…'}
         </span>
       </div>
+      {/* the whole board small, the view on it: bottom left (the zoom pill has the right) */}
+      <BoardMinimap objects={objects} cam={cam} view={() => vpRef.current} onCenter={centreAt} />
     </div>
   );
 }
 
-function BoardStroke({ stroke, legacy }: { stroke: LiveStroke; legacy?: string }) {
-  const runs = strokeRuns(stroke);
+/** `runs`: worked out already (objRuns); `live`: the stroke being drawn (strokeRuns) */
+function BoardStroke({ stroke, legacy, runs: given, live }: { stroke: LiveStroke; legacy?: string; runs?: { w: number; d: string }[] | null; live?: InkCache }) {
+  const runs = given !== undefined ? given : strokeRuns(stroke, live);
   return runs ? <g fill="none" stroke={stroke.color} opacity={stroke.o ?? 1} stroke-linecap="round" stroke-linejoin="round">{runs.map(run => <path d={run.d} stroke-width={run.w} />)}</g>
     : <path d={legacy ?? strokePathD(stroke)} fill={stroke.color} fill-opacity={stroke.o ?? 1} />;
 }

@@ -58,6 +58,8 @@ export interface InkUiState {
   pen: InkPen;
   pens: Record<InkPen, PenSettings>;
   drawing: DeckInk;
+  /** the Draw row folded away once something was picked in it, drawing still on (drawingToolbar `picked`; the Draw button brings it back) */
+  folded?: boolean;
 }
 
 export { INK_PALETTES, HIGHLIGHT_OPACITY } from '@overlyx/core/inkpresets.ts';
@@ -66,7 +68,7 @@ import { loadDeckInk, saveDeckInk, patchDeckInk, subscribeDeckInk, type DeckInk 
 import { scratchOut, SCRATCH_HOLD_MS, SCRATCH_HOLD_PX } from '@overlyx/core/scratchout.ts';
 import { snapShape, SNAP_HOLD_MS, SNAP_LEAVE_PX } from '@overlyx/core/shapesnap.ts';
 import { eraseAlong } from '@overlyx/core/inkerase.ts';
-import { freshPoint } from '@overlyx/core/freehand.ts';
+import { freshPoint, type InkCache } from '@overlyx/core/freehand.ts';
 import { pointPressure, pressed, watchForce } from '../../deliverable/runtime/pressure';
 import { ERASER_PX } from '../../deliverable/deckink';
 import { lassoGroups, readHandwriting, chooseReading, readingError, type LassoActions } from '../../deliverable/lassobar';
@@ -155,6 +157,7 @@ export function getInk(): InkUiState { return ui; }
 export function currentPen(state: InkUiState = ui): PenSettings { return state.pens[state.pen]; }
 export interface InkPatch {
   active?: boolean;
+  folded?: boolean;
   tool?: InkTool;
   /** which pen the colour / width / preset changes apply to (default: the pen in use, see below) */
   pen?: InkPen;
@@ -174,7 +177,8 @@ export interface InkPatch {
  */
 export function setInk(patch: InkPatch): void {
   const next = { ...ui, pens: { ...ui.pens } };
-  if (patch.active !== undefined) next.active = patch.active;
+  if (patch.active !== undefined) { if (patch.active !== ui.active) next.folded = false; next.active = patch.active; }
+  if (patch.folded !== undefined) next.folded = patch.folded;
   if (patch.tool !== undefined) { next.tool = patch.tool; if (patch.tool === 'pen' || patch.tool === 'highlighter') next.pen = patch.tool; }
   const settings = patch.color !== undefined || patch.width !== undefined || patch.slotColor || patch.slotWidth;
   if (settings) {
@@ -361,6 +365,9 @@ class InkLayer {
    * drawn once draw and hold snapped it to a shape (`pts` is the shape then)
    */
   private live: (LiveInk & { edgeX: number; anchorTop: number; raw?: [number, number, number][] }) | null = null;
+  /** what the last frame made of the stroke being drawn (freehand.ts InkCache: only its end is worked out again), its chunks' paths */
+  private liveCache: InkCache = {};
+  private livePaths = new Map<string, Path2D>();
   /** when the live stroke's last point was given (freehand.ts freshPoint: Safari's coalesced events repeat the last move's) */
   private liveT = -Infinity;
   /** the live stroke's pointer kind and first pressure (a trackpad's pressure counts once it changes, pressure.ts) */
@@ -690,12 +697,18 @@ class InkLayer {
       ctx.translate(edgeX, top);
       ctx.scale(z, z);
     };
-    const drawStroke = (stroke: InkStroke, edgeX: number, top: number, sel = false) => {
+    const drawStroke = (stroke: InkStroke, edgeX: number, top: number, sel = false, live = false) => {
       enter(edgeX, top, sel);
       ctx.globalAlpha = stroke.o !== undefined ? stroke.o : 1;
       ctx.fillStyle = stroke.color;
-      let runs = runCache.get(stroke);
-      if (!runs && (stroke.nib || stroke.poly)) { runs = (strokeRuns(stroke) ?? []).map(run => ({ w: run.w, path: new Path2D(run.d) })); runCache.set(stroke, runs); }
+      let runs = live ? undefined : runCache.get(stroke);
+      if (!runs && live && stroke.nib) {
+        // (the stroke being drawn: its chunks drawn so far come out the same — their paths are kept)
+        const was = this.livePaths;
+        this.livePaths = new Map();
+        runs = (strokeRuns(stroke, this.liveCache) ?? []).map(run => { const path = was.get(run.d) ?? new Path2D(run.d); this.livePaths.set(run.d, path); return { w: run.w, path }; });
+      }
+      if (!runs && (stroke.nib || stroke.poly)) { runs = (strokeRuns(stroke) ?? []).map(run => ({ w: run.w, path: new Path2D(run.d) })); if (!live) runCache.set(stroke, runs); }
       if (runs) {
         ctx.strokeStyle = stroke.color; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
         for (const run of runs) { ctx.lineWidth = run.w; ctx.stroke(run.path); }
@@ -736,7 +749,7 @@ class InkLayer {
     if (this.live && this.live.pts.length) {
       const l = this.live;
       const rel: InkStroke = { color: this.scratch?.hits.size ? '#8a9099' : l.color, w: l.w, o: l.o, ...(l.raw ? { poly: true as const } : { nib: l.nib, pressure: l.pressure }), pts: l.pts.map(([x, y, p]) => [(x - l.edgeX) / z, (y - l.anchorTop) / z, p] as [number, number, number]) };
-      drawStroke(rel, l.edgeX, l.anchorTop);
+      drawStroke(rel, l.edgeX, l.anchorTop, false, true);
     }
     // the lasso being drawn: always shown closed (a segment back to the start), lightly filled —
     // the selection is what the closed shape touches

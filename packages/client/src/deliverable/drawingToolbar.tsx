@@ -28,6 +28,12 @@ export interface DrawingContext {
    * now (its settings' colour filter offers them), what its text is called (a whiteboard's notes)
    */
   lasso?: { kinds: LassoKind[]; colors(): string[]; textLabel?: string };
+  /**
+   * Something was picked in the row — a pen, the eraser, the lasso, a colour, a width, a line or a
+   * shape: the row folds away, what was picked stays in hand (the user's wish: the row is out of the
+   * way while drawing; the Draw button brings it back). Not for the settings opened by a second click.
+   */
+  picked?: () => void;
 }
 
 /** the deck toolbar's Lines and Shapes (decktoolbar.tsx LINES / SHAPES), with its icons */
@@ -48,23 +54,24 @@ export function drawingToolbar(c: DrawingContext): ToolButton[][] {
   const hl = !shaping && ink.pen === 'highlighter';
   const pen = ink.pens[hl ? 'highlighter' : 'pen'];
   const name = hl ? 'Highlighter' : 'Pen';
-  const take = (p: DeckInkPatch) => { if (shaping) c.ink.set(p.pen ? p : { pen: 'pen', ...p }); else { c.ink.set(p); c.setTool('pen'); } };
+  const done = () => c.picked?.();
+  const take = (p: DeckInkPatch) => { if (shaping) c.ink.set(p.pen ? p : { pen: 'pen', ...p }); else { c.ink.set(p); c.setTool('pen'); } done(); };
   const takePen = (p: DeckInkPatch) => { c.ink.set(p); c.setTool('pen'); };
   return [
     [
       { id: 'dk-ink-pen', title: `${ink.nib.ball ? 'Ball pen' : 'Fountain pen'} (P) — with its own colour and width; click it again for its settings: fountain or ball pen, tip, pressure, stabilization, rounding, draw and hold for shapes, calibration`,
-        icon: ink.nib.ball ? 'inkball' : 'inkpen', active: c.tool === 'pen' && !hl, action: () => takePen({ pen: 'pen' }),
+        icon: ink.nib.ball ? 'inkball' : 'inkpen', active: c.tool === 'pen' && !hl, action: () => { takePen({ pen: 'pen' }); done(); },
         paletteWhenActive: true,
         palette: { title: 'Pen', render: close => <PenSettings nib={ink.nib} color={ink.pens.pen.color} width={ink.pens.pen.width} habits={{ scribble: ink.scribble, fingersDraw: ink.fingersDraw, pencil: ink.pencil, penInks: ink.penInks, snap: ink.snap }}
           onChange={nib => takePen({ pen: 'pen', nib })} onHabits={h => c.ink.set(h)} onClose={close} /> } },
-      { id: 'dk-ink-hl', title: 'Highlighter — with its own colour and width; what is under it shows through (draw and hold: a straight one)', icon: 'inkhl', active: c.tool === 'pen' && hl, action: () => takePen({ pen: 'highlighter' }) },
+      { id: 'dk-ink-hl', title: 'Highlighter — with its own colour and width; what is under it shows through (draw and hold: a straight one)', icon: 'inkhl', active: c.tool === 'pen' && hl, action: () => { takePen({ pen: 'highlighter' }); done(); } },
       { id: 'dk-ink-eraser', title: `Eraser (E) — ${ink.eraser.precise ? 'rubs out the part of a stroke it passes over' : 'removes the strokes it passes over'} (drawn ones: shapes and text stay); click it again for its settings: precise, size, highlighter only`,
-        icon: 'inkeraser', active: erasing, action: () => c.setTool('eraser'),
+        icon: 'inkeraser', active: erasing, action: () => { c.setTool('eraser'); done(); },
         paletteWhenActive: true,
         palette: { title: 'Eraser', render: () => <EraserSettings eraser={ink.eraser} onChange={p => c.ink.set({ eraser: p })} /> } },
-      ...(c.lasso ? [lassoButton(c.tool === 'lasso', ink, c.lasso, c.setTool, p => c.ink.set(p))] : []),
+      ...(c.lasso ? [lassoButton(c.tool === 'lasso', ink, c.lasso, t => { c.setTool(t); done(); }, p => c.ink.set(p))] : []),
     ],
-    ...(c.shapes ? [shapeButtons(c.shapes)] : []),
+    ...(c.shapes ? [shapeButtons({ ...c.shapes, set: kind => { c.shapes!.set(kind); done(); } })] : []),
     pen.colors.map((col, i) => ({
       id: 'dk-ink-c' + i, title: `${inkColorName(col)} (${name.toLowerCase()}) — click the selected colour again to change it`, icon: col,
       html: `<span class="tb-ink-swatch${hl ? ' hl' : ''}" data-color="${col}" style="background:${col}"></span>`,

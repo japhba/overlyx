@@ -417,4 +417,7 @@ export type FromRuntime =
   /** a comment pin pressed (`open`: show its threads), or what a new comment is on (the object or slide, the words selected in the text being retyped) */
   | { ol: 'comment'; path: Path | null; quote?: string; slide: number; open: boolean };
 
+/** the room (screen px) left of the rail's thumbnails for their numbers: the editor makes the rail's frame that much wider, the rail's page lays its slides out right of it */
+export const RAIL_NUM = 20;
+
 export const isFromRuntime = (d: unknown): d is FromRuntime => !!d && typeof d === 'object' && typeof (d as { ol?: unknown }).ol === 'string';

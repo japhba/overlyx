@@ -26,18 +26,25 @@ function apply(): void {
   const desk = view.deskChecker ? checker() : view.desk;
   const rules: string[] = [];
   // the page checkerboard lies under the body: the body itself is then see-through, the canvas on <html>
-  if (view.pageChecker) rules.push(`html.ol-edit { background: ${desk ?? currentDesk()} !important; } html.ol-edit body { background: transparent !important; }`);
-  else if (desk) rules.push(`html.ol-edit, html.ol-edit body { background: ${desk} !important; }`);
+  // (`ol-bg-read`: the page's own read for a moment, solo.ts notePageBackground)
+  if (view.pageChecker) rules.push(`html.ol-edit:not(.ol-bg-read) { background: ${desk ?? currentDesk()} !important; } html.ol-edit:not(.ol-bg-read) body { background: transparent !important; }`);
+  else if (desk) rules.push(`html.ol-edit:not(.ol-bg-read), html.ol-edit:not(.ol-bg-read) body { background: ${desk} !important; }`);
   style.textContent = rules.join('\n');
+  // (a slide without a background shows the checkerboard, not the page's colour: solo.ts)
+  document.documentElement.classList.toggle('ol-page-checker', view.pageChecker);
   refreshView();
 }
 
-/** the page's own canvas colour (what its body / html paint) */
+/** the page's own canvas colour (what its body / html paint, without the editor's) */
 function currentDesk(): string {
-  const b = getComputedStyle(document.body).backgroundColor;
-  if (b && b !== 'rgba(0, 0, 0, 0)') return b;
-  const h = getComputedStyle(document.documentElement).backgroundColor;
-  return h && h !== 'rgba(0, 0, 0, 0)' ? h : '#ffffff';
+  const root = document.documentElement;
+  root.classList.add('ol-bg-read');
+  try {
+    const b = getComputedStyle(document.body).backgroundColor;
+    if (b && b !== 'rgba(0, 0, 0, 0)') return b;
+    const h = getComputedStyle(root).backgroundColor;
+    return h && h !== 'rgba(0, 0, 0, 0)' ? h : '#ffffff';
+  } finally { root.classList.remove('ol-bg-read'); }
 }
 
 /** the checkerboards under the slides, where they are now */

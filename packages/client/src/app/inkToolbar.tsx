@@ -10,6 +10,7 @@ export function inkToolbar(): ToolButton[][] {
     setTool: tool => { if (tool === 'eraser' || tool === 'lasso') setInk({ tool }); else if (tool === 'pen') setInk({ tool: loadDeckInk().pen }); },
     ink: { presets: loadDeckInk(), set: patch => saveDeckInk(patchDeckInk(loadDeckInk(), patch)), draw: active => setInk({ active }) },
     done: false,
+    picked: () => setInk({ folded: true }),
     // the margins hold strokes and pictures (and the Draw row's lines and shapes, drawn as strokes)
     lasso: { kinds: ['ink', 'shapes', 'pictures'], colors: inkColorsInUse },
     extras: [

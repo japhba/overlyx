@@ -23,7 +23,7 @@ import { webHost } from './webHost';
 import { createLinkOpener, type LinkState } from './link-opening';
 import { capturePointerDrag } from './pointerdrag';
 import type { FromRuntime, ToRuntime, SelItem, SlideBox, Tool, Path, HtmlOp, DeliverableKind, Rect, ArrangeHow, Paint, CanvasView, KeyPress, Solo, ObjNode, InkRunD, WordsStyle } from './protocol';
-import { SlideView, viewLevels, viewDetents, levelAt, levelAnchor, VIEW_FIT_NAMES, type ViewFit, type ViewLevels } from './viewport';
+import { SlideView, fitScale, viewLevels, viewDetents, levelAt, levelAnchor, VIEW_FIT_NAMES, type ViewFit, type ViewLevels } from './viewport';
 import { pinchFactor, pinchLock, triGesture, type PinchLock } from './gestures';
 import { DetentPinch, stepOnto, type Detent, type Shown } from '../app/zoomdetent';
 import { zoomPill } from '../app/zoomhud';
@@ -32,7 +32,7 @@ import { keepAwake } from '../app/wakelock';
 import { presentFingersDraw, savePresentFingersDraw, presentLinked, savePresentLinked } from '../app/presentkit';
 import { checkedPresent, type PresentState, type PresenterState } from '../app/presentshare';
 import { createPortal } from 'preact/compat';
-import { isFromRuntime } from './protocol';
+import { isFromRuntime, RAIL_NUM } from './protocol';
 import { rebasedSplices, rebaseObjectPaths, objectHtml, imageHtml, insertPlace, newSlideHtml, slideDesigns, slidePaths, slideNotes, notesOp, sourceRange, inlineSvgHtml, guidesIn } from './sourceops';
 import { GUIDES_ATTR, LAYOUT_MARGINS_ATTR, layoutMarginGuides, parseGuides, masterGuides, formatGuides, withGuide, type Guide } from './guides';
 import { sizePt, stepPt } from './units';
@@ -60,7 +60,7 @@ import { deliverableInfo, slideElements } from '@overlyx/core/html/deliverable.t
 import { formatTimestamp } from '@overlyx/core';
 import { ReviewPane, type CommentDraft } from './ReviewPane';
 import { EditModeSwitch, type EditMode } from '../app/EditModeSwitch';
-import { useDarkPagesState, toggleDarkPages, invertedColor, DARK_DESK } from '../app/darkpages';
+import { useDarkPagesState, toggleDarkPages, invertedColor, deskBeside, DARK_DESK } from '../app/darkpages';
 import { recordReliability, recordInteraction } from '../usage';
 import { reportJump } from '../glitches';
 import { canvasInteraction, type InteractionOutcome } from '@overlyx/core/interactions.ts';
@@ -271,8 +271,21 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   const darkS = useDarkPagesState();
   const darkRef = useRef(darkS); darkRef.current = darkS;
   // (a web page has no canvas around it: the desk would be its own background — black words on dark grey; smart invert darkens it instead)
-  const shownView = (v: CanvasView): CanvasView => (darkRef.current.dark && kindRef.current !== 'page' && v.desk === null && !v.deskChecker ? { ...v, desk: DARK_DESK } : v);
+  /**
+   * The canvas as shown, and as the frame paints round the slide: what was chosen; else, beside slides,
+   * the dark theme's — or the page's own, a shade apart from the slides' when it is all but theirs (their
+   * edges show: deskBeside).
+   */
+  const shownView = (v: CanvasView): CanvasView => {
+    if (kindRef.current === 'page' || v.desk !== null || v.deskChecker) return v;
+    if (darkRef.current.dark) return { ...v, desk: DARK_DESK };
+    const c = colorsRef.current, apart = c ? deskBeside(c.desk, c.page) : null;
+    return c && apart !== c.desk ? { ...v, desk: apart } : v;
+  };
   const [colors, setColors] = useState<{ desk: string; page: string } | null>(null);
+  const colorsRef = useRef(colors); colorsRef.current = colors;
+  // (the page's colours known: the canvas a shade apart from the slides, if need be — the frame too)
+  useEffect(() => { if (colors) toCanvas({ ol: 'view', view: shownView(viewRef.current) }); }, [colors?.desk, colors?.page]);
   const [floatPop, setFloatPop] = useState<{ x: number; y: number; title: string; render: (close: () => void) => ComponentChildren } | null>(null);
   const [cropping, setCropping] = useState<Path | null>(null);
   const [bgFor, setBgFor] = useState<{ url: string; name: string; imgPath: Path; src: string } | null>(null);
@@ -326,8 +339,12 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
    * pen is put away (Done, Esc, V, another tool).
    */
   const [drawOpen, setDrawOpen] = useState(false);
-  const drawOpenRef = useRef(drawOpen); drawOpenRef.current = drawOpen;
-  useEffect(() => { if (tool !== 'pen' && tool !== 'eraser' && tool !== 'lasso') setDrawOpen(false); }, [tool]);
+  /** the row folded away once something was picked in it, what was picked still in hand (Draw's button brings the row back) */
+  const [drawHeld, setDrawHeld] = useState(false);
+  useEffect(() => { if (tool !== 'pen' && tool !== 'eraser' && tool !== 'lasso') { setDrawOpen(false); setDrawHeld(false); } }, [tool]);
+  // (the tool stays in hand, stroke after stroke, while the row is open or folded after a pick)
+  const drawKept = drawOpen || drawHeld;
+  const drawKeptRef = useRef(drawKept); drawKeptRef.current = drawKept;
   /** the colours used on the slide shown (runtime notetools.ts), for the lasso's colour filter */
   const slideColors = useRef<string[]>([]);
   /** Draw: the pen's and the highlighter's presets, which of them is in hand (deckink.ts) */
@@ -365,18 +382,20 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   const soloOn = !!solo && kind !== 'page' && solo.rect.w > 0 && solo.rect.h > 0;
   /** room past the slide's edges a slide zoomed in pans to (screen px) */
   const margin = box.w < 600 ? 12 : 32;
-  // one slide: the whole of it fits (both ways), edge to edge with the canvas; a web page: its width
+  // one slide: the whole of it fits (both ways), a strip of the canvas round it; a web page: its width
   const fit = soloOn
-    ? Math.max(0.05, Math.min(2, box.w / solo!.rect.w, box.h / solo!.rect.h))
+    ? fitScale(box, solo!.rect)
     : Math.max(0.05, Math.min(kind === 'page' ? 1 : 2, (box.w - 24) / frameW));
   const scale = fit * zoom;
   const showRail = kind === 'deck';
   const railOpen = showRail && railShown;
-  const railScale = Math.max(0.05, (railW - 20) / frameW);
+  const railScale = Math.max(0.05, (railW - 20 - RAIL_NUM) / frameW);
 
   const toFrame = (f: HTMLIFrameElement | null, msg: ToRuntime) => { try { f?.contentWindow?.postMessage(msg, '*'); } catch { /* gone */ } };
   const toCanvas = (msg: ToRuntime) => toFrame(canvasFrame.current, msg);
   const toRail = (msg: ToRuntime) => toFrame(railFrame.current, msg);
+  /** the rail's own colour: round the thumbnails in its frame (the dark theme's canvas while it is not laid out yet) */
+  const railColor = () => { const c = railBox.current ? getComputedStyle(railBox.current).backgroundColor : ''; return c && !/^(transparent|rgba\(0, 0, 0, 0\))$/.test(c) ? c : darkRef.current.dark ? DARK_DESK : null; };
   const svgExport = useRef<{ id: number; resolve(svg: string): void; reject(e: Error): void; timer: ReturnType<typeof setTimeout> } | null>(null);
   const svgExportId = useRef(0);
   useEffect(() => {
@@ -799,7 +818,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
             if (m.height) setPageH(m.height);
             setSolo(m.solo ?? null);
             toCanvas({ ol: 'scale', scale });
-            toCanvas({ ol: 'tool', tool, ink: { ...deckInkStyle(inkRef.current, pageWRef.current), penInks: inkRef.current.penInks && !readOnlyRef.current }, held: drawOpenRef.current });
+            toCanvas({ ol: 'tool', tool, ink: { ...deckInkStyle(inkRef.current, pageWRef.current), penInks: inkRef.current.penInks && !readOnlyRef.current }, held: drawKeptRef.current });
             toCanvas({ ol: 'guides', show: guidesRef.current });
             toCanvas({ ol: 'view', view: shownView(viewRef.current) });
             toCanvas({ ol: 'dark', invert: darkRef.current.invert, figures: darkRef.current.figures, desk: null });
@@ -815,7 +834,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
             toRail({ ol: 'scale', scale: railScale });
             if (host.ready()) toRail({ ol: 'source', version: version.current, html: text.toString() });
             toRail({ ol: 'current', slide: currentRef.current });
-            toRail({ ol: 'dark', invert: darkRef.current.invert, figures: darkRef.current.figures, desk: darkRef.current.dark ? DARK_DESK : null });
+            toRail({ ol: 'dark', invert: darkRef.current.invert, figures: darkRef.current.figures, desk: railColor() });
             if (peersRef.current.length) toRail({ ol: 'peers', peers: peersRef.current });
           }
           break;
@@ -902,7 +921,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
         }
         case 'draw': onDraw(m.version, m.tool, m.slide, m.rect, m.after ?? null, m.pts, m.runs ? { d: '', closed: false, runs: m.runs } : m.d !== undefined ? { d: m.d, closed: !!m.closed } : undefined, m.scratch, m.snap); break;
         // the Pencil drew with Select in hand: the pen for its stroke, then Select again — the Draw row stays as it was
-        case 'penInks': if (fromCanvas && !drawOpenRef.current) setToolState(m.done ? 'select' : 'pen'); break;
+        case 'penInks': if (fromCanvas && !drawKeptRef.current) setToolState(m.done ? 'select' : 'pen'); break;
         case 'toolBack': if (fromCanvas) setToolState(m.tool); break;
         case 'slideColors': if (fromCanvas) { slideColors.current = m.colors; rerender(); } break;
         case 'inkRead': if (fromCanvas) void readInk(m.as, m.lines, m.rect); break;
@@ -1072,7 +1091,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   // (the Bézier pen takes Enter / Esc / Backspace: the keyboard goes to the canvas)
   // (the pen draws right away only where the page can be changed)
   const inkStyle = { ...deckInkStyle(ink, pageW), penInks: ink.penInks && !locked };
-  useEffect(() => { toCanvas({ ol: 'tool', tool, ink: inkStyle, held: drawOpen }); if (tool === 'bezier') canvasFrame.current?.focus(); }, [tool, drawOpen, inkStyle.color, inkStyle.width, inkStyle.opacity, JSON.stringify(inkStyle.nib ?? null), inkStyle.fingers, inkStyle.scribble, inkStyle.penInks, inkStyle.snap, JSON.stringify(inkStyle.eraser ?? null), JSON.stringify(inkStyle.lasso ?? null)]);
+  useEffect(() => { toCanvas({ ol: 'tool', tool, ink: inkStyle, held: drawKept }); if (tool === 'bezier') canvasFrame.current?.focus(); }, [tool, drawKept, inkStyle.color, inkStyle.width, inkStyle.opacity, JSON.stringify(inkStyle.nib ?? null), inkStyle.fingers, inkStyle.scribble, inkStyle.penInks, inkStyle.snap, JSON.stringify(inkStyle.eraser ?? null), JSON.stringify(inkStyle.lasso ?? null)]);
   // the rail folded away: its frame goes, and says it is ready again when it comes back
   useEffect(() => { if (!railOpen) railReady.current = false; }, [railOpen]);
 
@@ -1496,7 +1515,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   useEffect(() => {
     toCanvas({ ol: 'view', view: shownView(viewRef.current) });
     toCanvas({ ol: 'dark', invert: darkS.invert, figures: darkS.figures, desk: null });
-    toRail({ ol: 'dark', invert: darkS.invert, figures: darkS.figures, desk: darkS.dark ? DARK_DESK : null });
+    toRail({ ol: 'dark', invert: darkS.invert, figures: darkS.figures, desk: railColor() });
   }, [darkS.dark, darkS.invert, darkS.figures, kind]);
 
   /* ------------------------------------------------------------- tools and objects */
@@ -2019,7 +2038,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     const k = key.toLowerCase();
     const map: Record<string, Tool> = { t: 'text', r: 'rect', o: 'ellipse', l: 'line', a: 'arrow', p: 'pen', e: 'eraser', s: 'lasso', b: 'bezier', v: 'select' };
     // (P, E and S open Draw: its row shows)
-    if (map[k]) { setToolState(map[k]); setDrawOpen(k === 'p' || k === 'e' || k === 's'); return true; }
+    if (map[k]) { setToolState(map[k]); setDrawOpen(k === 'p' || k === 'e' || k === 's'); setDrawHeld(false); return true; }
     if (k === 'n' && selRef.current.length) { nodesTimer.current = setTimeout(() => { nodesTimer.current = null; arrangeSel('edit-nodes'); }, 600); return true; }
     return false;
   };
@@ -2358,7 +2377,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     newSlide: () => newSlide(currentRef.current),
     slideLayouts: () => layoutItems(currentRef.current).map(it => ({ label: it.label!, action: it.action! })),
     ink: {
-      presets: ink, set: setInk, draw: on => { setDrawOpen(on); setToolState(on ? 'pen' : 'select'); }, open: drawOpen,
+      presets: ink, set: setInk, draw: on => { setDrawOpen(on); setDrawHeld(false); setToolState(on ? 'pen' : 'select'); }, open: drawOpen, held: drawHeld, fold: folded => { setDrawOpen(!folded); setDrawHeld(folded); },
       lassoColors: () => slideColors.current,
       thicken: k => paint({ inkScale: k }),
       convert: as => toCanvas({ ol: 'inkConvert', as }),
@@ -2526,7 +2545,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
                 <button class="dl-btn dl-rail-hide" title="Hide the slides (more room for the slide)" aria-label="Hide the slides" data-dl-rail-hide onClick={() => setRailShown(false)}>«</button>
               </div>
               {link && synced && <iframe ref={railFrame} class="dl-railframe" title="Slides" sandbox={offlineDocs.thumb ? undefined : 'allow-scripts'} src={offlineDocs.thumb ? offlineSrc('thumb') : src('thumb')}
-                style={{ top: `${RAIL_HEAD}px`, width: `${frameW}px`, height: `${railH / railScale}px`, transform: `scale(${railScale})` }} />}
+                style={{ top: `${RAIL_HEAD}px`, width: `${frameW + RAIL_NUM / railScale}px`, height: `${railH / railScale}px`, transform: `scale(${railScale})` }} />}
               <div class="dl-rail-grip" role="separator" aria-orientation="vertical" aria-label="Slide rail width" title="Drag to make the slides wider or narrower (double-click: back to the usual width)"
                 data-dl-railgrip onPointerDown={onRailGrip} onDblClick={() => setRail(RAIL_W)} />
               <div class="dl-rail-actions">

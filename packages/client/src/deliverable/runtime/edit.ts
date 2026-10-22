@@ -36,10 +36,10 @@ import { badges, isOrdering, orderClick, stopOrdering, postSequence, stepsChange
 import { startCrop, isCropping, endCrop, cropNow, cropTarget, setCropAspect, redrawCrop, type CropContext } from './crop';
 import { chipify, unchip, openChip, openChipEl, chipOpening, holdKey, holdAfter, holdIfLeaving, keyPress, isModifierKey, typeKeysHere, chipHooks, flushAfter, insertRefChip, shownChip, setChip, doneChip, displayChip, closeChip, trackChip, insertChip, chipBeside, recoverChipCaret, CHIP_CSS } from './mathedit';
 import { initPaths, isNodeEditing, nodesAfterSource, nodesTargetOf, startNodesOrConvert, endNodes, redrawNodes, penDown, penMove, penUp, penCancelPress, penKey, penDouble, penCancel, isPenDrawing, setMenuShape } from './pathedit';
-import { isSolo, showSlide, soloIndex, revealSlideOf } from './solo';
-import { inkRuns, inkPaths, runsBox, freshPoint, type FreePt, type InkRun } from './freehand';
+import { isSolo, showSlide, soloIndex, revealSlideOf, soloScale } from './solo';
+import { inkRuns, inkPaths, chunkPaths, runsBox, freshPoint, LIVE_CHUNK, type FreePt, type InkRun, type InkCache } from './freehand';
 import { pointPressure, pressed, watchForce } from './pressure';
-import { scratchOut, SCRATCH_HOLD_MS, SCRATCH_HOLD_PX } from '@overlyx/core/scratchout.ts';
+import { scratchOut, scribbleCusps, SCRATCH_HOLD_MS, SCRATCH_HOLD_PX } from '@overlyx/core/scratchout.ts';
 import { snapShape, SNAP_HOLD_MS, SNAP_LEAVE_PX, type Snapped } from '@overlyx/core/shapesnap.ts';
 import { lassoTakes, cutStroke, cutOps, uncut, straightened, handwriting, letterHeight, typedHtml, colorsUsed, type Cut } from './notetools';
 import { ERASER_PX } from '../deckink';
@@ -201,6 +201,7 @@ export function startEditing(): void {
 
 export function setScale(s: number, anchor?: { docY: number; screenY: number }): void {
   scale = s > 0 ? s : 1;
+  soloScale(scale);
   // zoomed about a point: that point of the page stays where it is on the screen
   if (anchor && !isSolo()) scrollTo({ top: Math.max(0, anchor.docY - anchor.screenY / scale) });
   draw();
@@ -2397,6 +2398,8 @@ let ink: {
   watch: StrokeWatch | null;
   /** draw and hold (core/shapesnap.ts): the timer of the pen at rest, the shape it became */
   snapTimer: ReturnType<typeof setTimeout> | null; snapped: Snapped | null;
+  /** what the last frame made of the stroke (freehand.ts InkCache): only its end is worked out again */
+  cache: InkCache;
 } | null = null;
 /** strokes drawn and sent to the editor, shown until the page has them (`count`: that many strokes the slide will have then) */
 const sentInk: { svg: SVGSVGElement; slide: HTMLElement | null; count: number; timer: ReturnType<typeof setTimeout> }[] = [];
@@ -2426,7 +2429,7 @@ function startInk(e: PointerEvent, slide: HTMLElement | null): void {
   svg.append(g);
   (slide ?? document.body).append(svg);
   ink = { slide, pts: [inkPoint(e, slide)], client: [[e.clientX, e.clientY]], pressure: e.pointerType === 'pen', svg, g, frame: 0, t: e.timeStamp, whole: wholePx(e), k: docScale(slide ?? document.body), kind: e.pointerType, p0: pointPressure(e),
-    rest: { x: e.clientX, y: e.clientY, t: performance.now(), timer: null }, judged: 0, cands: null, snapTimer: null, snapped: null,
+    rest: { x: e.clientX, y: e.clientY, t: performance.now(), timer: null }, judged: 0, cands: null, snapTimer: null, snapped: null, cache: {},
     watch: navigator.maxTouchPoints > 0 ? new StrokeWatch('deck', e.pointerType, { w: innerWidth, h: innerHeight }) : null };
   ink.watch?.add(e.clientX, e.clientY, e.timeStamp, 'down', scrollX, scrollY);
   paintInk(true);
@@ -2515,6 +2518,9 @@ function fadeScratch(els: Element[]): void {
 /** what the scribble drawn so far would erase (`hold`: the pen rests at its end) */
 function scratchTargets(hold: boolean): Element[] {
   if (!ink || !scribbles() || ink.client.length < 12) return [];
+  // (the strokes it could erase only once it is shaped as a scribble: sampling every stroke on the slide
+  // took long enough, a moment into every stroke, to make the line stall under the pen)
+  if (!ink.cands && !scribbleCusps(ink.client, { zoom: scale, width: inkStyle.width, hold })) return [];
   ink.cands ??= scratchCandidates(ink.slide);
   if (!ink.cands.length) return [];
   const hits = scratchOut(ink.client, ink.cands.map(c => c.pts), { zoom: scale, width: inkStyle.width, hold });
@@ -2539,16 +2545,20 @@ function takeInk(ev: PointerEvent, sample: InkSample): void {
   ink.watch?.add(ev.clientX, ev.clientY, ev.timeStamp, sample, scrollX, scrollY);
 }
 
-/** the stroke as runs of one width (freehand.ts), a path for each width as the page will have it (those that did not change left alone) */
+/**
+ * The stroke as runs of one width (freehand.ts): while it is drawn, in chunks — the paths of those
+ * drawn already stay as they are, and only the end is painted again —; at the lift, a path for each
+ * width as the page will have it.
+ */
 function paintInk(final: boolean): InkRun[] {
-  const runs = inkRunsNow(final);
-  setInkPaths(inkPaths(runs));
+  const runs = inkRunsNow(final, final ? 0 : LIVE_CHUNK);
+  setInkPaths(final ? inkPaths(runs) : chunkPaths(runs));
   return runs;
 }
-function inkRunsNow(final: boolean): InkRun[] {
+function inkRunsNow(final: boolean, chunk = 0): InkRun[] {
   if (!ink) return [];
   // (whole px are the frame's: 1/k px of the slide; the stabilization is in screen px, scale·k of them a px of the slide)
-  return inkRuns(ink.pts, { width: inkStyle.width, highlighter: inkStyle.opacity < 1, pressure: ink.pressure, zoom: scale * ink.k, coarse: ink.whole && ink.pts.length > 4 ? 1 / ink.k : false, nib: inkStyle.nib, final });
+  return inkRuns(ink.pts, { width: inkStyle.width, highlighter: inkStyle.opacity < 1, pressure: ink.pressure, zoom: scale * ink.k, coarse: ink.whole && ink.pts.length > 4 ? 1 / ink.k : false, nib: inkStyle.nib, final, chunk, ...(final ? {} : { cache: ink.cache }) });
 }
 /** the live stroke's paths made these (those that did not change left alone) */
 function setInkPaths(paths: { w: number; d: string }[]): void {

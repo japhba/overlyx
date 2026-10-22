@@ -4,7 +4,7 @@
  * document's text (packages/client/src/app/shellutil.tsx — 100 %).
  */
 import { describe, it, expect } from 'vitest';
-import { viewLevels, viewDetents, levelAt, levelAnchor, CONTENT_SIDE } from '../packages/client/src/deliverable/viewport.ts';
+import { viewLevels, viewDetents, levelAt, levelAnchor, CONTENT_SIDE, fitGap } from '../packages/client/src/deliverable/viewport.ts';
 import { stepOnto, DetentPinch } from '../packages/client/src/app/zoomdetent.ts';
 import { stepTextZoom } from '../packages/client/src/app/shellutil.tsx';
 
@@ -12,8 +12,10 @@ describe("a slide's zoom levels", () => {
   const box = { w: 1000, h: 600 };
   it('a portrait poster: the whole of it, its width, what is on it — all apart', () => {
     const l = viewLevels(box, { w: 800, h: 1200 }, { w: 400, h: 300 }, 8);
-    expect(l.fit).toBeCloseTo(0.5, 9);
-    expect(l.width).toBeCloseTo(1.25, 9);
+    // (a strip of the canvas round the fitted slide, at the sides too at Fit width: its edges show)
+    const g = 2 * fitGap(box);
+    expect(l.fit).toBeCloseTo((600 - g) / 1200, 9);
+    expect(l.width).toBeCloseTo((1000 - g) / 800, 9);
     expect(l.content).toBeCloseTo((600 - 2 * CONTENT_SIDE) / 300, 9);
     expect(viewDetents(l).map(d => d.key)).toEqual(['fit', 'width', 'content']);
     expect(levelAt(l, l.content!)).toBe('content');

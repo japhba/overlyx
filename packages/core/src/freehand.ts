@@ -18,8 +18,8 @@
 /** [x, y, pressure 0..1] — 0.5 where there is none (a mouse, a finger); 0 from a pen: not known (its first and last events) */
 export type FreePt = [number, number, number];
 
-/** a stretch of the stroke at one width: its points (slide px) */
-export interface InkRun { w: number; pts: [number, number][] }
+/** a stretch of the stroke at one width: its points (slide px); `k`: the chunk it is in (FreeOpts.chunk) */
+export interface InkRun { w: number; pts: [number, number][]; k?: number }
 
 /**
  * GoodNotes' pen settings (0..1 each; protocol.ts Nib): a ball pen's line is even and round, whatever
@@ -44,6 +44,15 @@ export interface FreeOpts {
   nib?: NibOpts;
   /** the pen has lifted: the end tapers too (a sharp tip's) */
   final?: boolean;
+  /**
+   * The runs cut every this many samples too (their widths as without), each marked with its chunk
+   * (`k`): while the stroke is drawn only its last chunks change — the smoothing reaches back a few
+   * dozen samples —, so the line drawn so far is left alone and only its end is painted again (a long
+   * stroke repainted whole every frame was what made the line lag behind the pen).
+   */
+  chunk?: number;
+  /** the same object at every call for a stroke being drawn (InkCache): only its end is worked out again */
+  cache?: InkCache;
 }
 
 /**
@@ -111,17 +120,36 @@ export function inkRuns(input: FreePt[], o: FreeOpts): InkRun[] {
   const coarse = !!o.coarse && round > 0;
   const sq = coarse ? COARSE_SIGMA * unit : 0, ss = (clamp01(nib.stabilization ?? 0) * STAB_PX) / zoom;
   const sigma = Math.hypot(sq, ss);
-  let x = twice(s.x, sigma / h), y = twice(s.y, sigma / h);
+  const sp = Math.max(1.2, 2.5 * sigma) / h;
+  const chunk = o.chunk && o.chunk > 1 ? Math.floor(o.chunk) : 0;
+  const n = s.x.length;
+  // a stroke being drawn (`cache`): what the last call made of the samples is kept as far as they are the
+  // same and far enough from the end not to feel the new ones (the smoothing's reach) — the same result
+  // as worked out afresh, in a time that does not grow with the stroke
+  const key = [w, sens, sharp, flat, usual, round, h, sigma, coarse && !ss ? unit : 0, chunk, o.final ? 1 : 0].join(' ');
+  const kept = o.cache?.kept && o.cache.kept.key === key ? o.cache.kept : null;
+  let m = 0;
+  if (kept) {
+    const on = kept.s.x.length, lim = Math.min(n, on);
+    let d = 0;
+    while (d < lim && s.x[d] === kept.s.x[d] && s.y[d] === kept.s.y[d] && s.p[d] === kept.s.p[d]) d++;
+    // (the reach of the smoothing of the line, of the pressure, of the flat nib's direction, of a sharp tip's taper at a lifted end)
+    const kx = sigma / h >= 0.3 ? Math.ceil(2.5 * (sigma / h)) : 0, kp = sens ? Math.ceil(2.5 * sp) : 0, kd = flat ? Math.ceil(2.5 * (2 / h)) : 0;
+    const kt = o.final && sharp ? Math.ceil((w * (1 + 5 * sharp)) / h) + 1 : 0;
+    m = Math.max(0, Math.min(d, on) - Math.max(2 * kx + 2 + kd, kp, kt) - 1);
+  }
+  const x = twice(s.x, sigma / h, m, kept?.x), y = twice(s.y, sigma / h, m, kept?.y);
   // whole px, unstabilized: smoothed only as far as the rounding could have put the pen (its steps go, its shape stays) — less, rounding less
-  if (coarse && !ss) { x = within(x, s.x, COARSE_WITHIN * unit * round); y = within(y, s.y, COARSE_WITHIN * unit * round); }
-  const p = sens ? gauss(s.p, Math.max(1.2, 2.5 * sigma) / h, true) : s.p;
+  if (coarse && !ss) { within(x, s.x, COARSE_WITHIN * unit * round, m); within(y, s.y, COARSE_WITHIN * unit * round, m); }
+  const p = sens ? gauss(s.p, sp, true, m, kept?.p) : s.p;
   // the width along it: pressure, the flat tip's direction, the sharp tip's taper at the start (and the end, once lifted)
-  const n = x.length;
   const across = flat ? flatWidth(flat) : null;
   let dir: number[] | null = null;
   if (across) {
-    const raw = x.map((_, i) => { const a = Math.max(0, i - 2), b = Math.min(n - 1, i + 2); return across(Math.atan2(y[b] - y[a], x[b] - x[a])); });
-    dir = gauss(raw, 2 / h, true);
+    const from = Math.max(0, m - Math.ceil(2.5 * (2 / h)));
+    const raw = new Array<number>(n);
+    for (let i = from; i < n; i++) { const a = Math.max(0, i - 2), b = Math.min(n - 1, i + 2); raw[i] = across(Math.atan2(y[b] - y[a], x[b] - x[a])); }
+    dir = gauss(raw, 2 / h, true, m, kept?.dir ?? undefined);
   }
   const taper = sharp ? w * (1 + 5 * sharp) : 0, tip = 1 - 0.85 * sharp;
   const ease = (d: number) => { const u = Math.min(1, d / taper); return tip + (1 - tip) * u * (2 - u); };
@@ -135,19 +163,45 @@ export function inkRuns(input: FreePt[], o: FreeOpts): InkRun[] {
   // (steps of 2½ %: a little over 0.05 px each side for the usual pen, not seen even zoomed in)
   const even = !sens && !dir && !taper;
   const q = Math.max(0.03, w * 0.025);
-  const runs: InkRun[] = [];
-  let cur: InkRun | null = null;
-  for (let i = 0; i < n; i++) {
+  // (kept: the runs as they were up to sample m, the one it was in cut back there and gone on with)
+  const of = kept ? kept.of : new Array<number>(n);
+  of.length = n;
+  let runs: KeptRun[] = [];
+  let cur: KeptRun | null = null;
+  if (kept && m > 0) {
+    const r = kept.of[m - 1];
+    runs = kept.runs.slice(0, r + 1);
+    const last = runs[r];
+    cur = { w: last.w, k: last.k, i0: last.i0, pts: last.pts.slice(0, (last.i0 > 0 ? 1 : 0) + m - last.i0) };
+    runs[r] = cur;
+  }
+  for (let i = m; i < n; i++) {
     const wi = even ? w : widthAt(i);
-    if (!cur || Math.abs(wi - cur.w) > q) {
-      const lw = even ? w : round2(Math.max(q, Math.round(wi / q) * q));
-      cur = { w: lw, pts: cur ? [cur.pts[cur.pts.length - 1]] : [] };
+    const k = chunk ? Math.floor(i / chunk) : 0;
+    const step = !cur || Math.abs(wi - cur.w) > q;
+    if (step || (chunk && k !== cur!.k)) {
+      // (a new chunk alone: the width goes on as it was)
+      const lw = !step ? cur!.w : even ? w : round2(Math.max(q, Math.round(wi / q) * q));
+      cur = { w: lw, k: chunk ? k : undefined, i0: i, pts: cur ? [cur.pts[cur.pts.length - 1]] : [] };
       runs.push(cur);
     }
-    cur.pts.push([x[i], y[i]]);
+    cur!.pts.push([x[i], y[i]]);
+    of[i] = runs.length - 1;
   }
   const tol = Math.min(0.05, w * 0.015);
-  return runs.map(r => ({ w: r.w, pts: simplify(r.pts, tol) }));
+  // (each run simplified once it is done: the last ones again)
+  const redo = kept && m > 0 ? kept.of[m - 1] : 0;
+  for (let i = redo; i < runs.length; i++) runs[i].simple = simplify(runs[i].pts, tol);
+  if (o.cache) o.cache.kept = { key, s, x, y, p, dir, runs, of };
+  return runs.map(r => (r.k === undefined ? { w: r.w, pts: r.simple! } : { w: r.w, pts: r.simple!, k: r.k }));
+}
+
+/** a run as inkRuns works it out (FreeOpts.cache): from sample `i0` on, its points before simplification and after */
+interface KeptRun { w: number; k?: number; i0: number; pts: [number, number][]; simple?: [number, number][] }
+
+/** what inkRuns keeps from one call to the next for a stroke being drawn (FreeOpts.cache): its samples, what was made of them, the run each sample went into */
+export interface InkCache {
+  kept?: { key: string; s: { x: number[]; y: number[]; p: number[] }; x: number[]; y: number[]; p: number[]; dir: number[] | null; runs: KeptRun[]; of: number[] };
 }
 
 const clamp01 = (v: number) => (Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0);
@@ -155,7 +209,7 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 /** the smoothing (px) of whole-px points, never moving the line further than their rounding (half a px, and a little) */
 const COARSE_SIGMA = 3;
 const COARSE_WITHIN = 0.6;
-const within = (v: number[], raw: number[], d: number) => v.map((a, i) => Math.max(raw[i] - d, Math.min(raw[i] + d, a)));
+const within = (v: number[], raw: number[], d: number, from = 0) => { for (let i = from; i < v.length; i++) v[i] = Math.max(raw[i] - d, Math.min(raw[i] + d, v[i])); };
 /** the smoothing (screen px) at full stroke stabilization: at half, a 6 px loop moves less than 0.1 px and a shaky hand's line is calm */
 const STAB_PX = 6;
 
@@ -287,32 +341,39 @@ function joinSamples(parts: { x: number[]; y: number[]; p: number[] }[]): { x: n
 /**
  * A Gaussian (σ in samples) along the samples. Towards either end over as many on each side as
  * there are, so the ends stay where the pen was — or, `oneSided` (the pressure), over what there is
- * on either side, so the ends are smoothed too.
+ * on either side, so the ends are smoothed too. From `from` on only, into `out` (what it has before
+ * kept: inkRuns' cache).
  */
-function gauss(v: number[], sigma: number, oneSided = false): number[] {
+function gauss(v: number[], sigma: number, oneSided = false, from = 0, out?: number[]): number[] {
   const n = v.length, K = Math.ceil(2.5 * sigma);
-  if (sigma < 0.3 || n < 3) return v.slice();
+  const res = out ?? new Array<number>(n);
+  res.length = n;
+  if (sigma < 0.3 || n < 3) { for (let i = from; i < n; i++) res[i] = v[i]; return res; }
   const wt = Array.from({ length: K + 1 }, (_, k) => Math.exp(-(k * k) / (2 * sigma * sigma)));
-  const out = new Array<number>(n);
-  for (let i = 0; i < n; i++) {
+  for (let i = from; i < n; i++) {
     const lo = oneSided ? Math.min(K, i) : Math.min(K, i, n - 1 - i), hi = oneSided ? Math.min(K, n - 1 - i) : lo;
     let s = wt[0] * v[i], ws = wt[0];
     for (let j = 1; j <= lo; j++) { s += wt[j] * v[i - j]; ws += wt[j]; }
     for (let j = 1; j <= hi; j++) { s += wt[j] * v[i + j]; ws += wt[j]; }
-    out[i] = s / ws;
+    res[i] = s / ws;
   }
-  return out;
+  return res;
 }
 
 /**
  * Smoothed without shrinking (Tukey's twicing: 2·G(v) − G(G(v))): a Gaussian alone pulls every curve
  * in towards its centre (by σ²/2r — the small loops of handwriting most), which showed as the ink
  * contracting; this takes out the jitter as the Gaussian does but keeps curves where they were.
+ * From `from` on only, into `out` (gauss).
  */
-function twice(v: number[], sigma: number): number[] {
-  if (sigma < 0.3) return v.slice();
-  const g = gauss(v, sigma), gg = gauss(g, sigma);
-  return g.map((a, i) => 2 * a - gg[i]);
+function twice(v: number[], sigma: number, from = 0, out?: number[]): number[] {
+  const n = v.length;
+  const res = out ?? new Array<number>(n);
+  res.length = n;
+  if (sigma < 0.3) { for (let i = from; i < n; i++) res[i] = v[i]; return res; }
+  const g = gauss(v, sigma, false, Math.max(0, from - Math.ceil(2.5 * sigma))), gg = gauss(g, sigma, false, from);
+  for (let i = from; i < n; i++) res[i] = 2 * g[i] - gg[i];
+  return res;
 }
 
 /** Ramer–Douglas–Peucker: the points no further than `tol` from the line kept without them dropped (the ends kept) */
@@ -355,6 +416,24 @@ export function inkPaths(runs: InkRun[], dx = 0, dy = 0): { w: number; d: string
   const by = new Map<number, string>();
   for (const r of runs) by.set(r.w, (by.get(r.w) ?? '') + runPathD(r, dx, dy));
   return [...by].map(([w, d]) => ({ w, d }));
+}
+
+/** samples in a chunk of a stroke being drawn (FreeOpts.chunk): a little more than the smoothing reaches back */
+export const LIVE_CHUNK = 96;
+
+/**
+ * The stroke being drawn as paths: those of each chunk (FreeOpts.chunk) one after the other, one for
+ * each width in it — the paths of the chunks drawn already come out the same frame after frame.
+ */
+export function chunkPaths(runs: InkRun[]): { w: number; d: string }[] {
+  const out: { w: number; d: string }[] = [];
+  let from = 0;
+  for (let i = 1; i <= runs.length; i++) {
+    if (i < runs.length && runs[i].k === runs[from].k) continue;
+    out.push(...inkPaths(runs.slice(from, i)));
+    from = i;
+  }
+  return out;
 }
 
 /** the box the stroke paints (its points, and half its width round them) */

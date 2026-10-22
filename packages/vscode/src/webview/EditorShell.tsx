@@ -594,7 +594,8 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       leading: [{ id: 'new', title: 'New document', icon: 'new', action: () => hostCommand('newFile') }, { id: 'open', title: 'Open', icon: 'open', action: () => hostCommand('openFile') }],
       navigation: [{ id: 'navback', title: 'Navigate back', icon: 'navback', action: () => hostCommand('back') }],
       sidebars: [{ id: 'outline', title: 'Outline (sections: click to jump, move and promote / demote them)', icon: 'outline', action: () => setShowOutline(s => !s), active: showOutline }],
-      tools: [{ id: 'ink', title: 'Draw in the margins — pen, highlighter, eraser, lasso; a pen draws on a margin right away', icon: 'ink', action: () => setInkMode(m => !m), active: inkMode }, { id: 'comments-panel', title: 'Comments', icon: 'notes', action: () => setShowComments(s => !s), active: showComments }],
+      tools: [{ id: 'ink', title: inkMode && getInk().folded ? 'Margin drawing is on — click for the pens, colours and widths again' : 'Draw in the margins — pen, highlighter, eraser, lasso; a pen draws on a margin right away', icon: 'ink',
+        action: () => { if (inkMode && getInk().folded) setInk({ folded: false }); else setInkMode(m => !m); }, active: inkMode }, { id: 'comments-panel', title: 'Comments', icon: 'notes', action: () => setShowComments(s => !s), active: showComments }],
       pdf: activeMeta?.master ? [{ id: 'pdfmaster', title: 'View master document', icon: 'viewmaster', action: () => vscode.postMessage({ type: 'openDoc', id: activeMeta.master! }) }] : [],
     },
   });
@@ -874,7 +875,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
         [tb.showMath && tbMode('mathpanels') !== 'off', 'mathpanels', <Toolbar id="mathpanels" label="Panels" groups={tb.mathPanels} />],
         [tb.showTable, 'table', <Toolbar id="table" label="Table" groups={tb.table} />],
         [tb.showReview, 'review', <Toolbar id="review" label="Review" groups={tb.review} />],
-        [inkMode, 'ink', <Toolbar id="ink" label="Draw" groups={inkGroups} />],
+        [inkMode && !getInk().folded, 'ink', <Toolbar id="ink" label="Draw" groups={inkGroups} />],
       ])} />}
       {/* the quick menu over selected words (toolbars.tsx `quick`) */}
       {!pdfOnly && <SelectionBar view={view} groups={tb.quick} />}

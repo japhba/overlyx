@@ -2978,7 +2978,7 @@ select.dl-zoom { appearance: none; -webkit-appearance: none; text-align: center;
 .dl-frame { position: absolute; top: 0; border: 0; transform-origin: 0 0; background: #fff; }
 .dl-editor[data-kind="deck"] .dl-frame, .dl-editor[data-kind="poster"] .dl-frame { background: transparent; }
 /* one slide on the canvas: placed by a transform from its corner (deliverable/viewport.ts) */
-.dl-frame.solo { top: 0; left: 0; }   /* (will-change only while it moves: viewport.ts motion — a layer kept at rest stays blurry on the iPad) */
+.dl-frame.solo { top: 0; left: 0; clip-path: inset(2px); }   /* (its outermost px: a scaled frame's edge row came out white, a stray line under the slide) */   /* (will-change only while it moves: viewport.ts motion — a layer kept at rest stays blurry on the iPad) */
 /* the slide pulled past an edge: a ring in the gap behind it fills as far as the pull has come (--k) and pops as
    the slide comes loose (deliverable/viewport.ts) */
 .dl-pull { position: absolute; left: -16px; top: -16px; width: 32px; height: 32px; z-index: 3; pointer-events: none; opacity: 0; --k: 0; }
@@ -3027,7 +3027,12 @@ select.dl-zoom { appearance: none; -webkit-appearance: none; text-align: center;
 .ol-newkind.active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-border); }
 .ol-newkind .ol-newthumb { background: #eef3fd; border: 1px solid var(--accent-border); border-radius: 3px; }
 .ol-newkind small { color: var(--ui-muted); font-size: 11px; text-align: center; }
-.ol-newkinds.four { grid-template-columns: repeat(4, 1fr); }
+/* the start page's five kinds (Home.tsx NewProjectDialog): one row, in a dialog a little wider than the usual */
+.ol-newkinds.five { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.dialog:has(.ol-newkinds.five) { width: min(600px, calc(100vw - 32px)); }
+/* (the thumbnails in a row of their own: the names on one line, however the hints below them wrap) */
+.ol-newkinds.five .ol-newkind { display: grid; grid-template-rows: 50px auto 1fr; justify-content: stretch; justify-items: center; align-items: center; align-content: start; }
+.ol-newkinds.five .ol-newkind small { align-self: start; }
 .ol-scientific-templates { border: 0; padding: 0; margin: 12px 0 18px; min-width: 0; }
 .ol-scientific-templates legend { font-size: 12px; color: var(--ui-muted); margin-bottom: 8px; }
 .ol-template-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
@@ -3039,10 +3044,16 @@ select.dl-zoom { appearance: none; -webkit-appearance: none; text-align: center;
 .ol-template-preview img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; box-shadow: 0 1px 3px #0002; }
 .ol-newkind { min-height: 116px; justify-content: flex-end; }
 .ol-newkind .ol-newthumb.empty { width: 34px; height: 26px; background: none; border: 1.5px dashed var(--ui-border); }
+/* the whiteboard's: a patch of its dotted canvas fading out at the edges (it has none), a stroke on it */
+.ol-newkinds .ol-newkind .ol-newthumb.board { width: 44px; height: 34px; border: 0; border-radius: 0; box-shadow: none;
+  background: radial-gradient(color-mix(in srgb, var(--accent) 60%, transparent) 0.9px, transparent 1.3px) 0 0 / 6px 6px;
+  -webkit-mask-image: radial-gradient(closest-side, #000 50%, transparent); mask-image: radial-gradient(closest-side, #000 50%, transparent); }
+.ol-newthumb.board svg { display: block; width: 100%; height: 100%; fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .dialog-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
 .dialog-hint { font-size: 12px; color: var(--ui-muted); margin: 6px 0; }
 .dialog-hint.error { color: var(--err); }
-@media (max-width: 560px) { .ol-newkinds.four { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 640px) { .ol-newkinds.five { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 420px) { .ol-newkinds.five { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 html[data-theme="dark"] .dl-canvas { background: #2a2c31; }
 /* the deck toolbar (deliverable/decktoolbar.tsx): the toolbars' own component in the deck's row — tools at the left,
    what fits the selection in the middle (scrolls sideways when the window is narrow; its palettes are fixed to the window),

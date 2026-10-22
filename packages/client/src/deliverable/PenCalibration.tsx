@@ -239,6 +239,7 @@ function PenCalibration({ onClose }: { onClose: () => void }) {
   }, [onClose]);
 
   const facts = useMemo(() => measure(traces), [traces]);
+  const hz = useFrameRate();
   // the pressure the hand writes with: drawn at the pen's width
   useEffect(() => { if (!usualByHand && facts?.usual != null && facts.usual !== nib.usual) setNib(n => ({ ...n, usual: facts.usual! })); }, [facts?.usual, usualByHand]);
 
@@ -386,6 +387,7 @@ function PenCalibration({ onClose }: { onClose: () => void }) {
               {!facts.pressure && facts.kind === 'the mouse or trackpad' && <div>No pressure came with it. A Mac's Force Touch trackpad tells it when you press to click and draw with the click held (not with tap to click or three-finger drag); Safari passes it on, other browsers may not.</div>}
             </>
           )}
+          {hz && <div data-pen-cal-hz>The screen shows the page {hz} times a second.{hz < 75 && appleTablet() ? ' An iPad Pro can show it 120 times: in Settings ▸ Safari ▸ Advanced ▸ Feature Flags (iPadOS 18: Settings ▸ Apps ▸ Safari ▸ Advanced ▸ Feature Flags) turn off "Prefer Page Rendering Updates near 60fps", then close OverLyX and open it again — the line follows the pen sooner.' : ''}</div>}
         </div>
         <div class="pen-cal-foot">
           <button type="button" class="pen-set-reset" data-pen-cal-reset onClick={() => { setUsualByHand(false); setWidth(pen.width); setNib({ ...DEFAULT_NIB, usual: facts?.usual ?? DEFAULT_NIB.usual }); }}>Reset to defaults</button>
@@ -406,3 +408,28 @@ export function openPenCalibration(): void {
   const close = () => { render(null, host); host.remove(); open = null; };
   render(<PenCalibration onClose={close} />, host);
 }
+
+/**
+ * How often the screen shows the page (its frames a second, from a second of them): Safari on an iPad
+ * Pro holds pages to 60 unless a feature flag is turned off — half as often as the screen could, which
+ * puts the line a frame further behind the pen.
+ */
+function useFrameRate(): number | null {
+  const [hz, setHz] = useState<number | null>(null);
+  useEffect(() => {
+    const ts: number[] = [];
+    let raf = 0;
+    const tick = (t: number) => {
+      ts.push(t);
+      if (ts.length < 61) { raf = requestAnimationFrame(tick); return; }
+      const d = ts.slice(1).map((v, i) => v - ts[i]).sort((a, b) => a - b)[30];
+      if (d > 0) setHz(Math.round(1000 / d / 10) * 10 || Math.round(1000 / d));
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  return hz;
+}
+
+/** an iPad (which says it is a Mac) or an iPhone, in Safari's engine */
+const appleTablet = () => typeof navigator !== 'undefined' && navigator.maxTouchPoints > 1 && /iPad|iPhone|Macintosh/.test(navigator.userAgent) && !/Chrome|CriOS|Firefox|FxiOS/.test(navigator.userAgent);

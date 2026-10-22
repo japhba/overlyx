@@ -26,8 +26,38 @@ function install(on: boolean): void {
     html.ol-solo :is(body, :has(> .slide)) { display: block !important; gap: 0 !important; padding: 0 !important; margin: 0 !important; transform: none !important; zoom: 1 !important;
       height: auto !important; min-height: 0 !important; max-height: none !important; overflow: visible !important; scroll-snap-type: none !important; }
     html.ol-solo .slide:not([${CUR}]) { display: none !important; }
-    html.ol-solo .slide[${CUR}] { margin: 0 !important; transform: none !important; }`;
+    html.ol-solo .slide[${CUR}] { margin: 0 !important; transform: none !important;
+      box-shadow: 0 0 0 calc(1px * var(--ol-px, 1)) rgba(0, 0, 0, 0.16), 0 calc(2px * var(--ol-px, 1)) calc(12px * var(--ol-px, 1)) rgba(0, 0, 0, 0.24) !important; }
+    :where(html.ol-solo:not(.ol-page-checker) .slide) { ${PAGE_BG} }`;
   document.head.appendChild(css);
+}
+
+/** no colour */
+const clear = (c: string) => !c || c === 'transparent' || /^rgba\(.*,\s*0(\.0+)?\)$/.test(c);
+
+/**
+ * Round the slide on the canvas and in the rail the editor's own colour is painted (view.ts, railDesk):
+ * the slide's edge is where the page ends (not 48 px further out, nor nowhere when the page and the
+ * slide are both white). A slide without a background of its own showed the page's, as it does when
+ * presented: it gets that, not the editor's colour (`PAGE_BG`: the least of rules — any of the page's
+ * own on its slides comes first).
+ */
+export const PAGE_BG = 'background-color: var(--ol-page-bg, #fff); background-image: var(--ol-page-img, none);';
+
+/** what the page paints round its slides (read with the editor's colour off for a moment: `ol-bg-read`), for PAGE_BG */
+export function notePageBackground(): void {
+  const root = document.documentElement;
+  root.classList.add('ol-bg-read');
+  const page = [document.body, root].map(el => getComputedStyle(el)).find(cs => cs.backgroundImage !== 'none' || !clear(cs.backgroundColor));
+  const color = page?.backgroundColor ?? '', img = page?.backgroundImage ?? 'none';
+  root.classList.remove('ol-bg-read');
+  root.style.setProperty('--ol-page-bg', !clear(color) ? color : img !== 'none' ? 'transparent' : '#fff');
+  root.style.setProperty('--ol-page-img', img);
+}
+
+/** the slide's edge in screen px, whatever the zoom (`scale`: screen px per px of the page) — zoomed far out (a poster), thinner: it stays inside the room round the slide */
+export function soloScale(scale: number): void {
+  document.documentElement.style.setProperty('--ol-px', String(Math.round(Math.min(3.5, 1 / (scale > 0 ? scale : 1)) * 1000) / 1000));
 }
 
 /** the slide shown (its index) */
@@ -57,6 +87,7 @@ export function ensureSolo(): void {
   const on = isSolo();
   install(on);
   if (!on) return;
+  notePageBackground();
   const ss = slides();
   const shown = ss.filter(s => s.hasAttribute(CUR));
   if (shown.length === 1) {

@@ -9,7 +9,7 @@
  */
 
 /** [x, y, pressure 0..1]; pressure 0 means "unknown" (a mouse) and draws at half width. */
-import { inkRuns, inkPaths, type NibOpts } from './freehand.ts';
+import { inkRuns, inkPaths, chunkPaths, LIVE_CHUNK, type NibOpts, type InkCache } from './freehand.ts';
 export type InkPts = [number, number, number][];
 
 export interface InkStroke {
@@ -28,12 +28,18 @@ export interface InkStroke {
   poly?: true;
 }
 
-/** One shared stroke engine for layouts, document margins and whiteboards. */
-export function strokeRuns(stroke: InkStroke): { w: number; d: string }[] | null {
+/**
+ * One shared stroke engine for layouts, document margins and whiteboards. `live`: the stroke is being
+ * drawn — the same object at every call (freehand.ts InkCache): only its end is worked out again, and
+ * it comes in chunks whose paths stay the same as it grows (chunkPaths).
+ */
+export function strokeRuns(stroke: InkStroke, live?: InkCache): { w: number; d: string }[] | null {
   if (stroke.poly) return stroke.pts.length ? [{ w: stroke.w, d: stroke.pts.map(([x, y], i) => `${i ? 'L' : 'M'}${r2(x)} ${r2(y)}`).join('') + (stroke.pts.length === 1 ? `L${r2(stroke.pts[0][0])} ${r2(stroke.pts[0][1])}` : '') }] : null;
   if (!stroke.nib) return null;
-  return inkPaths(inkRuns(stroke.pts, { width: stroke.w, highlighter: stroke.o !== undefined && stroke.o < 1, pressure: stroke.pressure, nib: stroke.nib, final: true }));
+  const runs = inkRuns(stroke.pts, { width: stroke.w, highlighter: stroke.o !== undefined && stroke.o < 1, pressure: stroke.pressure, nib: stroke.nib, final: true, ...(live ? { cache: live, chunk: LIVE_CHUNK } : {}) });
+  return live ? chunkPaths(runs) : inkPaths(runs);
 }
+
 
 /** The lines and shapes of the Draw row: the layout editor's (deck toolbar's Lines and Shapes). */
 export const INK_SHAPES = ['line', 'arrow', 'rect', 'roundrect', 'ellipse', 'triangle', 'diamond', 'star', 'hexagon'] as const;

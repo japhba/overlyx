@@ -94,13 +94,26 @@ export const VIEW_HOLD: Record<ViewFit, number> = { fit: Math.log(1.35), width: 
 export const CONTENT_SIDE = 16;
 
 /**
+ * The canvas round a fitted slide (screen px each side): a strip of it shows on all four sides, so the
+ * slide reads as a page with edges — fitted edge to edge, its sides were the canvas' own and it looked
+ * like a whiteboard without end.
+ */
+export const fitGap = (box: Size): number => (box.w < 600 ? 8 : 12);
+
+/** the scale (frame px → screen px) that shows the whole slide, the canvas' gap round it, at most 2 (Fit width keeps the gap at the sides too) */
+export function fitScale(box: Size, slide: Size): number {
+  const g = 2 * fitGap(box);
+  return Math.max(0.05, Math.min(2, (box.w - g) / slide.w, (box.h - g) / slide.h));
+}
+
+/**
  * The levels' scales (frame px → screen px) for a `slide`-sized slide whose content is `content` (none:
- * nothing on it) on a `box`-sized canvas, none past `max`. Fit is the editor's: edge to edge, at most 2.
+ * nothing on it) on a `box`-sized canvas, none past `max`. Fit is the editor's (fitScale).
  */
 export function viewLevels(box: Size, slide: Size, content: Size | null, max: number): ViewLevels {
-  const fit = Math.max(0.05, Math.min(2, box.w / slide.w, box.h / slide.h));
+  const fit = fitScale(box, slide);
   const cap = (z: number) => Math.max(0.05, Math.min(max, z));
-  const out: ViewLevels = { fit, width: cap(box.w / slide.w) };
+  const out: ViewLevels = { fit, width: cap((box.w - 2 * fitGap(box)) / slide.w) };
   if (content && content.w >= 1 && content.h >= 1) {
     const w = Math.max(1, box.w - 2 * CONTENT_SIDE), h = Math.max(1, box.h - 2 * CONTENT_SIDE);
     out.content = cap(Math.min(w / content.w, h / content.h));

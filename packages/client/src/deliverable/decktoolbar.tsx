@@ -87,6 +87,8 @@ export interface DeckCtx {
    */
   ink: {
     presets: DeckInk; set(p: DeckInkPatch): void; draw(on: boolean): void; open?: boolean;
+    /** the Draw row shown again or folded away, what is in hand kept (drawingToolbar `picked`); `held`: folded so */
+    fold?(folded: boolean): void; held?: boolean;
     lassoColors?(): string[]; thicken?(k: number): void; convert?(as: 'shapes' | 'notes' | 'formula'): void;
   };
 }
@@ -269,9 +271,11 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
   const one = sel.length === 1 ? sel[0] : null;
   const shapeTool = SHAPES.find(s => s.tool === c.tool);
   const lineTool = LINES.find(s => s.tool === c.tool);
-  // Draw's row: while Draw is open (its button, P, E, S) — not when the Pencil just drew by itself
+  // Draw's row: while Draw is open (its button, P, E, S) — not when the Pencil just drew by itself, nor once
+  // something was picked in it (folded away, the pen still in hand: `held`)
   const drawTool = c.tool === 'pen' || c.tool === 'eraser' || c.tool === 'lasso';
   const drawing = drawTool && c.ink.open !== false;
+  const held = drawTool && !drawing && !!c.ink.held && !!c.ink.fold;
 
   const tools: ToolButton[][] = [
     [
@@ -285,7 +289,8 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
         palette: { title: 'Shapes', cols: 4, items: SHAPES.map(s => ({ label: s.label, html: ICON(`dk-${s.tool}`), active: c.tool === s.tool, action: () => c.setTool(s.tool) })) } },
       { id: 'dk-lines', title: 'Lines (L line, A arrow, B Bézier path)', icon: lineTool ? `dk-${lineTool.tool}` : 'dk-line', active: !!lineTool, disabled: ro,
         palette: { title: 'Lines', cols: 4, items: LINES.map(s => ({ label: s.label, html: ICON(`dk-${s.tool}`), active: c.tool === s.tool, action: () => c.setTool(s.tool) })) } },
-      { id: 'dk-draw', title: drawing ? 'Done drawing (Esc)' : 'Draw (P) — pen, highlighter, eraser and lasso, stroke after stroke until Esc (a Pencil draws without it)', icon: 'dk-draw', active: drawing, disabled: ro, action: () => c.ink.draw(!drawing) },
+      { id: 'dk-draw', title: drawing ? 'Done drawing (Esc)' : held ? 'Drawing — click for the pens, colours and widths again (Esc or V puts the pen away)' : 'Draw (P) — pen, highlighter, eraser and lasso, stroke after stroke until Esc (a Pencil draws without it)',
+        icon: 'dk-draw', active: drawing || held, disabled: ro, action: () => { if (held) c.ink.fold!(false); else c.ink.draw(!drawing); } },
       { id: 'dk-image', title: 'Picture… (or drop a picture or an SVG on the slide)', icon: 'dk-image', action: c.insertImage, disabled: ro },
       { id: 'dk-formula', title: c.editingText ? 'Formula here, in the text (Ctrl+M or $; Ctrl+Shift+M displayed)' : 'Formula — click or drag on the slide; while typing a text, Ctrl+M or $ puts one in it', icon: 'dk-formula',
         action: () => { if (c.editingText) c.math.insert(false); else c.setTool('formula'); }, active: c.tool === 'formula' || c.math.editing, disabled: ro },
@@ -299,9 +304,11 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
   if (ro) return { tools, context: [], sections: [] };
   if (c.math.editing) { const g = mathGroups(c); return { tools, context: g, sections: [{ label: 'Formula', groups: g }] }; }
   if (c.nodes.editing) { const g = nodeGroups(c); return { tools, context: g, sections: [{ label: 'Points', groups: g }] }; }
-  const drawRow = drawing ? drawingToolbar({ ...c, lasso: { kinds: [...LASSO_KINDS], colors: () => c.ink.lassoColors?.() ?? [] } }) : null;
+  const drawRow = drawing ? drawingToolbar({ ...c, lasso: { kinds: [...LASSO_KINDS], colors: () => c.ink.lassoColors?.() ?? [] }, picked: c.ink.fold && (() => c.ink.fold!(true)) }) : null;
   // (the lasso's catch: its own tools after Draw's)
   if (drawRow && !(c.tool === 'lasso' && sel.length)) return { tools, context: drawRow, sections: [{ label: 'Draw', groups: drawRow }] };
+  // (folded away while drawing: nothing over the canvas — not the slide's tools in its place)
+  if (held && !(c.tool === 'lasso' && sel.length)) return { tools, context: [], sections: [] };
   const sections: ToolSection[] = [];
   let context: ToolButton[][] = [];
   // the selected object's suggestion: accepted or rejected here, before its own tools
