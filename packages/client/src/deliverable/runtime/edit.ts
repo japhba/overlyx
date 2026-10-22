@@ -38,6 +38,7 @@ import { chipify, unchip, openChip, openChipEl, chipOpening, holdKey, holdAfter,
 import { initPaths, isNodeEditing, nodesAfterSource, nodesTargetOf, startNodesOrConvert, endNodes, redrawNodes, penDown, penMove, penUp, penCancelPress, penKey, penDouble, penCancel, isPenDrawing, setMenuShape } from './pathedit';
 import { isSolo, showSlide, soloIndex, revealSlideOf, soloScale } from './solo';
 import { inkRuns, inkPaths, chunkPaths, runsBox, freshPoint, LIVE_CHUNK, type FreePt, type InkRun, type InkCache } from './freehand';
+import { penRateMeter } from '../../app/penrate';
 import { pointPressure, pressed, watchForce } from './pressure';
 import { scratchOut, scribbleCusps, SCRATCH_HOLD_MS, SCRATCH_HOLD_PX } from '@overlyx/core/scratchout.ts';
 import { snapShape, SNAP_HOLD_MS, SNAP_LEAVE_PX, type Snapped } from '@overlyx/core/shapesnap.ts';
@@ -2400,6 +2401,8 @@ let ink: {
   snapTimer: ReturnType<typeof setTimeout> | null; snapped: Snapped | null;
   /** what the last frame made of the stroke (freehand.ts InkCache): only its end is worked out again */
   cache: InkCache;
+  /** a pen's: its moves and the page's frames a second (app/penrate.ts; the editor tells an iPad held to 60 Hz how to change it) */
+  rate: ReturnType<typeof penRateMeter> | null;
 } | null = null;
 /** strokes drawn and sent to the editor, shown until the page has them (`count`: that many strokes the slide will have then) */
 const sentInk: { svg: SVGSVGElement; slide: HTMLElement | null; count: number; timer: ReturnType<typeof setTimeout> }[] = [];
@@ -2429,7 +2432,7 @@ function startInk(e: PointerEvent, slide: HTMLElement | null): void {
   svg.append(g);
   (slide ?? document.body).append(svg);
   ink = { slide, pts: [inkPoint(e, slide)], client: [[e.clientX, e.clientY]], pressure: e.pointerType === 'pen', svg, g, frame: 0, t: e.timeStamp, whole: wholePx(e), k: docScale(slide ?? document.body), kind: e.pointerType, p0: pointPressure(e),
-    rest: { x: e.clientX, y: e.clientY, t: performance.now(), timer: null }, judged: 0, cands: null, snapTimer: null, snapped: null, cache: {},
+    rest: { x: e.clientX, y: e.clientY, t: performance.now(), timer: null }, judged: 0, cands: null, snapTimer: null, snapped: null, cache: {}, rate: e.pointerType === 'pen' ? penRateMeter(e.timeStamp) : null,
     watch: navigator.maxTouchPoints > 0 ? new StrokeWatch('deck', e.pointerType, { w: innerWidth, h: innerHeight }) : null };
   ink.watch?.add(e.clientX, e.clientY, e.timeStamp, 'down', scrollX, scrollY);
   paintInk(true);
@@ -2445,6 +2448,7 @@ function inkPaint(): Record<string, string> {
 /** the pen moved: every point it passed (the coalesced events), drawn at the next frame */
 function moveInk(e: PointerEvent): void {
   if (!ink) return;
+  ink.rate?.move();
   const evs = e.getCoalescedEvents?.() ?? [];
   for (const ev of evs.length ? evs : [e]) takeInk(ev, evs.length ? 'coalesced' : 'move');
   // snapped into a shape: it stays while the pen rests; moving on (it only paused, at a corner say) takes the stroke back as drawn
@@ -2583,6 +2587,8 @@ function endInk(e: PointerEvent): void {
   if (e.timeStamp >= ink.t && Math.hypot(up[0] - last[0], up[1] - last[1]) > 0.5) { ink.pts.push([up[0], up[1], last[2]]); ink.watch?.add(e.clientX, e.clientY, e.timeStamp, 'up', scrollX, scrollY); }
   const glitch = ink.watch?.end();
   if (glitch) post({ ol: 'glitch', fields: glitch });
+  const rate = ink.rate?.end(e.timeStamp);
+  if (rate) post({ ol: 'penRate', ...rate });
   // a scribble over strokes erases them (core/scratchout.ts; the pen resting at its end: scratch and hold)
   if (ink.rest.timer) clearTimeout(ink.rest.timer);
   if (ink.snapTimer) clearTimeout(ink.snapTimer);
@@ -2629,6 +2635,7 @@ function penPutAway(): void {
 /** the stroke being drawn given up (a second finger, a cancelled pointer) */
 function dropInk(): void {
   if (!ink) return;
+  ink.rate?.end(0);
   if (ink.frame) cancelAnimationFrame(ink.frame);
   if (ink.rest.timer) clearTimeout(ink.rest.timer);
   if (ink.snapTimer) clearTimeout(ink.snapTimer);

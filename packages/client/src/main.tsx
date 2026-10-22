@@ -8,6 +8,7 @@ import { isBenignBrowserError } from './error-reporting';
 import { initUsage, recordUsage, noticeTemplate } from './usage';
 import { initGlitchWatch } from './glitches';
 import { initZoomLock } from './zoomlock';
+import { watchPenStrokes } from './app/promotion';
 import { currentMathFont, onMathRendererChange } from './editor/lyxmath/mathjax';
 import { warmOfflineResponses } from './offline-warm';
 import './styles.css';
@@ -19,6 +20,7 @@ render(<App />, document.getElementById('app')!);
 initUsage();   // anonymous usage statistics (usage.ts): the session, screen changes, flushing on leave
 initZoomLock();   // the page never zooms, its views do (zoomlock.ts)
 initGlitchWatch();   // on a touch screen: the interface scrolled out of place, strokes that jump (glitches.ts)
+watchPenStrokes();   // an iPad held to 60 Hz while its screen does 120: said once how to change it (promotion.ts)
 
 // Errors that escape (a node view, a promise nobody awaited) must not vanish in the console: show
 // them. The same message is shown at most once per 5 s.

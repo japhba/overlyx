@@ -13,6 +13,8 @@
  */
 import { render } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { appleTablet } from '../app/penrate';
+import { HZ120_STEPS } from '../app/promotion';
 import type { Nib } from './protocol';
 import { DECK_INK_WIDTH_CHOICES, DEFAULT_NIB, loadDeckInk, patchDeckInk, saveDeckInk, type DeckInkPatch } from './deckink';
 import { freshPoint, inkPaths, inkRuns, usualPressure, type FreePt } from './runtime/freehand';
@@ -387,7 +389,7 @@ function PenCalibration({ onClose }: { onClose: () => void }) {
               {!facts.pressure && facts.kind === 'the mouse or trackpad' && <div>No pressure came with it. A Mac's Force Touch trackpad tells it when you press to click and draw with the click held (not with tap to click or three-finger drag); Safari passes it on, other browsers may not.</div>}
             </>
           )}
-          {hz && <div data-pen-cal-hz>The screen shows the page {hz} times a second.{hz < 75 && appleTablet() ? ' An iPad Pro can show it 120 times: in Settings ▸ Safari ▸ Advanced ▸ Feature Flags (iPadOS 18: Settings ▸ Apps ▸ Safari ▸ Advanced ▸ Feature Flags) turn off "Prefer Page Rendering Updates near 60fps", then close OverLyX and open it again — the line follows the pen sooner.' : ''}</div>}
+          {hz && <div data-pen-cal-hz>The screen shows the page {hz} times a second.{hz < 75 && appleTablet() ? ` An iPad Pro can show it 120 times, and the line follows the pen sooner: only you can switch that on. ${HZ120_STEPS}` : ''}</div>}
         </div>
         <div class="pen-cal-foot">
           <button type="button" class="pen-set-reset" data-pen-cal-reset onClick={() => { setUsualByHand(false); setWidth(pen.width); setNib({ ...DEFAULT_NIB, usual: facts?.usual ?? DEFAULT_NIB.usual }); }}>Reset to defaults</button>
@@ -431,5 +433,3 @@ function useFrameRate(): number | null {
   return hz;
 }
 
-/** an iPad (which says it is a Mac) or an iPhone, in Safari's engine */
-const appleTablet = () => typeof navigator !== 'undefined' && navigator.maxTouchPoints > 1 && /iPad|iPhone|Macintosh/.test(navigator.userAgent) && !/Chrome|CriOS|Firefox|FxiOS/.test(navigator.userAgent);

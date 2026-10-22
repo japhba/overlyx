@@ -63,6 +63,7 @@ import { EditModeSwitch, type EditMode } from '../app/EditModeSwitch';
 import { useDarkPagesState, toggleDarkPages, invertedColor, deskBeside, DARK_DESK } from '../app/darkpages';
 import { recordReliability, recordInteraction } from '../usage';
 import { reportJump } from '../glitches';
+import { notePenStroke } from '../app/promotion';
 import { canvasInteraction, type InteractionOutcome } from '@overlyx/core/interactions.ts';
 import { saveReliabilityEvent } from './reliability';
 import { makeReliabilityDetail, type ReliabilityEvent } from '@overlyx/core/reliability.ts';
@@ -869,6 +870,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
           }
           break;
         case 'glitch': if (fromCanvas && m.fields?.engine === 'deck') reportJump(m.fields); break;
+        case 'penRate': if (fromCanvas && Number.isFinite(m.moves) && Number.isFinite(m.frames)) notePenStroke({ moves: m.moves, frames: m.frames }); break;
         case 'words': if (fromCanvas) setWords(m.rect || m.choosing ? { rect: m.rect, style: m.style, choosing: m.choosing } : null); break;
         case 'editing':
           if (!fromCanvas) break;
