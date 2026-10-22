@@ -8,7 +8,7 @@
 import { describe, it, expect } from 'vitest';
 import { objectHtml, inlineSvgHtml, penPathD } from '../packages/client/src/deliverable/sourceops.ts';
 import { loadDeckInk, saveDeckInk, patchDeckInk, deckInkStyle, defaultDeckInk, DEFAULT_NIB, hexColor, colorsPass, setLassoColors } from '../packages/client/src/deliverable/deckink.ts';
-import { inkRuns, runPathD, runsBox, inkPaths, freshPoint, pressureWidth, type FreePt, type InkRun } from '../packages/client/src/deliverable/runtime/freehand.ts';
+import { inkRuns, runPathD, runsBox, inkPaths, freshPoint, pressureWidth, usualPressure, type FreePt, type InkRun } from '../packages/client/src/deliverable/runtime/freehand.ts';
 import { applyOp, opSplices, parseSource, rebaseOp } from '../packages/core/src/html/source.ts';
 
 describe('objects drawn on a slide', () => {
@@ -172,6 +172,39 @@ describe("Draw's strokes as GoodNotes draws them (runtime/freehand.ts)", () => {
     expect(full).toBeLessThan(as * 0.45);
   });
 
+  it("rounding: 0 joins the pen's points straight (whole-px steps and all), more rounds corners; strokes from before round fully", () => {
+    // a square drawn at 240 Hz in whole px, slowing into each corner
+    const square: FreePt[] = [];
+    const sides: [number, number][] = [[0, 0], [30, 0], [30, 30], [0, 30], [0, 0]];
+    for (let s = 0; s < 4; s++) for (let i = s ? 1 : 0; i <= 36; i++) {
+      const u = i / 36, f = 10 * u ** 3 - 15 * u ** 4 + 6 * u ** 5, [ax, ay] = sides[s], [bx, by] = sides[s + 1];
+      square.push([Math.round(100 + ax + (bx - ax) * f), Math.round(100 + ay + (by - ay) * f), 0.3]);
+    }
+    const cut = (runs: InkRun[]) => Math.min(...all(runs).map(([x, y]) => Math.hypot(x - 130, y - 100)));
+    const at = (rounding?: number) => inkRuns(square, { width: 4, pressure: true, coarse: true, nib: { sensitivity: 0.25, ...(rounding === undefined ? {} : { rounding }) }, final: true });
+    expect(cut(at(0))).toBeLessThan(0.01);
+    expect(cut(at(0.3))).toBeLessThan(0.3);
+    expect(cut(at(1))).toBeGreaterThan(0.6);
+    expect(cut(at())).toBeCloseTo(cut(at(1)), 5);
+    // straight from point to point: a sparse zig-zag's legs are straight lines
+    const zig: FreePt[] = [[0, 0, 0.3], [10, 10, 0.3], [20, 0, 0.3], [30, 12, 0.3], [40, 0, 0.3], [50, 8, 0.3]];
+    const leg = all(inkRuns(zig, { width: 2, nib: { rounding: 0 } })).filter(([x]) => x > 20 && x < 30);
+    for (const [x, y] of leg) expect(Math.abs(y - (x - 20) * 1.2)).toBeLessThan(0.01);
+    const curved = all(inkRuns(zig, { width: 2, nib: { rounding: 1 } })).filter(([x]) => x > 20 && x < 30);
+    expect(Math.max(...curved.map(([x, y]) => Math.abs(y - (x - 20) * 1.2)))).toBeGreaterThan(0.2);
+  });
+
+  it("the usual pressure: drawn at the nominal width; measured as the median of a hand's strokes", () => {
+    expect(pressureWidth(0.25, 1)).toBeCloseTo(1, 6);
+    expect(pressureWidth(0.4, 1, 0.4)).toBeCloseTo(1, 6);
+    expect(pressureWidth(0.4, 1)).toBeGreaterThan(1.1);
+    const press = (p: number) => inkRuns(Array.from({ length: 80 }, (_, i) => [i * 2, 0, p] as FreePt), { width: 4, pressure: true, nib: { sensitivity: 1, usual: 0.5 } });
+    expect(press(0.5)[0].w).toBe(4);
+    expect(usualPressure([[]])).toBeNull();
+    const stroke = (p: number): FreePt[] => Array.from({ length: 40 }, (_, i) => [i, 0, i < 3 ? 0.02 : p]);
+    expect(usualPressure([stroke(0.3), stroke(0.4), stroke(0.42)])).toBe(0.4);
+  });
+
   it("takes each of the pen's points once, in order: Safari's coalesced events repeat the last move's (A B A C D C)", () => {
     const pts: FreePt[] = [];
     let t = -1;
@@ -257,12 +290,14 @@ describe("Draw's pens (deckink.ts)", () => {
     expect(deckInkStyle(patchDeckInk(ink, { pen: 'highlighter' })).nib).toBeUndefined();
   });
 
-  it("the pen's settings (GoodNotes'): 0, 25 %, 0, 0 to start with; changed one at a time, each between 0 and 1", () => {
-    expect(defaultDeckInk().nib).toEqual({ ball: false, sharpness: 0, sensitivity: 0.25, flatness: 0, stabilization: 0 });
+  it("the pen's settings (GoodNotes'): 0, 25 %, 0, 0 to start with, a little rounding; changed one at a time, each between 0 and 1", () => {
+    expect(defaultDeckInk().nib).toEqual({ ball: false, sharpness: 0, sensitivity: 0.25, flatness: 0, stabilization: 0, rounding: 0.3, usual: 0.25 });
     const a = patchDeckInk(defaultDeckInk(), { nib: { ball: true } });
     expect(a.nib.ball).toBe(true);
     const b = patchDeckInk(a, { nib: { sharpness: 0.5, flatness: 7, stabilization: -1 } });
-    expect(b.nib).toEqual({ ball: true, sharpness: 0.5, sensitivity: 0.25, flatness: 0, stabilization: 0 });
+    expect(b.nib).toEqual({ ball: true, sharpness: 0.5, sensitivity: 0.25, flatness: 0, stabilization: 0, rounding: 0.3, usual: 0.25 });
+    // (the usual pressure measured: never 0 or 1, where every width would be off)
+    expect(patchDeckInk(b, { nib: { usual: 0, rounding: 0 } }).nib).toMatchObject({ usual: 0.05, rounding: 0 });
     // (another change leaves them as they are)
     expect(patchDeckInk(b, { color: '#123456' }).nib).toEqual(b.nib);
     saveDeckInk(b);

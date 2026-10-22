@@ -52,11 +52,11 @@ export function drawingToolbar(c: DrawingContext): ToolButton[][] {
   const takePen = (p: DeckInkPatch) => { c.ink.set(p); c.setTool('pen'); };
   return [
     [
-      { id: 'dk-ink-pen', title: `${ink.nib.ball ? 'Ball pen' : 'Fountain pen'} (P) — with its own colour and width; click it again for its settings: fountain or ball pen, tip, pressure, stabilization, draw and hold for shapes`,
+      { id: 'dk-ink-pen', title: `${ink.nib.ball ? 'Ball pen' : 'Fountain pen'} (P) — with its own colour and width; click it again for its settings: fountain or ball pen, tip, pressure, stabilization, rounding, draw and hold for shapes, calibration`,
         icon: ink.nib.ball ? 'inkball' : 'inkpen', active: c.tool === 'pen' && !hl, action: () => takePen({ pen: 'pen' }),
         paletteWhenActive: true,
-        palette: { title: 'Pen', render: () => <PenSettings nib={ink.nib} color={ink.pens.pen.color} width={ink.pens.pen.width} habits={{ scribble: ink.scribble, fingersDraw: ink.fingersDraw, pencil: ink.pencil, penInks: ink.penInks, snap: ink.snap }}
-          onChange={nib => takePen({ pen: 'pen', nib })} onHabits={h => c.ink.set(h)} /> } },
+        palette: { title: 'Pen', render: close => <PenSettings nib={ink.nib} color={ink.pens.pen.color} width={ink.pens.pen.width} habits={{ scribble: ink.scribble, fingersDraw: ink.fingersDraw, pencil: ink.pencil, penInks: ink.penInks, snap: ink.snap }}
+          onChange={nib => takePen({ pen: 'pen', nib })} onHabits={h => c.ink.set(h)} onClose={close} /> } },
       { id: 'dk-ink-hl', title: 'Highlighter — with its own colour and width; what is under it shows through (draw and hold: a straight one)', icon: 'inkhl', active: c.tool === 'pen' && hl, action: () => takePen({ pen: 'highlighter' }) },
       { id: 'dk-ink-eraser', title: `Eraser (E) — ${ink.eraser.precise ? 'rubs out the part of a stroke it passes over' : 'removes the strokes it passes over'} (drawn ones: shapes and text stay); click it again for its settings: precise, size, highlighter only`,
         icon: 'inkeraser', active: erasing, action: () => c.setTool('eraser'),

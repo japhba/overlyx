@@ -23,7 +23,7 @@ export const ERASER_PX = [5, 10, 20] as const;
 export interface DeckInk {
   pen: DeckPen;
   pens: Record<DeckPen, DeckPenSet>;
-  /** the pen's settings (GoodNotes'): ball or fountain, tip, pressure, stabilization */
+  /** the pen's settings (GoodNotes'): ball or fountain, tip, pressure, stabilization, rounding, the usual pressure */
   nib: Nib;
   /** a Pencil has drawn in this browser: fingers move the slide (unless `fingersDraw`) */
   pencil: boolean;
@@ -45,9 +45,13 @@ export const DECK_INK_WIDTH_CHOICES: Record<DeckPen, number[]> = { pen: [1, 2, 3
 
 const KEY = 'ol.deckInk';
 
-/** the pen as it comes: a fountain pen with round ends, a little pressure, a round tip, no smoothing */
-export const DEFAULT_NIB: Nib = { ball: false, sharpness: 0, sensitivity: 0.25, flatness: 0, stabilization: 0 };
-const NIB_LEVELS = ['sharpness', 'sensitivity', 'flatness', 'stabilization'] as const;
+/**
+ * the pen as it comes: a fountain pen with round ends, a little pressure, a round tip, no smoothing,
+ * a little rounding (whole-px steps mostly gone, corners within a fifth of a px), the Pencil's usual
+ * pressure
+ */
+export const DEFAULT_NIB: Nib = { ball: false, sharpness: 0, sensitivity: 0.25, flatness: 0, stabilization: 0, rounding: 0.3, usual: 0.25 };
+const NIB_LEVELS = ['sharpness', 'sensitivity', 'flatness', 'stabilization', 'rounding', 'usual'] as const;
 const isLevel = (v: unknown): v is number => typeof v === 'number' && v >= 0 && v <= 1;
 
 /** a pen's settings with `p` taken over (each level kept between 0 and 1) */
@@ -56,6 +60,7 @@ function nibWith(n: Nib, p: Partial<Nib> | undefined): Nib {
   if (!p) return out;
   if (typeof p.ball === 'boolean') out.ball = p.ball;
   for (const k of NIB_LEVELS) if (isLevel(p[k])) out[k] = Math.round(p[k]! * 100) / 100;
+  out.usual = Math.max(0.05, Math.min(0.95, out.usual));
   return out;
 }
 

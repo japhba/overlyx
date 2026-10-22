@@ -2386,6 +2386,8 @@ function penLands(e: PointerEvent): void {
  */
 let ink: {
   slide: HTMLElement | null; pts: FreePt[]; client: [number, number][]; pressure: boolean; svg: SVGSVGElement; g: SVGGElement; frame: number; t: number; whole: boolean;
+  /** the frame's px per px of the slide (a poster fitted smaller: less than 1) */
+  k: number;
   /** scratch-out (core/scratchout.ts): where and since when the pen rests, when the scribble was last judged, the strokes it could erase */
   rest: { x: number; y: number; t: number; timer: ReturnType<typeof setTimeout> | null }; judged: number; cands: { el: Element; pts: [number, number][] }[] | null;
   /** on a touch screen: its points as the screen had them, for a point far off (core glitch.ts; the editor reports it) */
@@ -2418,7 +2420,7 @@ function startInk(e: PointerEvent, slide: HTMLElement | null): void {
   for (const [k, v] of Object.entries(inkPaint())) g.setAttribute(k, v);
   svg.append(g);
   (slide ?? document.body).append(svg);
-  ink = { slide, pts: [inkPoint(e, slide)], client: [[e.clientX, e.clientY]], pressure: e.pointerType === 'pen', svg, g, frame: 0, t: e.timeStamp, whole: wholePx(e),
+  ink = { slide, pts: [inkPoint(e, slide)], client: [[e.clientX, e.clientY]], pressure: e.pointerType === 'pen', svg, g, frame: 0, t: e.timeStamp, whole: wholePx(e), k: docScale(slide ?? document.body),
     rest: { x: e.clientX, y: e.clientY, t: performance.now(), timer: null }, judged: 0, cands: null, snapTimer: null, snapped: null,
     watch: navigator.maxTouchPoints > 0 ? new StrokeWatch('deck', e.pointerType, { w: innerWidth, h: innerHeight }) : null };
   ink.watch?.add(e.clientX, e.clientY, e.timeStamp, 'down', scrollX, scrollY);
@@ -2539,7 +2541,8 @@ function paintInk(final: boolean): InkRun[] {
 }
 function inkRunsNow(final: boolean): InkRun[] {
   if (!ink) return [];
-  return inkRuns(ink.pts, { width: inkStyle.width, highlighter: inkStyle.opacity < 1, pressure: ink.pressure, zoom: scale, coarse: ink.whole && ink.pts.length > 4, nib: inkStyle.nib, final });
+  // (whole px are the frame's: 1/k px of the slide; the stabilization is in screen px, scale·k of them a px of the slide)
+  return inkRuns(ink.pts, { width: inkStyle.width, highlighter: inkStyle.opacity < 1, pressure: ink.pressure, zoom: scale * ink.k, coarse: ink.whole && ink.pts.length > 4 ? 1 / ink.k : false, nib: inkStyle.nib, final });
 }
 /** the live stroke's paths made these (those that did not change left alone) */
 function setInkPaths(paths: { w: number; d: string }[]): void {

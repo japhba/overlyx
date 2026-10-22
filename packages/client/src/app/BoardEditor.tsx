@@ -30,7 +30,7 @@ import { LassoBar, pasteGroups } from '../deliverable/InkSelectionBar';
 import { lassoTakes, usedColors, makeInkClip, holdInk, heldInk, pastedInk, rotatePts, rotationAngle, thickened, type InkClip } from '../deliverable/inkselect';
 import { snapShape, SNAP_HOLD_MS, SNAP_LEAVE_PX } from '@overlyx/core/shapesnap.ts';
 import { eraseAlong } from '@overlyx/core/inkerase.ts';
-import type { NibOpts } from '@overlyx/core/freehand.ts';
+import { freshPoint, type NibOpts } from '@overlyx/core/freehand.ts';
 import { scratchOut, SCRATCH_HOLD_MS, SCRATCH_HOLD_PX } from '@overlyx/core/scratchout.ts';
 import type { StrokeWatch } from '@overlyx/core/glitch.ts';
 import { strokeWatch, strokeEnded } from '../glitches';
@@ -128,6 +128,8 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
   const [readOnly, setReadOnly] = useState(false);
   const readOnlyRef = useRef(readOnly); readOnlyRef.current = readOnly;
   const liveRef = useRef<LiveStroke | null>(null);
+  /** when the live stroke's last point was given (freehand.ts freshPoint) */
+  const liveT = useRef(-Infinity);
   /** the pointer drawing the stroke (another's moves are not its points), and its points as the screen had them (glitches.ts) */
   const drawingRef = useRef<{ id: number; watch: StrokeWatch | null } | null>(null);
   /** scratch-out while the pen draws (core/scratchout.ts): the strokes it would erase now (faded), where and since when the pen rests */
@@ -429,6 +431,7 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
       endScratch();
       if (drawing.scribble && !hl) scratchRef.current = { hits: new Set(), rest: { x: e.clientX, y: e.clientY, t: performance.now(), timer: null }, judged: 0 };
       liveRef.current = { color: pen.color, w: pen.width, nib: { ...drawing.nib }, pressure: e.pointerType === 'pen', ...(hl ? { o: HIGHLIGHT_OPACITY } : {}), pts: [[bx, by, e.pointerType === 'pen' ? e.pressure : 0]] };
+      liveT.current = e.timeStamp;
       drawingRef.current = { id: e.pointerId, watch: strokeWatch('board', e) };
       dragRef.current = { kind: 'draw', start: [bx, by] };
       endHold();
@@ -534,7 +537,12 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
       const events = (e.getCoalescedEvents?.() ?? [e]);
       for (const ev of events) {
         const [x, y] = toBoard(ev.clientX, ev.clientY);
-        if (liveRef.current.pts.length < 4000) { liveRef.current.pts.push([x, y, ev.pointerType === 'pen' ? ev.pressure : 0]); drawingRef.current?.watch?.add(ev.clientX, ev.clientY, ev.timeStamp, ev === e ? 'move' : 'coalesced'); }
+        const p: [number, number, number] = [x, y, ev.pointerType === 'pen' ? ev.pressure : 0];
+        // (each point once: Safari's coalesced events repeat the last move's, freehand.ts freshPoint)
+        if (liveRef.current.pts.length >= 4000 || !freshPoint(liveRef.current.pts, liveT.current, ev.timeStamp, p)) continue;
+        liveT.current = ev.timeStamp;
+        liveRef.current.pts.push(p);
+        drawingRef.current?.watch?.add(ev.clientX, ev.clientY, ev.timeStamp, ev === e ? 'move' : 'coalesced');
       }
       const sc = scratchRef.current;
       if (sc) {

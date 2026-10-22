@@ -31,9 +31,11 @@ export type Tool = 'select' | 'lasso' | 'text' | 'rect' | 'roundrect' | 'ellipse
 /**
  * Draw's pen, GoodNotes' settings (0..1 each): a ball pen (an even, round line) or a fountain pen with
  * its tip sharpness (round or pointed ends), pressure sensitivity and tip flatness (a flat nib: down-
- * strokes full, up-strokes hairlines); the stroke stabilization (smoothing) of either. runtime/freehand.ts.
+ * strokes full, up-strokes hairlines); the stroke stabilization (smoothing) and rounding (straight or curved
+ * from one reported point to the next) of either; the pressure the hand usually writes with (measured by
+ * the pen calibration, PenCalibration.tsx). runtime/freehand.ts.
  */
-export interface Nib { ball: boolean; sharpness: number; sensitivity: number; flatness: number; stabilization: number }
+export interface Nib { ball: boolean; sharpness: number; sensitivity: number; flatness: number; stabilization: number; rounding: number; usual: number }
 
 export interface InkStyle {
   color: string; width: number; opacity: number;

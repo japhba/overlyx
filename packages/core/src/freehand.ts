@@ -21,8 +21,15 @@ export type FreePt = [number, number, number];
 /** a stretch of the stroke at one width: its points (slide px) */
 export interface InkRun { w: number; pts: [number, number][] }
 
-/** GoodNotes' pen settings (0..1 each; protocol.ts Nib): a ball pen's line is even and round, whatever the rest */
-export interface NibOpts { ball?: boolean; sharpness?: number; sensitivity?: number; flatness?: number; stabilization?: number }
+/**
+ * GoodNotes' pen settings (0..1 each; protocol.ts Nib): a ball pen's line is even and round, whatever
+ * the rest. `rounding`: how the line joins the points the pen reported — 0 straight from one to the
+ * next (every corner where the pen turned, whole-px steps shown), 1 a curve through them (corners only
+ * where it turned by more than 100°, whole-px steps smoothed away); strokes from before it had 1.
+ * `usual`: the pressure the hand writes with (measured by the pen calibration), drawn at the nominal
+ * width — 0.25 (the Pencil's usual) when not measured.
+ */
+export interface NibOpts { ball?: boolean; sharpness?: number; sensitivity?: number; flatness?: number; stabilization?: number; rounding?: number; usual?: number }
 
 export interface FreeOpts {
   /** the nominal width (px) */
@@ -32,8 +39,8 @@ export interface FreeOpts {
   pressure?: boolean;
   /** screen px per px of the slide (the stabilization is in screen px) */
   zoom?: number;
-  /** the points came in whole px (older Safari): smoothed, or their steps show */
-  coarse?: boolean;
+  /** the points came in whole px (older Safari): smoothed as far as the rounding says, or their steps show — a number: the size of such a px in the stroke's px */
+  coarse?: boolean | number;
   nib?: NibOpts;
   /** the pen has lifted: the end tapers too (a sharp tip's) */
   final?: boolean;
@@ -55,9 +62,18 @@ export function freshPoint(pts: FreePt[], lastT: number, t: number, p: FreePt): 
  * Pencil's usual writing (~0.25) the nominal width whatever the sensitivity; at full sensitivity a
  * light touch two fifths of it and pressed hard twice it, at a quarter (the default) 0.79–1.19.
  */
-export function pressureWidth(p: number, sensitivity = 1): number {
+export function pressureWidth(p: number, sensitivity = 1, usual = 0.25): number {
   const r = (q: number) => 1 - (1 - Math.max(0, Math.min(1, q))) ** 3;
-  return Math.exp(sensitivity * (r(p) - r(0.25)) * 1.643);
+  return Math.exp(sensitivity * (r(p) - r(usual)) * 1.643);
+}
+
+/** the pressure a hand writes with, from its strokes' (pen) pressures: their median, the first and last few of each (touching down, lifting) left out */
+export function usualPressure(strokes: FreePt[][]): number | null {
+  const ps: number[] = [];
+  for (const s of strokes) for (let i = 3; i < s.length - 3; i++) if (s[i][2] > 0) ps.push(s[i][2]);
+  if (ps.length < 30) return null;
+  ps.sort((a, b) => a - b);
+  return Math.round(Math.max(0.05, Math.min(0.95, ps[ps.length >> 1])) * 100) / 100;
 }
 
 /** the nib's edge (a flat tip): rising to the right at 30°, as a pen is held — up-strokes hairlines, down-strokes full (screen y runs down) */
@@ -81,17 +97,23 @@ export function inkRuns(input: FreePt[], o: FreeOpts): InkRun[] {
   if (!pts.length) return [];
   const sens = pen && o.pressure ? clamp01(nib.sensitivity ?? 0.25) : 0;
   const sharp = pen ? clamp01(nib.sharpness ?? 0) : 0, flat = pen ? clamp01(nib.flatness ?? 0) : 0;
-  if (pts.length === 1) return [{ w: round2(w * (sens ? pressureWidth(pts[0][2], sens) : 1)), pts: [[pts[0][0], pts[0][1]]] }];
-  // samples every h px along the curve through the points
+  const usual = nib.usual !== undefined && Number.isFinite(nib.usual) ? Math.max(0.05, Math.min(0.95, nib.usual)) : 0.25;
+  const pw = (q: number) => pressureWidth(q, sens, usual);
+  if (pts.length === 1) return [{ w: round2(w * (sens ? pw(pts[0][2]) : 1)), pts: [[pts[0][0], pts[0][1]]] }];
+  // samples every h px along the line through the points: straight from one to the next, curved as far
+  // as the rounding says — each piece between the pen's corners on its own (the corners kept exactly)
+  const round = clamp01(nib.rounding ?? 1);
   const h = Math.max(0.3, Math.min(1, w / 6));
-  const s = resample(cornered(pts).flatMap((piece, i) => (i ? spline(piece, h).slice(1) : spline(piece, h))), h);
-  // smoothed only where asked (the stabilization, in screen px) or needed (whole px), without pulling curves in
+  const s = joinSamples(cornered(pts, Math.cos(((40 + 60 * round) * Math.PI) / 180)).map(piece => resample(spline(piece, h, round), h)));
+  // smoothed only where asked (the stabilization, in screen px) or needed (whole px, rounded), without pulling curves in
   const zoom = o.zoom && o.zoom > 0 ? o.zoom : 1;
-  const sq = o.coarse ? COARSE_SIGMA : 0, ss = (clamp01(nib.stabilization ?? 0) * STAB_PX) / zoom;
+  const unit = typeof o.coarse === 'number' && o.coarse > 0 ? o.coarse : 1;
+  const coarse = !!o.coarse && round > 0;
+  const sq = coarse ? COARSE_SIGMA * unit : 0, ss = (clamp01(nib.stabilization ?? 0) * STAB_PX) / zoom;
   const sigma = Math.hypot(sq, ss);
   let x = twice(s.x, sigma / h), y = twice(s.y, sigma / h);
-  // whole px, unstabilized: smoothed only as far as the rounding could have put the pen (its steps go, its shape stays)
-  if (o.coarse && !ss) { x = within(x, s.x, COARSE_WITHIN); y = within(y, s.y, COARSE_WITHIN); }
+  // whole px, unstabilized: smoothed only as far as the rounding could have put the pen (its steps go, its shape stays) — less, rounding less
+  if (coarse && !ss) { x = within(x, s.x, COARSE_WITHIN * unit * round); y = within(y, s.y, COARSE_WITHIN * unit * round); }
   const p = sens ? gauss(s.p, Math.max(1.2, 2.5 * sigma) / h, true) : s.p;
   // the width along it: pressure, the flat tip's direction, the sharp tip's taper at the start (and the end, once lifted)
   const n = x.length;
@@ -104,7 +126,7 @@ export function inkRuns(input: FreePt[], o: FreeOpts): InkRun[] {
   const taper = sharp ? w * (1 + 5 * sharp) : 0, tip = 1 - 0.85 * sharp;
   const ease = (d: number) => { const u = Math.min(1, d / taper); return tip + (1 - tip) * u * (2 - u); };
   const widthAt = (i: number) => {
-    let f = sens ? pressureWidth(p[i], sens) : 1;
+    let f = sens ? pw(p[i]) : 1;
     if (dir) f *= dir[i];
     if (taper) { f *= ease(i * h); if (o.final) f *= ease((n - 1 - i) * h); }
     return w * f;
@@ -158,11 +180,12 @@ function clean(input: FreePt[], pen: boolean): FreePt[] {
 }
 
 /**
- * The points in pieces at the pen's sharp turns (by more than 100°, measured over 2 px either side —
- * a v's point, an m's foot, a scribble's turn): a curve through a turn rounds it, which read as the
- * line being stabilized; each piece is a curve of its own, the turn stays sharp.
+ * The points in pieces at the pen's sharp turns (by more than 100° at full rounding, 40° at none —
+ * `cosLimit` the cosine of that —, measured over 2 px either side: a v's point, an m's foot, a
+ * scribble's turn): a curve through a turn rounds it, which read as the line being stabilized; each
+ * piece is a curve of its own, the turn stays sharp.
  */
-function cornered(pts: FreePt[]): FreePt[][] {
+function cornered(pts: FreePt[], cosLimit: number): FreePt[][] {
   const n = pts.length;
   if (n < 5) return [pts];
   const reach = 2;
@@ -179,14 +202,18 @@ function cornered(pts: FreePt[]): FreePt[][] {
   let from = 0;
   for (let i = 2; i < n - 2; i++) {
     // the sharpest point of a turn (its neighbours turn less), a piece at least three points long
-    if (cos[i] < -0.17 && cos[i] <= cos[i - 1] && cos[i] < cos[i + 1] && i - from >= 2) { pieces.push(pts.slice(from, i + 1)); from = i; }
+    if (cos[i] < cosLimit && cos[i] <= cos[i - 1] && cos[i] < cos[i + 1] && i - from >= 2) { pieces.push(pts.slice(from, i + 1)); from = i; }
   }
   pieces.push(pts.slice(from));
   return pieces;
 }
 
-/** the centripetal Catmull-Rom curve through the points, as a polyline with pieces of at most `step` px (pressure along it linearly) */
-function spline(pts: FreePt[], step: number): FreePt[] {
+/**
+ * The centripetal Catmull-Rom curve through the points, as a polyline with pieces of at most `step` px
+ * (pressure along it linearly) — `curve` (0..1) of the way from the straight line between each two
+ * points to that curve.
+ */
+function spline(pts: FreePt[], step: number, curve = 1): FreePt[] {
   const n = pts.length;
   // before the first point and after the last: where the curve was heading, bending as it bent (else its ends come out flat)
   const beyond = (a: FreePt, b: FreePt, c: FreePt | undefined): FreePt => {
@@ -203,6 +230,11 @@ function spline(pts: FreePt[], step: number): FreePt[] {
   for (let i = 0; i < n - 1; i++) {
     const p0 = i ? pts[i - 1] : head, p1 = pts[i], p2 = pts[i + 1], p3 = i + 2 < n ? pts[i + 2] : tail;
     const m = Math.max(1, Math.min(64, Math.ceil(Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) / step)));
+    if (curve <= 0) {
+      for (let j = 1; j < m; j++) out.push([p1[0] + ((p2[0] - p1[0]) * j) / m, p1[1] + ((p2[1] - p1[1]) * j) / m, p1[2] + ((p2[2] - p1[2]) * j) / m]);
+      out.push(p2);
+      continue;
+    }
     const t1 = knot(p0, p1), t2 = t1 + knot(p1, p2), t3 = t2 + knot(p2, p3);
     for (let j = 1; j < m; j++) {
       // (Barry and Goldman's pyramid, x and y at once)
@@ -213,7 +245,8 @@ function spline(pts: FreePt[], step: number): FreePt[] {
       const cx = w2 * p2[0] + w3 * p3[0], cy = w2 * p2[1] + w3 * p3[1];
       const e1 = (t2 - t) / t2, e2 = t / t2, f1 = (t3 - t) / (t3 - t1), f2 = (t - t1) / (t3 - t1);
       const dx = e1 * ax + e2 * bx, dy = e1 * ay + e2 * by, gx = f1 * bx + f2 * cx, gy = f1 * by + f2 * cy;
-      out.push([v1 * dx + v2 * gx, v1 * dy + v2 * gy, p1[2] + ((p2[2] - p1[2]) * j) / m]);
+      const lx = p1[0] + ((p2[0] - p1[0]) * j) / m, ly = p1[1] + ((p2[1] - p1[1]) * j) / m;
+      out.push([lx + curve * (v1 * dx + v2 * gx - lx), ly + curve * (v1 * dy + v2 * gy - ly), p1[2] + ((p2[2] - p1[2]) * j) / m]);
     }
     out.push(p2);
   }
@@ -241,6 +274,14 @@ function resample(line: FreePt[], h: number): { x: number[]; y: number[]; p: num
   if (h - need < 0.3 * h && x.length > 1) { x.pop(); y.pop(); p.pop(); }
   x.push(end[0]); y.push(end[1]); p.push(end[2]);
   return { x, y, p };
+}
+
+/** the samples of the pieces one after the other (each piece starts where the last ended: that sample once) */
+function joinSamples(parts: { x: number[]; y: number[]; p: number[] }[]): { x: number[]; y: number[]; p: number[] } {
+  if (parts.length === 1) return parts[0];
+  const out = { x: [] as number[], y: [] as number[], p: [] as number[] };
+  parts.forEach((q, i) => { const k = i ? 1 : 0; out.x.push(...q.x.slice(k)); out.y.push(...q.y.slice(k)); out.p.push(...q.p.slice(k)); });
+  return out;
 }
 
 /**

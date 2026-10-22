@@ -718,26 +718,39 @@ blend.
     (Shift: 45° steps), **Draw** (P; `deckink.ts`: pen, highlighter and eraser E with the documents'
     margin-ink presets — a click on the picked colour / width changes it, `ol.deckInk`; the pen stays in
     hand stroke after stroke until Esc. A stroke is GoodNotes' (`runtime/freehand.ts` `inkRuns`): a
-    centripetal Catmull-Rom curve through every point the pen reported (however few: loops stay
-    loops) — in pieces at the pen's sharp turns (`cornered`: more than 100° over 2 px either side; a
-    curve through a v's point rounded it, which read as stabilized) — resampled every ⅔ px and
-    smoothed only where needed — whole-px points (older Safari): 3 px but never further than their
-    rounding (0.6 px, `within`); the stroke stabilization — by Tukey's twicing (2·G − G∘G: a plain
+    line through every point the pen reported (however few: loops stay loops), as far as the pen's
+    **rounding** says (`nib.rounding`, default 30 %; strokes saved before it had none and draw at
+    100 %): 0 straight from point to point, 100 % a centripetal Catmull-Rom curve — in pieces at the
+    pen's sharp turns (`cornered`: more than 40° + 60°·rounding over 2 px either side; a curve through
+    a v's point rounded it, which read as stabilized), each piece resampled every ⅔ px on its own (the
+    corner points kept exactly) — and smoothed only where needed — whole-px points (older Safari): 3
+    of their px but never further than rounding × 0.6 of them (`within`; the runtime gives their size
+    in slide px, `coarse: 1/k`); the stroke stabilization — by Tukey's twicing (2·G − G∘G: a plain
     Gaussian pulled small loops in by σ²/2r, the ink "contracted"); its width from the Pencil's
     pressure through `pressureWidth(p, sensitivity)` (usual writing ≈ the nominal width whatever the
-    sensitivity), the pressure smoothed too (raw, it beaded); a mouse's, a finger's and the
+    sensitivity — or at the hand's own usual pressure, `nib.usual`, measured by the calibration), the
+    pressure smoothed too (raw, it beaded); a mouse's, a finger's and the
     highlighter's even. The pen's settings are GoodNotes' (the pen button clicked again:
-    `PenSettings.tsx`, `deckink.ts` `nib`, protocol `Nib`, defaults 0 / 25 % / 0 / 0): fountain or
+    `PenSettings.tsx`, `deckink.ts` `nib`, protocol `Nib`, defaults 0 / 25 % / 0 / 0, rounding 30 %;
+    each a slider with named rungs, `NibLevels`): fountain or
     **ball pen** (even and round whatever the rest), **tip sharpness** (start, and the end once
     lifted, tapered to a point over 1–6 widths), **pressure sensitivity**, **tip flatness** (a flat nib
     at 30°: width by the stroke's direction, down-strokes full, up-strokes hairlines), **stroke
-    stabilization** (up to 6 screen px of smoothing) — with a preview drawn by `inkRuns`, plus
-    *Scribble to erase* and, once a Pencil has drawn here, *Fingers draw too*. It is drawn by the
+    stabilization** (up to 6 screen px of smoothing), **rounding** — with a preview drawn by `inkRuns`, plus
+    *Scribble to erase* and, once a Pencil has drawn here, *Fingers draw too*. **Calibrate with your
+    pen…** opens `PenCalibration.tsx` over everything: guide strokes drawn as a hand draws them (the
+    two-thirds power law; arches and points, loops, corners, a spiral and a quickening wave) to trace,
+    ruled lines for anything else; the pen's strokes kept as given and redrawn with the settings as
+    they change (*Hold to compare* with the saved ones, *Show the points the pen gave*); it measures
+    the pen (points a second, whole px or not, coalesced or not, pressure range, `usualPressure` = the
+    median, which sets `usual` until set by hand) and Save writes `nib` through `saveDeckInk`, so
+    slides, boards and documents' margins follow. Docs' and boards' strokes keep the `nib` they were
+    drawn with, so a change applies to new strokes only. It is drawn by the
     browser's stroker as runs of one width (steps of 2½ %, round caps and joins, each starting where
     the last ended), one `<path>` per width (`inkPaths`) — perfect-freehand's filled outline (before)
     straightened each stroke's first px, made its outline of chords as long as the pen is wide and
     blobbed small loops. Safari's coalesced events on the iPad repeat the last move's points (A B A
-    C D C: the line doubled back): `freshPoint` takes only newer ones. (Not the browser's predicted
+    C D C: the line doubled back): `freshPoint` takes only newer ones (on boards and documents' margins too since 22 Oct 2026). (Not the browser's predicted
     point: drawn ahead of the pen, the line drew back when it lifted.) Drawn in the slide itself while the pen moves (an
     `svg.ol-ink[data-ol-runtime]`, one rAF) exactly as it is then written (`<svg class="ol-ink"><g
     fill="none" stroke=… stroke-linecap="round" stroke-linejoin="round"><path fill="none"
