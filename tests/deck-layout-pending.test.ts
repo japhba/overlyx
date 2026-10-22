@@ -14,6 +14,7 @@ const hostSource = source(new FileURL('../packages/client/src/deliverable/Delive
 const envSource = source(new FileURL('../packages/client/src/deliverable/runtime/env.ts', import.meta.url));
 const editSource = source(new FileURL('../packages/client/src/deliverable/runtime/edit.ts', import.meta.url));
 const protocolSource = source(new FileURL('../packages/client/src/deliverable/protocol.ts', import.meta.url));
+const placeholderSource = source(new FileURL('../packages/client/src/deliverable/runtime/placeholders.ts', import.meta.url));
 function declaration(file: ReturnType<typeof source>, name: string, variable = false) {
   const matches: ts.Node[] = [];
   const visit = (node: ts.Node) => {
@@ -36,6 +37,8 @@ const hostCode = compile([
 const runtimeCode = compile([
   ...['link', 'srcPath', 'pathOf', 'liveAt', 'slideOf', 'docRect', 'slideTitle', 'slideBoxes', 'pageSize', 'sendLayout'].map(n => declaration(envSource, n)),
   ...['TEXT_TAGS', 'REPLACED', 'SVG_SHAPES'].map(n => declaration(editSource, n, true)),
+  ...['PH', 'MEDIA', 'isPicturePh'].map(n => declaration(placeholderSource, n, true)),
+  ...['phRole', 'isEmptyPh'].map(n => declaration(placeholderSource, n)),
   ...['selection', 'selectPaths', 'editTextAt', 'isSvgPart', 'isLocked', 'cs', 'isTextual', 'canType', 'isGroup',
     'movable', 'fixedHeight', 'kindOf', 'label', 'pictureSrc', 'listOf', 'item', 'report'].map(n => declaration(editSource, n)),
 ].join('\n'));

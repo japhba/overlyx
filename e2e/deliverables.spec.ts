@@ -119,7 +119,8 @@ test('slides from the rail, speaker notes, the code view, a change on disk shown
   await page.locator('[data-dl-newslide]').click();
   await expect(slides(page)).toHaveCount(3, { timeout: 15000 });
   await expect.poll(() => (fileText().match(/<section class="slide">/g) ?? []).length, { timeout: 15000 }).toBe(3);
-  expect(fileText()).toMatch(/<\/section>\n\n<section class="slide">\n {2}<div class="bar"[^\n]*\n {2}<h1 [^>]*>Title<\/h1>\n<\/section>\n\n<section/);
+  // (its title an empty placeholder: "Click to add title" on the canvas — decklayouts.ts)
+  expect(fileText()).toMatch(/<\/section>\n\n<section class="slide">\n {2}<div class="bar"[^\n]*\n {2}<h1 data-ol-ph="title" [^>]*><\/h1>\n<\/section>\n\n<section/);
 
   // speaker notes of the slide in view (scroll to the last one)
   await page.frameLocator('.dl-railframe').locator('section.slide').nth(2).click();

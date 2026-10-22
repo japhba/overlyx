@@ -20,6 +20,7 @@ const editingSource = source(new FileURL('../packages/client/src/deliverable/run
 const reviewSource = source(new FileURL('../packages/client/src/deliverable/runtime/review.ts', import.meta.url));
 const environmentSource = source(new FileURL('../packages/client/src/deliverable/runtime/env.ts', import.meta.url));
 const messageSource = source(new FileURL('../packages/client/src/deliverable/runtime/index.ts', import.meta.url));
+const placeholderSource = source(new FileURL('../packages/client/src/deliverable/runtime/placeholders.ts', import.meta.url));
 
 function functionSource(file: ReturnType<typeof source>, name: string): string {
   let found: ts.FunctionDeclaration | undefined;
@@ -54,6 +55,7 @@ const handlers = compile([
   functionSource(editingSource, 'pastePlain'),
   functionSource(editingSource, 'onBeforeInput'),
   functionSource(editingSource, 'scheduleCommit'),
+  variableSource(placeholderSource, 'PH'),
   functionSource(editingSource, 'cleanHtml'),
   variableSource(editingSource, 'PHRASING_BOXES'),
   variableSource(editingSource, 'BLOCK_INSIDE'),

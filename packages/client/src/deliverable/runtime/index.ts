@@ -38,6 +38,7 @@ import { installReviewCss, setReview, railReview } from './review';
 import { exportPageSvg } from './svgexport';
 import { startEmbed, embedSettled, startViewSync, viewSettled } from './embed';
 import { startLinks } from './links';
+import { looksOf } from './placeholders';
 
 function addStyle(css: string): HTMLStyleElement {
   const s = document.createElement('style');
@@ -295,6 +296,7 @@ function onMessage(e: MessageEvent): void {
       break;
     }
     case 'select': if (MODE === 'edit') edit.selectPaths(m.paths as Path[]); break;
+    case 'looks': post({ ol: 'looks', id: m.id, looks: looksOf(m.paths.map(p => liveAt(p))) }); break;
     case 'editText': if (MODE === 'edit') edit.editTextAt(m.path, m.selectAll, m.math); break;
     case 'stopText': if (MODE === 'edit') edit.stopText(m.save !== false); break;
     case 'scrollTo': if (MODE === 'edit') edit.scrollToSlide(m.slide, m.smooth); else if (MODE === 'thumb') railShow(m.slide); break;

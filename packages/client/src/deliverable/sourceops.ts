@@ -5,6 +5,7 @@
  * html/source.ts), so it is tested without a browser.
  */
 import { GUIDES_ATTR } from './guides';
+import { PH_ATTR, isRole } from './decklayouts';
 import { parseSource, opSplices, mapOffset, elementAt, elementStartingAt, elementChildren, walk, outerRange, attr, hasClass, pathOf, type HtmlOp, type Path, type Splice, type HElement } from '@overlyx/core/html/source.ts';
 import { textChanges, mapTextOffset } from '@overlyx/core/html/textedit.ts';
 import { slideElements } from '@overlyx/core/html/deliverable.ts';
@@ -481,7 +482,8 @@ function pathOfEl(el: HElement): Path {
 
 /**
  * A new slide after slide `i`: the slide's own element with its objects emptied of text — the same
- * design, nothing to delete — or, from `blank`, the slide element alone.
+ * design, nothing to delete: its title an empty placeholder ("Click to add title", decklayouts.ts),
+ * its placeholders empty — or, from `blank`, the slide element alone.
  */
 export function newSlideHtml(text: string, i: number, blank = false): string | null {
   const { doc, text: t } = parseSource(text);
@@ -528,17 +530,21 @@ function slideDesign(t: string, ss: HElement[], s: HElement | undefined, blank: 
     if (!k.sourceCodeLocation) continue;
     const { from, to } = outerRange(k);
     const src = t.slice(from, to);
+    const st = k.sourceCodeLocation.startTag!;
+    const open = t.slice(st.startOffset, st.endOffset).replace(/\s(data-ol-(?:comments|ins|del|chg|was))=("[^"]*"|'[^']*')/g, '');
+    const role = attr(k, PH_ATTR);
+    // a placeholder: the same, empty (a title: the title's)
+    if (isRole(role)) { if (role === 'title') titled = true; parts.push(`${open}</${k.tagName}>`); continue; }
     const textual = /^(h[1-6]|p|ul|ol|div|blockquote)$/.test(k.tagName) && /\S/.test(textOf(k));
     // (or marked as decoration by whoever designed the deck)
     const decor = attr(k, 'aria-hidden') === 'true' || attr(k, 'data-ol-master') !== null || /(^|\s)(decor\w*|bg|background|accent|ornament|logo|footer|bar|band|stripe|rule)(\s|$)/i.test(attr(k, 'class') ?? '');
     if (!textual) { if (elsewhere.has(src.trim()) || decor) parts.push(src); continue; }
     if (/^h[1-6]$/.test(k.tagName) && !titled) {
       titled = true;
-      const st = k.sourceCodeLocation.startTag!;
-      parts.push(t.slice(st.startOffset, st.endOffset) + 'Title' + `</${k.tagName}>`);
+      parts.push(`${open.replace(/^<(\w+)/, `<$1 ${PH_ATTR}="title"`)}</${k.tagName}>`);
     }
   }
-  if (!titled) parts.unshift('<h2>Title</h2>');
+  if (!titled) parts.unshift(`<h2 ${PH_ATTR}="title" style="position: absolute; left: 7.5%; top: 8%; width: 85%"></h2>`);
   return `${open}\n  ${parts.join('\n  ')}\n${close}`;
 }
 

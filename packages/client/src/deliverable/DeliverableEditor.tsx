@@ -22,7 +22,7 @@ import type { DeliverableHost, Peer } from './host';
 import { webHost } from './webHost';
 import { createLinkOpener, type LinkState } from './link-opening';
 import { capturePointerDrag } from './pointerdrag';
-import type { FromRuntime, ToRuntime, SelItem, SlideBox, Tool, Path, HtmlOp, DeliverableKind, Rect, ArrangeHow, Paint, CanvasView, KeyPress, Solo, ObjNode, InkRunD, WordsStyle } from './protocol';
+import type { FromRuntime, ToRuntime, SelItem, SlideBox, Tool, Path, HtmlOp, DeliverableKind, Rect, ArrangeHow, Paint, CanvasView, KeyPress, Solo, ObjNode, InkRunD, WordsStyle, TextLook } from './protocol';
 import { SlideView, fitScale, viewLevels, viewDetents, levelAt, levelAnchor, VIEW_FIT_NAMES, type ViewFit, type ViewLevels } from './viewport';
 import { pinchFactor, pinchLock, triGesture, type PinchLock } from './gestures';
 import { DetentPinch, stepOnto, type Detent, type Shown } from '../app/zoomdetent';
@@ -35,6 +35,9 @@ import { createPortal } from 'preact/compat';
 import { isFromRuntime, RAIL_NUM } from './protocol';
 import { rebasedSplices, rebaseObjectPaths, objectHtml, imageHtml, insertPlace, newSlideHtml, slideDesigns, slidePaths, slideNotes, notesOp, sourceRange, inlineSvgHtml, guidesIn } from './sourceops';
 import { GUIDES_ATTR, LAYOUT_MARGINS_ATTR, layoutMarginGuides, parseGuides, masterGuides, formatGuides, withGuide, type Guide } from './guides';
+import { deckMargins, deckDesign, builtInLayouts, savedLayouts, layoutFromSlide, saveLayoutOp, applyLayoutOp, placeholderObject, layoutThumb, deckColors, PH_ATTR, PH_LABELS, PH_ROLES, type PhRole, type DesignLooks, type DeckDesign, type Layout } from './decklayouts';
+import { LayoutPicker, type LayoutCard } from './LayoutPicker';
+import { chooseDock, touchScreen, smallScreen, dockAsked, type DeckDock } from './deckdock';
 import { sizePt, stepPt } from './units';
 import { deckToolbar, quickGroups, type DeckTextActions } from './decktoolbar';
 import { loadDeckInk, saveDeckInk, subscribeDeckInk, patchDeckInk, deckInkStyle, type DeckInk, type DeckInkPatch } from './deckink';
@@ -54,7 +57,7 @@ import { activeMathField } from '../editor/lyxmath/field';
 import { mathReady } from '../editor/lyxmath/mathjax';
 import { setLayoutMathFont } from '../fonts/editorfont';
 import { useMathPanels } from '../app/toolbars';
-import { parseSource, opSplices, elementAt, elementChildren, attr } from '@overlyx/core/html/source.ts';
+import { parseSource, opSplices, elementAt, elementChildren, attr, parseStyle } from '@overlyx/core/html/source.ts';
 import { reviewOps, resolveOps, resolveAll, reviewOf, isSuggesting, suggestingOp, stampOf, threadsOp, parseThreads, newThreadId, describe as describeObject, COMMENTS, type ReviewChange, type ReviewThread, type Thread } from '@overlyx/core/html/review.ts';
 import { deliverableInfo, slideElements } from '@overlyx/core/html/deliverable.ts';
 import { formatTimestamp } from '@overlyx/core';
@@ -346,6 +349,20 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   // (the tool stays in hand, stroke after stroke, while the row is open or folded after a pick)
   const drawKept = drawOpen || drawHeld;
   const drawKeptRef = useRef(drawKept); drawKeptRef.current = drawKept;
+  /** a touch screen or a phone-sized window: the toolbars go where they leave the slide biggest (deckdock.ts), and drawing hides what it does not need */
+  const [touchUi, setTouchUi] = useState(() => touchScreen() || smallScreen());
+  useEffect(() => { const on = () => setTouchUi(touchScreen() || smallScreen()); addEventListener('resize', on); return () => removeEventListener('resize', on); }, []);
+  const touchRef = useRef(touchUi); touchRef.current = touchUi;
+  /**
+   * Drawing on a touch screen with everything it does not need out of the way (the user, 22 Oct 2026:
+   * "when drawing, have everything unneeded disappear, similarly to Apple Notes, where we can re-expand
+   * toolbars by tapping them … from the top right corner of the slides"): once a stroke is drawn, or
+   * something is picked in the Draw row, the app's bars, the toolbars, the slide rail, the notes and
+   * the panes go; the pen in hand waits at the slide's top right corner, its tap brings the Draw row
+   * back over the canvas. Done, Esc or V puts the pen away, and all of it comes back.
+   */
+  const [drawFocus, setDrawFocusState] = useState(false);
+  const drawFocusRef = useRef(drawFocus); drawFocusRef.current = drawFocus;
   /** the colours used on the slide shown (runtime notetools.ts), for the lasso's colour filter */
   const slideColors = useRef<string[]>([]);
   /** Draw: the pen's and the highlighter's presets, which of them is in hand (deckink.ts) */
@@ -391,6 +408,17 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   const showRail = kind === 'deck';
   const railOpen = showRail && railShown;
   const railScale = Math.max(0.05, (railW - 20 - RAIL_NUM) / frameW);
+  /**
+   * The inside of the slide's layout margins (frame px; decklayouts.ts deckMargins — the template's,
+   * else where the deck's objects sit): what Fit margins shows as big as the canvas takes it.
+   */
+  const marginBox = useMemo((): Rect | null => {
+    if (!soloOn) return null;
+    const r = solo!.rect;
+    const m = deckMargins(textNow, { w: r.w, h: r.h }, current).sides;
+    return { x: r.x + m.left, y: r.y + m.top, w: r.w - m.left - m.right, h: r.h - m.top - m.bottom };
+  }, [textNow, current, soloOn, solo?.rect.x, solo?.rect.y, solo?.rect.w, solo?.rect.h]);
+  const marginRef = useRef(marginBox); marginRef.current = marginBox;
 
   const toFrame = (f: HTMLIFrameElement | null, msg: ToRuntime) => { try { f?.contentWindow?.postMessage(msg, '*'); } catch { /* gone */ } };
   const toCanvas = (msg: ToRuntime) => toFrame(canvasFrame.current, msg);
@@ -930,6 +958,9 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
         case 'inkConverted': if (fromCanvas) showHud(m.count ? `${m.count === m.of ? '' : `${m.count} of ${m.of} strokes `}straightened · Undo brings ${m.count > 1 ? 'them' : 'it'} back` : 'No shape in these strokes', 1800); break;
         case 'sequence': if (fromCanvas) setSeq({ slide: m.slide, rows: m.rows, steps: m.steps, ordering: m.ordering }); break;
         case 'objects': if (fromCanvas) setObjects({ slide: m.slide, items: m.items }); break;
+        case 'looks': if (fromCanvas) looksReq.current.get(m.id)?.(m.looks); break;
+        // an empty picture placeholder tapped: a picture for it (fillPicture)
+        case 'placeholderPicture': if (fromCanvas && !readOnlyRef.current) { phPicture.current = m.path; fileInput.current?.click(); } break;
         case 'comment': {
           if (!fromCanvas) break;
           if (!m.open) { startDraft(m.path, m.slide, m.quote); break; }
@@ -1088,7 +1119,40 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     pageDir.current = 0;
     if (d) slideView.enter(d); else slideView.recentre(false);
   }, [solo?.slide, soloOn]);
-  useLayoutEffect(() => { if (soloOn) slideView.refit(); }, [box.w, box.h, solo?.rect.w, solo?.rect.h]);
+  /**
+   * The slide where it was on the screen when the canvas changed size for drawing (the toolbars folded
+   * away, or back): from there it springs to its level (Fit: as big as the canvas is now) — not a jump.
+   */
+  const screenHold = useRef<{ x: number; y: number; s: number; at: number } | null>(null);
+  const holdSlideOnScreen = () => {
+    const c = canvasBox.current?.getBoundingClientRect(), p = slideView.place(), so = soloState.current;
+    if (!c || !p || !so || !soloRef.current) return;
+    screenHold.current = { x: c.left + p.tx + (so.rect.x + so.rect.w / 2) * p.s, y: c.top + p.ty + (so.rect.y + so.rect.h / 2) * p.s, s: p.s, at: performance.now() };
+  };
+  const setDrawFocus = (on: boolean) => {
+    if (on === drawFocusRef.current) return;
+    holdSlideOnScreen();
+    drawFocusRef.current = on;
+    setDrawFocusState(on);
+  };
+  useLayoutEffect(() => {
+    if (!soloOn) return;
+    const h = screenHold.current, c = canvasBox.current?.getBoundingClientRect();
+    screenHold.current = null;
+    if (h && c && performance.now() - h.at < 1500 && !pinchRef.current && !wheelPinch.current) {
+      const r = solo!.rect;
+      slideView.placeAt(h.s, r.x + r.w / 2, r.y + r.h / 2, h.x - c.left, h.y - c.top);
+      const k = levelRef.current;
+      if (k) goToLevel(k, true); else { commitLiveZoom(0); slideView.release(); }
+      return;
+    }
+    slideView.refit();
+  }, [box.w, box.h, solo?.rect.w, solo?.rect.h]);
+  // the pen put away (another tool, Esc, V), presenting, only viewing: everything back
+  useEffect(() => { if (drawFocus && (!(tool === 'pen' || tool === 'eraser' || tool === 'lasso') || presenting || locked || !touchUi)) setDrawFocus(false); }, [tool, presenting, locked, drawFocus, touchUi]);
+  // (the app's bars go with the editor's own in one layout: one change of the canvas, one spring)
+  useLayoutEffect(() => { document.documentElement.classList.toggle('ol-draw-focus', drawFocus); }, [drawFocus]);
+  useEffect(() => () => document.documentElement.classList.remove('ol-draw-focus'), []);
   useEffect(() => { toRail({ ol: 'scale', scale: railScale }); }, [railScale]);
   // (the Bézier pen takes Enter / Esc / Backspace: the keyboard goes to the canvas)
   // (the pen draws right away only where the page can be changed)
@@ -1116,7 +1180,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   /** the zoom levels of the slide shown (viewport.ts): Fit, Fit width, Fit content */
   const levelsNow = (): ViewLevels => {
     const so = soloState.current;
-    return so && soloRef.current ? viewLevels(boxRef.current, so.rect, so.content ?? null, MAX_ZOOM) : { fit: fitRef.current };
+    return so && soloRef.current ? viewLevels(boxRef.current, so.rect, so.content ?? null, MAX_ZOOM, marginRef.current) : { fit: fitRef.current };
   };
   /** a level as the zoom menu names it */
   const levelName = (k: ViewFit) => k !== 'fit' ? VIEW_FIT_NAMES[k] : host.bindSvgExporter ? 'Fit drawing' : kindRef.current === 'poster' ? 'Fit poster' : kindRef.current === 'page' ? 'Fit width' : 'Fit slide';
@@ -1155,7 +1219,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     const s1 = levelsNow()[k] ?? fitRef.current, s0 = slideView.scaleNow() ?? s1;
     const a0 = slideView.toFrame(b.w / 2, b.h / 2);
     if (!a0) return;
-    const want = levelAnchor(k, so.rect, so.content ?? null), a1 = { x: want.x, y: want.y ?? a0.y };
+    const want = levelAnchor(k, so.rect, so.content ?? null, marginRef.current), a1 = { x: want.x, y: want.y ?? a0.y };
     levelRef.current = k;
     heldAt.current = k;
     const done = () => {
@@ -1529,6 +1593,11 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     const drawing = t === 'pen';
     if (!drawing) setToolState('select');
     if (readOnlyRef.current) return;
+    // drawing on a touch screen: the Draw row folds into the pen at the corner, the rest goes too (Apple Notes')
+    if (drawing && touchRef.current && drawKeptRef.current && soloRef.current) {
+      if (drawOpen) { setDrawOpen(false); setDrawHeld(true); }
+      setDrawFocus(true);
+    }
     if (versions.current.get(v) === undefined) return;
     const cur = text.toString();
     const k = kindRef.current;
@@ -1852,6 +1921,12 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
         { label: 'Replace picture…', action: imageTools.replace },
       ] : []),
       { label: 'Edit code', action: () => showCode() },
+      // a layout's placeholder (decklayouts.ts): what goes in it, said while it is empty — or an ordinary object again
+      ...(one && kind === 'deck' && one.kind !== 'ink' && one.slide >= 0 ? [{ label: 'Placeholder', sub: [
+        ...PH_ROLES.map(r => ({ label: PH_LABELS[r], checked: one.ph?.role === r, disabled: readOnlyRef.current, action: () => applyOps([{ t: 'attr', path: one.path, name: PH_ATTR, value: r }]) })),
+        { sep: true },
+        { label: 'Not a placeholder', checked: !one.ph, disabled: readOnlyRef.current || !one.ph, action: () => applyOps([{ t: 'attr', path: one.path, name: PH_ATTR, value: null }]) },
+      ] }] : []),
       { label: 'Comment', shortcut: 'Ctrl+Alt+M', disabled: readOnlyRef.current, action: () => toCanvas({ ol: 'newComment' }) },
       ...(selChange && !readOnlyRef.current ? [
         { label: `Accept suggestion (${selChange.by})`, action: () => resolveChange(selChange, true) },
@@ -1944,13 +2019,16 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     const sp = ps[i];
     showContextMenu(x, y, [
       { label: 'Text box', action: () => insertObject('text') },
-      { label: 'Picture…', action: () => fileInput.current?.click() },
+      { label: 'Picture…', action: () => { phPicture.current = null; fileInput.current?.click(); } },
       { label: kind === 'page' ? 'Comment on the page' : 'Comment on the slide', disabled: readOnlyRef.current, action: () => startDraft(sp ?? null, i) },
       ...(kind !== 'page' ? [
         { sep: true },
         { label: 'Slide background colour…', disabled: !sp || readOnlyRef.current, action: () => pickAt(x, y, 'Slide background', close => <ColorGrid current={null} close={close} none="As the design has it" onPick={c => { if (sp) applyOps([{ t: 'style', path: sp, set: { background: c } }]); }} />) },
         { label: 'New slide', shortcut: 'Ctrl+M', action: () => newSlide(i) },
+        { label: 'New slide in a layout…', action: () => pickAt(x, y, 'New slide', close => layoutPicker(i, close)) },
+        { label: 'Apply layout…', disabled: readOnlyRef.current, action: () => pickAt(x, y, 'Apply layout', close => layoutPicker(i, close, true)) },
         { label: 'Duplicate slide', action: () => duplicateSlide(i) },
+        { label: 'Placeholder', sub: PH_ROLES.map(r => ({ label: PH_LABELS[r], disabled: readOnlyRef.current, action: () => { void insertPlaceholder(r); } })) },
         { label: 'Guides', sub: guideItems(i, menuPoint.current) },
       ] : []),
       { sep: true },
@@ -1960,17 +2038,111 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
 
   /* ------------------------------------------------------------- slides */
 
-  /** a slide after slide `after`, in slide `like`'s design (newSlideHtml) */
-  const newSlide = (after: number, blank = false, like = after) => {
-    const cur = text.toString();
-    const ps = slidePaths(cur);
-    const html = newSlideHtml(cur, like, blank);
-    if (!html || !ps.length) return;
+  /** the slide `html` after slide `after`, shown */
+  const insertSlide = (after: number, html: string) => {
+    const ps = slidePaths(text.toString());
+    if (!ps.length) return;
     const p = ps[Math.min(after, ps.length - 1)];
     const parent = p.slice(0, -1);
     if (!applyOps([{ t: 'insert', parent, index: p[p.length - 1] + 1, html }])) return;
     const next = after + 1;
     setTimeout(() => { setCurrent(next); toCanvas({ ol: 'scrollTo', slide: next }); toRail({ ol: 'current', slide: next }); }, 150);
+  };
+  /** a slide after slide `after`, in slide `like`'s design (newSlideHtml) */
+  const newSlide = (after: number, blank = false, like = after) => {
+    const html = newSlideHtml(text.toString(), like, blank);
+    if (html) insertSlide(after, html);
+  };
+
+  /* ------------------------------------------------------------- layouts and placeholders (decklayouts.ts) */
+
+  /** the slide's own size (px): the layouts are drawn and placed in it */
+  const slideSizeNow = () => { const r = soloState.current?.rect; return r && r.w > 0 ? { w: r.w, h: r.h } : { w: pageWRef.current || 1280, h: pageH || (pageWRef.current || 1280) * 9 / 16 }; };
+  const designNow = () => deckDesign(text.toString(), slideSizeNow(), currentRef.current);
+  /** the answers of the canvas to `looks` (how the deck's texts look, measured there) */
+  const looksReq = useRef(new Map<number, (looks: (TextLook | null)[]) => void>());
+  const looksId = useRef(0);
+  /** the looks of the design's texts (runtime placeholders.ts looksOf); none when the canvas does not answer soon */
+  const askLooks = (d: DeckDesign): Promise<DesignLooks> => {
+    const keys = ['title', 'body', 'coverTitle', 'coverSub'] as const;
+    const refs = keys.map(k => d[k]);
+    return new Promise(resolve => {
+      if (!canvasReady.current) { resolve({}); return; }
+      const id = ++looksId.current;
+      const timer = setTimeout(() => { looksReq.current.delete(id); resolve({}); }, 400);
+      looksReq.current.set(id, ls => {
+        clearTimeout(timer);
+        looksReq.current.delete(id);
+        const out: DesignLooks = {};
+        keys.forEach((k, i) => { if (refs[i]) out[k] = ls[i] ?? null; });
+        resolve(out);
+      });
+      toCanvas({ ol: 'looks', id, paths: refs.map(r => r?.path ?? [-1]) });
+    });
+  };
+  const layoutsNow = (d = designNow(), looks: DesignLooks = {}): Layout[] => [...savedLayouts(text.toString()), ...builtInLayouts(d, looks)];
+  /** a layout's slide, its placeholders looking as the deck's texts do */
+  const layoutHtml = async (id: string): Promise<string | null> => {
+    const d = designNow();
+    return layoutsNow(d, await askLooks(d)).find(l => l.id === id)?.html ?? null;
+  };
+  /** the layouts drawn small (LayoutPicker) */
+  const layoutCards = (): LayoutCard[] => {
+    const size = slideSizeNow(), look = deckColors(text.toString()), paper = colorsRef.current?.page ?? '#fff';
+    return layoutsNow().map(l => ({ id: l.id, name: l.name, thumb: layoutThumb(l.html, size, look, paper), saved: !!l.saved }));
+  };
+  /** Apply layout: the slide made of the layout, what it had put in its placeholders (decklayouts applyLayoutOp) */
+  const applyLayout = async (i: number, id: string) => {
+    const html = await layoutHtml(id);
+    const op = html ? applyLayoutOp(text.toString(), i, html) : null;
+    if (op) applyOps([op]);
+  };
+  /** Save as layout: the slide kept in a <template> of the deck, new slides can take it */
+  const saveAsLayout = async (i: number) => {
+    const html = layoutFromSlide(text.toString(), i);
+    if (!html) return;
+    const n = savedLayouts(text.toString()).length;
+    const name = await uiPrompt('Save as layout', 'New slides can take this slide’s layout: everything on it as it is, its placeholders empty. (A text box becomes a placeholder from its right-click menu; Placeholder in the Slide tools adds one.)', `Layout ${n + 1}`, { okLabel: 'Save layout' });
+    if (!name?.trim()) return;
+    const op = saveLayoutOp(text.toString(), html, name.trim());
+    if (op && applyOps([op], true)) notify(`Saved the layout “${name.trim()}” — New slide ▾ offers it.`);
+  };
+  /** what a new slide (or, `apply`, slide `at`) can be: the layouts, like one of the deck's slides */
+  const layoutPicker = (at: number, close: () => void, apply = false) => {
+    const titled = (i: number) => { const t = slidesRef.current[i]?.title.trim() ?? ''; return t ? ` · ${t.length > 32 ? t.slice(0, 31) + '…' : t}` : ''; };
+    const size = slideSizeNow();
+    return (
+      <LayoutPicker cards={layoutCards()} aspect={size.w / size.h} close={close}
+        pick={id => { if (apply) void applyLayout(at, id); else void layoutHtml(id).then(html => { if (html) insertSlide(at, html); }); }}
+        remove={id => { const l = savedLayouts(text.toString()).find(x => x.id === id); if (l?.saved) applyOps([{ t: 'remove', paths: [l.saved] }], true); }}
+        extras={apply ? [{ label: 'Save this slide as a layout…', action: () => { void saveAsLayout(at); } }] : [
+          ...slideDesigns(text.toString(), at).map(i => i === at
+            ? { label: `Like this slide${titled(i)}`, shortcut: 'Ctrl+M', action: () => newSlide(at) }
+            : { label: `Like slide ${i + 1}${titled(i)}`, action: () => newSlide(at, false, i) }),
+          { label: 'Duplicate this slide', action: () => duplicateSlide(at) },
+        ]} />
+    );
+  };
+  /** a placeholder of `role` put on the slide shown, where the deck's layouts have one (decklayouts placeholderObject) */
+  const insertPlaceholder = async (role: PhRole) => {
+    if (readOnlyRef.current) return;
+    const d = designNow(), looks = await askLooks(d);
+    const cur = text.toString();
+    const place = insertPlace(cur, slidePaths(cur)[currentRef.current] ?? null, null, kindRef.current);
+    if (place && applyOps([{ t: 'insert', parent: place.parent, index: place.index, html: placeholderObject(role, d, looks) }])) pending.current = { select: [place.path] };
+  };
+  /** the picture placeholder a picture is being chosen for (the file input's) */
+  const phPicture = useRef<Path | null>(null);
+  /** a picture in a picture placeholder's place and size, filling it (PowerPoint's) */
+  const fillPicture = async (path: Path, f: File) => {
+    const rel = await uploadFile({ name: f.name, type: f.type, data: f });
+    if (!rel) { notify(`Could not upload ${f.name}.`, 'error'); return; }
+    const el = elementAt(parseSource(text.toString()).doc, path);
+    if (!el || attr(el, PH_ATTR) !== 'picture') { notify('The placeholder is no longer there.', 'error'); return; }
+    const st = new Map(parseStyle(attr(el, 'style') ?? '').map(d => [d.prop.toLowerCase(), d.value]));
+    const geo = ['position', 'left', 'top', 'right', 'bottom', 'width', 'height', 'rotate', 'z-index'].filter(k => st.get(k)).map(k => `${k}: ${st.get(k)}`).join('; ');
+    const q = (v: string) => v.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+    if (applyOps([{ t: 'outer', path, html: `<img ${PH_ATTR}="picture" src="${q(rel)}" alt="" style="${q(geo + '; object-fit: cover')}">` }])) pending.current = { select: [path] };
   };
   const gotoSlide = (i: number) => {
     const n = slidesRef.current.length;
@@ -1991,22 +2163,14 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     applyOps([{ t: 'move', path: p, parent, index: d > 0 ? qi + 1 : qi }]);
     setCurrent(i + d);
   };
-  /** the layouts of a new slide after slide `after`: each of the deck's designs (this slide's first, sourceops slideDesigns), or blank */
-  const layoutItems = (after: number): MenuItem[] => {
-    const titled = (i: number) => { const t = slidesRef.current[i]?.title.trim() ?? ''; return t ? ` · ${t.length > 40 ? t.slice(0, 39) + '…' : t}` : ''; };
-    return [
-      ...slideDesigns(text.toString(), after).map(i => i === after
-        ? { label: `Like this slide${titled(i)}`, shortcut: 'Ctrl+M', action: () => newSlide(after) }
-        : { label: `Like slide ${i + 1}${titled(i)}`, action: () => newSlide(after, false, i) }),
-      { label: 'Blank slide', action: () => newSlide(after, true) },
-    ];
-  };
   const slideMenu = (x: number, y: number, i: number) => {
     const n = slides.length;
     showContextMenu(x, y, [
       { label: 'New slide', action: () => newSlide(i) },
-      // (a menu of its own, not a submenu: a submenu opens on hover, which a finger does not do)
-      { label: 'New slide in a layout…', action: () => showContextMenu(x, y, layoutItems(i)) },
+      // (pickers of their own, not submenus: a submenu opens on hover, which a finger does not do)
+      { label: 'New slide in a layout…', action: () => pickAt(x, y, 'New slide', close => layoutPicker(i, close)) },
+      { label: 'Apply layout…', disabled: readOnlyRef.current, action: () => pickAt(x, y, 'Apply layout', close => layoutPicker(i, close, true)) },
+      { label: 'Save as layout…', disabled: readOnlyRef.current, action: () => { void saveAsLayout(i); } },
       { label: 'Duplicate slide', action: () => duplicateSlide(i) },
       { sep: true },
       { label: 'Move up', disabled: i <= 0, action: () => moveSlide(i, -1) },
@@ -2285,7 +2449,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   const curSlidePath = slides[current]?.path ?? null;
   const notes = curSlidePath && kind === 'deck' ? slideNotes(text.toString(), curSlidePath).text : '';
   // the zoom menu: the levels (one slide: Fit, Fit width, Fit content — those apart), what the zoom is at
-  const shownLevels: ViewLevels = soloOn ? viewLevels(box, solo!.rect, solo!.content ?? null, MAX_ZOOM) : { fit };
+  const shownLevels: ViewLevels = soloOn ? viewLevels(box, solo!.rect, solo!.content ?? null, MAX_ZOOM, marginBox) : { fit };
   const zoomLevels = soloOn ? viewDetents(shownLevels).map(d => d.key) : ['fit' as const];
   const pct = Math.round(scale * 100);
   const atLevel = soloOn ? levelAt(shownLevels, scale) : Math.abs(zoom - 1) < 0.005 ? 'fit' : null;
@@ -2372,14 +2536,19 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     nodes: { editing: !!nodeEd, selected: nodeEd?.selected ?? 0, total: nodeEd?.total ?? 0, cmd: cmd => toCanvas({ ol: 'nodes', cmd }) },
     // (the text being retyped ends first: its box does not take the undone version while it is retyped)
     undo: () => { toCanvas({ ol: 'stopText' }); setTimeout(() => host.undo(), 30); }, redo: () => { toCanvas({ ol: 'stopText' }); setTimeout(() => host.redo(), 30); },
-    insertImage: () => fileInput.current?.click(),
+    insertImage: () => { phPicture.current = null; fileInput.current?.click(); },
     text: textActions, paint, arrange: arrangeSel, image: imageTools, remove: removeSel,
     slideBackground: c => { const sp = slidePaths(text.toString())[currentRef.current]; if (sp) applyOps([{ t: 'style', path: sp, set: { background: c } }]); },
     canvas: { view, set: setView },
     newSlide: () => newSlide(currentRef.current),
-    slideLayouts: () => layoutItems(currentRef.current).map(it => ({ label: it.label!, action: it.action! })),
+    layoutPicker: close => layoutPicker(currentRef.current, close),
+    placeholders: kind === 'deck' ? {
+      insert: r => { void insertPlaceholder(r); },
+      picture: () => { const one = selRef.current.length === 1 ? selRef.current[0] : null; if (one?.ph?.role === 'picture') { phPicture.current = one.path; fileInput.current?.click(); } },
+    } : undefined,
     ink: {
-      presets: ink, set: setInk, draw: on => { setDrawOpen(on); setDrawHeld(false); setToolState(on ? 'pen' : 'select'); }, open: drawOpen, held: drawHeld, fold: folded => { setDrawOpen(!folded); setDrawHeld(folded); },
+      presets: ink, set: setInk, draw: on => { setDrawOpen(on); setDrawHeld(false); setToolState(on ? 'pen' : 'select'); }, open: drawOpen, held: drawHeld,
+      fold: folded => { setDrawOpen(!folded); setDrawHeld(folded); if (folded && touchRef.current && soloRef.current) setDrawFocus(true); },
       lassoColors: () => slideColors.current,
       thicken: k => paint({ inkScale: k }),
       convert: as => toCanvas({ ol: 'inkConvert', as }),
@@ -2401,6 +2570,32 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     const x = Math.min(a.x, r.x), y = Math.min(a.y, r.y);
     return { x, y, w: Math.max(a.x + a.w, r.x + r.w) - x, h: Math.max(a.y + a.h, r.y + r.h) - y };
   }) : null;
+
+  /* ------------------------------------------------------------- where the toolbars are (deckdock.ts) */
+
+  // the editor's room: the toolbars and the canvas share it, wherever the toolbars go
+  const editorRef = useRef<HTMLDivElement>(null);
+  const [area, setArea] = useState({ w: 0, h: 0 });
+  useEffect(() => {
+    const el = editorRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setArea(a => a.w === el.clientWidth && a.h === el.clientHeight ? a : { w: el.clientWidth, h: el.clientHeight }));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const dockWas = useRef<DeckDock>('top');
+  const dockAsk = dockAsked();
+  const slideShape = solo && solo.rect.w > 0 ? solo.rect : { w: pageW || 1280, h: pageH || (pageW || 1280) * 9 / 16 };
+  // (the rail beside the canvas takes its width — on a narrow screen it is a drawer over it —, the notes their height)
+  const dockArea = { w: area.w - (railOpen && typeof innerWidth === 'number' && innerWidth > 900 ? railW : 0), h: area.h - (kind === 'deck' && notesShown ? 74 : 0) };
+  const placed = kind === 'page' || presenting || !(touchUi || dockAsk) ? { dock: 'top' as DeckDock, col: 0 }
+    : chooseDock({ area: dockArea, slide: slideShape, tools: bars.tools.reduce((n, g) => n + g.length * 34 + 9, 24), rest: 560, current: dockWas.current });
+  const dock: DeckDock = kind === 'page' || presenting ? 'top' : dockAsk ?? placed.dock;
+  dockWas.current = dock;
+  /** drawing with everything else out of the way (drawFocus): on the one-slide canvas */
+  const focusOn = drawFocus && soloOn && !presenting;
+  const sides = dock === 'sides' && !focusOn;
+  const topBar = !sides && !focusOn;
 
   // the contextual tools on a row of their own when they do not fit beside the others (nothing hidden)
   const barRef = useRef<HTMLDivElement>(null);
@@ -2425,7 +2620,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     const ro = new ResizeObserver(checkContextRow);
     ro.observe(bar);
     return () => ro.disconnect();
-  }, []);
+  }, [topBar]);
 
   // the slide in view: is enough of it on the screen? (zoomed into a corner, or scrolled away from it)
   const curBox = slides[current]?.rect;
@@ -2458,6 +2653,122 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     )}
   </> : null;
 
+  /* ------------------------------------------------------------- the toolbar's parts: a row along the top, or a column at each side */
+
+  const ctxEl = (
+    <div class="dl-ctx">{bars.sections.length > 0 && (
+      <div class="dl-ctx-secs">{bars.sections.map((sec, i) => <Toolbar key={`${i}:${sec.label}`} id="deck-context" label={sec.label} groups={sec.groups} />)}</div>
+    )}</div>
+  );
+  const pageEls = kind === 'page' && <>
+    {host.makeArticle && !readOnly && <button class="dl-btn" data-dl-article title="Write this page as an article: its prose in the document editor (comments, suggestions, formulas), everything else kept as it is and shown running" onClick={() => {
+      void uiConfirm('Write as an article', 'The page becomes a document: its text is written in the document editor — with comments, suggestions, formulas and citations — and what is not text (navigation, scripts, interactive figures) stays as it is, shown running. The page as it is now is kept as a version.', { okLabel: 'Write as article' })
+        .then(ok => { if (ok) return host.makeArticle!(); })
+        .catch(e => notify('Could not make it an article: ' + (e as Error).message, 'error'));
+    }}>✎ Article</button>}
+    <button class={'dl-btn' + (device === 'desktop' ? ' on' : '')} title="Desktop width" onClick={() => setDevice('desktop')}>🖥</button>
+    <button class={'dl-btn' + (device === 'mobile' ? ' on' : '')} title="Phone width" onClick={() => setDevice('mobile')}>📱</button>
+  </>;
+  const zoomSelect = (
+    <select class="dl-btn dl-zoom" data-dl-zoom value={zoomPick} onChange={e => { const el = e.currentTarget as HTMLSelectElement; chooseZoom(el.value); el.blur(); }}
+      title={`Zoom (${pct} %). ${zoomLevels.map(levelName).join(', ')}: a pinch stops at ${zoomLevels.length > 1 ? 'them' : 'it'}${zoomLevels.includes('margins') ? '; Fit margins shows the inside of the layout’s margins' : ''}${solo?.content ? '; Fit content what is on the slide' : ''}. Ctrl+0: ${levelName('fit')}`}>
+      {zoomLevels.map(k => <option key={k} value={k}>{levelName(k)}</option>)}
+      {zoomPick === 'custom' && <option value="custom">{pct}%</option>}
+      {DECK_ZOOMS.map(z => <option key={z} value={String(z)}>{z}%</option>)}
+    </select>
+  );
+  const invertBtn = darkS.dark && (
+    <button class={'dl-btn dl-invert' + (darkS.invert ? ' on' : '')} data-dl-invert aria-pressed={darkS.invert} onClick={toggleDarkPages}
+      title={darkS.invert ? 'Smart invert: the slides light on dark, photographs in their colours — documents, PDFs and slides alike. Click for their own colours' : 'The slides’ own colours — click to smart-invert the pages (documents, PDFs and slides alike)'}>◐</button>
+  );
+  const objectsBtn = (
+    <button class={'dl-btn dl-objects-btn' + (objOpen ? ' on' : '')} data-tb="dk-objects" onClick={() => toggleObjects()}
+      title="Objects: what is on the slide as a tree — open groups and drawings, select a letter of a logo, rename, lock, restack (Inkscape's Objects, PowerPoint's Selection Pane)"
+      dangerouslySetInnerHTML={{ __html: ICONS['dk-objects'] ?? '' }} />
+  );
+  const codeBtn = !host.bindSvgExporter && <button class={'dl-btn' + (codeOpen ? ' on' : '')} title="The page's code" data-dl-code onClick={() => setCodeOpen(o => !o)}>&lt;/&gt;</button>;
+  const toggleReview = () => { setReviewOpen(!reviewOpen); if (reviewOpen) { setDraft(null); setFocus(null); } };
+  const reviewCount = openComments + review.changes.length;
+  const reviewBtn = (
+    <button class={'dl-btn dl-review-btn' + (reviewOpen ? ' on' : '')} data-dl-review-toggle onClick={toggleReview}
+      title={`Comments and suggestions${openComments || review.changes.length ? ` — ${openComments} open comment${openComments === 1 ? '' : 's'}, ${review.changes.length} suggestion${review.changes.length === 1 ? '' : 's'}` : ''}`}>
+      <svg class="dl-rv-icon-svg" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 2.5h12v8.5H6.5L2 14z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" /></svg>
+      {reviewCount > 0 && <span class="dl-rv-count" data-dl-review-count>{reviewCount}</span>}
+    </button>
+  );
+  const modeSwitch = (
+    <EditModeSwitch mode={viewing ? 'viewing' : suggesting ? 'suggesting' : 'editing'} canEdit={!readOnly} view={null} views={() => []} onMode={setMode}
+      changes={{ ins: showIns, del: showDel, set: setChanges }} shortcuts={false} />
+  );
+  const downloads = (x: number, y: number) => showContextMenu(x, y, host.downloads(m => src(m === 'view' && kind === 'deck' ? 'present' : m)));
+  const downloadBtn = !host.bindSvgExporter && (
+    <button class="dl-btn" title="Download" data-dl-download onClick={e => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); downloads(r.left, r.bottom + 4); }}>⤓</button>
+  );
+  const statusEl = (
+    <span role="status" aria-live="polite" class={'dl-status' + (online ? '' : ' off')} title={saveState?.localError ? 'Browser storage failed: ' + saveState.localError : saveState?.pending ? saveState.localPending === false ? 'Changes are kept in this browser and will sync when connected.' : 'Changes are still being written. Keep this tab open until Saved appears.' : undefined}>
+      {saveState?.state === 'stale' ? 'Older local copy' : !synced ? 'Loading…' : readOnly ? 'View only' : saveState?.state === 'offline' || !online ? (saveState?.pending ? saveState.localPending === false && !saveState.localError ? 'Offline — saved in this browser' : 'Offline — keep this tab open' : 'Offline') : saveState?.state === 'saving' ? 'Saving…' : saveState?.state === 'saved' ? 'Saved' : ''}
+    </span>
+  );
+  /** the side columns' ⋯: what the top row has besides the zoom and Present (a column has no room for all of it) */
+  const moreMenu = (x: number, y: number) => showContextMenu(x, y, [
+    { label: 'Objects', checked: objOpen, action: () => toggleObjects() },
+    { label: `Comments and suggestions${reviewCount ? ` (${reviewCount})` : ''}`, checked: reviewOpen, action: toggleReview },
+    ...(!host.bindSvgExporter ? [{ label: 'Code', checked: codeOpen, action: () => setCodeOpen(o => !o) }] : []),
+    { sep: true },
+    { label: 'Editing', checked: !viewing && !suggesting, disabled: readOnly, action: () => setMode('editing') },
+    { label: 'Suggesting', checked: !viewing && suggesting, disabled: readOnly, action: () => setMode('suggesting') },
+    { label: 'Viewing', checked: viewing, action: () => setMode('viewing') },
+    ...(darkS.dark ? [{ sep: true }, { label: 'Smart invert pages', checked: darkS.invert, action: toggleDarkPages }] : []),
+    // (a menu of its own, not a submenu: a submenu opens on hover, which a finger does not do)
+    ...(!host.bindSvgExporter ? [{ sep: true }, { label: 'Download…', action: () => downloads(x, y) }] : []),
+  ]);
+  /** a column at each side (deckdock.ts): the tools at the left; what fits the selection, the zoom, Present and the rest at the right */
+  const leftCol = sides && (
+    <div class="dl-side left tb-side" data-tb-side="left" data-dl-side="left" role="toolbar" aria-label="Tools">
+      <Toolbar id="deck-tools" groups={bars.tools} />
+    </div>
+  );
+  const rightCol = sides && (
+    <div class="dl-side right tb-side" data-tb-side="right" data-dl-side="right" role="toolbar" aria-label="Format and view">
+      {chrome}
+      {ctxEl}
+      <div class="dl-side-end">
+        {zoomSelect}
+        {kind !== 'page' && !host.bindSvgExporter && <button class="dl-btn dl-present" title="Present from this slide (Shift+F5) — F5 from the first" aria-label="Present" data-dl-present onClick={() => startPresenting(false)}>▶</button>}
+        <button class="dl-btn dl-more" title="More: objects, comments, code, editing or suggesting, download" aria-label="More" data-dl-more
+          onClick={e => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); moreMenu(r.left, r.top); }}>
+          ⋯{reviewCount > 0 && <span class="dl-rv-count">{reviewCount}</span>}
+        </button>
+        {statusEl}
+      </div>
+    </div>
+  );
+  /** drawing (drawFocus): the pen in hand at the slide's top right corner — its tap the Draw row over the canvas — and Undo beside it */
+  const focusPill = focusOn && (() => {
+    const p = slideView.place(), r = solo!.rect;
+    const right = p ? p.tx + (r.x + r.w) * p.s : box.w, top = p ? p.ty + r.y * p.s : 0;
+    const x = Math.min(box.w - 8, right - 8), y = Math.max(8, top + 8);
+    const icon = tool === 'eraser' ? 'inkeraser' : tool === 'lasso' ? 'inklasso' : ink.pen === 'highlighter' ? 'inkhl' : ink.nib.ball ? 'inkball' : 'inkpen';
+    return (
+      <div class="dl-focus" data-dl-focus style={{ right: `${Math.max(8, box.w - x)}px`, top: `${y}px` }}>
+        <div class="dl-focus-row">
+        <button type="button" class="dl-focus-btn" title="Undo (or tap with two fingers)" aria-label="Undo" data-dl-focus-undo
+          onClick={() => { toCanvas({ ol: 'stopText' }); setTimeout(() => host.undo(), 30); }} dangerouslySetInnerHTML={{ __html: ICONS['undo'] ?? '↶' }} />
+        <button type="button" class={'dl-focus-btn dl-focus-pen' + (drawOpen ? ' on' : '')} data-dl-focus-pen aria-expanded={drawOpen}
+          title={drawOpen ? 'Fold the pens away' : 'The pens, colours and widths — Done in them brings the toolbars back'} aria-label="Drawing tools"
+          onClick={() => { if (drawOpen) { setDrawOpen(false); setDrawHeld(true); } else { setDrawOpen(true); setDrawHeld(false); } }}>
+          <span class="dl-focus-ico" dangerouslySetInnerHTML={{ __html: ICONS[icon] ?? ICONS['dk-draw'] ?? '' }} />
+          {tool === 'pen' && <span class="dl-focus-dot" style={{ background: inkStyle.color }} />}
+        </button>
+        </div>
+        {/* (the Draw row — or the lasso's tools — under it when asked for) */}
+        {bars.sections.length > 0 && (
+          <div class="dl-focus-bar" data-dl-focus-bar>{bars.sections.map((sec, i) => <Toolbar key={`${i}:${sec.label}`} id="deck-context" label={sec.label} groups={sec.groups} />)}</div>
+        )}
+      </div>
+    );
+  })();
+
   const insertRecoveredCopy = () => {
     const draft = recoveredRef.current[0];
     if (!draft || locked) return;
@@ -2473,7 +2784,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   };
 
   return (
-    <div class={'dl-editor' + (presenting ? ' presenting' : '')} data-kind={kind}>
+    <div ref={editorRef} class={'dl-editor' + (presenting ? ' presenting' : '') + (focusOn ? ' dl-drawfocus' : '')} data-kind={kind} data-dock={dock}>
       {saveState?.state === 'stale' && <div role="alert" data-dl-stale-notice style="padding:8px 12px;background:#fff5d8;color:#342700">
         This file was replaced while this browser had an older copy. Download the local source before reopening the latest file.
         <button class="btn" onClick={() => {
@@ -2489,58 +2800,36 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
       </div>}
       {(tool === 'select' || tool === 'lasso') && quick.length > 0 && quickRect && <QuickBar groups={quick} rect={quickRect} box={onWords ? sel[0]?.rect : undefined} frame={() => canvasFrame.current} scrollY={() => (soloOn ? 0 : scrollRef.current)} />}
       {/* (the context tools, when they float below the bar, start right of the slide rail: its header stays clear) */}
-      <div ref={barRef} class={'dl-toolbar' + (ctxRow ? ' dl-ctx-row' : '')} role="toolbar" style={`--ctx-left: ${railOpen ? railW + 8 : 8}px`}>
+      {topBar && <div ref={barRef} class={'dl-toolbar' + (ctxRow ? ' dl-ctx-row' : '')} role="toolbar" style={`--ctx-left: ${railOpen ? railW + 8 : 8}px`}>
         <span class="dl-title" title={path}>{title}</span>
         {chrome}
         <Toolbar id="deck-tools" groups={bars.tools} />
-        <input ref={fileInput} type="file" accept="image/*,.svg" multiple hidden onChange={e => { const fs = Array.from((e.target as HTMLInputElement).files ?? []); (e.target as HTMLInputElement).value = ''; void uploadImages(fs.map(f => ({ name: f.name, type: f.type, data: f })), null); }} />
-        <input ref={replaceInput} type="file" accept="image/*,.svg" hidden onChange={e => { const fs = Array.from((e.target as HTMLInputElement).files ?? []); (e.target as HTMLInputElement).value = ''; void replacePicture(fs); }} />
-        <div class="dl-ctx">{bars.sections.length > 0 && (
-          <div class="dl-ctx-secs">{bars.sections.map((sec, i) => <Toolbar key={`${i}:${sec.label}`} id="deck-context" label={sec.label} groups={sec.groups} />)}</div>
-        )}</div>
-        {kind === 'page' && <>
-          {host.makeArticle && !readOnly && <button class="dl-btn" data-dl-article title="Write this page as an article: its prose in the document editor (comments, suggestions, formulas), everything else kept as it is and shown running" onClick={() => {
-            void uiConfirm('Write as an article', 'The page becomes a document: its text is written in the document editor — with comments, suggestions, formulas and citations — and what is not text (navigation, scripts, interactive figures) stays as it is, shown running. The page as it is now is kept as a version.', { okLabel: 'Write as article' })
-              .then(ok => { if (ok) return host.makeArticle!(); })
-              .catch(e => notify('Could not make it an article: ' + (e as Error).message, 'error'));
-          }}>✎ Article</button>}
-          <button class={'dl-btn' + (device === 'desktop' ? ' on' : '')} title="Desktop width" onClick={() => setDevice('desktop')}>🖥</button>
-          <button class={'dl-btn' + (device === 'mobile' ? ' on' : '')} title="Phone width" onClick={() => setDevice('mobile')}>📱</button>
-        </>}
+        {ctxEl}
+        {pageEls}
         <span class="dl-zoomgroup">
           <button class="dl-btn" title="Zoom out (Ctrl+−)" onClick={() => zoomStep(1 / 1.25)}>−</button>
-          <select class="dl-btn dl-zoom" data-dl-zoom value={zoomPick} onChange={e => { const el = e.currentTarget as HTMLSelectElement; chooseZoom(el.value); el.blur(); }}
-            title={`Zoom (${pct} %). ${zoomLevels.map(levelName).join(', ')}: a pinch stops at ${zoomLevels.length > 1 ? 'them' : 'it'}${solo?.content ? '; Fit content leaves the slide’s margins out' : ''}. Ctrl+0: ${levelName('fit')}`}>
-            {zoomLevels.map(k => <option key={k} value={k}>{levelName(k)}</option>)}
-            {zoomPick === 'custom' && <option value="custom">{pct}%</option>}
-            {DECK_ZOOMS.map(z => <option key={z} value={String(z)}>{z}%</option>)}
-          </select>
+          {zoomSelect}
           <button class="dl-btn" title="Zoom in (Ctrl+=)" onClick={() => zoomStep(1.25)}>+</button>
         </span>
-        {darkS.dark && <button class={'dl-btn dl-invert' + (darkS.invert ? ' on' : '')} data-dl-invert aria-pressed={darkS.invert} onClick={toggleDarkPages}
-          title={darkS.invert ? 'Smart invert: the slides light on dark, photographs in their colours — documents, PDFs and slides alike. Click for their own colours' : 'The slides’ own colours — click to smart-invert the pages (documents, PDFs and slides alike)'}>◐</button>}
-        <button class={'dl-btn dl-objects-btn' + (objOpen ? ' on' : '')} data-tb="dk-objects" onClick={() => toggleObjects()}
-          title="Objects: what is on the slide as a tree — open groups and drawings, select a letter of a logo, rename, lock, restack (Inkscape's Objects, PowerPoint's Selection Pane)"
-          dangerouslySetInnerHTML={{ __html: ICONS['dk-objects'] ?? '' }} />
-        {!host.bindSvgExporter && <button class={'dl-btn' + (codeOpen ? ' on' : '')} title="The page's code" data-dl-code onClick={() => setCodeOpen(o => !o)}>&lt;/&gt;</button>}
-        <button class={'dl-btn dl-review-btn' + (reviewOpen ? ' on' : '')} data-dl-review-toggle onClick={() => { setReviewOpen(!reviewOpen); if (reviewOpen) { setDraft(null); setFocus(null); } }}
-          title={`Comments and suggestions${openComments || review.changes.length ? ` — ${openComments} open comment${openComments === 1 ? '' : 's'}, ${review.changes.length} suggestion${review.changes.length === 1 ? '' : 's'}` : ''}`}>
-          <svg class="dl-rv-icon-svg" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 2.5h12v8.5H6.5L2 14z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" /></svg>
-          {openComments + review.changes.length > 0 && <span class="dl-rv-count" data-dl-review-count>{openComments + review.changes.length}</span>}
-        </button>
-        <EditModeSwitch mode={viewing ? 'viewing' : suggesting ? 'suggesting' : 'editing'} canEdit={!readOnly} view={null} views={() => []} onMode={setMode}
-          changes={{ ins: showIns, del: showDel, set: setChanges }} shortcuts={false} />
+        {invertBtn}
+        {objectsBtn}
+        {codeBtn}
+        {reviewBtn}
+        {modeSwitch}
         {kind !== 'page' && !host.bindSvgExporter && <button class="dl-btn dl-present" title="Present from this slide (Shift+F5) — F5 from the first" data-dl-present onClick={() => startPresenting(false)}>▶ Present</button>}
-        {!host.bindSvgExporter && <button class="dl-btn" title="Download" data-dl-download onClick={e => {
-          const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-          showContextMenu(r.left, r.bottom + 4, host.downloads(m => src(m === 'view' && kind === 'deck' ? 'present' : m)));
-        }}>⤓</button>}
-        <span role="status" aria-live="polite" class={'dl-status' + (online ? '' : ' off')} title={saveState?.localError ? 'Browser storage failed: ' + saveState.localError : saveState?.pending ? saveState.localPending === false ? 'Changes are kept in this browser and will sync when connected.' : 'Changes are still being written. Keep this tab open until Saved appears.' : undefined}>
-          {saveState?.state === 'stale' ? 'Older local copy' : !synced ? 'Loading…' : readOnly ? 'View only' : saveState?.state === 'offline' || !online ? (saveState?.pending ? saveState.localPending === false && !saveState.localError ? 'Offline — saved in this browser' : 'Offline — keep this tab open' : 'Offline') : saveState?.state === 'saving' ? 'Saving…' : saveState?.state === 'saved' ? 'Saved' : ''}
-        </span>
-      </div>
-      <div class="dl-body">
-        {showRail && railShown && (
+        {downloadBtn}
+        {statusEl}
+      </div>}
+        <input ref={fileInput} type="file" accept="image/*,.svg" multiple hidden onChange={e => {
+          const fs = Array.from((e.target as HTMLInputElement).files ?? []); (e.target as HTMLInputElement).value = '';
+          const ph = phPicture.current; phPicture.current = null;
+          if (ph && fs[0]) { void fillPicture(ph, fs[0]); return; }
+          void uploadImages(fs.map(f => ({ name: f.name, type: f.type, data: f })), null);
+        }} />
+        <input ref={replaceInput} type="file" accept="image/*,.svg" hidden onChange={e => { const fs = Array.from((e.target as HTMLInputElement).files ?? []); (e.target as HTMLInputElement).value = ''; void replacePicture(fs); }} />
+      <div class="dl-body" data-sides={sides ? '' : undefined} style={sides ? `--dl-col: ${placed.col}px` : undefined}>
+        {leftCol}
+        {showRail && railShown && !focusOn && (
           <div class="dl-rail" ref={railBox} style={{ width: `${railW}px` }}>
               <div class="dl-rail-head">
                 <span class="dl-rail-count" title="The slide shown, of all slides">{slides.length ? `Slide ${current + 1} of ${slides.length}` : 'Slides'}</span>
@@ -2552,8 +2841,8 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
                 data-dl-railgrip onPointerDown={onRailGrip} onDblClick={() => setRail(RAIL_W)} />
               <div class="dl-rail-actions">
                 <button class="dl-btn" title="New slide after this one (Ctrl+M)" data-dl-newslide disabled={locked} onClick={() => newSlide(current)}>+ Slide</button>
-                <button class="dl-btn" title="New slide in a layout: like one of the deck’s slides, or blank" aria-label="New slide in a layout" data-dl-newslide-layouts disabled={locked}
-                  onClick={e => { const r = e.currentTarget.getBoundingClientRect(); showContextMenu(r.left, r.top, layoutItems(current)); }}>▾</button>
+                <button class="dl-btn" title="New slide in a layout — title slide, title and body, two columns … made of this deck’s design, or one of its own" aria-label="New slide in a layout" data-dl-newslide-layouts disabled={locked}
+                  onClick={e => { const r = e.currentTarget.getBoundingClientRect(); pickAt(r.left, r.top, 'New slide', close => layoutPicker(current, close)); }}>▾</button>
               </div>
           </div>
         )}
@@ -2602,6 +2891,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
             )}
             {hud && <div key={hud.n} class="dl-hud" role="status" data-dl-hud>{hud.text}</div>}
             <div ref={zoomHud} class="zoom-hud" aria-hidden="true" data-dl-zoomhud />
+            {focusPill}
             {(lost || zoomed || (soloOn && slideFree)) && kind !== 'page' && (
               <button type="button" class={'dl-refocus' + (lost ? ' lost' : '')} data-dl-refocus onClick={fitSlide}
                 title={zoomed ? `Show the whole ${kind === 'poster' ? 'poster' : 'slide'} again (Ctrl+0)` : 'Back into the middle (Ctrl+0)'}>
@@ -2610,7 +2900,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
             )}
           </div>
           {/* (folded away, nothing of them is left here: their button is in the corner) */}
-          {kind === 'deck' && notesShown && (
+          {kind === 'deck' && notesShown && !focusOn && (
             <div class="dl-notes">
               <textarea placeholder="Speaker notes" value={notesDraft && curSlidePath && notesDraft.path.join() === curSlidePath.join() ? notesDraft.text : notes} disabled={locked || !curSlidePath} data-dl-notes
                 onInput={e => setNotesDraft((e.target as HTMLTextAreaElement).value)}
@@ -2619,18 +2909,18 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
             </div>
           )}
         </div>
-        {objOpen && (
+        {objOpen && !focusOn && (
           <ObjectsPane slide={objects.slide} items={objects.items} sel={sel} readOnly={locked} close={() => toggleObjects(false)}
             select={paths => toCanvas({ ol: 'select', paths })} hover={p => toCanvas({ ol: 'hover', path: p })}
             rename={(p, name) => applyOps([{ t: 'attr', path: p, name: 'data-ol-name', value: name }])}
             lock={(p, on) => applyOps([{ t: 'attr', path: p, name: 'data-ol-locked', value: on ? '' : null }])}
             restack={(p, ref, front) => toCanvas({ ol: 'restack', path: p, ref, front })} />
         )}
-        {animOpen && kind === 'deck' && (
+        {animOpen && kind === 'deck' && !focusOn && (
           <AnimationPane seq={seq} sel={sel} readOnly={locked} close={() => toggleAnim(false)}
             send={cmd => toCanvas({ ol: 'steps', cmd })} select={p => toCanvas({ ol: 'select', paths: [p] })} />
         )}
-        {reviewOpen && (
+        {reviewOpen && !focusOn && (
           <ReviewPane review={review} slideTitles={slides.map(s => s.title)} current={current} kind={kind} me={me} canEdit={!locked}
             focus={focus} draft={draft} submitDraft={submitDraft} cancelDraft={() => setDraft(null)} select={showOnCanvas}
             reply={replyTo} resolve={resolveThread} remove={removeThread}
@@ -2638,15 +2928,16 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
             acceptAll={() => resolveEverything(true)} rejectAll={() => resolveEverything(false)}
             close={() => { setReviewOpen(false); setDraft(null); setFocus(null); }} />
         )}
-        {codeOpen && (
+        {codeOpen && !focusOn && (
           <div class="dl-code">
             <div class="dl-code-head"><span>{path.split('/').pop()}</span><button class="dl-btn" onClick={() => setCodeOpen(false)} title="Close">×</button></div>
             <textarea ref={codeRef} spellcheck={false} readOnly={locked} onInput={onCodeInput} data-dl-codearea
               onKeyDown={e => { if (e.key === 'Tab') { e.preventDefault(); document.execCommand('insertText', false, '  '); } }} />
           </div>
         )}
+        {rightCol}
       </div>
-      {corner && (cornerSlot ? createPortal(corner, cornerSlot) : <div class="dl-foot">{corner}</div>)}
+      {corner && !focusOn && (cornerSlot ? createPortal(corner, cornerSlot) : <div class="dl-foot">{corner}</div>)}
       {floatPop && <FloatPopover {...floatPop} onClose={() => setFloatPop(null)} />}
       {citeOpen && host.docId && <CiteDialog meta={CITE_META} search docId={host.docId} project={host.docId.split('/').slice(0, 2).join('/')} restoreFocusOnInsert={false}
         onInsert={(keys, cmd, before, after) => {

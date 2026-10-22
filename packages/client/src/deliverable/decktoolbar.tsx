@@ -8,6 +8,7 @@
  * so it looks like the LyX rows in the Classic interface and like Google's in the Modern one.
  */
 import { useEffect, useState } from 'preact/hooks';
+import type { ComponentChildren } from 'preact';
 import { mathPreview, type ToolButton, type Palette } from '../app/Toolbar';
 import { ColorGrid } from '../app/ColorGrid';
 import type { SelItem, Tool, Paint, ArrangeHow, DeliverableKind, CanvasView, NodeCmd } from './protocol';
@@ -16,6 +17,7 @@ import { fmtPt, ptToPx, pxToPt, sizePt, stepPt } from './units';
 import { drawingToolbar } from './drawingToolbar';
 import { type DeckInk, type DeckInkPatch, LASSO_KINDS } from './deckink';
 import { lassoGroups } from './lassobar';
+import { PH_ROLES, PH_LABELS, type PhRole } from './decklayouts';
 import './deckicons';
 
 export interface DeckTextActions {
@@ -61,8 +63,10 @@ export interface DeckCtx {
   /** the guides (guides.ts): shown or not, and what can be done with them (the slide's right-click menu's Guides) */
   guides: { shown: boolean; items(): { label: string; action: () => void; active?: boolean }[] };
   newSlide(): void;
-  /** the layouts a new slide can take (the deck's own designs, blank) */
-  slideLayouts(): { label: string; action: () => void }[];
+  /** the layouts a new slide can take (LayoutPicker.tsx: the deck's own, those made of its design, like a slide of it, blank) */
+  layoutPicker(close: () => void): ComponentChildren;
+  /** placeholders (decklayouts.ts): one of a role put on the slide; a picture put into the empty picture placeholder selected */
+  placeholders?: { insert(role: PhRole): void; picture(): void };
   /** LyX's formula editor (MathOverlay): open on a formula of the text, a new formula at the caret, its commands, the math panels; a displayed one numbered and labelled */
   math: { editing: boolean; insert(display: boolean): void; exec(cmd: string, ...args: unknown[]): void; panels: { id: string; title: string; palette: Palette }[]; display: boolean; number(): void; label(): void };
   /** LaTeX's citations, references and overlays on slides (core html/refs.ts) */
@@ -250,7 +254,7 @@ function paintLabel(items: SelItem[]): string {
  * then group / ungroup and arrange, `extra` (duplicate, comment) and delete. Empty while points, a formula or a crop are edited.
  * Over `words` selected in a text being retyped: what is done to words — font, size, bold … highlight, a link —, then `extra`.
  */
-const QUICK: string[][] = [['dk-b', 'dk-i', 'dk-color', 'dk-size'], ['dk-align'], ['dk-inkcolor', 'dk-ink-thinner', 'dk-ink-thicker', 'dk-ink-convert', 'dk-fill', 'dk-stroke'], ['dk-linecolor', 'dk-lineweight', 'dk-tips'], ['dk-crop', 'dk-nobg'], ['dk-group', 'dk-ungroup', 'dk-arrange']];
+const QUICK: string[][] = [['dk-ph-addpicture'], ['dk-b', 'dk-i', 'dk-color', 'dk-size'], ['dk-align'], ['dk-inkcolor', 'dk-ink-thinner', 'dk-ink-thicker', 'dk-ink-convert', 'dk-fill', 'dk-stroke'], ['dk-linecolor', 'dk-lineweight', 'dk-tips'], ['dk-crop', 'dk-nobg'], ['dk-group', 'dk-ungroup', 'dk-arrange']];
 const QUICK_WORDS: string[][] = [['dk-font', 'dk-size'], ['dk-b', 'dk-i', 'dk-u', 'dk-color', 'dk-hl'], ['dk-href']];
 export function quickGroups(sections: ToolSection[], extra: ToolButton[], words = false): ToolButton[][] {
   const all = new Map<string, ToolButton>();
@@ -450,6 +454,12 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
     ]);
   }
 
+  // an empty picture placeholder: a picture for it (PowerPoint's icon in the box)
+  if (one?.ph?.role === 'picture' && one.ph.empty && c.placeholders) {
+    section('Picture placeholder');
+    context.push([{ id: 'dk-ph-addpicture', title: 'Add a picture — it takes the placeholder’s place and size', icon: 'dk-image', action: c.placeholders.picture }]);
+  }
+
   if (sel.length) {
     section('Arrange');
     const st = one?.style;
@@ -522,17 +532,11 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
         ) } },
       // (a poster is one page: a "slide" added to it was invisible — no rail — and a blank page of the PDF)
       ...(c.kind === 'deck' ? [{ id: 'dk-newslide', title: 'New slide (Ctrl+M)', icon: '+ Slide', action: c.newSlide },
-        // (PowerPoint's New Slide ▾: the button beside it)
-        { id: 'dk-layouts', title: 'New slide in a layout: like one of the deck’s slides, or blank', icon: 'Layouts',
-          palette: { title: 'New slide', list: true, render: (close: () => void) => (
-            <div class="tb-popup-grid">
-              {c.slideLayouts().map((it, i) => (
-                <button key={i} type="button" class="tb-pal-item" data-newslide-layout={i} onMouseDown={e => e.preventDefault()} onClick={() => { close(); it.action(); }}>
-                  <span class="tb-pal-label">{it.label}</span>
-                </button>
-              ))}
-            </div>
-          ) } },
+        // (PowerPoint's New Slide ▾, Google's layouts: the button beside it)
+        { id: 'dk-layouts', title: 'New slide in a layout — title slide, title and body, two columns … made of this deck’s design, or one of its own (Save as layout)', icon: 'Layouts',
+          palette: { title: 'New slide', render: (close: () => void) => c.layoutPicker(close) } },
+        ...(c.placeholders ? [{ id: 'dk-placeholder', title: 'Placeholder — a box that says what goes in it (“Click to add title”) until something does; nothing of it shows when presenting', icon: 'dk-placeholder',
+          palette: { title: 'Placeholder', list: true, cols: 1, items: PH_ROLES.map(r => ({ label: PH_LABELS[r], html: ICON('dk-ph-' + r), action: () => c.placeholders!.insert(r) })) } } as ToolButton] : []),
         animateButton(c)] : []),
     ]);
   }

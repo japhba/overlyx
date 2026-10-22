@@ -57,6 +57,7 @@ import { initGuides, guideSlide, guideAt, guideSnaps, guideParts, startGuideDrag
 import { listInkBox } from './listmarkers';
 import { replaceEditingHost, editingTextStyle, carryEditingTextStyle } from './editinghost';
 import { textBoundary, textListItem } from './textnavigation';
+import { PH, PH_CSS, phRole, isEmptyPh, isPicturePh, primeList } from './placeholders';
 
 const NS = 'http://www.w3.org/1999/xhtml';
 let host: HTMLElement;
@@ -157,7 +158,8 @@ export function startEditing(): void {
     html.ol-on-guide-x, html.ol-on-guide-x * { cursor: col-resize !important; }
     html.ol-on-guide-y, html.ol-on-guide-y * { cursor: row-resize !important; }
     html.ol-edit a { cursor: default; }
-    ${CHIP_CSS}`;
+    ${CHIP_CSS}
+    ${PH_CSS}`;
   document.head.appendChild(css);
   dragCss = document.createElement('style');
   dragCss.setAttribute('data-ol-runtime', '');
@@ -694,8 +696,8 @@ export function isTextual(el: Element): boolean {
 
 /** text can be typed into it: a text box, or a shape with nothing but text in it (an empty one too) */
 export function canType(el: Element): boolean {
-  // (a list of references is made by the runtime from the citations: cite.ts)
-  if (el.classList.contains('ol-bibliography')) return false;
+  // (a list of references is made by the runtime from the citations: cite.ts; a picture placeholder takes a picture)
+  if (el.classList.contains('ol-bibliography') || isPicturePh(el)) return false;
   if (isTextual(el)) return true;
   if (!(el instanceof HTMLElement) || REPLACED.has(el.localName) || el.classList.contains('slide') || el === document.body || el.classList.contains('ol-crop')) return false;
   const src = srcOf.get(el);
@@ -1110,6 +1112,7 @@ function item(el: Element): SelItem | null {
     kind, locked: isLocked(el), cropped: el.classList.contains('ol-crop'), canText: canType(el),
     src: kind === 'image' ? pictureSrc(el) : undefined,
     list: listOf(el),
+    ...(phRole(el) ? { ph: { role: phRole(el)!, empty: isEmptyPh(el) } } : {}),
   };
 }
 
@@ -2037,8 +2040,11 @@ function onDragEnd(e: PointerEvent): void {
   if (d.kind === 'guide') { endGuideDrag(canceled || state.version === null); return; }
   if (d.kind === 'pan') {
     if (d.moved && isSolo()) post({ ol: 'panEnd', cancel: canceled });
-    // a tap on nothing: the selection goes; on an object: that one is selected
-    if (!d.moved && !e.shiftKey && !canceled) { selected = d.tap ? [d.tap] : []; report(); }
+    // a tap on nothing: the selection goes; on an object: that one is selected — an empty placeholder takes the caret (Google Slides')
+    if (!d.moved && !e.shiftKey && !canceled) {
+      selected = d.tap ? [d.tap] : []; report();
+      if (d.tap && isEmptyPh(d.tap) && !isPicturePh(d.tap) && !isLocked(d.tap) && tapPlaceholder(d.tap, e)) return;
+    }
     draw();
     return;
   }
@@ -2079,6 +2085,9 @@ function onDragEnd(e: PointerEvent): void {
     return;
   }
   if (!d.moved) {
+    // a click on an empty placeholder: the caret in it (a picture's, clicked again: a picture for it)
+    if (d.kind === 'move' && d.clicked && selected.length === 1 && !e.shiftKey && isEmptyPh(d.clicked) && !isLocked(d.clicked)
+      && (!isPicturePh(d.clicked) || d.again) && tapPlaceholder(d.clicked, e)) return;
     // a click on one of several selected objects: that one alone (PowerPoint's); a drag would have moved them all
     if (d.kind === 'move' && d.clicked && selected.length > 1 && !e.shiftKey) { selected = [d.clicked]; report(); }
     // a click on the object already selected: resize handles ⇄ rotation arrows (Inkscape)
@@ -3026,6 +3035,15 @@ function finishSvgText(keep: boolean): void {
   commit([{ t: 'inner', path, html: copy.innerHTML, before: src.innerHTML }]);
 }
 
+/** an empty placeholder clicked or tapped: typing in it, or (a picture's) the editor asks for a picture — false: neither */
+function tapPlaceholder(el: Element, e: PointerEvent): boolean {
+  if (state.version === null) return false;
+  if (isPicturePh(el)) { const p = pathOf(el); if (p) post({ ol: 'placeholderPicture', path: p }); draw(); return !!p; }
+  if (!canType(el)) return false;
+  beginText(el as HTMLElement, { x: e.clientX, y: e.clientY });
+  return true;
+}
+
 function beginText(el: HTMLElement, at: { x: number; y: number } | null, selectAll = false, openMath = false): void {
   const src = srcOf.get(el);
   if (!src) return;
@@ -3040,6 +3058,8 @@ function beginText(el: HTMLElement, at: { x: number; y: number } | null, selectA
   lockDeletions(el);
   el.classList.add('ol-notex');
   const chipping = chipify(el);
+  // (an empty list placeholder: its first item to type in)
+  const firstItem = primeList(el);
   el.setAttribute('data-ol-editing', '');
   el.contentEditable = 'true';
   editStartHtml = cleanHtml(el);
@@ -3055,6 +3075,10 @@ function beginText(el: HTMLElement, at: { x: number; y: number } | null, selectA
       else if (openMath) openChip(chipping.chips[0], null);
       else placeCaret(el, at, selectAll);
     });
+  } else if (firstItem) {
+    const r = document.createRange();
+    r.setStart(firstItem, 0); r.collapse(true);
+    getSelection()?.removeAllRanges(); getSelection()?.addRange(r);
   } else placeCaret(el, at, selectAll);
   el.addEventListener('input', scheduleCommit);
   el.addEventListener('beforeinput', onBeforeInput);
@@ -3114,6 +3138,8 @@ function cleanHtml(el: HTMLElement): string {
   if (/^\s*<br>\s*$/.test(html)) html = '';
   // the no-break spaces contenteditable puts beside typed spaces (so they would not collapse) are spaces
   html = html.replace(/&nbsp;(?= )|(?<= )&nbsp;/g, ' ').replace(/&nbsp;(?=<\/|$)/g, ' ');
+  // a placeholder typed empty again (an item, a line break left): empty, its prompt shows
+  if (el.hasAttribute(PH) && !(c.textContent ?? '').trim() && !c.querySelector('img, svg, video, canvas, iframe, object, embed, picture, math')) html = '';
   // and the ones beside a formula (typed next to its uneditable chip)
   html = html.replace(/(?<=\\\)|\\\]|\$\$)&nbsp;|&nbsp;(?=\\\(|\\\[|\$\$)/g, ' ');
   return html;

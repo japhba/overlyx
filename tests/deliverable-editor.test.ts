@@ -103,7 +103,8 @@ describe('the editor changes the text', () => {
   it('a new slide keeps the design of the one it follows, without its text or its own pictures and shapes', () => {
     const html = newSlideHtml(DECK, 1)!;
     expect(html).toMatch(/^<section class="slide">/);
-    expect(html).toContain('>Title</h2>');
+    // (its title an empty placeholder: "Click to add title" on the canvas, nothing when presented)
+    expect(html).toMatch(/<h2 data-ol-ph="title"[^>]*><\/h2>/);
     expect(html).not.toContain('One message per slide');
     // that slide's own shape is content (usability test: "New slide" copied every picture and drawing)
     expect(html).not.toContain('border-radius: 24px');

@@ -21,11 +21,24 @@ export const GUIDES_ATTR = 'data-ol-guides';
 /** A template's fixed safe-area margins. Unlike guides, these are visible/snappable but never moved or reset. */
 export const LAYOUT_MARGINS_ATTR = 'data-ol-layout-margins';
 
+export interface MarginSides { top: number; right: number; bottom: number; left: number }
+
 /** CSS margin shorthand in slide units (bare/px, pt, mm, cm, in, or %); returns its four safe-area lines. */
 export function layoutMarginGuides(value: string | null | undefined, w: number, h: number): Guide[] {
-  if (value == null || !value.trim() || !(w > 0) || !(h > 0)) return [];
+  const m = layoutMarginSides(value, w, h);
+  if (!m) return [];
+  const guides = [
+    { axis: 'x' as const, at: m.left }, { axis: 'x' as const, at: w - m.right },
+    { axis: 'y' as const, at: m.top }, { axis: 'y' as const, at: h - m.bottom },
+  ];
+  return dedupe(guides);
+}
+
+/** the same margins as the slide px from each edge (null: none, or none that leave room inside the slide) */
+export function layoutMarginSides(value: string | null | undefined, w: number, h: number): MarginSides | null {
+  if (value == null || !value.trim() || !(w > 0) || !(h > 0)) return null;
   const tokens = value.trim().split(/\s+/);
-  if (tokens.length > 4) return [];
+  if (tokens.length > 4) return null;
   const sides = tokens.length === 1 ? [tokens[0], tokens[0], tokens[0], tokens[0]]
     : tokens.length === 2 ? [tokens[0], tokens[1], tokens[0], tokens[1]]
       : tokens.length === 3 ? [tokens[0], tokens[1], tokens[2], tokens[1]]
@@ -38,14 +51,10 @@ export function layoutMarginGuides(value: string | null | undefined, w: number, 
     const px = unit === '%' ? ref * n / 100 : unit === 'pt' ? n * 96 / 72 : unit === 'mm' ? n * 96 / 25.4 : unit === 'cm' ? n * 96 / 2.54 : unit === 'in' ? n * 96 : n;
     return Number.isFinite(px) && px >= 0 ? px : NaN;
   });
-  if (values.some(n => !Number.isFinite(n))) return [];
+  if (values.some(n => !Number.isFinite(n))) return null;
   const [top, right, bottom, left] = values;
-  if (left + right >= w || top + bottom >= h) return [];
-  const guides = [
-    { axis: 'x' as const, at: left }, { axis: 'x' as const, at: w - right },
-    { axis: 'y' as const, at: top }, { axis: 'y' as const, at: h - bottom },
-  ];
-  return dedupe(guides);
+  if (left + right >= w || top + bottom >= h) return null;
+  return { top, right, bottom, left };
 }
 
 /** two guides this near (slide px) are one */

@@ -461,6 +461,14 @@ html[data-ui="modern"] .dl-toolbar.dl-ctx-row { padding-bottom: 4px; row-gap: 0;
 html[data-ui="modern"] .dl-toolbar.dl-ctx-row > .dl-ctx { border-top: 1px solid var(--m-line); padding-top: 4px; margin: 0 4px; }
 html[data-ui="modern"] .dl-toolbar.dl-ctx-row > .dl-zoomgroup { margin-left: auto; }
 html[data-ui="modern"] .dl-toolbar > .toolbar { background: none; border: 0; padding: 0; }
+/* the side columns (deckdock.ts): the strip's colour, upright */
+html[data-ui="modern"] .dl-side { background: var(--m-strip); border-color: var(--m-line) !important; }
+html[data-ui="modern"] .dl-side .toolbar { background: none; border: 0; }
+html[data-ui="modern"] .dl-side-end { border-top-color: var(--m-line); }
+html[data-ui="modern"] .dl-side-end .dl-present { padding: 0; }
+html[data-ui="modern"] .dl-focus-btn { border-color: var(--m-line); background: color-mix(in srgb, var(--m-paper) 88%, transparent); color: var(--m-ink); box-shadow: var(--m-shadow); }
+html[data-ui="modern"] .dl-focus-pen.on { background: var(--m-key-on); color: var(--m-on-key-on); }
+html[data-ui="modern"] .dl-focus-bar { border-color: var(--m-line); background: var(--m-paper); box-shadow: var(--m-shadow); }
 html[data-ui="modern"] .dl-title { display: none; }
 html[data-ui="modern"] .dl-btn { border-radius: var(--m-radius); border: 0; height: 30px; color: var(--m-ink2); }
 html[data-ui="modern"] .dl-btn:hover:not(:disabled) { background: var(--m-hover); color: var(--m-ink); }

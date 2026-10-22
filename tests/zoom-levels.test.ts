@@ -30,6 +30,15 @@ describe("a slide's zoom levels", () => {
     expect(viewLevels(box, { w: 1280, h: 720 }, null, 8).content).toBeUndefined();
     expect(viewLevels(box, { w: 1280, h: 720 }, { w: 2, h: 2 }, 8).content).toBe(8);
   });
+  it("Fit margins: the inside of the layout's margins as big as the canvas takes it, the gap Fit keeps round it, in the middle", () => {
+    const l = viewLevels(box, { w: 1280, h: 720 }, { w: 1100, h: 600 }, 8, { w: 1088, h: 576 });
+    const g = 2 * fitGap(box);
+    expect(l.margins).toBeCloseTo(Math.min((1000 - g) / 1088, (600 - g) / 576), 9);
+    expect(viewDetents(l).map(d => d.key)).toContain('margins');
+    expect(levelAnchor('margins', { x: 48, y: 48, w: 1280, h: 720 }, null, { x: 144, y: 120, w: 1088, h: 576 })).toEqual({ x: 688, y: 408 });
+    // (no margins: no such level)
+    expect(viewLevels(box, { w: 1280, h: 720 }, null, 8).margins).toBeUndefined();
+  });
   it('Fit content puts what is on the slide in the middle; Fit width keeps where the view is up and down', () => {
     const slide = { x: 48, y: 48, w: 800, h: 1200 }, content = { x: 248, y: 498, w: 400, h: 300 };
     expect(levelAnchor('fit', slide, content)).toEqual({ x: 448, y: 648 });

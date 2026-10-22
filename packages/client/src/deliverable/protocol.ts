@@ -150,6 +150,8 @@ export interface SelItem {
   src?: string;
   /** the list it is or holds: its items appear one by one from step `steps` (data-steps), or all at once (null) */
   list?: { path: Path; steps: number | null };
+  /** a layout's placeholder (decklayouts.ts): its role, and whether nothing is in it yet */
+  ph?: { role: string; empty: boolean };
 }
 
 /** `deleted`: deleted as a suggestion (shown faded until accepted; not presented) */
@@ -304,7 +306,12 @@ export type ToRuntime =
   /** the right-click menu's weave chosen: the crossing right-clicked woven (or its weave undone) — runtime/weave.ts */
   | { ol: 'weave' }
   /** Ctrl+V with the keyboard in the editor: what the clipboard holds, pasted on the canvas (runtime/clip.ts) */
-  | { ol: 'paste'; html: string; plain: string; files: { name: string; type: string; data: ArrayBuffer }[] };
+  | { ol: 'paste'; html: string; plain: string; files: { name: string; type: string; data: ArrayBuffer }[] }
+  /** how the deck's text looks where the editor asks (a new slide's placeholders take it: decklayouts.ts) — answered with `looks` */
+  | { ol: 'looks'; id: number; paths: Path[] };
+
+/** the computed type of a text element (CSS values as the browser gives them) */
+export interface TextLook { fontSize: string; lineHeight: string; fontFamily: string; fontWeight: string; color: string }
 
 /** runtime → editor */
 export type FromRuntime =
@@ -417,7 +424,11 @@ export type FromRuntime =
   /** the Objects pane's tree of the slide worked on (while the pane is open) */
   | { ol: 'objects'; slide: number; items: ObjNode[] }
   /** a comment pin pressed (`open`: show its threads), or what a new comment is on (the object or slide, the words selected in the text being retyped) */
-  | { ol: 'comment'; path: Path | null; quote?: string; slide: number; open: boolean };
+  | { ol: 'comment'; path: Path | null; quote?: string; slide: number; open: boolean }
+  /** the answer to `looks`: each path's look (null: no such element) */
+  | { ol: 'looks'; id: number; looks: (TextLook | null)[] }
+  /** an empty picture placeholder tapped (decklayouts.ts): the editor asks for a picture to put in its place */
+  | { ol: 'placeholderPicture'; path: Path };
 
 /** the room (screen px) left of the rail's thumbnails for their numbers: the editor makes the rail's frame that much wider, the rail's page lays its slides out right of it */
 export const RAIL_NUM = 20;
