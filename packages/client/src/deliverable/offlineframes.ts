@@ -199,6 +199,7 @@ export function offlineFrames(userId: number, html: () => string, getLink: () =>
       // Background text synchronization must not acquire a second link before
       // the opening controller has succeeded, particularly after a denial.
       if (!initialized) return;
+      // (the text's pictures are read from all of it, parsed again: after a pause, not between the strokes of a word written by hand)
       timer = setTimeout(() => { void prepare().then(async ready => {
         const source = html(), key = ready.base + '|' + JSON.stringify(referencedAssets(source, ready.folder, ready.base));
         if (!force && key === assetKey) return;
@@ -208,7 +209,7 @@ export function offlineFrames(userId: number, html: () => string, getLink: () =>
         const same = assets && Object.keys(next).length === Object.keys(assets).length && Object.entries(next).every(([url, value]) => assets![url] === value);
         assets = next;
         if (!same) resourceListeners.forEach(callback => callback(next));
-      }).catch(() => {}); }, 600);
+      }).catch(() => {}); }, force ? 600 : 2500);
     },
     destroy() { closed = true; generation++; clearTimeout(timer); assets = null; prepared = null; resourceListeners.clear(); },
   };

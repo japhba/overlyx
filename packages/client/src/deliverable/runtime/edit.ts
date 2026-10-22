@@ -2404,6 +2404,8 @@ let ink: {
   kind: string; p0: number;
   /** scratch-out (core/scratchout.ts): where and since when the pen rests, when the scribble was last judged, the strokes it could erase */
   rest: { x: number; y: number; t: number; timer: ReturnType<typeof setTimeout> | null }; judged: number; cands: { el: Element; pts: [number, number][] }[] | null;
+  /** where those were looked for (client px: the scribble's box, widened), and each stroke's points once sampled */
+  near: Rect | null; sampled: Map<Element, [number, number][]>;
   /** on a touch screen: its points as the screen had them, for a point far off (core glitch.ts; the editor reports it) */
   watch: StrokeWatch | null;
   /** draw and hold (core/shapesnap.ts): the timer of the pen at rest, the shape it became */
@@ -2441,7 +2443,7 @@ function startInk(e: PointerEvent, slide: HTMLElement | null): void {
   svg.append(g);
   (slide ?? document.body).append(svg);
   ink = { slide, pts: [inkPoint(e, slide)], client: [[e.clientX, e.clientY]], pressure: e.pointerType === 'pen', svg, g, frame: 0, t: e.timeStamp, whole: wholePx(e), k: docScale(slide ?? document.body), kind: e.pointerType, p0: pointPressure(e),
-    rest: { x: e.clientX, y: e.clientY, t: performance.now(), timer: null }, judged: 0, cands: null, snapTimer: null, snapped: null, cache: {}, rate: e.pointerType === 'pen' ? penRateMeter(e.timeStamp) : null,
+    rest: { x: e.clientX, y: e.clientY, t: performance.now(), timer: null }, judged: 0, cands: null, near: null, sampled: new Map(), snapTimer: null, snapped: null, cache: {}, rate: e.pointerType === 'pen' ? penRateMeter(e.timeStamp) : null,
     watch: navigator.maxTouchPoints > 0 ? new StrokeWatch('deck', e.pointerType, { w: innerWidth, h: innerHeight }) : null };
   ink.watch?.add(e.clientX, e.clientY, e.timeStamp, 'down', scrollX, scrollY);
   paintInk(true);
@@ -2499,24 +2501,43 @@ const scribbles = () => inkStyle.scribble !== false && inkStyle.opacity >= 1;
 
 /**
  * The strokes on the scribble's slide it could erase — Draw's, and open unfilled paths, as the eraser
- * takes —, each line sampled every ~3 screen px in the frame's client px (the scribble's).
+ * takes —, each line sampled every ~3 screen px in the frame's client px (the scribble's). Only Draw's
+ * strokes that reach `near` (the scribble's box, widened: scratchOut looks no further): sampling every
+ * stroke on a slide full of handwriting stalled the pen, the more so in Safari. Each sampled once
+ * (`sampled`) while the scribble goes on.
  */
-function scratchCandidates(slide: HTMLElement | null): { el: Element; pts: [number, number][] }[] {
+function scratchCandidates(slide: HTMLElement | null, near: Rect, sampled: Map<Element, [number, number][]>): { el: Element; pts: [number, number][] }[] {
   const out: { el: Element; pts: [number, number][] }[] = [];
   for (const el of Array.from((slide ?? document.body).children)) {
     if (el.localName !== 'svg' || el.hasAttribute('data-ol-runtime') || !srcOf.has(el) || isLocked(el) || !isStrokeArt(el)) continue;
-    const pts: [number, number][] = [];
-    for (const g of Array.from(el.querySelectorAll('path, polyline'))) {
-      const geo = g as SVGGeometryElement, m = geo.getScreenCTM();
-      if (!m) continue;
-      let len = 0;
-      try { len = geo.getTotalLength(); } catch { continue; }
-      const n = Math.min(600, Math.max(2, Math.ceil((len * Math.hypot(m.a, m.b) * scale) / 3)));
-      for (let i = 0; i <= n; i++) { const q = geo.getPointAtLength((len * i) / n).matrixTransform(m); pts.push([q.x, q.y]); }
+    // (a stroke's <svg> is its box; other drawings may draw beyond theirs)
+    if (el.classList.contains('ol-ink')) {
+      const r = el.getBoundingClientRect();
+      if (r.right < near.x || r.left > near.x + near.w || r.bottom < near.y || r.top > near.y + near.h) continue;
+    }
+    let pts = sampled.get(el);
+    if (!pts) {
+      pts = [];
+      for (const g of Array.from(el.querySelectorAll('path, polyline'))) {
+        const geo = g as SVGGeometryElement, m = geo.getScreenCTM();
+        if (!m) continue;
+        let len = 0;
+        try { len = geo.getTotalLength(); } catch { continue; }
+        const n = Math.min(600, Math.max(2, Math.ceil((len * Math.hypot(m.a, m.b) * scale) / 3)));
+        for (let i = 0; i <= n; i++) { const q = geo.getPointAtLength((len * i) / n).matrixTransform(m); pts.push([q.x, q.y]); }
+      }
+      sampled.set(el, pts);
     }
     if (pts.length) out.push({ el, pts });
   }
   return out;
+}
+
+/** the box of points (client px) */
+function ptsBox(pts: [number, number][]): Rect {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const [x, y] of pts) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }
 
 /** the strokes faded because the scribble would erase them, with the opacity each had */
@@ -2534,7 +2555,13 @@ function scratchTargets(hold: boolean): Element[] {
   // (the strokes it could erase only once it is shaped as a scribble: sampling every stroke on the slide
   // took long enough, a moment into every stroke, to make the line stall under the pen)
   if (!ink.cands && !scribbleCusps(ink.client, { zoom: scale, width: inkStyle.width, hold })) return [];
-  ink.cands ??= scratchCandidates(ink.slide);
+  // (the strokes near it, looked for again once it goes beyond where they were: scratchOut's reach is the
+  // width and 4 px on screen past the scribble's box, a margin of 64 px holds that)
+  const b = ptsBox(ink.client), reach = 64 + inkStyle.width * Math.max(1, scale) + 4 / scale, n = ink.near;
+  if (!ink.cands || !n || b.x - reach < n.x || b.y - reach < n.y || b.x + b.w + reach > n.x + n.w || b.y + b.h + reach > n.y + n.h) {
+    ink.near = { x: b.x - 2 * reach, y: b.y - 2 * reach, w: b.w + 4 * reach, h: b.h + 4 * reach };
+    ink.cands = scratchCandidates(ink.slide, ink.near, ink.sampled);
+  }
   if (!ink.cands.length) return [];
   const hits = scratchOut(ink.client, ink.cands.map(c => c.pts), { zoom: scale, width: inkStyle.width, hold });
   return hits ? hits.map(i => ink!.cands![i].el) : [];

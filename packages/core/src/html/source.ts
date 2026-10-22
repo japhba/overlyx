@@ -21,9 +21,26 @@ export interface Splice { from: number; to: number; insert: string }
 
 export interface SourceDoc { text: string; doc: HDocument }
 
+/**
+ * The last texts parsed: an edit asks for the same text's tree several times (the speaker notes, the
+ * review, the margins, the edit itself) — a deck with much ink is half a MB, ~50 ms a parse, and each
+ * pen stroke parsed it ten times. Trees are only read, never changed. Let go of after a while: a big
+ * page's tree is many MB.
+ */
+const parsed: SourceDoc[] = [];
+let forgetParsed: ReturnType<typeof setTimeout> | null = null;
+
 /** The text parsed with source locations — as a browser's DOMParser would (scripting off: <noscript> parses as markup). */
 export function parseSource(text: string): SourceDoc {
-  return { text, doc: parse(text, { sourceCodeLocationInfo: true, scriptingEnabled: false }) };
+  const known = parsed.find(p => p.text === text);
+  if (known) return known;
+  const src = { text, doc: parse(text, { sourceCodeLocationInfo: true, scriptingEnabled: false }) };
+  parsed.unshift(src);
+  if (parsed.length > 3) parsed.length = 3;
+  if (forgetParsed) clearTimeout(forgetParsed);
+  forgetParsed = setTimeout(() => { parsed.length = 0; forgetParsed = null; }, 10000);
+  (forgetParsed as { unref?: () => void }).unref?.();
+  return src;
 }
 
 export const isElement = (n: HNode): n is HElement => 'tagName' in n;

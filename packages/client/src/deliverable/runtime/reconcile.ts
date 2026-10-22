@@ -144,9 +144,19 @@ function syncAttributes(live: Element, s0: Element, s1: Element): void {
   }
 }
 
+/**
+ * The two source elements are the same, all the way down. (The DOM compares them where they differ:
+ * their outerHTML, made for every element at every level, took most of the time a pen stroke on a deck
+ * with much ink cost. A <template>'s content is no child of it: compared as markup.)
+ */
+function same(a: Element, b: Element): boolean {
+  if (!a.isEqualNode(b)) return false;
+  return a.localName !== 'template' && !a.getElementsByTagName('template').length || a.outerHTML === b.outerHTML;
+}
+
 function reconcile(live: Element, s0: Element, s1: Element, added: Element[]): Element {
   if (live === guard.editing) { relink(live, s0, s1); return live; }
-  if (s0.outerHTML === s1.outerHTML) { relink(live, s0, s1); return live; }
+  if (same(s0, s1)) { relink(live, s0, s1); return live; }
   if (s0.localName === s1.localName && live.localName === s1.localName && ownText(s0) === ownText(s1) && s1.localName !== 'template') {
     syncAttributes(live, s0, s1);
     link(live, s1);
@@ -160,34 +170,38 @@ function reconcile(live: Element, s0: Element, s1: Element, added: Element[]): E
   return el;
 }
 
-/** match two lists of source elements: identical ones by a longest common subsequence */
-function lcs(a: string[], b: string[]): [number, number][] {
+/**
+ * match two lists of source elements: identical ones by a longest common subsequence — of what lies
+ * between the identical prefix and suffix (an edit changes one or two elements: a stroke added to a
+ * slide, the slide it was added to)
+ */
+function lcs(a: Element[], b: Element[]): [number, number][] {
   const n = a.length, m = b.length;
-  if (n * m > 250000) {
-    // big lists: identical prefix and suffix only
-    const out: [number, number][] = [];
-    let i = 0;
-    while (i < n && i < m && a[i] === b[i]) { out.push([i, i]); i++; }
-    let k = 0;
-    while (k < n - i && k < m - i && a[n - 1 - k] === b[m - 1 - k]) k++;
-    for (let t = k; t > 0; t--) out.push([n - t, m - t]);
-    return out;
-  }
-  const dp = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
-  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
   const out: [number, number][] = [];
+  let p = 0;
+  while (p < n && p < m && same(a[p], b[p])) { out.push([p, p]); p++; }
+  let q = 0;
+  while (q < n - p && q < m - p && same(a[n - 1 - q], b[m - 1 - q])) q++;
+  const tail: [number, number][] = [];
+  for (let t = q; t > 0; t--) tail.push([n - t, m - t]);
+  const n1 = n - p - q, m1 = m - p - q;
+  // big lists: identical prefix and suffix only
+  if (!n1 || !m1 || n1 * m1 > 250000) return [...out, ...tail];
+  const eq = Array.from({ length: n1 }, (_, i) => Array.from({ length: m1 }, (_, j) => same(a[p + i], b[p + j])));
+  const dp = Array.from({ length: n1 + 1 }, () => new Uint16Array(m1 + 1));
+  for (let i = n1 - 1; i >= 0; i--) for (let j = m1 - 1; j >= 0; j--) dp[i][j] = eq[i][j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
   let i = 0, j = 0;
-  while (i < n && j < m) {
-    if (a[i] === b[j]) { out.push([i, j]); i++; j++; }
+  while (i < n1 && j < m1) {
+    if (eq[i][j]) { out.push([p + i, p + j]); i++; j++; }
     else if (dp[i + 1][j] >= dp[i][j + 1]) i++;
     else j++;
   }
-  return out;
+  return [...out, ...tail];
 }
 
 function reconcileChildren(live: Element, s0: Element, s1: Element, added: Element[]): void {
   const a = Array.from(s0.children), b = Array.from(s1.children);
-  const pairs = lcs(a.map(e => e.outerHTML), b.map(e => e.outerHTML));
+  const pairs = lcs(a, b);
   const result: (Element | null)[] = new Array(b.length).fill(null);
   const usedA = new Set<number>();
   for (const [i, j] of pairs) {
@@ -199,7 +213,7 @@ function reconcileChildren(live: Element, s0: Element, s1: Element, added: Eleme
   // their live state, especially an active draft, instead of removing/recreating it.
   for (let j = 0; j < b.length; j++) {
     if (result[j]) continue;
-    const i = a.findIndex((old, i) => !usedA.has(i) && old.outerHTML === b[j].outerHTML);
+    const i = a.findIndex((old, i) => !usedA.has(i) && same(old, b[j]));
     if (i < 0) continue;
     const l = liveOf.get(a[i]);
     if (l && l.parentElement === live) { usedA.add(i); relink(l, a[i], b[j]); result[j] = l; }

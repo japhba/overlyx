@@ -122,6 +122,17 @@ async function naturalSize(data: Blob): Promise<{ w: number; h: number } | null>
 
 type Notify = (text: string, kind?: 'info' | 'error') => void;
 
+/** the value once it has stayed for `ms` (the first at once) */
+function useSettled<T>(v: T, ms: number): T {
+  const [settled, setSettled] = useState(v);
+  useEffect(() => {
+    if (v === settled) return;
+    const t = setTimeout(() => setSettled(v), ms);
+    return () => clearTimeout(t);
+  }, [v]);
+  return settled;
+}
+
 const samePath = (a: Path | null | undefined, b: Path | null | undefined) => !!a && !!b && a.length === b.length && a.every((x, i) => x === b[i]);
 /** `inner` is `outer` or inside it */
 const within = (outer: Path, inner: Path) => outer.length <= inner.length && outer.every((x, i) => x === inner[i]);
@@ -202,8 +213,10 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   const me = host.author?.() || 'You';
   const textNow = host.text();
   /** Suggesting: a setting of the page (its <meta>), for everyone editing it, as in documents */
-  const suggesting = isSuggesting(textNow);
+  const suggesting = useMemo(() => isSuggesting(textNow), [textNow]);
   const review = useMemo(() => reviewOf(textNow), [textNow]);
+  /** the text once it has stayed a second: what can wait while it is being changed (the layout margins, parsed from all of it) */
+  const settledText = useSettled(textNow, 1000);
   const [showIns, setShowIns] = useState(() => loadFlag('ol.deckShowIns', true));
   const [showDel, setShowDel] = useState(() => loadFlag('ol.deckShowDel', true));
   const [reviewOpen, setReviewOpenState] = useState(() => loadFlag('ol.reviewPane', false));
@@ -429,9 +442,9 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   const marginBox = useMemo((): Rect | null => {
     if (!soloOn) return null;
     const r = solo!.rect;
-    const m = deckMargins(textNow, { w: r.w, h: r.h }, current).sides;
+    const m = deckMargins(settledText, { w: r.w, h: r.h }, current).sides;
     return { x: r.x + m.left, y: r.y + m.top, w: r.w - m.left - m.right, h: r.h - m.top - m.bottom };
-  }, [textNow, current, soloOn, solo?.rect.x, solo?.rect.y, solo?.rect.w, solo?.rect.h]);
+  }, [settledText, current, soloOn, solo?.rect.x, solo?.rect.y, solo?.rect.w, solo?.rect.h]);
   const marginRef = useRef(marginBox); marginRef.current = marginBox;
 
   const toFrame = (f: HTMLIFrameElement | null, msg: ToRuntime) => { try { f?.contentWindow?.postMessage(msg, '*'); } catch { /* gone */ } };
@@ -598,6 +611,8 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   /* ------------------------------------------------------------- versions to the frames */
 
   const sendTimer = useRef<{ canvas: ReturnType<typeof setTimeout> | null; rail: ReturnType<typeof setTimeout> | null }>({ canvas: null, rail: null });
+  /** when the last pen stroke came: while one follows another, the rail's thumbnail waits (the whole page parsed again in its frame, every stroke) */
+  const lastInkAt = useRef(-1e9);
   const sendSource = (now = false) => {
     const html = text.toString();
     const v = ++version.current;
@@ -608,7 +623,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     const toC = () => { t.canvas = null; if (canvasReady.current) toCanvas({ ol: 'source', version: v, html }); };
     if (now) toC(); else t.canvas = setTimeout(toC, 40);
     if (t.rail) clearTimeout(t.rail);
-    t.rail = setTimeout(() => { t.rail = null; if (railReady.current) toRail({ ol: 'source', version: v, html: text.toString() }); }, 350);
+    t.rail = setTimeout(() => { t.rail = null; if (railReady.current) toRail({ ol: 'source', version: v, html: text.toString() }); }, performance.now() - lastInkAt.current < 1500 ? 1500 : 350);
   };
 
   useEffect(() => {
@@ -1645,6 +1660,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
       setDrawFocus(true);
     }
     if (versions.current.get(v) === undefined) return;
+    if (drawing) lastInkAt.current = performance.now();
     const cur = text.toString();
     const k = kindRef.current;
     const place = insertPlace(cur, slide, after, k);
@@ -2496,7 +2512,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   /* ------------------------------------------------------------- notes */
 
   const curSlidePath = slides[current]?.path ?? null;
-  const notes = curSlidePath && kind === 'deck' ? slideNotes(text.toString(), curSlidePath).text : '';
+  const notes = useMemo(() => curSlidePath && kind === 'deck' ? slideNotes(textNow, curSlidePath).text : '', [textNow, curSlidePath?.join(), kind]);
   // the zoom menu: the levels (one slide: Fit, Fit width, Fit content — those apart), what the zoom is at
   const shownLevels: ViewLevels = soloOn ? viewLevels(box, solo!.rect, solo!.content ?? null, MAX_ZOOM, marginBox, gap) : { fit };
   const zoomLevels = soloOn ? viewDetents(shownLevels).map(d => d.key) : ['fit' as const];

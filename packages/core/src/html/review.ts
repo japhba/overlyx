@@ -953,7 +953,12 @@ function changeWords(el: HElement, was: Was): string[] {
 }
 
 /** every comment thread and suggestion of the page, in document order (suggestions one per object and person) */
+/** a review attribute anywhere in the text (attribute names: any case) */
+const REVIEW_ATTR = /data-ol-(comments|by|ins|del|chg)\b/i;
+
 export function reviewOf(text: string): Review {
+  // (nothing to review: no parse — the page parsed again after every pen stroke, on a deck with much ink)
+  if (!REVIEW_ATTR.test(text)) return { changes: [], threads: [] };
   const { doc } = parseSource(text);
   const slides = slideElements(doc);
   const slideOf = (el: HElement) => { for (const e of upFrom(el)) { const i = slides.indexOf(e); if (i >= 0) return i; } return -1; };
