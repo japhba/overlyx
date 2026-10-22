@@ -15,19 +15,16 @@ vi.hoisted(() => {
   store.set('ol.inkPens', JSON.stringify({ pen: { color: '#d93025', width: 4, colors: ['#111111'], widths: [1.5, 2.5, 4] }, highlighter: { width: 2.5 } }));
   g.localStorage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, v); }, removeItem: (k: string) => { store.delete(k); } };
 });
-import { getInk, setInk, currentPen, INK_PALETTES, INK_WIDTHS, INK_WIDTH_RANGE, PX_PER_MM, mmToPx, pxToMm, formatMm, inkColorName } from '../packages/client/src/editor/plugins/ink.ts';
+import { getInk, setInk, currentPen, INK_PALETTES, INK_WIDTHS, INK_WIDTH_RANGE, PX_PER_MM, mmToPx, pxToMm, inkColorName } from '../packages/client/src/editor/plugins/ink.ts';
 import { loadDeckInk, patchDeckInk, saveDeckInk } from '../packages/client/src/deliverable/deckink';
 
 describe('the pen case', () => {
-  it('mm ↔ px at the ruler\'s 96 dpi; widths print without trailing zeros', () => {
+  it('mm ↔ px at the ruler\'s 96 dpi', () => {
     expect(PX_PER_MM).toBeCloseTo(3.7795, 4);
     expect(mmToPx(1)).toBe(3.78);
     expect(mmToPx(0.6)).toBe(2.27);
     expect(pxToMm(3.78)).toBe(1);
     expect(pxToMm(2.5)).toBe(0.65);   // to the nearest 0.05 mm
-    expect(formatMm(0.6)).toBe('0.6 mm');
-    expect(formatMm(2)).toBe('2 mm');
-    expect(formatMm(0.35)).toBe('0.35 mm');
   });
 
   it('migrates an older px case into mm (the highlighter\'s implied ×4 included), defaults elsewhere', () => {

@@ -1313,7 +1313,7 @@ html.ol-inking, html.ol-inking * { -webkit-user-select: none !important; user-se
 .pen-cal-paper > svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
 .pen-cal-rule { stroke: #dfe3ea; stroke-width: 1; }
 .pen-cal-label { fill: #9aa1ad; font: 11px var(--ui-font); }
-.pen-cal-guide { fill: none; stroke: #d3d8e0; stroke-linecap: round; stroke-linejoin: round; }
+.pen-cal-guide { opacity: 0.28; }
 .pen-cal-tip { fill: var(--accent); opacity: 0.8; }
 .pen-cal-raw { fill: none; stroke: #e5484d; stroke-width: 0.5; opacity: 0.7; }
 .pen-cal-dot { fill: none; stroke: #e5484d; stroke-width: 1.6; stroke-linecap: round; }

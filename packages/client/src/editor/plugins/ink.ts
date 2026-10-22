@@ -89,8 +89,6 @@ export const INK_WIDTH_RANGE: Record<InkPen, { min: number; max: number; step: n
   pen: { min: 0.1, max: 3, step: 0.05 },
   highlighter: { min: 1, max: 10, step: 0.25 },
 };
-/** "0.6 mm", "2 mm" — the width as the toolbar shows it. */
-export function formatMm(mm: number): string { return mm.toFixed(2).replace(/\.?0+$/, '') + ' mm'; }
 /** A name for the well-known preset colours (the title of a swatch), else the hex code. */
 export function inkColorName(hex: string): string {
   for (const pal of Object.values(INK_PALETTES)) for (const [c, name] of pal) if (c.toLowerCase() === hex.toLowerCase()) return name;

@@ -1,9 +1,11 @@
 /**
  * The pen calibration (the pen's settings ▸ Calibrate…): a sheet of paper on which a few strokes are
  * drawn as a hand draws them — arches and points, loops, corners, a spiral and a quickening wave — for
- * the pen to trace, or anything else written there. What the pen draws is redrawn with the settings
- * beside it as they change (and with the saved ones while Compare is held); Save keeps them for this
- * browser's pen (deckink.ts), on slides, boards and documents' margins alike.
+ * the pen to trace, or anything else written there. Those strokes are drawn as the pen would give them
+ * (its points a second, whole px if it gives those) and, like what the pen draws, with the settings
+ * beside it as they change (with the saved ones while Compare is held): the width in points, the
+ * levels in per cent. Save keeps them for this browser's pen (deckink.ts), on slides, boards and
+ * documents' margins alike.
  *
  * It measures the pen too: points a second, whole-px positions (older Safari), its pressure — the
  * usual one (the median) is drawn at the nominal width from then on (freehand.ts `usual`).
@@ -11,9 +13,10 @@
 import { render } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { Nib } from './protocol';
-import { DEFAULT_NIB, loadDeckInk, patchDeckInk, saveDeckInk } from './deckink';
+import { DECK_INK_WIDTH_CHOICES, DEFAULT_NIB, loadDeckInk, patchDeckInk, saveDeckInk, type DeckInkPatch } from './deckink';
 import { freshPoint, inkPaths, inkRuns, usualPressure, type FreePt } from './runtime/freehand';
-import { NibLevels } from './PenSettings';
+import { NibLevels, rungStyle } from './PenSettings';
+import { fmtPt, ptToPx, pxToPt } from './units';
 
 type Pt = [number, number];
 
@@ -130,6 +133,53 @@ function measure(traces: Trace[]) {
 
 const pct = (v: number) => `${Math.round(v * 100)} %`;
 
+/**
+ * A guide as a pen would give it — its points at `rate` a second, in whole px where the pen gives
+ * those —, placed on the paper by `at`, so that it is drawn as the hand's strokes are. Its pressure:
+ * the usual one, a little more on the way down and less on the way up, light as it touches down and
+ * lifts. `t`: when each point came (ms from its start).
+ */
+function asPenGives(g: { pts: Pt[]; t: number[] }, rate: number, whole: boolean, at: (p: Pt) => Pt, usual: number): { pts: FreePt[]; t: number[] } {
+  const T = g.t[g.t.length - 1], n = Math.max(2, Math.ceil((T * rate) / 1000));
+  const pts: FreePt[] = [], t: number[] = [];
+  let j = 1;
+  for (let k = 0; k <= n; k++) {
+    const tau = Math.min(T, (k * 1000) / rate);
+    while (j < g.t.length - 1 && g.t[j] < tau) j++;
+    const a = g.pts[j - 1], b = g.pts[j], f = g.t[j] > g.t[j - 1] ? Math.min(1, (tau - g.t[j - 1]) / (g.t[j] - g.t[j - 1])) : 1;
+    let [x, y] = at([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f]);
+    if (whole) { x = Math.round(x); y = Math.round(y); }
+    const down = (b[1] - a[1]) / (Math.hypot(b[0] - a[0], b[1] - a[1]) || 1), ramp = Math.max(0, Math.min(1, tau / 60, (T - tau) / 60));
+    pts.push([x, y, Math.max(0.03, (usual + 0.1 * down) * (0.35 + 0.65 * ramp))]);
+    t.push(tau);
+  }
+  return { pts, t };
+}
+
+/** the pen's widths a width can be set to (px of a 1280 px slide, as on the slide at 100 %): the width picker's range */
+const W_LO = DECK_INK_WIDTH_CHOICES.pen[0], W_HI = DECK_INK_WIDTH_CHOICES.pen[DECK_INK_WIDTH_CHOICES.pen.length - 1];
+
+/** the pen's width in points: a slider finer at the thin end, in quarter points, the pen's three presets its rungs */
+function WidthSlider({ px, presets, onChange }: { px: number; presets: number[]; onChange: (px: number) => void }) {
+  const pos = (v: number) => (Math.log(v / W_LO) / Math.log(W_HI / W_LO)) * 1000;
+  const val = (p: number) => W_LO * (W_HI / W_LO) ** (p / 1000);
+  const snap = (v: number) => presets.find(w => Math.abs(Math.log(w / v)) < 0.05) ?? Math.round(ptToPx(Math.max(0.25, Math.round(pxToPt(v) * 4) / 4)) * 1000) / 1000;
+  const label = (v: number) => `${fmtPt(pxToPt(v))} pt`;
+  return (
+    <div class="pen-set-row" data-pen-cal-width title="The pen's width, as on a slide at 100 %. Save puts it in place of the width preset in use">
+      <span class="pen-set-name">Width<span class="pen-set-val">{label(px)}</span></span>
+      <input type="range" class="ink-pick-range" min={0} max={1000} step={1} value={Math.round(pos(px))} aria-label="Width" aria-valuetext={label(px)}
+        onInput={e => onChange(snap(val(Number((e.target as HTMLInputElement).value))))} />
+      <div class="ff-rungs pen-set-rungs">
+        {[...new Set(presets)].map(w => (
+          <button key={w} type="button" class={'ff-rung' + (Math.abs(w - px) < 1e-3 ? ' on' : '')} style={rungStyle(pos(w) / 10)} title={`One of the pen's widths: ${label(w)}`}
+            onMouseDown={e => e.preventDefault()} onClick={() => onChange(w)}><span>{label(w)}</span></button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /** the dots of the points a stroke was given (and a hairline through them) */
 const dotsD = (pts: FreePt[]) => pts.map(([x, y]) => `M${x.toFixed(2)} ${y.toFixed(2)}h0.01`).join('');
 
@@ -139,6 +189,7 @@ function PenCalibration({ onClose }: { onClose: () => void }) {
   const saved = useMemo(() => loadDeckInk(), []);
   const pen = saved.pens.pen;
   const [nib, setNib] = useState<Nib>(saved.nib);
+  const [width, setWidth] = useState(pen.width);
   /** the usual pressure follows what is measured until set by hand */
   const [usualByHand, setUsualByHand] = useState(false);
   const [traces, setTraces] = useState<Trace[]>([]);
@@ -184,9 +235,10 @@ function PenCalibration({ onClose }: { onClose: () => void }) {
   // the pressure the hand writes with: drawn at the pen's width
   useEffect(() => { if (!usualByHand && facts?.usual != null && facts.usual !== nib.usual) setNib(n => ({ ...n, usual: facts.usual! })); }, [facts?.usual, usualByHand]);
 
-  const shown = comparing ? saved.nib : nib;
-  const runsOf = (t: Trace, final: boolean) => inkPaths(inkRuns(t.pts, { width: pen.width, pressure: t.pen, zoom: 1, coarse: t.whole && t.pts.length > 4 ? 1 : false, nib: shown, final }));
-  const drawn = useMemo(() => traces.map(t => runsOf(t, true)), [traces, shown, pen.width]);
+  const shown = comparing ? saved.nib : nib, shownW = comparing ? pen.width : width;
+  const runsOf = (pts: FreePt[], pressure: boolean, whole: boolean, final: boolean) =>
+    inkPaths(inkRuns(pts, { width: shownW, pressure, zoom: 1, coarse: whole && pts.length > 4 ? 1 : false, nib: shown, final }));
+  const drawn = useMemo(() => traces.map(t => runsOf(t.pts, t.pen, t.whole, true)), [traces, shown, shownW]);
 
   // where the guides sit: centred at the top, as large as they are where there is room
   const fit = Math.min(1, (size.w - 24) / BOX.w, (size.h - 24) / BOX.h);
@@ -195,6 +247,20 @@ function PenCalibration({ onClose }: { onClose: () => void }) {
   // below the guides, lines to write anything on, as far as the paper goes
   const rows = [...ROWS];
   for (let y = ROWS[ROWS.length - 1].y + 110; oy + (y + 20) * gs < size.h; y += 90) rows.push({ y, label: rows.length === ROWS.length ? 'your own writing' : '' });
+  // the guides as this pen gives its strokes (until it has drawn: the Pencil's 240 a second, finer than a px)
+  const rate = Math.max(30, Math.min(480, facts?.rate ?? 240)), givesWhole = facts?.whole ?? false;
+  const demo = useMemo(() => TIMED.map(g => ({ start: g.start, ...asPenGives(g, rate, givesWhole, p => [ox + p[0] * gs, oy + p[1] * gs], nib.usual) })), [rate, givesWhole, ox, oy, gs, nib.usual]);
+  const demoDone = useMemo(() => demo.map(d => runsOf(d.pts, true, givesWhole, true)), [demo, shown, shownW]);
+  // how many of each guide's points are drawn by now; the one being drawn
+  const shownTo = demo.map(d => {
+    const t = now - d.start;
+    if (t <= 0) return 0;
+    if (t >= d.t[d.t.length - 1]) return d.pts.length;
+    let end = 1;
+    while (end < d.pts.length && d.t[end] <= t) end++;
+    return end;
+  });
+  const drawingGuide = shownTo.findIndex((e, i) => e > 0 && e < demo[i].pts.length);
 
   const local = (e: PointerEvent): FreePt => {
     const r = paper.current!.getBoundingClientRect();
@@ -238,8 +304,14 @@ function PenCalibration({ onClose }: { onClose: () => void }) {
     else setFrame(f => f + 1);
   };
 
-  const save = () => { saveDeckInk(patchDeckInk(loadDeckInk(), { nib })); onClose(); };
-  const changed = (Object.keys(nib) as (keyof Nib)[]).some(k => nib[k] !== saved.nib[k]);
+  const save = () => {
+    // the width in place of the preset in use (as clicking the selected width again does); the pen in hand stays
+    const cur = loadDeckInk(), p = cur.pens.pen, idx = p.widths.indexOf(p.width);
+    const w: DeckInkPatch = width === p.width ? {} : p.widths.includes(width) || idx < 0 ? { width } : { slotWidth: { idx, width } };
+    saveDeckInk({ ...patchDeckInk(cur, { pen: 'pen', nib, ...w }), pen: cur.pen });
+    onClose();
+  };
+  const changed = width !== pen.width || (Object.keys(nib) as (keyof Nib)[]).some(k => nib[k] !== saved.nib[k]);
   const l = live.current;
 
   return (
@@ -247,7 +319,7 @@ function PenCalibration({ onClose }: { onClose: () => void }) {
       <div class="pen-cal-head">
         <div class="pen-cal-titles">
           <div class="pen-cal-title">Pen calibration</div>
-          <div class="pen-cal-sub">Trace the grey strokes as they are drawn, or write anything. Change the settings: what you drew is redrawn with them.</div>
+          <div class="pen-cal-sub">Trace the pale strokes as they are drawn, or write anything. Change the settings: your strokes and the pale ones are redrawn with them.</div>
         </div>
         <button type="button" class="btn" data-pen-cal-replay onClick={() => setPlayed(p => p + 1)}>Replay</button>
         <button type="button" class="btn" data-pen-cal-undo disabled={!traces.length} onClick={() => setTraces(ts => ts.slice(0, -1))}>Undo</button>
@@ -261,23 +333,16 @@ function PenCalibration({ onClose }: { onClose: () => void }) {
           <g transform={`translate(${ox} ${oy}) scale(${gs})`}>
             {rows.map(r => <line key={r.y} class="pen-cal-rule" x1={20} x2={BOX.w - 10} y1={r.y} y2={r.y} />)}
             {rows.map(r => r.label && <text key={'t' + r.y} class="pen-cal-label" x={BOX.w - 10} y={r.y + 16} text-anchor="end">{r.label}</text>)}
-            {TIMED.map((g, i) => {
-              const t = now - g.start;
-              if (t <= 0) return null;
-              let end = g.pts.length;
-              if (t < g.t[g.t.length - 1]) { end = 1; while (end < g.pts.length && g.t[end] <= t) end++; }
-              const tip = end < g.pts.length ? g.pts[end - 1] : null;
-              return (
-                <g key={i}>
-                  <path class="pen-cal-guide" d={pathOf(g.pts, end)} stroke-width={Math.min(8, Math.max(5, pen.width * 2) / gs)} />
-                  {tip && <circle class="pen-cal-tip" cx={tip[0]} cy={tip[1]} r={5 / gs} />}
-                </g>
-              );
-            })}
           </g>
+          {/* (the guides faint, as one: where two runs meet they would darken each other) */}
+          <g class="pen-cal-guide" fill="none" stroke={pen.color} stroke-linecap="round" stroke-linejoin="round">
+            {demo.map((d, i) => !shownTo[i] ? null : (shownTo[i] === d.pts.length ? demoDone[i] : runsOf(d.pts.slice(0, shownTo[i]), true, givesWhole, false))
+              .map(p => <path key={i + ':' + p.w} stroke-width={p.w} d={p.d} />))}
+          </g>
+          {drawingGuide >= 0 && <circle class="pen-cal-tip" cx={demo[drawingGuide].pts[shownTo[drawingGuide] - 1][0]} cy={demo[drawingGuide].pts[shownTo[drawingGuide] - 1][1]} r={5} />}
           <g fill="none" stroke={pen.color} stroke-linecap="round" stroke-linejoin="round">
             {drawn.map((paths, i) => paths.map(p => <path key={i + ':' + p.w} stroke-width={p.w} d={p.d} />))}
-            {l && runsOf(l, false).map(p => <path key={'l' + p.w} stroke-width={p.w} d={p.d} />)}
+            {l && runsOf(l.pts, l.pen, l.whole, false).map(p => <path key={'l' + p.w} stroke-width={p.w} d={p.d} />)}
           </g>
           {showPts && (
             <g class="pen-cal-pts">
@@ -292,6 +357,7 @@ function PenCalibration({ onClose }: { onClose: () => void }) {
         </svg>
       </div>
       <div class="pen-cal-side">
+        <WidthSlider px={width} presets={pen.widths} onChange={setWidth} />
         <NibLevels nib={nib} wide onChange={p => { if (p.usual !== undefined) setUsualByHand(true); setNib(n => ({ ...n, ...p })); }} measuredUsual={facts?.usual ?? null} />
         <label class="pen-set-check">
           <input type="checkbox" checked={showPts} data-pen-cal-points onChange={e => setShowPts((e.target as HTMLInputElement).checked)} /> Show the points the pen gave
@@ -304,14 +370,15 @@ function PenCalibration({ onClose }: { onClose: () => void }) {
         <div class="pen-cal-facts" data-pen-cal-facts>
           {!facts ? <span>Draw a few strokes and the pen is measured here.</span> : (
             <>
-              <div><b>Drawn with {facts.kind}</b>{facts.rate ? ` · ${facts.rate} points a second` : ''}{facts.coalesced ? '' : ' (no in-between points)'}</div>
-              <div>{facts.whole ? 'Positions in whole pixels: this browser rounds them. Rounding smooths the steps away; at 0 they show.' : 'Positions finer than a pixel: rounding makes little difference here except on fast strokes.'}</div>
+              <div><b>Drawn with {facts.kind}</b>{facts.rate ? ` · ${facts.rate} points a second` : ''}{facts.coalesced ? '' : ' (this browser gives no in-between points)'}</div>
+              <div>{facts.whole ? 'Positions to the whole screen pixel: this browser rounds them. Rounding smooths the steps away; at 0 they show.' : 'Positions finer than a screen pixel: rounding makes little difference except on fast strokes.'}</div>
+              <div>The pale strokes are drawn as this pen gives its points.</div>
               {facts.pressure && <div>Pressure {pct(facts.pressure.lo)} – {pct(facts.pressure.hi)}{facts.usual != null ? `, usually ${pct(facts.usual)}` : ''}.</div>}
             </>
           )}
         </div>
         <div class="pen-cal-foot">
-          <button type="button" class="pen-set-reset" data-pen-cal-reset onClick={() => { setUsualByHand(false); setNib({ ...DEFAULT_NIB, usual: facts?.usual ?? DEFAULT_NIB.usual }); }}>Reset to defaults</button>
+          <button type="button" class="pen-set-reset" data-pen-cal-reset onClick={() => { setUsualByHand(false); setWidth(pen.width); setNib({ ...DEFAULT_NIB, usual: facts?.usual ?? DEFAULT_NIB.usual }); }}>Reset to defaults</button>
         </div>
       </div>
     </div>

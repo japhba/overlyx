@@ -740,8 +740,12 @@ blend.
     *Scribble to erase* and, once a Pencil has drawn here, *Fingers draw too*. **Calibrate with your
     pen…** opens `PenCalibration.tsx` over everything: guide strokes drawn as a hand draws them (the
     two-thirds power law; arches and points, loops, corners, a spiral and a quickening wave) to trace,
-    ruled lines for anything else; the pen's strokes kept as given and redrawn with the settings as
-    they change (*Hold to compare* with the saved ones, *Show the points the pen gave*); it measures
+    ruled lines for anything else; the guides are sampled as the measured pen gives its points
+    (`asPenGives`: its rate, whole px if so; 240 a second until measured) and drawn faintly through
+    `inkRuns` like the pen's own strokes, which are kept as given — both redrawn with the settings as
+    they change (*Hold to compare* with the saved ones, *Show the points the pen gave*), the width
+    in points (a log slider in quarter points, the pen's presets as rungs; Save puts it in place of
+    the preset in use, the pen in hand unchanged); it measures
     the pen (points a second, whole px or not, coalesced or not, pressure range, `usualPressure` = the
     median, which sets `usual` until set by hand) and Save writes `nib` through `saveDeckInk`, so
     slides, boards and documents' margins follow. Docs' and boards' strokes keep the `nib` they were

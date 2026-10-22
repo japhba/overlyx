@@ -30,7 +30,7 @@ const LEVELS: Level[] = [
 const USUAL: Level = { key: 'usual', label: 'Your usual pressure', title: 'The pressure you write with is drawn at the pen\'s width: lighter thinner, harder wider. Measured from what you draw here until you set it', rungs: [[0.25, 'Pencil']], fountain: true, min: 0.05, max: 0.95 };
 
 /** a rung at `p` % of the slider: its tick exactly there, its name centred on it — at the ends reaching inwards (FontPicker's) */
-const rungStyle = (p: number) => ({ left: `${p}%`, ...(p < 8 ? { transform: 'none', alignItems: 'flex-start' } : p > 92 ? { transform: 'translateX(-100%)', alignItems: 'flex-end' } : {}) });
+export const rungStyle = (p: number) => ({ left: `${p}%`, ...(p < 8 ? { transform: 'none', alignItems: 'flex-start' } : p > 92 ? { transform: 'translateX(-100%)', alignItems: 'flex-end' } : {}) });
 
 /** one of the pen's levels: a continuous slider with its rungs below, the knob snapping to a rung within 3 % */
 function LevelSlider({ l, value, onChange }: { l: Level; value: number; onChange: (v: number) => void }) {
