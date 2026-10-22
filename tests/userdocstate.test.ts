@@ -15,7 +15,7 @@ process.env.OVERLYX_DATA_DIR = join(ROOT, 'data');
 process.env.OVERLYX_PROJECTS_DIR = join(ROOT, 'projects');
 
 const { createUser } = await import('../packages/server/src/auth.ts');
-const { docFolds, setDocFolds, markDocOpened, lastOpenedByProject } = await import('../packages/server/src/userSettings.ts');
+const { docFolds, setDocFolds, docPlace, setDocPlace, markDocOpened, lastOpenedByProject, lastFileByProject } = await import('../packages/server/src/userSettings.ts');
 const { cleanupProjectData } = await import('../packages/server/src/export.ts');
 const { db } = await import('../packages/server/src/db.ts');
 const { adoptGuest } = await import('../packages/server/src/access.ts');
@@ -72,5 +72,29 @@ describe('last opened, per user', () => {
     // the activity log's older history counts too
     db.prepare("INSERT INTO access_log (project, user_id, action, detail, at) VALUES ('ben/old', ?, 'open', 'x.tex', 12345)").run(ben.id);
     expect(lastOpenedByProject(ben.id).get('ben/old')).toBe(12345);
+  });
+});
+
+describe('where the user was, per user and document', () => {
+  it("a deck's slide: the newer note wins, malformed ones change nothing", () => {
+    expect(docPlace(ann.id, 'ann/d/talk/index.html')).toEqual({ slide: null, at: 0 });
+    expect(setDocPlace(ann.id, 'ann/d/talk/index.html', 7, 2000)).toEqual({ slide: 7, at: 2000 });
+    expect(setDocPlace(ann.id, 'ann/d/talk/index.html', 3, 1000)).toEqual({ slide: 7, at: 2000 });   // another device's, sent late
+    expect(setDocPlace(ann.id, 'ann/d/talk/index.html', -1, 3000).slide).toBe(7);
+    expect(setDocPlace(ann.id, 'ann/d/talk/index.html', 'x', 3000).slide).toBe(7);
+    expect(setDocPlace(ann.id, 'ann/d/talk/index.html', 2, 3000)).toEqual({ slide: 2, at: 3000 });
+    expect(docPlace(ben.id, 'ann/d/talk/index.html').slide).toBeNull();
+  });
+  it('the file of each project opened last, named as the tab that shows it', async () => {
+    markDocOpened(ann.id, 'ann/r/main.tex');
+    await new Promise(r => setTimeout(r, 5));
+    markDocOpened(ann.id, 'ann/r/refs.bib', 'text');
+    expect(lastFileByProject(ann.id).get('ann/r')).toBe('text:ann/r/refs.bib');
+    await new Promise(r => setTimeout(r, 5));
+    markDocOpened(ann.id, 'ann/r/talk/index.html');
+    markDocOpened(ann.id, 'ann/s/paper.pdf', 'pdf');
+    expect(lastFileByProject(ann.id).get('ann/r')).toBe('ann/r/talk/index.html');
+    expect(lastFileByProject(ann.id).get('ann/s')).toBe('pdf:ann/s/paper.pdf');
+    expect(lastFileByProject(ben.id).get('ann/r')).toBeUndefined();
   });
 });

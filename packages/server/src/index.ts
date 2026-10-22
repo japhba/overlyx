@@ -18,7 +18,7 @@ import { oauthRoutes, wellKnownRoutes } from './mcpOauth.ts';
 import { listMcpTokens, deleteMcpToken } from './mcpTokens.ts';
 import { cliDownloadRoutes } from './cliDownload.ts';
 import { cliLoginRoutes } from './cliLogin.ts';
-import { userSettings, setUserSettings, userKeys, setUserKeys, docFolds, setDocFolds, lastOpenedByProject } from './userSettings.ts';
+import { userSettings, setUserSettings, userKeys, setUserKeys, docFolds, setDocFolds, docPlace, setDocPlace, markDocOpened, lastOpenedByProject, lastFileByProject } from './userSettings.ts';
 import { authMiddleware, authRouter, requireAuth, createUser, createGuest, generatePassword, setSessionCookie, toSessionUser } from './auth.ts';
 import { attachWebSocket, originAllowed } from './ws.ts';
 import { manager, docWorkers, projectChangedListeners, graphicsChangedListeners } from './docs.ts';
@@ -208,12 +208,12 @@ const needProject = (min: Role) => (req: express.Request, res: express.Response,
  */
 api.all('/docs/*', (req, res, next) => {
   const full = String((req.params as any)[0] ?? '');
-  const m = /^(.*?)(?:\/(meta|tex|lyx|outline|source|bib|reset|save|header|frontmatter|versions(?:\/\d+(?:\/restore)?)?|export(?:\/cancel)?|pdf|build|folds|external|legacy-merge|synctex\/(?:view|edit|pages)))?$/.exec(full)!;
+  const m = /^(.*?)(?:\/(meta|tex|lyx|outline|source|bib|reset|save|header|frontmatter|versions(?:\/\d+(?:\/restore)?)?|export(?:\/cancel)?|pdf|build|folds|place|opened|external|legacy-merge|synctex\/(?:view|edit|pages)))?$/.exec(full)!;
   // an id from before a project moved (namespaces.ts) names the document under its current key
   const id = canonicalDocId(decodeURIComponent(m[1]));
   const action = m[2] ?? '';
-  // exporting only reads the document; the folds are the user's own way of looking at it (viewers keep theirs too)
-  const write = req.method !== 'GET' && !/^(export|folds)/.test(action);
+  // exporting only reads the document; the folds, the place and the open are the user's own way of looking at it (viewers keep theirs too)
+  const write = req.method !== 'GET' && !/^(export|folds|place|opened)/.test(action);
   const role = roleFor(req.user!, projectOfDoc(id));
   if (!atLeast(role, write ? 'edit' : 'view')) { deny(res, role); return; }
   req.role = role!;
@@ -242,8 +242,10 @@ api.get('/projects', (req, res) => {
   ensureStarterProjects(req.user!);
   // when this user last opened each project (the start screen sorts by recency)
   const opened = lastOpenedByProject(req.user!.id);
+  // and which file they were in last (the project reopens on it)
+  const lastFile = lastFileByProject(req.user!.id);
   const people = projectPeople();
-  res.json({ projects: accessibleProjects(req.user!).map(p => ({ name: p.name, title: p.title, kind: p.kind, role: p.role, via: p.via, owner: p.owner, files: p.files, lastOpened: opened.get(p.name) ?? null,
+  res.json({ projects: accessibleProjects(req.user!).map(p => ({ name: p.name, title: p.title, kind: p.kind, role: p.role, via: p.via, owner: p.owner, files: p.files, lastOpened: opened.get(p.name) ?? null, lastFile: lastFile.get(p.name) ?? null,
     members: people.get(p.name)?.people ?? [], invited: people.get(p.name)?.invited ?? 0 })) });
   void ensureAllRepos();   // directories that appeared since (created by hand, the welcome and starter projects) get their repository
 });
@@ -1535,6 +1537,11 @@ api.get('/docs/*/synctex/pages', async (req, res) => {
 /** The user's folded sections of a document (client editor/plugins/fold.ts): per user, on every browser. */
 api.get('/docs/*/folds', (req, res) => { res.json(docFolds(req.user!.id, docId(req))); });
 api.put('/docs/*/folds', (req, res) => { res.json(setDocFolds(req.user!.id, docId(req), req.body?.folds, req.body?.at)); });
+/** Where the user was in a document — a deck's slide (client deliverable/slidememory.ts): it reopens there, on every browser. */
+api.get('/docs/*/place', (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(docPlace(req.user!.id, docId(req))); });
+api.put('/docs/*/place', (req, res) => { res.json(setDocPlace(req.user!.id, docId(req), req.body?.slide, req.body?.at)); });
+/** A file shown without a connection of its own (the text editor, the PDF viewer; client app/lastfile.ts) counts as opened: its project reopens on it. */
+api.put('/docs/*/opened', (req, res) => { markDocOpened(req.user!.id, docId(req), req.body?.view === 'pdf' ? 'pdf' : 'text'); res.json({ ok: true }); });
 
 /**
  * Last build result + the current job (running / queued / just finished), for the PDF panel.

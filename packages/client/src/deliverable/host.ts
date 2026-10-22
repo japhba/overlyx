@@ -60,6 +60,9 @@ export interface DeliverableHost {
   /** this person's caret in the text they retype (null: none), and the slide they look at — for the others (a host without others leaves them out) */
   setCaret?(caret: TextCaret | null): void;
   setSlide?(slide: number): void;
+  /** the slide of a deck this person looked at last (null: none), to reopen it there — and noting the one looked at now (a host without memory leaves them out: the first slide) */
+  lastSlide?(): Promise<number | null>;
+  noteSlide?(slide: number): void;
   onPeers(cb: (peers: Peer[]) => void): () => void;
   /**
    * Presenting on several screens (app/presentshare.ts): this presenter's state for the others (null:

@@ -786,6 +786,29 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   // the slide looked at, for the others (their rails show who is where)
   useEffect(() => { if (kind !== 'page') host.setSlide?.(current); }, [current, kind, host]);
   const slidesRef = useRef(slides); slidesRef.current = slides;
+  /**
+   * A deck reopens on the slide this person looked at last (host.lastSlide): 'asking' until the host
+   * answers, then that slide until the slides are known, then 'done' — at once when they went to
+   * another slide meanwhile (theirs stands). From then on the slide looked at is noted.
+   */
+  const backTo = useRef<'asking' | number | 'done'>(host.lastSlide ? 'asking' : 'done');
+  useEffect(() => {
+    let live = true;
+    host.lastSlide?.().then(s => { if (live && backTo.current === 'asking') { backTo.current = s ?? 'done'; goBack(); } }, () => { if (backTo.current === 'asking') backTo.current = 'done'; });
+    return () => { live = false; };
+  }, [host]);
+  const goBack = () => {
+    const k = backTo.current;
+    if (typeof k !== 'number' || !slidesRef.current.length) return;
+    backTo.current = 'done';
+    if (kindRef.current === 'deck' && k !== currentRef.current) gotoSlideRef.current(k);
+  };
+  useEffect(goBack, [slides, kind]);
+  useEffect(() => {
+    if (kind !== 'deck') return;
+    if (backTo.current !== 'done') { if (current === 0) return; backTo.current = 'done'; }
+    host.noteSlide?.(current);
+  }, [current, kind, host]);
   /** when a frame last asked for a menu (the slide rail's tap or hold, a right-click on the canvas) */
   const frameMenuAt = useRef(0);
 

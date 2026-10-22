@@ -109,14 +109,49 @@ export function setDocFolds(userId: number, docId: string, folds: unknown, at?: 
   return { folds: out, at: when };
 }
 
-/* ------------- per user and document: when they last opened it (the start screen sorts projects by recency) */
+/* ------------- per user and document: where they were in it (a deck's slide; client deliverable/slidememory.ts, /api/docs/<id>/place) */
+
+export interface DocPlace { /** the slide looked at last (0-based); null = none noted */ slide: number | null; /** when (their browser's clock, ms); 0 = never */ at: number }
+
+export function docPlace(userId: number, docId: string): DocPlace {
+  const row = db.prepare("SELECT value, updated_at FROM user_doc_state WHERE user_id = ? AND doc_id = ? AND key = 'place'").get(userId, docId) as { value: string; updated_at: number } | undefined;
+  if (!row) return { slide: null, at: 0 };
+  try { const v = JSON.parse(row.value); return { slide: Number.isInteger(v?.slide) && v.slide >= 0 ? v.slide : null, at: row.updated_at }; } catch { return { slide: null, at: row.updated_at }; }
+}
+
+/** Note where the user is in a document; an older note (another device's, sent late) leaves a newer one as it is. */
+export function setDocPlace(userId: number, docId: string, slide: unknown, at?: unknown): DocPlace {
+  if (!Number.isInteger(slide) || (slide as number) < 0 || (slide as number) > 100_000) return docPlace(userId, docId);
+  const now = Date.now();
+  const when = typeof at === 'number' && Number.isFinite(at) && at > 0 ? Math.min(Math.round(at), now) : now;
+  db.prepare("INSERT INTO user_doc_state (user_id, doc_id, key, value, updated_at) VALUES (?, ?, 'place', ?, ?) ON CONFLICT(user_id, doc_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at WHERE excluded.updated_at >= user_doc_state.updated_at")
+    .run(userId, docId, JSON.stringify({ slide }), when);
+  return docPlace(userId, docId);
+}
+
+/* ------------- per user and document: when they last opened it (the start screen sorts projects by recency, a project reopens on it) */
+
+/** how a file was shown: a document ('' — its WebSocket connection), or in the text editor / PDF viewer (client noteShown) */
+export type OpenedView = '' | 'text' | 'pdf';
 
 /** A document was opened by the user (every WebSocket connection; the activity log keeps only one entry per 10 minutes). */
-export function markDocOpened(userId: number, docId: string): void {
+export function markDocOpened(userId: number, docId: string, view: OpenedView = ''): void {
   try {
-    db.prepare("INSERT INTO user_doc_state (user_id, doc_id, key, value, updated_at) VALUES (?, ?, 'opened', '', ?) ON CONFLICT(user_id, doc_id, key) DO UPDATE SET updated_at = excluded.updated_at")
-      .run(userId, docId, Date.now());
+    db.prepare("INSERT INTO user_doc_state (user_id, doc_id, key, value, updated_at) VALUES (?, ?, 'opened', ?, ?) ON CONFLICT(user_id, doc_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at")
+      .run(userId, docId, view, Date.now());
   } catch (e) { console.error('[state] cannot note the open:', e); }
+}
+
+/** The file of each project the user opened last, as the web app names its tab (`text:`/`pdf:` before files that are not documents). */
+export function lastFileByProject(userId: number): Map<string, string> {
+  const out = new Map<string, string>(), at = new Map<string, number>();
+  for (const r of db.prepare("SELECT doc_id, value, updated_at FROM user_doc_state WHERE user_id = ? AND key = 'opened'").all(userId) as { doc_id: string; value: string; updated_at: number }[]) {
+    const project = projectOfDoc(r.doc_id);
+    if (r.updated_at <= (at.get(project) ?? 0)) continue;
+    at.set(project, r.updated_at);
+    out.set(project, (r.value === 'text' || r.value === 'pdf' ? r.value + ':' : '') + r.doc_id);
+  }
+  return out;
 }
 
 /** When the user last opened a document of each project — the newer of this and the activity log (which goes back further). */

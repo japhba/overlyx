@@ -38,6 +38,8 @@ export interface Project {
   owner?: { id: number; name: string; username: string } | null;
   /** when this user last opened the project (server clock), null: never */
   lastOpened?: number | null;
+  /** the file this user was in last (a tab id: a document's, or `text:`/`pdf:` + a file's — app/lastfile.ts), null: none noted */
+  lastFile?: string | null;
   /** who joined it besides the owner (server access.ts projectPeople): names and avatars, in the order they came */
   members?: ProjectPerson[];
   /** invitations to an address without an account yet */
@@ -314,6 +316,11 @@ export const api = {
   /** the user's folded sections of a document (editor/plugins/fold.ts), kept with the account */
   folds: (id: string) => req<{ folds: SavedFold[]; at: number }>('GET', `/api/docs/${encId(id)}/folds`),
   setFolds: (id: string, folds: SavedFold[], at: number) => req<{ folds: SavedFold[]; at: number }>('PUT', `/api/docs/${encId(id)}/folds`, { folds, at }),
+  /** where the user was in a document: a deck's slide (deliverable/slidememory.ts) */
+  place: (id: string) => req<{ slide: number | null; at: number }>('GET', `/api/docs/${encId(id)}/place`),
+  setPlace: (id: string, slide: number, at: number) => req<{ slide: number | null; at: number }>('PUT', `/api/docs/${encId(id)}/place`, { slide, at }),
+  /** a file shown in the text editor or the PDF viewer (they keep no connection that would say so): its project reopens on it */
+  markOpened: (id: string, view: 'text' | 'pdf') => req<{ ok: boolean }>('PUT', `/api/docs/${encId(id)}/opened`, { view }),
   keys: () => req<{ keys: Record<string, string | null> }>('GET', '/api/keys'),
   setKeys: (keys: Record<string, string | null>) => req<{ keys: Record<string, string | null> }>('POST', '/api/keys', { keys }),
   setSettings: (patch: { fineGrainedAccess?: boolean; paragraphSkip?: boolean; interface?: 'classic' | 'modern' }) => req<{ settings: UserSettings }>('POST', '/api/settings', patch),

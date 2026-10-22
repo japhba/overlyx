@@ -84,6 +84,7 @@ import { setPagesView, setPageBreaks, pageAtCursor, setPagesHost } from '../edit
 import { setInk, getInk, subscribeInk, isTabletClient } from '../editor/plugins/ink';
 import { BoardEditor } from './BoardEditor';
 import { DeliverableEditor } from '../deliverable/DeliverableEditor';
+import { noteShown } from './lastfile';
 import { NewLayoutDialog } from './NewLayoutDialog';
 import { setLayoutHeader, layoutZoomStep, refreshLayoutCheck } from '../editor/layout/controller';
 import { acceptAllChanges, rejectAllChanges, changeAt, hasChanges, changesFilterKey } from '../editor/plugins/changes';
@@ -261,6 +262,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     if (rawSplit) setPanes(l => setPaneShown(l, 'tex', true));
     else if (prev.doc === docId && prev.raw) setPanes(l => setPaneShown(l, 'tex', false));   // the same document without "raw:" (Back, a switch)
   }, [hashId]);
+  // the file shown: its project opens on it next time (lastfile.ts)
+  useEffect(() => { if (docId) noteShown(docId); }, [docId]);
   // the layout as of now: keys and menus may run a handler from an earlier render (Preact installs the
   // new ones after the paint), and two quick Ctrl+Alt+S must toggle twice
   const panesRef = useRef(panes);

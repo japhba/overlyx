@@ -10,6 +10,7 @@ import type { EditorView } from 'prosemirror-view';
 import { api, type Project, type TexHeading } from '../api';
 import { FileBrowser, projectLabel, useProjectEvents } from './FileBrowser';
 import { projectDocs } from './Home';
+import { lastFileOf } from './lastfile';
 import { Outline, type OutlineItem } from './Outline';
 import { editorContext } from '../editor/context';
 import { projectOfDoc } from '@overlyx/core';
@@ -93,13 +94,14 @@ export function DocPanel({ current, currentDoc, refreshKey, outline, activePos, 
     return () => { if (editorContext.openDocs === fn) editorContext.openDocs = undefined; };
   });
 
-  /** switching projects opens the other project's main document (one project at a time) */
+  /** switching projects opens the file of the other project that was open last, else its main document (one project at a time) */
   const switchProject = (name: string) => {
     const p = projects.find(x => x.name === name);
     if (!p) return;
     setPicked(name);
-    const d = projectDocs(p, true)[0];
-    if (d) onOpen(`${name}/${d}`);
+    const last = lastFileOf(p), d = projectDocs(p, true)[0];
+    if (last) onOpen(last);
+    else if (d) onOpen(`${name}/${d}`);
     else onOpen(name);   // no documents yet: open the project itself (App.tsx's ProjectRootPanel offers to create one)
   };
 

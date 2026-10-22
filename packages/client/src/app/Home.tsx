@@ -12,6 +12,7 @@ import { OverleafImport, projectNameFrom, type ImportInitial } from './OverleafI
 import { chooseGoogleImport } from './gpicker';
 import { takePendingImport } from './pendingImport';
 import { sortByRecency, recencyLabel } from './recency';
+import { lastFileOf } from './lastfile';
 import { projectShortName, splitProjectKey, isProjectName } from '@overlyx/core';
 import { uiConfirm, uiAlert, Dialog } from './Dialogs';
 import { promptNewFile, createProjectFile } from './newfile';
@@ -181,7 +182,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
     <div class="actions">
       {docs[0] ? (isExample
         ? <button class="btn primary small" data-start-tour onClick={() => onStartTour(p.name + '/' + docs[0])}>Start the tour</button>
-        : <button class="btn primary small" onClick={() => onOpen(p.name + '/' + docs[0])}>Open</button>)
+        : <button class="btn primary small" onClick={() => onOpen(lastFileOf(p) ?? p.name + '/' + docs[0])}>Open</button>)
         : <button class="btn primary small" onClick={() => onOpen(p.name)} title="This project has no documents yet — open it to create the first one">Open</button>}
       {p.role === 'owner' && p.via !== 'admin' && <button class="btn small" onClick={() => onShare(p.name)} data-share={p.name}>Share…</button>}
       <button class="btn small" onClick={() => onGit(p.name)} data-git={p.name} title="Clone, pull and push this project with git">Git…</button>
@@ -222,7 +223,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
   /** one line per project: name and facts on the left, its first documents on one line below (the count is in the facts), the actions on the right */
   const row = (p: Project) => {
     const docs = projectDocs(p, true);
-    const target = docs[0] ? p.name + '/' + docs[0] : p.name;
+    const target = lastFileOf(p) ?? (docs[0] ? p.name + '/' + docs[0] : p.name);
     return (
       <div class="home-card home-row" key={p.name} data-project={p.name}>
         <div class="title">
