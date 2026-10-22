@@ -102,9 +102,13 @@ export const CONTENT_SIDE = 16;
  */
 export const fitGap = (box: Size): number => (box.w < 600 ? 8 : 12);
 
-/** the scale (frame px → screen px) that shows the whole slide, the canvas' gap round it, at most 2 (Fit width keeps the gap at the sides too) */
-export function fitScale(box: Size, slide: Size): number {
-  const g = 2 * fitGap(box);
+/**
+ * The scale (frame px → screen px) that shows the whole slide, the canvas' gap round it, at most 2 (Fit
+ * width keeps the gap at the sides too). `gap` 0: edge to edge (drawing with everything else away —
+ * the user, 22 Oct 2026: "it leaves some margins which we should be able to ditch").
+ */
+export function fitScale(box: Size, slide: Size, gap = fitGap(box)): number {
+  const g = 2 * gap;
   return Math.max(0.05, Math.min(2, (box.w - g) / slide.w, (box.h - g) / slide.h));
 }
 
@@ -113,12 +117,12 @@ export function fitScale(box: Size, slide: Size): number {
  * nothing on it) and whose margins leave `margins` inside them, on a `box`-sized canvas, none past
  * `max`. Fit is the editor's (fitScale); Fit margins keeps the gap Fit keeps round the slide.
  */
-export function viewLevels(box: Size, slide: Size, content: Size | null, max: number, margins: Size | null = null): ViewLevels {
-  const fit = fitScale(box, slide);
+export function viewLevels(box: Size, slide: Size, content: Size | null, max: number, margins: Size | null = null, gap = fitGap(box)): ViewLevels {
+  const fit = fitScale(box, slide, gap);
   const cap = (z: number) => Math.max(0.05, Math.min(max, z));
-  const out: ViewLevels = { fit, width: cap((box.w - 2 * fitGap(box)) / slide.w) };
+  const out: ViewLevels = { fit, width: cap((box.w - 2 * gap) / slide.w) };
   if (margins && margins.w >= 1 && margins.h >= 1) {
-    const g = 2 * fitGap(box);
+    const g = 2 * gap;
     out.margins = cap(Math.min((box.w - g) / margins.w, (box.h - g) / margins.h));
   }
   if (content && content.w >= 1 && content.h >= 1) {
@@ -176,9 +180,15 @@ export interface ViewMarks {
   onFree?: (free: boolean) => void;
   /** there are slides to swipe between (a deck): a swipe sideways goes to the next (1) or the one before (-1) */
   pages?: () => boolean;
+  /** a swipe up goes to the next too, down to the one before (drawing with everything else away: Notes' and GoodNotes' pages scroll up and down) */
+  pagesUpDown?: () => boolean;
+  /** the slide never comes loose (drawing with everything else away: no Centre slide to bring it back, and a loose slide takes the swipes that turn the page) */
+  fastened?: () => boolean;
   onPage?: (dir: 1 | -1) => void;
   /** a zoom going on shows the slide at this scale (once a frame at most), ahead of the editor's */
   onLive?: (scale: number) => void;
+  /** the slide was shown there (`place()`, each time it is drawn): what sits on its corner follows it */
+  placed?: (p: { tx: number; ty: number; s: number }) => void;
 }
 
 /**
@@ -197,10 +207,13 @@ export class SlideView {
   private free = false;
   /**
    * A scroll's or a finger's way so far (px), for a swipe sideways to turn the page (Safari's swipe
-   * between pages): its `axis` once it is clear, whether it `pages` (sideways, the slide in place and
-   * at that side's edge when it began — `x0`), and once it has (the rest of it, momentum, does nothing).
+   * between pages): its `axis` once it is clear, whether it `pages` (sideways — or up and down,
+   * `pagesUpDown` —, the slide in place and at that side's edge when it began — `x0`, `y0`), and once
+   * it has (the rest of it, momentum, does nothing).
    */
-  private swipe: { x: number; y: number; x0: number; t0: number; finger: boolean; axis: 'x' | 'y' | null; pages: boolean; paged: boolean } | null = null;
+  private swipe: { x: number; y: number; x0: number; y0: number; t0: number; finger: boolean; axis: 'x' | 'y' | null; pages: boolean; paged: boolean } | null = null;
+  /** the way the last page was turned: the next slide comes in from that side */
+  private turned: 'x' | 'y' = 'x';
   /** this pull may set the slide free: a finger's, or a scroll begun at the edge it pulls past */
   private armed = true;
   /** the ring shows how far the pull has come (not while a zoom or a snap back in springs) */
@@ -336,6 +349,7 @@ export class SlideView {
     if (!this.moving) { const d = (typeof devicePixelRatio === 'number' && devicePixelRatio) || 1; tx = Math.round(tx * d) / d; ty = Math.round(ty * d) / d; }
     el.style.transform = `translate(${tx}px, ${ty}px) scale(${p.s * kx}, ${p.s * ky})`;
     this.drawRing(v);
+    this.marks.placed?.(p);
   }
 
   /**
@@ -409,7 +423,7 @@ export class SlideView {
       this.ringOn = true;
       // pulled further out, as far as it takes: loose
       const past = pastRanges(this.raw, home);
-      if (this.armed && past >= BREAK && past > before) this.loosen(v, catchUp);
+      if (this.armed && past >= BREAK && past > before && !this.marks.fastened?.()) this.loosen(v, catchUp);
     }
     this.render();
   }
@@ -465,7 +479,7 @@ export class SlideView {
     // A finger owns its release. An older zoom/wheel timer must not settle it
     // halfway through, discard its motion, or retain the wheel's swipe identity.
     if (this.idle) { clearTimeout(this.idle); this.idle = null; this.swipe = null; }
-    if (!this.swipe) this.swipe = { x: 0, y: 0, x0: this.raw.x, t0: performance.now(), finger: true, axis: null, pages: false, paged: false };
+    if (!this.swipe) this.swipe = { x: 0, y: 0, x0: this.raw.x, y0: this.raw.y, t0: performance.now(), finger: true, axis: null, pages: false, paged: false };
     this.armed = true;
     if (this.steer(dx, dy)) return;
     this.pull(dx, dy, 1);
@@ -474,8 +488,8 @@ export class SlideView {
   /**
    * A swipe sideways turns the page — the slide in its place (not loose), all of it across the canvas
    * or at that side's edge when the swipe began; it shows the pull on the rubber band, and never comes
-   * loose that way (up and down it still does). Up and down, or zoomed in mid-slide, it pans as ever.
-   * True: the swipe took the move.
+   * loose that way (up and down it still does, unless `pagesUpDown`: then up and down turn the page as
+   * well). Otherwise, or zoomed in mid-slide, it pans as ever. True: the swipe took the move.
    */
   private steer(dx: number, dy: number): boolean {
     const s = this.swipe, v = this.input();
@@ -483,29 +497,31 @@ export class SlideView {
     s.x += dx; s.y += dy;
     if (!s.axis && Math.hypot(s.x, s.y) > 6) {
       s.axis = Math.abs(s.x) > 1.3 * Math.abs(s.y) ? 'x' : 'y';
-      const [lo, hi] = this.ranges(v).x;
-      // (a swipe left goes on — the next slide — from the right edge; right, back from the left one)
-      const edge = s.x < 0 ? s.x0 <= lo + 0.5 : s.x0 >= hi - 0.5;
-      s.pages = s.axis === 'x' && !this.free && !!this.marks.pages?.() && edge;
+      const across = s.axis === 'x', d = across ? s.x : s.y, at = across ? s.x0 : s.y0;
+      const [lo, hi] = this.ranges(v)[s.axis];
+      // (a swipe left goes on — the next slide — from the right edge; right, back from the left one; up, on from the bottom)
+      const edge = d < 0 ? at <= lo + 0.5 : at >= hi - 0.5;
+      s.pages = (across || !!this.marks.pagesUpDown?.()) && !this.free && !!this.marks.pages?.() && edge;
     }
     if (!s.pages) return false;
     if (s.paged) return true;
-    this.pull(dx, 0, 0, true);
-    if (!s.finger && Math.abs(s.x) >= PAGE_SCROLL) this.turn(s);
+    if (s.axis === 'x') this.pull(dx, 0, 0, true); else this.pull(0, dy, 0, true);
+    if (!s.finger && Math.abs(s.axis === 'x' ? s.x : s.y) >= PAGE_SCROLL) this.turn(s);
     return true;
   }
 
   private turn(s: NonNullable<SlideView['swipe']>): void {
     s.paged = true;
-    this.marks.onPage?.(s.x < 0 ? 1 : -1);
+    this.turned = s.axis === 'y' ? 'y' : 'x';
+    this.marks.onPage?.((s.axis === 'y' ? s.y : s.x) < 0 ? 1 : -1);
   }
 
-  /** another slide, by a swipe: in from the side it was swiped from (`dir` 1: the next, from the right) */
+  /** another slide, by a swipe: in from the side it was swiped from (`dir` 1: the next, from the right — or from below) */
   enter(dir: 1 | -1): void {
     const v = this.input();
     this.recentre(false);
     if (!v || this.reduced()) return;
-    const from = { x: dir * Math.min(240, v.box.w * 0.3), y: 0 };
+    const from = this.turned === 'y' ? { x: 0, y: dir * Math.min(240, v.box.h * 0.3) } : { x: dir * Math.min(240, v.box.w * 0.3), y: 0 };
     this.animateFrom(from, { x: 0, y: 0 });
     // (at the side from its first frame, not in the middle till the spring's first step)
     this.shown = from;
@@ -516,7 +532,7 @@ export class SlideView {
   scroll(dx: number, dy: number): void {
     if (!this.idle) {
       this.armed = this.atEdge(dx, dy);
-      this.swipe = { x: 0, y: 0, x0: this.raw.x, t0: performance.now(), finger: false, axis: null, pages: false, paged: false };
+      this.swipe = { x: 0, y: 0, x0: this.raw.x, y0: this.raw.y, t0: performance.now(), finger: false, axis: null, pages: false, paged: false };
     }
     if (!this.steer(dx, dy)) this.pull(dx, dy, 0.4);
     if (this.idle) clearTimeout(this.idle);
@@ -578,8 +594,8 @@ export class SlideView {
     const s = this.swipe;
     this.swipe = null;
     if (!cancelled && v && s?.finger && s.pages && !s.paged) {
-      const fast = performance.now() - s.t0 < 250 && Math.abs(s.x) > 30;
-      if (fast || Math.abs(s.x) >= PAGE_FINGER * v.box.w) this.turn(s);
+      const d = Math.abs(s.axis === 'y' ? s.y : s.x), fast = performance.now() - s.t0 < 250 && d > 30;
+      if (fast || d >= PAGE_FINGER * (s.axis === 'y' ? v.box.h : v.box.w)) this.turn(s);
     }
     if (!v) return;
     const r = this.active(v);

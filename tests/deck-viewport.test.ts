@@ -277,10 +277,10 @@ describe('a swipe sideways turns the page (Safari\'s swipe between pages)', () =
     vi.stubGlobal('cancelAnimationFrame', (h: ReturnType<typeof setTimeout>) => clearTimeout(h));
   });
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
-  const make = (scale = 0.7, pages = true) => {
+  const make = (scale = 0.7, pages = true, drawing = false) => {
     const frame = { style: {} } as unknown as HTMLElement;
     const turned: number[] = [], free: boolean[] = [];
-    const v = new SlideView(() => frame, () => ({ box, rect, scale, margin: 32 }), { pages: () => pages, onPage: d => turned.push(d), onFree: f => free.push(f) });
+    const v = new SlideView(() => frame, () => ({ box, rect, scale, margin: 32 }), { pages: () => pages, onPage: d => turned.push(d), onFree: f => free.push(f), pagesUpDown: () => drawing, fastened: () => drawing });
     v.render();
     const letGo = () => vi.advanceTimersByTime(200);
     return { v, turned, free, letGo };
@@ -366,6 +366,39 @@ describe('a swipe sideways turns the page (Safari\'s swipe between pages)', () =
     for (let i = 0; i < 20; i++) v.scroll(30, 0);
     letGo();
     expect(turned).toEqual([]);
+  });
+
+  it('drawing with everything else away: up and down turn the page too, and the slide never comes loose', () => {
+    const { v, turned, free } = make(0.7, true, true);
+    v.panBy(0, -60); v.panBy(0, -60); v.release();   // up: the next
+    expect(turned).toEqual([1]);
+    v.panBy(0, 80); vi.advanceTimersByTime(400); v.panBy(0, 60); v.release();   // down, slowly, a fifth of the canvas: the one before
+    expect(turned).toEqual([1, -1]);
+    v.panBy(0, -20); v.release();   // a short slow nudge: nothing
+    expect(turned).toEqual([1, -1]);
+    // zoomed in mid-slide, pulled far past its edge: it pans, then springs back — never loose
+    const z = make(1.4, true, true);
+    for (let i = 0; i < 30; i++) z.v.panBy(30, 0);
+    z.v.release(); vi.advanceTimersByTime(1000);
+    expect(z.free).toEqual([]);
+    expect(free).toEqual([]);
+    // not drawing: up and down pull it loose as ever
+    const n = make();
+    for (let i = 0; i < 10; i++) n.v.panBy(0, -40);
+    n.v.release();
+    expect(n.turned).toEqual([]);
+    expect(n.free).toEqual([true]);
+  });
+
+  it('turned up or down, the next slide comes in from below (the one before from above)', () => {
+    const { v } = make(0.7, true, true);
+    vi.stubGlobal('matchMedia', () => ({ matches: false }));
+    const y = () => v.place()!.ty - (box.h / 2 - (rect.y + rect.h / 2) * v.place()!.s);
+    v.panBy(0, -60); v.panBy(0, -60); v.release();
+    v.enter(1);
+    expect(y()).toBeGreaterThan(100);
+    vi.advanceTimersByTime(1000);
+    expect(Math.abs(y())).toBeLessThan(1);
   });
 
   it('the next slide comes in from the side it was swiped from', () => {

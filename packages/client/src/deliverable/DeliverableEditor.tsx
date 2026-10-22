@@ -105,6 +105,12 @@ function sameSolo(a: Solo | null, b: Solo | null): boolean {
   return a.slide === b.slide && Math.abs(a.height - b.height) < 2 && near(a.rect, b.rect) && near(a.content, b.content);
 }
 
+/** where the pen and Undo sit while drawing (CSS right / top on the canvas): inside the slide's top right corner, on the canvas when that is off it */
+function focusSpot(p: { tx: number; ty: number; s: number }, r: Rect, box: { w: number; h: number }): { right: number; top: number } {
+  const x = Math.min(box.w - 8, p.tx + (r.x + r.w) * p.s - 8), y = Math.max(8, p.ty + r.y * p.s + 8);
+  return { right: Math.max(8, box.w - x), top: y };
+}
+
 /** the zoom menu's percentages (of the slide's own size) */
 const DECK_ZOOMS = [50, 75, 100, 150, 200];
 
@@ -400,9 +406,16 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   const soloOn = !!solo && kind !== 'page' && solo.rect.w > 0 && solo.rect.h > 0;
   /** room past the slide's edges a slide zoomed in pans to (screen px) */
   const margin = box.w < 600 ? 12 : 32;
+  /** drawing with everything else out of the way (drawFocus): on the one-slide canvas */
+  const focusOn = drawFocus && soloOn && !presenting;
+  /** the canvas round a fitted slide: none while drawing so (edge to edge), else viewport.ts fitGap */
+  const gap = focusOn ? 0 : undefined;
+  const gapRef = useRef(gap); gapRef.current = gap;
+  const focusRef = useRef(focusOn); focusRef.current = focusOn;
+  const focusPillEl = useRef<HTMLDivElement>(null);
   // one slide: the whole of it fits (both ways), a strip of the canvas round it; a web page: its width
   const fit = soloOn
-    ? fitScale(box, solo!.rect)
+    ? fitScale(box, solo!.rect, gap)
     : Math.max(0.05, Math.min(kind === 'page' ? 1 : 2, (box.w - 24) / frameW));
   const scale = fit * zoom;
   const showRail = kind === 'deck';
@@ -1086,6 +1099,15 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     pull: () => pullRing.current, onFree: setSlideFree, onLive: s => { toCanvas({ ol: 'scale', scale: s }); showZoom(s); },
     // a swipe sideways: the next slide, or the one before (viewport.ts steer)
     pages: () => kindRef.current === 'deck' && slidesRef.current.length > 1,
+    // (drawing with everything else away: up and down too, as Notes' pages scroll)
+    pagesUpDown: () => focusRef.current, fastened: () => focusRef.current,
+    // (the pen and Undo on the slide's corner go with it as it moves — a page turned, a pull — not only as the editor draws)
+    placed: p => {
+      const el = focusPillEl.current, so = soloState.current;
+      if (!el || !so) return;
+      const at = focusSpot(p, so.rect, boxRef.current);
+      el.style.right = `${at.right}px`; el.style.top = `${at.top}px`;
+    },
     onPage: dir => {
       const k = currentRef.current + dir;
       if (k < 0 || k >= slidesRef.current.length) return;
@@ -1180,7 +1202,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   /** the zoom levels of the slide shown (viewport.ts): Fit, Fit width, Fit content */
   const levelsNow = (): ViewLevels => {
     const so = soloState.current;
-    return so && soloRef.current ? viewLevels(boxRef.current, so.rect, so.content ?? null, MAX_ZOOM, marginRef.current) : { fit: fitRef.current };
+    return so && soloRef.current ? viewLevels(boxRef.current, so.rect, so.content ?? null, MAX_ZOOM, marginRef.current, gapRef.current) : { fit: fitRef.current };
   };
   /** a level as the zoom menu names it */
   const levelName = (k: ViewFit) => k !== 'fit' ? VIEW_FIT_NAMES[k] : host.bindSvgExporter ? 'Fit drawing' : kindRef.current === 'poster' ? 'Fit poster' : kindRef.current === 'page' ? 'Fit width' : 'Fit slide';
@@ -2449,7 +2471,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   const curSlidePath = slides[current]?.path ?? null;
   const notes = curSlidePath && kind === 'deck' ? slideNotes(text.toString(), curSlidePath).text : '';
   // the zoom menu: the levels (one slide: Fit, Fit width, Fit content — those apart), what the zoom is at
-  const shownLevels: ViewLevels = soloOn ? viewLevels(box, solo!.rect, solo!.content ?? null, MAX_ZOOM, marginBox) : { fit };
+  const shownLevels: ViewLevels = soloOn ? viewLevels(box, solo!.rect, solo!.content ?? null, MAX_ZOOM, marginBox, gap) : { fit };
   const zoomLevels = soloOn ? viewDetents(shownLevels).map(d => d.key) : ['fit' as const];
   const pct = Math.round(scale * 100);
   const atLevel = soloOn ? levelAt(shownLevels, scale) : Math.abs(zoom - 1) < 0.005 ? 'fit' : null;
@@ -2592,8 +2614,6 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     : chooseDock({ area: dockArea, slide: slideShape, tools: bars.tools.reduce((n, g) => n + g.length * 34 + 9, 24), rest: 560, current: dockWas.current });
   const dock: DeckDock = kind === 'page' || presenting ? 'top' : dockAsk ?? placed.dock;
   dockWas.current = dock;
-  /** drawing with everything else out of the way (drawFocus): on the one-slide canvas */
-  const focusOn = drawFocus && soloOn && !presenting;
   const sides = dock === 'sides' && !focusOn;
   const topBar = !sides && !focusOn;
 
@@ -2745,12 +2765,10 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   );
   /** drawing (drawFocus): the pen in hand at the slide's top right corner — its tap the Draw row over the canvas — and Undo beside it */
   const focusPill = focusOn && (() => {
-    const p = slideView.place(), r = solo!.rect;
-    const right = p ? p.tx + (r.x + r.w) * p.s : box.w, top = p ? p.ty + r.y * p.s : 0;
-    const x = Math.min(box.w - 8, right - 8), y = Math.max(8, top + 8);
+    const p = slideView.place(), at = p ? focusSpot(p, solo!.rect, box) : { right: 8, top: 8 };
     const icon = tool === 'eraser' ? 'inkeraser' : tool === 'lasso' ? 'inklasso' : ink.pen === 'highlighter' ? 'inkhl' : ink.nib.ball ? 'inkball' : 'inkpen';
     return (
-      <div class="dl-focus" data-dl-focus style={{ right: `${Math.max(8, box.w - x)}px`, top: `${y}px` }}>
+      <div ref={focusPillEl} class="dl-focus" data-dl-focus style={{ right: `${at.right}px`, top: `${at.top}px` }}>
         <div class="dl-focus-row">
         <button type="button" class="dl-focus-btn" title="Undo (or tap with two fingers)" aria-label="Undo" data-dl-focus-undo
           onClick={() => { toCanvas({ ol: 'stopText' }); setTimeout(() => host.undo(), 30); }} dangerouslySetInnerHTML={{ __html: ICONS['undo'] ?? '↶' }} />

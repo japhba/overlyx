@@ -26,6 +26,12 @@ describe("a slide's zoom levels", () => {
     expect(viewDetents(l).map(d => d.key)).toEqual(['fit']);
     expect(levelAt(l, l.width!)).toBe('fit');
   });
+  it('drawing with everything else away (gap 0): the slide edge to edge, no strip of the canvas round it', () => {
+    const l = viewLevels({ w: 1366, h: 1024 }, { w: 1280, h: 720 }, null, 8, null, 0);
+    expect(l.fit).toBeCloseTo(1366 / 1280, 9);
+    expect(l.width).toBeCloseTo(1366 / 1280, 9);
+    expect(viewLevels({ w: 1366, h: 1024 }, { w: 1280, h: 720 }, null, 8).fit).toBeCloseTo((1366 - 2 * fitGap({ w: 1366, h: 1024 })) / 1280, 9);
+  });
   it('nothing on the slide: Fit and Fit width only; never past the zoom allowed', () => {
     expect(viewLevels(box, { w: 1280, h: 720 }, null, 8).content).toBeUndefined();
     expect(viewLevels(box, { w: 1280, h: 720 }, { w: 2, h: 2 }, 8).content).toBe(8);
