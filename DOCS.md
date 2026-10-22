@@ -729,8 +729,12 @@ blend.
     Gaussian pulled small loops in by σ²/2r, the ink "contracted"); its width from the Pencil's
     pressure through `pressureWidth(p, sensitivity)` (usual writing ≈ the nominal width whatever the
     sensitivity — or at the hand's own usual pressure, `nib.usual`, measured by the calibration), the
-    pressure smoothed too (raw, it beaded); a mouse's, a finger's and the
-    highlighter's even. The pen's settings are GoodNotes' (the pen button clicked again:
+    pressure smoothed too (raw, it beaded); a finger's, a plain mouse's and the highlighter's even. A
+    Mac's Force Touch trackpad presses too (`runtime/pressure.ts`, slides, boards, margins and the
+    calibration alike): Safari's `webkitForce` (on the event, else the last `webkitmouseforcechanged`;
+    a click's 1 as a quarter, a force click's 2 as three quarters) or Chrome's pointer pressure; a
+    mouse's stroke takes pressure only once it changes (`pressed`: a button is a constant 0.5 or 1),
+    and a force click's Look Up is held back while a stroke is drawn (`watchForce`). The pen's settings are GoodNotes' (the pen button clicked again:
     `PenSettings.tsx`, `deckink.ts` `nib`, protocol `Nib`, defaults 0 / 25 % / 0 / 0, rounding 30 %;
     each a slider with named rungs, `NibLevels`): fountain or
     **ball pen** (even and round whatever the rest), **tip sharpness** (start, and the end once

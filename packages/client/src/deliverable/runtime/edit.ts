@@ -38,6 +38,7 @@ import { chipify, unchip, openChip, openChipEl, chipOpening, holdKey, holdAfter,
 import { initPaths, isNodeEditing, nodesAfterSource, nodesTargetOf, startNodesOrConvert, endNodes, redrawNodes, penDown, penMove, penUp, penCancelPress, penKey, penDouble, penCancel, isPenDrawing, setMenuShape } from './pathedit';
 import { isSolo, showSlide, soloIndex, revealSlideOf } from './solo';
 import { inkRuns, inkPaths, runsBox, freshPoint, type FreePt, type InkRun } from './freehand';
+import { pointPressure, pressed, watchForce } from './pressure';
 import { scratchOut, SCRATCH_HOLD_MS, SCRATCH_HOLD_PX } from '@overlyx/core/scratchout.ts';
 import { snapShape, SNAP_HOLD_MS, SNAP_LEAVE_PX, type Snapped } from '@overlyx/core/shapesnap.ts';
 import { lassoTakes, cutStroke, cutOps, uncut, straightened, handwriting, letterHeight, typedHtml, colorsUsed, type Cut } from './notetools';
@@ -2388,6 +2389,8 @@ let ink: {
   slide: HTMLElement | null; pts: FreePt[]; client: [number, number][]; pressure: boolean; svg: SVGSVGElement; g: SVGGElement; frame: number; t: number; whole: boolean;
   /** the frame's px per px of the slide (a poster fitted smaller: less than 1) */
   k: number;
+  /** the pointer's kind and its first point's pressure (a trackpad's counts once it changes, pressure.ts) */
+  kind: string; p0: number;
   /** scratch-out (core/scratchout.ts): where and since when the pen rests, when the scribble was last judged, the strokes it could erase */
   rest: { x: number; y: number; t: number; timer: ReturnType<typeof setTimeout> | null }; judged: number; cands: { el: Element; pts: [number, number][] }[] | null;
   /** on a touch screen: its points as the screen had them, for a point far off (core glitch.ts; the editor reports it) */
@@ -2403,8 +2406,10 @@ const inkCount = (slide: HTMLElement | null) => (slide ?? document.body).querySe
 function inkPoint(e: PointerEvent, slide: HTMLElement | null): FreePt {
   const [x, y] = slide ? slidePoint(slide, e.pageX, e.pageY) : [e.pageX, e.pageY];
   // (a pen's 0: not known — its first and last events; freehand.ts takes the nearest known)
-  return [x, y, e.pointerType === 'pen' ? Math.max(0, e.pressure) : 0.5];
+  return [x, y, pointPressure(e)];
 }
+// (a force click while drawing: no Look Up)
+watchForce(() => ink !== null);
 
 const wholePx = (e: PointerEvent) => Number.isInteger(e.clientX) && Number.isInteger(e.clientY);
 
@@ -2420,7 +2425,7 @@ function startInk(e: PointerEvent, slide: HTMLElement | null): void {
   for (const [k, v] of Object.entries(inkPaint())) g.setAttribute(k, v);
   svg.append(g);
   (slide ?? document.body).append(svg);
-  ink = { slide, pts: [inkPoint(e, slide)], client: [[e.clientX, e.clientY]], pressure: e.pointerType === 'pen', svg, g, frame: 0, t: e.timeStamp, whole: wholePx(e), k: docScale(slide ?? document.body),
+  ink = { slide, pts: [inkPoint(e, slide)], client: [[e.clientX, e.clientY]], pressure: e.pointerType === 'pen', svg, g, frame: 0, t: e.timeStamp, whole: wholePx(e), k: docScale(slide ?? document.body), kind: e.pointerType, p0: pointPressure(e),
     rest: { x: e.clientX, y: e.clientY, t: performance.now(), timer: null }, judged: 0, cands: null, snapTimer: null, snapped: null,
     watch: navigator.maxTouchPoints > 0 ? new StrokeWatch('deck', e.pointerType, { w: innerWidth, h: innerHeight }) : null };
   ink.watch?.add(e.clientX, e.clientY, e.timeStamp, 'down', scrollX, scrollY);
@@ -2529,6 +2534,7 @@ function takeInk(ev: PointerEvent, sample: InkSample): void {
   ink.t = ev.timeStamp;
   ink.whole &&= wholePx(ev);
   ink.pts.push(p);
+  if (!ink.pressure && pressed(ink.kind, ink.p0, p[2])) ink.pressure = true;
   ink.client.push([ev.clientX, ev.clientY]);
   ink.watch?.add(ev.clientX, ev.clientY, ev.timeStamp, sample, scrollX, scrollY);
 }

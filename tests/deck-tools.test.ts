@@ -9,6 +9,7 @@ import { describe, it, expect } from 'vitest';
 import { objectHtml, inlineSvgHtml, penPathD } from '../packages/client/src/deliverable/sourceops.ts';
 import { loadDeckInk, saveDeckInk, patchDeckInk, deckInkStyle, defaultDeckInk, DEFAULT_NIB, hexColor, colorsPass, setLassoColors } from '../packages/client/src/deliverable/deckink.ts';
 import { inkRuns, runPathD, runsBox, inkPaths, freshPoint, pressureWidth, usualPressure, type FreePt, type InkRun } from '../packages/client/src/deliverable/runtime/freehand.ts';
+import { pointPressure, pressed } from '../packages/client/src/deliverable/runtime/pressure.ts';
 import { applyOp, opSplices, parseSource, rebaseOp } from '../packages/core/src/html/source.ts';
 
 describe('objects drawn on a slide', () => {
@@ -203,6 +204,22 @@ describe("Draw's strokes as GoodNotes draws them (runtime/freehand.ts)", () => {
     expect(usualPressure([[]])).toBeNull();
     const stroke = (p: number): FreePt[] => Array.from({ length: 40 }, (_, i) => [i, 0, i < 3 ? 0.02 : p]);
     expect(usualPressure([stroke(0.3), stroke(0.4), stroke(0.42)])).toBe(0.4);
+  });
+
+  it("pressure: a pen's, a Force Touch trackpad's (Safari's webkitForce, Chrome's pressure), never a plain button's", () => {
+    const ev = (pointerType: string, pressure: number, webkitForce?: number) => ({ pointerType, pressure, ...(webkitForce !== undefined ? { webkitForce } : {}) }) as unknown as PointerEvent;
+    expect(pointPressure(ev('pen', 0.42))).toBe(0.42);
+    expect(pointPressure(ev('pen', -1))).toBe(0);
+    expect(pointPressure(ev('mouse', 0.5))).toBe(0.5);
+    expect(pointPressure(ev('mouse', 0.5, 1.5))).toBeCloseTo(0.5, 6);
+    expect(pointPressure(ev('mouse', 0.5, 3))).toBe(1);
+    expect(pointPressure(ev('mouse', 0.31))).toBe(0.31);
+    expect(pointPressure(ev('touch', 0.9))).toBe(0.5);
+    // a mouse's stroke takes its pressure once it changes; a pen's always; a finger's never
+    expect(pressed('pen', 0.3, 0.3)).toBe(true);
+    expect(pressed('mouse', 0.5, 0.5)).toBe(false);
+    expect(pressed('mouse', 0.33, 0.4)).toBe(true);
+    expect(pressed('touch', 0.5, 0.9)).toBe(false);
   });
 
   it("takes each of the pen's points once, in order: Safari's coalesced events repeat the last move's (A B A C D C)", () => {

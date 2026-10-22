@@ -7,8 +7,9 @@
  * levels in per cent. Save keeps them for this browser's pen (deckink.ts), on slides, boards and
  * documents' margins alike.
  *
- * It measures the pen too: points a second, whole-px positions (older Safari), its pressure — the
- * usual one (the median) is drawn at the nominal width from then on (freehand.ts `usual`).
+ * It measures the pen too: points a second, whole-px positions (older Safari), its pressure — a
+ * Pencil's or a Mac's Force Touch trackpad's (runtime/pressure.ts); the usual one (the median) is
+ * drawn at the nominal width from then on (freehand.ts `usual`).
  */
 import { render } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
@@ -16,6 +17,7 @@ import type { Nib } from './protocol';
 import { DECK_INK_WIDTH_CHOICES, DEFAULT_NIB, loadDeckInk, patchDeckInk, saveDeckInk, type DeckInkPatch } from './deckink';
 import { freshPoint, inkPaths, inkRuns, usualPressure, type FreePt } from './runtime/freehand';
 import { NibLevels, rungStyle } from './PenSettings';
+import { pointPressure, pressed, watchForce } from './runtime/pressure';
 import { fmtPt, ptToPx, pxToPt } from './units';
 
 type Pt = [number, number];
@@ -105,8 +107,11 @@ const pathOf = (pts: Pt[], end = pts.length) => {
 /** a stroke on the paper: its points (paper px) as the pen gave them, and what it says of the pen */
 interface Trace {
   pts: FreePt[];
-  pen: boolean;
+  /** it was pressed harder and lighter (a pen; a trackpad that tells, pressure.ts) */
+  pressure: boolean;
   kind: string;
+  /** the pointer's type and its first point's pressure */
+  type: string; p0: number;
   /** every position in whole px */
   whole: boolean;
   /** events (each time stamp once) and the time they took (ms); the most points one move carried */
@@ -115,7 +120,7 @@ interface Trace {
 
 /** what the strokes tell of the pen (those of a pen, if any) */
 function measure(traces: Trace[]) {
-  const pens = traces.filter(t => t.pen);
+  const pens = traces.filter(t => t.pressure);
   const use = pens.length ? pens : traces;
   if (!use.length) return null;
   const rates = use.filter(t => t.events >= 12 && t.last > t.first).map(t => ((t.events - 1) * 1000) / (t.last - t.first)).sort((a, b) => a - b);
@@ -220,6 +225,8 @@ function PenCalibration({ onClose }: { onClose: () => void }) {
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [played]);
+  // (a force click while drawing: no Look Up)
+  useEffect(() => watchForce(() => live.current !== null), []);
   // Esc: away without saving; the editor behind hears no keys meanwhile
   useEffect(() => {
     root.current?.focus();
@@ -238,7 +245,7 @@ function PenCalibration({ onClose }: { onClose: () => void }) {
   const shown = comparing ? saved.nib : nib, shownW = comparing ? pen.width : width;
   const runsOf = (pts: FreePt[], pressure: boolean, whole: boolean, final: boolean) =>
     inkPaths(inkRuns(pts, { width: shownW, pressure, zoom: 1, coarse: whole && pts.length > 4 ? 1 : false, nib: shown, final }));
-  const drawn = useMemo(() => traces.map(t => runsOf(t.pts, t.pen, t.whole, true)), [traces, shown, shownW]);
+  const drawn = useMemo(() => traces.map(t => runsOf(t.pts, t.pressure, t.whole, true)), [traces, shown, shownW]);
 
   // where the guides sit: centred at the top, as large as they are where there is room
   const fit = Math.min(1, (size.w - 24) / BOX.w, (size.h - 24) / BOX.h);
@@ -264,10 +271,10 @@ function PenCalibration({ onClose }: { onClose: () => void }) {
 
   const local = (e: PointerEvent): FreePt => {
     const r = paper.current!.getBoundingClientRect();
-    return [e.clientX - r.left, e.clientY - r.top, e.pointerType === 'pen' ? Math.max(0, e.pressure) : 0.5];
+    return [e.clientX - r.left, e.clientY - r.top, pointPressure(e)];
   };
   const whole = (e: PointerEvent) => Number.isInteger(e.clientX) && Number.isInteger(e.clientY);
-  const kindOf = (e: PointerEvent) => (e.pointerType === 'pen' ? 'a pen' : e.pointerType === 'touch' ? 'a finger' : 'the mouse');
+  const kindOf = (e: PointerEvent) => (e.pointerType === 'pen' ? 'a pen' : e.pointerType === 'touch' ? 'a finger' : 'the mouse or trackpad');
 
   const down = (e: PointerEvent) => {
     if (e.button > 0 || live.current) return;
@@ -276,7 +283,8 @@ function PenCalibration({ onClose }: { onClose: () => void }) {
     else if (e.pointerType === 'touch' && pencilSeen.current) return;
     e.preventDefault();
     (e.currentTarget as Element).setPointerCapture(e.pointerId);
-    live.current = { id: e.pointerId, pts: [local(e)], pen: e.pointerType === 'pen', kind: kindOf(e), whole: whole(e), events: 1, first: e.timeStamp, last: e.timeStamp, perMove: 1, lastT: e.timeStamp };
+    const first = local(e);
+    live.current = { id: e.pointerId, pts: [first], pressure: e.pointerType === 'pen', kind: kindOf(e), type: e.pointerType, p0: first[2], whole: whole(e), events: 1, first: e.timeStamp, last: e.timeStamp, perMove: 1, lastT: e.timeStamp };
     setFrame(f => f + 1);
   };
   const move = (e: PointerEvent) => {
@@ -292,6 +300,7 @@ function PenCalibration({ onClose }: { onClose: () => void }) {
       l.lastT = ev.timeStamp;
       l.whole &&= whole(ev);
       l.pts.push(p);
+      if (!l.pressure && pressed(l.type, l.p0, p[2])) { l.pressure = true; l.kind = 'the trackpad (Force Touch)'; }
     }
     requestAnimationFrame(() => setFrame(f => f + 1));
   };
@@ -342,7 +351,7 @@ function PenCalibration({ onClose }: { onClose: () => void }) {
           {drawingGuide >= 0 && <circle class="pen-cal-tip" cx={demo[drawingGuide].pts[shownTo[drawingGuide] - 1][0]} cy={demo[drawingGuide].pts[shownTo[drawingGuide] - 1][1]} r={5} />}
           <g fill="none" stroke={pen.color} stroke-linecap="round" stroke-linejoin="round">
             {drawn.map((paths, i) => paths.map(p => <path key={i + ':' + p.w} stroke-width={p.w} d={p.d} />))}
-            {l && runsOf(l.pts, l.pen, l.whole, false).map(p => <path key={'l' + p.w} stroke-width={p.w} d={p.d} />)}
+            {l && runsOf(l.pts, l.pressure, l.whole, false).map(p => <path key={'l' + p.w} stroke-width={p.w} d={p.d} />)}
           </g>
           {showPts && (
             <g class="pen-cal-pts">
@@ -374,6 +383,7 @@ function PenCalibration({ onClose }: { onClose: () => void }) {
               <div>{facts.whole ? 'Positions to the whole screen pixel: this browser rounds them. Rounding smooths the steps away; at 0 they show.' : 'Positions finer than a screen pixel: rounding makes little difference except on fast strokes.'}</div>
               <div>The pale strokes are drawn as this pen gives its points.</div>
               {facts.pressure && <div>Pressure {pct(facts.pressure.lo)} – {pct(facts.pressure.hi)}{facts.usual != null ? `, usually ${pct(facts.usual)}` : ''}.</div>}
+              {!facts.pressure && facts.kind === 'the mouse or trackpad' && <div>No pressure came with it. A Mac's Force Touch trackpad tells it when you press to click and draw with the click held (not with tap to click or three-finger drag); Safari passes it on, other browsers may not.</div>}
             </>
           )}
         </div>

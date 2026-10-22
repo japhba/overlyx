@@ -67,6 +67,7 @@ import { scratchOut, SCRATCH_HOLD_MS, SCRATCH_HOLD_PX } from '@overlyx/core/scra
 import { snapShape, SNAP_HOLD_MS, SNAP_LEAVE_PX } from '@overlyx/core/shapesnap.ts';
 import { eraseAlong } from '@overlyx/core/inkerase.ts';
 import { freshPoint } from '@overlyx/core/freehand.ts';
+import { pointPressure, pressed, watchForce } from '../../deliverable/runtime/pressure';
 import { ERASER_PX } from '../../deliverable/deckink';
 import { lassoGroups, readHandwriting, chooseReading, readingError, type LassoActions } from '../../deliverable/lassobar';
 import { LassoBar, pasteGroups } from '../../deliverable/InkSelectionBar';
@@ -362,6 +363,9 @@ class InkLayer {
   private live: (LiveInk & { edgeX: number; anchorTop: number; raw?: [number, number, number][] }) | null = null;
   /** when the live stroke's last point was given (freehand.ts freshPoint: Safari's coalesced events repeat the last move's) */
   private liveT = -Infinity;
+  /** the live stroke's pointer kind and first pressure (a trackpad's pressure counts once it changes, pressure.ts) */
+  private liveKind = '';
+  private liveP0 = 0.5;
   /** draw and hold: where the pen came to rest, and the timer that snaps the stroke when it stays there */
   private hold: { x: number; y: number; timer: ReturnType<typeof setTimeout> } | null = null;
   /** where the pen rested when the stroke snapped (client px): moving on from there takes it back as drawn */
@@ -400,6 +404,8 @@ class InkLayer {
     this.scroller = view.dom.closest('.editor-scroll');
     if (!this.scroller) return;
     this.canvas.className = 'ink-canvas';
+    // (a force click while drawing: no Look Up)
+    this.unsub.push(watchForce(() => this.live !== null));
     // first child, sticky: it follows the scrollport without extending the scrollable area — an
     // absolutely positioned canvas translated to the scroll offset would hold the offset open (the
     // page could never scroll back after the ink gutters are removed, or after the text shrinks)
@@ -993,6 +999,8 @@ class InkLayer {
     this.pointerId = e.pointerId;
     this.canvas.setPointerCapture(e.pointerId);
     this.liveT = -Infinity;
+    this.liveKind = e.pointerType;
+    this.liveP0 = pointPressure(e);
     this.addPoint(e, g);
     this.watch = strokeWatch('doc-ink', e, { ox: g.scrollLeft, oy: g.scrollTop });
     e.preventDefault();
@@ -1017,10 +1025,11 @@ class InkLayer {
     const events = coalesced?.length ? coalesced : [e];
     for (const ev of events) {
       const [x, y] = this.toContent(ev, g);
-      const p = ev.pointerType === 'pen' ? ev.pressure : 0;
+      const p = pointPressure(ev);
       if (this.live.pts.length >= 4000 || !freshPoint(this.live.pts, this.liveT, ev.timeStamp, [x, y, p])) continue;
       this.liveT = ev.timeStamp;
       this.live.pts.push([x, y, p]);
+      if (!this.live.pressure && pressed(this.liveKind, this.liveP0, p)) this.live.pressure = true;
       this.watch?.add(ev.clientX, ev.clientY, ev.timeStamp, coalesced?.length ? 'coalesced' : 'move', g.scrollLeft, g.scrollTop);
     }
     if (this.scratch) {
