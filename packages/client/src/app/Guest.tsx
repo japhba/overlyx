@@ -1,6 +1,6 @@
 /**
- * The guest callout: somebody opened a share link without an account and is in the document as
- * "Anonymous Otter". It hangs under the Sign in button (top right) and suggests signing in with
+ * The guest callout: somebody opened a share link (or a public project) without an account and is
+ * in the document as "Anonymous Otter". It hangs under the Sign in button (top right) and suggests signing in with
  * Google to keep the project — the guest's memberships move to the account (server: access.ts
  * adoptGuest) and the document reopens there. Dismissed for the session; the Sign in button stays.
  */
@@ -23,7 +23,9 @@ export function GuestCallout({ user, project, google, onSignIn }: { user: User; 
         <h3>You're in as a guest</h3>
         <button type="button" class="tour-close" title="Not now" onClick={dismiss}>✕</button>
       </div>
-      <p>The link lets you {verb} {what} as <b>{user.name}</b>. Sign in to keep it in your account: it will be on your start screen, and your edits will carry your name.</p>
+      {project?.via === 'public'
+        ? <p>{what} is public: you are reading it as <b>{user.name}</b>. Sign in to keep it on your start screen.</p>
+        : <p>The link lets you {verb} {what} as <b>{user.name}</b>. Sign in to keep it in your account: it will be on your start screen, and your edits will carry your name.</p>}
       {google
         ? <a class="google" href={googleSignInUrl()} data-google-login><GoogleG /><span>Continue with Google</span></a>
         : <button type="button" class="btn primary" data-guest-signin onClick={onSignIn}>Sign in</button>}

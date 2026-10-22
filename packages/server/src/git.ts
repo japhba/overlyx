@@ -29,7 +29,7 @@ import { db, type UserRow } from './db.ts';
 import { projectDir, listProjects } from './projects.ts';
 import { manager, fileWrittenListeners } from './docs.ts';
 import { verifyPassword, toSessionUser, type SessionUser } from './auth.ts';
-import { roleFor, atLeast, logAccess, accessibleProjects, scopeRefusal } from './access.ts';
+import { roleFor, atLeast, logAccess, accessibleProjects, scopeRefusal, isPublic } from './access.ts';
 import { createOwnedProject } from './projectCreate.ts';
 import { buildIncluding, buildErrors, errorLocations, lastBuild } from './export.ts';
 import { canonicalProject } from './namespaces.ts';
@@ -621,22 +621,24 @@ async function handle(req: Request, res: Response): Promise<void> {
   if (endpoint !== 'info/refs' && req.method !== 'POST') { res.status(405).end(); return; }
   if (endpoint === 'info/refs' && req.method !== 'GET') { res.status(405).end(); return; }
 
-  // --- who
+  // --- who: anybody may clone and pull a public project without credentials (a push still asks for them)
   const ip = req.ip ?? 'x';
-  const user = authenticateBasic(req, res);
-  if (!user) return;
+  const write = service === 'git-receive-pack';
+  const anonymous = !write && !req.headers.authorization && isPublic(project);
+  const user = anonymous ? null : authenticateBasic(req, res);
+  if (!user && !anonymous) return;
 
   // --- what they may do
   if (!isProjectKey(project) || !fs.existsSync(projectDir(project))) { res.status(404).type('text').send(`no project "${project}"\n`); return; }
-  const write = service === 'git-receive-pack';
-  const role = roleFor(user, project);
+  const role = user ? roleFor(user, project) : 'view';
   if (!atLeast(role, write ? 'edit' : 'view')) {
-    const narrowed = scopeRefusal(user, project, write ? 'edit' : 'view');
+    const narrowed = user && scopeRefusal(user, project, write ? 'edit' : 'view');
     res.status(403).type('text').send(narrowed ? `OverLyX: ${narrowed}\n` : role ? `You can only view "${project}" — pushing needs editor access\n` : `You do not have access to "${project}"\n`);
     return;
   }
   // the owner's activity log: one entry per person and direction (info/refs precedes every fetch and push)
-  if (endpoint !== 'info/refs') logAccess(project, user.id, write ? 'git-push' : 'git-fetch');
+  if (endpoint !== 'info/refs') logAccess(project, user?.id ?? null, write ? 'git-push' : 'git-fetch');
+  const who = user?.username ?? 'anonymous';
 
   // --- the repository, up to date with the editors
   try {
@@ -652,10 +654,10 @@ async function handle(req: Request, res: Response): Promise<void> {
       REQUEST_METHOD: req.method,
       QUERY_STRING: req.originalUrl.includes('?') ? req.originalUrl.slice(req.originalUrl.indexOf('?') + 1) : '',
       CONTENT_TYPE: req.headers['content-type'] ?? '',
-      REMOTE_USER: user.username,
+      REMOTE_USER: who,
       REMOTE_ADDR: ip,
-      GIT_COMMITTER_NAME: user.name,
-      GIT_COMMITTER_EMAIL: user.email ?? `${user.username}@${hostName()}`,
+      GIT_COMMITTER_NAME: user?.name ?? who,
+      GIT_COMMITTER_EMAIL: user?.email ?? `${who}@${hostName()}`,
     });
     if (req.headers['content-length']) env.CONTENT_LENGTH = String(req.headers['content-length']);
     if (req.headers['content-encoding']) env.HTTP_CONTENT_ENCODING = String(req.headers['content-encoding']);
@@ -689,8 +691,8 @@ async function handle(req: Request, res: Response): Promise<void> {
       res.end();
     });
     child.on('close', code => {
-      if (code) console.error(`[git] http-backend exited with ${code} for ${user.username} ${service} ${project}: ${stderr.trim()}`);
-      else if (write && endpoint === 'git-receive-pack') console.log(`[git] ${user.username} pushed to "${project}"`);
+      if (code) console.error(`[git] http-backend exited with ${code} for ${who} ${service} ${project}: ${stderr.trim()}`);
+      else if (write && endpoint === 'git-receive-pack') console.log(`[git] ${who} pushed to "${project}"`);
       if (stderr && !code && /error|fatal|rejected/i.test(stderr)) console.warn(`[git] ${service} ${project}: ${stderr.trim()}`);
       resolve();
     });

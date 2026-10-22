@@ -245,6 +245,25 @@ describe('git over HTTP', () => {
     expect(readFileSync(join(PROJECT, 'refs.bib'), 'utf8')).toContain('title={B}');
   });
 
+  it('a public project clones without credentials; pushing still needs an editor', async () => {
+    const info = `${base}/git/jan/paper.git/info/refs?service=git-upload-pack`;
+    expect((await fetch(info)).status).toBe(401);
+    access.setPublic('jan/paper', true);
+    try {
+      expect((await fetch(info)).status).toBe(200);
+      const anon = join(ROOT, 'clones', 'anonymous');
+      await g(ROOT, 'clone', '-q', `${base}/git/jan/paper.git`, anon);
+      expect(readFileSync(join(anon, 'refs.bib'), 'utf8')).toContain('title={B}');
+      // a push asks for credentials (and none are given)
+      expect((await fetch(`${base}/git/jan/paper.git/info/refs?service=git-receive-pack`)).status).toBe(401);
+      writeFileSync(join(anon, 'refs.bib'), 'broken\n');
+      await g(anon, 'commit', '-q', '-am', 'vandalism');
+      await expect(g(anon, 'push', '-q', 'origin', 'main')).rejects.toThrow(/401|Authentication|could not read Username|terminal prompts disabled/);
+      expect(readFileSync(join(PROJECT, 'refs.bib'), 'utf8')).toContain('title={B}');
+    } finally { access.setPublic('jan/paper', false); }
+    expect((await fetch(info)).status).toBe(401);
+  });
+
   it('pull gets what OverLyX wrote since; a pushed document change reaches the open document', async () => {
     const doc = await manager.open('jan/paper/main.tex');
     doc.loadFromLyx(doc.parse(docText('one', 'two edited by bob', 'three', 'four from the browser')), 'test');

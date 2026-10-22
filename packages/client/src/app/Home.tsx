@@ -138,7 +138,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
 
   const example = projects?.find(p => p.kind === 'example' && p.via === 'owner') ?? null;
   const mine = sortByRecency(projects?.filter(p => p.via === 'owner' && p !== example) ?? []);
-  const shared = sortByRecency(projects?.filter(p => p.via === 'member' || p.via === 'link') ?? []);
+  const shared = sortByRecency(projects?.filter(p => p.via === 'member' || p.via === 'link' || p.via === 'public') ?? []);
   const admin = projects?.filter(p => p.via === 'admin') ?? [];
 
   const [newOpen, setNewOpen] = useState(false);
@@ -176,7 +176,10 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
       </div>
     );
   };
-  const badge = (p: Project) => p.via !== 'owner' && <span class={'badge' + (p.role === 'view' ? ' view' : '')}>{p.via === 'admin' ? 'admin' : p.role === 'view' ? 'can view' : 'can edit'}</span>;
+  const badge = (p: Project) => <>
+    {p.public && <span class="badge view" data-public-badge title="Anyone can view this project and clone it, without an account">public</span>}
+    {p.via !== 'owner' && <span class={'badge' + (p.role === 'view' ? ' view' : '')}>{p.via === 'admin' ? 'admin' : p.role === 'view' ? 'can view' : 'can edit'}</span>}
+  </>;
   const docLink = (p: Project, d: string) => <a key={d} href={'#/' + p.name + '/' + d} onClick={e => { e.preventDefault(); onOpen(p.name + '/' + d); }}>{docLabel(p, d)}</a>;
   const actions = (p: Project, docs: string[], isExample = false) => (
     <div class="actions">

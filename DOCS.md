@@ -250,6 +250,19 @@ blend.
   top level by hand moves into the instance owner's namespace. *File ▸ Share project…*, the 👥
   button in the file browser, or the start screen. Anyone with a Google account may sign in (they only see their own and shared projects);
   set `OVERLYX_SIGNUP=invited` to allow only e-mails that were invited to a project.
+* **Public projects** (Share dialog ▸ *Public*, like a public repository on GitHub): anyone may
+  view the project at its own address (`https://<server>/#/<owner>/<project>/<path>`, no token)
+  and `git clone` / pull it without credentials; editing and pushing still need an account the
+  owner added as an editor. `projects.public`; `roleFor` gives everyone `view` on it (a narrowed
+  sign-in only within its projects). The client asks `POST /api/public/:project/visit` (outside
+  the authenticated router) for an address of a project it does not list: a public one is noted as
+  a hidden `via = 'public'` membership (`access.ts joinPublic`) so that it is on the visitor's list
+  under *Shared with you* — not among the people in the Share dialog, which counts them — and a
+  visitor without a session comes in as a guest (also on `OVERLYX_SIGNUP=invited` instances: the
+  owner made it public). An address naming only the project lands on its main document (main.tex,
+  another LaTeX document, an `index.html` deck or page, markdown). Making it private again removes
+  those memberships (people who came in through the share link meanwhile keep theirs). Anonymous
+  git fetches are logged as *Someone pulled with git*; `git-receive-pack` always asks for credentials.
 * **Project addresses** (`core/src/projectKey.ts`, `server/src/namespaces.ts`): projects live in
   their owner's namespace, like repositories on GitHub. The project *thesis* of the account *jan* is
   `jan/thesis` — its directory `<projects dir>/jan/thesis`, its documents `jan/thesis/<path>` — and

@@ -2,8 +2,9 @@
  * Share dialog (Google-Docs style): people with access and their roles, invite by username or
  * e-mail, and "anyone with the link" with a copyable link (which also lets people in without an
  * account, as guests — app/Guest.tsx). The link shares the whole project and names the file it
- * opens — the one open when the dialog was, or another document picked under the link. Only the
- * owner (or an administrator) sees it — the server refuses everything else.
+ * opens — the one open when the dialog was, or another document picked under the link. *Public*
+ * lets everybody view the project at its own address and clone it, no link or account needed. Only
+ * the owner (or an administrator) sees it — the server refuses everything else.
  */
 import { useEffect, useState } from 'preact/hooks';
 import { inkOn } from './contrast';
@@ -18,8 +19,13 @@ import { docPathOf, projectOfDoc, projectShortName } from '@overlyx/core';
  * without `path`) with the token that joins the project.
  */
 export function shareUrl(token: string, project: string, path?: string | null): string {
+  return `${publicUrl(project, path)}?share=${token}`;
+}
+
+/** A public project's address: the file it opens (`#/<owner>/<project>/<path>`), no token. */
+export function publicUrl(project: string, path?: string | null): string {
   const seg = (s: string) => s.split('/').map(encodeURIComponent).join('/');
-  return `${location.origin}/#/${seg(project)}${path ? '/' + seg(path) : ''}?share=${token}`;
+  return `${location.origin}/#/${seg(project)}${path ? '/' + seg(path) : ''}`;
 }
 
 /** One activity entry as a sentence fragment after the person's name. */
@@ -39,6 +45,16 @@ export function describe(e: ActivityEntry): string {
 
 const ROLE_LABEL: Record<string, string> = { view: 'Viewer', edit: 'Editor' };
 
+/** The file a link opens: a choice among the project's documents, or the one there is. */
+function OpensFile({ files, path, busy, onPick, attr }: { files: string[]; path: string | null; busy: boolean; onPick: (p: string) => void; attr: string }) {
+  if (files.length === 1) return <b {...{ [attr]: '' }}>{files[0]}</b>;
+  return (
+    <select value={path ?? ''} disabled={busy} {...{ [attr]: '' }} onChange={e => onPick((e.target as HTMLSelectElement).value)}>
+      {files.map(p => <option key={p} value={p}>{p}</option>)}
+    </select>
+  );
+}
+
 export function ShareDialog({ project, user, doc, onClose, onChanged }: { project: string; user: User; doc?: string | null; onClose: () => void; onChanged?: () => void }) {
   const [info, setInfo] = useState<ShareInfo | null>(null);
   // the file the link opens: the one open in the workspace, else (from the start screen) the main document
@@ -49,6 +65,7 @@ export function ShareDialog({ project, user, doc, onClose, onChanged }: { projec
   const [role, setRole] = useState<'view' | 'edit'>('edit');
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copiedPublic, setCopiedPublic] = useState(false);
   const [activity, setActivity] = useState<ActivityEntry[] | null>(null);
   // public PDF links: the project's documents and which of them have one
   const [pdf, setPdf] = useState<PdfLinksInfo | null>(null);
@@ -98,6 +115,16 @@ export function ShareDialog({ project, user, doc, onClose, onChanged }: { projec
     const url = shareUrl(info.link.token, project, linkPath);
     try { await navigator.clipboard.writeText(url); } catch { const el = document.querySelector<HTMLInputElement>('.share-link input'); el?.select(); document.execCommand('copy'); }
     setCopied(true); setTimeout(() => setCopied(false), 2000);
+  };
+  // everything in the project, its history too, becomes readable by anyone: ask first
+  const setPublic = async (on: boolean) => {
+    if (on && !await uiConfirm('Make the project public?', `Anyone can then open “${info?.title ?? projectShortName(project)}” and read every file in it — without an account — and clone it with git, its history included. Only the people listed above can change it. You can make it private again at any time.`, { okLabel: 'Make public' })) return;
+    await update(() => api.setPublic(project, on));
+  };
+  const copyPublic = async () => {
+    const url = publicUrl(project, linkPath);
+    try { await navigator.clipboard.writeText(url); } catch { const el = document.querySelector<HTMLInputElement>('[data-public-link] input'); el?.select(); document.execCommand('copy'); }
+    setCopiedPublic(true); setTimeout(() => setCopiedPublic(false), 2000);
   };
   const title = info?.title ?? projectShortName(project);
   // what the link can open: the file open now and the project's documents (main document first)
@@ -189,12 +216,7 @@ export function ShareDialog({ project, user, doc, onClose, onChanged }: { projec
           )}
           {info.link && linkFiles.length > 0 && (
             <div class="share-link-file hint">
-              Opens{' '}
-              {linkFiles.length > 1
-                ? <select value={linkPath ?? ''} disabled={busy} data-link-file onChange={e => setLinkPath((e.target as HTMLSelectElement).value)}>
-                    {linkFiles.map(p => <option key={p} value={p}>{p}</option>)}
-                  </select>
-                : <b data-link-file>{linkFiles[0]}</b>}
+              Opens <OpensFile files={linkFiles} path={linkPath} busy={busy} onPick={setLinkPath} attr="data-link-file" />
               {' '}— and gives access to the whole project.
             </div>
           )}
@@ -203,6 +225,26 @@ export function ShareDialog({ project, user, doc, onClose, onChanged }: { projec
               {info.link.createdAt && <span title={new Date(info.link.createdAt).toLocaleString()}>Link created {new Date(info.link.createdAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}.</span>}
               <button type="button" class="btn small" disabled={busy} data-link-reset title="Make a new link — the current one stops working" onClick={() => void resetLink()}>Reset link</button>
             </div>
+          )}
+          <h4>Public</h4>
+          <label class="pref" data-public-toggle>
+            <input type="checkbox" checked={!!info.public} disabled={busy} onChange={e => { const el = e.target as HTMLInputElement; const on = el.checked; el.checked = !on; void setPublic(on); }} />
+            <span>Anyone can view this project, without an account
+              <span class="sub">At its own address, like a public repository: people read it and present it, and clone it with git — no link or password needed. Only the people listed above can change it.</span>
+            </span>
+          </label>
+          {info.public && (
+            <>
+              <div class="share-link" data-public-link>
+                <input type="text" readonly value={publicUrl(project, linkPath)} onFocus={e => (e.target as HTMLInputElement).select()} />
+                <button class="btn" onClick={() => void copyPublic()}>{copiedPublic ? 'Copied ✓' : 'Copy link'}</button>
+              </div>
+              <div class="share-link-file hint">
+                {linkFiles.length > 0 && <>Opens <OpensFile files={linkFiles} path={linkPath} busy={busy} onPick={setLinkPath} attr="data-public-file" />. </>}
+                Clone: <code>git clone {location.origin}/git/{project}.git</code>
+                {info.visitors ? ` · Opened by ${info.visitors} ${info.visitors === 1 ? 'person' : 'people'} so far.` : ''}
+              </div>
+            </>
           )}
           <h4>Public PDF link</h4>
           <div class="hint">A stable address that serves the latest PDF of a document to anyone — link it from your web page, or embed it. It is rebuilt when the project changed; readers need no account.</div>

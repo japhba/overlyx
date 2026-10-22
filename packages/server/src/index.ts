@@ -19,7 +19,7 @@ import { listMcpTokens, deleteMcpToken } from './mcpTokens.ts';
 import { cliDownloadRoutes } from './cliDownload.ts';
 import { cliLoginRoutes } from './cliLogin.ts';
 import { userSettings, setUserSettings, userKeys, setUserKeys, docFolds, setDocFolds, docPlace, setDocPlace, markDocOpened, lastOpenedByProject, lastFileByProject } from './userSettings.ts';
-import { authMiddleware, authRouter, requireAuth, createUser, createGuest, generatePassword, setSessionCookie, toSessionUser } from './auth.ts';
+import { authMiddleware, authRouter, requireAuth, createUser, createGuest, generatePassword, setSessionCookie, toSessionUser, type SessionUser } from './auth.ts';
 import { attachWebSocket, originAllowed } from './ws.ts';
 import { manager, docWorkers, projectChangedListeners, graphicsChangedListeners } from './docs.ts';
 import { mountDeliverables, deliverableToken, splitEntry, createDeliverable, deliverableZip } from './deliverables.ts';
@@ -42,8 +42,8 @@ import { overleafProjectId, cloneOverleafProject } from './overleaf.ts';
 import { toPng, isDirectImage } from './graphics.ts';
 import { buildPdf, exportTex, texExportDir, lastBuild, requestBuild, currentJob, cancelBuild, publicJob, cleanupProjectData, synctexView, synctexEdit, synctexPages, layoutCheckOf } from './export.ts';
 import { sendFileAt, readFileAt, isRegularFileAt } from './confined.ts';
-import { db } from './db.ts';
-import { accessibleProjects, adoptProjects, roleFor, atLeast, isRole, registerProject, projectRow, shareInfo, addMember, setMemberRole, removeMember, memberRow, linkMemberIds, setLink, resetLink, linkProject, acceptLink, newOwner, setOwner, trashProject, ensureWelcomeProject, ensureStarterProjects, type Role } from './access.ts';
+import { db, type ProjectRow } from './db.ts';
+import { accessibleProjects, adoptProjects, roleFor, atLeast, isRole, registerProject, projectRow, shareInfo, addMember, setMemberRole, removeMember, memberRow, linkMemberIds, setLink, resetLink, linkProject, acceptLink, setPublic, joinPublic, newOwner, setOwner, trashProject, ensureWelcomeProject, ensureStarterProjects, type Role } from './access.ts';
 import { canonicalProject, canonicalDocId } from './namespaces.ts';
 import { gdocsRoutes } from './gdocs/routes.ts';
 import { startAutoSync, filesMoved } from './gdocs/sync.ts';
@@ -67,7 +67,7 @@ import { gitRouter, ensureAllRepos, ensureRepo, repoInfo, cloneUrl, commitProjec
 import { syncRouter } from './sync.ts';
 import { runSelfCheck, selfCheckEnabled, selfCheckState } from './selfcheck.ts';
 import { externalSyncOf } from './syncPeers.ts';
-import { texHeadings, parseBibtex, lyxToPm, exportLyx, splitDocId, projectOfDoc, docPathOf, splitProjectKey } from '@overlyx/core';
+import { texHeadings, parseBibtex, lyxToPm, exportLyx, splitDocId, projectOfDoc, docPathOf, splitProjectKey, isProjectKey } from '@overlyx/core';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -103,6 +103,34 @@ app.use('/oauth', oauthRoutes());
  * authenticated router. Guests exist only on instances open to everyone (`OVERLYX_SIGNUP`).
  */
 const guestBudget = new Map<string, { n: number; until: number }>();
+/** A guest session for a visitor without one (answered with an error and null when there is none to be had). */
+function admitGuest(req: express.Request, res: express.Response): SessionUser | null {
+  // a cross-site page must not be able to plant a guest session in somebody's browser
+  if (!originAllowed(req) || req.headers['sec-fetch-site'] === 'cross-site') { res.status(403).json({ error: 'forbidden' }); return null; }
+  // no account mills: a handful of guests per address and hour
+  const ip = req.ip ?? 'x';
+  if (guestBudget.size > 5000) { const now = Date.now(); for (const [k, v] of guestBudget) if (v.until < now) guestBudget.delete(k); }
+  const b = guestBudget.get(ip);
+  if (b && b.until > Date.now() && b.n >= 30) { res.status(429).json({ error: 'too many guests from this address, try again later' }); return null; }
+  guestBudget.set(ip, b && b.until > Date.now() ? { n: b.n + 1, until: b.until } : { n: 1, until: Date.now() + 60 * 60 * 1000 });
+  const user = toSessionUser(createGuest());
+  setSessionCookie(req, res, user);
+  return user;
+}
+/**
+ * What a share link or a public project's address opens: the main document, and the file the
+ * address names — only when the project has it (moved or deleted: the main document). The main
+ * document: main.tex, another LaTeX document, a deck or page (index.html first), markdown — an
+ * agents' notes file last.
+ */
+const landingRank = (f: { path: string; kind: string }) =>
+  /(^|\/)main\.tex$/.test(f.path) ? 0 : f.path.endsWith('.tex') ? 1 : f.kind === 'html' ? (/(^|\/)index\.html?$/i.test(f.path) ? 2 : 3) : /(^|\/)(AGENTS|CLAUDE)\.md$/i.test(f.path) ? 5 : 4;
+function landing(project: ProjectRow, role: Role, wanted: unknown, user: SessionUser | null) {
+  const files = listProjects().find(p => p.name === project.name)?.files ?? [];
+  const lyx = files.filter(f => (f.kind === 'doc' || f.kind === 'html') && !isBackupFile(f.name)).sort((a, b) => landingRank(a) - landingRank(b) || a.path.length - b.path.length || a.path.localeCompare(b.path));
+  const f = typeof wanted === 'string' && wanted ? files.find(x => x.path === wanted && x.kind !== 'dir') : undefined;
+  return { project: project.name, title: project.title, role, doc: lyx[0] ? `${project.name}/${lyx[0].path}` : null, file: f ? { path: f.path, name: f.name, kind: f.kind } : null, ...(user ? { user } : {}) };
+}
 app.post('/api/share/:token/accept', (req, res) => {
   try {
     const token = String(req.params.token);
@@ -110,28 +138,33 @@ app.post('/api/share/:token/accept', (req, res) => {
     let joined = false;
     if (!user) {
       if (config.signup === 'invited') { res.status(401).json({ error: 'Sign in to open this shared project' }); return; }
-      // a cross-site page must not be able to plant a guest session in somebody's browser
-      if (!originAllowed(req) || req.headers['sec-fetch-site'] === 'cross-site') { res.status(403).json({ error: 'forbidden' }); return; }
       if (!linkProject(token)) { res.status(404).json({ error: 'This link is not valid (any more). Ask the owner to share the project again.' }); return; }
-      // no account mills: a handful of guests per address and hour
-      const ip = req.ip ?? 'x';
-      if (guestBudget.size > 5000) { const now = Date.now(); for (const [k, v] of guestBudget) if (v.until < now) guestBudget.delete(k); }
-      const b = guestBudget.get(ip);
-      if (b && b.until > Date.now() && b.n >= 30) { res.status(429).json({ error: 'too many guests from this address, try again later' }); return; }
-      guestBudget.set(ip, b && b.until > Date.now() ? { n: b.n + 1, until: b.until } : { n: 1, until: Date.now() + 60 * 60 * 1000 });
-      user = toSessionUser(createGuest());
-      setSessionCookie(req, res, user);
+      user = admitGuest(req, res) ?? undefined;
+      if (!user) return;
       joined = true;
     }
     const { project, role } = acceptLink(token, user);
-    const files = listProjects().find(p => p.name === project.name)?.files ?? [];
-    const lyx = files.filter(f => f.kind === 'doc' && !isBackupFile(f.name)).sort((a, b) => Number(!/(^|\/)main\.tex$/.test(a.path)) - Number(!/(^|\/)main\.tex$/.test(b.path)) || Number(!a.path.endsWith('.tex')) - Number(!b.path.endsWith('.tex')) || a.path.length - b.path.length || a.path.localeCompare(b.path));
     // a link to one file of the project (`#/<owner>/<project>/<path>?share=<token>`): the whole project is shared, the
-    // file is where the visitor lands — named only when the project has it (moved or deleted: the main document)
-    const wanted = typeof req.query.path === 'string' ? req.query.path : '';
-    const f = wanted ? files.find(x => x.path === wanted && x.kind !== 'dir') : undefined;
-    res.json({ project: project.name, title: project.title, role, doc: lyx[0] ? `${project.name}/${lyx[0].path}` : null, file: f ? { path: f.path, name: f.name, kind: f.kind } : null, ...(joined ? { user } : {}) });
+    // file is where the visitor lands
+    res.json(landing(project, role, req.query.path, joined ? user : null));
   } catch (e) { res.status(404).json({ error: (e as Error).message }); }
+});
+/**
+ * Open a project at its address (`#/<owner>/<project>/<path>`): a public one lets anybody in as a
+ * viewer — without a session as a guest, also on instances where only invited people may sign up
+ * (its owner made it public) — and goes on their project list (access.ts joinPublic). 404 for
+ * everything else, whether it exists or not.
+ */
+app.post('/api/public/:project/visit', (req, res) => {
+  let project: string;
+  try { project = canonicalProject(String(req.params.project)); } catch { res.status(404).json({ error: 'not found' }); return; }
+  const row = isProjectKey(project) ? projectRow(project) : undefined;
+  if (!row || (!req.user && !row.public)) { res.status(404).json({ error: 'not found' }); return; }
+  const user = req.user ?? admitGuest(req, res);
+  if (!user) return;
+  const role = joinPublic(project, user);
+  if (!role) { res.status(404).json({ error: 'not found' }); return; }
+  res.json({ ...landing(row, role, req.query.path, req.user ? null : user), public: !!row.public });
 });
 
 const api = express.Router();
@@ -245,7 +278,7 @@ api.get('/projects', (req, res) => {
   // and which file they were in last (the project reopens on it)
   const lastFile = lastFileByProject(req.user!.id);
   const people = projectPeople();
-  res.json({ projects: accessibleProjects(req.user!).map(p => ({ name: p.name, title: p.title, kind: p.kind, role: p.role, via: p.via, owner: p.owner, files: p.files, lastOpened: opened.get(p.name) ?? null, lastFile: lastFile.get(p.name) ?? null,
+  res.json({ projects: accessibleProjects(req.user!).map(p => ({ name: p.name, title: p.title, kind: p.kind, role: p.role, via: p.via, public: p.public, owner: p.owner, files: p.files, lastOpened: opened.get(p.name) ?? null, lastFile: lastFile.get(p.name) ?? null,
     members: people.get(p.name)?.people ?? [], invited: people.get(p.name)?.invited ?? 0 })) });
   void ensureAllRepos();   // directories that appeared since (created by hand, the welcome and starter projects) get their repository
 });
@@ -458,6 +491,16 @@ api.post('/projects/:project/share/link', needProject('owner'), (req, res) => {
     if (affected.length) manager.kick(req.params.project, affected);
     logAccess(req.params.project, req.user!.id, 'share', role ? `turned on link sharing (${role === 'edit' ? 'editors' : 'viewers'})` : 'turned off link sharing');
     res.json({ link, share: shareInfo(req.params.project) });
+  } catch (e) { res.status(400).json({ error: (e as Error).message }); }
+});
+/** Public: body { public: boolean } — anyone may view it and clone it; off removes who came in because it was. */
+api.post('/projects/:project/share/public', needProject('owner'), (req, res) => {
+  try {
+    const on = req.body?.public === true;
+    const affected = setPublic(req.params.project, on);
+    if (affected.length) manager.kick(req.params.project, affected);
+    logAccess(req.params.project, req.user!.id, 'share', on ? 'made the project public' : 'made the project private');
+    res.json({ share: shareInfo(req.params.project) });
   } catch (e) { res.status(400).json({ error: (e as Error).message }); }
 });
 /** A new share link: the old one stops working; who came in through it keeps access. */

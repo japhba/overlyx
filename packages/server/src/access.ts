@@ -11,6 +11,10 @@
  *  - or turns on **link sharing**: anyone who opens `/#/share/<token>` joins as viewer/editor —
  *    without an account as a **guest** (a temporary account, see `adoptGuest`); turning the link
  *    off revokes what was granted through it;
+ *  - or makes it **public** (`setPublic`): everybody may view it at its own address — without an
+ *    account as a guest too — and clone it with git anonymously; editing still needs one of the
+ *    above. Who opens it is noted as a hidden `via = 'public'` membership (`joinPublic`) so that it
+ *    is on their project list; making it private again removes those;
  *  - administrators do **not** see everything: an administrator opens somebody else's project only through
  *    an explicit, time-limited grant ("open as administrator"), which is written to the project's activity log;
  *  - the **activity log** of a project (who opened, built, pulled, pushed, shared, and administrator
@@ -80,17 +84,24 @@ export function adoptProjects(): void {
 
 function userEmail(user: SessionUser): string { return (user.email ?? '').trim().toLowerCase(); }
 
-/** The user's role in a project (null = no access). An administrator's access is an explicit, logged grant (see below). */
-export function roleFor(user: SessionUser, project: string): Role | null {
+/**
+ * The user's role in a project (null = no access). An administrator's access is an explicit, logged
+ * grant (see below). `withPublic: false` leaves out what they have only because the project is public.
+ */
+export function roleFor(user: SessionUser, project: string, withPublic = true): Role | null {
   if (!isProjectKey(project)) return null;
   const row = projectRow(project);
   if (!row) return null;
   if (row.owner_id === user.id) return withinScope(user, project, 'owner');
   if (user.isAdmin && adminGrantActive(user.id, project)) return withinScope(user, project, 'owner');
-  const m = db.prepare(`SELECT role FROM project_members WHERE project = ? AND (user_id = ? OR (email IS NOT NULL AND email = ?))
-                        ORDER BY CASE role WHEN 'edit' THEN 0 ELSE 1 END LIMIT 1`).get(project, user.id, userEmail(user) || '\0') as { role: string } | undefined;
-  return m && isRole(m.role) ? withinScope(user, project, m.role) : null;
+  const m = db.prepare(`SELECT role FROM project_members WHERE project = ? AND (user_id = ? OR (email IS NOT NULL AND email = ?)) AND (? OR via != 'public')
+                        ORDER BY CASE role WHEN 'edit' THEN 0 ELSE 1 END LIMIT 1`).get(project, user.id, userEmail(user) || '\0', withPublic ? 1 : 0) as { role: string } | undefined;
+  if (m && isRole(m.role)) return withinScope(user, project, m.role);
+  return withPublic && row.public ? withinScope(user, project, 'view') : null;
 }
+
+/** Anyone may view the project (and clone it without an account). */
+export function isPublic(project: string): boolean { return !!projectRow(project)?.public; }
 
 /**
  * A role as far as the credential the user came in with allows: one narrowed at its authorization
@@ -125,8 +136,10 @@ export interface ProjectAccess extends Project {
   title: string | null;
   kind: string;
   role: Role;
-  /** how the user got in: owns it / shared with them / joined via link / administrator */
-  via: 'owner' | 'member' | 'link' | 'admin';
+  /** how the user got in: owns it / shared with them / joined via link / opened it while public / administrator */
+  via: 'owner' | 'member' | 'link' | 'public' | 'admin';
+  /** anyone may view it (setPublic) */
+  public: boolean;
   owner: { id: number; name: string; username: string } | null;
 }
 
@@ -147,11 +160,11 @@ export function accessibleProjects(user: SessionUser, opts: { files?: boolean } 
     let role: Role | null = null;
     let via: ProjectAccess['via'] = 'member';
     if (row?.owner_id === user.id) { role = 'owner'; via = 'owner'; }
-    else if (m && isRole(m.role)) { role = m.role; via = m.via === 'link' ? 'link' : 'member'; }
+    else if (m && isRole(m.role)) { role = m.role; via = m.via === 'link' || m.via === 'public' ? m.via : 'member'; }
     else if (user.isAdmin && adminGrantActive(user.id, p.name)) { role = 'owner'; via = 'admin'; }
     if (role) role = withinScope(user, p.name, role);
     if (!role) continue;
-    out.push({ ...p, title: row?.title ?? null, kind: row?.kind ?? 'project', role, via, owner: row?.owner_id != null ? owners.get(row.owner_id) ?? null : null });
+    out.push({ ...p, title: row?.title ?? null, kind: row?.kind ?? 'project', role, via, public: !!row?.public, owner: row?.owner_id != null ? owners.get(row.owner_id) ?? null : null });
   }
   return out;
 }
@@ -168,7 +181,7 @@ export interface ProjectPerson { name: string; username: string; color: string; 
 export function projectPeople(): Map<string, { people: ProjectPerson[]; invited: number }> {
   const rows = db.prepare(`SELECT m.project, m.role, m.via, m.created_at, u.id AS uid, u.display_name, u.username, u.color, u.avatar_url, u.is_guest
     FROM project_members m LEFT JOIN users u ON u.id = m.user_id OR (m.user_id IS NULL AND m.email IS NOT NULL AND u.email IS NOT NULL AND lower(u.email) = lower(m.email))
-    ORDER BY m.created_at`).all() as { project: string; role: string; via: string; created_at: number; uid: number | null; display_name: string | null; username: string | null; color: string | null; avatar_url: string | null; is_guest: number | null }[];
+    WHERE m.via != 'public' ORDER BY m.created_at`).all() as { project: string; role: string; via: string; created_at: number; uid: number | null; display_name: string | null; username: string | null; color: string | null; avatar_url: string | null; is_guest: number | null }[];
   const out = new Map<string, { people: ProjectPerson[]; invited: number }>();
   for (const r of rows) {
     const e = out.get(r.project) ?? { people: [], invited: 0 };
@@ -269,16 +282,20 @@ export interface ShareInfo {
   owner: { id: number; name: string; username: string } | null;
   members: { id: number; role: string; via: string; email: string | null; user: { id: number; name: string; username: string; color: string; avatar: string | null } | null }[];
   link: { token: string; role: 'view' | 'edit'; createdAt: number | null } | null;
+  /** anyone may view it (setPublic); `visitors`: the accounts and guests that opened it so */
+  public: boolean;
+  visitors: number;
 }
 
 export function shareInfo(project: string): ShareInfo {
   const row = projectRow(project);
   const owner = row?.owner_id != null ? db.prepare('SELECT id, display_name AS name, username FROM users WHERE id = ?').get(row.owner_id) as ShareInfo['owner'] : null;
-  const members = (db.prepare('SELECT * FROM project_members WHERE project = ? ORDER BY created_at').all(project) as MemberRow[]).map(m => {
+  const members = (db.prepare("SELECT * FROM project_members WHERE project = ? AND via != 'public' ORDER BY created_at").all(project) as MemberRow[]).map(m => {
     const u = m.user_id != null ? db.prepare('SELECT id, display_name AS name, username, color, avatar_url FROM users WHERE id = ?').get(m.user_id) as { id: number; name: string; username: string; color: string; avatar_url: string | null } | undefined : undefined;
     return { id: m.id, role: m.role, via: m.via, email: m.email, user: u ? { id: u.id, name: u.name, username: u.username, color: u.color, avatar: u.avatar_url ? `/api/users/${u.id}/avatar` : null } : null };
   });
-  return { name: project, title: row?.title ?? null, owner: owner ?? null, members, link: row?.link_token && isRole(row.link_role) ? { token: row.link_token, role: row.link_role, createdAt: row.link_created_at } : null };
+  const visitors = (db.prepare("SELECT COUNT(*) AS n FROM project_members WHERE project = ? AND via = 'public'").get(project) as { n: number }).n;
+  return { name: project, title: row?.title ?? null, owner: owner ?? null, members, link: row?.link_token && isRole(row.link_role) ? { token: row.link_token, role: row.link_role, createdAt: row.link_created_at } : null, public: !!row?.public, visitors };
 }
 
 /** Share with a person: `who` is a username or an e-mail address. */
@@ -372,12 +389,43 @@ export function linkProject(token: string): ProjectRow | undefined {
 export function acceptLink(token: string, user: SessionUser): { project: ProjectRow; role: Role } {
   const row = linkProject(token);
   if (!row || !isRole(row.link_role)) throw new Error('This link is not valid (any more). Ask the owner to share the project again.');
-  const current = roleFor(user, row.name);
+  // (viewing a public project is no reason to skip joining: the link's access outlasts it being public)
+  const current = roleFor(user, row.name, false);
   if (atLeast(current, row.link_role)) return { project: row, role: current! };
   db.prepare(`INSERT INTO project_members (project, user_id, email, role, via, added_by, created_at) VALUES (?,?,?,?,?,?,?)
               ON CONFLICT(project, user_id) WHERE user_id IS NOT NULL DO UPDATE SET role = excluded.role, via = excluded.via`)
     .run(row.name, user.id, null, row.link_role, 'link', row.owner_id, Date.now());
   return { project: row, role: row.link_role };
+}
+
+/**
+ * Make a project public (anyone may view it and clone it, without an account) or private again —
+ * which removes everyone who only came in because it was public. Returns their ids (their open
+ * editors reconnect).
+ */
+export function setPublic(project: string, on: boolean): number[] {
+  if (!projectRow(project)) throw new Error('project not found');
+  const visitors = (db.prepare("SELECT user_id FROM project_members WHERE project = ? AND via = 'public' AND user_id IS NOT NULL").all(project) as { user_id: number }[]).map(r => r.user_id);
+  db.prepare('UPDATE projects SET public = ? WHERE name = ?').run(on ? 1 : 0, project);
+  if (on) return [];
+  db.prepare("DELETE FROM project_members WHERE project = ? AND via = 'public'").run(project);
+  return visitors;
+}
+
+/**
+ * Someone opens a project at its address: a public one they have no other way into is noted as a
+ * hidden membership, so that it is on their project list (and the start screen) from now on.
+ * Returns their role (null: no access — the project is not public).
+ */
+export function joinPublic(project: string, user: SessionUser): Role | null {
+  const row = projectRow(project);
+  if (!row) return null;
+  const role = roleFor(user, project);
+  if (!role || !row.public || row.owner_id === user.id) return role;
+  if (db.prepare('SELECT 1 FROM project_members WHERE project = ? AND (user_id = ? OR (email IS NOT NULL AND email = ?))').get(project, user.id, userEmail(user) || '\0')) return role;
+  db.prepare(`INSERT INTO project_members (project, user_id, email, role, via, added_by, created_at) VALUES (?,?,NULL,'view','public',?,?)
+              ON CONFLICT(project, user_id) WHERE user_id IS NOT NULL DO NOTHING`).run(project, user.id, row.owner_id, Date.now());
+  return role;
 }
 
 /** The account a project is handed to (by username or e-mail); throws when there is none. */
@@ -494,7 +542,7 @@ export function trashProject(project: string): string {
   db.prepare('DELETE FROM project_aliases WHERE name = ?').run(project);
   // a deleted example project is not re-created: keep a tombstone row, under a hidden name that no
   // project can take (core isProjectName)
-  if (row?.kind === 'example') db.prepare("UPDATE projects SET name = ?, kind = 'example-gone', link_token = NULL, link_role = NULL, link_created_at = NULL WHERE name = ?").run(project.replace('/', '/.deleted-') + '-' + Date.now(), project);
+  if (row?.kind === 'example') db.prepare("UPDATE projects SET name = ?, kind = 'example-gone', link_token = NULL, link_role = NULL, link_created_at = NULL, public = 0 WHERE name = ?").run(project.replace('/', '/.deleted-') + '-' + Date.now(), project);
   else db.prepare('DELETE FROM projects WHERE name = ?').run(project);
   return dest;
 }

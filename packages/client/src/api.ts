@@ -33,8 +33,10 @@ export interface Project {
   /** 'project' | 'example' (the personal welcome project) */
   kind?: string;
   role?: Role;
-  /** how the user got access: owns it / shared with them / joined via link / administrator */
-  via?: 'owner' | 'member' | 'link' | 'admin';
+  /** how the user got access: owns it / shared with them / joined via link / opened it while public / administrator */
+  via?: 'owner' | 'member' | 'link' | 'public' | 'admin';
+  /** anyone may view it and clone it, without an account (Share ▸ Public) */
+  public?: boolean;
   owner?: { id: number; name: string; username: string } | null;
   /** when this user last opened the project (server clock), null: never */
   lastOpened?: number | null;
@@ -56,7 +58,9 @@ export const pdfLinkUrl = (l: { token: string; fileName: string }) => `${locatio
 /** a document's PDF is committed into a GitHub repository after every successful build (administrators; the server's GITHUB_PUBLISH_TOKEN) */
 export interface PdfPublishInfo { doc: string; repo: string; path: string; branch: string | null; lastPushedAt: number | null; lastAttemptAt: number | null; lastError: string | null; htmlUrl: string }
 export interface PdfLinksInfo { docs: string[]; links: PdfLinkInfo[]; publish: PdfPublishInfo[]; publishAvailable: boolean }
-export interface ShareInfo { name?: string; title?: string | null; owner: { id: number; name: string; username: string } | null; members: ShareMember[]; link: { token: string; role: 'view' | 'edit'; createdAt: number | null } | null }
+export interface ShareInfo { name?: string; title?: string | null; owner: { id: number; name: string; username: string } | null; members: ShareMember[]; link: { token: string; role: 'view' | 'edit'; createdAt: number | null } | null;
+  /** anyone may view it at its address and clone it, no account needed; `visitors`: who opened it so */
+  public?: boolean; visitors?: number }
 export interface LayoutInfo { name: string; category?: string; labelType?: string; tocLevel?: number; latexType?: string; latexName?: string; isNumbered?: boolean }
 export interface TexHeading { level: number; text: string; n: number; num?: string; starred: boolean }
 export interface SyncBox { page: number; x: number; y: number; h: number; v: number; W: number; H: number }
@@ -289,6 +293,7 @@ export const api = {
   setLink: (project: string, role: 'view' | 'edit' | null) => req<{ link: ShareInfo['link']; share: ShareInfo }>('POST', `/api/projects/${encodeURIComponent(project)}/share/link`, { role }),
   /** a new share link in place of the current one (the old one stops working) */
   resetLink: (project: string) => req<{ link: ShareInfo['link']; share: ShareInfo }>('POST', `/api/projects/${encodeURIComponent(project)}/share/link/reset`),
+  setPublic: (project: string, on: boolean) => req<{ share: ShareInfo }>('POST', `/api/projects/${encodeURIComponent(project)}/share/public`, { public: on }),
   setOwner: (project: string, username: string) => req<{ share: ShareInfo }>('POST', `/api/projects/${encodeURIComponent(project)}/share/owner`, { username }),
   /**
    * open a share link (#/share/<token>[/<path>]): join the project; `doc` is its main document, `file`
@@ -296,6 +301,11 @@ export const api = {
    * returns its `user`.
    */
   acceptShare: (token: string, path?: string | null) => req<{ project: string; title: string | null; role: Role; doc: string | null; file: Pick<ProjectFile, 'path' | 'name' | 'kind'> | null; user?: User }>('POST', `/api/share/${encodeURIComponent(token)}/accept${path ? '?path=' + encodeURIComponent(path) : ''}`),
+  /**
+   * open a project at its address: a public one puts it on the visitor's list (and lets a visitor
+   * without a session in as a guest: `user`); 404 when it is not public and not theirs
+   */
+  visitPublic: (project: string, path?: string | null) => req<{ project: string; title: string | null; role: Role; doc: string | null; file: Pick<ProjectFile, 'path' | 'name' | 'kind'> | null; user?: User; public: boolean }>('POST', `/api/public/${encodeURIComponent(project)}/visit${path ? '?path=' + encodeURIComponent(path) : ''}`),
   // git: every project is a repository (clone URL, history); the account token is the HTTPS password
   gitInfo: (project: string) => req<GitInfo>('GET', `/api/projects/${encodeURIComponent(project)}/git`),
   gitRestore: (project: string, commit: string) => req<{ restored: boolean; files: string[] } & Omit<GitInfo, 'url' | 'username' | 'role' | 'hasPassword'>>('POST', `/api/projects/${encodeURIComponent(project)}/git/restore`, { commit }),

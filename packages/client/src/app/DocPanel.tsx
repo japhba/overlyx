@@ -65,7 +65,7 @@ export function DocPanel({ current, currentDoc, refreshKey, outline, activePos, 
     const byTitle = (a: Project, b: Project) => Number((b.kind ?? '') === 'example') - Number((a.kind ?? '') === 'example') || projectLabel(a).localeCompare(projectLabel(b));
     return [
       { label: 'Your projects', items: projects.filter(p => (p.via ?? 'owner') === 'owner').sort(byTitle) },
-      { label: 'Shared with you', items: projects.filter(p => p.via === 'member' || p.via === 'link').sort(byTitle) },
+      { label: 'Shared with you', items: projects.filter(p => p.via === 'member' || p.via === 'link' || p.via === 'public').sort(byTitle) },
       { label: 'Opened as administrator', items: projects.filter(p => p.via === 'admin').sort(byTitle) },
     ].filter(g => g.items.length);
   }, [projects]);
@@ -134,7 +134,7 @@ export function DocPanel({ current, currentDoc, refreshKey, outline, activePos, 
           {!projects.length && <option value="">(no projects)</option>}
           {groups.map(g => (
             <optgroup key={g.label} label={g.label}>
-              {g.items.map(p => <option key={p.name} value={p.name}>{projectLabel(p)}{p.via === 'admin' && p.owner ? ` — ${p.owner.username}` : p.via === 'member' || p.via === 'link' ? ` — ${p.owner?.name ?? 'shared'}${p.role === 'view' ? ' (view)' : ''}` : ''}</option>)}
+              {g.items.map(p => <option key={p.name} value={p.name}>{projectLabel(p)}{p.via === 'admin' && p.owner ? ` — ${p.owner.username}` : p.via === 'member' || p.via === 'link' || p.via === 'public' ? ` — ${p.owner?.name ?? 'shared'}${p.role === 'view' ? ' (view)' : ''}` : ''}</option>)}
             </optgroup>
           ))}
         </select>

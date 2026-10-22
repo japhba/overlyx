@@ -91,7 +91,7 @@ import { acceptAllChanges, rejectAllChanges, changeAt, hasChanges, changesFilter
 import * as T from '../editor/tablecommands';
 import type { PresenceUser } from '../editor/editor';
 import { setQuery, findNext, replaceCurrent, replaceAll, findKey } from '../editor/plugins/find';
-import { schema, unquote, projectOfDoc, docPathOf, docDirOf, projectShortName, spacingStretch, spacingValue } from '@overlyx/core';
+import { schema, unquote, projectOfDoc, docPathOf, docDirOf, projectShortName, spacingStretch, spacingValue, splitDocId, isProjectKey } from '@overlyx/core';
 
 type Dialog = { name: string; arg?: unknown } | null;
 
@@ -111,6 +111,10 @@ export function App() {
       if (token) {
         try { const a = await api.acceptShare(token, parseHash().sharePath); if (a.user) { u = a.user; location.hash = shareLanding(a); } }
         catch (e) { setLinkNote((e as Error).message); }
+      } else if (!u) {
+        // a public project's address: the visitor reads it as a guest, no sign-in
+        const v = await visitPublic();
+        if (v?.user) u = v.user;
       }
       setUser(u); setGoogle(r.google);
       if (u) void syncBindings();   // account shortcuts follow the user across browsers
@@ -130,7 +134,7 @@ export function App() {
   useEffect(() => {
     if (!user) return;
     let live = true;
-    void rekeyLocalCopies().then(canonicalHash).finally(() => { if (live) setLinkChecked(user.id); });
+    void rekeyLocalCopies().then(canonicalHash).then(() => visitPublic()).finally(() => { if (live) setLinkChecked(user.id); });
     return () => { live = false; };
   }, [user?.id]);
   const acceptLogin = (u: User) => {
@@ -197,6 +201,24 @@ function parseHash(): { id: string | null; goto: string | null; heading: number 
 function shareLanding(r: { project: string; doc: string | null; file: Parameters<typeof fileTabId>[1] | null }): string {
   const id = (r.file && fileTabId(r.project, r.file)) || r.doc;
   return id ? '#/' + id : '';
+}
+
+/**
+ * Open the public project the address names (`#/<owner>/<project>[/<path>]`) — someone else's that
+ * this person has no other way into: the server puts it on their project list, and lets a visitor
+ * without a session in as a guest (`user`). An address naming only the project goes on to its main
+ * document. Null: not a public project, or the server is out of reach.
+ */
+async function visitPublic(): Promise<Awaited<ReturnType<typeof api.visitPublic>> | null> {
+  const h = parseHash();
+  if (h.share || !h.id) return null;
+  const { project, path } = splitDocId(h.id.replace(/^(raw|text|pdf):/, ''));
+  if (!isProjectKey(project) || knownProjects.has(project)) return null;
+  try {
+    const v = await Promise.race([api.visitPublic(project, path || null), new Promise<null>(res => setTimeout(res, 3000, null))]);
+    if (v?.public && v.role === 'view' && !path) location.replace(shareLanding(v) || location.hash);
+    return v;
+  } catch { return null; }
 }
 
 /**
@@ -597,11 +619,12 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
   useEffect(() => navHistory.subscribe(rerender), []);
-  // a share link (#/<owner>/<project>/<path>?share=<token>): join the project, then open the linked file (or its main document)
+  // a share link (#/<owner>/<project>/<path>?share=<token>): join the project, then open the linked file (or its main document);
+  // a public project's address puts it on the project list
   useEffect(() => {
     const check = () => {
       const { share: token, sharePath } = parseHash();
-      if (!token) return;
+      if (!token) { void visitPublic().then(v => { if (v?.public && v.role === 'view') setRefreshKey(k => k + 1); }); return; }
       api.acceptShare(token, sharePath).then(r => {
         notify(`You can now ${r.role === 'view' ? 'view' : 'edit'} “${r.title ?? projectShortName(r.project)}”`);
         setRefreshKey(k => k + 1);

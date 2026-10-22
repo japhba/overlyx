@@ -165,6 +165,9 @@ try {
         AND a.at > COALESCE((SELECT MAX(b.at) FROM access_log b WHERE b.project = projects.name AND b.action = 'share' AND b.detail = 'turned off link sharing'), 0))
     WHERE link_token IS NOT NULL`);
 } catch { /* column exists */ }
+// 2026-10-22: public projects — anyone may view them at their address and clone them, without an
+// account (access.ts setPublic, joinPublic)
+try { db.exec('ALTER TABLE projects ADD COLUMN public INTEGER NOT NULL DEFAULT 0'); } catch { /* column exists */ }
 
 // 2026-09-01: MCP tokens became user-scoped (one token, every project its account can access —
 // mcpTokens.ts). Databases from before have project-scoped rows: rebuild the table, attributing
@@ -198,10 +201,12 @@ export interface ProjectRow {
   link_token: string | null; link_role: string | null; created_at: number;
   /** when the share link was made (null: before this was recorded, and nothing in the activity log) */
   link_created_at: number | null;
+  /** 1: anyone may view the project and clone it, without an account (access.ts setPublic) */
+  public?: number;
 }
 export interface MemberRow {
   id: number; project: string; user_id: number | null; email: string | null; role: string;
-  /** 'user' (added by name) | 'email' (invited by e-mail) | 'link' (joined through the share link) */
+  /** 'user' (added by name) | 'email' (invited by e-mail) | 'link' (joined through the share link) | 'public' (opened the public project) */
   via: string; added_by: number | null; created_at: number;
 }
 

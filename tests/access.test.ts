@@ -237,6 +237,52 @@ describe('link sharing', () => {
   });
 });
 
+describe('public projects', () => {
+  it('anyone views a public project; opening it puts it on their list; private again revokes only that', () => {
+    expect(access.isPublic('jan/paper')).toBe(false);
+    expect(access.joinPublic('jan/paper', bob)).toBeNull();                       // not public: nothing to join
+    access.setPublic('jan/paper', true);
+    expect(access.isPublic('jan/paper')).toBe(true);
+    // view only — editing still needs to be added
+    expect(access.roleFor(bob, 'jan/paper')).toBe('view');
+    expect(access.roleFor(bob, 'jan/paper', false)).toBeNull();
+    expect(access.accessibleProjects(bob).map(p => p.name)).not.toContain('jan/paper');
+    expect(access.joinPublic('jan/paper', bob)).toBe('view');
+    expect(access.accessibleProjects(bob).find(p => p.name === 'jan/paper')).toMatchObject({ role: 'view', via: 'public', public: true });
+    const guest = toSessionUser(createGuest());
+    expect(access.joinPublic('jan/paper', guest)).toBe('view');
+    // the visitors are counted, not listed among the people the project is shared with
+    const info = access.shareInfo('jan/paper');
+    expect(info).toMatchObject({ public: true, visitors: 2 });
+    expect(info.members.map(m => m.user?.username)).not.toContain('bob');
+    expect(access.projectPeople().get('jan/paper')?.people.map(p => p.username) ?? []).not.toContain('bob');
+    // the owner and people it is shared with keep their own membership
+    expect(access.joinPublic('jan/paper', jan)).toBe('owner');
+    access.addMember('jan/paper', 'carol', 'edit', jan);
+    expect(access.joinPublic('jan/paper', carol)).toBe('edit');
+    expect(access.shareInfo('jan/paper').visitors).toBe(2);
+    // a share link opened while it is public still joins: it outlasts the project being public
+    const link = access.setLink('jan/paper', 'view')!;
+    const dan = toSessionUser(createUser('dan', 'Dan', 'pw'));
+    expect(access.acceptLink(link.token, dan).role).toBe('view');
+    expect(access.accessibleProjects(dan).find(p => p.name === 'jan/paper')?.via).toBe('link');
+    // adding a visitor by name makes them a member like anyone
+    access.addMember('jan/paper', 'bob', 'edit', jan);
+    expect(access.roleFor(bob, 'jan/paper')).toBe('edit');
+    // private again: only who came in because it was public loses access
+    expect(access.setPublic('jan/paper', false)).toEqual([guest.id]);
+    expect(access.roleFor(guest, 'jan/paper')).toBeNull();
+    expect(access.roleFor(bob, 'jan/paper')).toBe('edit');
+    expect(access.roleFor(carol, 'jan/paper')).toBe('edit');
+    expect(access.roleFor(dan, 'jan/paper')).toBe('view');
+    expect(access.roleFor(eve(), 'jan/paper')).toBeNull();
+    access.setLink('jan/paper', null);
+    access.removeMember('jan/paper', access.shareInfo('jan/paper').members.find(m => m.user?.username === 'bob')!.id);
+    access.removeMember('jan/paper', access.shareInfo('jan/paper').members.find(m => m.user?.username === 'carol')!.id);
+  });
+});
+function eve() { return toSessionUser(db.prepare("SELECT * FROM users WHERE username = 'eve'").get() as any ?? createUser('eve', 'Eve', 'pw')); }
+
 describe('example project and deletion', () => {
   it('creates one example project per account, once', () => {
     const name = access.ensureWelcomeProject(bob)!;
