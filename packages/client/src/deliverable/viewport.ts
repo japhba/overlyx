@@ -208,10 +208,11 @@ export class SlideView {
   /**
    * A scroll's or a finger's way so far (px), for a swipe sideways to turn the page (Safari's swipe
    * between pages): its `axis` once it is clear, whether it `pages` (sideways — or up and down,
-   * `pagesUpDown` —, the slide in place and at that side's edge when it began — `x0`, `y0`), and once
-   * it has (the rest of it, momentum, does nothing).
+   * `pagesUpDown` —, the slide in place and at that side's edge when it began — `x0`, `y0` —, or a
+   * finger's that ran into that edge on its way: `from`, its way along the axis till then, else 0),
+   * and once it has (the rest of it, momentum, does nothing).
    */
-  private swipe: { x: number; y: number; x0: number; y0: number; t0: number; finger: boolean; axis: 'x' | 'y' | null; pages: boolean; paged: boolean } | null = null;
+  private swipe: { x: number; y: number; x0: number; y0: number; t0: number; finger: boolean; axis: 'x' | 'y' | null; pages: boolean; paged: boolean; from: number | null } | null = null;
   /** the way the last page was turned: the next slide comes in from that side */
   private turned: 'x' | 'y' = 'x';
   /** this pull may set the slide free: a finger's, or a scroll begun at the edge it pulls past */
@@ -479,7 +480,7 @@ export class SlideView {
     // A finger owns its release. An older zoom/wheel timer must not settle it
     // halfway through, discard its motion, or retain the wheel's swipe identity.
     if (this.idle) { clearTimeout(this.idle); this.idle = null; this.swipe = null; }
-    if (!this.swipe) this.swipe = { x: 0, y: 0, x0: this.raw.x, y0: this.raw.y, t0: performance.now(), finger: true, axis: null, pages: false, paged: false };
+    if (!this.swipe) this.swipe = { x: 0, y: 0, x0: this.raw.x, y0: this.raw.y, t0: performance.now(), finger: true, axis: null, pages: false, paged: false, from: null };
     this.armed = true;
     if (this.steer(dx, dy)) return;
     this.pull(dx, dy, 1);
@@ -489,19 +490,28 @@ export class SlideView {
    * A swipe sideways turns the page — the slide in its place (not loose), all of it across the canvas
    * or at that side's edge when the swipe began; it shows the pull on the rubber band, and never comes
    * loose that way (up and down it still does, unless `pagesUpDown`: then up and down turn the page as
-   * well). Otherwise, or zoomed in mid-slide, it pans as ever. True: the swipe took the move.
+   * well). Otherwise, or zoomed in mid-slide, it pans — and a finger that pans the slide into that edge
+   * and goes on turns the page from there, as Photos does (the user, 22 Oct 2026: at Fit margins, the
+   * slide a little wider than the canvas, a swipe only showed the margin). True: the swipe took the move.
    */
   private steer(dx: number, dy: number): boolean {
     const s = this.swipe, v = this.input();
     if (!s || !v) return false;
     s.x += dx; s.y += dy;
+    const turns = (axis: 'x' | 'y') => (axis === 'x' || !!this.marks.pagesUpDown?.()) && !this.free && !!this.marks.pages?.();
     if (!s.axis && Math.hypot(s.x, s.y) > 6) {
       s.axis = Math.abs(s.x) > 1.3 * Math.abs(s.y) ? 'x' : 'y';
       const across = s.axis === 'x', d = across ? s.x : s.y, at = across ? s.x0 : s.y0;
       const [lo, hi] = this.ranges(v)[s.axis];
       // (a swipe left goes on — the next slide — from the right edge; right, back from the left one; up, on from the bottom)
       const edge = d < 0 ? at <= lo + 0.5 : at >= hi - 0.5;
-      s.pages = (across || !!this.marks.pagesUpDown?.()) && !this.free && !!this.marks.pages?.() && edge;
+      s.pages = turns(s.axis) && edge;
+      if (s.pages) s.from = 0;
+    } else if (s.axis && !s.pages && s.finger && turns(s.axis)) {
+      const across = s.axis === 'x', d = across ? dx : dy, way = across ? s.x - dx : s.y - dy, at = across ? this.raw.x : this.raw.y;
+      const [lo, hi] = this.ranges(v)[s.axis];
+      // (at that edge — or past it, on the band — and still going the way the swipe goes)
+      if (d && Math.sign(d) === Math.sign(way) && (d < 0 ? at <= lo + 0.5 : at >= hi - 0.5)) { s.pages = true; s.from = way; }
     }
     if (!s.pages) return false;
     if (s.paged) return true;
@@ -513,7 +523,7 @@ export class SlideView {
   private turn(s: NonNullable<SlideView['swipe']>): void {
     s.paged = true;
     this.turned = s.axis === 'y' ? 'y' : 'x';
-    this.marks.onPage?.((s.axis === 'y' ? s.y : s.x) < 0 ? 1 : -1);
+    this.marks.onPage?.((s.axis === 'y' ? s.y : s.x) - (s.from ?? 0) < 0 ? 1 : -1);
   }
 
   /** another slide, by a swipe: in from the side it was swiped from (`dir` 1: the next, from the right — or from below) */
@@ -532,7 +542,7 @@ export class SlideView {
   scroll(dx: number, dy: number): void {
     if (!this.idle) {
       this.armed = this.atEdge(dx, dy);
-      this.swipe = { x: 0, y: 0, x0: this.raw.x, y0: this.raw.y, t0: performance.now(), finger: false, axis: null, pages: false, paged: false };
+      this.swipe = { x: 0, y: 0, x0: this.raw.x, y0: this.raw.y, t0: performance.now(), finger: false, axis: null, pages: false, paged: false, from: null };
     }
     if (!this.steer(dx, dy)) this.pull(dx, dy, 0.4);
     if (this.idle) clearTimeout(this.idle);
@@ -594,8 +604,12 @@ export class SlideView {
     const s = this.swipe;
     this.swipe = null;
     if (!cancelled && v && s?.finger && s.pages && !s.paged) {
-      const d = Math.abs(s.axis === 'y' ? s.y : s.x), fast = performance.now() - s.t0 < 250 && d > 30;
-      if (fast || d >= PAGE_FINGER * (s.axis === 'y' ? v.box.h : v.box.w)) this.turn(s);
+      const dim = s.axis === 'y' ? v.box.h : v.box.w, [lo, hi] = this.ranges(v)[s.axis === 'y' ? 'y' : 'x'];
+      // (past the edge only, when it ran into it; then a flick counts near a fit — the slide's margins, what
+      // is round its content — not zoomed in on a detail, where a quick pan overshoots the edge)
+      const d = Math.abs((s.axis === 'y' ? s.y : s.x) - (s.from ?? 0));
+      const fast = performance.now() - s.t0 < 250 && d > 30 && (!s.from || hi - lo <= dim / 2);
+      if (fast || d >= PAGE_FINGER * dim) this.turn(s);
     }
     if (!v) return;
     const r = this.active(v);

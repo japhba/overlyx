@@ -330,6 +330,40 @@ describe('a swipe sideways turns the page (Safari\'s swipe between pages)', () =
     expect(turned).toEqual([1, -1]);
   });
 
+  it('a finger that pans the slide into its edge and goes on turns the page from there (Fit margins: a little wider than the canvas)', () => {
+    // (0.85: 88 px wider than the canvas — its pan range ±76 px)
+    const { v, turned, free } = make(0.85);
+    for (let i = 0; i < 5; i++) v.panBy(-40, 0);   // a flick: to the edge, and on
+    v.release();
+    expect(turned).toEqual([1]);
+    // slowly, only the way past the edge counts: a little springs back, a sixth of the canvas turns the page
+    const a = make(0.85);
+    a.v.panBy(-50, 0); vi.advanceTimersByTime(400); a.v.panBy(-50, 0); a.v.panBy(-36, 0); a.v.release();
+    expect(a.turned).toEqual([]);
+    const b = make(0.85);
+    b.v.panBy(-50, 0); vi.advanceTimersByTime(400); b.v.panBy(-50, 0); for (let i = 0; i < 5; i++) b.v.panBy(-40, 0); b.v.release();
+    expect(b.turned).toEqual([1]);
+    // the next slide comes in (centred): flicked the other way, the one before
+    b.v.enter(1);
+    for (let i = 0; i < 5; i++) b.v.panBy(40, 0);
+    b.v.release();
+    expect(b.turned).toEqual([1, -1]);
+    expect([...free, ...a.free, ...b.free]).toEqual([]);
+  });
+
+  it('zoomed in on a detail, a quick pan that overshoots the edge does not turn the page; pulled on far enough, it does — never loose', () => {
+    // (1.4: its pan range ±428 px)
+    const q = make(1.4);
+    for (let i = 0; i < 12; i++) q.v.panBy(-40, 0);   // 52 px past the edge, quickly
+    q.v.release();
+    expect(q.turned).toEqual([]);
+    const f = make(1.4);
+    for (let i = 0; i < 20; i++) f.v.panBy(-40, 0);
+    f.v.release();
+    expect(f.turned).toEqual([1]);
+    expect([...q.free, ...f.free]).toEqual([]);
+  });
+
   it('a canceled short flick settles without paging, while a normal lift still pages', () => {
     const { v, turned } = make();
     const home = v.place();
@@ -376,10 +410,11 @@ describe('a swipe sideways turns the page (Safari\'s swipe between pages)', () =
     expect(turned).toEqual([1, -1]);
     v.panBy(0, -20); v.release();   // a short slow nudge: nothing
     expect(turned).toEqual([1, -1]);
-    // zoomed in mid-slide, pulled far past its edge: it pans, then springs back — never loose
+    // zoomed in mid-slide, pulled far on past its edge: it pans, then turns the page (the one before) — never loose
     const z = make(1.4, true, true);
     for (let i = 0; i < 30; i++) z.v.panBy(30, 0);
     z.v.release(); vi.advanceTimersByTime(1000);
+    expect(z.turned).toEqual([-1]);
     expect(z.free).toEqual([]);
     expect(free).toEqual([]);
     // not drawing: up and down pull it loose as ever
