@@ -13,6 +13,7 @@ import { highlightTex, highlightLines } from './texhighlight';
 import { UndoStack, undoRedoKey, applyUndoRedo, applySnapshot, editingKey, matchBrackets, commentMask, type Snapshot } from './codearea';
 import { splitDocId } from '@overlyx/core';
 import { uiConfirm } from './Dialogs';
+import { holdReload } from './update';
 
 type SaveState = 'loading' | 'saved' | 'dirty' | 'saving' | 'conflict' | 'error' | 'readonly';
 const LABEL: Record<SaveState, string> = { loading: 'Loading…', saved: '✓ Saved', dirty: 'Unsaved changes…', saving: 'Saving…', conflict: 'Not saved — changed on the server', error: 'Could not save', readonly: '👁 view only' };
@@ -84,7 +85,9 @@ export function TextEditor({ id, notify }: { id: string; notify: (text: string, 
   useEffect(() => {
     const h = (e: BeforeUnloadEvent) => { if (dirty.current) { e.preventDefault(); e.returnValue = ''; } };
     window.addEventListener('beforeunload', h);
-    return () => window.removeEventListener('beforeunload', h);
+    // (and a reload for a newer build waits until the text is saved — update.ts)
+    const unhold = holdReload(() => dirty.current);
+    return () => { window.removeEventListener('beforeunload', h); unhold(); };
   }, []);
 
   /** the textarea holds new text (typed, undone, pasted): keep it, schedule the save */

@@ -38,6 +38,7 @@ import { scratchOut, scribbleCusps, SCRATCH_HOLD_MS, SCRATCH_HOLD_PX } from '@ov
 import type { StrokeWatch } from '@overlyx/core/glitch.ts';
 import { strokeWatch, strokeEnded } from '../glitches';
 import { shapePoints, INK_SHAPES, type InkShape } from '@overlyx/core';
+import { holdReload } from './update';
 const isShapeTool = (t: string): t is InkShape => (INK_SHAPES as readonly string[]).includes(t);
 
 export interface BoardObj {
@@ -208,7 +209,10 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     };
     provider.awareness.on('change', onAwareness);
     void api.readText(project, path).then(r => setReadOnly(r.role === 'view')).catch(() => {});
+    // (no local copy: a reload for a newer build waits until the server has the board — update.ts)
+    const unhold = holdReload(() => !(provider.wsconnected && provider.synced));
     return () => {
+      unhold();
       objects.unobserve(onObjects);
       provider.awareness.off('change', onAwareness);
       provider.awareness.setLocalState(null);

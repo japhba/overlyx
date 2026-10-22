@@ -152,7 +152,8 @@ export function StatusBar({ layout, markdown, status, chord, message, save, trac
 }) {
   // (after them, `data-statusbar-slot`: an open slide deck's folded slides and notes, DeliverableEditor's portal)
   const start = <><span class="statusbar-corner">{corner}</span><span class="statusbar-slot" data-statusbar-slot /></>;
-  if (quiet) return <div class="statusbar">{start}{message && <span class={'msg ' + message.kind}>{message.text}</span>}<span class="spacer" />{sync}<BuildVersion /></div>;
+  const update = updateReady && <button type="button" class="update-hint" title="A newer version of OverLyX is deployed. Reloading takes a second; your document is kept." onClick={() => location.reload()}>↻ new version — reload</button>;
+  if (quiet) return <div class="statusbar">{start}{message && <span class={'msg ' + message.kind}>{message.text}</span>}<span class="spacer" />{update}{sync}<BuildVersion /></div>;
   return (
     <div class="statusbar">
       {start}
@@ -166,7 +167,7 @@ export function StatusBar({ layout, markdown, status, chord, message, save, trac
       {change && <span class="change-info" title="Tracked change under the cursor (right-click to accept / reject)">{change}</span>}
       {message && <span class={'msg ' + message.kind}>{message.text}</span>}
       <span class="spacer" />
-      {updateReady && <button type="button" class="update-hint" title="A newer version of OverLyX is deployed. Reloading takes a second; your document is kept." onClick={() => location.reload()}>↻ new version — reload</button>}
+      {update}
       {stats && (
         <span class="stats" data-stats title={(stats.sel ? 'Words and characters in the selection' : 'Words and characters in the document')
           + (stats.pages !== undefined ? `, and the pages ${stats.sel ? 'it' : 'they'} would fill at 11pt — estimated for LaTeX's article class on A4 (43 lines of about 70 characters; headings, formulas, figures, tables and the references by the room they take). The PDF decides.` : '')}>

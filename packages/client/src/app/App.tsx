@@ -68,7 +68,7 @@ import { createEditor, moveLocalCopies, type EditorHandle, type SaveState } from
 import { refreshMacros } from '../editor/macrodefs';
 import { describeChange } from '../editor/assembly';
 import { useProjectEvents, deletedHere, siblingDocument } from './FileBrowser';
-import { newerVersionAvailable } from './update';
+import { newerVersionAvailable, reloadHeld } from './update';
 import { generateLyx } from './SourcePane';
 import { editorContext, viewDocId } from '../editor/context';
 import { navHistory, type NavLocation } from './navhistory';
@@ -374,30 +374,35 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   const [changeInfo, setChangeInfo] = useState<string | null>(null);
   const [save, setSave] = useState<SaveState>({ state: 'connecting', pending: false, savedAt: 0, unavailable: false });
   const [reloadKey, setReloadKey] = useState(0);
-  // A newer client build is deployed (checked after every (re)connect, when the tab comes back to
-  // the foreground and every 15 minutes): offer a reload; do it unasked only while the tab is hidden
-  // and nothing is half-done (all edits confirmed by the server, no dialog open).
+  // A newer client build is deployed (checked a few seconds after the start, after every (re)connect
+  // of a document, when the tab comes back to the foreground or online, and every 15 minutes), whatever
+  // the tab shows: offer a reload; do it unasked only while the tab is hidden and nothing is half-done
+  // (the text editor's edits and every other open editor's confirmed, no talk going on — update.ts
+  // holdReload —, no dialog open). Only the text editor's connection used to start the checks, and its
+  // save state to allow the reload: a tab left on slides kept a days-old build — one whose slide show
+  // did not go along with the other screens' (22 Oct 2026).
   const [updateReady, setUpdateReady] = useState(false);
   useEffect(() => {
-    if (!status.connected || updateReady) return;
+    if (updateReady) return;
     let alive = true;
-    const check = () => { void newerVersionAvailable().then(v => { if (alive && v) setUpdateReady(true); }); };
+    const check = () => { if (navigator.onLine !== false) void newerVersionAvailable().then(v => { if (alive && v) setUpdateReady(true); }); };
     const t = setTimeout(check, 3000);
     const iv = setInterval(check, 15 * 60000);
     const onVisible = () => { if (document.visibilityState === 'visible') check(); };
     document.addEventListener('visibilitychange', onVisible);
-    return () => { alive = false; clearTimeout(t); clearInterval(iv); document.removeEventListener('visibilitychange', onVisible); };
+    window.addEventListener('online', check);
+    return () => { alive = false; clearTimeout(t); clearInterval(iv); document.removeEventListener('visibilitychange', onVisible); window.removeEventListener('online', check); };
   }, [status.connected, updateReady]);
   useEffect(() => {
     if (!updateReady) return;
     const quietReload = () => {
-      if (document.visibilityState !== 'hidden' || save.pending || save.state !== 'saved' || document.querySelector('.dialog-backdrop')) return;
+      if (document.visibilityState !== 'hidden' || (isLyxDoc && (save.pending || save.state !== 'saved')) || reloadHeld() || document.querySelector('.dialog-backdrop')) return;
       location.reload();
     };
     quietReload();
     document.addEventListener('visibilitychange', quietReload);
     return () => document.removeEventListener('visibilitychange', quietReload);
-  }, [updateReady, save.pending, save.state]);
+  }, [updateReady, save.pending, save.state, isLyxDoc]);
   const [zoom, setZoom] = useState(Number(localStorage.getItem('ol.zoom') || 1));
   // width of the text column in px (0 = full width), see View ▸ Text width
   const [textWidth, setTextWidth] = useState<number>(() => { const v = Number(localStorage.getItem('ol.textWidth')); return Number.isFinite(v) && localStorage.getItem('ol.textWidth') !== null ? v : 720; });

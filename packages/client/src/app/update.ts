@@ -8,6 +8,21 @@
  */
 let lastCheck = 0;
 
+/**
+ * What an open editor has not had confirmed yet — a deck's or a whiteboard's edits, a text file's, a
+ * presentation going on: the quiet reload for a newer build (App.tsx) waits while any says so. Each
+ * is asked at that moment; the returned function takes it back.
+ */
+const holds = new Set<() => boolean>();
+export function holdReload(pending: () => boolean): () => void {
+  holds.add(pending);
+  return () => { holds.delete(pending); };
+}
+export function reloadHeld(): boolean {
+  for (const f of holds) { try { if (f()) return true; } catch { return true; } }
+  return false;
+}
+
 export async function newerVersionAvailable(opts: { minIntervalMs?: number } = {}): Promise<boolean> {
   if (!import.meta.env.PROD) return false;
   const now = Date.now();

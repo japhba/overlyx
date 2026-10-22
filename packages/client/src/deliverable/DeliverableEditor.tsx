@@ -26,6 +26,7 @@ import type { FromRuntime, ToRuntime, SelItem, SlideBox, Tool, Path, HtmlOp, Del
 import { SlideView, fitScale, viewLevels, viewDetents, levelAt, levelAnchor, VIEW_FIT_NAMES, type ViewFit, type ViewLevels } from './viewport';
 import { pinchFactor, pinchLock, triGesture, type PinchLock } from './gestures';
 import { DetentPinch, stepOnto, type Detent, type Shown } from '../app/zoomdetent';
+import { holdReload } from '../app/update';
 import { zoomPill } from '../app/zoomhud';
 import { CornerButton } from '../app/CornerButton';
 import { keepAwake } from '../app/wakelock';
@@ -2451,6 +2452,9 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   useEffect(() => { if (!presenting && slides[current]) { toCanvas({ ol: 'scrollTo', slide: current }); toRail({ ol: 'current', slide: current }); } }, [presenting]);
   // the screen kept on while presenting (an iPad locks mid-talk): asked for here, as the sandboxed frame may not
   useEffect(() => (presenting ? keepAwake() : undefined), [presenting]);
+  // no reload for a newer build (app/update.ts) mid-talk, nor with edits not yet confirmed
+  const presentingNow = useRef(presenting); presentingNow.current = presenting;
+  useEffect(() => holdReload(() => { const s = host.saveState?.(); return presentingNow.current || (!!s && (s.pending || !!s.localPending || s.state !== 'saved')); }), [host]);
   // presented on other screens too (an iPad and a Mac): their states into the frame as they change; this one's withdrawn as it ends
   useEffect(() => {
     if (!presenting || !host.onPresent) return;
