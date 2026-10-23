@@ -5,7 +5,7 @@
  * could not read, the page's script errors. Measured in the page as rendered, in CSS px relative
  * to the slide.
  */
-import { slides, slideTitle, state, srcOf, isForeign } from './env';
+import { slides, slideTitle, state, srcOf, isForeign, pageHtml } from './env';
 import { mathTypeset } from './math';
 
 export interface PageIssue { kind: 'overflow' | 'offpage' | 'overlap' | 'small-text' | 'contrast' | 'image' | 'math' | 'citation' | 'reference'; text: string; at?: { x: number; y: number; w: number; h: number } }
@@ -231,7 +231,7 @@ function checkScope(scope: Element, frame: DOMRect, kind: 'deck' | 'poster' | 'p
   {
     // (the slide's text as written: its references are typeset away on the page)
     const own = srcOf.get(scope)?.outerHTML ?? (scope === document.body ? raw.html : raw.slides.get(scope) ?? '');
-    const labels = new Set([...(state.html || raw.html).matchAll(/\\label\{([^}]+)\}/g)].map(m => m[1].trim()));
+    const labels = new Set([...(pageHtml() || raw.html).matchAll(/\\label\{([^}]+)\}/g)].map(m => m[1].trim()));
     for (const m of own.matchAll(/\\(?:eq)?ref\{([^}]+)\}/g)) {
       if (labels.has(m[1].trim())) continue;
       issues.push({ kind: 'reference', text: `${m[0]} refers to no equation: no \\label{${m[1].trim()}} on the page` });

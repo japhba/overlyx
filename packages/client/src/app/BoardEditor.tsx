@@ -463,7 +463,7 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
       const drawing = loadDeckInk(), pen = drawing.pens[hl ? 'highlighter' : 'pen'];
       endScratch();
       if (drawing.scribble && !hl) scratchRef.current = { hits: new Set(), rest: { x: e.clientX, y: e.clientY, t: performance.now(), timer: null }, judged: 0 };
-      liveRef.current = { color: pen.color, w: pen.width, nib: { ...drawing.nib }, pressure: e.pointerType === 'pen', ...(hl ? { o: HIGHLIGHT_OPACITY } : {}), pts: [[bx, by, pointPressure(e)]] };
+      liveRef.current = { color: pen.color, w: pen.width, nib: { ...drawing.nib, ...(e.pointerType === 'pen' ? { lift: true } : {}) }, pressure: e.pointerType === 'pen', ...(hl ? { o: HIGHLIGHT_OPACITY } : {}), pts: [[bx, by, pointPressure(e)]] };
       liveT.current = e.timeStamp;
       liveFirst.current = { kind: e.pointerType, p: pointPressure(e) };
       drawingRef.current = { id: e.pointerId, watch: strokeWatch('board', e) };

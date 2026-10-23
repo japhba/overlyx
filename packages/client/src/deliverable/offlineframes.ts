@@ -52,6 +52,10 @@ function folderAsset(value: string, base: string): string | null {
   } catch { return null; }
 }
 
+/** what in the text could name a file (without parsing it): while these stay the same, so do its assets */
+const ASSET_HINTS = /\b(?:src|href|poster|srcset)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)|url\(\s*[^)]*\)|@import[^;]*;/gi;
+const assetHints = (html: string): string => (html.match(ASSET_HINTS) ?? []).join('\n');
+
 function referencedAssets(html: string, base: string, scope = base): string[] {
   const doc = new DOMParser().parseFromString(html, 'text/html'), urls = new Set<string>();
   const suppliedBase = doc.querySelector('base[href]')?.getAttribute('href');
@@ -77,6 +81,8 @@ export function offlineFrames(userId: number, html: () => string, getLink: () =>
   let closed = false;
   let initialized = false;
   let assetKey: string | undefined;
+  /** the text's file names, roughly (assetHints), when its assets were last read from it */
+  let hintKey: string | undefined;
   const resourceListeners = new Set<(assets: AssetUrls) => void>();
   const ownsAccount = () => {
     try { return !closed && JSON.parse(localStorage.getItem('ol.user') ?? 'null')?.id === userId; }
@@ -201,11 +207,14 @@ export function offlineFrames(userId: number, html: () => string, getLink: () =>
       if (!initialized) return;
       // (the text's pictures are read from all of it, parsed again: after a pause, not between the strokes of a word written by hand)
       timer = setTimeout(() => { void prepare().then(async ready => {
-        const source = html(), key = ready.base + '|' + JSON.stringify(referencedAssets(source, ready.folder, ready.base));
-        if (!force && key === assetKey) return;
+        const source = html(), hints = ready.base + '|' + assetHints(source);
+        // (strokes written, words typed: no file named anew, nothing parsed — half a MB on a deck with much ink)
+        if (!force && hints === hintKey) return;
+        const key = ready.base + '|' + JSON.stringify(referencedAssets(source, ready.folder, ready.base));
+        if (!force && key === assetKey) { hintKey = hints; return; }
         const next = await privateAssets(source, ready.folder, ready.base, await publicAssets());
         if (closed || ready.generation !== generation) return;
-        assetKey = key;
+        assetKey = key; hintKey = hints;
         const same = assets && Object.keys(next).length === Object.keys(assets).length && Object.entries(next).every(([url, value]) => assets![url] === value);
         assets = next;
         if (!same) resourceListeners.forEach(callback => callback(next));

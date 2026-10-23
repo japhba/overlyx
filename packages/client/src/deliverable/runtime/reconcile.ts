@@ -10,6 +10,7 @@ import { state, setFolderBase, srcOf, liveOf, link, isForeign, post } from './en
 import { typeset, untypeset } from './math';
 import { renderCites, refreshCites } from './cite';
 import { mapAssets, setMappedAttribute, rememberMappedSource } from '../offlineassets';
+import { patchContainer, type SourcePatch } from '@overlyx/core/html/source.ts';
 
 /** the element being retyped (contenteditable): left alone until that ends */
 export const guard = { editing: null as Element | null };
@@ -56,6 +57,7 @@ export function applySource(html: string, version: number): boolean {
     pairAll(prev);
   }
   state.html = html;
+  state.edits = [];
   state.version = version;
   if (!prev) {
     state.src = next;
@@ -76,6 +78,70 @@ export function applySource(html: string, version: number): boolean {
     if (window.__OL.assetUrls) mapAssets(document.documentElement, window.__OL.assetUrls, document.baseURI);
   }
   // citations at once (their numbers may have changed anywhere), formulas typeset
+  renderCites(added);
+  refreshCites();
+  typesetting = typeset(added.filter(a => a.isConnected));
+  return true;
+}
+
+/**
+ * Take a new version of the text as patches of the one shown (core html/source.ts sourcePatch): only
+ * the container each changes is parsed, in its place — a stroke added to a slide, an object moved on
+ * it — not all of the page (half a MB on a deck with much ink, parsed and compared after every pen
+ * stroke while the next one was being written). False: not patches of this version, or one the page
+ * cannot take so (the editor sends all of the text then).
+ */
+export function applyPatches(base: number, list: SourcePatch[], version: number): boolean {
+  const src = state.src;
+  if (!src || state.version !== base || !list.length) return false;
+  const added: Element[] = [];
+  const edits: { from: number; to: number; html: string }[] = [];
+  for (const p of list) {
+    let box: Element | null = src.documentElement;
+    for (const i of p.path) box = box?.children[i] ?? null;
+    const live = box && liveOf.get(box);
+    if (!box || !live?.isConnected || !patchContainer(box.localName, box.namespaceURI ?? '')) return false;
+    const range = src.createRange();
+    range.selectNodeContents(box);
+    const frag = range.createContextualFragment(p.html);
+    if (p.at === undefined) {
+      // its content anew: compared with what it was, child by child
+      const next = box.cloneNode(false) as Element;
+      next.append(frag);
+      reconcile(live, box, next, added);
+      box.replaceWith(next);
+    } else {
+      // some of its child nodes replaced (none: new ones put in) — the elements that stay what they were
+      // (moved, restyled) brought up to date as they are, the rest out and in: in the page before the next
+      // element of the source there (else after the last one before)
+      const olds = Array.from(box.childNodes).slice(p.at, p.at + (p.count ?? 0));
+      const ref = box.childNodes[p.at + (p.count ?? 0)] ?? null;
+      const nodes = Array.from(frag.childNodes);
+      const oldEls = olds.filter((n): n is Element => n.nodeType === 1), newEls = nodes.filter((n): n is Element => n.nodeType === 1);
+      const lives = oldEls.map(o => liveOf.get(o));
+      if (lives.some(l => l?.parentElement !== live)) return false;
+      box.insertBefore(frag, olds[0] ?? ref);
+      for (const o of olds) o.remove();
+      if (oldEls.length === newEls.length && oldEls.every((o, i) => o.localName === newEls[i].localName)) {
+        oldEls.forEach((o, i) => reconcile(lives[i]!, o, newEls[i], added));
+      } else {
+        for (const l of lives) { untypeset([l!]); l!.remove(); }
+        let after: Element | null = null, before: Element | null = null;
+        for (let n: ChildNode | null = ref; n && !after; n = n.nextSibling) { const l = n.nodeType === 1 ? liveOf.get(n as Element) : undefined; if (l?.parentElement === live) after = l; }
+        for (let n: ChildNode | null = nodes.length ? nodes[0].previousSibling : ref ? ref.previousSibling : box.lastChild; n && !after && !before; n = n.previousSibling) { const l = n.nodeType === 1 ? liveOf.get(n as Element) : undefined; if (l?.parentElement === live) before = l; }
+        for (const n of newEls) {
+          const el = fresh(n);
+          if (after) after.before(el); else if (before) before.after(el); else live.append(el);
+          before = el;
+          added.push(el);
+        }
+      }
+    }
+    // (the text itself made only when asked for, pageHtml: put together after every stroke, half a MB)
+    edits.push({ from: p.from, to: p.to, html: p.html });
+  }
+  state.edits.push(...edits);
+  state.version = version;
   renderCites(added);
   refreshCites();
   typesetting = typeset(added.filter(a => a.isConnected));

@@ -8,7 +8,7 @@
  * was last sent (`version`) and reports what people do on the canvas as operations on that version
  * (core html/source.ts HtmlOp, elements by path) — the editor rebases them onto the current text.
  */
-import type { HtmlOp, Path } from '@overlyx/core/html/source.ts';
+import type { HtmlOp, Path, SourcePatch } from '@overlyx/core/html/source.ts';
 import type { CiteEntry } from '@overlyx/core/html/refs.ts';
 import type { MathJaxMacro } from '@overlyx/core/html/deckextras.ts';
 import type { ReliabilityEvent, ReliabilityPointer } from '@overlyx/core/reliability.ts';
@@ -216,7 +216,8 @@ export interface PeerInfo { paths: Path[]; color: string; name: string; caret?: 
 /** editor → runtime */
 export type ToRuntime =
   | { ol: 'exportSvg'; id: number; except?: string }
-  | { ol: 'source'; version: number; html: string }
+  /** the text at `version`: all of it, or (`patch`) as patches of version `base` (core html/source.ts sourcePatch), which the frame shows now */
+  | { ol: 'source'; version: number; html?: string; patch?: { base: number; list: SourcePatch[] } }
   | { ol: 'assets'; urls: Record<string, string> }
   | { ol: 'folder'; base: string }
   | { ol: 'select'; paths: Path[] }
@@ -374,6 +375,8 @@ export type FromRuntime =
   | { ol: 'goto'; slide: number }
   | { ol: 'exit' }
   | { ol: 'reload' }
+  /** patches came for a version the frame does not show: all of the text, please */
+  | { ol: 'needSource' }
   | { ol: 'pasteFiles'; files: { name: string; type: string; data: ArrayBuffer }[]; slide: Path | null; at: { x: number; y: number } | null }
   | { ol: 'scroll'; y: number }
   /** a pinch or Ctrl+wheel in the frame: zoom by `factor` about a point (frame client px; its document y) */

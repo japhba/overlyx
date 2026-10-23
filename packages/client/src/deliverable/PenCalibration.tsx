@@ -247,7 +247,7 @@ function PenCalibration({ onClose }: { onClose: () => void }) {
 
   const shown = comparing ? saved.nib : nib, shownW = comparing ? pen.width : width;
   const runsOf = (pts: FreePt[], pressure: boolean, whole: boolean, final: boolean) =>
-    inkPaths(inkRuns(pts, { width: shownW, pressure, zoom: 1, coarse: whole && pts.length > 4 ? 1 : false, nib: shown, final }));
+    inkPaths(inkRuns(pts, { width: shownW, pressure, zoom: 1, coarse: whole && pts.length > 4 ? 1 : false, nib: pressure ? { ...shown, lift: true } : shown, final }));
   const drawn = useMemo(() => traces.map(t => runsOf(t.pts, t.pressure, t.whole, true)), [traces, shown, shownW]);
 
   // where the guides sit: centred at the top, as large as they are where there is room

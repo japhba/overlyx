@@ -15,13 +15,13 @@
  * turns true once fonts, math and pictures have settled (the renderer waits for it).
  */
 import { RAIL_NUM, type ToRuntime, type Path, type PeerInfo } from '../protocol';
-import { MODE, post, state, setFolderBase, detectKind, slideBoxes, pageSize, sendLayout, slides, srcOf, pathOf, docRect, isForeign, layoutHooks, liveAt, slideOf } from './env';
+import { MODE, post, state, setFolderBase, detectKind, slideBoxes, pageSize, sendLayout, slides, srcOf, pathOf, docRect, isForeign, layoutHooks, liveAt, slideOf, penBusy, whenPenRests } from './env';
 import { safeColor } from './carets';
 import { inkOn } from '../../app/contrast';
 import { startMath, typesetPage, useCachedMath } from './math';
 import { mapAssets, mappedAttribute, setMappedAttribute } from '../offlineassets';
 import { renderCites, refreshCites, addEntries, CITE_CSS } from './cite';
-import { applySource, whenTypeset } from './reconcile';
+import { applySource, applyPatches, whenTypeset } from './reconcile';
 import * as edit from './edit';
 import { setGuidesShown } from './guides';
 import { weave } from './weave';
@@ -288,15 +288,23 @@ function onMessage(e: MessageEvent): void {
       break;
     case 'source': {
       const first = state.src === null;
-      const ok = applySource(m.html, m.version);
-      if (!ok) return;
+      // (patches of the version shown: only what they change parsed — else all of the text, asked for when not sent)
+      // (inside slides only: the page's colours and the slides' backdrop stay as they were)
+      let inSlides = false;
+      if (m.patch && applyPatches(m.patch.base, m.patch.list, m.version)) inSlides = m.patch.list.every(p => !!slideOf(liveAt(p.path)));
+      else {
+        if (typeof m.html !== 'string') { post({ ol: 'needSource' }); return; }
+        if (!applySource(m.html, m.version)) return;
+      }
       // (the kind as the text has it now: the page first served may have been another version)
       state.kind = detectKind();
       if (MODE === 'edit') { ensureSolo(); edit.afterSource(); void whenTypeset().then(() => edit.draw()); }
       if (MODE === 'thumb') { notePageBackground(); drawRail(); }
       darkSlidesChanged();
       if (first) void settle().then(() => { sendLayout(); if (MODE === 'edit') { refreshView(); reportColors(); } });
-      else requestAnimationFrame(() => { sendLayout(); if (MODE === 'thumb') drawRail(); if (MODE === 'edit') { refreshView(); reportColors(); } });
+      // (a stroke on a slide while the pen writes on: the slides measured again once it rests)
+      else if (inSlides && MODE === 'edit' && penBusy()) whenPenRests(sendLayout);
+      else requestAnimationFrame(() => { sendLayout(); if (MODE === 'thumb') drawRail(); if (MODE === 'edit' && !inSlides) { refreshView(); reportColors(); } });
       break;
     }
     case 'select': if (MODE === 'edit') edit.selectPaths(m.paths as Path[]); break;

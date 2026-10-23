@@ -862,9 +862,16 @@ const SUGGEST_RE = /<meta\s[^>]*name\s*=\s*["']?overlyx-suggesting["']?[^>]*>/i;
 
 /** Suggesting is on for this page: <meta name="overlyx-suggesting" content="on"> (for everyone editing it, as in documents) */
 export function isSuggesting(text: string): boolean {
-  const m = SUGGEST_RE.exec(text);
-  return !!m && !/content\s*=\s*["']?(off|false|no)\b/i.test(m[0]);
+  // (asked of the same text a few times an edit: the whole of it searched once)
+  if (suggestingOf?.text === text) return suggestingOf.on;
+  // (in the head: what comes after it not searched — half a MB on a deck with much ink)
+  const body = text.search(/<body[\s>]/i);
+  const m = SUGGEST_RE.exec(body > 0 ? text.slice(0, body) : text);
+  const on = !!m && !/content\s*=\s*["']?(off|false|no)\b/i.test(m[0]);
+  suggestingOf = { text, on };
+  return on;
 }
+let suggestingOf: { text: string; on: boolean } | null = null;
 
 /** the operation that turns Suggesting on or off (null: it already is) */
 export function suggestingOp(text: string, on: boolean): HtmlOp | null {

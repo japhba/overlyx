@@ -25,7 +25,7 @@
  */
 import type { Path, SelItem, SelStyle, Tool, Rect, HtmlOp, ObjKind, KeyPress, InkStyle, PeerInfo, TextCaret, WordsStyle, ReliabilityEvent, ReliabilityPointer } from '../protocol';
 import { inkOn } from '../../app/contrast';
-import { MODE, post, state, srcOf, link, pathOf, liveAt, sourced, slides, slideOf, docRect, isForeign, sendLayout } from './env';
+import { MODE, post, state, srcOf, link, pathOf, liveAt, sourced, slides, slideOf, docRect, isForeign, sendLayout, penWork } from './env';
 import { mapAssets, restoreMappedAssets } from '../offlineassets';
 import { guard, linkTree } from './reconcile';
 import { typeset } from './math';
@@ -2414,6 +2414,10 @@ let ink: {
   cache: InkCache;
   /** a pen's: its moves and the page's frames a second (app/penrate.ts; the editor tells an iPad held to 60 Hz how to change it) */
   rate: ReturnType<typeof penRateMeter> | null;
+  /** page px → the slide's, as the slide lay when the stroke began (asked at every move, it made the page lay itself out again) */
+  at: (x: number, y: number) => [number, number];
+  /** what its paths were set to last (setInkPaths) */
+  shown: { w: number; d: string }[];
 } | null = null;
 /** strokes drawn and sent to the editor, shown until the page has them (`count`: that many strokes the slide will have then) */
 const sentInk: { svg: SVGSVGElement; slide: HTMLElement | null; count: number; timer: ReturnType<typeof setTimeout> }[] = [];
@@ -2421,7 +2425,7 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 const inkCount = (slide: HTMLElement | null) => (slide ?? document.body).querySelectorAll(':scope > svg.ol-ink:not([data-ol-runtime])').length;
 
 function inkPoint(e: PointerEvent, slide: HTMLElement | null): FreePt {
-  const [x, y] = slide ? slidePoint(slide, e.pageX, e.pageY) : [e.pageX, e.pageY];
+  const [x, y] = ink?.slide === slide ? ink.at(e.pageX, e.pageY) : slide ? slidePoint(slide, e.pageX, e.pageY) : [e.pageX, e.pageY];
   // (a pen's 0: not known — its first and last events; freehand.ts takes the nearest known)
   return [x, y, pointPressure(e)];
 }
@@ -2432,6 +2436,7 @@ const wholePx = (e: PointerEvent) => Number.isInteger(e.clientX) && Number.isInt
 
 function startInk(e: PointerEvent, slide: HTMLElement | null): void {
   dropInk();
+  penWork.down = true;
   const svg = document.createElementNS(SVG_NS, 'svg') as SVGSVGElement;
   svg.setAttribute('data-ol-runtime', '');
   svg.setAttribute('class', 'ol-ink');
@@ -2442,7 +2447,7 @@ function startInk(e: PointerEvent, slide: HTMLElement | null): void {
   for (const [k, v] of Object.entries(inkPaint())) g.setAttribute(k, v);
   svg.append(g);
   (slide ?? document.body).append(svg);
-  ink = { slide, pts: [inkPoint(e, slide)], client: [[e.clientX, e.clientY]], pressure: e.pointerType === 'pen', svg, g, frame: 0, t: e.timeStamp, whole: wholePx(e), k: docScale(slide ?? document.body), kind: e.pointerType, p0: pointPressure(e),
+  ink = { slide, at: slidePlacer(slide), shown: [], pts: [inkPoint(e, slide)], client: [[e.clientX, e.clientY]], pressure: e.pointerType === 'pen', svg, g, frame: 0, t: e.timeStamp, whole: wholePx(e), k: docScale(slide ?? document.body), kind: e.pointerType, p0: pointPressure(e),
     rest: { x: e.clientX, y: e.clientY, t: performance.now(), timer: null }, judged: 0, cands: null, near: null, sampled: new Map(), snapTimer: null, snapped: null, cache: {}, rate: e.pointerType === 'pen' ? penRateMeter(e.timeStamp) : null,
     watch: navigator.maxTouchPoints > 0 ? new StrokeWatch('deck', e.pointerType, { w: innerWidth, h: innerHeight }) : null };
   ink.watch?.add(e.clientX, e.clientY, e.timeStamp, 'down', scrollX, scrollY);
@@ -2598,25 +2603,28 @@ function paintInk(final: boolean): InkRun[] {
 function inkRunsNow(final: boolean, chunk = 0): InkRun[] {
   if (!ink) return [];
   // (whole px are the frame's: 1/k px of the slide; the stabilization is in screen px, scale·k of them a px of the slide)
-  return inkRuns(ink.pts, { width: inkStyle.width, highlighter: inkStyle.opacity < 1, pressure: ink.pressure, zoom: scale * ink.k, coarse: ink.whole && ink.pts.length > 4 ? 1 / ink.k : false, nib: inkStyle.nib, final, chunk, ...(final ? {} : { cache: ink.cache }) });
+  // (a pen's: ink where it pressed, freehand.ts NibOpts.lift)
+  return inkRuns(ink.pts, { width: inkStyle.width, highlighter: inkStyle.opacity < 1, pressure: ink.pressure, zoom: scale * ink.k, coarse: ink.whole && ink.pts.length > 4 ? 1 / ink.k : false, nib: ink.kind === 'pen' ? { ...inkStyle.nib, lift: true } : inkStyle.nib, final, chunk, ...(final ? {} : { cache: ink.cache }) });
 }
-/** the live stroke's paths made these (those that did not change left alone) */
+/** the live stroke's paths made these (those that did not change left alone: compared with what they were last set to, not read back from the page) */
 function setInkPaths(paths: { w: number; d: string }[]): void {
   if (!ink) return;
-  const kids = ink.g.children;
+  const kids = ink.g.children, was = ink.shown;
   paths.forEach((p, i) => {
     let el = kids[i];
-    if (!el) { el = document.createElementNS(SVG_NS, 'path'); ink!.g.append(el); }
-    const w = String(p.w);
-    if (el.getAttribute('d') !== p.d) el.setAttribute('d', p.d);
-    if (el.getAttribute('stroke-width') !== w) el.setAttribute('stroke-width', w);
+    if (!el) { el = document.createElementNS(SVG_NS, 'path'); ink!.g.append(el); was[i] = { w: NaN, d: '' }; }
+    if (was[i].d !== p.d) el.setAttribute('d', p.d);
+    if (was[i].w !== p.w) el.setAttribute('stroke-width', String(p.w));
+    was[i] = p;
   });
   while (kids.length > paths.length) kids[kids.length - 1].remove();
+  was.length = paths.length;
 }
 
 /** the pen lifted: the stroke drawn to its end, sent; it stays shown until the page has it */
 function endInk(e: PointerEvent): void {
   if (!ink) return;
+  penWork.down = false; penWork.at = performance.now();
   if (ink.frame) cancelAnimationFrame(ink.frame);
   // where it lifted, if not where it last was — with the pressure it had (a Pencil lifting reports none)
   const up = inkPoint(e, ink.slide), last = ink.pts[ink.pts.length - 1];
@@ -2671,6 +2679,7 @@ function penPutAway(): void {
 /** the stroke being drawn given up (a second finger, a cancelled pointer) */
 function dropInk(): void {
   if (!ink) return;
+  penWork.down = false; penWork.at = performance.now();
   ink.rate?.end(0);
   if (ink.frame) cancelAnimationFrame(ink.frame);
   if (ink.rest.timer) clearTimeout(ink.rest.timer);
@@ -2814,9 +2823,14 @@ export function containerOf(el: Element): HTMLElement {
 
 /** the slide-local point of a document point (CSS px of the slide) */
 export function slidePoint(slide: HTMLElement, x: number, y: number): [number, number] {
+  return slidePlacer(slide)(x, y);
+}
+/** slidePoint as the slide lies now (null: the page itself) */
+function slidePlacer(slide: HTMLElement | null): (x: number, y: number) => [number, number] {
+  if (!slide) return (x, y) => [x, y];
   const sr = docRect(slide);
-  const k = slide.offsetWidth ? sr.w / slide.offsetWidth : 1;
-  return [(x - sr.x - slide.clientLeft) / k, (y - sr.y - slide.clientTop) / k];
+  const k = slide.offsetWidth ? sr.w / slide.offsetWidth : 1, cl = slide.clientLeft, ct = slide.clientTop;
+  return (x, y) => [(x - sr.x - cl) / k, (y - sr.y - ct) / k];
 }
 
 /* ------------------------------------------------------------------ drawing new objects */

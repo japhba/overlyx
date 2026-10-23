@@ -1002,7 +1002,7 @@ class InkLayer {
       color: pen.color,
       w: ui.drawing.pens[hl ? 'highlighter' : 'pen'].width,
       o: hl ? HIGHLIGHT_OPACITY : undefined,
-      nib: { ...ui.drawing.nib }, pressure: e.pointerType === 'pen',
+      nib: { ...ui.drawing.nib, ...(e.pointerType === 'pen' ? { lift: true } : {}) }, pressure: e.pointerType === 'pen',
       pts: [],
     };
     this.endScratch();

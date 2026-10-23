@@ -116,6 +116,45 @@ describe("Draw's strokes as GoodNotes draws them (runtime/freehand.ts)", () => {
     }
   });
 
+  it("a Pencil's ink (lift): thinning out as it lifts, none where it only grazed, no landing hook, dots whole — the same frame after frame", () => {
+    // pressed at 0.25, landing over 4 points, lifting over the last 5 (moving on), grazing in the middle
+    const pen = (n: number, whole = true): FreePt[] => Array.from({ length: n }, (_, i) => {
+      const x = 40 + i * 1.6 + 6 * Math.sin(i / 6), y = 80 + 10 * Math.sin(i / 4);
+      const p = i === 0 ? 0 : i >= 70 && i < 82 ? 0.01 : Math.min(0.25, 0.04 + 0.06 * i, 0.25 * ((119 - i) / 5) ** 1.5);
+      return [whole ? Math.round(x) : x, whole ? Math.round(y) : y, Math.max(0.005, p)];
+    });
+    for (const nib of [{ lift: true }, { lift: true, ball: true }, { lift: true, sharpness: 0.5, sensitivity: 0.6 }]) for (const chunk of [0, 64]) {
+      const opts = { width: 2.4, pressure: true, coarse: 0.8, zoom: 1.5, nib, chunk };
+      const cache = {};
+      for (let n = 1; n <= 120; n += n < 20 ? 1 : 3) expect(inkRuns(pen(n), { ...opts, cache })).toEqual(inkRuns(pen(n), opts));
+      expect(inkRuns(pen(120), { ...opts, final: true, cache })).toEqual(inkRuns(pen(120), { ...opts, final: true }));
+    }
+    const runs = inkRuns(pen(120), { width: 2.4, pressure: true, coarse: 0.8, zoom: 1.5, nib: { lift: true }, final: true });
+    // the graze: a gap (a run that does not start where the last ended)
+    const gaps = runs.slice(1).filter((r, i) => r.pts[0][0] !== runs[i].pts[runs[i].pts.length - 1][0] || r.pts[0][1] !== runs[i].pts[runs[i].pts.length - 1][1]);
+    expect(gaps.length).toBe(1);
+    const before = inkRuns(pen(120), { width: 2.4, pressure: true, coarse: 0.8, zoom: 1.5, nib: {}, final: true });
+    expect(before.slice(1).every((r, i) => r.pts[0][0] === before[i].pts[before[i].pts.length - 1][0] && r.pts[0][1] === before[i].pts[before[i].pts.length - 1][1])).toBe(true);
+    // thinning out at both ends, full between
+    expect(runs[runs.length - 1].w).toBeLessThan(1.2);
+    expect(runs[0].w).toBeLessThan(1.6);
+    expect(Math.max(...runs.map(r => r.w))).toBeGreaterThan(2.2);
+    // a tap pressed and let go where it stood: a whole dot
+    const tap: FreePt[] = [[10, 10, 0]];
+    for (const p of [0.1, 0.3, 0.2, 0.05]) freshPoint(tap, 0, 1, [10, 10, p]);
+    expect(tap).toEqual([[10, 10, 0.3]]);
+    expect(inkRuns(tap, { width: 2.4, pressure: true, nib: { lift: true }, final: true })[0].w).toBeGreaterThan(2.2);
+    // the pen lifting where it stood: its last pressure is the last one reported
+    const stop: FreePt[] = [[10, 10, 0.2], [12, 10, 0.25]];
+    freshPoint(stop, 0, 1, [12, 10, 0.03]);
+    expect(stop[1][2]).toBe(0.03);
+    // a hook where it landed: skidding 3½ px right and down, then the line up and left (turning back) — gone
+    const hooked: FreePt[] = [[50, 50, 0.2], [51, 51, 0.25], [52, 51, 0.25], [53, 52, 0.25], ...Array.from({ length: 30 }, (_, i): FreePt => [53 - i * 0.6, 51 - i * 1.5, 0.25])];
+    const near = (rs: InkRun[]) => Math.min(...rs.flatMap(r => r.pts.map(q => Math.hypot(q[0] - 50, q[1] - 50))));
+    expect(near(inkRuns(hooked, { width: 2, pressure: true, nib: {}, final: true }))).toBeLessThan(0.5);
+    expect(near(inkRuns(hooked, { width: 2, pressure: true, nib: { lift: true }, final: true }))).toBeGreaterThan(1.5);
+  });
+
   it("keeps the pen's sharp turns sharp (a v's point): a curve through them rounded them", () => {
     // a V from sparse points (6 px apart, as at 60 Hz): on its two arms, not bulging past the point (0.36 px before)
     const arm = (ax: number, ay: number, bx: number, by: number, n: number): FreePt[] => Array.from({ length: n }, (_, i) => [ax + (bx - ax) * i / n, ay + (by - ay) * i / n, 0.5]);

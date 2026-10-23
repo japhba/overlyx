@@ -24,23 +24,247 @@ export interface SourceDoc { text: string; doc: HDocument }
 /**
  * The last texts parsed: an edit asks for the same text's tree several times (the speaker notes, the
  * review, the margins, the edit itself) — a deck with much ink is half a MB, ~50 ms a parse, and each
- * pen stroke parsed it ten times. Trees are only read, never changed. Let go of after a while: a big
- * page's tree is many MB.
+ * pen stroke parsed it ten times. Trees are only read, never changed. Let go of after a while (a big
+ * page's tree is many MB), the last one later: the next edit's tree is made from it (sourcePatch).
  */
 const parsed: SourceDoc[] = [];
+/** texts known to follow from a parsed one by a patch (sourcePatch): their trees made from that one's */
+const derivable: { prev: SourceDoc; patch: SourcePatch; next: string }[] = [];
 let forgetParsed: ReturnType<typeof setTimeout> | null = null;
+const PARSE_OPTS = { sourceCodeLocationInfo: true, scriptingEnabled: false } as const;
+
+function remember(src: SourceDoc): void {
+  parsed.unshift(src);
+  if (parsed.length > 3) parsed.length = 3;
+  if (forgetParsed) clearTimeout(forgetParsed);
+  forgetParsed = setTimeout(() => {
+    parsed.length = Math.min(parsed.length, 1); derivable.length = 0;
+    forgetParsed = setTimeout(() => { parsed.length = 0; forgetParsed = null; }, 300000);
+    (forgetParsed as { unref?: () => void }).unref?.();
+  }, 10000);
+  (forgetParsed as { unref?: () => void }).unref?.();
+}
 
 /** The text parsed with source locations — as a browser's DOMParser would (scripting off: <noscript> parses as markup). */
 export function parseSource(text: string): SourceDoc {
   const known = parsed.find(p => p.text === text);
   if (known) return known;
-  const src = { text, doc: parse(text, { sourceCodeLocationInfo: true, scriptingEnabled: false }) };
-  parsed.unshift(src);
-  if (parsed.length > 3) parsed.length = 3;
-  if (forgetParsed) clearTimeout(forgetParsed);
-  forgetParsed = setTimeout(() => { parsed.length = 0; forgetParsed = null; }, 10000);
-  (forgetParsed as { unref?: () => void }).unref?.();
+  const d = derivable.find(x => x.next === text);
+  let doc: HDocument | null = null;
+  // (the patch's own text where it says: else parsed after all)
+  if (d && text.startsWith(d.patch.html, d.patch.from)) { try { doc = derivedDoc(d.prev, d.patch, text.length - d.prev.text.length); } catch { doc = null; } }
+  const src = { text, doc: doc ?? parse(text, PARSE_OPTS) };
+  remember(src);
   return src;
+}
+
+/* ------------------------------------------------------------------ patches */
+
+/**
+ * An edit of the text inside one element (a stroke added to a slide, an object moved on it): that
+ * element's `path`, the stretch of the old text replaced (`from`–`to`) and what came instead (`html`)
+ * — the element's whole content, or (`at`) `count` of its child nodes from the `at`-th on (none: new
+ * ones put in before that one). The frames bring their page up to date with it instead of parsing all
+ * of the new text, and parseSource makes the new text's tree from the old one's (what came in parsed
+ * in the element's place, the rest kept): a pen stroke on a deck with much ink parsed half a MB twice.
+ */
+export interface SourcePatch { path: Path; from: number; to: number; html: string; at?: number; count?: number }
+
+/**
+ * Elements whose content parses the same on its own (in their place) as within the page: the parser
+ * ends them only at their end tag, whatever comes inside — not a <p> (a <div> in it ends it), a
+ * table's parts, a list item, an inline element. HTML ones only.
+ */
+const CONTAINERS = new Set(['section', 'div', 'main', 'article', 'aside', 'header', 'footer', 'nav', 'figure']);
+const HTML_NS = 'http://www.w3.org/1999/xhtml';
+const SCRIPT = /<\/?script\b/i;
+export const patchContainer = (tagName: string, namespaceURI: string): boolean => namespaceURI === HTML_NS && CONTAINERS.has(tagName);
+
+/**
+ * How `next` follows from `prev` as a SourcePatch — from the splices that made it, else from the one
+ * stretch where they differ — or null: prev's tree not at hand (nothing is parsed here), or the change
+ * not within one container's content (a <script> in or out: the frames load the page again). Kept, so
+ * that parseSource(next) makes its tree from prev's.
+ */
+export function sourcePatch(prev: string, next: string, splices?: readonly Splice[]): SourcePatch | null {
+  if (prev === next) return null;
+  const src = parsed.find(p => p.text === prev) ?? (derivable.some(x => x.next === prev) ? parseSource(prev) : null);
+  if (!src) return null;
+  const delta = next.length - prev.length;
+  let change: Splice;
+  if (splices?.length) {
+    const s = [...splices].sort((a, b) => a.from - b.from);
+    if (s.reduce((n, x) => n + x.insert.length - (x.to - x.from), 0) !== delta) return null;
+    const from = s[0].from, to = Math.max(...s.map(x => x.to));
+    change = s.length === 1 ? s[0] : { from, to, insert: next.slice(from, to + delta) };
+  } else change = changedStretch(prev, next);
+  // (a script in or out: the frames load the page again)
+  if (SCRIPT.test(change.insert) || SCRIPT.test(prev.slice(change.from, change.to))) return null;
+  // (new nodes among a container's children where the change can be put so; else that container's content)
+  let best: SourcePatch | null = null;
+  for (const c of splices?.length ? [change] : alignments(prev, change)) { best = patchAt(src, c, false); if (best) break; }
+  best ??= patchAt(src, change, true);
+  if (best) { derivable.unshift({ prev: src, patch: best, next }); if (derivable.length > 3) derivable.length = 3; }
+  return best;
+}
+
+/** the one stretch where two texts differ (their common start and end compared a KB at a time first) */
+function changedStretch(a: string, b: string): Splice {
+  const m = Math.min(a.length, b.length);
+  let p = 0;
+  while (p + 1024 <= m && a.slice(p, p + 1024) === b.slice(p, p + 1024)) p += 1024;
+  while (p < m && a.charCodeAt(p) === b.charCodeAt(p)) p++;
+  let s = 0;
+  while (s + 1024 <= m - p && a.slice(a.length - s - 1024, a.length - s) === b.slice(b.length - s - 1024, b.length - s)) s += 1024;
+  while (s < m - p && a.charCodeAt(a.length - 1 - s) === b.charCodeAt(b.length - 1 - s)) s++;
+  return { from: p, to: a.length - s, insert: b.slice(p, b.length - s) };
+}
+
+/**
+ * The same change put elsewhere: text put in (or taken out) where the same characters come before or
+ * after it could as well have gone a few places on — `</svg>\n  <svg …></svg>\n  ` added after a stroke
+ * is also `<svg …></svg>\n  </svg>\n  ` added inside it. A place between two elements is looked for.
+ */
+function alignments(text: string, c: Splice): Splice[] {
+  const out = [c];
+  const ins = c.from === c.to, del = !c.insert;
+  if (ins === del) return out;
+  const MAX = 96;
+  if (ins) {
+    let x = c.insert, f = c.from;
+    for (let k = 0; k < MAX && f > 0 && text[f - 1] === x[x.length - 1]; k++) { x = text[f - 1] + x.slice(0, -1); f--; out.push({ from: f, to: f, insert: x }); }
+    x = c.insert; f = c.from;
+    for (let k = 0; k < MAX && f < text.length && text[f] === x[0]; k++) { x = x.slice(1) + text[f]; f++; out.push({ from: f, to: f, insert: x }); }
+  } else {
+    const n = c.to - c.from;
+    for (let f = c.from, k = 0; k < MAX && f > 0 && text[f - 1] === text[f - 1 + n]; k++) { f--; out.push({ from: f, to: f + n, insert: '' }); }
+    for (let f = c.from, k = 0; k < MAX && f + n < text.length && text[f] === text[f + n]; k++) { f++; out.push({ from: f, to: f + n, insert: '' }); }
+  }
+  return out;
+}
+
+/** the patch of the change `c` of src's text: the deepest container holding it, new nodes among its children where they can be (else, `whole`, its content) */
+function patchAt(src: SourceDoc, c: Splice, whole: boolean): SourcePatch | null {
+  let el = htmlElement(src.doc);
+  if (!el) return null;
+  let box: HElement | null = null, boxPath: Path = [];
+  const path: Path = [];
+  for (;;) {
+    const kids = elementChildren(el);
+    let found = -1;
+    for (let i = 0; i < kids.length; i++) {
+      const loc = kids[i].sourceCodeLocation;
+      if (!loc?.startTag || !loc.endTag) continue;
+      if (loc.startOffset > c.from) break;
+      if (loc.startTag.endOffset <= c.from && c.to <= loc.endTag.startOffset) { found = i; break; }
+    }
+    if (found < 0) break;
+    el = kids[found];
+    path.push(found);
+    if (patchContainer(el.tagName, el.namespaceURI)) { box = el; boxPath = [...path]; }
+  }
+  if (!box) return null;
+  const loc = box.sourceCodeLocation!, from = loc.startTag!.endOffset, to = loc.endTag!.startOffset;
+  if (SCRIPT.test(c.insert)) return null;
+  // the container's child nodes the change touches (none: it goes in between two), widened over the text
+  // beside them — what comes in is then joined with nothing beside it —, each ended where it ends
+  const kids = box.childNodes as HNode[];
+  if (kids.every(k => k.sourceCodeLocation)) {
+    const start = (k: HNode) => k.sourceCodeLocation!.startOffset, end = (k: HNode) => k.sourceCodeLocation!.endOffset;
+    let a = 0;
+    while (a < kids.length && end(kids[a]) <= c.from && !(c.from === c.to && end(kids[a]) === c.from && start(kids[a]) === c.from)) a++;
+    let b = a;
+    while (b < kids.length && (start(kids[b]) < c.to || (b === a && start(kids[b]) < c.from))) b++;
+    if (a > 0 && kids[a - 1].nodeName === '#text') a--;
+    if (b < kids.length && kids[b].nodeName === '#text') b++;
+    const sFrom = a < b ? start(kids[a]) : c.from, sTo = a < b ? end(kids[b - 1]) : c.from;
+    // (one left open before the stretch, or at its end: what follows would go into it)
+    const open = (k: HNode | undefined) => !!k && isElement(k) && !k.sourceCodeLocation?.endTag && !VOID.has(k.tagName);
+    if (sFrom <= c.from && c.to <= sTo && !open(kids[a - 1]) && !open(kids[b - 1])) {
+      const old = src.text.slice(sFrom, sTo);
+      const html = old.slice(0, c.from - sFrom) + c.insert + old.slice(c.to - sFrom);
+      const fr = parseFragment(box, html, PARSE_OPTS) as unknown as { childNodes: HNode[] };
+      if (!SCRIPT.test(old) && !open(fr.childNodes[fr.childNodes.length - 1])) return { path: boxPath, from: sFrom, to: sTo, html, at: a, count: b - a };
+    }
+  }
+  if (!whole) return null;
+  const old = src.text.slice(from, to);
+  if (SCRIPT.test(old)) return null;
+  return { path: boxPath, from, to, html: old.slice(0, c.from - from) + c.insert + old.slice(c.to - from) };
+}
+
+/**
+ * The tree of the text after the patch, made from the tree before: the container's content (or the
+ * nodes put among it) parsed in its place, every other node the same with its place in the text moved
+ * on past the change. (Built anew — the old tree stays as it was: it may still be in use.)
+ */
+function derivedDoc(prev: SourceDoc, p: SourcePatch, delta: number): HDocument {
+  const box = elementAt(prev.doc, p.path);
+  if (!box || !patchContainer(box.tagName, box.namespaceURI)) throw new Error('no such container');
+  const frag = parseFragment(box, p.html, PARSE_OPTS) as unknown as { childNodes: HNode[] };
+  const { from, to } = p;
+  const copy = (x: HNode, parent: unknown): HNode => {
+    const y = { ...x, parentNode: parent } as HNode & { childNodes?: HNode[]; content?: HNode };
+    const l = x.sourceCodeLocation;
+    if (l) (y as { sourceCodeLocation?: unknown }).sourceCodeLocation = movedLoc(l as Loc, from, to, delta);
+    if (x === box) {
+      const added = frag.childNodes.map(n => fresh(n, y, from));
+      const old = box.childNodes as HNode[], n = p.count ?? 0;
+      y.childNodes = p.at === undefined ? added : [...old.slice(0, p.at).map(k => copy(k, y)), ...added, ...old.slice(p.at + n).map(k => copy(k, y))];
+    } else if ('childNodes' in x) y.childNodes = (x.childNodes as HNode[]).map(k => copy(k, y));
+    if ('content' in x && x.content) y.content = copy(x.content as unknown as HNode, null);
+    return y;
+  };
+  // (the new nodes: their places in the parsed content moved to where it is)
+  const fresh = (x: HNode, parent: unknown, by: number): HNode => {
+    const y = x as HNode & { parentNode: unknown; childNodes?: HNode[]; content?: HNode };
+    y.parentNode = parent;
+    if (x.sourceCodeLocation) (y as { sourceCodeLocation?: unknown }).sourceCodeLocation = movedLoc(x.sourceCodeLocation as Loc, -1, -1, by);
+    if (y.childNodes) for (const k of y.childNodes) fresh(k, y, by);
+    if (y.content) fresh(y.content, null, by);
+    return y;
+  };
+  const doc = { ...prev.doc } as HDocument;
+  doc.childNodes = (prev.doc.childNodes as HNode[]).map(k => copy(k, doc)) as HDocument['childNodes'];
+  return doc;
+}
+
+interface Loc { startOffset: number; endOffset: number; startLine: number; startCol: number; endLine: number; endCol: number; startTag?: Loc; endTag?: Loc; attrs?: Record<string, Loc> }
+
+/**
+ * A place in the text after a change of [from, to) by `d` characters: where it starts moves when it
+ * starts at or after the change's end, where it ends when it ends after the change's start (lines and
+ * columns are not kept up: nothing reads them). Wholly after the change: an attribute's place is
+ * worked out once asked for (MovedLoc).
+ */
+function movedLoc(l: Loc, from: number, to: number, d: number): Loc {
+  if (l.endOffset <= from) return l;
+  if (l.startOffset >= to) return new MovedLoc(l, d);
+  const out: Loc = { ...l, startOffset: l.startOffset >= to ? l.startOffset + d : l.startOffset, endOffset: l.endOffset > from ? l.endOffset + d : l.endOffset };
+  if (l.startTag) out.startTag = movedLoc(l.startTag, from, to, d);
+  if (l.endTag) out.endTag = movedLoc(l.endTag, from, to, d);
+  if (l.attrs) out.attrs = Object.fromEntries(Object.entries(l.attrs).map(([k, a]) => [k, movedLoc(a, from, to, d)]));
+  return out;
+}
+
+class MovedLoc implements Loc {
+  startOffset: number; endOffset: number; startLine: number; startCol: number; endLine: number; endCol: number;
+  startTag?: Loc; endTag?: Loc;
+  /** the attributes' places before any move, and by how much they all moved since */
+  #attrs: Record<string, Loc> | undefined; #by: number; #moved: Record<string, Loc> | undefined;
+  constructor(l: Loc, d: number) {
+    this.startOffset = l.startOffset + d; this.endOffset = l.endOffset + d;
+    this.startLine = l.startLine; this.startCol = l.startCol; this.endLine = l.endLine; this.endCol = l.endCol;
+    if (l.startTag) this.startTag = new MovedLoc(l.startTag, d);
+    if (l.endTag) this.endTag = new MovedLoc(l.endTag, d);
+    if (l instanceof MovedLoc) { this.#attrs = l.#attrs; this.#by = l.#by + d; }
+    else { this.#attrs = l.attrs; this.#by = d; }
+  }
+  get attrs(): Record<string, Loc> | undefined {
+    if (!this.#attrs) return undefined;
+    if (!this.#moved) { const by = this.#by; this.#moved = Object.fromEntries(Object.entries(this.#attrs).map(([k, a]) => [k, { ...a, startOffset: a.startOffset + by, endOffset: a.endOffset + by }])); }
+    return this.#moved;
+  }
 }
 
 export const isElement = (n: HNode): n is HElement => 'tagName' in n;

@@ -42,9 +42,17 @@ export const state = {
   /** the source the page shows now (the editor's text at `version`), parsed */
   src: null as Document | null,
   version: null as number | null,
+  /** its text: as it came, and the patches since (applyPatches) — pageHtml */
   html: '',
+  edits: [] as { from: number; to: number; html: string }[],
   kind: 'page' as DeliverableKind,
 };
+
+/** the text of the page shown now */
+export function pageHtml(): string {
+  if (state.edits.length) { for (const e of state.edits) state.html = state.html.slice(0, e.from) + e.html + state.html.slice(e.to); state.edits = []; }
+  return state.html;
+}
 
 /** Renew the document folder while preserving an authored HTML base element. */
 export function setFolderBase(folder: string): void {
@@ -71,6 +79,33 @@ export const liveOf = new WeakMap<Element, Element>();
 export function link(live: Element, src: Element): void {
   srcOf.set(live, src);
   liveOf.set(src, live);
+}
+
+/**
+ * Draw's pen at work (edit.ts): a stroke being drawn, or one ended a moment ago. What can wait after a
+ * stroke came back into the page (measuring every slide again for the editor) waits until it rests:
+ * on an iPad's Safari, moves the page is too busy to take are lost — the next letter's loop came out
+ * as a straight line.
+ */
+export const penWork = { down: false, at: -1e9 };
+const PEN_REST_MS = 800;
+export const penBusy = (): boolean => penWork.down || performance.now() - penWork.at < PEN_REST_MS;
+const resting = new Set<() => void>();
+let restTimer: ReturnType<typeof setTimeout> | null = null;
+/** `f` once the pen rests (now, when it does); the same `f` asked for twice, once */
+export function whenPenRests(f: () => void): void {
+  if (!penBusy()) { f(); return; }
+  resting.add(f);
+  if (!restTimer) armRest();
+}
+function armRest(): void {
+  restTimer = setTimeout(() => {
+    restTimer = null;
+    if (penBusy()) { armRest(); return; }
+    const fs = [...resting];
+    resting.clear();
+    for (const f of fs) f();
+  }, Math.max(50, PEN_REST_MS - (performance.now() - penWork.at)));
 }
 
 /** the path of a source element (indices among element children from <html>) */

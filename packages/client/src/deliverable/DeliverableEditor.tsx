@@ -58,7 +58,7 @@ import { activeMathField } from '../editor/lyxmath/field';
 import { mathReady } from '../editor/lyxmath/mathjax';
 import { setLayoutMathFont } from '../fonts/editorfont';
 import { useMathPanels } from '../app/toolbars';
-import { parseSource, opSplices, elementAt, elementChildren, attr, parseStyle } from '@overlyx/core/html/source.ts';
+import { parseSource, opSplices, elementAt, elementChildren, attr, parseStyle, sourcePatch, type SourcePatch } from '@overlyx/core/html/source.ts';
 import { reviewOps, resolveOps, resolveAll, reviewOf, isSuggesting, suggestingOp, stampOf, threadsOp, parseThreads, newThreadId, describe as describeObject, COMMENTS, type ReviewChange, type ReviewThread, type Thread } from '@overlyx/core/html/review.ts';
 import { deliverableInfo, slideElements } from '@overlyx/core/html/deliverable.ts';
 import { formatTimestamp } from '@overlyx/core';
@@ -122,12 +122,14 @@ async function naturalSize(data: Blob): Promise<{ w: number; h: number } | null>
 
 type Notify = (text: string, kind?: 'info' | 'error') => void;
 
-/** the value once it has stayed for `ms` (the first at once) */
-function useSettled<T>(v: T, ms: number): T {
+/** the value once it has stayed for `ms` (the first at once) — and, while `busy` says so, not before that is over */
+function useSettled<T>(v: T, ms: number, busy?: () => boolean): T {
   const [settled, setSettled] = useState(v);
   useEffect(() => {
     if (v === settled) return;
-    const t = setTimeout(() => setSettled(v), ms);
+    let t: ReturnType<typeof setTimeout>;
+    const done = () => { if (busy?.()) t = setTimeout(done, ms); else setSettled(v); };
+    t = setTimeout(done, ms);
     return () => clearTimeout(t);
   }, [v]);
   return settled;
@@ -215,8 +217,8 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   /** Suggesting: a setting of the page (its <meta>), for everyone editing it, as in documents */
   const suggesting = useMemo(() => isSuggesting(textNow), [textNow]);
   const review = useMemo(() => reviewOf(textNow), [textNow]);
-  /** the text once it has stayed a second: what can wait while it is being changed (the layout margins, parsed from all of it) */
-  const settledText = useSettled(textNow, 1000);
+  /** the text once it has stayed a second, and the pen a while: what can wait while it is being changed (the layout margins, from all of it) */
+  const settledText = useSettled(textNow, 1000, () => performance.now() - lastInkAt.current < 2500);
   const [showIns, setShowIns] = useState(() => loadFlag('ol.deckShowIns', true));
   const [showDel, setShowDel] = useState(() => loadFlag('ol.deckShowDel', true));
   const [reviewOpen, setReviewOpenState] = useState(() => loadFlag('ol.reviewPane', false));
@@ -589,7 +591,14 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   useEffect(() => {
     if (!host.bibliography) return;
     let t: ReturnType<typeof setTimeout> | null = null;
+    let scanned = -1;
     const sync = () => {
+      // (new citations only: versions whose patches put none in need no search of all of the text)
+      const v = version.current;
+      let none = scanned >= 0;
+      for (let k = scanned + 1; none && k <= v; k++) { const p = patches.current.get(k); if (!p || /cite/i.test(p.html)) none = false; }
+      scanned = v;
+      if (none) return;
       const keys = citedKeys(text.toString()).filter(k => !bibAsked.current.has(k));
       if (!keys.length) return;
       for (const k of keys) bibAsked.current.add(k);
@@ -611,24 +620,57 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   /* ------------------------------------------------------------- versions to the frames */
 
   const sendTimer = useRef<{ canvas: ReturnType<typeof setTimeout> | null; rail: ReturnType<typeof setTimeout> | null }>({ canvas: null, rail: null });
-  /** when the last pen stroke came: while one follows another, the rail's thumbnail waits (the whole page parsed again in its frame, every stroke) */
+  /** when the last pen stroke came: while one follows another, the rail's thumbnail waits */
   const lastInkAt = useRef(-1e9);
+  /**
+   * each version as a patch of the one before (core sourcePatch; null: not one), while kept: a frame
+   * shown a version a few before takes these instead of all of the text — a stroke added to a slide is
+   * that slide's new element parsed in the frame, not the whole page (half a MB on a deck with much ink)
+   */
+  const patches = useRef(new Map<number, SourcePatch | null>());
+  /** the version each frame was sent last */
+  const sentTo = useRef({ canvas: -1, rail: -1 });
+  /** the splices of the last edit made here and the text they were made on: its patch from them (else from the two texts) */
+  const lastSplices = useRef<{ before: string; splices: { from: number; to: number; insert: string }[] } | null>(null);
+  /** the text at the latest version for a frame: as patches of the one it was sent last, when they all are */
+  const sourceMsg = (frame: 'canvas' | 'rail'): ToRuntime => {
+    const v = version.current, base = sentTo.current[frame];
+    sentTo.current[frame] = v;
+    const list: SourcePatch[] = [];
+    if (base >= 0 && base < v && v - base <= 40) for (let k = base + 1; k <= v; k++) { const p = patches.current.get(k); if (!p) { list.length = 0; break; } list.push(p); }
+    return list.length ? { ol: 'source', version: v, patch: { base, list } } : { ol: 'source', version: v, html: versions.current.get(v) ?? text.toString() };
+  };
+  /** a render once the pen has rested a moment (strokes following one another) */
+  const inkRender = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rerenderSoon = () => {
+    if (inkRender.current) clearTimeout(inkRender.current);
+    const wait = () => { inkRender.current = performance.now() - lastInkAt.current < 800 ? setTimeout(wait, 200) : null; if (!inkRender.current) rerender(); };
+    inkRender.current = setTimeout(wait, 200);
+  };
+  useEffect(() => () => { if (inkRender.current) clearTimeout(inkRender.current); }, []);
   const sendSource = (now = false) => {
-    const html = text.toString();
+    const html = host.text();
+    const before = versions.current.get(version.current);
     const v = ++version.current;
     versions.current.set(v, html);
-    for (const k of versions.current.keys()) if (k < v - 40) versions.current.delete(k);
+    const made = lastSplices.current;
+    lastSplices.current = null;
+    let patch: SourcePatch | null = null;
+    if (before !== undefined && before !== html) { try { patch = sourcePatch(before, html, made && made.before === before ? made.splices : undefined); } catch { patch = null; } }
+    patches.current.set(v, patch);
+    for (const k of versions.current.keys()) if (k < v - 40) { versions.current.delete(k); patches.current.delete(k); }
     const t = sendTimer.current;
     if (t.canvas) clearTimeout(t.canvas);
-    const toC = () => { t.canvas = null; if (canvasReady.current) toCanvas({ ol: 'source', version: v, html }); };
+    const toC = () => { t.canvas = null; if (canvasReady.current) toCanvas(sourceMsg('canvas')); };
     if (now) toC(); else t.canvas = setTimeout(toC, 40);
     if (t.rail) clearTimeout(t.rail);
-    t.rail = setTimeout(() => { t.rail = null; if (railReady.current) toRail({ ol: 'source', version: v, html: text.toString() }); }, performance.now() - lastInkAt.current < 1500 ? 1500 : 350);
+    t.rail = setTimeout(() => { t.rail = null; if (railReady.current) toRail(sourceMsg('rail')); }, performance.now() - lastInkAt.current < 1500 ? 1500 : 350);
   };
 
   useEffect(() => {
     const offs = [
-      host.onChange(origin => { sendSource(origin === 'canvas'); codeSync(origin); rerender(); }),
+      // (strokes following one another: the editor's own panels brought up to date once the pen rests — the frames have them at once)
+      host.onChange(origin => { sendSource(origin === 'canvas'); codeSync(origin); if (origin === 'canvas' && performance.now() - lastInkAt.current < 800) rerenderSoon(); else rerender(); }),
       host.onStatus(() => setOnline(host.online())),
       host.onReady(() => { setSynced(true); sendSource(true); }),
       host.onPeers(peers => { peersRef.current = peers; toCanvas({ ol: 'peers', peers }); toRail({ ol: 'peers', peers }); }),
@@ -645,7 +687,9 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   /** splices of the text, as one undo step */
   const applySplices = (splices: { from: number; to: number; insert: string }[], origin: 'canvas' | 'code' = 'canvas', separateUndo = origin === 'canvas') => {
     if (readOnlyRef.current || !splices.length) return;
+    lastSplices.current = { before: host.text(), splices };
     host.apply(splices, origin, separateUndo);
+    lastSplices.current = null;
   };
 
   /** who and when, while suggesting (null: edits are direct) */
@@ -905,7 +949,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
             toCanvas({ ol: 'dark', invert: darkRef.current.invert, figures: darkRef.current.figures, desk: null });
             toCanvas(reviewMsgRef.current());
             if (objOpenRef.current) toCanvas({ ol: 'objects', on: true });
-            if (host.ready()) toCanvas({ ol: 'source', version: version.current, html: versions.current.get(version.current) ?? text.toString() });
+            if (host.ready()) { sentTo.current.canvas = -1; toCanvas(sourceMsg('canvas')); }
             setDeckMacros(macroTableOf(m.macros ?? {}));
             if (bibKnown.current.size) toCanvas({ ol: 'bib', entries: [...bibKnown.current.values()] });
             if (peersRef.current.length) toCanvas({ ol: 'peers', peers: peersRef.current });
@@ -913,7 +957,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
             railReady.current = true;
             if (bibKnown.current.size) toRail({ ol: 'bib', entries: [...bibKnown.current.values()] });
             toRail({ ol: 'scale', scale: railScale });
-            if (host.ready()) toRail({ ol: 'source', version: version.current, html: text.toString() });
+            if (host.ready()) { sentTo.current.rail = -1; toRail(sourceMsg('rail')); }
             toRail({ ol: 'current', slide: currentRef.current });
             toRail({ ol: 'dark', invert: darkRef.current.invert, figures: darkRef.current.figures, desk: railColor() });
             if (peersRef.current.length) toRail({ ol: 'peers', peers: peersRef.current });
@@ -1063,6 +1107,10 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
         case 'cropping': if (fromCanvas) setCropping(m.path); break;
         case 'editSvg': if (fromCanvas) { const rel = svgOf(m.src); if (rel) editSvgPicture(rel); } break;
         case 'scroll': if (fromCanvas) { scrollRef.current = m.y; setScrollY(m.y); } break;
+        case 'needSource':
+          if (fromCanvas && canvasReady.current) { sentTo.current.canvas = -1; toCanvas(sourceMsg('canvas')); }
+          else if (fromRail && railReady.current) { sentTo.current.rail = -1; toRail(sourceMsg('rail')); }
+          break;
         case 'reload': {
           canvasReady.current = canvasReady.current && !fromCanvas; if (fromRail) railReady.current = false;
           if (fromCanvas) setCanvasState('opening');

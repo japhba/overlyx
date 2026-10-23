@@ -79,7 +79,7 @@ export interface PenHabits { scribble: boolean; fingersDraw: boolean; pencil: bo
 
 export function PenSettings({ nib, color, width, habits, onChange, onHabits, onClose }: { nib: Nib; color: string; width: number; habits: PenHabits; onChange: (p: Partial<Nib>) => void; onHabits: (p: Partial<PenHabits>) => void; onClose?: () => void }) {
   const w = Math.max(1.5, Math.min(7, width * 1.1));
-  const paths = inkPaths(inkRuns(SAMPLE, { width: w, pressure: true, nib, final: true }));
+  const paths = inkPaths(inkRuns(SAMPLE, { width: w, pressure: true, nib: { ...nib, lift: true }, final: true }));
   const off = (p: Partial<Nib>) => Object.entries(p).every(([k, v]) => nib[k as keyof Nib] === v);
   return (
     <div class="ink-pick pen-set" data-pen-settings>

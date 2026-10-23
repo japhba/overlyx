@@ -60,7 +60,15 @@ export function webHost(id: string, user: User): DeliverableHost & { destroy(): 
   let persistence: IndexeddbPersistence | null = null;
   const handlers = (provider as unknown as { messageHandlers: ((enc: unknown, dec: decoding.Decoder, ...context: unknown[]) => void)[] }).messageHandlers;
   const text = ydoc.getText('html');
-  const frames = offlineFrames(user.id, () => text.toString(), () => api.deliverableLink(project, path));
+  // the text as one string for each version of it, not made anew at every ask: on a deck with much ink
+  // it is half a MB, asked for many times an edit — and two equal copies compared as strings (a memo's
+  // inputs) went through it a character at a time (while a change is being made: made each time)
+  let shown: string | null = null, changing = false;
+  ydoc.on('beforeTransaction', () => { changing = true; });
+  ydoc.on('beforeObserverCalls', () => { changing = false; });
+  text.observe(() => { shown = null; });
+  const textNow = () => (changing ? text.toString() : (shown ??= text.toString()));
+  const frames = offlineFrames(user.id, textNow, () => api.deliverableLink(project, path));
   const warmFrames = () => frames.changed();
   text.observe(warmFrames);
   const undo = new Y.UndoManager(text, { trackedOrigins: new Set(['canvas', 'code', 'agent']), captureTimeout: 600 });
@@ -263,7 +271,7 @@ export function webHost(id: string, user: User): DeliverableHost & { destroy(): 
     docId: id,
     author: () => user.name || user.username,
     bibliography: async keys => (keys.length ? (await api.bibKeys(id, keys)).entries : []),
-    text: () => text.toString(),
+    text: textNow,
     apply(splices: Splice[], origin, separateUndo = false) {
       if (readOnly || stale || !splices.length) return;
       if (separateUndo) undo.stopCapturing();
