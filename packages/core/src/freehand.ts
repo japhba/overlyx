@@ -41,6 +41,10 @@ export interface NibOpts {
    * before it: without.
    */
   lift?: boolean;
+  /** how far (screen px) the pressure is smoothed for the width (the pen lab's) — else as far as the line is, at least 1.2 px */
+  pressSmooth?: number;
+  /** (`lift`) the ink against the pressure, as a part of the stroke's strongest so far: none below `liftLo`, full from `liftHi` (the pen lab's; else 0.12 and 0.42) */
+  liftLo?: number; liftHi?: number;
 }
 
 export interface FreeOpts {
@@ -146,14 +150,15 @@ export function inkRuns(input: FreePt[], o: FreeOpts): InkRun[] {
   const coarse = !!o.coarse && round > 0;
   const sq = coarse ? COARSE_SIGMA * unit : 0, ss = (clamp01(nib.stabilization ?? 0) * STAB_PX) / zoom;
   const sigma = Math.hypot(sq, ss);
-  const sp = Math.max(1.2, 2.5 * sigma) / h;
+  const sp = (nib.pressSmooth !== undefined && Number.isFinite(nib.pressSmooth) ? Math.max(0.3, nib.pressSmooth) / zoom : Math.max(1.2, 2.5 * sigma)) / h;
   const chunk = o.chunk && o.chunk > 1 ? Math.floor(o.chunk) : 0;
   const n = s.x.length;
   // a stroke being drawn (`cache`): what the last call made of the samples is kept as far as they are the
   // same and far enough from the end not to feel the new ones (the smoothing's reach) — the same result
   // as worked out afresh, in a time that does not grow with the stroke
   const inked = lift && !dot;
-  const key = [w, sens, sharp, flat, usual, round, h, sigma, coarse && !ss ? unit : 0, chunk, o.final ? 1 : 0, inked ? zoom : 0].join(' ');
+  const liftLo = clamp01(nib.liftLo ?? LIFT_LO), liftHi = Math.max(liftLo + 0.02, Math.min(1, nib.liftHi ?? LIFT_HI));
+  const key = [w, sens, sharp, flat, usual, round, h, sigma, sp, coarse && !ss ? unit : 0, chunk, o.final ? 1 : 0, inked ? zoom : 0, liftLo, liftHi].join(' ');
   const kept = o.cache?.kept && o.cache.kept.key === key ? o.cache.kept : null;
   let m = 0;
   if (kept) {
@@ -182,7 +187,7 @@ export function inkRuns(input: FreePt[], o: FreeOpts): InkRun[] {
     const floor = LIFT_FLOOR * usual;
     for (let i = m; i < n; i++) {
       top[i] = Math.max(i ? top[i - 1] : floor, lq[i]);
-      const r = Math.max(0, Math.min(1, (lq[i] / top[i] - LIFT_LO) / (LIFT_HI - LIFT_LO)));
+      const r = Math.max(0, Math.min(1, (lq[i] / top[i] - liftLo) / (liftHi - liftLo)));
       // (a ball pen's line stays even: there or not)
       ink[i] = nib.ball ? (r > 0.15 ? 1 : 0) : r * r * (3 - 2 * r);
     }

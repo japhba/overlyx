@@ -259,6 +259,8 @@ export const api = {
   clientError: (data: { message: string; stack?: string | null }) => req<{ id: number | null }>('POST', '/api/client-error', data),
   /** a display glitch the app noticed (glitches.ts; measurements and fixed words only, core glitch.ts) */
   clientGlitch: (data: { kind: string; fields: Record<string, string | number>; trail: string[] }) => req<{ id: number | null }>('POST', '/api/client-glitch', data),
+  /** the pen lab's answers (PenLab.tsx; server feedback.ts): the settings compared and what was chosen, the writing if ticked */
+  inkLab: (data: Record<string, unknown>) => req<{ id: number }>('POST', '/api/ink-lab', data),
   accountDeletion: () => req<DeletionPreview>('GET', '/api/account/deletion'),
   /** administrators: problem reports, error records, mail to privacy@ / contact@ (server feedback.ts) */
   adminReports: (kind?: string) => req<{ reports: AdminReport[] }>('GET', `/api/admin/reports${kind ? `?kind=${encodeURIComponent(kind)}` : ''}`),

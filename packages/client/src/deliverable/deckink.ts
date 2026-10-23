@@ -52,6 +52,9 @@ const KEY = 'ol.deckInk';
  */
 export const DEFAULT_NIB: Nib = { ball: false, sharpness: 0, sensitivity: 0.25, flatness: 0, stabilization: 0, rounding: 0.3, usual: 0.25 };
 const NIB_LEVELS = ['sharpness', 'sensitivity', 'flatness', 'stabilization', 'rounding', 'usual'] as const;
+const LAB_LEVELS = ['pressSmooth', 'liftLo', 'liftHi'] as const;
+/** the pen lab's settings left unsaid (a reset: the engine's own again) */
+export const NO_LAB: Pick<Nib, 'pressSmooth' | 'liftLo' | 'liftHi'> = { pressSmooth: undefined, liftLo: undefined, liftHi: undefined };
 const isLevel = (v: unknown): v is number => typeof v === 'number' && v >= 0 && v <= 1;
 
 /** a pen's settings with `p` taken over (each level kept between 0 and 1) */
@@ -61,6 +64,13 @@ function nibWith(n: Nib, p: Partial<Nib> | undefined): Nib {
   if (typeof p.ball === 'boolean') out.ball = p.ball;
   for (const k of NIB_LEVELS) if (isLevel(p[k])) out[k] = Math.round(p[k]! * 100) / 100;
   out.usual = Math.max(0.05, Math.min(0.95, out.usual));
+  // (the pen lab's: given as undefined, back to the engine's own)
+  for (const k of LAB_LEVELS) {
+    if (!(k in p)) continue;
+    const v = p[k];
+    if (typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= (k === 'pressSmooth' ? 50 : 1)) out[k] = Math.round(v * 100) / 100;
+    else delete out[k];
+  }
   return out;
 }
 

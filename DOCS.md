@@ -510,6 +510,8 @@ blend.
   document ink, math pad). A report has measurements and fixed words only (the server's
   `glitchReport` drops anything else) and the last 16 kinds of input before it (`down pen canvas`,
   `focus math below`, `keyboard up` …); the first four repeats add their measurements to the row.
+  The pen lab's answers, when a person sends them (`POST /api/ink-lab`, kind `ink-lab`, see *Find
+  your ink*), are kept a year, numbers and fixed words only (`core/inklab.ts` `inkLabReport`).
   `sudo overlyx-telemetry reports` lists them. The no-account VS Code extension uses its own narrow,
   IP-rate-limited `/api/vscode-telemetry` receiver for errors when both VS Code telemetry and
   `overlyx.errorReports` are enabled. VS Code sanitizes the exception first; only extension/VS Code
@@ -766,7 +768,27 @@ blend.
     the pen (points a second, whole px or not, coalesced or not, pressure range, `usualPressure` = the
     median, which sets `usual` until set by hand) and Save writes `nib` through `saveDeckInk`, so
     slides, boards and documents' margins follow. Docs' and boards' strokes keep the `nib` they were
-    drawn with, so a change applies to new strokes only. It is drawn by the
+    drawn with, so a change applies to new strokes only. **Find your ink** (the pen settings, the
+    calibration's header, or `/?penlab`; `PenLab.tsx`, 23 Oct 2026) finds the ink by comparing: the
+    user writes a line once (points, times, tilt kept in `ol.penLab`), then picks between two inks of
+    it (A much better … B much better, either or both horrible; hold a panel to see the other ink in
+    its place, Replay writes it again at its pace). The inks are points of `core/inklab.ts`
+    `LAB_DIMS` — pressure, its smoothing (`nib.pressSmooth`), where the ink breaks off and is full
+    (`liftLo`/`liftHi`, relative to the stroke's strongest pressure), pointed ends, flat nib,
+    smoothing, rounding, each scaled to [0, 1] and capped where small handwriting loses its shape —
+    and what is asked comes from `core/prefgp.ts`: a preference Gaussian process (ordinal probit for
+    the five answers, "horrible" a threshold, a latent bias for the top panel; Laplace by Newton in
+    the answers' space; kernel length by evidence), first the `LAB_KINDS` against the best so far,
+    then the incumbent against the challenger of largest EUBO, every fourth a Thompson draw, every
+    fourth the best of the second or third region against its neighbours, two pairs asked again the
+    other way round; pairs that look alike on a small canvas (< 5 % of the ink differs) are not
+    shown. Favourites: one per hill of the posterior mean (hill–valley test) within 1 of the best.
+    *Use this ink* writes the three lab fields into `nib` (Reset in the pen settings removes them,
+    `NO_LAB`). *Send* posts the answers (and the writing if ticked) to `POST /api/ink-lab` (report
+    kind `ink-lab`, kept a year; read with `sudo overlyx-telemetry report <id>`); a curator's answers
+    pasted into `inklab.ts` `CURATED` become everyone's prior and veto (settings horrible to them
+    more likely than not are never shown). `scratch/labrender.mts` draws settings on GoodNotes
+    centre lines of the tea_taste handwriting offline. It is drawn by the
     browser's stroker as runs of one width (steps of 2½ %, round caps and joins, each starting where
     the last ended), one `<path>` per width (`inkPaths`) — perfect-freehand's filled outline (before)
     straightened each stroke's first px, made its outline of chords as long as the pen is wide and

@@ -16,7 +16,8 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { appleTablet } from '../app/penrate';
 import { HZ120_STEPS } from '../app/promotion';
 import type { Nib } from './protocol';
-import { DECK_INK_WIDTH_CHOICES, DEFAULT_NIB, loadDeckInk, patchDeckInk, saveDeckInk, type DeckInkPatch } from './deckink';
+import { DECK_INK_WIDTH_CHOICES, DEFAULT_NIB, NO_LAB, loadDeckInk, patchDeckInk, saveDeckInk, type DeckInkPatch } from './deckink';
+import { openPenLab } from './PenLab';
 import { freshPoint, inkPaths, inkRuns, usualPressure, type FreePt } from './runtime/freehand';
 import { NibLevels, rungStyle } from './PenSettings';
 import { pointPressure, pressed, watchForce } from './runtime/pressure';
@@ -320,7 +321,8 @@ function PenCalibration({ onClose }: { onClose: () => void }) {
     // the width in place of the preset in use (as clicking the selected width again does); the pen in hand stays
     const cur = loadDeckInk(), p = cur.pens.pen, idx = p.widths.indexOf(p.width);
     const w: DeckInkPatch = width === p.width ? {} : p.widths.includes(width) || idx < 0 ? { width } : { slotWidth: { idx, width } };
-    saveDeckInk({ ...patchDeckInk(cur, { pen: 'pen', nib, ...w }), pen: cur.pen });
+    // (the pen lab's settings as they are here: reset, they go)
+    saveDeckInk({ ...patchDeckInk(cur, { pen: 'pen', nib: { ...NO_LAB, ...nib }, ...w }), pen: cur.pen });
     onClose();
   };
   const changed = width !== pen.width || (Object.keys(nib) as (keyof Nib)[]).some(k => nib[k] !== saved.nib[k]);
@@ -333,6 +335,8 @@ function PenCalibration({ onClose }: { onClose: () => void }) {
           <div class="pen-cal-title">Pen calibration</div>
           <div class="pen-cal-sub">Trace the pale strokes as they are drawn, or write anything. Change the settings: your strokes and the pale ones are redrawn with them.</div>
         </div>
+        <button type="button" class="btn" data-pen-cal-lab title="Write a line once, then pick the better of two inks again and again: the ink you like is found from your choices"
+          onClick={() => { onClose(); openPenLab(traces.map(t => ({ pts: t.pts, pressure: t.pressure, whole: t.whole }))); }}>Find your ink…</button>
         <button type="button" class="btn" data-pen-cal-replay onClick={() => setPlayed(p => p + 1)}>Replay</button>
         <button type="button" class="btn" data-pen-cal-undo disabled={!traces.length} onClick={() => setTraces(ts => ts.slice(0, -1))}>Undo</button>
         <button type="button" class="btn" data-pen-cal-clear disabled={!traces.length} onClick={() => setTraces([])}>Clear</button>

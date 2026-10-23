@@ -9,6 +9,10 @@
  *   POST /api/client-glitch  a display glitch the app noticed on a touch screen (client glitches.ts):
  *                            measurements and fixed words only (core glitch.ts), kind `client-glitch`,
  *                            one row per kind of glitch; the first repeats' measurements are added
+ *   POST /api/ink-lab        the pen lab's answers (client PenLab.tsx), sent by the person: the ink
+ *                            settings compared and what was chosen, the points of the line they wrote
+ *                            there only if ticked — numbers and fixed words only (core inklab.ts inkLabReport), kind
+ *                            `ink-lab`, one row a sending; kept a year
  *   POST /api/vscode-telemetry  a sanitized extension error, accepted without a web-app session
  *                            (the extension obeys VS Code's telemetry setting; this route is
  *                            separately rate-limited and accepts only a fixed diagnostic schema)
@@ -29,6 +33,7 @@ import { db } from './db.ts';
 import { config, REPO_ROOT } from './config.ts';
 import { notifyOwner } from './mailer.ts';
 import { glitchReport } from '@overlyx/core/glitch.ts';
+import { inkLabReport } from '@overlyx/core/inklab.ts';
 
 // error_reports held the GitHub issue of each distinct error, from when reports were issues
 db.exec(`DROP TABLE IF EXISTS error_reports;
@@ -154,9 +159,9 @@ export function reportServerError(err: unknown): void {
 /** Error reports not seen for `days` are forgotten (startup housekeeping); people's own reports stay until their account goes. */
 export function pruneReports(days = 90): number {
   const day = 24 * 60 * 60 * 1000;
-  // mail to privacy@ / contact@ (inbox.ts) is kept a year — long enough to answer a request and keep its record
-  return db.prepare("DELETE FROM reports WHERE kind NOT IN ('feedback', 'mail') AND last_at < ?").run(Date.now() - days * day).changes
-    + db.prepare("DELETE FROM reports WHERE kind = 'mail' AND last_at < ?").run(Date.now() - 365 * day).changes;
+  // mail to privacy@ / contact@ (inbox.ts) is kept a year — long enough to answer a request and keep its record; the pen lab's answers as long, for the pens to learn from
+  return db.prepare("DELETE FROM reports WHERE kind NOT IN ('feedback', 'mail', 'ink-lab') AND last_at < ?").run(Date.now() - days * day).changes
+    + db.prepare("DELETE FROM reports WHERE kind IN ('mail', 'ink-lab') AND last_at < ?").run(Date.now() - 365 * day).changes;
 }
 
 /** Reports and mail for the administrators' list (newest first). */
@@ -177,7 +182,7 @@ export function storeMail(m: { from: string; fromName: string; to: string[]; sub
 
 /** An account is deleted: its reports go, its link to error reports is cut. */
 export function forgetUserReports(userId: number): void {
-  db.prepare("DELETE FROM reports WHERE kind = 'feedback' AND user_id = ?").run(userId);
+  db.prepare("DELETE FROM reports WHERE kind IN ('feedback', 'ink-lab') AND user_id = ?").run(userId);
   db.prepare('UPDATE reports SET user_id = NULL WHERE user_id = ?').run(userId);
 }
 
@@ -214,6 +219,16 @@ export function feedbackRoutes(): express.Router {
     if (!config.errorReports) { res.status(204).end(); return; }
     if (!allow('client-error', 60) || !allow(`client-error:${u.id}`, 20)) { res.status(429).json({ error: 'rate limited' }); return; }
     const id = reportError({ kind: 'client-error', message: clean(b.message, 1000), stack: b.stack ? clean(b.stack, 4000) : null, userAgent: req.get('user-agent') ?? '', who: { id: u.id, name: u.name, username: u.username } });
+    res.json({ id });
+  });
+  r.post('/ink-lab', (req, res) => {
+    const u = req.user!;
+    const lab = inkLabReport(req.body);
+    if (!lab) { res.status(400).json({ error: 'not the pen lab\'s answers' }); return; }
+    if (!allow(`ink-lab:${u.id}`, 10)) { res.status(429).json({ error: 'That is a lot of sending for one hour — please try again later.' }); return; }
+    const now = Date.now();
+    const id = Number(insertReport.run({ kind: 'ink-lab', hash: null, title: lab.title, body: lab.body, user_id: u.id, version: appVersion, user_agent: clean(req.get('user-agent') ?? '', 300) || null, now }).lastInsertRowid);
+    console.log(`[ink-lab] report #${id}: ${lab.title}`);
     res.json({ id });
   });
   r.post('/client-glitch', (req, res) => {

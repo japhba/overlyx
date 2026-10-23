@@ -1334,6 +1334,46 @@ html.ol-inking, html.ol-inking * { -webkit-user-select: none !important; user-se
   .pen-cal-side .pen-set-levels { max-width: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); column-gap: 18px; }
   .pen-cal-side .pen-set-kind { grid-column: 1 / -1; max-width: 300px; }
 }
+/* the pen lab (PenLab.tsx): a sample written once, then two inks of it at a time */
+.pen-lab { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; }
+.pen-lab-write, .pen-lab-main { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; padding: 12px 16px; gap: 10px; }
+.pen-lab-note, .pen-lab-hint { color: var(--ui-muted); font-size: 12.5px; line-height: 1.45; max-width: 760px; }
+.pen-lab-pad { position: relative; flex: 0 0 auto; height: min(56vh, 400px); border-radius: 6px; background: #fdfdfb; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18); touch-action: none; cursor: crosshair; overflow: hidden; }
+.pen-lab-pad > svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.pen-lab-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.pen-lab-bar .btn, .pen-lab-answers .btn, .pen-lab-send .btn, .pen-lab-fav .btn { font: 13px var(--ui-font); color: var(--ui-fg); }
+.pen-lab .btn.primary { color: #fff; }
+.pen-lab .btn:disabled { opacity: 0.45; }
+.pen-lab-pair { display: flex; flex-direction: column; gap: 10px; flex: 1 1 auto; min-height: 0; }
+.pen-lab-pair.busy { opacity: 0.55; }
+.pen-lab-panel { position: relative; flex: 1 1 0; min-height: 60px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 18px 10px 10px; border-radius: 6px;
+  background: #fdfdfb; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18); touch-action: none; overflow: hidden; }
+.pen-lab-panel.bad { box-shadow: 0 0 0 2px #e5484d; }
+.pen-lab-panel.held { box-shadow: 0 0 0 2px var(--accent); }
+.pen-lab-ink { display: block; width: 100%; height: auto; max-height: 100%; overflow: visible; }
+.pen-lab-tag { position: absolute; left: 8px; top: 6px; font: 600 12px var(--ui-font); color: #9aa1ad; }
+.pen-lab-panel.held .pen-lab-tag { color: var(--accent); }
+.pen-lab-details { align-self: stretch; margin-top: 6px; color: #6b7280; font: 11px/1.4 var(--ui-font); }
+.pen-lab-answers { display: flex; flex-direction: column; gap: 6px; flex: 0 0 auto; }
+.pen-lab-grades { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.pen-lab-grade { min-height: 44px; padding: 4px 6px; }
+.pen-lab-grade.same { background: var(--ui-hover, rgba(127, 127, 127, 0.1)); }
+.pen-lab-flags { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.pen-lab-flag { min-height: 36px; }
+.pen-lab-flag.on { border-color: #e5484d; color: #e5484d; background: color-mix(in srgb, #e5484d 10%, transparent); }
+.pen-lab-flags .pen-set-check { margin: 0 0 0 8px; }
+.pen-lab-best { color: var(--ui-muted); font-size: 12px; }
+.pen-lab-settled { padding: 8px 10px; border-radius: 6px; background: color-mix(in srgb, var(--accent) 10%, transparent); font-size: 13px; }
+.pen-lab-widths { display: inline-flex; gap: 2px; margin-right: 6px; }
+.pen-lab-w { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--ui-fg); cursor: pointer; }
+.pen-lab-w.on { border-color: var(--accent); color: var(--accent); }
+.pen-lab-results { gap: 14px; }
+.pen-lab-fav { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 6px; background: #fdfdfb; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18); color: #202124; }
+.pen-lab-fav-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; }
+.pen-lab-fav-head .btn { margin-left: auto; }
+.pen-lab-send { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; font-size: 13px; }
+.pen-lab-status { margin: 0 16px 12px; padding: 8px 10px; border-radius: 6px; background: var(--ui-hover, rgba(127, 127, 127, 0.1)); font-size: 13px; }
+@media (max-width: 720px) { .pen-lab-grades { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 /* Draw's eraser and lasso settings (deliverable/DrawSettings.tsx) */
 .eraser-sizes { display: flex; gap: 6px; align-items: center; }
 .eraser-size { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; padding: 0; border: 1px solid var(--ui-border); border-radius: 6px; background: none; cursor: pointer; }

@@ -3,12 +3,14 @@
  * pen, the fountain pen's tip sharpness, pressure sensitivity and tip flatness, and the stroke
  * stabilization and rounding of either — with a stroke drawn as they make it (runtime/freehand.ts, as
  * on the slide) — and the way to the pen calibration (PenCalibration.tsx), where the pen's own strokes
- * show them. Kept in this browser with the pen's colours and widths (deckink.ts).
+ * show them, and to the pen lab (PenLab.tsx), where the ink is found by comparing. Kept in this browser
+ * with the pen's colours and widths (deckink.ts).
  */
 import type { Nib } from './protocol';
-import { DEFAULT_NIB } from './deckink';
+import { DEFAULT_NIB, NO_LAB } from './deckink';
 import { inkRuns, inkPaths, type FreePt } from './runtime/freehand';
 import { openPenCalibration } from './PenCalibration';
+import { openPenLab } from './PenLab';
 
 /** the preview's stroke: a loop and a wave, pressed lightly at either end and harder in the middle */
 const SAMPLE: FreePt[] = Array.from({ length: 241 }, (_, i) => {
@@ -89,6 +91,9 @@ export function PenSettings({ nib, color, width, habits, onChange, onHabits, onC
       <NibLevels nib={nib} onChange={onChange} />
       <button type="button" class="pen-set-calibrate" data-pen-calibrate onMouseDown={e => e.preventDefault()} onClick={() => { onClose?.(); openPenCalibration(); }}
         title="A page to trace a few strokes with your pen while you change these settings, which also measures your pen's pressure">Calibrate with your pen…</button>
+      <button type="button" class="pen-set-calibrate" data-pen-lab-open onMouseDown={e => e.preventDefault()} onClick={() => { onClose?.(); openPenLab(); }}
+        title="Write a line once, then pick the better of two inks again and again: the ink you like is found from your choices">Find your ink by comparing…</button>
+      {nib.pressSmooth !== undefined && <div class="pen-set-note">An ink found by comparing is in use (Reset goes back to the plain settings).</div>}
       <label class="pen-set-check" title="Scribble tightly back and forth over strokes to erase them: what it would erase fades as you scribble, and goes when the pen lifts (lifted away from it, nothing goes; resting the pen at the end makes a short scribble count). Undo brings the strokes back, with the scribble as ink. A scribble over nothing stays.">
         <input type="checkbox" checked={habits.scribble} data-pen-scribble onChange={e => onHabits({ scribble: (e.target as HTMLInputElement).checked })} /> Scribble to erase
       </label>
@@ -107,7 +112,7 @@ export function PenSettings({ nib, color, width, habits, onChange, onHabits, onC
       )}
       <div class="ink-pick-foot">
         {/* (the usual pressure is the hand's, measured: kept) */}
-        <button type="button" class="pen-set-reset" data-pen-reset disabled={off({ ...DEFAULT_NIB, usual: nib.usual })} onMouseDown={e => e.preventDefault()} onClick={() => onChange({ ...DEFAULT_NIB, usual: nib.usual })}>Reset</button>
+        <button type="button" class="pen-set-reset" data-pen-reset disabled={off({ ...DEFAULT_NIB, ...NO_LAB, usual: nib.usual })} onMouseDown={e => e.preventDefault()} onClick={() => onChange({ ...DEFAULT_NIB, ...NO_LAB, usual: nib.usual })}>Reset</button>
         <span class="ink-pick-hint">for this browser's pen</span>
       </div>
     </div>

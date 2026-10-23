@@ -35,7 +35,11 @@ export type Tool = 'select' | 'lasso' | 'text' | 'rect' | 'roundrect' | 'ellipse
  * from one reported point to the next) of either; the pressure the hand usually writes with (measured by
  * the pen calibration, PenCalibration.tsx). runtime/freehand.ts.
  */
-export interface Nib { ball: boolean; sharpness: number; sensitivity: number; flatness: number; stabilization: number; rounding: number; usual: number }
+export interface Nib {
+  ball: boolean; sharpness: number; sensitivity: number; flatness: number; stabilization: number; rounding: number; usual: number;
+  /** found in the pen lab (PenLab.tsx; freehand.ts NibOpts): the pressure's smoothing (screen px), where the ink breaks off and is full (parts of the stroke's strongest pressure) — else the engine's own */
+  pressSmooth?: number; liftLo?: number; liftHi?: number;
+}
 
 export interface InkStyle {
   color: string; width: number; opacity: number;

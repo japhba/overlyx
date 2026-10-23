@@ -17,6 +17,8 @@ import 'prosemirror-gapcursor/style/gapcursor.css';
 import 'prosemirror-tables/style/tables.css';
 
 render(<App />, document.getElementById('app')!);
+// the pen lab straight away (an address with ?penlab: a link to send, or to keep on an iPad's home screen)
+if (new URLSearchParams(location.search).has('penlab')) void import('./deliverable/PenLab').then(m => m.openPenLab());
 initUsage();   // anonymous usage statistics (usage.ts): the session, screen changes, flushing on leave
 initZoomLock();   // the page never zooms, its views do (zoomlock.ts)
 initGlitchWatch();   // on a touch screen: the interface scrolled out of place, strokes that jump (glitches.ts)
