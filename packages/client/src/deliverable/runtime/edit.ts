@@ -2561,7 +2561,8 @@ function scratchTargets(hold: boolean): Element[] {
   // took long enough, a moment into every stroke, to make the line stall under the pen)
   if (!ink.cands && !scribbleCusps(ink.client, { zoom: scale, width: inkStyle.width, hold })) return [];
   // (the strokes near it, looked for again once it goes beyond where they were: scratchOut's reach is the
-  // width and 4 px on screen past the scribble's box, a margin of 64 px holds that)
+  // width and 4 px on screen past the scribble's box, and the dots and tails of what it erases around
+  // that — a letter or so —, a margin of 64 px holds that)
   const b = ptsBox(ink.client), reach = 64 + inkStyle.width * Math.max(1, scale) + 4 / scale, n = ink.near;
   if (!ink.cands || !n || b.x - reach < n.x || b.y - reach < n.y || b.x + b.w + reach > n.x + n.w || b.y + b.h + reach > n.y + n.h) {
     ink.near = { x: b.x - 2 * reach, y: b.y - 2 * reach, w: b.w + 4 * reach, h: b.h + 4 * reach };

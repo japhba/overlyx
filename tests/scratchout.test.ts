@@ -5,6 +5,8 @@ import { scratchOut, scribbleCusps, type Pt } from '../packages/core/src/scratch
 const pts = (f: (t: number) => Pt, n = 400) => Array.from({ length: n + 1 }, (_, i) => f(i / n));
 /** a zig-zag over x0..x1 between y0 and y1, `legs` legs */
 const zigzag = (x0: number, x1: number, y0: number, y1: number, legs: number) => pts(t => [x0 + (x1 - x0) * t, y0 + (y1 - y0) * Math.abs(((t * legs) % 2) - 1)]);
+/** straight through these points, 30 points a leg */
+const through = (...way: Pt[]) => way.slice(1).flatMap((b, i) => pts(t => [way[i][0] + (b[0] - way[i][0]) * t, way[i][1] + (b[1] - way[i][1]) * t], 30));
 /** a handwritten word in x 0..100, y 0..24: letters as small strokes (c, l, o, an i and its dot, a t and its bar) */
 const word: Pt[][] = [
   pts(t => [10 - 8 * Math.cos(Math.PI * (0.25 + 1.5 * t)), 16 - 8 * Math.sin(Math.PI * (0.25 + 1.5 * t))], 40),   // c
@@ -33,6 +35,25 @@ describe('scratch-out', () => {
     expect(scratchOut(zigzag(20, 60, 18, 40, 12), [underline])).toBeNull();
   });
 
+  it('a quick hand: loose legs, few samples, kept to the middle of the word, thin loops, a flat Z', () => {
+    const all = [0, 1, 2, 3, 4, 5, 6];
+    // eight legs over the word (each ~2.7 × as long as it advances), four points a leg (60 Hz)
+    expect(scratchOut(zigzag(-4, 104, -6, 28, 8).filter((_, i) => i % 12 === 0), word)?.sort((a, b) => a - b)).toEqual(all);
+    // back and forth through the middle of the word: the l's and t's tops, the i's dot and the t's bar go too
+    const strike = pts(t => [-4 + 108 * (1 - Math.abs(((t * 6) % 2) - 1)), 13 + 6 * t]);
+    expect(scratchOut(strike, word)?.sort((a, b) => a - b)).toEqual(all);
+    // thin loops, the pen turning the same way at each end
+    const loops = pts(t => { const a = t * 6 * Math.PI; return [50 + 54 * Math.tanh(2 * Math.sin(a)) / Math.tanh(2), 15 + 3 * Math.cos(a) + 2 * t]; });
+    expect(scratchOut(loops, word)?.sort((a, b) => a - b)).toEqual(all);
+    // three long legs, a Z flattened over the word
+    expect(scratchOut(through([-4, 10], [104, 13], [-4, 17], [104, 20]), word)?.length).toBe(7);
+  });
+
+  it('a circle drawn round a word, a z written over it: they stay', () => {
+    expect(scratchOut(pts(t => [50 + 62 * Math.cos(t * 4.4 * Math.PI), 13 + 22 * Math.sin(t * 4.4 * Math.PI)]), word)).toBeNull();
+    expect(scratchOut(through([30, 6], [52, 6], [30, 22], [52, 22]), word)).toBeNull();
+  });
+
   it('a long stroke it only partly covers stays; lifting the pen far away cancels it', () => {
     const underline = pts(t => [-20 + 300 * t, 30], 100);
     expect(scratchOut(zigzag(-4, 104, -6, 34, 16), [...word, underline])).not.toContain(7);
@@ -58,12 +79,14 @@ describe('scratch-out', () => {
     expect(scribbleCusps(pts(t => [t * 60, 30 * Math.abs(((t * 8) % 2) - 1)]))).not.toBeNull();
     expect(scribbleCusps(pts(t => [80 * Math.abs(((t * 4) % 2) - 1), 50 + t * 6]))).not.toBeNull();
     expect(scribbleCusps(pts(t => { const a = t * Math.PI * 6; return [40 + 40 * Math.tanh(4 * Math.sin(a)) / Math.tanh(4), 50 + 4 * Math.cos(a) + t * 10]; }))).not.toBeNull();
-    // writing: an m (its arches as wide as high), a v v v (legs at ±55°), loops (e e e), a straight line, three legs, a circle round and round, an s
+    // three legs, long for how little they advance (a flat Z)
+    expect(scribbleCusps(pts(t => [60 * Math.abs(((t * 3) % 2) - 1), t * 20]))).not.toBeNull();
+    // writing: an m (its arches as wide as high), a v v v (legs at ±55°), loops (e e e), a straight line, three legs as tall as wide (a Z), a circle round and round, an s
     expect(scribbleCusps(pts(t => { const u = t * 6, k = Math.min(5, Math.floor(u)), a = Math.PI * (u - k); return [k * 30 + 15 - 15 * Math.cos(a), 40 - 30 * Math.sin(a)]; }))).toBeNull();
     expect(scribbleCusps(pts(t => [t * 90, 30 * Math.abs(((t * 5) % 2) - 1)]))).toBeNull();
     expect(scribbleCusps(pts(t => [t * 120 + 10 * Math.cos(t * 30), 50 + 10 * Math.sin(t * 30)]))).toBeNull();
     expect(scribbleCusps(pts(t => [t * 200, 30]))).toBeNull();
-    expect(scribbleCusps(pts(t => [60 * Math.abs(((t * 3) % 2) - 1), t * 20]))).toBeNull();
+    expect(scribbleCusps(pts(t => [60 * Math.abs(((t * 3) % 2) - 1), t * 60]))).toBeNull();
     expect(scribbleCusps(pts(t => [50 + 20 * Math.cos(t * 12), 50 + 20 * Math.sin(t * 12)]))).toBeNull();
     expect(scribbleCusps(pts(t => [30 * Math.sin(t * Math.PI * 2), t * 60]))).toBeNull();
   });
