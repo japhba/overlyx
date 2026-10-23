@@ -26,6 +26,8 @@ export interface DockInput {
   rest: number;
   /** where they are now (a little in its favour: no flipping as the window changes by a hair) */
   current: DeckDock;
+  /** the canvas round a fitted slide (screen px; none on a touch screen: edge to edge) */
+  gap?: number;
 }
 
 /**
@@ -37,11 +39,12 @@ export function chooseDock(i: DockInput): { dock: DeckDock; col: number } {
   if (!(area.w > 0 && area.h > 0 && slide.w > 0 && slide.h > 0)) return { dock: i.current, col: DOCK_COL_MIN };
   // the top: one row, or two when the tools and the rest do not fit side by side (the tools scroll sideways)
   const rows = i.tools + i.rest <= area.w ? 1 : 2;
-  const top = fitScale({ w: area.w, h: area.h - rows * DOCK_ROW }, slide);
+  const gap = i.gap ?? fitGap(area);
+  const top = fitScale({ w: area.w, h: area.h - rows * DOCK_ROW }, slide, gap);
   // the room beside the slide fitted to the whole height
-  const shown = (area.h - 2 * fitGap(area)) * slide.w / slide.h;
+  const shown = (area.h - 2 * gap) * slide.w / slide.h;
   const col = Math.round(Math.min(DOCK_COL_MAX, Math.max(DOCK_COL_MIN, (area.w - shown) / 2)));
-  const sides = fitScale({ w: area.w - 2 * col, h: area.h }, slide);
+  const sides = fitScale({ w: area.w - 2 * col, h: area.h }, slide, gap);
   const k = i.current === 'sides' ? 0.98 : 1.02;
   return { dock: sides > top * k ? 'sides' : 'top', col };
 }

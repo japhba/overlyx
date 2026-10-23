@@ -115,6 +115,12 @@ function focusSpot(p: { tx: number; ty: number; s: number }, r: Rect, box: { w: 
 /** the zoom menu's percentages (of the slide's own size) */
 const DECK_ZOOMS = [50, 75, 100, 150, 200];
 
+/** the room at each side of the canvas the slide is not fitted into (screen px) */
+type Inset = { t: number; r: number; b: number; l: number };
+const NO_INSET: Inset = { t: 0, r: 0, b: 0, l: 0 };
+/** how long the bars take to slide away or back while drawing (ms; styles.css ol-bars-leaving / ol-bars-back) */
+const BARS_MS = 180;
+
 /** the natural size of a picture file (null when the browser cannot decode it) */
 async function naturalSize(data: Blob): Promise<{ w: number; h: number } | null> {
   try { const b = await createImageBitmap(data); const r = { w: b.width, h: b.height }; b.close?.(); return r; } catch { return null; }
@@ -285,7 +291,15 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   const pageWRef = useRef(pageW); pageWRef.current = pageW;
   const [pageH, setPageH] = useState(0);
   const [railW, setRailW] = useState(loadRailW);
-  const [box, setBox] = useState({ w: 800, h: 600 });
+  /** the canvas' size; `box`, the part of it the slide is fitted to (below) */
+  const [canvasSize, setBox] = useState({ w: 800, h: 600 });
+  /**
+   * The room the bars left as drawing put them away (screen px at each side of the canvas): the slide
+   * stays in the part it had, as big as it was, and the canvas grows round it (the user, 23 Oct 2026:
+   * the slide zooming in as one began to draw was confusing). None once they are back.
+   */
+  const [inset, setInset] = useState(NO_INSET);
+  const box = { w: Math.max(1, canvasSize.w - inset.l - inset.r), h: Math.max(1, canvasSize.h - inset.t - inset.b) };
   const [railH, setRailH] = useState(600);
   const [zoom, setZoom] = useState(1);
   /** the frame's left edge when it is wider than the canvas (zoomed in): panned sideways */
@@ -359,6 +373,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   const [nodeEd, setNodeEd] = useState<{ selected: number; total: number } | null>(null);
   const nodeEdRef = useRef(false); nodeEdRef.current = !!nodeEd;
   const [tool, setToolState] = useState<Tool>('select');
+  const toolRef = useRef(tool); toolRef.current = tool;
   /**
    * Draw opened (its button, P, E, S): its row of pens, colours and widths shows. A Pencil that draws by
    * itself (InkStyle.penInks) does not open it: the row only comes when asked for, and folds when the
@@ -379,12 +394,18 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
    * Drawing on a touch screen with everything it does not need out of the way (the user, 22 Oct 2026:
    * "when drawing, have everything unneeded disappear, similarly to Apple Notes, where we can re-expand
    * toolbars by tapping them … from the top right corner of the slides"): once a stroke is drawn, or
-   * something is picked in the Draw row, the app's bars, the toolbars, the slide rail, the notes and
-   * the panes go; the pen in hand waits at the slide's top right corner, its tap brings the Draw row
-   * back over the canvas. Done, Esc or V puts the pen away, and all of it comes back.
+   * something is picked in the Draw row, the app's bars and the toolbars go (the panels opened — the
+   * files, the slide rail, the notes, the panes — stay); the pen in hand waits at the slide's top right
+   * corner, its tap brings the Draw row back over the canvas. Done, Esc or V puts the pen away, and all
+   * of it comes back. The user, 23 Oct 2026: "it is a bit confusing how a more zoomed in view happens …
+   * always make the slide snap to the boundary by default, then make the toolbars slide away and
+   * reappear on tap": the slide is fitted edge to edge from the start and stays as it is while they
+   * slide away (`inset`); a finger's tap while drawing brings them back, the next puts them away again
+   * (Photos').
    */
   const [drawFocus, setDrawFocusState] = useState(false);
-  const drawFocusRef = useRef(drawFocus); drawFocusRef.current = drawFocus;
+  /** drawing focus as last asked for (the state follows once the bars have slid away) */
+  const focusAsked = useRef(false);
   /** the colours used on the slide shown (runtime notetools.ts), for the lasso's colour filter */
   const slideColors = useRef<string[]>([]);
   /** Draw: the pen's and the highlighter's presets, which of them is in hand (deckink.ts) */
@@ -424,8 +445,8 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   const margin = box.w < 600 ? 12 : 32;
   /** drawing with everything else out of the way (drawFocus): on the one-slide canvas */
   const focusOn = drawFocus && soloOn && !presenting;
-  /** the canvas round a fitted slide: none while drawing so (edge to edge), else viewport.ts fitGap */
-  const gap = focusOn ? 0 : undefined;
+  /** the canvas round a fitted slide: none on a touch screen (edge to edge, as it stays while drawing), else viewport.ts fitGap */
+  const gap = touchUi && soloOn ? 0 : undefined;
   const gapRef = useRef(gap); gapRef.current = gap;
   const focusRef = useRef(focusOn); focusRef.current = focusOn;
   const focusPillEl = useRef<HTMLDivElement>(null);
@@ -1103,6 +1124,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
         case 'penDown': if (fromCanvas) penOnCanvas(m.down); break;
         case 'history': if (fromCanvas) historyGesture(m.redo); break;
         case 'panEnd': if (fromCanvas) slideView.release(!!m.cancel); break;
+        case 'fingerTap': if (fromCanvas) fingerTap(); break;
         case 'colors': if (fromCanvas) setColors({ desk: m.desk, page: m.page }); break;
         case 'cropping': if (fromCanvas) setCropping(m.path); break;
         case 'editSvg': if (fromCanvas) { const rel = svgOf(m.src); if (rel) editSvgPicture(rel); } break;
@@ -1212,7 +1234,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
       e.preventDefault();
       if (canvasFingers.current.size || !soloRef.current) return;
       if (e.type === 'gesturestart') { last = 1; return; }
-      const r = el.getBoundingClientRect(), sc = e.scale ?? 1;
+      const r = (viewEl.current ?? el).getBoundingClientRect(), sc = e.scale ?? 1;
       zoomSolo(sc / last, (e.clientX ?? r.left + r.width / 2) - r.left, (e.clientY ?? r.top + r.height / 2) - r.top);
       last = sc;
     };
@@ -1228,40 +1250,72 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     pageDir.current = 0;
     if (d) slideView.enter(d); else slideView.recentre(false);
   }, [solo?.slide, soloOn]);
+  /** the slide's part of the canvas (`inset`), where the frame and what goes with the slide sit */
+  const viewEl = useRef<HTMLDivElement>(null);
+  /** that part on the screen as the bars went away or came back: the slide stays there */
+  const viewWas = useRef<DOMRect | null>(null);
+  const barsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reducedMotion = () => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; } };
   /**
-   * The slide where it was on the screen when the canvas changed size for drawing (the toolbars folded
-   * away, or back): from there it springs to its level (Fit: as big as the canvas is now) — not a jump.
+   * Drawing focus on or off. The bars slide away first (they keep their room meanwhile), then leave it
+   * to the canvas; coming back, they take it again and slide in. Either way the slide stays put.
    */
-  const screenHold = useRef<{ x: number; y: number; s: number; at: number } | null>(null);
-  const holdSlideOnScreen = () => {
-    const c = canvasBox.current?.getBoundingClientRect(), p = slideView.place(), so = soloState.current;
-    if (!c || !p || !so || !soloRef.current) return;
-    screenHold.current = { x: c.left + p.tx + (so.rect.x + so.rect.w / 2) * p.s, y: c.top + p.ty + (so.rect.y + so.rect.h / 2) * p.s, s: p.s, at: performance.now() };
-  };
   const setDrawFocus = (on: boolean) => {
-    if (on === drawFocusRef.current) return;
-    holdSlideOnScreen();
-    drawFocusRef.current = on;
-    setDrawFocusState(on);
+    if (on === focusAsked.current) return;
+    focusAsked.current = on;
+    const html = document.documentElement;
+    if (barsTimer.current) { clearTimeout(barsTimer.current); barsTimer.current = null; }
+    html.classList.remove('ol-bars-back');
+    const go = () => {
+      barsTimer.current = null;
+      viewWas.current = viewEl.current?.getBoundingClientRect() ?? null;
+      setDrawFocusState(on);
+    };
+    if (on && !reducedMotion()) { html.classList.add('ol-bars-leaving'); barsTimer.current = setTimeout(go, BARS_MS); return; }
+    html.classList.remove('ol-bars-leaving');
+    go();
   };
+  useEffect(() => () => { if (barsTimer.current) clearTimeout(barsTimer.current); }, []);
+  /**
+   * The bars gone (or back), the canvas is another size: the slide keeps the part of it it had — where
+   * it was on the screen — till they come back. Set before the screen is drawn again: no jump.
+   * (the app's bars go with the editor's own in one layout: one change of the canvas)
+   */
   useLayoutEffect(() => {
-    if (!soloOn) return;
-    const h = screenHold.current, c = canvasBox.current?.getBoundingClientRect();
-    screenHold.current = null;
-    if (h && c && performance.now() - h.at < 1500 && !pinchRef.current && !wheelPinch.current) {
-      const r = solo!.rect;
-      slideView.placeAt(h.s, r.x + r.w / 2, r.y + r.h / 2, h.x - c.left, h.y - c.top);
-      const k = levelRef.current;
-      if (k) goToLevel(k, true); else { commitLiveZoom(0); slideView.release(); }
-      return;
+    const html = document.documentElement;
+    const back = !drawFocus && html.classList.contains('ol-draw-focus');
+    html.classList.toggle('ol-draw-focus', drawFocus);
+    html.classList.remove('ol-bars-leaving');
+    if (back && !reducedMotion()) {
+      html.classList.add('ol-bars-back');
+      barsTimer.current = setTimeout(() => { barsTimer.current = null; html.classList.remove('ol-bars-back'); }, BARS_MS + 40);
     }
-    slideView.refit();
-  }, [box.w, box.h, solo?.rect.w, solo?.rect.h]);
+    const was = viewWas.current, c = canvasBox.current, v = viewEl.current;
+    viewWas.current = null;
+    if (!c) return;
+    const r = c.getBoundingClientRect();
+    const next = drawFocus && was && soloRef.current
+      ? { t: Math.max(0, was.top - r.top), r: Math.max(0, r.right - was.right), b: Math.max(0, r.bottom - was.bottom), l: Math.max(0, was.left - r.left) }
+      : NO_INSET;
+    if (v) Object.assign(v.style, { top: `${next.t}px`, right: `${next.r}px`, bottom: `${next.b}px`, left: `${next.l}px` });
+    setInset(next);
+    setBox(prev => prev.w === c.clientWidth && prev.h === c.clientHeight ? prev : { w: c.clientWidth, h: c.clientHeight });
+  }, [drawFocus]);
+  useLayoutEffect(() => { if (soloOn) slideView.refit(); }, [box.w, box.h, solo?.rect.w, solo?.rect.h]);
   // the pen put away (another tool, Esc, V), presenting, only viewing: everything back
-  useEffect(() => { if (drawFocus && (!(tool === 'pen' || tool === 'eraser' || tool === 'lasso') || presenting || locked || !touchUi)) setDrawFocus(false); }, [tool, presenting, locked, drawFocus, touchUi]);
-  // (the app's bars go with the editor's own in one layout: one change of the canvas, one spring)
-  useLayoutEffect(() => { document.documentElement.classList.toggle('ol-draw-focus', drawFocus); }, [drawFocus]);
-  useEffect(() => () => document.documentElement.classList.remove('ol-draw-focus'), []);
+  useEffect(() => { if ((drawFocus || focusAsked.current) && (!(tool === 'pen' || tool === 'eraser' || tool === 'lasso') || presenting || locked || !touchUi)) setDrawFocus(false); }, [tool, presenting, locked, drawFocus, touchUi]);
+  useEffect(() => () => document.documentElement.classList.remove('ol-draw-focus', 'ol-bars-leaving', 'ol-bars-back'), []);
+  /**
+   * A finger's tap on the slide or beside it while drawing on a touch screen (it neither draws nor
+   * moves anything): the bars come back, with the Draw row open — or, back already, go away again.
+   */
+  const fingerTap = () => {
+    if (!touchRef.current || !soloRef.current || readOnlyRef.current) return;
+    const t = toolRef.current;
+    if (t !== 'pen' && t !== 'eraser' && t !== 'lasso') return;
+    if (focusAsked.current) { setDrawOpen(true); setDrawHeld(false); setDrawFocus(false); }
+    else { setDrawOpen(false); setDrawHeld(true); setDrawFocus(true); }
+  };
   useEffect(() => { toRail({ ol: 'scale', scale: railScale }); }, [railScale]);
   // (the Bézier pen takes Enter / Esc / Backspace: the keyboard goes to the canvas)
   // (the pen draws right away only where the page can be changed)
@@ -1488,7 +1542,8 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
    */
   const canvasFingers = useRef(new Map<number, { x: number; y: number }>());
   const canvasIgnoredPalms = useRef(new Set<number>());
-  const canvasGesture = useRef<{ kind: 'pan' | 'pinch' | 'tri' | 'done'; x: number; y: number; x0: number; y0: number; t0: number; moving?: boolean } | null>(null);
+  /** (`noTap`: a second finger came, or the pen — lifted, it is no tap) */
+  const canvasGesture = useRef<{ kind: 'pan' | 'pinch' | 'tri' | 'done'; x: number; y: number; x0: number; y0: number; t0: number; moving?: boolean; noTap?: boolean } | null>(null);
   const cancelCanvasTouch = (event: Extract<ReliabilityEvent, 'gesture.cancelled' | 'gesture.capture-lost' | 'gesture.interrupted'> = 'gesture.interrupted') => {
     const ids = [...canvasFingers.current.keys()], g = canvasGesture.current;
     if (ids.length) recordReliability(event, { pointer: 'touch', context: kindRef.current });
@@ -1532,10 +1587,12 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     if (g.kind === 'pan') slideView.release(true);
     else if (g.kind === 'pinch') pinchEnd(true);
     g.kind = 'done';
+    g.noTap = true;
   };
   const canvasTouch = (e: PointerEvent) => {
     if (e.pointerType !== 'touch' || !soloRef.current) return;
-    const fingers = canvasFingers.current, box = canvasBox.current?.getBoundingClientRect();
+    // (in the slide's part of the canvas, as the view places it)
+    const fingers = canvasFingers.current, box = (viewEl.current ?? canvasBox.current)?.getBoundingClientRect();
     if (!box) return;
     const at = { x: e.clientX - box.left, y: e.clientY - box.top };
     if (e.type === 'pointerdown') {
@@ -1554,7 +1611,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
       if (fingers.size === 1) canvasGesture.current = { kind: 'pan', x: at.x, y: at.y, x0: at.x, y0: at.y, t0: performance.now() };
       else if (fingers.size === 2 && g?.kind === 'pan') {
         const ps = [...fingers.values()];
-        canvasGesture.current = { ...g, kind: 'pinch' };
+        canvasGesture.current = { ...g, kind: 'pinch', noTap: true };
         pinchStart(ps, ps);
       } else if (fingers.size >= 3 && g?.kind !== 'tri' && g?.kind !== 'done') {
         if (g?.kind === 'pinch') pinchEnd(true);
@@ -1587,6 +1644,8 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     if (g && g.kind !== 'tri') g.kind = 'done';
     if (fingers.size) return;
     if (g?.kind === 'tri') { const h = triGesture(g.x - g.x0, g.y - g.y0, performance.now() - g.t0); if (h) historyGesture(h === 'redo'); }
+    // (one finger down and up again, not moved: a tap)
+    else if (g && !g.moving && !g.noTap && performance.now() - g.t0 < 400) fingerTap();
     canvasGesture.current = null;
   };
   /** three fingers (runtime): undo, redo — said for a moment on the canvas, as the gesture shows nothing itself */
@@ -2702,8 +2761,9 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   // (the rail beside the canvas takes its width — on a narrow screen it is a drawer over it —, the notes their height)
   const dockArea = { w: area.w - (railOpen && typeof innerWidth === 'number' && innerWidth > 900 ? railW : 0), h: area.h - (kind === 'deck' && notesShown ? 74 : 0) };
   const placed = kind === 'page' || presenting || !(touchUi || dockAsk) ? { dock: 'top' as DeckDock, col: 0 }
-    : chooseDock({ area: dockArea, slide: slideShape, tools: bars.tools.reduce((n, g) => n + g.length * 34 + 9, 24), rest: 560, current: dockWas.current });
-  const dock: DeckDock = kind === 'page' || presenting ? 'top' : dockAsk ?? placed.dock;
+    : chooseDock({ area: dockArea, slide: slideShape, tools: bars.tools.reduce((n, g) => n + g.length * 34 + 9, 24), rest: 560, current: dockWas.current, gap: touchUi ? 0 : undefined });
+  // (kept while drawing has the bars away: they come back where they were, into the room the slide left them)
+  const dock: DeckDock = kind === 'page' || presenting ? 'top' : dockAsk ?? (focusOn ? dockWas.current : placed.dock);
   dockWas.current = dock;
   const sides = dock === 'sides' && !focusOn;
   const topBar = !sides && !focusOn;
@@ -2938,7 +2998,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
         <input ref={replaceInput} type="file" accept="image/*,.svg" hidden onChange={e => { const fs = Array.from((e.target as HTMLInputElement).files ?? []); (e.target as HTMLInputElement).value = ''; void replacePicture(fs); }} />
       <div class="dl-body" data-sides={sides ? '' : undefined} style={sides ? `--dl-col: ${placed.col}px` : undefined}>
         {leftCol}
-        {showRail && railShown && !focusOn && (
+        {showRail && railShown && (
           <div class="dl-rail" ref={railBox} style={{ width: `${railW}px` }}>
               <div class="dl-rail-head">
                 <span class="dl-rail-count" title="The slide shown, of all slides">{slides.length ? `Slide ${current + 1} of ${slides.length}` : 'Slides'}</span>
@@ -2965,7 +3025,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
               if (soloOn) {
                 // beside the slide: as on it — a pinch zooms about the pointer, a scroll pulls the slide (it springs back, or pulled far enough, comes loose)
                 e.preventDefault();
-                const r = e.currentTarget.getBoundingClientRect();
+                const r = (viewEl.current ?? e.currentTarget).getBoundingClientRect();
                 if (e.ctrlKey || e.metaKey) zoomSolo(Math.exp(-e.deltaY * k * 0.01), e.clientX - r.left, e.clientY - r.top);
                 else if (e.shiftKey && !e.deltaX) slideView.scroll(-e.deltaY * k, 0);
                 else slideView.scroll(-e.deltaX * k, -e.deltaY * k);
@@ -2975,8 +3035,21 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
             }}
             onDragOver={e => { if (e.dataTransfer?.types.includes('Files')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } }}
             onDrop={e => { if (!e.dataTransfer?.files.length) return; e.preventDefault(); const fs = Array.from(e.dataTransfer.files); void placeFiles(fs.map(f => ({ name: f.name, type: f.type, data: f })), null, null); }}>
-            {link && synced && <iframe ref={canvasFrame} class={'dl-frame' + (soloOn ? ' solo' : '')} title="Page" sandbox={offlineDocs.edit ? undefined : 'allow-scripts allow-modals allow-popups allow-forms'} src={offlineDocs.edit ? offlineSrc('edit') : src('edit')}
-              style={soloOn ? { width: `${frameW}px`, height: `${solo!.height}px`, left: '0px' } : { width: `${frameW}px`, height: `${frameH}px`, transform: `scale(${scale})`, left: `${left}px` }} />}
+            {/* (the slide's part of the canvas: all of it, but while drawing holds the slide where the bars left it) */}
+            <div ref={viewEl} class="dl-view" style={{ top: `${inset.t}px`, right: `${inset.r}px`, bottom: `${inset.b}px`, left: `${inset.l}px` }}>
+              {link && synced && <iframe ref={canvasFrame} class={'dl-frame' + (soloOn ? ' solo' : '')} title="Page" sandbox={offlineDocs.edit ? undefined : 'allow-scripts allow-modals allow-popups allow-forms'} src={offlineDocs.edit ? offlineSrc('edit') : src('edit')}
+                style={soloOn ? { width: `${frameW}px`, height: `${solo!.height}px`, left: '0px' } : { width: `${frameW}px`, height: `${frameH}px`, transform: `scale(${scale})`, left: `${left}px` }} />}
+              {soloOn && (
+                <div ref={pullRing} class="dl-pull" data-dl-pull aria-hidden="true">
+                  <svg viewBox="0 0 32 32">
+                    <circle class="dl-pull-disc" cx="16" cy="16" r="15" />
+                    <circle class="dl-pull-arc" cx="16" cy="16" r="12.5" pathLength="1" transform="rotate(-90 16 16)" />
+                    <path class="dl-pull-arrows" d="M16 9v14M9 16h14M13.5 11.5 16 9l2.5 2.5M13.5 20.5 16 23l2.5-2.5M11.5 13.5 9 16l2.5 2.5M20.5 13.5 23 16l-2.5 2.5" />
+                  </svg>
+                </div>
+              )}
+              {focusPill}
+            </div>
             {(!link || !synced || canvasState !== 'ready') && <div class="dl-opening" data-dl-opening={canvasState === 'failed' ? 'failed' : linkState}
               role={canvasState === 'failed' || linkState === 'failed' || linkState === 'denied' ? 'alert' : 'status'}>
               <p>{linkState === 'denied'
@@ -2989,18 +3062,8 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
                 onClick={retryOpening}>Retry opening</button>}
               {canvasState === 'failed' && <button type="button" class="dl-btn" onClick={() => setCodeOpen(true)}>Open Code</button>}
             </div>}
-            {soloOn && (
-              <div ref={pullRing} class="dl-pull" data-dl-pull aria-hidden="true">
-                <svg viewBox="0 0 32 32">
-                  <circle class="dl-pull-disc" cx="16" cy="16" r="15" />
-                  <circle class="dl-pull-arc" cx="16" cy="16" r="12.5" pathLength="1" transform="rotate(-90 16 16)" />
-                  <path class="dl-pull-arrows" d="M16 9v14M9 16h14M13.5 11.5 16 9l2.5 2.5M13.5 20.5 16 23l2.5-2.5M11.5 13.5 9 16l2.5 2.5M20.5 13.5 23 16l-2.5 2.5" />
-                </svg>
-              </div>
-            )}
             {hud && <div key={hud.n} class="dl-hud" role="status" data-dl-hud>{hud.text}</div>}
             <div ref={zoomHud} class="zoom-hud" aria-hidden="true" data-dl-zoomhud />
-            {focusPill}
             {(lost || zoomed || (soloOn && slideFree)) && kind !== 'page' && (
               <button type="button" class={'dl-refocus' + (lost ? ' lost' : '')} data-dl-refocus onClick={fitSlide}
                 title={zoomed ? `Show the whole ${kind === 'poster' ? 'poster' : 'slide'} again (Ctrl+0)` : 'Back into the middle (Ctrl+0)'}>
@@ -3009,7 +3072,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
             )}
           </div>
           {/* (folded away, nothing of them is left here: their button is in the corner) */}
-          {kind === 'deck' && notesShown && !focusOn && (
+          {kind === 'deck' && notesShown && (
             <div class="dl-notes">
               <textarea placeholder="Speaker notes" value={notesDraft && curSlidePath && notesDraft.path.join() === curSlidePath.join() ? notesDraft.text : notes} disabled={locked || !curSlidePath} data-dl-notes
                 onInput={e => setNotesDraft((e.target as HTMLTextAreaElement).value)}
@@ -3018,18 +3081,18 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
             </div>
           )}
         </div>
-        {objOpen && !focusOn && (
+        {objOpen && (
           <ObjectsPane slide={objects.slide} items={objects.items} sel={sel} readOnly={locked} close={() => toggleObjects(false)}
             select={paths => toCanvas({ ol: 'select', paths })} hover={p => toCanvas({ ol: 'hover', path: p })}
             rename={(p, name) => applyOps([{ t: 'attr', path: p, name: 'data-ol-name', value: name }])}
             lock={(p, on) => applyOps([{ t: 'attr', path: p, name: 'data-ol-locked', value: on ? '' : null }])}
             restack={(p, ref, front) => toCanvas({ ol: 'restack', path: p, ref, front })} />
         )}
-        {animOpen && kind === 'deck' && !focusOn && (
+        {animOpen && kind === 'deck' && (
           <AnimationPane seq={seq} sel={sel} readOnly={locked} close={() => toggleAnim(false)}
             send={cmd => toCanvas({ ol: 'steps', cmd })} select={p => toCanvas({ ol: 'select', paths: [p] })} />
         )}
-        {reviewOpen && !focusOn && (
+        {reviewOpen && (
           <ReviewPane review={review} slideTitles={slides.map(s => s.title)} current={current} kind={kind} me={me} canEdit={!locked}
             focus={focus} draft={draft} submitDraft={submitDraft} cancelDraft={() => setDraft(null)} select={showOnCanvas}
             reply={replyTo} resolve={resolveThread} remove={removeThread}
@@ -3037,7 +3100,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
             acceptAll={() => resolveEverything(true)} rejectAll={() => resolveEverything(false)}
             close={() => { setReviewOpen(false); setDraft(null); setFocus(null); }} />
         )}
-        {codeOpen && !focusOn && (
+        {codeOpen && (
           <div class="dl-code">
             <div class="dl-code-head"><span>{path.split('/').pop()}</span><button class="dl-btn" onClick={() => setCodeOpen(false)} title="Close">×</button></div>
             <textarea ref={codeRef} spellcheck={false} readOnly={locked} onInput={onCodeInput} data-dl-codearea

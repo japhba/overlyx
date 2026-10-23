@@ -398,6 +398,8 @@ export type FromRuntime =
   | { ol: 'history'; redo: boolean }
   /** the finger that panned was lifted or interrupted; cancellation settles without a release flick */
   | { ol: 'panEnd'; cancel?: boolean }
+  /** drawing (the pen, the eraser, the lasso in hand), a finger tapped the slide: it neither drew nor moved it (the editor's bars come back, or go) */
+  | { ol: 'fingerTap' }
   /** the page's own colours: what is around its slides (the body's background) and the slides' usual one */
   | { ol: 'colors'; desk: string; page: string }
   /** crop mode started (the picture's path) or ended (null) */

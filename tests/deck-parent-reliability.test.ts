@@ -58,6 +58,9 @@ function harness(options: {
     fingerMid: () => ({ x: 20, y: 30 }),
     triGesture: () => null,
     historyGesture: (...args: unknown[]) => operations.push({ name: 'historyGesture', args }),
+    // (the slide's part of the canvas: all of it here; a finger's tap while drawing toggles the bars)
+    viewEl: { current: null },
+    fingerTap: (...args: unknown[]) => operations.push({ name: 'fingerTap', args }),
   });
   runInContext(actualFunctions('cancelCanvasTouch', 'cancel', 'penOnCanvas', 'canvasTouch'), context);
   const handlers = runInContext('({ cancelCanvasTouch, cancel, penOnCanvas, canvasTouch })', context) as Record<string, (...args: any[]) => any>;

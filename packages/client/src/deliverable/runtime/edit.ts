@@ -1393,6 +1393,8 @@ interface Drag {
   ls?: { x: number; y: number };
   pointerId?: number;
   pointerType?: string;
+  /** when it began (performance.now()): a finger's tap is quick */
+  t0?: number;
   hold?: ReturnType<typeof setTimeout>;
 }
 let drag: Drag | null = null;
@@ -1488,7 +1490,7 @@ function onPointerDown(e: PointerEvent): void {
   }
   grab(e);
   const x = e.pageX, y = e.pageY;
-  const base = { x0: x, y0: y, els: [], moved: false, pointerId: e.pointerId, pointerType: e.pointerType, last: { x: e.clientX, y: e.clientY }, ls: { x: e.screenX, y: e.screenY } };
+  const base = { x0: x, y0: y, els: [], moved: false, pointerId: e.pointerId, pointerType: e.pointerType, t0: performance.now(), last: { x: e.clientX, y: e.clientY }, ls: { x: e.screenX, y: e.screenY } };
   // the pen's eraser end erases while it is turned round, whatever the tool (Li et al. 2005: the fewest mode errors)
   if (eraserEnd) {
     drag = { ...base, kind: 'erase', slide: slideOf(t), erased: [] };
@@ -2040,6 +2042,8 @@ function onDragEnd(e: PointerEvent): void {
   if (d.kind === 'guide') { endGuideDrag(canceled || state.version === null); return; }
   if (d.kind === 'pan') {
     if (d.moved && isSolo()) post({ ol: 'panEnd', cancel: canceled });
+    // drawing, a finger's tap (fingers move the slide, only the pen draws): the editor shows its bars, or puts them away
+    if (!d.moved && !canceled && d.pointerType === 'touch' && (tool === 'pen' || tool === 'eraser' || tool === 'lasso') && isSolo() && performance.now() - (d.t0 ?? 0) < 400) post({ ol: 'fingerTap' });
     // a tap on nothing: the selection goes; on an object: that one is selected — an empty placeholder takes the caret (Google Slides')
     if (!d.moved && !e.shiftKey && !canceled) {
       selected = d.tap ? [d.tap] : []; report();

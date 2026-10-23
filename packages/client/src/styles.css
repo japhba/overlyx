@@ -3121,6 +3121,10 @@ html[data-theme="dark"] .dl-canvas { background: #2a2c31; }
 .dl-ctx:not(:empty)::before { content: ''; flex: none; width: 1px; height: 20px; background: var(--ui-border); margin: 0 4px 0 0; }
 .dl-zoomgroup { display: inline-flex; align-items: center; flex: none; }
 .dl-toolbar > .dl-btn, .dl-toolbar > .dl-status { flex: none; }
+/* the tools too scroll sideways when the row is narrower than they are (an iPad upright with the files open): the row
+   never grows wider than the editor — it did, and the pane scrolled the editor under the files, the slide's left edge cut */
+.dl-toolbar > .toolbar-deck-tools { flex: 0 1 auto; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.dl-toolbar > .toolbar-deck-tools::-webkit-scrollbar { display: none; }
 @media (max-width: 900px) { .dl-title { display: none; } }
 /* On touch-sized layouts the panels must not take width away from the slide. Keep their
    persisted open/closed state, but present them as drawers over the work area instead. */
@@ -3207,8 +3211,27 @@ html[data-ui] .dl-side .tb-label { font-size: 9px; letter-spacing: .06em; white-
 .dl-more { position: relative; font-size: 18px; width: 40px; }
 .dl-more .dl-rv-count { position: absolute; top: 0; right: 0; }
 /* drawing with the toolbars away (DeliverableEditor drawFocus, as Apple Notes' palette folds while one draws): the app's bars go too */
-html.ol-draw-focus .app > .menubar, html.ol-draw-focus .app .statusbar, html.ol-draw-focus .main > .sidebar, html.ol-draw-focus .main > .sidebar-grip,
+html.ol-draw-focus .app > .menubar, html.ol-draw-focus .app .statusbar,
 html.ol-draw-focus .app > .health-bar, html.ol-draw-focus .app > .find-bar-wrap, html.ol-draw-focus .app > .guest-callout { display: none !important; }
+/* the slide's part of the canvas (DeliverableEditor inset): all of it, but while drawing the slide stays where the bars left it; the fingers beside the slide are the canvas' */
+.dl-view { position: absolute; pointer-events: none; }
+.dl-view > .dl-frame { pointer-events: auto; }
+/* the bars slide away as drawing begins (then the canvas takes their room; the panels opened stay), and back in when a tap or Done brings them (ol-bars-back; BARS_MS) */
+html.ol-bars-leaving .app > .menubar, html.ol-bars-leaving .dl-toolbar, html.ol-bars-leaving .app .statusbar, html.ol-bars-leaving .dl-side {
+  transition: transform .18s ease-in, opacity .18s ease-in; opacity: 0; pointer-events: none;
+}
+html.ol-bars-leaving .app > .menubar, html.ol-bars-leaving .dl-toolbar { transform: translateY(-100%); }
+html.ol-bars-leaving .app .statusbar { transform: translateY(100%); }
+html.ol-bars-leaving .dl-side.left { transform: translateX(-100%); }
+html.ol-bars-leaving .dl-side.right { transform: translateX(100%); }
+@keyframes ol-bar-from-top { from { transform: translateY(-100%); opacity: 0; } }
+@keyframes ol-bar-from-bottom { from { transform: translateY(100%); opacity: 0; } }
+@keyframes ol-bar-from-left { from { transform: translateX(-100%); opacity: 0; } }
+@keyframes ol-bar-from-right { from { transform: translateX(100%); opacity: 0; } }
+html.ol-bars-back .app > .menubar, html.ol-bars-back .dl-toolbar { animation: ol-bar-from-top .18s ease-out; }
+html.ol-bars-back .app .statusbar { animation: ol-bar-from-bottom .18s ease-out; }
+html.ol-bars-back .dl-side.left { animation: ol-bar-from-left .18s ease-out; }
+html.ol-bars-back .dl-side.right { animation: ol-bar-from-right .18s ease-out; }
 /* the pen in hand at the slide's top right corner (its tap: the Draw row under it) and Undo beside it */
 .dl-focus { position: absolute; z-index: 7; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; pointer-events: none; max-width: calc(100% - 16px); }
 .dl-focus-row { display: flex; gap: 8px; }
