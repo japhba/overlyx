@@ -2569,7 +2569,10 @@ sub-directory per account, named by its username, and in it one directory per pr
 (SQLite, caches, builds, `credentials.txt`), `OVERLYX_CLIENT_DIST` (built client to serve, default
 `packages/client/dist`), `OVERLYX_UNLOAD_MS` (how long an idle document stays loaded, default 6 h),
 `OVERLYX_MAX_BUILDS` (parallel PDF builds, default 2), `OVERLYX_BUILD_NICE` (niceness of latexmk,
-default 10), `OVERLYX_DOC_WORKERS` (worker threads for parsing and writing documents, default the
+default 10), `OVERLYX_PROJECT_MAX_MB` (how large a project's files may grow together, like GitHub's
+1 GB per repository, default 1024; its history in `.git` does not count; uploads, copies, synced
+clones, git pushes, imports, MCP and agent-panel writes that would cross it are refused — server
+`projectsize.ts`), `OVERLYX_DOC_WORKERS` (worker threads for parsing and writing documents, default the
 cores less two, 1–4; `0`: on the main thread), `OVERLYX_SANDBOX` (`auto` — use bubblewrap when installed, the default; `bwrap` — required;
 `none`),
 `LYX_LAYOUT_DIR` (LyX `lib/layouts`), `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` +

@@ -83,6 +83,8 @@ export const config = {
   gitCommitMs: Number(process.env.OVERLYX_GIT_COMMIT_MS ?? 5 * 60 * 1000),
   /** longest time changes may stay uncommitted while editing goes on (ms) */
   gitCommitMaxWaitMs: Number(process.env.OVERLYX_GIT_COMMIT_MAX_WAIT ?? 30 * 60 * 1000),
+  /** how large a project's files may grow together, like GitHub's 1 GB per repository (projectsize.ts) */
+  projectMaxBytes: Number(process.env.OVERLYX_PROJECT_MAX_MB ?? 1024) * 1024 * 1024,
   /** feedback + error reports become GitHub issues of this repository (feedback.ts); needs a token with Issues: write */
   github: {
     repo: (process.env.GITHUB_REPO ?? 'japhba/overlyx').trim(),

@@ -4,6 +4,7 @@ import path from 'node:path';
 import { parseLyx } from '@overlyx/core';
 import { collect, projectDir, resolveProjectPath } from './projectfiles.ts';
 import { extractZip } from './zip.ts';
+import { projectRoom, noteWritten, assertRoom } from './projectsize.ts';
 import { importLyxFile, readLyxText, type ImportResult } from './texdoc.ts';
 
 export async function importLyxUpload(project: string, filename: string, data: Buffer,
@@ -15,8 +16,8 @@ export async function importLyxUpload(project: string, filename: string, data: B
   fs.mkdirSync(dest); // never replace an existing document, folder or project
   try {
     let skipped: string[] = [];
-    if (/\.zip$/i.test(filename)) skipped = extractZip(data, dest).skipped;
-    else fs.writeFileSync(path.join(dest, filename), data);
+    if (/\.zip$/i.test(filename)) { skipped = extractZip(data, dest, { maxBytes: projectRoom(project) }).skipped; noteWritten(project, null); }
+    else { assertRoom(project, data.length, 0, 'This file'); fs.writeFileSync(path.join(dest, filename), data); }
     const files = collect(dest, dest, [], 0).filter(f => f.kind !== 'dir');
     const lyx = files.filter(f => /\.lyx$/i.test(f.name));
     if (!lyx.length) throw new Error('The archive contains no .lyx documents');

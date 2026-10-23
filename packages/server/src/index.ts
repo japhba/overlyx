@@ -65,6 +65,7 @@ import { zoteroRoutes, zoteroStatus, searchZotero } from './zotero.ts';
 import { fetchPdfForEntry } from './pdffetch.ts';
 import { gitRouter, ensureAllRepos, ensureRepo, repoInfo, cloneUrl, commitProject, restoreProject, touchProject, createToken, listTokens, deleteToken, flushCommits } from './git.ts';
 import { syncRouter } from './sync.ts';
+import { assertRoom, bytesAt, noteWritten, ProjectFullError, directoryBytes, formatBytes } from './projectsize.ts';
 import { runSelfCheck, selfCheckEnabled, selfCheckState } from './selfcheck.ts';
 import { externalSyncOf } from './syncPeers.ts';
 import { texHeadings, parseBibtex, lyxToPm, exportLyx, splitDocId, projectOfDoc, docPathOf, splitProjectKey, isProjectKey } from '@overlyx/core';
@@ -332,6 +333,11 @@ api.post('/import/overleaf', async (req, res) => {
     if (fs.existsSync(projectDir(name)) || projectRow(name)) { results.push({ id, name, ok: false, error: 'a project with this name exists already' }); continue; }
     try {
       await cloneOverleafProject(id, token, projectDir(name));
+      const bytes = directoryBytes(projectDir(name));
+      if (bytes > config.projectMaxBytes) {
+        fs.rmSync(projectDir(name), { recursive: true, force: true });
+        throw new Error(`the project holds ${formatBytes(bytes)}, more than the ${formatBytes(config.projectMaxBytes)} a project may hold`);
+      }
       registerProject(name, req.user!.id);
       await ensureRepo(name).catch(e => console.error('[git] repo setup after Overleaf clone failed:', e));
       touchProject(name, req.user!.id);
@@ -377,7 +383,7 @@ api.post('/import/zip', express.raw({ type: '*/*', limit: '300mb' }), (req, res)
     if (fs.existsSync(projectDir(project)) || projectRow(project)) throw new Error('a project with this name exists already');
     const dir = projectDir(project);
     try {
-      const { files, skipped } = extractZip(buf, dir);
+      const { files, skipped } = extractZip(buf, dir, { maxBytes: config.projectMaxBytes });
       if (!files.length) throw new Error('the archive contains no files');
       registerProject(project, req.user!.id);
       ensureRepo(project).catch(e => console.error('[git] init failed:', e));
@@ -827,11 +833,12 @@ api.post('/projects/:project/upload', needProject('edit'), express.raw({ type: '
     const abs = resolveProjectPath(req.params.project, rel);
     // overwrite=0 (editor image paste/drop): never replace — the client counts up to a free name
     if (req.query.overwrite === '0' && fs.existsSync(abs)) { res.status(409).json({ error: 'file exists' }); return; }
+    assertRoom(req.params.project, (req.body as Buffer).length, bytesAt(abs), 'This upload');
     fs.mkdirSync(path.dirname(abs), { recursive: true });
     fs.writeFileSync(abs, req.body as Buffer);
     touchProject(req.params.project, req.user!.id);
     res.json({ ok: true, path: rel, kind: fileKind(rel) });
-  } catch (e) { res.status(400).json({ error: String(e) }); }
+  } catch (e) { res.status(e instanceof ProjectFullError ? e.status : 400).json({ error: e instanceof ProjectFullError ? e.message : String(e) }); }
 });
 
 /** File operations behind the explorer's context menu (VS Code-like). Deleted files go to the data
@@ -854,7 +861,9 @@ api.post('/projects/:project/fileops', needProject('edit'), (req, res) => {
       const rel = String(req.body?.from ?? '');
       const abs = guard(rel);
       if (!fs.existsSync(abs)) throw new Error('not found');
+      const bytes = bytesAt(abs);
       moveOut(abs, rel);
+      noteWritten(project, -bytes);
       // a Google Docs tab's document stays deleted (its tab is not synced back in); its group forgets it
       filesMoved(project, rel, null); lwFilesMoved(project, rel, null); groupFileMoved(project, rel, null);
     } else if (op === 'rename' || op === 'copy') {
@@ -865,11 +874,11 @@ api.post('/projects/:project/fileops', needProject('edit'), (req, res) => {
       if (fs.existsSync(to)) { res.status(409).json({ error: 'a file with that name exists' }); return; }
       fs.mkdirSync(path.dirname(to), { recursive: true });
       if (op === 'rename') { fs.renameSync(from, to); filesMoved(project, fromRel, toRel); lwFilesMoved(project, fromRel, toRel); groupFileMoved(project, fromRel, toRel); }
-      else fs.cpSync(from, to, { recursive: true });
+      else { assertRoom(project, bytesAt(from), 0, 'This copy'); fs.cpSync(from, to, { recursive: true }); }
     } else throw new Error('unknown operation');
     touchProject(req.params.project, req.user!.id);
     res.json({ ok: true });
-  } catch (e) { res.status(400).json({ error: (e as Error).message ?? String(e) }); }
+  } catch (e) { res.status(e instanceof ProjectFullError ? e.status : 400).json({ error: (e as Error).message ?? String(e) }); }
 });
 
 /** File types a browser may render in place; everything else (html, svg, …) is offered as a download — a project's files are user content and must not run as a page of our origin. */
@@ -998,7 +1007,7 @@ api.post('/projects/:project/bib/add', needProject('edit'), async (req, res) => 
     if (!r.existed) logAccess(project, req.user!.id, 'bib-add', `${r.key} → ${r.file}`);
     // fetch the paper's PDF into <project>/pdf/ in the background (additive; open copies only)
     if (config.literature) {
-      void fetchPdfForEntry(dir, bibtex, req.body?.hit as Hit | undefined)
+      void fetchPdfForEntry(dir, bibtex, req.body?.hit as Hit | undefined, bytes => assertRoom(project, bytes, 0, "The paper's PDF"))
         .then(saved => { if (saved && !saved.existed) touchProject(project, req.user!.id); })
         .catch(e => console.warn('[pdffetch]', (e as Error).message));
     }

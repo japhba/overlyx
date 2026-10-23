@@ -69,9 +69,10 @@ export interface PdfResult { file: string; existed: boolean }
 
 /**
  * Fetch the PDF for one BibTeX entry into `<project>/pdf/`. Returns null when no open copy could
- * be found; never overwrites or removes anything already there.
+ * be found; never overwrites or removes anything already there. `fits` throws when the PDF would
+ * not fit into the project (projectsize.ts).
  */
-export async function fetchPdfForEntry(projectDir: string, bibtex: string, hit?: Hit): Promise<PdfResult | null> {
+export async function fetchPdfForEntry(projectDir: string, bibtex: string, hit?: Hit, fits?: (bytes: number) => void): Promise<PdfResult | null> {
   const e = parseBibtex(bibtex)[0];
   if (!e) return null;
   const rel = path.join('pdf', pdfFileName(e));
@@ -84,6 +85,7 @@ export async function fetchPdfForEntry(projectDir: string, bibtex: string, hit?:
       let buf: Buffer | null = null;
       try { buf = await downloadPdf(url); } catch { /* next candidate */ }
       if (!buf) continue;
+      fits?.(buf.length);
       fs.mkdirSync(path.dirname(abs), { recursive: true });
       const tmp = abs + '.overlyx-tmp';
       fs.writeFileSync(tmp, buf);

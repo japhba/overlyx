@@ -35,6 +35,7 @@ import { isArticleHtml } from '@overlyx/core/html/article.ts';
 import { lastBuild, buildIncluding, buildErrors, requestBuild } from './export.ts';
 import { touchProject } from './git.ts';
 import { lstatIn, readFileIn, readTextIn, readlinkIn, writeFileIn, symlinkIn, removeIn } from './confined.ts';
+import { assertRoom } from './projectsize.ts';
 
 /** The name the panel's agent has on the MCP server (its token's name) … */
 export const PANEL_AGENT = 'Agent panel';
@@ -258,6 +259,7 @@ async function syncNow(tid: string, project: string, userId: number): Promise<Sy
         } else {
           const live = resolveProjectPath(project, rel);
           const prev = readIfFile(live);
+          assertRoom(project, Buffer.byteLength(text), prev?.length ?? 0, rel);
           writeAtomic(live, text);
           out.push({ path: rel, action: 'copied' });
           touched = true;
@@ -279,6 +281,7 @@ async function syncNow(tid: string, project: string, userId: number): Promise<Sy
       const existed = fs.existsSync(live);
       if (existed && isDocumentFile(project, rel)) continue;   // never overwrite a live document untracked
       const prev = existed ? readIfFile(live) : null;
+      assertRoom(project, data.length, prev?.length ?? 0, rel);
       writeAtomic(live, data);
       out.push({ path: rel, action: existed ? 'copied' : 'created' });
       touched = true;

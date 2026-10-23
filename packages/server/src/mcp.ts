@@ -78,6 +78,7 @@ import { db, type UserRow } from './db.ts';
 import { showAgent, presenceIn, type AgentLook, type PresentPerson } from './agentPresence.ts';
 import { changedRange, findPassage, paragraphCount, type Cursor } from './ycursor.ts';
 import { readPm } from './collabdoc.ts';
+import { assertRoom, bytesAt } from './projectsize.ts';
 import type { Node as PMNode } from 'prosemirror-model';
 import {
   agentFor, knownAgent, agentRow, agentLabel, agentColor, agentOwner, noteToolCall, wantsSession, recordSession, sessionRow, touchSession, dropSession,
@@ -390,6 +391,7 @@ async function writeDocumentLocked(project: string, userId: number, agentName: s
   if (article && (fs.existsSync(abs) ? !isDocumentFile(project, path) : !isArticleHtml(tex))) throw new Error(fs.existsSync(abs) ? `${path} is an HTML deliverable, not a document — edit it with read_file / edit_file / write_file.` : 'A web article needs <meta name="overlyx" content="article"> in its <head> (create_document with an .html path starts one from the template).');
   if (!fs.existsSync(abs)) {
     const r = parseDocumentText(tex, project, path);   // validate and collect warnings before creating
+    assertRoom(project, Buffer.byteLength(tex), 0, path);
     fs.mkdirSync(nodePath.dirname(abs), { recursive: true });
     fs.writeFileSync(abs, tex, 'utf8');
     touchProject(project, userId);
@@ -488,6 +490,7 @@ function writeFile(project: string, userId: number, rel: string, text: string) {
     touchProject(project, userId);
     return { ok: true, size: Buffer.byteLength(text) };
   }
+  assertRoom(project, Buffer.byteLength(text), bytesAt(abs), rel);
   fs.mkdirSync(nodePath.dirname(abs), { recursive: true });
   const tmp = abs + '.overlyx-tmp';
   fs.writeFileSync(tmp, text, 'utf8');

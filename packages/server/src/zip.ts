@@ -6,6 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
+import { formatBytes } from './projectsize.ts';
 
 export interface ZipEntry {
   name: string;
@@ -80,7 +81,7 @@ export function extractZip(buf: Buffer, dest: string, opts: { maxFiles?: number;
   const maxFiles = opts.maxFiles ?? 5000, maxBytes = opts.maxBytes ?? 1024 * 1024 * 1024;
   if (entries.length > maxFiles) throw new Error(`too many files in the archive (${entries.length})`);
   const total = entries.reduce((s, e) => s + e.size, 0);
-  if (total > maxBytes) throw new Error(`the archive unpacks to ${Math.round(total / 1e6)} MB — too large`);
+  if (total > maxBytes) throw new Error(`the archive unpacks to ${formatBytes(total)}, more than the ${formatBytes(maxBytes)} that fit into the project`);
   const tops = new Set(entries.map(e => e.name.replace(/\\/g, '/').split('/')[0]));
   const strip = tops.size === 1 && entries.every(e => e.name.replace(/\\/g, '/').includes('/')) ? [...tops][0].length + 1 : 0;
   const root = path.resolve(dest);

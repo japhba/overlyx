@@ -25,6 +25,7 @@ import { promisify } from 'node:util';
 import express, { type Request, type Response } from 'express';
 import { isProjectKey, projectShortName } from '@overlyx/core';
 import { config } from './config.ts';
+import { projectRoom, noteWritten } from './projectsize.ts';
 import { db, type UserRow } from './db.ts';
 import { projectDir, listProjects } from './projects.ts';
 import { manager, fileWrittenListeners } from './docs.ts';
@@ -658,6 +659,9 @@ async function handle(req: Request, res: Response): Promise<void> {
       REMOTE_ADDR: ip,
       GIT_COMMITTER_NAME: user?.name ?? who,
       GIT_COMMITTER_EMAIL: user?.email ?? `${who}@${hostName()}`,
+      // a push brings at most what still fits into the project (projectsize.ts): git refuses a larger
+      // pack ("pack exceeds maximum allowed size"); a full project still takes small ones (deletions, fixes)
+      ...(write ? { GIT_CONFIG_COUNT: '5', GIT_CONFIG_KEY_4: 'receive.maxInputSize', GIT_CONFIG_VALUE_4: String(Math.max(projectRoom(project), 256 * 1024)) } : {}),
     });
     if (req.headers['content-length']) env.CONTENT_LENGTH = String(req.headers['content-length']);
     if (req.headers['content-encoding']) env.HTTP_CONTENT_ENCODING = String(req.headers['content-encoding']);
@@ -693,10 +697,13 @@ async function handle(req: Request, res: Response): Promise<void> {
     child.on('close', code => {
       if (code) console.error(`[git] http-backend exited with ${code} for ${who} ${service} ${project}: ${stderr.trim()}`);
       else if (write && endpoint === 'git-receive-pack') console.log(`[git] ${who} pushed to "${project}"`);
+      if (write) noteWritten(project, null);
       if (stderr && !code && /error|fatal|rejected/i.test(stderr)) console.warn(`[git] ${service} ${project}: ${stderr.trim()}`);
       resolve();
     });
     req.on('aborted', () => { try { child.kill(); } catch { /* ignore */ } });
+    // git may stop reading early (a pack over receive.maxInputSize): the rest of the upload goes nowhere
+    child.stdin.on('error', () => { req.unpipe(child.stdin); req.resume(); });
     req.pipe(child.stdin);
   });
 

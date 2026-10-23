@@ -36,6 +36,7 @@ import { readFileIn, writeFileIn, removeIn, lstatIn } from './confined.ts';
 import { git, gitEnv, ensureRepo, touchProject, commitProject, commitListeners, authenticateBasic, cliTarget } from './git.ts';
 import { logAccess, roleFor } from './access.ts';
 import { notePeer } from './syncPeers.ts';
+import { assertRoom, noteWritten } from './projectsize.ts';
 import type { SessionUser } from './auth.ts';
 
 const execFileP = promisify(execFile);
@@ -203,7 +204,11 @@ async function applyFile(project: string, user: SessionUser, f: PushedFile): Pro
     if (content === null) {
       removeIn(root, rel);
       hashCache.delete(`${project}\0${rel}`);
-    } else await writeWhole(open, root, rel, content);
+      noteWritten(project, -(st?.size ?? 0));
+    } else {
+      assertRoom(project, content.length, st?.size ?? 0, rel);
+      await writeWhole(open, root, rel, content);
+    }
     touchProject(project, user.id);
     return { path: rel, status: 'applied', hash: newHash };
   }
@@ -223,6 +228,7 @@ async function applyFile(project: string, user: SessionUser, f: PushedFile): Pro
   const merged = await mergeText(f.baseText, cur.toString('utf8'), f.text);
   if (merged === null) return keepServer();
   const bytes = Buffer.from(merged, 'utf8');
+  assertRoom(project, bytes.length, cur.length, rel);
   await writeWhole(open, root, rel, bytes);
   touchProject(project, user.id);
   return { path: rel, status: 'merged', hash: blobHash(bytes), ...(bytes.equals(content) ? {} : { text: merged }) };
