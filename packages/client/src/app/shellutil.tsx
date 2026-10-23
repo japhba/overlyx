@@ -170,6 +170,8 @@ export function SidebarGrip({ side }: { side: 'left' | 'right' }) {
   return (
     <div class={'sidebar-grip ' + side} title="Drag to resize" onPointerDown={(e) => {
       e.preventDefault();
+      // (kept by the grip: a frame under the pointer — a slide, an article's block — would take the moves and the release)
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ }
       const move = (ev: PointerEvent) => {
         const w = Math.round(Math.max(180, Math.min(window.innerWidth * 0.6, side === 'left' ? ev.clientX : window.innerWidth - ev.clientX)));
         document.documentElement.style.setProperty(`--${side}-width`, w + 'px');

@@ -241,6 +241,8 @@ export interface MacroResolver {
 export interface CollectMacrosOptions {
   /** Child documents inherit the master's parsed header; do not collect that inherited preamble twice. */
   includePreamble?: boolean;
+  /** files read first, as if \input at the top of the preamble (an HTML article's `<link rel="overlyx-macros">`) */
+  files?: string[];
 }
 
 /**
@@ -263,6 +265,7 @@ export function collectMacros(doc: LyxDocument, resolver: MacroResolver = {}, op
       return;
     }
   };
+  for (const f of options.files ?? []) visitFile(f);
   if (options.includePreamble !== false) {
     const pre = macrosFromLatex(getPreamble(doc), 'preamble');
     out.push(...pre.macros);

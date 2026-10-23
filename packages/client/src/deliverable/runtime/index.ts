@@ -39,6 +39,10 @@ import { exportPageSvg } from './svgexport';
 import { startEmbed, embedSettled, startViewSync, viewSettled } from './embed';
 import { startLinks } from './links';
 import { looksOf } from './placeholders';
+import { installStorage } from './storage';
+
+// a page's localStorage where the sandbox refuses the browser's (storage.ts), before the page's scripts run
+installStorage(MODE === 'view');
 
 function addStyle(css: string): HTMLStyleElement {
   const s = document.createElement('style');

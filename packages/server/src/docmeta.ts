@@ -16,6 +16,7 @@ import { isMarkdownPath, MARKDOWN_LAYOUTS } from '@overlyx/core/md/index.ts';
 import { isHtmlPath } from '@overlyx/core/html/deliverable.ts';
 import { ARTICLE_LAYOUTS } from '@overlyx/core/html/article.ts';
 import { articleVars } from '@overlyx/core/html/articletheme.ts';
+import { pageLinks } from '@overlyx/core/html/deckextras.ts';
 import { config } from './config.ts';
 import { projectDir, findMaster } from './projectfiles.ts';
 import { cachedParseFile } from './texdoc.ts';
@@ -76,7 +77,7 @@ export function documentMeta(s: DocState, open: OpenDocs): DocumentMeta {
   const macros = collectMacros(rootLyx, {
     include: includeDoc,
     readFile: (fn) => { const abs = safe(fn); try { return abs ? fs.readFileSync(abs, 'utf8') : undefined; } catch { return undefined; } },
-  });
+  }, article ? { files: pageLinks(lyx.preamble.join('\n'), 'overlyx-macros') } : {});
   if (masterRel) {
     // the child's own macros come last (they override for the child's view)
     macros.push(...collectMacros(lyx, { include: includeDoc, readFile: (fn) => { const abs = safe(fn); try { return abs ? fs.readFileSync(abs, 'utf8') : undefined; } catch { return undefined; } } }, { includePreamble: false }));

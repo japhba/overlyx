@@ -441,6 +441,8 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
   useEffect(() => { try { localStorage.setItem('ol.source.w', String(Math.round(width))); } catch { /* ignore */ } }, [width]);
   const startResizeW = (e: PointerEvent) => {
     e.preventDefault();
+    // (kept by the grip: a frame under the pointer would take the moves and the release)
+    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* ignore */ }
     const startX = e.clientX, startW = width;
     const move = (ev: PointerEvent) => setWidth(Math.max(280, Math.min(window.innerWidth * 0.8, startW + startX - ev.clientX)));
     const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };

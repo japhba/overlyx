@@ -1997,7 +1997,7 @@ button.lit-link { border: 0; background: none; padding: 0; color: var(--accent);
 .pane-grip::before { content: ''; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px; background: var(--ui-border); }
 .pane-grip:hover::before, html.pane-resizing .pane-grip::before { left: 2px; width: 3px; background: var(--accent); opacity: 0.6; }
 html.pane-resizing, html.pane-resizing * { cursor: col-resize !important; user-select: none !important; }
-html.pane-resizing canvas, html.pane-resizing textarea { pointer-events: none; }
+html.pane-resizing canvas, html.pane-resizing textarea, html.pane-resizing iframe { pointer-events: none; }
 @media (max-width: 760px) { .pane-grip { display: none; } }
 /* A narrow VS Code editor group still supports multiple resizable panes. */
 .app[data-vscode] .pane-grip { display: block; }

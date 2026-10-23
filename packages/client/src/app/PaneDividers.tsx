@@ -18,6 +18,10 @@ export function PaneDividers({ layout, onChange, onResizeEnd }: {
     if (!left || !right) return;
     stop.current?.();
     e.preventDefault();
+    // (the pointer kept by the grip: over a pane's frame — an article's page, a slide — the window
+    // would see neither the moves nor the release, and the divider then followed a button-less pointer)
+    const grip = e.currentTarget as HTMLElement;
+    try { grip.setPointerCapture(e.pointerId); } catch { /* ignore */ }
     const widths: [number, number] = [left.getBoundingClientRect().width, right.getBoundingClientRect().width];
     const x0 = e.clientX;
     let next = layout;
@@ -30,6 +34,7 @@ export function PaneDividers({ layout, onChange, onResizeEnd }: {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', end);
       window.removeEventListener('pointercancel', end);
+      grip.removeEventListener('lostpointercapture', end);
       document.documentElement.classList.remove('pane-resizing');
       stop.current = null;
       onResizeEnd?.(next);
@@ -38,6 +43,7 @@ export function PaneDividers({ layout, onChange, onResizeEnd }: {
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', end);
     window.addEventListener('pointercancel', end);
+    grip.addEventListener('lostpointercapture', end);
   };
 
   const shown = visiblePanes(layout);
