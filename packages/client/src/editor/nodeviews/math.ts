@@ -736,7 +736,7 @@ export class MathDisplayView implements NodeView {
     if (!avail) return undefined;
     const room = wideRoom(this.dom, avail) - 2 * (this.metaEl.offsetWidth + 14) - 8;
     const box = (this.field?.dom ?? this.staticEl ?? this.dom).querySelector('mjx-container') ?? this.field?.dom ?? this.staticEl ?? this.dom;
-    const fs = parseFloat(getComputedStyle(box).fontSize) * (box.tagName === 'MJX-CONTAINER' ? 1 : (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--math-scale')) || 1));
+    const fs = parseFloat(getComputedStyle(box).fontSize) * (box.tagName === 'MJX-CONTAINER' ? 1 : (parseFloat(getComputedStyle(box).getPropertyValue('--math-scale')) || 1));
     if (!fs) return undefined;
     // in half ems: a few pixels more or less draw the formula anew only when that changes where it breaks
     return Math.max(10, Math.floor((room / fs) * 2) / 2);

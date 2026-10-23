@@ -43,6 +43,8 @@ export interface MathFont {
   hint: string;
   /** its x-height (em; MathJax's font data): formulas are sized by it */
   xHeight: number;
+  /** the height of its capital H (em; MathJax's font data): an article's formulas are sized by it (editor/article.ts) */
+  capHeight: number;
 }
 
 const CM = '"CMU Serif", serif';
@@ -100,20 +102,20 @@ export const EDITOR_FACES: EditorFace[] = [
   served('pennstander', 'Pennstander', 'informal, handwriting-like', 'fira'),
 ];
 
-/** MathJax's fonts (x-heights from their font data), in the order of the menu */
+/** MathJax's fonts (x- and cap heights from their font data), in the order of the menu */
 export const MATH_FONTS: MathFont[] = [
-  { id: 'newcm', label: 'New Computer Modern', hint: 'LaTeX’s Computer Modern, complete', xHeight: 0.442 },
-  { id: 'modern', label: 'Latin Modern', hint: 'Computer Modern as lmodern draws it', xHeight: 0.442 },
-  { id: 'tex', label: 'MathJax TeX', hint: 'Computer Modern as MathJax 3 and KaTeX draw it', xHeight: 0.442 },
-  { id: 'stix2', label: 'STIX Two', hint: 'a Times, the largest set of symbols', xHeight: 0.479 },
-  { id: 'termes', label: 'TeX Gyre Termes', hint: 'a Times', xHeight: 0.441 },
-  { id: 'pagella', label: 'TeX Gyre Pagella', hint: 'a Palatino', xHeight: 0.482 },
-  { id: 'asana', label: 'Asana Math', hint: 'a Palatino (pxfonts)', xHeight: 0.482 },
-  { id: 'bonum', label: 'TeX Gyre Bonum', hint: 'a Bookman', xHeight: 0.499 },
-  { id: 'schola', label: 'TeX Gyre Schola', hint: 'a Century Schoolbook', xHeight: 0.47 },
-  { id: 'dejavu', label: 'TeX Gyre DejaVu', hint: 'DejaVu Serif', xHeight: 0.519 },
-  { id: 'euler', label: 'Euler', hint: 'Hermann Zapf’s upright AMS Euler letters', xHeight: 0.46 },
-  { id: 'fira', label: 'Fira Math', hint: 'sans-serif, Fira Sans', xHeight: 0.527 },
+  { id: 'newcm', label: 'New Computer Modern', hint: 'LaTeX’s Computer Modern, complete', xHeight: 0.442, capHeight: 0.683 },
+  { id: 'modern', label: 'Latin Modern', hint: 'Computer Modern as lmodern draws it', xHeight: 0.442, capHeight: 0.683 },
+  { id: 'tex', label: 'MathJax TeX', hint: 'Computer Modern as MathJax 3 and KaTeX draw it', xHeight: 0.442, capHeight: 0.683 },
+  { id: 'stix2', label: 'STIX Two', hint: 'a Times, the largest set of symbols', xHeight: 0.479, capHeight: 0.657 },
+  { id: 'termes', label: 'TeX Gyre Termes', hint: 'a Times', xHeight: 0.441, capHeight: 0.662 },
+  { id: 'pagella', label: 'TeX Gyre Pagella', hint: 'a Palatino', xHeight: 0.482, capHeight: 0.692 },
+  { id: 'asana', label: 'Asana Math', hint: 'a Palatino (pxfonts)', xHeight: 0.482, capHeight: 0.692 },
+  { id: 'bonum', label: 'TeX Gyre Bonum', hint: 'a Bookman', xHeight: 0.499, capHeight: 0.681 },
+  { id: 'schola', label: 'TeX Gyre Schola', hint: 'a Century Schoolbook', xHeight: 0.47, capHeight: 0.722 },
+  { id: 'dejavu', label: 'TeX Gyre DejaVu', hint: 'DejaVu Serif', xHeight: 0.519, capHeight: 0.729 },
+  { id: 'euler', label: 'Euler', hint: 'Hermann Zapf’s upright AMS Euler letters', xHeight: 0.46, capHeight: 0.683 },
+  { id: 'fira', label: 'Fira Math', hint: 'sans-serif, Fira Sans', xHeight: 0.527, capHeight: 0.689 },
 ];
 
 /** Faces that were renamed: a preference saved under the old id keeps its face. */
