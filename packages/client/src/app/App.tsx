@@ -1825,7 +1825,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         {isLyxDoc && <SourcePane key={docId!} fill style={paneStyle('tex')} target={sourceTarget} tick={docTick} selTick={selTick} mathField={mathField} onNotify={notify} onClose={() => showPane('tex', false)} />}
         {isLyxDoc && pdfMounted && (
           <div class="pdf-pane" data-pane="pdf" style={paneStyle('pdf')}>
-            {isArticle ? <ArticlePage key={docId} docId={docId!} savedAt={save.savedAt} view={view} selTick={selTick} syncSeq={pageSync} onClose={() => showPane('pdf', false)} /> : <PdfPanel key={docId} docId={docId} state={pdf} savedAt={save.savedAt} onBuild={build} onCancel={cancelBuild} onShowTex={showTex} syncTarget={syncTarget} onForward={() => { void syncToPdf(); }} onInverse={(pg, x, y) => { void syncFromPdf(pg, x, y); }}
+            {isArticle ? <ArticlePage key={docId} docId={docId!} savedAt={save.savedAt} view={view} selTick={selTick} syncSeq={pageSync} ruler={showRuler} onClose={() => showPane('pdf', false)} /> : <PdfPanel key={docId} docId={docId} state={pdf} savedAt={save.savedAt} onBuild={build} onCancel={cancelBuild} onShowTex={showTex} syncTarget={syncTarget} onForward={() => { void syncToPdf(); }} onInverse={(pg, x, y) => { void syncFromPdf(pg, x, y); }}
               onPublicLink={shareProject ? () => setShareFor(shareProject) : undefined} onClose={() => showPane('pdf', false)} />}
           </div>
         )}

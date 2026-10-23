@@ -1221,6 +1221,10 @@ pre.hl .l.cur { background: color-mix(in srgb, var(--active-bg) 45%, transparent
 .ruler-rung { position: absolute; top: 0; height: 24px; width: 0; border-left: 1px dashed color-mix(in srgb, var(--accent) 45%, transparent); pointer-events: none; z-index: 1; }
 .ruler-rung.wide { top: 24px; height: 10px; }
 .ruler-rung.on { border-left: 1px solid var(--accent-strong); }
+/* over an article's page (app/ArticlePage.tsx): the band is the page's text column, where its frame says */
+.ruler.page-ruler { position: relative; flex: none; height: 24px; z-index: 2; }
+.ruler.page-ruler .ruler-inner { margin: 0; }
+.ruler.page-ruler .ruler-band { position: absolute; top: 0; bottom: 0; max-width: none; margin: 0; }
 
 /* Margin ink (editor/plugins/ink.ts): the drawing canvas overlays the scroll viewport, clipped to
    the margins by a keyhole clip-path set from JS (the text column is a hole, so clicks there reach

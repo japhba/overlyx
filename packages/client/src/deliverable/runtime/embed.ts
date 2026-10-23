@@ -6,6 +6,7 @@
  * message to the editor, client editor/articleblocks.ts).
  */
 import { follow, type FollowTarget } from './follow';
+import { startColumn, columnSettled } from './column';
 
 let shown: Element[] = [];
 
@@ -63,10 +64,11 @@ export function embedSettled(): void {
 /**
  * A page shown beside its article in the editor (client app/ArticlePage.tsx): where it is scrolled to
  * goes to the editor, which brings a reloaded page back there; the paragraph the editor's cursor is
- * in is brought into view (follow.ts).
+ * in is brought into view (follow.ts); its text column is as wide as the ruler over it says (column.ts).
  */
 export function startViewSync(): void {
   if (window.parent === window) return;
+  startColumn();
   let pending = false;
   addEventListener('scroll', () => {
     if (pending) return;
@@ -86,5 +88,7 @@ export function startViewSync(): void {
 
 /** the page has settled (fonts, math, pictures): the editor may scroll it now */
 export function viewSettled(): void {
-  if (window.parent !== window) window.parent.postMessage({ ol: 'viewReady' }, '*');
+  if (window.parent === window) return;
+  columnSettled();
+  window.parent.postMessage({ ol: 'viewReady' }, '*');
 }

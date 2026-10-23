@@ -11,6 +11,10 @@
  *
  * In margin mode the ruler shows the split too (app/notespane.tsx): the column is centred in the
  * text part, and over the notes & comments pane sit its sash and the notes' text size.
+ *
+ * Over an article's page (app/ArticlePage.tsx) it shows the page's text column, where the page's
+ * frame says it is (runtime/column.ts), and sets its width there; it snaps to the page's own width
+ * too, and a double-click goes back to it. It has no second track there.
  */
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { SashProps } from './notespane';
@@ -30,6 +34,10 @@ export const NOTE_SCALE_MIN = 60, NOTE_SCALE_MAX = 130, NOTE_SCALE_DEFAULT = 90,
 /** Margin mode's part of the ruler: the notes pane's sash, − / + for the text size of notes and comments, and » to fold the pane away. */
 export interface RulerNotes { sash: SashProps; scale: number; onScale(pct: number): void; onFold?(): void }
 
+/** The ruler over a page: its text column (px from the ruler's left edge), the widest it can get there, its width as the page has it, and going back to that */
+export interface RulerPage { left: number; width: number; full: number; own: number; onOwn(): void }
+const OWN = 'As published';
+
 /**
  * Where the column sits on the ruler and how wide things are, in the ruler's own (layout) px — the
  * document's px: a viewport zoom transforms the ruler with the page (app/documentviewport.ts) —
@@ -44,7 +52,7 @@ function useWideWidth(): number {
   return w;
 }
 
-export function Ruler({ width, onChange, notes }: { width: number; onChange: (w: number) => void; notes?: RulerNotes }) {
+export function Ruler({ width, onChange, notes, page }: { width: number; onChange: (w: number) => void; notes?: RulerNotes; page?: RulerPage }) {
   const rulerRef = useRef<HTMLDivElement>(null);
   const bandRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<{ track: 'text' | 'wide'; width: number; rung?: string } | null>(null);
@@ -58,7 +66,7 @@ export function Ruler({ width, onChange, notes }: { width: number; onChange: (w:
     const measure = () => {
       const inner = band.parentElement as HTMLElement;
       // the widest the column can get: the text part's whole width (12px either side, as the page's padding then)
-      const full = Math.max(MIN_WIDTH, notes ? inner.clientWidth : ruler.clientWidth - 24);
+      const full = Math.max(MIN_WIDTH, page ? page.full : notes ? inner.clientWidth : ruler.clientWidth - 24);
       setGeo({ centre: inner.offsetLeft + band.offsetLeft + band.offsetWidth / 2, column: band.offsetWidth, scale: documentViewScale(band) || 1, full, pane: paneRoom(band) });
     };
     const ro = new ResizeObserver(measure);
@@ -66,13 +74,15 @@ export function Ruler({ width, onChange, notes }: { width: number; onChange: (w:
     ro.observe(ruler);
     measure();
     return () => ro.disconnect();
-  }, [width, !!notes]);
+  }, [width, !!notes, page?.left, page?.width, page?.full]);
 
   /** a handle dragged: the width it stands for (doc px), symmetric about the column's centre */
   const startDrag = (track: 'text' | 'wide') => (ev: PointerEvent) => {
     ev.preventDefault();
     const band = bandRef.current;
     if (!band) return;
+    // (the moves keep coming over a frame: the page's, an article's HTML block)
+    try { (ev.currentTarget as Element).setPointerCapture(ev.pointerId); } catch { /* ignore */ }
     const rect = band.getBoundingClientRect();
     const centre = rect.left + rect.width / 2;
     const scale = documentViewScale(band) || 1;
@@ -82,6 +92,7 @@ export function Ruler({ width, onChange, notes }: { width: number; onChange: (w:
       if (track === 'text') {
         // out to the edge: the full width (0); else the nearest rung, or the width dragged
         if (w >= geo.full - SNAP / scale || near(geo.full)) { setDrag({ track, width: Math.round(geo.full), rung: 'Full width' }); onChange(0); return; }
+        if (page && near(page.own)) { setDrag({ track, width: Math.round(page.own), rung: OWN }); page.onOwn(); return; }
         const rung = TEXT_WIDTH_RUNGS.find(([, v]) => near(v));
         const next = Math.round(Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, rung ? rung[1] : w)));
         setDrag({ track, width: next, rung: rung?.[0] });
@@ -125,19 +136,19 @@ export function Ruler({ width, onChange, notes }: { width: number; onChange: (w:
   const wideLabel = wide === WIDE_TEXT ? 'same as the text' : wide === WIDE_FULL ? 'full width' : `${(wideNow / PX_PER_CM).toFixed(1)} cm`;
   // rungs shown while a handle is dragged: where it snaps
   const rungs = drag?.track === 'text'
-    ? [...TEXT_WIDTH_RUNGS.filter(([, v]) => v < geo.full).map(([l, v]) => ({ w: v, label: l })), { w: geo.full, label: 'Full width' }]
+    ? [...TEXT_WIDTH_RUNGS.filter(([, v]) => v < geo.full).map(([l, v]) => ({ w: v, label: l })), ...(page && page.own < geo.full ? [{ w: page.own, label: OWN }] : []), { w: geo.full, label: 'Full width' }]
     : drag?.track === 'wide' ? [{ w: geo.column, label: 'Text' }, { w: geo.pane, label: 'Full' }] : [];
   return (
-    <div ref={rulerRef} class={'ruler' + (drag ? ' dragging' : '')}>
-      <div class="ruler-inner" title="Drag a handle to change the text width; double-click to reset">
-        <div class="ruler-band" ref={bandRef} onDblClick={() => onChange(DEFAULT_WIDTH)}>
+    <div ref={rulerRef} class={'ruler' + (page ? ' page-ruler' : '') + (drag ? ' dragging' : '')} data-page-ruler={page ? '' : undefined}>
+      <div class="ruler-inner" title={page ? 'Drag a handle to change how wide the text runs here (the page itself stays as it is); double-click: as published' : 'Drag a handle to change the text width; double-click to reset'}>
+        <div class="ruler-band" ref={bandRef} style={page ? { left: page.left + 'px', width: page.width + 'px' } : undefined} onDblClick={() => page ? page.onOwn() : onChange(DEFAULT_WIDTH)}>
           {ticks.map(t => <span key={t.x} class={'tick' + (t.major ? ' major' : '')} style={{ left: t.x + 'px' }}>{t.label && <span class="tick-label">{t.label}</span>}</span>)}
           <span class="handle left" role="slider" tabIndex={0} aria-label="Text width, left handle" aria-valuemin={MIN_WIDTH} aria-valuemax={Math.round(geo.full)} aria-valuenow={width || shown} onKeyDown={keyboardWidth} onPointerDown={startDrag('text')} title="Left margin — drag or use arrow keys to change the text width (out to the edge: full width)" />
           <span class="handle right" role="slider" tabIndex={0} aria-label="Text width, right handle" aria-valuemin={MIN_WIDTH} aria-valuemax={Math.round(geo.full)} aria-valuenow={width || shown} onKeyDown={keyboardWidth} onPointerDown={startDrag('text')} title="Right margin — drag or use arrow keys to change the text width (out to the edge: full width)" />
           {(drag?.track === 'text' || width === 0) && <span class="readout">{drag?.rung ? drag.rung + ' · ' : ''}{(shown / PX_PER_CM).toFixed(1)} cm · {shown} px{width === 0 && !drag ? ' (full width)' : ''}</span>}
         </div>
       </div>
-      {geo.column > 0 && (
+      {geo.column > 0 && !page && (
         <div class="ruler-wide" data-ruler-wide title={`Formulas and tables: ${wideLabel} — drag an end to change how far they may reach into the margins; double-click: full width`}
           onDblClick={() => setWideWidth(WIDE_FULL)}>
           <span class="wide-band" style={{ left: `${geo.centre - px(wideShown) / 2}px`, width: `${px(wideShown)}px` }} />
