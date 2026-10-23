@@ -1094,6 +1094,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   };
   /** SyncTeX: the place in the PDF to show (forward search) */
   const [syncTarget, setSyncTarget] = useState<PdfTarget | null>(null);
+  /** an article's Sync: its page pane shows the cursor's paragraph (app/ArticlePage.tsx) */
+  const [pageSync, setPageSync] = useState(0);
   /** the LaTeX the last build compiled (fetched once, kept with the build state) */
   const builtTex = async (): Promise<string | null> => {
     if (!docId) return null;
@@ -1103,6 +1105,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   /** Forward search: the cursor's line in the built LaTeX (sourcelocate) → its box in the PDF (synctex view) → scroll + flash there. */
   const syncToPdf = async () => {
     if (!docId || !view || !isLyxDoc) return;
+    if (isArticle) { showPane('pdf'); setPageSync(Date.now()); return; }
     const tex = await builtTex();
     if (!tex) { notify('SyncTeX needs a built PDF — build it first (Ctrl+R)', 'error'); return; }
     const where = cursorLine(view, tex, mathField, null);
@@ -1450,7 +1453,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     { title: 'Navigate', items: [
       { label: 'Outline pane (files panel)', shortcut: 'Ctrl+Alt+O', action: () => setShowFiles(true) },
       { label: 'Go to label…', action: () => { void uiPrompt('Go to Label', 'Label:').then(n => { if (n) gotoLabel(n, view ?? undefined); }); } },
-      { label: 'Sync to PDF (forward search)', shortcut: 'Ctrl+Alt+J', action: () => { void syncToPdf(); } },
+      { label: isArticle ? 'Show in the page' : 'Sync to PDF (forward search)', shortcut: 'Ctrl+Alt+J', action: () => { void syncToPdf(); } },
       { sep: true },
       { label: 'Back', shortcut: NAV_BACK_KEY, disabled: !navHistory.canBack(), action: navBack },
       { label: 'Forward', shortcut: NAV_FORWARD_KEY, disabled: !navHistory.canForward(), action: navForward },
@@ -1822,7 +1825,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         {isLyxDoc && <SourcePane key={docId!} fill style={paneStyle('tex')} target={sourceTarget} tick={docTick} selTick={selTick} mathField={mathField} onNotify={notify} onClose={() => showPane('tex', false)} />}
         {isLyxDoc && pdfMounted && (
           <div class="pdf-pane" data-pane="pdf" style={paneStyle('pdf')}>
-            {isArticle ? <ArticlePage key={docId} docId={docId!} savedAt={save.savedAt} onClose={() => showPane('pdf', false)} /> : <PdfPanel key={docId} docId={docId} state={pdf} savedAt={save.savedAt} onBuild={build} onCancel={cancelBuild} onShowTex={showTex} syncTarget={syncTarget} onForward={() => { void syncToPdf(); }} onInverse={(pg, x, y) => { void syncFromPdf(pg, x, y); }}
+            {isArticle ? <ArticlePage key={docId} docId={docId!} savedAt={save.savedAt} view={view} selTick={selTick} syncSeq={pageSync} onClose={() => showPane('pdf', false)} /> : <PdfPanel key={docId} docId={docId} state={pdf} savedAt={save.savedAt} onBuild={build} onCancel={cancelBuild} onShowTex={showTex} syncTarget={syncTarget} onForward={() => { void syncToPdf(); }} onInverse={(pg, x, y) => { void syncFromPdf(pg, x, y); }}
               onPublicLink={shareProject ? () => setShareFor(shareProject) : undefined} onClose={() => showPane('pdf', false)} />}
           </div>
         )}

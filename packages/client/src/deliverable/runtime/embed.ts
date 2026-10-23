@@ -5,6 +5,7 @@
  * block sits flush in the frame, and the frame's height follows the block's (an `embedSize`
  * message to the editor, client editor/articleblocks.ts).
  */
+import { follow, type FollowTarget } from './follow';
 
 let shown: Element[] = [];
 
@@ -61,7 +62,8 @@ export function embedSettled(): void {
 
 /**
  * A page shown beside its article in the editor (client app/ArticlePage.tsx): where it is scrolled to
- * goes to the editor, which brings a reloaded page back there.
+ * goes to the editor, which brings a reloaded page back there; the paragraph the editor's cursor is
+ * in is brought into view (follow.ts).
  */
 export function startViewSync(): void {
   if (window.parent === window) return;
@@ -74,6 +76,11 @@ export function startViewSync(): void {
   addEventListener('message', e => {
     const d = e.data as { ol?: string; y?: number } | null;
     if (e.source === window.parent && d?.ol === 'viewScrollTo' && typeof d.y === 'number') scrollTo(0, d.y);
+    // the editor's cursor moved to another paragraph (follow.ts)
+    const t = (d as { target?: FollowTarget } | null)?.target;
+    if (e.source === window.parent && d?.ol === 'viewFollow' && t && Array.isArray(t.words) && t.words.every(w => typeof w === 'string')) {
+      follow({ words: t.words.slice(0, 400), nth: Number(t.nth) || 0, frac: Number(t.frac) || 0, flash: !!t.flash });
+    }
   });
 }
 

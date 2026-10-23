@@ -5,21 +5,59 @@
  * scrolled to (runtime/embed.ts startViewSync). A phone's width on request; the PDF is the page
  * printed by the server's browser. What the page keeps in its localStorage (a view option it offers)
  * is kept here for each project, as a browser keeps it for a site, and handed back at each load
- * (runtime/storage.ts).
+ * (runtime/storage.ts). The page follows the editor's cursor: the paragraph it is in is brought into
+ * view when the cursor moves to another (runtime/follow.ts), and marked on Sync (Ctrl+Alt+J).
  */
 import { useEffect, useRef, useState } from 'preact/hooks';
+import type { EditorView } from 'prosemirror-view';
 import { api } from '../api';
 import { projectOfDoc, docPathOf } from '@overlyx/core';
 import { openProjectPath } from '../openpath';
 import { PAGE_STORAGE_NAME, PAGE_STORAGE_MAX } from '../deliverable/runtime/storage';
+import { followWords, type FollowTarget } from '../deliverable/runtime/follow';
 
 const PHONE = 390;
 const storeKey = (project: string) => 'ol.pageStorage:' + project;
 
-export function ArticlePage({ docId, savedAt, onClose }: {
+/** where the editor's cursor is, for the page to find: its paragraph's own words (a paragraph
+ *  without any, such as a display formula's: the one before it, else after) */
+function cursorTarget(view: EditorView): FollowTarget | null {
+  const blocks: { pos: number; size: number; words: string[] }[] = [];
+  view.state.doc.descendants((node, pos) => {
+    if (!node.isTextblock) return true;
+    let text = '';
+    node.forEach(c => { text += c.isText ? c.text ?? '' : ' '; });
+    blocks.push({ pos, size: node.content.size, words: followWords(text) });
+    return true;
+  });
+  const { from, $from } = view.state.selection;
+  let d = $from.depth;
+  while (d > 0 && !$from.node(d).isTextblock) d--;
+  let i = d > 0 ? blocks.findIndex(b => b.pos === $from.before(d)) : blocks.findIndex(b => b.pos >= from);
+  if (i < 0) return null;
+  let frac = Math.min(1, Math.max(0, (from - blocks[i].pos - 1) / Math.max(1, blocks[i].size)));
+  if (!blocks[i].words.length) {
+    let j = i;
+    while (j >= 0 && !blocks[j].words.length) j--;
+    if (j >= 0) frac = 1;
+    else { j = i; while (j < blocks.length && !blocks[j].words.length) j++; frac = 0; }
+    if (j < 0 || j >= blocks.length) return null;
+    i = j;
+  }
+  const key = blocks[i].words.join(' ');
+  const nth = blocks.slice(0, i).filter(b => b.words.join(' ') === key).length;
+  return { words: blocks[i].words, nth, frac };
+}
+
+export function ArticlePage({ docId, savedAt, view, selTick, syncSeq, onClose }: {
   docId: string;
   /** when the document was last written: the page is loaded again after it */
   savedAt: number;
+  /** the article's editor, and a count of its cursor's moves: the page follows the cursor */
+  view?: EditorView | null;
+  selTick?: number;
+  /** Sync (Ctrl+Alt+J): the cursor's paragraph shown and marked */
+  syncSeq?: number;
   onClose?: () => void;
 }) {
   const project = projectOfDoc(docId), path = docPathOf(docId);
@@ -30,6 +68,14 @@ export function ArticlePage({ docId, savedAt, onClose }: {
   const frame = useRef<HTMLIFrameElement>(null);
   const scrolled = useRef(0);
   const stored = useRef<string | null>(null);
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  /** the page has loaded (the frame takes messages); a Sync waiting for it; the place last sent */
+  const ready = useRef(false);
+  const pendingSync = useRef<FollowTarget | null>(null);
+  const pendingFollow = useRef<FollowTarget | null>(null);
+  const followed = useRef('');
+  const sendFollow = (target: FollowTarget) => frame.current?.contentWindow?.postMessage({ ol: 'viewFollow', target }, '*');
   if (stored.current === null) { try { stored.current = localStorage.getItem(storeKey(project)) ?? ''; } catch { stored.current = ''; } }
 
   useEffect(() => {
@@ -64,14 +110,45 @@ export function ArticlePage({ docId, savedAt, onClose }: {
       }
       // a link of the page to another file of the project: opened in OverLyX (one leaving OverLyX opens a tab itself, runtime/links.ts)
       if (d?.ol === 'openPath' && typeof (d as { path?: unknown }).path === 'string') openProjectPath(project, (d as { path: string }).path);
-      // (loaded: back where the reader was)
-      if (d?.ol === 'viewReady' && scrolled.current) frame.current.contentWindow?.postMessage({ ol: 'viewScrollTo', y: scrolled.current }, '*');
+      // (loaded: back where the reader was, else at the cursor; a Sync asked for meanwhile shown)
+      if (d?.ol === 'viewReady') {
+        ready.current = true;
+        if (scrolled.current) frame.current.contentWindow?.postMessage({ ol: 'viewScrollTo', y: scrolled.current }, '*');
+        const v = viewRef.current;
+        const t = pendingSync.current ?? pendingFollow.current ?? (!scrolled.current && v ? cursorTarget(v) : null);
+        pendingSync.current = pendingFollow.current = null;
+        if (t) sendFollow(t);
+      }
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
   }, [project]);
 
   const src = url ? `${url}?ol=view&n=${n}` : null;
+  useEffect(() => { ready.current = false; }, [src]);
+
+  // the cursor moved to another paragraph (or far within one): the page brings it into view
+  useEffect(() => {
+    if (!view) return;
+    const t = setTimeout(() => {
+      const target = cursorTarget(view);
+      if (!target) return;
+      const key = `${target.words.join(' ')}|${target.nth}|${Math.round(target.frac * 4)}`;
+      if (key === followed.current) return;
+      followed.current = key;
+      if (ready.current) sendFollow(target); else pendingFollow.current = target;
+    }, 250);
+    return () => clearTimeout(t);
+  }, [view, selTick]);
+
+  // Sync: shown and marked, once the page is there
+  useEffect(() => {
+    if (!syncSeq || !view) return;
+    const target = cursorTarget(view);
+    if (!target) return;
+    if (ready.current) sendFollow({ ...target, flash: true }); else pendingSync.current = { ...target, flash: true };
+  }, [syncSeq]);
+
   const pdfHref = `/api/projects/${encodeURIComponent(project)}/deliverable-pdf?path=${encodeURIComponent(path)}`;
   return (
     <div class="pdf-panel article-page" data-article-page>
