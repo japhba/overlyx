@@ -268,7 +268,12 @@ export async function pushProject(project: string, opts: { force?: boolean } = {
     db.prepare('UPDATE mirrors SET last_head = ?, last_push_at = ?, last_attempt_at = ?, last_error = NULL WHERE project = ?').run(head, Date.now(), Date.now(), project);
     console.log(`[mirror] pushed "${project}" → ${repo} (${head.slice(0, 7)})`);
   } catch (e) {
-    const msg = String((e as Error).message ?? e).replace(/x-access-token:[^@\s]*@/g, '').slice(0, 500);
+    // execFile's message starts with the command (including the credential-helper script).
+    // Put Git's reason first so it survives the dialog's preview and single-line log collection.
+    const error = e as Error & { stderr?: string };
+    let msg = String(error.stderr?.trim() || error.message || e).replace(/x-access-token:[^@\s]*@/g, '');
+    if (config.mirror.token) msg = msg.split(config.mirror.token).join('[redacted]');
+    msg = msg.replace(/\s+/g, ' ').trim().slice(0, 500);
     db.prepare('UPDATE mirrors SET last_attempt_at = ?, last_error = ? WHERE project = ?').run(Date.now(), msg, project);
     console.error(`[mirror] push of "${project}" failed: ${msg}`);
   }

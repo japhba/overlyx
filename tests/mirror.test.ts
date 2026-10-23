@@ -4,7 +4,7 @@
  * pushed with its history, pushed again only when its HEAD moved, skipped while paused, repository
  * names are made GitHub-safe, and a deleted project's mirror row goes away.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -25,6 +25,7 @@ delete process.env.GITHUB_MIRROR_ORG; delete process.env.GITHUB_MIRROR_TOKEN;
 
 const mirror = await import('../packages/server/src/mirror.ts');
 const gitmod = await import('../packages/server/src/git.ts');
+const { config } = await import('../packages/server/src/config.ts');
 const access = await import('../packages/server/src/access.ts');
 const { createUser } = await import('../packages/server/src/auth.ts');
 
@@ -111,5 +112,35 @@ describe('mirror', () => {
     expect(mirror.mirrorRow('jan/second')?.last_head).toBeTruthy();
     await mirror.archiveMirror('jan/second');
     expect(mirror.mirrorRow('jan/second')).toBeUndefined();
+  });
+
+  it('shows the Git failure reason on one line without credentials and keeps the last successful push', async () => {
+    const project = 'example/mirror-failure';
+    mkdirSync(join(ROOT, 'projects', project), { recursive: true });
+    writeFileSync(join(ROOT, 'projects', project, 'main.tex'), 'Example.\n');
+    const before = await mirror.pushProject(project);
+    expect(before.lastError).toBeNull();
+    expect(before.lastPushAt).not.toBeNull();
+    const previous = { ...config.mirror };
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      // The target was already checked; make the next push fail at Git, without a network request.
+      config.mirror.token = 'synthetic-mirror-token';
+      config.mirror.urlTemplate = `file://${join(ROOT, 'missing', config.mirror.token)}/{repo}.git`;
+      const failed = await mirror.pushProject(project, { force: true });
+      expect(failed.lastError).toMatch(/^fatal: .*does not appear to be a git repository/);
+      expect(failed.lastError).toContain('[redacted]');
+      expect(failed.lastError).not.toContain(config.mirror.token);
+      expect(failed.lastError).not.toContain('credential.helper');
+      expect(failed.lastError).not.toMatch(/[\r\n]/);
+      expect(failed.lastError!.length).toBeLessThanOrEqual(500);
+      expect(logged).toHaveBeenCalledWith(`[mirror] push of "${project}" failed: ${failed.lastError}`);
+      expect(failed.lastHead).toBe(before.lastHead);
+      expect(failed.lastPushAt).toBe(before.lastPushAt);
+      expect(failed.behind).toBe(true);
+    } finally {
+      Object.assign(config.mirror, previous);
+      logged.mockRestore();
+    }
   });
 });
