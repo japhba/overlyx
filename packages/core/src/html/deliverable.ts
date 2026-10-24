@@ -128,6 +128,13 @@ export function starterPage(title: string): string {
 `;
 }
 
+/** the title of a web page still exactly as starterPage made it (nothing written on it yet), else null */
+export function untouchedPageTitle(text: string): string | null {
+  if (text.length > 4000 || !/<meta name="overlyx" content="page">/.test(text)) return null;
+  const { title } = deliverableInfo(text);
+  return text === starterPage(title) ? title : null;
+}
+
 export function starterFor(kind: DeliverableKind, title: string, template?: string): string {
   if (kind === 'page' && template !== undefined) throw new Error('Web pages do not have scientific templates.');
   return kind === 'deck' ? starterDeck(title, template) : kind === 'poster' ? starterPoster(title, template) : starterPage(title);

@@ -13,15 +13,24 @@ import { uiPrompt } from './Dialogs';
 import { starterFor } from '@overlyx/core/html/deliverable.ts';
 import type { DeliverableKind } from '@overlyx/core/html/deliverable.ts';
 
-export const NEW_FILE_HINT = 'The ending decides what it is: .tex a LaTeX document, .md a Markdown document, .html slides (poster.html a poster, page.html or index.html a web page, article.html or post.html an article — a web page you write like a document), .board a whiteboard, .bib, .sty, .txt … a text file.';
+export const NEW_FILE_HINT = 'The ending decides what it is: .tex a LaTeX document, .md a Markdown document, .html slides (poster.html a poster, page.html or site/index.html a web page, article.html or post.html an article — a web page you write like a document; a folder’s index.html goes by the folder’s name), .board a whiteboard, .bib, .sty, .txt … a text file.';
 
 export type NewFileKind = 'doc' | 'board' | 'deliverable' | 'text';
 
-/** which deliverable a new .html file is, by its name: a poster, a web page, else slides */
+/**
+ * which deliverable a new .html file is, by its name: a poster, a web page, else slides. A folder's
+ * index.html — how every deliverable is kept — goes by the folder's name (SAB/index.html slides,
+ * site/index.html a web page); the project's own index.html is its website.
+ */
 export function deliverableKindForName(rel: string): DeliverableKind {
-  const base = (rel.split('/').pop() ?? rel).replace(/\.html?$/i, '');
+  const parts = rel.replace(/\.html?$/i, '').split('/');
+  let base = parts.pop() ?? '';
+  if (/^(index|home)$/i.test(base)) {
+    if (!parts.length) return 'page';
+    base = parts.pop()!;
+  }
   if (/poster/i.test(base)) return 'poster';
-  if (/(^|[^a-z])(page|site|web|website|index|home)([^a-z]|$)/i.test(base)) return 'page';
+  if (/(^|[^a-z])(page|site|web|website|homepage)([^a-z]|$)/i.test(base)) return 'page';
   return 'deck';
 }
 
@@ -59,8 +68,10 @@ export async function createProjectFile(project: string, rel: string): Promise<s
     return id;
   }
   if (kind === 'deliverable') {
-    // not an empty page (the canvas would have nothing to edit): the starting point of its kind
-    const stem = (rel.split('/').pop() ?? rel).replace(/\.html?$/i, '');
+    // not an empty page (the canvas would have nothing to edit): the starting point of its kind,
+    // titled by its name (a folder's index.html by the folder's)
+    const parts = rel.replace(/\.html?$/i, '').split('/');
+    const stem = parts.length > 1 && /^index$/i.test(parts[parts.length - 1]) ? parts[parts.length - 2] : parts[parts.length - 1];
     const title = stem.replace(/[-_]+/g, ' ').replace(/^\w/, c => c.toUpperCase());
     const r = await api.upload(project, rel, new Blob([starterFor(deliverableKindForName(rel), title)], { type: 'text/html' }), { overwrite: false });
     return project + '/' + r.path;

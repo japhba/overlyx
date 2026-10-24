@@ -14,6 +14,7 @@
  */
 import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { createPortal } from 'preact/compat';
 import { api, fileTabId, fileUrl, isAuxFile, isTextFile, type Project, type ProjectFile } from '../api';
 import { subscribeProjectEvents } from '../projectevents';
 import { showContextMenu, type MenuItem } from '../editor/contextmenu';
@@ -21,6 +22,7 @@ import { chooseLyxImport } from './lyximport';
 import { projectOfDoc, splitDocId, projectShortName, type DocGroup, type DocGroupMember } from '@overlyx/core';
 import { uiPrompt, uiConfirm, uiAlert } from './Dialogs';
 import { promptNewFile } from './newfile';
+import { NewLayoutDialog } from './NewLayoutDialog';
 import { useUiMode } from './uimode';
 import { KIND_ICONS, iconSvg } from './modernicons';
 import { chooseGoogleImport } from './gpicker';
@@ -340,6 +342,8 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
     if (shown && (shown === id || shown.startsWith(id + '/'))) deletedHere.add(shown);
     await doOp({ op: 'delete', from: p });
   };
+  /** + Slides: a deck, poster, web page or article — a folder with an index.html — in `dir` (NewLayoutDialog) */
+  const [newLayoutIn, setNewLayoutIn] = useState<string | null>(null);
   const newFolder = async (dir = '') => {
     const n = await uiPrompt('New Folder', `New folder${dir ? ' in ' + dir : ''}:`, 'figures');
     if (n) await doOp({ op: 'mkdir', to: (dir ? dir + '/' : '') + n.trim() });
@@ -371,6 +375,7 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
   ];
   const newItems = (dir = ''): MenuItem[] => canEdit ? [
     { label: 'New File…', action: () => void newFile(dir) },
+    { label: 'New Slides / Poster / Page…', action: () => setNewLayoutIn(dir) },
     { label: 'New Folder…', action: () => void newFolder(dir) },
     { label: 'Upload…', action: () => void upload(dir) },
     { label: 'Import from LyX…', action: () => chooseLyxImport(project!.name, dir, r => { reveal(r.created[0] ?? ''); void load(); onOpen(r.id); }) },
@@ -530,7 +535,8 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
         {via === 'owner' ? 'Your project' : via === 'admin' ? `Owned by ${project.owner?.name ?? '—'}` : `Shared by ${project.owner?.name ?? '—'} · ${role === 'view' ? 'view only' : 'you can edit'}`} · {project.name}
       </div>}
       <div class="actions">
-        {canEdit && project && <button class="small-btn" onClick={() => void newFile()} title="New file in this project — the ending decides what it is: .tex a LaTeX document, .md a Markdown document, .board a whiteboard, .bib, .sty … a text file">+ File</button>}
+        {canEdit && project && <button class="small-btn" onClick={() => void newFile()} title="New file in this project — the ending decides what it is: .tex a LaTeX document, .md a Markdown document, .html slides or a web page, .board a whiteboard, .bib, .sty … a text file">+ File</button>}
+        {canEdit && project && <button class="small-btn" data-new-slides onClick={() => setNewLayoutIn('')} title="New slides, a poster, a web page or an article: a folder with an index.html, edited on a canvas">+ Slides</button>}
         {canEdit && project && <button class="small-btn" onClick={() => void newFolder()} title="New folder in this project (also in the right-click menu of any folder)">+ Folder</button>}
         {canEdit && project && <button class="small-btn" onClick={() => void upload()} title="Upload files (figures, .bib, .sty …) — or drag them from your computer onto the file list">⇧</button>}
         {canEdit && project && <button class="small-btn" data-lyx-import onClick={() => chooseLyxImport(project.name, '', r => { void load(); onOpen(r.id); })} title="Import a .lyx document or a zipped LyX project">LyX⇩</button>}
@@ -541,6 +547,10 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
       {project && renderChildren('', tree, 0)}
       {project && !tree.length && <div class="empty">No files yet — make one with + File (main.tex is a document), or upload files.</div>}
       {!projects.length && <div class="empty">No projects yet.</div>}
+      {/* (on the page's body: not clipped by the sidebar, its clicks not the file tree's) */}
+      {newLayoutIn !== null && project && createPortal(<NewLayoutDialog project={project.name} dir={newLayoutIn} onClose={() => setNewLayoutIn(null)}
+        notify={(t, k) => { if (k === 'error') void uiAlert('Could Not Create It', t); }}
+        onCreated={id => { const rel = splitDocId(id).path; if (rel.includes('/')) reveal(rel.slice(0, rel.lastIndexOf('/') + 1)); void load(); onOpen(id); }} />, document.body)}
     </div>
   );
 }
