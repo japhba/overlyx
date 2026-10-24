@@ -1057,13 +1057,19 @@ api.put('/projects/:project/text/*', needProject('edit'), (req, res) => {
 api.get('/projects/:project/graphics/*', needProject('view'), async (req, res) => {
   try {
     const rel = decodeURIComponent((req.params as any)[0]);
-    let abs = resolveProjectPath(req.params.project, rel);
-    // \includegraphics{fig} names no extension: the first file graphicx would take
-    if (!fs.existsSync(abs) && !path.extname(abs)) {
-      const hit = ['.pdf', '.png', '.jpg', '.jpeg', '.eps', '.svg'].map(e => abs + e).find(f => fs.existsSync(f));
-      if (hit) abs = hit;
+    const find = (r: string): string | null => {
+      const abs = resolveProjectPath(req.params.project, r);
+      if (fs.existsSync(abs)) return abs;
+      // \includegraphics{fig} names no extension: the first file graphicx would take
+      return path.extname(abs) ? null : ['.pdf', '.png', '.jpg', '.jpeg', '.eps', '.svg'].map(e => abs + e).find(f => fs.existsSync(f)) ?? null;
+    };
+    let abs = find(rel);
+    // not beside the document: where its \graphicspath leads (?alt=, project-relative, in order — the client's figureCandidates)
+    for (const alt of ([] as unknown[]).concat(req.query.alt ?? []).slice(0, 8)) {
+      if (abs) break;
+      try { abs = find(String(alt)); } catch { /* outside the project */ }
     }
-    if (!fs.existsSync(abs)) { res.status(404).json({ error: 'not found' }); return; }
+    if (!abs) { res.status(404).json({ error: 'not found' }); return; }
     const width = Math.min(4000, Math.max(100, Number(req.query.w ?? 1200)));
     const download = req.query.download === '1';
     if (isDirectImage(abs) && !download) { res.sendFile(abs); return; }
@@ -1172,6 +1178,7 @@ api.get('/docs/*/meta', async (req, res) => {
       macroList: m.macroList,
       bib: bibUnique.slice(0, 30000).map(e => ({ key: e.key, author: e.authorShort, year: e.year, title: e.title })),
       layouts: m.layouts, flexInsets: m.flexInsets,
+      graphicsPath: m.graphicsPath,
       files: listProjects().find(p => p.name === doc.project)?.files ?? [],
       health: m.health,
     });

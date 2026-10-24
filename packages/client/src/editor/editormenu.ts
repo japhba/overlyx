@@ -18,9 +18,9 @@ import { fixTableColumnWidths } from './tablefit';
 import { isMarkdownDoc } from './markdown';
 import { TABLE_WIDTHS, type ColumnWidthChoice } from '../app/Toolbar';
 import { changeAt, resolveChange, changeAuthorName } from './plugins/changes';
-import { fileUrl, graphicsUrl } from '../api';
+import { fileUrl } from '../api';
 import { STANDARD_LAYOUTS } from './layouts';
-import { resolveDocPath } from './context';
+import { figureFile, figureUrl } from './context';
 import { getPrefs, setPref } from '../prefs';
 import { effectiveShortcut } from '../app/keybindings';
 import { openRewrite, REWRITE_KEY } from './ai/rewrite';
@@ -141,13 +141,13 @@ export function editorContextMenu(view: EditorView, ev: MouseEvent, spelling?: {
       }
     } else if (node.type.name === 'graphics') {
       const file = p.get('filename') ?? '';
-      const rel = resolveDocPath(file, docDir);
+      const rel = figureFile(file, docDir);
       items.push(
         { label: `Graphics ${file}`, info: true },
         ...(/\.svg$/i.test(rel) ? [{ label: 'Edit drawing (SVG)…', icon: 'edit' as const, shortcut: 'double-click', action: () => editSvgFile(project, rel, !view.editable) }] : []),
         { label: 'Graphics settings…', icon: 'image', ...(/\.svg$/i.test(rel) ? {} : { shortcut: 'double-click' }), action: dialog('inset', pos) },
         { label: 'Open original in new browser tab', icon: 'open', action: () => window.open(fileUrl(project, rel), '_blank') },
-        { label: 'Export as PNG…', icon: 'image', action: () => window.open(graphicsUrl(project, rel, 2400) + '&download=1', '_blank') },
+        { label: 'Export as PNG…', icon: 'image', action: () => window.open(figureUrl(project, file, docDir, 2400) + '&download=1', '_blank') },
         { sep: true },
       );
     } else if (node.type.name === 'math_inline' || node.type.name === 'math_display') {

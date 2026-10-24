@@ -44,7 +44,7 @@ const stripExt = (p: string) => p.replace(/\.[A-Za-z0-9]{1,5}$/, '');
 /**
  * Does the graphics event for `changed` (project-relative, with its extension) concern the inset
  * that shows `wanted` (project-relative as written in the document — LaTeX allows the extension
- * to be left out, and `\graphicspath`-style variations are not resolved here)?
+ * to be left out; the callers ask for each `\graphicspath` candidate, editor/context.ts figureCandidates)?
  */
 export function sameGraphicsFile(changed: string, wanted: string): boolean {
   const a = norm(changed), b = norm(wanted);

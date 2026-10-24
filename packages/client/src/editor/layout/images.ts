@@ -6,8 +6,8 @@
 import type { EditorView } from 'prosemirror-view';
 import { NodeSelection } from 'prosemirror-state';
 import { schema } from '@overlyx/core';
-import { graphicsUrl, fileUrl } from '../../api';
-import { editorContext, resolveDocPath, toDocRel, viewDocDir, viewProject } from '../context';
+import { fileUrl } from '../../api';
+import { editorContext, figureFile, figureUrl, toDocRel, viewDocDir, viewProject } from '../context';
 import { imageExt, imageFiles, isSvgMarkup, svgFile, uploadBaseName, uploadUnique } from '../imagepaste';
 import { isLayoutDoc, insertObject, pageAt } from './commands';
 import { isLayoutObject } from './geom';
@@ -23,7 +23,7 @@ export function imageAspect(view: EditorView, docRel: string): Promise<number> {
     const img = new Image();
     img.onload = () => resolve(img.naturalWidth ? img.naturalHeight / img.naturalWidth : 0.75);
     img.onerror = () => resolve(0.75);
-    img.src = graphicsUrl(project, resolveDocPath(docRel, viewDocDir(view)), 800);
+    img.src = figureUrl(project, docRel, viewDocDir(view), 800);
   });
 }
 
@@ -116,7 +116,7 @@ export async function imageToShapes(view: EditorView, pos: number): Promise<void
   const project = viewProject(view);
   const ctl = layoutControllerOf(view);
   if (!img || img.type.name !== 'ol_image' || !project || !ctl) return;
-  const file = resolveDocPath(String(img.attrs.src ?? ''), viewDocDir(view));
+  const file = figureFile(String(img.attrs.src ?? ''), viewDocDir(view));
   let text = '';
   try {
     const res = await fetch(fileUrl(project, file), { credentials: 'include' });

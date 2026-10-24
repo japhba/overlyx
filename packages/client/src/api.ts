@@ -95,6 +95,8 @@ export interface DocMeta {
   macroList: { name: string; args: number; def: string; display?: string; source: string }[];
   bib: BibItem[]; layouts: LayoutInfo[] | null; flexInsets: string[] | null; files: ProjectFile[];
   master: string | null; labels: { name: string; context: string; file: string }[];
+  /** the folders of the document's (its master's) \graphicspath, project-relative ('' or ending in '/'): figures are looked for there too */
+  graphicsPath?: string[];
   /** structural damage found in the file on disk (an external edit broke an OverLyX convention) */
   health: HealthIssue[];
 }
@@ -496,9 +498,10 @@ export function isAuxFile(name: string): boolean {
   return AUX_EXTS.has(ext);
 }
 
-export function graphicsUrl(project: string, path: string, w = 1200): string {
+/** `alt`: where else the file may be (project-relative, tried in order when `path` is missing — the \graphicspath folders: editor/context.ts figureUrl) */
+export function graphicsUrl(project: string, path: string, w = 1200, alt: string[] = []): string {
   // Encode the whole path so the browser cannot consume ../ segments before the host resolves it.
-  return `${API_BASE}/api/projects/${encodeURIComponent(project)}/graphics/${encodeURIComponent(path)}?w=${w}`;
+  return `${API_BASE}/api/projects/${encodeURIComponent(project)}/graphics/${encodeURIComponent(path)}?w=${w}${alt.map(a => '&alt=' + encodeURIComponent(a)).join('')}`;
 }
 export function fileUrl(project: string, path: string): string {
   return `${API_BASE}/api/projects/${encodeURIComponent(project)}/file/${encodeURIComponent(path)}`;

@@ -16,8 +16,7 @@ import {
   type Hull, type HullType, type MacroTable, type Slice, type Atom, type Cell, type CellRef, type Owner,
 } from '@overlyx/core';
 import { MathGeometry, editXY, moveToClosestEdge, partOfAnchor, insetAt, boundaryX, x2pos, lineOf, selectionBoxes, type AtomGeom } from './geometry';
-import { graphicsUrl } from '../../api';
-import { editorContext, resolveDocPath } from '../context';
+import { editorContext, figureUrl } from '../context';
 import { getPrefs } from '../../prefs';
 import { documentViewScale } from '../viewscale';
 import { renderMath, onMathRendererChange } from './mathjax';
@@ -66,7 +65,7 @@ export function mathImageResolver(context?: MathImageContext): (src: string) => 
     const docDir = context?.docDir ?? editorContext.docDir;
     // explicit web/data URLs are already usable; TeX project file names are relative paths
     if (!project || !src || /^(?:[a-z][a-z0-9+.-]*:|\/\/|\/)/i.test(src)) return src;
-    return graphicsUrl(project, resolveDocPath(src, docDir), 400);
+    return figureUrl(project, src, docDir, 400);
   };
 }
 

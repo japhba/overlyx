@@ -1,6 +1,7 @@
 /** Shared editor context (current user, document meta, UI hooks) for node views and commands. */
 import type { EditorView } from 'prosemirror-view';
 import type { AiStatus, DocMeta, User } from '../api';
+import { graphicsUrl } from '../api';
 
 export interface EditorContext {
   user: User | null;
@@ -86,6 +87,38 @@ export function resolveDocPath(file: string, docDir: string = editorContext.docD
     else if (p !== '.' && p !== '') out.push(p);
   }
   return out.join('/');
+}
+
+/**
+ * Where a figure's file name (`\includegraphics`, an image object) may be, project-relative, in the
+ * order graphicx looks: beside the document, then in the folders of its \graphicspath (the metadata's).
+ */
+export function figureCandidates(file: string, docDir: string = editorContext.docDir): string[] {
+  const out = [resolveDocPath(file, docDir)];
+  if (file.startsWith('/')) return out;
+  for (const dir of editorContext.meta?.graphicsPath ?? []) {
+    const c = resolveDocPath(file, dir);
+    if (!out.includes(c)) out.push(c);
+  }
+  return out;
+}
+
+/** The image URL of a figure: the graphics endpoint takes the first candidate that exists (figureCandidates). */
+export function figureUrl(project: string, file: string, docDir: string = editorContext.docDir, w = 1200): string {
+  const [first, ...alt] = figureCandidates(file, docDir);
+  return graphicsUrl(project, first, w, alt);
+}
+
+/** The figure's file as the project's file list knows it (the first candidate found, its extension added), project-relative; else the first candidate. */
+export function figureFile(file: string, docDir: string = editorContext.docDir): string {
+  const cands = figureCandidates(file, docDir);
+  const has = new Set((editorContext.meta?.files ?? []).map(f => f.path));
+  for (const c of cands) {
+    if (has.has(c)) return c;
+    const ext = /\.[A-Za-z0-9]{1,5}$/.test(c) ? undefined : ['.pdf', '.png', '.jpg', '.jpeg', '.eps', '.svg'].find(e => has.has(c + e));
+    if (ext) return c + ext;
+  }
+  return cands[0];
 }
 
 /** The inverse of resolveDocPath: a project-relative path as the document references it (LyX stores graphics relative to the document). */

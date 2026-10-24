@@ -9,8 +9,7 @@
 import type { Node as PMNode } from 'prosemirror-model';
 import type { EditorView, NodeView } from 'prosemirror-view';
 import { TextSelection } from 'prosemirror-state';
-import { graphicsUrl } from '../../api';
-import { resolveDocPath, viewDocDir, viewProject } from '../context';
+import { figureCandidates, figureUrl, onMetaChange, viewDocDir, viewProject } from '../context';
 import { subscribeProjectEvents } from '../../projectevents';
 import { boxOf, placeElement, MM, PT, color, shapePathInBox, DASHES, ptToMm } from './geom';
 import { rawPreview } from './rawpreview';
@@ -324,6 +323,8 @@ export class ImageView implements NodeView {
   img: HTMLImageElement;
   private version = 0;
   private unsubscribe: (() => void) | null = null;
+  /** the metadata names the \graphicspath folders the file may be in */
+  private unsubscribeMeta = onMetaChange(() => this.render());
 
   constructor(public node: PMNode, private view: EditorView, private getPos: () => number | undefined) {
     this.dom = document.createElement('div');
@@ -341,8 +342,8 @@ export class ImageView implements NodeView {
     const project = viewProject(view);
     if (project) this.unsubscribe = subscribeProjectEvents(project, ev => {
       if (ev.kind !== 'graphics') return;
-      const file = resolveDocPath(String(this.node.attrs.src ?? ''), viewDocDir(this.view));
-      if (!ev.path || !file || !(ev.path === file || ev.path.startsWith(file + '.'))) return;
+      const src = String(this.node.attrs.src ?? '');
+      if (!ev.path || !src || !figureCandidates(src, viewDocDir(this.view)).some(file => ev.path === file || ev.path.startsWith(file + '.'))) return;
       this.version = ev.v ?? Date.now();
       this.render();
     });
@@ -361,7 +362,7 @@ export class ImageView implements NodeView {
     this.dom.title = file;
     this.dom.dataset.file = file;
     if (project && file) {
-      const url = graphicsUrl(project, resolveDocPath(file, viewDocDir(this.view)), 2000) + (this.version ? `&v=${this.version}` : '');
+      const url = figureUrl(project, file, viewDocDir(this.view), 2000) + (this.version ? `&v=${this.version}` : '');
       if (this.img.dataset.src !== url) { this.img.dataset.src = url; this.img.src = url; }
     }
     this.dom.style.opacity = a.opacity !== null && a.opacity !== undefined ? String(a.opacity) : '';
@@ -377,7 +378,7 @@ export class ImageView implements NodeView {
   }
 
   ignoreMutation(): boolean { return true; }
-  destroy(): void { this.unsubscribe?.(); }
+  destroy(): void { this.unsubscribe?.(); this.unsubscribeMeta(); }
 }
 
 /* ------------------------------------------------------------------ group */

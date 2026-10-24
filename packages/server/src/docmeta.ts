@@ -8,7 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  collectMacros, toMathliveMacros, getTextClass, getModules, getAuthors, headerValue, paramMap, unquote, walkInsets,
+  collectMacros, toMathliveMacros, getTextClass, getModules, getAuthors, getPreamble, graphicsSearchDirs, headerValue, paramMap, unquote, walkInsets,
   walkParagraphs as walkParagraphsAll, plainText, type LyxDocument,
 } from '@overlyx/core';
 import { applyDocumentTheorems, loadDocumentClass, describeLayouts, flexInsetNames } from '@overlyx/core/latex/layouts.ts';
@@ -44,6 +44,8 @@ export interface DocumentMeta {
   macroList: { name: string; args: number; def: string; display?: string; source?: string }[];
   layouts: unknown;
   flexInsets: unknown;
+  /** the folders of the (master's) \graphicspath, project-relative ('' or ending in '/'): where the editor's figures are looked for too */
+  graphicsPath: string[];
   /** an HTML article: the custom properties its page sets at :root (its look, which the editor takes on) */
   article?: { vars: Record<string, string> };
   /** where the time went (ms) */
@@ -169,5 +171,6 @@ export function documentMeta(s: DocState, open: OpenDocs): DocumentMeta {
     macros: toMathliveMacros(macros),
     macroList: macros.map(m => ({ name: m.name, args: m.args, def: m.def, display: m.display, source: m.source })),
     layouts, flexInsets, timings,
+    graphicsPath: article ? [] : graphicsSearchDirs(getPreamble(rootLyx), path.dirname(rootRel)),
   };
 }

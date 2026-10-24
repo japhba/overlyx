@@ -24,6 +24,7 @@ export * from './math/index.ts';
 export { checkTexHealth, repairTex, type HealthIssue } from './tex/health.ts';
 export { lintTex, maskOpaque, type LintIssue } from './tex/lint.ts';
 export { texHeadings, headingPlainText, type TexHeading } from './tex/headings.ts';
+export { graphicsSearchDirs } from './tex/graphicspath.ts';
 export { moduleWarnings, type ModuleInfo } from './modules.ts';
 export { markEditedSettings, hasSettingsLine, MANAGED_BEGIN, MANAGED_END } from './tex/preamble.ts';
 export * from './projectKey.ts';

@@ -4,12 +4,12 @@ import type { ComponentChildren } from 'preact';
 import type { DocMeta, ProjectFile, BibItem } from '../api';
 import type { GraphicsOpts, TableChanges } from '../editor/commands';
 import type { ColumnWidthKind } from '../editor/tablecommands';
-import { api, graphicsUrl } from '../api';
+import { api } from '../api';
 import type { LitHit, BibAddResult, ZoteroStatus } from '../api';
 import { ZoteroConnect } from './ZoteroConnect';
 import type { Node as PMNode } from 'prosemirror-model';
 import { paramMap, unquote, moduleWarnings, markEditedSettings, columnWidthLength } from '@overlyx/core';
-import { resolveDocPath, toDocRel as docRelPath } from '../editor/context';
+import { figureUrl, resolveDocPath, toDocRel as docRelPath } from '../editor/context';
 import type { EditorView } from 'prosemirror-view';
 import { referenceTargets, type ReferenceOptions } from '../editor/references';
 import { editorContext } from '../editor/context';
@@ -113,7 +113,7 @@ export function GraphicsDialog({ meta, project, docDir = '', initial, onInsert, 
         {files.map(f => <div key={f.path} class={toDocRel(f.path) === filename ? 'sel' : ''} onClick={() => setFilename(toDocRel(f.path))}>{f.path}</div>)}
         {!files.length && <div class="sub">No image files in this project yet — upload one.</div>}
       </div>
-      {filename && <img src={graphicsUrl(project, toProjectRel(filename), 600)} style="max-height:140px;max-width:100%;object-fit:contain;border:1px solid #ddd" alt="" />}
+      {filename && <img src={figureUrl(project, filename, docDir, 600)} style="max-height:140px;max-width:100%;object-fit:contain;border:1px solid #ddd" alt="" />}
       <div class="panel-tabs">
         <button class={tab === 'graphics' ? 'active' : ''} onClick={() => setTab('graphics')}>Graphics</button>
         <button class={tab === 'clip' ? 'active' : ''} onClick={() => setTab('clip')}>Clipping</button>

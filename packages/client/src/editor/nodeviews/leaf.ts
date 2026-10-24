@@ -5,10 +5,9 @@
 import type { Node as PMNode } from 'prosemirror-model';
 import type { EditorView, NodeView } from 'prosemirror-view';
 import { paramMap, unquote } from '@overlyx/core';
-import { graphicsUrl } from '../../api';
 import { getPrefs, subscribePrefs } from '../../prefs';
 import { subscribeProjectEvents, sameGraphicsFile } from '../../projectevents';
-import { editorContext, onMetaChange, resolveDocPath, viewDocDir, viewProject } from '../context';
+import { editorContext, figureCandidates, figureFile, figureUrl, onMetaChange, resolveDocPath, viewDocDir, viewProject } from '../context';
 import { applyChangeAttrs } from '../plugins/changes';
 import { classifyImage, type FigureKind } from '../figureinvert';
 import { editSvgFile } from '../svgEditorEvents';
@@ -25,6 +24,7 @@ export class GraphicsView implements NodeView {
   private version = 0;
   private unsubscribeEvents: (() => void) | null = null;
   private unsubscribePrefs: (() => void) | null = null;
+  private unsubscribeMeta: (() => void) | null = null;
   /** what the loaded pixels look like (see figureinvert.ts); null until loaded / unreadable */
   private kind: FigureKind | null = null;
 
@@ -54,13 +54,15 @@ export class GraphicsView implements NodeView {
     this.watchFile();
     window.addEventListener('ol:svg-saved', this.svgSaved);
     this.unsubscribePrefs = subscribePrefs(() => this.applyInvert());
+    // the metadata names the \graphicspath folders the file may be in
+    this.unsubscribeMeta = onMetaChange(() => this.render());
   }
 
   private editBtn: HTMLButtonElement;
   /** the figure's file when it is an SVG drawing (project-relative), else null */
   private svgRel(): string | null {
     const file = params(this.node).get('filename') ?? '';
-    return /\.svg$/i.test(file) ? resolveDocPath(unquote(file), viewDocDir(this.view)) : null;
+    return /\.svg$/i.test(file) ? figureFile(unquote(file), viewDocDir(this.view)) : null;
   }
   private editSvg() {
     const rel = this.svgRel(), project = viewProject(this.view) || editorContext.project;
@@ -69,7 +71,7 @@ export class GraphicsView implements NodeView {
 
   private svgSaved = (event: Event) => {
     const target = (event as CustomEvent<{ project: string; path: string }>).detail;
-    if (target.project === viewProject(this.view) && target.path === resolveDocPath(params(this.node).get('filename') ?? '', viewDocDir(this.view))) {
+    if (target.project === viewProject(this.view) && figureCandidates(params(this.node).get('filename') ?? '', viewDocDir(this.view)).includes(target.path)) {
       this.version = Date.now(); this.render();
     }
   };
@@ -81,7 +83,7 @@ export class GraphicsView implements NodeView {
     this.unsubscribeEvents = subscribeProjectEvents(project, ev => {
       if (ev.kind !== 'graphics') return;
       const file = params(this.node).get('filename') ?? '';
-      if (!file || !sameGraphicsFile(ev.path, resolveDocPath(file, viewDocDir(this.view)))) return;
+      if (!file || !figureCandidates(file, viewDocDir(this.view)).some(c => sameGraphicsFile(ev.path, c))) return;
       if (ev.v === this.version) return;
       this.version = ev.v;
       this.render();
@@ -105,7 +107,7 @@ export class GraphicsView implements NodeView {
     this.img.title = `${file}\nwidth: ${width ?? 'auto'}${scale ? `, scale ${scale}%` : ''} — ${svg ? 'double-click to edit the drawing, right-click for its settings or to' : 'double-click for settings, right-click to'} export as PNG`;
     this.editBtn.hidden = !svg;
     if (project && file) {
-      const url = graphicsUrl(project, resolveDocPath(file, viewDocDir(this.view)), 1600) + (this.version ? `&v=${this.version}` : '');
+      const url = figureUrl(project, file, viewDocDir(this.view), 1600) + (this.version ? `&v=${this.version}` : '');
       if (this.img.dataset.src !== url) { this.img.dataset.src = url; this.img.src = url; }
       this.img.style.display = '';
       this.caption.textContent = '';
@@ -149,6 +151,7 @@ export class GraphicsView implements NodeView {
     window.removeEventListener('ol:svg-saved', this.svgSaved);
     this.unsubscribeEvents?.(); this.unsubscribeEvents = null;
     this.unsubscribePrefs?.(); this.unsubscribePrefs = null;
+    this.unsubscribeMeta?.(); this.unsubscribeMeta = null;
   }
 }
 

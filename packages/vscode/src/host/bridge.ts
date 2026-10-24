@@ -215,7 +215,12 @@ export class Bridge {
       if (!root) { send(res, 404, { error: 'unknown project' }); return; }
       const rel = m[3].split('/').map(decodeURIComponent).join('/');
       const requested = path.resolve(root, rel);
-      const abs = m[2] === 'graphics' ? resolveGraphicsPath(requested) : requested;
+      let abs = m[2] === 'graphics' ? resolveGraphicsPath(requested) : requested;
+      // a figure not beside the document: where its \graphicspath leads (?alt=, project-relative, in order)
+      if (m[2] === 'graphics' && !fs.existsSync(abs)) {
+        const hit = url.searchParams.getAll('alt').slice(0, 8).map(a => resolveGraphicsPath(path.resolve(root, a))).find(f => fs.existsSync(f));
+        if (hit) abs = hit;
+      }
       // Local papers may reference shared figures above their own directory. Permit supported
       // graphics through the image endpoint; raw file reads and uploads remain project-bounded.
       if (abs !== root && !abs.startsWith(root + path.sep) && (m[2] !== 'graphics' || !isGraphicsFile(abs))) {
