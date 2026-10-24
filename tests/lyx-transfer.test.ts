@@ -5,11 +5,12 @@ import path from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { parseLyx, exportLyx } from '../packages/core/src/index.ts';
 import { parseTex } from '../packages/core/src/tex/index.ts';
-import { writeZip } from '../packages/server/src/zip.ts';
 import { LYX_LAYOUTS } from './lyxlib.ts';
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'overlyx-lyx-transfer-'));
 process.env.OVERLYX_DATA_DIR = path.join(root, 'data');
 process.env.OVERLYX_PROJECTS_DIR = path.join(root, 'projects');
+// (server modules only after the directories are set: they load the configuration, which keeps them)
+const { writeZip } = await import('../packages/server/src/zip.ts');
 const { importLyxUpload } = await import('../packages/server/src/lyximport.ts');
 const pdf = async () => {};
 const tex = (body: string) => ['\\documentclass{article}', '\\begin{document}', body, '\\end{document}'].join('\n');

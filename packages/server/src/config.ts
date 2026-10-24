@@ -7,13 +7,19 @@ import { isMainThread } from 'node:worker_threads';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(here, '../../..');
+/**
+ * A test (vitest) that loads the configuration before pointing it at its own scratch tree gets a
+ * throwaway one, never the instance's: run as root, the defaults are the real projects and data
+ * (a test's static import once made the server's test run write into /root/projects).
+ */
+const testScratch = (name: string) => path.join(os.tmpdir(), `overlyx-vitest-unset-${process.pid}`, name);
 
 export const config = {
   port: Number(process.env.PORT ?? 3000),
   host: process.env.HOST ?? '0.0.0.0',
-  dataDir: path.resolve(process.env.OVERLYX_DATA_DIR ?? path.join(REPO_ROOT, 'data')),
+  dataDir: path.resolve(process.env.OVERLYX_DATA_DIR ?? (process.env.VITEST ? testScratch('data') : path.join(REPO_ROOT, 'data'))),
   /** the projects: `<projectsDir>/<owner>/<name>`, one namespace per account (namespaces.ts) */
-  projectsDir: path.resolve(process.env.OVERLYX_PROJECTS_DIR ?? '/root/projects'),
+  projectsDir: path.resolve(process.env.OVERLYX_PROJECTS_DIR ?? (process.env.VITEST ? testScratch('projects') : '/root/projects')),
   layoutDir: process.env.LYX_LAYOUT_DIR ?? (fs.existsSync('/root/lyx/lib/layouts') ? '/root/lyx/lib/layouts' : path.join(REPO_ROOT, 'lyx/lib/layouts')),
   lyxBin: process.env.OVERLYX_LYX_BIN ?? 'lyx',
   /** first Google Docs export: Markdown → DOCX with embedded figures and native equations */

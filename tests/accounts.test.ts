@@ -15,6 +15,7 @@ rmSync(ROOT, { recursive: true, force: true });
 mkdirSync(join(ROOT, 'projects'), { recursive: true });
 process.env.OVERLYX_DATA_DIR = join(ROOT, 'data');
 process.env.OVERLYX_PROJECTS_DIR = join(ROOT, 'projects');
+process.env.OVERLYX_AGENT_USERS = 'off';   // (agent files in the data directory, as the server's own user)
 process.env.OVERLYX_OWNER_EMAIL = 'owner@example.com';
 process.env.OVERLYX_MIRROR_URL = `file://${join(ROOT, 'mirrors')}/{repo}.git`;
 process.env.OVERLYX_OPERATOR = 'Ada Operator';

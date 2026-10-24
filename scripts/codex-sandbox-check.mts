@@ -206,7 +206,8 @@ try {
   const listing = out[0]?.split('LISTING')[1] ?? '';
   const uidSeen = /UID=(\d+)/.exec(out[0] ?? '')?.[1];
   check(`the commands do not run as root${UID !== null ? ` (the agent uid ${UID})` : ''}`, uidSeen !== undefined && uidSeen !== '0' && (UID === null || uidSeen === String(UID)), out[0]);
-  check('another user\'s project is invisible', !!out[0]?.includes('NO-NOTES') && !out[0].includes('SECRET-BOB') && /\balice\b/.test(listing) && !/\bbob\b/.test(listing), out[0]);
+  // (as an agent uid no project is there at all — the copy hard-links what it needs; else its own, read only)
+  check('another user\'s project is invisible', !!out[0]?.includes('NO-NOTES') && !out[0].includes('SECRET-BOB') && (UID !== null || /\balice\b/.test(listing)) && !/\bbob\b/.test(listing), out[0]);
   check('OverLyX\'s database, codex\'s sign-in, the project\'s .git, /etc/shadow and the MCP token are out of reach', out[1] !== undefined && !/SECRET-(AUTH|GIT|TOKEN)|SQLite format/.test(out[1]) && !/root:/.test(out[1]), out[1]);
   check('the working copy is writable, its symlinks into the live project resolve, the live project is read only', out[2] !== undefined && out[2].includes('WROTE-COPY') && !out[2].includes('WROTE-LIVE') && out[2].includes('P   N   G') && fs.existsSync(path.join(copy, 'new.txt')) && !fs.existsSync(path.join(live, 'x.txt')), out[2]);
   check('no escalation out of the sandbox', out[3] !== undefined && !out[3].includes('SECRET-BOB') && !approvalsAsked.length, `${out[3]} approvals: ${approvalsAsked.join(', ')}`);
