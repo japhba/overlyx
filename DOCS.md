@@ -525,9 +525,15 @@ blend.
   25, DynamicUser, the production checkout read-only), accepts mail only for `MAILIN_RECIPIENTS` at
   `MAILIN_DOMAIN`, keeps text + attachment names as JSON files in `/var/lib/overlyx-mailin`; it never
   sends or forwards. The OverLyX server imports them every minute into `reports` (kind `mail`, kept a
-  year); administrators read them in Settings ▸ Account ▸ Messages and reports (`GET /api/admin/reports`).
-  Without an MX record senders deliver to the A record; restart `overlyx-mailin` after a deploy that
-  changes mailin.ts.
+  year); administrators read them in Settings ▸ Account ▸ Messages and reports (`GET /api/admin/reports`)
+  and answer there (`POST /api/admin/reports/:id/answer`, feedback.ts `answerMail`): the answer goes out
+  from the address the message was sent to and is kept in the message, so it goes with it after a year.
+  Sending needs `OVERLYX_SMTP_URL` (a sending service on port 587 — Hetzner blocks 25 and 465 — e.g.
+  `smtp://<login>:<key>@smtp-relay.brevo.com:587`, with the domain authenticated there: DKIM and
+  DMARC records in DNS) and `OVERLYX_MAIL_FROM` for the owner's notices (mailer.ts): that a sign-up,
+  a problem report or mail arrived — never names, addresses or text; mail at most once an hour. The
+  privacy notice lists the sending service once `OVERLYX_SMTP_URL` is set. Without an MX record
+  senders deliver to the A record; restart `overlyx-mailin` after a deploy that changes mailin.ts.
 * **Privacy notice and account deletion** (`packages/server/src/privacy.ts`, `accounts.ts`): `GET /privacy`
   is a public page (start-page footer, *Help ▸ Privacy notice*, Settings ▸ Privacy) describing what is
   kept, the services involved and retention — keep it in step with the code it names in its header.

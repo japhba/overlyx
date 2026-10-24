@@ -2153,6 +2153,8 @@ html[data-presenting] .editor-column.panes > .editor-scroll { display: block !im
 .admin-reports .ar-head { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; padding: 6px 8px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .admin-reports .ar-title { font-weight: 600; overflow-wrap: anywhere; }
 .admin-reports .ar-body { margin: 0 8px 6px; padding: 6px 8px; max-height: 260px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; background: var(--ui-bg2); border-radius: 3px; }
+.admin-reports .ar-answer { margin: 0 8px 6px; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.admin-reports .ar-answer textarea { width: 100%; box-sizing: border-box; font: inherit; font-size: 12px; }
 .admin-reports .ar-row .btn.danger { margin: 0 8px 8px; }
 .delete-account { border: 1px solid var(--err); border-radius: 4px; padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; }
 .delete-account p { margin: 0; }

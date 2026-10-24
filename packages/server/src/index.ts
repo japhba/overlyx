@@ -55,7 +55,7 @@ import { ownProjectKey } from './projectCreate.ts';
 import { sandboxAvailable } from './sandbox.ts';
 import { grantAdminAccess, projectsForAdmin, activityOf, logAccess, pruneAccessLog, pruneGuests, projectPeople } from './access.ts';
 import { statusOf as mirrorStatus, pushProject as mirrorPush, setMirrorEnabled, archiveMirror, startMirrorSweeper } from './mirror.ts';
-import { feedbackRoutes, vscodeTelemetryRoutes, reportServerError, pruneReports, listReports, deleteReport, appVersion, appCommit } from './feedback.ts';
+import { feedbackRoutes, vscodeTelemetryRoutes, reportServerError, pruneReports, listReports, deleteReport, answerMail, appVersion, appCommit } from './feedback.ts';
 import { startInboxImport } from './inbox.ts';
 import { deletionPreview, deleteAccount, pruneTrash } from './accounts.ts';
 import { privacyPage } from './privacy.ts';
@@ -1676,6 +1676,14 @@ api.get('/admin/backups', (req, res) => {
 api.delete('/admin/reports/:id', (req, res) => {
   if (!req.user?.isAdmin) { res.status(403).json({ error: 'admin only' }); return; }
   res.json({ ok: deleteReport(Number(req.params.id)) });
+});
+/** Administrators: answer mail to privacy@ / contact@ from that address (feedback.ts answerMail); the answer is kept with the message. */
+api.post('/admin/reports/:id/answer', async (req, res) => {
+  if (!req.user?.isAdmin) { res.status(403).json({ error: 'admin only' }); return; }
+  const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+  if (!text || text.length > 20000) { res.status(400).json({ error: 'Write an answer (at most 20 000 characters)' }); return; }
+  try { res.json({ ok: true, ...(await answerMail(Number(req.params.id), text)) }); }
+  catch (e) { res.status(502).json({ error: (e as Error).message }); }
 });
 
 api.get('/users', (req, res) => {

@@ -282,6 +282,8 @@ export const api = {
   /** administrators: problem reports, error records, mail to privacy@ / contact@ (server feedback.ts) */
   adminReports: (kind?: string) => req<{ reports: AdminReport[] }>('GET', `/api/admin/reports${kind ? `?kind=${encodeURIComponent(kind)}` : ''}`),
   deleteAdminReport: (id: number) => req<{ ok: boolean }>('DELETE', `/api/admin/reports/${id}`),
+  /** answer mail to privacy@ / contact@ from that address (server feedback.ts answerMail) */
+  answerAdminReport: (id: number, text: string) => req<{ ok: boolean; to: string; from: string }>('POST', `/api/admin/reports/${id}/answer`, { text }),
   deleteAccount: (confirm: string) => req<{ ok: boolean; projects: string[] }>('POST', '/api/account/delete', { confirm }),
   me: () => req<{ user: User | null; google: boolean; signup?: 'open' | 'invited' }>('GET', '/api/auth/me'),
   login: (username: string, password: string) => req<{ user: User }>('POST', '/api/auth/login', { username, password }),

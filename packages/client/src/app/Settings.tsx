@@ -404,12 +404,35 @@ function AdminReports() {
           </button>
           {open === r.id && <>
             <pre class="ar-body">{r.body}</pre>
+            {r.kind === 'mail' && <MailAnswer id={r.id} onSent={() => void api.adminReports(kind).then(x => setRows(x.reports)).catch(() => {})} />}
             <button class="btn small danger" onClick={() => void remove(r.id)}>Delete</button>
           </>}
         </div>
       ))}
     </div>
   </>;
+}
+
+/** An answer to mail sent to privacy@ / contact@: it goes out from that address (server feedback.ts answerMail) and is kept with the message. */
+function MailAnswer({ id, onSent }: { id: number; onSent: () => void }) {
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<{ err: boolean; text: string } | null>(null);
+  const send = async () => {
+    setBusy(true); setNote(null);
+    try {
+      const r = await api.answerAdminReport(id, text);
+      setText(''); setNote({ err: false, text: `Sent to ${r.to} from ${r.from}.` }); onSent();
+    } catch (e) { setNote({ err: true, text: (e as Error).message }); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div class="ar-answer" data-ar-answer>
+      <textarea rows={5} placeholder="Answer (sent from the address this message was sent to)" value={text} onInput={e => setText((e.target as HTMLTextAreaElement).value)} />
+      <button class="btn small" disabled={busy || !text.trim()} onClick={() => void send()}>{busy ? 'Sending…' : 'Send answer'}</button>
+      {note && <div class={note.err ? 'err' : 'sub'}>{note.text}</div>}
+    </div>
+  );
 }
 
 /** Settings ▸ Account: the account's own access token and sign-ins — never anybody else's */

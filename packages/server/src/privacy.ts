@@ -31,6 +31,17 @@ function offsiteBackup(): string | null {
   return ({ hel1: 'Helsinki, Finland', nbg1: 'Nuremberg, Germany', fsn1: 'Falkenstein, Germany' } as Record<string, string>)[region] ?? 'another of its data centres';
 }
 
+/** the service this server sends e-mail through (OVERLYX_SMTP_URL, mailer.ts: answers to privacy@ / contact@ and content-free notices to the owner); null when it sends none */
+function mailService(): string | null {
+  const url = (process.env.OVERLYX_SMTP_URL ?? '').trim();
+  if (!url || url === 'json') return null;
+  let host = '';
+  try { host = new URL(url).hostname; } catch { return 'an e-mail sending service'; }
+  if (/brevo|sendinblue/.test(host)) return 'Brevo (Sendinblue SAS, France)';
+  if (/gmail|google/.test(host)) return 'Google (Gmail)';
+  return host || 'an e-mail sending service';
+}
+
 /** the unattended maintenance worker (deploy/overlyx-maintenance.timer: codex, OpenAI) is switched on — pausing it disables the timer (DOCS.md) */
 function maintenanceAgent(): boolean {
   return fs.existsSync('/etc/systemd/system/timers.target.wants/overlyx-maintenance.timer');
@@ -62,6 +73,7 @@ export function privacyHtml(): string {
   const mirror = !!(config.mirror.org && config.mirror.token);
   const offsite = offsiteBackup();
   const maintenance = maintenanceAgent();
+  const sender = mailService();
   const operatorAi = (process.env.OVERLYX_OPERATOR_AI ?? '').trim();
   const who = operator ? esc(operator) : `the person who runs ${esc(site)}`;
   const reach = contact
@@ -98,7 +110,7 @@ ${google
 <p>The OverLyX extension for VS Code reports its errors in the same way when VS Code's telemetry is on. These reports carry no account and no file names.</p>
 <p>At VS Code telemetry level <b>All</b>, the extension can also send anonymous usage categories from its editor, PDF and slide/poster views and native commands, saves, builds, synchronization and agent handoffs. This requires <b>overlyx.usageStatistics</b>, which you can switch off in VS Code Settings; error/crash-only telemetry levels send no usage. Reports contain release versions, coarse OS/architecture and local/remote/desktop/web categories, action/outcome/state categories and bounded timings, with random IDs for an activation or webview load. They include no document or clipboard content, file or workspace paths, host names, account details or persistent machine ID. Disabling collection discards queued events and updates open views immediately. Detailed events are retained for ${RELIABILITY_RETENTION_DAYS} days and ordinary action statistics for ${USAGE_DAYS} days, under the anonymous usage policy below.</p>
 <h3>Mail to us</h3>
-<p>Mail you send to privacy@ or contact@${esc(site)} is received by this server and kept there; it is never forwarded to anyone's inbox. Only the operator reads it, in the app. It contains what you wrote, your address and the subject; attachments are not kept (only their names). It is deleted a year after it arrived.</p>
+<p>Mail you send to privacy@ or contact@${esc(site)} is received by this server and kept there; it is never forwarded to anyone's inbox. Only the operator reads it, in the app${sender ? `, and answers from there: the answer goes out from privacy@ or contact@ through ${esc(sender)} and is kept here with your message` : ''}. It contains what you wrote, your address and the subject; attachments are not kept (only their names). It is deleted a year after it arrived.</p>
 <h3>Anonymous usage statistics</h3>
 <p>To find what is confusing or broken, the app counts which menu items, buttons and shortcuts are used and which ones fail. These counts are not linked to you. They carry no name, account, document or file name and no text, only a random id that changes with each page load. They are kept for ${USAGE_DAYS} days.</p>
 <p>Detailed interaction diagnostics use fixed categories for clicks, context menus, drag/drop, paste/cut and deletion outcomes, selection type, empty/filled and collapsed/margin notes, editing permissions, change tracking, pointer type, API outcomes, connectivity, resource errors and duration buckets. Administrators can examine short action trails around failures, unchanged or repeated attempts and undo. No typed text, clipboard contents, input values, coordinates, URLs, document identifiers or account identifiers are included. These detailed events are kept for ${RELIABILITY_RETENTION_DAYS} days and follow the same usage-statistics switch.</p>
@@ -122,6 +134,7 @@ ${google
 <tr><td>Hetzner (Germany)</td><td>Hosts the server, so it stores everything above${offsite ? `. Also keeps our off-site backups, in its data centre in ${offsite} — encrypted on our server before they leave it, so Hetzner cannot read them` : ''}</td><td>Always</td></tr>
 ${google ? `<tr><td>Google</td><td>Signs you in. With Google Docs sync, the linked document's text and comments go to that Google Doc</td><td>When you sign in; Docs sync only if you connect Google Drive and link a document</td></tr>` : ''}
 ${mirror ? `<tr><td>GitHub (USA)</td><td>A backup copy of every project's version history, in private repositories that only the operator can access, updated every few minutes</td><td>Always. A project's owner can pause it in the project's <b>Git</b> dialog</td></tr>` : ''}
+${sender ? `<tr><td>${esc(sender)}</td><td>Sends our e-mail: the operator's answers to mail you sent to privacy@ / contact@ (your address and the answer), and notices to the operator that something arrived — a sign-up, a problem report, mail — which never contain names, addresses or text</td><td>When we answer you</td></tr>` : ''}
 ${maintenance ? `<tr><td>OpenAI (USA), through the operator's ChatGPT account (Codex)</td><td>To find and fix bugs, an AI assistant screens new problem reports, error records, the pen page's answers and the error lines of the server logs every ten minutes, and may correct OverLyX's code. E-mail addresses and anything that looks like a password or key are removed first, and reports reach it without the account they came from; but what you wrote in a report and the log lines can contain user names and project or file names. It gets no projects and no mail to privacy@ / contact@</td><td>Always, while this automatic maintenance is switched on</td></tr>` : ''}
 ${operatorAi ? `<tr><td>${esc(operatorAi)} (USA): the AI coding assistants the operator works with</td><td>When the operator develops or looks after OverLyX with them on the server, they can see what the operator sees there: mostly code, logs and statistics (with other people's names pseudonymized where the tools allow), and the data described on this page where a problem needs it</td><td>When the operator works on the server</td></tr>` : ''}
 <tr><td>OpenRouter (USA), and the AI company whose model is used (Google by default; also Anthropic, OpenAI and others you can choose)</td><td>The text around your cursor or your selection, your instruction, and your document's LaTeX source as context. “Escalate to AI” for a document that will not build sends the whole <code>.tex</code> file. Writing a formula with the math keyboard’s pen sends a picture of the handwriting and the formula around the cursor. No account details</td><td>Only when you use an AI feature. All AI features are off until you switch them on in Settings</td></tr>
@@ -151,7 +164,7 @@ ${operatorAi ? `<tr><td>${esc(operatorAi)} (USA): the AI coding assistants the o
 <tr><td>Nightly backups on the server</td><td>14 days</td></tr>
 ${offsite ? `<tr><td>Encrypted off-site backups (Hetzner, ${offsite})</td><td>About four months: three months of backups, then 30 more days in which the storage keeps them locked — nobody can delete them earlier, not even we, so that an attack on the server cannot destroy them</td></tr>` : ''}
 <tr><td>Activity log, error records</td><td>90 days</td></tr>
-<tr><td>Mail to privacy@ / contact@</td><td>A year</td></tr>
+<tr><td>Mail to privacy@ / contact@${sender ? ' and our answers' : ''}</td><td>A year${sender ? ' after your message arrived' : ''}</td></tr>
 <tr><td>Server logs</td><td>A few months (deleted oldest first at a fixed size)</td></tr>
 <tr><td>Anonymous usage statistics</td><td>${USAGE_DAYS} days</td></tr>
 <tr><td>Consent-only reliability diagnostics</td><td>${RELIABILITY_RETENTION_DAYS} days</td></tr>

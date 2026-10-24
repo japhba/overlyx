@@ -1,7 +1,7 @@
 /**
  * Feedback and error reports stay on this server (the `reports` table) — nothing goes to a public
- * issue tracker. A person's report is also mailed to the instance owner (mailer.ts notifyOwner) so
- * somebody reads it; `npx tsx scripts/reports.ts` lists them.
+ * issue tracker. The instance owner is told by e-mail that a person's report arrived (mailer.ts
+ * notifyOwner — not its content) so somebody reads it; `npx tsx scripts/reports.ts` lists them.
  *
  *   POST /api/feedback       a person's report (bug / idea / question) → one row, kind `feedback`
  *   POST /api/client-error   an error that escaped in the browser → one row per distinct message
@@ -31,7 +31,7 @@ import { execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import { db } from './db.ts';
 import { config, REPO_ROOT } from './config.ts';
-import { notifyOwner } from './mailer.ts';
+import { notifyOwner, READ_IT, sendAnswer } from './mailer.ts';
 import { glitchReport } from '@overlyx/core/glitch.ts';
 import { inkLabReport } from '@overlyx/core/inklab.ts';
 
@@ -96,9 +96,9 @@ export function submitFeedback(f: FeedbackInput, who: Reporter): { id: number } 
   const { title, body } = formatFeedback(f);
   const id = Number(insertReport.run({ kind: 'feedback', hash: null, title, body, user_id: who.id, version: appVersion, user_agent: f.userAgent ? clean(f.userAgent, 300) : null, now: Date.now() }).lastInsertRowid);
   console.log(`[feedback] report #${id} (${f.kind}) from ${who.username}`);
-  void notifyOwner(`OverLyX ${KIND[f.kind]?.toLowerCase() ?? 'feedback'} #${id}: ${title}`,
-    `${who.name} (${who.username}${who.email ? ', ' + who.email : ''}) wrote:\n\n${body}\n\n` +
-    (f.userAgent ? `Browser: ${clean(f.userAgent, 300)}\n` : '') + `\nAll reports: npx tsx scripts/reports.ts\n`);
+  // that a report came, not what it says or who sent it: the report stays on this server
+  void notifyOwner(`OverLyX: a new problem report (${KIND[f.kind]?.toLowerCase() ?? 'feedback'}, #${id})`,
+    `Someone sent a report with Help ▸ Report a problem. ${READ_IT}\n`);
   return { id };
 }
 
@@ -178,6 +178,27 @@ export function storeMail(m: { from: string; fromName: string; to: string[]; sub
   const id = Number(insertReport.run({ kind: 'mail', hash: null, title: clean(m.subject, 300) || '(no subject)', body: `${head}\n\n${clean(m.text, 20000)}`, user_id: null, version: appVersion, user_agent: null, now: m.receivedAt }).lastInsertRowid);
   console.log(`[mail] message #${id} for ${m.to.join(', ')}`);
   return id;
+}
+
+/**
+ * An administrator answers a message (kind `mail`) from the address it was sent to (privacy@ /
+ * contact@), through mailer.ts. The answer is kept in the message's body, so it goes with the
+ * message a year after that arrived (pruneReports) — no copy in anyone's mailbox.
+ */
+export async function answerMail(id: number, answer: string): Promise<{ to: string; from: string }> {
+  const r = db.prepare("SELECT title, body FROM reports WHERE id = ? AND kind = 'mail'").get(id) as { title: string; body: string } | undefined;
+  if (!r) throw new Error('There is no such message');
+  const head = r.body.split('\n\n')[0];
+  const sender = /^From: (.*)$/m.exec(head)?.[1] ?? '';
+  const to = (/<([^<>\s]+)>\s*$/.exec(sender)?.[1] ?? sender).trim();
+  const from = (/^To: (.*)$/m.exec(head)?.[1] ?? '').split(',').map(a => a.trim()).find(a => /^(privacy|contact)@[^\s@]+$/i.test(a));
+  if (!/^[^\s@<>,]+@[^\s@<>,]+\.[^\s@<>,]+$/.test(to) || !from) throw new Error('This message has no address to answer to, or was not sent to privacy@ / contact@');
+  const text = clean(answer, 20000);
+  const title = r.title.replace(/\s+/g, ' ');
+  await sendAnswer({ from, to, subject: /^re:/i.test(title) ? title : `Re: ${title}`, text });
+  db.prepare('UPDATE reports SET body = ? WHERE id = ?').run(`${r.body}\n\n— Answered ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC from ${from}:\n${text}`, id);
+  console.log(`[mail] message #${id} answered from ${from}`);
+  return { to, from };
 }
 
 /** An account is deleted: its reports go, its link to error reports is cut. */
