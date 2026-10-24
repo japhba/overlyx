@@ -12,7 +12,9 @@
 #   - the projects directory with their git histories (without build products);
 #   - the agents' homes (sign-ins, transcripts; not their working copies);
 # then forgets snapshots beyond KEEP (14 daily, 8 weekly, 3 monthly: about three months — the
-# privacy notice says so) and prunes on Sundays. Status for the development account (no secrets):
+# privacy notice says so) and any other snapshot (one made by hand) after OTHERS_DAYS (92), and
+# prunes on Sundays — completely (--max-unused 0), so that no remnant of deleted data outlives the
+# snapshots that held it by more than the lock's days. Status for the development account (no secrets):
 # /var/lib/overlyx-backup-offsite/backup.json. Configuration: /etc/overlyx/backup-offsite.env
 # (RESTIC_REPOSITORY, RESTIC_PASSWORD_FILE, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION).
 #
@@ -28,6 +30,7 @@ STAGE=${OVERLYX_BACKUP_STAGE:-$(dirname "$PROJECTS")/backup-stage}
 STATUS=${OVERLYX_BACKUP_STATUS:-/var/lib/overlyx-backup-offsite}
 SECRETS=${OVERLYX_SECRETS_FILE:-$(dirname "$0")/../deploy/secrets.env}
 KEEP=${OVERLYX_BACKUP_KEEP:---keep-daily 14 --keep-weekly 8 --keep-monthly 3}
+OTHERS_DAYS=${OVERLYX_BACKUP_OTHERS_DAYS:-92}
 
 log() { echo "[backup-offsite] $*"; }
 started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -62,7 +65,9 @@ log "snapshot ${snap:0:8}: $files files, $(numfmt --to=iec "${added:-0}" 2>/dev/
 
 # the history kept: about three months; the bucket keeps what restic forgets for the lock's 30 days more
 restic forget --quiet --host overlyx --tag nightly $KEEP
-if [ "$(date -u +%u)" = 7 ] || [ "${OVERLYX_BACKUP_PRUNE:-}" = 1 ]; then restic prune --quiet && log "pruned"; fi
+# snapshots made by hand (another tag, other paths) go after OTHERS_DAYS: one group, so the age counts from tonight's snapshot
+restic forget --quiet --host overlyx --group-by host --keep-tag nightly --keep-within "${OTHERS_DAYS}d"
+if [ "$(date -u +%u)" = 7 ] || [ "${OVERLYX_BACKUP_PRUNE:-}" = 1 ]; then restic prune --quiet --max-unused 0 && log "pruned"; fi
 trap - ERR
 status true "$snap" "${added:-0}" "${files:-0}"
 log "done"

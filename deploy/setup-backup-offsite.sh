@@ -48,10 +48,13 @@ if [ "${1:-}" = "--retire-github-mirror" ]; then
   [ -f "$S" ] || { echo "no secrets file found for overlyx.service" >&2; exit 1; }
   grep -q '"ok":true' /var/lib/overlyx-backup-offsite/backup.json 2>/dev/null || { echo "the off-site backup has not succeeded yet (/var/lib/overlyx-backup-offsite/backup.json) — not retiring the mirror" >&2; exit 1; }
   grep -q '"ok":true' /var/lib/overlyx-backup-offsite/check.json 2>/dev/null || { echo "the restore check has not succeeded yet (/var/lib/overlyx-backup-offsite/check.json) — not retiring the mirror" >&2; exit 1; }
-  cp -p "$S" "$S.before-mirror-retired-$(date -u +%Y%m%d)"
+  # the old copy goes to $ETC, not beside it: deploy/ is in the (public) repository's checkout
+  install -d -m 700 "$ETC"
+  old="$ETC/$(basename "$S").before-mirror-retired-$(date -u +%Y%m%d)"
+  cp -p "$S" "$old"
   sed -i -E 's/^(GITHUB_MIRROR_(ORG|TOKEN)=)/# retired for the off-site backup: \1/' "$S"
   systemctl restart overlyx
-  echo "the GitHub mirror is off (the old $S is kept beside it). The organisation's repositories stay on GitHub until you delete them."
+  echo "the GitHub mirror is off (the old $S is kept as $old). The organisation's repositories stay on GitHub until you delete them."
   exit 0
 fi
 

@@ -1330,6 +1330,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     { sep: true },
     { label: 'Report a problem / send feedback…', action: () => setDialog({ name: 'feedback' }) },
     { label: 'Privacy notice', action: () => void window.open('/privacy', '_blank', 'noopener') },
+    { label: 'Terms of use', action: () => void window.open('/terms', '_blank', 'noopener') },
     { label: 'OverLyX for VS Code (.vsix download)', action: () => { const a = document.createElement('a'); a.href = '/api/vscode-extension'; a.download = ''; document.body.appendChild(a); a.click(); a.remove(); notify('Downloading the extension — install it in VS Code with “Extensions: Install from VSIX…”'); } },
     { label: 'About OverLyX', action: () => void uiAlert('About OverLyX', 'OverLyX — a collaborative WYSIWYM editor for LaTeX documents (LyX’s “what you see is what you mean”).\nDocuments are ordinary .tex files (change tracking and comments live in the file as macros and comment blocks); formulas are edited with a port of LyX\'s math editor; collaboration via Yjs CRDTs.') },
   ] };

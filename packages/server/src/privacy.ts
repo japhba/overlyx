@@ -6,11 +6,13 @@
  * It describes this code — keep it in step when data handling changes: feedback.ts (reports),
  * accounts.ts (deletion, trash), usage.ts (statistics), access.ts (activity log, guests, admin
  * access), mirror.ts (GitHub backup), ai.ts / airepair.ts / agent.ts / bibsearch.ts / gdocs /
- * lesswrong (third parties), scripts/backup.sh and scripts/backup-offsite.sh (backups).
+ * lesswrong (third parties), scripts/backup.sh and scripts/backup-offsite.sh (backups),
+ * scripts/maintenance.ts (what the AI maintenance worker is given). The terms of use: terms.ts.
  *
  * Who runs the instance comes from the environment: OVERLYX_OPERATOR (a name) and
  * OVERLYX_PRIVACY_CONTACT (an e-mail address; else OVERLYX_CONTACT_EMAIL, the contact address of the
- * literature services' polite pools). On overlyx.app both are set in a systemd drop-in
+ * literature services' polite pools); OVERLYX_OPERATOR_AI names the AI coding assistants the
+ * operator works on the server with. On overlyx.app they are set in a systemd drop-in
  * (/etc/systemd/system/overlyx.service.d/operator.conf).
  */
 import fs from 'node:fs';
@@ -29,7 +31,25 @@ function offsiteBackup(): string | null {
   return ({ hel1: 'Helsinki, Finland', nbg1: 'Nuremberg, Germany', fsn1: 'Falkenstein, Germany' } as Record<string, string>)[region] ?? 'another of its data centres';
 }
 
-const esc = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+/** the unattended maintenance worker (deploy/overlyx-maintenance.timer: codex, OpenAI) is switched on — pausing it disables the timer (DOCS.md) */
+function maintenanceAgent(): boolean {
+  return fs.existsSync('/etc/systemd/system/timers.target.wants/overlyx-maintenance.timer');
+}
+
+export const esc = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+
+/** the look of the public notices (this one and terms.ts) */
+export const NOTICE_STYLE = `<style>
+:root{--bg:#fbfaf7;--fg:#1b1b1b;--mute:#5d5d5d;--rule:#e2dfd8;--accent:#c8102e}
+@media (prefers-color-scheme:dark){:root{--bg:#161616;--fg:#ebe9e4;--mute:#a7a49d;--rule:#33312d;--accent:#ff5a6e}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:46rem;margin:0 auto;padding:2.5rem 1rem 4rem}
+h1{font-size:2rem;margin:0 0 .25rem;letter-spacing:-.01em}h2{font-size:1.2rem;margin:2.2rem 0 .5rem;padding-top:1rem;border-top:1px solid var(--rule)}
+h3{font-size:1rem;margin:1.2rem 0 .3rem}p,li{margin:.4rem 0}ul{padding-left:1.25rem}
+.sub{color:var(--mute);margin:0 0 1.5rem}a{color:var(--accent)}table{border-collapse:collapse;width:100%;font-size:.95rem}
+td,th{text-align:left;vertical-align:top;padding:.35rem .5rem;border-bottom:1px solid var(--rule)}th{font-weight:600}
+.back{display:inline-block;margin-bottom:1.5rem;text-decoration:none}
+</style>`;
 
 export function privacyHtml(): string {
   const operator = (process.env.OVERLYX_OPERATOR ?? '').trim();
@@ -41,6 +61,8 @@ export function privacyHtml(): string {
   const google = !!config.google.clientId;
   const mirror = !!(config.mirror.org && config.mirror.token);
   const offsite = offsiteBackup();
+  const maintenance = maintenanceAgent();
+  const operatorAi = (process.env.OVERLYX_OPERATOR_AI ?? '').trim();
   const who = operator ? esc(operator) : `the person who runs ${esc(site)}`;
   const reach = contact
     ? `by e-mail to <a href="mailto:${esc(contact)}">${esc(contact)}</a>, or with <b>Help ▸ Report a problem</b> in the app`
@@ -48,21 +70,11 @@ export function privacyHtml(): string {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Privacy · OverLyX</title><link rel="icon" href="/icon.svg"><link rel="apple-touch-icon" href="/apple-touch-icon.png">
-<style>
-:root{--bg:#fbfaf7;--fg:#1b1b1b;--mute:#5d5d5d;--rule:#e2dfd8;--accent:#c8102e}
-@media (prefers-color-scheme:dark){:root{--bg:#161616;--fg:#ebe9e4;--mute:#a7a49d;--rule:#33312d;--accent:#ff5a6e}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif}
-main{max-width:46rem;margin:0 auto;padding:2.5rem 1rem 4rem}
-h1{font-size:2rem;margin:0 0 .25rem;letter-spacing:-.01em}h2{font-size:1.2rem;margin:2.2rem 0 .5rem;padding-top:1rem;border-top:1px solid var(--rule)}
-h3{font-size:1rem;margin:1.2rem 0 .3rem}p,li{margin:.4rem 0}ul{padding-left:1.25rem}
-.sub{color:var(--mute);margin:0 0 1.5rem}a{color:var(--accent)}table{border-collapse:collapse;width:100%;font-size:.95rem}
-td,th{text-align:left;vertical-align:top;padding:.35rem .5rem;border-bottom:1px solid var(--rule)}th{font-weight:600}
-.back{display:inline-block;margin-bottom:1.5rem;text-decoration:none}
-</style></head>
+${NOTICE_STYLE}</head>
 <body><main>
 <a class="back" href="/">← OverLyX</a>
 <h1>Privacy notice</h1>
-<p class="sub">Last updated ${PRIVACY_UPDATED}. This page says what ${esc(site)} keeps about you, who else sees it, how long it stays, and how to get rid of it. It is a beta: if anything here is unclear or wrong, please tell us.</p>
+<p class="sub">Last updated ${PRIVACY_UPDATED}. This page says what ${esc(site)} keeps about you, who else sees it, how long it stays, and how to get rid of it. It is a beta: if anything here is unclear or wrong, please tell us. The rules for using OverLyX are in the <a href="/terms">terms of use</a>.</p>
 
 <h2>Who runs OverLyX</h2>
 <p>OverLyX at ${esc(site)} is run by ${who}, who decides how your data is used (the “controller” in data-protection law). You can reach them ${reach}.</p>
@@ -79,7 +91,7 @@ ${google
 <h3>The project's activity log</h3>
 <p>For each project we note who opened a document, built a PDF, pulled or pushed with git, or changed the sharing. Only the project's owner sees this log. Entries are deleted after 90 days.</p>
 <h3>Problem reports</h3>
-<p>What you send with <b>Help ▸ Report a problem</b> is stored on this server and only the operator reads it. We never publish it. It contains your text, your account, the app version and your browser, plus the document name and the last error message only if you tick those boxes.</p>
+<p>What you send with <b>Help ▸ Report a problem</b> is stored on this server. The operator reads it${maintenance ? ', and an AI assistant screens it to find and fix bugs, without your account (see <a href="#services">Services we use</a>)' : ''}. We never publish it. It contains your text, your account, the app version and your browser, plus the document name and the last error message only if you tick those boxes.</p>
 <p>Errors the app runs into are recorded the same way, automatically, with your account attached. They contain the error message, where in the code it happened, the app version and your browser. They never contain the content of your documents. An error record is deleted 90 days after the error last happened. Your own reports are deleted when you delete your account.</p>
 <p>On a touch screen, display glitches the app notices are recorded the same way: the whole interface scrolled or zoomed out of place, or a stroke you drew that jumped across the screen. Such a record has the screen's size and scroll positions, the kind of control that had the focus, whether the on-screen keyboard was up, how far the stroke jumped, and the kinds of input in the seconds before (a tap on a toolbar, the pen touching down, the keyboard coming up). It never has text, what or where you drew, or names.</p>
 <p>When you press <b>Send my answers to OverLyX</b> in the pen's <b>Find your ink</b> page, your answers are stored the same way: which ink settings you compared, what you chose, how long each choice took, and your screen's size and kind of pen — and the points your pen gave for the line you wrote there only if you tick that box. They help make the pens' default ink better for everyone. They are deleted a year after you sent them, or with your account.</p>
@@ -93,7 +105,7 @@ ${google
 <p>Separate reliability diagnostics are sent only if you give separate consent. They count a fixed list of events and pointer types, coarse contexts and duration buckets — never document text, account details, URLs, coordinates, or free text. They use the same short-lived random page-load id and are kept for ${RELIABILITY_RETENTION_DAYS} days. They are not sent when usage statistics are switched off or your browser sends Global Privacy Control.</p>
 <p>You can switch them off in <b>Settings ▸ Privacy</b>. Your browser's Global Privacy Control signal also switches them off.</p>
 <h3>Server logs</h3>
-<p>The server's logs record events such as “user X opened project Y” or “a build failed”, together with user names and project or file names. For requests that fail, they also record the IP address and browser. The logs help us keep the service running and secure. They are deleted automatically, oldest first, once they reach a fixed size — currently after a few months.</p>
+<p>The server's logs record events such as “user X opened project Y” or “a build failed”, together with user names and project or file names. For requests that fail, they also record the IP address and browser. The logs help us keep the service running and secure.${maintenance ? ' The lines about errors are screened by the AI assistant that looks for bugs (see <a href="#services">Services we use</a>).' : ''} They are deleted automatically, oldest first, once they reach a fixed size — currently after a few months.</p>
 <h3>In your browser</h3>
 <p>We set one sign-in cookie (<code>ol_session</code>, valid for 30 days)${google ? ', and short-lived ones (10 minutes) while you sign in with Google or connect Google Drive' : ''}. There are no advertising or tracking cookies.</p>
 <p>The app keeps your preferences in your browser. It also keeps copies of the documents you opened there, so it can work offline and reconnect without losing edits. <b>Sign out</b> removes those copies.</p>
@@ -104,12 +116,14 @@ ${google
 <li><b>Anyone with a link</b>: if you turn on a share link or a public PDF link, anyone who has the link can open the project or download the PDF. You can turn the link off at any time.</li>
 <li><b>The operator and administrators</b> have technical access to the server and can see the list of accounts and projects. To help with a problem, an administrator can give themselves temporary access to a project. Every such access is recorded in the project's activity log, so its owner sees it.</li>
 </ul>
-<h3>Services we use</h3>
+<h3 id="services">Services we use</h3>
 <table>
 <tr><th>Service</th><th>What it gets</th><th>When</th></tr>
 <tr><td>Hetzner (Germany)</td><td>Hosts the server, so it stores everything above${offsite ? `. Also keeps our off-site backups, in its data centre in ${offsite} — encrypted on our server before they leave it, so Hetzner cannot read them` : ''}</td><td>Always</td></tr>
 ${google ? `<tr><td>Google</td><td>Signs you in. With Google Docs sync, the linked document's text and comments go to that Google Doc</td><td>When you sign in; Docs sync only if you connect Google Drive and link a document</td></tr>` : ''}
 ${mirror ? `<tr><td>GitHub (USA)</td><td>A backup copy of every project's version history, in private repositories that only the operator can access, updated every few minutes</td><td>Always. A project's owner can pause it in the project's <b>Git</b> dialog</td></tr>` : ''}
+${maintenance ? `<tr><td>OpenAI (USA), through the operator's ChatGPT account (Codex)</td><td>To find and fix bugs, an AI assistant screens new problem reports, error records, the pen page's answers and the error lines of the server logs every ten minutes, and may correct OverLyX's code. E-mail addresses and anything that looks like a password or key are removed first, and reports reach it without the account they came from; but what you wrote in a report and the log lines can contain user names and project or file names. It gets no projects and no mail to privacy@ / contact@</td><td>Always, while this automatic maintenance is switched on</td></tr>` : ''}
+${operatorAi ? `<tr><td>${esc(operatorAi)} (USA): the AI coding assistants the operator works with</td><td>When the operator develops or looks after OverLyX with them on the server, they can see what the operator sees there: mostly code, logs and statistics (with other people's names pseudonymized where the tools allow), and the data described on this page where a problem needs it</td><td>When the operator works on the server</td></tr>` : ''}
 <tr><td>OpenRouter (USA), and the AI company whose model is used (Google by default; also Anthropic, OpenAI and others you can choose)</td><td>The text around your cursor or your selection, your instruction, and your document's LaTeX source as context. “Escalate to AI” for a document that will not build sends the whole <code>.tex</code> file. Writing a formula with the math keyboard’s pen sends a picture of the handwriting and the formula around the cursor. No account details</td><td>Only when you use an AI feature. All AI features are off until you switch them on in Settings</td></tr>
 <tr><td>OpenAI, through your own ChatGPT account</td><td>What the Agent panel's agent reads and writes in the project you give it. Its sign-in and conversations are stored on our server in your account's folder</td><td>Only if you use the Agent panel and sign in to ChatGPT there</td></tr>
 <tr><td>Anthropic, OpenAI or OpenRouter (USA; OpenRouter passes the request on to the company whose model you choose), through your own API key — or OpenAI through your ChatGPT sign-in</td><td>What the Agent panel's agent reads and writes in the project you give it, and what an AI feature sends (above) when you choose one of these models for it, sent with your key. The key is stored encrypted on our server for your account; the agent's conversations are stored there too, in your account's folder</td><td>Only if you add a key (or sign in) in a model menu and use a model on it</td></tr>
@@ -126,7 +140,7 @@ ${mirror ? `<tr><td>GitHub (USA)</td><td>A backup copy of every project's versio
 <h2>Why we may do this</h2>
 <ul>
 <li><b>To provide the service you signed up for</b> (contract): your account, your projects, sharing, building PDFs and the backups that protect your work.</li>
-<li><b>Our legitimate interests</b>: keeping the service secure, finding and fixing errors (error reports, logs) and improving it (anonymous statistics). You can object, see <a href="#rights">your rights</a>.</li>
+<li><b>Our legitimate interests</b>: keeping the service secure, finding and fixing errors (error reports, logs${maintenance || operatorAi ? ', also with the AI assistants above' : ''}) and improving it (anonymous statistics). You can object, see <a href="#rights">your rights</a>.</li>
 <li><b>Your consent</b> for the optional features you switch on: the AI features, Google Drive, Zotero, the Agent panel and connected AI apps. Switching them off withdraws it.</li>
 </ul>
 

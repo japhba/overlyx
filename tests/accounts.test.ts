@@ -25,6 +25,7 @@ const access = await import('../packages/server/src/access.ts');
 const accounts = await import('../packages/server/src/accounts.ts');
 const fb = await import('../packages/server/src/feedback.ts');
 const { privacyHtml } = await import('../packages/server/src/privacy.ts');
+const { termsHtml } = await import('../packages/server/src/terms.ts');
 const { createUser, toSessionUser } = await import('../packages/server/src/auth.ts');
 const { db } = await import('../packages/server/src/db.ts');
 
@@ -148,6 +149,17 @@ describe('the privacy notice', () => {
     expect(html).toContain('Settings ▸ Account ▸ Delete account');
     expect(html).toContain(`${accounts.TRASH_DAYS} days in the trash`);
     expect(html).toContain('Falkenstein, Germany');
+    expect(html).toContain('href="/terms"');
+    expect(html).not.toMatch(/<script/i);
+  });
+});
+
+describe('the terms of use', () => {
+  it('name the operator, point to the privacy notice and keep what the law does not let them limit', () => {
+    const html = termsHtml();
+    expect(html).toContain('Ada Operator');
+    expect(html).toContain('href="/privacy"');
+    expect(html).toContain('injury to life, body or health');
     expect(html).not.toMatch(/<script/i);
   });
 });

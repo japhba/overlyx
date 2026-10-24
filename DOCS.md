@@ -2897,7 +2897,9 @@ has **Object Lock in COMPLIANCE mode**: every object is kept at least 30 days, w
 this server and its keys included — and restic's own deletes only leave delete markers over versions
 the bucket still holds; lifecycle rules let a deleted version go 31 days later. Kept: 14 daily, 8
 weekly, 3 monthly snapshots (about three months, plus those 30 days; the privacy notice says so);
-pruned on Sundays. `deploy/overlyx-backup-check.timer` (Sundays) runs `scripts/backup-check.sh`:
+a snapshot made by hand (any other tag) is forgotten 92 days after it was made
+(`OVERLYX_BACKUP_OTHERS_DAYS`); pruned on Sundays with `--max-unused 0`, so no remnant of deleted
+data stays behind in a partly used pack. `deploy/overlyx-backup-check.timer` (Sundays) runs `scripts/backup-check.sh`:
 `restic check` reading 5 % of the data back, the newest snapshot at most two days old, a test restore
 of the database (integrity_check, users) and of one project picked at random. Their status — no
 names, no secrets — is in `/var/lib/overlyx-backup-offsite/{backup,check}.json`, readable by the
@@ -2913,7 +2915,10 @@ copy goes with the server — creates the locked bucket (`mc mb --with-lock`, de
 versioning, lifecycle), runs `restic init`, installs the timers and the telemetry wrapper, and runs
 the first backup and the restore check. Once both have succeeded,
 `bash deploy/setup-backup-offsite.sh --retire-github-mirror` turns the GitHub mirror below off (the
-privacy notice then no longer lists GitHub; the repositories already there stay until deleted).
+privacy notice then no longer lists GitHub; the old `secrets.env` is kept in `/etc/overlyx/`, outside
+the repository; the repositories already there stay until deleted — delete the organisation then, as
+deleting an account no longer reaches them). On overlyx.app this was done on 24 October 2026 and the
+organisation deleted.
 
 Restoring from it (the same layout as a nightly backup, then `scripts/restore.sh`):
 
@@ -2931,7 +2936,7 @@ overlyx-backup/<bucket>` shows the versions; `mc cp --recursive --rewind <time> 
 and restore from that copy with `RESTIC_REPOSITORY=/mnt/HC_Volume_107166861/restic-rewound`. On a new
 machine all that is needed is the S3 keys, the bucket's name and the repository password.
 
-**Off-site mirror (GitHub organisation; to be retired for the off-site backup above).** With `GITHUB_MIRROR_ORG` and `GITHUB_MIRROR_TOKEN` in
+**Off-site mirror (GitHub organisation; retired for the off-site backup above, off on overlyx.app).** With `GITHUB_MIRROR_ORG` and `GITHUB_MIRROR_TOKEN` in
 `deploy/secrets.env` (a fine-grained token whose resource owner is the organisation, *All
 repositories*, permissions *Contents* and *Administration: read & write*), every project's git
 repository is pushed to a private repository `<org>/<project>` of that organisation

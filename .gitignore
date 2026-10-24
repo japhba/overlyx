@@ -11,4 +11,6 @@ playwright-report/
 .env
 dist.new/
 deploy/secrets.env
+deploy/secrets.env.*
+!deploy/secrets.env.example
 scripts/recording/out/

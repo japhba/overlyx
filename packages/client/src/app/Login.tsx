@@ -230,6 +230,7 @@ export function Login({ onLogin, google, note, onBack }: {
                 <button class={'btn' + (google ? '' : ' primary')} disabled={busy}>Sign in</button>
               </div>
             )}
+            <p class="signin-note" data-terms-note>By signing in you agree to the <a href="/terms" target="_blank" rel="noopener">terms of use</a>. What we keep about you: <a href="/privacy" target="_blank" rel="noopener">privacy notice</a>.</p>
             {onBack && <button type="button" class="fallback-link" data-login-back onClick={onBack}>← Continue as a guest for now</button>}
             <a class="demos-hint" href="#overleaf" data-overleaf-hint onClick={e => { e.preventDefault(); scrollTo('#overleaf'); }}>Coming from Overleaf or LyX? Bring your projects along ↓</a>
           </form>
@@ -255,6 +256,7 @@ export function Login({ onLogin, google, note, onBack }: {
             </a>
             <a href={GITHUB_URL + '/issues/new'} target="_blank" rel="noopener">Report an issue</a>
             <a href="/privacy" data-privacy-link>Privacy</a>
+            <a href="/terms" data-terms-link>Terms</a>
           </nav>
         </footer>
       </div>

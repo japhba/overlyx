@@ -59,6 +59,7 @@ import { feedbackRoutes, vscodeTelemetryRoutes, reportServerError, pruneReports,
 import { startInboxImport } from './inbox.ts';
 import { deletionPreview, deleteAccount, pruneTrash } from './accounts.ts';
 import { privacyPage } from './privacy.ts';
+import { termsPage } from './terms.ts';
 import { usageRoutes, vscodeUsageRoutes } from './usage.ts';
 import { searchLiterature, bibtexFor, addToCitedBib, sourcesAvailable, normTitle, type Hit } from './bibsearch.ts';
 import { identify } from './citelinks.ts';
@@ -1782,8 +1783,9 @@ app.use('/api', api);
 // HTML deliverables' sandboxed pages (/ol-d/<token>/…) and the runtime's CORS (/_ol/…): before the app's catch-all
 mountDeliverables(app);
 
-/** The privacy notice (privacy.ts): public, readable without signing in. */
+/** The privacy notice (privacy.ts) and the terms of use (terms.ts): public, readable without signing in. */
 app.get('/privacy', privacyPage);
+app.get('/terms', termsPage);
 
 if (fs.existsSync(config.clientDist)) {
   app.use(express.static(config.clientDist, { index: false, maxAge: '1h' }));
