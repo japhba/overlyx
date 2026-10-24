@@ -66,7 +66,7 @@ import { reviewOps, resolveOps, resolveAll, reviewOf, isSuggesting, suggestingOp
 import { deliverableInfo, slideElements } from '@overlyx/core/html/deliverable.ts';
 import { formatTimestamp } from '@overlyx/core';
 import { ReviewPane, type CommentDraft } from './ReviewPane';
-import { EditModeSwitch, type EditMode } from '../app/EditModeSwitch';
+import { EditModeSwitch, modeScope, setOwnSuggesting, suggestingFor, switchModeScope, type EditMode, type ModeScope } from '../app/EditModeSwitch';
 import { useDarkPagesState, toggleDarkPages, invertedColor, deskBeside, DARK_DESK } from '../app/darkpages';
 import { recordReliability, recordInteraction } from '../usage';
 import { reportJump } from '../glitches';
@@ -223,8 +223,12 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   /** who comments and suggests here */
   const me = host.author?.() || 'You';
   const textNow = host.text();
-  /** Suggesting: a setting of the page (its <meta>), for everyone editing it, as in documents */
-  const suggesting = useMemo(() => isSuggesting(textNow), [textNow]);
+  /** Suggesting: a setting of the page (its <meta>), for everyone editing it, as in documents … */
+  const pageSuggesting = useMemo(() => isSuggesting(textNow), [textNow]);
+  /** … unless this person chose for themselves (the mode switch's Applies to ▸ Only me) */
+  const modeKey = host.docId ?? host.path;
+  const [, setOwnTick] = useState(0);
+  const suggesting = suggestingFor(modeKey, pageSuggesting);
   const review = useMemo(() => reviewOf(textNow), [textNow]);
   /** the text once it has stayed a second, and the pen a while: what can wait while it is being changed (the layout margins, from all of it) */
   const settledText = useSettled(textNow, 1000, () => performance.now() - lastInkAt.current < 2500);
@@ -737,7 +741,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   const similarCache = useRef<{ t: string; p: string; n: number } | null>(null);
 
   /** who and when, while suggesting (null: edits are direct) */
-  const suggestStamp = () => (isSuggesting(text.toString()) ? stampOf(me) : null);
+  const suggestStamp = () => (suggestingFor(modeKey, isSuggesting(text.toString())) ? stampOf(me) : null);
 
   /**
    * operations on the current text (from this side: the toolbar, the rail's menu) — while suggesting
@@ -823,12 +827,22 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     const n = reviewOf(text.toString()).changes.length;
     if (replaceText(resolveAll(text.toString(), accept))) notify(`${accept ? 'Accepted' : 'Rejected'} ${n} suggestion${n === 1 ? '' : 's'} — Ctrl+Z undoes it.`);
   };
-  /** the mode switch: Viewing is this editor's; Editing / Suggesting the page's setting */
+  /** the mode switch: Viewing is this editor's; Editing / Suggesting the page's setting, or this person's own (Only me) */
   const setMode = (m: EditMode) => {
     setViewing(m === 'viewing');
     if (m === 'viewing' || hostReadOnly.current) return;
+    if (modeScope() === 'me') { setOwnSuggesting(modeKey, m === 'suggesting'); setOwnTick(t => t + 1); return; }
+    setOwnSuggesting(modeKey, null);
     const op = suggestingOp(text.toString(), m === 'suggesting');
     if (op) applyOps([op], true);
+  };
+  /** Applies to: to Everyone, this person's own mode becomes the page's */
+  const setModeScopeTo = (to: ModeScope) => {
+    const push = switchModeScope(modeKey, to, isSuggesting(text.toString()));
+    setOwnTick(t => t + 1);
+    const op = push !== null && !hostReadOnly.current ? suggestingOp(text.toString(), push) : null;
+    if (op) applyOps([op], true);
+    notify(to === 'me' ? 'Editing or suggesting now applies to you alone' : 'Editing or suggesting now applies to everyone editing the page');
   };
   const setChanges = (ins: boolean, del: boolean) => { setShowIns(ins); setShowDel(del); saveFlag('ol.deckShowIns', ins); saveFlag('ol.deckShowDel', del); };
 
@@ -3134,7 +3148,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   );
   const modeSwitch = (
     <EditModeSwitch mode={viewing ? 'viewing' : suggesting ? 'suggesting' : 'editing'} canEdit={!readOnly} view={null} views={() => []} onMode={setMode}
-      changes={{ ins: showIns, del: showDel, set: setChanges }} shortcuts={false} />
+      changes={{ ins: showIns, del: showDel, set: setChanges }} shortcuts={false} scope={{ doc: pageSuggesting, set: setModeScopeTo }} />
   );
   const downloads = (x: number, y: number) => showContextMenu(x, y, host.downloads(m => src(m === 'view' && kind === 'deck' ? 'present' : m)));
   const downloadBtn = !host.bindSvgExporter && (

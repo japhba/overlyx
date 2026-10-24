@@ -1,9 +1,11 @@
 /**
  * Google Docs' mode switch at the top right of the editor: Editing · Suggesting · Viewing, and
  * under them which tracked changes are drawn (the review toolbar's Show insertions / deletions).
- * Suggesting is change tracking, a setting of the document (\tracking_changes, as in LyX), so it
- * is on for everyone editing the document; Viewing makes only this editor read-only. Shared by
- * the web client (end of the first toolbar row) and the VS Code webview (its top bar).
+ * Suggesting is change tracking. Under "Applies to ▸ Everyone" it is a setting of the document
+ * (\tracking_changes, as in LyX), on for everyone editing it; under "Only me" each person's choice
+ * is their own (kept in this browser per document, as in Google Docs) and the document's setting
+ * stays as it is for the others. Viewing makes only this editor read-only. Shared by the web
+ * client (end of the first toolbar row), the VS Code webview (its top bar) and the deck editor.
  */
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { EditorView } from 'prosemirror-view';
@@ -16,6 +18,45 @@ export function editModeOf(tracking: boolean, viewing: boolean): EditMode {
   return viewing ? 'viewing' : tracking ? 'suggesting' : 'editing';
 }
 
+/** who Editing / Suggesting applies to: this person alone, or everyone editing the document (its setting) */
+export type ModeScope = 'me' | 'everyone';
+const SCOPE_KEY = 'ol.modeScope';
+const OWN_KEY = 'ol.ownSuggesting:';
+
+export function modeScope(): ModeScope {
+  try { return localStorage.getItem(SCOPE_KEY) === 'me' ? 'me' : 'everyone'; } catch { return 'everyone'; }
+}
+export function setModeScope(s: ModeScope): void {
+  try { localStorage.setItem(SCOPE_KEY, s); } catch { /* private window: this session's default */ }
+}
+
+/** this person's own choice for a document under "Only me" (null: none made, the document's setting applies) */
+export function ownSuggesting(docId: string): boolean | null {
+  try { const v = localStorage.getItem(OWN_KEY + docId); return v === '1' ? true : v === '0' ? false : null; } catch { return null; }
+}
+export function setOwnSuggesting(docId: string, on: boolean | null): void {
+  try { if (on === null) localStorage.removeItem(OWN_KEY + docId); else localStorage.setItem(OWN_KEY + docId, on ? '1' : '0'); } catch { /* not remembered */ }
+}
+
+/** whether this person's edits become suggestions: their own choice under "Only me", else the document's setting */
+export function suggestingFor(docId: string | null | undefined, doc: boolean): boolean {
+  const own = docId && modeScope() === 'me' ? ownSuggesting(docId) : null;
+  return own ?? doc;
+}
+
+/**
+ * "Applies to" switched. To Only me: the current mode becomes this person's own (the document's
+ * setting stays, later changes of it no longer move them). To Everyone: their own mode becomes the
+ * document's — returned when the document's setting must change to it.
+ */
+export function switchModeScope(docId: string | null | undefined, to: ModeScope, doc: boolean): boolean | null {
+  const mine = suggestingFor(docId, doc);
+  setModeScope(to);
+  if (!docId) return null;
+  setOwnSuggesting(docId, to === 'me' ? mine : null);
+  return to === 'everyone' && mine !== doc ? mine : null;
+}
+
 /** Switch to `mode`: Editing and Suggesting leave Viewing and set change tracking; Viewing leaves tracking as it is. */
 export function applyEditMode(mode: EditMode, s: { tracking: boolean; toggleTracking(): void; setViewing(on: boolean): void }): void {
   s.setViewing(mode === 'viewing');
@@ -25,8 +66,13 @@ export function applyEditMode(mode: EditMode, s: { tracking: boolean; toggleTrac
 const MODES: { mode: EditMode; label: string; hint: string; title: string }[] = [
   { mode: 'editing', label: 'Editing', hint: 'Edit the document directly', title: 'Change tracking off' },
   { mode: 'suggesting', label: 'Suggesting', hint: 'Edits become tracked changes to accept or reject',
-    title: 'Change tracking on (Ctrl+Shift+E) — a setting of the document, so it applies to everyone editing it' },
+    title: 'Change tracking on (Ctrl+Shift+E)' },
   { mode: 'viewing', label: 'Viewing', hint: 'Read the document without changing it', title: 'This editor is read-only until you switch back' },
+];
+
+const SCOPES: { id: ModeScope; label: string; title: string }[] = [
+  { id: 'me', label: 'Only me', title: 'Editing or suggesting is your own choice for this document; the others keep the document’s setting' },
+  { id: 'everyone', label: 'Everyone', title: 'Editing or suggesting is the document’s setting (change tracking), the same for everyone editing it' },
 ];
 
 /** the four combinations of the insertion / deletion filter (editor/plugins/changes.ts) */
@@ -44,7 +90,7 @@ const ICONS: Record<EditMode, string> = {
 };
 const Icon = ({ mode }: { mode: EditMode }) => <span class="edit-mode-icon" dangerouslySetInnerHTML={{ __html: ICONS[mode] }} />;
 
-export function EditModeSwitch({ mode, canEdit, view, views, onMode, changes, shortcuts = true }: {
+export function EditModeSwitch({ mode, canEdit, view, views, onMode, changes, shortcuts = true, scope }: {
   mode: EditMode;
   /** false with view access only: Viewing is all there is */
   canEdit: boolean;
@@ -57,8 +103,11 @@ export function EditModeSwitch({ mode, canEdit, view, views, onMode, changes, sh
   changes?: { ins: boolean; del: boolean; set(ins: boolean, del: boolean): void };
   /** the documents' shortcut named in the titles (not on slides, where Ctrl+Shift+E centres) */
   shortcuts?: boolean;
+  /** "Applies to": the document's own setting (suggesting or not) and the switch of who the mode is for */
+  scope?: { doc: boolean; set(to: ModeScope): void };
 }) {
   const [open, setOpen] = useState(false);
+  const scopeNow = modeScope();
   const wrap = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
@@ -77,6 +126,12 @@ export function EditModeSwitch({ mode, canEdit, view, views, onMode, changes, sh
     setOpen(false);
     recordUsage('toolbar', `mode ▸ ${m}`);
     if (m !== shown) onMode(m);
+    view?.focus();
+  };
+  const pickScope = (to: ModeScope) => {
+    setOpen(false);
+    recordUsage('toolbar', `mode scope ▸ ${to}`);
+    if (to !== scopeNow) scope?.set(to);
     view?.focus();
   };
   const pickView = (c: typeof CHANGE_VIEWS[number]) => {
@@ -101,12 +156,27 @@ export function EditModeSwitch({ mode, canEdit, view, views, onMode, changes, sh
         <div class="edit-mode-menu" role="menu">
           {MODES.map(m => (
             <button type="button" key={m.mode} role="menuitemradio" aria-checked={shown === m.mode} data-mode={m.mode}
-              disabled={!canEdit && m.mode !== 'viewing'} title={!canEdit && m.mode !== 'viewing' ? 'The project was shared with you for viewing' : shortcuts ? m.title : m.title.replace(/ \(Ctrl\+Shift\+E\)/, '')} onClick={() => pickMode(m.mode)}>
+              disabled={!canEdit && m.mode !== 'viewing'} onClick={() => pickMode(m.mode)}
+              title={!canEdit && m.mode !== 'viewing' ? 'The project was shared with you for viewing'
+                : (shortcuts ? m.title : m.title.replace(/ \(Ctrl\+Shift\+E\)/, '')) + (m.mode === 'viewing' || !scope ? '' : scopeNow === 'me' ? ' — for you alone' : ' — for everyone editing the document')}>
               <Icon mode={m.mode} />
               <span class="edit-mode-text"><b>{m.label}</b><small>{m.hint}</small></span>
               <span class="edit-mode-check">{shown === m.mode ? '✓' : ''}</span>
             </button>
           ))}
+          {canEdit && scope && (
+            <>
+              <div class="edit-mode-sep" />
+              <div class="edit-mode-head">Applies to</div>
+              {SCOPES.map(sc => (
+                <button type="button" key={sc.id} role="menuitemradio" aria-checked={scopeNow === sc.id} data-mode-scope={sc.id} class="edit-mode-filter" title={sc.title} onClick={() => pickScope(sc.id)}>
+                  <span class="edit-mode-check lead">{scopeNow === sc.id ? '✓' : ''}</span>
+                  <span class="edit-mode-text">{sc.label}
+                    {sc.id === 'me' && scopeNow === 'me' && <small>The others: {scope.doc ? 'suggesting' : 'editing'} (the document’s setting)</small>}</span>
+                </button>
+              ))}
+            </>
+          )}
           <div class="edit-mode-sep" />
           <div class="edit-mode-head">Show changes</div>
           {CHANGE_VIEWS.map(c => {

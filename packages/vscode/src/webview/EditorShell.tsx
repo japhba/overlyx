@@ -55,7 +55,7 @@ import { SourcePane, cursorLine, docBlocks, blockPos } from '@client/app/SourceP
 import { PaneSwitch } from '@client/app/PaneSwitch';
 import { PaneDividers } from '@client/app/PaneDividers';
 import { loadLayout, normalizeLayout, saveLayout, setPaneShown, togglePane, visiblePanes, paneGrow, type PaneId, type PaneLayout } from '@client/app/panes';
-import { EditModeSwitch, editModeOf, applyEditMode } from '@client/app/EditModeSwitch';
+import { EditModeSwitch, editModeOf, applyEditMode, modeScope, setOwnSuggesting, suggestingFor, switchModeScope, type ModeScope } from '@client/app/EditModeSwitch';
 import { locateSourceLine } from '@client/app/sourcelocate';
 import { activeMathField, mathFocusListeners, mathCursorListeners, type LyxMathField } from '@client/editor/lyxmath/field';
 import {
@@ -267,9 +267,9 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
     const activeMeta = id === docId ? metaRef.current : relatedRefs.current.get(id)?.meta;
     if (activeMeta) {
       editorContext.meta = activeMeta;
-      editorContext.trackChanges = activeMeta.trackingChanges;
+      editorContext.trackChanges = suggestingFor(id, activeMeta.trackingChanges);
       editorContext.changeAuthorId = activeMeta.authors.find(a => a.name === 'You')?.id;
-      setTracking(activeMeta.trackingChanges);
+      setTracking(editorContext.trackChanges);
     }
     const p = C.currentParagraph(v.state);
     setLayout(p ? p.node.attrs.layout : '');
@@ -286,6 +286,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
     let handle: LocalEditorHandle | null = null;
     void (async () => {
       editorContext.user = { id: 1, username: 'you', name: 'You', color: '#3b6ea5', isAdmin: false };
+      editorContext.myNames = init.author ? [init.author] : [];
       editorContext.docId = docId;
       editorContext.project = projectOfDoc(docId);
       editorContext.docDir = docDirOf(docId);
@@ -312,8 +313,8 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       if (m) {
         handle.view.dom.lang = bcp47(m.language);
         applyAuthorColors(m.authors);
-        setTracking(m.trackingChanges);
-        editorContext.trackChanges = m.trackingChanges;
+        editorContext.trackChanges = suggestingFor(docId, m.trackingChanges);
+        setTracking(editorContext.trackChanges);
         editorContext.changeAuthorId = m.authors.find(x => x.name === 'You')?.id;
       }
       refreshMacros(handle.view, m?.macros ?? {});
@@ -476,9 +477,13 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
     for (const v of allViews()) { v.setProps({}); v.dom.classList.toggle('view-only', viewing); }
   }, [viewing, relatedRefs.current.size]);
 
-  const toggleTracking = async () => {
+  const toggleTracking = () => setTrackingTo(!editorContext.trackChanges);
+  /** Suggesting on or off: the file's setting (Applies to ▸ Everyone) or this person's own (Only me) */
+  const setTrackingTo = async (next: boolean) => {
     const target = viewDocId(currentView()!);
-    const next = !editorContext.trackChanges;
+    const forAll = modeScope() === 'everyone';
+    const set = forAll ? { tracking_changes: String(next) } : undefined;
+    const doc = forAll ? next : editorContext.meta!.trackingChanges;
     try {
       if (next && editorContext.changeAuthorId === undefined) {
         const id = hashAuthor('You');
@@ -486,19 +491,27 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
         const idx = lines.findIndex(l => l.startsWith('\\author '));
         const line = `\\author ${id} "You" ""`;
         if (idx >= 0) lines.splice(idx, 0, line); else lines.push(line);
-        const r = await api.setHeader(target, { headerLines: lines, set: { tracking_changes: 'true' } });
+        const r = await api.setHeader(target, { headerLines: lines, set });
         updateHeader(target, r.headerLines);
         editorContext.changeAuthorId = id;
-        updateMeta(target, { ...editorContext.meta!, trackingChanges: next, authors: [...editorContext.meta!.authors, { id, name: 'You' }] });
-      } else {
-        const r = await api.setHeader(target, { set: { tracking_changes: String(next) } });
+        updateMeta(target, { ...editorContext.meta!, trackingChanges: doc, authors: [...editorContext.meta!.authors, { id, name: 'You' }] });
+      } else if (forAll) {
+        const r = await api.setHeader(target, { set });
         updateHeader(target, r.headerLines);
         updateMeta(target, { ...editorContext.meta!, trackingChanges: next });
       }
+      setOwnSuggesting(target, forAll ? null : next);
       editorContext.trackChanges = next;
       setTracking(next);
-      notify(next ? 'Change tracking ON' : 'Change tracking OFF');
+      notify(next ? `Change tracking ON${forAll ? '' : ' for you alone'}` : `Change tracking OFF${forAll ? '' : ' for you'}`);
     } catch (e) { notify('Could not switch change tracking: ' + (e as Error).message, 'error'); }
+  };
+  /** the mode switch's "Applies to": to Everyone, this person's own mode becomes the file's */
+  const setTrackingScope = (to: ModeScope) => {
+    const target = viewDocId(currentView()!);
+    const push = switchModeScope(target, to, !!editorContext.meta?.trackingChanges);
+    if (push !== null) void setTrackingTo(push);
+    else notify(to === 'me' ? 'Editing or suggesting now applies to you alone' : 'Editing or suggesting now applies to everyone editing the file');
   };
 
   const gotoLabelIn = (v: EditorView, name: string): boolean => {
@@ -810,7 +823,8 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
           <InterfaceZoom />
           <ThemeToggle pref={themePref} dark={shownDark} onPick={pickTheme} host="VS Code" onSettings={() => setDialog({ name: 'preferences' })} />
           <EditModeSwitch mode={editModeOf(tracking, viewing)} canEdit view={view} views={allViews}
-            onMode={m => applyEditMode(m, { tracking, toggleTracking: () => { void toggleTracking(); }, setViewing })} />
+            onMode={m => applyEditMode(m, { tracking, toggleTracking: () => { void toggleTracking(); }, setViewing })}
+            scope={{ doc: !!editorContext.meta?.trackingChanges, set: setTrackingScope }} />
           <PaneSwitch layout={panes} onChange={changePanes} markdown={/\.(md|markdown)$/i.test(docId)} article={article} />
         </span>
       </div>

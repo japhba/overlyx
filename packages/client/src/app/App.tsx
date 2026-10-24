@@ -27,7 +27,7 @@ import { applyArticleLook } from '../editor/article';
 import { ArticlePage } from './ArticlePage';
 import { PaneSwitch } from './PaneSwitch';
 import { PaneDividers } from './PaneDividers';
-import { EditModeSwitch, editModeOf, applyEditMode } from './EditModeSwitch';
+import { EditModeSwitch, editModeOf, applyEditMode, modeScope, setOwnSuggesting, suggestingFor, switchModeScope, type ModeScope } from './EditModeSwitch';
 import { loadLayout, saveLayout, setPaneShown, togglePane, visiblePanes, paneGrow, type PaneId, type PaneLayout } from './panes';
 import { ShareDialog } from './Share';
 import { GuestCallout } from './Guest';
@@ -392,7 +392,10 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   const pagesOn = pagesFor.doc === docId && pagesFor.on;
   const [combined, setCombined] = useState(localStorage.getItem('ol.combined') === '1');
   const [childIds, setChildIds] = useState<string[]>([]);
+  /** whether this person's edits are tracked (Suggesting) … */
   const [tracking, setTracking] = useState(false);
+  /** … and the document's own setting (\tracking_changes: everyone's, unless they chose for themselves) */
+  const [docTracking, setDocTracking] = useState(false);
   const [chord, setChord] = useState<string | null>(null);
   const [changeInfo, setChangeInfo] = useState<string | null>(null);
   const [save, setSave] = useState<SaveState>({ state: 'connecting', pending: false, savedAt: 0, unavailable: false });
@@ -854,7 +857,20 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     editorRef.current = handle; activeViewRef.current = handle.view; editorContext.activeView = handle.view;
     // header lines live in the Y meta map
     const metaMap = handle.ydoc.getMap<string>('meta');
-    const readHeader = () => { try { setHeaderLines(JSON.parse(metaMap.get('header') ?? '[]')); } catch { /* ignore */ } };
+    // the document's change tracking, and what applies to this person (EditModeSwitch: Only me / Everyone)
+    const followDocTracking = (doc: boolean) => {
+      const on = suggestingFor(docId, doc);
+      setDocTracking(doc); setTracking(on); editorContext.trackChanges = on;
+    };
+    const readHeader = () => {
+      try {
+        const lines: string[] = JSON.parse(metaMap.get('header') ?? '[]');
+        setHeaderLines(lines);
+        // switched for everyone, here or by a co-author: followed at once
+        const t = lines.find(l => l.startsWith('\\tracking_changes '));
+        if (t) followDocTracking(t === '\\tracking_changes true');
+      } catch { /* ignore */ }
+    };
     readHeader(); metaMap.observe(readHeader);
     const h = handle;
     let firstSync = true;
@@ -874,8 +890,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         // the browser's spell checker picks its dictionary from the lang attribute
         h.view.dom.lang = bcp47(m.language);
         applyAuthorColors(m.authors);
-        setTracking(m.trackingChanges);
-        editorContext.trackChanges = m.trackingChanges;
+        followDocTracking(m.trackingChanges);
         editorContext.changeAuthorId = m.authors.find(x => x.name === user.name)?.id;
       }
       refreshMacros(h.view, m?.macros ?? null);
@@ -1205,9 +1220,12 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     setDialog({ name: 'tex', arg: r.tex ?? '' });
   };
 
-  const toggleTracking = async () => {
+  const toggleTracking = () => setTrackingTo(!editorContext.trackChanges);
+  /** Suggesting on or off: the document's setting (Applies to ▸ Everyone) or this person's own (Only me) */
+  const setTrackingTo = async (next: boolean) => {
     if (!docId) return;
-    const next = !editorContext.trackChanges;
+    const forAll = modeScope() === 'everyone';
+    const set = forAll ? { tracking_changes: String(next) } : undefined;
     if (next && editorContext.changeAuthorId === undefined) {
       // register this user as an author in the document header
       const id = hashAuthor(user.name);
@@ -1215,17 +1233,26 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       const idx = lines.findIndex(l => l.startsWith('\\author '));
       const line = `\\author ${id} "${user.name}" ""`;
       if (idx >= 0) lines.splice(idx, 0, line); else lines.push(line);
-      await api.setHeader(docId, { headerLines: lines, set: { tracking_changes: 'true' } });
+      await api.setHeader(docId, { headerLines: lines, set });
       editorContext.changeAuthorId = id;
       // the editor reads the authors from editorContext.meta (the status bar's "Inserted by …", the change menu)
       const m = editorContext.meta;
       if (m && !m.authors.some(a => a.id === id)) { const next = { ...m, authors: [...m.authors, { id, name: user.name }] }; editorContext.meta = next; setMeta(next); }
-    } else {
-      await api.setHeader(docId, { set: { tracking_changes: String(next) } });
+    } else if (forAll) {
+      await api.setHeader(docId, { set });
     }
+    setOwnSuggesting(docId, forAll ? null : next);
+    if (forAll) setDocTracking(next);
     editorContext.trackChanges = next;
     setTracking(next);
-    notify(next ? `Change tracking ON (as ${user.name})` : 'Change tracking OFF');
+    notify(next ? `Change tracking ON (as ${user.name}${forAll ? '' : ', for you alone'})` : `Change tracking OFF${forAll ? '' : ' for you'}`);
+  };
+  /** the mode switch's "Applies to": to Everyone, this person's own mode becomes the document's */
+  const setTrackingScope = (to: ModeScope) => {
+    if (!docId) return;
+    const push = switchModeScope(docId, to, docTracking);
+    if (push !== null) void setTrackingTo(push);
+    else notify(to === 'me' ? 'Editing or suggesting now applies to you alone' : 'Editing or suggesting now applies to everyone editing the document');
   };
 
   const [repairing, setRepairing] = useState(false);
@@ -1699,7 +1726,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   const modeSwitch = (
     <EditModeSwitch mode={editModeOf(tracking, viewing)} canEdit={!viewOnly} view={view}
       views={() => [masterView, ...[...childRefs.current.values()].map(h => h.view)].filter((v): v is EditorView => !!v)}
-      onMode={m => applyEditMode(m, { tracking, toggleTracking: () => { void toggleTracking(); }, setViewing })} />
+      onMode={m => applyEditMode(m, { tracking, toggleTracking: () => { void toggleTracking(); }, setViewing })}
+      scope={{ doc: docTracking, set: setTrackingScope }} />
   );
 
   // "⇄ In sync with VS Code / Google Docs": the document is kept in step with a copy elsewhere (SyncChip.tsx)
