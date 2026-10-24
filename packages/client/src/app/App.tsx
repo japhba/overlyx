@@ -84,6 +84,7 @@ import { setPagesView, setPageBreaks, pageAtCursor, setPagesHost } from '../edit
 import { setInk, getInk, subscribeInk, isTabletClient } from '../editor/plugins/ink';
 import { BoardEditor } from './BoardEditor';
 import { DeliverableEditor } from '../deliverable/DeliverableEditor';
+import { useEditorMenus } from './editormenus';
 import { noteShown } from './lastfile';
 import { NewLayoutDialog } from './NewLayoutDialog';
 import { setLayoutHeader, layoutZoomStep, refreshLayoutCheck } from '../editor/layout/controller';
@@ -1336,6 +1337,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     ] },
   ] : [];
   const textColor = markValue(view, 'color');
+  // a slide deck's own menus (deliverable/DeliverableEditor.tsx: Edit, View, Insert, Slide, Arrange)
+  const editorMenus = useEditorMenus();
   // the shortcut table is searchable too (a match opens the table)
   const helpSearchEntries = useMemo(() => HELP_ROWS.map(([k, v]) => ({ id: 'Keyboard shortcuts ▸ ' + v, label: v, path: ['Keyboard shortcuts'], shortcut: k, fixed: true, action: () => setDialog({ name: 'help' }) })), []);
   const sectionItems = useMemo<MenuDef['items']>(() => {
@@ -1386,7 +1389,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     if (what !== 'connected') notify(what, 'error');
     setDialog({ name: 'lesswrong' });
   }, [docId]);
-  const menus: MenuDef[] = [...(isProjectRoot ? projectRootMenus : docId && !isLyxDoc ? textFileMenus : docId ? [
+  const menus: MenuDef[] = [...(isProjectRoot ? projectRootMenus : docId && !isLyxDoc ? [...textFileMenus, ...(isHtmlTab ? editorMenus : [])] : docId ? [
     { title: 'File', items: [
       { label: 'New…', shortcut: 'Ctrl+N', action: () => editorContext.ui?.newFile() },
       newSlidesItem,

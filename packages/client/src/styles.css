@@ -3116,6 +3116,15 @@ html[data-theme="dark"] .dl-canvas { background: #2a2c31; }
 .dl-toolbar.dl-ctx-row > .dl-ctx:has(.tb-popup) { z-index: 60; }
 .dl-toolbar.dl-ctx-row > .dl-ctx::before { display: none; }
 .dl-toolbar.dl-ctx-row > .dl-ctx + * { margin-left: auto; }
+/* more than one line of them: the sections go on to the next line — never cut off at the window's edge
+   (the row floats over the canvas, nothing under it moves); a section wider than the row wraps its groups */
+@media (min-width: 901px) {
+  .dl-toolbar.dl-ctx-row > .dl-ctx { overflow: visible; }
+  .dl-toolbar.dl-ctx-row > .dl-ctx > .dl-ctx-secs { flex-wrap: wrap; width: auto; row-gap: 3px; }
+  .dl-toolbar.dl-ctx-row > .dl-ctx .toolbar { max-width: 100%; flex-wrap: wrap; row-gap: 2px; }
+}
+/* a button's name for screen readers only (the New slide ▾ beside + Slide shows its ▾) */
+.dk-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .dl-ctx .toolbar { width: max-content; }
 .dl-ctx .toolbar > span:first-child > .tb-sep:first-child { display: none; }
 .dl-ctx:not(:empty)::before { content: ''; flex: none; width: 1px; height: 20px; background: var(--ui-border); margin: 0 4px 0 0; }

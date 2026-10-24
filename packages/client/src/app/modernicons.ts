@@ -11,12 +11,12 @@ import {
   ListIndentIncrease, ListIndentDecrease, Heading1, Frame, Tag, Bookmark, TextQuote, StickyNote, MessageSquarePlus, Square, Link,
   CodeXml, Variable, Files, Baseline, Subscript, Superscript, BetweenHorizontalEnd, TableRowsSplit, BetweenVerticalEnd,
   TableColumnsSplit, Check, X, CheckCheck, ListX, ChevronDown, ChevronUp, MousePointer2, TextCursorInput, Shapes, Spline,
-  Crop, WandSparkles, Replace, Grid2x2, Blend, Lock, Trash, SquareDashed, Layers, BringToFront, ArrowUpRight,
-  SquareRoundCorner, Minus, MessageSquare, History, Sparkles, FileCode, Highlighter, PaintBucket, CaseUpper, CaseSensitive,
+  Crop, WandSparkles, Replace, Blend, Lock, Trash, SquareDashed, Layers, BringToFront, ArrowUpRight,
+  SquareRoundCorner, Minus, MessageSquare, History, Sparkles, FileCode, Highlighter, CaseUpper, CaseSensitive,
   Presentation, Heading, SquareCode, SquareSigma, Type, Droplet, Scan, Ruler, PencilLine, Hash, Book, Sheet,
   SplinePointer, SquaresUnite, SquaresSubtract, SquaresIntersect, SquaresExclude, Combine, Split, VectorPolygon, VectorSquare,
   ArrowRightLeft, DiamondPlus, DiamondMinus, Diamond, CircleDot, Slash, Unlink, Link2, Pentagon, ChartSpline,
-  LassoSelect, Pen, Eraser, Hand, Maximize2, Focus,
+  LassoSelect, Pen, Eraser, Hand, Maximize2, Focus, SquareStack,
   FileType, FileType2, PanelsTopLeft, Globe, Brush, BookMarked, FileImage, Folder, Asterisk, Group, Ungroup, Layers2,
 } from 'lucide';
 
@@ -61,7 +61,8 @@ export const MODERN_ICONS: Record<string, string> = {
   'dk-dash': N(Ruler), 'dk-lineweight': N(Minus), 'dk-linedash': N(Ruler), 'dk-tips': N(ArrowUpRight),
   'dk-radius': N(SquareRoundCorner), 'dk-opacity': N(Blend), 'dk-shadow': N(Layers), 'dk-arrange': N(BringToFront),
   'dk-lock': N(Lock), 'dk-delete': N(Trash), 'dk-crop': N(Crop), 'dk-cropshape': N(Scan), 'dk-nobg': N(WandSparkles),
-  'dk-replace': N(Replace), 'dk-bg': N(PaintBucket), 'dk-canvas': N(Grid2x2), 'dk-undo': N(Undo2), 'dk-redo': N(Redo2),
+  // (the slide's Background and Layout are words, as Google Slides' are)
+  'dk-replace': N(Replace), 'dk-undo': N(Undo2), 'dk-redo': N(Redo2), 'dk-master': N(SquareStack),
   'dk-cropaspect': N(SquareDashed), 'dk-highlight': N(Highlighter), 'dk-fill': N(Droplet), 'dk-pen': N(PencilLine), 'dk-draw': N(Pen), 'dk-ink-pen': N(Pen), 'dk-ink-hl': N(Highlighter), 'dk-ink-eraser': N(Eraser),
   'dk-duplicate': N(Copy), 'dk-present': N(Presentation), 'dk-code': N(FileCode),
   // LaTeX on slides: the list of references, steps (beamer's overlays)

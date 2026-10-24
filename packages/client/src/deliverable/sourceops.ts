@@ -6,6 +6,7 @@
  */
 import { GUIDES_ATTR } from './guides';
 import { PH_ATTR, isRole } from './decklayouts';
+import { MASTER_ATTR, numberObjects } from './deckmaster';
 import { parseSource, opSplices, mapOffset, elementAt, elementStartingAt, elementChildren, walk, outerRange, attr, hasClass, pathOf, type HtmlOp, type Path, type Splice, type HElement } from '@overlyx/core/html/source.ts';
 import { textChanges, mapTextOffset } from '@overlyx/core/html/textedit.ts';
 import { slideElements } from '@overlyx/core/html/deliverable.ts';
@@ -488,7 +489,7 @@ function pathOfEl(el: HElement): Path {
 export function newSlideHtml(text: string, i: number, blank = false): string | null {
   const { doc, text: t } = parseSource(text);
   const ss = slideElements(doc);
-  return slideDesign(t, ss, ss[i] ?? ss[ss.length - 1], blank);
+  return slideDesign(t, ss, ss[i] ?? ss[ss.length - 1], blank, numberObjects(text));
 }
 
 /**
@@ -498,9 +499,10 @@ export function newSlideHtml(text: string, i: number, blank = false): string | n
 export function slideDesigns(text: string, first = 0): number[] {
   const { doc, text: t } = parseSource(text);
   const ss = slideElements(doc);
+  const numbers = numberObjects(text);
   const seen = new Set<string>(), out: number[] = [];
   for (const i of [first, ...ss.keys()]) {
-    const html = ss[i] ? slideDesign(t, ss, ss[i], false) : null;
+    const html = ss[i] ? slideDesign(t, ss, ss[i], false, numbers) : null;
     // (a page number, a date in the footer: the same design on every slide)
     const key = html?.replace(/>[^<]*</g, '><');
     if (!key || seen.has(key)) continue;
@@ -510,7 +512,7 @@ export function slideDesigns(text: string, first = 0): number[] {
   return out;
 }
 
-function slideDesign(t: string, ss: HElement[], s: HElement | undefined, blank: boolean): string | null {
+function slideDesign(t: string, ss: HElement[], s: HElement | undefined, blank: boolean, numbers: Set<HElement>): string | null {
   if (!s?.sourceCodeLocation?.startTag) return null;
   const open = t.slice(s.sourceCodeLocation.startTag.startOffset, s.sourceCodeLocation.startTag.endOffset);
   const close = `</${s.tagName}>`;
@@ -532,6 +534,8 @@ function slideDesign(t: string, ss: HElement[], s: HElement | undefined, blank: 
     const src = t.slice(from, to);
     const st = k.sourceCodeLocation.startTag!;
     const open = t.slice(st.startOffset, st.endOffset).replace(/\s(data-ol-(?:comments|ins|del|chg|was))=("[^"]*"|'[^']*')/g, '');
+    // what is on every slide (the master's), the slide number: the new slide's too (deckmaster.ts renumbers it)
+    if (attr(k, MASTER_ATTR) !== null || numbers.has(k)) { parts.push(src); continue; }
     const role = attr(k, PH_ATTR);
     // a placeholder: the same, empty (a title: the title's)
     if (isRole(role)) { if (role === 'title') titled = true; parts.push(`${open}</${k.tagName}>`); continue; }

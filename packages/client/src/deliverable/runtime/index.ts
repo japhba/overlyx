@@ -105,7 +105,8 @@ function startThumb(): void {
       height: auto !important; min-height: 0 !important; max-height: none !important; overflow: visible !important; scroll-snap-type: none !important; }
     html.ol-thumb .slide { margin: 0 0 var(--ol-gap, 40px) 0 !important; transform: none !important;
       box-shadow: 0 0 0 var(--ol-hair, 1px) rgba(0, 0, 0, 0.2), 0 var(--ol-hair, 1px) calc(4 * var(--ol-hair, 1px)) rgba(0, 0, 0, 0.18) !important; }
-    :where(html.ol-thumb .slide) { ${PAGE_BG} }`);
+    :where(html.ol-thumb .slide) { ${PAGE_BG} }
+    html.ol-thumb .slide[data-ol-skip] { opacity: .45 !important; }`);
   notePageBackground();
   const host = document.createElement('ol-overlay');
   host.setAttribute('data-ol-runtime', '');
@@ -119,6 +120,7 @@ function startThumb(): void {
     .c { position: absolute; transform: translate(calc(-100% - 4px / var(--s)), calc(4px / var(--s))); display: flex; align-items: center; gap: calc(2px / var(--s)); font: 700 calc(11px / var(--s)) system-ui, sans-serif; color: #3a2a00; background: #f6b400; padding: calc(1px / var(--s)) calc(5px / var(--s)); border-radius: calc(8px / var(--s)) calc(8px / var(--s)) calc(8px / var(--s)) calc(2px / var(--s)); }
     .chg { position: absolute; width: calc(3px / var(--s)); transform: translateX(calc(-5px / var(--s))); border-radius: calc(2px / var(--s)); }
     .del { position: absolute; transform: translate(-50%, -50%); font: 700 calc(12px / var(--s)) system-ui, sans-serif; color: #fff; background: #d2453c; padding: calc(2px / var(--s)) calc(8px / var(--s)); border-radius: calc(4px / var(--s)); }
+    .del.skip { background: #5f6368; font-weight: 600; }
     .who { position: absolute; display: flex; gap: calc(2px / var(--s)); transform: translate(calc(-100% - 4px / var(--s)), calc(-100% - 4px / var(--s))); }
     .who span { display: grid; place-items: center; width: calc(18px / var(--s)); height: calc(18px / var(--s)); border-radius: 50%; font: 700 calc(9px / var(--s)) system-ui, sans-serif; box-shadow: 0 0 0 calc(1.5px / var(--s)) #fff; }
   </style><div class="l"></div>`;
@@ -226,6 +228,7 @@ function drawRail(): void {
     const rv = railReview(s);
     if (rv.changed) parts.push(`<div class="chg" style="left:${r.x}px;top:${r.y}px;height:${r.h}px;background:${rv.changed}" title="Suggested changes"></div>`);
     if (rv.deleted) parts.push(`<div class="del" style="left:${r.x + r.w / 2}px;top:${r.y + r.h / 2}px">Deleted</div>`);
+    else if (s.hasAttribute('data-ol-skip')) parts.push(`<div class="del skip" style="left:${r.x + r.w / 2}px;top:${r.y + r.h / 2}px">Skipped</div>`);
     if (rv.comments) parts.push(`<div class="c" style="left:${r.x + r.w}px;top:${r.y}px">💬 ${rv.comments}</div>`);
     // (a ring round it, a hair apart from its edge)
     const o = 4 / railScale;
@@ -415,6 +418,8 @@ function settle(): Promise<void> {
 function init(): void {
   state.kind = detectKind();
   addStyle(NOTES_CSS);
+  // a skipped slide (the editor's Skip slide): not presented, not printed
+  if (MODE === 'present' || MODE === 'print') addStyle('.slide[data-ol-skip] { display: none !important; }');
   // suggestions shown while editing, accepted everywhere else (review.ts)
   installReviewCss();
   if (MODE === 'check') rememberPage();

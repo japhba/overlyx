@@ -1113,8 +1113,12 @@ function item(el: Element): SelItem | null {
     src: kind === 'image' ? pictureSrc(el) : undefined,
     list: listOf(el),
     ...(phRole(el) ? { ph: { role: phRole(el)!, empty: isEmptyPh(el) } } : {}),
+    ...(masterKey(el) ? { master: masterKey(el)! } : {}),
   };
 }
+
+/** an object on every slide (the editor's deckmaster.ts): its key */
+const masterKey = (el: Element): string | null => (slideOf(el) && el.parentElement === slideOf(el) ? (srcOf.get(el) ?? el).getAttribute('data-ol-master') : null) || null;
 
 /** the list an object is, or the one list it holds (its items can appear one by one) */
 function listOf(el: Element): SelItem['list'] {
@@ -1181,7 +1185,7 @@ export function selectionLabel(els: Element[]): string {
   const own = el.getAttribute('data-ol-name') ?? (k === 'svgpart' ? el.id : '');
   if (k === 'svgpart') return `SVG ▸ ${own || (SVG_PART_NAMES[el.localName] ?? el.localName)}`;
   const name = k === 'line' && el.localName === 'svg' && !lineOf(el) ? 'Drawing' : k === 'other' ? OTHER_NAMES[el.localName] ?? 'Object' : KIND_NAMES[k][0];
-  const named = own ? `${name} · ${own}` : name;
+  const named = (own ? `${name} · ${own}` : name) + (masterKey(el) ? ' · on every slide' : '');
   // an object of a group: where it is
   return groupOf(el) ? `Group ▸ ${named}` : named;
 }

@@ -1105,10 +1105,13 @@ blend.
     portalled into the status bar's `[data-statusbar-slot]`; in VS Code, which has no status bar, a
     strip of their own under the editor, `.dl-foot`). The **contextual toolbar** (`decktoolbar.tsx`, the toolbars' own
     component: the tools always; then only what fits the selection — text, shape, line or picture
-    tools, Arrange, Path and the rest — and with nothing selected the slide's background and the canvas;
+    tools, Arrange, Path and the rest — and with nothing selected the slide's *Background* (this
+    slide or every slide), *Layout* (the slide put in another layout), guides, placeholders,
+    animation and *+ Slide* ▾ (words on the buttons where an icon says little, as Google's);
     when they do not fit beside the tools they float as a bar of their own over the canvas's top edge
-    (`dl-ctx-row` — the canvas never moves when something is selected), its palettes fixed to the
-    window), speaker
+    (`dl-ctx-row` — the canvas never moves when something is selected), going on to a second line
+    rather than off the window's edge (the quick menu then stays below that bar), its palettes fixed
+    to the window), speaker
     notes (`<aside class="notes">` of the slide in view), the code (a textarea on the same `Y.Text`;
     *Edit code* jumps to an object's source), others' selections (awareness `htmlSel`; a dashed frame
     and their name), their carets in a text they retype (`htmlCaret`: the box's path and places in its
@@ -1132,6 +1135,36 @@ blend.
     **website `.zip`** that works without OverLyX (the runtime and MathJax under `_overlyx/`, a deck
     opening presenting, files from elsewhere in the project copied into `_assets/`, PDF figures as
     SVG).
+  * **Menus, the slide master, slide numbers, skipped slides** (24 Oct 2026, the user: "improve our
+    slide/layout editor … compared against typical presentation editing, slide master etc. … my main
+    concern is that things are intuitive"). **Menus**: the editor hands the menu bar (and the Modern
+    interface's ≡) its own *Edit, View, Insert, Slide, Format, Arrange* (`app/editormenus.ts`:
+    `setEditorMenus` after a burst of renders; the shell re-renders only when what they show changed,
+    an entry runs its newest version), every command with its key, found by the menus' search too;
+    right-click menus begin with *Cut / Copy / Paste* (the clipboard events' handlers fill the
+    clipboard; Paste reads it with `navigator.clipboard.read`, else says to press ⌘V). **The master**
+    (`deckmaster.ts`) is kept in the markup, so the file stays a page any browser shows: an object *on
+    every slide* is a copy on each slide with one `data-ol-master` key (*Put on every slide* — right-click,
+    the Arrange bar's stack icon, Arrange menu: the same element in the same place on other slides is
+    linked and made like this one, no slide gets one it lacked; else a copy goes on every slide at
+    the same place in its stack). An edit made here that changes one copy changes all of them
+    (`followUps`, applied with the edit as one splice list — `composeSplices` — so one undo step; also
+    the deck's saved layouts' copies; a copy duplicated or pasted onto its own slide becomes that
+    slide's; slides added from a layout saved before take the copy most slides have; never while
+    suggesting); *Unlink*, *Remove from the other slides*, *Delete from every slide*. The first such
+    change says so once; editing an unlinked object that has twins on other slides says how to link
+    them (`twinsOf`). New slides and layouts carry the master's objects and the slide number along.
+    *Make N similar texts look like this* (Keynote's Update style: the same element, class and
+    placeholder role elsewhere take its font, size, weight, colour, spacing, alignment — not its
+    place). **Slide numbers**: *Insert ▸ Slide numbers* puts `<span data-ol-field="slide-number">`
+    (in a footer on every slide) — fields are rewritten as slides come and go; numbers typed as
+    text (agents' decks, the starters) follow too when the slides were numbered right before
+    (`numbering`: one place on ≥ 60 % of the slides, from the first slide or the one after the title,
+    "n / total" kept), and *Put on every slide* on such a footer turns its number into a field.
+    **Skip slide** (rail, right-click, Slide menu): `data-ol-skip` — not presented, not printed
+    (runtime `slides()` in `present`/`print`), faded with *Skipped* on the rail. **Background colour of
+    every slide** and **Layout of this slide** (the layout picker applying to the slide) sit beside
+    the new-slide ones. Tests: `tests/deckmaster.test.ts`.
   * **VS Code** (`packages/vscode/src/host/deliverables.ts`, webview `deliverableMain.tsx`): *Open
     With… ▸ OverLyX Slides, Poster or Web Page* on an `.html` file (or the editor title's button);
     *New Slide Deck… / New Poster… / New Web Page…* (File ▸ New File…) make a folder with an

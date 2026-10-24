@@ -156,10 +156,12 @@ export interface SelItem {
   list?: { path: Path; steps: number | null };
   /** a layout's placeholder (decklayouts.ts): its role, and whether nothing is in it yet */
   ph?: { role: string; empty: boolean };
+  /** on every slide (deckmaster.ts data-ol-master): its key */
+  master?: string;
 }
 
-/** `deleted`: deleted as a suggestion (shown faded until accepted; not presented) */
-export interface SlideBox { index: number; path: Path; rect: Rect; title: string; deleted?: boolean }
+/** `deleted`: deleted as a suggestion (shown faded until accepted; not presented); `skipped`: Skip slide (deckmaster.ts: not presented, not printed) */
+export interface SlideBox { index: number; path: Path; rect: Rect; title: string; deleted?: boolean; skipped?: boolean }
 
 /** how the canvas shows the review (runtime/review.ts) */
 export interface ReviewView {

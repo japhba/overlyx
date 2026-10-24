@@ -11,7 +11,7 @@ import { useEffect, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import { mathPreview, type ToolButton, type Palette } from '../app/Toolbar';
 import { ColorGrid } from '../app/ColorGrid';
-import type { SelItem, Tool, Paint, ArrangeHow, DeliverableKind, CanvasView, NodeCmd } from './protocol';
+import type { SelItem, Tool, Paint, ArrangeHow, DeliverableKind, NodeCmd } from './protocol';
 import { ASPECTS } from './runtime/crop';
 import { fmtPt, ptToPx, pxToPt, sizePt, stepPt } from './units';
 import { drawingToolbar } from './drawingToolbar';
@@ -58,13 +58,19 @@ export interface DeckCtx {
     done(commit: boolean): void;
   };
   remove(): void;
-  slideBackground(c: string | null): void;
-  canvas: { view: CanvasView; set(v: Partial<CanvasView>): void };
+  /** the slide's background colour — or (`every`) every slide's */
+  slideBackground(c: string | null, every?: boolean): void;
   /** the guides (guides.ts): shown or not, and what can be done with them (the slide's right-click menu's Guides) */
   guides: { shown: boolean; items(): { label: string; action: () => void; active?: boolean }[] };
   newSlide(): void;
-  /** the layouts a new slide can take (LayoutPicker.tsx: the deck's own, those made of its design, like a slide of it, blank) */
-  layoutPicker(close: () => void): ComponentChildren;
+  /** the layouts a new slide can take (LayoutPicker.tsx: the deck's own, those made of its design, like a slide of it, blank) — or (`apply`) the slide shown can be put in */
+  layoutPicker(close: () => void, apply?: boolean): ComponentChildren;
+  /**
+   * The deck's master (deckmaster.ts): the object selected put on every slide, or — one that is —
+   * unlinked from its copies, taken off the other slides, deleted from all; the texts like the one
+   * selected on the other slides (`similar` of them) made to look like it
+   */
+  master?: { on(): void; unlink(): void; removeOthers(): void; deleteAll(): void; similar: number; lookAlike(): void };
   /** placeholders (decklayouts.ts): one of a role put on the slide; a picture put into the empty picture placeholder selected */
   placeholders?: { insert(role: PhRole): void; picture(): void };
   /** LyX's formula editor (MathOverlay): open on a formula of the text, a new formula at the caret, its commands, the math panels; a displayed one numbered and labelled */
@@ -199,12 +205,12 @@ export const DECK_FONTS: { label: string; css: string | null; google?: string }[
   { label: 'Courier', css: '"Courier New", Courier, monospace' },
 ];
 
-const SHAPES: { tool: Tool; label: string }[] = [
+export const SHAPES: { tool: Tool; label: string }[] = [
   { tool: 'rect', label: 'Rectangle' }, { tool: 'roundrect', label: 'Rounded rectangle' }, { tool: 'ellipse', label: 'Ellipse' },
   { tool: 'triangle', label: 'Triangle' }, { tool: 'diamond', label: 'Diamond' }, { tool: 'star', label: 'Star' }, { tool: 'hexagon', label: 'Hexagon' },
 ];
 // (freehand strokes: Draw, a tool of its own)
-const LINES: { tool: Tool; label: string }[] = [{ tool: 'line', label: 'Line' }, { tool: 'arrow', label: 'Arrow' }, { tool: 'bezier', label: 'Path: click for corners, drag for curves (B)' }];
+export const LINES: { tool: Tool; label: string }[] = [{ tool: 'line', label: 'Line' }, { tool: 'arrow', label: 'Arrow' }, { tool: 'bezier', label: 'Path: click for corners, drag for curves (B)' }];
 
 const firstFamily = (css: string) => css.split(',')[0].trim().replace(/^["']|["']$/g, '');
 
@@ -384,6 +390,8 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
           { label: 'Strikethrough', html: ICON('dk-strike'), action: c.text.strike },
           ...['1', '1.15', '1.5', '2'].map(v => ({ label: `Line spacing ${v}`, html: ICON('dk-lines'), active: lineSpacing(st) === v, action: () => c.text.lineHeight(v) })),
           { label: 'Clear formatting (Ctrl+\\)', html: ICON('dk-clear'), action: c.text.clear },
+          // (Keynote's Update style: the master's text styles, kept in the slides' own markup)
+          ...(c.master && c.master.similar > 0 && one && !c.editingText ? [{ label: `Make ${c.master.similar} similar text${c.master.similar === 1 ? '' : 's'} on the other slides look like this`, html: ICON('dk-master'), action: c.master.lookAlike }] : []),
         ] } },
     ]);
   }
@@ -501,24 +509,22 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
         palette: { title: 'Opacity', render: () => <Slider label="Opacity" value={Math.round((st ? Number(st.opacity) : 1) * 100)} onSet={v => c.paint({ opacity: v / 100 })} /> } },
       { id: 'dk-shadow', title: 'Shadow', icon: 'dk-shadow', active: !!st?.shadow, action: () => c.paint({ shadow: !st?.shadow }) },
       ...(c.kind === 'deck' ? [animateButton(c)] : []),
+      ...(c.master && one && one.slide >= 0 && c.kind === 'deck' ? [masterButton(c.master, one)] : []),
       { id: 'dk-lock', title: locked ? 'Unlock (it can be moved again)' : 'Lock (selected, not moved or resized)', icon: 'dk-lock', active: locked, action: () => c.arrange(locked ? 'unlock' : 'lock') },
       { id: 'dk-delete', title: 'Delete (Del)', icon: 'dk-delete', action: c.remove, disabled: locked },
     ]);
   } else if (c.kind !== 'page') {
-    section(c.pageLabel ?? (c.kind === 'poster' ? 'Poster' : 'Slide'));
-    const v = c.canvas.view;
+    const what = c.pageLabel ?? (c.kind === 'poster' ? 'Poster' : 'Slide');
+    section(what);
+    const deck = c.kind === 'deck';
+    // (words on the buttons, as Google Slides' Background and Layout: what they do is not drawn easily)
     context.push([
-      { id: 'dk-bg', title: `${c.pageLabel ?? (c.kind === 'poster' ? 'Poster' : 'Slide')} background colour`, icon: 'dk-background',
-        palette: { title: `${c.pageLabel ?? (c.kind === 'poster' ? 'Poster' : 'Slide')} background`, render: close => <ColorGrid current={null} close={close} none="As the design has it" onPick={col => c.slideBackground(col)} /> } },
-      { id: 'dk-canvas', title: 'Canvas: its colour, transparency checkerboards (also: right-click the canvas)', icon: 'dk-canvas',
-        palette: { title: 'Canvas', render: close => (
-          <div class="dk-canvas-pal">
-            <label class="dk-check"><input type="checkbox" checked={v.deskChecker} onChange={e => c.canvas.set({ deskChecker: (e.target as HTMLInputElement).checked })} /> Checkerboard canvas</label>
-            <label class="dk-check"><input type="checkbox" checked={v.pageChecker} onChange={e => c.canvas.set({ pageChecker: (e.target as HTMLInputElement).checked })} /> Checkerboard under the slides (shows transparency)</label>
-            <div class="dk-pal-title">Canvas colour</div>
-            <ColorGrid current={v.desk} close={close} none="Same as the page" onPick={col => c.canvas.set({ desk: col, deskChecker: false })} />
-          </div>
-        ) } },
+      { id: 'dk-bg', title: deck ? 'Background colour — of this slide, or of every slide' : `${what} background colour`, icon: 'Background',
+        palette: { title: `${what} background`, render: close => <BackgroundPalette close={close} every={deck} onPick={c.slideBackground} /> } },
+      ...(deck ? [{ id: 'dk-applylayout', title: 'Layout — this slide in another layout (title slide, title and body, two columns …): its words go into the new layout’s places; or this slide saved as a layout', icon: 'Layout',
+        palette: { title: 'Layout of this slide', render: (close: () => void) => c.layoutPicker(close, true) } } as ToolButton] : []),
+    ]);
+    context.push([
       { id: 'dk-guides', title: 'Guides: lines objects snap to — every slide’s (the master’s) and a slide’s own; drag one to move it (Alt: a copy), off the slide to remove it (also: right-click the slide)', icon: 'dk-guides', active: c.guides.shown,
         // (what can be done, worked out when it opens: it reads the deck's guides)
         palette: { title: 'Guides', list: true, render: close => (
@@ -530,16 +536,19 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
             ))}
           </div>
         ) } },
-      // (a poster is one page: a "slide" added to it was invisible — no rail — and a blank page of the PDF)
-      ...(c.kind === 'deck' ? [{ id: 'dk-newslide', title: 'New slide (Ctrl+M)', icon: '+ Slide', action: c.newSlide },
-        // (PowerPoint's New Slide ▾, Google's layouts: the button beside it)
-        { id: 'dk-layouts', title: 'New slide in a layout — title slide, title and body, two columns … made of this deck’s design, or one of its own (Save as layout)', icon: 'Layouts',
-          palette: { title: 'New slide', render: (close: () => void) => c.layoutPicker(close) } },
-        ...(c.placeholders ? [{ id: 'dk-placeholder', title: 'Placeholder — a box that says what goes in it (“Click to add title”) until something does; nothing of it shows when presenting', icon: 'dk-placeholder',
-          palette: { title: 'Placeholder', list: true, cols: 1, items: PH_ROLES.map(r => ({ label: PH_LABELS[r], html: ICON('dk-ph-' + r), action: () => c.placeholders!.insert(r) })) } } as ToolButton] : []),
-        animateButton(c)] : []),
+      ...(deck && c.placeholders ? [{ id: 'dk-placeholder', title: 'Placeholder — a box that says what goes in it (“Click to add title”) until something does; nothing of it shows when presenting', icon: 'dk-placeholder',
+        palette: { title: 'Placeholder', list: true, cols: 1, items: PH_ROLES.map(r => ({ label: PH_LABELS[r], html: ICON('dk-ph-' + r), action: () => c.placeholders!.insert(r) })) } } as ToolButton] : []),
+      ...(deck ? [animateButton(c)] : []),
+    ]);
+    // (a poster is one page: a "slide" added to it was invisible — no rail — and a blank page of the PDF)
+    if (deck) context.push([
+      { id: 'dk-newslide', title: 'New slide after this one, like it (Ctrl+M)', icon: '+ Slide', action: c.newSlide },
+      // (PowerPoint's New Slide ▾, Google's + ▾: the layouts a new slide can take)
+      { id: 'dk-layouts', title: 'New slide in a layout — title slide, title and body, two columns … made of this deck’s design, or one of its own', icon: '', html: '<span class="dk-sr">New slide in a layout</span>',
+        palette: { title: 'New slide', render: (close: () => void) => c.layoutPicker(close) } },
     ]);
   }
+
   let out = sections.filter(x => x.groups.length);
   // a shape or drawing selected (not being typed into): its own tools first, then those of its text — as its label says
   if (!c.editingText && shapes.length && sel.every(x => x.kind !== 'text' && x.kind !== 'formula')) {
@@ -556,6 +565,29 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
 /** the Animation pane: what appears and disappears on each click when presenting (beamer's overlays, AnimationPane.tsx) */
 function animateButton(c: DeckCtx): ToolButton {
   return { id: 'dk-step', title: 'Animation: objects appear and disappear click by click when presenting, in the order you click them (beamer\'s \\pause, \\only<2->)', icon: 'dk-step', active: c.animate.open, action: c.animate.toggle };
+}
+
+/** On every slide (deckmaster.ts): put there — or, for one that is, what else can be done with it */
+function masterButton(m: NonNullable<DeckCtx['master']>, one: SelItem): ToolButton {
+  return one.master
+    ? { id: 'dk-master', title: 'On every slide — a change to it here changes it on every slide that has it', icon: 'dk-master', active: true,
+      palette: { title: 'On every slide', list: true, cols: 1, items: [
+        { label: 'Unlink this one — change it on this slide alone', action: m.unlink },
+        { label: 'Remove from the other slides', action: m.removeOthers },
+        { label: 'Delete from every slide', action: m.deleteAll },
+      ] } }
+    : { id: 'dk-master', title: 'Put on every slide (the slide master): a logo, a bar, a footer — changed on one slide, changed on all', icon: 'dk-master', action: m.on };
+}
+
+/** the background palette: the colours, for this slide or (a deck) every slide */
+function BackgroundPalette({ close, every: offer, onPick }: { close: () => void; every: boolean; onPick: (c: string | null, every: boolean) => void }) {
+  const [every, setEvery] = useState(false);
+  return (
+    <div class="dk-canvas-pal">
+      {offer && <label class="dk-check"><input type="checkbox" checked={every} data-dk-bg-every onChange={e => setEvery((e.target as HTMLInputElement).checked)} /> Every slide</label>}
+      <ColorGrid current={null} close={close} none="As the design has it" onPick={col => onPick(col, offer && every)} />
+    </div>
+  );
 }
 
 /** PowerPoint's line weights (pt), and two heavier */

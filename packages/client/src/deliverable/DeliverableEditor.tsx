@@ -40,7 +40,9 @@ import { deckMargins, deckDesign, builtInLayouts, savedLayouts, layoutFromSlide,
 import { LayoutPicker, type LayoutCard } from './LayoutPicker';
 import { chooseDock, touchScreen, smallScreen, dockAsked, type DeckDock } from './deckdock';
 import { sizePt, stepPt } from './units';
-import { deckToolbar, quickGroups, type DeckTextActions } from './decktoolbar';
+import { deckToolbar, quickGroups, SHAPES, LINES, type DeckTextActions } from './decktoolbar';
+import { setEditorMenus } from '../app/editormenus';
+import type { MenuDef } from '../app/MenuBar';
 import { loadDeckInk, saveDeckInk, subscribeDeckInk, patchDeckInk, deckInkStyle, type DeckInk, type DeckInkPatch } from './deckink';
 import { readHandwriting, chooseReading, readingError } from './lassobar';
 import { QuickBar } from './QuickBar';
@@ -58,7 +60,8 @@ import { activeMathField } from '../editor/lyxmath/field';
 import { mathReady } from '../editor/lyxmath/mathjax';
 import { setLayoutMathFont } from '../fonts/editorfont';
 import { useMathPanels } from '../app/toolbars';
-import { parseSource, opSplices, elementAt, elementChildren, attr, parseStyle, sourcePatch, type SourcePatch } from '@overlyx/core/html/source.ts';
+import { parseSource, opSplices, elementAt, elementChildren, attr, parseStyle, sourcePatch, applySplices as applyTextSplices, type SourcePatch } from '@overlyx/core/html/source.ts';
+import { followUps, composeSplices, twinsOf, putOnEverySlide, otherCopies, slideNumberOps, lookAlikeOps, similarTexts, MASTER_ATTR, SKIP_ATTR } from './deckmaster';
 import { reviewOps, resolveOps, resolveAll, reviewOf, isSuggesting, suggestingOp, stampOf, threadsOp, parseThreads, newThreadId, describe as describeObject, COMMENTS, type ReviewChange, type ReviewThread, type Thread } from '@overlyx/core/html/review.ts';
 import { deliverableInfo, slideElements } from '@overlyx/core/html/deliverable.ts';
 import { formatTimestamp } from '@overlyx/core';
@@ -706,12 +709,32 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   /* ------------------------------------------------------------- changes of the text */
 
   /** splices of the text, as one undo step */
-  const applySplices = (splices: { from: number; to: number; insert: string }[], origin: 'canvas' | 'code' = 'canvas', separateUndo = origin === 'canvas') => {
+  const applySplices = (splices: { from: number; to: number; insert: string }[], origin: 'canvas' | 'code' = 'canvas', separateUndo = origin === 'canvas', follow = true) => {
     if (readOnlyRef.current || !splices.length) return;
-    lastSplices.current = { before: host.text(), splices };
-    host.apply(splices, origin, separateUndo);
+    const before = host.text();
+    let all = splices;
+    // what the deck's master asks for besides (deckmaster.ts): the other copies of an object on every
+    // slide, the slide numbers — one undo step with the edit (not while suggesting: a suggestion is one object's)
+    if (follow && origin === 'canvas' && kindRef.current !== 'page' && !isSuggesting(before)) {
+      try {
+        const f = followUps(before, applyTextSplices(before, splices), splices);
+        if (f.splices.length) all = composeSplices(before, splices, f.splices);
+        if (f.copies && !masterTold.current) { masterTold.current = true; notify('Changed on every slide that has it — it is on every slide. To change it on this slide alone, right-click it ▸ Unlink from the other slides.'); }
+        // (the same bar or logo on other slides, not linked: how to change them all, once)
+        else if (!f.copies && !masterTold.current && !twinsTold.current) {
+          const n = twinsOf(before, splices);
+          if (n) { twinsTold.current = true; notify(`The same object is on ${n} other slide${n === 1 ? '' : 's'}. To make ${n === 1 ? 'that one' : 'them'} like this one and change them all at once from now on: right-click it ▸ Put on every slide.`); }
+        }
+      } catch (e) { console.warn('deck master', e); }
+    }
+    lastSplices.current = { before, splices: all };
+    host.apply(all, origin, separateUndo);
     lastSplices.current = null;
   };
+  /** the first change that reached the other slides: said once */
+  const masterTold = useRef(false);
+  const twinsTold = useRef(false);
+  const similarCache = useRef<{ t: string; p: string; n: number } | null>(null);
 
   /** who and when, while suggesting (null: edits are direct) */
   const suggestStamp = () => (isSuggesting(text.toString()) ? stampOf(me) : null);
@@ -2077,7 +2100,10 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   const objectMenu = (x: number, y: number, weave?: { label: string; undo: boolean }) => {
     if (!sel.length) { emptySlideMenu(x, y, currentRef.current); return; }
     const one = sel.length === 1 ? sel[0] : null;
+    const master = kind === 'deck' && one && one.slide >= 0 && !readOnlyRef.current ? masterOps(one) : null;
     const items: MenuItem[] = [
+      ...clipboardItems(),
+      { sep: true },
       ...(one && one.canText ? [{ label: 'Edit text', shortcut: 'Enter', action: () => toCanvas({ ol: 'editText', path: one.path }) }] : []),
       // two shapes cross where it was right-clicked: the lower one over the upper one there, as if woven (runtime/weave.ts)
       ...(weave ? [{ label: weave.label, disabled: readOnlyRef.current, action: () => toCanvas({ ol: 'weave' }) }] : []),
@@ -2104,11 +2130,55 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
       { sep: true },
       { label: 'Duplicate', shortcut: 'Ctrl+D', action: duplicateSel },
       { label: 'Delete', shortcut: 'Del', disabled: sel.every(s => s.locked), action: removeSel },
+      ...(master ? [{ sep: true }, ...masterItems(one!, master)] : []),
       { sep: true },
       ...arrangeItems(),
     ];
     showContextMenu(x, y, items);
   };
+  /** the master's entries for an object (deckmaster.ts): on every slide, or what can be done with one that is; texts made alike */
+  const masterItems = (one: SelItem, m: ReturnType<typeof masterOps>): MenuItem[] => [
+    ...(one.master ? [
+      { label: 'On every slide', info: true },
+      { label: 'Unlink from the other slides (change it here alone)', action: m.unlink },
+      { label: 'Remove from the other slides', action: m.removeOthers },
+      { label: 'Delete from every slide', action: m.deleteAll },
+    ] : [{ label: 'Put on every slide', action: m.on }]),
+    ...(m.similar ? [{ label: `Make ${m.similar} similar text${m.similar === 1 ? '' : 's'} on other slides look like this`, action: m.lookAlike }] : []),
+  ];
+  /** Cut, Copy, Paste from a menu (the keys come through the clipboard events: the handlers below) */
+  const clipboardCmd = (how: 'cut' | 'copy' | 'paste') => {
+    if (how !== 'paste') {
+      const c = clipRef.current;
+      if (!c || !selRef.current.length) return;
+      // (a menu's click is a gesture the browser lets copy: the copy handler below fills the clipboard)
+      let done = false;
+      try { done = document.execCommand('copy'); } catch { done = false; }
+      if (!done) void navigator.clipboard?.write?.([new ClipboardItem({ 'text/html': new Blob([c.html], { type: 'text/html' }), 'text/plain': new Blob([c.plain], { type: 'text/plain' }) })]).catch(() => notify('The browser did not let the page copy: press Ctrl+C.'));
+      if (how === 'cut') removeSel();
+      return;
+    }
+    if (readOnlyRef.current) return;
+    const keys = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘V' : 'Ctrl+V';
+    const read = navigator.clipboard?.read;
+    if (!read) { notify(`Press ${keys} to paste here.`); return; }
+    void navigator.clipboard.read().then(async items => {
+      let html = '', plain = '';
+      const files: { name: string; type: string; data: ArrayBuffer }[] = [];
+      for (const it of items) for (const type of it.types) {
+        const b = await it.getType(type);
+        if (type === 'text/html') html = await b.text();
+        else if (type === 'text/plain') plain = await b.text();
+        else if (type.startsWith('image/')) files.push({ name: 'pasted.' + type.split('/')[1].replace('svg+xml', 'svg'), type, data: await b.arrayBuffer() });
+      }
+      toCanvas({ ol: 'paste', html, plain, files });
+    }).catch(() => notify(`The browser did not let the page read the clipboard: press ${keys} to paste.`));
+  };
+  const clipboardItems = (): MenuItem[] => [
+    { label: 'Cut', shortcut: 'Ctrl+X', disabled: !sel.length || readOnlyRef.current || sel.every(s => s.locked), action: () => clipboardCmd('cut') },
+    { label: 'Copy', shortcut: 'Ctrl+C', disabled: !sel.length, action: () => clipboardCmd('copy') },
+    { label: 'Paste', shortcut: 'Ctrl+V', disabled: readOnlyRef.current, action: () => clipboardCmd('paste') },
+  ];
 
   const pickAt = (x: number, y: number, title: string, render: (close: () => void) => ComponentChildren) => { closeContextMenu(); setFloatPop({ x, y, title, render }); };
   const canvasItems = (x: number, y: number): MenuItem[] => {
@@ -2186,18 +2256,28 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   const emptySlideMenu = (x: number, y: number, i: number) => {
     const ps = slidePaths(text.toString());
     const sp = ps[i];
+    const deck = kind === 'deck', ro = readOnlyRef.current;
     showContextMenu(x, y, [
+      { label: 'Paste', shortcut: 'Ctrl+V', disabled: ro, action: () => clipboardCmd('paste') },
+      { sep: true },
       { label: 'Text box', action: () => insertObject('text') },
       { label: 'Picture…', action: () => { phPicture.current = null; fileInput.current?.click(); } },
-      { label: kind === 'page' ? 'Comment on the page' : 'Comment on the slide', disabled: readOnlyRef.current, action: () => startDraft(sp ?? null, i) },
+      { label: kind === 'page' ? 'Comment on the page' : 'Comment on the slide', disabled: ro, action: () => startDraft(sp ?? null, i) },
       ...(kind !== 'page' ? [
         { sep: true },
-        { label: 'Slide background colour…', disabled: !sp || readOnlyRef.current, action: () => pickAt(x, y, 'Slide background', close => <ColorGrid current={null} close={close} none="As the design has it" onPick={c => { if (sp) applyOps([{ t: 'style', path: sp, set: { background: c } }]); }} />) },
-        { label: 'New slide', shortcut: 'Ctrl+M', action: () => newSlide(i) },
-        { label: 'New slide in a layout…', action: () => pickAt(x, y, 'New slide', close => layoutPicker(i, close)) },
-        { label: 'Apply layout…', disabled: readOnlyRef.current, action: () => pickAt(x, y, 'Apply layout', close => layoutPicker(i, close, true)) },
-        { label: 'Duplicate slide', action: () => duplicateSlide(i) },
-        { label: 'Placeholder', sub: PH_ROLES.map(r => ({ label: PH_LABELS[r], disabled: readOnlyRef.current, action: () => { void insertPlaceholder(r); } })) },
+        { label: deck ? 'Background colour of this slide…' : 'Background colour…', disabled: !sp || ro, action: () => pickAt(x, y, 'Slide background', close => <ColorGrid current={null} close={close} none="As the design has it" onPick={c => { if (sp) applyOps([{ t: 'style', path: sp, set: { background: c } }]); }} />) },
+        ...(deck ? [
+          { label: 'Background colour of every slide…', disabled: ro, action: () => pickAt(x, y, 'Background of every slide', close => <ColorGrid current={null} close={close} none="As the design has it" onPick={c => slideBackground(c, true)} />) },
+          { label: 'Layout of this slide…', disabled: ro, action: () => pickAt(x, y, 'Layout of this slide', close => layoutPicker(i, close, true)) },
+          { sep: true },
+          { label: 'New slide', shortcut: 'Ctrl+M', action: () => newSlide(i) },
+          { label: 'New slide in a layout…', action: () => pickAt(x, y, 'New slide', close => layoutPicker(i, close)) },
+          { label: 'Duplicate slide', action: () => duplicateSlide(i) },
+          { label: 'Skip slide (not presented)', checked: !!slidesRef.current[i]?.skipped, disabled: ro, action: () => toggleSkip(i) },
+          { sep: true },
+          { label: 'Slide numbers', disabled: ro, action: insertSlideNumbers },
+          { label: 'Placeholder', sub: PH_ROLES.map(r => ({ label: PH_LABELS[r], disabled: ro, action: () => { void insertPlaceholder(r); } })) },
+        ] : []),
         { label: 'Guides', sub: guideItems(i, menuPoint.current) },
       ] : []),
       { sep: true },
@@ -2313,6 +2393,55 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     const q = (v: string) => v.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
     if (applyOps([{ t: 'outer', path, html: `<img ${PH_ATTR}="picture" src="${q(rel)}" alt="" style="${q(geo + '; object-fit: cover')}">` }])) pending.current = { select: [path] };
   };
+  /* ------------------------------------------------------------- the master (deckmaster.ts): on every slide, slide numbers, skipped slides */
+
+  const masterOps = (it: SelItem | null) => ({
+    on: () => {
+      if (!it) return;
+      const r = putOnEverySlide(text.toString(), it.path);
+      if (!r || !applyOps(r.ops)) return;
+      pending.current = { select: [it.path] };
+      masterTold.current = true;
+      notify(r.linked
+        ? `Linked with the same object on ${r.linked} other slide${r.linked === 1 ? '' : 's'}: changed on one, changed on all.`
+        : `On every slide now — changed on one slide, changed on all (${r.added + 1} slides).`);
+    },
+    unlink: () => { if (it && applyOps([{ t: 'attr', path: it.path, name: MASTER_ATTR, value: null }])) notify('This one is the slide’s own now: the other slides keep theirs.'); },
+    removeOthers: () => {
+      if (!it) return;
+      const others = otherCopies(text.toString(), it.path);
+      applyOps([{ t: 'attr', path: it.path, name: MASTER_ATTR, value: null }, ...(others.length ? [{ t: 'remove' as const, paths: others }] : [])]);
+    },
+    deleteAll: () => { if (it) applyOps([{ t: 'remove', paths: [it.path, ...otherCopies(text.toString(), it.path)] }]); },
+    similar: it ? similarCount : 0,
+    lookAlike: () => {
+      if (!it) return;
+      const ops = lookAlikeOps(text.toString(), it.path);
+      if (!ops.length) { notify('No text like this one on the other slides.'); return; }
+      if (applyOps(ops)) notify(`${ops.length} text${ops.length === 1 ? '' : 's'} on the other slides look like this one now.`);
+    },
+  });
+  /** Insert ▸ Slide numbers: on every slide, kept right (deckmaster slideNumberOps) */
+  const insertSlideNumbers = () => {
+    if (readOnlyRef.current) return;
+    const r = slideNumberOps(text.toString(), slideSizeNow());
+    if (r.already) { notify('The slides are numbered already: their numbers follow as slides are added, moved or removed.'); return; }
+    if (applyOps(r.ops)) { masterTold.current = true; notify('Slide numbers on every slide, bottom right — they follow as slides are added, moved or removed. Move or restyle one: all of them follow.'); }
+  };
+  /** Skip slide: not presented, not printed (PowerPoint's Hide slide, Google's Skip slide) */
+  const toggleSkip = (i: number) => {
+    const p = slidePaths(text.toString())[i];
+    if (!p) return;
+    const on = !slidesRef.current[i]?.skipped;
+    if (applyOps([{ t: 'attr', path: p, name: SKIP_ATTR, value: on ? '' : null }]) && on) notify(`Slide ${i + 1} is skipped: it is not presented or printed. Skip slide again brings it back.`);
+  };
+  /** the background colour of the slide shown, or of every slide */
+  const slideBackground = (c: string | null, every = false) => {
+    const ps = slidePaths(text.toString());
+    const paths = every ? ps : ps[currentRef.current] ? [ps[currentRef.current]] : [];
+    if (paths.length) applyOps(paths.map(p => ({ t: 'style' as const, path: p, set: { background: c } })));
+  };
+
   const gotoSlide = (i: number) => {
     const n = slidesRef.current.length;
     if (!n) return;
@@ -2335,12 +2464,14 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   const slideMenu = (x: number, y: number, i: number) => {
     const n = slides.length;
     showContextMenu(x, y, [
-      { label: 'New slide', action: () => newSlide(i) },
+      { label: 'New slide', shortcut: 'Ctrl+M', action: () => newSlide(i) },
       // (pickers of their own, not submenus: a submenu opens on hover, which a finger does not do)
       { label: 'New slide in a layout…', action: () => pickAt(x, y, 'New slide', close => layoutPicker(i, close)) },
-      { label: 'Apply layout…', disabled: readOnlyRef.current, action: () => pickAt(x, y, 'Apply layout', close => layoutPicker(i, close, true)) },
-      { label: 'Save as layout…', disabled: readOnlyRef.current, action: () => { void saveAsLayout(i); } },
       { label: 'Duplicate slide', action: () => duplicateSlide(i) },
+      { label: 'Skip slide (not presented)', checked: !!slides[i]?.skipped, disabled: readOnlyRef.current, action: () => toggleSkip(i) },
+      { sep: true },
+      { label: 'Layout of this slide…', disabled: readOnlyRef.current, action: () => pickAt(x, y, 'Layout of this slide', close => layoutPicker(i, close, true)) },
+      { label: 'Save as layout…', disabled: readOnlyRef.current, action: () => { void saveAsLayout(i); } },
       { sep: true },
       { label: 'Move up', disabled: i <= 0, action: () => moveSlide(i, -1) },
       { label: 'Move down', disabled: i >= n - 1, action: () => moveSlide(i, 1) },
@@ -2350,6 +2481,129 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
       { label: 'Delete slide', disabled: n <= 1, action: () => deleteSlide(i) },
     ]);
   };
+
+  /* ------------------------------------------------------------- the menu bar's menus (app/editormenus.ts) */
+
+  /**
+   * Edit, View, Insert, Slide, Format, Arrange — as PowerPoint's, Keynote's and Google Slides' menus:
+   * everything the toolbars, the right-click menus and the keys do, found by its name, its key beside it
+   * (the menu bar's search finds them too). Pickers open at the canvas's top left.
+   */
+  const deckMenus = (): MenuDef[] => {
+    const ro = readOnlyRef.current || locked, deck = kind === 'deck', i = currentRef.current;
+    const one = sel.length === 1 ? sel[0] : null;
+    const at = () => { const r = canvasBox.current?.getBoundingClientRect(); return { x: (r?.left ?? 200) + 24, y: (r?.top ?? 120) + 12 }; };
+    const pick = (title: string, render: (close: () => void) => ComponentChildren) => { const p = at(); pickAt(p.x, p.y, title, render); };
+    const textOn = editingText !== null || sel.some(s => s.canText || s.text);
+    const master = deck && one && one.slide >= 0 && !ro ? masterOps(one) : null;
+    const menus: MenuDef[] = [
+      { title: 'Edit', items: [
+        { label: 'Undo', shortcut: 'Ctrl+Z', disabled: ro, action: () => { toCanvas({ ol: 'stopText' }); setTimeout(() => host.undo(), 30); } },
+        { label: 'Redo', shortcut: 'Ctrl+Y', disabled: ro, action: () => { toCanvas({ ol: 'stopText' }); setTimeout(() => host.redo(), 30); } },
+        { sep: true },
+        ...clipboardItems(),
+        { label: 'Duplicate', shortcut: 'Ctrl+D', disabled: ro || !sel.length, action: duplicateSel },
+        { label: 'Delete', shortcut: 'Del', disabled: ro || !sel.length || sel.every(s => s.locked), action: removeSel },
+        { label: kind === 'page' ? 'Select all' : 'Select all on the slide', shortcut: 'Ctrl+A', action: () => toCanvas({ ol: 'selectAll' }) },
+        { sep: true },
+        { label: 'Comment', shortcut: 'Ctrl+Alt+M', disabled: readOnlyRef.current, action: () => toCanvas({ ol: 'newComment' }) },
+        { label: 'Editing', checked: !viewing && !suggesting, disabled: readOnly, action: () => setMode('editing') },
+        { label: 'Suggesting', checked: !viewing && suggesting, disabled: readOnly, action: () => setMode('suggesting') },
+        { label: 'Viewing', checked: viewing, action: () => setMode('viewing') },
+        { sep: true },
+        { label: 'Edit code', action: () => showCode() },
+      ] },
+      { title: 'View', items: [
+        { label: deck ? 'Fit the slide' : 'Fit the page', shortcut: 'Ctrl+0', action: fitSlide },
+        { label: 'Zoom in', shortcut: 'Ctrl+=', action: () => zoomStep(1.25) },
+        { label: 'Zoom out', shortcut: 'Ctrl+-', action: () => zoomStep(1 / 1.25) },
+        { sep: true },
+        ...(deck ? [
+          { label: 'Slides', checked: railShown, action: () => setRailShown(!railShown) },
+          { label: 'Speaker notes', checked: notesShown, action: () => setNotesShown(!notesShown) },
+          { label: 'Animation', checked: animOpen, action: () => toggleAnim() },
+        ] : []),
+        { label: 'Objects', checked: objOpen, action: () => toggleObjects() },
+        { label: 'Comments and suggestions', checked: reviewOpen, action: () => { setReviewOpen(!reviewOpen); if (reviewOpen) { setDraft(null); setFocus(null); } } },
+        { label: 'Code', checked: codeOpen, action: () => setCodeOpen(o => !o) },
+        ...(kind !== 'page' ? [{ sep: true }, { label: 'Guides', sub: guideItems(i, null) }] : []),
+        { label: 'Canvas', sub: canvasItems(at().x, at().y) },
+      ] },
+      { title: 'Insert', items: [
+        { label: 'Text box', shortcut: 'T', disabled: ro, action: () => insertObject('text') },
+        { label: 'Picture…', disabled: ro, action: () => { phPicture.current = null; fileInput.current?.click(); } },
+        { label: 'Shape', disabled: ro, sub: SHAPES.map(s => ({ label: s.label, action: () => setTool(s.tool) })) },
+        { label: 'Line', disabled: ro, sub: LINES.map(s => ({ label: s.label.replace(/:.*/, ''), action: () => setTool(s.tool) })) },
+        { label: 'Drawing (pen)', shortcut: 'P', disabled: ro, action: () => { setDrawOpen(true); setDrawHeld(false); setToolState('pen'); } },
+        { label: editingText ? 'Formula' : 'Formula — click on the slide', shortcut: editingText ? 'Ctrl+M' : undefined, disabled: ro, action: () => { if (editingText) toCanvas({ ol: 'insertMath', display: false }); else setTool('formula'); } },
+        ...(editingText ? [
+          { label: 'Link…', shortcut: 'Ctrl+K', action: insertLink },
+          ...(host.docId ? [{ label: 'Citation…', shortcut: 'Ctrl+Shift+C', action: () => setCiteOpen(true) }] : []),
+          { label: 'Cross-reference…', shortcut: 'Ctrl+Shift+I', action: pickReference },
+        ] : []),
+        { label: 'List of references — click on the slide', disabled: ro, action: () => setTool('references') },
+        { label: 'Comment', shortcut: 'Ctrl+Alt+M', disabled: readOnlyRef.current, action: () => toCanvas({ ol: 'newComment' }) },
+        ...(deck ? [
+          { sep: true },
+          { label: 'Slide numbers', disabled: ro, action: insertSlideNumbers },
+          { label: 'Placeholder', disabled: ro, sub: PH_ROLES.map(r => ({ label: PH_LABELS[r], action: () => { void insertPlaceholder(r); } })) },
+          { sep: true },
+          { label: 'New slide', shortcut: 'Ctrl+M', disabled: ro, action: () => newSlide(i) },
+          { label: 'New slide in a layout…', disabled: ro, action: () => pick('New slide', close => layoutPicker(i, close)) },
+        ] : []),
+      ] },
+      ...(deck ? [{ title: 'Slide', items: [
+        { label: 'New slide', shortcut: 'Ctrl+M', disabled: ro, action: () => newSlide(i) },
+        { label: 'New slide in a layout…', disabled: ro, action: () => pick('New slide', close => layoutPicker(i, close)) },
+        { label: 'Duplicate slide', disabled: ro, action: () => duplicateSlide(i) },
+        { label: 'Delete slide', disabled: ro || slides.length <= 1, action: () => deleteSlide(i) },
+        { label: 'Skip slide (not presented)', checked: !!slides[i]?.skipped, disabled: ro, action: () => toggleSkip(i) },
+        { sep: true },
+        { label: 'Layout of this slide…', disabled: ro, action: () => pick('Layout of this slide', close => layoutPicker(i, close, true)) },
+        { label: 'Save as layout…', disabled: ro, action: () => { void saveAsLayout(i); } },
+        { label: 'Background colour…', disabled: ro, action: () => pick('Slide background', close => <ColorGrid current={null} close={close} none="As the design has it" onPick={c => slideBackground(c)} />) },
+        { label: 'Background colour of every slide…', disabled: ro, action: () => pick('Background of every slide', close => <ColorGrid current={null} close={close} none="As the design has it" onPick={c => slideBackground(c, true)} />) },
+        { label: 'Slide numbers', disabled: ro, action: insertSlideNumbers },
+        { sep: true },
+        { label: 'Move slide up', disabled: ro || i <= 0, action: () => moveSlide(i, -1) },
+        { label: 'Move slide down', disabled: ro || i >= slides.length - 1, action: () => moveSlide(i, 1) },
+        { label: 'Previous slide', shortcut: 'PageUp', disabled: i <= 0, action: () => gotoSlide(i - 1) },
+        { label: 'Next slide', shortcut: 'PageDown', disabled: i >= slides.length - 1, action: () => gotoSlide(i + 1) },
+        { sep: true },
+        { label: 'Present from this slide', shortcut: 'Shift+F5', action: () => { void startPresenting(false); } },
+        { label: 'Present from the start', shortcut: 'F5', action: () => { void startPresenting(true); } },
+      ] }] : []),
+      ...(textOn && !ro ? [{ title: 'Format', items: [
+        { label: 'Bold', shortcut: 'Ctrl+B', action: textActions.bold },
+        { label: 'Italic', shortcut: 'Ctrl+I', action: textActions.italic },
+        { label: 'Underline', shortcut: 'Ctrl+U', action: textActions.underline },
+        { label: 'Strikethrough', action: textActions.strike },
+        { label: 'Larger', shortcut: 'Ctrl+Shift+.', action: () => fontSize(1) },
+        { label: 'Smaller', shortcut: 'Ctrl+Shift+,', action: () => fontSize(-1) },
+        { sep: true },
+        { label: 'Align left', shortcut: 'Ctrl+Shift+L', action: () => textActions.align('left') },
+        { label: 'Centre', shortcut: 'Ctrl+Shift+E', action: () => textActions.align('center') },
+        { label: 'Align right', shortcut: 'Ctrl+Shift+R', action: () => textActions.align('right') },
+        { label: 'Justify', shortcut: 'Ctrl+Shift+J', action: () => textActions.align('justify') },
+        { sep: true },
+        { label: 'Bulleted list', shortcut: 'Ctrl+Shift+8', action: () => textActions.list('ul') },
+        { label: 'Numbered list', shortcut: 'Ctrl+Shift+7', action: () => textActions.list('ol') },
+        { sep: true },
+        { label: 'Clear formatting', shortcut: 'Ctrl+\\', action: textActions.clear },
+        ...(master?.similar ? [{ label: `Make ${master.similar} similar text${master.similar === 1 ? '' : 's'} on other slides look like this`, action: master.lookAlike }] : []),
+      ] }] : []),
+      ...(sel.length && !ro ? [{ title: 'Arrange', items: [
+        ...arrangeItems(),
+        ...(master ? [{ sep: true }, ...masterItems(one!, master).filter(m => !(m as MenuItem).info)] : []),
+      ] }] : []),
+    ];
+    return menus;
+  };
+  // (after a burst of renders — a drag, a stroke —: the guides' entries read the deck's text)
+  const menusLatest = useRef(deckMenus);
+  menusLatest.current = deckMenus;
+  useEffect(() => { const id = setTimeout(() => setEditorMenus(menusLatest.current()), 120); return () => clearTimeout(id); });
+  useEffect(() => () => setEditorMenus([]), []);
 
   /* ------------------------------------------------------------- keys */
 
@@ -2525,11 +2779,12 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   /* ------------------------------------------------------------- presenting */
 
   // slides deleted as suggestions are not presented: the presentation numbers the others
-  const presentIndexOf = (i: number) => slidesRef.current.slice(0, i).filter(s => !s.deleted).length;
+  // (the presented slides: not those deleted as suggestions, nor skipped ones)
+  const presentIndexOf = (i: number) => slidesRef.current.slice(0, i).filter(s => !s.deleted && !s.skipped).length;
   const canvasIndexOf = (k: number) => {
     let n = -1;
     const ss = slidesRef.current;
-    for (let i = 0; i < ss.length; i++) if (!ss[i].deleted && ++n === k) return i;
+    for (let i = 0; i < ss.length; i++) if (!ss[i].deleted && !ss[i].skipped && ++n === k) return i;
     return k;
   };
 
@@ -2696,6 +2951,14 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     try { localStorage.setItem('ol.animPane', open ? '1' : '0'); } catch { /* private window */ }
     if (!open && seq.ordering) toCanvas({ ol: 'steps', cmd: { how: 'order', kind: null } });
   };
+  // the texts like the one selected on the other slides (deckmaster similarTexts: Make … look like this), worked out once a text
+  const one1 = sel.length === 1 ? sel[0] : null;
+  let similarCount = 0;
+  if (one1 && kind === 'deck' && one1.kind === 'text' && !one1.master && one1.slide >= 0) {
+    const t0 = host.text(), k = one1.path.join(), c = similarCache.current;
+    if (c && c.p === k && c.t === t0) similarCount = c.n;
+    else { try { similarCount = similarTexts(t0, one1.path).length; } catch { similarCount = 0; } similarCache.current = { t: t0, p: k, n: similarCount }; }
+  }
   const bars = deckToolbar({
     pageLabel: host.bindSvgExporter ? 'SVG' : undefined,
     guides: { shown: guidesShown, items: () => guideItems(currentRef.current, null).filter(m => !m.sep && !m.disabled && m.action).map(m => ({ label: m.label!, action: m.action!, active: m.checked })) },
@@ -2710,10 +2973,10 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     undo: () => { toCanvas({ ol: 'stopText' }); setTimeout(() => host.undo(), 30); }, redo: () => { toCanvas({ ol: 'stopText' }); setTimeout(() => host.redo(), 30); },
     insertImage: () => { phPicture.current = null; fileInput.current?.click(); },
     text: textActions, paint, arrange: arrangeSel, image: imageTools, remove: removeSel,
-    slideBackground: c => { const sp = slidePaths(text.toString())[currentRef.current]; if (sp) applyOps([{ t: 'style', path: sp, set: { background: c } }]); },
-    canvas: { view, set: setView },
+    slideBackground,
     newSlide: () => newSlide(currentRef.current),
-    layoutPicker: close => layoutPicker(currentRef.current, close),
+    layoutPicker: (close, apply) => layoutPicker(currentRef.current, close, apply),
+    master: kind === 'deck' ? masterOps(sel.length === 1 ? sel[0] : null) : undefined,
     placeholders: kind === 'deck' ? {
       insert: r => { void insertPlaceholder(r); },
       picture: () => { const one = selRef.current.length === 1 ? selRef.current[0] : null; if (one?.ph?.role === 'picture') { phPicture.current = one.path; fileInput.current?.click(); } },
@@ -2775,7 +3038,9 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     const bar = barRef.current;
     if (!bar) return;
     const ctx = bar.querySelector<HTMLElement>(':scope > .dl-ctx');
-    const need = (ctx?.firstElementChild as HTMLElement | null)?.scrollWidth ?? 0;
+    // (the sections side by side, however they wrap in the row of their own: else the row would decide it fits and flip back)
+    const secs = Array.from(ctx?.firstElementChild?.children ?? []) as HTMLElement[];
+    const need = secs.reduce((n, k, i) => n + k.offsetWidth + (i ? 13 : 0), 0);
     let others = 0;
     for (const k of Array.from(bar.children) as HTMLElement[]) if (k !== ctx && k.offsetParent !== null) others += k.offsetWidth + 4;
     const cs = getComputedStyle(bar);

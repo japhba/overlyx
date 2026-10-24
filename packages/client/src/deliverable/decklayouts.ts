@@ -21,6 +21,7 @@ import { parseSource, elementChildren, attr, hasClass, outerRange, innerRange, p
 import { slideElements } from '@overlyx/core/html/deliverable.ts';
 import { LAYOUT_MARGINS_ATTR, layoutMarginSides, type MarginSides } from './guides';
 import type { TextLook } from './protocol';
+import { MASTER_ATTR, numberObjects } from './deckmaster';
 
 export const PH_ATTR = 'data-ol-ph';
 export const LAYOUT_ATTR = 'data-ol-layout';
@@ -41,6 +42,8 @@ interface Obj {
   textual: boolean; heading: boolean;
   /** decoration: marked as such, or the same on another slide */
   decor: boolean; repeated: boolean;
+  /** on every slide (deckmaster.ts), or the slide number: decoration even when it is text */
+  master: boolean;
   ph: PhRole | null;
 }
 interface SlideInfo { el: HElement; objs: Obj[] }
@@ -80,6 +83,7 @@ function readSlides(text: string | SourceDoc, size: Size): { t: string; slides: 
   const html = elementChildren(doc).find(e => e.tagName === 'html');
   const bodyEl = html ? elementChildren(html).find(e => e.tagName === 'body') ?? null : null;
   const srcs = els.map(s => elementChildren(s).filter(k => k.sourceCodeLocation).map(k => { const r = outerRange(k); return t.slice(r.from, r.to).trim(); }));
+  const numbers = numberObjects(typeof text === 'string' ? text : { doc });
   // (a copy of a slide — duplicated, or made of a layout saved from it — repeats all of it: that is no design the slides share)
   const copies = (i: number, j: number) => { const a = srcs[i], b = new Set(srcs[j]); return a.length > 0 && a.filter(x => b.has(x)).length >= 0.6 * Math.max(a.length, b.size); };
   const slides = els.map((s, i) => {
@@ -95,11 +99,12 @@ function readSlides(text: string | SourceDoc, size: Size): { t: string; slides: 
       const ph = attr(k, PH_ATTR);
       const textual = TEXT_TAG.test(k.tagName) && /\S/.test(textOf(k));
       const repeated = srcs.some((o, j) => j !== i && o.includes(src.trim()) && !copies(i, j));
-      const marked = attr(k, 'aria-hidden') === 'true' || attr(k, 'data-ol-master') !== null || DECOR_CLASS.test(attr(k, 'class') ?? '');
+      const marked = attr(k, 'aria-hidden') === 'true' || attr(k, MASTER_ATTR) !== null || DECOR_CLASS.test(attr(k, 'class') ?? '');
+      const master = attr(k, MASTER_ATTR) !== null || numbers.has(k);
       objs.push({
-        el: k, tag: k.tagName, src, style: st, x, y, w, h, textual, heading: /^h[1-6]$/.test(k.tagName),
+        el: k, tag: k.tagName, src, style: st, x, y, w, h, textual, heading: /^h[1-6]$/.test(k.tagName), master,
         // (the same heading on two slides is two slides about one thing, not their design)
-        ph: isRole(ph) ? ph : null, repeated, decor: !isRole(ph) && ((repeated && !/^h[1-6]$/.test(k.tagName)) || (marked && !textual)),
+        ph: isRole(ph) ? ph : null, repeated, decor: !isRole(ph) && (master || (repeated && !/^h[1-6]$/.test(k.tagName)) || (marked && !textual)),
       });
     }
     return { el: s, objs };
@@ -415,7 +420,7 @@ export function applyLayoutOp(text: string, slide: number, layout: string): Html
     parts.push(`${open}${fitInto(k.tagName, inner(from))}</${k.tagName}>`);
   }
   // the rest of the slide: kept (not its decoration — the layout's comes instead —, nor its empty placeholders)
-  const decor = new Set(info?.objs.filter(o => o.decor && !o.textual).map(o => o.el) ?? []);
+  const decor = new Set(info?.objs.filter(o => o.decor && (!o.textual || o.master)).map(o => o.el) ?? []);
   let notes = '';
   for (const k of kids) {
     if (used.has(k) || decor.has(k)) continue;

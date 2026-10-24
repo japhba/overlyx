@@ -36,7 +36,7 @@ const hostCode = compile([
 ].join('\n'));
 const runtimeCode = compile([
   ...['link', 'srcPath', 'pathOf', 'liveAt', 'slideOf', 'docRect', 'slideTitle', 'slideBoxes', 'pageSize', 'sendLayout'].map(n => declaration(envSource, n)),
-  ...['TEXT_TAGS', 'REPLACED', 'SVG_SHAPES'].map(n => declaration(editSource, n, true)),
+  ...['TEXT_TAGS', 'REPLACED', 'SVG_SHAPES', 'masterKey'].map(n => declaration(editSource, n, true)),
   ...['PH', 'MEDIA', 'isPicturePh'].map(n => declaration(placeholderSource, n, true)),
   ...['phRole', 'isEmptyPh'].map(n => declaration(placeholderSource, n)),
   ...['selection', 'selectPaths', 'editTextAt', 'isSvgPart', 'isLocked', 'cs', 'isTextual', 'canType', 'isGroup',

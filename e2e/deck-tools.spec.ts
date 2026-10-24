@@ -115,8 +115,8 @@ test('the contextual toolbar, fill, distribute, group, flip and rotation (a seco
   expect((await page.request.post(BASE_URL + '/api/projects', { data: { name: NAME } })).ok()).toBeTruthy();
   await setup(page);
 
-  // nothing selected: the slide's background and the canvas, no text tools
-  await expect(page.locator('[data-tb="dk-canvas"]')).toBeVisible();
+  // nothing selected: the slide's background and layout, no text tools
+  await expect(page.locator('.dl-toolbar [data-tb="dk-bg"]')).toBeVisible();
   await expect(page.locator('[data-tb="dk-b"]')).toHaveCount(0);
 
   // a text box: the text menu
