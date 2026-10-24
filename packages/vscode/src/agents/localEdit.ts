@@ -264,7 +264,7 @@ export async function replyToComment(file: string, a: { comment: string; text?: 
     if (a.resolve && !resolved) {
       const first = thread.paragraphs[0];
       const h = parseHeader(first.items.map(itemText).join('').trim());
-      if (h) first.items = [textItem(commentHeader(h.author, h.time, true))];
+      if (h) first.items = [textItem(commentHeader(h.author, h.time, true, h.reactions))];
       else thread.paragraphs.unshift(paragraph('Plain Layout', [textItem(commentHeader('', formatTimestamp(), true))]));
       resolved = true;
     }

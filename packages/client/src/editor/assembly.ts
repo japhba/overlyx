@@ -27,6 +27,7 @@ import { marginPlugin } from './plugins/margin';
 import { pagesPlugin } from './plugins/pages';
 import { commentUiPlugin, hiddenThreadsPlugin } from './plugins/commentui';
 import { commentGuardPlugin } from './plugins/commentguard';
+import { reactionsPlugin } from './plugins/reactions';
 import { changeTrackingPlugin, changesFilterPlugin, changeAuthorName } from './plugins/changes';
 import { changeActionsPlugin } from './plugins/changeactions';
 import { mergeReviewPlugin, type MergeSource } from './plugins/mergereview';
@@ -106,7 +107,7 @@ export function editorNodeViews(): NonNullable<EditorProps['nodeViews']> {
 
 /** The editable element's attributes; the browser's spell checker only when it is the chosen engine (two sets of underlines otherwise). */
 export function editorAttributes(child: boolean, p: { spellcheck: boolean; spellEngine: string; showResolvedComments?: boolean }): Record<string, string> {
-  // show-resolved: resolved comment threads keep a marker in the text (View ▸ Resolved comments in the text)
+  // show-resolved: resolved comment threads keep a marker in the text and their (faded) cards (View ▸ Resolved comments)
   return { class: 'lyx-editor' + (child ? ' lyx-editor-child' : '') + (p.showResolvedComments ? ' show-resolved' : ''), spellcheck: p.spellcheck && p.spellEngine === 'browser' ? 'true' : 'false' };
 }
 
@@ -148,6 +149,7 @@ export function assemblePlugins(o: AssemblyOptions): Plugin[] {
     commentUiPlugin(),   // the thread under the cursor opens; Ctrl+Enter leaves it (before the keymap); empty messages go when it is left
     hiddenThreadsPlugin(),   // resolved threads are not in the text (unless shown): the caret steps over them (before the keymap)
     commentGuardPlugin(),   // other people's comment messages are theirs: this editor's own edits leave them alone
+    reactionsPlugin(),   // emoji / Yes / No reactions under comment messages, and the ☺ picker
     lyxKeymap(),
     fontCarryPlugin(),
     insetCaretPlugin(),

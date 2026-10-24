@@ -37,7 +37,7 @@ export interface Project {
   via?: 'owner' | 'member' | 'link' | 'public' | 'admin';
   /** anyone may view it and clone it, without an account (Share ▸ Public) */
   public?: boolean;
-  owner?: { id: number; name: string; username: string } | null;
+  owner?: { id: number; name: string; username: string; avatar?: string | null } | null;
   /** when this user last opened the project (server clock), null: never */
   lastOpened?: number | null;
   /** the file this user was in last (a tab id: a document's, or `text:`/`pdf:` + a file's — app/lastfile.ts), null: none noted */

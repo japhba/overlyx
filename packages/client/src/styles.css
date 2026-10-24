@@ -486,6 +486,16 @@ html[data-theme="dark"]:not([data-dark-pages]) .editor-scroll.margin-mode > .edi
 .notes-unfold { position: sticky; top: 44px; height: 0; z-index: 6; }
 .notes-unfold > button { position: absolute; right: 0; top: 0; writing-mode: vertical-rl; padding: 10px 5px; border: 1px solid var(--ui-border); border-right: none; border-radius: 8px 0 0 8px; background: var(--notes-bg, var(--panel-bg, var(--page-bg))); color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
 .notes-unfold > button:hover, .notes-unfold > button:focus-visible { color: var(--ui-fg); border-color: var(--accent); }
+/* the notes pane's switch for resolved comment threads (notespane.tsx NotesResolved): at the pane's top, the cards below it */
+.notes-resolved { position: absolute; top: 12px; right: calc(var(--notes-inset, 0px) + var(--notes-col, 340px) - 16px); transform: translateX(100%); z-index: 3; }
+.notes-resolved > button { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px 0 8px; border: 1px solid var(--ui-border); border-radius: 13px; background: var(--page-bg); color: var(--muted); font: 12px var(--ui-font); white-space: nowrap; cursor: pointer; }
+.notes-resolved > button b { font-weight: 600; color: var(--ui-muted); }
+.notes-resolved > button:hover, .notes-resolved > button:focus-visible { color: var(--ui-fg); border-color: var(--accent); }
+.notes-resolved > button.on { color: var(--ui-fg); background: color-mix(in srgb, var(--ok, #2e7d32) 10%, var(--page-bg)); border-color: color-mix(in srgb, var(--ok, #2e7d32) 45%, var(--ui-border)); }
+.notes-resolved-check { width: 14px; height: 14px; background: currentColor; color: var(--ok, #2e7d32);
+  -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='M4.5 12.5l5 5 10-11'/></svg>") center / contain no-repeat;
+          mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='M4.5 12.5l5 5 10-11'/></svg>") center / contain no-repeat; }
+.margin-mode > .editor-page:has(> .editor-host > .ol-layout) > .notes-resolved { display: none; }
 /* MathLive shades the inset that contains the caret; the LyX corner markers replace that */
 .lyx-editor { outline: none; font-family: var(--editor-font); font-size: calc(15.5px * var(--editor-zoom)); line-height: calc(1.45 * var(--ol-line-stretch, 1)); color: var(--editor-fg); min-height: 300px; }
 .lyx-editor:focus-visible { outline: none; }
@@ -792,7 +802,12 @@ html[data-theme="dark"] { --cm-accent: #f4c03c; --cm-chip-bg: #8a6b12; --cm-chip
    the text (the editor's show-resolved class); otherwise the dot has no size (the Comments panel
    lists the thread). It stays in the layout: Chrome's own Backspace / Delete beside an element that
    is not drawn at all (display: none) took the thread with the character */
-.lyx-inset-note-comment.resolved > .inset-box { display: none !important; }
+.lyx-editor:not(.show-resolved) .lyx-inset-note-comment.resolved > .inset-box { display: none !important; }
+/* shown (the notes pane's Show resolved, View ▸ Resolved comments): a faded card, Reopen in its corner, no reply */
+.lyx-inset-note-comment.resolved > .inset-box { opacity: 0.6; border-left-color: var(--muted2); transition: opacity 0.12s; }
+.lyx-inset-note-comment.resolved > .inset-box:hover, .lyx-inset-note-comment.resolved.cm-active > .inset-box { opacity: 1; }
+.lyx-inset-note-comment.resolved > .inset-box > .inset-content { padding-right: 68px; }
+.lyx-inset-note-comment.resolved > .inset-box .inset-action[data-act="reply"] { display: none !important; }
 .lyx-inset-note-comment.resolved > .inset-anchor, .margin-mode .lyx-inset-note-comment.resolved > .inset-anchor { display: inline-block; min-width: 0; width: 8px; height: 8px; padding: 0; margin: 0 2px; border-radius: 50%; background: var(--muted2); opacity: 0.7; vertical-align: middle; box-shadow: none; transform: none; }
 .lyx-inset-note-comment.resolved > .inset-anchor::before { content: none; }
 .lyx-inset-note-comment.resolved.highlight > .inset-anchor { box-shadow: 0 0 0 3px var(--hl-bg2); }
@@ -812,6 +827,10 @@ html[data-theme="dark"] { --cm-accent: #f4c03c; --cm-chip-bg: #8a6b12; --cm-chip
   -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'><path d='M4.5 12.5l5 5 10-11'/></svg>") center / contain no-repeat;
           mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'><path d='M4.5 12.5l5 5 10-11'/></svg>") center / contain no-repeat; }
 .lyx-inset-note-comment > .inset-box .inset-action[data-act="resolve"]:hover { background: color-mix(in srgb, var(--ok, #2e7d32) 14%, transparent); color: var(--ok, #2e7d32); }
+/* Reopen (a resolved thread shown): a word, not the ✓ */
+.lyx-inset-note-comment > .inset-box .inset-action[data-act="reopen"] { width: auto; height: 22px; padding: 0 9px; border: 1px solid var(--cm-line); border-radius: 11px; background: var(--page-bg); color: var(--ui-fg); font: 600 11.5px/20px var(--ui-font); }
+.lyx-inset-note-comment > .inset-box .inset-action[data-act="reopen"]::before { content: none; }
+.lyx-inset-note-comment > .inset-box .inset-action[data-act="reopen"]:hover { border-color: var(--cm-accent); }
 /* Reply: a field at the foot of the open card */
 .lyx-inset-note-comment > .inset-box .inset-action[data-act="reply"] { order: 2; display: none; width: 100%; margin-top: 10px; padding: 6px 12px; border: 1px solid var(--cm-line); border-radius: 16px; background: var(--page-bg); color: var(--ui-muted); font: inherit; font-size: 12.5px; line-height: 18px; text-align: left; cursor: text; }
 .lyx-inset-note-comment > .inset-box .inset-action[data-act="reply"]::after { content: "…"; }
@@ -823,6 +842,33 @@ html[data-theme="dark"] { --cm-accent: #f4c03c; --cm-chip-bg: #8a6b12; --cm-chip
 /* in the margin: every card shows, the open one stands out */
 .margin-mode .lyx-inset-note-comment.in-margin > .inset-box { display: flex; flex-direction: column; padding: 10px 12px 10px 14px; border-left-width: 3px; border-radius: 8px; font-size: var(--note-size, 0.9em); }
 .margin-mode .lyx-inset-note-comment.in-margin.cm-active > .inset-box { z-index: 4; border-color: color-mix(in srgb, var(--cm-accent) 60%, var(--cm-line)); box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1), 0 12px 30px -10px rgba(0, 0, 0, 0.3); }
+/* the selected card (the cursor in its thread, or jumped to): outlined, so it stands out among the others */
+.margin-mode .lyx-inset-note-comment.in-margin.cm-active > .inset-box, .lyx-inset-note-comment.highlight > .inset-box { outline: 2px solid var(--cm-accent); outline-offset: 2px; }
+
+/* reactions (plugins/reactions.ts): chips under a message, the ☺ beside its time (on hover / in the open card), the picker */
+.cm-reactions { display: flex; flex-wrap: wrap; gap: 4px; margin: 5px 0 2px; text-indent: 0; font-size: 12px; }
+.comment-header > .cm-reactions { padding-left: 28px; }
+.cm-react { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 7px; border: 1px solid var(--cm-line); border-radius: 11px; background: var(--page-bg); color: var(--ui-fg); font: 12px/1 var(--ui-font); cursor: pointer; user-select: none; }
+.cm-react b { font-size: 11px; font-weight: 600; color: var(--ui-muted); }
+.cm-react:hover { border-color: var(--cm-accent); }
+.cm-react.mine { background: color-mix(in srgb, var(--accent) 12%, var(--page-bg)); border-color: color-mix(in srgb, var(--accent) 55%, var(--cm-line)); }
+.cm-react.mine b { color: var(--accent); }
+.cm-react.word { font-weight: 600; }
+.cm-react.yes, .cm-react-pick.yes { color: var(--ok, #2e7d32); }
+.cm-react.no, .cm-react-pick.no { color: var(--err, #c62828); }
+.cm-react-add { display: inline-grid; place-items: center; width: 20px; height: 20px; margin-left: 4px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--ui-muted); font-size: 0; vertical-align: top; cursor: pointer; opacity: 0; transition: opacity 0.12s; }
+.cm-react-add::before { content: ""; width: 15px; height: 15px; background: currentColor;
+  -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><path d='M20.5 11.5a8.5 8.5 0 1 1-8-8.5'/><path d='M8.5 14.5s1.3 2 3.5 2 3.5-2 3.5-2'/><path d='M9 9.5h.01M15 9.5h.01'/><path d='M19 2.5v5M16.5 5h5'/></svg>") center / contain no-repeat;
+          mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><path d='M20.5 11.5a8.5 8.5 0 1 1-8-8.5'/><path d='M8.5 14.5s1.3 2 3.5 2 3.5-2 3.5-2'/><path d='M9 9.5h.01M15 9.5h.01'/><path d='M19 2.5v5M16.5 5h5'/></svg>") center / contain no-repeat; }
+.lyx-inset-note-comment > .inset-box:hover .cm-react-add, .lyx-inset-note-comment.cm-active .cm-react-add, .cm-react-add:focus-visible { opacity: 0.8; }
+.cm-react-add:hover { opacity: 1 !important; background: var(--row-hover); color: var(--ui-fg); }
+.lyx-editor[contenteditable="false"] .cm-react-add { display: none; }
+.cm-react-picker { position: fixed; z-index: 1000; display: flex; flex-wrap: wrap; align-items: center; gap: 2px; width: 288px; padding: 6px; box-sizing: border-box; background: var(--surface); border: 1px solid var(--ui-border); border-radius: 10px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.2); font-family: var(--ui-font); }
+.cm-react-pick { min-width: 32px; height: 32px; padding: 0 4px; border: 0; border-radius: 6px; background: none; color: var(--ui-fg); font-size: 19px; line-height: 1; cursor: pointer; }
+.cm-react-pick:hover, .cm-react-pick:focus-visible { background: var(--row-hover); }
+.cm-react-pick.word { height: 26px; margin-top: 4px; padding: 0 11px; border: 1px solid var(--ui-border); border-radius: 13px; font-size: 12.5px; font-weight: 600; }
+.cm-react-own { flex: 1; min-width: 70px; height: 26px; margin: 4px 0 0 4px; padding: 0 9px; border: 1px solid var(--ui-border); border-radius: 13px; background: var(--page-bg); color: var(--ui-fg); font: 12.5px var(--ui-font); outline: none; }
+.cm-react-own:focus { border-color: var(--accent); }
 /* nested in another inset (a footnote, a note card): the same chip */
 .lyx-inset-note-comment .lyx-inset-note-comment > .inset-anchor { font-size: 0.55em; }
 

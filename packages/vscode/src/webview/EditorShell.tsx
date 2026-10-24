@@ -29,7 +29,7 @@ import { ContextBars, contextBars } from '@client/app/ctxdock';
 import { SettingsPanel } from '@client/app/Settings';
 import { HelpDialog, HELP_ROWS, DialogHost, uiPrompt } from '@client/app/Dialogs';
 import { Ruler, DEFAULT_WIDTH, MIN_WIDTH, MAX_WIDTH, NOTE_SCALE_DEFAULT } from '@client/app/Ruler';
-import { useNotesPane, useNotesFold, NotesSash, NotesUnfoldTab } from '@client/app/notespane';
+import { useNotesPane, useNotesFold, NotesSash, NotesUnfoldTab, NotesResolved } from '@client/app/notespane';
 import { setInk, getInk, subscribeInk } from '@client/editor/plugins/ink';
 /**
  * The OverLyX editor inside VS Code: the web client's Workspace (App.tsx) trimmed to the editor
@@ -879,6 +879,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
             {notesFold.folded && <NotesUnfoldTab onUnfold={notesFold.unfold} />}
             <div class="editor-page">
               {marginMode && <NotesSash sash={notesPane.sash} onFold={notesFold.fold} />}
+              {marginMode && <NotesResolved views={allViews} tick={docTick} />}
               {visibleIds.map(id => id === docId ? <div key={id}>
                 {combined && <div class="child-doc-header"><span class="name">{id.split('/').pop()}</span><button class="small-btn" onClick={() => setCombined(false)}>Show this document only</button></div>}
                 <div class="editor-host" ref={containerRef} />

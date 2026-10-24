@@ -63,14 +63,15 @@ export function layout(view: EditorView): void {
   const on = marginKey.getState(view.state) ?? false;
   const cards = Array.from(view.dom.querySelectorAll<HTMLElement>(':scope .lyx-inset-note'));
   // only top-level notes (notes nested in notes stay inline in their parent card); resolved comment
-  // threads are not shown at all (the Comments panel keeps them)
-  const top = cards.filter(c => !c.parentElement?.closest('.lyx-inset-note') && !c.classList.contains('resolved'));
+  // threads only when shown (the editor's show-resolved: the notes pane's switch, View ▸ Resolved comments)
+  const showResolved = view.dom.classList.contains('show-resolved');
+  const top = cards.filter(c => !c.parentElement?.closest('.lyx-inset-note') && (showResolved || !c.classList.contains('resolved')));
   if (!on) {
     for (const c of cards) {
       c.classList.remove('in-margin');
       const b = c.querySelector<HTMLElement>(':scope > .inset-box');
       if (!b) continue;
-      if (c.classList.contains('cm-active') && !c.classList.contains('resolved')) placePopover(view, c, b);
+      if (c.classList.contains('cm-active') && (showResolved || !c.classList.contains('resolved'))) placePopover(view, c, b);
       else if (c.classList.contains('cm-placed')) { c.classList.remove('cm-placed'); b.style.top = ''; b.style.left = ''; b.style.width = ''; }
       else { b.style.top = ''; b.style.left = ''; b.style.width = ''; }
     }
@@ -98,7 +99,9 @@ export function layout(view: EditorView): void {
     const anchor = c.querySelector<HTMLElement>(':scope > .inset-anchor') ?? c;
     return { el: c, anchorTop: anchor.getBoundingClientRect().top };
   }).sort((a, b) => a.anchorTop - b.anchorTop);
-  let nextTop = -Infinity;
+  // the pane's switch for resolved threads sits at its top: the cards start below it
+  const toggle = page?.querySelector<HTMLElement>(':scope > .notes-resolved > button');
+  let nextTop = toggle ? toggle.getBoundingClientRect().bottom + 8 * scale : -Infinity;
   for (const it of items) {
     it.el.classList.add('in-margin');
     const box = it.el.querySelector<HTMLElement>(':scope > .inset-box')!;

@@ -24,7 +24,7 @@ export function Comments({ views, tick }: { views: EditorView[]; /** bumps when 
     <div key={viewDocId(it.view) + ':' + it.pos} class={'comment-row' + (it.resolved ? ' resolved' : '')} data-comment={it.resolved ? 'resolved' : 'open'}
       onClick={() => navHistory.jump(() => gotoComment(it.view, it.pos))} title="Show this comment in the text">
       <div class="who">
-        <span class="avatar" style={`--who-hue:${authorHue(it.author || 'Comment')}`}>{authorInitials(it.author || 'C')}</span>
+        <span class="avatar" data-author={it.author} style={`--who-hue:${authorHue(it.author || 'Comment')}`}>{authorInitials(it.author || 'C')}</span>
         <span class="author">{it.author || 'Comment'}</span>
         {it.time && <span class="time">{it.time}</span>}
         {many && <span class="doc">{viewDocId(it.view).split('/').pop()}</span>}
@@ -42,8 +42,8 @@ export function Comments({ views, tick }: { views: EditorView[]; /** bumps when 
       {open.length ? open.map(row) : <div class="empty">No open comments.</div>}
       <div class="section-title archive" onClick={() => setShowResolved(s => !s)} title="Resolved comments are kept here">
         <span class="chev">{showResolved ? '▾' : '▸'}</span> Resolved <span class="count">{resolved.length}</span>
-        <label class="in-text" title="A small marker in the text where each resolved thread was (View ▸ Resolved comments in the text)" onClick={e => e.stopPropagation()}>
-          <input type="checkbox" checked={inText} onChange={e => setPref('showResolvedComments', (e.currentTarget as HTMLInputElement).checked)} /> In the text
+        <label class="in-text" title="Resolved threads in the document too: a small marker where each was, and their cards, faded, in the notes pane (View ▸ Resolved comments)" onClick={e => e.stopPropagation()}>
+          <input type="checkbox" checked={inText} onChange={e => setPref('showResolvedComments', (e.currentTarget as HTMLInputElement).checked)} /> In the document
         </label>
       </div>
       {showResolved && (resolved.length ? resolved.map(row) : <div class="empty">Nothing resolved yet.</div>)}

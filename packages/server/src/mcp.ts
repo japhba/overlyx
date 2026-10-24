@@ -232,7 +232,7 @@ async function resolveComment(project: string, path: string, index: number) {
   const headerPar = target.inset.paragraphs[0];
   const h = parseHeader(headerPar.items.map(itemText).join('').trim());
   if (!h) throw new Error('This comment has no structured author/time header (a plain LyX note) — cannot mark it resolved.');
-  headerPar.items = [textItem(commentHeader(h.author, h.time, true))];
+  headerPar.items = [textItem(commentHeader(h.author, h.time, true, h.reactions))];
   commitEdit(doc, lyx);
   return { ok: true };
 }

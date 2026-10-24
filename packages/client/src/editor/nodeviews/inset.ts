@@ -139,7 +139,7 @@ export class InsetView implements NodeView {
     }
     if (controls && !this.actions.firstChild) {
       // a resolved thread leaves the text: its marker stays (the Comments panel lists it and can reopen it)
-      if (h?.resolved) this.anchor.title = 'Resolved comment — click to put the cursor here; the Comments panel lists it and can reopen it';
+      if (h?.resolved) this.anchor.title = 'Resolved comment — click to open it (Reopen brings it back)';
       // Reply: a field at the foot of the open card; Resolve: the ✓ in its corner (the words stay the buttons' text)
       const reply = document.createElement('button');
       reply.type = 'button'; reply.className = 'inset-action'; reply.dataset.act = 'reply'; reply.textContent = 'Reply'; reply.title = 'Reply to this comment';
@@ -232,7 +232,7 @@ export class InsetView implements NodeView {
       const cur = this.view.state.doc.nodeAt(pos);
       if (cur) this.view.dispatch(this.view.state.tr.setSelection(TextSelection.near(this.view.state.doc.resolve(pos + cur.nodeSize))));
       this.view.focus();
-      editorContext.notify?.('Comment resolved — Ctrl+Z undoes it; the Comments panel lists it and can reopen it');
+      editorContext.notify?.('Comment resolved — Ctrl+Z undoes it; View ▸ Resolved comments (or Show resolved atop the notes pane) shows it again to reopen');
     }
   }
 

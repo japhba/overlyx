@@ -140,7 +140,8 @@ export interface ProjectAccess extends Project {
   via: 'owner' | 'member' | 'link' | 'public' | 'admin';
   /** anyone may view it (setPublic) */
   public: boolean;
-  owner: { id: number; name: string; username: string } | null;
+  /** `avatar`: their picture (Google sign-in), shown beside their comments in the editor */
+  owner: { id: number; name: string; username: string; avatar: string | null } | null;
 }
 
 /** Projects the user can open, with their role in each. */
@@ -152,7 +153,8 @@ export function accessibleProjects(user: SessionUser, opts: { files?: boolean } 
     const prev = memberships.get(m.project);
     if (!prev || (m.role === 'edit' && prev.role !== 'edit')) memberships.set(m.project, m);
   }
-  const owners = new Map((db.prepare('SELECT id, display_name, username FROM users').all() as { id: number; display_name: string; username: string }[]).map(u => [u.id, { id: u.id, name: u.display_name, username: u.username }]));
+  const owners = new Map((db.prepare('SELECT id, display_name, username, avatar_url FROM users').all() as { id: number; display_name: string; username: string; avatar_url: string | null }[])
+    .map(u => [u.id, { id: u.id, name: u.display_name, username: u.username, avatar: u.avatar_url ? `/api/users/${u.id}/avatar` : null }]));
   const out: ProjectAccess[] = [];
   for (const p of listProjects(opts)) {
     const row = rows.get(p.name);

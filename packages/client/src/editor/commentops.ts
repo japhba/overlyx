@@ -90,7 +90,7 @@ export function setCommentResolved(view: EditorView, pos: number, resolved: bool
     return;
   }
   if (h.resolved === resolved) return;
-  const para = schema.nodes.paragraph.create(first.attrs, schema.text(commentHeader(h.author, h.time, resolved)));
+  const para = schema.nodes.paragraph.create(first.attrs, schema.text(commentHeader(h.author, h.time, resolved, h.reactions)));
   // anyone may resolve a thread: its first header (often someone else's) changes with it
   view.dispatch(allowCommentEdit(view.state.tr.replaceWith(pos + 1, pos + 1 + first.nodeSize, para)));
 }

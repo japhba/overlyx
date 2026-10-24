@@ -78,6 +78,24 @@ export function applyAuthorColors(authors: { id: number; name: string }[]): void
   }).join('\n');
 }
 
+/**
+ * The pictures of the people in the open project (its owner, its members, oneself — Google sign-in)
+ * beside their comments: the avatar circle of a comment header (plugins/numbering.ts, data-author =
+ * the name in the header) and of the Comments panel shows the picture instead of the initials.
+ */
+export function applyCommentAvatars(people: ({ name: string; avatar?: string | null } | null | undefined)[]): void {
+  let el = document.getElementById('ol-comment-avatars') as HTMLStyleElement | null;
+  if (!el) { el = document.createElement('style'); el.id = 'ol-comment-avatars'; document.head.appendChild(el); }
+  const str = (s: string) => '"' + s.replace(/["\\\n]/g, c => '\\' + c.charCodeAt(0).toString(16) + ' ') + '"';
+  const seen = new Set<string>();
+  el.textContent = people.flatMap(p => {
+    if (!p?.avatar || !p.name || seen.has(p.name)) return [];
+    seen.add(p.name);
+    const who = str(p.name);
+    return [`.comment-header[data-author=${who}]::before, .comments-panel .avatar[data-author=${who}] { background: url(${str(p.avatar)}) center / cover, hsl(var(--who-hue, 210) 45% 50%); color: transparent; }`];
+  }).join('\n');
+}
+
 // the colours follow the metadata: an author who starts tracking changes (or an agent whose edits arrive
 // live) gets a colour without a reload
 onMetaChange(() => { const m = editorContext.meta; if (m) applyAuthorColors(m.authors); });

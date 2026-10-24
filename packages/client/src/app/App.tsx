@@ -39,7 +39,7 @@ import { usePresentation } from './presentation';
 import { Toolbar, NAMED_COLORS, type ToolButton } from './Toolbar';
 import { buildToolbars, loadToolbarPrefs, mathExecutor, useMathPanels, toolbarClipboard, markValue, MODERN_COLLAPSE, type ToolbarId, type ToolbarMode, type ToolbarPrefs } from './toolbars';
 import { SelectionBar } from './SelectionBar';
-import { debounce, hashAuthor, applyAuthorColors, bcp47, suggestLabel, LayoutPicker, documentStats, applyEditorZoom, stepTextZoom, useDocumentViewportZoom, SidebarGrip, restoreSidebarWidths } from './shellutil';
+import { debounce, hashAuthor, applyAuthorColors, applyCommentAvatars, bcp47, suggestLabel, LayoutPicker, documentStats, applyEditorZoom, stepTextZoom, useDocumentViewportZoom, SidebarGrip, restoreSidebarWidths } from './shellutil';
 import { chooseLyxImport } from './lyximport';
 import { setDocumentFonts } from '../fonts/editorfont';
 import { setDocumentParagraphs, setDocumentHeadings } from '../editor/paragraphsep';
@@ -52,7 +52,7 @@ import { Versions } from './Versions';
 import { AgentPanel, askAgentAbout } from './AgentPanel';
 import { PdfPanel, stateFromBuild, jobActive, EMPTY_PDF, type PdfState } from './PdfPanel';
 import { Ruler, NOTE_SCALE_DEFAULT, NOTE_SCALE_MIN, NOTE_SCALE_MAX, MIN_WIDTH, MAX_WIDTH } from './Ruler';
-import { useNotesPane, useNotesFold, NotesSash, NotesUnfoldTab } from './notespane';
+import { useNotesPane, useNotesFold, NotesSash, NotesUnfoldTab, NotesResolved } from './notespane';
 import { StatusBar, SaveIndicator, ZoomControl, type Status } from './StatusBar';
 import { CornerButton } from './CornerButton';
 import { SyncChip, useExternalSync } from './SyncChip';
@@ -577,6 +577,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     api.projects().then(r => { if (live) setCurProject(r.projects.find(p => p.name === docProject) ?? null); }).catch(() => {});
     return () => { live = false; };
   }, [showFiles, docProject, curProject?.name, refreshKey]);
+  // the project's people's pictures beside their comments (shellutil applyCommentAvatars)
+  useEffect(() => { applyCommentAvatars([user, curProject?.owner, ...(curProject?.members ?? [])]); }, [user, curProject]);
   const [selVersion, setSelVersion] = useState(0);
   const [docTick, setDocTick] = useState(0);
   const [selTick, setSelTick] = useState(0);
@@ -1845,6 +1847,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
           {docId ? (isPdfTab ? <div class="pdf-tab"><PdfViewer key={docId} url={fileUrl(projectOfDoc(textId!), docPathOf(textId!))} toolbar={<a class="small-btn" href={fileUrl(projectOfDoc(textId!), docPathOf(textId!)) + '?download=1'}>Download</a>} /></div> : isBoardTab ? <BoardEditor key={docId} id={docId} user={user} notify={notify} /> : isHtmlTab ? <DeliverableEditor key={docId} id={docId} user={user} notify={notify} /> : htmlPending ? <div class="editor-loading" aria-busy="true" /> : isProjectRoot ? <ProjectRootPanel key={docId} project={docId} notify={notify} onCreated={id => { openInTab(id); setRefreshKey(k => k + 1); }} /> : !isLyxDoc ? <TextEditor key={docId} id={textId!} notify={notify} /> :
             <div class="editor-page">
               {marginMode && <NotesSash sash={notesPane.sash} onFold={notesFold.fold} />}
+              {marginMode && <NotesResolved views={() => [masterView, ...[...childRefs.current.values()].map(h => h.view)].filter((v): v is EditorView => !!v)} tick={docTick} />}
               <div class="editor-host" ref={containerRef} />
               {combined && childIds.map(id => (
                 <ChildEditor key={id + ':' + reloadKey} id={id} user={user} marginMode={marginMode} readOnly={viewOnly || viewing} onSelection={onSelection} onDocChange={() => { setDocTick(t => t + 1); }} onStale={resolveStale}

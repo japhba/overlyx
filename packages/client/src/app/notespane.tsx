@@ -16,9 +16,16 @@
  * The pane folds away like a VS Code side panel: the » on its sash (or the sash dragged nearly shut)
  * turns margin mode off and leaves a "Notes" tab at the right edge that brings it back
  * (useNotesFold, <NotesUnfoldTab>; kept in this browser as `ol.notesFolded`).
+ *
+ * At the top of the pane, <NotesResolved> shows or hides the resolved comment threads: faded cards
+ * among the others, to read or reopen (the preference View ▸ Resolved comments, also in the text).
  */
 import { useEffect, useLayoutEffect, useState } from 'preact/hooks';
+import type { Node as PMNode } from 'prosemirror-model';
+import type { EditorView } from 'prosemirror-view';
 import { documentViewScale } from '../editor/viewscale';
+import { isResolvedThread } from '../editor/plugins/commentui';
+import { getPrefs, setPref, subscribePrefs } from '../prefs';
 import type { RefObject } from 'preact';
 
 export const NOTES_SHARE_DEFAULT = 0.3, NOTES_SHARE_MIN = 0.15, NOTES_SHARE_MAX = 0.6;
@@ -154,6 +161,43 @@ export function NotesUnfoldTab({ onUnfold }: { onUnfold: () => void }) {
   return (
     <div class="notes-unfold">
       <button type="button" data-notes-unfold title="Show the notes & comments pane again" onClick={onUnfold}>Notes</button>
+    </div>
+  );
+}
+
+const resolvedCounts = new WeakMap<PMNode, number>();
+/** the resolved comment threads in a document (counted once per version of it) */
+function resolvedIn(doc: PMNode): number {
+  let n = resolvedCounts.get(doc);
+  if (n === undefined) {
+    n = 0;
+    doc.descendants(node => { if (isResolvedThread(node)) { n!++; return false; } return true; });
+    resolvedCounts.set(doc, n);
+  }
+  return n;
+}
+
+/**
+ * The resolved threads, shown or not: a switch at the top of the notes pane (only when there are
+ * some). `views`: the open editors (the master and the combined view's children); `tick` bumps
+ * when a document changed.
+ */
+export function NotesResolved({ views, tick }: { views: () => EditorView[]; tick: number }) {
+  const [shown, setShown] = useState(getPrefs().showResolvedComments);
+  useEffect(() => subscribePrefs(p => setShown(p.showResolvedComments)), []);
+  void tick;
+  const n = views().reduce((sum, v) => sum + resolvedIn(v.state.doc), 0);
+  // the switch came or went: the cards make room for it (plugins/margin.ts lays them out again on resize)
+  useEffect(() => { window.dispatchEvent(new Event('resize')); }, [n > 0]);
+  if (!n) return null;
+  return (
+    <div class="notes-resolved">
+      <button type="button" data-notes-resolved aria-pressed={shown} class={shown ? 'on' : ''}
+        title={shown ? 'Hide the resolved comments again' : 'Show the resolved comments: faded cards beside where they were, to read or reopen'}
+        onMouseDown={e => e.preventDefault()} onClick={() => setPref('showResolvedComments', !shown)}>
+        <span class="notes-resolved-check" aria-hidden="true" />
+        {shown ? 'Hide resolved' : 'Show resolved'} <b>{n}</b>
+      </button>
     </div>
   );
 }
