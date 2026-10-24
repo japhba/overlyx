@@ -81,6 +81,14 @@ export const config = {
      * stand-in engine for tests.
      */
     claude: process.env.OVERLYX_AGENT_CLAUDE !== 'off',
+    /**
+     * Agents never run as root (agentusers.ts): when the server does, each account's agent engine —
+     * and everything it runs — has an unprivileged uid of its own. OVERLYX_AGENT_USERS=off keeps
+     * them as the server's own user (tests with stand-in engines).
+     */
+    users: process.getuid?.() === 0 && process.env.OVERLYX_AGENT_USERS !== 'off',
+    /** working copies hard-link the project's files (agentwork.ts): with agent users — whose uid may read them but not write them — or OVERLYX_AGENT_HARDLINKS=1 (tests) */
+    hardlinks: false,
     claudeServer: process.env.OVERLYX_CLAUDE_SERVER ? path.resolve(process.env.OVERLYX_CLAUDE_SERVER) : path.join(REPO_ROOT, 'scripts', 'claude-app-server.mjs'),
   },
   /** minimum interval between automatic versions (ms) */
@@ -150,7 +158,16 @@ export const config = {
     repairsPerDayTotal: Number(process.env.OVERLYX_AI_REPAIRS_PER_DAY_TOTAL ?? 200),
   },
   sessionDays: 30,
+  /**
+   * Where the agents' homes, working copies and scratch directories live. With agent users
+   * (agent.users) they must be reachable by those uids, so not under the data directory (in
+   * /root): beside the projects (the same filesystem — working copies hard-link the project's
+   * files); otherwise the data directory. OVERLYX_AGENT_DIR overrides.
+   */
+  agentDir: '',
 };
+config.agent.hardlinks = config.agent.users || process.env.OVERLYX_AGENT_HARDLINKS === '1';
+config.agentDir = path.resolve(process.env.OVERLYX_AGENT_DIR ?? (config.agent.users ? path.join(path.dirname(config.projectsDir), 'agents') : config.dataDir));
 
 // (a document worker, docpool.ts, reads the configuration only: the server has set things up)
 if (isMainThread) {

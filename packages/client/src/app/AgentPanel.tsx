@@ -19,7 +19,7 @@
  */
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { api, type AgentStatus, type AgentLogin, type AgentThreadInfo, type AgentItem, type AgentChange, type AgentEventMsg, type AgentTurnContext, type AgentModel, type LitHit, type AgentCheckpoint, type AgentScope, type AgentProvider } from '../api';
-import { ModelPicker, KeyDialog, ConnectRows, PROVIDER_LABEL, connectedProviders, missingProviders, providerOf, providerWho, modelKey, parseModelKey, type KeyProvider } from './AgentModelPicker';
+import { ModelPicker, KeyDialog, ConnectRows, PROVIDER_LABEL, connectedProviders, missingProviders, providerOf, providerWho, modelKey, parseModelKey, type KeyProvider, type PickerModel } from './AgentModelPicker';
 import { editorContext } from '../editor/context';
 import { bibRefs, type BibRef } from './bibrefs';
 import { RichText, transcriptCopy } from './agentText';
@@ -546,7 +546,7 @@ function CodexPanel({ project, notify, pinned, onUnpin }: { project: string; not
           notify(`A new thread on ${PROVIDER_LABEL[providerOf(chosen)]}: a conversation stays with the provider it started on`);
         }
         if (!tid) {
-          const prov = chosen ? providerOf(chosen) : 'chatgpt';
+          const prov = (chosen ? providerOf(chosen) : 'chatgpt') as AgentProvider;
           const r = await api.agentStartThread(project, scope, prov, chosen?.id);
           tid = r.id; setSel(tid); setMine(true); setItems([]); setLiveCp(null); setApprovals([]);
           setThreadAt({ provider: r.provider ?? prov, model: r.model ?? chosen?.id ?? null });
@@ -571,7 +571,7 @@ function CodexPanel({ project, notify, pinned, onUnpin }: { project: string; not
   };
 
   /** Pick a model (the picker, or the thread just opened): its effort list follows. */
-  function choose(m: AgentModel, remember = true) {
+  function choose(m: PickerModel, remember = true) {
     const k = modelKey(m);
     setModel(k);
     const ef = m.defaultEffort ?? '';

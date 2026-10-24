@@ -9,7 +9,7 @@ import { config } from './config.ts';
 import { cachedBib } from './bibcache.ts';
 import { setSecurityHeaders } from './security.ts';
 import { requestAiRepair, AiRepairError } from './airepair.ts';
-import { aiStatus, aiAvailable, rewrite as aiRewrite, complete as aiComplete, recognizeInk, allow as aiAllow, AiError, selectionToTex, texToPm } from './ai.ts';
+import { aiStatus, aiAvailable, pickRoute, usesServerKey, rewrite as aiRewrite, complete as aiComplete, recognizeInk, allow as aiAllow, AiError, selectionToTex, texToPm } from './ai.ts';
 import { linkedAi, combineVersions } from './linkedai.ts';
 import { mcpRouter } from './mcp.ts';
 import { mcpAgentRoutes, pruneAgents } from './mcpAgents.ts';
@@ -1277,14 +1277,15 @@ api.post('/ai/ink', async (req, res) => {
 api.post('/docs/*/ai/rewrite', async (req, res) => {
   try {
     if (!atLeast(req.role, 'edit')) { res.status(403).json({ error: 'view-only' }); return; }
-    if (!aiAvailable()) { res.status(503).json({ error: 'AI assistance is not configured on this server (OPENROUTER_API_KEY is unset).' }); return; }
-    if (!aiAllow(`rewrite:${req.user!.id}`, config.ai.rewritesPerMinute)) { res.status(429).json({ error: 'Too many AI requests — wait a moment.' }); return; }
     const body = req.body ?? {};
+    // the picker's choice: the server's key (needs it configured) or one of the account's own providers
+    if (usesServerKey(pickRoute(body.model, config.ai.model, req.user!.id)) && !aiAvailable()) { res.status(503).json({ error: 'AI assistance is not configured on this server (OPENROUTER_API_KEY is unset) — choose one of your own providers in the model menu.' }); return; }
+    if (!aiAllow(`rewrite:${req.user!.id}`, config.ai.rewritesPerMinute)) { res.status(429).json({ error: 'Too many AI requests — wait a moment.' }); return; }
     if (typeof body.instruction !== 'string') { res.status(400).json({ error: 'instruction missing' }); return; }
     const doc = await manager.open(docId(req));
     const ac = new AbortController();
     req.on('close', () => { if (!res.writableEnded) ac.abort(); });
-    const r = await aiRewrite(doc, { instruction: body.instruction, content: Array.isArray(body.content) ? body.content : [], layout: typeof body.layout === 'string' ? body.layout : undefined, before: typeof body.before === 'string' ? body.before : undefined, after: typeof body.after === 'string' ? body.after : undefined, model: body.model, math: body.math && typeof body.math.latex === 'string' ? body.math : undefined, source: body.source && typeof body.source.text === 'string' ? { text: String(body.source.text).slice(0, 30000), before: typeof body.source.before === 'string' ? body.source.before : undefined, after: typeof body.source.after === 'string' ? body.source.after : undefined } : undefined, history: Array.isArray(body.history) ? body.history.slice(-5).map((h: any) => ({ instruction: String(h?.instruction ?? '').slice(0, 1000), tex: String(h?.tex ?? '').slice(0, 8000) })) : undefined }, ac.signal);
+    const r = await aiRewrite(doc, { instruction: body.instruction, content: Array.isArray(body.content) ? body.content : [], layout: typeof body.layout === 'string' ? body.layout : undefined, before: typeof body.before === 'string' ? body.before : undefined, after: typeof body.after === 'string' ? body.after : undefined, model: body.model, userId: req.user!.id, math: body.math && typeof body.math.latex === 'string' ? body.math : undefined, source: body.source && typeof body.source.text === 'string' ? { text: String(body.source.text).slice(0, 30000), before: typeof body.source.before === 'string' ? body.source.before : undefined, after: typeof body.source.after === 'string' ? body.source.after : undefined } : undefined, history: Array.isArray(body.history) ? body.history.slice(-5).map((h: any) => ({ instruction: String(h?.instruction ?? '').slice(0, 1000), tex: String(h?.tex ?? '').slice(0, 8000) })) : undefined }, ac.signal);
     res.json(r);
   } catch (e) {
     if (e instanceof AiError) { if (e.status !== 499) res.status(e.status).json({ error: e.message }); return; }

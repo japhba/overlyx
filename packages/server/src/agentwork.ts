@@ -34,7 +34,8 @@ import { projectDir, resolveProjectPath, isDocumentFile, findMaster } from './pr
 import { isArticleHtml } from '@overlyx/core/html/article.ts';
 import { lastBuild, buildIncluding, buildErrors, requestBuild } from './export.ts';
 import { touchProject } from './git.ts';
-import { lstatIn, readFileIn, readTextIn, readlinkIn, writeFileIn, symlinkIn, removeIn } from './confined.ts';
+import { lstatIn, readFileIn, readTextIn, readlinkIn, writeFileIn, symlinkIn, linkIn, removeIn } from './confined.ts';
+import { privateTo, passDir } from './agentusers.ts';
 import { assertRoom } from './projectsize.ts';
 
 /** The name the panel's agent has on the MCP server (its token's name) … */
@@ -64,6 +65,8 @@ interface Manifest {
   turn?: { n: number; startedAt: number; turnId: string | null };
   /** false: the turn's document changes go in directly, without tracked-change marks (the panel's Track changes box) */
   tracked?: boolean;
+  /** the files kind 'link' (the project's own, hard-linked — or copied — into the copy): [device, inode] of what was put there, so a file the agent replaced is told from the one it was given */
+  linked?: Record<string, [number, number]>;
 }
 
 /**
@@ -76,13 +79,13 @@ export function panelTracking(userId: number, project: string): boolean { return
 /** whether the thread's last turn tracked its changes (undefined: no turn in a working copy yet) */
 export function workspaceTracking(tid: string): boolean | undefined { const m = readManifest(tid); return m?.turn ? m.tracked !== false : undefined; }
 
-const root = () => path.join(config.dataDir, 'agent-work');
+const root = () => passDir(path.join(config.agentDir, 'agent-work'));
 const safeId = (tid: string) => tid.replace(/[^A-Za-z0-9._-]/g, '_');
 const manifestPath = (tid: string) => path.join(root(), safeId(tid) + '.json');
 const baseDir = (tid: string) => path.join(root(), safeId(tid) + '.base');
 
 /** A thread's scratch HOME and TMPDIR (agent.ts threadSandbox), by its MCP key — codex names the thread only after it has started in its sandbox. */
-export const scratchDir = (key: string) => path.join(config.dataDir, 'agent-scratch', key.replace(/[^A-Za-z0-9_-]/g, '_'));
+export const scratchDir = (key: string) => path.join(passDir(path.join(config.agentDir, 'agent-scratch')), key.replace(/[^A-Za-z0-9_-]/g, '_'));
 
 /** The agent's working directory for a thread of `project`. */
 export function workspaceDir(tid: string, project: string): string {
@@ -93,11 +96,35 @@ function readManifest(tid: string): Manifest | null {
   try { return JSON.parse(fs.readFileSync(manifestPath(tid), 'utf8')) as Manifest; } catch { return null; }
 }
 
-function writeAtomic(file: string, data: string | Buffer): void {
+function writeAtomic(file: string, data: string | Buffer, mode?: number): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = file + '.overlyx-tmp';
-  fs.writeFileSync(tmp, data);
+  fs.writeFileSync(tmp, data, mode !== undefined ? { mode } : undefined);
   fs.renameSync(tmp, file);
+}
+
+/**
+ * A file of the project the agent reads but does not change (a figure, a PDF) into its copy. As the
+ * server's own user the agent gets a symlink into the project (read only in its sandbox). As an
+ * agent uid (agentusers.ts), which cannot reach the project, the project's own file hard-linked —
+ * that uid may read it, never write it, and a link costs nothing — or, where that is not possible
+ * (another filesystem, a file only root may read), a copy. Returns what was put there.
+ */
+function mirrorFile(dir: string, rel: string, live: string): [number, number] | null {
+  const st = fs.lstatSync(live);
+  if (!st.isFile()) return null;
+  const here = lstatIn(dir, rel);
+  if (here?.isFile() && here.dev === st.dev && here.ino === st.ino) return [here.dev, here.ino];
+  if (config.agent.hardlinks && st.mode & 0o004) {
+    try { linkIn(dir, rel, live); return [st.dev, st.ino]; } catch (e) { if (!['EXDEV', 'EPERM', 'EMLINK'].includes((e as NodeJS.ErrnoException).code ?? '')) throw e; }
+  }
+  if (!config.agent.users) {
+    if (readlinkIn(dir, rel) !== live) symlinkIn(dir, rel, live);
+    return null;
+  }
+  writeFileIn(dir, rel, fs.readFileSync(live));
+  const copied = lstatIn(dir, rel);
+  return copied ? [copied.dev, copied.ino] : null;
 }
 
 const readBase = (tid: string, rel: string): string | null => { try { return fs.readFileSync(path.join(baseDir(tid), rel), 'utf8'); } catch { return null; } };
@@ -131,8 +158,11 @@ export function prepareWorkspace(tid: string, project: string, userId: number, t
     const dir = workspaceDir(tid, project);
     if (fs.existsSync(dir)) await syncNow(tid, project, userId);
     fs.mkdirSync(dir, { recursive: true });
+    // the copy is the agent's (its uid's: agentusers.ts) — the server's bases and checkpoints beside it are not
+    privateTo(path.dirname(dir), userId); privateTo(dir, userId);
+    for (const d of [baseDir(tid), turnsDir(tid)]) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
     const old = readManifest(tid);
-    const manifest: Manifest = { project, files: {}, usedAt: Date.now(), ...(tracked ? {} : { tracked: false }) };
+    const manifest: Manifest = { project, files: {}, usedAt: Date.now(), linked: {}, ...(tracked ? {} : { tracked: false }) };
     for (const f of docFiles(project)) {
       if (f.kind === 'dir') continue;
       const live = resolveProjectPath(project, f.path);
@@ -149,7 +179,8 @@ export function prepareWorkspace(tid: string, project: string, userId: number, t
         writeBase(tid, f.path, text);
         manifest.files[f.path] = 'copy';
       } else {
-        if (readlinkIn(dir, f.path) !== live) symlinkIn(dir, f.path, live);
+        const put = mirrorFile(dir, f.path, live);
+        if (put) manifest.linked![f.path] = put;
         manifest.files[f.path] = 'link';
       }
     }
@@ -163,7 +194,7 @@ export function prepareWorkspace(tid: string, project: string, userId: number, t
     const prev = old?.turn ? readCheckpoint(tid, old.turn.n) : null;
     if (prev && !prev.finished) writeCheckpoint(tid, { ...prev, finished: true });
     manifest.turn = { n: Math.max(old?.turn?.n ?? 0, lastCheckpointNumber(tid)) + 1, startedAt: Date.now(), turnId: null };
-    writeAtomic(manifestPath(tid), JSON.stringify(manifest));
+    writeAtomic(manifestPath(tid), JSON.stringify(manifest), 0o600);
     pruneCheckpoints(tid);
     return dir;
   });
@@ -237,6 +268,9 @@ async function syncNow(tid: string, project: string, userId: number): Promise<Sy
     try {
       const st = lstatIn(dir, rel);
       if (!st?.isFile()) continue;   // gone meanwhile, or a link now
+      // the project's own file, as it was given (mirrorFile): nothing of the agent's
+      const given = kind === 'link' ? manifest.linked?.[rel] : undefined;
+      if (given && st.dev === given[0] && st.ino === given[1]) continue;
       if (kind === 'copy') {
         if (st.size > MAX_TEXT) continue;
         const buf = readFileIn(dir, rel, MAX_TEXT);
@@ -287,14 +321,14 @@ async function syncNow(tid: string, project: string, userId: number): Promise<Sy
       touched = true;
       recordFile(tid, manifest, rel, prev, data);
       if ((TEXT_EXT.has(ext) || html) && !data.includes(0)) { writeBase(tid, rel, data.toString('utf8')); manifest.files[rel] = 'copy'; }
-      else { symlinkIn(dir, rel, live); manifest.files[rel] = 'link'; }
+      else { const put = mirrorFile(dir, rel, live); if (put) (manifest.linked ??= {})[rel] = put; manifest.files[rel] = 'link'; }
     } catch (e) {
       out.push({ path: rel, action: 'tracked', error: (e as Error).message });
     }
   }
   if (touched) touchProject(project, userId);
   manifest.usedAt = Date.now();
-  writeAtomic(manifestPath(tid), JSON.stringify(manifest));
+  writeAtomic(manifestPath(tid), JSON.stringify(manifest), 0o600);
   if (out.length) console.log(`[agent-work ${tid}] ${out.map(f => `${f.path}: ${f.error ? 'failed — ' + f.error : f.action + (f.inserted !== undefined ? ` +${f.inserted}/−${f.deleted}` : '')}`).join('; ')}`);
   return out;
 }
@@ -473,7 +507,7 @@ export function noteTurnId(tid: string, turnId: string): void {
   const m = readManifest(tid);
   if (!m?.turn || m.turn.turnId === turnId) return;
   m.turn.turnId = turnId;
-  writeAtomic(manifestPath(tid), JSON.stringify(m));
+  writeAtomic(manifestPath(tid), JSON.stringify(m), 0o600);
   const cp = readCheckpoint(tid, m.turn.n);
   if (cp && !cp.turnId) writeCheckpoint(tid, { ...cp, turnId });
 }
@@ -618,7 +652,7 @@ export function undoCheckpoint(tid: string, project: string, n: number, userId: 
     if (manifest) {
       // later changes of the same turn go into a checkpoint of their own
       if (manifest.turn?.n === n) manifest.turn = { n: n + 1, startedAt: Date.now(), turnId: manifest.turn.turnId };
-      writeAtomic(manifestPath(tid), JSON.stringify(manifest));
+      writeAtomic(manifestPath(tid), JSON.stringify(manifest), 0o600);
     }
     if (touched) touchProject(project, userId);
     // the turn had broken the build: build again, so the PDF recovers without anyone asking

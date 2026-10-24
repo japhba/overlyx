@@ -2270,6 +2270,7 @@ html[data-presenting] .editor-column.panes > .editor-scroll { display: block !im
 .agent-key-dialog .muted { color: var(--ui-muted); font-size: 12px; }
 .agent-key-dialog .err { color: var(--err); }
 .agent-key-dialog input { font-family: ui-monospace, monospace; }
+.agent-mp-menu.down { bottom: auto; top: calc(100% + 4px); }
 .agent-msg .agent-code, .agent-code { font-family: ui-monospace, monospace; font-size: 12px; background: var(--ui-bg2); border: 1px solid var(--ui-border); border-radius: 6px; padding: 6px 8px; overflow-x: auto; white-space: pre; margin: 4px 0; }
 .agent-msg code { font-family: ui-monospace, monospace; font-size: 0.92em; background: var(--ui-bg2); border-radius: 4px; padding: 0 3px; }
 .agent-math-block { text-align: center; margin: 4px 0; overflow-x: auto; }
@@ -2290,7 +2291,9 @@ html[data-presenting] .editor-column.panes > .editor-scroll { display: block !im
 .agent-hr { border: 0; border-top: 1px solid var(--ui-border); margin: 8px 0; }
 
 /* ⌘K panel: model choice and raw-source proposals */
-.ai-panel .ai-model { max-width: 130px; font-size: 11px; background: var(--page-bg); color: var(--ui-muted); border: 1px solid var(--ui-border); border-radius: 5px; padding: 1px 2px; flex: none; }
+/* the ⌘J model picker (AgentModelPicker.tsx InlineModelPicker): its button sits in this span */
+.ai-panel .ai-model { flex: none; display: inline-flex; min-width: 0; }
+.ai-panel .ai-model .agent-mp-btn { max-width: 170px; font-size: 11px; color: var(--ui-muted); padding: 2px 5px; }
 .ai-panel .ai-src { font-family: ui-monospace, monospace; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow-y: auto; margin: 0; }
 
 

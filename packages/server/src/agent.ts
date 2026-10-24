@@ -59,7 +59,8 @@ import {
   type AgentProvider, type ProviderModel,
 } from './agentkeys.ts';
 import { mintInternalToken, forgetInternalTokens, agentNetSocket } from './agentnet.ts';
-import { sandboxParts, sandboxAvailable } from './sandbox.ts';
+import { sandboxParts, sandboxAvailable, scopesAvailable } from './sandbox.ts';
+import { agentUid, giveTo, privateTo, passDir, agentRuntime, migrateAgentData } from './agentusers.ts';
 
 /* ------------------------------------------------------------------ protocol types (the subset we touch) */
 
@@ -111,7 +112,7 @@ const SANDBOX_DENY = [
 const exists = (p: string) => { try { fs.lstatSync(p); return true; } catch { return false; } };
 
 /** The directory new threads start in: empty, and nothing the agent can write (their turns then move to the working copy). */
-const startDir = () => { const d = path.join(config.dataDir, 'agent-start'); fs.mkdirSync(d, { recursive: true }); return d; };
+const startDir = () => { const d = path.join(config.agentDir, 'agent-start'); fs.mkdirSync(d, { recursive: true }); return d; };
 
 /** The parts of the profile that hold for every thread — also the managed config's default, should a thread ever load without its own. */
 function baseFilesystem(): Record<string, unknown> {
@@ -138,15 +139,22 @@ export interface ThreadSandbox { cwd: string; approvalPolicy: 'never'; config: R
  * untrusted: codex trusts the directory a thread with a writable sandbox starts in, and a trusted
  * directory's .codex/config.toml — a project file any editor can write — would be loaded, its MCP
  * servers started unsandboxed. The header tells the MCP server which thread is calling.
+ *
+ * With agent users (agentusers.ts) codex runs as the account's uid, which cannot reach the
+ * projects at all: the copy hard-links the project's files it needs (agentwork.ts), so the live
+ * project is not in the profile; the scratch HOME is the uid's (`userId`: the thread's owner).
  */
-export function threadSandbox(t: { project: string; key: string; cwd: string; native: boolean; provider?: AgentProvider }): ThreadSandbox {
+export function threadSandbox(t: { project: string; key: string; cwd: string; native: boolean; provider?: AgentProvider; userId?: number }): ThreadSandbox {
   const live = projectDir(t.project), home = scratchDir(t.key), start = startDir();
   fs.mkdirSync(home, { recursive: true });
+  if (t.userId !== undefined) privateTo(home, t.userId);
   fs.mkdirSync(t.cwd, { recursive: true });
   const fsys = baseFilesystem();
   fsys[start] = 'read';
-  fsys[live] = 'read';
-  if (exists(path.join(live, '.git'))) fsys[path.join(live, '.git')] = 'deny';
+  if (!config.agent.users || t.userId === undefined) {
+    fsys[live] = 'read';
+    if (exists(path.join(live, '.git'))) fsys[path.join(live, '.git')] = 'deny';
+  }
   fsys[home] = 'write';
   fsys[':project_roots'] = { '.': t.native ? 'write' : 'read' };
   const untrusted = Object.fromEntries([...new Set([t.cwd, start, live, home])].map(d => [d, { trust_level: 'untrusted' }]));
@@ -174,13 +182,17 @@ export interface ClaudeTurnSandbox { pre: string[]; bwrap: string[]; configDir: 
  * (the copy's binary files are symlinks into it; its .git hidden), the thread's scratch HOME and
  * Claude Code's own configuration directory (its session files) — writable; no network (the
  * engine's forwarder reaches only OverLyX's internal socket, agentnet.ts), in a cgroup of its own.
+ * With agent users the engine starts bwrap as the account's uid (`userId`, the thread's owner): no
+ * live project (the copy hard-links its files), the cgroup is the keeper's (agentusers.ts).
  */
-export function claudeTurnSandbox(t: { project: string; key: string; cwd: string; configDir: string }): ClaudeTurnSandbox {
+export function claudeTurnSandbox(t: { project: string; key: string; cwd: string; configDir: string; userId?: number }): ClaudeTurnSandbox {
   const live = projectDir(t.project), home = scratchDir(t.key);
+  const asAgent = config.agent.users && t.userId !== undefined;
   const { pre, bwrap } = sandboxParts({
-    cwd: t.cwd, home, rw: [t.cwd, t.configDir], ro: [live], hide: [path.join(live, '.git')],
+    cwd: t.cwd, home, rw: [t.cwd, t.configDir], ...(asAgent ? { unprivileged: true } : { ro: [live], hide: [path.join(live, '.git')] }),
     cgroup: { memoryMB: 3072, tasks: 1024 },
   });
+  if (t.userId !== undefined) { privateTo(home, t.userId); privateTo(t.configDir, t.userId); }
   return { pre, bwrap, configDir: t.configDir };
 }
 
@@ -353,7 +365,7 @@ requires_openai_auth = false
 type Subscriber = { project: string; res: Response };
 interface PendingReq { resolve: (v: any) => void; reject: (e: Error) => void; timer?: NodeJS.Timeout }
 
-const agentHomeDir = (userId: number) => path.join(config.dataDir, 'agent-home', String(userId));
+const agentHomeDir = (userId: number) => path.join(passDir(path.join(config.agentDir, 'agent-home')), String(userId));
 
 const AGENT_TOKEN_NAME = 'Agent panel';
 /** The hidden internal MCP credential the embedded agent authenticates with (plaintext kept so
@@ -400,7 +412,9 @@ class AgentHost {
    *  (codex only reads it at process start, so the keeper must then be restarted). */
   private ensureHome(): boolean {
     const h = this.home();
-    fs.mkdirSync(h, { recursive: true });
+    fs.mkdirSync(h, { recursive: true, mode: 0o700 });
+    privateTo(agentHomeDir(this.userId), this.userId);
+    privateTo(h, this.userId);
     if (this.engine === 'claude') return false;   // nothing to configure: every turn brings its settings
     // OverLyX owns this file — rewritten on every start so the port and settings stay current
     const file = path.join(h, 'config.toml');
@@ -409,6 +423,7 @@ class AgentHost {
     try { old = fs.readFileSync(file, 'utf8'); } catch { /* fresh home */ }
     if (old === text) return false;
     fs.writeFileSync(file, text);
+    giveTo(file, this.userId);
     return old !== null;
   }
 
@@ -444,7 +459,7 @@ class AgentHost {
       sock = await this.dial();   // a race with a just-spawning keeper: take it if one answers
     }
     if (!sock) {
-      this.spawnKeeper();
+      await this.spawnKeeper();
       for (let i = 0; i < 50 && !sock; i++) { await new Promise(r => setTimeout(r, 100)); sock = await this.dial(); }
       if (!sock) throw new Error('the agent keeper did not start');
     }
@@ -464,18 +479,30 @@ class AgentHost {
     return ran !== now;
   }
 
-  private spawnKeeper(): void {
+  /**
+   * Start the account's keeper. With agent users (agentusers.ts) it runs as the account's uid —
+   * through setpriv, in a systemd scope of its own — from the agent runtime (the checkout is
+   * root's); everything it starts is that uid's.
+   */
+  private async spawnKeeper(): Promise<void> {
     try { fs.unlinkSync(this.sockPath()); } catch { /* none */ }
     try { fs.writeFileSync(this.versionPath(), this.engineVersion() ?? ''); } catch { /* the check just stays off */ }
+    const uid = agentUid(this.userId);
+    const run = uid !== null ? await agentRuntime() : null;
+    const keeper = run ? path.join(run, 'agent-keeper.mjs') : KEEPER_SCRIPT;
     // codex gets the panel's MCP credential; the Claude engine an internal one (agentnet.ts: it works
     // on internal requests only — its sandboxed commands can see it), its socket and its forwarder
     const engine = this.engine === 'claude'
       ? {
-        KEEPER_BIN: process.execPath, KEEPER_ARGS: JSON.stringify([config.agent.claudeServer]),
-        KEEPER_ENV: JSON.stringify({ OVERLYX_AGENT_TOKEN: mintInternalToken(this.userId), OVERLYX_AGENT_NET: agentNetSocket(), OVERLYX_SANDBOX_ENTRY: CLAUDE_ENTRY }),
+        KEEPER_BIN: process.execPath, KEEPER_ARGS: JSON.stringify([run ? path.join(run, 'claude-app-server.mjs') : config.agent.claudeServer]),
+        KEEPER_ENV: JSON.stringify({ OVERLYX_AGENT_TOKEN: mintInternalToken(this.userId), OVERLYX_AGENT_NET: agentNetSocket(), OVERLYX_SANDBOX_ENTRY: run ? path.join(run, 'claude-sandbox-entry.mjs') : CLAUDE_ENTRY }),
       }
       : { KEEPER_BIN: config.agent.bin, OVERLYX_MCP_TOKEN: agentMcpToken(this.userId) };
-    const child = spawn(process.execPath, [KEEPER_SCRIPT], {
+    const argv = uid === null ? [process.execPath, keeper] : [
+      ...(scopesAvailable() ? ['systemd-run', '--scope', '--quiet', '--collect', '-p', 'MemoryMax=3G', '-p', 'MemorySwapMax=0', '-p', 'TasksMax=2048', '--'] : []),
+      'setpriv', `--reuid=${uid}`, `--regid=${uid}`, '--clear-groups', '--', process.execPath, keeper,
+    ];
+    const child = spawn(argv[0], argv.slice(1), {
       detached: true, stdio: 'ignore', cwd: this.home(),
       env: {
         PATH: process.env.PATH ?? '/usr/bin:/bin', LANG: process.env.LANG ?? 'C.UTF-8',
@@ -685,7 +712,7 @@ class AgentHost {
       // the Claude engine runs each turn in the sandbox the turn brings (claudeTurnSandbox)
       res = await this.request('thread/resume', { threadId: row.thread_id, cwd, approvalPolicy: 'never', config: { 'overlyx.mcpKey': threadKey(row.thread_id) } });
     } else {
-      const box = threadSandbox({ project: row.project, key: threadKey(row.thread_id), cwd, native: isNativeThread(row.created_at), provider });
+      const box = threadSandbox({ project: row.project, key: threadKey(row.thread_id), cwd, native: isNativeThread(row.created_at), provider, userId: row.user_id });
       res = await this.request('thread/resume', { threadId: row.thread_id, cwd: box.cwd, approvalPolicy: box.approvalPolicy, config: box.config, ...(isKeyProvider(provider) ? { modelProvider: CODEX_PROVIDERS[provider as 'openai' | 'openrouter'] } : {}) });
     }
     assertSandboxed(res, row.thread_id);
@@ -701,13 +728,13 @@ class AgentHost {
    * A question answered once, outside the panel's threads: an ephemeral thread in consultSandbox,
    * the reply in the shape `schema` gives (codex's outputSchema) — on the user's own ChatGPT sign-in.
    */
-  async ask(text: string, schema: object, timeoutMs = 150_000): Promise<string> {
+  async ask(text: string, schema: object, model?: string, timeoutMs = 150_000): Promise<string> {
     if (this.engine !== 'codex') throw new Error('one-shot questions go to codex');
     await this.ensure();
     const box = consultSandbox();
     const out = await this.request('thread/start', {
       cwd: box.cwd, approvalPolicy: box.approvalPolicy, config: box.config, ephemeral: true,
-      developerInstructions: CONSULT_INSTRUCTIONS, ...(config.agent.model ? { model: config.agent.model } : {}),
+      developerInstructions: CONSULT_INSTRUCTIONS, ...(model || config.agent.model ? { model: model || config.agent.model } : {}),
     });
     const tid = String(out.thread.id);
     assertSandboxed(out, tid);
@@ -850,8 +877,8 @@ export function codexSignedIn(userId: number): boolean {
   return config.agent.enabled && fs.existsSync(path.join(agentHomeDir(userId), 'auth.json'));
 }
 
-/** A one-shot question to the user's own codex (AgentHost.ask). */
-export function askCodex(userId: number, text: string, schema: object): Promise<string> { return host(userId).ask(text, schema); }
+/** A one-shot question to the user's own codex (AgentHost.ask), on its ChatGPT sign-in — `model`: one of its models (the ⌘J picker). */
+export function askCodex(userId: number, text: string, schema: object, model?: string): Promise<string> { return host(userId).ask(text, schema, model); }
 
 /* ------------------------------------------------------------------ selection context */
 
@@ -917,7 +944,11 @@ const threadRow = (tid: string) => db.prepare('SELECT * FROM agent_threads WHERE
 
 export function agentRoutes(): express.Router {
   const r = express.Router();
-  if (config.agent.enabled) { try { pruneWorkspaces(); } catch { /* best-effort */ } }
+  if (config.agent.enabled) {
+    // (agentusers.ts: the agents' files beside the projects, owned by their uids)
+    try { migrateAgentData(); } catch (e) { console.error('[agent] moving the agents\' files failed:', (e as Error).message); }
+    try { pruneWorkspaces(); } catch { /* best-effort */ }
+  }
   // what a turn changed, its build check, its undo: to the thread owner's open panels
   onCheckpoint((tid, cp) => { const row = threadRow(tid); if (row) hosts.get(`${engineOf(providerOfRow(row))}:${row.user_id}`)?.emitCheckpoint(tid, cp); });
   r.use(['/agent', '/projects/:project/agent'], (_req, res, next) => { if (!config.agent.enabled) { res.status(404).json({ error: 'the agent is not enabled on this server' }); return; } next(); });
@@ -1050,7 +1081,7 @@ export function agentRoutes(): express.Router {
       const out = engineOf(provider) === 'claude'
         ? await h.request('thread/start', { cwd: startDir(), approvalPolicy: 'never', config: { 'overlyx.mcpKey': key }, developerInstructions: NATIVE_INSTRUCTIONS(project, toolSetOf(provider)), model })
         : await (() => {
-          const box = threadSandbox({ project, key, cwd: startDir(), native: true, provider });
+          const box = threadSandbox({ project, key, cwd: startDir(), native: true, provider, userId });
           return h.request('thread/start', {
             cwd: box.cwd,
             approvalPolicy: box.approvalPolicy,
@@ -1119,7 +1150,7 @@ export function agentRoutes(): express.Router {
       // codex: the sandbox stays the one the thread was loaded with (threadSandbox); its working
       // directory is the turn's cwd, and no turn may bring an approval policy that lets it out.
       // The Claude engine: the turn brings its sandbox (claudeTurnSandbox), for this working copy.
-      const sandbox = h.engine === 'claude' ? { overlyxSandbox: claudeTurnSandbox({ project: row.project, key: threadKey(row.thread_id), cwd, configDir: h.claudeConfigDir(row.thread_id) }) } : {};
+      const sandbox = h.engine === 'claude' ? { overlyxSandbox: claudeTurnSandbox({ project: row.project, key: threadKey(row.thread_id), cwd, configDir: h.claudeConfigDir(row.thread_id), userId: row.user_id }) } : {};
       const turn = h.request('turn/start', { threadId: row.thread_id, input, cwd, approvalPolicy: 'never', ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(cmid ? { clientUserMessageId: cmid } : {}), ...sandbox }, 0);
       turn.catch(e => console.error(`[agent ${req.user!.id}] turn failed:`, (e as Error).message));
       // (a turn the engine refuses outright — the Claude engine without its sandbox — fails here, within the 5 s)

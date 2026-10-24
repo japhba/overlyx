@@ -6,7 +6,9 @@
  * thread's commands see its own project and nothing else (another user's project, OverLyX's
  * database, codex's sign-in, host secrets), that nothing leads out of the sandbox (escalation, a
  * project's own .codex/config.toml), that LaTeX still builds in the working copy, and that the
- * same holds for a thread resumed after a codex restart. Exits 1 when a check fails.
+ * same holds for a thread resumed after a codex restart. Run as root (production, its autodeploy and
+ * scripts/update-codex.sh), codex runs as an agent uid (agentusers.ts) — the commands must not be
+ * root — with a working copy that hard-links the project's files, as production does. Exits 1 when a check fails.
  *
  * scripts/update-codex.sh runs it after installing a new codex (and goes back when it fails);
  * tests/agent-sandbox.test.ts runs it with every test run.
@@ -32,6 +34,12 @@ const R = fs.mkdtempSync(path.join(process.env.OVERLYX_SCRATCH ?? os.tmpdir(), '
 process.env.OVERLYX_DATA_DIR = path.join(R, 'data');
 process.env.OVERLYX_PROJECTS_DIR = path.join(R, 'projects');
 const { threadSandbox, managedCodexConfig } = await import('../packages/server/src/agent.ts');
+const { config } = await import('../packages/server/src/config.ts');
+const { agentUid, giveTo } = await import('../packages/server/src/agentusers.ts');
+/** the thread's owner: as root, codex runs as this account's agent uid */
+const OWNER = 9999;
+const UID = agentUid(OWNER);
+if (UID !== null) fs.chmodSync(R, 0o711);   // (the agent uid passes through the scratch tree)
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
 const write = (file: string, data: string | Buffer) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, data); };
@@ -47,13 +55,17 @@ write(path.join(live, '.git', 'config'), '[remote "origin"]\n\turl = https://SEC
 write(path.join(live, '.codex', 'config.toml'), evilConfig);   // a project file any editor could write
 write(path.join(other, 'notes.tex'), 'SECRET-BOB\n');
 write(path.join(other, 'img.png'), PNG);
-// the thread's working copy (agentwork.ts): documents copied, binary files symlinked into the live project
-const copy = path.join(R, 'data', 'agent-work', 'thread-1', 'paper');
+// the thread's working copy (agentwork.ts): documents copied, binary files hard-linked from the live
+// project (symlinked into it when codex runs as the server's own user)
+const copy = path.join(config.agentDir, 'agent-work', 'thread-1', 'paper');
 write(path.join(copy, 'paper.tex'), fs.readFileSync(path.join(live, 'paper.tex')));
-fs.symlinkSync(path.join(live, 'fig.png'), path.join(copy, 'fig.png'));
+if (UID !== null) fs.linkSync(path.join(live, 'fig.png'), path.join(copy, 'fig.png'));
+else fs.symlinkSync(path.join(live, 'fig.png'), path.join(copy, 'fig.png'));
 write(path.join(copy, '.codex', 'config.toml'), evilConfig);
+giveTo(path.dirname(copy), OWNER, true);
 // …and where new threads start (OverLyX's own empty directory — planted here only to catch codex trusting it)
-write(path.join(R, 'data', 'agent-start', '.codex', 'config.toml'), evilConfig);
+const startDir = path.join(config.agentDir, 'agent-start');
+write(path.join(startDir, '.codex', 'config.toml'), evilConfig);
 const KEY = 'check-key-123';
 const home = path.join(R, 'codex-home');
 write(path.join(home, 'auth.json'), '{"SECRET-AUTH":1}\n');
@@ -109,6 +121,8 @@ const port = (srv.address() as { port: number }).port;
 write(path.join(home, 'config.toml'), `model = "check-model"\nmodel_provider = "check"\n`
   + managedCodexConfig().replace(/^url = .*$/m, `url = "http://127.0.0.1:${port}/mcp"`)
   + `\n[model_providers.check]\nname = "check"\nbase_url = "http://127.0.0.1:${port}/v1"\nwire_api = "responses"\nrequires_openai_auth = false\n`);
+giveTo(home, OWNER, true);
+if (UID !== null) fs.chmodSync(home, 0o700);
 
 /* ------------------------------------------------------------------ codex app-server */
 
@@ -118,7 +132,7 @@ const waiting = new Map<number, (m: any) => void>();
 const notified: ((m: any) => void)[] = [];
 function boot(): void {
   // its own process group: `codex` is a node wrapper around the native binary, and stop() takes both
-  cx = spawn(BIN, ['app-server'], { detached: true, env: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: home, CODEX_HOME: home, LANG: 'C.UTF-8', TERM: 'dumb', OVERLYX_MCP_TOKEN: 'SECRET-TOKEN' }, stdio: ['pipe', 'pipe', 'pipe'] });
+  cx = spawn(BIN, ['app-server'], { detached: true, env: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: home, CODEX_HOME: home, LANG: 'C.UTF-8', TERM: 'dumb', OVERLYX_MCP_TOKEN: 'SECRET-TOKEN' }, stdio: ['pipe', 'pipe', 'pipe'], ...(UID !== null ? { uid: UID, gid: UID } : {}) });
   let buf = '';
   cx.stdout.on('data', d => {
     buf += d;
@@ -174,13 +188,13 @@ let exitCode = 1;
 try {
   await start();
   // a new thread: started in the empty start directory, its turn in the working copy (agent.ts)
-  const startBox = threadSandbox({ project: 'alice/paper', key: KEY, cwd: path.join(R, 'data', 'agent-start'), native: true });
+  const startBox = threadSandbox({ project: 'alice/paper', key: KEY, cwd: startDir, native: true, userId: OWNER });
   const st = await request('thread/start', { cwd: startBox.cwd, approvalPolicy: startBox.approvalPolicy, config: startBox.config });
   check('codex takes the thread\'s sandbox at thread/start', settingsOk(st), JSON.stringify({ approval: st?.approvalPolicy, profile: st?.activePermissionProfile }));
   const tid = st.thread.id as string;
   const pdflatex = fs.existsSync('/usr/bin/pdflatex');
   const out = await turn(tid, copy, [
-    { cmd: `cat ${other}/notes.tex 2>/dev/null || echo NO-NOTES; echo LISTING; ls ${path.join(R, 'projects')}` },
+    { cmd: `echo UID=$(id -u); cat ${other}/notes.tex 2>/dev/null || echo NO-NOTES; echo LISTING; ls ${path.join(R, 'projects')}` },
     { cmd: `head -c 15 ${path.join(R, 'data', 'overlyx.sqlite')}; cat ${home}/auth.json; cat ${live}/.git/config; head -c 12 /etc/shadow; env` },
     { cmd: `cat fig.png | head -c 4 | od -c | head -1; echo copy > new.txt && echo WROTE-COPY; echo x > ${live}/x.txt && echo WROTE-LIVE` },
     { cmd: `cat ${other}/notes.tex`, escalate: true },
@@ -190,6 +204,8 @@ try {
     { cmd: `for p in ${HOST_PATHS.map(p => `'${p}'`).join(' ')}; do ls "$p" >/dev/null 2>&1 && echo "LISTED $p"; done; grep -l SECRET-TOKEN /proc/[0-9]*/environ 2>/dev/null | sed 's/^/ENVLEAK /'; echo PROBED` },
   ]);
   const listing = out[0]?.split('LISTING')[1] ?? '';
+  const uidSeen = /UID=(\d+)/.exec(out[0] ?? '')?.[1];
+  check(`the commands do not run as root${UID !== null ? ` (the agent uid ${UID})` : ''}`, uidSeen !== undefined && uidSeen !== '0' && (UID === null || uidSeen === String(UID)), out[0]);
   check('another user\'s project is invisible', !!out[0]?.includes('NO-NOTES') && !out[0].includes('SECRET-BOB') && /\balice\b/.test(listing) && !/\bbob\b/.test(listing), out[0]);
   check('OverLyX\'s database, codex\'s sign-in, the project\'s .git, /etc/shadow and the MCP token are out of reach', out[1] !== undefined && !/SECRET-(AUTH|GIT|TOKEN)|SQLite format/.test(out[1]) && !/root:/.test(out[1]), out[1]);
   check('the working copy is writable, its symlinks into the live project resolve, the live project is read only', out[2] !== undefined && out[2].includes('WROTE-COPY') && !out[2].includes('WROTE-LIVE') && out[2].includes('P   N   G') && fs.existsSync(path.join(copy, 'new.txt')) && !fs.existsSync(path.join(live, 'x.txt')), out[2]);
@@ -203,7 +219,7 @@ try {
   await start();
   // the panel reads the transcript first (opening the thread) — that must not load it without its sandbox
   await request('thread/read', { threadId: tid, includeTurns: true });
-  const box = threadSandbox({ project: 'alice/paper', key: KEY, cwd: copy, native: true });
+  const box = threadSandbox({ project: 'alice/paper', key: KEY, cwd: copy, native: true, userId: OWNER });
   const rs = await request('thread/resume', { threadId: tid, cwd: box.cwd, approvalPolicy: box.approvalPolicy, config: box.config });
   check('codex takes the thread\'s sandbox at thread/resume', settingsOk(rs), JSON.stringify({ approval: rs?.approvalPolicy, profile: rs?.activePermissionProfile }));
   const out2 = await turn(tid, copy, [{ cmd: `cat ${other}/notes.tex; echo again > new2.txt && echo WROTE-COPY` }]);

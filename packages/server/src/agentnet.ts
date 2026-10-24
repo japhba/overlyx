@@ -144,13 +144,14 @@ export function llmProxy(): express.Router {
 
 /* ------------------------------------------------------------------ the internal socket */
 
-export const agentNetDir = () => path.join(config.dataDir, 'agent-net');
+export const agentNetDir = () => path.join(config.agentDir, 'agent-net');
 export const agentNetSocket = () => path.join(agentNetDir(), 'overlyx.sock');
 
 /**
  * Serve the provider proxy and `mcp` (the /mcp router) on the internal socket; returns the server
  * (closed with the main one). The socket is replaced on every start: sandboxes bind its directory,
- * so the new one is what they reach after a restart.
+ * so the new one is what they reach after a restart. With agent users (agentusers.ts) every uid may
+ * connect — what it reaches needs a credential.
  */
 export function listenInternal(mcp: express.Router): http.Server {
   const app = express();
@@ -162,6 +163,9 @@ export function listenInternal(mcp: express.Router): http.Server {
   try { fs.unlinkSync(agentNetSocket()); } catch { /* none */ }
   const server = http.createServer(app);
   server.on('error', e => console.error('[agent-net] the internal socket failed:', e.message));
-  server.listen(agentNetSocket());
+  server.listen(agentNetSocket(), () => {
+    if (!config.agent.users) return;
+    try { fs.chmodSync(agentNetDir(), 0o755); fs.chmodSync(agentNetSocket(), 0o666); } catch (e) { console.error('[agent-net]', (e as Error).message); }
+  });
   return server;
 }

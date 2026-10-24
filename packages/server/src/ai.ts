@@ -13,8 +13,10 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import Anthropic from '@anthropic-ai/sdk';
 import { config } from './config.ts';
 import type { OpenDoc } from './docs.ts';
+import { keyOf, isAgentProvider, upstreamOf, PROVIDER_NAMES, type AgentProvider } from './agentkeys.ts';
 import { readerFor, writeDocumentText, cachedParseFile } from './texdoc.ts';
 import { parseTex, SETTINGS_PREFIX } from '@overlyx/core/tex/index.ts';
 import { paragraphsToPm, pmBlocksToParagraphs, collectMacros, type PMJSON, type LyxDocument } from '@overlyx/core';
@@ -53,6 +55,30 @@ export function pickModel(requested: unknown, fallback: string): string {
 }
 
 /**
+ * Where an inline AI request runs — the ⌘J picker offers the same choice as the Agent panel's
+ * (AgentModelPicker.tsx): the server's own OpenRouter key (`overlyx`, the models above), or one of
+ * the account's own providers (agentkeys.ts: the ChatGPT sign-in, an OpenAI, OpenRouter or
+ * Anthropic key). The client sends `provider:model`; a bare id is an OpenRouter id on the server's key.
+ */
+export type AiProvider = 'overlyx' | AgentProvider;
+export interface AiRoute { provider: AiProvider; model: string; userId?: number }
+export function pickRoute(requested: unknown, fallback: string, userId?: number): AiRoute {
+  const s = typeof requested === 'string' ? requested.trim() : '';
+  const i = s.indexOf(':');
+  const provider = s.slice(0, i);
+  if (i > 0 && (provider === 'overlyx' || isAgentProvider(provider))) {
+    const model = s.slice(i + 1);
+    if (provider === 'overlyx') return { provider, model: pickModel(model, fallback) };
+    if (userId === undefined || !/^[\w.:/-]{1,120}$/.test(model)) throw new AiError('That model cannot be used here.', 400);
+    if (provider !== 'chatgpt' && !keyOf(userId, provider)) throw new AiError(`There is no ${PROVIDER_NAMES[provider]} key on your account — add it from the model menu.`, 400);
+    return { provider, model, userId };
+  }
+  return { provider: 'overlyx', model: pickModel(s || undefined, fallback) };
+}
+/** A route needs the server's OpenRouter key. */
+export const usesServerKey = (r: AiRoute) => r.provider === 'overlyx';
+
+/**
  * Request adjustments some models need (applied by `chat` to whatever model is chosen, from the
  * dropdown or typed in): OpenAI's gpt-5* reject `temperature` and reason unless told not to;
  * Gemini 3.8 Flash skips its reasoning once the effort is low (measured: 0 reasoning tokens,
@@ -71,7 +97,7 @@ export function tuningFor(model: string): { reasoning?: { effort: 'minimal' | 'l
 /** a part of a message: text, or an image (a data: URL — the handwriting of the math keyboard's pen) */
 export type ChatPart = { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } };
 export interface ChatMessage { role: 'system' | 'user' | 'assistant'; content: string | ChatPart[] }
-export interface ChatOptions { model?: string; temperature?: number; maxTokens?: number; signal?: AbortSignal; title?: string }
+export interface ChatOptions { model?: string; temperature?: number; maxTokens?: number; signal?: AbortSignal; title?: string; /** the account's own provider instead of the server's key (pickRoute) */ route?: AiRoute }
 
 function messageText(content: unknown): string {
   if (typeof content === 'string') return content;
@@ -82,9 +108,10 @@ function messageText(content: unknown): string {
 /** One chat completion through OpenRouter; the assistant's text (may be empty). */
 export async function chat(messages: ChatMessage[], opts: ChatOptions = {}): Promise<string> {
   const t0 = Date.now();
-  const what = `${opts.title ?? 'OverLyX'} ${opts.model ?? config.ai.model}`;
+  const what = `${opts.title ?? 'OverLyX'} ${opts.route && opts.route.provider !== 'overlyx' ? `${opts.route.provider}:${opts.route.model}` : opts.route?.model ?? opts.model ?? config.ai.model}`;
   try {
-    const text = await chatRaw(messages, opts);
+    const r = opts.route;
+    const text = r && r.provider !== 'overlyx' ? await chatOwn(messages, r, opts) : await chatRaw(messages, r ? { ...opts, model: r.model } : opts);
     const chars = messages.reduce((n, m) => n + (typeof m.content === 'string' ? m.content.length : m.content.reduce((k, p) => k + (p.type === 'text' ? p.text.length : 0), 0)), 0);
     const images = messages.reduce((n, m) => n + (typeof m.content === 'string' ? 0 : m.content.filter(p => p.type === 'image_url').length), 0);
     console.log(`[ai] ${what}: ${Date.now() - t0} ms, ${chars} chars${images ? ` + ${images} image${images > 1 ? 's' : ''}` : ''} in, ${text.length} out`);
@@ -95,18 +122,18 @@ export async function chat(messages: ChatMessage[], opts: ChatOptions = {}): Pro
   }
 }
 
-async function chatRaw(messages: ChatMessage[], opts: ChatOptions): Promise<string> {
-  if (!config.openrouter.apiKey) throw new AiError('AI assistance is not configured on this server (OPENROUTER_API_KEY is unset).', 503);
+async function chatRaw(messages: ChatMessage[], opts: ChatOptions, key = config.openrouter.apiKey, api = config.openrouter.api): Promise<string> {
+  if (!key) throw new AiError('AI assistance is not configured on this server (OPENROUTER_API_KEY is unset).', 503);
   const model = opts.model ?? config.ai.model;
   const tuning = tuningFor(model);
   let res: Response;
   try {
-    res = await fetch(`${config.openrouter.api}/chat/completions`, {
+    res = await fetch(`${api}/chat/completions`, {
       method: 'POST',
       signal: opts.signal,
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${config.openrouter.apiKey}`,
+        Authorization: `Bearer ${key}`,
         'HTTP-Referer': config.publicUrl || 'https://overlyx.app',
         'X-Title': opts.title ?? 'OverLyX',
       },
@@ -129,6 +156,58 @@ async function chatRaw(messages: ChatMessage[], opts: ChatOptions): Promise<stri
   const json = await res.json().catch(() => null) as { choices?: { message?: { content?: unknown } }[]; error?: { message?: string } } | null;
   if (json?.error?.message) throw new AiError(`The AI request failed: ${json.error.message}`);
   return messageText(json?.choices?.[0]?.message?.content);
+}
+
+/** One request on the account's own provider (pickRoute): their OpenRouter or OpenAI key, Anthropic key, or the ChatGPT sign-in. */
+async function chatOwn(messages: ChatMessage[], r: AiRoute, opts: ChatOptions): Promise<string> {
+  const userId = r.userId!;
+  const system = messages.filter(m => m.role === 'system').map(m => messageText(m.content)).join('\n\n');
+  const rest = messages.filter(m => m.role !== 'system').map(m => ({ role: m.role as 'user' | 'assistant', content: messageText(m.content) }));
+  const keyFor = (p: 'openrouter' | 'openai' | 'anthropic') => { const k = keyOf(userId, p); if (!k) throw new AiError(`There is no ${PROVIDER_NAMES[p]} key on your account any more.`, 400); return k; };
+  const refused = (status: number | undefined, body: string) => (status === 401 || status === 403
+    ? new AiError(`${PROVIDER_NAMES[r.provider as AgentProvider]} refused your key — replace it from the model menu.`, 400)
+    : new AiError(`The AI request failed (${status ?? 'no answer'}): ${body.slice(0, 300)}`));
+  if (r.provider === 'openrouter') return chatRaw(messages, { ...opts, model: r.model }, keyFor('openrouter'), upstreamOf('openrouter') + '/v1');
+  if (r.provider === 'openai') {
+    // the Responses API: every current OpenAI model (codex's among them) takes it
+    let res: Response;
+    try {
+      res = await fetch(`${upstreamOf('openai')}/v1/responses`, {
+        method: 'POST', signal: opts.signal,
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${keyFor('openai')}` },
+        body: JSON.stringify({ model: r.model, instructions: system || undefined, input: rest, max_output_tokens: Math.max(opts.maxTokens ?? 2048, 1024) * 2, reasoning: { effort: 'low' }, store: false }),
+      });
+    } catch (e) {
+      if ((e as Error).name === 'AbortError') throw new AiError('cancelled', 499);
+      throw new AiError(`Could not reach OpenAI: ${(e as Error).message}`);
+    }
+    if (!res.ok) throw refused(res.status, await res.text().catch(() => ''));
+    const j = await res.json().catch(() => null) as { output?: { type?: string; content?: { type?: string; text?: string }[] }[] } | null;
+    return (j?.output ?? []).filter(o => o.type === 'message').flatMap(o => o.content ?? []).filter(c => c.type === 'output_text').map(c => c.text ?? '').join('');
+  }
+  if (r.provider === 'anthropic') {
+    const client = new Anthropic({ apiKey: keyFor('anthropic'), baseURL: upstreamOf('anthropic'), maxRetries: 1 });
+    try {
+      const msg = await client.messages.create({
+        model: r.model, max_tokens: Math.max(opts.maxTokens ?? 2048, 1024) * 4, system: system || undefined,
+        messages: rest.length ? rest : [{ role: 'user', content: '' }],
+        // a quick answer: little thinking (it cannot be turned off on the current models)
+        output_config: { effort: 'low' },
+      }, { signal: opts.signal });
+      if (msg.stop_reason === 'refusal') throw new AiError('The model declined this request.', 400);
+      return msg.content.filter(b => b.type === 'text').map(b => (b as { text: string }).text).join('');
+    } catch (e) {
+      if (e instanceof AiError) throw e;
+      if (e instanceof Anthropic.APIUserAbortError) throw new AiError('cancelled', 499);
+      if (e instanceof Anthropic.APIError) throw refused(e.status, e.message);
+      throw new AiError(`Could not reach Anthropic: ${(e as Error).message}`);
+    }
+  }
+  // the ChatGPT sign-in: a one-shot question to the account's codex (slower: a few seconds)
+  const { askCodex } = await import('./agent.ts');
+  const prompt = `${system}\n\n${rest.map(m => (m.role === 'assistant' ? `(Your earlier answer)\n${m.content}` : m.content)).join('\n\n')}\n\nPut your whole answer, exactly as it should be used, in "reply".`;
+  const out = await askCodex(userId, prompt, { type: 'object', properties: { reply: { type: 'string' } }, required: ['reply'], additionalProperties: false }, r.model);
+  try { return String((JSON.parse(out) as { reply?: unknown }).reply ?? ''); } catch { return out; }
 }
 
 /** Strips a markdown fence and stray quoting a model may put around a LaTeX reply. */
@@ -229,8 +308,10 @@ Rules:
 
 export interface RewriteRequest {
   instruction: string; content: PMJSON[]; layout?: string;
-  /** model chosen in the client's preferences (validated; the server default otherwise) */
+  /** model chosen in the client's picker: `provider:model` (pickRoute) or an OpenRouter id on the server's key (validated; the server default otherwise) */
   model?: string;
+  /** the account asking: its own providers may be chosen */
+  userId?: number;
   /** text of the paragraph before / after the cursor (locates the cursor in the document when nothing is selected) */
   before?: string; after?: string;
   math?: { latex: string; display: boolean; selection?: string };
@@ -252,7 +333,7 @@ function historySection(history: RewriteRequest['history']): string {
 export async function rewrite(doc: OpenDoc, req: RewriteRequest, signal?: AbortSignal): Promise<RewriteResult> {
   const instruction = req.instruction.trim();
   if (!instruction) throw new AiError('Say what to do with the passage.', 400);
-  const model = pickModel(req.model, config.ai.model);
+  const route = pickRoute(req.model, config.ai.model, req.userId);
   const docText = await doc.textAsync();
   const macros = macroLines(doc);
   if (req.source) {
@@ -265,14 +346,14 @@ export async function rewrite(doc: OpenDoc, req: RewriteRequest, signal?: AbortS
     }
     const what = sel.trim() ? `## The selected source to replace\n\`\`\`latex\n${sel.slice(0, 12000)}\n\`\`\`` : `## Nothing is selected — write new source for the cursor, marked ${CURSOR}`;
     const user = `## Document (.tex source, for context; the selection is marked ${SEL_OPEN} … ${SEL_CLOSE} when present)\n${context}\n\n## Macros known to the document\n${macros.join('\n') || '(none)'}\n\n${what}${historySection(req.history)}\n\n## Instruction\n${instruction}\n\nReply with the raw LaTeX replacement only — it goes verbatim into the .tex file (no fences, no commentary, no \\documentclass unless the selection contained one).`;
-    const reply = cleanReply(await chat([{ role: 'system', content: REWRITE_SYSTEM }, { role: 'user', content: user }], { model, signal, title: 'OverLyX rewrite' }));
+    const reply = cleanReply(await chat([{ role: 'system', content: REWRITE_SYSTEM }, { role: 'user', content: user }], { route, signal, title: 'OverLyX rewrite' }));
     return { tex: reply, nodes: [], original: sel };
   }
   if (req.math) {
     const original = req.math.selection ?? req.math.latex;
     const context = documentContext(docText, req.math.latex, 60000);
     const user = `## Document (for context)\n${context}\n\n## Macros known to the document\n${macros.join('\n') || '(none)'}\n\n## The formula being edited (${req.math.display ? 'display' : 'inline'} math)\n${req.math.latex}\n\n## Part of it to replace\n${original}${historySection(req.history)}\n\n## Instruction\n${instruction}\n\nReply with LaTeX math only (no $ or \\[ delimiters, no environment unless the part to replace contains one), the replacement for the part.`;
-    const reply = cleanReply(await chat([{ role: 'system', content: REWRITE_SYSTEM }, { role: 'user', content: user }], { model, signal, title: 'OverLyX rewrite' }));
+    const reply = cleanReply(await chat([{ role: 'system', content: REWRITE_SYSTEM }, { role: 'user', content: user }], { route, signal, title: 'OverLyX rewrite' }));
     return { tex: reply.replace(/^\$+|\$+$/g, '').trim(), nodes: [], original };
   }
   const original = selectionToTex(doc, req.content, req.layout);
@@ -283,7 +364,7 @@ export async function rewrite(doc: OpenDoc, req: RewriteRequest, signal?: AbortS
     if (loc) context = documentContext(docText.slice(0, loc.end) + CURSOR + docText.slice(loc.end), CURSOR, 160000, false);
   }
   const user = `## Document (for context; the passage to replace is marked)\n${context}\n\n## Macros known to the document\n${macros.join('\n') || '(none)'}\n\n## Passage to replace\n${original || '(empty — insert new text at the cursor)'}${historySection(req.history)}\n\n## Instruction\n${instruction}\n\nReply with the replacement for the passage only.`;
-  const reply = cleanReply(await chat([{ role: 'system', content: REWRITE_SYSTEM }, { role: 'user', content: user }], { model, signal, title: 'OverLyX rewrite' }));
+  const reply = cleanReply(await chat([{ role: 'system', content: REWRITE_SYSTEM }, { role: 'user', content: user }], { route, signal, title: 'OverLyX rewrite' }));
   let nodes: PMJSON[] = [];
   try { nodes = texToPm(doc, reply); } catch (e) { throw new AiError(`The reply could not be parsed as LaTeX: ${(e as Error).message}`); }
   return { tex: reply, nodes, original };

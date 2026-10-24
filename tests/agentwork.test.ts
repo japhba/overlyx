@@ -14,6 +14,7 @@ const PROJ = join(ROOT, 'projects', 'owner', 'cv');
 mkdirSync(join(PROJ, 'figs'), { recursive: true });
 process.env.OVERLYX_DATA_DIR = join(ROOT, 'data');
 process.env.OVERLYX_PROJECTS_DIR = join(ROOT, 'projects');
+process.env.OVERLYX_AGENT_USERS = 'off';   // (symlinked copies, as the server's own user: tests/agentwork-links.test.ts has the agent uids' hard links)
 
 const { prepareWorkspace, syncWorkspace, workspaceDir } = await import('../packages/server/src/agentwork.ts');
 const { manager } = await import('../packages/server/src/docs.ts');

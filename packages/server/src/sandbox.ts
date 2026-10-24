@@ -114,7 +114,7 @@ function prlimit(): string | null {
 
 let scopes: boolean | null = null;
 /** Whether commands can get a cgroup of their own (root under systemd: `systemd-run --scope`), tried once. */
-function scopesAvailable(): boolean {
+export function scopesAvailable(): boolean {
   if (scopes === null) {
     scopes = false;
     if (process.getuid?.() === 0 && fs.existsSync('/run/systemd/system') && process.env.OVERLYX_BUILD_CGROUP !== '0') {
@@ -141,9 +141,10 @@ export function sandboxed(cmd: string, args: string[], spec: SandboxSpec): Sandb
  * Claude engine, scripts/claude-app-server.mjs: it adds the environment and the command it runs):
  * the commands in front of bwrap (limits, cgroup) and bwrap's own options, without the `--` that
  * ends them. `hide`: directories inside bound ones that the sandbox must not see (an empty
- * read-only tmpfs over each). Throws without a sandbox.
+ * read-only tmpfs over each). `unprivileged`: bwrap is started by an unprivileged user (an agent's
+ * uid, agentusers.ts) — the full unshare, and no cgroup here (its keeper has one). Throws without a sandbox.
  */
-export function sandboxParts(spec: SandboxSpec & { hide?: string[] }): { pre: string[]; bwrap: string[] } {
+export function sandboxParts(spec: SandboxSpec & { hide?: string[]; unprivileged?: boolean }): { pre: string[]; bwrap: string[] } {
   if (!sandboxAvailable()) throw new Error('bubblewrap is not available: nothing runs unsandboxed here');
   const home = spec.home === false ? '/tmp/home' : spec.home ?? sandboxHome();
   const b: string[] = [];
@@ -157,7 +158,7 @@ export function sandboxParts(spec: SandboxSpec & { hide?: string[] }): { pre: st
   // As root, a user namespace would hide the capabilities that read files owned by other users
   // (projects synced from elsewhere often are): skip the user namespace and drop every capability
   // except reading; unprivileged servers get the full unshare (they need the user namespace).
-  if (process.getuid?.() === 0) b.push('--unshare-pid', '--unshare-net', '--unshare-ipc', '--unshare-uts', '--unshare-cgroup-try', '--cap-drop', 'ALL', '--cap-add', 'CAP_DAC_READ_SEARCH');
+  if (process.getuid?.() === 0 && !spec.unprivileged) b.push('--unshare-pid', '--unshare-net', '--unshare-ipc', '--unshare-uts', '--unshare-cgroup-try', '--cap-drop', 'ALL', '--cap-add', 'CAP_DAC_READ_SEARCH');
   else b.push('--unshare-all');
   b.push('--die-with-parent', '--new-session', '--chdir', spec.cwd);
   b.push('--clearenv', '--setenv', 'PATH', '/usr/local/bin:/usr/bin:/bin', '--setenv', 'LANG', 'C.UTF-8', '--setenv', 'HOME', home, '--setenv', 'TMPDIR', '/tmp');
@@ -165,7 +166,7 @@ export function sandboxParts(spec: SandboxSpec & { hide?: string[] }): { pre: st
   // limits that hold inside the sandbox too: no file over MAX_FILE_BYTES, no core dumps; a project's
   // build in a cgroup of its own (systemd-run --scope runs the command itself: same process, same group)
   const pre: string[] = [];
-  if (spec.cgroup && scopesAvailable()) pre.push('systemd-run', '--scope', '--quiet', '--collect', '-p', `MemoryMax=${spec.cgroup.memoryMB}M`, '-p', 'MemorySwapMax=0', '-p', `TasksMax=${spec.cgroup.tasks}`, '--');
+  if (spec.cgroup && !spec.unprivileged && scopesAvailable()) pre.push('systemd-run', '--scope', '--quiet', '--collect', '-p', `MemoryMax=${spec.cgroup.memoryMB}M`, '-p', 'MemorySwapMax=0', '-p', `TasksMax=${spec.cgroup.tasks}`, '--');
   const pl = prlimit();
   if (pl) pre.push(pl, `--fsize=${MAX_FILE_BYTES}`, '--core=0', '--');
   return { pre, bwrap: b };

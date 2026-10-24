@@ -22,6 +22,8 @@ writeFileSync(join(ROOT, 'projects', 'owner', 'p', 'paper.tex'), '\\documentclas
 process.env.OVERLYX_DATA_DIR = join(ROOT, 'data');
 process.env.OVERLYX_PROJECTS_DIR = join(ROOT, 'projects');
 process.env.OVERLYX_CODEX_BIN = resolve(process.cwd(), 'scripts/codex-stub.mjs');
+// (the stand-in engines run as the server's own user — tests/agent-sandbox.test.ts runs the real ones as agent uids under root)
+process.env.OVERLYX_AGENT_USERS = 'off';
 process.env.STUB_LOGIN_DELAY = '120';
 process.env.STUB_DELAY = '60';
 

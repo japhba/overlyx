@@ -11,6 +11,9 @@
  * between a check and a use changes nothing. `root` itself must be a directory nothing untrusted
  * can replace (the build directory and the working copy are mount points / roots of their sandbox;
  * their parents are the server's own). Elsewhere (macOS, for tests) the same checks run on paths.
+ *
+ * What is made below `root` belongs to `root`'s owner: a working copy is its agent's uid's
+ * (agentusers.ts), so the files the server mirrors in stay the agent's to edit.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -25,6 +28,13 @@ const at = (d: Dir, name: string) => PROC_FD ? `${PROC_FD}/${d.fd}/${name}` : pa
 const self = (d: Dir) => PROC_FD ? `${PROC_FD}/${d.fd}` : d.path;
 const code = (e: unknown) => (e as NodeJS.ErrnoException).code;
 
+/** Who new entries below `root` belong to: its owner, when the server (root) works in someone else's directory; null otherwise. */
+function ownerOf(root: string): { uid: number; gid: number } | null {
+  if (process.getuid?.() !== 0) return null;
+  try { const st = fs.statSync(root); return st.uid === 0 ? null : { uid: st.uid, gid: st.gid }; } catch { return null; }
+}
+const give = (file: string, owner: { uid: number; gid: number } | null) => { if (owner) fs.lchownSync(file, owner.uid, owner.gid); };
+
 function parts(rel: string): string[] {
   const p = rel.split(/[\\/]+/).filter(s => s && s !== '.');
   if (p.some(s => s === '..')) throw new Error(`path leaves its directory: ${rel}`);
@@ -38,6 +48,7 @@ function parts(rel: string): string[] {
  */
 function openDir(root: string, dirs: string[], create: boolean): Dir {
   let d: Dir = { fd: fs.openSync(root, O_RDONLY | O_DIRECTORY), path: root };
+  const owner = create ? ownerOf(root) : null;
   try {
     for (const name of dirs) {
       let fd: number;
@@ -46,7 +57,7 @@ function openDir(root: string, dirs: string[], create: boolean): Dir {
         const c = code(e);
         if (!create || (c !== 'ENOENT' && c !== 'ELOOP' && c !== 'ENOTDIR')) throw e;
         if (c !== 'ENOENT') removeAt(d, name);
-        try { fs.mkdirSync(at(d, name)); } catch (e2) { if (code(e2) !== 'EEXIST') throw e2; }
+        try { fs.mkdirSync(at(d, name)); give(at(d, name), owner); } catch (e2) { if (code(e2) !== 'EEXIST') throw e2; }
         fd = fs.openSync(at(d, name), O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
       }
       fs.closeSync(d.fd);
@@ -130,6 +141,8 @@ export function writeFileIn(root: string, rel: string, data: string | Buffer, op
     removeAt(d, tmp);
     const fd = fs.openSync(at(d, tmp), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o644);
     try {
+      const owner = ownerOf(root);
+      if (owner) fs.fchownSync(fd, owner.uid, owner.gid);
       fs.writeFileSync(fd, data);
       if (opts.mtime) fs.futimesSync(fd, opts.mtime, opts.mtime);
     } finally { fs.closeSync(fd); }
@@ -145,6 +158,16 @@ export function symlinkIn(root: string, rel: string, target: string): void {
   inParent(root, rel, true, (d, name) => {
     removeAt(d, name);
     fs.symlinkSync(target, at(d, name));
+    give(at(d, name), ownerOf(root));
+  });
+}
+
+/** Make `rel` below `root` a hard link to the file `target` (the same file: its owner and permissions), replacing what is there. Throws where that is not possible (another filesystem). */
+export function linkIn(root: string, rel: string, target: string): void {
+  fs.mkdirSync(root, { recursive: true });
+  inParent(root, rel, true, (d, name) => {
+    removeAt(d, name);
+    fs.linkSync(target, at(d, name));
   });
 }
 

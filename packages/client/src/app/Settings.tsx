@@ -28,6 +28,7 @@ import { formatShortcut } from './shortcuts';
 import { setThemePref, useTheme, DARK_TONES, type ThemePref } from './theme';
 import { REWRITE_KEY } from '../editor/ai/rewrite';
 import { Dialog, uiAlert } from './Dialogs';
+import { InlineModelPicker } from './AgentModelPicker';
 import { AUTO_BUILD_CHOICES, AUTO_BUILD_DELAYS } from './pdfstatus';
 import { EDITOR_FACES, MATH_FONTS, FOLLOW_DOCUMENT, MATCH_TEXT, GOOGLE_FACE, editorFace, mathFont } from '../fonts/catalog';
 import { resolvedFace, resolvedMath } from '../fonts/editorfont';
@@ -221,7 +222,11 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
             <Row label="Pause before suggesting"><input type="number" min={80} max={5000} step={20} value={p.aiCompleteDelay} onInput={e => setPref('aiCompleteDelay', Math.max(80, Number((e.target as HTMLInputElement).value) || 200))} style="max-width:90px" /> ms</Row>
             <h3>Models</h3>
             <div class="sub">Any OpenRouter model id works; the notes are from measurements on a real paper. The choice is kept in this browser.</div>
-            <ModelPicker label={`Rewrite (${REWRITE_KEY})`} value={p.aiModel} fallback={ai?.model ?? ''} models={ai?.models ?? []} onChange={v => setPref('aiModel', v)} pref="aiModel" />
+            {/* the rewrite's picker is the ⌘J prompt's and the Agent panel's: the server's models, then your own providers */}
+            <div class="row model-row" data-pref="aiModel">
+              <label>{`Rewrite (${REWRITE_KEY})`}</label>
+              <div style="flex:1;display:flex;flex-direction:column;gap:4px"><InlineModelPicker server={ai ?? null} value={p.aiModel} onChange={v => setPref('aiModel', v)} placement="down" /></div>
+            </div>
             <ModelPicker label="Autocomplete" value={p.aiCompletionModel} fallback={ai?.completionModel ?? ''} models={ai?.models ?? []} onChange={v => setPref('aiCompletionModel', v)} pref="aiCompletionModel" />
             <div class="sub">What is sent: your instruction or the text around the cursor together with the document’s LaTeX source (so the model knows the notation, macros, citation keys) goes to the model through the OverLyX server. Nothing is written to the document without your Tab or Accept. The switches are also in the Tools menu, so the command palette finds them.</div>
           </>}

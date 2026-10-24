@@ -2223,13 +2223,16 @@ blend.
   composer says so. **The Claude engine's sandbox** (`claudeTurnSandbox`, sent with every turn as
   `overlyxSandbox`; a turn without it is refused): bwrap from `sandbox.ts sandboxParts` — the system's
   files (not all of /etc), the working copy and Claude Code's own directory (its session files)
-  writable, the live project read only with its `.git` hidden, the thread's scratch HOME, no network,
-  a cgroup of its own; `scripts/claude-sandbox-entry.mjs` inside forwards 127.0.0.1:8765 to the
+  writable, the thread's scratch HOME, no network; as the server's own user also the live project
+  read only (its `.git` hidden) and a cgroup of its own — as an agent uid (see "Accounts on the
+  server") the engine starts bwrap unprivileged, the copy hard-links the project's files and the
+  keeper's scope is the cgroup; `scripts/claude-sandbox-entry.mjs` inside forwards 127.0.0.1:8765 to the
   internal socket `data/agent-net/overlyx.sock` (its directory bound read only), the only way out.
   No filesystem settings are loaded (no project CLAUDE.md, hooks, skills or .mcp.json) and only
   Bash, Read, Edit, Write, Glob, Grep, NotebookEdit, WebSearch, Task and TodoWrite exist.
   `scripts/claude-sandbox-check.mts` runs the real engine against a stand-in Anthropic API and checks
-  all of this (`tests/agent-sandbox.test.ts`); `tests/agent-providers.test.ts` the keys, the picker,
+  all of this (`tests/agent-sandbox.test.ts`; both checks, run as root — the server's autodeploy, the
+  nightly codex update — run the engine as an agent uid and check that commands are not root); `tests/agent-providers.test.ts` the keys, the picker,
   the proxy's rules and a Claude turn through the routes. `OVERLYX_AGENT_CLAUDE=off` leaves the
   Anthropic provider out (so does a server without bwrap); `OVERLYX_LLM_UPSTREAM_<PROVIDER>` points
   a provider at a stand-in. A keeper started on another engine version (codex's, or the Claude
@@ -2334,7 +2337,14 @@ blend.
   Preferences — the switches are menu items, so the command palette finds them): needs
   `OPENROUTER_API_KEY` on the server (the same key as "Escalate to AI"); Gemini 3.1 Flash Lite rewrites,
   Gemini 2.5 Flash Lite completes (`OVERLYX_AI_MODEL`, `OVERLYX_AI_COMPLETION_MODEL`). The ⌘J
-  panel has its own model picker (kept as the rewrite preference), accepts follow-up instructions that
+  panel's model picker (kept as the rewrite preference; also in Settings ▸ AI) is the Agent panel's
+  (`app/AgentModelPicker.tsx InlineModelPicker`): the server's own models first (OverLyX, included,
+  on its OpenRouter key), then the account's providers — the ChatGPT sign-in (a one-shot codex
+  question, slower), its OpenAI, Anthropic or OpenRouter key — and the ones not connected yet in
+  italics. The choice is sent as `provider:model` (`ai.ts pickRoute`; a bare id is an OpenRouter id
+  on the server's key) and the request goes to that provider with the account's key (`chatOwn`);
+  ⌘J works without the server's key when the account has a provider of its own. Autocomplete,
+  handwriting and repairs stay on the server's models. The ⌘J panel accepts follow-up instructions that
   refine the shown proposal (Enter with an empty box accepts), and also works in the source view
   (⌘J over selected raw LaTeX proposes raw source; accepting splices it and the live apply carries
   it into the document). Autocorrect (Tools ▸ Autocorrect typos, on by default): a minor typo is
@@ -2764,6 +2774,18 @@ root, and none can read other users' projects:
   and their projects under stable pseudonyms (`u-…/p-…`, keyed by `data/telemetry-pseudonyms.key`). Its
   SSH sessions get no forwarded agent (an sshd `Match` block), so the owner's laptop key can't be
   used from it to log in as root.
+- **Agent uids** (`agentusers.ts`, no setup needed): the Agent panel's agents never run as root. Each
+  account's engine — codex or the Claude engine, its keeper and everything they run — runs as uid
+  2100000 + the account's id (its own gid, no supplementary groups, no `/etc/passwd` entry), started
+  through `setpriv` in a systemd scope of its own (3 GB, 2048 tasks). Its files live beside the
+  projects in `/mnt/HC_Volume_107166861/agents` (`config.agentDir`; moved there from the data
+  directory once, `.owned` marks that they were handed over): `agent-home/<id>`, the working copies
+  `agent-work/<thread>` and `agent-scratch/<key>`, each 0700 and the uid's; the server's manifests,
+  bases and checkpoints beside the copies stay root's (0600/0700); `agent-runtime/` holds copies of
+  the keeper, the Claude engine and the Agent SDK the uids can read (the checkout is in /root). The
+  projects directory stays root's alone: a working copy hard-links the project's files it does not
+  edit (same volume; a copy where a file is not world-readable), so an agent never reaches a
+  project. `OVERLYX_AGENT_USERS=off` runs them as the server's user (tests with stand-in engines).
 - `overlyx-maint` — the maintenance worker (above): its own checkout, state and inbox; systemd hides
   `/root`, `/home`, `/mnt` and other accounts' processes from it besides.
 

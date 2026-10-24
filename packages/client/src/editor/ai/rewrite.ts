@@ -13,7 +13,9 @@ import { Plugin, PluginKey, TextSelection, NodeSelection, type Transaction } fro
 import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
 import { Fragment, Slice } from 'prosemirror-model';
 import { schema } from '@overlyx/core';
+import { h, render } from 'preact';
 import { api, type PMJSON } from '../../api';
+import { InlineModelPicker, inlineModelLabel, ownInlineAi } from '../../app/AgentModelPicker';
 import { getPrefs, setPref } from '../../prefs';
 import { editorContext, viewDocId } from '../context';
 import { currentParagraph } from '../commands';
@@ -72,6 +74,8 @@ class RewritePanel {
   /** follow-ups: the proposals so far (a new instruction refines the last one) */
   private history: { instruction: string; tex: string }[] = [];
   private host: HTMLElement;
+  /** where the model picker (preact) is rendered */
+  private picker!: HTMLElement;
 
   constructor(private target: Target, anchor: DOMRect) {
     const view = target.kind === 'source' ? null : target.view;
@@ -81,7 +85,7 @@ class RewritePanel {
     this.dom.dataset.aiPanel = target.kind;
     this.dom.innerHTML = `
       <div class="ai-row">
-        <select class="ai-model" title="Model for this rewrite (kept as your rewrite model)"></select>
+        <span class="ai-model" title="Model for this rewrite (kept as your rewrite model)"></span>
         <textarea class="ai-input" rows="1" placeholder="${target.kind === 'math' ? 'What to do with the formula… (Enter to ask)' : target.from === target.to ? 'What to write here… (Enter to ask)' : 'What to do with the selection… (Enter to ask)'}"></textarea>
         <button type="button" class="ai-close" title="Close (Esc)">✕</button>
       </div>
@@ -94,19 +98,12 @@ class RewritePanel {
         <button type="button" class="btn ai-copy" data-ai-copy title="Copy the proposal's LaTeX to the clipboard">Copy</button>
       </div>`;
     this.input = this.dom.querySelector('.ai-input')!;
-    // the model for this rewrite: the server's default or one of its offered models (kept in the prefs)
-    const sel = this.dom.querySelector('.ai-model') as HTMLSelectElement;
-    const models = editorContext.ai?.models ?? [];
-    const fallback = editorContext.ai?.model ?? '';
-    // each entry: name — AA intelligence index (artificialanalysis.ai) · measured response time
-    const optText = (m: { label: string; aa?: number; speed: string }) => `${m.label} — AA ${m.aa ?? '?'} · ${m.speed}`;
-    const fb = models.find(m => m.id === fallback);
-    sel.append(Object.assign(new Option(fb ? optText(fb) : (fallback || 'default'), ''), { title: fb?.note ?? '' }));
-    for (const m of models) sel.append(Object.assign(new Option(optText(m), m.id), { title: m.note }));
-    const pref = getPrefs().aiModel;
-    if (pref && !models.some(m => m.id === pref)) sel.append(new Option(pref, pref));
-    sel.value = pref && [...sel.options].some(o => o.value === pref) ? pref : '';
-    sel.addEventListener('change', () => setPref('aiModel', sel.value));
+    // the model for this rewrite (kept in the prefs): the Agent panel's picker — the server's own
+    // models first (each with its AA intelligence index and measured response time), then the
+    // account's providers (app/AgentModelPicker.tsx)
+    this.picker = this.dom.querySelector('.ai-model') as HTMLElement;
+    const pick = () => render(h(InlineModelPicker, { server: editorContext.ai ?? null, value: getPrefs().aiModel, placement: 'down', onChange: (k: string) => { setPref('aiModel', k); pick(); } }), this.picker);
+    pick();
     this.status = this.dom.querySelector('.ai-status')!;
     this.preview = this.dom.querySelector('.ai-preview')!;
     this.actions = this.dom.querySelector('.ai-actions')!;
@@ -126,7 +123,7 @@ class RewritePanel {
       ev.stopPropagation();
       if (ev.key === 'Escape') { ev.preventDefault(); this.close(); return; }
       if (ev.key === 'Enter' && !ev.shiftKey) {
-        if ((ev.target as HTMLElement).tagName === 'SELECT') return;   // Enter in the model picker confirms the choice, not the prompt
+        if ((ev.target as HTMLElement).tagName === 'SELECT' || (ev.target as HTMLElement).closest('.agent-mp')) return;   // Enter in the model picker picks, it does not ask
         ev.preventDefault();
         // a proposal is on show: Enter with an empty box accepts it, typed text is a follow-up
         if (this.result && !this.input.value.trim()) this.accept();
@@ -187,7 +184,7 @@ class RewritePanel {
     const ac = this.ctrl = new AbortController();
     // the busy status names the model and counts the seconds (a thinking model can take 10 s+)
     const modelId = getPrefs().aiModel || editorContext.ai?.model || '';
-    const label = editorContext.ai?.models.find(m => m.id === modelId)?.label ?? (modelId || 'the model');
+    const label = inlineModelLabel(modelId) ?? editorContext.ai?.models.find(m => m.id === modelId)?.label ?? (modelId.replace(/^\w+:/, '') || 'the model');
     const t0 = Date.now();
     this.setStatus(`Asking ${label}…`, 'busy');
     const tick = window.setInterval(() => { if (this.ctrl === ac) this.setStatus(`Asking ${label}… ${Math.round((Date.now() - t0) / 1000)} s`, 'busy'); }, 1000);
@@ -296,6 +293,7 @@ class RewritePanel {
   close(clear = true) {
     this.ctrl?.abort();
     if (clear && this.target.kind === 'text') { const v = this.target.view; if (aiRewriteKey.getState(v.state)?.preview) v.dispatch(v.state.tr.setMeta(aiRewriteKey, 'clear')); }
+    render(null, this.picker);
     this.dom.remove();
     if (panel === this) panel = null;
     if (this.target.kind === 'text') this.target.view.focus(); else if (this.target.kind === 'math') this.target.field.focus(); else this.target.textarea.focus();
@@ -313,7 +311,12 @@ function notConfigured(): void {
 
 /** Open the rewrite prompt for the editor's selection (a selected formula node counts as math). */
 export function openRewrite(view: EditorView): boolean {
-  if (!editorContext.ai?.available) { notConfigured(); return true; }
+  // without the server's own key, the account's providers (the model menu's) can still rewrite
+  if (!editorContext.ai?.available) { void ownInlineAi().then(own => (own ? openRewriteOwn(view) : notConfigured())); return true; }
+  return openRewriteOwn(view);
+}
+
+function openRewriteOwn(view: EditorView): boolean {
   closeRewrite();
   // a cursor moved by the browser a moment ago (End, a click) may not be in the state yet
   try { (view as any).domObserver?.flush(); } catch { /* ignore */ }

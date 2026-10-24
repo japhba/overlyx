@@ -22,6 +22,8 @@ writeFileSync(join(ROOT, 'projects', 'owner', 'p', 'paper.tex'), '\\documentclas
 process.env.OVERLYX_DATA_DIR = join(ROOT, 'data');
 process.env.OVERLYX_PROJECTS_DIR = join(ROOT, 'projects');
 process.env.OVERLYX_CODEX_BIN = resolve(process.cwd(), 'scripts/codex-stub.mjs');
+// (the stand-in engines run as the server's own user — tests/agent-sandbox.test.ts runs the real ones as agent uids under root)
+process.env.OVERLYX_AGENT_USERS = 'off';
 
 /* the providers' stand-in: keys are checked, models listed, model requests echo the credential they arrived with */
 const seen: { path: string; auth: string; key: string }[] = [];
@@ -62,7 +64,8 @@ const upstream = http.createServer((req, res) => {
       res.end();
       return;
     }
-    if (req.url?.includes('/v1/responses')) return json(200, { echo: { auth, body: JSON.parse(body || '{}') } });
+    if (req.url?.includes('/v1/responses')) return json(200, { echo: { auth, body: JSON.parse(body || '{}') }, output: [{ type: 'message', content: [{ type: 'output_text', text: `oa:${JSON.parse(body || '{}').model}` }] }] });
+    if (req.url?.includes('/v1/chat/completions')) return json(200, { choices: [{ message: { content: `or:${JSON.parse(body || '{}').model}:${auth}` } }] });
     json(404, {});
   });
 });
@@ -78,6 +81,8 @@ const { createUser } = await import('../packages/server/src/auth.ts');
 const { registerProject } = await import('../packages/server/src/access.ts');
 const { createMcpToken } = await import('../packages/server/src/mcpTokens.ts');
 const { db } = await import('../packages/server/src/db.ts');
+const { chat, pickRoute } = await import('../packages/server/src/ai.ts');
+const { setKey } = await import('../packages/server/src/agentkeys.ts');
 
 const owner = createUser('owner', 'Owner', 'pw');
 const other = createUser('olga', 'Olga', 'pw');
@@ -198,6 +203,27 @@ describe('the provider proxy', () => {
   });
 });
 
+describe('the inline AI on the account\'s own providers (the ⌘J picker)', () => {
+  it('reads the picker\'s choice: the server\'s key for bare ids, the account\'s providers by prefix', () => {
+    expect(pickRoute('google/gemini-9', 'x/default', owner.id)).toEqual({ provider: 'overlyx', model: 'google/gemini-9' });
+    expect(pickRoute('overlyx:google/gemini-9', 'x/default', owner.id)).toEqual({ provider: 'overlyx', model: 'google/gemini-9' });
+    expect(pickRoute(undefined, 'x/default', owner.id)).toEqual({ provider: 'overlyx', model: 'x/default' });
+    expect(pickRoute('openrouter:anthropic/claude-sonnet-9', 'x/default', owner.id)).toMatchObject({ provider: 'openrouter', model: 'anthropic/claude-sonnet-9' });
+    expect(() => pickRoute('anthropic:claude-x', 'x/default', other.id)).toThrow(/no Anthropic API key/);
+  });
+
+  it('asks the chosen provider with the account\'s key', async () => {
+    await setKey(other.id, 'anthropic', 'sk-ant-good-olga');
+    await setKey(other.id, 'openrouter', 'sk-or-good-olga');
+    await setKey(other.id, 'openai', 'sk-good-olga');
+    const ask = (model: string) => chat([{ role: 'system', content: 'be brief' }, { role: 'user', content: 'hi' }], { route: pickRoute(model, 'x/default', other.id) });
+    expect(await ask('anthropic:claude-test-9')).toBe('ok');
+    expect(await ask('openrouter:google/gemini-9-pro')).toBe('or:google/gemini-9-pro:Bearer sk-or-good-olga');
+    expect(await ask('openai:gpt-9')).toBe('oa:gpt-9');
+    expect(seen.some(s => s.path.startsWith('POST /anthropic/v1/messages') && s.key === 'sk-ant-good-olga')).toBe(true);
+  });
+});
+
 const claudeInstalled = (() => {
   try { execFileSync('bwrap', ['--version'], { stdio: 'ignore' }); } catch { return false; }
   return existsSync(resolve(process.cwd(), 'node_modules/@anthropic-ai/claude-agent-sdk/package.json'));
@@ -216,6 +242,7 @@ describe.skipIf(!claudeInstalled)('a Claude engine thread on the Anthropic key',
     const reader = res.body!.getReader();
     const dec = new TextDecoder();
     await sleep(150);
+    const seenBefore = seen.length;
     const turn = await call('POST', `/projects/owner%2Fp/agent/threads/${tid}/turn`, { text: 'say hello', clientMessageId: 'local-c1' });
     expect(turn.status).toBe(200);
     let text = '', buf = '';
@@ -233,7 +260,9 @@ describe.skipIf(!claudeInstalled)('a Claude engine thread on the Anthropic key',
     expect(evs.find(e => e.method === 'item/completed' && e.params.item?.type === 'userMessage')?.params.item.clientId).toBe('local-c1');
     expect(evs.find(e => e.method === 'turn/completed')?.params.turn.status).toBe('completed');
     // the model saw the account's key — the engine only its internal credential
-    expect(seen.filter(s => s.path.startsWith('POST /anthropic/v1/messages')).every(s => s.key === 'sk-ant-good-9999')).toBe(true);
+    const turnRequests = seen.slice(seenBefore).filter(s => s.path.startsWith('POST /anthropic/v1/messages'));
+    expect(turnRequests.length).toBeGreaterThan(0);
+    expect(turnRequests.every(s => s.key === 'sk-ant-good-9999')).toBe(true);
     expect(mcpSeen.length).toBeGreaterThan(0);
     const read = await call('GET', `/projects/owner%2Fp/agent/threads/${tid}`);
     expect(read.body.provider).toBe('anthropic');

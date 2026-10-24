@@ -50,6 +50,7 @@ import { Outline, buildOutline, type OutlineItem } from './Outline';
 import { Comments } from './Comments';
 import { Versions } from './Versions';
 import { AgentPanel, askAgentAbout } from './AgentPanel';
+import { inlineModelLabel } from './AgentModelPicker';
 import { PdfPanel, stateFromBuild, jobActive, EMPTY_PDF, type PdfState } from './PdfPanel';
 import { Ruler, NOTE_SCALE_DEFAULT, NOTE_SCALE_MIN, NOTE_SCALE_MAX, MIN_WIDTH, MAX_WIDTH } from './Ruler';
 import { useNotesPane, useNotesFold, NotesSash, NotesUnfoldTab, NotesResolved } from './notespane';
@@ -1501,7 +1502,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       { label: 'Shortcut tips after mouse actions', checked: prefs.shortcutTips, action: () => setPref('shortcutTips', !prefs.shortcutTips) },
       { sep: true },
       { label: 'AI assistance ▸', sub: [
-        { label: ai === null ? 'Checking the server…' : ai.available ? `Models: ${prefs.aiModel || ai.model} (${REWRITE_KEY}) · ${prefs.aiCompletionModel || ai.completionModel} (autocomplete)` : 'Not configured on this server (OPENROUTER_API_KEY)', disabled: true },
+        { label: ai === null ? 'Checking the server…' : ai.available ? `Models: ${(prefs.aiModel && inlineModelLabel(prefs.aiModel)) || prefs.aiModel || ai.model} (${REWRITE_KEY}) · ${prefs.aiCompletionModel || ai.completionModel} (autocomplete)` : 'Not configured on this server (OPENROUTER_API_KEY)', disabled: true },
         { label: 'Choose the models… (Settings)', action: () => setDialog({ name: 'preferences', arg: 'ai' }) },
         { label: 'Show the ✦ button on the toolbar (autocomplete on/off)', checked: prefs.aiButton, action: () => setPref('aiButton', !prefs.aiButton) },
         { sep: true },
