@@ -1,0 +1,15 @@
+# Is the off-site backup still good? (scripts/backup-check.sh: restic check on a sample of the data,
+# the newest snapshot's age, a test restore of the database and one project into scratch.)
+[Unit]
+Description=OverLyX off-site backup: restore check
+After=network-online.target
+Wants=network-online.target
+RequiresMountsFor=/mnt/HC_Volume_107166861
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/overlyx/backup-offsite.env
+ExecStart=/bin/bash /root/lyx/overlyx-production/scripts/backup-check.sh
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=3h

@@ -1,6 +1,8 @@
 #!/bin/bash
 # Restore a backup made by scripts/backup.sh (<backups>/<timestamp>/{overlyx.sqlite,secret.key,projects.tar.gz})
-# into a data directory and a projects directory:
+# — or one laid out the same way with a projects/ directory instead of the tarball (what
+# scripts/restore-offsite.sh puts together from the off-site backup) — into a data directory and a
+# projects directory:
 #
 #   scripts/restore.sh <backup dir> <data dir> <projects dir> [--force]
 #
@@ -16,7 +18,7 @@
 set -euo pipefail
 src=${1:?backup dir}; data=${2:?data dir}; projects=${3:?projects dir}; force=${4:-}
 [ -f "$src/overlyx.sqlite" ] || { echo "$src has no overlyx.sqlite" >&2; exit 1; }
-[ -f "$src/projects.tar.gz" ] || { echo "$src has no projects.tar.gz" >&2; exit 1; }
+[ -f "$src/projects.tar.gz" ] || [ -d "$src/projects" ] || { echo "$src has no projects.tar.gz (or projects/)" >&2; exit 1; }
 stamp=$(date -u +%Y-%m-%dT%H-%M-%SZ)
 aside() { if [ -e "$1" ]; then [ "$force" = "--force" ] || { echo "$1 exists — pass --force to move it aside" >&2; exit 1; }; mv "$1" "$1.before-restore-$stamp"; echo "moved $1 aside"; fi; }
 
@@ -33,11 +35,15 @@ if [ -f "$src/secrets.env" ] && [ ! -f "$deploy/secrets.env" ]; then install -m 
 
 # projects: the tarball holds one top-level directory (the basename of the projects dir at backup time)
 if [ -d "$projects" ] && [ -n "$(ls -A "$projects")" ]; then aside "$projects"; fi
-tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
-tar --extract --gzip --file "$src/projects.tar.gz" -C "$tmp"
-top=$(ls -1 "$tmp" | head -1)
 mkdir -p "$projects"
-cp -a "$tmp/$top/." "$projects/"
+if [ -d "$src/projects" ]; then
+  cp -a "$src/projects/." "$projects/"
+else
+  tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+  tar --extract --gzip --file "$src/projects.tar.gz" -C "$tmp"
+  top=$(ls -1 "$tmp" | head -1)
+  cp -a "$tmp/$top/." "$projects/"
+fi
 
 echo "restored $src:"
 echo "  users=$(sqlite3 "$data/overlyx.sqlite" 'SELECT COUNT(*) FROM users') projects=$(sqlite3 "$data/overlyx.sqlite" 'SELECT COUNT(*) FROM projects') versions=$(sqlite3 "$data/overlyx.sqlite" 'SELECT COUNT(*) FROM versions') ydocs=$(sqlite3 "$data/overlyx.sqlite" 'SELECT COUNT(*) FROM ydocs')"

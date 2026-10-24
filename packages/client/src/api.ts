@@ -133,6 +133,8 @@ export interface AgentStatus {
   providers?: Partial<Record<AgentProvider, AgentProviderStatus>>;
 }
 export interface AgentLogin { loginId: string; verificationUrl: string; userCode: string }
+/** one run of the off-site backup or its restore check, as its status file has it */
+export interface BackupRun { ok: boolean; started: string; finished: string; snapshot?: string; added?: string; files?: string; note?: string }
 export interface AgentThreadInfo { id: string; title: string | null; user: { id: number; name: string | null }; mine: boolean; createdAt: number; updatedAt: number; provider?: AgentProvider; model?: string | null }
 export interface AgentChange { path: string; kind: string; diff: string }
 /** one entry of a thread's transcript (codex's ThreadItem, loosely typed — we render known kinds) */
@@ -410,6 +412,8 @@ export const api = {
   aiMerge: (id: string, body: AiMergeRequest, signal?: AbortSignal) => req<AiMergeResult>('POST', `/api/docs/${encId(id)}/ai/merge`, body, undefined, signal),
   /** the embedded coding agent (Agent panel; agent.ts on the server) */
   agentStatus: () => req<AgentStatus>('GET', '/api/agent/status'),
+  /** administrators: the off-site backup's and its restore check's last runs (scripts/backup-offsite.sh, backup-check.sh) */
+  adminBackups: () => req<{ configured: boolean; backup: BackupRun | null; check: BackupRun | null }>('GET', '/api/admin/backups'),
   agentLogin: () => req<AgentLogin>('POST', '/api/agent/login'),
   agentLoginCancel: (loginId: string) => req<{ ok: boolean }>('POST', '/api/agent/login/cancel', { loginId }),
   agentLogout: () => req<{ ok: boolean }>('POST', '/api/agent/logout'),

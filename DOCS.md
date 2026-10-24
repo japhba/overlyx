@@ -2887,7 +2887,51 @@ whether it is configured; the features stay off in every browser until a user sw
 
 ## Backups and restoring
 
-**Off-site mirror (GitHub organisation).** With `GITHUB_MIRROR_ORG` and `GITHUB_MIRROR_TOKEN` in
+**Off-site backup (Hetzner Object Storage, restic).** `deploy/overlyx-backup-offsite.timer` runs
+`scripts/backup-offsite.sh` every night at 04:15 UTC (after the local backup): the SQLite database
+(online backup), `secret.key`, `secrets.env` and the telemetry key — staged with a manifest in
+`/mnt/HC_Volume_107166861/backup-stage` (0700, emptied after each run) — the projects with their git
+histories (without build products) and the agents' homes, encrypted by restic on this server and
+stored in a bucket in another Hetzner location (Helsinki; the server is in Falkenstein). The bucket
+has **Object Lock in COMPLIANCE mode**: every object is kept at least 30 days, whatever anyone does —
+this server and its keys included — and restic's own deletes only leave delete markers over versions
+the bucket still holds; lifecycle rules let a deleted version go 31 days later. Kept: 14 daily, 8
+weekly, 3 monthly snapshots (about three months, plus those 30 days; the privacy notice says so);
+pruned on Sundays. `deploy/overlyx-backup-check.timer` (Sundays) runs `scripts/backup-check.sh`:
+`restic check` reading 5 % of the data back, the newest snapshot at most two days old, a test restore
+of the database (integrity_check, users) and of one project picked at random. Their status — no
+names, no secrets — is in `/var/lib/overlyx-backup-offsite/{backup,check}.json`, readable by the
+development account, and their logs via `sudo overlyx-telemetry logs 48 backup`.
+
+Setting it up (once, as root; idempotent): create S3 credentials in the Hetzner Console (Object
+Storage ▸ credentials — not the bucket: Object Lock can only be switched on when a bucket is made,
+which the Console cannot), then `bash deploy/setup-backup-offsite.sh`. It installs restic (Ubuntu's
+package) and a pinned, checksum-checked MinIO client (`mc`), writes `/etc/overlyx/backup-offsite.env`
+(0600), makes the repository password `/etc/overlyx/restic-password` and shows it once — **keep it
+offline (password manager and paper): without it nobody can read the backups**, and the server's
+copy goes with the server — creates the locked bucket (`mc mb --with-lock`, default retention,
+versioning, lifecycle), runs `restic init`, installs the timers and the telemetry wrapper, and runs
+the first backup and the restore check. Once both have succeeded,
+`bash deploy/setup-backup-offsite.sh --retire-github-mirror` turns the GitHub mirror below off (the
+privacy notice then no longer lists GitHub; the repositories already there stay until deleted).
+
+Restoring from it (the same layout as a nightly backup, then `scripts/restore.sh`):
+
+```bash
+set -a; . /etc/overlyx/backup-offsite.env; set +a
+restic snapshots --host overlyx                                          # what there is
+scripts/restore-offsite.sh latest /tmp/restore/data /tmp/restore/projects   # a drill: start an isolated instance on them (below)
+# for the real thing: systemctl stop overlyx; scripts/restore-offsite.sh <id> /root/lyx/overlyx/data /mnt/HC_Volume_107166861/projects --force; systemctl start overlyx
+```
+
+After an attack that deleted snapshots (they only look deleted: the bucket keeps every version for
+30 days), roll the bucket back first — `MC_CONFIG_DIR=/etc/overlyx/mc mc ls --versions
+overlyx-backup/<bucket>` shows the versions; `mc cp --recursive --rewind <time> overlyx-backup/<bucket>
+/mnt/HC_Volume_107166861/restic-rewound` copies the repository as it was at a time before the attack —
+and restore from that copy with `RESTIC_REPOSITORY=/mnt/HC_Volume_107166861/restic-rewound`. On a new
+machine all that is needed is the S3 keys, the bucket's name and the repository password.
+
+**Off-site mirror (GitHub organisation; to be retired for the off-site backup above).** With `GITHUB_MIRROR_ORG` and `GITHUB_MIRROR_TOKEN` in
 `deploy/secrets.env` (a fine-grained token whose resource owner is the organisation, *All
 repositories*, permissions *Contents* and *Administration: read & write*), every project's git
 repository is pushed to a private repository `<org>/<project>` of that organisation

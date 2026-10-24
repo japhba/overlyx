@@ -1665,6 +1665,13 @@ api.get('/admin/reports', (req, res) => {
   const kind = typeof req.query.kind === 'string' && /^[a-z-]{1,20}$/.test(req.query.kind) ? req.query.kind : undefined;
   res.json({ reports: listReports({ kind, limit: Number(req.query.limit) || 200 }) });
 });
+/** Administrators: how the off-site backup (scripts/backup-offsite.sh) and its weekly restore check (scripts/backup-check.sh) went — their status files, no secrets. */
+api.get('/admin/backups', (req, res) => {
+  if (!req.user?.isAdmin) { res.status(403).json({ error: 'admin only' }); return; }
+  const dir = process.env.OVERLYX_BACKUP_STATUS ?? '/var/lib/overlyx-backup-offsite';
+  const read = (f: string) => { try { return JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')) as Record<string, unknown>; } catch { return null; } };
+  res.json({ configured: fs.existsSync('/etc/overlyx/backup-offsite.env'), backup: read('backup.json'), check: read('check.json') });
+});
 api.delete('/admin/reports/:id', (req, res) => {
   if (!req.user?.isAdmin) { res.status(403).json({ error: 'admin only' }); return; }
   res.json({ ok: deleteReport(Number(req.params.id)) });

@@ -8,7 +8,7 @@
  *   telemetry.ts usage [days]        the usage summary (scripts/usage-report.ts), default 30 days
  *   telemetry.ts reports [days]      problem reports, newest first (scripts/reports.ts minus the sender)
  *   telemetry.ts report <id>         one report in full
- *   telemetry.ts logs [hours] [overlyx|autodeploy|maintenance]   a service's log, default 6 hours
+ *   telemetry.ts logs [hours] [overlyx|autodeploy|maintenance|backup]   a service's log, default 6 hours
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -23,8 +23,10 @@ const projectsDir = process.env.OVERLYX_PROJECTS_DIR ?? '/root/projects';
 const owner = process.env.OVERLYX_TELEMETRY_OWNER ?? 'jan';
 const [what = 'usage', first, second] = process.argv.slice(2);
 const number = (s: string | undefined, fallback: number, max: number) => Math.min(max, Math.max(1, Math.floor(Number(s ?? fallback)) || fallback));
-const units: Record<string, string> = { overlyx: 'overlyx', autodeploy: 'overlyx-autodeploy', maintenance: 'overlyx-maintenance' };
-const usage = 'usage: telemetry.ts usage [days] | reports [days] | report <id> | logs [hours] [overlyx|autodeploy|maintenance]';
+const units: Record<string, string[]> = { overlyx: ['overlyx'], autodeploy: ['overlyx-autodeploy'], maintenance: ['overlyx-maintenance'],
+  // the backups: the local nightly one, the off-site one and its weekly restore check (their status also in /var/lib/overlyx-backup-offsite)
+  backup: ['overlyx-backup', 'overlyx-backup-offsite', 'overlyx-backup-check'] };
+const usage = 'usage: telemetry.ts usage [days] | reports [days] | report <id> | logs [hours] [overlyx|autodeploy|maintenance|backup]';
 
 // A keyed hash, so that hashing guessed names does not undo a pseudonym; the key stays root's.
 function pseudonymKey(): Buffer {
@@ -125,7 +127,7 @@ function main() {
         console.log('');
       }
     } else {
-      const log = execFileSync('journalctl', ['-u', units[second ?? 'overlyx'], '--since', `-${number(first, 6, 24 * 90)}h`, '-n', '5000', '--no-pager', '-o', 'short-iso'],
+      const log = execFileSync('journalctl', [...units[second ?? 'overlyx'].flatMap(u => ['-u', u]), '--since', `-${number(first, 6, 24 * 90)}h`, '-n', '5000', '--no-pager', '-o', 'short-iso'],
         { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
       process.stdout.write((second ?? 'overlyx') === 'overlyx' ? serverLog(log, clean) : log.split('\n').map(clean).join('\n'));
     }

@@ -6,19 +6,28 @@
  * It describes this code — keep it in step when data handling changes: feedback.ts (reports),
  * accounts.ts (deletion, trash), usage.ts (statistics), access.ts (activity log, guests, admin
  * access), mirror.ts (GitHub backup), ai.ts / airepair.ts / agent.ts / bibsearch.ts / gdocs /
- * lesswrong (third parties), scripts/backup.sh (backups).
+ * lesswrong (third parties), scripts/backup.sh and scripts/backup-offsite.sh (backups).
  *
  * Who runs the instance comes from the environment: OVERLYX_OPERATOR (a name) and
  * OVERLYX_PRIVACY_CONTACT (an e-mail address; else OVERLYX_CONTACT_EMAIL, the contact address of the
  * literature services' polite pools). On overlyx.app both are set in a systemd drop-in
  * (/etc/systemd/system/overlyx.service.d/operator.conf).
  */
+import fs from 'node:fs';
 import type { Request, Response } from 'express';
 import { config } from './config.ts';
 import { RELIABILITY_RETENTION_DAYS, RETENTION_DAYS as USAGE_DAYS } from './usage.ts';
 import { TRASH_DAYS } from './accounts.ts';
 
-export const PRIVACY_UPDATED = '13 October 2026';
+export const PRIVACY_UPDATED = '24 October 2026';
+
+/** the off-site backup's location, when deploy/setup-backup-offsite.sh has set it up (its settings file names the bucket's region); null without one */
+function offsiteBackup(): string | null {
+  let env: string;
+  try { env = fs.readFileSync('/etc/overlyx/backup-offsite.env', 'utf8'); } catch { return null; }
+  const region = /^AWS_DEFAULT_REGION=(\w+)/m.exec(env)?.[1] ?? '';
+  return ({ hel1: 'Helsinki, Finland', nbg1: 'Nuremberg, Germany', fsn1: 'Falkenstein, Germany' } as Record<string, string>)[region] ?? 'another of its data centres';
+}
 
 const esc = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 
@@ -30,6 +39,8 @@ export function privacyHtml(): string {
   const site = config.publicUrl ? new URL(config.publicUrl).host : 'this OverLyX instance';
   // what this server offers: the notice describes it, not a different setup
   const google = !!config.google.clientId;
+  const mirror = !!(config.mirror.org && config.mirror.token);
+  const offsite = offsiteBackup();
   const who = operator ? esc(operator) : `the person who runs ${esc(site)}`;
   const reach = contact
     ? `by e-mail to <a href="mailto:${esc(contact)}">${esc(contact)}</a>, or with <b>Help ▸ Report a problem</b> in the app`
@@ -96,9 +107,9 @@ ${google
 <h3>Services we use</h3>
 <table>
 <tr><th>Service</th><th>What it gets</th><th>When</th></tr>
-<tr><td>Hetzner (Germany)</td><td>Hosts the server, so it stores everything above</td><td>Always</td></tr>
+<tr><td>Hetzner (Germany)</td><td>Hosts the server, so it stores everything above${offsite ? `. Also keeps our off-site backups, in its data centre in ${offsite} — encrypted on our server before they leave it, so Hetzner cannot read them` : ''}</td><td>Always</td></tr>
 ${google ? `<tr><td>Google</td><td>Signs you in. With Google Docs sync, the linked document's text and comments go to that Google Doc</td><td>When you sign in; Docs sync only if you connect Google Drive and link a document</td></tr>` : ''}
-<tr><td>GitHub (USA)</td><td>A backup copy of every project's version history, in private repositories that only the operator can access, updated every few minutes</td><td>Always. A project's owner can pause it in the project's <b>Git</b> dialog</td></tr>
+${mirror ? `<tr><td>GitHub (USA)</td><td>A backup copy of every project's version history, in private repositories that only the operator can access, updated every few minutes</td><td>Always. A project's owner can pause it in the project's <b>Git</b> dialog</td></tr>` : ''}
 <tr><td>OpenRouter (USA), and the AI company whose model is used (Google by default; also Anthropic, OpenAI and others you can choose)</td><td>The text around your cursor or your selection, your instruction, and your document's LaTeX source as context. “Escalate to AI” for a document that will not build sends the whole <code>.tex</code> file. Writing a formula with the math keyboard’s pen sends a picture of the handwriting and the formula around the cursor. No account details</td><td>Only when you use an AI feature. All AI features are off until you switch them on in Settings</td></tr>
 <tr><td>OpenAI, through your own ChatGPT account</td><td>What the Agent panel's agent reads and writes in the project you give it. Its sign-in and conversations are stored on our server in your account's folder</td><td>Only if you use the Agent panel and sign in to ChatGPT there</td></tr>
 <tr><td>Anthropic, OpenAI or OpenRouter (USA; OpenRouter passes the request on to the company whose model you choose), through your own API key — or OpenAI through your ChatGPT sign-in</td><td>What the Agent panel's agent reads and writes in the project you give it, and what an AI feature sends (above) when you choose one of these models for it, sent with your key. The key is stored encrypted on our server for your account; the agent's conversations are stored there too, in your account's folder</td><td>Only if you add a key (or sign in) in a model menu and use a model on it</td></tr>
@@ -122,8 +133,9 @@ ${google ? `<tr><td>Google</td><td>Signs you in. With Google Docs sync, the link
 <h2>How long we keep it</h2>
 <table>
 <tr><td>Your account and your projects</td><td>Until you delete them</td></tr>
-<tr><td>Deleted projects and files</td><td>${TRASH_DAYS} days in the trash, in case you deleted something by mistake (ask the operator to restore it). After that they are erased, together with their GitHub backup</td></tr>
+<tr><td>Deleted projects and files</td><td>${TRASH_DAYS} days in the trash, in case you deleted something by mistake (ask the operator to restore it). After that they are erased${mirror ? ', together with their GitHub backup' : ''}</td></tr>
 <tr><td>Nightly backups on the server</td><td>14 days</td></tr>
+${offsite ? `<tr><td>Encrypted off-site backups (Hetzner, ${offsite})</td><td>About four months: three months of backups, then 30 more days in which the storage keeps them locked — nobody can delete them earlier, not even we, so that an attack on the server cannot destroy them</td></tr>` : ''}
 <tr><td>Activity log, error records</td><td>90 days</td></tr>
 <tr><td>Mail to privacy@ / contact@</td><td>A year</td></tr>
 <tr><td>Server logs</td><td>A few months (deleted oldest first at a fixed size)</td></tr>
@@ -135,10 +147,10 @@ ${google ? `<tr><td>Google</td><td>Signs you in. With Google Docs sync, the link
 <h2 id="delete">Deleting your account</h2>
 <p><b>Settings ▸ Account ▸ Delete account</b> deletes your account immediately, after you confirm with your user name. The following are deleted at the same time:</p>
 <ul>
-<li>the projects you own, including their history, trash copies and GitHub backups. If you shared them, they are gone for the other people too, so the dialog lists them first; you can make someone else the owner in the project's Share dialog instead;</li>
+<li>the projects you own, including their history, trash copies${mirror ? ' and GitHub backups' : ''}. If you shared them, they are gone for the other people too, so the dialog lists them first; you can make someone else the owner in the project's Share dialog instead;</li>
 <li>your access to other people's projects, your sign-ins (git, AI apps), the Agent panel's ChatGPT sign-in, API keys and conversations, your Google Drive connection, your problem reports and your settings.</li>
 </ul>
-<p>What you wrote in other people's projects stays there, because it is part of their documents. So do your name in their history and comments. The activity log and error records keep their entries, but those no longer point to you. The nightly backups still contain your account until they are replaced, after at most 14 days.</p>
+<p>What you wrote in other people's projects stays there, because it is part of their documents. So do your name in their history and comments. The activity log and error records keep their entries, but those no longer point to you. The nightly backups still contain your account until they are replaced, after at most 14 days${offsite ? '; the encrypted off-site backups, after about four months' : ''}.</p>
 <p>To keep your work, download each project first: the project's menu has <b>Download as .zip</b>.</p>
 
 <h2 id="rights">Your rights</h2>

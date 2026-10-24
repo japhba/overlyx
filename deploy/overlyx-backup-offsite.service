@@ -1,0 +1,15 @@
+# The off-site backup (scripts/backup-offsite.sh): restic, encrypted here, into the Hetzner Object
+# Storage bucket that deploy/setup-backup-offsite.sh made (its settings: /etc/overlyx/backup-offsite.env).
+[Unit]
+Description=OverLyX off-site backup (restic to Hetzner Object Storage)
+After=network-online.target overlyx-backup.service
+Wants=network-online.target
+RequiresMountsFor=/mnt/HC_Volume_107166861
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/overlyx/backup-offsite.env
+ExecStart=/bin/bash /root/lyx/overlyx-production/scripts/backup-offsite.sh
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=6h

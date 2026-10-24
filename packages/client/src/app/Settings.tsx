@@ -15,7 +15,7 @@ import { UiChoice } from './Tour';
 import { ZoteroConnect } from './ZoteroConnect';
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
-import { api, type AiStatus, type AiModelInfo, type User, type UserSettings, type AdminUser, type DeletionPreview, type AdminReport } from '../api';
+import { api, type AiStatus, type AiModelInfo, type User, type UserSettings, type AdminUser, type DeletionPreview, type AdminReport, type BackupRun } from '../api';
 import { clearLocalData } from './localData';
 import { getPrefs, setPref, subscribePrefs, type Prefs } from '../prefs';
 import { recordReliability } from '../usage';
@@ -280,6 +280,7 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
                 {users === null && <div class="sub">Loading…</div>}
               </div>
             </>}
+            {user.isAdmin && <AdminBackups />}
             {user.isAdmin && <AdminReports />}
             {!user.guest && <DeleteAccount user={user} />}
           </>}
@@ -350,6 +351,34 @@ function DeleteAccount({ user }: { user: User }) {
  * ran into (server feedback.ts). Read here; a handled one can be deleted.
  */
 const REPORT_KINDS: [string, string][] = [['mail', 'Mail'], ['feedback', 'Problem reports'], ['client-error', 'Errors (browser)'], ['client-glitch', 'Glitches (touch screens)'], ['server-error', 'Errors (server)'], ['vscode-error', 'Errors (VS Code)']];
+/** The off-site backup at a glance (administrators): its last run and its last restore check — red when one failed or is overdue. */
+function AdminBackups() {
+  const [s, setS] = useState<{ configured: boolean; backup: BackupRun | null; check: BackupRun | null } | null>(null);
+  useEffect(() => { api.adminBackups().then(setS).catch(() => setS(null)); }, []);
+  if (!s) return null;
+  const ago = (iso: string) => { const h = (Date.now() - Date.parse(iso)) / 3_600_000; return h < 48 ? `${Math.max(0, Math.round(h))} h ago` : `${Math.round(h / 24)} days ago`; };
+  const line = (label: string, r: BackupRun | null, maxHours: number, what: (r: BackupRun) => string) => {
+    const late = !r || Date.now() - Date.parse(r.finished) > maxHours * 3_600_000;
+    const bad = !r || !r.ok || late;
+    return (
+      <div class={bad ? 'err' : 'sub'} data-backup={label}>
+        {label}: {!r ? 'no run yet' : r.ok ? `ok, ${ago(r.finished)} — ${what(r)}` : `FAILED ${ago(r.finished)} — ${r.note ?? ''}`}{r?.ok && late ? ' — overdue' : ''}
+      </div>
+    );
+  };
+  return (
+    <>
+      <h3>Backups</h3>
+      {!s.configured
+        ? <div class="err" data-backup="none">No off-site backup is set up: as root, <code>bash deploy/setup-backup-offsite.sh</code> (DOCS.md “Backups and restoring”).</div>
+        : <>
+          {line('Off-site backup', s.backup, 36, r => `${r.files ?? '?'} files, ${Math.round(Number(r.added ?? 0) / 1048576)} MB new`)}
+          {line('Restore check', s.check, 9 * 24, r => r.note ?? '')}
+        </>}
+    </>
+  );
+}
+
 function AdminReports() {
   const [kind, setKind] = useState('mail');
   const [rows, setRows] = useState<AdminReport[] | null>(null);
