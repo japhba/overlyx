@@ -18,6 +18,10 @@ import { StatsDialog } from '@client/app/StatsDialog';
 import { shareTheme } from './appearance';
 import { InterfaceZoom } from './InterfaceZoom';
 import { BuiltPdf } from './BuiltPdf';
+import { ArticlePage } from '@client/app/ArticlePage';
+import { applyArticleLook } from '@client/editor/article';
+import { noteArticle } from '@client/articlekinds';
+import { setProjectPathOpener } from '@client/openpath';
 import type { PdfTarget } from '@client/app/PdfViewer';
 import { SvgEditorHost } from '@client/app/SvgEditor';
 import { ToolbarDock } from '@client/app/tbdock';
@@ -31,7 +35,9 @@ import { setInk, getInk, subscribeInk } from '@client/editor/plugins/ink';
  * The OverLyX editor inside VS Code: the web client's Workspace (App.tsx) trimmed to the editor
  * itself — LyX toolbars, find & replace, contextual math/table/review rows, comments margin and
  * panel, dialogs, status bar. File browsing, git, versions and agents stay on the VS Code side;
- * the PDF is a view here or a separate panel (pdfMain.tsx). Document sync with the extension host runs over
+ * the PDF is a view here or a separate panel (pdfMain.tsx). An HTML article (an .html file reaches
+ * this editor only as one: host/deliverables.ts) has its page where the PDF would be, as on the web
+ * (WYSIWYM · HTML · Page). Document sync with the extension host runs over
  * postMessage (full ProseMirror doc, debounced), everything else over the local HTTP bridge.
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from 'preact/hooks';
@@ -77,6 +83,9 @@ const stored = (k: string) => { try { return localStorage.getItem(k); } catch { 
 
 export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'init' }> }) {
   const docId = init.docId;
+  const article = /\.html?$/i.test(docId);
+  // (the editor's plugins, menus and HTML blocks ask the registry: before the editor is made)
+  if (article) noteArticle(docId, true);
   const [meta, setMeta] = useState<DocMeta | null>(null);
   const metaRef = useRef(meta);
   metaRef.current = meta;
@@ -170,6 +179,9 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   const [docTick, setDocTick] = useState(0);
   const [combined, setCombined] = useState(stored('ol.vscode.combined') === '1');
   const [selTick, setSelTick] = useState(0);
+  // an article's page: shown anew a moment after each change reached the file, marked on Sync (app/ArticlePage.tsx)
+  const [pageSaved, setPageSaved] = useState(0);
+  const [pageSync, setPageSync] = useState(0);
   const [, force] = useState(0);
   const rerender = () => force(x => x + 1);
 
@@ -233,7 +245,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   /* ---------------------------------------------------------------- editor lifecycle */
   const postUpdate = useMemo(() => debounce((v: EditorView) => {
     const update = handleRef.current!.takeUpdate(headerRef.current);
-    if (update) vscode.postMessage({ type: 'update', ...update });
+    if (update) { vscode.postMessage({ type: 'update', ...update }); setPageSaved(Date.now()); }
   }, 300), []);
   const postOutline = useMemo(() => debounce((v: EditorView) => {
     const items: OutlineEntry[] = buildOutline(v.state.doc, true, editorContext.meta?.secnumdepth ?? 3);
@@ -305,6 +317,8 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
         editorContext.changeAuthorId = m.authors.find(x => x.name === 'You')?.id;
       }
       refreshMacros(handle.view, m?.macros ?? {});
+      // an article: the page's look on the editor
+      applyArticleLook(handle.view, article ? m?.article?.vars ?? {} : null);
       postOutline(handle.view);
       // a layout document: the check of its text boxes against the last build (again after every build)
       refreshLayoutCheck(handle.view, () => api.layoutCheck(docId));
@@ -335,7 +349,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
     api.meta(docId).then(m => {
       setMeta(m); editorContext.meta = m;
       const v = handleRef.current?.view;
-      if (v) refreshMacros(v, m.macros ?? {});
+      if (v) { refreshMacros(v, m.macros ?? {}); if (article) applyArticleLook(v, m.article?.vars ?? {}); }
     }).catch(() => {});
   }, 1500), []);
 
@@ -350,6 +364,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
         case 'externalUpdate':
           postUpdate.cancel();
           setHeader(handleRef.current!.applyExternal(m.pmDoc, m.headerLines, m.ack));
+          if (m.type === 'externalUpdate') setPageSaved(Date.now());
           postUpdate(v);
           postOutline(v);
           metaReload();
@@ -395,6 +410,8 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   const runView = (fn: (v: EditorView) => boolean) => { const v = currentView(); if (!v) return; fn(v); };
 
   const build = (opts?: { open?: boolean }) => {
+    // an article's output is its page, shown as it is saved
+    if (article) { if (opts?.open !== false) showPane('pdf'); return; }
     editorContext.ui?.save();
     if (opts?.open !== false) showPane('pdf');
     vscode.postMessage({ type: 'build', open: false });
@@ -408,6 +425,8 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   const syncToPdf = async () => {
     const v = currentView();
     if (!v) return;
+    // an article: its page shows the cursor's paragraph
+    if (article) { showPane('pdf'); setPageSync(Date.now()); return; }
     const tex = await builtTex();
     if (!tex) { notify('SyncTeX needs a built PDF — build it first (Ctrl+R)', 'error'); return; }
     const where = cursorLine(v, tex, mathField, null);
@@ -506,6 +525,8 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
     editorContext.openInsetDialog = (v, pos) => { v.focus(); onSelection(v); if (pos !== undefined) setDialog({ name: 'inset', arg: pos }); };
     editorContext.openInTab = (id, opts) => vscode.postMessage({ type: 'openDoc', id, goto: opts?.goto, heading: opts?.heading });
     editorContext.separateDocument = { label: 'Open in new editor tab', open: id => vscode.postMessage({ type: 'openDoc', id, beside: true }) };
+    // a link of an article's page (or of an HTML block) to another file of the project: opened in VS Code
+    setProjectPathOpener((project, path) => vscode.postMessage({ type: 'openDoc', id: `${project}/${path}` }));
     editorContext.gotoLabel = (name, from) => {
       const v = from ?? handleRef.current?.view;
       if (v && gotoLabelIn(v, name)) return;
@@ -614,8 +635,8 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       { label: 'Open…', action: () => hostCommand('openFile') },
       { label: 'Save', shortcut: 'Ctrl+S', action: () => editorContext.ui!.save() },
       { sep: true },
-      { label: 'Build & View PDF', shortcut: 'Ctrl+R', action: () => build() },
-      { label: 'LaTeX source…', action: () => hostCommand('openSource') },
+      { label: article ? 'Show the page' : 'Build & View PDF', shortcut: 'Ctrl+R', action: () => build() },
+      { label: article ? 'HTML source…' : 'LaTeX source…', action: () => hostCommand('openSource') },
       { label: 'Source control', action: () => hostCommand('scm') },
       { label: 'File history (Timeline)', action: () => hostCommand('timeline') },
       { label: 'Close', action: () => hostCommand('closeTab') },
@@ -623,9 +644,9 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
     editingMenus.edit,
     editorViewMenu({ combined, setCombined, marginMode, toggleMargin, run, showRuler, setShowRuler, tbMode, setToolbar, textWidth, setTextWidth, stepTextWidth,
       hostItems: [
-        { label: 'LaTeX source beside the document (raw view)', shortcut: 'Ctrl+Alt+S', checked: panes.shown.tex, action: () => flipPane('tex') },
+        { label: article ? 'HTML source beside the document' : 'LaTeX source beside the document (raw view)', shortcut: 'Ctrl+Alt+S', checked: panes.shown.tex, action: () => flipPane('tex') },
         { label: 'Outline', shortcut: 'Ctrl+Alt+O', action: () => setShowOutline(s => !s) },
-        { label: 'PDF preview', checked: panes.shown.pdf, action: () => flipPane('pdf') },
+        { label: article ? 'The page' : 'PDF preview', checked: panes.shown.pdf, action: () => flipPane('pdf') },
         { label: 'Comments', checked: showComments, action: () => setShowComments(v => !v) },
         { label: 'Draw in the margins', checked: inkMode, action: () => setInkMode(v => !v) },
         { sep: true },
@@ -636,7 +657,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
     { title: 'Navigate', items: [
       { label: 'Back', action: () => hostCommand('back') }, { label: 'Forward', action: () => hostCommand('forward') },
       { label: 'Go to label…', action: () => { void uiPrompt('Go to Label', 'Label:').then(name => { if (name) editorContext.gotoLabel!(name, view!); }); } },
-      { label: 'Sync to PDF (forward search)', shortcut: 'Ctrl+Alt+J', action: () => { void syncToPdf(); } },
+      { label: article ? 'Show in the page' : 'Sync to PDF (forward search)', shortcut: 'Ctrl+Alt+J', action: () => { void syncToPdf(); } },
       { label: 'Beginning of document', action: () => { if (view) { view.dispatch(view.state.tr.setSelection(TextSelection.atStart(view.state.doc)).scrollIntoView()); view.focus(); } } },
       { label: 'End of document', action: () => { if (view) { view.dispatch(view.state.tr.setSelection(TextSelection.atEnd(view.state.doc)).scrollIntoView()); view.focus(); } } },
       { sep: true },
@@ -790,7 +811,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
           <ThemeToggle pref={themePref} dark={shownDark} onPick={pickTheme} host="VS Code" onSettings={() => setDialog({ name: 'preferences' })} />
           <EditModeSwitch mode={editModeOf(tracking, viewing)} canEdit view={view} views={allViews}
             onMode={m => applyEditMode(m, { tracking, toggleTracking: () => { void toggleTracking(); }, setViewing })} />
-          <PaneSwitch layout={panes} onChange={changePanes} markdown={/\.(md|markdown)$/i.test(docId)} />
+          <PaneSwitch layout={panes} onChange={changePanes} markdown={/\.(md|markdown)$/i.test(docId)} article={article} />
         </span>
       </div>
       {/* the toolbar rows: along the top, or in a column beside the document (app/tbdock.tsx; inside .main below) */}
@@ -853,8 +874,10 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
           </div>
           {sourceMounted.current && <SourcePane fill style={paneStyle('tex')} target={sourceTarget} tick={docTick} selTick={selTick} mathField={mathField} onNotify={notify} onClose={() => showPane('tex', false)} onSave={() => vscode.postMessage({ type: 'save' })} />}
           {pdfMounted.current && <div class="pdf-pane" data-pane="pdf" style={paneStyle('pdf')}>
-            <BuiltPdf target={pdfTarget} onBuild={() => build()} onForward={() => { void syncToPdf(); }}
-              onInverse={(page, x, y) => { void syncFromPdf(page, x, y); }} onOpenBeside={() => vscode.postMessage({ type: 'openPdfPanel' })} onClose={() => showPane('pdf', false)} />
+            {article
+              ? <ArticlePage docId={docId} savedAt={pageSaved} view={handleRef.current?.view} selTick={selTick} syncSeq={pageSync} ruler={showRuler} printable={false} onClose={() => showPane('pdf', false)} />
+              : <BuiltPdf target={pdfTarget} onBuild={() => build()} onForward={() => { void syncToPdf(); }}
+                onInverse={(page, x, y) => { void syncFromPdf(page, x, y); }} onOpenBeside={() => vscode.postMessage({ type: 'openPdfPanel' })} onClose={() => showPane('pdf', false)} />}
           </div>}
           <PaneDividers layout={panes} onChange={changePanes} />
         </div>

@@ -30,7 +30,7 @@ import { OverlyxTelemetry } from './host/telemetry.ts';
 import { setupAgents } from './host/agents.ts';
 import { setupSync } from './host/sync.ts';
 import { registerNewDocumentCommands } from './host/newDocument.ts';
-import { DeliverableServer, DeliverableEditorProvider } from './host/deliverables.ts';
+import { DeliverableServer, DeliverableEditorProvider, rootFor } from './host/deliverables.ts';
 import { runTool, toolTarget, TOOL_NAMES, type ToolName, type TextStore } from './agents/localEdit.ts';
 import { inEditor } from './agents/handover.ts';
 import * as build from './host/build.ts';
@@ -286,6 +286,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
         const dev = path.join(context.extensionPath, '../../node_modules', pkg, 'index.' + ext);
         return fs.existsSync(dev) ? dev : null;
       },
+      deliverableLink: async (project, relPath) => {
+        const root = projectRoots.get(project);
+        if (!root) throw new Error(`unknown project ${project}`);
+        const abs = path.resolve(root, relPath);
+        if (!abs.startsWith(root + path.sep)) throw new Error('path escapes project');
+        await deliverableServer.start();
+        // served from its workspace folder, as the slide editor serves pages (`../figures` reaches the project's figures)
+        const served = rootFor(vscode.Uri.file(abs));
+        const external = (await vscode.env.asExternalUri(vscode.Uri.parse(deliverableServer.origin))).toString().replace(/\/$/, '');
+        return { base: external + deliverableServer.baseFor(served).slice(deliverableServer.origin.length), entry: path.relative(served, abs).split(path.sep).join('/'), expires: 0 };
+      },
       agentTool: async (call) => {
         telemetry.track('extension-agent', 'attempt');
         if (!(TOOL_NAMES as readonly string[]).includes(call.tool)) return { error: `unknown tool ${call.tool}` };
@@ -310,7 +321,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
     const abs = path.extname(resolved) ? resolved : resolved + '.tex';
     if (!fs.existsSync(abs)) { void vscode.window.showErrorMessage(`OverLyX: ${rel} does not exist`); return; }
     if (opts?.goto !== undefined || opts?.heading !== undefined) provider.navigateTo(`${registerRoot(root)}/${path.relative(root, abs)}`, { type: 'navigate', label: opts.goto, heading: opts.heading });
-    void vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(abs), /\.pdf$/i.test(abs) ? 'overlyx.pdfViewer' : abs.endsWith('.tex') ? 'overlyx.texEditor' : 'default', { preview: false, viewColumn: opts?.beside ? vscode.ViewColumn.Beside : vscode.ViewColumn.Active });
+    const editor = /\.pdf$/i.test(abs) ? 'overlyx.pdfViewer' : /\.(tex|md|markdown)$/i.test(abs) ? 'overlyx.texEditor' : /\.html?$/i.test(abs) ? 'overlyx.htmlEditor' : 'default';
+    void vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(abs), editor, { preview: false, viewColumn: opts?.beside ? vscode.ViewColumn.Beside : vscode.ViewColumn.Active });
   };
 
   const provider = new OverlyxEditorProvider(context, registry, {
@@ -353,7 +365,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
     registerTexSymbols(),
     vscode.window.onDidChangeActiveColorTheme(t => pdfPanels.postTheme([vscode.ColorThemeKind.Dark, vscode.ColorThemeKind.HighContrast].includes(t.kind))),
     // HTML deliverables: slide decks, posters, web pages (host/deliverables.ts)
-    vscode.window.registerCustomEditorProvider('overlyx.htmlEditor', new DeliverableEditorProvider(context, deliverableServer, bridgeBase), {
+    vscode.window.registerCustomEditorProvider('overlyx.htmlEditor', new DeliverableEditorProvider(context, deliverableServer, bridgeBase, provider), {
       webviewOptions: { retainContextWhenHidden: true },
       supportsMultipleEditorsPerDocument: false,
     }),

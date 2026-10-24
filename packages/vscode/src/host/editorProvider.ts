@@ -1,7 +1,7 @@
 /**
- * The OverLyX custom editor for .tex files: a webview running the OverLyX editor, backed by the
- * ordinary TextDocument (VS Code owns file, dirty state, save and git; the webview owns the
- * WYSIWYG view and in-editor undo).
+ * The OverLyX custom editor for .tex and markdown files and HTML articles: a webview running the
+ * OverLyX editor, backed by the ordinary TextDocument (VS Code owns file, dirty state, save and git;
+ * the webview owns the WYSIWYG view and in-editor undo).
  */
 import * as vscode from 'vscode';
 import { watchAppearance, sendAppearance, changeAppearance } from './appearance.ts';
@@ -15,6 +15,7 @@ import { projectDirFor } from './project.ts';
 import type { TextStore } from '../agents/localEdit.ts';
 import type { InteractionAction, InteractionOutcome } from '@overlyx/core/interactions.ts';
 import { WindowUnreachable, type HandOver } from '../agents/handover.ts';
+import { isHtmlPath } from '@overlyx/core/html/deliverable.ts';
 
 export interface ProviderDeps {
   track?(action: InteractionAction, outcome: InteractionOutcome, durationMs?: number): void;
@@ -29,6 +30,17 @@ export interface ProviderDeps {
   openPdfPanel(docId: string): void;
   postToPdf(docId: string, msg: unknown): void;
   openDoc(root: string, rel: string, opts?: { goto?: string; heading?: number; beside?: boolean }): void;
+}
+
+/**
+ * The article's editor that is active, if one is: an article opens through overlyx.htmlEditor, and
+ * the context key gives it the document editor's keys (package.json keybindings).
+ */
+let articlePanel: vscode.WebviewPanel | undefined;
+function setArticlePanel(panel: vscode.WebviewPanel | undefined): void {
+  if (panel === articlePanel) return;
+  articlePanel = panel;
+  void vscode.commands.executeCommand('setContext', 'overlyx.articleActive', !!panel);
 }
 
 const isDark = () => [vscode.ColorThemeKind.Dark, vscode.ColorThemeKind.HighContrast].includes(vscode.window.activeColorTheme.kind);
@@ -54,6 +66,8 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
     const root = projectDirFor(document.uri.fsPath, folder?.uri.fsPath);
     const project = this.deps.registerRoot(root);
     const relPath = path.relative(root, document.uri.fsPath);
+    // an HTML article (deliverables.ts hands those over): its output is its page, not a PDF
+    const article = isHtmlPath(relPath);
     let ctx: TexContext;
     try {
       ctx = { root, layoutDir: this.deps.layoutDir(), readText: abs => vscode.workspace.textDocuments.find(d => !d.isClosed && d.uri.fsPath === abs)?.getText() };
@@ -149,7 +163,8 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
     };
     let metadataTimer: NodeJS.Timeout | undefined;
     const metadataChanged = () => { clearTimeout(metadataTimer); metadataTimer = setTimeout(() => post({ type: 'metadataChanged' }), 300); };
-    const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, '**/*.{tex,bib,sty,cls,lyx}'));
+    // (an article's stylesheets set its look in the editor: meta's article.vars)
+    const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, article ? '**/*.{tex,bib,sty,cls,lyx,html,htm,css}' : '**/*.{tex,bib,sty,cls,lyx}'));
     const diskChanged = (uri: vscode.Uri) => {
       if (path.relative(root, uri.fsPath).split(path.sep).some(part => part === '_build' || part === '.git')) return;
       this.applyChain = this.applyChain.then(async () => {
@@ -164,7 +179,7 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
       switch (msg.type) {
         case 'hostCommand': {
           if (msg.name === 'openSource') {
-            const { abs } = relatedPath(msg.id);
+            const abs = msg.id === session.docId ? document.uri.fsPath : relatedPath(msg.id).abs;
             this.applyChain = this.applyChain.then(async () => {
               const target = await vscode.workspace.openTextDocument(vscode.Uri.file(abs));
               await vscode.window.showTextDocument(target, { viewColumn: vscode.ViewColumn.Beside, preview: false });
@@ -238,6 +253,7 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
           break;
         case 'save': save(); break;
         case 'build':
+          if (article) break;   // (an article's output is its page: the Page pane)
           this.applyChain = this.applyChain.then(() => this.deps.startBuild(entry, { open: msg.open })).catch(e => console.error('overlyx build failed', e));
           break;
         case 'cancelBuild': this.deps.cancelBuild(session.docId); break;
@@ -290,12 +306,16 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
     };
     subs.push(panel.onDidChangeViewState(() => {
       if (panel.active) { this.registry.setActive(entry); refreshDocuments(); }
+      if (panel.active) setArticlePanel(article ? panel : undefined);
+      else if (articlePanel === panel) setArticlePanel(undefined);
     }));
+    if (panel.active) setArticlePanel(article ? panel : undefined);
     subs.push(vscode.window.onDidChangeWindowState(state => { if (state.focused && panel.visible) refreshDocuments(); }));
     subs.push(vscode.window.onDidChangeActiveColorTheme(() => post({ type: 'theme', dark: isDark() })), watchAppearance(panel.webview));
 
     panel.onDidDispose(() => {
       this.deps.track?.('extension-close', 'success');
+      if (articlePanel === panel) setArticlePanel(undefined);
       for (const timer of relatedTimers.values()) clearTimeout(timer);
       clearTimeout(externalTimer);
       clearTimeout(metadataTimer);

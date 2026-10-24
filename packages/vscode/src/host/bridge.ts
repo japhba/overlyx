@@ -42,6 +42,8 @@ export interface BridgeDelegate {
   cacheDir(): string;
   /** spell checker dictionaries (dictionary-en etc. from node_modules), or null */
   dictionary(lang: string, ext: 'aff' | 'dic'): string | null;
+  /** an HTML article's page on the pages' server (deliverables.ts): its folder's address and the page in it, as the server's deliverable-link answers */
+  deliverableLink(project: string, relPath: string): Promise<{ base: string; entry: string; expires: number }>;
   /** a local agent's tool call for a document open here, handed over by the tool server (agents/server.ts) */
   agentTool(call: { tool: string; args: Record<string, unknown>; author: string; cwd: string }): Promise<{ result?: unknown; error?: string; gone?: boolean }>;
 }
@@ -175,6 +177,15 @@ export class Bridge {
       if (kind === 'save' && req.method === 'POST') { send(res, 200, { ok: true }); return; }
       if (kind === 'versions') { send(res, 200, { versions: [] }); return; }
       send(res, 404, { error: `not supported in VS Code: docs/${kind}` });
+      return;
+    }
+
+    /* ---- an article's page (the Page pane, running HTML blocks) ---- */
+    m = /^\/projects\/([^/]+)\/deliverable-link$/.exec(api);
+    if (m) {
+      const rel = String(url.searchParams.get('path') ?? '');
+      if (!/\.html?$/i.test(rel)) { send(res, 400, { error: 'not a page' }); return; }
+      try { send(res, 200, await d.deliverableLink(decodeURIComponent(m[1]), rel)); } catch (e) { send(res, 404, { error: String((e as Error).message ?? e) }); }
       return;
     }
 

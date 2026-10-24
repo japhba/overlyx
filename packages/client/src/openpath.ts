@@ -5,10 +5,15 @@
  */
 import { fileUrl } from './api';
 
+/** where the host opens a project's files instead (VS Code: in its editors) */
+let hostOpen: ((project: string, path: string) => void) | null = null;
+export function setProjectPathOpener(open: ((project: string, path: string) => void) | null): void { hostOpen = open; }
+
 /** `rel` (a path in the project, with a `#place` perhaps) opened: in OverLyX when it is something OverLyX edits or shows */
 export function openProjectPath(project: string, rel: string): void {
   const path = rel.replace(/[?#].*$/, '').replace(/^\/+/, '');
   if (!path) return;
+  if (hostOpen) { hostOpen(project, path); return; }
   if (/\.(html?|tex|md|markdown|board)$/i.test(path)) location.hash = '#/' + project + '/' + path;
   else if (/\.pdf$/i.test(path)) location.hash = '#/pdf:' + project + '/' + path;
   else window.open(fileUrl(project, path), '_blank', 'noopener');

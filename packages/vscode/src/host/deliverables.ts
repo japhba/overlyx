@@ -9,6 +9,10 @@
  * the same as overlyx.app's /ol-d/. Paths stay inside the workspace folder (`../figures/plot.pdf`
  * reaches the paper's figures). A page is served as its editor has it (unsaved changes included),
  * with the OverLyX runtime (dist/ol/runtime.js and its MathJax) put first into its <head>.
+ *
+ * An HTML article (core html/article.ts: its <meta name="overlyx" content="article">) opens in the
+ * document editor instead (editorProvider.ts), as on the web; its Page pane and its running HTML
+ * blocks are served from here too (the bridge's deliverable-link).
  */
 import * as vscode from 'vscode';
 import { watchAppearance, sendAppearance, changeAppearance } from './appearance.ts';
@@ -22,6 +26,7 @@ import { runtimeTags, injectRuntime, resolveInProject, SANDBOX_CSP, RUNTIME_MODE
 import { starterFor, type DeliverableKind } from '@overlyx/core/html/deliverable.ts';
 import { SCIENTIFIC_TEMPLATES, templateLabel } from '@overlyx/core/html/scientific.ts';
 import { deckExtras, type DeckExtras } from '@overlyx/core/html/deckextras.ts';
+import { isArticleHtml, parseArticle, htmlBlockOf, blockKey, rawSource } from '@overlyx/core/html/article.ts';
 import { parseBibtex, type BibEntry } from '@overlyx/core/bib.ts';
 import { webviewHtml } from './webviewHtml.ts';
 import { toPng } from './graphics.ts';
@@ -107,6 +112,7 @@ export class DeliverableServer {
       let html: string;
       try { html = open ? open.getText() : fs.readFileSync(abs, 'utf8'); } catch { res.statusCode = 404; res.end(); return; }
       const mode = (RUNTIME_MODES as readonly string[]).includes(url.searchParams.get('ol') ?? '') ? url.searchParams.get('ol') as RuntimeMode : 'view';
+      if (mode === 'embed') html = embedBlock(html, url.searchParams.get('b') ?? '');
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       res.setHeader('Cache-Control', 'no-store');
       res.end(injectRuntime(html, runtimeTags(mode, { ...extrasOf(root, rel, html), ...((mode === 'edit' || mode === 'thumb') ? { source: html } : {}) })));
@@ -125,6 +131,19 @@ export class DeliverableServer {
     res.setHeader('Cache-Control', 'no-cache');
     fs.createReadStream(file).pipe(res);
   }
+}
+
+/**
+ * An article's page with one of its HTML blocks — the one whose source has `key` (core blockKey) —
+ * between two markers: the runtime's embed mode shows only that block, the page around it as it is.
+ * The document editor shows the block running so (the server's embedHtml).
+ */
+function embedBlock(text: string, key: string): string {
+  const p = parseArticle(text);
+  const i = p.doc.body.findIndex(par => { const b = htmlBlockOf(par); return !!b && blockKey(rawSource(b)) === key; });
+  const sp = i >= 0 ? p.parSpans[i] : null;
+  if (!sp) return text;
+  return text.slice(0, sp.start) + '<template data-ol-embed></template>' + text.slice(sp.start, sp.end) + '<template data-ol-embed-end></template>' + text.slice(sp.end);
 }
 
 /* ------------------------------------------------------------------ the editor */
@@ -153,16 +172,18 @@ export type HostToDeliverable =
 const isDark = () => [vscode.ColorThemeKind.Dark, vscode.ColorThemeKind.HighContrast].includes(vscode.window.activeColorTheme.kind);
 
 /** the folder a page's links resolve in: its workspace folder (so `../figures` reaches the project's figures), else the page's parent */
-function rootFor(uri: vscode.Uri): string {
+export function rootFor(uri: vscode.Uri): string {
   const ws = vscode.workspace.getWorkspaceFolder(uri);
   if (ws?.uri.scheme === 'file') return ws.uri.fsPath;
   return path.dirname(path.dirname(uri.fsPath));
 }
 
 export class DeliverableEditorProvider implements vscode.CustomTextEditorProvider {
-  constructor(private context: vscode.ExtensionContext, private server: DeliverableServer, private bridgeBase: () => Promise<string>) {}
+  /** `documents`: the document editor, which an HTML article (core html/article.ts) opens in, as on the web */
+  constructor(private context: vscode.ExtensionContext, private server: DeliverableServer, private bridgeBase: () => Promise<string>, private documents: vscode.CustomTextEditorProvider) {}
 
-  async resolveCustomTextEditor(document: vscode.TextDocument, panel: vscode.WebviewPanel): Promise<void> {
+  async resolveCustomTextEditor(document: vscode.TextDocument, panel: vscode.WebviewPanel, token: vscode.CancellationToken): Promise<void> {
+    if (isArticleHtml(document.getText())) return this.documents.resolveCustomTextEditor(document, panel, token);
     await this.server.start();
     const root = rootFor(document.uri);
     const entry = path.relative(root, document.uri.fsPath).split(path.sep).join('/');

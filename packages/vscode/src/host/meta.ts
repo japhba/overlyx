@@ -11,6 +11,10 @@ import {
 } from '@overlyx/core';
 import { loadDocumentClass, applyDocumentTheorems, describeLayouts, describeModules, flexInsetNames } from '@overlyx/core/latex/layouts.ts';
 import { isMarkdownPath, MARKDOWN_LAYOUTS } from '@overlyx/core/md/index.ts';
+import { ARTICLE_LAYOUTS } from '@overlyx/core/html/article.ts';
+import { articleVars } from '@overlyx/core/html/articletheme.ts';
+import { pageLinks } from '@overlyx/core/html/deckextras.ts';
+import { isHtmlPath } from '@overlyx/core/html/deliverable.ts';
 import { collectFiles, findMaster, isBackupFile, readTextFile } from './project.ts';
 import { cachedParseFile, type TexContext } from './texdoc.ts';
 
@@ -92,6 +96,8 @@ export function buildMeta(input: MetaInput): Record<string, unknown> {
   const { ctx, project, relPath, lyx, isChild } = input;
   const proj = ctx.root;
   const markdown = isMarkdownPath(relPath);
+  // an .html file in the document editor is an article (core html/article.ts)
+  const article = isHtmlPath(relPath);
   const masterRel = isChild ? findMaster(proj, relPath) : null;
   const masterId = masterRel ? `${project}/${masterRel}` : null;
   const readDoc = (rel: string): LyxDocument => cachedParseFile(ctx, rel).doc;
@@ -107,7 +113,7 @@ export function buildMeta(input: MetaInput): Record<string, unknown> {
   };
   const readFile = (fn: string) => { const abs = safe(fn); try { return abs ? ctx.readText?.(abs) ?? fs.readFileSync(abs, 'utf8') : undefined; } catch { return undefined; } };
 
-  const macros = collectMacros(rootLyx, { include: includeDoc, readFile });
+  const macros = collectMacros(rootLyx, { include: includeDoc, readFile }, article ? { files: pageLinks(lyx.preamble.join('\n'), 'overlyx-macros') } : {});
   if (masterRel) macros.push(...collectMacros(lyx, { include: includeDoc, readFile }, { includePreamble: false }));
 
   // labels across the master tree (for the cross-reference dialog)
@@ -147,14 +153,17 @@ export function buildMeta(input: MetaInput): Record<string, unknown> {
     layouts = describeLayouts(dc);
     // a markdown document: only the blocks markdown has (editor/markdown.ts in the client)
     if (markdown && Array.isArray(layouts)) layouts = (layouts as { name: string }[]).filter(l => MARKDOWN_LAYOUTS.includes(l.name));
+    if (article && Array.isArray(layouts)) layouts = (layouts as { name: string }[]).filter(l => ARTICLE_LAYOUTS.includes(l.name));
     flexInsets = dc.insetLayouts ? flexInsetNames(dc) : null;
   } catch { layouts = null; }
 
-  const health = input.fileText === null || markdown ? [] : checkTexHealth(input.fileText, { isFragment: isChild });
+  const health = input.fileText === null || markdown || article ? [] : checkTexHealth(input.fileText, { isFragment: isChild });
 
   return {
     id: `${project}/${relPath}`, project, path: relPath, master: masterId,
-    format: markdown ? 'markdown' : 'tex',
+    format: markdown ? 'markdown' : article ? 'article' : 'tex',
+    // an article's look: the custom properties its page sets at :root (the editor takes them on)
+    ...(article ? { article: { vars: articleVars(lyx.preamble.join('\n'), fn => { const abs = safe(fn); try { return abs && fs.statSync(abs).size < 1e6 ? readFile(fn) : undefined; } catch { return undefined; } }) } } : {}),
     role: 'edit',
     labels,
     textclass: getTextClass(rootLyx), modules: getModules(rootLyx),
@@ -172,7 +181,7 @@ export function buildMeta(input: MetaInput): Record<string, unknown> {
     macroList: macros.map(m => ({ name: m.name, args: m.args, def: m.def, display: m.display, source: m.source })),
     bib: bibUnique.slice(0, 30000).map(e => ({ key: e.key, author: e.authorShort, year: e.year, title: e.title })),
     layouts, flexInsets,
-    graphicsPath: graphicsSearchDirs(getPreamble(rootLyx), path.dirname(rootRel)),
+    graphicsPath: article ? [] : graphicsSearchDirs(getPreamble(rootLyx), path.dirname(rootRel)),
     files: collectFiles(proj),
     health,
   };

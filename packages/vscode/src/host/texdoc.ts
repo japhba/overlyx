@@ -1,14 +1,30 @@
 /**
  * Parsing and writing .tex documents in the context of a project directory: the project's own
  * layout files, the master's settings for child documents, and a cache of parsed files that are
- * not open. Ported from the server's texdoc.ts.
+ * not open. Ported from the server's texdoc.ts. Markdown documents and HTML articles (an .html file
+ * in the document editor is one: deliverables.ts sends only those here) go through their own parsers.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseTex, writeTex, writeTexPreserving, type ParseTexResult, type PreserveCache } from '@overlyx/core/tex/index.ts';
 import { layoutTemplate, setHeaderValue, markEditedSettings, type LyxDocument } from '@overlyx/core';
 import { parseMarkdown, writeMarkdown, writeMarkdownPreserving, isMarkdownPath, markdownForLatex, type MarkdownPreserveCache } from '@overlyx/core/md/index.ts';
+import { parseArticle, writeArticle, writeArticlePreserving, type ArticlePreserveCache } from '@overlyx/core/html/article.ts';
+import { isHtmlPath } from '@overlyx/core/html/deliverable.ts';
 import { findMaster, readTextFile, resolveInside } from './project.ts';
+
+/**
+ * TeX as MathML (the server's mathml.ts: MathJax in Node), for a new formula on an article whose page
+ * renders its math ahead of time. Loaded with the first article, not at activation; until it is
+ * there such a formula is written as TeX.
+ */
+let texToMathML: ((tex: string, display: boolean) => string | null) | undefined;
+let mathmlLoading = false;
+function loadMathML(): void {
+  if (mathmlLoading) return;
+  mathmlLoading = true;
+  void import('../../../server/src/mathml.ts').then(m => { texToMathML = m.texToMathML; }).catch(() => { /* TeX then */ });
+}
 
 export interface TexContext { root: string; layoutDir: string; /** Unsaved text in an open VS Code document. */ readText?: (absolutePath: string) => string | undefined }
 
@@ -70,6 +86,8 @@ export function sameDocumentText(a: string, b: string, ctx: TexContext, relPath:
 export function parseDocumentText(text: string, ctx: TexContext, relPath: string, depth = 0): ParseTexResult {
   // a markdown document (core md/): no preamble of its own, no master
   if (isMarkdownPath(relPath)) { const r = parseMarkdown(text); return { doc: r.doc, warnings: r.warnings, fragment: true, sources: r.parSpans, bodyRange: null }; }
+  // an HTML article: the page around its prose kept verbatim
+  if (isHtmlPath(relPath)) { loadMathML(); const r = parseArticle(text); return { doc: r.doc, warnings: r.warnings, fragment: true, sources: r.parSpans, bodyRange: null }; }
   const abs = resolveInside(ctx.root, relPath);
   const opts = { layoutDir: ctx.layoutDir, localDirs: [ctx.root, path.dirname(abs)], readFile: readerFor(ctx, abs) };
   const first = parseTex(text, opts);
@@ -95,6 +113,12 @@ export function writeDocumentText(doc: LyxDocument, ctx: TexContext, relPath: st
     const r = preserve ? writeMarkdownPreserving(doc, preserve.base, cache) : writeMarkdown(doc);
     return { text: r.text, warnings: r.warnings, files: {}, spans: r.spans };
   }
+  if (isHtmlPath(relPath)) {
+    let cache: ArticlePreserveCache | undefined;
+    if (preserve?.cache) { cache = articleCaches.get(preserve.cache); if (!cache) articleCaches.set(preserve.cache, cache = {}); }
+    const r = preserve ? writeArticlePreserving(doc, preserve.base, cache, { mathml: texToMathML }) : writeArticle(doc);
+    return { text: r.text, warnings: r.warnings, files: {}, spans: r.spans };
+  }
   const abs = resolveInside(ctx.root, relPath);
   const opts = {
     layoutDir: ctx.layoutDir, localDirs: [ctx.root, path.dirname(abs)], readFile: readerFor(ctx, abs),
@@ -108,6 +132,7 @@ export function writeDocumentText(doc: LyxDocument, ctx: TexContext, relPath: st
 
 /** a markdown document's parse of the file text between saves (the counterpart of the .tex PreserveCache) */
 const mdCaches = new WeakMap<PreserveCache, MarkdownPreserveCache>();
+const articleCaches = new WeakMap<PreserveCache, ArticlePreserveCache>();
 
 /** A markdown document as a complete .tex file, for its PDF (built with LuaLaTeX). */
 export function markdownAsTex(doc: LyxDocument, ctx: TexContext, relPath: string): string {

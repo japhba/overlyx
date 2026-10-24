@@ -63,7 +63,7 @@ function cursorTarget(view: EditorView): FollowTarget | null {
   return { words: blocks[i].words, nth, frac };
 }
 
-export function ArticlePage({ docId, savedAt, view, selTick, syncSeq, ruler, onClose }: {
+export function ArticlePage({ docId, savedAt, view, selTick, syncSeq, ruler, onClose, printable = true }: {
   docId: string;
   /** when the document was last written: the page is loaded again after it */
   savedAt: number;
@@ -75,6 +75,8 @@ export function ArticlePage({ docId, savedAt, view, selTick, syncSeq, ruler, onC
   /** View ▸ Ruler: the ruler over the page */
   ruler?: boolean;
   onClose?: () => void;
+  /** the page printed as a PDF is offered (the server prints it; VS Code has no printer for it) */
+  printable?: boolean;
 }) {
   const project = projectOfDoc(docId), path = docPathOf(docId);
   const [url, setUrl] = useState<string | null>(null);
@@ -192,7 +194,7 @@ export function ArticlePage({ docId, savedAt, view, selTick, syncSeq, ruler, onC
         <button type="button" class={'small-btn' + (phone ? ' active' : '')} aria-pressed={phone} onClick={() => setPhone(p => !p)} title="The page at a phone's width">Phone</button>
         <div class="pdf-bar-fill" />
         {src && <a class="small-btn" href={`${url}?ol=view`} target="_blank" rel="noopener" title="The page in a tab of its own">Open ↗</a>}
-        <a class="small-btn" href={pdfHref} target="_blank" rel="noopener" title="The page printed as a PDF">PDF</a>
+        {printable && <a class="small-btn" href={pdfHref} target="_blank" rel="noopener" title="The page printed as a PDF">PDF</a>}
         {onClose && <button type="button" class="small-btn close" onClick={onClose} title="Hide the page">✕</button>}
       </div>
       {ruler && !phone && src && column && (
