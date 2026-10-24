@@ -6,9 +6,9 @@ import type { Node as PMNode } from 'prosemirror-model';
 import { TextSelection } from 'prosemirror-state';
 import type { EditorView, NodeView } from 'prosemirror-view';
 import { insetLabel, argumentLabel } from '../layouts';
-import { parseHeader, commentHeader, formatTimestamp } from '@overlyx/core';
+import { parseHeader } from '@overlyx/core';
 import { editorContext } from '../context';
-import { toggleCommentResolved } from '../commentops';
+import { toggleCommentResolved, replyToThread } from '../commentops';
 import { recordInteraction } from '../../usage';
 import { footnoteJump } from '../plugins/mdfootnotes';
 import type { InteractionAction, InteractionOutcome } from '@overlyx/core/interactions.ts';
@@ -196,29 +196,10 @@ export class InsetView implements NodeView {
   reply() {
     const pos = this.getPos();
     if (pos === undefined) return;
-    const cur = this.view.state.doc.nodeAt(pos);
-    if (!cur) return;
-    // the last message still has no text (a new thread's first one): the cursor goes there — a reply
-    // below it left the first message blank, an empty "U1 13:41" above the comment (live co-editing test)
-    const last = cur.lastChild;
-    if (last && cur.childCount > 1 && !last.textContent.trim()) {
-      const inLast = pos + cur.nodeSize - 1 - last.nodeSize + 1;
-      this.view.dispatch(this.view.state.tr.setSelection(TextSelection.create(this.view.state.doc, inLast)));
-      this.view.focus();
-      this.recordAction('comment-reply', 'unchanged');
-      return;
-    }
-    const schema = this.view.state.schema;
-    const user = editorContext.user?.name ?? 'Anonymous';
-    const header = schema.nodes.paragraph.create({ layout: 'Plain Layout' }, schema.text(commentHeader(user, formatTimestamp())));
-    const body = schema.nodes.paragraph.create({ layout: 'Plain Layout' });
-    const end = pos + cur.nodeSize - 1; // before the closing token of the inset
-    let tr = this.view.state.tr.insert(end, [header, body]);
-    if (cur.attrs.status === 'collapsed') tr = tr.setNodeMarkup(pos, undefined, { ...cur.attrs, status: 'open' });
-    tr = tr.setSelection(TextSelection.create(tr.doc, end + header.nodeSize + 1));
-    this.view.dispatch(tr);
+    const done = replyToThread(this.view, pos);
+    if (!done) return;
     this.view.focus();
-    this.recordAction('comment-reply', 'changed');
+    this.recordAction('comment-reply', done);
   }
 
   toggleResolved() {

@@ -103,4 +103,24 @@ describe('changes display filter', () => {
     setChangesFilter(view as any, { showDeletions: false });
     expect(changesFilterKey.getState(view.state)!.unfolded.size).toBe(0);
   });
+
+  it('runs side by side or with only spaces between them share one caret, and a word between two spaces leaves one', () => {
+    // "The [quick] [brown] fox": two deletions at different times, a space between them
+    const two = '\\begin_layout Standard\nThe \n\\change_deleted 0 1700000000\nquick\\change_unchanged\n \n\\change_deleted 0 1700000100\nbrown\\change_unchanged\n fox\n\\end_layout\n';
+    const view = fakeView(pmDoc(two));
+    setChangesFilter(view as any, { showDeletions: false });
+    const plugin = view.state.plugins[0];
+    const found = ((plugin.props.decorations as any).call(plugin, view.state)).find();
+    const widgets = found.filter((d: any) => d.from === d.to);
+    expect(widgets).toHaveLength(1);
+    const hidden = found.filter((d: any) => d.from !== d.to && d.type?.attrs?.class === 'lyx-change-hidden').map((d: any) => view.state.doc.textBetween(d.from, d.to)).join('|');
+    // both words, the space between them and one of the spaces around them
+    expect(hidden).toBe('quick| |brown| ');
+    // one click opens both
+    setChangesFilter(view as any, { toggleRun: 'deleted:0:1700000000\ndeleted:0:1700000100' });
+    expect([...changesFilterKey.getState(view.state)!.unfolded].sort()).toEqual(['deleted:0:1700000000', 'deleted:0:1700000100']);
+    setChangesFilter(view as any, { toggleRun: 'deleted:0:1700000000\ndeleted:0:1700000100' });
+    expect(changesFilterKey.getState(view.state)!.unfolded.size).toBe(0);
+  });
 });
+

@@ -8,7 +8,7 @@ import { TextSelection } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
 import { parseHeader, commentHeader, formatTimestamp } from '@overlyx/core';
 import { editorContext } from './context';
-import { allowCommentEdit } from './plugins/commentguard';
+import { allowCommentEdit, isMe } from './plugins/commentguard';
 
 export interface CommentInfo {
   view: EditorView;
@@ -74,6 +74,34 @@ export function gotoComment(view: EditorView, pos: number): void {
     setTimeout(() => dom.classList.remove('highlight'), 1200);
     (dom.querySelector(':scope > .inset-box') as HTMLElement | null)?.scrollIntoView?.({ block: 'center', inline: 'nearest' });
   }
+}
+
+/**
+ * This person's reply to the thread at `pos`: their header and an empty line at its end, the cursor
+ * there — or, when the thread's last message is their own and still empty, the cursor goes to it.
+ * 'unchanged' / 'changed': what happened; null: no thread there.
+ */
+export function replyToThread(view: EditorView, pos: number): 'unchanged' | 'changed' | null {
+  const cur = view.state.doc.nodeAt(pos);
+  if (!cur || !isCommentNode(cur)) return null;
+  // the last message still has no text (a new thread's first one): the cursor goes there — a reply
+  // below it left the first message blank, an empty "U1 13:41" above the comment (live co-editing test)
+  const last = cur.lastChild;
+  let lastHeader: string | null = null;
+  cur.forEach(p => { const h = parseHeader(p.textContent.trim()); if (h) lastHeader = h.author; });
+  if (last && cur.childCount > 1 && !last.textContent.trim() && lastHeader !== null && isMe(lastHeader)) {
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, pos + cur.nodeSize - 1 - last.nodeSize + 1)));
+    return 'unchanged';
+  }
+  const schema = view.state.schema;
+  const user = editorContext.user?.name ?? 'Anonymous';
+  const header = schema.nodes.paragraph.create({ layout: 'Plain Layout' }, schema.text(commentHeader(user, formatTimestamp())));
+  const body = schema.nodes.paragraph.create({ layout: 'Plain Layout' });
+  const end = pos + cur.nodeSize - 1; // before the closing token of the inset
+  let tr = view.state.tr.insert(end, [header, body]);
+  if (cur.attrs.status === 'collapsed') tr = tr.setNodeMarkup(pos, undefined, { ...cur.attrs, status: 'open' });
+  view.dispatch(tr.setSelection(TextSelection.create(tr.doc, end + header.nodeSize + 1)));
+  return 'changed';
 }
 
 /** mark the thread at `pos` resolved / open again (a plain LyX comment first gets a header, so it becomes a thread) */

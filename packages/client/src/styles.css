@@ -842,8 +842,11 @@ html[data-theme="dark"] { --cm-accent: #f4c03c; --cm-chip-bg: #8a6b12; --cm-chip
 /* in the margin: every card shows, the open one stands out */
 .margin-mode .lyx-inset-note-comment.in-margin > .inset-box { display: flex; flex-direction: column; padding: 10px 12px 10px 14px; border-left-width: 3px; border-radius: 8px; font-size: var(--note-size, 0.9em); }
 .margin-mode .lyx-inset-note-comment.in-margin.cm-active > .inset-box { z-index: 4; border-color: color-mix(in srgb, var(--cm-accent) 60%, var(--cm-line)); box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1), 0 12px 30px -10px rgba(0, 0, 0, 0.3); }
-/* the selected card (the cursor in its thread, or jumped to): outlined, so it stands out among the others */
-.margin-mode .lyx-inset-note-comment.in-margin.cm-active > .inset-box, .lyx-inset-note-comment.highlight > .inset-box { outline: 2px solid var(--cm-accent); outline-offset: 2px; }
+/* the selected comment's anchor in the text (the cursor in its thread, or jumped to): outlined, so it is easy to find */
+.lyx-inset-note-comment.cm-active > .inset-anchor, .lyx-inset-note-comment.highlight > .inset-anchor { outline: 2px solid var(--cm-accent); outline-offset: 2px; }
+.lyx-inset-note-comment.ProseMirror-selectednode { outline: none; }
+/* (a thread selected as a whole — someone else's, the cursor cannot go in — is not words selected: no highlight over the card) */
+.lyx-inset-note-comment.ProseMirror-selectednode > .inset-box *::selection { background: transparent; }
 
 /* reactions (plugins/reactions.ts): chips under a message, the ☺ beside its time (on hover / in the open card), the picker */
 .cm-reactions { display: flex; flex-wrap: wrap; gap: 4px; margin: 5px 0 2px; text-indent: 0; font-size: 12px; }
@@ -2284,13 +2287,14 @@ html[data-presenting] .editor-column.panes > .editor-scroll { display: block !im
 
 /* A hidden tracked change (changes filter): a small caret with a triangle below marks the spot —
    click folds/unfolds that one run; the Review toolbar switches fold/unfold all. */
-.ol-change-fold { display: inline-block; position: relative; width: 9px; height: 1em; vertical-align: text-bottom; cursor: pointer; }
-.ol-change-fold::before { content: ''; position: absolute; left: 3px; top: 0.05em; bottom: 0.1em; width: 2px; border-radius: 1px; background: var(--change-color, var(--accent)); opacity: 0.85; }
-.ol-change-fold::after { content: ''; position: absolute; left: 0; bottom: -0.32em; border-left: 4.5px solid transparent; border-right: 4.5px solid transparent; border-top: 5px solid var(--change-color, var(--accent)); opacity: 0.85; }
-.ol-change-fold.open::after { border-top: 0; border-bottom: 5px solid var(--change-color, var(--accent)); }
-.ol-change-fold:hover::before, .ol-change-fold:hover::after { opacity: 1; }
+.ol-change-fold { display: inline-block; position: relative; width: 5px; height: 0.45em; margin: 0 1px; vertical-align: baseline; cursor: pointer; }
+.ol-change-fold::before { content: ''; position: absolute; left: 0; bottom: -0.1em; border-left: 2.5px solid transparent; border-right: 2.5px solid transparent; border-bottom: 4px solid var(--change-color, var(--accent)); opacity: 0.75; }
+.ol-change-fold.open::before { bottom: auto; top: -0.05em; border-bottom: 0; border-top: 4px solid var(--change-color, var(--accent)); }
+.ol-change-fold::after { content: ''; position: absolute; inset: -0.45em -4px -0.3em; }   /* a larger target than the mark */
+.ol-change-fold:hover::before { opacity: 1; }
 .ol-change-fold.inserted { --change-color: var(--ok); }
 .ol-change-fold.deleted { --change-color: var(--err); }
+.ol-change-fold.mixed { --change-color: var(--ui-muted); }
 .lyx-change-unfolded { outline: 1px dotted var(--change-color, var(--ui-muted)); outline-offset: 1px; }
 
 /* Vertical space (\vspace, \bigskip, ...) drawn like LyX: the actual gap, a vertical line with

@@ -5,12 +5,17 @@
  * empty goes away when the cursor leaves the thread: the reply just started, or the whole thread
  * when nothing was written into a new comment. Only the user's own messages are taken away, and
  * only by a move of their own cursor (a remote update never deletes anything here).
+ *
+ * A thread can also be selected as a whole (plugins/commentguard.ts puts a cursor that landed in
+ * someone else's message there): its card is open, and typing, Enter or a paste start one's reply;
+ * Backspace / Delete do not take other people's messages away.
  */
 import type { Node as PMNode } from 'prosemirror-model';
-import { Plugin, PluginKey, TextSelection, type EditorState, type Transaction } from 'prosemirror-state';
+import { NodeSelection, Plugin, PluginKey, TextSelection, type EditorState, type Transaction } from 'prosemirror-state';
 import { Decoration, DecorationSet } from 'prosemirror-view';
 import { parseHeader } from '@overlyx/core';
-import { isCommentNode } from '../commentops';
+import { isCommentNode, replyToThread } from '../commentops';
+import { othersMessages } from './commentguard';
 import { editorContext } from '../context';
 import { getPrefs } from '../../prefs';
 
@@ -25,6 +30,17 @@ export function threadAt(state: EditorState, pos: number): { pos: number; node: 
   }
   return null;
 }
+
+/** the thread that is open: the one the cursor is in, or the one selected as a whole */
+export function activeThread(state: EditorState): { pos: number; node: PMNode } | null {
+  const s = state.selection;
+  if (s instanceof NodeSelection && isCommentNode(s.node)) return { pos: s.from, node: s.node };
+  return threadAt(state, s.head);
+}
+const selectedThread = (state: EditorState): number | null => {
+  const s = state.selection;
+  return s instanceof NodeSelection && isCommentNode(s.node) ? s.from : null;
+};
 
 /**
  * What to take away from a thread the cursor left: its last message when that is the user's own and
@@ -49,21 +65,42 @@ export function commentUiPlugin(): Plugin {
     key: commentUiKey,
     props: {
       decorations(state) {
-        const t = threadAt(state, state.selection.head);
+        const t = activeThread(state);
         return t ? DecorationSet.create(state.doc, [Decoration.node(t.pos, t.pos + t.node.nodeSize, { class: 'cm-active' })]) : null;
       },
       handleKeyDown(view, ev) {
+        const sel = selectedThread(view.state);
+        if (sel !== null && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
+          // a thread selected as a whole: Enter replies; its messages stay (other people's, at least)
+          if (ev.key === 'Enter') { replyToThread(view, sel); return true; }
+          if ((ev.key === 'Backspace' || ev.key === 'Delete') && othersMessages(view.state.doc.nodeAt(sel)!, sel).length) {
+            editorContext.notify?.('Other people’s comments stay — resolve the thread (✓) when it is done');
+            return true;
+          }
+        }
         if (ev.key !== 'Enter' || !(ev.ctrlKey || ev.metaKey) || ev.altKey || ev.shiftKey) return false;
-        const t = threadAt(view.state, view.state.selection.head);
+        const t = activeThread(view.state);
         if (!t) return false;
         // Ctrl+Enter: done — back into the text, right after the thread's marker
         view.dispatch(view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(t.pos + t.node.nodeSize))).scrollIntoView());
         return true;
       },
+      // typing into a selected thread is a reply (not the thread replaced by the letter)
+      handleTextInput(view, _from, _to, text) {
+        const sel = selectedThread(view.state);
+        if (sel === null) return false;
+        if (replyToThread(view, sel)) view.dispatch(view.state.tr.insertText(text));
+        return true;
+      },
+      handlePaste(view) {
+        const sel = selectedThread(view.state);
+        if (sel !== null) replyToThread(view, sel);
+        return false;   // the paste goes on, into the reply
+      },
     },
     appendTransaction(trs: readonly Transaction[], oldState, newState) {
       if (!trs.some(tr => tr.selectionSet) || trs.some(tr => tr.getMeta('y-sync$'))) return null;
-      const before = threadAt(oldState, oldState.selection.head);
+      const before = activeThread(oldState);
       if (!before) return null;
       let pos = before.pos;
       for (const tr of trs) {
@@ -71,7 +108,7 @@ export function commentUiPlugin(): Plugin {
         if (r.deleted) return null;
         pos = r.pos;
       }
-      if (threadAt(newState, newState.selection.head)?.pos === pos) return null;   // still inside
+      if (activeThread(newState)?.pos === pos) return null;   // still inside
       const node = newState.doc.nodeAt(pos);
       if (!node || !isCommentNode(node)) return null;
       const me = editorContext.user?.name;

@@ -4,7 +4,7 @@
  * taking the whole thread out still work.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
-import { EditorState, TextSelection } from 'prosemirror-state';
+import { EditorState, NodeSelection, TextSelection } from 'prosemirror-state';
 import type { Node as PMNode } from 'prosemirror-model';
 import { schema } from '../packages/core/src/schema.ts';
 import { commentHeader } from '../packages/core/src/index.ts';
@@ -62,4 +62,16 @@ describe('other people’s comments', () => {
     const c = setup(thread(header('Bob'), plain('His.')));
     expect(lockedAuthor(c.state.doc, c.at(1, 1), c.at(1, 1))).toBe('Bob');
   });
+
+  it('the cursor does not go into someone else’s message: the thread is selected instead; a selection over it stays', () => {
+    const { state, start, at } = setup(thread(header('Bob'), plain('Check this.'), header('Ada'), plain('Done.')));
+    const into = state.apply(state.tr.setSelection(TextSelection.create(state.doc, at(1, 3))));
+    expect(into.selection instanceof NodeSelection && into.selection.from === start).toBe(true);
+    const mine = state.apply(state.tr.setSelection(TextSelection.create(state.doc, at(3, 2))));
+    expect(mine.selection.head).toBe(at(3, 2));
+    const words = state.apply(state.tr.setSelection(TextSelection.create(state.doc, at(1, 0), at(1, 5))));
+    expect(words.selection.empty).toBe(false);
+    expect(words.selection instanceof NodeSelection).toBe(false);
+  });
 });
+

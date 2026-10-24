@@ -47,7 +47,8 @@ function containerChain($p: ResolvedPos): number[] {
  * markdown footnote it lies in, at the end of the document far below its reference (plugins/mdfootnotes.ts).
  */
 function marginCard(target: EventTarget | null): HTMLElement | null {
-  return (target as Element | null)?.closest?.<HTMLElement>('.lyx-inset-note.in-margin > .inset-box, .lyx-inset-foot.fn-foot > .inset-box') ?? null;
+  // (an open comment's pop-up card in the text too: it hangs below its line like a margin card beside it)
+  return (target as Element | null)?.closest?.<HTMLElement>('.lyx-inset-note.in-margin > .inset-box, .lyx-inset-note-comment.cm-active > .inset-box, .lyx-inset-foot.fn-foot > .inset-box') ?? null;
 }
 
 /**

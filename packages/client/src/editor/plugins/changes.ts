@@ -625,9 +625,10 @@ export function changeGroupsIn(doc: PMNode, from: number, to: number): ChangeRan
  * Purely a *view* filter: which tracked-change types are drawn. Independent of the document
  * itself — insertions and deletions can each be hidden (both, either, or neither), e.g. to read
  * the text as it will look once deletions are accepted while still seeing what was inserted.
- * A hidden run does not vanish without a trace: a small caret with a triangle stands where it is
- * (like a folded region), and clicking it unfolds just that run — the toolbar switches then act
- * as fold / unfold *all* (flipping one clears the per-run exceptions).
+ * A hidden run does not vanish without a trace: a small caret stands where it is (like a folded
+ * region; hovering it shows the hidden text), and clicking it unfolds just that run — the toolbar
+ * switches then act as fold / unfold *all* (flipping one clears the per-run exceptions). Runs side
+ * by side, or with only spaces between them, share one caret (and the spaces fold with them).
  */
 export interface ChangesFilterState { showInsertions: boolean; showDeletions: boolean; unfolded: ReadonlySet<string> }
 export const changesFilterKey = new PluginKey<ChangesFilterState>('lyx-changes-filter');
@@ -636,11 +637,13 @@ export type ChangesFilterPatch = Partial<Pick<ChangesFilterState, 'showInsertion
 /** one edit's identity: stable across position shifts (an agent or user edit shares author+time) */
 const runKeyOf = (c: { type: string; author: number; time: number }) => `${c.type}:${c.author}:${c.time}`;
 
-const foldMarker = (key: string, type: string, folded: boolean) => () => {
+/** `keys`: the runs it stands for, one per line; `runs`: how many separate runs; `text`: what they hide (the start of it) */
+const foldMarker = (keys: string, type: string, folded: boolean, runs: number, text: string) => () => {
   const el = document.createElement('span');
   el.className = `ol-change-fold ${type}${folded ? '' : ' open'}`;
-  el.setAttribute('data-fold', key);
-  el.title = folded ? 'A hidden tracked change — click to show it' : 'Click to hide this tracked change again';
+  el.setAttribute('data-fold', keys);
+  const what = type === 'deleted' ? 'deletion' : type === 'inserted' ? 'insertion' : 'change';
+  el.title = folded ? `${runs > 1 ? `${runs} hidden ${what}s` : `A hidden ${what}`}${text ? `: “${text}”` : ''} — click to show` : `Click to hide ${runs > 1 ? 'these changes' : 'this change'} again`;
   el.contentEditable = 'false';
   return el;
 };
@@ -655,8 +658,11 @@ export function changesFilterPlugin(): Plugin<ChangesFilterState> {
         if (!meta) return prev;
         let unfolded: ReadonlySet<string> = prev.unfolded;
         if (meta.toggleRun) {
+          // (one caret may stand for several runs: all of them open, or all close again)
+          const keys = meta.toggleRun.split('\n').filter(Boolean);
           const next = new Set(unfolded);
-          next.has(meta.toggleRun) ? next.delete(meta.toggleRun) : next.add(meta.toggleRun);
+          const open = keys.some(k => !next.has(k));
+          for (const k of keys) { if (open) next.add(k); else next.delete(k); }
           unfolded = next;
         }
         // the toolbar switches mean fold / unfold ALL: flipping one resets the per-run exceptions
@@ -669,24 +675,58 @@ export function changesFilterPlugin(): Plugin<ChangesFilterState> {
         const f = changesFilterKey.getState(state)!;
         if (f.showInsertions && f.showDeletions) return null;
         const decos: Decoration[] = [];
-        let runKey: string | null = null;   // the filtered run the walker is currently inside
-        let runEnd = -1;
+        // the filtered runs one caret stands for: side by side, or with only spaces between them
+        type Group = { from: number; end: number; keys: string[]; types: Set<string>; runs: number; lastKey: string; text: string; nodes: { from: number; to: number; text: boolean }[]; gaps: { from: number; to: number }[] };
+        let g: Group | null = null;
+        let gap: { from: number; to: number; text: string } | null = null;   // spaces right after the group: its own if another hidden run follows
+        const flush = () => {
+          if (g) {
+            const folded = g.keys.some(k => !f.unfolded.has(k));
+            const type = g.types.size === 1 ? [...g.types][0] : 'mixed';
+            const keys = g.keys.join('\n');
+            const text = g.text.trim().replace(/\s+/g, ' ');
+            decos.push(Decoration.widget(g.from, foldMarker(keys, type, folded, g.runs, text.length > 60 ? text.slice(0, 60) + '…' : text), { side: -1, key: `fold:${keys}:${folded}` }));
+            const cls = folded ? 'lyx-change-hidden' : 'lyx-change-unfolded';
+            for (const n of g.nodes) decos.push(n.text ? Decoration.inline(n.from, n.to, { class: cls }) : Decoration.node(n.from, n.to, { class: cls }));
+            if (folded) {
+              for (const s of g.gaps) decos.push(Decoration.inline(s.from, s.to, { class: 'lyx-change-hidden' }));
+              // a word folded away between two spaces leaves one of them: "the ‸ fox", not "the  ‸  fox"
+              const $f = state.doc.resolve(g.from), $e = state.doc.resolve(g.end);
+              const before = g.from > $f.start() ? state.doc.textBetween(g.from - 1, g.from, '', '\ufffc') : '';
+              const after = g.end < $e.end() ? state.doc.textBetween(g.end, g.end + 1, '', '\ufffc') : '';
+              if (/^\s$/.test(after) && (before === '' || /^\s$/.test(before))) decos.push(Decoration.inline(g.end, g.end + 1, { class: 'lyx-change-hidden' }));
+            }
+          }
+          g = null; gap = null;
+        };
         state.doc.descendants((node, pos) => {
-          if (!node.isInline) { runKey = null; return true; }
+          if (!node.isInline) { flush(); return true; }
           const c = changeOf(node);
           const hit = c && ((c.type === 'inserted' && !f.showInsertions) || (c.type === 'deleted' && !f.showDeletions));
-          if (!hit) { runKey = null; return true; }
-          const key = runKeyOf(c);
-          const folded = !f.unfolded.has(key);
-          if (key !== runKey || pos > runEnd) {
-            runKey = key;
-            decos.push(Decoration.widget(pos, foldMarker(key, c.type, folded), { side: -1, key: `fold:${key}:${folded}` }));
+          if (!hit) {
+            if (g && !gap && node.isText && pos === g.end && /^\s+$/.test(node.text ?? '')) { gap = { from: pos, to: pos + node.nodeSize, text: node.text! }; return true; }
+            flush();
+            return true;
           }
-          runEnd = pos + node.nodeSize;
-          const cls = folded ? 'lyx-change-hidden' : 'lyx-change-unfolded';
-          decos.push(node.isText ? Decoration.inline(pos, pos + node.nodeSize, { class: cls }) : Decoration.node(pos, pos + node.nodeSize, { class: cls }));
-          return true;
+          const key = runKeyOf(c);
+          const touching = !!g && pos === g.end;
+          if (g && (touching || (gap && pos === gap.to))) {
+            if (gap) { g.gaps.push(gap); g.text += gap.text; gap = null; }
+          } else {
+            flush();
+            g = { from: pos, end: pos, keys: [], types: new Set(), runs: 0, lastKey: '', text: '', nodes: [], gaps: [] };
+          }
+          const grp = g!;
+          if (!touching || key !== grp.lastKey) grp.runs++;
+          if (!grp.keys.includes(key)) grp.keys.push(key);
+          grp.types.add(c.type);
+          grp.lastKey = key;
+          grp.end = pos + node.nodeSize;
+          grp.nodes.push({ from: pos, to: grp.end, text: node.isText });
+          if (grp.text.length < 80) grp.text += node.isText ? node.text : ' ';
+          return node.isText;   // a hidden inset goes as a whole
         });
+        flush();
         return decos.length ? DecorationSet.create(state.doc, decos) : null;
       },
       handleDOMEvents: {

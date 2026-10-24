@@ -5,9 +5,12 @@
  * to a message and taking a whole thread out (with the text around it) still work. Edits that
  * arrive from elsewhere (co-authors, agents, the TeX source) and undo / redo are not this editor's
  * to refuse. A plain LyX comment without headers has no known author and stays open to everyone.
+ * The cursor does not go into someone else's message either: put there (a click, the arrow keys),
+ * the thread is selected as a whole instead — its card open, to read, react or reply
+ * (plugins/commentui.ts) — while a selection over their words, to copy them, stays as it is.
  */
 import type { Node as PMNode } from 'prosemirror-model';
-import { Plugin, PluginKey, type Transaction } from 'prosemirror-state';
+import { NodeSelection, Plugin, PluginKey, TextSelection, type Transaction } from 'prosemirror-state';
 import { isHistoryTransaction } from 'prosemirror-history';
 import { parseHeader } from '@overlyx/core';
 import { isCommentNode } from '../commentops';
@@ -86,6 +89,16 @@ export function commentGuardPlugin(): Plugin {
         }
       }
       return true;
+    },
+    appendTransaction(trs, _old, state) {
+      const sel = state.selection;
+      if (!trs.some(tr => tr.selectionSet || tr.docChanged) || !(sel instanceof TextSelection) || !sel.empty) return null;
+      if (lockedAuthor(state.doc, sel.head, sel.head) === null) return null;
+      const $h = sel.$head;
+      for (let d = $h.depth; d > 0; d--) {
+        if (isCommentNode($h.node(d))) return state.tr.setSelection(NodeSelection.create(state.doc, $h.before(d)));
+      }
+      return null;
     },
   });
 }
