@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 /**
- * The agent keeper: owns one `codex app-server` child and bridges its JSON-lines stdio to a unix
+ * The agent keeper: owns one `codex app-server` child (or the Claude engine,
+ * scripts/claude-app-server.mjs, which speaks the same protocol: KEEPER_BIN/KEEPER_ARGS/KEEPER_ENV)
+ * and bridges its JSON-lines stdio to a unix
  * socket, so the codex process — and any turn it is running — survives OverLyX server restarts,
  * deploys included (the systemd unit uses KillMode=process; the keeper is spawned detached).
  * The server (packages/server/src/agent.ts) connects and speaks the app-server protocol through
@@ -18,6 +20,9 @@ import { spawn } from 'node:child_process';
 
 const SOCK = process.env.KEEPER_SOCKET;
 const BIN = (process.env.KEEPER_BIN ?? 'codex').trim();
+// the engine's arguments and its environment beyond the basics (the Claude engine: node with its script)
+const ARGS = process.env.KEEPER_ARGS ? JSON.parse(process.env.KEEPER_ARGS) : ['app-server'];
+const EXTRA_ENV = process.env.KEEPER_ENV ? JSON.parse(process.env.KEEPER_ENV) : {};
 const HOME = process.env.KEEPER_HOME;
 const IDLE_MS = Number(process.env.KEEPER_IDLE_MS ?? 2 * 60 * 60 * 1000);
 if (!SOCK || !HOME) { console.error('agent-keeper: KEEPER_SOCKET and KEEPER_HOME are required'); process.exit(2); }
@@ -29,9 +34,9 @@ const backlog = [];                 // codex → client lines while nobody is co
 const MAX_BACKLOG = 20000;
 const outstanding = new Map();      // id → request line codex sent us and nobody answered yet
 
-const child = spawn(BIN, ['app-server'], {
+const child = spawn(BIN, ARGS, {
   cwd: HOME,
-  env: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME, CODEX_HOME: HOME, LANG: process.env.LANG ?? 'C.UTF-8', TERM: 'dumb', OVERLYX_MCP_TOKEN: process.env.OVERLYX_MCP_TOKEN ?? '' },
+  env: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME, CODEX_HOME: HOME, LANG: process.env.LANG ?? 'C.UTF-8', TERM: 'dumb', OVERLYX_MCP_TOKEN: process.env.OVERLYX_MCP_TOKEN ?? '', ...EXTRA_ENV },
   stdio: ['pipe', 'pipe', 'pipe'],
 });
 

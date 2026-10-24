@@ -42,9 +42,11 @@ test('sign in, ask, let it write, limit what it reads, find the thread again', a
   await expect(page.locator('[data-agent-code]')).toHaveText('STUB-CODE');
   await expect(page.locator('.agent-compose textarea')).toBeVisible({ timeout: 15000 });
 
-  // the model and effort selectors come from codex's model list
-  await expect(page.locator('select[data-agent-model]')).toBeVisible();
-  await expect(page.locator('select[data-agent-model] option', { hasText: 'Stub Model' })).toHaveCount(1);
+  // the model picker lists codex's models under the ChatGPT sign-in, the other providers in italics
+  await page.locator('[data-agent-model]').click();
+  await expect(page.locator('[data-agent-model-option]', { hasText: 'Stub Model' })).toHaveCount(1);
+  await expect(page.locator('.agent-mp-item.connect[data-agent-connect="anthropic"]')).toBeVisible();
+  await page.keyboard.press('Escape');
   await expect(page.locator('select[data-agent-effort]')).toHaveValue('medium');
 
   // a first message starts a thread; the stubbed reply streams in

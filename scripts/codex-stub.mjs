@@ -136,7 +136,7 @@ function runTurn(id, p) {
 const settings = (p) => fs.existsSync(path.join(HOME, 'ignore-sandbox'))
   ? { approvalPolicy: 'on-request', activePermissionProfile: null }
   : { approvalPolicy: p.approvalPolicy ?? 'on-request', activePermissionProfile: p.config?.default_permissions ? { id: p.config.default_permissions, extends: null } : null };
-const logParams = (method, threadId, p) => fs.appendFileSync(path.join(HOME, 'thread-params.jsonl'), JSON.stringify({ method, threadId, cwd: p.cwd ?? null, approvalPolicy: p.approvalPolicy ?? null, config: p.config ?? null }) + '\n');
+const logParams = (method, threadId, p) => fs.appendFileSync(path.join(HOME, 'thread-params.jsonl'), JSON.stringify({ method, threadId, cwd: p.cwd ?? null, approvalPolicy: p.approvalPolicy ?? null, config: p.config ?? null, modelProvider: p.modelProvider ?? null, model: p.model ?? null }) + '\n');
 
 let buf = '';
 process.stdin.on('data', (d) => {

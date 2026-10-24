@@ -2193,11 +2193,47 @@ blend.
   `localStorage.ol.spell.words`) and *Ignore*. Preferences ▸ Checker switches to the browser's own
   checker instead (which checks slowly after a click and keeps its suggestions to itself). The
   abc✓ toolbar button, Tools ▸ Spell checking and the context menu switch checking off and on.
-* **The Agent panel** (`app/AgentPanel.tsx`, server `agent.ts`): OpenAI Codex embedded in the
-  right sidebar, driven over its app-server protocol (the same JSON-RPC interface the Codex VS
+* **The Agent panel** (`app/AgentPanel.tsx`, server `agent.ts`): OpenAI Codex (or Claude Code, on an
+  Anthropic key — below) embedded in the right sidebar, driven over its app-server protocol (the same JSON-RPC interface the Codex VS
   Code extension speaks) — one `codex` child process per signed-in user, `CODEX_HOME` under
   `data/agent-home/<user>/` so ChatGPT credentials and codex's memories are per account and shared
-  across that user's projects. Users sign in with their *own* ChatGPT account (device code). A
+  across that user's projects. Users sign in with their *own* ChatGPT account (device code) — or
+  bring their own API keys.
+  **Providers** (`agentkeys.ts`, `agentnet.ts`; the picker `app/AgentModelPicker.tsx`): a thread runs
+  on the ChatGPT sign-in, or on one of the account's keys — **OpenAI** or **OpenRouter** (in codex:
+  the managed config's `[model_providers.overlyx-openai|overlyx-openrouter]`, `wire_api = "responses"`,
+  chosen per thread with `modelProvider`; no web search on OpenRouter) or **Anthropic** (in the second
+  engine, Claude Code through the Agent SDK: `scripts/claude-app-server.mjs`, which speaks the part of
+  codex's app-server protocol the server uses, so the same AgentHost, keeper, transcripts,
+  working copies and checkpoints serve both; one host and keeper per account and engine, the
+  engine's home `data/agent-home/<user>/claude/`). An Anthropic key from a Console organization linked
+  to a Claude Max or Team plan draws on that plan's monthly API credits (they cover the API and the
+  Agent SDK, not interactive Claude Code). A key is checked with its provider when it is added
+  (`PUT /api/agent/keys/:provider`), sealed at rest (`agent_keys`) and never reaches an agent: codex
+  and Claude Code send their model requests to `/internal/llm/<provider>/…` (agentnet.ts), which
+  takes internal requests only — the internal socket, or loopback without the forwarding headers
+  Caddy adds — from a known agent credential (codex's panel token; the Claude engine's `olxint_…`
+  token, minted per keeper and valid on internal requests only, for the proxy and /mcp), lets
+  through model requests only, adds the key and streams the answer. The picker
+  (`GET /api/agent/models`) lists the models of every connected provider under the provider and who
+  is signed in there (Sign out / Remove), then the providers not connected yet in italics (Sign in
+  with ChatGPT…, Use an … key…); OpenRouter's catalogue is thinned to the newest tool-calling text
+  models per maker, Anthropic's comes from its models API. A thread stays with its provider
+  (`agent_threads.provider`, `model`): another provider's model starts a new thread, and the
+  composer says so. **The Claude engine's sandbox** (`claudeTurnSandbox`, sent with every turn as
+  `overlyxSandbox`; a turn without it is refused): bwrap from `sandbox.ts sandboxParts` — the system's
+  files (not all of /etc), the working copy and Claude Code's own directory (its session files)
+  writable, the live project read only with its `.git` hidden, the thread's scratch HOME, no network,
+  a cgroup of its own; `scripts/claude-sandbox-entry.mjs` inside forwards 127.0.0.1:8765 to the
+  internal socket `data/agent-net/overlyx.sock` (its directory bound read only), the only way out.
+  No filesystem settings are loaded (no project CLAUDE.md, hooks, skills or .mcp.json) and only
+  Bash, Read, Edit, Write, Glob, Grep, NotebookEdit, WebSearch, Task and TodoWrite exist.
+  `scripts/claude-sandbox-check.mts` runs the real engine against a stand-in Anthropic API and checks
+  all of this (`tests/agent-sandbox.test.ts`); `tests/agent-providers.test.ts` the keys, the picker,
+  the proxy's rules and a Claude turn through the routes. `OVERLYX_AGENT_CLAUDE=off` leaves the
+  Anthropic provider out (so does a server without bwrap); `OVERLYX_LLM_UPSTREAM_<PROVIDER>` points
+  a provider at a stand-in. A keeper started on another engine version (codex's, or the Claude
+  engine's script and SDK: `claudeEngineVersion`) is restarted once quiet. A
   thread works in its **private working copy** of the project (`agentwork.ts`,
   `data/agent-work/<thread>/<project>/`) and edits files the way coding agents do — `apply_patch`,
   a script — in its own codex sandbox (below). Every turn mirrors the

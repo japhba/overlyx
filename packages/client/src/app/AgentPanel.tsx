@@ -1,11 +1,13 @@
 /**
- * The Agent panel (right sidebar): OpenAI Codex embedded in OverLyX. Users sign in with their
- * own ChatGPT account (device code — the server keeps credentials per account, shared across
- * their projects, together with codex's memories). A thread runs in the project's directory on
- * the server; its transcript streams in over SSE (message/reasoning deltas, command output,
- * file-change diffs) and codex's approval requests are answered from here — with an optional
- * comment that steers the running turn. Model and reasoning effort come from codex's own list
- * and are sent per turn. Assistant text renders LaTeX through the math editor's MathJax path with
+ * The Agent panel (right sidebar): an agent embedded in OverLyX — OpenAI Codex on the user's own
+ * ChatGPT account (device code) or OpenAI / OpenRouter key, or Claude Code on their Anthropic key
+ * (the server keeps sign-ins and keys per account, shared across their projects). A thread runs in
+ * a working copy of the project on the server; its transcript streams in over SSE (message/reasoning
+ * deltas, command output, file-change diffs) and the agent's approval requests are answered from
+ * here — with an optional comment that steers the running turn. The model picker
+ * (AgentModelPicker.tsx) lists the models of every connected provider, and offers the others in
+ * italics; a thread stays with its provider (another provider's model starts a new thread). Model
+ * and reasoning effort are sent per turn. Assistant text renders LaTeX through the math editor's MathJax path with
  * the open document's macros. Completed diffs collapse to a summary and only unfold by
  * themselves when they look important (small, or touching the open document); the transcript
  * follows the stream while you are at the bottom. Threads belong to the project: every editor
@@ -16,7 +18,8 @@
  * (ExternalAgents.tsx): the owner writes to them here and reads their replies.
  */
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { api, type AgentStatus, type AgentLogin, type AgentThreadInfo, type AgentItem, type AgentChange, type AgentEventMsg, type AgentTurnContext, type AgentModel, type LitHit, type AgentCheckpoint, type AgentScope } from '../api';
+import { api, type AgentStatus, type AgentLogin, type AgentThreadInfo, type AgentItem, type AgentChange, type AgentEventMsg, type AgentTurnContext, type AgentModel, type LitHit, type AgentCheckpoint, type AgentScope, type AgentProvider } from '../api';
+import { ModelPicker, KeyDialog, ConnectRows, PROVIDER_LABEL, connectedProviders, missingProviders, providerOf, providerWho, modelKey, parseModelKey, type KeyProvider } from './AgentModelPicker';
 import { editorContext } from '../editor/context';
 import { bibRefs, type BibRef } from './bibrefs';
 import { RichText, transcriptCopy } from './agentText';
@@ -198,6 +201,17 @@ function ItemView({ it, project, notify }: { it: AgentItem; project?: string; no
           {open && (it as any).arguments !== undefined ? <div class="out">{JSON.stringify((it as any).arguments, null, 1).slice(0, 2000)}</div> : null}
         </div>
       );
+    case 'toolCall':
+      // the Claude engine's other tools (Read, Grep, WebSearch, Task …): one line — click for what came back
+      return (
+        <div class="agent-item tool" data-agent="toolcall">
+          <div class="line" onClick={() => setOpen(o => !o)}>
+            <span class="chev">{open ? '▾' : '▸'}</span> {it.tool}{it.detail ? `: ${it.detail}` : ''}
+            {it.status === 'inProgress' ? ' …' : it.status === 'failed' ? <span class="err"> ✗</span> : null}
+          </div>
+          {open && it.output ? <div class="out">{it.output.slice(0, 4000)}</div> : null}
+        </div>
+      );
     case 'fileChange':
       return <FileChangeView key={it.id} it={it} />;
     case 'plan':
@@ -314,7 +328,12 @@ function CodexPanel({ project, notify, pinned, onUnpin }: { project: string; not
   const setLiveCp = (cp: AgentCheckpoint | null) => { liveCpRef.current = cp; setLiveCpState(cp); };
   const [text, setText] = useState('');
   const [models, setModels] = useState<AgentModel[]>([]);
+  /** the chosen model, as `provider:id` (AgentModelPicker modelKey) */
   const [model, setModel] = useState(stored('ol.agent.model') ?? '');
+  /** the open thread's provider and model: a conversation stays with the provider it started on */
+  const [threadAt, setThreadAt] = useState<{ provider: AgentProvider; model: string | null } | null>(null);
+  /** an API key being added (KeyDialog) */
+  const [keyFor, setKeyFor] = useState<KeyProvider | null>(null);
   const [effort, setEffort] = useState(stored('ol.agent.effort') ?? '');
   /** the agent's document edits as tracked changes (the default) or straight into the text */
   const [tracked, setTracked] = useState(stored('ol.agent.tracked') !== '0');
@@ -343,19 +362,21 @@ function CodexPanel({ project, notify, pinned, onUnpin }: { project: string; not
     }).catch(() => { /* no access yet */ });
   }, [project, status?.authenticated]);
 
-  /** codex's model catalogue, once signed in; keep stored choices when they still exist */
+  /** the models of every provider the account has connected; keep the stored choice while it exists */
+  const connectedKey = connectedProviders(status).join(',');
   useEffect(() => {
-    if (!status?.authenticated) return;
+    if (!status?.authenticated) { setModels([]); return; }
     api.agentModels().then(r => {
       setModels(r.models);
-      const cur = r.models.find(m => m.id === (stored('ol.agent.model') ?? '')) ?? r.models.find(m => m.isDefault) ?? r.models[0];
+      const want = parseModelKey(stored('ol.agent.model'));
+      const cur = (want && r.models.find(m => providerOf(m) === want.provider && m.id === want.id)) ?? defaultModel(r.models);
       if (cur) {
-        setModel(cur.id);
+        setModel(modelKey(cur));
         const ef = stored('ol.agent.effort');
         setEffort(ef && cur.efforts.includes(ef) ? ef : (cur.defaultEffort ?? ''));
       }
-    }).catch(() => { /* selector stays hidden */ });
-  }, [status?.authenticated]);
+    }).catch(() => { /* the picker stays empty */ });
+  }, [connectedKey]);
 
   /** codex's live events for this user + project */
   useEffect(() => {
@@ -473,6 +494,7 @@ function CodexPanel({ project, notify, pinned, onUnpin }: { project: string; not
     setLiveCp(cps.find(c => !c.finished && !c.undone) ?? null);
     setMine(r.mine);
     if (r.scope) setScope(r.scope);
+    setThreadAt({ provider: r.provider ?? 'chatgpt', model: r.model ?? null });
     setApprovals((r.approvals ?? []).map(a => ({ requestId: a.requestId, method: a.method, params: a.params })));
     const last = r.thread.turns[r.thread.turns.length - 1] as { id?: string; status?: string } | undefined;
     setBusyTurn(last?.status === 'inProgress' ? last.id ?? null : null);
@@ -480,6 +502,11 @@ function CodexPanel({ project, notify, pinned, onUnpin }: { project: string; not
 
   const openThread = (t: AgentThreadInfo) => {
     setSel(t.id); setMine(t.mine); setItems([]); setApprovals([]); setLiveCp(null); stick.current = true;
+    // the picker follows the thread: its provider, its model (when that is still offered)
+    const prov = t.provider ?? 'chatgpt';
+    setThreadAt({ provider: prov, model: t.model ?? null });
+    const m = models.find(x => providerOf(x) === prov && x.id === t.model);
+    if (m) choose(m, false);
     store('ol.agent.sel:' + project, t.id);
     syncThread(t.id).catch(e => notify(errText(e), 'error'));
   };
@@ -509,13 +536,25 @@ function CodexPanel({ project, notify, pinned, onUnpin }: { project: string; not
     const context = pinned ?? selectionContext();
     onUnpin();
     if (fixed === undefined) setText('');
+    const chosen = models.find(m => modelKey(m) === model) ?? null;
     void (async () => {
       try {
         let tid = selRef.current;
-        if (!tid) { const r = await api.agentStartThread(project, scope); tid = r.id; setSel(tid); setMine(true); setItems([]); store('ol.agent.sel:' + project, tid); void refreshThreads(); }
+        // another provider's model than the open thread's: a new thread on that provider
+        if (tid && chosen && threadAt && providerOf(chosen) !== threadAt.provider) {
+          tid = null;
+          notify(`A new thread on ${PROVIDER_LABEL[providerOf(chosen)]}: a conversation stays with the provider it started on`);
+        }
+        if (!tid) {
+          const prov = chosen ? providerOf(chosen) : 'chatgpt';
+          const r = await api.agentStartThread(project, scope, prov, chosen?.id);
+          tid = r.id; setSel(tid); setMine(true); setItems([]); setLiveCp(null); setApprovals([]);
+          setThreadAt({ provider: r.provider ?? prov, model: r.model ?? chosen?.id ?? null });
+          store('ol.agent.sel:' + project, tid); void refreshThreads();
+        }
         setItems(list => [...list, localItem]);
         setBusyTurn('pending');
-        await api.agentTurn(project, tid, { text: t, context, clientMessageId: localItem.id, tracked, scope, ...(model ? { model } : {}), ...(effort ? { effort } : {}) });
+        await api.agentTurn(project, tid, { text: t, context, clientMessageId: localItem.id, tracked, scope, ...(chosen ? { model: chosen.id } : {}), ...(effort ? { effort } : {}) });
       } catch (e) { setBusyTurn(null); notify(errText(e), 'error'); }
     })();
   };
@@ -531,6 +570,35 @@ function CodexPanel({ project, notify, pinned, onUnpin }: { project: string; not
     })();
   };
 
+  /** Pick a model (the picker, or the thread just opened): its effort list follows. */
+  function choose(m: AgentModel, remember = true) {
+    const k = modelKey(m);
+    setModel(k);
+    const ef = m.defaultEffort ?? '';
+    setEffort(e => (m.efforts.includes(e) ? e : ef));
+    if (remember) { store('ol.agent.model', k); store('ol.agent.effort', m.efforts.includes(effort) ? effort : ef); }
+  }
+
+  /** A provider not connected yet, chosen in the picker or on the first screen: the ChatGPT device code, or a key. */
+  const connect = (p: AgentProvider) => {
+    if (p === 'chatgpt') { api.agentLogin().then(setLogin).catch(e => notify(errText(e), 'error')); return; }
+    setKeyFor(p);
+  };
+  const disconnect = async (p: AgentProvider) => {
+    const what = p === 'chatgpt' ? `Sign ${providerWho(p, status) || 'this ChatGPT account'} out of the agent?` : `Remove your ${PROVIDER_LABEL[p]} key from OverLyX? Threads on it stay readable; new turns there need a key again.`;
+    if (!(await uiConfirm(p === 'chatgpt' ? 'Sign Out' : 'Remove Key', what, { okLabel: p === 'chatgpt' ? 'Sign out' : 'Remove', danger: p !== 'chatgpt' }))) return;
+    (p === 'chatgpt' ? api.agentLogout() : api.agentRemoveKey(p)).then(() => refreshStatus()).catch(e => notify(errText(e), 'error'));
+  };
+  const keyDialog = keyFor && <KeyDialog provider={keyFor} onClose={() => setKeyFor(null)} onDone={() => { notify(`${PROVIDER_LABEL[keyFor]} key added`); setKeyFor(null); void refreshStatus(); }} />;
+  const loginBox = login && (
+    <div class="code-box" data-agent="chatgpt-login">
+      <p>Open <a href={login.verificationUrl} target="_blank" rel="noreferrer">{login.verificationUrl.replace(/^https?:\/\//, '')}</a> and enter:</p>
+      <div class="code" data-agent-code>{login.userCode}</div>
+      <p class="wait">Waiting for the sign-in to finish…</p>
+      <button class="small-btn" onClick={() => { void api.agentLoginCancel(login.loginId).catch(() => { /* gone */ }); setLogin(null); }}>Cancel</button>
+    </div>
+  );
+
   if (!status) return <div class="agent-panel"><div class="empty">Connecting…</div></div>;
   if (!status.enabled) return <div class="agent-panel"><div class="empty">The agent is not enabled on this server.</div></div>;
 
@@ -538,40 +606,41 @@ function CodexPanel({ project, notify, pinned, onUnpin }: { project: string; not
     return (
       <div class="agent-panel" data-agent="signin">
         <div class="agent-signin">
-          <p>The agent is <b>OpenAI Codex</b> running on this project's files, with your own ChatGPT account — sign in once, it is kept for your account (all your projects).</p>
-          {!login ? (
-            <button class="small-btn" data-agent-login onClick={() => api.agentLogin().then(setLogin).catch(e => notify(errText(e), 'error'))}>Sign in with ChatGPT…</button>
-          ) : (
-            <div class="code-box">
-              <p>Open <a href={login.verificationUrl} target="_blank" rel="noreferrer">{login.verificationUrl.replace(/^https?:\/\//, '')}</a> and enter:</p>
-              <div class="code" data-agent-code>{login.userCode}</div>
-              <p class="wait">Waiting for the sign-in to finish…</p>
-              <button class="small-btn" onClick={() => { void api.agentLoginCancel(login.loginId).catch(() => { /* gone */ }); setLogin(null); }}>Cancel</button>
-            </div>
-          )}
+          <p>The agent works on this project’s files with an AI you connect: your own <b>ChatGPT</b> account (it runs as OpenAI Codex), or an API key of yours — <b>Anthropic</b> (Claude Code), <b>OpenAI</b> or <b>OpenRouter</b>. It is kept for your account (all your projects).</p>
+          {!login ? <div class="agent-connects"><ConnectRows providers={missingProviders(status)} onConnect={connect} buttons /></div> : loginBox}
         </div>
+        {keyDialog}
       </div>
     );
   }
 
-  const curModel = models.find(m => m.id === model);
+  const curModel = models.find(m => modelKey(m) === model);
   const efforts = curModel?.efforts?.length ? curModel.efforts : ['low', 'medium', 'high'];
+  // the next message goes to another provider than the open thread's: it starts a new thread
+  const switching = !!(sel && mine && curModel && threadAt && providerOf(curModel) !== threadAt.provider);
+  const headWho = (() => {
+    const p = curModel ? providerOf(curModel) : connectedProviders(status)[0];
+    if (!p) return '';
+    const who = providerWho(p, status);
+    return `${PROVIDER_LABEL[p]}${who ? ` · ${who}` : ''}`;
+  })();
+  const modelName = (prov: AgentProvider | undefined, id: string | null | undefined) => (id && models.find(m => providerOf(m) === (prov ?? 'chatgpt') && m.id === id)?.label) || id || '';
 
   return (
     <div class="agent-panel" data-agent="panel">
       <div class="agent-head">
-        {sel && <button class="small-btn" data-agent-back title="All threads of this project" onClick={() => { setSel(null); setItems([]); setApprovals([]); store('ol.agent.sel:' + project, ''); void refreshThreads(); }}>‹</button>}
-        <span class="who" title={`Signed in as ${status.account?.email ?? 'ChatGPT'}${status.account?.plan ? ` (${status.account.plan})` : ''}`}>
-          {sel ? (threads.find(t => t.id === sel)?.title ?? 'Thread') : (status.account?.email ?? 'ChatGPT')}
+        {sel && <button class="small-btn" data-agent-back title="All threads of this project" onClick={() => { setSel(null); setItems([]); setApprovals([]); setThreadAt(null); store('ol.agent.sel:' + project, ''); void refreshThreads(); }}>‹</button>}
+        <span class="who" title={sel && threadAt ? `${PROVIDER_LABEL[threadAt.provider]}${threadAt.model ? ` · ${modelName(threadAt.provider, threadAt.model)}` : ''}` : headWho}>
+          {sel ? (threads.find(t => t.id === sel)?.title ?? 'Thread') : headWho}
         </span>
-        {!sel && <button class="small-btn" title="Sign this ChatGPT account out of the agent" onClick={() => api.agentLogout().then(() => refreshStatus()).catch(e => notify(errText(e), 'error'))}>Sign out</button>}
       </div>
+      {loginBox && <div class="agent-signin">{loginBox}</div>}
       {!sel ? (
         <div class="agent-scroll agent-threads" ref={scrollRef} onScroll={onScroll}>
           {threads.map(t => (
             <div key={t.id} class="row" data-agent-thread onClick={() => openThread(t)}>
               <div class="title">{t.title ?? 'New thread'}</div>
-              <div class="meta">{t.mine ? 'you' : t.user.name ?? 'someone'} · {new Date(t.updatedAt).toLocaleDateString()}</div>
+              <div class="meta">{t.mine ? 'you' : t.user.name ?? 'someone'} · {new Date(t.updatedAt).toLocaleDateString()}{t.provider && t.provider !== 'chatgpt' || t.model ? ` · ${modelName(t.provider, t.model) || PROVIDER_LABEL[t.provider ?? 'chatgpt']}` : ''}</div>
             </div>
           ))}
           {!threads.length && <div class="empty">No agent threads in this project yet — ask below to start one.</div>}
@@ -589,21 +658,17 @@ function CodexPanel({ project, notify, pinned, onUnpin }: { project: string; not
       {(!sel || mine) && (
         <div class="agent-compose">
           {pinned && <div class="ext-pin" data-ext-pin>About the passage you pinned <button class="mini" title="Do not send it" onClick={onUnpin}>×</button></div>}
+          {switching && !busyTurn && <div class="agent-switch-note" data-agent-switching>Sends in a new thread on {PROVIDER_LABEL[providerOf(curModel!)]} — this conversation stays with {PROVIDER_LABEL[threadAt!.provider]}</div>}
           <textarea
             ref={inputRef}
             value={text}
-            placeholder={busyTurn && busyTurn !== 'pending' ? 'Steer the running turn… (Enter to send)' : sel ? 'Reply… (Enter to send)' : 'Ask the agent… (Enter to send)'}
+            placeholder={busyTurn && busyTurn !== 'pending' ? 'Steer the running turn… (Enter to send)' : sel && !switching ? 'Reply… (Enter to send)' : 'Ask the agent… (Enter to send)'}
             onInput={e => setText((e.target as HTMLTextAreaElement).value)}
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
           />
           <div class="row">
-            {models.length > 0 && (
-              <select class="agent-select" data-agent-model title={curModel?.description || 'Model'} value={model}
-                onChange={e => { const v = (e.target as HTMLSelectElement).value; setModel(v); store('ol.agent.model', v); const m = models.find(x => x.id === v); const ef = m?.defaultEffort ?? ''; setEffort(ef); store('ol.agent.effort', ef); }}>
-                {models.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
-              </select>
-            )}
-            {models.length > 0 && (
+            <ModelPicker models={models} status={status} value={model} onChange={m => choose(m)} onConnect={connect} onDisconnect={p => void disconnect(p)} />
+            {curModel && (
               <select class="agent-select" data-agent-effort title="Reasoning effort" value={effort}
                 onChange={e => { const v = (e.target as HTMLSelectElement).value; setEffort(v); store('ol.agent.effort', v); }}>
                 {efforts.map(ef => <option key={ef} value={ef}>{ef}</option>)}
@@ -635,8 +700,19 @@ function CodexPanel({ project, notify, pinned, onUnpin }: { project: string; not
         </div>
       )}
       {sel && !mine && <div class="agent-readonly">Started by {threads.find(t => t.id === sel)?.user.name ?? 'another editor'} — you can read it, not drive it.</div>}
+      {keyDialog}
     </div>
   );
+}
+
+/** The model a new choice starts from: the first connected provider's default (the sign-in's first). */
+function defaultModel(models: AgentModel[]): AgentModel | undefined {
+  const order: AgentProvider[] = ['chatgpt', 'anthropic', 'openai', 'openrouter'];
+  for (const p of order) {
+    const list = models.filter(m => providerOf(m) === p);
+    if (list.length) return list.find(m => m.isDefault) ?? list[0];
+  }
+  return undefined;
 }
 
 /* ------------------------------------------------------------------ the panel: the embedded agent and the agents from elsewhere */
@@ -656,7 +732,7 @@ export function askAgentAbout(): void {
 }
 
 /**
- * The Agent panel: the embedded agent (Codex on the server — when AI assistance is on, `codex`) and
+ * The Agent panel: the embedded agent (Codex or Claude Code on the server — when AI assistance is on, `codex`) and
  * the account's agents connected from elsewhere (ExternalAgents.tsx), one at a time, chosen in a
  * row of tabs at the top (kept per browser).
  */
@@ -680,7 +756,7 @@ export function AgentPanel({ project, notify, codex }: { project: string; notify
     <div class="agent-wrap">
       {ext.agents.length > 0 && (
         <div class="agent-switch" role="tablist">
-          {codex && <button role="tab" class={shown === 'codex' ? 'active' : ''} data-agent-tab="codex" title="OpenAI Codex, running on this server with your ChatGPT account" onClick={() => choose('codex')}>Codex (built in)</button>}
+          {codex && <button role="tab" class={shown === 'codex' ? 'active' : ''} data-agent-tab="codex" title="The agent built into OverLyX: Codex or Claude Code on this server, with your ChatGPT sign-in or your API keys" onClick={() => choose('codex')}>Built-in agent</button>}
           {ext.agents.map(a => (
             <button key={a.id} role="tab" class={shown === `ext:${a.id}` ? 'active' : ''} data-agent-tab={`ext:${a.id}`} title={`${a.label} — ${a.status === 'offline' ? 'last seen ' + ago(a.lastSeen) : a.status}`} onClick={() => choose(`ext:${a.id}`)}>
               <AgentChip a={a} />

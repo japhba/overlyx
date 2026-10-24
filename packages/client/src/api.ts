@@ -119,10 +119,21 @@ export type AccessAction = 'open' | 'build' | 'git-fetch' | 'git-push' | 'share'
 export interface ActivityEntry { id: number; action: AccessAction; detail: string | null; at: number; user: { id: number; name: string; username: string } | null }
 export interface AdminProjectInfo { name: string; title: string | null; kind: string; owner: { id: number; name: string; username: string } | null; access: 'owner' | 'member' | 'granted' | null; grantUntil: number | null }
 
-/** The embedded coding agent (agent.ts on the server: OpenAI Codex, the user's own ChatGPT account) */
-export interface AgentStatus { enabled: boolean; authenticated: boolean; method?: string | null; account?: { email: string | null; plan: string | null } | null }
+/** The embedded coding agent (agent.ts on the server): OpenAI Codex on the user's own ChatGPT account
+ *  or OpenAI / OpenRouter key, Claude Code on their Anthropic key (agentkeys.ts) */
+export type AgentProvider = 'chatgpt' | 'openai' | 'openrouter' | 'anthropic';
+/** one provider of the account: signed in / a key kept (its last characters); `available`: offered on this server */
+export interface AgentProviderStatus { connected: boolean; account?: { email: string | null; plan: string | null } | null; hint?: string | null; available?: boolean }
+export interface AgentStatus {
+  enabled: boolean;
+  /** any provider connected */
+  authenticated: boolean; method?: string | null;
+  /** the ChatGPT sign-in's account */
+  account?: { email: string | null; plan: string | null } | null;
+  providers?: Partial<Record<AgentProvider, AgentProviderStatus>>;
+}
 export interface AgentLogin { loginId: string; verificationUrl: string; userCode: string }
-export interface AgentThreadInfo { id: string; title: string | null; user: { id: number; name: string | null }; mine: boolean; createdAt: number; updatedAt: number }
+export interface AgentThreadInfo { id: string; title: string | null; user: { id: number; name: string | null }; mine: boolean; createdAt: number; updatedAt: number; provider?: AgentProvider; model?: string | null }
 export interface AgentChange { path: string; kind: string; diff: string }
 /** one entry of a thread's transcript (codex's ThreadItem, loosely typed — we render known kinds) */
 export interface AgentItem {
@@ -130,6 +141,8 @@ export interface AgentItem {
   content?: { type: string; text?: string }[];
   summary?: string[]; command?: string; cwd?: string; aggregatedOutput?: string | null; exitCode?: number | null;
   changes?: AgentChange[]; server?: string; tool?: string;
+  /** (type 'toolCall', the Claude engine's other tools) what it was called on, and what came back */
+  detail?: string; output?: string;
   /** (client-side, type 'overlyxCheckpoint') what the turn changed in the project — rendered as a checkpoint card */
   checkpoint?: AgentCheckpoint;
 }
@@ -149,7 +162,7 @@ export interface AgentCheckpoint {
 /** one message of the agent events stream (SSE); kind 'checkpoint' carries { threadId, checkpoint } */
 export interface AgentEventMsg { kind: 'notification' | 'request' | 'status' | 'checkpoint'; method?: string; params?: any; requestId?: string; running?: boolean }
 export interface AgentTurnContext { docId?: string; content?: PMJSON[]; layout?: string; mathLatex?: string; openDocs?: string[] }
-export interface AgentModel { id: string; label: string; description: string; efforts: string[]; defaultEffort: string | null; isDefault: boolean }
+export interface AgentModel { id: string; label: string; description: string; efforts: string[]; defaultEffort: string | null; isDefault: boolean; /** where it runs (older servers: the ChatGPT sign-in) */ provider?: AgentProvider }
 /** an agent connected over MCP from elsewhere (Claude Code, Codex, ChatGPT …; mcpAgents.ts on the server) */
 export interface ExternalAgent {
   id: number; name: string; label: string; color: string;
@@ -400,9 +413,12 @@ export const api = {
   agentLogin: () => req<AgentLogin>('POST', '/api/agent/login'),
   agentLoginCancel: (loginId: string) => req<{ ok: boolean }>('POST', '/api/agent/login/cancel', { loginId }),
   agentLogout: () => req<{ ok: boolean }>('POST', '/api/agent/logout'),
+  /** an API key for the panel: the server checks it with the provider and keeps it for the account */
+  agentSetKey: (provider: Exclude<AgentProvider, 'chatgpt'>, key: string) => req<{ ok: boolean; hint: string }>('PUT', `/api/agent/keys/${provider}`, { key }),
+  agentRemoveKey: (provider: Exclude<AgentProvider, 'chatgpt'>) => req<{ ok: boolean }>('DELETE', `/api/agent/keys/${provider}`),
   agentThreads: (project: string) => req<{ threads: AgentThreadInfo[] }>('GET', `/api/projects/${encodeURIComponent(project)}/agent/threads`),
-  agentStartThread: (project: string, scope?: AgentScope) => req<{ id: string; model: string | null; scope: AgentScope }>('POST', `/api/projects/${encodeURIComponent(project)}/agent/threads`, { scope }),
-  agentThread: (project: string, tid: string) => req<{ thread: { id: string; turns: AgentTurn[] }; mine: boolean; approvals?: { requestId: string; method: string; params: unknown }[]; checkpoints?: AgentCheckpoint[]; scope?: AgentScope }>('GET', `/api/projects/${encodeURIComponent(project)}/agent/threads/${encodeURIComponent(tid)}`),
+  agentStartThread: (project: string, scope?: AgentScope, provider?: AgentProvider, model?: string) => req<{ id: string; model: string | null; scope: AgentScope; provider?: AgentProvider }>('POST', `/api/projects/${encodeURIComponent(project)}/agent/threads`, { scope, provider, model }),
+  agentThread: (project: string, tid: string) => req<{ thread: { id: string; turns: AgentTurn[] }; mine: boolean; approvals?: { requestId: string; method: string; params: unknown }[]; checkpoints?: AgentCheckpoint[]; scope?: AgentScope; provider?: AgentProvider; model?: string | null }>('GET', `/api/projects/${encodeURIComponent(project)}/agent/threads/${encodeURIComponent(tid)}`),
   /** what the thread's agent may read through the MCP tools: all the user's projects, or only this one */
   agentSetScope: (project: string, tid: string, scope: AgentScope) => req<{ ok: boolean; scope: AgentScope }>('POST', `/api/projects/${encodeURIComponent(project)}/agent/threads/${encodeURIComponent(tid)}/scope`, { scope }),
   agentUndo: (project: string, tid: string, n: number) => req<{ ok: boolean; checkpoint: AgentCheckpoint; reverted: string[]; kept: { path: string; why: string }[] }>('POST', `/api/projects/${encodeURIComponent(project)}/agent/threads/${encodeURIComponent(tid)}/checkpoints/${n}/undo`),

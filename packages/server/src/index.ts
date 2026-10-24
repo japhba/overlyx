@@ -13,7 +13,8 @@ import { aiStatus, aiAvailable, rewrite as aiRewrite, complete as aiComplete, re
 import { linkedAi, combineVersions } from './linkedai.ts';
 import { mcpRouter } from './mcp.ts';
 import { mcpAgentRoutes, pruneAgents } from './mcpAgents.ts';
-import { agentRoutes, disconnectAgents } from './agent.ts';
+import { agentRoutes, disconnectAgents, agentAvailable } from './agent.ts';
+import { llmProxy, listenInternal } from './agentnet.ts';
 import { oauthRoutes, wellKnownRoutes } from './mcpOauth.ts';
 import { listMcpTokens, deleteMcpToken } from './mcpTokens.ts';
 import { cliDownloadRoutes } from './cliDownload.ts';
@@ -73,6 +74,8 @@ import { texHeadings, parseBibtex, lyxToPm, exportLyx, splitDocId, projectOfDoc,
 const app = express();
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
+// the Agent panel's agents reach their AI provider through OverLyX (agentnet.ts): internal requests only, before any cookie or body handling
+app.use('/internal/llm', llmProxy());
 app.use(authMiddleware);
 app.use((_req, res, next) => {
   setSecurityHeaders(res);
@@ -1801,6 +1804,8 @@ setInterval(pruneTrashNow, 24 * 60 * 60 * 1000).unref();
 
 const server = http.createServer(app);
 attachWebSocket(server);
+// the sandboxed agents' way to the provider proxy and the MCP tools (agentnet.ts)
+if (agentAvailable()) listenInternal(mcpRouter());
 
 server.listen(config.port, config.host, () => {
   startAutoSync();

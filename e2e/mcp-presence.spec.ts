@@ -132,7 +132,7 @@ test('a message from the Agent panel reaches the agent with the selection; its r
   await openDoc(page, DOC);
   const { client } = await connect('codex-mcp-client');
   await openAgentPanel(page);
-  await page.locator('[data-agent-tab]', { hasText: 'Codex' }).first().click();
+  await page.locator('[data-agent-tab]', { hasText: 'Built-in' }).first().click();
   const view = page.locator('[data-ext-agent]');
   await expect(view).toBeVisible();
   await selectText(page, 'a typo');
@@ -166,7 +166,7 @@ test('"Ask agent about this" pins the selection for the next message, even after
   await page.mouse.click(box.x, box.y, { button: 'right' });
   await page.locator('.ctx-menu .ctx-item', { hasText: 'Ask agent about this' }).click();
   await expect(page.locator('.agent-wrap')).toBeVisible();
-  await page.locator('[data-agent-tab]', { hasText: 'Codex' }).first().click();
+  await page.locator('[data-agent-tab]', { hasText: 'Built-in' }).first().click();
   await expect(page.locator('[data-ext-pin]')).toContainText('the selected passage');
   await selectText(page, 'sets the scene');   // the selection moves on; the pinned passage is what goes along
   const waiting = call(client, 'wait_for_instructions', { timeout_seconds: 45 });

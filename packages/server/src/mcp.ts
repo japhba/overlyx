@@ -68,6 +68,7 @@ import { buildIncluding, buildErrors, lastBuild, currentJob } from './export.ts'
 import { PANEL_AGENT, buildBeforeTurn, agentCheckpoint, undoCheckpoint, panelTracking } from './agentwork.ts';
 import { panelThreadScope } from './agent.ts';
 import { verifyMcpToken } from './mcpTokens.ts';
+import { INTERNAL_PREFIX, isInternalRequest, verifyInternalToken } from './agentnet.ts';
 import { wwwAuthenticate } from './mcpOauth.ts';
 import { config } from './config.ts';
 import { roleFor, atLeast, logAccess, accessibleProjects, scopeRefusal } from './access.ts';
@@ -1178,7 +1179,11 @@ async function handle(req: Request, res: Response): Promise<void> {
   const m = /^Bearer\s+(\S+)/i.exec(auth);
   // 401 + WWW-Authenticate points OAuth clients (ChatGPT) at the protected-resource metadata
   if (!m) { res.setHeader('WWW-Authenticate', wwwAuthenticate(req)); res.status(401).json({ error: 'Authorization: Bearer <token> required (use your account token from File ▸ Git repository…, or connect via OAuth)' }); return; }
-  const identity = verifyMcpToken(m[1]);
+  // the Agent panel's Claude engine authenticates with an internal credential, valid on internal
+  // requests only (agentnet.ts): the panel's agent, as codex's panel credential is
+  const internalUser = m[1].startsWith(INTERNAL_PREFIX) ? (isInternalRequest(req) ? verifyInternalToken(m[1]) : null) : undefined;
+  const identity = internalUser === undefined ? verifyMcpToken(m[1])
+    : internalUser === null ? null : { kind: 'agent' as const, id: 0, userId: internalUser, name: PANEL_AGENT, scope: null };
   if (!identity) { res.setHeader('WWW-Authenticate', wwwAuthenticate(req)); res.status(401).json({ error: 'invalid or expired token' }); return; }
   const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(identity.userId) as UserRow | undefined;
   if (!userRow || userRow.is_guest) { res.status(403).json({ error: 'the account behind this token no longer exists' }); return; }

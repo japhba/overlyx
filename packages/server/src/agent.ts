@@ -24,6 +24,13 @@
  * bridges its stdio to a unix socket under the user's agent home. A server restart — a deploy —
  * disconnects and reconnects; the turn keeps running, buffered events are replayed, and
  * unanswered approval requests are re-delivered (the systemd unit needs KillMode=process).
+ *
+ * Providers: a thread runs on the account's ChatGPT sign-in (codex's own), or on one of the
+ * account's API keys (agentkeys.ts) — OpenAI or OpenRouter in codex (the managed config's model
+ * providers point at agentnet.ts's proxy, which adds the key), Anthropic in the second engine,
+ * Claude Code (scripts/claude-app-server.mjs), which speaks the same protocol, so the same
+ * AgentHost drives it: one host per account and engine, each with its own keeper. A thread stays
+ * with the provider it was started on (agent_threads.provider); its model can change per turn.
  */
 import express, { type Request, type Response } from 'express';
 import { spawn } from 'node:child_process';
@@ -47,6 +54,12 @@ import {
 import type { AccessScope } from './tokenAuth.ts';
 import { projectOfDoc, type PMJSON } from '@overlyx/core';
 import type { SessionUser } from './auth.ts';
+import {
+  keyHints, keyOf, setKey, removeKey, forgetKeys, keyProviderModels, isAgentProvider, isKeyProvider, KeyError, PROVIDER_NAMES,
+  type AgentProvider, type ProviderModel,
+} from './agentkeys.ts';
+import { mintInternalToken, forgetInternalTokens, agentNetSocket } from './agentnet.ts';
+import { sandboxParts, sandboxAvailable } from './sandbox.ts';
 
 /* ------------------------------------------------------------------ protocol types (the subset we touch) */
 
@@ -69,13 +82,15 @@ export interface AgentEvent {
 export const NATIVE_EDITS_SINCE = Date.parse('2026-09-27T09:48:00Z');
 export const isNativeThread = (createdAt: number): boolean => createdAt >= NATIVE_EDITS_SINCE;
 
-const NATIVE_INSTRUCTIONS = (project: string) => `You are embedded in OverLyX, a collaborative WYSIWYG LaTeX editor. The working directory is your private working copy of the user's LaTeX project "${project}", refreshed from the live project at the start of every turn. Edit files here directly with your usual tools (apply_patch; a script for mechanical changes). Every change you make to a .tex document is picked up right away and applied to the live document as tracked changes — marked word by word, a changed digit is one digit — which the user reviews and accepts or rejects in the editor; that is the whole point, so edit exactly what needs to change and leave the rest byte-for-byte alone. Changes to other files (.bib, a new figure or .tex file) are copied into the project; build output you produce here (latexmk's .aux/.log, the PDF next to a .tex) stays here.
+/** what a thread's agent has: codex's tools or Claude Code's, and web search (not on OpenRouter: codex's web_search tool is OpenAI's) */
+interface ToolSet { tools: 'codex' | 'claude'; web: boolean }
+const NATIVE_INSTRUCTIONS = (project: string, o: ToolSet = { tools: 'codex', web: true }) => `You are embedded in OverLyX, a collaborative WYSIWYG LaTeX editor. The working directory is your private working copy of the user's LaTeX project "${project}", refreshed from the live project at the start of every turn. Edit files here directly with your usual tools (${o.tools === 'claude' ? 'Edit and Write' : 'apply_patch'}; a script for mechanical changes). Every change you make to a .tex document is picked up right away and applied to the live document as tracked changes — marked word by word, a changed digit is one digit — which the user reviews and accepts or rejects in the editor; that is the whole point, so edit exactly what needs to change and leave the rest byte-for-byte alone. Changes to other files (.bib, a new figure or .tex file) are copied into the project; build output you produce here (latexmk's .aux/.log, the PDF next to a .tex) stays here.
 Web articles — an .html file whose <head> has <meta name="overlyx" content="article"> — are documents too: your edits to one become tracked changes the same way (inside an interactive block — a script, an SVG, a canvas — they are applied as made). Their prose is the content of the page's <article>, in plain semantic HTML: <h1> title, <p class="byline">, <p class="abstract">, <h2>–<h6>, <p>, lists, <blockquote>, <pre><code>, <figure><img><figcaption> (class "wide": wider than the text), <span class="sidenote">…</span> for notes, TeX math as \\(…\\) and \\[…\\], \\cite{key} with the project's .bib. Put an interactive figure in an element of its own with its script inside (people see it running and edit its source), and keep prose out of it. A new article is an index.html with that meta tag in a folder of its own (the overlyx tool create_document with an .html path starts one in the house style). Decks, posters and plain web pages (other .html files) are designs, not documents: edit them as files.
 Your shell sees only this working copy, the system's files and a scratch HOME — no other project is on disk for you. The user's other projects are reachable through the overlyx MCP tools (list_projects, read_document, …) as long as the user lets you read them (the agent panel can limit you to this project); there is no way out of the sandbox, so don't ask for one.
 The copy does not change under you during a turn, but the live document does — the user edits between and during your turns and your edits are merged in — so read a file afresh at the start of each turn instead of relying on what it said earlier.
 Pending tracked changes appear in the source as \\lyxadded{author}{time}{text} and \\lyxdeleted{author}{time}{text}: text inside \\lyxdeleted is already deleted — don't restore it unless asked; edit around and inside these macros freely (you never need to write them yourself). Comment lines starting with %% are OverLyX bookkeeping (notes, settings) — leave them unless asked. Never run git: OverLyX versions every change.
-The "overlyx" MCP server (project "${project}") has the comment threads (list_comments / add_comment / resolve_comment), build_pdf, which compiles the live document (your edits are already in it), and undo_turn. Do NOT recompile after every edit: when a turn has changed a .tex document, OverLyX builds it after the turn and shows the user whether the PDF still compiles — compile yourself only when asked, or once at the end of a larger or riskier change (new packages, macros, environments, tables). If build_pdf says your changes broke the build (it compares with the build before your changes), fix the error, or take the turn's changes back with undo_turn when you cannot fix it quickly — never end a turn leaving a document that no longer compiles. undo_turn with turns_back 1, 2, … takes back an earlier turn's changes exactly (the user's edits since are kept) — use it when the user asks you to roll back.
-You have internet access through the web_search tool — use it for literature, references and facts (a shell command that needs the network still asks for approval).
+The "overlyx" MCP server (project "${project}"${o.tools === 'claude' ? '; its tools are named mcp__overlyx__…' : ''}) has the comment threads (list_comments / add_comment / resolve_comment), build_pdf, which compiles the live document (your edits are already in it), and undo_turn. Do NOT recompile after every edit: when a turn has changed a .tex document, OverLyX builds it after the turn and shows the user whether the PDF still compiles — compile yourself only when asked, or once at the end of a larger or riskier change (new packages, macros, environments, tables). If build_pdf says your changes broke the build (it compares with the build before your changes), fix the error, or take the turn's changes back with undo_turn when you cannot fix it quickly — never end a turn leaving a document that no longer compiles. undo_turn with turns_back 1, 2, … takes back an earlier turn's changes exactly (the user's edits since are kept) — use it when the user asks you to roll back.
+${!o.web ? 'You have no internet access here (no web search, and shell commands have no network): when a question needs current information or the literature, say so.' : o.tools === 'claude' ? 'You have internet access through the WebSearch tool — use it for literature, references and facts (shell commands have no network).' : 'You have internet access through the web_search tool — use it for literature, references and facts (a shell command that needs the network still asks for approval).'}
 By default the user is here to understand and explore their document and the literature around it — answering, explaining, finding and summarizing is the normal mode, and most turns should not touch any file. Editing happens every so often, only when the user explicitly asks for a change; when a request is ambiguous about whether to edit, explain first and offer the edit instead of making it.
 Each user message may be preceded by a [context]…[/context] item the editor adds (the user did not write it): the document being edited, the other open documents, and the current selection — quoted, and marked ⟦SELECTION⟧…⟦/SELECTION⟧ in a file excerpt. Use it to resolve "this", "here" or an unqualified request.`;
 
@@ -124,7 +139,7 @@ export interface ThreadSandbox { cwd: string; approvalPolicy: 'never'; config: R
  * directory's .codex/config.toml — a project file any editor can write — would be loaded, its MCP
  * servers started unsandboxed. The header tells the MCP server which thread is calling.
  */
-export function threadSandbox(t: { project: string; key: string; cwd: string; native: boolean }): ThreadSandbox {
+export function threadSandbox(t: { project: string; key: string; cwd: string; native: boolean; provider?: AgentProvider }): ThreadSandbox {
   const live = projectDir(t.project), home = scratchDir(t.key), start = startDir();
   fs.mkdirSync(home, { recursive: true });
   fs.mkdirSync(t.cwd, { recursive: true });
@@ -144,9 +159,36 @@ export function threadSandbox(t: { project: string; key: string; cwd: string; na
       projects: untrusted,
       'shell_environment_policy.set': { HOME: home, TMPDIR: home },
       'mcp_servers.overlyx.http_headers': { 'X-OverLyX-Thread': t.key },
+      // codex's web_search is a tool of OpenAI's Responses API: OpenRouter's does not take it
+      ...(t.provider === 'openrouter' ? { 'tools.web_search': false, 'features.web_search_request': false } : {}),
     },
   };
 }
+
+/** What a Claude Code turn runs in (scripts/claude-app-server.mjs adds the command and its environment): sandbox.ts sandboxParts. */
+export interface ClaudeTurnSandbox { pre: string[]; bwrap: string[]; configDir: string }
+
+/**
+ * The Claude engine's counterpart of threadSandbox, for one turn: bwrap with the system's files
+ * (sandbox.ts — not all of /etc), the turn's working copy (writable), the live project read only
+ * (the copy's binary files are symlinks into it; its .git hidden), the thread's scratch HOME and
+ * Claude Code's own configuration directory (its session files) — writable; no network (the
+ * engine's forwarder reaches only OverLyX's internal socket, agentnet.ts), in a cgroup of its own.
+ */
+export function claudeTurnSandbox(t: { project: string; key: string; cwd: string; configDir: string }): ClaudeTurnSandbox {
+  const live = projectDir(t.project), home = scratchDir(t.key);
+  const { pre, bwrap } = sandboxParts({
+    cwd: t.cwd, home, rw: [t.cwd, t.configDir], ro: [live], hide: [path.join(live, '.git')],
+    cgroup: { memoryMB: 3072, tasks: 1024 },
+  });
+  return { pre, bwrap, configDir: t.configDir };
+}
+
+/** codex's model provider for a thread on an account key (the managed config's [model_providers.*]; the ChatGPT sign-in is codex's own) */
+const CODEX_PROVIDERS = { openai: 'overlyx-openai', openrouter: 'overlyx-openrouter' } as const;
+export type AgentEngine = 'codex' | 'claude';
+export const engineOf = (provider: AgentProvider): AgentEngine => (provider === 'anthropic' ? 'claude' : 'codex');
+const toolSetOf = (provider: AgentProvider): ToolSet => ({ tools: engineOf(provider), web: provider !== 'openrouter' });
 
 /**
  * A one-shot question's sandbox (AgentHost.ask): the empty start directory and the system's files
@@ -287,6 +329,22 @@ bearer_token_env_var = "OVERLYX_MCP_TOKEN"
 # elicitation; the panel used to have no card for it and every write tool came back
 # "user rejected MCP tool call".
 default_tools_approval_mode = "approve"
+
+# Threads on the account's own API keys (agentkeys.ts): model requests go to OverLyX's proxy
+# (agentnet.ts), which adds the key — codex authenticates there with its panel credential.
+[model_providers.${CODEX_PROVIDERS.openai}]
+name = "OpenAI (your API key)"
+base_url = "http://127.0.0.1:${config.port}/internal/llm/openai/v1"
+env_key = "OVERLYX_MCP_TOKEN"
+wire_api = "responses"
+requires_openai_auth = false
+
+[model_providers.${CODEX_PROVIDERS.openrouter}]
+name = "OpenRouter (your API key)"
+base_url = "http://127.0.0.1:${config.port}/internal/llm/openrouter/v1"
+env_key = "OVERLYX_MCP_TOKEN"
+wire_api = "responses"
+requires_openai_auth = false
 `;
 }
 
@@ -306,7 +364,7 @@ function agentMcpToken(userId: number): string {
 }
 
 class AgentHost {
-  /** connection to this user's keeper, which owns the codex child (scripts/agent-keeper.mjs) */
+  /** connection to this user's keeper, which owns the engine's process — codex or the Claude engine (scripts/agent-keeper.mjs) */
   conn: net.Socket | null = null;
   /** a keeper connection is up (the events stream reports it) */
   running = false;
@@ -328,12 +386,14 @@ class AgentHost {
   private oneShots = new Map<string, (method: string, params: any) => void>();
   ready: Promise<void> | null = null;
 
-  constructor(public userId: number) {
-    const rows = db.prepare('SELECT thread_id, project FROM agent_threads WHERE user_id = ?').all(userId) as { thread_id: string; project: string }[];
-    for (const r of rows) this.threadProjects.set(r.thread_id, r.project);
+  constructor(public userId: number, public engine: AgentEngine = 'codex') {
+    const rows = db.prepare('SELECT thread_id, project, provider FROM agent_threads WHERE user_id = ?').all(userId) as { thread_id: string; project: string; provider: string | null }[];
+    for (const r of rows) if (engineOf(providerOfRow(r)) === engine) this.threadProjects.set(r.thread_id, r.project);
   }
 
-  home(): string { return agentHomeDir(this.userId); }
+  /** the engine's home: CODEX_HOME, or the Claude engine's directory inside it */
+  home(): string { return this.engine === 'claude' ? path.join(agentHomeDir(this.userId), 'claude') : agentHomeDir(this.userId); }
+  private get tag(): string { return this.engine === 'claude' ? `[agent ${this.userId} claude]` : `[agent ${this.userId}]`; }
   private sockPath(): string { return path.join(this.home(), 'keeper.sock'); }
 
   /** Write the managed codex config; `true` when an existing, different config was replaced
@@ -341,6 +401,7 @@ class AgentHost {
   private ensureHome(): boolean {
     const h = this.home();
     fs.mkdirSync(h, { recursive: true });
+    if (this.engine === 'claude') return false;   // nothing to configure: every turn brings its settings
     // OverLyX owns this file — rewritten on every start so the port and settings stay current
     const file = path.join(h, 'config.toml');
     const text = managedCodexConfig();
@@ -376,7 +437,7 @@ class AgentHost {
       // server, another model…) never reaches a keeper's running codex — old keepers kept
       // serving threads WITHOUT the overlyx MCP tools after the connector was introduced.
       // Ask the keeper to shut down (it kills its codex child; threads resume on demand).
-      console.log(`[agent ${this.userId}] managed codex config changed — restarting the keeper`);
+      console.log(`${this.tag} managed codex config changed — restarting the keeper`);
       try { sock.write(JSON.stringify({ keeper: 'shutdown' }) + '\n'); } catch { /* gone */ }
       sock.destroy();
       for (let i = 0; i < 40 && fs.existsSync(this.sockPath()); i++) await new Promise(r => setTimeout(r, 100));
@@ -390,12 +451,13 @@ class AgentHost {
     await this.attach(sock);
   }
 
-  private versionPath(): string { return path.join(this.home(), 'codex-version'); }
+  private versionPath(): string { return path.join(this.home(), this.engine === 'claude' ? 'engine-version' : 'codex-version'); }
+  private engineVersion(): string | null { return this.engine === 'claude' ? claudeEngineVersion() : installedCodexVersion(); }
 
-  /** A newer codex was installed since this user's keeper started its child (a keeper from
-   *  before the version stamp counts as outdated). */
-  codexOutdated(): boolean {
-    const now = installedCodexVersion();
+  /** A newer engine was installed since this user's keeper started its child — codex, or the Claude
+   *  engine's script or SDK (a keeper from before the version stamp counts as outdated). */
+  outdated(): boolean {
+    const now = this.engineVersion();
     if (!now) return false;
     let ran = '';
     try { ran = fs.readFileSync(this.versionPath(), 'utf8').trim(); } catch { /* no stamp */ }
@@ -404,13 +466,20 @@ class AgentHost {
 
   private spawnKeeper(): void {
     try { fs.unlinkSync(this.sockPath()); } catch { /* none */ }
-    try { fs.writeFileSync(this.versionPath(), installedCodexVersion() ?? ''); } catch { /* the check just stays off */ }
+    try { fs.writeFileSync(this.versionPath(), this.engineVersion() ?? ''); } catch { /* the check just stays off */ }
+    // codex gets the panel's MCP credential; the Claude engine an internal one (agentnet.ts: it works
+    // on internal requests only — its sandboxed commands can see it), its socket and its forwarder
+    const engine = this.engine === 'claude'
+      ? {
+        KEEPER_BIN: process.execPath, KEEPER_ARGS: JSON.stringify([config.agent.claudeServer]),
+        KEEPER_ENV: JSON.stringify({ OVERLYX_AGENT_TOKEN: mintInternalToken(this.userId), OVERLYX_AGENT_NET: agentNetSocket(), OVERLYX_SANDBOX_ENTRY: CLAUDE_ENTRY }),
+      }
+      : { KEEPER_BIN: config.agent.bin, OVERLYX_MCP_TOKEN: agentMcpToken(this.userId) };
     const child = spawn(process.execPath, [KEEPER_SCRIPT], {
       detached: true, stdio: 'ignore', cwd: this.home(),
       env: {
         PATH: process.env.PATH ?? '/usr/bin:/bin', LANG: process.env.LANG ?? 'C.UTF-8',
-        KEEPER_SOCKET: this.sockPath(), KEEPER_BIN: config.agent.bin, KEEPER_HOME: this.home(),
-        OVERLYX_MCP_TOKEN: agentMcpToken(this.userId),
+        KEEPER_SOCKET: this.sockPath(), KEEPER_HOME: this.home(), ...engine,
         ...(process.env.OVERLYX_KEEPER_IDLE_MS ? { KEEPER_IDLE_MS: process.env.OVERLYX_KEEPER_IDLE_MS } : {}),
       },
     });
@@ -489,9 +558,9 @@ class AgentHost {
   /** The keeper's own control lines: the hello on connect, codex stderr, codex exit. */
   private onKeeper(msg: { keeper: string; [k: string]: unknown }): void {
     if (msg.keeper === 'hello' && this.helloResolve) { const r = this.helloResolve; this.helloResolve = null; r(msg as { initialized?: boolean }); }
-    else if (msg.keeper === 'stderr' && msg.line) console.error(`[agent ${this.userId}]`, String(msg.line).slice(0, 500));
+    else if (msg.keeper === 'stderr' && msg.line) console.error(this.tag, String(msg.line).slice(0, 500));
     else if (msg.keeper === 'exit') {
-      console.error(`[agent ${this.userId}] codex exited${msg.code ? ` (${msg.code})` : ''}`);
+      console.error(`${this.tag} ${this.engine === 'claude' ? 'the Claude engine' : 'codex'} exited${msg.code ? ` (${msg.code})` : ''}`);
       this.conn?.destroy();   // onClose does the bookkeeping
     }
   }
@@ -504,7 +573,7 @@ class AgentHost {
     // root outside the thread's scope. Declined here, never shown.
     const refusal = sandboxRefusal(method);
     if (refusal) {
-      console.warn(`[agent ${this.userId}] declined ${method} — the agent stays in its sandbox`);
+      console.warn(`${this.tag} declined ${method} — the agent stays in its sandbox`);
       this.send({ jsonrpc: '2.0', id: msg.id, result: refusal });
       return;
     }
@@ -580,7 +649,7 @@ class AgentHost {
       clearTimeout(this.syncTimers.get(tid));
       this.syncTimers.set(tid, setTimeout(() => {
         this.syncTimers.delete(tid);
-        syncWorkspace(tid, row.project, this.userId).catch(e => console.error(`[agent ${this.userId}] sync of ${tid} failed:`, (e as Error).message));
+        syncWorkspace(tid, row.project, this.userId).catch(e => console.error(`${this.tag} sync of ${tid} failed:`, (e as Error).message));
       }, 150));
     });
   }
@@ -592,7 +661,7 @@ class AgentHost {
     void (async () => {
       const cp = await finishTurn(tid, project, this.userId);
       if (cp) await checkBuilds(tid, project, cp.n);
-    })().catch(e => console.error(`[agent ${this.userId}] end of turn in ${tid} failed:`, (e as Error).message));
+    })().catch(e => console.error(`${this.tag} end of turn in ${tid} failed:`, (e as Error).message));
   }
 
   emitCheckpoint(tid: string, cp: Checkpoint): void {
@@ -610,11 +679,21 @@ class AgentHost {
   /** Load a thread into codex (after a codex restart) — under its sandbox, which codex binds at load; `cwd`: where its turns run. */
   async ensureThreadLoaded(row: ThreadRow, cwd: string): Promise<void> {
     if (this.loaded.has(row.thread_id)) return;
-    const box = threadSandbox({ project: row.project, key: threadKey(row.thread_id), cwd, native: isNativeThread(row.created_at) });
-    const res = await this.request('thread/resume', { threadId: row.thread_id, cwd: box.cwd, approvalPolicy: box.approvalPolicy, config: box.config });
+    const provider = providerOfRow(row);
+    let res: any;
+    if (this.engine === 'claude') {
+      // the Claude engine runs each turn in the sandbox the turn brings (claudeTurnSandbox)
+      res = await this.request('thread/resume', { threadId: row.thread_id, cwd, approvalPolicy: 'never', config: { 'overlyx.mcpKey': threadKey(row.thread_id) } });
+    } else {
+      const box = threadSandbox({ project: row.project, key: threadKey(row.thread_id), cwd, native: isNativeThread(row.created_at), provider });
+      res = await this.request('thread/resume', { threadId: row.thread_id, cwd: box.cwd, approvalPolicy: box.approvalPolicy, config: box.config, ...(isKeyProvider(provider) ? { modelProvider: CODEX_PROVIDERS[provider as 'openai' | 'openrouter'] } : {}) });
+    }
     assertSandboxed(res, row.thread_id);
     this.loaded.add(row.thread_id);
   }
+
+  /** Where the Claude engine keeps Claude Code's own files of a thread (its CLAUDE_CONFIG_DIR, bound into the turn's sandbox). */
+  claudeConfigDir(threadId: string): string { return path.join(this.home(), 'threads', threadId, 'claude'); }
 
   markLoaded(threadId: string, project: string): void { this.loaded.add(threadId); this.threadProjects.set(threadId, project); }
 
@@ -623,6 +702,7 @@ class AgentHost {
    * the reply in the shape `schema` gives (codex's outputSchema) — on the user's own ChatGPT sign-in.
    */
   async ask(text: string, schema: object, timeoutMs = 150_000): Promise<string> {
+    if (this.engine !== 'codex') throw new Error('one-shot questions go to codex');
     await this.ensure();
     const box = consultSandbox();
     const out = await this.request('thread/start', {
@@ -660,8 +740,8 @@ class AgentHost {
     this.idleTimer = setTimeout(() => {
       // an open panel keeps codex running — unless a newer codex was installed since it started
       // (scripts/update-codex.sh): then a quiet one stops too, and the next request starts the new one
-      if (this.activeTurns.size || (this.subscribers.size && !this.codexOutdated())) { this.touch(); return; }
-      if (this.subscribers.size) console.log(`[agent ${this.userId}] codex ${installedCodexVersion()} is installed — restarting the quiet agent on it`);
+      if (this.activeTurns.size || (this.subscribers.size && !this.outdated())) { this.touch(); return; }
+      if (this.subscribers.size) console.log(`${this.tag} ${this.engine === 'claude' ? 'a new Claude engine' : `codex ${installedCodexVersion()}`} is installed — restarting the quiet agent on it`);
       this.stop();
     }, config.agent.idleMs);
     this.idleTimer.unref();
@@ -713,29 +793,57 @@ function sandboxRefusal(method: string): object | null {
   return /requestApproval/.test(method) ? { decision: 'decline' } : null;
 }
 
-const KEEPER_SCRIPT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../scripts/agent-keeper.mjs');
+const SCRIPTS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../scripts');
+const KEEPER_SCRIPT = path.join(SCRIPTS, 'agent-keeper.mjs');
+/** the first process in a Claude Code sandbox: the forwarder to the internal socket */
+const CLAUDE_ENTRY = path.join(SCRIPTS, 'claude-sandbox-entry.mjs');
 
-const hosts = new Map<number, AgentHost>();
-function host(userId: number): AgentHost {
-  let h = hosts.get(userId);
-  if (!h) { h = new AgentHost(userId); hosts.set(userId, h); }
+let claudeVersionCache: { key: string; version: string } | null = null;
+/** The Claude engine as installed: its script, the forwarder and the Agent SDK's version — a keeper that started another is outdated. */
+export function claudeEngineVersion(): string | null {
+  const files = [config.agent.claudeServer, CLAUDE_ENTRY];
+  let sdk = '';
+  try { sdk = JSON.parse(fs.readFileSync(path.join(config.agent.claudeServer, '../../node_modules/@anthropic-ai/claude-agent-sdk/package.json'), 'utf8')).version ?? ''; } catch { /* a stand-in engine */ }
+  let key = sdk;
+  try { for (const f of files) key += ':' + fs.statSync(f).mtimeMs; } catch { return null; }
+  if (claudeVersionCache?.key !== key) {
+    const h = crypto.createHash('sha256');
+    for (const f of files) h.update(fs.readFileSync(f));
+    claudeVersionCache = { key, version: `${sdk || 'sdk?'}+${h.digest('hex').slice(0, 12)}` };
+  }
+  return claudeVersionCache.version;
+}
+
+/** The provider a thread runs on (rows from before providers: the ChatGPT sign-in). */
+export function providerOfRow(row: { provider?: string | null }): AgentProvider { return isAgentProvider(row.provider) ? row.provider : 'chatgpt'; }
+
+const hosts = new Map<string, AgentHost>();
+function host(userId: number, engine: AgentEngine = 'codex'): AgentHost {
+  const k = `${engine}:${userId}`;
+  let h = hosts.get(k);
+  if (!h) { h = new AgentHost(userId, engine); hosts.set(k, h); }
   return h;
 }
+/** The host that runs a thread: its owner's, for the thread's engine. */
+const hostOf = (row: ThreadRow) => host(row.user_id, engineOf(providerOfRow(row)));
 
 /** Server shutdown: detach from the keepers — the codex children keep running and the next
  *  server process (a deploy's restart) reconnects instead of killing a turn in progress. */
 export function disconnectAgents(): void { for (const h of hosts.values()) h.disconnect(); }
 
-/** Stop every keeper and codex child (tests, explicit teardown). */
+/** Stop every keeper and engine child (tests, explicit teardown). */
 export function shutdownAgents(): void { for (const h of hosts.values()) h.stop(); }
-/** The user deleted their account: their codex stops, and its home (ChatGPT sign-in, transcripts) goes. */
+/** The user deleted their account: their engines stop, their homes (ChatGPT sign-in, transcripts) and API keys go. */
 export function forgetAgentUser(userId: number): void {
-  hosts.get(userId)?.stop();
-  hosts.delete(userId);
+  for (const engine of ['codex', 'claude'] as const) { hosts.get(`${engine}:${userId}`)?.stop(); hosts.delete(`${engine}:${userId}`); }
+  forgetKeys(userId);
+  forgetInternalTokens(userId);
   fs.rmSync(agentHomeDir(userId), { recursive: true, force: true });
 }
 
 export function agentAvailable(): boolean { return config.agent.enabled; }
+/** The Anthropic provider (the Claude engine) is offered: it needs the sandbox, there is no unsandboxed fallback. */
+const claudeAvailable = () => { try { return config.agent.enabled && config.agent.claude && sandboxAvailable(); } catch { return false; } };
 
 /** The user signed in to the Agent panel with their ChatGPT account (the sign-in file exists; asking codex would start it). */
 export function codexSignedIn(userId: number): boolean {
@@ -804,14 +912,14 @@ async function composeInput(text: string, ctx: TurnContext | undefined, user: Se
 
 /* ------------------------------------------------------------------ routes */
 
-interface ThreadRow { thread_id: string; project: string; user_id: number; title: string | null; created_at: number; updated_at: number; scope: string | null; mcp_key: string | null }
+interface ThreadRow { thread_id: string; project: string; user_id: number; title: string | null; created_at: number; updated_at: number; scope: string | null; mcp_key: string | null; provider: string | null; model: string | null }
 const threadRow = (tid: string) => db.prepare('SELECT * FROM agent_threads WHERE thread_id = ?').get(tid) as ThreadRow | undefined;
 
 export function agentRoutes(): express.Router {
   const r = express.Router();
   if (config.agent.enabled) { try { pruneWorkspaces(); } catch { /* best-effort */ } }
   // what a turn changed, its build check, its undo: to the thread owner's open panels
-  onCheckpoint((tid, cp) => { const row = threadRow(tid); if (row) hosts.get(row.user_id)?.emitCheckpoint(tid, cp); });
+  onCheckpoint((tid, cp) => { const row = threadRow(tid); if (row) hosts.get(`${engineOf(providerOfRow(row))}:${row.user_id}`)?.emitCheckpoint(tid, cp); });
   r.use(['/agent', '/projects/:project/agent'], (_req, res, next) => { if (!config.agent.enabled) { res.status(404).json({ error: 'the agent is not enabled on this server' }); return; } next(); });
 
   const fail = (res: Response, e: unknown, code = 500) => { if (!res.headersSent) res.status(code).json({ error: (e as Error)?.message ?? String(e) }); };
@@ -826,17 +934,46 @@ export function agentRoutes(): express.Router {
 
   /* ---- account (per user, project-independent) ---- */
 
+  /** Which providers the account has: the ChatGPT sign-in (asking codex only when it may be signed in) and its keys (agentkeys.ts). */
   r.get('/agent/status', (req, res) => { void (async () => {
     const userId = req.user!.id;
     const authFile = path.join(agentHomeDir(userId), 'auth.json');
-    if (!fs.existsSync(authFile) && !hosts.get(userId)?.conn) { res.json({ enabled: true, authenticated: false }); return; }
     try {
-      const h = host(userId); await h.ensure();
-      const [auth, acct] = await Promise.all([h.request('getAuthStatus', {}), h.request('account/read', {}).catch(() => null)]);
-      const account = acct?.account && acct.account.type === 'chatgpt' ? { email: acct.account.email ?? null, plan: acct.account.planType ?? null } : null;
-      res.json({ enabled: true, authenticated: !!auth?.authMethod && auth.authMethod !== null, method: auth?.authMethod ?? null, account });
+      let chatgpt: { connected: boolean; account: { email: string | null; plan: string | null } | null; method: string | null } = { connected: false, account: null, method: null };
+      if (fs.existsSync(authFile) || hosts.get(`codex:${userId}`)?.conn) {
+        const h = host(userId); await h.ensure();
+        const [auth, acct] = await Promise.all([h.request('getAuthStatus', {}), h.request('account/read', {}).catch(() => null)]);
+        const account = acct?.account && acct.account.type === 'chatgpt' ? { email: acct.account.email ?? null, plan: acct.account.planType ?? null } : null;
+        chatgpt = { connected: !!auth?.authMethod && auth.authMethod !== null, account, method: auth?.authMethod ?? null };
+      }
+      const keys = keyHints(userId);
+      const providers = {
+        chatgpt: { connected: chatgpt.connected, account: chatgpt.account },
+        openai: { connected: !!keys.openai, hint: keys.openai?.hint ?? null },
+        openrouter: { connected: !!keys.openrouter, hint: keys.openrouter?.hint ?? null },
+        anthropic: { connected: !!keys.anthropic && claudeAvailable(), hint: keys.anthropic?.hint ?? null, available: claudeAvailable() },
+      };
+      const authenticated = Object.values(providers).some(p => p.connected);
+      res.json({ enabled: true, authenticated, method: chatgpt.method, account: chatgpt.account, providers });
     } catch (e) { fail(res, e); }
   })(); });
+
+  /** An API key for the panel (OpenAI, OpenRouter, Anthropic): checked with the provider, then kept sealed for the account. */
+  r.put('/agent/keys/:provider', (req, res) => { void (async () => {
+    const provider = req.params.provider;
+    if (!isKeyProvider(provider) || (provider === 'anthropic' && !claudeAvailable())) { res.status(404).json({ error: 'no such provider here' }); return; }
+    try {
+      const out = await setKey(req.user!.id, provider, String(req.body?.key ?? ''));
+      console.log(`[agent ${req.user!.id}] ${PROVIDER_NAMES[provider]} key added`);
+      res.json({ ok: true, hint: out.hint });
+    } catch (e) { e instanceof KeyError ? res.status(e.status).json({ error: e.message }) : fail(res, e); }
+  })(); });
+
+  r.delete('/agent/keys/:provider', (req, res) => {
+    const provider = req.params.provider;
+    if (!isKeyProvider(provider)) { res.status(404).json({ error: 'no such provider' }); return; }
+    res.json({ ok: removeKey(req.user!.id, provider) });
+  });
 
   r.post('/agent/login', (req, res) => { void (async () => {
     try {
@@ -856,55 +993,81 @@ export function agentRoutes(): express.Router {
     catch (e) { fail(res, e); }
   })(); });
 
+  /** The picker's models: of every provider the account has, each tagged with its provider. */
   r.get('/agent/models', (req, res) => { void (async () => {
-    try {
-      const h = host(req.user!.id); await h.ensure();
-      const out = await h.request('model/list', {});
-      const models = ((out?.data ?? []) as any[]).filter(m => !m.hidden).map(m => ({
-        id: String(m.model ?? m.id),
-        label: String(m.displayName ?? m.model ?? m.id),
-        description: String(m.description ?? ''),
-        efforts: ((m.supportedReasoningEfforts ?? []) as any[]).map(e => (typeof e === 'string' ? e : String(e?.effort ?? e?.reasoningEffort ?? ''))).filter(Boolean),
-        defaultEffort: m.defaultReasoningEffort ?? null,
-        isDefault: !!m.isDefault,
-      }));
-      res.json({ models });
-    } catch (e) { fail(res, e); }
+    const userId = req.user!.id;
+    const keys = keyHints(userId);
+    const models: ProviderModel[] = [];
+    const chatgpt = codexSignedIn(userId);
+    if (chatgpt || keys.openai) {
+      // codex's catalogue: the ChatGPT sign-in's models, and on an OpenAI key the same models through the API
+      try {
+        const h = host(userId); await h.ensure();
+        const out = await h.request('model/list', {});
+        const listed = ((out?.data ?? []) as any[]).filter(m => !m.hidden).map(m => ({
+          id: String(m.model ?? m.id),
+          label: String(m.displayName ?? m.model ?? m.id),
+          description: String(m.description ?? ''),
+          efforts: ((m.supportedReasoningEfforts ?? []) as any[]).map(e => (typeof e === 'string' ? e : String(e?.effort ?? e?.reasoningEffort ?? ''))).filter(Boolean),
+          defaultEffort: m.defaultReasoningEffort ?? null,
+          isDefault: !!m.isDefault,
+        }));
+        if (chatgpt) for (const m of listed) models.push({ ...m, provider: 'chatgpt' });
+        if (keys.openai) for (const m of listed) models.push({ ...m, provider: 'openai' });
+      } catch (e) { console.error(`[agent ${userId}] codex's model list:`, (e as Error).message); }
+    }
+    if (keys.openrouter) models.push(...await keyProviderModels(userId, 'openrouter'));
+    if (keys.anthropic && claudeAvailable()) models.push(...await keyProviderModels(userId, 'anthropic'));
+    res.json({ models });
   })(); });
 
   /* ---- threads of a project ---- */
 
   r.get('/projects/:project/agent/threads', (req, res) => {
     if (!needRole(req, res, 'edit')) return;
-    const rows = db.prepare(`SELECT t.thread_id, t.title, t.user_id, t.created_at, t.updated_at, u.display_name AS name FROM agent_threads t
+    const rows = db.prepare(`SELECT t.thread_id, t.title, t.user_id, t.created_at, t.updated_at, t.provider, t.model, u.display_name AS name FROM agent_threads t
       LEFT JOIN users u ON u.id = t.user_id WHERE t.project = ? ORDER BY t.updated_at DESC LIMIT 100`).all(String(req.params.project)) as any[];
-    res.json({ threads: rows.map(t => ({ id: t.thread_id, title: t.title, user: { id: t.user_id, name: t.name }, mine: t.user_id === req.user!.id, createdAt: t.created_at, updatedAt: t.updated_at })) });
+    res.json({ threads: rows.map(t => ({ id: t.thread_id, title: t.title, user: { id: t.user_id, name: t.name }, mine: t.user_id === req.user!.id, createdAt: t.created_at, updatedAt: t.updated_at, provider: providerOfRow(t), model: t.model ?? null })) });
   });
 
   r.post('/projects/:project/agent/threads', (req, res) => { void (async () => {
     if (!needRole(req, res, 'edit')) return;
     const project = String(req.params.project);
     const scope = scopeOf(req.body?.scope);
+    const userId = req.user!.id;
+    // where it runs: the provider the panel's model picker chose (older clients: the ChatGPT sign-in)
+    const provider: AgentProvider = isAgentProvider(req.body?.provider) ? req.body.provider : 'chatgpt';
+    // (on the ChatGPT sign-in codex itself tells a turn that nobody is signed in)
+    const connected = provider === 'chatgpt' || (!!keyOf(userId, provider) && (provider !== 'anthropic' || claudeAvailable()));
+    if (!connected) { res.status(400).json({ error: `Add your ${PROVIDER_NAMES[provider]} key first (the model menu)` }); return; }
+    const model = typeof req.body?.model === 'string' && req.body.model ? String(req.body.model).slice(0, 120) : (provider === 'chatgpt' && config.agent.model) || '';
+    if (!model && provider !== 'chatgpt') { res.status(400).json({ error: 'choose a model' }); return; }
     try {
-      const h = host(req.user!.id); await h.ensure();
+      const h = host(userId, engineOf(provider)); await h.ensure();
       // the thread starts in an empty directory under its sandbox (its first turn moves it into
       // the working copy, which exists only once codex has named the thread)
       const key = crypto.randomBytes(18).toString('base64url');
-      const box = threadSandbox({ project, key, cwd: startDir(), native: true });
-      const out = await h.request('thread/start', {
-        cwd: box.cwd,
-        approvalPolicy: box.approvalPolicy,
-        config: box.config,
-        developerInstructions: NATIVE_INSTRUCTIONS(project),
-        ...(config.agent.model ? { model: config.agent.model } : {}),
-      });
+      const out = engineOf(provider) === 'claude'
+        ? await h.request('thread/start', { cwd: startDir(), approvalPolicy: 'never', config: { 'overlyx.mcpKey': key }, developerInstructions: NATIVE_INSTRUCTIONS(project, toolSetOf(provider)), model })
+        : await (() => {
+          const box = threadSandbox({ project, key, cwd: startDir(), native: true, provider });
+          return h.request('thread/start', {
+            cwd: box.cwd,
+            approvalPolicy: box.approvalPolicy,
+            config: box.config,
+            developerInstructions: NATIVE_INSTRUCTIONS(project, toolSetOf(provider)),
+            ...(isKeyProvider(provider) ? { modelProvider: CODEX_PROVIDERS[provider as 'openai' | 'openrouter'] } : {}),
+            ...(model ? { model } : {}),
+          });
+        })();
       const tid = out.thread.id as string;
       assertSandboxed(out, tid);
-      db.prepare('INSERT OR REPLACE INTO agent_threads (thread_id, project, user_id, title, created_at, updated_at, scope, mcp_key) VALUES (?,?,?,?,?,?,?,?)')
-        .run(tid, project, req.user!.id, null, Date.now(), Date.now(), scope === 'project' ? 'project' : null, key);
+      const started = model || out.model || null;
+      db.prepare('INSERT OR REPLACE INTO agent_threads (thread_id, project, user_id, title, created_at, updated_at, scope, mcp_key, provider, model) VALUES (?,?,?,?,?,?,?,?,?,?)')
+        .run(tid, project, userId, null, Date.now(), Date.now(), scope === 'project' ? 'project' : null, key, provider === 'chatgpt' ? null : provider, started);
       h.markLoaded(tid, project);
-      logAccess(project, req.user!.id, 'open', 'agent-thread');
-      res.json({ id: tid, model: out.model ?? null, scope });
+      logAccess(project, userId, 'open', 'agent-thread');
+      res.json({ id: tid, model: started, scope, provider });
     } catch (e) { fail(res, e); }
   })(); });
 
@@ -913,11 +1076,11 @@ export function agentRoutes(): express.Router {
     const row = threadRow(String(req.params.tid));
     if (!row || row.project !== String(req.params.project)) { res.status(404).json({ error: 'no such thread in this project' }); return; }
     try {
-      const h = host(row.user_id); await h.ensure();       // transcripts are read through their owner's codex
+      const h = hostOf(row); await h.ensure();       // transcripts are read through their owner's engine
       const out = await h.request('thread/read', { threadId: row.thread_id, includeTurns: true });
       const approvals = row.user_id === req.user!.id ? h.pendingApprovals(row.thread_id) : [];
       const checkpoints = isNativeThread(row.created_at) ? listCheckpoints(row.thread_id).map(publicCheckpoint) : [];
-      res.json({ thread: out.thread, mine: row.user_id === req.user!.id, user: row.user_id, approvals, checkpoints, scope: scopeOf(row.scope) });
+      res.json({ thread: out.thread, mine: row.user_id === req.user!.id, user: row.user_id, approvals, checkpoints, scope: scopeOf(row.scope), provider: providerOfRow(row), model: row.model ?? null });
     } catch (e) { fail(res, e); }
   })(); });
 
@@ -929,7 +1092,7 @@ export function agentRoutes(): express.Router {
     const text = String(req.body?.text ?? '').trim();
     if (!text) { res.status(400).json({ error: 'empty message' }); return; }
     try {
-      const h = host(req.user!.id); await h.ensure();
+      const h = hostOf(row); await h.ensure();
       // the panel's Reads choice, sent with every message: it holds for this turn on
       const scope = req.body?.scope === undefined ? scopeOf(row.scope) : scopeOf(req.body.scope);
       if (scope !== scopeOf(row.scope)) db.prepare('UPDATE agent_threads SET scope = ? WHERE thread_id = ?').run(scope === 'project' ? 'project' : null, row.thread_id);
@@ -952,10 +1115,14 @@ export function agentRoutes(): express.Router {
       // the panel's optimistic message id: codex echoes it on the userMessage item, so the client can dedupe
       const cmid = typeof req.body?.clientMessageId === 'string' && req.body.clientMessageId ? String(req.body.clientMessageId).slice(0, 60) : undefined;
       for (const note of [trackingNote(tracked, wasTracked), scopeNote(row.thread_id, row.project, scope)]) if (note) input.unshift({ type: 'text', text: note, text_elements: [] });
-      // the sandbox stays the one the thread was loaded with (threadSandbox): its working directory
-      // is the turn's cwd, and no turn may bring an approval policy that lets it out
-      const turn = h.request('turn/start', { threadId: row.thread_id, input, cwd, approvalPolicy: 'never', ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(cmid ? { clientUserMessageId: cmid } : {}) }, 0);
+      if (model && model !== row.model) db.prepare('UPDATE agent_threads SET model = ? WHERE thread_id = ?').run(model, row.thread_id);
+      // codex: the sandbox stays the one the thread was loaded with (threadSandbox); its working
+      // directory is the turn's cwd, and no turn may bring an approval policy that lets it out.
+      // The Claude engine: the turn brings its sandbox (claudeTurnSandbox), for this working copy.
+      const sandbox = h.engine === 'claude' ? { overlyxSandbox: claudeTurnSandbox({ project: row.project, key: threadKey(row.thread_id), cwd, configDir: h.claudeConfigDir(row.thread_id) }) } : {};
+      const turn = h.request('turn/start', { threadId: row.thread_id, input, cwd, approvalPolicy: 'never', ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(cmid ? { clientUserMessageId: cmid } : {}), ...sandbox }, 0);
       turn.catch(e => console.error(`[agent ${req.user!.id}] turn failed:`, (e as Error).message));
+      // (a turn the engine refuses outright — the Claude engine without its sandbox — fails here, within the 5 s)
       // the turn runs long; its progress arrives over the events stream — answer as soon as it is accepted
       const quick = await Promise.race([turn.then(t => t), new Promise(r2 => setTimeout(r2, 5000, null))]);
       res.json({ ok: true, turn: quick ? (quick as any).turn ?? null : null });
@@ -995,7 +1162,7 @@ export function agentRoutes(): express.Router {
     if (row.user_id !== req.user!.id) { res.status(403).json({ error: "Only the thread's creator can decide approvals" }); return; }
     const decision = String(req.body?.decision ?? '');
     if (!['accept', 'acceptForSession', 'decline', 'cancel'].includes(decision)) { res.status(400).json({ error: 'bad decision' }); return; }
-    const ok = host(row.user_id).respond(String(req.body?.requestId ?? ''), { decision });
+    const ok = hostOf(row).respond(String(req.body?.requestId ?? ''), { decision });
     ok ? res.json({ ok: true }) : res.status(404).json({ error: 'this approval request is gone (answered or expired)' });
   });
 
@@ -1008,7 +1175,7 @@ export function agentRoutes(): express.Router {
     const text = String(req.body?.text ?? '').trim();
     if (!text) { res.status(400).json({ error: 'empty message' }); return; }
     try {
-      const h = host(row.user_id); await h.ensure();
+      const h = hostOf(row); await h.ensure();
       const cmid = typeof req.body?.clientMessageId === 'string' && req.body.clientMessageId ? String(req.body.clientMessageId).slice(0, 60) : undefined;
       const input = await composeInput(text, req.body?.context as TurnContext | undefined, req.user!, scopeOf(row.scope) === 'project' ? row.project : undefined);
       const legacy = legacyThreadNote(row.created_at);
@@ -1023,7 +1190,7 @@ export function agentRoutes(): express.Router {
     const row = threadRow(String(req.params.tid));
     if (!row || row.project !== String(req.params.project)) { res.status(404).json({ error: 'no such thread in this project' }); return; }
     if (row.user_id !== req.user!.id) { res.status(403).json({ error: "Only the thread's creator can interrupt it" }); return; }
-    try { await host(row.user_id).request('turn/interrupt', { threadId: row.thread_id, turnId: String(req.body?.turnId ?? '') }); res.json({ ok: true }); }
+    try { await hostOf(row).request('turn/interrupt', { threadId: row.thread_id, turnId: String(req.body?.turnId ?? '') }); res.json({ ok: true }); }
     catch (e) { fail(res, e); }
   })(); });
 
@@ -1031,13 +1198,14 @@ export function agentRoutes(): express.Router {
 
   r.get('/projects/:project/agent/events', (req, res) => {
     if (!needRole(req, res, 'edit')) return;
-    const h = host(req.user!.id);
+    // both engines' events for this user and project (a host is only an object until it is needed)
+    const hs = [host(req.user!.id, 'codex'), host(req.user!.id, 'claude')];
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
-    res.write(`data: ${JSON.stringify({ kind: 'status', running: h.running })}\n\n`);
+    res.write(`data: ${JSON.stringify({ kind: 'status', running: hs.some(h => h.running) })}\n\n`);
     const sub: Subscriber = { project: String(req.params.project), res };
-    h.subscribers.add(sub);
+    for (const h of hs) h.subscribers.add(sub);
     const hb = setInterval(() => res.write(': hb\n\n'), 20000);
-    req.on('close', () => { clearInterval(hb); h.subscribers.delete(sub); });
+    req.on('close', () => { clearInterval(hb); for (const h of hs) h.subscribers.delete(sub); });
   });
 
   return r;

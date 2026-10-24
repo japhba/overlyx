@@ -74,6 +74,14 @@ export const config = {
     idleMs: Number(process.env.OVERLYX_AGENT_IDLE_MS ?? 30 * 60 * 1000),
     /** model passed to new threads ('' = codex's default) */
     model: (process.env.OVERLYX_AGENT_MODEL ?? '').trim(),
+    /**
+     * The panel's second engine (agent.ts, scripts/claude-app-server.mjs): Claude Code through the
+     * Agent SDK, on the account's own Anthropic API key, for threads on the Anthropic provider.
+     * OVERLYX_AGENT_CLAUDE=off leaves the Anthropic provider out; OVERLYX_CLAUDE_SERVER points at a
+     * stand-in engine for tests.
+     */
+    claude: process.env.OVERLYX_AGENT_CLAUDE !== 'off',
+    claudeServer: process.env.OVERLYX_CLAUDE_SERVER ? path.resolve(process.env.OVERLYX_CLAUDE_SERVER) : path.join(REPO_ROOT, 'scripts', 'claude-app-server.mjs'),
   },
   /** minimum interval between automatic versions (ms) */
   autoVersionIntervalMs: Number(process.env.OVERLYX_AUTOVERSION_MS ?? 10 * 60 * 1000),

@@ -131,6 +131,20 @@ function scopesAvailable(): boolean {
  */
 export function sandboxed(cmd: string, args: string[], spec: SandboxSpec): SandboxedCommand {
   if (!sandboxAvailable()) return { cmd, args, env: { ...process.env, ...spec.env } };
+  const { pre, bwrap } = sandboxParts(spec);
+  const all = [...pre, 'bwrap', ...bwrap, '--', cmd, ...args];
+  return { cmd: all[0], args: all.slice(1), env: { ...process.env } };
+}
+
+/**
+ * sandboxed()'s pieces, for a caller that finishes the command line itself (the Agent panel's
+ * Claude engine, scripts/claude-app-server.mjs: it adds the environment and the command it runs):
+ * the commands in front of bwrap (limits, cgroup) and bwrap's own options, without the `--` that
+ * ends them. `hide`: directories inside bound ones that the sandbox must not see (an empty
+ * read-only tmpfs over each). Throws without a sandbox.
+ */
+export function sandboxParts(spec: SandboxSpec & { hide?: string[] }): { pre: string[]; bwrap: string[] } {
+  if (!sandboxAvailable()) throw new Error('bubblewrap is not available: nothing runs unsandboxed here');
   const home = spec.home === false ? '/tmp/home' : spec.home ?? sandboxHome();
   const b: string[] = [];
   for (const d of [...SYSTEM_RO, ...ETC_RO]) if (fs.existsSync(d)) b.push('--ro-bind', d, d);
@@ -139,6 +153,7 @@ export function sandboxed(cmd: string, args: string[], spec: SandboxSpec): Sandb
   else { fs.mkdirSync(home, { recursive: true }); b.push('--bind', home, home); }
   for (const d of new Set(spec.ro ?? [])) if (fs.existsSync(d)) b.push('--ro-bind', d, d);
   for (const d of new Set(spec.rw)) { fs.mkdirSync(d, { recursive: true }); b.push('--bind', d, d); }
+  for (const d of new Set(spec.hide ?? [])) if (fs.existsSync(d)) b.push('--tmpfs', d, '--remount-ro', d);
   // As root, a user namespace would hide the capabilities that read files owned by other users
   // (projects synced from elsewhere often are): skip the user namespace and drop every capability
   // except reading; unprivileged servers get the full unshare (they need the user namespace).
@@ -153,6 +168,5 @@ export function sandboxed(cmd: string, args: string[], spec: SandboxSpec): Sandb
   if (spec.cgroup && scopesAvailable()) pre.push('systemd-run', '--scope', '--quiet', '--collect', '-p', `MemoryMax=${spec.cgroup.memoryMB}M`, '-p', 'MemorySwapMax=0', '-p', `TasksMax=${spec.cgroup.tasks}`, '--');
   const pl = prlimit();
   if (pl) pre.push(pl, `--fsize=${MAX_FILE_BYTES}`, '--core=0', '--');
-  const all = [...pre, 'bwrap', ...b, '--', cmd, ...args];
-  return { cmd: all[0], args: all.slice(1), env: { ...process.env } };
+  return { pre, bwrap: b };
 }

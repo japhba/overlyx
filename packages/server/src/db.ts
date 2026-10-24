@@ -253,6 +253,11 @@ CREATE INDEX IF NOT EXISTS agent_threads_project ON agent_threads(project, updat
 // X-OverLyX-Thread header, which tells the MCP server whose thread a call comes from
 try { db.exec('ALTER TABLE agent_threads ADD COLUMN scope TEXT'); } catch { /* column exists */ }
 try { db.exec('ALTER TABLE agent_threads ADD COLUMN mcp_key TEXT'); } catch { /* column exists */ }
+// provider: where the thread runs — NULL (the ChatGPT sign-in, codex), 'openai' / 'openrouter' (the
+// account's key, codex) or 'anthropic' (the account's key, Claude Code: agentkeys.ts); model: the
+// model it was started with or last switched to
+try { db.exec('ALTER TABLE agent_threads ADD COLUMN provider TEXT'); } catch { /* column exists */ }
+try { db.exec('ALTER TABLE agent_threads ADD COLUMN model TEXT'); } catch { /* column exists */ }
 
 // The starter projects each account got (access.ts ensureStarterProjects): one row per account and
 // template, kept when the project is deleted, so a starter is created exactly once.
