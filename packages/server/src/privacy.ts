@@ -37,6 +37,7 @@ function mailService(): string | null {
   if (!url || url === 'json') return null;
   let host = '';
   try { host = new URL(url).hostname; } catch { return 'an e-mail sending service'; }
+  if (/scaleway|scw/.test(host)) return 'Scaleway (Scaleway SAS, France)';
   if (/brevo|sendinblue/.test(host)) return 'Brevo (Sendinblue SAS, France)';
   if (/gmail|google/.test(host)) return 'Google (Gmail)';
   return host || 'an e-mail sending service';

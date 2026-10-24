@@ -4,7 +4,9 @@
  * a problem report (feedback.ts), mail to privacy@ / contact@ (inbox.ts) — never what: no names,
  * addresses or text, which stay on the server (the privacy notice promises it). `OVERLYX_SMTP_URL`
  * turns them on — an SMTP connection URL with credentials, e.g. a sending service on port 587
- * (`smtp://login:key@smtp-relay.brevo.com:587`; Hetzner blocks outbound 25 and 465), with
+ * (`smtp://<project id>:<secret key>@smtp.tem.scaleway.com:587` — one that sends the text as it is:
+ * Brevo turns it into HTML with a tracking pixel nobody can switch off; Hetzner blocks outbound 25
+ * and 465), with
  * `OVERLYX_MAIL_FROM` an address of the instance's domain. Without it the notice is only logged.
  * `OVERLYX_SMTP_URL=json` uses nodemailer's JSON transport (nothing leaves the process) — tests use
  * that and read `sentMails`.

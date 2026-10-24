@@ -529,7 +529,8 @@ blend.
   and answer there (`POST /api/admin/reports/:id/answer`, feedback.ts `answerMail`): the answer goes out
   from the address the message was sent to and is kept in the message, so it goes with it after a year.
   Sending needs `OVERLYX_SMTP_URL` (a sending service on port 587 — Hetzner blocks 25 and 465 — e.g.
-  `smtp://<login>:<key>@smtp-relay.brevo.com:587`, with the domain authenticated there: DKIM and
+  `smtp://<project id>:<secret key>@smtp.tem.scaleway.com:587` — not Brevo, which turns every mail
+  into HTML with a tracking pixel that cannot be switched off — with the domain authenticated there: DKIM and
   DMARC records in DNS) and `OVERLYX_MAIL_FROM` for the owner's notices (mailer.ts): that a sign-up,
   a problem report or mail arrived — never names, addresses or text; mail at most once an hour. The
   privacy notice lists the sending service once `OVERLYX_SMTP_URL` is set. Without an MX record
