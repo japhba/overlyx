@@ -63,4 +63,14 @@ describe('owner notices', () => {
     expect(kept.body).toContain('Done: your account is deleted.');
     await expect(fb.answerMail(id + 999, 'x')).rejects.toThrow(/no such message/);
   });
+
+  it('notices go to OVERLYX_NOTIFY_EMAIL when it is set', async () => {
+    process.env.OVERLYX_NOTIFY_EMAIL = 'notices@example.net';
+    try {
+      const before = mailer.sentMails.length;
+      mailer.notifySignup({ name: 'Grace', username: 'grace', email: 'grace@example.com' }, 45);
+      await expect.poll(() => mailer.sentMails.length).toBe(before + 1);
+      expect(mailer.sentMails[before].to).toBe('notices@example.net');
+    } finally { delete process.env.OVERLYX_NOTIFY_EMAIL; }
+  });
 });

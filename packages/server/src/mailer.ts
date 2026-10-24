@@ -1,5 +1,6 @@
 /**
- * E-mail notices to the instance owner (`OVERLYX_OWNER_EMAIL`): that something arrived — a sign-up,
+ * E-mail notices to the instance owner (`OVERLYX_NOTIFY_EMAIL`, else `OVERLYX_OWNER_EMAIL` — which also
+ * makes that account the administrator, so it cannot simply be another mailbox): that something arrived — a sign-up,
  * a problem report (feedback.ts), mail to privacy@ / contact@ (inbox.ts) — never what: no names,
  * addresses or text, which stay on the server (the privacy notice promises it). `OVERLYX_SMTP_URL`
  * turns them on — an SMTP connection URL with credentials, e.g. a sending service on port 587
@@ -29,7 +30,7 @@ export const sentMails: { to: string; subject: string; text: string }[] = [];
 
 /** Fire-and-forget notification to the owner; failures are logged, never thrown to the caller. */
 export async function notifyOwner(subject: string, text: string): Promise<void> {
-  const to = config.ownerEmail;
+  const to = (process.env.OVERLYX_NOTIFY_EMAIL ?? '').trim() || config.ownerEmail;
   if (!to) return;
   const t = getTransport();
   if (!t) { console.log(`[mail] OVERLYX_SMTP_URL not set — would have mailed ${to}: ${subject}`); return; }
