@@ -16,6 +16,7 @@ import type { TextStore } from '../agents/localEdit.ts';
 import type { InteractionAction, InteractionOutcome } from '@overlyx/core/interactions.ts';
 import { WindowUnreachable, type HandOver } from '../agents/handover.ts';
 import { isHtmlPath } from '@overlyx/core/html/deliverable.ts';
+import { gitUserName } from './newDocument.ts';
 
 export interface ProviderDeps {
   track?(action: InteractionAction, outcome: InteractionOutcome, durationMs?: number): void;
@@ -217,7 +218,7 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
           this.applyChain = this.applyChain.then(async () => {
             await session.syncFromDisk();
             const r = session.parseCurrent();
-            post({ type: 'init', docId: session.docId, base, pmDoc: r.pmDoc as never, headerLines: r.headerLines, fragment: r.fragment, dark: isDark(), ack: session.applied });
+            post({ type: 'init', docId: session.docId, base, pmDoc: r.pmDoc as never, headerLines: r.headerLines, fragment: r.fragment, dark: isDark(), ack: session.applied, author: gitUserName(path.dirname(document.uri.fsPath)) });
             if (r.warnings.length) vscode.window.setStatusBarMessage(`OverLyX: ${r.warnings.length} parse warning(s) — details in the raw file`, 8000);
           }).catch(e => {
             void vscode.window.showErrorMessage(`OverLyX could not open ${relPath}: ${String(e)}`);

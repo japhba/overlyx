@@ -7,6 +7,7 @@ import { Plugin, PluginKey, TextSelection } from 'prosemirror-state';
 import { Decoration, DecorationSet } from 'prosemirror-view';
 import type { EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
+import { lockedAuthor } from './commentguard';
 
 /** A text match spans `[from, to)` in the document. A math match spans the whole formula atom
  *  (`[from, from+1)`) — the actual substring lives inside its `latex` at `[latexOffset, latexOffset+latexLen)`. */
@@ -167,7 +168,9 @@ export function replaceAll(view: EditorView, replacement: string): number {
   // group by `from` (several math matches can share one formula node) and walk positions
   // back-to-front so replacing one match never shifts the positions still to be processed
   const byFrom = new Map<number, FindMatch[]>();
-  for (const m of s.matches) (byFrom.get(m.from) ?? byFrom.set(m.from, []).get(m.from)!).push(m);
+  // other people's comments are left as they are (plugins/commentguard.ts would refuse the whole replacement)
+  const matches = s.matches.filter(m => lockedAuthor(view.state.doc, m.from, m.to) === null);
+  for (const m of matches) (byFrom.get(m.from) ?? byFrom.set(m.from, []).get(m.from)!).push(m);
   for (const from of [...byFrom.keys()].sort((a, b) => b - a)) {
     const group = byFrom.get(from)!;
     if (group[0].kind === 'math') {
@@ -182,7 +185,6 @@ export function replaceAll(view: EditorView, replacement: string): number {
       for (const m of group) tr = applyReplacement(tr, m, resolveReplacement(view, m, replacement, s));
     }
   }
-  const n = s.matches.length;
   view.dispatch(tr);
-  return n;
+  return matches.length;
 }

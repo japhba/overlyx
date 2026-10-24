@@ -26,6 +26,7 @@ import { listDragPlugin } from './plugins/listdrag';
 import { marginPlugin } from './plugins/margin';
 import { pagesPlugin } from './plugins/pages';
 import { commentUiPlugin, hiddenThreadsPlugin } from './plugins/commentui';
+import { commentGuardPlugin } from './plugins/commentguard';
 import { changeTrackingPlugin, changesFilterPlugin, changeAuthorName } from './plugins/changes';
 import { changeActionsPlugin } from './plugins/changeactions';
 import { mergeReviewPlugin, type MergeSource } from './plugins/mergereview';
@@ -146,6 +147,7 @@ export function assemblePlugins(o: AssemblyOptions): Plugin[] {
     listDragPlugin(),   // list items move by drag and drop, with their sub-items (the grip left of the bullet)
     commentUiPlugin(),   // the thread under the cursor opens; Ctrl+Enter leaves it (before the keymap); empty messages go when it is left
     hiddenThreadsPlugin(),   // resolved threads are not in the text (unless shown): the caret steps over them (before the keymap)
+    commentGuardPlugin(),   // other people's comment messages are theirs: this editor's own edits leave them alone
     lyxKeymap(),
     fontCarryPlugin(),
     insetCaretPlugin(),

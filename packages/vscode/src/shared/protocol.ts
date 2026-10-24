@@ -26,7 +26,9 @@ export type HostToEditor =
   | { type: 'relatedExternalUpdate'; id: string; pmDoc: PmDoc; headerLines: string[]; ack: SyncTag | null }
   | { type: 'metadataChanged' }
   | { type: 'relatedError'; id: string; error: string }
-  | { type: 'init'; docId: string; base: string; pmDoc: PmDoc; headerLines: string[]; fragment: boolean; dark: boolean; ack: SyncTag | null }
+  | { type: 'init'; docId: string; base: string; pmDoc: PmDoc; headerLines: string[]; fragment: boolean; dark: boolean; ack: SyncTag | null;
+      /** git's user.name: comments under it are this person's too (plugins/commentguard.ts) */
+      author?: string }
   /**
    * The file's content as the host now has it — changed outside the editor (git, another editor,
    * VS Code undo), or re-read after one of the editor's own updates was written. `ack` names the

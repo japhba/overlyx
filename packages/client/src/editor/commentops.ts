@@ -8,6 +8,7 @@ import { TextSelection } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
 import { parseHeader, commentHeader, formatTimestamp } from '@overlyx/core';
 import { editorContext } from './context';
+import { allowCommentEdit } from './plugins/commentguard';
 
 export interface CommentInfo {
   view: EditorView;
@@ -90,7 +91,8 @@ export function setCommentResolved(view: EditorView, pos: number, resolved: bool
   }
   if (h.resolved === resolved) return;
   const para = schema.nodes.paragraph.create(first.attrs, schema.text(commentHeader(h.author, h.time, resolved)));
-  view.dispatch(view.state.tr.replaceWith(pos + 1, pos + 1 + first.nodeSize, para));
+  // anyone may resolve a thread: its first header (often someone else's) changes with it
+  view.dispatch(allowCommentEdit(view.state.tr.replaceWith(pos + 1, pos + 1 + first.nodeSize, para)));
 }
 export function toggleCommentResolved(view: EditorView, pos: number): void {
   const cur = view.state.doc.nodeAt(pos);

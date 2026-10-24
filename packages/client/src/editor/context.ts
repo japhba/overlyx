@@ -22,6 +22,8 @@ export interface EditorContext {
   sourceAppliedAt?: number;
   /** fetch the document's metadata again (an author the editor does not know yet showed up in a change) — App.tsx */
   refreshAuthors?: () => void;
+  /** other names this person's comments carry (VS Code: git's user.name besides "You") — plugins/commentguard.ts */
+  myNames?: string[];
   /** author id used for change tracking */
   changeAuthorId?: number;
   trackChanges: boolean;
