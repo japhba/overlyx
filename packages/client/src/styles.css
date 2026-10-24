@@ -3169,6 +3169,24 @@ select.dl-zoom { appearance: none; -webkit-appearance: none; text-align: center;
 .ol-template-card small { color: var(--ui-muted); font-size: 11px; }
 .ol-template-preview { display: flex; align-items: center; justify-content: center; height: 92px; background: #e1e4e7; border-radius: 3px; overflow: hidden; }
 .ol-template-preview img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; box-shadow: 0 1px 3px #0002; }
+.ol-template-grid.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 480px) { .ol-template-grid.four { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.ol-blank-page { display: block; background: #fff; box-shadow: 0 1px 3px #0003; }
+/* a blank deck's page size (ScientificTemplates.tsx PageSizePicker) */
+.ol-page-sizes { border: 0; padding: 0; margin: 10px 0 0; min-width: 0; }
+.ol-page-sizes legend { font-size: 12px; color: var(--ui-muted); margin-bottom: 8px; }
+.ol-size-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 6px; }
+.ol-size-card { display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 0; padding: 6px 4px; border: 1px solid var(--ui-border); border-radius: 6px; background: var(--surface); color: var(--ui-fg); font: 12px var(--ui-font); cursor: pointer; }
+.ol-size-card:hover { background: var(--row-hover); }
+.ol-size-card.active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-border); }
+.ol-size-card strong { font-weight: 600; white-space: nowrap; }
+.ol-size-card small { color: var(--ui-muted); font-size: 10.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ol-size-thumb { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; }
+.ol-size-thumb span { display: block; background: #fff; border: 1px solid var(--accent-border); border-radius: 2px; }
+.ol-orient { display: flex; gap: 6px; margin: 8px 0 0; }
+.ol-orient-btn { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid var(--ui-border); border-radius: 6px; background: var(--surface); color: var(--ui-fg); font: 12px var(--ui-font); cursor: pointer; }
+.ol-orient-btn span { display: block; border: 1.5px solid currentColor; border-radius: 1.5px; }
+.ol-orient-btn.active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-border); }
 .ol-newkind { min-height: 116px; justify-content: flex-end; }
 .ol-newkind .ol-newthumb.empty { width: 34px; height: 26px; background: none; border: 1.5px dashed var(--ui-border); }
 /* the whiteboard's: a patch of its dotted canvas fading out at the edges (it has none), a stroke on it */

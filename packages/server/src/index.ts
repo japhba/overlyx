@@ -25,7 +25,7 @@ import { attachWebSocket, originAllowed } from './ws.ts';
 import { manager, docWorkers, projectChangedListeners, graphicsChangedListeners } from './docs.ts';
 import { mountDeliverables, deliverableToken, splitEntry, createDeliverable, deliverableZip } from './deliverables.ts';
 import { deliverablePdf } from './render.ts';
-import { starterFor, isHtmlPath, DELIVERABLE_KINDS, type DeliverableKind } from '@overlyx/core/html/deliverable.ts';
+import { starterFor, pageSize, isHtmlPath, DELIVERABLE_KINDS, type DeliverableKind } from '@overlyx/core/html/deliverable.ts';
 import { newArticleText } from '@overlyx/core/html/articletheme.ts';
 import { refreshScientificStarters } from './starterupdates.ts';
 import { listProjects, resolveProjectPath, assertWritableRelPath, projectDir, createProject, newDocumentText, newMarkdownText, fileKind, isBackupFile, isDocumentFile } from './projects.ts';
@@ -782,7 +782,9 @@ api.post('/projects/:project/deliverables', needProject('edit'), (req, res) => {
     const dir = String(req.body?.dir ?? '').replace(/^\/+|\/+$/g, '');
     if (dir) assertWritableRelPath(dir + '/index.html');
     const template = req.body?.template === undefined ? undefined : String(req.body.template);
-    const rel = createDeliverable(req.params.project, dir, starterFor(kind, String(req.body?.title ?? ''), template));
+    // (a blank deck's page size: the device's, a common slide or paper size — NewLayoutDialog)
+    const size = req.body?.size === undefined ? undefined : pageSize(req.body.size);
+    const rel = createDeliverable(req.params.project, dir, starterFor(kind, String(req.body?.title ?? ''), template, size));
     touchProject(req.params.project, req.user!.id);
     res.json({ id: `${req.params.project}/${rel}`, path: rel });
   } catch (e) { res.status(400).json({ error: (e as Error).message }); }

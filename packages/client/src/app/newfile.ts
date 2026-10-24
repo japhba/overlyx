@@ -11,6 +11,7 @@ import { api } from '../api';
 import { noteArticle } from '../articlekinds';
 import { uiPrompt } from './Dialogs';
 import { starterFor } from '@overlyx/core/html/deliverable.ts';
+import { usualDeckSize } from './decksize';
 import type { DeliverableKind } from '@overlyx/core/html/deliverable.ts';
 
 export const NEW_FILE_HINT = 'The ending decides what it is: .tex a LaTeX document, .md a Markdown document, .html slides (poster.html a poster, page.html or site/index.html a web page, article.html or post.html an article — a web page you write like a document; a folder’s index.html goes by the folder’s name), .board a whiteboard, .bib, .sty, .txt … a text file.';
@@ -68,12 +69,14 @@ export async function createProjectFile(project: string, rel: string): Promise<s
     return id;
   }
   if (kind === 'deliverable') {
-    // not an empty page (the canvas would have nothing to edit): the starting point of its kind,
-    // titled by its name (a folder's index.html by the folder's)
+    // not an empty page (the canvas would have nothing to edit): the starting point of its kind —
+    // slides blank, at the size chosen last — titled by its name (a folder's index.html by the folder's)
     const parts = rel.replace(/\.html?$/i, '').split('/');
     const stem = parts.length > 1 && /^index$/i.test(parts[parts.length - 1]) ? parts[parts.length - 2] : parts[parts.length - 1];
     const title = stem.replace(/[-_]+/g, ' ').replace(/^\w/, c => c.toUpperCase());
-    const r = await api.upload(project, rel, new Blob([starterFor(deliverableKindForName(rel), title)], { type: 'text/html' }), { overwrite: false });
+    const kind = deliverableKindForName(rel);
+    const html = kind === 'deck' ? starterFor(kind, title, 'blank', usualDeckSize()) : starterFor(kind, title);
+    const r = await api.upload(project, rel, new Blob([html], { type: 'text/html' }), { overwrite: false });
     return project + '/' + r.path;
   }
   const empty = kind === 'board' ? '{"overlyx":"board","v":1,"objects":{\n}}\n' : '';

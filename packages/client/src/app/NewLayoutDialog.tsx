@@ -10,11 +10,12 @@ import { PAGE_PRESETS } from '@overlyx/core';
 import { api } from '../api';
 import { noteArticle } from '../articlekinds';
 import { Dialog } from './Dialogs';
-import { ScientificTemplates } from './ScientificTemplates';
+import { ScientificTemplates, chosenDesign } from './ScientificTemplates';
+import { initialDeckSize, rememberDeckSize, sizeOf } from './decksize';
 
 type Kind = 'deck' | 'poster' | 'page' | 'article';
 const KINDS: { id: Kind; label: string; hint: string; w: number; h: number; dir: string }[] = [
-  { id: 'deck', label: 'Slide deck', hint: '16:9 or 4:3, presented full screen', w: 16, h: 9, dir: 'talk' },
+  { id: 'deck', label: 'Slide deck', hint: 'Blank pages or a design, any size', w: 16, h: 9, dir: 'talk' },
   { id: 'poster', label: 'Poster', hint: '48 × 36 in or portrait, printed as PDF', w: 48, h: 36, dir: 'poster' },
   { id: 'page', label: 'Web page', hint: 'A project page or a small site', w: 12, h: 9, dir: 'site' },
   { id: 'article', label: 'Article', hint: 'A research post or an essay: written like a document', w: 9, h: 12, dir: 'article' },
@@ -24,6 +25,7 @@ export function NewLayoutDialog({ project, dir, onClose, onCreated, notify }: { 
   const [latex, setLatex] = useState(false);
   const [kind, setKind] = useState<Kind>('deck');
   const [template, setTemplate] = useState<string>();
+  const [size, setSize] = useState(initialDeckSize);
   const [folder, setFolder] = useState('talk');
   const [title, setTitle] = useState('');
   const [touched, setTouched] = useState(false);
@@ -33,10 +35,12 @@ export function NewLayoutDialog({ project, dir, onClose, onCreated, notify }: { 
   const create = (selectedKind = kind) => {
     const f = (touched || selectedKind === kind ? folder.trim().replace(/^\/+|\/+$/g, '') : '') || KINDS.find(x => x.id === selectedKind)!.dir;
     setBusy(true);
+    const design = selectedKind === 'article' || selectedKind === 'page' ? undefined : chosenDesign(selectedKind, selectedKind === kind ? template : undefined);
+    if (design === 'blank') rememberDeckSize(size);
     // an article is a document (core html/article.ts), written in the document editor: its folder's index.html
     const made = selectedKind === 'article'
       ? api.newDoc(project, (dir ? dir + '/' : '') + f + '/index.html', { title: title.trim() || undefined }).then(r => { noteArticle(r.id, true); return r; })
-      : api.newDeliverable(project, (dir ? dir + '/' : '') + f, selectedKind, title.trim() || undefined, selectedKind === kind ? template : undefined);
+      : api.newDeliverable(project, (dir ? dir + '/' : '') + f, selectedKind, title.trim() || undefined, design, design === 'blank' ? sizeOf(size) : undefined);
     made.then(r => { onClose(); onCreated(r.id); })
       .catch(e => { setBusy(false); notify('Could not create it: ' + (e as Error).message, 'error'); });
   };
@@ -58,7 +62,7 @@ export function NewLayoutDialog({ project, dir, onClose, onCreated, notify }: { 
           );
         })}
       </div>
-      {kind !== 'page' && kind !== 'article' && <ScientificTemplates kind={kind} value={template} onChange={setTemplate} />}
+      {kind !== 'page' && kind !== 'article' && <ScientificTemplates kind={kind} value={template} onChange={setTemplate} size={size} onSize={setSize} />}
       {kind === 'article' && <p class="dialog-hint">Prose, formulas, citations and figures, written with comments and suggestions like any document — and published as a web page, with interactive figures your agent can build.</p>}
       <label class="dialog-row">Title <input value={title} placeholder="Untitled" onInput={e => setTitle((e.target as HTMLInputElement).value)} onKeyDown={e => { if (e.key === 'Enter') create(); }} data-deliverable-title /></label>
       <label class="dialog-row">Folder <input value={folder} onInput={e => { setTouched(true); setFolder((e.target as HTMLInputElement).value); }} onKeyDown={e => { if (e.key === 'Enter') create(); }} data-deliverable-folder /></label>

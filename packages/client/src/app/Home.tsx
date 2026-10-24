@@ -18,7 +18,8 @@ import { uiConfirm, uiAlert, Dialog } from './Dialogs';
 import { promptNewFile, createProjectFile } from './newfile';
 import { useUiMode } from './uimode';
 import { KIND_ICONS, iconSvg } from './modernicons';
-import { ScientificTemplates } from './ScientificTemplates';
+import { ScientificTemplates, chosenDesign } from './ScientificTemplates';
+import { initialDeckSize, rememberDeckSize, sizeOf, usualDeckSize } from './decksize';
 import { BetaNote } from './Login';
 
 const isBackup = (name: string) => name.endsWith('~') || name.startsWith('#') || name.endsWith('.emergency');
@@ -295,7 +296,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
 type NewKind = 'doc' | 'deck' | 'poster' | 'board' | 'empty';
 const NEW_KINDS: { id: NewKind; label: string; hint: string; w: number; h: number; name: string }[] = [
   { id: 'doc', label: 'Document', hint: 'A paper, thesis or notes', w: 210, h: 297, name: 'Untitled document' },
-  { id: 'deck', label: 'Slides', hint: '16:9 or 4:3, presented full screen', w: 16, h: 9, name: 'Untitled slides' },
+  { id: 'deck', label: 'Slides', hint: 'Blank pages or a design, any size', w: 16, h: 9, name: 'Untitled slides' },
   { id: 'poster', label: 'Poster', hint: '48 × 36 in or portrait', w: 48, h: 36, name: 'Untitled poster' },
   // (no page: its thumbnail is a patch of the endless dotted canvas, styles.css .ol-newthumb.board)
   { id: 'board', label: 'Whiteboard', hint: 'An endless canvas to draw and think on', w: 0, h: 0, name: 'Untitled whiteboard' },
@@ -309,6 +310,7 @@ const NEW_KINDS: { id: NewKind; label: string; hint: string; w: number; h: numbe
 export function NewProjectDialog({ onClose, onCreated, notify }: { onClose: () => void; onCreated: (id: string | null, name: string) => void; notify: (text: string, kind?: 'info' | 'error') => void }) {
   const [kind, setKind] = useState<NewKind>('doc');
   const [template, setTemplate] = useState<string>();
+  const [size, setSize] = useState(initialDeckSize);
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const k = NEW_KINDS.find(x => x.id === kind)!;
@@ -321,9 +323,10 @@ export function NewProjectDialog({ onClose, onCreated, notify }: { onClose: () =
     try {
       const { project } = await api.createProject(n);
       const key = project.name;
-      const chosenTemplate = selectedKind === kind ? template : undefined;
+      const chosenTemplate = chosenDesign(selectedKind, selectedKind === kind ? template : undefined);
+      if (selectedKind === 'deck' && chosenTemplate === 'blank') rememberDeckSize(size);
       const id = selectedKind === 'doc' ? (await api.newDoc(key, 'main.tex', { title: n })).id
-        : selectedKind === 'deck' ? (await api.newDeliverable(key, 'slides', 'deck', n, chosenTemplate)).id
+        : selectedKind === 'deck' ? (await api.newDeliverable(key, 'slides', 'deck', n, chosenTemplate, chosenTemplate === 'blank' ? sizeOf(size) : undefined)).id
         : selectedKind === 'poster' ? (await api.newDeliverable(key, 'poster', 'poster', n, chosenTemplate)).id
         : selectedKind === 'board' ? await createProjectFile(key, 'whiteboard.board')
         : null;
@@ -349,7 +352,7 @@ export function NewProjectDialog({ onClose, onCreated, notify }: { onClose: () =
           );
         })}
       </div>
-      {(kind === 'deck' || kind === 'poster') && <ScientificTemplates kind={kind} value={template} onChange={setTemplate} />}
+      {(kind === 'deck' || kind === 'poster') && <ScientificTemplates kind={kind} value={template} onChange={setTemplate} size={size} onSize={setSize} />}
       <label class="dialog-row">Name <input type="text" value={name} autofocus placeholder={k.name || 'Name of the project'} data-new-name
         onInput={e => setName((e.target as HTMLInputElement).value)} onKeyDown={e => { if (e.key === 'Enter') void create(); }} /></label>
       {invalid && <p class="dialog-hint error">{invalid}</p>}
@@ -376,7 +379,8 @@ export function ProjectRootPanel({ project, notify, onCreated }: { project: stri
     if (id) onCreated(id);
   };
   const createDeliverable = async (kind: 'deck' | 'poster') => {
-    try { onCreated((await api.newDeliverable(project, kind === 'deck' ? 'slides' : 'poster', kind, projectShortName(project))).id); }
+    // (slides start blank, at the size chosen last — the New dialogs offer the designs)
+    try { onCreated((await (kind === 'deck' ? api.newDeliverable(project, 'slides', kind, projectShortName(project), 'blank', usualDeckSize()) : api.newDeliverable(project, 'poster', kind, projectShortName(project)))).id); }
     catch (e) { notify((e as Error).message, 'error'); }
   };
   if (info === undefined) return <div class="home"><div class="meta">Loading…</div></div>;

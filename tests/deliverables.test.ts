@@ -73,6 +73,23 @@ describe('agents make and edit deliverables', () => {
     await expect(callTool(token, 'create_deliverable', { folder: 'invalid-style', kind: 'poster', template: 'dark-seminar' })).rejects.toThrow(/Unknown poster template/);
     expect(existsSync(file('invalid-style/index.html'))).toBe(false);
   });
+  it('a deck starts blank at the page size asked for; a size that is none is refused', async () => {
+    const { blankDeck, pageSize, slideElements } = await import('../packages/core/src/html/deliverable.ts');
+    const { parseSource } = await import('../packages/core/src/html/source.ts');
+    await callTool(token, 'create_deliverable', { folder: 'notes', kind: 'deck', template: 'blank', title: 'Notes' });
+    const html = readFileSync(file('notes/index.html'), 'utf8');
+    expect(html).toContain('<meta name="overlyx" content="deck">');
+    expect(html).toContain('width: 1280px; height: 720px');
+    const ipad = blankDeck('SAB', { width: 834, height: 1112, unit: 'px' });
+    expect(ipad).toContain('width: 834px; height: 1112px');
+    expect(ipad).toContain('@page { size: 834px 1112px');
+    expect(slideElements(parseSource(ipad).doc)).toHaveLength(1);
+    expect(ipad).not.toMatch(/<section class="slide">[^<]/);
+    expect(blankDeck('A4', { width: 210, height: 297, unit: 'mm' })).toContain('width: 210mm; height: 297mm');
+    expect(() => pageSize({ width: 12, height: 720 })).toThrow(/size.width/);
+    expect(() => pageSize({ width: 1280, height: 720, unit: 'em' })).toThrow(/size.unit/);
+    await expect(callTool(token, 'create_deliverable', { folder: 'blank-poster', kind: 'poster', template: 'blank' })).rejects.toThrow(/Only slide decks/);
+  });
   it('create_deliverable starts a folder of the kind asked for, list_documents shows it', async () => {
     const r = json(await callTool(token, 'create_deliverable', { folder: 'talk', kind: 'deck', title: 'Waves' }));
     expect(r.path).toBe('talk/index.html');

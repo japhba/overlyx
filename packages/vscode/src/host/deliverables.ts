@@ -23,7 +23,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { URL } from 'node:url';
 import { runtimeTags, injectRuntime, resolveInProject, SANDBOX_CSP, RUNTIME_MODES, type RuntimeMode } from '@overlyx/core/html/serve.ts';
-import { starterFor, type DeliverableKind } from '@overlyx/core/html/deliverable.ts';
+import { starterFor, DECK_SIZES, type DeliverableKind, type PageSize } from '@overlyx/core/html/deliverable.ts';
 import { SCIENTIFIC_TEMPLATES, templateLabel } from '@overlyx/core/html/scientific.ts';
 import { deckExtras, type DeckExtras } from '@overlyx/core/html/deckextras.ts';
 import { isArticleHtml, parseArticle, htmlBlockOf, blockKey, rawSource } from '@overlyx/core/html/article.ts';
@@ -278,13 +278,25 @@ const FOLDER: Record<DeliverableKind, string> = { deck: 'talk', poster: 'poster'
  * from core's starting point, opened in the OverLyX editor.
  */
 export async function newDeliverable(kind: DeliverableKind, startDir: string): Promise<void> {
-  let template: string | undefined;
+  let template: string | undefined, size: PageSize | undefined;
   if (kind !== 'page') {
-    const style = await vscode.window.showQuickPick(SCIENTIFIC_TEMPLATES.filter(t => t.kind === kind).map(t => ({
+    // a deck can start blank (as GoodNotes' pages): then its page size is asked for
+    const blank = kind === 'deck' ? [{ label: 'Blank', description: 'empty pages · any size', detail: 'Nothing on them: write, draw or build from scratch.', id: 'blank' }] : [];
+    const style = await vscode.window.showQuickPick([...blank, ...SCIENTIFIC_TEMPLATES.filter(t => t.kind === kind).map(t => ({
       label: templateLabel(t), description: t.size, detail: t.description, id: t.id,
-    })), { title: `New ${KIND_LABEL[kind]} — choose a scientific style`, placeHolder: 'Open MIT-licensed templates' });
+    }))], { title: `New ${KIND_LABEL[kind]} — blank or a scientific style`, placeHolder: 'Open-licensed templates' });
     if (!style) return;
     template = style.id;
+    if (template === 'blank') {
+      const dims = (p: PageSize) => `${p.width} × ${p.height}${p.unit === 'px' ? '' : ' ' + p.unit}`;
+      // the slide sizes landscape, the paper sizes either way
+      const sizes = DECK_SIZES.flatMap(p => p.unit === 'px' ? [{ label: p.label, p }]
+        : [{ label: `${p.label} landscape`, p }, { label: `${p.label} portrait`, p: { ...p, width: p.height, height: p.width } }]);
+      const picked = await vscode.window.showQuickPick(sizes.map(({ label, p }) => ({ label, description: dims(p), detail: p.hint, p })),
+        { title: `New ${KIND_LABEL[kind]} — page size` });
+      if (!picked) return;
+      size = { width: picked.p.width, height: picked.p.height, unit: picked.p.unit };
+    }
   }
   const picked = await vscode.window.showSaveDialog({
     title: `New ${KIND_LABEL[kind]} — a folder with an index.html`,
@@ -298,7 +310,7 @@ export async function newDeliverable(kind: DeliverableKind, startDir: string): P
   if (fs.existsSync(file)) { void vscode.window.showErrorMessage(`OverLyX: ${file} exists already`); return; }
   fs.mkdirSync(dir, { recursive: true });
   const title = path.basename(dir).replace(/[-_]+/g, ' ');
-  fs.writeFileSync(file, starterFor(kind, title.charAt(0).toUpperCase() + title.slice(1), template), 'utf8');
+  fs.writeFileSync(file, starterFor(kind, title.charAt(0).toUpperCase() + title.slice(1), template, size), 'utf8');
   await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(file), 'overlyx.htmlEditor');
 }
 

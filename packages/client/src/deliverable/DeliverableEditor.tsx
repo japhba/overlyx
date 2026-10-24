@@ -63,7 +63,8 @@ import { useMathPanels } from '../app/toolbars';
 import { parseSource, opSplices, elementAt, elementChildren, attr, parseStyle, sourcePatch, applySplices as applyTextSplices, type SourcePatch } from '@overlyx/core/html/source.ts';
 import { followUps, composeSplices, twinsOf, putOnEverySlide, otherCopies, slideNumberOps, lookAlikeOps, similarTexts, MASTER_ATTR, SKIP_ATTR } from './deckmaster';
 import { reviewOps, resolveOps, resolveAll, reviewOf, isSuggesting, suggestingOp, stampOf, threadsOp, parseThreads, newThreadId, describe as describeObject, COMMENTS, type ReviewChange, type ReviewThread, type Thread } from '@overlyx/core/html/review.ts';
-import { deliverableInfo, slideElements, starterDeck, untouchedPageTitle } from '@overlyx/core/html/deliverable.ts';
+import { deliverableInfo, slideElements, blankDeck, untouchedPageTitle } from '@overlyx/core/html/deliverable.ts';
+import { usualDeckSize } from '../app/decksize';
 import { formatTimestamp } from '@overlyx/core';
 import { ReviewPane, type CommentDraft } from './ReviewPane';
 import { EditModeSwitch, modeScope, setOwnSuggesting, suggestingFor, switchModeScope, type EditMode, type ModeScope } from '../app/EditModeSwitch';
@@ -3113,11 +3114,11 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   // a web page nothing has been written on yet (made by a name that said "page" when slides were meant): slides instead, in one click
   const blankPage = kind === 'page' && !locked && host.ready() ? untouchedPageTitle(host.text()) : null;
   const pageEls = kind === 'page' && <>
-    {blankPage !== null && <button class="dl-btn" data-dl-as-deck title="Make it a slide deck instead — nothing has been written on this page yet (Undo makes it a web page again)" onClick={() => {
+    {blankPage !== null && <button class="dl-btn" data-dl-as-deck title="Make it a slide deck instead — blank pages, at the size of new decks (this screen’s, or the one chosen last); nothing has been written on this page yet (Undo makes it a web page again)" onClick={() => {
       const parts = host.path.split('/');
       // (a folder's index.html is titled by its folder: SAB/index.html, “SAB”)
       const title = blankPage === 'Index' && parts.length > 1 ? parts[parts.length - 2] : blankPage;
-      applySplices([{ from: 0, to: host.text().length, insert: starterDeck(title) }], 'canvas', true, false);
+      applySplices([{ from: 0, to: host.text().length, insert: blankDeck(title, usualDeckSize()) }], 'canvas', true, false);
     }}>▭ Slides</button>}
     {host.makeArticle && !readOnly && <button class="dl-btn" data-dl-article title="Write this page as an article: its prose in the document editor (comments, suggestions, formulas), everything else kept as it is and shown running" onClick={() => {
       void uiConfirm('Write as an article', 'The page becomes a document: its text is written in the document editor — with comments, suggestions, formulas and citations — and what is not text (navigation, scripts, interactive figures) stays as it is, shown running. The page as it is now is kept as a version.', { okLabel: 'Write as article' })

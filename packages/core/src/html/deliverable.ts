@@ -135,7 +135,77 @@ export function untouchedPageTitle(text: string): string | null {
   return text === starterPage(title) ? title : null;
 }
 
-export function starterFor(kind: DeliverableKind, title: string, template?: string): string {
+/* ------------------------------------------------------------------ blank decks and their page sizes */
+
+export type PageUnit = 'px' | 'mm' | 'in';
+/** a page's size, landscape or portrait as written */
+export interface PageSize { width: number; height: number; unit: PageUnit }
+
+/** A page size a new deck can have (landscape; turned for portrait): the common choices of slides and paper. */
+export interface PagePreset extends PageSize { id: string; label: string; hint: string }
+export const DECK_SIZES: readonly PagePreset[] = [
+  { id: '16:9', label: '16:9', hint: 'Widescreen: PowerPoint, Keynote and Google Slides, today’s projectors and screens', width: 1280, height: 720, unit: 'px' },
+  { id: '4:3', label: '4:3', hint: 'Standard: older projectors, beamer, and the 10.5″, 12.9″ and 13″ iPads', width: 1024, height: 768, unit: 'px' },
+  { id: '16:10', label: '16:10', hint: 'Laptop screens (a MacBook’s), beamer’s 16:10', width: 1280, height: 800, unit: 'px' },
+  { id: 'ipad11', label: 'iPad 11″', hint: 'The iPad and the iPad Air 11″ (the iPad Pro 11″ is a hair wider)', width: 1180, height: 820, unit: 'px' },
+  { id: 'a4', label: 'A4', hint: 'Paper: notes and handouts that print on A4', width: 297, height: 210, unit: 'mm' },
+  { id: 'letter', label: 'Letter', hint: 'Paper: notes and handouts that print on US Letter', width: 11, height: 8.5, unit: 'in' },
+];
+export const DEFAULT_DECK_SIZE: PageSize = DECK_SIZES[0];
+
+const SIZE_RANGE: Record<PageUnit, [number, number]> = { px: [160, 8000], mm: [40, 2000], in: [1.5, 80] };
+
+/** a page size from outside (an API request): checked, rounded to what CSS writes; throws when it is not one */
+export function pageSize(v: unknown): PageSize {
+  const o = (v ?? {}) as Partial<Record<keyof PageSize, unknown>>;
+  const unit = o.unit === undefined ? 'px' : o.unit;
+  if (unit !== 'px' && unit !== 'mm' && unit !== 'in') throw new Error('size.unit: px, mm or in');
+  const [lo, hi] = SIZE_RANGE[unit];
+  const num = (x: unknown, name: string) => {
+    const n = Number(x);
+    if (!Number.isFinite(n) || n < lo || n > hi) throw new Error(`size.${name}: ${lo}–${hi} ${unit}`);
+    return Math.round(n * 100) / 100;
+  };
+  return { width: num(o.width, 'width'), height: num(o.height, 'height'), unit };
+}
+
+/**
+ * A deck with nothing on it — GoodNotes' or Keynote's blank page: one white slide of `size` (its
+ * new slides are blank too, newSlideHtml), no margins, no title, no decoration; written text gets a
+ * size that reads at the page's scale.
+ */
+export function blankDeck(title: string, size: PageSize = DEFAULT_DECK_SIZE): string {
+  const { width, height, unit } = pageSize(size);
+  const w = `${width}${unit}`, h = `${height}${unit}`;
+  const text = `${Math.round(Math.max(width, height) / 48 * 100) / 100}${unit}`;
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="overlyx" content="deck">
+<title>${esc(title || 'Untitled slides')}</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #dce0e4; color: #1d1d1f; font-family: -apple-system, system-ui, "Segoe UI", Helvetica, Arial, sans-serif; }
+  .slide { width: ${w}; height: ${h}; position: relative; overflow: hidden; background: #fff; margin: 0 auto 40px; font-size: ${text}; line-height: 1.35; }
+  h1, h2, h3, p, ul, ol { margin: 0; }
+  .notes { display: none; }
+  @media print { @page { size: ${w} ${h}; margin: 0; } body { background: none; } .slide { margin: 0; break-after: page; break-inside: avoid; print-color-adjust: exact; -webkit-print-color-adjust: exact; } .slide:last-of-type { break-after: auto; } }
+</style>
+</head>
+<body>
+<section class="slide"></section>
+</body>
+</html>
+`;
+}
+
+/** `template` "blank": blankDeck of `size`; otherwise a scientific design (its own size) */
+export function starterFor(kind: DeliverableKind, title: string, template?: string, size?: PageSize): string {
   if (kind === 'page' && template !== undefined) throw new Error('Web pages do not have scientific templates.');
+  if (template === 'blank') {
+    if (kind !== 'deck') throw new Error('Only slide decks start blank.');
+    return blankDeck(title, size);
+  }
   return kind === 'deck' ? starterDeck(title, template) : kind === 'poster' ? starterPoster(title, template) : starterPage(title);
 }

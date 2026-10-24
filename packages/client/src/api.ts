@@ -3,6 +3,7 @@ import { offlineGet } from './offline-api';
 import { noteProjectFiles } from './articlekinds';
 import { recordInteraction } from './usage';
 import { apiInteraction, requestOutcome } from '@overlyx/core/interactions.ts';
+import type { PageSize } from '@overlyx/core/html/deliverable.ts';
 
 export interface User {
   id: number; username: string; name: string; color: string; isAdmin: boolean; avatar?: string | null;
@@ -361,7 +362,8 @@ export const api = {
   newDoc: (project: string, path: string, opts: { title?: string; textclass?: string; /** a layout document from this page preset (core PAGE_PRESETS) */ layout?: string } = {}) => req<{ id: string }>('POST', `/api/projects/${encodeURIComponent(project)}/new`, { path, ...opts }),
   /** plain text files (.tex, .bib, …) for the built-in text editor; `mtime` guards against overwriting someone else's save */
   /** a new HTML deliverable (deck / poster / web page): the folder `dir` with its index.html */
-  newDeliverable: (project: string, dir: string, kind: 'deck' | 'poster' | 'page', title?: string, template?: string) => req<{ id: string; path: string }>('POST', `/api/projects/${encodeURIComponent(project)}/deliverables`, { dir, kind, title, template }),
+  /** `template` "blank" with `size`: an empty deck of that page size (core blankDeck) */
+  newDeliverable: (project: string, dir: string, kind: 'deck' | 'poster' | 'page', title?: string, template?: string, size?: PageSize) => req<{ id: string; path: string }>('POST', `/api/projects/${encodeURIComponent(project)}/deliverables`, { dir, kind, title, template, size }),
   /** the sandboxed address of a deliverable's folder (server deliverables.ts) */
   deliverableLink: async (project: string, path: string) => {
     const url = `/api/projects/${encodeURIComponent(project)}/deliverable-link?path=${encodeURIComponent(path)}`;
