@@ -182,8 +182,6 @@ export interface ViewMarks {
   onFree?: (free: boolean) => void;
   /** there are slides to swipe between (a deck): a swipe sideways goes to the next (1) or the one before (-1) */
   pages?: () => boolean;
-  /** a swipe up goes to the next too, down to the one before (drawing with everything else away: Notes' and GoodNotes' pages scroll up and down) */
-  pagesUpDown?: () => boolean;
   /** the slide never comes loose (drawing with everything else away: no Centre slide to bring it back, and a loose slide takes the swipes that turn the page) */
   fastened?: () => boolean;
   onPage?: (dir: 1 | -1) => void;
@@ -192,8 +190,8 @@ export interface ViewMarks {
    * GoodNotes adds a page: a finger's, pulled ADD_PAGE of the canvas — said as it goes by `adding`.
    */
   addsPage?: () => boolean;
-  /** how far a swipe on past the last slide has come to adding one (1: let go, it does), along `axis`; null: it is over */
-  adding?: (k: number | null, axis: 'x' | 'y') => void;
+  /** how far a swipe on past the last slide has come to adding one (1: let go, it does); null: it is over */
+  adding?: (k: number | null) => void;
   /** a zoom going on shows the slide at this scale (once a frame at most), ahead of the editor's */
   onLive?: (scale: number) => void;
   /** the slide was shown there (`place()`, each time it is drawn): what sits on its corner follows it */
@@ -216,14 +214,12 @@ export class SlideView {
   private free = false;
   /**
    * A scroll's or a finger's way so far (px), for a swipe sideways to turn the page (Safari's swipe
-   * between pages): its `axis` once it is clear, whether it `pages` (sideways — or up and down,
-   * `pagesUpDown` —, the slide in place and at that side's edge when it began — `x0`, `y0` —, or a
+   * between pages): its `axis` once it is clear, whether it `pages` (sideways, the slide in place and
+   * at that side's edge when it began — `x0` —, or a
    * finger's that ran into that edge on its way: `from`, its way along the axis till then, else 0),
    * and once it has (the rest of it, momentum, does nothing).
    */
-  private swipe: { x: number; y: number; x0: number; y0: number; t0: number; finger: boolean; axis: 'x' | 'y' | null; pages: boolean; paged: boolean; from: number | null } | null = null;
-  /** the way the last page was turned: the next slide comes in from that side */
-  private turned: 'x' | 'y' = 'x';
+  private swipe: { x: number; y: number; x0: number; t0: number; finger: boolean; axis: 'x' | 'y' | null; pages: boolean; paged: boolean; from: number | null } | null = null;
   /** a swipe on past the last slide shows how far it has come to adding one (`adding`) */
   private addShown = false;
   /** this pull may set the slide free: a finger's, or a scroll begun at the edge it pulls past */
@@ -491,7 +487,7 @@ export class SlideView {
     // A finger owns its release. An older zoom/wheel timer must not settle it
     // halfway through, discard its motion, or retain the wheel's swipe identity.
     if (this.idle) { clearTimeout(this.idle); this.idle = null; this.swipe = null; }
-    if (!this.swipe) this.swipe = { x: 0, y: 0, x0: this.raw.x, y0: this.raw.y, t0: performance.now(), finger: true, axis: null, pages: false, paged: false, from: null };
+    if (!this.swipe) this.swipe = { x: 0, y: 0, x0: this.raw.x, t0: performance.now(), finger: true, axis: null, pages: false, paged: false, from: null };
     this.armed = true;
     if (this.steer(dx, dy)) return;
     this.pull(dx, dy, 1);
@@ -500,80 +496,76 @@ export class SlideView {
   /**
    * A swipe sideways turns the page — the slide in its place (not loose), all of it across the canvas
    * or at that side's edge when the swipe began; it shows the pull on the rubber band, and never comes
-   * loose that way (up and down it still does, unless `pagesUpDown`: then up and down turn the page as
-   * well). Otherwise, or zoomed in mid-slide, it pans — and a finger that pans the slide into that edge
-   * and goes on turns the page from there, as Photos does (the user, 22 Oct 2026: at Fit margins, the
-   * slide a little wider than the canvas, a swipe only showed the margin). True: the swipe took the move.
+   * loose that way. Only sideways (the user, 25 Oct 2026: "for advancing slides/new, only do
+   * left/right"): up and down it pans and pulls loose as ever (`fastened`: it only pulls). Zoomed in
+   * mid-slide it pans — and a finger that pans the slide into that edge and goes on turns the page from
+   * there, as Photos does (the user, 22 Oct 2026: at Fit margins, the slide a little wider than the
+   * canvas, a swipe only showed the margin). True: the swipe took the move.
    */
   private steer(dx: number, dy: number): boolean {
     const s = this.swipe, v = this.input();
     if (!s || !v) return false;
     s.x += dx; s.y += dy;
-    const turns = (axis: 'x' | 'y') => (axis === 'x' || !!this.marks.pagesUpDown?.()) && !this.free && !!this.marks.pages?.();
+    const turns = !this.free && !!this.marks.pages?.();
+    const [lo, hi] = this.ranges(v).x;
     if (!s.axis && Math.hypot(s.x, s.y) > 6) {
       s.axis = Math.abs(s.x) > 1.3 * Math.abs(s.y) ? 'x' : 'y';
-      const across = s.axis === 'x', d = across ? s.x : s.y, at = across ? s.x0 : s.y0;
-      const [lo, hi] = this.ranges(v)[s.axis];
-      // (a swipe left goes on — the next slide — from the right edge; right, back from the left one; up, on from the bottom)
-      const edge = d < 0 ? at <= lo + 0.5 : at >= hi - 0.5;
-      s.pages = turns(s.axis) && edge;
+      // (a swipe left goes on — the next slide — from the right edge; right, back from the left one)
+      s.pages = s.axis === 'x' && turns && (s.x < 0 ? s.x0 <= lo + 0.5 : s.x0 >= hi - 0.5);
       if (s.pages) s.from = 0;
-    } else if (s.axis && !s.pages && s.finger && turns(s.axis)) {
-      const across = s.axis === 'x', d = across ? dx : dy, way = across ? s.x - dx : s.y - dy, at = across ? this.raw.x : this.raw.y;
-      const [lo, hi] = this.ranges(v)[s.axis];
+    } else if (s.axis === 'x' && !s.pages && s.finger && turns) {
+      const way = s.x - dx;
       // (at that edge — or past it, on the band — and still going the way the swipe goes)
-      if (d && Math.sign(d) === Math.sign(way) && (d < 0 ? at <= lo + 0.5 : at >= hi - 0.5)) { s.pages = true; s.from = way; }
+      if (dx && Math.sign(dx) === Math.sign(way) && (dx < 0 ? this.raw.x <= lo + 0.5 : this.raw.x >= hi - 0.5)) { s.pages = true; s.from = way; }
     }
     if (!s.pages) return false;
     if (s.paged) return true;
-    if (s.axis === 'x') this.pull(dx, 0, 0, true); else this.pull(0, dy, 0, true);
-    if (s.finger && this.adds(s, v)) this.showAdd(this.addWay(s, v), s.axis === 'y' ? 'y' : 'x');
+    this.pull(dx, 0, 0, true);
+    if (s.finger && this.adds(s, v)) this.showAdd(this.addWay(s, v));
     else this.showAdd(null);
     // (a scroll never adds a slide)
-    if (!s.finger && !this.pastLast(s) && Math.abs(s.axis === 'x' ? s.x : s.y) >= PAGE_SCROLL) this.turn(s);
+    if (!s.finger && !this.pastLast(s) && Math.abs(s.x) >= PAGE_SCROLL) this.turn(s);
     return true;
   }
 
-  /** the swipe goes on past the last slide (to the next: left, or up), where going on adds one */
+  /** the swipe goes on past the last slide (left: to the next), where going on adds one */
   private pastLast(s: NonNullable<SlideView['swipe']>): boolean {
-    return (s.axis === 'y' ? s.y : s.x) - (s.from ?? 0) < 0 && !!this.marks.addsPage?.();
+    return s.x - (s.from ?? 0) < 0 && !!this.marks.addsPage?.();
   }
 
   /**
-   * The swipe goes on past the last slide (to the next: left, or up), where that adds one — begun at
-   * the slide's edge, or near a fit (all of the slide, or most of it, on the screen): zoomed in on a
-   * detail, a pan that runs into the edge only shows the band (panning the slide round never adds one)
+   * The swipe goes on past the last slide, where that adds one — begun at the slide's edge, or near a
+   * fit (all of the slide, or most of it, on the screen): zoomed in on a detail, a pan that runs into
+   * the edge only shows the band (panning the slide round never adds one)
    */
   private adds(s: NonNullable<SlideView['swipe']>, v: ViewInput): boolean {
     if (!this.pastLast(s)) return false;
-    const [lo, hi] = this.ranges(v)[s.axis === 'y' ? 'y' : 'x'];
-    return !s.from || hi - lo <= (s.axis === 'y' ? v.box.h : v.box.w) / 2;
+    const [lo, hi] = this.ranges(v).x;
+    return !s.from || hi - lo <= v.box.w / 2;
   }
 
   /** how far it has come to adding a slide: 1 once pulled ADD_PAGE of the canvas */
   private addWay(s: NonNullable<SlideView['swipe']>, v: ViewInput): number {
-    const way = Math.abs((s.axis === 'y' ? s.y : s.x) - (s.from ?? 0));
-    return way / (ADD_PAGE * (s.axis === 'y' ? v.box.h : v.box.w));
+    return Math.abs(s.x - (s.from ?? 0)) / (ADD_PAGE * v.box.w);
   }
 
-  private showAdd(k: number | null, axis: 'x' | 'y' = 'x'): void {
+  private showAdd(k: number | null): void {
     if (k === null && !this.addShown) return;
     this.addShown = k !== null;
-    this.marks.adding?.(k, axis);
+    this.marks.adding?.(k);
   }
 
   private turn(s: NonNullable<SlideView['swipe']>): void {
     s.paged = true;
-    this.turned = s.axis === 'y' ? 'y' : 'x';
-    this.marks.onPage?.((s.axis === 'y' ? s.y : s.x) - (s.from ?? 0) < 0 ? 1 : -1);
+    this.marks.onPage?.(s.x - (s.from ?? 0) < 0 ? 1 : -1);
   }
 
-  /** another slide, by a swipe: in from the side it was swiped from (`dir` 1: the next, from the right — or from below) */
+  /** another slide, by a swipe: in from the side it was swiped from (`dir` 1: the next, from the right) */
   enter(dir: 1 | -1): void {
     const v = this.input();
     this.recentre(false);
     if (!v || this.reduced()) return;
-    const from = this.turned === 'y' ? { x: 0, y: dir * Math.min(240, v.box.h * 0.3) } : { x: dir * Math.min(240, v.box.w * 0.3), y: 0 };
+    const from = { x: dir * Math.min(240, v.box.w * 0.3), y: 0 };
     this.animateFrom(from, { x: 0, y: 0 });
     // (at the side from its first frame, not in the middle till the spring's first step)
     this.shown = from;
@@ -584,7 +576,7 @@ export class SlideView {
   scroll(dx: number, dy: number): void {
     if (!this.idle) {
       this.armed = this.atEdge(dx, dy);
-      this.swipe = { x: 0, y: 0, x0: this.raw.x, y0: this.raw.y, t0: performance.now(), finger: false, axis: null, pages: false, paged: false, from: null };
+      this.swipe = { x: 0, y: 0, x0: this.raw.x, t0: performance.now(), finger: false, axis: null, pages: false, paged: false, from: null };
     }
     if (!this.steer(dx, dy)) this.pull(dx, dy, 0.4);
     if (this.idle) clearTimeout(this.idle);
@@ -648,10 +640,10 @@ export class SlideView {
     this.swipe = null;
     this.showAdd(null);
     if (!cancelled && v && s?.finger && s.pages && !s.paged) {
-      const dim = s.axis === 'y' ? v.box.h : v.box.w, [lo, hi] = this.ranges(v)[s.axis === 'y' ? 'y' : 'x'];
+      const dim = v.box.w, [lo, hi] = this.ranges(v).x;
       // (past the edge only, when it ran into it; then a flick counts near a fit — the slide's margins, what
       // is round its content — not zoomed in on a detail, where a quick pan overshoots the edge)
-      const d = Math.abs((s.axis === 'y' ? s.y : s.x) - (s.from ?? 0));
+      const d = Math.abs(s.x - (s.from ?? 0));
       const fast = performance.now() - s.t0 < 250 && d > 30 && (!s.from || hi - lo <= dim / 2);
       // (on past the last slide: a slide added, or nothing — however far a pan of a detail went on)
       if (this.pastLast(s) ? this.adds(s, v) && this.addWay(s, v) >= 1 : fast || d >= PAGE_FINGER * dim) this.turn(s);

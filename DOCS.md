@@ -1004,7 +1004,10 @@ blend.
     the swipe began, shows the pull on the rubber band and turns the page after 90 px of scroll (once
     a swipe, momentum and all) or, a finger, a sixth of the canvas or a flick; the next slide comes
     in from that side (`enter`). Sideways it never comes loose; up and down, and zoomed in mid-slide,
-    it pans and pulls loose as ever. On a touch screen a finger's swipe on past the **last slide adds
+    it pans and pulls loose as ever. **Only sideways** turns or adds a slide (the user, 25 Oct 2026,
+    who also draws beside the slides): up and down never do, in full screen and drawing focus either —
+    there the slide is `fastened` (never loose), an up or down pull just springs back; the Pencil never
+    swipes, and a hand resting beside the slide as the Pencil lands lets go without turning. On a touch screen a finger's swipe on past the **last slide adds
     one** (`addsPage`, GoodNotes' next page): pulled 22 % of the canvas (`ADD_PAGE`; no flick, no
     scroll; begun at the slide's edge or near a fit — a pan of a zoomed-in detail that runs on past
     the last slide's edge adds nothing), the room the pull opens shows the new slide as a dashed page
@@ -1014,7 +1017,7 @@ blend.
     toolbar's ⛶ button, also in the side column): the app's bars, the files, the rail, the notes, the
     panes and the toolbars go (`html.ol-deck-full`, `.dl-full`), the slide is fitted edge to edge into
     the whole screen, Undo, the pens (their tap: the Draw row under them) and ⤡ back wait on its top
-    right corner (the drawing focus' pill), swipes up and down turn the page too and a page turned says
+    right corner (the drawing focus' pill), swipes sideways turn the page and a page turned says
     "3 / 12"; the browser's own full screen is asked for too where there is one (not in a web app from
     the home screen) and leaving it leaves the editor's as it is. The editor sizes the frame to the
     slide and moves it by a transform set outside renders (`deliverable/viewport.ts` `SlideView`; a zoom

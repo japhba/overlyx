@@ -280,7 +280,7 @@ describe('a swipe sideways turns the page (Safari\'s swipe between pages)', () =
   const make = (scale = 0.7, pages = true, drawing = false) => {
     const frame = { style: {} } as unknown as HTMLElement;
     const turned: number[] = [], free: boolean[] = [];
-    const v = new SlideView(() => frame, () => ({ box, rect, scale, margin: 32 }), { pages: () => pages, onPage: d => turned.push(d), onFree: f => free.push(f), pagesUpDown: () => drawing, fastened: () => drawing });
+    const v = new SlideView(() => frame, () => ({ box, rect, scale, margin: 32 }), { pages: () => pages, onPage: d => turned.push(d), onFree: f => free.push(f), fastened: () => drawing });
     v.render();
     const letGo = () => vi.advanceTimersByTime(200);
     return { v, turned, free, letGo };
@@ -433,21 +433,22 @@ describe('a swipe sideways turns the page (Safari\'s swipe between pages)', () =
     expect(turned).toEqual([]);
   });
 
-  it('drawing with everything else away: up and down turn the page too, and the slide never comes loose', () => {
+  it('only sideways turns the page — up and down never, drawing with everything else away or not; drawing, the slide never comes loose', () => {
     const { v, turned, free } = make(0.7, true, true);
-    v.panBy(0, -60); v.panBy(0, -60); v.release();   // up: the next
+    v.panBy(0, -60); v.panBy(0, -60); v.release();   // up, quickly
+    v.panBy(0, 80); vi.advanceTimersByTime(400); v.panBy(0, 60); v.release();   // down, slowly, a fifth of the canvas
+    for (let i = 0; i < 10; i++) v.panBy(0, -40);   // up, far
+    v.release();
+    expect(turned).toEqual([]);
+    expect(free).toEqual([]);
+    v.panBy(-60, 0); v.panBy(-60, 0); v.release();   // left: the next
     expect(turned).toEqual([1]);
-    v.panBy(0, 80); vi.advanceTimersByTime(400); v.panBy(0, 60); v.release();   // down, slowly, a fifth of the canvas: the one before
-    expect(turned).toEqual([1, -1]);
-    v.panBy(0, -20); v.release();   // a short slow nudge: nothing
-    expect(turned).toEqual([1, -1]);
     // zoomed in mid-slide, pulled far on past its edge: it pans, then turns the page (the one before) — never loose
     const z = make(1.4, true, true);
     for (let i = 0; i < 30; i++) z.v.panBy(30, 0);
     z.v.release(); vi.advanceTimersByTime(1000);
     expect(z.turned).toEqual([-1]);
     expect(z.free).toEqual([]);
-    expect(free).toEqual([]);
     // not drawing: up and down pull it loose as ever
     const n = make();
     for (let i = 0; i < 10; i++) n.v.panBy(0, -40);
@@ -456,15 +457,15 @@ describe('a swipe sideways turns the page (Safari\'s swipe between pages)', () =
     expect(n.free).toEqual([true]);
   });
 
-  it('turned up or down, the next slide comes in from below (the one before from above)', () => {
-    const { v } = make(0.7, true, true);
-    vi.stubGlobal('matchMedia', () => ({ matches: false }));
-    const y = () => v.place()!.ty - (box.h / 2 - (rect.y + rect.h / 2) * v.place()!.s);
-    v.panBy(0, -60); v.panBy(0, -60); v.release();
-    v.enter(1);
-    expect(y()).toBeGreaterThan(100);
-    vi.advanceTimersByTime(1000);
-    expect(Math.abs(y())).toBeLessThan(1);
+  it('on past the last slide, up or down never adds one', () => {
+    const frame = { style: {} } as unknown as HTMLElement;
+    const turned: number[] = [], shown: (number | null)[] = [];
+    const v = new SlideView(() => frame, () => ({ box, rect, scale: 0.7, margin: 32 }), { pages: () => true, onPage: d => turned.push(d), addsPage: () => true, adding: k => shown.push(k), fastened: () => true });
+    v.render();
+    for (let i = 0; i < 12; i++) v.panBy(0, -40);
+    v.release();
+    expect(turned).toEqual([]);
+    expect(shown).toEqual([]);
   });
 
   it('the next slide comes in from the side it was swiped from', () => {

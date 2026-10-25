@@ -1271,11 +1271,11 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     pull: () => pullRing.current, onFree: setSlideFree, onLive: s => { toCanvas({ ol: 'scale', scale: s }); showZoom(s); },
     // a swipe sideways: the next slide, or the one before (viewport.ts steer) — on past the last, a new one
     pages: () => kindRef.current === 'deck' && (slidesRef.current.length > 1 || addsPage()),
-    // (drawing with everything else away, the slide on the whole screen: up and down too, as Notes' pages scroll)
-    pagesUpDown: () => focusRef.current || fullRef.current, fastened: () => focusRef.current || fullRef.current,
+    // (drawing with everything else away, the slide on the whole screen: it never comes loose — up and down only pull at it)
+    fastened: () => focusRef.current || fullRef.current,
     addsPage: () => addsPage(),
     // (the new slide shows in the room the pull opens beyond the last one, filling in as far as it has come)
-    adding: (k, axis) => {
+    adding: k => {
       const el = addBadge.current, f = canvasFrame.current, so = soloState.current, view = viewEl.current;
       if (!el) return;
       if (k === null || !f || !so || !view) { el.style.opacity = '0'; el.classList.remove('ready'); return; }
@@ -1284,15 +1284,12 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
       const sx = r.width / Math.max(1, f.offsetWidth), sy = r.height / Math.max(1, f.offsetHeight);
       const l = r.left - vb.left + so.rect.x * sx, t = r.top - vb.top + so.rect.y * sy, w = so.rect.w * sx, h = so.rect.h * sy;
       const G = 8;
-      const room = axis === 'x'
-        ? { l: l + w + G, t: Math.max(G, t), w: Math.max(0, vb.width - l - w - 2 * G), h: Math.min(vb.height - G, t + h) - Math.max(G, t) }
-        : { l: Math.max(G, l), t: t + h + G, w: Math.min(vb.width - G, l + w) - Math.max(G, l), h: Math.max(0, vb.height - t - h - 2 * G) };
+      const room = { l: l + w + G, t: Math.max(G, t), w: Math.max(0, vb.width - l - w - 2 * G), h: Math.min(vb.height - G, t + h) - Math.max(G, t) };
       Object.assign(el.style, { left: `${room.l}px`, top: `${room.t}px`, width: `${room.w}px`, height: `${room.h}px`, opacity: Math.min(1, k * 5).toFixed(3) });
       // (the ring and its words in the middle of that room, never off the screen while the room is still narrow)
       const mx = Math.min(vb.width - 76, Math.max(76, room.l + room.w / 2)) - room.l, my = Math.min(vb.height - 48, Math.max(48, room.t + room.h / 2)) - room.t;
       el.style.setProperty('--mx', `${mx}px`); el.style.setProperty('--my', `${my}px`);
       el.style.setProperty('--k', Math.min(1, k).toFixed(3));
-      el.dataset.axis = axis;
       const ready = k >= 1;
       if (ready !== el.classList.contains('ready')) {
         el.classList.toggle('ready', ready);
