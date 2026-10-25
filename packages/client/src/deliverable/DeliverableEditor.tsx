@@ -1271,8 +1271,6 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     pull: () => pullRing.current, onFree: setSlideFree, onLive: s => { toCanvas({ ol: 'scale', scale: s }); showZoom(s); },
     // a swipe sideways: the next slide, or the one before (viewport.ts steer) — on past the last, a new one
     pages: () => kindRef.current === 'deck' && (slidesRef.current.length > 1 || addsPage()),
-    // (drawing with everything else away, the slide on the whole screen: it never comes loose — up and down only pull at it)
-    fastened: () => focusRef.current || fullRef.current,
     addsPage: () => addsPage(),
     // (the new slide shows in the room the pull opens beyond the last one, filling in as far as it has come)
     adding: k => {

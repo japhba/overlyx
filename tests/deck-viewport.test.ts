@@ -277,10 +277,10 @@ describe('a swipe sideways turns the page (Safari\'s swipe between pages)', () =
     vi.stubGlobal('cancelAnimationFrame', (h: ReturnType<typeof setTimeout>) => clearTimeout(h));
   });
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
-  const make = (scale = 0.7, pages = true, drawing = false) => {
+  const make = (scale = 0.7, pages = true) => {
     const frame = { style: {} } as unknown as HTMLElement;
     const turned: number[] = [], free: boolean[] = [];
-    const v = new SlideView(() => frame, () => ({ box, rect, scale, margin: 32 }), { pages: () => pages, onPage: d => turned.push(d), onFree: f => free.push(f), fastened: () => drawing });
+    const v = new SlideView(() => frame, () => ({ box, rect, scale, margin: 32 }), { pages: () => pages, onPage: d => turned.push(d), onFree: f => free.push(f) });
     v.render();
     const letGo = () => vi.advanceTimersByTime(200);
     return { v, turned, free, letGo };
@@ -433,34 +433,30 @@ describe('a swipe sideways turns the page (Safari\'s swipe between pages)', () =
     expect(turned).toEqual([]);
   });
 
-  it('only sideways turns the page — up and down never, drawing with everything else away or not; drawing, the slide never comes loose', () => {
-    const { v, turned, free } = make(0.7, true, true);
+  it('only sideways turns the page — up and down never: they pull the slide, far enough loose (the way to the canvas round it)', () => {
+    const { v, turned, free } = make(0.7, true);
     v.panBy(0, -60); v.panBy(0, -60); v.release();   // up, quickly
     v.panBy(0, 80); vi.advanceTimersByTime(400); v.panBy(0, 60); v.release();   // down, slowly, a fifth of the canvas
-    for (let i = 0; i < 10; i++) v.panBy(0, -40);   // up, far
-    v.release();
     expect(turned).toEqual([]);
     expect(free).toEqual([]);
     v.panBy(-60, 0); v.panBy(-60, 0); v.release();   // left: the next
     expect(turned).toEqual([1]);
-    // zoomed in mid-slide, pulled far on past its edge: it pans, then turns the page (the one before) — never loose
-    const z = make(1.4, true, true);
+    for (let i = 0; i < 10; i++) v.panBy(0, -40);   // up, far: loose
+    v.release();
+    expect(turned).toEqual([1]);
+    expect(free).toEqual([true]);
+    // zoomed in mid-slide, pulled far on past its edge sideways: it pans, then turns the page (the one before) — never loose
+    const z = make(1.4, true);
     for (let i = 0; i < 30; i++) z.v.panBy(30, 0);
     z.v.release(); vi.advanceTimersByTime(1000);
     expect(z.turned).toEqual([-1]);
     expect(z.free).toEqual([]);
-    // not drawing: up and down pull it loose as ever
-    const n = make();
-    for (let i = 0; i < 10; i++) n.v.panBy(0, -40);
-    n.v.release();
-    expect(n.turned).toEqual([]);
-    expect(n.free).toEqual([true]);
   });
 
   it('on past the last slide, up or down never adds one', () => {
     const frame = { style: {} } as unknown as HTMLElement;
     const turned: number[] = [], shown: (number | null)[] = [];
-    const v = new SlideView(() => frame, () => ({ box, rect, scale: 0.7, margin: 32 }), { pages: () => true, onPage: d => turned.push(d), addsPage: () => true, adding: k => shown.push(k), fastened: () => true });
+    const v = new SlideView(() => frame, () => ({ box, rect, scale: 0.7, margin: 32 }), { pages: () => true, onPage: d => turned.push(d), addsPage: () => true, adding: k => shown.push(k) });
     v.render();
     for (let i = 0; i < 12; i++) v.panBy(0, -40);
     v.release();

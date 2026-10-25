@@ -1006,7 +1006,8 @@ blend.
     in from that side (`enter`). Sideways it never comes loose; up and down, and zoomed in mid-slide,
     it pans and pulls loose as ever. **Only sideways** turns or adds a slide (the user, 25 Oct 2026,
     who also draws beside the slides): up and down never do, in full screen and drawing focus either —
-    there the slide is `fastened` (never loose), an up or down pull just springs back; the Pencil never
+    they pull the slide, and far enough set it loose there too (the way to the canvas round it; it was
+    fastened while drawing, and the canvas never came within reach); the Pencil never
     swipes, and a hand resting beside the slide as the Pencil lands lets go without turning. On a touch screen a finger's swipe on past the **last slide adds
     one** (`addsPage`, GoodNotes' next page): pulled 22 % of the canvas (`ADD_PAGE`; no flick, no
     scroll; begun at the slide's edge or near a fit — a pan of a zoomed-in detail that runs on past

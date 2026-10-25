@@ -182,8 +182,6 @@ export interface ViewMarks {
   onFree?: (free: boolean) => void;
   /** there are slides to swipe between (a deck): a swipe sideways goes to the next (1) or the one before (-1) */
   pages?: () => boolean;
-  /** the slide never comes loose (drawing with everything else away: no Centre slide to bring it back, and a loose slide takes the swipes that turn the page) */
-  fastened?: () => boolean;
   onPage?: (dir: 1 | -1) => void;
   /**
    * The slide shown is the last, and a swipe on past it adds one (`onPage(1)` past the end), as
@@ -431,7 +429,7 @@ export class SlideView {
       this.ringOn = true;
       // pulled further out, as far as it takes: loose
       const past = pastRanges(this.raw, home);
-      if (this.armed && past >= BREAK && past > before && !this.marks.fastened?.()) this.loosen(v, catchUp);
+      if (this.armed && past >= BREAK && past > before) this.loosen(v, catchUp);
     }
     this.render();
   }
@@ -497,7 +495,8 @@ export class SlideView {
    * A swipe sideways turns the page — the slide in its place (not loose), all of it across the canvas
    * or at that side's edge when the swipe began; it shows the pull on the rubber band, and never comes
    * loose that way. Only sideways (the user, 25 Oct 2026: "for advancing slides/new, only do
-   * left/right"): up and down it pans and pulls loose as ever (`fastened`: it only pulls). Zoomed in
+   * left/right"): up and down it pans and pulls loose as ever — the way to the canvas round it (the
+   * user, the same day: "i dont seem to be able to ever reach the canvas" — drawing, it never came loose). Zoomed in
    * mid-slide it pans — and a finger that pans the slide into that edge and goes on turns the page from
    * there, as Photos does (the user, 22 Oct 2026: at Fit margins, the slide a little wider than the
    * canvas, a swipe only showed the margin). True: the swipe took the move.
