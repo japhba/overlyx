@@ -90,7 +90,10 @@
         "command": "overlyx.openDeliverable",
         "title": "Open in OverLyX (slides, poster or web page)",
         "category": "OverLyX",
-        "icon": "$(preview)"
+        "icon": {
+          "light": "assets/olyx-light.svg",
+          "dark": "assets/olyx-dark.svg"
+        }
       },
       {
         "command": "overlyx.newDocument",
@@ -103,7 +106,10 @@
         "command": "overlyx.openInOverlyx",
         "title": "Open in OverLyX Editor",
         "category": "OverLyX",
-        "icon": "$(preview)"
+        "icon": {
+          "light": "assets/olyx-light.svg",
+          "dark": "assets/olyx-dark.svg"
+        }
       },
       {
         "command": "overlyx.openAsText",
