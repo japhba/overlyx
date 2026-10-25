@@ -185,7 +185,10 @@ describe('local tools: the MCP server agents start (stdio)', () => {
   const TSX = pathToFileURL(path.join(here, '../node_modules/tsx/dist/loader.mjs')).href;
 
   async function session(cwd: string, clientName: string, calls: { name: string; arguments: object }[]): Promise<any[]> {
-    const child = spawn(process.execPath, ['--import', TSX, ENTRY], { cwd, env: { ...process.env, OVERLYX_LAYOUT_DIR: LYX_LAYOUTS, OVERLYX_AGENTS_DIR: path.join(cwd, '.agents') }, stdio: ['pipe', 'pipe', 'pipe'] });
+    // whose agent it is: git's user.name (one of its own, not this machine's)
+    const gitConfig = path.join(cwd, '.gitconfig-test');
+    fs.writeFileSync(gitConfig, '[user]\n\tname = Ada Lovelace\n');
+    const child = spawn(process.execPath, ['--import', TSX, ENTRY], { cwd, env: { ...process.env, OVERLYX_LAYOUT_DIR: LYX_LAYOUTS, OVERLYX_AGENTS_DIR: path.join(cwd, '.agents'), GIT_CONFIG_GLOBAL: gitConfig, GIT_CONFIG_NOSYSTEM: '1' }, stdio: ['pipe', 'pipe', 'pipe'] });
     const answers = new Map<number, any>();
     let buf = '', err = '';
     child.stderr.on('data', d => { err += d; });
@@ -215,7 +218,7 @@ describe('local tools: the MCP server agents start (stdio)', () => {
     // open in an OverLyX editor of this (living) process — the file has no OverLyX block
     publishOpenDocuments(path.join(dir, '.agents'), [path.join(dir, 'paper/main.tex')]);
     const [init, list, edit, bad] = await session(dir, 'codex-mcp-client', [
-      { name: 'edit_document', arguments: { path: 'paper/main.tex', old_text: 'brown', new_text: 'red' } },
+      { name: 'edit_document', arguments: { path: 'paper/main.tex', old_text: 'brown', new_text: 'red', model: 'gpt-5.5' } },
       { name: 'edit_document', arguments: { path: 'paper/main.tex', old_text: 'unicorn', new_text: 'x' } },
     ]);
     expect(init.result.serverInfo.name).toBe('overlyx-local');
@@ -226,7 +229,7 @@ describe('local tools: the MCP server agents start (stdio)', () => {
     expect(list.result.tools.map((t: { name: string }) => t.name).sort()).toEqual(['add_comment', 'edit_document', 'reply_to_comment', 'write_document']);
     if (edit.result.isError) throw new Error(edit.result.content[0].text);
     expect(JSON.parse(edit.result.content[0].text)).toMatchObject({ ok: true, inserted_chars: 3, deleted_chars: 5 });
-    expect(read(dir, 'paper/main.tex')).toMatch(/\\lyxadded\{Codex\}\{[^}]+\}\{red\}/);
+    expect(read(dir, 'paper/main.tex')).toMatch(/\\lyxadded\{Codex \(GPT-5\.5\) \[Ada\]\}\{[^}]+\}\{red\}/);
     expect(bad.result.isError).toBe(true);
     expect(bad.result.content[0].text).toMatch(/old_text/);
   }, 60000);
@@ -252,19 +255,20 @@ describe('local tools: the MCP server agents start (stdio)', () => {
     try {
       const [, , handed] = await session(dir, 'claude-code', [{ name: 'edit_document', arguments: { path: 'main.tex', old_text: 'lazy', new_text: 'sleepy' } }]);
       expect(JSON.parse(handed.result.content[0].text)).toEqual({ ok: true, via: 'editor' });
-      expect(calls).toEqual([{ tool: 'edit_document', args: { path: 'main.tex', old_text: 'lazy', new_text: 'sleepy' }, author: 'Claude Code', cwd: dir }]);
+      expect(calls).toEqual([{ tool: 'edit_document', args: { path: 'main.tex', old_text: 'lazy', new_text: 'sleepy' }, author: 'Claude [Ada]', cwd: dir }]);
       expect(read(dir)).toBe(PAPER);   // the window edits it, not the tool server
       open = false;   // closed meanwhile: the file itself
       const [, , direct] = await session(dir, 'claude-code', [{ name: 'edit_document', arguments: { path: 'main.tex', old_text: 'lazy', new_text: 'sleepy' } }]);
       expect(JSON.parse(direct.result.content[0].text)).toMatchObject({ ok: true, inserted_chars: 6 });
-      expect(read(dir)).toMatch(/\\lyxadded\{Claude Code\}\{[^}]+\}\{sleepy\}/);
+      expect(read(dir)).toMatch(/\\lyxadded\{Claude \[Ada\]\}\{[^}]+\}\{sleepy\}/);
     } finally { bridge.close(); }
   }, 60000);
 
-  it('names the author after the agent', () => {
-    expect(authorFor({ name: 'claude-code', version: '2.1' } as never)).toBe('Claude Code');
-    expect(authorFor({ name: 'codex-mcp-client' })).toBe('Codex');
-    expect(authorFor({ name: 'my-agent', title: 'My Agent' })).toBe('My Agent');
+  it('names the author after the agent, its model and whose agent it is', () => {
+    expect(authorFor({ name: 'claude-code', version: '2.1' } as never, 'claude-opus-5-5[1m]', 'Jan Bauer')).toBe('Claude (Opus 5.5) [Jan]');
+    expect(authorFor({ name: 'codex-mcp-client' }, 'GPT-5.5', 'Ada')).toBe('Codex (GPT-5.5) [Ada]');
+    expect(authorFor({ name: 'claude-code' })).toBe('Claude');
+    expect(authorFor({ name: 'my-agent', title: 'My Agent' }, null, 'Ada')).toBe('My Agent [Ada]');
     expect(authorFor(undefined)).toBe('AI agent');
   });
 });

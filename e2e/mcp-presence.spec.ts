@@ -110,7 +110,7 @@ test('the agent appears in the document as a collaborator: its caret on its edit
   const { client } = await connect('codex-mcp-client');
   await call(client, 'edit_document', { project: PROJECT, path: 'main.tex', old_text: 'the lazy dog', new_text: 'the sleepy dog', tracked: false });
   // the browser's collaborator rendering: a named caret, and an avatar in the presence list
-  const caret = page.locator('.ProseMirror-yjs-cursor', { hasText: 'Codex (Admin)' });
+  const caret = page.locator('.ProseMirror-yjs-cursor', { hasText: 'Codex [Admin]' });
   await expect(caret).toHaveCount(1, { timeout: 15000 });
   // (the caret's name label sits in the text: read it without the collaborators' carets)
   const plainText = () => page.evaluate(() => { const c = document.querySelector('.lyx-editor')!.cloneNode(true) as HTMLElement; c.querySelectorAll('.ProseMirror-yjs-cursor').forEach(x => x.remove()); return c.textContent; });
@@ -124,7 +124,7 @@ test('the agent appears in the document as a collaborator: its caret on its edit
   await expect(page.locator('.ProseMirror-yjs-selection')).toContainText('has a typo in it', { timeout: 10000 });
   // the agent's place, as other agents and itself see it
   const r = await call(client, 'get_presence', { project: PROJECT, path: 'main.tex' });
-  expect(r.documents[0].people.find((p: any) => p.self)).toMatchObject({ kind: 'agent', name: 'Codex (Admin)', selection: { text: 'has a typo in it' } });
+  expect(r.documents[0].people.find((p: any) => p.self)).toMatchObject({ kind: 'agent', name: 'Codex [Admin]', selection: { text: 'has a typo in it' } });
 });
 
 test('a message from the Agent panel reaches the agent with the selection; its reply shows in the panel', async ({ page }) => {

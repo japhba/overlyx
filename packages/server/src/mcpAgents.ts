@@ -29,7 +29,8 @@ import express, { type Request, type Response } from 'express';
 import { db } from './db.ts';
 import type { SessionUser } from './auth.ts';
 import { originAllowed } from './ws.ts';
-import { editorContextLines, type TurnContext } from './agent.ts';
+import { editorContextLines, ownerFirstName, type TurnContext } from './agent.ts';
+import { agentAuthorName } from '@overlyx/core/agentname.ts';
 
 export interface ClientInfo { name: string; title?: string; version?: string }
 export interface TokenIdentity { kind: 'personal' | 'agent'; id: number; userId: number; name: string }
@@ -37,6 +38,8 @@ export interface TokenIdentity { kind: 'personal' | 'agent'; id: number; userId:
 export interface AgentRow {
   id: number; user_id: number; token_kind: string; token_id: number; client_name: string; client_title: string | null; client_version: string | null;
   created_at: number; last_seen_at: number; last_project: string | null; last_path: string | null; last_tool: string | null; active_at: number | null; stateless_at: number | null;
+  /** the model the agent last said it is (the `model` of its edits and comments), null until it says */
+  model: string | null;
 }
 export interface MessageRow {
   id: number; agent_id: number; user_id: number;
@@ -77,11 +80,19 @@ export const wantsSession = (client: ClientInfo | null): boolean => !!client && 
 const tokenLabel = (row: Pick<AgentRow, 'token_kind'>) => (row.token_kind === 'personal' ? 'account token' : 'connector credential');
 export const agentTitle = (row: Pick<AgentRow, 'client_name' | 'client_title'>, fallback = 'Agent'): string =>
   CLIENT_TITLES[row.client_name] ?? (row.client_title?.trim() || row.client_name || fallback);
-/** "Claude Code (Jan)": how the agent appears to people — as a collaborator and in the Agent panel. */
+/** The assistant behind an MCP client, as its edits are signed (clientInfo.name → name; others: agentTitle). */
+const CLIENT_ASSISTANTS: Record<string, string> = { 'claude-code': 'Claude', 'claude-ai': 'Claude', 'gemini-cli-mcp-client': 'Gemini' };
+/** "Claude (Opus 5.5) [Jan]": how the agent appears to people — the author of its tracked changes and comments, as a collaborator and in the Agent panel. */
 export function agentLabel(row: AgentRow): string {
-  const owner = (db.prepare('SELECT display_name AS name FROM users WHERE id = ?').get(row.user_id) as { name: string } | undefined)?.name ?? '';
-  const first = owner.trim().split(/\s+/)[0];
-  return first ? `${agentTitle(row)} (${first})` : agentTitle(row);
+  return agentAuthorName(CLIENT_ASSISTANTS[row.client_name] ?? agentTitle(row), row.model, ownerFirstName(row.user_id));
+}
+/** The agent said which model it is (a tool call's `model`): remembered, so its later edits are signed with it too. */
+export function noteAgentModel(row: AgentRow, model: string | undefined): void {
+  const m = model?.trim().slice(0, 80);
+  if (!m || m === row.model) return;
+  db.prepare('UPDATE mcp_agents SET model = ? WHERE id = ?').run(m, row.id);
+  row.model = m;
+  scheduleAgentsEvent(row.user_id);
 }
 export const agentColor = (row: Pick<AgentRow, 'id'>): string => AGENT_COLORS[row.id % AGENT_COLORS.length];
 /** The account an agent acts for, as its avatar shows it in a document: the owner's colour and face (agentPresence.ts). */

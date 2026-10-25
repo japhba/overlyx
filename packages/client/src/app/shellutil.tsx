@@ -15,6 +15,7 @@ import { estimatePages } from './pagecount';
 import { currentParagraph } from '../editor/commands';
 import { editorContext, onMetaChange } from '../editor/context';
 import { recordInteraction } from '../usage';
+import { isAgentAuthor } from '@overlyx/core/agentname.ts';
 
 /**
  * Zoom the rendered text with a font-size variable, remembered per browser. The column, ruler
@@ -66,12 +67,11 @@ export function applyAuthorColors(authors: { id: number; name: string }[]): void
   const dark = ['#7bd88f', '#ff8a80', '#82b1ff', '#d6a2ff', '#ffb74d', '#4dd0e1', '#f48fb1', '#d7ccc8', '#c5e1a5', '#9fa8da'];
   let el = document.getElementById('ol-author-colors') as HTMLStyleElement | null;
   if (!el) { el = document.createElement('style'); el.id = 'ol-author-colors'; document.head.appendChild(el); }
-  // an agent's tracked changes (the MCP connector's authors, "… (MCP)") are grey by default,
+  // an agent's tracked changes ("Claude (Opus 5.5) [Jan]", formerly "… (MCP)") are grey by default,
   // so the colours stay for human co-authors and the eye can skim the machine's insertions
-  const isAgent = (n: string) => /\(MCP\)\s*$/.test(n);
   el.textContent = authors.map((a, i) => {
-    const light = isAgent(a.name) ? '#757575' : palette[i % palette.length];
-    const dk = isAgent(a.name) ? '#9e9e9e' : dark[i % dark.length];
+    const light = isAgentAuthor(a.name) ? '#757575' : palette[i % palette.length];
+    const dk = isAgentAuthor(a.name) ? '#9e9e9e' : dark[i % dark.length];
     return `.lyx-change[data-author="${a.id}"], .lyx-inset[data-author="${a.id}"] { --change-color: ${light}; }\n`
       // (lifted only on a dark page: with smart invert off the page is white paper, app/darkpages.ts)
       + `html[data-theme="dark"][data-dark-pages] .lyx-change[data-author="${a.id}"], html[data-theme="dark"][data-dark-pages] .lyx-inset[data-author="${a.id}"] { --change-color: ${dk}; }`;

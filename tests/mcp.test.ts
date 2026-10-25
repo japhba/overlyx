@@ -213,7 +213,7 @@ describe('propose_edit', () => {
     expect(r.changed).toBe(true);
     const openDoc = await manager.open('owner/p/a.tex');
     const text = openDoc.toText();
-    expect(text).toContain('\\lyxadded{Fixit Bot (MCP)}');
+    expect(text).toContain('\\lyxadded{Fixit Bot [Owner]}');
     expect(text).toContain('revised');
     expect(text).toContain('First paragraph');   // unchanged prefix survives
     // the plain reading (paragraphs as returned by read_document) shows the *proposed* text,
@@ -241,6 +241,17 @@ describe('propose_edit', () => {
   });
 });
 
+describe('signing', () => {
+  it("an agent's edits are signed with the model it names, kept for its later edits, and whose agent it is", async () => {
+    writeFileSync(file('signed.tex'), doc('One two three.\n\nFour five six.'));
+    const t = createMcpToken(owner.id, 'Claude').token;
+    await callTool(t, 'edit_document', { path: 'signed.tex', old_text: 'two', new_text: 'zwei', model: 'claude-opus-5-5[1m]' });
+    await callTool(t, 'edit_document', { path: 'signed.tex', old_text: 'six', new_text: 'sechs' });
+    const text = (await manager.open('owner/p/signed.tex')).toText();
+    expect(text.match(/\\lyxadded\{[^}]*\}/g)).toEqual(['\\lyxadded{Claude (Opus 5.5) [Owner]}', '\\lyxadded{Claude (Opus 5.5) [Owner]}']);
+  });
+});
+
 describe('comments', () => {
   it('add_comment, list_comments, resolve_comment round-trip', async () => {
     writeFileSync(file('c.tex'), doc('A paragraph to comment on.'));
@@ -250,7 +261,7 @@ describe('comments', () => {
     const list1 = await callTool(t, 'list_comments', { path: 'c.tex' });
     expect(list1).toHaveLength(1);
     expect(list1[0].resolved).toBe(false);
-    expect(list1[0].messages[0].author).toBe('Reviewer Bot (MCP)');
+    expect(list1[0].messages[0].author).toBe('Reviewer Bot [Owner]');
     expect(list1[0].messages[0].text).toBe('This claim needs a citation.');
 
     const resolved = await callTool(t, 'resolve_comment', { path: 'c.tex', index: 0 });
@@ -277,8 +288,8 @@ describe('raw LaTeX', () => {
     const r = await callTool(t, 'replace_paragraph', { path: 'd.tex', index: 0, latex: 'The loss $L=\\sum_i x_i^2$ converges.' });
     expect(r.ok).toBe(true);
     const text = (await manager.open('owner/p/d.tex')).toText();
-    expect(text).toContain('\\lyxadded{TeX Bot (MCP)}');
-    expect(text).toContain('\\lyxdeleted{TeX Bot (MCP)}');
+    expect(text).toContain('\\lyxadded{TeX Bot [Owner]}');
+    expect(text).toContain('\\lyxdeleted{TeX Bot [Owner]}');
     expect(text).toContain('x_i^2');
     const read = await callTool(t, 'read_document', { path: 'd.tex' });
     expect(read.text).toContain('converges');
@@ -335,7 +346,7 @@ Thesis: \emph{Learning dynamics} in recurrent networks. Advisor: \href{https://e
 2016--2019 & BSc Physics, TU Munich \\
 \end{tabular}`;
   const cvDoc = `\\documentclass{article}\n\\usepackage{hyperref}\n\\begin{document}\n${CV}\n\\end{document}\n`;
-  const marks = (text: string) => [...text.matchAll(/\\lyx(added|deleted)\{CV Bot \(MCP\)\}\{[^}]*\}\{([^}]*)\}/g)].map(m => `${m[1] === 'added' ? '+' : '-'}${m[2]}`);
+  const marks = (text: string) => [...text.matchAll(/\\lyx(added|deleted)\{CV Bot \[Owner\]\}\{[^}]*\}\{([^}]*)\}/g)].map(m => `${m[1] === 'added' ? '+' : '-'}${m[2]}`);
 
   it('edit_document marks only the changed digit of a year in a formatted paragraph', async () => {
     writeFileSync(file('cv.tex'), cvDoc);
@@ -496,7 +507,7 @@ describe('what an edit reports', () => {
     expect(r2.applied_directly.join(' ')).not.toMatch(/still use/);
     const text = (await manager.open('owner/p/pre.tex')).toText();
     expect(text).not.toMatch(/\\R[^a-zA-Z]/);
-    expect(text).toMatch(/\\lyxadded\{Macro Bot \(MCP\)\}\{[^}]*\}\{\$f:\\Real\^n\\to\\Real\$\}/);
+    expect(text).toMatch(/\\lyxadded\{Macro Bot \[Owner\]\}\{[^}]*\}\{\$f:\\Real\^n\\to\\Real\$\}/);
     const b = await callTool(t, 'build_pdf', { path: 'pre.tex', wait_seconds: 150 });
     expect(b.errors ?? []).toEqual([]);
     expect(b.ok).toBe(true);
@@ -790,27 +801,27 @@ describe('agents shown to the people in a document', () => {
     await initialize(t, 'codex-mcp-client');
     const d = await manager.open('owner/p/pres.tex');
     await callTool(t, 'read_document', { path: 'pres.tex' });
-    let mine = agentStates(d).filter(a => a.state.user.name === 'Codex (Owner)');
+    let mine = agentStates(d).filter(a => a.state.user.name === 'Codex [Owner]');
     expect(mine).toHaveLength(1);
     expect(mine[0].state.cursor).toBeUndefined();   // reading: present, no caret yet
     expect(isAgentClient(d, mine[0].id)).toBe(true);   // browsers cannot overwrite it (ws.ts)
     await callTool(t, 'edit_document', { path: 'pres.tex', old_text: 'Third one.', new_text: 'Third one, edited.' });
-    mine = agentStates(d).filter(a => a.state.user.name === 'Codex (Owner)');
+    mine = agentStates(d).filter(a => a.state.user.name === 'Codex [Owner]');
     const at = describeCursor(d.ydoc, mine[0].state.cursor);
     expect(at?.cursor.paragraph).toBe(2);
     expect(at?.selection?.text).toContain('edited');
     // the agent sees itself
     const p = await callTool(t, 'get_presence', { path: 'pres.tex' });
-    expect(p.documents[0].people.find((x: any) => x.self)).toMatchObject({ kind: 'agent', name: 'Codex (Owner)' });
+    expect(p.documents[0].people.find((x: any) => x.self)).toMatchObject({ kind: 'agent', name: 'Codex [Owner]' });
     await callTool(t, 'highlight', { path: 'pres.tex', quote: 'SOME   words' });
-    const hl = describeCursor(d.ydoc, agentStates(d).find(a => a.state.user.name === 'Codex (Owner)')!.state.cursor);
+    const hl = describeCursor(d.ydoc, agentStates(d).find(a => a.state.user.name === 'Codex [Owner]')!.state.cursor);
     expect(hl?.selection).toMatchObject({ from: { paragraph: 0 }, text: 'some words' });
     await callTool(t, 'highlight', { path: 'pres.tex', paragraph_index: 1 });
-    const whole = describeCursor(d.ydoc, agentStates(d).find(a => a.state.user.name === 'Codex (Owner)')!.state.cursor);
+    const whole = describeCursor(d.ydoc, agentStates(d).find(a => a.state.user.name === 'Codex [Owner]')!.state.cursor);
     expect(whole?.selection?.text).toBe('The second paragraph says x^2 and more here.');
     await expect(callTool(t, 'highlight', { path: 'pres.tex', quote: 'not in this document' })).rejects.toThrow(/not found/);
     await callTool(t, 'highlight', { path: 'pres.tex', clear: true });
-    expect(agentStates(d).find(a => a.state.user.name === 'Codex (Owner)')!.state.cursor).toBeUndefined();
+    expect(agentStates(d).find(a => a.state.user.name === 'Codex [Owner]')!.state.cursor).toBeUndefined();
   });
 
   it("the Agent panel's own agent is not shown as a visitor and has no inbox", async () => {
@@ -989,7 +1000,7 @@ describe('messages from OverLyX to an agent elsewhere', () => {
       // the collaborator's list does not show the owner's agents; the owner's does
       expect((await (await fetch(`${api}/mcp-agents`, { headers: { 'x-user': String(colin.id) } })).json()).agents).toEqual([]);
       const listed = (await (await fetch(`${api}/mcp-agents`, { headers: { 'x-user': String(owner.id) } })).json()).agents;
-      expect(listed.find((a: any) => a.id === agentId)).toMatchObject({ name: 'Codex', label: 'Codex (Owner)', token: 'connector credential' });
+      expect(listed.find((a: any) => a.id === agentId)).toMatchObject({ name: 'Codex', label: 'Codex [Owner]', token: 'connector credential' });
       expect((await fetch(`${api}/mcp-agents/${agentId}/messages`, { headers: { 'x-user': String(colin.id) } })).status).toBe(404);
       // a context naming a document the sender cannot see is dropped, not read
       const rita = createUser('rita', 'Rita', 'pw');

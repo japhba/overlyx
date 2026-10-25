@@ -103,7 +103,7 @@ requires **Developer: Reload Window** so VS Code loads the rebuilt extension.
 
 Claude Code, Codex or another agent working in your folders can make its edits of LaTeX and
 markdown documents **tracked changes** when you ask for it — "…with track changes", "as suggestions":
-insertions and deletions attributed to the agent ("Claude Code", "Codex"), which you accept or reject
+insertions and deletions attributed to the agent, its model and you ("Claude (Opus 5.5) [Ada]"), which you accept or reject
 in the editor like a collaborator's. Asked, agents also comment, and answer and resolve your comment
 threads. Without such a request they edit as they always do. When the extension finds Claude Code or
 Codex on this computer it asks once whether to connect them; later, **OverLyX: Connect AI Agents** /

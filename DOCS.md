@@ -2280,7 +2280,9 @@ blend.
   live project in first (documents as their live source, with the tracked-change markup); every
   applied patch, command and finished turn takes the agent's changes back: a document is diffed
   against what was mirrored and merged into the live document as the agent's tracked changes,
-  word by word (`docedit.ts` + `core/src/lyx/trackdiff.ts`, author `Agent panel (MCP)`; a
+  word by word (`docedit.ts` + `core/src/lyx/trackdiff.ts`, author: the engine, the turn's model and
+  the account — `Claude (Opus 5.5) [Jan]`, `agent.ts panelAuthor`, kept in the manifest and the
+  checkpoint; turns from before 25 Oct 2026: `Agent panel (MCP)`; a
   neighbouring paragraph somebody changed meanwhile keeps their version — `mergeInPlace`), other
   files (`.bib`, a new figure or `.tex`) are copied into the project, build output stays in the
   copy. What was mirrored is kept beside the copy, so a restart mid-turn loses nothing.
@@ -4061,8 +4063,13 @@ clientInfo, User-Agent). It exposes these tools:
   paragraphs are aligned, similar ones diffed word by word (a single changed word down to its
   characters: 202~~5~~6), formulas and links as units, footnotes, boxes, floats and same-shaped
   tables entered and diffed inside; the result is `\lyxadded`/`\lyxdeleted` runs and tracked
-  paragraph breaks attributed to the agent (author `"<agent> (MCP)"`) — the representation a human's
-  Track Changes produces, reviewable and rejectable from the Review toolbar. Accept all gives exactly
+  paragraph breaks attributed to the agent — the representation a human's
+  Track Changes produces, reviewable and rejectable from the Review toolbar. The author is the
+  assistant, its model and whose agent it is, `"Claude (Opus 5.5) [Jan]"` (`core/src/agentname.ts`;
+  until 25 Oct 2026 `"<agent> (MCP)"`): MCP does not say which model a client runs, so the editing and
+  comment tools take an optional `model` that the agent's `mcp_agents` row keeps (`noteAgentModel`);
+  the Agent panel's agent signs with its thread's provider and model (`agent.ts panelAuthor`). The
+  editor greys these authors' changes (`isAgentAuthor`). Accept all gives exactly
   the agent's version, Reject all exactly the previous one. Text already marked deleted is invisible
   to the comparison (it stays deleted when the agent's version leaves it out); another author's
   pending insertion that the agent keeps stays theirs; the agent's *own* pending changes in an edited
@@ -4166,7 +4173,8 @@ clientInfo, User-Agent). It exposes these tools:
   writes a marked block into `$CODEX_HOME/AGENTS.md` (`instructCodex`; disconnecting takes it out, a
   file left empty is removed; connected before the note → added once, globalState `agents.codexNote`).
   Verified with real agents (the block as a project-level AGENTS.md for Codex): a plain request → their
-  own edit, "with track changes" → `edit_document`, marks signed with the agent's name. The command is `process.execPath` with `ELECTRON_RUN_AS_NODE=1` (a
+  own edit, "with track changes" → `edit_document`, marks signed with the agent, the model it names
+  (the tools' optional `model`) and git's `user.name` ("Claude (Opus 5.5) [Jan]"). The command is `process.execPath` with `ELECTRON_RUN_AS_NODE=1` (a
   Snap's revision path via `current`; on macOS the app's `MacOS/Electron`) running a launcher in the
   global storage (`agents/overlyx-local.cjs` + `current.json`), which starts the registering version's
   `dist/agents.cjs` or, once an update removed it, the newest installed `overlyx.overlyx-vscode-*`.
@@ -4248,7 +4256,7 @@ clientInfo, User-Agent). It exposes these tools:
   selected paragraph" mean the user's own cursor / selection and to call get_presence first.
 * **People see the agent.** An agent connected from elsewhere (not the Agent panel's own) gets an
   awareness client of its own in each document it reads or edits (`agentPresence.ts showAgent`): a
-  state `{ user: { name: "Claude Code (Jan)", color, agent: true }, cursor }` applied to the
+  state `{ user: { name: "Claude (Opus 5.5) [Jan]", color, agent: true }, cursor }` applied to the
   document's Awareness and relayed by ws.ts like a browser's, so the web client and the VS Code
   extension draw it with their collaborator rendering (presence avatars — agents as rounded
   squares — and a named caret / selection). After an edit the caret covers the range it changed

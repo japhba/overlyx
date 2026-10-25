@@ -358,3 +358,5 @@ CREATE TABLE IF NOT EXISTS mcp_agent_messages (
 );
 CREATE INDEX IF NOT EXISTS mcp_agent_messages_agent ON mcp_agent_messages(agent_id, id);
 `);
+// the model the agent last said it is (an optional `model` of its edits and comments: mcp.ts), so they are signed "Claude (Opus 5.5) [Jan]"
+try { db.exec('ALTER TABLE mcp_agents ADD COLUMN model TEXT'); } catch { /* column exists */ }

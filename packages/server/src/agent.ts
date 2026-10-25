@@ -53,6 +53,7 @@ import {
 } from './agentwork.ts';
 import type { AccessScope } from './tokenAuth.ts';
 import { projectOfDoc, type PMJSON } from '@overlyx/core';
+import { agentAuthorName } from '@overlyx/core/agentname.ts';
 import type { SessionUser } from './auth.ts';
 import {
   keyHints, keyOf, setKey, removeKey, forgetKeys, keyProviderModels, isAgentProvider, isKeyProvider, KeyError, PROVIDER_NAMES,
@@ -841,6 +842,23 @@ export function claudeEngineVersion(): string | null {
   return claudeVersionCache.version;
 }
 
+/** The first name an account's agents are labelled with ("[Jan]"): the display name's first word, else the username. */
+export function ownerFirstName(userId: number): string {
+  const u = db.prepare('SELECT display_name, username FROM users WHERE id = ?').get(userId) as { display_name: string | null; username: string } | undefined;
+  return (u?.display_name?.trim() || u?.username || '').split(/\s+/)[0] ?? '';
+}
+
+/** How the panel's agent signs its tracked changes and comments in a thread: its engine, the thread's model and the account — "Claude (Opus 5.5) [Jan]", "Codex (GPT-5.5) [Jan]". */
+export function panelAuthor(row: { provider?: string | null; model?: string | null; user_id: number }): string {
+  const provider = providerOfRow(row);
+  return agentAuthorName(engineOf(provider) === 'claude' ? 'Claude' : 'Codex', row.model || (provider === 'chatgpt' ? config.agent.model : '') || null, ownerFirstName(row.user_id));
+}
+/** The same, for the thread whose MCP key a request names (X-OverLyX-Thread); undefined: no such thread of the account's. */
+export function panelAuthorFor(userId: number, key: string | undefined): string | undefined {
+  const row = key ? db.prepare('SELECT provider, model, user_id FROM agent_threads WHERE mcp_key = ? AND user_id = ?').get(key, userId) as { provider: string | null; model: string | null; user_id: number } | undefined : undefined;
+  return row ? panelAuthor(row) : undefined;
+}
+
 /** The provider a thread runs on (rows from before providers: the ChatGPT sign-in). */
 export function providerOfRow(row: { provider?: string | null }): AgentProvider { return isAgentProvider(row.provider) ? row.provider : 'chatgpt'; }
 
@@ -1134,15 +1152,16 @@ export function agentRoutes(): express.Router {
       const tracked = req.body?.tracked !== false;
       const wasTracked = native ? workspaceTracking(row.thread_id) : panelTracking(req.user!.id, row.project);
       setPanelTracking(req.user!.id, row.project, tracked);
-      const cwd = native ? await prepareWorkspace(row.thread_id, row.project, req.user!.id, tracked) : projectDir(row.project);
+      // per-turn model / reasoning-effort overrides from the panel's selectors (stick for later turns too)
+      const model = typeof req.body?.model === 'string' && req.body.model ? String(req.body.model).slice(0, 80) : undefined;
+      const effort = typeof req.body?.effort === 'string' && req.body.effort ? String(req.body.effort).slice(0, 20) : undefined;
+      // the turn's changes are signed with the model it runs on: "Claude (Opus 5.5) [Jan]"
+      const cwd = native ? await prepareWorkspace(row.thread_id, row.project, req.user!.id, tracked, panelAuthor({ ...row, model: model ?? row.model })) : projectDir(row.project);
       await h.ensureThreadLoaded(row, cwd);
       const input = await composeInput(text, req.body?.context as TurnContext | undefined, req.user!, scope === 'project' ? row.project : undefined);
       const legacy = legacyThreadNote(row.created_at);
       if (legacy) input.unshift({ type: 'text', text: legacy, text_elements: [] });
       if (!row.title) db.prepare('UPDATE agent_threads SET title = ? WHERE thread_id = ?').run(text.slice(0, 100), row.thread_id);
-      // per-turn model / reasoning-effort overrides from the panel's selectors (stick for later turns too)
-      const model = typeof req.body?.model === 'string' && req.body.model ? String(req.body.model).slice(0, 80) : undefined;
-      const effort = typeof req.body?.effort === 'string' && req.body.effort ? String(req.body.effort).slice(0, 20) : undefined;
       // the panel's optimistic message id: codex echoes it on the userMessage item, so the client can dedupe
       const cmid = typeof req.body?.clientMessageId === 'string' && req.body.clientMessageId ? String(req.body.clientMessageId).slice(0, 60) : undefined;
       for (const note of [trackingNote(tracked, wasTracked), scopeNote(row.thread_id, row.project, scope)]) if (note) input.unshift({ type: 'text', text: note, text_elements: [] });

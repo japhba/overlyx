@@ -66,7 +66,7 @@ import { userSettings } from './userSettings.ts';
 import { touchProject, repoInfo, restoreProject, commitProject } from './git.ts';
 import { buildIncluding, buildErrors, lastBuild, currentJob } from './export.ts';
 import { PANEL_AGENT, buildBeforeTurn, agentCheckpoint, undoCheckpoint, panelTracking } from './agentwork.ts';
-import { panelThreadScope } from './agent.ts';
+import { panelThreadScope, panelAuthorFor } from './agent.ts';
 import { verifyMcpToken } from './mcpTokens.ts';
 import { INTERNAL_PREFIX, isInternalRequest, verifyInternalToken } from './agentnet.ts';
 import { wwwAuthenticate } from './mcpOauth.ts';
@@ -82,7 +82,7 @@ import { readPm } from './collabdoc.ts';
 import { assertRoom, bytesAt } from './projectsize.ts';
 import type { Node as PMNode } from 'prosemirror-model';
 import {
-  agentFor, knownAgent, agentRow, agentLabel, agentColor, agentOwner, noteToolCall, wantsSession, recordSession, sessionRow, touchSession, dropSession,
+  agentFor, knownAgent, agentRow, agentLabel, noteAgentModel, agentColor, agentOwner, noteToolCall, wantsSession, recordSession, sessionRow, touchSession, dropSession,
   registerPusher, unregisterPusher, streamChanged, waitForInstructions, replyFromAgent, forAgent,
   type AgentRow, type ClientInfo, type TokenIdentity,
 } from './mcpAgents.ts';
@@ -151,9 +151,7 @@ async function readDocument(project: string, path: string) {
   return doc.readAsync();   // { text, paragraphs: index, layout, depth, text }
 }
 
-const authorName = (agentName: string) => `${agentName} (MCP)`;
-
-async function proposeEdit(project: string, agentName: string, path: string, paragraphIndex: number, newText: string) {
+async function proposeEdit(project: string, author: string, path: string, paragraphIndex: number, newText: string) {
   const { doc, lyx } = await openLyx(project, path);
   const par = lyx.body[paragraphIndex];
   if (!par) throw new Error(`No paragraph ${paragraphIndex} — this document has ${lyx.body.length} paragraph(s) (see read_document).`);
@@ -168,7 +166,7 @@ async function proposeEdit(project: string, agentName: string, path: string, par
   if (oldText === newText) return { changed: false, message: 'No difference from the current text.' };
   const next = lyx.body.slice();
   next[paragraphIndex] = { ...par, items: [textItem(newText, font)] };
-  commitTracked(doc, lyx, next, agentName);
+  commitTracked(doc, lyx, next, author);
   return { changed: true, paragraph_index: paragraphIndex, runs: diffText(oldText, newText), note: 'Applied as a tracked change; a human reviewer can accept/reject it from the Review toolbar.' };
 }
 
@@ -211,12 +209,12 @@ async function listComments(project: string, path: string) {
   return findComments(lyx);
 }
 
-async function addComment(project: string, agentName: string, path: string, text: string, paragraphIndex: number | undefined) {
+async function addComment(project: string, author: string, path: string, text: string, paragraphIndex: number | undefined) {
   const { doc, lyx } = await openLyx(project, path);
   const idx = paragraphIndex ?? lyx.body.length - 1;
   const par = lyx.body[idx];
   if (!par) throw new Error(`No paragraph ${idx} — this document has ${lyx.body.length} paragraph(s).`);
-  const header = paragraph('Plain Layout', [textItem(commentHeader(authorName(agentName), formatTimestamp()))]);
+  const header = paragraph('Plain Layout', [textItem(commentHeader(author, formatTimestamp()))]);
   const bodyParagraphs = text.split('\n').map(line => paragraph('Plain Layout', [textItem(line)]));
   const inset = textInset('Note', 'Comment', [header, ...bodyParagraphs], 'open');
   par.items.push(insetItem(inset));
@@ -255,7 +253,7 @@ function buildStatus(project: string, path: string) {
   };
 }
 
-async function buildDocument(project: string, agentName: string, userId: number, path: string, waitSeconds: number) {
+async function buildDocument(project: string, agentName: string, author: string, userId: number, path: string, waitSeconds: number) {
   const id = `${project}/${path}`;
   await manager.open(id);                                   // validates the path, flushes pending state
   logAccess(project, userId, 'build', path);
@@ -267,7 +265,7 @@ async function buildDocument(project: string, agentName: string, userId: number,
   const wait = Math.max(5, Math.min(600, waitSeconds));
   let timer: NodeJS.Timeout | undefined;
   const result = await Promise.race([
-    buildIncluding(id, authorName(agentName), Date.now()),   // a build that started before the latest edit does not count
+    buildIncluding(id, author, Date.now()),   // a build that started before the latest edit does not count
     new Promise<null>(res => { timer = setTimeout(() => res(null), wait * 1000); }),
   ]);
   clearTimeout(timer);
@@ -299,9 +297,8 @@ const FRAGMENT_MAX = 256 * 1024;
 const DOC_MAX = 20_000_000;
 const FILE_MAX = 4 * 1024 * 1024;
 
-/** Register the agent as a change-tracking author and switch tracking on. */
-function beginTracking(lyx: LyxDocument, agentName: string): { authorId: number; time: number } {
-  const author = authorName(agentName);
+/** Register the agent (`author`: how it signs, mcpAgents.ts agentLabel) as a change-tracking author and switch tracking on. */
+function beginTracking(lyx: LyxDocument, author: string): { authorId: number; time: number } {
   const authorId = lyxAuthorId(author, '');
   addAuthor(lyx.header, authorId, author, '');
   setHeaderValue(lyx.header, 'tracking_changes', 'true');
@@ -309,8 +306,8 @@ function beginTracking(lyx: LyxDocument, agentName: string): { authorId: number;
 }
 
 /** Replace the body by `next` as the agent's tracked changes — only what differs is marked. */
-function commitTracked(doc: Awaited<ReturnType<typeof manager.open>>, lyx: LyxDocument, next: Paragraph[], agentName: string): { inserted: number; deleted: number } {
-  const { authorId, time } = beginTracking(lyx, agentName);
+function commitTracked(doc: Awaited<ReturnType<typeof manager.open>>, lyx: LyxDocument, next: Paragraph[], author: string): { inserted: number; deleted: number } {
+  const { authorId, time } = beginTracking(lyx, author);
   lyx.body = trackDiff(lyx.body, next, { author: authorId, time });
   commitEdit(doc, lyx);
   return changeStats(lyx.body, { author: authorId, time });
@@ -325,34 +322,34 @@ async function parseFragment(project: string, path: string, latex: string) {
   return { doc, lyx: doc.toLyxDocument(), pars: r.doc.body, warnings: r.warnings };
 }
 
-async function insertParagraphs(project: string, agentName: string, path: string, index: number, latex: string) {
+async function insertParagraphs(project: string, author: string, path: string, index: number, latex: string) {
   const { doc, lyx, pars, warnings } = await parseFragment(project, path, latex);
   if (!pars.length) throw new Error('The LaTeX parsed to no paragraphs.');
   if (index < 0 || index > lyx.body.length) throw new Error(`Insert position ${index} out of range — the document has ${lyx.body.length} paragraph(s); 0 inserts at the top, ${lyx.body.length} appends.`);
   const next = lyx.body.slice();
   next.splice(index, 0, ...pars);
-  commitTracked(doc, lyx, next, agentName);
+  commitTracked(doc, lyx, next, author);
   return { ok: true, inserted: pars.length, at: index, warnings, note: 'Inserted as a tracked change (reviewable from the Review toolbar); paragraph indices shifted — re-run read_document.' };
 }
 
-async function replaceParagraph(project: string, agentName: string, path: string, index: number, latex: string) {
+async function replaceParagraph(project: string, author: string, path: string, index: number, latex: string) {
   const { doc, lyx, pars, warnings } = await parseFragment(project, path, latex);
   const par = lyx.body[index];
   if (!par) throw new Error(`No paragraph ${index} — this document has ${lyx.body.length} paragraph(s) (see read_document).`);
   if (!pars.length) throw new Error('The LaTeX parsed to no paragraphs — use delete_paragraph to remove one.');
   const next = lyx.body.slice();
   next.splice(index, 1, ...pars);
-  const st = commitTracked(doc, lyx, next, agentName);
+  const st = commitTracked(doc, lyx, next, author);
   return { ok: true, warnings, inserted_chars: st.inserted, deleted_chars: st.deleted, note: 'Applied as tracked changes — only the words / characters that differ are marked; a reviewer accepts or rejects them.' };
 }
 
-async function deleteParagraph(project: string, agentName: string, path: string, index: number) {
+async function deleteParagraph(project: string, author: string, path: string, index: number) {
   const { doc, lyx } = await openLyx(project, path);
   const par = lyx.body[index];
   if (!par) throw new Error(`No paragraph ${index} — this document has ${lyx.body.length} paragraph(s).`);
   const next = lyx.body.slice();
   next.splice(index, 1);
-  commitTracked(doc, lyx, next, agentName);
+  commitTracked(doc, lyx, next, author);
   return { ok: true, note: 'Marked deleted as a tracked change; the text disappears when a reviewer accepts it.' };
 }
 
@@ -377,11 +374,11 @@ async function withDocLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
   finally { if (docLocks.get(id) === run) docLocks.delete(id); }
 }
 
-function writeDocument(project: string, userId: number, agentName: string, path: string, tex: string, tracked = true) {
-  return withDocLock(`${project}/${path}`, () => writeDocumentLocked(project, userId, agentName, path, tex, tracked));
+function writeDocument(project: string, userId: number, author: string, path: string, tex: string, tracked = true) {
+  return withDocLock(`${project}/${path}`, () => writeDocumentLocked(project, userId, author, path, tex, tracked));
 }
 
-async function writeDocumentLocked(project: string, userId: number, agentName: string, path: string, tex: string, tracked: boolean) {
+async function writeDocumentLocked(project: string, userId: number, author: string, path: string, tex: string, tracked: boolean) {
   if (!tex.trim()) throw new Error('tex missing');
   if (tex.length > DOC_MAX) throw new Error('too large');
   const article = isHtmlPath(path);
@@ -406,7 +403,7 @@ async function writeDocumentLocked(project: string, userId: number, agentName: s
     touchProject(project, userId);
     return { ok: true, created: false, tracked: false, changed: st.changed, warnings, note: 'Written directly (no tracked changes); the previous state is in the project history (project_history / restore_project).' };
   }
-  const { result: st, warnings } = await doc.agentEdit('tracked', null, { after: tex }, { author: authorName(agentName), warnings: true });
+  const { result: st, warnings } = await doc.agentEdit('tracked', null, { after: tex }, { author: author, warnings: true });
   return {
     ok: true, created: false, warnings, inserted_chars: st.inserted, deleted_chars: st.deleted,
     ...(st.direct.length ? { applied_directly: st.direct } : {}),
@@ -414,11 +411,11 @@ async function writeDocumentLocked(project: string, userId: number, agentName: s
   };
 }
 
-function editDocument(project: string, userId: number, agentName: string, path: string, oldText: string, newText: string, all: boolean, tracked = true) {
-  return withDocLock(`${project}/${path}`, () => editDocumentLocked(project, userId, agentName, path, oldText, newText, all, tracked));
+function editDocument(project: string, userId: number, author: string, path: string, oldText: string, newText: string, all: boolean, tracked = true) {
+  return withDocLock(`${project}/${path}`, () => editDocumentLocked(project, userId, author, path, oldText, newText, all, tracked));
 }
 
-async function editDocumentLocked(project: string, userId: number, agentName: string, path: string, oldText: string, newText: string, all: boolean, tracked: boolean) {
+async function editDocumentLocked(project: string, userId: number, author: string, path: string, oldText: string, newText: string, all: boolean, tracked: boolean) {
   const doc = await manager.open(`${project}/${path}`);
   const replace = { oldText, newText, all };
   if (!tracked) {
@@ -435,7 +432,7 @@ async function editDocumentLocked(project: string, userId: number, agentName: st
       now_reads: st.excerpt,
     };
   }
-  const { result: st, warnings } = await doc.agentEdit('tracked', null, { replace }, { author: authorName(agentName), warnings: true });
+  const { result: st, warnings } = await doc.agentEdit('tracked', null, { replace }, { author: author, warnings: true });
   return {
     ok: true, inserted_chars: st.inserted, deleted_chars: st.deleted, warnings,
     // what changed decides, not the marks: a preamble edit or one's own pending insertion taken back needs none
@@ -574,7 +571,7 @@ export const MCP_INSTRUCTIONS = `OverLyX projects are LaTeX documents that peopl
 
 Workflow: list_projects → list_documents / list_files → read_document (a document's full LaTeX source) or read_file (other text files) → edit → build_pdf.
 
-Editing documents: edit_document (replace a passage) and write_document (a whole source) apply your change as TRACKED CHANGES by default, so the user can review them. Tracked editing must never block you or leave a document broken. On ANY problem with it, switch to direct editing at once by passing tracked: false to edit_document / write_document — the same edit, applied without tracked-change marks. Problems that call for the fallback include: an edit that fails to apply or does not match (do not retry a failing tracked edit more than once); tracked-change markup (\\lyxadded / \\lyxdeleted) making the passage hard to address; a result (now_reads) that looks garbled, duplicated or incomplete; a build that fails after your tracked edit, or whose errors point at tracked-change markup; math, tables, environments or preamble changes the tracked form mangles; the user asking for direct edits. When a tracked edit of yours broke something, take it back (project_history + restore_project, or edit_document with tracked: false restoring the old text) and redo it with tracked: false. Keep other people's tracked changes intact.
+Editing documents: edit_document (replace a passage) and write_document (a whole source) apply your change as TRACKED CHANGES by default, so the user can review them. Your changes and comments are signed with your name, your model and whose agent you are, e.g. "Claude (Opus 5.5) [Ada]": where the tools take a model argument, pass your model's name (e.g. "Opus 5.5") with your first edit or comment. Tracked editing must never block you or leave a document broken. On ANY problem with it, switch to direct editing at once by passing tracked: false to edit_document / write_document — the same edit, applied without tracked-change marks. Problems that call for the fallback include: an edit that fails to apply or does not match (do not retry a failing tracked edit more than once); tracked-change markup (\\lyxadded / \\lyxdeleted) making the passage hard to address; a result (now_reads) that looks garbled, duplicated or incomplete; a build that fails after your tracked edit, or whose errors point at tracked-change markup; math, tables, environments or preamble changes the tracked form mangles; the user asking for direct edits. When a tracked edit of yours broke something, take it back (project_history + restore_project, or edit_document with tracked: false restoring the old text) and redo it with tracked: false. Keep other people's tracked changes intact.
 
 Other text files (refs.bib, macros, .sty) are always edited directly: edit_file (replace a passage) or write_file.
 
@@ -610,9 +607,11 @@ const httpScope = new AsyncLocalStorage<{ signal: AbortSignal }>();
 /** One MCP server instance for `user`'s account: scoped to `fixedProject` when connected at
  *  /mcp/<project> (the classic form), or across every project the account can reach when
  *  connected at /mcp — each tool then takes `project`, and the account's role in that project
- *  is checked per call. Tools are attributed to `agentName`; `caller` is the agent behind the
- *  connection. `channel`: declare Claude Code's channel capability (a session that can push). */
-function buildMcpServer(user: SessionUser, agentName: string, userId: number, fixedProject: string | null, caller: Caller = callerFor(null), opts: { channel?: boolean } = {}): McpServer {
+ *  is checked per call. `agentName` is the credential's name; `caller` is the agent behind the
+ *  connection, whose label signs its edits and comments ("Claude (Opus 5.5) [Jan]") — the Agent
+ *  panel's agent signs with `author` (agent.ts panelAuthor). `channel`: declare Claude Code's
+ *  channel capability (a session that can push). */
+function buildMcpServer(user: SessionUser, agentName: string, userId: number, fixedProject: string | null, caller: Caller = callerFor(null), opts: { channel?: boolean; author?: string } = {}): McpServer {
   const server = new McpServer({ name: 'overlyx', version: '1.0.0' }, { instructions: MCP_INSTRUCTIONS, ...(opts.channel ? { capabilities: { experimental: { 'claude/channel': {} } } } : {}) });
   const projArg = {
     project: z.string().optional().describe(fixedProject
@@ -632,6 +631,18 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
   };
   /** `tracked` when a document tool is called without it: tracked, unless it is the panel's agent and its Track changes box is off */
   const trackedDefault = (project: string): boolean => agentName !== PANEL_AGENT || panelTracking(userId, project);
+  /** How an edit or comment is signed: the agent's label, with the model this call names (kept for its later calls) */
+  const signed = (model?: string): string => {
+    if (!caller.agent) return opts.author ?? `${agentName} (MCP)`;
+    noteAgentModel(caller.agent, model);
+    const label = agentLabel(caller.agent);
+    if (caller.look) caller.look.name = label;
+    return label;
+  };
+  /** Agents from elsewhere say which model they are (MCP does not tell); the panel's agent is known */
+  const modelArg = (agentName === PANEL_AGENT ? {} : {
+    model: z.string().optional().describe('Your model, by name (e.g. "Opus 5.5", "GPT-5.5"): your tracked changes and comments are signed with it — "Claude (Opus 5.5) [Ada]". Give it at least once; it is kept for your later edits'),
+  }) as { model: z.ZodOptional<z.ZodString> };
 
   /** Every tool call of an agent from elsewhere is noted: when it was last seen, and where (the Agent panel lists it). */
   const register = ((name: string, config: unknown, cb: (...a: any[]) => unknown) => server.registerTool(name, config as never, (async (...a: any[]) => {
@@ -686,8 +697,9 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
       path: z.string(),
       paragraph_index: z.number().int().nonnegative().describe('From read_document\'s paragraphs list'),
       new_text: z.string().describe('The complete new text of the paragraph'),
+      ...modelArg,
     },
-  }, async ({ project: p, path, paragraph_index, new_text }) => { try { const project = need(p, 'edit'); return ok(await traced(project, path, () => proposeEdit(project, agentName, path, paragraph_index, new_text))); } catch (e) { return fail(e); } });
+  }, async ({ project: p, path, paragraph_index, new_text, model }) => { try { const project = need(p, 'edit'); return ok(await traced(project, path, () => proposeEdit(project, signed(model), path, paragraph_index, new_text))); } catch (e) { return fail(e); } });
 
   register('list_comments', {
     description: 'List comment threads in a document: index, the top-level paragraph they belong to, where they sit (body, a float, a table cell, …), messages, resolved state. Finds threads anywhere — inside tables, floats and other insets too.',
@@ -702,8 +714,9 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
       path: z.string(),
       text: z.string(),
       paragraph_index: z.number().int().nonnegative().optional().describe('Defaults to the last paragraph'),
+      ...modelArg,
     },
-  }, async ({ project: p, path, text, paragraph_index }) => { try { const project = need(p, 'edit'); return ok(await traced(project, path, () => addComment(project, agentName, path, text, paragraph_index))); } catch (e) { return fail(e); } });
+  }, async ({ project: p, path, text, paragraph_index, model }) => { try { const project = need(p, 'edit'); return ok(await traced(project, path, () => addComment(project, signed(model), path, text, paragraph_index))); } catch (e) { return fail(e); } });
 
   register('resolve_comment', {
     description: 'Mark a comment thread resolved (index from list_comments, in the same call — the document may have changed since an earlier listing).',
@@ -713,7 +726,7 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
   register('build_pdf', {
     description: 'Compile the document to PDF with latexmk and wait for the result (viewers may build, like in the app). Returns ok, the LaTeX warnings, previous_build (whether the build before your changes succeeded), on failure the first errors (file:line: message) and a note when your changes broke it, and the tail of the compile log; on timeout the build keeps running — poll build_status. Humans open the PDF in the app.',
     inputSchema: { ...projArg, path: z.string(), wait_seconds: z.number().int().positive().max(600).optional().describe('How long to wait before returning (default 180; the build continues on timeout)') },
-  }, async ({ project: p, path, wait_seconds }) => { try { const project = need(p, 'view'); await present(project, path); return ok(await buildDocument(project, agentName, userId, path, wait_seconds ?? 180)); } catch (e) { return fail(e); } });
+  }, async ({ project: p, path, wait_seconds }) => { try { const project = need(p, 'view'); await present(project, path); return ok(await buildDocument(project, agentName, signed(), userId, path, wait_seconds ?? 180)); } catch (e) { return fail(e); } });
 
   if (agentName === PANEL_AGENT) register('undo_turn', {
     description: "Take back every change one of your turns made to the project: its documents return exactly to their state before that turn (your tracked changes of the turn disappear, as if rejected — earlier marks and everybody else's edits since are kept), files it wrote get their old content back, files it created are removed. turns_back 0 (default) = the changes of the turn you are in (e.g. an edit that broke the build and cannot be fixed quickly); 1 = the last earlier turn that changed files, 2 = the one before, … Your working copy is refreshed afterwards.",
@@ -818,31 +831,33 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
       new_text: z.string().describe('Its replacement (raw LaTeX; markdown in a .md document; HTML in a web article)'),
       replace_all: z.boolean().optional().describe('Replace every occurrence (default: old_text must be unique)'),
       tracked: z.boolean().optional().describe('true (default): a tracked change for review. false: applied directly, no tracked-change marks — the fallback whenever tracked editing runs into any problem (see the server instructions); the previous state stays in the project history'),
+      ...modelArg,
     },
-  }, async ({ project: p, path, old_text, new_text, replace_all, tracked }) => { try { const project = need(p, 'edit'); return ok(await traced(project, path, () => editDocument(project, userId, agentName, path, old_text, new_text, !!replace_all, tracked ?? trackedDefault(project)))); } catch (e) { return fail(e); } });
+  }, async ({ project: p, path, old_text, new_text, replace_all, tracked, model }) => { try { const project = need(p, 'edit'); return ok(await traced(project, path, () => editDocument(project, userId, signed(model), path, old_text, new_text, !!replace_all, tracked ?? trackedDefault(project)))); } catch (e) { return fail(e); } });
 
   register('insert_paragraphs', {
     description: 'Insert raw LaTeX (anything: formulas, citations, sections, environments — parsed like the editor parses .tex) as new paragraphs at a position: 0 = top, paragraph count = append. Applied as a tracked insertion, reviewable like any collaborator edit. Indices shift — re-run read_document afterwards.',
-    inputSchema: { ...projArg, path: z.string(), index: z.number().int().nonnegative().describe('Position from read_document; the paragraph count appends'), latex: z.string() },
-  }, async ({ project: p, path, index, latex }) => { try { const project = need(p, 'edit'); return ok(await traced(project, path, () => insertParagraphs(project, agentName, path, index, latex))); } catch (e) { return fail(e); } });
+    inputSchema: { ...projArg, path: z.string(), index: z.number().int().nonnegative().describe('Position from read_document; the paragraph count appends'), latex: z.string(), ...modelArg },
+  }, async ({ project: p, path, index, latex, model }) => { try { const project = need(p, 'edit'); return ok(await traced(project, path, () => insertParagraphs(project, signed(model), path, index, latex))); } catch (e) { return fail(e); } });
 
   register('replace_paragraph', {
     description: 'Replace one paragraph by raw LaTeX (may parse to several paragraphs; formulas, citations, anything allowed). Tracked, and diffed against the old paragraph: only the words / characters that differ are marked (inside tables and footnotes too).',
-    inputSchema: { ...projArg, path: z.string(), index: z.number().int().nonnegative().describe("From read_document's paragraphs list"), latex: z.string() },
-  }, async ({ project: p, path, index, latex }) => { try { const project = need(p, 'edit'); return ok(await traced(project, path, () => replaceParagraph(project, agentName, path, index, latex))); } catch (e) { return fail(e); } });
+    inputSchema: { ...projArg, path: z.string(), index: z.number().int().nonnegative().describe("From read_document's paragraphs list"), latex: z.string(), ...modelArg },
+  }, async ({ project: p, path, index, latex, model }) => { try { const project = need(p, 'edit'); return ok(await traced(project, path, () => replaceParagraph(project, signed(model), path, index, latex))); } catch (e) { return fail(e); } });
 
   register('delete_paragraph', {
     description: 'Mark one paragraph deleted as a tracked change (the text disappears when a reviewer accepts it).',
-    inputSchema: { ...projArg, path: z.string(), index: z.number().int().nonnegative() },
-  }, async ({ project: p, path, index }) => { try { const project = need(p, 'edit'); return ok(await traced(project, path, () => deleteParagraph(project, agentName, path, index))); } catch (e) { return fail(e); } });
+    inputSchema: { ...projArg, path: z.string(), index: z.number().int().nonnegative(), ...modelArg },
+  }, async ({ project: p, path, index, model }) => { try { const project = need(p, 'edit'); return ok(await traced(project, path, () => deleteParagraph(project, signed(model), path, index))); } catch (e) { return fail(e); } });
 
   register('write_document', {
     description: "Write a document's whole raw source (LaTeX; markdown for .md; a web article's whole HTML page for .html, its head with <meta name=\"overlyx\" content=\"article\">), or create the document when the path does not exist. On an existing document the new source is diffed against the current one and applied as tracked changes (only what differs is marked) — or, with tracked: false, written directly. For a local change prefer edit_document.",
     inputSchema: {
       ...projArg, path: z.string(), tex: z.string(),
       tracked: z.boolean().optional().describe('true (default): a tracked change for review. false: applied directly, no tracked-change marks — the fallback whenever tracked editing runs into any problem (see the server instructions); the previous state stays in the project history'),
+      ...modelArg,
     },
-  }, async ({ project: p, path, tex, tracked }) => { try { const project = need(p, 'edit'); return ok(await traced(project, path, () => writeDocument(project, userId, agentName, path, tex, tracked ?? trackedDefault(project)))); } catch (e) { return fail(e); } });
+  }, async ({ project: p, path, tex, tracked, model }) => { try { const project = need(p, 'edit'); return ok(await traced(project, path, () => writeDocument(project, userId, signed(model), path, tex, tracked ?? trackedDefault(project)))); } catch (e) { return fail(e); } });
 
   register('set_markdown_style', {
     description: "Change how a markdown (.md) document is typeset — in the editor and its PDF — by setting keys of its YAML front matter (pandoc's variables, so the file comes out alike with pandoc --pdf-engine=lualatex; only these keys change, the rest of the front matter stays). Call it with style {} to read the current keys and the fonts on offer. Keys (null removes one): " +
@@ -1238,7 +1253,9 @@ async function handle(req: Request, res: Response): Promise<void> {
   // is nor calls a tool (Claude Code's server/discover probe, tools/list) creates no agent entry.
   const callsTool = (Array.isArray(req.body) ? req.body : [req.body]).some(m => m && typeof m === 'object' && (m as { method?: unknown }).method === 'tools/call');
   const caller = callerFor(!external ? null : init || callsTool ? agentFor(identity, init?.client ?? null, { stateless: !!init }) : knownAgent(identity));
-  const server = buildMcpServer(user, identity.name, identity.userId, project, caller);
+  // the panel's agent signs its edits with its thread's model ("Claude (Opus 5.5) [Jan]")
+  const author = external ? undefined : panelAuthorFor(identity.userId, req.header('x-overlyx-thread'));
+  const server = buildMcpServer(user, identity.name, identity.userId, project, caller, { author });
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   res.on('close', () => { void transport.close(); void server.close(); });
   try {

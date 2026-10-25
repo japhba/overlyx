@@ -7,6 +7,9 @@
  * dist/agents.cjs, by way of the stable launcher the extension keeps in its global storage.
  */
 import path from 'node:path';
+import os from 'node:os';
+import { execFileSync } from 'node:child_process';
+import { agentAuthorName } from '@overlyx/core/agentname.ts';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
@@ -19,6 +22,8 @@ export const LOCAL_SERVER_NAME = 'overlyx-local';
 
 export const LOCAL_INSTRUCTIONS = `Tracked changes in LaTeX (.tex) and markdown (.md) documents, for the OverLyX editor. Use these tools ONLY when the user asks for it — "with track changes", "as tracked changes", "as suggestions", "so I can review them", or for comments in the document. Otherwise edit files as you normally would, with your own tools; never on your own initiative. When asked, edit the documents with these tools, not with your own file editing (apply_patch, edit/write tools, shell): your edit then becomes TRACKED CHANGES — insertions and deletions attributed to you, which the user accepts or rejects in the OverLyX editor (an editor that has the file open shows them at once, also with unsaved edits; none needs to be open). Read the files with your own tools; paths are relative to your working directory. A document without OverLyX's block in its preamble gets one with the first tracked change (it defines the change marks for LaTeX).
 
+Your changes and comments are signed with your name, your model and whose agent you are, e.g. "Claude (Opus 5.5) [Ada]": pass your model's name (e.g. "Opus 5.5") as model with your first call.
+
 edit_document replaces a passage (old_text → new_text; any LaTeX), write_document writes a whole source or creates a document. Only what actually changes is marked — a word, a digit, a table cell. In the source, pending changes look like \\lyxadded{author}{date}{text} and \\lyxdeleted{author}{date}{text} (in markdown: <ins …>text</ins>, <del …>text</del>); old_text may leave that markup out, and whitespace differences are tolerated. Never write or edit that markup yourself, and leave other people's tracked changes alone. The preamble is never tracked (applied directly, and said so).
 
 Tracked editing must never block you or leave a document broken. On ANY problem with it — an edit that does not match (do not retry a failing tracked edit more than once), markup making a passage hard to address, a result (now_reads) that looks garbled, a build that fails because of your tracked edit, math / tables / environments the tracked form mangles — pass tracked: false: the same edit applied directly, without marks. Do the same when the user asks for direct edits.
@@ -27,13 +32,24 @@ Comments: add_comment starts a thread at a passage, reply_to_comment answers a t
 
 Other files (refs.bib, .sty, macros, figures, code) are not documents: edit them directly with your own tools. Leave the block between "%% OverLyX ---" and "%% end OverLyX ---" alone (regenerated on every save); put preamble additions above it. The tools may rewrite what you wrote into OverLyX's canonical form (spacing, line breaks) — read the file again before editing the same passage.`;
 
-/** Whose changes: the agent's own name, from the client's initialize. */
-export function authorFor(client: { name?: string; title?: string } | undefined): string {
+/**
+ * Whose changes: the agent (from the client's initialize), the model it said it is (a tool call's
+ * `model`) and whose agent it is (`owner`: git's user.name, as the editor signs the user's own
+ * changes) — "Claude (Opus 5.5) [Jan]", as OverLyX's server signs them (core agentname.ts).
+ */
+export function authorFor(client: { name?: string; title?: string } | undefined, model?: string | null, owner?: string | null): string {
   const name = client?.name ?? '';
-  if (/^claude[-_ ]?code/i.test(name)) return 'Claude Code';
-  if (/codex/i.test(name)) return 'Codex';
-  if (/^cursor/i.test(name)) return 'Cursor';
-  return (client?.title || name || 'AI agent').slice(0, 60);
+  const assistant = /^claude/i.test(name) ? 'Claude' : /codex/i.test(name) ? 'Codex' : /^cursor/i.test(name) ? 'Cursor' : /^gemini/i.test(name) ? 'Gemini' : (client?.title || name || 'AI agent').slice(0, 60);
+  return agentAuthorName(assistant, model, owner);
+}
+
+/** The person the agents on this computer work for: git's user.name where they work, else the account's name. */
+function ownerName(cwd: string): string {
+  try {
+    const name = execFileSync('git', ['config', 'user.name'], { cwd, encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    if (name) return name;
+  } catch { /* no git, or no name set */ }
+  try { return os.userInfo().username; } catch { return ''; }
 }
 
 const ok = (value: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(value, null, 2) }] });
@@ -62,13 +78,18 @@ export async function handToEditor(endpoint: string, call: { tool: ToolName; arg
 
 export function buildLocalServer(opts: { cwd: string; layoutDir: string; agentsDir?: string }): McpServer {
   const server = new McpServer({ name: LOCAL_SERVER_NAME, version: '1.0.0' }, { instructions: LOCAL_INSTRUCTIONS });
+  /** the model the agent last said it is (kept for its later calls: one server per agent session) */
+  let model: string | null = null;
+  let owner: string | null = null;
   /**
    * A tool call: handed to the VS Code window that has the document open (the edit then applies to
    * its editor, unsaved typing included), else done on the file.
    */
-  const call = (tool: ToolName) => async (args: Record<string, unknown>) => {
+  const call = (tool: ToolName) => async ({ model: said, ...args }: Record<string, unknown>) => {
     try {
-      const author = authorFor(server.server.getClientVersion());
+      if (typeof said === 'string' && said.trim()) model = said.trim().slice(0, 80);
+      owner ??= ownerName(opts.cwd);
+      const author = authorFor(server.server.getClientVersion(), model, owner);
       const open = openDocuments(opts.agentsDir);
       const endpoint = open.get(toolTarget(args, opts.cwd));
       if (endpoint) {
@@ -79,6 +100,7 @@ export function buildLocalServer(opts: { cwd: string; layoutDir: string; agentsD
     } catch (e) { return fail(e); }
   };
   const pathArg = z.string().describe('The document file: relative to your working directory (e.g. "paper/main.tex"), or absolute');
+  const modelArg = z.string().optional().describe('Your model, by name (e.g. "Opus 5.5", "GPT-5.5"): your tracked changes and comments are signed with it — "Claude (Opus 5.5) [Ada]". Give it at least once; it is kept for your later calls');
   const trackedArg = z.boolean().optional().describe('true (default): tracked changes for the user to review. false: applied directly, without marks — the fallback whenever tracked editing runs into any problem (see the instructions)');
 
   server.registerTool('edit_document', {
@@ -89,12 +111,13 @@ export function buildLocalServer(opts: { cwd: string; layoutDir: string; agentsD
       new_text: z.string().describe('Its replacement (raw LaTeX, or markdown in a .md document)'),
       replace_all: z.boolean().optional().describe('Replace every occurrence (default: old_text must be unique)'),
       tracked: trackedArg,
+      model: modelArg,
     },
   }, call('edit_document'));
 
   server.registerTool('write_document', {
     description: "Write a document's whole source as tracked changes (only when the user asks for tracked changes), or create the document when the file does not exist. On an existing document the new source is diffed against the file and applied as tracked changes (only what differs is marked) — or, with tracked: false, written directly. For a local change prefer edit_document.",
-    inputSchema: { path: pathArg, tex: z.string().describe('The complete source'), tracked: trackedArg },
+    inputSchema: { path: pathArg, tex: z.string().describe('The complete source'), tracked: trackedArg, model: modelArg },
   }, call('write_document'));
 
   server.registerTool('add_comment', {
@@ -103,6 +126,7 @@ export function buildLocalServer(opts: { cwd: string; layoutDir: string; agentsD
       path: pathArg,
       text: z.string().describe('The comment (plain text; new lines start new paragraphs)'),
       at: z.string().optional().describe('A passage of the document text the comment is about, quoted exactly (unique in the document)'),
+      model: modelArg,
     },
   }, call('add_comment'));
 
@@ -113,6 +137,7 @@ export function buildLocalServer(opts: { cwd: string; layoutDir: string; agentsD
       comment: z.string().describe('A passage of the thread (any of its messages), unique among the threads'),
       text: z.string().optional().describe('Your reply'),
       resolve: z.boolean().optional().describe('Mark the thread resolved'),
+      model: modelArg,
     },
   }, call('reply_to_comment'));
 

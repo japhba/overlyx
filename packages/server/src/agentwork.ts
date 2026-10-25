@@ -40,7 +40,11 @@ import { assertRoom } from './projectsize.ts';
 
 /** The name the panel's agent has on the MCP server (its token's name) … */
 export const PANEL_AGENT = 'Agent panel';
-/** … and the tracked-change author of its edits (the same as its MCP edits, so its own changes are recognised either way). */
+/**
+ * … and the tracked-change author of its edits before they were signed with the thread's model
+ * (agent.ts panelAuthor, the same as its MCP edits, so its own changes are recognised either way):
+ * a working copy prepared without an author, and the checkpoints of those turns.
+ */
 export const AGENT_AUTHOR = `${PANEL_AGENT} (MCP)`;
 
 /** Text files mirrored as copies (others are symlinked); new files of these kinds are copied back. */
@@ -65,6 +69,8 @@ interface Manifest {
   turn?: { n: number; startedAt: number; turnId: string | null };
   /** false: the turn's document changes go in directly, without tracked-change marks (the panel's Track changes box) */
   tracked?: boolean;
+  /** whom the turn's tracked changes are by: "Claude (Opus 5.5) [Jan]" (agent.ts panelAuthor); missing: AGENT_AUTHOR */
+  author?: string;
   /** the files kind 'link' (the project's own, hard-linked — or copied — into the copy): [device, inode] of what was put there, so a file the agent replaced is told from the one it was given */
   linked?: Record<string, [number, number]>;
 }
@@ -151,9 +157,10 @@ async function liveText(project: string, rel: string): Promise<string> {
 
 /**
  * Mirror the live project into the thread's copy (taking over anything not synced yet first); returns
- * the copy's path. `tracked` false: the new turn's document changes go in without tracked-change marks.
+ * the copy's path. `tracked` false: the new turn's document changes go in without tracked-change marks;
+ * `author`: whom they are by.
  */
-export function prepareWorkspace(tid: string, project: string, userId: number, tracked = true): Promise<string> {
+export function prepareWorkspace(tid: string, project: string, userId: number, tracked = true, author?: string): Promise<string> {
   return serial(tid, async () => {
     const dir = workspaceDir(tid, project);
     if (fs.existsSync(dir)) await syncNow(tid, project, userId);
@@ -162,7 +169,7 @@ export function prepareWorkspace(tid: string, project: string, userId: number, t
     privateTo(path.dirname(dir), userId); privateTo(dir, userId);
     for (const d of [baseDir(tid), turnsDir(tid)]) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
     const old = readManifest(tid);
-    const manifest: Manifest = { project, files: {}, usedAt: Date.now(), linked: {}, ...(tracked ? {} : { tracked: false }) };
+    const manifest: Manifest = { project, files: {}, usedAt: Date.now(), linked: {}, ...(tracked ? {} : { tracked: false }), ...(author ? { author } : {}) };
     for (const f of docFiles(project)) {
       if (f.kind === 'dir') continue;
       const live = resolveProjectPath(project, f.path);
@@ -286,7 +293,7 @@ async function syncNow(tid: string, project: string, userId: number): Promise<Sy
             out.push({ path: rel, action: 'edited' });
             if (r.after !== r.before) await recordDoc(tid, manifest, doc, rel, r.before, r.after);
           } else {
-            const { result: r } = await doc.agentEdit('tracked', base, { after: text }, { author: AGENT_AUTHOR });
+            const { result: r } = await doc.agentEdit('tracked', base, { after: text }, { author: manifest.author ?? AGENT_AUTHOR });
             out.push({ path: rel, action: 'tracked', inserted: r.inserted, deleted: r.deleted });
             if (r.after !== r.before) await recordDoc(tid, manifest, doc, rel, r.before, r.after);
           }
@@ -390,6 +397,8 @@ export interface Checkpoint {
   updatedAt: number;
   /** the turn is over (no more changes go into this checkpoint) */
   finished: boolean;
+  /** whom its tracked changes are by (Manifest.author); missing: AGENT_AUTHOR */
+  author?: string;
   files: CheckpointFile[];
   builds: BuildCheck[];
   /** taken back: when, by whom, and what could not be (edited since) */
@@ -398,7 +407,6 @@ export interface Checkpoint {
   buildBefore: Record<string, { status: 'ok' | 'error'; errors: string[] } | null>;
 }
 
-const agentAuthorId = () => lyxAuthorId(AGENT_AUTHOR, '');
 const readIfFile = (f: string): Buffer | null => { try { return fs.statSync(f).isFile() ? fs.readFileSync(f) : null; } catch { return null; } };
 const readUtf8 = (f: string): string | null => { try { return fs.readFileSync(f, 'utf8'); } catch { return null; } };
 
@@ -433,7 +441,7 @@ export function listCheckpoints(tid: string): Checkpoint[] {
 function currentCheckpoint(tid: string, manifest: Manifest): Checkpoint {
   if (!manifest.turn) manifest.turn = { n: lastCheckpointNumber(tid) + 1, startedAt: Date.now(), turnId: null };   // a turn that began before checkpoints existed
   const t = manifest.turn;
-  return readCheckpoint(tid, t.n) ?? { n: t.n, turnId: t.turnId, startedAt: t.startedAt, updatedAt: Date.now(), finished: false, files: [], builds: [], undone: null, buildBefore: {} };
+  return readCheckpoint(tid, t.n) ?? { n: t.n, turnId: t.turnId, startedAt: t.startedAt, updatedAt: Date.now(), finished: false, ...(manifest.author ? { author: manifest.author } : {}), files: [], builds: [], undone: null, buildBefore: {} };
 }
 
 /** The document a change to `rel` is built through: its master, or itself. */
@@ -455,7 +463,7 @@ async function recordDoc(tid: string, manifest: Manifest, doc: OpenDoc, rel: str
     const target = buildTarget(manifest.project, rel);
     if (!(target in cp.buildBefore)) cp.buildBefore[target] = buildState(target);
     // and a version to go back to by hand (File ▸ Versions), whatever happens to the checkpoint
-    void manager.createVersion(doc.id, 'before an Agent panel change', AGENT_AUTHOR, 'agent', before).then(() => pruneAgentVersions(doc.id)).catch(() => { /* best effort */ });
+    void manager.createVersion(doc.id, 'before an Agent panel change', manifest.author ?? AGENT_AUTHOR, 'agent', before).then(() => pruneAgentVersions(doc.id)).catch(() => { /* best effort */ });
   } else {
     // people edited the document between two of the agent's changes: carry that over
     const prevAfter = readUtf8(af), shadow = readUtf8(sh);
@@ -485,7 +493,7 @@ function pruneAgentVersions(docId: string, keep = 30): void {
 
 /** The changes of checkpoint `cp` by the agent (its author, marked within the checkpoint's time). */
 function ofCheckpoint(cp: Checkpoint): (c: Change) => boolean {
-  const a = agentAuthorId(), t0 = Math.floor(cp.startedAt / 1000), t1 = Math.ceil(cp.updatedAt / 1000);
+  const a = lyxAuthorId(cp.author ?? AGENT_AUTHOR, ''), t0 = Math.floor(cp.startedAt / 1000), t1 = Math.ceil(cp.updatedAt / 1000);
   return c => c.author === a && c.time >= t0 && c.time <= t1;
 }
 
