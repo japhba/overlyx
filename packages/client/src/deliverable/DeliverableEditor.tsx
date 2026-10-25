@@ -272,7 +272,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   const offlineDocsRef = useRef(offlineDocs); offlineDocsRef.current = offlineDocs;
   const currentLink = useRef(link); currentLink.current = link;
   const [linkState, setLinkState] = useState<LinkState>('opening');
-  const [canvasState, setCanvasState] = useState<'opening' | 'ready' | 'failed'>('opening');
+  const [canvasState, setCanvasState] = useState<'opening' | 'slow' | 'ready' | 'failed'>('opening');
   const canvasOpeningAt = useRef(Date.now());
   const canvasHadFailure = useRef(false);
   const lastSaveDiagnostic = useRef<ReturnType<typeof saveReliabilityEvent>>(null);
@@ -521,24 +521,35 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   }, [host]);
 
   // A valid link does not prove that its document and runtime actually started.
+  // Give downloads as long as they need (Remote-SSH can be slow); only a loaded
+  // frame with no ready message has missed the runtime's startup deadline.
   // Watch each intentional opening; ordinary link renewal leaves drafts alone.
   useLayoutEffect(() => {
-    if (!link || !synced) return;
+    const frame = canvasFrame.current;
+    if (!link || !synced || !frame) return;
     canvasReady.current = false;
     canvasOpeningAt.current = Date.now();
     setCanvasState('opening');
-    const timer = setTimeout(() => {
-      if (!canvasReady.current) {
-        canvasHadFailure.current = true;
-        recordReliability('canvas.timeout', { context: kindRef.current, durationMs: Date.now() - canvasOpeningAt.current });
-        setCanvasState('failed');
-      }
+    let timer = setTimeout(() => {
+      if (!canvasReady.current) setCanvasState('slow');
     }, 20_000);
-    return () => clearTimeout(timer);
+    const loaded = () => {
+      clearTimeout(timer);
+      if (canvasReady.current) return;
+      timer = setTimeout(() => {
+        if (!canvasReady.current) {
+          canvasHadFailure.current = true;
+          recordReliability('canvas.timeout', { context: kindRef.current, durationMs: Date.now() - canvasOpeningAt.current });
+          setCanvasState('failed');
+        }
+      }, 20_000);
+    };
+    frame.addEventListener('load', loaded);
+    return () => { clearTimeout(timer); frame.removeEventListener('load', loaded); };
   }, [host, !!link, synced, frameLink?.base, offlineRevisions.edit]);
   const retryOpening = () => {
     recordReliability('canvas.retry', { context: kindRef.current });
-    if (canvasState === 'failed') restartOpening.current = true;
+    if (canvasState === 'slow' || canvasState === 'failed') restartOpening.current = true;
     retryLink.current();
   };
 
@@ -3472,17 +3483,18 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
                 </div>
               )}
             </div>
-            {(!link || !synced || canvasState !== 'ready') && <div class="dl-opening" data-dl-opening={canvasState === 'failed' ? 'failed' : linkState}
+            {(!link || !synced || canvasState !== 'ready') && <div class="dl-opening" data-dl-opening={canvasState === 'failed' || canvasState === 'slow' ? canvasState : linkState}
               role={canvasState === 'failed' || linkState === 'failed' || linkState === 'denied' ? 'alert' : 'status'}>
               <p>{linkState === 'denied'
                 ? 'This page is unavailable or your access has changed. Check your account or ask the owner, then try again.'
                 : canvasState === 'failed' ? 'The canvas could not start. Retry opening, or open Code to recover its source.'
                 : linkState === 'failed'
                   ? 'Could not open the canvas. Reconnect to the network or try again.'
+                  : canvasState === 'slow' ? 'The canvas is still loading. You can wait, retry opening, or open Code.'
                   : !synced ? 'Loading the document…' : 'Opening the canvas…'}</p>
-              {(canvasState === 'failed' || linkState === 'failed' || linkState === 'denied') && <button type="button" class="dl-btn" data-dl-retry-open
+              {(canvasState === 'slow' || canvasState === 'failed' || linkState === 'failed' || linkState === 'denied') && <button type="button" class="dl-btn" data-dl-retry-open
                 onClick={retryOpening}>Retry opening</button>}
-              {canvasState === 'failed' && <button type="button" class="dl-btn" onClick={() => setCodeOpen(true)}>Open Code</button>}
+              {(canvasState === 'slow' || canvasState === 'failed') && <button type="button" class="dl-btn" onClick={() => setCodeOpen(true)}>Open Code</button>}
             </div>}
             {drawPalette && <DrawPalette sections={bars.sections} />}
             {hud && <div key={hud.n} class="dl-hud" role="status" data-dl-hud style={hud.ms > 900 ? { animationDuration: `${hud.ms}ms` } : undefined}>{hud.text}</div>}

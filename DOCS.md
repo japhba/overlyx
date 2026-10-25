@@ -677,8 +677,9 @@ blend.
     becomes opaque through the response policy, and creates the offline document from that
     opaque origin. The parent restores the iframe sandbox before sending any authored HTML;
     neither the app CSP nor the document's access to app cookies/storage is relaxed.
-    A canvas that has not reported ready within 20 seconds offers **Retry** and **Open Code**,
-    so its current source remains reachable even when the frame cannot start.
+    A canvas that takes more than 20 seconds to load offers **Retry** and **Open Code** while
+    continuing to wait. Its runtime's 20-second startup deadline begins when the frame loads,
+    so a slow download does not count as a failed startup and the current source stays reachable.
   * **The runtime** (modes `?ol=edit|thumb|present|print|check|view`) pairs the live page with the
     source it was rendered from (`srcOf` / `liveOf`) and takes each new version of the text in
     place (`reconcile.ts`): an unchanged element keeps its live state (typeset math, what the page's
