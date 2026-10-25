@@ -70,7 +70,8 @@ import { ReviewPane, type CommentDraft } from './ReviewPane';
 import { EditModeSwitch, modeScope, setOwnSuggesting, suggestingFor, switchModeScope, type EditMode, type ModeScope } from '../app/EditModeSwitch';
 import { useDarkPagesState, toggleDarkPages, invertedColor, deskBeside, DARK_DESK } from '../app/darkpages';
 import { recordReliability, recordInteraction } from '../usage';
-import { reportJump } from '../glitches';
+import { reportJump, reportPalm } from '../glitches';
+import { DrawPalette } from './drawpalette';
 import { notePenStroke } from '../app/promotion';
 import { canvasInteraction, type InteractionOutcome } from '@overlyx/core/interactions.ts';
 import { saveReliabilityEvent } from './reliability';
@@ -430,7 +431,11 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   const [ink, setInkState] = useState<DeckInk>(loadDeckInk);
   const inkRef = useRef(ink); inkRef.current = ink;
   useEffect(() => subscribeDeckInk(next => { inkRef.current = next; setInkState(next); }), []);
-  const setInk = (p: DeckInkPatch) => { const v = patchDeckInk(inkRef.current, p); inkRef.current = v; setInkState(v); saveDeckInk(v); };
+  const setInk = (p: DeckInkPatch) => {
+    const v = patchDeckInk(inkRef.current, p); inkRef.current = v; setInkState(v); saveDeckInk(v);
+    // (locked open on a touch screen: the palette stays — where it goes is the user's)
+    if (p.keepRow && touchRef.current) showHudRef.current('Drag the pens by their grip ⠿ to any edge of the screen', 3000);
+  };
   /** the slide rail and the speaker notes, hidden or not (their « / ▾ buttons) */
   const [railShown, setRailShownState] = useState(() => loadShown('ol.deckSlides', true));
   const [notesShown, setNotesShownState] = useState(() => loadShown('ol.deckNotes', false));
@@ -1066,6 +1071,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
           }
           break;
         case 'glitch': if (fromCanvas && m.fields?.engine === 'deck') reportJump(m.fields); break;
+        case 'palm': if (fromCanvas && Number.isFinite(m.contact)) reportPalm({ engine: 'deck', contact: m.contact, contactH: m.contactH, frameScale: m.scale }); break;
         case 'penRate': if (fromCanvas && Number.isFinite(m.moves) && Number.isFinite(m.frames)) notePenStroke({ moves: m.moves, frames: m.frames }); break;
         case 'words': if (fromCanvas) setWords(m.rect || m.choosing ? { rect: m.rect, style: m.style, choosing: m.choosing } : null); break;
         case 'editing':
@@ -1257,7 +1263,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   /** a swipe on past the last slide adds one (viewport.ts addsPage): on a touch screen, in a deck that can be changed */
   const addsPage = () => touchRef.current && kindRef.current === 'deck' && !readOnlyRef.current && currentRef.current === slidesRef.current.length - 1;
   const addPageRef = useRef<() => void>(() => {});
-  const showHudRef = useRef<(text: string) => void>(() => {});
+  const showHudRef = useRef<(text: string, ms?: number) => void>(() => {});
   /** the "+" a swipe on past the last slide fills as it goes (slideView `adding`) */
   const addBadge = useRef<HTMLDivElement>(null);
   const slideView = useMemo(() => new SlideView(() => canvasFrame.current, () => viewInput.current, {
@@ -1268,13 +1274,31 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     // (drawing with everything else away, the slide on the whole screen: up and down too, as Notes' pages scroll)
     pagesUpDown: () => focusRef.current || fullRef.current, fastened: () => focusRef.current || fullRef.current,
     addsPage: () => addsPage(),
+    // (the new slide shows in the room the pull opens beyond the last one, filling in as far as it has come)
     adding: (k, axis) => {
-      const el = addBadge.current;
+      const el = addBadge.current, f = canvasFrame.current, so = soloState.current, view = viewEl.current;
       if (!el) return;
+      if (k === null || !f || !so || !view) { el.style.opacity = '0'; el.classList.remove('ready'); return; }
+      const r = f.getBoundingClientRect(), vb = view.getBoundingClientRect();
+      // (the frame as shown, stretched by the pull: its px on the screen)
+      const sx = r.width / Math.max(1, f.offsetWidth), sy = r.height / Math.max(1, f.offsetHeight);
+      const l = r.left - vb.left + so.rect.x * sx, t = r.top - vb.top + so.rect.y * sy, w = so.rect.w * sx, h = so.rect.h * sy;
+      const G = 8;
+      const room = axis === 'x'
+        ? { l: l + w + G, t: Math.max(G, t), w: Math.max(0, vb.width - l - w - 2 * G), h: Math.min(vb.height - G, t + h) - Math.max(G, t) }
+        : { l: Math.max(G, l), t: t + h + G, w: Math.min(vb.width - G, l + w) - Math.max(G, l), h: Math.max(0, vb.height - t - h - 2 * G) };
+      Object.assign(el.style, { left: `${room.l}px`, top: `${room.t}px`, width: `${room.w}px`, height: `${room.h}px`, opacity: Math.min(1, k * 5).toFixed(3) });
+      // (the ring and its words in the middle of that room, never off the screen while the room is still narrow)
+      const mx = Math.min(vb.width - 76, Math.max(76, room.l + room.w / 2)) - room.l, my = Math.min(vb.height - 48, Math.max(48, room.t + room.h / 2)) - room.t;
+      el.style.setProperty('--mx', `${mx}px`); el.style.setProperty('--my', `${my}px`);
+      el.style.setProperty('--k', Math.min(1, k).toFixed(3));
       el.dataset.axis = axis;
-      el.classList.toggle('ready', k !== null && k >= 1);
-      el.style.opacity = k === null ? '0' : Math.max(0, Math.min(1, (k - 0.1) / 0.3)).toFixed(3);
-      el.style.setProperty('--k', Math.min(1, k ?? 0).toFixed(3));
+      const ready = k >= 1;
+      if (ready !== el.classList.contains('ready')) {
+        el.classList.toggle('ready', ready);
+        const label = el.querySelector('.dl-addpage-label');
+        if (label) label.textContent = ready ? 'Let go: new slide' : 'Pull for a new slide';
+      }
     },
     // (the pen and Undo on the slide's corner go with it as it moves — a page turned, a pull — not only as the editor draws)
     placed: p => {
@@ -1745,14 +1769,14 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     canvasGesture.current = null;
   };
   /** three fingers (runtime): undo, redo — said for a moment on the canvas, as the gesture shows nothing itself */
-  const [hud, setHud] = useState<{ text: string; n: number } | null>(null);
+  const [hud, setHud] = useState<{ text: string; n: number; ms: number } | null>(null);
   const hudTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const showHud = (text: string, ms = 900) => {
-    setHud(h => ({ text, n: (h?.n ?? 0) + 1 }));
+    setHud(h => ({ text, n: (h?.n ?? 0) + 1, ms }));
     if (hudTimer.current) clearTimeout(hudTimer.current);
     hudTimer.current = setTimeout(() => setHud(null), ms);
   };
-  showHudRef.current = text => showHud(text);
+  showHudRef.current = (text, ms) => showHud(text, ms);
   /** the lasso's Convert to text / formula: the handwriting read by the server (its readings offered beside it when unsure), then typed in its place */
   const readInk = async (as: 'notes' | 'formula', lines: [number, number][][], rect: Rect) => {
     showHud('Reading the handwriting…', 8000);
@@ -3177,9 +3201,12 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
 
   /* ------------------------------------------------------------- the toolbar's parts: a row along the top, or a column at each side */
 
+  /** the Draw row on a touch screen: a palette of its own on the canvas, put where the user likes it (drawpalette.tsx) — not in the toolbar, its side column or under the pen on the slide's corner */
+  const drawPalette = touchUi && !!bars.draw && !presenting;
+  const ctxSections = drawPalette ? [] : bars.sections;
   const ctxEl = (
-    <div class="dl-ctx">{bars.sections.length > 0 && (
-      <div class="dl-ctx-secs">{bars.sections.map((sec, i) => <Toolbar key={`${i}:${sec.label}`} id="deck-context" label={sec.label} groups={sec.groups} />)}</div>
+    <div class="dl-ctx">{ctxSections.length > 0 && (
+      <div class="dl-ctx-secs">{ctxSections.map((sec, i) => <Toolbar key={`${i}:${sec.label}`} id="deck-context" label={sec.label} groups={sec.groups} />)}</div>
     )}</div>
   );
   // a web page nothing has been written on yet (made by a name that said "page" when slides were meant): slides instead, in one click
@@ -3308,8 +3335,8 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
           onClick={() => setFull(false)} dangerouslySetInnerHTML={{ __html: ICONS['dk-fullscreen-exit'] ?? '×' }} />}
         </div>
         {/* (the Draw row — or the lasso's tools — under it when asked for) */}
-        {drawTool && bars.sections.length > 0 && (
-          <div class="dl-focus-bar" data-dl-focus-bar>{bars.sections.map((sec, i) => <Toolbar key={`${i}:${sec.label}`} id="deck-context" label={sec.label} groups={sec.groups} />)}</div>
+        {drawTool && ctxSections.length > 0 && (
+          <div class="dl-focus-bar" data-dl-focus-bar>{ctxSections.map((sec, i) => <Toolbar key={`${i}:${sec.label}`} id="deck-context" label={sec.label} groups={sec.groups} />)}</div>
         )}
       </div>
     );
@@ -3430,12 +3457,15 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
               {/* (a swipe on past the last slide: the new one it adds, filling as it goes) */}
               {soloOn && kind === 'deck' && (
                 <div ref={addBadge} class="dl-addpage" data-dl-addpage aria-hidden="true">
-                  <svg viewBox="0 0 32 32">
-                    <circle class="dl-pull-disc" cx="16" cy="16" r="15" />
-                    <circle class="dl-pull-arc" cx="16" cy="16" r="12.5" pathLength="1" transform="rotate(-90 16 16)" />
-                    <path class="dl-addpage-plus" d="M16 10v12M10 16h12" />
-                  </svg>
-                  <span class="dl-addpage-label">New slide</span>
+                  <div class="dl-addpage-ghost" />
+                  <div class="dl-addpage-mark">
+                    <svg viewBox="0 0 32 32">
+                      <circle class="dl-pull-disc" cx="16" cy="16" r="15" />
+                      <circle class="dl-pull-arc" cx="16" cy="16" r="12.5" pathLength="1" transform="rotate(-90 16 16)" />
+                      <path class="dl-addpage-plus" d="M16 10v12M10 16h12" />
+                    </svg>
+                    <span class="dl-addpage-label">Pull for a new slide</span>
+                  </div>
                 </div>
               )}
             </div>
@@ -3451,7 +3481,8 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
                 onClick={retryOpening}>Retry opening</button>}
               {canvasState === 'failed' && <button type="button" class="dl-btn" onClick={() => setCodeOpen(true)}>Open Code</button>}
             </div>}
-            {hud && <div key={hud.n} class="dl-hud" role="status" data-dl-hud>{hud.text}</div>}
+            {drawPalette && <DrawPalette sections={bars.sections} />}
+            {hud && <div key={hud.n} class="dl-hud" role="status" data-dl-hud style={hud.ms > 900 ? { animationDuration: `${hud.ms}ms` } : undefined}>{hud.text}</div>}
             <div ref={zoomHud} class="zoom-hud" aria-hidden="true" data-dl-zoomhud />
             {(lost || zoomed || (soloOn && slideFree)) && kind !== 'page' && (
               <button type="button" class={'dl-refocus' + (lost ? ' lost' : '')} data-dl-refocus onClick={fitSlide}

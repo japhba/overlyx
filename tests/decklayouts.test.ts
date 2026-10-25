@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { deckMargins, deckDesign, builtInLayouts, savedLayouts, layoutFromSlide, saveLayoutOp, applyLayoutOp, placeholderObject, layoutThumb, deckColors } from '../packages/client/src/deliverable/decklayouts.ts';
 import { newSlideHtml, nextPageHtml } from '../packages/client/src/deliverable/sourceops.ts';
 import { chooseDock } from '../packages/client/src/deliverable/deckdock.ts';
+import { nearestDock, palPlace } from '../packages/client/src/deliverable/drawpalette.tsx';
 import { applyOp, parseSource } from '../packages/core/src/html/source.ts';
 import { slideElements } from '../packages/core/src/html/deliverable.ts';
 
@@ -196,5 +197,23 @@ describe('where the toolbars go on a touch screen', () => {
     const a = chooseDock({ ...near, current: 'top' }).dock, b = chooseDock({ ...near, current: 'sides' }).dock;
     expect([a, b]).toContain(b);
     expect(chooseDock({ ...near, current: a }).dock).toBe(a);
+  });
+});
+
+describe('the Draw palette on a touch screen (drawpalette.tsx)', () => {
+  const canvas = { w: 1112, h: 834 };
+  it('let go, it goes to the nearest edge, where along it it was let go — upright at the sides', () => {
+    expect(nearestDock(500, 800, canvas)).toEqual({ edge: 'bottom', at: 500 / 1112 });
+    expect(nearestDock(30, 400, canvas).edge).toBe('left');
+    expect(nearestDock(1100, 100, canvas).edge).toBe('right');
+    expect(nearestDock(400, 20, canvas).edge).toBe('top');
+  });
+  it('sits inside the canvas, its room kept from the edges, wherever along the edge it was put', () => {
+    expect(palPlace({ edge: 'bottom', at: 0.5 }, { w: 574, h: 42 }, canvas)).toEqual({ x: 269, y: 782 });
+    expect(palPlace({ edge: 'bottom', at: 0.99 }, { w: 574, h: 42 }, canvas).x).toBe(1112 - 574 - 10);
+    expect(palPlace({ edge: 'left', at: 0 }, { w: 51, h: 574 }, canvas)).toEqual({ x: 10, y: 10 });
+    expect(palPlace({ edge: 'right', at: 0.5 }, { w: 51, h: 574 }, canvas)).toEqual({ x: 1112 - 51 - 10, y: 130 });
+    // (longer than the canvas: from its start, scrolling)
+    expect(palPlace({ edge: 'top', at: 0.5 }, { w: 1300, h: 42 }, canvas)).toEqual({ x: 10, y: 10 });
   });
 });

@@ -808,7 +808,10 @@ blend.
     before as one filled outline still work — Paint `ink` recolours either), and shown until the
     page has it (`inkArrived`), so nothing flickers or changes on release. Once a Pencil has drawn
     (the runtime says `pencil`; kept as `ol.deckInk` `pencil`), fingers move the slide instead of
-    drawing. Palm rejection (runtime `isPalm` / `penLands`): touches that come down while the pen is
+    drawing. Palm rejection (runtime `isPalm` / `penLands`; a contact counts as broad past `PALM_W`
+    110 px — 46 took the iPad's fingertips for the palm, and no finger swipe ever reached the slide;
+    each broad one is reported anonymously as a `client-glitch` of kind `palm` with its size, to tune
+    it): touches that come down while the pen is
     on the screen or within 0.4 s after it lifts, or as broad as a palm, are the palm's and count
     for nothing till they lift; those already down when the pen lands are taken for the palm then
     and what they began is undone (a pinch put back, a pull let go, three fingers no undo); a third
@@ -1003,7 +1006,9 @@ blend.
     in from that side (`enter`). Sideways it never comes loose; up and down, and zoomed in mid-slide,
     it pans and pulls loose as ever. On a touch screen a finger's swipe on past the **last slide adds
     one** (`addsPage`, GoodNotes' next page): pulled 22 % of the canvas (`ADD_PAGE`; no flick, no
-    scroll), a "+" filling in the gap behind the slide says *New slide* once letting go adds it —
+    scroll; begun at the slide's edge or near a fit — a pan of a zoomed-in detail that runs on past
+    the last slide's edge adds nothing), the room the pull opens shows the new slide as a dashed page
+    with a ring filling in it, *Pull for a new slide*, then *Let go: new slide* —
     the last slide's design (`sourceops.ts` `nextPageHtml`; no title placeholder after a slide
     without a title, a page written on by hand). **Full screen** (25 Oct 2026, touch screens: the
     toolbar's ⛶ button, also in the side column): the app's bars, the files, the rail, the notes, the
@@ -2573,7 +2578,12 @@ the eraser, lasso, scribble-erase and live collaboration handle them like any st
 render such strokes). Every Draw row picks its colours from the layout editor's palette (`ColorGrid`:
 Google's grid, a seaborn row, custom colours). In Modern, *Draw* sits beside the inserts (it was under
 ⋮), and the paper page stays centred between the drawing gutters (it used to scroll out of view).
-The Draw row folds away once something is picked in it (the pen kept in hand) unless its **lock**
+On a touch screen the slides' Draw row is a **palette on the canvas** (`deliverable/drawpalette.tsx`,
+not in the toolbar or under the pen on the slide's corner), along the bottom at first: dragged by its
+grip ⠿ it follows the finger, the canvas' edges light up (the nearest brightest) and a dashed outline
+shows where it will go; let go, it settles at that edge where it was let go — upright at the left or
+the right (its popups then open beside it) — and stays there (`ol.deckDrawPalette`); a double tap on
+the grip puts it back at the bottom. The Draw row folds away once something is picked in it (the pen kept in hand) unless its **lock**
 (🔒 before *Done*, `DeckInk.keepRow`, this browser's) keeps it open — then drawing on a touch
 screen does not put the deck's toolbars away either, and a finger's tap leaves them.
 

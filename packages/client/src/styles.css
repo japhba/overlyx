@@ -3327,16 +3327,46 @@ html.ol-draw-focus .app > .health-bar, html.ol-draw-focus .app > .find-bar-wrap,
 html.ol-deck-full .app > .menubar, html.ol-deck-full .app .statusbar, html.ol-deck-full .app > .health-bar, html.ol-deck-full .app > .find-bar-wrap,
 html.ol-deck-full .app > .guest-callout, html.ol-deck-full .app > .tb-dock-top, html.ol-deck-full .app > .main > .sidebar, html.ol-deck-full .app > .main > .sidebar-grip { display: none !important; }
 .dl-editor.dl-full .dl-rail { display: none; }
-/* a swipe on past the last slide (viewport.ts adding): the new slide it adds, at the side it comes in from — the ring fills, then says so */
-.dl-addpage { position: absolute; z-index: 3; right: 18px; top: 50%; transform: translateY(-50%); pointer-events: none; opacity: 0; --k: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; }
-.dl-addpage[data-axis="y"] { right: auto; top: auto; bottom: 18px; left: 50%; transform: translateX(-50%); }
-.dl-addpage svg { display: block; width: 40px; height: 40px; overflow: visible; transform: scale(calc(0.75 + 0.25 * var(--k))); }
+/* the Draw row on a touch screen: a palette on the canvas at the edge it was dragged to (deliverable/drawpalette.tsx) — upright at the sides; its grip drags it, the edges light up and a dashed outline shows where it goes */
+.dl-drawpal { position: absolute; z-index: 8; display: flex; align-items: center; max-width: calc(100% - 20px); overflow: auto hidden; scrollbar-width: none; padding: 3px 6px 3px 2px; background: var(--surface); border: 1px solid var(--ui-border); border-radius: 12px; box-shadow: 0 4px 18px rgba(0, 0, 0, .2); transition: left .2s cubic-bezier(.2, .8, .3, 1), top .2s cubic-bezier(.2, .8, .3, 1), transform .15s, box-shadow .15s, opacity .15s; touch-action: pan-x; }
+.dl-drawpal::-webkit-scrollbar { display: none; }
+.dl-drawpal.unplaced { visibility: hidden; }
+.dl-drawpal.lifted { transition: transform .15s, box-shadow .15s, opacity .15s; transform: scale(1.04); box-shadow: 0 12px 32px rgba(0, 0, 0, .3); opacity: .9; }
+.dl-drawpal .toolbar { flex-wrap: nowrap; border: 0; padding: 0; background: none; width: max-content; flex: none; }
+.dl-drawpal > .toolbar + .toolbar { margin-left: 6px; padding-left: 6px; border-left: 1px solid var(--ui-border); }
+.dl-drawpal-grip { flex: none; align-self: stretch; display: inline-flex; align-items: center; justify-content: center; width: 26px; min-height: 34px; margin-right: 2px; padding: 0; border: 0; border-radius: 8px; background: none; color: var(--ui-muted); cursor: grab; touch-action: none; }
+.dl-drawpal-grip svg { width: 10px; height: 16px; }
+.dl-drawpal-grip:hover, .dl-drawpal.lifted .dl-drawpal-grip { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.dl-drawpal.lifted .dl-drawpal-grip { cursor: grabbing; }
+.dl-drawpal.upright { flex-direction: column; max-width: none; max-height: calc(100% - 20px); overflow: hidden auto; padding: 2px 3px 6px; touch-action: pan-y; }
+.dl-drawpal.upright .dl-drawpal-grip { align-self: stretch; width: auto; min-height: 0; height: 24px; margin: 0 0 2px; }
+.dl-drawpal.upright .dl-drawpal-grip svg { transform: rotate(90deg); }
+.dl-drawpal.upright .toolbar { flex-direction: column; width: auto; }
+.dl-drawpal.upright .tb-sep { width: 22px; height: 1px; margin: 4px auto; }
+.dl-drawpal.upright > .toolbar + .toolbar { margin: 6px 0 0; padding: 6px 0 0; border-left: 0; border-top: 1px solid var(--ui-border); }
+.dl-drawpal-guides { position: absolute; inset: 0; z-index: 9; pointer-events: none; }
+.dl-drawpal-rail { position: absolute; border-radius: 3px; background: color-mix(in srgb, var(--accent) 22%, transparent); transition: background .12s, box-shadow .12s; }
+.dl-drawpal-rail.top { left: 10px; right: 10px; top: 3px; height: 4px; }
+.dl-drawpal-rail.bottom { left: 10px; right: 10px; bottom: 3px; height: 4px; }
+.dl-drawpal-rail.left { top: 10px; bottom: 10px; left: 3px; width: 4px; }
+.dl-drawpal-rail.right { top: 10px; bottom: 10px; right: 3px; width: 4px; }
+.dl-drawpal-rail.on { background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
+.dl-drawpal-ghost { position: absolute; border: 2px dashed var(--accent); border-radius: 12px; background: color-mix(in srgb, var(--accent) 10%, transparent); transition: left .12s, top .12s, width .12s, height .12s; }
+@media (prefers-reduced-motion: reduce) { .dl-drawpal, .dl-drawpal-ghost { transition: none; } }
+/* a swipe on past the last slide (viewport.ts adding): the new slide shows in the room the pull opens beyond it — a dashed page filling in, the ring in it filling as the pull goes on, then saying so */
+.dl-addpage { position: absolute; z-index: 3; left: 0; top: 0; width: 0; height: 0; pointer-events: none; opacity: 0; --k: 0; --mx: 50%; --my: 50%; }
+.dl-addpage-ghost { position: absolute; inset: 0; border: 2px dashed color-mix(in srgb, var(--accent) calc(35% + 45% * var(--k)), transparent); border-radius: 6px; background: color-mix(in srgb, var(--accent) calc(4% + 8% * var(--k)), transparent); }
+.dl-addpage.ready .dl-addpage-ghost { border-style: solid; background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.dl-addpage-mark { position: absolute; left: var(--mx); top: var(--my); transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.dl-addpage-mark svg { display: block; width: 44px; height: 44px; overflow: visible; transform: scale(calc(0.8 + 0.2 * var(--k))); }
 .dl-addpage-plus { fill: none; stroke: color-mix(in srgb, var(--accent) calc(var(--k) * 100%), var(--ui-muted)); stroke-width: 2; stroke-linecap: round; }
-.dl-addpage-label { font: 12px/1.2 var(--ui-font); color: var(--ui-fg); background: var(--surface); border: 1px solid var(--ui-border); border-radius: 10px; padding: 2px 8px; white-space: nowrap; opacity: 0; transition: opacity .12s; }
-.dl-addpage.ready .dl-addpage-label { opacity: 1; }
+.dl-addpage-label { font: 600 12px/1.2 var(--ui-font); color: var(--ui-fg); background: var(--surface); border: 1px solid var(--ui-border); border-radius: 10px; padding: 3px 9px; white-space: nowrap; box-shadow: 0 1px 4px rgba(0, 0, 0, .15); }
 .dl-addpage.ready .dl-pull-disc { fill: var(--accent); stroke: var(--accent); }
 .dl-addpage.ready .dl-pull-arc { stroke: transparent; }
 .dl-addpage.ready .dl-addpage-plus { stroke: #fff; }
+.dl-addpage.ready .dl-addpage-mark svg { animation: dl-addpage-ready .28s cubic-bezier(.2, .7, .3, 1.4); }
+.dl-addpage.ready .dl-addpage-label { background: var(--accent); border-color: var(--accent); color: #fff; }
+@keyframes dl-addpage-ready { 0% { transform: scale(.9); } 60% { transform: scale(1.15); } 100% { transform: scale(1); } }
 /* the slide's part of the canvas (DeliverableEditor inset): all of it, but while drawing the slide stays where the bars left it; the fingers beside the slide are the canvas' */
 .dl-view { position: absolute; pointer-events: none; }
 .dl-view > .dl-frame { pointer-events: auto; }

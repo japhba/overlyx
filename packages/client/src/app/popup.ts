@@ -17,7 +17,8 @@ export function pinUnder(el: HTMLElement, anchor: HTMLElement): void {
   const at = (x: number, y: number) => { el.style.left = `${x - o.left}px`; el.style.top = `${y - o.top}px`; };
   const { width: w, height: h } = o;
   // a toolbar docked in a column beside the document (app/tbdock.tsx): beside the button, towards the page
-  const side = anchor.closest<HTMLElement>('.tb-side')?.dataset.tbSide;
+  // (or the deck's Draw palette standing upright at a side: deliverable/drawpalette.tsx)
+  const side = anchor.closest<HTMLElement>('[data-tb-side]')?.dataset.tbSide;
   if (side === 'left' || side === 'right') {
     el.style.maxHeight = `${H - 16}px`;
     const x = side === 'left' ? Math.min(b.right + 4, W - 8 - w) : Math.max(4, b.left - 4 - w);

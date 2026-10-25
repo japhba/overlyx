@@ -361,6 +361,8 @@ export type FromRuntime =
   | { ol: 'glitch'; fields: GlitchFields }
   /** a pen stroke's moves and the page's frames a second (app/penrate.ts): an iPad held to 60 Hz is told how to change it (app/promotion.ts) */
   | { ol: 'penRate'; moves: number; frames: number }
+  /** a touch taken for the palm by its breadth, no pen near (runtime isPalm): as broad as the browser said (page px), at the page's scale */
+  | { ol: 'palm'; contact: number; contactH: number; scale: number }
   /** words pasted on the canvas: a new text box with them (`after`: the object selected on that slide) */
   | { ol: 'pasteText'; version: number; slide: Path | null; after: Path | null; text: string }
   /** what Ctrl+C copies of the selection now (null: nothing), for the editor to answer a copy at once (runtime/clip.ts) */

@@ -73,6 +73,11 @@ export function reportJump(fields: GlitchFields): void {
   if (watching) send('jump', fields);
 }
 
+/** a touch the deck canvas took for the palm by its breadth (runtime isPalm): how broad, at the page's zoom */
+export function reportPalm(fields: GlitchFields): void {
+  if (watching) send('palm', { ...fields, zoom: Math.round((window.visualViewport?.scale ?? 1) * 100) / 100 });
+}
+
 /* ------------------------------------------------------------------ what had the focus */
 
 function focusKind(el: Element | null): string {

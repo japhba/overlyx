@@ -2380,10 +2380,24 @@ function ignorePalmContact(pointerId: number): void {
   postGestureReliability('gesture.palm-ignored', 'touch');
 }
 
+/**
+ * How broad a contact is the palm's, not a finger's (px on the screen, as far as the page can tell):
+ * a fingertip on an iPad is some 40–65 pt across, more in CSS px with the interface zoomed out — the
+ * old 46 took the user's fingers for the palm (the user, 25 Oct 2026: "swiping between slides still
+ * doesn't work"); the side of a hand is twice as broad. Whether WebKit's width inside the scaled frame
+ * is the page's px or the screen's is not known: the smaller reading counts, a palm missed being the
+ * lesser harm (the pen landing still takes the touches down then for the palm's).
+ */
+const PALM_W = 110;
+
 function isPalm(e: PointerEvent): boolean {
   if (penOn !== null || performance.now() - penOffAt < PALM_AFTER) return true;
   // (a contact as broad as a palm, where the browser says how broad: the iPad's)
-  return fingersPan() && Math.max(e.width || 0, e.height || 0) * scale > 46;
+  const w = Math.max(e.width || 0, e.height || 0);
+  if (!fingersPan() || w * Math.min(1, scale) <= PALM_W) return false;
+  // (said, anonymously: how broad the touches taken for the palm are on the real screens)
+  post({ ol: 'palm', contact: Math.round(w), contactH: Math.round(Math.min(e.width || 0, e.height || 0)), scale: Math.round(scale * 100) / 100 });
+  return true;
 }
 
 function penLands(e: PointerEvent): void {

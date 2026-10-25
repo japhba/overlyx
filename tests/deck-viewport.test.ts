@@ -385,6 +385,16 @@ describe('a swipe sideways turns the page (Safari\'s swipe between pages)', () =
     expect(turned).toEqual([1, -1]);
   });
 
+  it('zoomed in on a detail, panning the last slide into its edge and on never adds one', () => {
+    const frame = { style: {} } as unknown as HTMLElement;
+    const turned: number[] = [];
+    const v = new SlideView(() => frame, () => ({ box, rect, scale: 3, margin: 32 }), { pages: () => true, onPage: d => turned.push(d), addsPage: () => true });
+    v.render();
+    for (let i = 0; i < 60; i++) v.panBy(-40, 0);   // across the slide, into its edge, and far on
+    v.release();
+    expect(turned).toEqual([]);
+  });
+
   it('a canceled short flick settles without paging, while a normal lift still pages', () => {
     const { v, turned } = make();
     const home = v.place();

@@ -275,7 +275,7 @@ export function quickGroups(sections: ToolSection[], extra: ToolButton[], words 
   return [...groups, [...extra, ...(del ? [del] : [])]].map(g => g.map(own));
 }
 
-export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolButton[][]; sections: ToolSection[] } {
+export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolButton[][]; sections: ToolSection[]; draw?: boolean } {
   const ro = c.readOnly;
   const sel = c.sel;
   const one = sel.length === 1 ? sel[0] : null;
@@ -316,7 +316,8 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
   if (c.nodes.editing) { const g = nodeGroups(c); return { tools, context: g, sections: [{ label: 'Points', groups: g }] }; }
   const drawRow = drawing ? drawingToolbar({ ...c, lasso: { kinds: [...LASSO_KINDS], colors: () => c.ink.lassoColors?.() ?? [] }, picked: c.ink.fold && (() => c.ink.fold!(true)) }) : null;
   // (the lasso's catch: its own tools after Draw's)
-  if (drawRow && !(c.tool === 'lasso' && sel.length)) return { tools, context: drawRow, sections: [{ label: 'Draw', groups: drawRow }] };
+  // (`draw`: the sections are the Draw row — on a touch screen a palette of its own, DeliverableEditor drawPalette)
+  if (drawRow && !(c.tool === 'lasso' && sel.length)) return { tools, context: drawRow, sections: [{ label: 'Draw', groups: drawRow }], draw: true };
   // (folded away while drawing: nothing over the canvas — not the slide's tools in its place)
   if (held && !(c.tool === 'lasso' && sel.length)) return { tools, context: [], sections: [] };
   const sections: ToolSection[] = [];

@@ -527,17 +527,27 @@ export class SlideView {
     if (!s.pages) return false;
     if (s.paged) return true;
     if (s.axis === 'x') this.pull(dx, 0, 0, true); else this.pull(0, dy, 0, true);
-    const adds = this.adds(s);
-    if (s.finger && adds) this.showAdd(this.addWay(s, v), s.axis === 'y' ? 'y' : 'x');
+    if (s.finger && this.adds(s, v)) this.showAdd(this.addWay(s, v), s.axis === 'y' ? 'y' : 'x');
     else this.showAdd(null);
     // (a scroll never adds a slide)
-    if (!s.finger && !adds && Math.abs(s.axis === 'x' ? s.x : s.y) >= PAGE_SCROLL) this.turn(s);
+    if (!s.finger && !this.pastLast(s) && Math.abs(s.axis === 'x' ? s.x : s.y) >= PAGE_SCROLL) this.turn(s);
     return true;
   }
 
-  /** the swipe goes on past the last slide (to the next: left, or up), where that adds one */
-  private adds(s: NonNullable<SlideView['swipe']>): boolean {
+  /** the swipe goes on past the last slide (to the next: left, or up), where going on adds one */
+  private pastLast(s: NonNullable<SlideView['swipe']>): boolean {
     return (s.axis === 'y' ? s.y : s.x) - (s.from ?? 0) < 0 && !!this.marks.addsPage?.();
+  }
+
+  /**
+   * The swipe goes on past the last slide (to the next: left, or up), where that adds one — begun at
+   * the slide's edge, or near a fit (all of the slide, or most of it, on the screen): zoomed in on a
+   * detail, a pan that runs into the edge only shows the band (panning the slide round never adds one)
+   */
+  private adds(s: NonNullable<SlideView['swipe']>, v: ViewInput): boolean {
+    if (!this.pastLast(s)) return false;
+    const [lo, hi] = this.ranges(v)[s.axis === 'y' ? 'y' : 'x'];
+    return !s.from || hi - lo <= (s.axis === 'y' ? v.box.h : v.box.w) / 2;
   }
 
   /** how far it has come to adding a slide: 1 once pulled ADD_PAGE of the canvas */
@@ -643,7 +653,8 @@ export class SlideView {
       // is round its content — not zoomed in on a detail, where a quick pan overshoots the edge)
       const d = Math.abs((s.axis === 'y' ? s.y : s.x) - (s.from ?? 0));
       const fast = performance.now() - s.t0 < 250 && d > 30 && (!s.from || hi - lo <= dim / 2);
-      if (this.adds(s) ? this.addWay(s, v) >= 1 : fast || d >= PAGE_FINGER * dim) this.turn(s);
+      // (on past the last slide: a slide added, or nothing — however far a pan of a detail went on)
+      if (this.pastLast(s) ? this.adds(s, v) && this.addWay(s, v) >= 1 : fast || d >= PAGE_FINGER * dim) this.turn(s);
     }
     if (!v) return;
     const r = this.active(v);

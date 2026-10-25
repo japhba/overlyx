@@ -51,4 +51,9 @@ describe('a glitch report', () => {
     expect(glitchReport('jump', { engine: 'deck', pointer: 'pen', sample: 'coalesced', at: 'middle', spike: 'yes', place: 'origin' }, [])!.message)
       .toBe('A stroke jumped across the screen · deck · pen · coalesced point, middle of the stroke · one stray point · at the screen corner (0, 0)');
   });
+  it('a touch taken for the palm: how broad it was, nothing else', () => {
+    const r = glitchReport('palm', { engine: 'deck', contact: 124, contactH: 96, frameScale: 0.98, zoom: 0.75, title: 'x' }, [])!;
+    expect(r.message).toBe('A touch was taken for the palm by its breadth · deck · about 120 px on the screen');
+    expect(r.details).toEqual({ engine: 'deck', contact: '124', contactH: '96', frameScale: '0.98', zoom: '0.75' });
+  });
 });

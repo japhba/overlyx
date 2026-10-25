@@ -6,13 +6,15 @@
  *   zoom    the whole interface zoomed in (a pinch the app did not take)
  *   jump    a stroke's point far from the one before it, sooner than a hand gets there: drawn, a
  *           line across the screen
+ *   palm    a touch taken for the hand resting on the screen because it was broad, with no pen near
+ *           (it moves nothing): how broad it was, to tell a finger's contact from a palm's on the iPad
  * A report is measurements and fixed words only: sizes, scroll offsets, the kinds of control and of
  * input — never text, names, or where on the page something was drawn. The server takes nothing else
  * (glitchReport).
  */
 import { INTERACTION_TARGETS } from './interactions.ts';
 
-export const GLITCH_KINDS = ['shift', 'zoom', 'jump'] as const;
+export const GLITCH_KINDS = ['shift', 'zoom', 'jump', 'palm'] as const;
 export type GlitchKind = typeof GLITCH_KINDS[number];
 
 export const INK_ENGINES = ['deck', 'present', 'board', 'doc-ink', 'math-pad'] as const;
@@ -33,6 +35,8 @@ const WORDS: Record<string, readonly string[] | 'number' | 'class'> = {
   engine: INK_ENGINES, pointer: ['pen', 'touch', 'mouse'], sample: ['down', 'move', 'coalesced', 'up'], before: ['down', 'move', 'coalesced', 'up'],
   at: ['first', 'middle', 'last'], jump: 'number', dt: 'number', points: 'number', spike: ['yes', 'no'], place: ['inside', 'origin', 'outside'],
   scrolled: 'number', stroke: 'number',
+  // palm: the contact's breadth and height as the browser gave them (CSS px of the page touched), that page's scale on the screen
+  contact: 'number', contactH: 'number', frameScale: 'number',
 };
 
 /** what happened before a glitch, as `<ms before> <word> [<word or number>…]` (glitches.ts keeps them) */
@@ -77,7 +81,9 @@ export function glitchReport(kind: unknown, fields: unknown, trail: unknown): { 
   const g = cleanGlitch(kind, fields, trail);
   if (!g) return null;
   const f = g.fields, w = (k: string) => (f[k] === undefined ? '?' : String(f[k]));
-  const message = g.kind === 'jump'
+  const message = g.kind === 'palm'
+    ? `A touch was taken for the palm by its breadth · ${w('engine')} · about ${f.contact === undefined ? '?' : Math.round(Number(f.contact) * Number(f.frameScale ?? 1) / 10) * 10} px on the screen`
+    : g.kind === 'jump'
     ? `A stroke jumped across the screen · ${w('engine')} · ${w('pointer')} · ${w('sample')} point, ${w('at')} of the stroke${f.spike === 'yes' ? ' · one stray point' : ''}${f.place && f.place !== 'inside' ? ` · at the ${f.place === 'origin' ? 'screen corner (0, 0)' : 'outside of the screen'}` : ''}`
     : g.kind === 'zoom'
       ? `The interface was zoomed in · ${w('app')}`

@@ -469,6 +469,7 @@ html[data-ui="modern"] .dl-side-end .dl-present { padding: 0; }
 html[data-ui="modern"] .dl-focus-btn { border-color: var(--m-line); background: color-mix(in srgb, var(--m-paper) 88%, transparent); color: var(--m-ink); box-shadow: var(--m-shadow); }
 html[data-ui="modern"] .dl-focus-pen.on { background: var(--m-key-on); color: var(--m-on-key-on); }
 html[data-ui="modern"] .dl-focus-bar { border-color: var(--m-line); background: var(--m-paper); box-shadow: var(--m-shadow); }
+html[data-ui="modern"] .dl-drawpal { border-color: var(--m-line); background: var(--m-paper); }
 html[data-ui="modern"] .dl-title { display: none; }
 html[data-ui="modern"] .dl-btn { border-radius: var(--m-radius); border: 0; height: 30px; color: var(--m-ink2); }
 html[data-ui="modern"] .dl-btn:hover:not(:disabled) { background: var(--m-hover); color: var(--m-ink); }
