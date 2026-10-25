@@ -618,9 +618,9 @@ html.lyx-list-dragging, html.lyx-list-dragging * { cursor: grabbing !important; 
 .lyx-color-red { color: #d00; } .lyx-color-blue { color: #00d; } .lyx-color-green { color: #080; } .lyx-color-magenta { color: #c0c; } .lyx-color-cyan { color: #0aa; } .lyx-color-yellow { color: #aa0; } .lyx-color-orange { color: #e80; } .lyx-color-purple { color: #808; } .lyx-color-brown { color: #840; } .lyx-color-darkgray { color: var(--fg2); } .lyx-color-gray { color: var(--muted2); } .lyx-color-lightgray { color: var(--ui-border); } .lyx-color-lime { color: #5c0; } .lyx-color-olive { color: #880; } .lyx-color-pink { color: #e6a; } .lyx-color-teal { color: #088; } .lyx-color-violet { color: #80f; } .lyx-color-black { color: #000; } .lyx-color-white { color: #fff; }
 
 /* change tracking */
-/* how far a change's author colour has gone into black with its age (app/shellutil.tsx changeAgeCss);
+/* how far along its fade into black a change's author colour is (app/shellutil.tsx changeAgeCss);
    not inherited, so a fresh change inside an old changed inset keeps its own */
-@property --change-fade { syntax: '<percentage>'; inherits: false; initial-value: 0%; }
+@property --change-age { syntax: '<percentage>'; inherits: false; initial-value: 0%; }
 .lyx-change-inserted { color: var(--change-color, var(--ok)); }
 .lyx-change-deleted { color: var(--change-color, var(--err)); text-decoration: line-through; text-decoration-thickness: 1.5px; opacity: 0.85; }
 .lyx-inset[data-change="inserted"] > .inset-box { border-color: var(--change-color, var(--accent)); border-style: dashed; }

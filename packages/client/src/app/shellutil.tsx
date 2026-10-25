@@ -79,33 +79,35 @@ export function applyAuthorColors(authors: { id: number; name: string }[]): void
   el.textContent = authors.map((a, i) => {
     const light = isAgentAuthor(a.name) ? '#757575' : AUTHOR_COLORS[i % AUTHOR_COLORS.length];
     const dk = isAgentAuthor(a.name) ? '#9e9e9e' : AUTHOR_COLORS_DARK[i % AUTHOR_COLORS_DARK.length];
-    // an older change goes into black (into the white text on a dark page) by its --change-fade
-    return `.lyx-change[data-author="${a.id}"], .lyx-inset[data-author="${a.id}"] { --change-color: color-mix(in oklab, ${light}, #000 var(--change-fade, 0%)); }\n`
+    // an older change goes into black (into the white text on a dark page) by its --change-age
+    return `.lyx-change[data-author="${a.id}"], .lyx-inset[data-author="${a.id}"] { --change-color: color-mix(in oklab, ${light}, #000 calc(var(--change-age, 0%) * ${FADE_LIGHT})); }\n`
       // (lifted only on a dark page: with smart invert off the page is white paper, app/darkpages.ts)
-      + `html[data-theme="dark"][data-dark-pages] .lyx-change[data-author="${a.id}"], html[data-theme="dark"][data-dark-pages] .lyx-inset[data-author="${a.id}"] { --change-color: color-mix(in oklab, ${dk}, var(--editor-fg) var(--change-fade, 0%)); }`;
+      + `html[data-theme="dark"][data-dark-pages] .lyx-change[data-author="${a.id}"], html[data-theme="dark"][data-dark-pages] .lyx-inset[data-author="${a.id}"] { --change-color: color-mix(in oklab, ${dk}, var(--editor-fg) calc(var(--change-age, 0%) * ${FADE_DARK})); }`;
   }).join('\n');
   refreshChangeAges();
 }
 
 const HOUR = 3600, YEAR = 365.25 * 24 * HOUR;
-/** how far the oldest changes have gone into black: most of the way, not all */
-const FADE_MAX = 0.75;
+/** how far into black the oldest changes go: half way on a light page (darker colours look all
+ *  alike on screen), three quarters into the white text on a dark one */
+const FADE_LIGHT = 0.5, FADE_DARK = 0.75;
 
 /**
- * How far a change's colour has gone into black at an age (s): not at all in its first hour, then
- * slowly at first and faster later along a log clock (1 h → 1 d → 1 w → 1 mo → 1 y) — 9 % at a
- * day, 24 % at a week, 39 % at a month, 54 % at three months — to 75 % at a year, where it stays.
+ * How far along its fade a change is at an age (s), 0–1: not at all in its first hour, then
+ * slowly at first and faster later along a log clock (1 h → 1 d → 1 w → 1 mo → 1 y) — 0.12 at a
+ * day, 0.32 at a week, 0.52 at a month, 0.72 at three months — and all the way at a year, where
+ * it stays. FADE_LIGHT / FADE_DARK turn it into the share of black (white).
  */
-export function changeFade(age: number): number {
+export function changeAge(age: number): number {
   if (!(age > HOUR)) return 0;
   const s = Math.min(1, Math.log(age / HOUR) / Math.log(YEAR / HOUR));
-  return FADE_MAX * s * s;
+  return s * s;
 }
 
 /**
- * The CSS that gives every tracked change its fade by age (`--change-fade`), without looking at
- * the document: `data-time` is the change's Unix time in decimal, so a run of seconds sharing its
- * leading digits is one prefix selector (`[data-time^="17613"]` = 10⁵ s). A run is at most a
+ * The CSS that gives every tracked change its place on the fade (`--change-age`), without looking
+ * at the document: `data-time` is the change's Unix time in decimal, so a run of seconds sharing
+ * its leading digits is one prefix selector (`[data-time^="17613"]` = 10⁵ s). A run is at most a
  * quarter of its age long, so the fade hardly changes within it — about 170 runs from 2001 on.
  */
 export function changeAgeCss(now: number): string {
@@ -118,14 +120,14 @@ export function changeAgeCss(now: number): string {
       if (t % w2 !== 0 || last > end || (young < YEAR && w2 * 4 > young)) break;
       w = w2;
     }
-    const pct = Math.round(changeFade(now - (t + w / 2)) * 100);
+    const pct = Math.round(changeAge(now - (t + w / 2)) * 100);
     if (pct) {
       const prefix = String(t).slice(0, 10 - Math.round(Math.log10(w)));
       (byPct.get(pct) ?? byPct.set(pct, []).get(pct)!).push(`.lyx-change[data-time^="${prefix}"], .lyx-inset[data-time^="${prefix}"]`);
     }
     t += w;
   }
-  return [...byPct].map(([pct, sel]) => `${sel.join(',\n')} { --change-fade: ${pct}%; }`).join('\n');
+  return [...byPct].map(([pct, sel]) => `${sel.join(',\n')} { --change-age: ${pct}%; }`).join('\n');
 }
 
 let changeAgesTimer: ReturnType<typeof setInterval> | null = null;
