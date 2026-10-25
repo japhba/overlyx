@@ -60,22 +60,82 @@ export function hashAuthor(name: string): number {
   return h | 0;
 }
 
+/**
+ * The authors' colours for change tracking: no red and no green (they say deleted / inserted
+ * everywhere else, and are the pair colour-blind readers lose), all in one lightness band so that
+ * authors differ by hue alone — the age fade below darkens every colour alike. The most distinct
+ * come first, for the two or three authors most documents have.
+ */
+const AUTHOR_COLORS = ['#126bc5', '#cf630d', '#bb3285', '#008396', '#a67b01', '#7451c2', '#9b4ba8'];
+// the same hues, lifted so that they read on the dark page (app/theme.ts)
+const AUTHOR_COLORS_DARK = ['#90c1fe', '#fca676', '#ff97cd', '#7bccdd', '#dab976', '#c1b0fe', '#e2a3ec'];
+
 /** One colour per LyX author for change tracking (stable across sessions: by author id order). */
 export function applyAuthorColors(authors: { id: number; name: string }[]): void {
-  const palette = ['#2e7d32', '#c62828', '#1565c0', '#6a1b9a', '#ef6c00', '#00838f', '#ad1457', '#4e342e', '#558b2f', '#283593'];
-  // the same hues, lifted so that they read on the dark page (app/theme.ts)
-  const dark = ['#7bd88f', '#ff8a80', '#82b1ff', '#d6a2ff', '#ffb74d', '#4dd0e1', '#f48fb1', '#d7ccc8', '#c5e1a5', '#9fa8da'];
   let el = document.getElementById('ol-author-colors') as HTMLStyleElement | null;
   if (!el) { el = document.createElement('style'); el.id = 'ol-author-colors'; document.head.appendChild(el); }
   // an agent's tracked changes ("Claude (Opus 5.5) [Jan]", formerly "… (MCP)") are grey by default,
   // so the colours stay for human co-authors and the eye can skim the machine's insertions
   el.textContent = authors.map((a, i) => {
-    const light = isAgentAuthor(a.name) ? '#757575' : palette[i % palette.length];
-    const dk = isAgentAuthor(a.name) ? '#9e9e9e' : dark[i % dark.length];
-    return `.lyx-change[data-author="${a.id}"], .lyx-inset[data-author="${a.id}"] { --change-color: ${light}; }\n`
+    const light = isAgentAuthor(a.name) ? '#757575' : AUTHOR_COLORS[i % AUTHOR_COLORS.length];
+    const dk = isAgentAuthor(a.name) ? '#9e9e9e' : AUTHOR_COLORS_DARK[i % AUTHOR_COLORS_DARK.length];
+    // an older change goes into black (into the white text on a dark page) by its --change-fade
+    return `.lyx-change[data-author="${a.id}"], .lyx-inset[data-author="${a.id}"] { --change-color: color-mix(in oklab, ${light}, #000 var(--change-fade, 0%)); }\n`
       // (lifted only on a dark page: with smart invert off the page is white paper, app/darkpages.ts)
-      + `html[data-theme="dark"][data-dark-pages] .lyx-change[data-author="${a.id}"], html[data-theme="dark"][data-dark-pages] .lyx-inset[data-author="${a.id}"] { --change-color: ${dk}; }`;
+      + `html[data-theme="dark"][data-dark-pages] .lyx-change[data-author="${a.id}"], html[data-theme="dark"][data-dark-pages] .lyx-inset[data-author="${a.id}"] { --change-color: color-mix(in oklab, ${dk}, var(--editor-fg) var(--change-fade, 0%)); }`;
   }).join('\n');
+  refreshChangeAges();
+}
+
+const HOUR = 3600, YEAR = 365.25 * 24 * HOUR;
+/** how far the oldest changes have gone into black: most of the way, not all */
+const FADE_MAX = 0.75;
+
+/**
+ * How far a change's colour has gone into black at an age (s): not at all in its first hour, then
+ * the colour left shrinks by the same factor with every equal step on a log clock — 38 % gone at a
+ * day, 54 % at a week, 63 % at a month — down to a quarter at a year, where it stays.
+ */
+export function changeFade(age: number): number {
+  if (!(age > HOUR)) return 0;
+  const s = Math.min(1, Math.log(age / HOUR) / Math.log(YEAR / HOUR));
+  return 1 - (1 - FADE_MAX) ** s;
+}
+
+/**
+ * The CSS that gives every tracked change its fade by age (`--change-fade`), without looking at
+ * the document: `data-time` is the change's Unix time in decimal, so a run of seconds sharing its
+ * leading digits is one prefix selector (`[data-time^="17613"]` = 10⁵ s). A run is at most a
+ * quarter of its age long, so the fade hardly changes within it — about 170 runs from 2001 on.
+ */
+export function changeAgeCss(now: number): string {
+  const byPct = new Map<number, string[]>();
+  const end = now - HOUR;
+  for (let t = 1e9; t <= end;) {
+    let w = 1;
+    for (;;) {
+      const w2 = w * 10, last = t + w2 - 1, young = now - last;
+      if (t % w2 !== 0 || last > end || (young < YEAR && w2 * 4 > young)) break;
+      w = w2;
+    }
+    const pct = Math.round(changeFade(now - (t + w / 2)) * 100);
+    if (pct) {
+      const prefix = String(t).slice(0, 10 - Math.round(Math.log10(w)));
+      (byPct.get(pct) ?? byPct.set(pct, []).get(pct)!).push(`.lyx-change[data-time^="${prefix}"], .lyx-inset[data-time^="${prefix}"]`);
+    }
+    t += w;
+  }
+  return [...byPct].map(([pct, sel]) => `${sel.join(',\n')} { --change-fade: ${pct}%; }`).join('\n');
+}
+
+let changeAgesTimer: ReturnType<typeof setInterval> | null = null;
+/** the fades follow the clock: recomputed every ten minutes while a document is open */
+function refreshChangeAges(): void {
+  let el = document.getElementById('ol-change-ages') as HTMLStyleElement | null;
+  if (!el) { el = document.createElement('style'); el.id = 'ol-change-ages'; document.head.appendChild(el); }
+  const css = changeAgeCss(Math.floor(Date.now() / 1000));
+  if (el.textContent !== css) el.textContent = css;
+  changeAgesTimer ??= setInterval(refreshChangeAges, 10 * 60 * 1000);
 }
 
 /**
