@@ -163,6 +163,8 @@ interface TextCtx {
   /** the enclosing item environment (\item starts a new paragraph) */
   itemStyle: LayoutStyle | null;
   cur: Paragraph | null;
+  /** a command layout just ended; an immediately following tracked break still belongs to it */
+  endedCommand?: Paragraph;
   align: string | null;
   noindent: boolean;
   appendix: boolean;
@@ -353,6 +355,7 @@ class BodyParser {
     // (something is put into the paragraph: what the body's scanner read so far is part of it)
     if (ctx === this.root && this.main) this.lastPush = this.main.pos;
     if (ctx.cur) return ctx.cur;
+    ctx.endedCommand = undefined;
     const p: Paragraph = { layout: ctx.layout, depth: ctx.depth, params: {}, items: [] };
     if (ctx.align) p.params.align = ctx.align;
     if (ctx.noindent) { p.params.noindent = true; ctx.noindent = false; }
@@ -407,6 +410,7 @@ class BodyParser {
 
   private endPar(ctx: TextCtx): void {
     const p = ctx.cur;
+    ctx.endedCommand = undefined;
     ctx.skipSpace = false;
     if (p && ctx === this.root) this.ends.set(p, Math.max(this.tokStart, this.lastPush));
     if (!p) return;
@@ -653,10 +657,11 @@ class BodyParser {
   }
 
   /** Parse a `{...}` group (or the rest until `}` at the scanner position) as inset content. */
-  private parseInsetGroup(s: Scanner, base: string, st?: State, owner: TextCtx['owner'] = 'inset', float?: TextInset): Paragraph[] {
+  private parseInsetGroup(s: Scanner, base: string, _st?: State, owner: TextCtx['owner'] = 'inset', float?: TextInset): Paragraph[] {
     const ctx = newCtx(base, owner);
     ctx.float = float;
-    const inner: State = { font: {}, change: st?.change ? { ...st.change } : undefined };
+    // The inset itself carries the surrounding change; its contents only carry explicit marks.
+    const inner: State = { font: {} };
     if (s.peekChar() === '{' || (s.skipBlanks(), s.peekChar() === '{')) {
       s.pos++;
       this.parseText(s, ctx, inner, { close: true });
@@ -667,10 +672,10 @@ class BodyParser {
   }
 
   /** Parse environment content until \end{name} as inset content. */
-  private parseInsetEnv(s: Scanner, name: string, base: string, st?: State, owner: TextCtx['owner'] = 'inset', float?: TextInset): Paragraph[] {
+  private parseInsetEnv(s: Scanner, name: string, base: string, _st?: State, owner: TextCtx['owner'] = 'inset', float?: TextInset): Paragraph[] {
     const ctx = newCtx(base, owner);
     ctx.float = float;
-    const inner: State = { font: {}, change: st?.change ? { ...st.change } : undefined };
+    const inner: State = { font: {} };
     this.envStack.push(name);
     this.parseText(s, ctx, inner, { env: name });
     this.envStack.pop();
@@ -745,7 +750,19 @@ class BodyParser {
       if (s.peekChar() === '{') {
         const end = groupEnd(s.s, s.pos);
         const inner = s.s.slice(s.pos + 1, end - 1);
-        if (inner === '¶' || inner === '\\par') { s.pos = end; this.ensurePar(ctx).endChange = change; return null; }
+        if (inner === '¶' || inner === '\\par') {
+          s.pos = end;
+          // Command layouts already ended their paragraph (e.g. \paragraph*{...}). The mark
+          // still belongs to that paragraph, rather than to a newly manufactured empty one.
+          const p = ctx.cur ?? ctx.endedCommand ?? this.ensurePar(ctx);
+          p.endChange = change;
+          if (ctx === this.root && ctx.endedCommand) {
+            this.ends.set(p, s.pos);
+            this.pendingStart = null;
+          }
+          ctx.endedCommand = undefined;
+          return null;
+        }
         s.pos++;
         const r = this.parseText(s, ctx, { font: { ...st.font }, change }, { ...stop, close: true, item: false });
         if (r !== 'close' && r !== 'eof') return r;
@@ -1328,6 +1345,7 @@ class BodyParser {
     }
     this.absorbLabels(s, ctx, inner);
     this.endPar(ctx);
+    ctx.endedCommand = par;
   }
 
   /**

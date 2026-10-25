@@ -14,10 +14,11 @@
  *    as one deletion + one insertion rather than a shredded word salad.
  *  - Existing marks: content is compared regardless of who inserted it (another author's pending
  *    insertion that the new version keeps stays theirs); text already marked deleted only matches
- *    text marked deleted, and stays deleted when the new version leaves it out. The author's OWN
- *    pending changes in a changed region are first taken back (their insertions removed, their
- *    deletions restored) and then re-derived — like LyX, where deleting your own insertion simply
- *    removes it — so an agent refining its earlier proposal does not stack changes on changes.
+ *    text marked deleted, and stays deleted when the new version leaves it out. Fully inserted
+ *    passages of the author's OWN that are refined in place keep their marks. Other own changes
+ *    in a changed region are first taken back (their insertions removed, their deletions restored)
+ *    and then re-derived — like LyX, where deleting your own insertion simply removes it — so an
+ *    agent refining its earlier proposal does not stack changes on changes.
  */
 import type { Paragraph, Item, Change, FontState, Inset, TabularInset } from './ast.ts';
 import { FONT_KEYS, changesEqual } from './ast.ts';
@@ -256,8 +257,40 @@ class Cx {
 
   /** The tracked version of a paragraph list; `clean`: old carries none of the author's own changes. */
   paragraphs(oldPars: Paragraph[], newPars: Paragraph[], clean: boolean): Paragraph[] {
+    if (!clean) oldPars = this.refineOwnInsertions(oldPars, newPars);
     const { seq, vOld } = this.entries(oldPars, newPars, clean);
     return this.breaks(seq, vOld);
+  }
+
+  /**
+   * Refining a passage wholly inserted by this author is still the same pending insertion.
+   * Carry it forward before taking back other own changes: rejecting its breaks first would
+   * join the entire neighbouring insertion, re-stamp it, and lose its paragraph correspondence.
+   */
+  private refineOwnInsertions(olds: Paragraph[], news: Paragraph[]): Paragraph[] {
+    const ownInsertion = (c?: Change): c is Change => c?.type === 'inserted' && c.author === this.as.author;
+    const ownParagraph = (p: Paragraph) => p.items.length > 0 && p.items.every(it => ownInsertion(it.change));
+    if (!olds.some(ownParagraph)) return olds;
+    const pairs = align(olds.map(p => this.parKey(p)), news.map(p => this.parKey(p)));
+    const out: Paragraph[] = [];
+    let i = 0, j = 0;
+    for (const [pi, pj] of [...pairs, [olds.length, news.length] as [number, number]]) {
+      const from = olds.slice(i, pi), to = news.slice(j, pj);
+      const mark = from[0]?.items[0]?.change;
+      if (from.length && to.length && ownInsertion(mark)
+        && from.every(ownParagraph)
+        && from.slice(0, -1).every(p => ownInsertion(p.endChange))) {
+        for (let k = 0; k < to.length; k++) {
+          // A marked container owns its contents as a unit; do not nest the same author's marks.
+          const items = to[k].items.filter(it => !isDel(it.change)).map(it =>
+            resolveInItem(withChange(it, mark), true, c => c.author === this.as.author));
+          out.push(withEnd({ ...to[k], items }, k + 1 < to.length ? mark : from.at(-1)!.endChange));
+        }
+      } else out.push(...from);
+      if (pi < olds.length) out.push(olds[pi]);
+      i = pi + 1; j = pj + 1;
+    }
+    return out;
   }
 
   private ownEnd(p: Paragraph): boolean { return !!p.endChange && p.endChange.author === this.as.author; }
