@@ -32,6 +32,7 @@ export interface DrawingContext {
    * Something was picked in the row — a pen, the eraser, the lasso, a colour, a width, a line or a
    * shape: the row folds away, what was picked stays in hand (the user's wish: the row is out of the
    * way while drawing; the Draw button brings it back). Not for the settings opened by a second click.
+   * Where the row folds, its lock keeps it open (DeckInk keepRow).
    */
   picked?: () => void;
 }
@@ -54,9 +55,16 @@ export function drawingToolbar(c: DrawingContext): ToolButton[][] {
   const hl = !shaping && ink.pen === 'highlighter';
   const pen = ink.pens[hl ? 'highlighter' : 'pen'];
   const name = hl ? 'Highlighter' : 'Pen';
-  const done = () => c.picked?.();
+  // (locked open: what was picked is in hand, the row stays)
+  const done = () => { if (!ink.keepRow) c.picked?.(); };
   const take = (p: DeckInkPatch) => { if (shaping) c.ink.set(p.pen ? p : { pen: 'pen', ...p }); else { c.ink.set(p); c.setTool('pen'); } done(); };
   const takePen = (p: DeckInkPatch) => { c.ink.set(p); c.setTool('pen'); };
+  const end: ToolButton[] = [
+    // the user, 25 Oct 2026: "add the option keep the drawing toolbar expanded by a lock icon"
+    ...(c.picked ? [{ id: 'dk-draw-lock', icon: ink.keepRow ? 'dk-lock' : 'dk-unlock', active: ink.keepRow, action: () => c.ink.set({ keepRow: !ink.keepRow }),
+      title: ink.keepRow ? 'The pens stay open — click to let them fold away once something is picked in them' : 'Keep the pens open: picking one, a colour or a width no longer folds them away' }] : []),
+    ...(c.done === false ? [] : [{ id: 'dk-draw-done', title: 'Done drawing (Esc or V)', icon: 'Done', active: true, action: () => c.ink.draw(false) }]),
+  ];
   return [
     [
       { id: 'dk-ink-pen', title: `${ink.nib.ball ? 'Ball pen' : 'Fountain pen'} (P) — with its own colour and width; click it again for its settings: fountain or ball pen, tip, pressure, stabilization, rounding, draw and hold for shapes, calibration`,
@@ -92,7 +100,7 @@ export function drawingToolbar(c: DrawingContext): ToolButton[][] {
         active: v === w, action: () => take({ slotWidth: { idx: i, width: v } }) })) },
     })),
     ...(c.extras?.length ? [c.extras] : []),
-    ...(c.done === false ? [] : [[{ id: 'dk-draw-done', title: 'Done drawing (Esc or V)', icon: 'Done', active: true, action: () => c.ink.draw(false) }]]),
+    ...(end.length ? [end] : []),
   ];
 }
 

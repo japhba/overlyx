@@ -34,7 +34,7 @@ import { presentFingersDraw, savePresentFingersDraw, presentLinked, savePresentL
 import { checkedPresent, type PresentState, type PresenterState } from '../app/presentshare';
 import { createPortal } from 'preact/compat';
 import { isFromRuntime, RAIL_NUM } from './protocol';
-import { rebasedSplices, rebaseObjectPaths, objectHtml, imageHtml, insertPlace, newSlideHtml, slideDesigns, slidePaths, slideNotes, notesOp, sourceRange, inlineSvgHtml, guidesIn } from './sourceops';
+import { rebasedSplices, rebaseObjectPaths, objectHtml, imageHtml, insertPlace, newSlideHtml, nextPageHtml, slideDesigns, slidePaths, slideNotes, notesOp, sourceRange, inlineSvgHtml, guidesIn } from './sourceops';
 import { GUIDES_ATTR, LAYOUT_MARGINS_ATTR, layoutMarginGuides, parseGuides, masterGuides, formatGuides, withGuide, type Guide } from './guides';
 import { deckMargins, deckDesign, builtInLayouts, savedLayouts, layoutFromSlide, saveLayoutOp, applyLayoutOp, placeholderObject, layoutThumb, deckColors, PH_ATTR, PH_LABELS, PH_ROLES, type PhRole, type DesignLooks, type DeckDesign, type Layout } from './decklayouts';
 import { LayoutPicker, type LayoutCard } from './LayoutPicker';
@@ -388,6 +388,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
    * pen is put away (Done, Esc, V, another tool).
    */
   const [drawOpen, setDrawOpen] = useState(false);
+  const drawOpenRef = useRef(drawOpen); drawOpenRef.current = drawOpen;
   /** the row folded away once something was picked in it, what was picked still in hand (Draw's button brings the row back) */
   const [drawHeld, setDrawHeld] = useState(false);
   useEffect(() => { if (tool !== 'pen' && tool !== 'eraser' && tool !== 'lasso') { setDrawOpen(false); setDrawHeld(false); } }, [tool]);
@@ -414,6 +415,15 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   const [drawFocus, setDrawFocusState] = useState(false);
   /** drawing focus as last asked for (the state follows once the bars have slid away) */
   const focusAsked = useRef(false);
+  /**
+   * The slide on the whole screen, asked for by its button on a touch screen (the user, 25 Oct 2026:
+   * "when on ipad, can we have a toggle that enters fullscreen mode in which the slide is edge to edge?
+   * swipe to make a new slide should work as well"): the app's bars, the files, the slide rail, the
+   * notes, the panes and the toolbars go; the slide is fitted edge to edge into the screen, and Undo,
+   * the pens and the way back wait on its top right corner (the drawing focus' pill). Swipes turn the
+   * page sideways and up and down; on past the last slide, they add one.
+   */
+  const [full, setFullState] = useState(false);
   /** the colours used on the slide shown (runtime notetools.ts), for the lasso's colour filter */
   const slideColors = useRef<string[]>([]);
   /** Draw: the pen's and the highlighter's presets, which of them is in hand (deckink.ts) */
@@ -453,6 +463,9 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   const margin = box.w < 600 ? 12 : 32;
   /** drawing with everything else out of the way (drawFocus): on the one-slide canvas */
   const focusOn = drawFocus && soloOn && !presenting;
+  /** the slide on the whole screen (`full`) */
+  const fullOn = full && soloOn && !presenting;
+  const fullRef = useRef(fullOn); fullRef.current = fullOn;
   /** the canvas round a fitted slide: none on a touch screen (edge to edge, as it stays while drawing), else viewport.ts fitGap */
   const gap = touchUi && soloOn ? 0 : undefined;
   const gapRef = useRef(gap); gapRef.current = gap;
@@ -1241,13 +1254,28 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   /** a swipe turned the page: the next slide comes in from that side */
   const pageDir = useRef<0 | 1 | -1>(0);
   const gotoSlideRef = useRef<(i: number) => void>(() => {});
+  /** a swipe on past the last slide adds one (viewport.ts addsPage): on a touch screen, in a deck that can be changed */
+  const addsPage = () => touchRef.current && kindRef.current === 'deck' && !readOnlyRef.current && currentRef.current === slidesRef.current.length - 1;
+  const addPageRef = useRef<() => void>(() => {});
+  const showHudRef = useRef<(text: string) => void>(() => {});
+  /** the "+" a swipe on past the last slide fills as it goes (slideView `adding`) */
+  const addBadge = useRef<HTMLDivElement>(null);
   const slideView = useMemo(() => new SlideView(() => canvasFrame.current, () => viewInput.current, {
     // (a pinch's scale reaches the page as it goes: the handles keep their size on the screen)
     pull: () => pullRing.current, onFree: setSlideFree, onLive: s => { toCanvas({ ol: 'scale', scale: s }); showZoom(s); },
-    // a swipe sideways: the next slide, or the one before (viewport.ts steer)
-    pages: () => kindRef.current === 'deck' && slidesRef.current.length > 1,
-    // (drawing with everything else away: up and down too, as Notes' pages scroll)
-    pagesUpDown: () => focusRef.current, fastened: () => focusRef.current,
+    // a swipe sideways: the next slide, or the one before (viewport.ts steer) — on past the last, a new one
+    pages: () => kindRef.current === 'deck' && (slidesRef.current.length > 1 || addsPage()),
+    // (drawing with everything else away, the slide on the whole screen: up and down too, as Notes' pages scroll)
+    pagesUpDown: () => focusRef.current || fullRef.current, fastened: () => focusRef.current || fullRef.current,
+    addsPage: () => addsPage(),
+    adding: (k, axis) => {
+      const el = addBadge.current;
+      if (!el) return;
+      el.dataset.axis = axis;
+      el.classList.toggle('ready', k !== null && k >= 1);
+      el.style.opacity = k === null ? '0' : Math.max(0, Math.min(1, (k - 0.1) / 0.3)).toFixed(3);
+      el.style.setProperty('--k', Math.min(1, k ?? 0).toFixed(3));
+    },
     // (the pen and Undo on the slide's corner go with it as it moves — a page turned, a pull — not only as the editor draws)
     placed: p => {
       const el = focusPillEl.current, so = soloState.current;
@@ -1256,10 +1284,12 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
       el.style.right = `${at.right}px`; el.style.top = `${at.top}px`;
     },
     onPage: dir => {
-      const k = currentRef.current + dir;
-      if (k < 0 || k >= slidesRef.current.length) return;
+      const k = currentRef.current + dir, n = slidesRef.current.length;
+      if (dir === 1 && k === n && addsPage()) { pageDir.current = 1; addPageRef.current(); return; }
+      if (k < 0 || k >= n) return;
       pageDir.current = dir;
       gotoSlideRef.current(k);
+      if (fullRef.current) showHudRef.current(`${k + 1} / ${n}`);
     },
   }), []);
   useEffect(() => () => slideView.destroy(), [slideView]);
@@ -1299,6 +1329,8 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
    * to the canvas; coming back, they take it again and slide in. Either way the slide stays put.
    */
   const setDrawFocus = (on: boolean) => {
+    // (the slide on the whole screen: nothing more to put away)
+    if (on && fullRef.current) return;
     if (on === focusAsked.current) return;
     focusAsked.current = on;
     const html = document.documentElement;
@@ -1351,9 +1383,35 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     if (!touchRef.current || !soloRef.current || readOnlyRef.current) return;
     const t = toolRef.current;
     if (t !== 'pen' && t !== 'eraser' && t !== 'lasso') return;
+    // (locked open, the Draw row stays — and so do the bars)
+    const keep = inkRef.current.keepRow;
+    // (the slide on the whole screen: the Draw row on its corner, unfolded or folded)
+    if (fullRef.current) { if (!keep) { const open = !drawOpenRef.current; setDrawOpen(open); setDrawHeld(!open); } return; }
     if (focusAsked.current) { setDrawOpen(true); setDrawHeld(false); setDrawFocus(false); }
-    else { setDrawOpen(false); setDrawHeld(true); setDrawFocus(true); }
+    else if (!keep) { setDrawOpen(false); setDrawHeld(true); setDrawFocus(true); }
   };
+  /**
+   * The slide on the whole screen, or back (`full`): the browser's own full screen too where it has
+   * one to ask for (Safari; a web app opened from the home screen has no bars of its own), given up
+   * with it — the editor's stays when the browser leaves its own (a text typed in, a swipe from the top).
+   */
+  const setFull = (on: boolean) => {
+    if (on) setDrawFocus(false);
+    setFullState(on);
+    const html = document.documentElement;
+    try {
+      const standalone = (navigator as { standalone?: boolean }).standalone === true || matchMedia('(display-mode: standalone)').matches;
+      if (on && !standalone && !document.fullscreenElement && document.fullscreenEnabled) void html.requestFullscreen?.()?.catch(() => undefined);
+      else if (!on && document.fullscreenElement === html) void document.exitFullscreen().catch(() => undefined);
+    } catch { /* no full screen here */ }
+    // (the whole slide, edge to edge, into the room it gets)
+    if (Math.abs(zoomRef.current - 1) > 0.01 || slideView.isFree()) fitSlide();
+  };
+  useLayoutEffect(() => { document.documentElement.classList.toggle('ol-deck-full', fullOn); }, [fullOn]);
+  useEffect(() => () => {
+    document.documentElement.classList.remove('ol-deck-full');
+    if (document.fullscreenElement === document.documentElement) void document.exitFullscreen().catch(() => undefined);
+  }, []);
   useEffect(() => { toRail({ ol: 'scale', scale: railScale }); }, [railScale]);
   // (the Bézier pen takes Enter / Esc / Backspace: the keyboard goes to the canvas)
   // (the pen draws right away only where the page can be changed)
@@ -1694,6 +1752,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     if (hudTimer.current) clearTimeout(hudTimer.current);
     hudTimer.current = setTimeout(() => setHud(null), ms);
   };
+  showHudRef.current = text => showHud(text);
   /** the lasso's Convert to text / formula: the handwriting read by the server (its readings offered beside it when unsure), then typed in its place */
   const readInk = async (as: 'notes' | 'formula', lines: [number, number][][], rect: Rect) => {
     showHud('Reading the handwriting…', 8000);
@@ -1800,7 +1859,8 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     if (!drawing) setToolState('select');
     if (readOnlyRef.current) return;
     // drawing on a touch screen: the Draw row folds into the pen at the corner, the rest goes too (Apple Notes')
-    if (drawing && touchRef.current && drawKeptRef.current && soloRef.current) {
+    // — unless the row is locked open (then all of it stays)
+    if (drawing && touchRef.current && drawKeptRef.current && soloRef.current && !inkRef.current.keepRow) {
       if (drawOpen) { setDrawOpen(false); setDrawHeld(true); }
       setDrawFocus(true);
     }
@@ -2303,20 +2363,29 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   /* ------------------------------------------------------------- slides */
 
   /** the slide `html` after slide `after`, shown */
-  const insertSlide = (after: number, html: string) => {
+  const insertSlide = (after: number, html: string): boolean => {
     const ps = slidePaths(text.toString());
-    if (!ps.length) return;
+    if (!ps.length) return false;
     const p = ps[Math.min(after, ps.length - 1)];
     const parent = p.slice(0, -1);
-    if (!applyOps([{ t: 'insert', parent, index: p[p.length - 1] + 1, html }])) return;
+    if (!applyOps([{ t: 'insert', parent, index: p[p.length - 1] + 1, html }])) return false;
     const next = after + 1;
     setTimeout(() => { setCurrent(next); toCanvas({ ol: 'scrollTo', slide: next }); toRail({ ol: 'current', slide: next }); }, 150);
+    return true;
   };
   /** a slide after slide `after`, in slide `like`'s design (newSlideHtml) */
   const newSlide = (after: number, blank = false, like = after) => {
     const html = newSlideHtml(text.toString(), like, blank);
     if (html) insertSlide(after, html);
   };
+  /** a swipe on past the last slide: one after it, in its design (sourceops nextPageHtml), coming in from that side */
+  const addPage = () => {
+    const i = slidesRef.current.length - 1;
+    const html = nextPageHtml(text.toString(), i);
+    if (html && insertSlide(i, html)) showHud(`New slide · ${i + 2}`);
+    else pageDir.current = 0;
+  };
+  addPageRef.current = addPage;
 
   /* ------------------------------------------------------------- layouts and placeholders (decklayouts.ts) */
 
@@ -3041,10 +3110,12 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   const placed = kind === 'page' || presenting || !(touchUi || dockAsk) ? { dock: 'top' as DeckDock, col: 0 }
     : chooseDock({ area: dockArea, slide: slideShape, tools: bars.tools.reduce((n, g) => n + g.length * 34 + 9, 24), rest: 560, current: dockWas.current, gap: touchUi ? 0 : undefined });
   // (kept while drawing has the bars away: they come back where they were, into the room the slide left them)
-  const dock: DeckDock = kind === 'page' || presenting ? 'top' : dockAsk ?? (focusOn ? dockWas.current : placed.dock);
+  const dock: DeckDock = kind === 'page' || presenting ? 'top' : dockAsk ?? (focusOn || fullOn ? dockWas.current : placed.dock);
   dockWas.current = dock;
-  const sides = dock === 'sides' && !focusOn;
-  const topBar = !sides && !focusOn;
+  /** the toolbars away: drawing focus, the slide on the whole screen */
+  const barsAway = focusOn || fullOn;
+  const sides = dock === 'sides' && !barsAway;
+  const topBar = !sides && !barsAway;
 
   // the contextual tools on a row of their own when they do not fit beside the others (nothing hidden)
   const barRef = useRef<HTMLDivElement>(null);
@@ -3136,6 +3207,12 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
       {DECK_ZOOMS.map(z => <option key={z} value={String(z)}>{z}%</option>)}
     </select>
   );
+  /** the slide on the whole screen (`full`): on a touch screen */
+  const fullBtn = touchUi && soloOn && (
+    <button class="dl-btn dl-full-btn" data-dl-full aria-label="Full screen" onClick={() => setFull(true)}
+      title="Full screen: the slide edge to edge, everything else away — swipe to the next slide, on past the last for a new one"
+      dangerouslySetInnerHTML={{ __html: ICONS['dk-fullscreen'] ?? '⛶' }} />
+  );
   const invertBtn = darkS.dark && (
     <button class={'dl-btn dl-invert' + (darkS.invert ? ' on' : '')} data-dl-invert aria-pressed={darkS.invert} onClick={toggleDarkPages}
       title={darkS.invert ? 'Smart invert: the slides light on dark, photographs in their colours — documents, PDFs and slides alike. Click for their own colours' : 'The slides’ own colours — click to smart-invert the pages (documents, PDFs and slides alike)'}>◐</button>
@@ -3193,6 +3270,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
       {ctxEl}
       <div class="dl-side-end">
         {zoomSelect}
+        {fullBtn}
         {kind !== 'page' && !host.bindSvgExporter && <button class="dl-btn dl-present" title="Present from this slide (Shift+F5) — F5 from the first" aria-label="Present" data-dl-present onClick={() => startPresenting(false)}>▶</button>}
         <button class="dl-btn dl-more" title="More: objects, comments, code, editing or suggesting, download" aria-label="More" data-dl-more
           onClick={e => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); moreMenu(r.left, r.top); }}>
@@ -3202,24 +3280,35 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
       </div>
     </div>
   );
-  /** drawing (drawFocus): the pen in hand at the slide's top right corner — its tap the Draw row over the canvas — and Undo beside it */
-  const focusPill = focusOn && (() => {
+  /**
+   * Drawing (drawFocus), the slide on the whole screen (full): the pen in hand at the slide's top right
+   * corner — its tap the Draw row over the canvas —, Undo beside it, and the way out of the full screen
+   */
+  const drawTool = tool === 'pen' || tool === 'eraser' || tool === 'lasso';
+  const focusPill = (focusOn || fullOn) && (() => {
     const p = slideView.place(), at = p ? focusSpot(p, solo!.rect, box) : { right: 8, top: 8 };
     const icon = tool === 'eraser' ? 'inkeraser' : tool === 'lasso' ? 'inklasso' : ink.pen === 'highlighter' ? 'inkhl' : ink.nib.ball ? 'inkball' : 'inkpen';
+    const rowOpen = drawTool && drawOpen;
     return (
       <div ref={focusPillEl} class="dl-focus" data-dl-focus style={{ right: `${at.right}px`, top: `${at.top}px` }}>
         <div class="dl-focus-row">
-        <button type="button" class="dl-focus-btn" title="Undo (or tap with two fingers)" aria-label="Undo" data-dl-focus-undo
-          onClick={() => { toCanvas({ ol: 'stopText' }); setTimeout(() => host.undo(), 30); }} dangerouslySetInnerHTML={{ __html: ICONS['undo'] ?? '↶' }} />
-        <button type="button" class={'dl-focus-btn dl-focus-pen' + (drawOpen ? ' on' : '')} data-dl-focus-pen aria-expanded={drawOpen}
-          title={drawOpen ? 'Fold the pens away' : 'The pens, colours and widths — Done in them brings the toolbars back'} aria-label="Drawing tools"
-          onClick={() => { if (drawOpen) { setDrawOpen(false); setDrawHeld(true); } else { setDrawOpen(true); setDrawHeld(false); } }}>
+        {!locked && <button type="button" class="dl-focus-btn" title="Undo (or tap with two fingers)" aria-label="Undo" data-dl-focus-undo
+          onClick={() => { toCanvas({ ol: 'stopText' }); setTimeout(() => host.undo(), 30); }} dangerouslySetInnerHTML={{ __html: ICONS['undo'] ?? '↶' }} />}
+        {!locked && <button type="button" class={'dl-focus-btn dl-focus-pen' + (rowOpen ? ' on' : '')} data-dl-focus-pen aria-expanded={rowOpen}
+          title={!drawTool ? 'Draw — the pens, colours and widths' : drawOpen ? 'Fold the pens away' : fullOn ? 'The pens, colours and widths' : 'The pens, colours and widths — Done in them brings the toolbars back'} aria-label="Drawing tools"
+          onClick={() => {
+            if (!drawTool) { setToolState('pen'); setDrawOpen(true); setDrawHeld(false); }
+            else if (drawOpen) { setDrawOpen(false); setDrawHeld(true); }
+            else { setDrawOpen(true); setDrawHeld(false); }
+          }}>
           <span class="dl-focus-ico" dangerouslySetInnerHTML={{ __html: ICONS[icon] ?? ICONS['dk-draw'] ?? '' }} />
           {tool === 'pen' && <span class="dl-focus-dot" style={{ background: inkStyle.color }} />}
-        </button>
+        </button>}
+        {fullOn && <button type="button" class="dl-focus-btn" title="Leave the full screen: the toolbars, the slides and the rest back" aria-label="Leave full screen" data-dl-full-exit
+          onClick={() => setFull(false)} dangerouslySetInnerHTML={{ __html: ICONS['dk-fullscreen-exit'] ?? '×' }} />}
         </div>
         {/* (the Draw row — or the lasso's tools — under it when asked for) */}
-        {bars.sections.length > 0 && (
+        {drawTool && bars.sections.length > 0 && (
           <div class="dl-focus-bar" data-dl-focus-bar>{bars.sections.map((sec, i) => <Toolbar key={`${i}:${sec.label}`} id="deck-context" label={sec.label} groups={sec.groups} />)}</div>
         )}
       </div>
@@ -3241,7 +3330,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   };
 
   return (
-    <div ref={editorRef} class={'dl-editor' + (presenting ? ' presenting' : '') + (focusOn ? ' dl-drawfocus' : '')} data-kind={kind} data-dock={dock}>
+    <div ref={editorRef} class={'dl-editor' + (presenting ? ' presenting' : '') + (focusOn ? ' dl-drawfocus' : '') + (fullOn ? ' dl-full' : '')} data-kind={kind} data-dock={dock}>
       {saveState?.state === 'stale' && <div role="alert" data-dl-stale-notice style="padding:8px 12px;background:#fff5d8;color:#342700">
         This file was replaced while this browser had an older copy. Download the local source before reopening the latest file.
         <button class="btn" onClick={() => {
@@ -3268,6 +3357,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
           {zoomSelect}
           <button class="dl-btn" title="Zoom in (Ctrl+=)" onClick={() => zoomStep(1.25)}>+</button>
         </span>
+        {fullBtn}
         {invertBtn}
         {objectsBtn}
         {codeBtn}
@@ -3337,6 +3427,17 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
                 </div>
               )}
               {focusPill}
+              {/* (a swipe on past the last slide: the new one it adds, filling as it goes) */}
+              {soloOn && kind === 'deck' && (
+                <div ref={addBadge} class="dl-addpage" data-dl-addpage aria-hidden="true">
+                  <svg viewBox="0 0 32 32">
+                    <circle class="dl-pull-disc" cx="16" cy="16" r="15" />
+                    <circle class="dl-pull-arc" cx="16" cy="16" r="12.5" pathLength="1" transform="rotate(-90 16 16)" />
+                    <path class="dl-addpage-plus" d="M16 10v12M10 16h12" />
+                  </svg>
+                  <span class="dl-addpage-label">New slide</span>
+                </div>
+              )}
             </div>
             {(!link || !synced || canvasState !== 'ready') && <div class="dl-opening" data-dl-opening={canvasState === 'failed' ? 'failed' : linkState}
               role={canvasState === 'failed' || linkState === 'failed' || linkState === 'denied' ? 'alert' : 'status'}>
@@ -3360,7 +3461,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
             )}
           </div>
           {/* (folded away, nothing of them is left here: their button is in the corner) */}
-          {kind === 'deck' && notesShown && (
+          {kind === 'deck' && notesShown && !fullOn && (
             <div class="dl-notes">
               <textarea placeholder="Speaker notes" value={notesDraft && curSlidePath && notesDraft.path.join() === curSlidePath.join() ? notesDraft.text : notes} disabled={locked || !curSlidePath} data-dl-notes
                 onInput={e => setNotesDraft((e.target as HTMLTextAreaElement).value)}
@@ -3369,18 +3470,18 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
             </div>
           )}
         </div>
-        {objOpen && (
+        {objOpen && !fullOn && (
           <ObjectsPane slide={objects.slide} items={objects.items} sel={sel} readOnly={locked} close={() => toggleObjects(false)}
             select={paths => toCanvas({ ol: 'select', paths })} hover={p => toCanvas({ ol: 'hover', path: p })}
             rename={(p, name) => applyOps([{ t: 'attr', path: p, name: 'data-ol-name', value: name }])}
             lock={(p, on) => applyOps([{ t: 'attr', path: p, name: 'data-ol-locked', value: on ? '' : null }])}
             restack={(p, ref, front) => toCanvas({ ol: 'restack', path: p, ref, front })} />
         )}
-        {animOpen && kind === 'deck' && (
+        {animOpen && kind === 'deck' && !fullOn && (
           <AnimationPane seq={seq} sel={sel} readOnly={locked} close={() => toggleAnim(false)}
             send={cmd => toCanvas({ ol: 'steps', cmd })} select={p => toCanvas({ ol: 'select', paths: [p] })} />
         )}
-        {reviewOpen && (
+        {reviewOpen && !fullOn && (
           <ReviewPane review={review} slideTitles={slides.map(s => s.title)} current={current} kind={kind} me={me} canEdit={!locked}
             focus={focus} draft={draft} submitDraft={submitDraft} cancelDraft={() => setDraft(null)} select={showOnCanvas}
             reply={replyTo} resolve={resolveThread} remove={removeThread}
@@ -3388,7 +3489,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
             acceptAll={() => resolveEverything(true)} rejectAll={() => resolveEverything(false)}
             close={() => { setReviewOpen(false); setDraft(null); setFocus(null); }} />
         )}
-        {codeOpen && (
+        {codeOpen && !fullOn && (
           <div class="dl-code">
             <div class="dl-code-head"><span>{path.split('/').pop()}</span><button class="dl-btn" onClick={() => setCodeOpen(false)} title="Close">×</button></div>
             <textarea ref={codeRef} spellcheck={false} readOnly={locked} onInput={onCodeInput} data-dl-codearea
@@ -3397,7 +3498,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
         )}
         {rightCol}
       </div>
-      {corner && !focusOn && (cornerSlot ? createPortal(corner, cornerSlot) : <div class="dl-foot">{corner}</div>)}
+      {corner && !barsAway && (cornerSlot ? createPortal(corner, cornerSlot) : <div class="dl-foot">{corner}</div>)}
       {floatPop && <FloatPopover {...floatPop} onClose={() => setFloatPop(null)} />}
       {citeOpen && host.docId && <CiteDialog meta={CITE_META} search docId={host.docId} project={host.docId.split('/').slice(0, 2).join('/')} restoreFocusOnInsert={false}
         onInsert={(keys, cmd, before, after) => {

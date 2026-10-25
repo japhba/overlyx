@@ -37,6 +37,8 @@ export interface DeckInk {
   eraser: EraserSet;
   /** the kinds of thing the lasso takes */
   lasso: LassoKind[];
+  /** the Draw row locked open (its lock): a pick no longer folds it away, nor does drawing on a touch screen put it away with the toolbars */
+  keepRow: boolean;
 }
 
 /** the width presets (px of a 1280 px slide: 1½, 3, 6 pt; the highlighter's 10½, 18, 30 pt) and what the width picker offers */
@@ -85,6 +87,7 @@ export function defaultDeckInk(): DeckInk {
     snap: true,
     eraser: { precise: false, size: 1, hlOnly: false, back: false },
     lasso: [...LASSO_KINDS],
+    keepRow: false,
     pens: {
       pen: { color: INK_PALETTES.pen[0][0], width: DECK_INK_WIDTHS.pen[1], colors: INK_PALETTES.pen.map(c => c[0]), widths: [...DECK_INK_WIDTHS.pen] },
       highlighter: { color: INK_PALETTES.highlighter[0][0], width: DECK_INK_WIDTHS.highlighter[1], colors: INK_PALETTES.highlighter.map(c => c[0]), widths: [...DECK_INK_WIDTHS.highlighter] },
@@ -103,7 +106,7 @@ export function loadDeckInk(): DeckInk {
     if (!s || typeof s !== 'object') return ink;
     if (s.pen === 'pen' || s.pen === 'highlighter') ink.pen = s.pen;
     if (s.nib && typeof s.nib === 'object') ink.nib = nibWith(ink.nib, s.nib);
-    for (const k of ['pencil', 'fingersDraw', 'scribble', 'penInks', 'snap'] as const) if (typeof s[k] === 'boolean') ink[k] = s[k]!;
+    for (const k of ['pencil', 'fingersDraw', 'scribble', 'penInks', 'snap', 'keepRow'] as const) if (typeof s[k] === 'boolean') ink[k] = s[k]!;
     if (s.eraser && typeof s.eraser === 'object') ink.eraser = eraserWith(ink.eraser, s.eraser);
     if (Array.isArray(s.lasso)) { const k = LASSO_KINDS.filter(x => s.lasso!.includes(x)); if (k.length) ink.lasso = k; }
     for (const p of ['pen', 'highlighter'] as DeckPen[]) {
@@ -150,6 +153,7 @@ export interface DeckInkPatch {
   snap?: boolean;
   eraser?: Partial<EraserSet>;
   lasso?: LassoKind[];
+  keepRow?: boolean;
 }
 
 /** the presets after a change (a new object: the old one is left as it was) */
@@ -166,11 +170,11 @@ export function patchDeckInk(ink: DeckInk, p: DeckInkPatch): DeckInk {
     cur.widths[p.slotWidth.idx] = p.slotWidth.width;
     cur.width = p.slotWidth.width;
   }
-  const flag = (k: 'pencil' | 'fingersDraw' | 'scribble' | 'penInks' | 'snap') => (typeof p[k] === 'boolean' ? p[k]! : ink[k]);
+  const flag = (k: 'pencil' | 'fingersDraw' | 'scribble' | 'penInks' | 'snap' | 'keepRow') => (typeof p[k] === 'boolean' ? p[k]! : ink[k]);
   const lasso = p.lasso ? LASSO_KINDS.filter(k => p.lasso!.includes(k)) : ink.lasso;
   return {
     pen, pens: { ...ink.pens, [pen]: cur }, nib: nibWith(ink.nib, p.nib), pencil: flag('pencil'), fingersDraw: flag('fingersDraw'), scribble: flag('scribble'), penInks: flag('penInks'),
-    snap: flag('snap'), eraser: p.eraser ? eraserWith(ink.eraser, p.eraser) : ink.eraser, lasso: lasso.length ? lasso : ink.lasso,
+    snap: flag('snap'), eraser: p.eraser ? eraserWith(ink.eraser, p.eraser) : ink.eraser, lasso: lasso.length ? lasso : ink.lasso, keepRow: flag('keepRow'),
   };
 }
 

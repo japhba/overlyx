@@ -3323,6 +3323,20 @@ html[data-ui] .dl-side .tb-label { font-size: 9px; letter-spacing: .06em; white-
 /* drawing with the toolbars away (DeliverableEditor drawFocus, as Apple Notes' palette folds while one draws): the app's bars go too */
 html.ol-draw-focus .app > .menubar, html.ol-draw-focus .app .statusbar,
 html.ol-draw-focus .app > .health-bar, html.ol-draw-focus .app > .find-bar-wrap, html.ol-draw-focus .app > .guest-callout { display: none !important; }
+/* the slide on the whole screen (DeliverableEditor full): the files and the rail go too, and the editor keeps no toolbars, notes or panes */
+html.ol-deck-full .app > .menubar, html.ol-deck-full .app .statusbar, html.ol-deck-full .app > .health-bar, html.ol-deck-full .app > .find-bar-wrap,
+html.ol-deck-full .app > .guest-callout, html.ol-deck-full .app > .tb-dock-top, html.ol-deck-full .app > .main > .sidebar, html.ol-deck-full .app > .main > .sidebar-grip { display: none !important; }
+.dl-editor.dl-full .dl-rail { display: none; }
+/* a swipe on past the last slide (viewport.ts adding): the new slide it adds, at the side it comes in from — the ring fills, then says so */
+.dl-addpage { position: absolute; z-index: 3; right: 18px; top: 50%; transform: translateY(-50%); pointer-events: none; opacity: 0; --k: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.dl-addpage[data-axis="y"] { right: auto; top: auto; bottom: 18px; left: 50%; transform: translateX(-50%); }
+.dl-addpage svg { display: block; width: 40px; height: 40px; overflow: visible; transform: scale(calc(0.75 + 0.25 * var(--k))); }
+.dl-addpage-plus { fill: none; stroke: color-mix(in srgb, var(--accent) calc(var(--k) * 100%), var(--ui-muted)); stroke-width: 2; stroke-linecap: round; }
+.dl-addpage-label { font: 12px/1.2 var(--ui-font); color: var(--ui-fg); background: var(--surface); border: 1px solid var(--ui-border); border-radius: 10px; padding: 2px 8px; white-space: nowrap; opacity: 0; transition: opacity .12s; }
+.dl-addpage.ready .dl-addpage-label { opacity: 1; }
+.dl-addpage.ready .dl-pull-disc { fill: var(--accent); stroke: var(--accent); }
+.dl-addpage.ready .dl-pull-arc { stroke: transparent; }
+.dl-addpage.ready .dl-addpage-plus { stroke: #fff; }
 /* the slide's part of the canvas (DeliverableEditor inset): all of it, but while drawing the slide stays where the bars left it; the fingers beside the slide are the canvas' */
 .dl-view { position: absolute; pointer-events: none; }
 .dl-view > .dl-frame { pointer-events: auto; }
@@ -3534,6 +3548,8 @@ html[data-presenting] .ol-refocus { display: none; }
 .dl-obj-row.locked .dl-obj-label { color: var(--ui-muted); }
 .dl-objects-btn { display: inline-flex; align-items: center; }
 .dl-objects-btn svg { width: 15px; height: 15px; display: block; }
+.dl-full-btn { display: inline-flex; align-items: center; justify-content: center; }
+.dl-full-btn svg { width: 15px; height: 15px; display: block; }
 
 /* Document ▸ Settings of a markdown document (app/MarkdownSettings.tsx) */
 .md-settings { display: flex; flex-direction: column; gap: 8px; min-width: min(460px, 100%); }

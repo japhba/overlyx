@@ -84,6 +84,10 @@ Object.assign(ICONS, {
   'dk-group': I('<rect x="1.5" y="1.5" width="13" height="13" stroke-dasharray="1.6 1.2"/><rect x="3.5" y="3.5" width="5" height="5"/><circle cx="10.5" cy="10.5" r="2.5"/>'),
   'dk-ungroup': I('<rect x="1.5" y="1.5" width="6.5" height="6.5" stroke-dasharray="1.4 1.1"/><rect x="3" y="3" width="3.5" height="3.5"/><rect x="8" y="8" width="6.5" height="6.5" stroke-dasharray="1.4 1.1"/><circle cx="11.25" cy="11.25" r="1.9"/>'),
   'dk-lock': I('<rect x="3.5" y="7" width="9" height="7" rx="1"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/>'),
+  'dk-unlock': I('<rect x="3.5" y="7" width="9" height="7" rx="1"/><path d="M5.5 7V5a2.5 2.5 0 0 1 4.9-.7"/>'),
+  // the slide on the whole screen, and back
+  'dk-fullscreen': I('<path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/>'),
+  'dk-fullscreen-exit': I('<path d="M6 2.5V6H2.5M10 2.5V6h3.5M13.5 10H10v3.5M2.5 10H6v3.5"/>'),
   'dk-crop': I('<path d="M4.5 1.5v10h10M1.5 4.5h10v10"/>'),
   'dk-nobg': I('<rect x="1.8" y="2.8" width="12.4" height="10.4" rx="1" stroke-dasharray="1.6 1.3"/><path d="M5 12c0-3 1.3-5 3-5s3 2 3 5" fill="currentColor" fill-opacity="0.3"/><circle cx="8" cy="5.4" r="1.6" fill="currentColor" fill-opacity="0.3"/>'),
   'dk-replace': I('<rect x="1.8" y="2.8" width="8.5" height="7.5" rx="0.8"/><path d="M12 6.5v6.8H5.5"/><path d="M10.2 11.4l1.8 1.9 1.8-1.9" /><path d="M3 8.6l2.4-2.4 1.8 1.8 1.2-1.2 1.6 1.6"/>'),

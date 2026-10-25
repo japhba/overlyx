@@ -1001,7 +1001,17 @@ blend.
     the swipe began, shows the pull on the rubber band and turns the page after 90 px of scroll (once
     a swipe, momentum and all) or, a finger, a sixth of the canvas or a flick; the next slide comes
     in from that side (`enter`). Sideways it never comes loose; up and down, and zoomed in mid-slide,
-    it pans and pulls loose as ever. The editor sizes the frame to the
+    it pans and pulls loose as ever. On a touch screen a finger's swipe on past the **last slide adds
+    one** (`addsPage`, GoodNotes' next page): pulled 22 % of the canvas (`ADD_PAGE`; no flick, no
+    scroll), a "+" filling in the gap behind the slide says *New slide* once letting go adds it —
+    the last slide's design (`sourceops.ts` `nextPageHtml`; no title placeholder after a slide
+    without a title, a page written on by hand). **Full screen** (25 Oct 2026, touch screens: the
+    toolbar's ⛶ button, also in the side column): the app's bars, the files, the rail, the notes, the
+    panes and the toolbars go (`html.ol-deck-full`, `.dl-full`), the slide is fitted edge to edge into
+    the whole screen, Undo, the pens (their tap: the Draw row under them) and ⤡ back wait on its top
+    right corner (the drawing focus' pill), swipes up and down turn the page too and a page turned says
+    "3 / 12"; the browser's own full screen is asked for too where there is one (not in a web app from
+    the home screen) and leaving it leaves the editor's as it is. The editor sizes the frame to the
     slide and moves it by a transform set outside renders (`deliverable/viewport.ts` `SlideView`; a zoom
     too while it goes on — `zoomTo`, `placeAt` hold a `live` scale the editor's `zoom` takes over ~120 ms
     after the last wheel step or when the fingers lift, so a pinch renders no Preact; `will-change` only
@@ -2563,6 +2573,9 @@ the eraser, lasso, scribble-erase and live collaboration handle them like any st
 render such strokes). Every Draw row picks its colours from the layout editor's palette (`ColorGrid`:
 Google's grid, a seaborn row, custom colours). In Modern, *Draw* sits beside the inserts (it was under
 ⋮), and the paper page stays centred between the drawing gutters (it used to scroll out of view).
+The Draw row folds away once something is picked in it (the pen kept in hand) unless its **lock**
+(🔒 before *Done*, `DeckInk.keepRow`, this browser's) keeps it open — then drawing on a touch
+screen does not put the deck's toolbars away either, and a finger's tap leaves them.
 
 **Scratch-out and the pen's flow** (17 Oct 2026, after the user doubted both; designed from a web
 review of the apps and the HCI literature):

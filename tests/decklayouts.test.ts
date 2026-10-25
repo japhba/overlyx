@@ -7,7 +7,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { deckMargins, deckDesign, builtInLayouts, savedLayouts, layoutFromSlide, saveLayoutOp, applyLayoutOp, placeholderObject, layoutThumb, deckColors } from '../packages/client/src/deliverable/decklayouts.ts';
-import { newSlideHtml } from '../packages/client/src/deliverable/sourceops.ts';
+import { newSlideHtml, nextPageHtml } from '../packages/client/src/deliverable/sourceops.ts';
 import { chooseDock } from '../packages/client/src/deliverable/deckdock.ts';
 import { applyOp, parseSource } from '../packages/core/src/html/source.ts';
 import { slideElements } from '../packages/core/src/html/deliverable.ts';
@@ -117,6 +117,12 @@ describe("the deck's own layouts", () => {
     const h = newSlideHtml(DECK, 1)!;
     expect(h).toContain('<h2 data-ol-ph="title" style="position: absolute; left: 96px; top: 72px; width: 1088px"></h2>');
     expect(newSlideHtml(deck(slide('<p>No heading</p>')), 0)).toMatch(/<h2 data-ol-ph="title" style="[^"]+"><\/h2>/);
+  });
+  it('a swipe on past the last slide: its design — a slide written on by hand gets no title either (GoodNotes\' next page)', () => {
+    expect(nextPageHtml(DECK, 1)).toBe(newSlideHtml(DECK, 1));
+    const page = nextPageHtml(deck(slide('<svg class="ink" style="position: absolute"><path d="M0 0L9 9"/></svg>')), 0)!;
+    expect(page).not.toContain('data-ol-ph');
+    expect(page).not.toContain('<svg');
   });
 });
 

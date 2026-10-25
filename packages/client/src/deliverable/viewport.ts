@@ -78,6 +78,8 @@ export const BREAK = 160;
 /** how far a scroll sideways goes (px) before it turns the page; a finger: this much of the canvas, or a flick */
 export const PAGE_SCROLL = 90;
 const PAGE_FINGER = 0.15;
+/** how much of the canvas a finger swipes on past the last slide to add one (no flick: a slide is not added by accident) */
+export const ADD_PAGE = 0.22;
 
 /**
  * The zoom levels of a slide on the canvas, as the PDF viewer's fits (app/pdfzoom.ts): the whole slide
@@ -185,6 +187,13 @@ export interface ViewMarks {
   /** the slide never comes loose (drawing with everything else away: no Centre slide to bring it back, and a loose slide takes the swipes that turn the page) */
   fastened?: () => boolean;
   onPage?: (dir: 1 | -1) => void;
+  /**
+   * The slide shown is the last, and a swipe on past it adds one (`onPage(1)` past the end), as
+   * GoodNotes adds a page: a finger's, pulled ADD_PAGE of the canvas — said as it goes by `adding`.
+   */
+  addsPage?: () => boolean;
+  /** how far a swipe on past the last slide has come to adding one (1: let go, it does), along `axis`; null: it is over */
+  adding?: (k: number | null, axis: 'x' | 'y') => void;
   /** a zoom going on shows the slide at this scale (once a frame at most), ahead of the editor's */
   onLive?: (scale: number) => void;
   /** the slide was shown there (`place()`, each time it is drawn): what sits on its corner follows it */
@@ -215,6 +224,8 @@ export class SlideView {
   private swipe: { x: number; y: number; x0: number; y0: number; t0: number; finger: boolean; axis: 'x' | 'y' | null; pages: boolean; paged: boolean; from: number | null } | null = null;
   /** the way the last page was turned: the next slide comes in from that side */
   private turned: 'x' | 'y' = 'x';
+  /** a swipe on past the last slide shows how far it has come to adding one (`adding`) */
+  private addShown = false;
   /** this pull may set the slide free: a finger's, or a scroll begun at the edge it pulls past */
   private armed = true;
   /** the ring shows how far the pull has come (not while a zoom or a snap back in springs) */
@@ -516,8 +527,29 @@ export class SlideView {
     if (!s.pages) return false;
     if (s.paged) return true;
     if (s.axis === 'x') this.pull(dx, 0, 0, true); else this.pull(0, dy, 0, true);
-    if (!s.finger && Math.abs(s.axis === 'x' ? s.x : s.y) >= PAGE_SCROLL) this.turn(s);
+    const adds = this.adds(s);
+    if (s.finger && adds) this.showAdd(this.addWay(s, v), s.axis === 'y' ? 'y' : 'x');
+    else this.showAdd(null);
+    // (a scroll never adds a slide)
+    if (!s.finger && !adds && Math.abs(s.axis === 'x' ? s.x : s.y) >= PAGE_SCROLL) this.turn(s);
     return true;
+  }
+
+  /** the swipe goes on past the last slide (to the next: left, or up), where that adds one */
+  private adds(s: NonNullable<SlideView['swipe']>): boolean {
+    return (s.axis === 'y' ? s.y : s.x) - (s.from ?? 0) < 0 && !!this.marks.addsPage?.();
+  }
+
+  /** how far it has come to adding a slide: 1 once pulled ADD_PAGE of the canvas */
+  private addWay(s: NonNullable<SlideView['swipe']>, v: ViewInput): number {
+    const way = Math.abs((s.axis === 'y' ? s.y : s.x) - (s.from ?? 0));
+    return way / (ADD_PAGE * (s.axis === 'y' ? v.box.h : v.box.w));
+  }
+
+  private showAdd(k: number | null, axis: 'x' | 'y' = 'x'): void {
+    if (k === null && !this.addShown) return;
+    this.addShown = k !== null;
+    this.marks.adding?.(k, axis);
   }
 
   private turn(s: NonNullable<SlideView['swipe']>): void {
@@ -573,6 +605,7 @@ export class SlideView {
     if (this.idle) { clearTimeout(this.idle); this.idle = null; }
     // (two fingers: the swipe a finger began is no swipe)
     this.swipe = null;
+    this.showAdd(null);
     this.motion();
     this.pop = null;
     this.ringOn = false;
@@ -603,13 +636,14 @@ export class SlideView {
     const v = this.input();
     const s = this.swipe;
     this.swipe = null;
+    this.showAdd(null);
     if (!cancelled && v && s?.finger && s.pages && !s.paged) {
       const dim = s.axis === 'y' ? v.box.h : v.box.w, [lo, hi] = this.ranges(v)[s.axis === 'y' ? 'y' : 'x'];
       // (past the edge only, when it ran into it; then a flick counts near a fit — the slide's margins, what
       // is round its content — not zoomed in on a detail, where a quick pan overshoots the edge)
       const d = Math.abs((s.axis === 'y' ? s.y : s.x) - (s.from ?? 0));
       const fast = performance.now() - s.t0 < 250 && d > 30 && (!s.from || hi - lo <= dim / 2);
-      if (fast || d >= PAGE_FINGER * dim) this.turn(s);
+      if (this.adds(s) ? this.addWay(s, v) >= 1 : fast || d >= PAGE_FINGER * dim) this.turn(s);
     }
     if (!v) return;
     const r = this.active(v);

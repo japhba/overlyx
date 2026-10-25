@@ -16,7 +16,7 @@ import {
   Presentation, Heading, SquareCode, SquareSigma, Type, Droplet, Scan, Ruler, PencilLine, Hash, Book, Sheet,
   SplinePointer, SquaresUnite, SquaresSubtract, SquaresIntersect, SquaresExclude, Combine, Split, VectorPolygon, VectorSquare,
   ArrowRightLeft, DiamondPlus, DiamondMinus, Diamond, CircleDot, Slash, Unlink, Link2, Pentagon, ChartSpline,
-  LassoSelect, Pen, Eraser, Hand, Maximize2, Focus, SquareStack,
+  LassoSelect, Pen, Eraser, Hand, Maximize2, Focus, SquareStack, LockOpen, Maximize, Minimize,
   FileType, FileType2, PanelsTopLeft, Globe, Brush, BookMarked, FileImage, Folder, Asterisk, Group, Ungroup, Layers2,
 } from 'lucide';
 
@@ -60,7 +60,7 @@ export const MODERN_ICONS: Record<string, string> = {
   'dk-ul': N(List), 'dk-ol': N(ListOrdered), 'dk-more-text': N(Pilcrow), 'dk-weight': N(Minus),
   'dk-dash': N(Ruler), 'dk-lineweight': N(Minus), 'dk-linedash': N(Ruler), 'dk-tips': N(ArrowUpRight),
   'dk-radius': N(SquareRoundCorner), 'dk-opacity': N(Blend), 'dk-shadow': N(Layers), 'dk-arrange': N(BringToFront),
-  'dk-lock': N(Lock), 'dk-delete': N(Trash), 'dk-crop': N(Crop), 'dk-cropshape': N(Scan), 'dk-nobg': N(WandSparkles),
+  'dk-lock': N(Lock), 'dk-unlock': N(LockOpen), 'dk-fullscreen': N(Maximize), 'dk-fullscreen-exit': N(Minimize), 'dk-delete': N(Trash), 'dk-crop': N(Crop), 'dk-cropshape': N(Scan), 'dk-nobg': N(WandSparkles),
   // (the slide's Background and Layout are words, as Google Slides' are)
   'dk-replace': N(Replace), 'dk-undo': N(Undo2), 'dk-redo': N(Redo2), 'dk-master': N(SquareStack),
   'dk-cropaspect': N(SquareDashed), 'dk-highlight': N(Highlighter), 'dk-fill': N(Droplet), 'dk-pen': N(PencilLine), 'dk-draw': N(Pen), 'dk-ink-pen': N(Pen), 'dk-ink-hl': N(Highlighter), 'dk-ink-eraser': N(Eraser),

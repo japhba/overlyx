@@ -493,6 +493,18 @@ export function newSlideHtml(text: string, i: number, blank = false): string | n
 }
 
 /**
+ * The slide a swipe on past slide `i` (the last) adds: its design, as newSlideHtml's — but a slide
+ * with no title (a page written on by hand) gets none either, as GoodNotes adds a page of the same paper.
+ */
+export function nextPageHtml(text: string, i: number): string | null {
+  const { doc, text: t } = parseSource(text);
+  const ss = slideElements(doc);
+  const s = ss[i] ?? ss[ss.length - 1];
+  const titled = !!s && elementChildren(s).some(k => /^h[1-6]$/.test(k.tagName) || attr(k, PH_ATTR) === 'title');
+  return slideDesign(t, ss, s, false, numberObjects(text), titled);
+}
+
+/**
  * The slides whose designs (newSlideHtml's) differ, words aside — `first` first: the layouts a new
  * slide can take, as Keynote's are the theme's (an HTML deck has no masters: its slides are its layouts).
  */
@@ -512,7 +524,7 @@ export function slideDesigns(text: string, first = 0): number[] {
   return out;
 }
 
-function slideDesign(t: string, ss: HElement[], s: HElement | undefined, blank: boolean, numbers: Set<HElement>): string | null {
+function slideDesign(t: string, ss: HElement[], s: HElement | undefined, blank: boolean, numbers: Set<HElement>, title = true): string | null {
   if (!s?.sourceCodeLocation?.startTag) return null;
   const open = t.slice(s.sourceCodeLocation.startTag.startOffset, s.sourceCodeLocation.startTag.endOffset);
   const close = `</${s.tagName}>`;
@@ -548,7 +560,7 @@ function slideDesign(t: string, ss: HElement[], s: HElement | undefined, blank: 
       parts.push(`${open.replace(/^<(\w+)/, `<$1 ${PH_ATTR}="title"`)}</${k.tagName}>`);
     }
   }
-  if (!titled) parts.unshift(`<h2 ${PH_ATTR}="title" style="position: absolute; left: 7.5%; top: 8%; width: 85%"></h2>`);
+  if (!titled && title) parts.unshift(`<h2 ${PH_ATTR}="title" style="position: absolute; left: 7.5%; top: 8%; width: 85%"></h2>`);
   return `${open}\n  ${parts.join('\n  ')}\n${close}`;
 }
 

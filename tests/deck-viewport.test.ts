@@ -5,7 +5,7 @@
  * free, and let go near its place it snaps back in.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { rubber, banded, unband, panRange, freeRange, spring, clampTo, SlideView, BREAK, snapDistance, PAGE_SCROLL } from '../packages/client/src/deliverable/viewport.ts';
+import { rubber, banded, unband, panRange, freeRange, spring, clampTo, SlideView, BREAK, snapDistance, PAGE_SCROLL, ADD_PAGE } from '../packages/client/src/deliverable/viewport.ts';
 import { pinchFactor, pinchLock, triGesture, PINCH_START, PAN_BREAK } from '../packages/client/src/deliverable/gestures.ts';
 
 describe('the slide canvas', () => {
@@ -362,6 +362,27 @@ describe('a swipe sideways turns the page (Safari\'s swipe between pages)', () =
     f.v.release();
     expect(f.turned).toEqual([1]);
     expect([...q.free, ...f.free]).toEqual([]);
+  });
+
+  it('on past the last slide, a finger adds one once pulled far enough — not a flick, not a scroll; the "+" fills as it goes', () => {
+    const frame = { style: {} } as unknown as HTMLElement;
+    const turned: number[] = [], shown: (number | null)[] = [];
+    const v = new SlideView(() => frame, () => ({ box, rect, scale: 0.7, margin: 32 }), { pages: () => true, onPage: d => turned.push(d), addsPage: () => true, adding: k => shown.push(k) });
+    v.render();
+    v.panBy(-25, 0); v.panBy(-25, 0); v.release();   // a flick: no new slide
+    expect(turned).toEqual([]);
+    expect(shown.at(-1)).toBeNull();
+    const step = (ADD_PAGE * box.w) / 4;
+    for (let i = 0; i < 4; i++) v.panBy(-step - 0.1, 0);
+    expect(shown.at(-1)).toBeGreaterThanOrEqual(1);
+    v.release();
+    expect(turned).toEqual([1]);
+    vi.advanceTimersByTime(400);
+    for (let i = 0; i < 12; i++) v.scroll(-30, 0);   // a scroll past the last: nothing
+    vi.advanceTimersByTime(200);
+    expect(turned).toEqual([1]);
+    v.panBy(60, 0); vi.advanceTimersByTime(70); v.release();   // back: the slide before, as ever
+    expect(turned).toEqual([1, -1]);
   });
 
   it('a canceled short flick settles without paging, while a normal lift still pages', () => {
