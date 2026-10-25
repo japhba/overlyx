@@ -6,8 +6,8 @@
  * sizes the frame to that and pans and zooms the frame itself (DeliverableEditor, viewport.ts): the
  * page never scrolls.
  */
-import type { Rect, Solo } from '../protocol';
-import { MODE, state, slides, docRect, layoutHooks, post, slideOf } from './env';
+import { soloPad, ASIDE_ATTR, type Rect, type Solo } from '../protocol';
+import { MODE, state, slides, docRect, layoutHooks, post, slideOf, pageSize } from './env';
 
 /** room around the slide shown (CSS px of the page): the selection's handles and label fit in it */
 export const SOLO_PAD = 48;
@@ -18,17 +18,27 @@ let css: HTMLStyleElement | null = null;
 export function isSolo(): boolean { return MODE === 'edit' && state.kind !== 'page' && slides().length > 0; }
 
 function install(on: boolean): void {
-  document.documentElement.classList.toggle('ol-solo', on);
+  const root = document.documentElement;
+  root.classList.toggle('ol-solo', on);
+  // (a deck: the canvas beside the slide, to draw on — soloPad, fitPad)
+  root.classList.toggle('ol-aside', on && state.kind === 'deck');
   if (!on || css) return;
   css = document.createElement('style');
   css.setAttribute('data-ol-runtime', '');
-  css.textContent = `html.ol-solo { padding: ${SOLO_PAD}px !important; margin: 0 !important; overflow: hidden !important; height: auto !important; min-height: 0 !important; box-sizing: content-box !important; scroll-snap-type: none !important; }
+  css.textContent = `html.ol-solo { padding: var(--ol-pad-y, ${SOLO_PAD}px) var(--ol-pad-x, ${SOLO_PAD}px) !important; margin: 0 !important; overflow: hidden !important; height: auto !important; min-height: 0 !important; box-sizing: content-box !important; scroll-snap-type: none !important; }
     html.ol-solo :is(body, :has(> .slide)) { display: block !important; gap: 0 !important; padding: 0 !important; margin: 0 !important; transform: none !important; zoom: 1 !important;
       height: auto !important; min-height: 0 !important; max-height: none !important; overflow: visible !important; scroll-snap-type: none !important; }
     html.ol-solo .slide:not([${CUR}]) { display: none !important; }
     html.ol-solo .slide[${CUR}] { margin: 0 !important; transform: none !important;
       box-shadow: 0 0 0 calc(1px * var(--ol-px, 1)) rgba(0, 0, 0, 0.16), 0 calc(2px * var(--ol-px, 1)) calc(12px * var(--ol-px, 1)) rgba(0, 0, 0, 0.24) !important; }
-    :where(html.ol-solo:not(.ol-page-checker) .slide) { ${PAGE_BG} }`;
+    :where(html.ol-solo:not(.ol-page-checker) .slide) { ${PAGE_BG} }
+    html.ol-solo.ol-aside .slide[${CUR}] { overflow: visible !important; }
+    html.ol-solo.ol-aside [${ASIDE_ATTR}] { opacity: 0.6; }
+    html.ol-solo.ol-aside::before { content: ''; position: absolute; inset: calc(8px * var(--ol-px, 1)); pointer-events: none;
+      border: calc(1.5px * var(--ol-px, 1)) dashed rgba(128, 128, 128, 0.45); border-radius: calc(12px * var(--ol-px, 1)); }
+    html.ol-solo.ol-aside::after { content: 'Beside the slide · not shown when presenting'; position: absolute; left: var(--ol-pad-x); top: calc(var(--ol-pad-y) - 40px * var(--ol-px, 1));
+      pointer-events: none; font: 500 calc(12px * var(--ol-px, 1)) / 1.2 system-ui, -apple-system, sans-serif; color: rgba(40, 44, 52, 0.8); white-space: nowrap;
+      text-shadow: 0 0 calc(3px * var(--ol-px, 1)) rgba(255, 255, 255, 0.85); }`;
   document.head.appendChild(css);
 }
 
@@ -100,6 +110,20 @@ export function ensureSolo(): void {
   if (index !== before) post({ ol: 'visible', slide: index });
 }
 
+/**
+ * The room round the slide shown (soloPad), from its own size — the other slides are hidden: the
+ * first's measures nothing (runtime pageSize) — set when that changes.
+ */
+function fitPad(s: HTMLElement): { x: number; y: number } {
+  const root = document.documentElement;
+  // (a slide sized by the window, 100vw / 100vh: no size of its own — the room would grow the frame, the frame the slide, without end)
+  const w = Math.abs(s.offsetWidth - root.clientWidth) <= 2 ? 1280 : s.offsetWidth || 1280, h = Math.abs(s.offsetHeight - root.clientHeight) <= 2 ? 720 : s.offsetHeight || 720;
+  const pad = soloPad(state.kind, w, h);
+  if (root.style.getPropertyValue('--ol-pad-x') !== `${pad.x}px`) root.style.setProperty('--ol-pad-x', `${pad.x}px`);
+  if (root.style.getPropertyValue('--ol-pad-y') !== `${pad.y}px`) root.style.setProperty('--ol-pad-y', `${pad.y}px`);
+  return pad;
+}
+
 /** an element of another slide is selected or retyped (an undo, the code view, a search): its slide is shown */
 export function revealSlideOf(el: Element | null): boolean {
   if (!el || !isSolo()) return false;
@@ -166,9 +190,12 @@ function soloInfo(): Solo | undefined {
   if (!isSolo()) return undefined;
   const s = slides()[index];
   if (!s) return undefined;
+  const pad = fitPad(s);
   const r = docRect(s);
   const content = contentRect(s) ?? undefined;
-  return { slide: index, rect: r, height: Math.ceil(r.y + r.h + SOLO_PAD), ...(content ? { content } : {}) };
+  // (a slide as wide as the window — 100vw, no size of its own: pageSize's 1280 —, else as it is)
+  const own = pageSize().width;
+  return { slide: index, rect: r, width: Math.ceil(r.x + (own ? Math.min(own, r.w) : r.w) + pad.x), height: Math.ceil(r.y + r.h + pad.y), ...(content ? { content } : {}) };
 }
 
 layoutHooks.solo = soloInfo;

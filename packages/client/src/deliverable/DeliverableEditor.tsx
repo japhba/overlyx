@@ -33,7 +33,7 @@ import { keepAwake } from '../app/wakelock';
 import { presentFingersDraw, savePresentFingersDraw, presentLinked, savePresentLinked } from '../app/presentkit';
 import { checkedPresent, type PresentState, type PresenterState } from '../app/presentshare';
 import { createPortal } from 'preact/compat';
-import { isFromRuntime, RAIL_NUM } from './protocol';
+import { isFromRuntime, RAIL_NUM, ASIDE_ATTR } from './protocol';
 import { rebasedSplices, rebaseObjectPaths, objectHtml, imageHtml, insertPlace, newSlideHtml, nextPageHtml, slideDesigns, slidePaths, slideNotes, notesOp, sourceRange, inlineSvgHtml, guidesIn } from './sourceops';
 import { GUIDES_ATTR, LAYOUT_MARGINS_ATTR, layoutMarginGuides, parseGuides, masterGuides, formatGuides, withGuide, type Guide } from './guides';
 import { deckMargins, deckDesign, builtInLayouts, savedLayouts, layoutFromSlide, saveLayoutOp, applyLayoutOp, placeholderObject, layoutThumb, deckColors, PH_ATTR, PH_LABELS, PH_ROLES, type PhRole, type DesignLooks, type DeckDesign, type Layout } from './decklayouts';
@@ -108,7 +108,7 @@ function saveView(path: string, v: CanvasView): void {
 function sameSolo(a: Solo | null, b: Solo | null): boolean {
   if (!a || !b) return a === b;
   const near = (r?: Rect, q?: Rect) => !r || !q ? r === q : Math.abs(r.x - q.x) < 1 && Math.abs(r.y - q.y) < 1 && Math.abs(r.w - q.w) < 1 && Math.abs(r.h - q.h) < 1;
-  return a.slide === b.slide && Math.abs(a.height - b.height) < 2 && near(a.rect, b.rect) && near(a.content, b.content);
+  return a.slide === b.slide && Math.abs(a.height - b.height) < 2 && Math.abs((a.width ?? 0) - (b.width ?? 0)) < 2 && near(a.rect, b.rect) && near(a.content, b.content);
 }
 
 /** where the pen and Undo sit while drawing (CSS right / top on the canvas): inside the slide's top right corner, on the canvas when that is off it */
@@ -463,6 +463,8 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
   const pending = useRef<{ select?: Path[]; editText?: Path; math?: boolean } | null>(null);
 
   const frameW = kind === 'page' ? (device === 'mobile' ? 390 : 1280) : pageW + PAD * 2;
+  /** the one-slide canvas' frame: the slide and the room round it (a deck's, the canvas beside it to draw on: protocol soloPad), as the runtime lays it out */
+  const soloFrameW = solo?.width ?? pageW + PAD * 2;
   const soloOn = !!solo && kind !== 'page' && solo.rect.w > 0 && solo.rect.h > 0;
   /** room past the slide's edges a slide zoomed in pans to (screen px) */
   const margin = box.w < 600 ? 12 : 32;
@@ -1889,8 +1891,14 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     const k = kindRef.current;
     const place = insertPlace(cur, slide, after, k);
     if (!place) return;
-    const html = objectHtml(t, rect, k, pageW / 1280, pts, bez, drawing ? deckInkStyle(inkRef.current, pageWRef.current) : undefined);
-    if (!html) return;
+    // (wholly beside the slide, on the canvas round it: the slide's, shown only while editing — ASIDE_ATTR)
+    const besideIt = (r: Rect, h: string) => {
+      const so = soloState.current;
+      return so && k === 'deck' && slide && (r.x + r.w <= 0 || r.y + r.h <= 0 || r.x >= so.rect.w || r.y >= so.rect.h) ? h.replace(/^<(\w+)/, `<$1 ${ASIDE_ATTR}`) : h;
+    };
+    const made = objectHtml(t, rect, k, pageW / 1280, pts, bez, drawing ? deckInkStyle(inkRef.current, pageWRef.current) : undefined);
+    if (!made) return;
+    const html = besideIt(rect, made);
     if (!applyOps([{ t: 'insert', parent: place.parent, index: place.index, html }])) return;
     if (scratch?.length) {
       // a scribble over strokes (core/scratchout.ts): they and it go, a step after it came — so the first
@@ -1902,7 +1910,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     if (snap && /^[a-z]+$/.test(snap.kind)) {
       // draw and hold (core/shapesnap.ts): the stroke becomes its shape a step after it came — Undo brings the stroke back as drawn
       const shaped = objectHtml('pen', snap.rect, k, pageW / 1280, undefined, { d: '', closed: false, runs: snap.runs }, deckInkStyle(inkRef.current, pageWRef.current));
-      if (shaped && applyOps([{ t: 'outer', path: place.path, html: shaped.replace('<svg class="ol-ink"', `<svg class="ol-ink" data-ol-shape="${snap.kind}"`) }])) showHud(`${SNAP_NAMES[snap.kind] ?? 'Shape'} · Undo brings the stroke back`, 1400);
+      if (shaped && applyOps([{ t: 'outer', path: place.path, html: besideIt(snap.rect, shaped.replace('<svg class="ol-ink"', `<svg class="ol-ink" data-ol-shape="${snap.kind}"`)) }])) showHud(`${SNAP_NAMES[snap.kind] ?? 'Shape'} · Undo brings the stroke back`, 1400);
       return;
     }
     pending.current = drawing ? null : t === 'formula' ? { editText: place.path, math: true } : t === 'text' ? { editText: place.path } : { select: [place.path] };
@@ -3438,7 +3446,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
             {/* (the slide's part of the canvas: all of it, but while drawing holds the slide where the bars left it) */}
             <div ref={viewEl} class="dl-view" style={{ top: `${inset.t}px`, right: `${inset.r}px`, bottom: `${inset.b}px`, left: `${inset.l}px` }}>
               {link && synced && <iframe ref={canvasFrame} class={'dl-frame' + (soloOn ? ' solo' : '')} title="Page" sandbox={offlineDocs.edit ? undefined : 'allow-scripts allow-modals allow-popups allow-forms'} src={offlineDocs.edit ? offlineSrc('edit') : src('edit')}
-                style={soloOn ? { width: `${frameW}px`, height: `${solo!.height}px`, left: '0px' } : { width: `${frameW}px`, height: `${frameH}px`, transform: `scale(${scale})`, left: `${left}px` }} />}
+                style={soloOn ? { width: `${soloFrameW}px`, height: `${solo!.height}px`, left: '0px' } : { width: `${frameW}px`, height: `${frameH}px`, transform: `scale(${scale})`, left: `${left}px` }} />}
               {soloOn && (
                 <div ref={pullRing} class="dl-pull" data-dl-pull aria-hidden="true">
                   <svg viewBox="0 0 32 32">

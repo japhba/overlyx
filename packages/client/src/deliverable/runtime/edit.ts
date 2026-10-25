@@ -24,6 +24,7 @@
  * drag that leaves the frame keeps going.
  */
 import type { Path, SelItem, SelStyle, Tool, Rect, HtmlOp, ObjKind, KeyPress, InkStyle, PeerInfo, TextCaret, WordsStyle, ReliabilityEvent, ReliabilityPointer } from '../protocol';
+import { ASIDE_ATTR } from '../protocol';
 import { inkOn } from '../../app/contrast';
 import { MODE, post, state, srcOf, link, pathOf, liveAt, sourced, slides, slideOf, docRect, isForeign, sendLayout, penWork } from './env';
 import { mapAssets, restoreMappedAssets } from '../offlineassets';
@@ -1518,7 +1519,8 @@ function onPointerDown(e: PointerEvent): void {
     return;
   }
   if (tool === 'pen') {
-    const slide = slideOf(t);
+    // (on the canvas beside the slide: the slide's, drawn beside it)
+    const slide = slideOf(t) ?? besideSlide();
     drag = { ...base, kind: 'pen', slide, pts: [[x, y]] };
     startInk(e, slide);
     capture();
@@ -2141,6 +2143,8 @@ function onDragEnd(e: PointerEvent): void {
   for (const x of d.els) {
     const op = styleOp(x);
     if (op) ops.push(op);
+    const aside = asideOp(x.el);
+    if (aside) ops.push(aside);
     if (d.kind === 'resize' && x.inner) {
       const ip = pathOf(x.inner.img);
       const ist = x.inner.img.style;
@@ -2151,6 +2155,25 @@ function onDragEnd(e: PointerEvent): void {
   // an object of a group moved or resized: the group fits around its objects again
   commit([...ops, ...refitGroups(d.els.map(x => x.el))]);
   draw();
+}
+
+/** the canvas beside the slide shown (solo.ts, a deck's): what is drawn there is that slide's */
+function besideSlide(): HTMLElement | null {
+  return isSolo() && state.kind === 'deck' ? slides()[soloIndex()] ?? null : null;
+}
+
+/**
+ * An object of the slide shown moved wholly beside it, or back onto it: marked so (ASIDE_ATTR) — what
+ * lies beside a slide is never presented, printed or in the thumbnails (PowerPoint's pasteboard).
+ */
+function asideOp(el: Element): HtmlOp | null {
+  const slide = besideSlide();
+  if (!slide || el.parentElement !== slide) return null;
+  const s = slide.getBoundingClientRect(), r = el.getBoundingClientRect();
+  const beside = r.right <= s.left || r.left >= s.right || r.bottom <= s.top || r.top >= s.bottom;
+  const path = pathOf(el);
+  if (!path || beside === el.hasAttribute(ASIDE_ATTR)) return null;
+  return { t: 'attr', path, name: ASIDE_ATTR, value: beside ? '' : null };
 }
 
 /** A tool switch or lost window focus ends the in-flight gesture as a cancellation. */

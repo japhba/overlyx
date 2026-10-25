@@ -1020,7 +1020,18 @@ blend.
     the whole screen, Undo, the pens (their tap: the Draw row under them) and ⤡ back wait on its top
     right corner (the drawing focus' pill), swipes sideways turn the page and a page turned says
     "3 / 12"; the browser's own full screen is asked for too where there is one (not in a web app from
-    the home screen) and leaving it leaves the editor's as it is. The editor sizes the frame to the
+    the home screen) and leaving it leaves the editor's as it is. **Beside the slide** (25 Oct 2026, the
+    user: draw "on the canvas outside of the slides"; PowerPoint's pasteboard): a deck's frame holds
+    half a slide of room each way round the slide shown (`protocol.ts` `soloPad`; runtime `fitPad`
+    from the shown slide's size — the hidden first slide measures nothing — and `Solo.width`, the
+    frame width the editor gives it), the slide's own overflow shown while editing, a dashed edge
+    round the room and *Beside the slide · not shown when presenting* over the slide's corner. The
+    pen draws there (runtime `besideSlide`): the stroke is the slide's, at coordinates outside it, and
+    an object wholly outside its slide carries `data-ol-aside` (`ASIDE_ATTR`; set when drawn — the
+    editor's `besideIt` — and when moved off or back on — runtime `asideOp`), drawn at 60 % while
+    editing and hidden in every other mode (presenting, the rail's thumbnails, printing, the published
+    page). It is reached by a pinch out past Fit or a pull up or down that sets the slide loose.
+    The editor sizes the frame to the
     slide and moves it by a transform set outside renders (`deliverable/viewport.ts` `SlideView`; a zoom
     too while it goes on — `zoomTo`, `placeAt` hold a `live` scale the editor's `zoom` takes over ~120 ms
     after the last wheel step or when the fingers lift, so a pinch renders no Preact; `will-change` only

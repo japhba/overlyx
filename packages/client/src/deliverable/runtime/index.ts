@@ -14,7 +14,7 @@
  * In every mode TeX math is typeset (math.ts) and speaker notes are hidden; `window.__olReady`
  * turns true once fonts, math and pictures have settled (the renderer waits for it).
  */
-import { RAIL_NUM, type ToRuntime, type Path, type PeerInfo } from '../protocol';
+import { RAIL_NUM, ASIDE_ATTR, type ToRuntime, type Path, type PeerInfo } from '../protocol';
 import { MODE, post, state, setFolderBase, detectKind, slideBoxes, pageSize, sendLayout, slides, srcOf, pathOf, docRect, isForeign, layoutHooks, liveAt, slideOf, penBusy, whenPenRests } from './env';
 import { safeColor } from './carets';
 import { inkOn } from '../../app/contrast';
@@ -420,6 +420,8 @@ function init(): void {
   addStyle(NOTES_CSS);
   // a skipped slide (the editor's Skip slide): not presented, not printed
   if (MODE === 'present' || MODE === 'print') addStyle('.slide[data-ol-skip] { display: none !important; }');
+  // what lies beside a slide (drawn on the canvas round it, solo.ts): only while editing
+  if (MODE !== 'edit') addStyle(`[${ASIDE_ATTR}] { display: none !important; }`);
   // suggestions shown while editing, accepted everywhere else (review.ts)
   installReviewCss();
   if (MODE === 'check') rememberPage();

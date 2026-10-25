@@ -182,7 +182,8 @@ export interface ReviewView {
  * `content`: where what is on it is (its text, pictures, drawings, filled or framed boxes — not its
  * background), the slide's margins left out: what Fit content zooms to (none: nothing on it).
  */
-export interface Solo { slide: number; rect: Rect; height: number; content?: Rect }
+/** the one slide the canvas shows (runtime solo.ts): where it is in the frame, the frame's size it lays out in (`width`: the room round it, soloPad), what is on it */
+export interface Solo { slide: number; rect: Rect; width?: number; height: number; content?: Rect }
 
 /** what an object does at a step when presenting (core html/steps.ts) */
 export type StepKind = 'appear' | 'disappear';
@@ -445,5 +446,18 @@ export type FromRuntime =
 
 /** the room (screen px) left of the rail's thumbnails for their numbers: the editor makes the rail's frame that much wider, the rail's page lays its slides out right of it */
 export const RAIL_NUM = 20;
+
+/**
+ * The room round the slide the canvas shows (CSS px of the page, each side): a poster's, the
+ * selection's handles and label; a deck's, half a slide each way — the canvas beside the slide, to
+ * draw on (the user, 25 Oct 2026: "draw on the canvas outside of the slides"), PowerPoint's pasteboard:
+ * what lies there wholly outside the slide is the slide's (`ASIDE_ATTR`), shown only while editing.
+ * `w`, `h`: the slides' size (the first's, runtime pageSize).
+ */
+export function soloPad(kind: string, w: number, h: number): { x: number; y: number } {
+  return kind === 'deck' ? { x: Math.max(48, Math.round(w / 2)), y: Math.max(48, Math.round(h / 2)) } : { x: 48, y: 48 };
+}
+/** marks an object of a slide lying wholly beside it (drawn there, or moved there): never presented, printed or in the thumbnails */
+export const ASIDE_ATTR = 'data-ol-aside';
 
 export const isFromRuntime = (d: unknown): d is FromRuntime => !!d && typeof d === 'object' && typeof (d as { ol?: unknown }).ol === 'string';
