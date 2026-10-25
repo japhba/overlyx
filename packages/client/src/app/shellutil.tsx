@@ -93,13 +93,13 @@ const FADE_MAX = 0.75;
 
 /**
  * How far a change's colour has gone into black at an age (s): not at all in its first hour, then
- * the colour left shrinks by the same factor with every equal step on a log clock — 38 % gone at a
- * day, 54 % at a week, 63 % at a month — down to a quarter at a year, where it stays.
+ * slowly at first and faster later along a log clock (1 h → 1 d → 1 w → 1 mo → 1 y) — 9 % at a
+ * day, 24 % at a week, 39 % at a month, 54 % at three months — to 75 % at a year, where it stays.
  */
 export function changeFade(age: number): number {
   if (!(age > HOUR)) return 0;
   const s = Math.min(1, Math.log(age / HOUR) / Math.log(YEAR / HOUR));
-  return 1 - (1 - FADE_MAX) ** s;
+  return FADE_MAX * s * s;
 }
 
 /**
