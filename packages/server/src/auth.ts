@@ -7,6 +7,7 @@ import { db, pickColor, type UserRow } from './db.ts';
 import { config, JWT_SECRET } from './config.ts';
 import { adoptGuest, bindInvitations, isInvited } from './access.ts';
 import { notifySignup } from './mailer.ts';
+import { tidy } from '@overlyx/core/agentname.ts';
 import { isDriveCallback, finishConnect } from './gdocs/google.ts';
 import type { AccessScope } from './tokenAuth.ts';
 
@@ -54,15 +55,18 @@ const GUEST_ANIMALS = ['Aardvark', 'Badger', 'Capybara', 'Dolphin', 'Elk', 'Fox'
 /**
  * A guest: the temporary account of somebody who opened a share link without signing in. No
  * password, no e-mail; it lives as long as its session cookie and vanishes when the visitor signs
- * in (access.ts adoptGuest moves what the link granted to the real account) or is pruned.
+ * in (access.ts adoptGuest moves what the link granted to the real account) or is pruned. A name
+ * the visitor gave on the invitation is shown as "Ada Lovelace (guest)" — nobody vouches for it —
+ * and without one they are "Anonymous Otter".
  */
-export function createGuest(): UserRow {
+export function createGuest(name?: string | null): UserRow {
+  const given = tidy(name ?? '').slice(0, 60).trim();
   const animal = GUEST_ANIMALS[crypto.randomInt(GUEST_ANIMALS.length)];
   for (;;) {
     const username = 'guest-' + crypto.randomBytes(5).toString('hex');
     if (db.prepare('SELECT 1 FROM users WHERE username = ?').get(username)) continue;
     const info = db.prepare('INSERT INTO users (username, display_name, password_hash, color, email, google_sub, is_admin, is_guest, created_at) VALUES (?,?,?,?,?,?,0,1,?)')
-      .run(username, 'Anonymous ' + animal, null, pickColor(), null, null, Date.now());
+      .run(username, given ? `${given} (guest)` : 'Anonymous ' + animal, null, pickColor(), null, null, Date.now());
     return db.prepare('SELECT * FROM users WHERE id = ?').get(info.lastInsertRowid) as UserRow;
   }
 }

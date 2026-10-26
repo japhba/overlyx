@@ -152,9 +152,9 @@ export function App() {
   };
   // "Continue without an account" on the invitation: the server opens a guest session holding what
   // the link grants, straight to the document — signing in later keeps the project (Workspace's guest callout)
-  const joinAsGuest = async () => {
+  const joinAsGuest = async (name: string) => {
     if (!invite) return;
-    const a = await api.acceptShare(invite.token, invite.path);
+    const a = await api.acceptShare(invite.token, invite.path, name);
     const u = a.user ?? (await api.me()).user;
     if (!u) throw new Error('The project could not be opened. Try again, or sign in.');
     location.hash = shareLanding(a);

@@ -98,7 +98,7 @@ ${NOTICE_STYLE}</head>
 ${google
     ? '<p>When you sign in with Google we receive and keep your name, e-mail address, profile picture and Google account id. We derive a user name from your e-mail address and give you a colour (both show next to your edits). We also keep your settings and keyboard shortcuts.</p>'
     : '<p>Your account was set up by the operator: we keep your name, user name, e-mail address if one was given, a scrambled form of your password (never the password itself) and a colour that shows next to your edits. We also keep your settings and keyboard shortcuts.</p>'}
-<p>If you open a share link without signing in, you get a temporary guest account with a random name (“Anonymous Otter”). It is deleted about a month later, or its access moves to your account when you sign in.</p>
+<p>If you open a share link without signing in, you get a temporary guest account under the name you give there, marked as a guest, or a random one (“Anonymous Otter”). It is deleted about a month later, or its access moves to your account when you sign in.</p>
 <h3>Your projects</h3>
 <p>Everything you put into a project stays on the server: files, uploaded images, the PDFs we build, comments, tracked changes and earlier versions. Every project has a version history (a git repository). OverLyX commits your changes to it after a few minutes of editing, with your name and e-mail address as the author.</p>
 <h3>The project's activity log</h3>

@@ -212,6 +212,10 @@ describe('link sharing', () => {
     expect(guest.guest).toBe(true);
     expect(guest.username).toMatch(/^guest-[0-9a-f]{10}$/);
     expect(guest.name).toMatch(/^Anonymous [A-Z][a-z]+$/);
+    // a name the visitor gave on the invitation: tidied for LaTeX author fields, marked as unverified
+    expect(toSessionUser(createGuest('  Ada  Lovelace ')).name).toBe('Ada Lovelace (guest)');
+    expect(toSessionUser(createGuest('Ada}{\\x')).name).toBe('Ada x (guest)');
+    expect(toSessionUser(createGuest(' {} ')).name).toMatch(/^Anonymous [A-Z][a-z]+$/);
     expect(bob.guest).toBeUndefined();
     expect(access.acceptLink(link.token, guest).role).toBe('edit');
     expect(access.roleFor(guest, 'jan/paper')).toBe('edit');

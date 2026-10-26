@@ -194,6 +194,9 @@ div.login.lp .invite-key:hover { background: color-mix(in srgb, var(--lp-ink) 86
 div.login.lp .invite-key.outline { background: transparent; color: var(--lp-ink); }
 div.login.lp .invite-key.outline:hover { background: color-mix(in srgb, var(--lp-ink) 6%, transparent); }
 div.login.lp .invite-key:disabled { opacity: 0.6; cursor: default; }
+div.login.lp .invite-name { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--lp-ink2); }
+div.login.lp .invite-name i { font-style: normal; color: var(--lp-muted); }
+div.login.lp .invite-name input { width: 100%; }
 div.login.lp .invite-page .err { margin: 16px 0 0; font-size: 13.5px; }
 div.login.lp .invite-foot { margin: 24px 0 0; text-align: center; font-size: 12px; color: var(--lp-muted); }
 div.login.lp .invite-foot a { color: inherit; }

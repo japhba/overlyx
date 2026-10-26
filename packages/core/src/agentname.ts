@@ -6,7 +6,7 @@
  */
 
 /** Characters a name keeps: they end up in LaTeX (\lyxadded{author}…), LyX's \author line and comment headers. */
-const tidy = (s: string) => s.replace(/[^\p{L}\p{N} .+_'-]/gu, ' ').replace(/\s+/g, ' ').trim();
+export const tidy = (s: string) => s.replace(/[^\p{L}\p{N} .+_'-]/gu, ' ').replace(/\s+/g, ' ').trim();
 const cap = (w: string) => (/^[a-z]+$/.test(w) ? w[0].toUpperCase() + w.slice(1) : w);
 
 /**

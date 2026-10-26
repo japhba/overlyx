@@ -108,8 +108,8 @@ app.use('/oauth', oauthRoutes());
  * authenticated router. Guests exist only on instances open to everyone (`OVERLYX_SIGNUP`).
  */
 const guestBudget = new Map<string, { n: number; until: number }>();
-/** A guest session for a visitor without one (answered with an error and null when there is none to be had). */
-function admitGuest(req: express.Request, res: express.Response): SessionUser | null {
+/** A guest session for a visitor without one (answered with an error and null when there is none to be had); `name`: what they want to be called. */
+function admitGuest(req: express.Request, res: express.Response, name?: string | null): SessionUser | null {
   // a cross-site page must not be able to plant a guest session in somebody's browser
   if (!originAllowed(req) || req.headers['sec-fetch-site'] === 'cross-site') { res.status(403).json({ error: 'forbidden' }); return null; }
   // no account mills: a handful of guests per address and hour
@@ -118,7 +118,7 @@ function admitGuest(req: express.Request, res: express.Response): SessionUser | 
   const b = guestBudget.get(ip);
   if (b && b.until > Date.now() && b.n >= 30) { res.status(429).json({ error: 'too many guests from this address, try again later' }); return null; }
   guestBudget.set(ip, b && b.until > Date.now() ? { n: b.n + 1, until: b.until } : { n: 1, until: Date.now() + 60 * 60 * 1000 });
-  const user = toSessionUser(createGuest());
+  const user = toSessionUser(createGuest(name));
   setSessionCookie(req, res, user);
   return user;
 }
@@ -146,7 +146,7 @@ app.get('/api/share/:token', (req, res) => {
   if (!p) { res.status(404).json({ error: 'This link is not valid (any more). Ask the owner to share the project again.' }); return; }
   res.json({ ...p, guests: config.signup !== 'invited' });
 });
-app.post('/api/share/:token/accept', (req, res) => {
+app.post('/api/share/:token/accept', express.json({ limit: '4kb' }), (req, res) => {
   try {
     const token = String(req.params.token);
     let user = req.user;
@@ -154,7 +154,7 @@ app.post('/api/share/:token/accept', (req, res) => {
     if (!user) {
       if (config.signup === 'invited') { res.status(401).json({ error: 'Sign in to open this shared project' }); return; }
       if (!shareLinkOf(token)) { res.status(404).json({ error: 'This link is not valid (any more). Ask the owner to share the project again.' }); return; }
-      user = admitGuest(req, res) ?? undefined;
+      user = admitGuest(req, res, typeof req.body?.name === 'string' ? req.body.name : null) ?? undefined;
       if (!user) return;
       joined = true;
     }

@@ -316,7 +316,7 @@ export function ShareDialog({ project, user, doc, view, onClose, onChanged }: { 
             ))}
             {activity && !activity.length && <div class="hint">Nothing yet.</div>}
           </div>
-          <div class="hint">Viewers can read and compile; editors can also change the documents and upload files.{info.links.length ? ' Whoever opens a link comes in with its role — without an account as a guest (“Anonymous Otter”), who keeps the project by signing in.' : ''}</div>
+          <div class="hint">Viewers can read and compile; editors can also change the documents and upload files.{info.links.length ? ' Whoever opens a link comes in with its role — without an account as a guest (under a name they give, or “Anonymous Otter”), who keeps the project by signing in.' : ''}</div>
         </>
       )}
     </Dialog>
@@ -339,7 +339,7 @@ function NewLinkDialog({ title, path, onCreate, onClose }: { title: string; path
   return (
     <Dialog title={`New link to “${title}”`} onClose={onClose}
       buttons={<button class="btn primary" disabled={busy} data-link-create onClick={() => void create()}>Create link</button>}>
-      <p>Anyone who has the link comes into the whole project — every file in it{path ? `, not only ${path}` : ''} — without an account if they like, as an anonymous guest. A forwarded link works just the same.</p>
+      <p>Anyone who has the link comes into the whole project — every file in it{path ? `, not only ${path}` : ''} — without an account if they like, as a guest under a name they choose or anonymously. A forwarded link works just the same.</p>
       {choice('view', 'Can view', 'Read every file with its comments and history, build the PDF, download the project and clone it with git.')}
       {choice('edit', 'Can edit', 'Also change everything: write and comment, upload, rename and delete files, accept or reject tracked changes, restore earlier versions.')}
       <p class="hint">The link keeps this role for good: for another, make another link. Whoever comes in through it stays until you remove them, or turn the link off with ✕.</p>

@@ -1,8 +1,8 @@
 /**
  * Coming in through a share link without an account. First the invitation (ShareInvite): somebody
  * opened a share link without a session, and before anything is created the page asks how to come
- * in — with an account, or without one as a guest ("Anonymous Otter") — with the difference in three
- * lines each. Then, for a guest, the callout (GuestCallout): it hangs under the Sign in button (top
+ * in — with an account, or without one as a guest — with the difference in three lines each. A guest
+ * may give a name ("Ada (guest)"), else they are "Anonymous Otter". Then, for a guest, the callout (GuestCallout): it hangs under the Sign in button (top
  * right) and suggests signing in with Google to keep the project — the guest's memberships move to
  * the account (server: access.ts adoptGuest) and the document reopens there. Dismissed for the
  * session; the Sign in button stays.
@@ -15,6 +15,8 @@ import { projectTitle } from './Home';
 import { projectShortName } from '@overlyx/core';
 
 const DISMISS_KEY = 'ol.guestHint';
+/** the name a guest gave last time in this browser, offered again on the next invitation */
+const NAME_KEY = 'ol.guestName';
 
 /** no callout this session: the visitor chose to come in as a guest a moment ago, knowing the difference */
 function dismissGuestHint() { try { sessionStorage.setItem(DISMISS_KEY, '1'); } catch { /* ignore */ } }
@@ -23,18 +25,21 @@ export type SharePreview = Awaited<ReturnType<typeof api.sharePreview>>;
 
 export function ShareInvite({ invite, google, onGuest, onSignIn }: {
   invite: SharePreview; google: boolean;
-  /** come in as a guest: the workspace opens, or it rejects with what went wrong */
-  onGuest: () => Promise<void>;
+  /** come in as a guest, under `name` or anonymously (''): the workspace opens, or it rejects with what went wrong */
+  onGuest: (name: string) => Promise<void>;
   /** the sign-in page (no Google here, or a username and password) */
   onSignIn: () => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const [name, setName] = useState(() => { try { return localStorage.getItem(NAME_KEY) ?? ''; } catch { return ''; } });
   const title = invite.title ?? projectShortName(invite.project);
   const verb = invite.role === 'view' ? 'view' : 'edit';
   const guest = async () => {
     setBusy(true); setErr('');
-    try { dismissGuestHint(); await onGuest(); }
+    const n = name.trim();
+    try { localStorage.setItem(NAME_KEY, n); } catch { /* ignore */ }
+    try { dismissGuestHint(); await onGuest(n); }
     catch (e) { setErr((e as Error).message); setBusy(false); }
   };
   return (
@@ -60,9 +65,14 @@ export function ShareInvite({ invite, google, onGuest, onSignIn }: {
               <h2>Continue without an account</h2>
               <ul>
                 <li>Opens right away, nothing to sign up for</li>
-                <li>You appear as an anonymous guest, like “Anonymous Otter”</li>
+                <li>Others see the name you give, or “Anonymous Otter”</li>
                 <li>Only in this browser; sign in later to keep the project</li>
               </ul>
+              <label class="invite-name">
+                <span>Your name <i>(optional)</i></span>
+                <input type="text" autocomplete="name" maxLength={60} placeholder="Anonymous" value={name} data-invite-guest-name
+                  onInput={e => setName((e.target as HTMLInputElement).value)} onKeyDown={e => { if (e.key === 'Enter' && !busy) void guest(); }} />
+              </label>
               <button type="button" class="invite-key outline" disabled={busy} data-invite-guest-go onClick={() => void guest()}>{busy ? 'Opening…' : 'Continue as a guest'}</button>
             </section>
           )}

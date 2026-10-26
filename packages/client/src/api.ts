@@ -328,9 +328,9 @@ export const api = {
   /**
    * open a share link (#/share/<token>[/<path>]): join the project; `doc` is its main document, `file`
    * the linked file when the project has it. Without a session the server opens a guest session and
-   * returns its `user`.
+   * returns its `user`, named `name` when the visitor gave one ("Ada (guest)") or else "Anonymous Otter".
    */
-  acceptShare: (token: string, path?: string | null) => req<{ project: string; title: string | null; role: Role; doc: string | null; file: Pick<ProjectFile, 'path' | 'name' | 'kind'> | null; user?: User }>('POST', `/api/share/${encodeURIComponent(token)}/accept${path ? '?path=' + encodeURIComponent(path) : ''}`),
+  acceptShare: (token: string, path?: string | null, name?: string) => req<{ project: string; title: string | null; role: Role; doc: string | null; file: Pick<ProjectFile, 'path' | 'name' | 'kind'> | null; user?: User }>('POST', `/api/share/${encodeURIComponent(token)}/accept${path ? '?path=' + encodeURIComponent(path) : ''}`, name ? { name } : undefined),
   /**
    * open a project at its address: a public one puts it on the visitor's list (and lets a visitor
    * without a session in as a guest: `user`); 404 when it is not public and not theirs
