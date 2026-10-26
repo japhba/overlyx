@@ -198,8 +198,10 @@ test('link sharing: joining through the link, revoked when the link is turned of
   const pageA = await openDocPage(admin);
   const dlg = await openShareDialog(pageA);
   await dlg.locator('[data-link-mode]').selectOption('link');
+  await pageA.getByRole('button', { name: 'Turn on link' }).click();   // the popup that says what the link gives away
   await expect(dlg.locator('[data-link-role]')).toBeVisible();
   await dlg.locator('[data-link-role]').selectOption('edit');
+  await pageA.getByRole('button', { name: 'Allow editing' }).click();
   const url = await dlg.locator('.share-link input').inputValue();
   expect(url).toMatch(/#\/admin\/e2e-share\/main\.tex\?share=[A-Za-z0-9_-]{20,}$/);   // the link names the open file
 

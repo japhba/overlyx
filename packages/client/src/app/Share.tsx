@@ -109,6 +109,27 @@ export function ShareDialog({ project, user, doc, onClose, onChanged }: { projec
     if (!await uiConfirm('Reset the Link?', 'The current link stops working and a new one replaces it. People who already joined through the old link keep their access — remove them above, or switch to Restricted to remove them all.', { okLabel: 'Reset link' })) return;
     if (await update(() => api.resetLink(project))) setCopied(false);
   };
+  // what the link gives away, said before it is turned on or raised to editing (as Public asks
+  // first): the whole project, not only the file it opens, to whoever has it, account or not
+  const setLink = async (to: 'view' | 'edit' | null) => {
+    const t = info?.title ?? projectShortName(project);
+    if (to && !info?.link) {
+      const what = linkPath ? `every file in the project — not only ${linkPath}` : 'every file in the project';
+      if (!await uiConfirm(`Share “${t}” with anyone who has the link?`,
+        `Anyone who has the link can then ${to === 'edit' ? 'change' : 'read'} ${what} — with its comments and history, and download it or clone it with git.\n\n`
+        + 'No account needed: without one they come in as an anonymous guest. A forwarded link works just the same.\n\n'
+        + 'Everyone who opens it stays on the project — listed above, “via link” — until you remove them or switch back to Restricted. Reset link stops new people coming in.',
+        { okLabel: 'Turn on link' })) return;
+    } else if (to === 'edit' && info?.link?.role === 'view') {
+      const n = info.members.filter(m => m.via === 'link').length;
+      const who = n ? `${n === 1 ? 'The one person who came' : `The ${n} people who came`} in through the link, and anyone who opens it from now on,` : 'Anyone who opens it from now on';
+      if (!await uiConfirm('Let anyone with the link edit?',
+        `${who} can then change every file in “${t}”: write and comment, upload, rename and delete files, accept or reject tracked changes, and restore earlier versions.\n\n`
+        + 'No account needed: a guest’s changes carry a name like “Anonymous Otter”.',
+        { okLabel: 'Allow editing' })) return;
+    }
+    await update(() => api.setLink(project, to));
+  };
   const add = async () => { if (!who.trim() || busy) return; if (await update(() => api.addMember(project, who.trim(), role))) setWho(''); };
   const copy = async () => {
     if (!info?.link) return;
@@ -198,12 +219,12 @@ export function ShareDialog({ project, user, doc, onClose, onChanged }: { projec
           <h4>General access</h4>
           <div class="share-general">
             <select value={info.link ? 'link' : 'restricted'} disabled={busy} data-link-mode
-              onChange={e => void update(() => api.setLink(project, (e.target as HTMLSelectElement).value === 'link' ? (info.link?.role ?? 'view') : null))}>
+              onChange={e => { const el = e.target as HTMLSelectElement; const on = el.value === 'link'; el.value = info.link ? 'link' : 'restricted'; void setLink(on ? (info.link?.role ?? 'view') : null); }}>
               <option value="restricted">Restricted — only the people listed above</option>
               <option value="link">Anyone with the link</option>
             </select>
             {info.link && (
-              <select value={info.link.role} disabled={busy} data-link-role onChange={e => void update(() => api.setLink(project, (e.target as HTMLSelectElement).value as 'view' | 'edit'))}>
+              <select value={info.link.role} disabled={busy} data-link-role onChange={e => { const el = e.target as HTMLSelectElement; const to = el.value as 'view' | 'edit'; el.value = info.link!.role; void setLink(to); }}>
                 <option value="view">{ROLE_LABEL.view}</option><option value="edit">{ROLE_LABEL.edit}</option>
               </select>
             )}
