@@ -297,6 +297,23 @@ blend.
   keeps its old address) through the Contents API — one request, no clone, nothing committed when
   the file is byte-identical; failures show in the dialog with *Push now* (`server/pdfpublish.ts`,
   table `pdf_publish`).
+* **Links to a place** (`client/src/editor/permalink.ts`, GitHub's *Copy permalink*): the right-click
+  menus copy an address that opens the file at the place right-clicked and marks it (yellow, until the
+  next click or key) — **Copy link to this paragraph / heading / formula / picture / table / the
+  selected text** in documents, **to line 12 / lines 12–20** in the text editor, **to page 3** in a
+  project's PDF, **to this slide / this object** in slides, posters and web pages, **Copy link** to a
+  file in the file browser. The place is a query after the file's address: a document's place is its
+  label where it has one (`?goto=sec:intro`), else a quote — `?text=<its first words>` with
+  `&end=<its last words>` for a long one, `&before=<the words before it>` (and `&n=<k>`) when the
+  first words recur — so co-authors' edits elsewhere never move it (Chrome's *Copy link to
+  highlight*); a formula is quoted as its `$…$`, a picture as `\includegraphics{…}`; words edited
+  away since: the longest beginning still there is marked, and said. Text files: `?line=12-20`;
+  PDFs: `?page=3`; decks: `?slide=3&obj=2.1` (the object's place among the slide's elements, then
+  selected). Opening one needs access to the project as any address does. In the VS Code extension
+  the same entries copy the overlyx.app address when the folder is a synced clone (sync.ts
+  `webPlaceOf`, core `webFileAddress`), and **Open on overlyx.app** (the 🌐 in the editor title bar,
+  the tab's menu; *Copy overlyx.app Link* in a text editor's right-click menu: with the selected lines)
+  opens the file there.
 * **Every project is a git repository** you can clone, pull and push from your own machine
   (*File ▸ Git repository…* or *Git…* on a project card):
   `git clone https://<server>/git/<owner>/<project>.git` with your username and your **account access

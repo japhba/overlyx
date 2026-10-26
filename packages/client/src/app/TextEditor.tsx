@@ -14,11 +14,17 @@ import { UndoStack, undoRedoKey, applyUndoRedo, applySnapshot, editingKey, match
 import { splitDocId } from '@overlyx/core';
 import { uiConfirm } from './Dialogs';
 import { holdReload } from './update';
+import { canLink, copyPlaceLink, type Place } from '../editor/permalink';
+import { showContextMenu, type MenuItem } from '../editor/contextmenu';
 
 type SaveState = 'loading' | 'saved' | 'dirty' | 'saving' | 'conflict' | 'error' | 'readonly';
 const LABEL: Record<SaveState, string> = { loading: 'Loading…', saved: '✓ Saved', dirty: 'Unsaved changes…', saving: 'Saving…', conflict: 'Not saved — changed on the server', error: 'Could not save', readonly: '👁 view only' };
 
-export function TextEditor({ id, notify }: { id: string; notify: (text: string, kind?: 'info' | 'error') => void }) {
+/**
+ * `place`: the lines a link names (`?line=12-20`, editor/permalink.ts) — the caret goes to them and they
+ * are marked, GitHub's yellow lines, until the next click or key; the right-click menu copies such links.
+ */
+export function TextEditor({ id, notify, place }: { id: string; notify: (text: string, kind?: 'info' | 'error') => void; place?: Place | null }) {
   const { project, path } = splitDocId(id);
   const [text, setText] = useState('');
   const [state, setState] = useState<SaveState>('loading');
@@ -35,6 +41,9 @@ export function TextEditor({ id, notify }: { id: string; notify: (text: string, 
   const undo = useRef(new UndoStack({ value: '', start: 0, end: 0 }));
   /** cursor offset when nothing is selected (for bracket matching), else null */
   const [cursor, setCursor] = useState<number | null>(null);
+  /** the lines a link names (0-based, first and last), marked */
+  const [linked, setLinked] = useState<[number, number] | null>(null);
+  const linkedAt = useRef(0);
   const mask = useMemo(() => commentMask(text), [text]);
   const match = useMemo(() => (cursor === null ? null : matchBrackets(text, cursor, mask)), [text, cursor, mask]);
   const html = useMemo(() => {
@@ -44,8 +53,8 @@ export function TextEditor({ id, notify }: { id: string; notify: (text: string, 
       const cls = match.kind === 'adjacent' ? 'hl-match' : 'hl-enclose';
       for (const at of [match.open, match.close]) for (let k = 0; k < match.len; k++) marks.set(at + k, cls);
     }
-    return highlightLines(highlightTex(text, marks), pos.line - 1);
-  }, [text, match, pos.line]);
+    return highlightLines(highlightTex(text, marks), pos.line - 1, linked);
+  }, [text, match, pos.line, linked]);
 
   const load = async () => {
     try {
@@ -131,6 +140,50 @@ export function TextEditor({ id, notify }: { id: string; notify: (text: string, 
     if (s) { e.preventDefault(); applySnapshot(el, s); onInput({ target: el } as unknown as Event); }
   };
 
+  // a link's lines: the caret to the first, scrolled to a third of the way down, marked
+  useEffect(() => {
+    const el = ta.current, l = place?.line;
+    if (!el || !l || state === 'loading' || state === 'error') return;
+    const n = text.split('\n').length;
+    const a = Math.min(l[0], n) - 1, b = Math.min(l[1], n) - 1;
+    setLinked([a, b]); linkedAt.current = performance.now();
+    let off = 0;
+    for (let k = 0; k < a; k++) off = text.indexOf('\n', off) + 1;
+    el.focus({ preventScroll: true }); el.setSelectionRange(off, off);
+    updatePos();
+    requestAnimationFrame(() => {
+      const row = pre.current?.querySelectorAll<HTMLElement>('.l')[a];
+      if (row) { el.scrollTop = Math.max(0, row.offsetTop - el.clientHeight / 3); syncScroll(el); }
+    });
+  }, [place, state === 'loading' || state === 'error']);
+  /** the mark goes with the next click or key (not the one that followed the link) */
+  const unmark = () => { if (linked && performance.now() - linkedAt.current > 150) setLinked(null); };
+
+  /** our right-click menu: a link to the line(s), the clipboard; Shift+right-click keeps the browser's */
+  const onContextMenu = (e: MouseEvent) => {
+    const el = ta.current;
+    if (!el || e.shiftKey) return;
+    e.preventDefault();
+    const v = el.value, ro = readonly;
+    const first = v.slice(0, el.selectionStart).split('\n').length;
+    // (a selection that ends at a line's start does not take that line)
+    const endAt = el.selectionEnd > el.selectionStart && v[el.selectionEnd - 1] === '\n' ? el.selectionEnd - 1 : el.selectionEnd;
+    const last = Math.max(first, v.slice(0, endAt).split('\n').length);
+    const what = first === last ? `line ${first}` : `lines ${first}–${last}`;
+    const exec = (cmd: string) => () => { el.focus(); document.execCommand(cmd); };
+    const items: MenuItem[] = [
+      ...(canLink('text:' + id) ? [{ label: `Copy link to ${what}`, icon: 'link' as const, action: () => copyPlaceLink('text:' + id, { line: [first, last] }, what) }, { sep: true }] : []),
+      { label: 'Cut', icon: 'cut', disabled: ro || el.selectionStart === el.selectionEnd, action: exec('cut') },
+      { label: 'Copy', icon: 'copy', disabled: el.selectionStart === el.selectionEnd, action: exec('copy') },
+      { label: 'Paste', icon: 'paste', disabled: ro, action: () => {
+        navigator.clipboard?.readText?.().then(t => { el.focus(); document.execCommand('insertText', false, t); }, () => notify('Use Ctrl+V to paste', 'error'));
+      } },
+      { label: 'Select all', action: () => { el.focus(); el.select(); } },
+      { label: (navigator.platform.includes('Mac') ? '⇧' : 'Shift+') + 'right-click: the browser menu', info: true },
+    ];
+    showContextMenu(e.clientX, e.clientY, items);
+  };
+
   const syncScroll = (el: HTMLTextAreaElement) => {
     if (pre.current) { pre.current.scrollTop = el.scrollTop; pre.current.scrollLeft = el.scrollLeft; }
   };
@@ -160,7 +213,7 @@ export function TextEditor({ id, notify }: { id: string; notify: (text: string, 
         <div class={'te-code' + (readonly ? ' readonly' : '')}>
           <pre class="hl" ref={pre} aria-hidden="true"><code dangerouslySetInnerHTML={{ __html: html }} /></pre>
           <textarea ref={ta} value={text} spellcheck={false} readOnly={readonly} autocomplete="off" autocorrect="off" autocapitalize="off"
-            onInput={onInput} onKeyDown={onKeyDown} onClick={updatePos} onKeyUp={updatePos}
+            onInput={onInput} onKeyDown={e => { unmark(); onKeyDown(e); }} onMouseDown={unmark} onClick={updatePos} onKeyUp={updatePos} onContextMenu={onContextMenu}
             onScroll={e => syncScroll(e.target as HTMLTextAreaElement)} />
         </div>
       </div>

@@ -53,6 +53,12 @@ export interface EditorContext {
   openDocs?: () => string[];
   /** "Ask agent about this" (right-click menu): pin the selection for the Agent panel's next message — set by a shell that has the panel */
   askAgent?: () => void;
+  /**
+   * The web address of a file (a document's id, a `text:` / `pdf:` tab id), which the "Copy link to …"
+   * entries extend by the place (editor/permalink.ts): the web app's own, the VS Code extension's
+   * when the folder is synced with a project — null (no such entries) otherwise
+   */
+  webLink?: (id: string) => string | null;
 }
 
 export const editorContext: EditorContext = { user: null, meta: null, docId: null, project: null, docDir: '', trackChanges: false, combined: false };

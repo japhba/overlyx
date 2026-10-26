@@ -19,7 +19,7 @@ import { isMarkdownDoc } from './markdown';
 import { TABLE_WIDTHS, type ColumnWidthChoice } from '../app/Toolbar';
 import { changeAt, resolveChange, changeAuthorName } from './plugins/changes';
 import { fileUrl } from '../api';
-import { STANDARD_LAYOUTS } from './layouts';
+import { STANDARD_LAYOUTS, sectionLevel } from './layouts';
 import { figureFile, figureUrl } from './context';
 import { getPrefs, setPref } from '../prefs';
 import { effectiveShortcut } from '../app/keybindings';
@@ -28,6 +28,7 @@ import { openLinkBox, openLink, hrefOf, unlinkText, LINK_KEY } from './links';
 import { editSvgFile } from './svgEditorEvents';
 import { addToDictionary, ignoreWord } from './spell/plugin';
 import { foldMenuItems, sectionFoldState, foldedCount, itemFoldMenuItems, itemFoldState, foldedItemCount } from './plugins/fold';
+import { labelIn, placeLinkItems } from './permalink';
 
 const REF_TYPES: [string, string][] = [
   ['ref', '<reference>'], ['eqref', '(<reference>)'], ['pageref', '<page>'], ['vref', '<reference> on page <page>'],
@@ -190,6 +191,7 @@ export function editorContextMenu(view: EditorView, ev: MouseEvent, spelling?: {
     { sep: true },
     { label: 'Comment', icon: 'comment', shortcut: MOD + '+Alt+C', action: run(C.insertComment) },
     ...(onLink ? [] : [{ label: 'Insert link', icon: 'link', shortcut: LINK_KEY, action: () => openLinkBox(view) } as MenuItem]),
+    ...placeLinkMenu(view, target),
     ...(prefs.aiRewrite ? [{ label: hasSel ? 'Rewrite selection with AI…' : 'Write here with AI…', icon: 'ai', shortcut: REWRITE_KEY, action: () => openRewrite(view) } as MenuItem] : []),
     ...(editorContext.askAgent ? [{ label: hasSel ? 'Ask agent about this…' : 'Ask agent…', icon: 'ai', action: () => editorContext.askAgent?.() } as MenuItem] : []),
     ...(hasSel && !formulaSelected ? [{ label: 'Turn into a formula', icon: 'formula', shortcut: MOD + '+M', action: () => C.insertMath(false)(view) } as MenuItem] : []),
@@ -255,6 +257,32 @@ export function editorContextMenu(view: EditorView, ev: MouseEvent, spelling?: {
     { label: (isMac ? '⇧' : 'Shift+') + 'right-click: the browser menu', info: true },
   );
   return items;
+}
+
+/**
+ * "Copy link to this paragraph" — to the picture or table right-clicked, the selected text, else the
+ * paragraph (editor/permalink.ts): by its label where it carries one (a heading's, the float a picture
+ * or table is in), else by a quote of it. A formula's entry is among its own (nodeviews/math.ts).
+ */
+function placeLinkMenu(view: EditorView, target: { node: PMNode; pos: number } | null): MenuItem[] {
+  const { doc, selection: sel } = view.state;
+  const kind = target?.node.type.name ?? '';
+  const OBJECTS: Record<string, string> = { math_inline: 'formula', math_display: 'formula', graphics: 'picture', table: 'table' };
+  if (target && OBJECTS[kind] && !(sel.from < target.pos || sel.to > target.pos + target.node.nodeSize)) {
+    if (OBJECTS[kind] === 'formula') return [];
+    const { node, pos } = target;
+    return placeLinkItems(view, 'this ' + OBJECTS[kind], () => {
+      // its float: the caption's label
+      const $p = doc.resolve(pos);
+      let label: string | null = null;
+      for (let d = $p.depth; !label && d > 0; d--) if ($p.node(d).type.name === 'inset') label = labelIn($p.node(d));
+      return { from: pos, to: pos + node.nodeSize, label };
+    });
+  }
+  if (!sel.empty) return placeLinkItems(view, 'the selected text', () => ({ from: sel.from, to: sel.to, label: null }));
+  const par = sel.$from.parent;
+  if (!par.isTextblock || !par.content.size) return [];
+  return placeLinkItems(view, sectionLevel(String(par.attrs.layout ?? '')) !== null ? 'this heading' : 'this paragraph', () => ({ from: sel.$from.start(), to: sel.$from.end(), label: labelIn(par) }));
 }
 
 /**

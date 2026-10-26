@@ -74,7 +74,7 @@ import * as C from '@client/editor/commands';
 import { setMarginMode } from '@client/editor/plugins/margin';
 import { acceptAllChanges, rejectAllChanges, changeAt } from '@client/editor/plugins/changes';
 import { setQuery, findNext, replaceCurrent, replaceAll, findKey } from '@client/editor/plugins/find';
-import { unquote, projectOfDoc, docDirOf } from '@overlyx/core';
+import { unquote, projectOfDoc, docDirOf, webFileAddress } from '@overlyx/core';
 import { describeChange } from '@client/editor/assembly';
 
 type DialogState = { name: string; arg?: unknown } | null;
@@ -358,6 +358,12 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
     const onMsg = (ev: MessageEvent<HostToEditor>) => {
       const m = ev.data;
       if (!m) return;
+      // the folder synced with a project on overlyx.app: the right-click menu's "Copy link to …" (client editor/permalink.ts)
+      if (m.type === 'webLink') {
+        const w = m.web;
+        editorContext.webLink = w ? id => (id.startsWith(w.local + '/') ? webFileAddress(w.origin, w.project, [w.dir, id.slice(w.local.length + 1)].filter(Boolean).join('/')) : null) : undefined;
+        return;
+      }
       const v = handleRef.current?.view;
       if (!v) return;
       switch (m.type) {

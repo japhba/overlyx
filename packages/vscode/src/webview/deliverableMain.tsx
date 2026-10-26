@@ -43,9 +43,12 @@ function vscodeHost(init: Extract<HostToDeliverable, { type: 'dlInit' }>): Deliv
     inflight = next.after;
     vscode.postMessage({ type: 'dlApply', version, splices: next.splices });
   };
+  /** the page's address on overlyx.app (its folder synced with a project): links to a slide or an object */
+  let web: string | null = null;
   addEventListener('message', (ev: MessageEvent<HostToDeliverable>) => {
     const m = ev.data;
-    if (m?.type === 'dlText') {
+    if (m?.type === 'dlWeb') web = m.url;
+    else if (m?.type === 'dlText') {
       version = m.version;
       if (inflight !== null && m.text === inflight) {
         // our change, in the document now: the next one goes
@@ -101,6 +104,7 @@ function vscodeHost(init: Extract<HostToDeliverable, { type: 'dlInit' }>): Deliv
     onAsset(cb) { assets.add(cb); return () => assets.delete(cb); },
     setSelection: () => {},
     onPeers: () => () => {},
+    webLink: () => web,
     downloads: open => [
       { label: 'Print or save as PDF (in the browser)…', action: () => vscode.postMessage({ type: 'dlOpenExternal', url: open('print') + '#print' }) },
       { label: 'Open in the browser', action: () => vscode.postMessage({ type: 'dlOpenExternal', url: open('view') }) },

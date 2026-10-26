@@ -72,6 +72,7 @@ import { useProjectEvents, deletedHere, siblingDocument } from './FileBrowser';
 import { newerVersionAvailable, reloadHeld } from './update';
 import { generateLyx } from './SourcePane';
 import { editorContext, viewDocId } from '../editor/context';
+import { parsePlace, showPlace, webAppLink, type Place } from '../editor/permalink';
 import { navHistory, type NavLocation } from './navhistory';
 import { restoredCursorPos } from '../editor/cursormemory';
 import { PdfViewer, type PdfTarget } from './PdfViewer';
@@ -177,26 +178,27 @@ const SOURCE_TITLE = 'LaTeX source beside the text (Ctrl+Alt+S)';
 const stored = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
 
 /**
- * `#/project/path.tex?goto=label` or `?heading=<n>` (the n-th heading), or a share link
+ * `#/project/path.tex?goto=label` or `?heading=<n>` (the n-th heading), a place a link names
+ * (`?text=…`, `?line=…`, `?page=…`, `?slide=…`: editor/permalink.ts), or a share link
  * `#/<owner>/<project>/<path>?share=<token>` — the file it lands on, the token joins the project
  * (from before: `#/share/<token>` and `#/share/<token>/<path>`)
  */
-function parseHash(): { id: string | null; goto: string | null; heading: number | null; share: string | null; sharePath: string | null } {
+function parseHash(): { id: string | null; goto: string | null; heading: number | null; place: Place | null; share: string | null; sharePath: string | null } {
   const raw = location.hash.replace(/^#\/?/, '');
   const q = raw.indexOf('?');
   const idPart = decodeURIComponent(q >= 0 ? raw.slice(0, q) : raw);
   if (idPart.startsWith('share/')) {
     const rest = idPart.slice('share/'.length);
     const cut = rest.indexOf('/');
-    return { id: null, goto: null, heading: null, share: cut < 0 ? rest : rest.slice(0, cut), sharePath: cut < 0 ? null : rest.slice(cut + 1) || null };
+    return { id: null, goto: null, heading: null, place: null, share: cut < 0 ? rest : rest.slice(0, cut), sharePath: cut < 0 ? null : rest.slice(cut + 1) || null };
   }
   const params = q >= 0 ? new URLSearchParams(raw.slice(q + 1)) : null;
   const token = params?.get('share');
-  if (token) return { id: null, goto: null, heading: null, share: token, sharePath: docPathOf(idPart.replace(/^(raw|text|pdf):/, '')) || null };
+  if (token) return { id: null, goto: null, heading: null, place: null, share: token, sharePath: docPathOf(idPart.replace(/^(raw|text|pdf):/, '')) || null };
   const h = params?.get('heading');
   // markdown files opened in the plain text editor before they were documents: links stay valid
   const id = idPart.startsWith('text:') && isMarkdownDoc(idPart) ? idPart.slice(5) : idPart;
-  return { id: id || null, goto: params?.get('goto') ?? null, heading: h !== null && h !== undefined && /^\d+$/.test(h) ? Number(h) : null, share: null, sharePath: null };
+  return { id: id || null, goto: params?.get('goto') ?? null, heading: h !== null && h !== undefined && /^\d+$/.test(h) ? Number(h) : null, place: parsePlace(params), share: null, sharePath: null };
 }
 
 /** Where a share link lands (the hash): the linked file when it opens in a tab, else the project's main document. */
@@ -589,6 +591,9 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   const containerRef = useRef<HTMLDivElement>(null);
   const pendingGoto = useRef<string | null>(parseHash().goto);
   const pendingHeading = useRef<number | null>(parseHash().heading);
+  /** the place a link names (editor/permalink.ts): a document goes to it once it has its text (runGoto), the other editors are handed it */
+  const pendingPlace = useRef<Place | null>(parseHash().place);
+  const [place, setPlace] = useState<Place | null>(() => parseHash().place);
   const [, force] = useState(0);
   const rerender = () => force(x => x + 1);
   // an .html file's kind comes with its project's file list: the right editor opens then
@@ -615,9 +620,9 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       apply(h);
     };
     const apply = (h: ReturnType<typeof parseHash>) => {
-      pendingGoto.current = h.goto; pendingHeading.current = h.heading; setHashId(h.id);
+      pendingGoto.current = h.goto; pendingHeading.current = h.heading; pendingPlace.current = h.place; setPlace(h.place); setHashId(h.id);
       if (h.id?.startsWith('text:')) navHistory.visit(h.id, null);
-      if ((h.goto || h.heading !== null) && h.id === editorContext.docId) runGoto();
+      if ((h.goto || h.heading !== null || h.place?.text) && h.id === editorContext.docId) runGoto();
     };
     navHistory.load();
     const h0 = parseHash().id;
@@ -740,6 +745,9 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       const it = items[n];
       if (it) { jumpToOutline(v, it); pendingHeading.current = null; }
     }
+    // ?text=…: the quoted place (editor/permalink.ts)
+    const p = pendingPlace.current;
+    if (p?.text && v) { pendingPlace.current = null; navHistory.jump(() => showPlace(v, p)); }
   };
   /** the cursor to a heading of the outline (the Navigate menu, the documents panel) */
   const jumpToOutline = (v: EditorView, it: OutlineItem) => {
@@ -983,6 +991,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     editorContext.openInsetDialog = (_view, pos) => { if (pos !== undefined) setDialog({ name: 'inset', arg: pos }); };
     editorContext.openInTab = openInTab;
     editorContext.gotoLabel = gotoLabel;
+    editorContext.webLink = webAppLink;
     (window as any).overlyx = editorContext;   // handy for tests / debugging
     editorContext.ui = {
       save: () => {
@@ -1846,7 +1855,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         <div class={'editor-scroll' + (marginMode && isLyxDoc ? ' margin-mode' : '') + (inkMode && isLyxDoc ? ' ink-pan' : '')} ref={scrollRef} data-pane="doc" style={isLyxDoc ? paneStyle('doc') : undefined} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
           {(isLyxDoc || isTextTab) && showRuler && <Ruler width={textWidth} onChange={setTextWidth} notes={isLyxDoc && marginMode ? { sash: notesPane.sash, scale: noteScale, onScale: setNoteScale, onFold: notesFold.fold } : undefined} />}
           {isLyxDoc && notesFold.folded && <NotesUnfoldTab onUnfold={notesFold.unfold} />}
-          {docId ? (isPdfTab ? <div class="pdf-tab"><PdfViewer key={docId} url={fileUrl(projectOfDoc(textId!), docPathOf(textId!))} toolbar={<a class="small-btn" href={fileUrl(projectOfDoc(textId!), docPathOf(textId!)) + '?download=1'}>Download</a>} /></div> : isBoardTab ? <BoardEditor key={docId} id={docId} user={user} notify={notify} /> : isHtmlTab ? <DeliverableEditor key={docId} id={docId} user={user} notify={notify} /> : htmlPending ? <div class="editor-loading" aria-busy="true" /> : isProjectRoot ? <ProjectRootPanel key={docId} project={docId} notify={notify} onCreated={id => { openInTab(id); setRefreshKey(k => k + 1); }} /> : !isLyxDoc ? <TextEditor key={docId} id={textId!} notify={notify} /> :
+          {docId ? (isPdfTab ? <div class="pdf-tab"><PdfViewer key={docId} url={fileUrl(projectOfDoc(textId!), docPathOf(textId!))} linkId={docId} place={place} toolbar={<a class="small-btn" href={fileUrl(projectOfDoc(textId!), docPathOf(textId!)) + '?download=1'}>Download</a>} /></div> : isBoardTab ? <BoardEditor key={docId} id={docId} user={user} notify={notify} /> : isHtmlTab ? <DeliverableEditor key={docId} id={docId} user={user} notify={notify} place={place} /> : htmlPending ? <div class="editor-loading" aria-busy="true" /> : isProjectRoot ? <ProjectRootPanel key={docId} project={docId} notify={notify} onCreated={id => { openInTab(id); setRefreshKey(k => k + 1); }} /> : !isLyxDoc ? <TextEditor key={docId} id={textId!} notify={notify} place={place} /> :
             <div class="editor-page">
               {marginMode && <NotesSash sash={notesPane.sash} onFold={notesFold.fold} />}
               {marginMode && <NotesResolved views={() => [masterView, ...[...childRefs.current.values()].map(h => h.view)].filter((v): v is EditorView => !!v)} tick={docTick} />}

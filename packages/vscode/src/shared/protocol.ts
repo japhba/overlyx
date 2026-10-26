@@ -45,7 +45,12 @@ export type HostToEditor =
   /** a PDF build of this document finished (a layout document fetches the check of its text boxes) */
   | { type: 'built' }
   | { type: 'theme'; dark: boolean }
-  | { type: 'appearance'; appearance: Appearance };
+  | { type: 'appearance'; appearance: Appearance }
+  /**
+   * The folder is synced with a project on `origin` (host/sync.ts): links name the editor's documents
+   * there — a document id `<local>/<rel>` is `<dir>/<rel>` in `project`. Null: not synced, no links.
+   */
+  | { type: 'webLink'; web: { origin: string; project: string; dir: string; local: string } | null };
 
 /** editor webview → host */
 export type EditorToHost =

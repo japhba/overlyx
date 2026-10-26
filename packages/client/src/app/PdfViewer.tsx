@@ -36,6 +36,8 @@ import { formRects, paintDark, useDarkPages } from './pdfdark';
 import { setPref } from '../prefs';
 import { contentLayout, inkBox, stepZoom, zoomValue, Pinch, FIT_NAMES, GAP, PAD, PT, WIDTH_SPARE, ZOOMS, type Box, type Fit, type Geo, type Levels, type Zoom } from './pdfzoom';
 import { zoomPill } from './zoomhud';
+import { canLink, copyPlaceLink, type Place } from '../editor/permalink';
+import { showContextMenu } from '../editor/contextmenu';
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/legacy/build/pdf.worker.min.mjs', import.meta.url).toString();
 
@@ -132,7 +134,9 @@ const topsOf = (geo: Geo[]): number[] => {
   return out;
 };
 
-export function PdfViewer({ url, target, onSync, toolbar, hint, overlay, withCredentials = true }: { url: string; target?: PdfTarget | null; onSync?: (page: number, x: number, y: number) => void; toolbar?: ComponentChildren; hint?: string; overlay?: ComponentChildren; withCredentials?: boolean }) {
+export function PdfViewer({ url, target, onSync, toolbar, hint, overlay, withCredentials = true, linkId, place }: { url: string; target?: PdfTarget | null; onSync?: (page: number, x: number, y: number) => void; toolbar?: ComponentChildren; hint?: string; overlay?: ComponentChildren; withCredentials?: boolean;
+  /** a project's PDF file (its tab id): a right-click on a page copies a link to it (`?page=3`, editor/permalink.ts), and `place` goes to the page such a link names */
+  linkId?: string; place?: Place | null }) {
   const host = useRef<HTMLDivElement>(null);
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null);
   const [pages, setPages] = useState<PageInfo[]>([]);
@@ -641,6 +645,16 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, overlay, withCre
     n = Math.max(1, Math.min(pages.length, n));
     el.scrollTo({ top: tops[n - 1] - PAD });
   };
+  // a link's page (once the pages are laid out)
+  useEffect(() => { if (place?.page && pages.length && width > 0) gotoPage(place.page); }, [place, pages.length, width > 0]);
+  const pageMenu = (n: number) => (e: MouseEvent) => {
+    if (!linkId || e.shiftKey || !canLink(linkId)) return;
+    e.preventDefault();
+    showContextMenu(e.clientX, e.clientY, [
+      { label: `Copy link to page ${n}`, icon: 'link', action: () => copyPlaceLink(linkId, { page: n }, `page ${n}`) },
+      { label: (navigator.platform.includes('Mac') ? '⇧' : 'Shift+') + 'right-click: the browser menu', info: true },
+    ]);
+  };
 
   const shownZoom = zoomValue(zoom, levels);
   const zoomPick = typeof zoom === 'string' ? zoom : ZOOMS.includes(zoom) ? String(zoom) : 'custom';
@@ -676,7 +690,7 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, overlay, withCre
           {pages.map((p, i) => {
             const g = geo[i], s = g.scale, n = i + 1;
             return (
-              <div key={n} class="pdf-page-box" style={{ width: `${g.crop.w * s}px`, height: `${g.crop.h * s}px` }} data-page={n}
+              <div key={n} class="pdf-page-box" style={{ width: `${g.crop.w * s}px`, height: `${g.crop.h * s}px` }} data-page={n} onContextMenu={pageMenu(n)}
                 onDblClick={e => { if (!onSync) return; const r = ((e.currentTarget as HTMLElement).firstElementChild as HTMLElement).getBoundingClientRect(); onSync(n, (e.clientX - r.left) / s, (e.clientY - r.top) / s); }}>
                 {/* the whole page; the box shows the part of it in `crop` (Fit content: what is painted on it) */}
                 <div class="pdf-sheet" style={{ width: `${p.width * s}px`, height: `${p.height * s}px`, left: `${-g.crop.x * s}px`, top: `${-g.crop.y * s}px` }}>

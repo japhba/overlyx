@@ -11,6 +11,7 @@ import { connectParams } from '@overlyx/core/collab/connect.ts';
 import * as decoding from 'lib0/decoding';
 import { splitDocId } from '@overlyx/core';
 import { lastSlide, noteSlide } from './slidememory';
+import { webAppLink } from '../editor/permalink';
 import { api, type User } from '../api';
 import { subscribeProjectEvents } from '../projectevents';
 import type { DeliverableHost, ChangeOrigin, Peer, Splice } from './host';
@@ -314,6 +315,7 @@ export function webHost(id: string, user: User): DeliverableHost & { destroy(): 
     setSlide(slide) { try { if (provider.awareness.getLocalState()?.htmlSlide !== slide) provider.awareness.setLocalStateField('htmlSlide', slide); } catch { /* closing */ } },
     lastSlide: () => lastSlide(id),
     noteSlide: slide => noteSlide(id, slide),
+    webLink: () => webAppLink(id),
     onPeers(cb) {
       const f = () => cb(peersOf());
       provider.awareness.on('change', f);

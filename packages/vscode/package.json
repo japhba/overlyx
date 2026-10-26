@@ -112,6 +112,18 @@
         }
       },
       {
+        "command": "overlyx.openOnWeb",
+        "title": "Open on overlyx.app",
+        "category": "OverLyX",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "overlyx.copyWebLink",
+        "title": "Copy overlyx.app Link",
+        "category": "OverLyX",
+        "icon": "$(link)"
+      },
+      {
         "command": "overlyx.openAsText",
         "title": "Open as LaTeX Source (text editor)",
         "category": "OverLyX",
@@ -279,7 +291,19 @@
           "command": "overlyx.buildPdf",
           "when": "activeCustomEditorId == overlyx.texEditor",
           "group": "navigation"
+        },
+        {
+          "command": "overlyx.openOnWeb",
+          "when": "overlyx.onWeb",
+          "group": "navigation@90"
         }
+      ],
+      "editor/title/context": [
+        { "command": "overlyx.openOnWeb", "when": "overlyx.onWeb", "group": "overlyx@1" },
+        { "command": "overlyx.copyWebLink", "when": "overlyx.onWeb", "group": "overlyx@2" }
+      ],
+      "editor/context": [
+        { "command": "overlyx.copyWebLink", "when": "overlyx.onWeb && editorTextFocus", "group": "9_cutcopypaste@9" }
       ],
       "view/title": [
         {
@@ -295,7 +319,9 @@
       ],
       "commandPalette": [
         { "command": "overlyx.editorKey", "when": "false" },
-        { "command": "overlyx.syncMenu", "when": "false" }
+        { "command": "overlyx.syncMenu", "when": "false" },
+        { "command": "overlyx.openOnWeb", "when": "overlyx.onWeb" },
+        { "command": "overlyx.copyWebLink", "when": "overlyx.onWeb" }
       ]
     },
     "keybindings": [

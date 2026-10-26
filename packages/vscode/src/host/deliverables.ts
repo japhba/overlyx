@@ -31,6 +31,8 @@ import { parseBibtex, type BibEntry } from '@overlyx/core/bib.ts';
 import { webviewHtml } from './webviewHtml.ts';
 import { toPng } from './graphics.ts';
 import { gitUserName } from './newDocument.ts';
+import { webPlaceOf, onWebPlaces } from './sync.ts';
+import { webFileAddress } from '@overlyx/core/projectKey.ts';
 
 const TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.htm': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
@@ -162,6 +164,8 @@ export type DeliverableToHost =
 export type HostToDeliverable =
   /** `author`: git's user.name, the name comments and suggestions are made under */
   | { type: 'dlInit'; text: string; version: number; base: string; entry: string; readOnly: boolean; dark: boolean; author?: string }
+  /** the page's address on overlyx.app (its folder synced with a project, sync.ts), which links to a slide or an object extend; null: none */
+  | { type: 'dlWeb'; url: string | null }
   | { type: 'dlText'; text: string; version: number }
   | { type: 'dlAsset'; path: string; v: number }
   | { type: 'dlUploaded'; id: number; error?: string }
@@ -210,11 +214,14 @@ export class DeliverableEditorProvider implements vscode.CustomTextEditorProvide
     };
     subs.push(watcher, watcher.onDidChange(asset), watcher.onDidCreate(asset));
     subs.push(vscode.window.onDidChangeActiveColorTheme(() => post({ type: 'theme', dark: isDark() })), watchAppearance(panel.webview));
+    const sendWeb = () => { const w = webPlaceOf(document.uri.fsPath); post({ type: 'dlWeb', url: w ? webFileAddress(w.origin, w.project, w.path) : null }); };
+    subs.push(onWebPlaces(sendWeb));
 
     subs.push(panel.webview.onDidReceiveMessage((msg: DeliverableToHost) => {
       switch (msg.type) {
         case 'ready':
           post({ type: 'dlInit', text: document.getText(), version: document.version, base, entry, readOnly: false, dark: isDark(), author: gitUserName(path.dirname(document.uri.fsPath)) });
+          sendWeb();
           sendAppearance(panel.webview);
           break;
         case 'appearance':

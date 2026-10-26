@@ -1,4 +1,5 @@
 import type { LayoutCheck, DocGroup, PageBreaks } from '@overlyx/core';
+import { isTextFile } from '@overlyx/core/projectKey.ts';
 import { offlineGet } from './offline-api';
 import { noteProjectFiles } from './articlekinds';
 import { recordInteraction } from './usage';
@@ -497,15 +498,8 @@ export const api = {
   createUser: (username: string, name: string, password?: string) => req<{ user: User; password: string }>('POST', '/api/users', { username, name, password }),
 };
 
-const TEXT_EXTS = new Set(['tex', 'sty', 'cls', 'bib', 'bst', 'bbx', 'cbx', 'lbx', 'dtx', 'ins', 'ltx', 'clo', 'lco', 'ldf', 'fd', 'def', 'cfg', 'txt', 'md', 'markdown', 'rst', 'csv', 'tsv', 'json', 'yaml', 'yml', 'toml', 'ini', 'xml', 'html', 'css', 'js', 'ts', 'py', 'sh', 'r', 'm', 'jl', 'lua', 'layout', 'module', 'inc', 'bind', 'ui', 'log', 'aux', 'bbl', 'blg', 'out', 'toc', 'lof', 'lot', 'gitignore', 'latexmkrc']);
-const TEXT_NAMES = new Set(['makefile', 'latexmkrc', '.latexmkrc', 'readme', 'license', '.gitignore', 'dockerfile']);
-/** Files that open in the built-in text editor (everything else that is not a document opens in a browser tab). */
-export function isTextFile(name: string): boolean {
-  const base = name.split('/').pop() ?? name;
-  if (TEXT_NAMES.has(base.toLowerCase())) return true;
-  const ext = base.includes('.') ? base.slice(base.lastIndexOf('.') + 1).toLowerCase() : '';
-  return TEXT_EXTS.has(ext);
-}
+/** Files that open in the built-in text editor (everything else that is not a document opens in a browser tab): core projectKey.ts. */
+export { isTextFile };
 /** The tab a project file opens in (`#/<id>`): documents as they are, PDFs in the viewer, text files in the text editor; null for files that open elsewhere (LyX files are imported, images in a browser tab). */
 export function fileTabId(project: string, f: Pick<ProjectFile, 'path' | 'name' | 'kind'>): string | null {
   const id = `${project}/${f.path}`;

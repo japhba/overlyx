@@ -139,7 +139,10 @@ you and someone on the server changed the same paragraph of a document, their te
 is a tracked change over it; other text merges by lines; what cannot merge keeps the server's
 version and yours next to it as a conflict copy. A file with unsaved changes waits until you save
 it. The status bar shows the state (click it to sync now, pause the folder, see the log or open the
-project in the browser). No CLI and no token needed: **OverLyX: Clone Project from OverLyX…** (also
+project in the browser). **Open on overlyx.app** (the globe in the editor's title bar, or the tab's
+right-click menu) opens the file in front there — a text file at the selected lines; *Copy overlyx.app
+Link* copies that address, and the OverLyX editors' right-click menus copy links to a paragraph, a
+formula, a slide or an object on it. No CLI and no token needed: **OverLyX: Clone Project from OverLyX…** (also
 in the empty Explorer) signs you in through the browser, lists your projects and clones one into a
 folder named after the project — into a folder of your code's git repository as a submodule of it
 or as a clone it ignores, as you choose;

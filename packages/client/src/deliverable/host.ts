@@ -85,6 +85,8 @@ export interface DeliverableHost {
   author?(): string;
   /** the page's document id on the server (the citation dialog searches and adds papers with it); absent: no citation dialog */
   readonly docId?: string;
+  /** the page's web address, which links to a slide or an object extend (editor/permalink.ts); absent or null: no such links */
+  webLink?(): string | null;
   /** the project's bibliography (its .bib files): the entries of `keys` (with their fields), for citations typed or pasted */
   bibliography?(keys: string[]): Promise<BibRecord[]>;
 }

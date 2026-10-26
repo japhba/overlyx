@@ -14,6 +14,7 @@ import { onMathRendererChange } from '../lyxmath/mathjax';
 import { macroTableFor, mathViews, macroVersion, macrosReady } from '../lyxmath/macrotable';
 import { showContextMenu, type MenuItem } from '../contextmenu';
 import { clipboardMenuItems, selectionCovers } from '../clipmenu';
+import { formulaLinkItems } from '../permalink';
 import { toggleMathDisplay, countLabelRefs, renameLabelRefs } from '../commands';
 import { editorContext, viewDocDir, viewProject } from '../context';
 import { getPrefs } from '../../prefs';
@@ -425,6 +426,7 @@ export class MathInlineView implements NodeView {
       { label: 'Inline formula', info: true },
       { label: 'Convert to display formula', icon: 'formula', action: () => { this.selectSelf(); toggleMathDisplay(this.view.state, this.view.dispatch); } },
       ...toTableItems(this.view, this.getPos),
+      ...formulaLinkItems(this.view, this.getPos),
       { label: 'Delete formula', icon: 'delete', action: () => deleteFormula(this.view, this.getPos) },
     ];
   }
@@ -757,6 +759,7 @@ export class MathDisplayView implements NodeView {
       { label: 'New line (row)', icon: 'insert', shortcut: 'Enter', action: () => this.ensureField().execute('newline') },
       { label: 'Convert to inline formula', icon: 'formula', action: () => { this.selectSelf(); toggleMathDisplay(this.view.state, this.view.dispatch); } },
       ...toTableItems(this.view, this.getPos),
+      ...formulaLinkItems(this.view, this.getPos),
       { label: 'Delete formula', icon: 'delete', action: () => deleteFormula(this.view, this.getPos) },
     ];
   }

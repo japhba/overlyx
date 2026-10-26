@@ -57,3 +57,27 @@ export function docDirOf(id: string): string {
   const i = p.lastIndexOf('/');
   return i < 0 ? '' : p.slice(0, i);
 }
+
+const TEXT_EXTS = new Set(['tex', 'sty', 'cls', 'bib', 'bst', 'bbx', 'cbx', 'lbx', 'dtx', 'ins', 'ltx', 'clo', 'lco', 'ldf', 'fd', 'def', 'cfg', 'txt', 'md', 'markdown', 'rst', 'csv', 'tsv', 'json', 'yaml', 'yml', 'toml', 'ini', 'xml', 'html', 'css', 'js', 'ts', 'py', 'sh', 'r', 'm', 'jl', 'lua', 'layout', 'module', 'inc', 'bind', 'ui', 'log', 'aux', 'bbl', 'blg', 'out', 'toc', 'lof', 'lot', 'gitignore', 'latexmkrc']);
+const TEXT_NAMES = new Set(['makefile', 'latexmkrc', '.latexmkrc', 'readme', 'license', '.gitignore', 'dockerfile']);
+/** Files the web app opens in its text editor (everything else that is not a document opens in a browser tab). */
+export function isTextFile(name: string): boolean {
+  const base = name.split('/').pop() ?? name;
+  if (TEXT_NAMES.has(base.toLowerCase())) return true;
+  const ext = base.includes('.') ? base.slice(base.lastIndexOf('.') + 1).toLowerCase() : '';
+  return TEXT_EXTS.has(ext);
+}
+
+/**
+ * A project file's address in the web app on the server at `origin`: the tab it opens in there, as
+ * the client's fileTabId names it — documents, slides, posters and boards as themselves, PDFs in the
+ * PDF viewer (`pdf:`), other text files in the text editor (`text:`) — or the project's for a file
+ * that opens in none. Links to a place in it extend it (client editor/permalink.ts); the VS Code
+ * extension makes them for folders synced with a project.
+ */
+export function webFileAddress(origin: string, project: string, path: string): string {
+  const enc = (s: string) => s.split('/').map(encodeURIComponent).join('/');
+  const ext = path.includes('.') ? path.slice(path.lastIndexOf('.') + 1).toLowerCase() : '';
+  const prefix = ['tex', 'md', 'markdown', 'html', 'htm', 'board'].includes(ext) ? '' : ext === 'pdf' ? 'pdf:' : ext !== 'lyx' && isTextFile(path) ? 'text:' : null;
+  return `${origin.replace(/\/+$/, '')}/#/${prefix === null || !path ? enc(project) : prefix + enc(`${project}/${path}`)}`;
+}

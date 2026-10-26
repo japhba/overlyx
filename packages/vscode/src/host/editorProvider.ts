@@ -17,6 +17,7 @@ import type { InteractionAction, InteractionOutcome } from '@overlyx/core/intera
 import { WindowUnreachable, type HandOver } from '../agents/handover.ts';
 import { isHtmlPath } from '@overlyx/core/html/deliverable.ts';
 import { gitUserName } from './newDocument.ts';
+import { webPlaceOf, onWebPlaces } from './sync.ts';
 
 export interface ProviderDeps {
   track?(action: InteractionAction, outcome: InteractionOutcome, durationMs?: number): void;
@@ -84,6 +85,12 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
 
     const post = (msg: HostToEditor) => void panel.webview.postMessage(msg);
     const subs: vscode.Disposable[] = [];
+    // where the project's directory is on overlyx.app, when its folder is synced with a project there (sync.ts): links
+    const sendWeb = () => {
+      const w = webPlaceOf(document.uri.fsPath), rel = relPath.split(path.sep).join('/');
+      post({ type: 'webLink', web: w && w.path.endsWith(rel) ? { origin: w.origin, project: w.project, dir: w.path.slice(0, w.path.length - rel.length).replace(/\/$/, ''), local: project } : null });
+    };
+    subs.push(onWebPlaces(sendWeb));
     const related = this.registry.relatedSessions(entry);
     const relatedTimers = new Map<string, NodeJS.Timeout>();
     const relatedPath = (id: string) => {
@@ -219,6 +226,7 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
             await session.syncFromDisk();
             const r = session.parseCurrent();
             post({ type: 'init', docId: session.docId, base, pmDoc: r.pmDoc as never, headerLines: r.headerLines, fragment: r.fragment, dark: isDark(), ack: session.applied, author: gitUserName(path.dirname(document.uri.fsPath)) });
+            sendWeb();
             if (r.warnings.length) vscode.window.setStatusBarMessage(`OverLyX: ${r.warnings.length} parse warning(s) — details in the raw file`, 8000);
           }).catch(e => {
             void vscode.window.showErrorMessage(`OverLyX could not open ${relPath}: ${String(e)}`);

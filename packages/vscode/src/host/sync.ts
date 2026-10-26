@@ -34,6 +34,7 @@ import * as vscode from 'vscode';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
+import { webFileAddress } from '@overlyx/core';
 import { syncEngineFor, syncTarget, syncCredentials, knownSyncHosts, describeChanges, signInWithBrowser, signedInHosts, signOutOf, remoteProjects, cloneProject, enclosingRepo, addProjectSubmodule, ignoreInRepo, type SyncEngine, type SyncStatus, type SyncTarget, type SyncChanges, type SyncAuth } from '../../../cli/bin/overlyx.js';
 
 interface FolderSync {
@@ -60,6 +61,16 @@ const ASKED = (dir: string) => `overlyx.sync.asked:${dir}`;
 const time = (t: number) => new Date(t).toLocaleTimeString();
 const projectUrl = (t: SyncTarget) => `${t.host}/#/${t.project.split('/').map(encodeURIComponent).join('/')}`;
 const inside = (file: string, dir: string) => file.startsWith(dir + path.sep);
+
+/** Where a file of a synced clone is on its project's server (`path`: in the project). */
+export interface WebPlace { origin: string; project: string; path: string }
+let webOf: (file: string) => WebPlace | null = () => null;
+const webListeners = new Set<() => void>();
+const webChanged = () => { for (const l of webListeners) l(); };
+/** The server place of a file (null: not in a synced clone) — Open on overlyx.app, the editors' "Copy link to …". */
+export const webPlaceOf = (file: string): WebPlace | null => webOf(file);
+/** Called when clones start or stop being synced (their files' web places change). */
+export function onWebPlaces(cb: () => void): vscode.Disposable { webListeners.add(cb); return { dispose: () => { webListeners.delete(cb); } }; }
 
 /** a clone's git directory: .git, or where the .git file of a submodule or worktree points */
 function gitDirOf(dir: string): string {
@@ -258,6 +269,7 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
       syncs.set(dir, f);
       // a nested clone found before the folder it sits in (two scans racing) gives way to it
       for (const d of [...syncs.keys()]) if (inside(d, dir)) removeFolder(d);
+      webChanged();
       if (found && enabled() && !paused(dir) && !context.workspaceState.get<boolean>(ASKED(dir)) && !syncedBefore(dir)) { void ask(f); return true; }
       f.unasked = found && paused(dir) && !syncedBefore(dir);
       await connect(f);
@@ -295,6 +307,7 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
     disconnect(f);
     f.item.dispose();
     syncs.delete(dir);
+    webChanged();
   }
 
   /** Sign in to `host` through the browser; then every folder waiting for it syncs. Null when it did not work out. */
@@ -431,6 +444,37 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
   };
   const none = () => void vscode.window.showInformationMessage('OverLyX: no folder here is a clone of an OverLyX project (git clone https://overlyx.app/git/<owner>/<project>.git).');
 
+  webOf = file => {
+    const f = owner(file);
+    return f ? { origin: f.target.host, project: f.target.project, path: path.relative(f.dir, file).split(path.sep).join('/') } : null;
+  };
+  /** the file of the editor in front (a text editor's, or a custom editor's: the LaTeX, slides, PDF ones) */
+  const activeFile = (): vscode.Uri | undefined => {
+    const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input as { uri?: vscode.Uri } | undefined;
+    return input?.uri ?? vscode.window.activeTextEditor?.document.uri;
+  };
+  /**
+   * The web address of `uri` (the editor in front's file by default) — with the selected lines of a
+   * text editor showing it (`?line=12-20`, GitHub's #L12-L20) — or null, said, when it is not in a synced clone.
+   */
+  const webUrl = (uri?: vscode.Uri): string | null => {
+    const file = uri instanceof vscode.Uri ? uri : activeFile();
+    const w = file?.scheme === 'file' ? webOf(file.fsPath) : null;
+    if (!w) { void vscode.window.showInformationMessage('OverLyX: this file is not in a folder synced with an OverLyX project.'); return null; }
+    const url = webFileAddress(w.origin, w.project, w.path);
+    const ed = vscode.window.activeTextEditor;
+    if (!ed || ed.document.uri.fsPath !== file!.fsPath || !url.includes('#/text:')) return url;
+    const sel = ed.selection, a = sel.start.line + 1;
+    const b = Math.max(a, sel.end.line + (sel.end.character === 0 && sel.end.line > sel.start.line ? 0 : 1));
+    return `${url}?line=${a === b ? a : `${a}-${b}`}`;
+  };
+  /** the context key the "Open on overlyx.app" button shows by: the editor in front shows a file of a synced clone */
+  const updateOnWeb = () => {
+    const file = activeFile();
+    void vscode.commands.executeCommand('setContext', 'overlyx.onWeb', file?.scheme === 'file' && !!webOf(file.fsPath));
+  };
+  webListeners.add(updateOnWeb);
+
   context.subscriptions.push(
     out,
     { dispose: () => { for (const dir of [...syncs.keys()]) removeFolder(dir); } },
@@ -444,6 +488,17 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
     vscode.commands.registerCommand('overlyx.syncPause', (dir?: string) => { const f = pick(dir); return f ? setPaused(f, true) : none(); }),
     vscode.commands.registerCommand('overlyx.syncResume', (dir?: string) => { const f = pick(dir); return f ? setPaused(f, false) : none(); }),
     vscode.commands.registerCommand('overlyx.syncShowLog', () => out.show(true)),
+    // (a string, not a Uri: VS Code would encode the address's #/…?… part)
+    vscode.commands.registerCommand('overlyx.openOnWeb', (uri?: vscode.Uri) => { const url = webUrl(uri); if (url) void vscode.env.openExternal(url as unknown as vscode.Uri); }),
+    vscode.commands.registerCommand('overlyx.copyWebLink', async (uri?: vscode.Uri) => {
+      const url = webUrl(uri);
+      if (!url) return;
+      await vscode.env.clipboard.writeText(url);
+      vscode.window.setStatusBarMessage(`$(link) Link copied: ${url}`, 4000);
+    }),
+    vscode.window.tabGroups.onDidChangeTabs(updateOnWeb),
+    vscode.window.onDidChangeActiveTextEditor(updateOnWeb),
+    { dispose: () => { webListeners.delete(updateOnWeb); webOf = () => null; } },
     vscode.commands.registerCommand('overlyx.cloneProject', () => cloneCommand()),
     vscode.commands.registerCommand('overlyx.signIn', async () => { const host = await chooseServer('Sign in to which OverLyX server?', true); if (host) await signInTo(host); }),
     vscode.commands.registerCommand('overlyx.signOut', () => signOutCommand()),
@@ -488,4 +543,5 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
     }),
   );
   rescan();
+  updateOnWeb();
 }

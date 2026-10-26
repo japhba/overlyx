@@ -18,6 +18,7 @@ import { createPortal } from 'preact/compat';
 import { api, fileTabId, fileUrl, isAuxFile, isTextFile, type Project, type ProjectFile } from '../api';
 import { subscribeProjectEvents } from '../projectevents';
 import { showContextMenu, type MenuItem } from '../editor/contextmenu';
+import { canLink, copyPlaceLink } from '../editor/permalink';
 import { chooseLyxImport } from './lyximport';
 import { projectOfDoc, splitDocId, projectShortName, type DocGroup, type DocGroupMember } from '@overlyx/core';
 import { uiPrompt, uiConfirm, uiAlert } from './Dialogs';
@@ -381,10 +382,12 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
     { label: 'Import from LyX…', action: () => chooseLyxImport(project!.name, dir, r => { reveal(r.created[0] ?? ''); void load(); onOpen(r.id); }) },
     ...(gdocs ? [{ label: 'Import from Google Docs…', action: () => void importGoogle(dir) }] : []),
   ] : [];
-  const fileCtx = (f: ProjectFile, openIt: () => void) => (e: MouseEvent) => {
+  /** `linkId`: the tab the file opens in, whose link "Copy link" copies (editor/permalink.ts) */
+  const fileCtx = (f: ProjectFile, openIt: () => void, linkId: string | null) => (e: MouseEvent) => {
     e.preventDefault(); e.stopPropagation();
     showContextMenu(e.clientX, e.clientY, [
       { label: 'Open', action: openIt },
+      ...(linkId && canLink(linkId) ? [{ label: 'Copy link', action: () => copyPlaceLink(linkId, null, f.name) }] : []),
       { label: 'Download', action: () => download(f.path) },
       ...(f.kind === 'doc' ? [{ label: 'Download LyX (.lyx)', action: () => window.open(`/api/docs/${encodeURIComponent(project!.name + '/' + f.path)}/lyx`) }] : []),
       ...ctxCommon(f.path, false),
@@ -496,7 +499,7 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
         data-file={f.path}
         onDragOver={dragOver(f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) : '')}
         onDrop={drop(f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) : '')}
-        onContextMenu={fileCtx(f, () => { if (isLyx) void importLyx(); else if (inTab) onOpen(tabId); else if (isSvg) editSvg(); else window.open(href, '_blank'); })}
+        onContextMenu={fileCtx(f, () => { if (isLyx) void importLyx(); else if (inTab) onOpen(tabId); else if (isSvg) editSvg(); else window.open(href, '_blank'); }, inTab && !isLyx ? tabId : null)}
         onClick={e => { if (isLyx) { e.preventDefault(); void importLyx(); return; } if (isSvg && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) { e.preventDefault(); editSvg(); return; } if (inTab && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) { e.preventDefault(); onOpen(tabId); } }}>
         {outlines && (outlined
           ? <span class="twisty" role="button" title={open ? 'Hide the outline' : 'Show the outline'} onClick={e => { e.preventDefault(); e.stopPropagation(); outlines.toggle(id); }}>{open ? '▾' : '▸'}</span>

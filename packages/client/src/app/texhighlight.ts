@@ -138,7 +138,8 @@ export function highlightTex(src: string, marks?: Map<number, string>): string {
 /**
  * The highlighted HTML as one `<div class="l">` per source line (spans that run across a line
  * break are closed and reopened), so that line numbers (CSS counters) and the current line
- * (`current`, 0-based → class `cur`) work with soft-wrapped lines.
+ * (`current`, 0-based → class `cur`) work with soft-wrapped lines; the lines a link names
+ * (`linked`, 0-based first and last → class `linked`) are marked.
  */
 /** highlightLines, as one HTML string per line (without the wrapping div): a pane can patch only the lines that changed. */
 export function highlightLineList(html: string): string[] {
@@ -157,11 +158,11 @@ export function highlightLineList(html: string): string[] {
   return lines;
 }
 
-export function highlightLines(html: string, current: number | null = null): string {
+export function highlightLines(html: string, current: number | null = null, linked: [number, number] | null = null): string {
   const open: string[] = [];
   let out = '';
   let line = 0;
-  const startLine = () => `<div class="l${line === current ? ' cur' : ''}">`;
+  const startLine = () => `<div class="l${line === current ? ' cur' : ''}${linked && line >= linked[0] && line <= linked[1] ? ' linked' : ''}">`;
   out += startLine();
   for (const part of html.split(/(<span[^>]*>|<\/span>|\n)/)) {
     if (!part) continue;

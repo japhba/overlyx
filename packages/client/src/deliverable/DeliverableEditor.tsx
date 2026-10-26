@@ -34,6 +34,7 @@ import { presentFingersDraw, savePresentFingersDraw, presentLinked, savePresentL
 import { checkedPresent, type PresentState, type PresenterState } from '../app/presentshare';
 import { createPortal } from 'preact/compat';
 import { isFromRuntime, RAIL_NUM, ASIDE_ATTR } from './protocol';
+import { copyLinkAt, type Place } from '../editor/permalink';
 import { rebasedSplices, rebaseObjectPaths, objectHtml, imageHtml, insertPlace, newSlideHtml, nextPageHtml, slideDesigns, slidePaths, slideNotes, notesOp, sourceRange, inlineSvgHtml, guidesIn } from './sourceops';
 import { GUIDES_ATTR, LAYOUT_MARGINS_ATTR, layoutMarginGuides, parseGuides, masterGuides, formatGuides, withGuide, type Guide } from './guides';
 import { deckMargins, deckDesign, builtInLayouts, savedLayouts, layoutFromSlide, saveLayoutOp, applyLayoutOp, placeholderObject, layoutThumb, deckColors, PH_ATTR, PH_LABELS, PH_ROLES, type PhRole, type DesignLooks, type DeckDesign, type Layout } from './decklayouts';
@@ -163,14 +164,17 @@ interface Link { base: string; entry: string; expires: number }
 /** what a held stroke became, said for a moment (core/shapesnap.ts SnapKind) */
 const SNAP_NAMES: Record<string, string> = { line: 'Line', arrow: 'Arrow', polyline: 'Lines', triangle: 'Triangle', rect: 'Rectangle', square: 'Square', quad: 'Four-sided shape', polygon: 'Polygon', ellipse: 'Ellipse', circle: 'Circle' };
 
-export function DeliverableEditor({ id, user, notify }: { id: string; user: User; notify: Notify }) {
+export function DeliverableEditor({ id, user, notify, place }: { id: string; user: User; notify: Notify; place?: Place | null }) {
   const host = useMemo(() => webHost(id, user), [id]);
   useEffect(() => () => host.destroy(), [host]);
-  return <DeliverableCanvas key={id} host={host} notify={notify} />;
+  return <DeliverableCanvas key={id} host={host} notify={notify} place={place} />;
 }
 
-/** The editor around the page, wherever it runs (`host`: the web app's, the VS Code extension's). */
-export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableHost; notify: Notify; chrome?: ComponentChildren }) {
+/**
+ * The editor around the page, wherever it runs (`host`: the web app's, the VS Code extension's).
+ * `place`: the slide and object a link names (`?slide=3&obj=2`, editor/permalink.ts) — shown and selected.
+ */
+export function DeliverableCanvas({ host, notify, chrome, place }: { host: DeliverableHost; notify: Notify; chrome?: ComponentChildren; place?: Place | null }) {
   const path = host.path;
   const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
   const [, bump] = useState(0);
@@ -2236,6 +2240,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
         { label: 'Not a placeholder', checked: !one.ph, disabled: readOnlyRef.current || !one.ph, action: () => applyOps([{ t: 'attr', path: one.path, name: PH_ATTR, value: null }]) },
       ] }] : []),
       { label: 'Comment', shortcut: 'Ctrl+Alt+M', disabled: readOnlyRef.current, action: () => toCanvas({ ol: 'newComment' }) },
+      ...(one ? objectLinkItems(one) : []),
       ...(selChange && !readOnlyRef.current ? [
         { label: `Accept suggestion (${selChange.by})`, action: () => resolveChange(selChange, true) },
         { label: 'Reject suggestion', action: () => resolveChange(selChange, false) },
@@ -2249,6 +2254,28 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
     ];
     showContextMenu(x, y, items);
   };
+  /**
+   * "Copy link to this object / slide" (editor/permalink.ts): `?slide=<n>`, and the object's place
+   * among the slide's elements (`&obj=2.1`; on a web page among the page's) — none where the host has no address.
+   */
+  const linkTo = (place: Place, what: string) => { const base = host.webLink?.(); if (base) copyLinkAt(base, place, what, notify); };
+  const objectLinkItems = (one: SelItem): MenuItem[] => {
+    if (!host.webLink?.()) return [];
+    const sp = one.slide >= 0 ? slidePaths(text.toString())[one.slide] : [];
+    if (!sp || sp.some((k, j) => one.path[j] !== k) || one.path.length <= sp.length) return [];
+    return [{ label: 'Copy link to this object', action: () => linkTo({ ...(one.slide >= 0 ? { slide: one.slide + 1 } : {}), obj: one.path.slice(sp.length) }, 'this object') }];
+  };
+  const slideLinkItems = (i: number): MenuItem[] => kind === 'deck' && host.webLink?.() ? [{ label: 'Copy link to this slide', action: () => linkTo({ slide: i + 1 }, `slide ${i + 1}`) }] : [];
+  // a link's slide and object: shown and selected once the canvas has the slides (then the slide looked at last does not take over)
+  const placeShown = useRef<Place | null>(null);
+  useEffect(() => {
+    if (!place || placeShown.current === place || canvasState !== 'ready' || (!slides.length && kind !== 'page')) return;
+    placeShown.current = place;
+    const k = place.slide && slides.length ? Math.min(place.slide, slides.length) - 1 : -1;
+    if (k >= 0) { backTo.current = 'done'; if (kind === 'deck') gotoSlide(k); }
+    const base = k >= 0 ? slidePaths(text.toString())[k] : kind === 'page' ? [] : null;
+    if (place.obj && base) setTimeout(() => toCanvas({ ol: 'select', paths: [[...base, ...place.obj!]] }), 150);
+  }, [place, slides, kind, canvasState]);
   /** the master's entries for an object (deckmaster.ts): on every slide, or what can be done with one that is; texts made alike */
   const masterItems = (one: SelItem, m: ReturnType<typeof masterOps>): MenuItem[] => [
     ...(one.master ? [
@@ -2376,6 +2403,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
       { label: 'Text box', action: () => insertObject('text') },
       { label: 'Picture…', action: () => { phPicture.current = null; fileInput.current?.click(); } },
       { label: kind === 'page' ? 'Comment on the page' : 'Comment on the slide', disabled: ro, action: () => startDraft(sp ?? null, i) },
+      ...slideLinkItems(i),
       ...(kind !== 'page' ? [
         { sep: true },
         { label: deck ? 'Background colour of this slide…' : 'Background colour…', disabled: !sp || ro, action: () => pickAt(x, y, 'Slide background', close => <ColorGrid current={null} close={close} none="As the design has it" onPick={c => { if (sp) applyOps([{ t: 'style', path: sp, set: { background: c } }]); }} />) },
@@ -2600,6 +2628,7 @@ export function DeliverableCanvas({ host, notify, chrome }: { host: DeliverableH
       { sep: true },
       { label: 'Edit code', action: () => { const p = slidePaths(text.toString())[i]; if (p) showCode(p); } },
       { label: 'Comment on the slide', disabled: readOnlyRef.current, action: () => startDraft(slidePaths(text.toString())[i] ?? null, i) },
+      ...slideLinkItems(i),
       { label: 'Delete slide', disabled: n <= 1, action: () => deleteSlide(i) },
     ]);
   };
