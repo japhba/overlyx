@@ -311,7 +311,10 @@ blend.
   highlight*); a formula is quoted as its `$…$`, a picture as `\includegraphics{…}`; words edited
   away since: the longest beginning still there is marked, and said. Text files: `?line=12-20`;
   PDFs: `?page=3`; decks: `?slide=3&obj=2.1` (the object's place among the slide's elements, then
-  selected). Opening one needs access to the project as any address does. In the VS Code extension
+  selected). In the web app a popup asks who may open it first (`app/CopyLinkDialog.tsx`): *People
+  with access* (the plain address, saying who they are) or — the owner only — *Anyone with the link can
+  view / edit*, which makes a new share link with that role and puts its token in front of the place
+  (`?share=<token>&text=…`; joining keeps the rest of the query, App.tsx `shareLanding`). In the VS Code extension
   the same entries copy the overlyx.app address when the folder is a synced clone (sync.ts
   `webPlaceOf`, core `webFileAddress`), and **Open on overlyx.app** (the 🌐 in the editor title bar,
   the tab's menu; *Copy overlyx.app Link* in a text editor's right-click menu: with the selected lines)

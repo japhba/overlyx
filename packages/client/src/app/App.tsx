@@ -30,6 +30,7 @@ import { PaneDividers } from './PaneDividers';
 import { EditModeSwitch, editModeOf, applyEditMode, modeScope, setOwnSuggesting, suggestingFor, switchModeScope, type ModeScope } from './EditModeSwitch';
 import { loadLayout, saveLayout, setPaneShown, togglePane, visiblePanes, paneGrow, applyPreset, presetMatches, parseViewParam, viewParam, type LinkView, type PaneId, type PaneLayout, type ViewKind } from './panes';
 import { ShareDialog } from './Share';
+import { CopyLinkDialog } from './CopyLinkDialog';
 import { GuestCallout, ShareInvite, type SharePreview } from './Guest';
 import { GitDialog } from './Git';
 import { MenuBar, openPalette, PALETTE_LABEL, PALETTE_DEFAULT, type MenuDef } from './MenuBar';
@@ -226,10 +227,17 @@ function parseHash(): { id: string | null; goto: string | null; heading: number 
 /** What kind of document a link's `view=` speaks of (its words for the source and the output: app/panes.ts). */
 const viewKindOf = (id: string): ViewKind => (isArticleDoc(id) ? 'article' : isMarkdownDoc(id) ? 'markdown' : 'tex');
 
-/** Where a share link lands (the hash): the linked file when it opens in a tab, else the project's main document. */
+/**
+ * Where a share link lands (the hash): the linked file when it opens in a tab, else the project's
+ * main document — with what else the link's query names, its place and view (editor/permalink.ts, panes.ts).
+ */
 function shareLanding(r: { project: string; doc: string | null; file: Parameters<typeof fileTabId>[1] | null }): string {
   const id = (r.file && fileTabId(r.project, r.file)) || r.doc;
-  return id ? '#/' + id : '';
+  if (!id) return '';
+  const q = new URLSearchParams(location.hash.split('?')[1] ?? '');
+  q.delete('share');
+  const rest = q.toString().replace(/\+/g, '%20');
+  return '#/' + id + (rest ? '?' + rest : '');
 }
 
 /**
@@ -536,6 +544,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   }, [findOpen, findFocus]);
   // sharing: the project whose share dialog is open; view-only when the current project was shared for viewing
   const [shareFor, setShareFor] = useState<string | null>(null);
+  // "Copy link to …": who may open it, asked first (app/CopyLinkDialog.tsx)
+  const [linkAsk, setLinkAsk] = useState<{ url: string; what: string } | null>(null);
   // File ▸ New slides / poster / page…: the project a layout document is created in
   const [newLayoutFor, setNewLayoutFor] = useState<string | null>(null);
   // the project whose git dialog (clone URL, tokens, history) is open
@@ -686,10 +696,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       api.acceptShare(token, sharePath).then(r => {
         notify(`You can now ${r.role === 'view' ? 'view' : 'edit'} “${r.title ?? projectShortName(r.project)}”`);
         setRefreshKey(k => k + 1);
-        // (the view the link names goes along: permalink.ts)
-        const view = new URLSearchParams(location.hash.split('?')[1] ?? '').get('view')?.replace(/[^a-z,]/gi, '');
-        const landing = shareLanding(r);
-        location.hash = landing && view ? landing + '?view=' + view : landing;
+        location.hash = shareLanding(r);
       }).catch(e => { notify((e as Error).message, 'error'); location.hash = ''; });
     };
     check();
@@ -1041,6 +1048,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     editorContext.openInTab = openInTab;
     editorContext.gotoLabel = gotoLabel;
     editorContext.webLink = webAppLink;
+    editorContext.askLinkScope = (url, what) => setLinkAsk({ url, what });
     editorContext.linkView = id => (isLyxDoc && (id === docId || childIds.includes(id)) ? viewParam(panes, pagesOn, viewKindOf(id)) : null);
     (window as any).overlyx = editorContext;   // handy for tests / debugging
     editorContext.ui = {
@@ -1972,6 +1980,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         sync={syncChip}
         pdf={isLyxDoc ? { state: pdf, onClick: rebuild => { if (rebuild && !pdf.busy) void build(); else if (!pdfPaneVisible) changePanes(l => (narrowPanes ? { ...setPaneShown(l, 'pdf', true), order: ['pdf', ...l.order.filter(p => p !== 'pdf')] } : setPaneShown(l, 'pdf', true))); } } : undefined} />
       {renderDialog()}
+      {linkAsk && <CopyLinkDialog url={linkAsk.url} what={linkAsk.what} user={user} notify={notify} onClose={() => setLinkAsk(null)} />}
       {shareFor && <ShareDialog project={shareFor} user={user} doc={docId?.replace(/^(text|pdf):/, '') ?? null} view={isLyxDoc ? viewParam(panes, pagesOn, viewKindOf(docId!)) : null} onClose={() => setShareFor(null)} onChanged={() => setRefreshKey(k => k + 1)} />}
       {newLayoutFor && <NewLayoutDialog project={newLayoutFor} dir={textId ? docPathOf(textId).split('/').slice(0, -1).join('/') : ''} notify={notify} onClose={() => setNewLayoutFor(null)} onCreated={id => { location.hash = '#/' + id; setRefreshKey(k => k + 1); }} />}
       {gitFor && <GitDialog project={gitFor} user={user} onClose={() => setGitFor(null)} />}

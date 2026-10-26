@@ -100,6 +100,7 @@ export function copyPlaceLink(id: string, place: (Place & { goto?: string }) | n
 export function copyLinkAt(base: string, place: (Place & { goto?: string; view?: string | null }) | null, what: string, notify = editorContext.notify): void {
   const q = place ? placeQuery(place) : '';
   const url = base + (q ? '?' + q : '');
+  if (editorContext.askLinkScope) { editorContext.askLinkScope(url, what); return; }
   const done = () => notify?.(`Link to ${what} copied`);
   const failed = () => notify?.('The link could not be copied: ' + url, 'error');
   try {
@@ -107,6 +108,24 @@ export function copyLinkAt(base: string, place: (Place & { goto?: string; view?:
     if (w) { w.then(done, () => (legacyCopy(url) ? done() : failed())); return; }
   } catch { /* below */ }
   if (legacyCopy(url)) done(); else failed();
+}
+
+/** The link `url` with a share link's token: whoever opens it joins the project first, then lands on the place (app/App.tsx). */
+export function withShareToken(url: string, token: string): string {
+  const q = url.indexOf('?', url.indexOf('#'));
+  return q < 0 ? `${url}?share=${token}` : `${url.slice(0, q)}?share=${token}&${url.slice(q + 1)}`;
+}
+
+/**
+ * Put `text` on the clipboard — also text still to come (a share link being made): Safari takes
+ * the write only inside the click, so the clipboard is handed the promise; false: refused.
+ */
+export async function copyText(text: string | Promise<string>): Promise<boolean> {
+  if (typeof text !== 'string' && typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
+    try { await navigator.clipboard.write([new ClipboardItem({ 'text/plain': text.then(t => new Blob([t], { type: 'text/plain' })) })]); return true; } catch { /* below */ }
+  }
+  const s = await text;
+  try { await navigator.clipboard.writeText(s); return true; } catch { return legacyCopy(s); }
 }
 
 /** execCommand('copy') from a scratch field: where the async clipboard is refused (an unfocused webview, an old Safari) */

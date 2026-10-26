@@ -2,7 +2,7 @@
 /** Links to a place (client/src/editor/permalink.ts): the quote made for a range finds that range again, also after edits. */
 import { describe, it, expect } from 'vitest';
 import { schema } from '../packages/core/src/schema.ts';
-import { docText, quotePlace, findPlace, placeQuery, parsePlace } from '../packages/client/src/editor/permalink.ts';
+import { docText, quotePlace, findPlace, placeQuery, parsePlace, withShareToken } from '../packages/client/src/editor/permalink.ts';
 
 const par = (...content: (string | ReturnType<typeof schema.node>)[]) => schema.node('paragraph', null, content.map(c => typeof c === 'string' ? schema.text(c) : c));
 const doc = (...ps: ReturnType<typeof par>[]) => schema.node('doc', null, ps);
@@ -65,6 +65,12 @@ describe('links to a place in a document', () => {
     const hit = findPlace(docText(edited), p)!;
     expect(hit.from).toBe(parRange(edited, 1).from);
     expect(hit.exact).toBe(false);
+  });
+
+  it('puts a share link\'s token in front of the place, so the link joins first and lands there', () => {
+    expect(withShareToken('https://overlyx.app/#/jan/paper/main.tex?text=Results&view=wysiwym', 'T0k')).toBe('https://overlyx.app/#/jan/paper/main.tex?share=T0k&text=Results&view=wysiwym');
+    expect(withShareToken('https://overlyx.app/#/text:jan/paper/notes.txt', 'T0k')).toBe('https://overlyx.app/#/text:jan/paper/notes.txt?share=T0k');
+    expect(withShareToken('https://overlyx.app/app?x=1#/jan/paper/main.tex?page=2', 'T0k')).toBe('https://overlyx.app/app?x=1#/jan/paper/main.tex?share=T0k&page=2');
   });
 
   it('reads lines, pages, slides and objects', () => {

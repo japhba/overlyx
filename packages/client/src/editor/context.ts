@@ -59,6 +59,12 @@ export interface EditorContext {
    * when the folder is synced with a project — null (no such entries) otherwise
    */
   webLink?: (id: string) => string | null;
+  /**
+   * "Copy link to …" in a shell that can share: who may open the link `url` is asked first — the
+   * people with access, or anyone, through a new share link (app/CopyLinkDialog.tsx); unset: copied
+   * as it is
+   */
+  askLinkScope?: (url: string, what: string) => void;
   /** How the shell shows the document `id` when it is the open one, as a link's `view=` (app/panes.ts viewParam); null for other files */
   linkView?: (id: string) => string | null;
 }
