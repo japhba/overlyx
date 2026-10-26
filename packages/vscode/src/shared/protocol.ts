@@ -27,7 +27,7 @@ export type HostToEditor =
   | { type: 'metadataChanged' }
   | { type: 'relatedError'; id: string; error: string }
   | { type: 'init'; docId: string; base: string; pmDoc: PmDoc; headerLines: string[]; fragment: boolean; dark: boolean; ack: SyncTag | null;
-      /** git's user.name: comments under it are this person's too (plugins/commentguard.ts) */
+      /** who edits here (host/newDocument.ts authorName): the name of their tracked changes and comments */
       author?: string }
   /**
    * The file's content as the host now has it — changed outside the editor (git, another editor,

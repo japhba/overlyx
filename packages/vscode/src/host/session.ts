@@ -9,7 +9,7 @@ import * as vscode from 'vscode';
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
-import { lyxToPm, headerValue, mergeLyx, type LyxDocument, type PMJSON } from '@overlyx/core';
+import { lyxToPm, headerValue, mergeLyx, getAuthors, addAuthor, type LyxDocument, type PMJSON } from '@overlyx/core';
 import { documentModel, sameModel, modelDocument, type DocumentModel, type SyncTag } from '../shared/documentModel.ts';
 import os from 'node:os';
 import { parseDocumentText, writeDocumentText, includeResolver, cachedParseFile, sameDocumentText, markdownAsTex, type TexContext } from './texdoc.ts';
@@ -134,6 +134,10 @@ export class DocSession {
     if (sameModel(incoming, currentModel)) { this.remember(incoming, current.doc); return diskChanged; }
     const ours = modelDocument(incoming, current.doc);
     const merged = mergeLyx(this.baseDocument(base, current), ours, current.doc);
+    // the webview's authors stay known to the writer when the file's header won (a .tex names an
+    // author only in their changes: one whose first change this is is in the webview's header alone)
+    merged.header = { ...merged.header, lines: [...merged.header.lines] };
+    for (const a of getAuthors(ours.header)) addAuthor(merged.header, a.id, a.name, a.email ?? '');
     const mergedModel = documentModel(lyxToPm(merged), merged.header.lines);
     const rebased = !sameModel(incoming, mergedModel);
     if (rebased) this.preserveDraft(writeDocumentText(ours, this.ctx, this.relPath, current.fragment, includeResolver(this.ctx, this.relPath)).text);

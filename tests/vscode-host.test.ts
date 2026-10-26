@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { lyxToPm, pmToLyxBody, texHeadings, type LyxDocument, type PMJSON } from '@overlyx/core';
+import { lyxToPm, pmToLyxBody, texHeadings, lyxAuthorId, addAuthor, getAuthors, type LyxDocument, type PMJSON } from '@overlyx/core';
 import { parseDocumentText, writeDocumentText, includeResolver } from '../packages/vscode/src/host/texdoc.ts';
 import { buildMeta } from '../packages/vscode/src/host/meta.ts';
 import { childDocuments, collectFiles, findMaster, projectDirFor } from '../packages/vscode/src/host/project.ts';
@@ -94,6 +94,21 @@ describe('vscode host document pipeline', () => {
     expect(w1.text).toContain('\\section{Introduction}');
     expect(w1.text).toContain('\\label{eq:main}');
     expect(w1.text).toContain('\\input{chapter.tex}');
+  });
+
+  it("a change typed in the editor keeps its author's name through the .tex (not \"Unknown\")", () => {
+    const r = parseDocumentText(MAIN, ctx, 'main.tex');
+    const pm = lyxToPm(r.doc) as PMJSON;
+    // the webview's own change (EditorShell ownAuthorId) and the header line its update carries (localEditor withOwnAuthor)
+    const id = lyxAuthorId('Ada Lovelace', '');
+    const text = JSON.stringify(pm).match(/"text":"([^"]{4,})"/)![1];
+    const marked = JSON.parse(JSON.stringify(pm).replace(`"text":"${text}"`, `"text":"${text}","marks":[{"type":"change","attrs":{"type":"inserted","author":${id},"time":1800000000}}]`));
+    const header = { lines: [...r.doc.header.lines] };
+    addAuthor(header, id, 'Ada Lovelace');
+    const out = writeDocumentText({ ...r.doc, body: pmToLyxBody(marked), header }, ctx, 'main.tex', false, includeResolver(ctx, 'main.tex')).text;
+    expect(out).toContain('\\lyxadded{Ada Lovelace}');
+    // read back, the change is still under the same id: the editor goes on extending it, the name resolves
+    expect(getAuthors(parseDocumentText(out, ctx, 'main.tex').doc.header)).toContainEqual(expect.objectContaining({ id, name: 'Ada Lovelace' }));
   });
 
   it('classifies files and finds the master of a child', () => {

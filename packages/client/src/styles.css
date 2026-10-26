@@ -627,10 +627,16 @@ html.lyx-list-dragging, html.lyx-list-dragging * { cursor: grabbing !important; 
 .lyx-inset[data-change="deleted"] > .inset-box { outline: 1px dashed var(--err); opacity: 0.6; }
 /* Inline nodes carrying a change (formulas, macros, graphics — `data-changed`): the colour is
    inherited by MathJax and the math field; a line-through cannot reach into their inline-blocks, so
-   a deleted one gets LyX's diagonal cross-out instead. */
+   a deleted formula is struck through by a line of its own, across the middle like deleted text
+   (a display formula's: across the formula, not the column); a deleted graphic gets LyX's cross-out. */
 .lyx-math-inline[data-changed], .lyx-math-display[data-changed], .lyx-macro[data-changed], .lyx-graphics[data-changed] { position: relative; }
+.lyx-math-display[data-changed="deleted"] > :is(.lyx-math-static, .lm-field) { position: relative; }
 .lyx-math-inline[data-changed] mjx-container, .lyx-math-display[data-changed] mjx-container, .lyx-macro[data-changed] mjx-container { color: inherit; }
-.lyx-math-inline[data-changed="deleted"]::after, .lyx-math-display[data-changed="deleted"]::after, .lyx-macro[data-changed="deleted"]::after, .lyx-graphics[data-changed="deleted"]::after {
+.lyx-math-inline[data-changed="deleted"]::after, .lyx-math-display[data-changed="deleted"] > :is(.lyx-math-static, .lm-field)::after, .lyx-macro[data-changed="deleted"]::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(to bottom, transparent calc(50% - 0.75px), var(--change-color, var(--err)) calc(50% - 0.75px), var(--change-color, var(--err)) calc(50% + 0.75px), transparent calc(50% + 0.75px));
+}
+.lyx-graphics[data-changed="deleted"]::after {
   content: ''; position: absolute; inset: 0; pointer-events: none;
   background: linear-gradient(to top right, transparent calc(50% - 1px), var(--change-color, var(--err)) calc(50% - 1px), var(--change-color, var(--err)) calc(50% + 1px), transparent calc(50% + 1px));
 }

@@ -64,5 +64,6 @@ export function describeChanges(c: SyncChanges): string[];
 export function signInWithBrowser(host: string, ui: { open(url: string): Promise<unknown>; manual?: boolean; askCode?(): Promise<string | null | undefined>; project?: string; app?: "vscode" }): Promise<SyncAuth>;
 export function signedInHosts(): { host: string; username: string }[];
 export function signOutOf(host: string): boolean;
+export function accountOf(host: string, auth: SyncAuth): Promise<{ username: string; name: string | null; email: string | null }>;
 export function remoteProjects(host: string, auth: SyncAuth): Promise<{ name: string; title: string | null; role: string }[]>;
 export function cloneProject(host: string, auth: SyncAuth, project: string, parent: string, name?: string): Promise<string>;

@@ -4,7 +4,7 @@ import { documentMenus } from '@client/app/documentMenus';
 import { editorViewMenu } from '@client/app/editorViewMenu';
 import { buildToolbars, loadToolbarPrefs, mathExecutor, useMathPanels, toolbarClipboard, markValue, type ToolbarId, type ToolbarMode, type ToolbarPrefs } from '@client/app/toolbars';
 import { SelectionBar } from '@client/app/SelectionBar';
-import { debounce, hashAuthor, applyAuthorColors, bcp47, suggestLabel, LayoutPicker, documentStats, applyEditorZoom, stepTextZoom, useDocumentViewportZoom, SidebarGrip, restoreSidebarWidths } from '@client/app/shellutil';
+import { debounce, applyAuthorColors, bcp47, suggestLabel, LayoutPicker, documentStats, applyEditorZoom, stepTextZoom, useDocumentViewportZoom, SidebarGrip, restoreSidebarWidths } from '@client/app/shellutil';
 import { setDocumentFonts } from '@client/fonts/editorfont';
 import { setDocumentParagraphs, setDocumentHeadings } from '@client/editor/paragraphsep';
 import { setDocumentNumbering } from '@client/editor/plugins/numbering';
@@ -74,7 +74,7 @@ import * as C from '@client/editor/commands';
 import { setMarginMode } from '@client/editor/plugins/margin';
 import { acceptAllChanges, rejectAllChanges, changeAt } from '@client/editor/plugins/changes';
 import { setQuery, findNext, replaceCurrent, replaceAll, findKey } from '@client/editor/plugins/find';
-import { unquote, projectOfDoc, docDirOf, webFileAddress } from '@overlyx/core';
+import { unquote, projectOfDoc, docDirOf, webFileAddress, lyxAuthorId } from '@overlyx/core';
 import { describeChange } from '@client/editor/assembly';
 
 type DialogState = { name: string; arg?: unknown } | null;
@@ -84,6 +84,11 @@ const stored = (k: string) => { try { return localStorage.getItem(k); } catch { 
 export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'init' }> }) {
   const docId = init.docId;
   const article = /\.html?$/i.test(docId);
+  // who edits here (host/newDocument.ts authorName): tracked changes and comments go under this name
+  const me = init.author || 'You';
+  // a .tex names authors only in their changes (\lyxadded{name}…), and its parse numbers them so:
+  // a change made under this id is still this person's once the file has been read back
+  const ownAuthorId = (m: DocMeta) => m.authors.find(a => a.name === me)?.id ?? lyxAuthorId(me, '');
   // (the editor's plugins, menus and HTML blocks ask the registry: before the editor is made)
   if (article) noteArticle(docId, true);
   const [meta, setMeta] = useState<DocMeta | null>(null);
@@ -268,7 +273,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
     if (activeMeta) {
       editorContext.meta = activeMeta;
       editorContext.trackChanges = suggestingFor(id, activeMeta.trackingChanges);
-      editorContext.changeAuthorId = activeMeta.authors.find(a => a.name === 'You')?.id;
+      editorContext.changeAuthorId = ownAuthorId(activeMeta);
       setTracking(editorContext.trackChanges);
     }
     const p = C.currentParagraph(v.state);
@@ -285,8 +290,8 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
     let cancelled = false;
     let handle: LocalEditorHandle | null = null;
     void (async () => {
-      editorContext.user = { id: 1, username: 'you', name: 'You', color: '#3b6ea5', isAdmin: false };
-      editorContext.myNames = init.author ? [init.author] : [];
+      editorContext.user = { id: 1, username: 'you', name: me, color: '#3b6ea5', isAdmin: false };
+      editorContext.myNames = [me];
       editorContext.docId = docId;
       editorContext.project = projectOfDoc(docId);
       editorContext.docDir = docDirOf(docId);
@@ -315,7 +320,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
         applyAuthorColors(m.authors);
         editorContext.trackChanges = suggestingFor(docId, m.trackingChanges);
         setTracking(editorContext.trackChanges);
-        editorContext.changeAuthorId = m.authors.find(x => x.name === 'You')?.id;
+        editorContext.changeAuthorId = ownAuthorId(m);
       }
       refreshMacros(handle.view, m?.macros ?? {});
       // an article: the page's look on the editor
@@ -489,19 +494,9 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
     const target = viewDocId(currentView()!);
     const forAll = modeScope() === 'everyone';
     const set = forAll ? { tracking_changes: String(next) } : undefined;
-    const doc = forAll ? next : editorContext.meta!.trackingChanges;
     try {
-      if (next && editorContext.changeAuthorId === undefined) {
-        const id = hashAuthor('You');
-        const lines = [...docHeaders(target)];
-        const idx = lines.findIndex(l => l.startsWith('\\author '));
-        const line = `\\author ${id} "You" ""`;
-        if (idx >= 0) lines.splice(idx, 0, line); else lines.push(line);
-        const r = await api.setHeader(target, { headerLines: lines, set });
-        updateHeader(target, r.headerLines);
-        editorContext.changeAuthorId = id;
-        updateMeta(target, { ...editorContext.meta!, trackingChanges: doc, authors: [...editorContext.meta!.authors, { id, name: 'You' }] });
-      } else if (forAll) {
+      // (no author to register: the update that carries this person's first change names them, localEditor.ts)
+      if (forAll) {
         const r = await api.setHeader(target, { set });
         updateHeader(target, r.headerLines);
         updateMeta(target, { ...editorContext.meta!, trackingChanges: next });
@@ -924,7 +919,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       {/* the quick menu over selected words (toolbars.tsx `quick`) */}
       {!pdfOnly && <SelectionBar view={view} groups={tb.quick} />}
       <StatusBar layout={layout} status={status} chord={chord} message={message} save={{ state: 'saved', pending: false, savedAt: 0, unavailable: false }}
-        tracking={tracking} trackingAs="You" change={changeInfo} stats={docStats} zoom={zoom} onZoom={setZoom} />
+        tracking={tracking} trackingAs={me} change={changeInfo} stats={docStats} zoom={zoom} onZoom={setZoom} />
       {renderDialog()}
       <SvgEditorHost />
       <DialogHost />

@@ -4,12 +4,14 @@ import { EditorView } from 'prosemirror-view';
 import { keymap } from 'prosemirror-keymap';
 import * as Y from 'yjs';
 import { Awareness } from 'y-protocols/awareness';
-import { schema, projectOfDoc, docDirOf } from '@overlyx/core';
+import { schema, projectOfDoc, docDirOf, getAuthors, addAuthor } from '@overlyx/core';
 import { writeDocument } from '@overlyx/core/collab/index.ts';
 import { collabSync, cursorPlugin, undoPlugin, undo, redo } from '@client/editor/collab';
 import { assemblePlugins, editorViewProps, editorAttributes, dispatchTransactionProp, installEditorDom } from '@client/editor/assembly';
 import { isMarkdownDoc } from '@client/editor/markdown';
 import { inkPlugin } from '@client/editor/plugins/ink';
+import { allChanges } from '@client/editor/plugins/changes';
+import { editorContext } from '@client/editor/context';
 import { getPrefs, subscribePrefs } from '@client/prefs';
 import { editorSessions } from './editorSession';
 import { documentModel, mergeModels, sameModel, SyncLedger, type DocumentModel, type SyncTag } from '../shared/documentModel';
@@ -103,7 +105,7 @@ export function createLocalEditor(opts: LocalEditorOptions): LocalEditorHandle {
       return merged.headerLines;
     },
     takeUpdate(headerLines: string[]) {
-      const next = documentModel(view.state.doc.toJSON(), headerLines);
+      const next = documentModel(view.state.doc.toJSON(), withOwnAuthor(view.state.doc, headerLines));
       const base = session!.ledger.base;
       if (sameModel(next, base)) return null;
       const sync = session!.ledger.send(next);
@@ -123,4 +125,17 @@ export function createLocalEditor(opts: LocalEditorOptions): LocalEditorHandle {
       }
     },
   };
+}
+
+/**
+ * The header naming this editor's own author while the document holds a change of theirs: a .tex
+ * keeps only names (\lyxadded{name}{…}), so its parse knows an author from their first change in
+ * the file on — without this line the writer signed that very change "Unknown".
+ */
+function withOwnAuthor(doc: EditorState['doc'], headerLines: string[]): string[] {
+  const id = editorContext.changeAuthorId, name = editorContext.user?.name;
+  const header = { lines: [...headerLines] };
+  if (id === undefined || !name || getAuthors(header).some(a => a.id === id) || !allChanges(doc).some(c => c.author === id)) return headerLines;
+  addAuthor(header, id, name);
+  return header.lines;
 }

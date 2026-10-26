@@ -13,6 +13,7 @@ import { execFileSync } from 'node:child_process';
 import { PAGE_PRESETS, newDocumentText, newMarkdownText } from '@overlyx/core';
 import { newLayoutDocumentText } from './texdoc.ts';
 import { newDeliverable } from './deliverables.ts';
+import { syncTarget, syncCredentials, accountOf } from '../../../cli/bin/overlyx.js';
 
 type Kind = 'slides' | 'poster' | 'page' | 'latex' | 'markdown';
 
@@ -58,9 +59,38 @@ function freeName(dir: string, name: string): string {
   for (let i = 2, n = name; ; n = `${stem}-${i++}${ext}`) if (!fs.existsSync(path.join(dir, n))) return n;
 }
 
-/** git's user.name — the author on a new title page, as the web app puts the account's name there */
-export function gitUserName(cwd: string): string | undefined {
+/** git's user.name */
+function gitUserName(cwd: string): string | undefined {
   try { return execFileSync('git', ['config', 'user.name'], { cwd, encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).trim() || undefined; } catch { return undefined; }
+}
+
+/** display names of the accounts synced folders sign in with, by host and username (only found ones are kept) */
+const accountNames = new Map<string, Promise<string | undefined>>();
+
+/**
+ * Who edits here: the name tracked changes, comments and a new title page go under. In a folder
+ * synced with OverLyX, the display name of the account it syncs as — what overlyx.app signs that
+ * account's own changes with; else git's user.name, else the computer's user. Never "You": the
+ * changes travel to everyone else, and the file keeps only the name.
+ */
+export async function authorName(cwd: string): Promise<string> {
+  const target = await syncTarget(cwd).catch(() => null);
+  const auth = target && await syncCredentials(target.host, cwd).catch(() => null);
+  if (target && auth) {
+    const key = `${target.host} ${auth.username}`;
+    let name = accountNames.get(key);
+    if (!name) {
+      name = Promise.race([
+        accountOf(target.host, auth).then(u => u.name?.trim() || u.username, () => undefined),
+        new Promise<undefined>(resolve => setTimeout(resolve, 4000)),
+      ]);
+      accountNames.set(key, name);
+      void name.then(n => { if (!n) accountNames.delete(key); });
+    }
+    const found = await name;
+    if (found) return found;
+  }
+  return gitUserName(cwd) ?? os.userInfo().username;
 }
 
 /** The new file's text; `abs` is where it goes (the writer reads the folder's packages and macros). */
@@ -92,7 +122,7 @@ async function createNew(which: keyof typeof PICK, layoutDir: () => string): Pro
     // the dialog asked about replacing the name as typed, not this one
     if (fs.existsSync(abs)) { void vscode.window.showErrorMessage(`OverLyX: ${path.basename(abs)} already exists`); return; }
   }
-  const author = choice.doc === 'markdown' ? undefined : gitUserName(path.dirname(abs));
+  const author = choice.doc === 'markdown' ? undefined : await authorName(path.dirname(abs));
   const text = newFileText(choice, abs, layoutDir(), author);
   await vscode.workspace.fs.writeFile(vscode.Uri.file(abs), Buffer.from(text, 'utf8'));
   await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(abs), 'overlyx.texEditor', { preview: false });

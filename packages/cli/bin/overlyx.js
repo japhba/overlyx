@@ -1871,6 +1871,11 @@ export function signOutOf(host) {
   return true;
 }
 
+/** The account the sign-in belongs to on `host`: { username, name (its display name), email }. */
+export async function accountOf(host, auth) {
+  return (await api({ host, ...auth }, '/git/api/user')).user;
+}
+
 /** The projects the sign-in reaches on `host`: { name, title, role }. */
 export async function remoteProjects(host, auth) {
   return (await api({ host, ...auth }, '/git/api/projects')).projects;

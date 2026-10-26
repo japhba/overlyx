@@ -30,7 +30,7 @@ import { isArticleHtml, parseArticle, htmlBlockOf, blockKey, rawSource } from '@
 import { parseBibtex, type BibEntry } from '@overlyx/core/bib.ts';
 import { webviewHtml } from './webviewHtml.ts';
 import { toPng } from './graphics.ts';
-import { gitUserName } from './newDocument.ts';
+import { authorName } from './newDocument.ts';
 import { webPlaceOf, onWebPlaces } from './sync.ts';
 import { webFileAddress } from '@overlyx/core/projectKey.ts';
 
@@ -162,7 +162,7 @@ export type DeliverableToHost =
   | { type: 'appearance'; appearance: Appearance };
 
 export type HostToDeliverable =
-  /** `author`: git's user.name, the name comments and suggestions are made under */
+  /** `author`: who edits here (newDocument.ts authorName), the name comments and suggestions are made under */
   | { type: 'dlInit'; text: string; version: number; base: string; entry: string; readOnly: boolean; dark: boolean; author?: string }
   /** the page's address on overlyx.app (its folder synced with a project, sync.ts), which links to a slide or an object extend; null: none */
   | { type: 'dlWeb'; url: string | null }
@@ -220,9 +220,11 @@ export class DeliverableEditorProvider implements vscode.CustomTextEditorProvide
     subs.push(panel.webview.onDidReceiveMessage((msg: DeliverableToHost) => {
       switch (msg.type) {
         case 'ready':
-          post({ type: 'dlInit', text: document.getText(), version: document.version, base, entry, readOnly: false, dark: isDark(), author: gitUserName(path.dirname(document.uri.fsPath)) });
-          sendWeb();
-          sendAppearance(panel.webview);
+          void authorName(path.dirname(document.uri.fsPath)).then(author => {
+            post({ type: 'dlInit', text: document.getText(), version: document.version, base, entry, readOnly: false, dark: isDark(), author });
+            sendWeb();
+            sendAppearance(panel.webview);
+          });
           break;
         case 'appearance':
           changeAppearance(panel.webview, msg.appearance);

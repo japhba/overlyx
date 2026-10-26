@@ -16,7 +16,7 @@ import type { TextStore } from '../agents/localEdit.ts';
 import type { InteractionAction, InteractionOutcome } from '@overlyx/core/interactions.ts';
 import { WindowUnreachable, type HandOver } from '../agents/handover.ts';
 import { isHtmlPath } from '@overlyx/core/html/deliverable.ts';
-import { gitUserName } from './newDocument.ts';
+import { authorName } from './newDocument.ts';
 import { webPlaceOf, onWebPlaces } from './sync.ts';
 
 export interface ProviderDeps {
@@ -222,10 +222,12 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
           break;
         case 'ready': {
           sendAppearance(panel.webview);   // before init: the shell starts with the theme switch's choices
+          const named = authorName(path.dirname(document.uri.fsPath));
           this.applyChain = this.applyChain.then(async () => {
+            const author = await named;
             await session.syncFromDisk();
             const r = session.parseCurrent();
-            post({ type: 'init', docId: session.docId, base, pmDoc: r.pmDoc as never, headerLines: r.headerLines, fragment: r.fragment, dark: isDark(), ack: session.applied, author: gitUserName(path.dirname(document.uri.fsPath)) });
+            post({ type: 'init', docId: session.docId, base, pmDoc: r.pmDoc as never, headerLines: r.headerLines, fragment: r.fragment, dark: isDark(), ack: session.applied, author });
             sendWeb();
             if (r.warnings.length) vscode.window.setStatusBarMessage(`OverLyX: ${r.warnings.length} parse warning(s) — details in the raw file`, 8000);
           }).catch(e => {

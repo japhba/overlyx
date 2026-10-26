@@ -499,6 +499,8 @@ const authorsAsked = new Set<number>();
 export function changeAuthorName(id: number): string {
   const name = editorContext.meta?.authors.find(a => a.id === id)?.name;
   if (name) return name;
+  // one's own first change, before the table has it (the VS Code editor registers no author)
+  if (id === editorContext.changeAuthorId && editorContext.user?.name) return editorContext.user.name;
   if (!authorsAsked.has(id)) { authorsAsked.add(id); editorContext.refreshAuthors?.(); }
   return 'a co-author';
 }
