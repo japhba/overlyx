@@ -52,8 +52,8 @@ describe('feedback and error reports, kept on the server', () => {
     // the mail goes out asynchronously: poll for it (a fixed 20 ms wait failed under the deploy's load)
     const mail = await vi.waitFor(() => sentMails.find(m => m.subject.includes(`#${r.id}`)) ?? Promise.reject(new Error('not mailed yet')), { timeout: 5000, interval: 20 });
     expect(mail.to).toBe('owner@example.com');
-    expect(mail.subject).toContain('Formula vanished');
-    expect(mail.text).toContain('Ada Lovelace (ada, ada@example.com) wrote:');
+    // that a report came, never what it says or who sent it (mailer.ts: the report stays on the server)
+    for (const told of [mail.subject, mail.text]) for (const secret of ['Formula vanished', 'alpha', 'Ada', 'ada@example.com']) expect(told).not.toContain(secret);
   });
 
   it('leaves the document name and the error out unless they were given', () => {
