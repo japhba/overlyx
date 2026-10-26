@@ -387,6 +387,17 @@ export function linkProject(token: string): ProjectRow | undefined {
   return row && isRole(row.link_role) ? row : undefined;
 }
 
+/**
+ * What a share link opens, before anybody joins: its project, title, owner's name and role — for the
+ * page that asks a visitor without a session how to come in (with an account, or as a guest).
+ */
+export function linkPreview(token: string): { project: string; title: string | null; owner: string | null; role: Role } | undefined {
+  const row = linkProject(token);
+  if (!row) return undefined;
+  const owner = row.owner_id != null ? db.prepare('SELECT display_name AS name FROM users WHERE id = ?').get(row.owner_id) as { name: string } | undefined : undefined;
+  return { project: row.name, title: row.title, owner: owner?.name ?? null, role: row.link_role as Role };
+}
+
 /** A signed-in user (or guest) opens a share link: they join the project with the link's role. */
 export function acceptLink(token: string, user: SessionUser): { project: ProjectRow; role: Role } {
   const row = linkProject(token);

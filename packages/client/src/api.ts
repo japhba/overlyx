@@ -319,6 +319,11 @@ export const api = {
   setPublic: (project: string, on: boolean) => req<{ share: ShareInfo }>('POST', `/api/projects/${encodeURIComponent(project)}/share/public`, { public: on }),
   setOwner: (project: string, username: string) => req<{ share: ShareInfo }>('POST', `/api/projects/${encodeURIComponent(project)}/share/owner`, { username }),
   /**
+   * what a share link opens, joining nothing (the page that asks a visitor without a session how to
+   * come in: app/Guest.tsx ShareInvite); `guests`: whether coming in without an account is possible
+   */
+  sharePreview: (token: string) => req<{ project: string; title: string | null; owner: string | null; role: Role; guests: boolean }>('GET', `/api/share/${encodeURIComponent(token)}`),
+  /**
    * open a share link (#/share/<token>[/<path>]): join the project; `doc` is its main document, `file`
    * the linked file when the project has it. Without a session the server opens a guest session and
    * returns its `user`.

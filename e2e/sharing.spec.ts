@@ -231,7 +231,7 @@ test('link sharing: joining through the link, revoked when the link is turned of
   await carol.close(); await u1.close(); await admin.close();
 });
 
-test('anyone with the link: a visitor without an account comes in as a guest and keeps the project by signing in', async ({ browser }) => {
+test('anyone with the link: a visitor without an account chooses, comes in as a guest and keeps the project by signing in', async ({ browser }) => {
   const admin = await asUser(browser);
   const on = await admin.request.post(`${BASE_URL}/api/projects/${PROJECT}/share/link`, { data: { role: 'edit' } });
   expect(on.ok()).toBe(true);
@@ -245,25 +245,43 @@ test('anyone with the link: a visitor without an account comes in as a guest and
   await expect(pageS.locator('.login [data-login-note]')).toContainText('not valid', { timeout: 15000 });
   await stranger.close();
 
-  // the live link: straight into the document as "Anonymous …", the callout top right, no tour
+  // the live link: first the invitation — join with an account, or continue without one; nothing is made yet
   const guest = await browser.newContext();
   const page = await guest.newPage();
   await page.goto(`/#/share/${token}`);
+  const invite = page.locator('[data-share-invite]');
+  await expect(invite.locator('h1')).toContainText('invited you to edit “e2e-share”', { timeout: 15000 });
+  await expect(invite.locator('[data-invite-account]')).toBeVisible();
+  expect((await (await guest.request.get(BASE_URL + '/api/auth/me')).json()).user).toBeNull();
+  // without an account: straight into the document as "Anonymous …", no tour — and no callout, the choice was made knowingly
+  await invite.locator('[data-invite-guest-go]').click();
   await page.waitForURL(/#\/admin\/e2e-share\/main\.tex$/, { timeout: 20000 });
   await page.waitForSelector('.lyx-editor', { timeout: 30000 });
   await expect(page.locator('.statusbar')).toContainText('connected', { timeout: 20000 });
   await expect(page.locator('.login')).toHaveCount(0);
   await expect(page.locator('.tour-card')).toHaveCount(0);
+  await expect(page.locator('[data-guest-callout]')).toHaveCount(0);
   const me = (await (await guest.request.get(BASE_URL + '/api/auth/me')).json()).user as { guest?: boolean; username: string; name: string };
   expect(me.guest).toBe(true);
   expect(me.username).toMatch(/^guest-/);
   expect(me.name).toMatch(/^Anonymous /);
-  const callout = page.locator('[data-guest-callout]');
-  await expect(callout).toBeVisible();
+  // in a later session (here: another tab) the callout top right suggests signing in
+  const tab = await guest.newPage();
+  await tab.goto('/#/admin/e2e-share/main.tex');
+  const callout = tab.locator('[data-guest-callout]');
+  await expect(callout).toBeVisible({ timeout: 30000 });
   await expect(callout).toContainText('as a guest');
   await expect(callout).toContainText(me.name);
   await expect(callout).toContainText('edit “e2e-share”');
   await expect(page.locator('.menubar [data-signin]')).toBeVisible();
+  // "Not now" folds the callout away for the session; the Sign in button stays
+  await callout.locator('[data-guest-later]').click();
+  await expect(callout).toHaveCount(0);
+  await expect(tab.locator('.menubar [data-signin]')).toBeVisible();
+  await tab.reload();
+  await tab.waitForSelector('.lyx-editor', { timeout: 30000 });
+  await expect(tab.locator('[data-guest-callout]')).toHaveCount(0);
+  await tab.close();
   await expect(page.locator('.docpanel[data-project="admin/e2e-share"] .badge')).toHaveText('edit');
   // guests edit like any editor and show up in the owner's dialog — but get nothing of their own
   await page.locator('.lyx-editor .lyx-par').last().click();
@@ -280,13 +298,6 @@ test('anyone with the link: a visitor without an account comes in as a guest and
   expect((await guest.request.post(BASE_URL + '/api/projects', { data: { name: 'guest-project' } })).status()).toBe(403);
   expect((await guest.request.get(BASE_URL + '/api/git/tokens')).status()).toBe(403);
   expect((await projectsOf(guest)).map(p => p.name)).toEqual([PROJECT]);     // no example project either
-  // "Not now" folds the callout away for the session; the Sign in button stays
-  await callout.locator('[data-guest-later]').click();
-  await expect(callout).toHaveCount(0);
-  await expect(page.locator('.menubar [data-signin]')).toBeVisible();
-  await page.reload();
-  await page.waitForSelector('.lyx-editor', { timeout: 30000 });
-  await expect(page.locator('[data-guest-callout]')).toHaveCount(0);
 
   // signing in (with a password here — Google does the same) moves the guest's project to the account
   await page.evaluate(TOUR_SEEN_SCRIPT);

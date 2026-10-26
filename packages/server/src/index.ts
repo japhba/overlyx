@@ -44,7 +44,7 @@ import { toPng, isDirectImage } from './graphics.ts';
 import { buildPdf, exportTex, texExportDir, lastBuild, requestBuild, currentJob, cancelBuild, publicJob, cleanupProjectData, synctexView, synctexEdit, synctexPages, layoutCheckOf } from './export.ts';
 import { sendFileAt, readFileAt, isRegularFileAt } from './confined.ts';
 import { db, type ProjectRow } from './db.ts';
-import { accessibleProjects, adoptProjects, roleFor, atLeast, isRole, registerProject, projectRow, shareInfo, addMember, setMemberRole, removeMember, memberRow, linkMemberIds, setLink, resetLink, linkProject, acceptLink, setPublic, joinPublic, newOwner, setOwner, trashProject, ensureWelcomeProject, ensureStarterProjects, type Role } from './access.ts';
+import { accessibleProjects, adoptProjects, roleFor, atLeast, isRole, registerProject, projectRow, shareInfo, addMember, setMemberRole, removeMember, memberRow, linkMemberIds, setLink, resetLink, linkProject, linkPreview, acceptLink, setPublic, joinPublic, newOwner, setOwner, trashProject, ensureWelcomeProject, ensureStarterProjects, type Role } from './access.ts';
 import { canonicalProject, canonicalDocId } from './namespaces.ts';
 import { gdocsRoutes } from './gdocs/routes.ts';
 import { startAutoSync, filesMoved } from './gdocs/sync.ts';
@@ -136,6 +136,16 @@ function landing(project: ProjectRow, role: Role, wanted: unknown, user: Session
   const f = typeof wanted === 'string' && wanted ? files.find(x => x.path === wanted && x.kind !== 'dir') : undefined;
   return { project: project.name, title: project.title, role, doc: lyx[0] ? `${project.name}/${lyx[0].path}` : null, file: f ? { path: f.path, name: f.name, kind: f.kind } : null, ...(user ? { user } : {}) };
 }
+/**
+ * What a share link opens, joining nothing: a visitor without a session sees it on the page that
+ * offers signing in or coming in as a guest (client app/Guest.tsx ShareInvite); `guests`: whether
+ * this instance has the second way.
+ */
+app.get('/api/share/:token', (req, res) => {
+  const p = linkPreview(String(req.params.token));
+  if (!p) { res.status(404).json({ error: 'This link is not valid (any more). Ask the owner to share the project again.' }); return; }
+  res.json({ ...p, guests: config.signup !== 'invited' });
+});
 app.post('/api/share/:token/accept', (req, res) => {
   try {
     const token = String(req.params.token);

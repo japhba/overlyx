@@ -172,3 +172,36 @@ div.login.lp .links svg { width: 14px; height: 14px; }
   div.login.lp .formula { font-size: 16.5px; }
   div.login.lp .foot { margin-top: 72px; }
 }
+
+/* ------------------------------------------------------------ a share link's invitation (Guest.tsx ShareInvite):
+   who invited whom to what, then two cards side by side — with an account (blue rule) or as a guest
+   (yellow) — each with three comparable lines and its key at the bottom, the keys level */
+div.login.lp.invite { display: flex; }
+div.login.lp .invite-page { box-sizing: border-box; width: 100%; max-width: 800px; margin: auto; padding: 56px 40px 40px; }
+div.login.lp .invite-mark { margin: 0 0 40px; font-size: 32px; }
+div.login.lp .invite-page h1 { margin: 0 0 10px; font-family: var(--lp-display); font-size: 31px; line-height: 1.2; font-weight: 500; letter-spacing: -0.01em; text-wrap: balance; }
+div.login.lp .invite-title { font-weight: 600; overflow-wrap: anywhere; }
+div.login.lp .invite-lede { margin: 0 0 32px; font-size: 15px; line-height: 1.5; color: var(--lp-muted); }
+div.login.lp .invite-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px; }
+div.login.lp .invite-option { --rule: var(--lp-blue); display: flex; flex-direction: column; gap: 16px; padding: 28px 24px 24px; background: var(--lp-paper); border: 1px solid var(--lp-line); border-top: 0; background-image: linear-gradient(var(--rule), var(--rule)); background-size: 100% 4px; background-repeat: no-repeat; box-shadow: 0 1px 0 rgba(0, 0, 0, 0.03), 0 24px 48px -32px rgba(0, 0, 0, 0.25); }
+div.login.lp .invite-option.guest { --rule: var(--lp-yellow); }
+div.login.lp .invite-option h2 { margin: 0; font-family: var(--lp-display); font-size: 21px; font-weight: 500; letter-spacing: -0.005em; }
+div.login.lp .invite-option ul { flex: 1; display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; font-size: 14px; line-height: 1.45; color: var(--lp-ink2); }
+div.login.lp .invite-option li { position: relative; padding-left: 17px; }
+div.login.lp .invite-option li::before { content: ""; position: absolute; left: 0; top: 0.5em; width: 6px; height: 6px; background: var(--rule); }
+div.login.lp .invite-key { display: flex; align-items: center; justify-content: center; min-height: 48px; padding: 0 16px; border: 1px solid var(--lp-ink); border-radius: 2px; background: var(--lp-ink); color: var(--lp-on-ink); font-size: 15px; font-weight: 600; cursor: pointer; transition: background 0.15s; }
+div.login.lp .invite-key:hover { background: color-mix(in srgb, var(--lp-ink) 86%, var(--lp-bg)); }
+div.login.lp .invite-key.outline { background: transparent; color: var(--lp-ink); }
+div.login.lp .invite-key.outline:hover { background: color-mix(in srgb, var(--lp-ink) 6%, transparent); }
+div.login.lp .invite-key:disabled { opacity: 0.6; cursor: default; }
+div.login.lp .invite-page .err { margin: 16px 0 0; font-size: 13.5px; }
+div.login.lp .invite-foot { margin: 24px 0 0; text-align: center; font-size: 12px; color: var(--lp-muted); }
+div.login.lp .invite-foot a { color: inherit; }
+div.login.lp .invite-foot a:hover { color: var(--lp-ink); }
+@media (max-width: 640px) {
+  div.login.lp .invite-page { padding: 32px 16px 28px; }
+  div.login.lp .invite-mark { margin-bottom: 28px; font-size: 27px; }
+  div.login.lp .invite-page h1 { font-size: 25px; }
+  div.login.lp .invite-lede { margin-bottom: 24px; }
+  div.login.lp .invite-option { padding: 24px 20px 20px; }
+}

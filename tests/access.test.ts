@@ -148,6 +148,10 @@ describe('link sharing', () => {
     const link = access.setLink('jan/paper', 'view')!;
     expect(link.token).toMatch(/^[A-Za-z0-9_-]{20,}$/);
     expect(access.roleFor(bob, 'jan/paper')).toBeNull();
+    // what the link opens can be shown first, joining nothing
+    expect(access.linkPreview(link.token)).toMatchObject({ project: 'jan/paper', owner: 'Jan Bauer', role: 'view' });
+    expect(access.linkPreview('not-a-token')).toBeUndefined();
+    expect(access.roleFor(bob, 'jan/paper')).toBeNull();
     expect(access.acceptLink(link.token, bob).role).toBe('view');
     expect(access.roleFor(bob, 'jan/paper')).toBe('view');
     expect(access.accessibleProjects(bob).find(p => p.name === 'jan/paper')?.via).toBe('link');
@@ -164,6 +168,7 @@ describe('link sharing', () => {
     expect(access.roleFor(bob, 'jan/paper')).toBeNull();
     expect(access.roleFor(carol, 'jan/paper')).toBe('edit');
     expect(() => access.acceptLink(link.token, bob)).toThrow(/not valid/);
+    expect(access.linkPreview(link.token)).toBeUndefined();
     expect(access.setLink('jan/paper', 'view')?.token).not.toBe(link.token);
   });
 

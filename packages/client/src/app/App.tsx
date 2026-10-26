@@ -30,7 +30,7 @@ import { PaneDividers } from './PaneDividers';
 import { EditModeSwitch, editModeOf, applyEditMode, modeScope, setOwnSuggesting, suggestingFor, switchModeScope, type ModeScope } from './EditModeSwitch';
 import { loadLayout, saveLayout, setPaneShown, togglePane, visiblePanes, paneGrow, type PaneId, type PaneLayout } from './panes';
 import { ShareDialog } from './Share';
-import { GuestCallout } from './Guest';
+import { GuestCallout, ShareInvite, type SharePreview } from './Guest';
 import { GitDialog } from './Git';
 import { MenuBar, openPalette, PALETTE_LABEL, PALETTE_DEFAULT, type MenuDef } from './MenuBar';
 import { setThemePref, useTheme } from './theme';
@@ -105,14 +105,16 @@ export function App() {
   const [ready, setReady] = useState(false);
   // why the share link in the URL did not open (shown on the sign-in page)
   const [linkNote, setLinkNote] = useState<string | null>(null);
+  // a share link opened without a session: what it opens, for the page that asks how to come in
+  const [invite, setInvite] = useState<{ token: string; path: string | null; info: SharePreview } | null>(null);
   useEffect(() => {
     api.me().then(async r => {
       let u = r.user;
-      // a share link opened without an account: the server lets the visitor in as a guest, straight
-      // to the document — signing in later keeps the project (Workspace's guest callout)
+      // a share link opened without an account: first the choice — sign in (Workspace then joins
+      // the project through the link still in the URL) or come in as a guest (joinAsGuest)
       const token = u ? null : parseHash().share;
       if (token) {
-        try { const a = await api.acceptShare(token, parseHash().sharePath); if (a.user) { u = a.user; location.hash = shareLanding(a); } }
+        try { setInvite({ token, path: parseHash().sharePath, info: await api.sharePreview(token) }); }
         catch (e) { setLinkNote((e as Error).message); }
       } else if (!u) {
         // a public project's address: the visitor reads it as a guest, no sign-in
@@ -147,7 +149,24 @@ export function App() {
     setUser(u);
     void api.me().catch(() => {});
   };
+  // "Continue without an account" on the invitation: the server opens a guest session holding what
+  // the link grants, straight to the document — signing in later keeps the project (Workspace's guest callout)
+  const joinAsGuest = async () => {
+    if (!invite) return;
+    const a = await api.acceptShare(invite.token, invite.path);
+    const u = a.user ?? (await api.me()).user;
+    if (!u) throw new Error('The project could not be opened. Try again, or sign in.');
+    location.hash = shareLanding(a);
+    setInvite(null);
+    acceptLogin(u);
+    void syncBindings();
+  };
   if (!ready || (user && linkChecked !== user.id)) return <div style="padding:40px;color:#666">Loading…</div>;
+  if (!user && invite) {
+    return wantLogin
+      ? <Login google={google} onLogin={u => { setInvite(null); setWantLogin(false); acceptLogin(u); }} onBack={() => setWantLogin(false)} backLabel="← Back to the invitation" note={`Sign in to join “${invite.info.title ?? projectShortName(invite.info.project)}”.`} />
+      : <ShareInvite invite={invite.info} google={google} onGuest={joinAsGuest} onSignIn={() => setWantLogin(true)} />;
+  }
   if (!user) return <Login google={google} onLogin={acceptLogin} note={linkNote} />;
   if (user.guest && wantLogin) return <Login google={google} onLogin={u => { acceptLogin(u); setWantLogin(false); }} onBack={() => setWantLogin(false)} note="Sign in to keep the shared project in your account." />;
   return <Workspace user={user} google={google} onSignIn={() => setWantLogin(true)} onLogout={() => api.logout().then(clearLocalData).then(() => { try { localStorage.removeItem('ol.user'); } catch { /* ignore */ } setUser(null); })} />;

@@ -159,12 +159,13 @@ function DemoWheel() {
   );
 }
 
-export function Login({ onLogin, google, note, onBack }: {
+export function Login({ onLogin, google, note, onBack, backLabel = '← Continue as a guest for now' }: {
   onLogin: (u: User) => void; google: boolean;
   /** why the visitor is here (a share link that did not open, a guest keeping a project) */
   note?: string | null;
-  /** a guest changed their mind: back to the document */
+  /** a guest changed their mind: back to the document (or to the share link's invitation) */
   onBack?: () => void;
+  backLabel?: string;
 }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -231,7 +232,7 @@ export function Login({ onLogin, google, note, onBack }: {
               </div>
             )}
             <p class="signin-note" data-terms-note>By signing in you agree to the <a href="/terms" target="_blank" rel="noopener">terms of use</a>. What we keep about you: <a href="/privacy" target="_blank" rel="noopener">privacy notice</a>.</p>
-            {onBack && <button type="button" class="fallback-link" data-login-back onClick={onBack}>← Continue as a guest for now</button>}
+            {onBack && <button type="button" class="fallback-link" data-login-back onClick={onBack}>{backLabel}</button>}
             <a class="demos-hint" href="#overleaf" data-overleaf-hint onClick={e => { e.preventDefault(); scrollTo('#overleaf'); }}>Coming from Overleaf or LyX? Bring your projects along ↓</a>
           </form>
           </div>
