@@ -8,9 +8,9 @@
  *    namespace (`OVERLYX_OWNER_EMAIL`, else the first admin);
  *  - the owner **shares** it with people (by username or e-mail — an e-mail that has not signed in
  *    yet is kept as an invitation and matched on the first Google sign-in) as *viewer* or *editor*;
- *  - or turns on **link sharing**: anyone who opens `/#/share/<token>` joins as viewer/editor —
- *    without an account as a **guest** (a temporary account, see `adoptGuest`); turning the link
- *    off revokes what was granted through it;
+ *  - or makes **share links** (`createLink`), each with its own role for good: anyone who opens
+ *    one joins as viewer/editor — without an account as a **guest** (a temporary account, see
+ *    `adoptGuest`); turning a link off can take out who came in through it (`revokeLink`);
  *  - or makes it **public** (`setPublic`): everybody may view it at its own address — without an
  *    account as a guest too — and clone it with git anonymously; editing still needs one of the
  *    above. Who opens it is noted as a hidden `via = 'public'` membership (`joinPublic`) so that it
@@ -282,8 +282,10 @@ export interface ShareInfo {
   name: string;
   title: string | null;
   owner: { id: number; name: string; username: string } | null;
-  members: { id: number; role: string; via: string; email: string | null; user: { id: number; name: string; username: string; color: string; avatar: string | null } | null }[];
-  link: { token: string; role: 'view' | 'edit'; createdAt: number | null } | null;
+  /** `link`: the share link a member came in through (`via` 'link'; it may be off since) */
+  members: { id: number; role: string; via: string; link: string | null; email: string | null; user: { id: number; name: string; username: string; color: string; avatar: string | null } | null }[];
+  /** the project's share links, oldest first */
+  links: ShareLink[];
   /** anyone may view it (setPublic); `visitors`: the accounts and guests that opened it so */
   public: boolean;
   visitors: number;
@@ -294,10 +296,10 @@ export function shareInfo(project: string): ShareInfo {
   const owner = row?.owner_id != null ? db.prepare('SELECT id, display_name AS name, username FROM users WHERE id = ?').get(row.owner_id) as ShareInfo['owner'] : null;
   const members = (db.prepare("SELECT * FROM project_members WHERE project = ? AND via != 'public' ORDER BY created_at").all(project) as MemberRow[]).map(m => {
     const u = m.user_id != null ? db.prepare('SELECT id, display_name AS name, username, color, avatar_url FROM users WHERE id = ?').get(m.user_id) as { id: number; name: string; username: string; color: string; avatar_url: string | null } | undefined : undefined;
-    return { id: m.id, role: m.role, via: m.via, email: m.email, user: u ? { id: u.id, name: u.name, username: u.username, color: u.color, avatar: u.avatar_url ? `/api/users/${u.id}/avatar` : null } : null };
+    return { id: m.id, role: m.role, via: m.via, link: m.via === 'link' ? m.link_token ?? null : null, email: m.email, user: u ? { id: u.id, name: u.name, username: u.username, color: u.color, avatar: u.avatar_url ? `/api/users/${u.id}/avatar` : null } : null };
   });
   const visitors = (db.prepare("SELECT COUNT(*) AS n FROM project_members WHERE project = ? AND via = 'public'").get(project) as { n: number }).n;
-  return { name: project, title: row?.title ?? null, owner: owner ?? null, members, link: row?.link_token && isRole(row.link_role) ? { token: row.link_token, role: row.link_role, createdAt: row.link_created_at } : null, public: !!row?.public, visitors };
+  return { name: project, title: row?.title ?? null, owner: owner ?? null, members, links: linksOf(project), public: !!row?.public, visitors };
 }
 
 /** Share with a person: `who` is a username or an e-mail address. */
@@ -337,11 +339,6 @@ export function memberRow(project: string, memberId: number): MemberRow | undefi
   return db.prepare('SELECT * FROM project_members WHERE id = ? AND project = ?').get(memberId, project) as MemberRow | undefined;
 }
 
-/** The accounts that came in through the share link. */
-export function linkMemberIds(project: string): number[] {
-  return (db.prepare("SELECT user_id FROM project_members WHERE project = ? AND via = 'link' AND user_id IS NOT NULL").all(project) as { user_id: number }[]).map(r => r.user_id);
-}
-
 export function setMemberRole(project: string, memberId: number, role: 'view' | 'edit'): boolean {
   return db.prepare('UPDATE project_members SET role = ? WHERE id = ? AND project = ?').run(role, memberId, project).changes > 0;
 }
@@ -350,41 +347,52 @@ export function removeMember(project: string, memberId: number): boolean {
   return db.prepare('DELETE FROM project_members WHERE id = ? AND project = ?').run(memberId, project).changes > 0;
 }
 
-/** Turn link sharing on (with a role) or off (revoking everyone who joined through the link). */
-export function setLink(project: string, role: 'view' | 'edit' | null): ShareInfo['link'] {
-  const row = projectRow(project);
-  if (!row) throw new Error('project not found');
-  if (!role) {
-    db.prepare('UPDATE projects SET link_token = NULL, link_role = NULL, link_created_at = NULL WHERE name = ?').run(project);
-    db.prepare("DELETE FROM project_members WHERE project = ? AND via = 'link'").run(project);
-    return null;
-  }
-  const token = row.link_token ?? crypto.randomBytes(18).toString('base64url');
-  const createdAt = row.link_token ? row.link_created_at : Date.now();
-  db.prepare('UPDATE projects SET link_token = ?, link_role = ?, link_created_at = ? WHERE name = ?').run(token, role, createdAt, project);
-  // people who came in through the link follow the link's role
-  db.prepare("UPDATE project_members SET role = ? WHERE project = ? AND via = 'link'").run(role, project);
-  return { token, role, createdAt };
+/**
+ * A share link: anyone who has its address comes into the project with its role. The role belongs to
+ * the link for as long as it lives — another role is another link — so a link already handed out
+ * never gives more than it did when it was made. A project has any number of them.
+ */
+export interface ShareLink { token: string; role: 'view' | 'edit'; createdAt: number; /** the people on the project who came in through it */ joined: number }
+
+/** The project's share links, oldest first. */
+export function linksOf(project: string): ShareLink[] {
+  const rows = db.prepare(`SELECT l.token, l.role, l.created_at,
+      (SELECT COUNT(*) FROM project_members m WHERE m.project = l.project AND m.via = 'link' AND m.link_token = l.token) AS joined
+    FROM share_links l WHERE l.project = ? ORDER BY l.created_at, l.rowid`).all(project) as { token: string; role: string; created_at: number; joined: number }[];
+  return rows.filter(r => isRole(r.role)).map(r => ({ token: r.token, role: r.role as 'view' | 'edit', createdAt: r.created_at, joined: r.joined }));
+}
+
+/** A new share link with `role`, for good. */
+export function createLink(project: string, role: 'view' | 'edit', by: SessionUser | null): ShareLink {
+  if (!projectRow(project)) throw new Error('project not found');
+  if (!isRole(role)) throw new Error('role must be view or edit');
+  const token = crypto.randomBytes(18).toString('base64url');
+  const createdAt = Date.now();
+  db.prepare('INSERT INTO share_links (token, project, role, created_by, created_at) VALUES (?, ?, ?, ?, ?)').run(token, project, role, by?.id ?? null, createdAt);
+  return { token, role, createdAt, joined: 0 };
 }
 
 /**
- * A new share link in place of the current one (same role): the old address stops working. People
- * who already came in through it keep their access — Restricted removes them, or one by one.
+ * Turn a share link off: its address stops working. With `removeJoined` the people who came in
+ * through it are out too (their ids in `removed`: their open editors reconnect); otherwise they keep
+ * their access. Undefined: no such link of the project.
  */
-export function resetLink(project: string): NonNullable<ShareInfo['link']> {
-  const row = projectRow(project);
-  if (!row) throw new Error('project not found');
-  if (!row.link_token || !isRole(row.link_role)) throw new Error('link sharing is off');
-  const token = crypto.randomBytes(18).toString('base64url');
-  const createdAt = Date.now();
-  db.prepare('UPDATE projects SET link_token = ?, link_created_at = ? WHERE name = ?').run(token, createdAt, project);
-  return { token, role: row.link_role, createdAt };
+export function revokeLink(project: string, token: string, removeJoined: boolean): { role: 'view' | 'edit'; removed: number[] } | undefined {
+  const l = db.prepare('SELECT role FROM share_links WHERE token = ? AND project = ?').get(token, project) as { role: 'view' | 'edit' } | undefined;
+  if (!l) return undefined;
+  const removed = removeJoined ? (db.prepare("SELECT user_id FROM project_members WHERE project = ? AND via = 'link' AND link_token = ? AND user_id IS NOT NULL").all(project, token) as { user_id: number }[]).map(r => r.user_id) : [];
+  db.transaction(() => {
+    db.prepare('DELETE FROM share_links WHERE token = ?').run(token);
+    if (removeJoined) db.prepare("DELETE FROM project_members WHERE project = ? AND via = 'link' AND link_token = ?").run(project, token);
+  })();
+  return { role: l.role, removed };
 }
 
-/** The project a share link opens, if the link is live. */
-export function linkProject(token: string): ProjectRow | undefined {
-  const row = db.prepare('SELECT * FROM projects WHERE link_token = ?').get(token) as ProjectRow | undefined;
-  return row && isRole(row.link_role) ? row : undefined;
+/** The live share link `token`: the project it opens and the role it gives. */
+export function shareLinkOf(token: string): { project: ProjectRow; role: Role } | undefined {
+  const l = db.prepare('SELECT project, role FROM share_links WHERE token = ?').get(token) as { project: string; role: string } | undefined;
+  const row = l && isRole(l.role) ? projectRow(l.project) : undefined;
+  return row ? { project: row, role: l!.role as Role } : undefined;
 }
 
 /**
@@ -392,23 +400,25 @@ export function linkProject(token: string): ProjectRow | undefined {
  * page that asks a visitor without a session how to come in (with an account, or as a guest).
  */
 export function linkPreview(token: string): { project: string; title: string | null; owner: string | null; role: Role } | undefined {
-  const row = linkProject(token);
-  if (!row) return undefined;
+  const link = shareLinkOf(token);
+  if (!link) return undefined;
+  const { project: row } = link;
   const owner = row.owner_id != null ? db.prepare('SELECT display_name AS name FROM users WHERE id = ?').get(row.owner_id) as { name: string } | undefined : undefined;
-  return { project: row.name, title: row.title, owner: owner?.name ?? null, role: row.link_role as Role };
+  return { project: row.name, title: row.title, owner: owner?.name ?? null, role: link.role };
 }
 
 /** A signed-in user (or guest) opens a share link: they join the project with the link's role. */
 export function acceptLink(token: string, user: SessionUser): { project: ProjectRow; role: Role } {
-  const row = linkProject(token);
-  if (!row || !isRole(row.link_role)) throw new Error('This link is not valid (any more). Ask the owner to share the project again.');
+  const link = shareLinkOf(token);
+  if (!link) throw new Error('This link is not valid (any more). Ask the owner to share the project again.');
+  const { project: row, role } = link;
   // (viewing a public project is no reason to skip joining: the link's access outlasts it being public)
   const current = roleFor(user, row.name, false);
-  if (atLeast(current, row.link_role)) return { project: row, role: current! };
-  db.prepare(`INSERT INTO project_members (project, user_id, email, role, via, added_by, created_at) VALUES (?,?,?,?,?,?,?)
-              ON CONFLICT(project, user_id) WHERE user_id IS NOT NULL DO UPDATE SET role = excluded.role, via = excluded.via`)
-    .run(row.name, user.id, null, row.link_role, 'link', row.owner_id, Date.now());
-  return { project: row, role: row.link_role };
+  if (atLeast(current, role)) return { project: row, role: current! };
+  db.prepare(`INSERT INTO project_members (project, user_id, email, role, via, added_by, created_at, link_token) VALUES (?,?,?,?,?,?,?,?)
+              ON CONFLICT(project, user_id) WHERE user_id IS NOT NULL DO UPDATE SET role = excluded.role, via = excluded.via, link_token = excluded.link_token`)
+    .run(row.name, user.id, null, role, 'link', row.owner_id, Date.now(), token);
+  return { project: row, role };
 }
 
 /**
@@ -499,7 +509,7 @@ export function adoptGuest(guest: SessionUser, userId: number): string[] {
       const owner = projectRow(m.project)?.owner_id === userId;
       const existing = db.prepare('SELECT id, role FROM project_members WHERE project = ? AND user_id = ?').get(m.project, userId) as { id: number; role: string } | undefined;
       if (owner || existing) {
-        if (existing && m.role === 'edit' && existing.role !== 'edit') db.prepare("UPDATE project_members SET role = 'edit', via = 'link' WHERE id = ?").run(existing.id);
+        if (existing && m.role === 'edit' && existing.role !== 'edit') db.prepare("UPDATE project_members SET role = 'edit', via = 'link', link_token = ? WHERE id = ?").run(m.link_token ?? null, existing.id);
         db.prepare('DELETE FROM project_members WHERE id = ?').run(m.id);
       } else {
         db.prepare('UPDATE project_members SET user_id = ? WHERE id = ?').run(userId, m.id);
@@ -548,6 +558,7 @@ export function trashProject(project: string): string {
   }
   const row = projectRow(project);
   db.prepare('DELETE FROM project_members WHERE project = ?').run(project);
+  db.prepare('DELETE FROM share_links WHERE project = ?').run(project);
   // administrator grants and the activity log belong to this project, not to a later one of the same name
   db.prepare('DELETE FROM admin_grants WHERE project = ?').run(project);
   db.prepare('DELETE FROM access_log WHERE project = ?').run(project);

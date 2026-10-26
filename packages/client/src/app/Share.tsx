@@ -1,17 +1,18 @@
 /**
  * Share dialog (Google-Docs style): people with access and their roles, invite by username or
- * e-mail, and "anyone with the link" with a copyable link (which also lets people in without an
- * account, as guests — app/Guest.tsx). The link shares the whole project and names the file it
- * opens — the one open when the dialog was, or another document picked under the link. *Public*
+ * e-mail, and share links (which also let people in without an account, as guests — app/Guest.tsx):
+ * any number of them, each made with its own role for good (New link… asks which, saying what each
+ * gives away), each turned off on its own. A link shares the whole project and names the file it
+ * opens — the one open when the dialog was, or another document picked under the links. *Public*
  * lets everybody view the project at its own address and clone it, no link or account needed. Only
  * the owner (or an administrator) sees it — the server refuses everything else.
  */
 import { useEffect, useState } from 'preact/hooks';
 import { inkOn } from './contrast';
 import { AvatarContent, initials } from './Avatar';
-import { api, pdfLinkUrl, type ActivityEntry, type PdfLinkInfo, type PdfLinksInfo, type PdfPublishInfo, type ShareInfo, type User } from '../api';
+import { api, pdfLinkUrl, type ActivityEntry, type PdfLinkInfo, type PdfLinksInfo, type PdfPublishInfo, type ShareInfo, type ShareLinkInfo, type User } from '../api';
 import { ago } from './Git';
-import { Dialog, uiConfirm } from './Dialogs';
+import { Dialog, uiConfirm, uiConfirmCheck } from './Dialogs';
 import { docPathOf, projectOfDoc, projectShortName } from '@overlyx/core';
 import { describeView } from './panes';
 
@@ -44,7 +45,8 @@ export function describe(e: ActivityEntry): string {
   }
 }
 
-const ROLE_LABEL: Record<string, string> = { view: 'Viewer', edit: 'Editor' };
+/** when a link was made, as the dialog says it */
+const madeAt = (t: number) => new Date(t).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 
 /** The file a link opens: a choice among the project's documents, or the one there is. */
 function OpensFile({ files, path, busy, onPick, attr }: { files: string[]; path: string | null; busy: boolean; onPick: (p: string) => void; attr: string }) {
@@ -67,7 +69,9 @@ export function ShareDialog({ project, user, doc, view, onClose, onChanged }: { 
   const [who, setWho] = useState('');
   const [role, setRole] = useState<'view' | 'edit'>('edit');
   const [busy, setBusy] = useState(false);
-  const [copied, setCopied] = useState(false);
+  // the link whose address was just copied (its token); the New link… popup
+  const [copied, setCopied] = useState<string | null>(null);
+  const [newLink, setNewLink] = useState(false);
   const [copiedPublic, setCopiedPublic] = useState(false);
   const [activity, setActivity] = useState<ActivityEntry[] | null>(null);
   // public PDF links: the project's documents and which of them have one
@@ -107,38 +111,22 @@ export function ShareDialog({ project, user, doc, view, onClose, onChanged }: { 
     catch (e) { setErr((e as Error).message); }
     finally { setBusy(false); }
   };
-  // a new link in place of the current one: the old address stops working (it went too far, say)
-  const resetLink = async () => {
-    if (!await uiConfirm('Reset the Link?', 'The current link stops working and a new one replaces it. People who already joined through the old link keep their access — remove them above, or switch to Restricted to remove them all.', { okLabel: 'Reset link' })) return;
-    if (await update(() => api.resetLink(project))) setCopied(false);
-  };
-  // what the link gives away, said before it is turned on or raised to editing (as Public asks
-  // first): the whole project, not only the file it opens, to whoever has it, account or not
-  const setLink = async (to: 'view' | 'edit' | null) => {
-    const t = info?.title ?? projectShortName(project);
-    if (to && !info?.link) {
-      const what = linkPath ? `every file in the project — not only ${linkPath}` : 'every file in the project';
-      if (!await uiConfirm(`Share “${t}” with anyone who has the link?`,
-        `Anyone who has the link can then ${to === 'edit' ? 'change' : 'read'} ${what} — with its comments and history, and download it or clone it with git.\n\n`
-        + 'No account needed: without one they come in as an anonymous guest. A forwarded link works just the same.\n\n'
-        + 'Everyone who opens it stays on the project — listed above, “via link” — until you remove them or switch back to Restricted. Reset link stops new people coming in.',
-        { okLabel: 'Turn on link' })) return;
-    } else if (to === 'edit' && info?.link?.role === 'view') {
-      const n = info.members.filter(m => m.via === 'link').length;
-      const who = n ? `${n === 1 ? 'The one person who came' : `The ${n} people who came`} in through the link, and anyone who opens it from now on,` : 'Anyone who opens it from now on';
-      if (!await uiConfirm('Let anyone with the link edit?',
-        `${who} can then change every file in “${t}”: write and comment, upload, rename and delete files, accept or reject tracked changes, and restore earlier versions.\n\n`
-        + 'No account needed: a guest’s changes carry a name like “Anonymous Otter”.',
-        { okLabel: 'Allow editing' })) return;
-    }
-    await update(() => api.setLink(project, to));
+  // a link handed out too far: its address stops working, and who came in through it goes too unless kept
+  const revoke = async (l: ShareLinkInfo) => {
+    const what = `The ${l.role === 'edit' ? 'editing' : 'viewing'} link made ${madeAt(l.createdAt)} stops working: nobody new comes in through it.`;
+    let remove = false;
+    if (l.joined) {
+      const r = await uiConfirmCheck('Turn this link off?', what, { label: l.joined === 1 ? 'Also remove the one person who came in through it' : `Also remove the ${l.joined} people who came in through it`, checked: true }, { okLabel: 'Turn off' });
+      if (r === null) return;
+      remove = r;
+    } else if (!await uiConfirm('Turn this link off?', what, { okLabel: 'Turn off' })) return;
+    await update(() => api.revokeLink(project, l.token, remove));
   };
   const add = async () => { if (!who.trim() || busy) return; if (await update(() => api.addMember(project, who.trim(), role))) setWho(''); };
-  const copy = async () => {
-    if (!info?.link) return;
-    const url = shareUrl(info.link.token, project, linkPath, linkView);
-    try { await navigator.clipboard.writeText(url); } catch { const el = document.querySelector<HTMLInputElement>('.share-link input'); el?.select(); document.execCommand('copy'); }
-    setCopied(true); setTimeout(() => setCopied(false), 2000);
+  const copy = async (l: ShareLinkInfo) => {
+    const url = shareUrl(l.token, project, linkPath, linkView);
+    try { await navigator.clipboard.writeText(url); } catch { const el = document.querySelector<HTMLInputElement>(`[data-link-token="${l.token}"] input`); el?.select(); document.execCommand('copy'); }
+    setCopied(l.token); setTimeout(() => setCopied(c => (c === l.token ? null : c)), 2000);
   };
   // everything in the project, its history too, becomes readable by anyone: ask first
   const setPublic = async (on: boolean) => {
@@ -177,6 +165,7 @@ export function ShareDialog({ project, user, doc, view, onClose, onChanged }: { 
   };
 
   return (
+    <>
     <Dialog title={`Share “${title}”`} onClose={onClose}>
       <div class="share-add">
         <input type="text" autofocus placeholder="Username or e-mail address" value={who} disabled={!info} onInput={e => setWho((e.target as HTMLInputElement).value)}
@@ -204,7 +193,7 @@ export function ShareDialog({ project, user, doc, view, onClose, onChanged }: { 
                   : <span class="avatar pending" title="Invited — has not signed in yet">✉</span>}
                 <span class="who" title={m.user ? `${m.user.name} (${m.user.username})` : m.email ?? ''}>
                   {m.user ? m.user.name : m.email}
-                  <small>{m.user ? m.user.username : 'invited, not signed in yet'}{m.via === 'link' ? ' · via link' : ''}</small>
+                  <small>{m.user ? m.user.username : 'invited, not signed in yet'}{m.via === 'link' ? (info.links.some(l => l.token === m.link) ? ' · via link' : ' · via a link, off now') : ''}</small>
                 </span>
                 <select value={m.role} disabled={busy} data-member-role onChange={e => {
                   const el = e.target as HTMLSelectElement;
@@ -217,40 +206,35 @@ export function ShareDialog({ project, user, doc, view, onClose, onChanged }: { 
                 <button class="mini" title="Remove access" disabled={busy} onClick={() => void update(() => api.removeMember(project, m.id))}>✕</button>
               </div>
             ))}
-            {!info.members.length && <div class="hint">Nobody else yet — add people above or turn on link sharing.</div>}
+            {!info.members.length && <div class="hint">Nobody else yet — add people above or make a link.</div>}
           </div>
-          <h4>General access</h4>
-          <div class="share-general">
-            <select value={info.link ? 'link' : 'restricted'} disabled={busy} data-link-mode
-              onChange={e => { const el = e.target as HTMLSelectElement; const on = el.value === 'link'; el.value = info.link ? 'link' : 'restricted'; void setLink(on ? (info.link?.role ?? 'view') : null); }}>
-              <option value="restricted">Restricted — only the people listed above</option>
-              <option value="link">Anyone with the link</option>
-            </select>
-            {info.link && (
-              <select value={info.link.role} disabled={busy} data-link-role onChange={e => { const el = e.target as HTMLSelectElement; const to = el.value as 'view' | 'edit'; el.value = info.link!.role; void setLink(to); }}>
-                <option value="view">{ROLE_LABEL.view}</option><option value="edit">{ROLE_LABEL.edit}</option>
-              </select>
-            )}
+          <h4>Links</h4>
+          <div class="share-links" data-share-links>
+            {info.links.map(l => (
+              <div class="share-link-item" key={l.token} data-share-link={l.role} data-link-token={l.token}>
+                <div class="share-link">
+                  <span class={'link-role ' + l.role}>{l.role === 'edit' ? 'Can edit' : 'Can view'}</span>
+                  <input type="text" readonly value={shareUrl(l.token, project, linkPath, linkView)} onFocus={e => (e.target as HTMLInputElement).select()} />
+                  <button class="btn" onClick={() => void copy(l)}>{copied === l.token ? 'Copied ✓' : 'Copy'}</button>
+                  <button class="mini" title="Turn this link off" disabled={busy} data-link-off onClick={() => void revoke(l)}>✕</button>
+                </div>
+                <div class="hint small" data-link-created={l.createdAt}>
+                  Made {madeAt(l.createdAt)} · {l.joined ? `${l.joined} ${l.joined === 1 ? 'person' : 'people'} came in through it` : 'nobody has come in through it yet'}
+                </div>
+              </div>
+            ))}
+            {!info.links.length && <div class="hint">No links: only the people listed above can open the project.</div>}
           </div>
-          {info.link && (
-            <div class="share-link">
-              <input type="text" readonly value={shareUrl(info.link.token, project, linkPath, linkView)} onFocus={e => (e.target as HTMLInputElement).select()} />
-              <button class="btn" onClick={() => void copy()}>{copied ? 'Copied ✓' : 'Copy link'}</button>
-            </div>
-          )}
-          {info.link && linkFiles.length > 0 && (
+          {info.links.length > 0 && linkFiles.length > 0 && (
             <div class="share-link-file hint">
-              Opens <OpensFile files={linkFiles} path={linkPath} busy={busy} onPick={setLinkPath} attr="data-link-file" />
+              They open <OpensFile files={linkFiles} path={linkPath} busy={busy} onPick={setLinkPath} attr="data-link-file" />
               {linkView && <span data-link-view>{' '}as you see it ({describeView(linkView)})</span>}
-              {' '}— and gives access to the whole project.
+              {' '}— and give access to the whole project.
             </div>
           )}
-          {info.link && (
-            <div class="share-link-meta hint" data-link-created={info.link.createdAt ?? ''}>
-              {info.link.createdAt && <span title={new Date(info.link.createdAt).toLocaleString()}>Link created {new Date(info.link.createdAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}.</span>}
-              <button type="button" class="btn small" disabled={busy} data-link-reset title="Make a new link — the current one stops working" onClick={() => void resetLink()}>Reset link</button>
-            </div>
-          )}
+          <div class="share-link-meta">
+            <button type="button" class="btn small" disabled={busy} data-link-new onClick={() => setNewLink(true)}>New link…</button>
+          </div>
           <h4>Public</h4>
           <label class="pref" data-public-toggle>
             <input type="checkbox" checked={!!info.public} disabled={busy} onChange={e => { const el = e.target as HTMLInputElement; const on = el.checked; el.checked = !on; void setPublic(on); }} />
@@ -332,9 +316,33 @@ export function ShareDialog({ project, user, doc, view, onClose, onChanged }: { 
             ))}
             {activity && !activity.length && <div class="hint">Nothing yet.</div>}
           </div>
-          <div class="hint">{info.link ? `Anyone who opens the link becomes ${info.link.role === 'edit' ? 'an editor' : 'a viewer'} — without an account as a guest (“Anonymous Otter”), who keeps the project by signing in. Switching back to Restricted removes everyone who came in through the link.` : 'Viewers can read and compile; editors can also change the documents and upload files.'}</div>
+          <div class="hint">Viewers can read and compile; editors can also change the documents and upload files.{info.links.length ? ' Whoever opens a link comes in with its role — without an account as a guest (“Anonymous Otter”), who keeps the project by signing in.' : ''}</div>
         </>
       )}
+    </Dialog>
+    {newLink && <NewLinkDialog title={title} path={linkPath} onClose={() => setNewLink(false)} onCreate={r => update(() => api.createLink(project, r))} />}
+    </>
+  );
+}
+
+/**
+ * New link…: what a link would give away, with each role to pick from — the role the link then keeps
+ * for good. A link reaches whoever it is passed on to, account or not, and opens the whole project.
+ */
+function NewLinkDialog({ title, path, onCreate, onClose }: { title: string; path: string | null; onCreate: (role: 'view' | 'edit') => Promise<boolean>; onClose: () => void }) {
+  const [role, setRole] = useState<'view' | 'edit'>('view');
+  const [busy, setBusy] = useState(false);
+  const create = async () => { setBusy(true); if (await onCreate(role)) onClose(); else setBusy(false); };
+  const choice = (r: 'view' | 'edit', label: string, sub: string) => (
+    <label class="pref"><input type="radio" name="ol-new-link-role" data-new-link-role={r} checked={role === r} onChange={() => setRole(r)} /><span>{label}<span class="sub">{sub}</span></span></label>
+  );
+  return (
+    <Dialog title={`New link to “${title}”`} onClose={onClose}
+      buttons={<button class="btn primary" disabled={busy} data-link-create onClick={() => void create()}>Create link</button>}>
+      <p>Anyone who has the link comes into the whole project — every file in it{path ? `, not only ${path}` : ''} — without an account if they like, as an anonymous guest. A forwarded link works just the same.</p>
+      {choice('view', 'Can view', 'Read every file with its comments and history, build the PDF, download the project and clone it with git.')}
+      {choice('edit', 'Can edit', 'Also change everything: write and comment, upload, rename and delete files, accept or reject tracked changes, restore earlier versions.')}
+      <p class="hint">The link keeps this role for good: for another, make another link. Whoever comes in through it stays until you remove them, or turn the link off with ✕.</p>
     </Dialog>
   );
 }

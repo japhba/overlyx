@@ -50,7 +50,7 @@ export interface Project {
   invited?: number;
 }
 export interface ProjectPerson { name: string; username: string; color: string; avatar: string | null; role: 'view' | 'edit'; via: string; since: number; guest: boolean }
-export interface ShareMember { id: number; role: 'view' | 'edit'; via: string; email: string | null; user: { id: number; name: string; username: string; color: string; avatar: string | null } | null }
+export interface ShareMember { id: number; role: 'view' | 'edit'; via: string; /** via 'link': the share link they came in through (it may be off since) */ link?: string | null; email: string | null; user: { id: number; name: string; username: string; color: string; avatar: string | null } | null }
 /** a zip import: `projects` lists every project the archive produced (several for an Overleaf bundle of zips), `errors` the ones that failed */
 export interface ZipImportResult { ok: boolean; name: string; files: number; skipped: string[]; projects: { name: string; files: number; skipped: string[] }[]; errors: { name: string; error: string }[] }
 export interface LyxImportResult { id: string; created: string[]; warnings: string[]; files: number; skipped: string[] }
@@ -60,7 +60,9 @@ export const pdfLinkUrl = (l: { token: string; fileName: string }) => `${locatio
 /** a document's PDF is committed into a GitHub repository after every successful build (administrators; the server's GITHUB_PUBLISH_TOKEN) */
 export interface PdfPublishInfo { doc: string; repo: string; path: string; branch: string | null; lastPushedAt: number | null; lastAttemptAt: number | null; lastError: string | null; htmlUrl: string }
 export interface PdfLinksInfo { docs: string[]; links: PdfLinkInfo[]; publish: PdfPublishInfo[]; publishAvailable: boolean }
-export interface ShareInfo { name?: string; title?: string | null; owner: { id: number; name: string; username: string } | null; members: ShareMember[]; link: { token: string; role: 'view' | 'edit'; createdAt: number | null } | null;
+/** a share link: its role is its own for good (another role is another link); `joined`: the people who came in through it */
+export interface ShareLinkInfo { token: string; role: 'view' | 'edit'; createdAt: number; joined: number }
+export interface ShareInfo { name?: string; title?: string | null; owner: { id: number; name: string; username: string } | null; members: ShareMember[]; links: ShareLinkInfo[];
   /** anyone may view it at its address and clone it, no account needed; `visitors`: who opened it so */
   public?: boolean; visitors?: number }
 export interface LayoutInfo { name: string; category?: string; labelType?: string; tocLevel?: number; latexType?: string; latexName?: string; isNumbered?: boolean }
@@ -313,9 +315,9 @@ export const api = {
   addMember: (project: string, who: string, role: 'view' | 'edit') => req<{ member: ShareMember; share: ShareInfo }>('POST', `/api/projects/${encodeURIComponent(project)}/share/members`, { who, role }),
   setMemberRole: (project: string, id: number, role: 'view' | 'edit') => req<{ share: ShareInfo }>('POST', `/api/projects/${encodeURIComponent(project)}/share/members/${id}`, { role }),
   removeMember: (project: string, id: number) => req<{ share: ShareInfo }>('DELETE', `/api/projects/${encodeURIComponent(project)}/share/members/${id}`),
-  setLink: (project: string, role: 'view' | 'edit' | null) => req<{ link: ShareInfo['link']; share: ShareInfo }>('POST', `/api/projects/${encodeURIComponent(project)}/share/link`, { role }),
-  /** a new share link in place of the current one (the old one stops working) */
-  resetLink: (project: string) => req<{ link: ShareInfo['link']; share: ShareInfo }>('POST', `/api/projects/${encodeURIComponent(project)}/share/link/reset`),
+  createLink: (project: string, role: 'view' | 'edit') => req<{ link: ShareLinkInfo; share: ShareInfo }>('POST', `/api/projects/${encodeURIComponent(project)}/share/links`, { role }),
+  /** turn a share link off; `remove`: the people who came in through it lose their access too */
+  revokeLink: (project: string, token: string, remove: boolean) => req<{ share: ShareInfo }>('DELETE', `/api/projects/${encodeURIComponent(project)}/share/links/${encodeURIComponent(token)}${remove ? '?remove=1' : ''}`),
   setPublic: (project: string, on: boolean) => req<{ share: ShareInfo }>('POST', `/api/projects/${encodeURIComponent(project)}/share/public`, { public: on }),
   setOwner: (project: string, username: string) => req<{ share: ShareInfo }>('POST', `/api/projects/${encodeURIComponent(project)}/share/owner`, { username }),
   /**

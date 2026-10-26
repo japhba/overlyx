@@ -144,8 +144,11 @@ describe('sharing with people', () => {
 });
 
 describe('link sharing', () => {
-  it('grants the link role on opening the link and follows / revokes with the link', () => {
-    const link = access.setLink('jan/paper', 'view')!;
+  /** every link of the project off, and who came in through them out */
+  const allOff = (project: string) => { for (const l of access.linksOf(project)) access.revokeLink(project, l.token, true); };
+
+  it('grants the link role on opening the link; turned off with its people, the token is dead', () => {
+    const link = access.createLink('jan/paper', 'view', jan);
     expect(link.token).toMatch(/^[A-Za-z0-9_-]{20,}$/);
     expect(access.roleFor(bob, 'jan/paper')).toBeNull();
     // what the link opens can be shown first, joining nothing
@@ -155,27 +158,56 @@ describe('link sharing', () => {
     expect(access.acceptLink(link.token, bob).role).toBe('view');
     expect(access.roleFor(bob, 'jan/paper')).toBe('view');
     expect(access.accessibleProjects(bob).find(p => p.name === 'jan/paper')?.via).toBe('link');
-    expect(access.setLink('jan/paper', 'edit')?.token).toBe(link.token);   // same link, new role
-    expect(access.roleFor(bob, 'jan/paper')).toBe('edit');
-    // an explicit membership is never lowered by the link
+    expect(access.shareInfo('jan/paper').members.find(m => m.user?.username === 'bob')).toMatchObject({ via: 'link', link: link.token });
+    expect(access.linksOf('jan/paper')).toEqual([{ token: link.token, role: 'view', createdAt: link.createdAt, joined: 1 }]);
+    // an explicit membership is never lowered by a link
     access.addMember('jan/paper', 'carol', 'edit', jan);
-    access.setLink('jan/paper', 'view');
     expect(access.acceptLink(link.token, carol).role).toBe('edit');
     expect(access.roleFor(carol, 'jan/paper')).toBe('edit');
-    expect(access.roleFor(bob, 'jan/paper')).toBe('view');
-    // off: everyone who came through the link is out, the token is dead
-    expect(access.setLink('jan/paper', null)).toBeNull();
+    // off, with the people who came in: bob is out, carol (added by name) stays, the token is dead
+    expect(access.revokeLink('jan/paper', link.token, true)).toEqual({ role: 'view', removed: [bob.id] });
+    expect(access.revokeLink('jan/paper', link.token, true)).toBeUndefined();
     expect(access.roleFor(bob, 'jan/paper')).toBeNull();
     expect(access.roleFor(carol, 'jan/paper')).toBe('edit');
     expect(() => access.acceptLink(link.token, bob)).toThrow(/not valid/);
     expect(access.linkPreview(link.token)).toBeUndefined();
-    expect(access.setLink('jan/paper', 'view')?.token).not.toBe(link.token);
+    expect(access.shareInfo('jan/paper').links).toEqual([]);
+    access.removeMember('jan/paper', access.shareInfo('jan/paper').members.find(m => m.user?.username === 'carol')!.id);
+  });
+
+  it('keeps each link\'s role for good: several links side by side, one off leaves the others', () => {
+    const viewers = access.createLink('jan/paper', 'view', jan);
+    const editors = access.createLink('jan/paper', 'edit', jan);
+    expect(editors.token).not.toBe(viewers.token);
+    expect(access.linksOf('jan/paper').map(l => l.role)).toEqual(['view', 'edit']);   // oldest first
+    expect(access.acceptLink(viewers.token, bob).role).toBe('view');
+    expect(access.acceptLink(editors.token, carol).role).toBe('edit');
+    // a second link with more rights raises who opens it, and they now belong to that link
+    expect(access.acceptLink(editors.token, bob).role).toBe('edit');
+    expect(access.shareInfo('jan/paper').members.find(m => m.user?.username === 'bob')?.link).toBe(editors.token);
+    expect(access.linksOf('jan/paper').map(l => l.joined)).toEqual([0, 2]);
+    // the viewers' link off: nobody of the editors' link loses anything, that link still works
+    expect(access.revokeLink('jan/paper', viewers.token, true)?.removed).toEqual([]);
+    expect(access.roleFor(bob, 'jan/paper')).toBe('edit');
+    expect(access.linkPreview(editors.token)?.role).toBe('edit');
+    // off without its people: the address is dead, who came in stays (remove them one by one)
+    expect(access.revokeLink('jan/paper', editors.token, false)).toEqual({ role: 'edit', removed: [] });
+    expect(() => access.acceptLink(editors.token, eve())).toThrow(/not valid/);
+    expect(access.roleFor(bob, 'jan/paper')).toBe('edit');
+    expect(access.roleFor(carol, 'jan/paper')).toBe('edit');
+    expect(access.shareInfo('jan/paper').members.filter(m => m.via === 'link').map(m => m.link)).toEqual([editors.token, editors.token]);
+    for (const m of access.shareInfo('jan/paper').members) access.removeMember('jan/paper', m.id);
+    // a link belongs to its project: another project cannot turn it off
+    const other = access.createLink('jan/paper', 'view', jan);
+    expect(access.revokeLink('jan/legacy', other.token, true)).toBeUndefined();
+    expect(access.linkPreview(other.token)?.project).toBe('jan/paper');
+    allOff('jan/paper');
   });
 
   it('lets a guest (no account) in, and hands what the guest gathered to the account they sign in with', () => {
-    const link = access.setLink('jan/paper', 'edit')!;
-    expect(access.linkProject(link.token)?.name).toBe('jan/paper');
-    expect(access.linkProject('nope')).toBeUndefined();
+    const link = access.createLink('jan/paper', 'edit', jan);
+    expect(access.shareLinkOf(link.token)?.project.name).toBe('jan/paper');
+    expect(access.shareLinkOf('nope')).toBeUndefined();
     const guest = toSessionUser(createGuest());
     expect(guest.guest).toBe(true);
     expect(guest.username).toMatch(/^guest-[0-9a-f]{10}$/);
@@ -195,19 +227,19 @@ describe('link sharing', () => {
     expect(access.adoptGuest(guest, erin.id)).toEqual(['jan/paper']);
     expect(access.roleFor(erin, 'jan/paper')).toBe('edit');
     expect(access.accessibleProjects(erin).find(p => p.name === 'jan/paper')?.via).toBe('link');
+    expect(access.shareInfo('jan/paper').members.find(m => m.user?.username === 'erin')?.link).toBe(link.token);
     expect(access.activityOf('jan/paper')[0]).toMatchObject({ action: 'open', user: { username: 'erin' } });
     expect(db.prepare('SELECT COUNT(*) AS n FROM users WHERE id = ?').get(guest.id)).toEqual({ n: 0 });
     expect(db.prepare('SELECT COUNT(*) AS n FROM project_members WHERE user_id = ?').get(guest.id)).toEqual({ n: 0 });
     // an account that is a viewer already is raised by an edit link, an owner is left alone
     const g2 = toSessionUser(createGuest());
     access.acceptLink(link.token, g2);
-    access.removeMember('jan/paper', access.shareInfo('jan/paper').members.find(m => m.user?.username === 'carol')!.id);
     access.addMember('jan/paper', 'carol', 'view', jan);
     expect(access.adoptGuest(g2, carol.id)).toEqual(['jan/paper']);
-    expect(access.roleFor(carol, 'jan/paper')).toBe('edit');                        // g2 came in while the link said edit
-    access.setLink('jan/paper', 'view');
+    expect(access.roleFor(carol, 'jan/paper')).toBe('edit');                        // g2 came in through the edit link
+    expect(access.shareInfo('jan/paper').members.find(m => m.user?.username === 'carol')).toMatchObject({ via: 'link', link: link.token });
     const g3 = toSessionUser(createGuest());
-    access.acceptLink(link.token, g3);
+    access.acceptLink(access.createLink('jan/paper', 'view', jan).token, g3);
     expect(access.adoptGuest(g3, jan.id)).toEqual(['jan/paper']);
     expect(access.roleFor(jan, 'jan/paper')).toBe('owner');
     expect(access.shareInfo('jan/paper').members.map(m => m.user?.username)).not.toContain(g3.username);
@@ -219,26 +251,8 @@ describe('link sharing', () => {
     expect(access.pruneGuests()).toBe(1);
     expect(db.prepare('SELECT COUNT(*) AS n FROM users WHERE id IN (?, ?)').get(old.id, fresh.id)).toEqual({ n: 1 });
     expect(access.roleFor(old, 'jan/paper')).toBeNull();
-    access.setLink('jan/paper', null);
-  });
-
-  it('reset: a new link replaces the old one, people who came in keep access; the link knows when it was made', () => {
-    const before = Date.now();
-    const link = access.setLink('jan/paper', 'edit')!;
-    expect(link.createdAt).toBeGreaterThanOrEqual(before);
-    expect(access.setLink('jan/paper', 'view')?.createdAt).toBe(link.createdAt);   // a new role is not a new link
-    access.acceptLink(link.token, bob);
-    const fresh = access.resetLink('jan/paper');
-    expect(fresh.token).not.toBe(link.token);
-    expect(fresh.role).toBe('view');
-    expect(fresh.createdAt).toBeGreaterThanOrEqual(link.createdAt!);
-    expect(access.shareInfo('jan/paper').link).toEqual(fresh);
-    expect(() => access.acceptLink(link.token, bob)).toThrow(/not valid/);
-    expect(access.roleFor(bob, 'jan/paper')).toBe('view');
-    expect(access.acceptLink(fresh.token, bob).role).toBe('view');
-    access.setLink('jan/paper', null);
-    expect(access.roleFor(bob, 'jan/paper')).toBeNull();
-    expect(() => access.resetLink('jan/paper')).toThrow(/off/);
+    allOff('jan/paper');
+    expect(access.roleFor(carol, 'jan/paper')).toBeNull();
   });
 });
 
@@ -267,7 +281,7 @@ describe('public projects', () => {
     expect(access.joinPublic('jan/paper', carol)).toBe('edit');
     expect(access.shareInfo('jan/paper').visitors).toBe(2);
     // a share link opened while it is public still joins: it outlasts the project being public
-    const link = access.setLink('jan/paper', 'view')!;
+    const link = access.createLink('jan/paper', 'view', jan);
     const dan = toSessionUser(createUser('dan', 'Dan', 'pw'));
     expect(access.acceptLink(link.token, dan).role).toBe('view');
     expect(access.accessibleProjects(dan).find(p => p.name === 'jan/paper')?.via).toBe('link');
@@ -281,7 +295,7 @@ describe('public projects', () => {
     expect(access.roleFor(carol, 'jan/paper')).toBe('edit');
     expect(access.roleFor(dan, 'jan/paper')).toBe('view');
     expect(access.roleFor(eve(), 'jan/paper')).toBeNull();
-    access.setLink('jan/paper', null);
+    access.revokeLink('jan/paper', link.token, true);
     access.removeMember('jan/paper', access.shareInfo('jan/paper').members.find(m => m.user?.username === 'bob')!.id);
     access.removeMember('jan/paper', access.shareInfo('jan/paper').members.find(m => m.user?.username === 'carol')!.id);
   });

@@ -227,8 +227,10 @@ blend.
 * **Sharing** (Google-Docs model): a project is private to its owner until it is shared. The owner
   invites people by username or e-mail address as *viewers* or *editors* (an e-mail that has not
   signed in yet is kept as an invitation and bound to the account on its first Google sign-in), or
-  turns on *Anyone with the link* (`/#/share/<token>`; switching back to *Restricted* revokes
-  everyone who came in through the link). The link means *anyone*: a visitor without an account
+  makes share links (`#/<owner>/<project>/<path>?share=<token>`, table `share_links`): any number,
+  each with the role picked in *New link…* for good — another role is another link, so a link
+  handed out never gives more than it did — and each turned off on its own (✕; who came in
+  through it, `project_members.link_token`, goes too unless the owner keeps them). A link means *anyone*: a visitor without an account
   lands in the document straight away as a **guest** — `POST /api/share/:token/accept` (outside
   the authenticated router) creates a temporary account ("Anonymous Otter", `users.is_guest`,
   same-origin only, ≤ 30 per address and hour) and sets the session cookie; the client shows a

@@ -197,12 +197,12 @@ test('link sharing: joining through the link, revoked when the link is turned of
   const admin = await asUser(browser);
   const pageA = await openDocPage(admin);
   const dlg = await openShareDialog(pageA);
-  await dlg.locator('[data-link-mode]').selectOption('link');
-  await pageA.getByRole('button', { name: 'Turn on link' }).click();   // the popup that says what the link gives away
-  await expect(dlg.locator('[data-link-role]')).toBeVisible();
-  await dlg.locator('[data-link-role]').selectOption('edit');
-  await pageA.getByRole('button', { name: 'Allow editing' }).click();
-  const url = await dlg.locator('.share-link input').inputValue();
+  // New link… asks the link's role, saying what each gives away
+  await dlg.locator('[data-link-new]').click();
+  await pageA.locator('[data-new-link-role="edit"]').check();
+  await pageA.locator('[data-link-create]').click();
+  await expect(dlg.locator('[data-share-link="edit"]')).toBeVisible();
+  const url = await dlg.locator('[data-share-link="edit"] input').inputValue();
   expect(url).toMatch(/#\/admin\/e2e-share\/main\.tex\?share=[A-Za-z0-9_-]{20,}$/);   // the link names the open file
 
   const carol = await asUser(browser, 'carol');
@@ -220,8 +220,9 @@ test('link sharing: joining through the link, revoked when the link is turned of
   await expect.poll(() => readFileSync(FILE, 'utf8'), { timeout: 15000 }).toContain('LINK-TYPED');
   await expect(dlg.locator('[data-member="carol"]')).toContainText('via link', { timeout: 10000 });   // the dialog refreshes itself
 
-  // restricted again: carol is out, the old link is dead
-  await dlg.locator('[data-link-mode]').selectOption('restricted');
+  // the link off, with who came in through it: carol is out, the old link is dead
+  await dlg.locator('[data-share-link="edit"] [data-link-off]').click();
+  await pageA.getByRole('button', { name: 'Turn off' }).click();
   await expect(dlg.locator('[data-member="carol"]')).toHaveCount(0, { timeout: 10000 });
   await expect.poll(() => metaStatus(carol)).toBe(403);
   const u1 = await asUser(browser, 'u1');
@@ -235,7 +236,7 @@ test('link sharing: joining through the link, revoked when the link is turned of
 
 test('anyone with the link: a visitor without an account chooses, comes in as a guest and keeps the project by signing in', async ({ browser }) => {
   const admin = await asUser(browser);
-  const on = await admin.request.post(`${BASE_URL}/api/projects/${PROJECT}/share/link`, { data: { role: 'edit' } });
+  const on = await admin.request.post(`${BASE_URL}/api/projects/${PROJECT}/share/links`, { data: { role: 'edit' } });
   expect(on.ok()).toBe(true);
   const token = (await on.json()).link.token as string;
 
@@ -324,7 +325,7 @@ test('anyone with the link: a visitor without an account chooses, comes in as a 
   expect(names).toContain('u1');
   expect(names).not.toContain(me.username);
   // tidy up: the link off takes u1 out again
-  expect((await admin.request.post(`${BASE_URL}/api/projects/${PROJECT}/share/link`, { data: { role: null } })).ok()).toBe(true);
+  expect((await admin.request.delete(`${BASE_URL}/api/projects/${PROJECT}/share/links/${token}?remove=1`)).ok()).toBe(true);
   await guest.close(); await admin.close();
 });
 

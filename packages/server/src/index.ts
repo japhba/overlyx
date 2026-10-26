@@ -44,7 +44,7 @@ import { toPng, isDirectImage } from './graphics.ts';
 import { buildPdf, exportTex, texExportDir, lastBuild, requestBuild, currentJob, cancelBuild, publicJob, cleanupProjectData, synctexView, synctexEdit, synctexPages, layoutCheckOf } from './export.ts';
 import { sendFileAt, readFileAt, isRegularFileAt } from './confined.ts';
 import { db, type ProjectRow } from './db.ts';
-import { accessibleProjects, adoptProjects, roleFor, atLeast, isRole, registerProject, projectRow, shareInfo, addMember, setMemberRole, removeMember, memberRow, linkMemberIds, setLink, resetLink, linkProject, linkPreview, acceptLink, setPublic, joinPublic, newOwner, setOwner, trashProject, ensureWelcomeProject, ensureStarterProjects, type Role } from './access.ts';
+import { accessibleProjects, adoptProjects, roleFor, atLeast, isRole, registerProject, projectRow, shareInfo, addMember, setMemberRole, removeMember, memberRow, createLink, revokeLink, shareLinkOf, linkPreview, acceptLink, setPublic, joinPublic, newOwner, setOwner, trashProject, ensureWelcomeProject, ensureStarterProjects, type Role } from './access.ts';
 import { canonicalProject, canonicalDocId } from './namespaces.ts';
 import { gdocsRoutes } from './gdocs/routes.ts';
 import { startAutoSync, filesMoved } from './gdocs/sync.ts';
@@ -153,7 +153,7 @@ app.post('/api/share/:token/accept', (req, res) => {
     let joined = false;
     if (!user) {
       if (config.signup === 'invited') { res.status(401).json({ error: 'Sign in to open this shared project' }); return; }
-      if (!linkProject(token)) { res.status(404).json({ error: 'This link is not valid (any more). Ask the owner to share the project again.' }); return; }
+      if (!shareLinkOf(token)) { res.status(404).json({ error: 'This link is not valid (any more). Ask the owner to share the project again.' }); return; }
       user = admitGuest(req, res) ?? undefined;
       if (!user) return;
       joined = true;
@@ -501,17 +501,24 @@ api.delete('/projects/:project/share/members/:id', needProject('owner'), (req, r
   if (m?.user_id != null) manager.kick(req.params.project, [m.user_id]);
   res.json({ share: shareInfo(req.params.project) });
 });
-/** Link sharing: body { role: 'view' | 'edit' | null } (null turns it off and revokes link members). */
-api.post('/projects/:project/share/link', needProject('owner'), (req, res) => {
+/** A new share link: body { role: 'view' | 'edit' }, the link's role for good (another role is another link). */
+api.post('/projects/:project/share/links', needProject('owner'), (req, res) => {
   try {
-    const role = req.body?.role ?? null;
-    if (role !== null && !isRole(role)) { res.status(400).json({ error: 'role must be view, edit or null' }); return; }
-    const affected = linkMemberIds(req.params.project);
-    const link = setLink(req.params.project, role);
-    if (affected.length) manager.kick(req.params.project, affected);
-    logAccess(req.params.project, req.user!.id, 'share', role ? `turned on link sharing (${role === 'edit' ? 'editors' : 'viewers'})` : 'turned off link sharing');
+    const role = req.body?.role;
+    if (!isRole(role)) { res.status(400).json({ error: 'role must be view or edit' }); return; }
+    const link = createLink(req.params.project, role, req.user!);
+    logAccess(req.params.project, req.user!.id, 'share', `made a share link for ${role === 'edit' ? 'editors' : 'viewers'}`);
     res.json({ link, share: shareInfo(req.params.project) });
   } catch (e) { res.status(400).json({ error: (e as Error).message }); }
+});
+/** Turn a share link off; `?remove=1` also takes out the people who came in through it. */
+api.delete('/projects/:project/share/links/:token', needProject('owner'), (req, res) => {
+  const r = revokeLink(req.params.project, String(req.params.token), req.query.remove === '1');
+  if (!r) { res.status(404).json({ error: 'no such link' }); return; }
+  if (r.removed.length) manager.kick(req.params.project, r.removed);
+  const n = r.removed.length;
+  logAccess(req.params.project, req.user!.id, 'share', `turned off a share link for ${r.role === 'edit' ? 'editors' : 'viewers'}${n ? ` and removed the ${n === 1 ? 'person' : `${n} people`} who came in through it` : ''}`);
+  res.json({ share: shareInfo(req.params.project) });
 });
 /** Public: body { public: boolean } — anyone may view it and clone it; off removes who came in because it was. */
 api.post('/projects/:project/share/public', needProject('owner'), (req, res) => {
@@ -521,14 +528,6 @@ api.post('/projects/:project/share/public', needProject('owner'), (req, res) => 
     if (affected.length) manager.kick(req.params.project, affected);
     logAccess(req.params.project, req.user!.id, 'share', on ? 'made the project public' : 'made the project private');
     res.json({ share: shareInfo(req.params.project) });
-  } catch (e) { res.status(400).json({ error: (e as Error).message }); }
-});
-/** A new share link: the old one stops working; who came in through it keeps access. */
-api.post('/projects/:project/share/link/reset', needProject('owner'), (req, res) => {
-  try {
-    const link = resetLink(req.params.project);
-    logAccess(req.params.project, req.user!.id, 'share', 'reset the share link (the old one no longer works)');
-    res.json({ link, share: shareInfo(req.params.project) });
   } catch (e) { res.status(400).json({ error: (e as Error).message }); }
 });
 /**

@@ -76,7 +76,7 @@ async function eraseProject(project: string, live: LiveDocs): Promise<void> {
   cleanupProjectData(project);
   for (const t of db.prepare('SELECT thread_id FROM agent_threads WHERE project = ?').all(project) as { thread_id: string }[]) removeWorkspace(t.thread_id);
   db.transaction(() => {
-    for (const t of ['project_members', 'admin_grants', 'access_log', 'agent_threads']) db.prepare(`DELETE FROM ${t} WHERE project = ?`).run(project);
+    for (const t of ['project_members', 'share_links', 'admin_grants', 'access_log', 'agent_threads']) db.prepare(`DELETE FROM ${t} WHERE project = ?`).run(project);
     db.prepare('DELETE FROM project_aliases WHERE name = ?').run(project);
     db.prepare('DELETE FROM gdocs_links WHERE substr(doc_id, 1, ?) = ?').run(...docPrefix(project));
     db.prepare('DELETE FROM lesswrong_links WHERE substr(doc_id, 1, ?) = ?').run(...docPrefix(project));

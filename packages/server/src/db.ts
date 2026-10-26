@@ -54,6 +54,14 @@ CREATE TABLE IF NOT EXISTS project_members (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS project_members_user ON project_members(project, user_id) WHERE user_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS project_members_email ON project_members(project, email) WHERE email IS NOT NULL;
+CREATE TABLE IF NOT EXISTS share_links (
+  token TEXT PRIMARY KEY,
+  project TEXT NOT NULL,
+  role TEXT NOT NULL,
+  created_by INTEGER,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS share_links_project ON share_links(project);
 CREATE TABLE IF NOT EXISTS git_tokens (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL,
@@ -168,6 +176,17 @@ try {
 // 2026-10-22: public projects — anyone may view them at their address and clone them, without an
 // account (access.ts setPublic, joinPublic)
 try { db.exec('ALTER TABLE projects ADD COLUMN public INTEGER NOT NULL DEFAULT 0'); } catch { /* column exists */ }
+// 2026-10-26: a project has any number of share links, each with its own role for good (access.ts
+// createLink), and the people who came in through one remember which. The one link of before
+// (projects.link_token / link_role, unused since) moves over with its people.
+try { db.exec('ALTER TABLE project_members ADD COLUMN link_token TEXT'); } catch { /* column exists */ }
+db.transaction(() => {
+  db.exec(`INSERT OR IGNORE INTO share_links (token, project, role, created_by, created_at)
+    SELECT link_token, name, link_role, owner_id, COALESCE(link_created_at, created_at) FROM projects WHERE link_token IS NOT NULL AND link_role IN ('view', 'edit')`);
+  db.exec(`UPDATE project_members SET link_token = (SELECT p.link_token FROM projects p WHERE p.name = project_members.project)
+    WHERE via = 'link' AND link_token IS NULL AND project IN (SELECT name FROM projects WHERE link_token IS NOT NULL)`);
+  db.exec('UPDATE projects SET link_token = NULL, link_role = NULL, link_created_at = NULL WHERE link_token IS NOT NULL');
+})();
 
 // 2026-09-01: MCP tokens became user-scoped (one token, every project its account can access —
 // mcpTokens.ts). Databases from before have project-scoped rows: rebuild the table, attributing
@@ -198,8 +217,8 @@ export interface ProjectRow {
   name: string; title: string | null; owner_id: number | null;
   /** 'project' | 'example' (the personal welcome project) | 'example-gone' (deleted by its owner: not re-created) */
   kind: string;
+  /** the single share link of before 26 Oct 2026 — moved to `share_links`, always null since */
   link_token: string | null; link_role: string | null; created_at: number;
-  /** when the share link was made (null: before this was recorded, and nothing in the activity log) */
   link_created_at: number | null;
   /** 1: anyone may view the project and clone it, without an account (access.ts setPublic) */
   public?: number;
@@ -208,6 +227,8 @@ export interface MemberRow {
   id: number; project: string; user_id: number | null; email: string | null; role: string;
   /** 'user' (added by name) | 'email' (invited by e-mail) | 'link' (joined through the share link) | 'public' (opened the public project) */
   via: string; added_by: number | null; created_at: number;
+  /** via 'link': the share link they came in through (`share_links.token`; it may be off since) */
+  link_token?: string | null;
 }
 
 export interface UserRow {

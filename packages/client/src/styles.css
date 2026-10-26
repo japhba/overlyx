@@ -1884,6 +1884,11 @@ a.btn { display: inline-block; color: var(--ui-fg); text-decoration: none; line-
 .share-link-file select { max-width: 60%; font-size: 12px; }
 .share-link-meta { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
 .share-link-meta button { margin-left: auto; }
+/* share links: one row per link, its role first (Share.tsx) */
+.share-link-item + .share-link-item { margin-top: 8px; }
+.share-link .link-role { align-self: center; flex: none; font-size: 11px; padding: 1px 7px; border-radius: 9px; border: 1px solid var(--ui-border); color: var(--ui-muted); white-space: nowrap; }
+.share-link .link-role.edit { border-color: var(--accent); color: var(--accent); }
+.share-link-item .hint.small { margin-top: 2px; }
 .tree-row .owner { color: var(--muted2); font-weight: 400; font-size: 11px; }
 /* ---- git dialog */
 .git-dialog { display: flex; flex-direction: column; gap: 6px; max-height: 70vh; overflow: auto; padding-right: 4px; }
