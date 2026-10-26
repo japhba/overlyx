@@ -13,19 +13,20 @@ import { api, pdfLinkUrl, type ActivityEntry, type PdfLinkInfo, type PdfLinksInf
 import { ago } from './Git';
 import { Dialog, uiConfirm } from './Dialogs';
 import { docPathOf, projectOfDoc, projectShortName } from '@overlyx/core';
+import { describeView } from './panes';
 
 /**
  * A share link: the address of the file it opens (`#/<owner>/<project>/<path>`; the main document
- * without `path`) with the token that joins the project.
+ * without `path`) with the token that joins the project, and the view it opens in (`view=`: app/panes.ts).
  */
-export function shareUrl(token: string, project: string, path?: string | null): string {
-  return `${publicUrl(project, path)}?share=${token}`;
+export function shareUrl(token: string, project: string, path?: string | null, view?: string | null): string {
+  return `${publicUrl(project, path)}?share=${token}${view ? '&view=' + view : ''}`;
 }
 
-/** A public project's address: the file it opens (`#/<owner>/<project>/<path>`), no token. */
-export function publicUrl(project: string, path?: string | null): string {
+/** A public project's address: the file it opens (`#/<owner>/<project>/<path>`), no token; the view it opens in. */
+export function publicUrl(project: string, path?: string | null, view?: string | null): string {
   const seg = (s: string) => s.split('/').map(encodeURIComponent).join('/');
-  return `${location.origin}/#/${seg(project)}${path ? '/' + seg(path) : ''}`;
+  return `${location.origin}/#/${seg(project)}${path ? '/' + seg(path) : ''}${view ? '?view=' + view : ''}`;
 }
 
 /** One activity entry as a sentence fragment after the person's name. */
@@ -55,11 +56,13 @@ function OpensFile({ files, path, busy, onPick, attr }: { files: string[]; path:
   );
 }
 
-export function ShareDialog({ project, user, doc, onClose, onChanged }: { project: string; user: User; doc?: string | null; onClose: () => void; onChanged?: () => void }) {
+export function ShareDialog({ project, user, doc, view, onClose, onChanged }: { project: string; user: User; doc?: string | null; /** how the open document is shown (a link's `view=`) */ view?: string | null; onClose: () => void; onChanged?: () => void }) {
   const [info, setInfo] = useState<ShareInfo | null>(null);
   // the file the link opens: the one open in the workspace, else (from the start screen) the main document
   const openPath = doc && projectOfDoc(doc) === project ? docPathOf(doc) : null;
   const [linkPath, setLinkPath] = useState<string | null>(openPath);
+  // the open document's link opens it as it is shown here: the same panes, on pages or not
+  const linkView = linkPath && linkPath === openPath ? view ?? null : null;
   const [err, setErr] = useState('');
   const [who, setWho] = useState('');
   const [role, setRole] = useState<'view' | 'edit'>('edit');
@@ -133,7 +136,7 @@ export function ShareDialog({ project, user, doc, onClose, onChanged }: { projec
   const add = async () => { if (!who.trim() || busy) return; if (await update(() => api.addMember(project, who.trim(), role))) setWho(''); };
   const copy = async () => {
     if (!info?.link) return;
-    const url = shareUrl(info.link.token, project, linkPath);
+    const url = shareUrl(info.link.token, project, linkPath, linkView);
     try { await navigator.clipboard.writeText(url); } catch { const el = document.querySelector<HTMLInputElement>('.share-link input'); el?.select(); document.execCommand('copy'); }
     setCopied(true); setTimeout(() => setCopied(false), 2000);
   };
@@ -143,7 +146,7 @@ export function ShareDialog({ project, user, doc, onClose, onChanged }: { projec
     await update(() => api.setPublic(project, on));
   };
   const copyPublic = async () => {
-    const url = publicUrl(project, linkPath);
+    const url = publicUrl(project, linkPath, linkView);
     try { await navigator.clipboard.writeText(url); } catch { const el = document.querySelector<HTMLInputElement>('[data-public-link] input'); el?.select(); document.execCommand('copy'); }
     setCopiedPublic(true); setTimeout(() => setCopiedPublic(false), 2000);
   };
@@ -231,13 +234,14 @@ export function ShareDialog({ project, user, doc, onClose, onChanged }: { projec
           </div>
           {info.link && (
             <div class="share-link">
-              <input type="text" readonly value={shareUrl(info.link.token, project, linkPath)} onFocus={e => (e.target as HTMLInputElement).select()} />
+              <input type="text" readonly value={shareUrl(info.link.token, project, linkPath, linkView)} onFocus={e => (e.target as HTMLInputElement).select()} />
               <button class="btn" onClick={() => void copy()}>{copied ? 'Copied ✓' : 'Copy link'}</button>
             </div>
           )}
           {info.link && linkFiles.length > 0 && (
             <div class="share-link-file hint">
               Opens <OpensFile files={linkFiles} path={linkPath} busy={busy} onPick={setLinkPath} attr="data-link-file" />
+              {linkView && <span data-link-view>{' '}as you see it ({describeView(linkView)})</span>}
               {' '}— and gives access to the whole project.
             </div>
           )}
@@ -257,11 +261,11 @@ export function ShareDialog({ project, user, doc, onClose, onChanged }: { projec
           {info.public && (
             <>
               <div class="share-link" data-public-link>
-                <input type="text" readonly value={publicUrl(project, linkPath)} onFocus={e => (e.target as HTMLInputElement).select()} />
+                <input type="text" readonly value={publicUrl(project, linkPath, linkView)} onFocus={e => (e.target as HTMLInputElement).select()} />
                 <button class="btn" onClick={() => void copyPublic()}>{copiedPublic ? 'Copied ✓' : 'Copy link'}</button>
               </div>
               <div class="share-link-file hint">
-                {linkFiles.length > 0 && <>Opens <OpensFile files={linkFiles} path={linkPath} busy={busy} onPick={setLinkPath} attr="data-public-file" />. </>}
+                {linkFiles.length > 0 && <>Opens <OpensFile files={linkFiles} path={linkPath} busy={busy} onPick={setLinkPath} attr="data-public-file" />{linkView && <> as you see it ({describeView(linkView)})</>}. </>}
                 Clone: <code>git clone {location.origin}/git/{project}.git</code>
                 {info.visitors ? ` · Opened by ${info.visitors} ${info.visitors === 1 ? 'person' : 'people'} so far.` : ''}
               </div>

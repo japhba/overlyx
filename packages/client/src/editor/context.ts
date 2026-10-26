@@ -59,6 +59,8 @@ export interface EditorContext {
    * when the folder is synced with a project — null (no such entries) otherwise
    */
   webLink?: (id: string) => string | null;
+  /** How the shell shows the document `id` when it is the open one, as a link's `view=` (app/panes.ts viewParam); null for other files */
+  linkView?: (id: string) => string | null;
 }
 
 export const editorContext: EditorContext = { user: null, meta: null, docId: null, project: null, docDir: '', trackChanges: false, combined: false };

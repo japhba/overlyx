@@ -70,6 +70,7 @@ describe('links to a place in a document', () => {
   it('reads lines, pages, slides and objects', () => {
     expect(parsePlace(new URLSearchParams('line=20-12'))).toEqual({ line: [12, 20] });
     expect(placeQuery({ line: [7, 7] })).toBe('line=7');
+    expect(placeQuery({ goto: 'sec:a', view: 'wysiwym,pdf' })).toBe('goto=sec%3Aa&view=wysiwym,pdf');
     expect(parsePlace(new URLSearchParams(placeQuery({ slide: 3, obj: [2, 1] })))).toEqual({ slide: 3, obj: [2, 1] });
     expect(parsePlace(new URLSearchParams('page=4'))).toEqual({ page: 4 });
     expect(parsePlace(new URLSearchParams('goto=sec:intro'))).toBeNull();

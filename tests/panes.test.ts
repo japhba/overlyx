@@ -9,7 +9,7 @@ import { useState } from 'preact/hooks';
 import { act } from 'preact/test-utils';
 import { PaneSwitch } from '../packages/client/src/app/PaneSwitch';
 import { PaneDividers } from '../packages/client/src/app/PaneDividers';
-import { DEFAULT_LAYOUT, ARRANGEMENTS, applyArrangement, arrangementMatches, applyPreset, loadLayout, mirrorPanes, movePane, normalizeLayout, paneGrow, presetMatches, resizeBetween, saveLayout, setPaneShown, soloPane, togglePane, visiblePanes } from '../packages/client/src/app/panes';
+import { DEFAULT_LAYOUT, ARRANGEMENTS, applyArrangement, arrangementMatches, applyPreset, describeView, loadLayout, mirrorPanes, movePane, normalizeLayout, paneGrow, parseViewParam, presetMatches, resizeBetween, saveLayout, setPaneShown, soloPane, togglePane, viewParam, visiblePanes } from '../packages/client/src/app/panes';
 import { formatAge, pdfStatus } from '../packages/client/src/app/pdfstatus';
 
 beforeEach(() => localStorage.clear());
@@ -201,5 +201,20 @@ describe('projects by recency (the start screen)', async () => {
     expect(recencyLabel(a, T)).toBe('opened 1 h ago');
     expect(recencyLabel(b, T)).toBe('changed 2 min ago');
     expect(recencyLabel(c, T)).toBe('');
+  });
+});
+
+describe('a link\'s view (view=)', () => {
+  it('names the shown panes left to right in the switch\'s words, and reads them back', () => {
+    const l = applyPreset(DEFAULT_LAYOUT, ['pdf', 'doc']);
+    expect(viewParam(l, false, 'tex')).toBe('pdf,wysiwym');
+    expect(viewParam(l, true, 'tex')).toBe('pdf,pages');
+    expect(viewParam(applyPreset(DEFAULT_LAYOUT, ['doc', 'tex', 'pdf']), false, 'article')).toBe('wysiwym,html,page');
+    expect(viewParam(applyPreset(DEFAULT_LAYOUT, ['tex']), false, 'markdown')).toBe('markdown');
+    expect(parseViewParam('pdf,pages')).toEqual({ panes: ['pdf', 'doc'], pages: true });
+    expect(parseViewParam('wysiwym,html,page')).toEqual({ panes: ['doc', 'tex', 'pdf'], pages: false });
+    expect(parseViewParam('nonsense')).toBeNull();
+    expect(parseViewParam(null)).toBeNull();
+    expect(describeView('pages,pdf')).toBe('WYSIWYM on pages and PDF');
   });
 });

@@ -144,3 +144,33 @@ export function paneGrow(l: PaneLayout, id: PaneId, shown: readonly PaneId[]): n
   const sum = shown.reduce((s, p) => s + l.weights[p], 0);
   return sum > 0 && shown.includes(id) ? (l.weights[id] / sum) * shown.length : 1;
 }
+
+/**
+ * A link's `view=` (editor/permalink.ts): the panes the sender had on screen, left to right, in the
+ * switch's words for the kind of document — `wysiwym`, `tex` / `markdown` / `html`, `pdf` / `page` —
+ * with `pages` for the WYSIWYM pane on the PDF's pages (View ▸ Pages): `view=wysiwym,pdf`,
+ * `view=pages`, `view=tex,pdf`, `view=html,page`.
+ */
+export interface LinkView { panes: PaneId[]; pages: boolean }
+export type ViewKind = 'tex' | 'markdown' | 'article';
+const VIEW_WORDS: Record<string, PaneId> = { wysiwym: 'doc', pages: 'doc', tex: 'tex', latex: 'tex', markdown: 'tex', html: 'tex', source: 'tex', pdf: 'pdf', page: 'pdf' };
+
+export function viewParam(l: PaneLayout, pages: boolean, kind: ViewKind): string {
+  const word = (p: PaneId) => (p === 'doc' ? (pages ? 'pages' : 'wysiwym') : p === 'tex' ? (kind === 'article' ? 'html' : kind) : kind === 'article' ? 'page' : 'pdf');
+  return visiblePanes(l).map(word).join(',');
+}
+
+/** The view a link names; null when it names none (unknown words are skipped, a pane named twice counts once). */
+export function parseViewParam(s: string | null | undefined): LinkView | null {
+  if (!s) return null;
+  const words = s.toLowerCase().split(/[\s,+]+/).filter(w => w in VIEW_WORDS);
+  const panes = [...new Set(words.map(w => VIEW_WORDS[w]))];
+  return panes.length ? { panes, pages: words.includes('pages') } : null;
+}
+
+/** A view in words, for a hint: "WYSIWYM and PDF". */
+export function describeView(s: string): string {
+  const names: Record<string, string> = { wysiwym: 'WYSIWYM', pages: 'WYSIWYM on pages', tex: 'TeX', markdown: 'Markdown', html: 'HTML', pdf: 'PDF', page: 'the page' };
+  const parts = s.split(',').map(w => names[w] ?? w);
+  return parts.length > 1 ? parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1] : parts[0] ?? '';
+}

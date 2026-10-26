@@ -14,6 +14,9 @@
  *   decks, posters, web pages  `slide=3`, an object on it `obj=2.1` (its place among the slide's
  *               elements; on a web page among the page's)
  *
+ * A document's link also says how it was shown, `view=wysiwym,pdf` (app/panes.ts viewParam): the
+ * panes left to right and whether on pages — the person opening it sees what the sender saw.
+ *
  * What a file's address is, the shell says (`editorContext.webLink`): the web app its own origin,
  * the VS Code extension the overlyx.app project its folder is synced with — no link without one.
  */
@@ -35,7 +38,7 @@ export interface Place {
 }
 
 /** The query that says `p` (without the "?"): `goto` first, then the place's own fields. */
-export function placeQuery(p: Place & { goto?: string }): string {
+export function placeQuery(p: Place & { goto?: string; view?: string | null }): string {
   const q = new URLSearchParams();
   if (p.goto) q.set('goto', p.goto);
   if (p.text !== undefined) {
@@ -48,8 +51,9 @@ export function placeQuery(p: Place & { goto?: string }): string {
   if (p.page) q.set('page', String(p.page));
   if (p.slide) q.set('slide', String(p.slide));
   if (p.obj?.length) q.set('obj', p.obj.join('.'));
-  // (spaces as %20, not "+": the quote stays readable where links are pasted)
-  return q.toString().replace(/\+/g, '%20');
+  if (p.view) q.set('view', p.view);
+  // (spaces as %20, not "+": the quote stays readable where links are pasted; the view's commas as they are)
+  return q.toString().replace(/\+/g, '%20').replace(/%2C/gi, ',');
 }
 
 /** The place a link's query names (`goto` / `heading` are the shell's), null when it names none. */
@@ -83,16 +87,17 @@ export const webAppLink = (id: string) => `${location.origin}${location.pathname
 export const canLink = (id: string) => !!id && !!editorContext.webLink?.(id);
 
 /**
- * Copy the link to `place` in the file `id` and say so (`what`: "this paragraph", "line 12", …).
- * Nothing when the shell has no address for the file.
+ * Copy the link to `place` in the file `id` and say so (`what`: "this paragraph", "line 12", …), with
+ * the view the file is shown in when it is the open document. Nothing when the shell has no address for the file.
  */
 export function copyPlaceLink(id: string, place: (Place & { goto?: string }) | null, what: string): void {
   const base = editorContext.webLink?.(id);
-  if (base) copyLinkAt(base, place, what);
+  const view = editorContext.linkView?.(id);
+  if (base) copyLinkAt(base, view ? { ...place, view } : place, what);
 }
 
 /** Copy the link to `place` in the file at the address `base`, and say so (`notify`; the editor's by default). */
-export function copyLinkAt(base: string, place: (Place & { goto?: string }) | null, what: string, notify = editorContext.notify): void {
+export function copyLinkAt(base: string, place: (Place & { goto?: string; view?: string | null }) | null, what: string, notify = editorContext.notify): void {
   const q = place ? placeQuery(place) : '';
   const url = base + (q ? '?' + q : '');
   const done = () => notify?.(`Link to ${what} copied`);

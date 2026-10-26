@@ -54,7 +54,7 @@ import { StatusBar, type Status } from '@client/app/StatusBar';
 import { SourcePane, cursorLine, docBlocks, blockPos } from '@client/app/SourcePane';
 import { PaneSwitch } from '@client/app/PaneSwitch';
 import { PaneDividers } from '@client/app/PaneDividers';
-import { loadLayout, normalizeLayout, saveLayout, setPaneShown, togglePane, visiblePanes, paneGrow, type PaneId, type PaneLayout } from '@client/app/panes';
+import { loadLayout, normalizeLayout, saveLayout, setPaneShown, togglePane, visiblePanes, paneGrow, viewParam, type PaneId, type PaneLayout } from '@client/app/panes';
 import { EditModeSwitch, editModeOf, applyEditMode, modeScope, setOwnSuggesting, suggestingFor, switchModeScope, type ModeScope } from '@client/app/EditModeSwitch';
 import { locateSourceLine } from '@client/app/sourcelocate';
 import { activeMathField, mathFocusListeners, mathCursorListeners, type LyxMathField } from '@client/editor/lyxmath/field';
@@ -132,6 +132,8 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
     const state = vscode.getState();
     vscode.setState({ ...(state && typeof state === 'object' ? state : {}), panes });
   }, [panes]);
+  // "Copy link to …" says how the document is shown here (client app/panes.ts viewParam)
+  useEffect(() => { editorContext.linkView = id => (id === docId ? viewParam(panesRef.current, false, article ? 'article' : /\.(md|markdown)$/i.test(docId) ? 'markdown' : 'tex') : null); }, []);
   const showPane = (id: PaneId, on = true) => changePanes(l => setPaneShown(l, id, on));
   const flipPane = (id: PaneId) => changePanes(l => togglePane(l, id));
   const shownPanes = visiblePanes(panes);

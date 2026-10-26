@@ -28,7 +28,7 @@ import { ArticlePage } from './ArticlePage';
 import { PaneSwitch } from './PaneSwitch';
 import { PaneDividers } from './PaneDividers';
 import { EditModeSwitch, editModeOf, applyEditMode, modeScope, setOwnSuggesting, suggestingFor, switchModeScope, type ModeScope } from './EditModeSwitch';
-import { loadLayout, saveLayout, setPaneShown, togglePane, visiblePanes, paneGrow, type PaneId, type PaneLayout } from './panes';
+import { loadLayout, saveLayout, setPaneShown, togglePane, visiblePanes, paneGrow, applyPreset, presetMatches, parseViewParam, viewParam, type LinkView, type PaneId, type PaneLayout, type ViewKind } from './panes';
 import { ShareDialog } from './Share';
 import { GuestCallout, ShareInvite, type SharePreview } from './Guest';
 import { GitDialog } from './Git';
@@ -198,27 +198,33 @@ const stored = (k: string) => { try { return localStorage.getItem(k); } catch { 
 
 /**
  * `#/project/path.tex?goto=label` or `?heading=<n>` (the n-th heading), a place a link names
- * (`?text=…`, `?line=…`, `?page=…`, `?slide=…`: editor/permalink.ts), or a share link
+ * (`?text=…`, `?line=…`, `?page=…`, `?slide=…`: editor/permalink.ts) and the view it opens in
+ * (`?view=wysiwym,pdf`: app/panes.ts — the id then has `raw:` exactly when it shows the source), or a share link
  * `#/<owner>/<project>/<path>?share=<token>` — the file it lands on, the token joins the project
  * (from before: `#/share/<token>` and `#/share/<token>/<path>`)
  */
-function parseHash(): { id: string | null; goto: string | null; heading: number | null; place: Place | null; share: string | null; sharePath: string | null } {
+function parseHash(): { id: string | null; goto: string | null; heading: number | null; place: Place | null; view: LinkView | null; share: string | null; sharePath: string | null } {
   const raw = location.hash.replace(/^#\/?/, '');
   const q = raw.indexOf('?');
   const idPart = decodeURIComponent(q >= 0 ? raw.slice(0, q) : raw);
   if (idPart.startsWith('share/')) {
     const rest = idPart.slice('share/'.length);
     const cut = rest.indexOf('/');
-    return { id: null, goto: null, heading: null, place: null, share: cut < 0 ? rest : rest.slice(0, cut), sharePath: cut < 0 ? null : rest.slice(cut + 1) || null };
+    return { id: null, goto: null, heading: null, place: null, view: null, share: cut < 0 ? rest : rest.slice(0, cut), sharePath: cut < 0 ? null : rest.slice(cut + 1) || null };
   }
   const params = q >= 0 ? new URLSearchParams(raw.slice(q + 1)) : null;
   const token = params?.get('share');
-  if (token) return { id: null, goto: null, heading: null, place: null, share: token, sharePath: docPathOf(idPart.replace(/^(raw|text|pdf):/, '')) || null };
+  if (token) return { id: null, goto: null, heading: null, place: null, view: null, share: token, sharePath: docPathOf(idPart.replace(/^(raw|text|pdf):/, '')) || null };
   const h = params?.get('heading');
   // markdown files opened in the plain text editor before they were documents: links stay valid
-  const id = idPart.startsWith('text:') && isMarkdownDoc(idPart) ? idPart.slice(5) : idPart;
-  return { id: id || null, goto: params?.get('goto') ?? null, heading: h !== null && h !== undefined && /^\d+$/.test(h) ? Number(h) : null, place: parsePlace(params), share: null, sharePath: null };
+  let id = idPart.startsWith('text:') && isMarkdownDoc(idPart) ? idPart.slice(5) : idPart;
+  const view = id && !/^(text|pdf):/.test(id) ? parseViewParam(params?.get('view')) : null;
+  if (view) id = (view.panes.includes('tex') ? 'raw:' : '') + id.replace(/^raw:/, '');
+  return { id: id || null, goto: params?.get('goto') ?? null, heading: h !== null && h !== undefined && /^\d+$/.test(h) ? Number(h) : null, place: parsePlace(params), view, share: null, sharePath: null };
 }
+
+/** What kind of document a link's `view=` speaks of (its words for the source and the output: app/panes.ts). */
+const viewKindOf = (id: string): ViewKind => (isArticleDoc(id) ? 'article' : isMarkdownDoc(id) ? 'markdown' : 'tex');
 
 /** Where a share link lands (the hash): the linked file when it opens in a tab, else the project's main document. */
 function shareLanding(r: { project: string; doc: string | null; file: Parameters<typeof fileTabId>[1] | null }): string {
@@ -324,6 +330,26 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     const id = h ? h.replace(/^raw:/, '') : null;
     if (id && n.shown.tex !== h!.startsWith('raw:')) location.hash = '#/' + (n.shown.tex ? 'raw:' : '') + id;
   };
+  /**
+   * A link's view (`view=`, app/panes.ts): the panes and Pages as the sender had them, kept like a
+   * switch of one's own. The address then says it no more: a reload keeps what was changed since.
+   */
+  const applyLinkView = (v: LinkView) => {
+    const raw = location.hash.replace(/^#\/?/, '');
+    const q = raw.indexOf('?');
+    const idPart = (q >= 0 ? raw.slice(0, q) : raw).replace(/^raw:/, '');
+    const params = new URLSearchParams(q >= 0 ? raw.slice(q + 1) : '');
+    params.delete('view');
+    const rest = params.toString().replace(/\+/g, '%20');
+    history.replaceState(history.state, '', '#/' + (v.panes.includes('tex') ? 'raw:' : '') + idPart + (rest ? '?' + rest : ''));
+    changePanes(l => (presetMatches(l, v.panes) ? l : applyPreset(l, v.panes)));
+    if (v.panes.includes('doc')) {
+      const id = decodeURIComponent(idPart);
+      try { if (v.pages) localStorage.setItem(pagesKeyOf(id), '1'); else localStorage.removeItem(pagesKeyOf(id)); } catch { /* private window: for this visit */ }
+      setPagesFor({ doc: id, on: v.pages });
+    }
+  };
+  useEffect(() => { const v = parseHash().view; if (v) applyLinkView(v); }, []);
   const showPane = (id: PaneId, on = true) => changePanes(l => setPaneShown(l, id, on));
   const flipPane = (id: PaneId) => changePanes(l => togglePane(l, id));
   /** The Source switches (Ctrl+Alt+S, the right rail, the panel tabs, the View menu): the LaTeX source beside the document. */
@@ -640,6 +666,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     };
     const apply = (h: ReturnType<typeof parseHash>) => {
       pendingGoto.current = h.goto; pendingHeading.current = h.heading; pendingPlace.current = h.place; setPlace(h.place); setHashId(h.id);
+      if (h.view) applyLinkView(h.view);
       if (h.id?.startsWith('text:')) navHistory.visit(h.id, null);
       if ((h.goto || h.heading !== null || h.place?.text) && h.id === editorContext.docId) runGoto();
     };
@@ -659,7 +686,10 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       api.acceptShare(token, sharePath).then(r => {
         notify(`You can now ${r.role === 'view' ? 'view' : 'edit'} “${r.title ?? projectShortName(r.project)}”`);
         setRefreshKey(k => k + 1);
-        location.hash = shareLanding(r);
+        // (the view the link names goes along: permalink.ts)
+        const view = new URLSearchParams(location.hash.split('?')[1] ?? '').get('view')?.replace(/[^a-z,]/gi, '');
+        const landing = shareLanding(r);
+        location.hash = landing && view ? landing + '?view=' + view : landing;
       }).catch(e => { notify((e as Error).message, 'error'); location.hash = ''; });
     };
     check();
@@ -1011,6 +1041,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     editorContext.openInTab = openInTab;
     editorContext.gotoLabel = gotoLabel;
     editorContext.webLink = webAppLink;
+    editorContext.linkView = id => (isLyxDoc && (id === docId || childIds.includes(id)) ? viewParam(panes, pagesOn, viewKindOf(id)) : null);
     (window as any).overlyx = editorContext;   // handy for tests / debugging
     editorContext.ui = {
       save: () => {
@@ -1941,7 +1972,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         sync={syncChip}
         pdf={isLyxDoc ? { state: pdf, onClick: rebuild => { if (rebuild && !pdf.busy) void build(); else if (!pdfPaneVisible) changePanes(l => (narrowPanes ? { ...setPaneShown(l, 'pdf', true), order: ['pdf', ...l.order.filter(p => p !== 'pdf')] } : setPaneShown(l, 'pdf', true))); } } : undefined} />
       {renderDialog()}
-      {shareFor && <ShareDialog project={shareFor} user={user} doc={docId?.replace(/^(text|pdf):/, '') ?? null} onClose={() => setShareFor(null)} onChanged={() => setRefreshKey(k => k + 1)} />}
+      {shareFor && <ShareDialog project={shareFor} user={user} doc={docId?.replace(/^(text|pdf):/, '') ?? null} view={isLyxDoc ? viewParam(panes, pagesOn, viewKindOf(docId!)) : null} onClose={() => setShareFor(null)} onChanged={() => setRefreshKey(k => k + 1)} />}
       {newLayoutFor && <NewLayoutDialog project={newLayoutFor} dir={textId ? docPathOf(textId).split('/').slice(0, -1).join('/') : ''} notify={notify} onClose={() => setNewLayoutFor(null)} onCreated={id => { location.hash = '#/' + id; setRefreshKey(k => k + 1); }} />}
       {gitFor && <GitDialog project={gitFor} user={user} onClose={() => setGitFor(null)} />}
       {askInterface && !tour && <InterfacePrompt onDone={() => setAskInterface(false)} />}
