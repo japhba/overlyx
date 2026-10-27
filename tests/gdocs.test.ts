@@ -324,6 +324,37 @@ describe('the sync of a document', async () => {
     g.anchoredComments = true;
   });
 
+  it('a failed sync leaves saved local edits pending for the next automatic sync', async () => {
+    const id = 'u/p/retry.md';
+    writeFileSync(join(ROOT, 'projects', 'u', 'p', 'retry.md'), '# Retry\n\nOriginal text.\n');
+    const link = await sync.linkNewGoogleDoc(id, owner.id, 'Retry');
+    const lastSync = link.last_sync!;
+    const doc = await manager.open(id);
+    const getDocument = vi.spyOn(g, 'getDocument');
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+    try {
+      vi.setSystemTime(lastSync + 1000);
+      doc.loadFromLyx(parseMarkdown('# Retry\n\nSaved edit.\n').doc, 'test');
+      await doc.saveToFile();
+      getDocument.mockRejectedValueOnce(new TypeError('fetch failed'));
+      vi.setSystemTime(lastSync + 2000);
+      await expect(sync.syncDoc(id)).rejects.toThrow('fetch failed');
+      expect(sync.linkOf(id)?.last_sync).toBe(lastSync);
+      expect(sync.linkOf(id)?.last_error).toBe('fetch failed');
+      expect(g.doc(link.file_id).text()).toContain('Original text.');
+
+      sync.startAutoSync();
+      await vi.advanceTimersByTimeAsync(60_000);
+      await vi.waitFor(() => {
+        expect(g.doc(link.file_id).text()).toContain('Saved edit.');
+        expect(sync.linkOf(id)?.last_error).toBeNull();
+      });
+    } finally {
+      getDocument.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it('a .tex document syncs too: headings, formulas and citations as text Docs can hold', async () => {
     const tex = join(ROOT, 'projects', 'u', 'p', 'note.tex');
     writeFileSync(tex, '\\documentclass{article}\n\\begin{document}\n\\section{Intro}\nEnergy $E=mc^2$ as in \\cite{einstein}.\n\\begin{itemize}\n\\item one\n\\end{itemize}\n\\end{document}\n');

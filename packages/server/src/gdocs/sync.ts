@@ -355,7 +355,8 @@ async function runSync(docId: string, opts: { pullTracked?: boolean } = {}): Pro
     if (whole) { const g = await reconcileGroup(docId, link, whole); report.warnings.push(...g.warnings); report.notes.push(...g.notes); }
     return report;
   } catch (e) {
-    db.prepare('UPDATE gdocs_links SET last_error = ?, last_sync = ? WHERE doc_id = ?').run((e as Error).message, Date.now(), docId);
+    // Keep the last successful sync time: saved local edits still need an automatic retry.
+    db.prepare('UPDATE gdocs_links SET last_error = ? WHERE doc_id = ?').run((e as Error).message, docId);
     throw e;
   }
 }
