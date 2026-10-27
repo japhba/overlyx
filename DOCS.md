@@ -2787,12 +2787,21 @@ directory is stopped. A build no longer sees the shared `<data dir>/cache` (it h
 converted pictures and parsed bibliographies). The image converters (rsvg-convert, inkscape,
 pdftocairo, gs, ImageMagick) write into a fresh directory of their own with a throwaway `HOME`, the
 result moved into place afterwards, and ImageMagick's `/etc/ImageMagick-6` policy is bound in.
-URLs that come from users — a citation's PDF (`pdffetch.ts`), a deck's CDN files when agents render
-it (`render.ts`) — are fetched through `netguard.ts`: public hosts only, every redirect resolved and
-checked again (no server ports, local network or cloud metadata address). Imported zips never
+URLs that come from users — a citation's PDF (`pdffetch.ts`), a pasted page (`citelinks.ts`), a
+deck's CDN files when agents render it (`render.ts`) — are fetched through `netguard.ts`: public
+hosts only, every redirect resolved and checked again (no server ports, local network or cloud
+metadata address). Since 27 Oct 2026 (after CVE-2026-111497, a code-execution bug in Node's Brotli
+decoder) the server no longer reads those answers itself: a throwaway `node` in bubblewrap
+(`fetchbox.ts`) — as root under uid 2099999, no files but the system's libraries, an empty
+environment, no capabilities — connects to exactly the addresses netguard checked (no DNS of its own),
+follows no redirect, decodes the body and hands back status, headers and at most the caller's limit.
+`deploy/overlyx-fetch.nft` refuses that uid every loopback, private and link-local address. Install:
+`cp deploy/overlyx-fetch.nft /etc/overlyx/fetch.nft && cp deploy/overlyx-fetch-firewall.service
+/etc/systemd/system/ && systemctl daemon-reload && systemctl enable --now overlyx-fetch-firewall`;
+without it the server warns at the first fetch (`[fetchbox]`). Imported zips never
 inflate past the sizes they declare; a synced clone's push takes at most 1000 files, two pushes per
 user at a time (`sync.ts`); Google Docs links stop syncing once their linker may no longer edit the
-document. Tests: `tests/security-limits.test.ts`, `tests/pdffetch.test.ts`.
+document. Tests: `tests/security-limits.test.ts`, `tests/pdffetch.test.ts`, `tests/fetchbox.test.ts`.
 
 **Unattended maintenance.** The owner authorizes quick, unsupervised screen → implement → deploy
 iterations (16 Oct 2026). `overlyx-maintenance.timer` runs `scripts/maintenance.sh` every ten minutes;

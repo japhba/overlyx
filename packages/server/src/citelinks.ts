@@ -484,7 +484,7 @@ const PAGE_MAX = 2_000_000;
 
 /** A page the user pasted: public hosts only, every redirect checked, at most PAGE_MAX bytes. */
 async function fetchPage(url: string, accept = 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.5'): Promise<{ body: string; type: string; url: string }> {
-  const r = await guardedFetch(url, { headers: { 'user-agent': PAGE_UA, accept } }, fetchImpl);
+  const r = await guardedFetch(url, { headers: { 'user-agent': PAGE_UA, accept } }, fetchImpl, { maxBytes: PAGE_MAX });
   const host = new URL(url).hostname;
   const body = await readCapped(r, PAGE_MAX);
   if (r.status === 202 || CHALLENGE.test(body.slice(0, 4000))) throw new Error(`${new BotCheck(host).message} — paste the DOI or the BibTeX instead`);

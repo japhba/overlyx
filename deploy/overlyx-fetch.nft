@@ -1,0 +1,14 @@
+# /etc/overlyx/fetch.nft — the fetch sandbox's firewall (packages/server/src/fetchbox.ts). The process
+# that fetches URLs users gave runs as uid 2099999 and may reach the public internet only: no
+# loopback (this server's ports, Caddy's admin API), no private, link-local or reserved address (the
+# cloud's metadata service) — the ranges netguard.ts refuses by name. A table of its own, so no other
+# rule changes; loaded by overlyx-fetch-firewall.service, reloading replaces it.
+table inet overlyx_fetch
+delete table inet overlyx_fetch
+table inet overlyx_fetch {
+  chain output {
+    type filter hook output priority filter; policy accept;
+    meta skuid 2099999 ip daddr { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.0.0.0/24, 192.168.0.0/16, 198.18.0.0/15, 224.0.0.0/3 } counter reject
+    meta skuid 2099999 ip6 daddr { ::/127, ::ffff:0:0/96, 64:ff9b::/96, fc00::/7, fe80::/10, ff00::/8 } counter reject
+  }
+}

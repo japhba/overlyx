@@ -56,7 +56,7 @@ async function openAccessUrls(doi: string): Promise<string[]> {
 
 async function downloadPdf(url: string): Promise<Buffer | null> {
   // the URL is the entry's (anyone's BibTeX): public hosts only, every redirect checked (netguard.ts)
-  const r = await guardedFetch(url, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT) }, fetchImpl);
+  const r = await guardedFetch(url, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT) }, fetchImpl, { maxBytes: MAX_PDF_BYTES });
   if (!r.ok) return null;
   const len = Number(r.headers.get('content-length') ?? 0);
   if (len > MAX_PDF_BYTES) return null;

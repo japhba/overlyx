@@ -1,0 +1,16 @@
+# The fetch sandbox's firewall (deploy/overlyx-fetch.nft, packages/server/src/fetchbox.ts), loaded before
+# the server starts. Install: cp deploy/overlyx-fetch.nft /etc/overlyx/fetch.nft &&
+# cp deploy/overlyx-fetch-firewall.service /etc/systemd/system/ && systemctl daemon-reload &&
+# systemctl enable --now overlyx-fetch-firewall
+[Unit]
+Description=OverLyX: firewall for the fetch sandbox (public internet only)
+Before=overlyx.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/overlyx/fetch.nft
+ExecStop=/usr/sbin/nft delete table inet overlyx_fetch
+
+[Install]
+WantedBy=multi-user.target

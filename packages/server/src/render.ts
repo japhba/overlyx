@@ -108,7 +108,7 @@ async function answer(route: Route): Promise<void> {
     try {
       // every hop (a redirect too) on an allowed CDN, over https, on a public address (netguard.ts)
       const res = await guardedFetch(u, { signal: AbortSignal.timeout(15000), headers: { 'User-Agent': req.headers()['user-agent'] ?? 'Mozilla/5.0' } }, fetch,
-        { allow: h => h.protocol === 'https:' && CDN_HOSTS.has(h.hostname) });
+        { allow: h => h.protocol === 'https:' && CDN_HOSTS.has(h.hostname), maxBytes: CDN_MAX });
       const buf = Buffer.from(await res.arrayBuffer());
       if (buf.length > CDN_MAX) { await route.abort(); return; }
       const headers: Record<string, string> = { 'Access-Control-Allow-Origin': '*' };

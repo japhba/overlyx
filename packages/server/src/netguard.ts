@@ -2,10 +2,13 @@
  * Fetching a URL that came from a user (a bibliography entry's url, a deck's CDN link): only hosts
  * on the public internet, and every redirect checked again — never the server's own ports, the
  * cloud's metadata address or the local network (server-side request forgery). A redirect is
- * followed by hand (at most a few), each hop resolved and checked before it is fetched.
+ * followed by hand (at most a few), each hop resolved and checked before it is fetched — by the
+ * sandboxed fetcher (fetchbox.ts), which connects to exactly the addresses checked here and keeps
+ * the parsing and decoding of the answer out of the server.
  */
 import dns from 'node:dns';
 import net from 'node:net';
+import { boxedFetch, fetchBoxAvailable, FETCH_MAX_BYTES, type NetworkDefaults } from './fetchbox.ts';
 
 const v4 = (ip: string): number[] => ip.split('.').map(Number);
 
@@ -33,28 +36,46 @@ let resolver = async (host: string): Promise<string[]> => (await dns.promises.lo
 /** (tests) how host names resolve */
 export function setResolver(f: (host: string) => Promise<string[]>): void { resolver = f; }
 
-/** Whether the URL's host is a public one (http or https only). */
-export async function isPublicUrl(u: URL): Promise<boolean> {
-  if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
-  if (u.username || u.password) return false;
+/** The addresses of the URL's host when it is a public one (http or https only); null when it is not. */
+export async function publicAddresses(u: URL): Promise<string[] | null> {
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+  if (u.username || u.password) return null;
   const host = u.hostname.replace(/^\[|\]$/g, '');
-  if (!host || /^localhost$/i.test(host) || /\.localhost$/i.test(host)) return false;
-  if (net.isIP(host)) return !isPrivateAddress(host);
+  if (!host || /^localhost$/i.test(host) || /\.localhost$/i.test(host)) return null;
+  if (net.isIP(host)) return isPrivateAddress(host) ? null : [host];
   let ips: string[];
-  try { ips = await resolver(host); } catch { return false; }
-  return ips.length > 0 && ips.every(ip => !isPrivateAddress(ip));
+  try { ips = await resolver(host); } catch { return null; }
+  return ips.length > 0 && ips.every(ip => !isPrivateAddress(ip)) ? ips : null;
+}
+
+/** Whether the URL's host is a public one (http or https only). */
+export async function isPublicUrl(u: URL): Promise<boolean> { return (await publicAddresses(u)) !== null; }
+
+const network = new WeakMap<object, NetworkDefaults>();
+/**
+ * Mark `f` as a fetch that goes to the network (bibsearch.ts's fetchImpl; the global fetch is one
+ * too): guardedFetch then sends the request to the sandboxed fetcher with `defaults` instead of
+ * calling `f`. A stand-in a test installs is not marked, and is called as it is.
+ */
+export function networkFetch<F extends typeof fetch>(f: F, defaults: NetworkDefaults = {}): F {
+  network.set(f, defaults);
+  return f;
 }
 
 /**
  * fetch(), refusing hosts that are not public (and those `allow` refuses) at the start and after
- * every redirect. Throws when a hop is refused or there are too many.
+ * every redirect. Throws when a hop is refused or there are too many. `maxBytes`: the sandboxed
+ * fetcher hands back at most one byte more of a body (default FETCH_MAX_BYTES).
  */
-export async function guardedFetch(url: string | URL, init: RequestInit, fetcher: typeof fetch = fetch, opts: { maxHops?: number; allow?: (u: URL) => boolean } = {}): Promise<Response> {
+export async function guardedFetch(url: string | URL, init: RequestInit, fetcher: typeof fetch = fetch, opts: { maxHops?: number; allow?: (u: URL) => boolean; maxBytes?: number } = {}): Promise<Response> {
   let u = new URL(url);
   const hops = opts.maxHops ?? 5;
+  const defaults = fetcher === globalThis.fetch ? {} : network.get(fetcher);
+  const boxed = defaults !== undefined && fetchBoxAvailable();
   for (let hop = 0; hop <= hops; hop++) {
-    if ((opts.allow && !opts.allow(u)) || !(await isPublicUrl(u))) throw new Error(`refused to fetch ${u.protocol}//${u.host}`);
-    const r = await fetcher(u.href, { ...init, redirect: 'manual' });
+    const addresses = opts.allow && !opts.allow(u) ? null : await publicAddresses(u);
+    if (!addresses) throw new Error(`refused to fetch ${u.protocol}//${u.host}`);
+    const r = boxed ? await boxedFetch(u, init, addresses, opts.maxBytes ?? FETCH_MAX_BYTES, defaults) : await fetcher(u.href, { ...init, redirect: 'manual' });
     const loc = r.status >= 300 && r.status < 400 ? r.headers.get('location') : null;
     if (!loc) return r;
     try { await r.body?.cancel(); } catch { /* nothing to drain */ }

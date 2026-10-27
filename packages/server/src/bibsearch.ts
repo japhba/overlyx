@@ -18,6 +18,7 @@ import path from 'node:path';
 import { parseBibtex, cleanTex, type BibEntry } from '@overlyx/core';
 import { config } from './config.ts';
 import { identify, resolveLink } from './citelinks.ts';
+import { networkFetch } from './netguard.ts';
 
 export interface Hit {
   /** stable id for the client (doi, dblp key or openalex id) */
@@ -54,8 +55,8 @@ export function sourcesAvailable(): string[] {
 const UA = 'OverLyX/0.1 (https://github.com/japhba/overlyx' + (config.contactEmail ? `; mailto:${config.contactEmail}` : '') + ')';
 const TIMEOUT = 9000;
 
-/** injectable for tests */
-export let fetchImpl: typeof fetch = (input, init) => fetch(input, { ...init, signal: init?.signal ?? AbortSignal.timeout(TIMEOUT), headers: { 'user-agent': UA, ...(init?.headers as Record<string, string> | undefined) } });
+/** injectable for tests; marked as going to the network, so a user's URL handed to guardedFetch with it is fetched in the sandbox with the same user agent and timeout */
+export let fetchImpl: typeof fetch = networkFetch((input, init) => fetch(input, { ...init, signal: init?.signal ?? AbortSignal.timeout(TIMEOUT), headers: { 'user-agent': UA, ...(init?.headers as Record<string, string> | undefined) } }), { headers: { 'user-agent': UA }, timeoutMs: TIMEOUT });
 export function setFetch(f: typeof fetch): void { fetchImpl = f; }
 
 const DOI_RE = /\b(10\.\d{4,9}\/[^\s"'<>]+)/i;
