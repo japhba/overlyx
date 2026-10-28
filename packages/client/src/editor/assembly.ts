@@ -30,6 +30,7 @@ import { commentGuardPlugin } from './plugins/commentguard';
 import { reactionsPlugin } from './plugins/reactions';
 import { changeTrackingPlugin, changesFilterPlugin, changeAuthorName } from './plugins/changes';
 import { changeActionsPlugin } from './plugins/changeactions';
+import { scrollMarksPlugin } from './plugins/scrollmarks';
 import { mergeReviewPlugin, type MergeSource } from './plugins/mergereview';
 import { fontCarryPlugin } from './plugins/fontcarry';
 import { insetCaretPlugin } from './plugins/insetcaret';
@@ -168,6 +169,7 @@ export function assemblePlugins(o: AssemblyOptions): Plugin[] {
     changeTrackingPlugin(),
     changesFilterPlugin(),
     changeActionsPlugin(),   // ✓ / ✗ with the author and date over the tracked change under the pointer or the caret
+    scrollMarksPlugin(),   // comments and tracked changes marked along the pane's scroll bar, a click goes there
     mergeReviewPlugin(o.merges),   // the card that goes through what offline edits and the live text changed differently
     findPlugin(),
     pasteTargetsPlugin(),

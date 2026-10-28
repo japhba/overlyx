@@ -3406,6 +3406,14 @@ How it works, in order of what happens when you open a document:
   replacement (deletion + insertion) or a suggestion across a paragraph break is one decision; hovering
   ✓ / ✗ shades what it applies to. Not on read-only editors. The bar and the shading are drawn outside
   the editor's DOM. `tests/changes-actions.test.ts`, `e2e/toolbar.spec.ts` "accept / reject in the text".
+* **Marks along the scroll bar** (`editor/plugins/scrollmarks.ts`, both shells; VS Code's overview
+  ruler): a fixed strip over the document pane's scroll bar (10 px over the text where scroll bars only
+  show while scrolling) marks each tracked change in its author's colour (left half; `.ol-scrollmark`
+  joins `applyAuthorColors`' age fade) and each open comment thread in amber (right half), at its height
+  in the whole document; neighbours of one kind merge, a hover names them, a click goes to the first
+  (the caret into the change, the thread's card open; Back returns). A master and its child documents
+  share their pane's strip; resolved threads, folded sections and documents that fit the pane get none.
+  Redrawn at most every 250 ms (document changes, ResizeObserver on pane and editor).
 * **Quick menu over selected words** (`app/SelectionBar.tsx`, both shells; the deck's QuickBar in a
   document): selecting words brings up a small bar right above them — below them when there is no room
   above, kept inside the document pane, following it while it scrolls — with the text menu's own

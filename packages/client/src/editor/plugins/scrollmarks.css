@@ -1,0 +1,12 @@
+/* comments and tracked changes along the document pane's scroll bar (scrollmarks.ts): over the
+   bar, which stays draggable between the marks; changes on the left half, comments on the right */
+.ol-scrollmarks { position: fixed; z-index: 4; pointer-events: none; }
+.ol-scrollmark { position: absolute; width: calc(50% - 1px); border-radius: 1px; opacity: 0.8; pointer-events: auto; cursor: pointer; }
+.ol-scrollmark::after { content: ''; position: absolute; inset: -3px 0; }   /* a 3 px line is hard to hit */
+.ol-scrollmark:hover { opacity: 1; }
+.ol-scrollmark.change { left: 1px; background: var(--change-color, var(--ok)); }
+.ol-scrollmark.change.deleted { background: var(--change-color, var(--err)); }
+.ol-scrollmark.comment { right: 1px; background: var(--cm-accent, #efb21a); }
+.ol-scrollmarks.overlay .ol-scrollmark { opacity: 0.9; }
+html[data-presenting] .ol-scrollmarks { display: none; }
+@media print { .ol-scrollmarks { display: none; } }

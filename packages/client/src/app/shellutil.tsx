@@ -80,9 +80,10 @@ export function applyAuthorColors(authors: { id: number; name: string }[]): void
     const light = isAgentAuthor(a.name) ? '#757575' : AUTHOR_COLORS[i % AUTHOR_COLORS.length];
     const dk = isAgentAuthor(a.name) ? '#9e9e9e' : AUTHOR_COLORS_DARK[i % AUTHOR_COLORS_DARK.length];
     // an older change goes into black (into the white text on a dark page) by its --change-age
-    return `.lyx-change[data-author="${a.id}"], .lyx-inset[data-author="${a.id}"] { --change-color: color-mix(in oklab, ${light}, #000 calc(var(--change-age, 0%) * ${FADE_LIGHT})); }\n`
+    // (.ol-scrollmark: the change's mark along the scroll bar, editor/plugins/scrollmarks.ts)
+    return `.lyx-change[data-author="${a.id}"], .lyx-inset[data-author="${a.id}"], .ol-scrollmark[data-author="${a.id}"] { --change-color: color-mix(in oklab, ${light}, #000 calc(var(--change-age, 0%) * ${FADE_LIGHT})); }\n`
       // (lifted only on a dark page: with smart invert off the page is white paper, app/darkpages.ts)
-      + `html[data-theme="dark"][data-dark-pages] .lyx-change[data-author="${a.id}"], html[data-theme="dark"][data-dark-pages] .lyx-inset[data-author="${a.id}"] { --change-color: color-mix(in oklab, ${dk}, var(--editor-fg) calc(var(--change-age, 0%) * ${FADE_DARK})); }`;
+      + `html[data-theme="dark"][data-dark-pages] .lyx-change[data-author="${a.id}"], html[data-theme="dark"][data-dark-pages] .lyx-inset[data-author="${a.id}"], html[data-theme="dark"][data-dark-pages] .ol-scrollmark[data-author="${a.id}"] { --change-color: color-mix(in oklab, ${dk}, var(--editor-fg) calc(var(--change-age, 0%) * ${FADE_DARK})); }`;
   }).join('\n');
   refreshChangeAges();
 }
