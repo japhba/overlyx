@@ -3,8 +3,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Bridge, type BridgeDelegate } from '../packages/vscode/src/host/bridge.ts';
-import { graphicsUrl, fileUrl } from '../packages/client/src/api.ts';
-import { resolveDocPath } from '../packages/client/src/editor/context.ts';
+import { buildMeta } from '../packages/vscode/src/host/meta.ts';
+import { graphicsUrl, fileUrl, type DocMeta } from '../packages/client/src/api.ts';
+import { editorContext, figureUrl, resolveDocPath } from '../packages/client/src/editor/context.ts';
 
 const fixtures = new URL('../packages/vscode/test/fixtures/', import.meta.url);
 const png = fs.readFileSync(new URL('graphics.png', fixtures));
@@ -50,9 +51,30 @@ describe('VS Code relative graphics paths', () => {
     expect(response.status).toBe(404);
   });
 
+  it.each(['plot #1.png', 'plot #1'])('finds %s through a standalone document\'s parent graphicspath', async filename => {
+    const previousMeta = editorContext.meta;
+    try {
+      editorContext.meta = buildMeta({
+        ctx: { root, layoutDir: path.join(workspace, 'layouts') },
+        project: 'paper', relPath: 'main.tex', isChild: false, fileText: null,
+        lyx: { preamble: [], format: 620, body: [], trailer: [], header: { lines: [
+          '\\textclass article', '\\begin_preamble',
+          '\\graphicspath{{../missing/}{../figures/}}', '\\end_preamble',
+        ] } },
+      }) as unknown as DocMeta;
+      expect(editorContext.meta.graphicsPath).toEqual(['../missing/', '../figures/']);
+      const response = await fetch(bridge.base + figureUrl('paper', filename, ''));
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-type')).toBe('image/png');
+      expect(Buffer.from(await response.arrayBuffer())).toEqual(png);
+    } finally { editorContext.meta = previousMeta; }
+  });
+
   it('keeps non-image reads, raw files and uploads bounded to the project', async () => {
     const nonImage = await fetch(bridge.base + graphicsUrl('paper', '../private.txt'));
     expect(nonImage.status).toBe(403);
+    const nonImageAlt = await fetch(bridge.base + graphicsUrl('paper', 'missing.png', 1200, ['../private.txt']));
+    expect(nonImageAlt.status).toBe(403);
     const raw = await fetch(bridge.base + fileUrl('paper', '../figures/plot.pdf'));
     expect(raw.status).toBe(403);
     const upload = await fetch(`${bridge.base}/api/projects/paper/upload?path=${encodeURIComponent('../outside.png')}`, { method: 'POST', body: png });

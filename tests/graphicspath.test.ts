@@ -14,4 +14,11 @@ describe('graphicsSearchDirs', () => {
     expect(graphicsSearchDirs('\\graphicspath{{old/}}\n% \\graphicspath{{commented/}}\n\\graphicspath{{new/}}', '')).toEqual(['new/']);
     expect(graphicsSearchDirs('\\usepackage{graphicx}', '')).toEqual([]);
   });
+
+  it('can retain relative folders above a local project, while still excluding absolute folders', () => {
+    const local = { allowOutsideProject: true };
+    expect(graphicsSearchDirs('\\graphicspath{{../figures/}{../../shared/}{../figures/}}', '.', local)).toEqual(['../figures/', '../../shared/']);
+    expect(graphicsSearchDirs('\\graphicspath{{../../../shared/}{../../figures/}{../}}', 'notes/parts', local)).toEqual(['../shared/', 'figures/', 'notes/']);
+    expect(graphicsSearchDirs('\\graphicspath{{../figures/}{/abs/}{C:/figures/}{~/figures/}}', '', local)).toEqual(['../figures/']);
+  });
 });

@@ -181,7 +181,7 @@ export function buildMeta(input: MetaInput): Record<string, unknown> {
     macroList: macros.map(m => ({ name: m.name, args: m.args, def: m.def, display: m.display, source: m.source })),
     bib: bibUnique.slice(0, 30000).map(e => ({ key: e.key, author: e.authorShort, year: e.year, title: e.title })),
     layouts, flexInsets,
-    graphicsPath: article ? [] : graphicsSearchDirs(getPreamble(rootLyx), path.dirname(rootRel)),
+    graphicsPath: article ? [] : graphicsSearchDirs(getPreamble(rootLyx), path.dirname(rootRel), { allowOutsideProject: true }),
     files: collectFiles(proj),
     health,
   };
