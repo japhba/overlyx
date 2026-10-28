@@ -187,7 +187,7 @@ interface TextCtx {
   rawDepth: number;
 }
 
-interface Stop { close?: boolean; env?: string; item?: boolean; cell?: boolean }
+interface Stop { close?: boolean; env?: string; item?: boolean; cell?: boolean; itemStart?: number }
 type StopReason = 'eof' | 'close' | 'end' | 'item' | 'amp' | 'newrow';
 
 const cloneState = (st: State): State => ({ font: { ...st.font }, change: st.change ? { ...st.change } : undefined });
@@ -708,7 +708,7 @@ class BodyParser {
       return null;
     }
     if (name === 'item' || (stop.item && ctx.itemStyle && name === ctx.itemStyle.itemCommand)) {
-      if (stop.item) return 'item';
+      if (stop.item) { stop.itemStart = t.start; return 'item'; }
       const opt = s.readOptional();
       this.pushERT(ctx, st, '\\item' + (opt !== null ? `[${opt}]` : '') + (t.spaceAfter ? ' ' : ''));
       return null;
@@ -1725,8 +1725,20 @@ class BodyParser {
     }
     this.envStack.push(env);
     if (isItem) {
-      // text before the first \item is unusual; it lands in a paragraph of the layout
-      let r = this.parseText(s, ctx, cloneState(st), { env, item: true });
+      // Declarations and comments before the first \item belong to the environment, not an
+      // extra item. Use the normal parser to find the real item (ignoring commands in groups,
+      // comments and nested environments), then keep the preamble verbatim on its first item.
+      const preambleStart = s.pos;
+      const stop: Stop = { env, item: true };
+      let r = this.parseText(s, ctx, cloneState(st), stop);
+      if (r === 'item') {
+        this.endPar(ctx);
+        ctx.pars.splice(ctx.envStart);
+        const preamble = s.s.slice(preambleStart, stop.itemStart).trim();
+        if (preamble) args.push({ ...argumentInset('listpreamble:raw', ertParagraphs(preamble)), status: 'collapsed' });
+        // The writer emits the preamble outside the first paragraph's source span too.
+        if (ctx === this.root) this.pendingStart = stop.itemStart!;
+      }
       let first = true;
       const overlay = [...style.args.values()].some(a => a.id.startsWith('item:') && a.leftDelim === '<');
       while (r === 'item') {

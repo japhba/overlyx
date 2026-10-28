@@ -255,6 +255,9 @@ function prepareEnvironment(ctx: ExportContext, text: TextInfo, pit: number, os:
         for (const [k, v] of argInsetsOf(p, 'listpreamble:')) if (!found.has(k)) found.set(k, v);
       }
       latexArgInsets(ctx, os, rp, style.args, found, 'listpreamble:');
+      // Unmodelled LaTeX before the first item is an environment preamble, never an \item.
+      const raw = found.get('listpreamble:raw');
+      if (raw) { os.write(ertContent(raw)); os.breakln(); }
     }
   }
   return { style, parLang: lang, leftIndentOpen };

@@ -121,6 +121,7 @@ const ARG_LABELS: Record<string, Record<string, string>> = (() => {
 
 /** The label of an Argument inset owned by `owner` (a paragraph layout, or "inset:<Flex name>"). */
 export function argumentLabel(owner: string | null | undefined, id: string, content = ''): string {
+  if (id === 'listpreamble:raw') return 'List preamble';
   if (owner) {
     const l = ARG_LABELS[owner]?.[id];
     if (l) return l;
