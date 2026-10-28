@@ -90,6 +90,30 @@ describe('GitHub bug reports', () => {
     expect(() => toMathml(raised)).not.toThrow();
   });
 
+  it('renders a starred \\mathpalette helper raised by its own depth (the alignment paper\'s transpose)', () => {
+    const source = String.raw`\makeatletter
+      \DeclareRobustCommand{\T}{%
+        {\mathpalette\@transpose{}}%
+      }
+      \newcommand*{\@transpose}[2]{%
+        % #1: math style
+        \raisebox{\depth}{$\m@th#1\intercal$}%
+      }
+      \makeatother`;
+    const transported = toMathliveMacros(macrosFromLatex(source).macros);
+    const raised = (style: string) => `{\\raisebox{\\depth}{$\\${style}\\intercal$}}`;
+    expect(transported.T.def).toBe(`{\\mathchoice${['displaystyle', 'textstyle', 'scriptstyle', 'scriptscriptstyle'].map(raised).join('')}}`);
+    const macros: MacroTable = { T: { nargs: 0, def: transported.T.def } };
+    expect(sanitizeForMathjax(transported.T.def, 'T', 0)).toBe(transported.T.def);
+    // raised by the depth: the depth is gone, the height kept
+    const mml = toMathml(String.raw`\mathbf{u}^{\T}`, mathjaxMacros(macros));
+    expect(mml).toMatch(/<mpadded[^>]*voffset="1depth"/);
+    expect(mml).toMatch(/<mpadded[^>]*depth="-1depth"/);
+    expect(mml).not.toMatch(/<mpadded[^>]*height=/);
+    expect(mml).toMatch(/<mo[^>]*>&#x22BA;<\/mo>/);
+    expect(renderStaticHtml(String.raw`\mathbf{u}^{\T}\mathbf{h}`, false, macros, { project: 'paper', docDir: '' })).not.toMatch(/lm-error|lm-unknown|lm-undefined/);
+  });
+
   it('colours SVG glyph macros without masking ordinary PDF or raster images', () => {
     const macros: MacroTable = {
       Pfi: { nargs: 0, def: String.raw`\includegraphics[height=.7em]{symbols/doublephi.svg}` },

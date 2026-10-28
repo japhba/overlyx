@@ -71,7 +71,7 @@ function readCsName(s: string, i: number): [string, number] | null {
  * the index after the definition, or null if this is not a definition.
  */
 export function parseMacroAt(s: string, i: number, source: MacroDef['source']): [MacroDef, number] | null {
-  const head = /^(?:\\global\s*)?(?:\\long\s*)?(?:\\outer\s*)?(?:\\protected\s*)?\\(newcommand\*?|renewcommand\*?|providecommand\*?|DeclareRobustCommand\*?|NewDocumentCommand|RenewDocumentCommand|DeclareDocumentCommand|ProvideDocumentCommand|DeclareMathOperator\*?|DeclarePairedDelimiter(?:X|XPP)?|def|edef|gdef|xdef|let)\b/.exec(s.slice(i));
+  const head = /^(?:\\global\s*)?(?:\\long\s*)?(?:\\outer\s*)?(?:\\protected\s*)?\\(newcommand\*?|renewcommand\*?|providecommand\*?|DeclareRobustCommand\*?|NewDocumentCommand|RenewDocumentCommand|DeclareDocumentCommand|ProvideDocumentCommand|DeclareMathOperator\*?|DeclarePairedDelimiter(?:X|XPP)?|def|edef|gdef|xdef|let)(?![A-Za-z])/.exec(s.slice(i));
   if (!head) return null;
   const kind = head[1];
   let j = i + head[0].length;
@@ -297,9 +297,11 @@ export function collectMacros(doc: LyxDocument, resolver: MacroResolver = {}, op
 /** Convert macro definitions to the math editor's metadata format (legacy function name). */
 export function toMathliveMacros(macros: MacroDef[]): Record<string, { def: string; args: number; optional?: string; expand: boolean }> {
   const out: ReturnType<typeof toMathliveMacros> = {};
+  // all definitions, also the internal \@helpers that \mathpalette calls (the last one wins)
+  const byName = new Map(macros.map(m => [m.name, m]));
   for (const m of macros) {
     if (!/^[A-Za-z]+$/.test(m.name)) continue;
-    const def = m.display ?? sanitizeForMathlive(m.def, m);
+    const def = m.display ?? sanitizeForMathlive(expandMathpalette(m.def, byName), m);
     out[m.name] = { def, args: m.args, expand: false,
       ...(m.optional !== undefined && m.args > 0 ? { optional: m.optional } : {}) };
   }
@@ -345,10 +347,28 @@ function unmath(s: string): string {
   return m ? m[1] : t;
 }
 
-/** Keep explicit baseline shifts; \raisebox takes its math inside its text box. */
+/**
+ * plain TeX's \mathpalette\helper{arg}: the helper with each math style as #1, picked by \mathchoice.
+ * Helpers that are not known two-argument macros stay as they are.
+ */
+export function expandMathpalette(def: string, macros: Map<string, MacroDef>): string {
+  let out = def;
+  for (let i = out.indexOf('\\mathpalette'); i >= 0; i = out.indexOf('\\mathpalette', i + 1)) {
+    const name = readCsName(out, i + '\\mathpalette'.length);
+    const helper = name && macros.get(name[0]);
+    if (!name || !helper || helper.args !== 2) continue;
+    const arg = readGroup(out, skipWs(out, name[1]));
+    if (!arg) continue;
+    const branch = (style: string) => `{${helper.def.replace(/#1/g, style).replace(/#2/g, arg[0])}}`;
+    out = out.slice(0, i) + '\\mathchoice' + ['\\displaystyle', '\\textstyle', '\\scriptstyle', '\\scriptscriptstyle'].map(branch).join('') + out.slice(arg[1]);
+  }
+  return out;
+}
+
+/** Keep explicit baseline shifts, also by the content's \height or \depth; \raisebox takes its math inside its text box. */
 export function approximateRaisebox(content: string, args: string[]): string {
   const lift = args[args.length - 1].trim(), body = unmath(content);
-  return /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)\s*[a-z]{2}$/.test(lift)
+  return /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)\s*[a-z]{2}$/.test(lift) || /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)?\s*\\(?:height|depth)$/.test(lift)
     ? `\\raisebox{${lift}}{$${body}$}` : `{${body}}`;
 }
 
@@ -398,7 +418,8 @@ export function approximateImageSymbols(def: string): string {
  * (keeping the arguments visible) for the rest.
  */
 export function sanitizeForMathlive(def: string, m: { name: string; args: number }): string {
-  let d = def.replace(/\r?\n\s*/g, ' ');
+  // \m@th (\mathsurround=0pt) changes nothing in a browser
+  let d = def.replace(/\r?\n\s*/g, ' ').replace(/\\m@th(?![A-Za-z@])/g, '');
   // text-mode boxes that only change size / position: keep the content
   d = replaceCommand(d, 'scalebox', c => `{${unmath(c)}}`, 2);
   d = replaceCommand(d, 'resizebox', c => `{${unmath(c)}}`, 3);

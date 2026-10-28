@@ -151,16 +151,22 @@ const OverlyxMethods = {
     const glyph = parser.create('node', 'mglyph', [], { src, width: textEm(w), height: textEm(h), alt: file }) as MmlNode;
     parser.Push(parser.create('node', 'TeXAtom', [glyph], { texClass: 0 }) as MmlNode);
   },
-  /** \raisebox{lift}[height][depth]{text}: the text (math inside $…$) moved up */
+  /**
+   * \raisebox{lift}[height][depth]{text}: the text (math inside $…$) moved up. A lift by the text's
+   * own \height or \depth is MathML's pseudo-unit, which MathJax adds correctly only to the dimension
+   * it names: a raise by \depth zeroes the depth and keeps the height.
+   */
   Raisebox(parser: TexParser, name: string) {
     const lift = parser.GetArgument(name).trim();
     const h = parser.GetBrackets(name, '');
     const d = parser.GetBrackets(name, '');
     const nodes = ParseUtil.internalMath(parser, parser.GetArgument(name), 0);
-    const def: Record<string, string> = { voffset: lift };
-    const up = !lift.startsWith('-'), amount = lift.replace(/^[+-]/, '');
-    def.height = h || (up ? '+' : '-') + amount;
-    def.depth = d || (up ? '-' : '+') + amount;
+    const box = /^([+-]?)(\d*\.?\d*)\s*\\(height|depth)$/.exec(lift);
+    const offset = box ? box[1] + (box[2] || '1') + box[3] : lift;
+    const def: Record<string, string> = { voffset: offset };
+    const up = !offset.startsWith('-'), amount = offset.replace(/^[+-]/, '');
+    if (h || box?.[3] !== 'depth') def.height = h || (up ? '+' : '-') + amount;
+    if (d || box?.[3] !== 'height') def.depth = d || (up ? '-' : '+') + amount;
     parser.Push(parser.create('node', 'mpadded', nodes, def) as MmlNode);
   },
   /**

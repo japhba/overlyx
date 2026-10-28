@@ -28,7 +28,8 @@ blend.
 * **WYSIWYG without compiling.** Text, insets, floats, tables and math render as you type.
   Formulas (inline and display, `equation`/`align`/`gather`/`multline`/…) are edited in place
   and rendered with MathJax 4; document macros (`FormulaMacro` insets, preamble `\newcommand`/`\def`,
-  `\input{macros}` files, child documents) render immediately. Formulas are typed the LaTeX way
+  `\input{macros}` files, child documents; a `\mathpalette\helper{…}` becomes TeX's `\mathchoice`
+  over the four styles) render immediately. Formulas are typed the LaTeX way
   too: `$` opens an inline formula, `$` inside it closes it (Space does not leave such a formula —
   `$r \ll d$` types as written), `$$` opens a display formula, and
   Backspace in the empty formula gives the typed dollar back as text (the way to type a literal
@@ -1625,7 +1626,8 @@ blend.
   the LyX cell/inset model, a port of `MathParser.cpp` and of LyX 2.5's writer so that edited formulas
   are written exactly as LyX writes them, and a port of `Cursor.cpp`/`InsetMathNest` for the cursor)
   rendered with MathJax 4 (`packages/client/src/editor/lyxmath`: `mathjax-tex.ts` is the TeX input —
-  MathJax's packages plus OverLyX's own commands `\htmlClass`, `\includegraphics`, `\raisebox`,
+  MathJax's packages plus OverLyX's own commands `\htmlClass`, `\includegraphics`, `\raisebox` (also
+  by the content's own `\height`/`\depth`, as MathML pseudo-units),
   `\textsc`, stmaryrd's `\llangle`/`\llbracket` as stretchy delimiters, a `\middle` that works inside
   a cell, the document's macros looked up per formula, undefined commands shown in red; `mathjax.ts`
   the CHTML output, one per math font; `core/src/math/mathjax.ts` translates the LyX model into that
