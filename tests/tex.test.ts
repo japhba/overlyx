@@ -215,6 +215,11 @@ describe('inline content', () => {
     expect(flat).toContain('\\citep[see][p.~5]{knuth,lamport}, \\citet*{knuth}, \\href{https://x.org/a}{the site}, \\url{https://x.org}.');
     expect(flat).toContain('\\eqref{eq:b}, \\cref{fig:c}');
   });
+
+  it('hyperlinks to files next to the document stay relative (LyX makes only web names http://)', () => {
+    const src = doc('See \\href{README.md}{the readme}, \\href{run:notes/a.md}{a}, \\href{file:b.tex}{b}, \\href{\\#sec}{here} and \\href{www.lyx.org}{LyX}.', '\\usepackage{hyperref}');
+    expect(bodyOf(expectStable(src))).toBe('See \\href{README.md}{the readme}, \\href{run:notes/a.md}{a}, \\href{file:b.tex}{b}, \\href{\\#sec}{here} and \\href{http://www.lyx.org}{LyX}.');
+  });
 });
 
 /* ------------------------------------------------------------ insets */

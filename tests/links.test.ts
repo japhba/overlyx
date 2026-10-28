@@ -10,7 +10,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { EditorState, TextSelection } from 'prosemirror-state';
 import { EditorView } from 'prosemirror-view';
-import { schema } from '@overlyx/core';
+import { schema, relativeLink } from '@overlyx/core';
 import { parseCell, parseFormula, writeFormula, writeCellLatex, renderHullSource, MathCursor, atomCells, nargs, type Atom, type Owner } from '../packages/core/src/math';
 import { mathRequirements } from '../packages/core/src/latex/symbols';
 import { normalizeMath } from '../packages/core/src/latex/mathfix';
@@ -27,6 +27,21 @@ describe('addresses typed into the link box', () => {
     expect(normalizeLinkInput('http://x.org/a b')).toBe('http://x.org/a b');
     expect(normalizeLinkInput('#sec:intro')).toBe('#sec:intro');
     expect(normalizeLinkInput('notes')).toBe('notes');
+    expect(normalizeLinkInput('claude.ai')).toBe('https://claude.ai');
+  });
+  it('keep a file of the project relative to the document', () => {
+    expect(normalizeLinkInput('README.md')).toBe('README.md');
+    expect(normalizeLinkInput('code/run.py')).toBe('code/run.py');
+    expect(normalizeLinkInput('../talk/index.html')).toBe('../talk/index.html');
+  });
+  it('relative links name files; domains and schemes are web addresses', () => {
+    expect(relativeLink('README.md')).toBe('README.md');
+    expect(relativeLink('notes/plan.tex#goal')).toBe('notes/plan.tex#goal');
+    expect(relativeLink('run:./a.pdf')).toBe('./a.pdf');
+    expect(relativeLink('file:b.tex')).toBe('b.tex');
+    expect(relativeLink('#sec:intro')).toBe('#sec:intro');
+    expect(relativeLink('notation')).toBe('notation');
+    for (const web of ['example.org', 'www.lyx.org/x.md', 'docs.rs/serde', 'https://x.org/README.md', 'mailto:a@b.org', '//cdn.x.org/a.js', 'file:///etc/passwd']) expect(relativeLink(web), web).toBeNull();
   });
   it('only web, mail and ftp addresses are opened', () => {
     expect(openableUrl('https://x.org')).toBe('https://x.org');

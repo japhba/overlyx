@@ -146,7 +146,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
     void vscode.window.showErrorMessage('OverLyX: could not connect to the preview server: ' + String(e));
     throw e;
   }
-  const pdfPanels = new PdfPanels(context.extensionUri, bridgeBase, onInverse, (error, area) => telemetry.report(error, area));
+  const pdfPanels = new PdfPanels(context.extensionUri, bridgeBase, onInverse, (error, area) => telemetry.report(error, area), id => {
+    const { project, path: rel } = splitDocId(id);
+    const root = projectRoots.get(project);
+    if (root) openDoc(root, rel);
+  });
 
   function makeDelegate(): BridgeDelegate {
     const DICT_PKG: Record<string, string> = { en: 'dictionary-en', 'en-gb': 'dictionary-en-gb', de: 'dictionary-de', fr: 'dictionary-fr' };

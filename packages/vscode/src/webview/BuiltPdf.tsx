@@ -95,7 +95,7 @@ export function BuiltPdf({ target: requestedTarget, onBuild, onInverse, onForwar
         {onClose && <button class="small-btn" onClick={onClose} title="Hide the PDF pane">✕</button>}
       </div>
       {pdf.url && ready
-        ? <PdfViewer url={pdf.url} target={requestedTarget ?? target} onSync={onInverse ?? ((page, x, y) => vscode.postMessage({ type: 'inverse', page, x, y }))} hint="Double-click the PDF to jump to that place in the document" overlay={progress} />
+        ? <PdfViewer url={pdf.url} base={G.docId} target={requestedTarget ?? target} onSync={onInverse ?? ((page, x, y) => vscode.postMessage({ type: 'inverse', page, x, y }))} hint="Double-click the PDF to jump to that place in the document" overlay={progress} />
         : <div class="pdf-empty">{progress}{pdf.url && !ready ? 'Loading the PDF viewer…' : pdf.busy ? 'Building the PDF in the background — you can keep editing.' : 'No PDF yet — click “Build PDF” (Ctrl+R in the editor).'}</div>}
       {(showLog || pdf.ok === false) && (
         <div class="log">{pdf.warnings.length ? 'Warnings:\n' + pdf.warnings.join('\n') + '\n\n' : ''}{pdf.log || '(no log)'}</div>

@@ -13,7 +13,8 @@
  *
  * Links (the PDF's link annotations — hyperref's citations, references, contents, URLs): an
  * invisible area over each; a web or mail address opens in a new tab, a place in the document is
- * scrolled to, and Back returns to where the reader was.
+ * scrolled to, and Back returns to where the reader was. A file named relative to the document
+ * (`\href{README.md}{…}`, `run:` / `file:` links, another PDF) opens in OverLyX, found from `base`.
  *
  * Zoom: Fit width and Fit content (past the margins: the pages cropped to what is painted on them, as
  * big as the pane takes them — pdfzoom.ts) and the steps between, from the
@@ -38,6 +39,8 @@ import { contentLayout, inkBox, stepZoom, zoomValue, Pinch, FIT_NAMES, GAP, PAD,
 import { zoomPill } from './zoomhud';
 import { canLink, copyPlaceLink, type Place } from '../editor/permalink';
 import { showContextMenu } from '../editor/contextmenu';
+import { relativeLink } from '@overlyx/core/projectKey.ts';
+import { openProjectPath, resolveInDocument } from '../openpath';
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/legacy/build/pdf.worker.min.mjs', import.meta.url).toString();
 
@@ -63,19 +66,20 @@ export interface PdfTarget { page: number; x: number; y: number; w?: number; h?:
 
 interface PageInfo { width: number; height: number }
 
-/** a link on a page: its area (pt from the page's top-left), and an address to open or a destination in the document */
-interface PdfLink { x: number; y: number; w: number; h: number; url?: string; dest?: unknown }
+/** a link on a page: its area (pt from the page's top-left), and an address to open, a file next to the document or a destination in the document */
+interface PdfLink { x: number; y: number; w: number; h: number; url?: string; file?: string; dest?: unknown }
 
-/** The links of a page (its Link annotations with a web / mail address or a destination). */
+/** The links of a page (its Link annotations with a web / mail address, a relative file — pdf.js leaves those in `unsafeUrl` — or a destination). */
 async function linksOf(page: PDFPageProxy): Promise<PdfLink[]> {
   const viewport = page.getViewport({ scale: 1 });
   const out: PdfLink[] = [];
-  for (const a of await page.getAnnotations({ intent: 'display' }) as { subtype?: string; rect?: number[]; url?: string; dest?: unknown }[]) {
+  for (const a of await page.getAnnotations({ intent: 'display' }) as { subtype?: string; rect?: number[]; url?: string; unsafeUrl?: string; dest?: unknown }[]) {
     if (a.subtype !== 'Link' || !a.rect) continue;
     const url = typeof a.url === 'string' && /^(https?|mailto):/i.test(a.url) ? a.url : undefined;
-    if (!url && a.dest == null) continue;
+    const file = !url && typeof a.unsafeUrl === 'string' ? relativeLink(a.unsafeUrl)?.replace(/[?#].*$/, '') || undefined : undefined;
+    if (!url && !file && a.dest == null) continue;
     const [x1, y1] = viewport.convertToViewportPoint(a.rect[0], a.rect[1]) as number[], [x2, y2] = viewport.convertToViewportPoint(a.rect[2], a.rect[3]) as number[];
-    out.push({ x: Math.min(x1, x2), y: Math.min(y1, y2), w: Math.abs(x2 - x1), h: Math.abs(y2 - y1), ...(url ? { url } : { dest: a.dest }) });
+    out.push({ x: Math.min(x1, x2), y: Math.min(y1, y2), w: Math.abs(x2 - x1), h: Math.abs(y2 - y1), ...(url ? { url } : file ? { file } : { dest: a.dest }) });
   }
   return out;
 }
@@ -134,9 +138,11 @@ const topsOf = (geo: Geo[]): number[] => {
   return out;
 };
 
-export function PdfViewer({ url, target, onSync, toolbar, hint, overlay, withCredentials = true, linkId, place }: { url: string; target?: PdfTarget | null; onSync?: (page: number, x: number, y: number) => void; toolbar?: ComponentChildren; hint?: string; overlay?: ComponentChildren; withCredentials?: boolean;
+export function PdfViewer({ url, target, onSync, toolbar, hint, overlay, withCredentials = true, linkId, place, base }: { url: string; target?: PdfTarget | null; onSync?: (page: number, x: number, y: number) => void; toolbar?: ComponentChildren; hint?: string; overlay?: ComponentChildren; withCredentials?: boolean;
   /** a project's PDF file (its tab id): a right-click on a page copies a link to it (`?page=3`, editor/permalink.ts), and `place` goes to the page such a link names */
-  linkId?: string; place?: Place | null }) {
+  linkId?: string; place?: Place | null;
+  /** what the PDF's relative links are relative to (`<project>/<path>`: the document it was built from, the PDF file itself); without it they are left out */
+  base?: string }) {
   const host = useRef<HTMLDivElement>(null);
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null);
   const [pages, setPages] = useState<PageInfo[]>([]);
@@ -696,10 +702,14 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, overlay, withCre
                 <div class="pdf-sheet" style={{ width: `${p.width * s}px`, height: `${p.height * s}px`, left: `${-g.crop.x * s}px`, top: `${-g.crop.y * s}px` }}>
                   <canvas ref={c => { if (c) canvases.current.set(n, c); else canvases.current.delete(n); }} />
                   <canvas class="pdf-detail" ref={c => { if (c) details.current.set(n, c); else details.current.delete(n); }} />
-                  {links.get(n)?.map((l, k) => (
-                    <a key={k} class="pdf-link" style={{ left: `${l.x * s}px`, top: `${l.y * s}px`, width: `${l.w * s}px`, height: `${l.h * s}px` }}
-                      {...(l.url ? { href: l.url, target: '_blank', rel: 'noopener noreferrer', title: l.url } : { href: '#', onClick: (e: MouseEvent) => { e.preventDefault(); void follow(l.dest); } })} />
-                  ))}
+                  {links.get(n)?.map((l, k) => {
+                    const file = l.file && base ? resolveInDocument(base, l.file) : null;
+                    if (l.file && !file) return null;
+                    return <a key={k} class="pdf-link" style={{ left: `${l.x * s}px`, top: `${l.y * s}px`, width: `${l.w * s}px`, height: `${l.h * s}px` }}
+                      {...(l.url ? { href: l.url, target: '_blank', rel: 'noopener noreferrer', title: l.url }
+                        : file ? { href: '#', title: 'Open ' + file.path, onClick: (e: MouseEvent) => { e.preventDefault(); openProjectPath(file.project, file.path); } }
+                        : { href: '#', onClick: (e: MouseEvent) => { e.preventDefault(); void follow(l.dest); } })} />;
+                  })}
                   {flash && flash.page === n && <div class="pdf-flash" style={{ left: `${flash.x * s - 4}px`, top: `${flash.y * s - 3}px`, width: `${Math.max(24, flash.w * s + 8)}px`, height: `${flash.h * s + 6}px` }} />}
                 </div>
               </div>

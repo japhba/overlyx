@@ -4,6 +4,8 @@
  * it. A link under the cursor shows a bubble with its address (a click opens it), Copy, Edit and
  * Remove. Both work in the text (LyX's hyperlink inset, a `command` node with cmd `href`) and in
  * formulas (`\href{…}{…}` in the math model — a link in a table's `\text{…}` cell, say).
+ * ⌘/Ctrl+click follows a link (its tooltip says so): a web address in a new tab, a file of the project
+ * (`\href{README.md}{…}`, `[…](README.md)`, `<a href="README.md">`: relative to the document) in OverLyX.
  */
 import type { EditorView } from 'prosemirror-view';
 import { isArticleDoc } from '../articlekinds';
@@ -11,20 +13,22 @@ import { openProjectPath, resolveInDocument } from '../openpath';
 import { NodeSelection, Plugin, PluginKey, TextSelection, type EditorState } from 'prosemirror-state';
 import { Decoration, DecorationSet } from 'prosemirror-view';
 import type { Node as PMNode, Mark } from 'prosemirror-model';
-import { paramMap, quote, unquote, schema, FONT_KEYS } from '@overlyx/core';
+import { paramMap, quote, unquote, schema, FONT_KEYS, relativeLink } from '@overlyx/core';
 import { menuIcon, type MenuIcon } from './menuicons';
-import { editorContext } from './context';
+import { editorContext, viewDocId } from './context';
 import { activeMathField, mathCursorListeners, mathFocusListeners, type LyxMathField } from './lyxmath/field';
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
 export const LINK_KEY = isMac ? '⌘K' : 'Ctrl+K';
+/** the click that follows a link in the editor (a plain click puts the cursor into it) */
+export const LINK_CLICK = isMac ? '⌘+click' : 'Ctrl+click';
 
 /* ------------------------------------------------------------------ addresses */
 
 /** What was typed or pasted into the link box, as a link target: `arxiv.org/abs/1` → `https://arxiv.org/abs/1`, `a@b.org` → `mailto:a@b.org`. */
 export function normalizeLinkInput(input: string): string {
   const s = input.trim();
-  if (!s || /^[a-z][a-z0-9+.-]*:/i.test(s) || /^[#/.]/.test(s)) return s;
+  if (!s || /^[a-z][a-z0-9+.-]*:/i.test(s) || /^[#/.]/.test(s) || relativeLink(s) !== null) return s;
   if (/^[^\s@/:]+@[^\s@/:]+\.[^\s@/:]+$/.test(s)) return 'mailto:' + s;
   if (/^(localhost|[^\s/:?#]+\.[a-z]{2,})(:\d+)?([/?#]|$)/i.test(s)) return 'https://' + s;
   return s;
@@ -40,24 +44,56 @@ export function openableUrl(target: string): string | null {
 }
 
 /**
- * An HTML article's link without a scheme (`../talk/index.html`, `#results`) is relative to the page,
- * as in a browser: it stays in OverLyX (openpath.ts); null when the link is no such link.
+ * A link to a file of the document's project, relative to the document (core relativeLink: `README.md`,
+ * `../talk/index.html`, `run:notes.pdf`, `#sec:intro`); null for a web address. An HTML article's
+ * links without a scheme are all relative to the page, as in a browser.
  */
-function articleRelative(target: string): string | null {
-  const doc = editorContext.docId;
+export function projectLink(target: string, docId: string | null = editorContext.docId): string | null {
   const t = target.trim();
-  if (!doc || !isArticleDoc(doc) || !t || /^[a-z][a-z0-9+.-]*:/i.test(t) || t.startsWith('//')) return null;
-  return t;
+  if (!docId) return null;
+  if (isArticleDoc(docId) && t && !/^[a-z][a-z0-9+.-]*:/i.test(t) && !t.startsWith('//')) return t;
+  return relativeLink(t);
 }
 
-/** Open a link: one leaving OverLyX in a new tab (by a click on an anchor, which the VS Code webview passes on to the system browser); an article's link to a file of its project in OverLyX. */
-export function openLink(target: string): void {
-  const rel = articleRelative(target);
-  if (rel !== null) {
-    if (rel.startsWith('#')) { editorContext.notify?.('A link to a place on this page'); return; }
-    const to = resolveInDocument(editorContext.docId!, rel);
+/**
+ * The project's file that a link names (`talk/` → its index.html or README.md, `notation` → notation.tex
+ * as \input finds it): a path, or why there is none. Without the project's file list, the path itself.
+ */
+function existingFile(project: string, path: string): { path: string } | { error: string } {
+  const files = project === editorContext.project ? editorContext.meta?.files : null;
+  if (!files?.length) return { path };
+  const p = path.replace(/\/+$/, '');
+  const has = new Set(files.filter(f => f.kind !== 'dir').map(f => f.path));
+  const found = [p, p + '.tex', p + '.md', p + '/index.html', p + '/README.md'].find(c => has.has(c));
+  if (found) return { path: found };
+  return { error: files.some(f => f.path.startsWith(p + '/')) ? `${p}/ is a folder` : `${p} is not in the project` };
+}
+
+/** The tooltip of a link in the editor: the click that follows it and where it leads. */
+export function linkTooltip(target: string, docId: string | null = editorContext.docId): string {
+  const rel = projectLink(target, docId);
+  if (rel === null && !openableUrl(target)) return 'Link: ' + target;
+  return `${LINK_CLICK} to open ${rel !== null ? rel.replace(/^(run|file):/i, '') : target.replace(/^mailto:/i, '')}`;
+}
+
+/**
+ * Open a link: one leaving OverLyX in a new tab (by a click on an anchor, which the VS Code webview passes
+ * on to the system browser); one to a file of the project (relative to the document `docId`) in OverLyX.
+ */
+export function openLink(target: string, docId: string | null = editorContext.docId): void {
+  const rel = projectLink(target, docId);
+  if (rel !== null && docId) {
+    if (/^[#?]/.test(rel)) {
+      // a place in this document: a label (LaTeX's `\href{#sec:intro}`); an article's anchors only on its page
+      if (rel.startsWith('#') && rel.length > 1 && !isArticleDoc(docId) && editorContext.gotoLabel) editorContext.gotoLabel(rel.slice(1));
+      else editorContext.notify?.('A link to a place in this document');
+      return;
+    }
+    const to = resolveInDocument(docId, rel);
     if (!to) { editorContext.notify?.('This link leads out of the project', 'error'); return; }
-    openProjectPath(to.project, to.path);
+    const file = existingFile(to.project, to.path);
+    if ('error' in file) { editorContext.notify?.(file.error, 'error'); return; }
+    openProjectPath(to.project, file.path);
     return;
   }
   const url = openableUrl(target);
@@ -292,7 +328,7 @@ class TextBubble {
     showBubble(this, url, anchor, view.editable ? {
       edit: () => openLinkBox(view),
       remove: () => { const p = current(); if (p !== null) unlinkText(view, p); },
-    } : null, url + '@' + pos);
+    } : null, url + '@' + pos, viewDocId(view));
   }
   destroy(): void {
     this.view.dom.removeEventListener('focus', this.onFocus);
@@ -355,6 +391,16 @@ export function installLinks(): void {
   }, true);
   // a right-click menu takes the bubble's place
   document.addEventListener('contextmenu', () => hideBubble(), true);
+  // the tooltips of a formula's links and of \url{…} (its text is the address, typed in place); hyperlink insets have theirs (nodeviews/leaf.ts)
+  document.addEventListener('mouseover', ev => {
+    const t = ev.target as Element | null;
+    const math = t?.closest?.('.lm-href') as HTMLElement | null;
+    if (math) { math.title = `${LINK_CLICK} to open the link`; return; }
+    const url = t?.closest?.('.lyx-inset-flex-url .inset-content') as HTMLElement | null;
+    if (!url) return;
+    const address = url.textContent?.trim() ?? '';
+    url.title = address ? linkTooltip(address, (url.closest('.ProseMirror') as HTMLElement | null)?.dataset.docId ?? editorContext.docId) : '';
+  });
 }
 
 /* ------------------------------------------------------------------ the box and the bubble (DOM) */
@@ -470,7 +516,7 @@ function hideBubble(): void {
 
 /** The bubble under a link: its address (a click opens it), Copy, and — when the document can be edited — Edit and Remove. */
 let bubbleKey = '';
-function showBubble(owner: object, url: string, anchor: () => Anchor | null, actions: { edit: () => void; remove: () => void } | null, key = url): void {
+function showBubble(owner: object, url: string, anchor: () => Anchor | null, actions: { edit: () => void; remove: () => void } | null, key = url, docId = editorContext.docId): void {
   if (bubble && bubbleOwner === owner && bubbleKey === key + !!actions) { bubbleAnchor = anchor; requestAnimationFrame(reposition); return; }
   hideBubble();
   bubbleKey = key + !!actions;
@@ -484,7 +530,7 @@ function showBubble(owner: object, url: string, anchor: () => Anchor | null, act
   a.className = 'link-bubble-url';
   a.textContent = url.replace(/^mailto:/i, '');
   a.title = url;
-  if (articleRelative(url) !== null) { a.href = '#'; a.addEventListener('click', ev => { ev.preventDefault(); openLink(url); }); }
+  if (projectLink(url, docId) !== null) { a.href = '#'; a.addEventListener('click', ev => { ev.preventDefault(); openLink(url, docId); }); }
   else if (openable) { a.href = openable; a.target = '_blank'; a.rel = 'noopener noreferrer'; }
   el.appendChild(a);
   const sep = document.createElement('span'); sep.className = 'link-bubble-sep'; el.appendChild(sep);

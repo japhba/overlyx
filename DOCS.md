@@ -2243,6 +2243,18 @@ blend.
   `\text{Wang24}` cell — becomes `\text{\href{https://…}{Wang24}}`, drawn in the link colour
   (`.lm-href`; not MathJax's own `\href`, which would navigate on a click), with the same bubble;
   the target is kept as LaTeX (`%`, `#` escaped) and the document loads hyperref.
+  **Links to files of the project** are relative to the document, as on the web: `\href{README.md}{…}`,
+  hyperref's `run:` / `file:` links (LyX's file hyperlinks), `\url{notes/a.md}`, Markdown's
+  `[…](README.md)`, HTML's `<a href="README.md">`. Core `relativeLink` (projectKey.ts) tells them from
+  web addresses: no scheme, and a path (`./`, `../`, `/`, `#`), a name without a dot or one ending in
+  a file's extension — `README.md` is a file, `example.org` / `docs.rs` / `www.…` are not. ⌘/Ctrl+click
+  (and the bubble's address) opens the file in OverLyX (`openProjectPath`: documents, PDFs, text files
+  in the text editor; a folder's index.html or README.md; `notation` → notation.tex); the project's
+  file list rules out missing ones with a message; `#label` goes to the label. Hovering a link says
+  "⌘+click to open README.md" (Ctrl+click elsewhere; `linkTooltip`). The .tex writer adds LyX's
+  `http://` only to web names, so such links round-trip. In the PDF pane hyperref's relative links
+  (pdf.js `unsafeUrl`) open the file too, relative to the document (`PdfViewer` `base`; VS Code's PDF
+  panel posts `openDoc` to the host).
 * **Spell checking** (`editor/spell/`): OverLyX's own checker by default — a Hunspell dictionary
   (nspell) in a Web Worker, chosen by the document's language (English, British, German, French;
   served from `/dict/`, loaded on demand), checking starts as soon as a document opens and only the

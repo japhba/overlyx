@@ -68,6 +68,29 @@ export function isTextFile(name: string): boolean {
   return TEXT_EXTS.has(ext);
 }
 
+/** Extensions a file's name ends in, so that a link to it needs no path (`README.md`); names ending in a web domain (`docs.rs`, `bun.sh`, `claude.ai`) are left out. */
+const LINK_FILE_EXTS = new Set(['tex', 'ltx', 'sty', 'cls', 'bib', 'bst', 'lyx', 'board', 'md', 'markdown', 'txt', 'rst', 'html', 'htm', 'pdf', 'eps', 'svg', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'tif', 'tiff',
+  'py', 'ipynb', 'r', 'jl', 'm', 'c', 'h', 'cpp', 'hpp', 'js', 'mjs', 'ts', 'tsx', 'json', 'yaml', 'yml', 'toml', 'ini', 'cfg', 'csv', 'tsv', 'dat', 'npy', 'npz', 'mat', 'h5', 'pkl',
+  'zip', 'gz', 'tgz', 'tar', 'log', 'mp4', 'mov', 'webm', 'mp3', 'wav', 'docx', 'xlsx', 'pptx', 'odt', 'tikz', 'pgf']);
+
+/**
+ * A link's target as a path relative to its document (`README.md`, `../talk/index.html`,
+ * `notes/plan.tex#goal`, `#sec:intro`) or null for a web address. LaTeX's `\href{README.md}{…}`,
+ * hyperref's `run:` and `file:` links (LyX's file hyperlinks), Markdown's `[…](README.md)` and HTML's
+ * `<a href="README.md">` name files this way. Without a path a name is a file's when it has no dot or
+ * ends in a file's extension (`README.md`); `example.org` and `www.…` are web addresses.
+ */
+export function relativeLink(target: string): string | null {
+  const t = target.trim();
+  const local = /^(run|file):(?!\/\/)/i.exec(t);
+  if (local) return t.slice(local[0].length) || null;
+  if (!t || /^[a-z][a-z0-9+.-]*:/i.test(t) || t.startsWith('//')) return null;
+  if (/^(\.{0,2}\/|[#?])/.test(t)) return t;
+  const first = t.split(/[/?#]/)[0];
+  if (/^(www\.|localhost$)/i.test(first)) return null;
+  return !first.includes('.') || LINK_FILE_EXTS.has(first.slice(first.lastIndexOf('.') + 1).toLowerCase()) ? t : null;
+}
+
 /**
  * A project file's address in the web app on the server at `origin`: the tab it opens in there, as
  * the client's fileTabId names it — documents, slides, posters and boards as themselves, PDFs in the

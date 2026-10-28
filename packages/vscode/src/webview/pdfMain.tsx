@@ -13,6 +13,7 @@ import { useHostTheme } from '@client/app/theme';
 import { relayAppearance, setHostDark } from './appearance';
 import { InterfaceZoom } from './InterfaceZoom';
 import { BuiltPdf, preparePdfWorker } from './BuiltPdf';
+import { setProjectPathOpener } from '@client/openpath';
 import '@client/styles.css';
 
 // the theme switch's choices from the editors (smart invert, the text tone, the theme — host/appearance.ts)
@@ -39,6 +40,9 @@ function PdfFileApp() {
     <InterfaceZoom />
   </>} /></div>;
 }
+
+// a link in the built PDF to a file of the project: opened in VS Code
+setProjectPathOpener((project, path) => vscode.postMessage({ type: 'openDoc', id: `${project}/${path}` }));
 
 void preparePdfWorker().then(() => {
   render(G.pdfUrl ? <PdfFileApp /> : <BuiltPdf />, document.getElementById('app')!);

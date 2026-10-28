@@ -55,7 +55,7 @@ import { InsetView } from './nodeviews/inset';
 import { HtmlBlockView } from './nodeviews/htmlblock';
 import { isArticleDoc } from '../articlekinds';
 import { GraphicsView, CommandView, LeafView } from './nodeviews/leaf';
-import { editorContext, viewDocDir, viewProject } from './context';
+import { editorContext, viewDocDir, viewDocId, viewProject } from './context';
 import { imageFiles, insertImageFiles, isSvgMarkup, looksLikeImageFileName, svgFile } from './imagepaste';
 import { sliceText } from './cliptext';
 import { clipboardSerializer } from './cliphtml';
@@ -292,13 +292,15 @@ export function editorViewProps(o: ViewPropsOptions): Pick<EditorProps, 'nodeVie
         if (nv?.ensureField) { const mf = nv.ensureField(); requestAnimationFrame(() => mf.focus()); return true; }
         return false;
       }
-      // Ctrl/Cmd+click: follow cross-references, hyperlinks and child documents
-      if (!(event.metaKey || event.ctrlKey) || node.type.name !== 'command') return false;
+      // Ctrl/Cmd+click: follow cross-references, hyperlinks (\url{…} too) and child documents
+      if (!(event.metaKey || event.ctrlKey)) return false;
+      if (node.type.name === 'inset' && node.attrs.name === 'Flex' && node.attrs.arg === 'URL') { openLink(node.textContent.trim(), viewDocId(view)); return true; }
+      if (node.type.name !== 'command') return false;
       let p: Map<string, string>;
       try { p = paramMap(JSON.parse(node.attrs.params || '[]')); } catch { return false; }
       const cmd = node.attrs.cmd as string;
       if (cmd === 'ref') { editorContext.gotoLabel?.(unquote(p.get('reference')).split(',')[0].trim(), view); return true; }
-      if (cmd === 'href') { const t = unquote(p.get('target')), type = unquote(p.get('type')); openLink(type && !t.startsWith(type) ? type + t : t); return true; }
+      if (cmd === 'href') { const t = unquote(p.get('target')), type = unquote(p.get('type')); openLink(type && !t.startsWith(type) ? type + t : t, viewDocId(view)); return true; }
       if (cmd === 'include') { const id = includeTarget(node, viewProject(view), viewDocDir(view)); if (id) editorContext.openInTab?.(id); return true; }
       return false;
     },

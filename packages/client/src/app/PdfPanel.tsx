@@ -115,7 +115,7 @@ export function PdfPanel({ docId, state, savedAt, onBuild, onCancel, onShowTex, 
         {onPublicLink && <button class="small-btn" data-pdf-public-link onClick={onPublicLink} title="A stable public address for this PDF — link it from your web page (Share dialog ▸ Public PDF link)">🔗</button>}
         {onClose && <button class="small-btn close" onClick={onClose} title="Hide the PDF pane">✕</button>}
       </div>
-      {state.url ? <PdfViewer url={state.url} target={syncTarget} onSync={onInverse} hint="Double-click the PDF to jump to that place in the document" overlay={progress}
+      {state.url ? <PdfViewer url={state.url} base={docId} target={syncTarget} onSync={onInverse} hint="Double-click the PDF to jump to that place in the document" overlay={progress}
         toolbar={onForward && <button class="small-btn" onClick={onForward} title="Show the cursor's place in the PDF (SyncTeX forward search, Ctrl+Alt+J)" data-pdf-sync>⇄ Sync</button>} />
         : <div class="pdf-empty">{progress}{state.busy ? 'Building the PDF in the background — you can keep editing.' : state.ok === false ? 'The build failed — see the log.' : 'No PDF yet — click “View PDF” (Ctrl+R).'}</div>}
       {showLog && (

@@ -17,6 +17,7 @@ import { latexTabular } from './tabular.ts';
 import { exportChild } from './export.ts';
 import { normalizeMath } from './mathfix.ts';
 import { inkSvg } from '../ink.ts';
+import { relativeLink } from '../projectKey.ts';
 
 export interface InsetPosition {
   par: Paragraph;
@@ -1128,8 +1129,10 @@ function latexCommand(ctx: ExportContext, os: TexStream, rp: RunParams, inset: L
       const type = g('type');
       if (!name) name = url;
       if (url) {
+        // (LyX makes `www.lyx.org` a web address; a link to a file next to the document, `README.md`, stays as it is)
+        const web = !type && !/^[a-z][a-z0-9+.-]*:/i.test(url) && relativeLink(url) === null;
         url = url.replace(/\\(?!\\)/g, '%5C').replace(/%/g, '\\%').replace(/#/g, '\\#');
-        if (!url.includes('://') && !type) url = 'http://' + url;
+        if (web) url = 'http://' + url;
       }
       if (name) {
         name = literal ? name : escapeText(ctx, name).replace(/\\textasciitilde\{\}/g, '$\\sim$');

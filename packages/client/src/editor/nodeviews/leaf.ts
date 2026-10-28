@@ -7,7 +7,8 @@ import type { EditorView, NodeView } from 'prosemirror-view';
 import { paramMap, unquote } from '@overlyx/core';
 import { getPrefs, subscribePrefs } from '../../prefs';
 import { subscribeProjectEvents, sameGraphicsFile } from '../../projectevents';
-import { editorContext, figureCandidates, figureFile, figureUrl, onMetaChange, resolveDocPath, viewDocDir, viewProject } from '../context';
+import { editorContext, figureCandidates, figureFile, figureUrl, onMetaChange, resolveDocPath, viewDocDir, viewDocId, viewProject } from '../context';
+import { linkTooltip, LINK_CLICK } from '../links';
 import { applyChangeAttrs } from '../plugins/changes';
 import { classifyImage, type FigureKind } from '../figureinvert';
 import { editSvgFile } from '../svgEditorEvents';
@@ -223,16 +224,16 @@ export class CommandView implements NodeView {
         break;
       }
       case 'href': {
-        const name = unquote(p.get('name')), target = unquote(p.get('target'));
+        const name = unquote(p.get('name')), target = unquote(p.get('target')), type = unquote(p.get('type'));
         text = name || target;
-        title = 'Hyperlink: ' + target;
+        title = linkTooltip(type && !target.startsWith(type) ? type + target : target, viewDocId(this.view));
         this.dom.classList.add('lyx-href');
         break;
       }
       case 'include': {
         const fn = unquote(p.get('filename'));
         text = `${latexCmd === 'input' ? 'Input' : latexCmd === 'include' ? 'Include' : latexCmd}: ${fn}`;
-        title = 'Child document: ' + fn + ' (double-click to open)';
+        title = `Child document: ${fn} — double-click or ${LINK_CLICK} to open`;
         this.dom.classList.add('lyx-button', 'lyx-include');
         break;
       }

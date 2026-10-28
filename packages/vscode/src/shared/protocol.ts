@@ -90,5 +90,7 @@ export type PdfToHost =
   | { type: 'savePdfCopy' }
   /** double-click in the PDF: inverse search at this point (PDF points from the page's top-left) */
   | { type: 'inverse'; page: number; x: number; y: number }
+  /** a link in the PDF to a file of the project (relative to the document): open it */
+  | { type: 'openDoc'; id: string }
   | { type: 'notify'; text: string; kind?: 'info' | 'error'; stack?: string }
   | { type: 'appearance'; appearance: Appearance };

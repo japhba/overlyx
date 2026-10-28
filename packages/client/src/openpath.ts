@@ -3,7 +3,7 @@
  * HTML block): a document, a page, a deck or a PDF in OverLyX; any other file in a new tab. Links that
  * leave OverLyX never come here: they open in a new tab.
  */
-import { fileUrl } from './api';
+import { fileUrl, isTextFile } from './api';
 
 /** where the host opens a project's files instead (VS Code: in its editors) */
 let hostOpen: ((project: string, path: string) => void) | null = null;
@@ -16,6 +16,7 @@ export function openProjectPath(project: string, rel: string): void {
   if (hostOpen) { hostOpen(project, path); return; }
   if (/\.(html?|tex|md|markdown|board)$/i.test(path)) location.hash = '#/' + project + '/' + path;
   else if (/\.pdf$/i.test(path)) location.hash = '#/pdf:' + project + '/' + path;
+  else if (!/\.lyx$/i.test(path) && isTextFile(path)) location.hash = '#/text:' + project + '/' + path;
   else window.open(fileUrl(project, path), '_blank', 'noopener');
 }
 

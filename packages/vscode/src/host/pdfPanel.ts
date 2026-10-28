@@ -15,6 +15,7 @@ export class PdfPanels {
     private bridgeBase: () => Promise<string>,
     private onInverse: (docId: string, page: number, x: number, y: number) => void,
     private reportError: (error: unknown, area: string) => void,
+    private onOpen: (id: string) => void,
   ) {}
 
   /** Show (or open) the PDF panel of a document. */
@@ -40,6 +41,7 @@ export class PdfPanels {
       if (msg.type === 'ready') sendAppearance(openedPanel.webview);
       else if (msg.type === 'appearance') changeAppearance(openedPanel.webview, msg.appearance);
       else if (msg.type === 'inverse') this.onInverse(docId, msg.page, msg.x, msg.y);
+      else if (msg.type === 'openDoc') this.onOpen(msg.id);
       else if (msg.type === 'notify') {
         if (msg.kind === 'error') {
           const error = new Error(msg.text);
