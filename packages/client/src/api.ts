@@ -95,7 +95,7 @@ export interface DocMeta {
   /** number of entries in the bibliography (meta.bib only holds the cited ones when it is large) */
   bibTotal?: number;
   authors: { id: number; name: string; email?: string }[];
-  macros: Record<string, { def: string; args: number; expand: boolean }>;
+  macros: Record<string, { def: string; args: number; optional?: string; expand: boolean }>;
   macroList: { name: string; args: number; def: string; display?: string; source: string }[];
   bib: BibItem[]; layouts: LayoutInfo[] | null; flexInsets: string[] | null; files: ProjectFile[];
   master: string | null; labels: { name: string; context: string; file: string }[];

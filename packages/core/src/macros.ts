@@ -1,7 +1,7 @@
 /**
  * Math macro collection: LyX FormulaMacro insets, preamble \newcommand/\def & co,
- * and \input{...}ed macro files. The result feeds MathLive's macro dictionary so that
- * user macros render instantly in the WYSIWYG view without any conversion.
+ * and \input{...}ed macro files. The result feeds the math editor's macro dictionary so that
+ * user macros render instantly in the WYSIWYG view.
  */
 import type { LyxDocument } from './lyx/ast.ts';
 import { getPreamble, walkInsets, unquote, paramMap } from './lyx/ast.ts';
@@ -29,7 +29,7 @@ export function readGroup(s: string, i: number): [string, number] | null {
   return null;
 }
 
-function readBracket(s: string, i: number): [string, number] | null {
+export function readBracket(s: string, i: number): [string, number] | null {
   if (s[i] !== '[') return null;
   let depth = 0;
   for (let j = i; j < s.length; j++) {
@@ -294,20 +294,14 @@ export function collectMacros(doc: LyxDocument, resolver: MacroResolver = {}, op
   return out;
 }
 
-/** Convert macro definitions to MathLive's macro dictionary format. */
-export function toMathliveMacros(macros: MacroDef[]): Record<string, { def: string; args: number; expand: boolean }> {
-  const out: Record<string, { def: string; args: number; expand: boolean }> = {};
+/** Convert macro definitions to the math editor's metadata format (legacy function name). */
+export function toMathliveMacros(macros: MacroDef[]): Record<string, { def: string; args: number; optional?: string; expand: boolean }> {
+  const out: ReturnType<typeof toMathliveMacros> = {};
   for (const m of macros) {
     if (!/^[A-Za-z]+$/.test(m.name)) continue;
-    let def = m.display ?? sanitizeForMathlive(m.def, m);
-    if (m.optional !== undefined && m.args > 0) {
-      // MathLive has no optional args; substitute the default for #1 and shift the rest
-      let d = def.replace(/#1/g, m.optional);
-      for (let k = 2; k <= m.args; k++) d = d.replace(new RegExp('#' + k, 'g'), '#' + (k - 1));
-      out[m.name] = { def: d, args: m.args - 1, expand: false };
-      continue;
-    }
-    out[m.name] = { def, args: m.args, expand: false };
+    const def = m.display ?? sanitizeForMathlive(m.def, m);
+    out[m.name] = { def, args: m.args, expand: false,
+      ...(m.optional !== undefined && m.args > 0 ? { optional: m.optional } : {}) };
   }
   return out;
 }

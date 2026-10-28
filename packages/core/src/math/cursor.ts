@@ -41,6 +41,8 @@ export function atomCells(o: Owner): Cell[] {
 export const nargs = (o: Owner) => atomCells(o).length;
 /** InsetMathNest::isActive: the cursor can enter it */
 export const isActive = (a: Atom) => a.t !== 'ref' && nargs(a) > 0;
+/** Enter the first mandatory argument, or the first optional one when there are no mandatory arguments. */
+const firstArg = (a: Atom): number => a.t === 'sqrt' && a.index ? 1 : a.t === 'macro' && a.nopt < a.args.length ? a.nopt : 0;
 /** InsetMathNest::confirmDeletion: big insets are selected before they are deleted */
 export const confirmDeletion = (a: Atom) => nargs(a) > 0;
 
@@ -258,7 +260,7 @@ export class MathCursor {
     const o = this.owner;
     if (isHull(o)) { this.idx = 0; this.pos = 0; return true; }
     if (!isActive(o)) return false;
-    this.idx = o.t === 'sqrt' && o.index ? 1 : o.t === 'macro' ? o.nopt : 0;   // root: index first; macros: first mandatory arg
+    this.idx = firstArg(o);
     this.pos = 0;
     return true;
   }
@@ -459,7 +461,7 @@ export class MathCursor {
     const safe = this.grabAndEraseSelection();
     this.plainInsert(a);
     if (isActive(a)) {
-      const first = a.t === 'sqrt' && a.index ? 1 : a.t === 'macro' ? a.nopt : 0;
+      const first = firstArg(a);
       const cells = atomCells(a);
       if (safe) cells[first].splice(0, 0, ...parseCell(safe, this.macros, this.mode === 'text' ? 'text' : 'math'));
       this.editInsertedInset();
@@ -527,7 +529,7 @@ export class MathCursor {
   handleNest(a: Atom) {
     const safe = this.grabAndEraseSelection();
     const cells = atomCells(a);
-    if (cells.length) cells[a.t === 'macro' ? a.nopt : 0].push(...parseCell(safe, this.macros, this.mode === 'text' ? 'text' : 'math'));
+    if (cells.length) cells[a.t === 'macro' ? firstArg(a) : 0].push(...parseCell(safe, this.macros, this.mode === 'text' ? 'text' : 'math'));
     this.insertAtom(a);
     this.editInsertedInset();
   }
@@ -736,7 +738,7 @@ export class MathCursor {
     else atom = createInsetMath(name, this.macros);
     // selection as the first argument
     const cells = atomCells(atom);
-    if (cells.length && sel) cells[atom.t === 'macro' ? atom.nopt : atom.t === 'sqrt' && atom.index ? 1 : 0].push(...parseCell(sel, this.macros));
+    if (cells.length && sel) cells[firstArg(atom)].push(...parseCell(sel, this.macros));
     // mode changes: a text command inside math is wrapped … we keep it simple and insert directly
     this.plainInsert(atom);
     return true;

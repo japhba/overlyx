@@ -158,9 +158,9 @@ export function writeAtom(a: Atom, os: MathWriter): void {
     case 'macro': {
       os.s('\\' + a.n);
       let first = true;
-      // optional arguments: up to the last non-empty one
-      let emptyOptFrom = 0;
-      for (let i = 0; i < a.args.length && i < a.nopt; i++) if (a.args[i].length) emptyOptFrom = i + 1;
+      // Keep explicit []: for a macro with a default it differs from an omitted argument.
+      let emptyOptFrom = a.noptProvided ?? 0;
+      for (let i = 0; i < a.args.length && i < a.nopt; i++) if (a.args[i].length) emptyOptFrom = Math.max(emptyOptFrom, i + 1);
       for (let i = 0; i < a.args.length && i < emptyOptFrom; i++) {
         first = false;
         const c = a.args[i];

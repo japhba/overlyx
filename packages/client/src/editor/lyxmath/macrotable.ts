@@ -51,10 +51,11 @@ export function markMacrosReady(view: object): void { readyViews.add(view); }
 export function macrosReady(view: object | undefined): boolean { return !!view && readyViews.has(view); }
 
 /** Set the macros that apply to every formula of `view`. `merge` stacks onto the table applied just before (child editors of a combined view). */
-export function setDocumentMacros(view: object, macros: Record<string, { def: string; args: number; expand?: boolean }>, merge = false): void {
+export function setDocumentMacros(view: object, macros: Record<string, { def: string; args: number; optional?: string; expand?: boolean }>, merge = false): void {
   const next: MacroTable = merge ? { ...(docMacrosByView.get(view) ?? lastTable) } : {};
   if (!merge) for (const [k, v] of Object.entries(FALLBACK_MACROS)) next[k] = { nargs: v.args, def: v.def };
-  for (const [k, v] of Object.entries(macros)) next[k] = { nargs: v.args, def: v.def };
+  for (const [k, v] of Object.entries(macros)) next[k] = { nargs: v.args, def: v.def,
+    ...(v.optional !== undefined ? { nopt: 1, optional: v.optional } : {}) };
   lastTable = next;
   // an unchanged table must not invalidate anything: every formula would re-render for nothing
   const sig = JSON.stringify(next);

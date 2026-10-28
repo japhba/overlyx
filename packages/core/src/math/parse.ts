@@ -685,9 +685,18 @@ class Parser {
           const info = macros[name];
           const nopt = info.nopt ?? 0;
           const args: Cell[] = [];
-          for (let i = 0; i < nopt; i++) args.push(this.parseCell(FLAG_OPTION, mode));
-          for (let i = 0; i < info.nargs - nopt; i++) { args.push(this.parseCell(FLAG_ITEM, mode)); if (mode === 'math') this.skipSpaces(); }
-          push({ t: 'macro', n: name, args, nopt });
+          let noptProvided = 0;
+          for (let i = 0; i < nopt; i++) {
+            this.skipSpaces();
+            if (this.nextToken().ch === '[') noptProvided = i + 1;
+            args.push(this.parseCell(FLAG_OPTION, mode));
+          }
+          for (let i = 0; i < info.nargs - nopt; i++) {
+            this.skipSpaces();
+            args.push(this.parseCell(FLAG_ITEM, mode));
+            if (mode === 'math') this.skipSpaces();
+          }
+          push({ t: 'macro', n: name, args, nopt, ...(noptProvided ? { noptProvided } : {}) });
         }
         else if (FRAC_NAMES[name]) {
           const c0 = this.parseCell(FLAG_ITEM, mode); if (mode === 'math') this.skipSpaces();

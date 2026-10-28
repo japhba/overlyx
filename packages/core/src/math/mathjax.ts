@@ -14,7 +14,7 @@
 import type { Atom, Cell, Grid, Hull, MacroTable } from './ast';
 import { SYMBOLS } from './parse';
 import { evalColor } from '../layout/colors';
-import { approximateImageSymbols, approximateOverlapSymbols, approximateRaisebox, replaceCommand, readGroup } from '../macros';
+import { approximateImageSymbols, approximateOverlapSymbols, approximateRaisebox, replaceCommand, readGroup, readBracket } from '../macros';
 import mathjaxMacrosTable from './mathjax-macros.json';
 
 /** LyX predefined macros MathJax lacks, as macro definitions (scripts/gen-mathjax-macros.ts) */
@@ -321,18 +321,22 @@ function mergeScriptsIntoMacro(nuc: string, a: Atom & { t: 'script' }, ctx: TexC
 /** Expand a user macro: the definition with `#k` replaced by the (editable) argument cells. */
 function macroToTex(a: Atom & { t: 'macro' }, ctx: TexContext, mode: 'math' | 'text'): string {
   const info = ctx.macros[a.n];
-  const args = a.args.map((c, i) => cellToTex(c, ctx, a, i, mode));
-  const id = ctx.cells.length;
+  const args = a.args.map((c, i) => {
+    if (i < a.nopt && !c.length) {
+      const value = i === 0 && !a.noptProvided ? info?.optional ?? '' : '';
+      // An omitted optional cell shows its default, without an empty mandatory-argument box.
+      return `\\htmlClass{${CELL_CLASS}${cellId(ctx, a, i)}}{${expandUserMacros(value, ctx.macros)}}`;
+    }
+    return cellToTex(c, ctx, a, i, mode);
+  });
   if (!info || !info.def) {
     // no definition: show the name with its arguments
     return `\\htmlClass{lm-macro}{\\htmlClass{lm-unknown}{\\text{\\textbackslash ${escapeText(a.n)}}}${args.map(s => `\\{${s}\\}`).join('')}}`;
   }
   const def = expandUserMacros(sanitizeForMathjax(info.def, a.n, a.args.length), ctx.macros);
-  const nopt = info.nopt ?? 0;
   let body = def;
   // template: arguments are substituted as already-wrapped cells; the rest renders non-editable
   body = body.replace(/#(\d)/g, (_m, d) => { const k = Number(d) - 1; return k < args.length ? `{${args[k]}}` : ''; });
-  void nopt; void id;
   return `\\htmlClass{lm-macro}{${body}}`;
 }
 
@@ -340,7 +344,7 @@ function macroToTex(a: Atom & { t: 'macro' }, ctx: TexContext, mode: 'math' | 't
  * User macros used inside another user macro's definition, expanded as TeX would expand them
  * (`\newcommand{\bb}[1]{\mathbf{#1}}`, `\newcommand{\bz}{\bb{z}}`): MathJax knows none of the
  * document's macros, so `\bz` used to show as "\bb" followed by z. Arguments are `{groups}` or
- * single tokens; an absent optional argument is empty; recursion stops after a few levels.
+ * single tokens; an absent optional argument uses its default; recursion stops after a few levels.
  */
 export function expandUserMacros(tex: string, macros: MacroTable, depth = 0): string {
   if (depth > 6 || !tex.includes('\\')) return tex;
@@ -357,7 +361,8 @@ export function expandUserMacros(tex: string, macros: MacroTable, depth = 0): st
     for (let k = 0; k < info.nargs; k++) {
       while (tex[j] === ' ') j++;
       if (k < nopt) {
-        if (tex[j] === '[') { const close = tex.indexOf(']', j); if (close < 0) { ok = false; break; } args.push(tex.slice(j + 1, close)); j = close + 1; } else args.push('');
+        if (tex[j] === '[') { const group = readBracket(tex, j); if (!group) { ok = false; break; } args.push(group[0]); j = group[1]; }
+        else args.push(k === 0 ? info.optional ?? '' : '');
         continue;
       }
       if (tex[j] === '{') { const g = readGroup(tex, j); if (!g) { ok = false; break; } args.push(g[0]); j = g[1]; continue; }

@@ -9,7 +9,7 @@ import type { EditorView } from 'prosemirror-view';
 import { setDocumentMacros, setInlineMacroDefs, markMacrosReady, macroTableFor, macrosReady, macroVersion, mathViews } from './lyxmath/macrotable';
 import { editorContext } from './context';
 
-type ServerMacros = Record<string, { def: string; args: number; expand: boolean }>;
+type ServerMacros = Record<string, { def: string; args: number; optional?: string; expand: boolean }>;
 interface InlineDef { pos: number; name: string; def: string; args: number }
 const serverMacrosByView = new WeakMap<EditorView, { macros: ServerMacros; merge: boolean }>();
 

@@ -67,8 +67,9 @@ export type Atom =
   | { t: 'href'; target: string; body: Cell }
   /** InsetMathGrid family: matrices, cases, array, aligned/split/gathered, substack (see Grid) */
   | ({ t: 'grid' } & Grid)
-  /** InsetMathMacro with a known definition and arguments (cells: optionals first, then mandatory) */
-  | { t: 'macro'; n: string; args: Cell[]; nopt: number; limits?: Limits }
+  /** InsetMathMacro with a known definition and arguments (cells: optionals first, then mandatory).
+   * noptProvided counts explicitly supplied optional arguments, including empty []. */
+  | { t: 'macro'; n: string; args: Cell[]; nopt: number; noptProvided?: number; limits?: Limits }
   /** InsetMathMacro without definition / unknown command: `\bm`, `\{`, `\_` … (no cells) */
   | { t: 'cmd'; n: string; limits?: Limits }
   /** InsetMathMacroArgument / InsetMathHash: `#1` inside a macro template, or a bare `#` */
@@ -124,7 +125,7 @@ export interface Hull extends Grid {
 export type HullType = 'simple' | 'equation' | 'eqnarray' | 'align' | 'alignat' | 'xalignat' | 'xxalignat' | 'flalign' | 'multline' | 'gather' | 'none' | 'unknown';
 
 /** Macro definitions the parser needs: number of mandatory + optional arguments. */
-export interface MacroInfo { nargs: number; nopt?: number; def?: string }
+export interface MacroInfo { nargs: number; nopt?: number; optional?: string; def?: string }
 export type MacroTable = Record<string, MacroInfo>;
 
 export const emptyCell = (): Cell => [];
