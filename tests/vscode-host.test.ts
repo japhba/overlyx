@@ -161,6 +161,19 @@ describe('vscode host document pipeline', () => {
     const unsaved = metadata({ ...ctx, readText: (file: string) => file === macrosPath ? String.raw`\newcommand{\bx}{\boldsymbol{z}}` : undefined } as typeof ctx);
     expect(JSON.stringify(unsaved.macros.bx)).toContain('boldsymbol{z}');
   });
+  it('reads \\input macro files and .bib files above the document\'s folder only within the readable folder', () => {
+    const notes = path.join(root, 'notes');
+    fs.mkdirSync(notes, { recursive: true });
+    fs.writeFileSync(path.join(root, 'notation.tex'), String.raw`\newcommand{\HH}{\mathbb{H}}`);
+    const source = String.raw`\documentclass{article}\input{../notation}\begin{document}$\HH$\bibliography{../refs}\end{document}`;
+    const sub = { root: notes, layoutDir };
+    const r = parseDocumentText(source, sub, 'note.tex');
+    const metadata = (context: typeof sub & { readRoot?: string }) => buildMeta({ ctx: context, project: 'notes', relPath: 'note.tex', lyx: r.doc, isChild: false, fileText: source }) as any;
+    expect(metadata(sub).macros.HH).toBeUndefined();
+    const wide = metadata({ ...sub, readRoot: root });
+    expect(wide.macros.HH).toBeDefined();
+    expect((wide.bib as any[]).some(b => b.key === 'knuth84')).toBe(true);
+  });
 });
 
 describe('childDocuments: the children of a master for the combined view', () => {

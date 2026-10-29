@@ -395,6 +395,8 @@ export function sanitizeForMathjax(def: string, name: string, args: number): str
   d = replaceCommand(d, 'accentset', (c, o) => `\\overset{${o[0] ?? ''}}{${c}}`, 2);
   d = replaceCommand(d, 'bm', c => `\\boldsymbol{${c}}`);
   d = replaceCommand(d, 'mathds', c => `\\mathbb{${c}}`);
+  // bbold's double-struck alphabet (\mathbbold{\Phi}): \mathbb is MathJax's nearest
+  d = replaceCommand(d, 'mathbbold', c => `\\mathbb{${c}}`);
   d = replaceCommand(d, 'intertext', c => `\\text{${c}}`);
   d = replaceCommand(d, 'DeclareMathOperator', () => '', 2);
   // The paper's double-glyph helper overlays two symbols with TeX boxes. Reproduce its

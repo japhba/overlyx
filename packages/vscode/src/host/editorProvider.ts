@@ -72,7 +72,8 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
     const article = isHtmlPath(relPath);
     let ctx: TexContext;
     try {
-      ctx = { root, layoutDir: this.deps.layoutDir(), readText: abs => vscode.workspace.textDocuments.find(d => !d.isClosed && d.uri.fsPath === abs)?.getText() };
+      const readRoot = folder?.uri.scheme === 'file' && (root + path.sep).startsWith(folder.uri.fsPath + path.sep) ? folder.uri.fsPath : undefined;
+      ctx = { root, layoutDir: this.deps.layoutDir(), readText: abs => vscode.workspace.textDocuments.find(d => !d.isClosed && d.uri.fsPath === abs)?.getText(), readRoot };
     } catch (e) {
       panel.webview.html = `<!doctype html><body style="font-family:sans-serif;padding:2em">${String(e)}</body>`;
       return;

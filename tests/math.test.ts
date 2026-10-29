@@ -182,3 +182,14 @@ describe('limits placement (the \\htmlClass cell markup must not detach scripts)
     expect(kx('$x_{i}^{2}$')).not.toContain('\\mathop');
   });
 });
+
+describe('bbold alphabet in a user macro', () => {
+  it('\\mathbbold renders as MathJax\'s \\mathbb instead of an undefined command', async () => {
+    const { macrosFromLatex, toMathliveMacros } = await import('../packages/core/src/macros.ts');
+    const { mathjaxMacros } = await import('../packages/core/src/math/mathjax.ts');
+    const defs = toMathliveMacros(macrosFromLatex(String.raw`\DeclareMathAlphabet{\mathbbold}{U}{bbold}{m}{n}\def\Pfi{\mathbbold{\Phi}}`).macros);
+    const table: MacroTable = { Pfi: { nargs: 0, def: defs.Pfi.def } };
+    const latex = renderHullSource(parseFormula(String.raw`$\tilde{\Pfi}_{qq'}$`, table), table).latex;
+    expect(toMathml(latex, mathjaxMacros(table))).toContain('double-struck');
+  });
+});

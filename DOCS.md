@@ -29,7 +29,9 @@ blend.
   Formulas (inline and display, `equation`/`align`/`gather`/`multline`/…) are edited in place
   and rendered with MathJax 4; document macros (`FormulaMacro` insets, preamble `\newcommand`/`\def`,
   `\input{macros}` files, child documents; a `\mathpalette\helper{…}` becomes TeX's `\mathchoice`
-  over the four styles) render immediately. Formulas are typed the LaTeX way
+  over the four styles) render immediately. In VS Code a document in a sub-folder reads its
+  `\input{../macros}` and `../refs.bib` from anywhere in its workspace folder (`TexContext.readRoot`,
+  `host/texdoc.ts readablePath`); bbold's `\mathbbold` is drawn as `\mathbb`. Formulas are typed the LaTeX way
   too: `$` opens an inline formula, `$` inside it closes it (Space does not leave such a formula —
   `$r \ll d$` types as written), `$$` opens a display formula, and
   Backspace in the empty formula gives the typed dollar back as text (the way to type a literal

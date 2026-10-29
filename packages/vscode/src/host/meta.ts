@@ -16,7 +16,7 @@ import { articleVars } from '@overlyx/core/html/articletheme.ts';
 import { pageLinks } from '@overlyx/core/html/deckextras.ts';
 import { isHtmlPath } from '@overlyx/core/html/deliverable.ts';
 import { collectFiles, findMaster, isBackupFile, readTextFile } from './project.ts';
-import { cachedParseFile, type TexContext } from './texdoc.ts';
+import { cachedParseFile, readablePath, type TexContext } from './texdoc.ts';
 
 export interface MetaInput {
   ctx: TexContext;
@@ -80,7 +80,7 @@ function scanBib(ctx: TexContext, relPath: string, rootLyx: LyxDocument, alsoDoc
   if (alsoDoc) scan(alsoDoc, 0);
   const bib: ReturnType<typeof parseBibtex> = [];
   for (const f of bibFiles) {
-    const abs = safe(f.endsWith('.bib') ? f : f + '.bib');
+    const abs = readablePath(ctx, docDir, f.endsWith('.bib') ? f : f + '.bib');
     if (abs && fs.existsSync(abs)) bib.push(...cachedBib(abs));
   }
   if (!bib.length) {
@@ -111,7 +111,7 @@ export function buildMeta(input: MetaInput): Record<string, unknown> {
     if (!abs || !abs.endsWith('.tex') || !fs.existsSync(abs)) return undefined;
     try { return readDoc(path.relative(proj, abs)); } catch { return undefined; }
   };
-  const readFile = (fn: string) => { const abs = safe(fn); try { return abs ? ctx.readText?.(abs) ?? fs.readFileSync(abs, 'utf8') : undefined; } catch { return undefined; } };
+  const readFile = (fn: string) => { const abs = readablePath(ctx, docDir, fn); try { return abs ? ctx.readText?.(abs) ?? fs.readFileSync(abs, 'utf8') : undefined; } catch { return undefined; } };
 
   const macros = collectMacros(rootLyx, { include: includeDoc, readFile }, article ? { files: pageLinks(lyx.preamble.join('\n'), 'overlyx-macros') } : {});
   if (masterRel) macros.push(...collectMacros(lyx, { include: includeDoc, readFile }, { includePreamble: false }));

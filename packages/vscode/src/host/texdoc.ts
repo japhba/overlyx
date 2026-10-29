@@ -26,15 +26,27 @@ function loadMathML(): void {
   void import('../../../server/src/mathml.ts').then(m => { texToMathML = m.texToMathML; }).catch(() => { /* TeX then */ });
 }
 
-export interface TexContext { root: string; layoutDir: string; /** Unsaved text in an open VS Code document. */ readText?: (absolutePath: string) => string | undefined }
+export interface TexContext {
+  root: string; layoutDir: string;
+  /** Unsaved text in an open VS Code document. */
+  readText?: (absolutePath: string) => string | undefined;
+  /** The folder \\input files and .bib files may be read from (the workspace folder): a note in a subfolder reads `../macros.tex`. Default: `root`. */
+  readRoot?: string;
+}
 
-/** A file read relative to a document, refusing to leave the project. */
+/** The absolute path of a file a document reads (`\\input`, `.bib`), or null when it lies outside the readable folder. */
+export function readablePath(ctx: TexContext, dir: string, name: string): string | null {
+  const abs = path.resolve(dir, name);
+  return abs.startsWith((ctx.readRoot ?? ctx.root) + path.sep) ? abs : null;
+}
+
+/** A file read relative to a document, refusing to leave the readable folder. */
 export function readerFor(ctx: TexContext, absDocPath: string): (name: string) => string | undefined {
   const dir = path.dirname(absDocPath);
   return (name: string) => {
     try {
-      const abs = path.resolve(dir, name);
-      if (!abs.startsWith(ctx.root + path.sep)) return undefined;
+      const abs = readablePath(ctx, dir, name);
+      if (!abs) return undefined;
       const open = ctx.readText?.(abs);
       if (open !== undefined) return open;
       const st = fs.statSync(abs);
