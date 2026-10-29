@@ -236,6 +236,8 @@ export type ToRuntime =
   | { ol: 'scale'; scale: number; anchor?: { docY: number; screenY: number } }
   /** (`held`: Draw is open — the pen does not go back to Select after a stroke it took itself) */
   | { ol: 'tool'; tool: Tool; ink?: InkStyle; held?: boolean }
+  /** the editor shows the stroke being drawn over the frame (FromRuntime liveInk) */
+  | { ol: 'liveInkHost' }
   /** the lasso's Convert on the selected strokes (runtime notetools.ts): shapes, or the handwriting read (it answers inkRead) */
   | { ol: 'inkConvert'; as: 'shapes' | 'notes' | 'formula' }
   /** what the handwriting was read as: the selected strokes give way to it */
@@ -356,6 +358,13 @@ export type FromRuntime =
   | { ol: 'pencil' }
   /** the Pencil is on the screen, or has lifted: the hand resting beside the slide moves nothing meanwhile */
   | { ol: 'penDown'; down: boolean }
+  /**
+   * The stroke being drawn on the one slide shown, for the editor to show over the frame until the frame
+   * shows it (`end`). Its first message says where the slide's px 0,0 is on the frame's page (`at`, CSS
+   * px), the frame's px per px of the slide (`k`) and whether it is the highlighter's (`hl`); `paint`:
+   * its <g>'s attributes, as they change; `paths` (in the slide's px): those from `from` on, of `n`.
+   */
+  | { ol: 'liveInk'; id: number; at?: [number, number]; k?: number; hl?: boolean; paint?: Record<string, string>; from?: number; paths?: { w: number; d: string }[]; n?: number; end?: boolean }
   /** content-free, allowlisted gesture reliability signal (never pointer coordinates or object/source data) */
   | { ol: 'reliability'; event: ReliabilityEvent; pointer: ReliabilityPointer }
   /** a stroke with a point far off (core glitch.ts StrokeWatch: measurements only), for the editor to report (glitches.ts) */

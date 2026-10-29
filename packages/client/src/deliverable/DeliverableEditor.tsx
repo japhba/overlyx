@@ -69,7 +69,7 @@ import { usualDeckSize } from '../app/decksize';
 import { formatTimestamp } from '@overlyx/core';
 import { ReviewPane, type CommentDraft } from './ReviewPane';
 import { EditModeSwitch, modeScope, setOwnSuggesting, suggestingFor, switchModeScope, type EditMode, type ModeScope } from '../app/EditModeSwitch';
-import { useDarkPagesState, toggleDarkPages, invertedColor, deskBeside, DARK_DESK } from '../app/darkpages';
+import { useDarkPagesState, toggleDarkPages, invertedColor, deskBeside, DARK_DESK, INVERT_FILTER } from '../app/darkpages';
 import { recordReliability, recordInteraction } from '../usage';
 import { reportJump, reportPalm } from '../glitches';
 import { DrawPalette } from './drawpalette';
@@ -965,6 +965,19 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
   }, [current, kind, host]);
   /** when a frame last asked for a menu (the slide rail's tap or hold, a right-click on the canvas) */
   const frameMenuAt = useRef(0);
+  /**
+   * The stroke being drawn on the slide (runtime edit.ts liveHost), shown over the frame until the frame
+   * shows it: a layer of its own on the canvas, unscaled (`.dl-liveink`), its paths placed where the
+   * slide is on the canvas — each frame paints the stroke alone, at the screen's resolution.
+   */
+  const liveSvg = useRef<SVGSVGElement>(null);
+  const liveInk = useRef<{ id: number; at: [number, number]; k: number; g: SVGGElement } | null>(null);
+  const liveInkMsg = useRef<(m: Extract<FromRuntime, { ol: 'liveInk' }>) => void>(() => {});
+  /** the slide's px on the canvas as the frame is placed (`p`: slideView place) */
+  const placeLive = (p: { tx: number; ty: number; s: number } | null) => {
+    const l = liveInk.current;
+    if (l && p) l.g.setAttribute('transform', `matrix(${p.s * l.k} 0 0 ${p.s * l.k} ${p.tx + l.at[0] * p.s} ${p.ty + l.at[1] * p.s})`);
+  };
 
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
@@ -1036,6 +1049,9 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
             if (m.width) setPageW(m.width);
             if (m.height) setPageH(m.height);
             setSolo(m.solo ?? null);
+            // (a stroke the frame was drawing as it started again: gone with it)
+            liveSvg.current?.replaceChildren(); liveInk.current = null;
+            toCanvas({ ol: 'liveInkHost' });
             toCanvas({ ol: 'scale', scale });
             toCanvas({ ol: 'tool', tool, ink: { ...deckInkStyle(inkRef.current, pageWRef.current), penInks: inkRef.current.penInks && !readOnlyRef.current }, held: drawKeptRef.current });
             toCanvas({ ol: 'guides', show: guidesRef.current });
@@ -1196,6 +1212,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
         case 'pinch': if (fromCanvas) onPinch(m); break;
         case 'pencil': if (fromCanvas && !inkRef.current.pencil) setInk({ pencil: true }); break;
         case 'penDown': if (fromCanvas) penOnCanvas(m.down); break;
+        case 'liveInk': if (fromCanvas) liveInkMsg.current(m); break;
         case 'history': if (fromCanvas) historyGesture(m.redo); break;
         case 'panEnd': if (fromCanvas) slideView.release(!!m.cancel); break;
         case 'fingerTap': if (fromCanvas) fingerTap(); break;
@@ -1314,6 +1331,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     },
     // (the pen and Undo on the slide's corner go with it as it moves — a page turned, a pull — not only as the editor draws)
     placed: p => {
+      placeLive(p);
       const el = focusPillEl.current, so = soloState.current;
       if (!el || !so) return;
       const at = focusSpot(p, so.rect, boxRef.current);
@@ -1329,6 +1347,33 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     },
   }), []);
   useEffect(() => () => slideView.destroy(), [slideView]);
+  liveInkMsg.current = m => {
+    const svg = liveSvg.current;
+    if (!svg) return;
+    if (m.at) {
+      // a new stroke: in the highlighter's blend, inverted with the slides (smart invert)
+      const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      svg.replaceChildren(g);
+      liveInk.current = { id: m.id, at: m.at, k: m.k ?? 1, g };
+      svg.style.mixBlendMode = m.hl ? 'multiply' : '';
+      svg.style.filter = darkRef.current.invert && kindRef.current !== 'page' ? INVERT_FILTER : '';
+      placeLive(slideView.place());
+    }
+    const l = liveInk.current;
+    if (!l || l.id !== m.id) return;
+    if (m.end) { svg.replaceChildren(); liveInk.current = null; return; }
+    if (m.paint) for (const [k, v] of Object.entries(m.paint)) l.g.setAttribute(k, v);
+    if (m.paths && m.from !== undefined) {
+      const kids = l.g.children;
+      m.paths.forEach((p, j) => {
+        let el = kids[m.from! + j];
+        if (!el) { el = document.createElementNS('http://www.w3.org/2000/svg', 'path'); l.g.append(el); }
+        el.setAttribute('d', p.d);
+        el.setAttribute('stroke-width', String(p.w));
+      });
+      while (kids.length > (m.n ?? kids.length)) kids[kids.length - 1].remove();
+    }
+  };
   // Safari's pinches beside the slide (a Mac's trackpad; the iPad's fingers, which canvasTouch takes): the slide's zoom, never the page's
   useEffect(() => {
     const el = canvasBox.current;
@@ -3487,6 +3532,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
             <div ref={viewEl} class="dl-view" style={{ top: `${inset.t}px`, right: `${inset.r}px`, bottom: `${inset.b}px`, left: `${inset.l}px` }}>
               {link && synced && <iframe ref={canvasFrame} class={'dl-frame' + (soloOn ? ' solo' : '')} title="Page" sandbox={offlineDocs.edit ? undefined : 'allow-scripts allow-modals allow-popups allow-forms'} src={offlineDocs.edit ? offlineSrc('edit') : src('edit')}
                 style={soloOn ? { width: `${soloFrameW}px`, height: `${solo!.height}px`, left: '0px' } : { width: `${frameW}px`, height: `${frameH}px`, transform: `scale(${scale})`, left: `${left}px` }} />}
+              <svg ref={liveSvg} class="dl-liveink" aria-hidden="true" />
               {soloOn && (
                 <div ref={pullRing} class="dl-pull" data-dl-pull aria-hidden="true">
                   <svg viewBox="0 0 32 32">

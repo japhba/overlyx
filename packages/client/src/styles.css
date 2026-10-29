@@ -3394,6 +3394,8 @@ html.ol-deck-full .app > .guest-callout, html.ol-deck-full .app > .tb-dock-top, 
 /* the slide's part of the canvas (DeliverableEditor inset): all of it, but while drawing the slide stays where the bars left it; the fingers beside the slide are the canvas' */
 .dl-view { position: absolute; pointer-events: none; }
 .dl-view > .dl-frame { pointer-events: auto; }
+/* the stroke being drawn, over the frame (DeliverableEditor liveInk): a layer of its own, never scaled — its <g> places it */
+.dl-liveink { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; will-change: transform; }
 /* the bars slide away as drawing begins (then the canvas takes their room; the panels opened stay), and back in when a tap or Done brings them (ol-bars-back; BARS_MS) */
 html.ol-bars-leaving .app > .menubar, html.ol-bars-leaving .dl-toolbar, html.ol-bars-leaving .app .statusbar, html.ol-bars-leaving .dl-side {
   transition: transform .18s ease-in, opacity .18s ease-in; opacity: 0; pointer-events: none;

@@ -2463,7 +2463,26 @@ let ink: {
   at: (x: number, y: number) => [number, number];
   /** what its paths were set to last (setInkPaths) */
   shown: { w: number; d: string }[];
+  /** shown by the editor over the frame while it is drawn (liveInkHost): its number there; 0: in the page */
+  live: number;
 } | null = null;
+/**
+ * The editor shows the stroke being drawn over the frame, on the one slide shown, until the pen lifts
+ * (DeliverableEditor liveInk): a layer of its own on the editor's canvas, each frame painting the
+ * stroke alone. In the page, every frame painted again the strokes under it — on a slide full of
+ * handwriting the iPad fell behind the Pencil —; a layer of its own in the page made the whole page a
+ * layer, which Safari shows at its own resolution, scaled by the zoom: pixelated (the user, 29 Oct 2026).
+ */
+let liveHost = false, liveIds = 0;
+export function setLiveInkHost(): void { liveHost = true; }
+/** the editor's stroke goes once the page shows it (painted: two frames on — or 150 ms on, a frame's frames held back) */
+function liveEnd(id: number): void {
+  if (!id) return;
+  let sent = false;
+  const send = () => { if (!sent) { sent = true; post({ ol: 'liveInk', id, end: true }); } };
+  requestAnimationFrame(() => requestAnimationFrame(send));
+  setTimeout(send, 150);
+}
 /** strokes drawn and sent to the editor, shown until the page has them (`count`: that many strokes the slide will have then) */
 const sentInk: { svg: SVGSVGElement; slide: HTMLElement | null; count: number; timer: ReturnType<typeof setTimeout> }[] = [];
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -2487,15 +2506,16 @@ function startInk(e: PointerEvent, slide: HTMLElement | null): void {
   svg.setAttribute('class', 'ol-ink');
   svg.setAttribute('aria-hidden', 'true');
   const hl = inkStyle.opacity < 1;
-  // (a layer of its own: each frame paints the stroke alone — in the slide's, every frame painted again
-  // the strokes under it, on a slide full of handwriting ~6× the time in WebKit; the iPad, slower than
-  // the frame, dropped the Pencil's points between frames: laggy, angular lines. The user, 29 Oct 2026)
-  svg.setAttribute('style', `position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; will-change: transform${hl ? '; mix-blend-mode: multiply' : ''}`);
+  svg.setAttribute('style', `position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none${hl ? '; mix-blend-mode: multiply' : ''}`);
   const g = document.createElementNS(SVG_NS, 'g') as SVGGElement;
-  for (const [k, v] of Object.entries(inkPaint())) g.setAttribute(k, v);
+  const paint = inkPaint();
+  for (const [k, v] of Object.entries(paint)) g.setAttribute(k, v);
   svg.append(g);
-  (slide ?? document.body).append(svg);
-  ink = { slide, at: slidePlacer(slide), shown: [], pts: [inkPoint(e, slide)], client: [[e.clientX, e.clientY]], pressure: e.pointerType === 'pen', svg, g, frame: 0, t: e.timeStamp, whole: wholePx(e), k: docScale(slide ?? document.body), kind: e.pointerType, p0: pointPressure(e),
+  // (shown by the editor while it is drawn, put in the page as the pen lifts: liveHost)
+  const live = liveHost && isSolo() ? ++liveIds : 0, o = slideOrigin(slide);
+  if (live) post({ ol: 'liveInk', id: live, at: [o.x, o.y], k: o.k, hl, paint });
+  else (slide ?? document.body).append(svg);
+  ink = { slide, live, at: (x, y) => [(x - o.x) / o.k, (y - o.y) / o.k], shown: [], pts: [inkPoint(e, slide)], client: [[e.clientX, e.clientY]], pressure: e.pointerType === 'pen', svg, g, frame: 0, t: e.timeStamp, whole: wholePx(e), k: docScale(slide ?? document.body), kind: e.pointerType, p0: pointPressure(e),
     rest: { x: e.clientX, y: e.clientY, t: performance.now(), timer: null }, judged: 0, cands: null, near: null, sampled: new Map(), snapTimer: null, snapped: null, cache: {}, rate: e.pointerType === 'pen' ? penRateMeter(e.timeStamp) : null,
     watch: navigator.maxTouchPoints > 0 ? new StrokeWatch('deck', e.pointerType, { w: innerWidth, h: innerHeight }) : null };
   ink.watch?.add(e.clientX, e.clientY, e.timeStamp, 'down', scrollX, scrollY);
@@ -2599,7 +2619,11 @@ function fadeScratch(els: Element[]): void {
   for (const [el, was] of [...scratchFaded]) if (!els.includes(el)) { (el as SVGElement).style.opacity = was; scratchFaded.delete(el); }
   for (const el of els) if (!scratchFaded.has(el)) { scratchFaded.set(el, (el as SVGElement).style.opacity); (el as SVGElement).style.opacity = '0.3'; }
   // the scribble itself grey while it is one (Fluid Inking's feedback)
-  if (ink) ink.g.setAttribute('stroke', els.length ? '#8a9099' : inkStyle.color);
+  const stroke = els.length ? '#8a9099' : inkStyle.color;
+  if (ink && ink.g.getAttribute('stroke') !== stroke) {
+    ink.g.setAttribute('stroke', stroke);
+    if (ink.live) post({ ol: 'liveInk', id: ink.live, paint: { stroke } });
+  }
 }
 
 /** what the scribble drawn so far would erase (`hold`: the pen rests at its end) */
@@ -2659,15 +2683,19 @@ function inkRunsNow(final: boolean, chunk = 0): InkRun[] {
 function setInkPaths(paths: { w: number; d: string }[]): void {
   if (!ink) return;
   const kids = ink.g.children, was = ink.shown;
+  let from = kids.length > paths.length ? paths.length : -1;
   paths.forEach((p, i) => {
     let el = kids[i];
     if (!el) { el = document.createElementNS(SVG_NS, 'path'); ink!.g.append(el); was[i] = { w: NaN, d: '' }; }
     if (was[i].d !== p.d) el.setAttribute('d', p.d);
     if (was[i].w !== p.w) el.setAttribute('stroke-width', String(p.w));
+    if ((was[i].d !== p.d || was[i].w !== p.w) && (from < 0 || i < from)) from = i;
     was[i] = p;
   });
   while (kids.length > paths.length) kids[kids.length - 1].remove();
   was.length = paths.length;
+  // (the editor's copy: what changed)
+  if (ink.live && from >= 0) post({ ol: 'liveInk', id: ink.live, from, paths: paths.slice(from), n: paths.length });
 }
 
 /** the pen lifted: the stroke drawn to its end, sent; it stays shown until the page has it */
@@ -2691,9 +2719,11 @@ function endInk(e: PointerEvent): void {
   // (snapped: the stroke as drawn is written too, a step before its shape, so that Undo brings it back)
   const runs = shape ? inkRunsNow(true) : paintInk(true);
   const shapeRuns = shape ? snappedRuns() : [];
-  const { slide, svg } = ink;
+  const { slide, svg, live } = ink;
   ink = null;
   penPutAway();
+  // (the editor's copy goes once the page shows the stroke, or that it went)
+  liveEnd(live);
   if (state.version === null || !runs.length) { svg.remove(); return; }
   // whole px for its place, the runs moved into its own box
   const boxed = (rs: InkRun[]) => {
@@ -2711,7 +2741,10 @@ function endInk(e: PointerEvent): void {
     clearTimeout(entry.timer);
     svg.remove();
     for (const el of gone) (el as SVGElement).style.visibility = 'hidden';
-  } else sentInk.push(entry);
+  } else {
+    if (live) (slide ?? document.body).append(svg);
+    sentInk.push(entry);
+  }
   post({ ol: 'draw', version: state.version, tool: 'pen', slide: slide ? pathOf(slide) : null, rect, after: null, runs: inkPaths(runs, -x, -y), ...(scratch.length ? { scratch } : {}), ...(snap ? { snap } : {}) });
 }
 
@@ -2736,6 +2769,7 @@ function dropInk(): void {
   penPutAway();
   fadeScratch([]);
   ink.svg.remove();
+  if (ink.live) post({ ol: 'liveInk', id: ink.live, end: true });
   ink = null;
 }
 
@@ -2876,10 +2910,15 @@ export function slidePoint(slide: HTMLElement, x: number, y: number): [number, n
 }
 /** slidePoint as the slide lies now (null: the page itself) */
 function slidePlacer(slide: HTMLElement | null): (x: number, y: number) => [number, number] {
-  if (!slide) return (x, y) => [x, y];
+  const o = slideOrigin(slide);
+  return (x, y) => [(x - o.x) / o.k, (y - o.y) / o.k];
+}
+/** where the slide's px 0,0 is on the page (page px), and the page's px per px of the slide */
+function slideOrigin(slide: HTMLElement | null): { x: number; y: number; k: number } {
+  if (!slide) return { x: 0, y: 0, k: 1 };
   const sr = docRect(slide);
-  const k = slide.offsetWidth ? sr.w / slide.offsetWidth : 1, cl = slide.clientLeft, ct = slide.clientTop;
-  return (x, y) => [(x - sr.x - cl) / k, (y - sr.y - ct) / k];
+  const k = slide.offsetWidth ? sr.w / slide.offsetWidth : 1;
+  return { x: sr.x + slide.clientLeft, y: sr.y + slide.clientTop, k };
 }
 
 /* ------------------------------------------------------------------ drawing new objects */

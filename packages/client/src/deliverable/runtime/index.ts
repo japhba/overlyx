@@ -317,6 +317,7 @@ function onMessage(e: MessageEvent): void {
     case 'scrollTo': if (MODE === 'edit') edit.scrollToSlide(m.slide, m.smooth); else if (MODE === 'thumb') railShow(m.slide); break;
     case 'scale': if (MODE === 'edit') edit.setScale(m.scale, m.anchor); else { railScale = m.scale; drawRail(); } break;
     case 'tool': if (MODE === 'edit') edit.setTool(m.tool, m.ink, m.held); break;
+    case 'liveInkHost': if (MODE === 'edit') edit.setLiveInkHost(); break;
     case 'inkConvert': if (MODE === 'edit') edit.inkConvert(m.as); break;
     case 'inkTyped': if (MODE === 'edit') edit.inkTyped(m.text, m.as); break;
     case 'guides': if (MODE === 'edit') setGuidesShown(m.show); break;
