@@ -1305,7 +1305,7 @@ pre.hl .l.cur { background: color-mix(in srgb, var(--active-bg) 45%, transparent
 .ink-canvas.draw[data-tool="eraser"] { cursor: cell; }
 .ink-canvas.draw[data-tool="lasso"] { cursor: default; }
 /* the laser pointer: a glowing red dot for a cursor (over the text column too — no keyhole in this mode) */
-.ink-canvas.draw[data-tool="laser"], .board[data-tool="laser"] { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'%3E%3Ccircle cx='10' cy='10' r='8' fill='%23ff2d55' fill-opacity='0.35'/%3E%3Ccircle cx='10' cy='10' r='3.5' fill='%23ff2d55'/%3E%3Ccircle cx='10' cy='10' r='1.3' fill='%23fff'/%3E%3C/svg%3E") 10 10, crosshair; }
+.ink-canvas.draw[data-tool="laser"], .board[data-tool="laser"] { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'%3E%3Ccircle cx='10' cy='10' r='8' fill='%23e0284b' fill-opacity='0.35'/%3E%3Ccircle cx='10' cy='10' r='3.5' fill='%23e0284b'/%3E%3Ccircle cx='10' cy='10' r='1.3' fill='%23fff'/%3E%3C/svg%3E") 10 10, crosshair; }
 /* lasso selection box: a DOM overlay in content coordinates (it scrolls with the page) */
 .ink-sel { position: absolute; z-index: 6; outline: 1.5px dashed var(--accent); outline-offset: 2px; cursor: move; pointer-events: auto; touch-action: none; }
 .ink-handle { position: absolute; width: 10px; height: 10px; background: var(--page-bg); border: 1.5px solid var(--accent); border-radius: 2px; }
@@ -1496,9 +1496,9 @@ html.ol-inking, html.ol-inking * { -webkit-user-select: none !important; user-se
 .board-color.active { outline: 2px solid var(--accent); outline-offset: 1px; }
 .board-width span { display: inline-block; border-radius: 50%; background: var(--ui-fg); vertical-align: middle; }
 .board-pop { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 6px; background: var(--surface); border: 1px solid var(--ui-border); border-radius: 6px; box-shadow: 0 6px 18px rgba(0,0,0,0.18); z-index: 11; }
-/* laser traces: SVG in board coordinates; a lifted one fades out */
+/* laser traces: SVG in board coordinates; lifted, they fade out (over app/laser.ts LASER_FADE_MS, set on the element) */
 .board-laser, .board-laser * { pointer-events: none; }
-.board-laser.fade { animation: ol-laser-fade 0.7s ease-out forwards; }
+.board-laser.fade { animation: ol-laser-fade 3s linear forwards; }
 @keyframes ol-laser-fade { from { opacity: 1; } to { opacity: 0; } }
 .board-zoom { position: absolute; right: 14px; bottom: 12px; display: flex; align-items: center; gap: 4px; padding: 4px 6px;
   background: var(--ui-bg); border: 1px solid var(--ui-border); border-radius: 8px; z-index: 10; }

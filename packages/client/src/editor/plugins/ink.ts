@@ -31,7 +31,7 @@ import { Plugin, PluginKey } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
 import type { Awareness } from 'y-protocols/awareness';
-import { schema, strokePathD, strokeRuns, laserPathD, polylineHitsPolygon, rectMostlyInPolygon, commentHeader, formatTimestamp, type InkStroke, type InkImage } from '@overlyx/core';
+import { schema, strokePathD, strokeRuns, polylineHitsPolygon, rectMostlyInPolygon, commentHeader, formatTimestamp, type InkStroke, type InkImage } from '@overlyx/core';
 import { Fragment } from 'prosemirror-model';
 import type { Transaction } from 'prosemirror-state';
 import { h, render } from 'preact';
@@ -70,6 +70,7 @@ import { snapShape, SNAP_HOLD_MS, SNAP_LEAVE_PX } from '@overlyx/core/shapesnap.
 import { eraseAlong } from '@overlyx/core/inkerase.ts';
 import { freshPoint, type InkCache } from '@overlyx/core/freehand.ts';
 import { pointPressure, pressed, watchForce } from '../../deliverable/runtime/pressure';
+import { LaserSession, LASER_COLOR, LASER_FADE_MS, paintTraces, paintDot } from '../../app/laser';
 import { ERASER_PX } from '../../deliverable/deckink';
 import { lassoGroups, readHandwriting, chooseReading, readingError, type LassoActions } from '../../deliverable/lassobar';
 import { LassoBar, pasteGroups } from '../../deliverable/InkSelectionBar';
@@ -246,41 +247,21 @@ export function isTabletClient(): boolean {
   try { return matchMedia('(any-pointer: coarse)').matches && navigator.maxTouchPoints > 0 && !matchMedia('(max-width: 700px), (max-height: 500px)').matches; } catch { return false; }
 }
 
-/** The laser pointer: the colour of one's own trace (the others' trails take their presence colour) and how long a lifted trace lingers. */
-export const LASER_COLOR = '#ff2d55';
-export const LASER_FADE_MS = 700;
-/** Draw a laser trail (points in canvas pixels): a soft wide glow under a bright core, and a dot at the head. */
-export function paintLaser(ctx: CanvasRenderingContext2D, pts: readonly (readonly [number, number, ...unknown[]])[], color: string, alpha: number, scale = 1): void {
-  if (!pts.length || alpha <= 0) return;
-  const path = new Path2D(laserPathD(pts));
-  ctx.save();
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-  ctx.strokeStyle = color;
-  ctx.globalAlpha = 0.3 * alpha;
-  ctx.lineWidth = 11 * scale;
-  ctx.stroke(path);
-  ctx.globalAlpha = 0.95 * alpha;
-  ctx.lineWidth = 3.2 * scale;
-  ctx.stroke(path);
-  const [hx, hy] = pts[pts.length - 1];
-  ctx.fillStyle = color;
-  ctx.globalAlpha = 0.5 * alpha;
-  ctx.beginPath(); ctx.arc(hx, hy, 8 * scale, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = '#fff';
-  ctx.globalAlpha = 0.9 * alpha;
-  ctx.beginPath(); ctx.arc(hx, hy, 2.2 * scale, 0, Math.PI * 2); ctx.fill();
-  ctx.restore();
-}
+/** The laser pointer (app/laser.ts): one's own trace's colour (the others' take their presence colour) and how long lifted traces take to fade. */
+export { LASER_COLOR, LASER_FADE_MS };
 
 interface InkData { v: 1; strokes: InkStroke[]; imgs: InkImage[] }
 interface SketchEntry { pos: number; blockPos: number; src: string; data: InkData }
 /** what streams over awareness while a stroke is drawn */
 interface LiveInk extends InkStroke { src: string; side: 'left' | 'right' }
-/** what streams over awareness while the laser is held: offsets from (left column edge, top of the `b`-th top-level block) / zoom */
-interface LiveLaser { b: number; pts: [number, number][] }
-/** another client's laser trail, kept after its field vanished so it can fade out here too */
-interface RemoteLaser { b: number; pts: [number, number][]; color: string; name: string; fadeStart: number | null }
+/**
+ * What streams over awareness while the laser is held: offsets from (left column edge, top of the
+ * `b`-th top-level block) / zoom, with the pressure; `n`: the trace's number (another: a new trace),
+ * `pen`: a Pencil's (its pressure is drawn). Clients before them sent [x, y] alone.
+ */
+interface LiveLaser { b: number; pts: [number, number, number?][]; n?: number; pen?: boolean }
+/** another client's laser traces, in content px, kept after its field vanished so they fade out here too (`src`: the points they were last taken from) */
+interface RemoteLaser { s: LaserSession; color: string; name: string; src: unknown }
 /** one selected thing, addressed inside its sketch node */
 interface SelItem { src: string; kind: 'stroke' | 'img'; idx: number }
 /** live transform while the selection is dragged: scale about (ox, oy), then translate; or turned by `rot.a` about its middle */
@@ -387,9 +368,11 @@ class InkLayer {
   private pasteAt: [number, number] | null = null;
   /** the stroke's points as the screen had them, for a point far off (glitches.ts) */
   private watch: StrokeWatch | null = null;
-  /** the laser trace being held (content coordinates) and the one fading after a lift */
-  private laser: { b: number; edgeX: number; top: number; pts: [number, number][] } | null = null;
-  private laserFade: { pts: [number, number][]; start: number } | null = null;
+  /** my laser traces, held and fading (content coordinates), and where the one held is anchored for the others */
+  private laser = new LaserSession();
+  private laserAt: { b: number; edgeX: number; top: number } | null = null;
+  /** a fading laser session is drawn whole here first, then onto the page at its opacity */
+  private laserLayer: HTMLCanvasElement | null = null;
   /**
    * Scratch-out while the pen draws (core/scratchout.ts): the strokes the scribble could erase (content
    * coordinates), those it would now (`src:idx`, drawn faded), where and since when the pen rests.
@@ -500,7 +483,7 @@ class InkLayer {
     layers.delete(this);
     if (this.hold) clearTimeout(this.hold.timer);
     if (this.live) try { this.awareness.setLocalStateField('ink', null); } catch { /* closing */ }
-    if (this.laser) try { this.awareness.setLocalStateField('laser', null); } catch { /* closing */ }
+    if (this.laser.held) try { this.awareness.setLocalStateField('laser', null); } catch { /* closing */ }
   }
 
   private applyMode() {
@@ -786,14 +769,14 @@ class InkLayer {
     } else this.selBox.hidden = true;
     this.renderBar(g, r);
     // laser traces on top of everything: the others' (fading once their field vanished), then mine
-    if (this.paintLasers(ctx, g, z)) this.schedule();
+    if (this.paintLasers(ctx, g, z, dpr)) this.schedule();
   }
 
   private blank = false;
   /** a stroke a pen began on a margin while Draw was off (onPenInMargin) */
   private penDraw = false;
   private nothingToDraw(): boolean {
-    if (ui.active || this.live || this.lasso || this.selection || this.laser || this.laserFade || this.remoteLasers.size) return false;
+    if (ui.active || this.live || this.lasso || this.selection || !this.laser.gone(performance.now()) || this.remoteLasers.size) return false;
     if (this.entries.some(e => e.data.strokes.length || e.data.imgs.length)) return false;
     let remote = false;
     this.awareness.getStates().forEach((state, clientId) => {
@@ -813,31 +796,40 @@ class InkLayer {
   }
 
   /** Draw every laser trace; returns true while something is still fading (keep repainting). */
-  private paintLasers(ctx: CanvasRenderingContext2D, g: ReturnType<InkLayer['geom']>, z: number): boolean {
+  private paintLasers(ctx: CanvasRenderingContext2D, g: ReturnType<InkLayer['geom']>, z: number, dpr: number): boolean {
     const now = performance.now();
     let animating = false;
-    // reconcile the remote trails with the awareness states: a vanished field starts its fade here
+    // the others': the trace each holds, as its awareness has it, gathered into its session here; a
+    // vanished field lets them fade
     const seen = new Set<number>();
     this.awareness.getStates().forEach((state, clientId) => {
       if (clientId === this.awareness.clientID) return;
       const s = state as { user?: { name?: string; color?: string }; laser?: LiveLaser | null };
-      if (!s.laser || !s.laser.pts?.length) return;
+      const l = s.laser;
+      if (!l || !Array.isArray(l.pts) || !l.pts.length) return;
       seen.add(clientId);
-      this.remoteLasers.set(clientId, { b: s.laser.b, pts: s.laser.pts, color: s.user?.color ?? LASER_COLOR, name: s.user?.name ?? '', fadeStart: null });
+      let rl = this.remoteLasers.get(clientId);
+      if (!rl) this.remoteLasers.set(clientId, rl = { s: new LaserSession(), color: LASER_COLOR, name: '', src: null });
+      rl.color = s.user?.color ?? LASER_COLOR;
+      rl.name = s.user?.name ?? '';
+      if (rl.src === l.pts && rl.s.held) return;
+      const blockPos = typeof l.b === 'number' ? this.blockPosOfIndex(l.b) : null;
+      const top = blockPos === null ? null : this.blockTop(blockPos, g);
+      if (top === null) return;
+      rl.src = l.pts;
+      const pts = l.pts.slice(0, 4000).filter(q => Array.isArray(q) && Number.isFinite(q[0]) && Number.isFinite(q[1]))
+        .map(([x, y, p]) => [g.edgeL + x * z, top + y * z, typeof p === 'number' && p >= 0 && p <= 1 ? p : 0.5] as [number, number, number]);
+      if (pts.length) rl.s.hold(pts, l.pen === true, now, typeof l.n === 'number' ? l.n : undefined);
     });
     for (const [clientId, rl] of this.remoteLasers) {
-      if (!seen.has(clientId) && rl.fadeStart === null) rl.fadeStart = now;
-      if (rl.fadeStart !== null && now - rl.fadeStart > LASER_FADE_MS) { this.remoteLasers.delete(clientId); continue; }
-      const blockPos = this.blockPosOfIndex(rl.b);
-      const top = blockPos === null ? null : this.blockTop(blockPos, g);
-      if (top === null) continue;
-      const alpha = rl.fadeStart === null ? 1 : 1 - (now - rl.fadeStart) / LASER_FADE_MS;
-      if (rl.fadeStart !== null) animating = true;
-      const pts = rl.pts.map(([x, y]) => [g.edgeL + x * z - g.scrollLeft, top + y * z - g.scrollTop] as [number, number]);
-      paintLaser(ctx, pts, rl.color, alpha);
-      if (rl.name && rl.fadeStart === null) {
+      if (!seen.has(clientId)) rl.s.end(now);
+      if (rl.s.gone(now)) { this.remoteLasers.delete(clientId); continue; }
+      if (rl.s.fading(now)) animating = true;
+      this.paintLaser(ctx, rl.s, rl.color, now, g, dpr);
+      const held = rl.s.held;
+      if (rl.name && held) {
         // whose pointer this is, beside its head (like the cursor labels in the text)
-        const [hx, hy] = pts[pts.length - 1];
+        const hx = held.pts[held.pts.length - 1][0] - g.scrollLeft, hy = held.pts[held.pts.length - 1][1] - g.scrollTop;
         ctx.save();
         ctx.font = '11px system-ui, sans-serif';
         const w = ctx.measureText(rl.name).width + 10;
@@ -849,14 +841,40 @@ class InkLayer {
         ctx.restore();
       }
     }
-    const mine = (pts: [number, number][], alpha: number) => paintLaser(ctx, pts.map(([x, y]) => [x - g.scrollLeft, y - g.scrollTop] as [number, number]), LASER_COLOR, alpha);
-    if (this.laser) mine(this.laser.pts, 1);
-    if (this.laserFade) {
-      const t = (now - this.laserFade.start) / LASER_FADE_MS;
-      if (t >= 1) this.laserFade = null;
-      else { mine(this.laserFade.pts, 1 - t); animating = true; }
+    // mine, on top
+    if (!this.laser.gone(now)) {
+      this.paintLaser(ctx, this.laser, LASER_COLOR, now, g, dpr);
+      if (this.laser.fading(now)) animating = true;
     }
     return animating;
+  }
+
+  /**
+   * A laser session over the page (content coordinates), and the dot where it points while held:
+   * at full strength straight onto the page; fading, drawn whole on a layer first and that put on at
+   * its opacity — one opacity for all of it, the overlaps of its lines not showing through.
+   */
+  private paintLaser(ctx: CanvasRenderingContext2D, s: LaserSession, color: string, now: number, g: ReturnType<InkLayer['geom']>, dpr: number): void {
+    const draw = (c: CanvasRenderingContext2D) => { c.save(); c.translate(-g.scrollLeft, -g.scrollTop); paintTraces(c, s.traces, color, ui.drawing.nib); c.restore(); };
+    const a = s.alpha(now);
+    if (a >= 1) draw(ctx);
+    else {
+      const layer = this.laserLayer ??= document.createElement('canvas');
+      if (layer.width !== this.canvas.width || layer.height !== this.canvas.height) { layer.width = this.canvas.width; layer.height = this.canvas.height; }
+      const lc = layer.getContext('2d');
+      if (!lc) return;
+      lc.setTransform(1, 0, 0, 1, 0, 0);
+      lc.clearRect(0, 0, layer.width, layer.height);
+      lc.setTransform(dpr, 0, 0, dpr, 0, 0);
+      draw(lc);
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalAlpha = a;
+      ctx.drawImage(layer, 0, 0);
+      ctx.restore();
+    }
+    const held = s.held;
+    if (held) { const [x, y] = held.pts[held.pts.length - 1]; paintDot(ctx, x - g.scrollLeft, y - g.scrollTop, color); }
   }
 
   /* -------------------------------------------------------------- drawing */
@@ -950,8 +968,8 @@ class InkLayer {
       const blockPos = anchor?.blockPos ?? this.blockPosOfIndex(this.view.state.doc.childCount - 1);
       const top = blockPos === null ? null : this.blockTop(blockPos, g);
       if (top === null) return;
-      this.laserFade = null;
-      this.laser = { b: this.view.state.doc.resolve(blockPos!).index(0), edgeX: g.edgeL, top, pts: [[cx, cy]] };
+      this.laserAt = { b: this.view.state.doc.resolve(blockPos!).index(0), edgeX: g.edgeL, top };
+      this.laser.begin([[cx, cy, pointPressure(e)]], e.pointerType === 'pen', performance.now());
       this.pointerId = e.pointerId;
       this.canvas.setPointerCapture(e.pointerId);
       this.sendLaser(true);
@@ -1067,26 +1085,26 @@ class InkLayer {
 
   /** Stream the held laser trace to the other clients (throttled unless `force`). */
   private sendLaser(force = false) {
-    const l = this.laser;
-    if (!l) return;
+    const t = this.laser.held, l = this.laserAt;
+    if (!t || !l) return;
     const now = performance.now();
     if (!force && now - this.lastAwarenessSend < 40) return;
     this.lastAwarenessSend = now;
     const z = zoom();
-    const msg: LiveLaser = { b: l.b, pts: l.pts.map(([x, y]) => [round4((x - l.edgeX) / z), round4((y - l.top) / z)] as [number, number]) };
+    const msg: LiveLaser = { b: l.b, n: t.id, pen: t.pen, pts: t.pts.map(([x, y, p]) => [round4((x - l.edgeX) / z), round4((y - l.top) / z), Math.round(p * 100) / 100] as [number, number, number]) };
     try { this.awareness.setLocalStateField('laser', msg); } catch { /* not connected */ }
   }
 
   private onMove = (e: PointerEvent) => {
     if (this.pointerId !== e.pointerId) return;
     const g = this.geom();
-    if (this.laser) {
-      for (const ev of e.getCoalescedEvents?.() ?? [e]) {
+    if (this.laser.held) {
+      const evs = e.getCoalescedEvents?.() ?? [];
+      for (const ev of evs.length ? evs : [e]) {
         const [x, y] = this.toContent(ev, g);
-        const last = this.laser.pts[this.laser.pts.length - 1];
-        if ((last[0] - x) ** 2 + (last[1] - y) ** 2 < 1) continue;
-        this.laser.pts.push([x, y]);
-        if (this.laser.pts.length > 1500) this.laser.pts.shift();   // a very long scribble keeps its recent tail
+        const pts = this.laser.held.pts, last = pts[pts.length - 1];
+        if ((last[0] - x) ** 2 + (last[1] - y) ** 2 < 0.25) { if (ev.pointerType === 'pen' && ev.pressure > 0) last[2] = ev.pressure; continue; }
+        this.laser.add([x, y, pointPressure(ev)], performance.now());
       }
       this.sendLaser();
       this.schedule();
@@ -1117,10 +1135,9 @@ class InkLayer {
     }
     this.eraseLast = null;
     try { this.canvas.releasePointerCapture(e.pointerId); } catch { /* gone */ }
-    if (this.laser) {
-      // lifted: the trace lingers and fades; the others fade their copy when the field vanishes
-      this.laserFade = { pts: this.laser.pts, start: performance.now() };
-      this.laser = null;
+    if (this.laser.held) {
+      // lifted: the traces linger and fade; the others fade their copies when the field vanishes
+      this.laser.end(performance.now());
       try { this.awareness.setLocalStateField('laser', null); } catch { /* closing */ }
       this.schedule();
       return;
@@ -1260,7 +1277,7 @@ class InkLayer {
     this.endScratch();
     this.live = null;
     this.lasso = null;
-    if (this.laser) { this.laserFade = { pts: this.laser.pts, start: performance.now() }; this.laser = null; }
+    this.laser.end(performance.now());
     try { this.awareness.setLocalStateField('ink', null); this.awareness.setLocalStateField('laser', null); } catch { /* closing */ }
     this.schedule();
   };

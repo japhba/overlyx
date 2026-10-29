@@ -2,9 +2,10 @@
  * Presenting tools shared by the two presenters — HTML decks (deliverable/runtime/present.ts, in the
  * sandboxed frame) and layout / beamer documents (editor/layout/present.ts):
  *
- * - the laser pointer, with the whiteboard's look (a wide soft glow under a bright core, a dot with a
- *   white centre at the head; app/BoardEditor.tsx): moved, it leaves a short tail that fades; pressed
- *   and dragged (or drawn with a finger or pen), its trace stays while held and fades once lifted.
+ * - the laser pointer, as in the margins and on the whiteboard (app/laser.ts: drawn as the pen draws,
+ *   over a soft glow, a dot with a white centre at the head): moved, it leaves a short tail; pressed
+ *   and dragged (or drawn with a finger or pen), its trace stays while held, and once lifted the traces
+ *   fade out together — unless it is pressed again before they are gone, which brings them back.
  *   While it is on, clicks don't advance (the keys still do);
  * - pinch to zoom and pan: a trackpad pinch (Ctrl + wheel, as Chromium and Firefox report it; Safari's
  *   gesture events), two fingers on a touch screen (once they spread or close by an eighth: two
@@ -33,15 +34,16 @@
  * slide's fit.
  */
 import { laserPathD } from '@overlyx/core/ink.ts';
+import type { FreePt, NibOpts } from '@overlyx/core/freehand.ts';
+import { LaserSession, LASER_COLOR, LASER_FADE_MS, tracesSvg, dotSvg } from './laser';
+import { loadDeckInk } from '../deliverable/deckink';
 import { keepAwake } from './wakelock';
 import { strokeWatch, strokeEnded } from '../glitches';
 import type { StrokeWatch } from '@overlyx/core/glitch.ts';
 import { pinchFactor, pinchLock, type PinchLock } from '../deliverable/gestures';
 import { PresentShare, slideKey, encodeStroke, encodePts, simplifyPts, TRAIL_PTS, HELD_PTS, type PresentState, type PresenterState, type Follow, type Pt } from './presentshare';
 
-/** the whiteboard's laser colour and fade time (editor/plugins/ink.ts LASER_COLOR / LASER_FADE_MS — a test checks they agree) */
-export const LASER_COLOR = '#ff2d55';
-export const LASER_FADE_MS = 700;
+export { LASER_COLOR, LASER_FADE_MS };
 /** how long the tail behind a moving (not pressed) laser dot lasts */
 export const LASER_TAIL_MS = 500;
 export const ZOOM_MIN = 1;
@@ -145,46 +147,10 @@ export function liveTail(pts: readonly TrailPoint[], now: number, maxAge = LASER
   return pts.filter(p => now - p.t < maxAge);
 }
 
-/** the tail as segments, each as opaque as it is young (1 at the head, 0 at `maxAge`) */
-export function tailSegments(pts: readonly TrailPoint[], now: number, maxAge = LASER_TAIL_MS): { x1: number; y1: number; x2: number; y2: number; a: number }[] {
-  const live = liveTail(pts, now, maxAge);
-  const out: { x1: number; y1: number; x2: number; y2: number; a: number }[] = [];
-  for (let i = 1; i < live.length; i++) {
-    const a = Math.max(0, Math.min(1, 1 - (now - live[i].t) / maxAge));
-    out.push({ x1: live[i - 1].x, y1: live[i - 1].y, x2: live[i].x, y2: live[i].y, a });
-  }
-  return out;
-}
-
-const r1 = (n: number) => Math.round(n * 10) / 10;
-
-/** a held trace (or a dot alone) as SVG markup: the board's glow, core and head, in screen px */
-export function traceSvg(pts: readonly { x: number; y: number }[], color = LASER_COLOR, head = true): string {
-  if (!pts.length) return '';
-  const last = pts[pts.length - 1];
-  let out = '';
-  if (pts.length > 1) {
-    const d = laserPathD(pts.map(p => [p.x, p.y] as [number, number]));
-    out += `<path class="glow" d="${d}" fill="none" stroke="${color}" stroke-opacity="0.3" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>`
-      + `<path class="core" d="${d}" fill="none" stroke="${color}" stroke-opacity="0.95" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>`;
-  }
-  if (head) out += dotSvg(last.x, last.y, color);
-  return out;
-}
-
-export function dotSvg(x: number, y: number, color = LASER_COLOR): string {
-  return `<circle class="head" cx="${r1(x)}" cy="${r1(y)}" r="8" fill="${color}" fill-opacity="0.5"/><circle cx="${r1(x)}" cy="${r1(y)}" r="2.2" fill="#fff" fill-opacity="0.9"/>`;
-}
-
-/** the moving dot's tail: segments fading along their length */
-export function tailSvg(pts: readonly TrailPoint[], now: number, color = LASER_COLOR): string {
-  let glow = '', core = '';
-  for (const s of tailSegments(pts, now)) {
-    const xy = `x1="${r1(s.x1)}" y1="${r1(s.y1)}" x2="${r1(s.x2)}" y2="${r1(s.y2)}"`;
-    glow += `<line ${xy} stroke-opacity="${(0.3 * s.a).toFixed(3)}" stroke-width="${(11 * (0.45 + 0.55 * s.a)).toFixed(2)}"/>`;
-    core += `<line ${xy} stroke-opacity="${(0.95 * s.a).toFixed(3)}" stroke-width="${(3.2 * (0.45 + 0.55 * s.a)).toFixed(2)}"/>`;
-  }
-  return glow || core ? `<g class="tail" stroke="${color}" stroke-linecap="round">${glow}${core}</g>` : '';
+/** the moving dot's tail as SVG markup, in screen px: a trace as the held one's, at one opacity — its end shortens as its points age */
+export function tailSvg(pts: readonly TrailPoint[], now: number, nib: NibOpts = {}, color = LASER_COLOR): string {
+  const live = liveTail(pts, now);
+  return live.length > 1 ? tracesSvg([{ pts: live.map(p => [p.x, p.y, 0.5] as FreePt), pen: false, held: false }], color, nib) : '';
 }
 
 /* ------------------------------------------------------------------ drawings on the slide */
@@ -269,8 +235,6 @@ const DOC_CSS = `.olpk-surface, .olpk-surface * { touch-action: none !important;
 
 const UI_CSS = `:host { all: initial; }
   svg.laser { position: fixed; left: 0; top: 0; width: 100vw; height: 100vh; overflow: visible; pointer-events: none; }
-  svg.laser .fade { animation: olpk-fade ${LASER_FADE_MS}ms ease-out forwards; }
-  @keyframes olpk-fade { from { opacity: 1; } to { opacity: 0; } }
   .bar { position: fixed; left: 16px; bottom: 16px; display: flex; align-items: center; gap: 2px; padding: 4px; border-radius: 22px;
     background: rgba(32, 33, 36, 0.84); color: #fff; font: 13px/1 system-ui, -apple-system, 'Segoe UI', sans-serif; box-shadow: 0 2px 12px rgba(0,0,0,0.35);
     opacity: 0; transition: opacity 0.45s; pointer-events: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
@@ -280,7 +244,7 @@ const UI_CSS = `:host { all: initial; }
   button:hover { background: rgba(255, 255, 255, 0.14); }
   button:focus-visible { outline: 2px solid #8ab4f8; }
   button.on { background: rgba(255, 255, 255, 0.24); }
-  button[data-k="laser"].on { background: rgba(255, 45, 85, 0.32); }
+  button[data-k="laser"].on { background: rgba(224, 40, 75, 0.32); }
   button[hidden], .colors[hidden] { display: none; }
   .sep { width: 1px; height: 18px; margin: 0 4px; background: rgba(255, 255, 255, 0.22); }
   .colors { display: inline-flex; align-items: center; gap: 4px; padding: 0 4px; }
@@ -294,7 +258,7 @@ const UI_CSS = `:host { all: initial; }
     .colors { gap: 8px; padding: 0 8px; }
   }
   .pos { padding: 0 8px; font-variant-numeric: tabular-nums; color: rgba(255, 255, 255, 0.86); white-space: nowrap; }
-  .dot { width: 12px; height: 12px; border-radius: 50%; background: radial-gradient(circle, #fff 0 18%, ${LASER_COLOR} 24% 55%, rgba(255,45,85,0.35) 62%, transparent 72%); }`;
+  .dot { width: 12px; height: 12px; border-radius: 50%; background: radial-gradient(circle, #fff 0 18%, ${LASER_COLOR} 24% 55%, rgba(224,40,75,0.35) 62%, transparent 72%); }`;
 
 const ICON = {
   prev: '<svg width="16" height="16" viewBox="0 0 16 16"><path d="M10.5 3 5.5 8l5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
@@ -362,8 +326,17 @@ export class PresentKit {
   private placed = false;
   /** the laser's points so far (its trail's numbers for the others) */
   private laserN = 0;
-  /** the others' lasers on this screen, in slide units: the moving one's trail by when it came, the held trace */
-  private peerLasers = new Map<number, { k: string; last: number; trail: { x: number; y: number; t: number }[]; held: Pt[] | null; head: Pt | null }>();
+  /** the others' lasers on this screen, in slide units: the moving one's trail by when it came, the traces held and fading (`on`: it still has a laser) */
+  private peerLasers = new Map<number, { k: string; last: number; trail: { x: number; y: number; t: number }[]; session: LaserSession; head: Pt | null; on: boolean }>();
+  /** the groups their traces are drawn in, by client: written again only when they changed (fading, only their opacity changes) */
+  private peerGs = new Map<number, { g: SVGGElement; v: number; key: string }>();
+  private peersG: SVGGElement;
+  /** this screen's laser traces (screen px), held and fading, and their group */
+  private mine = new LaserSession();
+  private mineG: SVGGElement;
+  private mineV = -1;
+  /** the pen case's nib: the laser is drawn as the pen draws */
+  private nib: NibOpts = loadDeckInk().nib;
   private remoteG: SVGGElement;
   private linkBtn: HTMLElement;
   /** fingers draw (and point the laser) with the tool in hand; off: only the Pencil does, fingers swipe, tap and pinch */
@@ -379,7 +352,6 @@ export class PresentKit {
   /** the kind of pointer that touched last (mouse, touch, pen) */
   private lastType = 'mouse';
   private view: ZoomView = { ...IDENTITY };
-  private held: TrailPoint[] | null = null;
   private tail: TrailPoint[] = [];
   private head: { x: number; y: number } | null = null;
   private raf = 0;
@@ -405,7 +377,7 @@ export class PresentKit {
     this.ui.setAttribute('data-ol-runtime', '');
     this.ui.style.cssText = 'all:initial;position:fixed;left:0;top:0;width:0;height:0;z-index:2147483647;pointer-events:none;display:block;';
     const sr = this.ui.attachShadow({ mode: 'open' });
-    sr.innerHTML = `<style>${UI_CSS}</style><svg class="laser" xmlns="http://www.w3.org/2000/svg"><g class="ink"><g class="strokes"></g><g class="remote"></g><g class="drawing"></g></g><g class="live"></g></svg>
+    sr.innerHTML = `<style>${UI_CSS}</style><svg class="laser" xmlns="http://www.w3.org/2000/svg"><g class="ink"><g class="strokes"></g><g class="remote"></g><g class="drawing"></g></g><g class="peerlasers"></g><g class="mylaser"></g><g class="live"></g></svg>
       <div class="bar" role="toolbar" aria-label="Presentation">
         <button data-k="prev" title="Previous (←)" aria-label="Previous">${ICON.prev}</button>
         <span class="pos"></span>
@@ -428,6 +400,8 @@ export class PresentKit {
     this.strokesG = sr.querySelector('g.strokes') as SVGGElement;
     this.drawG = sr.querySelector('g.drawing') as SVGGElement;
     this.remoteG = sr.querySelector('g.remote') as SVGGElement;
+    this.peersG = sr.querySelector('g.peerlasers') as SVGGElement;
+    this.mineG = sr.querySelector('g.mylaser') as SVGGElement;
     this.bar = sr.querySelector('.bar') as HTMLElement;
     this.posEl = sr.querySelector('.pos') as HTMLElement;
     this.laserBtn = sr.querySelector('[data-k="laser"]') as HTMLElement;
@@ -521,7 +495,7 @@ export class PresentKit {
   }
 
   /** another slide shown: the whole of it, with its drawings */
-  slideChanged(): void { this.cancelDraw(); this.resetZoom(); this.refresh(); this.renderInk(); this.render(); this.moved(); }
+  slideChanged(): void { this.cancelDraw(); this.mine.clear(); this.resetZoom(); this.refresh(); this.renderInk(); this.render(); this.moved(); }
 
   /**
    * The presenter showed another slide or step: the other screens are told (linked, they go along). A
@@ -602,7 +576,7 @@ export class PresentKit {
     }
     this.colorsEl.hidden = t !== 'pen' && t !== 'marker';
     this.markColor();
-    if (was === 'laser' && t !== 'laser') { this.endHeld(); this.tail = []; this.head = null; this.publish(true); }
+    if (was === 'laser' && t !== 'laser') { this.mine.end(performance.now()); this.tail = []; this.head = null; this.publish(true); }
     this.render();
   }
 
@@ -767,7 +741,7 @@ export class PresentKit {
     if (g.kind === 'pinch' || g.kind === 'pan') this.setView(g.v0);
     if (g.kind === 'pan') this.host.root.classList.remove('olpk-panning');
     if (g.kind === 'draw') this.cancelDraw();
-    if (g.kind === 'laser') { this.held = null; this.head = null; this.render(); }
+    if (g.kind === 'laser') { this.mine.drop(performance.now()); this.head = null; this.render(); }
   }
 
   private down(e: PointerEvent): void {
@@ -781,7 +755,7 @@ export class PresentKit {
     if (e.pointerType === 'touch' && this.pointers.size >= 2) {
       const ids = [...this.pointers.keys()].slice(-2) as [number, number];
       const [a, b] = ids.map(id => this.pointers.get(id)!);
-      this.endHeld();
+      this.mine.end(performance.now());
       this.cancelDraw();
       this.gesture = { kind: 'pinch', ids, d0: Math.hypot(a.x - b.x, a.y - b.y), c0: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, v0: { ...this.view }, lock: pinchLock() };
       this.suppressClick = true;
@@ -793,7 +767,7 @@ export class PresentKit {
     const pt = { x: e.clientX, y: e.clientY, t: performance.now() };
     const tool = this.toolFor(e);
     if (tool === 'laser') {
-      this.held = [pt];
+      this.mine.begin([[pt.x, pt.y, laserPressure(e)]], e.pointerType === 'pen', pt.t);
       this.head = pt;
       this.tail = [];
       this.laserN++;
@@ -864,11 +838,17 @@ export class PresentKit {
       if (g.stroke) { this.drawG.innerHTML = strokeSvg(g.stroke); this.publish(); }
       return;
     }
-    if (g?.kind === 'laser' && g.id === e.pointerId && this.held) {
-      const pt = { x: e.clientX, y: e.clientY, t: performance.now() };
-      this.held.push(pt);
-      this.head = pt;
-      this.laserN++;
+    const held = this.mine.held;
+    if (g?.kind === 'laser' && g.id === e.pointerId && held) {
+      const evs = e.getCoalescedEvents?.() ?? [];
+      for (const c of evs.length ? evs : [e]) {
+        const last = held.pts[held.pts.length - 1];
+        if ((last[0] - c.clientX) ** 2 + (last[1] - c.clientY) ** 2 < 0.25) { if (c.pointerType === 'pen' && c.pressure > 0) last[2] = c.pressure; continue; }
+        // (a new trace going on from a long one's end: its first point counted too, so the others take it as new)
+        if (this.mine.add([c.clientX, c.clientY, laserPressure(c)], performance.now())) this.laserN++;
+        this.laserN++;
+      }
+      this.head = { x: e.clientX, y: e.clientY };
       this.schedule();
       this.publish();
       return;
@@ -909,7 +889,7 @@ export class PresentKit {
     if ((g.kind === 'laser' || g.kind === 'pan' || g.kind === 'swipe' || g.kind === 'draw') && g.id !== e.pointerId) return;
     this.gesture = null;
     if (g.kind === 'laser') {
-      this.endHeld();
+      this.mine.end(performance.now());
       if (e.pointerType !== 'mouse') this.head = null;
       this.render();
       this.publish(true);
@@ -1024,30 +1004,34 @@ export class PresentKit {
     if (this.tool !== 'laser') return null;
     const f = inkFrame(this.view, this.host.base());
     if (!f) return null;
-    let pts = (this.held ?? this.tail).slice(this.held ? -HELD_PTS : -TRAIL_PTS);
-    if (!pts.length && this.head) pts = [{ ...this.head, t: 0 }];
+    const held = this.mine.held;
+    let pts: { x: number; y: number }[] = held ? held.pts.slice(-HELD_PTS).map(([x, y]) => ({ x, y })) : this.tail.slice(-TRAIL_PTS);
+    if (!pts.length && this.head) pts = [this.head];
     if (!pts.length) return null;
     const units = pts.map(p => toSlide(p, f));
-    return { k: key, n: Math.max(0, this.laserN - pts.length), pts: encodePts(this.held ? simplifyPts(units, 0.5) : units), held: !!this.held };
+    return { k: key, n: Math.max(0, this.laserN - pts.length), pts: encodePts(held ? simplifyPts(units, 0.5) : units), held: !!held };
   }
 
   /**
    * The others' lasers as they are now: a moving one's new points join its trail (with the time they
-   * came, so it fades here as there), a held trace is taken whole; one let go fades out.
+   * came, so it fades here as there), a held trace is taken whole — pressed again (its first point's
+   * number past what came before), a new one, its traces still fading back with it —, let go, they fade out.
    */
   private takeLasers(): void {
     const now = performance.now();
     const lasers = this.share.lasers();
     for (const [client, l] of this.peerLasers) {
       const n = lasers.get(client);
-      if (!n || n.k !== l.k || !n.held) { if (l.held) this.fadeTrace(l.held, l.k); l.held = null; }
-      if (!n) this.peerLasers.delete(client);
+      if (!n || n.k !== l.k || !n.held) l.session.end(now);
+      l.on = !!n && n.k === l.k;
+      if (!l.on) { l.trail = []; l.head = null; }
     }
     for (const [client, n] of lasers) {
       let l = this.peerLasers.get(client);
-      if (!l || l.k !== n.k) { l = { k: n.k, last: -1, trail: [], held: null, head: null }; this.peerLasers.set(client, l); }
+      if (!l || l.k !== n.k) { l = { k: n.k, last: -1, trail: [], session: new LaserSession(), head: null, on: true }; this.peerLasers.set(client, l); }
       const cur = l;
-      if (n.held) cur.held = n.pts;
+      const held = cur.session.held;
+      if (n.held) cur.session.hold(n.pts.map(([x, y]) => [x, y, 0.5] as FreePt), false, now, held && n.n <= cur.last ? held.id : n.n);
       else n.pts.forEach((p, i) => { if (n.n + i > cur.last) cur.trail.push({ x: p[0], y: p[1], t: now }); });
       cur.last = Math.max(cur.last, n.n + n.pts.length - 1);
       if (cur.trail.length > 120) cur.trail.splice(0, cur.trail.length - 120);
@@ -1055,33 +1039,40 @@ export class PresentKit {
     }
   }
 
-  /** another's held trace let go: it lingers and fades, as this screen's own does */
-  private fadeTrace(pts: readonly Pt[], key: string): void {
+  /**
+   * The others' lasers on the slide shown: their traces in groups of their own, in slide units (only
+   * their opacity changes as they fade), their moving dots and tails as SVG in screen px (returned);
+   * `moving`: something still fades or shortens.
+   */
+  private drawPeerLasers(now: number): { html: string; moving: boolean } {
     const f = inkFrame(this.view, this.host.base());
-    if (!f || key !== this.slideNow() || !pts.length) return;
-    const g = this.doc.createElementNS('http://www.w3.org/2000/svg', 'g');
-    g.setAttribute('class', 'trace fade');
-    g.innerHTML = traceSvg(pts.map(([x, y]) => ({ x: f.ox + f.k * x, y: f.oy + f.k * y })), LASER_COLOR, false);
-    this.svg.insertBefore(g, this.live);
-    setTimeout(() => g.remove(), LASER_FADE_MS + 60);
-  }
-
-  /** the others' lasers on the slide shown, as SVG in screen px; `fading`: a trail still fades */
-  private peerLaserSvg(now: number): { html: string; fading: boolean } {
-    const f = inkFrame(this.view, this.host.base());
-    if (!f || !this.peerLasers.size) return { html: '', fading: false };
     const key = this.slideNow();
-    const on = (p: readonly [number, number]) => ({ x: f.ox + f.k * p[0], y: f.oy + f.k * p[1] });
-    let html = '', fading = false;
-    for (const l of this.peerLasers.values()) {
-      if (l.k !== key) continue;
-      if (l.held) { html += `<g class="trace held">${traceSvg(l.held.map(on))}</g>`; continue; }
+    let html = '', moving = false;
+    for (const [client, l] of this.peerLasers) {
+      const s = l.session;
+      if (!l.on && s.gone(now)) this.peerLasers.delete(client);
+      const shown = !!f && l.k === key && !s.gone(now);
+      let e = this.peerGs.get(client);
+      if (!shown || !this.peerLasers.has(client)) { if (e) { e.g.remove(); this.peerGs.delete(client); } }
+      else {
+        if (!e) { e = { g: this.doc.createElementNS('http://www.w3.org/2000/svg', 'g') as SVGGElement, v: -1, key: '' }; this.peersG.appendChild(e.g); this.peerGs.set(client, e); }
+        const zk = String(Math.round(f!.k * 1000) / 1000);
+        if (e.v !== s.v || e.key !== zk) { e.g.innerHTML = tracesSvg(s.traces, LASER_COLOR, this.nib, f!.k); e.v = s.v; e.key = zk; }
+        e.g.setAttribute('transform', `matrix(${f!.k} 0 0 ${f!.k} ${f!.ox} ${f!.oy})`);
+        e.g.setAttribute('opacity', String(Math.round(s.alpha(now) * 1000) / 1000));
+        if (s.fading(now)) moving = true;
+      }
+      if (!f || l.k !== key) continue;
+      const on = (p: readonly [number, number]) => ({ x: f.ox + f.k * p[0], y: f.oy + f.k * p[1] });
+      const held = s.held;
+      if (held) { const h = held.pts[held.pts.length - 1]; const q = on([h[0], h[1]]); html += dotSvg(q.x, q.y); continue; }
       l.trail = liveTail(l.trail, now);
-      html += tailSvg(l.trail.map(p => ({ ...on([p.x, p.y]), t: p.t })), now);
+      html += tailSvg(l.trail.map(p => ({ ...on([p.x, p.y]), t: p.t })), now, this.nib);
       if (l.head) { const h = on(l.head); html += dotSvg(h.x, h.y); }
-      if (l.trail.length > 1) fading = true;
+      if (l.trail.length > 1) moving = true;
     }
-    return { html, fading };
+    for (const [client, e] of this.peerGs) if (!this.peerLasers.has(client)) { e.g.remove(); this.peerGs.delete(client); }
+    return { html, moving };
   }
 
   /** the drawings put where the slide is now (its fit, the zoom) */
@@ -1098,18 +1089,6 @@ export class PresentKit {
 
   /* -------------------------------------------------------------- drawing the laser */
 
-  /** the held trace lingers and fades (CSS), then goes */
-  private endHeld(): void {
-    const pts = this.held;
-    this.held = null;
-    if (!pts || !pts.length) return;
-    const g = this.doc.createElementNS('http://www.w3.org/2000/svg', 'g');
-    g.setAttribute('class', 'trace fade');
-    g.innerHTML = traceSvg(pts, LASER_COLOR, false);
-    this.svg.insertBefore(g, this.live);
-    setTimeout(() => g.remove(), LASER_FADE_MS + 60);
-  }
-
   private schedule(): void {
     if (this.raf) return;
     this.raf = requestAnimationFrame(() => { this.raf = 0; this.render(); });
@@ -1117,18 +1096,31 @@ export class PresentKit {
 
   private render(): void {
     const now = performance.now();
+    // my traces, held or fading: written again only when they changed
+    const m = this.mine;
+    if (m.gone(now)) { if (this.mineV !== -1) { this.mineG.replaceChildren(); this.mineV = -1; } }
+    else {
+      if (this.mineV !== m.v) { this.mineG.innerHTML = tracesSvg(m.traces, LASER_COLOR, this.nib); this.mineV = m.v; }
+      this.mineG.setAttribute('opacity', String(Math.round(m.alpha(now) * 1000) / 1000));
+    }
     let html = '';
     if (this.tool === 'laser') {
-      if (this.held) html = `<g class="trace held">${traceSvg(this.held)}</g>`;
+      const held = m.held;
+      if (held) { const h = held.pts[held.pts.length - 1]; html = dotSvg(h[0], h[1]); }
       else {
         this.tail = liveTail(this.tail, now);
-        html = tailSvg(this.tail, now);
+        html = tailSvg(this.tail, now, this.nib);
         if (this.head) html += dotSvg(this.head.x, this.head.y);
       }
     }
     // the other screens' lasers, under this one's
-    const peers = this.peerLaserSvg(now);
+    const peers = this.drawPeerLasers(now);
     this.live.innerHTML = peers.html + html;
-    if ((this.tool === 'laser' && !this.held && this.tail.length > 1) || peers.fading) this.schedule();
+    if ((this.tool === 'laser' && !m.held && this.tail.length > 1) || m.fading(now) || peers.moving) this.schedule();
   }
+}
+
+/** how hard a laser's point was pressed: a pen's (0: not known), else none told (0.5) */
+function laserPressure(e: PointerEvent): number {
+  return e.pointerType === 'pen' ? Math.max(0, e.pressure) : 0.5;
 }

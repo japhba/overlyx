@@ -16,10 +16,11 @@ import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 import { connectParams } from '@overlyx/core/collab/connect.ts';
 import * as decoding from 'lib0/decoding';
-import { strokePathD, strokeRuns, laserPathD, polylineHitsPolygon, rectMostlyInPolygon, splitDocId, type InkStroke } from '@overlyx/core';
+import { strokePathD, strokeRuns, polylineHitsPolygon, rectMostlyInPolygon, splitDocId, type InkStroke } from '@overlyx/core';
 import { api, fileUrl, type User } from '../api';
 import { imageFiles, imageExt, uploadBaseName, uploadUnique, isSvgMarkup, svgFile } from '../editor/imagepaste';
-import { HIGHLIGHT_OPACITY, LASER_COLOR, LASER_FADE_MS, subscribeInk } from '../editor/plugins/ink';
+import { HIGHLIGHT_OPACITY, subscribeInk } from '../editor/plugins/ink';
+import { LaserSession, tracePaths, LASER_COLOR, LASER_FADE_MS, LASER_GLOW_W, LASER_GLOW_OPACITY } from './laser';
 import { useUiMode } from './uimode';
 import { MODERN_ICONS, iconSvg } from './modernicons';
 import { hostedZoomPill } from './zoomhud';
@@ -58,8 +59,13 @@ type Tool = 'select' | 'lasso' | 'pen' | 'highlighter' | 'eraser' | 'note' | 'la
 interface Camera { tx: number; ty: number; s: number }
 /** `raw`: the stroke as drawn, once draw and hold snapped it to a shape (`pts` is the shape then), and where the pen rested (client px) */
 interface LiveStroke { color: string; w: number; o?: number; nib?: NibOpts; pressure?: boolean; poly?: true; pts: [number, number, number][]; raw?: [number, number, number][]; restAt?: [number, number] }
-/** a laser trace (board coordinates); `fadeAt` set once its owner lifted the pen */
-interface LaserTrail { pts: [number, number][]; color: string; name?: string; fadeAt: number | null }
+/**
+ * The laser held, as it goes to the others (board coordinates, with the pressure): `n` the trace's
+ * number (another: a new trace), `pen` a Pencil's. Clients before them sent [x, y] alone.
+ */
+interface BoardLaser { pts: [number, number, number?][]; n?: number; pen?: boolean }
+/** another's laser traces, kept after its field vanished so they fade here too (`src`: the points they were last taken from) */
+interface RemoteLaser { s: LaserSession; color: string; name?: string; src: unknown }
 
 const NOTE_COLORS = ['#fff3bf', '#d3f9d8', '#d0ebff', '#ffe3e3', '#f3f0ff'];
 const newId = () => Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
@@ -130,10 +136,10 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
   // pen and highlighter each keep their own colour, width and presets — the same pens as the
   // margin ink (one Goodnotes pen case per browser); the swatches show the pen in use, or the
   // last one used while another tool is active. A click on the selected preset opens its editor.
-  // the laser: my trace while held, then fading; the others' from awareness, kept to fade too
-  const laserRef = useRef<[number, number][] | null>(null);
-  const [laserFade, setLaserFade] = useState<{ pts: [number, number][]; key: number } | null>(null);
-  const remoteLasers = useRef(new Map<number, LaserTrail>());
+  // the laser (app/laser.ts): my traces, held and then fading together; the others' from awareness, kept to fade too
+  const laser = useRef(new LaserSession()).current;
+  const laserGone = useRef<ReturnType<typeof setTimeout>>();
+  const remoteLasers = useRef(new Map<number, RemoteLaser>());
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const selectedRef = useRef(selected); selectedRef.current = selected;
   const [lassoPts, setLassoPts] = useState<[number, number][] | null>(null);
@@ -192,18 +198,29 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     // "Connecting…" for good — take the state it is in
     if (provider.synced) onSync(true); else if (provider.wsconnected) onStatus({ status: 'connected' });
     const onAwareness = () => {
-      // laser trails: take the live ones, start fading the ones whose field vanished
+      // lasers: the trace each holds, gathered into its session; a vanished field lets them fade
       const seen = new Set<number>();
+      const now = performance.now();
       provider.awareness.getStates().forEach((state, clientId) => {
         if (clientId === ydoc.clientID) return;
-        const s = state as { user?: { name?: string; color?: string }; boardLaser?: { pts: [number, number][] } | null };
-        if (!s.boardLaser?.pts?.length) return;
+        const s = state as { user?: { name?: string; color?: string }; boardLaser?: BoardLaser | null };
+        const l = s.boardLaser;
+        if (!l || !Array.isArray(l.pts) || !l.pts.length) return;
         seen.add(clientId);
-        remoteLasers.current.set(clientId, { pts: s.boardLaser.pts, color: s.user?.color ?? LASER_COLOR, name: s.user?.name, fadeAt: null });
+        let r = remoteLasers.current.get(clientId);
+        if (!r) remoteLasers.current.set(clientId, r = { s: new LaserSession(), color: LASER_COLOR, src: null });
+        r.color = s.user?.color ?? LASER_COLOR;
+        r.name = s.user?.name;
+        if (r.src === l.pts && r.s.held) return;
+        r.src = l.pts;
+        const pts = l.pts.slice(0, 4000).filter(q => Array.isArray(q) && Number.isFinite(q[0]) && Number.isFinite(q[1]))
+          .map(([x, y, p]) => [x, y, typeof p === 'number' && p >= 0 && p <= 1 ? p : 0.5] as [number, number, number]);
+        if (pts.length) r.s.hold(pts, l.pen === true, now, typeof l.n === 'number' ? l.n : undefined);
       });
-      const now = performance.now();
-      for (const [clientId, t] of remoteLasers.current) {
-        if (!seen.has(clientId) && t.fadeAt === null) { t.fadeAt = now; setTimeout(() => { remoteLasers.current.delete(clientId); setPeerTick(k => k + 1); }, LASER_FADE_MS + 50); }
+      for (const [clientId, r] of remoteLasers.current) {
+        if (seen.has(clientId) || !r.s.held) continue;
+        r.s.end(now);
+        setTimeout(() => { if (remoteLasers.current.get(clientId) === r && r.s.gone(performance.now())) { remoteLasers.current.delete(clientId); setPeerTick(k => k + 1); } }, LASER_FADE_MS + 50);
       }
       setPeerTick(t => t + 1);
     };
@@ -378,6 +395,21 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     rerender();
   };
 
+  /** my laser's trace held to the others (board coordinates, with the pressure) */
+  const sendLaser = () => {
+    const t = laser.held;
+    if (!t) return;
+    const msg: BoardLaser = { n: t.id, pen: t.pen, pts: t.pts.map(([x, y, p]) => [round1(x), round1(y), Math.round(p * 100) / 100]) };
+    try { provider.awareness.setLocalStateField('boardLaser', msg); } catch { /* closing */ }
+  };
+  /** my laser let go: the others' copies fade, and mine go once faded out (unless the pen came back down) */
+  const fadeLaser = () => {
+    try { provider.awareness.setLocalStateField('boardLaser', null); } catch { /* closing */ }
+    clearTimeout(laserGone.current);
+    laserGone.current = setTimeout(() => { if (laser.gone(performance.now())) { laser.clear(); rerender(); } }, LASER_FADE_MS + 50);
+    rerender();
+  };
+
   const onPointerDown = (e: PointerEvent) => {
     const vp = vpRef.current!;
     if (e.pointerType === 'pen' && !loadDeckInk().pencil) saveDeckInk(patchDeckInk(loadDeckInk(), { pencil: true }));
@@ -390,7 +422,7 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
       pinch.current = { dist: Math.hypot(a[0] - b[0], a[1] - b[1]), s: camRef.current.s };
       dragRef.current = null;
       liveRef.current = null;
-      laserRef.current = null;
+      if (laser.held) { laser.drop(performance.now()); fadeLaser(); }
       endHold();
       return;
     }
@@ -409,11 +441,12 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     const onSelBox = !!target.closest?.('.board-selbox');
     vp.setPointerCapture(e.pointerId);
     if (t === 'laser' && (e.pointerType !== 'touch' || finger)) {
-      // the laser pointer: a viewer may use it too — nothing is written
-      laserRef.current = [[bx, by]];
-      setLaserFade(null);
+      // the laser pointer: a viewer may use it too — nothing is written; its traces still fading come back
+      clearTimeout(laserGone.current);
+      laser.begin([[bx, by, pointPressure(e)]], e.pointerType === 'pen', performance.now());
       dragRef.current = { kind: 'laser', start: [bx, by] };
-      try { provider.awareness.setLocalStateField('boardLaser', { pts: [[round1(bx), round1(by)]] }); } catch { /* closing */ }
+      sendLaser();
+      rerender();
     } else if (onSelBox && !corner && selectedRef.current.size && !readOnlyRef.current) {
       // dragging inside the selection box moves the whole selection
       dragRef.current = { kind: 'move', start: [bx, by], origs: origsOf(selectedRef.current) };
@@ -493,19 +526,15 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     const d = dragRef.current;
     if (!d && !liveRef.current) return;
     const [bx, by] = toBoard(e.clientX, e.clientY);
-    if (d?.kind === 'laser' && laserRef.current) {
-      const pts = laserRef.current;
-      for (const ev of e.getCoalescedEvents?.() ?? [e]) {
+    if (d?.kind === 'laser' && laser.held) {
+      const evs = e.getCoalescedEvents?.() ?? [];
+      for (const ev of evs.length ? evs : [e]) {
         const [x, y] = toBoard(ev.clientX, ev.clientY);
-        const last = pts[pts.length - 1];
-        if ((last[0] - x) ** 2 + (last[1] - y) ** 2 < 1 / (camRef.current.s * camRef.current.s)) continue;
-        pts.push([x, y]);
-        if (pts.length > 1500) pts.shift();
+        const pts = laser.held!.pts, last = pts[pts.length - 1];
+        if ((last[0] - x) ** 2 + (last[1] - y) ** 2 < 0.25 / (camRef.current.s * camRef.current.s)) { if (ev.pointerType === 'pen' && ev.pressure > 0) last[2] = ev.pressure; continue; }
+        laser.add([x, y, pointPressure(ev)], now);
       }
-      if (now - awarenessSend.current > 40 || pts.length < 4) {
-        awarenessSend.current = now;
-        try { provider.awareness.setLocalStateField('boardLaser', { pts: pts.map(([x, y]) => [round1(x), round1(y)]) }); } catch { /* closing */ }
-      }
+      if (now - awarenessSend.current > 40 || laser.held!.pts.length < 4) { awarenessSend.current = now; sendLaser(); }
       rerender();
     } else if (d?.kind === 'pan') {
       setCam(c => ({ ...c, tx: e.clientX - d.start[0], ty: e.clientY - d.start[1] }));
@@ -603,14 +632,10 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
   const onPointerUp = (e: PointerEvent) => {
     pointers.current.delete(e.pointerId);
     if (pointers.current.size < 2) pinch.current = null;
-    if (dragRef.current?.kind === 'laser' && laserRef.current) {
-      // lifted: the trace lingers and fades (CSS); the others fade theirs when the field vanishes
-      const pts = laserRef.current;
-      laserRef.current = null;
-      const key = Date.now();
-      setLaserFade({ pts, key });
-      setTimeout(() => setLaserFade(f => (f && f.key === key ? null : f)), LASER_FADE_MS + 50);
-      try { provider.awareness.setLocalStateField('boardLaser', null); } catch { /* closing */ }
+    if (dragRef.current?.kind === 'laser' && laser.held) {
+      // lifted: the traces linger and fade (CSS); the others fade theirs when the field vanishes
+      laser.end(performance.now());
+      fadeLaser();
     }
     const live = liveRef.current;
     const drawn = drawingRef.current;
@@ -887,18 +912,27 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
   const toolBtn = (t: Tool, label: string, title: string) => (
     <button class={'small-btn' + (tool === t ? ' active' : '')} data-tool={t} title={title} onClick={() => setTool(t)}>{face('bd-' + t, label)}</button>
   );
-  /** a laser trace as SVG: a wide soft glow under a bright core, a dot at the head — all sized for the screen, not the board */
-  const laserSvg = (t: LaserTrail, key: string | number, mine: boolean) => {
-    const d = laserPathD(t.pts);
-    const [hx, hy] = t.pts[t.pts.length - 1];
+  /**
+   * A laser session as SVG (app/laser.ts): its traces drawn as the pen draws, over one soft glow, and
+   * a dot where it points while held — sized for the screen, not the board. Lifted, it fades as a whole (CSS).
+   */
+  const laserSvg = (s: LaserSession, color: string, key: string, mine: boolean, name?: string) => {
+    if (s.gone(performance.now())) return null;
     const k = 1 / cam.s;
+    const nib = loadDeckInk().nib;
+    let glow = '';
+    const lines: { w: number; d: string }[] = [];
+    for (const t of s.traces) { const p = tracePaths(t, nib, cam.s); glow += p.glow; lines.push(...p.runs); }
+    const held = s.held, head = held?.pts[held.pts.length - 1];
     return (
-      <svg key={key} class={'board-laser' + (t.fadeAt !== null ? ' fade' : '')} style={{ left: 0, top: 0, overflow: 'visible' }} width={1} height={1} data-laser={mine ? 'mine' : 'peer'}>
-        <path d={d} fill="none" stroke={t.color} stroke-opacity={0.3} stroke-width={11 * k} stroke-linecap="round" stroke-linejoin="round" />
-        <path d={d} fill="none" stroke={t.color} stroke-opacity={0.95} stroke-width={3.2 * k} stroke-linecap="round" stroke-linejoin="round" />
-        <circle cx={hx} cy={hy} r={8 * k} fill={t.color} fill-opacity={0.5} />
-        <circle cx={hx} cy={hy} r={2.2 * k} fill="#fff" fill-opacity={0.9} />
-        {t.name && t.fadeAt === null && <text x={hx + 12 * k} y={hy - 8 * k} font-size={11 * k} fill={t.color} font-family="system-ui, sans-serif">{t.name}</text>}
+      <svg key={key} class={'board-laser' + (s.liftedAt !== null ? ' fade' : '')} style={{ left: 0, top: 0, overflow: 'visible', animationDuration: LASER_FADE_MS + 'ms' }} width={1} height={1} data-laser={mine ? 'mine' : 'peer'}>
+        <g fill="none" stroke={color} stroke-linecap="round" stroke-linejoin="round">
+          <path d={glow} stroke-opacity={LASER_GLOW_OPACITY} stroke-width={LASER_GLOW_W * k} />
+          {lines.map((r, i) => <path key={i} d={r.d} stroke-width={r.w} />)}
+        </g>
+        {head && <circle cx={head[0]} cy={head[1]} r={8 * k} fill={color} fill-opacity={0.5} />}
+        {head && <circle cx={head[0]} cy={head[1]} r={2.2 * k} fill="#fff" fill-opacity={0.9} />}
+        {head && name && <text x={head[0] + 12 * k} y={head[1] - 8 * k} font-size={11 * k} fill={color} font-family="system-ui, sans-serif">{name}</text>}
       </svg>
     );
   };
@@ -954,9 +988,8 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
           </svg>
         )}
         {/* laser traces: the others' (fading once lifted), then mine */}
-        {[...remoteLasers.current.entries()].map(([clientId, t]) => laserSvg(t, 'laser' + clientId, false))}
-        {laserRef.current && laserSvg({ pts: laserRef.current, color: LASER_COLOR, fadeAt: null }, 'mylaser', true)}
-        {laserFade && laserSvg({ pts: laserFade.pts, color: LASER_COLOR, fadeAt: laserFade.key }, 'myfade' + laserFade.key, true)}
+        {[...remoteLasers.current.entries()].map(([clientId, r]) => laserSvg(r.s, r.color, 'laser' + clientId, false, r.name))}
+        {laserSvg(laser, LASER_COLOR, 'mylaser', true)}
         {peers.map(p => (
           <div key={p.clientId} class="board-peer" style={{ left: p.x + 'px', top: p.y + 'px' }}>
             <span class="dot" style={{ background: p.color, transform: `scale(${1 / cam.s})` }} />
@@ -969,7 +1002,7 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
       {pasteAt && !selBB && heldInk() && <LassoBar id="board-paste-bar" groups={pasteGroups(() => { const clip = heldInk(); const at = pasteAt; setPasteAt(null); if (clip) pasteClip(clip, at); })} rect={clientBox({ x: pasteAt[0], y: pasteAt[1], w: 0, h: 0 })} />}
       <div class="board-tools" onPointerDown={e => e.stopPropagation()}>
         {toolBtn('select', '⤢', 'Select / move (drag empty space to pan)')}
-        {toolBtn('laser', '🔴', 'Laser pointer — a glowing trace that stays while you hold the pen down and fades when you lift it; not saved, seen live by everyone on the board')}
+        {toolBtn('laser', '🔴', 'Laser pointer — a glowing trace that stays while you hold the pen down and fades when you lift it (put down again before it is gone, it comes back); not saved, seen live by everyone on the board')}
         {!readOnly && toolBtn('note', '🗒', 'Sticky note')}
         {!readOnly && <button class="small-btn" title="Add images (or paste / drag them in)" onClick={pickImages}>{face('bd-image', '🖼')}</button>}
         <button class={'small-btn' + (fingerDraw ? ' active' : '')} data-finger-draw title={fingerDraw ? 'Drawing with a finger is on — a finger draws, two fingers pan and zoom (click to let a finger pan)' : 'Draw with a finger (otherwise only a pen or the mouse draws; a finger pans)'} onClick={() => setFingerDraw(!fingerDraw)}>{face('bd-finger', '☝')}</button>

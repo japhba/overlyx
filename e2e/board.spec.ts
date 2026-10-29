@@ -140,7 +140,7 @@ test('the laser pointer leaves a fading trace and writes nothing; the selected p
   await page.mouse.up();
   // lifted: the trace fades out and is gone; no stroke object was created
   await expect(page.locator('.board-laser.fade')).toBeVisible();
-  await expect(page.locator('.board-laser')).toHaveCount(0, { timeout: 3000 });
+  await expect(page.locator('.board-laser')).toHaveCount(0, { timeout: 6000 });
   await expect(page.locator('.board-stroke:not(.live)')).toHaveCount(0);
   await expect.poll(() => readFileSync(LASER_BOARD, 'utf8')).toBe('{"overlyx":"board","v":1,"objects":{\n}}\n');
 

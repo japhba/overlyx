@@ -50,21 +50,21 @@ async function laser(page: Page, scope: FrameLocator | Page, surface: Locator, p
   await expect(pos).toHaveText('1 / 2');
   await page.keyboard.press('l');
   await expect(surface).toHaveClass(/olpk-laser-on/);
-  // moving: a dot and a tail behind it, which fades once the mouse rests
+  // moving: a dot and a tail behind it, which shortens away once the mouse rests
   await page.mouse.move(cx - 120, cy);
   await page.mouse.move(cx + 120, cy + 40, { steps: 12 });
   await expect(ui.locator('svg.laser g.live circle.head')).toHaveCount(1);
-  await expect(ui.locator('svg.laser g.live g.tail line').first()).toBeAttached();
-  await expect(ui.locator('svg.laser g.live g.tail line')).toHaveCount(0, { timeout: 3000 });
+  await expect(ui.locator('svg.laser g.live g.trace path.glow').first()).toBeAttached();
+  await expect(ui.locator('svg.laser g.live g.trace')).toHaveCount(0, { timeout: 3000 });
   await expect(ui.locator('svg.laser g.live circle.head')).toHaveCount(1);
-  // pressed and dragged: a trace like the whiteboard's, held, then fading once lifted — the slide stays
+  // pressed and dragged: a trace as the whiteboard's (app/laser.ts), held, then fading once lifted — the slide stays
   await page.mouse.down();
   await page.mouse.move(cx - 60, cy - 60, { steps: 10 });
-  await expect(ui.locator('svg.laser g.live g.held path.glow')).toHaveCount(1);
-  await expect(ui.locator('svg.laser g.live g.held path.core')).toHaveCount(1);
+  await expect(ui.locator('svg.laser g.mylaser g.trace path.glow')).toHaveCount(1);
+  await expect(ui.locator('svg.laser g.mylaser')).toHaveAttribute('opacity', '1');
   await page.mouse.up();
-  await expect(ui.locator('svg.laser g.trace.fade')).toHaveCount(1);
-  await expect(ui.locator('svg.laser g.trace.fade')).toHaveCount(0, { timeout: 3000 });
+  await expect.poll(() => ui.locator('svg.laser g.mylaser').getAttribute('opacity').then(Number)).toBeLessThan(1);
+  await expect(ui.locator('svg.laser g.mylaser g.trace')).toHaveCount(0, { timeout: 6000 });
   await page.mouse.click(cx, cy);
   await page.waitForTimeout(300);
   await expect(pos).toHaveText('1 / 2');

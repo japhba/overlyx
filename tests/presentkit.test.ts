@@ -1,11 +1,13 @@
 /**
  * The presenting tools' arithmetic (packages/client/src/app/presentkit.ts): zooming about a point,
  * the clamps that keep the slide on screen, pinches, panning, wheel factors, the laser's tail ageing,
- * and that the laser looks like the whiteboard's.
+ * and the laser's traces (app/laser.ts, the same in the margins and on the whiteboard): drawn as the
+ * pen draws at one opacity, fading together once lifted, back when the pen comes down again in time.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { clampView, zoomAt, pinchView, panBy, wheelZoomFactor, liveTail, tailSegments, traceSvg, tailSvg, isZoomed, IDENTITY, LASER_COLOR, LASER_FADE_MS, ZOOM_MAX, type ZoomView } from '../packages/client/src/app/presentkit';
+import { clampView, zoomAt, pinchView, panBy, wheelZoomFactor, liveTail, tailSvg, isZoomed, IDENTITY, LASER_COLOR, LASER_FADE_MS, ZOOM_MAX, type ZoomView } from '../packages/client/src/app/presentkit';
+import { LaserSession, tracesSvg, LASER_W } from '../packages/client/src/app/laser';
 
 const W = 1600, H = 900;
 // a 16:10 slide fitted into a 16:9 window: full height, letterboxed left and right
@@ -101,30 +103,68 @@ describe('wheel', () => {
 });
 
 describe('the laser', () => {
-  it('the tail keeps only the points younger than its age, fading towards the oldest', () => {
+  it('the tail keeps only the points younger than its age, drawn at one opacity', () => {
     const pts = [{ x: 0, y: 0, t: 0 }, { x: 10, y: 0, t: 200 }, { x: 20, y: 0, t: 400 }, { x: 30, y: 0, t: 600 }];
     expect(liveTail(pts, 650, 500).map(p => p.x)).toEqual([10, 20, 30]);
-    const segs = tailSegments(pts, 650, 500);
-    expect(segs).toHaveLength(2);
-    expect(segs[0].a).toBeLessThan(segs[1].a);
-    expect(segs[1].a).toBeCloseTo(0.9);
-    expect(tailSegments(pts, 5000, 500)).toEqual([]);
     expect(tailSvg(pts, 5000)).toBe('');
-    expect(tailSvg(pts, 650)).toContain('<line');
-  });
-  it('draws a held trace as the board does: a wide soft glow, a bright core, a dot with a white centre', () => {
-    const svg = traceSvg([{ x: 0, y: 0 }, { x: 10, y: 5 }, { x: 20, y: 0 }]);
+    const svg = tailSvg(pts, 650);
     expect(svg).toContain('class="glow"');
-    expect(svg).toContain('stroke-width="11"');
-    expect(svg).toContain('stroke-width="3.2"');
-    expect(svg).toContain('fill="#fff"');
-    expect(svg).toContain(LASER_COLOR);
-    // a single point: the dot only
-    expect(traceSvg([{ x: 3, y: 4 }])).not.toContain('<path');
+    expect(svg).not.toMatch(/stroke-opacity="(?!0\.3")/);
+    expect(svg).not.toContain('<line');
   });
-  it('has the whiteboard\'s colour and fade time', () => {
+  it('draws traces as the pen does, over one glow, in its colour', () => {
+    const s = new LaserSession();
+    s.begin([[0, 0, 0.5]], false, 0);
+    for (let x = 1; x <= 40; x++) s.add([x * 2, Math.sin(x / 5) * 10, 0.5], 0);
+    const svg = tracesSvg(s.traces, LASER_COLOR, {});
+    expect(svg).toContain(LASER_COLOR);
+    expect(svg.match(/class="glow"/g)).toHaveLength(1);
+    expect(svg).toContain('stroke-width="11"');
+    expect(svg).toContain(`stroke-width="${LASER_W}"`);
+    // a Pencil's pressure makes the width vary, as the pen's
+    const p = new LaserSession();
+    p.begin([[0, 0, 0.1]], true, 0);
+    for (let x = 1; x <= 60; x++) p.add([x * 2, 0, x < 30 ? 0.1 + x / 40 : 0.9], 0);
+    p.end(0);
+    expect(new Set([...tracesSvg(p.traces, LASER_COLOR, {}).matchAll(/stroke-width="([\d.]+)"/g)].map(m => m[1])).size).toBeGreaterThan(3);
+  });
+  it('lifted, the traces fade out together; down again in time, they come back and the new one joins them', () => {
+    const s = new LaserSession();
+    s.begin([[0, 0, 0.5]], false, 0);
+    s.add([10, 0, 0.5], 10);
+    expect(s.alpha(500)).toBe(1);
+    s.end(1000);
+    expect(s.alpha(1000 + LASER_FADE_MS / 2)).toBeCloseTo(0.5);
+    s.begin([[50, 50, 0.5]], false, 1000 + LASER_FADE_MS / 2);
+    expect(s.traces).toHaveLength(2);
+    expect(s.alpha(1000 + LASER_FADE_MS * 2)).toBe(1);
+    s.end(5000);
+    expect(s.gone(5000 + LASER_FADE_MS)).toBe(true);
+    // too late: a session of its own
+    s.begin([[0, 0, 0.5]], false, 5000 + LASER_FADE_MS + 1);
+    expect(s.traces).toHaveLength(1);
+  });
+  it('gathers another\'s held traces by their numbers', () => {
+    const s = new LaserSession();
+    s.hold([[0, 0, 0.5]], false, 0, 7);
+    s.hold([[0, 0, 0.5], [5, 5, 0.5]], false, 10, 7);
+    expect(s.traces).toHaveLength(1);
+    s.hold([[9, 9, 0.5]], false, 20, 8);
+    expect(s.traces).toHaveLength(2);
+    // (a sender that numbers none: one trace until it lets go)
+    const o = new LaserSession();
+    o.hold([[0, 0, 0.5]], false, 0);
+    o.hold([[0, 0, 0.5], [1, 1, 0.5]], false, 5);
+    expect(o.traces).toHaveLength(1);
+    o.end(10);
+    o.hold([[3, 3, 0.5]], false, 20);
+    expect(o.traces).toHaveLength(2);
+  });
+  it('the margins\' and the whiteboard\'s laser is this one', () => {
     const ink = readFileSync(new URL('../packages/client/src/editor/plugins/ink.ts', import.meta.url), 'utf8');
-    expect(ink).toContain(`export const LASER_COLOR = '${LASER_COLOR}'`);
-    expect(ink).toContain(`export const LASER_FADE_MS = ${LASER_FADE_MS}`);
+    const board = readFileSync(new URL('../packages/client/src/app/BoardEditor.tsx', import.meta.url), 'utf8');
+    expect(ink).toContain("from '../../app/laser'");
+    expect(board).toContain("from './laser'");
+    expect(LASER_FADE_MS).toBe(3000);
   });
 });

@@ -333,10 +333,10 @@ test('the laser pointer traces over the text while the button is held, fades aft
     // the other client sees it in place (anchored to the same paragraph, in the pointer's presence colour)
     const boxB = (await pb.locator('.lyx-editor .lyx-par').nth(1).boundingBox())!;
     await expect.poll(() => canvasPixel(pb, boxB.x + 70, boxB.y + boxB.height / 2).then(([, , , al]) => al > 100), { timeout: 5000 }).toBe(true);
-    // lifted: gone within the second, on both sides — and nothing was written to the document
+    // lifted: faded out within three seconds, on both sides — and nothing was written to the document
     await pa.mouse.up();
-    await expect.poll(() => canvasPixel(pa, boxA.x + 70, yA).then(([, , , al]) => al), { timeout: 3000 }).toBe(0);
-    await expect.poll(() => canvasPixel(pb, boxB.x + 70, boxB.y + boxB.height / 2).then(([, , , al]) => al), { timeout: 3000 }).toBe(0);
+    await expect.poll(() => canvasPixel(pa, boxA.x + 70, yA).then(([, , , al]) => al), { timeout: 6000 }).toBe(0);
+    await expect.poll(() => canvasPixel(pb, boxB.x + 70, boxB.y + boxB.height / 2).then(([, , , al]) => al), { timeout: 6000 }).toBe(0);
     expect(await pa.locator('.lyx-editor .lyx-sketch').count()).toBe(sketches);
     // back to the pen: the text column is a hole again
     await pa.click('[data-tb="i-pen"]');
