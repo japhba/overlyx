@@ -2487,7 +2487,10 @@ function startInk(e: PointerEvent, slide: HTMLElement | null): void {
   svg.setAttribute('class', 'ol-ink');
   svg.setAttribute('aria-hidden', 'true');
   const hl = inkStyle.opacity < 1;
-  svg.setAttribute('style', `position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none${hl ? '; mix-blend-mode: multiply' : ''}`);
+  // (a layer of its own: each frame paints the stroke alone — in the slide's, every frame painted again
+  // the strokes under it, on a slide full of handwriting ~6× the time in WebKit; the iPad, slower than
+  // the frame, dropped the Pencil's points between frames: laggy, angular lines. The user, 29 Oct 2026)
+  svg.setAttribute('style', `position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; will-change: transform${hl ? '; mix-blend-mode: multiply' : ''}`);
   const g = document.createElementNS(SVG_NS, 'g') as SVGGElement;
   for (const [k, v] of Object.entries(inkPaint())) g.setAttribute(k, v);
   svg.append(g);

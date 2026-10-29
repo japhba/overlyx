@@ -187,7 +187,7 @@ export function slideTitle(s: Element): string {
 
 export function slideBoxes(): SlideBox[] {
   return slides().map((s, i) => {
-    s.setAttribute('data-ol-slide-index', String(i));
+    if (s.getAttribute('data-ol-slide-index') !== String(i)) s.setAttribute('data-ol-slide-index', String(i));
     const src = srcOf.get(s);
     return { index: i, path: src ? srcPath(src) : [], rect: docRect(s), title: slideTitle(s), ...(s.hasAttribute('data-ol-del') ? { deleted: true } : {}), ...(s.hasAttribute('data-ol-skip') ? { skipped: true } : {}) };
   });

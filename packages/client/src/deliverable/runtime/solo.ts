@@ -54,9 +54,34 @@ const clear = (c: string) => !c || c === 'transparent' || /^rgba\(.*,\s*0(\.0+)?
  */
 export const PAGE_BG = 'background-color: var(--ol-page-bg, #fff); background-image: var(--ol-page-img, none);';
 
+/**
+ * What the page's own colours come from: its style sheets and its html's and body's classes and
+ * styles, not the editor's. A link to a style sheet or an @import: unknown (it may not have loaded yet).
+ */
+function pageStyleKey(): string | null {
+  const parts: string[] = [];
+  for (const sheet of Array.from(document.styleSheets)) {
+    const el = sheet.ownerNode as Element | null;
+    if (!el || el.localName !== 'style') return null;
+    if (el.hasAttribute('data-ol-runtime')) continue;
+    const css = el.textContent ?? '';
+    if (/@import/i.test(css)) return null;
+    parts.push(css);
+  }
+  const own = (el: Element | null) => (el?.getAttribute('class') ?? '').split(/\s+/).filter(c => !c.startsWith('ol-')).join(' ');
+  parts.push(own(document.documentElement), own(document.body), document.body?.getAttribute('style') ?? '');
+  return parts.join('\n');
+}
+let readFor: string | null = null;
+
 /** what the page paints round its slides (read with the editor's colour off for a moment: `ol-bg-read`), for PAGE_BG */
 export function notePageBackground(): void {
-  const root = document.documentElement;
+  // (read again only when the page's styling changed: the read restyled the whole page — after every
+  // stroke drawn, on a deck full of ink some 6 ms in WebKit)
+  // (and when the colour set is gone: a new style written on the page's html replaces it)
+  const key = pageStyleKey(), root = document.documentElement;
+  if (key !== null && key === readFor && root.style.getPropertyValue('--ol-page-bg')) return;
+  readFor = key;
   root.classList.add('ol-bg-read');
   const page = [document.body, root].map(el => getComputedStyle(el)).find(cs => cs.backgroundImage !== 'none' || !clear(cs.backgroundColor));
   const color = page?.backgroundColor ?? '', img = page?.backgroundImage ?? 'none';
