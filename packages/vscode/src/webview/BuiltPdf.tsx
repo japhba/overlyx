@@ -21,8 +21,13 @@ async function fixPdfWorker(): Promise<void> {
     const src = pdfjs.GlobalWorkerOptions.workerSrc;
     if (!src) return;
     const code = await fetch(src, { signal: AbortSignal.timeout(10000) }).then(r => { if (!r.ok) throw new Error(`PDF worker: HTTP ${r.status}`); return r.text(); });
-    pdfjs.GlobalWorkerOptions.workerSrc = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
+    pdfjs.GlobalWorkerOptions.workerSrc = URL.createObjectURL(new Blob([standaloneWorker(code)], { type: 'text/javascript' }));
   } catch (e) { console.warn('pdf.js worker fallback (main thread):', e); }
+}
+/** The development server (overlyx.developmentPath) prefixes the worker with an import from
+ *  "/@vite/client", which a blob URL cannot resolve; the worker only uses its URL helper. */
+export function standaloneWorker(code: string): string {
+  return code.replace(/^import\s*\{\s*injectQuery as __vite__injectQuery\s*\}\s*from\s*["']\/@vite\/client["'];?/, 'const __vite__injectQuery = (url) => url;');
 }
 
 const PHASE: Record<string, string> = { queued: 'waiting for a free build slot', exporting: 'saving the document', compiling: 'running latexmk' };
