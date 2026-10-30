@@ -566,6 +566,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     let timer: ReturnType<typeof setTimeout> | undefined;
     let stopped = false;
     let offlineOpened = false, denied = false, recovering = false, opened = false;
+    let renewAt = 0;
     let waitingForSource: Promise<void> | undefined;
     let stopWaiting = () => {};
     const waitForSource = () => host.ready() ? Promise.resolve() : waitingForSource ??= new Promise<void>(resolve => {
@@ -608,8 +609,8 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
           if (stopped) return;
           for (const frame of [canvasFrame.current, railFrame.current, presentFrame.current]) toFrame(frame, { ol: 'assets', urls });
         }).catch(() => {});
-        clearTimeout(timer);
-        if (l.expires && l.expires > 0) timer = setTimeout(opener.retry, Math.max(60000, l.expires - Date.now() - 10 * 60000));
+        renewAt = l.expires && l.expires > 0 ? l.expires - 10 * 60000 : 0;
+        renewWhenDue();
       },
       onState: state => {
         setLinkState(state);
@@ -621,10 +622,19 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
       },
     });
     retryLink.current = opener.retry;
+    // the link renewed before it expires, by the wall clock checked each minute: one long timer stood
+    // still while the computer slept, and after a night the frame asked for new pictures under an
+    // expired link (broken images)
+    const due = () => renewAt > 0 && Date.now() >= renewAt;
+    function renewWhenDue() {
+      clearTimeout(timer);
+      if (renewAt > 0) timer = setTimeout(() => { if (due()) opener.retry(); else renewWhenDue(); }, 60000);
+    }
     const recover = () => {
       if (offlineOpened && !denied) {
         if (!recovering) { recovering = true; opener.retry(); }
-      } else opener.resume();
+      } else if (due() && !denied) opener.retry();
+      else opener.resume();
     };
     let wasOnline = host.online();
     const offStatus = host.onStatus(() => {

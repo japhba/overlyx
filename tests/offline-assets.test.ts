@@ -39,6 +39,17 @@ it('restores the exact canonical DOM on serialization after display-only image, 
   expect(live.querySelector('img')!.getAttribute('src')).toBe(image);
 });
 
+it('maps a picture read under a renewed link token to the frame still opened with the old one', () => {
+  // after a reconnection the editor reads the assets under a new /ol-d/<token>/; the open frame resolves against its first
+  const frameBase = 'https://example.invalid/ol-d/OLD.sig/talk/', newBase = 'https://example.invalid/ol-d/NEW.sig/talk/';
+  const live = document.createElement('section'); live.innerHTML = '<img src="images/photo.png"><p style="background:url(images/photo.png)">x</p>';
+  mapAssets(live, { [new URL('images/photo.png', newBase).href]: image }, frameBase);
+  expect(live.querySelector('img')!.getAttribute('src')).toBe(image);
+  expect(live.querySelector('p')!.getAttribute('style')).toContain(image);
+  // another folder of the project stays another file
+  expect(mappedSrcset('images/photo.png', { [new URL('../other/images/photo.png', newBase).href]: image }, frameBase)).toBe('images/photo.png');
+});
+
 it('retains the first raw source while refreshing mapped assets to a new version', () => {
   const live = document.createElement('section'); live.innerHTML = '<img src="photo.png"><style>.hero{background:url(photo.png)}</style>';
   const canonical = live.outerHTML;

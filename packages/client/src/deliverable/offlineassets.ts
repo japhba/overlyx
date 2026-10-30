@@ -48,8 +48,29 @@ export function mappedSrcset(value: string, assets: AssetUrls, base: string): st
   return result + value.slice(end);
 }
 
+/**
+ * A deliverable's files are addressed through a capability token (`/ol-d/<token>/…`) that is renewed —
+ * after a reconnection the assets were read under a new one while the frame still resolves against the
+ * one it opened with: matched without it (else every picture fell back to the network, under an
+ * expired token after a night asleep, and showed as a broken image).
+ */
+const TOKEN = /\/ol-d\/[^/]+\//;
+const tokenless = new WeakMap<AssetUrls, Map<string, string>>();
+function byFile(assets: AssetUrls): Map<string, string> {
+  let index = tokenless.get(assets);
+  if (!index) {
+    index = new Map();
+    for (const [url, value] of Object.entries(assets)) if (TOKEN.test(url)) index.set(url.replace(TOKEN, '/ol-d/~/'), value);
+    tokenless.set(assets, index);
+  }
+  return index;
+}
+
 export function mappedAsset(value: string, assets: AssetUrls, base: string): string {
-  try { return assets[new URL(value, base).href] ?? value; } catch { return value; }
+  try {
+    const url = new URL(value, base).href;
+    return assets[url] ?? (TOKEN.test(url) ? byFile(assets).get(url.replace(TOKEN, '/ol-d/~/')) : undefined) ?? value;
+  } catch { return value; }
 }
 
 export function mappedCss(css: string, assets: AssetUrls, base: string): string {
