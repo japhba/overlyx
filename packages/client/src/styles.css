@@ -3747,9 +3747,13 @@ html body .lyx-editor.ol-article > :is(.lyx-layout-itemize, .lyx-layout-enumerat
 .lyx-editor.ol-article .lyx-inset.ol-htmlblock.ol-htmlblock-quiet { margin: 0.4em 0; }
 .lyx-editor.ol-article .lyx-inset.ol-htmlblock.ol-htmlblock-quiet > .inset-box > .inset-label { position: static; opacity: 0.7; }
 /* the page pane (app/ArticlePage.tsx): the page at the pane's width, or a phone's */
-.article-page-view { flex: 1; min-height: 0; display: flex; justify-content: center; background: var(--muted2); }
-.article-page-view > iframe { flex: 1; border: 0; background: #fff; max-width: 100%; }
-.article-page-view.phone > iframe { flex: 0 0 auto; margin: 12px 0; border-radius: 18px; box-shadow: 0 2px 16px rgba(0, 0, 0, 0.25); }
+/* the page shown and its reload loading beneath it share one cell (app/ArticlePage.tsx): the reload is
+   covered, not hidden — a hidden frame may not run its animation frames, and it never settles */
+.article-page-view { flex: 1; min-height: 0; display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); background: var(--muted2); }
+.article-page-view > iframe { grid-area: 1 / 1; place-self: stretch; width: auto; height: auto; min-width: 0; min-height: 0; border: 0; background: #fff; max-width: 100%; z-index: 1; }
+.article-page-view > iframe.beneath { z-index: 0; pointer-events: none; }
+.article-page-view > .pdf-empty { grid-area: 1 / 1; }
+.article-page-view.phone > iframe { justify-self: center; margin: 12px 0; border-radius: 18px; box-shadow: 0 2px 16px rgba(0, 0, 0, 0.25); }
 .editor-loading { min-height: 60vh; }
 /* math the page has no TeX for (MathML another tool wrote, editor/nodeviews/htmlblock.ts): rendered in the text, its source behind the label */
 .lyx-editor.ol-article .lyx-inset.ol-rawmath > .inset-box { position: relative; border: 0; background: none; padding: 0; margin: 0; }

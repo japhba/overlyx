@@ -308,12 +308,14 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
 
     // Reconcile after returning to the editor even if a filesystem notification was missed
     // (for example, a file on NFS edited on another machine or while SSH was disconnected).
+    // A snapshot only when the file did change: the editor takes each as a save (an article's
+    // Page pane loads again, the metadata is fetched anew) — every focus of the window redrew it.
     const refreshDocuments = () => {
       this.applyChain = this.applyChain.then(async () => {
         for (const target of [session, ...related.values()]) {
-          await target.syncFromDisk();
-          pushSnapshot(target);
+          if (await target.syncFromDisk()) pushSnapshot(target);
         }
+        metadataChanged();
       }).catch(e => void vscode.window.showErrorMessage(`OverLyX could not refresh open documents: ${String(e)}`));
     };
     subs.push(panel.onDidChangeViewState(() => {

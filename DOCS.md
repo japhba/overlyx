@@ -3615,7 +3615,17 @@ not on the deliverable canvas. The file stays a plain web page that any host can
   the frame; the frame follows what is typed there.
 * **The page pane.** Where a LaTeX document has its PDF, an article has the page as published
   (`client/src/app/ArticlePage.tsx`, runtime `view` mode; reloaded after saves, where it was
-  scrolled to; a phone's width on request). Its PDF is the page printed by the renderer's headless
+  scrolled to; a phone's width on request). A reload loads in a second frame *beneath* the page
+  shown — covered, not hidden: a hidden cross-origin frame may get no animation frames and never
+  settle — and takes its place on its `viewReady` + first `viewScroll` (150 ms at most; 15 s if it
+  never says ready), so a save never shows the page loading or its math typeset again. The frames
+  are keyed by URL: Preact leaves the surviving one in place (moved, it would load again). A pinch
+  (Ctrl/⌘+wheel, Safari's gesture events, two fingers) magnifies the page ×1–4 inside its frame
+  (`runtime/viewzoom.ts`, only with an explicit `?ol=view` in a frame): the root keeps its size and
+  is scaled from its corner, so any point can stay under the fingers; the scale travels with
+  `viewScroll` / `viewScrollTo` and outlasts reloads; the ruler hides while magnified. The VS Code
+  host sends a snapshot on focus only when the file changed (`refreshDocuments`): each snapshot
+  counts as a save and reloaded the page. Its PDF is the page printed by the renderer's headless
   Chromium (`export.ts printArticle`, `render.ts deliverablePdf`); Export ▸ LaTeX writes it as a
   markdown document is written. No automatic PDF builds.
 * **Any web page.** Math another tool rendered becomes a formula when the page has its TeX —

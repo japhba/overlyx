@@ -32,6 +32,12 @@ export const vscode: VsCodeApi = (window as unknown as { __OVERLYX_VSCAPI?: VsCo
 
 if (import.meta.hot) {
   import.meta.hot.on('overlyx:reload-required', () => vscode.postMessage({ type: 'notify', text: 'This source change requires Developer: Reload Window. Save your document first.', kind: 'info' }));
+  // Vite reloads the page once its server answers again after the connection dropped: the live
+  // service restarts at each upstream update, Remote-SSH reconnects, the laptop sleeps. In a webview
+  // that redraws every OverLyX pane at once (or leaves it blank: the frame's own URL is an empty
+  // page) and drops the editor's undo history. The client awaits its listeners before reloading:
+  // one that never settles keeps the page; this webview's hot updates stop until it is reopened.
+  import.meta.hot.on('vite:ws:disconnect', () => new Promise<never>(() => {}));
 }
 
 /** Apply the VS Code theme to the OverLyX theme attribute. */

@@ -76,7 +76,7 @@ export function applyAuthorColors(authors: { id: number; name: string }[]): void
   if (!el) { el = document.createElement('style'); el.id = 'ol-author-colors'; document.head.appendChild(el); }
   // an agent's tracked changes ("Claude (Opus 5.5) [Jan]", formerly "… (MCP)") are grey by default,
   // so the colours stay for human co-authors and the eye can skim the machine's insertions
-  el.textContent = authors.map((a, i) => {
+  const css = authors.map((a, i) => {
     const light = isAgentAuthor(a.name) ? '#757575' : AUTHOR_COLORS[i % AUTHOR_COLORS.length];
     const dk = isAgentAuthor(a.name) ? '#9e9e9e' : AUTHOR_COLORS_DARK[i % AUTHOR_COLORS_DARK.length];
     // an older change goes into black (into the white text on a dark page) by its --change-age
@@ -85,6 +85,8 @@ export function applyAuthorColors(authors: { id: number; name: string }[]): void
       // (lifted only on a dark page: with smart invert off the page is white paper, app/darkpages.ts)
       + `html[data-theme="dark"][data-dark-pages] .lyx-change[data-author="${a.id}"], html[data-theme="dark"][data-dark-pages] .lyx-inset[data-author="${a.id}"], html[data-theme="dark"][data-dark-pages] .ol-scrollmark[data-author="${a.id}"] { --change-color: color-mix(in oklab, ${dk}, var(--editor-fg) calc(var(--change-age, 0%) * ${FADE_DARK})); }`;
   }).join('\n');
+  // (the same rules again — every metadata fetch brings the authors — would restyle the whole document)
+  if (el.textContent !== css) el.textContent = css;
   refreshChangeAges();
 }
 

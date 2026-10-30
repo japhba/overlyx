@@ -1,8 +1,9 @@
 /**
  * An HTML article's right-hand pane (core html/article.ts): where a LaTeX document has its PDF, the
  * page as it is published — its own styles, scripts and fonts, running in the sandbox (server
- * deliverables.ts, runtime "view" mode) — loaded again a moment after each save, where it was
- * scrolled to (runtime/embed.ts startViewSync). A phone's width on request; the PDF is the page
+ * deliverables.ts, runtime "view" mode) — loaded again a moment after each save, beneath the page
+ * shown, which it replaces once settled where the reader was scrolled to (runtime/embed.ts
+ * startViewSync). A pinch magnifies the page (runtime/viewzoom.ts); the scale outlasts the reloads. A phone's width on request; the PDF is the page
  * printed by the server's browser. What the page keeps in its localStorage (a view option it offers)
  * is kept here for each project, as a browser keeps it for a site, and handed back at each load
  * (runtime/storage.ts). The page follows the editor's cursor: the paragraph it is in is brought into
@@ -18,6 +19,7 @@ import { openProjectPath } from '../openpath';
 import { PAGE_STORAGE_NAME, PAGE_STORAGE_MAX } from '../deliverable/runtime/storage';
 import { followWords, type FollowTarget } from '../deliverable/runtime/follow';
 import { Ruler, MAX_WIDTH } from './Ruler';
+import { hostedZoomPill } from './zoomhud';
 
 const PHONE = 390;
 const storeKey = (project: string) => 'ol.pageStorage:' + project;
@@ -85,8 +87,23 @@ export function ArticlePage({ docId, savedAt, view, selTick, syncSeq, ruler, onC
   const [n, setN] = useState(0);
   const [width, setWidth] = useState<number | null>(storedWidth);
   const [column, setColumn] = useState<Column | null>(null);
-  const frame = useRef<HTMLIFrameElement>(null);
-  const scrolled = useRef(0);
+  /**
+   * The page shown and, after a save, the page loading again beneath it: that one takes its place once
+   * it has settled and is scrolled (and magnified) where the reader is, so a save never shows the page
+   * loading or its formulas typeset anew. Each load is a frame of its own (by its URL).
+   */
+  const [shown, setShown] = useState<string | null>(null);
+  const frames = useRef(new Map<string, HTMLIFrameElement>());
+  const win = (s: string | null | undefined) => (s ? frames.current.get(s)?.contentWindow ?? null : null);
+  /** the load that reported itself ready beneath the page shown (it takes its place shortly) */
+  const readyBeneath = useRef<string | null>(null);
+  const swapTimer = useRef(0);
+  /** where the page shown is scrolled to, and the scale a pinch magnified it to (runtime/viewzoom.ts) */
+  const place = useRef({ x: 0, y: 0, z: 1 });
+  const [zoomed, setZoomed] = useState(false);
+  const paneEl = useRef<HTMLDivElement>(null);
+  const hud = useMemo(() => hostedZoomPill(() => paneEl.current, 'data-page-zoomhud', 'Page'), []);
+  useEffect(() => () => { hud.dispose(); clearTimeout(swapTimer.current); }, []);
   const stored = useRef<string | null>(null);
   const viewRef = useRef(view);
   viewRef.current = view;
@@ -95,11 +112,23 @@ export function ArticlePage({ docId, savedAt, view, selTick, syncSeq, ruler, onC
   const pendingSync = useRef<FollowTarget | null>(null);
   const pendingFollow = useRef<FollowTarget | null>(null);
   const followed = useRef('');
-  const sendFollow = (target: FollowTarget) => frame.current?.contentWindow?.postMessage({ ol: 'viewFollow', target }, '*');
+  const shownRef = useRef<string | null>(null);
+  const srcRef = useRef<string | null>(null);
+  const front = () => win(shownRef.current);
+  const sendFollow = (target: FollowTarget, to = front()) => to?.postMessage({ ol: 'viewFollow', target }, '*');
   /** the text width for the page (at a phone's width: the page's own) */
   const widthNow = useRef<number | null>(null);
   widthNow.current = phone ? null : width;
-  const sendWidth = () => frame.current?.contentWindow?.postMessage({ ol: 'viewWidth', width: widthNow.current }, '*');
+  const sendWidth = (to = front()) => to?.postMessage({ ol: 'viewWidth', width: widthNow.current }, '*');
+  /** the load beneath, ready, in place of the page shown */
+  const swap = () => {
+    clearTimeout(swapTimer.current);
+    const s = readyBeneath.current;
+    readyBeneath.current = null;
+    if (!s || s !== srcRef.current || s === shownRef.current) return;
+    ready.current = true;
+    setShown(s);
+  };
   if (stored.current === null) { try { stored.current = localStorage.getItem(storeKey(project)) ?? ''; } catch { stored.current = ''; } }
 
   useEffect(() => {
@@ -120,9 +149,17 @@ export function ArticlePage({ docId, savedAt, view, selTick, syncSeq, ruler, onC
 
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
-      if (!frame.current || e.source !== frame.current.contentWindow) return;
-      const d = e.data as { ol?: string; y?: number } | null;
-      if (d?.ol === 'viewScroll' && typeof d.y === 'number') scrolled.current = d.y;
+      const shownWin = front(), beneath = srcRef.current !== shownRef.current ? win(srcRef.current) : null;
+      if (!e.source || (e.source !== shownWin && e.source !== beneath)) return;
+      const from = e.source as Window, isShown = from === shownWin;
+      const d = e.data as { ol?: string; y?: number; x?: number; z?: number } | null;
+      if (d?.ol === 'viewScroll' && typeof d.y === 'number') {
+        if (isShown) {
+          const z = typeof d.z === 'number' && Number.isFinite(d.z) ? d.z : 1;
+          if (z !== place.current.z) { hud.show(z); setZoomed(z !== 1); }
+          place.current = { x: typeof d.x === 'number' ? d.x : 0, y: d.y, z };
+        } else if (readyBeneath.current) swap();   // (the load beneath is where the reader is)
+      }
       // the page's localStorage changed: given back when the page is loaded again
       const items = (d as { items?: unknown }).items;
       if (d?.ol === 'pageStorage' && items && typeof items === 'object') {
@@ -141,13 +178,20 @@ export function ArticlePage({ docId, savedAt, view, selTick, syncSeq, ruler, onC
       }
       // (loaded: back where the reader was, else at the cursor; a Sync asked for meanwhile shown)
       if (d?.ol === 'viewReady') {
-        ready.current = true;
-        sendWidth();
-        if (scrolled.current) frame.current.contentWindow?.postMessage({ ol: 'viewScrollTo', y: scrolled.current }, '*');
+        if (isShown) ready.current = true;
+        sendWidth(from);
+        const p = place.current, moved = p.y || p.x || p.z !== 1;
+        if (moved) from.postMessage({ ol: 'viewScrollTo', ...p }, '*');
         const v = viewRef.current;
-        const t = pendingSync.current ?? pendingFollow.current ?? (!scrolled.current && v ? cursorTarget(v) : null);
+        const t = pendingSync.current ?? pendingFollow.current ?? (!moved && v ? cursorTarget(v) : null);
         pendingSync.current = pendingFollow.current = null;
-        if (t) sendFollow(t);
+        if (t) sendFollow(t, from);
+        // the load beneath takes the page's place once scrolled there (its viewScroll), or in a moment
+        if (!isShown) {
+          readyBeneath.current = srcRef.current;
+          clearTimeout(swapTimer.current);
+          swapTimer.current = window.setTimeout(swap, 150);
+        }
       }
     };
     window.addEventListener('message', onMessage);
@@ -157,7 +201,24 @@ export function ArticlePage({ docId, savedAt, view, selTick, syncSeq, ruler, onC
   // (the page loads with the width set then, so it shows at that width; later changes go to it as messages)
   const loadWidth = useMemo(() => widthNow.current, [url, n]);
   const src = url ? `${url}?ol=view&n=${n}${loadWidth !== null ? '&w=' + loadWidth : ''}` : null;
-  useEffect(() => { ready.current = false; }, [src]);
+  // the first load is shown as it loads; later ones load beneath it (see `shown`)
+  const visible = shown ?? src;
+  shownRef.current = visible;
+  srcRef.current = src;
+  useEffect(() => { if (src && shown === null) setShown(src); }, [src]);
+  // (a page that never says it is ready — its script failed — is shown all the same, after a while)
+  useEffect(() => {
+    if (!src || !shown || src === shown) return;
+    const t = setTimeout(() => { readyBeneath.current = src; swap(); }, 15000);
+    return () => clearTimeout(t);
+  }, [src, shown]);
+  /** each load's frame name, as it was made (it carries the page's stored items, runtime/storage.ts) */
+  const names = useRef(new Map<string, string | undefined>());
+  const nameOf = (s: string) => {
+    if (!names.current.has(s)) names.current.set(s, stored.current ? PAGE_STORAGE_NAME + stored.current : undefined);
+    return names.current.get(s);
+  };
+  useEffect(() => { for (const k of [...names.current.keys()]) if (k !== visible && k !== src) names.current.delete(k); });
 
   useEffect(() => {
     try { if (width === null) localStorage.removeItem(WIDTH_KEY); else localStorage.setItem(WIDTH_KEY, String(width)); } catch { /* ignore */ }
@@ -197,14 +258,19 @@ export function ArticlePage({ docId, savedAt, view, selTick, syncSeq, ruler, onC
         {printable && <a class="small-btn" href={pdfHref} target="_blank" rel="noopener" title="The page printed as a PDF">PDF</a>}
         {onClose && <button type="button" class="small-btn close" onClick={onClose} title="Hide the page">✕</button>}
       </div>
-      {ruler && !phone && src && column && (
+      {ruler && !phone && !zoomed && src && column && (
         <Ruler width={width ?? Math.round(column.width)} onChange={setWidth}
           page={{ left: column.left, width: column.width, full: column.full, own: column.own, onOwn: () => setWidth(null) }} />
       )}
-      <div class={'article-page-view' + (phone ? ' phone' : '')}>
-        {src ? <iframe ref={frame} key={src} src={src} style={phone ? { width: PHONE + 'px' } : undefined} title="The page as published"
-          name={stored.current ? PAGE_STORAGE_NAME + stored.current : undefined}
-          sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms allow-modals allow-downloads" />
+      <div class={'article-page-view' + (phone ? ' phone' : '')} ref={paneEl}>
+        {/* (by URL: the frame shown stays where it is in the DOM when the one before it goes — moved, it would load again) */}
+        {visible ? [visible, src !== visible ? src : null].map(s => s && (
+          <iframe key={s} ref={(el: HTMLIFrameElement | null) => { if (el) frames.current.set(s, el); else frames.current.delete(s); }}
+            class={s === visible ? undefined : 'beneath'} src={s} style={phone ? { width: PHONE + 'px' } : undefined}
+            title={s === visible ? 'The page as published' : undefined} aria-hidden={s === visible ? undefined : 'true'} tabIndex={s === visible ? undefined : -1}
+            name={nameOf(s)}
+            sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms allow-modals allow-downloads" />
+        ))
           : <div class="pdf-empty">{error ? 'Could not show the page: ' + error : 'Loading the page…'}</div>}
       </div>
     </div>
