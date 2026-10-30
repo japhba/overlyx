@@ -329,7 +329,7 @@ function macroToTex(a: Atom & { t: 'macro' }, ctx: TexContext, mode: 'math' | 't
     }
     return cellToTex(c, ctx, a, i, mode);
   });
-  if (!info || !info.def) {
+  if (info?.def === undefined) {
     // no definition: show the name with its arguments
     return `\\htmlClass{lm-macro}{\\htmlClass{lm-unknown}{\\text{\\textbackslash ${escapeText(a.n)}}}${args.map(s => `\\{${s}\\}`).join('')}}`;
   }
@@ -355,7 +355,7 @@ export function expandUserMacros(tex: string, macros: MacroTable, depth = 0): st
     if (!m) { out += tex[i++]; continue; }
     const name = m[1], info = macros[name];
     let j = i + m[0].length;
-    if (!info?.def || !/^[A-Za-z]/.test(name)) { out += m[0]; i = j; continue; }
+    if (info?.def === undefined || !/^[A-Za-z]/.test(name)) { out += m[0]; i = j; continue; }
     const nopt = info.nopt ?? 0, args: string[] = [];
     let ok = true;
     for (let k = 0; k < info.nargs; k++) {

@@ -12,6 +12,7 @@ export interface MacroDef {
   def: string;           // LaTeX definition body (#1..#n)
   optional?: string;     // default value of the optional first argument, if any
   display?: string;      // LyX "display" form (what LyX shows instead of the expansion)
+  conditional?: boolean; // value of a declared \newif switch; omitted from the renderer's macros
   source: 'lyx' | 'preamble' | 'file';
   raw: string;           // the original definition text
 }
@@ -188,8 +189,8 @@ export function stripComments(s: string): string {
  */
 const STRUCTURAL = new Set(['left', 'right', 'begin', 'end']);
 
-/** Scan LaTeX source for macro definitions. Also returns \input/\include file references. */
-export function macrosFromLatex(text: string, source: MacroDef['source'] = 'preamble'): { macros: MacroDef[]; inputs: string[] } {
+/** Visit definitions, switches and input files at their positions in the source. */
+function scanMacros(text: string, source: MacroDef['source'], add: (macro: MacroDef) => void, input: (name: string) => void, conditionals: Set<string>): void {
   // "\global\long\def\inv#1{\myinv{(#1)}}%% @display {(#1)^{-1}}": the display form OverLyX writes
   // for a LyX macro (latexMacro) — kept for the editor also when the file is read as plain text
   const displays = new Map<string, string>();
@@ -201,20 +202,41 @@ export function macrosFromLatex(text: string, source: MacroDef['source'] = 'prea
     if (nm && g && g[0].trim()) displays.set(nm[1] ?? nm[2], g[0].trim());
   }
   const s = stripComments(text);
-  const macros: MacroDef[] = [];
-  const inputs: string[] = [];
   for (let i = 0; i < s.length; i++) {
     if (s[i] !== '\\') continue;
     const inp = /^\\(?:input|include)\s*\{([^}]+)\}/.exec(s.slice(i));
-    if (inp) { inputs.push(inp[1].trim()); i += inp[0].length - 1; continue; }
+    if (inp) { input(inp[1].trim()); i += inp[0].length - 1; continue; }
+    const cmd = readCsName(s, i);
+    if (!cmd) continue;
+    if (cmd[0] === 'newif') {
+      const name = readCsName(s, cmd[1]);
+      if (name && /^if[A-Za-z@]+$/.test(name[0])) {
+        conditionals.add(name[0]);
+        add({ name: name[0], args: 0, def: '', conditional: false, source, raw: s.slice(i, name[1]) });
+        i = name[1] - 1;
+        continue;
+      }
+    }
+    const assignment = /^(.+)(true|false)$/.exec(cmd[0]);
+    if (assignment && conditionals.has('if' + assignment[1])) {
+      add({ name: 'if' + assignment[1], args: 0, def: '', conditional: assignment[2] === 'true', source, raw: s.slice(i, cmd[1]) });
+      i = cmd[1] - 1;
+      continue;
+    }
     const res = parseMacroAt(s, i, source);
     if (res) {
       const d = displays.get(res[0].name);
       if (d !== undefined && res[0].display === undefined) res[0].display = d;
-      if (!STRUCTURAL.has(res[0].name)) macros.push(res[0]);
+      if (!STRUCTURAL.has(res[0].name)) add(res[0]);
       i = res[1] - 1;
-    }
+    } else i = cmd[1] - 1;
   }
+}
+
+/** Scan LaTeX source for macro definitions. Also returns \input/\include file references. */
+export function macrosFromLatex(text: string, source: MacroDef['source'] = 'preamble'): { macros: MacroDef[]; inputs: string[] } {
+  const macros: MacroDef[] = [], inputs: string[] = [];
+  scanMacros(text, source, m => macros.push(m), name => inputs.push(name), new Set());
   return { macros, inputs };
 }
 
@@ -252,6 +274,8 @@ export interface CollectMacrosOptions {
  */
 export function collectMacros(doc: LyxDocument, resolver: MacroResolver = {}, options: CollectMacrosOptions = {}, seen = new Set<string>()): MacroDef[] {
   const out: MacroDef[] = [];
+  const conditionals = new Set<string>();
+  const visitLatex = (text: string, source: MacroDef['source']) => scanMacros(text, source, m => out.push(m), visitFile, conditionals);
   const visitFile = (name: string) => {
     const candidates = name.endsWith('.tex') ? [name] : [name + '.tex', name];
     for (const c of candidates) {
@@ -259,39 +283,73 @@ export function collectMacros(doc: LyxDocument, resolver: MacroResolver = {}, op
       const txt = resolver.readFile?.(c);
       if (txt === undefined) continue;
       seen.add('file:' + c);
-      const r = macrosFromLatex(txt, 'file');
-      out.push(...r.macros);
-      for (const inp of r.inputs) visitFile(inp);
+      visitLatex(txt, 'file');
+      // Guard recursion, while allowing a later \input to execute the file again.
+      seen.delete('file:' + c);
       return;
     }
   };
   for (const f of options.files ?? []) visitFile(f);
-  if (options.includePreamble !== false) {
-    const pre = macrosFromLatex(getPreamble(doc), 'preamble');
-    out.push(...pre.macros);
-    for (const inp of pre.inputs) visitFile(inp);
-  }
-  // body
-  for (const { inset } of walkInsets(doc.body)) {
-    if (inset.type === 'FormulaMacro') {
-      const md = macroFromLyxLines(inset.lines);
-      if (md) out.push(md);
-    } else if (inset.type === 'Leaf' && inset.name === 'CommandInset' && inset.arg === 'include') {
-      const pm = paramMap(inset.params);
-      const fn = unquote(pm.get('filename'));
-      if (fn && !seen.has('lyx:' + fn)) {
-        seen.add('lyx:' + fn);
-        // a child document (.lyx or .tex) is read as a document: its macros keep their positions
-        // (also the ones inside notes, which LyX evaluates); other files are scanned as text
-        const child = fn.endsWith('.lyx') || fn.endsWith('.tex') || !fn.includes('.') ? resolver.include?.(fn) : undefined;
-        // Fragment parsers attach the master's header to children for layout resolution. Its
-        // preamble has already been collected above and must not override later macro-file defs.
-        if (child) out.push(...collectMacros(child, resolver, { includePreamble: false }, seen));
-        else if (!fn.endsWith('.lyx')) visitFile(fn);
+  const visitDoc = (current: LyxDocument, includePreamble: boolean) => {
+    if (includePreamble) visitLatex(getPreamble(current), 'preamble');
+    for (const { inset } of walkInsets(current.body)) {
+      if (inset.type === 'FormulaMacro') {
+        const md = macroFromLyxLines(inset.lines);
+        if (md) out.push(md);
+      } else if (inset.type === 'Leaf' && inset.name === 'CommandInset' && inset.arg === 'include') {
+        const pm = paramMap(inset.params);
+        const fn = unquote(pm.get('filename'));
+        if (fn && !seen.has('lyx:' + fn)) {
+          seen.add('lyx:' + fn);
+          // a child document (.lyx or .tex) is read as a document: its macros keep their positions
+          // (also the ones inside notes, which LyX evaluates); other files are scanned as text
+          const child = fn.endsWith('.lyx') || fn.endsWith('.tex') || !fn.includes('.') ? resolver.include?.(fn) : undefined;
+          // Fragment parsers attach the master's header to children for layout resolution. Its
+          // preamble has already been collected above and must not override later macro-file defs.
+          if (child) visitDoc(child, false);
+          else if (!fn.endsWith('.lyx')) visitFile(fn);
+        }
       }
     }
-  }
+  };
+  visitDoc(doc, options.includePreamble !== false);
   return out;
+}
+
+// Track unsupported primitive conditionals too, so their \else/\fi cannot close a known switch.
+// Math commands such as \iff are not conditional openers.
+const PRIMITIVE_CONDITIONALS = new Set(['if', 'ifcat', 'ifnum', 'ifdim', 'ifodd', 'ifvmode', 'ifhmode', 'ifmmode', 'ifinner', 'ifvoid', 'ifhbox', 'ifvbox', 'ifx', 'ifeof', 'iftrue', 'iffalse', 'ifcase', 'ifdefined', 'ifcsname', 'iffontchar', 'ifincsname']);
+
+/** Resolve declared boolean switches at render time, keeping unknown or incomplete TeX intact. */
+function resolveConditionals(def: string, values: Map<string, boolean>): string {
+  const out: string[] = [];
+  const stack: { name: string; open: string; yes: string[]; no?: string[] }[] = [];
+  const append = (text: string) => {
+    const frame = stack[stack.length - 1];
+    (frame ? frame.no ?? frame.yes : out).push(text);
+  };
+  let last = 0;
+  for (const token of def.matchAll(/\\([A-Za-z@]+|[\s\S])/g)) {
+    append(def.slice(last, token.index));
+    const name = token[1], frame = stack[stack.length - 1];
+    if (values.has(name) || PRIMITIVE_CONDITIONALS.has(name)) {
+      stack.push({ name, open: token[0], yes: [] });
+    } else if (name === 'else' && frame && frame.no === undefined) {
+      frame.no = [];
+    } else if (name === 'fi' && frame) {
+      stack.pop();
+      const value = values.get(frame.name);
+      append(value === undefined ? frame.open + frame.yes.join('') + (frame.no ? '\\else' + frame.no.join('') : '') + token[0]
+        : (value ? frame.yes : frame.no ?? []).join(''));
+    } else append(token[0]);
+    last = token.index + token[0].length;
+  }
+  append(def.slice(last));
+  while (stack.length) {
+    const frame = stack.pop()!;
+    append(frame.open + frame.yes.join('') + (frame.no ? '\\else' + frame.no.join('') : ''));
+  }
+  return out.join('');
 }
 
 /** Convert macro definitions to the math editor's metadata format (legacy function name). */
@@ -299,11 +357,14 @@ export function toMathliveMacros(macros: MacroDef[]): Record<string, { def: stri
   const out: ReturnType<typeof toMathliveMacros> = {};
   // all definitions, also the internal \@helpers that \mathpalette calls (the last one wins)
   const byName = new Map(macros.map(m => [m.name, m]));
-  for (const m of macros) {
-    if (!/^[A-Za-z]+$/.test(m.name)) continue;
-    const def = m.display ?? sanitizeForMathlive(expandMathpalette(m.def, byName), m);
+  const conditionals = new Map<string, boolean>([['iftrue', true], ['iffalse', false]]);
+  for (const m of byName.values()) if (m.conditional !== undefined) conditionals.set(m.name, m.conditional);
+  for (const m of byName.values()) {
+    if (!/^[A-Za-z]+$/.test(m.name) || m.conditional !== undefined) continue;
+    const resolved = resolveConditionals(m.display ?? expandMathpalette(m.def, byName), conditionals);
+    const def = m.display !== undefined ? resolved : sanitizeForMathlive(resolved, m);
     out[m.name] = { def, args: m.args, expand: false,
-      ...(m.optional !== undefined && m.args > 0 ? { optional: m.optional } : {}) };
+      ...(m.optional !== undefined && m.args > 0 ? { optional: resolveConditionals(m.optional, conditionals) } : {}) };
   }
   return out;
 }
