@@ -19,6 +19,8 @@ import { markDocOpened } from './userSettings.ts';
 import { config } from './config.ts';
 import { isAgentClient, trackMoves } from './agentPresence.ts';
 import { offlineBase, applyClientUpdate } from './offlinemerge.ts';
+import { e2eUpgrade } from './e2e/relay.ts';
+import { isE2eProject } from './e2e/store.ts';
 
 const MSG_SYNC = 0;
 const MSG_AWARENESS = 1;
@@ -125,11 +127,14 @@ export function attachWebSocket(server: Server): void {
     const url = new URL(req.url ?? '/', 'http://localhost');
     // an upgrade for any other path (a browser extension probing the site, …) must not leave the
     // socket dangling: nobody else answers it and the proxy in front keeps it open for minutes
-    if (url.pathname !== '/ws' && url.pathname !== '/ws/') { socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n'); socket.destroy(); return; }
+    const e2e = url.pathname === '/e2e';
+    if (url.pathname !== '/ws' && url.pathname !== '/ws/' && !e2e) { socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n'); socket.destroy(); return; }
     // browsers send the page's origin: a foreign site must not be able to open a socket with our cookie
     if (!originAllowed(req)) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); socket.destroy(); return; }
     const user = userFromCookieHeader(req.headers.cookie);
     if (!user) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); socket.destroy(); return; }
+    // an end-to-end encrypted document: ciphertext relayed (e2e/relay.ts)
+    if (e2e) { try { e2eUpgrade(wss, req, socket, head, user); } catch (e) { console.error('[e2e] upgrade failed:', e); try { socket.write('HTTP/1.1 400 Bad Request\r\n\r\n'); socket.destroy(); } catch { /* gone */ } } return; }
     // (an exception in this listener would take the whole server down: answer it instead)
     try {
       // an id from before its project moved (namespaces.ts) joins the document under its current key
@@ -138,6 +143,8 @@ export function attachWebSocket(server: Server): void {
       const { project, path: rel } = splitDocId(docId);
       const role = roleFor(user, project);
       if (!role) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); socket.destroy(); return; }
+      // an end-to-end encrypted project has no document the server could open (its editors use /e2e)
+      if (isE2eProject(project)) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); socket.destroy(); return; }
       logAccess(project, user.id, 'open', rel || null);
       markDocOpened(user.id, docId);
       const model = url.searchParams.get('model'), needs = connectParams(docId).model;

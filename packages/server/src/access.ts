@@ -140,6 +140,8 @@ export interface ProjectAccess extends Project {
   via: 'owner' | 'member' | 'link' | 'public' | 'admin';
   /** anyone may view it (setPublic) */
   public: boolean;
+  /** end-to-end encrypted (e2e/store.ts) */
+  e2e: boolean;
   /** `avatar`: their picture (Google sign-in), shown beside their comments in the editor */
   owner: { id: number; name: string; username: string; avatar: string | null } | null;
 }
@@ -166,7 +168,7 @@ export function accessibleProjects(user: SessionUser, opts: { files?: boolean } 
     else if (user.isAdmin && adminGrantActive(user.id, p.name)) { role = 'owner'; via = 'admin'; }
     if (role) role = withinScope(user, p.name, role);
     if (!role) continue;
-    out.push({ ...p, title: row?.title ?? null, kind: row?.kind ?? 'project', role, via, public: !!row?.public, owner: row?.owner_id != null ? owners.get(row.owner_id) ?? null : null });
+    out.push({ ...p, title: row?.title ?? null, kind: row?.kind ?? 'project', role, via, public: !!row?.public, e2e: !!row?.e2e, owner: row?.owner_id != null ? owners.get(row.owner_id) ?? null : null });
   }
   return out;
 }
@@ -427,6 +429,7 @@ export function acceptLink(token: string, user: SessionUser): { project: Project
  * editors reconnect).
  */
 export function setPublic(project: string, on: boolean): number[] {
+  if (on && projectRow(project)?.e2e) throw new Error('An end-to-end encrypted project cannot be public');
   if (!projectRow(project)) throw new Error('project not found');
   const visitors = (db.prepare("SELECT user_id FROM project_members WHERE project = ? AND via = 'public' AND user_id IS NOT NULL").all(project) as { user_id: number }[]).map(r => r.user_id);
   db.prepare('UPDATE projects SET public = ? WHERE name = ?').run(on ? 1 : 0, project);

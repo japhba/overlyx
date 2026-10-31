@@ -180,6 +180,17 @@ try { db.exec('ALTER TABLE projects ADD COLUMN public INTEGER NOT NULL DEFAULT 0
 // createLink), and the people who came in through one remember which. The one link of before
 // (projects.link_token / link_role, unused since) moves over with its people.
 try { db.exec('ALTER TABLE project_members ADD COLUMN link_token TEXT'); } catch { /* column exists */ }
+// 2026-10-31: end-to-end encrypted projects (e2e/store.ts): the server keeps only ciphertext for them.
+// Each account's key pair: the public key, and the private key sealed with the account's recovery
+// code (both made in the browser; the server never sees the code or the private key in the clear).
+try { db.exec('ALTER TABLE projects ADD COLUMN e2e INTEGER NOT NULL DEFAULT 0'); } catch { /* column exists */ }
+db.exec(`CREATE TABLE IF NOT EXISTS e2e_user_keys (
+  user_id INTEGER PRIMARY KEY,
+  public_key TEXT NOT NULL,
+  sealed_private TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+)`);
 db.transaction(() => {
   db.exec(`INSERT OR IGNORE INTO share_links (token, project, role, created_by, created_at)
     SELECT link_token, name, link_role, owner_id, COALESCE(link_created_at, created_at) FROM projects WHERE link_token IS NOT NULL AND link_role IN ('view', 'edit')`);
@@ -222,6 +233,8 @@ export interface ProjectRow {
   link_created_at: number | null;
   /** 1: anyone may view the project and clone it, without an account (access.ts setPublic) */
   public?: number;
+  /** 1: end-to-end encrypted — the server keeps only ciphertext (e2e/store.ts) */
+  e2e?: number;
 }
 export interface MemberRow {
   id: number; project: string; user_id: number | null; email: string | null; role: string;

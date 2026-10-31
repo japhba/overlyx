@@ -70,6 +70,9 @@ import { syncRouter } from './sync.ts';
 import { assertRoom, bytesAt, noteWritten, ProjectFullError, directoryBytes, formatBytes } from './projectsize.ts';
 import { runSelfCheck, selfCheckEnabled, selfCheckState } from './selfcheck.ts';
 import { externalSyncOf } from './syncPeers.ts';
+import { e2eRoutes } from './e2e/routes.ts';
+import { kickE2e } from './e2e/relay.ts';
+import { isE2eProject, markE2e, e2eEnabled, closeE2eStore, dropKeys, E2eRefusal } from './e2e/store.ts';
 import { texHeadings, parseBibtex, lyxToPm, exportLyx, splitDocId, projectOfDoc, docPathOf, splitProjectKey, isProjectKey } from '@overlyx/core';
 
 const app = express();
@@ -226,6 +229,8 @@ api.use(usageRoutes());
 api.use(agentRoutes());
 // agents connected over MCP from elsewhere: the account's list, and messages to them (mcpAgents.ts)
 api.use(mcpAgentRoutes());
+// end-to-end encrypted projects: key pairs, wrapped keys, encrypted blobs, the public TeX Live / LyX files (e2e/routes.ts)
+api.use(e2eRoutes());
 
 /* ----------------------------------------------------------------- access */
 
@@ -246,9 +251,24 @@ const needProject = (min: Role) => (req: express.Request, res: express.Response,
   req.params.project = canonicalProject(String(req.params.project ?? ''));
   const role = roleFor(req.user!, req.params.project);
   if (!atLeast(role, min)) { deny(res, role); return; }
+  if (isE2eProject(req.params.project) && !e2eAllows(req)) { refuseE2e(res); return; }
   req.role = role!;
   next();
 };
+
+/**
+ * What the server still does for an end-to-end encrypted project (e2e/store.ts): who is in it
+ * (sharing, its activity, deleting it) and its event stream. Every route that reads or writes its
+ * files or documents is refused — they are ciphertext, served by /api/e2e.
+ */
+function e2eAllows(req: express.Request): boolean {
+  const rest = /^\/projects\/[^/]+(\/.*)?$/.exec(req.path)?.[1] ?? '';
+  if (rest === '') return req.method === 'DELETE';
+  return /^\/(events|activity|share(\/(members|links|owner)(\/[^/]+)?)?)$/.test(rest);
+}
+function refuseE2e(res: express.Response): void {
+  res.status(403).json({ error: new E2eRefusal().message, code: 'e2e' });
+}
 
 /**
  * Document routes (`/docs/<id>/<action>`): reading needs *view*, changing the document *edit*.
@@ -264,6 +284,8 @@ api.all('/docs/*', (req, res, next) => {
   const write = req.method !== 'GET' && !/^(export|folds|place|opened)/.test(action);
   const role = roleFor(req.user!, projectOfDoc(id));
   if (!atLeast(role, write ? 'edit' : 'view')) { deny(res, role); return; }
+  // an end-to-end encrypted project's documents are ciphertext the server cannot open
+  if (isE2eProject(projectOfDoc(id))) { refuseE2e(res); return; }
   req.role = role!;
   next();
 });
@@ -294,6 +316,7 @@ api.get('/projects', (req, res) => {
   const lastFile = lastFileByProject(req.user!.id);
   const people = projectPeople();
   res.json({ projects: accessibleProjects(req.user!).map(p => ({ name: p.name, title: p.title, kind: p.kind, role: p.role, via: p.via, public: p.public, owner: p.owner, files: p.files, lastOpened: opened.get(p.name) ?? null, lastFile: lastFile.get(p.name) ?? null,
+    ...(p.e2e ? { e2e: true } : {}),
     members: people.get(p.name)?.people ?? [], invited: people.get(p.name)?.invited ?? 0 })) });
   void ensureAllRepos();   // directories that appeared since (created by hand, the welcome and starter projects) get their repository
 });
@@ -319,10 +342,14 @@ api.post('/projects', (req, res) => {
     let name: string;
     try { name = ownProjectKey(req.user!.id, String(req.body?.name ?? '')); } catch (e) { res.status(400).json({ error: (e as Error).message }); return; }
     if (fs.existsSync(projectDir(name)) || projectRow(name)) { res.status(409).json({ error: 'a project with this name exists already' }); return; }
+    // end-to-end encrypted (e2e/store.ts): no repository, nothing the server could read
+    const e2e = req.body?.e2e === true;
+    if (e2e && !e2eEnabled) { res.status(503).json({ error: 'End-to-end encrypted projects are switched off on this server' }); return; }
     const p = createProject(name);
     registerProject(name, req.user!.id);
-    ensureRepo(name).catch(e => console.error('[git] init failed:', e));
-    res.json({ project: { name: p.name, title: null, kind: 'project', role: 'owner', via: 'owner', files: p.files } });
+    if (e2e) markE2e(name);
+    else ensureRepo(name).catch(e => console.error('[git] init failed:', e));
+    res.json({ project: { name: p.name, title: null, kind: 'project', role: 'owner', via: 'owner', files: p.files, ...(e2e ? { e2e: true } : {}) } });
   } catch (e) { res.status(400).json({ error: String(e) }); }
 });
 
@@ -463,6 +490,8 @@ api.get('/projects/:project/events', needProject('view'), (req, res) => {
 api.delete('/projects/:project', needProject('owner'), async (req, res) => {
   try {
     await manager.closeProject(req.params.project);
+    kickE2e(req.params.project);
+    closeE2eStore(req.params.project);
     const dest = trashProject(req.params.project);
     cleanupProjectData(req.params.project);
     void archiveMirror(req.params.project);
@@ -492,6 +521,7 @@ api.post('/projects/:project/share/members/:id', needProject('owner'), (req, res
   logAccess(req.params.project, req.user!.id, 'share', `made ${memberLabel(m)} ${role === 'edit' ? 'an editor' : 'a viewer'}`);
   // their open editors reconnect with the new role
   if (m?.user_id != null) manager.kick(req.params.project, [m.user_id]);
+  if (m?.user_id != null) kickE2e(req.params.project, [m.user_id]);
   res.json({ share: shareInfo(req.params.project) });
 });
 api.delete('/projects/:project/share/members/:id', needProject('owner'), (req, res) => {
@@ -499,6 +529,8 @@ api.delete('/projects/:project/share/members/:id', needProject('owner'), (req, r
   removeMember(req.params.project, Number(req.params.id));
   logAccess(req.params.project, req.user!.id, 'share', `removed ${memberLabel(m)}`);
   if (m?.user_id != null) manager.kick(req.params.project, [m.user_id]);
+  // the server stops handing them the encryption key (what they saw before, they may have kept)
+  if (m?.user_id != null && isE2eProject(req.params.project) && !roleFor({ id: m.user_id } as SessionUser, req.params.project, false)) { dropKeys(req.params.project, m.user_id); kickE2e(req.params.project, [m.user_id]); }
   res.json({ share: shareInfo(req.params.project) });
 });
 /** A new share link: body { role: 'view' | 'edit' }, the link's role for good (another role is another link). */
