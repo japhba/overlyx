@@ -15,6 +15,13 @@ describe('markdown PDF page settings', () => {
     expect(pre).toContain('\\setstretch{1.25}');
   });
 
+  it('escapes link text (file names with underscores, autolinks), keeps formulas in it', () => {
+    const body = writeTex(markdownForLatex(parseMarkdown('[a_b.tex](a_b.tex) <https://x.org/a_b#c> [$x_1$ & 5%](https://x.org)\n').doc), { basename: 'x' }).text;
+    expect(body).toContain('\\href{a_b.tex}{a\\_b.tex}');
+    expect(body).toContain('\\href{https://x.org/a_b\\#c}{https://x.org/a\\_b\\#c}');
+    expect(body).toContain('\\href{https://x.org}{$x_1$ \\& 5\\%}');
+  });
+
   it('reads the forms pandoc users write; a document without front matter keeps the article defaults', () => {
     expect(frontMatterVars(['---', 'geometry: "margin=1in, left=2in"', 'papersize: letter', '...'])).toEqual({ geometry: 'margin=1in, left=2in', papersize: 'letter' });
     expect(frontMatterVars(['---', 'geometry: [margin=1in, top=2cm]', '---'])).toEqual({ geometry: ['margin=1in', 'top=2cm'] });

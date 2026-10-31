@@ -8,7 +8,7 @@
  * `headings`).
  */
 import type { Item, LyxDocument, Paragraph } from '../lyx/ast.ts';
-import { setHeaderBlock } from '../lyx/ast.ts';
+import { paramMap, quote, setHeaderBlock, unquote } from '../lyx/ast.ts';
 import { mdTypesetting, applyTypesetting, typesettingPreamble, mdBodyFace, type LocalFont } from './typesetting.ts';
 export { frontMatterVars } from './typesetting.ts';
 
@@ -18,6 +18,15 @@ const LISTINGS_LANGUAGES: Record<string, string> = {
   php: 'PHP', r: 'R', matlab: 'Matlab', tex: 'TeX', latex: '[LaTeX]TeX', haskell: 'Haskell', lisp: 'Lisp', sql: 'SQL', html: 'HTML', xml: 'XML',
   fortran: 'Fortran', make: 'make', makefile: 'make', lua: 'Lua', octave: 'Octave', ocaml: '[Objective]Caml', erlang: 'erlang', gnuplot: 'Gnuplot', csharp: '[Sharp]C', 'c#': '[Sharp]C',
 };
+
+/**
+ * A link's text as LaTeX: markdown's is text (with its formulas as `$…$`), written as it is
+ * (`literal`), so `_`, `#`, `%` … are escaped here — `[a_b.tex](a_b.tex)` gave "Missing $ inserted".
+ */
+function linkText(s: string): string {
+  return s.split(/(\$[^$]+\$)/).map((part, i) => i % 2 ? part : part.replace(/[\\&_$%#{}^~]/g, ch =>
+    ch === '\\' ? '\\textbackslash{}' : ch === '^' ? '\\^{}' : ch === '~' ? '\\textasciitilde{}' : '\\' + ch)).join('');
+}
 
 /** `fontFiles`: fonts the build has as files (Google fonts the server fetched), by name — loaded by file */
 export function markdownForLatex(doc: LyxDocument, opts: { fontFiles?: Record<string, LocalFont> } = {}): LyxDocument {
@@ -32,6 +41,12 @@ export function markdownForLatex(doc: LyxDocument, opts: { fontFiles?: Record<st
           const file = (ins.params.find(l => /^\tfilename /.test(l)) ?? '').replace(/^\tfilename /, '').trim();
           ins.params = ins.params.filter(l => !/^\t(link |special alt=)/.test(l));
           if (/^[a-z][a-z0-9+.-]*:/i.test(file)) return [{ ...it, inset: { type: 'Leaf', name: 'CommandInset', arg: 'href', params: ['LatexCommand href', 'name "[image]"', `target "${file.replace(/"/g, '')}"`, 'literal "true"'] } }];
+        }
+        if (ins.type === 'Leaf' && ins.name === 'CommandInset' && ins.arg === 'href') {
+          // (an autolink has no name: its address is the text)
+          const p = paramMap(ins.params);
+          const name = linkText(unquote(p.get('name')) || unquote(p.get('target')));
+          ins.params = ins.params.map(l => l.startsWith('name ') ? 'name ' + quote(name) : l);
         }
         if (ins.type === 'Text' && ins.name === 'listings') {
           ins.params = ins.params.map(l => l.replace(/^lstparams "language=([^",]*)"$/, (_m, lang: string) => {

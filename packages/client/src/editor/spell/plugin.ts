@@ -13,6 +13,8 @@ import { getPrefs, subscribePrefs } from '../../prefs';
 import { editorContext } from '../context';
 import { checkableBlocks, wordsOf, type Word } from './tokenize';
 import type { SpellRequest, SpellResponse } from './worker';
+import workerUrl from './worker.ts?worker&url';
+import { API_BASE } from '../../api';
 
 export const spellKey = new PluginKey<DecorationSet>('lyx-spell');
 
@@ -27,11 +29,52 @@ export function dictionaryFor(language: string | undefined): string {
 
 /* ------------------------------------------------------------ the worker, shared by all editors */
 
+/** where the dictionaries are: the site's /dict/, the VS Code extension's local bridge */
+const dictBase = () => new URL(`${API_BASE}/dict/`, location.href).href;
+
+type SpellWorker = { postMessage(m: SpellRequest): void };
+
+/**
+ * A VS Code webview refuses a worker from the extension's files or the development server (another
+ * origin: "SecurityError: Failed to construct 'Worker'"), and a worker started from a blob may not
+ * import from there either. So there the page fetches the worker's code, and the modules it imports
+ * (the development server's), and starts it from blobs of its own — as the PDF's worker is
+ * (vscode webview/BuiltPdf.tsx); messages wait for it.
+ */
+function startWorker(onmessage: (ev: MessageEvent<SpellResponse>) => void): SpellWorker {
+  try { const w = new Worker(workerUrl, { type: 'module' }); w.onmessage = onmessage; return w; }
+  catch (e) {
+    if ((e as Error)?.name !== 'SecurityError') throw e;
+    const queue: SpellRequest[] = [];
+    let w: Worker | null = null;
+    void blobModule(new URL(workerUrl, document.baseURI).href, new Map()).then(blob => {
+      w = new Worker(blob, { type: 'module' });
+      w.onmessage = onmessage;
+      for (const m of queue.splice(0)) w.postMessage(m);
+    }).catch(err => console.warn('[spell] no worker:', err));
+    return { postMessage: m => { if (w) w.postMessage(m); else queue.push(m); } };
+  }
+}
+
+/** a module at `url` as a blob, the modules it imports (`from "/…"`, `import "/…"`) as blobs too */
+function blobModule(url: string, made: Map<string, Promise<string>>): Promise<string> {
+  let blob = made.get(url);
+  if (!blob) made.set(url, blob = (async () => {
+    const code = await fetch(url).then(r => { if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`); return r.text(); });
+    const IMPORT = /(\bfrom\s*|^\s*import\s*)(["'])(\.{0,2}\/[^"'\n]*)\2/gm;
+    const deps = new Map<string, string>();
+    for (const m of code.matchAll(IMPORT)) { const dep = new URL(m[3], url).href; deps.set(dep, await blobModule(dep, made)); }
+    const src = code.replace(IMPORT, (_m, head: string, q: string, spec: string) => head + q + deps.get(new URL(spec, url).href) + q);
+    return URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+  })());
+  return blob;
+}
+
 const PERSONAL_KEY = 'ol.spell.words';
 function loadPersonal(): Set<string> { try { return new Set(JSON.parse(localStorage.getItem(PERSONAL_KEY) ?? '[]')); } catch { return new Set(); } }
 const personal = loadPersonal();
 const ignored = new Set<string>();
-let worker: Worker | null = null;
+let worker: SpellWorker | null = null;
 let workerLang = '';
 let seq = 0;
 const waiting = new Map<number, (r: SpellResponse) => void>();
@@ -39,20 +82,19 @@ const waiting = new Map<number, (r: SpellResponse) => void>();
 const caches = new Map<string, Map<string, boolean>>();
 const listeners = new Set<() => void>();
 
-function ensureWorker(lang: string): Worker | null {
+function ensureWorker(lang: string): SpellWorker | null {
   if (!worker) {
     try {
-      worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
-      worker.onmessage = (ev: MessageEvent<SpellResponse>) => {
+      worker = startWorker(ev => {
         const m = ev.data;
         if (m.type === 'loaded') { if (!m.ok) console.warn('[spell] dictionary failed to load:', m.error); return; }
         const cb = waiting.get(m.id);
         if (cb) { waiting.delete(m.id); cb(m); }
-      };
+      });
     } catch (e) { console.warn('[spell] no worker:', e); return null; }
     if (personal.size) worker.postMessage({ type: 'add', words: [...personal] } satisfies SpellRequest);
   }
-  if (workerLang !== lang) { workerLang = lang; worker.postMessage({ type: 'load', lang } satisfies SpellRequest); }
+  if (workerLang !== lang) { workerLang = lang; worker.postMessage({ type: 'load', lang, base: dictBase() } satisfies SpellRequest); }
   return worker;
 }
 

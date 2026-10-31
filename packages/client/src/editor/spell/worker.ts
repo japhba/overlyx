@@ -6,7 +6,7 @@
 import nspell from 'nspell';
 
 export type SpellRequest =
-  | { type: 'load'; lang: string }
+  | { type: 'load'; lang: string; base?: string }
   | { type: 'check'; id: number; words: string[] }
   | { type: 'suggest'; id: number; word: string }
   | { type: 'add'; words: string[] };
@@ -15,17 +15,21 @@ export type SpellResponse =
   | { type: 'result'; id: number; wrong: string[] }
   | { type: 'suggestions'; id: number; list: string[] };
 
-/** served from /dict/<lang>.aff|.dic (vite.config.ts `dictionaries` plugin: the dictionary-* packages at build, a middleware in dev) */
+/**
+ * served from /dict/<lang>.aff|.dic (vite.config.ts `dictionaries` plugin: the dictionary-* packages
+ * at build, a middleware in dev; the VS Code extension's bridge) — `base`, the page's address for it
+ * (a worker started from a blob has no address of its own to go by)
+ */
 const KNOWN = new Set(['en', 'en-gb', 'de', 'fr']);
-const DICTS = (lang: string): [string, string] => { const l = KNOWN.has(lang) ? lang : 'en'; return [`/dict/${l}.aff`, `/dict/${l}.dic`]; };
+const DICTS = (lang: string, base = '/dict/'): [string, string] => { const l = KNOWN.has(lang) ? lang : 'en'; return [`${base}${l}.aff`, `${base}${l}.dic`]; };
 
 let spell: ReturnType<typeof nspell> | null = null;
 let loaded = '';
 let personal: string[] = [];
 const pending: SpellRequest[] = [];
 
-async function load(lang: string): Promise<void> {
-  const urls = DICTS(lang);
+async function load(lang: string, base?: string): Promise<void> {
+  const urls = DICTS(lang, base);
   try {
     const [aff, dic] = await Promise.all(urls.map(u => fetch(u).then(r => { if (!r.ok) throw new Error(`${u}: ${r.status}`); return r.text(); })));
     spell = nspell(aff, dic);
@@ -41,7 +45,7 @@ async function load(lang: string): Promise<void> {
 
 function handle(m: SpellRequest): void {
   switch (m.type) {
-    case 'load': if (m.lang !== loaded) void load(m.lang); return;
+    case 'load': if (m.lang !== loaded) void load(m.lang, m.base); return;
     case 'add': personal.push(...m.words); if (spell) for (const w of m.words) spell.add(w); return;
     case 'check': {
       if (!spell) { pending.push(m); return; }
