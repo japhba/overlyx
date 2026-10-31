@@ -88,13 +88,18 @@ function dictionaries(): Plugin {
 
 export default defineConfig({
   plugins: [preact(), serviceWorker(), dictionaries()],
-  define: { 'import.meta.env.VITE_BUILD_VERSION': JSON.stringify(buildVersion) },
+  // (core latex/layouts.ts: where LyX's layouts are — the virtual file system's, in the browser)
+  define: { 'import.meta.env.VITE_BUILD_VERSION': JSON.stringify(buildVersion), 'process.env.LYX_LAYOUT_DIR': JSON.stringify('/lyx/lib/layouts') },
   // MathJax's fonts load their per-block data from the package itself: pre-bundling MathJax for the
   // dev server would give those modules a second copy of MathJax's classes (editor/lyxmath/mathfonts.ts)
   optimizeDeps: { exclude: MATHJAX_PACKAGES },
   resolve: {
     // `@overlyx/core` is its index; `@overlyx/core/md/index.ts` and the like are its modules (loaded on demand)
     alias: [
+      // the core's parser and writer run in the browser for end-to-end encrypted projects (src/e2e/texlocal.ts):
+      // the LyX library they read through node:fs is a virtual file system there
+      { find: /^node:fs$/, replacement: path.resolve(__dirname, 'src/e2e/vfs.ts') },
+      { find: /^node:path$/, replacement: path.resolve(__dirname, 'src/e2e/pathshim.ts') },
       { find: /^@overlyx\/core$/, replacement: path.resolve(__dirname, '../core/src/index.ts') },
       { find: /^@overlyx\/core\/(.*)$/, replacement: path.resolve(__dirname, '../core/src') + '/$1' },
     ],
@@ -113,6 +118,8 @@ export default defineConfig({
       '/ol-d': `http://localhost:${process.env.OVERLYX_API_PORT ?? 3000}`,
       '/_ol': `http://localhost:${process.env.OVERLYX_API_PORT ?? 3000}`,
       '/ws': { target: `ws://localhost:${process.env.OVERLYX_API_PORT ?? 3000}`, ws: true },
+      // end-to-end encrypted documents' relay (server e2e/relay.ts)
+      '/e2e': { target: `ws://localhost:${process.env.OVERLYX_API_PORT ?? 3000}`, ws: true },
     },
   },
   build: { outDir: 'dist', sourcemap: true, chunkSizeWarningLimit: 3500, rollupOptions: { output: MATHJAX_ASSETS } },

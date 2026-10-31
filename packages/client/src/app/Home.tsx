@@ -21,6 +21,7 @@ import { KIND_ICONS, iconSvg } from './modernicons';
 import { ScientificTemplates, chosenDesign } from './ScientificTemplates';
 import { initialDeckSize, rememberDeckSize, sizeOf, usualDeckSize } from './decksize';
 import { BetaNote } from './Login';
+import { ensureAccountKeys } from '../e2e/ui';
 
 const isBackup = (name: string) => name.endsWith('~') || name.startsWith('#') || name.endsWith('.emergency');
 const mainFirst = (a: string, b: string) => Number(!/(^|\/)main\.tex$/.test(a)) - Number(!/(^|\/)main\.tex$/.test(b)) || a.split('/').length - b.split('/').length || a.localeCompare(b);
@@ -179,6 +180,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
   };
   const badge = (p: Project) => <>
     {p.public && <span class="badge view" data-public-badge title="Anyone can view this project and clone it, without an account">public</span>}
+    {p.e2e && <span class="badge e2e" data-e2e-badge title="End-to-end encrypted: the server keeps only ciphertext; documents are opened and built in the browser">🔒 encrypted</span>}
     {p.via !== 'owner' && <span class={'badge' + (p.role === 'view' ? ' view' : '')}>{p.via === 'admin' ? 'admin' : p.role === 'view' ? 'can view' : 'can edit'}</span>}
   </>;
   const docLink = (p: Project, d: string) => <a key={d} href={'#/' + p.name + '/' + d} onClick={e => { e.preventDefault(); onOpen(p.name + '/' + d); }}>{docLabel(p, d)}</a>;
@@ -190,8 +192,8 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
         : <button class="btn primary small" onClick={() => onOpen(p.name)} title="This project has no documents yet — open it to create the first one">Open</button>}
       {p.role === 'owner' && p.via !== 'admin' && <button class="btn small" onClick={() => onShare(p.name)} data-share={p.name}>Share…</button>}
       <button class="btn small" onClick={() => onGit(p.name)} data-git={p.name} title="Clone, pull and push this project with git">Git…</button>
-      <a class="btn small" data-download-zip={p.name} href={zipUrl(p.name)} title="Download the whole project as a .zip">Download</a>
-      {p.files.some(f => f.kind === 'doc') && <a class="btn small" data-download-lyx={p.name} href={zipUrl(p.name, 'lyx')} title="Download the project as LyX documents with figures and bibliography">LyX</a>}
+      {!p.e2e && <a class="btn small" data-download-zip={p.name} href={zipUrl(p.name)} title="Download the whole project as a .zip">Download</a>}
+      {!p.e2e && p.files.some(f => f.kind === 'doc') && <a class="btn small" data-download-lyx={p.name} href={zipUrl(p.name, 'lyx')} title="Download the project as LyX documents with figures and bibliography">LyX</a>}
       {p.role === 'owner' && <button class="btn small danger" title="Move this project to the trash" onClick={() => void remove(p)}>Delete</button>}
     </div>
   );
@@ -264,7 +266,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
           {viewIcon(view === 'rows' ? 'grid' : 'rows')}
         </button>
       </div>
-      {newOpen && <NewProjectDialog onClose={() => setNewOpen(false)} notify={notify}
+      {newOpen && <NewProjectDialog user={user} onClose={() => setNewOpen(false)} notify={notify}
         onCreated={(id, name) => { setNewOpen(false); void load(); onChanged(); if (id) onOpen(id); else notify(`Project "${name}" created — add a document with + File in the files panel`); }} />}
       {importOpen && <OverleafImport source={importSource} existing={(projects ?? []).filter(p => splitProjectKey(p.name).owner === user.username).map(p => projectShortName(p.name))} onClose={() => { setImportOpen(false); setPending(null); }} onImported={() => { void load(); onChanged(); }} notify={notify}
         initial={pending ?? undefined} autostart={!!pending} onDone={names => void openImported(names)} />}
@@ -307,12 +309,15 @@ const NEW_KINDS: { id: NewKind; label: string; hint: string; w: number; h: numbe
  * The start page's + New: a document, slides, a poster or a whiteboard, each in a project of its own
  * (named like it), opened right away — or an empty project. Inside a project, + File and File ▸ New … add more.
  */
-export function NewProjectDialog({ onClose, onCreated, notify }: { onClose: () => void; onCreated: (id: string | null, name: string) => void; notify: (text: string, kind?: 'info' | 'error') => void }) {
+export function NewProjectDialog({ user, onClose, onCreated, notify }: { user: User; onClose: () => void; onCreated: (id: string | null, name: string) => void; notify: (text: string, kind?: 'info' | 'error') => void }) {
   const [kind, setKind] = useState<NewKind>('doc');
   const [template, setTemplate] = useState<string>();
   const [size, setSize] = useState(initialDeckSize);
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
+  const [encrypted, setEncrypted] = useState(false);
+  // (slides, posters and boards are not available encrypted yet)
+  const canEncrypt = kind === 'doc' || kind === 'empty';
   const k = NEW_KINDS.find(x => x.id === kind)!;
   const typed = name.trim();
   const invalid = typed && !isProjectName(typed) ? 'Only letters, digits, space, . _ - are allowed.' : null;
@@ -321,7 +326,10 @@ export function NewProjectDialog({ onClose, onCreated, notify }: { onClose: () =
     if (!n || invalid) return;
     setBusy(true);
     try {
-      const { project } = await api.createProject(n);
+      const e2e = encrypted && (selectedKind === 'doc' || selectedKind === 'empty');
+      // an encrypted project needs this browser to hold the account's keys first (set up once, recovery code)
+      if (e2e && !(await ensureAccountKeys(user.id))) { setBusy(false); return; }
+      const { project } = await api.createProject(n, e2e);
       const key = project.name;
       const chosenTemplate = chosenDesign(selectedKind, selectedKind === kind ? template : undefined);
       if (selectedKind === 'deck' && chosenTemplate === 'blank') rememberDeckSize(size);
@@ -356,6 +364,8 @@ export function NewProjectDialog({ onClose, onCreated, notify }: { onClose: () =
       <label class="dialog-row">Name <input type="text" value={name} autofocus placeholder={k.name || 'Name of the project'} data-new-name
         onInput={e => setName((e.target as HTMLInputElement).value)} onKeyDown={e => { if (e.key === 'Enter') void create(); }} /></label>
       {invalid && <p class="dialog-hint error">{invalid}</p>}
+      {canEncrypt && <label class="feedback-opt" data-new-e2e><input type="checkbox" checked={encrypted} onChange={e => setEncrypted((e.target as HTMLInputElement).checked)} /> End-to-end encrypted</label>}
+      {canEncrypt && encrypted && <p class="dialog-hint" data-new-e2e-hint>Only you and the people you share it with can read it: the server keeps ciphertext, and the PDF is built in your browser. Agents, AI, git, sync and public links are not available for it.</p>}
       <p class="dialog-hint">{kind === 'empty' ? 'A project holds documents, slides, figures and a bibliography together. Share it to work on it with others.' : kind === 'board' ? `It gets a project of its own, “${typed || k.name}”, where the pictures you put on it are kept too.` : `It gets a project of its own, “${typed || k.name}”, where figures and a bibliography can go too.`}</p>
     </Dialog>
   );

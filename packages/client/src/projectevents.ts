@@ -10,9 +10,25 @@ import { API_BASE } from './api';
 export type ProjectEvent = { kind: 'files' } | { kind: 'graphics'; path: string; v: number };
 type Listener = (ev: ProjectEvent) => void;
 
-const streams = new Map<string, { es: EventSource; subs: Set<Listener>; closeTimer?: ReturnType<typeof setTimeout> }>();
+const streams = new Map<string, { es: EventSource | null; subs: Set<Listener>; closeTimer?: ReturnType<typeof setTimeout> }>();
+
+/** projects whose events are made in this browser, not by the server (end-to-end encrypted ones: e2e/install.ts) */
+let local: (project: string) => boolean = () => false;
+export function setLocalProjectEvents(fn: (project: string) => boolean): void { local = fn; }
+
+/** An event of a project whose files live in this browser (its file list changed, a figure was decrypted). */
+export function emitProjectEvent(project: string, ev: ProjectEvent): void {
+  for (const l of [...(streams.get(project)?.subs ?? [])]) { try { l(ev); } catch (e) { console.error('project event listener failed', e); } }
+}
 
 export function subscribeProjectEvents(project: string, cb: Listener): () => void {
+  if (local(project)) {
+    let s = streams.get(project);
+    if (!s) streams.set(project, s = { es: null, subs: new Set() });
+    s.subs.add(cb);
+    const mine = s;
+    return () => { mine.subs.delete(cb); };
+  }
   if (typeof EventSource === 'undefined') return () => {};
   let s = streams.get(project);
   if (!s) {
@@ -34,7 +50,7 @@ export function subscribeProjectEvents(project: string, cb: Listener): () => voi
     mine.subs.delete(cb);
     if (mine.subs.size || streams.get(project) !== mine) return;
     clearTimeout(mine.closeTimer);
-    mine.closeTimer = setTimeout(() => { if (!mine.subs.size && streams.get(project) === mine) { mine.es.close(); streams.delete(project); } }, 3000);
+    mine.closeTimer = setTimeout(() => { if (!mine.subs.size && streams.get(project) === mine) { mine.es?.close(); streams.delete(project); } }, 3000);
   };
 }
 

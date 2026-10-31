@@ -54,6 +54,9 @@ import { Versions } from './Versions';
 import { AgentPanel, askAgentAbout } from './AgentPanel';
 import { inlineModelLabel } from './AgentModelPicker';
 import { PdfPanel, stateFromBuild, jobActive, EMPTY_PDF, type PdfState } from './PdfPanel';
+import { E2eKeyHost } from './E2eKeys';
+import { installE2e } from '../e2e/install';
+import { isE2eDocId } from '../e2e/known';
 import { Ruler, NOTE_SCALE_DEFAULT, NOTE_SCALE_MIN, NOTE_SCALE_MAX, MIN_WIDTH, MAX_WIDTH } from './Ruler';
 import { useNotesPane, useNotesFold, NotesSash, NotesUnfoldTab, NotesResolved } from './notespane';
 import { StatusBar, SaveIndicator, ZoomControl, type Status } from './StatusBar';
@@ -97,6 +100,15 @@ import * as T from '../editor/tablecommands';
 import type { PresenceUser } from '../editor/editor';
 import { setQuery, findNext, replaceCurrent, replaceAll, findKey } from '../editor/plugins/find';
 import { schema, unquote, projectOfDoc, docPathOf, docDirOf, projectShortName, spacingStretch, spacingValue, splitDocId, isProjectKey } from '@overlyx/core';
+
+/** Save a file made in this browser (an end-to-end encrypted document's .tex or PDF): a Blob or a blob: URL. */
+function saveLocal(what: Blob | string, name: string): void {
+  const a = document.createElement('a');
+  a.href = typeof what === 'string' ? what : URL.createObjectURL(what);
+  a.download = name;
+  a.click();
+  if (typeof what !== 'string') setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
 
 type Dialog = { name: string; arg?: unknown } | null;
 
@@ -666,6 +678,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     setTimeout(() => setMessage(m => (m?.text === text ? null : m)), 4000);
     if (kind === 'error') recordUsage('notice', noticeTemplate(text));   // what went wrong, as a template (usage.ts)
   }, []);
+  // end-to-end encrypted projects are served in this browser (e2e/): their requests, file URLs and keys
+  installE2e(user, () => editorContext.docId || null, notify);
 
   useEffect(() => {
     const onHash = () => {
@@ -1501,10 +1515,10 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       { label: 'Export ▸', sub: [
         { label: 'PDF (latexmk)', shortcut: 'Ctrl+R', action: () => build() },
         { label: 'LaTeX source (as built)…', action: async () => { const r = await api.export(docId, 'tex'); setDialog({ name: 'tex', arg: r.tex ?? '' }); } },
-        { label: 'Download .tex', action: () => window.open(`/api/docs/${encodeURIComponent(docId)}/tex?download=1`) },
+        { label: 'Download .tex', action: () => { if (isE2eDocId(docId)) void api.texText(docId).then(t => saveLocal(new Blob([t], { type: 'text/x-tex' }), docPathOf(docId).split('/').pop()!)); else window.open(`/api/docs/${encodeURIComponent(docId)}/tex?download=1`); } },
         { label: 'Download LyX (.lyx)', action: () => window.open(`/api/docs/${encodeURIComponent(docId)}/lyx`) },
         { label: 'LyX project with figures (.zip)', action: () => window.open(`/api/projects/${encodeURIComponent(projectOfDoc(docId))}/zip?format=lyx`) },
-        { label: 'Download PDF', action: () => window.open(`/api/docs/${encodeURIComponent(docId)}/pdf?download=1`) },
+        { label: 'Download PDF', action: () => { if (isE2eDocId(docId)) { if (pdf.url) saveLocal(pdf.url, docPathOf(docId).split('/').pop()!.replace(/\.[^.]+$/, '') + '.pdf'); else notify('Build the PDF first (Ctrl+R): it is made in this browser', 'error'); } else window.open(`/api/docs/${encodeURIComponent(docId)}/pdf?download=1`); } },
       ] },
       { label: 'Versions…', action: () => setRightTab('versions') },
       { label: 'Share project…', action: () => setShareFor(projectOfDoc(docId)) },
@@ -1981,6 +1995,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         actions={{ openExample, showRight: () => { if (!rightTab) setRightTab('comments'); }, showPdf: () => showPane('pdf'), showFiles: () => setShowFiles(true) }} />}
       {/* last: any uiPrompt/uiConfirm/uiAlert (Dialogs.tsx) stacks above every other dialog above, including Home's and Git's */}
       <SvgEditorHost />
+      <E2eKeyHost />
       <DialogHost />
     </div>
   );

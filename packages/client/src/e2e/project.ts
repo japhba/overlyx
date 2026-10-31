@@ -1,0 +1,461 @@
+/**
+ * An end-to-end encrypted project as this browser holds it (DOCS.md "End-to-end encrypted projects"):
+ * its key, its manifest — the file list, itself an encrypted CRDT document (`files`: path → entry) —
+ * and its files: documents (encrypted Yjs logs, opened by the editor through socket.ts) and blobs
+ * (everything else, encrypted whole, immutable: a new version is a new blob). Paths, names and
+ * sizes are in the manifest only, so the server sees opaque ids and byte counts.
+ *
+ * localapi.ts answers the app's API requests for such a project from here; the editor finds its
+ * documents' ids here (socket.ts).
+ */
+import * as Y from 'yjs';
+import { IndexeddbPersistence } from 'y-indexeddb';
+import { projectOfDoc, isMarkdownPath, type LyxDocument } from '@overlyx/core';
+import { projectKey, createProjectKey, waitingMembers, KeyMissing } from './keys';
+import { ensureAccountKeys } from './ui';
+import { roles } from './known';
+export { noteProjects, markE2eProject, isE2eProject, isE2eDocId, knownE2eProjects } from './known';
+import { syncDoc, fetchDoc, seedDoc, REMOTE } from './relay';
+import { encrypt, decrypt, randomId } from './crypto';
+import type { TexContext, LocalProjectView } from './texlocal';
+
+type TexLocal = typeof import('./texlocal');
+let X: TexLocal | null = null;
+/** the parser, the writer and LyX's library: loaded with the first document of an encrypted project (they are big) */
+export async function tex(): Promise<TexLocal> {
+  if (!X) { const m = await import('./texlocal'); await m.ensureLyxLib(); X = m; }
+  return X;
+}
+const T = (): TexLocal => { if (!X) throw new Error('the document tools are not loaded yet'); return X; };
+
+export interface FileEntry { id: string; kind: 'doc' | 'blob' | 'dir'; size: number; mtime: number; /** a document without a preamble of its own (a child document) */ fragment?: boolean }
+/** the project file as the app lists it (api.ts ProjectFile) */
+export interface ListedFile { path: string; name: string; size: number; mtime: number; kind: 'doc' | 'lyx' | 'bib' | 'image' | 'tex' | 'pdf' | 'board' | 'html' | 'dir' | 'other' }
+
+/* ---------------------------------------------------------------------- the user */
+
+let user: { id: number; name: string } | null = null;
+export function setE2eUser(u: { id: number; name: string } | null): void { user = u; }
+export function e2eUser(): { id: number; name: string } {
+  if (!user) throw new Error('not signed in');
+  return user;
+}
+
+/* ------------------------------------------------------------------------- file kinds */
+
+const IMAGE = /\.(png|jpe?g|gif|svg|pdf|eps|ps|tiff?|webp|bmp)$/i;
+export function listedKind(path: string, e: FileEntry): ListedFile['kind'] {
+  if (e.kind === 'dir') return 'dir';
+  if (e.kind === 'doc') return 'doc';
+  const p = path.toLowerCase();
+  if (p.endsWith('.lyx')) return 'lyx';
+  if (p.endsWith('.bib')) return 'bib';
+  if (/\.(tex|sty|cls)$/.test(p)) return 'tex';
+  if (p.endsWith('.pdf')) return 'pdf';
+  if (IMAGE.test(p)) return 'image';
+  return 'other';
+}
+/** Is a file of this name a document (opened in the editor, kept as a CRDT log)? */
+export const isDocPath = (path: string) => /\.tex$/i.test(path) || isMarkdownPath(path);
+const MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', webp: 'image/webp', bmp: 'image/bmp', pdf: 'application/pdf', txt: 'text/plain', bib: 'text/plain', tex: 'text/plain' };
+export const mimeOf = (path: string) => MIME[path.slice(path.lastIndexOf('.') + 1).toLowerCase()] ?? 'application/octet-stream';
+const norm = (p: string) => p.split('/').filter(s => s && s !== '.').join('/');
+
+/* ------------------------------------------------------------------------------ project */
+
+export class E2eProject {
+  key: { key: CryptoKey; version: number } | null = null;
+  readonly manifest = new Y.Doc();
+  readonly files = this.manifest.getMap<string>('files');
+  ready: Promise<void>;
+  /** the documents open in an editor here, by path (their live state) */
+  readonly open = new Map<string, Y.Doc>();
+  private docs = new Map<string, { at: number; state: Uint8Array; model: LyxDocument | null }>();
+  private blobs = new Map<string, Uint8Array>();
+  private urls = new Map<string, { id: string; url: string }>();
+  private loadingUrls = new Map<string, Promise<string | null>>();
+  private sync: { destroy(): void; synced(): boolean } | null = null;
+  private persistence: IndexeddbPersistence | null = null;
+  private listeners = new Set<() => void>();
+
+  constructor(readonly name: string, readonly role: string, create: boolean) {
+    this.ready = this.init(create);
+    this.files.observe(() => { for (const l of [...this.listeners]) { try { l(); } catch (e) { console.error(e); } } });
+  }
+
+  private async init(create: boolean): Promise<void> {
+    const u = e2eUser();
+    this.key = create ? await createProjectKey(this.name, u.id) : await projectKey(this.name, u.id);
+    // the local copy of the manifest belongs to this project's key: another project made under the same name later has its own
+    const raw = new Uint8Array(await crypto.subtle.exportKey('raw', this.key.key));
+    const tag = [...new Uint8Array(await crypto.subtle.digest('SHA-256', raw)).subarray(0, 6)].map(b => b.toString(16).padStart(2, '0')).join('');
+    try { this.persistence = new IndexeddbPersistence(`overlyx-e2e-manifest:${this.name}:${tag}`, this.manifest); await Promise.race([this.persistence.whenSynced, new Promise(r => setTimeout(r, 1500))]); }
+    catch { /* no IndexedDB */ }
+    await new Promise<void>(resolve => {
+      const done = () => resolve();
+      this.sync = syncDoc(this.name, 'manifest', this.key!.key, this.manifest, { readOnly: this.role === 'view', onSynced: done });
+      // offline: the copy kept here
+      setTimeout(done, this.files.size ? 4000 : 15000);
+    });
+  }
+
+  onChange(fn: () => void): () => void { this.listeners.add(fn); return () => this.listeners.delete(fn); }
+
+  entry(path: string): FileEntry | undefined {
+    const v = this.files.get(norm(path));
+    if (!v) return undefined;
+    try { return JSON.parse(v) as FileEntry; } catch { return undefined; }
+  }
+  private setEntry(path: string, e: FileEntry): void { this.files.set(norm(path), JSON.stringify(e)); }
+
+  paths(): string[] { return [...this.files.keys()].sort(); }
+
+  /** The file list as the app shows it: entries, and the folders they are in. */
+  list(): ListedFile[] {
+    const out = new Map<string, ListedFile>();
+    for (const path of this.paths()) {
+      const e = this.entry(path);
+      if (!e) continue;
+      const parts = path.split('/');
+      for (let i = 1; i < parts.length; i++) {
+        const d = parts.slice(0, i).join('/');
+        if (!out.has(d)) out.set(d, { path: d, name: parts[i - 1], size: 0, mtime: e.mtime, kind: 'dir' });
+      }
+      out.set(path, { path, name: parts[parts.length - 1], size: e.size, mtime: e.mtime, kind: listedKind(path, e) });
+    }
+    return [...out.values()].sort((a, b) => a.path.localeCompare(b.path));
+  }
+
+  private get k(): CryptoKey { if (!this.key) throw new Error('the project is locked'); return this.key.key; }
+  private writable(): void { if (this.role === 'view') throw Object.assign(new Error('You can only view this project'), { status: 403 }); }
+
+  /* ------------------------------------------------------------------ documents */
+
+  private texContext(path: string): TexContext {
+    return { relPath: path, projectText: (rel) => this.cachedText(rel) };
+  }
+
+  /** A new document from its text (a template, an upload). */
+  async createDoc(path: string, text: string): Promise<void> {
+    this.writable();
+    path = norm(path);
+    await tex();
+    await this.prefetchTexts();
+    const { update, fragment } = T().stateOfText(text, this.texContext(path));
+    const id = randomId();
+    await seedDoc(this.name, id, this.k, update);
+    this.docs.set(id, { at: Date.now(), state: update, model: null });
+    this.setEntry(path, { id, kind: 'doc', size: text.length, mtime: Date.now(), ...(fragment ? { fragment: true } : {}) });
+  }
+
+  /** The document's whole state: the editor's when it is open here, else read from its log. */
+  async docState(path: string, maxAgeMs = 15000): Promise<Uint8Array> {
+    const live = this.open.get(norm(path));
+    if (live) return Y.encodeStateAsUpdate(live);
+    const e = this.entry(path);
+    if (!e || e.kind !== 'doc') throw new Error(`no document ${path}`);
+    const c = this.docs.get(e.id);
+    if (c && Date.now() - c.at < maxAgeMs) return c.state;
+    const state = await fetchDoc(this.name, e.id, this.k);
+    if (!state) { if (c) return c.state; throw new Error(`${path} could not be loaded`); }
+    this.docs.set(e.id, { at: Date.now(), state, model: null });
+    return state;
+  }
+
+  async docModel(path: string): Promise<LyxDocument> {
+    await tex();
+    const live = this.open.get(norm(path));
+    if (live) return T().lyxDocumentOf(live);
+    const state = await this.docState(path);
+    const e = this.entry(path)!;
+    const c = this.docs.get(e.id);
+    if (c?.model && c.state === state) return c.model;
+    const d = T().ydocOf(state);
+    const model = T().lyxDocumentOf(d);
+    d.destroy();
+    if (c) c.model = model;
+    return model;
+  }
+
+  /** Models of every document of the project (for metadata across a master and its children), synchronously readable afterwards. */
+  private models = new Map<string, LyxDocument>();
+  async prefetchDocs(): Promise<void> {
+    await tex();
+    const docs = this.paths().filter(p => this.entry(p)?.kind === 'doc');
+    await Promise.all(docs.map(async p => { try { this.models.set(p, await this.docModel(p)); } catch { /* left out */ } }));
+  }
+  modelNow(path: string): LyxDocument | undefined {
+    const live = this.open.get(norm(path));
+    return live ? T().lyxDocumentOf(live) : this.models.get(norm(path));
+  }
+
+  /** The document's text as the .tex (or .md) file would hold it. */
+  async docText(path: string): Promise<string> {
+    await tex();
+    await this.prefetchDocs();
+    await this.prefetchTexts();
+    return this.textOfModel(norm(path), await this.docModel(path));
+  }
+  private textOfModel(path: string, model: LyxDocument): string {
+    const ctx = this.texContext(path);
+    const master = isMarkdownPath(path) ? null : T().findMasterLocal(path, this.view());
+    const fragment = !!master || !!this.entry(path)?.fragment;
+    const include = (fn: string) => { const r = T().projectRel(path, fn.endsWith('.tex') || fn.includes('.') ? fn : fn + '.tex'); return r ? this.modelNow(r) : undefined; };
+    return T().writeText(model, ctx, fragment, include).text;
+  }
+  /** A markdown document as .tex (what its PDF is built from). */
+  async markdownAsTex(path: string): Promise<string> {
+    await tex();
+    return T().markdownTex(await this.docModel(path), this.texContext(norm(path)));
+  }
+
+  view(): LocalProjectView {
+    return { doc: (rel) => this.modelNow(rel), text: (rel) => this.cachedText(rel), paths: this.paths() };
+  }
+
+  /** Bring a document to `text` as the smallest change (an upload over it, the source pane). */
+  async applyText(path: string, text: string): Promise<void> {
+    this.writable();
+    await tex();
+    const parsed = T().parseText(text, this.texContext(norm(path))).doc;
+    const live = this.open.get(norm(path));
+    if (live) { T().applyLyxDocument(live, parsed); return; }
+    const e = this.entry(path)!;
+    const d = T().ydocOf(await this.docState(path, 0));
+    const before = Y.encodeStateVector(d);
+    T().applyLyxDocument(d, parsed);
+    const diff = Y.encodeStateAsUpdate(d, before);
+    d.destroy();
+    await seedDoc(this.name, e.id, this.k, diff);
+    this.docs.delete(e.id);
+    this.setEntry(path, { ...e, size: text.length, mtime: Date.now() });
+  }
+
+  /* ---------------------------------------------------------------------- blobs */
+
+  async readBlob(path: string): Promise<Uint8Array> {
+    const e = this.entry(path);
+    if (!e || e.kind !== 'blob') throw Object.assign(new Error(`no file ${path}`), { status: 404 });
+    const hit = this.blobs.get(e.id);
+    if (hit) return hit;
+    const res = await fetch(`/api/e2e/projects/${encodeURIComponent(this.name)}/blobs/${e.id}`, { credentials: 'same-origin' });
+    if (!res.ok) throw Object.assign(new Error(`${path} could not be loaded (${res.status})`), { status: res.status });
+    const plain = await decrypt(this.k, new Uint8Array(await res.arrayBuffer()), 'blob', e.id);
+    if (plain.length < 32 * 1024 * 1024) this.blobs.set(e.id, plain);
+    return plain;
+  }
+
+  /** a text file's content if it is here already (texts are fetched by prefetchTexts) */
+  private texts = new Map<string, string>();
+  cachedText(rel: string): string | undefined {
+    const e = this.entry(rel);
+    if (!e || e.kind !== 'blob') return undefined;
+    const b = this.blobs.get(e.id);
+    return b ? new TextDecoder().decode(b) : this.texts.get(rel);
+  }
+  /** The project's small text files (\input'ed macros, .bib), for the parser and the metadata. */
+  async prefetchTexts(): Promise<void> {
+    const want = this.paths().filter(p => /\.(tex|sty|cls|bib|bst|def|cfg|txt)$/i.test(p) && this.entry(p)?.kind === 'blob' && (this.entry(p)?.size ?? 0) < 4 * 1024 * 1024);
+    await Promise.all(want.map(p => this.readBlob(p).catch(() => null)));
+  }
+
+  async writeBlob(path: string, bytes: Uint8Array): Promise<void> {
+    this.writable();
+    path = norm(path);
+    const old = this.entry(path);
+    const id = randomId();
+    const ct = await encrypt(this.k, bytes, 'blob', id);
+    const res = await fetch(`/api/e2e/projects/${encodeURIComponent(this.name)}/blobs/${id}`, { method: 'PUT', credentials: 'same-origin', headers: { 'content-type': 'application/octet-stream' }, body: ct.slice().buffer as ArrayBuffer });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); throw Object.assign(new Error(d.error ?? `could not save ${path} (${res.status})`), { status: res.status }); }
+    this.blobs.set(id, bytes);
+    this.setEntry(path, { id, kind: 'blob', size: bytes.length, mtime: Date.now() });
+    this.dropUrl(path);
+    if (old && old.kind === 'blob') void this.releaseBlob(old.id);
+  }
+
+  /** delete a blob nobody's entry names any more */
+  private async releaseBlob(id: string): Promise<void> {
+    for (const p of this.paths()) if (this.entry(p)?.id === id) return;
+    this.blobs.delete(id);
+    await fetch(`/api/e2e/projects/${encodeURIComponent(this.name)}/blobs/${id}`, { method: 'DELETE', credentials: 'same-origin' }).catch(() => {});
+  }
+
+  /** Any file: a blob's bytes, a document's text. */
+  async readFile(path: string): Promise<Uint8Array> {
+    const e = this.entry(path);
+    if (e?.kind === 'doc') return new TextEncoder().encode(await this.docText(path));
+    return this.readBlob(path);
+  }
+
+  /** A file uploaded or saved: a document's text becomes (or changes) a document, anything else a blob. */
+  async putFile(path: string, bytes: Uint8Array): Promise<void> {
+    path = norm(path);
+    const e = this.entry(path);
+    if (e?.kind === 'doc') { await this.applyText(path, new TextDecoder().decode(bytes)); return; }
+    if (!e && isDocPath(path)) {
+      const text = new TextDecoder().decode(bytes);
+      // a .tex file is a document when it is one (\begin{document}); a preamble or macros file stays a text file
+      if (!/\.tex$/i.test(path) || /\\begin\{document\}/.test(text)) { await this.createDoc(path, text); return; }
+    }
+    await this.writeBlob(path, bytes);
+  }
+
+  /* ----------------------------------------------------------------- file operations */
+
+  private under(path: string): string[] { const p = norm(path); return this.paths().filter(q => q === p || q.startsWith(p + '/')); }
+
+  mkdir(path: string): void { this.writable(); this.setEntry(path, { id: '', kind: 'dir', size: 0, mtime: Date.now() }); }
+
+  rename(from: string, to: string): void {
+    this.writable();
+    const f = norm(from), t = norm(to);
+    if (!this.under(f).length) throw Object.assign(new Error(`no file ${from}`), { status: 404 });
+    if (this.entry(t)) throw Object.assign(new Error(`${to} exists already`), { status: 409 });
+    this.manifest.transact(() => {
+      for (const p of this.under(f)) { const v = this.files.get(p)!; this.files.delete(p); this.files.set(t + p.slice(f.length), v); }
+    });
+    for (const p of [...this.urls.keys()]) { const q = p.replace(/\0img$/, ''); if (q === f || q.startsWith(f + '/')) this.dropUrl(q); }
+  }
+
+  async remove(path: string): Promise<void> {
+    this.writable();
+    const gone = this.under(path).map(p => this.entry(p)!).filter(Boolean);
+    this.manifest.transact(() => { for (const p of this.under(path)) this.files.delete(p); });
+    for (const e of gone) {
+      if (e.kind === 'blob') await this.releaseBlob(e.id);
+      else if (e.kind === 'doc') await fetch(`/api/e2e/projects/${encodeURIComponent(this.name)}/docs/${e.id}`, { method: 'DELETE', credentials: 'same-origin' }).catch(() => {});
+    }
+  }
+
+  async copy(from: string, to: string): Promise<void> {
+    this.writable();
+    const f = norm(from), t = norm(to);
+    for (const p of this.under(f)) {
+      const e = this.entry(p)!, dest = t + p.slice(f.length);
+      if (e.kind === 'doc') {
+        const id = randomId();
+        await seedDoc(this.name, id, this.k, await this.docState(p, 0));
+        this.setEntry(dest, { ...e, id, mtime: Date.now() });
+      } else this.setEntry(dest, { ...e, mtime: Date.now() });   // blobs never change: both names share it
+    }
+  }
+
+  /* ------------------------------------------------------------ figures as URLs */
+
+  private dropUrl(path: string): void {
+    for (const slot of [path, path + '\0img']) {
+      const u = this.urls.get(slot);
+      if (u) { URL.revokeObjectURL(u.url); this.urls.delete(slot); }
+    }
+  }
+
+  /** A URL of the file's content made here (an object URL; `image`: a PDF as its first page), if it is made already; else null — `loadUrl` makes it. */
+  urlNow(path: string, image = false): string | null {
+    const e = this.entry(path), u = this.urls.get(norm(path) + (image ? '\0img' : ''));
+    return e && u && u.id === e.id ? u.url : null;
+  }
+
+  /** Make the file's object URL (a PDF figure as an image of its first page when `image`). */
+  loadUrl(path: string, image = false): Promise<string | null> {
+    path = norm(path);
+    const now = this.urlNow(path, image);
+    if (now) return Promise.resolve(now);
+    const slot = path + (image ? '\0img' : '');
+    const busy = this.loadingUrls.get(slot);
+    if (busy) return busy;
+    const p = (async () => {
+      const e = this.entry(path);
+      if (!e || e.kind === 'dir') return null;
+      let bytes = await this.readFile(path);
+      let type = mimeOf(path);
+      if (image && type === 'application/pdf') { const png = await pdfFirstPage(bytes); if (png) { bytes = png; type = 'image/png'; } }
+      const url = URL.createObjectURL(new Blob([bytes.slice().buffer as ArrayBuffer], { type }));
+      const old = this.urls.get(slot);
+      if (old) URL.revokeObjectURL(old.url);
+      this.urls.set(slot, { id: e.id, url });
+      return url;
+    })().finally(() => this.loadingUrls.delete(slot));
+    this.loadingUrls.set(slot, p);
+    return p;
+  }
+
+  destroy(): void {
+    this.sync?.destroy();
+    void this.persistence?.destroy();
+    for (const u of this.urls.values()) URL.revokeObjectURL(u.url);
+    this.manifest.destroy();
+  }
+}
+
+/** a PDF figure's first page as a PNG (graphics in the editor) */
+async function pdfFirstPage(bytes: Uint8Array): Promise<Uint8Array | null> {
+  try {
+    const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+    pdfjs.GlobalWorkerOptions.workerSrc ||= new URL('pdfjs-dist/legacy/build/pdf.worker.min.mjs', import.meta.url).toString();
+    const doc = await pdfjs.getDocument({ data: bytes.slice() }).promise;
+    const page = await doc.getPage(1);
+    const vp = page.getViewport({ scale: 2 });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.ceil(vp.width); canvas.height = Math.ceil(vp.height);
+    await page.render({ canvas, canvasContext: canvas.getContext('2d')!, viewport: vp } as never).promise;
+    const blob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/png'));
+    void doc.cleanup();
+    return blob ? new Uint8Array(await blob.arrayBuffer()) : null;
+  } catch (e) { console.warn('[e2e] PDF figure', e); return null; }
+}
+
+/* ---------------------------------------------------------------------------- registry */
+
+const projects = new Map<string, E2eProject>();
+
+/**
+ * The project, opened (its key unwrapped, its manifest synced) on first use. When this browser does
+ * not hold the account's keys yet, the person is asked (setup / recovery code) unless `prompt: false`.
+ */
+export async function openE2eProject(name: string, opts: { create?: boolean; prompt?: boolean } = {}): Promise<E2eProject> {
+  try { return await openOnce(name, opts); }
+  catch (e) {
+    if (e instanceof KeyMissing && e.reason === 'account' && opts.prompt !== false && await ensureAccountKeys(e2eUser().id)) {
+      try { return await openOnce(name, opts); } catch (e2) { if (e2 instanceof KeyMissing && e2.reason === 'waiting') tellWaiting(name); throw e2; }
+    }
+    if (e instanceof KeyMissing && e.reason === 'waiting' && opts.prompt !== false) tellWaiting(name);
+    throw e;
+  }
+}
+
+/** what the person is told about keys (the web app sets it: e2e/install.ts) */
+export const keyNotices = {
+  /** this account is a member but holds no key yet */
+  waiting: (_project: string) => {},
+  /** others wait for the key this account holds */
+  othersWaiting: (_project: string, _names: string[]) => {},
+};
+const told = new Set<string>();
+function tellWaiting(project: string): void { if (!told.has(project)) { told.add(project); keyNotices.waiting(project); } }
+function openOnce(name: string, opts: { create?: boolean }): Promise<E2eProject> {
+  let p = projects.get(name);
+  if (!p) {
+    p = new E2eProject(name, roles.get(name) ?? (opts.create ? 'owner' : 'edit'), !!opts.create);
+    projects.set(name, p);
+    const mine = p;
+    p.ready.catch(() => { if (projects.get(name) === mine) { projects.delete(name); mine.destroy(); } });
+    // a member waiting for the key this account holds is told about once a session
+    if (mine.role !== 'view') void p.ready.then(() => waitingMembers(name)).then(w => { if (w.length) keyNotices.othersWaiting(name, w.map(m => m.name)); }).catch(() => {});
+  }
+  return p.ready.then(() => p!);
+}
+
+/** the project if it is open and ready here (synchronous callers: figure URLs) */
+export function openedE2eProject(name: string): E2eProject | undefined { return projects.get(name); }
+
+export function closeE2eProjects(): void { for (const p of projects.values()) p.destroy(); projects.clear(); }
+
+/** The editor registers the documents it has open (their live state is what compiles and metadata read). */
+export function registerOpenDoc(docId: string, ydoc: Y.Doc): () => void {
+  const project = projectOfDoc(docId), path = docId.slice(project.length + 1);
+  let off = false;
+  void openE2eProject(project).then(p => { if (!off) p.open.set(path, ydoc); }).catch(() => {});
+  return () => { off = true; const p = projects.get(project); if (p?.open.get(path) === ydoc) p.open.delete(path); };
+}
+
+export { REMOTE };

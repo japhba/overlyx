@@ -82,7 +82,7 @@ app.disable('x-powered-by');
 app.use('/internal/llm', llmProxy());
 app.use(authMiddleware);
 app.use((_req, res, next) => {
-  setSecurityHeaders(res);
+  setSecurityHeaders(res, undefined, _req.path);
   next();
 });
 app.use(cliDownloadRoutes());

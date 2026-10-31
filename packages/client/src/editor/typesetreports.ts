@@ -9,6 +9,7 @@
 import { api, API_BASE } from '../api';
 import { preambleFacts, type TypesetInput } from '@overlyx/core/typeset.ts';
 import { editorContext } from './context';
+import { isE2eDocId } from '../e2e/known';
 
 const REPORTS_MAX = 12;
 let reports = 0;
@@ -29,6 +30,8 @@ function preambleOf(docId: string): Promise<string | null> {
 }
 
 async function send(input: TypesetInput, docId: string): Promise<void> {
+  // (an end-to-end encrypted document's commands and preamble stay in this browser)
+  if (isE2eDocId(docId)) return;
   let facts: Partial<TypesetInput> = {};
   if (input.command && docId) {
     const preamble = await preambleOf(docId);

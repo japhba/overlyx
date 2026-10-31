@@ -6,4 +6,6 @@ export async function clearLocalData(): Promise<void> {
     const dbs = await (indexedDB as any).databases?.() as { name?: string }[] | undefined;
     for (const d of dbs ?? []) if (d.name?.startsWith('overlyx:')) indexedDB.deleteDatabase(d.name);
   } catch { /* ignore */ }
+  // end-to-end encrypted projects: this browser's keys and decrypted copies (e2e/install.ts)
+  try { await (await import('../e2e/install')).forgetE2e(); } catch { /* ignore */ }
 }
