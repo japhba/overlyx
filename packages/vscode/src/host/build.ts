@@ -25,8 +25,8 @@ export interface BuildRequest {
   /** header of the compiled document (engine choice); null: pdflatex */
   header: LyxDocument['header'] | null;
   latexmk: string;
-  /** called right before compiling (the provider saves dirty documents here) */
-  prepare?: () => Promise<void>;
+  /** called right before compiling (the provider saves dirty documents here); what it returns goes into the build's warnings */
+  prepare?: () => Promise<string[] | void>;
   /** a directory TeX searches too (a markdown document's: its LaTeX is compiled elsewhere) */
   texInputs?: string;
 }
@@ -103,14 +103,14 @@ const isCancelled = (job: BuildJob): boolean => (job.status as JobStatus) === 'c
 async function runJob(job: BuildJob, req: BuildRequest): Promise<void> {
   try {
     job.status = 'exporting'; job.phaseAt = Date.now();
-    await req.prepare?.();
+    const prepared = (await req.prepare?.()) ?? [];
     if (isCancelled(job)) { job.finishedAt = Date.now(); return; }
     job.status = 'compiling'; job.phaseAt = Date.now();
     let source: string | undefined;
     try { source = fs.readFileSync(req.absPath, 'utf8'); } catch { /* read by latexmk or not at all */ }
     const r = await runLatexmk(job, req);
     if (isCancelled(job)) { job.finishedAt = Date.now(); return; }
-    lastBuilds.set(job.docId, { ...r, source });
+    lastBuilds.set(job.docId, { ...r, warnings: [...prepared, ...r.warnings], source });
     job.status = r.status; job.finishedAt = Date.now();
     for (const fn of builtListeners) { try { fn(job.docId); } catch { /* a listener's problem */ } }
   } catch (e) {

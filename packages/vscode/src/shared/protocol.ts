@@ -5,6 +5,7 @@
  */
 
 import type { DocumentModel, SyncTag } from './documentModel';
+import type { AgentSelection } from './agentSelection';
 
 /** ProseMirror JSON document (nodes of the editor schema). */
 export type PmDoc = { type: string; [k: string]: unknown };
@@ -62,6 +63,8 @@ export type EditorToHost =
   | { type: 'update'; pmDoc: PmDoc; headerLines: string[]; base: DocumentModel; sync: SyncTag }
   | { type: 'outline'; items: OutlineEntry[] }
   | { type: 'selection'; pos: number }
+  /** what is selected in document `id` (this one, or one shown with it), for the agents on this computer */
+  | { type: 'agentSelection'; id: string; sel: AgentSelection }
   | { type: 'notify'; text: string; kind?: 'info' | 'error'; stack?: string }
   /** flush pending edits and save the TextDocument (Ctrl+S inside the editor) */
   | { type: 'save' }

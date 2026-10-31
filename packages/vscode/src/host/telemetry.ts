@@ -13,6 +13,7 @@ import { makeInteractionDetail, type InteractionAction, type InteractionOutcome 
 import { reliabilityDurationBucket } from '@overlyx/core/reliability.ts';
 import { sanitizeUsageEvents, validUsageSession, type SafeUsageEvent } from '@overlyx/core/usagePayload.ts';
 import { broadcastUsageStats } from './appearance.ts';
+import { cleanTypeset } from '@overlyx/core/typeset.ts';
 
 const ENDPOINT = 'https://overlyx.app/api/vscode-telemetry';
 const USAGE_ENDPOINT = 'https://overlyx.app/api/vscode-usage';
@@ -60,6 +61,12 @@ class OverlyxTelemetrySender implements vscode.TelemetrySender {
       this.usage.set(key, group);
       if (group.events.length >= 40) this.flushUsage();
       else if (!this.timer) { this.timer = setTimeout(() => this.flushUsage(), 20000); this.timer.unref(); }
+      return;
+    }
+    if (eventName === 'typeset') {
+      // (flat through the logger, which cleans each string; put together again for the receiver, core typeset.ts)
+      const t = cleanTypeset({ ...data, packages: typeof data.packages === 'string' ? data.packages.split(',').filter(Boolean) : undefined });
+      if (t) this.enqueue({ schema: 1, event: 'typeset', ...this.common, typeset: t });
       return;
     }
     if (eventName !== 'error') return;
@@ -194,6 +201,15 @@ export class OverlyxTelemetry implements ErrorReporter, vscode.Disposable {
       stack: error.stack?.slice(0, 6000) ?? '',
       ...data,
     });
+  }
+
+  /** A formula the editor could not typeset while on the screen (client editor/typesetreports.ts), from the token-protected local bridge. */
+  typeset(value: unknown): void {
+    try {
+      const t = cleanTypeset(value);
+      if (!t || !this.enabled) return;
+      this.logger.logError('typeset', { ...t, packages: t.packages?.join(',') });
+    } catch { /* Diagnostics must never interrupt editing. */ }
   }
 
   dispose(): void {

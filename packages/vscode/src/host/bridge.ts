@@ -13,6 +13,8 @@ import { isDirectImage, isGraphicsFile, resolveGraphicsPath, toPng } from './gra
 
 export interface BridgeDelegate {
   usageBatch?(value: unknown): number;
+  /** a formula the editor could not typeset (client editor/typesetreports.ts): to the extension's telemetry */
+  typesetReport?(value: unknown): void;
   /** project name → absolute root directory (undefined: unknown project) */
   projectRoot(project: string): string | undefined;
   /** all projects with their files (the client's GET /api/projects shape, roughly) */
@@ -46,6 +48,8 @@ export interface BridgeDelegate {
   deliverableLink(project: string, relPath: string): Promise<{ base: string; entry: string; expires: number }>;
   /** a local agent's tool call for a document open here, handed over by the tool server (agents/server.ts) */
   agentTool(call: { tool: string; args: Record<string, unknown>; author: string; cwd: string }): Promise<{ result?: unknown; error?: string; gone?: boolean }>;
+  /** what was selected last in this window's OverLyX editors, placed in its file (shared/agentSelection.ts), for the tool server's get_selection */
+  agentSelection(): unknown;
 }
 
 const JSON_LIMIT = 32 * 1024 * 1024;
@@ -116,7 +120,9 @@ export class Bridge {
     if (api === '/settings') { send(res, 200, { settings: { allowRecopyTokens: false } }); return; }
     if (api === '/bib/sources') { send(res, 200, { enabled: false, sources: [] }); return; }
     if (api === '/client-error') { send(res, 200, { url: null }); return; }
+    if (api === '/client-typeset' && req.method === 'POST') { d.typesetReport?.(await body(req, 16 * 1024)); res.statusCode = 204; res.end(); return; }
     if (api === '/projects' && req.method === 'GET') { send(res, 200, { projects: d.projects() }); return; }
+    if (api === '/agent/selection' && req.method === 'GET') { send(res, 200, { selection: d.agentSelection() ?? null }); return; }
     if (api === '/agent/tool' && req.method === 'POST') {
       const b = await body(req);
       if (typeof b?.tool !== 'string' || !b.args || typeof b.args !== 'object' || typeof b.cwd !== 'string') { send(res, 400, { error: 'tool, args and cwd required' }); return; }

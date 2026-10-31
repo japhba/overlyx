@@ -448,6 +448,99 @@ export function putOnEverySlide(text: string, path: Path): { ops: HtmlOp[]; link
   return { ops, linked: 0, added };
 }
 
+/** `html`'s first start tag's master key (null: none) */
+const keyIn = (html: string): string | null => {
+  const tag = /^\s*<[^>]*>/.exec(html)?.[0] ?? '';
+  const m = /\sdata-ol-master\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(tag);
+  return m ? m[1] ?? m[2] ?? m[3] : null;
+};
+const samePath = (a: Path, b: Path) => a.length === b.length && a.every((v, i) => v === b[i]);
+
+/**
+ * The theme view's edits (DeliverableEditor's Edit theme — Google Slides' theme builder on the
+ * linked copies): `ops` made on one slide, as what they mean there — an object put on a slide (drawn,
+ * typed, pasted, a picture) or duplicated goes on every slide, a new master object (a copy on each, at
+ * the same place in its stack, one insertion a slide); one deleted goes from every slide; one replaced
+ * by markup without its key (a stroke snapped to a shape) keeps it, so its copies follow. Markup put
+ * in with a key no copy on that slide has (Put on every slide, Slide numbers) is as it was. Operations
+ * of `text`; the rest unchanged.
+ */
+export function everySlideOps(text: string, ops: readonly HtmlOp[]): HtmlOp[] {
+  if (!ops.some(o => o.t === 'insert' || o.t === 'duplicate' || o.t === 'remove' || o.t === 'outer')) return [...ops];
+  const { doc, text: t } = parseSource(text);
+  const ss = slideElements(doc);
+  const slideAt = (p: Path) => ss.findIndex(s => samePath(pathOf(s), p));
+  const slideOfEl = (el: HElement | null) => (el ? ss.indexOf(el.parentNode as HElement) : -1);
+  const taken = new Set<string>();
+  const fresh = (): string => { for (let n = 1; ; n++) { const k = `m${n}`; if (!taken.has(k) && !text.includes(`${MASTER_ATTR}="${k}"`)) { taken.add(k); return k; } } };
+  const keysOn = (i: number) => new Set(objectsOf(ss[i]).map(o => attr(o, MASTER_ATTR)).filter(Boolean));
+  /** what goes on the other slides: one insertion each, where the first came on its slide */
+  const others = new Map<number, { index: number; html: string[] }>();
+  const spread = (from: number, index: number, html: string) => ss.forEach((s, i) => {
+    if (i === from) return;
+    const o = others.get(i) ?? { index: placeIn(s, index), html: [] };
+    o.html.push(html);
+    others.set(i, o);
+  });
+  const out: HtmlOp[] = [];
+  for (const op of ops) {
+    if (op.t === 'insert') {
+      const i = slideAt(op.parent), key = keyIn(op.html);
+      if (i < 0 || (key && !keysOn(i).has(key))) { out.push(op); continue; }
+      const html = withAttr(op.html, MASTER_ATTR, fresh());
+      out.push({ ...op, html });
+      spread(i, op.index, html);
+    } else if (op.t === 'duplicate') {
+      const rest: Path[] = [];
+      for (const p of op.paths) {
+        const el = elementAt(doc, p), i = slideOfEl(el);
+        if (!el?.sourceCodeLocation || i < 0) { rest.push(p); continue; }
+        const r = outerRange(el);
+        const html = withAttr(t.slice(r.from, r.to), MASTER_ATTR, fresh());
+        const index = elementChildren(ss[i]).indexOf(el) + 1;
+        out.push({ t: 'insert', parent: pathOf(ss[i]), index, html });
+        spread(i, index, html);
+      }
+      if (rest.length) out.push({ ...op, paths: rest });
+    } else if (op.t === 'remove') {
+      const all = [...op.paths];
+      for (const p of op.paths) for (const q of otherCopies(text, p)) if (!all.some(x => samePath(x, q))) all.push(q);
+      out.push({ ...op, paths: all });
+    } else if (op.t === 'outer') {
+      const el = elementAt(doc, op.path);
+      const key = slideOfEl(el) >= 0 ? attr(el!, MASTER_ATTR) : null;
+      out.push(key && !keyIn(op.html) ? { ...op, html: withAttr(op.html, MASTER_ATTR, key) } : op);
+    } else out.push(op);
+  }
+  for (const [i, o] of others) out.push({ t: 'insert', parent: pathOf(ss[i]), index: o.index, html: o.html.join('\n') });
+  return out;
+}
+
+/** An object on every slide, as the theme pane lists those of a slide */
+export interface MasterObject { key: string; path: Path; label: string; slides: number }
+
+/** the objects of slide `slide` that are on every slide (their copies here), with how many slides have each */
+export function masterObjects(text: string, slide: number): MasterObject[] {
+  const { doc } = parseSource(text);
+  const ss = slideElements(doc), s = ss[slide];
+  if (!s) return [];
+  const count = new Map<string, number>();
+  for (const x of ss) for (const k of new Set(objectsOf(x).map(o => attr(o, MASTER_ATTR)).filter((k): k is string => !!k))) count.set(k, (count.get(k) ?? 0) + 1);
+  const field = (e: HElement): boolean => attr(e, FIELD_ATTR) !== null || elementChildren(e).some(field);
+  const name = (o: HElement): string => {
+    const own = attr(o, 'data-ol-name');
+    if (own) return own;
+    if (field(o)) return 'Slide number';
+    const words = textOf(o).replace(/\s+/g, ' ').trim();
+    if (words) return words.length > 40 ? words.slice(0, 39) + '…' : words;
+    return o.tagName === 'img' ? 'Picture' : o.tagName === 'svg' ? (/\bol-ink\b/.test(attr(o, 'class') ?? '') ? 'Drawing' : 'Shape') : 'Shape';
+  };
+  return objectsOf(s).flatMap(o => {
+    const key = attr(o, MASTER_ATTR);
+    return key ? [{ key, path: pathOf(o), label: name(o), slides: count.get(key) ?? 1 }] : [];
+  });
+}
+
 /** the other copies of the master object at `path` (paths), on the slides */
 export function otherCopies(text: string, path: Path): Path[] {
   const o = objectAt(text, path);

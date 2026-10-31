@@ -37,6 +37,7 @@ import { formRects, paintDark, useDarkPages } from './pdfdark';
 import { setPref } from '../prefs';
 import { contentLayout, inkBox, stepZoom, zoomValue, Pinch, FIT_NAMES, GAP, PAD, PT, WIDTH_SPARE, ZOOMS, type Box, type Fit, type Geo, type Levels, type Zoom } from './pdfzoom';
 import { zoomPill } from './zoomhud';
+import { zoomTarget, type ZoomStep } from './zoomkeys';
 import { canLink, copyPlaceLink, type Place } from '../editor/permalink';
 import { showContextMenu } from '../editor/contextmenu';
 import { relativeLink } from '@overlyx/core/projectKey.ts';
@@ -392,6 +393,10 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, overlay, withCre
   };
   /** a zoom chosen from the menu */
   const choose = (z: Zoom) => { springStop(); remember(z); const m = middle(); request(z, 1, m.x, m.y); };
+  // Ctrl/⌘ + − once the PDF was pressed on, or is all there is (app/zoomkeys.ts): a step; 0: Fit width
+  const keyZoom = useRef<(d: ZoomStep) => void>(() => {});
+  keyZoom.current = d => { if (d === 0) choose('width'); else step(d); };
+  useEffect(() => { const el = host.current?.closest<HTMLElement>('.pdf-viewer'); return el ? zoomTarget(el, d => keyZoom.current(d)) : undefined; }, []);
   /** a pinch's step (log of the factor) about the pointer: on through the levels, stopping at the fits (pdfzoom.ts Pinch) */
   const pinchBy = (d: number, x: number, y: number, timed: boolean) => {
     springStop();

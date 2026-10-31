@@ -26,7 +26,7 @@ import { runtimeTags, injectRuntime, resolveInProject, SANDBOX_CSP, RUNTIME_MODE
 import { starterFor, DECK_SIZES, type DeliverableKind, type PageSize } from '@overlyx/core/html/deliverable.ts';
 import { SCIENTIFIC_TEMPLATES, templateLabel } from '@overlyx/core/html/scientific.ts';
 import { deckExtras, type DeckExtras } from '@overlyx/core/html/deckextras.ts';
-import { isArticleHtml, parseArticle, htmlBlockOf, blockKey, rawSource } from '@overlyx/core/html/article.ts';
+import { isArticleHtml, asArticleText, parseArticle, htmlBlockOf, blockKey, rawSource } from '@overlyx/core/html/article.ts';
 import { parseBibtex, type BibEntry } from '@overlyx/core/bib.ts';
 import { webviewHtml } from './webviewHtml.ts';
 import { toPng } from './graphics.ts';
@@ -158,6 +158,8 @@ export type DeliverableToHost =
   | { type: 'dlUpload'; id: number; rel: string; data: string }
   | { type: 'dlOpenExternal'; url: string }
   | { type: 'dlSave' }
+  /** the web page made an article (its meta tag), opened again in the document editor */
+  | { type: 'dlAsArticle' }
   | { type: 'notify'; kind?: 'info' | 'error'; text: string }
   | { type: 'appearance'; appearance: Appearance };
 
@@ -266,6 +268,22 @@ export class DeliverableEditorProvider implements vscode.CustomTextEditorProvide
           break;
         case 'dlSave':
           chain = chain.then(async () => { await document.save(); }).catch(e => void vscode.window.showErrorMessage(`OverLyX could not save ${entry}: ${String(e)}`));
+          break;
+        case 'dlAsArticle':
+          // (as the server's makeArticle: the meta tag, saved — VS Code's Local History keeps the page before — then this
+          // editor closes and the file opens anew, which the document editor takes, isArticleHtml above)
+          chain = chain.then(async () => {
+            const text = document.getText();
+            if (!isArticleHtml(text)) {
+              const edit = new vscode.WorkspaceEdit();
+              edit.replace(document.uri, new vscode.Range(document.positionAt(0), document.positionAt(text.length)), asArticleText(text));
+              if (!await vscode.workspace.applyEdit(edit)) throw new Error('the file could not be changed');
+            }
+            await document.save();
+            const column = panel.viewColumn;
+            panel.dispose();
+            await vscode.commands.executeCommand('vscode.openWith', document.uri, 'overlyx.htmlEditor', column);
+          }).catch(e => void vscode.window.showErrorMessage(`OverLyX could not make ${entry} an article: ${String(e)}`));
           break;
         case 'notify':
           if (msg.kind === 'error') void vscode.window.showErrorMessage('OverLyX: ' + msg.text);

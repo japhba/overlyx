@@ -68,7 +68,7 @@ export function generateLyx(t: SourceTarget): string {
 }
 
 /** what sourcelocate.ts needs to know about a document position: the paragraph text around it, or the formula's row when in math */
-function cursorContext($pos: ResolvedPos, field: LyxMathField | null, prev: number | null): CursorContext | null {
+export function cursorContext($pos: ResolvedPos, field: LyxMathField | null, prev: number | null): CursorContext | null {
   const par = $pos.parent;
   if (!par.isTextblock) return null;
   const atom = String.fromCharCode(0);

@@ -224,9 +224,9 @@ describe('local tools: the MCP server agents start (stdio)', () => {
     expect(init.result.serverInfo.name).toBe('overlyx-local');
     expect(init.result.instructions).toMatch(/TRACKED CHANGES/);
     // only when the user asks for it — the instructions (Claude Code) and the descriptions (Codex) both say so
-    expect(init.result.instructions).toMatch(/^Tracked changes in LaTeX \(\.tex\) and markdown \(\.md\) documents, for the OverLyX editor\. Use these tools ONLY when the user asks for it/);
+    expect(init.result.instructions).toMatch(/^Tracked changes in LaTeX \(\.tex\) and markdown \(\.md\) documents, for the OverLyX editor\. Use the editing and comment tools ONLY when the user asks for it/);
     expect(list.result.tools.find((t: { name: string }) => t.name === 'edit_document').description).toMatch(/only when the user asks for tracked changes/);
-    expect(list.result.tools.map((t: { name: string }) => t.name).sort()).toEqual(['add_comment', 'edit_document', 'reply_to_comment', 'write_document']);
+    expect(list.result.tools.map((t: { name: string }) => t.name).sort()).toEqual(['add_comment', 'edit_document', 'get_selection', 'reply_to_comment', 'write_document']);
     if (edit.result.isError) throw new Error(edit.result.content[0].text);
     expect(JSON.parse(edit.result.content[0].text)).toMatchObject({ ok: true, inserted_chars: 3, deleted_chars: 5 });
     expect(read(dir, 'paper/main.tex')).toMatch(/\\lyxadded\{Codex \(GPT-5\.5\) \[Ada\]\}\{[^}]+\}\{red\}/);
@@ -394,7 +394,7 @@ if (a[0] === 'mcp' && a[1] === 'remove') process.exit(1);
     expect(fs.readFileSync(file + '.bak', 'utf8')).toContain('model = "gpt-6"');
     // the note in Codex's personal instructions (its model follows AGENTS.md before tool descriptions): added once, the rest kept
     const notes = reg.codexInstructionsFile();
-    expect(fs.readFileSync(notes, 'utf8')).toMatch(/^<!-- OverLyX \(VS Code extension\): begin[^\n]*-->\n## Tracked changes in LaTeX \/ markdown documents \(OverLyX\)\nOnly when the user asks for tracked changes.*`overlyx-local` MCP server.*Otherwise edit as usual\.\n<!-- OverLyX: end -->\n$/s);
+    expect(fs.readFileSync(notes, 'utf8')).toMatch(/^<!-- OverLyX \(VS Code extension\): begin[^\n]*-->\n## Tracked changes in LaTeX \/ markdown documents \(OverLyX\)\nOnly when the user asks for tracked changes.*`overlyx-local` MCP server.*Otherwise edit as usual\.\n## The user's selection in OverLyX\n.*`get_selection` of `overlyx-local` first.*\n<!-- OverLyX: end -->\n$/s);
     expect(reg.codexInstructed()).toBe(true);
     reg.instructCodex(false);
     fs.writeFileSync(notes, '# Mine\n\nAlways answer in English.\n');

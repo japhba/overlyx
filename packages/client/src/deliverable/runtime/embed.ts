@@ -7,7 +7,7 @@
  */
 import { follow, type FollowTarget } from './follow';
 import { startColumn, columnSettled } from './column';
-import { startViewZoom, setViewZoom, viewZoom } from './viewzoom';
+import { startViewZoom, setViewZoom, stepViewZoom, viewZoom } from './viewzoom';
 
 let shown: Element[] = [];
 
@@ -85,6 +85,9 @@ export function startViewSync(): void {
       if (typeof d.z === 'number') setViewZoom(d.z);
       scrollTo({ left: typeof d.x === 'number' ? d.x : 0, top: d.y, behavior: 'instant' });
     }
+    // the pane's − / + (or Ctrl/⌘ + − pressed in the editor beside it): a step of the zoom, 0 back to the page as it is
+    const step = (d as { step?: unknown } | null)?.step;
+    if (e.source === window.parent && d?.ol === 'viewZoomStep' && (step === 1 || step === -1 || step === 0)) stepViewZoom(step);
     // the editor's cursor moved to another paragraph (follow.ts)
     const t = (d as { target?: FollowTarget } | null)?.target;
     if (e.source === window.parent && d?.ol === 'viewFollow' && t && Array.isArray(t.words) && t.words.every(w => typeof w === 'string')) {

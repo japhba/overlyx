@@ -258,6 +258,9 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
         case 'selection':
           entry.selectionPos = msg.pos;
           break;
+        case 'agentSelection':
+          entry.agentSelection = { id: msg.id, sel: msg.sel, at: Date.now() };
+          break;
         case 'notify':
           if (msg.kind === 'error') this.deps.reportError(Object.assign(new Error(msg.text), msg.stack ? { stack: msg.stack } : {}), 'webview.editor');
           if (msg.kind === 'error') void vscode.window.showErrorMessage('OverLyX: ' + msg.text);
@@ -266,7 +269,7 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
         case 'save': save(); break;
         case 'build':
           if (article) break;   // (an article's output is its page: the Page pane)
-          this.applyChain = this.applyChain.then(() => this.deps.startBuild(entry, { open: msg.open })).catch(e => console.error('overlyx build failed', e));
+          this.applyChain = this.applyChain.then(() => this.deps.startBuild(entry, { open: msg.open })).catch(e => { console.error('overlyx build failed', e); void vscode.window.showErrorMessage(`OverLyX could not start the PDF build: ${String((e as Error)?.message ?? e)}`); });
           break;
         case 'cancelBuild': this.deps.cancelBuild(session.docId); break;
         case 'openPdfPanel': this.deps.openPdfPanel(session.docId); break;

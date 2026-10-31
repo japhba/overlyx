@@ -5,7 +5,8 @@
  * stays as it is — its root keeps its size and is transformed — and the frame scrolls over the
  * magnified page. The pinch lands in this frame, not in the editor around it, so the page magnifies
  * itself; the editor hears the scale with the scroll position (embed.ts `viewScroll`) and gives both
- * back to the page loaded again after a save (`viewScrollTo`). Only in the editor's pane: a page
+ * back to the page loaded again after a save (`viewScrollTo`). Ctrl/⌘ + and − pressed in the page,
+ * and the pane's − / + (`viewZoomStep`), step through the scales. Only in the editor's pane: a page
  * opened on its own is zoomed by the browser.
  */
 const MIN = 1, MAX = 4;
@@ -75,6 +76,17 @@ export function setViewZoom(z: number): void {
   if (Number.isFinite(z)) zoomAt(z, 0, 0);
 }
 
+/** the scales Ctrl/⌘ + and − and the pane's − / + step through */
+const STEPS = [1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4];
+/**
+ * A step in (1) or out (−1), or back to the page as it is (0) — about the middle of the pane's top,
+ * as a browser's own zoom keeps the top of the page where it is.
+ */
+export function stepViewZoom(d: number): void {
+  const z = d === 0 ? 1 : d > 0 ? STEPS.find(s => s > scale * 1.01) ?? MAX : [...STEPS].reverse().find(s => s < scale / 1.01) ?? MIN;
+  zoomAt(z, innerWidth / 2, 0);
+}
+
 let pending: { z: number; x: number; y: number; toX: number; toY: number } | null = null;
 let raf = 0;
 /** a pinch's step (log of the factor), coalesced to one transform a frame */
@@ -130,6 +142,17 @@ export function startViewZoom(onChange: () => void): void {
     }
   };
   for (const t of ['gesturestart', 'gesturechange', 'gestureend']) addEventListener(t, gesture, opts);
+  // Ctrl/⌘ + − 0 in the page: its zoom, not the browser's (nor, in VS Code, the whole window's — the
+  // keys pressed in this frame never reach the editor around it, client app/zoomkeys.ts)
+  addEventListener('keydown', e => {
+    const mod = /Mac|iPhone|iPad/.test(navigator.platform) ? e.metaKey : e.ctrlKey;
+    if (!mod || e.altKey || e.defaultPrevented) return;
+    const d = e.key === '+' || (!e.shiftKey && (e.code === 'Equal' || e.code === 'NumpadAdd')) ? 1
+      : e.shiftKey ? null : e.key === '-' || e.code === 'Minus' || e.code === 'NumpadSubtract' ? -1 : e.key === '0' || e.code === 'Numpad0' ? 0 : null;
+    if (d === null) return;
+    e.preventDefault();
+    stepViewZoom(d);
+  }, true);
   // a resized pane: the body takes the new width, magnified as before
   addEventListener('resize', () => {
     if (scale === 1) return;

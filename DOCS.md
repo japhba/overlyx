@@ -535,6 +535,17 @@ blend.
   document ink, math pad). A report has measurements and fixed words only (the server's
   `glitchReport` drops anything else) and the last 16 kinds of input before it (`down pen canvas`,
   `focus math below`, `keyboard up` …); the first four repeats add their measurements to the row.
+  Formulas the editor cannot typeset while they are on the screen (31 Oct 2026, the user: "often i
+  will find macros not rendering") are reported too (`client/src/editor/typesetreports.ts` from
+  `field.ts renderStaticInto`, an IntersectionObserver; `core/src/typeset.ts`; `POST
+  /api/client-typeset`, kind `client-typeset`, not mailed; VS Code: bridge → `telemetry.typeset` →
+  `/api/vscode-telemetry` event `typeset`): a command MathJax does not know, a TeX error, or one the
+  editor's own reader threw — each once a page load, 12 at most. A report has the command name or
+  the error's words (quoted formula text cut out), how the document's preamble has the command
+  (`preambleFacts`: defined, and with what — `\NewDocumentCommand`, `\def` …; named only; absent), the
+  packages it loads and how many files it \inputs, the format and the app — never a formula. A
+  command defined in the preamble yet unknown to the editor is the macro collector's bug
+  (`core/macros.ts`).
   The pen lab's answers, when a person sends them (`POST /api/ink-lab`, kind `ink-lab`, see *Find
   your ink*), are kept a year, numbers and fixed words only (`core/inklab.ts` `inkLabReport`).
   `sudo overlyx-telemetry reports` lists them. The no-account VS Code extension uses its own narrow,
@@ -1228,6 +1239,31 @@ blend.
     (runtime `slides()` in `present`/`print`), faded with *Skipped* on the rail. **Background colour of
     every slide** and **Layout of this slide** (the layout picker applying to the slide) sit beside
     the new-slide ones. Tests: `tests/deckmaster.test.ts`.
+  * **Edit theme** (31 Oct 2026, the user: "have a Edit Theme button that opens a kind of slide master
+    for Layout"; Google Slides' theme builder, PowerPoint's Slide Master view), built on the linked
+    copies above — the file format is unchanged. *Edit theme* beside *Background* and *Layout* (the
+    slide's row with nothing selected), *Slide ▸ Edit theme*, the slide's right-click menu: a purple
+    bar over the canvas ("Editing the theme — what you change here is on every slide", *Done*; Esc with
+    nothing selected leaves too; not while suggesting or viewing). The canvas shows the slide's objects
+    on every slide; its own are dimmed and let the pointer through (runtime `edit.ts setThemeView`,
+    `html[data-ol-theme-view]`, `inTheme` in `objectFor` / `objectsOn` / `selectPaths`). Operations
+    made there are rewritten before they become splices (`deckmaster.ts everySlideOps`, in `applyOps`
+    and `applyRuntimeOps`): an object put on the slide — drawn, typed, pasted, a picture — or
+    duplicated becomes a new master object with a copy on every slide (one insertion per slide, at
+    the same place in its stack, before the notes); a deleted one goes from every slide; one replaced
+    without its key keeps it. A change of one changes all as ever (`followUps`). *Background* is every
+    slide's. The **theme pane** (`ThemePane.tsx`, × hides it, the bar brings it back): the slide's
+    objects on every slide (`masterObjects`: click selects, hover outlines), *Background of every
+    slide*, the deck's **colours** — custom properties at `:root` whose value is a colour, the last
+    declaration counts (`decktheme.ts deckTheme`) —, the **fonts** of its text (`.slide`, `body`, `html`,
+    `:root`: the strongest that sets one) and of its headings (a rule of headings alone; `inherit`:
+    *As the text*) from the deck toolbar's list, and its **saved layouts** (a card's menu: new slide in
+    it, apply to this slide, rename, replace with the slide shown — how a layout is changed —, delete;
+    *Save this slide as a layout*). `themeSplices` writes the stylesheet in place: the value where it is
+    declared, else a declaration added to the rule, else a rule at the end of the last `<style>`, a
+    Google font's stylesheet linked in the `<head>` — one undo step. Layouts are not edited on the
+    canvas (the runtime never shows a `<template>`). Tests: `tests/decktheme.test.ts`,
+    `tests/deckmaster.test.ts`.
   * **VS Code** (`packages/vscode/src/host/deliverables.ts`, webview `deliverableMain.tsx`): *Open
     With… ▸ OverLyX Slides, Poster or Web Page* on an `.html` file (or the editor title's button);
     *New Slide Deck… / New Poster… / New Web Page…* (File ▸ New File…) make a folder with an
@@ -2695,7 +2731,12 @@ they take, plus 6 % for page breaking. Within ~10 % of the built PDFs it was che
 
 **VS Code interface zoom and PDF.** The *UI zoom* button in document, layout and PDF toolbars uses
 VS Code's native window zoom, scaling the whole window with correct pointer coordinates. Content
-zoom stays independent. The *PDF* segment opens the compiled PDF in the same editor without
+zoom stays independent: Ctrl/⌘ + − 0 (and the numpad's) are bound to nothing in VS Code while an
+OverLyX editor or PDF is active (`overlyx.editorKey` in package.json — they zoomed the whole window,
+31 Oct 2026), and every webview zooms its content with them (`app/zoomkeys.ts`, the web app too):
+the pane last pressed on — the PDF (a step; 0: Fit width), the article's Page pane — else the
+document's text (a slide deck its slide). The Page pane has − 100 % + in its bar (`viewZoomStep`
+to the frame); keys pressed inside the page's frame zoom it there (`runtime/viewzoom.ts`). The *PDF* segment opens the compiled PDF in the same editor without
 rebuilding; PDFs already on disk are rediscovered after a host reload. *Build & View PDF* and
 forward SyncTeX also select this view, and double-clicking the PDF returns to the document.
 *Open beside* keeps a separate PDF panel available. Both use `webview/BuiltPdf.tsx` and continue
@@ -3634,9 +3675,14 @@ not on the deliverable canvas. The file stays a plain web page that any host can
   pandoc's `span.math` — and stays as it is when not, shown rendered through its MathML (cleaned to
   MathML alone, `nodeviews/htmlblock.ts safeMathML`). A page without `<article>` or `<main>` keeps
   its nav, header, footer and sidebar as HTML blocks. A plain page (or a deliverable web page) on the
-  canvas has **✎ Article** (web app): `POST /docs/*/as-article` (`docs.ts makeArticle`) keeps the
+  canvas has the article's switch, **WYSIWYM · HTML · Page** (31 Oct 2026, the user: "sometimes HTML
+  pages will have the WYSIWYM switch, sometimes just a phone icon"), with *Page* on (the canvas),
+  *HTML* its code beside it and a *Phone* toggle (was 🖥 / 📱); *WYSIWYM* asks, then writes the page
+  as an article from now on (was ✎ Article): `POST /docs/*/as-article` (`docs.ts makeArticle`) keeps the
   page as a version, sets the meta tag and closes its deliverable document; the client leaves the
-  canvas first so its text never syncs into the document. `render_page`'s checker measures other
+  canvas first so its text never syncs into the document. In VS Code (`dlAsArticle`,
+  `host/deliverables.ts`) the extension sets the meta tag, saves (Local History keeps the page
+  before), closes the canvas and opens the file again, which the document editor takes. `render_page`'s checker measures other
   tools' math as formulas and skips text for screen readers only (a clipped box of a pixel:
   KaTeX's MathML copy, `.sr-only`) and zero-width struts (`runtime/report.ts`). The runtime is one
   enclosed script (es2022, wrapped: `runtime.vite.config.ts`) — it declares no globals a page's own
@@ -4237,7 +4283,17 @@ clientInfo, User-Agent). It exposes these tools:
   (0.160) passes the model the tools' descriptions but not the server's `instructions`, and follows
   AGENTS.md before either: asked "with track changes", it patched the plain text. So connecting also
   writes a marked block into `$CODEX_HOME/AGENTS.md` (`instructCodex`; disconnecting takes it out, a
-  file left empty is removed; connected before the note → added once, globalState `agents.codexNote`).
+  file left empty is removed; connected before the note → added once, globalState `agents.codexNote.selection`).
+  **The selection** (31 Oct 2026, the user: "have selections be accessible through to CC and Codex in
+  vscode"): VS Code gives Claude Code and Codex a text editor's selection, never a webview's. So the
+  editor sends its selection (`agentSelection`: the top-level paragraphs and the text around each end,
+  as the source pane locates places — `shared/agentSelection.ts`), the host keeps the latest per
+  editor (`OpenEditor.agentSelection`) and places it in the file's source on request
+  (`placeSelection`, the source map of `session.toTextMap()`, else the words alone), the bridge serves
+  it at `GET /api/agent/selection`, and the tool `get_selection` (read-only, no tracked-changes request
+  needed) asks every window listed in `open/<pid>.json` and returns the newest: the path, the lines,
+  their source, the selected text. The instructions and the Codex note tell the agents to call it when
+  the user says "this", "here", "the selected text".
   Verified with real agents (the block as a project-level AGENTS.md for Codex): a plain request → their
   own edit, "with track changes" → `edit_document`, marks signed with the agent, the model it names
   (the tools' optional `model`) and git's `user.name` ("Claude (Opus 5.5) [Jan]"). The command is `process.execPath` with `ELECTRON_RUN_AS_NODE=1` (a

@@ -391,7 +391,7 @@ function peerCaret(el: Element, p: PeerInfo): string {
 const shown = (el: Element): boolean => el.getClientRects().length > 0;
 
 export function selectPaths(paths: Path[]): void {
-  selected = paths.map(liveAt).filter((e): e is Element => !!e);
+  selected = paths.map(liveAt).filter((e): e is Element => !!e && inTheme(e));
   if (revealSlideOf(selected[0] ?? null)) afterReveal();
   report();
   draw();
@@ -955,12 +955,42 @@ function fileObject(el: Element, root: Element): Element | null {
   }
   return null;
 }
+/**
+ * The theme view (the editor's Edit theme, Google Slides' theme builder): the objects on every slide
+ * (the editor's deckmaster.ts, `data-ol-master` on a slide's object) are the canvas; the slide's own
+ * are dimmed and let the pointer through — a click, a marquee, Ctrl+A, the Objects pane take none of
+ * them. What is added, changed and deleted there the editor puts on every slide.
+ */
+let themeView = false;
+let themeCss: HTMLStyleElement | null = null;
+export function setThemeView(on: boolean): void {
+  themeView = on;
+  if (on && !themeCss) {
+    themeCss = document.createElement('style');
+    themeCss.setAttribute('data-ol-runtime', '');
+    themeCss.textContent = `html[data-ol-theme-view] .slide > :not([data-ol-master]):not([data-ol-runtime]) { opacity: .14 !important; filter: grayscale(1) !important; pointer-events: none !important; }`;
+    (document.head ?? document.documentElement).appendChild(themeCss);
+  }
+  document.documentElement.toggleAttribute('data-ol-theme-view', on);
+  const kept = selected.filter(inTheme);
+  if (kept.length !== selected.length) { if (editing) stopText(); selected = kept; report(); }
+  draw();
+}
+/** what the theme view lets be taken: an object on every slide or what is in one (off the slides: anything) */
+function inTheme(el: Element): boolean {
+  if (!themeView) return true;
+  const s = slideOf(el);
+  if (!s) return true;
+  for (let e: Element | null = el; e && e !== s; e = e.parentElement) if (e.parentElement === s) return (srcOf.get(e) ?? e).hasAttribute('data-ol-master');
+  return false;
+}
+
 /** the objects of a slide (Ctrl+A, a marquee): those of the SVG editor's drawing, in its open layers */
 export function objectsOn(slide: Element): Element[] {
   const out: Element[] = [];
   const take = (p: Element, file: boolean) => {
     for (const k of Array.from(p.children)) {
-      if (!srcOf.has(k) || isForeign(k) || k.classList.contains('notes')) continue;
+      if (!srcOf.has(k) || isForeign(k) || k.classList.contains('notes') || (!file && !inTheme(k))) continue;
       if (!file && k.hasAttribute('data-ol-svgfile')) take(k, true);
       else if (!file) out.push(k);
       else if (isLayer(k)) { if (!layerLocked(k) && cs(k).display !== 'none') take(k, true); }
@@ -975,7 +1005,7 @@ export function objectsOn(slide: Element): Element[] {
 function objectFor(target: Element, deep: boolean, at?: { x: number; y: number }): Element | null {
   if (at && blankOfDrawing(target, at.x, at.y)) return null;
   const el = sourced(target);
-  if (!el || el === document.body || el === document.documentElement || el.localName === 'head') return null;
+  if (!el || el === document.body || el === document.documentElement || el.localName === 'head' || !inTheme(el)) return null;
   if (deep) return memberAt(el) ?? objectFor(target, false);
   // inside the selection's group: the child of that group
   const scope = selected.length === 1 ? selected[0].parentElement ?? (selected[0].parentNode as Element | null) : null;
@@ -3458,7 +3488,8 @@ function onKeyDown(e: KeyboardEvent): void {
   if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
   if (e.key === 'Escape') {
     e.preventDefault();
-    if (tool !== 'select') { fwd(e); return; }
+    // (nothing selected in the theme view: the editor leaves it)
+    if (tool !== 'select' || (themeView && !selected.length)) { fwd(e); return; }
     selectParent();
     return;
   }

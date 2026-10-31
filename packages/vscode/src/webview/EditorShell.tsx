@@ -17,6 +17,7 @@ import { inkToolbar } from '@client/app/inkToolbar';
 import { StatsDialog } from '@client/app/StatsDialog';
 import { shareTheme } from './appearance';
 import { InterfaceZoom } from './InterfaceZoom';
+import { setDefaultZoom } from '@client/app/zoomkeys';
 import { BuiltPdf } from './BuiltPdf';
 import { ArticlePage } from '@client/app/ArticlePage';
 import { applyArticleLook } from '@client/editor/article';
@@ -45,13 +46,14 @@ import type { EditorView } from 'prosemirror-view';
 import { TextSelection } from 'prosemirror-state';
 import { vscode, applyTheme } from './globals';
 import type { HostToEditor, OutlineEntry } from '../shared/protocol';
+import { SELECTION_MAX, type AgentSelection } from '../shared/agentSelection';
 import { api, type DocMeta } from '@client/api';
 import { getPrefs, setPref, subscribePrefs, type Prefs } from '@client/prefs';
 import { Toolbar } from '@client/app/Toolbar';
 import { buildOutline, Outline, type OutlineItem } from '@client/app/Outline';
 import { Comments } from '@client/app/Comments';
 import { StatusBar, type Status } from '@client/app/StatusBar';
-import { SourcePane, cursorLine, docBlocks, blockPos } from '@client/app/SourcePane';
+import { SourcePane, cursorLine, docBlocks, blockPos, cursorContext } from '@client/app/SourcePane';
 import { PaneSwitch } from '@client/app/PaneSwitch';
 import { PaneDividers } from '@client/app/PaneDividers';
 import { loadLayout, normalizeLayout, saveLayout, setPaneShown, togglePane, visiblePanes, paneGrow, viewParam, type PaneId, type PaneLayout } from '@client/app/panes';
@@ -235,6 +237,9 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   useEffect(() => { localStorage.setItem('ol.toolbars', JSON.stringify(toolbars)); }, [toolbars]);
   useEffect(() => subscribePrefs(setPrefsState), []);
   useEffect(() => applyEditorZoom(zoom), [zoom]);
+  // Ctrl/⌘ + − zoom the text wherever the focus is — or the PDF, the page, once pressed on (app/zoomkeys.ts);
+  // VS Code's own zoom of the window has these keys bound to nothing while this editor is active (package.json)
+  useEffect(() => setDefaultZoom(k => editorContext.ui?.zoom(k)), []);
   useDocumentViewportZoom(scrollRef, docId);
   // Settings ▸ Editor ▸ Font ▸ "As in the document" follows the document's roman font
   useEffect(() => { setDocumentFonts(headerLines); setDocumentParagraphs(headerLines); setDocumentHeadings(headerLines); setDocumentNumbering(headerLines); setLayoutHeader(headerLines); }, [headerLines]);
@@ -262,6 +267,19 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   const postSelection = useMemo(() => debounce((v: EditorView) => {
     vscode.postMessage({ type: 'selection', pos: v.state.selection.from });
   }, 250), []);
+  // what is selected, for the agents on this computer (Claude Code, Codex: shared/agentSelection.ts) — of any document shown here
+  const postAgentSelection = useMemo(() => debounce((v: EditorView) => {
+    const { from, to, $from, $to } = v.state.selection;
+    const leaf = (n: { type: { name: string }; attrs: Record<string, unknown> }) =>
+      typeof n.attrs.latex !== 'string' ? '' : n.type.name === 'math_display' ? `\n${n.attrs.latex}\n` : `$${n.attrs.latex}$`;
+    const sel: AgentSelection = {
+      text: from === to ? '' : v.state.doc.textBetween(from, to, '\n\n', leaf as never).slice(0, SELECTION_MAX),
+      blocks: v.state.doc.childCount,
+      from: { block: $from.index(0), ctx: cursorContext($from, null, null) },
+      to: { block: $to.index(0), ctx: cursorContext($to, null, null) },
+    };
+    vscode.postMessage({ type: 'agentSelection', id: viewDocId(v), sel });
+  }, 300), []);
 
   const onSelection = (v: EditorView) => {
     if (!v.hasFocus() && currentView() && currentView() !== v) return;
@@ -285,6 +303,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
     setChangeInfo(ch ? describeChange(ch.type, ch.author, ch.time) : null);
     setSelTick(t => t + 1);
     if (viewDocId(v) === docId) { postSelection(v); setActivePos(v.state.selection.from); }
+    postAgentSelection(v);
     rerender();
   };
 

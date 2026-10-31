@@ -40,6 +40,7 @@ import { usePresentation } from './presentation';
 import { Toolbar, NAMED_COLORS, type ToolButton } from './Toolbar';
 import { buildToolbars, loadToolbarPrefs, mathExecutor, useMathPanels, toolbarClipboard, markValue, MODERN_COLLAPSE, type ToolbarId, type ToolbarMode, type ToolbarPrefs } from './toolbars';
 import { SelectionBar } from './SelectionBar';
+import { setDefaultZoom } from './zoomkeys';
 import { debounce, hashAuthor, applyAuthorColors, applyCommentAvatars, bcp47, suggestLabel, LayoutPicker, documentStats, applyEditorZoom, stepTextZoom, useDocumentViewportZoom, SidebarGrip, restoreSidebarWidths } from './shellutil';
 import { chooseLyxImport } from './lyximport';
 import { setDocumentFonts } from '../fonts/editorfont';
@@ -709,19 +710,9 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   // Settings ▸ Editor ▸ Font ▸ "As in the document" follows the document's roman font
   useEffect(() => { setDocumentFonts(headerLines); setDocumentParagraphs(headerLines); setDocumentHeadings(headerLines); setDocumentNumbering(headerLines); setLayoutHeader(headerLines); }, [headerLines]);
   // Ctrl/Cmd +/- zoom the document text, never the browser chrome — wherever the focus is (formula
-  // fields, panels). Ctrl+0 is a paragraph style now (Part, like LyX's Alt+P 0); reset via the status bar.
-  useEffect(() => {
-    const onKey = (ev: KeyboardEvent) => {
-      const mod = navigator.platform.includes('Mac') ? ev.metaKey : ev.ctrlKey;
-      if (!mod || ev.altKey || ev.shiftKey && ev.key !== '+') return;
-      const k = ev.key === '+' || ev.code === 'Equal' || ev.code === 'NumpadAdd' ? 1 : ev.key === '-' || ev.code === 'Minus' || ev.code === 'NumpadSubtract' ? -1 : null;
-      if (k === null) return;
-      ev.preventDefault(); ev.stopPropagation();
-      editorContext.ui?.zoom(k);
-    };
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, []);
+  // fields, panels), unless a pane that zooms itself was pressed on last (the PDF, app/zoomkeys.ts).
+  // Ctrl+0 is a paragraph style now (Part, like LyX's Alt+P 0); reset via the status bar.
+  useEffect(() => setDefaultZoom(k => editorContext.ui?.zoom(k)), []);
   // A file dropped outside a drop target (editor text, file browser) must not make the browser
   // navigate to it — that would throw the whole workspace away. Element handlers run first.
   useEffect(() => {

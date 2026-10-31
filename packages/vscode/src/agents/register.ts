@@ -224,6 +224,8 @@ const NOTE_END = '<!-- OverLyX: end -->';
 const CODEX_NOTE = `${NOTE_BEGIN}
 ## Tracked changes in LaTeX / markdown documents (OverLyX)
 Only when the user asks for tracked changes ("with track changes", "as suggestions", "so I can review them") or for comments in a .tex or .md document: make the edits with the tools of the \`${SERVER_NAME}\` MCP server — \`edit_document\`, \`write_document\`, \`add_comment\`, \`reply_to_comment\` — not with apply_patch, the shell or hand-written markup; the user then reviews them in OverLyX. Otherwise edit as usual.
+## The user's selection in OverLyX
+OverLyX's editor in VS Code is a webview: what the user selected there is not in your context. When they refer to a selection or a place in a document ("this", "here", "the selected text", "this paragraph"), call \`get_selection\` of \`${SERVER_NAME}\` first: the file, the lines of its source and the selected text.
 ${NOTE_END}
 `;
 

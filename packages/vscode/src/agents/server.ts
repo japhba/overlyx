@@ -20,13 +20,15 @@ import type { EditorAnswer } from './handover.ts';
 
 export const LOCAL_SERVER_NAME = 'overlyx-local';
 
-export const LOCAL_INSTRUCTIONS = `Tracked changes in LaTeX (.tex) and markdown (.md) documents, for the OverLyX editor. Use these tools ONLY when the user asks for it — "with track changes", "as tracked changes", "as suggestions", "so I can review them", or for comments in the document. Otherwise edit files as you normally would, with your own tools; never on your own initiative. When asked, edit the documents with these tools, not with your own file editing (apply_patch, edit/write tools, shell): your edit then becomes TRACKED CHANGES — insertions and deletions attributed to you, which the user accepts or rejects in the OverLyX editor (an editor that has the file open shows them at once, also with unsaved edits; none needs to be open). Read the files with your own tools; paths are relative to your working directory. A document without OverLyX's block in its preamble gets one with the first tracked change (it defines the change marks for LaTeX).
+export const LOCAL_INSTRUCTIONS = `Tracked changes in LaTeX (.tex) and markdown (.md) documents, for the OverLyX editor. Use the editing and comment tools ONLY when the user asks for it — "with track changes", "as tracked changes", "as suggestions", "so I can review them", or for comments in the document. Otherwise edit files as you normally would, with your own tools; never on your own initiative. When asked, edit the documents with these tools, not with your own file editing (apply_patch, edit/write tools, shell): your edit then becomes TRACKED CHANGES — insertions and deletions attributed to you, which the user accepts or rejects in the OverLyX editor (an editor that has the file open shows them at once, also with unsaved edits; none needs to be open). Read the files with your own tools; paths are relative to your working directory. A document without OverLyX's block in its preamble gets one with the first tracked change (it defines the change marks for LaTeX).
 
 Your changes and comments are signed with your name, your model and whose agent you are, e.g. "Claude (Opus 5.5) [Ada]": pass your model's name (e.g. "Opus 5.5") as model with your first call.
 
 edit_document replaces a passage (old_text → new_text; any LaTeX), write_document writes a whole source or creates a document. Only what actually changes is marked — a word, a digit, a table cell. In the source, pending changes look like \\lyxadded{author}{date}{text} and \\lyxdeleted{author}{date}{text} (in markdown: <ins …>text</ins>, <del …>text</del>); old_text may leave that markup out, and whitespace differences are tolerated. Never write or edit that markup yourself, and leave other people's tracked changes alone. The preamble is never tracked (applied directly, and said so).
 
 Tracked editing must never block you or leave a document broken. On ANY problem with it — an edit that does not match (do not retry a failing tracked edit more than once), markup making a passage hard to address, a result (now_reads) that looks garbled, a build that fails because of your tracked edit, math / tables / environments the tracked form mangles — pass tracked: false: the same edit applied directly, without marks. Do the same when the user asks for direct edits.
+
+The user's selection: OverLyX's editor in VS Code is a webview, so what the user selects there is not in your context as a text editor's selection is. Whenever the user refers to a selection or a place in a document ("this", "here", "the selected text", "this paragraph", "fix this"), call get_selection first (read-only, any time, no tracked-changes request needed): the file, the lines of its source, that source and the selected text as it reads.
 
 Comments: add_comment starts a thread at a passage, reply_to_comment answers a thread (and resolve: true marks it done). In the source a thread is a block of "%% @comment" … "%% @end" lines (in markdown an HTML comment "<!-- @comment … -->") with "Author (date):" headers; change threads only through these tools.
 
@@ -74,6 +76,37 @@ export async function handToEditor(endpoint: string, call: { tool: ToolName; arg
   if (!res.ok) return null;
   const answer = await res.json() as EditorAnswer;
   return answer.gone ? null : answer;
+}
+
+/** What the open windows answer for get_selection (host bridge.ts /api/agent/selection, extension.ts agentSelection). */
+interface WindowSelection { file: string; at: number; text: string; startLine?: number; endLine?: number; source?: string; unsaved?: boolean; focused?: boolean }
+
+/** The latest selection among the VS Code windows with OverLyX editors open (null: none, or none answers). */
+export async function latestSelection(agentsDir: string | undefined, timeoutMs = 3000): Promise<WindowSelection | null> {
+  const endpoints = [...new Set([...openDocuments(agentsDir).values()].filter((e): e is string => !!e))];
+  const answers = await Promise.all(endpoints.map(async ep => {
+    try {
+      const res = await fetch(`${ep}/api/agent/selection`, { signal: AbortSignal.timeout(timeoutMs) });
+      return res.ok ? ((await res.json()) as { selection?: WindowSelection | null }).selection ?? null : null;
+    } catch { return null; }
+  }));
+  return answers.filter((a): a is WindowSelection => !!a && typeof a.file === 'string' && typeof a.at === 'number').sort((a, b) => b.at - a.at)[0] ?? null;
+}
+
+/** get_selection's answer: the file relative to the agent's directory where it is inside it */
+export function describeSelection(s: WindowSelection | null, cwd: string, now = Date.now()): Record<string, unknown> {
+  if (!s) return { selection: null, note: 'Nothing is selected in an OverLyX editor in VS Code (or no OverLyX editor is open). Ask the user which passage they mean.' };
+  const rel = path.relative(cwd, s.file);
+  const lines = s.startLine === undefined ? undefined : s.endLine && s.endLine !== s.startLine ? `${s.startLine}-${s.endLine}` : String(s.startLine);
+  const secs = Math.max(0, Math.round((now - s.at) / 1000));
+  return {
+    path: rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? rel : s.file,
+    ...(lines ? { lines } : {}),
+    ...(s.text ? { selected_text: s.text } : { caret: 'Nothing is selected: the cursor is on these lines' }),
+    ...(s.source !== undefined ? { source: s.source } : {}),
+    selected: secs < 60 ? `${secs} s ago` : `${Math.round(secs / 60)} min ago`,
+    ...(s.unsaved ? { note: 'The editor has changes not yet saved to the file: the lines are those of the editor\'s text' } : {}),
+  };
 }
 
 export function buildLocalServer(opts: { cwd: string; layoutDir: string; agentsDir?: string }): McpServer {
@@ -140,6 +173,13 @@ export function buildLocalServer(opts: { cwd: string; layoutDir: string; agentsD
       model: modelArg,
     },
   }, call('reply_to_comment'));
+
+  server.registerTool('get_selection', {
+    description: "What the user has selected — or where the cursor is — in an OverLyX editor in VS Code (LaTeX, markdown and HTML article documents shown in OverLyX's visual editor, a webview whose selection you cannot otherwise see). Call it whenever the user refers to a selection or a place (\"this\", \"here\", \"the selected text\", \"this paragraph\", \"fix this\"). Read-only; use it any time (no tracked-changes request needed). Returns path (relative to your working directory when inside it), lines (1-based, of the document's source), source (those lines), selected_text (as it reads, formulas as $LaTeX$) and how long ago it was selected.",
+    inputSchema: {},
+  }, async () => {
+    try { return ok(describeSelection(await latestSelection(opts.agentsDir), opts.cwd)); } catch (e) { return fail(e); }
+  });
 
   return server;
 }

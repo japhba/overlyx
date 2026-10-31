@@ -43,7 +43,7 @@ export function setupAgents(context: vscode.ExtensionContext, layoutDir: () => s
       } catch (e) { done.push(`not Claude Code: ${String((e as { stderr?: string }).stderr || (e as Error).message).trim()}`); }
     }
     if (agents.codex) {
-      try { registerCodex(cmd); await context.globalState.update('agents.codexNote', true); done.push(`Codex (${codexConfigFile()}, and a note in ${codexInstructionsFile()})`); }
+      try { registerCodex(cmd); await context.globalState.update('agents.codexNote.selection', true); done.push(`Codex (${codexConfigFile()}, and a note in ${codexInstructionsFile()})`); }
       catch (e) { done.push(`not Codex: ${(e as Error).message}`); }
     }
     return done;
@@ -89,8 +89,8 @@ export function setupAgents(context: vscode.ExtensionContext, layoutDir: () => s
     const cmd = command();
     if (claudeRegistered() && !claudeRegistered(cmd)) await registerClaude(cmd);
     if (codexRegistered() && !codexRegistered(cmd)) registerCodex(cmd);
-    // connected with a version before the AGENTS.md note: added once (taken out by the user later, it stays out)
-    if (codexRegistered() && !context.globalState.get('agents.codexNote')) { instructCodex(true); await context.globalState.update('agents.codexNote', true); }
+    // connected with a version before the AGENTS.md note (or before its get_selection part): added once (taken out by the user later, it stays out)
+    if (codexRegistered() && !context.globalState.get('agents.codexNote.selection')) { instructCodex(true); await context.globalState.update('agents.codexNote.selection', true); }
   };
 
   // in the background: never in the way of opening the editor. Only for the installed extension —

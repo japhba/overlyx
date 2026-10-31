@@ -6,7 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { composeSplices, followUps, numberObjects, withoutFields, putOnEverySlide, otherCopies, slideNumberOps, lookAlikeOps, similarTexts, withAttr, twinsOf } from '../packages/client/src/deliverable/deckmaster.ts';
+import { composeSplices, followUps, numberObjects, withoutFields, putOnEverySlide, otherCopies, slideNumberOps, lookAlikeOps, similarTexts, withAttr, twinsOf, everySlideOps, masterObjects } from '../packages/client/src/deliverable/deckmaster.ts';
 import { applyOp, applySplices, opSplices, parseSource, type HtmlOp, type Splice } from '../packages/core/src/html/source.ts';
 import { slideElements } from '../packages/core/src/html/deliverable.ts';
 import { newSlideHtml } from '../packages/client/src/deliverable/sourceops.ts';
@@ -214,5 +214,69 @@ describe("the master's operations", () => {
     expect(withAttr('<p class="a">x <b data-ol-master="q">y</b></p>', 'data-ol-master', 'm2')).toBe('<p data-ol-master="m2" class="a">x <b data-ol-master="q">y</b></p>');
     expect(withAttr('<p data-ol-master="m2" class="a">x</p>', 'data-ol-master', null)).toBe('<p class="a">x</p>');
     expect(withAttr('<img src="a.png">', 'data-ol-master', 'm1')).toBe('<img data-ol-master="m1" src="a.png">');
+  });
+});
+
+describe('the theme view (Edit theme): what is done on one slide is on every slide', () => {
+  /** the text after `list` as the editor applies it in the theme view: everySlideOps, then the master's follow-ups */
+  const theme = (text: string, list: HtmlOp[]) => {
+    const src = parseSource(text);
+    const after = applySplices(text, everySlideOps(text, list).flatMap(op => opSplices(src, op)));
+    return applySplices(after, followUps(text, after).splices);
+  };
+  const notes = '<aside class="notes">Say it.</aside>';
+  const logo = '<img src="logo.png" style="position: absolute; left: 1100px; top: 20px; width: 120px">';
+  const text = deck([slide(bar(), h2('One'), notes), slide(bar(), h2('Two')), slide(h2('Three'))].join('\n'));
+
+  it('an object put on a slide goes on every slide, a new master object (before the notes)', () => {
+    const out = theme(text, [{ t: 'insert', parent: [1, 0], index: 2, html: logo }]);
+    const ss = slidesOf(out);
+    for (const s of ss) expect(s).toContain('<img data-ol-master="m2" src="logo.png"');
+    expect(ss[0].indexOf('logo.png')).toBeLessThan(ss[0].indexOf('<aside'));
+    expect(out.match(/data-ol-master="m1"/g)).toHaveLength(2);
+  });
+  it('several objects at once: one insertion on each other slide, in their order', () => {
+    const out = theme(text, [
+      { t: 'insert', parent: [1, 1], index: 2, html: '<p style="position: absolute; left: 0px; top: 0px">A</p>' },
+      { t: 'insert', parent: [1, 1], index: 3, html: '<p style="position: absolute; left: 0px; top: 40px">B</p>' },
+    ]);
+    for (const s of slidesOf(out)) { expect(s).toMatch(/data-ol-master="m2"[^>]*>A<\/p>/); expect(s).toMatch(/data-ol-master="m3"[^>]*>B<\/p>/); }
+    // (on the other slides; on its own, where the canvas put them)
+    for (const s of [slidesOf(out)[0], slidesOf(out)[2]]) expect(s.indexOf('>A<')).toBeLessThan(s.indexOf('>B<'));
+  });
+  it('a master object pasted onto its own slide is a new one, on every slide; markup that brings a key the slide lacks stays as it is', () => {
+    const pasted = theme(text, [{ t: 'insert', parent: [1, 0], index: 2, html: bar('#ff0000') }]);
+    expect(pasted.match(/data-ol-master="m2"/g)).toHaveLength(3);
+    expect(pasted.match(/data-ol-master="m1"/g)).toHaveLength(2);
+    const put = everySlideOps(text, [{ t: 'insert', parent: [1, 2], index: 0, html: bar() }]);
+    expect(put).toEqual([{ t: 'insert', parent: [1, 2], index: 0, html: bar() }]);
+  });
+  it('a master object duplicated: the copy is a new master object, beside it on every slide', () => {
+    const out = theme(text, [{ t: 'duplicate', paths: [[1, 0, 0]] }]);
+    const ss = slidesOf(out);
+    expect(ss[0].match(/data-ol-master="m1"/g)).toHaveLength(1);
+    for (const s of ss) expect(s).toContain('data-ol-master="m2"');
+    expect(ss[0].indexOf('m1')).toBeLessThan(ss[0].indexOf('m2'));
+  });
+  it('deleted on one slide, deleted from every slide; replaced without its key, still on every slide', () => {
+    const gone = theme(text, [{ t: 'remove', paths: [[1, 1, 0]] }]);
+    expect(gone).not.toContain('data-ol-master');
+    expect(slidesOf(gone)[0]).toContain('One');
+    const shape = '<div style="position: absolute; left: 0px; top: 0px; width: 1280px; height: 60px; background: #f00"></div>';
+    const out = theme(text, [{ t: 'outer', path: [1, 0, 0], html: shape }]);
+    const ss = slidesOf(out);
+    expect(ss[0]).toContain('height: 60px') ; expect(ss[1]).toContain('height: 60px');
+    expect(out.match(/data-ol-master="m1"/g)).toHaveLength(2);
+    expect(ss[2]).not.toContain('height: 60px');
+  });
+  it('the objects of a slide on every slide: named, with how many slides have them', () => {
+    const t2 = deck([slide(bar(), h2('One'), '<p data-ol-master="m5" class="footer"><span data-ol-field="slide-number">1</span></p>', '<img data-ol-master="m6" data-ol-name="Logo" src="l.png">'), slide(bar(), h2('Two'))].join('\n'));
+    expect(masterObjects(t2, 0)).toEqual([
+      { key: 'm1', path: [1, 0, 0], label: 'Shape', slides: 2 },
+      { key: 'm5', path: [1, 0, 2], label: 'Slide number', slides: 1 },
+      { key: 'm6', path: [1, 0, 3], label: 'Logo', slides: 1 },
+    ]);
+    expect(masterObjects(t2, 1).map(o => o.key)).toEqual(['m1']);
+    expect(masterObjects(t2, 5)).toEqual([]);
   });
 });

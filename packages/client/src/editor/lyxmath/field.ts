@@ -20,6 +20,7 @@ import { editorContext, figureUrl } from '../context';
 import { getPrefs } from '../../prefs';
 import { documentViewScale } from '../viewscale';
 import { renderMath, onMathRendererChange } from './mathjax';
+import { noteTypeset } from '../typesetreports';
 import { inputModeFor, mathKbdFocus, mathKbdDestroyed, noteHardwareKey, setSystemKeyboard } from '../mathkbd/hook';
 
 export type MoveOutDirection = 'backward' | 'forward' | 'upward' | 'downward';
@@ -1047,14 +1048,17 @@ export function rowRectsOf(hull: Hull, cells: CellRef[], container: HTMLElement)
  */
 export function renderStaticInto(el: HTMLElement, latex: string, display: boolean, macros: MacroTable, imageContext?: MathImageContext, onRetry?: () => void, width?: number): void {
   let r: ReturnType<typeof renderMath> | null = null;
+  let parseError: string | null = null;
   try {
     const hull = parseFormula(latex, macros);
     const { latex: src } = renderHullSource(hull, macros);
     r = renderMath(src, { display, width: display ? width : undefined, macros: mathjaxMacros(macros), image: mathImageResolver(imageContext) });
-  } catch { /* shown as an error */ }
+  } catch (e) { parseError = e instanceof Error ? e.message : String(e); }
   if (r?.node) { el.replaceChildren(r.node); maskImageGlyphs(el); }
   else el.innerHTML = `<span class="${r && !r.error ? 'lm-error lm-pending' : 'lm-error'}">${escapeHtml(latex)}</span>`;
   if (r?.retry && onRetry) void r.retry.then(onRetry);
+  // not typeset (a command MathJax does not know, a TeX error): reported once it is on the screen (typesetreports.ts); still loading: not yet
+  if (!r?.retry) noteTypeset(el, r?.undefinedCommands.length || r?.error || parseError ? { undefinedCommands: r?.undefinedCommands, error: r?.error ?? parseError, parse: !r, display } : null);
 }
 
 /** Static rendering of a formula as markup (see renderStaticInto). */

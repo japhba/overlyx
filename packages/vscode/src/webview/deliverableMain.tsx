@@ -111,6 +111,8 @@ function vscodeHost(init: Extract<HostToDeliverable, { type: 'dlInit' }>): Deliv
     ],
     present(url) { vscode.postMessage({ type: 'dlOpenExternal', url }); return true; },
     save: () => vscode.postMessage({ type: 'dlSave' }),
+    // (the host closes this editor and opens the file in the document editor)
+    makeArticle: () => { vscode.postMessage({ type: 'dlAsArticle' }); return Promise.resolve(); },
     // VS Code's own shortcuts (⌘P, ⌘W …): a key the page's frame got is handed to the webview's window, which VS Code listens to
     key(k) {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: k.key, code: k.key.length === 1 ? 'Key' + k.key.toUpperCase() : k.key, ctrlKey: k.ctrl, shiftKey: k.shift, altKey: k.alt, metaKey: k.meta, bubbles: true }));

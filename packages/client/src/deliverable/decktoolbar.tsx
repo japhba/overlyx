@@ -71,6 +71,8 @@ export interface DeckCtx {
    * selected on the other slides (`similar` of them) made to look like it
    */
   master?: { on(): void; unlink(): void; removeOthers(): void; deleteAll(): void; similar: number; lookAlike(): void };
+  /** the theme view (Edit theme: the objects on every slide, the deck's colours, fonts and layouts — DeliverableEditor), on or not; in it Background is every slide's */
+  theme?: { on: boolean; toggle(): void; disabled?: boolean };
   /** placeholders (decklayouts.ts): one of a role put on the slide; a picture put into the empty picture placeholder selected */
   placeholders?: { insert(role: PhRole): void; picture(): void };
   /** LyX's formula editor (MathOverlay): open on a formula of the text, a new formula at the caret, its commands, the math panels; a displayed one numbered and labelled */
@@ -515,15 +517,18 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
       { id: 'dk-delete', title: 'Delete (Del)', icon: 'dk-delete', action: c.remove, disabled: locked },
     ]);
   } else if (c.kind !== 'page') {
-    const what = c.pageLabel ?? (c.kind === 'poster' ? 'Poster' : 'Slide');
-    section(what);
     const deck = c.kind === 'deck';
-    // (words on the buttons, as Google Slides' Background and Layout: what they do is not drawn easily)
+    const theme = deck && c.theme?.on;
+    const what = theme ? 'Theme' : c.pageLabel ?? (c.kind === 'poster' ? 'Poster' : 'Slide');
+    section(what);
+    // (words on the buttons, as Google Slides' Background, Layout and Edit theme: what they do is not drawn easily)
     context.push([
-      { id: 'dk-bg', title: deck ? 'Background colour — of this slide, or of every slide' : `${what} background colour`, icon: 'Background',
-        palette: { title: `${what} background`, render: close => <BackgroundPalette close={close} every={deck} onPick={c.slideBackground} /> } },
-      ...(deck ? [{ id: 'dk-applylayout', title: 'Layout — this slide in another layout (title slide, title and body, two columns …): its words go into the new layout’s places; or this slide saved as a layout', icon: 'Layout',
+      { id: 'dk-bg', title: theme ? 'Background colour of every slide' : deck ? 'Background colour — of this slide, or of every slide' : `${what} background colour`, icon: 'Background',
+        palette: { title: theme ? 'Background of every slide' : `${what} background`, render: close => <BackgroundPalette close={close} every={deck} always={!!theme} onPick={c.slideBackground} /> } },
+      ...(deck && !theme ? [{ id: 'dk-applylayout', title: 'Layout — this slide in another layout (title slide, title and body, two columns …): its words go into the new layout’s places; or this slide saved as a layout', icon: 'Layout',
         palette: { title: 'Layout of this slide', render: (close: () => void) => c.layoutPicker(close, true) } } as ToolButton] : []),
+      ...(deck && c.theme ? [{ id: 'dk-theme', icon: theme ? 'Done' : 'Edit theme', active: theme, disabled: c.theme.disabled && !theme, action: c.theme.toggle,
+        title: theme ? 'Done: back to the slides (Esc)' : 'Edit theme — the slide master: what is on every slide (a logo, a bar, the slide number), the deck’s colours and fonts, its layouts; what you add or change there is on every slide' } as ToolButton] : []),
     ]);
     context.push([
       { id: 'dk-guides', title: 'Guides: lines objects snap to — every slide’s (the master’s) and a slide’s own; drag one to move it (Alt: a copy), off the slide to remove it (also: right-click the slide)', icon: 'dk-guides', active: c.guides.shown,
@@ -537,12 +542,12 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
             ))}
           </div>
         ) } },
-      ...(deck && c.placeholders ? [{ id: 'dk-placeholder', title: 'Placeholder — a box that says what goes in it (“Click to add title”) until something does; nothing of it shows when presenting', icon: 'dk-placeholder',
+      ...(deck && !theme && c.placeholders ? [{ id: 'dk-placeholder', title: 'Placeholder — a box that says what goes in it (“Click to add title”) until something does; nothing of it shows when presenting', icon: 'dk-placeholder',
         palette: { title: 'Placeholder', list: true, cols: 1, items: PH_ROLES.map(r => ({ label: PH_LABELS[r], html: ICON('dk-ph-' + r), action: () => c.placeholders!.insert(r) })) } } as ToolButton] : []),
-      ...(deck ? [animateButton(c)] : []),
+      ...(deck && !theme ? [animateButton(c)] : []),
     ]);
     // (a poster is one page: a "slide" added to it was invisible — no rail — and a blank page of the PDF)
-    if (deck) context.push([
+    if (deck && !theme) context.push([
       { id: 'dk-newslide', title: 'New slide after this one, like it (Ctrl+M)', icon: '+ Slide', action: c.newSlide },
       // (PowerPoint's New Slide ▾, Google's + ▾: the layouts a new slide can take)
       { id: 'dk-layouts', title: 'New slide in a layout — title slide, title and body, two columns … made of this deck’s design, or one of its own', icon: '', html: '<span class="dk-sr">New slide in a layout</span>',
@@ -580,13 +585,13 @@ function masterButton(m: NonNullable<DeckCtx['master']>, one: SelItem): ToolButt
     : { id: 'dk-master', title: 'Put on every slide (the slide master): a logo, a bar, a footer — changed on one slide, changed on all', icon: 'dk-master', action: m.on };
 }
 
-/** the background palette: the colours, for this slide or (a deck) every slide */
-function BackgroundPalette({ close, every: offer, onPick }: { close: () => void; every: boolean; onPick: (c: string | null, every: boolean) => void }) {
+/** the background palette: the colours, for this slide or (a deck) every slide — `always` every slide (the theme view) */
+function BackgroundPalette({ close, every: offer, always, onPick }: { close: () => void; every: boolean; always?: boolean; onPick: (c: string | null, every: boolean) => void }) {
   const [every, setEvery] = useState(false);
   return (
     <div class="dk-canvas-pal">
-      {offer && <label class="dk-check"><input type="checkbox" checked={every} data-dk-bg-every onChange={e => setEvery((e.target as HTMLInputElement).checked)} /> Every slide</label>}
-      <ColorGrid current={null} close={close} none="As the design has it" onPick={col => onPick(col, offer && every)} />
+      {offer && !always && <label class="dk-check"><input type="checkbox" checked={every} data-dk-bg-every onChange={e => setEvery((e.target as HTMLInputElement).checked)} /> Every slide</label>}
+      <ColorGrid current={null} close={close} none="As the design has it" onPick={col => onPick(col, offer && (every || !!always))} />
     </div>
   );
 }

@@ -33,6 +33,7 @@ import { registerNewDocumentCommands } from './host/newDocument.ts';
 import { DeliverableServer, DeliverableEditorProvider, rootFor } from './host/deliverables.ts';
 import { runTool, toolTarget, TOOL_NAMES, type ToolName, type TextStore } from './agents/localEdit.ts';
 import { inEditor } from './agents/handover.ts';
+import { placeSelection, SELECTION_MAX } from './shared/agentSelection.ts';
 import * as build from './host/build.ts';
 import { initAppearance } from './host/appearance.ts';
 import type { InteractionAction } from '@overlyx/core/interactions.ts';
@@ -96,6 +97,32 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
     return { ctx: { root, layoutDir: layoutDir() }, root, relPath };
   };
 
+  /** files TeX may read besides the document: \input files, packages and classes, bibliographies, data and pictures as text */
+  const TEX_INPUT = /\.(tex|ltx|sty|cls|clo|def|cfg|fd|bib|bst|bbx|cbx|lbx|dbx|tikz|pgf|lua|dat|csv|tsv|txt|svg|eps)$/i;
+  /**
+   * Before a build: the unsaved changes of what it reads — TeX inputs in the document's folder (the
+   * workspace folder: `\input{../notation}`) — are saved. One VS Code will not save (its file changed
+   * on disk meanwhile: an agent, the sync, git) no longer stops the build: latexmk reads the file on
+   * disk and the build's warnings say so. Other documents are left alone. Every build used to save
+   * the whole window and fail when any file could not be saved: one unrelated file in conflict (an
+   * AGENTS.md an agent had rewritten) failed every PDF build until it was found.
+   */
+  const saveBuildInputs = async (e: OpenEditor): Promise<string[]> => {
+    const scope = e.session.ctx.readRoot ?? e.session.ctx.root;
+    const sessions = registry.all().flatMap(x => [x.session, ...registry.relatedSessions(x).values()]);
+    const warnings: string[] = [];
+    for (const doc of vscode.workspace.textDocuments) {
+      const file = doc.uri.fsPath;
+      if (!doc.isDirty || doc.isUntitled || doc.uri.scheme !== 'file' || doc === e.session.document || !TEX_INPUT.test(file) || !file.startsWith(scope + path.sep)) continue;
+      // another OverLyX editor's document: its own save, which writes a change merged from disk itself
+      const owner = sessions.find(s => s.document === doc);
+      let saved: boolean;
+      try { saved = owner ? (await owner.save(), true) : await doc.save(); } catch { saved = false; }
+      if (!saved) warnings.push(`${path.relative(scope, file)}: its unsaved changes could not be saved (VS Code says why) — built from the file on disk`);
+    }
+    return warnings;
+  };
+
   const startBuild = (e: OpenEditor, opts?: { open?: boolean }): void => {
     const { session } = e;
     const target = session.buildTarget();
@@ -105,7 +132,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
       prepare: async () => {
         // the .tex file on disk is what latexmk compiles: write the editor's state first
         await session.save(e.resync);
-        if (!await vscode.workspace.saveAll(false)) throw new Error('Resolve the unsaved file changes before building the PDF.');
+        return saveBuildInputs(e);
       },
     });
     telemetry.track('extension-build', 'attempt');
@@ -156,6 +183,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
     const DICT_PKG: Record<string, string> = { en: 'dictionary-en', 'en-gb': 'dictionary-en-gb', de: 'dictionary-de', fr: 'dictionary-fr' };
     return {
       usageBatch: value => telemetry.usageBatch(value),
+      typesetReport: value => telemetry.typeset(value),
       projectRoot: (project) => projectRoots.get(project),
       projects: () => [...projectRoots.entries()].map(([name, root]) => ({ name, files: collectFiles(root) })),
       meta: async (docId) => {
@@ -316,6 +344,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
         });
         telemetry.track('extension-agent', answer.gone ? 'offline' : answer.error ? 'failed' : 'success');
         return answer;
+      },
+      agentSelection: () => {
+        // the latest selection among this window's editors, in its file's source as the editor holds it now
+        const latest = registry.all().map(e => e.agentSelection).filter(s => !!s).sort((a, b) => b!.at - a!.at)[0];
+        const session = latest && registry.sessionByDocId(latest.id);
+        if (!latest || !session) return null;
+        let placed: ReturnType<typeof placeSelection> | null = null;
+        try { const map = session.toTextMap(); placed = placeSelection(map.text, map.spans, latest.sel); } catch { /* unparsable just now: the text alone */ }
+        return {
+          file: session.document.uri.fsPath, at: latest.at, focused: vscode.window.state.focused,
+          unsaved: session.document.isDirty, text: latest.sel.text.slice(0, SELECTION_MAX), ...placed,
+        };
       },
     };
   }

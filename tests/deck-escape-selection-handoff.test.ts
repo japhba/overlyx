@@ -71,6 +71,8 @@ function setup() {
     exports: {}, window: win, document: doc, KeyboardEvent: win.KeyboardEvent, Node: win.Node, MODE: 'edit',
     state: { src, kind: 'deck', version: 7 }, srcOf, liveOf, selected: [image], editing: null,
     drawAhead: null, drawComposing: false, tool: 'select', active: null, ed: null, svgTyping: null,
+    // (the theme view, off: every object can be taken)
+    themeView: false, inTheme: () => true,
     isCropping: () => !!runtime.active, isNodeEditing: () => !!runtime.ed,
     isPenDrawing: () => false, isOrdering: () => false, chipOpening: () => false, openChipEl: () => null,
     isModifierKey: () => false, recoverChipCaret: vi.fn(), stopText, holdKey, holdAfter,
@@ -88,6 +90,7 @@ function setup() {
     pending, version: { current: 7 }, selRef, tool: 'select', presenting: false,
     typeAhead: { current: null }, textAhead: { current: false }, editingTextRef: { current: false },
     nodeEdRef: { current: null }, readOnlyRef: { current: false }, setToolState,
+    themeRef: { current: false }, setTheme: vi.fn(),
     setKind: vi.fn(), setSlides: vi.fn(), setPageW: vi.fn(), setPageH: vi.fn(),
     setSolo: (update: (before: null) => unknown) => update(null),
     toCanvas: (message: ToRuntime) => {

@@ -5,6 +5,7 @@
 import * as vscode from 'vscode';
 import type { DocSession } from './session.ts';
 import type { OutlineEntry } from '../shared/protocol.ts';
+import type { AgentSelection } from '../shared/agentSelection.ts';
 import type { TextStore } from '../agents/localEdit.ts';
 import type { HandOver } from '../agents/handover.ts';
 
@@ -13,6 +14,8 @@ export interface OpenEditor {
   panel: vscode.WebviewPanel;
   outline: OutlineEntry[];
   selectionPos: number;
+  /** what was selected last, in which of its documents (shared/agentSelection.ts): for the agents' get_selection */
+  agentSelection?: { id: string; sel: AgentSelection; at: number };
   /** after a save VS Code refused (the file changed outside meanwhile): bring VS Code's copy of the file up to date (DocSession.save) */
   resync?: (target: DocSession) => Promise<boolean>;
   /**

@@ -37,7 +37,7 @@ import { isFromRuntime, RAIL_NUM, ASIDE_ATTR } from './protocol';
 import { copyLinkAt, type Place } from '../editor/permalink';
 import { rebasedSplices, rebaseObjectPaths, objectHtml, imageHtml, insertPlace, newSlideHtml, nextPageHtml, slideDesigns, slidePaths, slideNotes, notesOp, sourceRange, inlineSvgHtml, guidesIn } from './sourceops';
 import { GUIDES_ATTR, LAYOUT_MARGINS_ATTR, layoutMarginGuides, parseGuides, masterGuides, formatGuides, withGuide, type Guide } from './guides';
-import { deckMargins, deckDesign, builtInLayouts, savedLayouts, layoutFromSlide, saveLayoutOp, applyLayoutOp, placeholderObject, layoutThumb, deckColors, PH_ATTR, PH_LABELS, PH_ROLES, type PhRole, type DesignLooks, type DeckDesign, type Layout } from './decklayouts';
+import { deckMargins, deckDesign, builtInLayouts, savedLayouts, layoutFromSlide, saveLayoutOp, applyLayoutOp, placeholderObject, layoutThumb, deckColors, PH_ATTR, PH_LABELS, PH_ROLES, LAYOUT_ATTR, type PhRole, type DesignLooks, type DeckDesign, type Layout } from './decklayouts';
 import { LayoutPicker, type LayoutCard } from './LayoutPicker';
 import { chooseDock, touchScreen, smallScreen, dockAsked, type DeckDock } from './deckdock';
 import { sizePt, stepPt } from './units';
@@ -62,7 +62,9 @@ import { mathReady } from '../editor/lyxmath/mathjax';
 import { setLayoutMathFont } from '../fonts/editorfont';
 import { useMathPanels } from '../app/toolbars';
 import { parseSource, opSplices, elementAt, elementChildren, attr, parseStyle, sourcePatch, applySplices as applyTextSplices, type SourcePatch } from '@overlyx/core/html/source.ts';
-import { followUps, composeSplices, twinsOf, putOnEverySlide, otherCopies, slideNumberOps, lookAlikeOps, similarTexts, MASTER_ATTR, SKIP_ATTR } from './deckmaster';
+import { followUps, composeSplices, twinsOf, putOnEverySlide, otherCopies, slideNumberOps, lookAlikeOps, similarTexts, everySlideOps, masterObjects, MASTER_ATTR, SKIP_ATTR } from './deckmaster';
+import { deckTheme, themeSplices, type ThemeChange } from './decktheme';
+import { ThemePane } from './ThemePane';
 import { reviewOps, resolveOps, resolveAll, reviewOf, isSuggesting, suggestingOp, stampOf, threadsOp, parseThreads, newThreadId, describe as describeObject, COMMENTS, type ReviewChange, type ReviewThread, type Thread } from '@overlyx/core/html/review.ts';
 import { deliverableInfo, slideElements, blankDeck, untouchedPageTitle } from '@overlyx/core/html/deliverable.ts';
 import { usualDeckSize } from '../app/decksize';
@@ -461,6 +463,19 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
   const [objOpen, setObjOpen] = useState(() => { try { return localStorage.getItem('ol.objPane') === '1'; } catch { return false; } });
   const objOpenRef = useRef(objOpen); objOpenRef.current = objOpen;
   const [objects, setObjects] = useState<{ slide: number; items: ObjNode[] }>({ slide: -1, items: [] });
+  /**
+   * The theme view — Edit theme (the user, 31 Oct 2026: "have a Edit Theme button that opens a kind of
+   * slide master for Layout"; Google Slides' theme builder, PowerPoint's Slide Master view), on the
+   * linked copies the master is (deckmaster.ts: no master slide of its own, the file stays a page any
+   * browser shows): the canvas shows the slide's objects on every slide, the slide's own dimmed and
+   * out of reach (runtime edit.ts setThemeView); what is added there goes on every slide, what is
+   * deleted goes from every slide (everySlideOps), a change of one changes all as ever (followUps);
+   * Background is every slide's. Beside it the theme pane (ThemePane.tsx): the deck's colours and
+   * fonts as its stylesheet names them (decktheme.ts) and its own layouts. Done or Esc leaves it.
+   */
+  const [themeOn, setThemeOnState] = useState(false);
+  const themeRef = useRef(themeOn); themeRef.current = themeOn;
+  const [themePane, setThemePane] = useState(true);
   const [presenting, setPresenting] = useState(false);
   const canvasReady = useRef(false);
   const railReady = useRef(false);
@@ -798,12 +813,14 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     // diagnostics here: never HTML, element paths, style values, text, coordinates or IDs.
     for (const action of new Set(ops.map(op => canvasInteraction(op.t)))) if (action) recordInteraction(action, outcome, { target: 'canvas', access: outcome === 'denied' ? 'view' : 'edit' });
   };
+  /** in the theme view: an edit on the slide as what it means there — on every slide (deckmaster everySlideOps) */
+  const themeOps = (t: string, ops: HtmlOp[]): HtmlOp[] => (themeRef.current && kindRef.current === 'deck' ? everySlideOps(t, ops) : ops);
   const applyOps = (ops: HtmlOp[], raw = false): boolean => {
     if (readOnlyRef.current || host.readOnly()) { recordOps(ops, 'denied'); notify('You can only view this page.', 'error'); return false; }
     const cur = text.toString();
     const src = parseSource(cur);
     try {
-      const sp = (raw ? ops : reviewOps(src, ops, suggestStamp())).flatMap(op => opSplices(src, op));
+      const sp = (raw ? ops : reviewOps(src, themeOps(cur, ops), suggestStamp())).flatMap(op => opSplices(src, op));
       applySplices(sp);
       recordOps(ops, text.toString() === cur ? 'unchanged' : 'changed');
       return true;
@@ -830,6 +847,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
       notify('The page changed meanwhile. Your text is available in Recover text.', 'error'); return false;
     }
     let reviewed: HtmlOp[];
+    try { ops = themeOps(base, ops); } catch { /* as they came */ }
     // (a guide moved is no suggestion: guides are the editor's, not the slides')
     if (ops.every(o => o.t === 'attr' && o.name === GUIDES_ATTR)) reviewed = ops;
     else try { reviewed = reviewOps(parseSource(base), ops, suggestStamp()); } catch { reviewed = ops; }
@@ -1065,6 +1083,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
             toCanvas({ ol: 'scale', scale });
             toCanvas({ ol: 'tool', tool, ink: { ...deckInkStyle(inkRef.current, pageWRef.current), penInks: inkRef.current.penInks && !readOnlyRef.current }, held: drawKeptRef.current });
             toCanvas({ ol: 'guides', show: guidesRef.current });
+            if (themeRef.current) toCanvas({ ol: 'theme', on: true });
             toCanvas({ ol: 'view', view: shownView(viewRef.current) });
             toCanvas({ ol: 'dark', invert: darkRef.current.invert, figures: darkRef.current.figures, desk: null });
             toCanvas(reviewMsgRef.current());
@@ -2465,6 +2484,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
         ...(deck ? [
           { label: 'Background colour of every slide…', disabled: ro, action: () => pickAt(x, y, 'Background of every slide', close => <ColorGrid current={null} close={close} none="As the design has it" onPick={c => slideBackground(c, true)} />) },
           { label: 'Layout of this slide…', disabled: ro, action: () => pickAt(x, y, 'Layout of this slide', close => layoutPicker(i, close, true)) },
+          { label: themeRef.current ? 'Done editing the theme' : 'Edit theme', disabled: ro, action: () => setTheme(!themeRef.current) },
           { sep: true },
           { label: 'New slide', shortcut: 'Ctrl+M', action: () => newSlide(i) },
           { label: 'New slide in a layout…', action: () => pickAt(x, y, 'New slide', close => layoutPicker(i, close)) },
@@ -2640,11 +2660,65 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     const on = !slidesRef.current[i]?.skipped;
     if (applyOps([{ t: 'attr', path: p, name: SKIP_ATTR, value: on ? '' : null }]) && on) notify(`Slide ${i + 1} is skipped: it is not presented or printed. Skip slide again brings it back.`);
   };
-  /** the background colour of the slide shown, or of every slide */
+  /** the background colour of the slide shown, or of every slide (always, in the theme view) */
   const slideBackground = (c: string | null, every = false) => {
     const ps = slidePaths(text.toString());
-    const paths = every ? ps : ps[currentRef.current] ? [ps[currentRef.current]] : [];
+    const paths = every || themeRef.current ? ps : ps[currentRef.current] ? [ps[currentRef.current]] : [];
     if (paths.length) applyOps(paths.map(p => ({ t: 'style' as const, path: p, set: { background: c } })));
+  };
+
+  /* ------------------------------------------------------------- the theme view (Edit theme) */
+
+  /** into the theme view or out of it (Edit theme, Done, Esc with nothing selected) */
+  const setTheme = (on: boolean) => {
+    if (on === themeRef.current) return;
+    if (on && (readOnlyRef.current || kindRef.current !== 'deck')) return;
+    // (a suggestion is one object's: the theme is changed directly)
+    if (on && suggestingFor(modeKey, isSuggesting(text.toString()))) { notify('The theme is changed directly, never suggested: switch to Editing to edit it.'); return; }
+    themeRef.current = on;
+    setThemeOnState(on);
+    if (on) setThemePane(true);
+    toCanvas({ ol: 'theme', on });
+  };
+  // (Viewing, Suggesting, a page that is no deck: out of it)
+  useEffect(() => { if (themeOn && (locked || kind !== 'deck' || suggesting)) setTheme(false); }, [themeOn, locked, kind, suggesting]);
+  /** a change of the deck's stylesheet (the theme pane's colours and fonts, decktheme.ts): one undo step */
+  const changeTheme = (ch: ThemeChange) => {
+    const sp = themeSplices(text.toString(), ch);
+    if (sp.length) applySplices(sp, 'canvas', true, false);
+  };
+  /** the deck's own layouts drawn small, for the theme pane */
+  const savedLayoutCards = (): LayoutCard[] => {
+    const t = text.toString(), size = slideSizeNow(), look = deckColors(t), paper = colorsRef.current?.page ?? '#fff';
+    return savedLayouts(t).map(l => ({ id: l.id, name: l.name, thumb: layoutThumb(l.html, size, look, paper), saved: true }));
+  };
+  const renameLayout = async (id: string) => {
+    const l = savedLayouts(text.toString()).find(k => k.id === id);
+    if (!l) return;
+    const name = await uiPrompt('Rename layout', 'New slides offer it under this name.', l.name, { okLabel: 'Rename' });
+    const now = savedLayouts(text.toString()).find(k => k.id === id && k.name === l.name);
+    if (name?.trim() && now?.saved) applyOps([{ t: 'attr', path: now.saved, name: LAYOUT_ATTR, value: name.trim() }], true);
+  };
+  /** a saved layout made like the slide shown (how a layout is changed: a slide in it changed, then put in its place) */
+  const replaceLayout = (id: string) => {
+    const t = text.toString();
+    const l = savedLayouts(t).find(k => k.id === id);
+    const html = layoutFromSlide(t, currentRef.current);
+    if (l?.saved && html && applyOps([{ t: 'inner', path: l.saved, html: `\n${html}\n` }], true)) notify(`The layout “${l.name}” is like slide ${currentRef.current + 1} now: new slides in it take that.`);
+  };
+  /** a saved layout's menu (the theme pane's cards) */
+  const layoutMenu = (id: string, x: number, y: number) => {
+    const l = savedLayouts(text.toString()).find(k => k.id === id);
+    if (!l?.saved) return;
+    const ro = readOnlyRef.current, saved = l.saved;
+    showContextMenu(x, y, [
+      { label: 'New slide in this layout', disabled: ro, action: () => { void layoutHtml(id).then(html => { if (html) insertSlide(currentRef.current, html); }); } },
+      { label: 'Apply to this slide', disabled: ro, action: () => { void applyLayout(currentRef.current, id); } },
+      { sep: true },
+      { label: 'Rename…', disabled: ro, action: () => { void renameLayout(id); } },
+      { label: `Replace with slide ${currentRef.current + 1}`, disabled: ro, action: () => replaceLayout(id) },
+      { label: 'Delete layout', disabled: ro, action: () => { applyOps([{ t: 'remove', paths: [saved] }], true); } },
+    ]);
   };
 
   const gotoSlide = (i: number) => {
@@ -2767,6 +2841,8 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
         { sep: true },
         { label: 'Layout of this slide…', disabled: ro, action: () => pick('Layout of this slide', close => layoutPicker(i, close, true)) },
         { label: 'Save as layout…', disabled: ro, action: () => { void saveAsLayout(i); } },
+        // (Google Slides' Slide ▸ Edit theme: the slide master — what is on every slide, the colours, fonts and layouts)
+        { label: 'Edit theme', checked: themeOn, disabled: ro || (suggesting && !themeOn), action: () => setTheme(!themeOn) },
         { label: 'Background colour…', disabled: ro, action: () => pick('Slide background', close => <ColorGrid current={null} close={close} none="As the design has it" onPick={c => slideBackground(c)} />) },
         { label: 'Background colour of every slide…', disabled: ro, action: () => pick('Background of every slide', close => <ColorGrid current={null} close={close} none="As the design has it" onPick={c => slideBackground(c, true)} />) },
         { label: 'Slide numbers', disabled: ro, action: insertSlideNumbers },
@@ -2867,7 +2943,8 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     if (mod && k === '0') { fitSlide(); return; }
     if (mod && (m.key === '=' || m.key === '+')) { zoomStep(1.25); return; }
     if (mod && m.key === '-') { zoomStep(1 / 1.25); return; }
-    if (m.key === 'Escape') { setToolState('select'); return; }
+    // (Select in hand and nothing selected in the theme view: out of it — the canvas sends it then)
+    if (m.key === 'Escape') { if (themeRef.current && toolRef.current === 'select' && !selRef.current.length && !editingTextRef.current) setTheme(false); else setToolState('select'); return; }
     // the slide before / after (the canvas shows one; the rail moves between them)
     if (!mod && !m.alt && (m.key === 'PageDown' || m.key === 'PageUp') && kindRef.current === 'deck') { gotoSlide(currentRef.current + (m.key === 'PageDown' ? 1 : -1)); return; }
     if (!mod && !m.alt && m.key.length === 1 && letterKey(m.key)) return;
@@ -2929,6 +3006,8 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
       else if (e.key === 'Escape') {
         if (e.defaultPrevented) return;
         if (tool !== 'select') setToolState('select');
+        // (the theme view with nothing selected: Esc leaves it, as Done)
+        else if (themeRef.current && !selRef.current.length && !editingTextRef.current && !presenting) { e.preventDefault(); setTheme(false); }
         else if (!presenting) {
           // A queued object selection must not overtake Escape. Deferred text
           // and formula editing retain their own keyboard context.
@@ -3165,6 +3244,11 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     if (c && c.p === k && c.t === t0) similarCount = c.n;
     else { try { similarCount = similarTexts(t0, one1.path).length; } catch { similarCount = 0; } similarCache.current = { t: t0, p: k, n: similarCount }; }
   }
+  // the theme pane's reading of the deck — its stylesheet, the slide's objects on every slide, its own layouts —, while the theme view is on
+  const themeInfo = useMemo(() => {
+    if (!themeOn || kind !== 'deck') return null;
+    try { return { theme: deckTheme(textNow), objects: masterObjects(textNow, current), layouts: savedLayoutCards() }; } catch (e) { console.warn('theme', e); return null; }
+  }, [themeOn, kind, textNow, current]);
   const bars = deckToolbar({
     pageLabel: host.bindSvgExporter ? 'SVG' : undefined,
     guides: { shown: guidesShown, items: () => guideItems(currentRef.current, null).filter(m => !m.sep && !m.disabled && m.action).map(m => ({ label: m.label!, action: m.action!, active: m.checked })) },
@@ -3183,6 +3267,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     newSlide: () => newSlide(currentRef.current),
     layoutPicker: (close, apply) => layoutPicker(currentRef.current, close, apply),
     master: kind === 'deck' ? masterOps(sel.length === 1 ? sel[0] : null) : undefined,
+    theme: kind === 'deck' ? { on: themeOn, toggle: () => setTheme(!themeRef.current), disabled: locked || suggesting } : undefined,
     placeholders: kind === 'deck' ? {
       insert: r => { void insertPlaceholder(r); },
       picture: () => { const one = selRef.current.length === 1 ? selRef.current[0] : null; if (one?.ph?.role === 'picture') { phPicture.current = one.path; fileInput.current?.click(); } },
@@ -3316,13 +3401,20 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
       const title = blankPage === 'Index' && parts.length > 1 ? parts[parts.length - 2] : blankPage;
       applySplices([{ from: 0, to: host.text().length, insert: blankDeck(title, usualDeckSize()) }], 'canvas', true, false);
     }}>▭ Slides</button>}
-    {host.makeArticle && !readOnly && <button class="dl-btn" data-dl-article title="Write this page as an article: its prose in the document editor (comments, suggestions, formulas), everything else kept as it is and shown running" onClick={() => {
-      void uiConfirm('Write as an article', 'The page becomes a document: its text is written in the document editor — with comments, suggestions, formulas and citations — and what is not text (navigation, scripts, interactive figures) stays as it is, shown running. The page as it is now is kept as a version.', { okLabel: 'Write as article' })
-        .then(ok => { if (ok) return host.makeArticle!(); })
-        .catch(e => notify('Could not make it an article: ' + (e as Error).message, 'error'));
-    }}>✎ Article</button>}
-    <button class={'dl-btn' + (device === 'desktop' ? ' on' : '')} title="Desktop width" onClick={() => setDevice('desktop')}>🖥</button>
-    <button class={'dl-btn' + (device === 'mobile' ? ' on' : '')} title="Phone width" onClick={() => setDevice('mobile')}>📱</button>
+    {/* every HTML page has the switch an article has (app/PaneSwitch.tsx): WYSIWYM · HTML · Page. This one is shown as its Page —
+        laid out on the canvas; WYSIWYM writes it as an article from now on (its prose in the document editor), HTML is its code */}
+    <div class="pane-switch view-mode-switch dl-page-switch" role="group" aria-label="WYSIWYM, HTML and Page">
+      <button type="button" data-dl-article disabled={!host.makeArticle || readOnly}
+        title={host.makeArticle ? 'WYSIWYM: write this page as an article — its prose in the document editor (comments, suggestions, formulas), everything else kept as it is and shown running' : 'WYSIWYM: pages are written as articles where the page’s file can be changed'}
+        onClick={() => {
+          void uiConfirm('Write as an article', 'The page becomes a document: its text is written in the document editor — with comments, suggestions, formulas and citations — and what is not text (navigation, scripts, interactive figures) stays as it is, shown running. The page as it is now is kept as a version.', { okLabel: 'Write as article' })
+            .then(ok => { if (ok) return host.makeArticle!(); })
+            .catch(e => notify('Could not make it an article: ' + (e as Error).message, 'error'));
+        }}>WYSIWYM</button>
+      {!host.bindSvgExporter && <button type="button" class={codeOpen ? 'active' : ''} aria-pressed={codeOpen} data-dl-code title="HTML: the page's code beside it" onClick={() => setCodeOpen(o => !o)}>HTML</button>}
+      <button type="button" class="active" aria-pressed="true" title="Page: the page laid out, edited where it stands">Page</button>
+    </div>
+    <button class={'dl-btn' + (device === 'mobile' ? ' on' : '')} aria-pressed={device === 'mobile'} title="The page at a phone's width" onClick={() => setDevice(d => d === 'mobile' ? 'desktop' : 'mobile')}>Phone</button>
   </>;
   const zoomSelect = (
     <select class="dl-btn dl-zoom" data-dl-zoom value={zoomPick} onChange={e => { const el = e.currentTarget as HTMLSelectElement; chooseZoom(el.value); el.blur(); }}
@@ -3347,7 +3439,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
       title="Objects: what is on the slide as a tree — open groups and drawings, select a letter of a logo, rename, lock, restack (Inkscape's Objects, PowerPoint's Selection Pane)"
       dangerouslySetInnerHTML={{ __html: ICONS['dk-objects'] ?? '' }} />
   );
-  const codeBtn = !host.bindSvgExporter && <button class={'dl-btn' + (codeOpen ? ' on' : '')} title="The page's code" data-dl-code onClick={() => setCodeOpen(o => !o)}>&lt;/&gt;</button>;
+  const codeBtn = !host.bindSvgExporter && kind !== 'page' && <button class={'dl-btn' + (codeOpen ? ' on' : '')} title="The page's code" data-dl-code onClick={() => setCodeOpen(o => !o)}>&lt;/&gt;</button>;
   const toggleReview = () => { setReviewOpen(!reviewOpen); if (reviewOpen) { setDraft(null); setFocus(null); } };
   const reviewCount = openComments + review.changes.length;
   const reviewBtn = (
@@ -3455,7 +3547,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
   };
 
   return (
-    <div ref={editorRef} class={'dl-editor' + (presenting ? ' presenting' : '') + (focusOn ? ' dl-drawfocus' : '') + (fullOn ? ' dl-full' : '')} data-kind={kind} data-dock={dock}>
+    <div ref={editorRef} class={'dl-editor' + (presenting ? ' presenting' : '') + (focusOn ? ' dl-drawfocus' : '') + (fullOn ? ' dl-full' : '')} data-kind={kind} data-dock={dock} data-theme-view={themeOn ? '' : undefined}>
       {saveState?.state === 'stale' && <div role="alert" data-dl-stale-notice style="padding:8px 12px;background:#fff5d8;color:#342700">
         This file was replaced while this browser had an older copy. Download the local source before reopening the latest file.
         <button class="btn" onClick={() => {
@@ -3519,6 +3611,14 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
           </div>
         )}
         <div class="dl-main">
+          {themeOn && !fullOn && (
+            <div class="dl-theme-bar" role="status" data-dl-theme-bar>
+              <span class="dl-theme-badge">Theme</span>
+              <span class="dl-theme-say">Editing the theme — what you change here is on every slide</span>
+              {!themePane && <button type="button" class="dl-btn" data-dl-theme-pane onClick={() => setThemePane(true)}>Colours, fonts, layouts</button>}
+              <button type="button" class="dl-btn dl-theme-done" data-dl-theme-done title="Back to the slides (Esc)" onClick={() => setTheme(false)}>Done</button>
+            </div>
+          )}
           <div class="dl-canvas" ref={canvasBox} style={deskCss ? { background: deskCss } : undefined} data-desk={view.deskChecker ? 'checker' : view.desk ? 'custom' : 'page'}
             onContextMenu={e => { if (e.target === e.currentTarget) { e.preventDefault(); canvasMenu(e.clientX, e.clientY); } }}
             onPointerDown={canvasTouch} onPointerMove={canvasTouch} onPointerUp={canvasTouch} onPointerCancel={canvasTouch} onLostPointerCapture={canvasTouch}
@@ -3619,6 +3719,16 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
             accept={c => resolveChange(c, true)} reject={c => resolveChange(c, false)}
             acceptAll={() => resolveEverything(true)} rejectAll={() => resolveEverything(false)}
             close={() => { setReviewOpen(false); setDraft(null); setFocus(null); }} />
+        )}
+        {themeOn && themePane && themeInfo && !fullOn && (
+          <ThemePane theme={themeInfo.theme} objects={themeInfo.objects} slide={current} sel={sel} layouts={themeInfo.layouts}
+            aspect={slideSizeNow().w / slideSizeNow().h} readOnly={locked} pick={pickAt}
+            setColor={(name, value) => changeTheme({ color: name, value })}
+            setFont={(which, css, google) => changeTheme({ font: which, value: css, google })}
+            background={c => slideBackground(c, true)}
+            select={p => toCanvas({ ol: 'select', paths: [p] })} hover={p => toCanvas({ ol: 'hover', path: p })}
+            layoutMenu={layoutMenu} saveLayout={() => { void saveAsLayout(currentRef.current); }}
+            close={() => { setThemePane(false); toCanvas({ ol: 'hover', path: null }); }} />
         )}
         {codeOpen && !fullOn && (
           <div class="dl-code">

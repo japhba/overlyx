@@ -68,7 +68,7 @@ function setup(pendingValue: Pending | null = null) {
     exports: {}, window: win, document: doc, HTMLElement: win.HTMLElement, SVGElement: win.SVGElement, Node: win.Node,
     getComputedStyle: win.getComputedStyle.bind(win), scrollX: 0, scrollY: 0,
     state, srcOf, liveOf, selected: [], editing: null, layoutHooks: {}, slides: () => [slide],
-    revealSlideOf: () => false, draw: vi.fn(), beginText, drawInput: null, drawComposing: false, drawAhead: null,
+    revealSlideOf: () => false, draw: vi.fn(), beginText, drawInput: null, drawComposing: false, drawAhead: null, inTheme: () => true,
     // Geometry/paint/clipboard dependencies are outside the version handoff;
     // actual item classification, source paths and selection routing are loaded above.
     styleOf: () => ({}), showGhost: vi.fn(), postClip: vi.fn(), postSequence: vi.fn(), postObjects: vi.fn(),
@@ -79,7 +79,7 @@ function setup(pendingValue: Pending | null = null) {
   runtime.link(slide.firstElementChild, sourceSlide.firstElementChild);
   const host = createContext({
     canvasFrame: { current: canvas }, railFrame: { current: rail }, presentFrame: { current: present },
-    pending, version, host: { setSelection }, canvasSelection: { current: null },
+    pending, version, host: { setSelection }, canvasSelection: { current: null }, themeRef: { current: false },
     setKind: vi.fn(), setSlides: vi.fn(), setPageW: vi.fn(), setPageH: vi.fn(),
     setSolo: (update: (previous: null) => unknown) => update(null), setSel,
     toCanvas: (message: ToRuntime) => {

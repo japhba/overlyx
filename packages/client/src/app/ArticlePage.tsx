@@ -20,6 +20,7 @@ import { PAGE_STORAGE_NAME, PAGE_STORAGE_MAX } from '../deliverable/runtime/stor
 import { followWords, type FollowTarget } from '../deliverable/runtime/follow';
 import { Ruler, MAX_WIDTH } from './Ruler';
 import { hostedZoomPill } from './zoomhud';
+import { zoomTarget, type ZoomStep } from './zoomkeys';
 
 const PHONE = 390;
 const storeKey = (project: string) => 'ol.pageStorage:' + project;
@@ -100,10 +101,14 @@ export function ArticlePage({ docId, savedAt, view, selTick, syncSeq, ruler, onC
   const swapTimer = useRef(0);
   /** where the page shown is scrolled to, and the scale a pinch magnified it to (runtime/viewzoom.ts) */
   const place = useRef({ x: 0, y: 0, z: 1 });
-  const [zoomed, setZoomed] = useState(false);
+  const [scale, setScale] = useState(1);
+  const zoomed = scale !== 1;
   const paneEl = useRef<HTMLDivElement>(null);
   const hud = useMemo(() => hostedZoomPill(() => paneEl.current, 'data-page-zoomhud', 'Page'), []);
   useEffect(() => () => { hud.dispose(); clearTimeout(swapTimer.current); }, []);
+  /** the page magnified a step (0: as it is) — the bar's − / +, and Ctrl/⌘ + − once the pane was pressed on (app/zoomkeys.ts) */
+  const zoomStep = (step: ZoomStep) => front()?.postMessage({ ol: 'viewZoomStep', step }, '*');
+  useEffect(() => paneEl.current?.parentElement ? zoomTarget(paneEl.current.parentElement, zoomStep) : undefined, []);
   const stored = useRef<string | null>(null);
   const viewRef = useRef(view);
   viewRef.current = view;
@@ -156,7 +161,7 @@ export function ArticlePage({ docId, savedAt, view, selTick, syncSeq, ruler, onC
       if (d?.ol === 'viewScroll' && typeof d.y === 'number') {
         if (isShown) {
           const z = typeof d.z === 'number' && Number.isFinite(d.z) ? d.z : 1;
-          if (z !== place.current.z) { hud.show(z); setZoomed(z !== 1); }
+          if (z !== place.current.z) { hud.show(z); setScale(z); }
           place.current = { x: typeof d.x === 'number' ? d.x : 0, y: d.y, z };
         } else if (readyBeneath.current) swap();   // (the load beneath is where the reader is)
       }
@@ -253,6 +258,11 @@ export function ArticlePage({ docId, savedAt, view, selTick, syncSeq, ruler, onC
       <div class="bar">
         <button type="button" class="small-btn" onClick={() => setN(x => x + 1)} title="Load the page again">↻</button>
         <button type="button" class={'small-btn' + (phone ? ' active' : '')} aria-pressed={phone} onClick={() => setPhone(p => !p)} title="The page at a phone's width">Phone</button>
+        <span class="page-zoom" role="group" aria-label="Zoom the page">
+          <button type="button" class="small-btn" data-page-zoom-out disabled={!zoomed} onClick={() => zoomStep(-1)} title="Zoom the page out (Ctrl/⌘ −)">−</button>
+          <button type="button" class="small-btn page-zoom-pct" data-page-zoom onClick={() => zoomStep(0)} title="The page's zoom — click for 100 % (Ctrl/⌘ 0); a pinch zooms about the fingers">{Math.round(scale * 100)} %</button>
+          <button type="button" class="small-btn" data-page-zoom-in disabled={scale >= 4} onClick={() => zoomStep(1)} title="Zoom the page in (Ctrl/⌘ +)">+</button>
+        </span>
         <div class="pdf-bar-fill" />
         {src && <a class="small-btn" href={`${url}?ol=view`} target="_blank" rel="noopener" title="The page in a tab of its own">Open ↗</a>}
         {printable && <a class="small-btn" href={pdfHref} target="_blank" rel="noopener" title="The page printed as a PDF">PDF</a>}

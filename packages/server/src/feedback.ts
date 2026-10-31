@@ -9,6 +9,9 @@
  *   POST /api/client-glitch  a display glitch the app noticed on a touch screen (client glitches.ts):
  *                            measurements and fixed words only (core glitch.ts), kind `client-glitch`,
  *                            one row per kind of glitch; the first repeats' measurements are added
+ *   POST /api/client-typeset a formula the editor could not typeset while it was on the screen (client
+ *                            typesetreports.ts): command names, the error's words and fixed words only
+ *                            (core typeset.ts), kind `client-typeset`, one row per command / error
  *   POST /api/ink-lab        the pen lab's answers (client PenLab.tsx), sent by the person: the ink
  *                            settings compared and what was chosen, the points of the line they wrote
  *                            there only if ticked — numbers and fixed words only (core inklab.ts inkLabReport), kind
@@ -33,6 +36,7 @@ import { db } from './db.ts';
 import { config, REPO_ROOT } from './config.ts';
 import { notifyOwner, READ_IT, sendAnswer } from './mailer.ts';
 import { glitchReport } from '@overlyx/core/glitch.ts';
+import { typesetReport } from '@overlyx/core/typeset.ts';
 import { inkLabReport } from '@overlyx/core/inklab.ts';
 
 // error_reports held the GitHub issue of each distinct error, from when reports were issues
@@ -113,7 +117,7 @@ const errBump = db.prepare('UPDATE reports SET count = count + 1, last_at = ? WH
 const errAgain = db.prepare("UPDATE reports SET count = count + 1, last_at = ?, body = body || ? WHERE id = ?");
 
 export interface ErrorInput {
-  kind: 'client-error' | 'server-error' | 'vscode-error' | 'client-glitch';
+  kind: 'client-error' | 'server-error' | 'vscode-error' | 'client-glitch' | 'client-typeset';
   message: string;
   stack?: string | null;
   userAgent?: string;
@@ -145,8 +149,8 @@ export function reportError(e: ErrorInput): number | null {
   const body = lines(true);
   const title = `[${e.kind}] ${message.split('\n')[0].slice(0, 120)}`;
   const id = Number(insertReport.run({ kind: e.kind, hash, title, body, user_id: e.who?.id ?? null, version: appVersion, user_agent: e.userAgent ? clean(e.userAgent, 300) : null, now }).lastInsertRowid);
-  // (a glitch is not mailed: there are many kinds of each, and they are read together)
-  if (e.kind !== 'client-glitch' && allow('error-mail', 10, 24 * 60 * 60 * 1000)) void notifyOwner(`OverLyX ${e.kind} #${id}: ${message.split('\n')[0].slice(0, 100)}`, `${body}\n\nOverLyX ${appVersion} · ${stamp()}\nAll reports: npx tsx scripts/reports.ts\n`);
+  // (a glitch or a formula not typeset is not mailed: there are many kinds of each, and they are read together)
+  if (e.kind !== 'client-glitch' && e.kind !== 'client-typeset' && allow('error-mail', 10, 24 * 60 * 60 * 1000)) void notifyOwner(`OverLyX ${e.kind} #${id}: ${message.split('\n')[0].slice(0, 100)}`, `${body}\n\nOverLyX ${appVersion} · ${stamp()}\nAll reports: npx tsx scripts/reports.ts\n`);
   return id;
 }
 
@@ -262,6 +266,15 @@ export function feedbackRoutes(): express.Router {
     const id = reportError({ kind: 'client-glitch', message: g.message, details: g.details, stack: g.trail, keepRepeats: 4, userAgent: req.get('user-agent') ?? '', who: { id: u.id, name: u.name, username: u.username } });
     res.json({ id });
   });
+  r.post('/client-typeset', (req, res) => {
+    const u = req.user!;
+    if (!config.errorReports) { res.status(204).end(); return; }
+    const t = typesetReport(req.body);
+    if (!t) { res.status(400).json({ error: 'not a typesetting report' }); return; }
+    if (!allow('client-typeset', 120) || !allow(`client-typeset:${u.id}`, 30)) { res.status(429).json({ error: 'rate limited' }); return; }
+    const id = reportError({ kind: 'client-typeset', message: t.message, details: t.details, keepRepeats: 4, userAgent: req.get('user-agent') ?? '', who: { id: u.id, name: u.name, username: u.username } });
+    res.json({ id });
+  });
   return r;
 }
 
@@ -286,6 +299,15 @@ export function vscodeTelemetryRoutes(): express.Router {
   r.post('/vscode-telemetry', express.json({ limit: '64kb', type: 'application/json' }), (req, res) => {
     if (!config.errorReports) { res.status(204).end(); return; }
     const b = req.body ?? {};
+    // a formula the extension's editor could not typeset (core typeset.ts): its fields only
+    if (b.schema === 1 && b.event === 'typeset') {
+      const t = typesetReport({ ...b.typeset, app: 'vscode' });
+      if (!t) { res.status(400).json({ error: 'not a typesetting report' }); return; }
+      if (!allow('vscode-typeset', 120) || !allow(`vscode-typeset:${req.ip ?? 'x'}`, 30)) { res.status(429).json({ error: 'rate limited' }); return; }
+      const extension = typeof b.extensionVersion === 'string' ? { Extension: clean(b.extensionVersion, 40) } : {};
+      res.json({ id: reportError({ kind: 'client-typeset', message: t.message, details: { ...t.details, ...extension }, keepRepeats: 4, userAgent: req.get('user-agent') ?? '' }) });
+      return;
+    }
     if (b.schema !== 1 || (b.event !== 'error' && b.event !== 'unhandled-error')) {
       res.status(400).json({ error: 'unsupported diagnostic schema' }); return;
     }

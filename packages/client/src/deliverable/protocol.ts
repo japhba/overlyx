@@ -244,6 +244,8 @@ export type ToRuntime =
   | { ol: 'inkTyped'; text: string; as: 'notes' | 'formula' }
   /** the guides shown on the slides (guides.ts) or not */
   | { ol: 'guides'; show: boolean }
+  /** the theme view (the editor's Edit theme): the objects on every slide alone shown and taken, the slides' own dimmed and out of reach (edit.ts setThemeView) */
+  | { ol: 'theme'; on: boolean }
   | { ol: 'exec'; command: string; value?: string }
   | { ol: 'go'; slide: number }
   | { ol: 'peers'; peers: PeerInfo[] }

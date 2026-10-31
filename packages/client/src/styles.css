@@ -3283,14 +3283,14 @@ html[data-theme="dark"] .dl-canvas { background: #2a2c31; }
   /* This drawer has a fixed responsive width; do not offer an inert resize handle. */
   .dl-rail-grip { display: none; }
   .dl-main { width: 100%; flex: 1 1 100%; }
-  .dl-body > .dl-rv, .dl-body > .dl-anim, .dl-body > .dl-objects {
+  .dl-body > .dl-rv, .dl-body > .dl-anim, .dl-body > .dl-objects, .dl-body > .dl-theme {
     position: absolute; z-index: 16; inset: 0 0 0 auto;
     width: min(288px, calc(100% - 48px)); max-width: calc(100% - 48px);
     box-shadow: -4px 0 18px rgba(0,0,0,.2);
   }
   /* (the toolbars in side columns: the drawers open beside them) */
   .dl-body[data-sides] > .dl-rail { left: var(--dl-col, 48px); }
-  .dl-body[data-sides] > :is(.dl-rv, .dl-anim, .dl-objects, .dl-code) { right: var(--dl-col, 48px); }
+  .dl-body[data-sides] > :is(.dl-rv, .dl-anim, .dl-objects, .dl-theme, .dl-code) { right: var(--dl-col, 48px); }
 
   /* Put every tool within reach without shrinking it to an unusable icon. The tool
      row scrolls horizontally; the zoom and view actions wrap below and stay visible.
@@ -3523,6 +3523,31 @@ html.ol-bars-back .dl-side.right { animation: ol-bar-from-right .18s ease-out; }
 .dl-anim-btn:hover:not(:disabled), .dl-anim-label:hover { background: var(--hover-bg, rgba(0,0,0,.06)); color: var(--ui-fg); }
 .dl-anim-btn:disabled { opacity: .3; cursor: default; }
 .dl-anim-clear { margin: 6px 10px 10px; }
+/* the theme view (DeliverableEditor's Edit theme): its bar over the canvas, its pane (ThemePane.tsx) */
+.dl-theme-bar { flex: none; height: 34px; box-sizing: border-box; display: flex; align-items: center; gap: 10px; padding: 0 8px 0 10px; background: color-mix(in srgb, #7c4dff 12%, var(--surface)); border-bottom: 1px solid color-mix(in srgb, #7c4dff 35%, var(--ui-border)); font-size: 12.5px; color: var(--ui-fg); min-width: 0; }
+.dl-theme-badge { flex: none; padding: 1px 7px; border-radius: 9px; background: #7c4dff; color: #fff; font-weight: 600; font-size: 11px; letter-spacing: .02em; }
+.dl-theme-say { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dl-theme-done { flex: none; background: #7c4dff; color: #fff; font-weight: 600; padding: 0 12px; }
+.dl-theme-done:hover:not(:disabled) { background: #6a3df0; }
+/* (the contextual tools floating under the toolbar go under the bar) */
+@media (min-width: 901px) { .dl-editor[data-theme-view] .dl-toolbar.dl-ctx-row > .dl-ctx { top: calc(100% + 38px); } }
+.dl-theme-scroll { flex: 1; overflow: auto; padding-bottom: 12px; }
+.dl-theme-hint { padding: 8px 10px; border-bottom: 1px solid var(--ui-border); }
+.dl-theme-list { padding: 2px 0 4px; }
+.dl-theme-count { flex: none; min-width: 18px; padding: 0 5px; border-radius: 8px; background: var(--hover-bg, rgba(0,0,0,.06)); color: var(--ui-muted); font-size: 11px; text-align: center; }
+.dl-theme-row { padding: 4px 10px; }
+.dl-theme-wide { width: 100%; justify-content: flex-start; border-color: var(--ui-border); }
+.dl-theme-colors { display: flex; flex-direction: column; padding: 2px 6px 4px; }
+.dl-theme-color { display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px; border: 0; border-radius: 5px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.dl-theme-color:hover:not(:disabled) { background: var(--ui-hover); }
+.dl-theme-swatch { flex: none; width: 22px; height: 22px; border-radius: 5px; box-shadow: inset 0 0 0 1px rgba(0,0,0,.18); }
+.dl-theme-cname { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dl-theme-cval { flex: none; color: var(--ui-muted); font: 11px ui-monospace, monospace; }
+.dl-theme-fonts { display: flex; flex-direction: column; gap: 6px; padding: 4px 10px 6px; }
+.dl-theme-font { display: flex; align-items: center; gap: 8px; }
+.dl-theme-font > span { width: 64px; flex: none; color: var(--ui-muted); }
+.dl-theme-font select { flex: 1; min-width: 0; font: inherit; }
+.dl-theme-layouts { padding: 2px 6px 4px; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); }
 
 /* the Review pane: comments and suggestions of a deck, poster or web page (ReviewPane.tsx) */
 .dl-rv { width: 288px; flex: none; display: flex; flex-direction: column; border-left: 1px solid var(--ui-border); background: var(--surface); font-size: 12.5px; color: var(--ui-fg); min-height: 0; }
@@ -3753,6 +3778,9 @@ html body .lyx-editor.ol-article > :is(.lyx-layout-itemize, .lyx-layout-enumerat
 .article-page-view > iframe { grid-area: 1 / 1; place-self: stretch; width: auto; height: auto; min-width: 0; min-height: 0; border: 0; background: #fff; max-width: 100%; z-index: 1; }
 .article-page-view > iframe.beneath { z-index: 0; pointer-events: none; }
 .article-page-view > .pdf-empty { grid-area: 1 / 1; }
+/* the page's zoom in the pane's bar: − 100 % + (app/ArticlePage.tsx) */
+.article-page .page-zoom { display: inline-flex; gap: 2px; align-items: center; }
+.article-page .page-zoom-pct { min-width: 4.2em; font-variant-numeric: tabular-nums; }
 .article-page-view.phone > iframe { justify-self: center; margin: 12px 0; border-radius: 18px; box-shadow: 0 2px 16px rgba(0, 0, 0, 0.25); }
 .editor-loading { min-height: 60vh; }
 /* math the page has no TeX for (MathML another tool wrote, editor/nodeviews/htmlblock.ts): rendered in the text, its source behind the label */
