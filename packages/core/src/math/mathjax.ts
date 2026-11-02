@@ -202,7 +202,7 @@ export function atomToTex(a: Atom, ctx: TexContext, mode: 'math' | 'text'): stri
     }
     case 'color': {
       if (a.old && a.color === 'normalcolor') return `{\\htmlClass{lm-normalcolor}{${cellToTex(a.body, ctx, a, 0, mode)}}}`;
-      const body = cellToTex(a.body, ctx, a, 0, a.old ? mode : 'text');
+      const body = cellToTex(a.body, ctx, a, 0, mode);
       // LyX's text colours look as coloured text does (styles.css .lyx-color-*, dark mode included)
       if (TEXT_COLOR_CLASSES.has(a.color)) return `{\\htmlClass{lyx-color-${a.color}}{${body}}}`;
       // anything else xcolor can say (a picked #RRGGBB, [rgb]{…}, red!50!blue) evaluated to MathJax's RGB

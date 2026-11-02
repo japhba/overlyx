@@ -133,6 +133,28 @@ describe('math parse structure (LyX semantics)', () => {
   });
 });
 
+describe('textcolor inherits the surrounding mode', () => {
+  it.each(['{red}', '[RGB]{32,96,160}'])('renders coloured math without literal dollars: %s', color => {
+    const hull = parseFormula(String.raw`\(\textcolor${color}{\boldsymbol v + q_i}\)`);
+    expect(writeFormula(hull)).toBe(String.raw`$\textcolor${color}{\boldsymbol{v}+q_{i}}$`);
+    const latex = renderHullSource(hull, {}, { atoms: true }).latex;
+    expect(latex).not.toContain('$');
+    const mml = toMathml(latex);
+    expect(mml).toContain('mathvariant="bold-italic"');
+    expect(mml).toContain('<msub');
+  });
+  it('preserves spaces and embedded math inside coloured text', () => {
+    const source = String.raw`$\text{a \textcolor{red}{colour with \ensuremath{x_{i}}} b}$`;
+    const hull = parseFormula(source);
+    expect(writeFormula(hull)).toBe(source);
+    const mml = toMathml(renderHullSource(hull, {}, { atoms: true }).latex);
+    const text = [...mml.matchAll(/<mtext\b[^>]*>(.*?)<\/mtext>/gs)].map(m => m[1]).join('');
+    expect(text).toContain('colour&#xA0;with&#xA0;');
+    expect(mml).toContain('<msub');
+    expect(mml).not.toMatch(/>\$<\/mo>/);
+  });
+});
+
 describe('corpus (all formulas of the local LyX projects, when present)', () => {
   const dir = '/tmp/claude-0/-root-lyx/9250d901-48e6-4b48-98b5-a211e39f6f1d/scratchpad/corpus';
   it.skipIf(!existsSync(dir + '/formulas.json'))('≥ 99% of LyX-2.5-written formulas round-trip byte-exactly', () => {

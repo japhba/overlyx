@@ -380,6 +380,20 @@ describe('math-mode (Ctrl+M): \\text{} in math, math again inside text (LyX LFUN
 });
 
 describe('the Text colour palette in a formula (LyX: InsetMathNest::handleFont2 → {\\color{c} …})', () => {
+  it('textcolor inherits math typing, including superscripts', () => {
+    const c = at(String.raw`$\textcolor{red}{v}$`);
+    c.pos = 0; right(c, 2);             // enter the colour, then move past v
+    expect(c.mode).toBe('math');
+    type(c, '^2');
+    expect(out(c)).toBe(String.raw`$\textcolor{red}{v^{2}}$`);
+  });
+  it('textcolor inside text keeps text typing and spaces', () => {
+    const c = at(String.raw`$\text{\textcolor{red}{a}}$`);
+    c.pos = 0; right(c, 3);             // enter the text and colour, then move past a
+    expect(c.mode).toBe('text');
+    type(c, ' b');
+    expect(out(c)).toBe(String.raw`$\text{\textcolor{red}{a b}}$`);
+  });
   /** a cursor at position `from` of the formula's cell, selecting to `to` */
   function sel(latex: string, from: number, to: number) {
     const h = parseFormula(latex, MACROS);

@@ -581,7 +581,8 @@ class Parser {
       }
       else if (t.cs === 'textcolor') {
         const color = this.parseColorSpec();
-        const body = this.parseCell(FLAG_ITEM, 'text');
+        // Like \color, \textcolor changes colour without changing the surrounding mode.
+        const body = this.parseCell(FLAG_ITEM, mode);
         push({ t: 'color', color, body, old: false });
       }
       else if (t.cs === 'normalcolor') {

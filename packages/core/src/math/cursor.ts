@@ -697,7 +697,6 @@ export class MathCursor {
       const o = this.slices[i].owner as Atom;
       if (o.t === 'font') return o.mode;
       if (o.t === 'box') return o.n === 'boxed' ? 'math' : 'text';
-      if (o.t === 'color' && !o.old) return 'text';
       if (o.t === 'ensuremath' || o.t === 'macro') return 'math';
       if (o.t === 'makebox') return 'text';
       if (o.t === 'grid' && o.env === 'tabular') return 'text';
