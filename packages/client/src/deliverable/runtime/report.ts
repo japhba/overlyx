@@ -7,6 +7,7 @@
  */
 import { slides, slideTitle, state, srcOf, isForeign, pageHtml } from './env';
 import { mathTypeset } from './math';
+import { noOverlap, visibleInk, glyphInk, formulaInk, pictureInk, aboveText } from './overlap';
 
 export interface PageIssue { kind: 'overflow' | 'offpage' | 'overlap' | 'small-text' | 'contrast' | 'image' | 'math' | 'citation' | 'reference'; text: string; at?: { x: number; y: number; w: number; h: number } }
 export interface PageReport { index: number; title: string; issues: PageIssue[] }
@@ -54,7 +55,7 @@ function screenReaderOnly(el: Element | null): boolean {
 const skipText = (p: Element) => screenReaderOnly(p) || !!p.closest(OTHER_MATH);
 
 /** the rects of an element's text (each line of each text node) */
-function textRects(el: Element, limit = 300): DOMRect[] {
+function textRects(el: Element, limit = 300, ink = false): DOMRect[] {
   const out: DOMRect[] = [];
   const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
   const r = document.createRange();
@@ -62,12 +63,31 @@ function textRects(el: Element, limit = 300): DOMRect[] {
     if (INVISIBLE.test(n.nodeValue ?? '')) continue;
     const p = n.parentElement;
     if (!p || isForeign(p) || p.closest('[data-ol-runtime], .notes, script, style') || skipText(p)) continue;
-    r.selectNodeContents(n);
-    for (const x of Array.from(r.getClientRects())) if (x.width > 0.5 && x.height > 0.5) out.push(x);
+    if (ink && (noOverlap(p) || !visibleInk(p))) continue;
+    if (ink) {
+      // Each glyph separately: whitespace between words and hidden inline spans paint no ink.
+      const glyph = glyphInk(p);
+      let i = 0;
+      for (const ch of n.nodeValue ?? '') {
+        const start = i; i += ch.length;
+        if (INVISIBLE.test(ch)) continue;
+        r.setStart(n, start); r.setEnd(n, i);
+        for (const x of Array.from(r.getClientRects())) if (x.width > 0.5 && x.height > 0.5) out.push(glyph(ch, x));
+        if (out.length >= limit) break;
+      }
+    } else {
+      r.selectNodeContents(n);
+      for (const x of Array.from(r.getClientRects())) if (x.width > 0.5 && x.height > 0.5) out.push(x);
+    }
   }
   // typeset formulas count as text
   for (const m of Array.from(el.querySelectorAll(`mjx-container, ${OTHER_MATH}`))) {
     if (m.parentElement?.closest(`mjx-container, ${OTHER_MATH}`) || screenReaderOnly(m)) continue;
+    if (ink) {
+      if (noOverlap(m) || !visibleInk(m)) continue;
+      const glyphs = formulaInk(m);
+      if (m.querySelector('svg')) { out.push(...glyphs); continue; }
+    }
     const x = m.getBoundingClientRect();
     if (x.width > 0.5) out.push(x);
   }
@@ -172,7 +192,7 @@ function checkScope(scope: Element, frame: DOMRect, kind: 'deck' | 'poster' | 'p
       if (out.length) issues.push({ kind: 'offpage', text: `text of ${labelOf(c)} runs past the slide's ${out.join(', ')}`, at: rel(new DOMRect(l, t, r - l, b - t)) });
     }
     // text of two objects on top of each other
-    const texts = tops.map(c => ({ c, rs: textRects(c, 200) })).filter(x => x.rs.length);
+    const texts = tops.filter(c => !noOverlap(c)).map(c => ({ c, rs: textRects(c, 4000, true) })).filter(x => x.rs.length);
     for (let i = 0; i < texts.length; i++) for (let j = i + 1; j < texts.length; j++) {
       const a = texts[i], b = texts[j];
       if (a.c.contains(b.c) || b.c.contains(a.c)) continue;
@@ -182,10 +202,11 @@ function checkScope(scope: Element, frame: DOMRect, kind: 'deck' | 'poster' | 'p
     // a picture that overlaps text it does not belong to
     const pics = tops.filter(c => c.matches('img, svg, video, canvas, picture, figure') || (c.querySelector('img, svg:not(mjx-container svg), canvas') && !(c.textContent ?? '').trim()));
     for (const p of pics) {
-      const pr = p.getBoundingClientRect();
+      if (noOverlap(p)) continue;
+      const paints = pictureInk(p);
       for (const t of texts) {
-        if (t.c === p || t.c.contains(p) || p.contains(t.c)) continue;
-        const clash = t.rs.find(x => hit(x, pr, 2));
+        if (t.c === p || t.c.contains(p) || p.contains(t.c) || !aboveText(p, t.c)) continue;
+        const clash = t.rs.find(paints);
         if (clash) { issues.push({ kind: 'overlap', text: `${labelOf(p)} covers part of the text of ${labelOf(t.c)}`, at: rel(clash) }); break; }
       }
     }

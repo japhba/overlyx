@@ -1287,10 +1287,14 @@ blend.
     splice), `list_documents` lists pages with their kind, and **`render_page`** shows a page as
     images plus a report of what is wrong on every page (`runtime/report.ts`): text needing more
     room than its box (measured by letting the box take its natural size), text running off the
-    slide, text of two objects on top of each other, a picture covering text, text too small for
-    the kind (deck ~2.2 % of the slide height, poster ~0.55 %), low contrast, pictures that did not
+    slide, text of two objects on top of each other (individual glyph boxes, excluding whitespace
+    and hidden text), a foreground picture covering text (inline SVG fills/strokes, rather than
+    the viewport), text too small for the kind (deck ~2.2 % of the slide height, poster ~0.55 %),
+    low contrast, pictures that did not
     load, formulas that did not typeset (MathJax errors and TeX left as written), the page's script
-    errors. The renderer (`render.ts`) is one headless Chromium (playwright-core) in the bubblewrap
+    errors. `data-ol-lint="no-overlap"` on either object or an SVG shape opts deliberate layering
+    out of overlap warnings only. The renderer (`render.ts`) is one headless Chromium
+    (playwright-core) in the bubblewrap
     sandbox with **no network namespace**: every request of the page comes back to the server over
     the DevTools pipe and is answered like the editor's frame (`resolveDeliverable`) or, for a short
     list of public font / script CDNs, fetched by the server — nothing else is reachable. At most two
