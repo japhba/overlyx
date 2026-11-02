@@ -336,7 +336,7 @@ let active: Active | null = null;
 export function isCropping(): boolean { return !!active; }
 
 const CSS = `
-  .crop { position: absolute; left: 0; top: 0; pointer-events: none; font: 12px system-ui, sans-serif; }
+  .crop { position: absolute; left: 0; top: 0; pointer-events: none; font: 12px Helvetica, Arial, sans-serif; }
   .crop * { box-sizing: border-box; }
   .ghost { position: absolute; opacity: .35; pointer-events: none; user-select: none; max-width: none; }
   .clip { position: absolute; overflow: hidden; pointer-events: auto; cursor: move; touch-action: none; }

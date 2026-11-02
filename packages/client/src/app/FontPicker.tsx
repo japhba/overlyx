@@ -202,7 +202,7 @@ export function FontList({ family, current, markdown, documentFonts, inDocument:
             {onFamily && <div class="tb-popup-title">{markdown ? 'The document’s font' : 'The document’s fonts'}</div>}
             {onFamily && <button type="button" class={'tb-pal-item ff-item' + (!current && !family ? ' active' : '')} onMouseDown={e => e.preventDefault()} onClick={() => onFamily(null)}>Default</button>}
             {onFamily && !markdown && (['roman', 'sans', 'typewriter'] as const).map(f => (
-              <button key={f} type="button" class={'tb-pal-item ff-item' + (!current && family === f ? ' active' : '')} style={{ fontFamily: f === 'roman' ? 'var(--editor-font), serif' : f === 'sans' ? 'var(--editor-sans-font, system-ui), sans-serif' : 'var(--editor-mono-font, monospace), monospace' }}
+              <button key={f} type="button" class={'tb-pal-item ff-item' + (!current && family === f ? ' active' : '')} style={{ fontFamily: f === 'roman' ? 'var(--editor-font), serif' : f === 'sans' ? 'var(--editor-sans-font, Helvetica), sans-serif' : 'var(--editor-mono-font, monospace), monospace' }}
                 onMouseDown={e => e.preventDefault()} onClick={() => onFamily(f)}>{FAMILY_NAMES[f]}</button>
             ))}
             {sections?.map(sec => (

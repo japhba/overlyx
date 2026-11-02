@@ -34,7 +34,7 @@ export const PH_CSS = `
   html.ol-edit [${PH}="title"]:not([data-ol-editing]):empty::before { content: 'Click to add title'; }
   html.ol-edit [${PH}="subtitle"]:not([data-ol-editing]):empty::before { content: 'Click to add subtitle'; }
   html.ol-edit [${PH}="picture"]:not([data-ol-editing]):empty { background: color-mix(in srgb, currentColor 5%, transparent) ${PICTURE_ICON} center calc(50% - 18px) / 56px no-repeat; }
-  html.ol-edit [${PH}="picture"]:not([data-ol-editing]):empty::before { content: 'Click to add a picture'; position: absolute; left: 0; right: 0; top: calc(50% + 20px); text-align: center; font: 600 20px/1.3 system-ui, sans-serif; color: #80868b; opacity: 1; }
+  html.ol-edit [${PH}="picture"]:not([data-ol-editing]):empty::before { content: 'Click to add a picture'; position: absolute; left: 0; right: 0; top: calc(50% + 20px); text-align: center; font: 600 20px/1.3 Helvetica, Arial, sans-serif; color: #80868b; opacity: 1; }
   @media (pointer: coarse) {
     html.ol-edit [${PH}]:not([data-ol-editing]):empty::before { content: 'Tap to add text'; }
     html.ol-edit [${PH}="title"]:not([data-ol-editing]):empty::before { content: 'Tap to add title'; }

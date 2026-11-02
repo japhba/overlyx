@@ -173,5 +173,5 @@ export const GUIDES_CSS = `
   .uguide.layout { border-color: #8b6fbd; border-style: dotted; }
   .uguide.moving { border-style: solid; }
   .uguide.off { opacity: .35; }
-  .ulabel { position: absolute; transform: translate(calc(12px * var(--s)), calc(12px * var(--s))); background: #333; color: #fff; padding: calc(2px * var(--s)) calc(6px * var(--s)); border-radius: calc(3px * var(--s)); white-space: nowrap; pointer-events: none; font: 500 calc(11px * var(--s)) / 1.3 system-ui, -apple-system, sans-serif; }
+  .ulabel { position: absolute; transform: translate(calc(12px * var(--s)), calc(12px * var(--s))); background: #333; color: #fff; padding: calc(2px * var(--s)) calc(6px * var(--s)); border-radius: calc(3px * var(--s)); white-space: nowrap; pointer-events: none; font: 500 calc(11px * var(--s)) / 1.3 Helvetica, Arial, sans-serif; }
 `;

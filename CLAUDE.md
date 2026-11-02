@@ -32,6 +32,16 @@ implement clear fixes, run minimal focused checks, and deploy without supervisio
 checkout and private persistent state. The runner commits and deploys with `--no-checks`; do not
 add review stages or broader test gates. See DOCS.md for operation and pause/resume commands.
 
+## No San Francisco fonts
+
+OverLyX never uses Apple's San Francisco fonts — SF Pro (any width, Rounded), SF Compact, SF Mono, SF
+Camera, New York — in the editor, documents, decks, articles, PDFs or the interface, and never the CSS
+keywords that resolve to them on Apple devices: `-apple-system`, `BlinkMacSystemFont`, `system-ui`,
+`ui-sans-serif`, `ui-serif`, `ui-monospace`, `ui-rounded` (the owner, 2 Nov 2026). Apple licenses them
+only for mock-ups of Apple-platform software. Use a named stack instead: `"Segoe UI", Roboto, "OL Inter",
+Helvetica, Arial, sans-serif` for the interface, `Helvetica, Arial, sans-serif` or a served/Google font
+for content, `Menlo, Consolas, monospace` for code. `tests/no-sf-fonts.test.ts` enforces it.
+
 ## Keyboard shortcuts are contextual (VS Code's model)
 
 A key may do different things in different places, as VS Code's keybindings carry a `when`

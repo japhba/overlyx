@@ -1603,10 +1603,7 @@ blend.
   New Computer Modern, Libertinus, STIX Two, XITS, TeX Gyre Termes / Pagella / Bonum / Schola, DejaVu
   Serif, EB Garamond, Crimson Pro, Charis, XCharter, Erewhon, Kp Roman, Concrete, Old Standard, GFS
   Neohellenic, IBM Plex Serif, PL46, Fira Sans, Lato, Noto Sans, Arsenal, Luciole, Pennstander — the
-  computer's own Palatino, or *Sans-serif*: San Francisco where the system has it (`--sf-font` in
-  styles.css: `-apple-system` / `BlinkMacSystemFont`, then an installed SF Pro by name; on phones —
-  coarse pointer, narrow — an installed SF Compact first), else Fira Sans (a saved `noto` preference
-  maps to it). Or *As in the document*: the face closest to the open document's roman font (each shell
+  computer's own Palatino (never Apple's San Francisco fonts, nor `system-ui` / `-apple-system` / `ui-*` anywhere in the app: CLAUDE.md, `tests/no-sf-fonts.test.ts`; a saved `sans` — the former San Francisco face — or `noto` preference becomes Fira Sans). Or *As in the document*: the face closest to the open document's roman font (each shell
   reports its header through `setDocumentFonts`, `tests/parity.test.ts`). *Math font*
   (`prefs.editorMathFont`): *Matching the text font* (the MathJax font closest in style to the face,
   the default) or one of MathJax 4's fonts — New Computer Modern, Latin Modern, MathJax TeX (the

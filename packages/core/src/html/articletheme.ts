@@ -13,8 +13,8 @@
 /** the design's custom properties and their values in a new article */
 export const ARTICLE_VARS: Record<string, string> = {
   '--font-text': '"Source Serif 4", "Iowan Old Style", Georgia, serif',
-  '--font-ui': 'Inter, system-ui, -apple-system, "Segoe UI", sans-serif',
-  '--font-code': '"JetBrains Mono", ui-monospace, Menlo, monospace',
+  '--font-ui': 'Inter, "Segoe UI", sans-serif',
+  '--font-code': '"JetBrains Mono", Menlo, monospace',
   '--text-size': '19px',
   '--leading': '1.68',
   '--measure': '680px',

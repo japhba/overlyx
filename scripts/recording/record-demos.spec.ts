@@ -110,7 +110,7 @@ const DRAWDECK = `<!doctype html>
 <meta name="overlyx" content="deck">
 <title>Composition</title>
 <style>
-  body { margin: 0; background: #dfe3ea; font-family: system-ui, sans-serif; color: #1c1b19; }
+  body { margin: 0; background: #dfe3ea; font-family: Helvetica, Arial, sans-serif; color: #1c1b19; }
   .slide { width: 1280px; height: 720px; position: relative; overflow: hidden; background: #fbfaf7; margin: 0 auto 40px; }
   .kicker { font-size: 20px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #84807a; margin: 0; }
   h2 { font-size: 46px; font-weight: 800; margin: 0; }

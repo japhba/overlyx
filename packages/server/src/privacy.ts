@@ -54,7 +54,7 @@ export const esc = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<
 export const NOTICE_STYLE = `<style>
 :root{--bg:#fbfaf7;--fg:#1b1b1b;--mute:#5d5d5d;--rule:#e2dfd8;--accent:#c8102e}
 @media (prefers-color-scheme:dark){:root{--bg:#161616;--fg:#ebe9e4;--mute:#a7a49d;--rule:#33312d;--accent:#ff5a6e}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 "Segoe UI",Roboto,Helvetica,Arial,sans-serif}
 main{max-width:46rem;margin:0 auto;padding:2.5rem 1rem 4rem}
 h1{font-size:2rem;margin:0 0 .25rem;letter-spacing:-.01em}h2{font-size:1.2rem;margin:2.2rem 0 .5rem;padding-top:1rem;border-top:1px solid var(--rule)}
 h3{font-size:1rem;margin:1.2rem 0 .3rem}p,li{margin:.4rem 0}ul{padding-left:1.25rem}

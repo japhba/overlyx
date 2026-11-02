@@ -213,6 +213,6 @@ export function badges(): string {
 }
 
 export const STEPS_CSS = `.steps { position: absolute; display: flex; gap: calc(2px * var(--s)); transform: translate(calc(-100% - 5px * var(--s)), 0); pointer-events: none; }
-    .step { min-width: calc(16px * var(--s)); height: calc(16px * var(--s)); line-height: calc(16px * var(--s)); padding: 0 calc(3px * var(--s)); box-sizing: border-box; border-radius: calc(8px * var(--s)); background: #2f6fde; color: #fff; text-align: center; font: 600 calc(10px * var(--s)) system-ui, sans-serif; box-shadow: 0 0 0 calc(1.5px * var(--s)) #fff; }
+    .step { min-width: calc(16px * var(--s)); height: calc(16px * var(--s)); line-height: calc(16px * var(--s)); padding: 0 calc(3px * var(--s)); box-sizing: border-box; border-radius: calc(8px * var(--s)); background: #2f6fde; color: #fff; text-align: center; font: 600 calc(10px * var(--s)) Helvetica, Arial, sans-serif; box-shadow: 0 0 0 calc(1.5px * var(--s)) #fff; }
     .step.disappear { background: #d2453c; }
     .steps.ordering .step { min-width: calc(20px * var(--s)); height: calc(20px * var(--s)); line-height: calc(20px * var(--s)); border-radius: calc(10px * var(--s)); font-size: calc(12px * var(--s)); }`;

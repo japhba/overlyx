@@ -37,7 +37,7 @@ function capHeight(family: string): number {
  * An article's formulas sized to its text font (the page's, not the editor's face that
  * fonts/editorfont.ts sizes --math-scale for): their capitals as tall as the text's. Matching
  * x-heights, as for the editor's faces, made them too large beside a sans-serif with a tall
- * x-height (system-ui, Inter), and an article's formulas are mostly capitals and Greek.
+ * x-height (Inter), and an article's formulas are mostly capitals and Greek.
  */
 function fitMath(view: EditorView): void {
   if (!view.dom.isConnected || !view.dom.classList.contains('ol-article')) return;

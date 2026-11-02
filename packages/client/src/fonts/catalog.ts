@@ -6,7 +6,8 @@
  *                       Modern (CMU Serif), the text fonts of the OpenType math fonts listed on
  *                       https://tex.stackexchange.com/q/425098 and a few more, all served with the
  *                       client (fonts/web, scripts/build-editor-fonts.py) and fetched only once
- *                       chosen — except the computer's own Palatino and San Francisco.
+ *                       chosen — except the computer's own Palatino. Never Apple's San Francisco
+ *                       fonts (CLAUDE.md, tests/no-sf-fonts.test.ts).
  *   MATH_FONTS          the editor's formulas (Settings ▸ Editor ▸ Math font): MathJax's fonts, each
  *                       made from an OpenType math font, which MathJax lays formulas out with
  *                       (editor/lyxmath/mathfonts.ts loads them). "Matching the text font" is the
@@ -48,8 +49,6 @@ export interface MathFont {
 }
 
 const CM = '"CMU Serif", serif';
-/** San Francisco where the system has it, SF Compact first on phones (styles.css --sf-font) */
-const SF = 'var(--sf-font)';
 /** Computer Modern's x-height (CMU Serif's) */
 export const CM_X_HEIGHT = 0.4306;
 
@@ -91,10 +90,6 @@ export const EDITOR_FACES: EditorFace[] = [
   served('plex', 'IBM Plex Serif', 'IBM’s corporate serif', 'stix2'),
   served('pl46', 'PL46', 'a Polish typeface of 1946 (no italic)', 'newcm'),
   served('fira', 'Fira Sans', 'sans-serif; typewriter Fira Mono', 'fira', { mono: '"OLT fira mono"' }),
-  {
-    id: 'sans', label: 'Sans-serif (this computer’s)', hint: 'San Francisco where the system has it (SF Compact on phones), else Fira Sans',
-    text: `${SF}, "OLT fira", sans-serif`, mono: '"SF Mono", "OLT fira mono"', math: 'fira', xHeight: 0.52,
-  },
   served('lato', 'Lato', 'sans-serif', 'fira'),
   served('notosans', 'Noto Sans', 'sans-serif, for every script', 'fira'),
   served('arsenal', 'Arsenal', 'sans-serif', 'fira'),
@@ -119,7 +114,7 @@ export const MATH_FONTS: MathFont[] = [
 ];
 
 /** Faces that were renamed: a preference saved under the old id keeps its face. */
-const FORMER_FACES: Record<string, string> = { noto: 'sans' };
+const FORMER_FACES: Record<string, string> = { noto: 'fira', sans: 'fira' };
 
 /** The math fonts of before MathJax (KaTeX with stand-in faces, 26 Sep 2026): a saved preference gets the closest one. */
 const FORMER_MATH_FONTS: Record<string, string> = {

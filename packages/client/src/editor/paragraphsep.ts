@@ -47,7 +47,7 @@ const selOf = (t: TextType) => (t === 'body' ? '.lyx-editor' : TYPE_LAYOUTS[t].m
 
 /** a style's font as CSS (the document's own families, a font by name, a family the editor carries, or a Google font of that name) */
 function fontCss(font: string): Record<string, string> {
-  if (FAMILY_FONTS[font]) return { 'font-family': font === '@sans' ? 'var(--editor-sans-font, system-ui), sans-serif' : font === '@mono' ? 'var(--editor-mono-font, monospace), monospace' : 'var(--editor-font)' };
+  if (FAMILY_FONTS[font]) return { 'font-family': font === '@sans' ? 'var(--editor-sans-font, Helvetica), sans-serif' : font === '@mono' ? 'var(--editor-mono-font, monospace), monospace' : 'var(--editor-font)' };
   if (font.includes('|')) {
     const f = parseFace(font);
     if (!f) return {};
