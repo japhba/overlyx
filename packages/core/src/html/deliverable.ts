@@ -189,6 +189,9 @@ export function blankDeck(title: string, size: PageSize = DEFAULT_DECK_SIZE): st
   body { margin: 0; background: #dce0e4; color: #1d1d1f; font-family: -apple-system, system-ui, "Segoe UI", Helvetica, Arial, sans-serif; }
   .slide { width: ${w}; height: ${h}; position: relative; overflow: hidden; background: #fff; margin: 0 auto 40px; font-size: ${text}; line-height: 1.35; }
   h1, h2, h3, p, ul, ol { margin: 0; }
+  :where(.slide li)::marker { color: #80868b; }
+  :where(.slide ul ul) { list-style-type: "\\2013\\2002"; padding-inline-start: 1.2em; font-size: 0.9em; }
+  :where(.slide ul ul ul) { list-style-type: "\\2022\\2002"; }
   .notes { display: none; }
   @media print { @page { size: ${w} ${h}; margin: 0; } body { background: none; } .slide { margin: 0; break-after: page; break-inside: avoid; print-color-adjust: exact; -webkit-print-color-adjust: exact; } .slide:last-of-type { break-after: auto; } }
 </style>
