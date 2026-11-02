@@ -17,7 +17,8 @@
     "Other"
   ],
   "activationEvents": [
-    "workspaceContains:.git/HEAD"
+    "workspaceContains:.git",
+    "onStartupFinished"
   ],
   "main": "./dist/extension.cjs",
   "contributes": {
