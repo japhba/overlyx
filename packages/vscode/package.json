@@ -426,7 +426,7 @@
         "overlyx.sync.enabled": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Keep clones of OverLyX projects in step with the server while VS Code is open: files you save reach the project within seconds, changes made there arrive here, and the branch follows the server's commits — no pull, commit or push. Applies to workspace folders whose git remote is a project on overlyx.app (or on a server listed in `#overlyx.sync.servers#` or signed in with the OverLyX CLI). Pause a single folder from the status bar.",
+          "markdownDescription": "Keep clones of OverLyX projects in step with the server while VS Code is open: files you save reach the project within seconds, changes made there arrive here, and the branch follows the server's commits — no pull, commit or push. Finds clones in workspace folders whose git remote is a project on overlyx.app (or on a server listed in `#overlyx.sync.servers#` or signed in with the OverLyX CLI). Accepted clones keep syncing after the workspace changes. Pause a single clone from its status bar item; Pause is remembered across workspaces too.",
           "tags": [
             "usesOnlineServices"
           ]

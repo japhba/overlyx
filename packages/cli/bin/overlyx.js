@@ -10,7 +10,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execFileP = promisify(execFile);
-const VERSION = '0.8.1';
+const VERSION = '0.8.2';
 const DEFAULT_HOST = 'https://overlyx.app';
 
 const HELP = `OverLyX CLI ${VERSION}
@@ -946,8 +946,14 @@ function withCloneInstructions(msg, clone) {
     + `with the tools of the "overlyx-local" server where you have them (edit_document, write_document, add_comment — your edits become tracked changes the user reviews in the OverLyX editor), otherwise directly. `
     + (clone.synced
       ? `OverLyX keeps this clone in step with the server (sync running): files saved here reach the server within seconds and changes made there arrive here — no pull or push needed. The tools below (project "${clone.project}") work on the server's copy, which is the same content; prefer the local files.`
-      : `Commit and push with git when the user asks (pull first). The tools below (project "${clone.project}") work on the copy on the OverLyX server, which changes only with a push — use them only when the user asks about that copy.`);
+      : `Automatic sync is not running for this clone: saved local edits stay local until you run overlyx sync . (once), overlyx sync --watch (continuously), or commit and push with git when the user asks (pull first). The tools below (project "${clone.project}") work on the server's copy, which may differ from these local files.`);
   return { ...msg, result: { ...msg.result, instructions: msg.result.instructions ? `${note}\n\n${msg.result.instructions}` : note } };
+}
+
+function withInactiveSyncWarning(msg, clone) {
+  if (!Array.isArray(msg?.result?.content)) return msg;
+  const text = `Warning: automatic sync is not running for the local clone of "${clone.project}". Saved local edits may be unsynced; this tool used the server's copy. Run overlyx sync . in the clone to sync once, or overlyx sync --watch to keep it in step.`;
+  return { ...msg, result: { ...msg.result, content: [...msg.result.content, { type: 'text', text }] } };
 }
 
 async function mcpServe(flags) {
@@ -1023,7 +1029,10 @@ async function mcpServe(flags) {
       return;
     }
     if (initialized) await initialized;
-    await post(msg);
+    // A workspace change can stop VS Code's engine during a long-lived agent session. Do not keep
+    // telling the agent that the files agree just because a lock existed at initialize.
+    const inactive = clone && msg.method === 'tools/call' && !await syncRunning('.');
+    await post(msg, inactive ? m => withInactiveSyncWarning(m, clone) : undefined);
     if (msg.method === 'notifications/initialized' && session) void eventStream();
   }
 
@@ -1962,6 +1971,7 @@ async function syncCommand(args, flags) {
     if (engine.status.state === 'paused') fail(engine.status.message);
     const lines = describeChanges(c);
     process.stdout.write(lines.length ? lines.join('\n') + '\n' : `In step with ${target.host} (${target.project})\n`);
+    if (!await syncRunning(dir)) process.stderr.write('Automatic sync is not running for this clone. This command synced once; later edits stay local until the next sync. Run overlyx sync --watch to keep it in step.\n');
     if (c.errors.length) process.exitCode = 1;
     return;
   }

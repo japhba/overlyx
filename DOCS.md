@@ -373,7 +373,11 @@ blend.
   was never synced (no `overlyx-sync/` in its git directory — `.git`, or where a submodule's `.git`
   file points) asks first, once per workspace (*Keep in Step* / *Not Now*): nobody opened it on
   purpose, and its first sync merges what changed on both sides; until then it is paused and its
-  status bar item says "not kept in step yet — click to start". Into a folder of a git repository
+  status bar item says "not kept in step yet — click to start". Accepted clones are remembered on
+  this computer and keep syncing after a workspace folder is removed or the window opens another
+  workspace; Pause is remembered too. Only those saved paths are revisited, and a path whose remote
+  now names another project is not resumed. Their status bar tooltip names the local folder and
+  says when it is outside the workspace. Into a folder of a git repository
   that is not a clone of a project itself, *Clone Project from OverLyX…* asks how: **as a submodule**
   (`addProjectSubmodule`: `git submodule add` with the project's address without an account in
   `.gitmodules`, staged for the user to commit) or **as a clone the repository ignores**
@@ -394,7 +398,10 @@ blend.
   (also in the empty Explorer) lists the account's projects (`/git/api/projects`) and clones one
   (`cloneProject`: the credential in an environment header, the remote URL naming the account), then
   opens it; *Sign Out…* forgets the sign-in (for the CLI too). In a terminal,
-  `overlyx sync [DIR]` syncs once and `overlyx sync --watch` until Ctrl+C. The extension bundles the
+  `overlyx sync [DIR]` syncs once and `overlyx sync --watch` until Ctrl+C. The one-shot command says
+  when no engine remains to send later edits. The MCP bridge checks again at each tool call and
+  warns when automatic sync is inactive: server results may differ from the local files.
+  The extension bundles the
   CLI file as a library (esbuild defines `process.env.OVERLYX_CLI_LIBRARY`, which keeps its command
   line from running; `overlyx.d.ts` types the exports). **File contents travel, not commits**, so
   the history keeps OverLyX's own schedule (`touchProject`: a commit `OVERLYX_GIT_COMMIT_MS` after
