@@ -11,7 +11,7 @@ import { useEffect, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import { mathPreview, type ToolButton, type Palette } from '../app/Toolbar';
 import { ColorGrid } from '../app/ColorGrid';
-import type { SelItem, Tool, Paint, ArrangeHow, DeliverableKind, NodeCmd, GroupLayout } from './protocol';
+import type { SelItem, SelStyle, Tool, Paint, ArrangeHow, DeliverableKind, NodeCmd, GroupLayout } from './protocol';
 import { DEFAULT_GROUP_LAYOUT } from './grouplayout';
 import { ASPECTS } from './runtime/crop';
 import { fmtPt, ptToPx, pxToPt, sizePt, stepPt } from './units';
@@ -33,6 +33,8 @@ export interface DeckTextActions {
   valign(v: 'flex-start' | 'center' | 'flex-end'): void;
   list(kind: 'ul' | 'ol'): void;
   lineHeight(v: string): void;
+  /** typographic properties (null: back to the inherited value) */
+  typography?(set: Record<string, string | null>): void;
   box?(anchor: 'fixed' | 'left' | 'center' | 'right'): void;
   step(n: number): void;
   clear(): void;
@@ -198,9 +200,11 @@ function mathGroups(c: DeckCtx): ToolButton[][] {
 /** Bundled choices are embedded; other web fonts load from Google Fonts when first used. */
 export const DECK_FONTS: { label: string; css: string | null; google?: string }[] = [
   { label: 'Default', css: null },
+  { label: 'Instrument Sans (bundled)', css: '"Instrument Sans", Helvetica, Arial, sans-serif' },
   { label: 'Fira Sans (bundled)', css: '"Fira Sans", Helvetica, Arial, sans-serif' },
   { label: 'Carlito (bundled)', css: 'Carlito, Helvetica, Arial, sans-serif' },
   { label: 'CMU Sans (bundled)', css: '"CMU Sans", Helvetica, Arial, sans-serif' },
+  { label: 'DejaVu Sans (bundled)', css: '"DejaVu Sans", Verdana, sans-serif' },
   { label: 'Inter', css: 'Inter, Helvetica, Arial, sans-serif', google: 'Inter' },
   { label: 'Roboto', css: 'Roboto, Helvetica, Arial, sans-serif', google: 'Roboto' },
   { label: 'Open Sans', css: '"Open Sans", Helvetica, Arial, sans-serif', google: 'Open Sans' },
@@ -226,6 +230,29 @@ export const SHAPES: { tool: Tool; label: string }[] = [
 export const LINES: { tool: Tool; label: string }[] = [{ tool: 'line', label: 'Line' }, { tool: 'arrow', label: 'Arrow' }, { tool: 'bezier', label: 'Path: click for corners, drag for curves (B)' }];
 
 const firstFamily = firstFontFamily;
+
+/** Text ▸ Typography: weight, width (variable fonts' wdth axis, e.g. Instrument Sans), tracking, caps, figures, ligatures */
+export const TYPOGRAPHY: { group: string; label: string; set: Record<string, string | null>; on?: (st: SelStyle) => boolean }[] = [
+  ...([['Light', '300'], ['Regular', '400'], ['Medium', '500'], ['Semibold', '600'], ['Bold', '700'], ['Black', '900']] as const).map(([label, w]) => ({
+    group: 'Weight', label, set: { 'font-weight': w }, on: (st: SelStyle) => st.fontWeight === w })),
+  ...([['Condensed', '75%'], ['Semi-condensed', '87.5%'], ['Normal width', '100%']] as const).map(([label, v]) => ({
+    group: 'Width', label, set: { 'font-stretch': v === '100%' ? null : v }, on: (st: SelStyle) => (st.fontStretch === 'normal' || !st.fontStretch ? '100%' : st.fontStretch) === v })),
+  ...([['Tight', '-0.02em'], ['Normal spacing', null], ['Wide', '0.05em'], ['Wider', '0.1em']] as const).map(([label, v]) => ({
+    group: 'Letter spacing', label, set: { 'letter-spacing': v }, on: v === null ? (st: SelStyle) => (st.letterSpacing ?? 'normal') === 'normal' : undefined })),
+  { group: 'Caps', label: 'Small caps', set: { 'font-variant-caps': 'small-caps' }, on: st => st.fontVariantCaps === 'small-caps' },
+  { group: 'Caps', label: 'Normal caps', set: { 'font-variant-caps': null }, on: st => (st.fontVariantCaps ?? 'normal') === 'normal' },
+  ...([['Tabular figures', 'tabular-nums'], ['Proportional figures', 'proportional-nums'], ['Old-style figures', 'oldstyle-nums'], ['Lining figures', 'lining-nums']] as const).map(([label, v]) => ({
+    group: 'Figures', label, set: { 'font-variant-numeric': v }, on: (st: SelStyle) => (st.fontVariantNumeric ?? '').includes(v) })),
+  { group: 'Ligatures', label: 'Ligatures', set: { 'font-variant-ligatures': null }, on: st => (st.fontVariantLigatures ?? 'normal') === 'normal' },
+  { group: 'Ligatures', label: 'No ligatures', set: { 'font-variant-ligatures': 'none' }, on: st => st.fontVariantLigatures === 'none' },
+];
+
+function typographyBtn(st: SelStyle | undefined, apply: (set: Record<string, string | null>) => void): ToolButton {
+  return { id: 'dk-typography', title: 'Typography: weight, width, letter spacing, small caps, figures, ligatures', icon: '',
+    html: '<span class="dk-font-sample" style="font-weight:600;letter-spacing:.02em">Ag</span>',
+    palette: { title: 'Typography', list: true, cols: 1, items: TYPOGRAPHY.map(t => ({
+      label: `${t.group} · ${t.label}`, active: !!st && !!t.on?.(st), action: () => apply(t.set) })) } };
+}
 
 /** − [size] + : Google's font size box, in points */
 function SizeBox({ pt, onSet }: { pt: number; onSet: (pt: number) => void }) {
@@ -435,6 +462,7 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
         ] } },
       { id: 'dk-ul', title: 'Bulleted list (Ctrl+Shift+8)', icon: 'dk-bullets', action: () => c.text.list('ul') },
       { id: 'dk-ol', title: 'Numbered list (Ctrl+Shift+7)', icon: 'dk-numbers', action: () => c.text.list('ol') },
+      ...(c.text.typography ? [typographyBtn(st, c.text.typography)] : []),
       { id: 'dk-more-text', title: 'More text options', icon: 'dk-lines',
         palette: { title: 'Text', list: true, cols: 1, items: [
           { label: 'Strikethrough', html: ICON('dk-strike'), action: c.text.strike },

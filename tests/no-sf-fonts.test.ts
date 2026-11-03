@@ -20,7 +20,9 @@ describe('no San Francisco fonts', () => {
       .split('\n').filter(f => /\.(ts|tsx|js|mjs|css|html|json)$/.test(f) && !/\/(node_modules|dist)\//.test(f));
     const hits: string[] = [];
     for (const f of files) {
-      readFileSync(join(ROOT, f), 'utf8').split('\n').forEach((line, i) => {
+      readFileSync(join(ROOT, f), 'utf8').split('\n').forEach((raw, i) => {
+        // embedded font data (base64) can spell a forbidden name by chance (e.g. "SFNS" inside DejaVu Sans' WOFF2)
+        const line = raw.replace(/base64,[A-Za-z0-9+/=]+/g, 'base64,');
         if (FORBIDDEN.test(line) && !ALLOWED.some(a => a.test(line.trim()))) hits.push(`${f}:${i + 1}: ${line.trim().slice(0, 120)}`);
       });
     }

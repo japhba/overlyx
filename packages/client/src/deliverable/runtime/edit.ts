@@ -621,6 +621,8 @@ export function exec(command: string, value?: string): void {
   editing.focus();
   if (command === 'inlineStep') { if (setInlineStep(editing, getSelection(), Number(value))) scheduleCommit(); return; }
   else if (command === 'fontSize' && value) styleRun('font-size', value);
+  // a typographic property on the selected words (Text ▸ Typography): "property:value"
+  else if (command === 'style' && value && TYPOGRAPHY.has(value.slice(0, value.indexOf(':')))) styleRun(value.slice(0, value.indexOf(':')), value.slice(value.indexOf(':') + 1));
   else if (command === 'lineHeight' && value) { editing.style.setProperty('line-height', value); scheduleCommit(); return; }
   else {
     const listCommand = command === 'insertUnorderedList' || command === 'insertOrderedList';
@@ -668,6 +670,7 @@ function replaceTextHost(tag: string): void {
 }
 
 /** the selected part of the text being retyped wrapped in a span with one style (inner ones of that style dropped) */
+const TYPOGRAPHY = new Set(['font-weight', 'font-stretch', 'letter-spacing', 'font-variant-caps', 'font-variant-numeric', 'font-variant-ligatures']);
 function styleRun(prop: string, value: string): void {
   const sel = getSelection();
   if (!editing || !sel || !sel.rangeCount) return;
@@ -1138,6 +1141,7 @@ function styleOf(el: Element): SelStyle {
     border: `${c.borderTopWidth} ${c.borderTopStyle} ${c.borderTopColor}`,
     fill, stroke, strokeWidth, dash, rotate: isSvgPart(el) ? Math.round((partBox(el)?.form.a ?? 0) * 1800 / Math.PI) / 10 : angleOf(el), flipX: fl.x, flipY: fl.y,
     shadow: c.boxShadow !== 'none' || (c.filter ?? '').includes('drop-shadow'), arrowStart, arrowEnd, lineHeight: c.lineHeight,
+    fontStretch: c.fontStretch, letterSpacing: c.letterSpacing, fontVariantCaps: c.fontVariantCaps, fontVariantNumeric: c.fontVariantNumeric, fontVariantLigatures: c.fontVariantLigatures,
   };
 }
 

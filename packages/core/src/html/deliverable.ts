@@ -193,9 +193,9 @@ ${TEMPLATE_FONT_LICENSE}
 <meta name="overlyx" content="deck">
 <title>${esc(title || 'Untitled slides')}</title>
 <style>
-  ${TEMPLATE_FONTS['Fira Sans']}
+  ${TEMPLATE_FONTS['Instrument Sans']}
   * { box-sizing: border-box; }
-  body { margin: 0; background: #dce0e4; color: #1d1d1f; font-family: "Fira Sans", Helvetica, Arial, sans-serif; }
+  body { margin: 0; background: #dce0e4; color: #1d1d1f; font-family: "Instrument Sans", Helvetica, Arial, sans-serif; }
   .slide { width: ${w}; height: ${h}; position: relative; overflow: hidden; background: #fff; margin: 0 auto 40px; font-size: ${text}; line-height: 1.35; }
   h1, h2, h3, p, ul, ol { margin: 0; }
   :where(.slide li)::marker { color: #80868b; }

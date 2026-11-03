@@ -89,8 +89,12 @@ blend.
   [CambridgeUS](https://github.com/josephwright/beamer/blob/main/base/themes/theme/beamerthemeCambridgeUS.sty)
   (GPL v3 or later). Every HTML file credits its source and license. Analytical teaching examples
   replace source placeholder artwork; there are no MIT logos or copied research results.
-  Bundled open fonts (Carlito, Fira Sans and CMU Sans, SIL OFL) make each HTML file portable;
-  blank decks also embed Fira Sans. The deck font picker and Edit theme embed these three choices;
+  Bundled fonts make each HTML file portable: Instrument Sans (the default of blank decks; its full variable
+  faces, weight 400–700 and width 75–100 %), Carlito, Fira Sans and CMU Sans (SIL OFL), and DejaVu Sans (a subset of
+  fonts-dejavu-core 2.37; Bitstream Vera and Arev licences, which allow subsetting under a name without "Bitstream",
+  "Vera" or "Arev"). The deck font picker and Edit theme embed these choices; Text ▸ Typography sets weight, width
+  (`font-stretch`, a variable font's wdth axis), letter spacing, small caps, figures and ligatures, on objects or
+  on selected words;
   fonts not embedded in the HTML carry a warning about machine-dependent fallbacks in the editor,
   presenter view, `render_page` and PDF.
   Carlito replaces the posters' Calibri with matching metrics. `scripts/gen-template-fonts.py`

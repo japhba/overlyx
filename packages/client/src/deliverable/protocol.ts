@@ -134,6 +134,8 @@ export interface SelStyle {
   /** degrees clockwise (the CSS `rotate` property), flips (the `scale` property) */
   rotate: number; flipX: boolean; flipY: boolean;
   shadow: boolean; arrowStart: boolean; arrowEnd: boolean; lineHeight: string;
+  /** typography (Text ▸ Typography): width (a variable font's wdth axis), tracking, caps, figures, ligatures */
+  fontStretch?: string; letterSpacing?: string; fontVariantCaps?: string; fontVariantNumeric?: string; fontVariantLigatures?: string;
 }
 
 export interface SelItem {

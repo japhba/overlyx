@@ -31,7 +31,7 @@ describe('the deck theme', () => {
     const th = deckTheme(starterDeck('Talk'));
     expect(th.colors.map(c => c.name)).toEqual(['--paper', '--ink', '--accent', '--muted', '--secondary']);
     expect(th.text.family).toBe('Fira Sans');
-    expect(deckTheme(blankDeck('B')).text.family).toBe('Fira Sans');
+    expect(deckTheme(blankDeck('B')).text.family).toBe('Instrument Sans');
   });
   it('a colour changed where it is declared, nothing else', () => {
     const t = page(`  :root { --ink: #1d2433; --accent: #2f6fde; }\n  :root { --accent: #ff0000; }`);
