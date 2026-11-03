@@ -33,6 +33,7 @@ import { setView, refreshView, reportColors } from './view';
 import { startPresenting } from './present';
 import { expandPrintSteps, STEP_VISIBILITY_CSS } from './steps';
 import { report, rememberPage } from './report';
+import { layout } from './layout';
 import { ensureSolo, notePageBackground, PAGE_BG, SOLO_PAD } from './solo';
 import { setDarkSlides, darkSlidesChanged } from './darkpages';
 import { installReviewCss, setReview, railReview } from './review';
@@ -433,7 +434,7 @@ function init(): void {
   // citations and lists of references (cite.ts)
   addStyle(CITE_CSS);
   if (document.body) { renderCites([document.body]); refreshCites(); }
-  window.__ol = { report, version: () => state.version, slides: () => slideBoxes(), size: pageSize, peerCarets: edit.peerCarets, railPeers: () => railDrawn,
+  window.__ol = { report, layout, version: () => state.version, slides: () => slideBoxes(), size: pageSize, peerCarets: edit.peerCarets, railPeers: () => railDrawn,
     printSteps: () => {
       if (MODE !== 'print' || state.kind !== 'deck') return;
       expandPrintSteps(slides());

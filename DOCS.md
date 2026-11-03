@@ -1298,7 +1298,14 @@ blend.
     the viewport), text too small for the kind (deck ~2.2 % of the slide height, poster ~0.55 %),
     low contrast, pictures that did not
     load, formulas that did not typeset (MathJax errors and TeX left as written), the page's script
-    errors. `data-ol-lint="no-overlap"` on either object or an SVG shape opts deliberate layering
+    errors. Its JSON text and MCP `structuredContent` also contain `report` and `layout`:
+    the pictured pages' object selectors/ids, rendered boxes, text line counts, soft wrapping
+    (explicit breaks excluded), overflow by axis, configured font stack and Chromium's actual font
+    faces including fallbacks (`fonts: null` when unavailable; SVG path formulas may use none).
+    Formula boxes include named marks from `\class{name}{…}` and `\cssId{name}{…}`.
+    Boxes are CSS pixels from the slide's top left (document top left for web pages), before
+    screenshot scaling. Layout measurements live in `runtime/layout.ts`; platform fonts come
+    from DevTools (`render-layout.ts`). `data-ol-lint="no-overlap"` on either object or an SVG shape opts deliberate layering
     out of overlap warnings only. The renderer (`render.ts`) is one headless Chromium
     (playwright-core) in the bubblewrap
     sandbox with **no network namespace**: every request of the page comes back to the server over

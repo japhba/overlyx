@@ -771,7 +771,7 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
   });
 
   register('render_page', {
-    description: 'Look at an HTML deliverable (a deck, poster or web page) or a web article: pages rendered as images by a real browser, as people see them and as the PDF prints, plus a report of problems on every page — text overflowing its box, text running off the slide, text of two objects overlapping, a picture covering text, text too small to read at the deliverable\'s size, low contrast, pictures that did not load, formulas that did not typeset, script errors. Use it after every substantial change and fix what it finds. For a deck pass the slides to see (0-based); the report always covers all of them.\n\n' + DELIVERABLE_GUIDE,
+    description: 'Look at an HTML deliverable (a deck, poster or web page) or a web article: pages rendered as images by a real browser, as people see them and as the PDF prints, plus a report of problems on every page — text overflowing its box, text running off the slide, text of two objects overlapping, a picture covering text, text too small to read at the deliverable\'s size, low contrast, pictures that did not load, formulas that did not typeset, script errors. Use it after every substantial change and fix what it finds. For a deck pass the slides to see (0-based); the report always covers all of them. The JSON text and structuredContent contain report and layout. Layout covers the pictured pages: each object\'s selector/id and rendered box; text lineCount, wraps (soft wrapping, excluding explicit breaks), overflow by axis, configured fontFamily and actual fonts (including fallback faces; null when unavailable); formula boxes and marks from \\class{name}{…} / \\cssId{name}{…}. Boxes use CSS px from the slide\'s top left (document top left for web pages), independent of screenshot scaling. SVG path formulas may use no platform text font.\n\n' + DELIVERABLE_GUIDE,
     annotations: { readOnlyHint: true },
     inputSchema: {
       ...projArg,
@@ -787,11 +787,13 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
       const r = await renderPages(project, path, userId, { pages, width });
       await present(project, path);
       const content: ({ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string })[] = [{ type: 'text', text: reportText(r.report, r.images.map(i => i.index)) }];
+      const structuredContent = { report: r.report, layout: r.layout };
+      content.push({ type: 'text', text: JSON.stringify(structuredContent) });
       for (const img of r.images) {
         content.push({ type: 'text', text: r.report.kind === 'page' ? 'The page:' : `Slide ${img.index}${img.report?.title ? ` — ${img.report.title}` : ''}:` });
         content.push({ type: 'image', data: img.png.toString('base64'), mimeType: 'image/png' });
       }
-      return { content };
+      return { content, structuredContent };
     } catch (e) { return fail(e); }
   });
 
