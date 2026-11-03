@@ -31,13 +31,22 @@ describe('the deck theme', () => {
     const th = deckTheme(starterDeck('Talk'));
     expect(th.colors.map(c => c.name)).toEqual(['--paper', '--ink', '--accent', '--muted', '--secondary']);
     expect(th.text.family).toBe('Fira Sans');
-    expect(deckTheme(blankDeck('B')).text.family).toBe('Helvetica');
+    expect(deckTheme(blankDeck('B')).text.family).toBe('Fira Sans');
   });
   it('a colour changed where it is declared, nothing else', () => {
     const t = page(`  :root { --ink: #1d2433; --accent: #2f6fde; }\n  :root { --accent: #ff0000; }`);
     const out = change(t, { color: '--accent', value: '#00aa00' });
     expect(out).toBe(t.replace('--accent: #ff0000', '--accent: #00aa00'));
     expect(themeSplices(out, { color: '--accent', value: '#00aa00' })).toEqual([]);
+  });
+  it('embeds bundled fonts even when the theme already requests that family, and embeds each only once', () => {
+    const t = page('  body { font-family: Carlito, sans-serif; }');
+    const ch: ThemeChange = { font: 'text', value: 'Carlito, sans-serif' };
+    const out = change(t, ch);
+    expect(out).toContain('@font-face{font-family:"Carlito"');
+    expect(out).toContain('data:font/woff2;base64,');
+    expect(out).not.toContain('fonts.googleapis.com');
+    expect(change(out, ch)).toBe(out);
   });
   it('the text font in every rule that sets it, the Google font linked once', () => {
     const t = page(`  body { margin: 0; font-family: Georgia, serif; }\n  .slide { font-family: Georgia; }`);

@@ -6,6 +6,7 @@
  * `slide` of a fixed size, TeX math between \( \) / \[ \]. DELIVERABLE_GUIDE says it to agents.
  */
 import { scientificDeck, scientificPoster } from './scientific.ts';
+import { TEMPLATE_FONTS, TEMPLATE_FONT_LICENSE } from './scientific-fonts.ts';
 import { parseSource, walk, attr, hasClass, pathOf, elementChildren, type HElement, type HDocument, type Path } from './source.ts';
 
 export type DeliverableKind = 'deck' | 'poster' | 'page';
@@ -183,14 +184,18 @@ export function blankDeck(title: string, size: PageSize = DEFAULT_DECK_SIZE): st
   const w = `${width}${unit}`, h = `${height}${unit}`;
   const text = `${Math.round(Math.max(width, height) / 48 * 100) / 100}${unit}`;
   return `<!doctype html>
+<!--
+${TEMPLATE_FONT_LICENSE}
+-->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="overlyx" content="deck">
 <title>${esc(title || 'Untitled slides')}</title>
 <style>
+  ${TEMPLATE_FONTS['Fira Sans']}
   * { box-sizing: border-box; }
-  body { margin: 0; background: #dce0e4; color: #1d1d1f; font-family: Helvetica, Arial, sans-serif; }
+  body { margin: 0; background: #dce0e4; color: #1d1d1f; font-family: "Fira Sans", Helvetica, Arial, sans-serif; }
   .slide { width: ${w}; height: ${h}; position: relative; overflow: hidden; background: #fff; margin: 0 auto 40px; font-size: ${text}; line-height: 1.35; }
   h1, h2, h3, p, ul, ol { margin: 0; }
   :where(.slide li)::marker { color: #80868b; }

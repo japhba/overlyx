@@ -90,6 +90,9 @@ blend.
   (GPL v3 or later). Every HTML file credits its source and license. Analytical teaching examples
   replace source placeholder artwork; there are no MIT logos or copied research results.
   Bundled open fonts (Carlito, Fira Sans and CMU Sans, SIL OFL) make each HTML file portable;
+  blank decks also embed Fira Sans. The deck font picker and Edit theme embed these three choices;
+  fonts not embedded in the HTML carry a warning about machine-dependent fallbacks in the editor,
+  presenter view, `render_page` and PDF.
   Carlito replaces the posters' Calibri with matching metrics. `scripts/gen-template-fonts.py`
   regenerates their embedded font faces. `core/src/html/scientific.ts` and `scientific-posters.ts`
   are the shared source; `npx tsx scripts/gen-scientific-starters.ts`

@@ -19,6 +19,7 @@ import { drawingToolbar } from './drawingToolbar';
 import { type DeckInk, type DeckInkPatch, LASSO_KINDS } from './deckink';
 import { lassoGroups } from './lassobar';
 import { PH_ROLES, PH_LABELS, type PhRole } from './decklayouts';
+import { bundledFont, firstFontFamily } from './deckfonts';
 import './deckicons';
 
 export interface DeckTextActions {
@@ -39,6 +40,9 @@ export interface DeckTextActions {
 
 export interface DeckCtx {
   kind: DeliverableKind;
+  fontWarning?(css: string): string | null;
+  /** The deck's text font, for the warning when no object is selected. */
+  defaultFont?: string | null;
   pageLabel?: string;
   tool: Tool;
   setTool(t: Tool): void;
@@ -191,9 +195,12 @@ function mathGroups(c: DeckCtx): ToolButton[][] {
   ];
 }
 
-/** fonts offered: the web fonts load from Google Fonts (a <link> is added to the page when one is first used) */
+/** Bundled choices are embedded; other web fonts load from Google Fonts when first used. */
 export const DECK_FONTS: { label: string; css: string | null; google?: string }[] = [
   { label: 'Default', css: null },
+  { label: 'Fira Sans (bundled)', css: '"Fira Sans", Helvetica, Arial, sans-serif' },
+  { label: 'Carlito (bundled)', css: 'Carlito, Helvetica, Arial, sans-serif' },
+  { label: 'CMU Sans (bundled)', css: '"CMU Sans", Helvetica, Arial, sans-serif' },
   { label: 'Inter', css: 'Inter, Helvetica, Arial, sans-serif', google: 'Inter' },
   { label: 'Roboto', css: 'Roboto, Helvetica, Arial, sans-serif', google: 'Roboto' },
   { label: 'Open Sans', css: '"Open Sans", Helvetica, Arial, sans-serif', google: 'Open Sans' },
@@ -218,7 +225,7 @@ export const SHAPES: { tool: Tool; label: string }[] = [
 // (freehand strokes: Draw, a tool of its own)
 export const LINES: { tool: Tool; label: string }[] = [{ tool: 'line', label: 'Line' }, { tool: 'arrow', label: 'Arrow' }, { tool: 'bezier', label: 'Path: click for corners, drag for curves (B)' }];
 
-const firstFamily = (css: string) => css.split(',')[0].trim().replace(/^["']|["']$/g, '');
+const firstFamily = firstFontFamily;
 
 /** − [size] + : Google's font size box, in points */
 function SizeBox({ pt, onSet }: { pt: number; onSet: (pt: number) => void }) {
@@ -375,12 +382,16 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
     const st = one?.style;
     const pt = st ? sizePt(parseFloat(st.fontSize) || 0) : 0;
     const fam = st ? firstFamily(st.fontFamily) : '';
+    const warning = [...new Set(sel.filter(s => s.canText || s.text).map(s => c.fontWarning?.(s.style.fontFamily)).filter(Boolean))].join('\n');
     const bold = sel.length > 0 && sel.every(s => Number(s.style.fontWeight) >= 600);
     const italic = sel.length > 0 && sel.every(s => s.style.fontStyle === 'italic');
     const under = sel.length > 0 && sel.every(s => s.style.textDecoration.includes('underline'));
     context.push([
-      { id: 'dk-font', title: 'Font', icon: '', html: `<span class="dk-font-face">${escHtml(fam || 'Font')}</span>`,
-        palette: { title: 'Font', list: true, cols: 1, items: DECK_FONTS.map(f => ({ label: f.label, html: `<span class="dk-font-sample" style="font-family:${escAttr(f.css ?? 'inherit')}">Aa</span>`, active: !!f.css && firstFamily(f.css) === fam, action: () => c.text.family(f.css, f.google) })) } },
+      { id: 'dk-font', title: warning || 'Font', icon: '', html: `<span class="dk-font-face">${warning ? '⚠ ' : ''}${escHtml(fam || 'Font')}</span>`,
+        palette: { title: 'Font', list: true, cols: 1, items: DECK_FONTS.map(f => {
+          const warn = f.css && !bundledFont(f.css) ? c.fontWarning?.(f.css) : null;
+          return { label: f.label + (warn ? ' ⚠' : ''), title: warn || f.label, html: `<span class="dk-font-sample" style="font-family:${escAttr(f.css ?? 'inherit')}">Aa</span>`, active: !!f.css && firstFamily(f.css) === fam, action: () => c.text.family(f.css, f.google) };
+        }) } },
       { id: 'dk-size', title: 'Font size (pt)', icon: '', widget: () => <SizeBox pt={pt} onSet={c.text.size} /> },
     ]);
     context.push([
@@ -569,6 +580,7 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
     const deck = c.kind === 'deck';
     const theme = deck && c.theme?.on;
     const what = theme ? 'Theme' : c.pageLabel ?? (c.kind === 'poster' ? 'Poster' : 'Slide');
+    const warning = c.defaultFont ? c.fontWarning?.(c.defaultFont) : null;
     section(what);
     // (words on the buttons, as Google Slides' Background, Layout and Edit theme: what they do is not drawn easily)
     context.push([
@@ -578,6 +590,8 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
         palette: { title: 'Layout of this slide', render: (close: () => void) => c.layoutPicker(close, true) } } as ToolButton] : []),
       ...(deck && c.theme ? [{ id: 'dk-theme', icon: theme ? 'Done' : 'Edit theme', active: theme, disabled: c.theme.disabled && !theme, action: c.theme.toggle,
         title: theme ? 'Done: back to the slides (Esc)' : 'Edit theme — the slide master: what is on every slide (a logo, a bar, the slide number), the deck’s colours and fonts, its layouts; what you add or change there is on every slide' } as ToolButton] : []),
+      ...(warning ? [{ id: 'dk-font-warning', icon: '⚠ Font', title: warning,
+        palette: { title: 'Font portability', render: () => <div class="dl-anim-hint">{warning}</div> } } as ToolButton] : []),
     ]);
     context.push([
       { id: 'dk-guides', title: 'Guides: lines objects snap to — every slide’s (the master’s) and a slide’s own; drag one to move it (Alt: a copy), off the slide to remove it (also: right-click the slide)', icon: 'dk-guides', active: c.guides.shown,
