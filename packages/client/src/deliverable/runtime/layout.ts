@@ -1,6 +1,7 @@
 /** Layout for agents, measured in the same settled page as their screenshot. */
 import type { DeliverableLayout, LayoutBox, LayoutObject } from '@overlyx/core/html/layout.ts';
 import { isForeign, slides, state } from './env';
+import { WRAP_LINES } from '../textboxes';
 
 const SKIP = '[data-ol-runtime], .notes, script, style, template, link, meta, noscript, mjx-assistive-mml';
 const MATH = 'mjx-container, .katex, .MathJax, math';
@@ -67,6 +68,17 @@ function unwrappedLines(el: Element): number {
       if (s.style === null) s.el.removeAttribute('style'); else s.el.setAttribute('style', s.style);
     }
   }
+}
+
+export function textLineCount(el: Element): number { return lineCount(textRects(el)); }
+
+/** Only boxes with an authored baseline can have gained unintended lines. Explicit breaks alone
+ * never trigger a warning. Old documents without a baseline keep their existing layout. */
+export function wrapWarning(el: Element): number | null {
+  const baseline = Number(el.getAttribute(WRAP_LINES));
+  if (!Number.isInteger(baseline) || baseline < 1 || !shown(el)) return null;
+  const lines = textLineCount(el);
+  return lines > baseline && lines > unwrappedLines(el) ? lines : null;
 }
 
 function measure(scope: Element, index: number) {

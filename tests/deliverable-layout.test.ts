@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { layout } from '../packages/client/src/deliverable/runtime/layout';
+import { layout, wrapWarning } from '../packages/client/src/deliverable/runtime/layout';
+import { report } from '../packages/client/src/deliverable/runtime/report';
 import { state } from '../packages/client/src/deliverable/runtime/env';
 
 const box = (el: Element, x: number, y: number, w: number, h: number) =>
@@ -68,6 +69,36 @@ it('measures MathJax chunks and named classes/ids in the slide coordinate system
     { classes: ['kernel'], box: { x: 70, y: 55, w: 30, h: 18 } },
     { classes: [], id: 'term', box: { x: 80, y: 60, w: 10, h: 10 } },
   ] }]);
+});
+
+it('warns about extra soft wrapping since a resize, in both the canvas measurement and render report', () => {
+  const slide = document.body.children[0];
+  slide.innerHTML = '<p data-wrap data-ol-wrap-lines="1">Label grows longer</p>';
+  const p = slide.firstElementChild!;
+  box(p, 40, 50, 60, 40);
+  Object.defineProperty(document, 'elementsFromPoint', { configurable: true, value: () => [] });
+  expect(wrapWarning(p)).toBe(2);
+  expect(report().pages[0].issues.filter(i => i.kind === 'wrap')).toEqual([
+    expect.objectContaining({ text: '"Label grows longer" wraps to 2 lines (was 1 when resized)' }),
+  ]);
+  p.setAttribute('data-ol-wrap-lines', '2');
+  expect(wrapWarning(p)).toBeNull();
+  expect(report().pages[0].issues.some(i => i.kind === 'wrap')).toBe(false);
+  p.removeAttribute('data-ol-wrap-lines');
+  expect(wrapWarning(p)).toBeNull();
+});
+
+it('does not warn for intentional line breaks or accept invalid wrap baselines', () => {
+  const slide = document.body.children[0];
+  slide.innerHTML = '<p data-ol-wrap-lines="1"><span>First</span><br><span>Second</span></p>';
+  const p = slide.firstElementChild!;
+  box(p, 40, 50, 180, 40); box(p.children[0], 40, 50, 60, 18); box(p.children[2], 40, 70, 60, 18);
+  expect(wrapWarning(p)).toBeNull();
+  p.setAttribute('data-wrap', '');
+  for (const value of ['0', '-1', 'NaN', 'Infinity', '1.5']) {
+    p.setAttribute('data-ol-wrap-lines', value);
+    expect(wrapWarning(p)).toBeNull();
+  }
 });
 
 it('uses document coordinates for web pages even after scrolling', () => {

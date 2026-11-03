@@ -145,7 +145,7 @@ async function withPage<T>(project: string, rel: string, userId: number, mode: R
 
 /* ------------------------------------------------------------------ what the runtime reports */
 
-export interface PageIssue { kind: 'overflow' | 'offpage' | 'overlap' | 'small-text' | 'contrast' | 'clipped'; text: string; at?: { x: number; y: number; w: number; h: number } }
+export interface PageIssue { kind: 'overflow' | 'wrap' | 'offpage' | 'overlap' | 'small-text' | 'contrast' | 'clipped'; text: string; at?: { x: number; y: number; w: number; h: number } }
 export interface PageReport { index: number; title: string; issues: PageIssue[] }
 export interface DeliverableReport { kind: 'deck' | 'poster' | 'page'; width: number; height: number; pages: PageReport[]; errors: string[] }
 

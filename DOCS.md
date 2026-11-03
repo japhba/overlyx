@@ -967,6 +967,14 @@ blend.
     until MathJax has typeset them, MathJax is fetched while the page's fonts load, and a formula
     typeset before is put back as a copy of its rendering at once (MathJax's SVG is in ex of the
     surrounding font, so it fits anywhere) — after an edit, a retyped text shown again, a chip.
+    Decks keep inline formulas unbroken by default; a page's
+    `<meta name="overlyx-math-inline-breaks" content="on|off">` overrides this. Changing it reloads
+    the frame so cached formulas use the same setting. A click with the Text tool creates an
+    auto-width label (`width:max-content`); a drag creates a wrapping box. *More text options*
+    switches to fixed width or auto width anchored left, centre or right (native CSS `translate`).
+    A resize saves the text's line count in `data-ol-wrap-lines`. If later edits or font changes
+    add soft-wrapped lines, the canvas marks the box and `render_page` reports “wraps to N lines”.
+    Explicit breaks alone do not warn; existing boxes acquire their baseline when resized.
     **LaTeX beyond formulas — beamer's feel, plain LaTeX in the HTML** (core `html/refs.ts`, the
     server side `html/deckextras.ts`, runtime `cite.ts`): **citations** `\cite{key}` (natbib's
     `\citep`, `\citet` …, notes, several keys) from the project's .bib files (all, or those of

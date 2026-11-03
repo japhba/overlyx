@@ -32,6 +32,7 @@ export interface DeckTextActions {
   valign(v: 'flex-start' | 'center' | 'flex-end'): void;
   list(kind: 'ul' | 'ol'): void;
   lineHeight(v: string): void;
+  box?(anchor: 'fixed' | 'left' | 'center' | 'right'): void;
   step(n: number): void;
   clear(): void;
 }
@@ -327,7 +328,7 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
     ],
     [
       { id: 'dk-select', title: 'Select and move (V)', icon: 'dk-select', action: () => c.setTool('select'), active: c.tool === 'select' },
-      { id: 'dk-text', title: 'Text box (T) — click or drag on the slide', icon: 'dk-text', action: () => c.setTool('text'), active: c.tool === 'text', disabled: ro },
+      { id: 'dk-text', title: 'Text box (T) — click for auto width, drag for wrapping text', icon: 'dk-text', action: () => c.setTool('text'), active: c.tool === 'text', disabled: ro },
       { id: 'dk-shapes', title: 'Shapes (R rectangle, O ellipse)', icon: shapeTool ? `dk-${shapeTool.tool}` : 'dk-shapes', active: !!shapeTool, disabled: ro,
         palette: { title: 'Shapes', cols: 4, items: SHAPES.map(s => ({ label: s.label, html: ICON(`dk-${s.tool}`), active: c.tool === s.tool, action: () => c.setTool(s.tool) })) } },
       { id: 'dk-lines', title: 'Lines (L line, A arrow, B Bézier path)', icon: lineTool ? `dk-${lineTool.tool}` : 'dk-line', active: !!lineTool, disabled: ro,
@@ -426,6 +427,13 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
       { id: 'dk-more-text', title: 'More text options', icon: 'dk-lines',
         palette: { title: 'Text', list: true, cols: 1, items: [
           { label: 'Strikethrough', html: ICON('dk-strike'), action: c.text.strike },
+          ...(c.text.box && sel.some(s => s.textBox) && !c.editingText ? [
+            ...(['left', 'center', 'right'] as const).map(anchor => ({
+              label: `Auto width · ${anchor === 'center' ? 'centre' : anchor} anchor`,
+              active: one?.textBox === anchor, action: () => c.text.box!(anchor),
+            })),
+            { label: 'Fixed width · wrap text', active: one?.textBox === 'fixed', action: () => c.text.box!('fixed') },
+          ] : []),
           ...['1', '1.15', '1.5', '2'].map(v => ({ label: `Line spacing ${v}`, html: ICON('dk-lines'), active: lineSpacing(st) === v, action: () => c.text.lineHeight(v) })),
           { label: 'Clear formatting (Ctrl+\\)', html: ICON('dk-clear'), action: c.text.clear },
           // (Keynote's Update style: the master's text styles, kept in the slides' own markup)

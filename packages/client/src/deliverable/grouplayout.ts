@@ -1,4 +1,5 @@
 import type { GroupLayout } from './protocol';
+import { TEXT_ANCHOR } from './textboxes';
 
 export const DEFAULT_GROUP_LAYOUT: GroupLayout = { direction: 'free', gap: 24, align: 'center', equal: false };
 
@@ -41,6 +42,8 @@ export function laidOutGroup(src: Element, members: GroupMemberBox[], size: { wi
     const child = copy.children[index] as HTMLElement;
     if (!child) continue;
     const s = child.style;
+    // Layout takes over positioning; the measured x already includes the label's translation.
+    if (child.hasAttribute(TEXT_ANCHOR)) { child.removeAttribute(TEXT_ANCHOR); s.translate = 'none'; }
     s.position = layout.direction === 'free' ? 'absolute' : 'relative';
     s.left = layout.direction === 'free' ? `${m.x}px` : '0px';
     s.top = layout.direction === 'free' ? `${m.y}px` : '0px';

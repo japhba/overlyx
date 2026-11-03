@@ -328,6 +328,7 @@ function onMessage(e: MessageEvent): void {
     case 'guides': if (MODE === 'edit') setGuidesShown(m.show); break;
     case 'theme': if (MODE === 'edit') edit.setThemeView(m.on); break;
     case 'exec': if (MODE === 'edit') edit.exec(m.command, m.value); break;
+    case 'textBox': if (MODE === 'edit') edit.setTextBox(m.anchor); break;
     case 'peers': if (MODE === 'edit') edit.setPeers(m.peers); else if (MODE === 'thumb') { railPeers = m.peers; drawRail(); } break;
     case 'dark': if (MODE === 'edit' || MODE === 'thumb') { setDarkSlides(m.invert, !!m.figures); if (MODE === 'thumb') railDesk(m.desk); } break;
     case 'current': if (MODE === 'thumb') railShow(m.slide); break;

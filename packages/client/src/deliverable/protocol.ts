@@ -167,6 +167,7 @@ export interface SelItem {
   /** on every slide (deckmaster.ts data-ol-master): its key */
   master?: string;
   layout?: GroupLayout;
+  textBox?: 'fixed' | 'left' | 'center' | 'right';
 }
 
 /** `deleted`: deleted as a suggestion (shown faded until accepted; not presented); `skipped`: Skip slide (deckmaster.ts: not presented, not printed) */
@@ -256,6 +257,7 @@ export type ToRuntime =
   /** the theme view (the editor's Edit theme): the objects on every slide alone shown and taken, the slides' own dimmed and out of reach (edit.ts setThemeView) */
   | { ol: 'theme'; on: boolean }
   | { ol: 'exec'; command: string; value?: string }
+  | { ol: 'textBox'; anchor: 'fixed' | 'left' | 'center' | 'right' }
   | { ol: 'go'; slide: number }
   | { ol: 'peers'; peers: PeerInfo[] }
   /**

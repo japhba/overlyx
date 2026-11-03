@@ -2146,6 +2146,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
       setTimeout(() => exec(cmd), 60);
     },
     lineHeight: v => { if (editingText) exec('lineHeight', v); else styleSel({ 'line-height': v }); },
+    box: anchor => toCanvas({ ol: 'textBox', anchor }),
     step: n => exec('inlineStep', String(n)),
     clear: () => { if (editingText) exec('removeFormat'); else styleSel({ 'font-weight': null, 'font-style': null, 'text-decoration': null, color: null, 'font-family': null }); },
   };

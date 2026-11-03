@@ -8,8 +8,10 @@
 import { slides, slideTitle, state, srcOf, isForeign, pageHtml } from './env';
 import { mathTypeset } from './math';
 import { noOverlap, visibleInk, glyphInk, formulaInk, pictureInk, aboveText } from './overlap';
+import { wrapWarning } from './layout';
+import { WRAP_LINES } from '../textboxes';
 
-export interface PageIssue { kind: 'overflow' | 'offpage' | 'overlap' | 'small-text' | 'contrast' | 'image' | 'math' | 'citation' | 'reference'; text: string; at?: { x: number; y: number; w: number; h: number } }
+export interface PageIssue { kind: 'overflow' | 'wrap' | 'offpage' | 'overlap' | 'small-text' | 'contrast' | 'image' | 'math' | 'citation' | 'reference'; text: string; at?: { x: number; y: number; w: number; h: number } }
 export interface PageReport { index: number; title: string; issues: PageIssue[] }
 
 export const scriptErrors: string[] = [];
@@ -140,6 +142,12 @@ function checkScope(scope: Element, frame: DOMRect, kind: 'deck' | 'poster' | 'p
   const fx = frame.left + scrollX, fy = frame.top + scrollY;
   const rel = (r: DOMRect) => ({ x: round(r.left + scrollX - fx), y: round(r.top + scrollY - fy), w: round(r.width), h: round(r.height) });
   const all = Array.from(scope.querySelectorAll('*')).filter(e => !isForeign(e) && !e.closest('[data-ol-runtime], .notes, mjx-container, script, style, template, svg, head') && !skipText(e));
+
+  if (kind !== 'page') for (const e of all) {
+    if (!e.hasAttribute(WRAP_LINES)) continue;
+    const lines = wrapWarning(e);
+    if (lines) issues.push({ kind: 'wrap', text: `${labelOf(e)} wraps to ${lines} lines (was ${e.getAttribute(WRAP_LINES)} when resized)`, at: rel(e.getBoundingClientRect()) });
+  }
 
   // text overflowing its box: a box whose content needs more room than it was given (measured by
   // letting it take its natural size for a moment — glyphs reaching past a line box are no overflow)

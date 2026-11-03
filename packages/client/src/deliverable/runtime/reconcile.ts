@@ -8,6 +8,7 @@
  */
 import { state, setFolderBase, srcOf, liveOf, link, isForeign, post } from './env';
 import { typeset, untypeset } from './math';
+import { inlineMathBreaks } from './mathconfig';
 import { renderCites, refreshCites } from './cite';
 import { mapAssets, setMappedAttribute, rememberMappedSource } from '../offlineassets';
 import { patchContainer, type SourcePatch } from '@overlyx/core/html/source.ts';
@@ -64,7 +65,7 @@ export function applySource(html: string, version: number): boolean {
     pairAll(next);
     return true;
   }
-  if (scriptsOf(prev) !== scriptsOf(next)) {
+  if (scriptsOf(prev) !== scriptsOf(next) || inlineMathBreaks(prev) !== inlineMathBreaks(next)) {
     state.src = next;
     post({ ol: 'reload' });
     location.reload();
