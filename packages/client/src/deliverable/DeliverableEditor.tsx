@@ -3263,7 +3263,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     // (the text being retyped ends first: its box does not take the undone version while it is retyped)
     undo: () => { toCanvas({ ol: 'stopText' }); setTimeout(() => host.undo(), 30); }, redo: () => { toCanvas({ ol: 'stopText' }); setTimeout(() => host.redo(), 30); },
     insertImage: () => { phPicture.current = null; fileInput.current?.click(); },
-    text: textActions, paint, arrange: arrangeSel, image: imageTools, remove: removeSel,
+    text: textActions, paint, arrange: arrangeSel, groupLayout: layout => toCanvas({ ol: 'groupLayout', layout }), image: imageTools, remove: removeSel,
     slideBackground,
     newSlide: () => newSlide(currentRef.current),
     layoutPicker: (close, apply) => layoutPicker(currentRef.current, close, apply),

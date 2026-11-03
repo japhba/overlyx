@@ -25,7 +25,7 @@ import { applySource, applyPatches, whenTypeset } from './reconcile';
 import * as edit from './edit';
 import { setGuidesShown } from './guides';
 import { weave } from './weave';
-import { arrange, paint, valign, restack } from './arrange';
+import { arrange, paint, valign, restack, setGroupLayout } from './arrange';
 import { wantObjects } from './objects';
 import { nodeCommand } from './pathedit';
 import { stepCommand } from './animate';
@@ -333,6 +333,7 @@ function onMessage(e: MessageEvent): void {
     case 'current': if (MODE === 'thumb') railShow(m.slide); break;
     case 'asset': refreshAsset(m.path, m.v); break;
     case 'arrange': if (MODE === 'edit') arrange(m.how); break;
+    case 'groupLayout': if (MODE === 'edit') setGroupLayout(m.layout); break;
     case 'paint': if (MODE === 'edit') paint(m.paint); break;
     case 'valign': if (MODE === 'edit') valign(m.v); break;
     case 'view': if (MODE === 'edit') setView(m.view); break;

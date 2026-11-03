@@ -68,12 +68,20 @@ export type ArrangeHow =
   | 'align-left' | 'align-center' | 'align-right' | 'align-top' | 'align-middle' | 'align-bottom'
   | 'center-h' | 'center-v' | 'distribute-h' | 'distribute-v'
   | 'rotate-cw' | 'rotate-ccw' | 'rotate-reset' | 'flip-h' | 'flip-v'
-  | 'group' | 'ungroup' | 'lock' | 'unlock'
+  | 'group' | 'group-row' | 'group-column' | 'ungroup' | 'lock' | 'unlock'
   /** Inkscape's Path menu (runtime/pathedit.ts) */
   | 'union' | 'difference' | 'intersection' | 'exclusion' | 'combine' | 'break-apart' | 'to-path' | 'reverse' | 'simplify' | 'edit-nodes';
 
 /** the node editor's commands (Inkscape's node toolbar) */
 export type NodeCmd = 'insert' | 'delete' | 'corner' | 'smooth' | 'straight' | 'curve' | 'break' | 'join' | 'close' | 'all' | 'done';
+
+/** A container's persistent CSS layout; free groups keep individually positioned objects. */
+export interface GroupLayout {
+  direction: 'free' | 'row' | 'column';
+  gap: number;
+  align: 'flex-start' | 'center' | 'flex-end' | 'stretch';
+  equal: boolean;
+}
 
 /** Draw's stroke, a run at one width (runtime/freehand.ts): its path data in the stroke's box */
 export interface InkRunD { w: number; d: string }
@@ -158,6 +166,7 @@ export interface SelItem {
   ph?: { role: string; empty: boolean };
   /** on every slide (deckmaster.ts data-ol-master): its key */
   master?: string;
+  layout?: GroupLayout;
 }
 
 /** `deleted`: deleted as a suggestion (shown faded until accepted; not presented); `skipped`: Skip slide (deckmaster.ts: not presented, not printed) */
@@ -261,6 +270,7 @@ export type ToRuntime =
   /** a file of the project changed on disk (project-relative): stylesheets and pictures are fetched again, scripts and data reload the page */
   | { ol: 'asset'; path: string; v: number }
   | { ol: 'arrange'; how: ArrangeHow }
+  | { ol: 'groupLayout'; layout: GroupLayout }
   | { ol: 'paint'; paint: Paint }
   /** the selected text boxes aligned to their top, middle or bottom (runtime arrange.ts valign) */
   | { ol: 'valign'; v: 'flex-start' | 'center' | 'flex-end' }

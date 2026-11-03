@@ -28,6 +28,7 @@ import { ASIDE_ATTR } from '../protocol';
 import { inkOn } from '../../app/contrast';
 import { MODE, post, state, srcOf, link, pathOf, liveAt, sourced, slides, slideOf, docRect, isForeign, sendLayout, penWork } from './env';
 import { mapAssets, restoreMappedAssets } from '../offlineassets';
+import { groupLayoutOf } from '../grouplayout';
 import { guard, linkTree } from './reconcile';
 import { typeset } from './math';
 import { renderCites, refreshCites } from './cite';
@@ -749,15 +750,23 @@ export function isLocked(el: Element): boolean { return el.hasAttribute('data-ol
 
 export function movable(el: Element): boolean {
   if (isSvgPart(el)) return SVG_SHAPES.has(el.localName);
+  if (inGroupLayout(el)) return false;
   const p = cs(el).position;
   if (p === 'absolute' || p === 'fixed' || p === 'relative') return true;
   return state.kind !== 'page' && !!slideOf(el) && el !== slideOf(el);
 }
 
-function fixedHeight(el: Element): boolean {
+/** Flow items can be selected and resized, but their container owns their positions. */
+function inGroupLayout(el: Element): boolean {
+  const parent = el.parentElement;
+  return !!parent && parent.classList.contains('ol-group') && cs(parent).display === 'flex' && ['static', 'relative'].includes(cs(el).position);
+}
+
+export function fixedHeight(el: Element): boolean {
   if (REPLACED.has(el.localName) || el.classList.contains('ol-crop')) return true;
   const src = srcOf.get(el);
-  if (src && /(^|;)\s*height\s*:/i.test(src.getAttribute('style') ?? '')) return true;
+  const height = /(?:^|;)\s*height\s*:([^;]*)/i.exec(src?.getAttribute('style') ?? '')?.[1].trim();
+  if (height && !/^auto(?:\s*!important)?$/i.test(height)) return true;
   return !(el.textContent ?? '').trim();
 }
 
@@ -1147,6 +1156,7 @@ function item(el: Element): SelItem | null {
     list: listOf(el),
     ...(phRole(el) ? { ph: { role: phRole(el)!, empty: isEmptyPh(el) } } : {}),
     ...(masterKey(el) ? { master: masterKey(el)! } : {}),
+    ...(kind === 'group' ? { layout: groupLayoutOf(el, cs(el)) ?? { direction: 'free', gap: 24, align: 'center', equal: false } } : {}),
   };
 }
 
@@ -1689,7 +1699,7 @@ function onManyHandleDown(e: PointerEvent, handle: string): void {
   e.preventDefault();
   e.stopPropagation();
   grab(e, true);
-  const els = live.map(el => { const d = start(el as HTMLElement); if (isGroup(el)) d.members = membersOf(el, true).map(start); return d; });
+  const els = live.map(el => { const d = start(el as HTMLElement); if (isGroup(el) && cs(el).display !== 'flex') d.members = membersOf(el, true).map(start); return d; });
   const u = union(els.map(d => d.r0));
   const base = { x0: e.pageX, y0: e.pageY, els, handle, moved: false, pointerId: e.pointerId, pointerType: e.pointerType, multi: u };
   if (handle === 'mrot') {
@@ -1769,7 +1779,7 @@ function onHandleDown(e: PointerEvent, handle: string): void {
     drag = { ...base, kind: 'end' };
   } else {
     // a group: its objects grow and shrink with it (PowerPoint's)
-    if (isGroup(el)) base.els[0].members = membersOf(el, true).map(start);
+    if (isGroup(el) && cs(el).display !== 'flex') base.els[0].members = membersOf(el, true).map(start);
     drag = { ...base, kind: 'resize' };
   }
   capture();
@@ -1792,6 +1802,8 @@ export function refitGroups(els: Element[], gone: Set<Element> = new Set()): Htm
     const outer = groupOf(g);
     if (outer && !gone.has(outer)) todo.push(outer);
     const c = cs(g);
+    // CSS layouts keep their own box and recompute gaps as their items change.
+    if (g.classList.contains('ol-group') && c.display === 'flex') continue;
     if (angleOf(g) || (c.scale && c.scale !== 'none') || c.transform !== 'none') continue;
     const ms = membersOf(g).filter(m => !gone.has(m));
     if (!ms.length || ms.length !== Array.from(g.children).filter(k => srcOf.has(k) && !gone.has(k) && !isForeign(k)).length) continue;
@@ -2058,7 +2070,7 @@ function resizeLive(d: DragEl, h: string, dx: number, dy: number, keepRatio: boo
     }
   }
   const pos = cs(d.el).position;
-  if (pos !== 'static' && (h.includes('w') || h.includes('n') || a)) { st.setProperty('left', `${l}px`); st.setProperty('top', `${t}px`); }
+  if (pos !== 'static' && !inGroupLayout(d.el) && (h.includes('w') || h.includes('n') || a)) { st.setProperty('left', `${l}px`); st.setProperty('top', `${t}px`); }
 }
 
 function onDragEnd(e: PointerEvent): void {

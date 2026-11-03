@@ -884,7 +884,14 @@ blend.
     flipped group); `commit` merges the style edits of one element (one commit's splices must not
     overlap). Resizing a group scales its objects' boxes (left / top / width, height where fixed; the
     text keeps its size, as in PowerPoint), in proportion at the corners. Parts of one drawing group
-    into a `<g>`; ungrouping a `<g>` hands its transform and paint to its parts. **Parts of a drawing**
+    into a `<g>`; ungrouping a `<g>` hands its transform and paint to its parts.
+    **Row and column groups**: Arrange ▸ *Group in a row / column*, or a selected container's
+    *Group layout* control, keep a gap, cross-axis alignment and optional equal widths/heights.
+    They are ordinary `div.ol-group` flex containers (`grouplayout.ts`), so text/size changes reflow
+    their items in the canvas, presentations and exports. Items remain selectable and editable;
+    the layout owns their positions. Resizing the container lets its layout respond, without
+    scaling fixed gaps. *Free* and Ungroup keep items at their measured positions.
+    **Parts of a drawing**
     (the letters of a logo, a ring: `edit.ts partBox`) have the same handles as any object — a resize
     box turned with them, rotation arrows on a click again — worked through their own `transform`,
     kept as one tidy chain `translate(p) rotate(a) scale(sx sy) translate(−c)` (c the centre of their

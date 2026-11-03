@@ -11,11 +11,12 @@
  * px) — parts of one drawing go into a <g>; ungroup puts them back on its parent (a <g>'s transform
  * and paint handed to its parts). Lock: PowerPoint's — selectable, not moved or resized.
  */
-import type { ArrangeHow, Paint, HtmlOp, Path } from '../protocol';
-import { selection, setSelection, start, placeLive, styleOp, commit, isLocked, movable, angleOf, isSvgPart, cs, containerOf, union, report, draw, kindOf, slidePoint, stopText, refitGroups, userScale, declaredPx, turnPartOp } from './edit';
+import type { ArrangeHow, Paint, HtmlOp, Path, GroupLayout } from '../protocol';
+import { selection, setSelection, start, placeLive, styleOp, commit, isLocked, movable, angleOf, isSvgPart, cs, containerOf, union, report, draw, kindOf, slidePoint, stopText, refitGroups, userScale, declaredPx, turnPartOp, fixedHeight } from './edit';
 import { pxToPt } from '../units';
 import { srcOf, pathOf, slideOf, docRect, liveAt } from './env';
 import { pathCommand } from './pathedit';
+import { DEFAULT_GROUP_LAYOUT, groupLayoutOf, laidOutGroup, type GroupMemberBox } from '../grouplayout';
 
 export function arrange(how: ArrangeHow): void {
   const sel = selection();
@@ -29,6 +30,7 @@ export function arrange(how: ArrangeHow): void {
     case 'flip-h': case 'flip-v': flip(sel, how === 'flip-h'); break;
     case 'union': case 'difference': case 'intersection': case 'exclusion': case 'combine': case 'break-apart': case 'to-path': case 'reverse': case 'simplify': case 'edit-nodes': pathCommand(how); break;
     case 'group': group(sel); break;
+    case 'group-row': case 'group-column': group(sel, how === 'group-row' ? 'row' : 'column'); break;
     case 'ungroup': ungroup(sel); break;
     case 'lock': case 'unlock': {
       const ops: HtmlOp[] = [];
@@ -238,9 +240,9 @@ function ungroupPart(src: Element): { html: string; n: number } {
   return { html: out.join(''), n: out.length };
 }
 
-function group(sel: Element[]): void {
+function group(sel: Element[], direction?: 'row' | 'column'): void {
   const parts = sel.filter(el => isSvgPart(el) && !isLocked(el));
-  if (parts.length >= 2 && parts.length === sel.length) { groupParts(parts); return; }
+  if (parts.length >= 2 && parts.length === sel.length) { if (!direction) groupParts(parts); return; }
   const els = sel.filter(el => !isSvgPart(el) && !isLocked(el));
   if (els.length < 2) return;
   const parent = els[0].parentElement;
@@ -267,9 +269,51 @@ function group(sel: Element[]): void {
     copy.setAttribute('style', withStyle(copy.getAttribute('style') ?? '', { position: pos, left: px(l - gx), top: px(t - gy), margin: c.position === 'static' ? '0' : null }));
     return copy.outerHTML;
   });
-  const html = `<div class="ol-group" style="position: absolute; left: ${px(gx)}; top: ${px(gy)}; width: ${px(gx2 - gx)}; height: ${px(gy2 - gy)}">\n  ${inner.join('\n  ')}\n</div>`;
+  let html = `<div class="ol-group" style="position: absolute; left: ${px(gx)}; top: ${px(gy)}; width: ${px(gx2 - gx)}; height: ${px(gy2 - gy)}">\n  ${inner.join('\n  ')}\n</div>`;
+  if (direction) {
+    const wrapper = document.createElement('div'); wrapper.innerHTML = html;
+    const root = wrapper.firstElementChild!;
+    // Layout order follows the canvas, rather than the objects' stacking order.
+    const visual = ordered.map((x, i) => ({ ...x, child: root.children[i], r: docRect(x.el) }))
+      .sort((a, b) => direction === 'row' ? a.r.x - b.r.x : a.r.y - b.r.y);
+    for (const x of visual) root.append(x.child);
+    const members = visual.map(x => ({ src: x.child, x: 0, y: 0, ...memberSize(x.el), autoHeight: !fixedHeight(x.el) }));
+    const widths = visual.map(x => {
+      const [a] = slidePoint(box, x.r.x, x.r.y), [b] = slidePoint(box, x.r.x + x.r.w, x.r.y);
+      return b - a;
+    });
+    const width = direction === 'row' ? widths.reduce((sum, w) => sum + w, 0) + DEFAULT_GROUP_LAYOUT.gap * (members.length - 1) : Math.max(...widths);
+    html = laidOutGroup(root, members, { width: px(width), height: px(gy2 - gy) }, { ...DEFAULT_GROUP_LAYOUT, direction }).outerHTML;
+  }
   const first = ordered[0];
   commit([{ t: 'outer', path: first.path!, html }, ...(ordered.length > 1 ? [{ t: 'remove', paths: ordered.slice(1).map(x => x.path!) } as HtmlOp] : [])], { select: [first.path!] });
+}
+
+/** Computed CSS sizes preserve content-box/border-box sizing when objects enter or leave a layout. */
+function memberSize(el: Element): { width: string; height: string } {
+  const c = cs(el);
+  return { width: Number.isFinite(parseFloat(c.width)) ? c.width : px((el as HTMLElement).offsetWidth),
+    height: Number.isFinite(parseFloat(c.height)) ? c.height : px((el as HTMLElement).offsetHeight) };
+}
+
+export function setGroupLayout(layout: GroupLayout): void {
+  if (!['free', 'row', 'column'].includes(layout.direction) || !['flex-start', 'center', 'flex-end', 'stretch'].includes(layout.align)
+      || !Number.isFinite(layout.gap) || layout.gap < 0 || layout.gap > 2000 || typeof layout.equal !== 'boolean') return;
+  stopText();
+  const sel = selection();
+  if (sel.length !== 1 || isLocked(sel[0]) || kindOf(sel[0]) !== 'group' || isSvgPart(sel[0])) return;
+  const el = sel[0], src = srcOf.get(el), path = pathOf(el);
+  if (!src || !path || el.localName === 'svg') return;
+  const members: GroupMemberBox[] = [];
+  for (const child of Array.from(el.children)) {
+    const original = srcOf.get(child);
+    if (!original || original.parentElement !== src) continue;
+    const r = docRect(child), [x, y] = slidePoint(el as HTMLElement, r.x, r.y);
+    members.push({ src: original, x, y, ...memberSize(child), autoHeight: !fixedHeight(child) });
+  }
+  if (!members.length || members.length !== src.children.length) return;
+  const copy = laidOutGroup(src, members, memberSize(el), layout);
+  commit([{ t: 'outer', path, html: copy.outerHTML }], { select: [path] });
 }
 
 function ungroup(sel: Element[]): void {
@@ -288,6 +332,7 @@ function ungroup(sel: Element[]): void {
       continue;
     }
     const c = cs(g.el);
+    const flow = groupLayoutOf(g.el, c)?.direction;
     const gl = parseFloat(c.left) || 0, gt = parseFloat(c.top) || 0;
     const children = Array.from(g.src.children);
     const live = Array.from(g.el.children).filter(k => srcOf.has(k));
@@ -296,7 +341,10 @@ function ungroup(sel: Element[]): void {
       const lk = live.find(x => srcOf.get(x) === k);
       const kc = lk ? cs(lk) : null;
       const l = kc ? parseFloat(kc.left) : NaN, t = kc ? parseFloat(kc.top) : NaN;
-      if (kc && kc.position !== 'static' && Number.isFinite(l) && Number.isFinite(t)) copy.setAttribute('style', withStyle(copy.getAttribute('style') ?? '', { left: px(l + gl), top: px(t + gt), right: null, bottom: null }));
+      if (lk && flow && flow !== 'free') {
+        const r = docRect(lk), [x, y] = slidePoint(containerOf(g.el), r.x, r.y);
+        copy.setAttribute('style', withStyle(copy.getAttribute('style') ?? '', { position: 'absolute', left: px(x), top: px(y), right: 'auto', bottom: 'auto', flex: null, margin: '0', ...memberSize(lk), ...(!fixedHeight(lk) ? { height: 'auto' } : {}) }));
+      } else if (kc && kc.position !== 'static' && Number.isFinite(l) && Number.isFinite(t)) copy.setAttribute('style', withStyle(copy.getAttribute('style') ?? '', { left: px(l + gl), top: px(t + gt), right: null, bottom: null }));
       void i;
       return copy.outerHTML;
     });

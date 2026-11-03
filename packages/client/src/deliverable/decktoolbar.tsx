@@ -11,7 +11,8 @@ import { useEffect, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import { mathPreview, type ToolButton, type Palette } from '../app/Toolbar';
 import { ColorGrid } from '../app/ColorGrid';
-import type { SelItem, Tool, Paint, ArrangeHow, DeliverableKind, NodeCmd } from './protocol';
+import type { SelItem, Tool, Paint, ArrangeHow, DeliverableKind, NodeCmd, GroupLayout } from './protocol';
+import { DEFAULT_GROUP_LAYOUT } from './grouplayout';
 import { ASPECTS } from './runtime/crop';
 import { fmtPt, ptToPx, pxToPt, sizePt, stepPt } from './units';
 import { drawingToolbar } from './drawingToolbar';
@@ -48,6 +49,7 @@ export interface DeckCtx {
   text: DeckTextActions;
   paint(p: Paint): void;
   arrange(how: ArrangeHow): void;
+  groupLayout(layout: GroupLayout): void;
   image: {
     /** crop mode is on (the picture's frame, Done / Cancel) */
     cropping: boolean;
@@ -251,6 +253,24 @@ function InlineStepPicker({ onSet, close }: { onSet: (step: number) => void; clo
     <label>Appear on step <input type="number" min="1" step="1" value={value} aria-label="Appear on step" onInput={e => setValue((e.target as HTMLInputElement).value)} /></label>
     <button type="submit" class="small-btn" disabled={!Number.isSafeInteger(step) || step < 1} onMouseDown={e => e.preventDefault()}>Apply to selected words</button>
     <span>Select words in one paragraph first. Step 1 shows them from the start; step 2 is the first click.</span>
+  </form>;
+}
+
+function GroupLayoutPicker({ layout, onSet, close }: { layout: GroupLayout; onSet: (layout: GroupLayout) => void; close: () => void }) {
+  const [value, setValue] = useState(layout);
+  const free = value.direction === 'free';
+  const valid = Number.isFinite(value.gap) && value.gap >= 0 && value.gap <= 2000;
+  return <form class="dk-group-layout" onSubmit={e => { e.preventDefault(); if (valid) { onSet(value); close(); } }}>
+    <label>Layout <select aria-label="Group layout" value={value.direction} onChange={e => setValue({ ...value, direction: e.currentTarget.value as GroupLayout['direction'] })}>
+      <option value="free">Free</option><option value="row">Row</option><option value="column">Column</option>
+    </select></label>
+    <label>Gap (px) <input type="number" min="0" max="2000" step="1" aria-label="Group gap (px)" disabled={free} value={value.gap} onInput={e => setValue({ ...value, gap: e.currentTarget.valueAsNumber })} /></label>
+    <label>Align items <select aria-label="Group item alignment" disabled={free} value={value.align} onChange={e => setValue({ ...value, align: e.currentTarget.value as GroupLayout['align'] })}>
+      <option value="flex-start">Start</option><option value="center">Centre</option><option value="flex-end">End</option><option value="stretch">Stretch</option>
+    </select></label>
+    <label><input type="checkbox" disabled={free} checked={value.equal} onChange={e => setValue({ ...value, equal: e.currentTarget.checked })} />{value.direction === 'column' ? 'Equal heights' : 'Equal widths'}</label>
+    <button type="submit" class="small-btn" disabled={!valid}>Apply</button>
+    <span>Ctrl+click to edit an item. Free layout lets you position items independently.</span>
   </form>;
 }
 
@@ -494,6 +514,8 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
     context.push([
       ...(sel.length > 1 ? [{ id: 'dk-group', title: 'Group (Ctrl+G) — moved and resized as one; Ctrl+click an object in it to move it alone', icon: 'dk-group', action: () => c.arrange('group') }] : []),
       ...(isGroup ? [{ id: 'dk-ungroup', title: 'Ungroup (Ctrl+Shift+G)', icon: 'dk-ungroup', action: () => c.arrange('ungroup') }] : []),
+      ...(one?.kind === 'group' && one.tag !== 'svg' ? [{ id: 'dk-group-layout', title: 'Group layout: free, row or column, gap and alignment', icon: 'dk-group',
+        palette: { title: 'Group layout', render: (close: () => void) => <GroupLayoutPicker layout={one.layout ?? DEFAULT_GROUP_LAYOUT} onSet={c.groupLayout} close={close} /> } }] : []),
       { id: 'dk-arrange', title: 'Arrange: order, align, rotate, group', icon: 'dk-arrange',
         palette: { title: 'Arrange', list: true, cols: 1, items: [
           { label: 'Bring to front (Ctrl+Shift+↑)', html: ICON('dk-arrange'), action: () => c.arrange('front') },
@@ -518,6 +540,10 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
           { label: 'Flip horizontally', html: ICON('dk-flip'), action: () => c.arrange('flip-h') },
           { label: 'Flip vertically', html: ICON('dk-flip'), action: () => c.arrange('flip-v') },
           ...(sel.length > 1 ? [{ label: 'Group (Ctrl+G)', html: ICON('dk-group'), action: () => c.arrange('group') }] : []),
+          ...(sel.length > 1 && sel.every(s => s.kind !== 'svgpart') ? [
+            { label: 'Group in a row', html: ICON('dk-group'), action: () => c.arrange('group-row') },
+            { label: 'Group in a column', html: ICON('dk-group'), action: () => c.arrange('group-column') },
+          ] : []),
           ...(isGroup ? [{ label: 'Ungroup (Ctrl+Shift+G)', html: ICON('dk-ungroup'), action: () => c.arrange('ungroup') }] : []),
         ] } },
       ...(sel.some(s => s.kind === 'shape' || s.kind === 'svg' || s.kind === 'svgpart' || s.kind === 'line') ? [{
