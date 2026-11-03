@@ -185,11 +185,12 @@ export async function renderPages(project: string, rel: string, userId: number, 
   });
 }
 
-/** The deliverable as a PDF: a deck one slide per page, a poster one page of its size, a web page on A4. */
-export async function deliverablePdf(project: string, rel: string, userId: number): Promise<Buffer> {
+/** A PDF: one page per slide (optionally per click step), a poster at its size, a web page on A4. */
+export async function deliverablePdf(project: string, rel: string, userId: number, opts: { steps?: boolean } = {}): Promise<Buffer> {
   return withPage(project, rel, userId, 'print', { width: 1280, height: 900 }, 1, async (_ctx, page) => {
     const rep = await report(page);
     if (rep.kind === 'page') return await page.pdf({ format: 'A4', printBackground: true, margin: { top: '12mm', bottom: '12mm', left: '12mm', right: '12mm' } });
+    if (rep.kind === 'deck' && opts.steps) await page.evaluate(() => (window as unknown as { __ol: { printSteps(): void } }).__ol.printSteps());
     return await page.pdf({ width: `${rep.width}px`, height: `${rep.height}px`, printBackground: true, preferCSSPageSize: false, margin: { top: '0', right: '0', bottom: '0', left: '0' } });
   });
 }

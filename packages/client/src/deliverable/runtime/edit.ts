@@ -58,6 +58,7 @@ import { initGuides, guideSlide, guideAt, guideSnaps, guideParts, startGuideDrag
 import { listInkBox } from './listmarkers';
 import { replaceEditingHost, editingTextStyle, carryEditingTextStyle } from './editinghost';
 import { textBoundary, textListItem } from './textnavigation';
+import { setInlineStep } from './inlinesteps';
 import { PH, PH_CSS, phRole, isEmptyPh, isPicturePh, primeList } from './placeholders';
 
 const NS = 'http://www.w3.org/1999/xhtml';
@@ -613,7 +614,8 @@ export function insertRef(src: string): void { if (!editing) return; editing.foc
 export function exec(command: string, value?: string): void {
   if (!editing) return;
   editing.focus();
-  if (command === 'fontSize' && value) styleRun('font-size', value);
+  if (command === 'inlineStep') { if (setInlineStep(editing, getSelection(), Number(value))) scheduleCommit(); return; }
+  else if (command === 'fontSize' && value) styleRun('font-size', value);
   else if (command === 'lineHeight' && value) { editing.style.setProperty('line-height', value); scheduleCommit(); return; }
   else {
     const listCommand = command === 'insertUnorderedList' || command === 'insertOrderedList';

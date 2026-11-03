@@ -815,7 +815,7 @@ api.get('/projects/:project/deliverable-pdf', needProject('view'), async (req, r
   const rel = String(req.query.path ?? '');
   if (!isHtmlPath(rel) || !fs.existsSync(resolveProjectPath(req.params.project, rel))) { res.status(404).json({ error: 'not found' }); return; }
   try {
-    const pdf = await deliverablePdf(req.params.project, rel, req.user!.id);
+    const pdf = await deliverablePdf(req.params.project, rel, req.user!.id, { steps: req.query.steps === 'all' });
     const name = (splitEntry(rel).dir.split('/').pop() || splitProjectKey(req.params.project).name).replace(/[^A-Za-z0-9._ -]+/g, '-') || 'deliverable';
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `${req.query.download === '1' ? 'attachment' : 'inline'}; filename="${name}.pdf"`);

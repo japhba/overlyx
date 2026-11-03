@@ -31,6 +31,7 @@ import { nodeCommand } from './pathedit';
 import { stepCommand } from './animate';
 import { setView, refreshView, reportColors } from './view';
 import { startPresenting } from './present';
+import { expandPrintSteps, STEP_VISIBILITY_CSS } from './steps';
 import { report, rememberPage } from './report';
 import { ensureSolo, notePageBackground, PAGE_BG, SOLO_PAD } from './solo';
 import { setDarkSlides, darkSlidesChanged } from './darkpages';
@@ -432,7 +433,14 @@ function init(): void {
   // citations and lists of references (cite.ts)
   addStyle(CITE_CSS);
   if (document.body) { renderCites([document.body]); refreshCites(); }
-  window.__ol = { report, version: () => state.version, slides: () => slideBoxes(), size: pageSize, peerCarets: edit.peerCarets, railPeers: () => railDrawn };
+  window.__ol = { report, version: () => state.version, slides: () => slideBoxes(), size: pageSize, peerCarets: edit.peerCarets, railPeers: () => railDrawn,
+    printSteps: () => {
+      if (MODE !== 'print' || state.kind !== 'deck') return;
+      expandPrintSteps(slides());
+      addStyle(STEP_VISIBILITY_CSS);
+      if (/^dim/i.test(document.querySelector('meta[name="overlyx-steps"]')?.getAttribute('content') ?? '')) document.documentElement.classList.add('ol-steps-dim');
+    },
+  };
   if (MODE === 'present') startPresenting();
   if (MODE === 'edit') { edit.startEditing(); ensureSolo(); }
   if (MODE === 'thumb') startThumb();

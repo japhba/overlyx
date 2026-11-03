@@ -31,6 +31,7 @@ export interface DeckTextActions {
   valign(v: 'flex-start' | 'center' | 'flex-end'): void;
   list(kind: 'ul' | 'ol'): void;
   lineHeight(v: string): void;
+  step(n: number): void;
   clear(): void;
 }
 
@@ -243,6 +244,16 @@ function Slider({ value, onSet, label }: { value: number; onSet: (v: number) => 
   );
 }
 
+function InlineStepPicker({ onSet, close }: { onSet: (step: number) => void; close: () => void }) {
+  const [value, setValue] = useState('2');
+  const step = Number(value);
+  return <form class="dk-inline-step" onSubmit={e => { e.preventDefault(); if (Number.isSafeInteger(step) && step >= 1) { onSet(step); close(); } }}>
+    <label>Appear on step <input type="number" min="1" step="1" value={value} aria-label="Appear on step" onInput={e => setValue((e.target as HTMLInputElement).value)} /></label>
+    <button type="submit" class="small-btn" disabled={!Number.isSafeInteger(step) || step < 1} onMouseDown={e => e.preventDefault()}>Apply to selected words</button>
+    <span>Select words in one paragraph first. Step 1 shows them from the start; step 2 is the first click.</span>
+  </form>;
+}
+
 const swatchIcon = (glyph: string, color: string | null) => `<svg viewBox="0 0 16 16">${glyph}<rect x="2" y="12.6" width="12" height="2.6" rx="0.5" fill="${color ?? 'none'}" stroke="${color ? 'none' : 'currentColor'}" stroke-width="0.7"/></svg>`;
 
 /** a named run of the contextual tools: what they act on, named as the selection's label on the canvas (runtime edit.ts selectionLabel) */
@@ -263,7 +274,7 @@ function paintLabel(items: SelItem[]): string {
  * Over `words` selected in a text being retyped: what is done to words — font, size, bold … highlight, a link —, then `extra`.
  */
 const QUICK: string[][] = [['dk-ph-addpicture'], ['dk-b', 'dk-i', 'dk-color', 'dk-size'], ['dk-align'], ['dk-inkcolor', 'dk-ink-thinner', 'dk-ink-thicker', 'dk-ink-convert', 'dk-fill', 'dk-stroke'], ['dk-linecolor', 'dk-lineweight', 'dk-tips'], ['dk-crop', 'dk-nobg'], ['dk-group', 'dk-ungroup', 'dk-arrange']];
-const QUICK_WORDS: string[][] = [['dk-font', 'dk-size'], ['dk-b', 'dk-i', 'dk-u', 'dk-color', 'dk-hl'], ['dk-href']];
+const QUICK_WORDS: string[][] = [['dk-font', 'dk-size'], ['dk-b', 'dk-i', 'dk-u', 'dk-color', 'dk-hl'], ['dk-href', 'dk-inline-step']];
 export function quickGroups(sections: ToolSection[], extra: ToolButton[], words = false): ToolButton[][] {
   const all = new Map<string, ToolButton>();
   for (const sec of sections) for (const g of sec.groups) for (const b of g) all.set(b.id, b);
@@ -372,6 +383,10 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
         { id: 'dk-dmath', title: 'Display formula (Ctrl+Shift+M)', icon: 'dmath', action: () => c.math.insert(true) },
       ],
     );
+    if (c.editingText && c.kind === 'deck') context.push([
+      { id: 'dk-inline-step', title: 'Appear on step… (selected words)', icon: 'dk-step',
+        palette: { title: 'Selected words', render: close => <InlineStepPicker onSet={c.text.step} close={close} /> } },
+    ]);
     const al = st?.textAlign ?? 'left';
     context.push([
       { id: 'dk-align', title: 'Alignment', icon: al === 'center' ? 'aligncenter' : al === 'right' || al === 'end' ? 'alignright' : 'alignleft',

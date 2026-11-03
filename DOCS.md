@@ -977,15 +977,21 @@ blend.
     **Macros** of `<link rel="overlyx-macros" href="../paper/macros.tex">` (and what it
     `\input`s) in every formula, on the slide and in the formula editor. **Steps** (beamer's
     overlays, PowerPoint's animations; core `html/steps.ts`): `data-step` on any object, an SVG's
-    paths too, is a beamer overlay specification (a lone `3`: from step 3 on; `-3`: gone from step 4;
-    `2-4`), `data-steps` on a list (items one by one). The *Animation* pane (`AnimationPane.tsx`,
+    paths and inline text (`span`, `strong`, `em`, `u`) too, is a beamer overlay specification
+    (a lone `3`: from step 3 on; `-3`: gone from step 4; `2-4`), `data-steps` on a list (items one
+    by one). The *Animation* pane (`AnimationPane.tsx`,
     runtime `animate.ts`) edits the slide's sequence, not the strings: *Appear* / *Disappear* put the
     selection on the next clicks in the order it was clicked (or all on one click), *Click objects
     in order…* adds each object clicked (Shift: same click as the one before, Ctrl/⌘: a part of a
     drawing), ↑ / ↓ move an event a notch (with the step beside, then past it), gaps close. Badges on
     the canvas: blue the steps an object appears at, red those it disappears at. Presenting goes
-    through a slide's steps first and back to the previous slide's last step (`<meta
-    name="overlyx-steps" content="dim">`: hidden objects faint). While a text is retyped, references and citations are
+    through a slide's steps first and back to the previous slide's last step. While typing, select
+    words within one paragraph and use **Appear on step…** in the text toolbar or quick menu;
+    step 1 removes their inline steps, and hidden words keep their space.
+    **Download ▸ PDF with click steps** exports each step
+    with the presenter's visibility rules, including inline reveals (at most 1000 pages;
+    `deliverable-pdf?path=…&steps=all`). Ordinary PDF export still shows everything. `<meta
+    name="overlyx-steps" content="dim">` shows hidden objects faintly. While a text is retyped, references and citations are
     uneditable chips, environments editable formulas. The text row's insert group matches the
     documents': link (Ctrl+K), cross-reference (Ctrl+Shift+I), citation (Ctrl+Shift+C, the
     documents' dialog incl. finding papers online), inline / display formula. render_page reports
