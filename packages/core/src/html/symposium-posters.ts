@@ -19,8 +19,8 @@ import { loremChart, type LoremChartKind, type LoremChartOptions } from './lorem
 
 const px = (inch: number) => +(inch * 96).toFixed(2);
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-export const SERIF = "Georgia, 'Times New Roman', 'Liberation Serif', 'DejaVu Serif', serif";
-export const MONO = "'DejaVu Sans Mono', Menlo, Consolas, 'Liberation Mono', monospace";
+export const SERIF = "'Liberation Serif', 'DejaVu Serif', serif";
+export const MONO = "'DejaVu Sans Mono', 'Liberation Mono', monospace";
 
 const WORDS = ('lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua ut enim ad minim veniam ' +
   'quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat duis aute irure dolor in reprehenderit in voluptate velit esse cillum ' +

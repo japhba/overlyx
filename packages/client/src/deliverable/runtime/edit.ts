@@ -104,14 +104,14 @@ export function startEditing(): void {
   root = host.attachShadow({ mode: 'closed' });
   root.innerHTML = `<style>
     :host { all: initial; }
-    .layer { position: absolute; left: 0; top: 0; pointer-events: none; font: 12px Helvetica, Arial, sans-serif; }
+    .layer { position: absolute; left: 0; top: 0; pointer-events: none; font: 12px sans-serif; }
     .frame { position: absolute; border: 1.5px solid #2f6fde; box-sizing: border-box; pointer-events: none; transform-origin: 50% 50%; }
     .frame.peer { border-style: dashed; }
     .frame.editing { border-color: #e8a33d; }
     .frame.locked { border-style: dotted; border-color: #8a93a6; }
     .frame.ctx { border-style: dashed; border-color: rgba(47,111,222,.6); }
     .frame.wrap { border-style: dashed; border-color: #b36b00; }
-    .wrap-label { position: absolute; color: #754600; background: #fff1c9; font: calc(11px * var(--s))/1.3 Helvetica, Arial, sans-serif; pointer-events: none; }
+    .wrap-label { position: absolute; color: #754600; background: #fff1c9; font: calc(11px * var(--s))/1.3 sans-serif; pointer-events: none; }
     .hover { position: absolute; outline: 1px solid rgba(47,111,222,.55); pointer-events: none; transform-origin: 50% 50%; }
     .handle { position: absolute; width: var(--h); height: var(--h); margin: calc(var(--h) / -2) 0 0 calc(var(--h) / -2); background: #fff; border: 1.5px solid #2f6fde; box-sizing: border-box; border-radius: 2px; pointer-events: auto; touch-action: none; }
     .handle.end { border-radius: 50%; width: calc(var(--h) * 1.25); height: calc(var(--h) * 1.25); margin: calc(var(--h) * -0.625) 0 0 calc(var(--h) * -0.625); cursor: ${MOVE_CURSOR}; }
@@ -123,7 +123,7 @@ export function startEditing(): void {
     ${GUIDES_CSS}
     .draw { position: absolute; border: 1.5px dashed #2f6fde; background: rgba(47,111,222,.08); pointer-events: none; }
     .drop { position: absolute; border: 3px dashed #2f6fde; background: rgba(47,111,222,.10); pointer-events: none; box-sizing: border-box; }
-    .tag { position: absolute; transform: translateY(calc(-100% - 3px * var(--s))); background: #2f6fde; color: #fff; padding: calc(1px * var(--s)) calc(6px * var(--s)); border-radius: calc(3px * var(--s)); white-space: nowrap; pointer-events: none; font: 600 calc(10.5px * var(--s)) / 1.35 Helvetica, Arial, sans-serif; letter-spacing: .02em; }
+    .tag { position: absolute; transform: translateY(calc(-100% - 3px * var(--s))); background: #2f6fde; color: #fff; padding: calc(1px * var(--s)) calc(6px * var(--s)); border-radius: calc(3px * var(--s)); white-space: nowrap; pointer-events: none; font: 600 calc(10.5px * var(--s)) / 1.35 sans-serif; letter-spacing: .02em; }
     .tag.editing { background: #e8a33d; }
     .tag.locked { background: #8a93a6; }
     ${STEPS_CSS}
@@ -132,7 +132,7 @@ export function startEditing(): void {
     .peer-tag { position: absolute; transform: translateY(-100%); color: #fff; padding: 1px 5px; border-radius: 3px 3px 0 0; white-space: nowrap; pointer-events: none; font-size: calc(11px * var(--s)); }
     .psel { position: absolute; opacity: .28; pointer-events: none; }
     .pcaret { position: absolute; width: calc(2px * var(--s)); margin-left: calc(-1px * var(--s)); pointer-events: none; }
-    .pflag { position: absolute; left: calc(-1px * var(--s)); bottom: 100%; padding: 0 calc(4px * var(--s)); border-radius: calc(3px * var(--s)) calc(3px * var(--s)) calc(3px * var(--s)) 0; white-space: nowrap; pointer-events: none; font: 600 calc(10px * var(--s)) / 1.3 Helvetica, Arial, sans-serif; }
+    .pflag { position: absolute; left: calc(-1px * var(--s)); bottom: 100%; padding: 0 calc(4px * var(--s)); border-radius: calc(3px * var(--s)) calc(3px * var(--s)) calc(3px * var(--s)) 0; white-space: nowrap; pointer-events: none; font: 600 calc(10px * var(--s)) / 1.3 sans-serif; }
     svg.ink { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
   </style><div class="layer"></div>`;
   layer = root.querySelector('.layer') as HTMLElement;

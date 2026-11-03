@@ -160,7 +160,7 @@ function drawRuler(c: HTMLCanvasElement, dir: 'h' | 'v', origin: number, pxPerMm
   const major = steps.find(st => st * pxPerMm >= 60) ?? 1000;
   const minor = major / (String(major).startsWith('2') ? 4 : 5);
   g.strokeStyle = fg; g.fillStyle = fg; g.lineWidth = 1;
-  g.font = '9px Helvetica, Arial, sans-serif';
+  g.font = '9px sans-serif';
   const from = Math.floor(-origin / pxPerMm / minor) * minor, to = (along - origin) / pxPerMm;
   if (!Number.isFinite(from) || !Number.isFinite(to) || (to - from) / minor > 4000) return;
   g.beginPath();

@@ -4,7 +4,7 @@ import { embeddedFontFamilies, fontPortabilityWarning, fontResource, firstFontFa
 
 it('new blank decks carry their default font, Instrument Sans, with its weight and width axes and no font download', () => {
   const html = blankDeck('Example');
-  expect(html).toContain('font-family: "Instrument Sans", Helvetica, Arial, sans-serif');
+  expect(html).toContain('font-family: "Instrument Sans", sans-serif');
   expect(html).toContain('font-family:"Instrument Sans";font-weight:400 700;font-style:normal;font-stretch:75% 100%');
   expect(html).toContain('font-family:"Instrument Sans";font-weight:400 700;font-style:italic;font-stretch:75% 100%');
   expect(html).not.toContain('fonts.googleapis.com');

@@ -30,8 +30,8 @@
 /* ------------------------------------------------------------ tokens */
 html[data-ui="modern"] {
   --m-radius: 6px;
-  --m-display: "OL Jost", "Jost", Futura, "Century Gothic", "OL Inter", Helvetica, Arial, sans-serif;
-  --ui-font: "OL Inter", Inter, "Segoe UI", Helvetica, Arial, sans-serif;
+  --m-display: "OL Jost", "Jost", "OL Inter", sans-serif;
+  --ui-font: "OL Inter", Inter, sans-serif;
 }
 /* the colours; a document's page in the dark theme with smart invert off is white paper (styles.css, app/darkpages.ts) */
 html[data-ui="modern"],

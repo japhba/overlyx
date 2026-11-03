@@ -14,8 +14,8 @@ div.login.lp {
   --lp-line: #d9d5cd; --lp-line2: #e6e2db;
   --lp-on-ink: #f6f5f1;
   --lp-blue: #2152a3; --lp-yellow: #efb21a; --lp-red: #d6402b;
-  --lp-display: "OL Jost", "Jost", Futura, "Century Gothic", Helvetica, Arial, sans-serif;
-  --lp-text: "OL Inter", "Inter", "Segoe UI", Roboto, sans-serif;
+  --lp-display: "OL Jost", "Jost", sans-serif;
+  --lp-text: "OL Inter", "Inter", Roboto, sans-serif;
   display: block; overflow-x: hidden; background: var(--lp-bg); color: var(--lp-ink); font-family: var(--lp-text); font-feature-settings: "cv11", "ss01"; -webkit-font-smoothing: antialiased;
 }
 html[data-theme="dark"] div.login.lp {
@@ -121,7 +121,7 @@ div.login.lp .overleaf-start .git-toggle { display: block; margin-top: 18px; pad
 div.login.lp .overleaf-start .git-toggle:hover { color: var(--lp-ink); }
 div.login.lp .overleaf-start .git :is(textarea, input) { width: 100%; box-sizing: border-box; margin-top: 8px; padding: 8px 10px; border: 1px solid var(--lp-line); border-radius: 2px; background: var(--lp-field); color: var(--lp-ink); font-size: 13px; }
 div.login.lp .overleaf-start .git input { height: 38px; }
-div.login.lp .overleaf-start .git textarea { font: 12.5px/1.45 "DejaVu Sans Mono", Menlo, monospace; resize: vertical; }
+div.login.lp .overleaf-start .git textarea { font: 12.5px/1.45 "DejaVu Sans Mono", monospace; resize: vertical; }
 div.login.lp .overleaf-start .small { margin-top: 10px; font-size: 12px; line-height: 1.5; color: var(--lp-muted); }
 div.login.lp .overleaf-start .pick { padding-top: 66px; }
 div.login.lp .dropzone { padding: 34px 20px; border: 1.5px dashed color-mix(in srgb, var(--lp-ink) 32%, transparent); border-radius: 0; background: var(--lp-paper); text-align: center; cursor: pointer; outline: none; transition: border-color 0.15s, background 0.15s; }

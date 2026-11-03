@@ -115,7 +115,7 @@ ${TEMPLATE_FONT_LICENSE}
   ${TEMPLATE_FONTS[font]}
   :root { --paper: ${t.background}; --ink: ${t.ink}; --accent: ${t.accent}; --muted: ${t.muted}; --secondary: ${t.secondary ?? (t.id === 'dark-seminar' ? '#f1be75' : '#bc6747')}; }
   * { box-sizing: border-box; }
-  body { margin: 0; background: #dce0e4; color: var(--ink); font-family: "${font}", Arial, Helvetica, sans-serif; }
+  body { margin: 0; background: #dce0e4; color: var(--ink); font-family: "${font}", sans-serif; }
   .slide { width: ${t.width}${poster ? 'mm' : 'px'}; height: ${t.height}${poster ? 'mm' : 'px'}; position: relative; overflow: hidden; background: var(--paper); margin: 0 auto ${poster ? '0' : '40px'}; }
   h1, h2, h3, p { margin: 0; }
   h1, h2 { font-family: inherit; font-weight: 700; }

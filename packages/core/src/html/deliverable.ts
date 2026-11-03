@@ -109,7 +109,7 @@ export function starterPage(title: string): string {
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
 <style>
   :root { --ink: #1d2433; --muted: #5b6475; --accent: #2f6fde; }
-  body { margin: 0; font-family: Inter, Helvetica, Arial, sans-serif; color: var(--ink); line-height: 1.6; }
+  body { margin: 0; font-family: Inter, sans-serif; color: var(--ink); line-height: 1.6; }
   header { padding: 96px 24px 64px; text-align: center; background: #f4f6fa; }
   header h1 { font-size: clamp(36px, 6vw, 64px); line-height: 1.1; margin: 0 0 16px; }
   main { max-width: 760px; margin: 0 auto; padding: 48px 24px 96px; font-size: 19px; }
@@ -195,7 +195,7 @@ ${TEMPLATE_FONT_LICENSE}
 <style>
   ${TEMPLATE_FONTS['Instrument Sans']}
   * { box-sizing: border-box; }
-  body { margin: 0; background: #dce0e4; color: #1d1d1f; font-family: "Instrument Sans", Helvetica, Arial, sans-serif; }
+  body { margin: 0; background: #dce0e4; color: #1d1d1f; font-family: "Instrument Sans", sans-serif; }
   .slide { width: ${w}; height: ${h}; position: relative; overflow: hidden; background: #fff; margin: 0 auto 40px; font-size: ${text}; line-height: 1.35; }
   h1, h2, h3, p, ul, ol { margin: 0; }
   :where(.slide li)::marker { color: #80868b; }

@@ -116,16 +116,16 @@ function startThumb(): void {
   host.style.cssText = 'all:initial;position:absolute;left:0;top:0;width:0;height:0;z-index:2147483647;pointer-events:none;display:block;';
   const root = host.attachShadow({ mode: 'closed' });
   root.innerHTML = `<style>
-    .n { position: absolute; width: calc(${RAIL_NUM - 6}px / var(--s)); transform: translateX(calc(-100% - 6px / var(--s))); text-align: right; font: 500 calc(11px / var(--s)) / 1 Helvetica, Arial, sans-serif; font-variant-numeric: tabular-nums; color: #8a8f98; }
+    .n { position: absolute; width: calc(${RAIL_NUM - 6}px / var(--s)); transform: translateX(calc(-100% - 6px / var(--s))); text-align: right; font: 500 calc(11px / var(--s)) / 1 sans-serif; font-variant-numeric: tabular-nums; color: #8a8f98; }
     .n.on { color: #2f6fde; font-weight: 700; }
     .cur { position: absolute; box-sizing: border-box; border: calc(2.5px / var(--s)) solid #2f6fde; border-radius: calc(4px / var(--s)); }
     .drop { position: absolute; height: calc(3px / var(--s)); background: #2f6fde; }
-    .c { position: absolute; transform: translate(calc(-100% - 4px / var(--s)), calc(4px / var(--s))); display: flex; align-items: center; gap: calc(2px / var(--s)); font: 700 calc(11px / var(--s)) Helvetica, Arial, sans-serif; color: #3a2a00; background: #f6b400; padding: calc(1px / var(--s)) calc(5px / var(--s)); border-radius: calc(8px / var(--s)) calc(8px / var(--s)) calc(8px / var(--s)) calc(2px / var(--s)); }
+    .c { position: absolute; transform: translate(calc(-100% - 4px / var(--s)), calc(4px / var(--s))); display: flex; align-items: center; gap: calc(2px / var(--s)); font: 700 calc(11px / var(--s)) sans-serif; color: #3a2a00; background: #f6b400; padding: calc(1px / var(--s)) calc(5px / var(--s)); border-radius: calc(8px / var(--s)) calc(8px / var(--s)) calc(8px / var(--s)) calc(2px / var(--s)); }
     .chg { position: absolute; width: calc(3px / var(--s)); transform: translateX(calc(-5px / var(--s))); border-radius: calc(2px / var(--s)); }
-    .del { position: absolute; transform: translate(-50%, -50%); font: 700 calc(12px / var(--s)) Helvetica, Arial, sans-serif; color: #fff; background: #d2453c; padding: calc(2px / var(--s)) calc(8px / var(--s)); border-radius: calc(4px / var(--s)); }
+    .del { position: absolute; transform: translate(-50%, -50%); font: 700 calc(12px / var(--s)) sans-serif; color: #fff; background: #d2453c; padding: calc(2px / var(--s)) calc(8px / var(--s)); border-radius: calc(4px / var(--s)); }
     .del.skip { background: #5f6368; font-weight: 600; }
     .who { position: absolute; display: flex; gap: calc(2px / var(--s)); transform: translate(calc(-100% - 4px / var(--s)), calc(-100% - 4px / var(--s))); }
-    .who span { display: grid; place-items: center; width: calc(18px / var(--s)); height: calc(18px / var(--s)); border-radius: 50%; font: 700 calc(9px / var(--s)) Helvetica, Arial, sans-serif; box-shadow: 0 0 0 calc(1.5px / var(--s)) #fff; }
+    .who span { display: grid; place-items: center; width: calc(18px / var(--s)); height: calc(18px / var(--s)); border-radius: 50%; font: 700 calc(9px / var(--s)) sans-serif; box-shadow: 0 0 0 calc(1.5px / var(--s)) #fff; }
   </style><div class="l"></div>`;
   railLayer = root.querySelector('.l') as HTMLElement;
   document.documentElement.appendChild(host);

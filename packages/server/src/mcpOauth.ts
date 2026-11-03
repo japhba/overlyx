@@ -101,7 +101,7 @@ export function oauthRoutes(): express.Router {
     });
   });
 
-  const page = (res: Response, status: number, body: string) => { res.status(status).type('html').send(`<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>OverLyX</title><style>body{font:15px/1.5 Helvetica,Arial,sans-serif;max-width:26em;margin:12vh auto;padding:0 1em;color:#222}button,.btn{font:inherit;padding:8px 18px;border-radius:8px;border:1px solid #bbb;background:#f6f6f6;cursor:pointer;text-decoration:none;color:inherit;display:inline-block}button.primary{background:#2a7ae2;border-color:#2a7ae2;color:#fff}form{display:inline}.muted{color:#777}${SCOPE_CSS}</style></head><body>${body}</body></html>`); };
+  const page = (res: Response, status: number, body: string) => { res.status(status).type('html').send(`<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>OverLyX</title><style>body{font:15px/1.5 sans-serif;max-width:26em;margin:12vh auto;padding:0 1em;color:#222}button,.btn{font:inherit;padding:8px 18px;border-radius:8px;border:1px solid #bbb;background:#f6f6f6;cursor:pointer;text-decoration:none;color:inherit;display:inline-block}button.primary{background:#2a7ae2;border-color:#2a7ae2;color:#fff}form{display:inline}.muted{color:#777}${SCOPE_CSS}</style></head><body>${body}</body></html>`); };
 
   /** Validate an authorize request; returns what the consent page and the code need, or answers the response itself. */
   function checkAuthorize(req: Request, res: Response): { client: ClientRow; redirectUri: string; state: string; challenge: string; scope: string } | null {

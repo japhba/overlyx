@@ -94,7 +94,8 @@ blend.
   fonts-dejavu-core 2.37; Bitstream Vera and Arev licences, which allow subsetting under a name without "Bitstream",
   "Vera" or "Arev"). The deck font picker and Edit theme embed these choices; Text ▸ Typography sets weight, width
   (`font-stretch`, a variable font's wdth axis), letter spacing, small caps, figures and ligatures, on objects or
-  on selected words;
+  on selected words. Every font stack names open fonts only, ending in a generic family
+  (`tests/open-fonts.test.ts`);
   fonts not embedded in the HTML carry a warning about machine-dependent fallbacks in the editor,
   presenter view, `render_page` and PDF.
   Carlito replaces the posters' Calibri with matching metrics. `scripts/gen-template-fonts.py`

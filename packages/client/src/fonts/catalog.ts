@@ -6,8 +6,9 @@
  *                       Modern (CMU Serif), the text fonts of the OpenType math fonts listed on
  *                       https://tex.stackexchange.com/q/425098 and a few more, all served with the
  *                       client (fonts/web, scripts/build-editor-fonts.py) and fetched only once
- *                       chosen — except the computer's own Palatino. Never Apple's San Francisco
- *                       fonts (CLAUDE.md, tests/no-sf-fonts.test.ts).
+ *                       chosen. Only open fonts: never a computer's own proprietary face (Palatino
+ *                       was one until 3 Nov 2026; tests/open-fonts.test.ts), never Apple's San
+ *                       Francisco fonts (CLAUDE.md, tests/no-sf-fonts.test.ts).
  *   MATH_FONTS          the editor's formulas (Settings ▸ Editor ▸ Math font): MathJax's fonts, each
  *                       made from an OpenType math font, which MathJax lays formulas out with
  *                       (editor/lyxmath/mathfonts.ts loads them). "Matching the text font" is the
@@ -71,10 +72,6 @@ export const EDITOR_FACES: EditorFace[] = [
   served('xits', 'XITS', 'STIX’s first version, a Times', 'stix2'),
   served('termes', 'TeX Gyre Termes', 'a Times', 'termes'),
   served('pagella', 'TeX Gyre Pagella', 'a Palatino', 'pagella'),
-  {
-    id: 'palatino', label: 'Palatino (this computer’s)', hint: 'the Palatino of macOS and Windows; TeX Gyre Pagella elsewhere',
-    text: `"Palatino Linotype", Palatino, "OLT pagella", "Book Antiqua", ${CM}`, math: 'pagella', xHeight: 0.469,
-  },
   served('bonum', 'TeX Gyre Bonum', 'a Bookman', 'bonum'),
   served('schola', 'TeX Gyre Schola', 'a Century Schoolbook', 'schola'),
   served('dejavu', 'DejaVu Serif', 'Bitstream Vera’s serif', 'dejavu'),
@@ -114,7 +111,7 @@ export const MATH_FONTS: MathFont[] = [
 ];
 
 /** Faces that were renamed: a preference saved under the old id keeps its face. */
-const FORMER_FACES: Record<string, string> = { noto: 'fira', sans: 'fira' };
+const FORMER_FACES: Record<string, string> = { noto: 'fira', sans: 'fira', palatino: 'pagella' };
 
 /** The math fonts of before MathJax (KaTeX with stand-in faces, 26 Sep 2026): a saved preference gets the closest one. */
 const FORMER_MATH_FONTS: Record<string, string> = {
@@ -158,7 +155,7 @@ const ROMAN_FACES: Record<string, string> = {
   libertine: 'libertinus', 'libertine-full': 'libertinus', 'libertinus-full': 'libertinus', 'libertinus serif': 'libertinus', 'linux libertine o': 'libertinus', 'linux libertine': 'libertinus',
   'stix two text': 'stix', stix2: 'stix', 'stix two': 'stix', xits: 'xits',
   times: 'termes', ptm: 'termes', mathptm: 'termes', tgtermes: 'termes', 'tex gyre termes': 'termes', 'times new roman': 'termes', 'nimbus roman': 'termes', tinos: 'termes',
-  palatino: 'pagella', ppl: 'pagella', pplj: 'pagella', mathpple: 'pagella', tgpagella: 'pagella', 'tex gyre pagella': 'pagella', 'palatino linotype': 'palatino', p052: 'pagella',
+  palatino: 'pagella', ppl: 'pagella', pplj: 'pagella', mathpple: 'pagella', tgpagella: 'pagella', 'tex gyre pagella': 'pagella', 'palatino linotype': 'pagella', p052: 'pagella',
   bookman: 'bonum', pbk: 'bonum', tgbonum: 'bonum', 'tex gyre bonum': 'bonum', newcent: 'schola', pnc: 'schola', tgschola: 'schola', 'tex gyre schola': 'schola', 'century schoolbook': 'schola',
   dejavuserif: 'dejavu', 'dejavu serif': 'dejavu', dejavuserifcondensed: 'dejavu',
   'fira sans': 'fira', 'new computer modern 10': 'newcm', 'latin modern': 'cm',

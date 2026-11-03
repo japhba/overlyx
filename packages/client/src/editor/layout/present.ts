@@ -318,7 +318,7 @@ class Presentation {
     d.close();
     for (const s of document.querySelectorAll('link[rel="stylesheet"], style')) d.head.append(s.cloneNode(true));
     const style = d.createElement('style');
-    style.textContent = `body.ol-presenter{margin:0;background:#1d1f24;color:#eee;font:15px/1.4 Helvetica,Arial,sans-serif;display:grid;grid-template-columns:3fr 2fr;grid-template-rows:auto 1fr;gap:14px;padding:14px;height:100vh;box-sizing:border-box}
+    style.textContent = `body.ol-presenter{margin:0;background:#1d1f24;color:#eee;font:15px/1.4 sans-serif;display:grid;grid-template-columns:3fr 2fr;grid-template-rows:auto 1fr;gap:14px;padding:14px;height:100vh;box-sizing:border-box}
       .pv-cur,.pv-next{position:relative;background:#000;overflow:hidden;border-radius:4px} .pv-next{opacity:.85}
       .pv-notes{grid-column:1/3;background:#2a2d34;border-radius:6px;padding:12px 16px;font-size:20px;overflow:auto;white-space:pre-wrap}
       .pv-bar{position:fixed;right:18px;top:10px;font-size:22px;font-variant-numeric:tabular-nums;color:#ffd}

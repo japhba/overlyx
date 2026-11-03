@@ -311,8 +311,8 @@ async function browserLogin(host, flags, ui = null) {
     if (u.pathname === '/callback' && u.searchParams.get('state') === state && u.searchParams.get('code')) {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(ui?.app === 'vscode'
-        ? '<!doctype html><meta charset="utf-8"><title>OverLyX for VS Code</title><body style="font:15px/1.5 Helvetica,Arial,sans-serif;max-width:28em;margin:12vh auto;padding:0 1em"><h2>OverLyX for VS Code is signed in</h2><p>You can close this tab and go back to VS Code.</p></body>'
-        : '<!doctype html><meta charset="utf-8"><title>OverLyX CLI</title><body style="font:15px/1.5 Helvetica,Arial,sans-serif;max-width:28em;margin:12vh auto;padding:0 1em"><h2>The OverLyX CLI is signed in</h2><p>You can close this tab and go back to the terminal.</p></body>');
+        ? '<!doctype html><meta charset="utf-8"><title>OverLyX for VS Code</title><body style="font:15px/1.5 sans-serif;max-width:28em;margin:12vh auto;padding:0 1em"><h2>OverLyX for VS Code is signed in</h2><p>You can close this tab and go back to VS Code.</p></body>'
+        : '<!doctype html><meta charset="utf-8"><title>OverLyX CLI</title><body style="font:15px/1.5 sans-serif;max-width:28em;margin:12vh auto;padding:0 1em"><h2>The OverLyX CLI is signed in</h2><p>You can close this tab and go back to the terminal.</p></body>');
       finish(u.searchParams.get('code'));
       return;
     }
