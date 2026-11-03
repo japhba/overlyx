@@ -196,7 +196,7 @@ function fresh(s1: Element): Element {
  * kept in step like any other, unlike the runtime's own data-ol- ones — a lock written to the text
  * did not hold on the canvas until the page was loaded again
  */
-const SOURCE_OL = new Set(['data-ol-comments', 'data-ol-ins', 'data-ol-del', 'data-ol-chg', 'data-ol-was', 'data-ol-locked', 'data-ol-name', 'data-ol-master', 'data-ol-field', 'data-ol-skip']);
+const SOURCE_OL = new Set(['data-ol-comments', 'data-ol-ins', 'data-ol-del', 'data-ol-chg', 'data-ol-was', 'data-ol-locked', 'data-ol-name', 'data-ol-master', 'data-ol-field', 'data-ol-skip', 'data-ol-connector', 'data-ol-frame']);
 const synced = (name: string) => !name.startsWith('data-ol-') || SOURCE_OL.has(name);
 
 function syncAttributes(live: Element, s0: Element, s1: Element): void {

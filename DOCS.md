@@ -1288,6 +1288,23 @@ blend.
     extension's own — not the bridge, whose API edits documents — on 127.0.0.1 with a random token,
     the same sandbox policy and runtime (`dist/ol/`, built by `scripts/build-runtime.mjs`); paths
     resolve in the workspace folder.
+  * **Anchored annotations** (`runtime/annotations.ts`): an empty SVG directly in a `.slide`
+    can carry `data-ol-connector='{"from":{"id":"diagram","side":"right"},"to":{"id":"equation","class":"term","side":"left"},"curve":40}'`
+    or `data-ol-frame='{"target":{"id":"equation","class":"term"},"padding":8,"radius":8}'`.
+    Targets resolve inside that slide: an id string or `{id}` reaches an object or a formula's
+    `\cssId{name}{…}`, `{id, class}` reaches `\class{name}{…}` inside that object, `{class}`
+    reaches named formula parts across the slide (multiple matches are framed together).
+    Connector sides are `auto` (default, towards the other target), `center`, `top`, `right`,
+    `bottom`, `left`; each anchor may add `offset: [x,y]` in slide pixels. `curve` is a signed
+    perpendicular control-point offset (0/default: straight); `head` defaults to 10 (0: no arrowhead).
+    Frames default to 8 px padding and radius. SVG `stroke`, `stroke-width`, `fill` style the
+    annotation (defaults: currentColor, 2, none); `data-step` reveals it as any object. Geometry
+    follows moves, resizing, font loading and formula retypesetting in every runtime mode, including
+    PDF click steps and offline exports. Missing targets hide their annotations until they return.
+    The runtime controls the SVG's position, size and viewBox; the SVG lets pointer input through
+    to the editable formula. Edit the targets and styling in the HTML (also described to agents in
+    `DELIVERABLE_GUIDE`). Source reconciliation keeps these attributes in step; generated shapes
+    never become part of the source. Focused checks: `tests/deck-annotations.test.ts`.
   * **Agents** (MCP, `mcp.ts`): `create_deliverable` (folder, kind, title), the file tools on the
     page (`read_file` / `edit_file` / `write_file` reach an open page's live text and apply as one
     splice), `list_documents` lists pages with their kind, and **`render_page`** shows a page as

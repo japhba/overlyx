@@ -42,6 +42,7 @@ import { startEmbed, embedSettled, startViewSync, viewSettled } from './embed';
 import { startLinks } from './links';
 import { looksOf } from './placeholders';
 import { installStorage } from './storage';
+import { refreshAnnotations } from './annotations';
 
 // a page's localStorage where the sandbox refuses the browser's (storage.ts), before the page's scripts run
 installStorage(MODE === 'view');
@@ -278,6 +279,7 @@ function onMessage(e: MessageEvent): void {
   if (MODE === 'present' && m.ol !== 'assets' && m.ol !== 'folder') return;
   switch (m.ol) {
     case 'exportSvg':
+      refreshAnnotations();
       try { post({ ol: 'exportedSvg', id: m.id, svg: exportPageSvg(edit.visibleSlideEl() ?? slides()[0], m.except) }); }
       catch (e) { post({ ol: 'exportedSvg', id: m.id, error: String((e as Error).message ?? e) }); }
       break;
@@ -305,6 +307,7 @@ function onMessage(e: MessageEvent): void {
       state.kind = detectKind();
       if (MODE === 'edit') { ensureSolo(); edit.afterSource(); void whenTypeset().then(() => edit.draw()); }
       if (MODE === 'thumb') { notePageBackground(); drawRail(); }
+      void whenTypeset().then(refreshAnnotations);
       darkSlidesChanged();
       if (first) void settle().then(() => { sendLayout(); if (MODE === 'edit') { refreshView(); reportColors(); } });
       // (a stroke on a slide while the pen writes on: the slides measured again once it rests)
@@ -440,6 +443,7 @@ function init(): void {
       expandPrintSteps(slides());
       addStyle(STEP_VISIBILITY_CSS);
       if (/^dim/i.test(document.querySelector('meta[name="overlyx-steps"]')?.getAttribute('content') ?? '')) document.documentElement.classList.add('ol-steps-dim');
+      refreshAnnotations();
     },
   };
   if (MODE === 'present') startPresenting();
@@ -462,6 +466,7 @@ function init(): void {
       // opened to be printed (the VS Code extension's "Print or save as PDF"): the browser's print dialog
       if (location.hash === '#print') setTimeout(() => print(), 300);
     }
+    refreshAnnotations();
     window.__olReady = true;
     if (MODE === 'embed') embedSettled();
     if (MODE === 'view') viewSettled();
