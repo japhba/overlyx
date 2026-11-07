@@ -38,6 +38,8 @@ import { verifyAccessToken } from './tokenAuth.ts';
 import { PANEL_AGENT } from './agentwork.ts';
 import { sendFileAt } from './confined.ts';
 import { sealer } from './sealed.ts';
+import { googleFontRoutes } from './googlefonts.ts';
+import { myFontRoutes } from './myfonts.ts';
 
 const execFileP = promisify(execFile);
 
@@ -510,6 +512,12 @@ export function gitRouter(): express.Router {
   r.post('/api/build', express.json({ limit: '32kb' }), (req, res) => { void cliBuild(req, res); });
   r.get('/api/pdf', (req, res) => { void cliPdf(req, res); });
   r.post('/api/restore', express.json({ limit: '32kb' }), (req, res) => { void cliRestore(req, res); });
+  // the VS Code extension's editors: Google fonts and the account's My fonts (googlefonts.ts,
+  // myfonts.ts), the same routes as the web app's /api/fonts, with the CLI's sign-in
+  const fonts = express.Router();
+  fonts.use((req, res, next) => { const user = authenticateBasic(req, res); if (!user) return; req.user = user; next(); });
+  fonts.use(googleFontRoutes(), myFontRoutes());
+  r.use('/api', (req, res, next) => { if (req.path.startsWith('/fonts/')) fonts(req, res, next); else next(); });
   r.all(/.*/, (req, res) => { void handle(req, res); });
   return r;
 }

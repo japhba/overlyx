@@ -8,16 +8,22 @@
  * Condensed, …) that the knob snaps to; a static family's weights as rungs alone — and the
  * OpenType features it has (old-style or tabular figures, small capitals, stylistic sets, …) as
  * switches. Everything applies to the selection at once (core fontface.ts: the `face` mark).
+ * My fonts (fonts/myfonts.ts: the account's, ★ on a row or in the panel) come first. A "!" beside
+ * the name says the text there is bold, italic or in small capitals that this font lacks, so it is
+ * faked (fonts/fakestyles.ts). In VS Code all of it comes through the extension's bridge (fontApi).
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { EditorView } from 'prosemirror-view';
 import { parseFace, faceValue, type FontFace, WEIGHT_LABELS } from '@overlyx/core';
 import { setFontFace, setFontFamily } from '../editor/commands';
-import { loadGoogleFont } from '../fonts/googlefont';
+import { loadGoogleFont, fontApi } from '../fonts/googlefont';
+import { loadMyFonts, toggleMyFont, useMyFonts } from '../fonts/myfonts';
+import { fakedStyles, fakeWarning, wantedStyles } from '../fonts/fakestyles';
 import { pinUnder } from './popup';
 
 interface CatalogFamily { f: string; c: string; a: { t: string; min: number; max: number; d: number }[]; w: number[]; i: boolean; p: number }
-interface Catalog { axisNames: Record<string, string>; families: CatalogFamily[] }
+/** `signin`: VS Code signed in to no OverLyX server, which the fonts come from */
+interface Catalog { axisNames: Record<string, string>; families: CatalogFamily[]; signin?: boolean }
 export interface FontInfo {
   family: string; category: string;
   axes: { tag: string; name: string; min: number; def: number; max: number }[];
@@ -26,11 +32,11 @@ export interface FontInfo {
 }
 
 let catalogP: Promise<Catalog> | null = null;
-const catalog = () => (catalogP ??= fetch('/api/fonts/catalog', { credentials: 'same-origin' }).then(r => (r.ok ? r.json() : { axisNames: {}, families: [] })).catch(() => ({ axisNames: {}, families: [] })));
+const catalog = () => (catalogP ??= fetch(fontApi('catalog'), { credentials: 'same-origin' }).then(r => (r.ok ? r.json() : { axisNames: {}, families: [] })).catch(() => ({ axisNames: {}, families: [] })));
 const infos = new Map<string, Promise<FontInfo | null>>();
 export const fontInfo = (family: string) => {
   let p = infos.get(family);
-  if (!p) { p = fetch('/api/fonts/info?family=' + encodeURIComponent(family), { credentials: 'same-origin' }).then(r => (r.ok ? r.json() : null)).catch(() => null); infos.set(family, p); }
+  if (!p) { p = fetch(fontApi('info?family=' + encodeURIComponent(family)), { credentials: 'same-origin' }).then(r => (r.ok ? r.json() : null)).catch(() => null); infos.set(family, p); }
   return p;
 };
 
@@ -46,7 +52,7 @@ function useSample(family: string, el: HTMLElement | null): string | null {
       io.disconnect();
       if (samples.has(family)) return;
       samples.set(family, 'loading');
-      new FontFace(name, `url(/api/fonts/sample?family=${encodeURIComponent(family)})`).load()
+      new FontFace(name, `url(${fontApi('sample?family=' + encodeURIComponent(family))})`).load()
         .then(f => { document.fonts.add(f); samples.set(family, 'ok'); setState('ok'); })
         .catch(() => { samples.set(family, 'none'); setState('none'); });
     });
@@ -120,6 +126,11 @@ export function FontPicker({ view, family, face, markdown, documentFonts }: Font
   const ref = useRef<HTMLSpanElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
   useEffect(() => { if (current) loadGoogleFont(current.family); }, [current?.family]);
+  // (asked once per page: in VS Code that also makes the bridge keep My fonts' files for offline use)
+  useEffect(() => { void loadMyFonts(); }, []);
+  const [info, setInfo] = useState<FontInfo | null>(null);
+  useEffect(() => { setInfo(null); if (!current) return; let live = true; void fontInfo(current.family).then(i => { if (live) setInfo(i); }); return () => { live = false; }; }, [current?.family]);
+  const faked = current && info ? fakedStyles(info, wantedStyles(selectedMarks(view), current.family)) : [];
   useEffect(() => {
     if (!open) return;
     const h = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
@@ -134,7 +145,9 @@ export function FontPicker({ view, family, face, markdown, documentFonts }: Font
     <span ref={ref} class="ff-box" data-fontpicker>
       <button type="button" class="tb-btn ff-button" title="Font (a Google font, its weight and features — or the document's serif, sans serif, monospace)"
         onMouseDown={e => e.preventDefault()} onClick={() => setOpen(o => !o)}>
-        <span class="ff-name" style={current ? { fontFamily: `'${current.family}', var(--ui-font)` } : undefined}>{label}</span><span class="ff-caret">▾</span>
+        <span class="ff-name" style={current ? { fontFamily: `'${current.family}', var(--ui-font)` } : undefined}>{label}</span>
+        {faked.length > 0 && <span class="ff-fake" data-ff-fake={faked.join(' ')} title={fakeWarning(current!.family, faked)} aria-label={fakeWarning(current!.family, faked)}>!</span>}
+        <span class="ff-caret">▾</span>
       </button>
       {open && (
         <div ref={popRef} class="tb-popup ff-pop" role="dialog" aria-label="Font">
@@ -147,6 +160,15 @@ export function FontPicker({ view, family, face, markdown, documentFonts }: Font
       )}
     </span>
   );
+}
+
+/** the marks of the text at the cursor, or of every text in the selection (the first 2000) */
+function* selectedMarks(view: EditorView): Generator<readonly import('prosemirror-model').Mark[]> {
+  const { $from, from, to, empty } = view.state.selection;
+  if (empty) { yield view.state.storedMarks ?? $from.marks(); return; }
+  const sets: (readonly import('prosemirror-model').Mark[])[] = [];
+  view.state.doc.nodesBetween(from, to, n => { if (sets.length >= 2000) return false; if (n.isText) sets.push(n.marks); return true; });
+  yield* sets;
 }
 
 export interface FontListProps {
@@ -175,6 +197,7 @@ export function FontList({ family, current, markdown, documentFonts, inDocument:
   const [cat, setCat] = useState<Catalog | null>(null);
   useEffect(() => { let live = true; void catalog().then(c => { if (live) setCat(c); }); return () => { live = false; }; }, []);
   const recent = useMemo(() => recentFonts(), []);
+  const mine = useMyFonts();
   const pick = (name: string) => {
     const entry = cat?.families.find(f => f.f === name);
     rememberFont(name);
@@ -188,7 +211,8 @@ export function FontList({ family, current, markdown, documentFonts, inDocument:
     return hits.sort((a, b) => Number(!a.f.toLowerCase().startsWith(q)) - Number(!b.f.toLowerCase().startsWith(q)) || a.p - b.p).slice(0, 80);
   }, [cat, q]);
   const byName = (n: string) => cat?.families.find(f => f.f === n) ?? null;
-  const row = (name: string, key: string) => <FontRow key={key} name={name} entry={byName(name)} active={current?.family === name} onPick={() => pick(name)} />;
+  const row = (name: string, key: string) => <FontRow key={key} name={name} entry={byName(name)} active={current?.family === name} onPick={() => pick(name)} mine={mine ? mine.includes(name) : null} />;
+  const others = (names: string[]) => names.filter(n => !mine?.includes(n));
   return (
     <div class="ff-list">
       <input class="ff-search" type="search" placeholder="Search fonts" value={query} autoFocus
@@ -196,7 +220,7 @@ export function FontList({ family, current, markdown, documentFonts, inDocument:
         onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter' && results[0]) { pick(results[0].f); } if (e.key === 'Escape') close(); }} />
       <div class="ff-scroll">
         {q ? (
-          results.length ? results.map(f => row(f.f, 'q' + f.f)) : <div class="ff-empty">{cat ? 'No Google font of that name' : 'Loading the fonts…'}</div>
+          results.length ? results.map(f => row(f.f, 'q' + f.f)) : <div class="ff-empty">{cat?.signin ? SIGN_IN : cat ? 'No Google font of that name' : 'Loading the fonts…'}</div>
         ) : (
           <>
             {onFamily && <div class="tb-popup-title">{markdown ? 'The document’s font' : 'The document’s fonts'}</div>}
@@ -215,10 +239,11 @@ export function FontList({ family, current, markdown, documentFonts, inDocument:
               </div>
             ))}
             {documentFonts && <button type="button" class="tb-pal-item ff-item ff-more" onMouseDown={e => e.preventDefault()} onClick={() => { close(); documentFonts(); }}>{markdown ? 'Typesetting…' : 'Document fonts…'}</button>}
-            {inDoc.length > 0 && <><div class="tb-popup-title">In this document</div>{inDoc.map(n => row(n, 'd' + n))}</>}
-            {recent.filter(n => !inDoc.includes(n)).length > 0 && <><div class="tb-popup-title">Recent</div>{recent.filter(n => !inDoc.includes(n)).map(n => row(n, 'r' + n))}</>}
+            {!!mine?.length && <><div class="tb-popup-title" title="Google fonts kept in your account: here first, in the web app and in VS Code (★ on a font adds or removes it)">My fonts</div>{mine.map(n => row(n, 'm' + n))}</>}
+            {others(inDoc).length > 0 && <><div class="tb-popup-title">In this document</div>{others(inDoc).map(n => row(n, 'd' + n))}</>}
+            {others(recent.filter(n => !inDoc.includes(n))).length > 0 && <><div class="tb-popup-title">Recent</div>{others(recent.filter(n => !inDoc.includes(n))).map(n => row(n, 'r' + n))}</>}
             <div class="tb-popup-title">Popular — Google Fonts</div>
-            {cat ? cat.families.slice(0, 40).map(f => row(f.f, 'p' + f.f)) : <div class="ff-empty">Loading the fonts…</div>}
+            {cat?.signin ? <div class="ff-empty">{SIGN_IN}</div> : cat ? cat.families.slice(0, 40).map(f => row(f.f, 'p' + f.f)) : <div class="ff-empty">Loading the fonts…</div>}
           </>
         )}
       </div>
@@ -226,7 +251,19 @@ export function FontList({ family, current, markdown, documentFonts, inDocument:
   );
 }
 
-function FontRow({ name, entry, active, onPick }: { name: string; entry: CatalogFamily | null; active: boolean; onPick: () => void }) {
+const SIGN_IN = 'Google fonts come from your OverLyX account: sign in (OverLyX: Sign In… in the command palette) to use them here.';
+
+/** ★ / ☆: the font in My fonts or not (a click switches it; `mine` null: no list here) */
+function MyFontStar({ name, mine, label }: { name: string; mine: boolean | null; label?: boolean }) {
+  if (mine === null) return null;
+  const say = mine ? `Remove ${name} from My fonts` : `Add ${name} to My fonts — first in the font list, in the web app and in VS Code`;
+  return <span class={'ff-star' + (mine ? ' on' : '') + (label ? ' labelled' : '')} role="button" tabIndex={-1} title={say} aria-label={say} aria-pressed={mine}
+    onMouseDown={e => { e.preventDefault(); e.stopPropagation(); }} onClick={e => { e.stopPropagation(); void toggleMyFont(name); }}>
+    {mine ? '★' : '☆'}{label && <span>{mine ? ' In my fonts' : ' Add to my fonts'}</span>}
+  </span>;
+}
+
+function FontRow({ name, entry, active, onPick, mine }: { name: string; entry: CatalogFamily | null; active: boolean; onPick: () => void; mine: boolean | null }) {
   const [el, setEl] = useState<HTMLButtonElement | null>(null);
   const sample = useSample(name, el);
   const variable = !!entry?.a.length;
@@ -235,6 +272,7 @@ function FontRow({ name, entry, active, onPick }: { name: string; entry: Catalog
       onMouseDown={e => e.preventDefault()} onClick={onPick}>
       <span class="ff-item-name" style={sample ? { fontFamily: `${sample}, var(--ui-font)` } : undefined}>{name}</span>
       {variable ? <span class="ff-tag" title="A variable font: any weight (and its other axes)">◐</span> : entry && entry.w.length > 1 ? <span class="ff-tag">{entry.w.length}</span> : null}
+      <MyFontStar name={name} mine={mine} />
     </button>
   );
 }
@@ -248,6 +286,7 @@ function FontRow({ name, entry, active, onPick }: { name: string; entry: Catalog
 export function FacePanel({ face, onChange, noWeight }: { face: FontFace; onChange: (f: FontFace) => void; noWeight?: boolean }) {
   const [info, setInfo] = useState<FontInfo | null | undefined>(undefined);
   const [f, setF] = useState(face);
+  const mine = useMyFonts();
   useEffect(() => { let live = true; void fontInfo(face.family).then(i => { if (live) setInfo(i); }); return () => { live = false; }; }, [face.family]);
   useEffect(() => { setF(face); }, [faceValue(face)]);
   const raf = useRef(0);
@@ -279,7 +318,7 @@ export function FacePanel({ face, onChange, noWeight }: { face: FontFace; onChan
   const more = info.axes.filter(a => a.tag !== a.tag.toLowerCase());
   return (
     <div class="ff-panel">
-      <div class="tb-popup-title">{face.family}{info.axes.length ? ' — variable' : ''}</div>
+      <div class="tb-popup-title ff-panel-title">{face.family}{info.axes.length ? ' — variable' : ''}<MyFontStar name={info.family} mine={mine ? mine.includes(info.family) : null} label /></div>
       {info.axes.length
         ? main.map(slider)
         : !noWeight && info.weights.length > 1 && <WeightRungs weights={info.weights} value={f.axes.wght ?? 400} onChange={v => setAxis('wght', v === 400 ? null : v)} />}

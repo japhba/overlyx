@@ -36,6 +36,7 @@ import { inEditor } from './agents/handover.ts';
 import { placeSelection, SELECTION_MAX } from './shared/agentSelection.ts';
 import * as build from './host/build.ts';
 import { initAppearance } from './host/appearance.ts';
+import { fontService } from './host/fonts.ts';
 import type { InteractionAction } from '@overlyx/core/interactions.ts';
 import type { HostToEditor } from './shared/protocol.ts';
 
@@ -310,6 +311,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
       synctexView: (docId, line, column) => build.synctexView(docId, line, column),
       synctexEdit: (docId, page, x, y) => build.synctexEdit(docId, page, x, y),
       cacheDir: () => path.join(context.globalStorageUri.fsPath, 'graphics'),
+      fonts: fontService(path.join(context.globalStorageUri.fsPath, 'google-fonts')),
       dictionary: (lang, ext) => {
         const bundled = path.join(context.extensionPath, 'dist/dict', `${lang}.${ext}`);
         if (fs.existsSync(bundled)) return bundled;

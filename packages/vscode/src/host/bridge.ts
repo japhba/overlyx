@@ -50,6 +50,8 @@ export interface BridgeDelegate {
   agentTool(call: { tool: string; args: Record<string, unknown>; author: string; cwd: string }): Promise<{ result?: unknown; error?: string; gone?: boolean }>;
   /** what was selected last in this window's OverLyX editors, placed in its file (shared/agentSelection.ts), for the tool server's get_selection */
   agentSelection(): unknown;
+  /** Google fonts and the account's My fonts, from the OverLyX server signed in to (fonts.ts): `/api/fonts/<sub>` */
+  fonts?(method: string, sub: string, search: string, body?: unknown): Promise<{ status: number; type: string; body: Buffer | string; cache?: string }>;
 }
 
 const JSON_LIMIT = 32 * 1024 * 1024;
@@ -109,6 +111,17 @@ export class Bridge {
     if (api === '/usage' && req.method === 'POST') {
       const stored = d.usageBatch?.(await body(req, 64 * 1024)) ?? 0;
       if (!stored) { res.statusCode = 204; res.end(); } else send(res, 200, { stored });
+      return;
+    }
+
+    // Google fonts: the font list, the fonts a document names (fonts.ts)
+    m = /^\/fonts\/(.+)$/.exec(api);
+    if (m && d.fonts) {
+      const r = await d.fonts(req.method ?? 'GET', m[1], url.search, req.method === 'PUT' ? await body(req, 64 * 1024) : undefined);
+      res.statusCode = r.status;
+      res.setHeader('Content-Type', r.type);
+      if (r.cache) res.setHeader('Cache-Control', r.cache);
+      res.end(r.body);
       return;
     }
 

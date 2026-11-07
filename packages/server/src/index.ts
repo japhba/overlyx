@@ -32,6 +32,7 @@ import { listProjects, resolveProjectPath, assertWritableRelPath, projectDir, cr
 import { isMarkdownPath } from '@overlyx/core/md/index.ts';
 import { markdownStyle, setMarkdownStyle } from './mdstyle.ts';
 import { googleFontRoutes } from './googlefonts.ts';
+import { myFontRoutes } from './myfonts.ts';
 import { snippetSvg, snippetFile } from './snippets.ts';
 import { importLyxFile, parseFragmentText, newLayoutDocumentText, withDocumentSettings, NO_INDENT_SETTINGS } from './texdoc.ts';
 import { importLyxUpload } from './lyximport.ts';
@@ -225,6 +226,8 @@ api.use(googleFontRoutes());
 api.use(usageRoutes());
 api.use(agentRoutes());
 // agents connected over MCP from elsewhere: the account's list, and messages to them (mcpAgents.ts)
+// the account's own Google fonts, first in every font list (myfonts.ts)
+api.use(myFontRoutes());
 api.use(mcpAgentRoutes());
 
 /* ----------------------------------------------------------------- access */

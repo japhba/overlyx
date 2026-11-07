@@ -359,12 +359,14 @@ export function googleFontRoutes(): express.Router {
     const family = String(req.query.family ?? '');
     const f = validFamily(family) ? await googleFont(family) : null;
     res.type('text/css').setHeader('Cache-Control', 'private, max-age=86400');
+    // (the files' addresses relative to this stylesheet: the same rules serve /api/fonts and the git
+    // API's /git/api/fonts, which the VS Code extension's bridge passes on — myfonts.ts)
     if (!f) { res.send(`/* "${family.replace(/[^\w ]/g, '')}": not a Google font here */`); return; }
     const wght = f.axes?.find(a => a.t === 'wght'), wdth = f.axes?.find(a => a.t === 'wdth');
     res.send(f.files.map(x => {
       const weight = f.axes ? (wght ? `${wght.min} ${wght.max}` : String(x.weight)) : String(x.weight);
       const stretch = wdth ? ` font-stretch: ${wdth.min}% ${wdth.max}%;` : '';
-      return `@font-face { font-family: ${JSON.stringify(f.family)}; font-style: ${x.style}; font-weight: ${weight};${stretch} font-display: swap; src: url(/api/fonts/google/${f.slug}/${x.file}) format('truetype'); }`;
+      return `@font-face { font-family: ${JSON.stringify(f.family)}; font-style: ${x.style}; font-weight: ${weight};${stretch} font-display: swap; src: url(google/${f.slug}/${x.file}) format('truetype'); }`;
     }).join('\n'));
   });
   r.get('/fonts/google/:slug/:file', (req, res) => {

@@ -35,9 +35,10 @@ export async function webviewHtml(webview: vscode.Webview, extensionUri: vscode.
     "default-src 'none'",
     `base-uri ${live ? dev : "'none'"}`,
     `img-src ${webview.cspSource} data: blob: http://127.0.0.1:* ${bridgeOrigin} ${dev}`,
-    // the editor's fonts (Settings ▸ Editor ▸ Text font / Math font) come with the webview bundle (fonts/web)
-    `style-src ${webview.cspSource} 'unsafe-inline' ${dev}`,
-    `font-src ${webview.cspSource} data: ${dev}`,
+    // the editor's fonts (Settings ▸ Editor ▸ Text font / Math font) come with the webview bundle (fonts/web);
+    // Google fonts (a document's fonts by name, the font list) from the bridge (fonts.ts)
+    `style-src ${webview.cspSource} 'unsafe-inline' ${bridgeOrigin} ${dev}`,
+    `font-src ${webview.cspSource} data: ${bridgeOrigin} ${dev}`,
     `script-src 'nonce-${nonce}' ${webview.cspSource} ${dev}`,
     `connect-src http://127.0.0.1:* ${bridgeOrigin} ${webview.cspSource} ${dev} ${dev.replace(/^http/, 'ws')}`,
     "worker-src blob: data:",

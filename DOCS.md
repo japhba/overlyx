@@ -3904,8 +3904,30 @@ selection at once.
   TrueType files are only the fallback — they lack most OpenType features (Inter's: 11 of 43).
   A family cached before (static css2 files) is fetched again (manifest `v`). The browser loads the
   same files (`/api/fonts/google.css`: a variable font's @font-face has weight and width ranges;
-  `editor/plugins/fontfaces.ts` loads the families a document uses). The font routes need a signed-in
-  user; the VS Code webview has none of them (the list then has the document's families only).
+  `editor/plugins/fontfaces.ts` loads the families a document uses; the stylesheet names its files
+  relative to itself, `google/<slug>/<file>`, so it serves under any prefix). The font routes need a
+  signed-in user.
+* **My fonts** (`server/myfonts.ts`, the account's `users.settings.fonts`; `GET`/`PUT /api/fonts/mine`;
+  client `fonts/myfonts.ts`): Google fonts installed into the account — ★ on a row of the list (shown
+  on hover, kept while in the list) or *Add to my fonts* in the panel's title. They come first in
+  every font list (then *In this document*, *Recent* without them), in the web app and in VS Code. A
+  font added is fetched into the server's cache at once (every axis and OpenType feature: the
+  repository's files). At most 200; guests and read-only sign-ins cannot change them.
+* **In VS Code** the webviews ask the extension's bridge (`OVERLYX_API_BASE`, `fontApi()` in
+  `fonts/googlefont.ts`), and the bridge (`vscode/src/host/fonts.ts`) asks the OverLyX server the
+  computer is signed in to (the CLI's and the extension's sign-in, overlyx.app first) through its git
+  API — `/git/api/fonts/*`, the same routes with Basic auth (`server/git.ts`). It keeps what it got
+  in the extension's storage (`google-fonts/`: font files for good, the catalogue, stylesheets and
+  descriptions refreshed daily) and answers from there when the server is away; reading My fonts
+  fetches their files, so they work offline. The webview's CSP allows the bridge's origin for styles
+  and fonts. Signed in nowhere, the list says to sign in (*OverLyX: Sign In…*). Local PDF builds in
+  VS Code do not get the files (the server's builds do: `ol-fonts/` above).
+* **Faked styles** (`fonts/fakestyles.ts`): where the text at the cursor or in the selection is bold,
+  italic (or emphasized, slanted) or in small capitals and its font by name has no such face — no
+  weight of 600 or more, no italic files (a slant axis does not count: the stylesheet declares the
+  files upright), no `smcp` feature — the font button shows an orange "!" beside the name. Its
+  tooltip says what is faked (the browser thickens, slants or shrinks the letters; the PDF finds no
+  such face and prints the text regular, upright, in lower case) and to pick a font that has it.
 
 ## Text styles
 
