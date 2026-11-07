@@ -661,6 +661,138 @@ export async function transcribeSpeech(req: { audio: string; lang?: string }, si
   return parseSpeechReply(reply);
 }
 
+/*
+ * Whisper (OpenAI's speech-to-text) for spoken comments: on the account's own OpenAI API key (the
+ * model menu's keys, agentkeys.ts) or else the server's OVERLYX_OPENAI_API_KEY. It takes the browser's
+ * recording as it is (webm/opus, Safari's mp4, ogg, wav) and answers sentence-sized segments with the
+ * times of their words — what core/voicecomment.ts needs to tell which strokes went with which words.
+ */
+
+/** a recording for Whisper at most (base64; OpenAI takes files up to 25 MB, the request body here 24 MB): over an hour at the browser's 32 kbit/s */
+export const WHISPER_MAX_AUDIO = 23_000_000;
+export type SpeechEngine = 'whisper' | 'gemini';
+/** what can put this account's recordings into words on the server: Whisper on its own key or the server's, Gemini on the server's OpenRouter key */
+export interface SpeechOptions { whisper: 'own' | 'server' | null; gemini: boolean; whisperModel: string; geminiModel: string }
+export function speechOptions(userId?: number): SpeechOptions {
+  const own = userId !== undefined && !!keyOf(userId, 'openai');
+  return { whisper: own ? 'own' : config.openai.apiKey ? 'server' : null, gemini: aiAvailable(), whisperModel: config.ai.whisperModel, geminiModel: config.ai.speechModel };
+}
+/** The engine a recording goes to: the one asked for when the account has it, else Whisper before Gemini; null: none on this server. */
+export function pickSpeech(requested: unknown, o: SpeechOptions): SpeechEngine | null {
+  if (requested === 'whisper' && o.whisper) return 'whisper';
+  if (requested === 'gemini' && o.gemini) return 'gemini';
+  return o.whisper ? 'whisper' : o.gemini ? 'gemini' : null;
+}
+
+/** a recording's kind by its first bytes (the browser's MediaRecorder: webm in Chrome/Firefox, mp4 in Safari): the file name ending Whisper goes by */
+export function audioKind(b: Buffer): { ext: string; mime: string } | null {
+  if (b.length < 12) return null;
+  if (b.toString('latin1', 0, 4) === 'RIFF' && b.toString('latin1', 8, 12) === 'WAVE') return { ext: 'wav', mime: 'audio/wav' };
+  if (b.readUInt32BE(0) === 0x1a45dfa3) return { ext: 'webm', mime: 'audio/webm' };
+  if (b.toString('latin1', 0, 4) === 'OggS') return { ext: 'ogg', mime: 'audio/ogg' };
+  if (b.toString('latin1', 4, 8) === 'ftyp') return { ext: 'm4a', mime: 'audio/mp4' };
+  if (b.toString('latin1', 0, 3) === 'ID3' || (b[0] === 0xff && (b[1] & 0xe0) === 0xe0)) return { ext: 'mp3', mime: 'audio/mpeg' };
+  return null;
+}
+
+interface WhisperSegment { start?: unknown; end?: unknown; text?: unknown; avg_logprob?: unknown; no_speech_prob?: unknown }
+interface WhisperWord { word?: unknown; start?: unknown; end?: unknown }
+const fin = (v: unknown, d = 0) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
+const r2 = (v: number) => Math.round(v * 100) / 100;
+
+/**
+ * Whisper's verbose_json as a comment's stretches `{t (s), text}`: each segment cut into its sentences,
+ * a sentence timed by its first word (Whisper's words carry no punctuation, so they are counted off
+ * along the segment's text), segments Whisper itself would call silence left out (its transcribe.py:
+ * no_speech_prob > 0.6 with avg_logprob < −1 — the "Thank you." it hears in a quiet room).
+ */
+export function whisperStretches(json: unknown): { t: number; text: string }[] {
+  const o = (json && typeof json === 'object' ? json : {}) as { text?: unknown; segments?: unknown; words?: unknown };
+  if (!Array.isArray(o.segments)) {
+    const text = String(o.text ?? '').replace(/\s+/g, ' ').trim();
+    return text ? [{ t: 0, text: text.slice(0, 20000) }] : [];
+  }
+  const words = (Array.isArray(o.words) ? o.words as WhisperWord[] : [])
+    .filter(w => w && typeof w.word === 'string' && typeof w.start === 'number' && Number.isFinite(w.start))
+    .map(w => ({ start: w.start as number, word: String(w.word).trim() })).filter(w => w.word);
+  const out: { t: number; text: string }[] = [];
+  let last = 0;
+  for (const s of o.segments as WhisperSegment[]) {
+    if (!s || typeof s.text !== 'string') continue;
+    if (fin(s.no_speech_prob) > 0.6 && fin(s.avg_logprob) < -1) continue;
+    const text = s.text.replace(/\s+/g, ' ').trim();
+    if (!text) continue;
+    const start = Math.max(0, fin(s.start)), end = Math.max(start, fin(s.end, start));
+    const own = words.filter(w => w.start >= start - 0.05 && w.start < end + 0.05);
+    const sentences = text.match(/[^.!?…]+[.!?…]+["'”’)\]]*\s*|[^.!?…]+$/g) ?? [text];
+    let k = 0, chars = 0;
+    for (const raw of sentences) {
+      const sentence = raw.trim();
+      if (!sentence) { chars += raw.length; continue; }
+      // its first word's time; failing that, as far into the segment as it is into the text
+      const t = own[k]?.start ?? start + (end - start) * (chars / text.length);
+      const at = r2(Math.min(end, Math.max(start, last, t)));
+      out.push({ t: at, text: sentence });
+      last = at;
+      k += sentence.split(/\s+/).filter(Boolean).length;
+      chars += raw.length;
+    }
+    if (out.length >= 400) break;
+  }
+  return out.slice(0, 400);
+}
+
+/** ISO-639-1 from the browser's language (`en-GB` → `en`): what Whisper takes as a hint */
+const whisperLanguage = (lang: unknown) => (typeof lang === 'string' && /^[a-z]{2}(?:[-_][A-Za-z0-9]+)*$/i.test(lang) ? lang.slice(0, 2).toLowerCase() : undefined);
+
+/** A recording put into words by Whisper: the account's own OpenAI key, else the server's. */
+export async function transcribeWhisper(req: { audio: string; lang?: string }, userId: number | undefined, signal?: AbortSignal): Promise<{ t: number; text: string }[]> {
+  const audio = String(req.audio ?? '');
+  if (!/^[A-Za-z0-9+/]+=*$/.test(audio)) throw new AiError('The recording could not be read.', 400);
+  if (audio.length > WHISPER_MAX_AUDIO) throw new AiError('The recording is too long for one comment — keep it under an hour.', 413);
+  const own = userId !== undefined ? keyOf(userId, 'openai') : null;
+  const key = own ?? config.openai.apiKey;
+  if (!key) throw new AiError('Whisper needs an OpenAI API key: add yours from the model menu (Settings ▸ AI), or the administrator sets OVERLYX_OPENAI_API_KEY.', 503);
+  const buf = Buffer.from(audio, 'base64');
+  const kind = audioKind(buf);
+  if (!kind) throw new AiError('The recording is in a format Whisper does not take (webm, mp4, ogg, wav or mp3).', 400);
+  const model = config.ai.whisperModel;
+  const timed = /^whisper/.test(model);
+  const form = new FormData();
+  form.append('file', new Blob([new Uint8Array(buf)], { type: kind.mime }), `comment.${kind.ext}`);
+  form.append('model', model);
+  form.append('response_format', timed ? 'verbose_json' : 'json');
+  if (timed) { form.append('timestamp_granularities[]', 'segment'); form.append('timestamp_granularities[]', 'word'); }
+  form.append('temperature', '0');
+  const language = whisperLanguage(req.lang);
+  if (language) form.append('language', language);
+  const t0 = Date.now();
+  let res: Response;
+  try {
+    res = await fetch(`${upstreamOf('openai')}/v1/audio/transcriptions`, { method: 'POST', signal, headers: { Authorization: `Bearer ${key}` }, body: form });
+  } catch (e) {
+    if ((e as Error).name === 'AbortError') throw new AiError('cancelled', 499);
+    throw new AiError(`Could not reach OpenAI: ${(e as Error).message}`);
+  }
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    let message = '';
+    try { message = String((JSON.parse(body) as { error?: { message?: unknown } }).error?.message ?? ''); } catch { message = body.slice(0, 300); }
+    console.warn(`[ai] whisper ${own ? 'own key' : 'server key'} failed (${res.status}) after ${Date.now() - t0} ms`);
+    if (res.status === 401 || res.status === 403) throw own
+      ? new AiError('OpenAI refused your key — replace it from the model menu (Settings ▸ AI).', 400)
+      : new AiError('OpenAI refused the server’s key — the administrator has to replace OVERLYX_OPENAI_API_KEY.', 502);
+    if (res.status === 429) throw new AiError(/quota|billing/i.test(body)
+      ? `${own ? 'Your' : 'The server’s'} OpenAI key has no credit left — see Billing at platform.openai.com.`
+      : 'OpenAI is limiting requests on this key — try again in a minute.', 429);
+    if (res.status === 413) throw new AiError('The recording is too large for Whisper (25 MB at most).', 413);
+    throw new AiError(`Whisper could not transcribe the recording (${res.status})${message ? `: ${message}` : ''}`);
+  }
+  const json = await res.json().catch(() => null) as unknown;
+  console.log(`[ai] whisper ${model} (${own ? 'own key' : 'server key'}): ${Date.now() - t0} ms, ${Math.round(buf.length / 1024)} KB in`);
+  return whisperStretches(json);
+}
+
 /* ------------------------------------------------------------------ rate limiting */
 
 const buckets = new Map<string, number[]>();

@@ -1248,19 +1248,35 @@ blend.
     With the comment pen in hand a **microphone pill** sits over the canvas (it stays while the Draw
     row folds away): **hold** the microphone to talk — draw with the other hand or the Pencil — and
     let go to finish; a **tap**, or the **lock**, records hands-free until the microphone (then ■) is
-    tapped. The words: the browser's speech recognition where there is one (Chrome / Edge: Google's
-    speech service; Safari on the Mac and the iPad: Apple's — said in the button's tooltip), words at
-    their time as they are heard, a caption in the pill; otherwise (Firefox, or the service refusing)
-    a recording (MediaRecorder) that goes, as 16 kHz WAV, to `POST /api/ai/transcribe` (ai.ts
-    `transcribeSpeech`, OpenRouter `input_audio`, `OVERLYX_AI_SPEECH_MODEL`, default the ink reader's
-    Gemini; 60 an hour per account); where that is not set up either, **the recording is kept** in the
+    tapped. **Who puts it into words** is an AI feature (Settings ▸ AI ▸ *Spoken comments*, kept per
+    browser as `speechEngine`; `deliverable/speechchoice.ts`; said in the button's tooltip and the
+    settings): *Automatic* (the default) takes **Whisper** where the account has an OpenAI key — its own
+    API key from the model menu (agentkeys.ts, sealed; used by the server, never sent to the browser),
+    else the server's `OVERLYX_OPENAI_API_KEY` (see Secrets) — then the browser's speech recognition,
+    then Gemini on the server; a chosen one that is not there falls back in that order. *Whisper*: a
+    recording (MediaRecorder: webm/opus, Safari's mp4) goes, as the browser made it, to `POST
+    /api/ai/transcribe` with `engine: 'whisper'` when the microphone is let go (ai.ts
+    `transcribeWhisper`: OpenAI `/v1/audio/transcriptions`, `OVERLYX_AI_WHISPER_MODEL` default `whisper-1`
+    — the one model with `timestamp_granularities`, so the words come back with their times —
+    `verbose_json`, the browser's language as a hint; 25 MB / over an hour at most); `whisperStretches`
+    cuts the segments into sentences timed by their first word and drops what Whisper itself calls
+    silence (`no_speech_prob` > 0.6 with `avg_logprob` < −1); about $0.006 a minute (OpenAI's price
+    list, Nov 2026). Meanwhile the pill shows how loud the microphone hears you (`startMeter`) — no
+    live caption, which would send the same audio to Google or Apple as well. *The browser's speech
+    recognition* (Chrome / Edge: Google's speech service; Safari on the Mac and the iPad: Apple's):
+    words at their time as they are heard, a caption in the pill, nothing through the server; when the
+    service refuses (offline, the language), a recording for the server's engines instead. *Gemini*:
+    the recording as 16 kHz WAV, `engine: 'gemini'` (`transcribeSpeech`, OpenRouter `input_audio`,
+    `OVERLYX_AI_SPEECH_MODEL`, default the ink reader's Gemini). 60 an hour per account either way; the
+    answer says which engine heard it, and a failing one (no credit, a refused key) is followed by the
+    other before giving up. Where nothing can, **the recording is kept** in the
     project next to the page (`comments/voice-YYYYMMDD-HHMMSS.webm`, through the host's upload) and
-    the comment says it was not transcribed. A finished recording and the comment strokes drawn
+    the comment says it was not transcribed (the pill says why). A finished recording and the comment strokes drawn
     during it — or in the 30 s before it (`LEAD_MS`: draw, then explain) — become **comment threads,
     one per slide** they touch (turning the slide while talking splits the words by the slide shown;
     a slide only drawn on gets all of them), on the slide, by this person (`planVoiceComments`). A
     thread holds, besides the usual fields, `voice` (`start`, `secs`, `said: [{t: ms from the start,
-    text}]`, `how`: device / server / none, `audio`) and `ink` (`ids` of its strokes, their `box` in
+    text}]`, `how`: device / whisper / server (Gemini) / none, `audio`) and `ink` (`ids` of its strokes, their `box` in
     slide px, `on`: the objects under them in a few words — `runtime/edit.ts strokeUnder` sends their
     paths with the stroke). The Review pane shows "Spoken · 0:12 · 2 marks over “Results”"; a click
     selects its strokes; **resolving or deleting it takes its strokes away** (Undo brings them
@@ -3262,6 +3278,13 @@ every reply (2.6 s) and, like 3.5 Flash Lite, answered sentence ends of a real p
 nothing; 2.5 Flash Lite writes sentences in 0.5–1 s, see `scratch/ai-bench.mjs`; `OVERLYX_AI_REWRITES_PER_MIN`,
 `OVERLYX_AI_COMPLETIONS_PER_MIN` rate limits per user). `GET /api/ai/status` tells the client
 whether it is configured; the features stay off in every browser until a user switches them on.
+
+`OVERLYX_OPENAI_API_KEY` (optional, from platform.openai.com ▸ API keys) transcribes spoken comments
+with OpenAI's Whisper for every account that has no OpenAI key of its own (about $0.006 a minute;
+`OVERLYX_AI_WHISPER_MODEL`, default `whisper-1`); a name of its own, so an `OPENAI_API_KEY` set for
+another tool is never billed for it. Without it accounts with their own key still get Whisper, the
+others the browser's speech recognition or Gemini on `OPENROUTER_API_KEY` (*Spoken comments* under
+the deck docs). `GET /api/ai/status` says, per account, which of them it has (`speech`).
 
 ## Backups and restoring
 

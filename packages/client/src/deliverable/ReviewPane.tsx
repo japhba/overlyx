@@ -212,7 +212,7 @@ function VoiceLine({ th }: { th: ReviewThread['thread'] }) {
   const on = [...new Set((k?.on ?? []).map(w => (/\\[A-Za-z([]/.test(w) ? 'a formula' : w)))];
   if (k?.ids.length) parts.push(`${k.ids.length} mark${k.ids.length > 1 ? 's' : ''}${on.length ? ' over ' + on.slice(0, 3).join(', ') + (on.length > 3 ? ' …' : '') : ''}`);
   return (
-    <div class="dl-rv-voice" data-rv-voice title={v ? (v.how === 'device' ? 'Put into words by the browser’s speech recognition' : v.how === 'server' ? 'Put into words by the server’s AI' : 'Not put into words: the recording is kept in the project') : undefined}>
+    <div class="dl-rv-voice" data-rv-voice title={v ? (v.how === 'device' ? 'Put into words by the browser’s speech recognition' : v.how === 'whisper' ? 'Put into words by OpenAI’s Whisper' : v.how === 'server' ? 'Put into words by the server’s AI (Gemini)' : 'Not put into words: the recording is kept in the project') : undefined}>
       <span class="dl-rv-voice-mark" aria-hidden="true" />{parts.join(' · ')}
       {v?.audio && <div class="dl-rv-voice-file">Recording: {v.audio}</div>}
     </div>

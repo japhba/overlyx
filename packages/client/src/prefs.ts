@@ -74,6 +74,8 @@ export interface Prefs {
    * cursor: on touch screens until a hardware keyboard is used ('auto'), always, or never
    */
   mathKeyboard: 'auto' | 'on' | 'off';
+  /** who puts spoken comments into words (deliverable/speechchoice.ts): Whisper, the browser's recognition, Gemini, or the first of them available */
+  speechEngine: 'auto' | 'whisper' | 'device' | 'gemini';
   /** the math keyboard's pen: handwriting is read by an AI model (a picture of it goes through the server) */
   aiInk: boolean;
   /** autoCorrect was set by the person (not the old default, see load) */
@@ -82,7 +84,7 @@ export interface Prefs {
   showResolvedComments: boolean;
 }
 
-export const DEFAULT_PREFS: Prefs = { spellcheck: true, spellEngine: 'overlyx', autoCorrect: false, aiButton: false, aiRewrite: false, aiCompleteText: false, aiCompleteMath: false, aiCompleteDelay: 200, darkPages: true, invertFigures: true, aiModel: '', aiCompletionModel: '', darkTone: 'white', usageStats: true, betaDiagnostics: false, autoBuild: 'shown', autoBuildDelay: 1, editorFont: 'document', editorMathFont: 'match', screenStyles: {}, shortcutTips: true, selectionBar: true, mathKeyboard: 'auto', aiInk: false, showResolvedComments: false };
+export const DEFAULT_PREFS: Prefs = { spellcheck: true, spellEngine: 'overlyx', autoCorrect: false, aiButton: false, aiRewrite: false, aiCompleteText: false, aiCompleteMath: false, aiCompleteDelay: 200, darkPages: true, invertFigures: true, aiModel: '', aiCompletionModel: '', darkTone: 'white', usageStats: true, betaDiagnostics: false, autoBuild: 'shown', autoBuildDelay: 1, editorFont: 'document', editorMathFont: 'match', screenStyles: {}, shortcutTips: true, selectionBar: true, mathKeyboard: 'auto', aiInk: false, speechEngine: 'auto', showResolvedComments: false };
 /** delays that were the default in earlier builds: a stored one of these follows the current default */
 const OLD_DEFAULT_DELAYS = new Set([600, 450]);
 const STORAGE = 'ol.prefs';

@@ -3239,6 +3239,9 @@ select.dl-zoom { appearance: none; -webkit-appearance: none; text-align: center;
 .dl-voicepill-dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: #e0284b; animation: dl-rec-blink 1.2s ease-in-out infinite; }
 @keyframes dl-rec-blink { 50% { opacity: .25; } }
 .dl-voicepill-time { flex: none; font-variant-numeric: tabular-nums; color: var(--ui-muted); }
+/* how loud the microphone hears it while the recording goes to Whisper / Gemini afterwards (voice.ts startMeter) */
+.dl-voicepill-level { flex: none; width: 34px; height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--ui-muted) 25%, transparent); overflow: hidden; }
+.dl-voicepill-level::before { content: ''; display: block; height: 100%; width: calc(var(--lv, 0) * 100%); background: #ff5c00; border-radius: inherit; transition: width .1s linear; }
 .dl-voicepill-what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dl-voicepill-what.hint, .dl-voicepill.working .dl-voicepill-what { color: var(--ui-muted); }
 .dl-voicepill-what.error { white-space: normal; color: #c4312a; }

@@ -5,10 +5,11 @@
  *   until let go (draw with the other hand, or the Pencil); a short tap records hands-free —, and the
  *   lock, which keeps a recording going hands-free (or starts one);
  * - `VoicePill`, over the canvas while recording (the Draw row may fold away meanwhile): the time, the
- *   words heard last, Stop; then "Making the comment…", and what went wrong, if anything.
+ *   words heard last (or, while the recording goes to Whisper / Gemini afterwards, how loud it hears
+ *   you), Stop; then "Making the comment…", and what went wrong, if anything.
  */
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { voiceView, subscribeVoice, startTalk, releaseTalk, stopTalk, setLocked, canTalk, hearer, type VoiceView } from './voice';
+import { voiceView, subscribeVoice, startTalk, releaseTalk, stopTalk, setLocked, canTalk, hearer, primeVoice, type VoiceView } from './voice';
 import { clock } from '@overlyx/core/voicecomment.ts';
 
 function useVoice(): VoiceView {
@@ -29,6 +30,8 @@ const UNLOCK = '<svg viewBox="0 0 16 16" fill="none"><rect x="3.5" y="7" width="
 export function TalkButtons({ owner, slide }: { owner: object; slide: () => number }) {
   const v = useVoice();
   const down = useRef(0);
+  // who will hear it (Whisper needs the server's word on the account's keys) — known before the first press
+  useEffect(() => { primeVoice(); }, []);
   if (!canTalk()) return null;
   const recording = v.phase === 'recording' || v.phase === 'starting';
   const onDown = (e: PointerEvent) => {
@@ -94,6 +97,7 @@ export function VoicePill({ armed, owner, slide }: { armed: boolean; owner: obje
       {recording && <>
         <span class="dl-voicepill-dot" aria-hidden="true" />
         <span class="dl-voicepill-time">{clock(Date.now() - v.since)}</span>
+        {v.level !== null && <span class="dl-voicepill-level" aria-hidden="true" style={`--lv:${v.level}`} />}
         <span class="dl-voicepill-what">{v.caption || (v.locked ? 'Listening — tap the microphone to stop' : 'Listening — let go to finish')}</span>
       </>}
       {v.phase === 'working' && <span class="dl-voicepill-what">Making the comment…</span>}

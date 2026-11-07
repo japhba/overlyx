@@ -73,7 +73,9 @@ export interface HealthIssue { code: string; message: string; severity: 'warning
 /** ProseMirror JSON (nodes of the editor schema) as the server returns them for AI proposals */
 export interface PMJSON { type: string; attrs?: Record<string, any>; content?: PMJSON[]; marks?: { type: string; attrs?: Record<string, any> }[]; text?: string }
 export interface AiModelInfo { id: string; label: string; note: string; /** Artificial Analysis Intelligence Index */ aa?: number; /** measured rewrite (⌘J) response time */ speed: string }
-export interface AiStatus { available: boolean; model: string; completionModel: string; inkModel?: string; models: AiModelInfo[] }
+/** what can transcribe this account's spoken comments on the server (ai.ts speechOptions): Whisper on its own OpenAI key or the server's, Gemini on the server's OpenRouter key */
+export interface AiSpeechOptions { whisper: 'own' | 'server' | null; gemini: boolean; whisperModel: string; geminiModel: string }
+export interface AiStatus { available: boolean; model: string; completionModel: string; inkModel?: string; models: AiModelInfo[]; speech?: AiSpeechOptions }
 /** the math keyboard's pen: the handwriting as a PNG data URL, the formula around the cursor */
 export interface AiInkRequest { image: string; before?: string; after?: string; text?: boolean; /** handwritten notes (the lasso's Convert to text): text with $…$ math, not a formula */ notes?: boolean }
 export interface AiRewriteRequest { instruction: string; content: PMJSON[]; layout?: string; before?: string; after?: string; model?: string; math?: { latex: string; display: boolean; selection?: string }; source?: { text: string; before?: string; after?: string }; history?: { instruction: string; tex: string }[] }
@@ -430,7 +432,7 @@ export const api = {
   aiComplete: (id: string, body: AiCompleteRequest, signal?: AbortSignal) => req<AiCompleteResult>('POST', `/api/docs/${encId(id)}/ai/complete`, body, undefined, signal),
   aiInk: (body: AiInkRequest, signal?: AbortSignal) => req<{ candidates: string[] }>('POST', '/api/ai/ink', body, undefined, signal),
   /** a spoken comment (the comment pen's push to talk) put into words by the server's AI: 16 kHz mono WAV, base64 */
-  aiTranscribe: (body: { audio: string; lang?: string }, signal?: AbortSignal) => req<{ said: { t: number; text: string }[] }>('POST', '/api/ai/transcribe', body, undefined, signal),
+  aiTranscribe: (body: { audio: string; lang?: string; engine?: 'whisper' | 'gemini' }, signal?: AbortSignal) => req<{ said: { t: number; text: string }[]; engine?: 'whisper' | 'gemini' }>('POST', '/api/ai/transcribe', body, undefined, signal),
   /** the account's own AI (server linkedai.ts: the Agent panel's ChatGPT sign-in, or a listening MCP agent): its name, null when none is linked */
   aiLinked: () => req<{ via: string | null }>('GET', '/api/ai/linked'),
   aiMerge: (id: string, body: AiMergeRequest, signal?: AbortSignal) => req<AiMergeResult>('POST', `/api/docs/${encId(id)}/ai/merge`, body, undefined, signal),
