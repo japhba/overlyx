@@ -105,6 +105,12 @@ function escapeText(s: string): string {
   return s.replace(/[\\{}$&#%_^~]/g, c => (c === '\\' ? '\\textbackslash ' : c === '~' ? '\\textasciitilde ' : c === '^' ? '\\textasciicircum ' : '\\' + c));
 }
 
+/** Editor labels need a text wrapper only when they stand in math mode. */
+function textToTex(s: string, mode: 'math' | 'text'): string {
+  const text = escapeText(s);
+  return mode === 'text' ? text : `\\text{${text}}`;
+}
+
 function charToTex(c: string, mode: 'math' | 'text'): string {
   if (mode === 'text') return escapeText(c);
   switch (c) {
@@ -260,7 +266,7 @@ export function atomToTex(a: Atom, ctx: TexContext, mode: 'math' | 'text'): stri
     case 'overset': case 'underset': return `\\${a.t}{${cellToTex(a.top, ctx, a, 1)}}{${cellToTex(a.body, ctx, a, 0)}}`;
     case 'stackrel': return `\\stackrel{${cellToTex(a.top, ctx, a, 1)}}{${cellToTex(a.body, ctx, a, 0)}}`;
     case 'xarrow': return `\\${a.n}${a.opt ? `[${cellToTex(a.opt, ctx, a, 1)}]` : ''}{${cellToTex(a.body, ctx, a, 0)}}`;
-    case 'ref': return `\\htmlClass{lm-ref}{\\text{${escapeText(a.label)}}}`;
+    case 'ref': return `\\htmlClass{lm-ref}{${textToTex(a.label, mode)}}`;
     // drawn as a link (styles.css .lm-href), not MathJax's \href: a click in the editor edits, ⌘/Ctrl+click follows it
     case 'href': return `\\htmlClass{lm-href}{${cellToTex(a.body, ctx, a, 0, mode)}}`;
     case 'grid': return gridToTex(a, ctx, mode);
@@ -270,10 +276,10 @@ export function atomToTex(a: Atom, ctx: TexContext, mode: 'math' | 'text'): stri
       if (n !== undefined) return n;
       if (a.n.length === 1 && !/[A-Za-z]/.test(a.n)) return '\\' + a.n;
       shownAsCode('math', a.n);
-      return `\\htmlClass{lm-unknown}{\\text{\\textbackslash ${escapeText(a.n)}}}` + (a.limits ? '' : '');
+      return `\\htmlClass{lm-unknown}{${textToTex('\\' + a.n, mode)}}` + (a.limits ? '' : '');
     }
-    case 'hash': return `\\htmlClass{lm-arg}{\\text{${escapeText(a.n)}}}`;
-    case 'comment': return `\\htmlClass{lm-comment}{\\text{\\%${escapeText(a.text)}}}`;
+    case 'hash': return `\\htmlClass{lm-arg}{${textToTex(a.n, mode)}}`;
+    case 'comment': return `\\htmlClass{lm-comment}{${textToTex('%' + a.text, mode)}}`;
     case 'env': shownAsCode('env', a.n); return `\\htmlClass{lm-unknown}{\\text{\\textbackslash begin\\{${escapeText(a.n)}\\}}}${cellToTex(a.body, ctx, a, 0, mode)}\\htmlClass{lm-unknown}{\\text{\\textbackslash end\\{${escapeText(a.n)}\\}}}`;
     case 'raw': return a.latex;
     case 'unknown': {
