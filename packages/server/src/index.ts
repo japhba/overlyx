@@ -62,6 +62,8 @@ import { deletionPreview, deleteAccount, pruneTrash } from './accounts.ts';
 import { privacyPage } from './privacy.ts';
 import { termsPage } from './terms.ts';
 import { usageRoutes, vscodeUsageRoutes } from './usage.ts';
+import { searchProject, SearchError } from './projectsearch.ts';
+import { allow as rateLimit } from './feedback.ts';
 import { searchLiterature, bibtexFor, addToCitedBib, sourcesAvailable, normTitle, type Hit } from './bibsearch.ts';
 import { identify } from './citelinks.ts';
 import { zoteroRoutes, zoteroStatus, searchZotero } from './zotero.ts';
@@ -461,6 +463,21 @@ api.get('/projects/:project/events', needProject('view'), (req, res) => {
   projectChangedListeners.add(listener);
   graphicsChangedListeners.add(graphics);
   req.on('close', cleanup);
+});
+
+/**
+ * Search in the project's files (the files panel's Search; projectsearch.ts): `q`, and `case`, `word`,
+ * `regex` = 1 for match case, whole word, a regular expression. Viewers may search.
+ */
+api.get('/projects/:project/search', needProject('view'), async (req, res) => {
+  if (!rateLimit(`search:${req.user!.id}`, 600)) { res.status(429).json({ error: 'Too many searches — try again in a while' }); return; }
+  const flag = (k: string) => req.query[k] === '1';
+  try {
+    res.json(await searchProject(req.user!, String(req.params.project), { q: String(req.query.q ?? ''), matchCase: flag('case'), wholeWord: flag('word'), regex: flag('regex') }, () => req.destroyed));
+  } catch (e) {
+    if (!(e instanceof SearchError)) console.error('[search]', e);
+    res.status(e instanceof SearchError ? e.status : 500).json({ error: e instanceof SearchError ? e.message : 'The search failed' });
+  }
 });
 
 /** Remove a project (owner): the directory is moved to <data>/trash, never deleted. */

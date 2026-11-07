@@ -16,8 +16,17 @@ export function noteShown(id: string): void {
   const plain = view ? id.slice(view.length + 1) : id;
   const { project, path } = splitDocId(plain);
   if (!project || !path) return;   // the project itself (no documents yet)
-  try { localStorage.setItem(KEY + project, JSON.stringify({ id, at: Date.now() })); } catch { /* private window */ }
+  try {
+    localStorage.setItem(KEY + project, JSON.stringify({ id, at: Date.now() }));
+    localStorage.setItem(RECENT + project, JSON.stringify([id, ...recentFiles(project).filter(x => x !== id)].slice(0, RECENT_MAX)));
+  } catch { /* private window */ }
   if (view) api.markOpened(plain, view).catch(() => { /* offline: this browser still knows */ });
+}
+
+const RECENT = 'ol.recentFiles:', RECENT_MAX = 30;
+/** The files of a project shown in this browser lately, newest first (tab ids): Go to File lists them first (app/quickopen.ts). */
+export function recentFiles(project: string): string[] {
+  try { const v = JSON.parse(localStorage.getItem(RECENT + project) ?? '[]'); return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []; } catch { return []; }
 }
 
 /** The file to open `p` on: the one this person was in last, here or elsewhere, if it is still in the project; null: none (its main document then). */

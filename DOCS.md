@@ -695,6 +695,29 @@ blend.
   LaTeX document from the template, `.md` a Markdown document, `.board` a whiteboard, anything else
   (`.bib`, `.sty`, `.txt` …) an empty text file; images, PDFs and other binaries are refused with a
   pointer to Upload. A taken name asks again with the server's error, never replaces (text files go
+* **Go to File and Search in the project** (VS Code's Quick Open and Find in Files; web app only —
+  the VS Code extension has VS Code's own). **`Ctrl/⌘+P`** (*File ▸ Go to file…*, `app/QuickOpen.tsx`,
+  `app/quickopen.ts`) opens a box over the window: a few letters of a file's name in order find it
+  (`mtex` main.tex, `figplot` figures/plot.pdf; word starts, runs of letters and the file name rank
+  above the folder), the files shown lately in this browser first (`lastfile.ts recentFiles`), Enter or
+  a click opens it; with no project open it looks through all of them. **`Ctrl/⌘+Shift+F`** (*File ▸
+  Search in the project…*, the 🔍 beside the project's name; the words selected become the query)
+  turns the files panel into a search (`app/ProjectSearch.tsx`): what is typed is looked for in every
+  text file of the project — as typed, or with *Aa* match case, *ab* whole word, *.\** a regular
+  expression (remembered per browser) — and the matches are listed by file, each in its line with
+  the match marked. A click opens the file there: a document at that line of its LaTeX (inverse
+  search's locator, `sourcelocate.ts locateSourceLine`; `#/<doc>?line=<n>&text=<the match>` — App's
+  `showSourceLine` marks the matched words in the paragraph), a text file at the line, slides at the
+  slide. Server: `GET /api/projects/:project/search?q=…&case=1&word=1&regex=1` (viewers may search;
+  `projectsearch.ts`, `searchtext.ts`): the file browser's files (no dot-folders, so no `.git`), without
+  build products, backups, pictures, PDFs, whiteboards, `.lyx` originals, archives and binaries (a NUL
+  byte), each resolved inside the project (a link out of it is left out); web pages only by what they
+  show (tags, scripts and styles blanked, so lines and columns stay the file's), with the slide of a
+  deck's match. Files are searched on disk: an open document is written there within seconds of an
+  edit (`saveDebounceMs`), so a word typed a moment ago is found a moment later. Limits
+  (`SEARCH_LIMITS`): files over 8 MB skipped, 100 matches listed per file, 2000 in all, 500 files,
+  3 s (then *stopped early*); the matching runs in a worker thread, one search at a time, and a
+  regular expression that never finishes has its worker stopped after 8 s.
   through `upload?overwrite=0`). Consequence: an empty raw `.tex` (a preamble) is no longer made
   from the panel — name it `.sty`, or upload it; existing raw `.tex` files still open in the text
   editor (what a `.tex` *is* stays decided by its content, `projects.ts classifyDocs`). Rows are no

@@ -220,6 +220,14 @@ async function req<T>(method: string, url: string, body?: unknown, raw?: BodyIni
 
 export const encId = (id: string) => encodeURIComponent(id);
 
+export interface ProjectSearchOptions { matchCase?: boolean; wholeWord?: boolean; regex?: boolean }
+/** a match of the project search: 1-based line, 0-based column; `preview.slice(from, to)` is the match; `slide` on a deck or poster */
+export interface ProjectSearchMatch { line: number; col: number; len: number; preview: string; from: number; to: number; slide?: number }
+export interface ProjectSearchResult {
+  files: { path: string; count: number; matches: ProjectSearchMatch[] }[];
+  total: number; truncated: boolean; searched: number; skipped: number;
+}
+
 export interface GdocsLink { fileId: string; tabId: string | null; url: string; auto: boolean; lastSync: number | null; lastError: string | null; linkedBy: number; format: 'text' | 'docx'; warnings: string[] }
 export interface GdocsStatus {
   configured: boolean; picker: boolean; account: { email: string | null } | null; link: GdocsLink | null; canEdit: boolean; guest: boolean;
@@ -470,6 +478,9 @@ export const api = {
   /** SyncTeX: the PDF boxes (points, origin top-left) of a 1-based line of the built .tex; inverse: the source line under a PDF point. */
   /** headings of a document from its file (the document panel's outline of documents that are not open) */
   docOutline: (id: string) => req<{ headings: TexHeading[]; mtime: number }>('GET', `/api/docs/${encId(id)}/outline`),
+  /** the project's files searched (the files panel's Search: server projectsearch.ts) */
+  projectSearch: (project: string, q: string, o: ProjectSearchOptions = {}, signal?: AbortSignal) =>
+    req<ProjectSearchResult>('GET', `/api/projects/${encodeURIComponent(project)}/search?q=${encodeURIComponent(q)}${o.matchCase ? '&case=1' : ''}${o.wholeWord ? '&word=1' : ''}${o.regex ? '&regex=1' : ''}`, undefined, undefined, signal),
   synctexView: (id: string, line: number) => req<{ boxes: SyncBox[] }>('GET', `/api/docs/${encId(id)}/synctex/view?line=${line}`),
   /** the Pages view: where the last build's pages begin in the built .tex, with their geometry (core pagebreaks.ts); null before a build */
   synctexPages: (id: string) => req<{ breaks: PageBreaks | null }>('GET', `/api/docs/${encId(id)}/synctex/pages`),
