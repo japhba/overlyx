@@ -5,6 +5,9 @@
  * (everything else, encrypted whole, immutable: a new version is a new blob). Paths, names and
  * sizes are in the manifest only, so the server sees opaque ids and byte counts.
  *
+ * An .html file (a deck, a poster, a web page: deliverable/) is a document too, its text a
+ * Y.Text('html') as the server's HtmlDoc keeps it; the canvas shows it from here (deckframes.ts).
+ *
  * Versions of a document (the Versions panel) are its text at that time, encrypted as a blob and
  * listed in the manifest (`versions`), made by hand or every ten minutes while someone edits it here.
  *
@@ -53,7 +56,7 @@ export function e2eUser(): { id: number; name: string } {
 const IMAGE = /\.(png|jpe?g|gif|svg|pdf|eps|ps|tiff?|webp|bmp)$/i;
 export function listedKind(path: string, e: FileEntry): ListedFile['kind'] {
   if (e.kind === 'dir') return 'dir';
-  if (e.kind === 'doc') return 'doc';
+  if (e.kind === 'doc') return isHtmlDoc(path) ? 'html' : 'doc';
   const p = path.toLowerCase();
   if (p.endsWith('.lyx')) return 'lyx';
   if (p.endsWith('.bib')) return 'bib';
@@ -63,8 +66,23 @@ export function listedKind(path: string, e: FileEntry): ListedFile['kind'] {
   return 'other';
 }
 /** Is a file of this name a document (opened in the editor, kept as a CRDT log)? */
-export const isDocPath = (path: string) => /\.tex$/i.test(path) || isMarkdownPath(path);
-const MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', webp: 'image/webp', bmp: 'image/bmp', pdf: 'application/pdf', txt: 'text/plain', bib: 'text/plain', tex: 'text/plain' };
+export const isDocPath = (path: string) => /\.tex$/i.test(path) || isMarkdownPath(path) || isHtmlDoc(path);
+/** an .html document: its text is a Y.Text('html'), not a LyX document */
+export const isHtmlDoc = (path: string) => /\.html?$/i.test(path);
+const htmlOf = (state: Uint8Array): string => { const d = new Y.Doc(); Y.applyUpdate(d, state); const t = d.getText('html').toString(); d.destroy(); return t; };
+/** `text` as the smallest splice of `t` (the common start and end kept) */
+function spliceTo(t: Y.Text, text: string): void {
+  const old = t.toString();
+  if (old === text) return;
+  let a = 0;
+  while (a < old.length && a < text.length && old[a] === text[a]) a++;
+  let b = 0;
+  while (b < old.length - a && b < text.length - a && old[old.length - 1 - b] === text[text.length - 1 - b]) b++;
+  t.doc!.transact(() => { t.delete(a, old.length - a - b); t.insert(a, text.slice(a, text.length - b)); });
+}
+const MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', webp: 'image/webp', avif: 'image/avif', bmp: 'image/bmp', ico: 'image/x-icon', pdf: 'application/pdf', txt: 'text/plain', bib: 'text/plain', tex: 'text/plain',
+  css: 'text/css', js: 'text/javascript', mjs: 'text/javascript', json: 'application/json', html: 'text/html', woff2: 'font/woff2', woff: 'font/woff', ttf: 'font/ttf', otf: 'font/otf',
+  mp4: 'video/mp4', webm: 'video/webm', mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', csv: 'text/csv' };
 export const mimeOf = (path: string) => MIME[path.slice(path.lastIndexOf('.') + 1).toLowerCase()] ?? 'application/octet-stream';
 const norm = (p: string) => p.split('/').filter(s => s && s !== '.').join('/');
 
@@ -148,6 +166,17 @@ export class E2eProject {
   async createDoc(path: string, text: string): Promise<void> {
     this.writable();
     path = norm(path);
+    if (isHtmlDoc(path)) {
+      const d = new Y.Doc();
+      d.getText('html').insert(0, text);
+      const update = Y.encodeStateAsUpdate(d);
+      d.destroy();
+      const id = randomId();
+      await seedDoc(this.name, id, this.k, update);
+      this.docs.set(id, { at: Date.now(), state: update, model: null });
+      this.setEntry(path, { id, kind: 'doc', size: text.length, mtime: Date.now() });
+      return;
+    }
     await tex();
     await this.prefetchTexts();
     const { update, fragment } = T().stateOfText(text, this.texContext(path));
@@ -190,7 +219,7 @@ export class E2eProject {
   private models = new Map<string, LyxDocument>();
   async prefetchDocs(): Promise<void> {
     await tex();
-    const docs = this.paths().filter(p => this.entry(p)?.kind === 'doc');
+    const docs = this.paths().filter(p => this.entry(p)?.kind === 'doc' && !isHtmlDoc(p));
     await Promise.all(docs.map(async p => { try { this.models.set(p, await this.docModel(p)); } catch { /* left out */ } }));
   }
   modelNow(path: string): LyxDocument | undefined {
@@ -200,6 +229,7 @@ export class E2eProject {
 
   /** The document's text as the .tex (or .md) file would hold it. */
   async docText(path: string): Promise<string> {
+    if (isHtmlDoc(path)) { const live = this.open.get(norm(path)); return live ? live.getText('html').toString() : htmlOf(await this.docState(path)); }
     await tex();
     await this.prefetchDocs();
     await this.prefetchTexts();
@@ -225,6 +255,21 @@ export class E2eProject {
   /** Bring a document to `text` as the smallest change (an upload over it, the source pane). */
   async applyText(path: string, text: string): Promise<void> {
     this.writable();
+    if (isHtmlDoc(path)) {
+      const live = this.open.get(norm(path));
+      if (live) { spliceTo(live.getText('html'), text); return; }
+      const e = this.entry(path)!;
+      const d = new Y.Doc();
+      Y.applyUpdate(d, await this.docState(path, 0));
+      const before = Y.encodeStateVector(d);
+      spliceTo(d.getText('html'), text);
+      const diff = Y.encodeStateAsUpdate(d, before);
+      d.destroy();
+      await seedDoc(this.name, e.id, this.k, diff);
+      this.docs.delete(e.id);
+      this.setEntry(path, { ...e, size: text.length, mtime: Date.now() });
+      return;
+    }
     await tex();
     const parsed = T().parseText(text, this.texContext(norm(path))).doc;
     const live = this.open.get(norm(path));

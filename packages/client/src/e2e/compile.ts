@@ -141,7 +141,8 @@ function format(engine: EngineName, v: { texlive: string; engines: string }, pro
 
 /* ---------------------------------------------------------------------------- build */
 
-export interface CompileResult { ok: boolean; pdf: Uint8Array | null; synctex: Uint8Array | null; log: string; warnings: string[]; tex: string; texName: string; engine: string }
+/** `olx`: what a layout document's text boxes wrote (core layout/check.ts), with `tex` the source as built */
+export interface CompileResult { ok: boolean; pdf: Uint8Array | null; synctex: Uint8Array | null; log: string; warnings: string[]; tex: string; texName: string; engine: string; olx: string | null }
 
 /**
  * The engine the server would build `main` with (server export.ts): a `% !TeX program` magic comment
@@ -289,6 +290,7 @@ async function compile(p: E2eProject, main: string, progress: (s: string) => voi
     return {
       ok: !!pdf && !errors, pdf: pdf instanceof Uint8Array ? pdf : null, synctex: synctex instanceof Uint8Array ? synctex : null,
       log: (out.length ? out.join('\n\n') + '\n\n' : '') + log, warnings, tex, texName: job + '.tex', engine: `${program} (in this browser)`,
+      olx: tex.includes('\\begin{olbox}') ? text(job + '.olx') || null : null,
     };
   } finally {
     runner.release();

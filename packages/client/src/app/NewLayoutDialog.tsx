@@ -9,6 +9,7 @@ import { useState } from 'preact/hooks';
 import { PAGE_PRESETS } from '@overlyx/core';
 import { api } from '../api';
 import { noteArticle } from '../articlekinds';
+import { isE2eProject } from '../e2e/known';
 import { Dialog } from './Dialogs';
 import { ScientificTemplates, chosenDesign } from './ScientificTemplates';
 import { initialDeckSize, rememberDeckSize, sizeOf } from './decksize';
@@ -51,7 +52,8 @@ export function NewLayoutDialog({ project, dir, onClose, onCreated, notify }: { 
     </>}>
       <p class="dialog-hint">A folder with a web page (<code>index.html</code>) that you and agents can design any way you like. Edit it on the canvas or in its code, present it, and download it as a PDF or a website.</p>
       <div class="ol-newkinds">
-        {KINDS.map(k => {
+        {/* (an article is written in the document editor and printed by the server: not in an encrypted project yet) */}
+        {KINDS.filter(k => k.id !== 'article' || !isE2eProject(project)).map(k => {
           const s = 48 / Math.max(k.w, k.h);
           return (
             <button key={k.id} type="button" class={'ol-newkind' + (k.id === kind ? ' active' : '')} onClick={() => choose(k.id)} onDblClick={() => create(k.id)} data-kind={k.id}>

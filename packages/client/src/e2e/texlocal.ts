@@ -16,6 +16,9 @@ import { parseTex, writeTex, writeTexPreserving, type ParseTexResult, type Prese
 import { applyDocumentTheorems, loadDocumentClass, describeLayouts, flexInsetNames, describeModules } from '@overlyx/core/latex/layouts.ts';
 import { isMarkdownPath, MARKDOWN_LAYOUTS, parseMarkdown, writeMarkdown, writeMarkdownPreserving, markdownForLatex } from '@overlyx/core/md/index.ts';
 import { mount, mounted } from './vfs';
+import { layoutTemplate } from '@overlyx/core/layout/templates.ts';
+import { setHeaderValue } from '@overlyx/core/lyx/ast.ts';
+import { markEditedSettings } from '@overlyx/core/tex/preamble.ts';
 
 export const LYX_LIB = '/lyx/lib';
 export const LAYOUT_DIR = '/lyx/lib/layouts';
@@ -118,6 +121,20 @@ export function stateOfText(text: string, ctx: TexContext): { update: Uint8Array
   const update = Y.encodeStateAsUpdate(ydoc);
   ydoc.destroy();
   return { update, fragment: r.fragment };
+}
+
+/**
+ * A new layout document's text (slides, a poster, a page in Layout mode: core layout/templates.ts),
+ * as the server makes it (texdoc.ts newLayoutDocumentText): its settings set, written through the
+ * .tex writer so that its managed block is there before the first edit.
+ */
+export function layoutDocumentText(preset: string, opts: { title?: string; author?: string }, ctx: TexContext): string {
+  const tpl = layoutTemplate(preset, opts);
+  const doc = parseText(tpl.text, ctx).doc;
+  const before = [...doc.header.lines];
+  for (const [k, v] of Object.entries(tpl.settings)) setHeaderValue(doc.header, k, v);
+  doc.header.lines = markEditedSettings(before, doc.header.lines, Object.keys(tpl.settings));
+  return writeText(doc, ctx, false).text;
 }
 
 export function ydocOf(update: Uint8Array): Y.Doc { const d = new Y.Doc(); Y.applyUpdate(d, update); return d; }

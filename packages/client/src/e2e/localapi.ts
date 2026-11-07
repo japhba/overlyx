@@ -9,7 +9,9 @@
  */
 import * as Y from 'yjs';
 import { newDocumentText, newMarkdownText, texHeadings, parseBibtex, lyxToPm, markEditedSettings, pageBreaks, synctexView, synctexEdit } from '@overlyx/core';
-import { openE2eProject, isE2eProject, isE2eDocId, markE2eProject, noteProjects, e2eUser, type E2eProject } from './project';
+import { starterFor, pageSize, DELIVERABLE_KINDS, type DeliverableKind } from '@overlyx/core/html/deliverable.ts';
+import { layoutCheck } from '@overlyx/core/layout/check.ts';
+import { openE2eProject, isE2eProject, isE2eDocId, markE2eProject, noteProjects, e2eUser, isHtmlDoc, type E2eProject } from './project';
 import { tex } from './project';
 import { forgetProjectKey, KeyMissing } from './keys';
 
@@ -97,6 +99,8 @@ const builds = new Map<string, { job: Job | null; build: Build | null; cancel: b
 /** the last build's SyncTeX data of each document (gzipped, as the engine wrote it), the built .tex's name and text: for PDF ⇄ source */
 const synctexOf = new Map<string, { gz: Uint8Array; texName: string; tex: string }>();
 const synctexText = new Map<string, { gz: Uint8Array; text: string; breaks?: unknown }>();
+/** a layout document's last build: what its text boxes wrote and the source it was built from (the editor's check of them) */
+const layoutOf = new Map<string, { olx: string; built: string }>();
 
 /** the last build's SyncTeX file of the document, as text (gunzipped once per build) */
 async function synctexFile(id: string): Promise<{ texName: string; tex: string; text: string; memo: { breaks?: unknown } } | null> {
@@ -216,8 +220,14 @@ async function docRoute(method: string, id: string, action: string, q: URLSearch
       const f = await synctexFile(id), page = Number(q.get('page')), x = Number(q.get('x')), y = Number(q.get('y'));
       return (f && page >= 1 && Number.isFinite(x) && Number.isFinite(y) ? synctexEdit(f.text, Math.floor(page), x, y) : null) ?? { line: null };
     }
+    case 'layoutcheck': {
+      const l = layoutOf.get(id);
+      return l ? layoutCheck(l.olx, l.built, await p.docText(rel)) : { params: null, boxes: [] };
+    }
     case 'export': {
       const format = (b.format ?? 'pdf') as string;
+      // (a deck, poster or web page: printed in the browser, its Download menu)
+      if (isHtmlDoc(rel)) refuse('A page is printed in this browser: its ⤓ Download menu ▸ Print or save as PDF');
       if (format === 'tex') return { ok: true, tex: await p.docText(rel) };
       return startBuild(p, id, rel, !!b.auto);
     }
@@ -243,6 +253,7 @@ function startBuild(p: E2eProject, id: string, rel: string, auto: boolean): unkn
       const r = await compileProject(p, rel, (s) => { job.progress = s; job.phaseAt = Date.now(); }, () => state.cancel);
       job.engine = r.engine;
       if (r.synctex) synctexOf.set(id, { gz: r.synctex, texName: r.texName, tex: r.tex });
+      if (r.olx) layoutOf.set(id, { olx: r.olx, built: r.tex }); else layoutOf.delete(id);
       if (state.build?.pdf && r.pdf) URL.revokeObjectURL(state.build.pdf);
       const url = r.pdf ? URL.createObjectURL(new Blob([r.pdf.slice().buffer as ArrayBuffer], { type: 'application/pdf' })) : state.build?.pdf ?? null;
       const at = Date.now();
@@ -270,10 +281,23 @@ async function projectRoute(method: string, project: string, rest: string, q: UR
     const path = String(b.path ?? '').replace(/^\/+/, '');
     if (!/\.(tex|md|markdown)$/i.test(path)) refuse('Only documents (.tex, .md) can be made in end-to-end encrypted projects');
     if (p.entry(path)) refuse(`${path} exists already`, 409);
-    if (b.layout) refuse('Slides and posters are not available in end-to-end encrypted projects yet');
-    const text = /\.(md|markdown)$/i.test(path) ? newMarkdownText(b.title as string | undefined) : newDocumentText({ textclass: b.textclass as string | undefined, title: b.title as string | undefined, author: e2eUser().name });
+    const opts = { title: b.title as string | undefined, author: e2eUser().name };
+    // (a layout document: slides, a poster or a page in Layout mode, from a page preset)
+    const text = /\.(md|markdown)$/i.test(path) ? newMarkdownText(opts.title)
+      : typeof b.layout === 'string' ? (await tex()).layoutDocumentText(b.layout, opts, { relPath: path, projectText: rel => p.cachedText(rel) })
+      : newDocumentText({ textclass: b.textclass as string | undefined, ...opts });
     await p.createDoc(path, text);
     return { id: `${project}/${path}` };
+  }
+  if (rest === '/deliverables' && method === 'POST') {
+    // a deck, poster or web page: the folder `dir` with an index.html to start from (the server's route, made here)
+    const kind = String(b.kind ?? 'deck') as DeliverableKind;
+    if (!DELIVERABLE_KINDS.includes(kind)) refuse('kind: deck, poster or page', 400);
+    const dir = String(b.dir ?? '').replace(/^\/+|\/+$/g, '');
+    const path = (dir ? dir + '/' : '') + 'index.html';
+    if (p.entry(path)) refuse(`${path} exists already`, 409);
+    await p.createDoc(path, starterFor(kind, String(b.title ?? ''), b.template === undefined ? undefined : String(b.template), b.size === undefined ? undefined : pageSize(b.size)));
+    return { id: `${project}/${path}`, path };
   }
   if (rest === '/upload' && method === 'POST') {
     const path = (q.get('path') ?? '').replace(/^\/+/, '');

@@ -319,8 +319,8 @@ export function NewProjectDialog({ user, onClose, onCreated, notify }: { user: U
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [encrypted, setEncrypted] = useState(false);
-  // (slides, posters and boards are not available encrypted yet)
-  const canEncrypt = kind === 'doc' || kind === 'empty';
+  // (whiteboards are not available encrypted yet)
+  const canEncrypt = kind !== 'board';
   const k = NEW_KINDS.find(x => x.id === kind)!;
   const typed = name.trim();
   const invalid = typed && !isProjectName(typed) ? 'Only letters, digits, space, . _ - are allowed.' : null;
@@ -329,7 +329,7 @@ export function NewProjectDialog({ user, onClose, onCreated, notify }: { user: U
     if (!n || invalid) return;
     setBusy(true);
     try {
-      const e2e = encrypted && (selectedKind === 'doc' || selectedKind === 'empty');
+      const e2e = encrypted && selectedKind !== 'board';
       // an encrypted project needs this browser to hold the account's keys first (set up once, recovery code)
       if (e2e && !(await ensureAccountKeys(user.id))) { setBusy(false); return; }
       const { project } = await api.createProject(n, e2e);
@@ -413,9 +413,8 @@ export function ProjectRootPanel({ project, notify, onCreated }: { project: stri
       <div class="home-actions">
         {info.e2eLocked ? <button class="btn primary" onClick={unlock}>Unlock</button> : <>
           <button class="btn primary" onClick={() => void createFirstDoc()}>+ New document</button>
-          {/* (not in an encrypted project yet) */}
-          {!info.e2e && <button class="btn" data-first-deliverable="deck" onClick={() => void createDeliverable('deck')}>+ New slides</button>}
-          {!info.e2e && <button class="btn" data-first-deliverable="poster" onClick={() => void createDeliverable('poster')}>+ New poster</button>}
+          <button class="btn" data-first-deliverable="deck" onClick={() => void createDeliverable('deck')}>+ New slides</button>
+          <button class="btn" data-first-deliverable="poster" onClick={() => void createDeliverable('poster')}>+ New poster</button>
         </>}
       </div>
     </div>

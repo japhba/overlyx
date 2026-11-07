@@ -5,7 +5,8 @@ import { mapAssets, mappedCss, cssAssetValues, srcsetAssetValues, type AssetUrls
 const scriptData = (text: string) => 'data:text/javascript;charset=utf-8,' + encodeURIComponent(text);
 let publicPromise: Promise<AssetUrls> | null = null;
 
-async function publicAssets(): Promise<AssetUrls> {
+/** the runtime's own scripts (/_ol/, its offline manifest) as data URLs, kept in the browser's cache (e2e/deckframes.ts too) */
+export async function publicAssets(): Promise<AssetUrls> {
   return publicPromise ??= (async () => {
     const manifestCache = await caches.open('overlyx-runtime-manifest');
     const manifestUrl = new URL('/_ol/offline.json', location.origin).href;
@@ -45,7 +46,7 @@ const dataUrl = (blob: Blob): Promise<string> => new Promise((resolve, reject) =
 
 /** Only assets inside this document's signed folder can be read by its frame.
  * Imported HTML must never make the parent fetch an authenticated API URL. */
-function folderAsset(value: string, base: string): string | null {
+export function folderAsset(value: string, base: string): string | null {
   try {
     const folder = new URL(base), url = new URL(value, base);
     return folder.origin === location.origin && folder.pathname.endsWith('/') && url.origin === folder.origin && url.pathname.startsWith(folder.pathname) ? url.href : null;
@@ -56,7 +57,8 @@ function folderAsset(value: string, base: string): string | null {
 const ASSET_HINTS = /\b(?:src|href|poster|srcset)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)|url\(\s*[^)]*\)|@import[^;]*;/gi;
 const assetHints = (html: string): string => (html.match(ASSET_HINTS) ?? []).join('\n');
 
-function referencedAssets(html: string, base: string, scope = base): string[] {
+/** the files of the folder `scope` that the page names (its pictures, styles, scripts), as URLs */
+export function referencedAssets(html: string, base: string, scope = base): string[] {
   const doc = new DOMParser().parseFromString(html, 'text/html'), urls = new Set<string>();
   const suppliedBase = doc.querySelector('base[href]')?.getAttribute('href');
   if (suppliedBase !== undefined && suppliedBase !== null) { try { base = new URL(suppliedBase, base).href; } catch { /* Retain the document folder for an invalid base. */ } }
