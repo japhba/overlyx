@@ -1,5 +1,5 @@
 /**
- * "No paragraph indentation" (Settings ▸ Account ▸ New documents, userSettings paragraphSkip): a
+ * "No paragraph indentation" (Settings ▸ Editor ▸ New documents, userSettings paragraphSkip): a
  * document the account creates gets Document ▸ Settings ▸ Paragraph separation = vertical space,
  * written into the file the way the settings dialog writes it (texdoc.ts withDocumentSettings) —
  * and the editor draws such a document's paragraphs flush left (editor/paragraphsep.ts).

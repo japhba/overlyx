@@ -20,6 +20,8 @@ import { loadGoogleFont, fontApi, fontCatalog, type Catalog, type CatalogFamily 
 import { loadMyFonts, toggleMyFont, useMyFonts } from '../fonts/myfonts';
 import { fakedStyles, fakeWarning, wantedStyles } from '../fonts/fakestyles';
 import { pinUnder } from './popup';
+import { EDITOR_FACES, MATH_FONTS, FOLLOW_DOCUMENT, MATCH_TEXT, editorFace, mathFont } from '../fonts/catalog';
+import { resolvedFace, resolvedMath } from '../fonts/editorfont';
 
 export interface FontInfo {
   family: string; category: string;
@@ -173,27 +175,40 @@ export interface FontListProps {
   current: FontFace | null;
   markdown: boolean;
   documentFonts?: () => void;
+  /** the documentFonts row's words */
+  documentFontsLabel?: string;
   /** families the document uses already */
   inDocument: string[];
   /** a Google font picked (another family keeps no axes or features: they were the old font's) */
   onPick: (family: string) => void;
   /** the document's own families (null: the default); none given: the list does not offer them */
   onFamily?: (family: string | null) => void;
-  /** lists of their own, first (the style editor's: the document's font sets, the editor's faces) */
+  /** lists of their own (the style editor's: the document's font sets, the editor's faces; a deck's embedded fonts) */
   sections?: FontSection[];
+  /** Google's fonts as well — My fonts, recent ones, the popular ones and a search through all; false: only the sections (the editor's math fonts) */
+  google?: boolean;
+  /** a word under Google's popular fonts (a deck's: linked, not embedded) */
+  googleNote?: string;
   close: () => void;
 }
 
-/** a list of fonts of the style editor's own above Google's (app/TextStyles.tsx) */
-export interface FontSection { title: string; items: { key: string; label: string; hint?: string; fontFamily?: string; active: boolean; pick: () => void }[] }
+/**
+ * a list of fonts of the caller's own: `lead` ones above My fonts (Default, "As in the document"), the
+ * others below them, above Google's; an item's `family` is the Google family it is (not listed twice)
+ */
+export interface FontSection {
+  title: string; lead?: boolean; note?: string;
+  items: { key: string; label: string; hint?: string; fontFamily?: string; family?: string; active: boolean; pick: () => void }[];
+}
 
-/** the font list: the document's families, recent and in-document fonts, Google's popular ones, a search through all */
-export function FontList({ family, current, markdown, documentFonts, inDocument: inDoc, onPick, onFamily, sections, close }: FontListProps) {
+/** the font list: the document's families, the caller's own lists, recent and in-document fonts, Google's popular ones, a search through all */
+export function FontList({ family, current, markdown, documentFonts, documentFontsLabel, inDocument: inDoc, onPick, onFamily, sections = [], google = true, googleNote, close }: FontListProps) {
   const [query, setQuery] = useState('');
   const [cat, setCat] = useState<Catalog | null>(null);
-  useEffect(() => { let live = true; void catalog().then(c => { if (live) setCat(c); }); return () => { live = false; }; }, []);
-  const recent = useMemo(() => recentFonts(), []);
-  const mine = useMyFonts();
+  useEffect(() => { if (!google) return; let live = true; void catalog().then(c => { if (live) setCat(c); }); return () => { live = false; }; }, [google]);
+  const recent = useMemo(() => (google ? recentFonts() : []), [google]);
+  const myList = useMyFonts();
+  const mine = google ? myList : null;
   const pick = (name: string) => {
     const entry = cat?.families.find(f => f.f === name);
     rememberFont(name);
@@ -201,23 +216,51 @@ export function FontList({ family, current, markdown, documentFonts, inDocument:
     onPick(entry?.f ?? name);
   };
   const q = query.trim().toLowerCase();
+  // what the list shows above Google's popular ones, so that no font is listed twice
+  const low = (n: string) => n.toLowerCase();
+  const own = new Set(sections.flatMap(s => s.items.map(it => low(it.family ?? it.label))));
+  const notOwn = (names: string[]) => names.filter(n => !own.has(low(n)) && !mine?.some(m => low(m) === low(n)));
+  const inDocShown = notOwn(inDoc);
+  const recentShown = notOwn(recent).filter(n => !inDoc.some(d => low(d) === low(n)));
+  const above = new Set([...own, ...(mine ?? []).map(low), ...inDocShown.map(low), ...recentShown.map(low)]);
+  const sectionHits = useMemo(() => (!q ? [] : sections.flatMap(s => s.items).filter(it => low(it.label).includes(q) || (it.family && low(it.family).includes(q)) || (it.hint && low(it.hint).includes(q)))), [sections, q]);
   const results = useMemo(() => {
     if (!cat || !q) return [];
-    const hits = cat.families.filter(f => f.f.toLowerCase().includes(q) || f.c.toLowerCase() === q);
+    const hits = cat.families.filter(f => (f.f.toLowerCase().includes(q) || f.c.toLowerCase() === q) && !sectionHits.some(it => low(it.family ?? it.label) === low(f.f)));
     return hits.sort((a, b) => Number(!a.f.toLowerCase().startsWith(q)) - Number(!b.f.toLowerCase().startsWith(q)) || a.p - b.p).slice(0, 80);
-  }, [cat, q]);
+  }, [cat, q, sectionHits]);
   const byName = (n: string) => cat?.families.find(f => f.f === n) ?? null;
   const row = (name: string, key: string) => <FontRow key={key} name={name} entry={byName(name)} active={current?.family === name} onPick={() => pick(name)} mine={mine ? mine.includes(name) : null} />;
-  const others = (names: string[]) => names.filter(n => !mine?.includes(n));
-  const myRows = !!mine?.length && <><div class="tb-popup-title" title="Google fonts kept in your account: here first, in the web app and in VS Code (★ on a font adds or removes it)">My fonts</div>{mine.map(n => row(n, 'm' + n))}</>;
+  const item = (it: FontSection['items'][number]) => (
+    <button key={it.key} type="button" class={'tb-pal-item ff-item' + (it.active ? ' active' : '')} title={it.hint ? `${it.label} — ${it.hint}` : it.label}
+      onMouseDown={e => e.preventDefault()} onClick={() => { it.pick(); close(); }}>
+      <span class="ff-item-name" style={it.fontFamily ? { fontFamily: it.fontFamily } : undefined}>{it.label}</span>
+      {it.hint && <span class="ff-hint">{it.hint}</span>}
+    </button>
+  );
+  const section = (sec: FontSection) => (
+    <div key={sec.title}>
+      <div class="tb-popup-title">{sec.title}</div>
+      {sec.note && <div class="ff-note">{sec.note}</div>}
+      {sec.items.map(item)}
+    </div>
+  );
+  const myRows = !!mine?.length && <><div class="tb-popup-title" title="Google fonts kept in your account: here first, in the web app and in VS Code (★ on a font adds or removes it; Settings ▸ Fonts lists them)">My fonts</div>{mine.map(n => row(n, 'm' + n))}</>;
+  const lead = sections.filter(s => s.lead), rest = sections.filter(s => !s.lead);
+  const searching = google || sections.reduce((n, s) => n + s.items.length, 0) > 14;
   return (
     <div class="ff-list">
-      <input class="ff-search" type="search" placeholder="Search fonts" value={query} autoFocus
+      {searching && <input class="ff-search" type="search" placeholder="Search fonts" value={query} autoFocus
         onInput={e => setQuery((e.target as HTMLInputElement).value)}
-        onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter' && results[0]) { pick(results[0].f); } if (e.key === 'Escape') close(); }} />
+        onKeyDown={e => {
+          e.stopPropagation();
+          if (e.key === 'Enter') { if (sectionHits[0]) { sectionHits[0].pick(); close(); } else if (results[0]) pick(results[0].f); }
+          if (e.key === 'Escape') close();
+        }} />}
       <div class="ff-scroll">
         {q ? (
-          results.length ? results.map(f => row(f.f, 'q' + f.f)) : <div class="ff-empty">{cat?.signin ? SIGN_IN : cat ? 'No Google font of that name' : 'Loading the fonts…'}</div>
+          sectionHits.length || results.length ? <>{sectionHits.map(item)}{results.map(f => row(f.f, 'q' + f.f))}</>
+            : <div class="ff-empty">{!google ? 'No font of that name' : cat?.signin ? SIGN_IN : cat ? 'No Google font of that name' : 'Loading the fonts…'}</div>
         ) : (
           <>
             {onFamily && <div class="tb-popup-title">{markdown ? 'The document’s font' : 'The document’s fonts'}</div>}
@@ -226,29 +269,89 @@ export function FontList({ family, current, markdown, documentFonts, inDocument:
               <button key={f} type="button" class={'tb-pal-item ff-item' + (!current && family === f ? ' active' : '')} style={{ fontFamily: f === 'roman' ? 'var(--editor-font), serif' : f === 'sans' ? 'var(--editor-sans-font), sans-serif' : 'var(--editor-mono-font, monospace), monospace' }}
                 onMouseDown={e => e.preventDefault()} onClick={() => onFamily(f)}>{FAMILY_NAMES[f]}</button>
             ))}
-            {/* (the style editor's lists — the document's own text font: My fonts first, above LaTeX's font sets) */}
-            {sections && myRows}
-            {sections?.map(sec => (
-              <div key={sec.title}>
-                <div class="tb-popup-title">{sec.title}</div>
-                {sec.items.map(it => (
-                  <button key={it.key} type="button" class={'tb-pal-item ff-item' + (it.active ? ' active' : '')} title={it.hint ?? it.label} style={it.fontFamily ? { fontFamily: it.fontFamily } : undefined}
-                    onMouseDown={e => e.preventDefault()} onClick={() => { it.pick(); close(); }}>{it.label}</button>
-                ))}
-              </div>
-            ))}
-            {documentFonts && <button type="button" class="tb-pal-item ff-item ff-more" onMouseDown={e => e.preventDefault()} onClick={() => { close(); documentFonts(); }}>{markdown ? 'Typesetting…' : 'Document fonts…'}</button>}
-            {!sections && myRows}
-            {others(inDoc).length > 0 && <><div class="tb-popup-title">In this document</div>{others(inDoc).map(n => row(n, 'd' + n))}</>}
-            {others(recent.filter(n => !inDoc.includes(n))).length > 0 && <><div class="tb-popup-title">Recent</div>{others(recent.filter(n => !inDoc.includes(n))).map(n => row(n, 'r' + n))}</>}
-            <div class="tb-popup-title">Popular — Google Fonts</div>
-            {cat?.signin ? <div class="ff-empty">{SIGN_IN}</div> : cat ? cat.families.slice(0, 40).map(f => row(f.f, 'p' + f.f)) : <div class="ff-empty">Loading the fonts…</div>}
+            {documentFonts && <button type="button" class="tb-pal-item ff-item ff-more" data-ff-document-fonts onMouseDown={e => e.preventDefault()} onClick={() => { close(); documentFonts(); }}>
+              <span>{documentFontsLabel ?? 'Font of the whole document…'}</span><span aria-hidden="true">›</span>
+            </button>}
+            {lead.map(section)}
+            {/* (the caller's own lists — the document's own text font: My fonts first, above LaTeX's font sets) */}
+            {myRows}
+            {rest.map(section)}
+            {inDocShown.length > 0 && <><div class="tb-popup-title">In this document</div>{inDocShown.map(n => row(n, 'd' + n))}</>}
+            {recentShown.length > 0 && <><div class="tb-popup-title">Recent</div>{recentShown.map(n => row(n, 'r' + n))}</>}
+            {google && <div class="tb-popup-title">Popular — Google Fonts</div>}
+            {google && googleNote && <div class="ff-note">{googleNote}</div>}
+            {google && (cat?.signin ? <div class="ff-empty">{SIGN_IN}</div> : cat ? cat.families.filter(f => !above.has(low(f.f))).slice(0, 40).map(f => row(f.f, 'p' + f.f)) : <div class="ff-empty">Loading the fonts…</div>)}
           </>
         )}
       </div>
     </div>
   );
 }
+
+/**
+ * A font button that opens the font list under it — one picker wherever a font is chosen: Settings ▸
+ * Fonts, Document ▸ Settings, Text styles, a deck's text and theme. The button shows `label` in the
+ * font (`face`, or `labelFont` for one of the sections' own); Escape closes the list, not the dialog
+ * around it.
+ */
+export function FontChooser({ label, labelFont, face = null, sections, google = true, googleNote, markdown = true, family = null, inDocument = [], documentFonts, documentFontsLabel, onPick, onFamily, disabled, title, data }: {
+  label: string; labelFont?: string; face?: FontFace | null; sections?: FontSection[]; google?: boolean; googleNote?: string; markdown?: boolean; family?: string | null; inDocument?: string[];
+  documentFonts?: () => void; documentFontsLabel?: string; onPick: (family: string) => void; onFamily?: (family: string | null) => void; disabled?: boolean; title?: string;
+  /** data-* attributes of the button (tests, the usage statistics) */
+  data?: Record<string, string>;
+}) {
+  const [open, setOpen] = useState(false);
+  const btn = useRef<HTMLButtonElement>(null);
+  const pop = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => { if (!btn.current?.contains(e.target as Node) && !pop.current?.contains(e.target as Node)) setOpen(false); };
+    // (the window's capture runs before a dialog's own Escape on the document: the list closes, not the dialog)
+    const k = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); setOpen(false); btn.current?.focus(); } };
+    document.addEventListener('mousedown', h);
+    window.addEventListener('keydown', k, true);
+    return () => { document.removeEventListener('mousedown', h); window.removeEventListener('keydown', k, true); };
+  }, [open]);
+  useLayoutEffect(() => { if (open && pop.current && btn.current) pinUnder(pop.current, btn.current); }, [open]);
+  useEffect(() => { if (face) loadGoogleFont(face.family); }, [face?.family]);
+  const font = face ? `'${face.family}', var(--ui-font)` : labelFont;
+  return (
+    <span class="ff-choose">
+      <button ref={btn} type="button" class="ff-choose-btn" disabled={disabled} title={title} onClick={() => setOpen(o => !o)} {...(data ?? {})}>
+        <span class="ff-choose-name" style={font ? { fontFamily: font } : undefined}>{label}</span><span class="ff-caret">▾</span>
+      </button>
+      {open && (
+        <div ref={pop} class="tb-popup ff-pop ff-choose-pop" role="dialog" aria-label={title ?? 'Font'}>
+          <FontList family={family} current={face} markdown={markdown} inDocument={inDocument} sections={sections} google={google} googleNote={googleNote}
+            documentFonts={documentFonts} documentFontsLabel={documentFontsLabel}
+            onPick={f => { onPick(f); setOpen(false); }} onFamily={onFamily ? f => { onFamily(f); setOpen(false); } : undefined} close={() => setOpen(false)} />
+        </div>
+      )}
+    </span>
+  );
+}
+
+/** the Text styles dialog's argument for the document's own font: Normal text, as the document and its PDF have it (the font list's "Font of the whole document…", the palette) */
+export const DOCUMENT_FONT_ARG = { layout: 'Standard', scope: 'document' as const };
+
+/** the editor's own text font (prefs.editorFont): "As in the document" and the faces that come with OverLyX — Settings ▸ Fonts, Text styles ▸ Only my editor */
+export function editorFontSections(current: string, set: (id: string) => void): FontSection[] {
+  return [
+    { title: 'Your editor', lead: true, items: [{ key: 'doc', label: `As in the document (now ${editorFace(resolvedFace(FOLLOW_DOCUMENT)).label})`, hint: 'the closest of these to the PDF’s font', active: current === FOLLOW_DOCUMENT, pick: () => set(FOLLOW_DOCUMENT) }] },
+    { title: 'Fonts that come with OverLyX', items: EDITOR_FACES.map(f => ({ key: f.id, label: f.label, hint: f.hint, fontFamily: f.text, active: current === f.id, pick: () => set(f.id) })) },
+  ];
+}
+/** the editor's text font as a button's words */
+export const editorFontLabel = (id: string) => (id === FOLLOW_DOCUMENT ? `As in the document (${editorFace(resolvedFace(FOLLOW_DOCUMENT)).label})` : editorFace(id).label);
+
+/** the editor's math font (prefs.editorMathFont): matching the text font, or one of MathJax's */
+export function mathFontSections(current: string, editorFont: string, set: (id: string) => void): FontSection[] {
+  return [
+    { title: 'Your editor', lead: true, items: [{ key: MATCH_TEXT, label: `Matching the text font (now ${mathFont(resolvedMath({ editorFont, editorMathFont: MATCH_TEXT })).label})`, active: current === MATCH_TEXT, pick: () => set(MATCH_TEXT) }] },
+    { title: 'Math fonts', items: MATH_FONTS.map(f => ({ key: f.id, label: f.label, hint: f.hint, active: current === f.id, pick: () => set(f.id) })) },
+  ];
+}
+export const mathFontLabel = (id: string, editorFont: string) => (id === MATCH_TEXT ? `Matching the text font (${mathFont(resolvedMath({ editorFont, editorMathFont: MATCH_TEXT })).label})` : mathFont(id).label);
 
 const SIGN_IN = 'Google fonts come from your OverLyX account: sign in (OverLyX: Sign In… in the command palette) to use them here.';
 
@@ -270,7 +373,9 @@ function FontRow({ name, entry, active, onPick, mine }: { name: string; entry: C
     <button ref={setEl} type="button" class={'tb-pal-item ff-item' + (active ? ' active' : '')} title={entry ? `${name} — ${entry.c}${variable ? ', variable: ' + entry.a.map(a => a.t).join(', ') : entry.w.length > 1 ? `, ${entry.w.length} weights` : ''}` : name}
       onMouseDown={e => e.preventDefault()} onClick={onPick}>
       <span class="ff-item-name" style={sample ? { fontFamily: `${sample}, var(--ui-font)` } : undefined}>{name}</span>
-      {variable ? <span class="ff-tag" title="A variable font: any weight (and its other axes)">◐</span> : entry && entry.w.length > 1 ? <span class="ff-tag">{entry.w.length}</span> : null}
+      {/* (drawn, not the ◐ character: the interface font lacks it and a fallback's came out a tiny half-glyph) */}
+      {variable ? <span class="ff-tag" title="A variable font: any weight (and its other axes)"><svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><circle cx="6" cy="6" r="4.6" fill="none" stroke="currentColor" stroke-width="1.2" /><path d="M6 1.4a4.6 4.6 0 0 1 0 9.2z" fill="currentColor" /></svg></span>
+        : entry && entry.w.length > 1 ? <span class="ff-tag" title={`${entry.w.length} weights`}>{entry.w.length}</span> : null}
       <MyFontStar name={name} mine={mine} />
     </button>
   );

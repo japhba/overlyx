@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 /**
- * Fonts: the editor's text faces and math fonts (Settings ▸ Editor ▸ Text font / Math font) and the
+ * Fonts: the editor's text faces and math fonts (Settings ▸ Fonts ▸ Text font / Math font) and the
  * document's font sets (Document ▸ Settings ▸ Fonts) — packages/client/src/fonts. Every font set must
  * name fonts LyX knows (so a .lyx file opens with them in LyX) and load its matching math package in
  * the PDF; every set names an editor face; "As in the document" finds the face closest to a

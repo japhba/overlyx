@@ -61,7 +61,7 @@ function managedBlock(ctx: ExportContext, provided: Set<string>, settings: Recor
   const f = ctx.features.withProvides(provided);
   const c: ExportContext = { ...ctx, features: f, dc: f.dc };
   const { bp, dc } = c;
-  // the text styles (Format ▸ Text styles: core textstyles.ts) — fonts by name need \olfontset
+  // the text styles (Document ▸ Text styles: core textstyles.ts) — fonts by name need \olfontset
   const styles = parseStyles(typeof settings.overlyx_styles === 'string' ? settings.overlyx_styles : '');
   // (what the preamble's own LaTeX sets is its: the managed block leaves it out — textstyles.ts)
   const tex = readTexStyles(bp.preamble);

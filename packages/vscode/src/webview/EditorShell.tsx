@@ -9,7 +9,7 @@ import { setDocumentFonts } from '@client/fonts/editorfont';
 import { setDocumentParagraphs, setDocumentHeadings } from '@client/editor/paragraphsep';
 import { setDocumentNumbering } from '@client/editor/plugins/numbering';
 import { MarkdownSettingsDialog } from '@client/app/MarkdownSettings';
-import { TextStylesPanel } from '@client/app/TextStyles';
+import { TextStylesPanel, textStylesArg } from '@client/app/TextStyles';
 import { isMarkdownDoc } from '@client/editor/markdown';
 import { usePresentation } from '@client/app/presentation';
 import { referenceTransaction } from '@client/editor/references';
@@ -29,7 +29,8 @@ import type { PdfTarget } from '@client/app/PdfViewer';
 import { SvgEditorHost } from '@client/app/SvgEditor';
 import { ToolbarDock } from '@client/app/tbdock';
 import { ContextBars, contextBars } from '@client/app/ctxdock';
-import { SettingsPanel } from '@client/app/Settings';
+import { SettingsPanel, settingsSearchEntries, documentFontEntry, type SettingsSection } from '@client/app/Settings';
+import { DOCUMENT_FONT_ARG } from '@client/app/FontPicker';
 import { HelpDialog, HELP_ROWS, DialogHost, uiPrompt } from '@client/app/Dialogs';
 import { Ruler, DEFAULT_WIDTH, MIN_WIDTH, MAX_WIDTH, NOTE_SCALE_DEFAULT } from '@client/app/Ruler';
 import { useNotesPane, useNotesFold, NotesSash, NotesUnfoldTab, NotesResolved } from '@client/app/notespane';
@@ -84,6 +85,8 @@ import { describeChange } from '@client/editor/assembly';
 type DialogState = { name: string; arg?: unknown } | null;
 
 const stored = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
+/** Settings in VS Code: the editor's — no Appearance (VS Code's theme; the dark-theme switches sit in Editor), AI or account; Drawing & pen is the margins' pen of this editor */
+const VSCODE_SETTINGS: SettingsSection[] = ['editor', 'fonts', 'drawing', 'keyboard'];
 
 export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'init' }> }) {
   const docId = init.docId;
@@ -245,7 +248,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   // VS Code's own zoom of the window has these keys bound to nothing while this editor is active (package.json)
   useEffect(() => setDefaultZoom(k => editorContext.ui?.zoom(k)), []);
   useDocumentViewportZoom(scrollRef, docId);
-  // Settings ▸ Editor ▸ Font ▸ "As in the document" follows the document's roman font
+  // Settings ▸ Fonts ▸ "As in the document" follows the document's roman font
   useEffect(() => { setDocumentFonts(headerLines); setDocumentParagraphs(headerLines); setDocumentHeadings(headerLines); setDocumentNumbering(headerLines); setLayoutHeader(headerLines); }, [headerLines]);
   usePresentation();   // View ▸ Presentation mode: Shift+F11 toggles, Esc leaves
   useEffect(() => { editorContext.combined = combined; localStorage.setItem('ol.vscode.combined', combined ? '1' : '0'); }, [combined]);
@@ -727,7 +730,12 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       { label: 'Keyboard shortcuts', action: () => setDialog({ name: 'help' }) },
     ] },
   ];
-  const helpSearchEntries = HELP_ROWS.map(([shortcut, label]) => ({ id: 'Keyboard shortcuts ▸ ' + label, label, path: ['Keyboard shortcuts'], shortcut, fixed: true, action: () => setDialog({ name: 'help' }) }));
+  const helpSearchEntries = [
+    ...HELP_ROWS.map(([shortcut, label]) => ({ id: 'Keyboard shortcuts ▸ ' + label, label, path: ['Keyboard shortcuts'], shortcut, fixed: true, action: () => setDialog({ name: 'help' }) })),
+    // Settings' sections ("font" finds Settings ▸ Fonts) and the document's own font (Text styles)
+    ...settingsSearchEntries(s => setDialog({ name: 'preferences', arg: s }), VSCODE_SETTINGS),
+    documentFontEntry(() => setDialog({ name: 'textstyles', arg: DOCUMENT_FONT_ARG })),
+  ];
 
   /* ---------------------------------------------------------------- dialogs */
   const insetDialogNode = () => {
@@ -746,7 +754,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
     const project = projectOfDoc(targetId);
     const docDir = view.dom.dataset.docDir ?? editorContext.docDir;
     switch (dialog.name) {
-      case 'preferences': return <SettingsPanel ai={null} user={editorContext.user!} sections={['editor']} onClose={close} />;
+      case 'preferences': return <SettingsPanel ai={null} user={editorContext.user!} sections={VSCODE_SETTINGS} initial={dialog.arg as SettingsSection | undefined} onClose={close} />;
       case 'help': return <HelpDialog onClose={close} />;
       case 'stats': return <StatsDialog view={view} onClose={close} />;
       case 'graphics': return <GraphicsDialog meta={targetMeta} project={project} docDir={docDir} onClose={close} onInsert={(f: string, o: any) => run(C.insertGraphics(f, o))} />;
@@ -808,7 +816,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       }
       case 'href': return <HrefDialog onClose={close} onInsert={(t: string, n: string) => run(C.insertHref(t, n))} />;
       case 'mdsettings': return <MarkdownSettingsDialog docId={targetId} onClose={close} onSaved={() => { void api.header(targetId).then(h => updateHeader(targetId, h.headerLines)); }} />;
-      case 'textstyles': return <TextStylesPanel docId={targetId} headerLines={docHeaders(targetId)} view={view} markdown={isMarkdownDoc(targetId)} layout={typeof dialog.arg === 'string' ? dialog.arg : undefined} onClose={close}
+      case 'textstyles': return <TextStylesPanel docId={targetId} headerLines={docHeaders(targetId)} view={view} markdown={isMarkdownDoc(targetId)} {...textStylesArg(dialog.arg)} onClose={close}
         onSaved={() => { void api.header(targetId).then(h => updateHeader(targetId, h.headerLines)); }} />;
       case 'settings': return <SettingsDialog docId={targetId} meta={targetMeta} headerLines={docHeaders(targetId)} onClose={close} onSaved={() => api.meta(targetId).then(m => { updateMeta(targetId, m); refreshMacros(view, m.macros); void api.header(targetId).then(h => updateHeader(targetId, h.headerLines)); })} />;
       case 'macros': return <MacrosDialog meta={targetMeta} onClose={close} />;

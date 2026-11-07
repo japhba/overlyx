@@ -19,7 +19,9 @@ import { drawingToolbar } from './drawingToolbar';
 import { type DeckInk, type DeckInkPatch, LASSO_KINDS } from './deckink';
 import { lassoGroups } from './lassobar';
 import { PH_ROLES, PH_LABELS, type PhRole } from './decklayouts';
-import { bundledFont, firstFontFamily, type DeckFont } from './deckfonts';
+import { bundledFont, deckFontFor, firstFontFamily, previewBundledFonts, type DeckFont, type GoogleFamilyStyles } from './deckfonts';
+import { FontList, type FontSection } from '../app/FontPicker';
+import { fontCatalog, type Catalog } from '../fonts/googlefont';
 import './deckicons';
 
 export interface DeckTextActions {
@@ -46,8 +48,6 @@ export interface DeckTextActions {
 export interface DeckCtx {
   kind: DeliverableKind;
   fontWarning?(css: string): string | null;
-  /** My fonts, first in the font list (deckfonts.ts myDeckFonts) */
-  myFonts?: DeckFont[];
   /** The deck's text font, for the warning when no object is selected. */
   defaultFont?: string | null;
   pageLabel?: string;
@@ -202,7 +202,12 @@ function mathGroups(c: DeckCtx): ToolButton[][] {
   ];
 }
 
-/** Bundled choices are embedded; other web fonts load from Google Fonts when first used. */
+/**
+ * The deck's own fonts: Default (the design's), then the bundled ones, embedded in the HTML when
+ * chosen (they work offline and look alike everywhere). Every other font comes from the font list
+ * itself (app/FontPicker.tsx FontList: My fonts, Google's popular ones and a search through all of
+ * Google Fonts), linked from Google Fonts.
+ */
 export const DECK_FONTS: DeckFont[] = [
   { label: 'Default', css: null },
   { label: 'Instrument Sans (bundled)', css: '"Instrument Sans", sans-serif' },
@@ -210,24 +215,49 @@ export const DECK_FONTS: DeckFont[] = [
   { label: 'Carlito (bundled)', css: 'Carlito, sans-serif' },
   { label: 'CMU Sans (bundled)', css: '"CMU Sans", sans-serif' },
   { label: 'DejaVu Sans (bundled)', css: '"DejaVu Sans", sans-serif' },
-  { label: 'Inter', css: 'Inter, sans-serif', google: 'Inter' },
-  { label: 'Roboto', css: 'Roboto, sans-serif', google: 'Roboto' },
-  { label: 'Open Sans', css: '"Open Sans", sans-serif', google: 'Open Sans' },
-  { label: 'Lato', css: 'Lato, sans-serif', google: 'Lato' },
-  { label: 'Montserrat', css: 'Montserrat, sans-serif', google: 'Montserrat' },
-  { label: 'Poppins', css: 'Poppins, sans-serif', google: 'Poppins' },
-  { label: 'Source Sans 3', css: '"Source Sans 3", sans-serif', google: 'Source Sans 3' },
-  { label: 'Merriweather', css: 'Merriweather, serif', google: 'Merriweather' },
-  { label: 'Lora', css: 'Lora, serif', google: 'Lora' },
-  { label: 'Playfair Display', css: '"Playfair Display", serif', google: 'Playfair Display' },
-  { label: 'EB Garamond', css: '"EB Garamond", serif', google: 'EB Garamond' },
-  { label: 'Source Code Pro', css: '"Source Code Pro", monospace', google: 'Source Code Pro' },
 ];
 
-/** the deck's font list: Default, then My fonts (the account's Google fonts, deckfonts.ts myDeckFonts), then the rest of DECK_FONTS */
-export function deckFontList(mine: DeckFont[] = []): DeckFont[] {
-  const taken = new Set(mine.map(f => firstFontFamily(f.css ?? '').toLowerCase()));
-  return [DECK_FONTS[0], ...mine, ...DECK_FONTS.slice(1).filter(f => !f.css || !taken.has(firstFontFamily(f.css).toLowerCase()))];
+/** the fonts that travel with the HTML: DECK_FONTS' bundled ones */
+export const embeddedDeckFonts = (): DeckFont[] => DECK_FONTS.filter(f => !!f.css && !!bundledFont(f.css));
+
+/** a font of the list by its family name: the embedded one when there is one (My fonts' Fira Sans too), else Google's (its catalogue entry), else the name alone */
+export function deckFontByName(name: string, entry: GoogleFamilyStyles | null): DeckFont {
+  const embedded = embeddedDeckFonts().find(f => firstFontFamily(f.css!).toLowerCase() === name.toLowerCase());
+  if (embedded) return embedded;
+  if (entry) return deckFontFor(entry);
+  return { label: name, css: `${/^[A-Za-z][A-Za-z-]*$/.test(name) ? name : JSON.stringify(name)}, sans-serif`, google: name };
+}
+
+/** the row above the deck's fonts: Default (the design's font), As the text (the theme's headings) */
+export interface DeckFontLead { label: string; hint?: string; active: boolean; pick: () => void }
+
+/** the deck's own sections of the font list: `lead` first, then the embedded fonts — My fonts and Google's are the list's own */
+export function deckFontSections(fam: string, pick: (f: DeckFont) => void, lead?: DeckFontLead): FontSection[] {
+  const same = (css: string) => firstFontFamily(css).toLowerCase() === fam.toLowerCase();
+  return [
+    ...(lead ? [{ title: 'This deck', lead: true, items: [{ key: 'lead', label: lead.label, hint: lead.hint, active: lead.active, pick: lead.pick }] }] : []),
+    { title: 'Embedded — travel with the HTML', items: embeddedDeckFonts().map(f => ({
+      key: f.label, label: firstFontFamily(f.css!), family: firstFontFamily(f.css!), fontFamily: f.css!, active: !!fam && same(f.css!), pick: () => pick(f),
+    })) },
+  ];
+}
+
+/** what the font list says over Google's fonts in a deck, instead of a warning on every one */
+export const DECK_GOOGLE_NOTE = 'Linked, not embedded: offline or elsewhere another font may stand in.';
+
+/** a Google family picked in the list, as a deck font (its catalogue entry says its axes and weights) */
+export const deckFontNamed = (name: string): Promise<DeckFont> => fontCatalog().then((c: Catalog) => deckFontByName(name, c.families.find(f => f.f === name) ?? null)).catch(() => deckFontByName(name, null));
+
+/** the deck's font list (the toolbar's Font, the quick menu over words): Default, My fonts, the embedded ones, Google's */
+function DeckFontList({ fam, onPick, close }: { fam: string; onPick: (f: DeckFont | null) => void; close: () => void }) {
+  useEffect(previewBundledFonts, []);
+  return (
+    <div class="dk-font-list">
+      <FontList family={null} current={fam ? { family: fam, axes: {}, features: [] } : null} markdown inDocument={[]} googleNote={DECK_GOOGLE_NOTE}
+        sections={deckFontSections(fam, f => onPick(f), { label: 'Default', hint: 'the design’s font', active: !fam, pick: () => onPick(null) })}
+        onPick={name => { close(); void deckFontNamed(name).then(onPick); }} close={close} />
+    </div>
+  );
 }
 
 export const SHAPES: { tool: Tool; label: string }[] = [
@@ -424,10 +454,7 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
     const under = sel.length > 0 && sel.every(s => s.style.textDecoration.includes('underline'));
     context.push([
       { id: 'dk-font', title: warning || 'Font', icon: '', html: `<span class="dk-font-face">${warning ? '⚠ ' : ''}${escHtml(fam || 'Font')}</span>`,
-        palette: { title: 'Font', list: true, cols: 1, items: deckFontList(c.myFonts).map(f => {
-          const warn = f.css && !bundledFont(f.css) ? c.fontWarning?.(f.css) : null;
-          return { label: f.label + (warn ? ' ⚠' : ''), title: (f.mine ? 'My fonts — every weight and axis it has. ' : '') + (warn || f.label), html: `<span class="dk-font-sample" style="font-family:${escAttr(f.css ?? 'inherit')}">Aa</span>`, active: !!f.css && firstFamily(f.css) === fam, action: () => c.text.family(f.css, f.google) };
-        }) } },
+        palette: { title: 'Font', render: close => <DeckFontList fam={fam} close={close} onPick={f => c.text.family(f?.css ?? null, f?.google)} /> } },
       { id: 'dk-size', title: 'Font size (pt)', icon: '', widget: () => <SizeBox pt={pt} onSet={c.text.size} /> },
     ]);
     context.push([
@@ -728,7 +755,6 @@ const lineSpacing = (st: SelItem['style'] | undefined) => {
 };
 
 const escHtml = (s: string) => s.replace(/[&<>]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[ch]!));
-const escAttr = (s: string) => s.replace(/"/g, '&quot;');
 
 import { ICONS } from '../app/Toolbar';
 import { LYX_ICONS } from '../app/lyxicons';

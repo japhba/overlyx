@@ -79,7 +79,9 @@ export function NibLevels({ nib, onChange, measuredUsual, wide }: { nib: Nib; on
 
 export interface PenHabits { scribble: boolean; fingersDraw: boolean; pencil: boolean; penInks: boolean; snap: boolean }
 
-export function PenSettings({ nib, color, width, habits, onChange, onHabits, onClose }: { nib: Nib; color: string; width: number; habits: PenHabits; onChange: (p: Partial<Nib>) => void; onHabits: (p: Partial<PenHabits>) => void; onClose?: () => void }) {
+export function PenSettings({ nib, color, width, habits, onChange, onHabits, onClose, onAllSettings }: { nib: Nib; color: string; width: number; habits: PenHabits; onChange: (p: Partial<Nib>) => void; onHabits: (p: Partial<PenHabits>) => void; onClose?: () => void;
+  /** Draw's popover: the way to Settings ▸ Drawing & pen (not there itself) */
+  onAllSettings?: () => void }) {
   const w = Math.max(1.5, Math.min(7, width * 1.1));
   const paths = inkPaths(inkRuns(SAMPLE, { width: w, pressure: true, nib: { ...nib, lift: true }, final: true }));
   const off = (p: Partial<Nib>) => Object.entries(p).every(([k, v]) => nib[k as keyof Nib] === v);
@@ -114,6 +116,7 @@ export function PenSettings({ nib, color, width, habits, onChange, onHabits, onC
         {/* (the usual pressure is the hand's, measured: kept) */}
         <button type="button" class="pen-set-reset" data-pen-reset disabled={off({ ...DEFAULT_NIB, ...NO_LAB, usual: nib.usual })} onMouseDown={e => e.preventDefault()} onClick={() => onChange({ ...DEFAULT_NIB, ...NO_LAB, usual: nib.usual })}>Reset</button>
         <span class="ink-pick-hint">for this browser's pen</span>
+        {onAllSettings && <button type="button" class="pen-set-reset" data-pen-all-settings onMouseDown={e => e.preventDefault()} onClick={() => { onClose?.(); onAllSettings(); }}>Settings…</button>}
       </div>
     </div>
   );

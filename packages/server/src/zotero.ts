@@ -1,5 +1,5 @@
 /**
- * Connect to Zotero (Settings ▸ Account ▸ Zotero, or the citation dialog's "Connect Zotero…"): the
+ * Connect to Zotero (Settings ▸ Editor ▸ Citations from Zotero, or the citation dialog's "Connect Zotero…"): the
  * account links its Zotero library with a Zotero Web API key (zotero.org/settings/keys — "Allow
  * library access" is enough; nothing is ever written to Zotero). The citation dialog's search then
  * lists the matching items of that library, and of the groups the key can read, above the papers

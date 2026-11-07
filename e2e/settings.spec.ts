@@ -1,9 +1,8 @@
 /**
- * The centralized Settings panel: opened from the avatar menu (works on the start screen, which
- * has no Tools menu), sections switch, the theme choice applies immediately, and the Account
- * section shows the signed-in user, the fine-grained access switch for new sign-ins, the token
- * re-copy state, and — for administrators — the per-account switches (flipping one's own is
- * reflected in the state line).
+ * The centralized Settings panel: opened from the avatar menu (on the start screen too), sections
+ * switch, the theme choice applies immediately, the Account section shows the signed-in user, the
+ * fine-grained access switch for new sign-ins and the token re-copy state, and — for administrators —
+ * Administration has the per-account switches (flipping one's own is reflected in the state line).
  */
 import { test, expect } from '@playwright/test';
 import { login } from './helpers';
@@ -25,10 +24,15 @@ test('avatar menu ▸ Settings: sections, theme, account (admin switches token r
   await dlg.locator('.settings-nav button', { hasText: 'Account' }).click();
   await expect(dlg.locator('[data-setting="whoami"]')).toContainText('admin');
   await expect(dlg.locator('[data-setting="recopy"]')).toContainText('Disabled');   // the test instance has no owner e-mail
+  // an administrator switches it per account in Administration
   const own = dlg.locator('.settings-users label', { hasText: '(admin' });
+  await dlg.locator('.settings-nav button', { hasText: 'Administration' }).click();
   await own.locator('input').check();
+  await dlg.locator('.settings-nav button', { hasText: 'Account' }).click();
   await expect(dlg.locator('[data-setting="recopy"]')).toContainText('Enabled');
+  await dlg.locator('.settings-nav button', { hasText: 'Administration' }).click();
   await own.locator('input').uncheck();
+  await dlg.locator('.settings-nav button', { hasText: 'Account' }).click();
   await expect(dlg.locator('[data-setting="recopy"]')).toContainText('Disabled');
   // fine-grained access for new sign-ins: the user's own switch, off by default, kept on the server
   const fine = dlg.locator('[data-setting="fine-grained"]');

@@ -35,7 +35,8 @@ import { pasteFromClipboard } from '../editor/clipmenu';
 import { openLinkBoxFor, LINK_KEY } from '../editor/links';
 import { layoutToolbar } from './layouttoolbar';
 import { FontSizeBox } from './fontsize';
-import { FontPicker } from './FontPicker';
+import { FontPicker, DOCUMENT_FONT_ARG } from './FontPicker';
+import { NAMED_LABELS } from '../editor/fontsize';
 import { isLayoutDoc } from '../editor/layout/commands';
 import { isMarkdownDoc, insertCodeBlock, insertRule } from '../editor/markdown';
 
@@ -233,7 +234,7 @@ export function textStylesPalette(run: ToolbarContext['run']): Palette {
   return { title: 'Text properties', list: true, cols: 2, items: [
     ['Emphasis', 'emph'], ['Bold', 'bold'], ['Noun (small caps)', 'noun'], ['Underline', 'underline'], ['Strikeout', 'strikeout'], ['Typewriter', 'typewriter'], ['Sans serif', 'sans'], ['Italic', 'italic'], ['Slanted', 'slanted'], ['Small caps', 'smallcaps'], ['Double underline', 'uuline'], ['Wavy underline', 'uwave'], ['Crossed out', 'xout'],
   ].map(([l, k]) => ({ label: l, action: () => run((C.fontCommands as Record<string, any>)[k]) })).concat(
-    [['Tiny', 'tiny'], ['Small', 'small'], ['Normal size', 'normal'], ['Large', 'large'], ['Huge', 'huge']].map(([l, v]) => ({ label: `Size: ${l}`, action: () => run(C.setValueMark('size', v === 'normal' ? null : v)) })),
+    ['tiny', 'small', 'normal', 'large', 'huge'].map(v => ({ label: `Size: ${NAMED_LABELS[v]}`, action: () => run(C.setValueMark('size', v === 'normal' ? null : v)) })),
     [{ label: 'Reset to default (Alt+C Space)', action: () => run(C.fontDefault) }]) };
 }
 
@@ -316,7 +317,8 @@ export function buildToolbars(ctx: ToolbarContext): Toolbars {
   const fontFamilyBtn: ToolButton = {
     id: 'fontfamily', title: 'Font', icon: '',
     ...(view ? { widget: () => <FontPicker view={view} family={family} face={markValue(view, 'face')} markdown={isMarkdownDoc(docId) || meta?.format === 'markdown'}
-      documentFonts={docId ? () => setDialog(isMarkdownDoc(docId) ? { name: 'mdsettings' } : { name: 'settings', arg: 'fonts' }) : undefined} /> } : { action: () => undefined }),
+      // (the whole document's font: Text styles ▸ Normal text, as the document and its PDF have it — the one place for it)
+      documentFonts={docId ? () => setDialog({ name: 'textstyles', arg: DOCUMENT_FONT_ARG }) : undefined} /> } : { action: () => undefined }),
   };
   const boldBtn: ToolButton = { id: 'bold', title: 'Bold (Ctrl+B)', icon: 'bold', action: () => run(C.fontCommands.bold), active: markActive('series', 'bold') };
   const underlineBtn: ToolButton = { id: 'underline', title: 'Underline (Ctrl+U)', icon: 'underline', action: () => run(C.fontCommands.underline), active: markActive('bar', 'under') };
