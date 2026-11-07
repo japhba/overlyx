@@ -21,7 +21,8 @@ It also brings back the features Lisnoti dropped while keeping their glyphs: Not
 (smcp, c2sc; \\textsc and small-caps headings have real ones), old-style, proportional, tabular and lining
 figures (the zero stays slashed), case forms (not for figures and the maths-axis brackets), the Greek
 alternates (ss06, ss07); and Noto Sans Math's dotless i and j for accents (dtls). Lisnoti's MATH table stays (static, for the Regular; the Bold instance gets Lisnoti
-Bold's), so LuaLaTeX's unicode-math can set formulas in the static instances.
+Bold's), so LuaLaTeX's unicode-math can set formulas in the static instances — tuned to Computer Modern's
+proportions first: delimgen.py draws the tall delimiters again, mathtune.py sets TeX's constants and spacing.
 
 Writes to --out: Anodyne[GRAD,wdth,wght].ttf, Anodyne-Italic[GRAD,wdth,wght].ttf (variable) and
 Anodyne-{Regular,Bold,Italic,BoldItalic}.ttf (static, normal width, GRAD 0, with MATH) plus OFL.txt.
@@ -47,7 +48,11 @@ from fontTools.designspaceLib import DesignSpaceDocument, AxisDescriptor, Source
 from fontTools import varLib
 from fontTools.otlLib.builder import buildStatTable
 
-VERSION = '0.200'
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import delimgen   # noqa: E402
+import mathtune   # noqa: E402
+
+VERSION = '0.300'
 FAMILY = 'Anodyne'
 # weight masters at Noto Sans's own (user values; Noto's avar puts 700 at normalised 0.61)
 WEIGHTS = (100, 400, 700, 900)
@@ -608,6 +613,16 @@ def build_style(lisR, lisB, notoVF, italic, tmp, notoMath=None):
     style = 'Italic' if italic else 'Roman'
     log(f'[{style}] loading')
     R, B = TTFont(lisR), TTFont(lisB)
+    # the maths at Computer Modern's proportions: tall delimiters drawn again from each font's own base
+    # glyphs and their assemblies cut from the largest (delimgen.py), then TeX's constants and side bearings
+    # growing with the height (mathtune.py) — the shifts measured on the Regular, the same for the Bold
+    for f in (R, B):
+        delimgen.redraw(f)
+        delimgen.assemble(f)
+    shifts = mathtune.delimiter_shifts(R)
+    mathtune.tune(R, shifts)
+    mathtune.tune(B, shifts)
+    log(f'[{style}] maths: delimiters drawn again, {len(shifts)} spaced at TeX\'s proportions')
     V = instantiateVariableFont(TTFont(notoVF), {'wdth': 100})
     noto = {w: instantiateVariableFont(TTFont(notoVF), {'wdth': 100, 'wght': w}) for w in WEIGHTS}
     notoC = {w: instantiateVariableFont(TTFont(notoVF), {'wdth': WDTH_MIN, 'wght': w}) for w in WEIGHTS}
