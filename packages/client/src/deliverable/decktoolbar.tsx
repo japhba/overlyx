@@ -210,6 +210,8 @@ function mathGroups(c: DeckCtx): ToolButton[][] {
  */
 export const DECK_FONTS: DeckFont[] = [
   { label: 'Default', css: null },
+  // (OverLyX's own sans-serif: its stylesheet from this server, server googlefonts.ts HOUSE_FONTS)
+  { label: 'Anodyne (OverLyX)', css: 'Anodyne, sans-serif', google: 'Anodyne' },
   { label: 'Instrument Sans (bundled)', css: '"Instrument Sans", sans-serif' },
   { label: 'Fira Sans (bundled)', css: '"Fira Sans", sans-serif' },
   { label: 'Carlito (bundled)', css: 'Carlito, sans-serif' },

@@ -20,18 +20,25 @@
  *   GET /api/fonts/google/<slug>/<file> a file
  *   GET /api/fonts/info?family=         its axes and named instances, weights, OpenType features (fontinfo.ts)
  *   GET /api/fonts/sample?family=       the family's name in its own face (a few glyphs: the font list)
+ *
+ * House fonts come with OverLyX instead (fonts/<slug>/ in the repository, HOUSE_FONTS): Anodyne, its
+ * sans-serif. The same routes serve them, first in the catalogue and available with Google switched
+ * off — to the web their variable woff2 files by Unicode range (web/), to TeX their static faces with
+ * the MATH table (tex/: fontspec finds Anodyne Bold by name, unicode-math sets formulas in it).
  */
 import express from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
-import { config } from './config.ts';
+import { config, REPO_ROOT } from './config.ts';
 import { fontFileInfo, type FontFileInfo } from './fontinfo.ts';
 
-export interface GoogleFontFile { style: 'normal' | 'italic'; weight: number; file: string }
+export interface GoogleFontFile { style: 'normal' | 'italic'; weight: number; file: string; /** a web file's unicode-range (house fonts) */ range?: string }
 export interface GoogleFont {
   family: string; slug: string; dir: string; files: GoogleFontFile[];
   /** variable font files (one upright, one italic): their axes' ranges */
   axes?: CatalogAxis[];
+  /** a house font: its static faces for TeX (`dir`/tex/), the web files being variable */
+  tex?: { regular: string; bold: string; italic: string; boldItalic: string };
 }
 export interface CatalogAxis { t: string; min: number; max: number; d: number }
 /** a family of the catalogue: name, category, axes (variable), static weights, italics, popularity rank */
@@ -49,6 +56,35 @@ const GITHUB_API = 'https://api.github.com/repos/google/fonts/contents/';
 
 export const validFamily = (name: string) => /^[A-Za-z0-9][A-Za-z0-9 ]{0,59}$/.test(name.trim());
 const slugOf = (family: string) => family.trim().toLowerCase().replace(/\s+/g, '-');
+
+/* ------------------------------------------------------------------ house fonts */
+
+/** the web files of a house font by Unicode range, as scripts/anodyne/build.py --repo writes them */
+const ANODYNE_RANGES: [string, string][] = [
+  ['latin', 'U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2212, U+2215, U+FEFF, U+FFFD'],
+  ['latin-ext', 'U+0100-024F, U+0259, U+0300-036F, U+1E00-1EFF, U+2020, U+20A0-20AB, U+20AD-20CF, U+2113, U+2C60-2C7F, U+A720-A7FF'],
+  ['greek', 'U+0370-03FF, U+1F00-1FFF'],
+  ['cyrillic', 'U+0400-052F, U+1C80-1C88, U+2DE0-2DFF, U+A640-A69F'],
+  ['symbols', 'U+2190-21FF, U+2300-23FF, U+2460-24FF, U+2500-27BF'],
+  ['math', 'U+2070-209F, U+2100-2111, U+2114-2121, U+2123-218F, U+2200-2211, U+2213-2214, U+2216-22FF, U+27C0-27FF, U+2900-2BFF'],
+  ['math-alpha', 'U+1D400-1D7FF'],
+];
+/** fonts that come with OverLyX: name → their files in REPO_ROOT/fonts/<slug>/ */
+const HOUSE_FONTS: Record<string, GoogleFont> = {
+  anodyne: {
+    family: 'Anodyne', slug: 'anodyne', dir: path.join(REPO_ROOT, 'fonts', 'anodyne'),
+    files: (['normal', 'italic'] as const).flatMap(style => ANODYNE_RANGES.map(([part, range]) => ({ style, weight: 400, file: `web/anodyne-${style === 'italic' ? 'italic' : 'roman'}-${part}.woff2`, range }))),
+    axes: [{ t: 'wght', min: 100, max: 900, d: 400 }, { t: 'GRAD', min: -100, max: 150, d: 0 }],
+    tex: { regular: 'tex/Anodyne-Regular.ttf', bold: 'tex/Anodyne-Bold.ttf', italic: 'tex/Anodyne-Italic.ttf', boldItalic: 'tex/Anodyne-BoldItalic.ttf' },
+  },
+};
+/** the house font of that name, if its files are there */
+export function houseFont(family: string): GoogleFont | null {
+  const f = HOUSE_FONTS[slugOf(family)];
+  return f && fs.existsSync(path.join(f.dir, f.tex!.regular)) ? f : null;
+}
+/** the house fonts' rows of the catalogue: first in the font list */
+const houseRows = (): CatalogFamily[] => Object.values(HOUSE_FONTS).filter(f => houseFont(f.family)).map(f => ({ f: f.family, c: 'Sans Serif', a: f.axes ?? [], w: [], i: true, p: 0 }));
 
 /** injectable for tests */
 export let fetchImpl: typeof fetch = (input, init) => fetch(input, { ...init, signal: init?.signal ?? AbortSignal.timeout(20000) });
@@ -102,6 +138,8 @@ const pending = new Map<string, Promise<GoogleFont | null>>();
 
 /** The family's files (fetched the first time), or null: not a Google font, switched off, or Google did not answer. */
 export function googleFont(family: string): Promise<GoogleFont | null> {
+  const house = validFamily(family) ? houseFont(family) : null;
+  if (house) return Promise.resolve(house);
   if (!enabled() || !validFamily(family)) return Promise.resolve(null);
   const slug = slugOf(family);
   const running = pending.get(slug);
@@ -248,6 +286,7 @@ async function fromCss2(family: string, entry: CatalogFamily | null, slug: strin
  * Google has; a variable font is its upright and italic file, set by axis (`variable`).
  */
 export function fontFaces(f: GoogleFont): { regular: string; bold?: string; italic?: string; boldItalic?: string; variable?: true } {
+  if (f.tex) return { regular: path.basename(f.tex.regular), bold: path.basename(f.tex.bold), italic: path.basename(f.tex.italic), boldItalic: path.basename(f.tex.boldItalic) };
   if (f.axes) {
     const up = f.files.find(x => x.style === 'normal') ?? f.files[0], it = f.files.find(x => x.style === 'italic');
     const wght = f.axes.find(a => a.t === 'wght');
@@ -263,7 +302,7 @@ export function fontFaces(f: GoogleFont): { regular: string; bold?: string; ital
 export function olfontFamilies(tex: string): string[] {
   const named = [...tex.matchAll(/\\ol(?:font(?:set)?|mainfont)(?:\[[^\]\n]*\]){0,2}\{([^}\n]+)\}/g)].map(m => m[1].trim());
   // (and the document's fonts by name — non-TeX fonts, Text styles' Normal text: \setmainfont)
-  const set = [...tex.matchAll(/\\set(?:main|sans|mono)font(?:\[[^\]\n]*\])?\{([^}\n]+)\}/g)].map(m => m[1].trim());
+  const set = [...tex.matchAll(/\\set(?:main|sans|mono|math)font(?:\[[^\]\n]*\])?\{([^}\n]+)\}/g)].map(m => m[1].trim());
   return [...new Set([...named, ...set].filter(validFamily))];
 }
 
@@ -283,10 +322,11 @@ export async function provideFaceFonts(tex: string, buildDir: string): Promise<s
     provided++;
     const sub = path.join(root, g.slug);
     fs.mkdirSync(sub, { recursive: true });
-    for (const f of g.files) {
-      const dest = path.join(sub, f.file);
-      try { if (fs.statSync(dest).size === fs.statSync(path.join(g.dir, f.file)).size) continue; } catch { /* not there */ }
-      fs.copyFileSync(path.join(g.dir, f.file), dest);
+    // (a house font: its static faces — LuaTeX does not read woff2)
+    for (const file of g.tex ? Object.values(g.tex) : g.files.map(f => f.file)) {
+      const dest = path.join(sub, path.basename(file));
+      try { if (fs.statSync(dest).size === fs.statSync(path.join(g.dir, file)).size) continue; } catch { /* not there */ }
+      fs.copyFileSync(path.join(g.dir, file), dest);
     }
   }
   return provided ? root : null;
@@ -315,7 +355,11 @@ export async function googleFontInfo(family: string): Promise<FontInfo | null> {
   const catalog = await googleCatalog().catch(() => null);
   const entry = catalog ? findFamily(catalog, g.family) : null;
   const up = g.files.find(f => f.style === 'normal' && (g.axes || f.weight === 400)) ?? g.files.find(f => f.style === 'normal') ?? g.files[0];
-  const fi = fontFileInfo(fs.readFileSync(path.join(g.dir, up.file)));
+  // (a house font's features from its static Regular, its axes and instances as the house font says)
+  const fi = g.tex
+    ? { ...fontFileInfo(fs.readFileSync(path.join(g.dir, g.tex.regular))), axes: (g.axes ?? []).map(a => ({ tag: a.t, name: a.t === 'GRAD' ? 'Grade' : 'Weight', min: a.min, def: a.d, max: a.max })),
+      instances: [[100, 'Thin'], [200, 'ExtraLight'], [300, 'Light'], [400, 'Regular'], [500, 'Medium'], [600, 'SemiBold'], [700, 'Bold'], [800, 'ExtraBold'], [900, 'Black']].map(([w, name]) => ({ name: name as string, coords: { wght: w as number } })) }
+    : fontFileInfo(fs.readFileSync(path.join(g.dir, up.file)));
   const weights = g.axes ? [] : [...new Set(g.files.filter(f => f.style === 'normal').map(f => f.weight))].sort((a, b) => a - b);
   const info: FontInfo = {
     family: g.family, category: entry?.c ?? '',
@@ -353,7 +397,8 @@ export function googleFontRoutes(): express.Router {
   r.get('/fonts/catalog', async (_req, res) => {
     const c = await googleCatalog();
     res.setHeader('Cache-Control', 'private, max-age=86400');
-    res.json(c ? { axisNames: c.axisNames, families: c.families } : { axisNames: {}, families: [] });
+    const house = houseRows();
+    res.json({ axisNames: { GRAD: 'Grade', ...c?.axisNames }, families: [...house, ...(c?.families ?? []).filter(f => !house.some(h => h.f === f.f))] });
   });
   r.get('/fonts/google.css', async (req, res) => {
     const family = String(req.query.family ?? '');
@@ -366,16 +411,18 @@ export function googleFontRoutes(): express.Router {
     res.send(f.files.map(x => {
       const weight = f.axes ? (wght ? `${wght.min} ${wght.max}` : String(x.weight)) : String(x.weight);
       const stretch = wdth ? ` font-stretch: ${wdth.min}% ${wdth.max}%;` : '';
+      if (x.range) return `@font-face { font-family: ${JSON.stringify(f.family)}; font-style: ${x.style}; font-weight: ${weight}; font-display: swap; src: url(google/${f.slug}/${path.basename(x.file)}) format('woff2'); unicode-range: ${x.range}; }`;
       return `@font-face { font-family: ${JSON.stringify(f.family)}; font-style: ${x.style}; font-weight: ${weight};${stretch} font-display: swap; src: url(google/${f.slug}/${x.file}) format('truetype'); }`;
     }).join('\n'));
   });
   r.get('/fonts/google/:slug/:file', (req, res) => {
     const { slug, file } = req.params;
-    if (!/^[a-z0-9-]{1,60}$/.test(slug) || !/^[a-z0-9-]{1,80}\.ttf$/.test(file)) { res.status(404).end(); return; }
-    const abs = path.join(ROOT(), slug, file);
+    const house = HOUSE_FONTS[slug];
+    if (!/^[a-z0-9-]{1,60}$/.test(slug) || !(house ? /^[a-z0-9-]{1,80}\.woff2$/ : /^[a-z0-9-]{1,80}\.ttf$/).test(file)) { res.status(404).end(); return; }
+    const abs = house ? path.join(house.dir, 'web', file) : path.join(ROOT(), slug, file);
     if (!fs.existsSync(abs)) { res.status(404).end(); return; }
     res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
-    res.type('font/ttf').sendFile(abs);
+    res.type(house ? 'font/woff2' : 'font/ttf').sendFile(abs);
   });
   r.get('/fonts/info', async (req, res) => {
     const family = String(req.query.family ?? '');
@@ -386,6 +433,12 @@ export function googleFontRoutes(): express.Router {
   });
   r.get('/fonts/sample', async (req, res) => {
     const family = String(req.query.family ?? '');
+    const house = validFamily(family) ? houseFont(family) : null;
+    if (house) {
+      res.setHeader('Cache-Control', 'private, max-age=86400');
+      res.type('font/woff2').sendFile(path.join(house.dir, house.files[0].file));
+      return;
+    }
     const file = validFamily(family) ? await sampleFile(family) : null;
     if (!file) { res.status(404).end(); return; }
     res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');

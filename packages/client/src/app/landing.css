@@ -15,7 +15,7 @@ div.login.lp {
   --lp-on-ink: #f6f5f1;
   --lp-blue: #2152a3; --lp-yellow: #efb21a; --lp-red: #d6402b;
   --lp-display: "OL Jost", "Jost", sans-serif;
-  --lp-text: "OL Inter", "Inter", Roboto, sans-serif;
+  --lp-text: Anodyne, "OL Inter", sans-serif;
   display: block; overflow-x: hidden; background: var(--lp-bg); color: var(--lp-ink); font-family: var(--lp-text); font-feature-settings: "cv11", "ss01"; -webkit-font-smoothing: antialiased;
 }
 html[data-theme="dark"] div.login.lp {

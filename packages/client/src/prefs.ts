@@ -38,6 +38,12 @@ export interface Prefs {
   aiCompletionModel: string;
   /** the dark theme's text and formulas: white, or a sepia / grey tone like Apple Books' reading themes (right-click the sun/moon switch) */
   darkTone: 'white' | 'sepia' | 'gray';
+  /**
+   * Grade of Anodyne, the interface's font (and of documents set in it), in this browser: stems darker
+   * (+) or lighter (−) at the same widths, so nothing moves — Settings ▸ Appearance. The dark theme
+   * takes 25 off by itself (app/theme.ts): light text on dark looks heavier.
+   */
+  textGrade: number;
   /** anonymous usage statistics (usage.ts): which actions are taken and which go wrong — never content or identity */
   usageStats: boolean;
   /** opt-in content-free beta reliability diagnostics; also requires usageStats and no GPC */
@@ -84,7 +90,7 @@ export interface Prefs {
   showResolvedComments: boolean;
 }
 
-export const DEFAULT_PREFS: Prefs = { spellcheck: true, spellEngine: 'overlyx', autoCorrect: false, aiButton: false, aiRewrite: false, aiCompleteText: false, aiCompleteMath: false, aiCompleteDelay: 200, darkPages: true, invertFigures: true, aiModel: '', aiCompletionModel: '', darkTone: 'white', usageStats: true, betaDiagnostics: false, autoBuild: 'shown', autoBuildDelay: 1, editorFont: 'document', editorMathFont: 'match', screenStyles: {}, shortcutTips: true, selectionBar: true, mathKeyboard: 'auto', aiInk: false, speechEngine: 'auto', showResolvedComments: false };
+export const DEFAULT_PREFS: Prefs = { spellcheck: true, spellEngine: 'overlyx', autoCorrect: false, aiButton: false, aiRewrite: false, aiCompleteText: false, aiCompleteMath: false, aiCompleteDelay: 200, darkPages: true, invertFigures: true, aiModel: '', aiCompletionModel: '', darkTone: 'white', textGrade: 0, usageStats: true, betaDiagnostics: false, autoBuild: 'shown', autoBuildDelay: 1, editorFont: 'document', editorMathFont: 'match', screenStyles: {}, shortcutTips: true, selectionBar: true, mathKeyboard: 'auto', aiInk: false, speechEngine: 'auto', showResolvedComments: false };
 /** delays that were the default in earlier builds: a stored one of these follows the current default */
 const OLD_DEFAULT_DELAYS = new Set([600, 450]);
 const STORAGE = 'ol.prefs';

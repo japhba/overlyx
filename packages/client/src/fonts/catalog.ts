@@ -86,6 +86,8 @@ export const EDITOR_FACES: EditorFace[] = [
   served('neohellenic', 'GFS Neohellenic', 'with only slight serifs', 'newcm'),
   served('plex', 'IBM Plex Serif', 'IBM’s corporate serif', 'stix2'),
   served('pl46', 'PL46', 'a Polish typeface of 1946 (no italic)', 'newcm'),
+  // (OverLyX's own sans-serif, the interface's font: fonts/anodyne, declared by its anodyne.css, variable)
+  { id: 'anodyne', label: 'Anodyne', hint: 'OverLyX’s sans-serif: clear I l 1 and O 0, maths symbols, weights 100–900, grade', text: `Anodyne, ${CM}`, math: 'fira', xHeight: 0.536 },
   served('fira', 'Fira Sans', 'sans-serif; typewriter Fira Mono', 'fira', { mono: '"OLT fira mono"' }),
   served('lato', 'Lato', 'sans-serif', 'fira'),
   served('notosans', 'Noto Sans', 'sans-serif, for every script', 'fira'),
@@ -158,7 +160,7 @@ const ROMAN_FACES: Record<string, string> = {
   palatino: 'pagella', ppl: 'pagella', pplj: 'pagella', mathpple: 'pagella', tgpagella: 'pagella', 'tex gyre pagella': 'pagella', 'palatino linotype': 'pagella', p052: 'pagella',
   bookman: 'bonum', pbk: 'bonum', tgbonum: 'bonum', 'tex gyre bonum': 'bonum', newcent: 'schola', pnc: 'schola', tgschola: 'schola', 'tex gyre schola': 'schola', 'century schoolbook': 'schola',
   dejavuserif: 'dejavu', 'dejavu serif': 'dejavu', dejavuserifcondensed: 'dejavu',
-  'fira sans': 'fira', 'new computer modern 10': 'newcm', 'latin modern': 'cm',
+  'fira sans': 'fira', 'new computer modern 10': 'newcm', 'latin modern': 'cm', anodyne: 'anodyne',
   charter: 'xcharter', xcharter: 'xcharter', 'md-charter': 'xcharter', mdbch: 'xcharter', 'bitstream charter': 'xcharter', 'charis sil': 'charis',
   utopia: 'erewhon', futs: 'erewhon', futj: 'erewhon', 'md-utopia': 'erewhon', mdput: 'erewhon', erewhon: 'erewhon', heuristica: 'erewhon',
   cochineal: 'crimson', crimson: 'crimson', crimsonpro: 'crimson', crimsonpromedium: 'crimson', crimsonprolight: 'crimson', 'crimson pro': 'crimson', 'crimson text': 'crimson',
