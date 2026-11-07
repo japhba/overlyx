@@ -1357,7 +1357,16 @@ blend.
     never in the presenter view, a click for the full screen), moved onto another screen where the
     Window Management API lets the editor; this window goes on in the presenter view — while it is
     on (or in an audience window) leaving the full screen does not end presenting. The Layout
-    presenter's second window (S) has the same bar button.
+    presenter's second window (S) has the same bar button. **A second screen takes the other
+    part by itself** (7 Nov 2026, the user agreed): a screen that starts presenting while another
+    screen of the account presents the deck, Linked, opens Linked — in the presenter view when that
+    screen shows the slides (the iPad beside the laptop), showing the slides when all of them are in
+    the presenter view (`presentshare.ts presenterAtStart`; each state says `pv: 1` in the presenter
+    view, put in by the editor). Decided once per presentation as it starts (or when the others are
+    heard of within 5 s), kept through the frame's restarts and *Bring up to date*
+    (`ol.presentHere` in sessionStorage); a switch by hand wins for the rest of that presentation and
+    is what the browser keeps. The first screen to present opens as its browser keeps it. Layout
+    (beamer) presenting is unchanged.
     **The slides follow the text while presenting**: the editor sends the presenting frame each
     version as it sends the canvas (patches, `presentReady` / `needSource`; the server serves
     `source` in `present` mode too), `present.ts sourceChanged` keeps the slide shown — where it is

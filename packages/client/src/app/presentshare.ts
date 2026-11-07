@@ -99,6 +99,8 @@ export interface PresentState {
    */
   doc?: string;
   b?: string;
+  /** put in by the editor too: this screen shows the presenter view (presenterAtStart) */
+  pv?: 1;
 }
 
 /** another presenter's state, checked and decoded */
@@ -525,6 +527,25 @@ export function staleness(own: { doc?: string; b?: string }, peers: readonly Pre
     if (own.b && isBuild(s.b) && s.b > own.b) out.build = true;
   }
   return out;
+}
+
+/**
+ * How a screen that starts presenting shows the deck, when another screen of this account presents it
+ * already (Linked, so it can be followed and turned): those screens showing the slides — this one opens
+ * in the presenter view, Linked, as their remote control (an iPad beside the laptop); those screens all
+ * in the presenter view (`pv`, put in by the editor) — this one shows the slides, Linked. Null when no
+ * such screen presents: then as this browser keeps it.
+ */
+export function presenterAtStart(peers: readonly PresenterState[]): { on: boolean; linked: true } | null {
+  let slides = false, views = false;
+  for (const { state, mine } of peers) {
+    if (!mine || !state || typeof state !== 'object') continue;
+    const s = state as { v?: unknown; at?: unknown; pv?: unknown };
+    const at = s.v === 1 ? readAt(s.at) : null;
+    if (!at?.linked) continue;
+    if (s.pv === 1) views = true; else slides = true;
+  }
+  return slides ? { on: true, linked: true } : views ? { on: false, linked: true } : null;
 }
 
 /**

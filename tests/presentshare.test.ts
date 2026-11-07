@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   PresentShare, encodePts, decodePts, encodeStroke, decodeStroke, readPresent, checkedPresent, slideKey, leads,
-  docStamp, staleness, textHash, INK_CAP, GONE_CAP, type PresentState, type SharedStroke,
+  docStamp, staleness, textHash, presenterAtStart, INK_CAP, GONE_CAP, type PresentState, type SharedStroke,
 } from '../packages/client/src/app/presentshare';
 import { PresentKit, INK_COLORS, PALM_AFTER_MS, PRESENT_LINKED_KEY, type InkStroke } from '../packages/client/src/app/presentkit';
 import { MAX_AWARENESS_STATE_JSON } from '../packages/core/src/awareness';
@@ -258,6 +258,24 @@ describe('the same deck on every screen', () => {
     expect(staleness(own, [peer('junk', '<b>')])).toEqual({ doc: false, build: false });
     expect(textHash('abc')).toMatch(/^[0-9a-f]{8}$/);
     expect(textHash('abc')).not.toBe(textHash('abd'));
+  });
+  it('a screen joining a presentation of this account opens as its presenter view and remote; joining a presenter view, it shows the slides', () => {
+    const laptop = new PresentShare('a');
+    // nobody presents yet, or only someone else: as this browser keeps it
+    expect(presenterAtStart([])).toBeNull();
+    expect(presenterAtStart([{ client: 1, state: st(laptop), mine: false }])).toBeNull();
+    // the laptop shows the slides: the iPad starting now is its presenter view, Linked
+    expect(presenterAtStart([{ client: 1, state: st(laptop), mine: true }])).toEqual({ on: true, linked: true });
+    // the laptop presents unlinked: it would not follow, so nothing is decided for this screen
+    laptop.setLinked(false);
+    expect(presenterAtStart([{ client: 1, state: st(laptop), mine: true }])).toBeNull();
+    laptop.setLinked(true);
+    // the iPad in the presenter view presents already: the laptop starting now shows the slides
+    expect(presenterAtStart([{ client: 2, state: st(laptop, { pv: 1 }), mine: true }])).toEqual({ on: false, linked: true });
+    // one screen with the slides is enough to make this one a presenter view
+    expect(presenterAtStart([{ client: 2, state: st(laptop, { pv: 1 }), mine: true }, { client: 3, state: st(laptop), mine: true }])).toEqual({ on: true, linked: true });
+    // what is not a presenter's state counts for nothing
+    expect(presenterAtStart([{ client: 4, state: { v: 1, at: { slide: 'x' } }, mine: true }, { client: 5, state: null, mine: true }])).toBeNull();
   });
 });
 
