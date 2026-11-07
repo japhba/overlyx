@@ -20,7 +20,12 @@ import { openE2eProject, isE2eDocId } from './project';
 
 const MSG_SYNC = 0, MSG_AWARENESS = 1, MSG_EPOCH = 2, MSG_SAVED = 3, MSG_PING = 4;
 const BATCH_MS = 120;
-/** per document: the server's state when "saved" was said last, and when that state came about (a reconnection does not make it newer: a build compares it with its PDF's time) */
+/**
+ * per document: the server's state when "saved" was said last, and when that state came about — a
+ * build compares it with its PDF's time. Neither a reconnection nor a reload makes it newer: the state
+ * a page first meets counts as older than anything the page builds (0: the log keeps no times), what
+ * changes it later (an edit here or a co-author's) as made then.
+ */
 const saved = new Map<string, { snap: Y.Snapshot; at: number }>();
 
 export class E2eSocket {
@@ -96,6 +101,7 @@ export class E2eSocket {
     if (!this.synced) { this.initial.push(u); return; }
     Y.applyUpdate(this.shadow, u);
     this.deliver(this.message(MSG_SYNC, enc => syncProtocol.writeUpdate(enc, u)));
+    this.deliverSaved();
   }
 
   private onSynced(): void {
@@ -120,7 +126,8 @@ export class E2eSocket {
   private deliverSaved(): void {
     const now = Y.snapshot(this.shadow);
     let s = saved.get(this.epoch);
-    if (!s || !Y.equalSnapshots(s.snap, now)) saved.set(this.epoch, s = { snap: now, at: Date.now() });
+    if (!s) saved.set(this.epoch, s = { snap: now, at: 0 });
+    else if (!Y.equalSnapshots(s.snap, now)) saved.set(this.epoch, s = { snap: now, at: Date.now() });
     const snap = Y.encodeSnapshot(now);
     const at = s.at;
     this.deliver(this.message(MSG_SAVED, enc => {
