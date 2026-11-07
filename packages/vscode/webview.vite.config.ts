@@ -22,6 +22,9 @@ export default defineConfig({
   resolve: {
     // `@overlyx/core` is its index; `@overlyx/core/md/index.ts` and the like are its modules
     alias: [
+      // the client's end-to-end encrypted projects run the core's parser in the browser (client vite.config.ts)
+      { find: /^node:fs$/, replacement: path.resolve(__dirname, '../client/src/e2e/vfs.ts') },
+      { find: /^node:path$/, replacement: path.resolve(__dirname, '../client/src/e2e/pathshim.ts') },
       { find: /^@overlyx\/core$/, replacement: path.resolve(__dirname, '../core/src/index.ts') },
       { find: /^@overlyx\/core\/(.*)$/, replacement: path.resolve(__dirname, '../core/src') + '/$1' },
       { find: '@client', replacement: path.resolve(__dirname, '../client/src') },
