@@ -619,6 +619,17 @@ blend.
   the raw summary) and `GET /api/admin/usage` rank actions by how often they failed, were undone
   within 5 s or were repeated in bursts, list the unanswered shortcuts, the dismissed dialogs and the
   error templates.
+* **Macros shown as TeX code** (usage kind `macro`, `core/usagePayload.ts`, `editor/plugins/macrousage.ts`):
+  the bare name of a LaTeX command the editor could only show as TeX code — a formula's command or
+  environment nothing here draws (`core/math/mathjax.ts onUnknownMathCommand`: `math qty`, `env
+  weirdenv`) and the first command of a TeX-code box in the text (`text vspace`, `env tikzpicture`),
+  each once per page load, at most 40. Only letters (2–32, an optional star), never arguments or
+  text; the document's own macros (its `\newcommand`s, which are drawn) are left out. Stored in that
+  one form only (client, VS Code's sanitizer and the server check it), kept 30 days. The report
+  (*Macros shown as TeX code*) and `/api/admin/usage` (`macros`) **name a command only once it was met
+  in 3 sessions** (`MACRO_MIN_SESSIONS`) — a name only one person's documents use stays a count — and
+  those become the maintenance worker's `unrendered-macro` signals (lowest priority; the prompt asks
+  it to judge whether drawing the command is worthwhile and, if so, to implement it, else no_fix).
 * **Detailed interaction diagnostics** extend ordinary anonymous usage statistics with a shared
   finite schema (`core/interactions.ts`), validated before queueing and again before storage.
   Clicks, context menus, drag/drop, paste/cut, deletion/Enter/Escape outcomes, annotation controls,
@@ -684,17 +695,6 @@ blend.
   LaTeX build products (`.aux`, `.log`, `.bbl`, …) and LyX
   backups are hidden unless *All files* is on. The *Navigate* menu lists the sections as well
   (so the command palette finds them).
-* **Text editor** for the other files of a project (`.tex`, `.bib`, `.sty`, `.cls`, `.bst`, `.md`,
-  `.txt`, `latexmkrc`, …): they open in a tab like documents, with line numbers, autosave 1.5 s
-  after the last change (or `Ctrl+S`), and a conflict check — if the file changed on the server
-  meanwhile (someone else, git) the save is refused and you choose between the server's
-  version and yours. Viewers get it read-only.
-* **One way to make a file** (`app/newfile.ts`): the panel's `+ File`, its right-click *New File…*
-  (and a folder row's `+`), *File ▸ New…* (`Ctrl+N`, also from a text file) and a new project's first
-  document all ask for a name, and **the ending decides** what it becomes: `.tex` — or no ending — a
-  LaTeX document from the template, `.md` a Markdown document, `.board` a whiteboard, anything else
-  (`.bib`, `.sty`, `.txt` …) an empty text file; images, PDFs and other binaries are refused with a
-  pointer to Upload. A taken name asks again with the server's error, never replaces (text files go
 * **Go to File and Search in the project** (VS Code's Quick Open and Find in Files; web app only —
   the VS Code extension has VS Code's own). **`Ctrl/⌘+P`** (*File ▸ Go to file…*, `app/QuickOpen.tsx`,
   `app/quickopen.ts`) opens a box over the window: a few letters of a file's name in order find it
@@ -718,6 +718,17 @@ blend.
   (`SEARCH_LIMITS`): files over 8 MB skipped, 100 matches listed per file, 2000 in all, 500 files,
   3 s (then *stopped early*); the matching runs in a worker thread, one search at a time, and a
   regular expression that never finishes has its worker stopped after 8 s.
+* **Text editor** for the other files of a project (`.tex`, `.bib`, `.sty`, `.cls`, `.bst`, `.md`,
+  `.txt`, `latexmkrc`, …): they open in a tab like documents, with line numbers, autosave 1.5 s
+  after the last change (or `Ctrl+S`), and a conflict check — if the file changed on the server
+  meanwhile (someone else, git) the save is refused and you choose between the server's
+  version and yours. Viewers get it read-only.
+* **One way to make a file** (`app/newfile.ts`): the panel's `+ File`, its right-click *New File…*
+  (and a folder row's `+`), *File ▸ New…* (`Ctrl+N`, also from a text file) and a new project's first
+  document all ask for a name, and **the ending decides** what it becomes: `.tex` — or no ending — a
+  LaTeX document from the template, `.md` a Markdown document, `.board` a whiteboard, anything else
+  (`.bib`, `.sty`, `.txt` …) an empty text file; images, PDFs and other binaries are refused with a
+  pointer to Upload. A taken name asks again with the server's error, never replaces (text files go
   through `upload?overwrite=0`). Consequence: an empty raw `.tex` (a preamble) is no longer made
   from the panel — name it `.sty`, or upload it; existing raw `.tex` files still open in the text
   editor (what a `.tex` *is* stays decided by its content, `projects.ts classifyDocs`). Rows are no
@@ -3066,8 +3077,10 @@ document. Tests: `tests/security-limits.test.ts`, `tests/pdffetch.test.ts`, `tes
 iterations (16 Oct 2026). `overlyx-maintenance.timer` runs `scripts/maintenance.sh` every ten minutes;
 the timer persists across reboots and `flock` prevents overlapping workers. A cheap read-only scan
 checks open GitHub issues (including recent comments), local feedback/browser/server/extension
-error reports, anonymous usage errors/problem trails and service errors. Mail and account tables
-are excluded. Only new or changed signals invoke Codex; recurring counts must double to wake it
+error reports, anonymous usage errors/problem trails, LaTeX commands the editor shows as TeX code
+(`unrendered-macro`, lowest priority: the worker judges whether drawing one is worthwhile — a common
+package's command, not one person's macro — and implements it or answers no_fix) and service errors.
+Mail and account tables are excluded. Only new or changed signals invoke Codex; recurring counts must double to wake it
 again. One coherent fix is attempted at a time, with only minimal relevant checks. The worker runs
 as its own account `overlyx-maint` (see "Accounts on the server" below): root first collects the
 evidence (`maintenance.ts --collect`, the unit's `ExecStartPre=+`) into

@@ -11,13 +11,15 @@
  *   dismissed     dialogs opened and closed without applying, and how quickly
  *   notices       error messages shown in the status bar, by template
  *   errors        uncaught errors, by template
+ *   macros        LaTeX commands the editor could only show as TeX code (named once seen in
+ *                 MACRO_MIN_SESSIONS sessions: a name only one person uses stays unnamed)
  */
-import { scrubUsageDetail } from '@overlyx/core/usagePayload.ts';
+import { scrubUsageDetail, parseMacroUsageDetail } from '@overlyx/core/usagePayload.ts';
 import type Database from 'better-sqlite3';
 import { isReliabilityContext, isReliabilityDurationBucket, parseReliabilityDetail } from '@overlyx/core/reliability.ts';
 import { parseInteractionDetail, isInteractionTarget, isClientBuildVersion } from '@overlyx/core/interactions.ts';
 
-export const USAGE_NAMES = ['session', 'view', 'menu', 'palette', 'shortcut', 'toolbar', 'key', 'chord', 'key-unbound', 'dialog', 'notice', 'error', 'undo', 'redo', 'reliability', 'interaction'] as const;
+export const USAGE_NAMES = ['session', 'view', 'menu', 'palette', 'shortcut', 'toolbar', 'key', 'chord', 'key-unbound', 'dialog', 'notice', 'error', 'undo', 'redo', 'reliability', 'interaction', 'macro'] as const;
 export type UsageName = (typeof USAGE_NAMES)[number];
 /** the kinds that are an action taken on purpose */
 export const ACTION_NAMES: ReadonlySet<string> = new Set(['menu', 'palette', 'shortcut', 'toolbar', 'key', 'chord']);
@@ -27,6 +29,8 @@ export const UNDO_WINDOW_MS = 5000;
 /** identical actions this close together are one burst */
 export const REPEAT_WINDOW_MS = 4000;
 export const REPEAT_MIN = 3;
+/** a command shown as TeX code is named in the summary once this many sessions met it (fewer: only counted) */
+export const MACRO_MIN_SESSIONS = 3;
 
 /**
  * Legacy usage details are scrubbed client-side and scrubbed again here so a modified client
@@ -76,6 +80,8 @@ export interface UsageSummary {
   /** Consent-only fixed-vocabulary diagnostics; never part of action ranking. */
   reliability: { events: number; sessions: number; details: Count[]; contexts: Count[]; durations: Count[] };
   interactions: { events: number; details: Count[]; contexts: Count[]; durations: Count[]; problemTrails: Count[] };
+  /** commands shown as TeX code (`math \foo`, `env tikzpicture`, `text \foo` as keys) met in MACRO_MIN_SESSIONS sessions or more; `rare`: how many other names were met */
+  macros: { listed: Count[]; rare: number };
 }
 
 const isUndoAction = (name: string, detail: string) => /(^|[^a-z])(undo|redo)([^a-z]|$)/i.test(detail) || (name === 'key' && /^(Shift-)?Mod-[zy]$/.test(detail));
@@ -117,6 +123,7 @@ export function summarise(rows: UsageRow[], o: { since: number; until: number; t
   const reliabilitySessions = new Set<string>();
   const interactionDetails = new Counter(), interactionContexts = new Counter(), interactionDurations = new Counter(), trails = new Counter();
   let interactionEvents = 0;
+  const macros = new Counter();
   let trailSession = '';
   let trailClient = 'unknown client', trailBuild = 'unknown build';
   let trail: { at: number; label: string }[] = [];
@@ -137,6 +144,8 @@ export function summarise(rows: UsageRow[], o: { since: number; until: number; t
     if (r.name === 'reliability' && !reliabilityDetail) continue;
     const interaction = r.name === 'interaction' ? parseInteractionDetail(r.detail) : null;
     if (r.name === 'interaction' && (!interaction || !isInteractionTarget(r.place))) continue;
+    const macro = r.name === 'macro' ? parseMacroUsageDetail(r.detail) : null;
+    if (r.name === 'macro' && !macro) continue;
     if (r.session !== trailSession) { trailSession = r.session; trail = []; trailClient = 'unknown client'; trailBuild = 'unknown build'; }
     if (r.name === 'session') {
       if (/^(ios|android|mac|windows|linux|other) (firefox|edge|chrome|safari|other) (narrow|medium|wide)( touch)?$/.test(r.detail)) trailClient = r.detail;
@@ -163,6 +172,7 @@ export function summarise(rows: UsageRow[], o: { since: number; until: number; t
     byName[r.name] = (byName[r.name] ?? 0) + 1;
     sessions.add(r.session);
     if (interaction) continue;
+    if (macro) { macros.add(`${macro.kind} ${macro.kind === 'env' ? macro.name : '\\' + macro.name}`, r.session); continue; }
     if (r.name === 'reliability' && reliabilityDetail) {
       reliabilityEvents++;
       reliabilitySessions.add(r.session);
@@ -233,6 +243,10 @@ export function summarise(rows: UsageRow[], o: { since: number; until: number; t
       details: reliabilityDetails.list(500), contexts: reliabilityContexts.list(500), durations: reliabilityDurations.list(500),
     },
     interactions: { events: interactionEvents, details: interactionDetails.list(o.top), contexts: interactionContexts.list(100), durations: interactionDurations.list(20), problemTrails: trails.list(o.top) },
+    macros: (() => {
+      const all = macros.list(Infinity), listed = all.filter(m => m.sessions >= MACRO_MIN_SESSIONS);
+      return { listed: listed.sort((a, b) => b.sessions - a.sessions || b.count - a.count || a.key.localeCompare(b.key)).slice(0, o.top), rare: all.length - listed.length };
+    })(),
   };
 }
 
@@ -274,6 +288,11 @@ export function formatUsageReport(s: UsageSummary): string {
   if (s.errors.length) {
     section('Uncaught errors (templates)');
     for (const n of s.errors.slice(0, 20)) out.push(`${rpad(n.count, 6)}  ${n.key}  (${n.sessions} session${n.sessions === 1 ? '' : 's'})`);
+  }
+  if (s.macros.listed.length || s.macros.rare) {
+    section(`Macros shown as TeX code (met in ${MACRO_MIN_SESSIONS}+ sessions; candidates for rendering)`);
+    for (const m of s.macros.listed.slice(0, 40)) out.push(`${rpad(m.count, 6)}  ${pad(m.key, 40)} (${m.sessions} session${m.sessions === 1 ? '' : 's'})`);
+    if (s.macros.rare) out.push(`(${s.macros.rare} more name${s.macros.rare === 1 ? '' : 's'} met in fewer sessions: not listed)`);
   }
   if (s.reliability.events) {
     section('Reliability diagnostics (consent-only, fixed categories)');

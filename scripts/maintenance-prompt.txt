@@ -8,6 +8,16 @@ context, not a request to tackle the entire backlog. Fix one coherent problem pe
 and GitHub requests may be valid small feature requests as well as bugs; implement clear,
 bounded requests consistent with the product. If unclear, record no_fix or defer and move on.
 
+A signal of kind unrendered-macro names a LaTeX command (or environment) that the editor could
+only show as TeX code — in formulas (math, env) or as the first command of a TeX-code box in the
+text (text) — met in several anonymous sessions; only its name is known. Decide whether drawing it
+is worthwhile: yes for a command of a common package or of LaTeX itself whose look the editor can
+give (a symbol, a font or accent, spacing, a reference-like command, an environment MathJax or the
+editor can lay out), no for internal or obscure commands, layout-only commands with nothing to see,
+or names that look like one person's own macros. If yes, implement the rendering where such
+commands live (core math tables and MathJax macros for formulas, the .tex reader and the editor's
+insets for text), with a small unit test, and answer fixed; if no, answer no_fix with the reason.
+
 Keep this lightweight: inspect relevant source, use a small reproduction when it resolves real
 uncertainty, implement, and run only the smallest useful check. Use a focused unit test or
 typecheck where appropriate. Do not run full suites, e2e/browser release gates, broad audits,

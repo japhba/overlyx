@@ -138,14 +138,25 @@ export function atomsToTex(cell: Cell, ctx: TexContext, mode: 'math' | 'text' = 
 
 const braced = (c: Cell, ctx: TexContext, owner: Atom, idx: number, mode: 'math' | 'text' = 'math') => '{' + cellToTex(c, ctx, owner, idx, mode) + '}';
 
+/**
+ * Told the name of each command (`math`) or environment (`env`) a formula shows as its name in TeX
+ * code because nothing here knows how to draw it — the editor counts them (client usage.ts
+ * recordMacro) so that the common ones get drawn. None by default (the server renders too).
+ */
+let unknownSink: ((kind: 'math' | 'env', name: string) => void) | null = null;
+export function onUnknownMathCommand(sink: typeof unknownSink): void { unknownSink = sink; }
+function shownAsCode(kind: 'math' | 'env', name: string): void {
+  if (unknownSink) try { unknownSink(kind, name); } catch { /* counting never stops drawing */ }
+}
+
 export function atomToTex(a: Atom, ctx: TexContext, mode: 'math' | 'text'): string {
   switch (a.t) {
     case 'char': return charToTex(a.c, mode);
     case 'sym': {
-      if (mode === 'text') { const e = SYMBOLS[a.n]; return e?.u ? escapeText(e.u) : `\\textbackslash ${a.n}`; }
+      if (mode === 'text') { const e = SYMBOLS[a.n]; if (!e?.u) shownAsCode('math', a.n); return e?.u ? escapeText(e.u) : `\\textbackslash ${a.n}`; }
       const lim = a.limits ? '\\' + a.limits : '';
       if (a.n === 'adots') return '\\iddots';
-      if (!MATHJAX_KNOWN.has(a.n) && /^[A-Za-z]+\*?$/.test(a.n)) { const e = SYMBOLS[a.n]; return e?.u ? `\\htmlClass{lm-unknown}{\\text{${escapeText(e.u)}}}` : `\\htmlClass{lm-unknown}{\\text{\\textbackslash ${escapeText(a.n)}}}`; }
+      if (!MATHJAX_KNOWN.has(a.n) && /^[A-Za-z]+\*?$/.test(a.n)) { const e = SYMBOLS[a.n]; if (!e?.u) shownAsCode('math', a.n); return e?.u ? `\\htmlClass{lm-unknown}{\\text{${escapeText(e.u)}}}` : `\\htmlClass{lm-unknown}{\\text{\\textbackslash ${escapeText(a.n)}}}`; }
       return '\\' + a.n + lim;
     }
     case 'space': {
@@ -258,11 +269,12 @@ export function atomToTex(a: Atom, ctx: TexContext, mode: 'math' | 'text'): stri
       const n = CMD_MAP[a.n];
       if (n !== undefined) return n;
       if (a.n.length === 1 && !/[A-Za-z]/.test(a.n)) return '\\' + a.n;
+      shownAsCode('math', a.n);
       return `\\htmlClass{lm-unknown}{\\text{\\textbackslash ${escapeText(a.n)}}}` + (a.limits ? '' : '');
     }
     case 'hash': return `\\htmlClass{lm-arg}{\\text{${escapeText(a.n)}}}`;
     case 'comment': return `\\htmlClass{lm-comment}{\\text{\\%${escapeText(a.text)}}}`;
-    case 'env': return `\\htmlClass{lm-unknown}{\\text{\\textbackslash begin\\{${escapeText(a.n)}\\}}}${cellToTex(a.body, ctx, a, 0, mode)}\\htmlClass{lm-unknown}{\\text{\\textbackslash end\\{${escapeText(a.n)}\\}}}`;
+    case 'env': shownAsCode('env', a.n); return `\\htmlClass{lm-unknown}{\\text{\\textbackslash begin\\{${escapeText(a.n)}\\}}}${cellToTex(a.body, ctx, a, 0, mode)}\\htmlClass{lm-unknown}{\\text{\\textbackslash end\\{${escapeText(a.n)}\\}}}`;
     case 'raw': return a.latex;
     case 'unknown': {
       // a command name being typed: green once it is a valid command, with the completion LyX would offer in grey
@@ -363,7 +375,7 @@ function macroToTex(a: Atom & { t: 'macro' }, ctx: TexContext, mode: 'math' | 't
     return cellToTex(c, ctx, a, i, mode);
   });
   if (info?.def === undefined) {
-    // no definition: show the name with its arguments
+    // no definition: show the name with its arguments (the document's own macro, not counted: shownAsCode)
     return `\\htmlClass{lm-macro}{\\htmlClass{lm-unknown}{\\text{\\textbackslash ${escapeText(a.n)}}}${args.map(s => `\\{${s}\\}`).join('')}}`;
   }
   const def = expandUserMacros(sanitizeForMathjax(info.def, a.n, a.args.length), ctx.macros);

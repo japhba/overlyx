@@ -14,6 +14,8 @@
  *   undo / redo                 (so that "undone right after action X" can be counted)
  *   view                        which kind of screen is shown (start page, editor, source, board …)
  *   session                     platform, touch, window width class — once per page load
+ *   macro                       a LaTeX command's bare name the editor could only show as TeX code
+ *                               (`math foo`, `env foo`, `text foo`: core usagePayload.ts), once per page load
  * Every event carries `where` the action happened (text, math, table, inset, form, dialog, ui),
  * a per-page-load random session id, and the time. No user id, document id, project name, file
  * name, text or formula ever leaves the browser: `scrub()` removes quoted strings, file names,
@@ -25,7 +27,7 @@
  * enables collection; the host applies VS Code's telemetry level and overlyx.usageStatistics
  * before forwarding anonymous batches (packages/vscode/src/host/telemetry.ts).
  */
-import { scrubUsageDetail } from '@overlyx/core/usagePayload.ts';
+import { scrubUsageDetail, macroUsageDetail, parseMacroUsageDetail, type MacroUsageKind } from '@overlyx/core/usagePayload.ts';
 import { API_BASE } from './api';
 import { getPrefs, subscribePrefs } from './prefs';
 import { editorContext } from './editor/context';
@@ -33,8 +35,8 @@ import { isBenignBrowserError } from './error-reporting';
 import { makeInteractionDetail, parseInteractionDetail, isInteractionTarget, isClientBuildVersion, type InteractionAction, type InteractionOutcome, type InteractionState, type InteractionTarget } from '@overlyx/core/interactions.ts';
 import { isReliabilityContext, isReliabilityDurationBucket, makeReliabilityDetail, parseReliabilityDetail, reliabilityDurationBucket, type ReliabilityEvent, type ReliabilityPointer, type ReliabilityContext } from '@overlyx/core/reliability.ts';
 
-export type UsageName = 'session' | 'view' | 'menu' | 'palette' | 'shortcut' | 'toolbar' | 'key' | 'chord' | 'key-unbound' | 'dialog' | 'notice' | 'error' | 'undo' | 'redo' | 'reliability' | 'interaction';
-export const USAGE_NAMES: readonly UsageName[] = ['session', 'view', 'menu', 'palette', 'shortcut', 'toolbar', 'key', 'chord', 'key-unbound', 'dialog', 'notice', 'error', 'undo', 'redo', 'reliability', 'interaction'];
+export type UsageName = 'session' | 'view' | 'menu' | 'palette' | 'shortcut' | 'toolbar' | 'key' | 'chord' | 'key-unbound' | 'dialog' | 'notice' | 'error' | 'undo' | 'redo' | 'reliability' | 'interaction' | 'macro';
+export const USAGE_NAMES: readonly UsageName[] = ['session', 'view', 'menu', 'palette', 'shortcut', 'toolbar', 'key', 'chord', 'key-unbound', 'dialog', 'notice', 'error', 'undo', 'redo', 'reliability', 'interaction', 'macro'];
 /** the action kinds the report treats as "the user did something on purpose" */
 export const ACTION_NAMES: readonly UsageName[] = ['menu', 'palette', 'shortcut', 'toolbar', 'key', 'chord'];
 
@@ -210,13 +212,31 @@ export function recordUsage(name: UsageName, detail = '', extra: { ok?: boolean;
   if (name === 'reliability' && (!reliabilityEnabled() || !parseReliabilityDetail(detail)
     || extra.where !== undefined && !isReliabilityContext(extra.where)
     || extra.dt !== undefined && !isReliabilityDurationBucket(extra.dt))) return;
-  const ev: UsageEvent & { at: number } = { at: Date.now(), ago: 0, name, detail: name === 'reliability' || name === 'interaction' ? detail : scrub(detail), where: extra.where ?? (name === 'reliability' ? 'ui' : whereNow()) };
+  if (name === 'macro' && !parseMacroUsageDetail(detail)) return;
+  const ev: UsageEvent & { at: number } = { at: Date.now(), ago: 0, name, detail: name === 'reliability' || name === 'interaction' || name === 'macro' ? detail : scrub(detail), where: extra.where ?? (name === 'reliability' ? 'ui' : whereNow()) };
   if (name !== 'reliability' && extra.ok !== undefined) ev.ok = extra.ok;
   if (extra.dt !== undefined && Number.isFinite(extra.dt)) ev.dt = Math.max(0, Math.round(extra.dt));
   queue.push(ev);
   if (queue.length > QUEUE_MAX) queue.splice(0, queue.length - QUEUE_MAX);
   if (queue.length >= BATCH_AT) void flushUsage();
   else if (!timer) timer = setTimeout(() => { timer = null; void flushUsage(); }, FLUSH_MS);
+}
+
+/** command names recorded this page load (each once), and how many at most */
+const macrosSeen = new Set<string>();
+const MACROS_MAX = 40;
+/**
+ * A LaTeX command the editor could only show as TeX code (a formula's unknown command, an unknown
+ * environment, a command in a TeX-code box): its bare name, once per page load. The document's own
+ * macros are left out by the caller (they render).
+ */
+export function recordMacro(kind: MacroUsageKind, name: string): void {
+  try {
+    const detail = macroUsageDetail(kind, name);
+    if (!detail || macrosSeen.has(detail) || macrosSeen.size >= MACROS_MAX || !usageEnabled()) return;
+    macrosSeen.add(detail);
+    recordUsage('macro', detail, { where: kind === 'text' ? 'text' : 'math' });
+  } catch { /* Collection must never interfere with drawing. */ }
 }
 
 /** the queued events, for tests */
@@ -343,4 +363,4 @@ export function initUsage(): void {
 }
 
 /** tests: forget the queue and the stop flag */
-export function resetUsageForTests(): void { queue = []; stopped = false; inited = false; sessionId = ''; if (timer) { clearTimeout(timer); timer = null; } }
+export function resetUsageForTests(): void { queue = []; stopped = false; inited = false; sessionId = ''; macrosSeen.clear(); if (timer) { clearTimeout(timer); timer = null; } }

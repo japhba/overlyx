@@ -47,6 +47,7 @@ import { pasteTargetsPlugin, pasteLatex, pasteBlocksIntoEmpty } from './plugins/
 import { autocorrectPlugin } from './spell/autocorrect';
 import { arrowsPlugin } from './plugins/arrows';
 import { mathOccurrencesPlugin } from './plugins/mathoccurrences';
+import { macroUsagePlugin } from './plugins/macrousage';
 import { spellPlugin, misspelledAt, spellSuggest } from './spell/plugin';
 import { aiRewritePlugin } from './ai/rewrite';
 import { aiCompletePlugin } from './ai/complete';
@@ -176,6 +177,7 @@ export function assemblePlugins(o: AssemblyOptions): Plugin[] {
     mergeReviewPlugin(o.merges),   // the card that goes through what offline edits and the live text changed differently
     findPlugin(),
     mathOccurrencesPlugin(),   // a symbol selected in a formula: the same symbol in the other formulas, a lighter shade
+    macroUsagePlugin(),   // commands only shown as TeX code (unknown in formulas, TeX-code boxes): their names counted, anonymously
     pasteTargetsPlugin(),
     linksPlugin(),   // the bubble under a hyperlink, the selection shown while the link box is open
     mirrorCaretPlugin(),
