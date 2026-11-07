@@ -25,7 +25,8 @@ import { stashLyxBind, ctrlINow, ctrlIPlan, CTRLI_COMMANDS, type CtrlI } from '.
 import { resetAllBindings, getBindings, setBinding, subscribeBindings } from './keybindings';
 import { useUiMode } from './uimode';
 import { formatShortcut } from './shortcuts';
-import { setThemePref, useTheme, DARK_TONES, type ThemePref } from './theme';
+import { setThemePref, useTheme, DARK_TONES, GRADE_RUNGS, GRADE_MIN, GRADE_MAX, type ThemePref } from './theme';
+import { AxisSlider } from './FontPicker';
 import { REWRITE_KEY } from '../editor/ai/rewrite';
 import { Dialog, uiAlert } from './Dialogs';
 import { InlineModelPicker } from './AgentModelPicker';
@@ -253,6 +254,12 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
               <label class="pref" key={v}><input type="radio" name="ol-theme" data-theme-pref={v} checked={themeChoice === v} onChange={() => setThemePref(v)} /><span>{label}{hint && <span class="sub">{hint}</span>}</span></label>
             ))}
             {darkTheme}
+            <h3>Text grade</h3>
+            <div class="sub">How dark the interface’s letters are — and those of documents set in Anodyne — in this browser. Grade changes the strokes only, never the width of a letter, so nothing moves. The dark theme takes 25 off by itself, as light letters on dark look heavier.</div>
+            <div class="settings-grade" data-pref="textGrade">
+              <AxisSlider name="Grade" min={GRADE_MIN} max={GRADE_MAX} def={0} rungs={GRADE_RUNGS} value={p.textGrade} onChange={v => setPref('textGrade', v)} />
+              <div class="settings-grade-sample">Il1 O0 — The quick brown fox jumps over the lazy dog, 3 × 4 ≠ 12 ± 1</div>
+            </div>
           </>}
           {section === 'privacy' && <>
             <h3>Usage statistics</h3>

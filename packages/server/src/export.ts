@@ -335,7 +335,8 @@ export async function exportTex(docId: string, opts: { into?: string } = {}): Pr
       if (!g) continue;
       const sub = path.join('ol-fonts', g.slug);
       fs.mkdirSync(path.join(dir, sub), { recursive: true });
-      for (const f of g.files) fs.copyFileSync(path.join(g.dir, f.file), path.join(dir, sub, f.file));
+      // (a house font: its static faces, LuaTeX reads no woff2)
+      for (const file of g.tex ? Object.values(g.tex) : g.files.map(f => f.file)) fs.copyFileSync(path.join(g.dir, file), path.join(dir, sub, path.basename(file)));
       fontFiles[name] = { path: `./${sub}/`, ...fontFaces(g) };
     }
     const tex = markdownAsTex(lyx, doc.project, doc.relPath, { fontFiles });

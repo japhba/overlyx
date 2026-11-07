@@ -94,4 +94,18 @@ describe('google fonts', () => {
     expect(await provideFaceFonts('no fonts', dir)).toBeNull();
     rmSync(dir, { recursive: true, force: true });
   });
+
+  it('serves Anodyne, the house font, from the repository: variable woff2 to the web, static faces with MATH to TeX', async () => {
+    const f = await googleFont('anodyne');
+    expect(f?.family).toBe('Anodyne');
+    expect(f?.axes?.map(a => a.t)).toEqual(['wght', 'GRAD']);
+    expect(f!.files.every(x => x.file.endsWith('.woff2') && x.range && existsSync(join(f!.dir, x.file)))).toBe(true);
+    expect(fontFaces(f!)).toEqual({ regular: 'Anodyne-Regular.ttf', bold: 'Anodyne-Bold.ttf', italic: 'Anodyne-Italic.ttf', boldItalic: 'Anodyne-BoldItalic.ttf' });
+    expect(asked).toEqual([]);  // never asks Google
+    expect(olfontFamilies('\\setsansfont{Anodyne}\\setmathfont{Anodyne}')).toEqual(['Anodyne']);
+    const dir = mkdtempSync(join(tmpdir(), 'olfont-build-'));
+    await provideFaceFonts('\\setsansfont{Anodyne}', dir);
+    expect(readdirSync(join(dir, 'ol-fonts', 'anodyne')).sort()).toEqual(['Anodyne-Bold.ttf', 'Anodyne-BoldItalic.ttf', 'Anodyne-Italic.ttf', 'Anodyne-Regular.ttf']);
+    rmSync(dir, { recursive: true, force: true });
+  });
 });

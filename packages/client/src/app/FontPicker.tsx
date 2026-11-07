@@ -345,8 +345,8 @@ export function FacePanel({ face, onChange, noWeight }: { face: FontFace; onChan
 /** a rung at `p` % of the slider: its tick exactly there, its name centred on it — at the ends it reaches inwards */
 const rungStyle = (p: number) => ({ left: `${p}%`, ...(p < 8 ? { transform: 'none', alignItems: 'flex-start' } : p > 92 ? { transform: 'translateX(-100%)', alignItems: 'flex-end' } : {}) });
 
-/** a continuous axis with its rungs below; the knob snaps to a rung within 1.5 % of the range */
-function AxisSlider({ name, min, max, def, rungs, value, onChange }: { name: string; min: number; max: number; def: number; rungs: { v: number; label: string }[]; value: number; onChange: (v: number) => void }) {
+/** a continuous axis with its rungs below; the knob snaps to a rung within 1.5 % of the range (also Settings ▸ Appearance ▸ Text grade) */
+export function AxisSlider({ name, min, max, def, rungs, value, onChange }: { name: string; min: number; max: number; def: number; rungs: { v: number; label: string }[]; value: number; onChange: (v: number) => void }) {
   const span = max - min || 1;
   const step = span > 20 ? 1 : 0.1;
   const pct = (v: number) => ((v - min) / span) * 100;

@@ -1,5 +1,6 @@
 @import './fonts/computer-modern/fonts.css';
 @import './fonts/web/webfonts.css';
+@import '../../../fonts/anodyne/web/anodyne.css';
 @import './modern.css';
 
 /* ------------------------------------------------------------ theme tokens
@@ -8,8 +9,14 @@
    out of the rules below: everything that is not a LyX text colour or a user colour goes through a token. */
 :root {
   --editor-font: "CMU Serif", serif;
-  /* open fonts only (tests/open-fonts.test.ts), never San Francisco (CLAUDE.md): Roboto on Android, the bundled Inter elsewhere */
-  --ui-font: Roboto, "OL Inter", sans-serif;
+  /* open fonts only (tests/open-fonts.test.ts), never San Francisco (CLAUDE.md): Anodyne, OverLyX's own
+     sans-serif (fonts/anodyne: Lisnoti's clear I l 1 and O 0 over Noto Sans, weights 100–900, grade) */
+  --ui-font: Anodyne, "OL Inter", sans-serif;
+  /* its grade (app/theme.ts): the person's, and the dark theme's −25 where light text is on dark —
+     set again on the paper pages that stay white in the dark theme (custom properties resolve where
+     font-variation-settings is declared, then the value is inherited) */
+  --ol-grade-auto: 0;
+  font-variation-settings: "GRAD" calc(var(--ol-grade, 0) + var(--ol-grade-auto));
   --editor-zoom: 1;
 }
 :root,
@@ -86,6 +93,7 @@ html[data-theme="dark"]:not([data-dark-pages]) .editor-page:not(:has(.ol-layout)
 }
 /* dark: text and formulas are white on a near-black page, the chrome a shade lighter */
 html[data-theme="dark"] {
+  --ol-grade-auto: -25;
   --vspace-color: #b98d5a;
   --space-mark: rgba(214, 102, 19, 0.55);
   --math-occ-bg: rgba(122, 167, 234, 0.14);
@@ -176,6 +184,8 @@ html[data-theme="dark"] .pdf-panel iframe { background: #2a2a30; }
 
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
+/* the white paper of the dark theme (smart invert off): dark text again, no dark-theme grade */
+html[data-theme="dark"]:not([data-dark-pages]) .editor-page:not(:has(.ol-layout)) { --ol-grade-auto: 0; font-variation-settings: "GRAD" calc(var(--ol-grade, 0) + var(--ol-grade-auto)); }
 /* the page never pinch- or double-tap-zooms: each view zooms its own content (zoomlock.ts) */
 html { touch-action: pan-x pan-y; }
 body { font-family: var(--ui-font); font-size: 13px; color: var(--ui-fg); background: var(--ui-bg); }
@@ -2226,6 +2236,10 @@ html[data-presenting] .editor-column.panes > .editor-scroll { display: block !im
   .settings-content { min-width: 0; }
 }
 .settings-content h3 { margin: 4px 0 0; }
+/* Appearance ▸ Text grade: the font picker's axis slider (rungs) over a sample at that grade — the
+   sample in the interface's font, its grade the slider's (on top of the dark theme's) */
+.settings-grade { max-width: 420px; display: grid; gap: 4px; }
+.settings-grade-sample { font: 15px/1.4 var(--ui-font); padding: 6px 8px; border: 1px solid var(--ui-border2); border-radius: 6px; background: var(--ui-bg); }
 .lyx-editor.font-sample { flex: none; min-height: 0; max-width: none; margin: 0; padding: 8px 12px; font-size: 14.5px; line-height: 1.4; background: var(--page-bg); border: 1px solid var(--ui-border); border-radius: 4px; }
 .lyx-editor.font-sample p { margin: 0 0 2px; text-align: justify; hyphens: auto; }
 .lyx-editor.font-sample .sample-display { margin: 6px 0 8px; text-align: center; overflow-x: auto; overflow-y: hidden; }

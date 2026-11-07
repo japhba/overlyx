@@ -57,6 +57,21 @@ subscribePrefs(applyTone);
 applyTone(getPrefs());
 
 /**
+ * Text grade (prefs.textGrade, Settings ▸ Appearance): Anodyne's GRAD axis — the stems of a lighter or
+ * heavier weight at the widths of this one, so text darkens or lightens without moving. `--ol-grade` on
+ * <html>; styles.css adds the dark theme's −25 (`--ol-grade-auto`) where light text sits on dark, and
+ * sets `font-variation-settings` from both. Fonts without the axis ignore it.
+ */
+export const GRADE_RUNGS: { v: number; label: string }[] = [{ v: -50, label: 'Lighter' }, { v: 0, label: 'Normal' }, { v: 50, label: 'Darker' }, { v: 100, label: 'Darkest' }];
+export const GRADE_MIN = -100, GRADE_MAX = 150;
+function applyGrade(p: Prefs): void {
+  const g = Math.max(GRADE_MIN, Math.min(GRADE_MAX, Number(p.textGrade) || 0));
+  if (g) document.documentElement.style.setProperty('--ol-grade', String(g)); else document.documentElement.style.removeProperty('--ol-grade');
+}
+subscribePrefs(applyGrade);
+applyGrade(getPrefs());
+
+/**
  * Smart invert (prefs.darkPages, prefs.invertFigures — app/darkpages.ts): `data-dark-pages` and
  * `data-invert-figures` on <html>, which styles.css combines with `data-theme` — the editor's page
  * dark or white paper, figures and layout pages inverted or not
