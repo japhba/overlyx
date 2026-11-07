@@ -5,18 +5,21 @@
  * (everything else, encrypted whole, immutable: a new version is a new blob). Paths, names and
  * sizes are in the manifest only, so the server sees opaque ids and byte counts.
  *
+ * Versions of a document (the Versions panel) are its text at that time, encrypted as a blob and
+ * listed in the manifest (`versions`), made by hand or every ten minutes while someone edits it here.
+ *
  * localapi.ts answers the app's API requests for such a project from here; the editor finds its
  * documents' ids here (socket.ts).
  */
 import * as Y from 'yjs';
 import { IndexeddbPersistence } from 'y-indexeddb';
 import { projectOfDoc, isMarkdownPath, type LyxDocument } from '@overlyx/core';
-import { projectKey, createProjectKey, waitingMembers, KeyMissing } from './keys';
+import { projectKey, createProjectKey, waitingMembers, rotateIfNeeded, keyApi, KeyMissing, type Keyring } from './keys';
 import { ensureAccountKeys } from './ui';
 import { roles } from './known';
 export { noteProjects, markE2eProject, isE2eProject, isE2eDocId, knownE2eProjects } from './known';
 import { syncDoc, fetchDoc, seedDoc, REMOTE } from './relay';
-import { encrypt, decrypt, randomId } from './crypto';
+import { randomId } from './crypto';
 import type { TexContext, LocalProjectView } from './texlocal';
 
 type TexLocal = typeof import('./texlocal');
@@ -29,6 +32,10 @@ export async function tex(): Promise<TexLocal> {
 const T = (): TexLocal => { if (!X) throw new Error('the document tools are not loaded yet'); return X; };
 
 export interface FileEntry { id: string; kind: 'doc' | 'blob' | 'dir'; size: number; mtime: number; /** a document without a preamble of its own (a child document) */ fragment?: boolean }
+/** a version of a document: its text kept as a blob (`blob`) */
+export interface VersionEntry { id: number; name: string; author: string; kind: 'manual' | 'auto'; created_at: number; size: number; blob: string }
+/** automatic versions while editing: one per this many ms at most, this many kept per document */
+const AUTO_VERSION_MS = 10 * 60 * 1000, AUTO_VERSIONS_KEPT = 60;
 /** the project file as the app lists it (api.ts ProjectFile) */
 export interface ListedFile { path: string; name: string; size: number; mtime: number; kind: 'doc' | 'lyx' | 'bib' | 'image' | 'tex' | 'pdf' | 'board' | 'html' | 'dir' | 'other' }
 
@@ -64,9 +71,11 @@ const norm = (p: string) => p.split('/').filter(s => s && s !== '.').join('/');
 /* ------------------------------------------------------------------------------ project */
 
 export class E2eProject {
-  key: { key: CryptoKey; version: number } | null = null;
+  key: Keyring | null = null;
   readonly manifest = new Y.Doc();
   readonly files = this.manifest.getMap<string>('files');
+  /** `<document id>/<version id>` → VersionEntry (JSON) */
+  readonly versions = this.manifest.getMap<string>('versions');
   ready: Promise<void>;
   /** the documents open in an editor here, by path (their live state) */
   readonly open = new Map<string, Y.Doc>();
@@ -86,14 +95,14 @@ export class E2eProject {
   private async init(create: boolean): Promise<void> {
     const u = e2eUser();
     this.key = create ? await createProjectKey(this.name, u.id) : await projectKey(this.name, u.id);
-    // the local copy of the manifest belongs to this project's key: another project made under the same name later has its own
-    const raw = new Uint8Array(await crypto.subtle.exportKey('raw', this.key.key));
+    // the local copy of the manifest belongs to this project's (first) key: another project made under the same name later has its own
+    const raw = new Uint8Array(await crypto.subtle.exportKey('raw', this.key.first));
     const tag = [...new Uint8Array(await crypto.subtle.digest('SHA-256', raw)).subarray(0, 6)].map(b => b.toString(16).padStart(2, '0')).join('');
     try { this.persistence = new IndexeddbPersistence(`overlyx-e2e-manifest:${this.name}:${tag}`, this.manifest); await Promise.race([this.persistence.whenSynced, new Promise(r => setTimeout(r, 1500))]); }
     catch { /* no IndexedDB */ }
     await new Promise<void>(resolve => {
       const done = () => resolve();
-      this.sync = syncDoc(this.name, 'manifest', this.key!.key, this.manifest, { readOnly: this.role === 'view', onSynced: done });
+      this.sync = syncDoc(this.name, 'manifest', this.key!, this.manifest, { readOnly: this.role === 'view', onSynced: done });
       // offline: the copy kept here
       setTimeout(done, this.files.size ? 4000 : 15000);
     });
@@ -126,7 +135,7 @@ export class E2eProject {
     return [...out.values()].sort((a, b) => a.path.localeCompare(b.path));
   }
 
-  private get k(): CryptoKey { if (!this.key) throw new Error('the project is locked'); return this.key.key; }
+  private get k(): Keyring { if (!this.key) throw new Error('the project is locked'); return this.key; }
   private writable(): void { if (this.role === 'view') throw Object.assign(new Error('You can only view this project'), { status: 403 }); }
 
   /* ------------------------------------------------------------------ documents */
@@ -240,7 +249,7 @@ export class E2eProject {
     if (hit) return hit;
     const res = await fetch(`/api/e2e/projects/${encodeURIComponent(this.name)}/blobs/${e.id}`, { credentials: 'same-origin' });
     if (!res.ok) throw Object.assign(new Error(`${path} could not be loaded (${res.status})`), { status: res.status });
-    const plain = await decrypt(this.k, new Uint8Array(await res.arrayBuffer()), 'blob', e.id);
+    const plain = await this.k.decrypt(new Uint8Array(await res.arrayBuffer()), 'blob', e.id);
     if (plain.length < 32 * 1024 * 1024) this.blobs.set(e.id, plain);
     return plain;
   }
@@ -259,18 +268,32 @@ export class E2eProject {
     await Promise.all(want.map(p => this.readBlob(p).catch(() => null)));
   }
 
+  /** Encrypt and store bytes as a new blob: its id. */
+  private async putBlob(bytes: Uint8Array, path: string): Promise<string> {
+    const id = randomId();
+    const ct = await this.k.encrypt(bytes, 'blob', id);
+    const res = await fetch(`/api/e2e/projects/${encodeURIComponent(this.name)}/blobs/${id}`, { method: 'PUT', credentials: 'same-origin', headers: { 'content-type': 'application/octet-stream' }, body: ct.slice().buffer as ArrayBuffer });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); throw Object.assign(new Error(d.error ?? `could not save ${path} (${res.status})`), { status: res.status }); }
+    this.blobs.set(id, bytes);
+    return id;
+  }
+
   async writeBlob(path: string, bytes: Uint8Array): Promise<void> {
     this.writable();
     path = norm(path);
     const old = this.entry(path);
-    const id = randomId();
-    const ct = await encrypt(this.k, bytes, 'blob', id);
-    const res = await fetch(`/api/e2e/projects/${encodeURIComponent(this.name)}/blobs/${id}`, { method: 'PUT', credentials: 'same-origin', headers: { 'content-type': 'application/octet-stream' }, body: ct.slice().buffer as ArrayBuffer });
-    if (!res.ok) { const d = await res.json().catch(() => ({})); throw Object.assign(new Error(d.error ?? `could not save ${path} (${res.status})`), { status: res.status }); }
-    this.blobs.set(id, bytes);
+    const id = await this.putBlob(bytes, path);
     this.setEntry(path, { id, kind: 'blob', size: bytes.length, mtime: Date.now() });
     this.dropUrl(path);
     if (old && old.kind === 'blob') void this.releaseBlob(old.id);
+  }
+
+  private async blobBytes(id: string): Promise<Uint8Array> {
+    const hit = this.blobs.get(id);
+    if (hit) return hit;
+    const res = await fetch(`/api/e2e/projects/${encodeURIComponent(this.name)}/blobs/${id}`, { credentials: 'same-origin' });
+    if (!res.ok) throw Object.assign(new Error(`the file could not be loaded (${res.status})`), { status: res.status });
+    return this.k.decrypt(new Uint8Array(await res.arrayBuffer()), 'blob', id);
   }
 
   /** delete a blob nobody's entry names any more */
@@ -323,7 +346,10 @@ export class E2eProject {
     this.manifest.transact(() => { for (const p of this.under(path)) this.files.delete(p); });
     for (const e of gone) {
       if (e.kind === 'blob') await this.releaseBlob(e.id);
-      else if (e.kind === 'doc') await fetch(`/api/e2e/projects/${encodeURIComponent(this.name)}/docs/${e.id}`, { method: 'DELETE', credentials: 'same-origin' }).catch(() => {});
+      else if (e.kind === 'doc') {
+        await this.dropVersions(e.id);
+        await fetch(`/api/e2e/projects/${encodeURIComponent(this.name)}/docs/${e.id}`, { method: 'DELETE', credentials: 'same-origin' }).catch(() => {});
+      }
     }
   }
 
@@ -338,6 +364,75 @@ export class E2eProject {
         this.setEntry(dest, { ...e, id, mtime: Date.now() });
       } else this.setEntry(dest, { ...e, mtime: Date.now() });   // blobs never change: both names share it
     }
+  }
+
+  /* --------------------------------------------------------------------- versions */
+
+  /** The document's versions, newest first. */
+  versionsOf(path: string): VersionEntry[] {
+    const e = this.entry(path);
+    if (!e || e.kind !== 'doc') return [];
+    const out: VersionEntry[] = [];
+    for (const [k, v] of this.versions) if (k.startsWith(e.id + '/')) { try { out.push(JSON.parse(v) as VersionEntry); } catch { /* skip */ } }
+    return out.sort((a, b) => b.created_at - a.created_at);
+  }
+
+  /** Keep the document's text as a version (`text`: given, else its text now). */
+  async saveVersion(path: string, name: string, kind: VersionEntry['kind'] = 'manual', text?: string): Promise<number> {
+    this.writable();
+    const e = this.entry(path);
+    if (!e || e.kind !== 'doc') throw Object.assign(new Error(`no document ${path}`), { status: 404 });
+    const bytes = new TextEncoder().encode(text ?? await this.docText(path));
+    const blob = await this.putBlob(bytes, path);
+    const now = Date.now();
+    const v: VersionEntry = { id: now * 1000 + Math.floor(Math.random() * 1000), name, author: e2eUser().name, kind, created_at: now, size: bytes.length, blob };
+    this.versions.set(`${e.id}/${v.id}`, JSON.stringify(v));
+    if (kind === 'auto') for (const old of this.versionsOf(path).filter(x => x.kind === 'auto').slice(AUTO_VERSIONS_KEPT)) void this.deleteVersion(path, old.id);
+    return v.id;
+  }
+
+  async versionText(path: string, vid: number): Promise<{ text: string; version: VersionEntry }> {
+    const v = this.versionsOf(path).find(x => x.id === vid);
+    if (!v) throw Object.assign(new Error('no such version'), { status: 404 });
+    return { text: new TextDecoder().decode(await this.blobBytes(v.blob)), version: v };
+  }
+
+  /** Bring the document back to a version (its state now kept as a version first, as the server does). */
+  async restoreVersion(path: string, vid: number): Promise<void> {
+    const { text, version } = await this.versionText(path, vid);
+    await this.saveVersion(path, `before restore of "${version.name}"`, 'auto');
+    await this.applyText(path, text);
+  }
+
+  async deleteVersion(path: string, vid: number): Promise<void> {
+    this.writable();
+    const e = this.entry(path);
+    const v = this.versionsOf(path).find(x => x.id === vid);
+    if (!e || !v) return;
+    this.versions.delete(`${e.id}/${v.id}`);
+    this.blobs.delete(v.blob);
+    await fetch(`/api/e2e/projects/${encodeURIComponent(this.name)}/blobs/${v.blob}`, { method: 'DELETE', credentials: 'same-origin' }).catch(() => {});
+  }
+
+  /** a document's versions go with it */
+  private async dropVersions(docEntryId: string): Promise<void> {
+    const gone: string[] = [];
+    this.manifest.transact(() => {
+      for (const [k, v] of [...this.versions]) if (k.startsWith(docEntryId + '/')) { this.versions.delete(k); try { gone.push((JSON.parse(v) as VersionEntry).blob); } catch { /* skip */ } }
+    });
+    for (const b of gone) await fetch(`/api/e2e/projects/${encodeURIComponent(this.name)}/blobs/${b}`, { method: 'DELETE', credentials: 'same-origin' }).catch(() => {});
+  }
+
+  private autoTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** An edit made here: an automatic version a while after it, when the newest is older than ten minutes. */
+  editedHere(path: string): void {
+    if (this.role === 'view' || this.autoTimers.has(path)) return;
+    this.autoTimers.set(path, setTimeout(() => {
+      this.autoTimers.delete(path);
+      const newest = this.versionsOf(path)[0]?.created_at ?? 0;
+      if (Date.now() - newest < AUTO_VERSION_MS || !this.open.has(path)) return;
+      void this.saveVersion(path, 'autosave', 'auto').catch(e => console.warn('[e2e] automatic version', e));
+    }, 60 * 1000));
   }
 
   /* ------------------------------------------------------------ figures as URLs */
@@ -380,6 +475,7 @@ export class E2eProject {
   }
 
   destroy(): void {
+    for (const t of this.autoTimers.values()) clearTimeout(t);
     this.sync?.destroy();
     void this.persistence?.destroy();
     for (const u of this.urls.values()) URL.revokeObjectURL(u.url);
@@ -412,9 +508,10 @@ const projects = new Map<string, E2eProject>();
  * The project, opened (its key unwrapped, its manifest synced) on first use. When this browser does
  * not hold the account's keys yet, the person is asked (setup / recovery code) unless `prompt: false`.
  */
-export async function openE2eProject(name: string, opts: { create?: boolean; prompt?: boolean } = {}): Promise<E2eProject> {
+export async function openE2eProject(name: string, opts: { create?: boolean; prompt?: boolean; /** the document being opened (opened once a waited-for key comes) */ doc?: string } = {}): Promise<E2eProject> {
   try { return await openOnce(name, opts); }
   catch (e) {
+    if (e instanceof KeyMissing && opts.doc) waitedDoc.set(name, opts.doc);
     if (e instanceof KeyMissing && e.reason === 'account' && opts.prompt !== false && await ensureAccountKeys(e2eUser().id)) {
       try { return await openOnce(name, opts); } catch (e2) { if (e2 instanceof KeyMissing && e2.reason === 'waiting') tellWaiting(name); throw e2; }
     }
@@ -429,9 +526,26 @@ export const keyNotices = {
   waiting: (_project: string) => {},
   /** others wait for the key this account holds */
   othersWaiting: (_project: string, _names: string[]) => {},
+  /** the key this account waited for has come (`doc`: the document that could not be opened without it) */
+  granted: (_project: string, _doc: string | null) => {},
 };
 const told = new Set<string>();
-function tellWaiting(project: string): void { if (!told.has(project)) { told.add(project); keyNotices.waiting(project); } }
+const waitedDoc = new Map<string, string>();
+/** Tell the person they wait for the key, and watch for it (a member gives it in their Share dialog). */
+function tellWaiting(project: string): void {
+  if (told.has(project)) return;
+  told.add(project);
+  keyNotices.waiting(project);
+  const poll = setInterval(() => {
+    void keyApi.projectKeys(project).then(info => {
+      if (!info.mine.length) return;
+      clearInterval(poll);
+      told.delete(project);
+      keyNotices.granted(project, waitedDoc.get(project) ?? null);
+      waitedDoc.delete(project);
+    }).catch(e => { if ((e as { status?: number }).status === 403 || (e as { status?: number }).status === 404) clearInterval(poll); });
+  }, 8000);
+}
 function openOnce(name: string, opts: { create?: boolean }): Promise<E2eProject> {
   let p = projects.get(name);
   if (!p) {
@@ -439,14 +553,18 @@ function openOnce(name: string, opts: { create?: boolean }): Promise<E2eProject>
     projects.set(name, p);
     const mine = p;
     p.ready.catch(() => { if (projects.get(name) === mine) { projects.delete(name); mine.destroy(); } });
-    // a member waiting for the key this account holds is told about once a session
-    if (mine.role !== 'view') void p.ready.then(() => waitingMembers(name)).then(w => { if (w.length) keyNotices.othersWaiting(name, w.map(m => m.name)); }).catch(() => {});
+    // someone who held the key left: a new one for those who stay; a member waiting for the key this
+    // account holds is told about once a session
+    if (mine.role !== 'view') void p.ready.then(() => rotateIfNeeded(name, e2eUser().id).catch(e => console.warn('[e2e] the key could not be replaced', e)))
+      .then(() => waitingMembers(name)).then(w => { if (w.length) keyNotices.othersWaiting(name, w.map(m => m.name)); }).catch(() => {});
   }
   return p.ready.then(() => p!);
 }
 
 /** the project if it is open and ready here (synchronous callers: figure URLs) */
 export function openedE2eProject(name: string): E2eProject | undefined { return projects.get(name); }
+/** whether this browser has opened the project (it holds its key) */
+export function e2eProjectUnlocked(name: string): boolean { return !!projects.get(name)?.key; }
 
 export function closeE2eProjects(): void { for (const p of projects.values()) p.destroy(); projects.clear(); }
 
@@ -454,8 +572,10 @@ export function closeE2eProjects(): void { for (const p of projects.values()) p.
 export function registerOpenDoc(docId: string, ydoc: Y.Doc): () => void {
   const project = projectOfDoc(docId), path = docId.slice(project.length + 1);
   let off = false;
-  void openE2eProject(project).then(p => { if (!off) p.open.set(path, ydoc); }).catch(() => {});
-  return () => { off = true; const p = projects.get(project); if (p?.open.get(path) === ydoc) p.open.delete(path); };
+  // (an edit typed here, not one that came from the relay: automatic versions)
+  const onUpdate = (_u: Uint8Array, _origin: unknown, _d: Y.Doc, tr: Y.Transaction) => { if (tr.local) projects.get(project)?.editedHere(path); };
+  void openE2eProject(project).then(p => { if (!off) { p.open.set(path, ydoc); ydoc.on('update', onUpdate); } }).catch(() => {});
+  return () => { off = true; ydoc.off('update', onUpdate); const p = projects.get(project); if (p?.open.get(path) === ydoc) p.open.delete(path); };
 }
 
 export { REMOTE };

@@ -102,6 +102,10 @@ CREATE TABLE IF NOT EXISTS keys (
   granted_by INTEGER,
   at INTEGER NOT NULL,
   PRIMARY KEY (user_id, version)
+);
+CREATE TABLE IF NOT EXISTS state (
+  k TEXT PRIMARY KEY,
+  v INTEGER NOT NULL
 );`);
   handles.set(project, { db: d, file, ino: fs.statSync(file).ino, used: Date.now() });
   return d;
@@ -237,19 +241,60 @@ export function wrappedKeys(project: string): WrappedKey[] {
     .map(r => ({ userId: r.user_id, version: r.version, wrapped: r.wrapped, grantedBy: r.granted_by, at: r.at }));
 }
 
-export function grantKey(project: string, userId: number, version: number, wrapped: string, by: number): void {
-  store(project).prepare(`INSERT INTO keys (user_id, version, wrapped, granted_by, at) VALUES (?,?,?,?,?)
-    ON CONFLICT(user_id, version) DO UPDATE SET wrapped = excluded.wrapped, granted_by = excluded.granted_by, at = excluded.at`).run(userId, version, wrapped, by, Date.now());
+/** The project key's newest version (0: none yet). */
+export function keyVersion(project: string): number {
+  return (store(project).prepare('SELECT MAX(version) AS v FROM keys').get() as { v: number | null }).v ?? 0;
 }
 
-/** A member who left, or whose key pair was replaced: the server stops handing them the project key. */
-export function dropKeys(project: string, userId: number): void {
-  store(project).prepare('DELETE FROM keys WHERE user_id = ?').run(userId);
+/** A wrapped key for a version that exists (or the project's first): one already there is kept, never replaced. */
+export function grantKey(project: string, userId: number, version: number, wrapped: string, by: number): boolean {
+  return store(project).prepare('INSERT INTO keys (user_id, version, wrapped, granted_by, at) VALUES (?,?,?,?,?) ON CONFLICT(user_id, version) DO NOTHING').run(userId, version, wrapped, by, Date.now()).changes > 0;
+}
+
+/**
+ * A member who left, or whose key pair was replaced (`rotate: false`): the server stops handing them
+ * the project key. One who left knew it: the members' browsers make a new one (`needsRotation`).
+ */
+export function dropKeys(project: string, userId: number, rotate = true): void {
+  const d = store(project);
+  d.transaction(() => {
+    const held = d.prepare('SELECT 1 FROM keys WHERE user_id = ?').get(userId);
+    if (held && rotate) d.prepare("INSERT INTO state (k, v) VALUES ('rotate_from', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").run(keyVersion(project));
+    d.prepare('DELETE FROM keys WHERE user_id = ?').run(userId);
+  })();
+}
+
+/**
+ * Whether the project key must be replaced: someone who held its newest version left (dropKeys), or
+ * holds it without being a member any more (a revoked link, a transferred project).
+ */
+export function needsRotation(project: string, members: Set<number>): boolean {
+  const v = keyVersion(project);
+  if (!v) return false;
+  const from = (store(project).prepare("SELECT v FROM state WHERE k = 'rotate_from'").get() as { v: number } | undefined)?.v;
+  if (from !== undefined && from >= v) return true;
+  return wrappedKeys(project).some(k => k.version === v && !members.has(k.userId));
+}
+
+/**
+ * A new project key (version `version`, the next one), wrapped for each member who stays: all or
+ * nothing, and only once per version — two browsers rotating at once, the second is refused (409)
+ * and takes the first's key.
+ */
+export function rotateKey(project: string, version: number, grants: { userId: number; wrapped: string }[], by: number): boolean {
+  const d = store(project);
+  return d.transaction(() => {
+    if (version !== keyVersion(project) + 1) return false;
+    const q = d.prepare('INSERT INTO keys (user_id, version, wrapped, granted_by, at) VALUES (?,?,?,?,?)');
+    for (const g of grants) q.run(g.userId, version, g.wrapped, by, Date.now());
+    d.prepare("DELETE FROM state WHERE k = 'rotate_from'").run();
+    return true;
+  })();
 }
 
 /** Every project in which the account holds a key (its key pair is being replaced). */
 export function dropKeysEverywhere(userId: number): void {
   for (const r of db.prepare('SELECT name FROM projects WHERE e2e = 1').all() as { name: string }[]) {
-    try { if (fs.existsSync(path.join(e2eDir(r.name), 'store.sqlite'))) dropKeys(r.name, userId); } catch { /* a project being moved */ }
+    try { if (fs.existsSync(path.join(e2eDir(r.name), 'store.sqlite'))) dropKeys(r.name, userId, false); } catch { /* a project being moved */ }
   }
 }

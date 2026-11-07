@@ -1578,8 +1578,11 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         { label: 'PDF (latexmk)', shortcut: 'Ctrl+R', action: () => build() },
         { label: 'LaTeX source (as built)…', action: async () => { const r = await api.export(docId, 'tex'); setDialog({ name: 'tex', arg: r.tex ?? '' }); } },
         { label: 'Download .tex', action: () => { if (isE2eDocId(docId)) void api.texText(docId).then(t => saveLocal(new Blob([t], { type: 'text/x-tex' }), docPathOf(docId).split('/').pop()!)); else window.open(`/api/docs/${encodeURIComponent(docId)}/tex?download=1`); } },
-        { label: 'Download LyX (.lyx)', action: () => window.open(`/api/docs/${encodeURIComponent(docId)}/lyx`) },
-        { label: 'LyX project with figures (.zip)', action: () => window.open(`/api/projects/${encodeURIComponent(projectOfDoc(docId))}/zip?format=lyx`) },
+        // (an encrypted project's LyX files would be made by the server: its .zip is made here instead)
+        ...(isE2eDocId(docId) ? [{ label: 'Project as .zip (made in this browser)', action: () => void import('../e2e/download').then(m => m.downloadProjectZip(projectOfDoc(docId))).catch(e => notify('Could not make the .zip: ' + (e as Error).message, 'error')) }] : [
+          { label: 'Download LyX (.lyx)', action: () => window.open(`/api/docs/${encodeURIComponent(docId)}/lyx`) },
+          { label: 'LyX project with figures (.zip)', action: () => window.open(`/api/projects/${encodeURIComponent(projectOfDoc(docId))}/zip?format=lyx`) },
+        ]),
         { label: 'Download PDF', action: () => { if (isE2eDocId(docId)) { if (pdf.url) saveLocal(pdf.url, docPathOf(docId).split('/').pop()!.replace(/\.[^.]+$/, '') + '.pdf'); else notify('Build the PDF first (Ctrl+R): it is made in this browser', 'error'); } else window.open(`/api/docs/${encodeURIComponent(docId)}/pdf?download=1`); } },
       ] },
       { label: 'Versions…', action: () => setRightTab('versions') },

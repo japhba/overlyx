@@ -4,7 +4,9 @@
  *
  *  - a project's content is encrypted with its project key (AES-256-GCM, a fresh 96-bit IV per
  *    message); the additional data names what the ciphertext is (`ol1:<kind>:<id>`), so the server
- *    cannot pass one document's update off as another's, or a blob as an update;
+ *    cannot pass one document's update off as another's, or a blob as an update. The key has
+ *    versions (a member who leaves makes the others replace it, keys.ts): a ciphertext says which
+ *    one it was made with;
  *  - every account has an ECDH P-256 key pair: the project key reaches a member wrapped for their
  *    public key (an ephemeral ECDH exchange → HKDF → AES-GCM, ECIES-like);
  *  - the private key is kept on the server only sealed with the account's recovery code (128 random
@@ -14,7 +16,8 @@
 
 const enc = new TextEncoder();
 const subtle = () => globalThis.crypto.subtle;
-const VERSION = 1;
+/** a ciphertext: `[1, iv, ct]` (made with a project's first key; sealed and wrapped keys), `[2, key version (2 bytes), iv, ct]` */
+const VERSION = 1, VERSION_KEYED = 2;
 
 /* ------------------------------------------------------------------------ encodings */
 
@@ -43,17 +46,37 @@ export async function newProjectKey(): Promise<CryptoKey> {
 /** additional data: what a ciphertext is (`kind`: doc, aw, blob, manifest…) and of which id */
 const ad = (kind: string, id: string) => enc.encode(`ol1:${kind}:${id}`);
 
-export async function encrypt(key: CryptoKey, plain: Uint8Array, kind: string, id: string): Promise<Uint8Array> {
+/** `keyVersion`: the version of the project key `key` is (1 for anything else) */
+export async function encrypt(key: CryptoKey, plain: Uint8Array, kind: string, id: string, keyVersion = 1): Promise<Uint8Array> {
   const iv = globalThis.crypto.getRandomValues(new Uint8Array(12));
   const ct = new Uint8Array(await subtle().encrypt({ name: 'AES-GCM', iv: buf(iv), additionalData: buf(ad(kind, id)) }, key, buf(plain)));
-  const out = new Uint8Array(1 + 12 + ct.length);
-  out[0] = VERSION; out.set(iv, 1); out.set(ct, 13);
+  const head = keyVersion === 1 ? 1 : 3;
+  const out = new Uint8Array(head + 12 + ct.length);
+  if (keyVersion === 1) out[0] = VERSION;
+  else { out[0] = VERSION_KEYED; out[1] = keyVersion >> 8; out[2] = keyVersion & 255; }
+  out.set(iv, head); out.set(ct, head + 12);
   return out;
 }
 
+/** Which version of the project key a ciphertext was made with (0: not a ciphertext of ours). */
+export function keyVersionOf(data: Uint8Array): number {
+  if (data[0] === VERSION) return 1;
+  if (data[0] === VERSION_KEYED && data.length > 3) return (data[1] << 8) | data[2];
+  return 0;
+}
+
 export async function decrypt(key: CryptoKey, data: Uint8Array, kind: string, id: string): Promise<Uint8Array> {
-  if (data[0] !== VERSION || data.length < 13 + 16) throw new Error('not an OverLyX ciphertext');
-  return new Uint8Array(await subtle().decrypt({ name: 'AES-GCM', iv: buf(data.subarray(1, 13)), additionalData: buf(ad(kind, id)) }, key, buf(data.subarray(13))));
+  const head = data[0] === VERSION ? 1 : data[0] === VERSION_KEYED ? 3 : 0;
+  if (!head || data.length < head + 12 + 16) throw new Error('not an OverLyX ciphertext');
+  return new Uint8Array(await subtle().decrypt({ name: 'AES-GCM', iv: buf(data.subarray(head, head + 12)), additionalData: buf(ad(kind, id)) }, key, buf(data.subarray(head + 12))));
+}
+
+/** What encrypts a project's content and decrypts it: its keys (keys.ts Keyring). */
+export interface Cipher {
+  encrypt(plain: Uint8Array, kind: string, id: string): Promise<Uint8Array>;
+  decrypt(data: Uint8Array, kind: string, id: string): Promise<Uint8Array>;
+  /** the relay says which version is the newest */
+  noteVersion?(version: number): void;
 }
 
 /* ------------------------------------------------------------------- account key pair */

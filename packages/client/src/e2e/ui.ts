@@ -16,6 +16,12 @@ export function keyRequest(): KeyRequest | null { return pending; }
 export function onKeyRequest(fn: () => void): () => void { listeners.add(fn); return () => listeners.delete(fn); }
 function set(r: KeyRequest | null): void { pending = r; for (const l of [...listeners]) l(); }
 
+/** Once no key dialog is open (a notice must not cover the recovery code before it was kept). */
+export function whenNoKeyRequest(): Promise<void> {
+  if (!pending) return Promise.resolve();
+  return new Promise(resolve => { const off = onKeyRequest(() => { if (!pending) { off(); resolve(); } }); });
+}
+
 let inFlight: Promise<boolean> | null = null;
 function ask(kind: 'setup' | 'unlock', replace = false): Promise<boolean> {
   return inFlight ??= new Promise<boolean>(resolve => {

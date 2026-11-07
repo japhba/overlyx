@@ -3644,7 +3644,15 @@ cannot read. The PDF is built in the browser too.
   public key.
 - Sharing makes someone a member, as for any project. They read nothing until a member who holds
   the key presses *Give key* in the Share dialog, which shows the fingerprints to compare
-  (`app/E2eShare.tsx`).
+  (`app/E2eShare.tsx`). They get every version of the key, so they can read what was written before.
+- **A member who leaves knew the key.** The server stops handing it to them and flags the project.
+  The next editor whose browser opens it (or the owner's Share dialog) makes a new version of the
+  key for the members who stay (`keys.ts rotateIfNeeded`, `POST /api/e2e/projects/<p>/keys/rotate`,
+  once per version: a second browser racing it gets 409 and takes the first's). The relay announces
+  the version (`KEY` message), and every open browser fetches it before it encrypts anything more.
+  Each ciphertext names the key version it was made with (`crypto.ts`). What was written before stays
+  encrypted with the older versions until the log is compacted; the person who left could read that
+  much anyway.
 
 **What the server keeps** (`packages/server/src/e2e/`) lies under the project's directory, in
 `.e2e/`:
@@ -3678,6 +3686,16 @@ links. The browser refuses those requests itself rather than sending text (`e2e/
 - Biber is not available; `backend=bibtex` works.
 - Each engine's LaTeX format is built in the browser the first time, which takes up to a minute,
   and kept in IndexedDB.
+
+**Versions and downloads.**
+- A document's versions (the Versions panel) are its text, encrypted as a blob and listed in the
+  manifest. They are saved by hand, before a restore, and automatically while someone edits the
+  document in a browser: at most one every ten minutes, the last 60 kept.
+- The project card's *Download* and *Export ▸ Project as .zip* make the .zip in the browser
+  (`e2e/zip.ts`, `e2e/download.ts`): documents as their .tex / .md text, the other files as they are.
+
+**Not available yet:** slides, posters and boards; LyX and Google Docs imports and LyX downloads;
+Google fonts (`\olfont`), which the server would have to put into the build; XeTeX fonts by name.
 
 **Switching it off and rolling back.**
 - `OVERLYX_E2E=off` stops the server from serving encrypted projects.

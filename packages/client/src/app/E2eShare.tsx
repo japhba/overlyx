@@ -3,10 +3,10 @@
  * someone a member, as for any project, but they can read nothing until a member who holds the key
  * gives it to them (wrapped for their public key, e2e/keys.ts). The server decides who is a member,
  * so the key is given only here, by a person: compare the fingerprint with theirs (Settings shows
- * it) when it matters.
+ * it) when it matters. A member removed here knew the key: a new one is made for those who stay.
  */
 import { useEffect, useState } from 'preact/hooks';
-import { waitingMembers, membersWithoutKeys, grantWaiting, myFingerprint, type KeyMember } from '../e2e/keys';
+import { waitingMembers, membersWithoutKeys, grantWaiting, myFingerprint, rotateIfNeeded, type KeyMember } from '../e2e/keys';
 import { e2eUser } from '../e2e/project';
 
 export function E2eShareKeys({ project, busy }: { project: string; busy: boolean }) {
@@ -16,7 +16,8 @@ export function E2eShareKeys({ project, busy }: { project: string; busy: boolean
   const [err, setErr] = useState('');
   const [giving, setGiving] = useState(false);
   const load = () => {
-    void waitingMembers(project).then(setWaiting).catch(e => setErr((e as Error).message));
+    void rotateIfNeeded(project, e2eUser().id).catch(e => setErr((e as Error).message))
+      .then(() => waitingMembers(project)).then(setWaiting).catch(e => setErr((e as Error).message));
     void membersWithoutKeys(project).then(setNoKeys).catch(() => {});
   };
   useEffect(() => {

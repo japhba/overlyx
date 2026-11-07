@@ -8,9 +8,9 @@
 import * as Y from 'yjs';
 import * as encoding from 'lib0/encoding';
 import * as decoding from 'lib0/decoding';
-import { encrypt, decrypt } from './crypto';
+import type { Cipher } from './crypto';
 
-export const S_ENTRY = 0, S_SYNCED = 1, S_ACK = 2, S_AWARENESS = 3, S_GONE = 4, S_PING = 5, S_ERROR = 6, S_COMPACTED = 7;
+export const S_ENTRY = 0, S_SYNCED = 1, S_ACK = 2, S_AWARENESS = 3, S_GONE = 4, S_PING = 5, S_ERROR = 6, S_COMPACTED = 7, S_KEY = 8;
 export const C_UPDATE = 0, C_SNAPSHOT = 1, C_AWARENESS = 2, C_HELLO = 3, C_PONG = 5;
 export const KIND_SNAPSHOT = 1;
 
@@ -34,7 +34,7 @@ export class RelayClient {
   private nextTag = 1;
   closed = false;
 
-  constructor(readonly project: string, readonly doc: string, private key: CryptoKey, private h: RelayHandlers) {
+  constructor(readonly project: string, readonly doc: string, private cipher: Cipher, private h: RelayHandlers) {
     const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/e2e?project=${encodeURIComponent(project)}&doc=${encodeURIComponent(doc)}`;
     this.ws = new WebSocket(url);
     this.ws.binaryType = 'arraybuffer';
@@ -56,7 +56,7 @@ export class RelayClient {
         const seq = decoding.readVarUint(dec), kind = decoding.readVarUint(dec), payload = decoding.readVarUint8Array(dec);
         this.inOrder(async () => {
           let plain: Uint8Array;
-          try { plain = await decrypt(this.key, payload, 'doc', this.doc); }
+          try { plain = await this.cipher.decrypt(payload, 'doc', this.doc); }
           catch { console.error(`[e2e] entry ${seq} of ${this.doc} cannot be decrypted`); this.h.undecryptable?.(seq); return; }
           this.h.entry(seq, plain, kind);
         });
@@ -68,13 +68,15 @@ export class RelayClient {
         decoding.readVarUint(dec);   // the sender's connection
         const payload = decoding.readVarUint8Array(dec);
         this.inOrder(async () => {
-          try { this.h.awareness?.(await decrypt(this.key, payload, 'aw', this.doc)); } catch { /* not ours */ }
+          try { this.h.awareness?.(await this.cipher.decrypt(payload, 'aw', this.doc)); } catch { /* not ours */ }
         });
         break;
       }
       case S_GONE: { const id = decoding.readVarUint(dec); this.inOrder(() => this.h.gone?.(id)); break; }
       case S_PING: this.raw(new Uint8Array([C_PONG])); break;
       case S_ERROR: { const m = decoding.readVarString(dec); this.inOrder(() => this.h.error?.(m)); break; }
+      // (at once: what is sent from now on waits for a newer key)
+      case S_KEY: this.cipher.noteVersion?.(decoding.readVarUint(dec)); break;
     }
   }
 
@@ -87,7 +89,7 @@ export class RelayClient {
   /** Encrypt and send an update; returns its tag (the server acknowledges it with its sequence number). */
   sendUpdate(update: Uint8Array): number {
     const tag = this.nextTag++;
-    void encrypt(this.key, update, 'doc', this.doc).then(ct => {
+    void this.cipher.encrypt(update, 'doc', this.doc).then(ct => {
       const enc = encoding.createEncoder();
       encoding.writeVarUint(enc, C_UPDATE); encoding.writeVarUint(enc, tag); encoding.writeVarUint8Array(enc, ct);
       this.raw(encoding.toUint8Array(enc));
@@ -97,7 +99,7 @@ export class RelayClient {
 
   /** Replace the log up to `upTo` by this state (the merge of exactly those entries). */
   sendSnapshot(upTo: number, state: Uint8Array): void {
-    void encrypt(this.key, state, 'doc', this.doc).then(ct => {
+    void this.cipher.encrypt(state, 'doc', this.doc).then(ct => {
       const enc = encoding.createEncoder();
       encoding.writeVarUint(enc, C_SNAPSHOT); encoding.writeVarUint(enc, upTo); encoding.writeVarUint8Array(enc, ct);
       this.raw(encoding.toUint8Array(enc));
@@ -105,7 +107,7 @@ export class RelayClient {
   }
 
   sendAwareness(update: Uint8Array): void {
-    void encrypt(this.key, update, 'aw', this.doc).then(ct => {
+    void this.cipher.encrypt(update, 'aw', this.doc).then(ct => {
       const enc = encoding.createEncoder();
       encoding.writeVarUint(enc, C_AWARENESS); encoding.writeVarUint8Array(enc, ct);
       this.raw(encoding.toUint8Array(enc));
@@ -128,12 +130,12 @@ export function wantsCompaction(entries: number, bytes: number): boolean { retur
  * The whole content of a document as one update: its log read once (a document nobody has open here —
  * a child document of the one being compiled, a file being copied). Null when it cannot be had.
  */
-export function fetchDoc(project: string, doc: string, key: CryptoKey, timeoutMs = 20000): Promise<Uint8Array | null> {
+export function fetchDoc(project: string, doc: string, cipher: Cipher, timeoutMs = 20000): Promise<Uint8Array | null> {
   return new Promise(resolve => {
     const updates: Uint8Array[] = [];
     let done = false;
     const finish = (v: Uint8Array | null) => { if (done) return; done = true; clearTimeout(t); c.close(); resolve(v); };
-    const c = new RelayClient(project, doc, key, {
+    const c = new RelayClient(project, doc, cipher, {
       entry: (_s, u) => updates.push(u),
       synced: () => finish(updates.length ? Y.mergeUpdates(updates) : new Uint8Array([0, 0])),
       ack: () => {},
@@ -144,11 +146,11 @@ export function fetchDoc(project: string, doc: string, key: CryptoKey, timeoutMs
 }
 
 /** Append one update to a document's log (a new document's first state, a change made away from any editor); resolves once the server has it. */
-export function seedDoc(project: string, doc: string, key: CryptoKey, update: Uint8Array, timeoutMs = 20000): Promise<void> {
+export function seedDoc(project: string, doc: string, cipher: Cipher, update: Uint8Array, timeoutMs = 20000): Promise<void> {
   return new Promise((resolve, reject) => {
     let done = false, tag = -1;
     const finish = (e?: Error) => { if (done) return; done = true; clearTimeout(t); c.close(); if (e) reject(e); else resolve(); };
-    const c = new RelayClient(project, doc, key, {
+    const c = new RelayClient(project, doc, cipher, {
       entry: () => {},
       synced: () => { tag = c.sendUpdate(update); },
       ack: (t) => { if (t === tag) finish(); },
@@ -165,7 +167,7 @@ export function seedDoc(project: string, doc: string, key: CryptoKey, update: Ui
  * fires after every (re)connection's initial log.
  */
 export const REMOTE = 'e2e-remote';
-export function syncDoc(project: string, doc: string, key: CryptoKey, ydoc: Y.Doc, opts: { readOnly?: boolean; onSynced?: () => void; onStatus?: (connected: boolean) => void } = {}): { destroy(): void; synced: () => boolean } {
+export function syncDoc(project: string, doc: string, cipher: Cipher, ydoc: Y.Doc, opts: { readOnly?: boolean; onSynced?: () => void; onStatus?: (connected: boolean) => void } = {}): { destroy(): void; synced: () => boolean } {
   let client: RelayClient | null = null;
   let destroyed = false, synced = false, attempts = 0;
   let lastSeq = 0, entries = 0, bytes = 0;
@@ -190,7 +192,7 @@ export function syncDoc(project: string, doc: string, key: CryptoKey, ydoc: Y.Do
     if (destroyed) return;
     synced = false; lastSeq = 0; entries = 0; bytes = 0;
     const server: Uint8Array[] = [];
-    const c = client = new RelayClient(project, doc, key, {
+    const c = client = new RelayClient(project, doc, cipher, {
       entry: (seq, u) => {
         lastSeq = seq; entries++; bytes += u.length;
         if (!synced) server.push(u);

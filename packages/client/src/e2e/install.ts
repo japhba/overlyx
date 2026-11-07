@@ -8,8 +8,9 @@ import { setLocalProjectEvents, emitProjectEvent } from '../projectevents';
 import { routeLocal, patchProjects, setCurrentDoc } from './localapi';
 import { setE2eUser, isE2eProject, openedE2eProject, openE2eProject, knownE2eProjects, closeE2eProjects, keyNotices, type E2eProject } from './project';
 import { uiAlert } from '../app/Dialogs';
-import { projectShortName } from '@overlyx/core';
+import { projectShortName, projectOfDoc } from '@overlyx/core';
 import { forgetKeys } from './keys';
+import { whenNoKeyRequest } from './ui';
 
 /** 1×1 transparent GIF: a figure while it is being decrypted (a "graphics" event redraws it) */
 const PIXEL = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
@@ -32,7 +33,16 @@ function watch(p: E2eProject): void {
 
 export function installE2e(user: { id: number; name: string }, currentDoc: () => string | null, notify: (text: string, kind?: 'info' | 'error') => void): void {
   setE2eUser(user);
-  keyNotices.waiting = (project) => void uiAlert('Waiting for the key', `“${projectShortName(project)}” is end-to-end encrypted: you can open it once a member who holds its key gives it to you. They see your request in the project’s Share dialog (and a note when they open it). Reload this page after they did.`);
+  // (after the key dialogs: a member who just set up encryption keeps the recovery code first)
+  keyNotices.waiting = (project) => void whenNoKeyRequest().then(() => uiAlert('Waiting for the key', `“${projectShortName(project)}” is end-to-end encrypted: you can open it once a member who holds its key gives it to you. They see your request in the project’s Share dialog (and a note when they open it). It opens here by itself once they did.`));
+  // the document that could not be opened without the key, or a page showing the project, starts again; elsewhere a note
+  keyNotices.granted = (project, doc) => {
+    const d = currentDoc();
+    if (doc || (d ? projectOfDoc(d) === project : location.hash.startsWith(`#/${project}`))) {
+      if (doc) location.hash = '#/' + doc;
+      location.reload();
+    } else notify(`You hold the key of “${projectShortName(project)}” now: open it from the project list`);
+  };
   keyNotices.othersWaiting = (project, names) => notify(`${names.join(', ')} ${names.length === 1 ? 'waits' : 'wait'} for the key of “${projectShortName(project)}” — Share ▸ Give key`);
   setCurrentDoc(currentDoc);
   setLocalProjectEvents(isE2eProject);

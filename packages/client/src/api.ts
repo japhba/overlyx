@@ -41,6 +41,8 @@ export interface Project {
   public?: boolean;
   /** end-to-end encrypted: the server keeps only ciphertext, this browser decrypts (e2e/) */
   e2e?: boolean;
+  /** (encrypted) this browser does not hold its key: `account` — not unlocked here, `waiting` — not given it yet */
+  e2eLocked?: 'account' | 'waiting';
   owner?: { id: number; name: string; username: string; avatar?: string | null } | null;
   /** when this user last opened the project (server clock), null: never */
   lastOpened?: number | null;

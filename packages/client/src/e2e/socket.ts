@@ -61,7 +61,7 @@ export class E2eSocket {
   private async start(docId: string): Promise<void> {
     try {
       if (!isE2eDocId(docId)) throw new Error('not an encrypted document');
-      const p = await openE2eProject(docId.split('/').slice(0, 2).join('/'));
+      const p = await openE2eProject(docId.split('/').slice(0, 2).join('/'), { doc: docId });
       await p.ready;
       if (this.readyState === 3) return;
       const path = docId.split('/').slice(2).join('/');
@@ -69,8 +69,7 @@ export class E2eSocket {
       if (!entry || entry.kind !== 'doc') { this.fail(4004, 'document not available'); return; }
       this.readOnly = p.role === 'view';
       this.epoch = entry.id;
-      const key = p.key!.key;
-      this.client = new RelayClient(p.name, entry.id, key, {
+      this.client = new RelayClient(p.name, entry.id, p.key!, {
         entry: (seq, u, kind) => this.onEntry(seq, u, kind),
         synced: () => this.onSynced(),
         ack: (tag) => this.onAck(tag),

@@ -14,9 +14,10 @@ import { canonicalProject } from '../namespaces.ts';
 import { assertRoom, ProjectFullError } from '../projectsize.ts';
 import {
   e2eEnabled, isE2eProject, OPAQUE_ID, userKeys, setUserKeys, resealPrivate, dropKeysEverywhere, publicKeysOf, wrappedKeys, grantKey,
-  writeBlob, blobFile, blobSize, deleteBlob, docIds, deleteDoc,
+  keyVersion, needsRotation, rotateKey, writeBlob, blobFile, blobSize, deleteBlob, docIds, deleteDoc,
 } from './store.ts';
 import { texliveFile, texliveVersion, texliveNames, lyxlibBundle, luaotfloadNames } from './texlive.ts';
+import { announceKey } from './relay.ts';
 
 /** a public key / wrapped key / sealed private key: base64url text of a few hundred bytes */
 const KEY_TEXT = /^[A-Za-z0-9_.:-]{16,8192}$/;
@@ -99,9 +100,8 @@ export function e2eRoutes(): express.Router {
     next();
   };
 
-  /** The project's members with their public keys and which key versions they hold; and the caller's wrapped keys. */
-  r.get('/e2e/projects/:project/keys', need('view'), (req, res) => {
-    const project = req.params.project;
+  /** the project's members (owner first) and their roles; not those who only see it because it is public */
+  const membersOf = (project: string): Map<number, { role: string; via: string }> => {
     const row = projectRow(project)!;
     const members = new Map<number, { role: string; via: string }>();
     if (row.owner_id != null) members.set(row.owner_id, { role: 'owner', via: 'owner' });
@@ -109,12 +109,40 @@ export function e2eRoutes(): express.Router {
       const had = members.get(m.user_id);
       if (!had || (had.role === 'view' && m.role === 'edit')) members.set(m.user_id, { role: m.role, via: m.via });
     }
+    return members;
+  };
+
+  /** Grants as sent (`[{ userId, version, wrapped }]`): those for members who have a key pair (the wrapped key names the public key it was made for). */
+  const validGrants = (project: string, body: unknown): { userId: number; version: number; wrapped: string }[] => {
+    const list = Array.isArray(body) ? body.slice(0, 200) : [];
+    const pub = publicKeysOf(list.map((g: { userId?: unknown }) => Number(g?.userId)).filter(Number.isInteger));
+    const out: { userId: number; version: number; wrapped: string }[] = [];
+    for (const g of list) {
+      const userId = Number(g?.userId), version = Number(g?.version), wrapped = g?.wrapped;
+      if (!Number.isInteger(userId) || !Number.isInteger(version) || version < 1 || version > 65535 || typeof wrapped !== 'string' || !KEY_TEXT.test(wrapped)) continue;
+      const u = db.prepare('SELECT id, username, display_name, color, is_admin, is_guest, email FROM users WHERE id = ?').get(userId) as { id: number; username: string; display_name: string; color: string; is_admin: number; is_guest: number; email: string | null } | undefined;
+      if (!u || !pub.has(userId)) continue;
+      if (!roleFor({ id: u.id, username: u.username, name: u.display_name, color: u.color, isAdmin: !!u.is_admin, guest: !!u.is_guest, email: u.email }, project, false)) continue;
+      out.push({ userId, version, wrapped });
+    }
+    return out;
+  };
+
+  /**
+   * The project's members with their public keys and which key versions they hold; the caller's
+   * wrapped keys; and `rotate` when someone who held the key is no longer a member (an editor's
+   * browser then makes a new one: POST …/keys/rotate).
+   */
+  r.get('/e2e/projects/:project/keys', need('view'), (req, res) => {
+    const project = req.params.project;
+    const members = membersOf(project);
     const keys = wrappedKeys(project);
     const pub = publicKeysOf([...members.keys()]);
     const users = new Map((db.prepare(`SELECT id, display_name, username, is_guest FROM users WHERE id IN (${[...members.keys()].map(() => '?').join(',') || 'NULL'})`).all(...members.keys()) as { id: number; display_name: string; username: string; is_guest: number }[]).map(u => [u.id, u]));
     res.setHeader('Cache-Control', 'no-store');
     res.json({
-      version: keys.reduce((v, k) => Math.max(v, k.version), 0),
+      version: keyVersion(project),
+      rotate: needsRotation(project, new Set(members.keys())),
       mine: keys.filter(k => k.userId === req.user!.id).map(k => ({ version: k.version, wrapped: k.wrapped })),
       members: [...members].map(([id, m]) => ({
         userId: id, role: m.role, via: m.via, name: users.get(id)?.display_name ?? '?', username: users.get(id)?.username ?? '?', guest: !!users.get(id)?.is_guest,
@@ -122,24 +150,35 @@ export function e2eRoutes(): express.Router {
       })),
     });
   });
-  /** `{ grants: [{ userId, version, wrapped }] }`: the project key wrapped for members' public keys (by a member who holds it). */
+  /**
+   * `{ grants: [{ userId, version, wrapped }] }`: the project key wrapped for members' public keys,
+   * by a member who holds it — versions that exist (or the first); a member's key already there stays.
+   */
   r.post('/e2e/projects/:project/keys', need('edit'), (req, res) => {
     const project = req.params.project;
-    const grants = Array.isArray(req.body?.grants) ? req.body.grants.slice(0, 200) : [];
-    const pub = publicKeysOf(grants.map((g: { userId?: unknown }) => Number(g?.userId)).filter(Number.isInteger));
+    const newest = keyVersion(project);
     let n = 0;
-    for (const g of grants) {
-      const userId = Number(g?.userId), version = Number(g?.version), wrapped = g?.wrapped;
-      if (!Number.isInteger(userId) || !Number.isInteger(version) || version < 1 || version > 1000 || typeof wrapped !== 'string' || !KEY_TEXT.test(wrapped)) continue;
-      // only to members who have a key pair (the wrapped key names the public key it was made for)
-      const u = db.prepare('SELECT id, username, display_name, color, is_admin, is_guest, email FROM users WHERE id = ?').get(userId) as { id: number; username: string; display_name: string; color: string; is_admin: number; is_guest: number; email: string | null } | undefined;
-      if (!u || !pub.has(userId)) continue;
-      if (!roleFor({ id: u.id, username: u.username, name: u.display_name, color: u.color, isAdmin: !!u.is_admin, guest: !!u.is_guest, email: u.email }, project, false)) continue;
-      grantKey(project, userId, version, wrapped, req.user!.id);
-      n++;
+    for (const g of validGrants(project, req.body?.grants)) {
+      if (g.version > Math.max(newest, 1)) continue;
+      if (grantKey(project, g.userId, g.version, g.wrapped, req.user!.id) && g.version === Math.max(newest, 1)) n++;
     }
     if (n) logAccess(project, req.user!.id, 'share', `gave the encryption key to ${n} member${n === 1 ? '' : 's'}`);
     res.json({ granted: n });
+  });
+  /**
+   * `{ version, grants: [{ userId, wrapped }] }`: a new project key, the next version, wrapped for the
+   * members who stay (the caller among them). 409 when another browser made it first.
+   */
+  r.post('/e2e/projects/:project/keys/rotate', need('edit'), (req, res) => {
+    const project = req.params.project;
+    const version = Number(req.body?.version);
+    const raw = Array.isArray(req.body?.grants) ? req.body.grants.map((g: Record<string, unknown>) => ({ ...g, version })) : [];
+    const grants = validGrants(project, raw);
+    if (!Number.isInteger(version) || !grants.some(g => g.userId === req.user!.id)) { res.status(400).json({ error: 'a new key needs a version and the caller\'s own copy' }); return; }
+    if (!rotateKey(project, version, grants, req.user!.id)) { res.status(409).json({ error: 'The key was replaced already', version: keyVersion(project) }); return; }
+    logAccess(project, req.user!.id, 'share', 'replaced the encryption key (a member had left)');
+    announceKey(project, version);
+    res.json({ ok: true, version });
   });
 
   /* --------------------------------------------------------------------- blobs, logs */

@@ -11,7 +11,7 @@ import * as Y from 'yjs';
 import { newDocumentText, newMarkdownText, texHeadings, parseBibtex, lyxToPm, markEditedSettings, pageBreaks, synctexView, synctexEdit } from '@overlyx/core';
 import { openE2eProject, isE2eProject, isE2eDocId, markE2eProject, noteProjects, e2eUser, type E2eProject } from './project';
 import { tex } from './project';
-import { forgetProjectKey } from './keys';
+import { forgetProjectKey, KeyMissing } from './keys';
 
 const NOT_HERE = 'This is not available in end-to-end encrypted projects: the server would see the content';
 export function refuse(message = NOT_HERE, status = 403): never { throw Object.assign(new Error(message), { status, data: { error: message, code: 'e2e' } }); }
@@ -65,13 +65,16 @@ function normalize(e: unknown): Error {
 }
 
 /** After the project list came: the encrypted projects' files are those of their manifests (those unlocked here). */
-export async function patchProjects<T extends { name: string; e2e?: boolean; role?: string; files: unknown[] }>(list: T[]): Promise<T[]> {
+export async function patchProjects<T extends { name: string; e2e?: boolean; role?: string; files: unknown[]; e2eLocked?: 'account' | 'waiting' }>(list: T[]): Promise<T[]> {
   noteProjects(list);
   await Promise.all(list.filter(p => p.e2e).map(async p => {
     try {
       const proj = await Promise.race([openE2eProject(p.name, { prompt: false }), new Promise<null>(r => setTimeout(r, 4000, null))]);
       if (proj) p.files = proj.list();
-    } catch { /* locked here: no files until it is unlocked */ }
+    } catch (e) {
+      // locked here: no files until it is unlocked
+      p.e2eLocked = e instanceof KeyMissing ? e.reason : 'account';
+    }
   }));
   return list;
 }
@@ -121,8 +124,15 @@ let jobIds = 1;
 
 async function docRoute(method: string, id: string, action: string, q: URLSearchParams, body: unknown): Promise<unknown> {
   const project = id.split('/').slice(0, 2).join('/'), rel = id.slice(project.length + 1);
-  const p = await openE2eProject(project);
+  const p = await openE2eProject(project, { doc: id });
   const b = (body ?? {}) as Record<string, unknown>;
+  const ver = /^versions\/(\d+)(\/restore)?$/.exec(action);
+  if (ver) {
+    const vid = Number(ver[1]);
+    if (ver[2] && method === 'POST') { await p.restoreVersion(rel, vid); return { ok: true }; }
+    if (method === 'GET') { const { text, version } = await p.versionText(rel, vid); return { lyx: text, name: version.name, created_at: version.created_at, author: version.author }; }
+    if (method === 'DELETE') { await p.deleteVersion(rel, vid); return { ok: true }; }
+  }
   switch (action) {
     case 'meta': {
       const { documentMetaLocal } = await tex();
@@ -192,7 +202,11 @@ async function docRoute(method: string, id: string, action: string, q: URLSearch
     case 'folds': return { folds: [], at: 0 };
     case 'place': return { slide: null, at: 0 };
     case 'external': return { clones: [], google: null };
-    case 'versions': if (method === 'GET') return { versions: [] }; break;
+    case 'versions': {
+      if (method === 'GET') return { versions: p.versionsOf(rel).map(({ blob: _b, ...v }) => v) };
+      if (method === 'POST') return { id: await p.saveVersion(rel, String(b.name ?? 'version'), 'manual', typeof b.lyx === 'string' ? b.lyx : undefined) };
+      break;
+    }
     case 'synctex/pages': return { breaks: await localPageBreaks(id).catch(() => null) };
     case 'synctex/view': {
       const f = await synctexFile(id), line = Number(q.get('line'));

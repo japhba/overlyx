@@ -7,7 +7,8 @@
  *
  * Wire format (lib0 encoding), server → browser:
  *   0 ENTRY seq kind data · 1 SYNCED head · 2 ACK tag seq · 3 AWARENESS from data · 4 GONE clientId
- *   5 PING · 6 ERROR message · 7 COMPACTED upTo
+ *   5 PING · 6 ERROR message · 7 COMPACTED upTo · 8 KEY version (the project key's newest version:
+ *   on connecting, and when a member's browser replaced it — the others fetch it before they write)
  * browser → server:
  *   0 UPDATE tag data · 1 SNAPSHOT upTo data · 2 AWARENESS data · 3 HELLO clientId · 5 PONG
  */
@@ -20,9 +21,9 @@ import type { SessionUser } from '../auth.ts';
 import { roleFor, atLeast } from '../access.ts';
 import { canonicalProject } from '../namespaces.ts';
 import { assertRoom, ProjectFullError } from '../projectsize.ts';
-import { isE2eProject, e2eEnabled, OPAQUE_ID, MANIFEST_DOC, entriesSince, appendUpdate, compact, headSeq, KIND_UPDATE } from './store.ts';
+import { isE2eProject, e2eEnabled, OPAQUE_ID, MANIFEST_DOC, entriesSince, appendUpdate, compact, headSeq, keyVersion, KIND_UPDATE } from './store.ts';
 
-export const S_ENTRY = 0, S_SYNCED = 1, S_ACK = 2, S_AWARENESS = 3, S_GONE = 4, S_PING = 5, S_ERROR = 6, S_COMPACTED = 7;
+export const S_ENTRY = 0, S_SYNCED = 1, S_ACK = 2, S_AWARENESS = 3, S_GONE = 4, S_PING = 5, S_ERROR = 6, S_COMPACTED = 7, S_KEY = 8;
 export const C_UPDATE = 0, C_SNAPSHOT = 1, C_AWARENESS = 2, C_HELLO = 3, C_PONG = 5;
 /** one update or snapshot (a big pasted document) */
 const MAX_ENTRY = 32 * 1024 * 1024;
@@ -71,8 +72,9 @@ function connect(ws: WebSocket, project: string, doc: string, user: SessionUser,
   room.add(c);
   const others = () => [...(rooms.get(key) ?? [])].filter(o => o !== c);
 
-  // the log, then where it ends
+  // the key's version, the log, then where it ends
   try {
+    send(c, message(S_KEY, enc => encoding.writeVarUint(enc, keyVersion(project))));
     for (const e of entriesSince(project, doc, since)) send(c, message(S_ENTRY, enc => { encoding.writeVarUint(enc, e.seq); encoding.writeVarUint(enc, e.kind); encoding.writeVarUint8Array(enc, e.data); }));
     send(c, message(S_SYNCED, enc => encoding.writeVarUint(enc, headSeq(project, doc))));
   } catch (e) {
@@ -162,4 +164,10 @@ export function kickE2e(project: string, userIds?: number[]): void {
     if (!key.startsWith(project + '\0')) continue;
     for (const c of room) if (!userIds || userIds.includes(c.user.id)) { try { c.ws.close(4003, 'access changed'); } catch { /* ignore */ } }
   }
+}
+
+/** A new project key (routes.ts rotate): every browser with a document of the project open fetches it. */
+export function announceKey(project: string, version: number): void {
+  const msg = message(S_KEY, enc => encoding.writeVarUint(enc, version));
+  for (const [key, room] of rooms) if (key.startsWith(project + '\0')) for (const c of room) send(c, msg);
 }

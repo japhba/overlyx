@@ -21,7 +21,7 @@ import { config } from './config.ts';
 import { RELIABILITY_RETENTION_DAYS, RETENTION_DAYS as USAGE_DAYS } from './usage.ts';
 import { TRASH_DAYS } from './accounts.ts';
 
-export const PRIVACY_UPDATED = '24 October 2026';
+export const PRIVACY_UPDATED = '7 November 2026';
 
 /** the off-site backup's location, when deploy/setup-backup-offsite.sh has set it up (its settings file names the bucket's region); null without one */
 function offsiteBackup(): string | null {
@@ -101,6 +101,7 @@ ${google
 <p>If you open a share link without signing in, you get a temporary guest account under the name you give there, marked as a guest, or a random one (“Anonymous Otter”). It is deleted about a month later, or its access moves to your account when you sign in.</p>
 <h3>Your projects</h3>
 <p>Everything you put into a project stays on the server: files, uploaded images, the PDFs we build, comments, tracked changes and earlier versions. Every project has a version history (a git repository). OverLyX commits your changes to it after a few minutes of editing, with your name and e-mail address as the author.</p>
+<p><b>End-to-end encrypted projects</b> are different. Their documents, files and file names are encrypted in your browser with a key that only the project's members hold, so the server stores and passes on only ciphertext it cannot read, and their PDFs are built in your browser. What the server still sees of them: who the members are and when they work in the project, how large its files and changes are, and which of TeX Live's public packages and fonts its PDFs need (your browser fetches those from the server). They have no git history; their earlier versions are kept encrypted like the rest. Your encryption keys are kept on the server only locked with your recovery code, which we never see: if you lose the code and every browser where you unlocked it, nobody can open those projects again, not even we.</p>
 <h3>The project's activity log</h3>
 <p>For each project we note who opened a document, built a PDF, pulled or pushed with git, or changed the sharing. Only the project's owner sees this log. Entries are deleted after 90 days.</p>
 <h3>Problem reports</h3>
@@ -122,7 +123,7 @@ ${google
 <p>The server's logs record events such as “user X opened project Y” or “a build failed”, together with user names and project or file names. For requests that fail, they also record the IP address and browser. The logs help us keep the service running and secure.${maintenance ? ' The lines about errors are screened by the AI assistant that looks for bugs (see <a href="#services">Services we use</a>).' : ''} They are deleted automatically, oldest first, once they reach a fixed size — currently after a few months.</p>
 <h3>In your browser</h3>
 <p>We set one sign-in cookie (<code>ol_session</code>, valid for 30 days)${google ? ', and short-lived ones (10 minutes) while you sign in with Google or connect Google Drive' : ''}. There are no advertising or tracking cookies.</p>
-<p>The app keeps your preferences in your browser. It also keeps copies of the documents you opened there, so it can work offline and reconnect without losing edits. <b>Sign out</b> removes those copies.</p>
+<p>The app keeps your preferences in your browser. It also keeps copies of the documents you opened there, so it can work offline and reconnect without losing edits, and the keys of your end-to-end encrypted projects once you unlocked them there. <b>Sign out</b> removes those copies and keys.</p>
 
 <h2>Who else sees your data</h2>
 <ul>
