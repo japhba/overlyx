@@ -84,7 +84,8 @@ export async function forgetE2e(): Promise<void> {
     const dbs = await (indexedDB as unknown as { databases?: () => Promise<{ name?: string }[]> }).databases?.() ?? [];
     for (const d of dbs) {
       const n = d.name ?? '';
-      if ((n.startsWith('overlyx-e2e') && n !== 'overlyx-e2e-tex') || projects.some(p => n.startsWith(`overlyx2:${p}/`))) indexedDB.deleteDatabase(n);
+      // (the documents' local copies; a deck's are `overlyx:<id>`, deliverable/webHost.ts)
+      if ((n.startsWith('overlyx-e2e') && n !== 'overlyx-e2e-tex') || projects.some(p => n.startsWith(`overlyx2:${p}/`) || n.startsWith(`overlyx:${p}/`))) indexedDB.deleteDatabase(n);
     }
   } catch { /* ignore */ }
   try { localStorage.removeItem('ol.e2eProjects'); } catch { /* ignore */ }

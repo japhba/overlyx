@@ -5,6 +5,7 @@
  * (webHost.ts) offers it to the editor; which file of a project: app/lastfile.ts.
  */
 import { api } from '../api';
+import { isE2eDocId } from '../e2e/known';
 
 interface SlideRecord { slide: number; at: number }
 
@@ -38,6 +39,8 @@ const push = (leaving = false) => {
   clearTimeout(timer);
   for (const [id, rec] of pending) {
     if (!leaving) { api.setPlace(id, rec.slide, rec.at).catch(() => { /* offline: the browser's copy is newer and goes up the next time */ }); continue; }
+    // (an encrypted project's document: its name is not the server's to know — the browser keeps the place)
+    if (isE2eDocId(id)) continue;
     // (the tab closes or goes to the background: a keepalive request outlives the page)
     try {
       void fetch(`/api/docs/${encodeURIComponent(id)}/place`, { method: 'PUT', keepalive: true, credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rec) })

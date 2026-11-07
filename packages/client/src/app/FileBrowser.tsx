@@ -167,7 +167,7 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
   const role = project?.role ?? 'owner';
   const via = project?.via ?? 'owner';
   const canEdit = role !== 'view';
-  // end-to-end encrypted: no slides, LyX or Google imports there yet (e2e/localapi.ts refuses them)
+  // end-to-end encrypted: no LyX or Google imports there yet (e2e/localapi.ts refuses them)
   const e2e = !!project && isE2eProject(project.name);
   // standalone the browser refreshes itself; under the documents panel the panel subscribes (it
   // needs the same listing for the documents' outlines) and bumps refreshKey for both
@@ -543,7 +543,7 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
       </div>}
       <div class="actions">
         {canEdit && project && <button class="small-btn" onClick={() => void newFile()} title="New file in this project — the ending decides what it is: .tex a LaTeX document, .md a Markdown document, .html slides or a web page, .board a whiteboard, .bib, .sty … a text file">+ File</button>}
-        {canEdit && project && !e2e && <button class="small-btn" data-new-slides onClick={() => setNewLayoutIn('')} title="New slides, a poster, a web page or an article: a folder with an index.html, edited on a canvas">+ Slides</button>}
+        {canEdit && project && <button class="small-btn" data-new-slides onClick={() => setNewLayoutIn('')} title="New slides, a poster, a web page or an article: a folder with an index.html, edited on a canvas">+ Slides</button>}
         {canEdit && project && <button class="small-btn" onClick={() => void newFolder()} title="New folder in this project (also in the right-click menu of any folder)">+ Folder</button>}
         {canEdit && project && <button class="small-btn" onClick={() => void upload()} title="Upload files (figures, .bib, .sty …) — or drag them from your computer onto the file list">⇧</button>}
         {canEdit && project && !e2e && <button class="small-btn" data-lyx-import onClick={() => chooseLyxImport(project.name, '', r => { void load(); onOpen(r.id); })} title="Import a .lyx document or a zipped LyX project">LyX⇩</button>}

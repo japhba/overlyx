@@ -2,7 +2,9 @@
  * The deliverable editor in the web app: the page's text is a Y.Text('html') synced with the server
  * (docs.ts HtmlDoc) over the documents' WebSocket, undone with a Y.UndoManager (agents' edits too,
  * like one's own), the folder served at /ol-d/<token>/ (deliverables.ts), uploads and file events
- * through the REST API, others' selections through the awareness.
+ * through the REST API, others' selections through the awareness. A page of an end-to-end encrypted
+ * project (e2e/) syncs through the encrypted relay instead, and its frames are made in this browser
+ * from the decrypted project (e2e/deckframes.ts): nothing of it is asked of the server.
  */
 import * as Y from 'yjs';
 import { IndexeddbPersistence } from 'y-indexeddb';
@@ -22,6 +24,10 @@ import { localWritesCommitted, snapshotCovers } from '../editor/savedstate';
 import { offlineFrames } from './offlineframes';
 import { noteArticle } from '../articlekinds';
 import { PRESENT_FIELD, watchPresenters } from '../app/presentshare';
+import { isE2eDocId } from '../e2e/known';
+import { E2eSocket } from '../e2e/socket';
+import { e2eFrames, printE2ePage } from '../e2e/deckframes';
+import { registerOpenDoc } from '../e2e/project';
 
 /** Check that storage can actually be opened and written before y-indexeddb installs
  * its listeners. Its constructor leaves an unhandled rejection when private mode
@@ -58,7 +64,8 @@ export function webHost(id: string, user: User): DeliverableHost & { destroy(): 
   const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
   // Load this history before connecting: an offline reopen must not start with a
   // fresh empty document, and histories from a replaced server file must not merge.
-  const provider = new WebsocketProvider(wsUrl, '', ydoc, { params: connectParams(id), disableBc: true, connect: false });
+  const encrypted = isE2eDocId(id);
+  const provider = new WebsocketProvider(wsUrl, '', ydoc, { params: connectParams(id), disableBc: true, connect: false, ...(encrypted ? { WebSocketPolyfill: E2eSocket as unknown as typeof WebSocket } : {}) });
   let persistence: IndexeddbPersistence | null = null;
   const handlers = (provider as unknown as { messageHandlers: ((enc: unknown, dec: decoding.Decoder, ...context: unknown[]) => void)[] }).messageHandlers;
   const text = ydoc.getText('html');
@@ -70,7 +77,10 @@ export function webHost(id: string, user: User): DeliverableHost & { destroy(): 
   ydoc.on('beforeObserverCalls', () => { changing = false; });
   text.observe(() => { shown = null; });
   const textNow = () => (changing ? text.toString() : (shown ??= text.toString()));
-  const frames = offlineFrames(user.id, textNow, () => api.deliverableLink(project, path));
+  const e2e = encrypted ? e2eFrames(project, path, textNow) : null;
+  const frames = e2e ?? offlineFrames(user.id, textNow, () => api.deliverableLink(project, path));
+  // (the page's live text is what the project's versions, .zip and builds read)
+  const unregister = encrypted ? registerOpenDoc(id, ydoc) : () => {};
   const warmFrames = () => frames.changed();
   text.observe(warmFrames);
   const undo = new Y.UndoManager(text, { trackedOrigins: new Set(['canvas', 'code', 'agent']), captureTimeout: 600 });
@@ -302,7 +312,8 @@ export function webHost(id: string, user: User): DeliverableHost & { destroy(): 
       state: stale ? 'stale' : navigator.onLine === false || !provider.wsconnected ? (localReady ? 'offline' : 'connecting') : !provider.synced ? 'connecting' : pending() ? 'saving' : 'saved' }),
     discardLocal: async () => { await persistence?.destroy(); await new Promise<void>((resolve, reject) => { const request = indexedDB.deleteDatabase('overlyx:' + id); request.onsuccess = () => resolve(); request.onerror = () => reject(request.error); request.onblocked = () => reject(new Error('Close other tabs displaying this file, then reopen it.')); }); },
     onSaveState(cb) { saveListeners.add(cb); return () => saveListeners.delete(cb); },
-    link: () => api.deliverableLink(project, path),
+    link: () => (e2e ? Promise.resolve(e2e.link()) : api.deliverableLink(project, path)),
+    ...(e2e ? { readFile: e2e.readFile } : {}),
     offlineFrame: frames.frame,
     offlineResources: frames.resources,
     onOfflineResources: frames.onResources,
@@ -326,6 +337,11 @@ export function webHost(id: string, user: User): DeliverableHost & { destroy(): 
     onPresent: cb => watchPresenters(provider.awareness, cb),
     docClock() { let n = 0; for (const c of Y.decodeStateVector(Y.encodeStateVector(ydoc)).values()) n += c; return n; },
     downloads(open) {
+      // (an encrypted project's page: printed here; the server makes neither its PDF nor its website)
+      if (e2e) return [
+        { label: 'Print or save as PDF…', action: () => void printE2ePage(e2e).catch(e => console.warn('[e2e] print', e)) },
+        { label: 'Project as .zip (made in this browser)', action: () => void import('../e2e/download').then(m => m.downloadProjectZip(project)) },
+      ];
       const q = `?path=${encodeURIComponent(path)}&download=1`;
       return [
         { label: 'PDF', action: () => window.open(`/api/projects/${encodeURIComponent(project)}/deliverable-pdf${q}`, '_blank') },
@@ -337,7 +353,7 @@ export function webHost(id: string, user: User): DeliverableHost & { destroy(): 
       ];
     },
     destroy() {
-      text.unobserve(warmFrames); frames.destroy();
+      text.unobserve(warmFrames); frames.destroy(); unregister();
       destroyed = true;
       window.removeEventListener('offline', onOffline); window.removeEventListener('online', onOnline);
       saveListeners.clear(); readyListeners.clear();

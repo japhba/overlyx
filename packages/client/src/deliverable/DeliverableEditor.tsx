@@ -2349,6 +2349,11 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     if (!s.startsWith('data:')) {
       const rel = resolveRel(s);
       if (rel === null) { notify('This picture is outside the project.', 'error'); return; }
+      // (an encrypted project's picture is read here: its folder's address is nobody's)
+      if (host.readFile) {
+        void host.readFile(rel).then(b => setBgFor({ url: URL.createObjectURL(b), name: s.split('/').pop() || 'picture', imgPath, src: s })).catch(e => notify(String((e as Error).message ?? e), 'error'));
+        return;
+      }
       url = link.base + rel.split('/').map(encodeURIComponent).join('/');
     }
     setBgFor({ url, name: s.startsWith('data:') ? 'picture' : s.split('/').pop() || 'picture', imgPath, src: s });

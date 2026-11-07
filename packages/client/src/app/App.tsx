@@ -57,7 +57,7 @@ import { inlineModelLabel } from './AgentModelPicker';
 import { PdfPanel, stateFromBuild, jobActive, EMPTY_PDF, type PdfState } from './PdfPanel';
 import { E2eKeyHost } from './E2eKeys';
 import { installE2e } from '../e2e/install';
-import { isE2eDocId } from '../e2e/known';
+import { isE2eDocId, isE2eProject } from '../e2e/known';
 import { Ruler, NOTE_SCALE_DEFAULT, NOTE_SCALE_MIN, NOTE_SCALE_MAX, MIN_WIDTH, MAX_WIDTH } from './Ruler';
 import { useNotesPane, useNotesFold, NotesSash, NotesUnfoldTab, NotesResolved } from './notespane';
 import { StatusBar, SaveIndicator, ZoomControl, type Status } from './StatusBar';
@@ -264,9 +264,13 @@ async function visitPublic(): Promise<Awaited<ReturnType<typeof api.visitPublic>
   const h = parseHash();
   if (h.share || !h.id) return null;
   const { project, path } = splitDocId(h.id.replace(/^(raw|text|pdf):/, ''));
-  if (!isProjectKey(project) || knownProjects.has(project)) return null;
+  if (!isProjectKey(project) || knownProjects.has(project) || isE2eProject(project)) return null;
+  const visit = (p: string | null) => Promise.race([api.visitPublic(project, p), new Promise<null>(res => setTimeout(res, 3000, null))]);
   try {
-    const v = await Promise.race([api.visitPublic(project, path || null), new Promise<null>(res => setTimeout(res, 3000, null))]);
+    // (the project first; the file's path only to a public one, which anyone may see — an end-to-end
+    // encrypted project's names are not the server's to know)
+    let v = await visit(null);
+    if (v?.public && path) v = await visit(path);
     if (v?.public && v.role === 'view' && !path) location.replace(shareLanding(v) || location.hash);
     return v;
   } catch { return null; }
@@ -286,11 +290,14 @@ async function canonicalHash(): Promise<boolean> {
   if (!idPart || idPart.startsWith('share/') || parseHash().share) return false;
   const prefix = /^(raw|text|pdf):/.exec(idPart)?.[0] ?? '';
   const id = idPart.slice(prefix.length);
-  if (knownProjects.has(projectOfDoc(id))) return false;
+  if (knownProjects.has(projectOfDoc(id)) || isE2eDocId(id)) return false;
+  // (only the project's part: what an old name maps; the file's path is not the server's to see —
+  // an end-to-end encrypted project's least of all — and comes back as it was)
+  const parts = id.split('/'), head = parts.slice(0, 2).join('/'), rest = parts.slice(2).map(p => '/' + p).join('');
   try {
-    const r = await Promise.race([api.resolveId(id), new Promise<null>(res => setTimeout(res, 3000, null))]);
-    if (!r || r.id === id || location.hash.replace(/^#\/?/, '') !== raw) return false;
-    location.replace('#/' + prefix + r.id + (q >= 0 ? raw.slice(q) : ''));
+    const r = await Promise.race([api.resolveId(head), new Promise<null>(res => setTimeout(res, 3000, null))]);
+    if (!r || r.id === head || location.hash.replace(/^#\/?/, '') !== raw) return false;
+    location.replace('#/' + prefix + r.id + rest + (q >= 0 ? raw.slice(q) : ''));
     return true;
   } catch { return false; /* offline, or no such document: as it is */ }
 }
@@ -305,7 +312,8 @@ async function rekeyLocalCopies(): Promise<void> {
   try { if (localStorage.getItem(FLAG)) return; } catch { return; }
   try {
     const dbs = await (indexedDB as any).databases?.() as { name?: string }[] | undefined;
-    const ids = (dbs ?? []).map(d => d.name ?? '').filter(n => n.startsWith('overlyx:')).map(n => n.slice('overlyx:'.length));
+    // (an encrypted project's copies are named after ids from after the namespaces, and their names are not the server's to see)
+    const ids = (dbs ?? []).map(d => d.name ?? '').filter(n => n.startsWith('overlyx:')).map(n => n.slice('overlyx:'.length)).filter(id => !isE2eDocId(id));
     if (ids.length) await Promise.race([api.resolveIds(ids).then(r => moveLocalCopies(r.ids)), new Promise((_, no) => setTimeout(no, 8000, new Error('timeout')))]);
     localStorage.setItem(FLAG, '1');
   } catch { /* offline: next time */ }

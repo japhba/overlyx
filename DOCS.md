@@ -3732,7 +3732,21 @@ links. The browser refuses those requests itself rather than sending text (`e2e/
 - The project card's *Download* and *Export ▸ Project as .zip* make the .zip in the browser
   (`e2e/zip.ts`, `e2e/download.ts`): documents as their .tex / .md text, the other files as they are.
 
-**Not available yet:** slides, posters and boards; LyX and Google Docs imports and LyX downloads;
+**Slides, posters and web pages.**
+- An HTML deliverable's `index.html` is an encrypted document like the others: its text a
+  `Y.Text('html')`, synced through the relay (deliverable/webHost.ts with the E2E socket).
+- The canvas, its slide rail and the presentation are the deck editor's offline frames, made in the
+  browser from the decrypted project (`e2e/deckframes.ts`): the page with the runtime and its files
+  as data URLs, opened through `/_ol/offline-frame.html`.
+- The frames' folder is at `https://e2e.invalid/`, an address that never resolves, so a file the page
+  names but the project lacks is asked of nobody. A policy of the frame's own lets it load fonts,
+  libraries and pictures only from public hosts, never from this server.
+- *Download ▸ Print or save as PDF* prints the page in the browser (the runtime's print mode in a
+  frame of its own); the server's PDF and website downloads are not offered.
+- Layout documents (slides and posters as LaTeX, Layout mode) are built with the rest; their check of
+  the text boxes reads the build's `.olx` in the browser (core `layout/check.ts`).
+
+**Not available yet:** whiteboards and HTML articles; LyX and Google Docs imports and LyX downloads;
 Google fonts (`\olfont`), which the server would have to put into the build; XeTeX fonts by name.
 
 **Switching it off and rolling back.**
