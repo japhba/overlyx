@@ -9,7 +9,7 @@ import { config } from './config.ts';
 import { cachedBib } from './bibcache.ts';
 import { setSecurityHeaders } from './security.ts';
 import { requestAiRepair, AiRepairError } from './airepair.ts';
-import { aiStatus, aiAvailable, pickRoute, usesServerKey, rewrite as aiRewrite, complete as aiComplete, recognizeInk, transcribeSpeech, allow as aiAllow, AiError, selectionToTex, texToPm } from './ai.ts';
+import { aiStatus, aiAvailable, pickRoute, usesServerKey, rewrite as aiRewrite, complete as aiComplete, recognizeInk, transcribeSpeech, transcribeWhisper, speechOptions, pickSpeech, allow as aiAllow, AiError, selectionToTex, texToPm } from './ai.ts';
 import { linkedAi, combineVersions } from './linkedai.ts';
 import { mcpRouter } from './mcp.ts';
 import { mcpAgentRoutes, pruneAgents } from './mcpAgents.ts';
@@ -1319,8 +1319,8 @@ api.post('/docs/*/ai-repair/apply', async (req, res) => {
 
 /* ---------------------------------------------------------- AI assistance (ai.ts) */
 
-/** Whether ⌘K rewriting / autocomplete can work on this server (a key is configured) and with which models. */
-api.get('/ai/status', (_req, res) => { res.json(aiStatus()); });
+/** Whether ⌘K rewriting / autocomplete can work on this server (a key is configured) and with which models; `speech`: what can transcribe this account's spoken comments (Whisper on its own OpenAI key or the server's, Gemini). */
+api.get('/ai/status', (req, res) => { res.json({ ...aiStatus(), speech: speechOptions(req.user?.id) }); });
 
 /** The math keyboard's pen: handwriting (a PNG) read as LaTeX — up to three readings, most likely first; `notes`: the lasso's Convert to text, read as text with $…$ math. */
 api.post('/ai/ink', async (req, res) => {
@@ -1338,14 +1338,21 @@ api.post('/ai/ink', async (req, res) => {
   }
 });
 
-/** The comment pen's push to talk where the browser cannot put speech into words: a recording (16 kHz mono WAV, base64) read by the server's model — its stretches at their seconds. */
+/**
+ * The comment pen's push to talk: a recording (base64) put into words — its stretches at their seconds.
+ * `engine` 'whisper' (OpenAI's Whisper on the account's own OpenAI key, else the server's; the browser's
+ * webm / mp4 as it is) or 'gemini' (the server's OpenRouter model; 16 kHz WAV); one the account does
+ * not have falls back to the other (ai.ts pickSpeech). The answer says which one heard it.
+ */
 api.post('/ai/transcribe', async (req, res) => {
   try {
-    if (!aiAvailable()) { res.status(503).json({ error: 'Speech recognition is not configured on this server (OPENROUTER_API_KEY is unset).' }); return; }
+    const engine = pickSpeech(req.body?.engine, speechOptions(req.user!.id));
+    if (!engine) { res.status(503).json({ error: 'Speech recognition is not set up on this server: an OpenAI API key for Whisper (yours, from the model menu in Settings ▸ AI) or the server’s OPENROUTER_API_KEY.' }); return; }
     if (!aiAllow(`speech:${req.user!.id}`, config.ai.speechPerHour, 3600_000)) { res.status(429).json({ error: 'That is the limit of spoken comments for now — try again later.' }); return; }
     const ac = new AbortController();
     req.on('close', () => { if (!res.writableEnded) ac.abort(); });
-    res.json({ said: await transcribeSpeech({ audio: String(req.body?.audio ?? ''), lang: req.body?.lang }, ac.signal) });
+    const audio = { audio: String(req.body?.audio ?? ''), lang: req.body?.lang };
+    res.json({ said: engine === 'whisper' ? await transcribeWhisper(audio, req.user!.id, ac.signal) : await transcribeSpeech(audio, ac.signal), engine });
   } catch (e) {
     if (e instanceof AiError) { if (e.status !== 499) res.status(e.status).json({ error: e.message }); return; }
     res.status(400).json({ error: (e as Error).message ?? String(e) });

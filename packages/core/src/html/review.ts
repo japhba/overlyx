@@ -71,9 +71,10 @@ export interface Thread {
 /**
  * What was said: when the recording began (ISO), how long it ran (s), its stretches of speech at their
  * seconds from the start; `how` turned it into words ('device': the browser's speech recognition,
- * 'server': the server's AI, 'none': not transcribed — then `audio` is the recording's project path)
+ * 'whisper': OpenAI's Whisper, 'server': the server's Gemini, 'none': not transcribed — then `audio` is
+ * the recording's project path)
  */
-export interface Voice { start: string; secs: number; said: { t: number; text: string }[]; how: 'device' | 'server' | 'none'; audio?: string }
+export interface Voice { start: string; secs: number; said: { t: number; text: string }[]; how: 'device' | 'whisper' | 'server' | 'none'; audio?: string }
 /** the strokes (ids), their bounding box on the slide (px: x, y, w, h), the objects under them in a few words */
 export interface InkRef { ids: string[]; box: [number, number, number, number]; on?: string[] }
 
@@ -87,7 +88,7 @@ function parseVoice(v: unknown): Voice | null {
   if (!v || typeof v !== 'object') return null;
   const o = v as Record<string, unknown>;
   const said = Array.isArray(o.said) ? (o.said as unknown[]).filter(s => s && typeof s === 'object').map(s => { const x = s as Record<string, unknown>; return { t: Math.max(0, num(x.t)), text: str(x.text) }; }) : [];
-  const how = o.how === 'device' || o.how === 'server' ? o.how : 'none';
+  const how = o.how === 'device' || o.how === 'whisper' || o.how === 'server' ? o.how : 'none';
   return { start: str(o.start), secs: Math.max(0, num(o.secs)), said, how, ...(typeof o.audio === 'string' && o.audio ? { audio: o.audio } : {}) };
 }
 

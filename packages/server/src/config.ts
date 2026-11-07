@@ -141,6 +141,14 @@ export const config = {
     api: (process.env.OPENROUTER_API_URL ?? 'https://openrouter.ai/api/v1').replace(/\/$/, ''),
   },
   /**
+   * OpenAI for everyone (optional): spoken comments go to Whisper on this key when an account has no
+   * OpenAI key of its own (ai.ts transcribeWhisper). Its own name, so a key set for another tool is
+   * never billed for transcriptions by accident.
+   */
+  openai: {
+    apiKey: (process.env.OVERLYX_OPENAI_API_KEY ?? '').trim(),
+  },
+  /**
    * AI assistance in the editor (⌘K rewrite, autocomplete; ai.ts) — through the same OpenRouter
    * key. Both defaults are fast non-thinking models: a ⌘K rewrite is interactive, and Gemini 3.7
    * Flash's mandatory reasoning made it take 7–16 s per rewrite (its hidden reasoning cannot be
@@ -161,6 +169,8 @@ export const config = {
     /** the comment pen's spoken comments, where the browser cannot put them into words (an audio-capable model) */
     speechModel: (process.env.OVERLYX_AI_SPEECH_MODEL ?? 'google/gemini-3.5-flash-lite').trim(),
     speechPerHour: Number(process.env.OVERLYX_AI_SPEECH_PER_HOUR ?? 60),
+    /** spoken comments on an OpenAI key: Whisper (only whisper-1 gives the times of the words; another model gives one stretch at 0 s) */
+    whisperModel: (process.env.OVERLYX_AI_WHISPER_MODEL ?? 'whisper-1').trim(),
     /** "Escalate to AI" repairs send a whole document to the repair model (an expensive one): per user an hour and a day, and for everyone a day */
     repairsPerHour: Number(process.env.OVERLYX_AI_REPAIRS_PER_HOUR ?? 5),
     repairsPerDay: Number(process.env.OVERLYX_AI_REPAIRS_PER_DAY ?? 20),
