@@ -1,0 +1,49 @@
+name: TeX engines (WebAssembly)
+
+# Builds tex-wasm/ (pdfTeX, LuaHBTeX and XeTeX from TeX Live's sources, for the PDF builds of end-to-end
+# encrypted projects in the browser), checks them against this runner's TeX Live — Ubuntu 24.04's,
+# the release the server runs — and, for a tag tex-wasm-*, publishes them as that tag's release.
+# tex-wasm/release.json names the release the client is built with and the SHA-256 of each file.
+
+on:
+  push:
+    tags: ['tex-wasm-*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build tools and TeX Live (for the check)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y autoconf automake libtool gettext autopoint gperf flex bison cmake pkg-config \
+            texlive-latex-recommended texlive-latex-extra texlive-luatex texlive-xetex texlive-fonts-recommended texlive-pictures
+      - name: Emscripten
+        run: |
+          git clone -q https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
+          "$RUNNER_TEMP/emsdk/emsdk" install "$(sed -n 's/^EMSCRIPTEN_VERSION *= *//p' tex-wasm/Makefile)"
+          "$RUNNER_TEMP/emsdk/emsdk" activate "$(sed -n 's/^EMSCRIPTEN_VERSION *= *//p' tex-wasm/Makefile)"
+      - name: Build
+        run: |
+          source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
+          make -C tex-wasm JOBS=4
+      - name: Check
+        run: make -C tex-wasm check
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tex-wasm
+          path: tex-wasm/dist/
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/tex-wasm-')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --title "TeX engines (WebAssembly) $GITHUB_REF_NAME" \
+            --notes-file tex-wasm/dist/NOTES.md tex-wasm/dist/*.js tex-wasm/dist/*.wasm tex-wasm/dist/texmf.cnf \
+            tex-wasm/dist/SHA256SUMS tex-wasm/dist/sources.txt tex-wasm/dist/source-*.tar.gz

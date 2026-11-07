@@ -14,3 +14,5 @@ deploy/secrets.env
 deploy/secrets.env.*
 !deploy/secrets.env.example
 scripts/recording/out/
+# tex-wasm/Makefile's build tree (its dist/ as every dist/)
+tex-wasm/build/
