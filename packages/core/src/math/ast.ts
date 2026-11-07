@@ -58,6 +58,8 @@ export type Atom =
   | { t: 'xarrow'; n: string; body: Cell; opt?: Cell }
   /** InsetMathRef: `\ref{label}` `\eqref{…}` … stored verbatim */
   | { t: 'ref'; n: string; label: string; opt?: string }
+  /** A natbib citation, drawn as its keys like a reference label; notes stay verbatim. */
+  | { t: 'cite'; n: string; keys: string; notes: string[] }
   /**
    * A hyperlink inside a formula: hyperref's `\href{target}{body}` (an OverLyX addition; LyX keeps it
    * as an unknown command followed by two groups, which writes the same LaTeX). The target is kept

@@ -125,7 +125,7 @@ function charToTex(c: string, mode: 'math' | 'text'): string {
 
 /** the colours of LyX's text colour menu: styles.css has a class for each (`.lyx-color-red`, …) */
 const TEXT_COLOR_CLASSES = new Set(['black', 'darkgray', 'gray', 'lightgray', 'white', 'red', 'orange', 'yellow', 'lime', 'green', 'olive', 'teal', 'cyan', 'blue', 'violet', 'purple', 'magenta', 'pink', 'brown']);
-const TEXT_OK = new Set<Atom['t']>(['char', 'space', 'kern', 'font', 'box', 'color', 'ref', 'hash', 'comment', 'raw', 'unknown', 'cmd', 'brace', 'oldfont', 'style', 'href']);
+const TEXT_OK = new Set<Atom['t']>(['char', 'space', 'kern', 'font', 'box', 'color', 'ref', 'cite', 'hash', 'comment', 'raw', 'unknown', 'cmd', 'brace', 'oldfont', 'style', 'href']);
 
 export function atomsToTex(cell: Cell, ctx: TexContext, mode: 'math' | 'text' = 'math'): string {
   let out = '';
@@ -267,6 +267,7 @@ export function atomToTex(a: Atom, ctx: TexContext, mode: 'math' | 'text'): stri
     case 'stackrel': return `\\stackrel{${cellToTex(a.top, ctx, a, 1)}}{${cellToTex(a.body, ctx, a, 0)}}`;
     case 'xarrow': return `\\${a.n}${a.opt ? `[${cellToTex(a.opt, ctx, a, 1)}]` : ''}{${cellToTex(a.body, ctx, a, 0)}}`;
     case 'ref': return `\\htmlClass{lm-ref}{${textToTex(a.label, mode)}}`;
+    case 'cite': return `\\htmlClass{lm-ref}{${textToTex(a.keys, mode)}}`;
     // drawn as a link (styles.css .lm-href), not MathJax's \href: a click in the editor edits, ⌘/Ctrl+click follows it
     case 'href': return `\\htmlClass{lm-href}{${cellToTex(a.body, ctx, a, 0, mode)}}`;
     case 'grid': return gridToTex(a, ctx, mode);

@@ -153,6 +153,7 @@ export function writeAtom(a: Atom, os: MathWriter): void {
     case 'stackrel': os.s('\\stackrel'); if (a.bottom) { os.s('['); writeCell(a.bottom, os); os.s(']'); } braced(os, a.top); braced(os, a.body); return;
     case 'xarrow': os.s('\\' + a.n); if (a.opt && a.opt.length) { os.s('['); writeCell(a.opt, os); os.s(']'); } braced(os, a.body); return;
     case 'ref': os.s('\\' + a.n); if (a.opt) os.s('[' + a.opt + ']'); os.s('{' + a.label + '}'); return;
+    case 'cite': os.s('\\' + a.n + a.notes.map(note => '[' + note + ']').join('') + '{' + a.keys + '}'); return;
     case 'href': os.s('\\href{' + a.target + '}'); braced(os, a.body); return;
     case 'grid': writeGrid(a, os); return;
     case 'macro': {

@@ -134,6 +134,14 @@ function aspectOf(url: string): number | undefined {
 const textEm = (em: number) => `${+(em * 16).toFixed(3)}px`;
 
 const OverlyxMethods = {
+  /** natbib's unparenthesized citation: keys, as in the editor's reference labels. */
+  CiteAlp(parser: TexParser, name: string) {
+    (parser as TexParser & { saveText?: () => void }).saveText?.();
+    parser.GetStar();
+    if (parser.GetBrackets(name) != null) parser.GetBrackets(name);
+    const keys = parser.GetArgument(name);
+    parser.Push(parser.create('node', 'mtext', [], { class: 'lm-ref' }, parser.create('text', keys)) as MmlNode);
+  },
   HtmlClass(parser: TexParser, name: string) {
     const cls = parser.GetArgument(name);
     parser.Push(classBox(parser, cls, parser.ParseArg(name)));
@@ -222,6 +230,8 @@ new CommandMap('overlyx-macros', {
     parser.Push(parser.create('token', kind, {}, text) as MmlNode);
   },
   htmlClass: OverlyxMethods.HtmlClass,
+  citealp: OverlyxMethods.CiteAlp,
+  Citealp: OverlyxMethods.CiteAlp,
   includegraphics: OverlyxMethods.IncludeGraphics,
   raisebox: OverlyxMethods.Raisebox,
   textsc: OverlyxMethods.TextSc,
@@ -232,6 +242,8 @@ new DelimiterMap('overlyx-delimiters', ParseMethods.delimiter as never, {
 } as never);
 // inside \text{…}: the same class boxes around text (every character of a text cell is an atom)
 new CommandMap('text-overlyx-macros', {
+  citealp: OverlyxMethods.CiteAlp,
+  Citealp: OverlyxMethods.CiteAlp,
   htmlClass(parser: TexParser, name: string) {
     const p = parser as TexParser & { saveText(): void; ParseTextArg(name: string, env: object): MmlNode };
     p.saveText();

@@ -175,6 +175,31 @@ describe('textcolor inherits the surrounding mode', () => {
 
 describe('editor labels inside math text', () => {
   it.each([
+    String.raw`\citealp{sample_1}`,
+    String.raw`\citealp*{sample_1,sample_2}`,
+    String.raw`\citealp[p.~3]{sample_1}`,
+    String.raw`\citealp[see][p.~3]{sample_1}`,
+    String.raw`\Citealp*[][p.~3]{sample_1}`,
+  ])('preserves and renders natbib citation keys: %s', citation => {
+    const keys = /\{([^}]+)\}$/.exec(citation)![1];
+    for (const text of [false, true]) {
+      const body = text ? `\\text{see ${citation} next}` : citation;
+      const hull = parseFormula(`$${body}$`);
+      expect(writeFormula(hull)).toBe(`$${body}$`);
+      const sources = [body, ...[false, true].map(atoms => renderHullSource(hull, {}, { atoms }).latex)];
+      for (const source of sources) {
+        const mml = toMathml(source);
+        expect(mml).toContain('class="lm-ref"');
+        expect(mml).toContain(keys);
+        expect(mml).not.toMatch(/lm-unknown|lm-undefined|<msub/);
+        if (text) {
+          const rendered = [...mml.matchAll(/<mtext\b[^>]*>(.*?)<\/mtext>/gs)].map(m => m[1]).join('').replace(/&#xA0;/g, ' ');
+          expect(rendered).toBe(`see ${keys} next`);
+        }
+      }
+    }
+  });
+  it.each([
     [String.raw`see \ref{eq:sample_1}`, 'lm-ref', 'eq:sample_1'],
     [String.raw`before \unsupported{after}`, 'lm-unknown', String.raw`\unsupported`],
     ['before % synthetic note\n after', 'lm-comment', '% synthetic note'],
