@@ -46,6 +46,7 @@ import { markdownPlugins, isMarkdownDoc, looksLikeMarkdown, pasteMarkdown } from
 import { pasteTargetsPlugin, pasteLatex, pasteBlocksIntoEmpty } from './plugins/paste';
 import { autocorrectPlugin } from './spell/autocorrect';
 import { arrowsPlugin } from './plugins/arrows';
+import { mathOccurrencesPlugin } from './plugins/mathoccurrences';
 import { spellPlugin, misspelledAt, spellSuggest } from './spell/plugin';
 import { aiRewritePlugin } from './ai/rewrite';
 import { aiCompletePlugin } from './ai/complete';
@@ -174,6 +175,7 @@ export function assemblePlugins(o: AssemblyOptions): Plugin[] {
     scrollMarksPlugin(),   // comments and tracked changes marked along the pane's scroll bar, a click goes there
     mergeReviewPlugin(o.merges),   // the card that goes through what offline edits and the live text changed differently
     findPlugin(),
+    mathOccurrencesPlugin(),   // a symbol selected in a formula: the same symbol in the other formulas, a lighter shade
     pasteTargetsPlugin(),
     linksPlugin(),   // the bubble under a hyperlink, the selection shown while the link box is open
     mirrorCaretPlugin(),

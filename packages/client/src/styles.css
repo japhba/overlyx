@@ -19,6 +19,8 @@ html[data-theme="dark"]:not([data-dark-pages]) .editor-page:not(:has(.ol-layout)
   color-scheme: light;
   --vspace-color: #9a6a35;   /* LyX's "added space markers" brown */
   --space-mark: rgba(139, 0, 0, 0.45);   /* LyX's LaTeX dark red, half strength: thin spaces, ~ */
+  --math-occ-bg: rgba(90, 140, 220, 0.12);   /* the selected symbol's other occurrences (plugins/mathoccurrences.ts): a lighter shade of .lm-sel */
+  --math-occ-line: rgba(90, 140, 220, 0.4);
   --ui-bg: #f3f3f1;
   --ui-bg2: #e9e9e6;
   --ui-border: #c9c9c4;
@@ -83,6 +85,8 @@ html[data-theme="dark"]:not([data-dark-pages]) .editor-page:not(:has(.ol-layout)
 html[data-theme="dark"] {
   --vspace-color: #b98d5a;
   --space-mark: rgba(214, 102, 19, 0.55);
+  --math-occ-bg: rgba(122, 167, 234, 0.14);
+  --math-occ-line: rgba(122, 167, 234, 0.45);
   color-scheme: dark;
   --ui-bg: #1c1c21;
   --ui-bg2: #24242b;

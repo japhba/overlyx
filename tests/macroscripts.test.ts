@@ -41,14 +41,16 @@ describe('macro scripts render greedily', () => {
     const s = render('$\\M^{2}$');
     expect(s).toMatch(/\\htmlClass\{lm-macro\}\{\\mathbf\{M\}\}\}\^\{\\htmlClass\{lm-c\d+\}\{2\}\}/);
   });
-  it('merges in the editable field too, where every atom carries its lm-a marker', () => {
+  it('merges in the editable field too, where every atom carries its lm-a marker (and its symbol key)', () => {
     // the field renders with atom markers (renderHullSource atoms: true); the merge used to
     // recognise only the static form, so a formula stopped being greedy the moment it was clicked
     const field = (latex: string) => renderHullSource(parseFormula(latex, MACROS), MACROS, { atoms: true }).latex;
-    expect(field('$\\q^{x}_{y}$')).toMatch(/\\htmlClass\{lm-c\d+\}\{\\htmlClass\{lm-a\}\{\\htmlClass\{lm-macro\}\{q\}\}\}\^\{\\htmlClass\{lm-c\d+\}\{\\htmlClass\{lm-a\}\{x\}\}\}_\{\\htmlClass\{lm-macro\}\{a\}\\htmlClass\{lm-c\d+\}\{\\htmlClass\{lm-a\}\{y\}\}\}/);
-    expect(field('$\\qq^{2}$')).toMatch(/\{\\htmlClass\{lm-macro\}\{q\}\}\}\^\{\\htmlClass\{lm-c\d+\}\{\\htmlClass\{lm-a\}\{2\}\}\}_\{\\htmlClass\{lm-macro\}\{a\}\}/);
+    expect(field('$\\q^{x}_{y}$')).toMatch(/\\htmlClass\{lm-c\d+\}\{\\htmlClass\{lm-a(?: [\w-]+)?\}\{\\htmlClass\{lm-macro\}\{q\}\}\}\^\{\\htmlClass\{lm-c\d+\}\{\\htmlClass\{lm-a(?: [\w-]+)?\}\{x\}\}\}_\{\\htmlClass\{lm-macro\}\{a\}\\htmlClass\{lm-c\d+\}\{\\htmlClass\{lm-a(?: [\w-]+)?\}\{y\}\}\}/);
+    expect(field('$\\qq^{2}$')).toMatch(/\{\\htmlClass\{lm-macro\}\{q\}\}\}\^\{\\htmlClass\{lm-c\d+\}\{\\htmlClass\{lm-a(?: [\w-]+)?\}\{2\}\}\}_\{\\htmlClass\{lm-macro\}\{a\}\}/);
     // a definition without trailing scripts: unchanged, markers and all
-    expect(field('$\\M^{2}$')).toMatch(/\\htmlClass\{lm-a\}\{\\htmlClass\{lm-macro\}\{\\mathbf\{M\}\}\}\}\^\{/);
+    expect(field('$\\M^{2}$')).toMatch(/\\htmlClass\{lm-a(?: [\w-]+)?\}\{\\htmlClass\{lm-macro\}\{\\mathbf\{M\}\}\}\}\^\{/);
+    // letters carry the key of their symbol: x in its font, the same x wherever it stands
+    expect(field('$x+\\mathbf{x}_{i}+\\alpha$')).toMatch(/\\htmlClass\{lm-a lm-k-c120\}\{x\}\\htmlClass\{lm-a\}\{\+\}.*\\htmlClass\{lm-a lm-k-mathbf-c120\}\{x\}.*\\htmlClass\{lm-a lm-k-s-alpha\}\{\\alpha\}/);
   });
   it('the LaTeX written back is untouched', async () => {
     const { writeFormula } = await import('../packages/core/src/math');

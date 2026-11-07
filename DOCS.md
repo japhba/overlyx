@@ -1770,6 +1770,15 @@ blend.
   insets and tracked changes; `Ctrl/⌘+click` follows a reference or opens a child document; **tabs**
   for open documents (new tabs open right of the current one); the text column is centred and its
   width is a View setting (*View ▸ Text width*, `Ctrl+Alt+±`).
+* **The selected symbol's other occurrences** (`editor/plugins/mathoccurrences.ts`, both shells): one
+  atom selected in a formula (Shift+arrow, a drag) — or a formula that is one symbol, selected whole —
+  gives the same symbol in the document's other formulas a lighter shade of the selection
+  (`--math-occ-bg`), as VS Code marks a word's occurrences. The same symbol is core
+  `math/mathjax.ts symbolKey`: a letter in its math font (x matches the x of x_i and x², not
+  `\mathbf{x}`), a symbol command (`\alpha`), and a symbol with scripts, an accent, a font or a macro by
+  the LaTeX it writes (x_i only x_i). Digits and operators are not symbols. The renderer gives every
+  atom of an editable formula its key's class (`lm-k-…`), so the highlight is one CSS rule under the
+  editor's root (`data-ol-occ`); formulas not upgraded to fields yet light up when they scroll in.
 * **Inserting with a selection** (`editor/commands.ts`) never throws the selection away. An inset —
   footnote, note, box, branch, caption, a float — takes the selected text, object or paragraphs in, as
   LyX does (`doInsertInset`: the selection moves into the new inset): a clicked image with *Insert ▸
