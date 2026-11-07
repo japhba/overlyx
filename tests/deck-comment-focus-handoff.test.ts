@@ -54,6 +54,9 @@ const handlers = compile([
   functionSource(editingSource, 'selection'),
   functionSource(editingSource, 'pastePlain'),
   functionSource(editingSource, 'onBeforeInput'),
+  functionSource(editingSource, 'onTextInput'),
+  // (typing's arrows, runtime/arrows.ts: not what this exercises)
+  'function arrowInput() { return false; }',
   functionSource(editingSource, 'scheduleCommit'),
   variableSource(placeholderSource, 'PH'),
   functionSource(editingSource, 'cleanHtml'),
