@@ -25,6 +25,9 @@ for family, weight, style, stretch, rel in [
     ('DejaVu Sans', 700, 'normal', None, assets + 'DejaVuSans-Bold.woff2'),
     ('DejaVu Sans', 400, 'italic', None, assets + 'DejaVuSans-Oblique.woff2'),
     ('DejaVu Sans', 700, 'italic', None, assets + 'DejaVuSans-BoldOblique.woff2'),
+    # Anodyne, OverLyX's own sans-serif (fonts/anodyne): its variable Latin faces, every weight and grade
+    ('Anodyne', '100 900', 'normal', None, '../../../../fonts/anodyne/web/anodyne-roman-latin.woff2'),
+    ('Anodyne', '100 900', 'italic', None, '../../../../fonts/anodyne/web/anodyne-italic-latin.woff2'),
 ]:
     file = fonts / rel
     mime, fmt = ('font/woff2', 'woff2') if file.suffix == '.woff2' else ('font/otf', 'opentype')
@@ -37,10 +40,12 @@ license_text = (
     + '\nFira Sans: Digitized data copyright 2012-2018, The Mozilla Foundation and Telefonica S.A., bBox Type GmbH and Carrois Corporate GbR, with Reserved Font Name Fira. SIL OFL 1.1.\n'
     + (root / 'packages/client/public/licenses/cm-unicode-OFL.txt').read_text()
     + '\n' + (root / 'packages/core/src/html/template-assets/DejaVu-LICENSE.txt').read_text()
+    # (Anodyne's notices: the copyright lines before the OFL, which Carlito's text above carries in full)
+    + '\nAnodyne: ' + (root / 'fonts/anodyne/OFL.txt').read_text().split('\n\n')[0] + '\nSIL Open Font License 1.1.\n'
 )
 dest = root / 'packages/core/src/html/scientific-fonts.ts'
 dest.write_text('// Generated from the bundled open fonts by scripts/gen-template-fonts.py.\n'
-                '// Instrument Sans, Carlito, Fira Sans and CMU Sans: SIL Open Font License 1.1; DejaVu Sans: Bitstream Vera and Arev licences.\n'
+                '// Instrument Sans, Carlito, Fira Sans, CMU Sans and Anodyne: SIL Open Font License 1.1; DejaVu Sans: Bitstream Vera and Arev licences.\n'
                 'export const TEMPLATE_FONTS: Record<string, string> = '
                 + json.dumps({k: '\n'.join(v) for k, v in faces.items()}, indent=2) + ';\n'
                 + 'export const TEMPLATE_FONT_LICENSE = '

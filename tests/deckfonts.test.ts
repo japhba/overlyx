@@ -84,7 +84,7 @@ it('makes a deck font of any Google family: its CSS family with its category\'s 
 it('lists the deck\'s own fonts — Default, then the embedded ones — and takes a family by name as the embedded font when there is one', () => {
   expect(DECK_FONTS[0]).toEqual({ label: 'Default', css: null });
   // every embedded font travels with the HTML (no Google link)
-  expect(embeddedDeckFonts().map(f => firstFontFamily(f.css!))).toEqual(['Instrument Sans', 'Fira Sans', 'Carlito', 'CMU Sans', 'DejaVu Sans']);
+  expect(embeddedDeckFonts().map(f => firstFontFamily(f.css!))).toEqual(['Anodyne', 'Instrument Sans', 'Fira Sans', 'Carlito', 'CMU Sans', 'DejaVu Sans']);
   for (const f of embeddedDeckFonts()) expect(fontResource('<html><head></head></html>', f.css, f.google)).toContain('@font-face');
   const picked: (string | null)[] = [];
   const [lead, embedded] = deckFontSections('Fira Sans', f => picked.push(f.css), { label: 'Default', active: false, pick: () => picked.push(null) });
@@ -92,10 +92,10 @@ it('lists the deck\'s own fonts — Default, then the embedded ones — and take
   expect(lead.items.map(it => it.label)).toEqual(['Default']);
   expect(embedded.lead).toBeFalsy();
   // (each with its family, so that Google's same-named family is not listed twice; the one in use marked)
-  expect(embedded.items.map(it => it.family)).toEqual(['Instrument Sans', 'Fira Sans', 'Carlito', 'CMU Sans', 'DejaVu Sans']);
+  expect(embedded.items.map(it => it.family)).toEqual(['Anodyne', 'Instrument Sans', 'Fira Sans', 'Carlito', 'CMU Sans', 'DejaVu Sans']);
   expect(embedded.items.filter(it => it.active).map(it => it.label)).toEqual(['Fira Sans']);
   embedded.items[0].pick(); lead.items[0].pick();
-  expect(picked).toEqual(['"Instrument Sans", sans-serif', null]);
+  expect(picked).toEqual(['Anodyne, sans-serif', null]);
   // no lead row unless asked for (the theme's text font has no "none")
   expect(deckFontSections('', () => {})).toHaveLength(1);
   // a name: the embedded font first (My fonts' Fira Sans is the bundled one), else Google's, else the name alone
@@ -106,3 +106,14 @@ it('lists the deck\'s own fonts — Default, then the embedded ones — and take
 });
 
 
+
+it('embeds Anodyne, the house font, chosen from the bundled list or the font list: never a Google Fonts link', () => {
+  const picked = deckFontFor({ f: 'Anodyne', c: 'Sans Serif', a: [{ t: 'wght', min: 100, max: 900 }, { t: 'GRAD', min: -100, max: 150 }], w: [], i: true });
+  for (const css of [DECK_FONTS.find(f => f.label.startsWith('Anodyne'))!.css!, picked.css!]) {
+    const res = fontResource('<html><head></head><body></body></html>', css, picked.google);
+    expect(res).toContain('font-family:"Anodyne";font-weight:100 900');
+    expect(res).toMatch(/url\(data:font\/woff2;base64,/);
+    expect(res).not.toContain('googleapis');
+    expect(fontPortabilityWarning(css, embeddedFontFamilies(`<style>${res.replace(/^[\s\S]*<style>|<\/style>[\s\S]*$/g, '')}</style>`))).toBeNull();
+  }
+});
