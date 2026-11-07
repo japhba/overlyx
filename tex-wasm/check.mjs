@@ -55,24 +55,12 @@ function texliveFile(prog, name, format) {
   return file;
 }
 
-/** an engine's module factory: the .js is CommonJS, which the repository's "type": "module" would not let require() see */
-const factories = new Map();
-function factoryOf(engine) {
-  if (!factories.has(engine)) {
-    const file = path.join(DIST, engine + '.js');
-    const module = { exports: {} };
-    new Function('module', 'exports', 'require', '__filename', '__dirname', fs.readFileSync(file, 'utf8'))(module, module.exports, require, file, DIST);
-    factories.set(engine, module.exports);
-  }
-  return factories.get(engine);
-}
-
 /** BusyTeX's name of a program's code where it differs (the program keeps its name: kpathsea's progname) */
 const APPLET = { lualatex: 'luahbtex' };
 
 let names = null;
 async function run(engine, program, args, files, cwd = '') {
-  const factory = factoryOf(engine);
+  const factory = require(path.join(DIST, engine + '.js'));   // CommonJS: tex-wasm/package.json
   const out = [];
   const M = await factory({
     thisProgram: '/texlive/bin/' + program, print: s => out.push(s), printErr: s => out.push(s),
