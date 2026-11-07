@@ -18,20 +18,36 @@ needs another name. What Anodyne changes:
   inserted at the same arc-length fraction, each run refitted as a cubic and converted with cu2qu's
   multi-master conversion (as fontmake does); Thin and Black extrapolated at Noto's stem ratios. About
   5 % (rare symbols whose Bold has other contours) are emboldened point by point instead.
+- **Width, 62.5–100** (`wdth`): Noto Sans's own condensed masters for the glyphs Lisnoti kept from
+  Noto; Lisnoti's redrawn and added glyphs squeezed to Noto's width at each weight master, their stems
+  brought back horizontally to Noto's condensed stems (no condensed drawing of them exists).
 - **Grade, −100–150** (`GRAD`): the stems of weight 400+GRAD at the widths of 400, so text darkens or
   lightens without moving. OverLyX takes 25 off in the dark theme and lets each browser set its own
   (Settings ▸ Appearance ▸ Text grade).
-- **Small capitals** (`smcp`, `c2sc`) again, for `\textsc` and small-caps headings.
+- **Features Lisnoti dropped but kept the glyphs of**: small capitals (`smcp`, `c2sc`, for `\textsc`
+  and small-caps headings), old-style, proportional, tabular and lining figures (the zero stays
+  slashed), case forms (not for figures and the maths-axis brackets), the Greek alternates (`ss06`,
+  `ss07`), and Noto Sans Math's dotless i and j for accents (`dtls`).
 
 Files: `web/` the variable fonts as woff2 by Unicode range with `anodyne.css` (the client imports it;
-the server serves the same files to decks and frames), `tex/` static Regular, Bold, Italic and Bold
-Italic at grade 0 with the MATH table (LuaLaTeX; the server copies them into a build that names
-Anodyne).
+the server serves the same files to decks and frames). `tex/`, for LuaLaTeX (the server copies them
+into a build that names Anodyne), without the Indic, Thai and CJK shaping Lisnoti carries:
+- `Anodyne-{Regular,Bold,Italic,BoldItalic}.ttf`, static, normal width, grade 0, with the MATH table:
+  what a plain `\setmainfont{Anodyne}` / `\setmathfont{Anodyne}` finds by name;
+- `AnodyneVariable{,-Italic}.ttf`, family "Anodyne Variable": the text as a variable font, which
+  `\olfont` takes for any weight, width and grade (core fontface.ts).
 
-Rebuild (≈11 min; fontTools and brotli on `PYTHONPATH`):
+LuaTeX caches a font the first time a build loads it; Anodyne's faces take ~0.8 GB each to cache, all
+at once more than a build may use (2.5 GB), so a build first loads each face its HOME has not cached,
+one per run (googlefonts.ts `houseFontWarmups`). With the caches, a document using all of it takes
+~1.3 GB.
+
+Rebuild (≈15 min, ~2.8 GB a style: run it as its own unit, `systemd-run --user --collect
+-p MemoryMax=3200M …`, one style per process with `--only roman` / `--only italic`, then `--install-only`;
+fontTools and brotli on `PYTHONPATH`):
 
     python3 scripts/anodyne/build.py --lisnoti <Lisnoti>/font-Lisnoti/Lisnoti-ttf \
-      --noto <dir with NotoSans[wdth,wght].ttf, NotoSans-Italic[wdth,wght].ttf from google/fonts ofl/notosans> \
+      --noto <dir with NotoSans[wdth,wght].ttf, NotoSans-Italic[wdth,wght].ttf, NotoSansMath-Regular.ttf> \
       --out <scratch dir> --repo fonts/anodyne
 
 Keep the Unicode ranges of `scripts/anodyne/build.py` (`WEB_RANGES`) and

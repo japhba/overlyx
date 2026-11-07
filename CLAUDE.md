@@ -51,6 +51,14 @@ family instead: `"OL Inter", Inter, sans-serif` for the interface, a bundled or 
 `sans-serif` / `serif` for content, `"DejaVu Sans Mono", monospace` for code. `tests/open-fonts.test.ts`
 enforces it (starters-legacy keeps the starters as they shipped).
 
+## New .tex documents keep TeX's default fonts
+
+A new LaTeX document (+ New, File ▸ New, the VS Code New Document command, an agent's create) uses
+TeX's own fonts, Computer Modern, until its author chooses others (the owner, 7 Nov 2026). OverLyX's
+house font Anodyne is the interface's sans-serif and a font one can pick; it never goes into a .tex
+file by default, and neither does any other font package, `\setmainfont` or `\olmainfont`.
+`tests/newdoc-fonts.test.ts` enforces it.
+
 ## Keyboard shortcuts are contextual (VS Code's model)
 
 A key may do different things in different places, as VS Code's keybindings carry a `when`

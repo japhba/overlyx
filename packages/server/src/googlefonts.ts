@@ -23,8 +23,11 @@
  *
  * House fonts come with OverLyX instead (fonts/<slug>/ in the repository, HOUSE_FONTS): Anodyne, its
  * sans-serif. The same routes serve them, first in the catalogue and available with Google switched
- * off — to the web their variable woff2 files by Unicode range (web/), to TeX their static faces with
- * the MATH table (tex/: fontspec finds Anodyne Bold by name, unicode-math sets formulas in it).
+ * off — to the web their variable woff2 files by Unicode range (web/), to TeX (tex/) four static faces
+ * with the MATH table (a plain \setmainfont{Anodyne} finds them by name, unicode-math sets formulas in
+ * it) and "Anodyne Variable", its text as a variable font, which \olfont takes for any weight, width
+ * and grade (core fontface.ts). LuaTeX caches a font the first time a build loads it, and Anodyne's
+ * faces take ~0.8 GB each to cache — all at once is more than a build may use: houseFontWarmups.
  */
 import express from 'express';
 import fs from 'node:fs';
@@ -37,8 +40,8 @@ export interface GoogleFont {
   family: string; slug: string; dir: string; files: GoogleFontFile[];
   /** variable font files (one upright, one italic): their axes' ranges */
   axes?: CatalogAxis[];
-  /** a house font: its static faces for TeX (`dir`/tex/), the web files being variable */
-  tex?: { regular: string; bold: string; italic: string; boldItalic: string };
+  /** a house font's files for TeX (`dir`/tex/): its static faces, and `variable` the text as variable fonts (family "<family> Variable") */
+  tex?: { regular: string; italic: string; bold: string; boldItalic: string; variable?: string[] };
 }
 export interface CatalogAxis { t: string; min: number; max: number; d: number }
 /** a family of the catalogue: name, category, axes (variable), static weights, italics, popularity rank */
@@ -74,14 +77,43 @@ const HOUSE_FONTS: Record<string, GoogleFont> = {
   anodyne: {
     family: 'Anodyne', slug: 'anodyne', dir: path.join(REPO_ROOT, 'fonts', 'anodyne'),
     files: (['normal', 'italic'] as const).flatMap(style => ANODYNE_RANGES.map(([part, range]) => ({ style, weight: 400, file: `web/anodyne-${style === 'italic' ? 'italic' : 'roman'}-${part}.woff2`, range }))),
-    axes: [{ t: 'wght', min: 100, max: 900, d: 400 }, { t: 'GRAD', min: -100, max: 150, d: 0 }],
-    tex: { regular: 'tex/Anodyne-Regular.ttf', bold: 'tex/Anodyne-Bold.ttf', italic: 'tex/Anodyne-Italic.ttf', boldItalic: 'tex/Anodyne-BoldItalic.ttf' },
+    axes: [{ t: 'wght', min: 100, max: 900, d: 400 }, { t: 'wdth', min: 62.5, max: 100, d: 100 }, { t: 'GRAD', min: -100, max: 150, d: 0 }],
+    tex: { regular: 'tex/Anodyne-Regular.ttf', italic: 'tex/Anodyne-Italic.ttf', bold: 'tex/Anodyne-Bold.ttf', boldItalic: 'tex/Anodyne-BoldItalic.ttf', variable: ['tex/AnodyneVariable.ttf', 'tex/AnodyneVariable-Italic.ttf'] },
   },
 };
 /** the house font of that name, if its files are there */
 export function houseFont(family: string): GoogleFont | null {
   const f = HOUSE_FONTS[slugOf(family)];
   return f && fs.existsSync(path.join(f.dir, f.tex!.regular)) ? f : null;
+}
+/** a house font's files for TeX (in its folder) */
+export const houseTexFiles = (f: GoogleFont): string[] => (f.tex ? [f.tex.regular, f.tex.italic, f.tex.bold, f.tex.boldItalic, ...(f.tex.variable ?? [])] : []);
+
+/**
+ * The faces of the house fonts a LaTeX text names whose LuaTeX cache the build's HOME lacks, each with a
+ * document that loads only it (from `ol-fonts/<slug>/`, as provideFaceFonts puts it): run one by one
+ * before the build, so that no run caches more than one (export.ts). The cache is luaotfload's, one
+ * file per font file (lower-case name), kept with the font's size, so a copy elsewhere still matches.
+ */
+export function houseFontWarmups(tex: string, home: string): { file: string; doc: string }[] {
+  const cached = new Set<string>();
+  try {
+    for (const tl of fs.readdirSync(home).filter(d => d.startsWith('.texlive'))) {
+      const dir = path.join(home, tl, 'texmf-var', 'luatex-cache', 'generic', 'fonts', 'otl');
+      for (const f of fs.existsSync(dir) ? fs.readdirSync(dir) : []) cached.add(f.replace(/\.lu[ac]$/, ''));
+    }
+  } catch { /* no HOME yet: all of them */ }
+  const out: { file: string; doc: string }[] = [];
+  for (const name of olfontFamilies(tex)) {
+    const g = houseFont(name);
+    if (!g?.tex) continue;
+    for (const file of houseTexFiles(g)) {
+      const base = path.basename(file);
+      if (cached.has(base.replace(/\.ttf$/, '').toLowerCase())) continue;
+      out.push({ file: base, doc: `\\documentclass{article}\\usepackage{fontspec}\\setmainfont{${base}}[Path=./ol-fonts/${g.slug}/]\\begin{document}x\\end{document}\n` });
+    }
+  }
+  return out;
 }
 /** the house fonts' rows of the catalogue: first in the font list */
 const houseRows = (): CatalogFamily[] => Object.values(HOUSE_FONTS).filter(f => houseFont(f.family)).map(f => ({ f: f.family, c: 'Sans Serif', a: f.axes ?? [], w: [], i: true, p: 0 }));
@@ -322,8 +354,8 @@ export async function provideFaceFonts(tex: string, buildDir: string): Promise<s
     provided++;
     const sub = path.join(root, g.slug);
     fs.mkdirSync(sub, { recursive: true });
-    // (a house font: its static faces — LuaTeX does not read woff2)
-    for (const file of g.tex ? Object.values(g.tex) : g.files.map(f => f.file)) {
+    // (a house font: its TrueType files, LuaTeX does not read woff2)
+    for (const file of g.tex ? houseTexFiles(g) : g.files.map(f => f.file)) {
       const dest = path.join(sub, path.basename(file));
       try { if (fs.statSync(dest).size === fs.statSync(path.join(g.dir, file)).size) continue; } catch { /* not there */ }
       fs.copyFileSync(path.join(g.dir, file), dest);
@@ -357,7 +389,7 @@ export async function googleFontInfo(family: string): Promise<FontInfo | null> {
   const up = g.files.find(f => f.style === 'normal' && (g.axes || f.weight === 400)) ?? g.files.find(f => f.style === 'normal') ?? g.files[0];
   // (a house font's features from its static Regular, its axes and instances as the house font says)
   const fi = g.tex
-    ? { ...fontFileInfo(fs.readFileSync(path.join(g.dir, g.tex.regular))), axes: (g.axes ?? []).map(a => ({ tag: a.t, name: a.t === 'GRAD' ? 'Grade' : 'Weight', min: a.min, def: a.d, max: a.max })),
+    ? { ...fontFileInfo(fs.readFileSync(path.join(g.dir, g.tex.regular))), axes: (g.axes ?? []).map(a => ({ tag: a.t, name: ({ GRAD: 'Grade', wdth: 'Width' } as Record<string, string>)[a.t] ?? 'Weight', min: a.min, def: a.d, max: a.max })),
       instances: [[100, 'Thin'], [200, 'ExtraLight'], [300, 'Light'], [400, 'Regular'], [500, 'Medium'], [600, 'SemiBold'], [700, 'Bold'], [800, 'ExtraBold'], [900, 'Black']].map(([w, name]) => ({ name: name as string, coords: { wght: w as number } })) }
     : fontFileInfo(fs.readFileSync(path.join(g.dir, up.file)));
   const weights = g.axes ? [] : [...new Set(g.files.filter(f => f.style === 'normal').map(f => f.weight))].sort((a, b) => a - b);
@@ -398,7 +430,7 @@ export function googleFontRoutes(): express.Router {
     const c = await googleCatalog();
     res.setHeader('Cache-Control', 'private, max-age=86400');
     const house = houseRows();
-    res.json({ axisNames: { GRAD: 'Grade', ...c?.axisNames }, families: [...house, ...(c?.families ?? []).filter(f => !house.some(h => h.f === f.f))] });
+    res.json({ axisNames: { GRAD: 'Grade', wdth: 'Width', ...c?.axisNames }, families: [...house, ...(c?.families ?? []).filter(f => !house.some(h => h.f === f.f))] });
   });
   r.get('/fonts/google.css', async (req, res) => {
     const family = String(req.query.family ?? '');
@@ -411,7 +443,7 @@ export function googleFontRoutes(): express.Router {
     res.send(f.files.map(x => {
       const weight = f.axes ? (wght ? `${wght.min} ${wght.max}` : String(x.weight)) : String(x.weight);
       const stretch = wdth ? ` font-stretch: ${wdth.min}% ${wdth.max}%;` : '';
-      if (x.range) return `@font-face { font-family: ${JSON.stringify(f.family)}; font-style: ${x.style}; font-weight: ${weight}; font-display: swap; src: url(google/${f.slug}/${path.basename(x.file)}) format('woff2'); unicode-range: ${x.range}; }`;
+      if (x.range) return `@font-face { font-family: ${JSON.stringify(f.family)}; font-style: ${x.style}; font-weight: ${weight};${stretch} font-display: swap; src: url(google/${f.slug}/${path.basename(x.file)}) format('woff2'); unicode-range: ${x.range}; }`;
       return `@font-face { font-family: ${JSON.stringify(f.family)}; font-style: ${x.style}; font-weight: ${weight};${stretch} font-display: swap; src: url(google/${f.slug}/${x.file}) format('truetype'); }`;
     }).join('\n'));
   });

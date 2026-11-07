@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Anodyne: OverLyX's sans-serif, a fork of Lisnoti (https://github.com/Lisnoti/Lisnoti, OFL; "Lisnoti" is a
-Reserved Font Name, so the fork needs its own name), built as a variable font with two axes:
+Reserved Font Name, so the fork needs its own name), built as a variable font with three axes:
 
   wght  100–900  weight. Glyphs Lisnoti kept from Noto Sans get Noto Sans's own masters (Thin, Bold, Black,
                  instanced from Google's variable Noto Sans), so every weight is Noto's design. Glyphs Lisnoti
@@ -10,19 +10,24 @@ Reserved Font Name, so the fork needs its own name), built as a variable font wi
                  fontmake does), Thin and Black extrapolated from the Regular→Bold change at Noto's stem ratios.
                  The few glyphs whose Bold has other contours are emboldened point by point (FreeType's
                  outline-emboldening rule), so they stay compatible too.
+  wdth  62.5–100 width. Noto Sans's own condensed masters (at each weight master) for the glyphs Lisnoti kept
+                 from Noto; the others squeezed to Noto's lowercase width at that weight and their stems brought
+                 back horizontally to Noto's condensed stems (no condensed drawing of them exists).
   GRAD  -100–150 grade: the stems of weight 400+GRAD at the widths of 400 — darker or lighter text that never
                  reflows. Derived from the weight masters: each point's weight delta, less the advance growth
                  spread across the glyph by the point's position.
 
-It also brings back Noto Sans's small capitals (smcp, c2sc), which Lisnoti dropped, so \\textsc and small-caps
-headings have real ones. Lisnoti's MATH table stays (static, for the Regular; the Bold instance gets Lisnoti
+It also brings back the features Lisnoti dropped while keeping their glyphs: Noto Sans's small capitals
+(smcp, c2sc; \\textsc and small-caps headings have real ones), old-style, proportional, tabular and lining
+figures (the zero stays slashed), case forms (not for figures and the maths-axis brackets), the Greek
+alternates (ss06, ss07); and Noto Sans Math's dotless i and j for accents (dtls). Lisnoti's MATH table stays (static, for the Regular; the Bold instance gets Lisnoti
 Bold's), so LuaLaTeX's unicode-math can set formulas in the static instances.
 
-Writes to --out: Anodyne[GRAD,wght].ttf, Anodyne-Italic[GRAD,wght].ttf (variable) and Anodyne-{Regular,Bold,
-Italic,BoldItalic}.ttf (static, GRAD 0, with MATH) plus OFL.txt.
+Writes to --out: Anodyne[GRAD,wdth,wght].ttf, Anodyne-Italic[GRAD,wdth,wght].ttf (variable) and
+Anodyne-{Regular,Bold,Italic,BoldItalic}.ttf (static, normal width, GRAD 0, with MATH) plus OFL.txt.
 
   PYTHONPATH=<fonttools+brotli> python3 scripts/anodyne/build.py --lisnoti <Lisnoti-ttf dir> --noto <dir with
-    NotoSans[wdth,wght].ttf and NotoSans-Italic[wdth,wght].ttf> --out <dir>
+    NotoSans[wdth,wght].ttf, NotoSans-Italic[wdth,wght].ttf and NotoSansMath-Regular.ttf> --out <dir>
 """
 import argparse
 import array
@@ -42,11 +47,15 @@ from fontTools.designspaceLib import DesignSpaceDocument, AxisDescriptor, Source
 from fontTools import varLib
 from fontTools.otlLib.builder import buildStatTable
 
-VERSION = '0.100'
+VERSION = '0.200'
 FAMILY = 'Anodyne'
 # weight masters at Noto Sans's own (user values; Noto's avar puts 700 at normalised 0.61)
 WEIGHTS = (100, 400, 700, 900)
 GRAD_MIN, GRAD_MAX = -100, 150
+# width: Noto Sans's range and its avar (user → design), the condensed master at 62.5
+WDTH_MIN = 62.5
+WDTH_MAP = [(62.5, 62.5), (75, 100 - 0.70001220703125 * 37.5), (87.5, 100 - 0.36663818359375 * 37.5), (100, 100)]
+WIDTHS = [(62.5, 'ExtraCondensed'), (75, 'Condensed'), (87.5, 'SemiCondensed'), (100, '')]
 INSTANCES = [(100, 'Thin'), (200, 'ExtraLight'), (300, 'Light'), (400, 'Regular'), (500, 'Medium'),
              (600, 'SemiBold'), (700, 'Bold'), (800, 'ExtraBold'), (900, 'Black')]
 
@@ -595,18 +604,23 @@ def add_feature(font, tag, mapping):
 
 # ------------------------------------------------------------------ the build of one style (roman or italic)
 
-def build_style(lisR, lisB, notoVF, italic, tmp):
+def build_style(lisR, lisB, notoVF, italic, tmp, notoMath=None):
     style = 'Italic' if italic else 'Roman'
     log(f'[{style}] loading')
     R, B = TTFont(lisR), TTFont(lisB)
     V = instantiateVariableFont(TTFont(notoVF), {'wdth': 100})
     noto = {w: instantiateVariableFont(TTFont(notoVF), {'wdth': 100, 'wght': w}) for w in WEIGHTS}
+    notoC = {w: instantiateVariableFont(TTFont(notoVF), {'wdth': WDTH_MIN, 'wght': w}) for w in WEIGHTS}
     # Noto's own stems, for the extrapolation and emboldening ratios: the stem of 'l' (a plain bar in Noto)
     def stem(f):
         o = read(f, 'l'); x0, _, x1, _ = bbox(o.contours); return x1 - x0
     s = {w: stem(noto[w]) for w in WEIGHTS}
     k_thin, k_black = (s[100] - s[400]) / (s[700] - s[400]), (s[900] - s[400]) / (s[700] - s[400])
     log(f'[{style}] Noto stems {s}; thin ×{k_thin:.2f}, black ×{k_black:.2f}')
+    # condensed: Noto's stems there, and how much narrower its lowercase is, per weight
+    sC = {w: stem(notoC[w]) for w in WEIGHTS}
+    kC = {w: sum(notoC[w]['hmtx'][c][0] / noto[w]['hmtx'][c][0] for c in 'nohdeasu') / 8 for w in WEIGHTS}
+    log(f'[{style}] condensed stems {sC}; widths ×' + ', '.join(f'{kC[w]:.3f}' for w in WEIGHTS))
 
     # --- small capitals: Noto's smcp/c2sc glyphs (and their components) into the Regular
     names = set(R.getGlyphOrder())
@@ -636,6 +650,31 @@ def build_style(lisR, lisB, notoVF, italic, tmp):
     add_feature(R, 'smcp', smcp)
     add_feature(R, 'c2sc', c2sc)
     log(f'[{style}] small caps: {len(smcp)} smcp, {len(c2sc)} c2sc, {len(added)} glyphs from Noto')
+
+    # --- Noto's figures, case forms and Greek alternates: Lisnoti kept their glyphs, not the features.
+    # The zero stays slashed: old-style figures take Noto's slashed old-style zero, proportional ones
+    # keep the default zero; case forms leave figures and brackets (Lisnoti's are on the maths axis) alone.
+    names = set(order)
+    feats = {tag: {a: b for a, b in single_subst_map(V, tag).items() if a in names and b in names}
+             for tag in ('onum', 'pnum', 'tnum', 'lnum', 'case', 'ss06', 'ss07')}
+    if 'zero.osf.slash' in names:
+        feats['onum']['zero'] = 'zero.osf.slash'
+        feats['lnum']['zero.osf.slash'] = 'zero'
+    feats['pnum'].pop('zero', None)
+    figures = ('zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine')
+    brackets = {'parenleft', 'parenright', 'bracketleft', 'bracketright', 'braceleft', 'braceright'}
+    feats['case'] = {a: b for a, b in feats['case'].items() if a not in brackets and not a.startswith(figures)}
+    # dotless i and j for accents in formulas (Noto Sans Math's dtls): the text ones and the maths italic ones
+    cmap = R.getBestCmap()
+    dtls = {a: b for a, b in (single_subst_map(TTFont(notoMath), 'dtls').items() if notoMath and os.path.exists(notoMath) else []) if a in names and b in names}
+    for src, dst in ((0x1D456, 0x1D6A4), (0x1D457, 0x1D6A5)):
+        if src in cmap and dst in cmap:
+            dtls[cmap[src]] = cmap[dst]
+    feats['dtls'] = dtls
+    for tag, m in feats.items():
+        if m:
+            add_feature(R, tag, m)
+    log(f'[{style}] features from Noto: ' + ', '.join(f'{t} {len(m)}' for t, m in feats.items()))
 
     # --- masters per glyph
     masters = {w: {} for w in WEIGHTS}
@@ -701,6 +740,43 @@ def build_style(lisR, lisB, notoVF, italic, tmp):
         kinds['embolden'] += 1
     log(f'[{style}] glyph sources: {kinds}')
 
+    # --- condensed masters: Noto's own where the glyph is Noto's; elsewhere the weight's master squeezed
+    # to Noto's width at that weight, its stems then brought back to Noto's condensed stems (horizontally)
+    condensed = {w: {} for w in WEIGHTS}
+    noto_glyphs = set()
+    synthetic = 0
+    for g in order:
+        r = masters[400][g]
+        if g in vnames:
+            v = read(V, g)
+            if structure(v) == structure(r) and (v.contours == r.contours if r.contours else [c[:3] for c in v.components] == [c[:3] for c in r.components]):
+                noto_glyphs.add(g)
+    for w in WEIGHTS:
+        k, sx = kC[w], (sC[w] - kC[w] * s[w]) / 2
+        for g in order:
+            if g in noto_glyphs:
+                condensed[w][g] = read(notoC[w], g)
+                continue
+            m = masters[w][g]
+            if not m.contours and not m.components:
+                o = m.copy()
+                o.adv = notoC[w]['hmtx'][g][0] if g in vnames else m.adv * k
+                condensed[w][g] = o
+                continue
+            if m.components:
+                condensed[w][g] = Outline(components=[(c[0], c[1] * k, c[2], c[3]) for c in m.components], adv=m.adv * k + 2 * sx)
+                continue
+            squeezed = Outline([[(p[0] * k, p[1], p[2]) for p in c] for c in m.contours], adv=m.adv * k)
+            f = 1.0
+            o = embolden(squeezed, sx, 0)
+            while not sane(squeezed, o) and f > 0.2:
+                f *= 0.75
+                o = embolden(squeezed, sx * f, 0)
+            condensed[w][g] = o
+            if w == 400:
+                synthetic += 1
+    log(f'[{style}] condensed: {len(noto_glyphs)} glyphs Noto\'s, {synthetic} squeezed')
+
     # --- grade masters: stems of 400+GRAD at 400's widths
     def at(g, wt):
         # Noto's avar: user 300 → normalised −0.5 (half-way to Thin); 550 → 0.28 (0.459 of the way to the 0.61 Bold)
@@ -728,33 +804,44 @@ def build_style(lisR, lisB, notoVF, italic, tmp):
         if t in R:
             del R[t]
     paths = {}
-    locs = [((w, 0), masters[w]) for w in WEIGHTS] + [((400, gv), grade[gv]) for gv in (GRAD_MIN, GRAD_MAX)]
-    for (w, gv), glyphs in locs:
+    locs = [((w, 100, 0), masters[w]) for w in WEIGHTS] + [((w, WDTH_MIN, 0), condensed[w]) for w in WEIGHTS] \
+        + [((400, 100, gv), grade[gv]) for gv in (GRAD_MIN, GRAD_MAX)]
+    for (w, wd, gv), glyphs in locs:
         f = copy.deepcopy(R)
         for g in order:
             write(f, g, glyphs[g])
         f['maxp'].recalc(f)
-        p = os.path.join(tmp, f'{style}-{w}-{gv}.ttf')
+        p = os.path.join(tmp, f'{style}-{w}-{wd}-{gv}.ttf')
         f.save(p)
-        paths[(w, gv)] = p
+        paths[(w, wd, gv)] = p
     log(f'[{style}] masters written')
+    # (the outlines and Noto's instances are on disk now: free them before varLib loads ten masters)
+    for d in (masters, condensed, grade, noto, notoC):
+        d.clear()
+    V = None
+    import gc
+    gc.collect()
 
     ds = DesignSpaceDocument()
     wa = AxisDescriptor(); wa.tag, wa.name, wa.minimum, wa.default, wa.maximum = 'wght', 'Weight', 100, 400, 900
     # Noto Sans's avar (user → design): the masters sit where Noto's do
     wa.map = [(100, 100), (200, 400 - 0.796875 * 300), (300, 250), (400, 400), (500, 400 + 0.18 * 500), (600, 400 + 0.38 * 500), (700, 400 + 0.61 * 500), (800, 400 + 0.79 * 500), (900, 900)]
+    da = AxisDescriptor(); da.tag, da.name, da.minimum, da.default, da.maximum = 'wdth', 'Width', WDTH_MIN, 100, 100
+    da.map = WDTH_MAP
     ga = AxisDescriptor(); ga.tag, ga.name, ga.minimum, ga.default, ga.maximum = 'GRAD', 'Grade', GRAD_MIN, 0, GRAD_MAX
-    ds.addAxis(wa); ds.addAxis(ga)
-    design = dict(wa.map)
-    for (w, gv), p in paths.items():
-        sd = SourceDescriptor(); sd.path = p; sd.location = {'Weight': design[w], 'Grade': gv}
-        sd.copyInfo = sd.copyLib = sd.copyFeatures = sd.copyGroups = (w, gv) == (400, 0)
+    ds.addAxis(wa); ds.addAxis(da); ds.addAxis(ga)
+    design, designW = dict(wa.map), dict(WDTH_MAP)
+    for (w, wd, gv), p in paths.items():
+        sd = SourceDescriptor(); sd.path = p; sd.location = {'Weight': design[w], 'Width': designW[wd], 'Grade': gv}
+        sd.copyInfo = sd.copyLib = sd.copyFeatures = sd.copyGroups = (w, wd, gv) == (400, 100, 0)
         ds.addSource(sd)
-    for wv, nm in INSTANCES:
-        inst = InstanceDescriptor(); inst.familyName = FAMILY
-        inst.styleName = (nm + ' Italic' if nm != 'Regular' else 'Italic') if italic else nm
-        inst.location = {'Weight': design[wv], 'Grade': 0}
-        ds.addInstance(inst)
+    for wd, wn in WIDTHS:
+        for wv, nm in INSTANCES:
+            inst = InstanceDescriptor(); inst.familyName = FAMILY
+            parts = [wn, '' if nm == 'Regular' and (wn or italic) else nm, 'Italic' if italic else '']
+            inst.styleName = ' '.join(x for x in parts if x) or 'Regular'
+            inst.location = {'Weight': design[wv], 'Width': designW[wd], 'Grade': 0}
+            ds.addInstance(inst)
     log(f'[{style}] varLib.build')
     vf, _, _ = varLib.build(ds, exclude=['MVAR'], optimize=True)
     return vf, R, B
@@ -796,6 +883,7 @@ def set_names(font, style, ps_style, variable):
 def stat(vf, italic):
     axes = [
         dict(tag='wght', name='Weight', values=[dict(value=v, name=n, **({'flags': 0x2} if v == 400 else {})) for v, n in INSTANCES]),
+        dict(tag='wdth', name='Width', values=[dict(value=v, name=n or 'Normal', **({'flags': 0x2} if v == 100 else {})) for v, n in WIDTHS]),
         dict(tag='GRAD', name='Grade', values=[dict(value=0, name='Normal', flags=0x2)]),
         dict(tag='ital', name='Italic', values=[dict(value=1, name='Italic')] if italic else [dict(value=0, name='Roman', flags=0x2, linkedValue=1)]),
     ]
@@ -834,7 +922,7 @@ def sort_math(font):
 
 
 def static(vf, w, math_from, out, style, ps):
-    f = instantiateVariableFont(copy.deepcopy(vf), {'wght': w, 'GRAD': 0}, updateFontNames=False)
+    f = instantiateVariableFont(copy.deepcopy(vf), {'wght': w, 'wdth': 100, 'GRAD': 0}, updateFontNames=False)
     if 'STAT' in f:
         del f['STAT']
     if math_from is not None and 'MATH' in math_from:
@@ -875,14 +963,32 @@ def unicodes(spec):
     return out
 
 
+# TeX's faces: Latin, Greek, Cyrillic, phonetics, punctuation, symbols, arrows, maths operators and alphabets
+TEX_RANGES = ('U+0000-036F, U+0370-03FF, U+0400-052F, U+1D00-1DBF, U+1E00-1FFF, U+2000-2BFF, U+2C60-2C7F, U+2E00-2E7F, '
+              'U+A720-A7FF, U+FB00-FB06, U+FE00-FE0F, U+1D400-1D7FF')
+# "Anodyne Variable": text only
+TEXT_RANGES = ('U+0000-024F, U+0259, U+02B0-02FF, U+0300-036F, U+0370-03FF, U+0400-052F, U+1E00-1FFF, U+2000-206F, '
+               'U+2070-209F, U+20A0-20CF, U+2100-214F, U+2190-21FF, U+2212, U+2215, U+2C60-2C7F, U+A720-A7FF, U+FB00-FB06')
+
+
+def tex_subset(f, ranges):
+    from fontTools import subset
+    opts = subset.Options()
+    opts.layout_features = ['*']; opts.name_IDs = ['*']; opts.notdef_outline = True; opts.hinting = False
+    opts.layout_scripts = ['DFLT', 'latn', 'grek', 'cyrl', 'math']
+    sub = subset.Subsetter(opts)
+    sub.populate(unicodes=unicodes(ranges))
+    sub.subset(f)
+
+
 def install(out, repo):
-    """the files OverLyX serves: web/ variable woff2 by range and anodyne.css, tex/ the static faces, OFL.txt"""
+    """the files OverLyX serves: web/ variable woff2 by range and anodyne.css, tex/ for LuaLaTeX, OFL.txt"""
     from fontTools import subset
     import shutil
     web, tex = os.path.join(repo, 'web'), os.path.join(repo, 'tex')
     os.makedirs(web, exist_ok=True); os.makedirs(tex, exist_ok=True)
-    css = ['/* generated by scripts/anodyne/build.py: Anodyne, variable (wght 100–900, GRAD −100–150), by Unicode range */']
-    for style, src in (('roman', f'{FAMILY}[GRAD,wght].ttf'), ('italic', f'{FAMILY}-Italic[GRAD,wght].ttf')):
+    css = ['/* generated by scripts/anodyne/build.py: Anodyne, variable (wght 100–900, wdth 62.5–100, GRAD −100–150), by Unicode range */']
+    for style, src in (('roman', f'{FAMILY}[GRAD,wdth,wght].ttf'), ('italic', f'{FAMILY}-Italic[GRAD,wdth,wght].ttf')):
         for part, rng in WEB_RANGES:
             f = TTFont(os.path.join(out, src))
             del f['MATH']
@@ -896,11 +1002,29 @@ def install(out, repo):
             f.flavor = 'woff2'
             f.save(os.path.join(web, name))
             log('web', name, os.path.getsize(os.path.join(web, name)))
-            css.append(f'@font-face {{ font-family: "Anodyne"; font-style: {"italic" if style == "italic" else "normal"}; font-weight: 100 900; font-display: swap; '
+            css.append(f'@font-face {{ font-family: "Anodyne"; font-style: {"italic" if style == "italic" else "normal"}; font-weight: 100 900; font-stretch: 62.5% 100%; font-display: swap; '
                        f'src: url("./{name}") format("woff2"); unicode-range: {rng}; }}')
     open(os.path.join(web, 'anodyne.css'), 'w').write('\n'.join(css) + '\n')
+    # TeX: the static faces with the MATH table (a plain \\setmainfont{Anodyne} finds them by name) and
+    # "Anodyne Variable", the text as a variable font for any weight, width and grade (\\olfont), both
+    # without the Indic, Thai and CJK shaping Lisnoti carries: LuaTeX's cache of a face is then smaller
+    for old in os.listdir(tex):
+        os.remove(os.path.join(tex, old))
     for n in ('Regular', 'Bold', 'Italic', 'BoldItalic'):
-        shutil.copy(os.path.join(out, f'{FAMILY}-{n}.ttf'), os.path.join(tex, f'{FAMILY}-{n}.ttf'))
+        f = TTFont(os.path.join(out, f'{FAMILY}-{n}.ttf'))
+        tex_subset(f, TEX_RANGES)
+        f.save(os.path.join(tex, f'{FAMILY}-{n}.ttf'))
+    for src, style in ((f'{FAMILY}[GRAD,wdth,wght].ttf', 'Regular'), (f'{FAMILY}-Italic[GRAD,wdth,wght].ttf', 'Italic')):
+        f = TTFont(os.path.join(out, src))
+        del f['MATH']
+        tex_subset(f, TEXT_RANGES)
+        fam, ps = f'{FAMILY} Variable', f'{FAMILY}Variable-{style}'
+        nm = f['name']
+        for i in (1, 3, 4, 6, 16, 17, 21, 22, 25):
+            nm.removeNames(nameID=i)
+        for i, v in ((1, fam), (2, style), (3, f'{VERSION};OLYX;{ps}'), (4, f'{fam} {style}'), (6, ps), (25, f'{FAMILY}Variable')):
+            nm.setName(v, i, 3, 1, 0x409)
+        f.save(os.path.join(tex, f'{FAMILY}Variable{"" if style == "Regular" else "-Italic"}.ttf'))
     shutil.copy(os.path.join(out, 'OFL.txt'), os.path.join(repo, 'OFL.txt'))
 
 
@@ -923,10 +1047,11 @@ def main():
                 continue
             r, b = ('Lisnoti-Italic.ttf', 'Lisnoti-BoldItalic.ttf') if italic else ('Lisnoti-Regular.ttf', 'Lisnoti-Bold.ttf')
             nv = 'NotoSans-Italic[wdth,wght].ttf' if italic else 'NotoSans[wdth,wght].ttf'
-            vf, R, B = build_style(os.path.join(a.lisnoti, r), os.path.join(a.lisnoti, b), os.path.join(a.noto, nv), italic, tmp)
+            vf, R, B = build_style(os.path.join(a.lisnoti, r), os.path.join(a.lisnoti, b), os.path.join(a.noto, nv), italic, tmp,
+                                   os.path.join(a.noto, 'NotoSansMath-Regular.ttf'))
             set_names(vf, 'Italic' if italic else 'Regular', 'Italic' if italic else 'Regular', True)
             stat(vf, italic)
-            name = f'{FAMILY}-Italic[GRAD,wght].ttf' if italic else f'{FAMILY}[GRAD,wght].ttf'
+            name = f'{FAMILY}-Italic[GRAD,wdth,wght].ttf' if italic else f'{FAMILY}[GRAD,wdth,wght].ttf'
             vf.save(os.path.join(a.out, name))
             log('wrote', name, os.path.getsize(os.path.join(a.out, name)))
             vf = TTFont(os.path.join(a.out, name))

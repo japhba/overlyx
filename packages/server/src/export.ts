@@ -17,7 +17,7 @@ import { toPdf } from './graphics.ts';
 import { sandboxed, sandboxHome, removeSandboxHome, type SandboxSpec } from './sandbox.ts';
 import { lstatIn, listIn, readFileIn, readTextIn, writeFileIn, isRegularFileAt } from './confined.ts';
 import { readTextFile, markdownAsTex } from './texdoc.ts';
-import { googleFont, fontFaces, provideFaceFonts } from './googlefonts.ts';
+import { googleFont, fontFaces, provideFaceFonts, houseTexFiles, houseFontWarmups } from './googlefonts.ts';
 import { mdTypesetting, textFontsOf, TEXLIVE_FONTS, type LocalFont } from '@overlyx/core/md/typesetting.ts';
 import { isMarkdownPath } from '@overlyx/core/md/index.ts';
 import { isHtmlPath } from '@overlyx/core/html/deliverable.ts';
@@ -335,8 +335,8 @@ export async function exportTex(docId: string, opts: { into?: string } = {}): Pr
       if (!g) continue;
       const sub = path.join('ol-fonts', g.slug);
       fs.mkdirSync(path.join(dir, sub), { recursive: true });
-      // (a house font: its static faces, LuaTeX reads no woff2)
-      for (const file of g.tex ? Object.values(g.tex) : g.files.map(f => f.file)) fs.copyFileSync(path.join(g.dir, file), path.join(dir, sub, path.basename(file)));
+      // (a house font: its variable TrueType files, LuaTeX reads no woff2)
+      for (const file of g.tex ? houseTexFiles(g) : g.files.map(f => f.file)) fs.copyFileSync(path.join(g.dir, file), path.join(dir, sub, path.basename(file)));
       fontFiles[name] = { path: `./${sub}/`, ...fontFaces(g) };
     }
     const tex = markdownAsTex(lyx, doc.project, doc.relPath, { fontFiles });
@@ -548,11 +548,23 @@ async function buildViaLatexmk(job: BuildJob): Promise<BuildResult> {
   // macro, a missing figure) must not stop latexmk after the first pass — without bibtex / biber
   // and the reruns every citation and reference is "??" until the next build
   args.push(engineFlag, '-pvc-', '-g', '-f', '-interaction=nonstopmode', '-file-line-error', '-synctex=1', base + '.tex');
+  // the build directory is the only writable place (the svg package's cache is a copy in it); the
+  // shared cache is not readable (it holds every user's converted pictures and parsed bibliographies)
+  const sandbox = { rw: [exp.dir], ro: [projectDir(project)], home: sandboxHome(project), cgroup: BUILD_CGROUP };
+  const texEnv = { ...texInputs(docDir, exp.dir, projectDir(project)), ...(faceFonts ? { OSFONTDIR: faceFonts } : {}) };
+  // a house font's faces LuaTeX has not cached in this HOME yet: one per run first (caching them all in
+  // the build would take more memory than it may use; googlefonts.ts houseFontWarmups)
+  if (faceFonts) {
+    for (const w of houseFontWarmups(exp.tex, sandbox.home)) {
+      setPhase(job, 'compiling');
+      job.progress = `preparing the font ${w.file}`;
+      fs.writeFileSync(path.join(exp.dir, 'ol-font-cache.tex'), w.doc);
+      await run('lualatex', ['-interaction=nonstopmode', 'ol-font-cache.tex'], { cwd: exp.dir, env: texEnv, timeoutMs: 180000, nice: true, sandbox }).done.catch(() => null);
+    }
+  }
   const proc = run('latexmk', args, {
-    cwd: exp.dir, env: { ...texInputs(docDir, exp.dir, projectDir(project)), ...(faceFonts ? { OSFONTDIR: faceFonts } : {}) }, timeoutMs: 420000, nice: true,
-    // the build directory is the only writable place (the svg package's cache is a copy in it); the
-    // shared cache is not readable (it holds every user's converted pictures and parsed bibliographies)
-    sandbox: { rw: [exp.dir], ro: [projectDir(project)], home: sandboxHome(project), cgroup: BUILD_CGROUP },
+    cwd: exp.dir, env: texEnv, timeoutMs: 420000, nice: true,
+    sandbox,
     onLine: (l) => { job.progress = l.slice(0, 200); },
   });
   job.cancel = () => { job.status = 'cancelled'; proc.kill(); };

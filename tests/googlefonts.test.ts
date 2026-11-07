@@ -4,7 +4,7 @@
  * fails; fetched once, cached, a name Google lacks remembered. \olfont's families go into the build.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { existsSync, rmSync, mkdtempSync, readdirSync } from 'node:fs';
+import { existsSync, rmSync, mkdtempSync, readdirSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -14,7 +14,7 @@ const ROOT = vi.hoisted(() => {
   return r;
 });
 rmSync(ROOT, { recursive: true, force: true });
-const { googleFont, fontFaces, setFetch, validFamily, olfontFamilies, provideFaceFonts } = await import('../packages/server/src/googlefonts.ts');
+const { googleFont, fontFaces, setFetch, validFamily, olfontFamilies, provideFaceFonts, houseFontWarmups } = await import('../packages/server/src/googlefonts.ts');
 const { fontspecFiles } = await import('../packages/core/src/md/typesetting.ts');
 
 const CATALOG = ")]}'" + JSON.stringify({
@@ -95,17 +95,29 @@ describe('google fonts', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it('serves Anodyne, the house font, from the repository: variable woff2 to the web, static faces with MATH to TeX', async () => {
+  it('serves Anodyne, the house font, from the repository: variable woff2 to the web, static faces with MATH and the text as a variable font to TeX', async () => {
     const f = await googleFont('anodyne');
     expect(f?.family).toBe('Anodyne');
-    expect(f?.axes?.map(a => a.t)).toEqual(['wght', 'GRAD']);
+    expect(f?.axes?.map(a => a.t)).toEqual(['wght', 'wdth', 'GRAD']);
     expect(f!.files.every(x => x.file.endsWith('.woff2') && x.range && existsSync(join(f!.dir, x.file)))).toBe(true);
     expect(fontFaces(f!)).toEqual({ regular: 'Anodyne-Regular.ttf', bold: 'Anodyne-Bold.ttf', italic: 'Anodyne-Italic.ttf', boldItalic: 'Anodyne-BoldItalic.ttf' });
     expect(asked).toEqual([]);  // never asks Google
     expect(olfontFamilies('\\setsansfont{Anodyne}\\setmathfont{Anodyne}')).toEqual(['Anodyne']);
     const dir = mkdtempSync(join(tmpdir(), 'olfont-build-'));
     await provideFaceFonts('\\setsansfont{Anodyne}', dir);
-    expect(readdirSync(join(dir, 'ol-fonts', 'anodyne')).sort()).toEqual(['Anodyne-Bold.ttf', 'Anodyne-BoldItalic.ttf', 'Anodyne-Italic.ttf', 'Anodyne-Regular.ttf']);
+    // (the static faces fontspec finds by name, and "Anodyne Variable" for any weight, width and grade)
+    const files = ['Anodyne-Bold.ttf', 'Anodyne-BoldItalic.ttf', 'Anodyne-Italic.ttf', 'Anodyne-Regular.ttf', 'AnodyneVariable-Italic.ttf', 'AnodyneVariable.ttf'];
+    expect(readdirSync(join(dir, 'ol-fonts', 'anodyne')).sort()).toEqual(files);
+    // each face LuaTeX has not cached in the build's HOME is loaded alone first, from where the build has it
+    const home = mkdtempSync(join(tmpdir(), 'olfont-home-'));
+    expect(houseFontWarmups('\\setsansfont{Anodyne}', home).map(w => w.file).sort()).toEqual(files);
+    mkdirSync(join(home, '.texlive2023', 'texmf-var', 'luatex-cache', 'generic', 'fonts', 'otl'), { recursive: true });
+    writeFileSync(join(home, '.texlive2023', 'texmf-var', 'luatex-cache', 'generic', 'fonts', 'otl', 'anodyne-regular.luc'), '');
+    const left = houseFontWarmups('\\olfont[wght=550]{Anodyne}{x}', home);
+    expect(left).toHaveLength(5);
+    expect(left[0].doc).toContain('\\setmainfont{Anodyne-Italic.ttf}[Path=./ol-fonts/anodyne/]');
+    expect(houseFontWarmups('\\setsansfont{Inter}', home)).toEqual([]);
+    rmSync(home, { recursive: true, force: true });
     rmSync(dir, { recursive: true, force: true });
   });
 });

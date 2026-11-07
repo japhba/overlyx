@@ -154,14 +154,20 @@ export const OLFONT_DEF = String.raw`\def\ol@loadfontspec{\let\ol@enc\encodingde
     \tl_new:N \l__olfont_axis_tl
     \int_new:N \l__olfont_w_int
     \int_new:N \l__olfont_b_int
-    % the face of weight #2 (a hundred) by its name, #3 a suffix (~Italic): * Light Italic, or empty
+    \bool_new:N \l__olfont_axes_bool
+    \tl_new:N \l__olfont_family_tl
+    % the face of weight #2 (a hundred) by its name, #3 a suffix (~Italic): * Light Italic, or empty;
+    % none when axes beyond the weight are asked for (width, grade): the variable font takes them all
     \cs_new_protected:Npn \__olfont_face:nnn #1#2#3
       {
         \tl_clear:N \l__olfont_face_tl
-        \exp_args:NNe \prop_get:NnNT \c__olfont_weights_prop {#2} \l__olfont_names_tl
+        \bool_if:NF \l__olfont_axes_bool
           {
-            \clist_map_inline:Nn \l__olfont_names_tl
-              { \IfFontExistsTF { #1~##1#3 } { \tl_set:Nn \l__olfont_face_tl { *~##1#3 } \clist_map_break: } { } }
+            \exp_args:NNe \prop_get:NnNT \c__olfont_weights_prop {#2} \l__olfont_names_tl
+              {
+                \clist_map_inline:Nn \l__olfont_names_tl
+                  { \IfFontExistsTF { #1~##1#3 } { \tl_set:Nn \l__olfont_face_tl { *~##1#3 } \clist_map_break: } { } }
+              }
           }
       }
     % the axes with the weight #1: axis={wght=…,opsz=…}
@@ -180,9 +186,16 @@ export const OLFONT_DEF = String.raw`\def\ol@loadfontspec{\let\ol@enc\encodingde
         \tl_if_in:nnTF {#1} {=}
           { \prop_set_from_keyval:Nn \l__olfont_axes_prop {#1} }
           { \tl_if_blank:nF {#1} { \prop_put:Nnn \l__olfont_axes_prop {wght} {#1} } }
+        \bool_set_false:N \l__olfont_axes_bool
+        \prop_map_inline:Nn \l__olfont_axes_prop { \str_if_eq:nnF {##1} {wght} { \bool_set_true:N \l__olfont_axes_bool } }
         \prop_get:NnNF \l__olfont_axes_prop {wght} \l__olfont_w_tl { \tl_set:Nn \l__olfont_w_tl {400} }
         \int_set:Nn \l__olfont_w_int { \fp_eval:n { max(100, min(900, round(\l__olfont_w_tl / 100) * 100)) } }
         \int_set:Nn \l__olfont_b_int { \int_compare:nNnTF { \l__olfont_w_int } < {700} {700} {900} }
+        % a family with its text as a variable font beside its static faces (OverLyX's Anodyne: "Anodyne
+        % Variable") takes over what the static faces lack: a width, a grade, a weight but 400 and 700
+        \tl_set:Nn \l__olfont_family_tl {#3}
+        \bool_lazy_or:nnT { \l__olfont_axes_bool } { ! \fp_compare_p:n { \l__olfont_w_tl = 400 || \l__olfont_w_tl = 700 } }
+          { \IfFontExistsTF { #3~Variable } { \tl_set:Nn \l__olfont_family_tl { #3~Variable } \bool_set_true:N \l__olfont_axes_bool } { } }
         % static faces by name
         \int_compare:nNnF { \l__olfont_w_int } = {400}
           {
@@ -192,9 +205,9 @@ export const OLFONT_DEF = String.raw`\def\ol@loadfontspec{\let\ol@enc\encodingde
             \tl_if_empty:NF \l__olfont_face_tl { \__olfont_put:n { ItalicFont = \l__olfont_face_tl } }
           }
         \__olfont_face:nnn {#3} { \int_use:N \l__olfont_b_int } { }
-        \tl_if_empty:NTF \l__olfont_face_tl { \__olfont_put:n { BoldFont = { \exp_not:n {#3} } } } { \__olfont_put:n { BoldFont = \l__olfont_face_tl } }
+        \tl_if_empty:NTF \l__olfont_face_tl { \__olfont_put:n { BoldFont = { \exp_not:V \l__olfont_family_tl } } } { \__olfont_put:n { BoldFont = \l__olfont_face_tl } }
         \__olfont_face:nnn {#3} { \int_use:N \l__olfont_b_int } { ~Italic }
-        \tl_if_empty:NTF \l__olfont_face_tl { \__olfont_put:n { BoldItalicFont = { \exp_not:n {#3} /I } } } { \__olfont_put:n { BoldItalicFont = \l__olfont_face_tl } }
+        \tl_if_empty:NTF \l__olfont_face_tl { \__olfont_put:n { BoldItalicFont = { \exp_not:V \l__olfont_family_tl /I } } } { \__olfont_put:n { BoldItalicFont = \l__olfont_face_tl } }
         % a variable font by its axes (a static one has none: ignored)
         \__olfont_axis:n { \l__olfont_w_tl }
         \__olfont_put:n { UprightFeatures = { RawFeature = { axis = { \l__olfont_axis_tl } } } }
@@ -208,7 +221,7 @@ export const OLFONT_DEF = String.raw`\def\ol@loadfontspec{\let\ol@enc\encodingde
     \DeclareDocumentCommand \olfontset { O{} O{} m }
       {
         \__olfont_opts:nnn {#1} {#2} {#3}
-        \use:e { \exp_not:N \fontspec { \exp_not:n {#3} } [ \exp_not:V \l__olfont_opts_tl ] }
+        \use:e { \exp_not:N \fontspec { \exp_not:V \l__olfont_family_tl } [ \exp_not:V \l__olfont_opts_tl ] }
       }
     \DeclareDocumentCommand \olfont { O{} O{} m +m } { \group_begin: \olfontset [#1] [#2] {#3} #4 \group_end: }
     % the body's font (text styles: Normal text), TeX's ligatures as \setmainfont's usual
@@ -216,7 +229,7 @@ export const OLFONT_DEF = String.raw`\def\ol@loadfontspec{\let\ol@enc\encodingde
       {
         \__olfont_opts:nnn {#1} {#2} {#3}
         \cs_set:Npn \encodingdefault {TU}
-        \use:e { \exp_not:N \setmainfont { \exp_not:n {#3} } [ \exp_not:V \l__olfont_opts_tl Ligatures = TeX ] }
+        \use:e { \exp_not:N \setmainfont { \exp_not:V \l__olfont_family_tl } [ \exp_not:V \l__olfont_opts_tl Ligatures = TeX ] }
       }
   }
   {
