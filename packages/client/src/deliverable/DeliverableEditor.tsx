@@ -64,7 +64,8 @@ import { useMathPanels } from '../app/toolbars';
 import { parseSource, opSplices, elementAt, elementChildren, attr, parseStyle, sourcePatch, applySplices as applyTextSplices, type SourcePatch } from '@overlyx/core/html/source.ts';
 import { followUps, composeSplices, twinsOf, putOnEverySlide, otherCopies, slideNumberOps, lookAlikeOps, similarTexts, everySlideOps, masterObjects, MASTER_ATTR, SKIP_ATTR } from './deckmaster';
 import { deckTheme, themeSplices, type ThemeChange } from './decktheme';
-import { embeddedFontFamilies, fontPortabilityWarning, fontResource } from './deckfonts';
+import { embeddedFontFamilies, fontPortabilityWarning, fontResource, myDeckFonts } from './deckfonts';
+import { useMyFontEntries } from '../fonts/myfonts';
 import { ThemePane } from './ThemePane';
 import { reviewOps, resolveOps, resolveAll, reviewOf, isSuggesting, suggestingOp, stampOf, threadsOp, parseThreads, newThreadId, describe as describeObject, COMMENTS, COMMENT_INK_ATTR, type ReviewChange, type ReviewThread, type Thread } from '@overlyx/core/html/review.ts';
 import { deliverableInfo, slideElements, blankDeck, untouchedPageTitle } from '@overlyx/core/html/deliverable.ts';
@@ -3508,8 +3509,11 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
   }, [themeOn, kind, textNow, current]);
   const fontInfo = useMemo(() => ({ embedded: embeddedFontFamilies(settledText), defaultFont: deckTheme(settledText).text.value }), [settledText]);
   const fontWarning = (css: string) => fontPortabilityWarning(css, fontInfo.embedded);
+  // My fonts (the account's Google fonts), first in the font lists — once the catalogue says what each has
+  const myFontEntries = useMyFontEntries();
+  const myFonts = useMemo(() => (myFontEntries ? myDeckFonts(myFontEntries) : undefined), [myFontEntries]);
   const bars = deckToolbar({
-    fontWarning, defaultFont: fontInfo.defaultFont,
+    fontWarning, myFonts, defaultFont: fontInfo.defaultFont,
     pageLabel: host.bindSvgExporter ? 'SVG' : undefined,
     guides: { shown: guidesShown, items: () => guideItems(currentRef.current, null).filter(m => !m.sep && !m.disabled && m.action).map(m => ({ label: m.label!, action: m.action!, active: m.checked })) },
     // (over selected words, the text tools show how the words look: their size, bold …, not the box's)
@@ -3983,7 +3987,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
             close={() => { setReviewOpen(false); setDraft(null); setFocus(null); }} />
         )}
         {themeOn && themePane && themeInfo && !fullOn && (
-          <ThemePane theme={themeInfo.theme} fontWarning={fontWarning} objects={themeInfo.objects} slide={current} sel={sel} layouts={themeInfo.layouts}
+          <ThemePane theme={themeInfo.theme} fontWarning={fontWarning} myFonts={myFonts} objects={themeInfo.objects} slide={current} sel={sel} layouts={themeInfo.layouts}
             aspect={slideSizeNow().w / slideSizeNow().h} readOnly={locked} pick={pickAt}
             setColor={(name, value) => changeTheme({ color: name, value })}
             setFont={(which, css, google) => changeTheme({ font: which, value: css, google })}

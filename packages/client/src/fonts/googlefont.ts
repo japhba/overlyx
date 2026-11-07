@@ -20,3 +20,12 @@ export function loadGoogleFont(family: string): void {
   link.dataset.googleFont = family;
   document.head.appendChild(link);
 }
+
+/** a family of Google's catalogue (server googlefonts.ts): name, category, axes (variable), static weights, italics, popularity rank */
+export interface CatalogFamily { f: string; c: string; a: { t: string; min: number; max: number; d: number }[]; w: number[]; i: boolean; p: number }
+/** `signin`: VS Code signed in to no OverLyX server, which the fonts come from */
+export interface Catalog { axisNames: Record<string, string>; families: CatalogFamily[]; signin?: boolean }
+
+let catalogP: Promise<Catalog> | null = null;
+/** Google's catalogue, asked once per page */
+export const fontCatalog = () => (catalogP ??= fetch(fontApi('catalog'), { credentials: 'same-origin' }).then(r => (r.ok ? r.json() : { axisNames: {}, families: [] })).catch(() => ({ axisNames: {}, families: [] })));

@@ -19,7 +19,7 @@ import { drawingToolbar } from './drawingToolbar';
 import { type DeckInk, type DeckInkPatch, LASSO_KINDS } from './deckink';
 import { lassoGroups } from './lassobar';
 import { PH_ROLES, PH_LABELS, type PhRole } from './decklayouts';
-import { bundledFont, firstFontFamily } from './deckfonts';
+import { bundledFont, firstFontFamily, type DeckFont } from './deckfonts';
 import './deckicons';
 
 export interface DeckTextActions {
@@ -46,6 +46,8 @@ export interface DeckTextActions {
 export interface DeckCtx {
   kind: DeliverableKind;
   fontWarning?(css: string): string | null;
+  /** My fonts, first in the font list (deckfonts.ts myDeckFonts) */
+  myFonts?: DeckFont[];
   /** The deck's text font, for the warning when no object is selected. */
   defaultFont?: string | null;
   pageLabel?: string;
@@ -201,7 +203,7 @@ function mathGroups(c: DeckCtx): ToolButton[][] {
 }
 
 /** Bundled choices are embedded; other web fonts load from Google Fonts when first used. */
-export const DECK_FONTS: { label: string; css: string | null; google?: string }[] = [
+export const DECK_FONTS: DeckFont[] = [
   { label: 'Default', css: null },
   { label: 'Instrument Sans (bundled)', css: '"Instrument Sans", sans-serif' },
   { label: 'Fira Sans (bundled)', css: '"Fira Sans", sans-serif' },
@@ -221,6 +223,12 @@ export const DECK_FONTS: { label: string; css: string | null; google?: string }[
   { label: 'EB Garamond', css: '"EB Garamond", serif', google: 'EB Garamond' },
   { label: 'Source Code Pro', css: '"Source Code Pro", monospace', google: 'Source Code Pro' },
 ];
+
+/** the deck's font list: Default, then My fonts (the account's Google fonts, deckfonts.ts myDeckFonts), then the rest of DECK_FONTS */
+export function deckFontList(mine: DeckFont[] = []): DeckFont[] {
+  const taken = new Set(mine.map(f => firstFontFamily(f.css ?? '').toLowerCase()));
+  return [DECK_FONTS[0], ...mine, ...DECK_FONTS.slice(1).filter(f => !f.css || !taken.has(firstFontFamily(f.css).toLowerCase()))];
+}
 
 export const SHAPES: { tool: Tool; label: string }[] = [
   { tool: 'rect', label: 'Rectangle' }, { tool: 'roundrect', label: 'Rounded rectangle' }, { tool: 'ellipse', label: 'Ellipse' },
@@ -416,9 +424,9 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
     const under = sel.length > 0 && sel.every(s => s.style.textDecoration.includes('underline'));
     context.push([
       { id: 'dk-font', title: warning || 'Font', icon: '', html: `<span class="dk-font-face">${warning ? '⚠ ' : ''}${escHtml(fam || 'Font')}</span>`,
-        palette: { title: 'Font', list: true, cols: 1, items: DECK_FONTS.map(f => {
+        palette: { title: 'Font', list: true, cols: 1, items: deckFontList(c.myFonts).map(f => {
           const warn = f.css && !bundledFont(f.css) ? c.fontWarning?.(f.css) : null;
-          return { label: f.label + (warn ? ' ⚠' : ''), title: warn || f.label, html: `<span class="dk-font-sample" style="font-family:${escAttr(f.css ?? 'inherit')}">Aa</span>`, active: !!f.css && firstFamily(f.css) === fam, action: () => c.text.family(f.css, f.google) };
+          return { label: f.label + (warn ? ' ⚠' : ''), title: (f.mine ? 'My fonts — every weight and axis it has. ' : '') + (warn || f.label), html: `<span class="dk-font-sample" style="font-family:${escAttr(f.css ?? 'inherit')}">Aa</span>`, active: !!f.css && firstFamily(f.css) === fam, action: () => c.text.family(f.css, f.google) };
         }) } },
       { id: 'dk-size', title: 'Font size (pt)', icon: '', widget: () => <SizeBox pt={pt} onSet={c.text.size} /> },
     ]);

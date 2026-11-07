@@ -16,14 +16,11 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/ho
 import type { EditorView } from 'prosemirror-view';
 import { parseFace, faceValue, type FontFace, WEIGHT_LABELS } from '@overlyx/core';
 import { setFontFace, setFontFamily } from '../editor/commands';
-import { loadGoogleFont, fontApi } from '../fonts/googlefont';
+import { loadGoogleFont, fontApi, fontCatalog, type Catalog, type CatalogFamily } from '../fonts/googlefont';
 import { loadMyFonts, toggleMyFont, useMyFonts } from '../fonts/myfonts';
 import { fakedStyles, fakeWarning, wantedStyles } from '../fonts/fakestyles';
 import { pinUnder } from './popup';
 
-interface CatalogFamily { f: string; c: string; a: { t: string; min: number; max: number; d: number }[]; w: number[]; i: boolean; p: number }
-/** `signin`: VS Code signed in to no OverLyX server, which the fonts come from */
-interface Catalog { axisNames: Record<string, string>; families: CatalogFamily[]; signin?: boolean }
 export interface FontInfo {
   family: string; category: string;
   axes: { tag: string; name: string; min: number; def: number; max: number }[];
@@ -31,8 +28,7 @@ export interface FontInfo {
   weights: number[]; italic: boolean; features: string[];
 }
 
-let catalogP: Promise<Catalog> | null = null;
-const catalog = () => (catalogP ??= fetch(fontApi('catalog'), { credentials: 'same-origin' }).then(r => (r.ok ? r.json() : { axisNames: {}, families: [] })).catch(() => ({ axisNames: {}, families: [] })));
+const catalog = fontCatalog;
 const infos = new Map<string, Promise<FontInfo | null>>();
 export const fontInfo = (family: string) => {
   let p = infos.get(family);
@@ -213,6 +209,7 @@ export function FontList({ family, current, markdown, documentFonts, inDocument:
   const byName = (n: string) => cat?.families.find(f => f.f === n) ?? null;
   const row = (name: string, key: string) => <FontRow key={key} name={name} entry={byName(name)} active={current?.family === name} onPick={() => pick(name)} mine={mine ? mine.includes(name) : null} />;
   const others = (names: string[]) => names.filter(n => !mine?.includes(n));
+  const myRows = !!mine?.length && <><div class="tb-popup-title" title="Google fonts kept in your account: here first, in the web app and in VS Code (★ on a font adds or removes it)">My fonts</div>{mine.map(n => row(n, 'm' + n))}</>;
   return (
     <div class="ff-list">
       <input class="ff-search" type="search" placeholder="Search fonts" value={query} autoFocus
@@ -229,6 +226,8 @@ export function FontList({ family, current, markdown, documentFonts, inDocument:
               <button key={f} type="button" class={'tb-pal-item ff-item' + (!current && family === f ? ' active' : '')} style={{ fontFamily: f === 'roman' ? 'var(--editor-font), serif' : f === 'sans' ? 'var(--editor-sans-font), sans-serif' : 'var(--editor-mono-font, monospace), monospace' }}
                 onMouseDown={e => e.preventDefault()} onClick={() => onFamily(f)}>{FAMILY_NAMES[f]}</button>
             ))}
+            {/* (the style editor's lists — the document's own text font: My fonts first, above LaTeX's font sets) */}
+            {sections && myRows}
             {sections?.map(sec => (
               <div key={sec.title}>
                 <div class="tb-popup-title">{sec.title}</div>
@@ -239,7 +238,7 @@ export function FontList({ family, current, markdown, documentFonts, inDocument:
               </div>
             ))}
             {documentFonts && <button type="button" class="tb-pal-item ff-item ff-more" onMouseDown={e => e.preventDefault()} onClick={() => { close(); documentFonts(); }}>{markdown ? 'Typesetting…' : 'Document fonts…'}</button>}
-            {!!mine?.length && <><div class="tb-popup-title" title="Google fonts kept in your account: here first, in the web app and in VS Code (★ on a font adds or removes it)">My fonts</div>{mine.map(n => row(n, 'm' + n))}</>}
+            {!sections && myRows}
             {others(inDoc).length > 0 && <><div class="tb-popup-title">In this document</div>{others(inDoc).map(n => row(n, 'd' + n))}</>}
             {others(recent.filter(n => !inDoc.includes(n))).length > 0 && <><div class="tb-popup-title">Recent</div>{others(recent.filter(n => !inDoc.includes(n))).map(n => row(n, 'r' + n))}</>}
             <div class="tb-popup-title">Popular — Google Fonts</div>

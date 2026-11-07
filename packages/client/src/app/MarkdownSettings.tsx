@@ -7,6 +7,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api, type MdFrontMatterValue } from '../api';
 import { Dialog } from './Dialogs';
+import { useMyFonts } from '../fonts/myfonts';
 
 type Vars = Record<string, MdFrontMatterValue>;
 type Font = { label: string; main: string; math: string; hint: string };
@@ -19,6 +20,7 @@ const headingKeys = (v: MdFrontMatterValue | undefined): HeadingKeys => (typeof 
 
 export function MarkdownSettingsDialog({ docId, onClose, onSaved }: { docId: string; onClose: () => void; onSaved?: () => void }) {
   const [fonts, setFonts] = useState<Font[]>([]);
+  const myFonts = useMyFonts();
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [v, setV] = useState({ main: '', math: '', size: '', paper: '', margins: '', stretch: '', numbered: false, justify: false, runIn: false, headingFont: '', headingColor: '', spacing: '' });
@@ -76,7 +78,10 @@ export function MarkdownSettingsDialog({ docId, onClose, onSaved }: { docId: str
         {row('Font', <input type="text" list="md-font-names" data-md-font value={v.main} placeholder="Computer Modern — LaTeX’s default"
           onInput={e => { const main = (e.target as HTMLInputElement).value; const f = fonts.find(x => x.main.toLowerCase() === main.trim().toLowerCase()); set(f ? { main: f.main, math: f.math } : { main }); }} />,
           'one of these, or any Google Fonts family by its name (Inter, Source Serif 4, Lora …): the server fetches it once')}
-        <datalist id="md-font-names">{fonts.map(f => <option key={f.main} value={f.main}>{f.label} — {f.hint}</option>)}</datalist>
+        <datalist id="md-font-names">
+          {myFonts?.filter(m => !fonts.some(f => f.main === m)).map(m => <option key={'my' + m} value={m}>★ My fonts — a Google font</option>)}
+          {fonts.map(f => <option key={f.main} value={f.main}>{f.label} — {f.hint}</option>)}
+        </datalist>
         {row('Math font', <select data-md-math value={v.math} onChange={e => set({ math: (e.target as HTMLSelectElement).value })}>
           <option value="">{v.main ? 'As LaTeX has it (Computer Modern)' : 'Computer Modern'}</option>
           {fonts.map(f => <option key={f.math} value={f.math}>{f.math}{pair?.math === f.math ? ' — drawn for the text font' : ''}</option>)}

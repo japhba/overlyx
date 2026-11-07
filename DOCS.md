@@ -4000,6 +4000,18 @@ selection at once.
   every font list (then *In this document*, *Recent* without them), in the web app and in VS Code. A
   font added is fetched into the server's cache at once (every axis and OpenType feature: the
   repository's files). At most 200; guests and read-only sign-ins cannot change them.
+  **As the document's own font** too: Format ▸ Text styles ▸ Normal text lists them above LaTeX's
+  font sets (and markdown's fonts with their math fonts); Document ▸ Settings ▸ Fonts ▸ *Font set*
+  has a *My fonts* group first (`my:Family`: non-TeX fonts on, `font_roman`'s second value the family
+  — `\setmainfont`, built with LuaLaTeX, which finds it in `ol-fonts/` by name; a TeX font set turns
+  non-TeX fonts off again); a markdown document's Settings ▸ Font suggests them first (`mainfont`);
+  Settings ▸ Editor ▸ Text font lists them for the editor alone (`gf:Family`). **On slides, posters
+  and web pages** they come first in the Text toolbar's font list (★, after Default) and in Edit
+  theme's text and heading fonts (`deckfonts.ts myDeckFonts`, `decktoolbar.tsx deckFontList`), linked
+  from Google Fonts like the list's other Google fonts but with all of the family (`googleFontSpec`:
+  a variable font's whole axes, so Typography's width and any weight work; a static one's every weight;
+  italics where it has them) — the published page loads them the same way. css2's files lack some
+  OpenType features the repository's have (documents get the complete files from this server).
 * **In VS Code** the webviews ask the extension's bridge (`OVERLYX_API_BASE`, `fontApi()` in
   `fonts/googlefont.ts`), and the bridge (`vscode/src/host/fonts.ts`) asks the OverLyX server the
   computer is signed in to (the CLI's and the extension's sign-in, overlyx.app first) through its git

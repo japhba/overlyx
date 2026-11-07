@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest';
 import { blankDeck } from '../packages/core/src/html/deliverable.ts';
-import { embeddedFontFamilies, fontPortabilityWarning, fontResource, firstFontFamily } from '../packages/client/src/deliverable/deckfonts';
+import { embeddedFontFamilies, fontPortabilityWarning, fontResource, firstFontFamily, googleFontSpec, myDeckFonts } from '../packages/client/src/deliverable/deckfonts';
+import { deckFontList, DECK_FONTS } from '../packages/client/src/deliverable/decktoolbar';
 
 it('new blank decks carry their default font, Instrument Sans, with its weight and width axes and no font download', () => {
   const html = blankDeck('Example');
@@ -52,3 +53,31 @@ it('supplies bundled choices in a portable style block and keeps existing web fo
   expect(resource).toContain('fonts.googleapis.com/css2?family=Lora');
   expect(fontResource(resource, 'Lora, serif', 'Lora')).toBe('');
 });
+
+it('My fonts link all of a Google font: a variable one\'s whole axes, a static one\'s weights, italics only where they exist', () => {
+  // css2 wants lower-case axes first, each part alphabetical; ital as a leading 0/1
+  expect(googleFontSpec({ f: 'Roboto Flex', c: 'Sans Serif', i: false, w: [], a: [{ t: 'wght', min: 100, max: 1000 }, { t: 'GRAD', min: -200, max: 150 }, { t: 'opsz', min: 8, max: 144 }, { t: 'XTRA', min: 323, max: 603 }] }))
+    .toBe('Roboto Flex:opsz,wght,GRAD,XTRA@8..144,100..1000,-200..150,323..603');
+  expect(googleFontSpec({ f: 'Inter', c: 'Sans Serif', i: true, w: [], a: [{ t: 'wght', min: 100, max: 900 }, { t: 'opsz', min: 14, max: 32 }] }))
+    .toBe('Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900');
+  expect(googleFontSpec({ f: 'Lora', c: 'Serif', i: true, w: [700, 400], a: [] })).toBe('Lora:ital,wght@0,400;0,700;1,400;1,700');
+  // one weight, no italics: exactly what it has (css2 refuses a query none of whose styles exist)
+  expect(googleFontSpec({ f: 'Bebas Neue', c: 'Display', i: false, w: [400], a: [] })).toBe('Bebas Neue:wght@400');
+  const link = fontResource('<html><head></head></html>', '"Bebas Neue", sans-serif', 'Bebas Neue:wght@400');
+  expect(link).toContain('css2?family=Bebas+Neue:wght@400&display=swap');
+  expect(fontResource(link, '"Bebas Neue", sans-serif', 'Bebas Neue:wght@400')).toBe('');
+  // a family whose name starts another's is not taken for it
+  expect(fontResource('<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400">', 'Inter, sans-serif', 'Inter')).toContain('family=Inter:');
+});
+
+it('puts My fonts first in the deck font lists, after Default, without the same family twice', () => {
+  const mine = myDeckFonts([{ f: 'Inter', c: 'Sans Serif', i: true, w: [], a: [{ t: 'wght', min: 100, max: 900 }] }, { f: 'Source Code Pro', c: 'Monospace', i: false, w: [400, 700], a: [] }]);
+  expect(mine.map(f => f.css)).toEqual(['Inter, sans-serif', '"Source Code Pro", monospace']);
+  const list = deckFontList(mine);
+  expect(list[0].label).toBe('Default');
+  expect(list.slice(1, 3).map(f => f.label)).toEqual(['★ Inter', '★ Source Code Pro']);
+  expect(list.filter(f => f.css && firstFontFamily(f.css) === 'Inter')).toHaveLength(1);
+  expect(list.length).toBe(DECK_FONTS.length);
+  expect(deckFontList()).toEqual(DECK_FONTS);
+});
+
