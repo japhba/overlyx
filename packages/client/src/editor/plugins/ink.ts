@@ -831,7 +831,7 @@ class InkLayer {
         // whose pointer this is, beside its head (like the cursor labels in the text)
         const hx = held.pts[held.pts.length - 1][0] - g.scrollLeft, hy = held.pts[held.pts.length - 1][1] - g.scrollTop;
         ctx.save();
-        ctx.font = '11px system-ui, sans-serif';
+        ctx.font = '11px sans-serif';
         const w = ctx.measureText(rl.name).width + 10;
         ctx.fillStyle = rl.color;
         ctx.globalAlpha = 0.9;

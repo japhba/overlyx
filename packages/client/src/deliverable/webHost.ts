@@ -10,6 +10,7 @@ import { WebsocketProvider } from 'y-websocket';
 import { connectParams } from '@overlyx/core/collab/connect.ts';
 import * as decoding from 'lib0/decoding';
 import { splitDocId } from '@overlyx/core';
+import { deliverableInfo } from '@overlyx/core/html/deliverable.ts';
 import { lastSlide, noteSlide } from './slidememory';
 import { webAppLink } from '../editor/permalink';
 import { api, type User } from '../api';
@@ -327,6 +328,9 @@ export function webHost(id: string, user: User): DeliverableHost & { destroy(): 
       const q = `?path=${encodeURIComponent(path)}&download=1`;
       return [
         { label: 'PDF', action: () => window.open(`/api/projects/${encodeURIComponent(project)}/deliverable-pdf${q}`, '_blank') },
+        ...(deliverableInfo(text.toString()).kind === 'deck' ? [
+          { label: 'PDF with click steps', action: () => window.open(`/api/projects/${encodeURIComponent(project)}/deliverable-pdf${q}&steps=all`, '_blank') },
+        ] : []),
         { label: 'Web page (.zip, works offline)', action: () => window.open(`/api/projects/${encodeURIComponent(project)}/deliverable-zip${q}`, '_blank') },
         { label: 'Open in a new tab', action: () => window.open(open('view'), '_blank', 'noopener') },
       ];

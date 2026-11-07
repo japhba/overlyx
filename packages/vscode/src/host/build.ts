@@ -48,7 +48,10 @@ export function currentJob(docId: string): BuildJob | undefined { return jobs.ge
 export function lastBuild(docId: string, texPath?: string): BuildRecord | undefined {
   const known = lastBuilds.get(docId);
   if (known || !texPath) return known;
-  // Reloading VS Code loses the in-memory build log, not the PDF on disk.
+  // Reloading VS Code loses the in-memory build log, not the PDF on disk — but while a build runs,
+  // the PDF there is the one being written ("Invalid PDF structure" on a first build).
+  const job = jobs.get(docId);
+  if (job && (job.status === 'queued' || job.status === 'exporting' || job.status === 'compiling')) return undefined;
   const pdfPath = texPath.replace(/\.tex$/i, '.pdf');
   if (pdfPath === texPath) return undefined;
   try {

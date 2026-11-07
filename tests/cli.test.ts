@@ -211,7 +211,7 @@ describe("overlyx mcp: local agents through the CLI's bridge", () => {
   const agentEnv = (extra: Record<string, string> = {}) => ({ ...process.env, OVERLYX_CONFIG_DIR: join(ROOT, 'config'), CODEX_HOME, PATH: `${FAKE}:${process.env.PATH}`, ...extra });
 
   /** run the bridge as an agent does: messages on stdin, one per line; the answers by id */
-  async function bridge(messages: object[], opts: { cwd?: string; configDir?: string } = {}): Promise<Record<string, any>> {
+  async function bridge(messages: object[], opts: { cwd?: string; configDir?: string; afterInitialize?: () => void } = {}): Promise<Record<string, any>> {
     const { spawn } = await import('node:child_process');
     const child = spawn(process.execPath, [CLI, 'mcp', 'serve'], { cwd: opts.cwd ?? ROOT, env: agentEnv(opts.configDir ? { OVERLYX_CONFIG_DIR: opts.configDir } : {}) });
     const answers: Record<string, any> = {};
@@ -225,11 +225,15 @@ describe("overlyx mcp: local agents through the CLI's bridge", () => {
           const line = buf.slice(0, i); buf = buf.slice(i + 1);
           const m = JSON.parse(line);
           if (m.id !== undefined) answers[m.id] = m;
+          if (m.id === 1 && opts.afterInitialize) {
+            opts.afterInitialize();
+            for (const next of messages) if (!('method' in next) || next.method !== 'initialize') child.stdin.write(JSON.stringify(next) + '\n');
+          }
           if (Object.keys(answers).length === want) { clearTimeout(timer); resolve(); }
         }
       });
       child.on('error', reject);
-      for (const m of messages) child.stdin.write(JSON.stringify(m) + '\n');
+      for (const m of messages) if (!opts.afterInitialize || ('method' in m && m.method === 'initialize')) child.stdin.write(JSON.stringify(m) + '\n');
     });
     child.stdin.end();
     const code = await new Promise(r => child.on('exit', r));
@@ -258,9 +262,28 @@ describe("overlyx mcp: local agents through the CLI's bridge", () => {
     await execFileP('git', ['-C', clone, 'remote', 'add', 'overlyx', `${host.replace('://', '://ada@')}/git/ada/Imported%20paper.git`]);
     const a = await bridge([INIT], { cwd: clone });
     expect(a[1].result.instructions).toMatch(/^This directory is a git clone of the OverLyX project "ada\/Imported paper" \(git remote "overlyx"\)\. Edit its documents here, in these files: with the tools of the "overlyx-local" server/);
+    expect(a[1].result.instructions).toContain('Automatic sync is not running');
     // elsewhere: the server's own instructions only
     const b = await bridge([INIT]);
     expect(b[1].result.instructions ?? '').not.toContain('git clone of the OverLyX project');
+  });
+
+  it('warns MCP tools when a clone stops syncing after the agent initialized', async () => {
+    const clone = join(ROOT, 'stopped-clone');
+    mkdirSync(clone, { recursive: true });
+    await execFileP('git', ['init', '-q', clone]);
+    await execFileP('git', ['-C', clone, 'remote', 'add', 'origin', `${host}/git/ada/Imported%20paper.git`]);
+    const stateDir = join(clone, '.git', 'overlyx-sync');
+    mkdirSync(stateDir);
+    writeFileSync(join(stateDir, 'lock'), JSON.stringify({ pid: process.pid, at: Date.now(), by: 'test sync' }));
+    const a = await bridge([INIT, { jsonrpc: '2.0', method: 'notifications/initialized' }, { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'list_projects', arguments: {} } }], {
+      cwd: clone,
+      afterInitialize: () => rmSync(join(stateDir, 'lock')),
+    });
+    expect(a[1].result.instructions).toContain('sync running');
+    expect(a[2].result.isError).toBeFalsy();
+    expect(a[2].result.content.at(-1).text).toContain('automatic sync is not running');
+    expect(a[2].result.content.at(-1).text).toContain('overlyx sync --watch');
   });
 
   it("Claude Code's session (a session id, the server's event stream) works through the bridge too", async () => {

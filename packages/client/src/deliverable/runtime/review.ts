@@ -112,15 +112,15 @@ export const REVIEW_OVERLAY_CSS = `.rv { position: absolute; box-sizing: border-
     .rv.chg { border-style: dashed; }
     .rv.txt { border-style: dotted; border-width: calc(1.5px * var(--s)); opacity: .8; }
     .rv.del { border-color: #d2453c; background: repeating-linear-gradient(135deg, rgba(210,69,60,.14) 0 calc(5px * var(--s)), transparent 0 calc(11px * var(--s))); }
-    .rv-tag { position: absolute; transform: translateY(calc(4px * var(--s))); color: #fff; background: var(--c); padding: calc(1px * var(--s)) calc(6px * var(--s)); border-radius: calc(3px * var(--s)); white-space: nowrap; pointer-events: none; font: 600 calc(10.5px * var(--s)) / 1.35 system-ui, -apple-system, sans-serif; }
+    .rv-tag { position: absolute; transform: translateY(calc(4px * var(--s))); color: #fff; background: var(--c); padding: calc(1px * var(--s)) calc(6px * var(--s)); border-radius: calc(3px * var(--s)); white-space: nowrap; pointer-events: none; font: 600 calc(10.5px * var(--s)) / 1.35 sans-serif; }
     .rv-tag.del { background: #d2453c; }
     .pin { position: absolute; transform: translate(calc(8px * var(--s)), -80%); display: flex; align-items: center; gap: calc(2px * var(--s)); min-width: calc(22px * var(--s)); height: calc(22px * var(--s)); padding: 0 calc(5px * var(--s)); box-sizing: border-box;
       background: #f6b400; color: #3a2a00; border-radius: calc(11px * var(--s)) calc(11px * var(--s)) calc(11px * var(--s)) calc(3px * var(--s)); box-shadow: 0 calc(1px * var(--s)) calc(3px * var(--s)) rgba(0,0,0,.3), 0 0 0 calc(1.5px * var(--s)) #fff;
-      font: 700 calc(11px * var(--s)) / 1 system-ui, -apple-system, sans-serif; pointer-events: auto; cursor: pointer; touch-action: none; }
+      font: 700 calc(11px * var(--s)) / 1 sans-serif; pointer-events: auto; cursor: pointer; touch-action: none; }
     .pin.inside { transform: translate(-100%, 0); }
     .pin svg { width: calc(12px * var(--s)); height: calc(12px * var(--s)); }
     .pin.focus { background: #2f6fde; color: #fff; }
-    .rv-ghost-tag { position: absolute; transform: translateY(-100%); color: #5f6673; font: 600 calc(10px * var(--s)) system-ui, sans-serif; pointer-events: none; white-space: nowrap; }`;
+    .rv-ghost-tag { position: absolute; transform: translateY(-100%); color: #5f6673; font: 600 calc(10px * var(--s)) sans-serif; pointer-events: none; white-space: nowrap; }`;
 
 const BUBBLE = '<svg viewBox="0 0 16 16"><path d="M2 2.5h12v8.5H6.5L2 14z" fill="currentColor"/></svg>';
 const esc = (s: string) => s.replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);

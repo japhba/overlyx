@@ -453,7 +453,7 @@ export function TextStylesPanel({ docId, headerLines, view, markdown, layout, on
           return (
             <button key={t} type="button" role="tab" aria-selected={t === type} class={'ts-type' + (t === type ? ' on' : '')} data-ts-type={t} onClick={() => setType(t)}
               style={{
-                fontFamily: f ? `'${f.family}', var(--editor-font)` : s.font === '@sans' ? 'var(--editor-sans-font, system-ui), sans-serif' : s.font === '@mono' ? 'var(--editor-mono-font, monospace), monospace' : 'var(--editor-font)',
+                fontFamily: f ? `'${f.family}', var(--editor-font)` : s.font === '@sans' ? 'var(--editor-sans-font), sans-serif' : s.font === '@mono' ? 'var(--editor-mono-font, monospace), monospace' : 'var(--editor-font)',
                 fontWeight: s.weight ?? d.weight, fontStyle: s.shape === 'italic' ? 'italic' : 'normal', color: s.color,
                 fontVariant: s.case === 'smallcaps' ? 'small-caps' : undefined, textTransform: s.case === 'uppercase' ? 'uppercase' : undefined,
                 fontSize: t === 'body' ? '1em' : `${Math.min(1.35, Math.max(0.85, sizePt(s.size ?? d.size, 10) / 10))}em`,

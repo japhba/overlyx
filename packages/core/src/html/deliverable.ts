@@ -6,6 +6,7 @@
  * `slide` of a fixed size, TeX math between \( \) / \[ \]. DELIVERABLE_GUIDE says it to agents.
  */
 import { scientificDeck, scientificPoster } from './scientific.ts';
+import { TEMPLATE_FONTS, TEMPLATE_FONT_LICENSE } from './scientific-fonts.ts';
 import { parseSource, walk, attr, hasClass, pathOf, elementChildren, type HElement, type HDocument, type Path } from './source.ts';
 
 export type DeliverableKind = 'deck' | 'poster' | 'page';
@@ -73,12 +74,16 @@ The conventions OverLyX relies on (everything else is up to you):
 - The slide master, kept in the markup: an object on every slide (a header bar, a logo, a footer) is a copy on each slide with the same data-ol-master="<key>" (e.g. data-ol-master="frame"); the editor keeps the copies identical — changed on one slide, changed on all — so give every repeated piece of a deck's design such a key, and leave it off a slide's own objects. Slide numbers: <span data-ol-field="slide-number">3</span> (and data-ol-field="slide-count" for the total) — write each slide's own number; the editor renumbers as slides are added, moved or removed. data-ol-skip on a slide: kept, but not presented or printed.
 - Write no navigation or presentation code and never hide slides with CSS or scripts (data-ol-skip skips one): OverLyX stacks the slides while editing, shows one at a time when presenting, and prints one per PDF page. Speaker notes go in <aside class="notes"> inside the slide (not shown on it).
 - Math: TeX between \\( \\) inline, \\[ \\] or $$ $$ displayed. OverLyX typesets it with MathJax — no script needed. Numbered equations as in LaTeX: \\begin{equation}\\label{eq:name} … \\end{equation} (align etc. too), referred to by \\eqref{eq:name} or \\ref{eq:name} anywhere in the text; numbers count through the whole deck.
+- Decks keep inline formulas on one line by default. <meta name="overlyx-math-inline-breaks" content="on"> allows breaks between terms ("off" disables them in other deliverables too).
+- One-line labels can use width:max-content;max-width:none. data-ol-text-anchor="left|center|right" records their anchor: left is its x position; add translate:-50% 0 for centre or -100% 0 for right so the anchor stays still as the text grows. The canvas defaults click-created text to auto width; dragging makes a wrapping box. More text options offers these sizing modes. data-ol-wrap-lines="N" records the line count accepted on the last resize; extra soft-wrapped lines are marked on the canvas and reported by render_page. Explicit breaks alone are not warnings.
+- Anchored annotations: put an empty SVG directly in a .slide, with data-ol-connector='{"from":{"id":"diagram","side":"right"},"to":{"id":"equation","class":"term","side":"left"},"curve":40}' for an arrow, or data-ol-frame='{"target":{"id":"equation","class":"term"},"padding":8,"radius":8}' for a rounded frame. A target is an object id string, or {"id":"object-id","class":"term"} for \\class{term}{…} inside that formula; {"id":"term-id"} also reaches \\cssId{term-id}{…}. Names resolve within this slide. Connector sides: auto (default), center, top, right, bottom, left; optional offset:[x,y] in slide pixels on each target. curve is a signed perpendicular control-point offset (0/default: straight); head is arrowhead length (default 10, 0 for a plain connector). Frame padding/radius default to 8. Set stroke, stroke-width and fill on the SVG (defaults currentColor, 2, none); use data-step for reveals. Geometry follows objects, fonts and formula edits automatically in the canvas, presentation and exports; missing targets hide the annotation until they return. Keep left/top/size/viewBox runtime-controlled; annotations let pointer input through so formulas remain editable. Targets and styling are edited in the HTML.
 - Macros: <link rel="overlyx-macros" href="../paper/macros.tex"> in <head> gives every formula the \\newcommand / \\def / \\DeclareMathOperator definitions of that .tex file of the project (and of the files it \\inputs) — use the paper's own notation.
 - Citations: \\cite{key}, \\citep{key}, \\citet{key} (natbib's forms, several keys, [pre][post] notes) in the text cite entries of the project's .bib files (all of them, or only those of <link rel="overlyx-bibliography" href="refs.bib">); they show as [1] — or Knuth (1984) with <meta name="overlyx-citations" content="authoryear">. An empty element of class "ol-bibliography" (positioned like any object, e.g. on a last "References" slide) gets the list of the works cited. Keys no .bib file has show as ? and are reported.
-- Steps (beamer's overlays, PowerPoint's animations): data-step on any object — an SVG's paths and groups too — says which steps it shows on when presenting. Step 1 is the slide as it comes up; each click goes one step on. data-step="3" means from step 3 on (as after two \pause); otherwise it is a beamer overlay specification: "-3" until step 3, then gone (it disappears on the third click), "2-4" steps 2 to 4, "1,3-" step 1 and from step 3 on. data-steps on a <ul>/<ol> makes its items appear one by one (data-steps="2": the first item at step 2). Nothing is hidden while editing or in the PDF. <meta name="overlyx-steps" content="dim"> shows what comes later faintly instead of hiding it.
+- Steps (beamer's overlays, PowerPoint's animations): data-step on any object, an SVG's paths/groups, or inline text (span, strong, em, u) says which steps it shows on when presenting. Step 1 is the slide as it comes up; each click goes one step on. data-step="3" means from step 3 on (as after two \pause); otherwise it is a beamer overlay specification: "-3" until step 3, then gone (it disappears on the third click), "2-4" steps 2 to 4, "1,3-" step 1 and from step 3 on. Use one text object with an inline data-step for a partial reveal; hidden words retain their space. The canvas text toolbar's "Appear on step" applies this to selected words (step 1 removes their inline steps). data-steps on a <ul>/<ol> makes its items appear one by one (data-steps="2": the first item at step 2). Nothing is hidden while editing or in the ordinary PDF. Download > PDF with click steps exports one page per step, including inline reveals (at most 1000 pages); the deliverable-pdf endpoint accepts steps=all. <meta name="overlyx-steps" content="dim"> shows what comes later faintly instead of hiding it, in presenting and step PDFs.
 - Files by relative paths (figures/plot.svg, ../figures/fig.pdf). PDF figures are shown as SVG, so a paper's figures can be used directly.
+- Overlap checks use individual text/formula glyph boxes and inline SVG fills and strokes. For deliberate layering, put data-ol-lint="no-overlap" on either object (or an SVG shape); this suppresses only overlap warnings, not overflow, off-page or readability warnings. Pictures behind text are backgrounds, not covers.
 - Review (people comment and suggest on the canvas; keep these attributes and elements when you edit around them): data-ol-comments='[{"id":"c1","by":"Name","at":"2026-10-11 14:03","text":"…","re":[{"by":"…","at":"…","text":"…"}]}]' on an object or slide holds its comment threads ("done": true = resolved; "quote": the words commented on) — to answer one, append to its "re" with your name ("AI agent" if you have none); data-ol-ins / data-ol-del ("Name|YYYY-MM-DD HH:MM") mark an object suggested as added / deleted, data-ol-chg with data-ol-was (the old attribute values) one suggested as changed, <ins data-ol-by="…"> / <del data-ol-by="…"> words typed / deleted. Don't accept or reject suggestions (remove these marks) unless asked to; a deleted object stays in the file until then. <meta name="overlyx-suggesting" content="on"> means the people want changes as suggestions.
-- So people can edit on the canvas: make each object of a slide (text block, image, shape, chart) a direct child of the .slide with position: absolute and its left/top/width (and height where it matters) — inline or in CSS — so it can be moved and resized; keep text in plain elements (h1–h4, p, ul/ol/li, span, strong, em, a) so it can be retyped in place. Anything else (an SVG drawing, a canvas, a script-made chart) still shows and can be moved and resized, but is changed in the code.
+- So people can edit on the canvas: make each object of a slide (text block, image, shape, chart) a direct child of the .slide with position: absolute and its left/top/width (and height where it matters) — inline or in CSS — so it can be moved and resized; keep text in plain elements (h1–h4, p, ul/ol/li, span, strong, em, a) so it can be retyped in place. Containers can be div.ol-group with positioned children relative to them. For persistent rows/columns, use a positioned div.ol-group with display:flex, flex-direction:row or column, gap and align-items; its children use position:relative, left:0, top:0 and flex:0 0 auto (or flex:1 1 0px for equal sizes). Give equal-size columns a fixed height. The canvas exposes these through Arrange > Group in a row / column and Group layout; Ctrl+click reaches a member. Anything else (an SVG drawing, a canvas, a script-made chart) still shows and can be moved and resized, but is changed in the code.
 
 Tools: create_deliverable starts a folder for a kind; read_file / edit_file / write_file edit its files (applied live in people's editors); render_page shows you a page as an image and lists problems (text overflowing its box, objects overlapping or off the page, text too small to read, citations of keys no .bib file has, references to labels that do not exist). Look at your pages with render_page after every substantial change and fix what it reports.`;
 
@@ -104,7 +109,7 @@ export function starterPage(title: string): string {
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
 <style>
   :root { --ink: #1d2433; --muted: #5b6475; --accent: #2f6fde; }
-  body { margin: 0; font-family: Inter, system-ui, sans-serif; color: var(--ink); line-height: 1.6; }
+  body { margin: 0; font-family: Inter, sans-serif; color: var(--ink); line-height: 1.6; }
   header { padding: 96px 24px 64px; text-align: center; background: #f4f6fa; }
   header h1 { font-size: clamp(36px, 6vw, 64px); line-height: 1.1; margin: 0 0 16px; }
   main { max-width: 760px; margin: 0 auto; padding: 48px 24px 96px; font-size: 19px; }
@@ -179,16 +184,23 @@ export function blankDeck(title: string, size: PageSize = DEFAULT_DECK_SIZE): st
   const w = `${width}${unit}`, h = `${height}${unit}`;
   const text = `${Math.round(Math.max(width, height) / 48 * 100) / 100}${unit}`;
   return `<!doctype html>
+<!--
+${TEMPLATE_FONT_LICENSE}
+-->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="overlyx" content="deck">
 <title>${esc(title || 'Untitled slides')}</title>
 <style>
+  ${TEMPLATE_FONTS['Instrument Sans']}
   * { box-sizing: border-box; }
-  body { margin: 0; background: #dce0e4; color: #1d1d1f; font-family: -apple-system, system-ui, "Segoe UI", Helvetica, Arial, sans-serif; }
+  body { margin: 0; background: #dce0e4; color: #1d1d1f; font-family: "Instrument Sans", sans-serif; }
   .slide { width: ${w}; height: ${h}; position: relative; overflow: hidden; background: #fff; margin: 0 auto 40px; font-size: ${text}; line-height: 1.35; }
   h1, h2, h3, p, ul, ol { margin: 0; }
+  :where(.slide li)::marker { color: #80868b; }
+  :where(.slide ul ul) { list-style-type: "\\2013\\2002"; padding-inline-start: 1.2em; font-size: 0.9em; }
+  :where(.slide ul ul ul) { list-style-type: "\\2022\\2002"; }
   .notes { display: none; }
   @media print { @page { size: ${w} ${h}; margin: 0; } body { background: none; } .slide { margin: 0; break-after: page; break-inside: avoid; print-color-adjust: exact; -webkit-print-color-adjust: exact; } .slide:last-of-type { break-after: auto; } }
 </style>

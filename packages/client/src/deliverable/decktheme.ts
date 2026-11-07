@@ -9,6 +9,7 @@
  * deckmaster.ts; the objects on every slide are deckmaster's linked copies.
  */
 import { parseSource, walk, innerRange, insertSplice, elementChildren, htmlElement, type Splice } from '@overlyx/core/html/source.ts';
+import { fontResource } from './deckfonts';
 
 /** a colour the deck names (`--accent`), as its last declaration at :root has it; `hex` for the colour picker */
 export interface ThemeColor { name: string; value: string; hex: string | null }
@@ -179,14 +180,6 @@ function ruleAtEnd(text: string, sheet: { from: number; to: number }, rule: stri
   return { from: at, to: at, insert: `\n${indent}${rule}` };
 }
 
-/** the <link> of a Google font, when the page does not link it yet (as the deck toolbar's font list adds it) */
-function fontLink(text: string, google: string | undefined): string {
-  if (!google) return '';
-  const fam = google.replace(/ /g, '+');
-  if (text.includes(`family=${fam}`)) return '';
-  return `<link href="https://fonts.googleapis.com/css2?family=${fam}:ital,wght@0,400;0,700;1,400;1,700&display=swap" rel="stylesheet">`;
-}
-
 /**
  * A change of the theme as splices of `text` (one undo step): a colour's value where its last :root
  * declaration is; a font in every rule that sets it (else added to the text's rule — `body`'s — or the
@@ -230,7 +223,7 @@ export function themeSplices(text: string, ch: ThemeChange): Splice[] {
   const ss = sheets(text);
   if (rule && ss.length) out.push(ruleAtEnd(text, ss[ss.length - 1], rule));
   // in the <head>, after what is there: the font's stylesheet, then (the page had none) a stylesheet with the rule
-  const link = out.length || rule ? fontLink(text, 'font' in ch && ch.value !== null ? ch.google : undefined) : '';
+  const link = 'font' in ch && ch.value !== null ? fontResource(text, ch.value, ch.google) : '';
   const tail = [link, rule && !ss.length ? `<style>\n  ${rule}\n</style>` : ''].filter(Boolean).join('\n');
   const head = tail ? headOf(text) : null;
   if (tail && head) out.push(insertSplice(text, head, 1e6, tail));

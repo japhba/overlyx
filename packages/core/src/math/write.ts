@@ -146,7 +146,7 @@ export function writeAtom(a: Atom, os: MathWriter): void {
     case 'oldfont': case 'style': os.s('{\\' + a.n + ' '); writeCell(a.body, os); os.s('}'); return;
     case 'color': {
       if (a.old) { os.s(a.color === 'normalcolor' ? '{\\normalcolor ' : '{\\color' + colorSpec(a.color)); writeCell(a.body, os); os.s('}'); }
-      else { os.s('\\textcolor' + colorSpec(a.color) + '{'); const tm = os.textMode; os.textMode = true; writeCell(a.body, os); os.textMode = tm; os.s('}'); }
+      else { os.s('\\textcolor' + colorSpec(a.color) + '{'); writeCell(a.body, os); os.s('}'); }
       return;
     }
     case 'overset': case 'underset': os.s('\\' + a.t); braced(os, a.top); braced(os, a.body); return;

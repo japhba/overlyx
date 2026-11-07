@@ -19,6 +19,8 @@ import { sandboxAvailable } from './sandbox.ts';
 import { deliverableToken, resolveDeliverable, liveHtml, type RuntimeMode } from './deliverables.ts';
 import { deliverableInfo } from '@overlyx/core/html/deliverable.ts';
 import { guardedFetch } from './netguard.ts';
+import type { DeliverableLayout } from '@overlyx/core/html/layout.ts';
+import { measureFonts } from './render-layout.ts';
 
 const ORIGIN = 'http://overlyx.internal';
 /** public CDNs a deliverable may load fonts and libraries from */
@@ -143,7 +145,7 @@ async function withPage<T>(project: string, rel: string, userId: number, mode: R
 
 /* ------------------------------------------------------------------ what the runtime reports */
 
-export interface PageIssue { kind: 'overflow' | 'offpage' | 'overlap' | 'small-text' | 'contrast' | 'clipped'; text: string; at?: { x: number; y: number; w: number; h: number } }
+export interface PageIssue { kind: 'overflow' | 'wrap' | 'offpage' | 'overlap' | 'small-text' | 'contrast' | 'clipped'; text: string; at?: { x: number; y: number; w: number; h: number } }
 export interface PageReport { index: number; title: string; issues: PageIssue[] }
 export interface DeliverableReport { kind: 'deck' | 'poster' | 'page'; width: number; height: number; pages: PageReport[]; errors: string[] }
 
@@ -158,38 +160,42 @@ export interface RenderedPage { index: number; png: Buffer; report: PageReport }
  * Pages of a deliverable as images (at most `maxWidth` px wide) with their reports. `pages`:
  * 0-based indices (deck); default the first. A web page is shot from the top, `width` CSS px wide.
  */
-export async function renderPages(project: string, rel: string, userId: number, opts: { pages?: number[]; maxWidth?: number; width?: number } = {}): Promise<{ report: DeliverableReport; images: RenderedPage[] }> {
+export async function renderPages(project: string, rel: string, userId: number, opts: { pages?: number[]; maxWidth?: number; width?: number } = {}): Promise<{ report: DeliverableReport; layout: DeliverableLayout; images: RenderedPage[] }> {
   const maxWidth = Math.min(2400, Math.max(320, opts.maxWidth ?? 1568));
   const pageWidth = Math.min(2400, Math.max(320, opts.width ?? 1280));
   // a poster is large (A0: ~3200 CSS px wide): shot at half scale, an image an agent can take in whole
   let kind = 'deck';
   try { kind = deliverableInfo(await liveHtml(project, rel)).kind; } catch { /* rendered as a deck */ }
   const dsf = kind === 'poster' ? 0.5 : 1;
-  return withPage(project, rel, userId, 'check', { width: pageWidth, height: 900 }, dsf, async (_ctx, page) => {
+  return withPage(project, rel, userId, 'check', { width: pageWidth, height: 900 }, dsf, async (ctx, page) => {
     const rep = await report(page);
+    const want = rep.kind === 'page' ? [0] : [...new Set((opts.pages?.length ? opts.pages : [0]).filter(i => i >= 0 && i < rep.pages.length))].slice(0, 12);
+    const layout = await page.evaluate(indices => (window as unknown as { __ol: { layout(pages: number[]): DeliverableLayout } }).__ol.layout(indices), want);
+    const cdp = await ctx.newCDPSession(page);
+    try { await measureFonts(cdp, layout); } finally { await cdp.detach(); }
     void maxWidth;
     const images: RenderedPage[] = [];
     if (rep.kind === 'page') {
       const full = await page.evaluate(() => Math.min(document.documentElement.scrollHeight, 6000));
       const png = await page.screenshot({ clip: { x: 0, y: 0, width: pageWidth, height: full }, fullPage: true });
       images.push({ index: 0, png, report: rep.pages[0] ?? { index: 0, title: '', issues: [] } });
-      return { report: rep, images };
+      return { report: rep, layout, images };
     }
-    const want = (opts.pages?.length ? opts.pages : [0]).filter(i => i >= 0 && i < rep.pages.length).slice(0, 12);
     for (const i of want) {
       const loc = page.locator('[data-ol-slide-index="' + i + '"]');
       const png = await loc.screenshot({ animations: 'disabled' });
       images.push({ index: i, png, report: rep.pages[i] });
     }
-    return { report: rep, images };
+    return { report: rep, layout, images };
   });
 }
 
-/** The deliverable as a PDF: a deck one slide per page, a poster one page of its size, a web page on A4. */
-export async function deliverablePdf(project: string, rel: string, userId: number): Promise<Buffer> {
+/** A PDF: one page per slide (optionally per click step), a poster at its size, a web page on A4. */
+export async function deliverablePdf(project: string, rel: string, userId: number, opts: { steps?: boolean } = {}): Promise<Buffer> {
   return withPage(project, rel, userId, 'print', { width: 1280, height: 900 }, 1, async (_ctx, page) => {
     const rep = await report(page);
     if (rep.kind === 'page') return await page.pdf({ format: 'A4', printBackground: true, margin: { top: '12mm', bottom: '12mm', left: '12mm', right: '12mm' } });
+    if (rep.kind === 'deck' && opts.steps) await page.evaluate(() => (window as unknown as { __ol: { printSteps(): void } }).__ol.printSteps());
     return await page.pdf({ width: `${rep.width}px`, height: `${rep.height}px`, printBackground: true, preferCSSPageSize: false, margin: { top: '0', right: '0', bottom: '0', left: '0' } });
   });
 }

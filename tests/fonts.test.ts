@@ -145,19 +145,13 @@ describe('editor faces', () => {
     expect(mathScale(editorFace('garamond'), mathFont('pagella'))).toBeCloseTo(1.1 * TEXT_X_HEIGHT.garamond / 0.482, 3);
   });
 
-  it('the sans-serif is San Francisco where the system has it, SF Compact first on phones; its formulas are Fira Math', () => {
-    const sans = editorFace('sans');
-    expect(sans.text).toMatch(/^var\(--sf-font\), "OLT fira", sans-serif$/);
+  it('no San Francisco face: a saved "sans" (San Francisco) or "noto" preference becomes Fira Sans, with Fira Math', () => {
+    expect(EDITOR_FACES.some(f => /SF |San Francisco|sf-font|-apple-system|system-ui/i.test(f.text + (f.mono ?? '') + f.hint))).toBe(false);
+    for (const old of ['sans', 'noto']) {
+      expect(editorFace(old).id).toBe('fira');
+      expect(resolvedFace(old)).toBe('fira');
+    }
     expect(resolvedMathFont('match', 'sans').id).toBe('fira');
-    const css = readFileSync(join(__dirname, '../packages/client/src/styles.css'), 'utf8');
-    // Apple's keywords for the system font in every engine, and nothing that means another system's UI font
-    const sf = css.match(/^ {2}--sf-font: ([^;]+);/m)![1];
-    expect(sf).toBe('-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro", "SF Pro Display"');
-    const phone = css.match(/@media \(pointer: coarse\) and \(max-width: 700px\)[^{]*\{\s*:root \{ --sf-font: ([^;]+);/)![1];
-    expect(phone).toBe('"SF Compact Text", "SF Compact", ' + sf);
-    // the face that was called Noto Sans
-    expect(editorFace('noto').id).toBe('sans');
-    expect(resolvedFace('noto')).toBe('sans');
   });
 
   it('"As in the document" is the face closest to the roman font', () => {

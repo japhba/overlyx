@@ -162,7 +162,9 @@ export function objectHtml(tool: Tool, rect: Rect, kind: DeliverableKind, scaleH
   const flowSize = flow ? `width: ${r(w)}px; height: ${r(h || 160)}px; ` : '';
   const centred = 'display: flex; align-items: center; justify-content: center; text-align: center; color: #fff; ';
   switch (tool) {
-    case 'text': return flow ? '<p>Text</p>' : `<p style="${pos(false)}margin: 0">Text</p>`;
+    case 'text': return flow ? '<p>Text</p>' : rect.w > 8
+      ? `<p data-ol-wrap-lines="1" style="${pos(false)}margin: 0">Text</p>`
+      : `<p data-ol-text-anchor="left" style="position: absolute; left: ${r(rect.x)}px; top: ${r(rect.y)}px; width: max-content; max-width: none; margin: 0">Text</p>`;
     // empty: LyX's formula editor opens on it at once (left empty, the box goes again); a click
     // centres it on the point, in a size for a slide
     case 'formula': {

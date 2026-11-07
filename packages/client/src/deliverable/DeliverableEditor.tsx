@@ -64,6 +64,7 @@ import { useMathPanels } from '../app/toolbars';
 import { parseSource, opSplices, elementAt, elementChildren, attr, parseStyle, sourcePatch, applySplices as applyTextSplices, type SourcePatch } from '@overlyx/core/html/source.ts';
 import { followUps, composeSplices, twinsOf, putOnEverySlide, otherCopies, slideNumberOps, lookAlikeOps, similarTexts, everySlideOps, masterObjects, MASTER_ATTR, SKIP_ATTR } from './deckmaster';
 import { deckTheme, themeSplices, type ThemeChange } from './decktheme';
+import { embeddedFontFamilies, fontPortabilityWarning, fontResource } from './deckfonts';
 import { ThemePane } from './ThemePane';
 import { reviewOps, resolveOps, resolveAll, reviewOf, isSuggesting, suggestingOp, stampOf, threadsOp, parseThreads, newThreadId, describe as describeObject, COMMENTS, type ReviewChange, type ReviewThread, type Thread } from '@overlyx/core/html/review.ts';
 import { deliverableInfo, slideElements, blankDeck, untouchedPageTitle } from '@overlyx/core/html/deliverable.ts';
@@ -2112,22 +2113,21 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     if (selected.length) applyOps(selected.map(s => ({ t: 'style', path: s.path, set: { 'font-size': `${stepPt(sizePt(parseFloat(s.style.fontSize) || 16), delta > 0 ? 1 : -1)}pt` } })));
   };
   const exec = (command: string, value?: string) => toCanvas({ ol: 'exec', command, value });
-  /** a web font used for the first time: its stylesheet linked in the page's head */
-  const ensureFont = (google?: string) => {
-    if (!google) return;
+  /** A font used for the first time: embed a bundled face, or link its web stylesheet. */
+  const ensureFont = (css: string | null, google?: string) => {
     const cur = text.toString();
-    const fam = google.replace(/ /g, '+');
-    if (cur.includes(`family=${fam}`)) return;
+    const resource = fontResource(cur, css, google);
+    if (!resource) return;
     const head = elementAt(parseSource(cur).doc, [0]);
     if (!head || head.tagName !== 'head') return;
-    applyOps([{ t: 'insert', parent: [0], index: 1e6, html: `<link href="https://fonts.googleapis.com/css2?family=${fam}:ital,wght@0,400;0,700;1,400;1,700&display=swap" rel="stylesheet">` }]);
+    applyOps([{ t: 'insert', parent: [0], index: 1e6, html: resource }]);
   };
   const toggle = (prop: string, on: string, off: string, test: (s: SelItem) => boolean) => {
     const all = sel.every(test);
     styleSel({ [prop]: all ? off : on });
   };
   const textActions: DeckTextActions = {
-    family: (css, google) => { ensureFont(google); if (editingText) exec('fontName', css ?? 'inherit'); else styleSel({ 'font-family': css }); },
+    family: (css, google) => { ensureFont(css, google); if (editingText) exec('fontName', css ?? 'inherit'); else styleSel({ 'font-family': css }); },
     size: pt => { if (editingText) exec('fontSize', `${pt}pt`); else styleSel({ 'font-size': `${pt}pt` }); },
     bold: () => { if (editingText) exec('bold'); else toggle('font-weight', '700', '400', s => Number(s.style.fontWeight) >= 600); },
     italic: () => { if (editingText) exec('italic'); else toggle('font-style', 'italic', 'normal', s => s.style.fontStyle === 'italic'); },
@@ -2146,6 +2146,12 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
       setTimeout(() => exec(cmd), 60);
     },
     lineHeight: v => { if (editingText) exec('lineHeight', v); else styleSel({ 'line-height': v }); },
+    typography: set => {
+      if (!editingText) { styleSel(set); return; }
+      for (const [prop, v] of Object.entries(set)) exec('style', `${prop}:${v ?? 'normal'}`);
+    },
+    box: anchor => toCanvas({ ol: 'textBox', anchor }),
+    step: n => exec('inlineStep', String(n)),
     clear: () => { if (editingText) exec('removeFormat'); else styleSel({ 'font-weight': null, 'font-style': null, 'text-decoration': null, color: null, 'font-family': null }); },
   };
   const paint = (p: Paint) => toCanvas({ ol: 'paint', paint: p });
@@ -3249,7 +3255,10 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     if (!themeOn || kind !== 'deck') return null;
     try { return { theme: deckTheme(textNow), objects: masterObjects(textNow, current), layouts: savedLayoutCards() }; } catch (e) { console.warn('theme', e); return null; }
   }, [themeOn, kind, textNow, current]);
+  const fontInfo = useMemo(() => ({ embedded: embeddedFontFamilies(settledText), defaultFont: deckTheme(settledText).text.value }), [settledText]);
+  const fontWarning = (css: string) => fontPortabilityWarning(css, fontInfo.embedded);
   const bars = deckToolbar({
+    fontWarning, defaultFont: fontInfo.defaultFont,
     pageLabel: host.bindSvgExporter ? 'SVG' : undefined,
     guides: { shown: guidesShown, items: () => guideItems(currentRef.current, null).filter(m => !m.sep && !m.disabled && m.action).map(m => ({ label: m.label!, action: m.action!, active: m.checked })) },
     // (over selected words, the text tools show how the words look: their size, bold …, not the box's)
@@ -3262,7 +3271,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     // (the text being retyped ends first: its box does not take the undone version while it is retyped)
     undo: () => { toCanvas({ ol: 'stopText' }); setTimeout(() => host.undo(), 30); }, redo: () => { toCanvas({ ol: 'stopText' }); setTimeout(() => host.redo(), 30); },
     insertImage: () => { phPicture.current = null; fileInput.current?.click(); },
-    text: textActions, paint, arrange: arrangeSel, image: imageTools, remove: removeSel,
+    text: textActions, paint, arrange: arrangeSel, groupLayout: layout => toCanvas({ ol: 'groupLayout', layout }), image: imageTools, remove: removeSel,
     slideBackground,
     newSlide: () => newSlide(currentRef.current),
     layoutPicker: (close, apply) => layoutPicker(currentRef.current, close, apply),
@@ -3721,7 +3730,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
             close={() => { setReviewOpen(false); setDraft(null); setFocus(null); }} />
         )}
         {themeOn && themePane && themeInfo && !fullOn && (
-          <ThemePane theme={themeInfo.theme} objects={themeInfo.objects} slide={current} sel={sel} layouts={themeInfo.layouts}
+          <ThemePane theme={themeInfo.theme} fontWarning={fontWarning} objects={themeInfo.objects} slide={current} sel={sel} layouts={themeInfo.layouts}
             aspect={slideSizeNow().w / slideSizeNow().h} readOnly={locked} pick={pickAt}
             setColor={(name, value) => changeTheme({ color: name, value })}
             setFont={(which, css, google) => changeTheme({ font: which, value: css, google })}

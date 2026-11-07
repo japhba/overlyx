@@ -32,6 +32,25 @@ implement clear fixes, run minimal focused checks, and deploy without supervisio
 checkout and private persistent state. The runner commits and deploys with `--no-checks`; do not
 add review stages or broader test gates. See DOCS.md for operation and pause/resume commands.
 
+## No San Francisco fonts
+
+OverLyX never uses Apple's San Francisco fonts — SF Pro (any width, Rounded), SF Compact, SF Mono, SF
+Camera, New York — in the editor, documents, decks, articles, PDFs or the interface, and never the CSS
+keywords that resolve to them on Apple devices: `-apple-system`, `BlinkMacSystemFont`, `system-ui`,
+`ui-sans-serif`, `ui-serif`, `ui-monospace`, `ui-rounded` (the owner, 2 Nov 2026). Apple licenses them
+only for mock-ups of Apple-platform software. `tests/no-sf-fonts.test.ts` enforces it.
+
+## Only open fonts
+
+Every font OverLyX names is open (the owner, 3 Nov 2026): bundled faces (Instrument Sans, Fira Sans,
+Carlito, CMU Sans, DejaVu Sans, the editor's served fonts, "OL Inter", "OL Jost"), Google Fonts families
+(all open), Liberation, DejaVu, Noto, Roboto, and the generic keywords. No proprietary face in a stack,
+not even as a fallback: no Helvetica, Arial, Georgia, Times New Roman, Courier New, Verdana, Tahoma,
+Menlo, Consolas, Monaco, Calibri, Cambria, Segoe UI, Palatino, Futura, … End a stack in its generic
+family instead: `"OL Inter", Inter, sans-serif` for the interface, a bundled or Google font then
+`sans-serif` / `serif` for content, `"DejaVu Sans Mono", monospace` for code. `tests/open-fonts.test.ts`
+enforces it (starters-legacy keeps the starters as they shipped).
+
 ## Keyboard shortcuts are contextual (VS Code's model)
 
 A key may do different things in different places, as VS Code's keybindings carry a `when`

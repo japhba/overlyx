@@ -37,7 +37,7 @@ function install(on: boolean): void {
     html.ol-solo.ol-aside::before { content: ''; position: absolute; inset: calc(8px * var(--ol-px, 1)); pointer-events: none;
       border: calc(1.5px * var(--ol-px, 1)) dashed rgba(128, 128, 128, 0.45); border-radius: calc(12px * var(--ol-px, 1)); }
     html.ol-solo.ol-aside::after { content: 'Beside the slide · not shown when presenting'; position: absolute; left: var(--ol-pad-x); top: calc(var(--ol-pad-y) - 40px * var(--ol-px, 1));
-      pointer-events: none; font: 500 calc(12px * var(--ol-px, 1)) / 1.2 system-ui, -apple-system, sans-serif; color: rgba(40, 44, 52, 0.8); white-space: nowrap;
+      pointer-events: none; font: 500 calc(12px * var(--ol-px, 1)) / 1.2 sans-serif; color: rgba(40, 44, 52, 0.8); white-space: nowrap;
       text-shadow: 0 0 calc(3px * var(--ol-px, 1)) rgba(255, 255, 255, 0.85); }`;
   document.head.appendChild(css);
 }

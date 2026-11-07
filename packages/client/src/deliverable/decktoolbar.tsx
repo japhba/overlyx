@@ -11,13 +11,15 @@ import { useEffect, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import { mathPreview, type ToolButton, type Palette } from '../app/Toolbar';
 import { ColorGrid } from '../app/ColorGrid';
-import type { SelItem, Tool, Paint, ArrangeHow, DeliverableKind, NodeCmd } from './protocol';
+import type { SelItem, SelStyle, Tool, Paint, ArrangeHow, DeliverableKind, NodeCmd, GroupLayout } from './protocol';
+import { DEFAULT_GROUP_LAYOUT } from './grouplayout';
 import { ASPECTS } from './runtime/crop';
 import { fmtPt, ptToPx, pxToPt, sizePt, stepPt } from './units';
 import { drawingToolbar } from './drawingToolbar';
 import { type DeckInk, type DeckInkPatch, LASSO_KINDS } from './deckink';
 import { lassoGroups } from './lassobar';
 import { PH_ROLES, PH_LABELS, type PhRole } from './decklayouts';
+import { bundledFont, firstFontFamily } from './deckfonts';
 import './deckicons';
 
 export interface DeckTextActions {
@@ -31,11 +33,18 @@ export interface DeckTextActions {
   valign(v: 'flex-start' | 'center' | 'flex-end'): void;
   list(kind: 'ul' | 'ol'): void;
   lineHeight(v: string): void;
+  /** typographic properties (null: back to the inherited value) */
+  typography?(set: Record<string, string | null>): void;
+  box?(anchor: 'fixed' | 'left' | 'center' | 'right'): void;
+  step(n: number): void;
   clear(): void;
 }
 
 export interface DeckCtx {
   kind: DeliverableKind;
+  fontWarning?(css: string): string | null;
+  /** The deck's text font, for the warning when no object is selected. */
+  defaultFont?: string | null;
   pageLabel?: string;
   tool: Tool;
   setTool(t: Tool): void;
@@ -47,6 +56,7 @@ export interface DeckCtx {
   text: DeckTextActions;
   paint(p: Paint): void;
   arrange(how: ArrangeHow): void;
+  groupLayout(layout: GroupLayout): void;
   image: {
     /** crop mode is on (the picture's frame, Done / Cancel) */
     cropping: boolean;
@@ -187,24 +197,26 @@ function mathGroups(c: DeckCtx): ToolButton[][] {
   ];
 }
 
-/** fonts offered: the web fonts load from Google Fonts (a <link> is added to the page when one is first used) */
+/** Bundled choices are embedded; other web fonts load from Google Fonts when first used. */
 export const DECK_FONTS: { label: string; css: string | null; google?: string }[] = [
   { label: 'Default', css: null },
-  { label: 'Inter', css: 'Inter, system-ui, sans-serif', google: 'Inter' },
-  { label: 'Roboto', css: 'Roboto, system-ui, sans-serif', google: 'Roboto' },
-  { label: 'Open Sans', css: '"Open Sans", system-ui, sans-serif', google: 'Open Sans' },
-  { label: 'Lato', css: 'Lato, system-ui, sans-serif', google: 'Lato' },
-  { label: 'Montserrat', css: 'Montserrat, system-ui, sans-serif', google: 'Montserrat' },
-  { label: 'Poppins', css: 'Poppins, system-ui, sans-serif', google: 'Poppins' },
-  { label: 'Source Sans 3', css: '"Source Sans 3", system-ui, sans-serif', google: 'Source Sans 3' },
-  { label: 'Merriweather', css: 'Merriweather, Georgia, serif', google: 'Merriweather' },
-  { label: 'Lora', css: 'Lora, Georgia, serif', google: 'Lora' },
-  { label: 'Playfair Display', css: '"Playfair Display", Georgia, serif', google: 'Playfair Display' },
-  { label: 'EB Garamond', css: '"EB Garamond", Georgia, serif', google: 'EB Garamond' },
-  { label: 'Source Code Pro', css: '"Source Code Pro", ui-monospace, monospace', google: 'Source Code Pro' },
-  { label: 'System sans-serif', css: 'system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif' },
-  { label: 'Georgia', css: 'Georgia, "Times New Roman", serif' },
-  { label: 'Courier', css: '"Courier New", Courier, monospace' },
+  { label: 'Instrument Sans (bundled)', css: '"Instrument Sans", sans-serif' },
+  { label: 'Fira Sans (bundled)', css: '"Fira Sans", sans-serif' },
+  { label: 'Carlito (bundled)', css: 'Carlito, sans-serif' },
+  { label: 'CMU Sans (bundled)', css: '"CMU Sans", sans-serif' },
+  { label: 'DejaVu Sans (bundled)', css: '"DejaVu Sans", sans-serif' },
+  { label: 'Inter', css: 'Inter, sans-serif', google: 'Inter' },
+  { label: 'Roboto', css: 'Roboto, sans-serif', google: 'Roboto' },
+  { label: 'Open Sans', css: '"Open Sans", sans-serif', google: 'Open Sans' },
+  { label: 'Lato', css: 'Lato, sans-serif', google: 'Lato' },
+  { label: 'Montserrat', css: 'Montserrat, sans-serif', google: 'Montserrat' },
+  { label: 'Poppins', css: 'Poppins, sans-serif', google: 'Poppins' },
+  { label: 'Source Sans 3', css: '"Source Sans 3", sans-serif', google: 'Source Sans 3' },
+  { label: 'Merriweather', css: 'Merriweather, serif', google: 'Merriweather' },
+  { label: 'Lora', css: 'Lora, serif', google: 'Lora' },
+  { label: 'Playfair Display', css: '"Playfair Display", serif', google: 'Playfair Display' },
+  { label: 'EB Garamond', css: '"EB Garamond", serif', google: 'EB Garamond' },
+  { label: 'Source Code Pro', css: '"Source Code Pro", monospace', google: 'Source Code Pro' },
 ];
 
 export const SHAPES: { tool: Tool; label: string }[] = [
@@ -214,7 +226,30 @@ export const SHAPES: { tool: Tool; label: string }[] = [
 // (freehand strokes: Draw, a tool of its own)
 export const LINES: { tool: Tool; label: string }[] = [{ tool: 'line', label: 'Line' }, { tool: 'arrow', label: 'Arrow' }, { tool: 'bezier', label: 'Path: click for corners, drag for curves (B)' }];
 
-const firstFamily = (css: string) => css.split(',')[0].trim().replace(/^["']|["']$/g, '');
+const firstFamily = firstFontFamily;
+
+/** Text ▸ Typography: weight, width (variable fonts' wdth axis, e.g. Instrument Sans), tracking, caps, figures, ligatures */
+export const TYPOGRAPHY: { group: string; label: string; set: Record<string, string | null>; on?: (st: SelStyle) => boolean }[] = [
+  ...([['Light', '300'], ['Regular', '400'], ['Medium', '500'], ['Semibold', '600'], ['Bold', '700'], ['Black', '900']] as const).map(([label, w]) => ({
+    group: 'Weight', label, set: { 'font-weight': w }, on: (st: SelStyle) => st.fontWeight === w })),
+  ...([['Condensed', '75%'], ['Semi-condensed', '87.5%'], ['Normal width', '100%']] as const).map(([label, v]) => ({
+    group: 'Width', label, set: { 'font-stretch': v === '100%' ? null : v }, on: (st: SelStyle) => (st.fontStretch === 'normal' || !st.fontStretch ? '100%' : st.fontStretch) === v })),
+  ...([['Tight', '-0.02em'], ['Normal spacing', null], ['Wide', '0.05em'], ['Wider', '0.1em']] as const).map(([label, v]) => ({
+    group: 'Letter spacing', label, set: { 'letter-spacing': v }, on: v === null ? (st: SelStyle) => (st.letterSpacing ?? 'normal') === 'normal' : undefined })),
+  { group: 'Caps', label: 'Small caps', set: { 'font-variant-caps': 'small-caps' }, on: st => st.fontVariantCaps === 'small-caps' },
+  { group: 'Caps', label: 'Normal caps', set: { 'font-variant-caps': null }, on: st => (st.fontVariantCaps ?? 'normal') === 'normal' },
+  ...([['Tabular figures', 'tabular-nums'], ['Proportional figures', 'proportional-nums'], ['Old-style figures', 'oldstyle-nums'], ['Lining figures', 'lining-nums']] as const).map(([label, v]) => ({
+    group: 'Figures', label, set: { 'font-variant-numeric': v }, on: (st: SelStyle) => (st.fontVariantNumeric ?? '').includes(v) })),
+  { group: 'Ligatures', label: 'Ligatures', set: { 'font-variant-ligatures': null }, on: st => (st.fontVariantLigatures ?? 'normal') === 'normal' },
+  { group: 'Ligatures', label: 'No ligatures', set: { 'font-variant-ligatures': 'none' }, on: st => st.fontVariantLigatures === 'none' },
+];
+
+function typographyBtn(st: SelStyle | undefined, apply: (set: Record<string, string | null>) => void): ToolButton {
+  return { id: 'dk-typography', title: 'Typography: weight, width, letter spacing, small caps, figures, ligatures', icon: '',
+    html: '<span class="dk-font-sample" style="font-weight:600;letter-spacing:.02em">Ag</span>',
+    palette: { title: 'Typography', list: true, cols: 1, items: TYPOGRAPHY.map(t => ({
+      label: `${t.group} · ${t.label}`, active: !!st && !!t.on?.(st), action: () => apply(t.set) })) } };
+}
 
 /** − [size] + : Google's font size box, in points */
 function SizeBox({ pt, onSet }: { pt: number; onSet: (pt: number) => void }) {
@@ -243,6 +278,34 @@ function Slider({ value, onSet, label }: { value: number; onSet: (v: number) => 
   );
 }
 
+function InlineStepPicker({ onSet, close }: { onSet: (step: number) => void; close: () => void }) {
+  const [value, setValue] = useState('2');
+  const step = Number(value);
+  return <form class="dk-inline-step" onSubmit={e => { e.preventDefault(); if (Number.isSafeInteger(step) && step >= 1) { onSet(step); close(); } }}>
+    <label>Appear on step <input type="number" min="1" step="1" value={value} aria-label="Appear on step" onInput={e => setValue((e.target as HTMLInputElement).value)} /></label>
+    <button type="submit" class="small-btn" disabled={!Number.isSafeInteger(step) || step < 1} onMouseDown={e => e.preventDefault()}>Apply to selected words</button>
+    <span>Select words in one paragraph first. Step 1 shows them from the start; step 2 is the first click.</span>
+  </form>;
+}
+
+function GroupLayoutPicker({ layout, onSet, close }: { layout: GroupLayout; onSet: (layout: GroupLayout) => void; close: () => void }) {
+  const [value, setValue] = useState(layout);
+  const free = value.direction === 'free';
+  const valid = Number.isFinite(value.gap) && value.gap >= 0 && value.gap <= 2000;
+  return <form class="dk-group-layout" onSubmit={e => { e.preventDefault(); if (valid) { onSet(value); close(); } }}>
+    <label>Layout <select aria-label="Group layout" value={value.direction} onChange={e => setValue({ ...value, direction: e.currentTarget.value as GroupLayout['direction'] })}>
+      <option value="free">Free</option><option value="row">Row</option><option value="column">Column</option>
+    </select></label>
+    <label>Gap (px) <input type="number" min="0" max="2000" step="1" aria-label="Group gap (px)" disabled={free} value={value.gap} onInput={e => setValue({ ...value, gap: e.currentTarget.valueAsNumber })} /></label>
+    <label>Align items <select aria-label="Group item alignment" disabled={free} value={value.align} onChange={e => setValue({ ...value, align: e.currentTarget.value as GroupLayout['align'] })}>
+      <option value="flex-start">Start</option><option value="center">Centre</option><option value="flex-end">End</option><option value="stretch">Stretch</option>
+    </select></label>
+    <label><input type="checkbox" disabled={free} checked={value.equal} onChange={e => setValue({ ...value, equal: e.currentTarget.checked })} />{value.direction === 'column' ? 'Equal heights' : 'Equal widths'}</label>
+    <button type="submit" class="small-btn" disabled={!valid}>Apply</button>
+    <span>Ctrl+click to edit an item. Free layout lets you position items independently.</span>
+  </form>;
+}
+
 const swatchIcon = (glyph: string, color: string | null) => `<svg viewBox="0 0 16 16">${glyph}<rect x="2" y="12.6" width="12" height="2.6" rx="0.5" fill="${color ?? 'none'}" stroke="${color ? 'none' : 'currentColor'}" stroke-width="0.7"/></svg>`;
 
 /** a named run of the contextual tools: what they act on, named as the selection's label on the canvas (runtime edit.ts selectionLabel) */
@@ -263,7 +326,7 @@ function paintLabel(items: SelItem[]): string {
  * Over `words` selected in a text being retyped: what is done to words — font, size, bold … highlight, a link —, then `extra`.
  */
 const QUICK: string[][] = [['dk-ph-addpicture'], ['dk-b', 'dk-i', 'dk-color', 'dk-size'], ['dk-align'], ['dk-inkcolor', 'dk-ink-thinner', 'dk-ink-thicker', 'dk-ink-convert', 'dk-fill', 'dk-stroke'], ['dk-linecolor', 'dk-lineweight', 'dk-tips'], ['dk-crop', 'dk-nobg'], ['dk-group', 'dk-ungroup', 'dk-arrange']];
-const QUICK_WORDS: string[][] = [['dk-font', 'dk-size'], ['dk-b', 'dk-i', 'dk-u', 'dk-color', 'dk-hl'], ['dk-href']];
+const QUICK_WORDS: string[][] = [['dk-font', 'dk-size'], ['dk-b', 'dk-i', 'dk-u', 'dk-color', 'dk-hl'], ['dk-href', 'dk-inline-step']];
 export function quickGroups(sections: ToolSection[], extra: ToolButton[], words = false): ToolButton[][] {
   const all = new Map<string, ToolButton>();
   for (const sec of sections) for (const g of sec.groups) for (const b of g) all.set(b.id, b);
@@ -296,7 +359,7 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
     ],
     [
       { id: 'dk-select', title: 'Select and move (V)', icon: 'dk-select', action: () => c.setTool('select'), active: c.tool === 'select' },
-      { id: 'dk-text', title: 'Text box (T) — click or drag on the slide', icon: 'dk-text', action: () => c.setTool('text'), active: c.tool === 'text', disabled: ro },
+      { id: 'dk-text', title: 'Text box (T) — click for auto width, drag for wrapping text', icon: 'dk-text', action: () => c.setTool('text'), active: c.tool === 'text', disabled: ro },
       { id: 'dk-shapes', title: 'Shapes (R rectangle, O ellipse)', icon: shapeTool ? `dk-${shapeTool.tool}` : 'dk-shapes', active: !!shapeTool, disabled: ro,
         palette: { title: 'Shapes', cols: 4, items: SHAPES.map(s => ({ label: s.label, html: ICON(`dk-${s.tool}`), active: c.tool === s.tool, action: () => c.setTool(s.tool) })) } },
       { id: 'dk-lines', title: 'Lines (L line, A arrow, B Bézier path)', icon: lineTool ? `dk-${lineTool.tool}` : 'dk-line', active: !!lineTool, disabled: ro,
@@ -343,19 +406,23 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
     const st = one?.style;
     const pt = st ? sizePt(parseFloat(st.fontSize) || 0) : 0;
     const fam = st ? firstFamily(st.fontFamily) : '';
+    const warning = [...new Set(sel.filter(s => s.canText || s.text).map(s => c.fontWarning?.(s.style.fontFamily)).filter(Boolean))].join('\n');
     const bold = sel.length > 0 && sel.every(s => Number(s.style.fontWeight) >= 600);
     const italic = sel.length > 0 && sel.every(s => s.style.fontStyle === 'italic');
     const under = sel.length > 0 && sel.every(s => s.style.textDecoration.includes('underline'));
     context.push([
-      { id: 'dk-font', title: 'Font', icon: '', html: `<span class="dk-font-face">${escHtml(fam || 'Font')}</span>`,
-        palette: { title: 'Font', list: true, cols: 1, items: DECK_FONTS.map(f => ({ label: f.label, html: `<span class="dk-font-sample" style="font-family:${escAttr(f.css ?? 'inherit')}">Aa</span>`, active: !!f.css && firstFamily(f.css) === fam, action: () => c.text.family(f.css, f.google) })) } },
+      { id: 'dk-font', title: warning || 'Font', icon: '', html: `<span class="dk-font-face">${warning ? '⚠ ' : ''}${escHtml(fam || 'Font')}</span>`,
+        palette: { title: 'Font', list: true, cols: 1, items: DECK_FONTS.map(f => {
+          const warn = f.css && !bundledFont(f.css) ? c.fontWarning?.(f.css) : null;
+          return { label: f.label + (warn ? ' ⚠' : ''), title: warn || f.label, html: `<span class="dk-font-sample" style="font-family:${escAttr(f.css ?? 'inherit')}">Aa</span>`, active: !!f.css && firstFamily(f.css) === fam, action: () => c.text.family(f.css, f.google) };
+        }) } },
       { id: 'dk-size', title: 'Font size (pt)', icon: '', widget: () => <SizeBox pt={pt} onSet={c.text.size} /> },
     ]);
     context.push([
       { id: 'dk-b', title: 'Bold (Ctrl+B)', icon: 'dk-bold', action: c.text.bold, active: bold },
       { id: 'dk-i', title: 'Italic (Ctrl+I)', icon: 'dk-italic', action: c.text.italic, active: italic },
       { id: 'dk-u', title: 'Underline (Ctrl+U)', icon: 'dk-underline', action: c.text.underline, active: under },
-      { id: 'dk-color', title: 'Text colour', icon: '', html: swatchIcon('<text x="3.6" y="10.4" font-size="10.5" font-family="system-ui, sans-serif" fill="currentColor">A</text>', st?.color ?? null),
+      { id: 'dk-color', title: 'Text colour', icon: '', html: swatchIcon('<text x="3.6" y="10.4" font-size="10.5" font-family="sans-serif" fill="currentColor">A</text>', st?.color ?? null),
         palette: { title: 'Text colour', render: close => <ColorGrid current={st?.color ?? null} close={close} onPick={col => c.text.color(col)} /> } },
       ...(c.editingText ? [{ id: 'dk-hl', title: 'Highlight colour (of the selected words)', icon: '', html: swatchIcon(ICONSVG.highlight, null),
         palette: { title: 'Highlight', render: (close: () => void) => <ColorGrid current={null} close={close} none="None" onPick={col => c.text.highlight(col)} /> } } as ToolButton] : []),
@@ -372,6 +439,10 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
         { id: 'dk-dmath', title: 'Display formula (Ctrl+Shift+M)', icon: 'dmath', action: () => c.math.insert(true) },
       ],
     );
+    if (c.editingText && c.kind === 'deck') context.push([
+      { id: 'dk-inline-step', title: 'Appear on step… (selected words)', icon: 'dk-step',
+        palette: { title: 'Selected words', render: close => <InlineStepPicker onSet={c.text.step} close={close} /> } },
+    ]);
     const al = st?.textAlign ?? 'left';
     context.push([
       { id: 'dk-align', title: 'Alignment', icon: al === 'center' ? 'aligncenter' : al === 'right' || al === 'end' ? 'alignright' : 'alignleft',
@@ -388,9 +459,17 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
         ] } },
       { id: 'dk-ul', title: 'Bulleted list (Ctrl+Shift+8)', icon: 'dk-bullets', action: () => c.text.list('ul') },
       { id: 'dk-ol', title: 'Numbered list (Ctrl+Shift+7)', icon: 'dk-numbers', action: () => c.text.list('ol') },
+      ...(c.text.typography ? [typographyBtn(st, c.text.typography)] : []),
       { id: 'dk-more-text', title: 'More text options', icon: 'dk-lines',
         palette: { title: 'Text', list: true, cols: 1, items: [
           { label: 'Strikethrough', html: ICON('dk-strike'), action: c.text.strike },
+          ...(c.text.box && sel.some(s => s.textBox) && !c.editingText ? [
+            ...(['left', 'center', 'right'] as const).map(anchor => ({
+              label: `Auto width · ${anchor === 'center' ? 'centre' : anchor} anchor`,
+              active: one?.textBox === anchor, action: () => c.text.box!(anchor),
+            })),
+            { label: 'Fixed width · wrap text', active: one?.textBox === 'fixed', action: () => c.text.box!('fixed') },
+          ] : []),
           ...['1', '1.15', '1.5', '2'].map(v => ({ label: `Line spacing ${v}`, html: ICON('dk-lines'), active: lineSpacing(st) === v, action: () => c.text.lineHeight(v) })),
           { label: 'Clear formatting (Ctrl+\\)', html: ICON('dk-clear'), action: c.text.clear },
           // (Keynote's Update style: the master's text styles, kept in the slides' own markup)
@@ -479,6 +558,8 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
     context.push([
       ...(sel.length > 1 ? [{ id: 'dk-group', title: 'Group (Ctrl+G) — moved and resized as one; Ctrl+click an object in it to move it alone', icon: 'dk-group', action: () => c.arrange('group') }] : []),
       ...(isGroup ? [{ id: 'dk-ungroup', title: 'Ungroup (Ctrl+Shift+G)', icon: 'dk-ungroup', action: () => c.arrange('ungroup') }] : []),
+      ...(one?.kind === 'group' && one.tag !== 'svg' ? [{ id: 'dk-group-layout', title: 'Group layout: free, row or column, gap and alignment', icon: 'dk-group',
+        palette: { title: 'Group layout', render: (close: () => void) => <GroupLayoutPicker layout={one.layout ?? DEFAULT_GROUP_LAYOUT} onSet={c.groupLayout} close={close} /> } }] : []),
       { id: 'dk-arrange', title: 'Arrange: order, align, rotate, group', icon: 'dk-arrange',
         palette: { title: 'Arrange', list: true, cols: 1, items: [
           { label: 'Bring to front (Ctrl+Shift+↑)', html: ICON('dk-arrange'), action: () => c.arrange('front') },
@@ -503,6 +584,10 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
           { label: 'Flip horizontally', html: ICON('dk-flip'), action: () => c.arrange('flip-h') },
           { label: 'Flip vertically', html: ICON('dk-flip'), action: () => c.arrange('flip-v') },
           ...(sel.length > 1 ? [{ label: 'Group (Ctrl+G)', html: ICON('dk-group'), action: () => c.arrange('group') }] : []),
+          ...(sel.length > 1 && sel.every(s => s.kind !== 'svgpart') ? [
+            { label: 'Group in a row', html: ICON('dk-group'), action: () => c.arrange('group-row') },
+            { label: 'Group in a column', html: ICON('dk-group'), action: () => c.arrange('group-column') },
+          ] : []),
           ...(isGroup ? [{ label: 'Ungroup (Ctrl+Shift+G)', html: ICON('dk-ungroup'), action: () => c.arrange('ungroup') }] : []),
         ] } },
       ...(sel.some(s => s.kind === 'shape' || s.kind === 'svg' || s.kind === 'svgpart' || s.kind === 'line') ? [{
@@ -520,6 +605,7 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
     const deck = c.kind === 'deck';
     const theme = deck && c.theme?.on;
     const what = theme ? 'Theme' : c.pageLabel ?? (c.kind === 'poster' ? 'Poster' : 'Slide');
+    const warning = c.defaultFont ? c.fontWarning?.(c.defaultFont) : null;
     section(what);
     // (words on the buttons, as Google Slides' Background, Layout and Edit theme: what they do is not drawn easily)
     context.push([
@@ -529,6 +615,8 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
         palette: { title: 'Layout of this slide', render: (close: () => void) => c.layoutPicker(close, true) } } as ToolButton] : []),
       ...(deck && c.theme ? [{ id: 'dk-theme', icon: theme ? 'Done' : 'Edit theme', active: theme, disabled: c.theme.disabled && !theme, action: c.theme.toggle,
         title: theme ? 'Done: back to the slides (Esc)' : 'Edit theme — the slide master: what is on every slide (a logo, a bar, the slide number), the deck’s colours and fonts, its layouts; what you add or change there is on every slide' } as ToolButton] : []),
+      ...(warning ? [{ id: 'dk-font-warning', icon: '⚠ Font', title: warning,
+        palette: { title: 'Font portability', render: () => <div class="dl-anim-hint">{warning}</div> } } as ToolButton] : []),
     ]);
     context.push([
       { id: 'dk-guides', title: 'Guides: lines objects snap to — every slide’s (the master’s) and a slide’s own; drag one to move it (Alt: a copy), off the slide to remove it (also: right-click the slide)', icon: 'dk-guides', active: c.guides.shown,

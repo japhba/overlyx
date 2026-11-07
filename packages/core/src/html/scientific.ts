@@ -97,7 +97,8 @@ https://www.gnu.org/licenses/gpl-3.0.html (applies to the Focus adaptation).
 CambridgeUS: copyright 2004 Madhusudan Singh and the Beamer contributors, GPL v3 or later
 (upstream GPL/LPPL dual license; applies to the CambridgeUS adaptation).
 MIT poster templates: CC0 1.0, https://github.com/MIT-BECL/Poster_Resources/blob/master/License-Templates
-Carlito, Fira Sans and CMU Sans fonts: SIL Open Font License 1.1, https://openfontlicense.org/
+Instrument Sans, Carlito, Fira Sans and CMU Sans fonts: SIL Open Font License 1.1, https://openfontlicense.org/;
+DejaVu Sans: Bitstream Vera and Arev licences (below)
 All plots are generated from the analytical functions described in the captions.
 ${(SYMPOSIUM_POSTERS as readonly string[]).includes(t.id) ? 'This layout is replicated from a 2026 research-symposium poster: every word is lorem ipsum, its\nfigures are placeholders with made-up values, and no people or logos are included.\n' : ''}These are teaching examples, not experimental measurements or published research results.
 
@@ -114,7 +115,7 @@ ${TEMPLATE_FONT_LICENSE}
   ${TEMPLATE_FONTS[font]}
   :root { --paper: ${t.background}; --ink: ${t.ink}; --accent: ${t.accent}; --muted: ${t.muted}; --secondary: ${t.secondary ?? (t.id === 'dark-seminar' ? '#f1be75' : '#bc6747')}; }
   * { box-sizing: border-box; }
-  body { margin: 0; background: #dce0e4; color: var(--ink); font-family: "${font}", Arial, Helvetica, sans-serif; }
+  body { margin: 0; background: #dce0e4; color: var(--ink); font-family: "${font}", sans-serif; }
   .slide { width: ${t.width}${poster ? 'mm' : 'px'}; height: ${t.height}${poster ? 'mm' : 'px'}; position: relative; overflow: hidden; background: var(--paper); margin: 0 auto ${poster ? '0' : '40px'}; }
   h1, h2, h3, p { margin: 0; }
   h1, h2 { font-family: inherit; font-weight: 700; }

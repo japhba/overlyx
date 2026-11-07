@@ -932,7 +932,7 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
         </g>
         {head && <circle cx={head[0]} cy={head[1]} r={8 * k} fill={color} fill-opacity={0.5} />}
         {head && <circle cx={head[0]} cy={head[1]} r={2.2 * k} fill="#fff" fill-opacity={0.9} />}
-        {head && name && <text x={head[0] + 12 * k} y={head[1] - 8 * k} font-size={11 * k} fill={color} font-family="system-ui, sans-serif">{name}</text>}
+        {head && name && <text x={head[0] + 12 * k} y={head[1] - 8 * k} font-size={11 * k} fill={color} font-family="sans-serif">{name}</text>}
       </svg>
     );
   };

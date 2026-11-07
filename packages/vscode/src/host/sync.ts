@@ -15,6 +15,8 @@
  * "Not Now"), since nobody opened it on purpose and its first sync merges what changed on both sides;
  * until then it is paused, and its status bar item starts it. A submodule's detached HEAD is put on
  * the server's branch by the engine (attachDetachedHead) when that changes no file and loses no commit.
+ * Accepted clones and their Pause setting are remembered on this computer: removing a workspace
+ * folder or reopening the window with another workspace does not silently stop their sync.
  *
  * The engine is the CLI's (packages/cli/bin/overlyx.js, bundled: `overlyx sync --watch` does the
  * same in a terminal, and the two never run on one clone at once). Here it adds: files with unsaved
@@ -58,6 +60,10 @@ const hostName = (h: string) => new URL(h).host;
 const PAUSED = (dir: string) => `overlyx.sync.paused:${dir}`;
 const ANNOUNCED = (dir: string) => `overlyx.sync.announced:${dir}`;
 const ASKED = (dir: string) => `overlyx.sync.asked:${dir}`;
+// Machine-local extension state survives a change of workspace (which can restart the extension host).
+const CLONE_PREFIX = 'overlyx.sync.clone:';
+const CLONE = (dir: string) => CLONE_PREFIX + dir;
+interface RememberedClone { host: string; project: string; paused: boolean }
 const time = (t: number) => new Date(t).toLocaleTimeString();
 const projectUrl = (t: SyncTarget) => `${t.host}/#/${t.project.split('/').map(encodeURIComponent).join('/')}`;
 const inside = (file: string, dir: string) => file.startsWith(dir + path.sep);
@@ -116,7 +122,10 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
   const syncs = new Map<string, FolderSync>();
   const config = () => vscode.workspace.getConfiguration('overlyx');
   const enabled = () => config().get<boolean>('sync.enabled') ?? true;
-  const paused = (dir: string) => context.workspaceState.get<boolean>(PAUSED(dir)) ?? false;
+  const remembered = (dir: string) => context.globalState.get<RememberedClone>(CLONE(dir));
+  const paused = (dir: string) => remembered(dir)?.paused ?? context.workspaceState.get<boolean>(PAUSED(dir)) ?? false;
+  const remember = (f: FolderSync, on = paused(f.dir)) => context.globalState.update(CLONE(f.dir), { host: f.target.host, project: f.target.project, paused: on });
+  let disposed = false;
   const log = (dir: string, line: string) => out.appendLine(`[${time(Date.now())}]${syncs.size > 1 ? ` ${path.basename(dir)}:` : ''} ${line}`);
 
   /** a file of `dir` with unsaved changes in an editor: the sync neither overwrites nor sends it until it is saved */
@@ -129,7 +138,7 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
     let text: string, detail: string;
     if (!enabled() || paused(f.dir)) { text = `$(debug-pause) OverLyX${name}`; detail = f.unasked ? 'Not kept in step with the server yet — click to start.' : 'Sync paused — click to resume.'; }
     else if (f.signin) { text = `$(account) OverLyX${name}: sign in`; detail = 'Not signed in — click to sign in through the browser.'; }
-    else if (f.problem || !s) { text = `$(sync) OverLyX${name}`; detail = f.problem ?? 'Starting…'; }
+    else if (f.problem || !s) { text = `$(${f.problem ? 'warning' : 'sync'}) OverLyX${name}`; detail = f.problem ?? 'Starting…'; }
     else {
       const icon = s.state === 'syncing' ? (f.spin ? 'sync' : 'sync~spin') : s.state === 'offline' ? 'cloud-offline' : s.state === 'error' ? 'error' : s.state === 'paused' ? 'debug-pause'
         : s.state === 'signin' ? 'account' : s.conflicts.length ? 'warning' : s.waiting.length ? 'sync' : 'check';
@@ -143,8 +152,9 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
       if (s.state === 'idle' && s.message) lines.push(s.message);
       detail = lines.filter(Boolean).join('\n\n');
     }
+    if (!vscode.workspace.getWorkspaceFolder(vscode.Uri.file(f.dir))) detail += '\n\nThis clone is outside this workspace. Pause or resume it from this item.';
     f.item.text = text;
-    f.item.tooltip = new vscode.MarkdownString(`${where}\n\n${detail}`);
+    f.item.tooltip = new vscode.MarkdownString(`${where}\n\n${f.dir}\n\n${detail}`);
     f.item.show();
   }
 
@@ -194,6 +204,8 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
       isBusy: busy(f.dir),
       log: line => log(f.dir, line),
     });
+    // Pause, disposal or an enclosing clone may have taken over while credentials were read.
+    if (disposed || syncs.get(f.dir) !== f || !enabled() || paused(f.dir)) return;
     if (!r.engine) { f.problem = r.error ?? null; f.signin = !!r.signin; render(f); if (f.signin) offerSignIn(f.target); return; }
     f.problem = null; f.signin = false;
     const engine = r.engine;
@@ -209,6 +221,8 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
         return c;
       } catch (e) { track?.('failed', performance.now() - started); throw e; }
     };
+    await remember(f);
+    if (disposed || syncs.get(f.dir) !== f || !enabled() || paused(f.dir)) return;
     f.engine = engine;
     f.unasked = false;
     if (!syncedBefore(f.dir) && !context.workspaceState.get<boolean>(ASKED(f.dir)) && !context.workspaceState.get<boolean>(ANNOUNCED(f.dir))) {
@@ -218,7 +232,10 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
     }
     log(f.dir, `syncing ${f.dir} with ${f.target.project} on ${f.target.host}`);
     render(f);
-    void engine.watch({ watchFiles: true }).catch(e => { report(e, 'sync.watch'); log(f.dir, `stopped: ${String(e)}`); });
+    void engine.watch({ watchFiles: true }).catch(e => {
+      report(e, 'sync.watch'); log(f.dir, `stopped: ${String(e)}`);
+      if (f.engine === engine) { disconnect(f); f.problem = 'Automatic sync stopped — click to retry or show the sync log.'; render(f); }
+    });
   }
 
   function disconnect(f: FolderSync): void {
@@ -229,6 +246,7 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
 
   async function setPaused(f: FolderSync, on: boolean): Promise<void> {
     await context.workspaceState.update(PAUSED(f.dir), on || undefined);
+    if (remembered(f.dir)) await remember(f, on);
     if (on) { disconnect(f); log(f.dir, 'paused'); }
     else await connect(f);
   }
@@ -253,13 +271,16 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
 
   /** `dir` synced if its git remote is a project on a known server; false when it is not a clone of one.
    *  `found`: by the search of a workspace folder (not opened or cloned on purpose), so a first sync asks. */
-  async function addClone(dir: string, nested: boolean, found = false): Promise<boolean> {
+  async function addClone(dir: string, nested: boolean, found = false, expected?: RememberedClone): Promise<boolean> {
+    if (disposed) return false;
     if (syncs.has(dir)) return true;
     if (adding.has(dir) || [...syncs.keys()].some(d => inside(dir, d))) return false;
     adding.add(dir);
     try {
       const target = await syncTarget(dir);
-      if (!target) return false;
+      if (!target || disposed) return false;
+      // A different repository at an old path has not been authorized by remembering that path.
+      if (expected && (target.host !== expected.host || target.project !== expected.project)) return false;
       const servers = [...knownSyncHosts(), ...(config().get<string[]>('sync.servers') ?? []).map(h => h.replace(/\/$/, ''))];
       if (!servers.includes(target.host) || syncs.has(dir)) return false;
       const item = vscode.window.createStatusBarItem(`overlyx.sync:${dir}`, vscode.StatusBarAlignment.Left, 40);
@@ -270,6 +291,7 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
       // a nested clone found before the folder it sits in (two scans racing) gives way to it
       for (const d of [...syncs.keys()]) if (inside(d, dir)) removeFolder(d);
       webChanged();
+      if (syncedBefore(dir)) await remember(f);
       if (found && enabled() && !paused(dir) && !context.workspaceState.get<boolean>(ASKED(dir)) && !syncedBefore(dir)) { void ask(f); return true; }
       f.unasked = found && paused(dir) && !syncedBefore(dir);
       await connect(f);
@@ -434,6 +456,17 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
     for (const d of vscode.workspace.textDocuments) void addCloneOf(d.uri).catch(e => report(e, 'sync.folder'));
   }
 
+  async function restoreClones(): Promise<void> {
+    // Parents first, as in workspace discovery: never run two engines for overlapping folders.
+    const keys = context.globalState.keys().filter(k => k.startsWith(CLONE_PREFIX)).sort((a, b) => a.length - b.length);
+    for (const key of keys) {
+      const dir = key.slice(CLONE_PREFIX.length), saved = remembered(dir);
+      if (!saved || !path.isAbsolute(dir) || !fs.existsSync(path.join(dir, '.git'))) continue;
+      const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(dir));
+      await addClone(dir, !!folder && folder.uri.fsPath !== dir, false, saved);
+    }
+  }
+
   /** the synced clone a file belongs to (the innermost one: a nested clone is not its folder's) */
   const owner = (file: string): FolderSync | undefined => [...syncs.values()].filter(f => inside(file, f.dir)).sort((a, b) => b.dir.length - a.dir.length)[0];
 
@@ -477,7 +510,7 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
 
   context.subscriptions.push(
     out,
-    { dispose: () => { for (const dir of [...syncs.keys()]) removeFolder(dir); } },
+    { dispose: () => { disposed = true; for (const dir of [...syncs.keys()]) removeFolder(dir); } },
     vscode.commands.registerCommand('overlyx.syncNow', async (dir?: string) => {
       const f = pick(dir);
       if (!f) return none();
@@ -527,13 +560,17 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
     vscode.workspace.onDidSaveTextDocument(d => { if (d.uri.scheme === 'file') owner(d.uri.fsPath)?.engine?.poke?.(); }),
     vscode.window.onDidChangeWindowState(s => {
       if (!s.focused) return;
-      for (const f of syncs.values()) { if (f.engine) f.engine.poke?.(); else if (!f.signin) void connect(f); }
+      for (const f of syncs.values()) { if (paused(f.dir)) disconnect(f); else if (f.engine) f.engine.poke?.(); else if (!f.signin) void connect(f); }
       // a clone made meanwhile (git clone in a terminal) inside a workspace folder
       if (enabled() && Date.now() - scanned > RESCAN_MS) rescan();
     }),
     vscode.workspace.onDidOpenTextDocument(d => void addCloneOf(d.uri).catch(e => report(e, 'sync.folder'))),
     vscode.workspace.onDidChangeWorkspaceFolders(e => {
-      for (const r of e.removed) for (const d of [...syncs.keys()]) if (d === r.uri.fsPath || inside(d, r.uri.fsPath)) removeFolder(d);
+      // Removing a workspace folder does not revoke the user's choice to sync its clones.
+      // Unaccepted discoveries still belong only to their workspace.
+      for (const r of e.removed) for (const f of [...syncs.values()]) if (f.dir === r.uri.fsPath || inside(f.dir, r.uri.fsPath)) {
+        if (remembered(f.dir)) render(f); else removeFolder(f.dir);
+      }
       for (const a of e.added) void addFolder(a).catch(err => report(err, 'sync.folder'));
     }),
     vscode.workspace.onDidChangeConfiguration(e => {
@@ -542,6 +579,6 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
       rescan();
     }),
   );
-  rescan();
+  void restoreClones().then(() => { if (!disposed) rescan(); }).catch(e => { report(e, 'sync.folder'); if (!disposed) rescan(); });
   updateOnWeb();
 }

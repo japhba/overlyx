@@ -25,13 +25,15 @@ import { applySource, applyPatches, whenTypeset } from './reconcile';
 import * as edit from './edit';
 import { setGuidesShown } from './guides';
 import { weave } from './weave';
-import { arrange, paint, valign, restack } from './arrange';
+import { arrange, paint, valign, restack, setGroupLayout } from './arrange';
 import { wantObjects } from './objects';
 import { nodeCommand } from './pathedit';
 import { stepCommand } from './animate';
 import { setView, refreshView, reportColors } from './view';
 import { startPresenting } from './present';
+import { expandPrintSteps, STEP_VISIBILITY_CSS } from './steps';
 import { report, rememberPage } from './report';
+import { layout } from './layout';
 import { ensureSolo, notePageBackground, PAGE_BG, SOLO_PAD } from './solo';
 import { setDarkSlides, darkSlidesChanged } from './darkpages';
 import { installReviewCss, setReview, railReview } from './review';
@@ -40,6 +42,7 @@ import { startEmbed, embedSettled, startViewSync, viewSettled } from './embed';
 import { startLinks } from './links';
 import { looksOf } from './placeholders';
 import { installStorage } from './storage';
+import { refreshAnnotations } from './annotations';
 
 // a page's localStorage where the sandbox refuses the browser's (storage.ts), before the page's scripts run
 installStorage(MODE === 'view');
@@ -113,16 +116,16 @@ function startThumb(): void {
   host.style.cssText = 'all:initial;position:absolute;left:0;top:0;width:0;height:0;z-index:2147483647;pointer-events:none;display:block;';
   const root = host.attachShadow({ mode: 'closed' });
   root.innerHTML = `<style>
-    .n { position: absolute; width: calc(${RAIL_NUM - 6}px / var(--s)); transform: translateX(calc(-100% - 6px / var(--s))); text-align: right; font: 500 calc(11px / var(--s)) / 1 system-ui, sans-serif; font-variant-numeric: tabular-nums; color: #8a8f98; }
+    .n { position: absolute; width: calc(${RAIL_NUM - 6}px / var(--s)); transform: translateX(calc(-100% - 6px / var(--s))); text-align: right; font: 500 calc(11px / var(--s)) / 1 sans-serif; font-variant-numeric: tabular-nums; color: #8a8f98; }
     .n.on { color: #2f6fde; font-weight: 700; }
     .cur { position: absolute; box-sizing: border-box; border: calc(2.5px / var(--s)) solid #2f6fde; border-radius: calc(4px / var(--s)); }
     .drop { position: absolute; height: calc(3px / var(--s)); background: #2f6fde; }
-    .c { position: absolute; transform: translate(calc(-100% - 4px / var(--s)), calc(4px / var(--s))); display: flex; align-items: center; gap: calc(2px / var(--s)); font: 700 calc(11px / var(--s)) system-ui, sans-serif; color: #3a2a00; background: #f6b400; padding: calc(1px / var(--s)) calc(5px / var(--s)); border-radius: calc(8px / var(--s)) calc(8px / var(--s)) calc(8px / var(--s)) calc(2px / var(--s)); }
+    .c { position: absolute; transform: translate(calc(-100% - 4px / var(--s)), calc(4px / var(--s))); display: flex; align-items: center; gap: calc(2px / var(--s)); font: 700 calc(11px / var(--s)) sans-serif; color: #3a2a00; background: #f6b400; padding: calc(1px / var(--s)) calc(5px / var(--s)); border-radius: calc(8px / var(--s)) calc(8px / var(--s)) calc(8px / var(--s)) calc(2px / var(--s)); }
     .chg { position: absolute; width: calc(3px / var(--s)); transform: translateX(calc(-5px / var(--s))); border-radius: calc(2px / var(--s)); }
-    .del { position: absolute; transform: translate(-50%, -50%); font: 700 calc(12px / var(--s)) system-ui, sans-serif; color: #fff; background: #d2453c; padding: calc(2px / var(--s)) calc(8px / var(--s)); border-radius: calc(4px / var(--s)); }
+    .del { position: absolute; transform: translate(-50%, -50%); font: 700 calc(12px / var(--s)) sans-serif; color: #fff; background: #d2453c; padding: calc(2px / var(--s)) calc(8px / var(--s)); border-radius: calc(4px / var(--s)); }
     .del.skip { background: #5f6368; font-weight: 600; }
     .who { position: absolute; display: flex; gap: calc(2px / var(--s)); transform: translate(calc(-100% - 4px / var(--s)), calc(-100% - 4px / var(--s))); }
-    .who span { display: grid; place-items: center; width: calc(18px / var(--s)); height: calc(18px / var(--s)); border-radius: 50%; font: 700 calc(9px / var(--s)) system-ui, sans-serif; box-shadow: 0 0 0 calc(1.5px / var(--s)) #fff; }
+    .who span { display: grid; place-items: center; width: calc(18px / var(--s)); height: calc(18px / var(--s)); border-radius: 50%; font: 700 calc(9px / var(--s)) sans-serif; box-shadow: 0 0 0 calc(1.5px / var(--s)) #fff; }
   </style><div class="l"></div>`;
   railLayer = root.querySelector('.l') as HTMLElement;
   document.documentElement.appendChild(host);
@@ -276,6 +279,7 @@ function onMessage(e: MessageEvent): void {
   if (MODE === 'present' && m.ol !== 'assets' && m.ol !== 'folder') return;
   switch (m.ol) {
     case 'exportSvg':
+      refreshAnnotations();
       try { post({ ol: 'exportedSvg', id: m.id, svg: exportPageSvg(edit.visibleSlideEl() ?? slides()[0], m.except) }); }
       catch (e) { post({ ol: 'exportedSvg', id: m.id, error: String((e as Error).message ?? e) }); }
       break;
@@ -303,6 +307,7 @@ function onMessage(e: MessageEvent): void {
       state.kind = detectKind();
       if (MODE === 'edit') { ensureSolo(); edit.afterSource(); void whenTypeset().then(() => edit.draw()); }
       if (MODE === 'thumb') { notePageBackground(); drawRail(); }
+      void whenTypeset().then(refreshAnnotations);
       darkSlidesChanged();
       if (first) void settle().then(() => { sendLayout(); if (MODE === 'edit') { refreshView(); reportColors(); } });
       // (a stroke on a slide while the pen writes on: the slides measured again once it rests)
@@ -323,11 +328,13 @@ function onMessage(e: MessageEvent): void {
     case 'guides': if (MODE === 'edit') setGuidesShown(m.show); break;
     case 'theme': if (MODE === 'edit') edit.setThemeView(m.on); break;
     case 'exec': if (MODE === 'edit') edit.exec(m.command, m.value); break;
+    case 'textBox': if (MODE === 'edit') edit.setTextBox(m.anchor); break;
     case 'peers': if (MODE === 'edit') edit.setPeers(m.peers); else if (MODE === 'thumb') { railPeers = m.peers; drawRail(); } break;
     case 'dark': if (MODE === 'edit' || MODE === 'thumb') { setDarkSlides(m.invert, !!m.figures); if (MODE === 'thumb') railDesk(m.desk); } break;
     case 'current': if (MODE === 'thumb') railShow(m.slide); break;
     case 'asset': refreshAsset(m.path, m.v); break;
     case 'arrange': if (MODE === 'edit') arrange(m.how); break;
+    case 'groupLayout': if (MODE === 'edit') setGroupLayout(m.layout); break;
     case 'paint': if (MODE === 'edit') paint(m.paint); break;
     case 'valign': if (MODE === 'edit') valign(m.v); break;
     case 'view': if (MODE === 'edit') setView(m.view); break;
@@ -432,7 +439,15 @@ function init(): void {
   // citations and lists of references (cite.ts)
   addStyle(CITE_CSS);
   if (document.body) { renderCites([document.body]); refreshCites(); }
-  window.__ol = { report, version: () => state.version, slides: () => slideBoxes(), size: pageSize, peerCarets: edit.peerCarets, railPeers: () => railDrawn };
+  window.__ol = { report, layout, version: () => state.version, slides: () => slideBoxes(), size: pageSize, peerCarets: edit.peerCarets, railPeers: () => railDrawn,
+    printSteps: () => {
+      if (MODE !== 'print' || state.kind !== 'deck') return;
+      expandPrintSteps(slides());
+      addStyle(STEP_VISIBILITY_CSS);
+      if (/^dim/i.test(document.querySelector('meta[name="overlyx-steps"]')?.getAttribute('content') ?? '')) document.documentElement.classList.add('ol-steps-dim');
+      refreshAnnotations();
+    },
+  };
   if (MODE === 'present') startPresenting();
   if (MODE === 'edit') { edit.startEditing(); ensureSolo(); }
   if (MODE === 'thumb') startThumb();
@@ -453,6 +468,7 @@ function init(): void {
       // opened to be printed (the VS Code extension's "Print or save as PDF"): the browser's print dialog
       if (location.hash === '#print') setTimeout(() => print(), 300);
     }
+    refreshAnnotations();
     window.__olReady = true;
     if (MODE === 'embed') embedSettled();
     if (MODE === 'view') viewSettled();

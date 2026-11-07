@@ -14,6 +14,7 @@ import { BASE } from './env';
 import { hasCite } from '@overlyx/core/html/refs.ts';
 import { CITE_WAIT } from './cite';
 import type { AssetUrls } from '../offlineassets';
+import { inlineMathBreaks } from './mathconfig';
 
 let loading: Promise<void> | null = null;
 let own = false;
@@ -230,7 +231,7 @@ function load(): Promise<void> {
       // equations numbered as LaTeX's (equation, align …), \label / \ref / \eqref anywhere on the page;
       // the macros of the .tex files the page links (server: core html/deckextras.ts)
       tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]'], ['$$', '$$']], processEscapes: true, tags: 'ams', macros: window.__OL?.macros ?? {} },
-      svg: { fontCache: 'global' },
+      svg: { fontCache: 'global', linebreaks: { inline: inlineMathBreaks() } },
       // no menu, no speech or braille (their worker would be fetched from the page's opaque origin), no enrichment
       options: {
         enableMenu: false, enableSpeech: false, enableBraille: false, enableEnrichment: false, enableExplorer: false,

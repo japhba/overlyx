@@ -89,7 +89,15 @@ blend.
   [CambridgeUS](https://github.com/josephwright/beamer/blob/main/base/themes/theme/beamerthemeCambridgeUS.sty)
   (GPL v3 or later). Every HTML file credits its source and license. Analytical teaching examples
   replace source placeholder artwork; there are no MIT logos or copied research results.
-  Bundled open fonts (Carlito, Fira Sans and CMU Sans, SIL OFL) make each HTML file portable;
+  Bundled fonts make each HTML file portable: Instrument Sans (the default of blank decks; its full variable
+  faces, weight 400–700 and width 75–100 %), Carlito, Fira Sans and CMU Sans (SIL OFL), and DejaVu Sans (a subset of
+  fonts-dejavu-core 2.37; Bitstream Vera and Arev licences, which allow subsetting under a name without "Bitstream",
+  "Vera" or "Arev"). The deck font picker and Edit theme embed these choices; Text ▸ Typography sets weight, width
+  (`font-stretch`, a variable font's wdth axis), letter spacing, small caps, figures and ligatures, on objects or
+  on selected words. Every font stack names open fonts only, ending in a generic family
+  (`tests/open-fonts.test.ts`);
+  fonts not embedded in the HTML carry a warning about machine-dependent fallbacks in the editor,
+  presenter view, `render_page` and PDF.
   Carlito replaces the posters' Calibri with matching metrics. `scripts/gen-template-fonts.py`
   regenerates their embedded font faces. `core/src/html/scientific.ts` and `scientific-posters.ts`
   are the shared source; `npx tsx scripts/gen-scientific-starters.ts`
@@ -373,7 +381,11 @@ blend.
   was never synced (no `overlyx-sync/` in its git directory — `.git`, or where a submodule's `.git`
   file points) asks first, once per workspace (*Keep in Step* / *Not Now*): nobody opened it on
   purpose, and its first sync merges what changed on both sides; until then it is paused and its
-  status bar item says "not kept in step yet — click to start". Into a folder of a git repository
+  status bar item says "not kept in step yet — click to start". Accepted clones are remembered on
+  this computer and keep syncing after a workspace folder is removed or the window opens another
+  workspace; Pause is remembered too. Only those saved paths are revisited, and a path whose remote
+  now names another project is not resumed. Their status bar tooltip names the local folder and
+  says when it is outside the workspace. Into a folder of a git repository
   that is not a clone of a project itself, *Clone Project from OverLyX…* asks how: **as a submodule**
   (`addProjectSubmodule`: `git submodule add` with the project's address without an account in
   `.gitmodules`, staged for the user to commit) or **as a clone the repository ignores**
@@ -394,7 +406,10 @@ blend.
   (also in the empty Explorer) lists the account's projects (`/git/api/projects`) and clones one
   (`cloneProject`: the credential in an environment header, the remote URL naming the account), then
   opens it; *Sign Out…* forgets the sign-in (for the CLI too). In a terminal,
-  `overlyx sync [DIR]` syncs once and `overlyx sync --watch` until Ctrl+C. The extension bundles the
+  `overlyx sync [DIR]` syncs once and `overlyx sync --watch` until Ctrl+C. The one-shot command says
+  when no engine remains to send later edits. The MCP bridge checks again at each tool call and
+  warns when automatic sync is inactive: server results may differ from the local files.
+  The extension bundles the
   CLI file as a library (esbuild defines `process.env.OVERLYX_CLI_LIBRARY`, which keeps its command
   line from running; `overlyx.d.ts` types the exports). **File contents travel, not commits**, so
   the history keeps OverLyX's own schedule (`touchProject`: a commit `OVERLYX_GIT_COMMIT_MS` after
@@ -877,7 +892,14 @@ blend.
     flipped group); `commit` merges the style edits of one element (one commit's splices must not
     overlap). Resizing a group scales its objects' boxes (left / top / width, height where fixed; the
     text keeps its size, as in PowerPoint), in proportion at the corners. Parts of one drawing group
-    into a `<g>`; ungrouping a `<g>` hands its transform and paint to its parts. **Parts of a drawing**
+    into a `<g>`; ungrouping a `<g>` hands its transform and paint to its parts.
+    **Row and column groups**: Arrange ▸ *Group in a row / column*, or a selected container's
+    *Group layout* control, keep a gap, cross-axis alignment and optional equal widths/heights.
+    They are ordinary `div.ol-group` flex containers (`grouplayout.ts`), so text/size changes reflow
+    their items in the canvas, presentations and exports. Items remain selectable and editable;
+    the layout owns their positions. Resizing the container lets its layout respond, without
+    scaling fixed gaps. *Free* and Ungroup keep items at their measured positions.
+    **Parts of a drawing**
     (the letters of a logo, a ring: `edit.ts partBox`) have the same handles as any object — a resize
     box turned with them, rotation arrows on a click again — worked through their own `transform`,
     kept as one tidy chain `translate(p) rotate(a) scale(sx sy) translate(−c)` (c the centre of their
@@ -953,6 +975,14 @@ blend.
     until MathJax has typeset them, MathJax is fetched while the page's fonts load, and a formula
     typeset before is put back as a copy of its rendering at once (MathJax's SVG is in ex of the
     surrounding font, so it fits anywhere) — after an edit, a retyped text shown again, a chip.
+    Decks keep inline formulas unbroken by default; a page's
+    `<meta name="overlyx-math-inline-breaks" content="on|off">` overrides this. Changing it reloads
+    the frame so cached formulas use the same setting. A click with the Text tool creates an
+    auto-width label (`width:max-content`); a drag creates a wrapping box. *More text options*
+    switches to fixed width or auto width anchored left, centre or right (native CSS `translate`).
+    A resize saves the text's line count in `data-ol-wrap-lines`. If later edits or font changes
+    add soft-wrapped lines, the canvas marks the box and `render_page` reports “wraps to N lines”.
+    Explicit breaks alone do not warn; existing boxes acquire their baseline when resized.
     **LaTeX beyond formulas — beamer's feel, plain LaTeX in the HTML** (core `html/refs.ts`, the
     server side `html/deckextras.ts`, runtime `cite.ts`): **citations** `\cite{key}` (natbib's
     `\citep`, `\citet` …, notes, several keys) from the project's .bib files (all, or those of
@@ -970,15 +1000,21 @@ blend.
     **Macros** of `<link rel="overlyx-macros" href="../paper/macros.tex">` (and what it
     `\input`s) in every formula, on the slide and in the formula editor. **Steps** (beamer's
     overlays, PowerPoint's animations; core `html/steps.ts`): `data-step` on any object, an SVG's
-    paths too, is a beamer overlay specification (a lone `3`: from step 3 on; `-3`: gone from step 4;
-    `2-4`), `data-steps` on a list (items one by one). The *Animation* pane (`AnimationPane.tsx`,
+    paths and inline text (`span`, `strong`, `em`, `u`) too, is a beamer overlay specification
+    (a lone `3`: from step 3 on; `-3`: gone from step 4; `2-4`), `data-steps` on a list (items one
+    by one). The *Animation* pane (`AnimationPane.tsx`,
     runtime `animate.ts`) edits the slide's sequence, not the strings: *Appear* / *Disappear* put the
     selection on the next clicks in the order it was clicked (or all on one click), *Click objects
     in order…* adds each object clicked (Shift: same click as the one before, Ctrl/⌘: a part of a
     drawing), ↑ / ↓ move an event a notch (with the step beside, then past it), gaps close. Badges on
     the canvas: blue the steps an object appears at, red those it disappears at. Presenting goes
-    through a slide's steps first and back to the previous slide's last step (`<meta
-    name="overlyx-steps" content="dim">`: hidden objects faint). While a text is retyped, references and citations are
+    through a slide's steps first and back to the previous slide's last step. While typing, select
+    words within one paragraph and use **Appear on step…** in the text toolbar or quick menu;
+    step 1 removes their inline steps, and hidden words keep their space.
+    **Download ▸ PDF with click steps** exports each step
+    with the presenter's visibility rules, including inline reveals (at most 1000 pages;
+    `deliverable-pdf?path=…&steps=all`). Ordinary PDF export still shows everything. `<meta
+    name="overlyx-steps" content="dim">` shows hidden objects faintly. While a text is retyped, references and citations are
     uneditable chips, environments editable formulas. The text row's insert group matches the
     documents': link (Ctrl+K), cross-reference (Ctrl+Shift+I), citation (Ctrl+Shift+C, the
     documents' dialog incl. finding papers online), inline / display formula. render_page reports
@@ -1275,15 +1311,43 @@ blend.
     extension's own — not the bridge, whose API edits documents — on 127.0.0.1 with a random token,
     the same sandbox policy and runtime (`dist/ol/`, built by `scripts/build-runtime.mjs`); paths
     resolve in the workspace folder.
+  * **Anchored annotations** (`runtime/annotations.ts`): an empty SVG directly in a `.slide`
+    can carry `data-ol-connector='{"from":{"id":"diagram","side":"right"},"to":{"id":"equation","class":"term","side":"left"},"curve":40}'`
+    or `data-ol-frame='{"target":{"id":"equation","class":"term"},"padding":8,"radius":8}'`.
+    Targets resolve inside that slide: an id string or `{id}` reaches an object or a formula's
+    `\cssId{name}{…}`, `{id, class}` reaches `\class{name}{…}` inside that object, `{class}`
+    reaches named formula parts across the slide (multiple matches are framed together).
+    Connector sides are `auto` (default, towards the other target), `center`, `top`, `right`,
+    `bottom`, `left`; each anchor may add `offset: [x,y]` in slide pixels. `curve` is a signed
+    perpendicular control-point offset (0/default: straight); `head` defaults to 10 (0: no arrowhead).
+    Frames default to 8 px padding and radius. SVG `stroke`, `stroke-width`, `fill` style the
+    annotation (defaults: currentColor, 2, none); `data-step` reveals it as any object. Geometry
+    follows moves, resizing, font loading and formula retypesetting in every runtime mode, including
+    PDF click steps and offline exports. Missing targets hide their annotations until they return.
+    The runtime controls the SVG's position, size and viewBox; the SVG lets pointer input through
+    to the editable formula. Edit the targets and styling in the HTML (also described to agents in
+    `DELIVERABLE_GUIDE`). Source reconciliation keeps these attributes in step; generated shapes
+    never become part of the source. Focused checks: `tests/deck-annotations.test.ts`.
   * **Agents** (MCP, `mcp.ts`): `create_deliverable` (folder, kind, title), the file tools on the
     page (`read_file` / `edit_file` / `write_file` reach an open page's live text and apply as one
     splice), `list_documents` lists pages with their kind, and **`render_page`** shows a page as
     images plus a report of what is wrong on every page (`runtime/report.ts`): text needing more
     room than its box (measured by letting the box take its natural size), text running off the
-    slide, text of two objects on top of each other, a picture covering text, text too small for
-    the kind (deck ~2.2 % of the slide height, poster ~0.55 %), low contrast, pictures that did not
+    slide, text of two objects on top of each other (individual glyph boxes, excluding whitespace
+    and hidden text), a foreground picture covering text (inline SVG fills/strokes, rather than
+    the viewport), text too small for the kind (deck ~2.2 % of the slide height, poster ~0.55 %),
+    low contrast, pictures that did not
     load, formulas that did not typeset (MathJax errors and TeX left as written), the page's script
-    errors. The renderer (`render.ts`) is one headless Chromium (playwright-core) in the bubblewrap
+    errors. Its JSON text and MCP `structuredContent` also contain `report` and `layout`:
+    the pictured pages' object selectors/ids, rendered boxes, text line counts, soft wrapping
+    (explicit breaks excluded), overflow by axis, configured font stack and Chromium's actual font
+    faces including fallbacks (`fonts: null` when unavailable; SVG path formulas may use none).
+    Formula boxes include named marks from `\class{name}{…}` and `\cssId{name}{…}`.
+    Boxes are CSS pixels from the slide's top left (document top left for web pages), before
+    screenshot scaling. Layout measurements live in `runtime/layout.ts`; platform fonts come
+    from DevTools (`render-layout.ts`). `data-ol-lint="no-overlap"` on either object or an SVG shape opts deliberate layering
+    out of overlap warnings only. The renderer (`render.ts`) is one headless Chromium
+    (playwright-core) in the bubblewrap
     sandbox with **no network namespace**: every request of the page comes back to the server over
     the DevTools pipe and is answered like the editor's frame (`resolveDeliverable`) or, for a short
     list of public font / script CDNs, fetched by the server — nothing else is reachable. At most two
@@ -1592,10 +1656,7 @@ blend.
   New Computer Modern, Libertinus, STIX Two, XITS, TeX Gyre Termes / Pagella / Bonum / Schola, DejaVu
   Serif, EB Garamond, Crimson Pro, Charis, XCharter, Erewhon, Kp Roman, Concrete, Old Standard, GFS
   Neohellenic, IBM Plex Serif, PL46, Fira Sans, Lato, Noto Sans, Arsenal, Luciole, Pennstander — the
-  computer's own Palatino, or *Sans-serif*: San Francisco where the system has it (`--sf-font` in
-  styles.css: `-apple-system` / `BlinkMacSystemFont`, then an installed SF Pro by name; on phones —
-  coarse pointer, narrow — an installed SF Compact first), else Fira Sans (a saved `noto` preference
-  maps to it). Or *As in the document*: the face closest to the open document's roman font (each shell
+  computer's own Palatino (never Apple's San Francisco fonts, nor `system-ui` / `-apple-system` / `ui-*` anywhere in the app: CLAUDE.md, `tests/no-sf-fonts.test.ts`; a saved `sans` — the former San Francisco face — or `noto` preference becomes Fira Sans). Or *As in the document*: the face closest to the open document's roman font (each shell
   reports its header through `setDocumentFonts`, `tests/parity.test.ts`). *Math font*
   (`prefs.editorMathFont`): *Matching the text font* (the MathJax font closest in style to the face,
   the default) or one of MathJax 4's fonts — New Computer Modern, Latin Modern, MathJax TeX (the

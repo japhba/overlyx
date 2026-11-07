@@ -109,16 +109,15 @@ test('Document ▸ Settings ▸ Fonts: a font set writes its text and math fonts
   expect(errors).toEqual([]);
 });
 
-test('the sans-serif face: San Francisco where the system has it, formulas in Fira Math; a saved "Noto Sans" becomes it', async ({ page }) => {
+test('no San Francisco: a saved "Sans-serif (this computer’s)" or "Noto Sans" becomes Fira Sans, formulas in Fira Math', async ({ page }) => {
   const errors = collectErrors(page);
-  const foreign = await open(page, { editorFont: 'noto' });
-  expect(await page.evaluate(() => document.documentElement.dataset.editorFont)).toBe('sans');
-  expect(await style(page, '.lyx-editor', 'font-family')).toMatch(/^-apple-system, BlinkMacSystemFont, SF Pro Text, SF Pro, SF Pro Display, OLT fira, sans-serif/);
+  const foreign = await open(page, { editorFont: 'sans' });
+  expect(await page.evaluate(() => document.documentElement.dataset.editorFont)).toBe('fira');
+  expect(await style(page, '.lyx-editor', 'font-family')).toMatch(/^OLT fira, /);
   await expect.poll(() => mathClass(page)).toBe('FIRA-N');
-  // no San Francisco on the test machine: the text is Fira Sans, the formulas Fira Math, both served with the client
   await expect.poll(() => loaded(page)).toEqual(expect.arrayContaining(['OLT fira', expect.stringMatching(/^MJX-FIRA-/)]));
   await openDialog(page, 'preferences');
-  await expect(page.locator('.dialog [data-pref="editorFont"]')).toHaveValue('sans');
+  await expect(page.locator('.dialog [data-pref="editorFont"]')).toHaveValue('fira');
   await expect(page.locator('.dialog [data-pref="editorMathFont"] option').first()).toContainText('Matching the text font (now Fira Math)');
   expect(foreign).toEqual([]);
   expect(errors).toEqual([]);

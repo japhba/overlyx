@@ -222,7 +222,7 @@ export function authRouter(hooks: AuthHooks = {}): Router {
         // Anyone with a Google account may sign in (they only ever see their own and shared projects,
         // like Google Docs) — unless the instance is invitation-only.
         if (config.signup === 'invited' && !isInvited(email)) {
-          res.status(403).type('html').send(`<p style="font:14px system-ui;margin:40px">This OverLyX instance is invitation-only. Ask a project owner to share a project with <b>${escapeHtml(email ?? 'your Google account')}</b>, then sign in again.</p><p style="font:14px system-ui;margin:40px"><a href="/">Back</a></p>`);
+          res.status(403).type('html').send(`<p style="font:14px sans-serif;margin:40px">This OverLyX instance is invitation-only. Ask a project owner to share a project with <b>${escapeHtml(email ?? 'your Google account')}</b>, then sign in again.</p><p style="font:14px sans-serif;margin:40px"><a href="/">Back</a></p>`);
           return;
         }
         const base = (email ?? 'google_' + info.sub).split('@')[0].toLowerCase().replace(/[^a-z0-9._-]/g, '') || 'user';

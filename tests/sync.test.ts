@@ -123,7 +123,10 @@ describe('overlyx sync: a clone in step with the server', () => {
   it('sends local saves and receives the server\'s changes, without a commit per sync', async () => {
     const p = await project('basic', { 'main.tex': doc('First paragraph.', 'Second paragraph.'), 'refs.bib': '@book{a,\n  title={A}\n}\n' });
     const commits = await p.commits();
-    expect(await sync(p.clone)).toMatch(/In step with/);
+    const first = await execFileP(process.execPath, [CLI, 'sync', p.clone], { encoding: 'utf8', env: env() });
+    expect(first.stdout).toMatch(/In step with/);
+    expect(first.stderr).toContain('Automatic sync is not running');
+    expect(first.stderr).toContain('overlyx sync --watch');
 
     writeFileSync(join(p.clone, 'main.tex'), doc('First paragraph, from the clone.', 'Second paragraph.'));
     mkdirSync(join(p.clone, 'figures'));

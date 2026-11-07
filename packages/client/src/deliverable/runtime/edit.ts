@@ -28,6 +28,7 @@ import { ASIDE_ATTR } from '../protocol';
 import { inkOn } from '../../app/contrast';
 import { MODE, post, state, srcOf, link, pathOf, liveAt, sourced, slides, slideOf, docRect, isForeign, sendLayout, penWork } from './env';
 import { mapAssets, restoreMappedAssets } from '../offlineassets';
+import { groupLayoutOf } from '../grouplayout';
 import { guard, linkTree } from './reconcile';
 import { typeset } from './math';
 import { renderCites, refreshCites } from './cite';
@@ -58,7 +59,10 @@ import { initGuides, guideSlide, guideAt, guideSnaps, guideParts, startGuideDrag
 import { listInkBox } from './listmarkers';
 import { replaceEditingHost, editingTextStyle, carryEditingTextStyle } from './editinghost';
 import { textBoundary, textListItem } from './textnavigation';
+import { setInlineStep } from './inlinesteps';
 import { PH, PH_CSS, phRole, isEmptyPh, isPicturePh, primeList } from './placeholders';
+import { TEXT_ANCHOR, WRAP_LINES, anchorFraction, textBoxStyle, type TextAnchor } from '../textboxes';
+import { textLineCount, wrapWarning } from './layout';
 
 const NS = 'http://www.w3.org/1999/xhtml';
 let host: HTMLElement;
@@ -100,12 +104,14 @@ export function startEditing(): void {
   root = host.attachShadow({ mode: 'closed' });
   root.innerHTML = `<style>
     :host { all: initial; }
-    .layer { position: absolute; left: 0; top: 0; pointer-events: none; font: 12px system-ui, sans-serif; }
+    .layer { position: absolute; left: 0; top: 0; pointer-events: none; font: 12px sans-serif; }
     .frame { position: absolute; border: 1.5px solid #2f6fde; box-sizing: border-box; pointer-events: none; transform-origin: 50% 50%; }
     .frame.peer { border-style: dashed; }
     .frame.editing { border-color: #e8a33d; }
     .frame.locked { border-style: dotted; border-color: #8a93a6; }
     .frame.ctx { border-style: dashed; border-color: rgba(47,111,222,.6); }
+    .frame.wrap { border-style: dashed; border-color: #b36b00; }
+    .wrap-label { position: absolute; color: #754600; background: #fff1c9; font: calc(11px * var(--s))/1.3 sans-serif; pointer-events: none; }
     .hover { position: absolute; outline: 1px solid rgba(47,111,222,.55); pointer-events: none; transform-origin: 50% 50%; }
     .handle { position: absolute; width: var(--h); height: var(--h); margin: calc(var(--h) / -2) 0 0 calc(var(--h) / -2); background: #fff; border: 1.5px solid #2f6fde; box-sizing: border-box; border-radius: 2px; pointer-events: auto; touch-action: none; }
     .handle.end { border-radius: 50%; width: calc(var(--h) * 1.25); height: calc(var(--h) * 1.25); margin: calc(var(--h) * -0.625) 0 0 calc(var(--h) * -0.625); cursor: ${MOVE_CURSOR}; }
@@ -117,7 +123,7 @@ export function startEditing(): void {
     ${GUIDES_CSS}
     .draw { position: absolute; border: 1.5px dashed #2f6fde; background: rgba(47,111,222,.08); pointer-events: none; }
     .drop { position: absolute; border: 3px dashed #2f6fde; background: rgba(47,111,222,.10); pointer-events: none; box-sizing: border-box; }
-    .tag { position: absolute; transform: translateY(calc(-100% - 3px * var(--s))); background: #2f6fde; color: #fff; padding: calc(1px * var(--s)) calc(6px * var(--s)); border-radius: calc(3px * var(--s)); white-space: nowrap; pointer-events: none; font: 600 calc(10.5px * var(--s)) / 1.35 system-ui, -apple-system, sans-serif; letter-spacing: .02em; }
+    .tag { position: absolute; transform: translateY(calc(-100% - 3px * var(--s))); background: #2f6fde; color: #fff; padding: calc(1px * var(--s)) calc(6px * var(--s)); border-radius: calc(3px * var(--s)); white-space: nowrap; pointer-events: none; font: 600 calc(10.5px * var(--s)) / 1.35 sans-serif; letter-spacing: .02em; }
     .tag.editing { background: #e8a33d; }
     .tag.locked { background: #8a93a6; }
     ${STEPS_CSS}
@@ -126,7 +132,7 @@ export function startEditing(): void {
     .peer-tag { position: absolute; transform: translateY(-100%); color: #fff; padding: 1px 5px; border-radius: 3px 3px 0 0; white-space: nowrap; pointer-events: none; font-size: calc(11px * var(--s)); }
     .psel { position: absolute; opacity: .28; pointer-events: none; }
     .pcaret { position: absolute; width: calc(2px * var(--s)); margin-left: calc(-1px * var(--s)); pointer-events: none; }
-    .pflag { position: absolute; left: calc(-1px * var(--s)); bottom: 100%; padding: 0 calc(4px * var(--s)); border-radius: calc(3px * var(--s)) calc(3px * var(--s)) calc(3px * var(--s)) 0; white-space: nowrap; pointer-events: none; font: 600 calc(10px * var(--s)) / 1.3 system-ui, -apple-system, sans-serif; }
+    .pflag { position: absolute; left: calc(-1px * var(--s)); bottom: 100%; padding: 0 calc(4px * var(--s)); border-radius: calc(3px * var(--s)) calc(3px * var(--s)) calc(3px * var(--s)) 0; white-space: nowrap; pointer-events: none; font: 600 calc(10px * var(--s)) / 1.3 sans-serif; }
     svg.ink { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
   </style><div class="layer"></div>`;
   layer = root.querySelector('.layer') as HTMLElement;
@@ -613,7 +619,10 @@ export function insertRef(src: string): void { if (!editing) return; editing.foc
 export function exec(command: string, value?: string): void {
   if (!editing) return;
   editing.focus();
-  if (command === 'fontSize' && value) styleRun('font-size', value);
+  if (command === 'inlineStep') { if (setInlineStep(editing, getSelection(), Number(value))) scheduleCommit(); return; }
+  else if (command === 'fontSize' && value) styleRun('font-size', value);
+  // a typographic property on the selected words (Text ▸ Typography): "property:value"
+  else if (command === 'style' && value && TYPOGRAPHY.has(value.slice(0, value.indexOf(':')))) styleRun(value.slice(0, value.indexOf(':')), value.slice(value.indexOf(':') + 1));
   else if (command === 'lineHeight' && value) { editing.style.setProperty('line-height', value); scheduleCommit(); return; }
   else {
     const listCommand = command === 'insertUnorderedList' || command === 'insertOrderedList';
@@ -661,6 +670,7 @@ function replaceTextHost(tag: string): void {
 }
 
 /** the selected part of the text being retyped wrapped in a span with one style (inner ones of that style dropped) */
+const TYPOGRAPHY = new Set(['font-weight', 'font-stretch', 'letter-spacing', 'font-variant-caps', 'font-variant-numeric', 'font-variant-ligatures']);
 function styleRun(prop: string, value: string): void {
   const sel = getSelection();
   if (!editing || !sel || !sel.rangeCount) return;
@@ -747,15 +757,23 @@ export function isLocked(el: Element): boolean { return el.hasAttribute('data-ol
 
 export function movable(el: Element): boolean {
   if (isSvgPart(el)) return SVG_SHAPES.has(el.localName);
+  if (inGroupLayout(el)) return false;
   const p = cs(el).position;
   if (p === 'absolute' || p === 'fixed' || p === 'relative') return true;
   return state.kind !== 'page' && !!slideOf(el) && el !== slideOf(el);
 }
 
-function fixedHeight(el: Element): boolean {
+/** Flow items can be selected and resized, but their container owns their positions. */
+function inGroupLayout(el: Element): boolean {
+  const parent = el.parentElement;
+  return !!parent && parent.classList.contains('ol-group') && cs(parent).display === 'flex' && ['static', 'relative'].includes(cs(el).position);
+}
+
+export function fixedHeight(el: Element): boolean {
   if (REPLACED.has(el.localName) || el.classList.contains('ol-crop')) return true;
   const src = srcOf.get(el);
-  if (src && /(^|;)\s*height\s*:/i.test(src.getAttribute('style') ?? '')) return true;
+  const height = /(?:^|;)\s*height\s*:([^;]*)/i.exec(src?.getAttribute('style') ?? '')?.[1].trim();
+  if (height && !/^auto(?:\s*!important)?$/i.test(height)) return true;
   return !(el.textContent ?? '').trim();
 }
 
@@ -1123,6 +1141,7 @@ function styleOf(el: Element): SelStyle {
     border: `${c.borderTopWidth} ${c.borderTopStyle} ${c.borderTopColor}`,
     fill, stroke, strokeWidth, dash, rotate: isSvgPart(el) ? Math.round((partBox(el)?.form.a ?? 0) * 1800 / Math.PI) / 10 : angleOf(el), flipX: fl.x, flipY: fl.y,
     shadow: c.boxShadow !== 'none' || (c.filter ?? '').includes('drop-shadow'), arrowStart, arrowEnd, lineHeight: c.lineHeight,
+    fontStretch: c.fontStretch, letterSpacing: c.letterSpacing, fontVariantCaps: c.fontVariantCaps, fontVariantNumeric: c.fontVariantNumeric, fontVariantLigatures: c.fontVariantLigatures,
   };
 }
 
@@ -1142,10 +1161,41 @@ function item(el: Element): SelItem | null {
     slide: s ? slides().indexOf(s) : -1,
     kind, locked: isLocked(el), cropped: el.classList.contains('ol-crop'), canText: canType(el),
     src: kind === 'image' ? pictureSrc(el) : undefined,
+    ...((kind === 'text' || kind === 'formula') && state.kind !== 'page' && !inGroupLayout(el) ? {
+      textBox: (el as HTMLElement).style.width === 'max-content' ? (el.getAttribute(TEXT_ANCHOR) || 'left') as TextAnchor : 'fixed' as const,
+    } : {}),
     list: listOf(el),
     ...(phRole(el) ? { ph: { role: phRole(el)!, empty: isEmptyPh(el) } } : {}),
     ...(masterKey(el) ? { master: masterKey(el)! } : {}),
+    ...(kind === 'group' ? { layout: groupLayoutOf(el, cs(el)) ?? { direction: 'free', gap: 24, align: 'center', equal: false } } : {}),
   };
+}
+
+/** Resizing accepts the present line count as the author's intended layout. */
+function rememberTextLines(el: Element): HtmlOp | null {
+  const path = pathOf(el);
+  if (!path || !isTextual(el) || state.kind === 'page') return null;
+  const value = String(Math.max(1, textLineCount(el)));
+  el.setAttribute(WRAP_LINES, value);
+  return { t: 'attr', path, name: WRAP_LINES, value };
+}
+
+export function setTextBox(anchor: TextAnchor | 'fixed'): void {
+  if (!['left', 'center', 'right', 'fixed'].includes(anchor) || state.kind === 'page') return;
+  stopText();
+  const ops: HtmlOp[] = [];
+  for (const el of selected) {
+    const path = pathOf(el);
+    if (!path || !(el instanceof HTMLElement) || isLocked(el) || !['text', 'formula'].includes(kindOf(el)) || inGroupLayout(el)) continue;
+    const set = textBoxStyle(el, anchor);
+    for (const [p, value] of Object.entries(set)) el.style.setProperty(p, value);
+    if (anchor === 'fixed') el.removeAttribute(TEXT_ANCHOR); else el.setAttribute(TEXT_ANCHOR, anchor);
+    ops.push({ t: 'style', path, set }, { t: 'attr', path, name: TEXT_ANCHOR, value: anchor === 'fixed' ? null : anchor });
+    if (anchor === 'fixed') { const op = rememberTextLines(el); if (op) ops.push(op); }
+    else { el.removeAttribute(WRAP_LINES); ops.push({ t: 'attr', path, name: WRAP_LINES, value: null }); }
+  }
+  if (ops.length) commit([...ops, ...refitGroups(selected)]);
+  draw();
 }
 
 /** an object on every slide (the editor's deckmaster.ts): its key */
@@ -1253,6 +1303,17 @@ export function draw(): void {
   layer.style.setProperty('--s', String(1 / scale));
   const parts: string[] = [];
   const bw = 1.5 / scale;
+  if (state.kind !== 'page') {
+    const scope = isSolo() ? slides()[soloIndex()] : document.body;
+    for (const el of Array.from(scope?.querySelectorAll(`[${WRAP_LINES}]`) ?? [])) {
+      if (!shown(el) || isForeign(el) || el.closest('[data-ol-runtime], .notes, template')) continue;
+      const lines = wrapWarning(el);
+      if (!lines) continue;
+      const b = boxOf(el), [x, y] = handleAt(b, 0, 1);
+      parts.push(frameAt('frame wrap', b, `border-width:${bw}px`));
+      parts.push(`<div class="wrap-label" style="left:${x}px;top:${y}px">Wraps to ${lines} lines</div>`);
+    }
+  }
   if (hoverEl && !selected.includes(hoverEl) && hoverEl.isConnected && !editing) parts.push(frameAt('hover', boxOf(hoverEl), `outline-width:${1 / scale}px`));
   drawnCarets = [];
   for (const p of peers) {
@@ -1687,7 +1748,7 @@ function onManyHandleDown(e: PointerEvent, handle: string): void {
   e.preventDefault();
   e.stopPropagation();
   grab(e, true);
-  const els = live.map(el => { const d = start(el as HTMLElement); if (isGroup(el)) d.members = membersOf(el, true).map(start); return d; });
+  const els = live.map(el => { const d = start(el as HTMLElement); if (isGroup(el) && cs(el).display !== 'flex') d.members = membersOf(el, true).map(start); return d; });
   const u = union(els.map(d => d.r0));
   const base = { x0: e.pageX, y0: e.pageY, els, handle, moved: false, pointerId: e.pointerId, pointerType: e.pointerType, multi: u };
   if (handle === 'mrot') {
@@ -1721,7 +1782,7 @@ function resizeMany(d: Drag, dx: number, dy: number, free: boolean): void {
     if (fixed) st.setProperty('height', `${hh}px`);
     // its centre where the scaling takes it (a text's top: its height follows its text)
     const cx = ax + (r.x + r.w / 2 - ax) * kx;
-    st.setProperty('left', `${m.left0 + (cx - (r.x + r.w / 2)) / k - (w - m.w0) / 2}px`);
+    st.setProperty('left', `${m.left0 + (cx - (r.x + r.w / 2)) / k + (anchorFraction(m.el) - 0.5) * (w - m.w0)}px`);
     if (fixed) { const cy = ay + (r.y + r.h / 2 - ay) * ky; st.setProperty('top', `${m.top0 + (cy - (r.y + r.h / 2)) / k - (hh - m.h0) / 2}px`); }
     else st.setProperty('top', `${m.top0 + (ay + (r.y - ay) * ky - r.y) / k}px`);
     for (const g of m.members ?? []) {
@@ -1767,7 +1828,7 @@ function onHandleDown(e: PointerEvent, handle: string): void {
     drag = { ...base, kind: 'end' };
   } else {
     // a group: its objects grow and shrink with it (PowerPoint's)
-    if (isGroup(el)) base.els[0].members = membersOf(el, true).map(start);
+    if (isGroup(el) && cs(el).display !== 'flex') base.els[0].members = membersOf(el, true).map(start);
     drag = { ...base, kind: 'resize' };
   }
   capture();
@@ -1790,6 +1851,8 @@ export function refitGroups(els: Element[], gone: Set<Element> = new Set()): Htm
     const outer = groupOf(g);
     if (outer && !gone.has(outer)) todo.push(outer);
     const c = cs(g);
+    // CSS layouts keep their own box and recompute gaps as their items change.
+    if (g.classList.contains('ol-group') && c.display === 'flex') continue;
     if (angleOf(g) || (c.scale && c.scale !== 'none') || c.transform !== 'none') continue;
     const ms = membersOf(g).filter(m => !gone.has(m));
     if (!ms.length || ms.length !== Array.from(g.children).filter(k => srcOf.has(k) && !gone.has(k) && !isForeign(k)).length) continue;
@@ -2037,6 +2100,9 @@ function resizeLive(d: DragEl, h: string, dx: number, dy: number, keepRatio: boo
   }
   const st = d.el.style;
   st.setProperty('width', `${w}px`);
+  // Percentage translate anchors move when width changes. Compensate so the opposite resize
+  // handle stays still; moving the object later still keeps its intrinsic width untouched.
+  l += anchorFraction(d.el) * (w - d.w0);
   if (fixedHeight(d.el) || h === 'n' || h === 's') st.setProperty('height', `${hh}px`);
   if (d.inner && d.w0 > 0) {
     // a cropped picture grows with its frame (what shows of it stays the same)
@@ -2056,7 +2122,7 @@ function resizeLive(d: DragEl, h: string, dx: number, dy: number, keepRatio: boo
     }
   }
   const pos = cs(d.el).position;
-  if (pos !== 'static' && (h.includes('w') || h.includes('n') || a)) { st.setProperty('left', `${l}px`); st.setProperty('top', `${t}px`); }
+  if (pos !== 'static' && !inGroupLayout(d.el) && (h.includes('w') || h.includes('n') || a || anchorFraction(d.el))) { st.setProperty('left', `${l}px`); st.setProperty('top', `${t}px`); }
 }
 
 function onDragEnd(e: PointerEvent): void {
@@ -2181,6 +2247,9 @@ function onDragEnd(e: PointerEvent): void {
       if (ip) ops.push({ t: 'style', path: ip, set: { left: `${Math.round(parseFloat(ist.left))}px`, top: `${Math.round(parseFloat(ist.top))}px`, width: `${Math.round(parseFloat(ist.width))}px` } });
     }
     for (const m of x.members ?? []) { const op = styleOp(m); if (op) ops.push(op); }
+    if (d.kind === 'resize') for (const el of [x.el, ...(x.members ?? []).map(m => m.el)]) {
+      const op = rememberTextLines(el); if (op) ops.push(op);
+    }
   }
   // an object of a group moved or resized: the group fits around its objects again
   commit([...ops, ...refitGroups(d.els.map(x => x.el))]);
