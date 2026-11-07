@@ -1,6 +1,7 @@
 # Anodyne
 
-OverLyX's sans-serif: the interface's font, an editor face (Settings ▸ Editor ▸ Text font), a deck
+OverLyX's sans-serif, published on its own at https://github.com/japhba/anodyne (with a demo page,
+https://japhba.github.io/anodyne/): the interface's font, an editor face (Settings ▸ Editor ▸ Text font), a deck
 font, and a font documents can name (`\setsansfont{Anodyne}`, `\setmathfont{Anodyne}`, a markdown
 document's `sansfont:`, the toolbar's font list). SIL Open Font License 1.1 (`OFL.txt`).
 
