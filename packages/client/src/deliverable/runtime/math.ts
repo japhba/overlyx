@@ -247,6 +247,16 @@ function load(): Promise<void> {
         },
       },
     };
+    // A displayed formula that is all of an object on a slide (the Formula tool's): no margins above
+    // and below it, nor a line's leading, so the object's box is the formula's — LaTeX's display skip
+    // belongs between the lines of a text, not round a box of its own (selected, the box was twice as
+    // tall as the formula).
+    const placed = '.slide :is([style*="position: absolute"], [style*="position:absolute"])', shown = 'mjx-container[jax="SVG"][display="true"]';
+    const css = document.createElement('style');
+    css.setAttribute('data-ol-runtime', '');
+    css.textContent = `${placed} > ${shown}:only-child, ${placed} > .ol-va:only-child > ${shown}:only-child,
+      ${placed} > .ol-mathchip:only-child > ${shown} { margin: 0 !important; line-height: 0; }`;
+    document.head.appendChild(css);
     const s = document.createElement('script');
     s.src = assets?.[BASE + 'mathjax/tex-svg.js'] ?? BASE + 'mathjax/tex-svg.js';
     s.async = true;

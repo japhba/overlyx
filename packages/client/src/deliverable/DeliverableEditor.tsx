@@ -2136,7 +2136,8 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     color: c => { if (editingText) exec('foreColor', c ?? 'inherit'); else styleSel({ color: c }); },
     highlight: c => exec('hiliteColor', c ?? 'transparent'),
     align: a => { if (editingText) exec(a === 'left' ? 'justifyLeft' : a === 'center' ? 'justifyCenter' : a === 'right' ? 'justifyRight' : 'justifyFull'); else styleSel({ 'text-align': a }); },
-    valign: v => toCanvas({ ol: 'valign', v }),
+    valign: (v, centre) => toCanvas({ ol: 'valign', v, ...(centre ? { centre: true } : {}) }),
+    fit: () => toCanvas({ ol: 'fitBox' }),
     list: kind => {
       const cmd = kind === 'ul' ? 'insertUnorderedList' : 'insertOrderedList';
       if (editingText) { exec(cmd); return; }

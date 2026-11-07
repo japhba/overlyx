@@ -94,6 +94,9 @@ Object.assign(ICONS, {
   'dk-duplicate': I('<rect x="2.5" y="5.5" width="8" height="8" rx="1"/><path d="M5.5 5.5V3.5a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-2"/>'),
   'dk-delete': I('<path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 9h5.6l.7-9"/>'),
   'dk-background': I('<rect x="1.5" y="3" width="13" height="10" rx="1"/><path d="M1.5 10.5l4-3.5 3 2.5 2-1.5 4 3" fill="currentColor" fill-opacity="0.25"/>'),
+  // the quick menu's Fit (the box shrunk round what it shows) and Centre in the box
+  'dk-fit': I('<rect x="1.5" y="1.5" width="13" height="13" rx="1" stroke-dasharray="1.6 1.2"/><rect x="5" y="5.5" width="6" height="5" rx="0.6"/><path d="M2.8 2.8l1.6 1.6M13.2 2.8l-1.6 1.6M2.8 13.2l1.6-1.6M13.2 13.2l-1.6-1.6" stroke-width="1"/>'),
+  'dk-centre': I('<rect x="1.5" y="1.5" width="13" height="13" rx="1"/><rect x="5.5" y="6" width="5" height="4" rx="0.5" fill="currentColor"/>'),
   'dk-guides': I('<rect x="1.5" y="1.5" width="13" height="13" rx="1"/><path d="M5.5 1.5v13M1.5 10h13" stroke-dasharray="1.6 1.2"/>'),
   // (on every slide: the slide master's — a stack of slides)
   'dk-master': I('<rect x="5.5" y="1.8" width="8.7" height="6.4" rx="0.8"/><path d="M3.7 4v5.8c0 .5.3.8.8.8h8"/><path d="M1.8 6.2v6c0 .5.3.8.8.8h8"/>'),

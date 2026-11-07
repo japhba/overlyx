@@ -344,7 +344,8 @@ export function editorViewProps(o: ViewPropsOptions): Pick<EditorProps, 'nodeVie
         return true;
       }
       const text = event.clipboardData?.getData('text/plain');
-      const html = event.clipboardData?.getData('text/html');
+      // (objects or words copied on a slide: their text, its formulas' TeX — parsed below as formulas)
+      const html = event.clipboardData?.getData('text/html')?.replace(/^[\s\S]*<!--overlyx-(?:objects|tex)\b[\s\S]*$/, '');
       // SVG markup on the text clipboard ("Copy as SVG" in drawing tools): an image, not text
       if (text && !viewOnly() && isSvgMarkup(text)) { void insertImageFiles(view, [svgFile(text)]); return true; }
       // an address pasted over selected text: the text becomes a link to it (Google Docs)

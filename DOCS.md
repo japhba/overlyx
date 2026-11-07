@@ -747,7 +747,11 @@ blend.
     `paste`; objects land on the slide in view where they were, beside them on their own slide, a step
     further each time; the parts of a drawing go into the drawing selected there, in its units at the
     same place on the slide, else as a drawing of their own fitted around them; ids taken in the page
-    get a `-2`; words become a text box), weaving (`weave.ts`, Inkscape's Knot: a right-click
+    get a `-2`; words become a text box; as text a copied text box or formula is its words with the
+    formulas' TeX, `\(…\)` as written — `clipOf` / `plainText` — and words copied while a text is
+    retyped carry their formulas' TeX too, `copyWords`, where the browser's copy dropped the drawn
+    formula; a document pastes either as LaTeX, so the formulas arrive as formulas, `assembly.ts`
+    handlePaste ignoring the HTML marked `<!--overlyx-objects` / `<!--overlyx-tex-->`), weaving (`weave.ts`, Inkscape's Knot: a right-click
     where two shapes cross offers the lower one over the upper one there — a clipped `<use>` of it
     right after the upper one, `g[data-ol-weave]`, clicks pass through it; right-clicked again it is
     undone), the drawing tools
@@ -773,6 +777,17 @@ blend.
     (`words` message: their box from the DOM selection, once a frame; how the first letter looks, so
     the toolbar's size / bold … show the words', not the box's); while the pointer is still selecting
     them (`choosing`) the menu waits, and comes back over them when it is lifted.
+    **Fit and centring** (7 Nov 2026): a text box or formula bigger than what it shows (`SelItem.loose`:
+    a formula in a box as wide as a line of text, one line in a wider box, a box given a height; not a
+    layout's placeholders) gets **Fit** beside the alignment — `edit.ts fitBoxes`: a formula or a
+    line becomes auto width anchored on the side it is aligned to (so it follows the formula as it is
+    edited), wrapped text a box as wide as its widest line, a height of its own goes, and what is in
+    the box stays where it was (measured before and after, `layout.ts contentRect`). The alignment
+    palette has *Centre in the box* and Top / Middle / Bottom for every box with a height of its own
+    (`valign` with `centre`: one step). A new formula object is auto width, centred on the click (or in
+    the box drawn), and a displayed formula that is all of a positioned object has no display margins
+    or leading (runtime `math.ts`), so its box is the formula's — it used to be 480 px wide and twice
+    the formula's height.
   * **List items move by drag and drop** (`runtime/listdrag.ts`, as in documents): with a text box
     selected or being retyped, a grip (in the overlay's shadow root) shows left of the bullet of the
     item under the pointer — of every item for a finger or a pen. Dragged, a line shows where it lands:

@@ -30,7 +30,10 @@ export interface DeckTextActions {
   color(c: string | null): void;
   highlight(c: string | null): void;
   align(a: 'left' | 'center' | 'right' | 'justify'): void;
-  valign(v: 'flex-start' | 'center' | 'flex-end'): void;
+  /** `centre`: and centred across, in one step */
+  valign(v: 'flex-start' | 'center' | 'flex-end', centre?: boolean): void;
+  /** the selected boxes fitted to what they show (SelItem.loose) */
+  fit?(): void;
   list(kind: 'ul' | 'ol'): void;
   lineHeight(v: string): void;
   /** typographic properties (null: back to the inherited value) */
@@ -325,7 +328,7 @@ function paintLabel(items: SelItem[]): string {
  * then group / ungroup and arrange, `extra` (duplicate, comment) and delete. Empty while points, a formula or a crop are edited.
  * Over `words` selected in a text being retyped: what is done to words — font, size, bold … highlight, a link —, then `extra`.
  */
-const QUICK: string[][] = [['dk-ph-addpicture'], ['dk-b', 'dk-i', 'dk-color', 'dk-size'], ['dk-align'], ['dk-inkcolor', 'dk-ink-thinner', 'dk-ink-thicker', 'dk-ink-convert', 'dk-fill', 'dk-stroke'], ['dk-linecolor', 'dk-lineweight', 'dk-tips'], ['dk-crop', 'dk-nobg'], ['dk-group', 'dk-ungroup', 'dk-arrange']];
+const QUICK: string[][] = [['dk-ph-addpicture'], ['dk-b', 'dk-i', 'dk-color', 'dk-size'], ['dk-align', 'dk-fit'], ['dk-inkcolor', 'dk-ink-thinner', 'dk-ink-thicker', 'dk-ink-convert', 'dk-fill', 'dk-stroke'], ['dk-linecolor', 'dk-lineweight', 'dk-tips'], ['dk-crop', 'dk-nobg'], ['dk-group', 'dk-ungroup', 'dk-arrange']];
 const QUICK_WORDS: string[][] = [['dk-font', 'dk-size'], ['dk-b', 'dk-i', 'dk-u', 'dk-color', 'dk-hl'], ['dk-href', 'dk-inline-step']];
 export function quickGroups(sections: ToolSection[], extra: ToolButton[], words = false): ToolButton[][] {
   const all = new Map<string, ToolButton>();
@@ -451,12 +454,16 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
           { label: 'Centre (Ctrl+Shift+E)', html: ICON('aligncenter'), active: al === 'center', action: () => c.text.align('center') },
           { label: 'Right (Ctrl+Shift+R)', html: ICON('alignright'), active: al === 'right' || al === 'end', action: () => c.text.align('right') },
           { label: 'Justified (Ctrl+Shift+J)', html: ICON('alignleft'), active: al === 'justify', action: () => c.text.align('justify') },
-          ...(sel.some(s => s.kind === 'shape') ? [
+          // (a box with a height of its own: a shape, a text box or a formula given one)
+          ...(sel.some(s => s.kind === 'shape') || (!c.editingText && sel.some(s => s.fixedHeight && (s.kind === 'text' || s.kind === 'formula'))) ? [
+            { label: 'Centre in the box', html: ICON('dk-centre'), action: () => c.text.valign('center', true) },
             { label: 'Top', html: ICON('valigntop'), action: () => c.text.valign('flex-start') },
             { label: 'Middle', html: ICON('valignmiddle'), action: () => c.text.valign('center') },
             { label: 'Bottom', html: ICON('valignbottom'), action: () => c.text.valign('flex-end') },
           ] : []),
         ] } },
+      // a formula or a line of text in a box bigger than it (SelItem.loose): the box made to fit it
+      ...(!c.editingText && c.text.fit && sel.some(s => s.loose) ? [{ id: 'dk-fit', title: 'Fit the box to what is in it — the formula or the text stays where it is, the box shrinks round it (and follows it as it is edited)', icon: 'dk-fit', action: c.text.fit } as ToolButton] : []),
       { id: 'dk-ul', title: 'Bulleted list (Ctrl+Shift+8)', icon: 'dk-bullets', action: () => c.text.list('ul') },
       { id: 'dk-ol', title: 'Numbered list (Ctrl+Shift+7)', icon: 'dk-numbers', action: () => c.text.list('ol') },
       ...(c.text.typography ? [typographyBtn(st, c.text.typography)] : []),

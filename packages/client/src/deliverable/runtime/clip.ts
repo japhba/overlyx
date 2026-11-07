@@ -7,9 +7,10 @@
  * passes a paste on (`paste`). With the keyboard in the frame, edit.ts's own clipboard events come here
  * the same way.
  *
- * Copied: each object's source. The parts of a drawing (shapes inside an SVG) are copied as a drawing
- * of their own: an <svg> fitted around them at the place on the slide where they were, with the
- * transforms and paint of the groups they were in.
+ * Copied: each object's source (as text: a text's or a formula's words, the formulas' TeX). The
+ * parts of a drawing (shapes inside an SVG) are copied as a drawing of their own: an <svg> fitted
+ * around them at the place on the slide where they were, with the transforms and paint of the groups
+ * they were in.
  * Pasted: onto the slide in view, where the objects were (beside them on the slide they came from;
  * each paste of the same objects a step further). Parts of a drawing go into the drawing selected
  * there (in front of the part selected), in that drawing's units and at the same place on the slide;
@@ -17,7 +18,7 @@
  */
 import type { HtmlOp, Path } from '../protocol';
 import { post, state, srcOf, pathOf, slides, slideOf, docRect } from './env';
-import { isSvgPart, isLocked, selection, commit, visibleSlideEl } from './edit';
+import { isSvgPart, isLocked, selection, commit, visibleSlideEl, kindOf } from './edit';
 import { isSolo } from './solo';
 
 const MARK = /<!--overlyx-objects(?: from=(-?\d+))?-->/;
@@ -119,6 +120,28 @@ function partsHtml(drawing: SVGSVGElement, parts: SVGGraphicsElement[]): string 
   return `<svg xmlns="${SVG_NS}" viewBox="${vb.map(n4).join(' ')}"${stretched ? ' preserveAspectRatio="none"' : ''} style="position: absolute; left: ${L}px; top: ${T}px; width: ${R - L}px; height: ${B - T}px; overflow: visible" data-ol-clip="parts">\n  ${inner.join('\n  ')}\n</svg>`;
 }
 
+/**
+ * A text's words as plain text — its formulas as their TeX (`\(…\)`, as written), a line break or a
+ * paragraph a new line: what a copied text box or formula is in a text editor, a LaTeX file, a chat
+ * (pasted into a document, the formulas are formulas again: editor/assembly.ts).
+ */
+export function plainText(root: Node): string {
+  let out = '';
+  const walk = (n: Node) => {
+    if (n.nodeType === Node.TEXT_NODE) { out += (n.nodeValue ?? '').replace(/\s+/g, ' '); return; }
+    if (n.nodeType !== Node.ELEMENT_NODE && n.nodeType !== Node.DOCUMENT_FRAGMENT_NODE) return;
+    const el = n as Element, name = el.localName ?? '';
+    if (/^(script|style|template|aside)$/.test(name) || el.classList?.contains('notes') || el.hasAttribute?.('data-ol-runtime')) return;
+    if (name === 'br') { out += '\n'; return; }
+    const block = /^(p|div|li|ul|ol|h[1-6]|blockquote|table|tr|figure|figcaption|pre)$/.test(name);
+    if (block && out && !out.endsWith('\n')) out += '\n';
+    for (const c of Array.from(n.childNodes)) walk(c);
+    if (block && !out.endsWith('\n')) out += '\n';
+  };
+  walk(root);
+  return out.replace(/[ \t]*\n[ \t]*/g, '\n').replace(/\n{2,}/g, '\n').replace(/\u00a0/g, ' ').trim();
+}
+
 const inOrder = (a: Element, b: Element) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1);
 
 /** what copying `sel` puts on the clipboard (null: nothing to copy) */
@@ -135,8 +158,10 @@ export function clipOf(sel: Element[]): { html: string; plain: string } | null {
   const out = items.map(x => (typeof x === 'string' ? x : partsHtml(x.drawing, x.parts))).filter((h): h is string => !!h);
   if (!out.length) return null;
   const s = slideOf(els[0]);
-  const plain = out.join('\n');
-  return { html: `<!--overlyx-objects from=${s ? slides().indexOf(s) : -1}-->${plain}`, plain };
+  // texts and formulas: their words, the formulas' TeX (elsewhere: the objects' markup)
+  const words = els.every(e => !isSvgPart(e) && ['text', 'formula'].includes(kindOf(e)));
+  const plain = words ? els.map(e => plainText(srcOf.get(e)!)).join('\n\n') : out.join('\n');
+  return { html: `<!--overlyx-objects from=${s ? slides().indexOf(s) : -1}-->${out.join('\n')}`, plain };
 }
 
 let lastClip: string | null | undefined;

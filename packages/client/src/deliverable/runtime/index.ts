@@ -331,12 +331,13 @@ function onMessage(e: MessageEvent): void {
     case 'textBox': if (MODE === 'edit') edit.setTextBox(m.anchor); break;
     case 'peers': if (MODE === 'edit') edit.setPeers(m.peers); else if (MODE === 'thumb') { railPeers = m.peers; drawRail(); } break;
     case 'dark': if (MODE === 'edit' || MODE === 'thumb') { setDarkSlides(m.invert, !!m.figures); if (MODE === 'thumb') railDesk(m.desk); } break;
+    case 'fitBox': if (MODE === 'edit') edit.fitBoxes(); break;
     case 'current': if (MODE === 'thumb') railShow(m.slide); break;
     case 'asset': refreshAsset(m.path, m.v); break;
     case 'arrange': if (MODE === 'edit') arrange(m.how); break;
     case 'groupLayout': if (MODE === 'edit') setGroupLayout(m.layout); break;
     case 'paint': if (MODE === 'edit') paint(m.paint); break;
-    case 'valign': if (MODE === 'edit') valign(m.v); break;
+    case 'valign': if (MODE === 'edit') valign(m.v, m.centre); break;
     case 'view': if (MODE === 'edit') setView(m.view); break;
     case 'crop': if (MODE === 'edit') edit.cropAt(m.path, { aspect: m.aspect, shape: m.shape }); break;
     case 'cropPreset': if (MODE === 'edit') edit.cropPreset(m.path, m); break;

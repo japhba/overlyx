@@ -170,6 +170,8 @@ export interface SelItem {
   master?: string;
   layout?: GroupLayout;
   textBox?: 'fixed' | 'left' | 'center' | 'right';
+  /** a text box or formula bigger than what it shows (the quick menu offers Fit) */
+  loose?: boolean;
 }
 
 /** `deleted`: deleted as a suggestion (shown faded until accepted; not presented); `skipped`: Skip slide (deckmaster.ts: not presented, not printed) */
@@ -260,6 +262,8 @@ export type ToRuntime =
   | { ol: 'theme'; on: boolean }
   | { ol: 'exec'; command: string; value?: string }
   | { ol: 'textBox'; anchor: 'fixed' | 'left' | 'center' | 'right' }
+  /** the selected text boxes and formulas fitted to what they show (runtime edit.ts fitBoxes) */
+  | { ol: 'fitBox' }
   | { ol: 'go'; slide: number }
   | { ol: 'peers'; peers: PeerInfo[] }
   /**
@@ -276,8 +280,8 @@ export type ToRuntime =
   | { ol: 'arrange'; how: ArrangeHow }
   | { ol: 'groupLayout'; layout: GroupLayout }
   | { ol: 'paint'; paint: Paint }
-  /** the selected text boxes aligned to their top, middle or bottom (runtime arrange.ts valign) */
-  | { ol: 'valign'; v: 'flex-start' | 'center' | 'flex-end' }
+  /** the selected text boxes aligned to their top, middle or bottom (runtime arrange.ts valign); `centre`: and centred across */
+  | { ol: 'valign'; v: 'flex-start' | 'center' | 'flex-end'; centre?: boolean }
   | { ol: 'view'; view: CanvasView }
   /** crop mode for a picture (optionally with an aspect / a round frame at once) — runtime/crop.ts */
   | { ol: 'crop'; path: Path; aspect?: number | null; shape?: 'rect' | 'circle' }

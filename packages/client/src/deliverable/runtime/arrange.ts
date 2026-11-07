@@ -374,9 +374,10 @@ const BLOCKS = /^(p|div|ul|ol|li|h[1-6]|table|figure|blockquote|pre|section|head
  * A text box aligned to its top, middle or bottom: a flex column, its text in one block first. A
  * flex container lays out each run of text and each inline element as an item of its own — the
  * lines of "Title<br>Authors" ran into one, bold words stood apart, and the text slid out of the box
- * (usability wave, 11 Oct 2026). Blocks inside (paragraphs, a list) stack as they are.
+ * (usability wave, 11 Oct 2026). Blocks inside (paragraphs, a list) stack as they are. `centre`: the
+ * text centred across as well, in the same step (the quick menu's Centre in the box).
  */
-export function valign(v: 'flex-start' | 'center' | 'flex-end'): void {
+export function valign(v: 'flex-start' | 'center' | 'flex-end', centre = false): void {
   stopText();
   const ops: HtmlOp[] = [];
   for (const el of selection().filter(e => !isLocked(e))) {
@@ -386,7 +387,7 @@ export function valign(v: 'flex-start' | 'center' | 'flex-end'): void {
     const wrapped = kids.length === 1 && (kids[0] as Element).classList?.contains('ol-va');
     const inline = kids.length > 0 && kids.every(n => n.nodeType === Node.TEXT_NODE || !BLOCKS.test((n as Element).localName));
     if (inline && !wrapped) ops.push({ t: 'inner', path, html: `<span class="ol-va">${src.innerHTML.trim()}</span>` });
-    ops.push({ t: 'style', path, set: { display: 'flex', 'flex-direction': 'column', 'justify-content': v, 'align-items': null } });
+    ops.push({ t: 'style', path, set: { display: 'flex', 'flex-direction': 'column', 'justify-content': v, 'align-items': null, ...(centre ? { 'text-align': 'center' } : {}) } });
   }
   if (ops.length) commit(ops, { select: 'keep' });
 }
