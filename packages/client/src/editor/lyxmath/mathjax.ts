@@ -72,6 +72,16 @@ function makeRenderer(font: LoadedMathFont): Renderer {
     mathjax.asyncLoad = (file: string) => loadFontModule(file);
   }
   const tex = makeTexInput();
+  // a font made from an OpenType MATH table (scripts/build-mathjax-font.py) sizes scripts as its table
+  // says (Anodyne: 60 % and 50 %); MathJax's own fonts keep TeX's 71 % (the math element's defaults)
+  const mc = (font.data as unknown as { mathConstants?: { ScriptPercentScaleDown?: number; ScriptScriptPercentScaleDown?: number } }).mathConstants;
+  if (mc?.ScriptPercentScaleDown) {
+    const mult = mc.ScriptPercentScaleDown / 100, min = `${(mc.ScriptScriptPercentScaleDown ?? 50) / 100}em`;
+    // (on the formula's math element, which MathJax's scriptlevel scaling reads: the parse options' root —
+    // before MathJax's own setInherited filter (priority −6) hands the math element's attributes down)
+    (tex as unknown as { postFilters: { add(f: (a: { data: { root: { attributes: { set(k: string, v: unknown): void } } } }) => void, priority: number): void } }).postFilters
+      .add(({ data }) => { data.root.attributes.set('scriptsizemultiplier', mult); data.root.attributes.set('scriptminsize', min); }, -10);
+  }
   const chtml = new CHTML<HTMLElement, Text, Document>({
     fontData: font.data,
     // display formulas given a width break into lines to fit it (RenderOptions.width); inline ones never

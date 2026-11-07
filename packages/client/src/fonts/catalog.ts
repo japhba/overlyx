@@ -87,7 +87,7 @@ export const EDITOR_FACES: EditorFace[] = [
   served('plex', 'IBM Plex Serif', 'IBM’s corporate serif', 'stix2'),
   served('pl46', 'PL46', 'a Polish typeface of 1946 (no italic)', 'newcm'),
   // (OverLyX's own sans-serif, the interface's font: fonts/anodyne, declared by its anodyne.css, variable)
-  { id: 'anodyne', label: 'Anodyne', hint: 'OverLyX’s sans-serif: clear I l 1 and O 0, maths symbols, weights 100–900, grade', text: `Anodyne, ${CM}`, math: 'fira', xHeight: 0.536 },
+  { id: 'anodyne', label: 'Anodyne', hint: 'OverLyX’s sans-serif: clear I l 1 and O 0, maths symbols, weights 100–900, grade', text: `Anodyne, ${CM}`, math: 'anodyne', xHeight: 0.536 },
   served('fira', 'Fira Sans', 'sans-serif; typewriter Fira Mono', 'fira', { mono: '"OLT fira mono"' }),
   served('lato', 'Lato', 'sans-serif', 'fira'),
   served('notosans', 'Noto Sans', 'sans-serif, for every script', 'fira'),
@@ -110,6 +110,8 @@ export const MATH_FONTS: MathFont[] = [
   { id: 'dejavu', label: 'TeX Gyre DejaVu', hint: 'DejaVu Serif', xHeight: 0.519, capHeight: 0.729 },
   { id: 'euler', label: 'Euler', hint: 'Hermann Zapf’s upright AMS Euler letters', xHeight: 0.46, capHeight: 0.683 },
   { id: 'fira', label: 'Fira Math', hint: 'sans-serif, Fira Sans', xHeight: 0.527, capHeight: 0.689 },
+  // (OverLyX's conversion of Anodyne's MATH table: scripts/build-mathjax-font.py)
+  { id: 'anodyne', label: 'Anodyne', hint: 'sans-serif, Anodyne: OverLyX’s own (Noto Sans Math’s design)', xHeight: 0.536, capHeight: 0.714 },
 ];
 
 /** Faces that were renamed: a preference saved under the old id keeps its face. */

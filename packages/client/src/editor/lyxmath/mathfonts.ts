@@ -79,6 +79,13 @@ const SOURCES: Record<string, FontSource> = {
     woff2: import.meta.glob('../../../../../node_modules/@mathjax/mathjax-fira-font/chtml/woff2/*.woff2', { query: '?no-inline', import: 'default', eager: true }),
     dynamic: import.meta.glob('../../../../../node_modules/@mathjax/mathjax-fira-font/mjs/chtml/dynamic/*.js'),
   },
+  // OverLyX's own conversion of an OpenType math font (scripts/build-mathjax-font.py), laid out like MathJax's
+  // packages: Anodyne's MATH table (fonts/anodyne, Lisnoti's, from Noto Sans Math)
+  anodyne: {
+    pkg: 'mathjax-anodyne-font', load: () => import('../../fonts/@mathjax/mathjax-anodyne-font/chtml.js'),
+    woff2: import.meta.glob('../../fonts/@mathjax/mathjax-anodyne-font/chtml/woff2/*.woff2', { query: '?no-inline', import: 'default', eager: true }),
+    dynamic: import.meta.glob('../../fonts/@mathjax/mathjax-anodyne-font/chtml/dynamic/*.js'),
+  },
   euler: {
     pkg: 'mathjax-euler-font-extension', base: 'newcm', load: () => import('@mathjax/mathjax-euler-font-extension/js/chtml.js'),
     woff2: import.meta.glob('../../../../../node_modules/@mathjax/mathjax-euler-font-extension/chtml/woff2/*.woff2', { query: '?no-inline', import: 'default', eager: true }),
