@@ -13,11 +13,11 @@ const googleOrigins = () => (process.env.GOOGLE_PICKER_API_KEY && process.env.GO
   : { script: '', frame: '', connect: '', img: '' });
 
 /**
- * The TeX engine of end-to-end encrypted projects (client public/vendor/swiftlatex) is WebAssembly: its
- * worker script may compile WebAssembly ('wasm-unsafe-eval' — not JavaScript's eval). A dedicated
- * worker runs under the policy of its own script's response, so nothing else gets this.
+ * The TeX engines of end-to-end encrypted projects (client public/texwasm, built by tex-wasm/) are
+ * WebAssembly: their worker may compile WebAssembly ('wasm-unsafe-eval' — not JavaScript's eval). A
+ * dedicated worker runs under the policy of its own script's response, so nothing else gets this.
  */
-const WASM_WORKERS = /^\/vendor\/swiftlatex\/[^/]+\.js$/;
+const WASM_WORKERS = /^\/texwasm\/worker\.js$/;
 
 /** Only OAuth consent pages pass an already-validated client redirect URI. `path`: the request's (the TeX engine's worker may compile WebAssembly). */
 export function setSecurityHeaders(res: Response, formRedirectUri?: string, path?: string): void {

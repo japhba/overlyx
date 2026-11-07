@@ -8,7 +8,7 @@
  * outline).
  */
 import * as Y from 'yjs';
-import { newDocumentText, newMarkdownText, texHeadings, parseBibtex, lyxToPm, markEditedSettings } from '@overlyx/core';
+import { newDocumentText, newMarkdownText, texHeadings, parseBibtex, lyxToPm, markEditedSettings, pageBreaks, synctexView, synctexEdit } from '@overlyx/core';
 import { openE2eProject, isE2eProject, isE2eDocId, markE2eProject, noteProjects, e2eUser, type E2eProject } from './project';
 import { tex } from './project';
 import { forgetProjectKey } from './keys';
@@ -91,6 +91,32 @@ async function createEncryptedProject(body: { name: string }): Promise<unknown> 
 interface Job { id: number; status: 'queued' | 'exporting' | 'compiling' | 'ok' | 'error' | 'cancelled'; engine: string; requestedBy: string; startedAt: number; phaseAt: number; finishedAt?: number; progress: string; rerun: boolean }
 interface Build { status: string; log: string; pdf: string | null; pdf_path: string | null; tex_path: string | null; updated_at: number; warnings: string[]; tex?: string; pdf_at?: number | null; source_at?: number | null }
 const builds = new Map<string, { job: Job | null; build: Build | null; cancel: boolean }>();
+/** the last build's SyncTeX data of each document (gzipped, as the engine wrote it), the built .tex's name and text: for PDF ⇄ source */
+const synctexOf = new Map<string, { gz: Uint8Array; texName: string; tex: string }>();
+const synctexText = new Map<string, { gz: Uint8Array; text: string; breaks?: unknown }>();
+
+/** the last build's SyncTeX file of the document, as text (gunzipped once per build) */
+async function synctexFile(id: string): Promise<{ texName: string; tex: string; text: string; memo: { breaks?: unknown } } | null> {
+  const s = synctexOf.get(id);
+  if (!s) return null;
+  let t = synctexText.get(id);
+  if (t?.gz !== s.gz) {
+    const text = await new Response(new Blob([s.gz.slice().buffer as ArrayBuffer]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
+    synctexText.set(id, t = { gz: s.gz, text });
+  }
+  return { texName: s.texName, tex: s.tex, text: t.text, memo: t };
+}
+
+/** the Pages view's page breaks of the last build (core pagebreaks.ts, without the PDF's words) */
+async function localPageBreaks(id: string): Promise<unknown> {
+  const f = await synctexFile(id);
+  if (!f) return null;
+  if (f.memo.breaks === undefined) {
+    const bodyLine = f.tex.split('\n').findIndex(l => /^[^%]*\\begin\{document\}/.test(l)) + 1;
+    f.memo.breaks = pageBreaks(f.text, f.texName, bodyLine, null, f.tex);
+  }
+  return f.memo.breaks;
+}
 let jobIds = 1;
 
 async function docRoute(method: string, id: string, action: string, q: URLSearchParams, body: unknown): Promise<unknown> {
@@ -167,7 +193,15 @@ async function docRoute(method: string, id: string, action: string, q: URLSearch
     case 'place': return { slide: null, at: 0 };
     case 'external': return { clones: [], google: null };
     case 'versions': if (method === 'GET') return { versions: [] }; break;
-    case 'synctex/pages': return { breaks: null };
+    case 'synctex/pages': return { breaks: await localPageBreaks(id).catch(() => null) };
+    case 'synctex/view': {
+      const f = await synctexFile(id), line = Number(q.get('line'));
+      return { boxes: f && line >= 1 ? synctexView(f.text, f.texName, Math.floor(line)) : [] };
+    }
+    case 'synctex/edit': {
+      const f = await synctexFile(id), page = Number(q.get('page')), x = Number(q.get('x')), y = Number(q.get('y'));
+      return (f && page >= 1 && Number.isFinite(x) && Number.isFinite(y) ? synctexEdit(f.text, Math.floor(page), x, y) : null) ?? { line: null };
+    }
     case 'export': {
       const format = (b.format ?? 'pdf') as string;
       if (format === 'tex') return { ok: true, tex: await p.docText(rel) };
@@ -186,13 +220,15 @@ function startBuild(p: E2eProject, id: string, rel: string, auto: boolean): unkn
   const prev = builds.get(id);
   if (prev?.job && ['queued', 'exporting', 'compiling'].includes(prev.job.status)) return { ok: true, job: prev.job };
   const now = Date.now();
-  const job: Job = { id: jobIds++, status: 'compiling', engine: 'pdflatex (in this browser)', requestedBy: e2eUser().name, startedAt: now, phaseAt: now, progress: 'starting', rerun: false };
+  const job: Job = { id: jobIds++, status: 'compiling', engine: 'LaTeX (in this browser)', requestedBy: e2eUser().name, startedAt: now, phaseAt: now, progress: 'starting', rerun: false };
   const state = { job, build: prev?.build ?? null, cancel: false };
   builds.set(id, state);
   void (async () => {
     try {
       const { compileProject } = await import('./compile');
       const r = await compileProject(p, rel, (s) => { job.progress = s; job.phaseAt = Date.now(); }, () => state.cancel);
+      job.engine = r.engine;
+      if (r.synctex) synctexOf.set(id, { gz: r.synctex, texName: r.texName, tex: r.tex });
       if (state.build?.pdf && r.pdf) URL.revokeObjectURL(state.build.pdf);
       const url = r.pdf ? URL.createObjectURL(new Blob([r.pdf.slice().buffer as ArrayBuffer], { type: 'application/pdf' })) : state.build?.pdf ?? null;
       const at = Date.now();

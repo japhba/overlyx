@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build && vite build -c runtime.vite.config.ts",
+    "dev": "node ../../scripts/fetch-tex-wasm.mjs && vite",
+    "build": "node ../../scripts/fetch-tex-wasm.mjs && vite build && vite build -c runtime.vite.config.ts",
     "preview": "vite preview"
   },
   "dependencies": {

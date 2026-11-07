@@ -1,0 +1,13 @@
+TeX engines in the browser (/texwasm/): pdfTeX, LuaHBTeX and XeTeX with xdvipdfmx, bibtex8 and makeindex,
+compiled to WebAssembly from the sources of TeX Live 2023.0 with BusyTeX's build. They build the PDFs of
+end-to-end encrypted projects in the browser (packages/client/src/e2e/compile.ts).
+
+How they are built: tex-wasm/README.md in OverLyX's repository (https://github.com/japhba/overlyx).
+The engines, their SHA-256 and their complete corresponding source: the GitHub release named in
+tex-wasm/release.json.
+
+pdfTeX, LuaTeX and XeTeX are free software under the GNU General Public License. kpathsea is under
+the GNU Lesser General Public License. The libraries have their own free licences: zlib, libpng,
+FreeType, HarfBuzz, Graphite2, ICU, Lua, xpdf, pplib, zziplib, fontconfig, expat, TECkit and libpaper.
+BusyTeX (https://github.com/busytex/busytex) is under the MIT licence. OverLyX's own parts are under
+GPL-3.0-or-later.

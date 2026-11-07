@@ -3464,6 +3464,59 @@ How it works, in order of what happens when you open a document:
    (Versions panel: compare / restore), discards the local copy and reloads the server's document.
    Logging out deletes the local copies and cached API responses on that browser.
 
+## End-to-end encrypted projects
+
+A project can be made **end-to-end encrypted** ("+ New" ▸ *End-to-end encrypted*). Its documents,
+its files and their names are encrypted in the browser. The server keeps and relays ciphertext it
+cannot read. The PDF is built in the browser too.
+
+**Keys** (`packages/client/src/e2e/crypto.ts`, `keys.ts`):
+- Every account that uses encryption has an ECDH P-256 key pair.
+- Its private key is sealed with a **recovery code** that only the person holds: 128 bits, shown
+  once, in groups of four. A new browser asks for the code.
+- Each project has an AES-256-GCM key. The project key is given to each member wrapped for their
+  public key.
+- Sharing makes someone a member, as for any project. They read nothing until a member who holds
+  the key presses *Give key* in the Share dialog, which shows the fingerprints to compare
+  (`app/E2eShare.tsx`).
+
+**What the server keeps** (`packages/server/src/e2e/`) lies under the project's directory, in
+`.e2e/`:
+- `store.sqlite`, an append-only log of encrypted Yjs updates per document, compacted by the
+  clients into encrypted snapshots. It also holds the wrapped keys.
+- `blobs/`, the encrypted files.
+
+The file list is itself an encrypted Yjs document (the *manifest*). The relay (`/e2e`, a WebSocket)
+passes on updates and cursors, which are encrypted too. Everything else that reads a project's files
+refuses an encrypted project: git, agents, AI, Google Docs and LessWrong sync, public projects and
+links. The browser refuses those requests itself rather than sending text (`e2e/localapi.ts`).
+
+**PDF builds in the browser.**
+- The engines are TeX Live's own pdfTeX, LuaHBTeX and XeTeX with bibtex8 and makeindex, compiled to
+  WebAssembly from the sources of the server's TeX Live release (`tex-wasm/`, published as a GitHub
+  release, fetched before the client build).
+- A worker (`public/texwasm/worker.js`) runs them.
+- The build follows the server's latexmk run (`e2e/compile.ts`):
+  - the same choice of engine;
+  - BibTeX and makeindex when needed;
+  - reruns until the references settle;
+  - SyncTeX, for PDF ⇄ source and the Pages view (core `synctex.ts`, `pagebreaks.ts`).
+- TeX Live's files come from the server, one per request, as the engine asks for them
+  (`/api/e2e/texlive/<version>/<pdflatex|lualatex|xelatex>/<format>/<name>`, answered with
+  kpsewhich).
+- The engine asks only for names in TeX Live's list of its files. So the server learns which
+  packages and fonts a document uses, but not its text or its files' names.
+- LuaLaTeX finds fonts by name through a luaotfload index of TeX Live's fonts that the server makes
+  once. XeTeX finds fonts only by file name, so a document with non-TeX fonts is built with LuaLaTeX
+  here.
+- Biber is not available; `backend=bibtex` works.
+- Each engine's LaTeX format is built in the browser the first time, which takes up to a minute,
+  and kept in IndexedDB.
+
+**Switching it off and rolling back.**
+- `OVERLYX_E2E=off` stops the server from serving encrypted projects.
+- The database changes only add things (`projects.e2e`, `e2e_user_keys`).
+
 ## Compatibility notes
 
 * **Browsers**: Chrome and Edge, Safari (Mac, iPhone, iPad) and Firefox; the e2e suite runs in all

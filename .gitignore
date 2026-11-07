@@ -14,3 +14,6 @@ deploy/secrets.env
 deploy/secrets.env.*
 !deploy/secrets.env.example
 scripts/recording/out/
+# the TeX engines (tex-wasm/), fetched by scripts/fetch-tex-wasm.mjs
+packages/client/public/texwasm/*
+!packages/client/public/texwasm/worker.js

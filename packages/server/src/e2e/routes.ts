@@ -6,6 +6,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import zlib from 'node:zlib';
 import express from 'express';
 import { db } from '../db.ts';
 import { roleFor, atLeast, projectRow, logAccess, type Role } from '../access.ts';
@@ -15,7 +16,7 @@ import {
   e2eEnabled, isE2eProject, OPAQUE_ID, userKeys, setUserKeys, resealPrivate, dropKeysEverywhere, publicKeysOf, wrappedKeys, grantKey,
   writeBlob, blobFile, blobSize, deleteBlob, docIds, deleteDoc,
 } from './store.ts';
-import { texliveFile, texliveVersion, lyxlibBundle } from './texlive.ts';
+import { texliveFile, texliveVersion, texliveNames, lyxlibBundle, luaotfloadNames } from './texlive.ts';
 
 /** a public key / wrapped key / sealed private key: base64url text of a few hundred bytes */
 const KEY_TEXT = /^[A-Za-z0-9_.:-]{16,8192}$/;
@@ -30,11 +31,26 @@ export function e2eRoutes(): express.Router {
   });
 
   // public files: TeX Live's (for the engine) and LyX's library (for the parser), versioned in the URL
-  r.get('/e2e/texlive/:ver/pdftex/:format/:name', async (req, res) => {
-    const file = await texliveFile(Number(req.params.format), String(req.params.name));
-    if (!file) { res.status(301).end(); return; }   // the engine's "no such file"
-    res.setHeader('fileid', path.basename(file));
+  r.get('/e2e/texlive/:ver/names.txt', (req, res) => {
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Cache-Control', req.params.ver === texliveVersion() ? 'private, max-age=31536000, immutable' : 'no-store');
+    const gz = texliveNames();
+    if (/\bgzip\b/.test(String(req.headers['accept-encoding'] ?? ''))) { res.setHeader('Content-Encoding', 'gzip'); res.end(gz); }
+    else res.end(zlib.gunzipSync(gz));
+  });
+  r.get('/e2e/texlive/:ver/luaotfload-names.lua.gz', async (_req, res) => {
+    const names = await luaotfloadNames();
+    if (!names) { res.status(404).end(); return; }
     res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
+    res.setHeader('Content-Type', 'application/gzip');
+    res.end(names);
+  });
+  r.get('/e2e/texlive/:ver/:program/:format/:name', async (req, res) => {
+    const file = await texliveFile(String(req.params.program), Number(req.params.format), String(req.params.name));
+    // the version is in the URL: a miss is as lasting as a hit (the engine asks for many files that do not exist)
+    res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
+    if (!file) { res.status(404).end(); return; }
+    res.setHeader('X-TeX-File', path.basename(file));
     res.sendFile(file);
   });
   r.get('/e2e/lyxlib/:ver', (req, res) => {
