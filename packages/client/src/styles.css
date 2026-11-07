@@ -758,6 +758,9 @@ html[data-theme="dark"][data-dark-pages] .lyx-inset-note-note > .inset-box > .in
 .lyx-inset-branch > .inset-box > .inset-label { background: #4e9a48; }
 .lyx-inset-flex > .inset-box { background: var(--purple-bg); border-color: var(--purple-border); }
 .lyx-inset-flex > .inset-box > .inset-label { background: #7e57c2; }
+.lyx-inset-flex-path.open > .inset-box { display: inline; background: transparent; border: 0; padding: 0; margin: 0; }
+.lyx-inset-flex-path.open > .inset-box > .inset-label { display: none; }
+.lyx-inset-flex-path > .inset-box > .inset-content { font-family: var(--editor-mono-font, "DejaVu Sans Mono"), monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .lyx-inset-argument > .inset-box { background: var(--chip-bg); }
 .lyx-inset-index > .inset-box { background: var(--err-bg); }
 .lyx-inset-listings > .inset-box { display: block; font-family: "DejaVu Sans Mono", monospace; font-size: 0.85em; background: var(--code-bg); white-space: pre-wrap; }

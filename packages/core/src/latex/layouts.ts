@@ -781,6 +781,16 @@ function readLayoutFile(file: string, dc: DocumentClass, seen: Set<string>): voi
 /* ------------------------------------------------------------ public API */
 
 function builtinLayouts(dc: DocumentClass): void {
+  // url's non-linking, typewriter path command has no standard LyX inset.
+  if (!dc.insetLayouts.has('Flex:Path')) {
+    const il = newInsetLayout('Flex:Path');
+    Object.assign(il, {
+      latexType: 'command', latexName: 'path', labelString: 'Path', requires: ['url'],
+      multiPar: false, customPars: false, forcePlain: true, passThru: true,
+      freeSpacing: true, needCProtect: true, font: { family: 'typewriter' },
+    });
+    dc.insetLayouts.set(il.name, il);
+  }
   // "Plain Layout" and "Standard" are created by LyX itself if missing.
   if (!dc.styles.has('Plain Layout')) {
     const s = newStyle('Plain Layout');

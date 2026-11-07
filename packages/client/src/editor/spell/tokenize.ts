@@ -8,7 +8,7 @@ import type { Node as PMNode } from 'prosemirror-model';
 export interface Word { word: string; from: number; to: number }
 
 /** insets whose text is code / markup, not prose */
-export const NO_SPELL_INSETS = new Set(['ERT', 'listings', 'Preamble', 'Index', 'IPA', 'Argument', 'Label', 'Flex Code', 'Flex URL', 'Flex Filename']);
+export const NO_SPELL_INSETS = new Set(['ERT', 'listings', 'Preamble', 'Index', 'IPA', 'Argument', 'Label', 'Flex Code', 'Flex URL', 'Flex Filename', 'Flex Path']);
 export const NO_SPELL_LAYOUTS = new Set(['LyX-Code', 'Verbatim', 'Verbatim*', 'Bibliography', 'Title', 'Author']);
 
 const WORD = /[\p{L}\p{M}]+(?:['’][\p{L}\p{M}]+)*/gu;
