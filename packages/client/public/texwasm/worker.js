@@ -15,6 +15,8 @@ const BASE = new URL('.', self.location.href).href;
 const PROGNAME = { pdftex: 'pdflatex', luahbtex: 'lualatex', xetex: 'xelatex' };
 /** formats never fetched: a format must come from this engine build (the worker is given it) */
 const NEVER = new Set([5, 8, 9, 10, 12]);   // base, cnf, ls-R, fmt, mem
+/** the engine's name for a program's code where it differs (the program keeps its name: kpathsea's progname, which picks the format) */
+const APPLET = { lualatex: 'luahbtex' };
 
 const modules = new Map();   // engine → Promise<{ factory, wasm }>
 const fetched = new Map();   // `${texlive}|${prog}|${format}/${name}` → { name, data } | null
@@ -115,7 +117,7 @@ async function run(msg) {
   const names = msg.engine === 'luahbtex' ? await namesOf(msg.texlive) : null;
   const out = [];
   const Module = await factory({
-    thisProgram: msg.program,
+    thisProgram: '/texlive/bin/' + msg.program,
     instantiateWasm(imports, done) { WebAssembly.instantiate(wasm, imports).then(inst => done(inst, wasm)); return {}; },
     print: s => { out.push(s); }, printErr: s => { out.push(s); },
     texliveFile: (name, format) => texliveFile(msg.texlive, index, prog, name, format),
@@ -125,12 +127,14 @@ async function run(msg) {
         // nothing to make missing fonts or files with: kpathsea asks the server instead
         MKTEXTEX: '0', MKTEXTFM: '0', MKTEXPK: '0', MKTEXMF: '0', MKOCP: '0', MKOFM: '0',
         HOME: '/texlive/home', XDG_CONFIG_HOME: '/texlive/config',
-        openin_any: 'p', openout_any: 'p', shell_escape: 'f', max_print_line: '1000',
+        // (TeX Live's defaults: reading anything — there is nothing else here — and writing only below the job)
+        openin_any: 'a', openout_any: 'p', shell_escape: 'f', max_print_line: '1000',
       }, msg.env || {});
     }],
   });
   const FS = Module.FS;
-  for (const d of ['/texlive/web2c', '/texlive/var', '/texlive/fmt', '/texlive/home', '/texlive/config/luaotfload']) mkdirs(FS, d);
+  for (const d of ['/texlive/bin', '/texlive/web2c', '/texlive/var', '/texlive/fmt', '/texlive/home', '/texlive/config/luaotfload']) mkdirs(FS, d);
+  FS.writeFile('/texlive/bin/' + msg.program, '');   // kpathsea finds its own directory from the program's file (SELFAUTOLOC)
   FS.writeFile('/texlive/web2c/texmf.cnf', texmfCnf);
   if (names) {
     mkdirs(FS, NAMES.slice(0, NAMES.lastIndexOf('/')));
@@ -147,7 +151,7 @@ async function run(msg) {
   FS.chdir('/work/' + (msg.cwd || ''));
   const since = Date.now();
   let code;
-  try { code = Module.callMain([msg.program, ...msg.args]); }
+  try { code = Module.callMain([APPLET[msg.program] || msg.program, ...msg.args]); }
   catch (e) { code = typeof e?.status === 'number' ? e.status : 1; out.push(String(e?.message ?? e)); }
   try { Module._flush_streams(); } catch (e) { /* gone with the run */ }
   const files = written(FS, '/work', since, []);

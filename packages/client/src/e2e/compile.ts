@@ -252,7 +252,8 @@ async function compile(p: E2eProject, main: string, progress: (s: string) => voi
       if (!bibDone && /\\bibdata\{/.test(aux)) {
         bibDone = true;
         progress('bibliography (BibTeX)');
-        const b = await runner.run(engine, texlive, 'bibtex8', ['-W', job], files, cwd, env);
+        // -8: bytes above 127 are letters, as bibtex has them (TeX Live's .csf code pages are not everywhere)
+        const b = await runner.run(engine, texlive, 'bibtex8', ['-8', '-W', job], files, cwd, env);
         take(b);
         out.push(`---- bibtex8 ${job} (exit ${b.code}) ----\n` + text(job + '.blg').slice(-4000));
         again = true;
