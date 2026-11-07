@@ -2525,7 +2525,14 @@ blend.
   it into the document). Autocorrect (Tools ▸ Autocorrect typos, on by default): a minor typo is
   fixed when the word is finished — dictionary-based (adjacent-swap candidates checked directly:
   Hunspell never suggests 'the' for 'teh'), never in formulas or code, Backspace right after
-  reverts and pins the word for the session.
+  reverts and pins the word for the session. **Arrows** (`editor/plugins/arrows.ts`, always on):
+  `->` becomes →, `<-` ←, `-->` ⟶, `<--` ⟵ (and `<->` ↔, `<-->` ⟷) as the last key is typed — the
+  key goes in as typing, the arrow replaces it as an undo step of its own, so ⌘Z or Backspace right
+  after gives the typed characters back, and those characters then stay as typed (not converted
+  again). Not in formulas, raw TeX, code-like insets or typewriter text; slide text boxes of HTML decks
+  don't have it. The .tex file has `\textrightarrow{}` / `\textleftarrow{}` and
+  `\ensuremath{\longrightarrow}` …, which the reader turns back into the characters
+  (`ENSUREMATH_ARROWS`); markdown and HTML keep the characters.
   * *Rewrite with AI* — `⌘J` / `Ctrl+J` (⌘K is the link box, as in Google Docs): select a passage — or nothing, to write at the cursor — and describe the
     change in the small prompt under it. The passage, the instruction and the document's LaTeX
     (for context: notation, macros, citation keys) go to the model; the reply comes back as LaTeX

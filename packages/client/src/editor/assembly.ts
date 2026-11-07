@@ -45,6 +45,7 @@ import { markdownRulesPlugin } from './plugins/mdrules';
 import { markdownPlugins, isMarkdownDoc, looksLikeMarkdown, pasteMarkdown } from './markdown';
 import { pasteTargetsPlugin, pasteLatex, pasteBlocksIntoEmpty } from './plugins/paste';
 import { autocorrectPlugin } from './spell/autocorrect';
+import { arrowsPlugin } from './plugins/arrows';
 import { spellPlugin, misspelledAt, spellSuggest } from './spell/plugin';
 import { aiRewritePlugin } from './ai/rewrite';
 import { aiCompletePlugin } from './ai/complete';
@@ -143,6 +144,7 @@ export function assemblePlugins(o: AssemblyOptions): Plugin[] {
     markdownRulesPlugin(),   // `- ` / `1. ` / `# ` at a paragraph start, before autocorrect looks at the space
     ...(o.markdown || o.article ? markdownPlugins({ article: !!o.article }) : []),   // `**bold**`, ``` + Enter …; markdown's blocks and marks only (before the LyX keymap)
     autocorrectPlugin(),
+    arrowsPlugin(),   // -> → and <- ←, --> ⟶, <-- ⟵ as they are typed; ⌘Z or Backspace right after gives the characters back (before the keymap's Backspace)
     chordPlugin(),
     layoutPlugin(),   // layout documents: object selection, handles, drawing tools (before the keymap and the mouse selection)
     foldPlugin(),   // section folding (before the keymap: ↑ / ↓ beside a fold skip the hidden text)
