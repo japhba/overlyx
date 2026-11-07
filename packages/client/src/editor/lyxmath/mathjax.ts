@@ -65,6 +65,22 @@ interface Renderer {
 let adaptor: ReturnType<typeof browserAdaptor> | null = null;
 const renderers = new Map<string, Renderer>();
 
+/** the bits of MathJax's MathML nodes the sans letters need */
+interface SansNode { walkTree(f: (n: SansNode) => void): void; isKind(k: string): boolean; getText?(): string; attributes: { getExplicit(k: string): unknown; set(k: string, v: unknown): void } }
+/** a token as beamer's default font theme sets it: Latin letters sans-serif italic, operator names and digits sans-serif */
+function sansLetters(n: SansNode): void {
+  const text = n.getText?.() ?? '';
+  // (capital Greek: upright from the sans font, as beamer's operators font has them)
+  if (n.isKind('mi') && /^[\u0393-\u03A9]$/.test(text) && n.attributes.getExplicit('mathvariant') === 'normal') { n.attributes.set('mathvariant', 'sans-serif'); return; }
+  if (n.attributes.getExplicit('mathvariant') !== undefined) return;
+  if (n.isKind('mi')) {
+    if (/^[A-Za-z]$/.test(text)) n.attributes.set('mathvariant', 'sans-serif-italic');
+    else if (/^[A-Za-z]{2,}$/.test(text)) n.attributes.set('mathvariant', 'sans-serif');
+  } else if (n.isKind('mn') && /^[0-9.,]+$/.test(text)) n.attributes.set('mathvariant', 'sans-serif');
+  // (\lim, \max, \det …: MathJax makes the ones with limits operators)
+  else if (n.isKind('mo') && /^[A-Za-z]{2,}$/.test(text)) n.attributes.set('mathvariant', 'sans-serif');
+}
+
 function makeRenderer(font: LoadedMathFont): Renderer {
   if (!adaptor) {
     adaptor = browserAdaptor();
@@ -81,6 +97,12 @@ function makeRenderer(font: LoadedMathFont): Renderer {
     // before MathJax's own setInherited filter (priority −6) hands the math element's attributes down)
     (tex as unknown as { postFilters: { add(f: (a: { data: { root: { attributes: { set(k: string, v: unknown): void } } } }) => void, priority: number): void } }).postFilters
       .add(({ data }) => { data.root.attributes.set('scriptsizemultiplier', mult); data.root.attributes.set('scriptminsize', min); }, -10);
+  }
+  // beamer's default font theme (mathfonts.ts `beamer`): Latin letters in sans-serif italic, digits and
+  // operator names (sin, log, \\operatorname) in sans-serif upright; Greek and the symbols stay Computer Modern's
+  if (font.sansLetters) {
+    (tex as unknown as { postFilters: { add(f: (a: { data: { root: SansNode } }) => void, priority: number): void } }).postFilters
+      .add(({ data }) => data.root.walkTree(sansLetters), -10);
   }
   const chtml = new CHTML<HTMLElement, Text, Document>({
     fontData: font.data,

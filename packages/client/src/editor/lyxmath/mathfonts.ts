@@ -19,6 +19,8 @@ interface FontSource {
   dynamic: Record<string, () => Promise<unknown>>;
   /** a font extension on top of another font (Euler: over New Computer Modern) */
   base?: string;
+  /** Latin letters, digits and operator names in the font's sans-serif (beamer's default font theme: mathjax.ts) */
+  sansLetters?: boolean;
 }
 
 // The globs must be literal. Paths lead to the workspace's node_modules; woff2 files stay files
@@ -86,6 +88,12 @@ const SOURCES: Record<string, FontSource> = {
     woff2: import.meta.glob('../../fonts/@mathjax/mathjax-anodyne-font/chtml/woff2/*.woff2', { query: '?no-inline', import: 'default', eager: true }),
     dynamic: import.meta.glob('../../fonts/@mathjax/mathjax-anodyne-font/chtml/dynamic/*.js'),
   },
+  // beamer's default font theme (and sfmath …): Computer Modern's symbols, big operators and Greek, the
+  // letters, digits and operator names from Computer Modern Sans — New Computer Modern has both
+  beamer: {
+    pkg: 'mathjax-newcm-font', load: () => import('@mathjax/mathjax-newcm-font/js/chtml.js'), sansLetters: true,
+    woff2: {}, dynamic: {},
+  },
   euler: {
     pkg: 'mathjax-euler-font-extension', base: 'newcm', load: () => import('@mathjax/mathjax-euler-font-extension/js/chtml.js'),
     woff2: import.meta.glob('../../../../../node_modules/@mathjax/mathjax-euler-font-extension/chtml/woff2/*.woff2', { query: '?no-inline', import: 'default', eager: true }),
@@ -125,6 +133,8 @@ export interface LoadedMathFont {
   extension?: unknown;
   /** the Unicode blocks formulas usually need, fetched in the background */
   preloadBlocks: string[];
+  /** Latin letters, digits and operator names in sans-serif (FontSource.sansLetters) */
+  sansLetters?: boolean;
 }
 
 /** the blocks of font data formulas usually need (the rest is fetched when a formula needs it) */
@@ -173,7 +183,7 @@ export function whenMathFontLoaded(id: string): Promise<boolean> {
           loaded.set(id, font);
           return font;
         }
-        const font: LoadedMathFont = { id, data: bundledFont(await src.load()), preloadBlocks: PRELOAD };
+        const font: LoadedMathFont = { id, data: bundledFont(await src.load()), preloadBlocks: src.sansLetters ? [...PRELOAD, 'sans-serif'] : PRELOAD, sansLetters: src.sansLetters };
         loaded.set(id, font);
         return font;
       } catch (e) {

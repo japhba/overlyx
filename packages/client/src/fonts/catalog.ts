@@ -112,6 +112,8 @@ export const MATH_FONTS: MathFont[] = [
   { id: 'fira', label: 'Fira Math', hint: 'sans-serif, Fira Sans', xHeight: 0.527, capHeight: 0.689 },
   // (OverLyX's conversion of Anodyne's MATH table: scripts/build-mathjax-font.py)
   { id: 'anodyne', label: 'Anodyne', hint: 'sans-serif, Anodyne: OverLyX’s own (Noto Sans Math’s design)', xHeight: 0.536, capHeight: 0.714 },
+  // (New Computer Modern with sans-serif letters: editor/lyxmath/mathfonts.ts; beamer slides draw their formulas so)
+  { id: 'beamer', label: 'Beamer’s default', hint: 'Computer Modern’s symbols with sans-serif letters, as beamer sets formulas', xHeight: 0.442, capHeight: 0.683 },
 ];
 
 /** Faces that were renamed: a preference saved under the old id keeps its face. */

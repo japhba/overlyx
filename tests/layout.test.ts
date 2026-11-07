@@ -215,6 +215,12 @@ describe('the page fonts of a layout document (what its PDF is set in)', () => {
     expect(pageFontsOf('\\usefonttheme{professionalfonts}', 'beamer')).toMatchObject({ id: 'sans', sansMath: false });
     expect(pageFontsOf('% \\usepackage[sfdefault]{notomath}', 'beamer').id).toBe('sans');   // a comment is no package
   });
+  it("the editor draws sans-serif math as the PDF has it: beamer's (CM symbols, sans letters), Noto Sans Math's, Fira's", () => {
+    expect(pageFontsOf('', 'beamer').sansMathFont).toBe('beamer');
+    expect(pageFontsOf('\\usepackage{sfmath}', 'article').sansMathFont).toBe('beamer');
+    expect(pageFontsOf('\\usepackage[sfdefault]{notomath}', 'beamer').sansMathFont).toBe('anodyne');
+    expect(pageFontsOf('\\usepackage{firamath}', 'beamer').sansMathFont).toBe('fira');
+  });
 });
 
 describe('macro files read as text keep the display form OverLyX writes after a definition', () => {

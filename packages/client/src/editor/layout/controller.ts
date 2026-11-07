@@ -1042,7 +1042,7 @@ class LayoutController {
     const fg = (el: string) => new RegExp(`\\\\setbeamercolor\\s*\\{\\s*${el}\\s*\\}\\s*\\{[^}]*?\\bfg\\s*=\\s*([^,}]+)`).exec(pre)?.[1]?.trim();
     const itemColor = color(fg('itemize items?') ?? fg('item') ?? fg('structure'));
     if (itemColor) s.setProperty('--ol-item-color', itemColor); else s.removeProperty('--ol-item-color');
-    setLayoutMathFont(fonts.sansMath ? 'fira' : null);
+    setLayoutMathFont(fonts.sansMath ? fonts.sansMathFont : null);
     this.fit();
     if (changed) this.rerenderViews();
   }

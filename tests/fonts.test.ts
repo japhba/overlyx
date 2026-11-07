@@ -117,7 +117,7 @@ describe('editor faces', () => {
   });
 
   it('math fonts are MathJax\'s, each bundled with its font data and x-height; former ids get the closest', () => {
-    expect(MATH_FONTS.map(m => m.id)).toEqual(['newcm', 'modern', 'tex', 'stix2', 'termes', 'pagella', 'asana', 'bonum', 'schola', 'dejavu', 'euler', 'fira', 'anodyne']);
+    expect(MATH_FONTS.map(m => m.id)).toEqual(['newcm', 'modern', 'tex', 'stix2', 'termes', 'pagella', 'asana', 'bonum', 'schola', 'dejavu', 'euler', 'fira', 'anodyne', 'beamer']);
     for (const m of MATH_FONTS) {
       expect(isMathFont(m.id), m.id).toBe(true);
       expect(m.xHeight, m.id).toBeGreaterThan(0.4);

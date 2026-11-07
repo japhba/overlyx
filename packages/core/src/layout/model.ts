@@ -554,6 +554,12 @@ export interface PageFonts {
   mathScale: number;
   /** formulas in a sans-serif math font (beamer's default font theme, notomath's sfdefault, sfmath…) */
   sansMath: boolean;
+  /**
+   * the editor's math font for those (editor/lyxmath/mathfonts.ts): `beamer` — Computer Modern's symbols
+   * with sans-serif letters, digits and operator names, as beamer's default font theme, sfmath and the
+   * like set them; `anodyne` for notomath (Noto Sans Math's design); `fira` for Fira's math packages
+   */
+  sansMathFont: 'beamer' | 'anodyne' | 'fira';
 }
 
 /**
@@ -599,5 +605,6 @@ export function pageFontsOf(preamble: string, textclass = 'beamer'): PageFonts {
   }
   if (['sfmath', 'sansmath', 'arevmath', 'cmbright', 'firamath', 'firamath-otf', 'mathastext'].some(p => pkgs.has(p))) sansMath = true;
   if (pkgs.has('kpfonts') && /sfmath/.test(pkgs.get('kpfonts') ?? '')) sansMath = true;
-  return { family, id, textScale, mathScale, sansMath };
+  const sansMathFont = pkgs.has('firamath') || pkgs.has('firamath-otf') ? 'fira' : pkgs.has('notomath') ? 'anodyne' : 'beamer';
+  return { family, id, textScale, mathScale, sansMath, sansMathFont };
 }
