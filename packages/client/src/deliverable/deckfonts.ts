@@ -80,11 +80,28 @@ export function googleFontSpec(e: GoogleFamilyStyles): string {
 /** a font of the deck's font lists (decktoolbar DECK_FONTS, the theme pane): `mine` one of My fonts */
 export interface DeckFont { label: string; css: string | null; google?: string; mine?: boolean }
 
-/** My fonts (the account's Google fonts, fonts/myfonts.ts) as deck fonts: their CSS family with the generic one of their category, the css2 query of all of them */
+/** a Google font as a deck font (a family of the catalogue, fonts/googlefont.ts): its CSS family with the generic one of its category, the css2 query of all of it */
+export function deckFontFor(e: GoogleFamilyStyles): DeckFont {
+  const generic = /monospace/i.test(e.c) ? 'monospace' : /^serif$/i.test(e.c) ? 'serif' : /handwriting/i.test(e.c) ? 'cursive' : 'sans-serif';
+  const name = /^[A-Za-z][A-Za-z-]*$/.test(e.f) ? e.f : JSON.stringify(e.f);
+  return { label: e.f, css: `${name}, ${generic}`, google: googleFontSpec(e) };
+}
+
+/** My fonts (the account's Google fonts, fonts/myfonts.ts) as deck fonts */
 export function myDeckFonts(entries: GoogleFamilyStyles[]): DeckFont[] {
-  return entries.map(e => {
-    const generic = /monospace/i.test(e.c) ? 'monospace' : /^serif$/i.test(e.c) ? 'serif' : /handwriting/i.test(e.c) ? 'cursive' : 'sans-serif';
-    const name = /^[A-Za-z][A-Za-z-]*$/.test(e.f) ? e.f : JSON.stringify(e.f);
-    return { label: '★ ' + e.f, css: `${name}, ${generic}`, google: googleFontSpec(e), mine: true };
-  });
+  return entries.map(e => ({ ...deckFontFor(e), label: '★ ' + e.f, mine: true }));
+}
+
+/**
+ * The bundled fonts drawn in the editor's own page too, so that the font list shows each in its face
+ * (they are otherwise only inside the deck's frame): once, when a deck font list first opens.
+ */
+let previewed = false;
+export function previewBundledFonts(): void {
+  if (previewed || typeof document === 'undefined') return;
+  previewed = true;
+  const style = document.createElement('style');
+  style.dataset.olDeckFonts = '';
+  style.textContent = Object.values(TEMPLATE_FONTS).join('\n');
+  document.head.appendChild(style);
 }

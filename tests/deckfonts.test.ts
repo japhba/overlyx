@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { blankDeck } from '../packages/core/src/html/deliverable.ts';
-import { embeddedFontFamilies, fontPortabilityWarning, fontResource, firstFontFamily, googleFontSpec, myDeckFonts } from '../packages/client/src/deliverable/deckfonts';
-import { deckFontList, DECK_FONTS } from '../packages/client/src/deliverable/decktoolbar';
+import { embeddedFontFamilies, fontPortabilityWarning, fontResource, firstFontFamily, googleFontSpec, myDeckFonts, deckFontFor } from '../packages/client/src/deliverable/deckfonts';
+import { deckFontSections, deckFontByName, embeddedDeckFonts, DECK_FONTS } from '../packages/client/src/deliverable/decktoolbar';
 
 it('new blank decks carry their default font, Instrument Sans, with its weight and width axes and no font download', () => {
   const html = blankDeck('Example');
@@ -70,14 +70,39 @@ it('My fonts link all of a Google font: a variable one\'s whole axes, a static o
   expect(fontResource('<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400">', 'Inter, sans-serif', 'Inter')).toContain('family=Inter:');
 });
 
-it('puts My fonts first in the deck font lists, after Default, without the same family twice', () => {
-  const mine = myDeckFonts([{ f: 'Inter', c: 'Sans Serif', i: true, w: [], a: [{ t: 'wght', min: 100, max: 900 }] }, { f: 'Source Code Pro', c: 'Monospace', i: false, w: [400, 700], a: [] }]);
-  expect(mine.map(f => f.css)).toEqual(['Inter, sans-serif', '"Source Code Pro", monospace']);
-  const list = deckFontList(mine);
-  expect(list[0].label).toBe('Default');
-  expect(list.slice(1, 3).map(f => f.label)).toEqual(['★ Inter', '★ Source Code Pro']);
-  expect(list.filter(f => f.css && firstFontFamily(f.css) === 'Inter')).toHaveLength(1);
-  expect(list.length).toBe(DECK_FONTS.length);
-  expect(deckFontList()).toEqual(DECK_FONTS);
+it('makes a deck font of any Google family: its CSS family with its category\'s generic one, the css2 query of all of it', () => {
+  expect(deckFontFor({ f: 'Inter', c: 'Sans Serif', i: true, w: [], a: [{ t: 'wght', min: 100, max: 900 }] }))
+    .toEqual({ label: 'Inter', css: 'Inter, sans-serif', google: 'Inter:ital,wght@0,100..900;1,100..900' });
+  expect(deckFontFor({ f: 'Source Code Pro', c: 'Monospace', i: false, w: [400, 700], a: [] }).css).toBe('"Source Code Pro", monospace');
+  expect(deckFontFor({ f: 'EB Garamond', c: 'Serif', i: true, w: [400], a: [] }).css).toBe('"EB Garamond", serif');
+  expect(deckFontFor({ f: 'Caveat', c: 'Handwriting', i: false, w: [400], a: [] }).css).toBe('Caveat, cursive');
+  // My fonts are the same fonts, starred
+  const mine = myDeckFonts([{ f: 'Inter', c: 'Sans Serif', i: true, w: [], a: [{ t: 'wght', min: 100, max: 900 }] }]);
+  expect(mine).toEqual([{ label: '★ Inter', css: 'Inter, sans-serif', google: 'Inter:ital,wght@0,100..900;1,100..900', mine: true }]);
 });
+
+it('lists the deck\'s own fonts — Default, then the embedded ones — and takes a family by name as the embedded font when there is one', () => {
+  expect(DECK_FONTS[0]).toEqual({ label: 'Default', css: null });
+  // every embedded font travels with the HTML (no Google link)
+  expect(embeddedDeckFonts().map(f => firstFontFamily(f.css!))).toEqual(['Instrument Sans', 'Fira Sans', 'Carlito', 'CMU Sans', 'DejaVu Sans']);
+  for (const f of embeddedDeckFonts()) expect(fontResource('<html><head></head></html>', f.css, f.google)).toContain('@font-face');
+  const picked: (string | null)[] = [];
+  const [lead, embedded] = deckFontSections('Fira Sans', f => picked.push(f.css), { label: 'Default', active: false, pick: () => picked.push(null) });
+  expect(lead.lead).toBe(true);
+  expect(lead.items.map(it => it.label)).toEqual(['Default']);
+  expect(embedded.lead).toBeFalsy();
+  // (each with its family, so that Google's same-named family is not listed twice; the one in use marked)
+  expect(embedded.items.map(it => it.family)).toEqual(['Instrument Sans', 'Fira Sans', 'Carlito', 'CMU Sans', 'DejaVu Sans']);
+  expect(embedded.items.filter(it => it.active).map(it => it.label)).toEqual(['Fira Sans']);
+  embedded.items[0].pick(); lead.items[0].pick();
+  expect(picked).toEqual(['"Instrument Sans", sans-serif', null]);
+  // no lead row unless asked for (the theme's text font has no "none")
+  expect(deckFontSections('', () => {})).toHaveLength(1);
+  // a name: the embedded font first (My fonts' Fira Sans is the bundled one), else Google's, else the name alone
+  const fira = { f: 'Fira Sans', c: 'Sans Serif', i: true, w: [400, 700], a: [] };
+  expect(deckFontByName('Fira Sans', fira)).toEqual(DECK_FONTS.find(f => f.css === '"Fira Sans", sans-serif'));
+  expect(deckFontByName('Lora', { f: 'Lora', c: 'Serif', i: true, w: [400, 700], a: [] }).google).toBe('Lora:ital,wght@0,400;0,700;1,400;1,700');
+  expect(deckFontByName('Some Font', null)).toEqual({ label: 'Some Font', css: '"Some Font", sans-serif', google: 'Some Font' });
+});
+
 

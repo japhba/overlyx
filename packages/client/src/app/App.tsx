@@ -46,7 +46,8 @@ import { debounce, hashAuthor, applyAuthorColors, applyCommentAvatars, bcp47, su
 import { chooseLyxImport } from './lyximport';
 import { setDocumentFonts } from '../fonts/editorfont';
 import { setDocumentParagraphs, setDocumentHeadings } from '../editor/paragraphsep';
-import { TextStylesPanel } from './TextStyles';
+import { TextStylesPanel, textStylesArg } from './TextStyles';
+import { DOCUMENT_FONT_ARG } from './FontPicker';
 import { setDocumentNumbering } from '../editor/plugins/numbering';
 import { MarkdownSettingsDialog } from './MarkdownSettings';
 import { Outline, buildOutline, type OutlineItem } from './Outline';
@@ -69,7 +70,7 @@ import { Tour, InterfacePrompt, tourWanted, rememberTour, type TourEnd } from '.
 import { FeedbackDialog } from './Feedback';
 import { Dialog, GraphicsDialog, TableDialog, LabelDialog, RefDialog, CiteDialog, HrefDialog, SettingsDialog, InsetDialog, HelpDialog, TexDialog, MacrosDialog, ParagraphDialog, TableSettingsDialog, DelimiterDialog, MatrixDialog, commandParams, HELP_ROWS, AiRepairDialog, ChildDocDialog, DialogHost, uiPrompt, uiConfirm, uiAlert } from './Dialogs';
 import { promptNewFile } from './newfile';
-import { SettingsPanel } from './Settings';
+import { SettingsPanel, settingsSearchEntries, documentFontEntry, type SettingsSection } from './Settings';
 import { clearLocalData } from './localData';
 import { createEditor, moveLocalCopies, type EditorHandle, type SaveState } from '../editor/editor';
 import { refreshMacros } from '../editor/macrodefs';
@@ -733,7 +734,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
 
   useEffect(() => applyEditorZoom(zoom), [zoom]);
   useDocumentViewportZoom(scrollRef, docId);
-  // Settings ▸ Editor ▸ Font ▸ "As in the document" follows the document's roman font
+  // Settings ▸ Fonts ▸ "As in the document" follows the document's roman font
   useEffect(() => { setDocumentFonts(headerLines); setDocumentParagraphs(headerLines); setDocumentHeadings(headerLines); setDocumentNumbering(headerLines); setLayoutHeader(headerLines); }, [headerLines]);
   // Ctrl/Cmd +/- zoom the document text, never the browser chrome — wherever the focus is (formula
   // fields, panels), unless a pane that zooms itself was pressed on last (the PDF, app/zoomkeys.ts).
@@ -1458,7 +1459,10 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   // the project's name: the tab already names the file (a combined master shows the children it includes)
   const docLabel = docId ? (combined && childIds.length ? [docId, ...childIds].map(base).join(' + ') : projectShortName(projectOfDoc(docId.replace(/^(text|pdf):/, '')))) : '';
 
-  // Help is available everywhere (the start screen has no other menus; feedback must be reachable there)
+  // Settings… in every editor and on the start screen (Tools ▸ Settings…, as in a document); the document's Tools has its switches too
+  const settingsItem = { label: 'Settings…', action: () => setDialog({ name: 'preferences' }) };
+  const plainTools: MenuDef = { title: 'Tools', items: [settingsItem] };
+  // Help is available everywhere (feedback must be reachable from the start screen too)
   const helpMenu: MenuDef = { title: 'Help', search: true, items: [
     { label: PALETTE_LABEL, shortcut: PALETTE_DEFAULT, action: openPalette },
     { label: 'Take the tour', action: () => openTour('intro') },
@@ -1511,7 +1515,12 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   // a slide deck's own menus (deliverable/DeliverableEditor.tsx: Edit, View, Insert, Slide, Arrange)
   const editorMenus = useEditorMenus();
   // the shortcut table is searchable too (a match opens the table)
-  const helpSearchEntries = useMemo(() => HELP_ROWS.map(([k, v]) => ({ id: 'Keyboard shortcuts ▸ ' + v, label: v, path: ['Keyboard shortcuts'], shortcut: k, fixed: true, action: () => setDialog({ name: 'help' }) })), []);
+  // and so are Settings' sections ("font" finds Settings ▸ Fonts) and, in a document, its own font (Text styles)
+  const helpSearchEntries = useMemo(() => [
+    ...HELP_ROWS.map(([k, v]) => ({ id: 'Keyboard shortcuts ▸ ' + v, label: v, path: ['Keyboard shortcuts'], shortcut: k, fixed: true, action: () => setDialog({ name: 'help' }) })),
+    ...settingsSearchEntries(s => setDialog({ name: 'preferences', arg: s }), undefined, !!user?.isAdmin),
+    ...(isLyxDoc ? [documentFontEntry(() => setDialog({ name: 'textstyles', arg: DOCUMENT_FONT_ARG }))] : []),
+  ], [user?.isAdmin, isLyxDoc]);
   const sectionItems = useMemo<MenuDef['items']>(() => {
     const v = masterView;
     if (!v) return [];
@@ -1659,9 +1668,9 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         { label: 'Rewrite selection with AI…', shortcut: REWRITE_KEY, disabled: !prefs.aiRewrite, action: () => runView(v => openRewrite(v)) },
       ] },
       { sep: true },
-      { label: 'Settings…', action: () => setDialog({ name: 'preferences' }) },
+      settingsItem,
     ] },
-  ] : []), helpMenu];
+  ] : []), ...(docId && isLyxDoc ? [] : [plainTools]), helpMenu];
 
   /** A paper was added to cited.bib: make the entry known, list cited.bib in the BibTeX inset, refresh the metadata. */
   const onBibAdded = (r: BibAddResult) => {
@@ -1756,7 +1765,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     // dialogs that do not need an editor (start screen, text files)
     if (dialog.name === 'feedback') return <FeedbackDialog docId={docId} onClose={() => { setDialog(null); view?.focus(); }} />;
     if (dialog.name === 'help') return <HelpDialog onClose={() => { setDialog(null); view?.focus(); }} />;
-    if (dialog.name === 'preferences') return <SettingsPanel ai={ai} user={user!} initial={dialog.arg as 'ai' | 'appearance' | undefined} onClose={() => { setDialog(null); view?.focus(); }} />;
+    if (dialog.name === 'preferences') return <SettingsPanel ai={ai} user={user!} initial={dialog.arg as SettingsSection | undefined} onClose={() => { setDialog(null); view?.focus(); }} />;
     if (!view || !docId) return null;
     const close = () => { setDialog(null); view.focus(); };
     const project = projectOfDoc(viewDocId(view)) || projectOfDoc(docId);
@@ -1822,7 +1831,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       }
       case 'href': return <HrefDialog onClose={close} onInsert={(t, n) => run(C.insertHref(t, n))} />;
       case 'mdsettings': return <MarkdownSettingsDialog docId={docId} onClose={close} />;
-      case 'textstyles': return <TextStylesPanel docId={docId} headerLines={headerLines} view={view} markdown={isMarkdownDoc(docId)} layout={typeof dialog.arg === 'string' ? dialog.arg : undefined} onClose={close} />;
+      case 'textstyles': return <TextStylesPanel docId={docId} headerLines={headerLines} view={view} markdown={isMarkdownDoc(docId)} {...textStylesArg(dialog.arg)} onClose={close} />;
       case 'settings': return <SettingsDialog docId={docId} meta={meta} headerLines={headerLines} tab={typeof dialog.arg === 'string' ? dialog.arg : undefined} onClose={close} onSaved={() => api.meta(docId).then(m => { setMeta(m); editorContext.meta = m; if (masterView) refreshMacros(masterView, m.macros); })} />;
       case 'macros': return <MacrosDialog meta={meta} onClose={close} />;
       case 'airepair': return docId ? <AiRepairDialog docId={docId} onClose={close} onApplied={() => api.meta(docId).then(m => { setMeta(m); editorContext.meta = m; })} /> : null;

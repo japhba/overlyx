@@ -15,11 +15,10 @@ import { referenceTargets, type ReferenceOptions } from '../editor/references';
 import { editorContext } from '../editor/context';
 import { diffLines } from './diff';
 import { recordUsage, dialogKey } from '../usage';
-import { DOCUMENT_FONT_SETS, matchFontSet, fontSetValues, fontValues } from '../fonts/catalog';
-import { useMyFonts } from '../fonts/myfonts';
+import { DOCUMENT_FONT_SETS, matchFontSet, fontSetValues, fontValues, editorFace, type DocumentFontSet } from '../fonts/catalog';
+import { FontChooser } from './FontPicker';
+import { parseFace } from '@overlyx/core';
 
-/** Document Settings ▸ Fonts ▸ Font set: a Google font of My fonts (`my:Family`) */
-const MY_FONT = 'my:';
 
 export function Dialog({ title, onClose, children, buttons, wide, restoreFocus }: { title: string; onClose: () => void; children: ComponentChildren; buttons?: ComponentChildren; wide?: boolean; restoreFocus?: () => boolean }) {
   const boxRef = useRef<HTMLDivElement>(null);
@@ -486,10 +485,13 @@ export function SettingsDialog({ docId, meta, headerLines, onSaved, onClose, tab
   const geometry = v.use_geometry === 'true';
   const fontFields = { font_roman: v.font_roman, font_sans: v.font_sans, font_typewriter: v.font_typewriter, font_math: v.font_math, font_sf_scale: v.font_sf_scale };
   const fontSet = matchFontSet(fontFields);
-  const myFonts = useMyFonts();
   const nonTex = v.use_non_tex_fonts === 'true';
   const romanByName = fontValues(v.font_roman)[1] ?? '';
-  const fontChoice = nonTex ? (myFonts?.includes(romanByName) ? MY_FONT + romanByName : '') : fontSet?.id ?? '';
+  const byName = nonTex && romanByName && romanByName !== 'default' ? romanByName : '';
+  // a font set, a font by name (non-TeX fonts: \setmainfont, built with LuaLaTeX, which finds a Google font by name), or LaTeX names of the document's own
+  const custom = !byName && (nonTex || !fontSet);
+  const pickSet = (s: DocumentFontSet) => { for (const [k, fv] of Object.entries(fontSetValues(s, fontFields))) set(k, fv); if (nonTex) set('use_non_tex_fonts', 'false'); };
+  const pickByName = (family: string) => { set('use_non_tex_fonts', 'true'); set('font_roman', `"${fontValues(v.font_roman)[0] || 'default'}" "${family}"`); };
   return (
     <Dialog title="Document Settings" onClose={onClose} wide buttons={<button class="btn primary" onClick={save}>Apply</button>}>
       <div class="hint">Changes here apply to the PDF and take precedence over matching settings in your preamble. Your preamble remains editable.</div>
@@ -545,29 +547,22 @@ export function SettingsDialog({ docId, meta, headerLines, onSaved, onClose, tab
         <Row label="Reference style">{bool('use_refstyle')}<span class="sub">refstyle (\\eqref, \\secref …) instead of prettyref</span></Row>
       </>}
       {tab === 'fonts' && <>
-        <Row label="Non-TeX fonts">{bool('use_non_tex_fonts')}<span class="sub">(XeTeX/LuaTeX)</span></Row>
-        <Row label="Font set"><select data-font-set value={fontChoice} onChange={e => {
-          const val = (e.target as HTMLSelectElement).value;
-          // a Google font of My fonts: the roman font by name (non-TeX fonts: \setmainfont, built with LuaLaTeX, which finds it by name)
-          if (val.startsWith(MY_FONT)) { set('use_non_tex_fonts', 'true'); set('font_roman', `"${fontValues(v.font_roman)[0] || 'default'}" "${val.slice(MY_FONT.length)}"`); return; }
-          const s = DOCUMENT_FONT_SETS.find(x => x.id === val);
-          if (s) { for (const [k, fv] of Object.entries(fontSetValues(s, fontFields))) set(k, fv); if (nonTex) set('use_non_tex_fonts', 'false'); }
-        }}>
-          {fontChoice === '' && <option value="">Custom — as set below</option>}
-          {!!myFonts?.length && <optgroup label="My fonts — Google fonts (LuaLaTeX)">{myFonts.map(f => <option key={f} value={MY_FONT + f}>{f}</option>)}</optgroup>}
-          <optgroup label="TeX font sets">{DOCUMENT_FONT_SETS.map(s => <option key={s.id} value={s.id}>{s.label} — {s.hint}</option>)}</optgroup>
-        </select></Row>
-        <div class="sub">{nonTex
-          ? 'With non-TeX fonts the text font is a font by name: a Google font (My fonts — ★ one in the font list to add it here) is built with LuaLaTeX, which finds it by name; any other must be installed on the build server (the second value of each below).'
-          : 'Each text font comes with the math font made for it; or a Google font of My fonts (★ one in the font list to add it here). The editor’s own font is set in Settings ▸ Editor ▸ Font (“As in the document” follows this choice).'}</div>
-        <Row label="Roman">{text('font_roman', '"default" "default" — LaTeX name, non-TeX name')}</Row>
-        <Row label="Sans serif">{text('font_sans', '"default" "default"')}</Row>
-        <Row label="Typewriter">{text('font_typewriter', '"default" "default"')}</Row>
-        <Row label="Math">{text('font_math', '"auto" "auto"')}</Row>
-        <Row label="Default family">{sel('font_default_family', ['default', 'rmdefault', 'sfdefault', 'ttdefault'])}</Row>
+        <Row label="Text font"><FontChooser label={byName || (custom ? 'Custom — see LaTeX details' : fontSet!.label)} face={byName ? parseFace(byName) : null} labelFont={!byName && fontSet ? editorFace(fontSet.face).text : undefined}
+          sections={[{ title: 'LaTeX’s font sets', note: 'Each with the math font made for it.', items: DOCUMENT_FONT_SETS.map(s => ({ key: s.id, label: s.label, hint: s.hint, fontFamily: editorFace(s.face).text, active: !nonTex && fontSet?.id === s.id, pick: () => pickSet(s) })) }]}
+          onPick={pickByName} title="The document's text font" data={{ 'data-font-set': byName ? 'name:' + byName : fontSet?.id ?? '' }} /></Row>
+        <div class="sub">A font set brings the math font drawn for it; a Google font (★ My fonts first, or any by its name) is set with LuaLaTeX. The headings, sizes and colours of the text: Document ▸ Text styles. Your own editor’s font: Settings ▸ Fonts (“As in the document” follows this).</div>
         <Row label="Base size">{sel('paperfontsize', ['default', '8', '9', '10', '11', '12', '14', '17', '20'])}</Row>
-        <Row label="Sans / typewriter scale">{text('font_sf_scale', '100 100', 'width:7em')}{text('font_tt_scale', '100 100', 'width:7em')}</Row>
         <Row label="Microtype">{bool('use_microtype')}</Row>
+        <details class="ds-latex" open={custom}>
+          <summary>LaTeX details — the fonts by their LaTeX names, sans serif, typewriter, math, scaling</summary>
+          <Row label="Non-TeX fonts">{bool('use_non_tex_fonts')}<span class="sub">(XeTeX/LuaTeX: fonts by name)</span></Row>
+          <Row label="Roman">{text('font_roman', '"default" "default" — LaTeX name, non-TeX name')}</Row>
+          <Row label="Sans serif">{text('font_sans', '"default" "default"')}</Row>
+          <Row label="Typewriter">{text('font_typewriter', '"default" "default"')}</Row>
+          <Row label="Math">{text('font_math', '"auto" "auto"')}</Row>
+          <Row label="Default family">{sel('font_default_family', ['default', 'rmdefault', 'sfdefault', 'ttdefault'])}</Row>
+          <Row label="Sans / typewriter scale">{text('font_sf_scale', '100 100', 'width:7em')}{text('font_tt_scale', '100 100', 'width:7em')}</Row>
+        </details>
       </>}
       {tab === 'branches' && <>
         <div class="list" style="max-height:220px">

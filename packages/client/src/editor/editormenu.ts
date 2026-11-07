@@ -308,7 +308,8 @@ function pushInsetItems(view: EditorView, node: PMNode, pos: number, items: Menu
   if (isComment && nv?.reply) items.push({ label: 'Reply to comment', icon: 'comment', action: () => nv.reply!() }, { label: 'Resolve / reopen thread', icon: 'spell', action: () => nv.toggleResolved!() });
   items.push(
     { label: node.attrs.status === 'collapsed' ? 'Open inset' : 'Close inset', icon: 'inset', shortcut: effectiveShortcut('Edit ▸ Open/close inset', 'Ctrl+Alt+I'), action: () => { if (nv?.toggle) nv.toggle(); else C.toggleInset(view.state, view.dispatch); } },
-    { label: 'Inset settings…', icon: 'settings', shortcut: 'Ctrl+Alt+I', action: () => editorContext.openInsetDialog?.(view, pos) },
+    // (Edit ▸ Inset settings…'s key — it showed Ctrl+Alt+I, Open/close inset's, above it too)
+    { label: 'Inset settings…', icon: 'settings', shortcut: effectiveShortcut('Edit ▸ Inset settings…', 'Ctrl+Alt+Shift+I'), action: () => editorContext.openInsetDialog?.(view, pos) },
     { label: 'Dissolve inset', icon: 'clearFormat', action: () => { C.dissolveInset(pos)(view.state, view.dispatch); view.focus(); } },
     { sep: true },
   );

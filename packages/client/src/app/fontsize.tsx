@@ -25,8 +25,13 @@ export function FontSizeBox({ view }: { view: EditorView }) {
   useEffect(() => {
     if (!open) return;
     const h = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
+    // Escape closes the list, and so does a right-click menu opening elsewhere (both stayed open)
+    const k = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setOpen(false); view.focus(); } };
+    const c = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
     document.addEventListener('mousedown', h);
-    return () => document.removeEventListener('mousedown', h);
+    document.addEventListener('keydown', k, true);
+    document.addEventListener('contextmenu', c, true);
+    return () => { document.removeEventListener('mousedown', h); document.removeEventListener('keydown', k, true); document.removeEventListener('contextmenu', c, true); };
   }, [open]);
   // the list fixed under the box: the Modern toolbar strip scrolls sideways and would clip it
   useLayoutEffect(() => { if (open && popRef.current && ref.current) pinUnder(popRef.current, ref.current); }, [open]);

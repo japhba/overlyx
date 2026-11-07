@@ -2,14 +2,14 @@
  * The fonts OverLyX offers, for the two places a font is chosen. They are independent, like LyX's
  * screen fonts (Preferences) and document fonts (Document ▸ Settings):
  *
- *   EDITOR_FACES        the editor's text (Settings ▸ Editor ▸ Text font, per browser): Computer
+ *   EDITOR_FACES        the editor's text (Settings ▸ Fonts ▸ Text font, per browser): Computer
  *                       Modern (CMU Serif), the text fonts of the OpenType math fonts listed on
  *                       https://tex.stackexchange.com/q/425098 and a few more, all served with the
  *                       client (fonts/web, scripts/build-editor-fonts.py) and fetched only once
  *                       chosen. Only open fonts: never a computer's own proprietary face (Palatino
  *                       was one until 3 Nov 2026; tests/open-fonts.test.ts), never Apple's San
  *                       Francisco fonts (CLAUDE.md, tests/no-sf-fonts.test.ts).
- *   MATH_FONTS          the editor's formulas (Settings ▸ Editor ▸ Math font): MathJax's fonts, each
+ *   MATH_FONTS          the editor's formulas (Settings ▸ Fonts ▸ Math font): MathJax's fonts, each
  *                       made from an OpenType math font, which MathJax lays formulas out with
  *                       (editor/lyxmath/mathfonts.ts loads them). "Matching the text font" is the
  *                       math font closest in style to the text face.
@@ -19,7 +19,7 @@
  *                       \font_roman / \font_sans / \font_typewriter / \font_math, so a .lyx file
  *                       opens with the same fonts in LyX.
  *
- * Each document font set names the editor face closest to it, for Settings ▸ Editor ▸ Text font ▸
+ * Each document font set names the editor face closest to it, for Settings ▸ Fonts ▸ Text font ▸
  * "As in the document".
  */
 import { TEXT_X_HEIGHT } from './web/metrics.gen';
@@ -124,7 +124,7 @@ const FORMER_MATH_FONTS: Record<string, string> = {
   plex: 'stix2', pl46: 'newcm', 'fira-text': 'fira', lete: 'fira', noto: 'fira', arsenal: 'fira', luciole: 'fira', pennstander: 'fira',
 };
 
-/** Settings ▸ Editor ▸ Text font: a face, or the face closest to the document's roman font */
+/** Settings ▸ Fonts ▸ Text font: a face, or the face closest to the document's roman font */
 export const FOLLOW_DOCUMENT = 'document';
 
 export interface DocumentFontSet {

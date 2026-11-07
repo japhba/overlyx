@@ -7,7 +7,8 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api, type MdFrontMatterValue } from '../api';
 import { Dialog } from './Dialogs';
-import { useMyFonts } from '../fonts/myfonts';
+import { FontChooser, type FontSection } from './FontPicker';
+import { parseFace } from '@overlyx/core';
 
 type Vars = Record<string, MdFrontMatterValue>;
 type Font = { label: string; main: string; math: string; hint: string };
@@ -20,7 +21,6 @@ const headingKeys = (v: MdFrontMatterValue | undefined): HeadingKeys => (typeof 
 
 export function MarkdownSettingsDialog({ docId, onClose, onSaved }: { docId: string; onClose: () => void; onSaved?: () => void }) {
   const [fonts, setFonts] = useState<Font[]>([]);
-  const myFonts = useMyFonts();
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [v, setV] = useState({ main: '', math: '', size: '', paper: '', margins: '', stretch: '', numbered: false, justify: false, runIn: false, headingFont: '', headingColor: '', spacing: '' });
@@ -41,6 +41,19 @@ export function MarkdownSettingsDialog({ docId, onClose, onSaved }: { docId: str
   }, [docId]);
   const set = (p: Partial<typeof v>) => setV(x => ({ ...x, ...p }));
   const pair = fonts.find(f => f.main === v.main);
+  // the font lists (the shared picker, app/FontPicker.tsx): pandoc's defaults, the fonts with a math font drawn for them, Google's
+  const textSections: FontSection[] = [
+    { title: 'The document’s', lead: true, items: [{ key: 'default', label: 'Default (Latin Modern)', hint: 'LaTeX’s', active: !v.main, pick: () => set({ main: '', math: '' }) }] },
+    { title: 'With their math fonts', items: fonts.map(f => ({ key: f.main, label: f.label, hint: f.hint, family: f.main, active: v.main === f.main, pick: () => set({ main: f.main, math: f.math }) })) },
+  ];
+  const mathSections: FontSection[] = [
+    { title: 'The document’s', lead: true, items: [{ key: 'default', label: 'Default (Latin Modern Math)', active: !v.math, pick: () => set({ math: '' }) }] },
+    { title: 'Math fonts', items: [...new Set([...fonts.map(f => f.math), ...(v.math ? [v.math] : [])])].map(m => ({ key: m, label: m, hint: pair?.math === m ? 'drawn for the text font' : fonts.find(f => f.math === m)?.label, active: v.math === m, pick: () => set({ math: m }) })) },
+  ];
+  const headingSections: FontSection[] = [
+    { title: 'The document’s', lead: true, items: [{ key: 'text', label: 'As the text', active: !v.headingFont, pick: () => set({ headingFont: '' }) }] },
+    { title: 'With their math fonts', items: fonts.map(f => ({ key: f.main, label: f.label, hint: f.hint, family: f.main, active: v.headingFont === f.main, pick: () => set({ headingFont: f.main }) })) },
+  ];
   const save = async () => {
     setBusy(true); setError('');
     try {
@@ -71,22 +84,17 @@ export function MarkdownSettingsDialog({ docId, onClose, onSaved }: { docId: str
   const row = (label: string, control: preact.ComponentChildren, hint?: string) => (
     <label class="md-set-row"><span class="md-set-label">{label}</span><span class="md-set-control">{control}{hint && <small class="hint">{hint}</small>}</span></label>
   );
+  // (a font row is no <label>: a click anywhere in the font list inside it went to the list's button and closed it)
+  const fontRow = (label: string, control: preact.ComponentChildren, hint?: string) => (
+    <div class="md-set-row"><span class="md-set-label">{label}</span><span class="md-set-control">{control}{hint && <small class="hint">{hint}</small>}</span></div>
+  );
   return (
     <Dialog title="Document Settings" onClose={onClose} buttons={<button class="btn primary" data-md-settings-apply disabled={busy} onClick={() => void save()}>Apply</button>}>
       <div class="md-settings" data-md-settings>
         <p class="hint">Kept in the document's front matter (pandoc's keys, so <code>pandoc --pdf-engine=lualatex</code> sets it alike); you can also edit them there.</p>
-        {row('Font', <input type="text" list="md-font-names" data-md-font value={v.main} placeholder="Computer Modern — LaTeX’s default"
-          onInput={e => { const main = (e.target as HTMLInputElement).value; const f = fonts.find(x => x.main.toLowerCase() === main.trim().toLowerCase()); set(f ? { main: f.main, math: f.math } : { main }); }} />,
-          'one of these, or any Google Fonts family by its name (Inter, Source Serif 4, Lora …): the server fetches it once')}
-        <datalist id="md-font-names">
-          {myFonts?.filter(m => !fonts.some(f => f.main === m)).map(m => <option key={'my' + m} value={m}>★ My fonts — a Google font</option>)}
-          {fonts.map(f => <option key={f.main} value={f.main}>{f.label} — {f.hint}</option>)}
-        </datalist>
-        {row('Math font', <select data-md-math value={v.math} onChange={e => set({ math: (e.target as HTMLSelectElement).value })}>
-          <option value="">{v.main ? 'As LaTeX has it (Computer Modern)' : 'Computer Modern'}</option>
-          {fonts.map(f => <option key={f.math} value={f.math}>{f.math}{pair?.math === f.math ? ' — drawn for the text font' : ''}</option>)}
-          {v.math && !fonts.some(f => f.math === v.math) && <option value={v.math}>{v.math}</option>}
-        </select>)}
+        {fontRow('Font', <FontChooser label={v.main ? pair?.label ?? v.main : 'Default (Latin Modern)'} face={v.main && !pair ? parseFace(v.main) : null} sections={textSections} onPick={main => set({ main })} title="Font" data={{ 'data-md-font': v.main }} />,
+          'one with the math font drawn for it, or any Google font (★ My fonts first): the server fetches it once')}
+        {fontRow('Math font', <FontChooser label={v.math ? `${v.math}${pair?.math === v.math ? ' — drawn for the text font' : ''}` : 'Default (Latin Modern Math)'} google={false} sections={mathSections} onPick={() => {}} title="Math font" data={{ 'data-md-math': v.math }} />)}
         {row('Size', <select value={v.size} onChange={e => set({ size: (e.target as HTMLSelectElement).value })}>
           <option value="">10 pt (default)</option><option value="11pt">11 pt</option><option value="12pt">12 pt</option>
         </select>)}
@@ -101,7 +109,7 @@ export function MarkdownSettingsDialog({ docId, onClose, onSaved }: { docId: str
         <label class="md-set-check"><input type="checkbox" data-md-justify checked={v.justify} onChange={e => set({ justify: (e.target as HTMLInputElement).checked })} /> Justified text (hyphenated, as LaTeX sets it)</label>
         <label class="md-set-check"><input type="checkbox" data-md-numbered checked={v.numbered} onChange={e => set({ numbered: (e.target as HTMLInputElement).checked })} /> Numbered sections</label>
         <label class="md-set-check"><input type="checkbox" data-md-runin checked={v.runIn} onChange={e => set({ runIn: (e.target as HTMLInputElement).checked })} /> Headings run into their paragraph</label>
-        {row('Heading font', <input type="text" list="md-font-names" data-md-heading-font value={v.headingFont} placeholder="As the text" onInput={e => set({ headingFont: (e.target as HTMLInputElement).value.trim() })} />)}
+        {fontRow('Heading font', <FontChooser label={v.headingFont || 'As the text'} face={v.headingFont ? parseFace(v.headingFont) : null} sections={headingSections} onPick={headingFont => set({ headingFont })} title="Heading font" data={{ 'data-md-heading-font': v.headingFont }} />)}
         {row('Heading spacing', <select data-md-heading-spacing value={v.spacing} onChange={e => set({ spacing: (e.target as HTMLSelectElement).value })}>
           <option value="">LaTeX’s</option><option value="compact">Compact — less space above and below</option><option value="tight">Tight</option>
           {v.spacing === 'custom' && <option value="custom">As the front matter has it</option>}

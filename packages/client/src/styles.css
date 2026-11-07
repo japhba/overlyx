@@ -302,7 +302,9 @@ html[data-theme="dark"] .ol-wordmark.bauhaus, html[data-ui="modern"][data-theme=
 .menu-item.disabled { color: var(--muted2); pointer-events: none; }
 .menu-item .shortcut { color: var(--muted2); font-size: 11px; }
 .menu-item:hover .shortcut { color: var(--on-accent-muted); }
-.menu-item.checked::before { content: "✓ "; }
+/* a checked entry: ✓ before its label, which stays on the left (with no shortcut, space-between had put it at the right edge) */
+.menu-item.checked::before { content: "✓"; margin-right: -12px; }
+.menu-item > span:first-child { flex: 1 1 auto; }
 .menu-sep { border-top: 1px solid var(--ui-border2); margin: 4px 0; }
 /* help menu: search over all menus and shortcuts */
 .menu-list.help-menu { width: 520px; max-width: calc(100vw - 24px); }
@@ -1628,6 +1630,7 @@ html.ol-inking, html.ol-inking * { -webkit-user-select: none !important; user-se
 .pdf-build-menu .delay { display: flex; align-items: center; gap: 6px; margin: 8px 0 4px; }
 .pdf-build-menu .delay select { font-size: 12px; }
 .pdf-build-menu .foot { margin-top: 6px; }
+.pdf-build-settings { display: block; width: 100%; margin-top: 6px; padding: 5px 0 0; border: 0; border-top: 1px solid var(--ui-border2); background: none; color: var(--accent); font: inherit; text-align: left; cursor: pointer; }
 /* how old the PDF is (app/pdfstatus.ts): green when current, amber when the document changed since, red after errors */
 .pdf-panel .pdf-age { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; color: var(--ok); }
 .pdf-panel .pdf-age.outdated { color: var(--warn-fg); }
@@ -2223,12 +2226,16 @@ html[data-presenting] .editor-column.panes > .editor-scroll { display: block !im
 .qo-hint { border-top: 1px solid var(--ui-border2); padding: 5px 12px; color: var(--muted2); font-size: 11px; }
 
 /* the centralized Settings panel (Settings.tsx) */
-.settings-dialog { display: flex; gap: 16px; min-height: 360px; }
-.settings-nav { display: flex; flex-direction: column; gap: 2px; flex: none; width: 130px; border-right: 1px solid var(--ui-border); padding-right: 12px; }
+/* one height for every section (it jumped from one to the next) and the sections' list in place while the content scrolls */
+.dialog:has(> .body > .settings-dialog) { height: min(720px, calc(100dvh - 24px)); }
+.dialog .body:has(> .settings-dialog) { overflow: hidden; }
+.settings-dialog { display: flex; gap: 16px; flex: 1 1 auto; min-height: 0; }
+.settings-nav { display: flex; flex-direction: column; gap: 2px; flex: none; width: 140px; border-right: 1px solid var(--ui-border); padding-right: 12px; overflow-y: auto; }
 .settings-nav button { text-align: left; padding: 5px 8px; border: none; background: none; border-radius: 4px; cursor: pointer; color: inherit; font: inherit; font-size: 13px; }
 .settings-nav button:hover { background: var(--row-hover); }
 .settings-nav button.active { background: var(--row-sel); font-weight: 600; }
-.settings-content { flex: 1; display: flex; flex-direction: column; gap: 10px; min-width: 460px; }
+.settings-content { flex: 1; display: flex; flex-direction: column; gap: 10px; min-width: 460px; min-height: 0; overflow-y: auto; padding-right: 4px; }
+.settings-content > * { flex: none; }
 /* a phone: the sections become a row of tabs above the content, which takes the dialog's width (it was cut off at the right) */
 @media (max-width: 640px) {
   .settings-dialog { flex-direction: column; gap: 10px; }
@@ -2243,7 +2250,18 @@ html[data-presenting] .editor-column.panes > .editor-scroll { display: block !im
 .lyx-editor.font-sample { flex: none; min-height: 0; max-width: none; margin: 0; padding: 8px 12px; font-size: 14.5px; line-height: 1.4; background: var(--page-bg); border: 1px solid var(--ui-border); border-radius: 4px; }
 .lyx-editor.font-sample p { margin: 0 0 2px; text-align: justify; hyphens: auto; }
 .lyx-editor.font-sample .sample-display { margin: 6px 0 8px; text-align: center; overflow-x: auto; overflow-y: hidden; }
+/* Document Settings ▸ Fonts ▸ LaTeX details: the LyX fields, folded under the font picker */
+.ds-latex { border-top: 1px solid var(--ui-border2); padding-top: 6px; display: flex; flex-direction: column; gap: 8px; }
+.ds-latex > summary { cursor: pointer; color: var(--ui-muted); }
+.ds-latex[open] > summary { margin-bottom: 4px; }
 .settings-users { border: 1px solid var(--ui-border); border-radius: 4px; padding: 6px 8px; display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow: auto; }
+/* Settings ▸ Fonts ▸ My fonts: each in its own face, with Remove */
+.settings-myfonts { border: 1px solid var(--ui-border); border-radius: 4px; padding: 4px 8px; display: flex; flex-direction: column; }
+.settings-myfont { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 30px; }
+.settings-myfont + .settings-myfont { border-top: 1px solid var(--ui-border2); }
+.settings-myfont-name { font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Settings ▸ Drawing & pen: Draw's pen popover, laid out in the page */
+.settings-pen .ink-pick { position: static; box-shadow: none; border: 1px solid var(--ui-border); border-radius: 4px; max-width: 420px; }
 .settings-users label { display: flex; gap: 8px; align-items: center; cursor: pointer; }
 .admin-reports { display: flex; flex-direction: column; gap: 6px; }
 .admin-reports .ar-kinds { display: flex; flex-wrap: wrap; gap: 4px; }
@@ -2940,8 +2958,21 @@ html[data-theme="dark"][data-dark-pages] .lyx-par[data-layout="FrameTitle"] { co
 .ff-panel-title { display: flex; align-items: center; gap: 6px; }
 /* a style the font lacks, faked (fonts/fakestyles.ts): "!" beside its name */
 .ff-fake { display: inline-grid; place-items: center; flex: none; width: 14px; height: 14px; border-radius: 50%; background: #d97706; color: #fff; font: 700 10px/1 var(--ui-font); cursor: help; }
-.tb-pal-item.ff-more { font: 12px var(--ui-font); color: var(--ui-muted); }
+/* the way to the document's own font (Text styles): a link with its arrow between rules — it read as a heading */
+.tb-pal-item.ff-more { font: 13px var(--ui-font); color: var(--accent); border-top: 1px solid var(--ui-border2); border-bottom: 1px solid var(--ui-border2); border-radius: 0; margin: 4px 0; }
 .ff-empty { padding: 6px; color: var(--ui-muted); font: 12px var(--ui-font); }
+/* a row's hint gives way to the font's name (names were cut to "Libertin…") */
+.ff-item:has(.ff-hint) > .ff-item-name { flex: none; max-width: 70%; }
+.ff-hint { flex: 1 1 0; min-width: 0; margin-left: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; color: var(--ui-muted); font: 11px var(--ui-font); }
+.ff-note { padding: 0 6px 4px; color: var(--ui-muted); font: 11px/1.35 var(--ui-font); }
+.ff-tag svg { display: block; }
+/* one font button wherever a font is chosen (FontPicker.tsx FontChooser): Settings, Document Settings, Text styles, a deck's theme */
+.ff-choose { display: inline-flex; max-width: 100%; min-width: 0; }
+.ff-choose-btn { display: inline-flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 180px; max-width: 100%; border: 1px solid var(--ui-border); border-radius: 5px; background: var(--surface); color: var(--ui-fg); padding: 3px 8px; font: 13px var(--ui-font); text-align: left; cursor: pointer; }
+.ff-choose-btn:hover:not(:disabled) { border-color: var(--ui-muted); }
+.ff-choose-btn:disabled { opacity: 0.6; cursor: default; }
+.ff-choose-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.tb-popup.ff-choose-pop { z-index: 120; }
 .ff-panel { border-top: 1px solid var(--ui-border); padding-top: 4px; overflow-y: auto; max-height: 40vh; flex: 0 0 auto; }
 .ff-sub { font: 12px var(--ui-font); color: var(--ui-fg); }
 .ff-axis { padding: 2px 6px 16px; }
@@ -3913,3 +3944,10 @@ html body .lyx-editor.ol-article > :is(.lyx-layout-itemize, .lyx-layout-enumerat
 .e2e-code code { display: inline-block; font-size: 1.15em; letter-spacing: 0.06em; padding: 0.45em 0.7em; border-radius: 6px; background: var(--code-bg, rgba(127, 127, 127, 0.12)); user-select: all; }
 .e2e-waiting { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 0; }
 .e2e-waiting code, .e2e-share .hint code { font-size: 0.9em; }
+
+/* deck font picker: the toolbar's Font (and the quick menu's over words) and Edit theme's fonts — the shared font list (FontPicker.tsx FontList) */
+.tb-popup[data-palette="dk-font"], .tb-popup[data-palette="q-font"] { width: 340px; max-width: calc(100vw - 16px); display: flex; flex-direction: column; max-height: 82vh; }
+.dk-font-list { display: flex; flex-direction: column; min-height: 0; }
+.dk-font-list .ff-scroll { max-height: 46vh; }
+.dl-theme-font .ff-choose { flex: 1; min-width: 0; }
+.dl-theme-font .ff-choose-btn { width: 100%; min-width: 0; }

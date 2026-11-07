@@ -9,6 +9,7 @@ import { ICONS } from '../app/Toolbar';
 import type { InkShape } from '@overlyx/core';
 import './deckicons';
 import { PenSettings } from './PenSettings';
+import { editorContext } from '../editor/context';
 import { inkColorName } from '../editor/plugins/ink';
 import { fmtPt, pxToPt } from './units';
 
@@ -84,7 +85,8 @@ export function drawingToolbar(c: DrawingContext): ToolButton[][] {
         icon: ink.nib.ball ? 'inkball' : 'inkpen', active: c.tool === 'pen' && !hl && !cm, action: () => { takePen({ pen: 'pen' }); done(); },
         paletteWhenActive: true,
         palette: { title: 'Pen', render: close => <PenSettings nib={ink.nib} color={ink.pens.pen.color} width={ink.pens.pen.width} habits={{ scribble: ink.scribble, fingersDraw: ink.fingersDraw, pencil: ink.pencil, penInks: ink.penInks, snap: ink.snap }}
-          onChange={nib => takePen({ pen: 'pen', nib })} onHabits={h => c.ink.set(h)} onClose={close} /> } },
+          onChange={nib => takePen({ pen: 'pen', nib })} onHabits={h => c.ink.set(h)} onClose={close}
+          onAllSettings={editorContext.ui ? () => editorContext.ui!.openDialog('preferences', 'drawing') : undefined} /> } },
       { id: 'dk-ink-hl', title: 'Highlighter — with its own colour and width; what is under it shows through (draw and hold: a straight one)', icon: 'inkhl', active: c.tool === 'pen' && hl, action: () => { takePen({ pen: 'highlighter' }); done(); } },
       ...(c.comment ? [{ id: 'dk-ink-comment', title: 'Comment pen — marks in glowing orange that are review comments, not content (not presented, printed or published); hold the microphone that comes with it and talk: what you say with what you draw becomes a comment agents and co-authors can act on',
         icon: 'inkcomment', active: c.tool === 'pen' && cm, action: () => { takePen({ pen: 'comment' }); done(); } }] : []),

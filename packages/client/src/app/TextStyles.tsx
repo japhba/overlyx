@@ -1,5 +1,5 @@
 /**
- * Format ▸ Text styles (and ✎ beside a style in the paragraph style list): how each kind of text
+ * Document ▸ Text styles (and ✎ beside a style in the paragraph style list): how each kind of text
  * looks — Title, Heading 1–4, Normal text, Quote — set as in Google Docs or Word, the document
  * changing as you go. A floating panel, not a dialog: the page stays in view. For the kind chosen:
  * font (any Google font, the document's own families or font sets; a variable font's axes and its
@@ -30,13 +30,12 @@ import {
 } from '@overlyx/core';
 import { MD_FONTS } from '@overlyx/core/md/typesetting.ts';
 import { api } from '../api';
-import { FontList, FacePanel, documentFaces, fontInfo, type FontInfo, type FontSection } from './FontPicker';
+import { FontChooser, FacePanel, documentFaces, fontInfo, editorFontSections, type FontInfo, type FontSection } from './FontPicker';
 import { cursorMarks } from './toolbars';
 import { previewTextStyles } from '../editor/paragraphsep';
 import { loadGoogleFont } from '../fonts/googlefont';
 import { getPrefs, setPref, subscribePrefs } from '../prefs';
-import { EDITOR_FACES, DOCUMENT_FONT_SETS, FOLLOW_DOCUMENT, GOOGLE_FACE, editorFace, matchFontSet, fontSetValues, fontValues, type DocumentFontSet } from '../fonts/catalog';
-import { pinUnder } from './popup';
+import { DOCUMENT_FONT_SETS, FOLLOW_DOCUMENT, GOOGLE_FACE, editorFace, matchFontSet, fontSetValues, fontValues, type DocumentFontSet } from '../fonts/catalog';
 import { styleLabel } from './stylenames';
 
 /** a kind's name: its paragraph style's, as the style list shows it (.tex: Section …; markdown: Heading 1 …; Modern: Normal text) */
@@ -104,6 +103,11 @@ function useFontInfo(family: string | null): FontInfo | null | undefined {
   return info;
 }
 
+/** the Text styles dialog's argument (setDialog arg): a style's name, or which style in which scope */
+export type TextStylesArg = string | { layout?: string; scope?: 'document' | 'screen' } | undefined;
+export const textStylesArg = (arg: unknown): Pick<TextStylesPanelProps, 'layout' | 'scope'> =>
+  typeof arg === 'string' ? { layout: arg } : arg && typeof arg === 'object' ? { layout: (arg as { layout?: string }).layout, scope: (arg as { scope?: 'document' | 'screen' }).scope } : {};
+
 export interface TextStylesPanelProps {
   docId: string;
   headerLines: readonly string[];
@@ -111,15 +115,17 @@ export interface TextStylesPanelProps {
   markdown: boolean;
   /** the kind shown first (a paragraph style's name, e.g. "Section"), else the cursor's */
   layout?: string;
+  /** the scope shown (a link to the document's font: "Document & PDF"), else the one last used */
+  scope?: 'document' | 'screen';
   onClose: () => void;
   /** after a change was saved (a shell without live settings reads the header again: VS Code) */
   onSaved?: () => void;
 }
 
-export function TextStylesPanel({ docId, headerLines, view, markdown, layout, onClose, onSaved }: TextStylesPanelProps) {
+export function TextStylesPanel({ docId, headerLines, view, markdown, layout, scope: initialScope, onClose, onSaved }: TextStylesPanelProps) {
   const cursorLayout = view ? (view.state.selection.$from.parent.attrs.layout as string | undefined) : undefined;
   const [type, setType] = useState<TextType>(typeOfLayout(layout ?? cursorLayout ?? '') ?? 'section');
-  const [scope, setScopeState] = useState<Scope>(() => { try { return localStorage.getItem(SCOPE_KEY) === 'screen' ? 'screen' : 'document'; } catch { return 'document'; } });
+  const [scope, setScopeState] = useState<Scope>(() => { if (initialScope) return initialScope; try { return localStorage.getItem(SCOPE_KEY) === 'screen' ? 'screen' : 'document'; } catch { return 'document'; } });
   const setScope = (s: Scope) => { setScopeState(s); try { localStorage.setItem(SCOPE_KEY, s); } catch { /* private window */ } };
 
   // the document's layers as edited here (its header catches up once they are saved)
@@ -386,10 +392,8 @@ export function TextStylesPanel({ docId, headerLines, view, markdown, layout, on
   };
   const fontSections = (): FontSection[] => {
     if (type !== 'body') return [];
-    if (scope === 'screen') return [{ title: 'Your editor', items: [
-      { key: 'doc', label: 'As in the document', active: ownFont === FOLLOW_DOCUMENT, pick: () => setPref('editorFont', FOLLOW_DOCUMENT) },
-      ...EDITOR_FACES.map(f => ({ key: f.id, label: f.label, hint: f.hint, fontFamily: f.text, active: ownFont === f.id, pick: () => setPref('editorFont', f.id) })),
-    ] }];
+    // (the same list as Settings ▸ Fonts ▸ Text font: it is the same setting)
+    if (scope === 'screen') return editorFontSections(ownFont, id => setPref('editorFont', id));
     if (markdown) return [{ title: 'With their math fonts', items: MD_FONTS.map(f => ({ key: f.main, label: f.label, hint: f.hint, active: familyOf(pdf.body?.font) === f.main, pick: () => change({ font: f.main }, { kind: 'md', main: f.main, math: f.math }) })) }];
     return [{ title: 'LaTeX’s font sets', items: DOCUMENT_FONT_SETS.map(s => ({ key: s.id, label: s.label, hint: s.hint, fontFamily: editorFace(s.face).text, active: !pdf.body?.font && docBodyLabel() === s.label, pick: () => change({ font: undefined }, { kind: 'set', set: s }) })) }];
   };
@@ -485,8 +489,9 @@ export function TextStylesPanel({ docId, headerLines, view, markdown, layout, on
       <div class="ts-body">
         {row('font', 'Font', (
           <>
-            <FontButton label={fontName} face={face} markdown={markdown} sections={fontSections()} withFamilies={type !== 'body'} view={view} onFont={pickFont}
-              onFamily={f => change({ font: f === 'sans' ? '@sans' : f === 'typewriter' ? '@mono' : f === 'roman' ? '@serif' : undefined })} />
+            <FontChooser label={fontName} face={face} markdown={markdown && type === 'body'} sections={fontSections()} inDocument={view ? documentFaces(view) : []} data={{ 'data-ts-font': '' }}
+              labelFont={!face && type === 'body' && scope === 'screen' && ownBodyFont ? editorFace(ownFont).text : undefined}
+              onPick={pickFont} onFamily={type !== 'body' ? f => change({ font: f === 'sans' ? '@sans' : f === 'typewriter' ? '@mono' : f === 'roman' ? '@serif' : undefined }) : undefined} />
             {face && extras && <FaceDetails face={face} onChange={f => pickFont(faceValue(f))} />}
           </>
         ))}
@@ -621,35 +626,6 @@ function Rungs({ value, rungs, onChange }: { value: number; rungs: { v: number; 
         ))}
       </div>
     </div>
-  );
-}
-
-/** the style's font: a button opening the font list (lists of the style editor's own first) */
-function FontButton({ label, face, markdown, sections, withFamilies, view, onFont, onFamily }: {
-  label: string; face: FontFace | null; markdown: boolean; sections: FontSection[]; withFamilies: boolean; view: EditorView | null;
-  onFont: (font: string | null) => void; onFamily: (family: string | null) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const btn = useRef<HTMLButtonElement>(null);
-  const pop = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const h = (e: MouseEvent) => { if (!btn.current?.contains(e.target as Node) && !pop.current?.contains(e.target as Node)) setOpen(false); };
-    document.addEventListener('mousedown', h);
-    return () => document.removeEventListener('mousedown', h);
-  }, [open]);
-  useEffect(() => { if (open && pop.current && btn.current) pinUnder(pop.current, btn.current); }, [open]);
-  useEffect(() => { if (face) loadGoogleFont(face.family); }, [face?.family]);
-  return (
-    <span class="ts-font">
-      <button ref={btn} type="button" class="ts-font-btn" data-ts-font onClick={() => setOpen(o => !o)} style={face ? { fontFamily: `'${face.family}', var(--ui-font)` } : undefined}>{label} ▾</button>
-      {open && (
-        <div ref={pop} class="tb-popup ff-pop ts-font-pop">
-          <FontList family={null} current={face} markdown={markdown && !withFamilies} inDocument={view ? documentFaces(view) : []} sections={sections}
-            onPick={family => { onFont(family); setOpen(false); }} onFamily={withFamilies ? f => { onFamily(f); setOpen(false); } : undefined} close={() => setOpen(false)} />
-        </div>
-      )}
-    </span>
   );
 }
 

@@ -1,5 +1,5 @@
 /**
- * The editor's fonts (Settings ▸ Editor ▸ Text font and Math font: prefs.editorFont and
+ * The editor's fonts (Settings ▸ Fonts ▸ Text font and Math font: prefs.editorFont and
  * prefs.editorMathFont; the catalogue is fonts/catalog.ts). The text font becomes CSS variables on
  * <html> — --editor-font for the text, --editor-sans-font / --editor-mono-font for Text Style ▸
  * Family — plus `data-editor-font` (absent for Computer Modern); the text fonts are declared in

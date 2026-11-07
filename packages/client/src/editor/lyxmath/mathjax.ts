@@ -3,7 +3,7 @@
  * (field.ts), the toolbars' symbol palettes, the settings preview, the agent panel.
  *
  * A TeX input jax with LyX's command set (mathjax-tex.ts) and a CHTML output jax for the chosen
- * math font (Settings ▸ Editor ▸ Math font; mathfonts.ts): MathJax lays formulas out from the
+ * math font (Settings ▸ Fonts ▸ Math font; mathfonts.ts): MathJax lays formulas out from the
  * font's OpenType MATH data — its spacing, radicals, wide accents and extensible delimiters. The
  * markup is MathJax's own, plus `data-sl` (the script level) on the editor's cell and atom boxes.
  * MathJax loads a font's data per Unicode block on demand, asynchronously: a formula that needs a

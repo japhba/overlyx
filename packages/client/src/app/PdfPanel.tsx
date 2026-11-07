@@ -12,6 +12,7 @@ import { encId, type BuildJob, type BuildInfo } from '../api';
 import { PdfViewer, type PdfTarget } from './PdfViewer';
 import { pdfStatus, useTicker, AUTO_BUILD_CHOICES, AUTO_BUILD_DELAYS } from './pdfstatus';
 import { getPrefs, setPref, subscribePrefs, type Prefs } from '../prefs';
+import { editorContext } from '../editor/context';
 
 export interface PdfState {
   url: string | null; log: string; busy: boolean; ok: boolean | null; warnings: string[]; tex?: string;
@@ -104,6 +105,8 @@ export function PdfPanel({ docId, state, savedAt, onBuild, onCancel, onShowTex, 
                 after the document is saved
               </label>
               <div class="sub foot">The document is saved 1.5 s after you stop typing. Builds run on the server in the background; the PDF keeps its page and zoom.</div>
+              {/* (every quick menu ends in its place in Settings) */}
+              {editorContext.ui && <button type="button" class="pdf-build-settings" data-pdf-settings onClick={() => { setMenu(false); editorContext.ui!.openDialog('preferences', 'editor'); }}>PDF settings…</button>}
             </div>
           )}
         </div>

@@ -215,7 +215,7 @@ function isIncludedByAnyLyx(project: string, relPath: string): boolean {
   return walk(proj, 0);
 }
 
-/** Settings ▸ Account ▸ New documents without indentation (userSettings paragraphSkip): vertical space between paragraphs. */
+/** Settings ▸ Editor ▸ New documents without indentation (userSettings paragraphSkip): vertical space between paragraphs. */
 export const NO_INDENT_SETTINGS: Record<string, string> = { paragraph_separation: 'skip', defskip: 'medskip' };
 
 /** A document's text with some settings changed, written as a settings change in the editor writes it (the rest byte for byte). */

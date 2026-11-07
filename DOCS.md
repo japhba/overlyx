@@ -580,7 +580,7 @@ blend.
   25, DynamicUser, the production checkout read-only), accepts mail only for `MAILIN_RECIPIENTS` at
   `MAILIN_DOMAIN`, keeps text + attachment names as JSON files in `/var/lib/overlyx-mailin`; it never
   sends or forwards. The OverLyX server imports them every minute into `reports` (kind `mail`, kept a
-  year); administrators read them in Settings ▸ Account ▸ Messages and reports (`GET /api/admin/reports`)
+  year); administrators read them in Settings ▸ Administration ▸ Messages and reports (`GET /api/admin/reports`)
   and answer there (`POST /api/admin/reports/:id/answer`, feedback.ts `answerMail`): the answer goes out
   from the address the message was sent to and is kept in the message, so it goes with it after a year.
   Sending needs `OVERLYX_SMTP_URL` (a sending service on port 587 — Hetzner blocks 25 and 465 — e.g.
@@ -1804,8 +1804,18 @@ blend.
   Appearance ▸ Dark theme* (the editor section in VS Code, which has no Appearance). e2e tests switch with `pickTheme()` (e2e/helpers.ts). Text and formulas are white on a near-black page; everything in
   `packages/client/src/styles.css` goes through the theme tokens at the top of the file (light values
   on `:root`, dark ones on `html[data-theme="dark"]`, set by `app/theme.ts`).
+* **Settings** (`app/Settings.tsx`, regrouped 7 Nov 2026 so that each thing has one place): Editor
+  (spelling, quick menu, math keyboard, automatic PDF builds, new documents' paragraph separation,
+  Zotero) · Fonts (the editor's text and math font, My fonts) · Drawing & pen (`PenSettings`, the
+  pen of slides, boards and margins) · Keyboard (shortcuts, tips, LyX's keys) · AI assistance ·
+  Appearance · Privacy · Account · Administration (administrators: token re-copy per account,
+  backups, mail and reports). One height for every section; the section list stays while the content
+  scrolls. *Tools ▸ Settings…* is in every editor and on the start screen (decks, boards and text files
+  have a Tools menu with just that), besides the avatar menu; the quick menus end in their place in
+  Settings (◑ ▸ Appearance settings…, the ▾ beside View PDF ▸ PDF settings…, Draw's pen ▸
+  Settings…). VS Code shows Editor, Fonts, Drawing & pen and Keyboard (`VSCODE_SETTINGS`).
 * **Fonts, for the editor and for the PDF separately** (like LyX's screen fonts and document fonts;
-  catalogue in `client/src/fonts/catalog.ts`). *Settings ▸ Editor* (per browser, both shells) has two
+  catalogue in `client/src/fonts/catalog.ts`). *Settings ▸ Fonts* (per browser, both shells) has two
   choices. *Text font* (`prefs.editorFont`): Computer Modern (bundled CMU Serif, the default), the text
   fonts of the OpenType math fonts listed on https://tex.stackexchange.com/q/425098 and a few more —
   New Computer Modern, Libertinus, STIX Two, XITS, TeX Gyre Termes / Pagella / Bonum / Schola, DejaVu
@@ -2371,8 +2381,8 @@ blend.
   from the third time on and five times per shortcut (counted per shortcut, so toolbar and menu add
   up; `localStorage.ol.shortcutTips`). Pressing the shortcut once ends its tips; the tip never takes
   the focus, lets clicks on its text through and closes after 5 s. *Don't show again* switches them
-  all off (pref `shortcutTips`: *Tools ▸ Shortcut tips after mouse actions*, *Settings ▸ Editor ▸
-  Shortcuts*, which can also start the counts over). Web client and VS Code extension alike.
+  all off (pref `shortcutTips`: *Tools ▸ Shortcut tips after mouse actions*, *Settings ▸ Keyboard*,
+  which can also start the counts over). Web client and VS Code extension alike.
 * **Text-file tabs and the source pane** (`app/TextEditor.tsx`, `app/SourcePane.tsx`, shared logic
   in `app/codearea.ts`): a textarea under a coloured copy of the text (`app/texhighlight.ts`) with
   VS Code habits — own undo / redo (`Ctrl+Z`, `Ctrl+Shift+Z` / `Ctrl+Y`; the browser's breaks as soon
@@ -2774,8 +2784,8 @@ blend.
   written from the tags (a web page becomes a `@misc` with `url` and `urldate`). Pasted pages are
   fetched through `netguard.ts` (public hosts only, every redirect checked, 2 MB cap); a site that
   answers servers with a bot check (DBLP, OpenReview, IEEE Xplore and HAL's pages from the production
-  box, October 2026) is reported as such, never taken for the paper. **Zotero**: Settings ▸ Account ▸
-  Zotero (or *Connect Zotero…* in the dialog) takes a Zotero Web API key with library read access
+  box, October 2026) is reported as such, never taken for the paper. **Zotero**: Settings ▸ Editor ▸
+  Citations from Zotero (or *Connect Zotero…* in the dialog) takes a Zotero Web API key with library read access
   (zotero.org/settings/keys); the search then lists the matching items of the user's library and of
   the groups the key reads first, marked, and cites them with Zotero's BibTeX (abstract, keywords and
   file links dropped). The key is checked with `GET /keys/current`, kept sealed per account
@@ -4102,20 +4112,34 @@ selection at once.
   `editor/plugins/fontfaces.ts` loads the families a document uses; the stylesheet names its files
   relative to itself, `google/<slug>/<file>`, so it serves under any prefix). The font routes need a
   signed-in user.
+* **One font list everywhere** (`app/FontPicker.tsx`, 7 Nov 2026): `FontList` — search through all of
+  Google Fonts, My fonts first, the caller's own lists (`FontSection`: `lead` ones such as Default or
+  "As in the document" above My fonts), *In this document*, *Recent*, Google's popular ones, no family
+  twice — is the toolbar's font button and, as `FontChooser` (a button that opens it; Escape closes the
+  list, not the dialog around it), every other place a font is chosen: Settings ▸ Fonts (text and math
+  font, My fonts), Document ▸ Text styles, Document ▸ Settings ▸ Fonts (LaTeX's font sets, Google fonts
+  by name; the LyX fields folded under *LaTeX details*), a markdown document's Settings (font, math
+  font, heading font), a deck's Font button and Edit theme (Default, the embedded fonts, Google's —
+  linked, not embedded, said once under them). `google={false}`: only the caller's lists (math fonts).
+  A FontChooser never sits inside a `<label>` (the label sent clicks in the list to its button, which
+  closed it). The toolbar list's *Font of the whole document…* opens Text styles ▸ Normal text in
+  *Document & PDF* (`DOCUMENT_FONT_ARG`), the one place for it; the command palette finds it, and
+  Settings' sections (`settingsSearchEntries`: "font" → Settings ▸ Fonts).
 * **My fonts** (`server/myfonts.ts`, the account's `users.settings.fonts`; `GET`/`PUT /api/fonts/mine`;
   client `fonts/myfonts.ts`): Google fonts installed into the account — ★ on a row of the list (shown
   on hover, kept while in the list) or *Add to my fonts* in the panel's title. They come first in
   every font list (then *In this document*, *Recent* without them), in the web app and in VS Code. A
   font added is fetched into the server's cache at once (every axis and OpenType feature: the
   repository's files). At most 200; guests and read-only sign-ins cannot change them.
-  **As the document's own font** too: Format ▸ Text styles ▸ Normal text lists them above LaTeX's
-  font sets (and markdown's fonts with their math fonts); Document ▸ Settings ▸ Fonts ▸ *Font set*
-  has a *My fonts* group first (`my:Family`: non-TeX fonts on, `font_roman`'s second value the family
-  — `\setmainfont`, built with LuaLaTeX, which finds it in `ol-fonts/` by name; a TeX font set turns
-  non-TeX fonts off again); a markdown document's Settings ▸ Font suggests them first (`mainfont`);
-  Settings ▸ Editor ▸ Text font lists them for the editor alone (`gf:Family`). **On slides, posters
-  and web pages** they come first in the Text toolbar's font list (★, after Default) and in Edit
-  theme's text and heading fonts (`deckfonts.ts myDeckFonts`, `decktoolbar.tsx deckFontList`), linked
+  Settings ▸ Fonts ▸ My fonts lists them (in their faces, with *Remove*) and adds one from the list.
+  **As the document's own font** too: Document ▸ Text styles ▸ Normal text lists them above LaTeX's
+  font sets (and markdown's fonts with their math fonts); Document ▸ Settings ▸ Fonts ▸ *Text font*
+  lists them first, and any other Google font by name (non-TeX fonts on, `font_roman`'s second value
+  the family — `\setmainfont`, built with LuaLaTeX, which finds it in `ol-fonts/` by name; a TeX font
+  set turns non-TeX fonts off again); a markdown document's Settings ▸ Font lists them first (`mainfont`);
+  Settings ▸ Fonts ▸ Text font lists them for the editor alone (`gf:Family`). **On slides, posters
+  and web pages** they come first in the Text toolbar's font list (after Default) and in Edit
+  theme's text and heading fonts (`deckfonts.ts deckFontFor`, `decktoolbar.tsx deckFontSections`), linked
   from Google Fonts like the list's other Google fonts but with all of the family (`googleFontSpec`:
   a variable font's whole axes, so Typography's width and any weight work; a static one's every weight;
   italics where it has them) — the published page loads them the same way. css2's files lack some
@@ -4138,7 +4162,7 @@ selection at once.
 
 ## Text styles
 
-*Format ▸ Text styles…*, the ✎ beside a style in the paragraph style list, or the list's last line
+*Document ▸ Text styles…*, the ✎ beside a style in the paragraph style list, or the list's last line
 (*Text styles — fonts, sizes, colours…*) open `app/TextStyles.tsx`: a floating panel (the page stays
 in view) where each kind of text — Title, Heading 1–4, Normal text, Quote — gets its font (any Google
 font, the document's serif / sans serif / monospace or, for normal text, its LaTeX font sets; a
@@ -4181,7 +4205,7 @@ in the preamble; editor = PDF ⊕ my editor:
   `\usepackage[onehalfspacing]{setspace}` keeps its package); the panel offers *Undo*. A markdown
   header carries header-includes as `\overlyx_includes` for the editor.
 * **My editor** (the panel's *Only my editor*): `prefs.screenStyles` (every document, this browser),
-  normal text's font `prefs.editorFont` (Settings ▸ Editor ▸ Text font; `gf:Family|axes|features`
+  normal text's font `prefs.editorFont` (Settings ▸ Fonts ▸ Text font; `gf:Family|axes|features`
   for a Google font). Never the PDF, never another person's editor; the panel marks such settings
   *Mine* and says in the document's view what your editor shows instead. Since 17 Oct 2026 the
   editor's text font follows the document unless chosen (`editorFont` 'document' by default; a

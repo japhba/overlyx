@@ -1,8 +1,39 @@
 import { describe, it, expect } from 'vitest';
-import { parseFormula, writeFormula, parseCell, writeCellLatex, MathCursor, renderHullSource, LLANGLE_PREAMBLE, definesLlangle, llanglePreamble, hasLlangleSnippet } from '@overlyx/core';
+import { parseFormula, writeFormula, parseCell, writeCellLatex, MathCursor, renderHullSource, onUnknownMathCommand, LLANGLE_PREAMBLE, definesLlangle, llanglePreamble, hasLlangleSnippet } from '@overlyx/core';
 import { toMathml } from './mathjax';
 
 const rt = (s: string) => writeFormula(parseFormula(s));
+
+describe('standard named delimiters after sizing commands', () => {
+  it.each([
+    ['lvert', 'rvert', /<mo[^>]*>(?:\||&#x7C;)<\/mo>/],
+    ['lVert', 'rVert', /<mo[^>]*>(?:‖|&#x2016;)<\/mo>/],
+    ['lbrack', 'rbrack', /<mo[^>]*>\[<\/mo>/],
+  ])('parses and draws %s / %s at every size', (left, right, glyph) => {
+    const seen: string[] = [];
+    onUnknownMathCommand((kind, name) => seen.push(`${kind} ${name}`));
+    try {
+      for (const size of ['big', 'Big', 'bigg', 'Bigg']) {
+        const src = `$\\${size}l\\${left} x\\${size}r\\${right}$`;
+        const h = parseFormula(src);
+        expect(h.rows[0].cells[0]).toEqual([
+          { t: 'big', n: size + 'l', d: '\\' + left },
+          { t: 'char', c: 'x' },
+          { t: 'big', n: size + 'r', d: '\\' + right },
+        ]);
+        expect(writeFormula(h)).toBe(src);
+        for (const atoms of [false, true]) {
+          const mml = toMathml(renderHullSource(h, {}, { atoms }).latex);
+          expect(mml).not.toContain('lm-unknown');
+          expect(mml).toMatch(glyph);
+          expect(mml).toContain('minsize=');
+          expect(mml).toContain('maxsize=');
+        }
+      }
+      expect(seen).toEqual([]);
+    } finally { onUnknownMathCommand(null); }
+  });
+});
 
 describe('double angle brackets (\\llangle … \\rrangle)', () => {
   it('round-trips as \\left … \\right delimiters', () => {

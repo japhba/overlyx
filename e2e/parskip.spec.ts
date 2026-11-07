@@ -1,7 +1,7 @@
 /**
  * Paragraph separation "Vertical space": the editor draws such a document's paragraphs flush left
  * with a gap (editor/paragraphsep.ts), an indented document keeps its first-line indents, and
- * Settings ▸ Account ▸ New documents ▸ "No paragraph indentation" makes the documents the account
+ * Settings ▸ Editor ▸ New documents ▸ "No paragraph indentation" makes the documents the account
  * creates start that way (userSettings paragraphSkip, texdoc.ts withDocumentSettings).
  */
 import { test, expect, type Page } from '@playwright/test';
@@ -39,11 +39,11 @@ test('no paragraph indentation: an account setting for new documents, drawn flus
   expect((await second(page)).gap).toBe(0);
   await expect(page.locator('html')).not.toHaveAttribute('data-par-sep', /.*/);
 
-  // Settings ▸ Account ▸ New documents
+  // Settings ▸ Editor ▸ New documents
   await page.click('[data-user-menu]');
   await page.click('.menu-item:has-text("Settings")');
   const dlg = page.locator('.dialog');
-  await dlg.locator('.settings-nav button', { hasText: 'Account' }).click();
+  await dlg.locator('.settings-nav button', { hasText: 'Editor' }).click();
   const skip = dlg.locator('[data-setting="paragraph-skip"]');
   await expect(skip).not.toBeChecked();
   await skip.check();

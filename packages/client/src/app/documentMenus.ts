@@ -1,4 +1,5 @@
 /** Editing commands shared by the browser and VS Code. Add document features here once. */
+import { NAMED_SIZES, NAMED_LABELS } from '../editor/fontsize';
 import { insertDrawing } from '../editor/svgdrawing';
 import type { EditorView } from 'prosemirror-view';
 import type { Command } from 'prosemirror-state';
@@ -72,9 +73,10 @@ export function documentMenus({ view, meta, run, runView, setDialog, textColor, 
           { label: 'Double underline', action: () => run(C.fontCommands.uuline) },
           { label: 'Wavy underline', action: () => run(C.fontCommands.uwave) },
           { sep: true },
-          ...['tiny', 'scriptsize', 'footnotesize', 'small', 'normal', 'large', 'larger', 'largest', 'huge', 'giant'].map(s => ({ label: 'Size: ' + s, action: () => run(C.setValueMark('size', s === 'normal' ? null : s)) })),
+          // (the sizes named as the font size box names them, editor/fontsize.ts; `id` keeps the old label for custom shortcuts and the statistics)
+          ...NAMED_SIZES.map(s => ({ id: 'Size: ' + s, label: 'Size: ' + NAMED_LABELS[s], action: () => run(C.setValueMark('size', s === 'normal' ? null : s)) })),
           { sep: true },
-          ...['red', 'blue', 'green', 'magenta', 'cyan', 'orange', 'purple', 'gray', 'none'].map(c => ({ label: 'Color: ' + c, action: () => run(C.setValueMark('color', c === 'none' ? null : c)) })),
+          ...['red', 'blue', 'green', 'magenta', 'cyan', 'orange', 'purple', 'gray', 'none'].map(c => ({ id: 'Color: ' + c, label: 'Colour: ' + c, action: () => run(C.setValueMark('color', c === 'none' ? null : c)) })),
         ]),
         { sep: true },
         { label: 'Reset font', shortcut: 'Ctrl+Alt+D', action: () => run(C.fontDefault) },
