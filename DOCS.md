@@ -1690,12 +1690,12 @@ blend.
   (`Section*`, `Subsection*`, …; `Chapter*` first in books). A space triggers each shortcut;
   unavailable levels stay literal text, and Backspace right after brings the marker back.
   Enter continues a list; Enter on an *empty* item ends it (a nested one
-  moves out one level first). **Backspace at the start of an item** takes the bullet away and keeps the
-  text where it was: it becomes a paragraph *of the item above* (LyX depth + 1 — LaTeX writes it inside
-  that `\item`, markdown indents it under it), as deep as LyX's nesting rule allows (`maxDepthAfter`:
-  the first item of a list has no item above — it leaves the list, or goes into its parent item); each
-  further Backspace moves it out one level, then it joins as usual. The item's own sub-items stay
-  where they are. Tab / Shift+Tab nest and unnest (`listIndent`) — Tab also on a paragraph right after
+  moves out one level first). **Backspace at the start of an item** takes it one level out — no bullet
+  counts as level 0 (the user's rule, 7 Nov 2026; `listExitBackspace`): a nested item becomes an item
+  of the level above, an item of the outermost level a plain paragraph, its text kept and not joined.
+  Its sub-items and what is nested in it (listmove.ts's unit) go out with it, so they stay its
+  sub-items — under the plain paragraph they carry the list on. A paragraph nested in an item moves
+  out one level per Backspace, then joins as usual. Tab / Shift+Tab nest and unnest (`listIndent`) — Tab also on a paragraph right after
   a list item, which puts it (or the image in it) into that item; Alt+Enter always starts a plain
   paragraph. **What is nested in an item starts at the item's text**: non-list paragraphs at depth *n*
   sit at 2*n* + 0.4em (the item's label box), on layout pages at `--ol-leftmargin` × *n* (beamer's
@@ -3543,6 +3543,11 @@ How it works, in order of what happens when you open a document:
   node selection, cells, a formula being edited, a read-only document or a layout document (its canvas
   has its own). It looks like the deck's (`.dl-quick`) and lives in `<body>`. Settings ▸ Editor ▸ Text
   ▸ "Quick menu over selected text" (`prefs.selectionBar`, on by default). `tests/parity.test.ts`.
+* **Horizontal spaces** (`\,` / `\thinspace`, `~`, `\quad`, `\enspace`, medium / thick / negative
+  spaces) are drawn as LyX draws them (`InsetSpace::draw`): no grey chip, a small bracket round the
+  baseline as wide as the space, in LyX's LaTeX dark red at half strength (`--space-mark`; orange on
+  dark pages); `~` and `\space` a half one standing on the baseline, negative spaces an upturned one.
+  `\hspace` and the fills keep their lines (`styles.css .lyx-space`).
 * **Paragraph separation** (Document ▸ Settings): "Vertical space" (`\paragraph_separation skip`) is drawn
   as the PDF has it — paragraphs flush left, `\defskip` between them (`editor/paragraphsep.ts`, both
   shells via `setDocumentParagraphs(headerLines)`; markdown documents are always this way). Settings ▸

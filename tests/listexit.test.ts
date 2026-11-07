@@ -1,7 +1,7 @@
 /**
- * Leaving a list the Google-Docs way (packages/client/src/editor/commands.ts): Backspace at the
- * start of a list item takes the bullet away and keeps the text where it was — a paragraph of the
- * item above (LyX depth) —, each further Backspace moves it out one level; Enter on an empty item
+ * Leaving a list (packages/client/src/editor/commands.ts): Backspace at the start of a list item
+ * takes it one level out with its sub-items — no bullet is level 0 —, a paragraph nested in an item
+ * moves out one level per Backspace; Enter on an empty item
  * ends the list instead of adding another item; Tab puts a paragraph after a list into the item
  * above. Elsewhere the keys keep their meaning.
  */
@@ -36,31 +36,32 @@ const run = (cmd: typeof listExitBackspace, state: EditorState): EditorState | n
 };
 
 describe('Backspace at the start of a list item', () => {
-  it('takes the bullet away and keeps the text; the paragraphs are not joined', () => {
+  it('takes an item of the outermost level out of the list: a plain paragraph, its text kept; the paragraphs are not joined', () => {
     const s = cursor(mkState([['Standard', 0, 'Intro'], ['Itemize', 0, 'first'], ['Itemize', 0, 'second']]), 1);
     const r = run(listExitBackspace, s)!;
     expect(r).not.toBeNull();
     expect(shape(r)).toEqual([['Standard', 0, 'Intro'], ['Standard', 0, 'first'], ['Itemize', 0, 'second']]);
-  });
-  it('keeps the text in the item above: a paragraph nested in it; the next Backspace moves it out, the one after joins', () => {
-    const s = cursor(mkState([['Itemize', 0, 'first'], ['Itemize', 0, 'second']]), 1);
-    const r1 = run(listExitBackspace, s)!;
-    expect(shape(r1)).toEqual([['Itemize', 0, 'first'], ['Standard', 1, 'second']]);
-    const r2 = run(listExitBackspace, cursor(r1, 1))!;
+    const r2 = run(listExitBackspace, cursor(mkState([['Itemize', 0, 'first'], ['Itemize', 0, 'second']]), 1))!;
     expect(shape(r2)).toEqual([['Itemize', 0, 'first'], ['Standard', 0, 'second']]);
     expect(run(listExitBackspace, cursor(r2, 1))).toBeNull();   // now an ordinary Backspace (joins)
   });
-  it('a nested item stays under its sibling above, or — the first one — goes into its parent item', () => {
-    const sib = cursor(mkState([['Itemize', 0, 'outer'], ['Itemize', 1, 'a'], ['Itemize', 1, 'b']]), 2);
-    expect(shape(run(listExitBackspace, sib)!)).toEqual([['Itemize', 0, 'outer'], ['Itemize', 1, 'a'], ['Standard', 2, 'b']]);
-    const first = cursor(mkState([['Itemize', 0, 'outer'], ['Itemize', 1, 'inner']]), 1);
-    const r = run(listExitBackspace, first)!;
-    expect(shape(r)).toEqual([['Itemize', 0, 'outer'], ['Standard', 1, 'inner']]);
-    expect(shape(run(listExitBackspace, cursor(r, 1))!)).toEqual([['Itemize', 0, 'outer'], ['Standard', 0, 'inner']]);
+  it('takes a nested item one level out, a bullet still (no bullet is level 0)', () => {
+    const s = cursor(mkState([['Itemize', 0, 'outer'], ['Itemize', 1, 'a'], ['Itemize', 1, 'b']]), 2);
+    const r1 = run(listExitBackspace, s)!;
+    expect(shape(r1)).toEqual([['Itemize', 0, 'outer'], ['Itemize', 1, 'a'], ['Itemize', 0, 'b']]);
+    expect(shape(run(listExitBackspace, cursor(r1, 2))!)).toEqual([['Itemize', 0, 'outer'], ['Itemize', 1, 'a'], ['Standard', 0, 'b']]);
   });
-  it('the item\'s own sub-items stay where they are (they follow the new paragraph in the item above)', () => {
-    const s = cursor(mkState([['Itemize', 0, 'A'], ['Itemize', 0, 'B'], ['Itemize', 1, 'B1']]), 1);
-    expect(shape(run(listExitBackspace, s)!)).toEqual([['Itemize', 0, 'A'], ['Standard', 1, 'B'], ['Itemize', 1, 'B1']]);
+  it('an item with sub-items: they go out with it and stay its sub-items, or carry the list on under the plain paragraph', () => {
+    const nested = cursor(mkState([['Itemize', 0, 'P'], ['Itemize', 1, 'B'], ['Itemize', 2, 'B1'], ['Standard', 2, 'B1 text'], ['Itemize', 1, 'C']]), 1);
+    expect(shape(run(listExitBackspace, nested)!)).toEqual([['Itemize', 0, 'P'], ['Itemize', 0, 'B'], ['Itemize', 1, 'B1'], ['Standard', 1, 'B1 text'], ['Itemize', 1, 'C']]);
+    const outer = cursor(mkState([['Standard', 0, 'Intro'], ['Itemize', 0, 'A'], ['Itemize', 1, 'A1'], ['Itemize', 1, 'A2'], ['Itemize', 0, 'B']]), 1);
+    expect(shape(run(listExitBackspace, outer)!)).toEqual([['Standard', 0, 'Intro'], ['Standard', 0, 'A'], ['Itemize', 0, 'A1'], ['Itemize', 0, 'A2'], ['Itemize', 0, 'B']]);
+  });
+  it('a paragraph nested in an item moves out one level per Backspace, then joins', () => {
+    const s = cursor(mkState([['Itemize', 0, 'item'], ['Standard', 1, 'inside']]), 1);
+    const r = run(listExitBackspace, s)!;
+    expect(shape(r)).toEqual([['Itemize', 0, 'item'], ['Standard', 0, 'inside']]);
+    expect(run(listExitBackspace, cursor(r, 1))).toBeNull();
   });
   it('does nothing away from the start of an item, or in an ordinary paragraph (Backspace keeps its meaning)', () => {
     expect(run(listExitBackspace, cursor(mkState([['Itemize', 0, 'first']]), 0, 2))).toBeNull();
