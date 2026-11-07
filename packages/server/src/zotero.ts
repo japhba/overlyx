@@ -33,7 +33,8 @@ CREATE TABLE IF NOT EXISTS zotero_accounts (
 `);
 
 const API = 'https://api.zotero.org';
-const { seal, unseal } = sealer('zotero');
+const { seal, unseal, reseal } = sealer('zotero');
+reseal('zotero_accounts', 'api_key');
 const headers = (key: string) => ({ 'Zotero-API-Version': '3', 'Zotero-API-Key': key });
 
 interface Library { type: 'user' | 'group'; id: number; name: string }

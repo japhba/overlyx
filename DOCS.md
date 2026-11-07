@@ -3066,6 +3066,18 @@ fine-grained personal access token in GitHub's *Developer settings*), and a seco
 file by `scp`. Without it the app runs with password login only. The per-instance JWT
 secret (`<data dir>/secret.key`) is generated on first start and is part of every backup too.
 
+**The accounts' secrets** — their own API keys, the Google Drive, LessWrong and Zotero
+authorisations, the account tokens kept for copying again and the Agent panel's — are sealed in the
+database (AES-256-GCM, `packages/server/src/sealed.ts`) under the **sealing key**,
+`<data dir>/sealing.key`, made on first start. Unlike `secret.key` it is in **no backup**, so a copy of
+the database or of a backup reveals none of them. **Keep one copy offline** (password manager), as
+root: `cat /root/lyx/overlyx/data/sealing.key`; it never changes. Restoring onto a new machine, put
+it back (mode 600) before the first start. Without it the server makes a new key and logs
+`[sealed] … is not the key this database's secrets were sealed with`; the old secrets then read as
+not connected, and every account connects its services and enters its keys again. The server holds
+the secrets while it runs, as it must: the Google Docs and LessWrong syncs act with the linking
+account's authorisation while that person is away, and agent turns go on after the tab closes.
+
 Do not put a broad-scope token (your `gh` login) in there: the server runs user-supplied LaTeX. `GITHUB_PUBLISH_TOKEN`
 (optional) lets administrators publish built PDFs into repositories (Share dialog ▸ *Public PDF
 link* ▸ *commit the PDF to a GitHub repository*): a fine-grained token with *Contents: read & write*
@@ -3086,7 +3098,7 @@ whether it is configured; the features stay off in every browser until a user sw
 
 **Off-site backup (Hetzner Object Storage, restic).** `deploy/overlyx-backup-offsite.timer` runs
 `scripts/backup-offsite.sh` every night at 04:15 UTC (after the local backup): the SQLite database
-(online backup), `secret.key`, `secrets.env` and the telemetry key — staged with a manifest in
+(online backup), `secret.key`, `secrets.env` and the telemetry key (not the sealing key: "Secrets") — staged with a manifest in
 `/mnt/HC_Volume_107166861/backup-stage` (0700, emptied after each run) — the projects with their git
 histories (without build products) and the agents' homes, encrypted by restic on this server and
 stored in a bucket in another Hetzner location (Helsinki; the server is in Falkenstein). The bucket
@@ -3155,7 +3167,7 @@ The mirror holds the documents and their history — not the database (users, sh
 tokens) nor `secrets.env`; those come from the nightly backup below. `OVERLYX_MIRROR_URL=file:///…/{repo}.git`
 mirrors into bare repositories on disk instead (tests, or a second disk).
 
-**Nightly backup.** `deploy/overlyx-backup.timer` runs `scripts/backup.sh` every night (SQLite online backup, `secret.key`,
+**Nightly backup.** `deploy/overlyx-backup.timer` runs `scripts/backup.sh` every night (SQLite online backup, `secret.key` — not `sealing.key` —,
 a tarball of the projects without build products; the newest 14 are kept) into `OVERLYX_BACKUP_DIR` —
 on overlyx.app `/mnt/HC_Volume_107166861/backups` (the volume; `data/backups` is a symlink to it).
 Restoring — do the drill once in a while:

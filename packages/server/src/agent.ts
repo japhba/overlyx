@@ -45,7 +45,7 @@ import { manager } from './docs.ts';
 import { projectDir } from './projects.ts';
 import { canonicalProject } from './namespaces.ts';
 import { roleFor, atLeast, logAccess } from './access.ts';
-import { createMcpToken } from './mcpTokens.ts';
+import { createMcpToken, keptMcpToken } from './mcpTokens.ts';
 import { selectionToTex, documentContext } from './ai.ts';
 import {
   prepareWorkspace, syncWorkspace, pruneWorkspaces, finishTurn, checkBuilds, noteTurnId, listCheckpoints, onCheckpoint,
@@ -369,11 +369,10 @@ interface PendingReq { resolve: (v: any) => void; reject: (e: Error) => void; ti
 const agentHomeDir = (userId: number) => path.join(passDir(path.join(config.agentDir, 'agent-home')), String(userId));
 
 const AGENT_TOKEN_NAME = 'Agent panel';
-/** The hidden internal MCP credential the embedded agent authenticates with (plaintext kept so
+/** The hidden internal MCP credential the embedded agent authenticates with (kept, sealed, so
  *  every codex start can pass it via the environment; re-minted if it is ever deleted). */
 function agentMcpToken(userId: number): string {
-  const row = db.prepare('SELECT token_plain FROM mcp_tokens WHERE user_id = ? AND name = ? AND token_plain IS NOT NULL').get(userId, AGENT_TOKEN_NAME) as { token_plain: string } | undefined;
-  return row ? row.token_plain : createMcpToken(userId, AGENT_TOKEN_NAME, true).token;
+  return keptMcpToken(userId, AGENT_TOKEN_NAME) ?? createMcpToken(userId, AGENT_TOKEN_NAME, true).token;
 }
 
 class AgentHost {
