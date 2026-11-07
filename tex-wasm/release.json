@@ -1,5 +1,13 @@
 {
-  "release": "",
-  "url": "",
-  "files": {}
+  "release": "tex-wasm-2023.0-1",
+  "url": "https://github.com/japhba/overlyx/releases/download/tex-wasm-2023.0-1/",
+  "files": {
+    "luahbtex.js": "4df786bd633551c7a129bb7a94c765601474126589ec317599d82c5409369d4d",
+    "luahbtex.wasm": "b9d72c965370f560b51851fa84f5033938df11f8a2b38b6a71b9607d615baeab",
+    "pdftex.js": "18d957508e5204e69e200435b9c2b6242d04902c882041396dfc3777af5bc44f",
+    "pdftex.wasm": "a420e6bd3de7c08f1f417038d1d0d389a81be05479c848af27adc226b9d4ce0f",
+    "texmf.cnf": "271578349b62a41077a28b2eb9be1f16d782590825a6acc8ee8cc979dbde37a8",
+    "xetex.js": "f0dd2b439ebfa2b4eb0de4f386fce80494cfea7b426635362152665fac617a0c",
+    "xetex.wasm": "aa3e47eee042c7efb89492aa5b083f59a69263100d41a0c966c76d35cda25a9f"
+  }
 }
