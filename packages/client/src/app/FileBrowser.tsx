@@ -28,6 +28,8 @@ import { useUiMode } from './uimode';
 import { KIND_ICONS, iconSvg } from './modernicons';
 import { chooseGoogleImport } from './gpicker';
 import { editSvgFile } from '../editor/svgEditorEvents';
+import { isE2eProject } from '../e2e/known';
+import { openE2eProject, e2eProjectUnlocked } from '../e2e/project';
 
 /**
  * Subscribe to the server's change stream for one project (SSE): `onChange` fires whenever files
@@ -165,6 +167,8 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
   const role = project?.role ?? 'owner';
   const via = project?.via ?? 'owner';
   const canEdit = role !== 'view';
+  // end-to-end encrypted: no slides, LyX or Google imports there yet (e2e/localapi.ts refuses them)
+  const e2e = !!project && isE2eProject(project.name);
   // standalone the browser refreshes itself; under the documents panel the panel subscribes (it
   // needs the same listing for the documents' outlines) and bumps refreshKey for both
   useProjectEvents(controlled === undefined ? selected : null, load);
@@ -539,16 +543,18 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
       </div>}
       <div class="actions">
         {canEdit && project && <button class="small-btn" onClick={() => void newFile()} title="New file in this project — the ending decides what it is: .tex a LaTeX document, .md a Markdown document, .html slides or a web page, .board a whiteboard, .bib, .sty … a text file">+ File</button>}
-        {canEdit && project && <button class="small-btn" data-new-slides onClick={() => setNewLayoutIn('')} title="New slides, a poster, a web page or an article: a folder with an index.html, edited on a canvas">+ Slides</button>}
+        {canEdit && project && !e2e && <button class="small-btn" data-new-slides onClick={() => setNewLayoutIn('')} title="New slides, a poster, a web page or an article: a folder with an index.html, edited on a canvas">+ Slides</button>}
         {canEdit && project && <button class="small-btn" onClick={() => void newFolder()} title="New folder in this project (also in the right-click menu of any folder)">+ Folder</button>}
         {canEdit && project && <button class="small-btn" onClick={() => void upload()} title="Upload files (figures, .bib, .sty …) — or drag them from your computer onto the file list">⇧</button>}
-        {canEdit && project && <button class="small-btn" data-lyx-import onClick={() => chooseLyxImport(project.name, '', r => { void load(); onOpen(r.id); })} title="Import a .lyx document or a zipped LyX project">LyX⇩</button>}
-        {canEdit && project && gdocs && <button class="small-btn" data-gdocs-import onClick={() => void importGoogle()} title="Import a Google Doc (picked in Google's picker) — one with tabs becomes a document group; it stays in step with the Google Doc">G⇩</button>}
+        {canEdit && project && !e2e && <button class="small-btn" data-lyx-import onClick={() => chooseLyxImport(project.name, '', r => { void load(); onOpen(r.id); })} title="Import a .lyx document or a zipped LyX project">LyX⇩</button>}
+        {canEdit && project && gdocs && !e2e && <button class="small-btn" data-gdocs-import onClick={() => void importGoogle()} title="Import a Google Doc (picked in Google's picker) — one with tabs becomes a document group; it stays in step with the Google Doc">G⇩</button>}
         {role === 'owner' && via !== 'admin' && project && onShare && <button class="small-btn" data-share={project.name} onClick={() => onShare(project.name)} title="Share this project…">👥</button>}
         <button class="small-btn" onClick={() => setShowAll(!showAll)} title="Show LaTeX build files (.aux, .log, .bbl …) and LyX backups (~, #, .emergency)">{showAll ? 'Fewer' : 'All files'}</button>
       </div>
       {project && renderChildren('', tree, 0)}
-      {project && !tree.length && <div class="empty">No files yet — make one with + File (main.tex is a document), or upload files.</div>}
+      {project && !tree.length && (e2e && !e2eProjectUnlocked(project.name)
+        ? <div class="empty" data-e2e-locked>🔒 This project is end-to-end encrypted: its files show once this browser holds its key. <button class="small-btn" onClick={() => void openE2eProject(project.name).then(() => load()).catch(e => void uiAlert('Still Locked', (e as Error).message))}>Unlock</button></div>
+        : <div class="empty">No files yet — make one with + File (main.tex is a document), or upload files.</div>)}
       {!projects.length && <div class="empty">No projects yet.</div>}
       {/* (on the page's body: not clipped by the sidebar, its clicks not the file tree's) */}
       {newLayoutIn !== null && project && createPortal(<NewLayoutDialog project={project.name} dir={newLayoutIn} onClose={() => setNewLayoutIn(null)}

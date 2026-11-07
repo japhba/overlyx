@@ -15,6 +15,8 @@ import { ago } from './Git';
 import { Dialog, uiConfirm, uiConfirmCheck } from './Dialogs';
 import { docPathOf, projectOfDoc, projectShortName } from '@overlyx/core';
 import { describeView } from './panes';
+import { E2eShareKeys } from './E2eShare';
+import { isE2eProject } from '../e2e/known';
 
 /**
  * A share link: the address of the file it opens (`#/<owner>/<project>/<path>`; the main document
@@ -60,6 +62,8 @@ function OpensFile({ files, path, busy, onPick, attr }: { files: string[]; path:
 
 export function ShareDialog({ project, user, doc, view, onClose, onChanged }: { project: string; user: User; doc?: string | null; /** how the open document is shown (a link's `view=`) */ view?: string | null; onClose: () => void; onChanged?: () => void }) {
   const [info, setInfo] = useState<ShareInfo | null>(null);
+  // end-to-end encrypted: no public address, no public PDF; who holds the key instead (E2eShare.tsx)
+  const e2e = isE2eProject(project);
   // the file the link opens: the one open in the workspace, else (from the start screen) the main document
   const openPath = doc && projectOfDoc(doc) === project ? docPathOf(doc) : null;
   const [linkPath, setLinkPath] = useState<string | null>(openPath);
@@ -88,7 +92,7 @@ export function ShareDialog({ project, user, doc, view, onClose, onChanged }: { 
     const load = () => Promise.all([
       api.share(project).then(i => { if (alive) setInfo(i); }),
       api.activity(project, 40).then(r => { if (alive) setActivity(r.entries); }).catch(() => {}),
-      api.pdfLinks(project).then(r => { if (alive) setPdf(r); }).catch(() => {}),
+      ...(isE2eProject(project) ? [] : [api.pdfLinks(project).then(r => { if (alive) setPdf(r); }).catch(() => {})]),
     ]).catch(e => { if (alive) setErr((e as Error).message); });
     void load();
     const t = setInterval(() => { if (!document.hidden) void load(); }, 4000);
@@ -235,6 +239,8 @@ export function ShareDialog({ project, user, doc, view, onClose, onChanged }: { 
           <div class="share-link-meta">
             <button type="button" class="btn small" disabled={busy} data-link-new onClick={() => setNewLink(true)}>New link…</button>
           </div>
+          {e2e && <E2eShareKeys project={project} busy={busy} />}
+          {!e2e && <>
           <h4>Public</h4>
           <label class="pref" data-public-toggle>
             <input type="checkbox" checked={!!info.public} disabled={busy} onChange={e => { const el = e.target as HTMLInputElement; const on = el.checked; el.checked = !on; void setPublic(on); }} />
@@ -304,6 +310,7 @@ export function ShareDialog({ project, user, doc, view, onClose, onChanged }: { 
             })}
             {pdf && !pdf.docs.length && <div class="hint">No documents in this project yet.</div>}
           </div>
+          </>}
           <h4>Activity</h4>
           <div class="hint">Who opened, built, pulled or pushed this project, changes to its sharing, and every time an administrator opened it (repeated opens by the same person are one entry per 10 minutes).</div>
           <div class="share-activity git-tokens" data-share-activity>

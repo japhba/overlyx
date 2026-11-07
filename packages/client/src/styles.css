@@ -3892,3 +3892,10 @@ html body .lyx-editor.ol-article > :is(.lyx-layout-itemize, .lyx-layout-enumerat
 .lyx-editor.ol-article .lyx-inset.ol-rawmath:hover > .inset-box > .inset-label, .lyx-editor.ol-article .lyx-inset.ol-rawmath.open > .inset-box > .inset-label { opacity: 0.8; }
 .lyx-editor.ol-article .lyx-inset.ol-rawmath.open > .inset-box > .inset-content { display: block; font-family: var(--ol-a-font-code, monospace); font-size: 0.7em; background: var(--ol-art-code); padding: 0.3em 0.5em; border-radius: 4px; }
 .ol-rawmath-shown math { font-size: 1.05em; }
+
+/* end-to-end encrypted projects (e2e/, app/E2eKeys.tsx) */
+.badge.e2e { background: color-mix(in srgb, var(--accent, #2a6) 14%, transparent); color: inherit; }
+.e2e-code { margin: 0.6em 0; }
+.e2e-code code { display: inline-block; font-size: 1.15em; letter-spacing: 0.06em; padding: 0.45em 0.7em; border-radius: 6px; background: var(--code-bg, rgba(127, 127, 127, 0.12)); user-select: all; }
+.e2e-waiting { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 0; }
+.e2e-waiting code, .e2e-share .hint code { font-size: 0.9em; }

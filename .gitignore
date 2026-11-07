@@ -16,3 +16,6 @@ deploy/secrets.env.*
 scripts/recording/out/
 # tex-wasm/Makefile's build tree (its dist/ as every dist/)
 tex-wasm/build/
+# the TeX engines (tex-wasm/), fetched by scripts/fetch-tex-wasm.mjs
+packages/client/public/texwasm/*
+!packages/client/public/texwasm/worker.js

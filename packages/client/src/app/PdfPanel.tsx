@@ -7,6 +7,7 @@
  * place at the same page (PdfViewer). The log opens by itself only after a build you asked for.
  */
 import { useEffect, useRef, useState } from 'preact/hooks';
+import { isE2eDocId } from '../e2e/known';
 import { encId, type BuildJob, type BuildInfo } from '../api';
 import { PdfViewer, type PdfTarget } from './PdfViewer';
 import { pdfStatus, useTicker, AUTO_BUILD_CHOICES, AUTO_BUILD_DELAYS } from './pdfstatus';
@@ -111,7 +112,10 @@ export function PdfPanel({ docId, state, savedAt, onBuild, onCancel, onShowTex, 
         <div class="pdf-bar-fill" />
         <button class={'small-btn' + (showLog ? ' active' : '') + (state.ok === false ? ' warn' : '')} onClick={() => { setShowLog(!showLog); openedByError.current = false; }} title="The build log">{showLog ? 'Hide log' : 'Log'}</button>
         <button class="small-btn" onClick={onShowTex} title="Show the LaTeX source as built">LaTeX</button>
-        {state.url && <a class="small-btn" href={`/api/docs/${encId(docId)}/pdf?download=1`} target="_blank" title="Download the PDF">⤓</a>}
+        {state.url && (isE2eDocId(docId)
+          // (an end-to-end encrypted document's PDF was built in this browser: its blob: URL)
+          ? <a class="small-btn" href={state.url} download={(docId.split('/').pop() ?? 'document').replace(/\.[^.]+$/, '') + '.pdf'} title="Download the PDF">⤓</a>
+          : <a class="small-btn" href={`/api/docs/${encId(docId)}/pdf?download=1`} target="_blank" title="Download the PDF">⤓</a>)}
         {onPublicLink && <button class="small-btn" data-pdf-public-link onClick={onPublicLink} title="A stable public address for this PDF — link it from your web page (Share dialog ▸ Public PDF link)">🔗</button>}
         {onClose && <button class="small-btn close" onClick={onClose} title="Hide the PDF pane">✕</button>}
       </div>

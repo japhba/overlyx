@@ -33,6 +33,7 @@
  * with the provider it was started on (agent_threads.provider); its model can change per turn.
  */
 import express, { type Request, type Response } from 'express';
+import { isE2eProject } from './e2e/store.ts';
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import net from 'node:net';
@@ -977,6 +978,8 @@ export function agentRoutes(): express.Router {
     req.params.project = canonicalProject(String(req.params.project ?? ''));   // an old name (namespaces.ts)
     const role = roleFor(req.user!, req.params.project);
     if (!atLeast(role, min)) { res.status(403).json({ error: 'You do not have access to this project' }); return false; }
+    // an end-to-end encrypted project: the agent could read nothing of it (e2e/store.ts)
+    if (isE2eProject(req.params.project)) { res.status(403).json({ error: 'The agent cannot work in an end-to-end encrypted project: the server cannot read it', code: 'e2e' }); return false; }
     return true;
   };
 

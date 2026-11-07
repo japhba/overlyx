@@ -39,6 +39,10 @@ export interface Project {
   via?: 'owner' | 'member' | 'link' | 'public' | 'admin';
   /** anyone may view it and clone it, without an account (Share ▸ Public) */
   public?: boolean;
+  /** end-to-end encrypted: the server keeps only ciphertext, this browser decrypts (e2e/) */
+  e2e?: boolean;
+  /** (encrypted) this browser does not hold its key: `account` — not unlocked here, `waiting` — not given it yet */
+  e2eLocked?: 'account' | 'waiting';
   owner?: { id: number; name: string; username: string; avatar?: string | null } | null;
   /** when this user last opened the project (server clock), null: never */
   lastOpened?: number | null;
@@ -199,7 +203,22 @@ export type ExternalAgentEvent = { kind: 'agents'; agents: ExternalAgent[] } | {
  */
 export const API_BASE: string = (globalThis as unknown as { OVERLYX_API_BASE?: string }).OVERLYX_API_BASE ?? '';
 
+/**
+ * Requests about an end-to-end encrypted project are answered in the browser (e2e/localapi.ts, set
+ * by the web app): `localRouter` returns their answer, or undefined for any other request. The
+ * other hooks: the project list's files of such projects, and the URLs of their files.
+ */
+type LocalRouter = (method: string, url: string, body: unknown, raw: BodyInit | undefined) => Promise<unknown> | undefined;
+let localRouter: LocalRouter | null = null;
+let projectsHook: ((list: Project[]) => Promise<Project[]>) | null = null;
+let urlHook: ((kind: 'graphics' | 'file', project: string, path: string, alt: string[]) => string | undefined) | null = null;
+export function setLocalApi(hooks: { router: LocalRouter; projects: (list: Project[]) => Promise<Project[]>; url: typeof urlHook }): void {
+  localRouter = hooks.router; projectsHook = hooks.projects; urlHook = hooks.url;
+}
+
 async function req<T>(method: string, url: string, body?: unknown, raw?: BodyInit, signal?: AbortSignal): Promise<T> {
+  const local = localRouter?.(method, url, body, raw);
+  if (local) return local as Promise<T>;
   const action = apiInteraction(method, url), start = performance.now();
   let res: Response;
   try { res = await fetch(API_BASE + url, {
@@ -304,8 +323,9 @@ export const api = {
   me: () => req<{ user: User | null; google: boolean; signup?: 'open' | 'invited' }>('GET', '/api/auth/me'),
   login: (username: string, password: string) => req<{ user: User }>('POST', '/api/auth/login', { username, password }),
   logout: () => req<{ ok: boolean }>('POST', '/api/auth/logout'),
-  projects: () => req<{ projects: Project[] }>('GET', '/api/projects').then(r => { for (const p of r.projects) knownProjects.add(p.name); noteProjectFiles(r.projects); return r; }),
-  createProject: (name: string) => req<{ project: Project }>('POST', '/api/projects', { name }),
+  projects: () => req<{ projects: Project[] }>('GET', '/api/projects').then(async r => { if (projectsHook) r.projects = await projectsHook(r.projects); for (const p of r.projects) knownProjects.add(p.name); noteProjectFiles(r.projects); return r; }),
+  /** `e2e`: end-to-end encrypted — the server keeps only ciphertext; documents are built in the browser (e2e/) */
+  createProject: (name: string, e2e = false) => req<{ project: Project }>('POST', '/api/projects', e2e ? { name, e2e } : { name }),
   /** the current id of a document (or project) an old link names — before projects lived in their owner's namespace */
   resolveId: (id: string) => req<{ id: string }>('GET', `/api/resolve?id=${encodeURIComponent(id)}`),
   resolveIds: (ids: string[]) => req<{ ids: Record<string, string> }>('POST', '/api/resolve', { ids }),
@@ -402,7 +422,7 @@ export const api = {
     return offlineGet(API_BASE + url, () => req<DocMeta>('GET', url));
   },
   /** the document's LaTeX source (what its .tex file contains) */
-  texText: (id: string) => fetch(`${API_BASE}/api/docs/${encId(id)}/tex`).then(async r => { if (!r.ok) throw Object.assign(new Error(`${r.status} ${r.statusText}`), { status: r.status }); return r.text(); }),
+  texText: (id: string) => (localRouter?.('GET', `/api/docs/${encId(id)}/tex`, undefined, undefined) as Promise<string> | undefined) ?? fetch(`${API_BASE}/api/docs/${encId(id)}/tex`).then(async r => { if (!r.ok) throw Object.assign(new Error(`${r.status} ${r.statusText}`), { status: r.status }); return r.text(); }),
   /** the LaTeX source with its source map: the character range of every top-level paragraph (null: the server has none) */
   texMap: (id: string) => req<{ text: string; spans: ({ start: number; end: number } | null)[] | null }>('GET', `/api/docs/${encId(id)}/tex?map=1`),
   /** replace the document by hand-edited LaTeX source */
@@ -542,10 +562,14 @@ export function isAuxFile(name: string): boolean {
 
 /** `alt`: where else the file may be (project-relative, tried in order when `path` is missing — the \graphicspath folders: editor/context.ts figureUrl) */
 export function graphicsUrl(project: string, path: string, w = 1200, alt: string[] = []): string {
+  const local = urlHook?.('graphics', project, path, alt);
+  if (local !== undefined) return local;
   // Encode the whole path so the browser cannot consume ../ segments before the host resolves it.
   return `${API_BASE}/api/projects/${encodeURIComponent(project)}/graphics/${encodeURIComponent(path)}?w=${w}${alt.map(a => '&alt=' + encodeURIComponent(a)).join('')}`;
 }
 export function fileUrl(project: string, path: string): string {
+  const local = urlHook?.('file', project, path, []);
+  if (local !== undefined) return local;
   return `${API_BASE}/api/projects/${encodeURIComponent(project)}/file/${encodeURIComponent(path)}`;
 }
 /** The whole project as a downloadable .zip (the project card's "Download" and the Git dialog). */

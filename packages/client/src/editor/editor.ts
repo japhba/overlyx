@@ -29,6 +29,8 @@ import { assemblePlugins, editorViewProps, editorAttributes, dispatchTransaction
 import { isMarkdownDoc } from './markdown';
 import { isArticleDoc } from '../articlekinds';
 import { setViewAwareness } from './viewawareness';
+import { E2eSocket } from '../e2e/socket';
+import { isE2eDocId, registerOpenDoc } from '../e2e/project';
 import type { MergeEntry, MergeSource } from './plugins/mergereview';
 import type { User } from '../api';
 
@@ -180,7 +182,10 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   // y-websocket appends the room name to the url; we pass the doc as a query param instead.
   // The connection is opened once the local copy has been loaded (see below).
   // model=2 (core collab/connect.ts): this editor holds the document as flows (core collab/model.ts); the server refuses older editors
-  const provider = new WebsocketProvider(wsUrl, '', ydoc, { params: connectParams(opts.docId), disableBc: true, connect: false });
+  // a document of an end-to-end encrypted project syncs through the encrypted relay (e2e/socket.ts)
+  const encrypted = isE2eDocId(opts.docId);
+  const provider = new WebsocketProvider(wsUrl, '', ydoc, { params: connectParams(opts.docId), disableBc: true, connect: false, ...(encrypted ? { WebSocketPolyfill: E2eSocket as unknown as typeof WebSocket } : {}) });
+  const unregister = encrypted ? registerOpenDoc(opts.docId, ydoc) : null;
   let destroyed = false;
   /** the document is empty here (nothing loaded or synced yet) */
   const isEmpty = () => ydoc.getText(BODY).length === 0 && ydoc.getMap(PAGES).size === 0;
@@ -584,6 +589,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
       // the view and its binding first: they must be gone before the provider/awareness fire their last events
       view.destroy();
       sync.destroy();
+      unregister?.();
       provider.awareness.setLocalState(null);
       provider.destroy();
       persistence.destroy();

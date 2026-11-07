@@ -21,6 +21,7 @@ import { KIND_ICONS, iconSvg } from './modernicons';
 import { ScientificTemplates, chosenDesign } from './ScientificTemplates';
 import { initialDeckSize, rememberDeckSize, sizeOf, usualDeckSize } from './decksize';
 import { BetaNote } from './Login';
+import { ensureAccountKeys } from '../e2e/ui';
 
 const isBackup = (name: string) => name.endsWith('~') || name.startsWith('#') || name.endsWith('.emergency');
 const mainFirst = (a: string, b: string) => Number(!/(^|\/)main\.tex$/.test(a)) - Number(!/(^|\/)main\.tex$/.test(b)) || a.split('/').length - b.split('/').length || a.localeCompare(b);
@@ -152,7 +153,9 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
   };
 
   const metaText = (p: Project, docs: string[]) =>
-    `${p.via === 'owner' ? 'Your project' : p.via === 'admin' ? (p.owner ? `Owned by ${p.owner.name} (${p.owner.username})` : 'No owner') : p.owner ? `Shared by ${p.owner.name}` : 'Shared with you'} · ${docs.length} document${docs.length === 1 ? '' : 's'}, ${p.files.length} file${p.files.length === 1 ? '' : 's'}${recencyLabel(p) ? ` · ${recencyLabel(p)}` : ''}`;
+    `${p.via === 'owner' ? 'Your project' : p.via === 'admin' ? (p.owner ? `Owned by ${p.owner.name} (${p.owner.username})` : 'No owner') : p.owner ? `Shared by ${p.owner.name}` : 'Shared with you'} · ${p.e2eLocked ? 'locked in this browser' : `${docs.length} document${docs.length === 1 ? '' : 's'}, ${p.files.length} file${p.files.length === 1 ? '' : 's'}`}${recencyLabel(p) ? ` · ${recencyLabel(p)}` : ''}`;
+  /** an encrypted project this browser cannot open yet lists nothing: not because it is empty */
+  const emptyNote = (p: Project) => p.e2eLocked === 'waiting' ? 'Waiting for a member to give you its key.' : p.e2eLocked ? 'Open it to unlock it with your recovery code.' : 'No documents yet.';
   /** who joined the project (and who owns it, when it is someone else's): avatars, then the names — guests ("Anonymous Otter") left out */
   const people = (p: Project) => {
     type Face = Omit<ProjectPerson, 'role'> & { role: ProjectPerson['role'] | 'owner' };
@@ -179,6 +182,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
   };
   const badge = (p: Project) => <>
     {p.public && <span class="badge view" data-public-badge title="Anyone can view this project and clone it, without an account">public</span>}
+    {p.e2e && <span class="badge e2e" data-e2e-badge title="End-to-end encrypted: the server keeps only ciphertext; documents are opened and built in the browser">🔒 encrypted</span>}
     {p.via !== 'owner' && <span class={'badge' + (p.role === 'view' ? ' view' : '')}>{p.via === 'admin' ? 'admin' : p.role === 'view' ? 'can view' : 'can edit'}</span>}
   </>;
   const docLink = (p: Project, d: string) => <a key={d} href={'#/' + p.name + '/' + d} onClick={e => { e.preventDefault(); onOpen(p.name + '/' + d); }}>{docLabel(p, d)}</a>;
@@ -187,11 +191,12 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
       {docs[0] ? (isExample
         ? <button class="btn primary small" data-start-tour onClick={() => onStartTour(p.name + '/' + docs[0])}>Start the tour</button>
         : <button class="btn primary small" onClick={() => onOpen(lastFileOf(p) ?? p.name + '/' + docs[0])}>Open</button>)
-        : <button class="btn primary small" onClick={() => onOpen(p.name)} title="This project has no documents yet — open it to create the first one">Open</button>}
+        : <button class="btn primary small" onClick={() => onOpen(p.name)} title={p.e2e && p.e2eLocked ? 'End-to-end encrypted: open it to unlock it in this browser' : 'This project has no documents yet — open it to create the first one'}>Open</button>}
       {p.role === 'owner' && p.via !== 'admin' && <button class="btn small" onClick={() => onShare(p.name)} data-share={p.name}>Share…</button>}
-      <button class="btn small" onClick={() => onGit(p.name)} data-git={p.name} title="Clone, pull and push this project with git">Git…</button>
-      <a class="btn small" data-download-zip={p.name} href={zipUrl(p.name)} title="Download the whole project as a .zip">Download</a>
-      {p.files.some(f => f.kind === 'doc') && <a class="btn small" data-download-lyx={p.name} href={zipUrl(p.name, 'lyx')} title="Download the project as LyX documents with figures and bibliography">LyX</a>}
+      {!p.e2e && <button class="btn small" onClick={() => onGit(p.name)} data-git={p.name} title="Clone, pull and push this project with git">Git…</button>}
+      {!p.e2e && <a class="btn small" data-download-zip={p.name} href={zipUrl(p.name)} title="Download the whole project as a .zip">Download</a>}
+      {p.e2e && !p.e2eLocked && <button class="btn small" data-download-zip={p.name} title="Download the whole project as a .zip, made in this browser" onClick={() => void import('../e2e/download').then(m => m.downloadProjectZip(p.name)).catch(e => notify('Could not make the .zip: ' + (e as Error).message, 'error'))}>Download</button>}
+      {!p.e2e && p.files.some(f => f.kind === 'doc') && <a class="btn small" data-download-lyx={p.name} href={zipUrl(p.name, 'lyx')} title="Download the project as LyX documents with figures and bibliography">LyX</a>}
       {p.role === 'owner' && <button class="btn small danger" title="Move this project to the trash" onClick={() => void remove(p)}>Delete</button>}
     </div>
   );
@@ -217,7 +222,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
         <div class="docs">
           {docs.slice(0, isExample ? 1 : 6).map(d => docLink(p, d))}
           {!isExample && docs.length > 6 && <span class="meta">+{docs.length - 6} more in the files panel</span>}
-          {!docs.length && <span class="meta">No documents yet.</span>}
+          {!docs.length && <span class="meta">{emptyNote(p)}</span>}
         </div>
         {actions(p, docs, isExample)}
       </div>
@@ -238,7 +243,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
         {people(p)}
         <div class="docs">
           {docs.slice(0, 8).map(d => docLink(p, d))}
-          {!docs.length && <span class="meta">No documents yet.</span>}
+          {!docs.length && <span class="meta">{emptyNote(p)}</span>}
         </div>
         {actions(p, docs)}
       </div>
@@ -264,7 +269,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
           {viewIcon(view === 'rows' ? 'grid' : 'rows')}
         </button>
       </div>
-      {newOpen && <NewProjectDialog onClose={() => setNewOpen(false)} notify={notify}
+      {newOpen && <NewProjectDialog user={user} onClose={() => setNewOpen(false)} notify={notify}
         onCreated={(id, name) => { setNewOpen(false); void load(); onChanged(); if (id) onOpen(id); else notify(`Project "${name}" created — add a document with + File in the files panel`); }} />}
       {importOpen && <OverleafImport source={importSource} existing={(projects ?? []).filter(p => splitProjectKey(p.name).owner === user.username).map(p => projectShortName(p.name))} onClose={() => { setImportOpen(false); setPending(null); }} onImported={() => { void load(); onChanged(); }} notify={notify}
         initial={pending ?? undefined} autostart={!!pending} onDone={names => void openImported(names)} />}
@@ -307,12 +312,15 @@ const NEW_KINDS: { id: NewKind; label: string; hint: string; w: number; h: numbe
  * The start page's + New: a document, slides, a poster or a whiteboard, each in a project of its own
  * (named like it), opened right away — or an empty project. Inside a project, + File and File ▸ New … add more.
  */
-export function NewProjectDialog({ onClose, onCreated, notify }: { onClose: () => void; onCreated: (id: string | null, name: string) => void; notify: (text: string, kind?: 'info' | 'error') => void }) {
+export function NewProjectDialog({ user, onClose, onCreated, notify }: { user: User; onClose: () => void; onCreated: (id: string | null, name: string) => void; notify: (text: string, kind?: 'info' | 'error') => void }) {
   const [kind, setKind] = useState<NewKind>('doc');
   const [template, setTemplate] = useState<string>();
   const [size, setSize] = useState(initialDeckSize);
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
+  const [encrypted, setEncrypted] = useState(false);
+  // (slides, posters and boards are not available encrypted yet)
+  const canEncrypt = kind === 'doc' || kind === 'empty';
   const k = NEW_KINDS.find(x => x.id === kind)!;
   const typed = name.trim();
   const invalid = typed && !isProjectName(typed) ? 'Only letters, digits, space, . _ - are allowed.' : null;
@@ -321,7 +329,10 @@ export function NewProjectDialog({ onClose, onCreated, notify }: { onClose: () =
     if (!n || invalid) return;
     setBusy(true);
     try {
-      const { project } = await api.createProject(n);
+      const e2e = encrypted && (selectedKind === 'doc' || selectedKind === 'empty');
+      // an encrypted project needs this browser to hold the account's keys first (set up once, recovery code)
+      if (e2e && !(await ensureAccountKeys(user.id))) { setBusy(false); return; }
+      const { project } = await api.createProject(n, e2e);
       const key = project.name;
       const chosenTemplate = chosenDesign(selectedKind, selectedKind === kind ? template : undefined);
       if (selectedKind === 'deck' && chosenTemplate === 'blank') rememberDeckSize(size);
@@ -356,6 +367,8 @@ export function NewProjectDialog({ onClose, onCreated, notify }: { onClose: () =
       <label class="dialog-row">Name <input type="text" value={name} autofocus placeholder={k.name || 'Name of the project'} data-new-name
         onInput={e => setName((e.target as HTMLInputElement).value)} onKeyDown={e => { if (e.key === 'Enter') void create(); }} /></label>
       {invalid && <p class="dialog-hint error">{invalid}</p>}
+      {canEncrypt && <label class="feedback-opt" data-new-e2e><input type="checkbox" checked={encrypted} onChange={e => setEncrypted((e.target as HTMLInputElement).checked)} /> End-to-end encrypted</label>}
+      {canEncrypt && encrypted && <p class="dialog-hint" data-new-e2e-hint>Only you and the people you share it with can read it: the server keeps ciphertext, and the PDF is built in your browser. Agents, AI, git, sync and public links are not available for it.</p>}
       <p class="dialog-hint">{kind === 'empty' ? 'A project holds documents, slides, figures and a bibliography together. Share it to work on it with others.' : kind === 'board' ? `It gets a project of its own, “${typed || k.name}”, where the pictures you put on it are kept too.` : `It gets a project of its own, “${typed || k.name}”, where figures and a bibliography can go too.`}</p>
     </Dialog>
   );
@@ -368,12 +381,15 @@ export function NewProjectDialog({ onClose, onCreated, notify }: { onClose: () =
  */
 export function ProjectRootPanel({ project, notify, onCreated }: { project: string; notify: (text: string, kind?: 'info' | 'error') => void; onCreated: (id: string) => void }) {
   const [info, setInfo] = useState<Project | null | undefined>(undefined);
+  const [loads, setLoads] = useState(0);
   useEffect(() => {
     let alive = true;
     setInfo(undefined);
     api.projects().then(r => { if (alive) setInfo(r.projects.find(p => p.name === project) ?? null); }).catch(() => { if (alive) setInfo(null); });
     return () => { alive = false; };
-  }, [project]);
+  }, [project, loads]);
+  // an encrypted project this browser holds no key of: unlocked with the recovery code (or waiting for a member to give the key)
+  const unlock = () => void import('../e2e/project').then(m => m.openE2eProject(project)).then(() => setLoads(n => n + 1)).catch(e => notify((e as Error).message, 'error'));
   const createFirstDoc = async () => {
     const id = await promptNewFile(project, { where: projectShortName(project), initial: 'main.tex', title: 'New Document' }).catch(e => { notify((e as Error).message, 'error'); return null; });
     if (id) onCreated(id);
@@ -392,11 +408,15 @@ export function ProjectRootPanel({ project, notify, onCreated }: { project: stri
       {docs.length ? <>
         <div class="sub">Open one of its documents — all its files are in the files panel on the left.</div>
         <div class="docs project-docs">{docs.map(d => <a key={d} href={'#/' + project + '/' + d.split('/').map(encodeURIComponent).join('/')} onClick={e => { e.preventDefault(); onCreated(project + '/' + d); }}><Glyph kind="doc" emoji="📄" /> {d}</a>)}</div>
-      </> : <div class="sub">This project has no documents yet. Its files (if any) are in the files panel on the left.</div>}
+      </> : info.e2eLocked ? <div class="sub" data-e2e-locked>🔒 This project is end-to-end encrypted, and this browser does not hold its key yet. {info.e2eLocked === 'waiting' ? 'A member who has it gives it to you in the project’s Share dialog; it opens here by itself then.' : 'Unlock it with your recovery code.'}</div>
+        : <div class="sub">This project has no documents yet. Its files (if any) are in the files panel on the left.</div>}
       <div class="home-actions">
-        <button class="btn primary" onClick={() => void createFirstDoc()}>+ New document</button>
-        <button class="btn" data-first-deliverable="deck" onClick={() => void createDeliverable('deck')}>+ New slides</button>
-        <button class="btn" data-first-deliverable="poster" onClick={() => void createDeliverable('poster')}>+ New poster</button>
+        {info.e2eLocked ? <button class="btn primary" onClick={unlock}>Unlock</button> : <>
+          <button class="btn primary" onClick={() => void createFirstDoc()}>+ New document</button>
+          {/* (not in an encrypted project yet) */}
+          {!info.e2e && <button class="btn" data-first-deliverable="deck" onClick={() => void createDeliverable('deck')}>+ New slides</button>}
+          {!info.e2e && <button class="btn" data-first-deliverable="poster" onClick={() => void createDeliverable('poster')}>+ New poster</button>}
+        </>}
       </div>
     </div>
   );

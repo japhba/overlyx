@@ -24,6 +24,7 @@
  * paragraphs, so the heading is found again by identity, and a recreated one by its layout and text.
  */
 import { Plugin, PluginKey, Selection, TextSelection, type Command, type EditorState, type Transaction } from 'prosemirror-state';
+import { isE2eDocId } from '../../e2e/known';
 import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
 import { schema } from '@overlyx/core';
@@ -639,6 +640,8 @@ const LEGACY = (docId: string) => 'ol.fold:' + docId;
 
 /** the last change, sent while the page goes away (a keepalive request is not cancelled with the page) */
 function sendFoldsOnLeave(docId: string, rec: FoldRecord): void {
+  // (the folded headings' words of an end-to-end encrypted document stay in this browser)
+  if (isE2eDocId(docId)) return;
   try {
     void fetch(`/api/docs/${docId.split('/').map(encodeURIComponent).join('/')}/folds`, {
       method: 'PUT', keepalive: true, credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folds: rec.folds, at: rec.at }),

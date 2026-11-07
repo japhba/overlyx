@@ -122,12 +122,21 @@ export function collect(root: string, dir: string, out: ProjectFile[], depth: nu
   return out.sort((a, b) => a.path.localeCompare(b.path));
 }
 
-/** Resolve a path inside a project, refusing to escape the project directory. */
+/**
+ * Whether a project is end-to-end encrypted (e2e/store.ts sets it on the main thread; the document
+ * workers never get such a project's documents). Its files are ciphertext under `.e2e/`, which
+ * nothing but e2e/store.ts reads or writes.
+ */
+let encrypted: (project: string) => boolean = () => false;
+export function setEncryptedCheck(fn: (project: string) => boolean): void { encrypted = fn; }
+
+/** Resolve a path inside a project, refusing to escape the project directory (and any file of an end-to-end encrypted project). */
 export function resolveProjectPath(project: string, rel: string): string {
   if (!isProjectKey(project)) throw new Error('bad project name');
   const root = path.join(config.projectsDir, project);
   const abs = path.resolve(root, rel);
   if (abs !== root && !abs.startsWith(root + path.sep)) throw new Error('path escapes project');
+  if (abs !== root && encrypted(project)) throw Object.assign(new Error('This project is end-to-end encrypted: the server cannot open its files'), { status: 403, code: 'e2e' });
   if (!staysInside(root, abs)) throw new Error('path escapes project');
   return abs;
 }

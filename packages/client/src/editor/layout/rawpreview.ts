@@ -7,12 +7,14 @@
  */
 import type { EditorView } from 'prosemirror-view';
 import { API_BASE } from '../../api';
+import { isE2eDocId } from '../../e2e/known';
 
 const cache = new Map<string, Promise<string | null>>();
 
 export function rawPreview(view: EditorView, latex: string, w: number, h: number): Promise<string | null> {
   const docId = view.dom.dataset.docId;
-  if (!docId || !latex.trim() || typeof fetch === 'undefined') return Promise.resolve(null);
+  // (an end-to-end encrypted document's LaTeX never goes to the server: blank, as offline)
+  if (!docId || !latex.trim() || typeof fetch === 'undefined' || isE2eDocId(docId)) return Promise.resolve(null);
   const key = `${docId}\u0000${w.toFixed(1)}\u0000${h.toFixed(1)}\u0000${latex}`;
   let p = cache.get(key);
   if (!p) {

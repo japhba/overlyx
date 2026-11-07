@@ -25,6 +25,7 @@ import { promisify } from 'node:util';
 import express, { type Request, type Response } from 'express';
 import { isProjectKey, projectShortName } from '@overlyx/core';
 import { config } from './config.ts';
+import { isE2eProject } from './e2e/store.ts';
 import { projectRoom, noteWritten } from './projectsize.ts';
 import { db, type UserRow } from './db.ts';
 import { projectDir, listProjects } from './projects.ts';
@@ -204,6 +205,8 @@ export async function ensureRepo(project: string, opts: { initialCommit?: boolea
   if (!isProjectKey(project)) throw new Error('bad project name');
   const dir = projectDir(project);
   if (!fs.existsSync(dir)) throw new Error('project not found');
+  // an end-to-end encrypted project has nothing the server could commit (e2e/store.ts)
+  if (isE2eProject(project)) return;
   // prepared in this process — unless the project was deleted and created again under the same name meanwhile
   if (prepared.has(project)) { if (fs.existsSync(path.join(dir, '.git'))) return; prepared.delete(project); }
   await withRepoLock(project, async () => {
@@ -565,7 +568,7 @@ export function cliTarget(req: Request, res: Response, user: SessionUser, need: 
   const src = req.method === 'GET' ? req.query : req.body ?? {};
   let project: string;
   try { project = canonicalProject(String(src.project ?? '')); } catch { res.status(400).json({ error: 'bad project name' }); return null; }
-  const role = isProjectKey(project) && fs.existsSync(projectDir(project)) ? roleFor(user, project) : null;
+  const role = isProjectKey(project) && fs.existsSync(projectDir(project)) && !isE2eProject(project) ? roleFor(user, project) : null;
   if (!role) { res.status(404).json({ error: scopeRefusal(user, project, need) ?? `no project "${String(src.project ?? '')}" (or no access to it)` }); return null; }
   if (!atLeast(role, need)) { res.status(403).json({ error: scopeRefusal(user, project, need) ?? `You can only view "${project}"` }); return null; }
   const rel = String(src.path ?? '').replace(/^\.?\/+/, '');
@@ -646,7 +649,7 @@ async function handle(req: Request, res: Response): Promise<void> {
   if (!user && !anonymous) return;
 
   // --- what they may do
-  if (!isProjectKey(project) || !fs.existsSync(projectDir(project))) { res.status(404).type('text').send(`no project "${project}"\n`); return; }
+  if (!isProjectKey(project) || !fs.existsSync(projectDir(project)) || isE2eProject(project)) { res.status(404).type('text').send(`no project "${project}"${isE2eProject(project) ? ' (it is end-to-end encrypted: it cannot be cloned)' : ''}\n`); return; }
   const role = user ? roleFor(user, project) : 'view';
   if (!atLeast(role, write ? 'edit' : 'view')) {
     const narrowed = user && scopeRefusal(user, project, write ? 'edit' : 'view');
