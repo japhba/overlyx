@@ -32,10 +32,27 @@ jobs:
       - name: Build
         run: |
           source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
-          make -C tex-wasm JOBS=4
+          set -o pipefail
+          make -C tex-wasm JOBS=4 2>&1 | tee "$RUNNER_TEMP/build.log"
       - name: Check
-        run: make -C tex-wasm check
+        run: |
+          set -o pipefail
+          make -C tex-wasm check 2>&1 | tee "$RUNNER_TEMP/check.log"
+      # a job's log needs a GitHub login, its annotations do not: what failed, readable by anyone
+      - name: What failed
+        if: failure()
+        run: |
+          note() { echo "::error title=$1::$(cut -c1-200 | sed -e ':a;N;$!ba' -e 's/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')"; }
+          for f in "$RUNNER_TEMP/build.log" "$RUNNER_TEMP/check.log"; do
+            [ -f "$f" ] || continue
+            grep -n -i -E 'error|failed|not found|no such file' "$f" | tail -n 25 | note "$(basename "$f") error lines"
+            tail -n 30 "$f" | note "$(basename "$f") end"
+          done
+          c=$(find tex-wasm/build -name config.log -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -n 1 | cut -d' ' -f2)
+          [ -n "$c" ] && tail -n 30 "$c" | note "last configure $c"
+          mkdir -p tex-wasm/dist && cp "$RUNNER_TEMP"/*.log tex-wasm/dist/ 2>/dev/null; [ -n "$c" ] && cp "$c" tex-wasm/dist/config.log; true
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: tex-wasm
           path: tex-wasm/dist/

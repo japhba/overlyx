@@ -1,0 +1,5 @@
+{
+  "private": true,
+  "type": "commonjs",
+  "description": "Not a package: what Emscripten makes here is CommonJS — the configure tests of the build in build/ (run by node), the engines in dist/ — which the repository's \"type\": \"module\" would make node read as ES modules."
+}
