@@ -14,6 +14,7 @@ import { isMarkdownPath, MARKDOWN_LAYOUTS } from '@overlyx/core/md/index.ts';
 import { ARTICLE_LAYOUTS } from '@overlyx/core/html/article.ts';
 import { articleVars } from '@overlyx/core/html/articletheme.ts';
 import { pageLinks } from '@overlyx/core/html/deckextras.ts';
+import { parseTexTitle } from '@overlyx/core/tex/index.ts';
 import { isHtmlPath } from '@overlyx/core/html/deliverable.ts';
 import { collectFiles, findMaster, isBackupFile, readTextFile } from './project.ts';
 import { cachedParseFile, readablePath, type TexContext } from './texdoc.ts';
@@ -182,6 +183,7 @@ export function buildMeta(input: MetaInput): Record<string, unknown> {
     bib: bibUnique.slice(0, 30000).map(e => ({ key: e.key, author: e.authorShort, year: e.year, title: e.title })),
     layouts, flexInsets,
     graphicsPath: article ? [] : graphicsSearchDirs(getPreamble(rootLyx), path.dirname(rootRel), { allowOutsideProject: true }),
+    titlePreview: markdown || article ? [] : parseTexTitle(lyx.header.lines, { layoutDir: ctx.layoutDir, localDirs: [proj, docDir] }),
     files: collectFiles(proj),
     health,
   };

@@ -17,6 +17,7 @@ import { isHtmlPath } from '@overlyx/core/html/deliverable.ts';
 import { ARTICLE_LAYOUTS } from '@overlyx/core/html/article.ts';
 import { articleVars } from '@overlyx/core/html/articletheme.ts';
 import { pageLinks } from '@overlyx/core/html/deckextras.ts';
+import { parseTexTitle } from '@overlyx/core/tex/index.ts';
 import { config } from './config.ts';
 import { projectDir, findMaster } from './projectfiles.ts';
 import { cachedParseFile } from './texdoc.ts';
@@ -46,6 +47,7 @@ export interface DocumentMeta {
   flexInsets: unknown;
   /** the folders of the (master's) \graphicspath, project-relative ('' or ending in '/'): where the editor's figures are looked for too */
   graphicsPath: string[];
+  titlePreview: ReturnType<typeof parseTexTitle>;
   /** an HTML article: the custom properties its page sets at :root (its look, which the editor takes on) */
   article?: { vars: Record<string, string> };
   /** where the time went (ms) */
@@ -172,5 +174,6 @@ export function documentMeta(s: DocState, open: OpenDocs): DocumentMeta {
     macroList: macros.map(m => ({ name: m.name, args: m.args, def: m.def, display: m.display, source: m.source })),
     layouts, flexInsets, timings,
     graphicsPath: article ? [] : graphicsSearchDirs(getPreamble(rootLyx), path.dirname(rootRel)),
+    titlePreview: markdown || article ? [] : parseTexTitle(lyx.header.lines, { layoutDir: config.layoutDir, localDirs: [proj, docDir] }),
   };
 }

@@ -107,6 +107,8 @@ export interface DocMeta {
   master: string | null; labels: { name: string; context: string; file: string }[];
   /** the folders of the document's (its master's) \graphicspath, project-relative ('' or ending in '/'): figures are looked for there too */
   graphicsPath?: string[];
+  /** The preamble's title declarations, drawn by a maketitle inset. */
+  titlePreview?: import('@overlyx/core').Paragraph[];
   /** structural damage found in the file on disk (an external edit broke an OverLyX convention) */
   health: HealthIssue[];
 }

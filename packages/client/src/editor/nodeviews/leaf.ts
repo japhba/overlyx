@@ -12,6 +12,9 @@ import { linkTooltip, LINK_CLICK } from '../links';
 import { applyChangeAttrs } from '../plugins/changes';
 import { classifyImage, type FigureKind } from '../figureinvert';
 import { editSvgFile } from '../svgEditorEvents';
+import { renderTitlePreview } from './title';
+import { renderStaticInto } from '../lyxmath/field';
+import { macroTableFor, mathViews } from '../lyxmath/macrotable';
 
 function params(node: PMNode): Map<string, string> {
   try { return paramMap(JSON.parse(node.attrs.params || '[]')); } catch { return new Map(); }
@@ -294,10 +297,15 @@ export class CommandView implements NodeView {
 /** Generic leaf (VSpace, Info, External, Separator, ...) rendered as a LyX button. */
 export class LeafView implements NodeView {
   dom: HTMLElement;
+  private unsubscribeMeta: (() => void) | null = null;
   constructor(private node: PMNode, private view: EditorView, private getPos: () => number | undefined) {
     this.dom = document.createElement('span');
     this.dom.contentEditable = 'false';
     this.render();
+    if (node.attrs.name === 'Title') {
+      this.unsubscribeMeta = onMetaChange(() => this.render());
+      mathViews.add(this);
+    }
     this.dom.addEventListener('dblclick', (ev) => { ev.preventDefault(); editorContext.openInsetDialog?.(this.view, this.getPos()); });
   }
   private render() {
@@ -309,7 +317,18 @@ export class LeafView implements NodeView {
     this.dom.className = `lyx-leaf lyx-leaf-${name.toLowerCase()} lyx-button`;
     const p = params(this.node);
     let text = name + (arg ? ' ' + arg : '');
-    if (name === 'VSpace') { this.renderVSpace(arg); return; }
+    if (name === 'Title') {
+      try {
+        const meta = editorContext.meta;
+        const paragraphs = meta?.id === viewDocId(this.view) ? meta.titlePreview ?? [] : [];
+        if (!paragraphs.length) { this.dom.textContent = 'Title block'; return; }
+        this.dom.className = 'lyx-leaf lyx-title-preview';
+        this.dom.title = 'Title block — edit the title, author and date in the document preamble';
+        renderTitlePreview(this.dom, paragraphs, (el, latex, display) => renderStaticInto(el, latex, display, macroTableFor(this.view, this.getPos()).table));
+        return;
+      } catch { text = 'Title block'; }
+    }
+    else if (name === 'VSpace') { this.renderVSpace(arg); return; }
     else if (name === 'Separator') { text = arg === 'plain' ? '' : '— separator —'; if (arg === 'plain') { this.dom.classList.remove('lyx-button'); this.dom.classList.add('lyx-separator-plain'); } }
     else if (name === 'Info') text = `Info: ${p.get('type') ?? ''} ${p.get('arg') ?? ''}`;
     else if (name === 'External') text = `External: ${unquote(p.get('filename'))}`;
@@ -342,6 +361,9 @@ export class LeafView implements NodeView {
     this.dom.append(glyph, lab);
     this.dom.title = `\\vspace${protect ? '*' : ''}{${amount}}`;
   }
-  update(node: PMNode): boolean { if (node.type !== this.node.type) return false; this.node = node; this.render(); return true; }
+  update(node: PMNode): boolean { if (node.type !== this.node.type || node.attrs.name !== this.node.attrs.name) return false; this.node = node; this.render(); return true; }
+  refreshMacros() { if (this.node.attrs.name === 'Title') this.render(); }
+  markStale() { this.refreshMacros(); }
   ignoreMutation() { return true; }
+  destroy() { this.unsubscribeMeta?.(); mathViews.delete(this); }
 }

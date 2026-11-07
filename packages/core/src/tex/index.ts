@@ -2,7 +2,7 @@
  * .tex documents: parser (LaTeX → document model), writer (document model → LaTeX) and the
  * one-time LyX importer. Server-side only (reads LyX layout files).
  */
-export { parseTex, parseAsctime, lyxLength } from './parse.ts';
+export { parseTex, parseTexTitle, parseAsctime, lyxLength } from './parse.ts';
 export type { ParseTexOptions, ParseTexResult } from './parse.ts';
 export { writeTex } from './write.ts';
 export type { WriteTexOptions, WriteTexResult } from './write.ts';

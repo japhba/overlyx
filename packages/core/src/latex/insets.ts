@@ -849,6 +849,7 @@ function latexListings(ctx: ExportContext, os: TexStream, rp: RunParams, inset: 
 
 function latexLeaf(ctx: ExportContext, os: TexStream, rp: RunParams, inset: LeafInset, pos: InsetPosition): void {
   switch (inset.name) {
+    case 'Title': os.write('\\maketitle'); os.termcmd(); return;
     case 'CommandInset': latexCommand(ctx, os, rp, inset, pos); return;
     case 'Graphics': latexGraphics(ctx, os, rp, inset); return;
     case 'Sketch': latexSketch(ctx, os, inset); return;

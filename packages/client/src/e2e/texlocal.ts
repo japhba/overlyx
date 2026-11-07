@@ -12,7 +12,7 @@ import {
   headerValue, paramMap, unquote, walkInsets, walkParagraphs, plainText, parseBibtex, type LyxDocument,
 } from '@overlyx/core';
 import { Reader, writeDocument, markModel2 } from '@overlyx/core/collab/index.ts';
-import { parseTex, writeTex, writeTexPreserving, type ParseTexResult, type PreserveCache } from '@overlyx/core/tex/index.ts';
+import { parseTex, parseTexTitle, writeTex, writeTexPreserving, type ParseTexResult, type PreserveCache } from '@overlyx/core/tex/index.ts';
 import { applyDocumentTheorems, loadDocumentClass, describeLayouts, flexInsetNames, describeModules } from '@overlyx/core/latex/layouts.ts';
 import { isMarkdownPath, MARKDOWN_LAYOUTS, parseMarkdown, writeMarkdown, writeMarkdownPreserving, markdownForLatex } from '@overlyx/core/md/index.ts';
 import { mount, mounted } from './vfs';
@@ -181,6 +181,7 @@ export interface LocalMeta {
   secnumdepth: number; tocdepth: number; authors: ReturnType<typeof getAuthors>; macros: ReturnType<typeof toMathliveMacros>;
   macroList: { name: string; args: number; def: string; display?: string; source?: string }[]; layouts: unknown; flexInsets: unknown; graphicsPath: string[];
   availableModules: ReturnType<typeof describeModules>;
+  titlePreview: ReturnType<typeof parseTexTitle>;
   bib: { key: string; author: string; year: string; title: string }[]; bibTotal: number;
 }
 
@@ -268,6 +269,7 @@ export function documentMetaLocal(rel: string, lyx: LyxDocument, view: LocalProj
     macroList: macros.map(m => ({ name: m.name, args: m.args, def: m.def, display: m.display, source: m.source })),
     layouts, flexInsets,
     graphicsPath: graphicsSearchDirs(getPreamble(rootLyx), dirOf(rootRel)),
+    titlePreview: markdown ? [] : parseTexTitle(lyx.header.lines, { layoutDir: LAYOUT_DIR }),
     availableModules: describeModules(LAYOUT_DIR, []),
     bib, bibTotal: all.length,
   };
