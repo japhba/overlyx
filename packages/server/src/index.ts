@@ -226,11 +226,11 @@ api.use((err: { type?: string; status?: number; message?: string }, req: express
 api.use(feedbackRoutes());
 // Google fonts a markdown document names, served to the editor from here (googlefonts.ts)
 api.use(googleFontRoutes());
+// the account's own Google fonts, first in every font list (myfonts.ts)
+api.use(myFontRoutes());
 api.use(usageRoutes());
 api.use(agentRoutes());
 // agents connected over MCP from elsewhere: the account's list, and messages to them (mcpAgents.ts)
-// the account's own Google fonts, first in every font list (myfonts.ts)
-api.use(myFontRoutes());
 api.use(mcpAgentRoutes());
 
 /* ----------------------------------------------------------------- access */

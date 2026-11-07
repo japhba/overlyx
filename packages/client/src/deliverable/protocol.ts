@@ -303,12 +303,12 @@ export type ToRuntime =
   | { ol: 'presentLinked'; on: boolean }
   /** presenting: the other screens presenting the document, their `present` awareness states as they came (app/presentshare.ts checks them) */
   | { ol: 'presentPeers'; peers: PresenterState[] }
+  /** presenting: the presenter view (runtime/presenter.ts) on or off and its notes' size, as this browser keeps them */
+  | { ol: 'presenter'; on: boolean; notes?: number }
   /** the formula open in LyX's formula editor changed (runtime/mathedit.ts: the chip follows) */
   | { ol: 'mathSet'; id: number; tex: string }
   /** LyX's formula editor left the formula (`dir`: by an arrow key / Escape, the caret goes that side; null: elsewhere; `putBack`: Backspace in the empty formula `$` opened gives the typed dollar back as text) */
   | { ol: 'mathDone'; id: number; tex: string; dir: 'forward' | 'backward' | null; putBack?: string; keys?: KeyPress[] }
-  /** presenting: the presenter view (runtime/presenter.ts) on or off and its notes' size, as this browser keeps them */
-  | { ol: 'presenter'; on: boolean; notes?: number }
   /** `$$` typed: the empty inline formula `$` opened becomes a displayed one (as in documents) */
   | { ol: 'mathDisplay'; id: number }
   /** LyX's formula editor is drawn over the formula: the formula itself hidden meanwhile (the runtime answers with mathKeys) */
@@ -456,18 +456,18 @@ export type FromRuntime =
   | { ol: 'presentLinked'; on: boolean }
   /** presenting: this presenter's state for the other screens (app/presentshare.ts; null: it ended) — the editor checks it and shares it */
   | { ol: 'presentShare'; state: PresentState | null }
-  /**
-   * a formula of the text being retyped to edit with LyX's formula editor (runtime/mathedit.ts):
-   * where it is and how big its letters are, its colour; `at`: the click into it; `dollar`: opened
-   * by typing `$` (or `$$`) in the text (LyxMathField.dollar)
-   */
-  | { ol: 'mathEdit'; id: number; tex: string; display: boolean; box: MathBox; color: string; at: { x: number; y: number } | null; where: 'start' | 'end'; dollar?: '$' | '$$' }
   /** presenting: the frame has started (again, after a reload): its settings, the others and the text, please */
   | { ol: 'presentReady' }
   /** presenting: the presenter view switched, or its notes' size changed — for the editor to keep */
   | { ol: 'presenterPrefs'; on: boolean; notes: number }
   /** presenting in the presenter view: the slides in a window of their own (on another screen, where the browser lets the editor place it) */
   | { ol: 'presentAudience' }
+  /**
+   * a formula of the text being retyped to edit with LyX's formula editor (runtime/mathedit.ts):
+   * where it is and how big its letters are, its colour; `at`: the click into it; `dollar`: opened
+   * by typing `$` (or `$$`) in the text (LyxMathField.dollar)
+   */
+  | { ol: 'mathEdit'; id: number; tex: string; display: boolean; box: MathBox; color: string; at: { x: number; y: number } | null; where: 'start' | 'end'; dollar?: '$' | '$$' }
   /** the keys typed in the text after the formula was opened there, before LyX's formula editor had the keyboard: the formula's, before any typed since */
   | { ol: 'mathKeys'; id: number; keys: KeyPress[] }
   /** the formula being edited moved (scrolled, reflowed, typeset again as it changed) */

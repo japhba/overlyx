@@ -2916,7 +2916,6 @@ html[data-theme="dark"][data-dark-pages] .lyx-par[data-layout="FrameTitle"] { co
 .tb-pal-item.ff-item { width: 100%; justify-content: space-between; height: 28px; font-size: 15px; }
 .ff-item-name { overflow: hidden; text-overflow: ellipsis; }
 .ff-tag { color: var(--ui-muted); font: 11px var(--ui-font); }
-.tb-pal-item.ff-more { font: 12px var(--ui-font); color: var(--ui-muted); }
 /* My fonts (fonts/myfonts.ts): ★ on a row — shown while it is in the list or the row is pointed at — and in the panel's title */
 .ff-star { margin-left: auto; padding: 0 2px 0 6px; color: var(--ui-muted); font: 14px var(--ui-font); cursor: pointer; visibility: hidden; }
 .ff-item:hover .ff-star, .ff-star.on, .ff-star.labelled { visibility: visible; }
@@ -2927,6 +2926,7 @@ html[data-theme="dark"][data-dark-pages] .lyx-par[data-layout="FrameTitle"] { co
 .ff-panel-title { display: flex; align-items: center; gap: 6px; }
 /* a style the font lacks, faked (fonts/fakestyles.ts): "!" beside its name */
 .ff-fake { display: inline-grid; place-items: center; flex: none; width: 14px; height: 14px; border-radius: 50%; background: #d97706; color: #fff; font: 700 10px/1 var(--ui-font); cursor: help; }
+.tb-pal-item.ff-more { font: 12px var(--ui-font); color: var(--ui-muted); }
 .ff-empty { padding: 6px; color: var(--ui-muted); font: 12px var(--ui-font); }
 .ff-panel { border-top: 1px solid var(--ui-border); padding-top: 4px; overflow-y: auto; max-height: 40vh; flex: 0 0 auto; }
 .ff-sub { font: 12px var(--ui-font); color: var(--ui-fg); }
