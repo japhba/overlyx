@@ -3,8 +3,8 @@
  * (app/FontPicker.tsx), the same in the web app and in VS Code, whose bridge keeps their files on the
  * computer (vscode host/fonts.ts). `null`: no list here (a guest; VS Code signed in to no server).
  */
-import { useEffect, useState } from 'preact/hooks';
-import { fontApi } from './googlefont';
+import { useEffect, useMemo, useState } from 'preact/hooks';
+import { fontApi, fontCatalog, loadGoogleFont, type CatalogFamily } from './googlefont';
 
 /** undefined: not asked yet */
 let mine: string[] | null | undefined;
@@ -30,6 +30,20 @@ export function useMyFonts(): string[] | null {
     return () => { listeners.delete(l); };
   }, []);
   return v;
+}
+
+/**
+ * My fonts with what Google's catalogue says of each (axes, weights, italics, category: a deck's css2
+ * query, deckfonts.ts googleFontSpec); null until both are known. Each is loaded into the page (from
+ * this server), so the lists can show it in its own face.
+ */
+export function useMyFontEntries(): CatalogFamily[] | null {
+  const mine = useMyFonts();
+  const [families, setFamilies] = useState<CatalogFamily[] | null>(null);
+  useEffect(() => { let live = true; void fontCatalog().then(c => { if (live) setFamilies(c.families); }); return () => { live = false; }; }, []);
+  const entries = useMemo(() => (mine && families ? mine.flatMap(name => families.filter(f => f.f === name).slice(0, 1)) : null), [mine, families]);
+  useEffect(() => { for (const e of entries ?? []) loadGoogleFont(e.f); }, [entries]);
+  return entries;
 }
 
 /** Put `family` into My fonts or take it out; false (the list as it was): the server refused or did not answer. */

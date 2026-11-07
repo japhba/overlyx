@@ -13,12 +13,14 @@ import type { DeckTheme } from './decktheme';
 import type { MasterObject } from './deckmaster';
 import type { LayoutCard } from './LayoutPicker';
 import { ColorGrid } from '../app/ColorGrid';
-import { DECK_FONTS } from './decktoolbar';
-import { bundledFont, firstFontFamily } from './deckfonts';
+import { deckFontList } from './decktoolbar';
+import { bundledFont, firstFontFamily, type DeckFont } from './deckfonts';
 
 interface Props {
   theme: DeckTheme;
   fontWarning(css: string): string | null;
+  /** My fonts, first in the font lists (deckfonts.ts myDeckFonts) */
+  myFonts?: DeckFont[];
   /** the objects on every slide, of the slide shown */
   objects: MasterObject[];
   slide: number;
@@ -48,8 +50,10 @@ const sameFamily = (a: string | null, b: string | null) => !!a && !!b && a.trim(
 const familyOf = (css: string | null) => (css ? firstFontFamily(css) : null);
 
 /** a font list: the deck toolbar's fonts, and the theme's own when it is none of them */
-function FontSelect({ label, value, family, none, disabled, onPick, fontWarning }: { label: string; value: string | null; family: string | null; none?: string; disabled: boolean; onPick: (css: string | null, google?: string) => void; fontWarning: Props['fontWarning'] }) {
-  const fonts = DECK_FONTS.filter(f => f.css);
+function FontSelect({ label, value, family, none, disabled, onPick, fontWarning, myFonts }: { label: string; value: string | null; family: string | null; none?: string; disabled: boolean; onPick: (css: string | null, google?: string) => void; fontWarning: Props['fontWarning']; myFonts?: DeckFont[] }) {
+  const fonts = deckFontList(myFonts).filter(f => f.css);
+  const option = (f: DeckFont, i: number) => <option key={f.label} value={String(i)}>{f.mine ? f.label.replace(/^★ /, '') : f.label}{!bundledFont(f.css!) && fontWarning(f.css!) ? ' ⚠' : ''}</option>;
+  const mine = fonts.filter(f => f.mine).length;
   const at = fonts.findIndex(f => sameFamily(familyOf(f.css), family));
   const sel = value === null ? (none ? 'none' : '') : at >= 0 ? String(at) : 'own';
   const warning = value ? fontWarning(value) : null;
@@ -66,7 +70,10 @@ function FontSelect({ label, value, family, none, disabled, onPick, fontWarning 
           {none && <option value="none">{none}</option>}
           {value === null && !none && <option value="">Not set</option>}
           {sel === 'own' && <option value="own">{family ?? value}</option>}
-          {fonts.map((f, i) => <option key={f.label} value={String(i)}>{f.label}{!bundledFont(f.css!) && fontWarning(f.css!) ? ' ⚠' : ''}</option>)}
+          {mine > 0 ? <>
+            <optgroup label="My fonts">{fonts.slice(0, mine).map((f, i) => option(f, i))}</optgroup>
+            <optgroup label="Fonts">{fonts.slice(mine).map((f, i) => option(f, i + mine))}</optgroup>
+          </> : fonts.map(option)}
         </select>
       </label>
       {warning && <div class="dl-anim-hint">⚠ {warning}</div>}
@@ -74,7 +81,7 @@ function FontSelect({ label, value, family, none, disabled, onPick, fontWarning 
   );
 }
 
-export function ThemePane({ theme, fontWarning, objects, slide, sel, layouts, aspect, readOnly, pick, setColor, setFont, background, select, hover, layoutMenu, saveLayout, close }: Props) {
+export function ThemePane({ theme, fontWarning, myFonts, objects, slide, sel, layouts, aspect, readOnly, pick, setColor, setFont, background, select, hover, layoutMenu, saveLayout, close }: Props) {
   const selected = new Set(sel.map(s => keyOf(s.path)));
   const at = (e: MouseEvent) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); return { x: r.left, y: r.bottom + 4 }; };
   return (
@@ -120,8 +127,8 @@ export function ThemePane({ theme, fontWarning, objects, slide, sel, layouts, as
 
         <div class="dl-anim-stephead">Fonts</div>
         <div class="dl-theme-fonts">
-          <FontSelect label="Text" value={theme.text.value} family={theme.text.family} disabled={readOnly} fontWarning={fontWarning} onPick={(css, g) => { if (css) setFont('text', css, g); }} />
-          <FontSelect label="Headings" value={theme.headings.value} family={theme.headings.family} none="As the text" disabled={readOnly} fontWarning={fontWarning} onPick={(css, g) => setFont('headings', css, g)} />
+          <FontSelect label="Text" value={theme.text.value} family={theme.text.family} disabled={readOnly} fontWarning={fontWarning} myFonts={myFonts} onPick={(css, g) => { if (css) setFont('text', css, g); }} />
+          <FontSelect label="Headings" value={theme.headings.value} family={theme.headings.family} none="As the text" disabled={readOnly} fontWarning={fontWarning} myFonts={myFonts} onPick={(css, g) => setFont('headings', css, g)} />
         </div>
 
         <div class="dl-anim-stephead">Layouts</div>

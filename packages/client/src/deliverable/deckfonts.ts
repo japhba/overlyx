@@ -35,7 +35,11 @@ export function fontPortabilityWarning(css: string, embedded: ReadonlySet<string
   return `${family} is not embedded in this HTML. If unavailable, the editor, presenter view, render_page and PDF each use that machine’s fallback font. Text widths and formula sizes can differ. Choose a bundled font to embed it.`;
 }
 
-/** Resources added by both the text picker and Edit theme; bundled choices work offline too. */
+/**
+ * Resources added by both the text picker and Edit theme; bundled choices work offline too. `google`:
+ * a family (regular, bold and their italics), or a whole css2 family query (`Inter:ital,wght@…`,
+ * googleFontSpec) — My fonts, with every weight or axis the family has.
+ */
 export function fontResource(text: string, css: string | null, google?: string): string {
   const bundled = css ? bundledFont(css) : undefined;
   if (bundled) {
@@ -43,7 +47,44 @@ export function fontResource(text: string, css: string | null, google?: string):
     return `<!--\n${TEMPLATE_FONT_LICENSE}\n-->\n<style>\n${TEMPLATE_FONTS[bundled]}\n</style>`;
   }
   if (!google) return '';
-  const family = google.replace(/ /g, '+');
-  if (text.includes(`family=${family}`)) return '';
-  return `<link href="https://fonts.googleapis.com/css2?family=${family}:ital,wght@0,400;0,700;1,400;1,700&display=swap" rel="stylesheet">`;
+  const [name, styles] = google.split(':');
+  const family = name.replace(/ /g, '+');
+  if (new RegExp(`family=${family.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![A-Za-z0-9+])`).test(text)) return '';
+  return `<link href="https://fonts.googleapis.com/css2?family=${family}:${styles ?? 'ital,wght@0,400;0,700;1,400;1,700'}&display=swap" rel="stylesheet">`;
+}
+
+/** what a family of Google's catalogue offers (fonts/googlefont.ts CatalogFamily): axes (variable), static weights, italics, category */
+export interface GoogleFamilyStyles { f: string; c: string; a: { t: string; min: number; max: number }[]; w: number[]; i: boolean }
+
+/**
+ * The css2 query for all of a Google font (`Family:ital,wdth,wght@0,75..100,100..900;1,…`): a variable
+ * font's whole axes (Text ▸ Typography's width and any weight), a static one's every weight, the
+ * italics when it has them — the fixed regular / bold / italic query gives only those four (and
+ * nothing for a family without a regular: css2 answers 400 when none of the styles asked exists).
+ * Axes as css2 wants them: lower-case tags first, each part alphabetical.
+ */
+export function googleFontSpec(e: GoogleFamilyStyles): string {
+  const num = (v: number) => String(Math.round(v * 1000) / 1000);
+  const axes = e.a.filter(a => a.t !== 'ital' && /^[A-Za-z]{4}$/.test(a.t))
+    .sort((x, y) => Number(x.t !== x.t.toLowerCase()) - Number(y.t !== y.t.toLowerCase()) || (x.t < y.t ? -1 : x.t > y.t ? 1 : 0));
+  const italic = e.i || e.a.some(a => a.t === 'ital');
+  if (axes.length) {
+    const ranges = axes.map(a => (a.min === a.max ? num(a.min) : `${num(a.min)}..${num(a.max)}`)).join(',');
+    return `${e.f}:${italic ? 'ital,' : ''}${axes.map(a => a.t).join(',')}@${italic ? `0,${ranges};1,${ranges}` : ranges}`;
+  }
+  const weights = [...new Set(e.w.filter(w => w >= 1 && w <= 1000))].sort((a, b) => a - b);
+  if (!weights.length) weights.push(400);
+  return italic ? `${e.f}:ital,wght@${[...weights.map(w => `0,${w}`), ...weights.map(w => `1,${w}`)].join(';')}` : `${e.f}:wght@${weights.join(';')}`;
+}
+
+/** a font of the deck's font lists (decktoolbar DECK_FONTS, the theme pane): `mine` one of My fonts */
+export interface DeckFont { label: string; css: string | null; google?: string; mine?: boolean }
+
+/** My fonts (the account's Google fonts, fonts/myfonts.ts) as deck fonts: their CSS family with the generic one of their category, the css2 query of all of them */
+export function myDeckFonts(entries: GoogleFamilyStyles[]): DeckFont[] {
+  return entries.map(e => {
+    const generic = /monospace/i.test(e.c) ? 'monospace' : /^serif$/i.test(e.c) ? 'serif' : /handwriting/i.test(e.c) ? 'cursive' : 'sans-serif';
+    const name = /^[A-Za-z][A-Za-z-]*$/.test(e.f) ? e.f : JSON.stringify(e.f);
+    return { label: '★ ' + e.f, css: `${name}, ${generic}`, google: googleFontSpec(e), mine: true };
+  });
 }

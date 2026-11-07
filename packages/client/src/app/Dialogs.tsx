@@ -15,7 +15,11 @@ import { referenceTargets, type ReferenceOptions } from '../editor/references';
 import { editorContext } from '../editor/context';
 import { diffLines } from './diff';
 import { recordUsage, dialogKey } from '../usage';
-import { DOCUMENT_FONT_SETS, matchFontSet, fontSetValues } from '../fonts/catalog';
+import { DOCUMENT_FONT_SETS, matchFontSet, fontSetValues, fontValues } from '../fonts/catalog';
+import { useMyFonts } from '../fonts/myfonts';
+
+/** Document Settings ▸ Fonts ▸ Font set: a Google font of My fonts (`my:Family`) */
+const MY_FONT = 'my:';
 
 export function Dialog({ title, onClose, children, buttons, wide, restoreFocus }: { title: string; onClose: () => void; children: ComponentChildren; buttons?: ComponentChildren; wide?: boolean; restoreFocus?: () => boolean }) {
   const boxRef = useRef<HTMLDivElement>(null);
@@ -482,6 +486,10 @@ export function SettingsDialog({ docId, meta, headerLines, onSaved, onClose, tab
   const geometry = v.use_geometry === 'true';
   const fontFields = { font_roman: v.font_roman, font_sans: v.font_sans, font_typewriter: v.font_typewriter, font_math: v.font_math, font_sf_scale: v.font_sf_scale };
   const fontSet = matchFontSet(fontFields);
+  const myFonts = useMyFonts();
+  const nonTex = v.use_non_tex_fonts === 'true';
+  const romanByName = fontValues(v.font_roman)[1] ?? '';
+  const fontChoice = nonTex ? (myFonts?.includes(romanByName) ? MY_FONT + romanByName : '') : fontSet?.id ?? '';
   return (
     <Dialog title="Document Settings" onClose={onClose} wide buttons={<button class="btn primary" onClick={save}>Apply</button>}>
       <div class="hint">Changes here apply to the PDF and take precedence over matching settings in your preamble. Your preamble remains editable.</div>
@@ -538,13 +546,20 @@ export function SettingsDialog({ docId, meta, headerLines, onSaved, onClose, tab
       </>}
       {tab === 'fonts' && <>
         <Row label="Non-TeX fonts">{bool('use_non_tex_fonts')}<span class="sub">(XeTeX/LuaTeX)</span></Row>
-        <Row label="Font set"><select data-font-set value={fontSet?.id ?? ''} disabled={v.use_non_tex_fonts === 'true'} onChange={e => { const s = DOCUMENT_FONT_SETS.find(x => x.id === (e.target as HTMLSelectElement).value); if (s) for (const [k, val] of Object.entries(fontSetValues(s, fontFields))) set(k, val); }}>
-          {!fontSet && <option value="">Custom — as set below</option>}
-          {DOCUMENT_FONT_SETS.map(s => <option key={s.id} value={s.id}>{s.label} — {s.hint}</option>)}
+        <Row label="Font set"><select data-font-set value={fontChoice} onChange={e => {
+          const val = (e.target as HTMLSelectElement).value;
+          // a Google font of My fonts: the roman font by name (non-TeX fonts: \setmainfont, built with LuaLaTeX, which finds it by name)
+          if (val.startsWith(MY_FONT)) { set('use_non_tex_fonts', 'true'); set('font_roman', `"${fontValues(v.font_roman)[0] || 'default'}" "${val.slice(MY_FONT.length)}"`); return; }
+          const s = DOCUMENT_FONT_SETS.find(x => x.id === val);
+          if (s) { for (const [k, fv] of Object.entries(fontSetValues(s, fontFields))) set(k, fv); if (nonTex) set('use_non_tex_fonts', 'false'); }
+        }}>
+          {fontChoice === '' && <option value="">Custom — as set below</option>}
+          {!!myFonts?.length && <optgroup label="My fonts — Google fonts (LuaLaTeX)">{myFonts.map(f => <option key={f} value={MY_FONT + f}>{f}</option>)}</optgroup>}
+          <optgroup label="TeX font sets">{DOCUMENT_FONT_SETS.map(s => <option key={s.id} value={s.id}>{s.label} — {s.hint}</option>)}</optgroup>
         </select></Row>
-        <div class="sub">{v.use_non_tex_fonts === 'true'
-          ? 'The font sets are TeX fonts (pdfLaTeX); with non-TeX fonts, name fonts installed on the build server below (second value of each).'
-          : 'Each text font comes with the math font made for it. The editor’s own font is set in Settings ▸ Editor ▸ Font (“As in the document” follows this choice).'}</div>
+        <div class="sub">{nonTex
+          ? 'With non-TeX fonts the text font is a font by name: a Google font (My fonts — ★ one in the font list to add it here) is built with LuaLaTeX, which finds it by name; any other must be installed on the build server (the second value of each below).'
+          : 'Each text font comes with the math font made for it; or a Google font of My fonts (★ one in the font list to add it here). The editor’s own font is set in Settings ▸ Editor ▸ Font (“As in the document” follows this choice).'}</div>
         <Row label="Roman">{text('font_roman', '"default" "default" — LaTeX name, non-TeX name')}</Row>
         <Row label="Sans serif">{text('font_sans', '"default" "default"')}</Row>
         <Row label="Typewriter">{text('font_typewriter', '"default" "default"')}</Row>

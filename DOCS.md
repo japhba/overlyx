@@ -1357,7 +1357,16 @@ blend.
     never in the presenter view, a click for the full screen), moved onto another screen where the
     Window Management API lets the editor; this window goes on in the presenter view — while it is
     on (or in an audience window) leaving the full screen does not end presenting. The Layout
-    presenter's second window (S) has the same bar button.
+    presenter's second window (S) has the same bar button. **A second screen takes the other
+    part by itself** (7 Nov 2026, the user agreed): a screen that starts presenting while another
+    screen of the account presents the deck, Linked, opens Linked — in the presenter view when that
+    screen shows the slides (the iPad beside the laptop), showing the slides when all of them are in
+    the presenter view (`presentshare.ts presenterAtStart`; each state says `pv: 1` in the presenter
+    view, put in by the editor). Decided once per presentation as it starts (or when the others are
+    heard of within 5 s), kept through the frame's restarts and *Bring up to date*
+    (`ol.presentHere` in sessionStorage); a switch by hand wins for the rest of that presentation and
+    is what the browser keeps. The first screen to present opens as its browser keeps it. Layout
+    (beamer) presenting is unchanged.
     **The slides follow the text while presenting**: the editor sends the presenting frame each
     version as it sends the canvas (patches, `presentReady` / `needSource`; the server serves
     `source` in `present` mode too), `present.ts sourceChanged` keeps the slide shown — where it is
@@ -2674,8 +2683,14 @@ blend.
   `->` becomes →, `<-` ←, `-->` ⟶, `<--` ⟵ (and `<->` ↔, `<-->` ⟷) as the last key is typed — the
   key goes in as typing, the arrow replaces it as an undo step of its own, so ⌘Z or Backspace right
   after gives the typed characters back, and those characters then stay as typed (not converted
-  again). Not in formulas, raw TeX, code-like insets or typewriter text; slide text boxes of HTML decks
-  don't have it. The .tex file has `\textrightarrow{}` / `\textleftarrow{}` and
+  again). Not in formulas, raw TeX, code-like insets or typewriter text. The rule table is core's
+  (`core/arrows.ts`; a dash the keyboard made of `--`, iPad's smart punctuation, and `>` is ⟶ too).
+  **Text on slides, posters and web pages** has it as well (7 Nov 2026, the user: "even if undo there
+  takes back the whole word"; `deliverable/runtime/arrows.ts`, on the retyped text's input event): the
+  arrow replaces the keys in the text being retyped and reaches the page as the character with the
+  next commit; Backspace right after (no other key between) gives the keys back and they stay;
+  ⌘Z undoes the whole retyping, as for any typing on a slide. Not in code (`code`, `pre`, `kbd`,
+  `samp`) or formulas, and not while suggesting (the tracked typing stays as typed). The .tex file has `\textrightarrow{}` / `\textleftarrow{}` and
   `\ensuremath{\longrightarrow}` …, which the reader turns back into the characters
   (`ENSUREMATH_ARROWS`); markdown and HTML keep the characters.
   * *Rewrite with AI* — `⌘J` / `Ctrl+J` (⌘K is the link box, as in Google Docs): select a passage — or nothing, to write at the cursor — and describe the
@@ -4056,6 +4071,18 @@ selection at once.
   every font list (then *In this document*, *Recent* without them), in the web app and in VS Code. A
   font added is fetched into the server's cache at once (every axis and OpenType feature: the
   repository's files). At most 200; guests and read-only sign-ins cannot change them.
+  **As the document's own font** too: Format ▸ Text styles ▸ Normal text lists them above LaTeX's
+  font sets (and markdown's fonts with their math fonts); Document ▸ Settings ▸ Fonts ▸ *Font set*
+  has a *My fonts* group first (`my:Family`: non-TeX fonts on, `font_roman`'s second value the family
+  — `\setmainfont`, built with LuaLaTeX, which finds it in `ol-fonts/` by name; a TeX font set turns
+  non-TeX fonts off again); a markdown document's Settings ▸ Font suggests them first (`mainfont`);
+  Settings ▸ Editor ▸ Text font lists them for the editor alone (`gf:Family`). **On slides, posters
+  and web pages** they come first in the Text toolbar's font list (★, after Default) and in Edit
+  theme's text and heading fonts (`deckfonts.ts myDeckFonts`, `decktoolbar.tsx deckFontList`), linked
+  from Google Fonts like the list's other Google fonts but with all of the family (`googleFontSpec`:
+  a variable font's whole axes, so Typography's width and any weight work; a static one's every weight;
+  italics where it has them) — the published page loads them the same way. css2's files lack some
+  OpenType features the repository's have (documents get the complete files from this server).
 * **In VS Code** the webviews ask the extension's bridge (`OVERLYX_API_BASE`, `fontApi()` in
   `fonts/googlefont.ts`), and the bridge (`vscode/src/host/fonts.ts`) asks the OverLyX server the
   computer is signed in to (the CLI's and the extension's sign-in, overlyx.app first) through its git
