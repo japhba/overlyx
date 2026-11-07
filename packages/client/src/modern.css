@@ -35,6 +35,7 @@ html[data-ui="modern"] {
 }
 /* the colours; a document's page in the dark theme with smart invert off is white paper (styles.css, app/darkpages.ts) */
 html[data-ui="modern"],
+html[data-ui="modern"][data-theme="dark"]:not([data-dark-pages]) .editor-scroll:has(> .editor-page):not(:has(.ol-layout)),
 html[data-ui="modern"][data-theme="dark"]:not([data-dark-pages]) .editor-page:not(:has(.ol-layout)) {
   /* the material */
   --m-ink: #1c1b19;          /* graphite */

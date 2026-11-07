@@ -14,7 +14,10 @@
 }
 :root,
 /* smart invert off (app/darkpages.ts): in the dark theme a document's page is white paper, the light
-   theme's colours on it and everything in it (layout documents' pages are paper anyway) */
+   theme's colours on it and everything in it (layout documents' pages are paper anyway) — and the
+   pane around it too, with its ruler: a table or formula spilling out of the sheet, or the sheet
+   narrower than the pane (Modern), would be on dark otherwise (dark text on the dark canvas) */
+html[data-theme="dark"]:not([data-dark-pages]) .editor-scroll:has(> .editor-page):not(:has(.ol-layout)),
 html[data-theme="dark"]:not([data-dark-pages]) .editor-page:not(:has(.ol-layout)) {
   color-scheme: light;
   --vspace-color: #9a6a35;   /* LyX's "added space markers" brown */
@@ -274,6 +277,10 @@ html[data-theme="dark"] .ol-wordmark.bauhaus, html[data-ui="modern"][data-theme=
 .menubar .theme-toggle, .editor-topbar .theme-toggle { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 22px; margin-right: 10px; border: 0; border-radius: 4px; background: none; color: var(--ui-muted); padding: 0; }
 .menubar .theme-toggle:hover, .editor-topbar .theme-toggle:hover { background: var(--ui-hover); color: var(--ui-fg); }
 .editor-topbar .theme-toggle { margin-right: 4px; }
+/* VS Code: "Open in browser" — the file on overlyx.app (vscode/src/webview/OpenOnWeb.tsx); in a deck's side column the globe alone */
+.open-on-web { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.open-on-web svg { width: 14px; height: 14px; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.dl-side .open-on-web > span { display: none; }
 .menubar .theme-toggle svg, .editor-topbar .theme-toggle svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .login h1 { font-size: 26px; }
 .menu { position: relative; }

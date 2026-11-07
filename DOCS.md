@@ -329,7 +329,11 @@ blend.
   the same entries copy the overlyx.app address when the folder is a synced clone (sync.ts
   `webPlaceOf`, core `webFileAddress`), and **Open on overlyx.app** (the 🌐 in the editor title bar,
   the tab's menu; *Copy overlyx.app Link* in a text editor's right-click menu: with the selected lines)
-  opens the file there.
+  opens the file there. The OverLyX editors have it as a button of their own too, *Open in browser*
+  (`vscode/src/webview/OpenOnWeb.tsx`: the document's top bar and *File* menu, at the cursor's
+  paragraph as its link would quote it, with the panes as shown; a deck's toolbar, at the slide shown)
+  — VS Code's title bar actions are easy to miss and can be hidden. The host opens only addresses
+  on the server the folder is synced with (`openOnWeb` / `dlOpenOnWeb` messages).
 * **Every project is a git repository** you can clone, pull and push from your own machine
   (*File ▸ Git repository…* or *Git…* on a project card):
   `git clone https://<server>/git/<owner>/<project>.git` with your username and your **account access
@@ -2076,8 +2080,11 @@ blend.
 * **Smart invert** (`app/darkpages.ts`, pref `darkPages`, on by default; the theme switch's menu):
   in the dark theme the content of *every* page is shown light on dark, colours keeping their hue —
   one switch, so documents, PDFs and slides always agree. Documents (.tex, .md): the theme's tokens
-  make the page dark; off, `.editor-page` gets the light theme's colour tokens (styles.css and
-  modern.css list it beside `:root` / `html[data-ui="modern"]`; the font and zoom tokens live in
+  make the page dark; off, `.editor-page` gets the light theme's colour tokens — and so does the
+  `.editor-scroll` around it, ruler included: a table or formula spilling out of the sheet into the
+  pane, or Modern's sheet narrower than a wide pane, stood on the dark canvas (dark words on dark,
+  the white "page" ending short of the window) — (styles.css and
+  modern.css list them beside `:root` / `html[data-ui="modern"]`; the font and zoom tokens live in
   blocks of their own so the page keeps them) — white paper inside the dark interface, like Word's
   page colour switch; the few literal dark-theme colours inside the page (LyX text colours, note
   labels, frame titles, authors' change colours in shellutil.tsx) apply only with
