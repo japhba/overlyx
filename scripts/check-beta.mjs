@@ -72,6 +72,9 @@ for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, async () => { a
 try {
   // (the client's bundle renders at about node's default 2 GB heap: builds died of it on 17 Oct 2026)
   const heap = { NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --max-old-space-size=4096`.trim() };
+  // the TeX engines of end-to-end encrypted projects' builds, from their GitHub release (the client's
+  // `npm run build` does it too; vite alone does not): without them only a warning, never a failed build
+  await run('tex-engines', process.execPath, [path.join(repo, 'scripts/fetch-tex-wasm.mjs')], repo);
   await run('build', process.platform === 'win32' ? 'npx.cmd' : 'npx', ['vite', 'build', '--outDir', dist, '--emptyOutDir'], path.join(repo, 'packages/client'), heap);
   await run('runtime', process.platform === 'win32' ? 'npx.cmd' : 'npx', ['vite', 'build', '-c', 'runtime.vite.config.ts'], path.join(repo, 'packages/client'), { ...heap, OVERLYX_RUNTIME_OUT: path.join(dist, '_ol') });
   const snapshot = createAssetSnapshot(dist);
