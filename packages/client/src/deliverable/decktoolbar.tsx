@@ -382,7 +382,8 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
   if (ro) return { tools, context: [], sections: [] };
   if (c.math.editing) { const g = mathGroups(c); return { tools, context: g, sections: [{ label: 'Formula', groups: g }] }; }
   if (c.nodes.editing) { const g = nodeGroups(c); return { tools, context: g, sections: [{ label: 'Points', groups: g }] }; }
-  const drawRow = drawing ? drawingToolbar({ ...c, lasso: { kinds: [...LASSO_KINDS], colors: () => c.ink.lassoColors?.() ?? [] }, picked: c.ink.fold && (() => c.ink.fold!(true)) }) : null;
+  // (the comment pen where comments can be made)
+  const drawRow = drawing ? drawingToolbar({ ...c, lasso: { kinds: [...LASSO_KINDS], colors: () => c.ink.lassoColors?.() ?? [] }, picked: c.ink.fold && (() => c.ink.fold!(true)), comment: !!c.review }) : null;
   // (the lasso's catch: its own tools after Draw's)
   // (`draw`: the sections are the Draw row — on a touch screen a palette of its own, DeliverableEditor drawPalette)
   if (drawRow && !(c.tool === 'lasso' && sel.length)) return { tools, context: drawRow, sections: [{ label: 'Draw', groups: drawRow }], draw: true };

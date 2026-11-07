@@ -62,9 +62,43 @@ export interface Thread {
   quote?: string;
   done?: boolean;
   re?: Reply[];
+  /** a spoken comment (the comment pen's push to talk, core/voicecomment.ts): what was said when */
+  voice?: Voice;
+  /** the comment pen's strokes it is about (`data-ol-comment-ink` ids), their box, what lies under them */
+  ink?: InkRef;
 }
 
+/**
+ * What was said: when the recording began (ISO), how long it ran (s), its stretches of speech at their
+ * seconds from the start; `how` turned it into words ('device': the browser's speech recognition,
+ * 'server': the server's AI, 'none': not transcribed — then `audio` is the recording's project path)
+ */
+export interface Voice { start: string; secs: number; said: { t: number; text: string }[]; how: 'device' | 'server' | 'none'; audio?: string }
+/** the strokes (ids), their bounding box on the slide (px: x, y, w, h), the objects under them in a few words */
+export interface InkRef { ids: string[]; box: [number, number, number, number]; on?: string[] }
+
+/** a comment pen's stroke: `<svg class="ol-ink" data-ol-comment-ink="k…">` — a review mark, left out of what is published */
+export const COMMENT_INK_ATTR = 'data-ol-comment-ink';
+
 const str = (v: unknown) => (typeof v === 'string' ? v : v === undefined || v === null ? '' : String(v));
+const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+
+function parseVoice(v: unknown): Voice | null {
+  if (!v || typeof v !== 'object') return null;
+  const o = v as Record<string, unknown>;
+  const said = Array.isArray(o.said) ? (o.said as unknown[]).filter(s => s && typeof s === 'object').map(s => { const x = s as Record<string, unknown>; return { t: Math.max(0, num(x.t)), text: str(x.text) }; }) : [];
+  const how = o.how === 'device' || o.how === 'server' ? o.how : 'none';
+  return { start: str(o.start), secs: Math.max(0, num(o.secs)), said, how, ...(typeof o.audio === 'string' && o.audio ? { audio: o.audio } : {}) };
+}
+
+function parseInkRef(v: unknown): InkRef | null {
+  if (!v || typeof v !== 'object') return null;
+  const o = v as Record<string, unknown>;
+  const ids = Array.isArray(o.ids) ? (o.ids as unknown[]).filter((x): x is string => typeof x === 'string' && /^[\w-]{1,40}$/.test(x)) : [];
+  const b = Array.isArray(o.box) ? (o.box as unknown[]).map(num) : [];
+  const on = Array.isArray(o.on) ? (o.on as unknown[]).map(str).filter(Boolean) : [];
+  return { ids, box: [b[0] ?? 0, b[1] ?? 0, b[2] ?? 0, b[3] ?? 0], ...(on.length ? { on } : {}) };
+}
 
 /** the threads of a data-ol-comments value (plain text an agent wrote is one thread) */
 export function parseThreads(v: string | null | undefined): Thread[] {
@@ -79,6 +113,9 @@ export function parseThreads(v: string | null | undefined): Thread[] {
     if (o.quote) th.quote = str(o.quote);
     if (o.done) th.done = true;
     if (re.length) th.re = re;
+    const voice = parseVoice(o.voice), ink = parseInkRef(o.ink);
+    if (voice) th.voice = voice;
+    if (ink) th.ink = ink;
     return th;
   });
 }
@@ -304,6 +341,8 @@ export interface ResolveOptions {
   by?: string;
   /** comment threads removed as well (the page as published) */
   stripComments?: boolean;
+  /** the comment pen's strokes removed too (published; a copy keeps them: a stroke drawn is an insert) */
+  stripCommentInk?: boolean;
 }
 
 function decider(accept: boolean, opts: ResolveOptions): Decide {
@@ -330,6 +369,8 @@ function decider(accept: boolean, opts: ResolveOptions): Decide {
       }
     }
     if (opts.stripComments && attr(el, COMMENTS) !== null) attrs[COMMENTS] = null;
+    // (the comment pen's strokes are review marks, as the threads are)
+    if (opts.stripCommentInk && attr(el, COMMENT_INK_ATTR) !== null) return { drop: true };
     if (Object.keys(attrs).length) d.attrs = attrs;
     return d.attrs || d.replace !== undefined || d.at !== undefined ? d : null;
   };
@@ -369,8 +410,8 @@ export function resolveAll(text: string, accept: boolean, opts: ResolveOptions =
 
 /** the page as it is published (downloaded as a web page): suggestions accepted, comments gone */
 export function publishedText(text: string): string {
-  if (!/data-ol-(comments|ins|del|chg|by)\b/.test(text)) return text;
-  return resolveAll(text, true, { stripComments: true });
+  if (!/data-ol-(comments|ins|del|chg|by|comment-ink)\b/.test(text)) return text;
+  return resolveAll(text, true, { stripComments: true, stripCommentInk: true });
 }
 
 /** a fragment copied (duplicated, pasted): as it reads with its suggestions accepted, without the comments */

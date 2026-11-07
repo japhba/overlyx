@@ -25,6 +25,7 @@
  */
 import type { Path, SelItem, SelStyle, Tool, Rect, HtmlOp, ObjKind, KeyPress, InkStyle, PeerInfo, TextCaret, WordsStyle, ReliabilityEvent, ReliabilityPointer } from '../protocol';
 import { ASIDE_ATTR } from '../protocol';
+import { COMMENT_INK_ATTR } from '@overlyx/core/html/review.ts';
 import { inkOn } from '../../app/contrast';
 import { MODE, post, state, srcOf, link, pathOf, liveAt, sourced, slides, slideOf, docRect, isForeign, sendLayout, penWork } from './env';
 import { mapAssets, restoreMappedAssets } from '../offlineassets';
@@ -2678,6 +2679,8 @@ function startInk(e: PointerEvent, slide: HTMLElement | null): void {
   svg.setAttribute('data-ol-runtime', '');
   svg.setAttribute('class', 'ol-ink');
   svg.setAttribute('aria-hidden', 'true');
+  // (the comment pen's: its glow, as the page will show it — review.ts)
+  if (inkStyle.comment) svg.setAttribute(COMMENT_INK_ATTR, '');
   const hl = inkStyle.opacity < 1;
   svg.setAttribute('style', `position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none${hl ? '; mix-blend-mode: multiply' : ''}`);
   const g = document.createElementNS(SVG_NS, 'g') as SVGGElement;
@@ -2699,6 +2702,8 @@ function startInk(e: PointerEvent, slide: HTMLElement | null): void {
 function inkPaint(): Record<string, string> {
   const a: Record<string, string> = { fill: 'none', stroke: inkStyle.color, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' };
   if (inkStyle.opacity < 1) a['stroke-opacity'] = String(Math.round(inkStyle.opacity * 100) / 100);
+  // (the comment pen's: the editor's copy glows too — DeliverableEditor liveInk)
+  if (inkStyle.comment) a['data-comment'] = '1';
   return a;
 }
 
@@ -2887,7 +2892,8 @@ function endInk(e: PointerEvent): void {
   if (ink.rest.timer) clearTimeout(ink.rest.timer);
   if (ink.snapTimer) clearTimeout(ink.snapTimer);
   const shape = ink.snapped;
-  const gone = shape ? [] : scratchTargets(performance.now() - ink.rest.t >= SCRATCH_HOLD_MS);
+  // (never the comment pen's: hatching over a passage to mark it must not rub out what is under it)
+  const gone = shape || inkStyle.comment ? [] : scratchTargets(performance.now() - ink.rest.t >= SCRATCH_HOLD_MS);
   fadeScratch([]);
   // (snapped: the stroke as drawn is written too, a step before its shape, so that Undo brings it back)
   const runs = shape ? inkRunsNow(true) : paintInk(true);
@@ -2918,7 +2924,31 @@ function endInk(e: PointerEvent): void {
     if (live) (slide ?? document.body).append(svg);
     sentInk.push(entry);
   }
-  post({ ol: 'draw', version: state.version, tool: 'pen', slide: slide ? pathOf(slide) : null, rect, after: null, runs: inkPaths(runs, -x, -y), ...(scratch.length ? { scratch } : {}), ...(snap ? { snap } : {}) });
+  const under = inkStyle.comment && slide ? strokeUnder(slide, rect) : [];
+  post({ ol: 'draw', version: state.version, tool: 'pen', slide: slide ? pathOf(slide) : null, rect, after: null, runs: inkPaths(runs, -x, -y), ...(scratch.length ? { scratch } : {}), ...(snap ? { snap } : {}), ...(under.length ? { under } : {}) });
+}
+
+/**
+ * What a comment pen's stroke is drawn over (slide px): the objects most of whose box it covers, or
+ * that cover much of it — a ring round a picture, a line under a sentence (its box a little larger) —
+ * not the slide's backgrounds, nor other ink
+ */
+function strokeUnder(slide: HTMLElement, r: Rect): Path[] {
+  const o = slideOrigin(slide), pad = 12;
+  const sx = r.x - pad, sy = r.y - pad, sw = r.w + 2 * pad, sh = r.h + 2 * pad;
+  const sb = slide.getBoundingClientRect(), slideArea = (sb.width / o.k) * (sb.height / o.k);
+  const out: Path[] = [];
+  for (const el of objectsOn(slide)) {
+    if (kindOf(el) === 'ink') continue;
+    const b = docRect(el);
+    const x = (b.x - o.x) / o.k, y = (b.y - o.y) / o.k, w = b.w / o.k, h = b.h / o.k;
+    if (w * h <= 0 || w * h > 0.8 * slideArea) continue;
+    const ix = Math.min(x + w, sx + sw) - Math.max(x, sx), iy = Math.min(y + h, sy + sh) - Math.max(y, sy);
+    if (ix <= 0 || iy <= 0) continue;
+    if (ix * iy >= 0.3 * sw * sh || ix * iy >= 0.5 * w * h) { const p = pathOf(el); if (p) out.push(p); }
+    if (out.length >= 8) break;
+  }
+  return out;
 }
 
 /** the pen's stroke done that took the pen itself with Draw not open: Select in hand again, fingers and the mouse selecting (the editor's Draw row stays folded) */

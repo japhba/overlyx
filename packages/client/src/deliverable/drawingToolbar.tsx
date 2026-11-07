@@ -35,6 +35,11 @@ export interface DrawingContext {
    * Where the row folds, its lock keeps it open (DeckInk keepRow).
    */
   picked?: () => void;
+  /**
+   * The comment pen, where strokes can become review comments (decks, posters, web pages): high-vis
+   * orange with a glow, its strokes review marks, push to talk beside it (VoiceTalk.tsx)
+   */
+  comment?: boolean;
 }
 
 /** the deck toolbar's Lines and Shapes (decktoolbar.tsx LINES / SHAPES), with its icons */
@@ -53,11 +58,19 @@ export function drawingToolbar(c: DrawingContext): ToolButton[][] {
   const shaping = !!c.shapes?.tool && c.shapes.tool === c.tool;
   const drawing = c.tool === 'pen' || shaping;
   const hl = !shaping && ink.pen === 'highlighter';
-  const pen = ink.pens[hl ? 'highlighter' : 'pen'];
-  const name = hl ? 'Highlighter' : 'Pen';
+  // (the comment pen where there is one; elsewhere the pen)
+  const cm = !shaping && !hl && ink.pen === 'comment' && !!c.comment;
+  const which = hl ? 'highlighter' : cm ? 'comment' : 'pen';
+  const pen = ink.pens[which];
+  const name = hl ? 'Highlighter' : cm ? 'Comment pen' : 'Pen';
   // (locked open: what was picked is in hand, the row stays)
   const done = () => { if (!ink.keepRow) c.picked?.(); };
-  const take = (p: DeckInkPatch) => { if (shaping) c.ink.set(p.pen ? p : { pen: 'pen', ...p }); else { c.ink.set(p); c.setTool('pen'); } done(); };
+  const take = (q: DeckInkPatch) => {
+    // (a surface without the comment pen, which was in hand elsewhere: the pen's presets)
+    const p: DeckInkPatch = ink.pen === 'comment' && !cm && !q.pen ? { pen: 'pen', ...q } : q;
+    if (shaping) c.ink.set(p.pen ? p : { pen: 'pen', ...p }); else { c.ink.set(p); c.setTool('pen'); }
+    done();
+  };
   const takePen = (p: DeckInkPatch) => { c.ink.set(p); c.setTool('pen'); };
   const end: ToolButton[] = [
     // the user, 25 Oct 2026: "add the option keep the drawing toolbar expanded by a lock icon"
@@ -68,11 +81,13 @@ export function drawingToolbar(c: DrawingContext): ToolButton[][] {
   return [
     [
       { id: 'dk-ink-pen', title: `${ink.nib.ball ? 'Ball pen' : 'Fountain pen'} (P) — with its own colour and width; click it again for its settings: fountain or ball pen, tip, pressure, stabilization, rounding, draw and hold for shapes, calibration`,
-        icon: ink.nib.ball ? 'inkball' : 'inkpen', active: c.tool === 'pen' && !hl, action: () => { takePen({ pen: 'pen' }); done(); },
+        icon: ink.nib.ball ? 'inkball' : 'inkpen', active: c.tool === 'pen' && !hl && !cm, action: () => { takePen({ pen: 'pen' }); done(); },
         paletteWhenActive: true,
         palette: { title: 'Pen', render: close => <PenSettings nib={ink.nib} color={ink.pens.pen.color} width={ink.pens.pen.width} habits={{ scribble: ink.scribble, fingersDraw: ink.fingersDraw, pencil: ink.pencil, penInks: ink.penInks, snap: ink.snap }}
           onChange={nib => takePen({ pen: 'pen', nib })} onHabits={h => c.ink.set(h)} onClose={close} /> } },
       { id: 'dk-ink-hl', title: 'Highlighter — with its own colour and width; what is under it shows through (draw and hold: a straight one)', icon: 'inkhl', active: c.tool === 'pen' && hl, action: () => { takePen({ pen: 'highlighter' }); done(); } },
+      ...(c.comment ? [{ id: 'dk-ink-comment', title: 'Comment pen — marks in glowing orange that are review comments, not content (not presented, printed or published); hold the microphone that comes with it and talk: what you say with what you draw becomes a comment agents and co-authors can act on',
+        icon: 'inkcomment', active: c.tool === 'pen' && cm, action: () => { takePen({ pen: 'comment' }); done(); } }] : []),
       { id: 'dk-ink-eraser', title: `Eraser (E) — ${ink.eraser.precise ? 'rubs out the part of a stroke it passes over' : 'removes the strokes it passes over'} (drawn ones: shapes and text stay); click it again for its settings: precise, size, highlighter only`,
         icon: 'inkeraser', active: erasing, action: () => { c.setTool('eraser'); done(); },
         paletteWhenActive: true,
@@ -80,7 +95,8 @@ export function drawingToolbar(c: DrawingContext): ToolButton[][] {
       ...(c.lasso ? [lassoButton(c.tool === 'lasso', ink, c.lasso, t => { c.setTool(t); done(); }, p => c.ink.set(p))] : []),
     ],
     ...(c.shapes ? [shapeButtons({ ...c.shapes, set: kind => { c.shapes!.set(kind); done(); } })] : []),
-    pen.colors.map((col, i) => ({
+    // (the comment pen has its one colour: no swatches)
+    (cm ? [] : pen.colors).map((col, i) => ({
       id: 'dk-ink-c' + i, title: `${inkColorName(col)} (${name.toLowerCase()}) — click the selected colour again to change it`, icon: col,
       html: `<span class="tb-ink-swatch${hl ? ' hl' : ''}" data-color="${col}" style="background:${col}"></span>`,
       active: drawing && pen.color === col,
@@ -91,11 +107,11 @@ export function drawingToolbar(c: DrawingContext): ToolButton[][] {
     })),
     pen.widths.map((w, i) => ({
       id: 'dk-ink-w' + i, title: `${name} ${fmtPt(pxToPt(w))} pt — click the selected width again to change it`, icon: String(w),
-      html: `<span class="tb-ink-width" data-width="${w}" style="width:${deckInkDot(hl ? 'highlighter' : 'pen', w)}px;height:${deckInkDot(hl ? 'highlighter' : 'pen', w)}px"></span>`,
+      html: `<span class="tb-ink-width${cm ? ' cm' : ''}" data-width="${w}" style="width:${deckInkDot(which, w)}px;height:${deckInkDot(which, w)}px"></span>`,
       active: drawing && pen.width === w,
       action: () => take({ width: w }),
       paletteWhenActive: true,
-      palette: { title: `${name} width ${i + 1}`, list: true, cols: 1, items: DECK_INK_WIDTH_CHOICES[hl ? 'highlighter' : 'pen'].map(v => ({
+      palette: { title: `${name} width ${i + 1}`, list: true, cols: 1, items: DECK_INK_WIDTH_CHOICES[which].map(v => ({
         label: `${fmtPt(pxToPt(v))} pt`, html: `<svg viewBox="0 0 40 16" width="40"><path d="M3 8h34" stroke="currentColor" stroke-width="${Math.min(v, 14)}" stroke-linecap="round"${hl ? ' opacity="0.45"' : ''}/></svg>`,
         active: v === w, action: () => take({ slotWidth: { idx: i, width: v } }) })) },
     })),

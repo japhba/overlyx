@@ -1341,6 +1341,7 @@ html.ol-inking, html.ol-inking * { -webkit-user-select: none !important; user-se
 .tb-ink-swatch { display: inline-block; width: 13px; height: 13px; border-radius: 50%; border: 1px solid var(--ui-border); vertical-align: middle; }
 .tb-ink-swatch.hl { border-radius: 3px; opacity: 0.8; }   /* the highlighter's presets: translucent bars, not pen dots */
 .tb-ink-width { display: inline-block; border-radius: 50%; background: var(--ui-fg); vertical-align: middle; }   /* the width dots are ink-black (light on dark), whatever the pen's colour */
+.tb-ink-width.cm { background: #ff5c00; box-shadow: 0 0 4px rgba(255, 92, 0, .65); }   /* (the comment pen's: its one colour) */
 /* preset editors (app/InkPickers.tsx): opened by clicking the selected swatch / dot again */
 .ink-pick { padding: 6px 8px 4px; min-width: 212px; font-family: var(--ui-font); font-size: 11px; color: var(--ui-fg); }
 .ink-pick-grid { display: grid; grid-template-columns: repeat(8, 22px); gap: 4px; }
@@ -3183,6 +3184,18 @@ select.dl-zoom { appearance: none; -webkit-appearance: none; text-align: center;
 .dl-notes textarea { padding-right: 36px; }
 /* what three fingers did (undo, redo): said for a moment at the top of the canvas */
 .dl-hud { position: absolute; top: 14px; left: 50%; z-index: 6; padding: 5px 14px; border-radius: 16px; background: rgba(32, 33, 36, .84); color: #fff; font: 13px/1.3 var(--ui-font); pointer-events: none; animation: dl-hud .9s ease-out forwards; }
+/* push to talk while the comment pen is in hand (deliverable/VoiceTalk.tsx): over the canvas, under the HUD's place */
+.dl-voicepill { position: absolute; top: 12px; left: 50%; translate: -50% 0; z-index: 7; display: flex; align-items: center; gap: 8px; max-width: min(560px, calc(100% - 24px)); padding: 3px 12px 3px 4px; border-radius: 20px; background: var(--surface); border: 1px solid var(--ui-border); box-shadow: 0 4px 18px rgba(0, 0, 0, .18); font: 13px/1.3 var(--ui-font); color: var(--ui-fg); }
+.dl-voicepill.rec { border-color: #ff5c00; box-shadow: 0 0 0 1px rgba(255, 92, 0, .35), 0 4px 18px rgba(255, 92, 0, .25); }
+.dl-talk { display: inline-flex; gap: 2px; }
+.dl-talk .tb-btn { height: 30px; min-width: 30px; border-radius: 15px; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.dl-talk-mic.on { background: #ff5c00; border-color: #ff5c00; color: #fff; }
+.dl-voicepill-dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: #e0284b; animation: dl-rec-blink 1.2s ease-in-out infinite; }
+@keyframes dl-rec-blink { 50% { opacity: .25; } }
+.dl-voicepill-time { flex: none; font-variant-numeric: tabular-nums; color: var(--ui-muted); }
+.dl-voicepill-what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dl-voicepill-what.hint, .dl-voicepill.working .dl-voicepill-what { color: var(--ui-muted); }
+.dl-voicepill-what.error { white-space: normal; color: #c4312a; }
 @keyframes dl-hud { 0% { opacity: 0; transform: translate(-50%, -4px); } 12% { opacity: 1; transform: translate(-50%, 0); } 70% { opacity: 1; transform: translate(-50%, 0); } 100% { opacity: 0; transform: translate(-50%, 0); } }
 /* the zoom while it changes (app/zoomhud.ts): over the view that zooms (slides, a PDF, a layout canvas, a board, the text), fading once it rests; at a fit, its name */
 .zoom-hud { position: absolute; top: 14px; left: 50%; z-index: 6; padding: 5px 14px; border-radius: 16px; background: rgba(32, 33, 36, .84); color: #fff; font: 13px/1.3 var(--ui-font); font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; transform: translateX(-50%); opacity: 0; transition: opacity .3s ease-out .1s; }
@@ -3615,6 +3628,11 @@ html.ol-bars-back .dl-side.right { animation: ol-bar-from-right .18s ease-out; }
 .dl-rv-what { color: var(--ui-muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dl-rv-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.4; }
 .dl-rv-quote { border-left: 3px solid #f6b400; padding: 1px 6px; color: var(--ui-muted); font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* a spoken comment's line (the comment pen's push to talk: deliverable/VoiceTalk.tsx) — its orange is the pen's */
+.dl-rv-voice { display: flex; flex-wrap: wrap; align-items: center; gap: 0 6px; color: var(--ui-muted); font-size: 11.5px; }
+.dl-rv-voice-mark { flex: none; width: 14px; height: 3px; border-radius: 2px; background: #ff5c00; box-shadow: 0 0 4px rgba(255, 92, 0, .7); }
+.dl-rv-voice-file { flex-basis: 100%; overflow-wrap: anywhere; }
+.dl-rv-inkshown { margin-left: auto; }
 .dl-rv-reply { border-top: 1px solid var(--ui-border); padding-top: 5px; margin-top: 3px; display: flex; flex-direction: column; gap: 2px; }
 .dl-rv-actions { display: flex; gap: 6px; margin-top: 3px; }
 .dl-rv-actions .dl-btn { flex: 1; }

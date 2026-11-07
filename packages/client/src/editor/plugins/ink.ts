@@ -221,8 +221,10 @@ const syncDrawing = (drawing: DeckInk) => {
     const pen = drawing.pens[p];
     return [p, { ...pen, width: pxToMm(pen.width), widths: pen.widths.map(pxToMm) }];
   })) as Record<InkPen, PenSettings>;
-  ui = { ...ui, drawing, pen: drawing.pen, pens,
-    tool: ui.tool === 'pen' || ui.tool === 'highlighter' ? drawing.pen : ui.tool };
+  // (the comment pen, a slide's, draws as the pen in a document's margins)
+  const pen: InkPen = drawing.pen === 'highlighter' ? 'highlighter' : 'pen';
+  ui = { ...ui, drawing, pen, pens,
+    tool: ui.tool === 'pen' || ui.tool === 'highlighter' ? pen : ui.tool };
   for (const fn of subs) fn();
 };
 try {
@@ -1131,7 +1133,7 @@ class InkLayer {
     if (this.erasing) {
       // the eraser's settings: back to the pen after erasing (GoodNotes' auto-deselect)
       this.erasing = false;
-      if (ui.drawing.eraser.back) setInk({ tool: ui.drawing.pen });
+      if (ui.drawing.eraser.back) setInk({ tool: ui.pen });
     }
     this.eraseLast = null;
     try { this.canvas.releasePointerCapture(e.pointerId); } catch { /* gone */ }

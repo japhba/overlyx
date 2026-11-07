@@ -66,11 +66,15 @@ import { followUps, composeSplices, twinsOf, putOnEverySlide, otherCopies, slide
 import { deckTheme, themeSplices, type ThemeChange } from './decktheme';
 import { embeddedFontFamilies, fontPortabilityWarning, fontResource } from './deckfonts';
 import { ThemePane } from './ThemePane';
-import { reviewOps, resolveOps, resolveAll, reviewOf, isSuggesting, suggestingOp, stampOf, threadsOp, parseThreads, newThreadId, describe as describeObject, COMMENTS, type ReviewChange, type ReviewThread, type Thread } from '@overlyx/core/html/review.ts';
+import { reviewOps, resolveOps, resolveAll, reviewOf, isSuggesting, suggestingOp, stampOf, threadsOp, parseThreads, newThreadId, describe as describeObject, COMMENTS, COMMENT_INK_ATTR, type ReviewChange, type ReviewThread, type Thread } from '@overlyx/core/html/review.ts';
 import { deliverableInfo, slideElements, blankDeck, untouchedPageTitle } from '@overlyx/core/html/deliverable.ts';
 import { usualDeckSize } from '../app/decksize';
 import { formatTimestamp } from '@overlyx/core';
 import { ReviewPane, type CommentDraft } from './ReviewPane';
+import { VoicePill } from './VoiceTalk';
+import { onTake, voiceSlide, cancelTalk, audioName, type VoiceTake } from './voice';
+import { planVoiceComments, commentInkId, commentInkPaths, looseCommentInk, type CommentStroke } from '@overlyx/core/voicecomment.ts';
+import { COMMENT_GLOW } from '@overlyx/core/inkpresets.ts';
 import { EditModeSwitch, modeScope, setOwnSuggesting, suggestingFor, switchModeScope, type EditMode, type ModeScope } from '../app/EditModeSwitch';
 import { useDarkPagesState, toggleDarkPages, invertedColor, deskBeside, DARK_DESK, INVERT_FILTER } from '../app/darkpages';
 import { recordReliability, recordInteraction } from '../usage';
@@ -966,11 +970,81 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
   };
   const replyTo = (t: ReviewThread, v: string) =>
     editThreads(t.path, ts => ts.map(x => (x.id === t.thread.id ? { ...x, re: [...(x.re ?? []), { by: me, at: formatTimestamp(), text: v }] } : x)));
-  const resolveThread = (t: ReviewThread, done: boolean) =>
+  /** the comment pen's strokes a thread is about, taken away (as it is resolved or deleted: they were its marks) */
+  const clearThreadInk = (t: ReviewThread) => {
+    const gone = commentInkPaths(text.toString(), t.thread.ink?.ids ?? []);
+    if (gone.length) applyOps([{ t: 'remove', paths: gone }], true);
+  };
+  const resolveThread = (t: ReviewThread, done: boolean) => {
     editThreads(t.path, ts => ts.map(x => { if (x.id !== t.thread.id) return x; const { done: _was, ...rest } = x; void _was; return done ? { ...rest, done: true } : rest; }));
+    if (done) clearThreadInk(t);
+  };
   const removeThread = (t: ReviewThread) => {
     editThreads(t.path, ts => ts.filter(x => x.id !== t.thread.id));
+    clearThreadInk(t);
     if (focus?.id === t.thread.id) setFocus(null);
+  };
+
+  /* ------------------------------------------------------------- spoken comments (the comment pen's push to talk) */
+
+  /** the comment pen's strokes drawn here this visit (what a recording takes: core/voicecomment.ts), and those a thread has */
+  const commentStrokes = useRef<CommentStroke[]>([]);
+  const claimedInk = useRef(new Set<string>());
+  /** a comment stroke drawn: its slide, box, what it is over (in a few words, from the text it was drawn on) */
+  const noteCommentStroke = (id: string, slide: Path | null, rect: Rect, was: string, under?: Path[]) => {
+    const si = slide ? slidesRef.current.findIndex(s => samePath(s.path, slide)) : -1;
+    let on: string[] = [];
+    if (under?.length) {
+      const { doc } = parseSource(was);
+      const all = slideElements(doc);
+      on = under.map(p => elementAt(doc, p)).filter((e): e is NonNullable<typeof e> => !!e).map(e => describeObject(e, all));
+    }
+    commentStrokes.current = [...commentStrokes.current.filter(s => Date.now() - s.at < 600_000), { id, slide: si, rect, at: Date.now(), ...(on.length ? { on } : {}) }];
+  };
+  /** where a page's comments go that are on no slide: its body */
+  const bodyPath = (): Path | null => {
+    const root = elementAt(parseSource(text.toString()).doc, []);
+    const b = root ? elementChildren(root).findIndex(k => k.tagName === 'body') : -1;
+    return b >= 0 ? [b] : null;
+  };
+  /** a recording finished: its words and the comment strokes drawn with it become threads, one per slide (the recording kept in the project when nothing could hear it) */
+  const makeVoiceComments = async (take: VoiceTake) => {
+    if (readOnlyRef.current) { notify('Switch from Viewing to Editing or Suggesting to comment.', 'error'); return; }
+    let audio: string | undefined;
+    if (take.audio) {
+      const dir = host.path.includes('/') ? host.path.slice(0, host.path.lastIndexOf('/') + 1) : '';
+      const rel = `${dir}comments/${audioName(take.audio, take.start)}`;
+      try { await host.upload(rel, take.audio); audio = rel; } catch { notify('The recording could not be kept in the project.', 'error'); }
+    }
+    const plans = planVoiceComments({ start: take.start, end: take.end, said: take.said, how: take.how, slides: take.slides, ...(audio ? { audio } : {}) }, commentStrokes.current, claimedInk.current);
+    if (!plans.length) { showHud('Nothing heard and nothing drawn — no comment made', 2400); return; }
+    for (const plan of plans) {
+      const path = plan.slide >= 0 ? slidesRef.current[plan.slide]?.path ?? bodyPath() : bodyPath();
+      if (!path) continue;
+      const th: Thread = { id: newThreadId(), by: me, at: formatTimestamp(), text: plan.text, voice: plan.voice, ...(plan.ink ? { ink: plan.ink } : {}) };
+      editThreads(path, ts => [...ts, th]);
+      for (const id of plan.ink?.ids ?? []) claimedInk.current.add(id);
+    }
+    const where = plans.length === 1 && plans[0].slide >= 0 && kindRef.current === 'deck' ? ` on slide ${plans[0].slide + 1}` : '';
+    showHud(plans.length > 1 ? `${plans.length} spoken comments made — see Comments` : take.how === 'none' && !take.said.length ? `Comment made${where} — the recording is kept (not transcribed)` : `Spoken comment made${where}`, 2600);
+  };
+  const makeVoiceRef = useRef(makeVoiceComments); makeVoiceRef.current = makeVoiceComments;
+  /** this editor's recordings (each canvas its own: an embedded drawing does not take a deck's) */
+  const voiceOwner = useRef({});
+  useEffect(() => onTake(t => { if (t.owner === voiceOwner.current) void makeVoiceRef.current(t); }), []);
+  useEffect(() => () => cancelTalk(voiceOwner.current), []);
+  // (what is said after turning the slide is about the slide turned to)
+  useEffect(() => { voiceSlide(kind === 'page' ? -1 : current, voiceOwner.current); }, [current, kind]);
+  /** the comment pen's strokes no thread is about (drawn without a word), and the switch that hides them all */
+  const looseInk = useMemo(() => (textNow.includes(COMMENT_INK_ATTR) ? looseCommentInk(textNow) : []), [textNow]);
+  const [inkShown, setInkShown] = useState(() => loadFlag('ol.deckCommentInk', true));
+  const showCommentInk = (on: boolean) => { setInkShown(on); saveFlag('ol.deckCommentInk', on); };
+  const removeLooseInk = () => { const gone = commentInkPaths(text.toString(), looseInk); if (gone.length) applyOps([{ t: 'remove', paths: gone }], true); };
+  /** a card clicked: as showOnCanvas, a spoken comment's strokes selected (where it is) */
+  const showThread = (path: Path, slide: number, threadId?: string) => {
+    showOnCanvas(path, slide, threadId);
+    const ids = threadId ? review.threads.find(x => x.thread.id === threadId && samePath(x.path, path))?.thread.ink?.ids : undefined;
+    if (ids?.length) setTimeout(() => { const paths = commentInkPaths(text.toString(), ids); if (paths.length) toCanvas({ ol: 'select', paths }); }, slide !== currentRef.current ? 120 : 0);
   };
   /** a card of the Review pane clicked: its slide shown, its object selected, its thread looked at */
   const showOnCanvas = (path: Path, slide: number, threadId?: string) => {
@@ -981,11 +1055,11 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     else setFocus(null);
   };
   const reviewMsg = (): ToRuntime => ({ ol: 'review', view: {
-    ins: showIns, del: showDel, suggesting: suggesting && !locked, me,
+    ins: showIns, del: showDel, suggesting: suggesting && !locked, me, noInk: !inkShown,
     focus: focus ? { path: focus.path, quote: focus.quote } : draft?.path ? { path: draft.path, quote: draft.quote } : null,
   } });
   const reviewMsgRef = useRef(reviewMsg); reviewMsgRef.current = reviewMsg;
-  useEffect(() => { toCanvas(reviewMsg()); }, [showIns, showDel, suggesting, locked, me, JSON.stringify(focus), JSON.stringify(draft?.path ?? null), draft?.quote]);
+  useEffect(() => { toCanvas(reviewMsg()); }, [showIns, showDel, suggesting, locked, me, JSON.stringify(focus), JSON.stringify(draft?.path ?? null), draft?.quote, inkShown]);
 
   /* ------------------------------------------------------------- the runtime's messages */
 
@@ -1228,7 +1302,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
           }
           break;
         }
-        case 'draw': onDraw(m.version, m.tool, m.slide, m.rect, m.after ?? null, m.pts, m.runs ? { d: '', closed: false, runs: m.runs } : m.d !== undefined ? { d: m.d, closed: !!m.closed } : undefined, m.scratch, m.snap); break;
+        case 'draw': onDraw(m.version, m.tool, m.slide, m.rect, m.after ?? null, m.pts, m.runs ? { d: '', closed: false, runs: m.runs } : m.d !== undefined ? { d: m.d, closed: !!m.closed } : undefined, m.scratch, m.snap, m.under); break;
         // the Pencil drew with Select in hand: the pen for its stroke, then Select again — the Draw row stays as it was
         case 'penInks': if (fromCanvas && !drawKeptRef.current) setToolState(m.done ? 'select' : 'pen'); break;
         case 'toolBack': if (fromCanvas) setToolState(m.tool); break;
@@ -1428,7 +1502,8 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
       svg.replaceChildren(g);
       liveInk.current = { id: m.id, at: m.at, k: m.k ?? 1, g };
       svg.style.mixBlendMode = m.hl ? 'multiply' : '';
-      svg.style.filter = darkRef.current.invert && kindRef.current !== 'page' ? INVERT_FILTER : '';
+      // (the comment pen's: with its glow, as the page shows it)
+      svg.style.filter = [darkRef.current.invert && kindRef.current !== 'page' ? INVERT_FILTER : '', m.paint?.['data-comment'] ? COMMENT_GLOW : ''].filter(Boolean).join(' ');
       placeLive(slideView.place());
     }
     const l = liveInk.current;
@@ -1569,7 +1644,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
   // (the Bézier pen takes Enter / Esc / Backspace: the keyboard goes to the canvas)
   // (the pen draws right away only where the page can be changed)
   const inkStyle = { ...deckInkStyle(ink, pageW), penInks: ink.penInks && !locked };
-  useEffect(() => { toCanvas({ ol: 'tool', tool, ink: inkStyle, held: drawKept }); if (tool === 'bezier') canvasFrame.current?.focus(); }, [tool, drawKept, inkStyle.color, inkStyle.width, inkStyle.opacity, JSON.stringify(inkStyle.nib ?? null), inkStyle.fingers, inkStyle.scribble, inkStyle.penInks, inkStyle.snap, JSON.stringify(inkStyle.eraser ?? null), JSON.stringify(inkStyle.lasso ?? null)]);
+  useEffect(() => { toCanvas({ ol: 'tool', tool, ink: inkStyle, held: drawKept }); if (tool === 'bezier') canvasFrame.current?.focus(); }, [tool, drawKept, inkStyle.color, inkStyle.width, inkStyle.opacity, JSON.stringify(inkStyle.nib ?? null), inkStyle.fingers, inkStyle.scribble, inkStyle.penInks, inkStyle.snap, JSON.stringify(inkStyle.eraser ?? null), JSON.stringify(inkStyle.lasso ?? null), inkStyle.comment]);
   // the rail folded away: its frame goes, and says it is ready again when it comes back
   useEffect(() => { if (!railOpen) railReady.current = false; }, [railOpen]);
 
@@ -2006,7 +2081,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
 
   const setTool = (t: Tool) => { setToolState(t); };
 
-  const onDraw = (v: number, t: Tool, slide: Path | null, rect: Rect, after: Path | null, pts?: [number, number][], bez?: { d: string; closed: boolean; runs?: InkRunD[] }, scratch?: Path[], snap?: { kind: string; rect: Rect; runs: InkRunD[] }) => {
+  const onDraw = (v: number, t: Tool, slide: Path | null, rect: Rect, after: Path | null, pts?: [number, number][], bez?: { d: string; closed: boolean; runs?: InkRunD[] }, scratch?: Path[], snap?: { kind: string; rect: Rect; runs: InkRunD[] }, under?: Path[]) => {
     // Draw: the pen stays in hand and the stroke is not selected — the next one follows (GoodNotes)
     const drawing = t === 'pen';
     if (!drawing) setToolState('select');
@@ -2028,10 +2103,14 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
       const so = soloState.current;
       return so && k === 'deck' && slide && (r.x + r.w <= 0 || r.y + r.h <= 0 || r.x >= so.rect.w || r.y >= so.rect.h) ? h.replace(/^<(\w+)/, `<$1 ${ASIDE_ATTR}`) : h;
     };
+    // the comment pen's stroke: a review mark of its own id (core/voicecomment.ts), noted for the spoken comment it goes with
+    const commentId = drawing && inkRef.current.pen === 'comment' ? commentInkId() : null;
+    const marked = (h: string) => (commentId ? h.replace('<svg class="ol-ink"', `<svg class="ol-ink" ${COMMENT_INK_ATTR}="${commentId}"`) : h);
     const made = objectHtml(t, rect, k, pageW / 1280, pts, bez, drawing ? deckInkStyle(inkRef.current, pageWRef.current) : undefined);
     if (!made) return;
-    const html = besideIt(rect, made);
+    const html = besideIt(rect, marked(made));
     if (!applyOps([{ t: 'insert', parent: place.parent, index: place.index, html }])) return;
+    if (commentId) noteCommentStroke(commentId, slide, snap?.rect ?? rect, cur, under);
     if (scratch?.length) {
       // a scribble over strokes (core/scratchout.ts): they and it go, a step after it came — so the first
       // undo brings them back with the scribble as ink, in case it was drawing (OneNote)
@@ -2042,7 +2121,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     if (snap && /^[a-z]+$/.test(snap.kind)) {
       // draw and hold (core/shapesnap.ts): the stroke becomes its shape a step after it came — Undo brings the stroke back as drawn
       const shaped = objectHtml('pen', snap.rect, k, pageW / 1280, undefined, { d: '', closed: false, runs: snap.runs }, deckInkStyle(inkRef.current, pageWRef.current));
-      if (shaped && applyOps([{ t: 'outer', path: place.path, html: besideIt(snap.rect, shaped.replace('<svg class="ol-ink"', `<svg class="ol-ink" data-ol-shape="${snap.kind}"`)) }])) showHud(`${SNAP_NAMES[snap.kind] ?? 'Shape'} · Undo brings the stroke back`, 1400);
+      if (shaped && applyOps([{ t: 'outer', path: place.path, html: besideIt(snap.rect, marked(shaped).replace('<svg class="ol-ink"', `<svg class="ol-ink" data-ol-shape="${snap.kind}"`)) }])) showHud(`${SNAP_NAMES[snap.kind] ?? 'Shape'} · Undo brings the stroke back`, 1400);
       return;
     }
     pending.current = drawing ? null : t === 'formula' ? { editText: place.path, math: true } : t === 'text' ? { editText: place.path } : { select: [place.path] };
@@ -3819,6 +3898,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
               {(canvasState === 'slow' || canvasState === 'failed') && <button type="button" class="dl-btn" onClick={() => setCodeOpen(true)}>Open Code</button>}
             </div>}
             {drawPalette && <DrawPalette sections={bars.sections} />}
+            <VoicePill armed={!locked && tool === 'pen' && ink.pen === 'comment'} owner={voiceOwner.current} slide={() => (kindRef.current === 'page' ? -1 : currentRef.current)} />
             {hud && <div key={hud.n} class="dl-hud" role="status" data-dl-hud style={hud.ms > 900 ? { animationDuration: `${hud.ms}ms` } : undefined}>{hud.text}</div>}
             <div ref={zoomHud} class="zoom-hud" aria-hidden="true" data-dl-zoomhud />
             {(lost || zoomed || (soloOn && slideFree)) && kind !== 'page' && (
@@ -3851,7 +3931,8 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
         )}
         {reviewOpen && !fullOn && (
           <ReviewPane review={review} slideTitles={slides.map(s => s.title)} current={current} kind={kind} me={me} canEdit={!locked}
-            focus={focus} draft={draft} submitDraft={submitDraft} cancelDraft={() => setDraft(null)} select={showOnCanvas}
+            focus={focus} draft={draft} submitDraft={submitDraft} cancelDraft={() => setDraft(null)} select={showThread}
+            commentInk={{ shown: inkShown, show: showCommentInk, loose: looseInk.length, removeLoose: removeLooseInk }}
             reply={replyTo} resolve={resolveThread} remove={removeThread}
             accept={c => resolveChange(c, true)} reject={c => resolveChange(c, false)}
             acceptAll={() => resolveEverything(true)} rejectAll={() => resolveEverything(false)}

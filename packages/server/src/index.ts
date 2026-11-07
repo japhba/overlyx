@@ -9,7 +9,7 @@ import { config } from './config.ts';
 import { cachedBib } from './bibcache.ts';
 import { setSecurityHeaders } from './security.ts';
 import { requestAiRepair, AiRepairError } from './airepair.ts';
-import { aiStatus, aiAvailable, pickRoute, usesServerKey, rewrite as aiRewrite, complete as aiComplete, recognizeInk, allow as aiAllow, AiError, selectionToTex, texToPm } from './ai.ts';
+import { aiStatus, aiAvailable, pickRoute, usesServerKey, rewrite as aiRewrite, complete as aiComplete, recognizeInk, transcribeSpeech, allow as aiAllow, AiError, selectionToTex, texToPm } from './ai.ts';
 import { linkedAi, combineVersions } from './linkedai.ts';
 import { mcpRouter } from './mcp.ts';
 import { mcpAgentRoutes, pruneAgents } from './mcpAgents.ts';
@@ -211,7 +211,8 @@ api.use((req, res, next) => {
 });
 // a text file saved from the built-in text editor may be bigger (TEXT_MAX); everything else is small
 const smallJson = express.json({ limit: '5mb' }), textJson = express.json({ limit: '24mb' });
-api.use((req, res, next) => (req.method === 'PUT' && /^\/projects\/[^/]+\/text\//.test(req.path) ? textJson : smallJson)(req, res, next));
+// (and a spoken comment's recording, ai.ts SPEECH_MAX_AUDIO)
+api.use((req, res, next) => ((req.method === 'PUT' && /^\/projects\/[^/]+\/text\//.test(req.path)) || (req.method === 'POST' && req.path === '/ai/transcribe') ? textJson : smallJson)(req, res, next));
 // a request body that could not be read (too large, not JSON) is logged with who sent it where — it
 // used to reach Express's default handler and the person only saw "Could not save"
 api.use((err: { type?: string; status?: number; message?: string }, req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -1282,6 +1283,20 @@ api.post('/ai/ink', async (req, res) => {
     req.on('close', () => { if (!res.writableEnded) ac.abort(); });
     const candidates = await recognizeInk({ image: String(body.image ?? ''), before: typeof body.before === 'string' ? body.before : undefined, after: typeof body.after === 'string' ? body.after : undefined, text: body.text === true, notes: body.notes === true, model: body.model }, ac.signal);
     res.json({ candidates });
+  } catch (e) {
+    if (e instanceof AiError) { if (e.status !== 499) res.status(e.status).json({ error: e.message }); return; }
+    res.status(400).json({ error: (e as Error).message ?? String(e) });
+  }
+});
+
+/** The comment pen's push to talk where the browser cannot put speech into words: a recording (16 kHz mono WAV, base64) read by the server's model — its stretches at their seconds. */
+api.post('/ai/transcribe', async (req, res) => {
+  try {
+    if (!aiAvailable()) { res.status(503).json({ error: 'Speech recognition is not configured on this server (OPENROUTER_API_KEY is unset).' }); return; }
+    if (!aiAllow(`speech:${req.user!.id}`, config.ai.speechPerHour, 3600_000)) { res.status(429).json({ error: 'That is the limit of spoken comments for now — try again later.' }); return; }
+    const ac = new AbortController();
+    req.on('close', () => { if (!res.writableEnded) ac.abort(); });
+    res.json({ said: await transcribeSpeech({ audio: String(req.body?.audio ?? ''), lang: req.body?.lang }, ac.signal) });
   } catch (e) {
     if (e instanceof AiError) { if (e.status !== 499) res.status(e.status).json({ error: e.message }); return; }
     res.status(400).json({ error: (e as Error).message ?? String(e) });

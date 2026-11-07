@@ -1199,6 +1199,42 @@ blend.
     editor read-only. The runtime syncs these `data-ol-` attributes like any source attribute
     (reconcile.ts `SOURCE_OL`); `stopText` re-pairs a retyped element's children (`linkTree`) —
     without it a later attribute change duplicated a text's inline elements.
+  * **The comment pen and push to talk** (7 Nov 2026, the user: "a new 'comment' pen that renders in
+    high-vis orange with a glow underneath … a push to talk (+lock option) button that records
+    commentary given alongside drawing. Process this into a format that makes it usable for agents to
+    implement feedback"; `core/voicecomment.ts`, `deliverable/voice.ts`, `VoiceTalk.tsx`). Draw's row
+    has a **Comment pen** beside the highlighter (decks, posters, web pages — where comments can be
+    made; `drawingToolbar` `comment`): one colour (`COMMENT_INK` #ff5c00, `core/inkpresets.ts`), its
+    own widths, the pen's nib; its strokes are ink objects marked `data-ol-comment-ink="k…"` (an id
+    each), drawn with a glow beneath (`COMMENT_GLOW`, a CSS drop-shadow from `runtime/review.ts`;
+    the editor's live stroke too), never scribbling out what they cross, **review marks**: shown on
+    the editing canvas, the rail and an agent's `render_page` (the `check` mode; the overlap lint
+    passes over them), never presented, printed, opened in a new tab or published (`publishedText`
+    `stripCommentInk`); the Review pane's *Comment pen* switch hides them (`ol.deckCommentInk`).
+    With the comment pen in hand a **microphone pill** sits over the canvas (it stays while the Draw
+    row folds away): **hold** the microphone to talk — draw with the other hand or the Pencil — and
+    let go to finish; a **tap**, or the **lock**, records hands-free until the microphone (then ■) is
+    tapped. The words: the browser's speech recognition where there is one (Chrome / Edge: Google's
+    speech service; Safari on the Mac and the iPad: Apple's — said in the button's tooltip), words at
+    their time as they are heard, a caption in the pill; otherwise (Firefox, or the service refusing)
+    a recording (MediaRecorder) that goes, as 16 kHz WAV, to `POST /api/ai/transcribe` (ai.ts
+    `transcribeSpeech`, OpenRouter `input_audio`, `OVERLYX_AI_SPEECH_MODEL`, default the ink reader's
+    Gemini; 60 an hour per account); where that is not set up either, **the recording is kept** in the
+    project next to the page (`comments/voice-YYYYMMDD-HHMMSS.webm`, through the host's upload) and
+    the comment says it was not transcribed. A finished recording and the comment strokes drawn
+    during it — or in the 30 s before it (`LEAD_MS`: draw, then explain) — become **comment threads,
+    one per slide** they touch (turning the slide while talking splits the words by the slide shown;
+    a slide only drawn on gets all of them), on the slide, by this person (`planVoiceComments`). A
+    thread holds, besides the usual fields, `voice` (`start`, `secs`, `said: [{t: ms from the start,
+    text}]`, `how`: device / server / none, `audio`) and `ink` (`ids` of its strokes, their `box` in
+    slide px, `on`: the objects under them in a few words — `runtime/edit.ts strokeUnder` sends their
+    paths with the stroke). The Review pane shows "Spoken · 0:12 · 2 marks over “Results”"; a click
+    selects its strokes; **resolving or deleting it takes its strokes away** (Undo brings them
+    back); comment-pen marks no thread is about are counted there with *Remove*. Agents:
+    `list_comments` on a deck gives each thread's slide, words with their times, and the strokes
+    (`agentComments`); `render_page` shows the strokes; `resolve_comment` resolves one and removes its
+    strokes (`resolveThreadText`). Documents' margins and whiteboards have no comment pen yet (the
+    pen in hand there is the ordinary pen).
   * **Guides** (12 Oct 2026, the user: "guidelines + an option to reset them, possibly tied to a slide
     master"; `deliverable/guides.ts`, `runtime/guides.ts`), as PowerPoint's: lines across the slide that
     moved and resized objects snap to (edit.ts `snap`, with the slide's and the objects' edges), drawn
@@ -4386,7 +4422,11 @@ clientInfo, User-Agent). It exposes these tools:
 * `list_comments(path)`, `add_comment(path, text, paragraph_index?)`, `resolve_comment(path, index)`
   — comment threads anywhere in the body, inside tables, floats and other insets included (same
   `Note Comment` inset shape and header convention — `Name (date time):` — as the client's comment
-  cards); new threads attach at the end of a top-level paragraph.
+  cards); new threads attach at the end of a top-level paragraph. On an HTML deck, poster or web page
+  `list_comments` reads the page's `data-ol-comments` threads (`core/voicecomment.ts agentComments`:
+  index, slide, the object, messages, resolved; a spoken comment's `spoken` words at their time into
+  the recording and its comment pen strokes as `drawn`: ids, box, the objects under them) and
+  `resolve_comment` resolves one there, its comment pen strokes removed with it.
 * `build_pdf(path, wait_seconds?)`, `build_status(path)` — compile with latexmk (viewers may,
   like in the app) and read the result: status, LaTeX warnings, and the compile-log tail. A build
   started before the latest edit never counts. A failed build_pdf also returns the first errors

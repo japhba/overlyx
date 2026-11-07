@@ -57,6 +57,8 @@ export interface InkStyle {
   eraser?: { precise: boolean; size: 0 | 1 | 2; hlOnly: boolean; back: boolean };
   /** what the lasso takes, and of which colours (lower-case #rrggbb; none: any) */
   lasso?: { kinds: ('ink' | 'shapes' | 'pictures' | 'text')[]; colors: string[] };
+  /** the comment pen's: a review mark with a glow (core/voicecomment.ts); its strokes never scribble out others */
+  comment?: boolean;
 }
 
 /** what kind of object the toolbar is showing tools for */
@@ -188,6 +190,8 @@ export interface ReviewView {
   me: string;
   /** the comment thread looked at: its object (pin highlighted), the words it is on (highlighted) */
   focus: { path: Path; quote?: string } | null;
+  /** the comment pen's strokes hidden (the Review pane's switch) */
+  noInk?: boolean;
 }
 
 /**
@@ -360,7 +364,9 @@ export type FromRuntime =
   /** `scratch`: the stroke was a scribble over these strokes (core/scratchout.ts) — it is added, then they and it go, as a step of its own */
   | { ol: 'draw'; version: number; tool: Tool; slide: Path | null; rect: Rect; after?: Path | null; pts?: [number, number][]; d?: string; closed?: boolean; runs?: InkRunD[]; scratch?: Path[];
       /** draw and hold: the shape the stroke became (core/shapesnap.ts), written a step after the stroke as drawn */
-      snap?: { kind: string; rect: Rect; runs: InkRunD[] } }
+      snap?: { kind: string; rect: Rect; runs: InkRunD[] };
+      /** a comment pen's stroke: the objects it is drawn over (what a spoken comment is about) */
+      under?: Path[] }
   /** a pen touched the slide with nothing but Select in hand: it draws (InkStyle.penInks); `done`: its stroke is over and Select is in hand again (Draw was not open) */
   | { ol: 'penInks'; done?: boolean }
   /** the eraser's "back to the pen after erasing" */

@@ -158,6 +158,9 @@ export const config = {
     /** handwritten formulas (the math keyboard's pen, ai.ts recognizeInk): a vision model, and requests per user per minute */
     inkModel: (process.env.OVERLYX_AI_INK_MODEL ?? 'google/gemini-3.5-flash-lite').trim(),
     inkPerMinute: Number(process.env.OVERLYX_AI_INK_PER_MIN ?? 90),
+    /** the comment pen's spoken comments, where the browser cannot put them into words (an audio-capable model) */
+    speechModel: (process.env.OVERLYX_AI_SPEECH_MODEL ?? 'google/gemini-3.5-flash-lite').trim(),
+    speechPerHour: Number(process.env.OVERLYX_AI_SPEECH_PER_HOUR ?? 60),
     /** "Escalate to AI" repairs send a whole document to the repair model (an expensive one): per user an hour and a day, and for everyone a day */
     repairsPerHour: Number(process.env.OVERLYX_AI_REPAIRS_PER_HOUR ?? 5),
     repairsPerDay: Number(process.env.OVERLYX_AI_REPAIRS_PER_DAY ?? 20),
