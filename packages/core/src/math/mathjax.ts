@@ -295,7 +295,13 @@ function delimToTex(name: string): string {
 }
 
 function gridToTex(g: Grid & { t: 'grid' }, ctx: TexContext, mode: 'math' | 'text'): string {
-  const rows = g.rows.map((r, ri) => r.cells.map((c, ci) => cellToTex(c, ctx, g, ri * g.ncols + ci, g.env === 'tabular' ? 'text' : mode)).join(' & ')).join(' \\\\ ');
+  const rows = g.rows.map((r, ri) => {
+    // Rules must be outside the cell/atom boxes for MathJax's array parser. Its native
+    // hdashline draws the default dash pattern; retain custom patterns only in the saved TeX.
+    const rules = r.hrules?.map(rule => '\\' + rule.n).join(' ') ?? '\\hline'.repeat(r.hlines ?? 0);
+    if (rules && ri > 0 && ri === g.rows.length - 1 && r.cells.every(c => !c.length) && !r.multi?.length) return rules;
+    return (rules ? rules + ' ' : '') + r.cells.map((c, ci) => cellToTex(c, ctx, g, ri * g.ncols + ci, g.env === 'tabular' ? 'text' : mode)).join(' & ');
+  }).join(' \\\\ ');
   switch (g.env) {
     case 'cases': return `\\begin{cases}${rows}\\end{cases}`;
     case 'substack': return `\\substack{${rows}}`;

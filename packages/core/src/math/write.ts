@@ -200,7 +200,11 @@ function writeGridBody(g: Grid, os: MathWriter, hull?: Hull): void {
   const nrows = g.rows.length;
   for (let row = 0; row < nrows; row++) {
     const r = g.rows[row];
-    if (r.hlines) { os.s('\\hline'.repeat(r.hlines) + ' '); }
+    if (r.hrules?.length) {
+      os.s(r.hrules.map(rule => '\\' + rule.n + (rule.opt ? '[' + rule.opt + ']' : '')).join('') + ' ');
+      // A final rule belongs to the preceding row, without another empty row after it.
+      if (row > 0 && row === nrows - 1 && r.cells.every(c => !c.length) && !r.multi?.length) continue;
+    } else if (r.hlines) { os.s('\\hline'.repeat(r.hlines) + ' '); }
     // do not write & and empty cells at the end of a line
     let lastcol = 0, emptyline = true, lastEoln = true;
     const multiOf = (col: number) => r.multi?.find(m => m.col === col);

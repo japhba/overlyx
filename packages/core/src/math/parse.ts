@@ -416,7 +416,17 @@ class Parser {
       else if ((t.cs === 'nonumber' || t.cs === 'notag') && hull) hull.numberedRows[cellrow] = t.cs === 'notag' ? 'notag' : false;
       else if (t.cs === 'number' && hull) hull.numberedRows[cellrow] = true;
 
-      else if (t.cs === 'hline') { const r = grid.rows[cellrow]; r.hlines = (r.hlines ?? 0) + 1; }
+      else if (t.cs === 'hline' || (t.cs === 'hdashline' && grid.env)) {
+        const r = grid.rows[cellrow];
+        if (t.cs === 'hdashline') {
+          const opt = this.parseVerbatimOption();
+          r.hrules ??= Array.from({ length: r.hlines ?? 0 }, () => ({ n: 'hline' as const }));
+          r.hrules.push(opt ? { n: 'hdashline', opt } : { n: 'hdashline' });
+        } else {
+          r.hlines = (r.hlines ?? 0) + 1;
+          r.hrules?.push({ n: 'hline' });
+        }
+      }
 
       else if (t.cs === 'sqrt') {
         const ar = this.parseCell(FLAG_OPTION, mode);
@@ -760,7 +770,7 @@ const innerHull = (name: string) => ['aligned', 'gathered', 'split', 'alignedat'
 
 function delEmptyLastRow(g: Grid) {
   const last = g.rows[g.rows.length - 1];
-  if (g.rows.length > 1 && last.cells.every(c => !c.length) && !last.hlines) g.rows.pop();
+  if (g.rows.length > 1 && last.cells.every(c => !c.length) && !last.hlines && !last.hrules?.length) g.rows.pop();
 }
 
 /** InsetMathGrid::guessColumns: number of columns of an array alignment string */
@@ -777,7 +787,7 @@ export function isValidLength(s: string): boolean { return LENGTH_RE.test(s.trim
 
 /** Commands the parser handles itself (not in the symbol table). */
 export const PARSER_COMMANDS: string[] = ['frac', 'dfrac', 'tfrac', 'cfrac', 'nicefrac', 'binom', 'dbinom', 'tbinom', 'sqrt', 'left', 'middle', 'right', 'begin', 'end', 'text', 'label', 'nonumber', 'notag',
-  'limits', 'nolimits', 'hline', 'cancelto', 'unit', 'unitfrac', 'stackrel', 'kern', 'mkern', 'choose', 'over', 'atop', 'brace', 'brack', 'color', 'textcolor', 'normalcolor', 'substack', 'framebox', 'makebox',
+  'limits', 'nolimits', 'hline', 'hdashline', 'cancelto', 'unit', 'unitfrac', 'stackrel', 'kern', 'mkern', 'choose', 'over', 'atop', 'brace', 'brack', 'color', 'textcolor', 'normalcolor', 'substack', 'framebox', 'makebox',
   'href', 'tag', 'hspace', 'smash', 'lyxmathsym', 'ensuremath', 'boxed', 'fbox', 'multicolumn', ...PHANTOMS, ...ONE_CELL_CMDS, ...XARROWS, ...REFS, 'sideset'];
 
 /** Is `\name` a command LyX would understand here (symbol table, parser or a document macro)? */

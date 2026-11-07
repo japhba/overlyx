@@ -123,6 +123,24 @@ describe('math parse structure (LyX semantics)', () => {
     const g = parseCell('\\begin{pmatrix}a & b\\\\\nc & d\n\\end{pmatrix}')[0] as Extract<Atom, { t: 'grid' }>;
     expect(g.t).toBe('grid'); expect(g.env).toBe('pmatrix'); expect(g.rows.length).toBe(2); expect(g.ncols).toBe(2);
   });
+  it.each(['array', 'pmatrix'])('renders and preserves hdashline rules in %s', env => {
+    const latex = String.raw`$\begin{${env}}${env === 'array' ? '{cc}' : ''}\hdashline a & b\\\hline\hdashline[2pt/3pt] c & d\\\hdashline\end{${env}}$`;
+    const hull = parseFormula(latex);
+    const saved = writeFormula(hull);
+    expect(saved.match(/\\hdashline/g)).toHaveLength(3);
+    expect(saved).toContain(String.raw`\hline\hdashline[2pt/3pt]`);
+    expect(saved).toMatch(/\\hdashline \\end\{/);
+    expect(writeFormula(parseFormula(saved))).toBe(saved);
+    for (const atoms of [false, true]) {
+      const source = renderHullSource(hull, {}, { atoms }).latex;
+      expect(source).not.toContain('lm-unknown');
+      expect(source).not.toContain('2pt/3pt');
+      const mml = toMathml(source);
+      expect(mml).toContain('rowlines="dashed"');
+      expect(mml).toContain('data-frame-styles="dashed none dashed none"');
+      expect((mml.match(/<mtr\b/g) ?? []).length).toBe(2);
+    }
+  });
   it('normalises what LyX normalises', () => {
     expect(rt('$x^2$')).toBe('$x^{2}$');
     expect(rt('$x_{i}^{2}$')).toBe('$x^{2}_{i}$');

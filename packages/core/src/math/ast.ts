@@ -108,6 +108,8 @@ export interface GridRow {
   nonewpage?: boolean;
   /** number of `\hline` before this row */
   hlines?: number;
+  /** Ordered rules when a row uses arydshln's `\hdashline`; supersedes hlines. */
+  hrules?: { n: 'hline' | 'hdashline'; opt?: string }[];
   /** multicolumn info for cells: [colIndex, ncols, align] */
   multi?: { col: number; ncols: number; align: string }[];
 }
