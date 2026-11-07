@@ -31,10 +31,10 @@ import { zoomPill } from '../app/zoomhud';
 import { CornerButton } from '../app/CornerButton';
 import { keepAwake } from '../app/wakelock';
 import { presentFingersDraw, savePresentFingersDraw, presentLinked, savePresentLinked } from '../app/presentkit';
-import { checkedPresent, type PresentState, type PresenterState } from '../app/presentshare';
+import { checkedPresent, docStamp, staleness, type PresentState, type PresenterState } from '../app/presentshare';
 import { createPortal } from 'preact/compat';
 import { isFromRuntime, RAIL_NUM, ASIDE_ATTR } from './protocol';
-import { copyLinkAt, type Place } from '../editor/permalink';
+import { copyLinkAt, placeQuery, type Place } from '../editor/permalink';
 import { rebasedSplices, rebaseObjectPaths, objectHtml, imageHtml, insertPlace, newSlideHtml, nextPageHtml, slideDesigns, slidePaths, slideNotes, notesOp, sourceRange, inlineSvgHtml, guidesIn } from './sourceops';
 import { GUIDES_ATTR, LAYOUT_MARGINS_ATTR, layoutMarginGuides, parseGuides, masterGuides, formatGuides, withGuide, type Guide } from './guides';
 import { deckMargins, deckDesign, builtInLayouts, savedLayouts, layoutFromSlide, saveLayoutOp, applyLayoutOp, placeholderObject, layoutThumb, deckColors, PH_ATTR, PH_LABELS, PH_ROLES, LAYOUT_ATTR, type PhRole, type DesignLooks, type DeckDesign, type Layout } from './decklayouts';
@@ -97,6 +97,19 @@ function saveShown(key: string, on: boolean): void {
 function loadRailW(): number {
   try { const v = Number(localStorage.getItem('ol.deckRail')); return v >= RAIL_MIN && v <= RAIL_MAX ? v : RAIL_W; } catch { return RAIL_W; }
 }
+/** the presenter view as this browser keeps it (runtime/presenter.ts: the presenting frame keeps nothing) */
+const PRESENTER_KEY = 'ol.presenter';
+function presenterPrefs(): { on: boolean; notes: number } {
+  try { const v = JSON.parse(localStorage.getItem(PRESENTER_KEY) ?? 'null'); return { on: v?.on === true, notes: typeof v?.notes === 'number' ? v.notes : 22 }; }
+  catch { return { on: false, notes: 22 }; }
+}
+function savePresenterPrefs(p: { on: boolean; notes: number }): void {
+  try { localStorage.setItem(PRESENTER_KEY, JSON.stringify(p)); } catch { /* private window */ }
+}
+/** the build of OverLyX running here, told the other screens presenting (presentshare.ts staleness) */
+const BUILD: string = String(import.meta.env?.VITE_BUILD_VERSION ?? '');
+/** a screen as the Window Management API tells of it */
+interface ScreenArea { availLeft: number; availTop: number; availWidth: number; availHeight: number }
 const CHECKER = 'repeating-conic-gradient(#e3e5e8 0 25%, #ffffff 0 50%) 0 0 / 16px 16px';
 const NO_VIEW: CanvasView = { desk: null, deskChecker: false, pageChecker: false };
 
@@ -709,7 +722,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
 
   /* ------------------------------------------------------------- versions to the frames */
 
-  const sendTimer = useRef<{ canvas: ReturnType<typeof setTimeout> | null; rail: ReturnType<typeof setTimeout> | null }>({ canvas: null, rail: null });
+  const sendTimer = useRef<{ canvas: ReturnType<typeof setTimeout> | null; rail: ReturnType<typeof setTimeout> | null; present: ReturnType<typeof setTimeout> | null }>({ canvas: null, rail: null, present: null });
   /** when the last pen stroke came: while one follows another, the rail's thumbnail waits */
   const lastInkAt = useRef(-1e9);
   /**
@@ -719,11 +732,13 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
    */
   const patches = useRef(new Map<number, SourcePatch | null>());
   /** the version each frame was sent last */
-  const sentTo = useRef({ canvas: -1, rail: -1 });
+  const sentTo = useRef({ canvas: -1, rail: -1, present: -1 });
+  /** the presenting frame has started and takes the versions of the text (presentReady) */
+  const presentReady = useRef(false);
   /** the splices of the last edit made here and the text they were made on: its patch from them (else from the two texts) */
   const lastSplices = useRef<{ before: string; splices: { from: number; to: number; insert: string }[] } | null>(null);
   /** the text at the latest version for a frame: as patches of the one it was sent last, when they all are */
-  const sourceMsg = (frame: 'canvas' | 'rail'): ToRuntime => {
+  const sourceMsg = (frame: 'canvas' | 'rail' | 'present'): ToRuntime => {
     const v = version.current, base = sentTo.current[frame];
     sentTo.current[frame] = v;
     const list: SourcePatch[] = [];
@@ -755,6 +770,17 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     if (now) toC(); else t.canvas = setTimeout(toC, 40);
     if (t.rail) clearTimeout(t.rail);
     t.rail = setTimeout(() => { t.rail = null; if (railReady.current) toRail(sourceMsg('rail')); }, performance.now() - lastInkAt.current < 1500 ? 1500 : 350);
+    // presenting: the slides follow the text (an edit on another screen, a synced clone, an agent mid-talk)
+    if (t.present) clearTimeout(t.present);
+    if (presentReady.current) t.present = setTimeout(() => { t.present = null; sendPresentSource(); }, now ? 0 : 250);
+  };
+  /** the presenting frame brought to the latest version, and the version it shows told the other screens */
+  const sendPresentSource = () => {
+    if (!presentReady.current || !presentFrame.current) return;
+    toFrame(presentFrame.current, sourceMsg('present'));
+    const html = versions.current.get(sentTo.current.present);
+    presentStamp.current = html !== undefined && host.docClock ? docStamp(html, host.docClock()) : undefined;
+    sharePresent();
   };
 
   useEffect(() => {
@@ -764,7 +790,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
       host.onStatus(() => setOnline(host.online())),
       host.onReady(() => { setSynced(true); sendSource(true); }),
       host.onPeers(peers => { peersRef.current = peers; toCanvas({ ol: 'peers', peers }); toRail({ ol: 'peers', peers }); }),
-      host.onAsset((p, v) => { toCanvas({ ol: 'asset', path: p, v }); toRail({ ol: 'asset', path: p, v }); }),
+      host.onAsset((p, v) => { toCanvas({ ol: 'asset', path: p, v }); toRail({ ol: 'asset', path: p, v }); toFrame(presentFrame.current, { ol: 'asset', path: p, v }); }),
     ];
     if (host.ready()) { setSynced(true); sendSource(true); }
     const ro = setInterval(() => { if (host.readOnly() !== hostReadOnly.current) setReadOnly(host.readOnly()); }, 1000);
@@ -1034,6 +1060,22 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
         }).catch(() => {});
       }
       if (fromPresent) {
+        if (m.ol === 'presentReady') {
+          // (started, or started again after a reload: it keeps nothing — the settings, the others and the text from here)
+          presentReady.current = true;
+          presentPrefsSent.current = true;
+          sentTo.current.present = -1;
+          toFrame(presentFrame.current, { ol: 'presentFingers', on: presentFingersDraw() });
+          toFrame(presentFrame.current, { ol: 'presentLinked', on: presentLinked() });
+          const pv = presenterPrefs();
+          presenterOn.current = presentAs.current !== 'audience' && pv.on;
+          toFrame(presentFrame.current, { ol: 'presenter', on: presenterOn.current, notes: pv.notes });
+          toFrame(presentFrame.current, { ol: 'presentPeers', peers: presentPeers.current });
+          sendPresentSource();
+        }
+        if (m.ol === 'needSource') { sentTo.current.present = -1; sendPresentSource(); }
+        if (m.ol === 'presenterPrefs') { presenterOn.current = m.on === true; if (presentAs.current !== 'audience') savePresenterPrefs({ on: m.on === true, notes: m.notes }); }
+        if (m.ol === 'presentAudience') void openAudience();
         if (m.ol === 'presentZoom') presentZoomed.current = m.zoomed;
         if (m.ol === 'exit') stopPresenting();
         if (m.ol === 'presentFingers') savePresentFingersDraw(m.on);
@@ -1041,7 +1083,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
         // its state for the other screens presenting the page: checked (the page's own scripts run in that frame too), then shared
         if (m.ol === 'presentShare') {
           const st = m.state === null ? null : checkedPresent(m.state, presentOut.current);
-          if (st || m.state === null) { presentOut.current = st; host.setPresent?.(st); }
+          if (st || m.state === null) { presentOut.current = st; sharePresent(); }
         }
         if (m.ol === 'visible') {
           // (its first slide shown: the frame has no storage, so the bar's "Fingers draw" and "Linked" come from here — and the other presenters as they are)
@@ -2354,6 +2396,12 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     placeShown.current = place;
     const k = place.slide && slides.length ? Math.min(place.slide, slides.length) - 1 : -1;
     if (k >= 0) { backTo.current = 'done'; if (kind === 'deck') gotoSlide(k); }
+    // (an audience window of the presenter view, or this screen brought up to date mid-talk)
+    if (place.present && kind === 'deck' && !presenting) {
+      void startPresenting(false, Math.max(0, k), place.present);
+      // (once: a reload later opens the deck as usual)
+      try { history.replaceState(history.state, '', location.href.replace(/([?&])present=[^&]*(&|$)/, (_m, a: string, b: string) => (b ? a : '')).replace(/[?&]$/, '')); } catch { /* as it is */ }
+    }
     const base = k >= 0 ? slidePaths(text.toString())[k] : kind === 'page' ? [] : null;
     if (place.obj && base) setTimeout(() => toCanvas({ ol: 'select', paths: [[...base, ...place.obj!]] }), 150);
   }, [place, slides, kind, canvasState]);
@@ -3090,22 +3138,68 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
   /** the other screens presenting the page (their awareness states), and this one's state as last shared (app/presentshare.ts) */
   const presentPeers = useRef<PresenterState[]>([]);
   const presentOut = useRef<PresentState | null>(null);
-  const startPresenting = async (fromStart = false) => {
+  /** the address the presenting frame opened (kept: a renewed link must not reload it mid-talk) */
+  const [presentUrl, setPresentUrl] = useState('about:blank');
+  /** how this screen presents: as asked here, or opened to present (`audience`: an audience window — never the presenter view; `here`: brought up to date mid-talk) */
+  const presentAs = useRef<'audience' | 'here' | null>(null);
+  /** presenting began without a click (a link opened it): one is asked for, for the full screen */
+  const [fullAsk, setFullAsk] = useState(false);
+  /** the presenter view is on: leaving the full screen does not end the presentation (opening the audience window leaves it) */
+  const presenterOn = useRef(false);
+  /** `at`: the slide to present from (the canvas's index), else the one shown */
+  const startPresenting = async (fromStart = false, at?: number, as: 'audience' | 'here' | null = null) => {
     presentZoomed.current = false;
     presentPrefsSent.current = false;
-    presentFrom.current = fromStart ? 0 : presentIndexOf(currentRef.current);
+    presentReady.current = false;
+    presentAs.current = as;
+    presentFrom.current = fromStart ? 0 : presentIndexOf(at ?? currentRef.current);
     if (offlineDocsRef.current.edit) {
       const doc = await host.offlineFrame?.('present', currentLink.current ?? undefined);
       setOfflineDocs(prev => ({ ...prev, present: doc ?? undefined }));
     }
     if (link && host.present?.(src('present') + `#${presentFrom.current + 1}`)) return;
+    setPresentUrl(src('present') + `#${presentFrom.current + 1}`);
     setPresenting(true);
+    if (as) { setFullAsk(!!document.fullscreenEnabled); return; }
     setTimeout(() => {
       void presentBox.current?.requestFullscreen?.().catch(() => undefined);
       presentFrame.current?.focus();
     }, 30);
   };
+  const askedFull = () => {
+    setFullAsk(false);
+    void presentBox.current?.requestFullscreen?.().catch(() => undefined);
+    presentFrame.current?.focus();
+  };
+  /**
+   * The presenter view's *Audience window*: the slides presented in a window of their own (Linked with
+   * this one: the same account), opened on another screen where the browser lets it be placed there
+   * (the Window Management API, asked for once) — else where the browser puts it, to be dragged to the
+   * projector. This window goes on in the presenter view.
+   */
+  const openAudience = async () => {
+    const base = host.webLink?.();
+    if (!base) { notify('This deck has no address to open in another window.', 'error'); return; }
+    const url = `${base}?${placeQuery({ slide: currentRef.current + 1, present: 'audience' })}`;
+    const sw = screen as Screen & { availLeft?: number; availTop?: number };
+    const win = window.open(url, 'overlyx-audience', `popup,width=${Math.round(sw.availWidth * 0.8)},height=${Math.round(sw.availHeight * 0.8)}`);
+    if (!win) { notify('The browser kept the audience window from opening: allow pop-ups for this site, then try again.', 'error'); return; }
+    presenterOn.current = true;
+    toFrame(presentFrame.current, { ol: 'presenter', on: true, notes: presenterPrefs().notes });
+    // on another screen, where the browser tells of the screens (Chrome, Edge: asks once)
+    try {
+      const w = window as Window & { getScreenDetails?: () => Promise<{ screens: ScreenArea[]; currentScreen: ScreenArea }> };
+      if (!w.getScreenDetails) return;
+      const d = await w.getScreenDetails();
+      const other = d.screens.find(s => s.availLeft !== d.currentScreen.availLeft || s.availTop !== d.currentScreen.availTop);
+      if (!other || win.closed) return;
+      win.moveTo(other.availLeft, other.availTop);
+      win.resizeTo(other.availWidth, other.availHeight);
+    } catch { /* not allowed: where the browser put it */ }
+  };
   const stopPresenting = () => {
+    setFullAsk(false);
+    presentReady.current = false;
     setPresenting(false);
     setOfflineDocs(({ present: _present, ...active }) => active);
     if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
@@ -3114,6 +3208,8 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     const onFs = () => {
       if (document.fullscreenElement || !presenting) return;
       if (presentZoomed.current) { presentZoomed.current = false; toFrame(presentFrame.current, { ol: 'unzoom' }); return; }
+      // (the presenter view, an audience window: presenting goes on in the window — Esc there ends it)
+      if (presenterOn.current || presentAs.current) return;
       setPresenting(false);
     };
     document.addEventListener('fullscreenchange', onFs);
@@ -3128,9 +3224,40 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
   // presented on other screens too (an iPad and a Mac): their states into the frame as they change; this one's withdrawn as it ends
   useEffect(() => {
     if (!presenting || !host.onPresent) return;
-    const off = host.onPresent(peers => { presentPeers.current = peers; toFrame(presentFrame.current, { ol: 'presentPeers', peers }); });
-    return () => { off(); presentPeers.current = []; presentOut.current = null; host.setPresent?.(null); };
+    const off = host.onPresent(peers => { presentPeers.current = peers; toFrame(presentFrame.current, { ol: 'presentPeers', peers }); checkStale(); });
+    // (a screen that stopped hearing from the others keeps its last word: looked at again now and then)
+    const iv = setInterval(checkStale, 2000);
+    return () => { off(); clearInterval(iv); presentPeers.current = []; presentOut.current = null; presentStamp.current = undefined; staleSince.current = null; setStale(null); host.setPresent?.(null); };
   }, [presenting, host]);
+  /**
+   * The same deck on every screen. The version of the text the frame shows and the build of OverLyX
+   * go with this presenter's state (presentshare.ts docStamp); when another screen of this account
+   * has a newer version for more than a few seconds (edits do not reach this one: it was asleep,
+   * offline, or kept a version from before them) or a newer OverLyX, this screen says so and offers to
+   * catch up — the page loaded again, presenting from the same slide.
+   */
+  const presentStamp = useRef<string | undefined>(undefined);
+  const staleSince = useRef<{ kind: 'doc' | 'build'; at: number } | null>(null);
+  const [stale, setStale] = useState<'doc' | 'build' | null>(null);
+  const [staleDismissed, setStaleDismissed] = useState<string | null>(null);
+  const sharePresent = () => {
+    const st = presentOut.current;
+    host.setPresent?.(st ? { ...st, ...(presentStamp.current ? { doc: presentStamp.current } : {}), ...(BUILD ? { b: BUILD } : {}) } : null);
+  };
+  const checkStale = () => {
+    const s = staleness({ doc: presentStamp.current, b: BUILD }, presentPeers.current);
+    const kind = s.build ? 'build' : s.doc ? 'doc' : null;
+    if (!kind) { staleSince.current = null; setStale(null); return; }
+    if (staleSince.current?.kind !== kind) staleSince.current = { kind, at: Date.now() };
+    if (Date.now() - staleSince.current.at >= 5000) setStale(kind);
+  };
+  /** this screen brought up to date: the page loaded again, presenting from the slide it shows */
+  const catchUp = () => {
+    const base = host.webLink?.();
+    if (!base) { location.reload(); return; }
+    try { history.replaceState(history.state, '', `${base}?${placeQuery({ slide: currentRef.current + 1, present: 'here' })}`); } catch { /* another origin: as it is */ }
+    location.reload();
+  };
 
   /* ------------------------------------------------------------- code view */
 
@@ -3784,8 +3911,14 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
       {bgFor && <BgRemoveDialog src={bgFor.url} name={bgFor.name} onDone={b => { void saveNoBg(b); }} onClose={() => setBgFor(null)} />}
       {presenting && link && (
         <div class="dl-presenting" ref={presentBox}>
-          <iframe ref={presentFrame} title="Presentation" sandbox={offlineDocs.present ? undefined : 'allow-scripts allow-popups'} src={offlineDocs.present ? offlineSrc('present') : src('present') + `#${presentFrom.current + 1}`}
+          <iframe ref={presentFrame} title="Presentation" sandbox={offlineDocs.present ? undefined : 'allow-scripts allow-popups'} src={offlineDocs.present ? offlineSrc('present') : presentUrl}
             onLoad={() => { if (offlineDocsRef.current.present) presentFrame.current?.contentWindow?.postMessage({ ol: 'go', slide: presentFrom.current }, '*'); }} />
+          {fullAsk && <button class="dl-present-full" onClick={askedFull}><span>Click for full screen</span></button>}
+          {stale && staleDismissed !== stale && <div class="dl-present-stale" role="alert">
+            <span>{stale === 'build' ? 'This screen runs an older version of OverLyX than your other screen.' : 'This screen shows an older version of the deck than your other screen.'}</span>
+            <button onClick={catchUp}>Bring up to date</button>
+            <button aria-label="Dismiss" title="Leave it so" onClick={() => setStaleDismissed(stale)}>×</button>
+          </div>}
         </div>
       )}
     </div>

@@ -3186,6 +3186,13 @@ select.dl-zoom { appearance: none; -webkit-appearance: none; text-align: center;
 .dl-code textarea { flex: 1; border: 0; resize: none; padding: 8px 10px; font: 12.5px/18px monospace; background: var(--code-bg); color: var(--editor-fg); outline: none; white-space: pre; tab-size: 2; }
 .dl-presenting { position: fixed; inset: 0; z-index: 10000; background: #000; }
 .dl-presenting iframe { width: 100%; height: 100%; border: 0; }
+/* presenting began without a click (an audience window, a screen brought up to date): one click for the full screen */
+.dl-present-full { all: unset; position: absolute; inset: 0; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.dl-present-full span { padding: 10px 20px; border-radius: 22px; background: rgba(32, 33, 36, .86); color: #fff; font: 15px/1.3 var(--ui-font); box-shadow: 0 2px 12px rgba(0, 0, 0, .4); }
+/* this screen is behind another of the account's presenting the deck (presentshare.ts staleness) */
+.dl-present-stale { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 2; display: flex; align-items: center; gap: 10px; max-width: calc(100% - 24px); padding: 8px 8px 8px 16px; border-radius: 22px; background: #fdd663; color: #202124; font: 14px/1.3 var(--ui-font); box-shadow: 0 2px 12px rgba(0, 0, 0, .4); }
+.dl-present-stale button { all: unset; cursor: pointer; padding: 6px 12px; border-radius: 16px; background: rgba(0, 0, 0, .1); font-weight: 600; white-space: nowrap; }
+.dl-present-stale button:hover { background: rgba(0, 0, 0, .18); }
 @media (max-width: 700px) { .dl-code { width: 100%; position: absolute; inset: 34px 0 0 0; z-index: 5; } }
 .ol-newkinds { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 10px 0 14px; }
 .ol-newkind { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 8px; border: 1px solid var(--ui-border); border-radius: 8px; background: var(--surface); color: inherit; font: inherit; cursor: pointer; }

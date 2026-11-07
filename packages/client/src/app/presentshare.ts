@@ -69,6 +69,11 @@ export interface PresentAt {
   linked: boolean;
   /** when it began presenting (ms since 1970): of screens that have not moved, the first leads */
   t0: number;
+  /**
+   * the slide's own mark (slideSid: its id, else what its source says), so that a screen whose deck
+   * has a slide more or less before it still shows the same slide, not the one at the same place
+   */
+  sid?: string;
 }
 
 /** what one presenter shares */
@@ -87,6 +92,13 @@ export interface PresentState {
   live: { k: string; s: string } | null;
   /** the laser on the slide `k`: its points (`n`: the number of the first, counted since the laser came on), held or moving */
   laser: { k: string; n: number; pts: string; held: boolean } | null;
+  /**
+   * Put in by the editor that shares the state, not by the presenting frame: the version of the
+   * document the frame shows (`doc`, docStamp: "<hash>.<count>") and the build of OverLyX it runs
+   * (`b`, "26/11/03-01:05") — screens that show different ones say so (staleness).
+   */
+  doc?: string;
+  b?: string;
 }
 
 /** another presenter's state, checked and decoded */
@@ -109,6 +121,9 @@ const isId = (v: unknown): v is string => typeof v === 'string' && /^[a-z0-9.]{1
 /** a slide's key: "s3" (the fourth slide), or the presenter's position text where it has no index */
 const isKey = (v: unknown): v is string => typeof v === 'string' && v.length > 0 && v.length <= 24 && /^[\w ./-]+$/.test(v);
 const isInt = (v: unknown, lo: number, hi: number): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= lo && v <= hi;
+const isSid = (v: unknown): v is string => typeof v === 'string' && /^[a-z0-9]{1,16}$/.test(v);
+const isStamp = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f]{8}\.\d{1,15}$/.test(v);
+const isBuild = (v: unknown): v is string => typeof v === 'string' && /^[\d/:-]{1,20}$/.test(v);
 
 /** the points in quarter units, each as the step from the one before: "x0,y0,dx1,dy1,…" */
 export function encodePts(pts: readonly (readonly [number, number])[]): string {
@@ -180,8 +195,12 @@ export function decodeStroke(v: unknown): SharedStroke | null {
 function readAt(v: unknown): PresentAt | null {
   const a = v as Partial<PresentAt> | null;
   if (!a || typeof a !== 'object' || !isInt(a.slide, 0, 1e5) || !isInt(a.step, 1, 1e5) || !isInt(a.n, -1, 1e12) || typeof a.linked !== 'boolean' || !isInt(a.t0, 0, 1e15)) return null;
-  return { slide: a.slide, step: a.step, n: a.n, linked: a.linked, t0: a.t0 };
+  return { slide: a.slide, step: a.step, n: a.n, linked: a.linked, t0: a.t0, ...(isSid(a.sid) ? { sid: a.sid } : {}) };
 }
+
+/** the same slide and step: by the slides' marks where both have one, else by their places */
+const sameAt = (a: { slide: number; step: number; sid?: string }, b: { slide: number; step: number; sid?: string }): boolean =>
+  a.step === b.step && (a.sid && b.sid ? a.sid === b.sid : a.slide === b.slide);
 
 /**
  * Whether the presenter at `a` (id `aid`) leads the one at `b`: it moved last (a higher clock); of two
@@ -277,8 +296,8 @@ export function checkedPresent(raw: unknown, prev: { iv: number; id: string; ink
 
 /* ------------------------------------------------------------------ one screen's share */
 
-/** a move to follow: a linked presenter ahead of this screen */
-export interface Follow { slide: number; step: number; n: number }
+/** a move to follow: a linked presenter ahead of this screen (`sid`: the slide's mark, where it has one) */
+export interface Follow { slide: number; step: number; n: number; sid?: string }
 
 /**
  * The presenting state one screen shares, and what it knows of the others': ids for its strokes, the
@@ -368,21 +387,31 @@ export class PresentShare {
     let best: PeerPresent | null = null;
     for (const p of this.peers.values()) if (p.mine && p.at.linked && (!best || leads(p.at, p.id, best.at, best.id))) best = p;
     if (!best || !(any || leads(best.at, best.id, this.at, this.id))) return null;
-    if (best.at.slide === this.at.slide && best.at.step === this.at.step) return null;
-    return { slide: best.at.slide, step: best.at.step, n: best.at.n };
+    if (sameAt(best.at, this.at)) return null;
+    return { slide: best.at.slide, step: best.at.step, n: best.at.n, ...(best.at.sid ? { sid: best.at.sid } : {}) };
+  }
+
+  /** when the presentation began: this screen's start, or the earliest of the other linked screens of this account (the timer of a screen joining late counts from there) */
+  beganAt(): number {
+    let t = this.at.t0;
+    if (this.at.linked) for (const p of this.peers.values()) if (p.mine && p.at.linked) t = Math.min(t, p.at.t0);
+    return t;
   }
 
   /**
    * This screen shows another slide or step: by itself (a move: the clock goes on past every one seen),
    * or following a presenter's move `follow` (its clock taken over). Unlinked, its moves lead no one.
    */
-  moved(slide: number, step: number, follow: Follow | null = null): void {
+  moved(slide: number, step: number, follow: Follow | null = null, sid?: string): void {
     const n = follow ? follow.n : this.at.linked ? this.clock() + 1 : this.at.n;
-    this.at = { ...this.at, slide, step, n };
+    this.at = { ...this.at, slide, step, n, sid };
   }
 
-  /** where this screen starts: no move (it leads no one until it moves by itself) */
-  place(slide: number, step: number): void { this.at = { ...this.at, slide, step }; }
+  /**
+   * where this screen starts, or where its slide is now that the deck changed under it (a slide put in
+   * before it): no move (it leads no one by this)
+   */
+  place(slide: number, step: number, sid?: string): void { this.at = { ...this.at, slide, step, sid }; }
 
   setLinked(on: boolean): void { this.at = { ...this.at, linked: on }; }
 
@@ -461,6 +490,42 @@ export class PresentShare {
 
 /** a slide's key for the drawings: by its index ("s3"), so it is the same slide on every screen */
 export const slideKey = (index: number): string => `s${index}`;
+
+/* ------------------------------------------------------------------ the same deck on every screen */
+
+/** a short hash of a text (FNV-1a, 8 hex digits) */
+export function textHash(s: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  return (h >>> 0).toString(16).padStart(8, '0');
+}
+
+/**
+ * The version of the document a screen shows, for the others: its text's hash and how much of the
+ * document's history it has (the web app: the sum of the Yjs clocks — a screen missing edits has less).
+ */
+export const docStamp = (text: string, count: number): string => `${textHash(text)}.${Math.max(0, Math.floor(count)) || 0}`;
+
+/**
+ * Is this screen behind another screen of this account presenting the document? `doc`: it shows
+ * another text and has less of the document's history (it missed edits — offline, asleep, or a
+ * presentation started before them); `build`: it runs an older OverLyX. Only screens that say their
+ * version count (older ones do not).
+ */
+export function staleness(own: { doc?: string; b?: string }, peers: readonly PresenterState[]): { doc: boolean; build: boolean } {
+  const out = { doc: false, build: false };
+  const [ownHash, ownN] = own.doc ? own.doc.split('.') : [];
+  for (const { state, mine } of peers) {
+    if (!mine || !state || typeof state !== 'object') continue;
+    const s = state as { doc?: unknown; b?: unknown };
+    if (own.doc && isStamp(s.doc)) {
+      const [h, n] = s.doc.split('.');
+      if (h !== ownHash && Number(n) > Number(ownN)) out.doc = true;
+    }
+    if (own.b && isBuild(s.b) && s.b > own.b) out.build = true;
+  }
+  return out;
+}
 
 /**
  * The other clients' `present` states in a document's awareness, handed to `cb` at once and then

@@ -30,7 +30,7 @@ import { wantObjects } from './objects';
 import { nodeCommand } from './pathedit';
 import { stepCommand } from './animate';
 import { setView, refreshView, reportColors } from './view';
-import { startPresenting } from './present';
+import { startPresenting, sourceChanged as presentSourceChanged, presentSettled } from './present';
 import { expandPrintSteps, STEP_VISIBILITY_CSS } from './steps';
 import { report, rememberPage } from './report';
 import { layout } from './layout';
@@ -276,7 +276,8 @@ function onMessage(e: MessageEvent): void {
   if (e.source !== window.parent) return;
   const m = e.data as ToRuntime;
   if (!m || typeof m !== 'object' || typeof m.ol !== 'string') return;
-  if (MODE === 'present' && m.ol !== 'assets' && m.ol !== 'folder') return;
+  // (presenting: the page's files and each new version of its text — the presenter's own messages are present.ts's)
+  if (MODE === 'present' && m.ol !== 'assets' && m.ol !== 'folder' && m.ol !== 'source' && m.ol !== 'bib' && m.ol !== 'asset') return;
   switch (m.ol) {
     case 'exportSvg':
       refreshAnnotations();
@@ -307,6 +308,7 @@ function onMessage(e: MessageEvent): void {
       state.kind = detectKind();
       if (MODE === 'edit') { ensureSolo(); edit.afterSource(); void whenTypeset().then(() => edit.draw()); }
       if (MODE === 'thumb') { notePageBackground(); drawRail(); }
+      if (MODE === 'present') { presentSourceChanged(); void whenTypeset().then(presentSettled); }
       void whenTypeset().then(refreshAnnotations);
       darkSlidesChanged();
       if (first) void settle().then(() => { sendLayout(); if (MODE === 'edit') { refreshView(); reportColors(); } });
@@ -472,6 +474,7 @@ function init(): void {
     refreshAnnotations();
     window.__olReady = true;
     if (MODE === 'embed') embedSettled();
+    if (MODE === 'present') presentSettled();
     if (MODE === 'view') viewSettled();
     if (MODE === 'edit' || MODE === 'thumb') { sendLayout(); if (MODE === 'edit') { edit.visibleSlide(); refreshView(); reportColors(); } }
   });

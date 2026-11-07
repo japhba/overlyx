@@ -82,4 +82,10 @@ describe('links to a place in a document', () => {
     expect(parsePlace(new URLSearchParams('goto=sec:intro'))).toBeNull();
     expect(placeQuery({ text: 'two words' })).toBe('text=two%20words');
   });
+
+  it('a deck presented at once: an audience window, a screen brought up to date', () => {
+    expect(placeQuery({ slide: 4, present: 'audience' })).toBe('slide=4&present=audience');
+    expect(parsePlace(new URLSearchParams('slide=4&present=audience'))).toEqual({ slide: 4, present: 'audience' });
+    expect(parsePlace(new URLSearchParams(placeQuery({ slide: 2, present: 'here' })))).toEqual({ slide: 2, present: 'here' });
+  });
 });

@@ -324,6 +324,7 @@ export function webHost(id: string, user: User): DeliverableHost & { destroy(): 
     },
     setPresent(state) { try { provider.awareness.setLocalStateField(PRESENT_FIELD, state); } catch { /* closing */ } },
     onPresent: cb => watchPresenters(provider.awareness, cb),
+    docClock() { let n = 0; for (const c of Y.decodeStateVector(Y.encodeStateVector(ydoc)).values()) n += c; return n; },
     downloads(open) {
       const q = `?path=${encodeURIComponent(path)}&download=1`;
       return [

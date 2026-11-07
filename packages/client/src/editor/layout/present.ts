@@ -165,6 +165,8 @@ class Presentation {
       at: () => ({ slide: this.index, step: this.step }),
       goTo: (i, step) => this.goTo(i, step),
       share: aw ? state => { try { aw.setLocalStateField(PRESENT_FIELD, state); } catch { /* closing */ } } : undefined,
+      // (the bar's presenter-view button and S: the second window below)
+      presenterView: { on: () => !!this.presenter && !this.presenter.closed, toggle: () => { if (this.presenter && !this.presenter.closed) { this.presenter.close(); this.presenter = null; } else this.openPresenter(); } },
     });
     this.cleanup.push(() => this.kit.destroy());
     this.fit();

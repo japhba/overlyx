@@ -1264,6 +1264,47 @@ blend.
     **website `.zip`** that works without OverLyX (the runtime and MathJax under `_overlyx/`, a deck
     opening presenting, files from elsewhere in the project copied into `_assets/`, PDF figures as
     SVG).
+  * **Presenter view and presenting from two screens** (7 Nov 2026, the user: "a presenter's view
+    with timer, speaker notes, slide browser … suitable for multiscreen use … switching to this view
+    by hovering the bottom menu, in particular when on iPad … when remote controlling a session").
+    **S** or the presenting bar's presenter-view button (the bar comes on a move near the bottom edge
+    or a tap) switches the presenting frame into the presenter view (runtime `presenter.ts`): the
+    slide big at the left (on top, upright) — still the presenting surface: pen, highlighter,
+    eraser, laser, pinch work there (`present.ts` places it in a *stage*: `--ol-cx` / `--ol-cy` /
+    `--ol-fit`, the kit's `base()` and zoom follow) —, the bar pinned under it (`PresentKit.pin`),
+    beside it the timer (since the presentation began — on a screen joining later, since the first
+    linked screen of the account began, `PresentShare.beganAt` —, pause, reset) and the clock, *Slide
+    3 of 6 · step 2 of 5*, what the next click shows (the next step, else the next slide), the speaker
+    notes (`<aside class="notes">`, A− / A+), and every slide in a strip (a tap goes there; scrolls
+    sideways with a finger). Its panels are a shadow tree (`ol-presenter`) whose copies of slides are
+    the page's own elements slotted in (`data-ol-copy`, the page's styles draw them; no pointer, so
+    a touch is the panel's); the kit takes no gesture from them (`PresentKitHost.outside`). The
+    editor keeps it per browser (`ol.presenter`: on, the notes' size; `presenter` /
+    `presenterPrefs` messages, the frame keeps nothing). **Remote control**: an iPad in the presenter
+    view, Linked with the laptop that shows the slides (the same account, `presentshare.ts`), turns
+    them; what is drawn on it shows there. **Audience window** (in the presenter view, the web app):
+    the slides presented in a window of their own (`?slide=n&present=audience`, editor/permalink.ts:
+    never in the presenter view, a click for the full screen), moved onto another screen where the
+    Window Management API lets the editor; this window goes on in the presenter view — while it is
+    on (or in an audience window) leaving the full screen does not end presenting. The Layout
+    presenter's second window (S) has the same bar button.
+    **The slides follow the text while presenting**: the editor sends the presenting frame each
+    version as it sends the canvas (patches, `presentReady` / `needSource`; the server serves
+    `source` in `present` mode too), `present.ts sourceChanged` keeps the slide shown — where it is
+    now when slides came or went before it — and its step. The moves between screens carry the slide's
+    mark too (`PresentAt.sid`: its id, else a hash of its words as the source has them), so a screen
+    whose deck has a slide more before it still shows the same slide. And each screen's state says
+    the version it shows (`doc`: the text's hash and the sum of the Yjs clocks, `docStamp`) and its
+    build (`b`): a screen behind another of the account's for 5 s (it missed edits) or on an older
+    OverLyX says so over its slides, *Bring up to date* loading the page again presenting from the same
+    slide (`?present=1`). Found 7 Nov 2026: the user's iPad, linked with the laptop, presented an older
+    version of a talk (3 Nov) — before, a presenting frame showed the page as it was when it opened,
+    while a synced clone on the laptop kept changing the deck (eleven updates 13:52–14:12 UTC, its
+    steps renumbered: the same step number was another build-up on each screen). Also found then: a slide put in before
+    another from the two texts alone (`<h2>…</h2></section><section class="slide">` after a slide's
+    start tag) was patched into that slide (core `html/source.ts`: a patch closing an element it did
+    not open is no patch now, `closesOutside`). Probes: `scratch/forkc-presenter.mts`,
+    `forkc-audience.mts`, `forkc-insert.mts`.
   * **Menus, the slide master, slide numbers, skipped slides** (24 Oct 2026, the user: "improve our
     slide/layout editor … compared against typical presentation editing, slide master etc. … my main
     concern is that things are intuitive"). **Menus**: the editor hands the menu bar (and the Modern

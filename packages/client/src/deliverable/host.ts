@@ -71,6 +71,8 @@ export interface DeliverableHost {
    */
   setPresent?(state: PresentState | null): void;
   onPresent?(cb: (peers: PresenterState[]) => void): () => void;
+  /** how much of the document's history this copy has (the web app: the sum of its Yjs clocks) — a screen presenting with less missed edits (presentshare.ts staleness) */
+  docClock?(): number;
   /** the Download menu's entries (the web app: PDF, website; VS Code: print, open in the browser) */
   downloads(open: (mode: string) => string): MenuItem[];
   /** present here (a full-screen frame) — or elsewhere, returning true (VS Code: the browser) */

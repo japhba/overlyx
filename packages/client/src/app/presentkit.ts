@@ -212,9 +212,13 @@ export interface PresentKitHost {
    * Where the presentation is: the slide's index and its step. With it the drawings are kept by the
    * slide's index (else by the position text), and the same slide on every screen has the same ones.
    */
-  at?(): { slide: number; step: number };
-  /** show the slide and step another screen moved to (the bar's "Linked") */
-  goTo?(slide: number, step: number): void;
+  at?(): { slide: number; step: number; sid?: string };
+  /**
+   * show the slide and step another screen moved to (the bar's "Linked"); `sid`: that slide's mark
+   * (presentshare.ts PresentAt.sid) — where this screen's deck has it elsewhere, there. Nothing when
+   * that is where it is already.
+   */
+  goTo?(slide: number, step: number, sid?: string): void;
   /**
    * This presenter's state for the other screens presenting the document (presentshare.ts), null
    * once it ends. Absent: nothing is shared. The others' come in through `setPeers`.
@@ -222,6 +226,13 @@ export interface PresentKitHost {
   share?(state: PresentState | null): void;
   /** the bar's "Linked" switched (kept as `onFingersDraw` is) */
   onLinked?(on: boolean): void;
+  /**
+   * An event there is the presenter's own, not the slide's (the presenter view's panels around it):
+   * no tool, swipe, tap or zoom is taken from it.
+   */
+  outside?(target: EventTarget | null): boolean;
+  /** the presenter view (notes, the next slide, a timer, every slide): the bar's button and S switch it */
+  presenterView?: { on(): boolean; toggle(): void };
 }
 
 // (nothing on the slide is selected either: on an iPad a long press or a Pencil drag brought the
@@ -239,6 +250,7 @@ const UI_CSS = `:host { all: initial; }
     background: rgba(32, 33, 36, 0.84); color: #fff; font: 13px/1 Roboto, sans-serif; box-shadow: 0 2px 12px rgba(0,0,0,0.35);
     opacity: 0; transition: opacity 0.45s; pointer-events: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
   .bar.show { opacity: 1; pointer-events: auto; }
+  .bar.pinned { opacity: 1; pointer-events: auto; transition: none; box-shadow: none; }
   button { all: unset; box-sizing: border-box; min-width: 32px; height: 32px; padding: 0 9px; border-radius: 16px; display: inline-flex; align-items: center;
     justify-content: center; gap: 5px; cursor: pointer !important; color: #fff; font: inherit; white-space: nowrap; }
   button:hover { background: rgba(255, 255, 255, 0.14); }
@@ -271,6 +283,7 @@ const ICON = {
   fingers: '<svg width="16" height="16" viewBox="0 0 16 16"><path d="M6.5 9.2V3a1.1 1.1 0 0 1 2.2 0v4.6M8.7 7.2a1.1 1.1 0 0 1 2.2 0v.6M10.9 7.7a1.1 1.1 0 0 1 2.2 0v2.2c0 2.6-1.6 4.6-4.4 4.6h-.6c-1.5 0-2.5-.6-3.4-1.8L3 10.2a1.1 1.1 0 0 1 1.8-1.3l1.7 1.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/></svg>',
   fit: '<svg width="16" height="16" viewBox="0 0 16 16"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   link: '<svg width="16" height="16" viewBox="0 0 16 16"><path d="M6.8 9.2a2.6 2.6 0 0 0 3.7 0l2.3-2.3a2.6 2.6 0 0 0-3.7-3.7l-.9.9M9.2 6.8a2.6 2.6 0 0 0-3.7 0L3.2 9.1a2.6 2.6 0 0 0 3.7 3.7l.9-.9" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  presenter: '<svg width="16" height="16" viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="8.5" height="6.5" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M12.2 3h2.3M12.2 5.8h2.3M12.2 8.6h2.3M1.8 12h5.4M9.3 12h4.9M1.8 14.2h3.6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
 };
 
 type Gesture =
@@ -339,6 +352,9 @@ export class PresentKit {
   private nib: NibOpts = loadDeckInk().nib;
   private remoteG: SVGGElement;
   private linkBtn: HTMLElement;
+  private pvBtn: HTMLElement;
+  /** the bar held in one place, always shown (the presenter view's): where */
+  private pinned: { left: number; top: number } | null = null;
   /** fingers draw (and point the laser) with the tool in hand; off: only the Pencil does, fingers swipe, tap and pinch */
   private fingersDraw = false;
   /** the Pencil on the glass (its pointer), and when it last lifted */
@@ -388,6 +404,7 @@ export class PresentKit {
         <button data-k="eraser" title="Eraser (Ctrl+E)" aria-label="Eraser" aria-pressed="false">${ICON.eraser}</button>
         <button data-k="laser" title="Laser pointer (L)" aria-label="Laser pointer" aria-pressed="false"><span class="dot"></span></button>
         <button data-k="fingers" title="Fingers draw too (off: only the Apple Pencil draws; fingers swipe, tap and pinch)" aria-label="Fingers draw" aria-pressed="false" hidden>${ICON.fingers}</button>
+        <button data-k="pv" title="Presenter view — the notes, the next slide, a timer and every slide; Linked with your other screen, a remote control for it (S)" aria-label="Presenter view" aria-pressed="false" hidden>${ICON.presenter}</button>
         <button data-k="link" title="Linked — this document is presented on another of your screens too: each goes along to the slide the other shows. Off: this screen goes its own way (the drawings and the laser still show where both show the same slide)" aria-label="Linked with the other screens" aria-pressed="true" hidden>${ICON.link}<span class="n"></span></button>
         <span class="colors" hidden>${INK_COLORS.map(c => `<button class="sw" data-k="color" data-c="${c}" style="--c:${c}" title="Colour" aria-label="Colour ${c}"></button>`).join('')}</span>
         <button data-k="clear" title="Clear the drawings on this slide (E)" aria-label="Clear the drawings on this slide" hidden>${ICON.clear}</button>
@@ -409,6 +426,8 @@ export class PresentKit {
     // (only where there are fingers to draw with)
     this.fingersBtn.hidden = !(this.win.navigator.maxTouchPoints > 0);
     this.linkBtn = sr.querySelector('[data-k="link"]') as HTMLElement;
+    this.pvBtn = sr.querySelector('[data-k="pv"]') as HTMLElement;
+    this.pvBtn.hidden = !host.presenterView;
     this.zoomBtn = sr.querySelector('[data-k="zoom"]') as HTMLElement;
     this.clearBtn = sr.querySelector('[data-k="clear"]') as HTMLElement;
     this.colorsEl = sr.querySelector('.colors') as HTMLElement;
@@ -434,7 +453,7 @@ export class PresentKit {
     on('selectstart', e => { if (!(e.target as Element | null)?.closest?.('input, textarea, select')) e.preventDefault(); });
     on('wheel', e => this.wheel(e), { capture: true, passive: false });
     // Safari's trackpad pinch
-    on('gesturestart' as keyof WindowEventMap, (e: Event) => { if (this.fromUi(e)) return; e.preventDefault(); this.safari = { ...this.view }; });
+    on('gesturestart' as keyof WindowEventMap, (e: Event) => { if (this.fromUi(e) || this.outside(e)) return; e.preventDefault(); this.safari = { ...this.view }; });
     on('gesturechange' as keyof WindowEventMap, (e: Event) => {
       if (!this.safari) return;
       e.preventDefault();
@@ -461,6 +480,9 @@ export class PresentKit {
   get presenters(): number { return this.share.presenters; }
   get screens(): number { return this.share.screens; }
 
+  /** when the presentation began (this screen's start, or a linked screen of this account that began earlier) */
+  get beganAt(): number { return this.share.beganAt(); }
+
   /** the slide shown, as the drawings are kept: by its index where the presenter tells it, else by its position text */
   private slideNow(): string {
     const a = this.host.at?.();
@@ -485,6 +507,7 @@ export class PresentKit {
       return true;
     }
     if (k === 'l' || k === 'L') { this.setLaser(this.tool !== 'laser'); return true; }
+    if ((k === 's' || k === 'S') && !typing && this.host.presenterView) { this.host.presenterView.toggle(); this.markPresenter(); return true; }
     if ((k === 'e' || k === 'E') && !typing) { this.clearInk(); return true; }
     if (k === '0' && !typing && this.zoomed) { this.resetZoom(); return true; }
     if (k === '+' || k === '=') { this.zoomBy(1.25); return true; }
@@ -505,10 +528,28 @@ export class PresentKit {
     const a = this.host.at?.();
     if (!a) return;
     const was = this.share.at;
-    if (!this.placed) { this.placed = true; this.share.place(a.slide, a.step); this.publish(true); return; }
+    if (!this.placed) { this.placed = true; this.share.place(a.slide, a.step, a.sid); this.publish(true); return; }
     const f = this.following;
-    if (a.slide === was.slide && a.step === was.step && (!f || f.n === was.n)) return;
-    this.share.moved(a.slide, a.step, f);
+    if (a.slide === was.slide && a.step === was.step && (!f || f.n === was.n)) {
+      if (a.sid !== was.sid) { this.share.place(a.slide, a.step, a.sid); this.publish(true); }
+      return;
+    }
+    this.share.moved(a.slide, a.step, f, a.sid);
+    this.publish(true);
+  }
+
+  /**
+   * The deck changed under the slide shown (an edit while presenting: a slide put in or taken out
+   * before it, its steps, its words): where it is now, told the others — no move, no slide changed.
+   */
+  reindexed(): void {
+    const a = this.host.at?.();
+    if (!a || !this.placed) return;
+    const was = this.share.at;
+    if (a.slide === was.slide && a.step === was.step && a.sid === was.sid) return;
+    this.share.place(a.slide, a.step, a.sid);
+    this.refresh();
+    this.renderInk();
     this.publish(true);
   }
 
@@ -549,12 +590,43 @@ export class PresentKit {
     if (!a || !this.host.goTo || !this.placed) return;
     this.following = f;
     try {
-      if (a.slide !== f.slide || a.step !== f.step) this.host.goTo(f.slide, f.step);
+      if (a.step !== f.step || (a.sid && f.sid ? a.sid !== f.sid : a.slide !== f.slide)) { if (f.sid) this.host.goTo(f.slide, f.step, f.sid); else this.host.goTo(f.slide, f.step); }
       this.moved();
     } finally { this.following = null; }
   }
 
-  refresh(): void { this.posEl.textContent = this.host.position(); }
+  refresh(): void { this.posEl.textContent = this.host.position(); this.markPresenter(); }
+
+  private markPresenter(): void {
+    const on = !!this.host.presenterView?.on();
+    this.pvBtn.classList.toggle('on', on);
+    this.pvBtn.setAttribute('aria-pressed', String(on));
+  }
+
+  /**
+   * The bar held at `p` (window px of its top left corner) and always shown — the presenter view's,
+   * under its slide; null: back at the window's bottom edge, shown when asked for.
+   */
+  pin(p: { left: number; top: number } | null): void {
+    this.pinned = p;
+    const st = this.bar.style;
+    if (p) {
+      st.left = `${Math.round(p.left)}px`; st.top = `${Math.round(p.top)}px`; st.bottom = 'auto';
+      clearTimeout(this.idle);
+      this.bar.classList.add('show', 'pinned');
+    } else {
+      st.left = st.top = st.bottom = '';
+      this.bar.classList.remove('pinned');
+      this.hideBar();
+    }
+    this.markPresenter();
+  }
+
+  /** the bar's height on screen (the presenter view keeps room for it) */
+  get barHeight(): number { return this.bar.offsetHeight || 42; }
+
+  /** the slide was put elsewhere on the screen (the presenter view on or off): the whole of it, its drawings placed again */
+  layoutChanged(): void { this.resetZoom(); this.scheduleInk(); }
 
   setLaser(on: boolean): void {
     if (on) this.setTool('laser');
@@ -629,6 +701,7 @@ export class PresentKit {
     else if (k === 'laser') this.setLaser(this.tool !== 'laser');
     else if (k === 'fingers') this.setFingersDraw(!this.fingersDraw);
     else if (k === 'link') this.setLinked(!this.linked);
+    else if (k === 'pv') { this.host.presenterView?.toggle(); this.markPresenter(); }
     else if (k === 'pen' || k === 'marker' || k === 'eraser') this.setTool(this.tool === k ? null : k);
     else if (k === 'color' && c) {
       if (this.tool === 'marker') this.markerColor = c;
@@ -654,6 +727,7 @@ export class PresentKit {
 
   hideBar(): void {
     clearTimeout(this.idle);
+    if (this.pinned) return;
     this.bar.classList.remove('show');
   }
 
@@ -667,6 +741,9 @@ export class PresentKit {
   }
 
   private fromUi(e: Event): boolean { return e.composedPath().includes(this.ui); }
+
+  /** on the presenter's own panels (the presenter view's): not the slide's */
+  private outside(e: Event): boolean { return !!this.host.outside?.(e.target); }
 
   /** on a link, a video, a form control of the slide: the page's own (a tap there is not the bar's) */
   private onControl(e: Event): boolean {
@@ -690,7 +767,7 @@ export class PresentKit {
   }
 
   private wheel(e: WheelEvent): void {
-    if (this.fromUi(e)) return;
+    if (this.fromUi(e) || this.outside(e)) return;
     const W = this.win.innerWidth, H = this.win.innerHeight;
     if (e.ctrlKey) {
       e.preventDefault(); e.stopPropagation();
@@ -746,7 +823,7 @@ export class PresentKit {
 
   private down(e: PointerEvent): void {
     this.lastType = e.pointerType;
-    if (this.fromUi(e)) return;
+    if (this.fromUi(e) || this.outside(e)) return;
     // the hand on the glass while the Pencil writes: nothing
     if (e.pointerType === 'touch' && this.isPalm()) { this.palms.add(e.pointerId); e.preventDefault(); return; }
     if (e.pointerType === 'pen') this.penLands(e);
@@ -804,7 +881,7 @@ export class PresentKit {
     const g = this.gesture;
     const W = this.win.innerWidth, H = this.win.innerHeight;
     // the mouse brings the bar only near the bottom edge: pointing at the slide does not
-    if (e.pointerType === 'mouse' && !g && e.clientY >= H - BAR_ZONE && !this.fromUi(e)) this.showBar(IDLE_MS);
+    if (e.pointerType === 'mouse' && !g && e.clientY >= H - BAR_ZONE && !this.fromUi(e) && !this.outside(e)) this.showBar(IDLE_MS);
     if (g?.kind === 'pinch') {
       const a = this.pointers.get(g.ids[0]), b = this.pointers.get(g.ids[1]);
       if (!a || !b) return;
@@ -864,7 +941,7 @@ export class PresentKit {
       if (Math.hypot(e.clientX - g.x0, e.clientY - g.y0) > 10) g.moved = true;
       return;
     }
-    if (this.tool === 'laser' && e.pointerType === 'mouse' && !e.buttons) {
+    if (this.tool === 'laser' && e.pointerType === 'mouse' && !e.buttons && !this.outside(e)) {
       const pt = { x: e.clientX, y: e.clientY, t: performance.now() };
       this.tail.push(pt);
       if (this.tail.length > 120) this.tail.splice(0, this.tail.length - 120);
@@ -929,13 +1006,13 @@ export class PresentKit {
   }
 
   private click(e: MouseEvent): void {
-    if (this.fromUi(e)) return;
+    if (this.fromUi(e) || this.outside(e)) return;
     if (this.tool || this.zoomed || this.suppressClick) { e.preventDefault(); e.stopPropagation(); }
     this.suppressClick = false;
   }
 
   private dblclick(e: MouseEvent): void {
-    if (this.fromUi(e)) return;
+    if (this.fromUi(e) || this.outside(e)) return;
     if (this.zoomed) { e.preventDefault(); e.stopPropagation(); this.resetZoom(); }
   }
 
