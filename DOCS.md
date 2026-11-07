@@ -2683,8 +2683,14 @@ blend.
   `->` becomes →, `<-` ←, `-->` ⟶, `<--` ⟵ (and `<->` ↔, `<-->` ⟷) as the last key is typed — the
   key goes in as typing, the arrow replaces it as an undo step of its own, so ⌘Z or Backspace right
   after gives the typed characters back, and those characters then stay as typed (not converted
-  again). Not in formulas, raw TeX, code-like insets or typewriter text; slide text boxes of HTML decks
-  don't have it. The .tex file has `\textrightarrow{}` / `\textleftarrow{}` and
+  again). Not in formulas, raw TeX, code-like insets or typewriter text. The rule table is core's
+  (`core/arrows.ts`; a dash the keyboard made of `--`, iPad's smart punctuation, and `>` is ⟶ too).
+  **Text on slides, posters and web pages** has it as well (7 Nov 2026, the user: "even if undo there
+  takes back the whole word"; `deliverable/runtime/arrows.ts`, on the retyped text's input event): the
+  arrow replaces the keys in the text being retyped and reaches the page as the character with the
+  next commit; Backspace right after (no other key between) gives the keys back and they stay;
+  ⌘Z undoes the whole retyping, as for any typing on a slide. Not in code (`code`, `pre`, `kbd`,
+  `samp`) or formulas, and not while suggesting (the tracked typing stays as typed). The .tex file has `\textrightarrow{}` / `\textleftarrow{}` and
   `\ensuremath{\longrightarrow}` …, which the reader turns back into the characters
   (`ENSUREMATH_ARROWS`); markdown and HTML keep the characters.
   * *Rewrite with AI* — `⌘J` / `Ctrl+J` (⌘K is the link box, as in Google Docs): select a passage — or nothing, to write at the cursor — and describe the

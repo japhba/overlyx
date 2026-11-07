@@ -9,34 +9,16 @@
  * Formulas type in their own field and never come here; raw TeX (ERT, listings, code paragraphs),
  * code-like insets (code, URL, file name, label) and typewriter (inline code) text stay literal. The
  * .tex writer writes the arrows through LyX's unicodesymbols (\textrightarrow, \textleftarrow,
- * \ensuremath{\longrightarrow} …); markdown and HTML keep the characters.
+ * \ensuremath{\longrightarrow} …); markdown and HTML keep the characters. The rule table is core's
+ * (core/arrows.ts), shared with the text retyped on slides (deliverable/runtime/arrows.ts).
  */
 import { Plugin, PluginKey, type EditorState, type Transaction } from 'prosemirror-state';
 import { isHistoryTransaction } from 'prosemirror-history';
 import type { EditorView } from 'prosemirror-view';
 import { inRawText } from '../rawtext';
+import { arrowFor, ARROWS } from '@overlyx/core/arrows.ts';
 
-/** the text before the caret, ending with the character just typed → the arrow it makes (longest first) */
-export const ARROW_RULES: [RegExp, string][] = [
-  [/(?:⟵|←-|<--|<–)>$/, '⟷'],
-  [/(?:←|<-)>$/, '↔'],
-  [/(?:--|–)>$/, '⟶'],
-  [/->$/, '→'],
-  [/(?:←|<-)-$/, '⟵'],
-  [/<-$/, '←'],
-];
-const ARROWS = new Set(ARROW_RULES.map(([, a]) => a));
-
-/** the arrow the text before the caret makes with `typed` after it, and how many characters (the typed one included) it replaces */
-export function arrowFor(before: string, typed: string): { arrow: string; length: number } | null {
-  if (typed !== '>' && typed !== '-') return null;
-  const s = before + typed;
-  for (const [re, arrow] of ARROW_RULES) {
-    const m = re.exec(s);
-    if (m) return { arrow, length: m[0].length };
-  }
-  return null;
-}
+export { ARROW_RULES, arrowFor } from '@overlyx/core/arrows.ts';
 
 interface Range { from: number; to: number }
 /** an arrow made: `prior` the text it replaced (what ⌘Z brings back), `typed` the keys behind it (what Backspace brings back: "<--" for a ⟵ made from ← and -) */

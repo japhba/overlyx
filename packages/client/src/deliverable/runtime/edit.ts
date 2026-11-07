@@ -33,6 +33,7 @@ import { groupLayoutOf } from '../grouplayout';
 import { guard, linkTree } from './reconcile';
 import { typeset } from './math';
 import { renderCites, refreshCites } from './cite';
+import { arrowInput, arrowBackspace } from './arrows';
 import { stepOf } from '@overlyx/core/html/refs.ts';
 import { refreshView } from './view';
 import { badges, isOrdering, orderClick, stopOrdering, postSequence, stepsChanged, STEPS_CSS } from './animate';
@@ -655,7 +656,7 @@ export function exec(command: string, value?: string): void {
 function replaceTextHost(tag: string): void {
   const old = editing!;
   const src = srcOf.get(old);
-  old.removeEventListener('input', scheduleCommit);
+  old.removeEventListener('input', onTextInput);
   old.removeEventListener('beforeinput', onBeforeInput);
   old.removeEventListener('paste', pastePlain);
   const next = replaceEditingHost(old, tag);
@@ -665,7 +666,7 @@ function replaceTextHost(tag: string): void {
   selected = selected.map(el => el === old ? next : el);
   if (rotating === old) rotating = next;
   if (hoverEl === old) hoverEl = next;
-  next.addEventListener('input', scheduleCommit);
+  next.addEventListener('input', onTextInput);
   next.addEventListener('beforeinput', onBeforeInput);
   next.addEventListener('paste', pastePlain);
 }
@@ -3412,7 +3413,7 @@ function beginText(el: HTMLElement, at: { x: number; y: number } | null, selectA
     r.setStart(firstItem, 0); r.collapse(true);
     getSelection()?.removeAllRanges(); getSelection()?.addRange(r);
   } else placeCaret(el, at, selectAll);
-  el.addEventListener('input', scheduleCommit);
+  el.addEventListener('input', onTextInput);
   el.addEventListener('beforeinput', onBeforeInput);
   el.addEventListener('paste', pastePlain);
   showGhost(null);
@@ -3441,6 +3442,12 @@ function pastePlain(e: ClipboardEvent): void {
   e.preventDefault();
   e.stopPropagation();
   document.execCommand('insertText', false, text);
+}
+
+/** typing in the retyped text: -> and the like become arrows (runtime/arrows.ts), then the commit as for any typing */
+function onTextInput(e: Event): void {
+  if (editing) arrowInput(e as InputEvent, editing);
+  scheduleCommit();
 }
 
 /** while suggesting: deletions struck through and typing underlined as it happens (review.ts) */
@@ -3528,7 +3535,7 @@ export function stopText(save = true): void {
   const el = editing;
   editing = null;
   guard.editing = null;
-  el.removeEventListener('input', scheduleCommit);
+  el.removeEventListener('input', onTextInput);
   el.removeEventListener('beforeinput', onBeforeInput);
   el.removeEventListener('paste', pastePlain);
   el.removeAttribute('contenteditable');
@@ -3629,6 +3636,8 @@ function onKeyDown(e: KeyboardEvent): void {
     if (mod && !e.altKey && e.key.toLowerCase() === 'm') { e.preventDefault(); e.stopPropagation(); insertChip(editing, e.shiftKey); return; }
     // $ typed opens a formula, as in documents ($$ a displayed one, Backspace gives the $ back)
     if (e.key === '$' && !mod && !e.altKey && !inCode()) { e.preventDefault(); insertChip(editing, false, '$'); return; }
+    // Backspace right after -> became →: the typed characters back (runtime/arrows.ts)
+    if (e.key === 'Backspace' && !mod && !e.altKey && !e.shiftKey && arrowBackspace(editing)) { e.preventDefault(); scheduleCommit(); return; }
     if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !mod && !e.shiftKey && !e.altKey) {
       const c = chipBeside(e.key === 'ArrowLeft' ? 'before' : 'after');
       if (c) { e.preventDefault(); openChip(c, null, e.key === 'ArrowLeft' ? 'end' : 'start'); return; }
