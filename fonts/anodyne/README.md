@@ -1,6 +1,6 @@
 # Anodyne
 
-OverLyX's sans-serif, published on its own at https://github.com/japhba/anodyne (with a demo page,
+OverLyX's sans-serif (0.400), published on its own at https://github.com/japhba/anodyne (with a demo page,
 https://japhba.github.io/anodyne/): the interface's font, an editor face (Settings ▸ Editor ▸ Text font), a deck
 font, and a font documents can name (`\setsansfont{Anodyne}`, `\setmathfont{Anodyne}`, a markdown
 document's `sansfont:`, the toolbar's font list). SIL Open Font License 1.1 (`OFL.txt`).
@@ -28,6 +28,11 @@ needs another name. What Anodyne changes:
   and small-caps headings), old-style, proportional, tabular and lining figures (the zero stays
   slashed), case forms (not for figures and the maths-axis brackets), the Greek alternates (`ss06`,
   `ss07`), and Noto Sans Math's dotless i and j for accents (`dtls`).
+- **Formulas at Computer Modern's proportions** (0.3): TeX's MATH constants, the tall delimiters drawn
+  again the way Computer Modern's sizes grow.
+- **Maths choices** (0.4): upright integrals (`ss02`), slanted inequalities (`ss03`), compact set
+  symbols (`ss04`), vertical negation strokes (`ss05`), an oval empty set (`cv01`), a lowered bar on ℏ
+  (`cv02`), e.g. `\setmathfont{Anodyne}[StylisticSet={2,3}]`; every axis varies the maths too.
 
 Files: `web/` the variable fonts as woff2 by Unicode range with `anodyne.css` (the client imports it;
 the server serves the same files to decks and frames). `tex/`, for LuaLaTeX (the server copies them
@@ -42,13 +47,11 @@ at once more than a build may use (2.5 GB), so a build first loads each face its
 one per run (googlefonts.ts `houseFontWarmups`). With the caches, a document using all of it takes
 ~1.3 GB.
 
-Rebuild (≈15 min, ~2.8 GB a style: run it as its own unit, `systemd-run --user --collect
--p MemoryMax=3200M …`, one style per process with `--only roman` / `--only italic`, then `--install-only`;
-fontTools and brotli on `PYTHONPATH`):
+Anodyne is built in its own repository, https://github.com/japhba/anodyne (editable UFO masters,
+`make release`); this folder holds what OverLyX serves of its release. To update it, pull that
+repository and run `scripts/anodyne/install.sh <its checkout>`: it copies the web files, makes the
+TeX files and regenerates the MathJax font (`packages/client/src/fonts/@mathjax/mathjax-anodyne-font`)
+and the decks' embedded faces (`packages/core/src/html/scientific-fonts.ts`).
 
-    python3 scripts/anodyne/build.py --lisnoti <Lisnoti>/font-Lisnoti/Lisnoti-ttf \
-      --noto <dir with NotoSans[wdth,wght].ttf, NotoSans-Italic[wdth,wght].ttf, NotoSansMath-Regular.ttf> \
-      --out <scratch dir> --repo fonts/anodyne
-
-Keep the Unicode ranges of `scripts/anodyne/build.py` (`WEB_RANGES`) and
+Keep the Unicode ranges of Anodyne's `sources/build.py` (`WEB_RANGES`) and
 `packages/server/src/googlefonts.ts` (`ANODYNE_RANGES`) the same.
