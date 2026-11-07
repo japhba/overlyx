@@ -173,6 +173,24 @@ describe('textcolor inherits the surrounding mode', () => {
   });
 });
 
+describe('editor labels inside math text', () => {
+  it.each([
+    [String.raw`see \ref{eq:sample_1}`, 'lm-ref', 'eq:sample_1'],
+    [String.raw`before \unsupported{after}`, 'lm-unknown', String.raw`\unsupported`],
+    ['before % synthetic note\n after', 'lm-comment', '% synthetic note'],
+  ])('renders %s in the surrounding mode', (body, cls, label) => {
+    for (const text of [false, true]) {
+      const hull = parseFormula(`\\[${text ? `\\text{${body}}` : body}\\]`);
+      for (const atoms of [false, true]) {
+        const mml = toMathml(renderHullSource(hull, {}, { atoms }).latex, undefined, true);
+        expect(mml).toContain(`class="${cls}"`);
+        const rendered = [...mml.matchAll(/<mtext\b[^>]*>(.*?)<\/mtext>/gs)].map(m => m[1]).join('').replace(/&#xA0;/g, ' ');
+        expect(rendered).toContain(label);
+      }
+    }
+  });
+});
+
 describe('corpus (all formulas of the local LyX projects, when present)', () => {
   const dir = '/tmp/claude-0/-root-lyx/9250d901-48e6-4b48-98b5-a211e39f6f1d/scratchpad/corpus';
   it.skipIf(!existsSync(dir + '/formulas.json'))('≥ 99% of LyX-2.5-written formulas round-trip byte-exactly', () => {
