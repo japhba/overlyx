@@ -212,7 +212,7 @@ describe('the kit on a presenting surface', () => {
     pointer('pointerdown', 'pen', 300, 300, 9);
     pointer('pointermove', 'pen', 380, 330, 9);
     vi.advanceTimersByTime(50);
-    expect(shadow().querySelectorAll('g.live g.held path')).not.toHaveLength(0);
+    expect(shadow().querySelectorAll('g.mylaser path')).not.toHaveLength(0);
     pointer('pointerup', 'pen', 340, 310, 9);
     expect(kit.strokes).toHaveLength(2);
     later();

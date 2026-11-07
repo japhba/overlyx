@@ -27,6 +27,7 @@ function sealingKey(): Buffer {
   if (master) return master;
   const file = path.join(config.dataDir, 'sealing.key');
   if (!fs.existsSync(file)) {
+    fs.mkdirSync(config.dataDir, { recursive: true });
     fs.writeFileSync(file, crypto.randomBytes(32).toString('hex'), { mode: 0o600, flag: 'wx' });
     console.warn(`[sealed] made a new sealing key, ${file}: keep a copy offline — no backup holds it (DOCS.md "Secrets")`);
   }
