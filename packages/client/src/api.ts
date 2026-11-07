@@ -1,4 +1,4 @@
-import type { LayoutCheck, DocGroup, PageBreaks } from '@overlyx/core';
+import type { LayoutCheck, DocGroup, PageBreaks, ProjectSettings } from '@overlyx/core';
 import { isTextFile } from '@overlyx/core/projectKey.ts';
 import { offlineGet } from './offline-api';
 import { noteProjectFiles } from './articlekinds';
@@ -386,6 +386,9 @@ export const api = {
   deleteGitToken: (id: number) => req<{ tokens: GitToken[] }>('DELETE', `/api/git/tokens/${id}`),
   /** the signed-in account's server-side settings; administrators switch them per user */
   settings: () => req<{ settings: UserSettings }>('GET', '/api/settings'),
+  /** a project's settings (Settings ▸ Project: `.overlyx/settings.json`, app/projectsettings.ts) */
+  projectSettings: (project: string) => req<{ settings: ProjectSettings }>('GET', `/api/projects/${encodeURIComponent(project)}/settings`),
+  setProjectSettings: (project: string, settings: ProjectSettings) => req<{ settings: ProjectSettings }>('PUT', `/api/projects/${encodeURIComponent(project)}/settings`, { settings }),
   /** the account's custom keyboard shortcuts (keybindings.ts syncs them) */
   /** the user's folded sections of a document (editor/plugins/fold.ts), kept with the account */
   folds: (id: string) => req<{ folds: SavedFold[]; at: number }>('GET', `/api/docs/${encId(id)}/folds`),

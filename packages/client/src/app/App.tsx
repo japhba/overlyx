@@ -71,7 +71,8 @@ import { Tour, InterfacePrompt, tourWanted, rememberTour, type TourEnd } from '.
 import { FeedbackDialog } from './Feedback';
 import { Dialog, GraphicsDialog, TableDialog, LabelDialog, RefDialog, CiteDialog, HrefDialog, SettingsDialog, InsetDialog, HelpDialog, TexDialog, MacrosDialog, ParagraphDialog, TableSettingsDialog, DelimiterDialog, MatrixDialog, commandParams, HELP_ROWS, AiRepairDialog, ChildDocDialog, DialogHost, uiPrompt, uiConfirm, uiAlert } from './Dialogs';
 import { promptNewFile } from './newfile';
-import { SettingsPanel, settingsSearchEntries, documentFontEntry, type SettingsSection } from './Settings';
+import { SettingsPanel, settingsSearchEntries, documentFontEntry, settingsArg } from './Settings';
+import { setActiveProject } from '../projectsettings';
 import { clearLocalData } from './localData';
 import { createEditor, moveLocalCopies, type EditorHandle, type SaveState } from '../editor/editor';
 import { refreshMacros } from '../editor/macrodefs';
@@ -751,6 +752,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   useDocumentViewportZoom(scrollRef, docId);
   // Settings ▸ Fonts ▸ "As in the document" follows the document's roman font
   useEffect(() => { setDocumentFonts(headerLines); setDocumentParagraphs(headerLines); setDocumentHeadings(headerLines); setDocumentNumbering(headerLines); setLayoutHeader(headerLines); }, [headerLines]);
+  // the open document's project: its settings apply over this person's (Settings ▸ Project)
+  useEffect(() => { setActiveProject(textId && !isE2eDocId(textId) ? projectOfDoc(textId) || null : null); }, [textId]);
   // Ctrl/Cmd +/- zoom the document text, never the browser chrome — wherever the focus is (formula
   // fields, panels), unless a pane that zooms itself was pressed on last (the PDF, app/zoomkeys.ts).
   // Ctrl+0 is a paragraph style now (Part, like LyX's Alt+P 0); reset via the status bar.
@@ -1780,7 +1783,14 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     // dialogs that do not need an editor (start screen, text files)
     if (dialog.name === 'feedback') return <FeedbackDialog docId={docId} onClose={() => { setDialog(null); view?.focus(); }} />;
     if (dialog.name === 'help') return <HelpDialog onClose={() => { setDialog(null); view?.focus(); }} />;
-    if (dialog.name === 'preferences') return <SettingsPanel ai={ai} user={user!} initial={dialog.arg as SettingsSection | undefined} onClose={() => { setDialog(null); view?.focus(); }} />;
+    if (dialog.name === 'preferences') {
+      // (the open document's project and the document itself: their tabs — Settings' scopes)
+      const settingsProject = textId && !isE2eDocId(textId) ? projectOfDoc(textId) || null : null;
+      const settingsDoc = view && docId && isLyxDoc && !isTextTab && !isPdfTab && !isHtmlTab && !isBoardTab && !viewOnly
+        ? { docId, headerLines, view, markdown: isMarkdownDoc(docId), openSettings: () => setDialog({ name: isMarkdownDoc(docId) ? 'mdsettings' : 'settings' }) }
+        : null;
+      return <SettingsPanel ai={ai} user={user!} {...settingsArg(dialog.arg)} project={settingsProject} projectReadOnly={viewOnly} document={settingsDoc} onClose={() => { setDialog(null); view?.focus(); }} />;
+    }
     if (!view || !docId) return null;
     const close = () => { setDialog(null); view.focus(); };
     const project = projectOfDoc(viewDocId(view)) || projectOfDoc(docId);

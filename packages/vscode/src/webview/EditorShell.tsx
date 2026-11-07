@@ -29,7 +29,7 @@ import type { PdfTarget } from '@client/app/PdfViewer';
 import { SvgEditorHost } from '@client/app/SvgEditor';
 import { ToolbarDock } from '@client/app/tbdock';
 import { ContextBars, contextBars } from '@client/app/ctxdock';
-import { SettingsPanel, settingsSearchEntries, documentFontEntry, type SettingsSection } from '@client/app/Settings';
+import { SettingsPanel, settingsSearchEntries, documentFontEntry, settingsArg, type SettingsSection } from '@client/app/Settings';
 import { DOCUMENT_FONT_ARG } from '@client/app/FontPicker';
 import { HelpDialog, HELP_ROWS, DialogHost, uiPrompt } from '@client/app/Dialogs';
 import { Ruler, DEFAULT_WIDTH, MIN_WIDTH, MAX_WIDTH, NOTE_SCALE_DEFAULT } from '@client/app/Ruler';
@@ -86,7 +86,7 @@ type DialogState = { name: string; arg?: unknown } | null;
 
 const stored = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
 /** Settings in VS Code: the editor's — no Appearance (VS Code's theme; the dark-theme switches sit in Editor), AI or account; Drawing & pen is the margins' pen of this editor */
-const VSCODE_SETTINGS: SettingsSection[] = ['editor', 'fonts', 'drawing', 'keyboard'];
+const VSCODE_SETTINGS: SettingsSection[] = ['editor', 'fonts', 'styles', 'drawing', 'keyboard'];
 
 export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'init' }> }) {
   const docId = init.docId;
@@ -754,7 +754,9 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
     const project = projectOfDoc(targetId);
     const docDir = view.dom.dataset.docDir ?? editorContext.docDir;
     switch (dialog.name) {
-      case 'preferences': return <SettingsPanel ai={null} user={editorContext.user!} sections={VSCODE_SETTINGS} initial={dialog.arg as SettingsSection | undefined} onClose={close} />;
+      // (User and Document: the workspace's own settings are VS Code's)
+      case 'preferences': return <SettingsPanel ai={null} user={editorContext.user!} sections={VSCODE_SETTINGS} {...settingsArg(dialog.arg)} onClose={close}
+        document={{ docId: targetId, headerLines: docHeaders(targetId), view, markdown: isMarkdownDoc(targetId), onSaved: () => { void api.header(targetId).then(h => updateHeader(targetId, h.headerLines)); }, openSettings: () => setDialog({ name: isMarkdownDoc(targetId) ? 'mdsettings' : 'settings' }) }} />;
       case 'help': return <HelpDialog onClose={close} />;
       case 'stats': return <StatsDialog view={view} onClose={close} />;
       case 'graphics': return <GraphicsDialog meta={targetMeta} project={project} docDir={docDir} onClose={close} onInsert={(f: string, o: any) => run(C.insertGraphics(f, o))} />;

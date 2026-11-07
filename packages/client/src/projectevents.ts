@@ -1,13 +1,14 @@
 /**
  * Server-sent events of a project (GET /api/projects/:project/events): the file list changed on
  * disk ({ kind: 'files' }) or a graphics file was written ({ kind: 'graphics', path, v } — `path`
- * relative to the project, `v` the file's mtime). One EventSource per project, shared by the file
+ * relative to the project, `v` the file's mtime), or its settings changed ({ kind: 'settings' }:
+ * app/projectsettings.ts). One EventSource per project, shared by the file
  * browser and every graphics inset of the open documents; it is closed a moment after the last
  * subscriber left (node views come and go while a document re-renders).
  */
 import { API_BASE } from './api';
 
-export type ProjectEvent = { kind: 'files' } | { kind: 'graphics'; path: string; v: number };
+export type ProjectEvent = { kind: 'files' } | { kind: 'graphics'; path: string; v: number } | { kind: 'settings' };
 type Listener = (ev: ProjectEvent) => void;
 
 const streams = new Map<string, { es: EventSource | null; subs: Set<Listener>; closeTimer?: ReturnType<typeof setTimeout> }>();

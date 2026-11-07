@@ -1830,16 +1830,46 @@ blend.
   Appearance ▸ Dark theme* (the editor section in VS Code, which has no Appearance). e2e tests switch with `pickTheme()` (e2e/helpers.ts). Text and formulas are white on a near-black page; everything in
   `packages/client/src/styles.css` goes through the theme tokens at the top of the file (light values
   on `:root`, dark ones on `html[data-theme="dark"]`, set by `app/theme.ts`).
-* **Settings** (`app/Settings.tsx`, regrouped 7 Nov 2026 so that each thing has one place): Editor
-  (spelling, quick menu, math keyboard, automatic PDF builds, new documents' paragraph separation,
-  Zotero) · Fonts (the editor's text and math font, My fonts) · Drawing & pen (`PenSettings`, the
-  pen of slides, boards and margins) · Keyboard (shortcuts, tips, LyX's keys) · AI assistance ·
-  Appearance · Privacy · Account · Administration (administrators: token re-copy per account,
-  backups, mail and reports). One height for every section; the section list stays while the content
-  scrolls. *Tools ▸ Settings…* is in every editor and on the start screen (decks, boards and text files
-  have a Tools menu with just that), besides the avatar menu; the quick menus end in their place in
-  Settings (◑ ▸ Appearance settings…, the ▾ beside View PDF ▸ PDF settings…, Draw's pen ▸
-  Settings…). VS Code shows Editor, Fonts, Drawing & pen and Keyboard (`VSCODE_SETTINGS`).
+* **Settings** (`app/Settings.tsx`, regrouped 7 Nov 2026 so that each thing has one place; scopes and
+  the large layout the same day): Editor (spelling, quick menu, math keyboard, automatic PDF builds,
+  new documents' paragraph separation, Zotero) · Fonts (the editor's text and math font, My fonts) ·
+  Text styles (Title, Normal text, Quote, the headings) · Drawing & pen (`PenSettings`, the pen of
+  slides, boards and margins) · Keyboard (shortcuts, tips, LyX's keys) · AI assistance · Appearance ·
+  Privacy · Account · Administration (administrators: token re-copy per account, backups, mail and
+  reports). The dialog takes most of the window (at most 1240 × 940): the sections at the left stay
+  while the page scrolls; each page is a title, group headings and rows — a setting's name and what it
+  does at the left, its control (switches, selects, choices) at the right, one column on narrow screens
+  (phones: the scopes and sections are scrolling rows). *Tools ▸ Settings…* is in every editor and on
+  the start screen (decks, boards and text files have a Tools menu with just that), besides the avatar
+  menu; the quick menus end in their place in Settings (◑ ▸ Appearance settings…, the ▾ beside View
+  PDF ▸ PDF settings…, Draw's pen ▸ Settings…). VS Code shows Editor, Fonts, Text styles, Drawing & pen
+  and Keyboard (`VSCODE_SETTINGS`) and the Document tab.
+* **Settings' scopes, as VS Code's** (7 Nov 2026): tabs along the top — **User** (yours, every project
+  and document: this browser's `prefs.ts`, a few with the account), **Project** (everyone's in the open
+  document's project: `.overlyx/settings.json` in the project — in its git history, hidden from the
+  file tree like every dot folder; the project's viewers see it read-only) and **Document** (the open
+  document's own, in its header: the PDF and everyone's editor follow it). The more specific wins:
+  Default < User < Project < Document. A setting that more than one scope can set says where the value
+  shown comes from (*Set here* with a bar at its left and ↺ to inherit again, *from User*, *Default*)
+  and, in a less specific tab, what overrides it ("example-paper sets Off for everyone in it — its
+  documents follow that"; "The document open has a font of its own"); the Project tab counts its
+  settings and dots the sections that have some. What a project may set (core `projectsettings.ts`,
+  checked on read and write — a hand-written or pushed file gives only valid settings): spell checking,
+  autocorrect, automatic builds and their delay (`prefs.ts PROJECT_PREF_KEYS`, laid over the person's
+  own by `setProjectPrefs`: `getPrefs()` is what applies, `getUserPrefs()` the person's), the editor's
+  text and math font, text styles, new documents' paragraph separation (the server's new-document
+  route and MCP `create_document` take the project's over the account's). The rest — theme, keys, AI,
+  privacy, account — is each person's (User only). The Document tab has the document's Text styles
+  (the Text styles panel's document scope in the page, `embedded`) and Paragraphs (its paragraph
+  separation, and a way to Document ▸ Settings…). `client/src/projectsettings.ts` loads the open
+  project's settings (`setActiveProject`, from App when the document changes; not in VS Code, whose
+  workspace settings are its own), follows the project's events (`{"kind":"settings"}`, sent by
+  `GET/PUT /api/projects/:project/settings`, server `projectsettings.ts`) and saves changes 300 ms
+  later. End-to-end encrypted projects have no project settings (the routes refuse). Behaviour change:
+  a document's own text styles and font now win over the person's ("Only my editor" used to win); a
+  document that keeps LaTeX's (Computer Modern, no styles) shows the project's or the person's
+  (`fonts/editorfont.ts documentSetsFont`, `editor/paragraphsep.ts`). `tests/screenstyles.test.ts`;
+  `scratch/settings-scopes.mts` screenshots the tabs against an isolated instance.
 * **Fonts, for the editor and for the PDF separately** (like LyX's screen fonts and document fonts;
   catalogue in `client/src/fonts/catalog.ts`). *Settings ▸ Fonts* (per browser, both shells) has two
   choices. *Text font* (`prefs.editorFont`): Computer Modern (bundled CMU Serif, the default), the text
@@ -4233,12 +4263,15 @@ in the preamble; editor = PDF ⊕ my editor:
   the document keeps those values, `removeStatements` takes them out of the preamble (a
   `\usepackage[onehalfspacing]{setspace}` keeps its package); the panel offers *Undo*. A markdown
   header carries header-includes as `\overlyx_includes` for the editor.
-* **My editor** (the panel's *Only my editor*): `prefs.screenStyles` (every document, this browser),
-  normal text's font `prefs.editorFont` (Settings ▸ Fonts ▸ Text font; `gf:Family|axes|features`
-  for a Google font). Never the PDF, never another person's editor; the panel marks such settings
-  *Mine* and says in the document's view what your editor shows instead. Since 17 Oct 2026 the
-  editor's text font follows the document unless chosen (`editorFont` 'document' by default; a
-  stored 'cm', the old default, not chosen is dropped).
+* **My editor** (the panel's *Only my editor*, Settings ▸ User ▸ Text styles): `prefs.screenStyles`
+  (every document, this browser), normal text's font `prefs.editorFont` (Settings ▸ Fonts ▸ Text font;
+  `gf:Family|axes|features` for a Google font). Never the PDF, never another person's editor; the
+  panel marks such settings *Mine*. Since 7 Nov 2026 they are Settings' User scope, under a project's
+  (`.overlyx/settings.json` `textStyles`, `editorFont`) and under the document's own, which wins (core
+  `cascadeStyles`: editor = defaults ⊕ User ⊕ Project ⊕ PDF) — the panel says in the document's view
+  what your editor shows where the document sets nothing, and in yours where the document's own wins.
+  Since 17 Oct 2026 the editor's text font follows the document unless chosen (`editorFont`
+  'document' by default; a stored 'cm', the old default, not chosen is dropped).
 
 The editor (`editor/paragraphsep.ts editorStyleLayers`, `stylesCss`): headings, title, quotes as
 before; the body's weight, axes / features, colour and line spacing (`--ol-line-stretch`, the editor's

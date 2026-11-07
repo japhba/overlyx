@@ -64,6 +64,7 @@ import { renderPages, type DeliverableReport } from './render.ts';
 import { listProjects, projectDir, resolveProjectPath, assertWritableRelPath, isDocumentFile, newDocumentText, newMarkdownText, findMaster } from './projects.ts';
 import { isMarkdownPath } from '@overlyx/core/md/index.ts';
 import { parseDocumentText, parseFragmentText, withDocumentSettings, NO_INDENT_SETTINGS } from './texdoc.ts';
+import { readProjectSettings } from './projectsettings.ts';
 import { userSettings } from './userSettings.ts';
 import { touchProject, repoInfo, restoreProject, commitProject } from './git.ts';
 import { buildIncluding, buildErrors, lastBuild, currentJob } from './export.ts';
@@ -474,7 +475,7 @@ function createDocument(project: string, userId: number, accountName: string, re
   if (fs.existsSync(abs)) throw new Error('file exists — write_document replaces an existing document');
   fs.mkdirSync(nodePath.dirname(abs), { recursive: true });
   let text = isMarkdownPath(rel) ? newMarkdownText(title) : article ? newArticleText({ title, author: accountName }) : newDocumentText({ title, author: accountName });
-  if (!isMarkdownPath(rel) && !article && userSettings(userId).paragraphSkip) text = withDocumentSettings(text, project, rel, NO_INDENT_SETTINGS);
+  if (!isMarkdownPath(rel) && !article && (readProjectSettings(project).paragraphSkip ?? userSettings(userId).paragraphSkip)) text = withDocumentSettings(text, project, rel, NO_INDENT_SETTINGS);
   fs.writeFileSync(abs, text, 'utf8');
   touchProject(project, userId);
   return { ok: true, path: rel };

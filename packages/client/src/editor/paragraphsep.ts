@@ -6,13 +6,15 @@
  * next to setDocumentFonts (tests/parity.test.ts) — and its text styles (setDocumentHeadings).
  */
 import {
-  HEADING_LEVELS, TEXT_TYPES, TYPE_LAYOUTS, SIZE_EM, FAMILY_FONTS, headingDisplay, styleLayers, pdfStyles, mergeStyles, bodyDefaults, parseFace, faceCss,
+  HEADING_LEVELS, TEXT_TYPES, TYPE_LAYOUTS, SIZE_EM, FAMILY_FONTS, headingDisplay, styleLayers, pdfStyles, bodyDefaults, parseFace, faceCss,
   type HeadingLevel, type TextStyle, type TextStyles, type TextType, type TexLayer,
-  resolveScreenStyles, type ScreenStyles,
+  cascadeStyles, type ScreenStyles,
 } from '@overlyx/core';
-import { faceForFontName, FOLLOW_DOCUMENT, GOOGLE_FACE } from '../fonts/catalog';
+import { faceForFontName, GOOGLE_FACE } from '../fonts/catalog';
 import { loadGoogleFont } from '../fonts/googlefont';
-import { getPrefs, subscribePrefs } from '../prefs';
+import { documentSetsFont } from '../fonts/editorfont';
+import { getPrefs, getUserPrefs, subscribePrefs } from '../prefs';
+import { activeProjectStyles, subscribeActiveProject } from '../projectsettings';
 
 const SKIPS = new Set(['smallskip', 'medskip', 'bigskip', 'halfline', 'fullline']);
 
@@ -34,10 +36,11 @@ export function setDocumentParagraphs(headerLines: readonly string[]): void {
 /* ------------------------------------------------------------------ text styles */
 
 /**
- * The text styles as the editor draws them (core textstyles.ts): the PDF's — the document's
- * settings (`\overlyx_styles`, a markdown document's front matter, a .tex document's settings) under
- * what the preamble's own LaTeX sets — and over them the person's own for this editor
- * (prefs.screenStyles, prefs.editorFont: Text styles ▸ My editor). Font, size, weight, shape, small
+ * The text styles as the editor draws them (core textstyles.ts cascadeStyles), in Settings' scopes:
+ * the person's own (User: prefs.screenStyles, prefs.editorFont), the open project's (Project:
+ * projectsettings.ts) over them, and over both the PDF's — the document's settings
+ * (`\overlyx_styles`, a markdown document's front matter, a .tex document's settings) under what the
+ * preamble's own LaTeX sets. Font, size, weight, shape, small
  * caps / capitals, colour, alignment, a rule, the space around, a heading that runs into the paragraph
  * after it (inline, the space above it on the paragraph before, a block pseudo-element ending the
  * line), the body's line spacing (--ol-line-stretch), justification (html[data-justify]). One <style>
@@ -129,27 +132,27 @@ export function stylesCss(styles: TextStyles, bodyFont?: string | null): string 
   return out.join('\n');
 }
 
-/** the layers the editor draws: the document's, its LaTeX's, the PDF's (both), this editor's own, and what the editor shows */
-export interface EditorStyleLayers { document: TextStyles; tex: TexLayer; pdf: TextStyles; screen: TextStyles; editor: TextStyles; markdown: boolean }
+/** the layers the editor draws: the document's, its LaTeX's, the PDF's (both), the person's and the project's trees, and what the editor shows */
+export interface EditorStyleLayers { document: TextStyles; tex: TexLayer; pdf: TextStyles; user: ScreenStyles; project: ScreenStyles; editor: TextStyles; markdown: boolean }
 
 let header: readonly string[] = [];
-/** the style editor's changes, drawn before they are saved (app/TextStyles.tsx) */
-let preview: { document?: TextStyles; tex?: TexLayer; screen?: ScreenStyles } | null = null;
+/** the style editors' changes, drawn before they are saved (app/TextStyles.tsx) */
+let preview: { document?: TextStyles; tex?: TexLayer; user?: ScreenStyles } | null = null;
 
 export function editorStyleLayers(headerLines: readonly string[] = header): EditorStyleLayers {
   const l = styleLayers(headerLines);
   const document = preview?.document ?? l.document, tex = preview?.tex ?? l.tex;
   const pdf = preview ? pdfStyles(document, tex) : l.pdf;
-  // (the editor layer's tree: heading levels with what All headings sets: core resolveScreenStyles)
-  const screen = resolveScreenStyles(preview?.screen ?? getPrefs().screenStyles ?? {});
-  return { document, tex, pdf, screen, editor: mergeStyles(pdf, screen), markdown: l.markdown };
+  const user = preview?.user ?? getUserPrefs().screenStyles ?? {}, project = activeProjectStyles();
+  return { document, tex, pdf, user, project, editor: cascadeStyles({ user, project, document: pdf }), markdown: l.markdown };
 }
 
-/** the body's font by name the editor draws (its axes and features): this editor's own, else the PDF's */
+/** the body's font by name the editor draws (its axes and features): the document's, else (when it keeps LaTeX's) the project's or the person's text font */
 function drawnBodyFont(layers: EditorStyleLayers): string | null {
-  const own = getPrefs().editorFont;
-  if (own && own !== FOLLOW_DOCUMENT) return own.startsWith(GOOGLE_FACE) ? own.slice(GOOGLE_FACE.length) : null;
-  return layers.pdf.body?.font ?? null;
+  if (layers.pdf.body?.font) return layers.pdf.body.font;
+  if (documentSetsFont()) return null;
+  const font = getPrefs().editorFont;
+  return font.startsWith(GOOGLE_FACE) ? font.slice(GOOGLE_FACE.length) : null;
 }
 
 function render(): void {
@@ -172,9 +175,10 @@ export function setDocumentHeadings(headerLines: readonly string[]): void {
 }
 
 /** the style editor's changes, drawn at once (null: what the document and the preferences say) */
-export function previewTextStyles(p: { document?: TextStyles; tex?: TexLayer; screen?: ScreenStyles } | null): void {
+export function previewTextStyles(p: { document?: TextStyles; tex?: TexLayer; user?: ScreenStyles } | null): void {
   preview = p;
   render();
 }
 
 subscribePrefs(() => render());
+subscribeActiveProject(() => render());

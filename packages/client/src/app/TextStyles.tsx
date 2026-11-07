@@ -14,7 +14,9 @@
  *                    (`overlyx_styles` — the managed block's LaTeX — and paperfontsize / spacing /
  *                    justification / fonts). The PDF and everyone's editor follow them.
  *   Only my editor   this person's own (prefs.screenStyles; Normal text's font is prefs.editorFont):
- *                    every document they open is drawn so, the PDF never.
+ *                    every document they open is drawn so where the document does not set it — the
+ *                    document's own wins (Settings' scopes, core textstyles.ts) — the PDF never.
+ * Settings ▸ Document ▸ Text styles shows this panel's document scope in place (`embedded`).
  * Every setting says where what it shows comes from: LaTeX's default, the document, LaTeX in the
  * preamble (header-includes, a .tex preamble: it has the last word in the PDF), or this editor alone.
  * Setting in the document what the preamble's LaTeX sets replaces that LaTeX — the values it set are
@@ -24,9 +26,9 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { EditorView } from 'prosemirror-view';
 import {
   TEXT_TYPES, NAMED_SIZES, SIZE_EM, TYPE_DEFAULTS, FAMILY_FONTS, ONEHALF_STRETCH, DOUBLE_STRETCH, WEIGHT_LABELS,
-  styleLayers, readTexStyles, settingsOverTex, managedSettings, pdfStyles, mergeStyles, takeOver, removeStatements, headerPreamble, bodyDefaults, spacingValue,
+  styleLayers, readTexStyles, settingsOverTex, managedSettings, pdfStyles, cascadeStyles, resolveScreenStyles, takeOver, removeStatements, headerPreamble, bodyDefaults, spacingValue,
   stylesJson, parseFace, faceValue, isHeading, typeOfLayout, TYPE_LAYOUTS,
-  type TextStyle, type TextStyles, type TextType, type StyleKey, type TexLayer, type TexStatement, type FontFace,
+  type TextStyle, type TextStyles, type TextType, type StyleKey, type TexLayer, type TexStatement, type FontFace, type ScreenStyles,
 } from '@overlyx/core';
 import { MD_FONTS } from '@overlyx/core/md/typesetting.ts';
 import { api } from '../api';
@@ -34,7 +36,8 @@ import { FontChooser, FacePanel, documentFaces, fontInfo, editorFontSections, ty
 import { cursorMarks } from './toolbars';
 import { previewTextStyles } from '../editor/paragraphsep';
 import { loadGoogleFont } from '../fonts/googlefont';
-import { getPrefs, setPref, subscribePrefs } from '../prefs';
+import { getUserPrefs, setPref, subscribePrefs } from '../prefs';
+import { activeProjectStyles, subscribeActiveProject } from '../projectsettings';
 import { DOCUMENT_FONT_SETS, FOLLOW_DOCUMENT, GOOGLE_FACE, editorFace, matchFontSet, fontSetValues, fontValues, type DocumentFontSet } from '../fonts/catalog';
 import { styleLabel } from './stylenames';
 
@@ -120,21 +123,27 @@ export interface TextStylesPanelProps {
   onClose: () => void;
   /** after a change was saved (a shell without live settings reads the header again: VS Code) */
   onSaved?: () => void;
+  /** in Settings ▸ Document: the document's scope only, in the page (no head, no Escape of its own) */
+  embedded?: boolean;
 }
 
-export function TextStylesPanel({ docId, headerLines, view, markdown, layout, scope: initialScope, onClose, onSaved }: TextStylesPanelProps) {
+export function TextStylesPanel({ docId, headerLines, view, markdown, layout, scope: initialScope, onClose, onSaved, embedded = false }: TextStylesPanelProps) {
   const cursorLayout = view ? (view.state.selection.$from.parent.attrs.layout as string | undefined) : undefined;
   const [type, setType] = useState<TextType>(typeOfLayout(layout ?? cursorLayout ?? '') ?? 'section');
-  const [scope, setScopeState] = useState<Scope>(() => { if (initialScope) return initialScope; try { return localStorage.getItem(SCOPE_KEY) === 'screen' ? 'screen' : 'document'; } catch { return 'document'; } });
+  const [chosenScope, setScopeState] = useState<Scope>(() => { if (initialScope) return initialScope; try { return localStorage.getItem(SCOPE_KEY) === 'screen' ? 'screen' : 'document'; } catch { return 'document'; } });
+  const scope: Scope = embedded ? 'document' : chosenScope;
   const setScope = (s: Scope) => { setScopeState(s); try { localStorage.setItem(SCOPE_KEY, s); } catch { /* private window */ } };
 
   // the document's layers as edited here (its header catches up once they are saved)
   const layers = useMemo(() => styleLayers(headerLines), [headerLines]);
   const [doc, setDoc] = useState<TextStyles>(layers.document);
   const [pre, setPre] = useState(() => headerPreamble(headerLines));
-  const [screen, setScreen] = useState<TextStyles>(() => getPrefs().screenStyles ?? {});
-  const [ownFont, setOwnFont] = useState(() => getPrefs().editorFont);
-  useEffect(() => subscribePrefs(p => { setScreen(p.screenStyles ?? {}); setOwnFont(p.editorFont); }), []);
+  const [screen, setScreen] = useState<ScreenStyles>(() => getUserPrefs().screenStyles ?? {});
+  const [ownFont, setOwnFont] = useState(() => getUserPrefs().editorFont);
+  useEffect(() => subscribePrefs(() => { const p = getUserPrefs(); setScreen(p.screenStyles ?? {}); setOwnFont(p.editorFont); }), []);
+  // (the open project's styles: between this person's and the document's)
+  const [project, setProject] = useState(activeProjectStyles);
+  useEffect(() => subscribeActiveProject(() => setProject(activeProjectStyles())), []);
   const timer = useRef<ReturnType<typeof setTimeout>>();
   const saving = useRef(0);
   const latest = useRef({ doc, pre });
@@ -147,15 +156,18 @@ export function TextStylesPanel({ docId, headerLines, view, markdown, layout, sc
   }, [headerLines]);
   const tex = useMemo<TexLayer>(() => settingsOverTex(readTexStyles(pre), managedSettings(headerLines)), [pre, headerLines]);
   const pdf = useMemo(() => pdfStyles(doc, tex), [doc, tex]);
-  const editor = useMemo(() => mergeStyles(pdf, screen), [pdf, screen]);
-  useEffect(() => { previewTextStyles({ document: doc, tex, screen }); }, [doc, tex, screen]);
+  const editor = useMemo(() => cascadeStyles({ user: screen, project, document: pdf }), [pdf, screen, project]);
+  /** what this person's and the project's styles give where the document sets nothing */
+  const below = useMemo(() => cascadeStyles({ user: screen, project }), [screen, project]);
+  useEffect(() => { previewTextStyles({ document: doc, tex, user: screen }); }, [doc, tex, screen]);
 
   const base = useMemo(() => { const v = Number(headerValue(headerLines, 'paperfontsize')); return v > 0 ? v : 10; }, [headerLines]);
   useEffect(() => {
+    if (embedded) return;
     const k = (e: KeyboardEvent) => { if (e.key === 'Escape' && !(e.target as HTMLElement | null)?.closest?.('.ff-pop')) { e.preventDefault(); onClose(); } };
     document.addEventListener('keydown', k);
     return () => document.removeEventListener('keydown', k);
-  }, [onClose]);
+  }, [onClose, embedded]);
 
   /* -------------------------------------------------------------- saving the document's */
 
@@ -338,22 +350,25 @@ export function TextStylesPanel({ docId, headerLines, view, markdown, layout, sc
   const val = <K extends StyleKey>(k: K): TextStyle[K] => (shown[k] ?? dflt[k]) as TextStyle[K];
   const texOf = tex[type];
   const ownBodyFont = type === 'body' && ownFont !== FOLLOW_DOCUMENT;
+  // (the document's own wins over this editor's: Settings' scopes)
   const originOf = (k: StyleKey): Origin => {
-    if (scope === 'screen' && (screen[type]?.[k] !== undefined || (k === 'font' && ownBodyFont))) return 'screen';
     if (texOf?.keys.includes(k)) return 'latex';
-    return doc[type]?.[k] !== undefined ? 'document' : 'default';
+    if (doc[type]?.[k] !== undefined) return 'document';
+    if (scope === 'screen' && (screen[type]?.[k] !== undefined || (k === 'font' && ownBodyFont))) return 'screen';
+    return 'default';
   };
-  /** in the document's view: what this editor alone shows instead */
-  const ownOf = (k: StyleKey): string | null => {
-    if (scope !== 'document') return null;
-    if (type === 'body' && k === 'font') return ownBodyFont ? editorFace(ownFont).label : null;
-    const v = screen[type]?.[k];
+  /** in the document's view: what this editor shows instead where the document keeps the default; in this editor's: what it shows of its own in vain */
+  const ownOf = (k: StyleKey): { text: string; shown: boolean } | null => {
+    const docSets = !!texOf?.keys.includes(k) || doc[type]?.[k] !== undefined;
+    if (scope === 'screen' && !docSets) return null;
+    if (type === 'body' && k === 'font') return ownBodyFont ? { text: editorFace(ownFont).label, shown: !docSets } : null;
+    const v = (scope === 'screen' ? resolveScreenStyles(screen) : below)[type]?.[k];
     if (v === undefined) return null;
-    return k === 'weight' ? weightLabel(v as number) : k === 'lineSpacing' ? `×${v}` : k === 'font' ? fontLabel(v as string) : String(v);
+    return { text: k === 'weight' ? weightLabel(v as number) : k === 'lineSpacing' ? `×${v}` : k === 'font' ? fontLabel(v as string) : String(v), shown: !docSets };
   };
   const dropOwn = (k: StyleKey) => {
     if (type === 'body' && k === 'font') { setPref('editorFont', FOLLOW_DOCUMENT); return; }
-    const next: TextStyles = { ...screen, [type]: { ...(screen[type] ?? {}) } };
+    const next: ScreenStyles = { ...screen, [type]: { ...(screen[type] ?? {}) } };
     delete next[type]![k];
     if (!Object.keys(next[type]!).length) delete next[type];
     setPref('screenStyles', next);
@@ -373,7 +388,9 @@ export function TextStylesPanel({ docId, headerLines, view, markdown, layout, sc
         </div>
         <div class="ts-ctl">
           {control}
-          {own !== null && <div class="ts-own">Your editor shows {own} <button type="button" class="ts-reset" title="Show the document’s in your editor too" onClick={() => dropOwn(k!)}>↺</button></div>}
+          {own !== null && (own.shown
+            ? <div class="ts-own">Your editor shows {own.text} (yours or the project’s){scope === 'document' && !embedded && screen[type]?.[k!] !== undefined && <button type="button" class="ts-reset" title="Show the document’s in your editor too" onClick={() => dropOwn(k!)}>↺</button>}</div>
+            : <div class="ts-own" data-ts-overridden>{scope === 'screen' ? `The document sets its own, which wins over yours (${own.text}).` : `Overrides ${own.text} (yours or the project’s).`}</div>)}
         </div>
       </div>
     );
@@ -439,15 +456,15 @@ export function TextStylesPanel({ docId, headerLines, view, markdown, layout, sc
   useEffect(() => setShowTex(false), [type]);
 
   return (
-    <div class="ts-panel" role="dialog" aria-label="Text styles" data-text-styles data-scope={scope}>
-      <div class="ts-head"><b>Text styles</b><button type="button" class="ts-close" title="Close (Esc)" onClick={onClose}>✕</button></div>
-      <div class="ts-scope">
+    <div class={'ts-panel' + (embedded ? ' ts-embedded' : '')} role={embedded ? 'group' : 'dialog'} aria-label="Text styles" data-text-styles data-scope={scope}>
+      {!embedded && <div class="ts-head"><b>Text styles</b><button type="button" class="ts-close" title="Close (Esc)" onClick={onClose}>✕</button></div>}
+      {!embedded && <div class="ts-scope">
         <span class="ts-seg ts-scope-seg">
           <button type="button" class={scope === 'document' ? 'on' : ''} data-ts-scope="document" onClick={() => setScope('document')}>Document &amp; PDF</button>
           <button type="button" class={scope === 'screen' ? 'on' : ''} data-ts-scope="screen" onClick={() => setScope('screen')}>Only my editor</button>
         </span>
-        <div class="ts-scope-say">{scope === 'document' ? 'Saved in the document: its PDF and everyone’s editor show it.' : 'How your editor shows every document — the PDF and other people’s editors stay as they are.'}</div>
-      </div>
+        <div class="ts-scope-say">{scope === 'document' ? 'Saved in the document: its PDF and everyone’s editor show it.' : 'How your editor shows what a document does not set itself — the PDF and other people’s editors stay as they are.'}</div>
+      </div>}
       <div class="ts-types" role="tablist">
         {TEXT_TYPES.map(t => {
           const s = editor[t] ?? {};
@@ -464,7 +481,7 @@ export function TextStylesPanel({ docId, headerLines, view, markdown, layout, sc
               }}>
               <span class="ts-type-name">{typeName(t, markdown)}</span>
               {tex[t] && <span class="ts-dot ts-dot-tex" title="LaTeX in the preamble sets some of this" />}
-              {(screen[t] || (t === 'body' && ownFont !== FOLLOW_DOCUMENT)) && <span class="ts-dot ts-dot-own" title="Your editor shows some of this its own way" />}
+              {(screen[t] || (t === 'body' && ownFont !== FOLLOW_DOCUMENT)) && <span class="ts-dot ts-dot-own" title="You set some of this for your editor (where the document does not)" />}
             </button>
           );
         })}

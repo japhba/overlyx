@@ -7,7 +7,8 @@
  * math font is MathJax's (editor/lyxmath/mathjax.ts setMathFont); --math-scale sizes formulas so
  * that their x-height is 1.1 times the text's. "As in the document" follows the roman font of the
  * open document: both shells report their document's settings with setDocumentFonts
- * (tests/parity.test.ts).
+ * (tests/parity.test.ts). A document with a font of its own shows it whatever the text font chosen
+ * (`documentSetsFont`: the document is Settings' most specific scope).
  */
 import { getPrefs, subscribePrefs, type Prefs } from '../prefs';
 import { editorFace, documentFace, faceForFontName, resolvedMathFont, mathScale, mathFont, FOLLOW_DOCUMENT, GOOGLE_FACE } from './catalog';
@@ -24,13 +25,22 @@ export function resolvedFace(pref: string, forDocument = docFace): string {
   return editorFace(pref === FOLLOW_DOCUMENT ? forDocument : pref).id;
 }
 
+/**
+ * Does the open document choose a font of its own (anything but LaTeX's Computer Modern)? Then the
+ * editor shows it whatever the project's or the person's text font (Settings' scopes: the document
+ * is the most specific); those apply to documents that keep LaTeX's.
+ */
+export const documentSetsFont = () => docFace !== 'cm';
+/** the face the editor draws for the text font that applies (prefs.getPrefs: the project's over the person's) */
+export const shownFace = (pref: string): string => resolvedFace(documentSetsFont() ? FOLLOW_DOCUMENT : pref);
+
 /** The math font shown for the preferences. */
 export function resolvedMath(p: Pick<Prefs, 'editorFont' | 'editorMathFont'> = getPrefs()): string {
-  return resolvedMathFont(p.editorMathFont, resolvedFace(p.editorFont)).id;
+  return resolvedMathFont(p.editorMathFont, shownFace(p.editorFont)).id;
 }
 
 function apply(p: Prefs): void {
-  const face = editorFace(resolvedFace(p.editorFont));
+  const face = editorFace(shownFace(p.editorFont));
   if (face.id.startsWith(GOOGLE_FACE)) loadGoogleFont(face.id.slice(GOOGLE_FACE.length));
   const math = layoutMath ? mathFont(layoutMath) : resolvedMathFont(p.editorMathFont, face.id);
   setMathFont(math.id);

@@ -35,6 +35,7 @@ import { googleFontRoutes } from './googlefonts.ts';
 import { myFontRoutes } from './myfonts.ts';
 import { snippetSvg, snippetFile } from './snippets.ts';
 import { importLyxFile, parseFragmentText, newLayoutDocumentText, withDocumentSettings, NO_INDENT_SETTINGS } from './texdoc.ts';
+import { readProjectSettings, writeProjectSettings, projectSettingsListeners } from './projectsettings.ts';
 import { importLyxUpload } from './lyximport.ts';
 import { toPdf } from './graphics.ts';
 import { extractZip, bundledZips, projectNameFromZip, writeZip } from './zip.ts';
@@ -470,14 +471,15 @@ api.post('/import/zip', express.raw({ type: '*/*', limit: '300mb' }), (req, res)
  * Server-sent events: `{"kind":"files"}` — the project's file list changed on disk (another user,
  * the agent, a git push, a LaTeX build — see projectChangedListeners; the file browser reloads
  * itself, so it needs no refresh button) — and `{"kind":"graphics","path":…,"v":mtime}` — a
- * graphics file was written (a plot script ran, an upload landed; the editors reload the image).
+ * graphics file was written (a plot script ran, an upload landed; the editors reload the image) —
+ * and `{"kind":"settings"}`: the project's settings changed (Settings ▸ Project, projectsettings.ts).
  */
 api.get('/projects/:project/events', needProject('view'), (req, res) => {
   const project = String(req.params.project);
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
   res.write(': connected\n\n');
   const hb = setInterval(() => res.write(': hb\n\n'), 20000);
-  const cleanup = () => { clearInterval(hb); projectChangedListeners.delete(listener); graphicsChangedListeners.delete(graphics); };
+  const cleanup = () => { clearInterval(hb); projectChangedListeners.delete(listener); graphicsChangedListeners.delete(graphics); projectSettingsListeners.delete(settings); };
   const allowed = () => { if (roleFor(req.user!, project)) return true; cleanup(); res.end(); return false; };   // access revoked since the connect
   const listener = (p: string) => {
     if (p !== project || !allowed()) return;
@@ -487,8 +489,13 @@ api.get('/projects/:project/events', needProject('view'), (req, res) => {
     if (p !== project || !allowed()) return;
     res.write(`data: ${JSON.stringify({ kind: 'graphics', path: file, v })}\n\n`);
   };
+  const settings = (p: string) => {
+    if (p !== project || !allowed()) return;
+    res.write('data: {"kind":"settings"}\n\n');
+  };
   projectChangedListeners.add(listener);
   graphicsChangedListeners.add(graphics);
+  projectSettingsListeners.add(settings);
   req.on('close', cleanup);
 });
 
@@ -809,6 +816,20 @@ api.delete('/mcp-tokens/:id', (req, res) => {
   res.json({ tokens });
 });
 
+/**
+ * The project's settings (Settings ▸ Project: `.overlyx/settings.json`, projectsettings.ts) — what
+ * everyone's editor in the project takes over their own. Read by anyone in the project, written by editors.
+ */
+api.get('/projects/:project/settings', needProject('view'), (req, res) => { res.json({ settings: readProjectSettings(req.params.project) }); });
+api.put('/projects/:project/settings', needProject('edit'), (req, res) => {
+  try {
+    const settings = writeProjectSettings(req.params.project, req.body?.settings);
+    touchProject(req.params.project, req.user!.id);
+    logAccess(req.params.project, req.user!.id, 'write', '.overlyx/settings.json');
+    res.json({ settings });
+  } catch (e) { res.status(400).json({ error: (e as Error).message }); }
+});
+
 api.post('/projects/:project/new', needProject('edit'), (req, res) => {
   try {
     let rel = String(req.body?.path ?? 'untitled.tex');
@@ -827,7 +848,9 @@ api.post('/projects/:project/new', needProject('edit'), (req, res) => {
     else if (layout) fs.writeFileSync(abs, newLayoutDocumentText(req.params.project, rel, layout, { title: req.body?.title, author: req.user?.name }), 'utf8');
     else {
       const text = newDocumentText({ textclass: req.body?.textclass, title: req.body?.title, author: req.user?.name });
-      fs.writeFileSync(abs, userSettings(req.user!.id).paragraphSkip ? withDocumentSettings(text, req.params.project, rel, NO_INDENT_SETTINGS) : text, 'utf8');
+      // (the project's choice over the account's: Settings ▸ Project ▸ New documents)
+      const skip = readProjectSettings(req.params.project).paragraphSkip ?? userSettings(req.user!.id).paragraphSkip;
+      fs.writeFileSync(abs, skip ? withDocumentSettings(text, req.params.project, rel, NO_INDENT_SETTINGS) : text, 'utf8');
     }
     touchProject(req.params.project, req.user!.id);
     res.json({ id: `${req.params.project}/${rel}` });

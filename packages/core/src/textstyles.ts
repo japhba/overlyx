@@ -5,7 +5,7 @@
  * italics, small capitals / capitals, colour, alignment, the body's line spacing, a rule, the space
  * above and below, a heading that runs into its paragraph.
  *
- * Three layers, the later winning:
+ * The PDF's layers, the later winning:
  *
  *   document   the file's own settings — a markdown document's front matter (`headings:`, `styles:`,
  *              pandoc's mainfont / fontsize / linestretch / justify), a .tex document's settings line
@@ -17,10 +17,15 @@
  *              for what the preamble sets (`stylesLatex`'s `tex`) — and the editor shows what it can
  *              read of it. Setting the same thing in the style editor replaces that LaTeX: `takeOver`
  *              names the statements to remove and the values they set, which the document keeps.
- *   my editor  one person's own (the client's preferences): only their editor shows it, never the PDF.
+ *
+ * The editor draws them in scopes, as VS Code's settings (Settings' User · Project · Document tabs),
+ * the more specific one winning key by key: the defaults (LaTeX's article, `TYPE_DEFAULTS`), one
+ * person's own (User, the client's preferences: every document they open, never the PDF), a
+ * project's (Project, `.overlyx/settings.json`: everyone's editor in the project, never the PDF),
+ * and the document's — the PDF's own, which therefore always shows as it will be printed.
  *
  *     PDF    = the class's look ⊕ document ⊕ LaTeX          (`pdfStyles`)
- *     editor = PDF ⊕ my editor                              (`mergeStyles`)
+ *     editor = defaults ⊕ User ⊕ Project ⊕ PDF              (`cascadeStyles`)
  *
  * The header line `\overlyx_styles {json}` carries the document layer's styles to the editor (a
  * markdown document's header also `\overlyx_includes`, its header-includes; a .tex document's
@@ -219,29 +224,63 @@ export function resolveScreenStyles(screen: ScreenStyles): TextStyles {
   return out;
 }
 
-/** where a style's value comes from: its own, an ancestor in the editor layer, the document (PDF), Normal text, or LaTeX's default */
-export type StyleOrigin = { from: 'own' | 'parent' | 'document' | 'body' | 'default'; parent?: ScreenStyleKey };
+/** the scopes text styles are set in, the more specific later (core projectsettings.ts has the project's file) */
+export type StyleScope = 'user' | 'project' | 'document';
+export const STYLE_SCOPES: readonly StyleScope[] = ['user', 'project', 'document'];
+/** each scope's styles: User's and Project's trees (with All headings), the document's as the PDF has them */
+export interface ScopedStyles { user?: ScreenStyles; project?: ScreenStyles; document?: TextStyles }
+
+/** what the editor draws: each scope's tree resolved, the more specific scope winning key by key */
+export function cascadeStyles(s: ScopedStyles): TextStyles {
+  return mergeStyles(mergeStyles(resolveScreenStyles(s.user ?? {}), resolveScreenStyles(s.project ?? {})), s.document ?? {});
+}
+
+/** a style's key as one scope sets it: User and Project its own or All headings', the document its first level's for All headings */
+function setIn<K extends StyleKey>(s: ScopedStyles, scope: StyleScope, key: ScreenStyleKey, k: K): { value: TextStyle[K]; headings: boolean } | null {
+  if (scope === 'document') {
+    const v = s.document?.[key === ALL_HEADINGS ? 'section' : key]?.[k];
+    return v === undefined ? null : { value: v, headings: false };
+  }
+  const tree = s[scope] ?? {};
+  const own = tree[key]?.[k];
+  if (own !== undefined) return { value: own, headings: false };
+  const v = SCREEN_PARENT[key] === ALL_HEADINGS ? tree[ALL_HEADINGS]?.[k] : undefined;
+  return v === undefined ? null : { value: v, headings: true };
+}
+
+/** where a value shown in a scope comes from: a scope (by its All headings, or Normal text's font and colour), or the default */
+export type ScopedOrigin = { scope: StyleScope | 'default'; via?: 'headings' | 'body' };
 /**
- * A key's value for a style of the editor layer over the document's (`pdf`: what the PDF has), with
- * where it comes from: own > All headings (heading levels) > the document > Normal text (font,
- * colour) > undefined (LaTeX's default).
+ * A style's key as `scope` shows it: set there (its own value or its All headings'), else what the
+ * scopes below give, else Normal text's (font and colour flow down, as on the page), else the default
+ * (undefined: TYPE_DEFAULTS). `over`: the scopes above that set it as well — theirs is what the editor draws.
  */
-export function screenValue<K extends StyleKey>(screen: ScreenStyles, pdf: TextStyles, key: ScreenStyleKey, k: K): { value: TextStyle[K] | undefined; origin: StyleOrigin } {
-  const own = screen[key]?.[k];
-  if (own !== undefined) return { value: own, origin: { from: 'own' } };
-  if (key !== 'body' && key !== ALL_HEADINGS && SCREEN_PARENT[key] === ALL_HEADINGS) {
-    const v = screen[ALL_HEADINGS]?.[k];
-    if (v !== undefined) return { value: v, origin: { from: 'parent', parent: ALL_HEADINGS } };
+export function scopedStyleValue<K extends StyleKey>(s: ScopedStyles, scope: StyleScope, key: ScreenStyleKey, k: K): { value: TextStyle[K] | undefined; origin: ScopedOrigin; over: StyleScope[] } {
+  const at = STYLE_SCOPES.indexOf(scope);
+  const over = STYLE_SCOPES.slice(at + 1).filter(sc => setIn(s, sc, key, k));
+  const below = STYLE_SCOPES.slice(0, at + 1).reverse();
+  for (const sc of below) {
+    const r = setIn(s, sc, key, k);
+    if (r) return { value: r.value, origin: { scope: sc, ...(r.headings ? { via: 'headings' as const } : {}) }, over };
   }
-  // (All headings itself shows what the document gives the first level)
-  const docType: TextType = key === ALL_HEADINGS ? 'section' : key;
-  const doc = pdf[docType]?.[k];
-  if (doc !== undefined) return { value: doc, origin: { from: 'document' } };
   if (key !== 'body' && FROM_BODY.includes(k)) {
-    const v = screen.body?.[k] ?? pdf.body?.[k];
-    if (v !== undefined) return { value: v, origin: { from: 'body', parent: 'body' } };
+    for (const sc of below) {
+      const v = setIn(s, sc, 'body', k)?.value;
+      if (v !== undefined) return { value: v, origin: { scope: sc, via: 'body' }, over };
+    }
   }
-  return { value: undefined, origin: { from: 'default' } };
+  return { value: undefined, origin: { scope: 'default' }, over };
+}
+
+/** screen styles from JSON (a project's settings file), only what is valid */
+export function screenStylesOf(v: unknown): ScreenStyles {
+  const out: ScreenStyles = {};
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return out;
+  for (const t of [...TEXT_TYPES, ALL_HEADINGS] as ScreenStyleKey[]) {
+    const st = textStyleOf((v as Record<string, unknown>)[t]);
+    if (Object.keys(st).length) out[t] = st;
+  }
+  return out;
 }
 
 export function mergeStyles(a: TextStyles, b: TextStyles): TextStyles {

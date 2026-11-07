@@ -2,6 +2,11 @@
  * Per-browser editor preferences (Tools ▸ Preferences…; the toggles also sit in the Tools menu
  * and are therefore searchable from the command palette). Stored in localStorage `ol.prefs`.
  *
+ * They are the User scope of Settings: the open project's settings (Settings ▸ Project,
+ * app/projectsettings.ts) are laid over them for the keys a project may set (PROJECT_PREF_KEYS), as
+ * VS Code's workspace settings over its user settings. `getPrefs` is what applies; `getUserPrefs` the
+ * person's own, which `setPref` changes.
+ *
  * The AI features are off by default: they send the document to a model through the server,
  * which is something a user should switch on knowingly (the server also has to be configured
  * with a key — Tools ▸ AI says so when it is not).
@@ -118,14 +123,35 @@ function load(): Prefs {
   } catch { return { ...DEFAULT_PREFS }; }
 }
 
-let prefs: Prefs = load();
-const listeners = new Set<(p: Prefs) => void>();
+/** the preferences a project may set for everyone in it (core projectsettings.ts) */
+export const PROJECT_PREF_KEYS = ['spellcheck', 'autoCorrect', 'autoBuild', 'autoBuildDelay', 'editorFont', 'editorMathFont'] as const;
+export type ProjectPrefKey = typeof PROJECT_PREF_KEYS[number];
 
+let user: Prefs = load();
+/** the open project's settings over them */
+let overlay: Partial<Pick<Prefs, ProjectPrefKey>> = {};
+let prefs: Prefs = user;
+const listeners = new Set<(p: Prefs) => void>();
+const notify = () => { for (const l of listeners) { try { l(prefs); } catch { /* ignore */ } } };
+
+/** the preferences that apply: this person's, with the open project's over them */
 export function getPrefs(): Prefs { return prefs; }
+/** this person's own (Settings ▸ User) */
+export function getUserPrefs(): Prefs { return user; }
 export function setPref<K extends keyof Prefs>(key: K, value: Prefs[K]): void {
-  if (prefs[key] === value) return;
-  prefs = { ...prefs, [key]: value, ...(key === 'autoCorrect' ? { autoCorrectChosen: true } : {}), ...(key === 'editorFont' ? { editorFontChosen: true } : {}) };
-  try { localStorage.setItem(STORAGE, JSON.stringify(prefs)); } catch { /* ignore */ }
-  for (const l of listeners) { try { l(prefs); } catch { /* ignore */ } }
+  if (user[key] === value) return;
+  user = { ...user, [key]: value, ...(key === 'autoCorrect' ? { autoCorrectChosen: true } : {}), ...(key === 'editorFont' ? { editorFontChosen: true } : {}) };
+  try { localStorage.setItem(STORAGE, JSON.stringify(user)); } catch { /* ignore */ }
+  prefs = { ...user, ...overlay };
+  notify();
+}
+/** the open project's settings for the keys it may set (none: {}) */
+export function setProjectPrefs(o: Partial<Pick<Prefs, ProjectPrefKey>>): void {
+  const next: Partial<Pick<Prefs, ProjectPrefKey>> = {};
+  for (const k of PROJECT_PREF_KEYS) if (o[k] !== undefined) (next as Record<string, unknown>)[k] = o[k];
+  if (PROJECT_PREF_KEYS.every(k => next[k] === overlay[k])) return;
+  overlay = next;
+  prefs = { ...user, ...overlay };
+  notify();
 }
 export function subscribePrefs(l: (p: Prefs) => void): () => void { listeners.add(l); return () => { listeners.delete(l); }; }

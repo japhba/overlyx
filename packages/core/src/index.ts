@@ -30,6 +30,7 @@ export { markEditedSettings, hasSettingsLine, MANAGED_BEGIN, MANAGED_END } from 
 export * from './projectKey.ts';
 export * from './fontface.ts';
 export * from './textstyles.ts';
+export * from './projectsettings.ts';
 export * from './pagebreaks.ts';
 export * from './synctex.ts';
 export { isMarkdownPath, MARKDOWN_LAYOUTS, HEADING_LAYOUTS, markdownLayoutFor, headingLevel, markdownHeader } from './md/common.ts';
