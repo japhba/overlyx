@@ -107,3 +107,5 @@ Object.assign(ICONS, {
   'dk-valign': I('<path d="M2 2.5h12M2 13.5h12"/><rect x="5" y="5.5" width="6" height="5" rx="0.6"/>'),
   'dk-clear': '<svg viewBox="0 0 16 16"><text x="2.2" y="11.5" font-size="10.5" font-family="sans-serif" fill="currentColor">T</text><path d="M9 9.5l5 5M14 9.5l-5 5" stroke="currentColor" stroke-width="1.2"/></svg>',
 });
+// (the Arrange palettes' alignment of objects: the Text row's 'dk-align' button shows the text's own alignment)
+ICONS['dk-align-objects'] = ICONS['dk-align'];

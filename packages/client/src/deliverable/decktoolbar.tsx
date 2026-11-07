@@ -573,17 +573,17 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
           { label: 'Bring forward (Ctrl+↑)', html: ICON('dk-arrange'), action: () => c.arrange('forward') },
           { label: 'Send backward (Ctrl+↓)', html: ICON('dk-arrange'), action: () => c.arrange('backward') },
           { label: 'Send to back (Ctrl+Shift+↓)', html: ICON('dk-arrange'), action: () => c.arrange('back') },
-          { label: sel.length > 1 ? 'Align left edges' : 'Align left on the slide', html: ICON('dk-align'), action: () => c.arrange('align-left') },
-          { label: 'Align centres', html: ICON('dk-align'), action: () => c.arrange('align-center') },
-          { label: 'Align right edges', html: ICON('dk-align'), action: () => c.arrange('align-right') },
-          { label: 'Align tops', html: ICON('dk-align'), action: () => c.arrange('align-top') },
-          { label: 'Align middles', html: ICON('dk-align'), action: () => c.arrange('align-middle') },
-          { label: 'Align bottoms', html: ICON('dk-align'), action: () => c.arrange('align-bottom') },
-          { label: 'Centre on the slide horizontally', html: ICON('dk-align'), action: () => c.arrange('center-h') },
-          { label: 'Centre on the slide vertically', html: ICON('dk-align'), action: () => c.arrange('center-v') },
+          { label: sel.length > 1 ? 'Align left edges' : 'Align left on the slide', html: ICON('dk-align-objects'), action: () => c.arrange('align-left') },
+          { label: 'Align centres', html: ICON('dk-align-objects'), action: () => c.arrange('align-center') },
+          { label: 'Align right edges', html: ICON('dk-align-objects'), action: () => c.arrange('align-right') },
+          { label: 'Align tops', html: ICON('dk-align-objects'), action: () => c.arrange('align-top') },
+          { label: 'Align middles', html: ICON('dk-align-objects'), action: () => c.arrange('align-middle') },
+          { label: 'Align bottoms', html: ICON('dk-align-objects'), action: () => c.arrange('align-bottom') },
+          { label: 'Centre on the slide horizontally', html: ICON('dk-align-objects'), action: () => c.arrange('center-h') },
+          { label: 'Centre on the slide vertically', html: ICON('dk-align-objects'), action: () => c.arrange('center-v') },
           ...(sel.length >= 3 ? [
-            { label: 'Distribute horizontally', html: ICON('dk-align'), action: () => c.arrange('distribute-h') },
-            { label: 'Distribute vertically', html: ICON('dk-align'), action: () => c.arrange('distribute-v') },
+            { label: 'Distribute horizontally', html: ICON('dk-align-objects'), action: () => c.arrange('distribute-h') },
+            { label: 'Distribute vertically', html: ICON('dk-align-objects'), action: () => c.arrange('distribute-v') },
           ] : []),
           { label: 'Rotate 90° clockwise', html: ICON('dk-rotate'), action: () => c.arrange('rotate-cw') },
           { label: 'Rotate 90° counter-clockwise', html: ICON('dk-rotate'), action: () => c.arrange('rotate-ccw') },
@@ -723,8 +723,10 @@ const escAttr = (s: string) => s.replace(/"/g, '&quot;');
 
 import { ICONS } from '../app/Toolbar';
 import { LYX_ICONS } from '../app/lyxicons';
-/** an icon as markup for palette items */
+import { MODERN_ICONS, iconSvg } from '../app/modernicons';
+/** an icon as markup for palette items: the Modern interface's line icon (uimode.ts) where it has one, as on the buttons */
 function ICON(name: string): string {
+  if (typeof document !== 'undefined' && document.documentElement.dataset.ui === 'modern' && MODERN_ICONS[name]) return iconSvg(MODERN_ICONS[name], 16);
   if (LYX_ICONS[name]) return `<img src="${LYX_ICONS[name]}" alt="" width="16" height="16" style="vertical-align:middle">`;
   return ICONS[name] ? `<span class="dk-ico">${ICONS[name]}</span>` : '';
 }

@@ -1841,7 +1841,10 @@ blend.
   `Toolbar` `collapse`, `MODERN_COLLAPSE`; the slide decks' text row has the same insert group in
   the same order), the file tree and the start page with Lucide line icons for what a file or a
   project is (`KIND_ICONS`), the contextual rows (formula, table, review,
-  ink) as floating bars — interface only, every function the same. The
+  ink) as floating bars — interface only, every function the same. No LyX drawing shows in Modern:
+  `MODERN_ICONS` has a line icon under every LyX icon name (`lyxicons.ts`; table borders, alignment,
+  math, review, version control — `tests/modern-icons.test.ts`), the deck's and the Layout toolbar's
+  hand-drawn ones (`dk-…`, `ol-…`), and the decks' palette items take them too (`decktoolbar.tsx ICON`). The
   choice is offered in the welcome card of a new account (two sketches, `Tour.tsx UiChoice`) — and on
   its own (`InterfacePrompt`) to a new account that arrives with an Overleaf import (it skips the
   welcome card) — in *View ▸ Interface* and *Settings ▸ Appearance*; kept in the account (`users.settings.interface`,
