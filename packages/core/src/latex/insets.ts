@@ -399,6 +399,15 @@ function latexTextInset(ctx: ExportContext, os: TexStream, rp: RunParams, inset:
         insetTextLatex(ctx, os, rp, pars, undefined);
         return;
       }
+      // A delimited path may contain unmatched braces: retain its literal delimiter.
+      const delimiter = inset.arg === 'Path' ? unquote(paramMap(inset.params).get('delimiter')) : '';
+      if (delimiter) {
+        if (rp.movingArg) os.write('\\protect');
+        os.write('\\path' + delimiter);
+        insetTextLatex(ctx, os, rp, pars, { ...il, latexName: '' });
+        os.write(delimiter);
+        return;
+      }
       insetTextLatex(ctx, os, rp, pars, il);
       return;
     }

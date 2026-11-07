@@ -821,6 +821,17 @@ class BodyParser {
 
     // \parbox[pos][height][inner]{width}{…}: LyX's frameless box with use_parbox (its text may have paragraphs)
     if (name === 'parbox' && this.handleParbox(s, ctx, st)) return null;
+    if (name === 'path') {
+      const arg = this.facts.defined.has(name) ? null : readPathArgument(s);
+      if (arg) {
+        this.pushInset(ctx, st, {
+          type: 'Text', name: 'Flex', arg: 'Path', status: 'open',
+          params: arg.delimiter === '{' ? [] : ['delimiter ' + quote(arg.delimiter)],
+          paragraphs: [{ layout: 'Plain Layout', depth: 0, params: {}, items: arg.text ? [{ kind: 'text', text: arg.text, font: {} }] : [] }],
+        });
+      } else this.pushERT(ctx, st, '\\path' + (t.spaceAfter ? ' ' : ''));
+      return null;
+    }
     // insets defined by inset layouts (\footnote, \caption, \url, \code, ...)
     let il = this.cmdInsets.get(name);
     for (const cand of this.cmdInsetParams.get(name) ?? []) {
@@ -1963,6 +1974,25 @@ function mergeCommentErts(pars: Paragraph[], merged?: (into: Paragraph, from: Pa
 function ertParagraphs(text: string): Paragraph[] {
   return text.split('\n').map(line => ({ layout: 'Plain Layout', depth: 0, params: {}, items: line ? [{ kind: 'text', text: line, font: {} } as Item] : [] }));
 }
+/** url's arguments are literal: neither % nor backslashes start TeX tokens. */
+function readPathArgument(s: Scanner): { text: string; delimiter: string } | null {
+  const delimiter = s.peekChar();
+  // Leave TikZ's \path[options] / \path (coordinates) / \path node … as code.
+  if (!delimiter || (delimiter !== '{' && /[\sA-Za-z0-9\\()[\]<>}]/.test(delimiter))) return null;
+  let depth = 1;
+  for (let i = s.pos + 1; i < s.s.length; i++) {
+    const c = s.s[i];
+    if (c === '\n' && s.s[i + 1] === '\n') return null;
+    if (delimiter === '{' && c === '{') depth++;
+    if (delimiter === '{' ? c === '}' && --depth === 0 : c === delimiter) {
+      const text = s.s.slice(s.pos + 1, i);
+      s.pos = i + 1;
+      return { text, delimiter };
+    }
+  }
+  return null;
+}
+
 function ertText(pars: Paragraph[]): string {
   return pars.map(p => p.items.map(it => (it.kind === 'text' ? it.text : '')).join('')).join('\n');
 }
