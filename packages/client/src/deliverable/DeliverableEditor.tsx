@@ -28,7 +28,7 @@ import { pinchFactor, pinchLock, triGesture, type PinchLock } from './gestures';
 import { DetentPinch, stepOnto, type Detent, type Shown } from '../app/zoomdetent';
 import { holdReload } from '../app/update';
 import { zoomPill } from '../app/zoomhud';
-import { CornerButton } from '../app/CornerButton';
+import { CornerButton, PanelIcon } from '../app/CornerButton';
 import { keepAwake } from '../app/wakelock';
 import { presentFingersDraw, savePresentFingersDraw, presentLinked, savePresentLinked } from '../app/presentkit';
 import { checkedPresent, docStamp, presenterAtStart, staleness, type PresentState, type PresenterState } from '../app/presentshare';
@@ -39,7 +39,8 @@ import { rebasedSplices, rebaseObjectPaths, objectHtml, imageHtml, insertPlace, 
 import { GUIDES_ATTR, LAYOUT_MARGINS_ATTR, layoutMarginGuides, parseGuides, masterGuides, formatGuides, withGuide, type Guide } from './guides';
 import { deckMargins, deckDesign, builtInLayouts, savedLayouts, layoutFromSlide, saveLayoutOp, applyLayoutOp, placeholderObject, layoutThumb, deckColors, PH_ATTR, PH_LABELS, PH_ROLES, LAYOUT_ATTR, type PhRole, type DesignLooks, type DeckDesign, type Layout } from './decklayouts';
 import { LayoutPicker, type LayoutCard } from './LayoutPicker';
-import { chooseDock, touchScreen, smallScreen, dockAsked, type DeckDock } from './deckdock';
+import { chooseDock, chooseBars, touchScreen, smallScreen, smallDisplay, dockAsked, DOCK_ROW, type DeckDock } from './deckdock';
+import { ActivityButton, setDeckBars, ACTIVITY_W, type BarsPlace } from '../app/ActivityBar';
 import { sizePt, stepPt } from './units';
 import { deckToolbar, quickGroups, SHAPES, LINES, type DeckTextActions } from './decktoolbar';
 import { setEditorMenus } from '../app/editormenus';
@@ -474,6 +475,12 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
   /** the app's status bar: the buttons of the folded slides and notes go into its corner (none in VS Code) */
   const [cornerSlot, setCornerSlot] = useState<HTMLElement | null>(null);
   useEffect(() => { setCornerSlot(document.querySelector<HTMLElement>('[data-statusbar-slot]')); }, []);
+  /** the app's bar at the left (ActivityBar.tsx), while it is there: the slides' button goes into it */
+  const [activitySlot, setActivitySlot] = useState<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    const el = document.querySelector<HTMLElement>('[data-activity-slot]');
+    if (el !== activitySlot) setActivitySlot(el);
+  });
   const setRailShown = (on: boolean) => { setRailShownState(on); saveShown('ol.deckSlides', on); };
   const setNotesShown = (on: boolean) => { setNotesShownState(on); saveShown('ol.deckNotes', on); };
   const [codeOpen, setCodeOpen] = useState(false);
@@ -512,8 +519,11 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
   /** the slide on the whole screen (`full`) */
   const fullOn = full && soloOn && !presenting;
   const fullRef = useRef(fullOn); fullRef.current = fullOn;
-  /** the canvas round a fitted slide: none on a touch screen (edge to edge, as it stays while drawing), else viewport.ts fitGap */
-  const gap = touchUi && soloOn ? 0 : undefined;
+  /**
+   * The canvas round a fitted slide: none, edge to edge (the user, 7 Nov 2026: "id like to have the slide
+   * go edge to edge on any screen"; on a touch screen since 23 Oct, as it stays while drawing)
+   */
+  const gap = soloOn ? 0 : undefined;
   const gapRef = useRef(gap); gapRef.current = gap;
   const focusRef = useRef(focusOn); focusRef.current = focusOn;
   const focusPillEl = useRef<HTMLDivElement>(null);
@@ -3578,14 +3588,48 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
   const dockAsk = dockAsked();
   const slideShape = solo && solo.rect.w > 0 ? solo.rect : { w: pageW || 1280, h: pageH || (pageW || 1280) * 9 / 16 };
   // (the rail beside the canvas takes its width — on a narrow screen it is a drawer over it —, the notes their height)
-  const dockArea = { w: area.w - (railOpen && typeof innerWidth === 'number' && innerWidth > 900 ? railW : 0), h: area.h - (kind === 'deck' && notesShown ? 74 : 0) };
-  const placed = kind === 'page' || presenting || !(touchUi || dockAsk) ? { dock: 'top' as DeckDock, col: 0 }
-    : chooseDock({ area: dockArea, slide: slideShape, tools: bars.tools.reduce((n, g) => n + g.length * 34 + 9, 24), rest: 560, current: dockWas.current, gap: touchUi ? 0 : undefined });
-  // (kept while drawing has the bars away: they come back where they were, into the room the slide left them)
-  const dock: DeckDock = kind === 'page' || presenting ? 'top' : dockAsk ?? (focusOn || fullOn ? dockWas.current : placed.dock);
-  dockWas.current = dock;
-  /** the toolbars away: drawing focus, the slide on the whole screen */
+  const railBeside = railOpen && typeof innerWidth === 'number' && innerWidth > 900 ? railW : 0;
+  const notesH = kind === 'deck' && notesShown ? 74 : 0;
+  const dockArea = { w: area.w - railBeside, h: area.h - notesH };
+  const dockTools = bars.tools.reduce((n, g) => n + g.length * 34 + 9, 24);
+  const placed = kind === 'page' || presenting || !(touchUi || dockAsk) ? { dock: 'top' as DeckDock, col: 0, fit: 0 }
+    : chooseDock({ area: dockArea, slide: slideShape, tools: dockTools, rest: 560, current: dockWas.current, gap: 0 });
+
+  /* ------------------------------------------------------------- the bars round the slide: docked, or floating over it (deckdock.ts chooseBars) */
+
+  /** the bars kept on the screen where they would float (the toolbar's lock; this browser's) */
+  const [barsLock, setBarsLockState] = useState(() => { try { return localStorage.getItem('ol.deckBars') === 'lock'; } catch { return false; } });
+  /** the app's width, its menu bar's and status bar's heights, the toolbar's row's, the editor's top left corner on the screen (px) */
+  const [barSizes, setBarSizes] = useState({ app: 0, menu: 0, status: 0, tool: 0, top: 0, left: 0 });
+  const barsWas = useRef({ place: 'left' as BarsPlace, wanted: false, float: false });
+  /** the app's bars round this editor (none in VS Code, whose window has its own, nor in the SVG pop-up) */
+  const appBars = !!cornerSlot && !host.bindSvgExporter;
+  /** drawing, or the slide on the whole screen, has the bars away: they stay as they were */
   const barsAway = focusOn || fullOn;
+  const barsAt = !appBars || !soloOn || presenting ? { place: 'left' as BarsPlace, wanted: false, float: false } : barsAway ? barsWas.current : (() => {
+    const was = barsWas.current;
+    // the room with none of the bars: the screen's width, the editor's height and what the docked bars take of it — whatever
+    // panels are open: shown or hidden, the files, the slides or the notes do not move the bars (their buttons are in them)
+    const room = { w: barSizes.app || area.w, h: area.h + (was.float ? 0 : barSizes.menu + barSizes.status) };
+    const docked = (a: { w: number; h: number }) => touchUi || dockAsk
+      ? chooseDock({ area: a, slide: slideShape, tools: dockTools, rest: 560, current: dockWas.current, gap: 0 }).fit
+      : fitScale({ w: a.w, h: a.h - (barSizes.tool || DOCK_ROW) }, slideShape, 0);
+    return chooseBars({ room, menu: barSizes.menu, status: barSizes.status, activity: ACTIVITY_W, docked,
+      whole: fitScale(room, slideShape, 0), small: smallDisplay(), locked: barsLock, current: was });
+  })();
+  barsWas.current = barsAt;
+  /**
+   * The bars float over the slide: out of its way, sliding in over it when asked for — a press on their
+   * handle at the top left, the pointer at the screen's top edge — and away again as the pointer leaves
+   * them (or a finger touches the slide); the lock keeps them on the screen
+   */
+  const floatOn = appBars && barsAt.float;
+  /** floating, the toolbar stays in columns at the sides where they take only canvas beside the slide (a phone held sideways): only what does not fit floats */
+  const floatSides = floatOn && placed.dock === 'sides' && placed.fit >= fitScale(dockArea, slideShape, 0) * 0.995;
+
+  // (kept while drawing has the bars away: they come back where they were, into the room the slide left them; floating: a row along the top)
+  const dock: DeckDock = kind === 'page' || presenting || (floatOn && !floatSides) ? 'top' : dockAsk ?? (barsAway ? dockWas.current : placed.dock);
+  dockWas.current = dock;
   const sides = dock === 'sides' && !barsAway;
   const topBar = !sides && !barsAway;
 
@@ -3616,6 +3660,82 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     return () => ro.disconnect();
   }, [topBar]);
 
+  // the bars' sizes as the room changes, or they float (laid out still: their sizes are there to be had)
+  useLayoutEffect(() => {
+    if (!appBars || barsAway) return;
+    const r = editorRef.current?.getBoundingClientRect();
+    const next = {
+      app: document.querySelector<HTMLElement>('.app')?.clientWidth ?? 0,
+      menu: document.querySelector<HTMLElement>('.app > .menubar')?.offsetHeight ?? 0,
+      status: document.querySelector<HTMLElement>('.app > .statusbar')?.offsetHeight ?? 0,
+      tool: barRef.current?.offsetHeight || barSizes.tool,
+      top: Math.round(r?.top ?? 0), left: Math.round(r?.left ?? 0),
+    };
+    if ((Object.keys(next) as (keyof typeof next)[]).some(k => next[k] !== barSizes[k])) setBarSizes(next);
+  }, [appBars, area.w, area.h, floatOn, barsAt.place, barsAway, topBar]);
+  // what the app's shell shows (ActivityBar.tsx): the panels' bar at the left (floating with the rest), or their buttons in the status bar's corner
+  const barsPlace: BarsPlace | null = appBars && soloOn && !presenting ? (floatOn ? 'left' : barsAt.place) : null;
+  useEffect(() => { if (appBars) setDeckBars({ place: barsPlace, rail: railOpen, showRail: setRailShown }); }, [appBars, barsPlace, railOpen]);
+  useEffect(() => () => { if (appBars) setDeckBars(null); }, [appBars]);
+  /** the floating bars in view */
+  const [barsShown, setBarsShown] = useState(false);
+  const barsHide = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const setBarsLock = (on: boolean) => {
+    setBarsLockState(on);
+    try { localStorage.setItem('ol.deckBars', on ? 'lock' : ''); } catch { /* private window */ }
+    // (let go: the bars stay in view till the pointer leaves them)
+    if (!on) setBarsShown(true);
+  };
+  const showBars = (on = true) => {
+    if (barsHide.current) { clearTimeout(barsHide.current); barsHide.current = null; }
+    setBarsShown(on);
+  };
+  useLayoutEffect(() => {
+    const html = document.documentElement;
+    html.classList.toggle('ol-bars-float', floatOn);
+    html.classList.toggle('ol-bars-shown', floatOn && barsShown);
+    if (floatOn) { html.style.setProperty('--ol-float-top', `${barSizes.menu}px`); html.style.setProperty('--ol-float-bottom', `${barSizes.status}px`); }
+  }, [floatOn, barsShown, barSizes.menu, barSizes.status]);
+  useEffect(() => { if (!floatOn) showBars(false); }, [floatOn]);
+  useEffect(() => () => {
+    if (barsHide.current) clearTimeout(barsHide.current);
+    document.documentElement.classList.remove('ol-bars-float', 'ol-bars-shown');
+  }, []);
+  // shown: away again as the pointer leaves them, at a press or a touch elsewhere (the slide's frame taking the focus), at Esc — not while a menu or a palette is open, or a field in them is typed in
+  useEffect(() => {
+    if (!floatOn || !barsShown) return;
+    const BARS = '.app > .menubar, .app > .statusbar, .main > .activitybar, .dl-toolbar, .dl-bars-handle, .dl-bars-edge, .tb-popup, .ctx-menu, [role="menu"]';
+    const inBars = (t: EventTarget | null) => t instanceof Element && !!t.closest(BARS);
+    const busy = () => {
+      if (document.querySelector('.tb-popup, .ctx-menu, [role="menu"], [aria-modal="true"]')) return true;
+      const a = document.activeElement;
+      return !!a && inBars(a) && a.matches('input, textarea, select, [contenteditable="true"]');
+    };
+    const later = (ms = 450) => {
+      if (barsHide.current) clearTimeout(barsHide.current);
+      const go = () => { if (busy()) { barsHide.current = setTimeout(go, 300); return; } barsHide.current = null; setBarsShown(false); };
+      barsHide.current = setTimeout(go, ms);
+    };
+    const keep = () => { if (barsHide.current) { clearTimeout(barsHide.current); barsHide.current = null; } };
+    const over = (e: PointerEvent) => { if (e.pointerType === 'mouse') { if (inBars(e.target)) keep(); else later(); } };
+    const out = (e: PointerEvent) => { if (e.pointerType === 'mouse' && !e.relatedTarget) later(); };
+    const down = (e: PointerEvent) => { if (!inBars(e.target)) later(0); };
+    const blur = () => setTimeout(() => { if (document.activeElement instanceof HTMLIFrameElement) later(0); }, 0);
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape' && !busy()) showBars(false); };
+    document.addEventListener('pointerover', over, true);
+    document.addEventListener('pointerout', out, true);
+    document.addEventListener('pointerdown', down, true);
+    document.addEventListener('keydown', key);
+    window.addEventListener('blur', blur);
+    return () => {
+      document.removeEventListener('pointerover', over, true);
+      document.removeEventListener('pointerout', out, true);
+      document.removeEventListener('pointerdown', down, true);
+      document.removeEventListener('keydown', key);
+      window.removeEventListener('blur', blur);
+    };
+  }, [floatOn, barsShown]);
+
   // the slide in view: is enough of it on the screen? (zoomed into a corner, or scrolled away from it)
   const curBox = slides[current]?.rect;
   let lost = false;
@@ -3629,16 +3749,21 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
   }
   const zoomed = soloOn ? Math.abs(zoom - 1) > 0.01 : zoom > 1.01;
   /**
-   * The slides and the notes folded away: their buttons in the screen's bottom-left corner — the app's
-   * status bar (its slot, after the files' button), or in VS Code a strip of their own under the
-   * editor — never over the slide.
+   * The slides' button: in the app's bar at the left (ActivityBar.tsx), lit while they are shown —
+   * where that bar is (it costs the slide nothing there, or floats with the other bars) —, else, folded
+   * away, in the screen's bottom-left corner with the notes': the app's status bar (its slot, after the
+   * files' button), or in VS Code a strip of their own under the editor — never over the slide.
    */
   const notesFirst = notes.trim().split('\n')[0];
-  const corner = (showRail && !railShown) || (kind === 'deck' && !notesShown) ? <>
-    {showRail && !railShown && (
-      <CornerButton icon="slides" title="Show the slides" data-dl-rail-show onClick={() => setRailShown(true)}>
-        Slides{slides.length ? ` · ${current + 1} of ${slides.length}` : ''}
-      </CornerButton>
+  const slidesName = `Slides${slides.length ? ` · ${current + 1} of ${slides.length}` : ''}`;
+  const slidesAtLeft = showRail && !!activitySlot && barsPlace === 'left';
+  const slidesActivity = slidesAtLeft && (
+    <ActivityButton icon="slides" label={slidesName} on={railShown} onClick={() => setRailShown(!railShown)}
+      title={railShown ? 'Hide the slides (more room for the slide)' : 'Show the slides'} data-dl-rail-show={railShown ? undefined : ''} />
+  );
+  const corner = (showRail && !railShown && !slidesAtLeft) || (kind === 'deck' && !notesShown) ? <>
+    {showRail && !railShown && !slidesAtLeft && (
+      <CornerButton icon="slides" title="Show the slides" data-dl-rail-show onClick={() => setRailShown(true)}>{slidesName}</CornerButton>
     )}
     {kind === 'deck' && !notesShown && (
       <CornerButton icon="notes" title={notesFirst ? `Show the speaker notes — ${notesFirst}` : 'Show the speaker notes'} data-dl-notes-show onClick={() => setNotesShown(true)}>
@@ -3694,6 +3819,26 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     <button class="dl-btn dl-full-btn" data-dl-full aria-label="Full screen" onClick={() => setFull(true)}
       title="Full screen: the slide edge to edge, everything else away — swipe to the next slide, on past the last for a new one"
       dangerouslySetInnerHTML={{ __html: ICONS['dk-fullscreen'] ?? '⛶' }} />
+  );
+  /** the bars kept on the screen, or let float over the slide: where they float (a small screen, the slide bigger without them) */
+  const barsLockBtn = barsAt.wanted && (
+    <button class={'dl-btn dl-bars-lock' + (barsLock ? ' on' : '')} data-dl-bars-lock aria-pressed={barsLock} onClick={() => setBarsLock(!barsLock)}
+      aria-label={barsLock ? 'Let the bars float over the slide' : 'Keep the bars on the screen'}
+      title={barsLock ? 'The bars stay on the screen — click to let them float over the slide while you work on it (the slide fills the screen; they come back from its top edge)'
+        : 'Keep the bars on the screen (the slide gets smaller) — now they float over the slide, away till you ask for them'}
+      dangerouslySetInnerHTML={{ __html: ICONS[barsLock ? 'dk-lock' : 'dk-unlock'] ?? '' }} />
+  );
+  /**
+   * The bars floating: their handle on the slide's top left corner, or with the toolbar in columns at
+   * the sides at the end of the right one — a press, not a hover: what slides in under the pointer is
+   * not to be clicked by it
+   */
+  const barsHandle = (
+    <button type="button" class={floatSides ? 'dl-btn dl-bars-btn' : 'dl-bars-handle'} data-dl-bars-show aria-expanded={barsShown} aria-label="Menus, files and slides"
+      onPointerDown={e => e.stopPropagation()} onClick={() => showBars(!barsShown)}
+      title={`The menus${floatSides ? '' : ', the toolbar'}, the files and the slides: they slide in over the slide while you need them (or move the pointer to the screen's top edge). The lock keeps them on the screen.`}>
+      <PanelIcon name="bars" />
+    </button>
   );
   const invertBtn = darkS.dark && (
     <button class={'dl-btn dl-invert' + (darkS.invert ? ' on' : '')} data-dl-invert aria-pressed={darkS.invert} onClick={toggleDarkPages}
@@ -3753,6 +3898,8 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
       <div class="dl-side-end">
         {zoomSelect}
         {fullBtn}
+        {floatSides && !barsAway && barsHandle}
+        {barsLockBtn}
         {kind !== 'page' && !host.bindSvgExporter && <button class="dl-btn dl-present" title="Present from this slide (Shift+F5) — F5 from the first" aria-label="Present" data-dl-present onClick={() => startPresenting(false)}>▶</button>}
         <button class="dl-btn dl-more" title="More: objects, comments, code, editing or suggesting, download" aria-label="More" data-dl-more
           onClick={e => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); moreMenu(r.left, r.top); }}>
@@ -3812,7 +3959,10 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
   };
 
   return (
-    <div ref={editorRef} class={'dl-editor' + (presenting ? ' presenting' : '') + (focusOn ? ' dl-drawfocus' : '') + (fullOn ? ' dl-full' : '')} data-kind={kind} data-dock={dock} data-theme-view={themeOn ? '' : undefined}>
+    <div ref={editorRef} class={'dl-editor' + (presenting ? ' presenting' : '') + (focusOn ? ' dl-drawfocus' : '') + (fullOn ? ' dl-full' : '')} data-kind={kind} data-dock={dock} data-theme-view={themeOn ? '' : undefined}
+      style={floatOn ? `--dl-float-top: ${Math.max(0, barSizes.menu - barSizes.top)}px; --dl-float-left: ${Math.max(0, ACTIVITY_W - barSizes.left)}px` : undefined}>
+      {/* the bars floating (ol-bars-float): the pointer at the screen's top edge brings them, as their handle does (on the canvas, below) */}
+      {floatOn && !barsAway && <div class="dl-bars-edge" aria-hidden="true" onPointerEnter={e => { if (e.pointerType === 'mouse') showBars(); }} />}
       {saveState?.state === 'stale' && <div role="alert" data-dl-stale-notice style="padding:8px 12px;background:#fff5d8;color:#342700">
         This file was replaced while this browser had an older copy. Download the local source before reopening the latest file.
         <button class="btn" onClick={() => {
@@ -3840,6 +3990,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
           <button class="dl-btn" title="Zoom in (Ctrl+=)" onClick={() => zoomStep(1.25)}>+</button>
         </span>
         {fullBtn}
+        {barsLockBtn}
         {invertBtn}
         {objectsBtn}
         {codeBtn}
@@ -3946,6 +4097,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
                 onClick={retryOpening}>Retry opening</button>}
               {(canvasState === 'slow' || canvasState === 'failed') && <button type="button" class="dl-btn" onClick={() => setCodeOpen(true)}>Open Code</button>}
             </div>}
+            {floatOn && !floatSides && !barsAway && barsHandle}
             {drawPalette && <DrawPalette sections={bars.sections} />}
             <VoicePill armed={!locked && tool === 'pen' && ink.pen === 'comment'} owner={voiceOwner.current} slide={() => (kindRef.current === 'page' ? -1 : currentRef.current)} />
             {hud && <div key={hud.n} class="dl-hud" role="status" data-dl-hud style={hud.ms > 900 ? { animationDuration: `${hud.ms}ms` } : undefined}>{hud.text}</div>}
@@ -4007,6 +4159,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
         {rightCol}
       </div>
       {corner && !barsAway && (cornerSlot ? createPortal(corner, cornerSlot) : <div class="dl-foot">{corner}</div>)}
+      {slidesActivity && createPortal(slidesActivity, activitySlot!)}
       {floatPop && <FloatPopover {...floatPop} onClose={() => setFloatPop(null)} />}
       {citeOpen && host.docId && <CiteDialog meta={CITE_META} search docId={host.docId} project={host.docId.split('/').slice(0, 2).join('/')} restoreFocusOnInsert={false}
         onInsert={(keys, cmd, before, after) => {

@@ -29,7 +29,7 @@ export function adminCredentials(): { username: string; password: string } {
   return { username, password };
 }
 
-export async function login(page: Page, creds = adminCredentials(), opts: { tour?: boolean; ui?: 'classic' | 'modern' | 'default' } = {}): Promise<void> {
+export async function login(page: Page, creds = adminCredentials(), opts: { tour?: boolean; ui?: 'classic' | 'modern' | 'default'; floatBars?: boolean } = {}): Promise<void> {
   // Existing editor regressions exercise Classic's menus and toolbar positions explicitly.
   // New-user checks pass ui: 'default' to exercise the product's actual onboarding default.
   if (opts.ui !== 'default') await page.addInitScript(ui => {
@@ -38,6 +38,8 @@ export async function login(page: Page, creds = adminCredentials(), opts: { tour
   // the interactive tour is offered once per browser; keep it out of the way unless a spec wants it
   if (!opts.tour) await page.addInitScript(TOUR_SEEN_SCRIPT);
   await page.addInitScript(AUTOCORRECT_OFF_SCRIPT);
+  // (Playwright's screen is its viewport, a small one: a deck's bars would float over the slide — kept docked unless a test asks)
+  if (!opts.floatBars) await page.addInitScript(BARS_DOCKED_SCRIPT);
   await page.goto('/');
   // with Google sign-in configured the password form is folded away behind a link
   await page.locator('[data-password-login], input[placeholder="Username"]').first().waitFor({ timeout: 20000 });
@@ -80,6 +82,8 @@ export function collectErrors(page: Page, opts: { allowConsole?: (message: Conso
   return errors;
 }
 
+/** a deck's bars kept on the screen (its lock: DeliverableEditor `barsLock`), as a test expects them */
+const BARS_DOCKED_SCRIPT = () => { try { if (localStorage.getItem('ol.deckBars') === null) localStorage.setItem('ol.deckBars', 'lock'); } catch { /* ignore */ } };
 export const TOUR_SEEN_SCRIPT = () => { try { if (!localStorage.getItem('ol.tour')) localStorage.setItem('ol.tour', 'e2e'); } catch { /* ignore */ } };
 /** e2e types prose verbatim (papers!): autocorrect stays off unless a spec sets the key itself */
 const AUTOCORRECT_OFF_SCRIPT = () => { try { const p = JSON.parse(localStorage.getItem('ol.prefs') ?? '{}'); if (!('autoCorrect' in p)) { p.autoCorrect = false; localStorage.setItem('ol.prefs', JSON.stringify(p)); } } catch { /* ignore */ } };

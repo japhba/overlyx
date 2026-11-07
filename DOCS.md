@@ -1314,11 +1314,37 @@ blend.
     duplicate, move, delete; its header's « folds it away — `ol.deckSlides`, folded at first on
     screens under 700 px; the speaker notes' ▾ folds them away completely, `ol.deckNotes`). Folded,
     nothing of them is left beside, under or over the slide (the user, 12 Oct 2026: "the slide and menu
-    bar menus should be in the corners of the screen so as to not occlude any slide content"): their
-    buttons — *Slides · 3 of 12*, *Notes* (a dot when the slide has notes, its first line in the
-    tooltip) — are in the screen's bottom-left corner, after the files' (`app/CornerButton.tsx`,
-    portalled into the status bar's `[data-statusbar-slot]`; in VS Code, which has no status bar, a
-    strip of their own under the editor, `.dl-foot`). The **contextual toolbar** (`decktoolbar.tsx`, the toolbars' own
+    bar menus should be in the corners of the screen so as to not occlude any slide content"). Since
+    7 Nov 2026 (the user: "id like them to be in the left bar again, like in vscode") the slides'
+    button is in the app's **bar at the left** with the files' (`app/ActivityBar.tsx`, portalled into
+    `[data-activity-slot]`; lit while the rail is shown, `[data-dl-rail-show]` only while it is
+    folded), and the files and the slides take turns beside a deck (App `filesShown`: the files'
+    panel is hidden while the rail is shown; `ol.files` stays as the documents had it). Where that bar
+    would make the slide smaller (the slide as wide as the room), the deck puts the buttons in the
+    screen's bottom-left corner instead: *Slides · 3 of 12* after the files', in the status bar's
+    `[data-statusbar-slot]` (`app/CornerButton.tsx`). *Notes* (a dot when the slide has notes, its
+    first line in the tooltip) is always there: the notes open at the bottom. In VS Code, which has no
+    status bar, a strip of their own under the editor, `.dl-foot`.
+  * **The bars round the slide** (7 Nov 2026, the user: "id like to have the slide go edge to edge on
+    any screen … have a hover-over when there is no way to fit the bars at all … but only if that helps
+    maximize slide real estate on small ish screens (say below 13 inch). also have a lock"): a fitted
+    slide has no gap round it on any screen (`gap` 0). `deckdock.ts chooseBars` decides from the
+    window and the slide's shape — not from the panels open, so opening the files or the notes never
+    moves the bars their buttons are in: the bar at the left where it costs the slide nothing, else
+    its buttons in the status bar; on a small screen (`smallDisplay`: under 1780 CSS px across the
+    screen's diagonal — a 13-inch MacBook Air or iPad Pro, not a 14-inch MacBook Pro) where the slide
+    gets ≥ 2 % bigger without the bars, all of them **float** (`html.ol-bars-float`): the app's menu
+    bar, status bar and left bar and the deck's toolbar row leave the layout and slide away past the
+    screen's edges; the pointer at the screen's top edge (`.dl-bars-edge`, mouse only) or a press on
+    the handle on the slide's top-left corner (`[data-dl-bars-show]`; with the toolbar in side
+    columns — a phone held sideways, where they cost the slide nothing and stay — at the end of the
+    right one) slides them in over the slide (`html.ol-bars-shown`), and they slide away as the
+    pointer leaves them, at a press or touch elsewhere (the slide's frame taking the focus), or Esc —
+    not while a menu, a palette or a dialog is open or a field in them is typed in. The toolbar's lock
+    (`[data-dl-bars-lock]`, shown wherever they would float) keeps them docked: `localStorage
+    ol.deckBars` = `lock`. e2e logins set the lock (Playwright's screen is its small viewport);
+    `login(page, creds, { floatBars: true })` leaves it. Probe: `scratch/deck-bars.mts` (SIZE,
+    SCREEN, TOUCH, RAIL, NOTES, STEPS=show,edge,leave,lock,unlock,files,slides). The **contextual toolbar** (`decktoolbar.tsx`, the toolbars' own
     component: the tools always; then only what fits the selection — text, shape, line or picture
     tools, Arrange, Path and the rest — and with nothing selected the slide's *Background* (this
     slide or every slide), *Layout* (the slide put in another layout), guides, placeholders,
@@ -2480,9 +2506,12 @@ blend.
   take (`App.tsx`, a layout effect on the scroll container's top edge).
 * **Sidebars**: the documents panel (left) and the Comments / PDF / Versions panels (right) hide
   with the « » buttons in their tab strip; a hidden sidebar leaves a thin rail with its panels' names
-  that brings it back — on the left nothing at all: the page, or a slide, has all the width, and its
-  button (*Files*, `[data-rail="outline"]`) is in the screen's bottom-left corner, the status bar's
-  start (`StatusBar` `corner`, `app/CornerButton.tsx`; a deck's folded slides and notes follow it). The state is remembered per browser (`localStorage.ol.files`, `ol.right`; the
+  that brings it back — on the left the **panels' bar** (`app/ActivityBar.tsx`, VS Code's activity
+  bar, 40 px; the user, 7 Nov 2026): the files' key, lit while they are shown (`[data-rail="outline"]`
+  only while they are hidden), and an open deck's slides'. On a narrow screen (the drawer layout),
+  or beside a deck whose slide the bar would make smaller (deck section: *The bars round the slide*),
+  the files' button is in the screen's bottom-left corner instead, the status bar's start (`StatusBar`
+  `corner`, `app/CornerButton.tsx`; a deck's folded slides and notes follow it). The state is remembered per browser (`localStorage.ol.files`, `ol.right`; the
   right side starts hidden, a PDF build opens it).
 * **Seaborn's palettes in every colour picker** (`app/seaborn.tsx`): a row of ten under the grid of
   the Google-style picker (`ColorGrid`: document text colour, the slides' text / fill / border / line

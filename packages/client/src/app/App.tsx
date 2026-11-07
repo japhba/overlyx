@@ -63,6 +63,7 @@ import { Ruler, NOTE_SCALE_DEFAULT, NOTE_SCALE_MIN, NOTE_SCALE_MAX, MIN_WIDTH, M
 import { useNotesPane, useNotesFold, NotesSash, NotesUnfoldTab, NotesResolved } from './notespane';
 import { StatusBar, SaveIndicator, ZoomControl, type Status } from './StatusBar';
 import { CornerButton } from './CornerButton';
+import { ActivityBar, ActivityButton, useDeckBars } from './ActivityBar';
 import { SyncChip, useExternalSync } from './SyncChip';
 import { SourcePane, type SourceTarget, cursorLine, docBlocks, blockPos } from './SourcePane';
 import { activeMathField, mathFocusListeners, mathCursorListeners, type LyxMathField } from '../editor/lyxmath/field';
@@ -449,6 +450,20 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       setRightTab(null);
     });
   }, []);
+  /**
+   * The panels' bar at the left (ActivityBar.tsx), or their buttons in the status bar's corner — an open
+   * deck says which; elsewhere the bar, but not on a narrow screen. Beside a deck the files and its
+   * slide rail take turns: the files' panel is hidden while the rail is shown (the files stay "shown"
+   * for the documents).
+   */
+  const deckBars = useDeckBars();
+  const narrowScreen = useMedia(DRAWER_LAYOUT_QUERY);
+  const barsPlace = deckBars?.place ?? (narrowScreen ? 'bottom' : 'left');
+  const filesShown = showFiles && !deckBars?.rail;
+  const toggleFiles = () => {
+    if (!filesShown && deckBars?.rail) { deckBars.showRail(false); setShowFiles(true); }
+    else setShowFiles(!filesShown);
+  };
   // the LaTeX source is a panel below the writing area with its own switch
   useEffect(() => { try { localStorage.setItem('ol.files', showFiles ? '1' : '0'); localStorage.setItem('ol.right', rightTab ?? ''); } catch { /* ignore */ } }, [showFiles, rightTab]);
   // dragged sidebar widths from the last visit (SidebarGrip)
@@ -656,11 +671,11 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   // folded beside the PDF, a phone's drawer) the open document's project is looked up here instead
   const docProject = docId ? projectOfDoc(docId.replace(/^(text|pdf):/, '')) : null;
   useEffect(() => {
-    if (showFiles || !docProject || curProject?.name === docProject) return;
+    if (filesShown || !docProject || curProject?.name === docProject) return;
     let live = true;
     api.projects().then(r => { if (live) setCurProject(r.projects.find(p => p.name === docProject) ?? null); }).catch(() => {});
     return () => { live = false; };
-  }, [showFiles, docProject, curProject?.name, refreshKey]);
+  }, [filesShown, docProject, curProject?.name, refreshKey]);
   // the project's people's pictures beside their comments (shellutil applyCommentAvatars)
   useEffect(() => { applyCommentAvatars([user, curProject?.owner, ...(curProject?.members ?? [])]); }, [user, curProject]);
   const [selVersion, setSelVersion] = useState(0);
@@ -1614,7 +1629,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     editorViewMenu({ combined, setCombined, marginMode, toggleMargin, run, showRuler, setShowRuler, tbMode, setToolbar, textWidth, setTextWidth, stepTextWidth,
       hostItems: [
       { label: 'LaTeX source beside the document (raw view)', shortcut: 'Ctrl+Alt+S', checked: panes.shown.tex, action: toggleRawSplit },
-      { label: 'Outline', shortcut: 'Ctrl+Alt+O', checked: showFiles, action: () => setShowFiles(!showFiles) },
+      { label: 'Outline', shortcut: 'Ctrl+Alt+O', checked: filesShown, action: toggleFiles },
       { label: 'PDF preview', checked: panes.shown.pdf, action: () => flipPane('pdf') },
       // (Google Docs' print layout, with TeX's page breaks: editor/plugins/pages.ts)
       { label: 'Pages (breaks as in the PDF)', checked: pagesOn, action: togglePages },
@@ -1987,14 +2002,19 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         );
       })()}
       <div class="main">
-        {/* (hidden, its button is in the bottom-left corner: StatusBar `corner`) */}
-        {showFiles && (
+        {/* the panels' bar (ActivityBar.tsx): the files, a deck's slides (its portal); where it is not, their buttons are in the bottom-left corner (StatusBar `corner`) */}
+        {barsPlace === 'left' && (
+          <ActivityBar>
+            <ActivityButton icon="files" label="Files" title={LEFT_TITLE} on={filesShown} onClick={toggleFiles} data-rail={filesShown ? undefined : 'outline'} />
+          </ActivityBar>
+        )}
+        {filesShown && (
           <div class="sidebar left">
             <DocPanel current={textId} currentDoc={isLyxDoc ? docId : null} refreshKey={refreshKey} outline={outline} activePos={activePos} view={masterView}
               onOpen={(id, o) => openInTab(id, o)} onHide={() => setShowFiles(false)} onProject={setCurProject} notify={notify} />
           </div>
         )}
-        {showFiles && <SidebarGrip side="left" />}
+        {filesShown && <SidebarGrip side="left" />}
         {isLyxDoc && <ToolbarDock at="left">{toolbarRows}</ToolbarDock>}
         <div class={'editor-column panes' + (isLyxDoc && shownPanes.length > 1 ? ' split' : '')}>
         <div class={'editor-scroll' + (marginMode && isLyxDoc ? ' margin-mode' : '') + (inkMode && isLyxDoc ? ' ink-pan' : '')} ref={scrollRef} data-pane="doc" style={isLyxDoc ? paneStyle('doc') : undefined} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
@@ -2050,7 +2070,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
           (.bottom-toolbars is absolutely positioned), so their coming and going with the cursor
           never shifts the document. */}
       {/* (each can be dragged by its name to another edge of the document: app/ctxdock.tsx) */}
-      {isLyxDoc && <ContextBars style={{ left: showFiles ? 'var(--left-width, 272px)' : '0px', right: rightTab ? 'var(--right-width, 360px)' : '24px' }} bars={contextBars([
+      {isLyxDoc && <ContextBars style={{ left: `calc(${filesShown ? 'var(--left-width, 272px)' : '0px'} + ${barsPlace === 'left' ? 'var(--activity-w, 40px)' : '0px'})`, right: rightTab ? 'var(--right-width, 360px)' : '24px' }} bars={contextBars([
         [tb.showMath, 'math', <Toolbar id="math" label="Math" groups={tb.math} />],
         [tb.showMath && tbMode('mathpanels') !== 'off', 'mathpanels', <Toolbar id="mathpanels" label="Panels" groups={tb.mathPanels} />],
         [tb.showTable, 'table', <Toolbar id="table" label="Table" groups={tb.table} />],
@@ -2063,7 +2083,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         docLabel={view && masterView && view !== masterView ? viewDocId(view).split('/').pop() ?? null : null}
         readOnly={!!docId && viewOnly} updateReady={updateReady} aiBusy={aiBusy > 0}
         quiet={!!docId && !isLyxDoc} stats={docStats} pageInfo={pagesOn && masterView && isLyxDoc ? pageAtCursor(masterView.state) : null} zoom={zoom} onZoom={setZoom}
-        corner={!showFiles && <CornerButton icon="files" title={LEFT_TITLE} data-rail="outline" onClick={() => setShowFiles(true)}>Files</CornerButton>}
+        corner={barsPlace === 'bottom' && !filesShown && <CornerButton icon="files" title={LEFT_TITLE} data-rail="outline" onClick={toggleFiles}>Files</CornerButton>}
         sync={syncChip}
         pdf={isLyxDoc ? { state: pdf, onClick: rebuild => { if (rebuild && !pdf.busy) void build(); else if (!pdfPaneVisible) changePanes(l => (narrowPanes ? { ...setPaneShown(l, 'pdf', true), order: ['pdf', ...l.order.filter(p => p !== 'pdf')] } : setPaneShown(l, 'pdf', true))); } } : undefined} />
       {renderDialog()}

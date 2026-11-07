@@ -622,23 +622,29 @@ test('Draw: strokes one after the other in the pen\'s colour, the highlighter, t
   await slides(page).first().waitFor({ timeout: 30000 });
   await expect(page.locator('[data-dl-rail-show]')).toBeVisible();
   await expect(page.locator('[data-dl-notes-show]')).toBeVisible();
-  // folded away, neither the slides, the notes nor the files panel takes room beside or under the slide,
-  // and nothing of them lies over it: their buttons are in the screen's bottom-left corner (the status bar)
-  await page.locator('.docpanel .hide').click();
+  // folded away, neither the slides, the notes nor the files panel takes room beside or under the slide, and nothing
+  // of them lies over it: the files' and the slides' buttons are in the bar at the left (ActivityBar.tsx: the slide
+  // is as high as the room, the bar costs it nothing), the notes' in the screen's bottom-left corner (the status bar)
+  if (await page.locator('.sidebar.left .docpanel').count()) await page.locator('.docpanel .hide').click();
   await expect(page.locator('[data-rail="outline"]')).toBeVisible();
-  await expect.poll(async () => { const m = (await page.locator('.main').boundingBox())!, cv = (await page.locator('.dl-canvas').boundingBox())!; return [Math.round(cv.x - m.x), Math.round(m.y + m.height - cv.y - cv.height)].join(); }).toBe('0,0');
+  await expect.poll(async () => { const a = (await page.locator('.activitybar').boundingBox())!, m = (await page.locator('.main').boundingBox())!, cv = (await page.locator('.dl-canvas').boundingBox())!; return [Math.round(cv.x - a.x - a.width), Math.round(m.y + m.height - cv.y - cv.height)].join(); }).toBe('0,0');
   const cv0 = (await page.locator('.dl-canvas').boundingBox())!;
-  for (const sel of ['[data-rail="outline"]', '[data-dl-rail-show]', '[data-dl-notes-show]']) {
+  for (const sel of ['[data-rail="outline"]', '[data-dl-rail-show]']) {
     const b = (await page.locator(sel).boundingBox())!;
-    expect(b.y).toBeGreaterThanOrEqual(cv0.y + cv0.height);
-    expect(b.x).toBeLessThan(400);
-    await expect(page.locator(`.statusbar ${sel}`)).toBeVisible();
+    expect(b.x + b.width).toBeLessThanOrEqual(cv0.x);
+    await expect(page.locator(`.activitybar ${sel}`)).toBeVisible();
   }
+  const nb = (await page.locator('[data-dl-notes-show]').boundingBox())!;
+  expect(nb.y).toBeGreaterThanOrEqual(cv0.y + cv0.height);
+  expect(nb.x).toBeLessThan(400);
+  await expect(page.locator('.statusbar [data-dl-notes-show]')).toBeVisible();
   await expect(page.locator('.dl-canvas button, .dl-canvas [role="button"]')).toHaveCount(0);
+  // the files and the slides take turns beside a deck
   await page.locator('[data-rail="outline"]').click();
   await expect(page.locator('.sidebar.left .docpanel')).toBeVisible();
   await page.locator('[data-dl-rail-show]').click();
   await expect(page.frameLocator('.dl-railframe').locator('section.slide')).toHaveCount(2);
+  await expect(page.locator('.sidebar.left .docpanel')).toHaveCount(0);
   await page.locator('[data-dl-notes-show]').click();
   await expect(page.locator('[data-dl-notes]')).toBeVisible();
   expect(real(errors)).toEqual([]);

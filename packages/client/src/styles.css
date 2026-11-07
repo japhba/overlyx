@@ -1088,6 +1088,17 @@ html[data-theme="dark"] { --cm-accent: #f4c03c; --cm-chip-bg: #8a6b12; --cm-chip
 .corner-btn:hover { background: var(--ui-hover); color: var(--ui-fg); }
 .corner-btn svg { width: 14px; height: 14px; flex: none; }
 .corner-btn .dl-notes-dot { color: var(--accent); }
+/* the panels' bar at the left (app/ActivityBar.tsx), VS Code's activity bar: a key a panel, lit while it is shown */
+.activitybar { flex: none; width: 40px; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 0; background: var(--ui-bg2); border-right: 1px solid var(--ui-border); }
+.activity-slot { display: contents; }
+.activity-btn { position: relative; flex: none; width: 32px; height: 32px; padding: 0; display: flex; align-items: center; justify-content: center; border: 0; border-radius: 5px; background: none; color: var(--ui-muted); cursor: pointer; }
+.activity-btn svg { width: 19px; height: 19px; }
+.activity-btn:hover { background: var(--ui-hover); color: var(--ui-fg); }
+.activity-btn.on { color: var(--ui-fg); }
+.activity-btn.on::before { content: ''; position: absolute; left: -4px; top: 5px; bottom: 5px; width: 2px; border-radius: 1px; background: var(--accent); }
+.activity-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+html[data-presenting] .activitybar { display: none !important; }
+@media (max-width: 900px) { html:not(.ol-bars-float) .main > .activitybar + .sidebar.left { left: 40px; } }
 .statusbar > span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .statusbar .build-version { flex-shrink: 0; font-variant-numeric: tabular-nums; user-select: text; }
 /* presence (top right of the menubar, Google-Docs style): overlapping avatars, the Share pill, the account avatar with its menu */
@@ -3516,11 +3527,12 @@ html[data-ui] .dl-side .tb-label { font-size: 9px; letter-spacing: .06em; white-
 .dl-more { position: relative; font-size: 18px; width: 40px; }
 .dl-more .dl-rv-count { position: absolute; top: 0; right: 0; }
 /* drawing with the toolbars away (DeliverableEditor drawFocus, as Apple Notes' palette folds while one draws): the app's bars go too */
-html.ol-draw-focus .app > .menubar, html.ol-draw-focus .app .statusbar,
+html.ol-draw-focus .app > .menubar, html.ol-draw-focus .app .statusbar, html.ol-draw-focus .app > .main > .activitybar,
 html.ol-draw-focus .app > .health-bar, html.ol-draw-focus .app > .find-bar-wrap, html.ol-draw-focus .app > .guest-callout { display: none !important; }
 /* the slide on the whole screen (DeliverableEditor full): the files and the rail go too, and the editor keeps no toolbars, notes or panes */
 html.ol-deck-full .app > .menubar, html.ol-deck-full .app .statusbar, html.ol-deck-full .app > .health-bar, html.ol-deck-full .app > .find-bar-wrap,
-html.ol-deck-full .app > .guest-callout, html.ol-deck-full .app > .tb-dock-top, html.ol-deck-full .app > .main > .sidebar, html.ol-deck-full .app > .main > .sidebar-grip { display: none !important; }
+html.ol-deck-full .app > .guest-callout, html.ol-deck-full .app > .tb-dock-top, html.ol-deck-full .app > .main > .sidebar, html.ol-deck-full .app > .main > .sidebar-grip,
+html.ol-deck-full .app > .main > .activitybar { display: none !important; }
 .dl-editor.dl-full .dl-rail { display: none; }
 /* the Draw row on a touch screen: a palette on the canvas at the edge it was dragged to (deliverable/drawpalette.tsx) — upright at the sides; its grip drags it, the edges light up and a dashed outline shows where it goes */
 .dl-drawpal { position: absolute; z-index: 8; display: flex; align-items: center; max-width: calc(100% - 20px); overflow: auto hidden; scrollbar-width: none; padding: 3px 6px 3px 2px; background: var(--surface); border: 1px solid var(--ui-border); border-radius: 12px; box-shadow: 0 4px 18px rgba(0, 0, 0, .2); transition: left .2s cubic-bezier(.2, .8, .3, 1), top .2s cubic-bezier(.2, .8, .3, 1), transform .15s, box-shadow .15s, opacity .15s; touch-action: pan-x; }
@@ -3575,6 +3587,7 @@ html.ol-bars-leaving .app > .menubar, html.ol-bars-leaving .dl-toolbar { transfo
 html.ol-bars-leaving .app .statusbar { transform: translateY(100%); }
 html.ol-bars-leaving .dl-side.left { transform: translateX(-100%); }
 html.ol-bars-leaving .dl-side.right { transform: translateX(100%); }
+html.ol-bars-leaving .main > .activitybar { transform: translateX(-100%); transition: transform .18s ease-in; }
 @keyframes ol-bar-from-top { from { transform: translateY(-100%); opacity: 0; } }
 @keyframes ol-bar-from-bottom { from { transform: translateY(100%); opacity: 0; } }
 @keyframes ol-bar-from-left { from { transform: translateX(-100%); opacity: 0; } }
@@ -3583,6 +3596,34 @@ html.ol-bars-back .app > .menubar, html.ol-bars-back .dl-toolbar { animation: ol
 html.ol-bars-back .app .statusbar { animation: ol-bar-from-bottom .18s ease-out; }
 html.ol-bars-back .dl-side.left { animation: ol-bar-from-left .18s ease-out; }
 html.ol-bars-back .dl-side.right { animation: ol-bar-from-right .18s ease-out; }
+html.ol-bars-back .main > .activitybar { animation: ol-bar-from-left .18s ease-out; }
+/* the bars floating over the slide (DeliverableEditor floatOn — a small screen, where any of them would make the slide
+   smaller): out of the layout, slid away past the screen's edges; html.ol-bars-shown slides them in over the slide —
+   the menu bar and the toolbar from the top, the panels' bar from the left, the status bar from the bottom */
+html.ol-bars-float .app > .menubar { position: fixed; top: 0; left: 0; right: 0; z-index: 72; }
+html.ol-bars-float .app > .statusbar { position: fixed; bottom: 0; left: 0; right: 0; z-index: 72; }
+html.ol-bars-float .app > .main > .activitybar { position: fixed; left: 0; top: var(--ol-float-top, 0px); bottom: var(--ol-float-bottom, 0px); z-index: 71; }
+html.ol-bars-float .dl-editor { position: relative; }
+html.ol-bars-float .dl-editor > .dl-toolbar { position: absolute; top: var(--dl-float-top, 0px); left: var(--dl-float-left, 0px); right: 0; z-index: 71; }
+html.ol-bars-float :is(.app > .menubar, .app > .statusbar, .app > .main > .activitybar, .dl-editor > .dl-toolbar) { visibility: hidden; transition: transform .18s ease-in, visibility 0s linear .18s; }
+html.ol-bars-float .app > .menubar { transform: translateY(-100%); }
+html.ol-bars-float .dl-editor > .dl-toolbar { transform: translateY(calc(-100% - var(--dl-float-top, 0px))); }
+html.ol-bars-float .app > .statusbar { transform: translateY(100%); }
+html.ol-bars-float .app > .main > .activitybar { transform: translateX(-100%); }
+html.ol-bars-float.ol-bars-shown :is(.app > .menubar, .app > .statusbar, .app > .main > .activitybar, .dl-editor > .dl-toolbar) { visibility: visible; transform: none; transition: transform .18s ease-out; }
+html.ol-bars-float.ol-bars-shown .dl-editor > .dl-toolbar { box-shadow: 0 4px 12px rgba(0,0,0,.12); }
+html.ol-bars-float.ol-bars-shown .app > .main > .activitybar { box-shadow: 4px 0 12px rgba(0,0,0,.10); }
+html.ol-bars-float.ol-bars-shown .app > .statusbar { box-shadow: 0 -4px 12px rgba(0,0,0,.08); }
+/* what brings them: the pointer at the screen's top edge, a press on the handle on the slide's top left corner */
+.dl-bars-edge { position: fixed; top: 0; left: 0; right: 0; height: 5px; z-index: 70; }
+@media (hover: none) { .dl-bars-edge { display: none; } }
+.dl-bars-handle { position: absolute; top: 6px; left: 6px; z-index: 9; width: 30px; height: 26px; padding: 0; display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--ui-border); border-radius: 7px; background: var(--surface); color: var(--ui-muted); opacity: .72; cursor: pointer; box-shadow: 0 1px 6px rgba(0,0,0,.14); transition: opacity .15s; }
+.dl-bars-handle svg { width: 17px; height: 17px; }
+.dl-bars-btn svg { width: 18px; height: 18px; display: block; }
+.dl-bars-handle:hover, .dl-bars-handle:focus-visible { opacity: 1; color: var(--ui-fg); }
+html.ol-bars-shown .dl-bars-handle { opacity: 0; pointer-events: none; }
+@media (pointer: coarse) { .dl-bars-handle { top: 8px; left: 8px; width: 40px; height: 34px; } .dl-bars-handle svg { width: 21px; height: 21px; } }
 /* the pen in hand at the slide's top right corner (its tap: the Draw row under it) and Undo beside it */
 .dl-focus { position: absolute; z-index: 7; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; pointer-events: none; max-width: calc(100% - 16px); }
 .dl-focus-row { display: flex; gap: 8px; }

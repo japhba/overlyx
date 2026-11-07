@@ -8,7 +8,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { deckMargins, deckDesign, builtInLayouts, savedLayouts, layoutFromSlide, saveLayoutOp, applyLayoutOp, placeholderObject, layoutThumb, deckColors } from '../packages/client/src/deliverable/decklayouts.ts';
 import { newSlideHtml, nextPageHtml } from '../packages/client/src/deliverable/sourceops.ts';
-import { chooseDock } from '../packages/client/src/deliverable/deckdock.ts';
+import { chooseDock, chooseBars } from '../packages/client/src/deliverable/deckdock.ts';
+import { fitScale } from '../packages/client/src/deliverable/viewport.ts';
 import { nearestDock, palPlace } from '../packages/client/src/deliverable/drawpalette.tsx';
 import { applyOp, parseSource } from '../packages/core/src/html/source.ts';
 import { slideElements } from '../packages/core/src/html/deliverable.ts';
@@ -197,6 +198,35 @@ describe('where the toolbars go on a touch screen', () => {
     const a = chooseDock({ ...near, current: 'top' }).dock, b = chooseDock({ ...near, current: 'sides' }).dock;
     expect([a, b]).toContain(b);
     expect(chooseDock({ ...near, current: a }).dock).toBe(a);
+  });
+});
+
+describe('the bars round a slide (chooseBars)', () => {
+  const slide = { w: 1280, h: 720 };
+  // a desktop: the app's menu bar 52, the toolbar's row 40, the status bar 24, the panels' bar 40 wide; the slide rail 170 beside the canvas
+  const bars = (w: number, h: number, o: { small?: boolean; locked?: boolean; rail?: number; notes?: number } = {}) => {
+    const rail = o.rail ?? 170, notes = o.notes ?? 0;
+    const room = { w, h };
+    return chooseBars({ room, menu: 52, status: 24, activity: 40,
+      docked: a => fitScale({ w: a.w - rail, h: a.h - notes - 40 }, slide, 0),
+      whole: fitScale({ w: w - rail, h: h - notes }, slide, 0),
+      small: o.small ?? false, locked: o.locked ?? false, current: { place: 'left', wanted: false } });
+  };
+  it('the panels\' bar at the left where the slide is as high as the room and has canvas beside it, else in the status bar', () => {
+    expect(bars(1920, 1000).place).toBe('left');
+    expect(bars(1100, 1000).place).toBe('bottom');
+  });
+  it('a big screen: never floating, however much the slide would gain', () => {
+    expect(bars(1920, 800, { notes: 74 }).float).toBe(false);
+  });
+  it('a small screen: floating where the slide gets bigger without the bars — not where it is as wide as the room anyway', () => {
+    const laptop = bars(1470, 830, { small: true, rail: 0, notes: 74 });
+    expect(laptop).toMatchObject({ wanted: true, float: true });
+    // an iPad upright: the slide as wide as the screen with the bars or without
+    expect(bars(820, 1180, { small: true, rail: 0 }).wanted).toBe(false);
+  });
+  it('locked: wanted, but kept on the screen', () => {
+    expect(bars(1470, 830, { small: true, rail: 0, locked: true })).toMatchObject({ wanted: true, float: false });
   });
 });
 
