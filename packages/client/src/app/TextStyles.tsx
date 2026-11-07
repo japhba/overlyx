@@ -554,11 +554,11 @@ export function TextStylesPanel({ docId, headerLines, view, markdown, layout, sc
   );
 }
 
-function Seg({ value, options, onChange }: { value: string; options: [string, string][]; onChange: (v: string) => void }) {
+export function Seg({ value, options, onChange }: { value: string; options: [string, string][]; onChange: (v: string) => void }) {
   return <span class="ts-seg">{options.map(([v, l]) => <button key={v} type="button" class={v === value ? 'on' : ''} onClick={() => onChange(v)}>{l}</button>)}</span>;
 }
 
-function Colors({ value, onChange }: { value?: string; onChange: (c: string | undefined) => void }) {
+export function Colors({ value, onChange }: { value?: string; onChange: (c: string | undefined) => void }) {
   return (
     <span class="ts-colors">
       <button type="button" class={'ts-swatch ts-none' + (!value ? ' on' : '')} title="The document's colour" onClick={() => onChange(undefined)}>⦸</button>
@@ -572,7 +572,7 @@ function Colors({ value, onChange }: { value?: string; onChange: (c: string | un
 const rungStyle = (p: number) => ({ left: `${p}%`, ...(p < 8 ? { transform: 'none', alignItems: 'flex-start' } : p > 92 ? { transform: 'translateX(-100%)', alignItems: 'flex-end' } : {}) });
 
 /** a continuous slider whose knob snaps to its rungs (within 1.5 % of the range); the rungs labelled under it where they fit */
-function Slider({ min, max, step, value, rungs, format, onChange }: { min: number; max: number; step: number; value: number; rungs: { v: number; label: string }[]; format: (v: number) => string; onChange: (v: number) => void }) {
+export function Slider({ min, max, step, value, rungs, format, onChange }: { min: number; max: number; step: number; value: number; rungs: { v: number; label: string }[]; format: (v: number) => string; onChange: (v: number) => void }) {
   const span = max - min || 1;
   const pct = (v: number) => ((Math.min(max, Math.max(min, v)) - min) / span) * 100;
   const [v, setV] = useState(value);

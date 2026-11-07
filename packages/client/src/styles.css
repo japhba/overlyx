@@ -2246,6 +2246,39 @@ html[data-presenting] .editor-column.panes > .editor-scroll { display: block !im
 /* Appearance ▸ Text grade: the font picker's axis slider (rungs) over a sample at that grade — the
    sample in the interface's font, its grade the slider's (on top of the dark theme's) */
 .settings-grade { max-width: 420px; display: grid; gap: 4px; }
+/* Settings ▸ Fonts ▸ your editor's text styles (app/EditorStyles.tsx): the tree of styles beside the
+   chosen one's properties, each with where its value comes from; a sample page below */
+.es { display: grid; gap: 10px; }
+.es-main { display: grid; grid-template-columns: minmax(150px, 190px) minmax(0, 1fr); gap: 12px; align-items: start; }
+.es-tree { display: grid; gap: 1px; border: 1px solid var(--ui-border2); border-radius: 6px; padding: 4px; background: var(--ui-bg); }
+.es-node { display: flex; align-items: center; justify-content: space-between; gap: 6px; text-align: left; border: 0; background: none; color: var(--ui-fg);
+  padding-top: 5px; padding-bottom: 5px; padding-right: 8px; border-radius: 4px; cursor: pointer; min-width: 0; }
+.es-node:hover { background: var(--ui-bg2); }
+.es-node.on { background: var(--accent); color: #fff; }
+.es-node.on .es-node-name { color: #fff !important; }
+.es-node-name { font-size: 13px !important; margin: 0 !important; padding: 0 !important; border: 0 !important; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.3; }
+.es-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .7; flex: none; }
+.es-props { display: grid; gap: 6px; min-width: 0; }
+.es-props-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.es-parent { font-size: 12px; color: var(--ui-muted); }
+.es-clear { margin-left: auto; font-size: 12px; }
+.es-prop { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px; align-items: center; }
+.es-label { font-size: 12.5px; color: var(--fg2); display: grid; gap: 1px; }
+.es-control { min-width: 0; }
+.es-control .ts-seg { flex-wrap: wrap; }
+.es-control .ts-seg button { padding: 2px 7px; font-size: 12px; white-space: nowrap; }
+.es-origin { font-size: 11px; color: var(--ui-muted); display: flex; align-items: center; gap: 3px; }
+.es-origin.own { color: var(--accent); font-weight: 600; }
+.es-reset { border: 0; background: none; color: inherit; cursor: pointer; font-size: 13px; padding: 0 2px; }
+.es-face { margin: -2px 0 2px 104px; }
+.es-sample { border: 1px solid var(--ui-border2); border-radius: 6px; padding: 12px 16px; background: var(--page-bg); color: var(--editor-fg);
+  font-size: 15px; line-height: 1.45; display: grid; gap: 4px; max-height: 260px; overflow: auto; }
+.es-s-title { text-align: center; }
+.es-s-quote { margin-left: 2em; margin-right: 2em; }
+@media (max-width: 720px) {
+  .es-main { grid-template-columns: 1fr; }
+  .es-face { margin-left: 0; }
+}
 .settings-grade-sample { font: 15px/1.4 var(--ui-font); padding: 6px 8px; border: 1px solid var(--ui-border2); border-radius: 6px; background: var(--ui-bg); }
 .lyx-editor.font-sample { flex: none; min-height: 0; max-width: none; margin: 0; padding: 8px 12px; font-size: 14.5px; line-height: 1.4; background: var(--page-bg); border: 1px solid var(--ui-border); border-radius: 4px; }
 .lyx-editor.font-sample p { margin: 0 0 2px; text-align: justify; hyphens: auto; }

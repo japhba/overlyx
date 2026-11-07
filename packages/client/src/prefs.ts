@@ -6,7 +6,7 @@
  * which is something a user should switch on knowingly (the server also has to be configured
  * with a key — Tools ▸ AI says so when it is not).
  */
-import type { TextStyles } from '@overlyx/core';
+import type { ScreenStyles } from '@overlyx/core';
 
 export interface Prefs {
   /** spell checking on the text (red underlines) */
@@ -68,7 +68,7 @@ export interface Prefs {
    * Text styles for this editor only (core textstyles.ts: the "my editor" layer over the document's
    * and its LaTeX's): every document is drawn with them, the PDF never (app/TextStyles.tsx)
    */
-  screenStyles: TextStyles;
+  screenStyles: ScreenStyles;
   /** the editor's math font (fonts/catalog.ts MATH_FONTS), or 'match' for the one drawn for the text face */
   editorMathFont: string;
   /** a tip with the shortcut after an action was taken with the mouse a few times (shortcuttips.ts) */

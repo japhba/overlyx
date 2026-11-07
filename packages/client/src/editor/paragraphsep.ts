@@ -8,6 +8,7 @@
 import {
   HEADING_LEVELS, TEXT_TYPES, TYPE_LAYOUTS, SIZE_EM, FAMILY_FONTS, headingDisplay, styleLayers, pdfStyles, mergeStyles, bodyDefaults, parseFace, faceCss,
   type HeadingLevel, type TextStyle, type TextStyles, type TextType, type TexLayer,
+  resolveScreenStyles, type ScreenStyles,
 } from '@overlyx/core';
 import { faceForFontName, FOLLOW_DOCUMENT, GOOGLE_FACE } from '../fonts/catalog';
 import { loadGoogleFont } from '../fonts/googlefont';
@@ -74,6 +75,9 @@ function declarations(st: TextStyle, runIn: boolean): string[] {
   return d;
 }
 
+/** a style's look as inline CSS declarations (Settings ▸ Fonts ▸ your editor's text styles: its samples) */
+export const styleSampleCss = (st: TextStyle): string => declarations(st, false).join('; ');
+
 /** the CSS of the styles the editor draws; `bodyFont`: the body's font by name when it is drawn (its axes and features) */
 export function stylesCss(styles: TextStyles, bodyFont?: string | null): string {
   const out: string[] = [];
@@ -130,13 +134,14 @@ export interface EditorStyleLayers { document: TextStyles; tex: TexLayer; pdf: T
 
 let header: readonly string[] = [];
 /** the style editor's changes, drawn before they are saved (app/TextStyles.tsx) */
-let preview: { document?: TextStyles; tex?: TexLayer; screen?: TextStyles } | null = null;
+let preview: { document?: TextStyles; tex?: TexLayer; screen?: ScreenStyles } | null = null;
 
 export function editorStyleLayers(headerLines: readonly string[] = header): EditorStyleLayers {
   const l = styleLayers(headerLines);
   const document = preview?.document ?? l.document, tex = preview?.tex ?? l.tex;
   const pdf = preview ? pdfStyles(document, tex) : l.pdf;
-  const screen = preview?.screen ?? getPrefs().screenStyles ?? {};
+  // (the editor layer's tree: heading levels with what All headings sets: core resolveScreenStyles)
+  const screen = resolveScreenStyles(preview?.screen ?? getPrefs().screenStyles ?? {});
   return { document, tex, pdf, screen, editor: mergeStyles(pdf, screen), markdown: l.markdown };
 }
 
@@ -167,7 +172,7 @@ export function setDocumentHeadings(headerLines: readonly string[]): void {
 }
 
 /** the style editor's changes, drawn at once (null: what the document and the preferences say) */
-export function previewTextStyles(p: { document?: TextStyles; tex?: TexLayer; screen?: TextStyles } | null): void {
+export function previewTextStyles(p: { document?: TextStyles; tex?: TexLayer; screen?: ScreenStyles } | null): void {
   preview = p;
   render();
 }

@@ -30,6 +30,7 @@ import { useUiMode } from './uimode';
 import { formatShortcut } from './shortcuts';
 import { setThemePref, useTheme, DARK_TONES, GRADE_RUNGS, GRADE_MIN, GRADE_MAX, type ThemePref } from './theme';
 import { AxisSlider } from './FontPicker';
+import { EditorStyles } from './EditorStyles';
 import { REWRITE_KEY } from '../editor/ai/rewrite';
 import { Dialog, uiAlert } from './Dialogs';
 import { InlineModelPicker } from './AgentModelPicker';
@@ -219,6 +220,9 @@ export function SettingsPanel({ ai, user, initial, onClose, sections: shown = SE
               onPick={() => {}} title="Math font" data={{ 'data-pref': 'editorMathFont', 'data-value': p.editorMathFont }} /></Row>
             <div class="sub">Formulas are laid out by MathJax from the math font’s own data, as TeX does from an OpenType math font; text inside formulas is in the text font. Text styles ▸ Only my editor sets the rest of how your editor shows text — headings, sizes, colours.</div>
             <FontSample />
+            <h3>Your editor’s text styles</h3>
+            <div class="sub">How your editor draws each kind of text in every document, in this browser; the PDF and other people’s editors keep the document’s own. A style takes what it does not set from the one above it.</div>
+            <EditorStyles />
             <h3>The document’s fonts</h3>
             <div class="sub">What the PDF and everyone’s editor show is the document’s own: Document ▸ Text styles (its text and headings), the toolbar’s font button (the selected text), and for LaTeX documents the details in Document ▸ Settings ▸ Fonts.</div>
             <h3>My fonts</h3>

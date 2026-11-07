@@ -190,6 +190,60 @@ export function stylesJson(styles: TextStyles): string {
 }
 
 /** `b` over `a`, type by type and key by key */
+/**
+ * One person's own styles for their editor (the "my editor" layer, prefs.screenStyles), as a tree:
+ * besides a style per kind, "All headings" (`headings`), which every heading level takes what it does
+ * not set itself from. The font and the colour come from Normal text through the page itself (CSS
+ * inheritance: the editor's text font, prefs.editorFont, is Normal text's) where nothing else sets them;
+ * weight, size and spacing never flow down, or headings would lose their weight.
+ */
+export const ALL_HEADINGS = 'headings' as const;
+export type ScreenStyleKey = TextType | typeof ALL_HEADINGS;
+export type ScreenStyles = TextStyles & { [ALL_HEADINGS]?: TextStyle };
+/** each style's parent in the tree (Normal text at the top) */
+export const SCREEN_PARENT: Record<ScreenStyleKey, ScreenStyleKey | null> = {
+  body: null, title: 'body', quote: 'body', headings: 'body',
+  section: 'headings', subsection: 'headings', subsubsection: 'headings', paragraph: 'headings',
+};
+/** what a child takes from Normal text when nothing else sets it (the page's CSS inheritance) */
+export const FROM_BODY: StyleKey[] = ['font', 'color'];
+
+/** the editor layer as the editor draws it: every heading level with what All headings sets and it does not */
+export function resolveScreenStyles(screen: ScreenStyles): TextStyles {
+  const out: TextStyles = {};
+  const all = screen[ALL_HEADINGS] ?? {};
+  for (const t of TEXT_TYPES) {
+    const st = isHeading(t) ? { ...all, ...(screen[t] ?? {}) } : { ...(screen[t] ?? {}) };
+    if (Object.keys(st).length) out[t] = st;
+  }
+  return out;
+}
+
+/** where a style's value comes from: its own, an ancestor in the editor layer, the document (PDF), Normal text, or LaTeX's default */
+export type StyleOrigin = { from: 'own' | 'parent' | 'document' | 'body' | 'default'; parent?: ScreenStyleKey };
+/**
+ * A key's value for a style of the editor layer over the document's (`pdf`: what the PDF has), with
+ * where it comes from: own > All headings (heading levels) > the document > Normal text (font,
+ * colour) > undefined (LaTeX's default).
+ */
+export function screenValue<K extends StyleKey>(screen: ScreenStyles, pdf: TextStyles, key: ScreenStyleKey, k: K): { value: TextStyle[K] | undefined; origin: StyleOrigin } {
+  const own = screen[key]?.[k];
+  if (own !== undefined) return { value: own, origin: { from: 'own' } };
+  if (key !== 'body' && key !== ALL_HEADINGS && SCREEN_PARENT[key] === ALL_HEADINGS) {
+    const v = screen[ALL_HEADINGS]?.[k];
+    if (v !== undefined) return { value: v, origin: { from: 'parent', parent: ALL_HEADINGS } };
+  }
+  // (All headings itself shows what the document gives the first level)
+  const docType: TextType = key === ALL_HEADINGS ? 'section' : key;
+  const doc = pdf[docType]?.[k];
+  if (doc !== undefined) return { value: doc, origin: { from: 'document' } };
+  if (key !== 'body' && FROM_BODY.includes(k)) {
+    const v = screen.body?.[k] ?? pdf.body?.[k];
+    if (v !== undefined) return { value: v, origin: { from: 'body', parent: 'body' } };
+  }
+  return { value: undefined, origin: { from: 'default' } };
+}
+
 export function mergeStyles(a: TextStyles, b: TextStyles): TextStyles {
   const out: TextStyles = {};
   for (const t of TEXT_TYPES) { const st = { ...(a[t] ?? {}), ...(b[t] ?? {}) }; if (Object.keys(st).length) out[t] = st; }
