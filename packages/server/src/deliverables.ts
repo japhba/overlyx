@@ -202,7 +202,7 @@ export async function resolveDeliverable(token: string, rawRest: string, query: 
     let html: string;
     const mode = (RUNTIME_MODES as readonly string[]).includes(String(query.ol)) ? String(query.ol) as RuntimeMode : 'view';
     try { html = mode === 'embed' ? await embedHtml(grant.project, rel, String(query.b ?? '')) : await liveHtml(grant.project, rel); } catch { return { status: 404, type: 'text/plain', body: 'Not found.' }; }
-    return { status: 200, type: 'text/html; charset=utf-8', body: injectRuntime(html, runtimeTags(mode, { ...extrasOf(grant.project, rel, html), ...((mode === 'edit' || mode === 'thumb') ? { source: html } : {}) }, runtimeSrc())), headers: { 'Cache-Control': 'no-store' } };
+    return { status: 200, type: 'text/html; charset=utf-8', body: injectRuntime(html, runtimeTags(mode, { ...extrasOf(grant.project, rel, html), ...((mode === 'edit' || mode === 'thumb' || mode === 'present') ? { source: html } : {}) }, runtimeSrc())), headers: { 'Cache-Control': 'no-store' } };
   }
 
   let st: fs.Stats;

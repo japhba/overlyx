@@ -16,7 +16,8 @@ import { api, googleSignInUrl, knownProjects, type AiStatus, type BibAddResult, 
 import { getPrefs, setPref, subscribePrefs, type Prefs } from '../prefs';
 import { openRewrite, REWRITE_KEY } from '../editor/ai/rewrite';
 import { Login } from './Login';
-import { DocPanel } from './DocPanel';
+import { DocPanel, openProjectSearch } from './DocPanel';
+import { QuickOpen } from './QuickOpen';
 import { DRAWER_LAYOUT_QUERY, foldDrawersOnNarrow } from './drawerLayout';
 import { Home, projectDocs, ProjectRootPanel } from './Home';
 import { pendingImportFlag } from './pendingImport';
@@ -77,7 +78,7 @@ import { useProjectEvents, deletedHere, siblingDocument } from './FileBrowser';
 import { newerVersionAvailable, reloadHeld } from './update';
 import { generateLyx } from './SourcePane';
 import { editorContext, viewDocId } from '../editor/context';
-import { parsePlace, showPlace, webAppLink, type Place } from '../editor/permalink';
+import { parsePlace, showPlace, markPlace, webAppLink, type Place } from '../editor/permalink';
 import { navHistory, type NavLocation } from './navhistory';
 import { restoredCursorPos } from '../editor/cursormemory';
 import { PdfViewer, type PdfTarget } from './PdfViewer';
@@ -313,6 +314,9 @@ async function rekeyLocalCopies(): Promise<void> {
 /** Navigate ▸ Back / Forward (navhistory.ts); the ids are the menu paths, so the palette can rebind them */
 const NAV_BACK_ID = 'Navigate ▸ Back', NAV_FORWARD_ID = 'Navigate ▸ Forward';
 const NAV_BACK_KEY = 'Ctrl+Alt+←', NAV_FORWARD_KEY = 'Ctrl+Alt+→';
+/** File ▸ Go to file… (app/QuickOpen.tsx) and File ▸ Search in the project… (app/ProjectSearch.tsx), as in VS Code */
+const GOTO_FILE_ID = 'File ▸ Go to file', GOTO_FILE_KEY = 'Ctrl+P';
+const SEARCH_PROJECT_ID = 'File ▸ Search in the project', SEARCH_PROJECT_KEY = 'Ctrl+Shift+F';
 
 function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: boolean; onSignIn: () => void; onLogout: () => void }) {
   // what the hash shows (one project, one file at a time): a document, "text:"/"pdf:" files, or
@@ -693,7 +697,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       pendingGoto.current = h.goto; pendingHeading.current = h.heading; pendingPlace.current = h.place; setPlace(h.place); setHashId(h.id);
       if (h.view) applyLinkView(h.view);
       if (h.id?.startsWith('text:')) navHistory.visit(h.id, null);
-      if ((h.goto || h.heading !== null || h.place?.text) && h.id === editorContext.docId) runGoto();
+      if ((h.goto || h.heading !== null || h.place?.text || h.place?.line) && h.id === editorContext.docId) runGoto();
     };
     navHistory.load();
     const h0 = parseHash().id;
@@ -806,9 +810,38 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       const it = items[n];
       if (it) { jumpToOutline(v, it); pendingHeading.current = null; }
     }
-    // ?text=…: the quoted place (editor/permalink.ts)
+    // ?line=…: a line of the document's LaTeX (the project search), else ?text=…: the quoted place (editor/permalink.ts)
     const p = pendingPlace.current;
-    if (p?.text && v) { pendingPlace.current = null; navHistory.jump(() => showPlace(v, p)); }
+    if (p?.line && v && editorContext.docId) { pendingPlace.current = null; void showSourceLine(v, editorContext.docId, p.line[0], p.text); }
+    else if (p?.text && v) { pendingPlace.current = null; navHistory.jump(() => showPlace(v, p)); }
+  };
+  /**
+   * Line `line` (1-based) of the document's LaTeX in the editor: the paragraph or formula written
+   * there (as inverse search finds it), the caret at `words` — the match a search found — marked.
+   */
+  const showSourceLine = async (v: EditorView, id: string, line: number, words?: string) => {
+    let tex: string;
+    try { tex = await api.texText(id); } catch { return; }
+    if (editorRef.current?.view !== v || !v.dom.isConnected) return;
+    const blocks = docBlocks(v);
+    const hit = locateSourceLine(tex, line - 1, blocks);
+    if (!hit) { notify(`Line ${line} of the LaTeX source was not found in the document`, 'error'); return; }
+    const b = blocks[hit.index];
+    let from = b.kind === 'math' ? b.pos : blockPos(b, hit.offset), to = b.kind === 'math' ? b.pos + (v.state.doc.nodeAt(b.pos)?.nodeSize ?? 1) : from;
+    if (words && b.kind === 'text') {
+      // the occurrence of the words nearest to where the line's phrase was found
+      const hay = b.text.toLowerCase(), needle = words.toLowerCase();
+      let best = -1;
+      for (let i = hay.indexOf(needle); i >= 0; i = hay.indexOf(needle, i + 1)) if (best < 0 || Math.abs(i - hit.offset) < Math.abs(best - hit.offset)) best = i;
+      if (best >= 0) { from = blockPos(b, best); to = blockPos(b, best + needle.length); }
+    }
+    from = Math.min(from, v.state.doc.content.size); to = Math.min(Math.max(to, from), v.state.doc.content.size);
+    navHistory.jump(() => { v.focus(); v.dispatch(v.state.tr.setSelection(TextSelection.near(v.state.doc.resolve(from))).scrollIntoView()); });
+    if (to > from) {
+      const range = document.createRange();
+      try { const a = v.domAtPos(from), e = v.domAtPos(to); range.setStart(a.node, a.offset); range.setEnd(e.node, e.offset); } catch { return; }
+      requestAnimationFrame(() => markPlace(() => (v.dom.isConnected ? [...range.getClientRects()] : [])));
+    }
   };
   /** the cursor to a heading of the outline (the Navigate menu, the documents panel) */
   const jumpToOutline = (v: EditorView, it: OutlineItem) => {
@@ -872,6 +905,29 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       const k = keyFromEvent(e);
       if (!k) return;
       const action = k === canonical(effectiveShortcut(NAV_BACK_ID, NAV_BACK_KEY)) ? navBack : k === canonical(effectiveShortcut(NAV_FORWARD_ID, NAV_FORWARD_KEY)) ? navForward : null;
+      if (!action) return;
+      e.preventDefault(); e.stopImmediatePropagation();
+      action();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, []);
+
+  // Go to File (Ctrl/⌘+P) and Search in the project (Ctrl/⌘+Shift+F), wherever the focus is (not during a slide show:
+  // the presenter's keys); rebound ones are run by the palette's listener
+  const [quickOpen, setQuickOpen] = useState(false);
+  const searchProject = useCallback(() => {
+    const sel = window.getSelection()?.toString().trim() ?? '';
+    setShowFiles(true);
+    openProjectSearch(sel && sel.length <= 120 && !sel.includes('\n') ? sel : undefined);
+  }, []);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || document.querySelector('.ol-present')) return;
+      const k = keyFromEvent(e);
+      if (!k) return;
+      const action = k === canonical(effectiveShortcut(GOTO_FILE_ID, GOTO_FILE_KEY)) ? () => setQuickOpen(true)
+        : k === canonical(effectiveShortcut(SEARCH_PROJECT_ID, SEARCH_PROJECT_KEY)) ? searchProject : null;
       if (!action) return;
       e.preventDefault(); e.stopImmediatePropagation();
       action();
@@ -1417,6 +1473,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       { label: 'New…', shortcut: 'Ctrl+N', action: () => editorContext.ui?.newFile() },
       newSlidesItem,
       importLyxItem,
+      { label: 'Go to file…', shortcut: GOTO_FILE_KEY, action: () => setQuickOpen(true) },
+      { label: 'Search in the project…', shortcut: SEARCH_PROJECT_KEY, action: searchProject },
       { label: 'Download LyX project (.zip)', action: () => window.open(`/api/projects/${encodeURIComponent(projectOfDoc(docId))}/zip?format=lyx`) },
       { label: 'Share project…', action: () => setShareFor(projectOfDoc(docId)) },
       { label: 'Git repository…', action: () => setGitFor(projectOfDoc(docId)) },
@@ -1430,6 +1488,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       newSlidesItem,
       importLyxItem,
       { label: 'Open… (files panel)', shortcut: 'Ctrl+O', action: () => setShowFiles(true) },
+      { label: 'Go to file…', shortcut: GOTO_FILE_KEY, action: () => setQuickOpen(true) },
+      { label: 'Search in the project…', shortcut: SEARCH_PROJECT_KEY, action: searchProject },
       ...(isPdfTab ? [] : [{ label: 'Saved automatically (Ctrl+S saves now)', disabled: true, action: () => {} }]),
       { sep: true },
       { label: 'Download', action: () => window.open(`/api/projects/${encodeURIComponent(projectOfDoc(textId!))}/file/${docPathOf(textId!).split('/').map(encodeURIComponent).join('/')}`) },
@@ -1510,6 +1570,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         });
       } },
       { label: 'Open… (files panel)', shortcut: 'Ctrl+O', action: () => setShowFiles(true) },
+      { label: 'Go to file…', shortcut: GOTO_FILE_KEY, action: () => setQuickOpen(true) },
+      { label: 'Search in the project…', shortcut: SEARCH_PROJECT_KEY, action: searchProject },
       { label: save.state === 'offline' ? 'Offline — changes are saved on this device' : save.state === 'saving' ? 'Saving…' : 'All changes saved automatically', disabled: true, action: () => {} },
       { sep: true },
       { label: 'Export ▸', sub: [
@@ -1989,6 +2051,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       {shareFor && <ShareDialog project={shareFor} user={user} doc={docId?.replace(/^(text|pdf):/, '') ?? null} view={isLyxDoc ? viewParam(panes, pagesOn, viewKindOf(docId!)) : null} onClose={() => setShareFor(null)} onChanged={() => setRefreshKey(k => k + 1)} />}
       {newLayoutFor && <NewLayoutDialog project={newLayoutFor} dir={textId ? docPathOf(textId).split('/').slice(0, -1).join('/') : ''} notify={notify} onClose={() => setNewLayoutFor(null)} onCreated={id => { location.hash = '#/' + id; setRefreshKey(k => k + 1); }} />}
       {gitFor && <GitDialog project={gitFor} user={user} onClose={() => setGitFor(null)} />}
+      {quickOpen && <QuickOpen project={docId ? projectOfDoc(docId.replace(/^(text|pdf):/, '')) || null : curProject?.name ?? null} onOpen={id => openInTab(id)} onClose={() => setQuickOpen(false)} />}
       {askInterface && !tour && <InterfacePrompt onDone={() => setAskInterface(false)} />}
       {tour && <Tour key={tourRequest} intro={tour === 'intro'} onEnd={endTour}
         ctx={{ docId, ready: isLyxDoc && status.synced && !!view, docTick, layout, inMath: !!mathField, saveState: save.state, rightTab, pdfBusy: pdf.busy, pdfBuiltAt: pdf.builtAt ?? 0, shareOpen: !!shareFor, gitOpen: !!gitFor, marginMode }}

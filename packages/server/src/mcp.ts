@@ -56,6 +56,8 @@ import { manager, HtmlDoc } from './docs.ts';
 import { markdownStyle, setMarkdownStyle } from './mdstyle.ts';
 import { isHtmlPath, deliverableInfo, starterFor, DELIVERABLE_GUIDE, DELIVERABLE_KINDS, type DeliverableKind } from '@overlyx/core/html/deliverable.ts';
 import { ARTICLE_GUIDE, isArticleHtml } from '@overlyx/core/html/article.ts';
+import { reviewOf } from '@overlyx/core/html/review.ts';
+import { agentComments, resolveThreadText } from '@overlyx/core/voicecomment.ts';
 import { newArticleText } from '@overlyx/core/html/articletheme.ts';
 import { createDeliverable } from './deliverables.ts';
 import { renderPages, type DeliverableReport } from './render.ts';
@@ -204,7 +206,17 @@ function findComments(lyx: LyxDocument): CommentEntry[] {
   });
 }
 
+/** a deck's, poster's or web page's text (comments in its HTML: core html/review.ts), null for a document (an article too) */
+function deliverableText(project: string, path: string): string | null {
+  if (!isHtmlPath(path)) return null;
+  const { text } = readFile(project, path);
+  return isArticleHtml(text) ? null : text;
+}
+
 async function listComments(project: string, path: string) {
+  // a deck's threads, spoken comments with the comment pen's strokes among them (core/voicecomment.ts)
+  const page = deliverableText(project, path);
+  if (page !== null) return agentComments(reviewOf(page).threads);
   const { lyx } = await openLyx(project, path);
   return findComments(lyx);
 }
@@ -222,7 +234,15 @@ async function addComment(project: string, author: string, path: string, text: s
   return { ok: true, paragraph_index: idx };
 }
 
-async function resolveComment(project: string, path: string, index: number) {
+async function resolveComment(project: string, path: string, index: number, userId: number) {
+  const page = deliverableText(project, path);
+  if (page !== null) {
+    if (reviewOf(page).threads[index]?.thread.done) return { ok: true, message: 'Already resolved.' };
+    // resolved, its comment pen strokes go with it (they were its marks)
+    const r = resolveThreadText(page, index);
+    writeFile(project, userId, path, r.text);
+    return { ok: true, ...(r.inkRemoved ? { comment_pen_strokes_removed: r.inkRemoved } : {}) };
+  }
   const { doc, lyx } = await openLyx(project, path);
   const hits = collectComments(lyx);
   const target = hits[index];
@@ -702,7 +722,7 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
   }, async ({ project: p, path, paragraph_index, new_text, model }) => { try { const project = need(p, 'edit'); return ok(await traced(project, path, () => proposeEdit(project, signed(model), path, paragraph_index, new_text))); } catch (e) { return fail(e); } });
 
   register('list_comments', {
-    description: 'List comment threads in a document: index, the top-level paragraph they belong to, where they sit (body, a float, a table cell, …), messages, resolved state. Finds threads anywhere — inside tables, floats and other insets too.',
+    description: 'List comment threads in a document: index, the top-level paragraph they belong to, where they sit (body, a float, a table cell, …), messages, resolved state. Finds threads anywhere — inside tables, floats and other insets too. On an HTML deck, poster or web page: index, slide (1-based), the object it is on, messages, resolved — and for spoken feedback given with the comment pen, `spoken` (what was said, at its time into the recording) and `drawn` (the glowing orange strokes it refers to: their ids — `<svg class="ol-ink" data-ol-comment-ink="…">` in the file —, their box on the slide in px, the objects under them). See them with render_page. Act on the feedback, then resolve_comment it: its strokes go with it.',
     annotations: { readOnlyHint: true },
     inputSchema: { ...projArg, path: z.string() },
   }, async ({ project: p, path }) => { try { const project = need(p, 'view'); const r = await listComments(project, path); await present(project, path); return ok(r); } catch (e) { return fail(e); } });
@@ -719,9 +739,9 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
   }, async ({ project: p, path, text, paragraph_index, model }) => { try { const project = need(p, 'edit'); return ok(await traced(project, path, () => addComment(project, signed(model), path, text, paragraph_index))); } catch (e) { return fail(e); } });
 
   register('resolve_comment', {
-    description: 'Mark a comment thread resolved (index from list_comments, in the same call — the document may have changed since an earlier listing).',
+    description: 'Mark a comment thread resolved (index from list_comments, in the same call — the document may have changed since an earlier listing). On a deck, poster or web page the comment pen strokes of a spoken comment are removed with it.',
     inputSchema: { ...projArg, path: z.string(), index: z.number().int().nonnegative() },
-  }, async ({ project: p, path, index }) => { try { const project = need(p, 'edit'); return ok(await traced(project, path, () => resolveComment(project, path, index))); } catch (e) { return fail(e); } });
+  }, async ({ project: p, path, index }) => { try { const project = need(p, 'edit'); return ok(await traced(project, path, () => resolveComment(project, path, index, userId))); } catch (e) { return fail(e); } });
 
   register('build_pdf', {
     description: 'Compile the document to PDF with latexmk and wait for the result (viewers may build, like in the app). Returns ok, the LaTeX warnings, previous_build (whether the build before your changes succeeded), on failure the first errors (file:line: message) and a note when your changes broke it, and the tail of the compile log; on timeout the build keeps running — poll build_status. Humans open the PDF in the app.',

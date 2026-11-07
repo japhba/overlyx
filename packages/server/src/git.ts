@@ -38,6 +38,9 @@ import { canonicalProject } from './namespaces.ts';
 import { verifyAccessToken } from './tokenAuth.ts';
 import { PANEL_AGENT } from './agentwork.ts';
 import { sendFileAt } from './confined.ts';
+import { sealer } from './sealed.ts';
+import { googleFontRoutes } from './googlefonts.ts';
+import { myFontRoutes } from './myfonts.ts';
 
 const execFileP = promisify(execFile);
 
@@ -418,6 +421,10 @@ export interface TokenRow { id: number; user_id: number; name: string; token_has
 
 function hashToken(token: string): string { return crypto.createHash('sha256').update(token).digest('hex'); }
 
+// the token kept for copying again (allowRecopyTokens) is sealed (sealed.ts)
+const kept = sealer('account-tokens');
+kept.reseal('git_tokens', 'token_plain', 'plain');
+
 /**
  * Create or rotate the account's one manually-managed access token. Rotation is atomic and
  * invalidates the previous token everywhere (Git, CLI and MCP).
@@ -427,7 +434,7 @@ export function createToken(userId: number, name: string, storePlain = false): {
   const info = db.transaction(() => {
     db.prepare('DELETE FROM git_tokens WHERE user_id = ?').run(userId);
     return db.prepare('INSERT INTO git_tokens (user_id, name, token_hash, token_plain, created_at) VALUES (?,?,?,?,?)')
-      .run(userId, name.trim().slice(0, 60) || 'Account access token', hashToken(token), storePlain ? token : null, Date.now());
+      .run(userId, name.trim().slice(0, 60) || 'Account access token', hashToken(token), storePlain ? kept.seal(token) : null, Date.now());
   })();
   return { id: Number(info.lastInsertRowid), token };
 }
@@ -435,7 +442,10 @@ export function createToken(userId: number, name: string, storePlain = false): {
 /** The user's single account token; with `includeSecrets`, its kept plaintext is returned. */
 export function listTokens(userId: number, includeSecrets = false): { id: number; name: string; created_at: number; last_used_at: number | null; token?: string }[] {
   const rows = db.prepare('SELECT id, name, created_at, last_used_at, token_plain FROM git_tokens WHERE user_id = ? ORDER BY created_at DESC').all(userId) as { id: number; name: string; created_at: number; last_used_at: number | null; token_plain: string | null }[];
-  return rows.map(({ token_plain, ...r }) => (includeSecrets && token_plain ? { ...r, token: token_plain } : r));
+  return rows.map(({ token_plain, ...r }) => {
+    const token = includeSecrets && token_plain ? kept.open(token_plain) : null;
+    return token ? { ...r, token } : r;
+  });
 }
 
 export function deleteToken(userId: number, id: number): boolean {
@@ -505,6 +515,12 @@ export function gitRouter(): express.Router {
   r.post('/api/build', express.json({ limit: '32kb' }), (req, res) => { void cliBuild(req, res); });
   r.get('/api/pdf', (req, res) => { void cliPdf(req, res); });
   r.post('/api/restore', express.json({ limit: '32kb' }), (req, res) => { void cliRestore(req, res); });
+  // the VS Code extension's editors: Google fonts and the account's My fonts (googlefonts.ts,
+  // myfonts.ts), the same routes as the web app's /api/fonts, with the CLI's sign-in
+  const fonts = express.Router();
+  fonts.use((req, res, next) => { const user = authenticateBasic(req, res); if (!user) return; req.user = user; next(); });
+  fonts.use(googleFontRoutes(), myFontRoutes());
+  r.use('/api', (req, res, next) => { if (req.path.startsWith('/fonts/')) fonts(req, res, next); else next(); });
   r.all(/.*/, (req, res) => { void handle(req, res); });
   return r;
 }

@@ -11,6 +11,7 @@ import type { JSX } from 'preact';
 import type { Path, DeliverableKind } from './protocol';
 import { reviewHue, type Review, type ReviewChange, type ReviewThread } from '@overlyx/core/html/review.ts';
 import { formatTimestamp } from '@overlyx/core';
+import { clock } from '@overlyx/core/voicecomment.ts';
 
 export interface CommentDraft { path: Path | null; slide: number; quote?: string; what: string }
 
@@ -36,6 +37,8 @@ interface Props {
   acceptAll(): void;
   rejectAll(): void;
   close(): void;
+  /** the comment pen's strokes: shown or hidden; how many no thread is about, and taking those away */
+  commentInk?: { shown: boolean; show(on: boolean): void; loose: number; removeLoose(): void };
 }
 
 /** "Jan Bauer" → "JB" */
@@ -117,7 +120,14 @@ export function ReviewPane(p: Props) {
           </span>
         )}
         <label class="dl-anim-check dl-rv-resolved"><input type="checkbox" checked={showResolved} onChange={e => setShowResolved((e.target as HTMLInputElement).checked)} data-rv-resolved /> Resolved{resolvedHere ? ` (${resolvedHere})` : ''}</label>
+        {p.commentInk && <label class="dl-anim-check dl-rv-inkshown" title="The comment pen’s glowing marks on the slides (never presented, printed or published)"><input type="checkbox" checked={p.commentInk.shown} onChange={e => p.commentInk!.show((e.target as HTMLInputElement).checked)} data-rv-inkshown /> Comment pen</label>}
       </div>
+      {p.commentInk && p.commentInk.loose > 0 && p.canEdit && (
+        <div class="dl-rv-all dl-rv-loose">
+          <span>{p.commentInk.loose} comment pen mark{p.commentInk.loose > 1 ? 's' : ''} without words</span>
+          <button class="dl-btn" onClick={p.commentInk.removeLoose} data-rv-removeloose title="Take away the comment pen’s marks that no comment is about (Undo brings them back)">Remove</button>
+        </div>
+      )}
       {changesAll > 0 && p.canEdit && (
         <div class="dl-rv-all">
           <span>{changesAll} suggestion{changesAll > 1 ? 's' : ''}{slideScoped && scope === 'slide' ? ' in all' : ''}</span>
@@ -173,6 +183,7 @@ function ThreadCard({ t, canEdit, me, focus, select, reply, resolve, remove }: P
       </div>
       <div class="dl-rv-what">{t.what}</div>
       {th.quote && <div class="dl-rv-quote">{th.quote}</div>}
+      {(th.voice || th.ink) && <VoiceLine th={th} />}
       <div class="dl-rv-text">{th.text}</div>
       {(th.re ?? []).map((r, i) => (
         <div class="dl-rv-reply" key={i}>
@@ -188,6 +199,22 @@ function ThreadCard({ t, canEdit, me, focus, select, reply, resolve, remove }: P
           {answer.trim() && <button class="dl-btn on" onClick={send} data-rv-send>Reply</button>}
         </div>
       )}
+    </div>
+  );
+}
+
+/** a spoken comment's line: how long, how it was heard, the recording kept, what was drawn over */
+function VoiceLine({ th }: { th: ReviewThread['thread'] }) {
+  const v = th.voice, k = th.ink;
+  const parts: string[] = [];
+  if (v) parts.push(`Spoken · ${clock(v.secs * 1000)}${v.how === 'none' ? ' · not transcribed' : ''}`);
+  // (what lies under them, short: a formula's source is "a formula")
+  const on = [...new Set((k?.on ?? []).map(w => (/\\[A-Za-z([]/.test(w) ? 'a formula' : w)))];
+  if (k?.ids.length) parts.push(`${k.ids.length} mark${k.ids.length > 1 ? 's' : ''}${on.length ? ' over ' + on.slice(0, 3).join(', ') + (on.length > 3 ? ' …' : '') : ''}`);
+  return (
+    <div class="dl-rv-voice" data-rv-voice title={v ? (v.how === 'device' ? 'Put into words by the browser’s speech recognition' : v.how === 'server' ? 'Put into words by the server’s AI' : 'Not put into words: the recording is kept in the project') : undefined}>
+      <span class="dl-rv-voice-mark" aria-hidden="true" />{parts.join(' · ')}
+      {v?.audio && <div class="dl-rv-voice-file">Recording: {v.audio}</div>}
     </div>
   );
 }

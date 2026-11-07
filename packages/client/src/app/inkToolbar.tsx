@@ -7,7 +7,7 @@ export function inkToolbar(): ToolButton[][] {
   const ink = getInk();
   return drawingToolbar({
     tool: ink.tool === 'pen' || ink.tool === 'highlighter' ? 'pen' : ink.tool,
-    setTool: tool => { if (tool === 'eraser' || tool === 'lasso') setInk({ tool }); else if (tool === 'pen') setInk({ tool: loadDeckInk().pen }); },
+    setTool: tool => { if (tool === 'eraser' || tool === 'lasso') setInk({ tool }); else if (tool === 'pen') setInk({ tool: loadDeckInk().pen === 'highlighter' ? 'highlighter' : 'pen' }); },
     ink: { presets: loadDeckInk(), set: patch => saveDeckInk(patchDeckInk(loadDeckInk(), patch)), draw: active => setInk({ active }) },
     done: false,
     picked: () => setInk({ folded: true }),

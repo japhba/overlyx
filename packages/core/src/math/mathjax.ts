@@ -16,6 +16,7 @@ import { SYMBOLS } from './parse';
 import { evalColor } from '../layout/colors';
 import { approximateImageSymbols, approximateOverlapSymbols, approximateRaisebox, replaceCommand, readGroup, readBracket } from '../macros';
 import mathjaxMacrosTable from './mathjax-macros.json';
+import { writeCellLatex } from './write';
 
 /** LyX predefined macros MathJax lacks, as macro definitions (scripts/gen-mathjax-macros.ts) */
 const mathjaxTable = mathjaxMacrosTable as { macros: Record<string, string>; native: string[] };
@@ -33,6 +34,8 @@ export interface TexContext {
   inTemplate?: boolean;
   /** wrap every atom of an editable cell in `\htmlClass{lm-a}{…}` (the editor measures them) */
   atoms?: boolean;
+  /** the math font the atoms being rendered stand in (`mathbf` …), for their `symbolKey` */
+  font?: string;
 }
 
 /** LaTeX's size commands → the editor's size classes (styles.css .lyx-size-*) */
@@ -44,6 +47,35 @@ const LIMIT_OPS = new Set(['sum', 'prod', 'coprod', 'bigcap', 'bigcup', 'bigodot
 const CELL_CLASS = 'lm-c';
 /** class of the wrapper around every atom of an editable cell (see `TexContext.atoms`) */
 export const ATOM_CLASS = 'lm-a';
+
+/**
+ * What an atom is, to find the same symbol elsewhere (the editor's occurrence highlighting,
+ * client lyxmath/occurrences.ts), as a class-name-safe key: a letter in its math font (x matches the
+ * x of x_i and of x^2, not \mathbf{x}), a symbol command (\alpha, \nabla), and — a symbol with
+ * scripts, an accent, a font, a macro — what it writes (x_i matches x_i only). Null for anything else
+ * (digits, operators, spaces, structures).
+ */
+export function symbolKey(a: Atom, font = ''): string | null {
+  const f = font ? font + '-' : '';
+  switch (a.t) {
+    case 'char': return /^\p{L}$/u.test(a.c) ? `${f}c${a.c.codePointAt(0)}` : null;
+    case 'sym': return /^[A-Za-z]+$/.test(a.n) ? `${f}s-${a.n}` : null;
+    case 'script': case 'deco': case 'font': case 'oldfont': case 'class': case 'macro': case 'cmd': {
+      const tex = writeCellLatex([a]);
+      let h = 0x811c9dc5;
+      for (let i = 0; i < tex.length; i++) h = Math.imul(h ^ tex.charCodeAt(i), 0x01000193);
+      return `${f}h${(h >>> 0).toString(36)}`;
+    }
+    default: return null;
+  }
+}
+
+/** render `f` with the atoms standing in math font `font` */
+function inFont<T>(ctx: TexContext, font: string, f: () => T): T {
+  const prev = ctx.font;
+  ctx.font = font;
+  try { return f(); } finally { ctx.font = prev; }
+}
 
 function cellId(ctx: TexContext, owner: Atom | Hull, idx: number): number {
   ctx.cells.push({ id: ctx.cells.length, owner, idx });
@@ -96,7 +128,7 @@ export function atomsToTex(cell: Cell, ctx: TexContext, mode: 'math' | 'text' = 
   for (const a of cell) {
     // inside \text{}: math constructs (scripts, symbols, \ensuremath …) are rendered as inline math
     let s = mode === 'text' && !TEXT_OK.has(a.t) ? '$' + atomToTex(a, ctx, 'math') + '$' : atomToTex(a, ctx, mode);
-    if (wrap) s = `\\htmlClass{${ATOM_CLASS}}{${s}}`;
+    if (wrap) { const k = mode === 'math' ? symbolKey(a, ctx.font) : null; s = `\\htmlClass{${ATOM_CLASS}${k ? ' lm-k-' + k : ''}}{${s}}`; }
     else if (prevCmd && /^[A-Za-z]/.test(s)) out += ' ';
     out += s;
     prevCmd = /\\[A-Za-z]+$/.test(s);
@@ -106,14 +138,25 @@ export function atomsToTex(cell: Cell, ctx: TexContext, mode: 'math' | 'text' = 
 
 const braced = (c: Cell, ctx: TexContext, owner: Atom, idx: number, mode: 'math' | 'text' = 'math') => '{' + cellToTex(c, ctx, owner, idx, mode) + '}';
 
+/**
+ * Told the name of each command (`math`) or environment (`env`) a formula shows as its name in TeX
+ * code because nothing here knows how to draw it — the editor counts them (client usage.ts
+ * recordMacro) so that the common ones get drawn. None by default (the server renders too).
+ */
+let unknownSink: ((kind: 'math' | 'env', name: string) => void) | null = null;
+export function onUnknownMathCommand(sink: typeof unknownSink): void { unknownSink = sink; }
+function shownAsCode(kind: 'math' | 'env', name: string): void {
+  if (unknownSink) try { unknownSink(kind, name); } catch { /* counting never stops drawing */ }
+}
+
 export function atomToTex(a: Atom, ctx: TexContext, mode: 'math' | 'text'): string {
   switch (a.t) {
     case 'char': return charToTex(a.c, mode);
     case 'sym': {
-      if (mode === 'text') { const e = SYMBOLS[a.n]; return e?.u ? escapeText(e.u) : `\\textbackslash ${a.n}`; }
+      if (mode === 'text') { const e = SYMBOLS[a.n]; if (!e?.u) shownAsCode('math', a.n); return e?.u ? escapeText(e.u) : `\\textbackslash ${a.n}`; }
       const lim = a.limits ? '\\' + a.limits : '';
       if (a.n === 'adots') return '\\iddots';
-      if (!MATHJAX_KNOWN.has(a.n) && /^[A-Za-z]+\*?$/.test(a.n)) { const e = SYMBOLS[a.n]; return e?.u ? `\\htmlClass{lm-unknown}{\\text{${escapeText(e.u)}}}` : `\\htmlClass{lm-unknown}{\\text{\\textbackslash ${escapeText(a.n)}}}`; }
+      if (!MATHJAX_KNOWN.has(a.n) && /^[A-Za-z]+\*?$/.test(a.n)) { const e = SYMBOLS[a.n]; if (!e?.u) shownAsCode('math', a.n); return e?.u ? `\\htmlClass{lm-unknown}{\\text{${escapeText(e.u)}}}` : `\\htmlClass{lm-unknown}{\\text{\\textbackslash ${escapeText(a.n)}}}`; }
       return '\\' + a.n + lim;
     }
     case 'space': {
@@ -175,11 +218,11 @@ export function atomToTex(a: Atom, ctx: TexContext, mode: 'math' | 'text'): stri
     case 'brace': return `{${cellToTex(a.body, ctx, a, 0, mode)}}`;
     case 'font': {
       const n = FONT_MAP[a.n] ?? a.n;
-      const inner = cellToTex(a.body, ctx, a, 0, a.mode);
+      const inner = inFont(ctx, a.n, () => cellToTex(a.body, ctx, a, 0, a.mode));
       if (a.mode === 'text' && mode === 'text' && (n === 'text' || n === 'textnormal')) return `{${inner}}`;
       return `\\${n}{${inner}}`;
     }
-    case 'oldfont': return `{\\${a.n} ${cellToTex(a.body, ctx, a, 0, mode)}}`;
+    case 'oldfont': return `{\\${a.n} ${inFont(ctx, a.n, () => cellToTex(a.body, ctx, a, 0, mode))}}`;
     case 'box': {
       const n = a.n === 'tag' || a.n === 'tag*' || a.n === 'intertext' ? 'text' : a.n;
       return `\\${n}{${cellToTex(a.body, ctx, a, 0, a.n === 'boxed' ? 'math' : 'text')}}`;
@@ -198,7 +241,8 @@ export function atomToTex(a: Atom, ctx: TexContext, mode: 'math' | 'text'): stri
     }
     case 'class': {
       const n = a.n === 'bm' || a.n === 'heavysymbol' ? 'boldsymbol' : a.n === 'lefteqn' ? 'mathrlap' : a.n;
-      return `\\${n}{${cellToTex(a.body, ctx, a, 0)}}` + (a.limits ? '\\' + a.limits : '');
+      const body = n === 'boldsymbol' ? inFont(ctx, n, () => cellToTex(a.body, ctx, a, 0)) : cellToTex(a.body, ctx, a, 0);
+      return `\\${n}{${body}}` + (a.limits ? '\\' + a.limits : '');
     }
     case 'color': {
       if (a.old && a.color === 'normalcolor') return `{\\htmlClass{lm-normalcolor}{${cellToTex(a.body, ctx, a, 0, mode)}}}`;
@@ -225,11 +269,12 @@ export function atomToTex(a: Atom, ctx: TexContext, mode: 'math' | 'text'): stri
       const n = CMD_MAP[a.n];
       if (n !== undefined) return n;
       if (a.n.length === 1 && !/[A-Za-z]/.test(a.n)) return '\\' + a.n;
+      shownAsCode('math', a.n);
       return `\\htmlClass{lm-unknown}{\\text{\\textbackslash ${escapeText(a.n)}}}` + (a.limits ? '' : '');
     }
     case 'hash': return `\\htmlClass{lm-arg}{\\text{${escapeText(a.n)}}}`;
     case 'comment': return `\\htmlClass{lm-comment}{\\text{\\%${escapeText(a.text)}}}`;
-    case 'env': return `\\htmlClass{lm-unknown}{\\text{\\textbackslash begin\\{${escapeText(a.n)}\\}}}${cellToTex(a.body, ctx, a, 0, mode)}\\htmlClass{lm-unknown}{\\text{\\textbackslash end\\{${escapeText(a.n)}\\}}}`;
+    case 'env': shownAsCode('env', a.n); return `\\htmlClass{lm-unknown}{\\text{\\textbackslash begin\\{${escapeText(a.n)}\\}}}${cellToTex(a.body, ctx, a, 0, mode)}\\htmlClass{lm-unknown}{\\text{\\textbackslash end\\{${escapeText(a.n)}\\}}}`;
     case 'raw': return a.latex;
     case 'unknown': {
       // a command name being typed: green once it is a valid command, with the completion LyX would offer in grey
@@ -304,7 +349,7 @@ export function splitTrailingScripts(s: string): { base: string; up?: string; do
 function mergeScriptsIntoMacro(nuc: string, a: Atom & { t: 'script' }, ctx: TexContext): string | null {
   // the nucleus cell holds the macro alone — in the editable field (ctx.atoms) inside its atom marker
   const plain = /^(\\htmlClass\{lm-c\d+\}\{\\htmlClass\{lm-macro\}\{)([\s\S]*)\}\}$/.exec(nuc);
-  const marked = plain ? null : /^(\\htmlClass\{lm-c\d+\}\{\\htmlClass\{lm-a\}\{\\htmlClass\{lm-macro\}\{)([\s\S]*)\}\}\}$/.exec(nuc);
+  const marked = plain ? null : /^(\\htmlClass\{lm-c\d+\}\{\\htmlClass\{lm-a(?: [\w-]+)?\}\{\\htmlClass\{lm-macro\}\{)([\s\S]*)\}\}\}$/.exec(nuc);
   const m = plain ?? marked;
   if (!m) return null;
   const split = splitTrailingScripts(m[2]);
@@ -330,7 +375,7 @@ function macroToTex(a: Atom & { t: 'macro' }, ctx: TexContext, mode: 'math' | 't
     return cellToTex(c, ctx, a, i, mode);
   });
   if (info?.def === undefined) {
-    // no definition: show the name with its arguments
+    // no definition: show the name with its arguments (the document's own macro, not counted: shownAsCode)
     return `\\htmlClass{lm-macro}{\\htmlClass{lm-unknown}{\\text{\\textbackslash ${escapeText(a.n)}}}${args.map(s => `\\{${s}\\}`).join('')}}`;
   }
   const def = expandUserMacros(sanitizeForMathjax(info.def, a.n, a.args.length), ctx.macros);

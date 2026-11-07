@@ -122,6 +122,21 @@ describe('source patches', () => {
     expect(gone.patched).toBe(true);
   });
 
+  it('a slide put in before another, from the two texts alone: not inside the next one (the stray end tag of a change across two slides)', () => {
+    // (slides right in <body>, as the starters have them: no container holds both)
+    const flat = DECK.replace('<main>\n', '').replace('</main>\n', '');
+    const next = flat.replace('<section class="slide">', '<section class="slide"><h2>New</h2></section>\n<section class="slide">');
+    parseSource(flat);
+    expect(sourcePatch(flat, next)).toBeNull();
+    expect(shape(parseSource(next).doc as unknown as HNode)).toEqual(fresh(next));
+    // in a container of the slides: between the two
+    const inMain = DECK.replace('<section class="slide">', '<section class="slide"><h2>New</h2></section>\n<section class="slide">');
+    parseSource(DECK);
+    const p = sourcePatch(DECK, inMain)!;
+    expect(applySplices(DECK, [{ from: p.from, to: p.to, insert: p.html }])).toBe(inMain);
+    expect(shape(parseSource(inMain).doc as unknown as HNode)).toEqual(fresh(inMain));
+  });
+
   it("a slide's own attribute: the slides' container parsed again", () => {
     expect(edit(DECK, [{ t: 'attr', path: [1, 0, 0], name: 'data-x', value: '1' }]).patched).toBe(true);
   });

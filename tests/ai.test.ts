@@ -273,6 +273,18 @@ describe('handwriting (the math keyboard\'s pen)', () => {
     expect(lastRequest.messages[0].content).toBe(ai.NOTES_PROMPT);
     expect(ai.parseNotesReply('just words')).toEqual(['just words']);
   });
+  it('a spoken comment (the comment pen\'s push to talk) is a WAV sent as input_audio, its stretches at their seconds', async () => {
+    const WAV = 'UklGR' + 'A'.repeat(40);
+    nextReply = '```json\n{"said": [{"t": 0.4, "text": "Make this  title shorter"}, {"t": 3, "text": "and drop the logo"}, {"t": 5, "text": " "}]}\n```';
+    expect(await ai.transcribeSpeech({ audio: WAV, lang: 'en-GB' })).toEqual([{ t: 0.4, text: 'Make this title shorter' }, { t: 3, text: 'and drop the logo' }]);
+    expect(lastRequest.messages[0].content).toBe(ai.SPEECH_PROMPT);
+    expect(lastRequest.messages[1].content[1]).toEqual({ type: 'input_audio', input_audio: { data: WAV, format: 'wav' } });
+    expect(lastRequest.messages[1].content[0].text).toContain('en-GB');
+    expect(ai.parseSpeechReply('{"said": []}')).toEqual([]);
+    expect(ai.parseSpeechReply('just words')).toEqual([{ t: 0, text: 'just words' }]);
+    await expect(ai.transcribeSpeech({ audio: 'data:audio/wav;base64,AAAA' })).rejects.toMatchObject({ status: 400 });
+    await expect(ai.transcribeSpeech({ audio: 'UklGR' + 'A'.repeat(ai.SPEECH_MAX_AUDIO) })).rejects.toMatchObject({ status: 413 });
+  });
   it('only PNG data URLs, not too large', async () => {
     await expect(ai.recognizeInk({ image: 'https://example.com/x.png' })).rejects.toMatchObject({ status: 400 });
     await expect(ai.recognizeInk({ image: 'data:image/png;base64,' + 'A'.repeat(ai.INK_MAX_IMAGE) })).rejects.toMatchObject({ status: 413 });

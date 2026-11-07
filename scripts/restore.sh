@@ -29,6 +29,8 @@ sqlite3 "$src/overlyx.sqlite" "PRAGMA integrity_check" | grep -qx ok || { echo "
 cp -p "$src/overlyx.sqlite" "$data/overlyx.sqlite"
 rm -f "$data/overlyx.sqlite-wal" "$data/overlyx.sqlite-shm"
 [ -f "$src/secret.key" ] && { aside "$data/secret.key"; install -m 600 "$src/secret.key" "$data/secret.key"; }
+# the sealing key is in no backup (DOCS.md "Secrets")
+[ -f "$data/sealing.key" ] || echo "no $data/sealing.key: put the owner's offline copy there (mode 600) before starting — without it every account connects Google Drive, LessWrong, Zotero and its API keys again"
 # the instance secrets go back next to this checkout's unit file (only if it has none yet)
 deploy="$(dirname "$0")/../deploy"
 if [ -f "$src/secrets.env" ] && [ ! -f "$deploy/secrets.env" ]; then install -m 600 "$src/secrets.env" "$deploy/secrets.env"; echo "restored $deploy/secrets.env"; fi

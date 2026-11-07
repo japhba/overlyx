@@ -14,6 +14,7 @@ out="$DEST/$stamp"
 mkdir -p "$out"
 sqlite3 "$DATA/overlyx.sqlite" ".backup '$out/overlyx.sqlite'"
 cp -p "$DATA/secret.key" "$out/" 2>/dev/null || true
+# never sealing.key: it opens the accounts' stored secrets, and the owner keeps it offline (DOCS.md "Secrets")
 # the instance secrets (deploy/secrets.env, git-ignored) exist nowhere else
 cp -p "$(dirname "$0")/../deploy/secrets.env" "$out/" 2>/dev/null || true
 tar --create --gzip --file "$out/projects.tar.gz" -C "$(dirname "$PROJECTS")" \

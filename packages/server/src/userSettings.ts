@@ -23,17 +23,27 @@
  * `interface`: how the web app looks for this account — 'classic' (LyX's toolbars) or 'modern' (a
  * Google Docs-like interface whose tools appear as needed), chosen in the welcome card of a new
  * account or in Settings ▸ Interface; null until chosen (the app starts in Modern then).
+ *
+ * `fonts`: My fonts — Google fonts installed into the account from the font list (myfonts.ts), first
+ * in every font list, in the web app and in the VS Code extension alike.
  */
 import { db } from './db.ts';
 import { config } from './config.ts';
 import { projectOfDoc } from '@overlyx/core';
 
-export interface UserSettings { allowRecopyTokens: boolean; fineGrainedAccess: boolean; paragraphSkip: boolean; interface: 'classic' | 'modern' | null }
+export interface UserSettings {
+  allowRecopyTokens: boolean; fineGrainedAccess: boolean; paragraphSkip: boolean; interface: 'classic' | 'modern' | null;
+  /** My fonts: Google fonts installed into the account (myfonts.ts), in the order added */
+  fonts: string[];
+}
+
+/** at most this many fonts in My fonts */
+export const MY_FONTS_MAX = 200;
 
 export function userSettings(userId: number): UserSettings {
   const row = db.prepare('SELECT email, settings FROM users WHERE id = ?').get(userId) as { email: string | null; settings: string | null } | undefined;
   const isOwner = !!(config.ownerEmail && row?.email && row.email.toLowerCase() === config.ownerEmail);
-  const defaults: UserSettings = { allowRecopyTokens: isOwner, fineGrainedAccess: false, paragraphSkip: false, interface: null };
+  const defaults: UserSettings = { allowRecopyTokens: isOwner, fineGrainedAccess: false, paragraphSkip: false, interface: null, fonts: [] };
   if (!row?.settings) return defaults;
   try {
     const stored = JSON.parse(row.settings);
@@ -50,6 +60,11 @@ export function setUserSettings(userId: number, patch: Partial<UserSettings>): U
   if (typeof patch.fineGrainedAccess === 'boolean') stored.fineGrainedAccess = patch.fineGrainedAccess;
   if (typeof patch.paragraphSkip === 'boolean') stored.paragraphSkip = patch.paragraphSkip;
   if (patch.interface === 'classic' || patch.interface === 'modern') stored.interface = patch.interface;
+  if (Array.isArray(patch.fonts)) {
+    const seen = new Set<string>();
+    stored.fonts = patch.fonts.filter((f): f is string => typeof f === 'string' && /^[A-Za-z0-9][A-Za-z0-9 ]{0,59}$/.test(f.trim()))
+      .map(f => f.trim()).filter(f => !seen.has(f.toLowerCase()) && !!seen.add(f.toLowerCase())).slice(0, MY_FONTS_MAX);
+  }
   db.prepare('UPDATE users SET settings = ? WHERE id = ?').run(JSON.stringify(stored), userId);
   return userSettings(userId);
 }

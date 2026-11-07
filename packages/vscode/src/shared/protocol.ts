@@ -74,6 +74,8 @@ export type EditorToHost =
   | { type: 'openPdfPanel' }
   /** open another document of the project (child document, label in another file) */
   | { type: 'openDoc'; id: string; goto?: string; heading?: number; beside?: boolean }
+  /** "Open in browser": this address on the synced project's server (the host checks the server) */
+  | { type: 'openOnWeb'; url: string }
   /** SyncTeX forward search result: show this box in the PDF panel */
   | { type: 'syncTarget'; target: { page: number; x: number; y: number; w?: number; h?: number; seq: number } }
   | { type: 'appearance'; appearance: Appearance };

@@ -11,8 +11,8 @@
  *   GET  /api/admin/usage     the summary (administrators; ?days=30&top=40) — usageReport.ts
  *
  * OVERLYX_USAGE_STATS=off refuses the batches (the client stops sending for the page load).
- * Legacy rows older than RETENTION_DAYS and reliability rows older than RELIABILITY_RETENTION_DAYS
- * are deleted daily. scripts/usage-report.ts prints the aggregate report.
+ * Legacy rows older than RETENTION_DAYS and reliability, interaction and macro rows older than
+ * RELIABILITY_RETENTION_DAYS are deleted daily. scripts/usage-report.ts prints the aggregate report.
  */
 import express from 'express';
 import { db } from './db.ts';
@@ -21,7 +21,7 @@ import { allow, appVersion } from './feedback.ts';
 import { USAGE_NAMES, scrubDetail, usageSummary, DETAIL_MAX } from './usageReport.ts';
 import { isReliabilityContext, isReliabilityDurationBucket, parseReliabilityDetail } from '@overlyx/core/reliability.ts';
 import { parseInteractionDetail, isInteractionTarget, isClientBuildVersion } from '@overlyx/core/interactions.ts';
-import { sanitizeUsageEvents, validUsageSession, vscodeUsageMeta } from '@overlyx/core/usagePayload.ts';
+import { sanitizeUsageEvents, validUsageSession, vscodeUsageMeta, parseMacroUsageDetail } from '@overlyx/core/usagePayload.ts';
 
 db.exec(`CREATE TABLE IF NOT EXISTS usage_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -79,6 +79,13 @@ export const storeUsage = db.transaction((session: string, events: unknown[], no
       ok = null;
       place = isReliabilityContext(e.where) ? e.where : null;
       dt = isReliabilityDurationBucket(e.dt) ? e.dt : null;
+    } else if (e.name === 'macro') {
+      // a command name the editor showed as TeX code, in the one fixed form (core usagePayload.ts)
+      if (!parseMacroUsageDetail(e.detail)) continue;
+      detail = e.detail as string;
+      ok = null;
+      place = typeof e.where === 'string' && WHERE_RE.test(e.where) ? e.where : null;
+      dt = null;
     } else {
       detail = scrubDetail(e.detail, DETAIL_MAX);
       ok = typeof e.ok === 'boolean' ? (e.ok ? 1 : 0) : null;
@@ -95,8 +102,8 @@ export const storeUsage = db.transaction((session: string, events: unknown[], no
 /** Delete what is older than the retention period. */
 export function pruneUsage(now = Date.now()): number {
   return db.prepare(`DELETE FROM usage_events
-    WHERE (name IN ('reliability', 'interaction') AND at < ?)
-       OR (name NOT IN ('reliability', 'interaction') AND at < ?)`)
+    WHERE (name IN ('reliability', 'interaction', 'macro') AND at < ?)
+       OR (name NOT IN ('reliability', 'interaction', 'macro') AND at < ?)`)
     .run(now - RELIABILITY_RETENTION_DAYS * 24 * 60 * 60 * 1000, now - RETENTION_DAYS * 24 * 60 * 60 * 1000).changes;
 }
 pruneUsage();

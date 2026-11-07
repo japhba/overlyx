@@ -45,6 +45,9 @@ import { markdownRulesPlugin } from './plugins/mdrules';
 import { markdownPlugins, isMarkdownDoc, looksLikeMarkdown, pasteMarkdown } from './markdown';
 import { pasteTargetsPlugin, pasteLatex, pasteBlocksIntoEmpty } from './plugins/paste';
 import { autocorrectPlugin } from './spell/autocorrect';
+import { arrowsPlugin } from './plugins/arrows';
+import { mathOccurrencesPlugin } from './plugins/mathoccurrences';
+import { macroUsagePlugin } from './plugins/macrousage';
 import { spellPlugin, misspelledAt, spellSuggest } from './spell/plugin';
 import { aiRewritePlugin } from './ai/rewrite';
 import { aiCompletePlugin } from './ai/complete';
@@ -143,6 +146,7 @@ export function assemblePlugins(o: AssemblyOptions): Plugin[] {
     markdownRulesPlugin(),   // `- ` / `1. ` / `# ` at a paragraph start, before autocorrect looks at the space
     ...(o.markdown || o.article ? markdownPlugins({ article: !!o.article }) : []),   // `**bold**`, ``` + Enter …; markdown's blocks and marks only (before the LyX keymap)
     autocorrectPlugin(),
+    arrowsPlugin(),   // -> → and <- ←, --> ⟶, <-- ⟵ as they are typed; ⌘Z or Backspace right after gives the characters back (before the keymap's Backspace)
     chordPlugin(),
     layoutPlugin(),   // layout documents: object selection, handles, drawing tools (before the keymap and the mouse selection)
     foldPlugin(),   // section folding (before the keymap: ↑ / ↓ beside a fold skip the hidden text)
@@ -172,6 +176,8 @@ export function assemblePlugins(o: AssemblyOptions): Plugin[] {
     scrollMarksPlugin(),   // comments and tracked changes marked along the pane's scroll bar, a click goes there
     mergeReviewPlugin(o.merges),   // the card that goes through what offline edits and the live text changed differently
     findPlugin(),
+    mathOccurrencesPlugin(),   // a symbol selected in a formula: the same symbol in the other formulas, a lighter shade
+    macroUsagePlugin(),   // commands only shown as TeX code (unknown in formulas, TeX-code boxes): their names counted, anonymously
     pasteTargetsPlugin(),
     linksPlugin(),   // the bubble under a hyperlink, the selection shown while the link box is open
     mirrorCaretPlugin(),
@@ -340,7 +346,8 @@ export function editorViewProps(o: ViewPropsOptions): Pick<EditorProps, 'nodeVie
         return true;
       }
       const text = event.clipboardData?.getData('text/plain');
-      const html = event.clipboardData?.getData('text/html');
+      // (objects or words copied on a slide: their text, its formulas' TeX — parsed below as formulas)
+      const html = event.clipboardData?.getData('text/html')?.replace(/^[\s\S]*<!--overlyx-(?:objects|tex)\b[\s\S]*$/, '');
       // SVG markup on the text clipboard ("Copy as SVG" in drawing tools): an image, not text
       if (text && !viewOnly() && isSvgMarkup(text)) { void insertImageFiles(view, [svgFile(text)]); return true; }
       // an address pasted over selected text: the text becomes a link to it (Google Docs)

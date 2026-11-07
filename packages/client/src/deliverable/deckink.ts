@@ -5,10 +5,11 @@
  * pens; widths are px of a 1280 px wide slide (the strokes are SVG paths in the page, sourceops.ts
  * objectHtml), shown in points like the other line weights (units.ts). Kept in this browser (`ol.deckInk`).
  */
-import { INK_PALETTES, HIGHLIGHT_OPACITY } from '@overlyx/core/inkpresets.ts';
+import { INK_PALETTES, HIGHLIGHT_OPACITY, COMMENT_INK, COMMENT_INK_WIDTHS } from '@overlyx/core/inkpresets.ts';
 import type { InkStyle, Nib } from './protocol';
 
-export type DeckPen = 'pen' | 'highlighter';
+/** the comment pen: high-vis orange with a glow, its strokes review marks (core/voicecomment.ts) — one colour, its own widths */
+export type DeckPen = 'pen' | 'highlighter' | 'comment';
 export interface DeckPenSet { color: string; width: number; colors: string[]; widths: number[] }
 /**
  * The eraser's settings (GoodNotes'): whole strokes or only the part under it (precise), its size, the
@@ -42,8 +43,8 @@ export interface DeckInk {
 }
 
 /** the width presets (px of a 1280 px slide: 1½, 3, 6 pt; the highlighter's 10½, 18, 30 pt) and what the width picker offers */
-export const DECK_INK_WIDTHS: Record<DeckPen, number[]> = { pen: [2, 4, 8], highlighter: [14, 24, 40] };
-export const DECK_INK_WIDTH_CHOICES: Record<DeckPen, number[]> = { pen: [1, 2, 3, 4, 6, 8, 12, 16, 24], highlighter: [8, 12, 16, 20, 24, 32, 40, 56, 72] };
+export const DECK_INK_WIDTHS: Record<DeckPen, number[]> = { pen: [2, 4, 8], highlighter: [14, 24, 40], comment: COMMENT_INK_WIDTHS };
+export const DECK_INK_WIDTH_CHOICES: Record<DeckPen, number[]> = { pen: [1, 2, 3, 4, 6, 8, 12, 16, 24], highlighter: [8, 12, 16, 20, 24, 32, 40, 56, 72], comment: [2, 3, 4, 5, 6, 8, 10, 12] };
 
 const KEY = 'ol.deckInk';
 
@@ -91,6 +92,7 @@ export function defaultDeckInk(): DeckInk {
     pens: {
       pen: { color: INK_PALETTES.pen[0][0], width: DECK_INK_WIDTHS.pen[1], colors: INK_PALETTES.pen.map(c => c[0]), widths: [...DECK_INK_WIDTHS.pen] },
       highlighter: { color: INK_PALETTES.highlighter[0][0], width: DECK_INK_WIDTHS.highlighter[1], colors: INK_PALETTES.highlighter.map(c => c[0]), widths: [...DECK_INK_WIDTHS.highlighter] },
+      comment: { color: COMMENT_INK, width: DECK_INK_WIDTHS.comment[1], colors: [COMMENT_INK], widths: [...DECK_INK_WIDTHS.comment] },
     },
   };
 }
@@ -104,18 +106,18 @@ export function loadDeckInk(): DeckInk {
   try {
     const s = JSON.parse(localStorage.getItem(KEY) ?? 'null') as Partial<DeckInk> | null;
     if (!s || typeof s !== 'object') return ink;
-    if (s.pen === 'pen' || s.pen === 'highlighter') ink.pen = s.pen;
+    if (s.pen === 'pen' || s.pen === 'highlighter' || s.pen === 'comment') ink.pen = s.pen;
     if (s.nib && typeof s.nib === 'object') ink.nib = nibWith(ink.nib, s.nib);
     for (const k of ['pencil', 'fingersDraw', 'scribble', 'penInks', 'snap', 'keepRow'] as const) if (typeof s[k] === 'boolean') ink[k] = s[k]!;
     if (s.eraser && typeof s.eraser === 'object') ink.eraser = eraserWith(ink.eraser, s.eraser);
     if (Array.isArray(s.lasso)) { const k = LASSO_KINDS.filter(x => s.lasso!.includes(x)); if (k.length) ink.lasso = k; }
-    for (const p of ['pen', 'highlighter'] as DeckPen[]) {
+    for (const p of ['pen', 'highlighter', 'comment'] as DeckPen[]) {
       const v = s.pens?.[p];
       if (!v) continue;
       const def = ink.pens[p];
       const colors = Array.isArray(v.colors) && v.colors.length === def.colors.length && v.colors.every(isColor) ? v.colors : def.colors;
       const widths = Array.isArray(v.widths) && v.widths.length === def.widths.length && v.widths.every(isWidth) ? v.widths : def.widths;
-      ink.pens[p] = { colors, widths, color: isColor(v.color) ? v.color : def.color, width: isWidth(v.width) ? v.width : def.width };
+      ink.pens[p] = { colors, widths, color: isColor(v.color) && p !== 'comment' ? v.color : def.color, width: isWidth(v.width) ? v.width : def.width };
     }
   } catch { /* private window, or not ours */ }
   return ink;
@@ -160,9 +162,10 @@ export interface DeckInkPatch {
 export function patchDeckInk(ink: DeckInk, p: DeckInkPatch): DeckInk {
   const pen = p.pen ?? ink.pen;
   const cur = { ...ink.pens[pen], colors: [...ink.pens[pen].colors], widths: [...ink.pens[pen].widths] };
-  if (p.color && isColor(p.color)) cur.color = p.color;
+  // (the comment pen's colour is its own: never another)
+  if (p.color && isColor(p.color) && pen !== 'comment') cur.color = p.color;
   if (p.width && isWidth(p.width)) cur.width = p.width;
-  if (p.slotColor && isColor(p.slotColor.color) && cur.colors[p.slotColor.idx] !== undefined) {
+  if (p.slotColor && isColor(p.slotColor.color) && cur.colors[p.slotColor.idx] !== undefined && pen !== 'comment') {
     cur.colors[p.slotColor.idx] = p.slotColor.color;
     cur.color = p.slotColor.color;
   }
@@ -181,11 +184,11 @@ export function patchDeckInk(ink: DeckInk, p: DeckInkPatch): DeckInk {
 /** the ink of the next stroke: the pen in hand, its width for a page `pageW` px wide (a poster's strokes as thick, seen whole, as a slide's) */
 export function deckInkStyle(ink: DeckInk, pageW = 1280): InkStyle {
   const p = ink.pens[ink.pen];
-  const hl = ink.pen === 'highlighter';
+  const hl = ink.pen === 'highlighter', comment = ink.pen === 'comment';
   const fingers = ink.fingersDraw ? 'draw' as const : ink.pencil ? 'pan' as const : undefined;
   return {
-    color: p.color, width: Math.round(p.width * Math.max(0.25, pageW / 1280) * 10) / 10, opacity: hl ? HIGHLIGHT_OPACITY : 1,
-    ...(hl ? {} : { nib: { ...ink.nib } }), ...(fingers ? { fingers } : {}), scribble: ink.scribble, penInks: ink.penInks,
+    color: comment ? COMMENT_INK : p.color, width: Math.round(p.width * Math.max(0.25, pageW / 1280) * 10) / 10, opacity: hl ? HIGHLIGHT_OPACITY : 1,
+    ...(hl ? {} : { nib: { ...ink.nib } }), ...(comment ? { comment: true } : {}), ...(fingers ? { fingers } : {}), scribble: ink.scribble, penInks: ink.penInks,
     snap: ink.snap, eraser: { ...ink.eraser }, lasso: { kinds: [...ink.lasso], colors: [...lassoColors] },
   };
 }
@@ -228,5 +231,5 @@ export function colorsPass(filter: readonly string[], colors: readonly (string |
 
 /** the size of a width preset's dot in the toolbar (screen px) */
 export function deckInkDot(pen: DeckPen, w: number): number {
-  return Math.round(Math.max(3, Math.min(14, pen === 'pen' ? 2.5 + w * 0.8 : 4 + w / 5)));
+  return Math.round(Math.max(3, Math.min(14, pen === 'highlighter' ? 4 + w / 5 : 2.5 + w * 0.8)));
 }

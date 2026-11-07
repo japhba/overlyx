@@ -329,7 +329,11 @@ blend.
   the same entries copy the overlyx.app address when the folder is a synced clone (sync.ts
   `webPlaceOf`, core `webFileAddress`), and **Open on overlyx.app** (the 🌐 in the editor title bar,
   the tab's menu; *Copy overlyx.app Link* in a text editor's right-click menu: with the selected lines)
-  opens the file there.
+  opens the file there. The OverLyX editors have it as a button of their own too, *Open in browser*
+  (`vscode/src/webview/OpenOnWeb.tsx`: the document's top bar and *File* menu, at the cursor's
+  paragraph as its link would quote it, with the panes as shown; a deck's toolbar, at the slide shown)
+  — VS Code's title bar actions are easy to miss and can be hidden. The host opens only addresses
+  on the server the folder is synced with (`openOnWeb` / `dlOpenOnWeb` messages).
 * **Every project is a git repository** you can clone, pull and push from your own machine
   (*File ▸ Git repository…* or *Git…* on a project card):
   `git clone https://<server>/git/<owner>/<project>.git` with your username and your **account access
@@ -615,6 +619,17 @@ blend.
   the raw summary) and `GET /api/admin/usage` rank actions by how often they failed, were undone
   within 5 s or were repeated in bursts, list the unanswered shortcuts, the dismissed dialogs and the
   error templates.
+* **Macros shown as TeX code** (usage kind `macro`, `core/usagePayload.ts`, `editor/plugins/macrousage.ts`):
+  the bare name of a LaTeX command the editor could only show as TeX code — a formula's command or
+  environment nothing here draws (`core/math/mathjax.ts onUnknownMathCommand`: `math qty`, `env
+  weirdenv`) and the first command of a TeX-code box in the text (`text vspace`, `env tikzpicture`),
+  each once per page load, at most 40. Only letters (2–32, an optional star), never arguments or
+  text; the document's own macros (its `\newcommand`s, which are drawn) are left out. Stored in that
+  one form only (client, VS Code's sanitizer and the server check it), kept 30 days. The report
+  (*Macros shown as TeX code*) and `/api/admin/usage` (`macros`) **name a command only once it was met
+  in 3 sessions** (`MACRO_MIN_SESSIONS`) — a name only one person's documents use stays a count — and
+  those become the maintenance worker's `unrendered-macro` signals (lowest priority; the prompt asks
+  it to judge whether drawing the command is worthwhile and, if so, to implement it, else no_fix).
 * **Detailed interaction diagnostics** extend ordinary anonymous usage statistics with a shared
   finite schema (`core/interactions.ts`), validated before queueing and again before storage.
   Clicks, context menus, drag/drop, paste/cut, deletion/Enter/Escape outcomes, annotation controls,
@@ -680,6 +695,29 @@ blend.
   LaTeX build products (`.aux`, `.log`, `.bbl`, …) and LyX
   backups are hidden unless *All files* is on. The *Navigate* menu lists the sections as well
   (so the command palette finds them).
+* **Go to File and Search in the project** (VS Code's Quick Open and Find in Files; web app only —
+  the VS Code extension has VS Code's own). **`Ctrl/⌘+P`** (*File ▸ Go to file…*, `app/QuickOpen.tsx`,
+  `app/quickopen.ts`) opens a box over the window: a few letters of a file's name in order find it
+  (`mtex` main.tex, `figplot` figures/plot.pdf; word starts, runs of letters and the file name rank
+  above the folder), the files shown lately in this browser first (`lastfile.ts recentFiles`), Enter or
+  a click opens it; with no project open it looks through all of them. **`Ctrl/⌘+Shift+F`** (*File ▸
+  Search in the project…*, the 🔍 beside the project's name; the words selected become the query)
+  turns the files panel into a search (`app/ProjectSearch.tsx`): what is typed is looked for in every
+  text file of the project — as typed, or with *Aa* match case, *ab* whole word, *.\** a regular
+  expression (remembered per browser) — and the matches are listed by file, each in its line with
+  the match marked. A click opens the file there: a document at that line of its LaTeX (inverse
+  search's locator, `sourcelocate.ts locateSourceLine`; `#/<doc>?line=<n>&text=<the match>` — App's
+  `showSourceLine` marks the matched words in the paragraph), a text file at the line, slides at the
+  slide. Server: `GET /api/projects/:project/search?q=…&case=1&word=1&regex=1` (viewers may search;
+  `projectsearch.ts`, `searchtext.ts`): the file browser's files (no dot-folders, so no `.git`), without
+  build products, backups, pictures, PDFs, whiteboards, `.lyx` originals, archives and binaries (a NUL
+  byte), each resolved inside the project (a link out of it is left out); web pages only by what they
+  show (tags, scripts and styles blanked, so lines and columns stay the file's), with the slide of a
+  deck's match. Files are searched on disk: an open document is written there within seconds of an
+  edit (`saveDebounceMs`), so a word typed a moment ago is found a moment later. Limits
+  (`SEARCH_LIMITS`): files over 8 MB skipped, 100 matches listed per file, 2000 in all, 500 files,
+  3 s (then *stopped early*); the matching runs in a worker thread, one search at a time, and a
+  regular expression that never finishes has its worker stopped after 8 s.
 * **Text editor** for the other files of a project (`.tex`, `.bib`, `.sty`, `.cls`, `.bst`, `.md`,
   `.txt`, `latexmkrc`, …): they open in a tab like documents, with line numbers, autosave 1.5 s
   after the last change (or `Ctrl+S`), and a conflict check — if the file changed on the server
@@ -747,7 +785,11 @@ blend.
     `paste`; objects land on the slide in view where they were, beside them on their own slide, a step
     further each time; the parts of a drawing go into the drawing selected there, in its units at the
     same place on the slide, else as a drawing of their own fitted around them; ids taken in the page
-    get a `-2`; words become a text box), weaving (`weave.ts`, Inkscape's Knot: a right-click
+    get a `-2`; words become a text box; as text a copied text box or formula is its words with the
+    formulas' TeX, `\(…\)` as written — `clipOf` / `plainText` — and words copied while a text is
+    retyped carry their formulas' TeX too, `copyWords`, where the browser's copy dropped the drawn
+    formula; a document pastes either as LaTeX, so the formulas arrive as formulas, `assembly.ts`
+    handlePaste ignoring the HTML marked `<!--overlyx-objects` / `<!--overlyx-tex-->`), weaving (`weave.ts`, Inkscape's Knot: a right-click
     where two shapes cross offers the lower one over the upper one there — a clipped `<use>` of it
     right after the upper one, `g[data-ol-weave]`, clicks pass through it; right-clicked again it is
     undone), the drawing tools
@@ -773,6 +815,17 @@ blend.
     (`words` message: their box from the DOM selection, once a frame; how the first letter looks, so
     the toolbar's size / bold … show the words', not the box's); while the pointer is still selecting
     them (`choosing`) the menu waits, and comes back over them when it is lifted.
+    **Fit and centring** (7 Nov 2026): a text box or formula bigger than what it shows (`SelItem.loose`:
+    a formula in a box as wide as a line of text, one line in a wider box, a box given a height; not a
+    layout's placeholders) gets **Fit** beside the alignment — `edit.ts fitBoxes`: a formula or a
+    line becomes auto width anchored on the side it is aligned to (so it follows the formula as it is
+    edited), wrapped text a box as wide as its widest line, a height of its own goes, and what is in
+    the box stays where it was (measured before and after, `layout.ts contentRect`). The alignment
+    palette has *Centre in the box* and Top / Middle / Bottom for every box with a height of its own
+    (`valign` with `centre`: one step). A new formula object is auto width, centred on the click (or in
+    the box drawn), and a displayed formula that is all of a positioned object has no display margins
+    or leading (runtime `math.ts`), so its box is the formula's — it used to be 480 px wide and twice
+    the formula's height.
   * **List items move by drag and drop** (`runtime/listdrag.ts`, as in documents): with a text box
     selected or being retyped, a grip (in the overlay's shadow root) shows left of the bullet of the
     item under the pointer — of every item for a finger or a pen. Dragged, a line shows where it lands:
@@ -1180,6 +1233,42 @@ blend.
     editor read-only. The runtime syncs these `data-ol-` attributes like any source attribute
     (reconcile.ts `SOURCE_OL`); `stopText` re-pairs a retyped element's children (`linkTree`) —
     without it a later attribute change duplicated a text's inline elements.
+  * **The comment pen and push to talk** (7 Nov 2026, the user: "a new 'comment' pen that renders in
+    high-vis orange with a glow underneath … a push to talk (+lock option) button that records
+    commentary given alongside drawing. Process this into a format that makes it usable for agents to
+    implement feedback"; `core/voicecomment.ts`, `deliverable/voice.ts`, `VoiceTalk.tsx`). Draw's row
+    has a **Comment pen** beside the highlighter (decks, posters, web pages — where comments can be
+    made; `drawingToolbar` `comment`): one colour (`COMMENT_INK` #ff5c00, `core/inkpresets.ts`), its
+    own widths, the pen's nib; its strokes are ink objects marked `data-ol-comment-ink="k…"` (an id
+    each), drawn with a glow beneath (`COMMENT_GLOW`, a CSS drop-shadow from `runtime/review.ts`;
+    the editor's live stroke too), never scribbling out what they cross, **review marks**: shown on
+    the editing canvas, the rail and an agent's `render_page` (the `check` mode; the overlap lint
+    passes over them), never presented, printed, opened in a new tab or published (`publishedText`
+    `stripCommentInk`); the Review pane's *Comment pen* switch hides them (`ol.deckCommentInk`).
+    With the comment pen in hand a **microphone pill** sits over the canvas (it stays while the Draw
+    row folds away): **hold** the microphone to talk — draw with the other hand or the Pencil — and
+    let go to finish; a **tap**, or the **lock**, records hands-free until the microphone (then ■) is
+    tapped. The words: the browser's speech recognition where there is one (Chrome / Edge: Google's
+    speech service; Safari on the Mac and the iPad: Apple's — said in the button's tooltip), words at
+    their time as they are heard, a caption in the pill; otherwise (Firefox, or the service refusing)
+    a recording (MediaRecorder) that goes, as 16 kHz WAV, to `POST /api/ai/transcribe` (ai.ts
+    `transcribeSpeech`, OpenRouter `input_audio`, `OVERLYX_AI_SPEECH_MODEL`, default the ink reader's
+    Gemini; 60 an hour per account); where that is not set up either, **the recording is kept** in the
+    project next to the page (`comments/voice-YYYYMMDD-HHMMSS.webm`, through the host's upload) and
+    the comment says it was not transcribed. A finished recording and the comment strokes drawn
+    during it — or in the 30 s before it (`LEAD_MS`: draw, then explain) — become **comment threads,
+    one per slide** they touch (turning the slide while talking splits the words by the slide shown;
+    a slide only drawn on gets all of them), on the slide, by this person (`planVoiceComments`). A
+    thread holds, besides the usual fields, `voice` (`start`, `secs`, `said: [{t: ms from the start,
+    text}]`, `how`: device / server / none, `audio`) and `ink` (`ids` of its strokes, their `box` in
+    slide px, `on`: the objects under them in a few words — `runtime/edit.ts strokeUnder` sends their
+    paths with the stroke). The Review pane shows "Spoken · 0:12 · 2 marks over “Results”"; a click
+    selects its strokes; **resolving or deleting it takes its strokes away** (Undo brings them
+    back); comment-pen marks no thread is about are counted there with *Remove*. Agents:
+    `list_comments` on a deck gives each thread's slide, words with their times, and the strokes
+    (`agentComments`); `render_page` shows the strokes; `resolve_comment` resolves one and removes its
+    strokes (`resolveThreadText`). Documents' margins and whiteboards have no comment pen yet (the
+    pen in hand there is the ordinary pen).
   * **Guides** (12 Oct 2026, the user: "guidelines + an option to reset them, possibly tied to a slide
     master"; `deliverable/guides.ts`, `runtime/guides.ts`), as PowerPoint's: lines across the slide that
     moved and resized objects snap to (edit.ts `snap`, with the slide's and the objects' edges), drawn
@@ -1245,6 +1334,47 @@ blend.
     **website `.zip`** that works without OverLyX (the runtime and MathJax under `_overlyx/`, a deck
     opening presenting, files from elsewhere in the project copied into `_assets/`, PDF figures as
     SVG).
+  * **Presenter view and presenting from two screens** (7 Nov 2026, the user: "a presenter's view
+    with timer, speaker notes, slide browser … suitable for multiscreen use … switching to this view
+    by hovering the bottom menu, in particular when on iPad … when remote controlling a session").
+    **S** or the presenting bar's presenter-view button (the bar comes on a move near the bottom edge
+    or a tap) switches the presenting frame into the presenter view (runtime `presenter.ts`): the
+    slide big at the left (on top, upright) — still the presenting surface: pen, highlighter,
+    eraser, laser, pinch work there (`present.ts` places it in a *stage*: `--ol-cx` / `--ol-cy` /
+    `--ol-fit`, the kit's `base()` and zoom follow) —, the bar pinned under it (`PresentKit.pin`),
+    beside it the timer (since the presentation began — on a screen joining later, since the first
+    linked screen of the account began, `PresentShare.beganAt` —, pause, reset) and the clock, *Slide
+    3 of 6 · step 2 of 5*, what the next click shows (the next step, else the next slide), the speaker
+    notes (`<aside class="notes">`, A− / A+), and every slide in a strip (a tap goes there; scrolls
+    sideways with a finger). Its panels are a shadow tree (`ol-presenter`) whose copies of slides are
+    the page's own elements slotted in (`data-ol-copy`, the page's styles draw them; no pointer, so
+    a touch is the panel's); the kit takes no gesture from them (`PresentKitHost.outside`). The
+    editor keeps it per browser (`ol.presenter`: on, the notes' size; `presenter` /
+    `presenterPrefs` messages, the frame keeps nothing). **Remote control**: an iPad in the presenter
+    view, Linked with the laptop that shows the slides (the same account, `presentshare.ts`), turns
+    them; what is drawn on it shows there. **Audience window** (in the presenter view, the web app):
+    the slides presented in a window of their own (`?slide=n&present=audience`, editor/permalink.ts:
+    never in the presenter view, a click for the full screen), moved onto another screen where the
+    Window Management API lets the editor; this window goes on in the presenter view — while it is
+    on (or in an audience window) leaving the full screen does not end presenting. The Layout
+    presenter's second window (S) has the same bar button.
+    **The slides follow the text while presenting**: the editor sends the presenting frame each
+    version as it sends the canvas (patches, `presentReady` / `needSource`; the server serves
+    `source` in `present` mode too), `present.ts sourceChanged` keeps the slide shown — where it is
+    now when slides came or went before it — and its step. The moves between screens carry the slide's
+    mark too (`PresentAt.sid`: its id, else a hash of its words as the source has them), so a screen
+    whose deck has a slide more before it still shows the same slide. And each screen's state says
+    the version it shows (`doc`: the text's hash and the sum of the Yjs clocks, `docStamp`) and its
+    build (`b`): a screen behind another of the account's for 5 s (it missed edits) or on an older
+    OverLyX says so over its slides, *Bring up to date* loading the page again presenting from the same
+    slide (`?present=1`). Found 7 Nov 2026: the user's iPad, linked with the laptop, presented an older
+    version of a talk (3 Nov) — before, a presenting frame showed the page as it was when it opened,
+    while a synced clone on the laptop kept changing the deck (eleven updates 13:52–14:12 UTC, its
+    steps renumbered: the same step number was another build-up on each screen). Also found then: a slide put in before
+    another from the two texts alone (`<h2>…</h2></section><section class="slide">` after a slide's
+    start tag) was patched into that slide (core `html/source.ts`: a patch closing an element it did
+    not open is no patch now, `closesOutside`). Probes: `scratch/forkc-presenter.mts`,
+    `forkc-audience.mts`, `forkc-insert.mts`.
   * **Menus, the slide master, slide numbers, skipped slides** (24 Oct 2026, the user: "improve our
     slide/layout editor … compared against typical presentation editing, slide master etc. … my main
     concern is that things are intuitive"). **Menus**: the editor hands the menu bar (and the Modern
@@ -1690,12 +1820,12 @@ blend.
   (`Section*`, `Subsection*`, …; `Chapter*` first in books). A space triggers each shortcut;
   unavailable levels stay literal text, and Backspace right after brings the marker back.
   Enter continues a list; Enter on an *empty* item ends it (a nested one
-  moves out one level first). **Backspace at the start of an item** takes the bullet away and keeps the
-  text where it was: it becomes a paragraph *of the item above* (LyX depth + 1 — LaTeX writes it inside
-  that `\item`, markdown indents it under it), as deep as LyX's nesting rule allows (`maxDepthAfter`:
-  the first item of a list has no item above — it leaves the list, or goes into its parent item); each
-  further Backspace moves it out one level, then it joins as usual. The item's own sub-items stay
-  where they are. Tab / Shift+Tab nest and unnest (`listIndent`) — Tab also on a paragraph right after
+  moves out one level first). **Backspace at the start of an item** takes it one level out — no bullet
+  counts as level 0 (the user's rule, 7 Nov 2026; `listExitBackspace`): a nested item becomes an item
+  of the level above, an item of the outermost level a plain paragraph, its text kept and not joined.
+  Its sub-items and what is nested in it (listmove.ts's unit) go out with it, so they stay its
+  sub-items — under the plain paragraph they carry the list on. A paragraph nested in an item moves
+  out one level per Backspace, then joins as usual. Tab / Shift+Tab nest and unnest (`listIndent`) — Tab also on a paragraph right after
   a list item, which puts it (or the image in it) into that item; Alt+Enter always starts a plain
   paragraph. **What is nested in an item starts at the item's text**: non-list paragraphs at depth *n*
   sit at 2*n* + 0.4em (the item's label box), on layout pages at `--ol-leftmargin` × *n* (beamer's
@@ -1770,6 +1900,15 @@ blend.
   insets and tracked changes; `Ctrl/⌘+click` follows a reference or opens a child document; **tabs**
   for open documents (new tabs open right of the current one); the text column is centred and its
   width is a View setting (*View ▸ Text width*, `Ctrl+Alt+±`).
+* **The selected symbol's other occurrences** (`editor/plugins/mathoccurrences.ts`, both shells): one
+  atom selected in a formula (Shift+arrow, a drag) — or a formula that is one symbol, selected whole —
+  gives the same symbol in the document's other formulas a lighter shade of the selection
+  (`--math-occ-bg`), as VS Code marks a word's occurrences. The same symbol is core
+  `math/mathjax.ts symbolKey`: a letter in its math font (x matches the x of x_i and x², not
+  `\mathbf{x}`), a symbol command (`\alpha`), and a symbol with scripts, an accent, a font or a macro by
+  the LaTeX it writes (x_i only x_i). Digits and operators are not symbols. The renderer gives every
+  atom of an editable formula its key's class (`lm-k-…`), so the highlight is one CSS rule under the
+  editor's root (`data-ol-occ`); formulas not upgraded to fields yet light up when they scroll in.
 * **Inserting with a selection** (`editor/commands.ts`) never throws the selection away. An inset —
   footnote, note, box, branch, caption, a float — takes the selected text, object or paragraphs in, as
   LyX does (`doInsertInset`: the selection moves into the new inset): a clicked image with *Insert ▸
@@ -1817,7 +1956,10 @@ blend.
   `Toolbar` `collapse`, `MODERN_COLLAPSE`; the slide decks' text row has the same insert group in
   the same order), the file tree and the start page with Lucide line icons for what a file or a
   project is (`KIND_ICONS`), the contextual rows (formula, table, review,
-  ink) as floating bars — interface only, every function the same. The
+  ink) as floating bars — interface only, every function the same. No LyX drawing shows in Modern:
+  `MODERN_ICONS` has a line icon under every LyX icon name (`lyxicons.ts`; table borders, alignment,
+  math, review, version control — `tests/modern-icons.test.ts`), the deck's and the Layout toolbar's
+  hand-drawn ones (`dk-…`, `ol-…`), and the decks' palette items take them too (`decktoolbar.tsx ICON`). The
   choice is offered in the welcome card of a new account (two sketches, `Tour.tsx UiChoice`) — and on
   its own (`InterfacePrompt`) to a new account that arrives with an Overleaf import (it skips the
   welcome card) — in *View ▸ Interface* and *Settings ▸ Appearance*; kept in the account (`users.settings.interface`,
@@ -2049,8 +2191,11 @@ blend.
 * **Smart invert** (`app/darkpages.ts`, pref `darkPages`, on by default; the theme switch's menu):
   in the dark theme the content of *every* page is shown light on dark, colours keeping their hue —
   one switch, so documents, PDFs and slides always agree. Documents (.tex, .md): the theme's tokens
-  make the page dark; off, `.editor-page` gets the light theme's colour tokens (styles.css and
-  modern.css list it beside `:root` / `html[data-ui="modern"]`; the font and zoom tokens live in
+  make the page dark; off, `.editor-page` gets the light theme's colour tokens — and so does the
+  `.editor-scroll` around it, ruler included: a table or formula spilling out of the sheet into the
+  pane, or Modern's sheet narrower than a wide pane, stood on the dark canvas (dark words on dark,
+  the white "page" ending short of the window) — (styles.css and
+  modern.css list them beside `:root` / `html[data-ui="modern"]`; the font and zoom tokens live in
   blocks of their own so the page keeps them) — white paper inside the dark interface, like Word's
   page colour switch; the few literal dark-theme colours inside the page (LyX text colours, note
   labels, frame titles, authors' change colours in shellutil.tsx) apply only with
@@ -2525,7 +2670,14 @@ blend.
   it into the document). Autocorrect (Tools ▸ Autocorrect typos, on by default): a minor typo is
   fixed when the word is finished — dictionary-based (adjacent-swap candidates checked directly:
   Hunspell never suggests 'the' for 'teh'), never in formulas or code, Backspace right after
-  reverts and pins the word for the session.
+  reverts and pins the word for the session. **Arrows** (`editor/plugins/arrows.ts`, always on):
+  `->` becomes →, `<-` ←, `-->` ⟶, `<--` ⟵ (and `<->` ↔, `<-->` ⟷) as the last key is typed — the
+  key goes in as typing, the arrow replaces it as an undo step of its own, so ⌘Z or Backspace right
+  after gives the typed characters back, and those characters then stay as typed (not converted
+  again). Not in formulas, raw TeX, code-like insets or typewriter text; slide text boxes of HTML decks
+  don't have it. The .tex file has `\textrightarrow{}` / `\textleftarrow{}` and
+  `\ensuremath{\longrightarrow}` …, which the reader turns back into the characters
+  (`ENSUREMATH_ARROWS`); markdown and HTML keep the characters.
   * *Rewrite with AI* — `⌘J` / `Ctrl+J` (⌘K is the link box, as in Google Docs): select a passage — or nothing, to write at the cursor — and describe the
     change in the small prompt under it. The passage, the instruction and the document's LaTeX
     (for context: notation, macros, citation keys) go to the model; the reply comes back as LaTeX
@@ -2925,8 +3077,10 @@ document. Tests: `tests/security-limits.test.ts`, `tests/pdffetch.test.ts`, `tes
 iterations (16 Oct 2026). `overlyx-maintenance.timer` runs `scripts/maintenance.sh` every ten minutes;
 the timer persists across reboots and `flock` prevents overlapping workers. A cheap read-only scan
 checks open GitHub issues (including recent comments), local feedback/browser/server/extension
-error reports, anonymous usage errors/problem trails and service errors. Mail and account tables
-are excluded. Only new or changed signals invoke Codex; recurring counts must double to wake it
+error reports, anonymous usage errors/problem trails, LaTeX commands the editor shows as TeX code
+(`unrendered-macro`, lowest priority: the worker judges whether drawing one is worthwhile — a common
+package's command, not one person's macro — and implements it or answers no_fix) and service errors.
+Mail and account tables are excluded. Only new or changed signals invoke Codex; recurring counts must double to wake it
 again. One coherent fix is attempted at a time, with only minimal relevant checks. The worker runs
 as its own account `overlyx-maint` (see "Accounts on the server" below): root first collects the
 evidence (`maintenance.ts --collect`, the unit's `ExecStartPre=+`) into
@@ -3066,6 +3220,18 @@ fine-grained personal access token in GitHub's *Developer settings*), and a seco
 file by `scp`. Without it the app runs with password login only. The per-instance JWT
 secret (`<data dir>/secret.key`) is generated on first start and is part of every backup too.
 
+**The accounts' secrets** — their own API keys, the Google Drive, LessWrong and Zotero
+authorisations, the account tokens kept for copying again and the Agent panel's — are sealed in the
+database (AES-256-GCM, `packages/server/src/sealed.ts`) under the **sealing key**,
+`<data dir>/sealing.key`, made on first start. Unlike `secret.key` it is in **no backup**, so a copy of
+the database or of a backup reveals none of them. **Keep one copy offline** (password manager), as
+root: `cat /root/lyx/overlyx/data/sealing.key`; it never changes. Restoring onto a new machine, put
+it back (mode 600) before the first start. Without it the server makes a new key and logs
+`[sealed] … is not the key this database's secrets were sealed with`; the old secrets then read as
+not connected, and every account connects its services and enters its keys again. The server holds
+the secrets while it runs, as it must: the Google Docs and LessWrong syncs act with the linking
+account's authorisation while that person is away, and agent turns go on after the tab closes.
+
 Do not put a broad-scope token (your `gh` login) in there: the server runs user-supplied LaTeX. `GITHUB_PUBLISH_TOKEN`
 (optional) lets administrators publish built PDFs into repositories (Share dialog ▸ *Public PDF
 link* ▸ *commit the PDF to a GitHub repository*): a fine-grained token with *Contents: read & write*
@@ -3086,7 +3252,7 @@ whether it is configured; the features stay off in every browser until a user sw
 
 **Off-site backup (Hetzner Object Storage, restic).** `deploy/overlyx-backup-offsite.timer` runs
 `scripts/backup-offsite.sh` every night at 04:15 UTC (after the local backup): the SQLite database
-(online backup), `secret.key`, `secrets.env` and the telemetry key — staged with a manifest in
+(online backup), `secret.key`, `secrets.env` and the telemetry key (not the sealing key: "Secrets") — staged with a manifest in
 `/mnt/HC_Volume_107166861/backup-stage` (0700, emptied after each run) — the projects with their git
 histories (without build products) and the agents' homes, encrypted by restic on this server and
 stored in a bucket in another Hetzner location (Helsinki; the server is in Falkenstein). The bucket
@@ -3155,7 +3321,7 @@ The mirror holds the documents and their history — not the database (users, sh
 tokens) nor `secrets.env`; those come from the nightly backup below. `OVERLYX_MIRROR_URL=file:///…/{repo}.git`
 mirrors into bare repositories on disk instead (tests, or a second disk).
 
-**Nightly backup.** `deploy/overlyx-backup.timer` runs `scripts/backup.sh` every night (SQLite online backup, `secret.key`,
+**Nightly backup.** `deploy/overlyx-backup.timer` runs `scripts/backup.sh` every night (SQLite online backup, `secret.key` — not `sealing.key` —,
 a tarball of the projects without build products; the newest 14 are kept) into `OVERLYX_BACKUP_DIR` —
 on overlyx.app `/mnt/HC_Volume_107166861/backups` (the volume; `data/backups` is a symlink to it).
 Restoring — do the drill once in a while:
@@ -3584,6 +3750,11 @@ links. The browser refuses those requests itself rather than sending text (`e2e/
   node selection, cells, a formula being edited, a read-only document or a layout document (its canvas
   has its own). It looks like the deck's (`.dl-quick`) and lives in `<body>`. Settings ▸ Editor ▸ Text
   ▸ "Quick menu over selected text" (`prefs.selectionBar`, on by default). `tests/parity.test.ts`.
+* **Horizontal spaces** (`\,` / `\thinspace`, `~`, `\quad`, `\enspace`, medium / thick / negative
+  spaces) are drawn as LyX draws them (`InsetSpace::draw`): no grey chip, a small bracket round the
+  baseline as wide as the space, in LyX's LaTeX dark red at half strength (`--space-mark`; orange on
+  dark pages); `~` and `\space` a half one standing on the baseline, negative spaces an upturned one.
+  `\hspace` and the fills keep their lines (`styles.css .lyx-space`).
 * **Paragraph separation** (Document ▸ Settings): "Vertical space" (`\paragraph_separation skip`) is drawn
   as the PDF has it — paragraphs flush left, `\defskip` between them (`editor/paragraphsep.ts`, both
   shells via `setDocumentParagraphs(headerLines)`; markdown documents are always this way). Settings ▸
@@ -3858,8 +4029,30 @@ selection at once.
   TrueType files are only the fallback — they lack most OpenType features (Inter's: 11 of 43).
   A family cached before (static css2 files) is fetched again (manifest `v`). The browser loads the
   same files (`/api/fonts/google.css`: a variable font's @font-face has weight and width ranges;
-  `editor/plugins/fontfaces.ts` loads the families a document uses). The font routes need a signed-in
-  user; the VS Code webview has none of them (the list then has the document's families only).
+  `editor/plugins/fontfaces.ts` loads the families a document uses; the stylesheet names its files
+  relative to itself, `google/<slug>/<file>`, so it serves under any prefix). The font routes need a
+  signed-in user.
+* **My fonts** (`server/myfonts.ts`, the account's `users.settings.fonts`; `GET`/`PUT /api/fonts/mine`;
+  client `fonts/myfonts.ts`): Google fonts installed into the account — ★ on a row of the list (shown
+  on hover, kept while in the list) or *Add to my fonts* in the panel's title. They come first in
+  every font list (then *In this document*, *Recent* without them), in the web app and in VS Code. A
+  font added is fetched into the server's cache at once (every axis and OpenType feature: the
+  repository's files). At most 200; guests and read-only sign-ins cannot change them.
+* **In VS Code** the webviews ask the extension's bridge (`OVERLYX_API_BASE`, `fontApi()` in
+  `fonts/googlefont.ts`), and the bridge (`vscode/src/host/fonts.ts`) asks the OverLyX server the
+  computer is signed in to (the CLI's and the extension's sign-in, overlyx.app first) through its git
+  API — `/git/api/fonts/*`, the same routes with Basic auth (`server/git.ts`). It keeps what it got
+  in the extension's storage (`google-fonts/`: font files for good, the catalogue, stylesheets and
+  descriptions refreshed daily) and answers from there when the server is away; reading My fonts
+  fetches their files, so they work offline. The webview's CSP allows the bridge's origin for styles
+  and fonts. Signed in nowhere, the list says to sign in (*OverLyX: Sign In…*). Local PDF builds in
+  VS Code do not get the files (the server's builds do: `ol-fonts/` above).
+* **Faked styles** (`fonts/fakestyles.ts`): where the text at the cursor or in the selection is bold,
+  italic (or emphasized, slanted) or in small capitals and its font by name has no such face — no
+  weight of 600 or more, no italic files (a slant axis does not count: the stylesheet declares the
+  files upright), no `smcp` feature — the font button shows an orange "!" beside the name. Its
+  tooltip says what is faked (the browser thickens, slants or shrinks the letters; the PDF finds no
+  such face and prints the text regular, upright, in lower case) and to pick a font that has it.
 
 ## Text styles
 
@@ -4318,7 +4511,11 @@ clientInfo, User-Agent). It exposes these tools:
 * `list_comments(path)`, `add_comment(path, text, paragraph_index?)`, `resolve_comment(path, index)`
   — comment threads anywhere in the body, inside tables, floats and other insets included (same
   `Note Comment` inset shape and header convention — `Name (date time):` — as the client's comment
-  cards); new threads attach at the end of a top-level paragraph.
+  cards); new threads attach at the end of a top-level paragraph. On an HTML deck, poster or web page
+  `list_comments` reads the page's `data-ol-comments` threads (`core/voicecomment.ts agentComments`:
+  index, slide, the object, messages, resolved; a spoken comment's `spoken` words at their time into
+  the recording and its comment pen strokes as `drawn`: ids, box, the objects under them) and
+  `resolve_comment` resolves one there, its comment pen strokes removed with it.
 * `build_pdf(path, wait_seconds?)`, `build_status(path)` — compile with latexmk (viewers may,
   like in the app) and read the result: status, LaTeX warnings, and the compile-log tail. A build
   started before the latest edit never counts. A failed build_pdf also returns the first errors

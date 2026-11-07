@@ -25,6 +25,7 @@
  */
 import type { Path, SelItem, SelStyle, Tool, Rect, HtmlOp, ObjKind, KeyPress, InkStyle, PeerInfo, TextCaret, WordsStyle, ReliabilityEvent, ReliabilityPointer } from '../protocol';
 import { ASIDE_ATTR } from '../protocol';
+import { COMMENT_INK_ATTR } from '@overlyx/core/html/review.ts';
 import { inkOn } from '../../app/contrast';
 import { MODE, post, state, srcOf, link, pathOf, liveAt, sourced, slides, slideOf, docRect, isForeign, sendLayout, penWork } from './env';
 import { mapAssets, restoreMappedAssets } from '../offlineassets';
@@ -52,7 +53,7 @@ import { offsetOf, caretBox, selectionBoxes, safeColor } from './carets';
 import { postObjects } from './objects';
 import { reviewOverlay, bindPins, setReviewHover, showGhost, lockDeletions, trackInput, captureCommentTarget, setLiveAt, styleAuthors, REVIEW_OVERLAY_CSS } from './review';
 import { initListDrag, hoverList, notePointer, listParts, bindListGrips, listDragging, stepItem, LIST_DRAG_CSS } from './listdrag';
-import { clipOf, postClip, paste } from './clip';
+import { clipOf, postClip, paste, plainText } from './clip';
 import { bufferedTextHtml } from '../recovery';
 import { weaveMenu } from './weave';
 import { initGuides, guideSlide, guideAt, guideSnaps, guideParts, startGuideDrag, moveGuideDrag, endGuideDrag, GUIDES_CSS } from './guides';
@@ -62,7 +63,7 @@ import { textBoundary, textListItem } from './textnavigation';
 import { setInlineStep } from './inlinesteps';
 import { PH, PH_CSS, phRole, isEmptyPh, isPicturePh, primeList } from './placeholders';
 import { TEXT_ANCHOR, WRAP_LINES, anchorFraction, textBoxStyle, type TextAnchor } from '../textboxes';
-import { textLineCount, wrapWarning } from './layout';
+import { textLineCount, wrapWarning, contentRect } from './layout';
 
 const NS = 'http://www.w3.org/1999/xhtml';
 let host: HTMLElement;
@@ -1163,12 +1164,86 @@ function item(el: Element): SelItem | null {
     src: kind === 'image' ? pictureSrc(el) : undefined,
     ...((kind === 'text' || kind === 'formula') && state.kind !== 'page' && !inGroupLayout(el) ? {
       textBox: (el as HTMLElement).style.width === 'max-content' ? (el.getAttribute(TEXT_ANCHOR) || 'left') as TextAnchor : 'fixed' as const,
+      ...(looseBox(el, kind) ? { loose: true } : {}),
     } : {}),
     list: listOf(el),
     ...(phRole(el) ? { ph: { role: phRole(el)!, empty: isEmptyPh(el) } } : {}),
     ...(masterKey(el) ? { master: masterKey(el)! } : {}),
     ...(kind === 'group' ? { layout: groupLayoutOf(el, cs(el)) ?? { direction: 'free', gap: 24, align: 'center', equal: false } } : {}),
   };
+}
+
+/** a box's padding and border (client px across and down) */
+function boxEdges(el: Element, k: number): { l: number; r: number; t: number; b: number } {
+  const c = cs(el), n = (v: string) => parseFloat(v) || 0;
+  return { l: (n(c.paddingLeft) + n(c.borderLeftWidth)) * k, r: (n(c.paddingRight) + n(c.borderRightWidth)) * k, t: (n(c.paddingTop) + n(c.borderTopWidth)) * k, b: (n(c.paddingBottom) + n(c.borderBottomWidth)) * k };
+}
+
+/**
+ * A text box or a formula bigger than what it shows: a formula in a box as wide as a line of text, a
+ * line of text in a wider box, a box given a height of its own (the quick menu's Fit). Wrapped text
+ * fills its width anyway; a layout's placeholders keep the layout's size.
+ */
+function looseBox(el: Element, kind: ObjKind): boolean {
+  if (!(el instanceof HTMLElement) || isLocked(el) || phRole(el) || !movable(el)) return false;
+  const c = contentRect(el);
+  if (!c) return false;
+  const k = docScale(el), r = el.getBoundingClientRect(), e = boxEdges(el, k);
+  const slackX = r.width - e.l - e.r - c.width, slackY = r.height - e.t - e.b - c.height;
+  const room = (kind === 'formula' ? 6 : 24) * k;
+  return (slackX > room && (kind === 'formula' || textLineCount(el) <= 1)) || (fixedHeight(el) && slackY > room);
+}
+
+const px2 = (v: number) => `${Math.round(v * 100) / 100}px`;
+
+/**
+ * The selected text boxes and formulas fitted to what they show (the quick menu's Fit): a formula or
+ * a line of text gets its content's width and keeps following it (auto width, anchored on the side it
+ * is aligned to), wrapped text keeps its lines in a box as wide as its widest, a height of its own
+ * goes — and what is in the box stays where it was on the slide.
+ */
+export function fitBoxes(): void {
+  if (state.kind === 'page') return;
+  stopText();
+  const ops: HtmlOp[] = [];
+  const fitted: Element[] = [];
+  for (const el of selected) {
+    const path = pathOf(el), kind = kindOf(el);
+    if (!path || !(el instanceof HTMLElement) || isLocked(el) || (kind !== 'text' && kind !== 'formula') || inGroupLayout(el) || !movable(el)) continue;
+    const before = contentRect(el);
+    if (!before) continue;
+    const k = docScale(el), c = cs(el);
+    const set: Record<string, string | null> = {};
+    let anchor: TextAnchor | null = null;
+    if (kind === 'formula' || textLineCount(el) <= 1) {
+      anchor = c.textAlign === 'center' ? 'center' : c.textAlign === 'right' || c.textAlign === 'end' ? 'right' : 'left';
+      Object.assign(set, textBoxStyle(el, anchor));
+    } else {
+      const r = el.getBoundingClientRect(), e = boxEdges(el, k);
+      const shrink = (r.width - e.l - e.r - before.width) / k;
+      if (shrink > 0.5 && Number.isFinite(parseFloat(c.width))) set.width = px2(parseFloat(c.width) - shrink);
+    }
+    if (fixedHeight(el) && el.style.height) set.height = null;
+    for (const [p, v] of Object.entries(set)) { if (v === null) el.style.removeProperty(p); else el.style.setProperty(p, v); }
+    // (what it shows, back where it was: the box moved round it)
+    const after = contentRect(el);
+    if (after) {
+      const now = cs(el);
+      for (const [p, d] of [['left', (before.left - after.left) / k], ['top', (before.top - after.top) / k]] as const) {
+        const v = parseFloat(now.getPropertyValue(p));
+        if (Math.abs(d) > 0.01 && Number.isFinite(v)) { set[p] = px2(v + d); el.style.setProperty(p, set[p]!); }
+      }
+    }
+    if (!Object.keys(set).length) continue;
+    ops.push({ t: 'style', path, set });
+    if (anchor) {
+      el.setAttribute(TEXT_ANCHOR, anchor); el.removeAttribute(WRAP_LINES);
+      ops.push({ t: 'attr', path, name: TEXT_ANCHOR, value: anchor }, { t: 'attr', path, name: WRAP_LINES, value: null });
+    }
+    fitted.push(el);
+  }
+  if (ops.length) commit([...ops, ...refitGroups(fitted)]);
+  draw();
 }
 
 /** Resizing accepts the present line count as the author's intended layout. */
@@ -2604,6 +2679,8 @@ function startInk(e: PointerEvent, slide: HTMLElement | null): void {
   svg.setAttribute('data-ol-runtime', '');
   svg.setAttribute('class', 'ol-ink');
   svg.setAttribute('aria-hidden', 'true');
+  // (the comment pen's: its glow, as the page will show it — review.ts)
+  if (inkStyle.comment) svg.setAttribute(COMMENT_INK_ATTR, '');
   const hl = inkStyle.opacity < 1;
   svg.setAttribute('style', `position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none${hl ? '; mix-blend-mode: multiply' : ''}`);
   const g = document.createElementNS(SVG_NS, 'g') as SVGGElement;
@@ -2625,6 +2702,8 @@ function startInk(e: PointerEvent, slide: HTMLElement | null): void {
 function inkPaint(): Record<string, string> {
   const a: Record<string, string> = { fill: 'none', stroke: inkStyle.color, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' };
   if (inkStyle.opacity < 1) a['stroke-opacity'] = String(Math.round(inkStyle.opacity * 100) / 100);
+  // (the comment pen's: the editor's copy glows too — DeliverableEditor liveInk)
+  if (inkStyle.comment) a['data-comment'] = '1';
   return a;
 }
 
@@ -2813,7 +2892,8 @@ function endInk(e: PointerEvent): void {
   if (ink.rest.timer) clearTimeout(ink.rest.timer);
   if (ink.snapTimer) clearTimeout(ink.snapTimer);
   const shape = ink.snapped;
-  const gone = shape ? [] : scratchTargets(performance.now() - ink.rest.t >= SCRATCH_HOLD_MS);
+  // (never the comment pen's: hatching over a passage to mark it must not rub out what is under it)
+  const gone = shape || inkStyle.comment ? [] : scratchTargets(performance.now() - ink.rest.t >= SCRATCH_HOLD_MS);
   fadeScratch([]);
   // (snapped: the stroke as drawn is written too, a step before its shape, so that Undo brings it back)
   const runs = shape ? inkRunsNow(true) : paintInk(true);
@@ -2844,7 +2924,31 @@ function endInk(e: PointerEvent): void {
     if (live) (slide ?? document.body).append(svg);
     sentInk.push(entry);
   }
-  post({ ol: 'draw', version: state.version, tool: 'pen', slide: slide ? pathOf(slide) : null, rect, after: null, runs: inkPaths(runs, -x, -y), ...(scratch.length ? { scratch } : {}), ...(snap ? { snap } : {}) });
+  const under = inkStyle.comment && slide ? strokeUnder(slide, rect) : [];
+  post({ ol: 'draw', version: state.version, tool: 'pen', slide: slide ? pathOf(slide) : null, rect, after: null, runs: inkPaths(runs, -x, -y), ...(scratch.length ? { scratch } : {}), ...(snap ? { snap } : {}), ...(under.length ? { under } : {}) });
+}
+
+/**
+ * What a comment pen's stroke is drawn over (slide px): the objects most of whose box it covers, or
+ * that cover much of it — a ring round a picture, a line under a sentence (its box a little larger) —
+ * not the slide's backgrounds, nor other ink
+ */
+function strokeUnder(slide: HTMLElement, r: Rect): Path[] {
+  const o = slideOrigin(slide), pad = 12;
+  const sx = r.x - pad, sy = r.y - pad, sw = r.w + 2 * pad, sh = r.h + 2 * pad;
+  const sb = slide.getBoundingClientRect(), slideArea = (sb.width / o.k) * (sb.height / o.k);
+  const out: Path[] = [];
+  for (const el of objectsOn(slide)) {
+    if (kindOf(el) === 'ink') continue;
+    const b = docRect(el);
+    const x = (b.x - o.x) / o.k, y = (b.y - o.y) / o.k, w = b.w / o.k, h = b.h / o.k;
+    if (w * h <= 0 || w * h > 0.8 * slideArea) continue;
+    const ix = Math.min(x + w, sx + sw) - Math.max(x, sx), iy = Math.min(y + h, sy + sh) - Math.max(y, sy);
+    if (ix <= 0 || iy <= 0) continue;
+    if (ix * iy >= 0.3 * sw * sh || ix * iy >= 0.5 * w * h) { const p = pathOf(el); if (p) out.push(p); }
+    if (out.length >= 8) break;
+  }
+  return out;
 }
 
 /** the pen's stroke done that took the pen itself with Draw not open: Select in hand again, fingers and the mouse selecting (the editor's Draw row stays folded) */
@@ -3632,10 +3736,33 @@ function fwd(e: KeyboardEvent): void {
 
 /* the clipboard (clip.ts): with the keyboard in the frame — mostly it is in the editor, which does the same */
 
+/**
+ * Words copied (or cut) while a text is retyped: its formulas, references and citations as their
+ * TeX. The browser's own copy took a formula's drawing, which has no text — a copy of words round an
+ * equation came out without it. (The HTML is marked, so a document pastes the TeX as formulas.)
+ */
+function copyWords(e: ClipboardEvent, cut: boolean): boolean {
+  const s = getSelection();
+  if (!editing || !s || s.isCollapsed || !s.rangeCount || !e.clipboardData) return false;
+  const range = s.getRangeAt(0);
+  if (!editing.contains(range.commonAncestorContainer)) return false;
+  const box = document.createElement('div');
+  box.append(range.cloneContents());
+  if (!box.querySelector('.ol-mathchip, .ol-refchip')) return false;
+  for (const x of Array.from(box.querySelectorAll('[data-ol-runtime]'))) x.remove();
+  unchip(box);
+  e.preventDefault();
+  e.clipboardData.setData('text/plain', plainText(box));
+  e.clipboardData.setData('text/html', `<!--overlyx-tex-->${box.innerHTML}`);
+  if (cut) document.execCommand('delete');
+  return true;
+}
+
 function onCopy(e: ClipboardEvent): void {
   if (drawInput && drawAhead) return;
   if (isCropping()) return;
-  if (editing || !selected.length || !e.clipboardData) return;
+  if (editing) { copyWords(e, false); return; }
+  if (!selected.length || !e.clipboardData) return;
   const c = clipOf(selected);
   if (!c) return;
   e.preventDefault();
@@ -3646,7 +3773,8 @@ function onCopy(e: ClipboardEvent): void {
 function onCut(e: ClipboardEvent): void {
   if (drawInput && drawAhead) return;
   if (isCropping()) return;
-  if (editing || !selected.length) return;
+  if (editing) { copyWords(e, true); return; }
+  if (!selected.length) return;
   onCopy(e);
   const paths = selected.filter(s => !isLocked(s)).map(pathOf).filter((p): p is Path => !!p);
   selected = [];

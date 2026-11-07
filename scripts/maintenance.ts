@@ -61,6 +61,15 @@ export function databaseSignals(db: Database.Database, since: number): Signal[] 
     for (const r of rows) signals.push({ key: `${kind}:${digest(r.key)}`, revision: countRevision(r.count), kind,
       title: privateText(r.key, 400), detail: `${r.count} occurrences in ${r.sessions} anonymous sessions. These are signals, not confirmed bugs.`, priority: kind === 'usage-error' ? 3 : 5 });
   }
+  // LaTeX the editor could only show as TeX code, met in several anonymous sessions: a candidate for
+  // drawing it (scripts/maintenance-prompt.txt says how to judge one)
+  for (const r of usage.macros.listed.slice(0, 10)) {
+    const [kind, name] = r.key.split(' ');
+    if (!/^(math|env|text)$/.test(kind) || !/^\\?[A-Za-z]{2,32}\*?$/.test(name ?? '')) continue;
+    signals.push({ key: `unrendered-macro:${r.key}`, revision: countRevision(r.sessions), kind: 'unrendered-macro',
+      title: `${kind === 'env' ? `\\begin{${name}}` : name} shown as TeX code (${kind === 'text' ? 'a TeX-code box in the text' : 'in formulas'})`,
+      detail: `${r.count} times in ${r.sessions} anonymous sessions. Judge whether OverLyX should draw it (see the unrendered-macro rules in your instructions); if so, implement the rendering; if not, answer no_fix.`, priority: 7 });
+  }
   for (const r of usage.suspicious.slice(0, 10)) {
     if (r.failed + r.repeated + r.undone < 3) continue;
     signals.push({ key: `usage-action:${digest(r.key)}`, revision: countRevision(r.failed + r.repeated + r.undone), kind: 'usage-action',
@@ -170,7 +179,7 @@ async function loggedProcess(bin: string, args: string[], file: string, timeout:
       const timer = setTimeout(kill, timeout);
       child.once('error', e => { clearTimeout(timer); reject(e); });
       child.once('exit', code => { clearTimeout(timer); code === 0 ? resolve() : reject(new Error(`${bin} failed; inspect ${file}`)); });
-      child.stdin.on('error', () => {}); child.stdin.end(input);
+      child.stdin!.on('error', () => {}); child.stdin!.end(input);
     });
   } finally { fs.closeSync(fd); }
 }

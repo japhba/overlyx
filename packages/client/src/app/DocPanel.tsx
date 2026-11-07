@@ -3,7 +3,8 @@
  * file browser without its own project picker). A document in the tree expands into its outline:
  * the open one by itself, live (the editor's headings, with the section tools); any other with
  * its twisty, from the file on disk (`GET /api/docs/<id>/outline`) — a heading of another
- * document opens that document at the heading.
+ * document opens that document at the heading. The 🔍 beside the project switches the panel to
+ * Search in the project (app/ProjectSearch.tsx; Ctrl+Shift+F, the `ol:project-search` event).
  */
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { EditorView } from 'prosemirror-view';
@@ -12,6 +13,8 @@ import { FileBrowser, projectLabel, useProjectEvents } from './FileBrowser';
 import { projectDocs } from './Home';
 import { lastFileOf } from './lastfile';
 import { Outline, type OutlineItem } from './Outline';
+import { ProjectSearch } from './ProjectSearch';
+import { MODERN_ICONS, iconSvg } from './modernicons';
 import { editorContext } from '../editor/context';
 import { projectOfDoc } from '@overlyx/core';
 
@@ -33,6 +36,15 @@ export interface DocPanelProps {
 
 const stored = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
 
+/** a Search asked for before the panel was there (App.tsx shows the panel, then it mounts) */
+let pendingSearch: { query?: string } | null = null;
+/** Show the files panel's Search (App.tsx opens the panel too): `query` fills it in. */
+export function openProjectSearch(query?: string): void {
+  pendingSearch = { query };
+  window.dispatchEvent(new CustomEvent('ol:project-search', { detail: { query } }));
+  setTimeout(() => { pendingSearch = null; }, 2000);
+}
+
 export function DocPanel({ current, currentDoc, refreshKey, outline, activePos, view, onOpen, onHide, onProject, notify }: DocPanelProps) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [picked, setPicked] = useState<string | null>(() => stored('ol.project'));
@@ -41,6 +53,15 @@ export function DocPanel({ current, currentDoc, refreshKey, outline, activePos, 
   // fsTick: the server told us the project's files changed on disk (SSE), or the window came back
   // into focus — reload the panel and the file browser without any refresh button
   const [fsTick, setFsTick] = useState(0);
+  // the files, or Search in the project (the box focused anew on each Ctrl+Shift+F)
+  const [searching, setSearching] = useState(() => !!pendingSearch);
+  const [searchFocus, setSearchFocus] = useState<{ n: number; query?: string }>(() => (pendingSearch ? { n: 1, query: pendingSearch.query } : { n: 0 }));
+  useEffect(() => {
+    pendingSearch = null;
+    const f = (e: Event) => { pendingSearch = null; setSearching(true); setSearchFocus(s => ({ n: s.n + 1, query: (e as CustomEvent<{ query?: string }>).detail?.query })); };
+    window.addEventListener('ol:project-search', f);
+    return () => window.removeEventListener('ol:project-search', f);
+  }, []);
   const listKey = refreshKey + fsTick;
   const load = () => api.projects().then(r => setProjects(r.projects)).catch(() => {});
   useEffect(() => { void load(); }, [listKey]);
@@ -139,9 +160,14 @@ export function DocPanel({ current, currentDoc, refreshKey, outline, activePos, 
           ))}
         </select>
         {project && (project.via ?? 'owner') !== 'owner' && <span class={'badge' + (project.role === 'view' ? ' view' : '')} title={project.role === 'view' ? 'Shared with you for viewing' : 'Shared with you for editing'}>{project.via === 'admin' ? 'admin' : project.role === 'view' ? 'view' : 'edit'}</span>}
+        <button class={'search-toggle' + (searching ? ' on' : '')} aria-pressed={searching} data-search-toggle
+          title={searching ? 'Back to the files' : 'Search in the project (Ctrl+Shift+F)'}
+          onClick={() => { if (!searching) setSearchFocus(s => ({ n: s.n + 1 })); setSearching(!searching); }}
+          dangerouslySetInnerHTML={{ __html: iconSvg(MODERN_ICONS.find, 15) }} />
         <button class="hide" title="Hide the files panel (Ctrl+Alt+O)" onClick={onHide}>«</button>
       </div>
-      <div class="panel-body">
+      <ProjectSearch project={project} hidden={!searching} focusKey={searchFocus.n} initial={searchFocus.query} />
+      <div class="panel-body" hidden={searching}>
         <FileBrowser current={current} project={selected} refreshKey={listKey} onOpen={id => onOpen(id)} outlines={{
           open: id => !!expanded[id],
           toggle,

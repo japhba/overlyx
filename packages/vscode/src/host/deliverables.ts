@@ -157,6 +157,8 @@ export type DeliverableToHost =
   | { type: 'dlUndo' } | { type: 'dlRedo' }
   | { type: 'dlUpload'; id: number; rel: string; data: string }
   | { type: 'dlOpenExternal'; url: string }
+  /** "Open in browser": the page on the synced project's server, at a slide (the host checks the address) */
+  | { type: 'dlOpenOnWeb'; url: string }
   | { type: 'dlSave' }
   /** the web page made an article (its meta tag), opened again in the document editor */
   | { type: 'dlAsArticle' }
@@ -266,6 +268,11 @@ export class DeliverableEditorProvider implements vscode.CustomTextEditorProvide
           // only this server's pages
           if (msg.url.startsWith(external + '/d/') || msg.url.startsWith(this.server.origin + '/d/')) void vscode.env.openExternal(vscode.Uri.parse(msg.url));
           break;
+        case 'dlOpenOnWeb': {
+          const w = webPlaceOf(document.uri.fsPath), page = w && webFileAddress(w.origin, w.project, w.path);
+          if (page && (msg.url === page || msg.url.startsWith(page + '?'))) void vscode.env.openExternal(msg.url as unknown as vscode.Uri);
+          break;
+        }
         case 'dlSave':
           chain = chain.then(async () => { await document.save(); }).catch(e => void vscode.window.showErrorMessage(`OverLyX could not save ${entry}: ${String(e)}`));
           break;

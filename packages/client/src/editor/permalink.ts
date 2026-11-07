@@ -12,7 +12,9 @@
  *   text files  `line=12` or `line=12-20` (GitHub's #L12-L20)
  *   PDF files   `page=3`
  *   decks, posters, web pages  `slide=3`, an object on it `obj=2.1` (its place among the slide's
- *               elements; on a web page among the page's)
+ *               elements; on a web page among the page's); `present=audience` presents the deck from
+ *               that slide (the presenter view's audience window), `present=1` too (a screen
+ *               brought up to date mid-talk)
  *
  * A document's link also says how it was shown, `view=wysiwym,pdf` (app/panes.ts viewParam): the
  * panes left to right and whether on pages — the person opening it sees what the sender saw.
@@ -35,6 +37,8 @@ export interface Place {
   /** 1-based */
   slide?: number;
   obj?: number[];
+  /** a deck presented at once: in an audience window (never the presenter view), or as this screen was (`here`) */
+  present?: 'audience' | 'here';
 }
 
 /** The query that says `p` (without the "?"): `goto` first, then the place's own fields. */
@@ -51,6 +55,7 @@ export function placeQuery(p: Place & { goto?: string; view?: string | null }): 
   if (p.page) q.set('page', String(p.page));
   if (p.slide) q.set('slide', String(p.slide));
   if (p.obj?.length) q.set('obj', p.obj.join('.'));
+  if (p.present) q.set('present', p.present === 'audience' ? 'audience' : '1');
   if (p.view) q.set('view', p.view);
   // (spaces as %20, not "+": the quote stays readable where links are pasted; the view's commas as they are)
   return q.toString().replace(/\+/g, '%20').replace(/%2C/gi, ',');
@@ -74,6 +79,8 @@ export function parsePlace(q: URLSearchParams | null): Place | null {
   if (int(q.get('slide'))) p.slide = int(q.get('slide'));
   const obj = q.get('obj');
   if (obj && /^\d+(\.\d+)*$/.test(obj)) p.obj = obj.split('.').map(Number);
+  const present = q.get('present');
+  if (present) p.present = present === 'audience' ? 'audience' : 'here';
   return Object.keys(p).length ? p : null;
 }
 

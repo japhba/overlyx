@@ -279,6 +279,12 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
           this.deps.openDoc(root, rel, { goto: msg.goto, heading: msg.heading, beside: msg.beside });
           break;
         }
+        case 'openOnWeb': {
+          // only an address on the server this folder is synced with (a string: a Uri would encode the #/…?… part)
+          const w = webPlaceOf(document.uri.fsPath);
+          if (w && msg.url.startsWith(w.origin.replace(/\/+$/, '') + '/#/')) void vscode.env.openExternal(msg.url as unknown as vscode.Uri);
+          break;
+        }
       }
     }));
 

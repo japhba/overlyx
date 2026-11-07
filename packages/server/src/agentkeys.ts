@@ -42,7 +42,8 @@ CREATE TABLE IF NOT EXISTS agent_keys (
 );
 `);
 
-const { seal, unseal } = sealer('agent-keys');
+const { seal, open, reseal } = sealer('agent-keys');
+reseal('agent_keys', 'sealed');
 
 export class KeyError extends Error { constructor(message: string, public status = 400) { super(message); } }
 
@@ -88,7 +89,7 @@ export function removeKey(userId: number, provider: KeyProvider): boolean {
 export function keyOf(userId: number, provider: KeyProvider): string | null {
   const row = db.prepare('SELECT sealed FROM agent_keys WHERE user_id = ? AND provider = ?').get(userId, provider) as { sealed: string } | undefined;
   if (!row) return null;
-  try { return unseal(row.sealed); } catch { return null; }
+  return open(row.sealed);
 }
 
 /** Which keys the account has: provider → the last characters of the key and when it was added. */

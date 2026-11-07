@@ -9,7 +9,7 @@ import { config } from './config.ts';
 import { cachedBib } from './bibcache.ts';
 import { setSecurityHeaders } from './security.ts';
 import { requestAiRepair, AiRepairError } from './airepair.ts';
-import { aiStatus, aiAvailable, pickRoute, usesServerKey, rewrite as aiRewrite, complete as aiComplete, recognizeInk, allow as aiAllow, AiError, selectionToTex, texToPm } from './ai.ts';
+import { aiStatus, aiAvailable, pickRoute, usesServerKey, rewrite as aiRewrite, complete as aiComplete, recognizeInk, transcribeSpeech, allow as aiAllow, AiError, selectionToTex, texToPm } from './ai.ts';
 import { linkedAi, combineVersions } from './linkedai.ts';
 import { mcpRouter } from './mcp.ts';
 import { mcpAgentRoutes, pruneAgents } from './mcpAgents.ts';
@@ -32,6 +32,7 @@ import { listProjects, resolveProjectPath, assertWritableRelPath, projectDir, cr
 import { isMarkdownPath } from '@overlyx/core/md/index.ts';
 import { markdownStyle, setMarkdownStyle } from './mdstyle.ts';
 import { googleFontRoutes } from './googlefonts.ts';
+import { myFontRoutes } from './myfonts.ts';
 import { snippetSvg, snippetFile } from './snippets.ts';
 import { importLyxFile, parseFragmentText, newLayoutDocumentText, withDocumentSettings, NO_INDENT_SETTINGS } from './texdoc.ts';
 import { importLyxUpload } from './lyximport.ts';
@@ -61,6 +62,8 @@ import { deletionPreview, deleteAccount, pruneTrash } from './accounts.ts';
 import { privacyPage } from './privacy.ts';
 import { termsPage } from './terms.ts';
 import { usageRoutes, vscodeUsageRoutes } from './usage.ts';
+import { searchProject, SearchError } from './projectsearch.ts';
+import { allow as rateLimit } from './feedback.ts';
 import { searchLiterature, bibtexFor, addToCitedBib, sourcesAvailable, normTitle, type Hit } from './bibsearch.ts';
 import { identify } from './citelinks.ts';
 import { zoteroRoutes, zoteroStatus, searchZotero } from './zotero.ts';
@@ -213,7 +216,8 @@ api.use((req, res, next) => {
 });
 // a text file saved from the built-in text editor may be bigger (TEXT_MAX); everything else is small
 const smallJson = express.json({ limit: '5mb' }), textJson = express.json({ limit: '24mb' });
-api.use((req, res, next) => (req.method === 'PUT' && /^\/projects\/[^/]+\/text\//.test(req.path) ? textJson : smallJson)(req, res, next));
+// (and a spoken comment's recording, ai.ts SPEECH_MAX_AUDIO)
+api.use((req, res, next) => ((req.method === 'PUT' && /^\/projects\/[^/]+\/text\//.test(req.path)) || (req.method === 'POST' && req.path === '/ai/transcribe') ? textJson : smallJson)(req, res, next));
 // a request body that could not be read (too large, not JSON) is logged with who sent it where — it
 // used to reach Express's default handler and the person only saw "Could not save"
 api.use((err: { type?: string; status?: number; message?: string }, req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -225,6 +229,8 @@ api.use((err: { type?: string; status?: number; message?: string }, req: express
 api.use(feedbackRoutes());
 // Google fonts a markdown document names, served to the editor from here (googlefonts.ts)
 api.use(googleFontRoutes());
+// the account's own Google fonts, first in every font list (myfonts.ts)
+api.use(myFontRoutes());
 api.use(usageRoutes());
 api.use(agentRoutes());
 // agents connected over MCP from elsewhere: the account's list, and messages to them (mcpAgents.ts)
@@ -484,6 +490,21 @@ api.get('/projects/:project/events', needProject('view'), (req, res) => {
   projectChangedListeners.add(listener);
   graphicsChangedListeners.add(graphics);
   req.on('close', cleanup);
+});
+
+/**
+ * Search in the project's files (the files panel's Search; projectsearch.ts): `q`, and `case`, `word`,
+ * `regex` = 1 for match case, whole word, a regular expression. Viewers may search.
+ */
+api.get('/projects/:project/search', needProject('view'), async (req, res) => {
+  if (!rateLimit(`search:${req.user!.id}`, 600)) { res.status(429).json({ error: 'Too many searches — try again in a while' }); return; }
+  const flag = (k: string) => req.query[k] === '1';
+  try {
+    res.json(await searchProject(req.user!, String(req.params.project), { q: String(req.query.q ?? ''), matchCase: flag('case'), wholeWord: flag('word'), regex: flag('regex') }, () => req.destroyed));
+  } catch (e) {
+    if (!(e instanceof SearchError)) console.error('[search]', e);
+    res.status(e instanceof SearchError ? e.status : 500).json({ error: e instanceof SearchError ? e.message : 'The search failed' });
+  }
 });
 
 /** Remove a project (owner): the directory is moved to <data>/trash, never deleted. */
@@ -1311,6 +1332,20 @@ api.post('/ai/ink', async (req, res) => {
     req.on('close', () => { if (!res.writableEnded) ac.abort(); });
     const candidates = await recognizeInk({ image: String(body.image ?? ''), before: typeof body.before === 'string' ? body.before : undefined, after: typeof body.after === 'string' ? body.after : undefined, text: body.text === true, notes: body.notes === true, model: body.model }, ac.signal);
     res.json({ candidates });
+  } catch (e) {
+    if (e instanceof AiError) { if (e.status !== 499) res.status(e.status).json({ error: e.message }); return; }
+    res.status(400).json({ error: (e as Error).message ?? String(e) });
+  }
+});
+
+/** The comment pen's push to talk where the browser cannot put speech into words: a recording (16 kHz mono WAV, base64) read by the server's model — its stretches at their seconds. */
+api.post('/ai/transcribe', async (req, res) => {
+  try {
+    if (!aiAvailable()) { res.status(503).json({ error: 'Speech recognition is not configured on this server (OPENROUTER_API_KEY is unset).' }); return; }
+    if (!aiAllow(`speech:${req.user!.id}`, config.ai.speechPerHour, 3600_000)) { res.status(429).json({ error: 'That is the limit of spoken comments for now — try again later.' }); return; }
+    const ac = new AbortController();
+    req.on('close', () => { if (!res.writableEnded) ac.abort(); });
+    res.json({ said: await transcribeSpeech({ audio: String(req.body?.audio ?? ''), lang: req.body?.lang }, ac.signal) });
   } catch (e) {
     if (e instanceof AiError) { if (e.status !== 499) res.status(e.status).json({ error: e.message }); return; }
     res.status(400).json({ error: (e as Error).message ?? String(e) });

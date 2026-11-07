@@ -57,6 +57,8 @@ export interface InkStyle {
   eraser?: { precise: boolean; size: 0 | 1 | 2; hlOnly: boolean; back: boolean };
   /** what the lasso takes, and of which colours (lower-case #rrggbb; none: any) */
   lasso?: { kinds: ('ink' | 'shapes' | 'pictures' | 'text')[]; colors: string[] };
+  /** the comment pen's: a review mark with a glow (core/voicecomment.ts); its strokes never scribble out others */
+  comment?: boolean;
 }
 
 /** what kind of object the toolbar is showing tools for */
@@ -170,6 +172,8 @@ export interface SelItem {
   master?: string;
   layout?: GroupLayout;
   textBox?: 'fixed' | 'left' | 'center' | 'right';
+  /** a text box or formula bigger than what it shows (the quick menu offers Fit) */
+  loose?: boolean;
 }
 
 /** `deleted`: deleted as a suggestion (shown faded until accepted; not presented); `skipped`: Skip slide (deckmaster.ts: not presented, not printed) */
@@ -186,6 +190,8 @@ export interface ReviewView {
   me: string;
   /** the comment thread looked at: its object (pin highlighted), the words it is on (highlighted) */
   focus: { path: Path; quote?: string } | null;
+  /** the comment pen's strokes hidden (the Review pane's switch) */
+  noInk?: boolean;
 }
 
 /**
@@ -260,6 +266,8 @@ export type ToRuntime =
   | { ol: 'theme'; on: boolean }
   | { ol: 'exec'; command: string; value?: string }
   | { ol: 'textBox'; anchor: 'fixed' | 'left' | 'center' | 'right' }
+  /** the selected text boxes and formulas fitted to what they show (runtime edit.ts fitBoxes) */
+  | { ol: 'fitBox' }
   | { ol: 'go'; slide: number }
   | { ol: 'peers'; peers: PeerInfo[] }
   /**
@@ -276,8 +284,8 @@ export type ToRuntime =
   | { ol: 'arrange'; how: ArrangeHow }
   | { ol: 'groupLayout'; layout: GroupLayout }
   | { ol: 'paint'; paint: Paint }
-  /** the selected text boxes aligned to their top, middle or bottom (runtime arrange.ts valign) */
-  | { ol: 'valign'; v: 'flex-start' | 'center' | 'flex-end' }
+  /** the selected text boxes aligned to their top, middle or bottom (runtime arrange.ts valign); `centre`: and centred across */
+  | { ol: 'valign'; v: 'flex-start' | 'center' | 'flex-end'; centre?: boolean }
   | { ol: 'view'; view: CanvasView }
   /** crop mode for a picture (optionally with an aspect / a round frame at once) — runtime/crop.ts */
   | { ol: 'crop'; path: Path; aspect?: number | null; shape?: 'rect' | 'circle' }
@@ -295,6 +303,8 @@ export type ToRuntime =
   | { ol: 'presentLinked'; on: boolean }
   /** presenting: the other screens presenting the document, their `present` awareness states as they came (app/presentshare.ts checks them) */
   | { ol: 'presentPeers'; peers: PresenterState[] }
+  /** presenting: the presenter view (runtime/presenter.ts) on or off and its notes' size, as this browser keeps them */
+  | { ol: 'presenter'; on: boolean; notes?: number }
   /** the formula open in LyX's formula editor changed (runtime/mathedit.ts: the chip follows) */
   | { ol: 'mathSet'; id: number; tex: string }
   /** LyX's formula editor left the formula (`dir`: by an arrow key / Escape, the caret goes that side; null: elsewhere; `putBack`: Backspace in the empty formula `$` opened gives the typed dollar back as text) */
@@ -354,7 +364,9 @@ export type FromRuntime =
   /** `scratch`: the stroke was a scribble over these strokes (core/scratchout.ts) — it is added, then they and it go, as a step of its own */
   | { ol: 'draw'; version: number; tool: Tool; slide: Path | null; rect: Rect; after?: Path | null; pts?: [number, number][]; d?: string; closed?: boolean; runs?: InkRunD[]; scratch?: Path[];
       /** draw and hold: the shape the stroke became (core/shapesnap.ts), written a step after the stroke as drawn */
-      snap?: { kind: string; rect: Rect; runs: InkRunD[] } }
+      snap?: { kind: string; rect: Rect; runs: InkRunD[] };
+      /** a comment pen's stroke: the objects it is drawn over (what a spoken comment is about) */
+      under?: Path[] }
   /** a pen touched the slide with nothing but Select in hand: it draws (InkStyle.penInks); `done`: its stroke is over and Select is in hand again (Draw was not open) */
   | { ol: 'penInks'; done?: boolean }
   /** the eraser's "back to the pen after erasing" */
@@ -444,6 +456,12 @@ export type FromRuntime =
   | { ol: 'presentLinked'; on: boolean }
   /** presenting: this presenter's state for the other screens (app/presentshare.ts; null: it ended) — the editor checks it and shares it */
   | { ol: 'presentShare'; state: PresentState | null }
+  /** presenting: the frame has started (again, after a reload): its settings, the others and the text, please */
+  | { ol: 'presentReady' }
+  /** presenting: the presenter view switched, or its notes' size changed — for the editor to keep */
+  | { ol: 'presenterPrefs'; on: boolean; notes: number }
+  /** presenting in the presenter view: the slides in a window of their own (on another screen, where the browser lets the editor place it) */
+  | { ol: 'presentAudience' }
   /**
    * a formula of the text being retyped to edit with LyX's formula editor (runtime/mathedit.ts):
    * where it is and how big its letters are, its colour; `at`: the click into it; `dollar`: opened

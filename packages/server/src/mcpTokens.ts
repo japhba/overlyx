@@ -7,16 +7,20 @@
  * tracked-change edits). Same storage shape as git.ts's account access token.
  *
  * Normally only a hash is stored and the token is shown exactly once; for accounts with the
- * `allowRecopyTokens` setting (userSettings.ts) the plaintext is kept too, so the Git dialog can
- * offer Copy again later.
+ * `allowRecopyTokens` setting (userSettings.ts) and the Agent panel's own the token is kept too,
+ * sealed (sealed.ts), so the Git dialog can offer Copy again later.
  */
 import crypto from 'node:crypto';
 import { db } from './db.ts';
+import { sealer } from './sealed.ts';
 import { verifyAccessToken, parseScope, type AccessScope } from './tokenAuth.ts';
 
 export interface McpTokenRow { id: number; user_id: number; name: string; token_hash: string; token_plain: string | null; created_at: number; last_used_at: number | null; expires_at: number | null }
 
 function hashToken(token: string): string { return crypto.createHash('sha256').update(token).digest('hex'); }
+
+const kept = sealer('account-tokens');
+kept.reseal('mcp_tokens', 'token_plain', 'plain');
 
 /** A new MCP token for the user; `storePlain` keeps the plaintext for later re-copy (see above);
  *  `expiresAt` for OAuth-issued tokens (mcpOauth.ts) — hand-created tokens do not expire;
@@ -24,7 +28,7 @@ function hashToken(token: string): string { return crypto.createHash('sha256').u
 export function createMcpToken(userId: number, name: string, storePlain = false, expiresAt: number | null = null, scope: AccessScope | null = null): { id: number; token: string } {
   const token = 'olxmcp_' + crypto.randomBytes(24).toString('base64url');
   const info = db.prepare('INSERT INTO mcp_tokens (user_id, name, token_hash, token_plain, created_at, expires_at, scope) VALUES (?,?,?,?,?,?,?)')
-    .run(userId, name.trim().slice(0, 60) || 'agent', hashToken(token), storePlain ? token : null, Date.now(), expiresAt, scope ? JSON.stringify(scope) : null);
+    .run(userId, name.trim().slice(0, 60) || 'agent', hashToken(token), storePlain ? kept.seal(token) : null, Date.now(), expiresAt, scope ? JSON.stringify(scope) : null);
   return { id: Number(info.lastInsertRowid), token };
 }
 
@@ -32,7 +36,19 @@ export function createMcpToken(userId: number, name: string, storePlain = false,
 export function listMcpTokens(userId: number, includeSecrets = false): { id: number; name: string; created_at: number; last_used_at: number | null; expires_at: number | null; scope: AccessScope | null; token?: string }[] {
   const rows = db.prepare('SELECT id, name, created_at, last_used_at, expires_at, token_plain, scope FROM mcp_tokens WHERE user_id = ? ORDER BY created_at DESC').all(userId) as
     { id: number; name: string; created_at: number; last_used_at: number | null; expires_at: number | null; token_plain: string | null; scope: string | null }[];
-  return rows.map(({ token_plain, scope, ...r }) => (includeSecrets && token_plain ? { ...r, scope: parseScope(scope), token: token_plain } : { ...r, scope: parseScope(scope) }));
+  return rows.map(({ token_plain, scope, ...r }) => {
+    const token = includeSecrets && token_plain ? kept.open(token_plain) : null;
+    return token ? { ...r, scope: parseScope(scope), token } : { ...r, scope: parseScope(scope) };
+  });
+}
+
+/** The kept token named `name` of the account (agent.ts: the Agent panel's), or null; one that can no longer be opened is deleted. */
+export function keptMcpToken(userId: number, name: string): string | null {
+  const row = db.prepare('SELECT id, token_plain FROM mcp_tokens WHERE user_id = ? AND name = ? AND token_plain IS NOT NULL').get(userId, name) as { id: number; token_plain: string } | undefined;
+  if (!row) return null;
+  const token = kept.open(row.token_plain);
+  if (token === null) db.prepare('DELETE FROM mcp_tokens WHERE id = ?').run(row.id);
+  return token;
 }
 
 export function deleteMcpToken(userId: number, id: number): boolean {

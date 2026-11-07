@@ -12,6 +12,8 @@ import { render } from 'preact';
 import { useHostTheme } from '@client/app/theme';
 import { DeliverableCanvas } from '@client/deliverable/DeliverableEditor';
 import { InterfaceZoom } from './InterfaceZoom';
+import { OpenOnWeb } from './OpenOnWeb';
+import { useEffect, useState } from 'preact/hooks';
 import type { DeliverableHost, ChangeOrigin, Splice } from '@client/deliverable/host';
 import type { HostToDeliverable } from '../host/deliverables';
 import '@client/styles.css';
@@ -24,6 +26,19 @@ setHostDark(G.dark);
 addEventListener('message', (ev: MessageEvent<HostToDeliverable>) => { if (ev.data?.type === 'theme') setHostDark(ev.data.dark); });
 
 type Listener<T> = (v: T) => void;
+
+/** the page on overlyx.app (null: its folder is not synced with a project) and the slide shown (0-based) */
+const webAddress = { url: null as string | null, slide: 0, listeners: new Set<() => void>() };
+
+/** "Open in browser" beside the zoom, while the page has an address on overlyx.app */
+function DeckChrome() {
+  const [url, setUrl] = useState(webAddress.url);
+  useEffect(() => { const l = () => setUrl(webAddress.url); webAddress.listeners.add(l); return () => { webAddress.listeners.delete(l); }; }, []);
+  return <>
+    {url && <OpenOnWeb link={() => webAddress.url && webAddress.url + (webAddress.slide > 0 ? `?slide=${webAddress.slide + 1}` : '')} message="dlOpenOnWeb" />}
+    <InterfaceZoom />
+  </>;
+}
 
 function vscodeHost(init: Extract<HostToDeliverable, { type: 'dlInit' }>): DeliverableHost {
   /** the text as shown here (changes not yet in the document included) */
@@ -47,7 +62,7 @@ function vscodeHost(init: Extract<HostToDeliverable, { type: 'dlInit' }>): Deliv
   let web: string | null = null;
   addEventListener('message', (ev: MessageEvent<HostToDeliverable>) => {
     const m = ev.data;
-    if (m?.type === 'dlWeb') web = m.url;
+    if (m?.type === 'dlWeb') { web = m.url; webAddress.url = m.url; for (const l of webAddress.listeners) l(); }
     else if (m?.type === 'dlText') {
       version = m.version;
       if (inflight !== null && m.text === inflight) {
@@ -105,6 +120,8 @@ function vscodeHost(init: Extract<HostToDeliverable, { type: 'dlInit' }>): Deliv
     setSelection: () => {},
     onPeers: () => () => {},
     webLink: () => web,
+    // (the slide shown: where "Open in browser" opens the deck)
+    noteSlide: slide => { webAddress.slide = slide; },
     downloads: open => [
       { label: 'Print or save as PDF (in the browser)…', action: () => vscode.postMessage({ type: 'dlOpenExternal', url: open('print') + '#print' }) },
       { label: 'Open in the browser', action: () => vscode.postMessage({ type: 'dlOpenExternal', url: open('view') }) },
@@ -127,7 +144,7 @@ const onInit = (ev: MessageEvent<HostToDeliverable>) => {
   if (m?.type !== 'dlInit') return;
   removeEventListener('message', onInit);
   setHostDark(m.dark);
-  render(<DeliverableCanvas host={vscodeHost(m)} notify={notify} chrome={<InterfaceZoom />} />, document.getElementById('app')!);
+  render(<DeliverableCanvas host={vscodeHost(m)} notify={notify} chrome={<DeckChrome />} />, document.getElementById('app')!);
 };
 addEventListener('message', onInit);
 vscode.postMessage({ type: 'ready' });

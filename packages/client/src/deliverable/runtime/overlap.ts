@@ -1,5 +1,5 @@
-/** Ink used by the overlap lint only; layout/overflow checks still measure the full boxes. */
-export const noOverlap = (el: Element): boolean => !!el.closest('[data-ol-lint~="no-overlap"]');
+/** Ink used by the overlap lint only; layout/overflow checks still measure the full boxes. (The comment pen's strokes are review marks over the page, never an overlap.) */
+export const noOverlap = (el: Element): boolean => !!el.closest('[data-ol-lint~="no-overlap"], [data-ol-comment-ink]');
 
 export function visibleInk(el: Element): boolean {
   if (getComputedStyle(el).visibility !== 'visible') return false;

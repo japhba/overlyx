@@ -14,6 +14,7 @@ import { MathInlineView, MathDisplayView, pendingFocus } from './nodeviews/math'
 import { setValueMarkIn } from './fontsize';
 import { isLayoutDoc, pageAt } from './layout/commands';
 import { placeImage } from './layout/images';
+import { listUnitAt, childPos } from './listmove';
 
 /* ------------------------------------------------------------ paragraphs */
 
@@ -260,12 +261,12 @@ const leaveList: Command = (state, dispatch) => {
 };
 
 /**
- * Backspace at the start of a list item takes the bullet away and keeps the text where it was
- * (Google Docs): it becomes a paragraph of the item above — text, an image, a formula belonging to
- * that item (LaTeX: a paragraph inside its \item; markdown: an indented block under it) — as deep as
- * LyX lets it nest there (the first item of a list has no item above: out of the list, or into the
- * parent item). The next Backspace moves such a nested paragraph out one level, and so on, instead
- * of joining the paragraphs.
+ * Backspace at the start of a list item takes it one level out — a paragraph without a bullet counts
+ * as level 0 (the user's rule, 7 Nov 2026): a nested item becomes an item of the level above, an item
+ * of the outermost level a plain paragraph, its text kept. Its sub-items and what is nested in it
+ * (listmove.ts's unit) move out with it, so they stay its sub-items — or, under the plain paragraph,
+ * carry the list on — and the nesting stays one LyX allows. In a paragraph nested in an item (text, an
+ * image, a formula belonging to it) each Backspace moves it out one level, then it joins as usual.
  */
 export const listExitBackspace: Command = (state, dispatch, view) => {
   const { $from, empty } = state.selection;
@@ -274,9 +275,17 @@ export const listExitBackspace: Command = (state, dispatch, view) => {
   if (par.type.name !== 'paragraph') return false;
   const depth = (par.attrs.depth as number) || 0;
   if (isListLayout(par.attrs.layout as string)) {
+    const u = listUnitAt(state.doc, $from.pos);
+    if (!u) return false;
     if (!dispatch) return true;
-    const nest = Math.min(depth + 1, maxDepthAfter(paragraphBefore(state)));
-    dispatch(state.tr.setNodeMarkup($from.before(), undefined, { ...par.attrs, layout: inInset(state) ? 'Plain Layout' : 'Standard', depth: nest }).scrollIntoView());
+    const tr = state.tr;
+    for (let i = u.from, pos = childPos(u, u.from); i < u.to; pos += u.parent.child(i).nodeSize, i++) {
+      const n = u.parent.child(i);
+      tr.setNodeMarkup(pos, undefined, i === u.from && depth === 0
+        ? { ...n.attrs, layout: inInset(state) ? 'Plain Layout' : 'Standard' }
+        : { ...n.attrs, depth: Math.max(0, ((n.attrs.depth as number) || 0) - 1) });
+    }
+    dispatch(tr.scrollIntoView());
     return true;
   }
   if (depth === 0) return false;

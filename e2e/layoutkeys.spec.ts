@@ -111,7 +111,7 @@ test('"- ", "1. " and "## " at a paragraph start become a bullet, a numbered ite
   expect(readFileSync(`${DIR}/md.tex`, 'utf8')).toContain('\\subsection{Heading here}');
 });
 
-test('Backspace at the start of an item keeps its text in the item above, the next one takes it out of the list, Tab puts it back; an image in an item starts at its text', async ({ page }) => {
+test('Backspace at the start of an outermost item takes it out of the list (no bullet is level 0), Tab puts it into the item above; an image in an item starts at its text', async ({ page }) => {
   await login(page);
   await openDoc(page, `${PROJECT}/nest.tex`);
   await page.waitForTimeout(500);
@@ -123,12 +123,8 @@ test('Backspace at the start of an item keeps its text in the item above, the ne
   await page.keyboard.press('Home');
   await page.keyboard.press('Backspace');
   await expect(par('second point')).toHaveAttribute('data-layout', 'Standard');
-  await expect(par('second point')).toHaveAttribute('data-depth', '1');
-  await expect(pars).toHaveCount(5);   // not joined
-  expect(Math.abs(await textLeft('second point') - await textLeft('first point'))).toBeLessThan(1);   // the text stays where it was
-  await expect.poll(() => readFileSync(`${DIR}/nest.tex`, 'utf8'), { timeout: 15000 }).toMatch(/\\item first point\n\nsecond point\n\\item with a figure/);
-  await page.keyboard.press('Backspace');
   await expect(par('second point')).toHaveAttribute('data-depth', '0');   // out of the list
+  await expect(pars).toHaveCount(5);   // not joined
   expect(await textLeft('second point')).toBeLessThan(await textLeft('first point') - 10);
   await page.keyboard.press('Tab');
   await expect(par('second point')).toHaveAttribute('data-depth', '1');   // back into the item above

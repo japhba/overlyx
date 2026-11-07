@@ -31,6 +31,7 @@ const { agentRoutes, shutdownAgents, disconnectAgents, installedCodexVersion } =
 const { createUser } = await import('../packages/server/src/auth.ts');
 const { registerProject } = await import('../packages/server/src/access.ts');
 const { db } = await import('../packages/server/src/db.ts');
+const { keptMcpToken } = await import('../packages/server/src/mcpTokens.ts');
 
 const owner = createUser('owner', 'Owner', 'pw');
 const editor = createUser('bob', 'Bob', 'pw');
@@ -100,8 +101,10 @@ describe('agent sign-in', () => {
     // gate them behind its own approval elicitation (it used to be auto-declined: every write
     // tool returned "user rejected MCP tool call")
     expect(cfg).toContain('default_tools_approval_mode = "approve"');
+    // kept for the next start, sealed (sealed.ts)
     const row = db.prepare("SELECT token_plain FROM mcp_tokens WHERE user_id = ? AND name = 'Agent panel'").get(owner.id) as { token_plain: string } | undefined;
-    expect(row?.token_plain).toMatch(/^olxmcp_/);
+    expect(row?.token_plain).toMatch(/^s2\./);
+    expect(keptMcpToken(owner.id, 'Agent panel')).toMatch(/^olxmcp_/);
   });
 });
 

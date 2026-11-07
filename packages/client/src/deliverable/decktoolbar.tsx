@@ -30,7 +30,10 @@ export interface DeckTextActions {
   color(c: string | null): void;
   highlight(c: string | null): void;
   align(a: 'left' | 'center' | 'right' | 'justify'): void;
-  valign(v: 'flex-start' | 'center' | 'flex-end'): void;
+  /** `centre`: and centred across, in one step */
+  valign(v: 'flex-start' | 'center' | 'flex-end', centre?: boolean): void;
+  /** the selected boxes fitted to what they show (SelItem.loose) */
+  fit?(): void;
   list(kind: 'ul' | 'ol'): void;
   lineHeight(v: string): void;
   /** typographic properties (null: back to the inherited value) */
@@ -325,7 +328,7 @@ function paintLabel(items: SelItem[]): string {
  * then group / ungroup and arrange, `extra` (duplicate, comment) and delete. Empty while points, a formula or a crop are edited.
  * Over `words` selected in a text being retyped: what is done to words — font, size, bold … highlight, a link —, then `extra`.
  */
-const QUICK: string[][] = [['dk-ph-addpicture'], ['dk-b', 'dk-i', 'dk-color', 'dk-size'], ['dk-align'], ['dk-inkcolor', 'dk-ink-thinner', 'dk-ink-thicker', 'dk-ink-convert', 'dk-fill', 'dk-stroke'], ['dk-linecolor', 'dk-lineweight', 'dk-tips'], ['dk-crop', 'dk-nobg'], ['dk-group', 'dk-ungroup', 'dk-arrange']];
+const QUICK: string[][] = [['dk-ph-addpicture'], ['dk-b', 'dk-i', 'dk-color', 'dk-size'], ['dk-align', 'dk-fit'], ['dk-inkcolor', 'dk-ink-thinner', 'dk-ink-thicker', 'dk-ink-convert', 'dk-fill', 'dk-stroke'], ['dk-linecolor', 'dk-lineweight', 'dk-tips'], ['dk-crop', 'dk-nobg'], ['dk-group', 'dk-ungroup', 'dk-arrange']];
 const QUICK_WORDS: string[][] = [['dk-font', 'dk-size'], ['dk-b', 'dk-i', 'dk-u', 'dk-color', 'dk-hl'], ['dk-href', 'dk-inline-step']];
 export function quickGroups(sections: ToolSection[], extra: ToolButton[], words = false): ToolButton[][] {
   const all = new Map<string, ToolButton>();
@@ -379,7 +382,8 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
   if (ro) return { tools, context: [], sections: [] };
   if (c.math.editing) { const g = mathGroups(c); return { tools, context: g, sections: [{ label: 'Formula', groups: g }] }; }
   if (c.nodes.editing) { const g = nodeGroups(c); return { tools, context: g, sections: [{ label: 'Points', groups: g }] }; }
-  const drawRow = drawing ? drawingToolbar({ ...c, lasso: { kinds: [...LASSO_KINDS], colors: () => c.ink.lassoColors?.() ?? [] }, picked: c.ink.fold && (() => c.ink.fold!(true)) }) : null;
+  // (the comment pen where comments can be made)
+  const drawRow = drawing ? drawingToolbar({ ...c, lasso: { kinds: [...LASSO_KINDS], colors: () => c.ink.lassoColors?.() ?? [] }, picked: c.ink.fold && (() => c.ink.fold!(true)), comment: !!c.review }) : null;
   // (the lasso's catch: its own tools after Draw's)
   // (`draw`: the sections are the Draw row — on a touch screen a palette of its own, DeliverableEditor drawPalette)
   if (drawRow && !(c.tool === 'lasso' && sel.length)) return { tools, context: drawRow, sections: [{ label: 'Draw', groups: drawRow }], draw: true };
@@ -451,12 +455,16 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
           { label: 'Centre (Ctrl+Shift+E)', html: ICON('aligncenter'), active: al === 'center', action: () => c.text.align('center') },
           { label: 'Right (Ctrl+Shift+R)', html: ICON('alignright'), active: al === 'right' || al === 'end', action: () => c.text.align('right') },
           { label: 'Justified (Ctrl+Shift+J)', html: ICON('alignleft'), active: al === 'justify', action: () => c.text.align('justify') },
-          ...(sel.some(s => s.kind === 'shape') ? [
+          // (a box with a height of its own: a shape, a text box or a formula given one)
+          ...(sel.some(s => s.kind === 'shape') || (!c.editingText && sel.some(s => s.fixedHeight && (s.kind === 'text' || s.kind === 'formula'))) ? [
+            { label: 'Centre in the box', html: ICON('dk-centre'), action: () => c.text.valign('center', true) },
             { label: 'Top', html: ICON('valigntop'), action: () => c.text.valign('flex-start') },
             { label: 'Middle', html: ICON('valignmiddle'), action: () => c.text.valign('center') },
             { label: 'Bottom', html: ICON('valignbottom'), action: () => c.text.valign('flex-end') },
           ] : []),
         ] } },
+      // a formula or a line of text in a box bigger than it (SelItem.loose): the box made to fit it
+      ...(!c.editingText && c.text.fit && sel.some(s => s.loose) ? [{ id: 'dk-fit', title: 'Fit the box to what is in it — the formula or the text stays where it is, the box shrinks round it (and follows it as it is edited)', icon: 'dk-fit', action: c.text.fit } as ToolButton] : []),
       { id: 'dk-ul', title: 'Bulleted list (Ctrl+Shift+8)', icon: 'dk-bullets', action: () => c.text.list('ul') },
       { id: 'dk-ol', title: 'Numbered list (Ctrl+Shift+7)', icon: 'dk-numbers', action: () => c.text.list('ol') },
       ...(c.text.typography ? [typographyBtn(st, c.text.typography)] : []),
@@ -566,17 +574,17 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
           { label: 'Bring forward (Ctrl+↑)', html: ICON('dk-arrange'), action: () => c.arrange('forward') },
           { label: 'Send backward (Ctrl+↓)', html: ICON('dk-arrange'), action: () => c.arrange('backward') },
           { label: 'Send to back (Ctrl+Shift+↓)', html: ICON('dk-arrange'), action: () => c.arrange('back') },
-          { label: sel.length > 1 ? 'Align left edges' : 'Align left on the slide', html: ICON('dk-align'), action: () => c.arrange('align-left') },
-          { label: 'Align centres', html: ICON('dk-align'), action: () => c.arrange('align-center') },
-          { label: 'Align right edges', html: ICON('dk-align'), action: () => c.arrange('align-right') },
-          { label: 'Align tops', html: ICON('dk-align'), action: () => c.arrange('align-top') },
-          { label: 'Align middles', html: ICON('dk-align'), action: () => c.arrange('align-middle') },
-          { label: 'Align bottoms', html: ICON('dk-align'), action: () => c.arrange('align-bottom') },
-          { label: 'Centre on the slide horizontally', html: ICON('dk-align'), action: () => c.arrange('center-h') },
-          { label: 'Centre on the slide vertically', html: ICON('dk-align'), action: () => c.arrange('center-v') },
+          { label: sel.length > 1 ? 'Align left edges' : 'Align left on the slide', html: ICON('dk-align-objects'), action: () => c.arrange('align-left') },
+          { label: 'Align centres', html: ICON('dk-align-objects'), action: () => c.arrange('align-center') },
+          { label: 'Align right edges', html: ICON('dk-align-objects'), action: () => c.arrange('align-right') },
+          { label: 'Align tops', html: ICON('dk-align-objects'), action: () => c.arrange('align-top') },
+          { label: 'Align middles', html: ICON('dk-align-objects'), action: () => c.arrange('align-middle') },
+          { label: 'Align bottoms', html: ICON('dk-align-objects'), action: () => c.arrange('align-bottom') },
+          { label: 'Centre on the slide horizontally', html: ICON('dk-align-objects'), action: () => c.arrange('center-h') },
+          { label: 'Centre on the slide vertically', html: ICON('dk-align-objects'), action: () => c.arrange('center-v') },
           ...(sel.length >= 3 ? [
-            { label: 'Distribute horizontally', html: ICON('dk-align'), action: () => c.arrange('distribute-h') },
-            { label: 'Distribute vertically', html: ICON('dk-align'), action: () => c.arrange('distribute-v') },
+            { label: 'Distribute horizontally', html: ICON('dk-align-objects'), action: () => c.arrange('distribute-h') },
+            { label: 'Distribute vertically', html: ICON('dk-align-objects'), action: () => c.arrange('distribute-v') },
           ] : []),
           { label: 'Rotate 90° clockwise', html: ICON('dk-rotate'), action: () => c.arrange('rotate-cw') },
           { label: 'Rotate 90° counter-clockwise', html: ICON('dk-rotate'), action: () => c.arrange('rotate-ccw') },
@@ -716,8 +724,10 @@ const escAttr = (s: string) => s.replace(/"/g, '&quot;');
 
 import { ICONS } from '../app/Toolbar';
 import { LYX_ICONS } from '../app/lyxicons';
-/** an icon as markup for palette items */
+import { MODERN_ICONS, iconSvg } from '../app/modernicons';
+/** an icon as markup for palette items: the Modern interface's line icon (uimode.ts) where it has one, as on the buttons */
 function ICON(name: string): string {
+  if (typeof document !== 'undefined' && document.documentElement.dataset.ui === 'modern' && MODERN_ICONS[name]) return iconSvg(MODERN_ICONS[name], 16);
   if (LYX_ICONS[name]) return `<img src="${LYX_ICONS[name]}" alt="" width="16" height="16" style="vertical-align:middle">`;
   return ICONS[name] ? `<span class="dk-ico">${ICONS[name]}</span>` : '';
 }

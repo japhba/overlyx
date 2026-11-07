@@ -43,6 +43,15 @@ function textRects(el: Element): DOMRect[] {
   return rects;
 }
 
+/** What a text box or a formula shows (its words, its formulas' glyphs) in client px — not the box
+ * round them, nor a displayed formula's margins or a line's leading; null when it shows nothing. */
+export function contentRect(el: Element): DOMRect | null {
+  const rects = textRects(el);
+  if (!rects.length) return null;
+  const l = Math.min(...rects.map(r => r.left)), t = Math.min(...rects.map(r => r.top));
+  return new DOMRect(l, t, Math.max(...rects.map(r => r.right)) - l, Math.max(...rects.map(r => r.bottom)) - t);
+}
+
 /** Inline spans with different font sizes still share a line. Start with the shortest boxes so
  * a tall formula does not join two neighbouring text lines. */
 function lineCount(rects: DOMRect[]): number {

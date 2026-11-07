@@ -33,6 +33,24 @@ const derivable: { prev: SourceDoc; patch: SourcePatch; next: string }[] = [];
 let forgetParsed: ReturnType<typeof setTimeout> | null = null;
 const PARSE_OPTS = { sourceCodeLocationInfo: true, scriptingEnabled: false } as const;
 
+/**
+ * `html`, put into a container inside the elements `outer` (its own tag name and its ancestors'),
+ * closes one of them before opening it — the text's change straddles elements: `<h2>…</h2></section>
+ * <section class="slide">` put in after a slide's start tag is a slide put in before it. Parsed as that
+ * slide's content alone, the stray end tag would be dropped and the next slide land inside this one.
+ */
+function closesOutside(outer: ReadonlySet<string>, html: string): boolean {
+  const depth = new Map<string, number>();
+  for (const m of html.replace(/<!--[\s\S]*?-->/g, '').matchAll(/<(\/?)([a-zA-Z][\w:-]*)/g)) {
+    const t = m[2].toLowerCase();
+    if (!outer.has(t)) continue;
+    const d = (depth.get(t) ?? 0) + (m[1] ? -1 : 1);
+    if (d < 0) return true;
+    depth.set(t, d);
+  }
+  return false;
+}
+
 function remember(src: SourceDoc): void {
   parsed.unshift(src);
   if (parsed.length > 3) parsed.length = 3;
@@ -149,6 +167,8 @@ function patchAt(src: SourceDoc, c: Splice, whole: boolean): SourcePatch | null 
   if (!el) return null;
   let box: HElement | null = null, boxPath: Path = [];
   const path: Path = [];
+  /** the tag names of the box and the elements around it */
+  const outer = new Set<string>();
   for (;;) {
     const kids = elementChildren(el);
     let found = -1;
@@ -163,6 +183,7 @@ function patchAt(src: SourceDoc, c: Splice, whole: boolean): SourcePatch | null 
     path.push(found);
     if (patchContainer(el.tagName, el.namespaceURI)) { box = el; boxPath = [...path]; }
   }
+  for (let e: HElement | null = box; e; e = (e.parentNode && 'tagName' in e.parentNode ? e.parentNode : null) as HElement | null) outer.add(e.tagName);
   if (!box) return null;
   const loc = box.sourceCodeLocation!, from = loc.startTag!.endOffset, to = loc.endTag!.startOffset;
   if (SCRIPT.test(c.insert)) return null;
@@ -184,13 +205,14 @@ function patchAt(src: SourceDoc, c: Splice, whole: boolean): SourcePatch | null 
       const old = src.text.slice(sFrom, sTo);
       const html = old.slice(0, c.from - sFrom) + c.insert + old.slice(c.to - sFrom);
       const fr = parseFragment(box, html, PARSE_OPTS) as unknown as { childNodes: HNode[] };
-      if (!SCRIPT.test(old) && !open(fr.childNodes[fr.childNodes.length - 1])) return { path: boxPath, from: sFrom, to: sTo, html, at: a, count: b - a };
+      if (!SCRIPT.test(old) && !open(fr.childNodes[fr.childNodes.length - 1]) && !closesOutside(outer, html)) return { path: boxPath, from: sFrom, to: sTo, html, at: a, count: b - a };
     }
   }
   if (!whole) return null;
   const old = src.text.slice(from, to);
   if (SCRIPT.test(old)) return null;
-  return { path: boxPath, from, to, html: old.slice(0, c.from - from) + c.insert + old.slice(c.to - from) };
+  const html = old.slice(0, c.from - from) + c.insert + old.slice(c.to - from);
+  return closesOutside(outer, html) ? null : { path: boxPath, from, to, html };
 }
 
 /**

@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   PresentShare, encodePts, decodePts, encodeStroke, decodeStroke, readPresent, checkedPresent, slideKey, leads,
-  INK_CAP, GONE_CAP, type PresentState, type SharedStroke,
+  docStamp, staleness, textHash, INK_CAP, GONE_CAP, type PresentState, type SharedStroke,
 } from '../packages/client/src/app/presentshare';
 import { PresentKit, INK_COLORS, PALM_AFTER_MS, PRESENT_LINKED_KEY, type InkStroke } from '../packages/client/src/app/presentkit';
 import { MAX_AWARENESS_STATE_JSON } from '../packages/core/src/awareness';
@@ -199,6 +199,65 @@ describe('Linked: the slide shown', () => {
     expect(a.leader()).toBeNull();
     b.setLinked(true);
     expect(b.leader(true)).toMatchObject({ slide: 2 });
+  });
+});
+
+describe('the same deck on every screen', () => {
+  const st = (s: PresentShare, extra: Record<string, unknown> = {}) => ({ ...(wire(s.state(new Map(), 's0', null, null)) as object), ...extra });
+
+  it('a slide is followed by its mark where both screens have one: a slide put in before it on one screen moves it, not the slide shown', () => {
+    const a = new PresentShare('b'), b = new PresentShare('a');
+    a.place(0, 1, 'aaa'); b.place(0, 1, 'aaa');
+    a.at.t0 = b.at.t0 = 1000;
+    // a's deck has a slide more before it: the same slide is its fifth, b's fourth
+    a.moved(4, 2, null, 'cafe');
+    b.setPeers([{ client: 1, state: st(a), mine: true }]);
+    const f = b.leader()!;
+    expect(f).toMatchObject({ slide: 4, step: 2, sid: 'cafe' });
+    b.moved(3, 2, f, 'cafe');
+    // there already (by its mark), though at another place: nothing more to follow
+    b.setPeers([{ client: 1, state: st(a), mine: true }]);
+    expect(b.leader()).toBeNull();
+    // without marks (an older screen), by the place as before
+    const c = new PresentShare('c');
+    c.place(3, 2);
+    c.setPeers([{ client: 1, state: st(a), mine: true }]);
+    expect(c.leader(true)).toMatchObject({ slide: 4 });
+  });
+
+  it('a mark that is not one is left out', () => {
+    const a = new PresentShare('a');
+    a.place(1, 1, 'ok12');
+    const raw = st(a) as { at: Record<string, unknown> };
+    expect(readPresent(raw, 1)!.at.sid).toBe('ok12');
+    raw.at.sid = '<script>';
+    expect(readPresent(raw, 1)!.at.sid).toBeUndefined();
+  });
+
+  it('the timer of a screen joining late counts from the first screen\'s start', () => {
+    const first = new PresentShare('a'), late = new PresentShare('b');
+    first.at.t0 = 1000; late.at.t0 = 9000;
+    late.setPeers([{ client: 1, state: st(first), mine: true }]);
+    expect(late.beganAt()).toBe(1000);
+    // someone else's presentation is not this one's
+    late.setPeers([{ client: 1, state: st(first), mine: false }]);
+    expect(late.beganAt()).toBe(9000);
+  });
+
+  it('a screen that missed edits, or runs an older OverLyX, is told so — by the other screens of the account only', () => {
+    const own = { doc: docStamp('<p>old</p>', 120), b: '26/11/03-01:05' };
+    const peer = (doc: string, b: string, mine = true) => ({ client: 2, state: { doc, b }, mine });
+    expect(staleness(own, [peer(docStamp('<p>old</p>', 120), '26/11/03-01:05')])).toEqual({ doc: false, build: false });
+    // the other has edits this one lacks
+    expect(staleness(own, [peer(docStamp('<p>new</p>', 131), '26/11/03-01:05')]).doc).toBe(true);
+    // this one has edits the other lacks: the other is told, not this one
+    expect(staleness(own, [peer(docStamp('<p>older</p>', 100), '26/11/03-01:05')]).doc).toBe(false);
+    expect(staleness(own, [peer(own.doc, '26/11/07-00:34')]).build).toBe(true);
+    expect(staleness(own, [peer(own.doc, '26/10/31-12:53')]).build).toBe(false);
+    expect(staleness(own, [peer(docStamp('x', 999), '26/11/07-00:34', false)])).toEqual({ doc: false, build: false });
+    expect(staleness(own, [peer('junk', '<b>')])).toEqual({ doc: false, build: false });
+    expect(textHash('abc')).toMatch(/^[0-9a-f]{8}$/);
+    expect(textHash('abc')).not.toBe(textHash('abd'));
   });
 });
 

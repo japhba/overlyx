@@ -11,7 +11,8 @@
  */
 import type { FromRuntime, Path, ReviewView } from '../protocol';
 import { MODE, post, pathOf, slides, slideOf, docRect } from './env';
-import { parseThreads, parseWas, parseStamp, stampOf, reviewHue, COMMENTS, INS, DEL, CHG, WAS, BY } from '@overlyx/core/html/review.ts';
+import { parseThreads, parseWas, parseStamp, stampOf, reviewHue, COMMENTS, INS, DEL, CHG, WAS, BY, COMMENT_INK_ATTR } from '@overlyx/core/html/review.ts';
+import { COMMENT_GLOW } from '@overlyx/core/inkpresets.ts';
 
 let view: ReviewView = { ins: true, del: true, suggesting: false, me: '', focus: null };
 let authorCss: HTMLStyleElement | null = null;
@@ -30,11 +31,17 @@ export function installReviewCss(): void {
       html.ol-edit [${DEL}] { opacity: .38 !important; }
       html.ol-rev-noins [${INS}], html.ol-rev-noins ins[${BY}] { display: none !important; }
       html.ol-rev-nodel [${DEL}], html.ol-rev-nodel del[${BY}] { display: none !important; }
-      ::highlight(ol-quote) { background-color: rgba(255, 196, 0, .45); }`
+      ::highlight(ol-quote) { background-color: rgba(255, 196, 0, .45); }
+      svg[${COMMENT_INK_ATTR}] { filter: ${COMMENT_GLOW}; }
+      html.ol-rev-noink svg[${COMMENT_INK_ATTR}] { display: none !important; }`
     // (the rail shows the slides as they are, deleted ones faded; elsewhere the page as it reads with the suggestions accepted)
     : MODE === 'thumb'
       ? `del[${BY}], [${DEL}]:not(.slide) { display: none !important; } ins[${BY}] { text-decoration: none !important; } .slide[${DEL}] { opacity: .4 !important; }`
-      : `del[${BY}], [${DEL}] { display: none !important; } ins[${BY}] { text-decoration: none !important; }`;
+      // (the comment pen's strokes are review marks: not presented, printed or published — but an
+      // agent's render_page (check) shows them, as the feedback it is to act on)
+      : MODE === 'check'
+        ? `del[${BY}], [${DEL}] { display: none !important; } ins[${BY}] { text-decoration: none !important; } svg[${COMMENT_INK_ATTR}] { filter: ${COMMENT_GLOW}; }`
+        : `del[${BY}], [${DEL}], svg[${COMMENT_INK_ATTR}] { display: none !important; } ins[${BY}] { text-decoration: none !important; }`;
   (document.head ?? document.documentElement).appendChild(s);
   if (MODE === 'edit') styleAuthors();
 }
@@ -60,6 +67,7 @@ export function setReview(v: ReviewView): void {
   const h = document.documentElement.classList;
   h.toggle('ol-rev-noins', !v.ins);
   h.toggle('ol-rev-nodel', !v.del);
+  h.toggle('ol-rev-noink', !!v.noInk);
   highlightQuote();
 }
 

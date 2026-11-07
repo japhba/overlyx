@@ -30,7 +30,7 @@ const SCOPE = 'lesswrong:access';
 /** the e2e tests' LessWrong: the simulation (fake.ts), connected without LessWrong's consent page */
 export const LESSWRONG_STUB = process.env.OVERLYX_E2E_LESSWRONG_STUB === '1';
 
-const { seal, unseal } = sealer('lesswrong');
+const { seal, open, reseal } = sealer('lesswrong');
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS lesswrong_client (
@@ -47,6 +47,8 @@ CREATE TABLE IF NOT EXISTS lesswrong_accounts (
   created_at INTEGER NOT NULL
 );
 `);
+reseal('lesswrong_client', 'client_secret');
+reseal('lesswrong_accounts', 'token');
 
 export class LessWrongAuthError extends Error {}
 export class LessWrongApiError extends Error {}
@@ -62,12 +64,15 @@ function accessToken(userId: number): string {
   const r = db.prepare('SELECT token, expires_at FROM lesswrong_accounts WHERE user_id = ?').get(userId) as { token: string; expires_at: number } | undefined;
   if (!r) throw new LessWrongAuthError('LessWrong is not connected for this account — connect it in File ▸ LessWrong');
   if (r.expires_at <= Date.now()) throw new LessWrongAuthError('The LessWrong authorisation expired (after 90 days) — connect LessWrong again in File ▸ LessWrong');
-  return unseal(r.token);
+  const token = open(r.token);
+  if (token === null) throw new LessWrongAuthError('The LessWrong authorisation can no longer be read — connect LessWrong again in File ▸ LessWrong');
+  return token;
 }
 
 async function clientFor(redirectUri: string): Promise<{ id: string; secret: string }> {
   const row = db.prepare('SELECT client_id, client_secret FROM lesswrong_client WHERE redirect_uri = ?').get(redirectUri) as { client_id: string; client_secret: string } | undefined;
-  if (row) return { id: row.client_id, secret: unseal(row.client_secret) };
+  const secret = row && open(row.client_secret);   // unreadable: register again
+  if (row && secret) return { id: row.client_id, secret };
   const res = await fetch(LW_URL + '/oauth/register', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -183,7 +188,8 @@ export async function disconnectLessWrong(userId: number): Promise<void> {
   db.prepare('DELETE FROM lesswrong_accounts WHERE user_id = ?').run(userId);
   if (!r || LESSWRONG_STUB) return;
   const c = db.prepare('SELECT client_id, client_secret FROM lesswrong_client LIMIT 1').get() as { client_id: string; client_secret: string } | undefined;
-  if (c) await fetch(LW_URL + '/oauth/revoke', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ token: unseal(r.token), client_id: c.client_id, client_secret: unseal(c.client_secret) }) }).catch(() => undefined);
+  const token = open(r.token), secret = c && open(c.client_secret);
+  if (c && token && secret) await fetch(LW_URL + '/oauth/revoke', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ token, client_id: c.client_id, client_secret: secret }) }).catch(() => undefined);
 }
 
 /* ------------------------------------------------------------------ the API */

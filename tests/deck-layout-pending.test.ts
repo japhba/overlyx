@@ -40,7 +40,9 @@ const runtimeCode = compile([
   ...['PH', 'MEDIA', 'isPicturePh'].map(n => declaration(placeholderSource, n, true)),
   ...['phRole', 'isEmptyPh'].map(n => declaration(placeholderSource, n)),
   ...['selection', 'selectPaths', 'editTextAt', 'isSvgPart', 'isLocked', 'cs', 'isTextual', 'canType', 'isGroup',
-    'movable', 'fixedHeight', 'kindOf', 'label', 'pictureSrc', 'listOf', 'item', 'report'].map(n => declaration(editSource, n)),
+    'movable', 'inGroupLayout', 'fixedHeight', 'kindOf', 'label', 'pictureSrc', 'listOf', 'item', 'report'].map(n => declaration(editSource, n)),
+  // the quick menu's Fit measures the rendered box; jsdom lays nothing out
+  'function looseBox() { return false; }',
 ].join('\n'));
 type Pending = { select?: Path[]; editText?: Path; math?: boolean };
 type Layout = Extract<FromRuntime, { ol: 'layout' }>;

@@ -42,6 +42,9 @@ import { shapePoints, INK_SHAPES, type InkShape } from '@overlyx/core';
 import { holdReload } from './update';
 const isShapeTool = (t: string): t is InkShape => (INK_SHAPES as readonly string[]).includes(t);
 
+/** the pen in hand as a board has it (the comment pen, a slide's, draws as the pen here) */
+const boardPen = (): 'pen' | 'highlighter' => (loadDeckInk().pen === 'highlighter' ? 'highlighter' : 'pen');
+
 export interface BoardObj {
   t: 'stroke' | 'img' | 'note';
   x: number; y: number; w: number; h: number; z?: number;
@@ -435,7 +438,7 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     const penTakes = e.pointerType === 'pen' && toolRef.current === 'select' && loadDeckInk().penInks && !readOnlyRef.current && !corner && !target.closest?.('.board-selbox');
     // its eraser end erases while it is turned round
     const eraserEnd = e.pointerType === 'pen' && (e.buttons & 32) !== 0;
-    const t = eraserEnd ? 'eraser' : penTakes ? loadDeckInk().pen : toolRef.current;
+    const t = eraserEnd ? 'eraser' : penTakes ? boardPen() : toolRef.current;
     const drawTool = (t === 'pen' || t === 'highlighter') && (e.pointerType !== 'touch' || finger) && !readOnlyRef.current;
     const origsOf = (ids: ReadonlySet<string>) => { const m = new Map<string, BoardObj>(); for (const id of ids) { const o = objects.get(id); if (o) m.set(id, { ...o, pts: o.pts?.map(p => [...p] as [number, number, number]) }); } return m; };
     const onSelBox = !!target.closest?.('.board-selbox');
@@ -669,7 +672,7 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
         }
       }
     }
-    if (dragRef.current?.kind === 'erase' && !dragRef.current.end && toolRef.current === 'eraser' && loadDeckInk().eraser.back) setTool(loadDeckInk().pen);
+    if (dragRef.current?.kind === 'erase' && !dragRef.current.end && toolRef.current === 'eraser' && loadDeckInk().eraser.back) setTool(boardPen());
     if (dragRef.current?.kind === 'lasso') {
       const poly = lassoRef.current;
       setLassoPts(null);
@@ -1009,9 +1012,9 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
         {!readOnly && <span class="board-sep" />}
         {!readOnly && <Toolbar id="board-draw" groups={drawingToolbar({
           tool: tool === 'pen' || tool === 'highlighter' ? 'pen' : tool,
-          setTool: next => { if (next === 'pen') setTool(loadDeckInk().pen); else if (next === 'eraser' || next === 'lasso') setTool(next); },
+          setTool: next => { if (next === 'pen') setTool(boardPen()); else if (next === 'eraser' || next === 'lasso') setTool(next); },
           lasso: { kinds: ['ink', 'shapes', 'pictures', 'text'], textLabel: 'Notes', colors: () => usedColors([...objects.values()].map(o => o.color)) },
-          ink: { presets: loadDeckInk(), set: patch => saveDeckInk(patchDeckInk(loadDeckInk(), patch)), draw: on => setTool(on ? loadDeckInk().pen : 'select') },
+          ink: { presets: loadDeckInk(), set: patch => saveDeckInk(patchDeckInk(loadDeckInk(), patch)), draw: on => setTool(on ? boardPen() : 'select') },
           done: false,
           shapes: { tool: isShapeTool(tool) ? tool : null, set: kind => setTool(kind) },
         })} />}

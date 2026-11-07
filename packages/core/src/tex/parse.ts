@@ -197,6 +197,9 @@ function newCtx(base: string, owner: TextCtx['owner'] = 'inset'): TextCtx {
 }
 
 /** asctime(gmtime(t)) → unix seconds ("Tue Aug 26 14:03:00 2026"). */
+/** \ensuremath{…} the writer makes of a typed arrow (editor/plugins/arrows.ts) → the character */
+const ENSUREMATH_ARROWS: Record<string, string> = { '\\longrightarrow': '\u27f6', '\\longleftarrow': '\u27f5', '\\leftrightarrow': '\u2194', '\\longleftrightarrow': '\u27f7' };
+
 export function parseAsctime(s: string): number {
   const m = /^\s*(?:\w{3})\s+(\w{3})\s+(\d{1,2})\s+(\d{1,2}):(\d{2}):(\d{2})\s+(\d{4})\s*$/.exec(s);
   if (!m) { const n = Number(s); if (Number.isFinite(n)) return n; const d = Date.parse(s); return Number.isNaN(d) ? 0 : Math.floor(d / 1000); }
@@ -890,7 +893,10 @@ class BodyParser {
     }
     if (name === 'ensuremath') {
       const g = s.readGroup();
-      if (g !== null) this.pushInset(ctx, st, { type: 'Formula', inline: true, latex: '\\ensuremath{' + g + '}' });
+      // the arrows the writer can only put in math (lib/unicodesymbols has no text command for them): typed arrows, read back as typed
+      const arrow = g !== null ? ENSUREMATH_ARROWS[g] : undefined;
+      if (arrow) this.pushText(ctx, st, arrow);
+      else if (g !== null) this.pushInset(ctx, st, { type: 'Formula', inline: true, latex: '\\ensuremath{' + g + '}' });
       else this.pushERT(ctx, st, '\\ensuremath');
       return null;
     }

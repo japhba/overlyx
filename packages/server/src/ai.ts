@@ -95,7 +95,7 @@ export function tuningFor(model: string): { reasoning?: { effort: 'minimal' | 'l
 /* ------------------------------------------------------------------ model access */
 
 /** a part of a message: text, or an image (a data: URL — the handwriting of the math keyboard's pen) */
-export type ChatPart = { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } };
+export type ChatPart = { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } } | { type: 'input_audio'; input_audio: { data: string; format: 'wav' } };
 export interface ChatMessage { role: 'system' | 'user' | 'assistant'; content: string | ChatPart[] }
 export interface ChatOptions { model?: string; temperature?: number; maxTokens?: number; signal?: AbortSignal; title?: string; /** the account's own provider instead of the server's key (pickRoute) */ route?: AiRoute }
 
@@ -616,6 +616,49 @@ export async function recognizeInk(req: InkRequest, signal?: AbortSignal): Promi
     { role: 'user', content: [{ type: 'text', text: where + mode }, { type: 'image_url', image_url: { url: image } }] },
   ], { model: pickModel(req.model, config.ai.inkModel), temperature: 0, maxTokens: 400, signal, title: 'OverLyX ink' });
   return parseInkReply(reply);
+}
+
+/* ------------------------------------------------------------------ spoken comments */
+
+/** a spoken comment's recording at most (base64 of 16 kHz mono 16-bit WAV: ~5 minutes) */
+export const SPEECH_MAX_AUDIO = 13_000_000;
+
+export const SPEECH_PROMPT = `You transcribe a spoken review comment. Someone looked at a slide (or a page) and talked about it while drawing on it — feedback for whoever will revise it.
+
+Transcribe exactly what is said, in the language it is spoken in:
+- Keep the speaker's words; drop only hesitations (um, uh) and false starts. No summary, no rephrasing, nothing added.
+- Split it into stretches of a sentence or so, each with the second into the recording at which it begins.
+- Mathematics spoken aloud as it would be written in text ("x squared" stays words unless clearly a formula: then $x^2$).
+
+Reply with JSON only: {"said": [{"t": <seconds>, "text": "<words>"}, …]} — {"said": []} when nothing is said.`;
+
+/** A spoken comment's stretches in a model's reply: JSON `{"said": [{t, text}]}` (or bare text: one stretch at 0). */
+export function parseSpeechReply(reply: string): { t: number; text: string }[] {
+  const t = cleanReply(reply);
+  const m = /\{[\s\S]*\}/.exec(t);
+  if (m) {
+    try {
+      const j = JSON.parse(m[0]) as { said?: unknown };
+      if (Array.isArray(j.said)) return j.said.filter((x): x is { t?: unknown; text?: unknown } => !!x && typeof x === 'object')
+        .map(x => ({ t: Math.max(0, Number(x.t) || 0), text: String(x.text ?? '').replace(/\s+/g, ' ').trim() }))
+        .filter(x => x.text).slice(0, 400);
+    } catch { /* not JSON after all */ }
+  }
+  const plain = t.replace(/\s+/g, ' ').trim();
+  return plain && !/^\{/.test(plain) ? [{ t: 0, text: plain.slice(0, 20000) }] : [];
+}
+
+/** A recording put into words by the server's model (the comment pen's push to talk where the browser has no speech recognition). */
+export async function transcribeSpeech(req: { audio: string; lang?: string }, signal?: AbortSignal): Promise<{ t: number; text: string }[]> {
+  const audio = String(req.audio ?? '');
+  if (!/^[A-Za-z0-9+/]+=*$/.test(audio) || !audio.startsWith('UklGR')) throw new AiError('The recording must be a WAV file.', 400);
+  if (audio.length > SPEECH_MAX_AUDIO) throw new AiError('The recording is too long — keep a spoken comment under five minutes.', 413);
+  const lang = typeof req.lang === 'string' && /^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$/.test(req.lang) ? ` The speaker's browser is set to ${req.lang}.` : '';
+  const reply = await chat([
+    { role: 'system', content: SPEECH_PROMPT },
+    { role: 'user', content: [{ type: 'text', text: 'The recording:' + lang }, { type: 'input_audio', input_audio: { data: audio, format: 'wav' } }] },
+  ], { model: config.ai.speechModel, temperature: 0, maxTokens: 4000, signal, title: 'OverLyX spoken comment' });
+  return parseSpeechReply(reply);
 }
 
 /* ------------------------------------------------------------------ rate limiting */

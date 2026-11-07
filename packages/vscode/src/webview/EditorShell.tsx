@@ -17,6 +17,8 @@ import { inkToolbar } from '@client/app/inkToolbar';
 import { StatsDialog } from '@client/app/StatsDialog';
 import { shareTheme } from './appearance';
 import { InterfaceZoom } from './InterfaceZoom';
+import { OpenOnWeb } from './OpenOnWeb';
+import { docText, labelIn, placeQuery, quotePlace } from '@client/editor/permalink';
 import { setDefaultZoom } from '@client/app/zoomkeys';
 import { BuiltPdf } from './BuiltPdf';
 import { ArticlePage } from '@client/app/ArticlePage';
@@ -104,6 +106,8 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   const [message, setMessage] = useState<{ text: string; kind: 'info' | 'error' } | null>(null);
   const [marginMode, setMarginModeState] = useState(stored('ol.margin') === '1');
   const [showComments, setShowComments] = useState(stored('ol.vscode.comments') === '1');
+  // the folder is synced with a project (host/sync.ts): "Open in browser" in the top bar and the File menu
+  const [onWeb, setOnWeb] = useState(false);
   // the outline as a panel inside the editor (the web client's Outline: click to jump, ▲▼ to move a section, ◀▶ to promote / demote) — shown unless hidden
   const [showOutline, setShowOutline] = useState(stored('ol.vscode.outline') !== '0');
   const [outline, setOutline] = useState<OutlineItem[]>([]);
@@ -388,6 +392,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       if (m.type === 'webLink') {
         const w = m.web;
         editorContext.webLink = w ? id => (id.startsWith(w.local + '/') ? webFileAddress(w.origin, w.project, [w.dir, id.slice(w.local.length + 1)].filter(Boolean).join('/')) : null) : undefined;
+        setOnWeb(!!w);
         return;
       }
       const v = handleRef.current?.view;
@@ -635,6 +640,17 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
     return n;
   };
 
+  /** this document on overlyx.app, at the cursor's paragraph (by its label where it has one), shown as the panes show it here */
+  const webAddressHere = (): string | null => {
+    const v = currentView(), id = v ? viewDocId(v) : docId;
+    const base = editorContext.webLink?.(id);
+    if (!base) return null;
+    const $f = v?.state.selection.$from, label = $f ? labelIn($f.parent) : null;
+    const place = label ? { goto: label } : $f?.parent.isTextblock ? quotePlace(docText(v!.state.doc), $f.start(), $f.end()) : null;
+    const q = placeQuery({ ...place, view: editorContext.linkView?.(id) ?? null });
+    return base + (q ? '?' + q : '');
+  };
+  const openOnWeb = () => { const url = webAddressHere(); if (url) vscode.postMessage({ type: 'openOnWeb', url }); };
   const textColor = markValue(view, 'color');
   const mathExec = mathExecutor(currentView);
   const mathPanels = useMathPanels(mathExec);
@@ -674,6 +690,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       { label: article ? 'HTML source…' : 'LaTeX source…', action: () => hostCommand('openSource') },
       { label: 'Source control', action: () => hostCommand('scm') },
       { label: 'File history (Timeline)', action: () => hostCommand('timeline') },
+      ...(onWeb ? [{ label: 'Open in the browser (overlyx.app)', action: openOnWeb }] : []),
       { label: 'Close', action: () => hostCommand('closeTab') },
     ] },
     editingMenus.edit,
@@ -842,6 +859,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       <MenuBar menus={menus} showThemeToggle={false} paletteShortcut="Ctrl+Alt+Shift+P" captureF1={false} searchEntries={helpSearchEntries} />
       <div class="editor-topbar"><strong title={docId}>{docId.split('/').pop()}</strong>
         <span class="topbar-right">
+          {onWeb && <OpenOnWeb link={webAddressHere} message="openOnWeb" />}
           <InterfaceZoom />
           <ThemeToggle pref={themePref} dark={shownDark} onPick={pickTheme} host="VS Code" onSettings={() => setDialog({ name: 'preferences' })} />
           <EditModeSwitch mode={editModeOf(tracking, viewing)} canEdit view={view} views={allViews}

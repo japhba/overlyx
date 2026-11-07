@@ -11,7 +11,8 @@
 import crypto from 'node:crypto';
 import type { Request as ExpressRequest, Response } from 'express';
 import { db } from '../db.ts';
-import { config, JWT_SECRET } from '../config.ts';
+import { config } from '../config.ts';
+import { sealer } from '../sealed.ts';
 import type { DocsDocument, DocsFile } from './model.ts';
 import type { Request } from './edits.ts';
 
@@ -30,19 +31,9 @@ CREATE TABLE IF NOT EXISTS google_drive (
 
 /* ------------------------------------------------------------------ tokens at rest */
 
-const KEY = crypto.createHash('sha256').update('overlyx-google-drive:' + JWT_SECRET).digest();
-function seal(plain: string): string {
-  const iv = crypto.randomBytes(12);
-  const c = crypto.createCipheriv('aes-256-gcm', KEY, iv);
-  const body = Buffer.concat([c.update(plain, 'utf8'), c.final()]);
-  return [iv, c.getAuthTag(), body].map(b => b.toString('base64url')).join('.');
-}
-function unseal(sealed: string): string {
-  const [iv, tag, body] = sealed.split('.').map(s => Buffer.from(s, 'base64url'));
-  const d = crypto.createDecipheriv('aes-256-gcm', KEY, iv);
-  d.setAuthTag(tag);
-  return Buffer.concat([d.update(body), d.final()]).toString('utf8');
-}
+const { seal, open, reseal } = sealer('google-drive');
+reseal('google_drive', 'refresh_token');
+reseal('google_drive', 'access_token');
 
 interface Row { user_id: number; email: string | null; refresh_token: string; access_token: string | null; expires_at: number }
 
@@ -71,11 +62,17 @@ export class GoogleAuthError extends Error {}
 export async function accessToken(userId: number): Promise<string> {
   const row = db.prepare('SELECT * FROM google_drive WHERE user_id = ?').get(userId) as Row | undefined;
   if (!row) throw new GoogleAuthError('Google Drive is not connected for this account');
-  if (row.access_token && row.expires_at > Date.now() + 60_000) return unseal(row.access_token);
+  const fresh = row.access_token && row.expires_at > Date.now() + 60_000 ? open(row.access_token) : null;
+  if (fresh) return fresh;
+  const refresh = open(row.refresh_token);
+  if (refresh === null) {
+    db.prepare('DELETE FROM google_drive WHERE user_id = ?').run(userId);
+    throw new GoogleAuthError('The Google Drive authorisation can no longer be read — connect Google Drive again');
+  }
   const res = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ client_id: config.google.clientId, client_secret: config.google.clientSecret, refresh_token: unseal(row.refresh_token), grant_type: 'refresh_token' }),
+    body: new URLSearchParams({ client_id: config.google.clientId, client_secret: config.google.clientSecret, refresh_token: refresh, grant_type: 'refresh_token' }),
   });
   const tok = await res.json() as { access_token?: string; expires_in?: number; error?: string };
   if (!tok.access_token) {
@@ -90,7 +87,8 @@ export async function accessToken(userId: number): Promise<string> {
 export async function disconnectDrive(userId: number): Promise<void> {
   const row = db.prepare('SELECT refresh_token FROM google_drive WHERE user_id = ?').get(userId) as { refresh_token: string } | undefined;
   db.prepare('DELETE FROM google_drive WHERE user_id = ?').run(userId);
-  if (row && !GOOGLE_STUB) await fetch('https://oauth2.googleapis.com/revoke?token=' + encodeURIComponent(unseal(row.refresh_token)), { method: 'POST' }).catch(() => undefined);
+  const refresh = row && open(row.refresh_token);
+  if (refresh && !GOOGLE_STUB) await fetch('https://oauth2.googleapis.com/revoke?token=' + encodeURIComponent(refresh), { method: 'POST' }).catch(() => undefined);
 }
 
 /* ------------------------------------------------------------------ connecting (OAuth) */

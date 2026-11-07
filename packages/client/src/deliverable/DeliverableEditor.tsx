@@ -31,10 +31,10 @@ import { zoomPill } from '../app/zoomhud';
 import { CornerButton } from '../app/CornerButton';
 import { keepAwake } from '../app/wakelock';
 import { presentFingersDraw, savePresentFingersDraw, presentLinked, savePresentLinked } from '../app/presentkit';
-import { checkedPresent, type PresentState, type PresenterState } from '../app/presentshare';
+import { checkedPresent, docStamp, staleness, type PresentState, type PresenterState } from '../app/presentshare';
 import { createPortal } from 'preact/compat';
 import { isFromRuntime, RAIL_NUM, ASIDE_ATTR } from './protocol';
-import { copyLinkAt, type Place } from '../editor/permalink';
+import { copyLinkAt, placeQuery, type Place } from '../editor/permalink';
 import { rebasedSplices, rebaseObjectPaths, objectHtml, imageHtml, insertPlace, newSlideHtml, nextPageHtml, slideDesigns, slidePaths, slideNotes, notesOp, sourceRange, inlineSvgHtml, guidesIn } from './sourceops';
 import { GUIDES_ATTR, LAYOUT_MARGINS_ATTR, layoutMarginGuides, parseGuides, masterGuides, formatGuides, withGuide, type Guide } from './guides';
 import { deckMargins, deckDesign, builtInLayouts, savedLayouts, layoutFromSlide, saveLayoutOp, applyLayoutOp, placeholderObject, layoutThumb, deckColors, PH_ATTR, PH_LABELS, PH_ROLES, LAYOUT_ATTR, type PhRole, type DesignLooks, type DeckDesign, type Layout } from './decklayouts';
@@ -66,11 +66,15 @@ import { followUps, composeSplices, twinsOf, putOnEverySlide, otherCopies, slide
 import { deckTheme, themeSplices, type ThemeChange } from './decktheme';
 import { embeddedFontFamilies, fontPortabilityWarning, fontResource } from './deckfonts';
 import { ThemePane } from './ThemePane';
-import { reviewOps, resolveOps, resolveAll, reviewOf, isSuggesting, suggestingOp, stampOf, threadsOp, parseThreads, newThreadId, describe as describeObject, COMMENTS, type ReviewChange, type ReviewThread, type Thread } from '@overlyx/core/html/review.ts';
+import { reviewOps, resolveOps, resolveAll, reviewOf, isSuggesting, suggestingOp, stampOf, threadsOp, parseThreads, newThreadId, describe as describeObject, COMMENTS, COMMENT_INK_ATTR, type ReviewChange, type ReviewThread, type Thread } from '@overlyx/core/html/review.ts';
 import { deliverableInfo, slideElements, blankDeck, untouchedPageTitle } from '@overlyx/core/html/deliverable.ts';
 import { usualDeckSize } from '../app/decksize';
 import { formatTimestamp } from '@overlyx/core';
 import { ReviewPane, type CommentDraft } from './ReviewPane';
+import { VoicePill } from './VoiceTalk';
+import { onTake, voiceSlide, cancelTalk, audioName, type VoiceTake } from './voice';
+import { planVoiceComments, commentInkId, commentInkPaths, looseCommentInk, type CommentStroke } from '@overlyx/core/voicecomment.ts';
+import { COMMENT_GLOW } from '@overlyx/core/inkpresets.ts';
 import { EditModeSwitch, modeScope, setOwnSuggesting, suggestingFor, switchModeScope, type EditMode, type ModeScope } from '../app/EditModeSwitch';
 import { useDarkPagesState, toggleDarkPages, invertedColor, deskBeside, DARK_DESK, INVERT_FILTER } from '../app/darkpages';
 import { recordReliability, recordInteraction } from '../usage';
@@ -97,6 +101,19 @@ function saveShown(key: string, on: boolean): void {
 function loadRailW(): number {
   try { const v = Number(localStorage.getItem('ol.deckRail')); return v >= RAIL_MIN && v <= RAIL_MAX ? v : RAIL_W; } catch { return RAIL_W; }
 }
+/** the presenter view as this browser keeps it (runtime/presenter.ts: the presenting frame keeps nothing) */
+const PRESENTER_KEY = 'ol.presenter';
+function presenterPrefs(): { on: boolean; notes: number } {
+  try { const v = JSON.parse(localStorage.getItem(PRESENTER_KEY) ?? 'null'); return { on: v?.on === true, notes: typeof v?.notes === 'number' ? v.notes : 22 }; }
+  catch { return { on: false, notes: 22 }; }
+}
+function savePresenterPrefs(p: { on: boolean; notes: number }): void {
+  try { localStorage.setItem(PRESENTER_KEY, JSON.stringify(p)); } catch { /* private window */ }
+}
+/** the build of OverLyX running here, told the other screens presenting (presentshare.ts staleness) */
+const BUILD: string = String(import.meta.env?.VITE_BUILD_VERSION ?? '');
+/** a screen as the Window Management API tells of it */
+interface ScreenArea { availLeft: number; availTop: number; availWidth: number; availHeight: number }
 const CHECKER = 'repeating-conic-gradient(#e3e5e8 0 25%, #ffffff 0 50%) 0 0 / 16px 16px';
 const NO_VIEW: CanvasView = { desk: null, deskChecker: false, pageChecker: false };
 
@@ -709,7 +726,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
 
   /* ------------------------------------------------------------- versions to the frames */
 
-  const sendTimer = useRef<{ canvas: ReturnType<typeof setTimeout> | null; rail: ReturnType<typeof setTimeout> | null }>({ canvas: null, rail: null });
+  const sendTimer = useRef<{ canvas: ReturnType<typeof setTimeout> | null; rail: ReturnType<typeof setTimeout> | null; present: ReturnType<typeof setTimeout> | null }>({ canvas: null, rail: null, present: null });
   /** when the last pen stroke came: while one follows another, the rail's thumbnail waits */
   const lastInkAt = useRef(-1e9);
   /**
@@ -719,11 +736,13 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
    */
   const patches = useRef(new Map<number, SourcePatch | null>());
   /** the version each frame was sent last */
-  const sentTo = useRef({ canvas: -1, rail: -1 });
+  const sentTo = useRef({ canvas: -1, rail: -1, present: -1 });
+  /** the presenting frame has started and takes the versions of the text (presentReady) */
+  const presentReady = useRef(false);
   /** the splices of the last edit made here and the text they were made on: its patch from them (else from the two texts) */
   const lastSplices = useRef<{ before: string; splices: { from: number; to: number; insert: string }[] } | null>(null);
   /** the text at the latest version for a frame: as patches of the one it was sent last, when they all are */
-  const sourceMsg = (frame: 'canvas' | 'rail'): ToRuntime => {
+  const sourceMsg = (frame: 'canvas' | 'rail' | 'present'): ToRuntime => {
     const v = version.current, base = sentTo.current[frame];
     sentTo.current[frame] = v;
     const list: SourcePatch[] = [];
@@ -755,6 +774,17 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     if (now) toC(); else t.canvas = setTimeout(toC, 40);
     if (t.rail) clearTimeout(t.rail);
     t.rail = setTimeout(() => { t.rail = null; if (railReady.current) toRail(sourceMsg('rail')); }, performance.now() - lastInkAt.current < 1500 ? 1500 : 350);
+    // presenting: the slides follow the text (an edit on another screen, a synced clone, an agent mid-talk)
+    if (t.present) clearTimeout(t.present);
+    if (presentReady.current) t.present = setTimeout(() => { t.present = null; sendPresentSource(); }, now ? 0 : 250);
+  };
+  /** the presenting frame brought to the latest version, and the version it shows told the other screens */
+  const sendPresentSource = () => {
+    if (!presentReady.current || !presentFrame.current) return;
+    toFrame(presentFrame.current, sourceMsg('present'));
+    const html = versions.current.get(sentTo.current.present);
+    presentStamp.current = html !== undefined && host.docClock ? docStamp(html, host.docClock()) : undefined;
+    sharePresent();
   };
 
   useEffect(() => {
@@ -764,7 +794,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
       host.onStatus(() => setOnline(host.online())),
       host.onReady(() => { setSynced(true); sendSource(true); }),
       host.onPeers(peers => { peersRef.current = peers; toCanvas({ ol: 'peers', peers }); toRail({ ol: 'peers', peers }); }),
-      host.onAsset((p, v) => { toCanvas({ ol: 'asset', path: p, v }); toRail({ ol: 'asset', path: p, v }); }),
+      host.onAsset((p, v) => { toCanvas({ ol: 'asset', path: p, v }); toRail({ ol: 'asset', path: p, v }); toFrame(presentFrame.current, { ol: 'asset', path: p, v }); }),
     ];
     if (host.ready()) { setSynced(true); sendSource(true); }
     const ro = setInterval(() => { if (host.readOnly() !== hostReadOnly.current) setReadOnly(host.readOnly()); }, 1000);
@@ -940,11 +970,81 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
   };
   const replyTo = (t: ReviewThread, v: string) =>
     editThreads(t.path, ts => ts.map(x => (x.id === t.thread.id ? { ...x, re: [...(x.re ?? []), { by: me, at: formatTimestamp(), text: v }] } : x)));
-  const resolveThread = (t: ReviewThread, done: boolean) =>
+  /** the comment pen's strokes a thread is about, taken away (as it is resolved or deleted: they were its marks) */
+  const clearThreadInk = (t: ReviewThread) => {
+    const gone = commentInkPaths(text.toString(), t.thread.ink?.ids ?? []);
+    if (gone.length) applyOps([{ t: 'remove', paths: gone }], true);
+  };
+  const resolveThread = (t: ReviewThread, done: boolean) => {
     editThreads(t.path, ts => ts.map(x => { if (x.id !== t.thread.id) return x; const { done: _was, ...rest } = x; void _was; return done ? { ...rest, done: true } : rest; }));
+    if (done) clearThreadInk(t);
+  };
   const removeThread = (t: ReviewThread) => {
     editThreads(t.path, ts => ts.filter(x => x.id !== t.thread.id));
+    clearThreadInk(t);
     if (focus?.id === t.thread.id) setFocus(null);
+  };
+
+  /* ------------------------------------------------------------- spoken comments (the comment pen's push to talk) */
+
+  /** the comment pen's strokes drawn here this visit (what a recording takes: core/voicecomment.ts), and those a thread has */
+  const commentStrokes = useRef<CommentStroke[]>([]);
+  const claimedInk = useRef(new Set<string>());
+  /** a comment stroke drawn: its slide, box, what it is over (in a few words, from the text it was drawn on) */
+  const noteCommentStroke = (id: string, slide: Path | null, rect: Rect, was: string, under?: Path[]) => {
+    const si = slide ? slidesRef.current.findIndex(s => samePath(s.path, slide)) : -1;
+    let on: string[] = [];
+    if (under?.length) {
+      const { doc } = parseSource(was);
+      const all = slideElements(doc);
+      on = under.map(p => elementAt(doc, p)).filter((e): e is NonNullable<typeof e> => !!e).map(e => describeObject(e, all));
+    }
+    commentStrokes.current = [...commentStrokes.current.filter(s => Date.now() - s.at < 600_000), { id, slide: si, rect, at: Date.now(), ...(on.length ? { on } : {}) }];
+  };
+  /** where a page's comments go that are on no slide: its body */
+  const bodyPath = (): Path | null => {
+    const root = elementAt(parseSource(text.toString()).doc, []);
+    const b = root ? elementChildren(root).findIndex(k => k.tagName === 'body') : -1;
+    return b >= 0 ? [b] : null;
+  };
+  /** a recording finished: its words and the comment strokes drawn with it become threads, one per slide (the recording kept in the project when nothing could hear it) */
+  const makeVoiceComments = async (take: VoiceTake) => {
+    if (readOnlyRef.current) { notify('Switch from Viewing to Editing or Suggesting to comment.', 'error'); return; }
+    let audio: string | undefined;
+    if (take.audio) {
+      const dir = host.path.includes('/') ? host.path.slice(0, host.path.lastIndexOf('/') + 1) : '';
+      const rel = `${dir}comments/${audioName(take.audio, take.start)}`;
+      try { await host.upload(rel, take.audio); audio = rel; } catch { notify('The recording could not be kept in the project.', 'error'); }
+    }
+    const plans = planVoiceComments({ start: take.start, end: take.end, said: take.said, how: take.how, slides: take.slides, ...(audio ? { audio } : {}) }, commentStrokes.current, claimedInk.current);
+    if (!plans.length) { showHud('Nothing heard and nothing drawn — no comment made', 2400); return; }
+    for (const plan of plans) {
+      const path = plan.slide >= 0 ? slidesRef.current[plan.slide]?.path ?? bodyPath() : bodyPath();
+      if (!path) continue;
+      const th: Thread = { id: newThreadId(), by: me, at: formatTimestamp(), text: plan.text, voice: plan.voice, ...(plan.ink ? { ink: plan.ink } : {}) };
+      editThreads(path, ts => [...ts, th]);
+      for (const id of plan.ink?.ids ?? []) claimedInk.current.add(id);
+    }
+    const where = plans.length === 1 && plans[0].slide >= 0 && kindRef.current === 'deck' ? ` on slide ${plans[0].slide + 1}` : '';
+    showHud(plans.length > 1 ? `${plans.length} spoken comments made — see Comments` : take.how === 'none' && !take.said.length ? `Comment made${where} — the recording is kept (not transcribed)` : `Spoken comment made${where}`, 2600);
+  };
+  const makeVoiceRef = useRef(makeVoiceComments); makeVoiceRef.current = makeVoiceComments;
+  /** this editor's recordings (each canvas its own: an embedded drawing does not take a deck's) */
+  const voiceOwner = useRef({});
+  useEffect(() => onTake(t => { if (t.owner === voiceOwner.current) void makeVoiceRef.current(t); }), []);
+  useEffect(() => () => cancelTalk(voiceOwner.current), []);
+  // (what is said after turning the slide is about the slide turned to)
+  useEffect(() => { voiceSlide(kind === 'page' ? -1 : current, voiceOwner.current); }, [current, kind]);
+  /** the comment pen's strokes no thread is about (drawn without a word), and the switch that hides them all */
+  const looseInk = useMemo(() => (textNow.includes(COMMENT_INK_ATTR) ? looseCommentInk(textNow) : []), [textNow]);
+  const [inkShown, setInkShown] = useState(() => loadFlag('ol.deckCommentInk', true));
+  const showCommentInk = (on: boolean) => { setInkShown(on); saveFlag('ol.deckCommentInk', on); };
+  const removeLooseInk = () => { const gone = commentInkPaths(text.toString(), looseInk); if (gone.length) applyOps([{ t: 'remove', paths: gone }], true); };
+  /** a card clicked: as showOnCanvas, a spoken comment's strokes selected (where it is) */
+  const showThread = (path: Path, slide: number, threadId?: string) => {
+    showOnCanvas(path, slide, threadId);
+    const ids = threadId ? review.threads.find(x => x.thread.id === threadId && samePath(x.path, path))?.thread.ink?.ids : undefined;
+    if (ids?.length) setTimeout(() => { const paths = commentInkPaths(text.toString(), ids); if (paths.length) toCanvas({ ol: 'select', paths }); }, slide !== currentRef.current ? 120 : 0);
   };
   /** a card of the Review pane clicked: its slide shown, its object selected, its thread looked at */
   const showOnCanvas = (path: Path, slide: number, threadId?: string) => {
@@ -955,11 +1055,11 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     else setFocus(null);
   };
   const reviewMsg = (): ToRuntime => ({ ol: 'review', view: {
-    ins: showIns, del: showDel, suggesting: suggesting && !locked, me,
+    ins: showIns, del: showDel, suggesting: suggesting && !locked, me, noInk: !inkShown,
     focus: focus ? { path: focus.path, quote: focus.quote } : draft?.path ? { path: draft.path, quote: draft.quote } : null,
   } });
   const reviewMsgRef = useRef(reviewMsg); reviewMsgRef.current = reviewMsg;
-  useEffect(() => { toCanvas(reviewMsg()); }, [showIns, showDel, suggesting, locked, me, JSON.stringify(focus), JSON.stringify(draft?.path ?? null), draft?.quote]);
+  useEffect(() => { toCanvas(reviewMsg()); }, [showIns, showDel, suggesting, locked, me, JSON.stringify(focus), JSON.stringify(draft?.path ?? null), draft?.quote, inkShown]);
 
   /* ------------------------------------------------------------- the runtime's messages */
 
@@ -1034,6 +1134,22 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
         }).catch(() => {});
       }
       if (fromPresent) {
+        if (m.ol === 'presentReady') {
+          // (started, or started again after a reload: it keeps nothing — the settings, the others and the text from here)
+          presentReady.current = true;
+          presentPrefsSent.current = true;
+          sentTo.current.present = -1;
+          toFrame(presentFrame.current, { ol: 'presentFingers', on: presentFingersDraw() });
+          toFrame(presentFrame.current, { ol: 'presentLinked', on: presentLinked() });
+          const pv = presenterPrefs();
+          presenterOn.current = presentAs.current !== 'audience' && pv.on;
+          toFrame(presentFrame.current, { ol: 'presenter', on: presenterOn.current, notes: pv.notes });
+          toFrame(presentFrame.current, { ol: 'presentPeers', peers: presentPeers.current });
+          sendPresentSource();
+        }
+        if (m.ol === 'needSource') { sentTo.current.present = -1; sendPresentSource(); }
+        if (m.ol === 'presenterPrefs') { presenterOn.current = m.on === true; if (presentAs.current !== 'audience') savePresenterPrefs({ on: m.on === true, notes: m.notes }); }
+        if (m.ol === 'presentAudience') void openAudience();
         if (m.ol === 'presentZoom') presentZoomed.current = m.zoomed;
         if (m.ol === 'exit') stopPresenting();
         if (m.ol === 'presentFingers') savePresentFingersDraw(m.on);
@@ -1041,7 +1157,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
         // its state for the other screens presenting the page: checked (the page's own scripts run in that frame too), then shared
         if (m.ol === 'presentShare') {
           const st = m.state === null ? null : checkedPresent(m.state, presentOut.current);
-          if (st || m.state === null) { presentOut.current = st; host.setPresent?.(st); }
+          if (st || m.state === null) { presentOut.current = st; sharePresent(); }
         }
         if (m.ol === 'visible') {
           // (its first slide shown: the frame has no storage, so the bar's "Fingers draw" and "Linked" come from here — and the other presenters as they are)
@@ -1186,7 +1302,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
           }
           break;
         }
-        case 'draw': onDraw(m.version, m.tool, m.slide, m.rect, m.after ?? null, m.pts, m.runs ? { d: '', closed: false, runs: m.runs } : m.d !== undefined ? { d: m.d, closed: !!m.closed } : undefined, m.scratch, m.snap); break;
+        case 'draw': onDraw(m.version, m.tool, m.slide, m.rect, m.after ?? null, m.pts, m.runs ? { d: '', closed: false, runs: m.runs } : m.d !== undefined ? { d: m.d, closed: !!m.closed } : undefined, m.scratch, m.snap, m.under); break;
         // the Pencil drew with Select in hand: the pen for its stroke, then Select again — the Draw row stays as it was
         case 'penInks': if (fromCanvas && !drawKeptRef.current) setToolState(m.done ? 'select' : 'pen'); break;
         case 'toolBack': if (fromCanvas) setToolState(m.tool); break;
@@ -1386,7 +1502,8 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
       svg.replaceChildren(g);
       liveInk.current = { id: m.id, at: m.at, k: m.k ?? 1, g };
       svg.style.mixBlendMode = m.hl ? 'multiply' : '';
-      svg.style.filter = darkRef.current.invert && kindRef.current !== 'page' ? INVERT_FILTER : '';
+      // (the comment pen's: with its glow, as the page shows it)
+      svg.style.filter = [darkRef.current.invert && kindRef.current !== 'page' ? INVERT_FILTER : '', m.paint?.['data-comment'] ? COMMENT_GLOW : ''].filter(Boolean).join(' ');
       placeLive(slideView.place());
     }
     const l = liveInk.current;
@@ -1527,7 +1644,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
   // (the Bézier pen takes Enter / Esc / Backspace: the keyboard goes to the canvas)
   // (the pen draws right away only where the page can be changed)
   const inkStyle = { ...deckInkStyle(ink, pageW), penInks: ink.penInks && !locked };
-  useEffect(() => { toCanvas({ ol: 'tool', tool, ink: inkStyle, held: drawKept }); if (tool === 'bezier') canvasFrame.current?.focus(); }, [tool, drawKept, inkStyle.color, inkStyle.width, inkStyle.opacity, JSON.stringify(inkStyle.nib ?? null), inkStyle.fingers, inkStyle.scribble, inkStyle.penInks, inkStyle.snap, JSON.stringify(inkStyle.eraser ?? null), JSON.stringify(inkStyle.lasso ?? null)]);
+  useEffect(() => { toCanvas({ ol: 'tool', tool, ink: inkStyle, held: drawKept }); if (tool === 'bezier') canvasFrame.current?.focus(); }, [tool, drawKept, inkStyle.color, inkStyle.width, inkStyle.opacity, JSON.stringify(inkStyle.nib ?? null), inkStyle.fingers, inkStyle.scribble, inkStyle.penInks, inkStyle.snap, JSON.stringify(inkStyle.eraser ?? null), JSON.stringify(inkStyle.lasso ?? null), inkStyle.comment]);
   // the rail folded away: its frame goes, and says it is ready again when it comes back
   useEffect(() => { if (!railOpen) railReady.current = false; }, [railOpen]);
 
@@ -1964,7 +2081,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
 
   const setTool = (t: Tool) => { setToolState(t); };
 
-  const onDraw = (v: number, t: Tool, slide: Path | null, rect: Rect, after: Path | null, pts?: [number, number][], bez?: { d: string; closed: boolean; runs?: InkRunD[] }, scratch?: Path[], snap?: { kind: string; rect: Rect; runs: InkRunD[] }) => {
+  const onDraw = (v: number, t: Tool, slide: Path | null, rect: Rect, after: Path | null, pts?: [number, number][], bez?: { d: string; closed: boolean; runs?: InkRunD[] }, scratch?: Path[], snap?: { kind: string; rect: Rect; runs: InkRunD[] }, under?: Path[]) => {
     // Draw: the pen stays in hand and the stroke is not selected — the next one follows (GoodNotes)
     const drawing = t === 'pen';
     if (!drawing) setToolState('select');
@@ -1986,10 +2103,14 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
       const so = soloState.current;
       return so && k === 'deck' && slide && (r.x + r.w <= 0 || r.y + r.h <= 0 || r.x >= so.rect.w || r.y >= so.rect.h) ? h.replace(/^<(\w+)/, `<$1 ${ASIDE_ATTR}`) : h;
     };
+    // the comment pen's stroke: a review mark of its own id (core/voicecomment.ts), noted for the spoken comment it goes with
+    const commentId = drawing && inkRef.current.pen === 'comment' ? commentInkId() : null;
+    const marked = (h: string) => (commentId ? h.replace('<svg class="ol-ink"', `<svg class="ol-ink" ${COMMENT_INK_ATTR}="${commentId}"`) : h);
     const made = objectHtml(t, rect, k, pageW / 1280, pts, bez, drawing ? deckInkStyle(inkRef.current, pageWRef.current) : undefined);
     if (!made) return;
-    const html = besideIt(rect, made);
+    const html = besideIt(rect, marked(made));
     if (!applyOps([{ t: 'insert', parent: place.parent, index: place.index, html }])) return;
+    if (commentId) noteCommentStroke(commentId, slide, snap?.rect ?? rect, cur, under);
     if (scratch?.length) {
       // a scribble over strokes (core/scratchout.ts): they and it go, a step after it came — so the first
       // undo brings them back with the scribble as ink, in case it was drawing (OneNote)
@@ -2000,7 +2121,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     if (snap && /^[a-z]+$/.test(snap.kind)) {
       // draw and hold (core/shapesnap.ts): the stroke becomes its shape a step after it came — Undo brings the stroke back as drawn
       const shaped = objectHtml('pen', snap.rect, k, pageW / 1280, undefined, { d: '', closed: false, runs: snap.runs }, deckInkStyle(inkRef.current, pageWRef.current));
-      if (shaped && applyOps([{ t: 'outer', path: place.path, html: besideIt(snap.rect, shaped.replace('<svg class="ol-ink"', `<svg class="ol-ink" data-ol-shape="${snap.kind}"`)) }])) showHud(`${SNAP_NAMES[snap.kind] ?? 'Shape'} · Undo brings the stroke back`, 1400);
+      if (shaped && applyOps([{ t: 'outer', path: place.path, html: besideIt(snap.rect, marked(shaped).replace('<svg class="ol-ink"', `<svg class="ol-ink" data-ol-shape="${snap.kind}"`)) }])) showHud(`${SNAP_NAMES[snap.kind] ?? 'Shape'} · Undo brings the stroke back`, 1400);
       return;
     }
     pending.current = drawing ? null : t === 'formula' ? { editText: place.path, math: true } : t === 'text' ? { editText: place.path } : { select: [place.path] };
@@ -2136,7 +2257,8 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     color: c => { if (editingText) exec('foreColor', c ?? 'inherit'); else styleSel({ color: c }); },
     highlight: c => exec('hiliteColor', c ?? 'transparent'),
     align: a => { if (editingText) exec(a === 'left' ? 'justifyLeft' : a === 'center' ? 'justifyCenter' : a === 'right' ? 'justifyRight' : 'justifyFull'); else styleSel({ 'text-align': a }); },
-    valign: v => toCanvas({ ol: 'valign', v }),
+    valign: (v, centre) => toCanvas({ ol: 'valign', v, ...(centre ? { centre: true } : {}) }),
+    fit: () => toCanvas({ ol: 'fitBox' }),
     list: kind => {
       const cmd = kind === 'ul' ? 'insertUnorderedList' : 'insertOrderedList';
       if (editingText) { exec(cmd); return; }
@@ -2353,6 +2475,12 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     placeShown.current = place;
     const k = place.slide && slides.length ? Math.min(place.slide, slides.length) - 1 : -1;
     if (k >= 0) { backTo.current = 'done'; if (kind === 'deck') gotoSlide(k); }
+    // (an audience window of the presenter view, or this screen brought up to date mid-talk)
+    if (place.present && kind === 'deck' && !presenting) {
+      void startPresenting(false, Math.max(0, k), place.present);
+      // (once: a reload later opens the deck as usual)
+      try { history.replaceState(history.state, '', location.href.replace(/([?&])present=[^&]*(&|$)/, (_m, a: string, b: string) => (b ? a : '')).replace(/[?&]$/, '')); } catch { /* as it is */ }
+    }
     const base = k >= 0 ? slidePaths(text.toString())[k] : kind === 'page' ? [] : null;
     if (place.obj && base) setTimeout(() => toCanvas({ ol: 'select', paths: [[...base, ...place.obj!]] }), 150);
   }, [place, slides, kind, canvasState]);
@@ -3089,22 +3217,68 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
   /** the other screens presenting the page (their awareness states), and this one's state as last shared (app/presentshare.ts) */
   const presentPeers = useRef<PresenterState[]>([]);
   const presentOut = useRef<PresentState | null>(null);
-  const startPresenting = async (fromStart = false) => {
+  /** the address the presenting frame opened (kept: a renewed link must not reload it mid-talk) */
+  const [presentUrl, setPresentUrl] = useState('about:blank');
+  /** how this screen presents: as asked here, or opened to present (`audience`: an audience window — never the presenter view; `here`: brought up to date mid-talk) */
+  const presentAs = useRef<'audience' | 'here' | null>(null);
+  /** presenting began without a click (a link opened it): one is asked for, for the full screen */
+  const [fullAsk, setFullAsk] = useState(false);
+  /** the presenter view is on: leaving the full screen does not end the presentation (opening the audience window leaves it) */
+  const presenterOn = useRef(false);
+  /** `at`: the slide to present from (the canvas's index), else the one shown */
+  const startPresenting = async (fromStart = false, at?: number, as: 'audience' | 'here' | null = null) => {
     presentZoomed.current = false;
     presentPrefsSent.current = false;
-    presentFrom.current = fromStart ? 0 : presentIndexOf(currentRef.current);
+    presentReady.current = false;
+    presentAs.current = as;
+    presentFrom.current = fromStart ? 0 : presentIndexOf(at ?? currentRef.current);
     if (offlineDocsRef.current.edit) {
       const doc = await host.offlineFrame?.('present', currentLink.current ?? undefined);
       setOfflineDocs(prev => ({ ...prev, present: doc ?? undefined }));
     }
     if (link && host.present?.(src('present') + `#${presentFrom.current + 1}`)) return;
+    setPresentUrl(src('present') + `#${presentFrom.current + 1}`);
     setPresenting(true);
+    if (as) { setFullAsk(!!document.fullscreenEnabled); return; }
     setTimeout(() => {
       void presentBox.current?.requestFullscreen?.().catch(() => undefined);
       presentFrame.current?.focus();
     }, 30);
   };
+  const askedFull = () => {
+    setFullAsk(false);
+    void presentBox.current?.requestFullscreen?.().catch(() => undefined);
+    presentFrame.current?.focus();
+  };
+  /**
+   * The presenter view's *Audience window*: the slides presented in a window of their own (Linked with
+   * this one: the same account), opened on another screen where the browser lets it be placed there
+   * (the Window Management API, asked for once) — else where the browser puts it, to be dragged to the
+   * projector. This window goes on in the presenter view.
+   */
+  const openAudience = async () => {
+    const base = host.webLink?.();
+    if (!base) { notify('This deck has no address to open in another window.', 'error'); return; }
+    const url = `${base}?${placeQuery({ slide: currentRef.current + 1, present: 'audience' })}`;
+    const sw = screen as Screen & { availLeft?: number; availTop?: number };
+    const win = window.open(url, 'overlyx-audience', `popup,width=${Math.round(sw.availWidth * 0.8)},height=${Math.round(sw.availHeight * 0.8)}`);
+    if (!win) { notify('The browser kept the audience window from opening: allow pop-ups for this site, then try again.', 'error'); return; }
+    presenterOn.current = true;
+    toFrame(presentFrame.current, { ol: 'presenter', on: true, notes: presenterPrefs().notes });
+    // on another screen, where the browser tells of the screens (Chrome, Edge: asks once)
+    try {
+      const w = window as Window & { getScreenDetails?: () => Promise<{ screens: ScreenArea[]; currentScreen: ScreenArea }> };
+      if (!w.getScreenDetails) return;
+      const d = await w.getScreenDetails();
+      const other = d.screens.find(s => s.availLeft !== d.currentScreen.availLeft || s.availTop !== d.currentScreen.availTop);
+      if (!other || win.closed) return;
+      win.moveTo(other.availLeft, other.availTop);
+      win.resizeTo(other.availWidth, other.availHeight);
+    } catch { /* not allowed: where the browser put it */ }
+  };
   const stopPresenting = () => {
+    setFullAsk(false);
+    presentReady.current = false;
     setPresenting(false);
     setOfflineDocs(({ present: _present, ...active }) => active);
     if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
@@ -3113,6 +3287,8 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     const onFs = () => {
       if (document.fullscreenElement || !presenting) return;
       if (presentZoomed.current) { presentZoomed.current = false; toFrame(presentFrame.current, { ol: 'unzoom' }); return; }
+      // (the presenter view, an audience window: presenting goes on in the window — Esc there ends it)
+      if (presenterOn.current || presentAs.current) return;
       setPresenting(false);
     };
     document.addEventListener('fullscreenchange', onFs);
@@ -3127,9 +3303,40 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
   // presented on other screens too (an iPad and a Mac): their states into the frame as they change; this one's withdrawn as it ends
   useEffect(() => {
     if (!presenting || !host.onPresent) return;
-    const off = host.onPresent(peers => { presentPeers.current = peers; toFrame(presentFrame.current, { ol: 'presentPeers', peers }); });
-    return () => { off(); presentPeers.current = []; presentOut.current = null; host.setPresent?.(null); };
+    const off = host.onPresent(peers => { presentPeers.current = peers; toFrame(presentFrame.current, { ol: 'presentPeers', peers }); checkStale(); });
+    // (a screen that stopped hearing from the others keeps its last word: looked at again now and then)
+    const iv = setInterval(checkStale, 2000);
+    return () => { off(); clearInterval(iv); presentPeers.current = []; presentOut.current = null; presentStamp.current = undefined; staleSince.current = null; setStale(null); host.setPresent?.(null); };
   }, [presenting, host]);
+  /**
+   * The same deck on every screen. The version of the text the frame shows and the build of OverLyX
+   * go with this presenter's state (presentshare.ts docStamp); when another screen of this account
+   * has a newer version for more than a few seconds (edits do not reach this one: it was asleep,
+   * offline, or kept a version from before them) or a newer OverLyX, this screen says so and offers to
+   * catch up — the page loaded again, presenting from the same slide.
+   */
+  const presentStamp = useRef<string | undefined>(undefined);
+  const staleSince = useRef<{ kind: 'doc' | 'build'; at: number } | null>(null);
+  const [stale, setStale] = useState<'doc' | 'build' | null>(null);
+  const [staleDismissed, setStaleDismissed] = useState<string | null>(null);
+  const sharePresent = () => {
+    const st = presentOut.current;
+    host.setPresent?.(st ? { ...st, ...(presentStamp.current ? { doc: presentStamp.current } : {}), ...(BUILD ? { b: BUILD } : {}) } : null);
+  };
+  const checkStale = () => {
+    const s = staleness({ doc: presentStamp.current, b: BUILD }, presentPeers.current);
+    const kind = s.build ? 'build' : s.doc ? 'doc' : null;
+    if (!kind) { staleSince.current = null; setStale(null); return; }
+    if (staleSince.current?.kind !== kind) staleSince.current = { kind, at: Date.now() };
+    if (Date.now() - staleSince.current.at >= 5000) setStale(kind);
+  };
+  /** this screen brought up to date: the page loaded again, presenting from the slide it shows */
+  const catchUp = () => {
+    const base = host.webLink?.();
+    if (!base) { location.reload(); return; }
+    try { history.replaceState(history.state, '', `${base}?${placeQuery({ slide: currentRef.current + 1, present: 'here' })}`); } catch { /* another origin: as it is */ }
+    location.reload();
+  };
 
   /* ------------------------------------------------------------- code view */
 
@@ -3691,6 +3898,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
               {(canvasState === 'slow' || canvasState === 'failed') && <button type="button" class="dl-btn" onClick={() => setCodeOpen(true)}>Open Code</button>}
             </div>}
             {drawPalette && <DrawPalette sections={bars.sections} />}
+            <VoicePill armed={!locked && tool === 'pen' && ink.pen === 'comment'} owner={voiceOwner.current} slide={() => (kindRef.current === 'page' ? -1 : currentRef.current)} />
             {hud && <div key={hud.n} class="dl-hud" role="status" data-dl-hud style={hud.ms > 900 ? { animationDuration: `${hud.ms}ms` } : undefined}>{hud.text}</div>}
             <div ref={zoomHud} class="zoom-hud" aria-hidden="true" data-dl-zoomhud />
             {(lost || zoomed || (soloOn && slideFree)) && kind !== 'page' && (
@@ -3723,7 +3931,8 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
         )}
         {reviewOpen && !fullOn && (
           <ReviewPane review={review} slideTitles={slides.map(s => s.title)} current={current} kind={kind} me={me} canEdit={!locked}
-            focus={focus} draft={draft} submitDraft={submitDraft} cancelDraft={() => setDraft(null)} select={showOnCanvas}
+            focus={focus} draft={draft} submitDraft={submitDraft} cancelDraft={() => setDraft(null)} select={showThread}
+            commentInk={{ shown: inkShown, show: showCommentInk, loose: looseInk.length, removeLoose: removeLooseInk }}
             reply={replyTo} resolve={resolveThread} remove={removeThread}
             accept={c => resolveChange(c, true)} reject={c => resolveChange(c, false)}
             acceptAll={() => resolveEverything(true)} rejectAll={() => resolveEverything(false)}
@@ -3783,8 +3992,14 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
       {bgFor && <BgRemoveDialog src={bgFor.url} name={bgFor.name} onDone={b => { void saveNoBg(b); }} onClose={() => setBgFor(null)} />}
       {presenting && link && (
         <div class="dl-presenting" ref={presentBox}>
-          <iframe ref={presentFrame} title="Presentation" sandbox={offlineDocs.present ? undefined : 'allow-scripts allow-popups'} src={offlineDocs.present ? offlineSrc('present') : src('present') + `#${presentFrom.current + 1}`}
+          <iframe ref={presentFrame} title="Presentation" sandbox={offlineDocs.present ? undefined : 'allow-scripts allow-popups'} src={offlineDocs.present ? offlineSrc('present') : presentUrl}
             onLoad={() => { if (offlineDocsRef.current.present) presentFrame.current?.contentWindow?.postMessage({ ol: 'go', slide: presentFrom.current }, '*'); }} />
+          {fullAsk && <button class="dl-present-full" onClick={askedFull}><span>Click for full screen</span></button>}
+          {stale && staleDismissed !== stale && <div class="dl-present-stale" role="alert">
+            <span>{stale === 'build' ? 'This screen runs an older version of OverLyX than your other screen.' : 'This screen shows an older version of the deck than your other screen.'}</span>
+            <button onClick={catchUp}>Bring up to date</button>
+            <button aria-label="Dismiss" title="Leave it so" onClick={() => setStaleDismissed(stale)}>×</button>
+          </div>}
         </div>
       )}
     </div>

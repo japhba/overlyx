@@ -8,7 +8,8 @@
 #
 # Each run (deploy/overlyx-backup-offsite.timer, nightly) backs up
 #   - the SQLite database (an online backup, consistent), secret.key and deploy/secrets.env, staged
-#     in OVERLYX_BACKUP_STAGE with a manifest that says where things were;
+#     in OVERLYX_BACKUP_STAGE with a manifest that says where things were — never sealing.key, which
+#     opens the accounts' stored secrets and which the owner keeps offline (DOCS.md "Secrets");
 #   - the projects directory with their git histories (without build products);
 #   - the agents' homes (sign-ins, transcripts; not their working copies);
 # then forgets snapshots beyond KEEP (14 daily, 8 weekly, 3 monthly: about three months — the

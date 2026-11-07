@@ -52,7 +52,8 @@ CREATE TABLE IF NOT EXISTS lesswrong_links (
 );
 `);
 
-const { seal, unseal } = sealer('lesswrong-key');
+const { seal, open, reseal } = sealer('lesswrong-key');
+reseal('lesswrong_links', 'link_key');
 
 export interface LwLinkRow {
   doc_id: string; post_id: string; link_key: string | null; user_id: number; title: string | null; draft: number | null;
@@ -99,7 +100,7 @@ let apiFor: (userId: number) => LessWrongApi = lessWrongApi;
 export function lessWrongApiFor(userId: number): LessWrongApi { return apiFor(userId); }
 export function setLessWrongApiFactory(f: (userId: number) => LessWrongApi): void { apiFor = f; }
 
-const keyOf = (l: LwLinkRow) => (l.link_key ? unseal(l.link_key) : null);
+const keyOf = (l: LwLinkRow) => (l.link_key ? open(l.link_key) : null);
 
 /* ------------------------------------------------------------------ linking */
 

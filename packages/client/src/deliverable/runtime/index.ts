@@ -30,7 +30,7 @@ import { wantObjects } from './objects';
 import { nodeCommand } from './pathedit';
 import { stepCommand } from './animate';
 import { setView, refreshView, reportColors } from './view';
-import { startPresenting } from './present';
+import { startPresenting, sourceChanged as presentSourceChanged, presentSettled } from './present';
 import { expandPrintSteps, STEP_VISIBILITY_CSS } from './steps';
 import { report, rememberPage } from './report';
 import { layout } from './layout';
@@ -276,7 +276,8 @@ function onMessage(e: MessageEvent): void {
   if (e.source !== window.parent) return;
   const m = e.data as ToRuntime;
   if (!m || typeof m !== 'object' || typeof m.ol !== 'string') return;
-  if (MODE === 'present' && m.ol !== 'assets' && m.ol !== 'folder') return;
+  // (presenting: the page's files and each new version of its text — the presenter's own messages are present.ts's)
+  if (MODE === 'present' && m.ol !== 'assets' && m.ol !== 'folder' && m.ol !== 'source' && m.ol !== 'bib' && m.ol !== 'asset') return;
   switch (m.ol) {
     case 'exportSvg':
       refreshAnnotations();
@@ -307,6 +308,7 @@ function onMessage(e: MessageEvent): void {
       state.kind = detectKind();
       if (MODE === 'edit') { ensureSolo(); edit.afterSource(); void whenTypeset().then(() => edit.draw()); }
       if (MODE === 'thumb') { notePageBackground(); drawRail(); }
+      if (MODE === 'present') { presentSourceChanged(); void whenTypeset().then(presentSettled); }
       void whenTypeset().then(refreshAnnotations);
       darkSlidesChanged();
       if (first) void settle().then(() => { sendLayout(); if (MODE === 'edit') { refreshView(); reportColors(); } });
@@ -331,12 +333,13 @@ function onMessage(e: MessageEvent): void {
     case 'textBox': if (MODE === 'edit') edit.setTextBox(m.anchor); break;
     case 'peers': if (MODE === 'edit') edit.setPeers(m.peers); else if (MODE === 'thumb') { railPeers = m.peers; drawRail(); } break;
     case 'dark': if (MODE === 'edit' || MODE === 'thumb') { setDarkSlides(m.invert, !!m.figures); if (MODE === 'thumb') railDesk(m.desk); } break;
+    case 'fitBox': if (MODE === 'edit') edit.fitBoxes(); break;
     case 'current': if (MODE === 'thumb') railShow(m.slide); break;
     case 'asset': refreshAsset(m.path, m.v); break;
     case 'arrange': if (MODE === 'edit') arrange(m.how); break;
     case 'groupLayout': if (MODE === 'edit') setGroupLayout(m.layout); break;
     case 'paint': if (MODE === 'edit') paint(m.paint); break;
-    case 'valign': if (MODE === 'edit') valign(m.v); break;
+    case 'valign': if (MODE === 'edit') valign(m.v, m.centre); break;
     case 'view': if (MODE === 'edit') setView(m.view); break;
     case 'crop': if (MODE === 'edit') edit.cropAt(m.path, { aspect: m.aspect, shape: m.shape }); break;
     case 'cropPreset': if (MODE === 'edit') edit.cropPreset(m.path, m); break;
@@ -471,6 +474,7 @@ function init(): void {
     refreshAnnotations();
     window.__olReady = true;
     if (MODE === 'embed') embedSettled();
+    if (MODE === 'present') presentSettled();
     if (MODE === 'view') viewSettled();
     if (MODE === 'edit' || MODE === 'thumb') { sendLayout(); if (MODE === 'edit') { edit.visibleSlide(); refreshView(); reportColors(); } }
   });

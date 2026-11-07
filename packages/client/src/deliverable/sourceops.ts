@@ -166,13 +166,14 @@ export function objectHtml(tool: Tool, rect: Rect, kind: DeliverableKind, scaleH
       ? `<p data-ol-wrap-lines="1" style="${pos(false)}margin: 0">Text</p>`
       : `<p data-ol-text-anchor="left" style="position: absolute; left: ${r(rect.x)}px; top: ${r(rect.y)}px; width: max-content; max-width: none; margin: 0">Text</p>`;
     // empty: LyX's formula editor opens on it at once (left empty, the box goes again); a click
-    // centres it on the point, in a size for a slide
+    // centres it on the point, a drag in the box drawn, in a size for a slide. Its box is the
+    // formula's (auto width anchored at its centre, textboxes.ts; no display margins, runtime math.ts),
+    // following it as it is typed — not a line of text's width round a short formula.
     case 'formula': {
       if (flow) return '<p>\\[ \\]</p>';
-      const fw = rect.w > 8 ? rect.w : 480 * scaleHint;
-      const x = rect.w > 8 ? rect.x : Math.max(0, Math.min(1280 * scaleHint - fw, rect.x - fw / 2));
-      const y = rect.h > 8 ? rect.y : Math.max(0, rect.y - 32 * scaleHint);
-      return `<div style="position: absolute; left: ${r(x)}px; top: ${r(y)}px; width: ${r(fw)}px; font-size: ${r(40 * scaleHint)}px; text-align: center">\\[ \\]</div>`;
+      const cx = rect.w > 8 ? rect.x + rect.w / 2 : Math.max(0, Math.min(1280 * scaleHint, rect.x));
+      const y = rect.h > 8 ? rect.y : Math.max(0, rect.y - 24 * scaleHint);
+      return `<div data-ol-text-anchor="center" style="position: absolute; left: ${r(cx)}px; top: ${r(y)}px; width: max-content; max-width: none; translate: -50% 0; font-size: ${r(40 * scaleHint)}px; text-align: center">\\[ \\]</div>`;
     }
     // the works cited, listed by the runtime (cite.ts) as LaTeX's \bibliography: here only its box
     case 'references': {

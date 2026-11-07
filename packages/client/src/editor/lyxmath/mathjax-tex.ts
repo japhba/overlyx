@@ -91,12 +91,13 @@ class DocumentMacroMap extends CommandMap {
 }
 
 /**
- * The parsed argument as the children of a new mrow with the class — or, for an atom (`lm-a`) that
- * is a single character, that token itself with the class: the same layout with one box fewer
+ * The parsed argument as the children of a new mrow with the class — or, for an atom (`lm-a`, with
+ * its symbol key's class or not) that is a single character, that token itself with the class: the
+ * same layout with one box fewer
  * (typing re-renders the whole formula; most atoms are characters).
  */
 function classBox(parser: TexParser, cls: string, arg: MmlNode): MmlNode {
-  if (cls === 'lm-a' && !NodeUtil.isInferred(arg) && arg.isToken && !arg.attributes.get('class')) {
+  if ((cls === 'lm-a' || cls.startsWith('lm-a ')) && !NodeUtil.isInferred(arg) && arg.isToken && !arg.attributes.get('class')) {
     NodeUtil.setAttribute(arg, 'class', cls);
     return arg;
   }
