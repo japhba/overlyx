@@ -6,7 +6,7 @@
 # the decks' embedded faces are regenerated from them. Takes ~5 min and well under 1 GB.
 #
 #   scripts/anodyne/install.sh <anodyne checkout>
-# fontTools and brotli on PYTHONPATH (default /mnt/HC_Volume_107166861/jan/pylib).
+# fontTools, brotli and uharfbuzz (the GPOS repacker) on PYTHONPATH (default /mnt/HC_Volume_107166861/jan/pylib).
 set -eu
 src=$(cd "$1" && pwd)
 repo=$(cd "$(dirname "$0")/../.." && pwd)
