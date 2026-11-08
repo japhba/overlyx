@@ -198,11 +198,13 @@ export function resolvedMathFont(pref: string, face: string): MathFont {
 }
 
 /**
- * The size of formulas relative to the text: their x-height 1.1 times the text's, as formulas
- * beside CMU Serif have always been in OverLyX.
+ * The size of formulas relative to the text: the text's own beside the math font made for the face,
+ * as in the PDF (MathJax's x-height for New Computer Modern, 0.442, is not its glyphs' 0.431); beside
+ * another math font, its x-height the text's. Was 1.1 times that, KaTeX's habit beside CMU Serif.
  */
 export function mathScale(face: EditorFace, math: MathFont): number {
-  return Math.round(1.1 * face.xHeight / math.xHeight * 1000) / 1000;
+  if (face.math === math.id) return 1;
+  return Math.round(face.xHeight / math.xHeight * 1000) / 1000;
 }
 
 /** The quoted values of a font header line: `"libertinus" "default"` → ['libertinus', 'default']. */

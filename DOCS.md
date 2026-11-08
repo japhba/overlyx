@@ -1897,8 +1897,8 @@ blend.
   worker precaches only New Computer Modern, and caches the chosen math font whole once the page names
   it — `'math-font'` message on every load, on a change and to a new worker — so that offline no
   formula style that had not been drawn yet falls back; `e2e/offline.spec.ts`). The CSPs allow no other font source. Formulas are
-  sized so that their x-height is 1.1 times the text face's (`mathScale`, from the face's and the math
-  font's x-heights); `\text` in formulas is the text face (MathJax's `mtextInheritFont`). *Document ▸ Settings
+  the text's size beside the face's own math font, as in the PDF, and beside another math font sized so
+  that their x-height is the text face's (`mathScale`, from the face's and the math font's x-heights); `\text` in formulas is the text face (MathJax's `mtextInheritFont`). *Document ▸ Settings
   ▸ Fonts ▸ Font set* writes LyX's `\font_roman` / `\font_sans` / `\font_typewriter` / `\font_math`
   (a .lyx file opens with the same fonts in LyX): each text font with the math font made for it —
   Latin Modern, Libertinus + Libertinus Math, Times + Helvetica + Courier + newtx math, Palatino

@@ -4,9 +4,9 @@
  * <html> — --editor-font for the text, --editor-sans-font / --editor-mono-font for Text Style ▸
  * Family — plus `data-editor-font` (absent for Computer Modern); the text fonts are declared in
  * fonts/web/webfonts.css, and a browser fetches a file only once text on the page uses it. The
- * math font is MathJax's (editor/lyxmath/mathjax.ts setMathFont); --math-scale sizes formulas so
- * that their x-height is 1.1 times the text's. "As in the document" follows the roman font of the
- * open document: both shells report their document's settings with setDocumentFonts
+ * math font is MathJax's (editor/lyxmath/mathjax.ts setMathFont); --math-scale sizes formulas to
+ * the text's size (x-heights matched beside a math font not the face's own). "As in the document"
+ * follows the roman font of the open document: both shells report their document's settings with setDocumentFonts
  * (tests/parity.test.ts). A document with a font of its own shows it whatever the text font chosen
  * (`documentSetsFont`: the document is Settings' most specific scope).
  */

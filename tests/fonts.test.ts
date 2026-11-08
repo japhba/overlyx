@@ -140,9 +140,12 @@ describe('editor faces', () => {
     expect(resolvedMathFont('match', 'termes').id).toBe('termes');
     expect(resolvedMathFont('match', 'concrete').id).toBe('euler');
     expect(resolvedMathFont('euler', 'palatino').id).toBe('euler');
-    // the formula's x-height is 1.1 times the text's
-    expect(mathScale(editorFace('cm'), mathFont('newcm'))).toBeCloseTo(1.1 * CM_X_HEIGHT / 0.442, 3);
-    expect(mathScale(editorFace('garamond'), mathFont('pagella'))).toBeCloseTo(1.1 * TEXT_X_HEIGHT.garamond / 0.482, 3);
+    // formulas are the text's size beside the face's own math font (as in the PDF), else their x-height is the text's
+    expect(mathScale(editorFace('cm'), mathFont('newcm'))).toBe(1);
+    expect(mathScale(editorFace('garamond'), mathFont('pagella'))).toBe(1);
+    expect(mathScale(editorFace('anodyne'), mathFont('anodyne'))).toBe(1);
+    expect(mathScale(editorFace('cm'), mathFont('stix2'))).toBeCloseTo(CM_X_HEIGHT / 0.479, 3);
+    expect(mathScale(editorFace('garamond'), mathFont('newcm'))).toBeCloseTo(TEXT_X_HEIGHT.garamond / 0.442, 3);
   });
 
   it('no San Francisco face: a saved "sans" (San Francisco) or "noto" preference becomes Fira Sans, with Fira Math', () => {

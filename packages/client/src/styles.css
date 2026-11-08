@@ -991,7 +991,7 @@ html[data-theme="dark"] { --cm-accent: #f4c03c; --cm-chip-bg: #8a6b12; --cm-chip
 .lyx-math-inline { display: inline-block; vertical-align: baseline; text-indent: 0; }
 /* statically rendered formula (upgraded to an editable field on demand) */
 .lyx-math-static { display: inline-block; padding: 1px 2px; border: 1px solid transparent; border-radius: 3px; line-height: normal; white-space: nowrap; cursor: text; }
-.lyx-math-static.display { font-size: 1.05em; grid-column: 2; justify-self: center; min-width: 4em; text-align: center; }
+.lyx-math-static.display { grid-column: 2; justify-self: center; min-width: 4em; text-align: center; }
 /* formulas that are not rendered yet (off-screen, rendered in idle time): show their source */
 .lyx-math-static.pending { font-family: "DejaVu Sans Mono", monospace; font-size: 0.78em; color: var(--muted2); white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: baseline; }
 .lyx-math-static.display.pending { white-space: pre-wrap; text-align: left; min-height: 1.6em; }
@@ -1039,9 +1039,8 @@ html[data-theme="dark"] { --cm-accent: #f4c03c; --cm-chip-bg: #8a6b12; --cm-chip
 .lm-error { font-family: "DejaVu Sans Mono", monospace; font-size: 0.8em; color: var(--err); }
 /* the math font's data for the formula is still on its way: its source meanwhile */
 .lm-error.lm-pending { color: var(--muted2); }
-.lm-field.display, .lyx-math-static.display { font-size: 1.05em; }
-/* formulas (MathJax, editor/lyxmath/mathjax.ts): their x-height 1.1 times the text's (fonts/editorfont.ts --math-scale) */
-.lyx-editor mjx-container[jax="CHTML"] { font-size: calc(var(--math-scale, 1.072) * 1em); }
+/* formulas (MathJax, editor/lyxmath/mathjax.ts): their x-height the text's (fonts/editorfont.ts --math-scale) */
+.lyx-editor mjx-container[jax="CHTML"] { font-size: calc(var(--math-scale, 1) * 1em); }
 /* a one-line display formula is MathJax's display math, broken into lines to fit the column (math.ts
    breakWidth): an inline box in the node view's grid, not MathJax's own centred block */
 .lyx-editor mjx-container[jax="CHTML"][display="true"] { display: inline-block; margin: 0; padding: 0; min-width: 0; }
