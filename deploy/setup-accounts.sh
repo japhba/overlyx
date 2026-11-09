@@ -37,7 +37,7 @@ step "accounts"
 id "$DEV" >/dev/null 2>&1 || useradd --create-home --uid 1000 --user-group --shell /bin/bash --comment "development (no access to other users' data)" "$DEV"
 chmod 700 "$DEV_HOME"
 id "$MAINT" >/dev/null 2>&1 || useradd --system --user-group --home-dir "$MAINT_HOME" --no-create-home --shell /usr/sbin/nologin --comment "OverLyX maintenance worker" "$MAINT"
-id "$BUILD" >/dev/null 2>&1 || useradd --system --user-group --home-dir "$BUILD_WORK" --no-create-home --shell /usr/sbin/nologin --comment "OverLyX: checks of new commits" "$BUILD"
+id "$BUILD" >/dev/null 2>&1 || useradd --system --user-group --home-dir "$BUILD_WORK" --no-create-home --shell /usr/sbin/nologin --comment "OverLyX checks of new commits" "$BUILD"
 
 step "users' data: root's alone"
 for d in "$PROJECTS" "$VOL/backups" "$VOL/scratch" "$DATA" /root/lyx/overlyx-production/data; do
