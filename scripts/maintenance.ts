@@ -180,7 +180,8 @@ function prepareCheckout(state: State, trusted: boolean) {
     git(['reset', '--hard', 'origin/master']);
   } else git(['merge', '--ff-only', 'origin/master']);
   const marker = path.join(checkout, '.git', 'maintenance-dependencies');
-  if (trusted && state.tainted) {
+  // (no record: the runs before trust was marked all served evidence anyone could write)
+  if (trusted && state.tainted !== false) {
     // a run on untrusted evidence could write anywhere in the checkout but .git — node_modules too
     log('starting from a clean install after a run on untrusted evidence');
     fs.rmSync(marker, { force: true });
