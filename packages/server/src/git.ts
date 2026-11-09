@@ -195,6 +195,15 @@ export function serverIdentity(): { name: string; email: string } {
 }
 
 /**
+ * The address a person's commits carry: `<username>@users.noreply.<server>`, never their account
+ * email — that would show to everyone who can clone the project, and GitHub refuses pushes of
+ * commits that expose an address its owner keeps private.
+ */
+export function commitEmail(username: string): string {
+  return `${username}@users.noreply.${hostName()}`;
+}
+
+/**
  * Make sure the project directory is a git repository configured for us: created (normally with a
  * `.gitignore` and an initial commit) if it is none yet; an existing repository is left alone
  * apart from the two settings a push into a checked-out branch needs. `initialCommit: false` is
@@ -258,8 +267,8 @@ const pending = new Map<string, Pending>();
 function editorsOf(ids: Iterable<number>): { name: string; email: string; username: string }[] {
   const out: { name: string; email: string; username: string }[] = [];
   for (const id of ids) {
-    const u = db.prepare('SELECT username, display_name, email FROM users WHERE id = ?').get(id) as { username: string; display_name: string; email: string | null } | undefined;
-    if (u) out.push({ name: u.display_name, username: u.username, email: u.email ?? `${u.username}@${hostName()}` });
+    const u = db.prepare('SELECT username, display_name FROM users WHERE id = ?').get(id) as { username: string; display_name: string } | undefined;
+    if (u) out.push({ name: u.display_name, username: u.username, email: commitEmail(u.username) });
   }
   return out;
 }
@@ -677,7 +686,7 @@ async function handle(req: Request, res: Response): Promise<void> {
       REMOTE_USER: who,
       REMOTE_ADDR: ip,
       GIT_COMMITTER_NAME: user?.name ?? who,
-      GIT_COMMITTER_EMAIL: user?.email ?? `${who}@${hostName()}`,
+      GIT_COMMITTER_EMAIL: commitEmail(who),
       // a push brings at most what still fits into the project (projectsize.ts): git refuses a larger
       // pack ("pack exceeds maximum allowed size"); a full project still takes small ones (deletions, fixes)
       ...(write ? { GIT_CONFIG_COUNT: '5', GIT_CONFIG_KEY_4: 'receive.maxInputSize', GIT_CONFIG_VALUE_4: String(Math.max(projectRoom(project), 256 * 1024)) } : {}),

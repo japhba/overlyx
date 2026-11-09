@@ -37,7 +37,7 @@ const docText = (...pars: string[]) => HEAD + pars.map(par).join('') + TAIL;
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 const jan = toSessionUser(createUser('jan', 'Jan Bauer', null, { email: 'owner@example.com', googleSub: 'g-jan' }));
-const bob = toSessionUser(createUser('bob', 'Bob Builder', 'bobs-password'));
+const bob = toSessionUser(createUser('bob', 'Bob Builder', 'bobs-password', { email: 'bob@example.com' }));
 const vera = toSessionUser(createUser('vera', 'Vera Viewer', 'veras-password'));
 
 /** where the project starts (the flat layout) and where it lives once adopted: jan's namespace */
@@ -123,7 +123,7 @@ describe('repository', () => {
     expect(await doc.saveToFile()).toBe(true);              // -> fileWrittenListeners -> touchProject (300 ms)
     for (let i = 0; i < 60 && (await g(PROJECT, 'rev-list', '--count', 'HEAD')).trim() === '1'; i++) await sleep(100);
     expect((await g(PROJECT, 'rev-list', '--count', 'HEAD')).trim()).toBe('2');
-    expect((await g(PROJECT, 'log', '-1', '--format=%an <%ae>%n%cn%n%s%n%b')).trim()).toBe('Bob Builder <bob@overlyx.local>\nOverLyX\nUpdate main.tex\nEdited in OverLyX by Bob Builder\n\nFiles:\n  main.tex');
+    expect((await g(PROJECT, 'log', '-1', '--format=%an <%ae>%n%cn%n%s%n%b')).trim()).toBe('Bob Builder <bob@users.noreply.overlyx.local>\nOverLyX\nUpdate main.tex\nEdited in OverLyX by Bob Builder\n\nFiles:\n  main.tex');
     expect((await g(PROJECT, 'status', '--porcelain')).trim()).toBe('');
     // nothing to commit: no commit
     expect(await gitmod.commitProject('jan/paper')).toBe(false);

@@ -341,7 +341,10 @@ blend.
   is the working tree, so desktop LyX, OverLyX and git all work on the same files. OverLyX commits
   what people edit in the browser by itself — five minutes after the last change (at most half an hour
   apart while editing goes on) and always
-  right before a clone, pull or push (attributed to the people who edited) — so the repository is
+  right before a clone, pull or push (attributed to the people who edited, as
+  `<username>@users.noreply.<server>` — never their account email, which would show to everyone who
+  can clone and makes GitHub refuse a push from users who keep theirs private; `commitEmail` in
+  `server/git.ts`) — so the repository is
   never behind the editor; *Commit now* in the dialog commits at once with a message of your own. A
   `git push` goes straight into the project (the checked-out branch is updated in place; open
   documents merge the change like an external save; uncommitted changes in files the push does not
