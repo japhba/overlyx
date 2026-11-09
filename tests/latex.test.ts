@@ -7,6 +7,7 @@ import { exportLatex } from '../packages/core/src/latex/export.ts';
 import { loadDocumentClass, describeLayouts, flexInsetNames, floatTypes } from '../packages/core/src/latex/layouts.ts';
 import { parseMacroDefinition } from '../packages/core/src/latex/insets.ts';
 import { latexLength } from '../packages/core/src/latex/lengths.ts';
+import { LYX_LIB } from './lyxlib.ts';
 
 /* ------------------------------------------------------------ helpers */
 
@@ -531,7 +532,7 @@ const LYX_BIN = spawnSync('which', ['lyx']).status === 0;
 
 describe.skipIf(!LYX_BIN)('comparison with LyX 2.4 export', () => {
   const scratch = process.env.OVERLYX_SCRATCH ?? '/tmp/claude-0/-root-lyx/9250d901-48e6-4b48-98b5-a211e39f6f1d/scratchpad/lyx-compare';
-  const files = ['/root/lyx/lib/examples/Welcome.lyx', '/root/lyx/lib/doc/Intro.lyx', '/root/lyx/lib/examples/Example_%28LyXified%29.lyx', '/root/lyx/lib/doc/Tutorial.lyx'];
+  const files = ['examples/Welcome.lyx', 'doc/Intro.lyx', 'examples/Example_%28LyXified%29.lyx', 'doc/Tutorial.lyx'].map(f => join(LYX_LIB, f));
   for (const f of files) {
     it(`body of ${f.split('/').pop()} matches modulo whitespace`, () => {
       const { mkdirSync, copyFileSync } = require('node:fs') as typeof import('node:fs');

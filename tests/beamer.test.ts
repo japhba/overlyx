@@ -4,7 +4,8 @@ import { dirname, basename, join } from 'node:path';
 import { parseLyx } from '../packages/core/src/lyx/parser.ts';
 
 import { parseTex, writeTex, importLyx } from '../packages/core/src/tex/index.ts';
-const files = ['/root/lyx/lib/examples/Presentations', '/root/lyx/lib/examples/Posters', '/root/lyx/lib/examples/de/Presentations', '/root/lyx/lib/examples/fr/Presentations', '/root/lyx/lib/examples/es/Presentations'].filter(existsSync).flatMap(d => readdirSync(d).filter(f => f.endsWith('.lyx') && /beamer/i.test(f)).map(f => join(d, f)));
+import { LYX_LIB } from './lyxlib.ts';
+const files = ['Presentations', 'Posters', 'de/Presentations', 'fr/Presentations', 'es/Presentations'].map(d => join(LYX_LIB, 'examples', d)).filter(existsSync).flatMap(d => readdirSync(d).filter(f => f.endsWith('.lyx') && /beamer/i.test(f)).map(f => join(d, f)));
 describe('beamer corpus', () => {
   for (const f of files) it(f, () => {
     const dir = dirname(f);

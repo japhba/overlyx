@@ -13,10 +13,11 @@ import { lyxToPm, pmToLyxBody, texHeadings, lyxAuthorId, addAuthor, getAuthors, 
 import { parseDocumentText, writeDocumentText, includeResolver } from '../packages/vscode/src/host/texdoc.ts';
 import { buildMeta } from '../packages/vscode/src/host/meta.ts';
 import { childDocuments, collectFiles, findMaster, projectDirFor } from '../packages/vscode/src/host/project.ts';
+import { LYX_LAYOUTS } from './lyxlib.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const bundledLayouts = path.resolve(here, '../packages/vscode/dist/lyxlib/layouts');
-const layoutDir = fs.existsSync(bundledLayouts) ? bundledLayouts : '/root/lyx/lib/layouts';
+const layoutDir = fs.existsSync(bundledLayouts) ? bundledLayouts : LYX_LAYOUTS;
 
 const MAIN = `\\documentclass{article}
 \\newcommand{\\RR}{\\mathbb{R}}

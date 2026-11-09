@@ -12,6 +12,8 @@ import { schema } from '../packages/core/src/schema.ts';
 import { parseLyx } from '../packages/core/src/lyx/parser.ts';
 import { lyxToPm, pmToLyxBody } from '../packages/core/src/convert.ts';
 import { writeParagraphs } from '../packages/core/src/lyx/writer.ts';
+import { join } from 'node:path';
+import { LYX_LIB } from './lyxlib.ts';
 
 const serializer = DOMSerializer.fromSchema(schema);
 const parser = PMDOMParser.fromSchema(schema);
@@ -262,7 +264,7 @@ describe('clipboard round trip (toDOM → parseDOM)', () => {
     expect(writeParagraphs(pmToLyxBody(back.toJSON() as never))).toBe(writeParagraphs(pmToLyxBody(doc.toJSON() as never)));
   });
 
-  const papers = ['/root/projects/recurrent_feature/main.lyx', '/root/projects/bayesian_chaos/main.lyx', '/root/lyx/lib/doc/UserGuide.lyx'].filter(existsSync);
+  const papers = ['/root/projects/recurrent_feature/main.lyx', '/root/projects/bayesian_chaos/main.lyx', join(LYX_LIB, 'doc/UserGuide.lyx')].filter(existsSync);
   it.each(papers)('a real document survives: %s', (file) => {
     const doc = pmDoc(readFileSync(file, 'utf8'));
     const back = roundTrip(doc);

@@ -1,4 +1,8 @@
-/** Lightweight, unattended issue/log → fix → deploy loop. Run through maintenance.sh (flock). */
+/**
+ * Lightweight, unattended issue/log → fix loop. Run through maintenance.sh (flock). The worker holds no
+ * GitHub key: it leaves each ready fix in its outbox, and root's promoter (maint-promote.ts, the unit's
+ * ExecStopPost) deploys it or queues it for the owner, depending on whom the evidence came from.
+ */
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -6,10 +10,15 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync, spawn } from 'node:child_process';
 import Database from 'better-sqlite3';
 import { usageSummary } from '../packages/server/src/usageReport.ts';
+import { secretReasons } from './maint-policy.ts';
 
-export interface Signal { key: string; revision: string; kind: string; title: string; detail: string; priority: number; issue?: number }
+// trusted: written by someone allowed to steer the worker (see issueSignals) — only such evidence can
+// lead to a fix that goes live without the owner looking at it
+export interface Signal { key: string; revision: string; kind: string; title: string; detail: string; priority: number; issue?: number; trusted?: boolean }
 export interface Seen { revision: string; attempts: number; nextAt: number; lastAt: number; outcome: string }
-export interface State { seen: Record<string, Seen>; lastScan: number; pending?: { keys: string[]; issues: number[]; commit: string } }
+// tainted: the checkout last served untrusted evidence (its node_modules or ignored files may have been
+// changed by that run) — a trusted run starts from a clean install
+export interface State { seen: Record<string, Seen>; lastScan: number; tainted?: boolean; pending?: unknown }
 export const digest = (s: string) => crypto.createHash('sha256').update(s).digest('hex').slice(0, 24);
 // Repeated errors get another look when their count doubles, rather than on every occurrence.
 export const countRevision = (count: number) => String(Math.floor(Math.log2(Math.max(1, count))));
@@ -28,6 +37,28 @@ export function privateText(value: unknown, max = 9000): string {
     .replace(/[^\s<>]+@[^\s<>]+\.[a-z]{2,}/gi, '<email>').slice(0, max);
 }
 
+/**
+ * Open GitHub issues as signals. The repository is public: anyone can open an issue or comment on one,
+ * so only issues opened by `trusted` GitHub accounts (the owner's, by default) are trusted, and of
+ * their comments only those by trusted accounts are passed on. GitHub vouches for the author — a
+ * signature in the text would be anyone's to copy. The revision follows the text passed on, so a
+ * stranger's comment does not reopen the owner's issue.
+ */
+export function issueSignals(issues: any[], trusted: Set<string>): Signal[] {
+  const signals: Signal[] = [];
+  const by = (x: any) => trusted.has(String(x?.author?.login ?? '').toLowerCase());
+  for (const i of issues) {
+    const labels = i.labels.map((l: any) => l.name);
+    if (labels.some((l: string) => ['wontfix', 'duplicate', 'maintenance-ignore'].includes(l))) continue;
+    const ok = by(i);
+    const comments = (i.comments ?? []).filter((c: any) => !ok || by(c)).slice(-5).map((c: any) => ({ body: c.body }));
+    const title = privateText(i.title, 300), detail = privateText(JSON.stringify({ body: i.body, labels, comments }));
+    signals.push({ key: `issue:${i.number}`, revision: digest(`${title}\n${detail}`), issue: i.number, kind: 'github-issue',
+      priority: labels.includes('bug') ? 0 : 1, title, detail, trusted: ok });
+  }
+  return signals;
+}
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const stateDir = process.env.OVERLYX_MAINTENANCE_STATE ?? '/var/lib/overlyx-maintenance';
 const production = process.env.OVERLYX_PRODUCTION ?? '/root/lyx/overlyx-production';
@@ -38,12 +69,16 @@ const dbFile = process.env.OVERLYX_MAINTENANCE_DB ?? path.join(process.env.OVERL
 // Set for the unprivileged worker (deploy/overlyx-maintenance.service): root screens the database, the
 // service journal and GitHub beforehand (--collect) and leaves the sanitized signals here for it.
 const inbox = process.env.OVERLYX_MAINTENANCE_INBOX;
-const site = process.env.OVERLYX_SITE_URL ?? 'https://overlyx.app';
+// the GitHub accounts whose issues may steer the worker (comma-separated logins; the repository's owner)
+const trustedLogins = new Set((process.env.OVERLYX_MAINTENANCE_TRUSTED ?? repo.split('/')[0]).split(',').map(s => s.trim().toLowerCase()).filter(Boolean));
+// ready fixes for root's promoter (maint-promote.ts reads them as this account)
+const outbox = path.join(stateDir, 'outbox');
 const log = (s: string) => console.log(`[maintenance] ${s}`);
 function command(bin: string, args: string[], cwd = root, timeout = 60000): string {
   return execFileSync(bin, args, { cwd, timeout, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 }
-const git = (args: string[]) => command('git', args, checkout);
+// (no hooks or fsmonitor from the checkout: Codex works in it, the runner commits in it)
+const git = (args: string[]) => command('git', ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', ...args], checkout);
 function save(state: State) {
   fs.writeFileSync(path.join(stateDir, 'state.new'), JSON.stringify(state, null, 2));
   fs.renameSync(path.join(stateDir, 'state.new'), path.join(stateDir, 'state.json'));
@@ -55,25 +90,26 @@ export function databaseSignals(db: Database.Database, since: number): Signal[] 
   const reports = db.prepare(`SELECT id, kind, title, body, count, version FROM reports
     WHERE last_at >= ? AND kind != 'mail' ORDER BY last_at DESC LIMIT 100`).all(since) as any[];
   for (const r of reports) signals.push({ key: `report:${r.id}`, revision: digest(`${r.title}\n${r.body}`) + ':' + countRevision(r.count),
-    kind: r.kind, title: privateText(r.title, 300), detail: privateText(`Report #${r.id}; release ${r.version}; occurrences ${r.count}\n${r.body}`), priority: r.kind === 'feedback' ? 2 : 3 });
+    kind: r.kind, title: privateText(r.title, 300), detail: privateText(`Report #${r.id}; release ${r.version}; occurrences ${r.count}\n${r.body}`), priority: r.kind === 'feedback' ? 2 : 3, trusted: false });
   const usage = usageSummary(db, { sinceMs: since, top: 20 });
   for (const [kind, rows] of [['usage-error', usage.errors], ['interaction-trail', usage.interactions.problemTrails]] as const) {
     for (const r of rows) signals.push({ key: `${kind}:${digest(r.key)}`, revision: countRevision(r.count), kind,
-      title: privateText(r.key, 400), detail: `${r.count} occurrences in ${r.sessions} anonymous sessions. These are signals, not confirmed bugs.`, priority: kind === 'usage-error' ? 3 : 5 });
+      title: privateText(r.key, 400), detail: `${r.count} occurrences in ${r.sessions} anonymous sessions. These are signals, not confirmed bugs.`, priority: kind === 'usage-error' ? 3 : 5, trusted: false });
   }
   // LaTeX the editor could only show as TeX code, met in several anonymous sessions: a candidate for
-  // drawing it (scripts/maintenance-prompt.txt says how to judge one)
+  // drawing it (scripts/maintenance-prompt.txt says how to judge one). Trusted: only a name that
+  // passed the pattern below and fixed words reach the worker.
   for (const r of usage.macros.listed.slice(0, 10)) {
     const [kind, name] = r.key.split(' ');
     if (!/^(math|env|text)$/.test(kind) || !/^\\?[A-Za-z]{2,32}\*?$/.test(name ?? '')) continue;
     signals.push({ key: `unrendered-macro:${r.key}`, revision: countRevision(r.sessions), kind: 'unrendered-macro',
       title: `${kind === 'env' ? `\\begin{${name}}` : name} shown as TeX code (${kind === 'text' ? 'a TeX-code box in the text' : 'in formulas'})`,
-      detail: `${r.count} times in ${r.sessions} anonymous sessions. Judge whether OverLyX should draw it (see the unrendered-macro rules in your instructions); if so, implement the rendering; if not, answer no_fix.`, priority: 7 });
+      detail: `${r.count} times in ${r.sessions} anonymous sessions. Judge whether OverLyX should draw it (see the unrendered-macro rules in your instructions); if so, implement the rendering; if not, answer no_fix.`, priority: 7, trusted: true });
   }
   for (const r of usage.suspicious.slice(0, 10)) {
     if (r.failed + r.repeated + r.undone < 3) continue;
     signals.push({ key: `usage-action:${digest(r.key)}`, revision: countRevision(r.failed + r.repeated + r.undone), kind: 'usage-action',
-      title: privateText(r.key, 400), detail: JSON.stringify({ count: r.count, sessions: r.sessions, failed: r.failed, repeated: r.repeated, undone: r.undone, where: r.where }), priority: 6 });
+      title: privateText(r.key, 400), detail: JSON.stringify({ count: r.count, sessions: r.sessions, failed: r.failed, repeated: r.repeated, undone: r.undone, where: r.where }), priority: 6, trusted: false });
   }
   return signals;
 }
@@ -82,13 +118,8 @@ async function collect(lastScan: number): Promise<Signal[]> {
   const signals: Signal[] = [];
   const failures: string[] = [];
   try {
-    const issues = JSON.parse(command('gh', ['issue', 'list', '-R', repo, '--state', 'open', '--limit', '100', '--json', 'number,title,body,updatedAt,labels,comments']));
-    for (const i of issues) {
-      const labels = i.labels.map((l: any) => l.name);
-      if (labels.some((l: string) => ['wontfix', 'duplicate', 'maintenance-ignore'].includes(l))) continue;
-      signals.push({ key: `issue:${i.number}`, revision: i.updatedAt, issue: i.number, kind: 'github-issue', priority: labels.includes('bug') ? 0 : 1,
-        title: privateText(i.title, 300), detail: privateText(JSON.stringify({ body: i.body, labels, comments: i.comments.slice(-5).map((c: any) => ({ body: c.body })) })) });
-    }
+    const issues = JSON.parse(command('gh', ['issue', 'list', '-R', repo, '--state', 'open', '--limit', '100', '--json', 'number,title,body,updatedAt,labels,comments,author']));
+    signals.push(...issueSignals(issues, trustedLogins));
   } catch { failures.push('GitHub issues'); }
   try {
     const db = new Database(dbFile, { readonly: true, fileMustExist: true });
@@ -103,7 +134,7 @@ async function collect(lastScan: number): Promise<Signal[]> {
       const template = privateText(line, 500).replace(/\b[\da-f]{8,}\b/gi, '#').replace(/\d+/g, '#');
       const lines = groups.get(template) ?? []; lines.push(privateText(line, 1200)); groups.set(template, lines);
     }
-    for (const [title, lines] of groups) signals.push({ key: `journal:${digest(title)}`, revision: '1', kind: 'server-log', priority: 4, title, detail: lines.slice(-5).join('\n') });
+    for (const [title, lines] of groups) signals.push({ key: `journal:${digest(title)}`, revision: '1', kind: 'server-log', priority: 4, title, detail: lines.slice(-5).join('\n'), trusted: false });
   } catch { failures.push('service journal'); }
   if (failures.length) log(`could not read ${failures.join(', ')}; other sources still screened`);
   if (failures.length === 3) throw new Error('All monitoring sources unavailable');
@@ -130,14 +161,15 @@ function collected(dir: string): Signal[] {
   return signals;
 }
 
-function prepareCheckout() {
+function prepareCheckout(state: State, trusted: boolean) {
+  const origin = process.env.OVERLYX_MAINTENANCE_ORIGIN ?? command('git', ['remote', 'get-url', 'origin'], source);
   if (!fs.existsSync(path.join(checkout, '.git'))) {
-    // the worker pushes to this remote with a deploy key of its own (scripts/maintenance.sh has none)
-    const origin = process.env.OVERLYX_MAINTENANCE_ORIGIN ?? command('git', ['remote', 'get-url', 'origin'], source);
+    // fetched anonymously (the repository is public): the worker has no GitHub key
     command('git', ['clone', '--quiet', '--no-checkout', origin, checkout]);
     git(['checkout', '-B', 'master', 'origin/master']);
     git(['config', 'user.name', 'OverLyX']); git(['config', 'user.email', 'overlyx@localhost']);
   }
+  git(['remote', 'set-url', 'origin', origin]);
   git(['fetch', 'origin', '--quiet']);
   // Only this worker owns this checkout. Archive failed/unfinished work before resynchronizing.
   const dirty = git(['status', '--porcelain']);
@@ -147,9 +179,15 @@ function prepareCheckout() {
     fs.writeFileSync(path.join(stateDir, `unfinished-${Date.now()}.patch`), git(['diff', '--cached', '--binary', 'origin/master']));
     git(['reset', '--hard', 'origin/master']);
   } else git(['merge', '--ff-only', 'origin/master']);
+  const marker = path.join(checkout, '.git', 'maintenance-dependencies');
+  if (trusted && state.tainted) {
+    // a run on untrusted evidence could write anywhere in the checkout but .git — node_modules too
+    log('starting from a clean install after a run on untrusted evidence');
+    fs.rmSync(marker, { force: true });
+    git(['clean', '-ffdxq']);
+  } else git(['clean', '-ffdq']);
   // Hardlinks, not node_modules symlinks: workspace packages and ProseMirror must resolve here.
   const lock = digest(fs.readFileSync(path.join(checkout, 'package-lock.json'), 'utf8'));
-  const marker = path.join(checkout, '.git', 'maintenance-dependencies');
   if (!fs.existsSync(marker) || fs.readFileSync(marker, 'utf8') !== lock) {
     const modules = [path.join(checkout, 'node_modules'), ...fs.readdirSync(path.join(checkout, 'packages'), { withFileTypes: true })
       .filter(entry => entry.isDirectory()).map(entry => path.join(checkout, 'packages', entry.name, 'node_modules'))];
@@ -168,6 +206,7 @@ function prepareCheckout() {
     if (!linked) command('npm', ['ci', '--no-audit', '--no-fund'], checkout, 15 * 60000);
     fs.writeFileSync(marker, lock);
   }
+  if (trusted) state.tainted = false;
 }
 
 async function loggedProcess(bin: string, args: string[], file: string, timeout: number, input?: string): Promise<void> {
@@ -188,40 +227,21 @@ const resultSchema = { type: 'object', additionalProperties: false, properties: 
   outcome: { type: 'string', enum: ['fixed', 'no_fix', 'defer'] }, summary: { type: 'string' }, checks: { type: 'array', items: { type: 'string' } },
 }, required: ['outcome', 'summary', 'checks'] };
 
-// Publishing is a push: the production server's autodeploy (root, scripts/autodeploy.sh) deploys what
-// reaches origin/master, and `Deploy: no-checks` leaves it the build and the verification. The worker
-// holds no rights on production; it waits until the site serves its commit.
-async function deploy(state: State, runDir: string) {
-  const push = () => command('git', ['push', '--quiet', 'origin', 'HEAD:refs/heads/master'], checkout, 120000);
-  try { push(); } catch {
-    git(['fetch', 'origin', '--quiet']);
-    try { git(['rebase', 'origin/master']); } catch { git(['rebase', '--abort']); throw new Error('Concurrent changes conflict; fix retained for another attempt'); }
-    push();
-  }
-  state.pending!.commit = git(['rev-parse', 'HEAD']); save(state);
-  fs.appendFileSync(path.join(runDir, 'deploy.log'), `pushed ${state.pending!.commit}\n`);
-  await served(state.pending!.commit);
-  for (const number of state.pending!.issues) {
-    // Closing a fixed issue is part of the authorized workflow; never copy private logs into it.
-    // (Without a GitHub login the commit's "Fixes #n" has closed it already.)
-    try { command('gh', ['issue', 'close', String(number), '-R', repo, '--reason', 'completed']); } catch { log(`could not close resolved issue #${number}`); }
-  }
-  log(`deployed ${state.pending!.commit.slice(0, 10)}`);
-  delete state.pending; save(state);
-}
-
-async function served(commit: string) {
-  const until = Date.now() + 15 * 60000;
-  for (;;) {
-    let live = '';
-    try { live = String((await (await fetch(`${site}/api/version`, { signal: AbortSignal.timeout(10000) })).json() as { commit?: string }).commit ?? ''); } catch { /* restarting */ }
-    if (live === commit) return;
-    if (/^[0-9a-f]{40}$/.test(live)) {   // a later push deployed on top of ours
-      try { git(['fetch', 'origin', '--quiet']); git(['merge-base', '--is-ancestor', commit, live]); return; } catch { /* older, or not fetched yet */ }
-    }
-    if (Date.now() > until) throw new Error(`${site} serves ${live.slice(0, 10) || 'nothing'}, not ${commit.slice(0, 10)}: see journalctl -u overlyx-autodeploy`);
-    await new Promise(resolve => setTimeout(resolve, 20000));
-  }
+// Handing over: the commit, as a patch, goes into the outbox; root's promoter (maint-promote.ts) applies
+// it to origin/master and either pushes it (trusted evidence, within the fixed rules, passed review) or
+// queues it for the owner. The runner's claim of which signal it fixed is checked there against root's
+// own record of the evidence.
+function handOver(signal: Signal, result: { summary: string; checks: string[] }) {
+  const id = `${new Date().toISOString().replace(/[:.]/g, '-')}-${digest(signal.key).slice(0, 8)}`;
+  const entry = { id, created: Date.now(), base: git(['rev-parse', 'origin/master']),
+    signal: { key: signal.key, kind: signal.kind, issue: signal.issue, trusted: !!signal.trusted },
+    summary: privateText(result.summary, 2000), checks: result.checks.slice(0, 20).map(c => privateText(c, 300)),
+    patch: git(['format-patch', '-1', '--stdout', '--binary', 'HEAD']) };
+  fs.mkdirSync(outbox, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(path.join(outbox, `${id}.json.new`), JSON.stringify(entry));
+  fs.renameSync(path.join(outbox, `${id}.json.new`), path.join(outbox, `${id}.json`));
+  git(['reset', '--hard', '--quiet', 'origin/master']);
+  log(`handed over ${signal.key} as ${id} (${signal.trusted ? 'trusted' : 'untrusted'} evidence)`);
 }
 
 async function main() {
@@ -233,21 +253,7 @@ async function main() {
   fs.mkdirSync(stateDir, { recursive: true, mode: 0o700 });
   const stateFile = path.join(stateDir, 'state.json');
   const state: State = fs.existsSync(stateFile) ? JSON.parse(fs.readFileSync(stateFile, 'utf8')) : { seen: {}, lastScan: 0 };
-  // A restart or network failure after committing must retry deployment, not discard the fix.
-  if (state.pending && !process.argv.includes('--scan')) {
-    try {
-      git(['fetch', 'origin', '--quiet']);
-      try { git(['rebase', 'origin/master']); } catch { git(['rebase', '--abort']); throw new Error('Pending deployment conflicts with newer work'); }
-      state.pending.commit = git(['rev-parse', 'HEAD']); save(state);
-      await deploy(state, stateDir);
-    } catch (e) {
-      log(String(e));
-      for (const key of state.pending!.keys) {
-        state.seen[key].outcome = 'retry'; state.seen[key].nextAt = Date.now();
-      }
-      delete state.pending; save(state); return;
-    }
-  }
+  if (state.pending) { log('dropping a pending push from before the outbox (the next run archives its commit)'); delete state.pending; }
   const signals = inbox ? collected(inbox) : await collect(state.lastScan);
   const now = Date.now();
   const queue = signals.filter(s => eligible(s, state.seen[s.key], now)).sort((a, b) => a.priority - b.priority);
@@ -256,34 +262,43 @@ async function main() {
   for (const [key, s] of Object.entries(state.seen)) if (now - s.lastAt > 90 * 86400000) delete state.seen[key];
   save(state);
   if (process.argv.includes('--scan') || !queue.length) return;
-  prepareCheckout();
   const signal = queue[0];
+  prepareCheckout(state, !!signal.trusted);
+  if (!signal.trusted) state.tainted = true;
+  save(state);
   const runDir = path.join(stateDir, 'runs', new Date().toISOString().replace(/[:.]/g, '-'));
   fs.mkdirSync(runDir, { recursive: true, mode: 0o700 });
   // Keep at most 30 private run transcripts. No trace or report is written inside the repository.
   const runs = fs.readdirSync(path.dirname(runDir)).sort();
   for (const old of runs.slice(0, -30)) fs.rmSync(path.join(path.dirname(runDir), old), { recursive: true, force: true });
-  fs.writeFileSync(path.join(runDir, 'input.json'), JSON.stringify({ signal, related: signals.filter(s => s.key !== signal.key).slice(0, 12) }, null, 2));
+  // a run on trusted evidence sees only trusted context: untrusted text could steer it as well
+  const related = signals.filter(s => s.key !== signal.key && (!signal.trusted || s.trusted)).slice(0, 12);
+  fs.writeFileSync(path.join(runDir, 'input.json'), JSON.stringify({ signal, related }, null, 2));
   fs.writeFileSync(path.join(runDir, 'schema.json'), JSON.stringify(resultSchema));
   const prompt = fs.readFileSync(path.join(root, 'scripts/maintenance-prompt.txt'), 'utf8') + `\nPrivate evidence: ${path.join(runDir, 'input.json')}\n`;
   // Record the attempt before starting, so a killed run does not produce an immediate retry storm.
   state.seen[signal.key] = finish(signal, state.seen[signal.key], 'retry', now); save(state);
-  log(`investigating ${signal.kind} (${signal.key})`);
+  log(`investigating ${signal.kind} (${signal.key}, ${signal.trusted ? 'trusted' : 'untrusted'})`);
   try {
-    await loggedProcess('codex', ['exec', '--sandbox', 'workspace-write', '-c', 'sandbox_workspace_write.network_access=true', '-c', 'approval_policy="never"',
+    // Commands Codex runs get no network: nothing it reads can be sent anywhere (the runner installs
+    // dependencies itself, outside the sandbox).
+    await loggedProcess('codex', ['exec', '--sandbox', 'workspace-write', '-c', 'sandbox_workspace_write.network_access=false', '-c', 'approval_policy="never"',
       '--json', '--output-schema', path.join(runDir, 'schema.json'), '--output-last-message', path.join(runDir, 'result.json'), '-'],
       path.join(runDir, 'agent.jsonl'), 15 * 60000, prompt);
     const result = JSON.parse(fs.readFileSync(path.join(runDir, 'result.json'), 'utf8'));
     if (!['fixed', 'no_fix', 'defer'].includes(result.outcome) || !Array.isArray(result.checks)) throw new Error('Invalid worker result');
     if (result.outcome === 'fixed' && git(['status', '--porcelain'])) {
       git(['add', '-A']); git(['diff', '--cached', '--check']);
-      git(['commit', '-m', 'Fix production issue discovered by maintenance worker', ...(signal.issue ? ['-m', `Fixes #${signal.issue}`] : []), '-m', 'Deploy: no-checks']);
-      // Another agent can push while this worker investigates; rebase only our own commit.
-      git(['fetch', 'origin', '--quiet']);
-      try { git(['rebase', 'origin/master']); } catch { git(['rebase', '--abort']); throw new Error('Concurrent changes conflict; fix retained for another attempt'); }
-      state.pending = { keys: [signal.key], issues: signal.issue ? [signal.issue] : [], commit: git(['rev-parse', 'HEAD']) };
+      const leaked = secretReasons(git(['diff', '--cached', '--binary']));
+      if (leaked.length) {
+        log(`refusing ${signal.key}: the change ${leaked.join(', ')}`);
+        git(['reset', '--hard', '--quiet', 'HEAD']);
+        state.seen[signal.key].outcome = 'blocked'; save(state); return;
+      }
+      git(['commit', '--quiet', '-m', 'Fix production issue discovered by maintenance worker', ...(signal.issue ? ['-m', `Fixes #${signal.issue}`] : []),
+        '-m', `Maintenance-signal: ${signal.key}\nDeploy: no-checks`]);
+      handOver(signal, result);
       state.seen[signal.key].outcome = 'fixed'; save(state);
-      await deploy(state, runDir);
     } else {
       state.seen[signal.key].outcome = result.outcome === 'defer' ? 'retry' : 'no_fix'; save(state);
       log(`finished ${signal.key}: ${result.outcome}`);

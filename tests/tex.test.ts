@@ -13,6 +13,7 @@ import { basename, dirname, join } from 'node:path';
 import { parseTex, writeTex, importLyx, splitDocument, settingsFromHeader } from '../packages/core/src/tex/index.ts';
 import { parseLyx } from '../packages/core/src/lyx/parser.ts';
 import { collectMacros, headerValue, paramMap, unquote, walkInsets, walkParagraphs, plainText, type LyxDocument, type Paragraph } from '../packages/core/src/index.ts';
+import { LYX_LIB } from './lyxlib.ts';
 
 const doc = (body: string, preamble = '', cls = 'article') => `\\documentclass{${cls}}\n${preamble}\n\\begin{document}\n${body}\n\\end{document}\n`;
 const parse = (text: string) => parseTex(text).doc;
@@ -536,10 +537,10 @@ describe('corpus: every imported document is stable under parse/write', () => {
   const userFiles = ['/root/projects/recurrent_feature/main.lyx', '/root/projects/recurrent_feature/appendix.lyx', '/root/projects/recurrent_feature/lyxmacros.lyx', '/root/projects/bayesian_chaos/main.lyx'].filter(f => existsSync(f));
   // (presentations rely on beamer overlay arguments the layouts write with their own delimiters;
   // qtree / xy / lilypond / noweb / sweave documents are external-tool languages inside ERT)
-  const exampleFiles = collectLyx('/root/lyx/lib/examples').filter(f => !/\/(ja|zh_CN|ko|he|ar|fa|ru|uk|el|hu|ja_JP)\//.test(f) && !/Localization|lilypond|sweave|knitr|R-S-statistics|noweb|xy|chess|linguistics|spreadsheet|Presentations|Posters|Instant_Preview|Beamer|Seminar|Foils|Japanese/i.test(f)).slice(0, 120);
+  const exampleFiles = collectLyx(join(LYX_LIB, 'examples')).filter(f => !/\/(ja|zh_CN|ko|he|ar|fa|ru|uk|el|hu|ja_JP)\//.test(f) && !/Localization|lilypond|sweave|knitr|R-S-statistics|noweb|xy|chess|linguistics|spreadsheet|Presentations|Posters|Instant_Preview|Beamer|Seminar|Foils|Japanese/i.test(f)).slice(0, 120);
   const files = [...userFiles, ...exampleFiles];
   for (const f of files) {
-    it(f.replace('/root/', ''), () => {
+    it(f.replace('/root/', '').replace(LYX_LIB + '/', 'lyx/lib/'), () => {
       const dir = dirname(f);
       const isChild = /appendix|lyxmacros/.test(basename(f));
       const text = readFileSync(f, 'utf8');

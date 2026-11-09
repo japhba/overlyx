@@ -9,6 +9,7 @@ import { describe, it, expect } from 'vitest';
 import { parseTex, writeTex, writeTexPreserving, type PreserveCache, type PreserveStats } from '../packages/core/src/tex/index.ts';
 import { canonical, texBalance } from '../packages/core/src/tex/preserve.ts';
 import { lyxToPm, pmToLyxBody, lyxAuthorId, addAuthor, type LyxDocument, type Paragraph } from '../packages/core/src/index.ts';
+import { LYX_LAYOUTS } from './lyxlib.ts';
 
 /** An Overleaf-style paper: hard-wrapped paragraphs, comments, the user's own preamble and spellings. */
 const PAPER = `% !TEX program = pdflatex
@@ -327,7 +328,7 @@ describe('a preserved save never balances environments differently from both the
   });
   it('falls back to the full rewrite instead of doubling a closing line (titlepage with \\centering)', () => {
     const src = '\\documentclass{article}\n\\begin{document}\n\nBody first.\n\n\\begin{titlepage}\n    \\centering\n    {\\Large A title\\par}\n\n    Bit flip (gate $X$).\n\\end{titlepage}\n\n\\end{document}\n';
-    const opts = { layoutDir: '/root/lyx/lib/layouts', localDirs: ['/tmp'] };
+    const opts = { layoutDir: LYX_LAYOUTS, localDirs: ['/tmp'] };
     const parse = (t: string) => parseTex(t, opts);
     const write = (d: any) => writeTex(d, { ...opts, fragment: false, basename: 'main' });
     const doc = parse(src).doc;

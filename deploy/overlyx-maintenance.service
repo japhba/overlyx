@@ -1,28 +1,35 @@
 [Unit]
-Description=OverLyX: screen issues and logs, fix and deploy
+Description=OverLyX: screen issues and logs, fix them, promote the fixes
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=oneshot
 # The worker runs as an account of its own (DOCS.md "Accounts on the server"): users' projects, the
-# database, backups, secrets and root's logins are out of its reach. Root only gathers the evidence
-# first ("+": with full privileges) — sanitized reports and usage signals from the database, errors
-# from the service journal, open GitHub issues — into an inbox the worker may read.
+# database, backups, secrets and root's logins are out of its reach, and it holds no GitHub key. Root
+# gathers the evidence first ("+": with full privileges) — sanitized reports and usage signals from the
+# database, errors from the service journal, open GitHub issues — into an inbox the worker may read,
+# marking what is trusted (the owner's issues); and afterwards promotes the worker's fixes from its
+# outbox (scripts/maint-promote.ts): to master when trusted, within the fixed rules and passed by the
+# reviewer, otherwise into the owner's private queue.
 User=overlyx-maint
 Group=overlyx-maint
 # (HOME: root's gh login, never configuration from the worker's home)
 ExecStartPre=+/usr/bin/env -C /root/lyx/overlyx-production HOME=/root /usr/bin/node --import tsx scripts/maintenance.ts --collect
-# the runner is the deployed code, read-only; Codex works in the worker's own checkout and publishes
-# by pushing with the worker's deploy key — the autodeploy timer (root) deploys origin/master
+# the runner is the deployed code, read-only; Codex works in the worker's own checkout (fetched
+# anonymously) and the runner leaves each fix in the outbox
 ExecStart=/bin/bash /opt/overlyx-production/scripts/maintenance.sh
+# root's promoter, after every run (also a failed one): the outbox, then the owner's approvals in the
+# queue; what it pushes to master the autodeploy timer (root) deploys
+ExecStopPost=+/usr/bin/env -C /root/lyx/overlyx-production HOME=/root OVERLYX_PRODUCTION=/root/lyx/overlyx-production /usr/bin/node --import tsx scripts/maint-promote.ts
 BindReadOnlyPaths=/root/lyx/overlyx-production:/opt/overlyx-production /root/lyx/lib:/opt/lyx/lib
 Environment=OVERLYX_PRODUCTION=/opt/overlyx-production
 Environment=LYX_LAYOUT_DIR=/opt/lyx/lib/layouts
 Environment=OVERLYX_MAINTENANCE_DB=/root/lyx/overlyx/data/overlyx.sqlite
 Environment=OVERLYX_MAINTENANCE_INBOX=/var/lib/overlyx-maintenance-inbox
 Environment=OVERLYX_MAINTENANCE_CHECKOUT=/var/lib/overlyx-maintenance/checkout
-Environment=OVERLYX_MAINTENANCE_ORIGIN=git@github.com:japhba/overlyx.git
+Environment=OVERLYX_MAINTENANCE_ORIGIN=https://github.com/japhba/overlyx.git
+Environment=OVERLYX_MAINT_QUEUE_REPO=japhba/overlyx-maint
 Environment=OVERLYX_SITE_URL=https://overlyx.app
 StateDirectory=overlyx-maintenance
 StateDirectoryMode=0700
@@ -39,6 +46,7 @@ ProtectKernelModules=yes
 ProtectControlGroups=yes
 RestrictSUIDSGID=yes
 TimeoutStartSec=45min
+TimeoutStopSec=20min
 KillMode=control-group
 Nice=10
 IOSchedulingClass=idle

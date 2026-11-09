@@ -7,7 +7,9 @@
 #   root           the administrator — no agents run here
 #   jan            development and every agent you start: its own projects, no other user's data;
 #                  no sudo but `sudo overlyx-deploy` and `sudo overlyx-telemetry`
-#   overlyx-maint  the unattended maintenance worker (its timer is left as it is)
+#   overlyx-maint  the unattended maintenance worker (its timer is left as it is): no GitHub key —
+#                  root promotes its fixes (scripts/maint-promote.ts), held ones wait in $QUEUE
+#   overlyx-build  runs the checks of each new commit before root deploys it (scripts/autodeploy.sh)
 #
 # Logins it cannot make for you are printed at the end. Personal files for jan (its CLAUDE.md files,
 # a memory note) come from $OVERLYX_ACCOUNT_FILES (default /root/admin/jan) when that exists.
@@ -23,6 +25,10 @@ DEV_HOME=/home/$DEV
 MAINT=overlyx-maint
 MAINT_HOME=/var/lib/overlyx-maintenance
 INBOX=/var/lib/overlyx-maintenance-inbox
+QUEUE=${OVERLYX_MAINT_QUEUE_REPO:-japhba/overlyx-maint}
+BUILD=overlyx-build
+BUILD_WORK=/var/lib/overlyx-build
+AUTODEPLOY_STATE=/var/lib/overlyx-autodeploy
 PERSONAL=${OVERLYX_ACCOUNT_FILES:-/root/admin/jan}
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 as() { local u=$1; shift; (cd / && runuser -u "$u" -- env HOME="$(getent passwd "$u" | cut -d: -f6)" PATH=/usr/local/bin:/usr/bin:/bin "$@"); }
@@ -31,6 +37,7 @@ step "accounts"
 id "$DEV" >/dev/null 2>&1 || useradd --create-home --uid 1000 --user-group --shell /bin/bash --comment "development (no access to other users' data)" "$DEV"
 chmod 700 "$DEV_HOME"
 id "$MAINT" >/dev/null 2>&1 || useradd --system --user-group --home-dir "$MAINT_HOME" --no-create-home --shell /usr/sbin/nologin --comment "OverLyX maintenance worker" "$MAINT"
+id "$BUILD" >/dev/null 2>&1 || useradd --system --user-group --home-dir "$BUILD_WORK" --no-create-home --shell /usr/sbin/nologin --comment "OverLyX: checks of new commits" "$BUILD"
 
 step "users' data: root's alone"
 for d in "$PROJECTS" "$VOL/backups" "$VOL/scratch" "$DATA" /root/lyx/overlyx-production/data; do
@@ -164,7 +171,15 @@ if [ "$(stat -c %U "$MAINT_HOME" 2>/dev/null)" = root ]; then
 fi
 install -d -m 700 "$MAINT_HOME"
 chown -R "$MAINT:$MAINT" "$MAINT_HOME"
-deploy_key "$MAINT" "$MAINT_HOME" "$MAINT@overlyx.app (maintenance worker)"
+# The worker pushes nothing: root's promoter does (scripts/maint-promote.ts). A key it held could be
+# read by Codex's commands, and whoever got it could push to master past every check.
+if [ -f "$MAINT_HOME/.ssh/id_ed25519.pub" ]; then
+  key=$(cut -d' ' -f1,2 "$MAINT_HOME/.ssh/id_ed25519.pub")
+  for id in $(gh api "repos/$REPO/keys" --jq ".[] | select(.key == \"$key\") | .id"); do
+    gh api -X DELETE "repos/$REPO/keys/$id" && echo "  removed the worker's deploy key $id from $REPO"
+  done
+  rm -f "$MAINT_HOME/.ssh/id_ed25519" "$MAINT_HOME/.ssh/id_ed25519.pub"
+fi
 install -d -o "$MAINT" -g "$MAINT" -m 700 "$MAINT_HOME/.codex"
 if [ ! -f "$MAINT_HOME/.codex/config.toml" ]; then
   codex_config "$MAINT_HOME/checkout" > "$MAINT_HOME/.codex/config.toml"
@@ -173,6 +188,27 @@ fi
 install -m 644 "$SRC/deploy/overlyx-maintenance.service" /etc/systemd/system/overlyx-maintenance.service
 systemctl daemon-reload
 systemd-analyze verify /etc/systemd/system/overlyx-maintenance.service
+
+step "promoting the worker's fixes: root's clone, the reviewer, the owner's private queue $QUEUE"
+install -d -m 700 /var/lib/overlyx-promote
+# (not fatal: the checks below say what is missing; without the queue, held fixes stay in /var/lib/overlyx-promote/queue)
+if gh repo view "$QUEUE" >/dev/null 2>&1 ||
+  gh repo create "$QUEUE" --private --description "OverLyX maintenance fixes waiting for the owner (scripts/maint-promote.ts in $REPO)"; then
+  gh label create deploy -R "$QUEUE" --color 0e8a16 --description "deploy this fix (on the next maintenance run)" --force >/dev/null || true
+  gh label create maint -R "$QUEUE" --color c5def5 --description "a maintenance fix held for the owner" --force >/dev/null || true
+else echo "  could not create $QUEUE with root's gh login" >&2; fi
+
+step "checks of new commits as $BUILD, not root (scripts/autodeploy.sh)"
+install -d -m 755 "$BUILD_WORK"   # root's; each commit's copy inside is the build account's
+install -d -m 755 "$AUTODEPLOY_STATE"
+if [ ! -e "$AUTODEPLOY_STATE/unprivileged-checks" ]; then
+  echo "  a trial first: production's own commit, checked as $BUILD (several minutes)"
+  if env HOME=/root LYX_LAYOUT_DIR=/root/lyx/lib/layouts bash "$SRC/scripts/autodeploy.sh" --trial; then
+    touch "$AUTODEPLOY_STATE/unprivileged-checks"; echo "  switched on: the autodeploy checks commits as $BUILD from now on"
+  else
+    echo "  the trial failed (above; logs in $AUTODEPLOY_STATE): checks stay as root until this script passes it" >&2
+  fi
+fi
 
 if [ -d "$PERSONAL" ] && [ -f "$PERSONAL/root-CLAUDE-note.md" ] && ! grep -q 'Accounts on the server' /root/.claude/CLAUDE.md 2>/dev/null; then
   { cat "$PERSONAL/root-CLAUDE-note.md"; echo; cat /root/.claude/CLAUDE.md; } > /root/.claude/CLAUDE.md.new && mv /root/.claude/CLAUDE.md.new /root/.claude/CLAUDE.md
@@ -183,7 +219,7 @@ fail=0
 ok() { echo "  ok    $*"; }
 bad() { echo "  FAIL  $*"; fail=1; }
 other=$(ls "$PROJECTS" | grep -vx "$DEV" | head -1)
-for u in "$DEV" "$MAINT"; do
+for u in "$DEV" "$MAINT" "$BUILD"; do
   for p in "$PROJECTS" "$PROJECTS/$other" "$VOL/backups" "$VOL/scratch" "$DATA" /root /root/lyx/overlyx-production; do
     if as "$u" ls "$p" >/dev/null 2>&1; then bad "$u can list $p"; else ok "$u cannot list $p"; fi
   done
@@ -207,11 +243,17 @@ systemd-run --quiet --wait --pipe --collect -p User="$MAINT" -p Group="$MAINT" -
     for p in /root /home /mnt; do ls "$p" >/dev/null 2>&1 && exit 4; done
     codex sandbox -- /bin/true >/dev/null 2>&1 || exit 5' && ok "the worker's unit sandbox: runner bound in, Codex sandbox works, /root /home /mnt hidden" \
   || bad "the worker's unit sandbox (exit $?: 3 runner missing, 4 a hidden path visible, 5 Codex's sandbox fails)"
-for u in "$DEV" "$MAINT"; do
-  # (ssh -T always exits 1 at GitHub: judge its greeting, not its status — pipefail would)
-  greeting=$(as "$u" ssh -o BatchMode=yes -T git@github.com 2>&1 || true)
-  grep -q "successfully authenticated" <<<"$greeting" && ok "$u pushes to $REPO" || bad "$u: no GitHub access over ssh ($greeting)"
+# (ssh -T always exits 1 at GitHub: judge its greeting, not its status — pipefail would)
+greeting=$(as "$DEV" ssh -o BatchMode=yes -T git@github.com 2>&1 || true)
+grep -q "successfully authenticated" <<<"$greeting" && ok "$DEV pushes to $REPO" || bad "$DEV: no GitHub access over ssh ($greeting)"
+greeting=$(as "$MAINT" ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -T git@github.com 2>&1 || true)
+grep -q "successfully authenticated" <<<"$greeting" && bad "$MAINT still has a GitHub key" || ok "$MAINT has no GitHub key"
+for r in "$REPO" "$QUEUE"; do
+  [ "$(gh api "repos/$r" --jq .permissions.push 2>/dev/null)" = true ] && ok "root's gh login pushes to $r" || bad "root's gh login cannot push to $r (gh auth refresh -s repo)"
 done
+[ "$(gh repo view "$QUEUE" --json visibility --jq .visibility)" = PRIVATE ] && ok "$QUEUE is private" || bad "$QUEUE is not private"
+(cd "$SRC" && HOME=/root node --import tsx scripts/maint-promote.ts --check-reviewer) && ok "the reviewer answers (OpenRouter)" || bad "the reviewer does not answer: every fix will wait in $QUEUE"
+[ -e "$AUTODEPLOY_STATE/unprivileged-checks" ] && ok "new commits are checked as $BUILD" || bad "new commits are still checked as root (the trial failed)"
 [ "$fail" = 0 ] || { echo; echo "some checks failed (above)" >&2; exit 1; }
 
 cat <<EOF
@@ -224,6 +266,8 @@ Done. What only you can do:
        runuser -u $MAINT -- env HOME=$MAINT_HOME codex login --device-auth
   4. Resume the worker when you want (it is still paused if it was):
        systemctl enable --now overlyx-maintenance.timer
+     Fixes it cannot deploy on its own wait as issues in https://github.com/$QUEUE —
+     label one "deploy" to deploy it, close it to drop it.
   5. End the agent sessions still running as root (tmux, VS Code, the Codex app): they keep full
      access until they stop. Work as $DEV from now on; root is for administration.
 EOF

@@ -27,10 +27,15 @@ the deployment guidance above, and verify that the live site serves the deployed
 ## Unattended maintenance
 
 The owner authorizes the maintenance worker to screen GitHub issues and private reports/logs,
-implement clear fixes, run minimal focused checks, and deploy without supervision (16 Oct 2026).
+implement clear fixes and run minimal focused checks without supervision (16 Oct 2026).
 `scripts/maintenance.sh`, run by `overlyx-maintenance.timer` every ten minutes, uses its own
-checkout and private persistent state. The runner commits and deploys with `--no-checks`; do not
-add review stages or broader test gates. See DOCS.md for operation and pause/resume commands.
+checkout and private persistent state. Since 9 Nov 2026 (the owner, after a security review: anyone
+could prompt-inject code through public issues or reports, and master runs as root) it holds no
+GitHub key; root's promoter (`scripts/maint-promote.ts`) deploys a fix only when its evidence was
+trusted (the owner's issues), it keeps to `scripts/maint-policy.ts` and a reviewer model passes it;
+everything else waits for the owner in the private queue `japhba/overlyx-maint`. Keep that gate —
+don't let the worker push or widen what counts as trusted; add no further test gates. See DOCS.md
+for operation and pause/resume commands.
 
 ## No San Francisco fonts
 

@@ -1,25 +1,16 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { LYX_LIB, lyxFilesIn } from './lyxlib.ts';
 import { parseLyx } from '../packages/core/src/lyx/parser.ts';
 import { writeLyx } from '../packages/core/src/lyx/writer.ts';
 
-function collect(dir: string, out: string[] = []): string[] {
-  for (const f of readdirSync(dir)) {
-    const p = join(dir, f);
-    const st = statSync(p);
-    if (st.isDirectory()) collect(p, out);
-    else if (f.endsWith('.lyx')) out.push(p);
-  }
-  return out;
-}
-
-const userFiles = collect('/root/projects');
-const lyxFiles = [...collect('/root/lyx/lib/doc'), ...collect('/root/lyx/lib/examples'), ...collect('/root/lyx/lib/templates')];
+const userFiles = lyxFilesIn('/root/projects');
+const lyxFiles = ['doc', 'examples', 'templates'].flatMap(d => lyxFilesIn(join(LYX_LIB, d)));
 
 describe('LyX parse/write round trip', () => {
   for (const f of [...userFiles, ...lyxFiles]) {
-    it(f.replace('/root/', ''), () => {
+    it(f.replace('/root/', '').replace(LYX_LIB + '/', 'lyx/lib/'), () => {
       const src = readFileSync(f, 'utf8');
       const doc = parseLyx(src);
       const out = writeLyx(doc);

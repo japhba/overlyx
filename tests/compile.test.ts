@@ -9,6 +9,7 @@ import { basename, dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { parseLyx } from '../packages/core/src/lyx/parser.ts';
 import { exportLatex } from '../packages/core/src/latex/export.ts';
+import { LYX_LIB } from './lyxlib.ts';
 
 const SCRATCH = process.env.OVERLYX_SCRATCH ?? '/tmp/claude-0/-root-lyx/9250d901-48e6-4b48-98b5-a211e39f6f1d/scratchpad/compile-tests';
 const HAVE_LATEXMK = spawnSync('which', ['latexmk']).status === 0;
@@ -66,7 +67,7 @@ function report(name: string, r: CompileResult): void {
 function syntheticDocument(dir: string): string {
   mkdirSync(join(dir, 'figures'), { recursive: true });
   // a PNG from the LyX documentation and an SVG
-  const pngSrc = ['/root/lyx/lib/doc/clipart/ToolbarEnvBox.png', '/usr/share/lyx/doc/clipart/ToolbarEnvBox.png'].find(existsSync);
+  const pngSrc = [join(LYX_LIB, 'doc/clipart/ToolbarEnvBox.png'), '/usr/share/lyx/doc/clipart/ToolbarEnvBox.png'].find(existsSync);
   if (pngSrc) copyFileSync(pngSrc, join(dir, 'figures', 'dot.png'));
   else writeFileSync(join(dir, 'figures', 'dot.png'), Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAE/wJ/l0qNqQAAAABJRU5ErkJggg==', 'base64'));
   writeFileSync(join(dir, 'figures', 'box.svg'), '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><rect width="40" height="20" fill="teal"/></svg>\n');
@@ -765,14 +766,14 @@ describe.skipIf(!HAVE_LATEXMK)('compile with latexmk', () => {
   }, 500000);
 
   const examples = [
-    '/root/lyx/lib/examples/Welcome.lyx',
-    '/root/lyx/lib/doc/Intro.lyx',
-    '/root/lyx/lib/examples/Example_%28LyXified%29.lyx',
-    '/root/lyx/lib/doc/Tutorial.lyx',
-    '/root/lyx/lib/doc/Formula-numbering.lyx',
-    '/root/lyx/lib/examples/Articles/American_Mathematical_Society_%28AMS%29.lyx',
-    '/root/lyx/lib/examples/Articles/American_Chemical_Society_%28ACS%29.lyx',
-  ];
+    'examples/Welcome.lyx',
+    'doc/Intro.lyx',
+    'examples/Example_%28LyXified%29.lyx',
+    'doc/Tutorial.lyx',
+    'doc/Formula-numbering.lyx',
+    'examples/Articles/American_Mathematical_Society_%28AMS%29.lyx',
+    'examples/Articles/American_Chemical_Society_%28ACS%29.lyx',
+  ].map(f => join(LYX_LIB, f));
   for (const f of examples) {
     const name = basename(f, '.lyx');
     it(`LyX example ${decodeURIComponent(name)}`, () => {

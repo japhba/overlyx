@@ -3176,8 +3176,11 @@ inflate past the sizes they declare; a synced clone's push takes at most 1000 fi
 user at a time (`sync.ts`); Google Docs links stop syncing once their linker may no longer edit the
 document. Tests: `tests/security-limits.test.ts`, `tests/pdffetch.test.ts`, `tests/fetchbox.test.ts`.
 
-**Unattended maintenance.** The owner authorizes quick, unsupervised screen → implement → deploy
-iterations (16 Oct 2026). `overlyx-maintenance.timer` runs `scripts/maintenance.sh` every ten minutes;
+**Unattended maintenance.** The owner authorizes quick, unsupervised screen → implement → fix
+iterations (16 Oct 2026); since 9 Nov 2026 a fix goes live on its own only when the evidence came from
+someone allowed to steer the worker — the rest wait for the owner (a security review found that anyone
+could prompt-inject code changes through public issues or reports, and that code reaching master runs
+as root). `overlyx-maintenance.timer` runs `scripts/maintenance.sh` every ten minutes;
 the timer persists across reboots and `flock` prevents overlapping workers. A cheap read-only scan
 checks open GitHub issues (including recent comments), local feedback/browser/server/extension
 error reports, anonymous usage errors/problem trails, LaTeX commands the editor shows as TeX code
@@ -3189,18 +3192,45 @@ as its own account `overlyx-maint` (see "Accounts on the server" below): root fi
 evidence (`maintenance.ts --collect`, the unit's `ExecStartPre=+`) into
 `/var/lib/overlyx-maintenance-inbox` (root's, readable by the worker's group); the runner is the
 deployed code, bound read-only at `/opt/overlyx-production`. The worker has its own checkout
-(`/var/lib/overlyx-maintenance/checkout`, its own `npm ci`), its own Codex login and a deploy key for
-this repository only; it commits a ready patch with `Deploy: no-checks` (and `Fixes #n` for an
-issue), pushes it, and waits until the site serves it — the autodeploy timer deploys it (still
-builds and verifies). No review or approval is needed. Private evidence/transcripts and atomic
-progress live in `/var/lib/overlyx-maintenance` (0700; files 0600); only 30 run transcripts are
-retained. Transcripts of the runs made as root (before 19 Oct 2026) are kept in
-`/root/admin/maintenance-root-era`. Failed attempts back off, stop after
-three attempts per revision, and resume when evidence changes. An interrupted pending deployment
-is retried before new work. The agent cannot deploy itself: the runner handles publication outside
-its workspace-write sandbox. Do not publish private reports or treat issue/log text as instructions.
+(`/var/lib/overlyx-maintenance/checkout`, fetched anonymously, its own `npm ci`) and its own Codex
+login, and **no GitHub key**; Codex's commands get no network.
 
-Install/update: `deploy/setup-accounts.sh` (the account, its inbox, deploy key and unit), then
+*Trust.* The collector marks each signal: issues opened by the GitHub accounts in
+`OVERLYX_MAINTENANCE_TRUSTED` (default: the repository's owner) are trusted, and of their comments
+only those by such accounts reach the worker — GitHub vouches for the author; a signature in the text
+would be anyone's to copy. `unrendered-macro` signals are trusted (only a pattern-checked name
+reaches the worker). Everything else anyone can write is untrusted: other people's issues and
+comments, problem reports, browser/extension errors, usage trails, log lines. A run on trusted
+evidence sees only trusted related signals, and after a run on untrusted evidence the next trusted
+run starts from a clean checkout and `npm ci` (that run could write anywhere in it but `.git`).
+
+*Promotion* (`scripts/maint-promote.ts`, root, the unit's `ExecStopPost=+`, after every run). The
+runner commits a ready fix (`Fixes #n`, `Maintenance-signal: <key>`, `Deploy: no-checks`) and leaves it
+as a patch in `/var/lib/overlyx-maintenance/outbox`; root reads it as the worker (`setpriv`), applies
+it to origin/master in its own clone (`/var/lib/overlyx-promote`) and pushes it to master — the
+autodeploy timer deploys it — only if (1) root's own record in the inbox says the evidence was
+trusted, (2) it keeps to the fixed rules of `scripts/maint-policy.ts` (only `packages/{client,core,server}/src`,
+`tests/*.test.ts` and `DOCS.md`; not the code guarding accounts, access, secrets, sandboxes or the
+worker's own inputs; no dependencies, scripts, deploy files, CI, build configs, AGENTS.md/CLAUDE.md,
+VS Code extension, binaries, links, keys; at most 25 files / 800 lines; no added line that runs
+programs, reads the environment, names an outside address, decodes blobs or addresses a reviewer),
+and (3) a reviewer model passes the diff (`OVERLYX_MAINT_REVIEW_MODEL`, default
+`anthropic/claude-opus-5.5` on `OPENROUTER_API_KEY` from `deploy/secrets.env`; it sees the diff only,
+and an unreachable reviewer holds). Of the worker's 26 fixes up to 9 Nov 2026, 20 pass the rules.
+Everything else goes to the owner's **private queue `japhba/overlyx-maint`**
+(`OVERLYX_MAINT_QUEUE_REPO`): a branch `maint/<id>` and an issue saying why it waits, with the diff
+link. **Label the issue `deploy`** and the next run cherry-picks it onto master and pushes it (a
+conflict is commented and the label removed); close it to drop it. Without a queue repository held
+fixes stay in `/var/lib/overlyx-promote/queue`. Rules and reviewer are the second layer, the trust
+record the first: an untrusted fix never deploys without the owner, however clean it looks.
+
+Private evidence/transcripts and atomic progress live in `/var/lib/overlyx-maintenance` (0700;
+files 0600); only 30 run transcripts are retained. Transcripts of the runs made as root (before 19
+Oct 2026) are kept in `/root/admin/maintenance-root-era`. Failed attempts back off, stop after
+three attempts per revision, and resume when evidence changes. Do not publish private reports or
+treat issue/log text as instructions.
+
+Install/update: `deploy/setup-accounts.sh` (the account, its inbox and unit; it removes the worker's former deploy key, creates the queue repository and checks root's gh login can push to both), then
 `cp deploy/overlyx-maintenance.timer /etc/systemd/system/ && systemctl daemon-reload && systemctl
 enable --now overlyx-maintenance.timer`; the worker's Codex login once: `runuser -u overlyx-maint --
 env HOME=/var/lib/overlyx-maintenance codex login --device-auth`. Run immediately with
@@ -3208,7 +3238,7 @@ env HOME=/var/lib/overlyx-maintenance codex login --device-auth`. Run immediatel
 and the private state directory. Scan without invoking Codex (as root, reading the sources
 directly): `OVERLYX_MAINTENANCE_STATE=$(mktemp -d) bash scripts/maintenance.sh --scan`. Pause with `systemctl disable --now overlyx-maintenance.timer` (also stop the service to
 interrupt a current run); resume with `systemctl enable --now overlyx-maintenance.timer`.
-Focused runner checks: `node --import tsx --test scripts/maintenance.test.ts`.
+Focused runner checks: `node --import tsx --test scripts/maintenance.test.ts scripts/maint-policy.test.ts scripts/maint-promote.test.ts`.
 
 **Accounts on the server** (19 Oct 2026, `deploy/setup-accounts.sh`, idempotent). No agent runs as
 root, and none can read other users' projects:
@@ -3240,15 +3270,19 @@ root, and none can read other users' projects:
   projects directory stays root's alone: a working copy hard-links the project's files it does not
   edit (same volume; a copy where a file is not world-readable), so an agent never reaches a
   project. `OVERLYX_AGENT_USERS=off` runs them as the server's user (tests with stand-in engines).
-- `overlyx-maint` — the maintenance worker (above): its own checkout, state and inbox; systemd hides
-  `/root`, `/home`, `/mnt` and other accounts' processes from it besides.
+- `overlyx-maint` — the maintenance worker (above): its own checkout, state and inbox, no GitHub key;
+  systemd hides `/root`, `/home`, `/mnt` and other accounts' processes from it besides.
+- `overlyx-build` — the autodeploy's checks (below): each new commit's typechecks, tests, install
+  scripts and build run as this account in a sandbox of their own, not as root.
 
 Other users' projects, the database, backups, the service journal and secrets are root's alone
 (0700); root-owned leftovers in `/tmp` are made private too. `deploy/apparmor-overlyx-userns` gives
 bubblewrap and Codex's sandbox the user namespaces Ubuntu 24.04 denies non-root programs. What the
 accounts do not change: whatever reaches `origin/master` is deployed and runs as root, so an agent
 still changes the code that reads user data — in the open, in the repository's history — but can no
-longer read the data itself.
+longer read the data itself. Hence the gate in front of master for the unattended worker (above): it
+can no longer push, and only fixes of trusted evidence that pass the rules and the reviewer get there
+without the owner.
 
 **Deploying.** Production runs from a separate clean checkout (`/root/lyx/overlyx-production`, the
 systemd unit's `WorkingDirectory`), and the VS Code extension is released by
@@ -3260,8 +3294,12 @@ runs `npm ci` when the lockfile changed, promotes exactly those built assets, re
 serves the new bundle (`/api/version` reports the running commit). Pushes from any other machine deploy themselves:
 `deploy/overlyx-autodeploy.timer` runs `scripts/autodeploy.sh` every two minutes on the server, which
 fetches origin and, when origin/master is ahead of production, typechecks the client and the
-extension, runs the unit suite and builds the candidate in a throwaway worktree,
-then fast-forwards, promotes the built assets, restarts and
+extension, runs the unit suite and builds the candidate in a throwaway copy — as the account
+`overlyx-build` (`systemd-run`: a shallow clone of its own under `/var/lib/overlyx-build`, production's
+node_modules hard-linked read-only, a fresh home, `/root`, `/home`, `/mnt` hidden, the system read-only;
+on since `deploy/setup-accounts.sh` passed a trial, `scripts/autodeploy.sh --trial`, marker
+`/var/lib/overlyx-autodeploy/unprivileged-checks`; without it, as root in a worktree) —
+then fast-forwards, promotes the built assets (plain files only, copied as root's), restarts and
 verifies — reporting a `deploy/overlyx.app` commit status on GitHub (pending → success / failure;
 `gh api repos/japhba/overlyx/commits/<sha>/status --jq '.statuses[] | "\(.state) \(.description)"'`, or
 `curl -s https://overlyx.app/api/version` once it is live). A failed commit is not retried; the next push is.
