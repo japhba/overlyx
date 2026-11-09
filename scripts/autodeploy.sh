@@ -98,13 +98,14 @@ else
 fi
 trap cleanup EXIT
 # build command... — in the copy; in the sandbox as the build account, with a fresh home and nothing of
-# root's to see: no state survives from one commit's checks to the next
+# root's to see: no state survives from one commit's checks to the next. (No ProtectKernelTunables: its
+# read-only /proc/sys keeps bubblewrap, which the tests start, from mounting a /proc of its own.)
 build() {
   if [ "$SANDBOX" = 1 ]; then
     systemd-run --quiet --wait --pipe --collect --service-type=exec --uid="$BUILD_USER" --gid="$BUILD_USER" \
       --working-directory="$WT" --nice=5 -p ProtectSystem=strict -p ReadWritePaths="$WT" -p ProtectHome=yes \
       -p InaccessiblePaths=-/mnt -p InaccessiblePaths=-/var/lib/overlyx-autodeploy -p PrivateTmp=yes -p ProtectProc=invisible \
-      -p NoNewPrivileges=yes -p RestrictSUIDSGID=yes -p ProtectKernelTunables=yes -p ProtectKernelModules=yes \
+      -p NoNewPrivileges=yes -p RestrictSUIDSGID=yes -p ProtectKernelModules=yes \
       -p ProtectControlGroups=yes -p BindReadOnlyPaths="$(dirname "$LYX_LAYOUT_DIR"):/opt/lyx/lib" \
       -E HOME="$WT/.home" -E PATH=/usr/local/bin:/usr/bin:/bin -E LYX_LAYOUT_DIR=/opt/lyx/lib/layouts \
       ${PLAYWRIGHT_BROWSERS_PATH:+-E PLAYWRIGHT_BROWSERS_PATH="$PLAYWRIGHT_BROWSERS_PATH"} "$@"
