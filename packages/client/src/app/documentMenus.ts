@@ -1,6 +1,7 @@
 /** Editing commands shared by the browser and VS Code. Add document features here once. */
 import { NAMED_SIZES, NAMED_LABELS } from '../editor/fontsize';
 import { insertDrawing } from '../editor/svgdrawing';
+import { insertDraftFigure } from '../editor/figuredraft';
 import type { EditorView } from 'prosemirror-view';
 import type { Command } from 'prosemirror-state';
 import { undo, redo } from '../editor/collab';
@@ -196,6 +197,7 @@ export function documentMenus({ view, meta, run, runView, setDialog, textColor, 
       { sep: true },
       { label: 'Link…', shortcut: LINK_KEY, action: () => runView(openLinkBoxFor) },
       { label: 'Image…', shortcut: 'Ctrl+Shift+G', action: () => setDialog({ name: 'graphics' }) },
+      { label: 'Figure (draw its draft)…', action: () => runView(v => { void insertDraftFigure(v); return true; }) },
       { label: 'Table…', shortcut: 'Ctrl+Alt+T', action: () => setDialog({ name: 'table' }) },
       { label: article ? 'Sidenote' : 'Footnote', shortcut: 'Ctrl+Alt+F', action: () => run(C.insertFootnote) },
       ...html<MenuEntry>([
@@ -268,6 +270,7 @@ export function documentMenus({ view, meta, run, runView, setDialog, textColor, 
       { label: 'Comment thread', shortcut: 'Ctrl+Alt+C', action: () => run(C.insertComment) },
       { sep: true },
       { label: 'Graphics…', shortcut: 'Ctrl+Shift+G', action: () => setDialog({ name: 'graphics' }) },
+      { label: 'Figure (draw its draft)…', action: () => runView(v => { void insertDraftFigure(v); return true; }) },
       { label: 'Drawing (SVG)…', action: () => runView(v => { void insertDrawing(v); return true; }) },
       { label: 'Table…', shortcut: 'Ctrl+Alt+T', action: () => setDialog({ name: 'table' }) },
       { label: 'Caption', action: () => run(C.insertCaption) },

@@ -68,6 +68,8 @@ export interface DeckCtx {
     crop(): void; resetCrop(): void; removeBackground(): void; replace(): void;
     /** the picture is an SVG drawing in the project: open it in the drawing editor (the documents' pop-up), else null */
     editSvg: (() => void) | null;
+    /** a picture of the project: its draft drawn in OverLyX or its final figure shown (editor/figuredraft.ts), else null */
+    version: { draft: boolean; show(to: 'draft' | 'final'): void } | null;
     /** cropped at once to an aspect / a round frame (crop mode: the frame changed) */
     shape(aspect: number | null, shape?: 'rect' | 'circle'): void;
     done(commit: boolean): void;
@@ -585,7 +587,11 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
         palette: { title: 'Crop to', list: true, cols: 1, items: [...shapes, ...(im?.cropped ? [{ label: 'Reset crop', html: ICON('dk-crop'), action: c.image.resetCrop }] : [])] } },
       { id: 'dk-nobg', title: 'Remove background', icon: 'dk-nobg', action: c.image.removeBackground },
       { id: 'dk-replace', title: 'Replace picture…', icon: 'dk-replace', action: c.image.replace },
-      ...(c.image.editSvg ? [{ id: 'dk-editsvg', title: 'Edit drawing — the SVG in the drawing editor (double-click the picture)', icon: 'dk-pen', action: c.image.editSvg }] : []),
+      ...(c.image.editSvg ? [{ id: 'dk-editsvg', title: c.image.version?.draft ? 'Draw on the draft — the pen in the drawing editor (double-click the picture)' : 'Edit drawing — the SVG in the drawing editor (double-click the picture)', icon: 'dk-pen', action: c.image.editSvg }] : []),
+      ...(c.image.version ? [
+        { id: 'dk-showdraft', title: c.image.version.draft ? 'Showing the draft — a sketch drawn in OverLyX, kept beside the figure as name.olx.svg' : 'Show the draft — a sketch drawn in OverLyX (made now if there is none)', icon: 'Draft', active: c.image.version.draft, action: () => c.image.version!.show('draft') },
+        { id: 'dk-showfinal', title: c.image.version.draft ? 'Show the final figure (the file beside the draft without .olx)' : 'Showing the final figure', icon: 'Final', active: !c.image.version.draft, action: () => c.image.version!.show('final') },
+      ] : []),
     ]);
   }
 

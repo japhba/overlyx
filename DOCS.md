@@ -2966,6 +2966,27 @@ and a slide's or poster's SVG picture (double-click, *Edit drawing (SVG)…* in 
 Picture section's pen button; runtime `editSvg` message → `DeliverableEditor` `editSvgPicture`); the
 picture reloads through the project's graphics event when it is saved.
 
+**Figure drafts** (9 Nov 2026; `core/figuredraft.ts`, `client/editor/figuredraft.ts`): every figure
+may have a draft drawn in OverLyX beside its final file under the same name, ending `.olx.svg`
+(`figures/plot.pdf` ↔ `figures/plot.olx.svg`; finals looked for as .pdf, .svg, .png, .jpg, .jpeg,
+.eps, .gif, .webp). The `.svg` keeps the draft an ordinary picture for the build (converted like any
+SVG; pdflatex takes the `figure.olx.pdf` name), browsers, slides and Inkscape. A document shows the
+version it names: the Draft | Final switch on a figure's corner (`nodeviews/leaf.ts`, a quiet "Draft"
+stays on drafts), its right-click entries (*Show the draft / Show the final figure*, *Draw the draft…*,
+*Upload / Replace the final figure…*, *All figures of this document*) rewrite the file name there
+(`switchFigureName`, keeping how it was written), so the PDF follows. A missing draft is made empty
+in the figure's shape and opened; closed unsaved, the figure goes back to its final and the draft is
+deleted. A missing final: a dialog says where to save it (a plotting script can write it there) or
+uploads it. Drafts open in the SVG pop-up with the pen in hand (`SvgTarget.draw` → host `startTool`,
+"Save draft"); final SVGs open with Select, for edits. Right-click ▸ *Insert figure* (and Insert ▸
+*Figure (draw its draft)…*) makes a figure float with a caption (markdown: the picture alone) around
+`figures/figure.olx.svg` (-2, …; a name free for its final too), opens it, and leaves the cursor in the
+caption; Cancel removes both. Slides, posters and web pages have the same (`DeliverableEditor`
+`pictureSlot` / `insertDraftPicture`: *Figure (draw its draft)…* in the slide's menu and Insert, the
+picture's menu, Draft / Final in its toolbar section; the draft goes to the page folder's `images/`),
+and so do layout pages in .tex (`layout/menu.ts`, `layoutImageSlot`). Decks need the host's document
+id (the web app), as Edit drawing does.
+
 The template choosers (+ New, File ▸ New, VS Code's quick pick) call the designs **Poster 1…5** and
 **Slides 1…3** (`templateLabel`, in `SCIENTIFIC_TEMPLATES` order); `name` stays the source design's,
 for the attribution line and the generated file's header. The example project's folders have the

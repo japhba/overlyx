@@ -18,6 +18,7 @@ import { moveToMaster } from './masters';
 import { imageToShapes } from './images';
 import { copyObjects } from './connectors';
 import { toDocRel, viewDocDir, viewProject, editorContext } from '../context';
+import { figureMenuItems, layoutImageSlot, insertLayoutDraftFigure } from '../figuredraft';
 
 /** Another picture in the same frame (its position, size and rotation stay; the crop is reset). */
 function replaceImage(view: EditorView, pos: number): void {
@@ -109,6 +110,8 @@ export function layoutContextMenu(view: EditorView, ev: MouseEvent): boolean {
       // a slide's object onto its master: drawn on every slide of that master (masters.ts)
       ...(pageNodeOf(view, positions[0])?.attrs.master && !L.isMasterPage(pageNodeOf(view, positions[0])) ? [{ label: `Move to the master (${pageNodeOf(view, positions[0])!.attrs.master})`, action: run(() => { const tr = moveToMaster(view.state, positions); if (tr) view.dispatch(tr.setMeta(layoutKey, { sel: [] })); }) } as MenuItem] : []),
       ...(kind === 'ol_image' ? [{ label: 'Replace image…', icon: 'image', action: () => replaceImage(view, one!.pos) } as MenuItem] : []),
+      // its draft drawn in OverLyX and its final figure (figuredraft.ts)
+      ...(kind === 'ol_image' ? [{ sep: true } as MenuItem, ...figureMenuItems(layoutImageSlot(view, one!.pos)), { sep: true } as MenuItem] : []),
       // an SVG picture as editable shapes (images.ts imageToShapes)
       ...(kind === 'ol_image' && /\.svg$/i.test(String(one!.node.attrs.src ?? '')) ? [{ label: 'Convert to shapes', action: () => { void imageToShapes(view, one!.pos); } } as MenuItem] : []),
       { label: locked ? 'Unlock' : 'Lock in place', action: run(() => { const tr = view.state.tr; for (const p of positions) L.setAttrs(tr, p, { lock: !locked }); view.dispatch(selectObjects(tr, positions)); }) },
@@ -129,6 +132,7 @@ export function layoutContextMenu(view: EditorView, ev: MouseEvent): boolean {
       const r = L.insertObject(view.state, pagePos, L.makeBox({ x: at[0], y: at[1], w: Math.max(20, Math.min(page.w * 0.4, page.w - at[0])), h: 10, grow: true }));
       view.dispatch(L.caretInto(r.tr, r.pos));
     }) },
+    { label: 'Figure here (draw its draft)…', icon: 'image', action: () => void insertLayoutDraftFigure(view, pagePos, at) },
     { label: 'Select all on this page', shortcut: 'Ctrl+A', action: run(() => view.dispatch(selectObjects(view.state.tr, pageObjects(pageNode, pagePos).filter(o => !o.node.attrs.lock).map(o => o.pos)))) },
     { sep: true },
     { label: 'New page after this one', action: run(() => view.dispatch(L.insertPage(view.state, pagePos + pageNode.nodeSize))) },

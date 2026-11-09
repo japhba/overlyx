@@ -199,6 +199,20 @@ button { cursor: pointer; }
 .lyx-graphics:hover .gfx-edit, .lyx-graphics.ProseMirror-selectednode .gfx-edit, .lyx-graphics .gfx-edit:focus-visible { opacity: 1; }
 .lyx-graphics .gfx-edit[hidden] { display: none; }
 .ProseMirror[contenteditable="false"] .lyx-graphics .gfx-edit { display: none; }
+/* Draft | Final (editor/figuredraft.ts): on a figure's corner while hovered; a draft keeps a quiet "Draft" showing */
+.lyx-graphics .gfx-versions { position: absolute; top: 6px; left: 6px; z-index: 2; display: inline-flex; border: 1px solid var(--ui-border); border-radius: 999px; background: var(--surface); box-shadow: 0 1px 4px rgba(0,0,0,.18); overflow: hidden; opacity: 0; transition: opacity .12s; }
+.lyx-graphics .gfx-versions[hidden] { display: none; }
+.lyx-graphics .gfx-versions button { padding: 3px 9px; border: 0; background: none; color: var(--ui-muted); font: 500 12px/1.4 var(--ui-font); cursor: pointer; }
+.lyx-graphics .gfx-versions button + button { border-left: 1px solid var(--ui-border); }
+.lyx-graphics .gfx-versions button[aria-pressed="true"] { background: var(--accent); color: var(--surface); cursor: default; }
+.lyx-graphics .gfx-versions button[data-missing] { font-style: italic; }
+.lyx-graphics .gfx-versions button[data-missing]::before { content: '+ '; }
+.lyx-graphics:hover .gfx-versions, .lyx-graphics.ProseMirror-selectednode .gfx-versions, .lyx-graphics .gfx-versions:focus-within { opacity: 1; }
+.lyx-graphics[data-draft] .gfx-versions { opacity: .7; }
+.lyx-graphics[data-draft]:not(:hover):not(.ProseMirror-selectednode) .gfx-versions button:not([aria-pressed="true"]) { display: none; }
+.ProseMirror[contenteditable="false"] .lyx-graphics .gfx-versions { pointer-events: none; }
+.ProseMirror[contenteditable="false"] .lyx-graphics:not([data-draft]) .gfx-versions { display: none; }
+.ProseMirror[contenteditable="false"] .lyx-graphics[data-draft] .gfx-versions button:not([aria-pressed="true"]) { display: none; }
 .dialog-backdrop.svg-lightbox { position: fixed; inset: 0; z-index: 90; padding: 3vh 3vw; background: #0009; display: flex; align-items: stretch; justify-content: stretch; }
 .svg-lightbox-panel { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--surface); color: var(--fg); border: 1px solid var(--ui-border); border-radius: 10px; overflow: hidden; box-shadow: 0 12px 60px #0006; }
 .svg-lightbox-bar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--ui-border); }

@@ -13,9 +13,11 @@
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
-import { type User } from '../api';
+import { api, type User } from '../api';
 import { showContextMenu, closeContextMenu, type MenuItem } from '../editor/contextmenu';
 import { editSvgFile } from '../editor/svgEditorEvents';
+import { drawDraft, figureMenuItems, newDraft, switchVersion, type FigureSlot } from '../editor/figuredraft';
+import { isFigureDraft } from '@overlyx/core';
 import { Toolbar, ICONS, type ToolButton } from '../app/Toolbar';
 import { ColorGrid } from '../app/ColorGrid';
 import type { DeliverableHost, Peer } from './host';
@@ -62,7 +64,7 @@ import { activeMathField } from '../editor/lyxmath/field';
 import { mathReady } from '../editor/lyxmath/mathjax';
 import { setLayoutMathFont } from '../fonts/editorfont';
 import { useMathPanels } from '../app/toolbars';
-import { parseSource, opSplices, elementAt, elementChildren, attr, parseStyle, sourcePatch, applySplices as applyTextSplices, type SourcePatch } from '@overlyx/core/html/source.ts';
+import { parseSource, opSplices, elementAt, elementChildren, attr, parseStyle, sourcePatch, walk, pathOf, applySplices as applyTextSplices, type SourcePatch } from '@overlyx/core/html/source.ts';
 import { followUps, composeSplices, twinsOf, putOnEverySlide, otherCopies, slideNumberOps, lookAlikeOps, similarTexts, everySlideOps, masterObjects, MASTER_ATTR, SKIP_ATTR } from './deckmaster';
 import { deckTheme, themeSplices, type ThemeChange } from './decktheme';
 import { embeddedFontFamilies, fontPortabilityWarning, fontResource } from './deckfonts';
@@ -408,14 +410,14 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
   /** the node editor on a path (runtime/pathedit.ts): how many of its nodes are selected */
   const [nodeEd, setNodeEd] = useState<{ selected: number; total: number } | null>(null);
   const nodeEdRef = useRef(false); nodeEdRef.current = !!nodeEd;
-  const [tool, setToolState] = useState<Tool>('select');
+  const [tool, setToolState] = useState<Tool>(host.startTool ?? 'select');
   const toolRef = useRef(tool); toolRef.current = tool;
   /**
    * Draw opened (its button, P, E, S): its row of pens, colours and widths shows. A Pencil that draws by
    * itself (InkStyle.penInks) does not open it: the row only comes when asked for, and folds when the
    * pen is put away (Done, Esc, V, another tool).
    */
-  const [drawOpen, setDrawOpen] = useState(false);
+  const [drawOpen, setDrawOpen] = useState(host.startTool === 'pen');
   const drawOpenRef = useRef(drawOpen); drawOpenRef.current = drawOpen;
   /** the row folded away once something was picked in it, what was picked still in hand (Draw's button brings the row back) */
   const [drawHeld, setDrawHeld] = useState(false);
@@ -2325,7 +2327,57 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
   const svgOf = (src: string | undefined): string | null =>
     src && host.docId && /\.svg([?#]|$)/i.test(src) && !/^([a-z]+:|\/)/i.test(src) ? resolveRel(src) : null;
   /** the documents' drawing editor (app/SvgEditor.tsx) over the deck; the picture reloads when it is saved (the project's graphics event) */
-  const editSvgPicture = (rel: string) => editSvgFile(host.docId!.split('/').slice(0, 2).join('/'), rel, readOnlyRef.current);
+  const editSvgPicture = (rel: string) => { if (isFigureDraft(rel)) drawDraft(pageProject()!, rel, readOnlyRef.current); else editSvgFile(pageProject()!, rel, readOnlyRef.current); };
+  /** the page's project (its document id's first two parts); null where the host has no id (no drawing editor there) */
+  const pageProject = () => host.docId ? host.docId.split('/').slice(0, 2).join('/') : null;
+  /** where the picture whose src is `src` is now (the first such picture; null: gone) */
+  const pathOfSrc = (src: string): Path | null => {
+    for (const el of walk(parseSource(text.toString()).doc)) if (el.tagName === 'img' && attr(el, 'src') === src) return pathOf(el);
+    return null;
+  };
+  /** a picture's draft drawn in OverLyX and its final figure (editor/figuredraft.ts): the picture as the switch sees it */
+  const pictureSlot = (one: SelItem | null): FigureSlot | null => {
+    const project = pageProject(), src = one?.kind === 'image' ? one.src : undefined;
+    if (!one || !project || !src || /^([a-z]+:|\/)/i.test(src)) return null;
+    const rel = resolveRel(src);
+    if (rel === null) return null;
+    const at = one.cropped ? [...one.path, 0] : one.path;
+    return {
+      project, name: src, rel, aspect: one.rect.w > 0 && one.rect.h > 0 ? one.rect.h / one.rect.w : null, readOnly: readOnlyRef.current,
+      rename: (from, to) => {
+        const el = elementAt(parseSource(text.toString()).doc, at);
+        const p = el && el.tagName === 'img' && attr(el, 'src') === from ? at : pathOfSrc(from);
+        if (!p) { notify('The picture changed meanwhile — select it again.', 'error'); return false; }
+        return applyOps([{ t: 'attr', path: p, name: 'src', value: to }]);
+      },
+    };
+  };
+  /**
+   * Figure (draw its draft): a picture of an empty draft (images/figure.olx.svg …) on the slide shown — at
+   * `at` (slide px) — opened at once with the pen; closed without saving, the picture and its draft go again.
+   */
+  const insertDraftPicture = async (slide: Path | null, at: { x: number; y: number } | null) => {
+    const project = pageProject();
+    if (readOnlyRef.current || !project) return;
+    let rel: string;
+    try { rel = await newDraft(project, (dir ? dir + '/' : '') + 'images', 'figure', undefined, (r, data) => host.upload(r, data)); }
+    catch (e) { notify(`Could not make the figure: ${(e as Error).message}`, 'error'); return; }
+    const src = dir ? rel.slice(dir.length + 1) : rel;
+    const k = kindRef.current;
+    const place = insertPlace(text.toString(), slide ?? (k !== 'page' ? slides[currentRef.current]?.path ?? null : null), selRef.current[0]?.path ?? null, k);
+    if (!place) return;
+    const w = Math.min(640, pageW * 0.5), h = w * 9 / 16;
+    const cx = at?.x ?? pageW / 2, cy = at?.y ?? (pageH || pageW * 9 / 16) / 2;
+    if (!applyOps([{ t: 'insert', parent: place.parent, index: place.index, html: imageHtml(src, k === 'page' ? null : { x: cx - w / 2, y: cy - h / 2, w, h: 0 }, k, { w: 640, h: 360 }) }])) return;
+    pending.current = { select: [place.path] };
+    drawDraft(project, rel, false, {
+      onDiscard: () => {
+        const p = pathOfSrc(src);
+        if (p) applyOps([{ t: 'remove', paths: [p] }]);
+        void api.fileOp(project, { op: 'delete', from: rel }).catch(() => {});
+      },
+    });
+  };
   const imageTools = {
     cropping: !!cropping,
     crop: () => { const one = imagePath(); if (one) toCanvas({ ol: 'crop', path: one.path }); },
@@ -2338,6 +2390,10 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     removeBackground: () => { const one = imagePath(); if (one) removeBackground(one); },
     replace: () => replaceInput.current?.click(),
     editSvg: (() => { const rel = svgOf(imagePath()?.src); return rel ? () => editSvgPicture(rel) : null; })(),
+    version: (() => {
+      const slot = pictureSlot(imagePath());
+      return slot ? { draft: isFigureDraft(slot.name), show: (to: 'draft' | 'final') => void switchVersion(slot, to) } : null;
+    })(),
   };
   /** Remove background (BgRemoveDialog): the picture fetched where the frames get it (CORS *), the result saved next to it */
   const removeBackground = (it: SelItem) => {
@@ -2450,7 +2506,10 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
       // a drawing: its points, Inkscape's node editor (the shape right-clicked, when the drawing has several)
       ...(one && (one.kind === 'svg' || one.kind === 'svgpart' || one.kind === 'line') && !one.locked ? [{ label: 'Edit points', shortcut: 'N', action: () => arrangeSel('edit-nodes') }] : []),
       ...(one && one.kind === 'image' ? [
-        ...(imageTools.editSvg ? [{ label: 'Edit drawing (SVG)…', shortcut: 'double-click', action: imageTools.editSvg }] : []),
+        ...(imageTools.editSvg && !imageTools.version?.draft ? [{ label: 'Edit drawing (SVG)…', shortcut: 'double-click', action: imageTools.editSvg }] : []),
+        // its draft drawn in OverLyX and its final figure (editor/figuredraft.ts)
+        ...figureMenuItems(pictureSlot(one), { drawShortcut: 'double-click' }),
+        { sep: true },
         { label: 'Crop', action: imageTools.crop },
         { label: 'Remove background', action: imageTools.removeBackground },
         { label: 'Replace picture…', action: imageTools.replace },
@@ -2631,6 +2690,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
       { sep: true },
       { label: 'Text box', action: () => insertObject('text') },
       { label: 'Picture…', action: () => { phPicture.current = null; fileInput.current?.click(); } },
+      ...(pageProject() ? [{ label: 'Figure (draw its draft)…', disabled: ro, action: () => void insertDraftPicture(sp ?? null, menuPoint.current) }] : []),
       { label: kind === 'page' ? 'Comment on the page' : 'Comment on the slide', disabled: ro, action: () => startDraft(sp ?? null, i) },
       ...slideLinkItems(i),
       ...(kind !== 'page' ? [
@@ -2967,6 +3027,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
       { title: 'Insert', items: [
         { label: 'Text box', shortcut: 'T', disabled: ro, action: () => insertObject('text') },
         { label: 'Picture…', disabled: ro, action: () => { phPicture.current = null; fileInput.current?.click(); } },
+        ...(pageProject() ? [{ label: 'Figure (draw its draft)…', disabled: ro, action: () => void insertDraftPicture(null, null) }] : []),
         { label: 'Shape', disabled: ro, sub: SHAPES.map(s => ({ label: s.label, action: () => setTool(s.tool) })) },
         { label: 'Line', disabled: ro, sub: LINES.map(s => ({ label: s.label.replace(/:.*/, ''), action: () => setTool(s.tool) })) },
         { label: 'Drawing (pen)', shortcut: 'P', disabled: ro, action: () => { setDrawOpen(true); setDrawHeld(false); setToolState('pen'); } },

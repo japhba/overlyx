@@ -12,6 +12,8 @@ import { linkTooltip, LINK_CLICK } from '../links';
 import { applyChangeAttrs } from '../plugins/changes';
 import { classifyImage, type FigureKind } from '../figureinvert';
 import { editSvgFile } from '../svgEditorEvents';
+import { draftOfFigure, finalOf, isFigureDraft } from '@overlyx/core';
+import { drawDraft, showFigureVersion } from '../figuredraft';
 import { renderTitlePreview } from './title';
 import { renderStaticInto } from '../lyxmath/field';
 import { macroTableFor, mathViews } from '../lyxmath/macrotable';
@@ -52,7 +54,23 @@ export class GraphicsView implements NodeView {
     this.editBtn.title = 'Edit this SVG drawing — the layout editor\'s shapes, lines, pen, text and formulas in a pop-up (or double-click the figure)';
     this.editBtn.addEventListener('mousedown', ev => { ev.preventDefault(); ev.stopPropagation(); });
     this.editBtn.addEventListener('click', ev => { ev.preventDefault(); ev.stopPropagation(); this.editSvg(); });
-    this.dom.append(this.img, this.caption, this.editBtn);
+    // Draft | Final (editor/figuredraft.ts): the sketch drawn in OverLyX, or the figure itself — the document names one
+    this.versions = document.createElement('span');
+    this.versions.className = 'gfx-versions';
+    this.versions.setAttribute('role', 'group');
+    this.versions.setAttribute('aria-label', 'Figure version');
+    for (const v of ['draft', 'final'] as const) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.dataset.v = v; b.textContent = v === 'draft' ? 'Draft' : 'Final';
+      b.addEventListener('mousedown', ev => { ev.preventDefault(); ev.stopPropagation(); });
+      b.addEventListener('click', ev => {
+        ev.preventDefault(); ev.stopPropagation();
+        const pos = this.getPos();
+        if (pos !== undefined) void showFigureVersion(this.view, pos, v);
+      });
+      this.versions.append(b);
+    }
+    this.dom.append(this.img, this.caption, this.versions, this.editBtn);
     this.render();
     this.dom.addEventListener('dblclick', (ev) => { ev.preventDefault(); if (this.svgRel()) this.editSvg(); else editorContext.openInsetDialog?.(this.view, this.getPos()); });
     this.watchFile();
@@ -63,14 +81,17 @@ export class GraphicsView implements NodeView {
   }
 
   private editBtn: HTMLButtonElement;
+  private versions: HTMLElement;
   /** the figure's file when it is an SVG drawing (project-relative), else null */
   private svgRel(): string | null {
     const file = params(this.node).get('filename') ?? '';
     return /\.svg$/i.test(file) ? figureFile(unquote(file), viewDocDir(this.view)) : null;
   }
+  /** a draft is drawn on (the pen in hand); a final SVG figure is only edited */
   private editSvg() {
     const rel = this.svgRel(), project = viewProject(this.view) || editorContext.project;
-    if (rel && project) editSvgFile(project, rel, !this.view.editable);
+    if (!rel || !project) return;
+    if (isFigureDraft(rel)) drawDraft(project, rel, !this.view.editable); else editSvgFile(project, rel, !this.view.editable);
   }
 
   private svgSaved = (event: Event) => {
@@ -108,8 +129,14 @@ export class GraphicsView implements NodeView {
     const lyxscale = p.get('lyxscale');
     this.img.alt = file;
     const svg = /\.svg$/i.test(file);
-    this.img.title = `${file}\nwidth: ${width ?? 'auto'}${scale ? `, scale ${scale}%` : ''} — ${svg ? 'double-click to edit the drawing, right-click for its settings or to' : 'double-click for settings, right-click to'} export as PNG`;
+    const draft = isFigureDraft(unquote(file));
+    this.img.title = `${file}${draft ? ' (the draft)' : ''}\nwidth: ${width ?? 'auto'}${scale ? `, scale ${scale}%` : ''} — ${draft ? 'double-click to draw on the draft, right-click for its final version, settings or to' : svg ? 'double-click to edit the drawing, right-click for its settings or to' : 'double-click for settings, right-click to'} export as PNG`;
     this.editBtn.hidden = !svg;
+    this.editBtn.textContent = draft ? '✎ Draw' : '✎ Edit drawing';
+    this.editBtn.title = draft
+      ? 'Draw on this draft — the pen, shapes, text and formulas in a pop-up (or double-click the figure)'
+      : 'Edit this SVG drawing — the layout editor\'s shapes, lines, pen, text and formulas in a pop-up (or double-click the figure)';
+    this.renderVersions(unquote(file), draft);
     if (project && file) {
       const url = figureUrl(project, file, viewDocDir(this.view), 1600) + (this.version ? `&v=${this.version}` : '');
       if (this.img.dataset.src !== url) { this.img.dataset.src = url; this.img.src = url; }
@@ -141,6 +168,26 @@ export class GraphicsView implements NodeView {
     const rot = p.get('rotateAngle');
     this.img.style.rotate = rot ? `${-Number(rot)}deg` : '';
     applyChangeAttrs(this.dom, this.node);
+  }
+  /** the switch: which version shows, and whether the other is there yet (the project's file list) */
+  private renderVersions(file: string, draft: boolean) {
+    this.dom.toggleAttribute('data-draft', draft);
+    this.versions.hidden = !file;
+    if (!file) return;
+    const rel = figureFile(file, viewDocDir(this.view));
+    const files = new Set((editorContext.meta?.files ?? []).map(f => f.path));
+    const known = !!editorContext.meta?.files;
+    const has = { draft: draft || files.has(draftOfFigure(rel)), final: !draft || !!finalOf(rel, files) };
+    for (const b of this.versions.querySelectorAll<HTMLButtonElement>('button')) {
+      const v = b.dataset.v as 'draft' | 'final', on = (v === 'draft') === draft;
+      b.setAttribute('aria-pressed', String(on));
+      b.toggleAttribute('data-missing', known && !has[v]);
+      b.title = on
+        ? (v === 'draft' ? `Showing the draft, ${rel} — drawn in OverLyX (the PDF shows it too)` : `Showing the final figure, ${rel}`)
+        : v === 'draft'
+          ? (known && !has.draft ? 'Draw a draft of this figure — a sketch kept beside it as ' + draftOfFigure(rel) : 'Show the draft instead (the PDF too)')
+          : (known && !has.final ? 'No final figure yet — where it goes, or upload it' : 'Show the final figure instead (the PDF too)');
+    }
   }
   update(node: PMNode): boolean {
     if (node.type !== this.node.type) return false;

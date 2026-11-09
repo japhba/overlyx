@@ -81,6 +81,8 @@ export interface DeliverableHost {
   present?(url: string): boolean;
   /** ⌘S (the web app saves by itself; VS Code saves the document) */
   save?(): void;
+  /** the tool in hand when the canvas opens (a figure's draft: the pen, Draw's row open); absent: Select */
+  readonly startTool?: 'pen';
   /** A drawing embedded in a document uses the same canvas and exports its page as SVG (`except`: a selector for objects to leave out). */
   bindSvgExporter?(exporter: (except?: string) => Promise<string>): () => void;
   /** a key pressed on the canvas that the editor does not handle (VS Code: its own shortcuts) */

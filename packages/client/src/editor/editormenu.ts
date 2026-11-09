@@ -26,6 +26,8 @@ import { effectiveShortcut } from '../app/keybindings';
 import { openRewrite, REWRITE_KEY } from './ai/rewrite';
 import { openLinkBox, openLink, hrefOf, unlinkText, LINK_KEY } from './links';
 import { editSvgFile } from './svgEditorEvents';
+import { insertDraftFigure, showAllFigures, figureMenuAt } from './figuredraft';
+import { isFigureDraft } from '@overlyx/core';
 import { addToDictionary, ignoreWord } from './spell/plugin';
 import { foldMenuItems, sectionFoldState, foldedCount, itemFoldMenuItems, itemFoldState, foldedItemCount } from './plugins/fold';
 import { labelIn, placeLinkItems } from './permalink';
@@ -143,9 +145,18 @@ export function editorContextMenu(view: EditorView, ev: MouseEvent, spelling?: {
     } else if (node.type.name === 'graphics') {
       const file = p.get('filename') ?? '';
       const rel = figureFile(file, docDir);
+      const draft = isFigureDraft(unquote(file));
+      const ro = !view.editable;
       items.push(
-        { label: `Graphics ${file}`, info: true },
-        ...(/\.svg$/i.test(rel) ? [{ label: 'Edit drawing (SVG)…', icon: 'edit' as const, shortcut: 'double-click', action: () => editSvgFile(project, rel, !view.editable) }] : []),
+        { label: `${draft ? 'Draft' : 'Graphics'} ${file}`, info: true },
+        // its two versions (figuredraft.ts): the sketch drawn in OverLyX, the figure itself — the document (and PDF) shows one
+        ...figureMenuAt(view, pos),
+        ...(!draft && /\.svg$/i.test(rel) ? [{ label: 'Edit the figure (SVG)…', icon: 'edit' as const, shortcut: 'double-click', action: () => editSvgFile(project, rel, ro) }] : []),
+        { label: 'All figures of this document', disabled: ro, sub: [
+          { label: 'Show the drafts', action: () => void showAllFigures(view, 'draft') },
+          { label: 'Show the final figures', action: () => void showAllFigures(view, 'final') },
+        ] },
+        { sep: true },
         { label: 'Graphics settings…', icon: 'image', ...(/\.svg$/i.test(rel) ? {} : { shortcut: 'double-click' }), action: dialog('inset', pos) },
         { label: 'Open original in new browser tab', icon: 'open', action: () => window.open(fileUrl(project, rel), '_blank') },
         { label: 'Export as PNG…', icon: 'image', action: () => window.open(figureUrl(project, file, docDir, 2400) + '&download=1', '_blank') },
@@ -191,6 +202,8 @@ export function editorContextMenu(view: EditorView, ev: MouseEvent, spelling?: {
     { sep: true },
     { label: 'Comment', icon: 'comment', shortcut: MOD + '+Alt+C', action: run(C.insertComment) },
     ...(onLink ? [] : [{ label: 'Insert link', icon: 'link', shortcut: LINK_KEY, action: () => openLinkBox(view) } as MenuItem]),
+    // a figure whose draft is drawn at once (figuredraft.ts): the final figure goes beside it later
+    ...(view.editable ? [{ label: 'Insert figure', icon: 'image', action: () => void insertDraftFigure(view) } as MenuItem] : []),
     ...placeLinkMenu(view, target),
     ...(prefs.aiRewrite ? [{ label: hasSel ? 'Rewrite selection with AI…' : 'Write here with AI…', icon: 'ai', shortcut: REWRITE_KEY, action: () => openRewrite(view) } as MenuItem] : []),
     ...(editorContext.askAgent ? [{ label: hasSel ? 'Ask agent about this…' : 'Ask agent…', icon: 'ai', action: () => editorContext.askAgent?.() } as MenuItem] : []),

@@ -77,6 +77,7 @@ function SvgEditor({ target, onClose }: { target: SvgTarget; onClose(): void }) 
       onAsset: () => () => {}, setSelection() {}, onPeers: () => () => {}, downloads: () => [],
       bindSvgExporter(fn) { exporter.current = fn; return () => { exporter.current = null; }; },
       save: () => saveRef.current(),
+      ...(target.draw && !target.readOnly ? { startTool: 'pen' as const } : {}),
     };
   }, [source, target]);
   const saved = useRef(false);
@@ -100,10 +101,10 @@ function SvgEditor({ target, onClose }: { target: SvgTarget; onClose(): void }) 
   const close = () => { if (saving) return; if (!dirty) leave(); else void uiConfirm('Discard SVG changes?', 'Close this drawing without saving?').then(ok => { if (ok) leave(); }); };
   closeRef.current = close;
   return <div class="dialog-backdrop svg-lightbox" onMouseDown={e => { if (e.target === e.currentTarget) close(); }}>
-    <div ref={panel} class="svg-lightbox-panel" role="dialog" aria-modal="true" aria-label={`SVG editor — ${target.path}`}>
-      <div class="svg-lightbox-bar"><strong>SVG editor — {target.path}</strong><span style="flex:1" />
+    <div ref={panel} class="svg-lightbox-panel" role="dialog" aria-modal="true" aria-label={`${target.draw ? 'Draft' : 'SVG editor'} — ${target.path}`}>
+      <div class="svg-lightbox-bar"><strong>{target.draw ? 'Draft' : 'SVG editor'} — {target.path}</strong><span style="flex:1" />
         <button class="btn" disabled={saving} onClick={close}>Cancel</button>
-        <button class="btn primary" disabled={!host || saving || target.readOnly || !dirty} onClick={() => void save()}>{saving ? 'Saving…' : 'Save SVG'}</button>
+        <button class="btn primary" disabled={!host || saving || target.readOnly || !dirty} onClick={() => void save()}>{saving ? 'Saving…' : target.draw ? 'Save draft' : 'Save SVG'}</button>
       </div>
       {error && <div class="svg-lightbox-error" role="alert">{error}</div>}
       {host ? <DeliverableCanvas host={host} notify={(message, kind) => { if (kind === 'error') setError(message); }} /> : !error && <p>Opening SVG…</p>}
