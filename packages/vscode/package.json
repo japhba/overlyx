@@ -360,6 +360,9 @@
         "mac": "cmd+alt+j",
         "when": "activeCustomEditorId == overlyx.texEditor || overlyx.articleActive"
       },
+      { "command": "overlyx.editorKey", "key": "ctrl+z", "mac": "cmd+z", "when": "(activeCustomEditorId == overlyx.texEditor || overlyx.articleActive) && !inputFocus && !panelFocus && !sideBarFocus && !auxiliaryBarFocus && !terminalFocus" },
+      { "command": "overlyx.editorKey", "key": "ctrl+shift+z", "mac": "cmd+shift+z", "when": "(activeCustomEditorId == overlyx.texEditor || overlyx.articleActive) && !inputFocus && !panelFocus && !sideBarFocus && !auxiliaryBarFocus && !terminalFocus" },
+      { "command": "overlyx.editorKey", "key": "ctrl+y", "mac": "cmd+y", "when": "(activeCustomEditorId == overlyx.texEditor || overlyx.articleActive) && !inputFocus && !panelFocus && !sideBarFocus && !auxiliaryBarFocus && !terminalFocus" },
       { "command": "overlyx.editorKey", "key": "ctrl+k", "mac": "cmd+k", "when": "(activeCustomEditorId == overlyx.texEditor || overlyx.articleActive) && !inputFocus && !panelFocus && !sideBarFocus && !auxiliaryBarFocus && !terminalFocus" },
       { "command": "overlyx.editorKey", "key": "ctrl+j", "mac": "cmd+j", "when": "(activeCustomEditorId == overlyx.texEditor || overlyx.articleActive) && !inputFocus && !panelFocus && !sideBarFocus && !auxiliaryBarFocus && !terminalFocus" },
       { "command": "overlyx.editorKey", "key": "ctrl+\\", "mac": "cmd+\\", "when": "(activeCustomEditorId == overlyx.texEditor || overlyx.articleActive) && !inputFocus && !panelFocus && !sideBarFocus && !auxiliaryBarFocus && !terminalFocus" },

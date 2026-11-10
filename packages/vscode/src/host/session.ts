@@ -232,6 +232,17 @@ export class DocSession {
   }
 
   /**
+   * VS Code's own Undo / Redo (Edit menu, command palette) while the OverLyX editor has the focus
+   * took back one of the whole-file writes — a step of another size than the editor's, which the
+   * next update was then merged with (the file's side wins): text vanished, undone text came back.
+   * The text goes back to what the editor's model was derived from; the caller runs the editor's
+   * own undo instead.
+   */
+  revertHistoryStep(): Promise<void> {
+    return this.enqueue(async () => { if (!this.disposed && this.synced) await this.replaceText(this.synced); });
+  }
+
+  /**
    * A local agent's edit (host/agents.ts): the document's new text, computed from its current text.
    * The caller pushes the snapshot to the webview (the change is ours, not an external one).
    */

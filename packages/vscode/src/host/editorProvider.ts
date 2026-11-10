@@ -305,6 +305,13 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
         }, 400));
       }
       if (ev.document !== document || ev.contentChanges.length === 0) return;
+      // (its keys never reach VS Code's undo here: package.json binds them to overlyx.editorKey)
+      if (panel.active && (ev.reason === vscode.TextDocumentChangeReason.Undo || ev.reason === vscode.TextDocumentChangeReason.Redo)) {
+        const name = ev.reason === vscode.TextDocumentChangeReason.Undo ? 'undo' : 'redo';
+        this.applyChain = this.applyChain.then(() => session.revertHistoryStep()).then(() => post({ type: 'command', name }))
+          .catch(e => console.error('overlyx undo failed', e));
+        return;
+      }
       clearTimeout(externalTimer);
       externalTimer = setTimeout(() => {
         this.applyChain = this.applyChain.then(() => {

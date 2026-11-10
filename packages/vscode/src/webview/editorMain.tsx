@@ -8,6 +8,7 @@ import { useHostTheme } from '@client/app/theme';
 import { LYX_ICONS } from '@client/app/lyxicons';
 import { editorContext } from '@client/editor/context';
 import { isBenignBrowserError } from '@client/error-reporting';
+import { undoRedoKey } from '@client/app/codearea';
 import { EditorShell } from './EditorShell';
 import { initUsage } from '@client/usage';
 import { relayAppearance } from './appearance';
@@ -33,6 +34,17 @@ for (const k of Object.keys(LYX_ICONS)) if (LYX_ICONS[k].startsWith('/')) LYX_IC
 // scheduling notice is no error (the web app ignores it too, main.tsx)
 window.addEventListener('error', e => { if (e.message && !isBenignBrowserError(e.message)) editorContext.notify?.('Something went wrong: ' + e.message.slice(0, 200), 'error'); });
 window.addEventListener('unhandledrejection', e => { const r = (e as PromiseRejectionEvent).reason; editorContext.notify?.('Something went wrong: ' + String(r instanceof Error ? r.message : r).slice(0, 200), 'error'); });
+
+// Undo / redo keys go to the editor's own histories (ProseMirror's, the source pane's, a formula's),
+// and package.json keeps them from VS Code's undo of the TextDocument. VS Code's webview script
+// cancels the browser's undo, so a plain input or textarea (a comment, the find box) that does not
+// take the key itself gets it here.
+document.addEventListener('keydown', e => {
+  const t = e.target;
+  if (e.defaultPrevented || !(t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement)) return;
+  const kind = undoRedoKey(e);
+  if (kind) { e.preventDefault(); document.execCommand(kind); }
+});
 
 const onInit = (ev: MessageEvent<HostToEditor>) => {
   const m = ev.data;

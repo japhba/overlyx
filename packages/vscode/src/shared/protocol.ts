@@ -40,7 +40,7 @@ export type HostToEditor =
   | { type: 'goto'; pos: number }
   | { type: 'navigate'; label?: string; heading?: number }
   /** run a UI command (keybindings / menus contributed on the VS Code side) */
-  | { type: 'command'; name: 'toggleMargin' | 'toggleCombined' | 'find' | 'syncToPdf' | 'buildPdf' | 'toggleTracking' }
+  | { type: 'command'; name: 'toggleMargin' | 'toggleCombined' | 'find' | 'syncToPdf' | 'buildPdf' | 'toggleTracking' | 'undo' | 'redo' }
   /** SyncTeX inverse search: a line (1-based) of the LaTeX as built — locate it and move the cursor */
   | { type: 'inverseSync'; line: number }
   /** a PDF build of this document finished (a layout document fetches the check of its text boxes) */

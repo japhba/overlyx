@@ -11,6 +11,7 @@ import { setDocumentNumbering } from '@client/editor/plugins/numbering';
 import { MarkdownSettingsDialog } from '@client/app/MarkdownSettings';
 import { TextStylesPanel, textStylesArg } from '@client/app/TextStyles';
 import { isMarkdownDoc } from '@client/editor/markdown';
+import { undo, redo } from '@client/editor/collab';
 import { usePresentation } from '@client/app/presentation';
 import { referenceTransaction } from '@client/editor/references';
 import { inkToolbar } from '@client/app/inkToolbar';
@@ -436,6 +437,8 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
           else if (m.name === 'buildPdf') build();
           else if (m.name === 'toggleTracking') void toggleTracking();
           else if (m.name === 'toggleCombined') setCombined(c => !c);
+          else if (m.name === 'undo') run(undo);
+          else if (m.name === 'redo') run(redo);
           break;
         case 'inverseSync': void gotoTexLine(m.line); break;
         case 'built': { const hv = handleRef.current?.view; if (hv) refreshLayoutCheck(hv, () => api.layoutCheck(docId)); break; }

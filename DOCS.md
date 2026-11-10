@@ -3098,6 +3098,19 @@ on focus) used to be taken for the newer state and undid that update in the edit
 moment ago came back. `tests/vscode-ledger.test.ts` and `tests/vscode-sync.test.ts` cover both;
 `packages/vscode/test/probeEditing.mjs` reproduces them in the real extension.
 
+**Undo is the editor's, not the TextDocument's.** VS Code's webview hands every key to the workbench
+too, and in a custom text editor its Undo undoes the *TextDocument* — so Ctrl+Z ran both the editor's
+undo (a word at a time, `plugins/undogroups.ts`) and VS Code's, which took back one whole-file write
+(whatever was typed in one debounced update). The next update was merged with that and the file's
+side won: undone text came back, a second Ctrl+Z jumped back a whole sentence, and what was typed
+right after an undo lost its first characters. `package.json` now binds Ctrl+Z / Ctrl+Shift+Z /
+Ctrl+Y (⌘ on macOS) to the no-op `overlyx.editorKey` while the OverLyX editor has the focus;
+VS Code's Undo / Redo run otherwise (Edit menu, command palette) put the text back
+(`DocSession.revertHistoryStep`) and run the editor's undo instead (a Redo there finds nothing to
+redo: the restore cleared VS Code's redo stack). Plain inputs and textareas in the webview get the
+browser's undo from `webview/editorMain.tsx` (VS Code's webview script cancels it).
+`packages/vscode/test/probeUndo.mjs` types, undoes and redoes in the real extension.
+
 **A save racing an outside write.** When the file changes on disk while the document has unsaved
 edits, the host merges the change into the document (`readDisk`; the unsaved text is kept as a draft
 in the extension's `recovery` folder first), but VS Code still holds the older file as "saved" and
@@ -3553,6 +3566,7 @@ journalctl -u overlyx-autodeploy -n 50   # on the production server: what the la
 # follow the pointer) and bursts of deletions under auto save with ~1 s pauses (the document must never
 # grow back — report.json edits.regrew); the workspace copy is edited
 (cd packages/vscode && xvfb-run -a -s "-screen 0 1600x1000x24" node test/probeEditing.mjs /tmp/copy-of-project main.tex /tmp/probe-editing)
+(cd packages/vscode && xvfb-run -a -s "-screen 0 1600x1000x24" node test/probeUndo.mjs /tmp/copy-of-project main.tex /tmp/probe-undo)
 # offline mode needs the built client (service worker): build into $S/dist, then
 (cd packages/client && npx vite build --outDir $S/dist)
 OVERLYX_E2E_BASE=http://127.0.0.1:3001 npx playwright test e2e/offline.spec.ts e2e/git.spec.ts   # git: a real clone / push / pull with a token
