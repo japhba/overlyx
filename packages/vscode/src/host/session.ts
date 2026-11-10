@@ -17,7 +17,7 @@ import { isMarkdownPath } from '@overlyx/core/md/index.ts';
 import { primePreserveCache, type ParseTexResult, type PreserveCache } from '@overlyx/core/tex/index.ts';
 import { buildMeta } from './meta.ts';
 import { findMaster } from './project.ts';
-import { WindowUnreachable } from '../agents/handover.ts';
+import { WindowUnreachable, PROBE_MS } from '../agents/handover.ts';
 import { markEditedSettings } from '@overlyx/core/tex/preamble.ts';
 
 export class DocSession {
@@ -50,7 +50,7 @@ export class DocSession {
     public readonly project: string,
     public readonly relPath: string,
     private readonly recoveryDir: string,
-  ) { this.diskText = fs.readFileSync(document.uri.fsPath, 'utf8'); }
+  ) { this.diskText = this.readFile(); }
 
   get docId(): string { return `${this.project}/${this.relPath}`; }
 
@@ -159,23 +159,15 @@ export class DocSession {
     // Child editors in a joint view do not own VS Code tabs, so their buffers may be released.
     const reopened = this.document.isClosed;
     if (reopened) this.document = await vscode.workspace.openTextDocument(this.document.uri);
-    let disk = fs.readFileSync(this.document.uri.fsPath, 'utf8');
+    let disk = this.readFile();
     if (disk === this.diskText) return reopened;
     // Let VS Code reload a clean file itself: a WorkspaceEdit would mark it dirty while
     // leaving VS Code's saved-file timestamp behind, causing a false save conflict.
-    if (!this.document.isDirty && this.document.getText() !== disk) {
-      await new Promise<void>((resolve, reject) => {
-        const listener = vscode.workspace.onDidChangeTextDocument(event => {
-          if (event.document !== this.document || event.contentChanges.length === 0) return;
-          clearTimeout(timeout); listener.dispose(); resolve();
-        });
-        const timeout = setTimeout(() => { listener.dispose(); reject(new WindowUnreachable(`VS Code did not reload ${this.docId} from disk`)); }, 5000);
-      });
-      disk = fs.readFileSync(this.document.uri.fsPath, 'utf8');
-    }
+    if (!this.document.isDirty && this.document.getText() !== disk && await this.reloaded()) disk = this.readFile();
     const local = this.document.getText();
     let text = disk;
-    if (local !== this.diskText && local !== disk) {
+    // (a clean document VS Code did not reload has nothing unsaved: it takes the file's text)
+    if (this.document.isDirty && local !== this.diskText && local !== disk) {
       const base = parseDocumentText(this.diskText, this.ctx, this.relPath);
       const ours = parseDocumentText(local, this.ctx, this.relPath);
       const theirs = parseDocumentText(disk, this.ctx, this.relPath);
@@ -189,6 +181,41 @@ export class DocSession {
     const changed = reopened || this.document.getText() !== this.synced;
     if (changed) this.parseCurrent();
     return changed;
+  }
+
+  /**
+   * The file's text as VS Code holds it in the TextDocument: without a byte order mark, in the
+   * document's line endings. A file that differs from the document only there is reloaded without a
+   * change event — waited for, it timed out after every save of such a file.
+   */
+  private readFile(): string {
+    const eol = this.document.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n';
+    return fs.readFileSync(this.document.uri.fsPath, 'utf8').replace(/^\uFEFF/, '').replace(/\r\n|\r|\n/g, eol);
+  }
+
+  /**
+   * Waits for VS Code to reload the clean TextDocument from its changed file; false when it did not.
+   * VS Code skips that reload when the file changes while it is saving the document, and misses it
+   * when its file watcher does: the edit then failed ("did not reload … from disk") until the file
+   * changed again. Only a window that does not answer at all (Remote-SSH, a laptop asleep) fails it:
+   * its document API would not apply the file's text either.
+   */
+  private async reloaded(): Promise<boolean> {
+    const reloaded = await new Promise<boolean>(resolve => {
+      const listener = vscode.workspace.onDidChangeTextDocument(event => {
+        if (event.document !== this.document || event.contentChanges.length === 0) return;
+        clearTimeout(timeout); listener.dispose(); resolve(true);
+      });
+      const timeout = setTimeout(() => { listener.dispose(); resolve(false); }, 5000);
+    });
+    if (reloaded) return true;
+    const answered = await new Promise<boolean>(resolve => {
+      const timeout = setTimeout(() => resolve(false), PROBE_MS);
+      vscode.commands.getCommands(true).then(() => { clearTimeout(timeout); resolve(true); }, () => { clearTimeout(timeout); resolve(false); });
+    });
+    if (!answered) throw new WindowUnreachable(`VS Code did not reload ${this.docId} from disk`);
+    console.warn(`OverLyX: VS Code did not reload ${this.docId} from disk; its text is applied as an edit`);
+    return false;
   }
 
   /** Drawing data lives in SVGs: persist it before reparsing the TeX anchor. */

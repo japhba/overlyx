@@ -9,6 +9,8 @@ import { parseDocumentText } from '../packages/vscode/src/host/texdoc.ts';
 const state = vi.hoisted(() => ({ documents: new Map<string, { text: string; version: number }>(), listeners: new Set<(event: unknown) => void>() }));
 vi.mock('vscode', () => ({
   Range: class { constructor(..._args: unknown[]) {} },
+  EndOfLine: { LF: 1, CRLF: 2 },
+  commands: { getCommands: async () => [] },
   WorkspaceEdit: class {
     edits: { uri: { fsPath: string }; text: string }[] = [];
     replace(uri: { fsPath: string }, _range: unknown, text: string) { this.edits.push({ uri, text }); }
@@ -96,6 +98,26 @@ describe('VS Code external source synchronization', () => {
     expect(doc.version).toBe(2);
     expect(doc.isDirty).toBe(false);
     expect(doc.text).toBe(revised);
+  });
+
+  it('does not wait for a reload that cannot change the buffer (byte order mark, line endings)', async () => {
+    doc.isDirty = false;
+    fs.writeFileSync(doc.uri.fsPath, '\uFEFF' + initial.replace(/\n/g, '\r\n'));
+    expect(await session.syncFromDisk()).toBe(false);
+    expect(doc.text).toBe(initial);
+  });
+
+  it('applies the file to a clean buffer VS Code did not reload', async () => {
+    vi.useFakeTimers();
+    try {
+      doc.isDirty = false;
+      fs.writeFileSync(doc.uri.fsPath, revised);
+      const refreshing = session.syncFromDisk();
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(await refreshing).toBe(true);
+      expect(doc.text).toBe(revised);
+      expect(fs.readdirSync(root)).not.toContain('recovery');
+    } finally { vi.useRealTimers(); }
   });
 
   it('ignores an unchanged stale view after the file is replaced', async () => {
