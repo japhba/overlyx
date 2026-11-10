@@ -9,7 +9,7 @@
 import type { EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
 import { TextSelection } from 'prosemirror-state';
-import { blankDraftSvg, draftOfFigure, figureBase, finalCandidates, isFigureDraft, paramMap, switchFigureName, unquote, FINAL_ENDINGS } from '@overlyx/core';
+import { blankDraftSvg, canMakePlaceholder, draftOfFigure, figureBase, finalCandidates, isFigureDraft, paramMap, switchFigureName, unquote, FINAL_ENDINGS } from '@overlyx/core';
 import { api, fileUrl } from '../api';
 import { uiConfirm } from '../app/Dialogs';
 import { insertFloat, insertGraphics } from './commands';
@@ -19,6 +19,7 @@ import { isMarkdownDoc } from './markdown';
 import { isLayoutDoc } from './layout/commands';
 import { placeImage } from './layout/images';
 import { editSvgFile } from './svgEditorEvents';
+import { makePlaceholder, placeholderTarget } from './placeholder';
 import type { MenuItem } from './contextmenu';
 
 /* ------------------------------------------------------------------ files */
@@ -162,6 +163,8 @@ export interface FigureSlot {
   rename(from: string, to: string): boolean;
   /** a file put into the project (project path), rejecting when the name is taken; absent: the server's upload */
   upload?(rel: string, data: Blob): Promise<void>;
+  /** no file under the name (the picture did not load): the project path a placeholder for it goes to (editor/placeholder.ts) */
+  missing?: string;
 }
 
 /**
@@ -211,6 +214,7 @@ export function figureMenuItems(s: FigureSlot | null, opts: { drawShortcut?: str
   if (!s) return [];
   const draft = isFigureDraft(s.name), ro = s.readOnly;
   return [
+    ...(s.missing ? [{ label: 'Make a placeholder figure', icon: 'image' as const, disabled: ro || !canMakePlaceholder(s.missing), action: () => void makePlaceholder(s.project, s.missing!, s.upload) }] : []),
     { label: 'Show the draft', checked: draft, disabled: ro, action: () => void switchVersion(s, 'draft') },
     { label: 'Show the final figure', checked: !draft, disabled: ro, action: () => void switchVersion(s, 'final') },
     { label: draft ? 'Draw on the draft…' : 'Draw the draft…', icon: 'edit', ...(draft && opts.drawShortcut ? { shortcut: opts.drawShortcut } : {}), disabled: ro && !draft, action: () => void switchVersion(s, 'draft', true) },
@@ -232,6 +236,7 @@ function docSlot(view: EditorView, pos: number): FigureSlot | null {
   if (!name) return null;
   return {
     project, name, rel, aspect: shownAspect(view, pos), readOnly: !view.editable,
+    missing: (view.nodeDOM(pos) as HTMLElement | null)?.hasAttribute?.('data-nofile') ? placeholderTarget(name, viewDocDir(view)) : undefined,
     rename: (from, to) => {
       const hit = findFigure(view, pos, from);
       if (!hit || !view.editable) return false;
@@ -262,6 +267,7 @@ export function layoutImageSlot(view: EditorView, pos: number): FigureSlot | nul
   return {
     project, name, rel: figureFile(name, viewDocDir(view)), aspect: shownAspect(view, pos) ?? (node.attrs.w ? Number(node.attrs.h) / Number(node.attrs.w) : null),
     readOnly: !view.editable,
+    missing: (view.nodeDOM(pos) as HTMLElement | null)?.classList?.contains('ol-missing') ? placeholderTarget(name, viewDocDir(view)) : undefined,
     rename: (from, to) => {
       let at = view.state.doc.nodeAt(pos)?.attrs.src === from ? pos : -1;
       if (at < 0) view.state.doc.descendants((n, p) => { if (at < 0 && n.type.name === 'ol_image' && n.attrs.src === from) at = p; return at < 0; });

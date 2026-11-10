@@ -959,6 +959,13 @@ html[data-theme="dark"] { --cm-accent: #f4c03c; --cm-chip-bg: #8a6b12; --cm-chip
 .lyx-graphics img { display: block; max-width: 100%; height: auto; margin: 0 auto; background: #fff; }
 .lyx-graphics .graphics-caption { display: block; font-family: var(--ui-font); font-size: 0.8em; color: var(--ui-muted); border: 1px dashed var(--ui-border); padding: 8px; }
 .lyx-graphics .graphics-caption:empty { display: none; }
+/* a figure with no file under its name yet (GraphicsView): where it goes, and Make a placeholder (editor/placeholder.ts) */
+.lyx-graphics .gfx-missing { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; box-sizing: border-box; max-width: 100%; min-height: 120px; margin: 0 auto; padding: 34px 12px 14px;
+  border: 1px dashed var(--ui-border); background: color-mix(in srgb, var(--ui-muted) 8%, transparent); color: var(--ui-muted); font: 0.8em/1.4 var(--ui-font); overflow-wrap: anywhere; }
+.lyx-graphics .gfx-missing[hidden], .lyx-graphics .gfx-missing button[hidden] { display: none; }
+.lyx-graphics .gfx-missing button { padding: 3px 10px; border: 1px solid var(--ui-border); border-radius: 999px; background: var(--surface); color: var(--ui-fg); font: 500 12px/1.4 var(--ui-font); cursor: pointer; }
+.lyx-graphics .gfx-missing button:disabled { opacity: .6; cursor: progress; }
+.ProseMirror[contenteditable="false"] .lyx-graphics .gfx-missing button { display: none; }
 /* an image in a list item or nested in one belongs to it: it starts at the item's text, as LaTeX and markdown
    put it (centred, it would look like a figure of its own) — unless its paragraph is centred */
 .lyx-par:is(.lyx-layout-itemize, .lyx-layout-enumerate, .lyx-layout-description, .lyx-layout-labeling, [data-depth]:not([data-depth="0"])):not([data-align]) > .lyx-graphics { text-align: left; }

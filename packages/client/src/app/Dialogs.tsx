@@ -10,6 +10,7 @@ import { ZoteroConnect } from './ZoteroConnect';
 import type { Node as PMNode } from 'prosemirror-model';
 import { paramMap, unquote, moduleWarnings, markEditedSettings, columnWidthLength } from '@overlyx/core';
 import { figureUrl, resolveDocPath, toDocRel as docRelPath } from '../editor/context';
+import { offerPlaceholder } from '../editor/placeholder';
 import type { EditorView } from 'prosemirror-view';
 import { referenceTargets, type ReferenceOptions } from '../editor/references';
 import { editorContext } from '../editor/context';
@@ -110,7 +111,7 @@ export function GraphicsDialog({ meta, project, docDir = '', initial, onInsert, 
   const text = (k: keyof GraphicsOpts, placeholder = '') => <input type="text" value={String(o[k] ?? '')} onInput={e => set(k, (e.target as HTMLInputElement).value)} placeholder={placeholder} />;
   const check = (k: keyof GraphicsOpts) => <input type="checkbox" checked={!!o[k]} onChange={e => set(k, (e.target as HTMLInputElement).checked)} />;
   return (
-    <Dialog title="Graphics" onClose={onClose} wide buttons={<button class="btn primary" disabled={!filename} onClick={() => { onInsert(filename, o); onClose(); }}>{initial ? 'Apply' : 'Insert'}</button>}>
+    <Dialog title="Graphics" onClose={onClose} wide buttons={<button class="btn primary" disabled={!filename} onClick={() => { onInsert(filename, o); onClose(); void offerPlaceholder(project, filename, docDir); }}>{initial ? 'Apply' : 'Insert'}</button>}>
       <Row label="File"><input type="text" value={filename} onInput={e => setFilename((e.target as HTMLInputElement).value)} placeholder="figures/plot.pdf" /><button class="small-btn" onClick={upload}>Upload…</button></Row>
       <div class="list" style="max-height:140px">
         {files.map(f => <div key={f.path} class={toDocRel(f.path) === filename ? 'sel' : ''} onClick={() => setFilename(toDocRel(f.path))}>{f.path}</div>)}

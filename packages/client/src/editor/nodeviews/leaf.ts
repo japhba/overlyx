@@ -12,8 +12,9 @@ import { linkTooltip, LINK_CLICK } from '../links';
 import { applyChangeAttrs } from '../plugins/changes';
 import { classifyImage, type FigureKind } from '../figureinvert';
 import { editSvgFile } from '../svgEditorEvents';
-import { draftOfFigure, finalOf, isFigureDraft } from '@overlyx/core';
+import { canMakePlaceholder, draftOfFigure, finalOf, isFigureDraft } from '@overlyx/core';
 import { drawDraft, showFigureVersion } from '../figuredraft';
+import { figureMissing, makePlaceholder, placeholderTarget } from '../placeholder';
 import { renderTitlePreview } from './title';
 import { renderStaticInto } from '../lyxmath/field';
 import { macroTableFor, mathViews } from '../lyxmath/macrotable';
@@ -43,7 +44,8 @@ export class GraphicsView implements NodeView {
     // the pixels are read back for the dark-theme classification: ask for CORS so a canvas copy is
     // allowed when the images come from another origin (the VS Code extension's local bridge)
     this.img.crossOrigin = 'anonymous';
-    this.img.addEventListener('load', () => { this.kind = classifyImage(this.img); this.applyInvert(); });
+    this.img.addEventListener('load', () => { this.showMissing(null); this.kind = classifyImage(this.img); this.applyInvert(); });
+    this.img.addEventListener('error', () => void this.checkMissing());
     this.caption = document.createElement('span');
     this.caption.className = 'graphics-caption';
     // an SVG figure: ✎ over its corner (on hover) opens the drawing in the SVG editor, as a double-click does
@@ -70,7 +72,18 @@ export class GraphicsView implements NodeView {
       });
       this.versions.append(b);
     }
-    this.dom.append(this.img, this.caption, this.versions, this.editBtn);
+    // no file under the name yet (a plot still to be made): said in the figure's place, with a placeholder offered (editor/placeholder.ts)
+    this.missing = document.createElement('span');
+    this.missing.className = 'gfx-missing';
+    this.missing.hidden = true;
+    this.missingText = document.createElement('span');
+    this.makeBtn = document.createElement('button');
+    this.makeBtn.type = 'button';
+    this.makeBtn.textContent = 'Make a placeholder';
+    this.makeBtn.addEventListener('mousedown', ev => { ev.preventDefault(); ev.stopPropagation(); });
+    this.makeBtn.addEventListener('click', ev => { ev.preventDefault(); ev.stopPropagation(); void this.placeholder(); });
+    this.missing.append(this.missingText, this.makeBtn);
+    this.dom.append(this.img, this.missing, this.caption, this.versions, this.editBtn);
     this.render();
     this.dom.addEventListener('dblclick', (ev) => { ev.preventDefault(); if (this.svgRel()) this.editSvg(); else editorContext.openInsetDialog?.(this.view, this.getPos()); });
     this.watchFile();
@@ -82,6 +95,36 @@ export class GraphicsView implements NodeView {
 
   private editBtn: HTMLButtonElement;
   private versions: HTMLElement;
+  private missing: HTMLElement;
+  private missingText: HTMLElement;
+  private makeBtn: HTMLButtonElement;
+  private fileName(): string { return unquote(params(this.node).get('filename') ?? ''); }
+  /** the picture did not load: is it that there is no file? */
+  private async checkMissing() {
+    const src = this.img.src, file = this.fileName(), project = viewProject(this.view) || editorContext.project;
+    if (!project || !file) return;
+    const missing = await figureMissing(project, file, viewDocDir(this.view));
+    if (this.img.src === src) this.showMissing(missing ? file : null);
+  }
+  /** `file` has no file (null: it is there, or being loaded) */
+  private showMissing(file: string | null) {
+    this.dom.toggleAttribute('data-nofile', !!file);
+    this.missing.hidden = !file;
+    this.img.style.display = file ? 'none' : '';
+    if (!file) return;
+    const target = placeholderTarget(file, viewDocDir(this.view));
+    this.missingText.textContent = `No file ${file} yet`;
+    this.makeBtn.hidden = !canMakePlaceholder(target);
+    this.makeBtn.title = `Make a placeholder figure at ${target} — a grey frame with the file's name, so the editor and the PDF show where the figure goes. The real figure saved there replaces it.`;
+  }
+  private async placeholder() {
+    const file = this.fileName(), project = viewProject(this.view) || editorContext.project;
+    if (!project || !file || !this.view.editable) return;
+    this.makeBtn.disabled = true;
+    const made = await makePlaceholder(project, placeholderTarget(file, viewDocDir(this.view)));
+    this.makeBtn.disabled = false;
+    if (made) { this.version = Date.now(); this.render(); }
+  }
   /** the figure's file when it is an SVG drawing (project-relative), else null */
   private svgRel(): string | null {
     const file = params(this.node).get('filename') ?? '';
@@ -139,11 +182,12 @@ export class GraphicsView implements NodeView {
     this.renderVersions(unquote(file), draft);
     if (project && file) {
       const url = figureUrl(project, file, viewDocDir(this.view), 1600) + (this.version ? `&v=${this.version}` : '');
-      if (this.img.dataset.src !== url) { this.img.dataset.src = url; this.img.src = url; }
-      this.img.style.display = '';
+      if (this.img.dataset.src !== url) { this.img.dataset.src = url; this.img.src = url; this.showMissing(null); }
       this.caption.textContent = '';
     } else {
+      this.showMissing(null);
       this.img.removeAttribute('src');
+      delete this.img.dataset.src;
       this.img.style.display = 'none';
       this.caption.textContent = file ? `[graphics: ${file}]` : '[graphics: no file]';
     }
@@ -164,6 +208,7 @@ export class GraphicsView implements NodeView {
     this.img.style.maxWidth = '100%';
     const shrink = lyxscale ? Math.max(10, Math.min(100, Number(lyxscale))) : 100;
     if (!cssWidth && scale) this.img.style.width = `${Math.min(100, Number(scale))}%`;
+    this.missing.style.width = this.img.style.width;
     this.dom.style.setProperty('--lyxscale', String(shrink / 100));
     const rot = p.get('rotateAngle');
     this.img.style.rotate = rot ? `${-Number(rot)}deg` : '';
