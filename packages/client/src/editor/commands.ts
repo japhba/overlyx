@@ -518,7 +518,41 @@ function selectedParagraphs(state: EditorState): PMNode[] | null {
   // a selection from the end of a paragraph, or to the start of one, does not take that paragraph along
   if ($from.parentOffset === $from.parent.content.size && paras.length > 1 && !paras[0].content.size) paras.shift();
   if ($to.parentOffset === 0 && paras.length > 1 && !paras[paras.length - 1].content.size) paras.pop();
-  return paras;
+  // nested items keep their nesting relative to each other; an inset's paragraphs start at depth 0
+  const base = Math.min(...paras.map(p => p.attrs.depth ?? 0));
+  return base ? paras.map(p => p.type.create({ ...p.attrs, depth: p.attrs.depth - base }, p.content)) : paras;
+}
+
+/**
+ * The paragraphs a selection of whole paragraphs covers — from the start of one (or the end of the one
+ * before) to the end of another (or the start of the next), as dragging over bullets selects them — as
+ * the range to replace and the depth of its first paragraph. null for a selection within one paragraph
+ * or starting or ending inside one, and when the paragraph after the range is nested deeper (the
+ * unselected sub-items of the last selected one, which a Standard paragraph cannot hold).
+ */
+function wholeParagraphs(tr: Transaction): { from: number; to: number; depth: number } | null {
+  const { $from, $to } = tr.selection;
+  if ($from.sameParent($to) || $from.parent.type !== schema.nodes.paragraph || $to.parent.type !== schema.nodes.paragraph) return null;
+  const from = $from.parentOffset === 0 ? $from.before() : $from.parentOffset === $from.parent.content.size ? $from.after() : -1;
+  const to = $to.parentOffset === $to.parent.content.size ? $to.after() : $to.parentOffset === 0 ? $to.before() : -1;
+  if (from < 0 || to <= from) return null;
+  const depth = tr.doc.resolve(from).nodeAfter?.attrs.depth ?? 0;
+  const next = tr.doc.resolve(to).nodeAfter;
+  if (next?.type === schema.nodes.paragraph && next.attrs.depth > depth) return null;
+  return { from, to, depth };
+}
+
+/**
+ * Put `node` (an inset or table that took in the selected paragraphs) in place of the selection of `tr`;
+ * returns where it starts. Whole selected paragraphs (wholeParagraphs) give way to a Standard paragraph
+ * holding it: in the first selected paragraph, as LyX places it, selected bullets became a note inside
+ * an empty bullet (`\item %` before `%% @note` in the .tex, an empty bullet in the PDF).
+ */
+function replaceSelected(tr: Transaction, node: PMNode): number {
+  const whole = wholeParagraphs(tr);
+  if (!whole) { tr.replaceSelectionWith(node, false); return tr.selection.from - node.nodeSize; }
+  tr.replaceWith(whole.from, whole.to, schema.nodes.paragraph.create({ layout: 'Standard', depth: whole.depth }, node));
+  return whole.from + 1;
 }
 
 /** The change mark (in an inline node's `marks` attr) of something inserted while changes are tracked. */
@@ -529,8 +563,7 @@ function insertedMarks(): string | undefined {
 
 /** Put the inset `node` in place of the selection of `tr`; the cursor goes to the end of its first paragraph. */
 function placeInset(tr: Transaction, node: PMNode): Transaction {
-  tr.replaceSelectionWith(node, false);
-  const pos = tr.selection.from - node.nodeSize;
+  const pos = replaceSelected(tr, node);
   const inner = pos + 1 + 1 + (node.firstChild?.content.size ?? 0);
   return tr.setSelection(TextSelection.create(tr.doc, Math.min(inner, tr.doc.content.size)));
 }
@@ -673,8 +706,7 @@ export function insertFloat(type: 'figure' | 'table' | 'algorithm' = 'figure'): 
     if (!dispatch) return true;
     let tr = state.tr;
     if (!taken && !state.selection.empty) tr.setSelection(Selection.near(tr.doc.resolve(state.selection.to), -1));
-    tr = tr.replaceSelectionWith(float, false);
-    const pos = tr.selection.from - float.nodeSize;
+    const pos = taken ? replaceSelected(tr, float) : tr.replaceSelectionWith(float, false).selection.from - float.nodeSize;
     // into the caption when something was moved in (its paragraph's start: +1 float, +1 paragraph, +1 caption, +1 its paragraph)
     let caret = pos + 2;
     if (taken) {
@@ -1090,8 +1122,7 @@ export function insertTable(rows: number, cols: number): Command {
     if (!dispatch) return true;
     let tr = state.tr;
     if (!taken && !state.selection.empty) tr.setSelection(Selection.near(tr.doc.resolve(state.selection.to), -1));
-    tr = tr.replaceSelectionWith(table, false);
-    const pos = tr.selection.from - table.nodeSize;
+    const pos = taken ? replaceSelected(tr, table) : tr.replaceSelectionWith(table, false).selection.from - table.nodeSize;
     tr = tr.setSelection(TextSelection.create(tr.doc, pos + 4));
     dispatch(tr.scrollIntoView());
     return true;

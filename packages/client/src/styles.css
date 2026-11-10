@@ -719,6 +719,8 @@ html.lyx-list-dragging, html.lyx-list-dragging * { cursor: grabbing !important; 
 .lyx-inset > .inset-box > .inset-content { display: inline; }
 .lyx-inset > .inset-box > .inset-content > .lyx-par { display: block; text-indent: 0; }
 .lyx-inset > .inset-box > .inset-content > .lyx-par:first-child { display: inline; }
+/* a list item first stays a block (inline, its bullet and hanging indent were off the others') */
+.lyx-inset > .inset-box > .inset-content > .lyx-par:first-child:is(.lyx-layout-itemize, .lyx-layout-enumerate, .lyx-layout-description, .lyx-layout-labeling) { display: block; }
 .lyx-inset > .inset-box > .inset-content > .lyx-par.lyx-layout-plain-layout { padding: 0; }
 .lyx-inset.collapsed > .inset-box > .inset-content { display: none; }
 .lyx-inset.collapsed > .inset-box { background: var(--ui-bg2); }
