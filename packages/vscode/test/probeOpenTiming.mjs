@@ -39,7 +39,7 @@ const udd = fs.mkdtempSync(path.join(os.tmpdir(), 'overlyx-probe-udd-'));
 const extDir = fs.mkdtempSync(path.join(os.tmpdir(), 'overlyx-probe-ext-'));
 fs.mkdirSync(path.join(udd, 'User'), { recursive: true });
 fs.writeFileSync(path.join(udd, 'User/settings.json'), JSON.stringify({
-  'workbench.editorAssociations': { '*.tex': 'overlyx.texEditor', '*.md': 'overlyx.texEditor' },
+  'workbench.editorAssociations': { '*.tex': 'overlyx.texEditor', '*.md': 'overlyx.texEditor', '*.html': 'overlyx.htmlEditor' },
   'security.workspace.trust.enabled': false, 'update.mode': 'none', 'telemetry.telemetryLevel': 'off',
   'workbench.startupEditor': 'none', 'window.restoreWindows': 'none', 'workbench.colorTheme': 'Default Light Modern',
 }, null, 2));
