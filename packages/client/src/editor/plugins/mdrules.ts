@@ -10,8 +10,7 @@
  * Lists typed the LaTeX way: `\begin{itemize}` (enumerate, description) alone in a paragraph makes
  * it the list's first item, `\item ` starts an item (a bullet in ordinary text; nothing more in a
  * list, which already is one), `\end{itemize}` alone in an item leaves the list. Other commands typed
- * in the text are typedtex.ts'. Math only comes from `$` / `$$`, as in Overleaf: `\alpha` typed in the
- * text is no formula (it used to become one, which was a second way into math).
+ * in the text are typedtex.ts' (math typed there too: `\alpha `, `\frac{a}{b}` become formulas).
  */
 import { InputRule, inputRules } from 'prosemirror-inputrules';
 import { inRawText } from '../rawtext';

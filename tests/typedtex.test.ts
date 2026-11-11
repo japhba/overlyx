@@ -22,10 +22,11 @@ vi.mock('../packages/client/src/api', () => ({
     },
   },
 }));
-const { typedTexPlugin, commandRunAt, insideOpenGroup } = await import('../packages/client/src/editor/plugins/typedtex.ts');
+const { typedTexPlugin, commandRunAt, insideOpenGroup, isMathCommand } = await import('../packages/client/src/editor/plugins/typedtex.ts');
+const { editorContext } = await import('../packages/client/src/editor/context.ts');
 
-function setup(docId = 'jan/paper/main.tex', text = '') {
-  const plugin = typedTexPlugin();
+function setup(docId = 'jan/paper/main.tex', text = '', hooks: Parameters<typeof typedTexPlugin>[0] = {}) {
+  const plugin = typedTexPlugin(hooks);
   const par = schema.nodes.paragraph.create({ layout: 'Standard' }, text ? [schema.text(text)] : []);
   let state = EditorState.create({ doc: schema.nodes.doc.create(null, [par]), plugins: [plugin] });
   state = state.apply(state.tr.setSelection(TextSelection.atEnd(state.doc)));
@@ -40,7 +41,8 @@ function setup(docId = 'jan/paper/main.tex', text = '') {
       if (!plugin.props.handleTextInput!.call(plugin, view as never, from, to, ch, () => view.state.tr)) view.dispatch(view.state.tr.insertText(ch, from, to));
     }
   };
-  return { view, type };
+  const key = (k: string) => (plugin.props.handleKeyDown!.call(plugin, view as never, { key: k, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false } as KeyboardEvent) as boolean);
+  return { view, type, key };
 }
 const settle = async () => { for (let i = 0; i < 4; i++) await new Promise(r => setTimeout(r, 0)); };
 const json = (view: { state: EditorState }) => view.state.doc.toJSON().content as { attrs: { layout: string }; content?: { type: string; text?: string; marks?: { type: string }[]; attrs?: Record<string, unknown> }[] }[];
@@ -105,15 +107,70 @@ describe('typed LaTeX commands', () => {
     expect(nodes.some(n => n.type === 'inset' && n.attrs!.name === 'ERT')).toBe(true);
   });
 
-  it('math only behind $: \\alpha and \\frac{…}{…} typed in the text stay TeX code, no formula', async () => {
-    const { view, type } = setup();
+  it('math typed in the text is a formula at once — \\alpha at the space, \\frac{…}{…} when finished; Esc gives the text back', async () => {
+    expect([isMathCommand('alpha'), isMathCommand('frac'), isMathCommand('mathbb'), isMathCommand('hat')]).toEqual([true, true, true, true]);
+    expect([isMathCommand('textbf'), isMathCommand('ldots'), isMathCommand('underline'), isMathCommand('LaTeX'), isMathCommand('smiley')]).toEqual([false, false, false, false, false]);
+    const { view, type, key } = setup();
     type('let \\alpha be \\frac{a}{b} here');
     await settle();
-    const nodes = json(view)[0].content!;
-    expect(nodes.some(n => n.type === 'math_inline')).toBe(false);
-    // (TeX code as pasted LaTeX gets it: an unknown command's braces are code, its arguments text)
-    const code = view.state.doc.firstChild!.content.content.filter(n => n.type.name === 'inset' && n.attrs.name === 'ERT').map(n => n.textContent);
-    expect(code).toEqual(['\\alpha', '\\frac{', '}{', '}']);
+    const maths = json(view)[0].content!.filter(n => n.type === 'math_inline').map(n => n.attrs!.latex);
+    expect(maths).toEqual(['\\alpha', '\\frac{a}{b}']);
+    expect(parsed.calls.filter(c => c.includes('alpha') || c.includes('frac'))).toEqual([]);   // (no server for those)
+    // Esc right after: the typed text back, the space typed after it kept
+    type(' and \\gamma ');
+    expect(json(view)[0].content!.at(-2)).toMatchObject({ type: 'math_inline' });
+    expect(key('Escape')).toBe(true);
+    expect(view.state.doc.textContent.endsWith('and \\gamma ')).toBe(true);
+    expect(key('Escape')).toBe(false);   // (once)
+    // …and only right after: typing on, Esc is Esc again
+    type('\\beta x');
+    expect(key('Escape')).toBe(false);
+  });
+
+  it('Enter ends a command without arguments as a space does; \\centering centres the paragraph', async () => {
+    const { view, type, key } = setup();
+    type('\\alpha');
+    key('Enter');
+    expect(json(view)[0].content![0]).toMatchObject({ type: 'math_inline', attrs: { latex: '\\alpha' } });
+    const c = setup();
+    c.type('\\centering ');
+    expect(c.view.state.doc.firstChild!.attrs.align).toBe('center');
+    expect(c.view.state.doc.textContent).toBe('');
+  });
+
+  it('environments alone in a paragraph: a float to type into and out of, a display formula, the class\'s paragraph styles', async () => {
+    const { view, type } = setup();
+    type('\\begin{figure}');
+    const float = view.state.doc.firstChild!.firstChild!;
+    expect(float.attrs).toMatchObject({ name: 'Float', arg: 'figure' });
+    expect(view.state.selection.$from.parent.attrs).toMatchObject({ layout: 'Plain Layout', align: 'center' });
+    type('\\includegraphics{plot.pdf}');
+    view.dispatch(view.state.tr.split(view.state.selection.from));
+    type('\\end{figure}');
+    await settle();
+    const f = view.state.doc.firstChild!.firstChild!;
+    expect(f.childCount).toBe(1);   // (the paragraph \end{figure} was typed in went)
+    expect(f.firstChild!.firstChild!.type.name).toBe('graphics');
+    expect(view.state.selection.$from.parent).toBe(view.state.doc.lastChild);   // a paragraph of its own after the float
+    expect(view.state.doc.lastChild!.attrs.layout).toBe('Standard');
+    // a display formula: the editor's (assembly.ts hands insertMath in)
+    const opened: string[] = [];
+    const m = setup('jan/paper/main.tex', '', { displayMath: (_v, env) => { opened.push(env); return true; } });
+    m.type('\\begin{align*}');
+    expect(opened).toEqual(['align*']);
+    expect(m.view.state.doc.textContent).toBe('');
+    // the class's environments
+    editorContext.meta = { layouts: [{ name: 'Standard' }, { name: 'Theorem', latexType: 'Environment', latexName: 'theorem' }] } as never;
+    try {
+      const t = setup();
+      t.type('\\begin{theorem}');
+      expect(t.view.state.doc.firstChild!.attrs.layout).toBe('Theorem');
+      t.type('Every proof ends.');
+      t.view.dispatch(t.view.state.tr.split(t.view.state.selection.from));
+      t.type('\\end{theorem}');
+      expect(t.view.state.doc.lastChild!.attrs.layout).toBe('Standard');
+      expect(t.view.state.doc.lastChild!.textContent).toBe('');
+    } finally { editorContext.meta = null; }
   });
 
   it('leaves markdown documents, a caret back inside the command and a command changed meanwhile alone', async () => {

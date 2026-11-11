@@ -66,7 +66,7 @@ import { sliceText } from './cliptext';
 import { clipboardSerializer } from './cliphtml';
 import { showContextMenu } from './contextmenu';
 import { editorContextMenu } from './editormenu';
-import { includeTarget } from './commands';
+import { includeTarget, insertMath } from './commands';
 import { LAYOUT_NODE_VIEWS } from './layout/nodeviews';
 import { layoutPlugin, layoutKey } from './layout/controller';
 import { layoutPaste, layoutDrop } from './layout/images';
@@ -145,7 +145,8 @@ export function assemblePlugins(o: AssemblyOptions): Plugin[] {
     aiCompletePlugin(),
     spellPlugin(),
     markdownRulesPlugin(),   // `- ` / `1. ` / `# ` at a paragraph start, before autocorrect looks at the space
-    typedTexPlugin(),   // `\textbf{…}`, `\section{…}`, `\cite{…}` … typed in a LaTeX document's text become what they mean
+    // `\textbf{…}`, `\section{…}`, `\cite{…}`, `\alpha`, `\begin{figure}` … typed in a LaTeX document's text become what they mean
+    typedTexPlugin({ displayMath: (view, env) => insertMath(true, env, { texSpaces: true })(view) }),
     ...(o.markdown || o.article ? markdownPlugins({ article: !!o.article }) : []),   // `**bold**`, ``` + Enter …; markdown's blocks and marks only (before the LyX keymap)
     autocorrectPlugin(),
     arrowsPlugin(),   // -> → and <- ←, --> ⟶, <-- ⟵ as they are typed; ⌘Z or Backspace right after gives the characters back (before the keymap's Backspace)

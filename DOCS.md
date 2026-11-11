@@ -1914,17 +1914,27 @@ blend.
 * **LaTeX typed in the text** (`editor/plugins/typedtex.ts`, `editor/plugins/mdrules.ts`; LaTeX
   documents only, not markdown or articles, never in TeX code or code paragraphs): as in Overleaf's
   visual editor, a finished command becomes what it means once the caret leaves it — `\textbf{…}`,
-  `\emph{…}`, `\cite{…}`, `\ref{…}`, `\footnote{…}`, `\href{…}{…}` … in place, `\section{…}` (and the
-  other headings) when it is all its paragraph holds; `\LaTeX`, `\today`, `\ldots` … at the space or
-  punctuation after them. "Finished": its last `}` typed and then a space, a full stop, Enter or a
-  click elsewhere (a `{` or `[` right after the `}` is its next argument; a command inside the
-  braces of one still open waits for that one). The command is parsed by the server's `/clip` (the
-  same as pasted LaTeX, the document's own preamble), so what the editor cannot show becomes a TeX
-  code box and reaches the PDF as typed. `\begin{itemize}` (enumerate, description) alone in a
-  paragraph makes it the first item, `\item ` starts one, `\end{itemize}` alone in an item leaves
-  the list (mdrules.ts, at once). Math is only what `$` / `$$` open (commands.ts typeDollar), as in
-  Overleaf (the user, 11 Nov 2026: one way into math is less confusing): `\alpha` or `\frac{a}{b}`
-  typed in the text stays TeX code as typed, and the build says "Missing $ inserted". Ctrl+Z gives the typed text back. `tests/typedtex.test.ts`.
+  `\emph{…}`, `\cite{…}`, `\ref{…}`, `\footnote{…}`, `\href{…}{…}`, `\includegraphics{…}`,
+  `\caption{…}`, `\label{…}` … in place, `\section{…}` (and the other headings) when it is all its
+  paragraph holds; `\LaTeX`, `\today`, `\ldots` … at the space, punctuation or Enter after them.
+  "Finished": its last `}` typed and then a space, a full stop, Enter or a click elsewhere (a `{` or
+  `[` right after the `}` is its next argument; a command inside the braces of one still open waits
+  for that one). Those are parsed by the server's `/clip` (the same as pasted LaTeX, the document's
+  own preamble), so what the editor cannot show becomes a TeX code box and reaches the PDF as typed.
+  **Math typed in the text is a formula at once** (the user, 11 Nov 2026, after first choosing "math
+  only behind `$`" and taking it back on a colleague's feedback): `\alpha ` at the space, `\frac{a}{b}`,
+  `\mathbb{R}`, `\hat{x}` when finished — locally, `isMathCommand` (the math symbol table's kinds
+  minus what LaTeX also takes in text: `\ldots`, `\underline`, `\dag`, wasysym symbols …); `$` / `$$`
+  open a formula to type into (commands.ts typeDollar). **Environments alone in their paragraph:**
+  `\begin{equation}` (align, gather, multline, flalign, eqnarray, starred too) opens a display formula of
+  that kind (assembly.ts hands `insertMath` in); `\begin{figure}` / `{table}` / `{algorithm}` a float
+  with one centred paragraph to type `\includegraphics`, `\caption`, `\label` into, `\end{figure}` leaves
+  it (a paragraph of its own after it); `\begin{theorem}` and any environment of the class (meta
+  layouts' `latexName`) its paragraph style, `\end{theorem}` back to Standard; `\centering` centres the
+  paragraph; `\begin{itemize}` (enumerate, description) alone in a paragraph makes it the first item,
+  `\item ` starts one, `\end{itemize}` alone in an item leaves the list (mdrules.ts, at once). **Esc
+  right after a conversion** (nothing typed since, the caret where it left it) gives the typed text
+  back — to keep a command verbatim; Ctrl+Z too. `tests/typedtex.test.ts`.
 * **Lists, Google-Docs style** (`editor/commands.ts leaveList`, `editor/plugins/mdrules.ts`): `- ` or `* ` at
   the start of a paragraph starts a bullet list, `1. ` a numbered one, `# ` / `## ` / … a heading,
   and `! ` / `!! ` / … its unnumbered counterpart at the same level in the document class
