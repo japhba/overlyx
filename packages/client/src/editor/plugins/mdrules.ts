@@ -7,18 +7,13 @@
  * (prosemirror-inputrules' undoInputRule, bound in keymap.ts). Only Standard / Plain paragraphs
  * change — a heading or a list item already is what it is.
  *
- * A math symbol typed as TeX in the text (`\alpha `, `\ll,` — the habit of everyone coming from
- * Overleaf, and what lands in the text after Space left a formula LyX-style) becomes an inline
- * formula instead of the literal `\textbackslash alpha` it used to be saved as; Backspace right
- * after gives the typed text back. Raw TeX (ERT, listings, code) is left alone.
- *
  * Lists typed the LaTeX way: `\begin{itemize}` (enumerate, description) alone in a paragraph makes
  * it the list's first item, `\item ` starts an item (a bullet in ordinary text; nothing more in a
  * list, which already is one), `\end{itemize}` alone in an item leaves the list. Other commands typed
- * in the text are typedtex.ts'.
+ * in the text are typedtex.ts'. Math only comes from `$` / `$$`, as in Overleaf: `\alpha` typed in the
+ * text is no formula (it used to become one, which was a second way into math).
  */
 import { InputRule, inputRules } from 'prosemirror-inputrules';
-import { schema, SYMBOLS } from '@overlyx/core';
 import { inRawText } from '../rawtext';
 import type { Plugin } from 'prosemirror-state';
 import type { LayoutInfo } from '../../api';
@@ -48,14 +43,6 @@ function layoutRule(re: RegExp, layoutFor: (m: RegExpMatchArray, layouts?: Layou
     return state.tr.delete(start, end).setNodeMarkup($from.before(), undefined, { ...par.attrs, layout });
   });
 }
-
-/** `\name` + a space or punctuation, where `name` is a math symbol (Greek letters, relations, operators): an inline formula. */
-const mathSymbolRule = new InputRule(/\\([A-Za-z]+)([\s,.;:!?)\]])$/, (state, match, start, end) => {
-  const name = match[1];
-  if (SYMBOLS[name]?.i !== 'sym' || inRawText(state) || !state.selection.$from.parent.isTextblock) return null;
-  const math = schema.nodes.math_inline.create({ latex: '\\' + name, delim: '$' });
-  return state.tr.replaceWith(start, end, [math, schema.text(match[2])]);
-});
 
 const LISTS: Record<string, string> = { itemize: 'Itemize', enumerate: 'Enumerate', description: 'Description' };
 const LIST_LAYOUTS = new Set(Object.values(LISTS));
@@ -92,7 +79,6 @@ export function markdownRulesPlugin(): Plugin {
       layoutRule(/^1[.)]\s$/, () => 'Enumerate'),
       layoutRule(/^(#{1,6})\s$/, (m, layouts) => headingForHashes(m[1].length, layouts)),
       layoutRule(/^(!{1,6})\s$/, (m, layouts) => headingForHashes(m[1].length, layouts, true)),
-      mathSymbolRule,
       layoutRule(/^\\begin\{(itemize|enumerate|description)\}$/, m => LISTS[m[1]]),
       itemRule,
       endListRule,

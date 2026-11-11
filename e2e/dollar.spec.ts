@@ -69,7 +69,7 @@ test('$ opens an inline formula, $ closes it, $$ a display formula; Backspace ri
   await expect.poll(() => readFileSync(`${DIR}/dollar.tex`, 'utf8'), { timeout: 15000 }).toContain('costs \\$5');
 });
 
-test('TeX typed the Overleaf way: spaces inside $…$, \\mathcal{F} braces, Esc keeps a finished command, \\alpha in the text', async ({ page }) => {
+test('TeX typed the Overleaf way: spaces inside $…$, \\mathcal{F} braces, Esc keeps a finished command, \\alpha in the text stays TeX', async ({ page }) => {
   await login(page);
   await openDoc(page, `${PROJECT}/habits.tex`);
   await page.waitForTimeout(500);
@@ -86,15 +86,12 @@ test('TeX typed the Overleaf way: spaces inside $…$, \\mathcal{F} braces, Esc 
   await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   await expect.poll(() => fieldLatex(page, '.lyx-editor .lyx-par:nth-child(2) .lyx-math-inline')).toBe('\\mathcal{F}+\\frac{a}{b}+\\beta');
-  // a math symbol typed in the text becomes a formula; Backspace right after gives the text back
+  // math only behind $, as in Overleaf: a math symbol typed in the text stays TeX code as typed
   await pars.nth(2).click({ position: { x: 4, y: 8 } });
   await page.keyboard.press('End');
   await page.keyboard.type(' Let \\alpha be');
-  await expect.poll(() => fieldLatex(page, '.lyx-editor .lyx-par:nth-child(3) .lyx-math-inline')).toBe('\\alpha');
-  await page.keyboard.type(' and \\gamma ');
-  await page.keyboard.press('Backspace');
-  await expect(pars.nth(2)).toContainText('and \\gamma');
-  await expect.poll(() => readFileSync(`${DIR}/habits.tex`, 'utf8'), { timeout: 15000 }).toContain('Let $\\alpha$ be and');
+  await expect.poll(() => readFileSync(`${DIR}/habits.tex`, 'utf8'), { timeout: 15000 }).toContain('Let \\alpha');
+  await expect(pars.nth(2).locator('.lyx-math-inline')).toHaveCount(0);
   const tex = readFileSync(`${DIR}/habits.tex`, 'utf8');
   expect(tex).toMatch(/\$r\s*\\ll d\$ and/);
   expect(tex).toContain('$\\mathcal{F}+\\frac{a}{b}+\\beta$');

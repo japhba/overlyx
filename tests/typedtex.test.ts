@@ -105,6 +105,17 @@ describe('typed LaTeX commands', () => {
     expect(nodes.some(n => n.type === 'inset' && n.attrs!.name === 'ERT')).toBe(true);
   });
 
+  it('math only behind $: \\alpha and \\frac{…}{…} typed in the text stay TeX code, no formula', async () => {
+    const { view, type } = setup();
+    type('let \\alpha be \\frac{a}{b} here');
+    await settle();
+    const nodes = json(view)[0].content!;
+    expect(nodes.some(n => n.type === 'math_inline')).toBe(false);
+    // (TeX code as pasted LaTeX gets it: an unknown command's braces are code, its arguments text)
+    const code = view.state.doc.firstChild!.content.content.filter(n => n.type.name === 'inset' && n.attrs.name === 'ERT').map(n => n.textContent);
+    expect(code).toEqual(['\\alpha', '\\frac{', '}{', '}']);
+  });
+
   it('leaves markdown documents, a caret back inside the command and a command changed meanwhile alone', async () => {
     const md = setup('jan/notes/a.md');
     md.type('\\textbf{x} ');

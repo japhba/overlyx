@@ -1922,8 +1922,9 @@ blend.
   same as pasted LaTeX, the document's own preamble), so what the editor cannot show becomes a TeX
   code box and reaches the PDF as typed. `\begin{itemize}` (enumerate, description) alone in a
   paragraph makes it the first item, `\item ` starts one, `\end{itemize}` alone in an item leaves
-  the list (mdrules.ts, at once). Math symbols (`\alpha `) become a formula at once and `$` / `$$`
-  open one (commands.ts typeDollar). Ctrl+Z gives the typed text back. `tests/typedtex.test.ts`.
+  the list (mdrules.ts, at once). Math is only what `$` / `$$` open (commands.ts typeDollar), as in
+  Overleaf (the user, 11 Nov 2026: one way into math is less confusing): `\alpha` or `\frac{a}{b}`
+  typed in the text stays TeX code as typed, and the build says "Missing $ inserted". Ctrl+Z gives the typed text back. `tests/typedtex.test.ts`.
 * **Lists, Google-Docs style** (`editor/commands.ts leaveList`, `editor/plugins/mdrules.ts`): `- ` or `* ` at
   the start of a paragraph starts a bullet list, `1. ` a numbered one, `# ` / `## ` / … a heading,
   and `! ` / `!! ` / … its unnumbered counterpart at the same level in the document class

@@ -6,15 +6,15 @@
  * is its next argument) — and `\LaTeX`, `\today`, `\ldots` … at the space or punctuation after them.
  * The command is parsed on the server against the document's own preamble, as pasted LaTeX is
  * (plugins/paste.ts): what the editor has no picture of becomes a TeX code box, so it reaches the
- * PDF as typed instead of as a printed backslash. Math symbols (`\alpha `) are mdrules.ts' (an
- * inline formula at once), `$` opens a formula (commands.ts typeDollar), `\begin{itemize}` and
- * `\item ` are mdrules.ts' too. A command inside the braces of one still open waits for that one;
+ * PDF as typed instead of as a printed backslash. Math is only what `$` / `$$` open (commands.ts
+ * typeDollar), as in Overleaf: `\alpha` or `\frac{a}{b}` typed in the text stays TeX code as typed,
+ * and the build says "Missing $ inserted". `\begin{itemize}` and `\item ` are mdrules.ts'. A command inside the braces of one still open waits for that one;
  * raw TeX, code, markdown documents and HTML articles are left alone. Ctrl+Z gives the typed text back.
  */
 import { Plugin, PluginKey, type EditorState } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
 import { Fragment, type Mark, type Node as PMNode, type ResolvedPos } from 'prosemirror-model';
-import { schema, SYMBOLS } from '@overlyx/core';
+import { schema } from '@overlyx/core';
 import { api } from '../../api';
 import { viewDocId } from '../context';
 import { inRawText } from '../rawtext';
@@ -182,7 +182,7 @@ export function typedTexPlugin(): Plugin<TypedState> {
         const before = $from.nodeBefore;
         if (!AFTER_BARE.test(text) || !before?.isText || !before.text!.includes('\\')) return false;
         const m = /\\([A-Za-z]+)$/.exec(before.text!);
-        if (!m || SYMBOLS[m[1]]) return false;
+        if (!m) return false;
         const line = lineBefore($from), at = line.length - m[0].length;
         if (escaped(line, at) || insideOpenGroup(line, at)) return false;
         const r = { from: from - m[0].length, to: from };
