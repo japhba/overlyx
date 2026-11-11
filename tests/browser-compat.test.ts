@@ -101,6 +101,19 @@ describe('idle time without requestIdleCallback (Safari)', () => {
     idleCallback(() => {}, { requestIdleCallback: (cb: unknown, o: unknown) => { calls.push(o); } });
     expect(calls).toEqual([{ timeout: 500 }]);
   });
+  // a page that keeps drawing frames (VS Code's webview) has hardly any idle time: a long paper's
+  // formulas came over 10–40 s, or never
+  it('scheduler.postTask goes first: a background task with a deadline of its own, not idle time', () => {
+    const calls: unknown[] = [];
+    let first = -1;
+    idleCallback(d => { first = d.timeRemaining(); }, {
+      requestIdleCallback: () => { calls.push('idle'); },
+      scheduler: { postTask: (cb: () => void, o: unknown) => { calls.push(o); cb(); return Promise.resolve(); } },
+    });
+    expect(calls).toEqual([{ priority: 'background' }]);
+    expect(first).toBeGreaterThan(0);
+    expect(first).toBeLessThanOrEqual(30);
+  });
 });
 
 /**

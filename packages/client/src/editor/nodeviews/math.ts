@@ -33,14 +33,14 @@ export const pendingFocus: { pos: number | null; keys: string[]; /** the formula
 /* ------------------------------------------------ deferred static rendering */
 
 interface Deferrable { dom: HTMLElement; view: EditorView; pending: boolean; stale: boolean; renderPending(): void }
-/** formulas showing their source instead of a rendering; rendered in idle time (document order) or when scrolled near */
+/** formulas showing their source instead of a rendering; rendered in the background (document order, idleCallback) or when scrolled near */
 const staticQueue = new Set<Deferrable>();
 let staticPumpScheduled = false;
 let batchStart = 0, lastBudgetCheck = 0;
 /**
  * Synchronous rendering budget: one burst of node-view constructions (the initial render of a
  * document) may spend ~40 ms on MathJax; the formulas after that only show their source and are
- * rendered in idle time. Keeps the first paint of a long paper fast without the formulas at the
+ * rendered in the background. Keeps the first paint of a long paper fast without the formulas at the
  * top (where the cursor is) ever appearing unrendered.
  */
 function canRenderNow(): boolean {
@@ -50,14 +50,31 @@ function canRenderNow(): boolean {
   return now - batchStart < 40;
 }
 /**
- * requestIdleCallback — or, where there is none (Safari), a timer whose deadline really runs out: the
- * pump renders formulas while `timeRemaining()` lasts, and a constant 8 ms had it render every queued
- * formula of a long paper in one go, which froze Safari for seconds after the paper opened (no
- * typing, no clicks, no timers; ~30 s for recurrent_feature in Playwright's WebKit).
+ * How long one slice of background typesetting runs before it yields. Every slice costs a frame
+ * (style, layout, the display formulas' relayout): on rhm_mft (547 formulas) slices of 12 ms took
+ * 8.5 s in VS Code under xvfb, of 40 ms 6 s. A key pressed meanwhile ends the slice where the
+ * browser tells (isInputPending).
  */
-export function idleCallback(cb: (d: { timeRemaining(): number }) => void, w: { requestIdleCallback?: unknown } = window as never): void {
+const SLICE_MS = 30;
+const inputPending = (): boolean => !!(navigator as { scheduling?: { isInputPending?(): boolean } }).scheduling?.isInputPending?.();
+/**
+ * A slice of background work whose deadline really runs out (the pump renders formulas while
+ * `timeRemaining()` lasts). Where there is scheduler.postTask (Chromium), a task at background
+ * priority: input and frames still go first, but the work does not wait for idle periods — a page
+ * that keeps drawing frames gets hardly any, and VS Code's webview typeset a long paper's formulas
+ * over 10–40 s (some openings never finished: every idle callback had < 3 ms left), with the main
+ * thread idle most of that time. Elsewhere requestIdleCallback; where there is none either (older
+ * Safari), a timer: a constant 8 ms had it render every queued formula of a long paper in one go,
+ * which froze Safari for seconds after the paper opened (~30 s for recurrent_feature in WebKit).
+ */
+export function idleCallback(cb: (d: { timeRemaining(): number }) => void, w: { requestIdleCallback?: unknown; scheduler?: { postTask?: unknown } } = window as never): void {
+  const slice = (ms: number) => () => { const end = performance.now() + ms; cb({ timeRemaining: () => (inputPending() ? 0 : Math.max(0, end - performance.now())) }); };
+  if (typeof w.scheduler?.postTask === 'function') {
+    void (w.scheduler.postTask as (cb: unknown, o: unknown) => Promise<unknown>)(slice(SLICE_MS), { priority: 'background' }).catch(() => {});
+    return;
+  }
   if (typeof w.requestIdleCallback === 'function') { (w.requestIdleCallback as (cb: unknown, o: unknown) => void)(cb, { timeout: 500 }); return; }
-  setTimeout(() => { const end = performance.now() + 8; cb({ timeRemaining: () => Math.max(0, end - performance.now()) }); }, 16);
+  setTimeout(slice(8), 16);
 }
 function schedulePump(): void {
   if (staticPumpScheduled || !staticQueue.size) return;

@@ -3584,6 +3584,9 @@ journalctl -u overlyx-autodeploy -n 50   # on the production server: what the la
 # grow back — report.json edits.regrew); the workspace copy is edited
 (cd packages/vscode && xvfb-run -a -s "-screen 0 1600x1000x24" node test/probeEditing.mjs /tmp/copy-of-project main.tex /tmp/probe-editing)
 (cd packages/vscode && xvfb-run -a -s "-screen 0 1600x1000x24" node test/probeUndo.mjs /tmp/copy-of-project main.tex /tmp/probe-undo)
+# how long opening a document takes in the extension (opened, closed, opened again): editor mounted, metadata,
+# every formula typeset; PROFILE=1 a CPU profile of the webview, TRACE=1 a Chrome trace of every process
+(cd packages/vscode && RUNS=2 xvfb-run -a -s "-screen 0 1600x1000x24" node test/probeOpenTiming.mjs /tmp/copy-of-project main.tex /tmp/probe-open)
 # offline mode needs the built client (service worker): build into $S/dist, then
 (cd packages/client && npx vite build --outDir $S/dist)
 OVERLYX_E2E_BASE=http://127.0.0.1:3001 npx playwright test e2e/offline.spec.ts e2e/git.spec.ts   # git: a real clone / push / pull with a token
