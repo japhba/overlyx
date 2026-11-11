@@ -59,6 +59,7 @@ export function completionContext(state: EditorState): CompletionContext | null 
   const par = $from.parent, off = $from.parentOffset;
   const cur = nodeText(par.cut(0, off));
   if (cur.trim().length < 3) return null;
+  if (/\\(?:[A-Za-z]*|(?:begin|end)\{[A-Za-z]*\*?)$/.test(cur)) return null;   // a LaTeX command being typed: plugins/typedtex.ts completes its name
   const nextNode = $from.nodeAfter;
   if (nextNode?.isText && nextNode.text && !/^\s/.test(nextNode.text)) return null;   // inside a word (a formula or inset after the cursor is fine)
   // the paragraphs before and after (top-level neighbours) for context

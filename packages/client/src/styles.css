@@ -2076,6 +2076,7 @@ button.lit-link { border: 0; background: none; padding: 0; color: var(--accent);
 /* ------------------------------------------------------------ AI assistance (editor/ai) */
 /* ghost text: the suggested continuation, rendered like real content but faint */
 .ai-ghost { color: var(--ghost-fg); opacity: 0.85; pointer-events: none; user-select: none; }
+.tex-hint { color: var(--ghost-fg); pointer-events: none; user-select: none; }   /* the rest of a \command's name being typed (plugins/typedtex.ts), Tab takes it */
 .ai-ghost mjx-container, .ai-ghost .lyx-math-inline, .ai-ghost .lyx-math-display { color: inherit; }
 .ai-ghost .lyx-math-display { display: block; text-align: center; }
 .lm-ghost { color: var(--ghost-fg); opacity: 0.85; }

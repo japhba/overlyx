@@ -1,12 +1,13 @@
 /**
- * LaTeX typed in a LaTeX document's text (packages/client/src/editor/plugins/typedtex.ts): a
- * finished command becomes what it means once the caret leaves it — parsed as pasted LaTeX is (here
- * by core's parser itself, the server's /clip does the same), a heading alone in its paragraph, a
- * command without arguments at the space after it. Typed the way the view would: handleTextInput
- * first, else the character inserted; the plugin's view sees every update.
+ * LaTeX typed in a LaTeX document's text (packages/client/src/editor/plugins/typedtex.ts): a heading,
+ * a font, a footnote at its `{` (its `}` only ends it), one-argument commands and formulas at their
+ * last `}`, the rest once the caret leaves them — parsed as pasted LaTeX is (here by core's parser
+ * itself, the server's /clip does the same) — and command names completed by Tab. Typed the way the
+ * view would: handleTextInput first, else the character inserted; the plugin's view sees every update.
  */
 import { describe, it, expect, vi } from 'vitest';
 import { EditorState, TextSelection, type Transaction } from 'prosemirror-state';
+import type { DecorationSet } from 'prosemirror-view';
 import { schema, lyxToPm } from '../packages/core/src/index.ts';
 import { parseTex } from '../packages/core/src/tex/index.ts';
 import { LYX_LAYOUTS } from './lyxlib.ts';
@@ -33,6 +34,7 @@ function setup(docId = 'jan/paper/main.tex', text = '', hooks: Parameters<typeof
   const view = {
     state, isDestroyed: false, composing: false, dom: { dataset: { docId } },
     dispatch(tr: Transaction) { const prev = view.state; view.state = view.state.apply(tr); pv.update!(view as never, prev); },
+    someProp(name: string, f: (h: (...a: unknown[]) => unknown) => unknown) { const h = (plugin.props as Record<string, unknown>)[name]; return typeof h === 'function' ? f(h.bind(plugin) as never) : undefined; },
   };
   const pv = plugin.spec.view!(view as never);
   const type = (chars: string) => {
@@ -42,7 +44,9 @@ function setup(docId = 'jan/paper/main.tex', text = '', hooks: Parameters<typeof
     }
   };
   const key = (k: string) => (plugin.props.handleKeyDown!.call(plugin, view as never, { key: k, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false } as KeyboardEvent) as boolean);
-  return { view, type, key };
+  /** the completion shown after the caret ('' none) */
+  const hint = () => (plugin.props.decorations!.call(plugin, view.state) as DecorationSet | null)?.find().map(d => String((d.spec as { key: string }).key).replace('tex-hint:', ''))[0] ?? '';
+  return { view, type, key, hint };
 }
 const settle = async () => { for (let i = 0; i < 4; i++) await new Promise(r => setTimeout(r, 0)); };
 const json = (view: { state: EditorState }) => view.state.doc.toJSON().content as { attrs: { layout: string }; content?: { type: string; text?: string; marks?: { type: string }[]; attrs?: Record<string, unknown> }[] }[];
@@ -60,42 +64,85 @@ describe('typed LaTeX commands', () => {
     expect(insideOpenGroup('x \\emph{b}', 2)).toBe(false);
   });
 
-  it('\\textbf{…} becomes bold once the caret goes on', async () => {
+  it('\\textbf{ types on in bold, \\emph{ inside it in both; each } ends its font', () => {
     const { view, type } = setup();
-    type('a \\textbf{bold}');
-    await settle();
-    expect(view.state.doc.textContent).toBe('a \\textbf{bold}');   // the caret is still at its end
-    type(' x');
-    await settle();
+    type('a \\textbf{bold \\emph{both} only} x');
+    const runs = json(view)[0].content!.map(n => `${n.text}:${(n.marks ?? []).map(m => m.type).sort().join('+')}`);
+    expect(runs).toEqual(['a :', 'bold :series', 'both:emph+series', ' only:series', ' x:']);
+  });
+
+  it('\\section{ at a paragraph\'s start makes it the heading, typed on as one; Esc right after gives the text back', () => {
+    const { view, type, key } = setup();
+    type('\\section{Intro');
+    expect(json(view)[0]).toMatchObject({ attrs: { layout: 'Section' }, content: [{ text: 'Intro' }] });
+    type('}');   // (only ends it)
+    expect(view.state.doc.textContent).toBe('Intro');
+    const s = setup();
+    s.type('\\subsection*{');
+    expect(s.view.state.doc.firstChild!.attrs.layout).toBe('Subsection*');
+    expect(s.key('Escape')).toBe(true);
+    expect(s.view.state.doc.firstChild!.attrs.layout).toBe('Standard');
+    expect(s.view.state.doc.textContent).toBe('\\subsection*{');
+    // not after text
+    const t = setup();
+    t.type('see \\section{x');
+    expect(t.view.state.doc.firstChild!.attrs.layout).toBe('Standard');
+    void key;
+  });
+
+  it('\\footnote{ opens a footnote to type in, its } leaves it', () => {
+    const { view, type } = setup();
+    type('See\\footnote{A note.} on');
     const [p] = json(view);
-    expect(view.state.doc.textContent).toBe('a bold x');
-    expect(p.content!.find(n => n.text === 'bold')!.marks![0].type).toBe('series');
+    expect(p.content!.map(n => n.type)).toEqual(['text', 'inset', 'text']);
+    expect(p.content![1]).toMatchObject({ attrs: { name: 'Foot' } });
+    expect(view.state.doc.firstChild!.child(1).textContent).toBe('A note.');
+    expect(p.content![2].text).toBe(' on');
   });
 
-  it('\\section{…} alone in its paragraph makes a heading, at Enter', async () => {
-    const { view, type } = setup();
-    type('\\section{Intro}');
-    view.dispatch(view.state.tr.split(view.state.selection.from));
+  it('\\cite{…} at its }, \\href{…}{…} once the caret goes on, a command inside open braces with the one around it', async () => {
+    const c = setup();
+    c.type('see \\cite{key}');
     await settle();
-    const [h, next] = json(view);
-    expect(h.attrs.layout).toBe('Section');
-    expect(h.content![0].text).toBe('Intro');
-    expect(next.attrs.layout).toBe('Standard');
-  });
-
-  it('waits for every argument (\\href{…}{…}) and for the command whose braces are still open', async () => {
+    expect(json(c.view)[0].content!.at(-1)).toMatchObject({ type: 'command', attrs: { cmd: 'citation' } });
     const { view, type } = setup();
     type('\\href{https://x.org}');
-    type('{site} ');
+    type('{see \\emph{b}}');
+    await settle();
+    expect(view.state.doc.textContent).toBe('\\href{https://x.org}{see \\emph{b}}');
+    type(' ');
     await settle();
     expect(json(view)[0].content![0]).toMatchObject({ type: 'command', attrs: { cmd: 'href' } });
-    const b = setup();
-    b.type('\\textbf{a \\emph{b} ');
-    await settle();
-    expect(b.view.state.doc.textContent).toBe('\\textbf{a \\emph{b} ');
-    b.type('c} ');
-    await settle();
-    expect(b.view.state.doc.textContent).toBe('a b c ');
+  });
+
+  it('completes command names as a formula does: the rest shown, Tab takes it and finishes the command', () => {
+    const { view, type, key, hint } = setup();
+    type('\\sec');
+    expect(hint()).toBe('tion');
+    key('Tab');
+    expect(view.state.doc.firstChild!.attrs.layout).toBe('Section');   // `\section{`: a heading to type
+    expect(view.state.doc.textContent).toBe('');
+    const m = setup();
+    m.type('so \\alp');
+    expect(m.hint()).toBe('ha');
+    expect(m.key('Escape')).toBe(true);   // (away with it)
+    expect(m.hint()).toBe('');
+    m.key('Tab');
+    expect(json(m.view)[0].content!.map(n => n.type)).toEqual(['text', 'math_inline', 'text']);
+    const f = setup();
+    f.type('\\begin{fig');
+    expect(f.hint()).toBe('ure');
+    f.key('Tab');
+    expect(f.view.state.doc.firstChild!.firstChild!.attrs).toMatchObject({ name: 'Float', arg: 'figure' });
+    f.view.dispatch(f.view.state.tr.split(f.view.state.selection.from));
+    f.type('\\end{');
+    expect(f.hint()).toBe('figure');   // the environment the caret is in
+    f.key('Tab');
+    expect(f.view.state.selection.$from.parent).toBe(f.view.state.doc.lastChild);
+    // nothing to complete: Tab is Tab
+    const n = setup();
+    n.type('C:\\Wxyz');
+    expect(n.key('Tab')).toBe(false);
   });
 
   it('a command without arguments at the space after it; unknown ones become TeX code', async () => {
@@ -180,10 +227,10 @@ describe('typed LaTeX commands', () => {
     expect(md.view.state.doc.textContent).toBe('\\textbf{x} ');
     // the caret goes back into the command: it waits
     const { view, type } = setup();
-    type('\\emph{y}');
+    type('\\textcolor{red}{y}');
     view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 4)));
     await settle();
-    expect(view.state.doc.textContent).toBe('\\emph{y}');
+    expect(view.state.doc.textContent).toBe('\\textcolor{red}{y}');
     const before = parsed.calls.length;
     view.dispatch(view.state.tr.setSelection(TextSelection.atEnd(view.state.doc)));
     type(' ');
