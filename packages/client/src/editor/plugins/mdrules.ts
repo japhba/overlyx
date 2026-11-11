@@ -11,6 +11,11 @@
  * Overleaf, and what lands in the text after Space left a formula LyX-style) becomes an inline
  * formula instead of the literal `\textbackslash alpha` it used to be saved as; Backspace right
  * after gives the typed text back. Raw TeX (ERT, listings, code) is left alone.
+ *
+ * Lists typed the LaTeX way: `\begin{itemize}` (enumerate, description) alone in a paragraph makes
+ * it the list's first item, `\item ` starts an item (a bullet in ordinary text; nothing more in a
+ * list, which already is one), `\end{itemize}` alone in an item leaves the list. Other commands typed
+ * in the text are typedtex.ts'.
  */
 import { InputRule, inputRules } from 'prosemirror-inputrules';
 import { schema, SYMBOLS } from '@overlyx/core';
@@ -52,6 +57,34 @@ const mathSymbolRule = new InputRule(/\\([A-Za-z]+)([\s,.;:!?)\]])$/, (state, ma
   return state.tr.replaceWith(start, end, [math, schema.text(match[2])]);
 });
 
+const LISTS: Record<string, string> = { itemize: 'Itemize', enumerate: 'Enumerate', description: 'Description' };
+const LIST_LAYOUTS = new Set(Object.values(LISTS));
+
+/** `\item ` at the start of a paragraph: a bullet in ordinary text, only the item it already is in a list */
+const itemRule = new InputRule(/^\\item\s$/, (state, _match, start, end) => {
+  const $from = state.selection.$from, par = $from.parent;
+  if (par.type.name !== 'paragraph' || start !== $from.start() || inRawText(state)) return null;
+  if (LIST_LAYOUTS.has(String(par.attrs.layout))) return state.tr.delete(start, end);
+  return PLAIN.has(String(par.attrs.layout)) ? state.tr.delete(start, end).setNodeMarkup($from.before(), undefined, { ...par.attrs, layout: 'Itemize' }) : null;
+});
+
+/** `\end{itemize}` alone in a list's item: out of the list (into the one around it, nested) */
+const endListRule = new InputRule(/^\\end\{(itemize|enumerate|description)\}$/, (state, _match, start, end) => {
+  const $from = state.selection.$from, par = $from.parent;
+  if (par.type.name !== 'paragraph' || start !== $from.start() || end !== $from.end() || !LIST_LAYOUTS.has(String(par.attrs.layout)) || inRawText(state)) return null;
+  const depth = Number(par.attrs.depth) || 0;
+  let layout = 'Standard';
+  if (depth > 0) {
+    // the item of the list around it: the paragraph before, one level out
+    const container = $from.node($from.depth - 1), index = $from.index($from.depth - 1);
+    for (let i = index - 1; i >= 0; i--) {
+      const b = container.child(i);
+      if ((Number(b.attrs.depth) || 0) < depth) { layout = String(b.attrs.layout); break; }
+    }
+  }
+  return state.tr.delete(start, end).setNodeMarkup($from.before(), undefined, { ...par.attrs, layout, depth: Math.max(0, depth - 1) });
+});
+
 export function markdownRulesPlugin(): Plugin {
   return inputRules({
     rules: [
@@ -60,6 +93,9 @@ export function markdownRulesPlugin(): Plugin {
       layoutRule(/^(#{1,6})\s$/, (m, layouts) => headingForHashes(m[1].length, layouts)),
       layoutRule(/^(!{1,6})\s$/, (m, layouts) => headingForHashes(m[1].length, layouts, true)),
       mathSymbolRule,
+      layoutRule(/^\\begin\{(itemize|enumerate|description)\}$/, m => LISTS[m[1]]),
+      itemRule,
+      endListRule,
     ],
   });
 }

@@ -1233,7 +1233,10 @@ blend.
     (presenting, the PDF, `render_page`, *Open in a new tab*) the page shows with the suggestions
     accepted and deleted slides are not presented; the rail marks changed slides, deleted ones and
     open comments; the web-page zip is `publishedText` (accepted, no comments). Viewing makes this
-    editor read-only. The runtime syncs these `data-ol-` attributes like any source attribute
+    editor read-only; a web page in Viewing runs — **▶ Preview** (where decks have ▶ Present) is
+    the same switch: the runtime's view mode in a frame over the canvas (whose clicks only select),
+    its buttons, links, forms and scripts working, loaded again once a change has settled, at the
+    place it was scrolled to (`liveView` in DeliverableEditor.tsx; both shells, so also VS Code). The runtime syncs these `data-ol-` attributes like any source attribute
     (reconcile.ts `SOURCE_OL`); `stopText` re-pairs a retyped element's children (`linkTree`) —
     without it a later attribute change duplicated a text's inline elements.
   * **The comment pen and push to talk** (7 Nov 2026, the user: "a new 'comment' pen that renders in
@@ -1908,6 +1911,19 @@ blend.
   (mathpazo), Charter (Mathdesign), Utopia (Fourier), Crimson Pro + newtx math (Cochineal) — all TeX
   fonts of TeX Live, built with pdfLaTeX; the fields below the set stay editable (*Custom*), and with
   non-TeX fonts the sets step aside. `tests/fonts.test.ts`, `e2e/fonts.spec.ts`.
+* **LaTeX typed in the text** (`editor/plugins/typedtex.ts`, `editor/plugins/mdrules.ts`; LaTeX
+  documents only, not markdown or articles, never in TeX code or code paragraphs): as in Overleaf's
+  visual editor, a finished command becomes what it means once the caret leaves it — `\textbf{…}`,
+  `\emph{…}`, `\cite{…}`, `\ref{…}`, `\footnote{…}`, `\href{…}{…}` … in place, `\section{…}` (and the
+  other headings) when it is all its paragraph holds; `\LaTeX`, `\today`, `\ldots` … at the space or
+  punctuation after them. "Finished": its last `}` typed and then a space, a full stop, Enter or a
+  click elsewhere (a `{` or `[` right after the `}` is its next argument; a command inside the
+  braces of one still open waits for that one). The command is parsed by the server's `/clip` (the
+  same as pasted LaTeX, the document's own preamble), so what the editor cannot show becomes a TeX
+  code box and reaches the PDF as typed. `\begin{itemize}` (enumerate, description) alone in a
+  paragraph makes it the first item, `\item ` starts one, `\end{itemize}` alone in an item leaves
+  the list (mdrules.ts, at once). Math symbols (`\alpha `) become a formula at once and `$` / `$$`
+  open one (commands.ts typeDollar). Ctrl+Z gives the typed text back. `tests/typedtex.test.ts`.
 * **Lists, Google-Docs style** (`editor/commands.ts leaveList`, `editor/plugins/mdrules.ts`): `- ` or `* ` at
   the start of a paragraph starts a bullet list, `1. ` a numbered one, `# ` / `## ` / … a heading,
   and `! ` / `!! ` / … its unnumbered counterpart at the same level in the document class

@@ -120,4 +120,30 @@ describe('markdown layout triggers', () => {
     expect(layoutOf(v)).toBe('Standard');
     expect(textOf(v)).toBe('- ');
   });
+
+  it('lists typed the LaTeX way: \\begin{itemize} makes an item, \\item starts one, \\end{itemize} leaves the list', () => {
+    const v = setup('\\begin{itemize'); expect(type(v, '}')).toBe(true);
+    expect(layoutOf(v)).toBe('Itemize'); expect(textOf(v)).toBe('');
+    const e = setup('\\begin{enumerate'); type(e, '}'); expect(layoutOf(e)).toBe('Enumerate');
+    // \item in a list: only the marker goes; in ordinary text: a bullet
+    const inList = setup('\\item', 'Enumerate'); expect(type(inList, ' ')).toBe(true);
+    expect(layoutOf(inList)).toBe('Enumerate'); expect(textOf(inList)).toBe('');
+    const plain = setup('\\item'); type(plain, ' '); expect(layoutOf(plain)).toBe('Itemize');
+    const head = setup('\\item', 'Section'); expect(type(head, ' ')).toBe(false);
+    const end = setup('\\end{itemize', 'Itemize'); expect(type(end, '}')).toBe(true);
+    expect(layoutOf(end)).toBe('Standard'); expect(textOf(end)).toBe('');
+    // not in a heading, not mid-paragraph
+    expect(type(setup('\\begin{itemize', 'Section'), '}')).toBe(false);
+    expect(type(setup('see \\end{itemize', 'Itemize'), '}')).toBe(false);
+  });
+
+  it('\\end{itemize} in a nested item goes back to the list around it', () => {
+    const outer = schema.nodes.paragraph.create({ layout: 'Enumerate' }, [schema.text('one')]);
+    const inner = schema.nodes.paragraph.create({ layout: 'Itemize', depth: 1 }, [schema.text('\\end{itemize')]);
+    let state = EditorState.create({ doc: schema.nodes.doc.create(null, [outer, inner]), plugins: [plugin] });
+    state = state.apply(state.tr.setSelection(TextSelection.create(state.doc, state.doc.content.size - 1)));
+    const view = { state, dispatch(tr: any) { view.state = view.state.apply(tr); }, composing: false };
+    expect(type(view as any, '}')).toBe(true);
+    expect(view.state.doc.lastChild!.attrs).toMatchObject({ layout: 'Enumerate', depth: 0 });
+  });
 });

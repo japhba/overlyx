@@ -42,6 +42,7 @@ import { dragSelectPlugin } from './plugins/dragselect';
 import { findPlugin } from './plugins/find';
 import { mirrorCaretPlugin } from './plugins/mirrorcaret';
 import { markdownRulesPlugin } from './plugins/mdrules';
+import { typedTexPlugin } from './plugins/typedtex';
 import { markdownPlugins, isMarkdownDoc, looksLikeMarkdown, pasteMarkdown } from './markdown';
 import { pasteTargetsPlugin, pasteLatex, pasteBlocksIntoEmpty } from './plugins/paste';
 import { autocorrectPlugin } from './spell/autocorrect';
@@ -144,6 +145,7 @@ export function assemblePlugins(o: AssemblyOptions): Plugin[] {
     aiCompletePlugin(),
     spellPlugin(),
     markdownRulesPlugin(),   // `- ` / `1. ` / `# ` at a paragraph start, before autocorrect looks at the space
+    typedTexPlugin(),   // `\textbf{…}`, `\section{…}`, `\cite{…}` … typed in a LaTeX document's text become what they mean
     ...(o.markdown || o.article ? markdownPlugins({ article: !!o.article }) : []),   // `**bold**`, ``` + Enter …; markdown's blocks and marks only (before the LyX keymap)
     autocorrectPlugin(),
     arrowsPlugin(),   // -> → and <- ←, --> ⟶, <-- ⟵ as they are typed; ⌘Z or Backspace right after gives the characters back (before the keymap's Backspace)

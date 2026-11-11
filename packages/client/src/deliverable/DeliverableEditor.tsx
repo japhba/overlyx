@@ -17,7 +17,8 @@ import { api, type User } from '../api';
 import { showContextMenu, closeContextMenu, type MenuItem } from '../editor/contextmenu';
 import { editSvgFile } from '../editor/svgEditorEvents';
 import { drawDraft, figureMenuItems, newDraft, switchVersion, type FigureSlot } from '../editor/figuredraft';
-import { isFigureDraft } from '@overlyx/core';
+import { isFigureDraft, projectOfDoc } from '@overlyx/core';
+import { openProjectPath } from '../openpath';
 import { Toolbar, ICONS, type ToolButton } from '../app/Toolbar';
 import { ColorGrid } from '../app/ColorGrid';
 import type { DeliverableHost, Peer } from './host';
@@ -344,6 +345,31 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
   const [panX, setPanX] = useState(0);
   const [scrollY, setScrollY] = useState(0);
   const scrollRef = useRef(0);
+  /**
+   * Viewing a web page (▶ Preview): the page as its readers get it — its buttons, links, forms and
+   * scripts working (runtime view mode, as an article's Page pane) — in a frame over the canvas, where
+   * a click only selects. Loaded again once a change has settled, scrolled to where it was.
+   */
+  const liveView = viewing && kind === 'page' && !offlineDocs.edit && !host.bindSvgExporter;
+  const liveFrame = useRef<HTMLIFrameElement>(null);
+  const [liveRev, setLiveRev] = useState(0);
+  const liveScroll = useRef(0);
+  useEffect(() => { if (liveView) setLiveRev(r => r + 1); }, [settledText]);
+  useEffect(() => {
+    if (!liveView) return;
+    liveScroll.current = scrollRef.current;
+    const onMessage = (e: MessageEvent) => {
+      const f = liveFrame.current;
+      if (!f || e.source !== f.contentWindow) return;
+      const d = e.data as { ol?: string; y?: unknown; path?: unknown } | null;
+      if (d?.ol === 'viewReady') f.contentWindow?.postMessage({ ol: 'viewScrollTo', y: liveScroll.current }, '*');
+      else if (d?.ol === 'viewScroll' && typeof d.y === 'number') liveScroll.current = d.y;
+      // a link to another file of the project (runtime/links.ts)
+      else if (d?.ol === 'openPath' && typeof d.path === 'string' && host.docId) openProjectPath(projectOfDoc(host.docId), d.path);
+    };
+    addEventListener('message', onMessage);
+    return () => removeEventListener('message', onMessage);
+  }, [liveView]);
   const [view, setViewState] = useState<CanvasView>(() => loadView(host.path));
   // the dark theme: a dark grey canvas unless one was chosen; the slides light on dark with smart invert (app/darkpages.ts)
   const darkS = useDarkPagesState();
@@ -3856,17 +3882,23 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
         laid out on the canvas; WYSIWYM writes it as an article from now on (its prose in the document editor), HTML is its code */}
     <div class="pane-switch view-mode-switch dl-page-switch" role="group" aria-label="WYSIWYM, HTML and Page">
       <button type="button" data-dl-article disabled={!host.makeArticle || readOnly}
-        title={host.makeArticle ? 'WYSIWYM: write this page as an article — its prose in the document editor (comments, suggestions, formulas), everything else kept as it is and shown running' : 'WYSIWYM: pages are written as articles where the page’s file can be changed'}
+        title={host.makeArticle ? 'WYSIWYM (“what you see is what you mean”): write this page as an article — its prose in the document editor (comments, suggestions, formulas), everything else kept as it is and shown running' : 'WYSIWYM (“what you see is what you mean”): pages are written as articles where the page’s file can be changed'}
         onClick={() => {
           void uiConfirm('Write as an article', 'The page becomes a document: its text is written in the document editor — with comments, suggestions, formulas and citations — and what is not text (navigation, scripts, interactive figures) stays as it is, shown running. The page as it is now is kept as a version.', { okLabel: 'Write as article' })
             .then(ok => { if (ok) return host.makeArticle!(); })
             .catch(e => notify('Could not make it an article: ' + (e as Error).message, 'error'));
         }}>WYSIWYM</button>
       {!host.bindSvgExporter && <button type="button" class={codeOpen ? 'active' : ''} aria-pressed={codeOpen} data-dl-code title="HTML: the page's code beside it" onClick={() => setCodeOpen(o => !o)}>HTML</button>}
-      <button type="button" class="active" aria-pressed="true" title="Page: the page laid out, edited where it stands">Page</button>
+      <button type="button" class="active" aria-pressed="true" title="Page: the page laid out, edited where it stands — a click selects; ▶ Preview (or Viewing) runs it, its buttons and links working">Page</button>
     </div>
     <button class={'dl-btn' + (device === 'mobile' ? ' on' : '')} aria-pressed={device === 'mobile'} title="The page at a phone's width" onClick={() => setDevice(d => d === 'mobile' ? 'desktop' : 'mobile')}>Phone</button>
   </>;
+  /** a web page's Present: the page running, as its readers get it (Viewing) — and back */
+  const previewBtn = kind === 'page' && !host.bindSvgExporter && (
+    <button class="dl-btn dl-present" data-dl-preview aria-pressed={viewing}
+      title={viewing ? (readOnly ? 'Back to the page laid out' : 'Back to editing the page') : 'Preview: the page as its readers get it — its buttons, links, forms and scripts working (the same as Viewing)'}
+      onClick={() => (viewing ? setViewing(false) : setMode('viewing'))}>{viewing ? (readOnly ? 'Done' : '✎ Edit') : '▶ Preview'}</button>
+  );
   const zoomSelect = (
     <select class="dl-btn dl-zoom" data-dl-zoom value={zoomPick} onChange={e => { const el = e.currentTarget as HTMLSelectElement; chooseZoom(el.value); el.blur(); }}
       title={`Zoom (${pct} %). ${zoomLevels.map(levelName).join(', ')}: a pinch stops at ${zoomLevels.length > 1 ? 'them' : 'it'}${zoomLevels.includes('margins') ? '; Fit margins shows the inside of the layout’s margins' : ''}${solo?.content ? '; Fit content what is on the slide' : ''}. Ctrl+0: ${levelName('fit')}`}>
@@ -4058,6 +4090,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
         {reviewBtn}
         {modeSwitch}
         {kind !== 'page' && !host.bindSvgExporter && <button class="dl-btn dl-present" title="Present from this slide (Shift+F5) — F5 from the first" data-dl-present onClick={() => startPresenting(false)}>▶ Present</button>}
+        {previewBtn}
         {downloadBtn}
         {statusEl}
       </div>}
@@ -4118,7 +4151,10 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
             {/* (the slide's part of the canvas: all of it, but while drawing holds the slide where the bars left it) */}
             <div ref={viewEl} class="dl-view" style={{ top: `${inset.t}px`, right: `${inset.r}px`, bottom: `${inset.b}px`, left: `${inset.l}px` }}>
               {link && synced && <iframe ref={canvasFrame} class={'dl-frame' + (soloOn ? ' solo' : '')} title="Page" sandbox={offlineDocs.edit ? undefined : 'allow-scripts allow-modals allow-popups allow-forms'} src={offlineDocs.edit ? offlineSrc('edit') : src('edit')}
-                style={soloOn ? { width: `${soloFrameW}px`, height: `${solo!.height}px`, left: '0px' } : { width: `${frameW}px`, height: `${frameH}px`, transform: `scale(${scale})`, left: `${left}px` }} />}
+                style={soloOn ? { width: `${soloFrameW}px`, height: `${solo!.height}px`, left: '0px' } : { width: `${frameW}px`, height: `${frameH}px`, transform: `scale(${scale})`, left: `${left}px`, visibility: liveView ? 'hidden' : undefined }} />}
+              {liveView && link && synced && <iframe key={liveRev} ref={liveFrame} class="dl-frame" title="The page, running" data-dl-live src={`${src('view')}&n=${liveRev}`}
+                sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms allow-modals allow-downloads"
+                style={{ width: `${frameW}px`, height: `${frameH}px`, transform: `scale(${scale})`, left: `${left}px` }} />}
               <svg ref={liveSvg} class="dl-liveink" aria-hidden="true" />
               {soloOn && (
                 <div ref={pullRing} class="dl-pull" data-dl-pull aria-hidden="true">

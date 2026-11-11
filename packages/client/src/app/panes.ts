@@ -11,10 +11,12 @@ export type PaneId = 'doc' | 'tex' | 'pdf';
 export const PANES: readonly PaneId[] = ['doc', 'tex', 'pdf'];
 export const PANE_LABELS: Record<PaneId, string> = { doc: 'WYSIWYM', tex: 'TeX', pdf: 'PDF' };
 export const PANE_TITLES: Record<PaneId, string> = {
-  doc: 'WYSIWYM — LyX’s “what you see is what you mean”: the document rendered and edited in place, its structure (sections, formulas, references) shown as it means, the final pages left to LaTeX',
+  doc: 'WYSIWYM — “what you see is what you mean”: the document rendered as you write it, its sections, formulas and references shown for what they mean (how the pages look is the PDF’s). LaTeX typed here becomes what it means: $…$ a formula, \\section{…} a heading, \\textbf{…}, \\cite{…}, \\ref{…} and the rest',
   tex: 'The LaTeX source of the document (Ctrl+Alt+S)',
   pdf: 'The PDF built from the document (Ctrl+R builds it)',
 };
+/** WYSIWYM's tooltip for a markdown document or an HTML article, which take markdown's typing rather than LaTeX's */
+export const WYSIWYM_PLAIN_TITLE = 'WYSIWYM — “what you see is what you mean”: the document rendered as you write it, its headings, formulas and links shown for what they mean ($…$ opens a formula)';
 
 export interface PaneLayout {
   /** left to right; always all three ids */

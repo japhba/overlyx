@@ -6,13 +6,13 @@
  * The layout logic is app/panes.ts.
  */
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { PANE_LABELS, PANE_TITLES, ARRANGEMENTS, applyArrangement, arrangementMatches, mirrorPanes, movePane, resetWidths, soloPane, togglePane, visiblePanes, type PaneId, type PaneLayout, type Preset } from './panes';
+import { PANE_LABELS, PANE_TITLES, WYSIWYM_PLAIN_TITLE, ARRANGEMENTS, applyArrangement, arrangementMatches, mirrorPanes, movePane, resetWidths, soloPane, togglePane, visiblePanes, type PaneId, type PaneLayout, type Preset } from './panes';
 
 const MINI: Record<PaneId, string> = { doc: 'Doc', tex: 'TeX', pdf: 'PDF' };
 
 export function PaneSwitch({ layout, onChange, narrow = false, markdown = false, article = false }: { layout: PaneLayout; onChange: (l: PaneLayout) => void; narrow?: boolean; /** a markdown document: its source pane holds markdown */ markdown?: boolean; /** an HTML article: its source is the page's HTML, its output the page (app/ArticlePage.tsx) */ article?: boolean }) {
   const LABELS: Record<PaneId, string> = article ? { ...PANE_LABELS, tex: 'HTML', pdf: 'Page' } : markdown ? { ...PANE_LABELS, tex: 'Markdown' } : PANE_LABELS;
-  const TITLES: Record<PaneId, string> = article ? { ...PANE_TITLES, tex: 'The page\'s HTML source (Ctrl+Alt+S)', pdf: 'The page as it is published, running (its scripts too)' } : markdown ? { ...PANE_TITLES, tex: 'The markdown source of the document (Ctrl+Alt+S)' } : PANE_TITLES;
+  const TITLES: Record<PaneId, string> = article ? { ...PANE_TITLES, doc: WYSIWYM_PLAIN_TITLE, tex: 'The page\'s HTML source (Ctrl+Alt+S)', pdf: 'The page as it is published, running (its scripts too)' } : markdown ? { ...PANE_TITLES, doc: WYSIWYM_PLAIN_TITLE, tex: 'The markdown source of the document (Ctrl+Alt+S)' } : PANE_TITLES;
   const row = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<{ id: PaneId; dx: number; to: number; w: number } | null>(null);
   const suppressClick = useRef(false);
