@@ -28,7 +28,7 @@ import { deliverablePdf } from './render.ts';
 import { starterFor, pageSize, isHtmlPath, DELIVERABLE_KINDS, type DeliverableKind } from '@overlyx/core/html/deliverable.ts';
 import { newArticleText } from '@overlyx/core/html/articletheme.ts';
 import { refreshScientificStarters } from './starterupdates.ts';
-import { listProjects, resolveProjectPath, assertWritableRelPath, projectDir, createProject, newDocumentText, newMarkdownText, fileKind, isBackupFile, isDocumentFile } from './projects.ts';
+import { listProjects, resolveProjectPath, assertWritableRelPath, projectDir, createProject, newDocumentText, newMarkdownText, fileKind, isBackupFile, isDocumentFile, findMaster } from './projects.ts';
 import { isMarkdownPath } from '@overlyx/core/md/index.ts';
 import { markdownStyle, setMarkdownStyle } from './mdstyle.ts';
 import { googleFontRoutes } from './googlefonts.ts';
@@ -46,7 +46,8 @@ import { toPng, isDirectImage } from './graphics.ts';
 import { buildPdf, exportTex, texExportDir, lastBuild, requestBuild, currentJob, cancelBuild, publicJob, cleanupProjectData, synctexView, synctexEdit, synctexPages, layoutCheckOf } from './export.ts';
 import { sendFileAt, readFileAt, isRegularFileAt } from './confined.ts';
 import { db, type ProjectRow } from './db.ts';
-import { accessibleProjects, adoptProjects, roleFor, atLeast, isRole, registerProject, projectRow, shareInfo, addMember, setMemberRole, removeMember, memberRow, createLink, revokeLink, shareLinkOf, linkPreview, acceptLink, setPublic, joinPublic, newOwner, setOwner, trashProject, ensureWelcomeProject, ensureStarterProjects, type Role } from './access.ts';
+import { accessibleProjects, adoptProjects, roleFor, atLeast, isRole, registerProject, projectRow, shareInfo, addMember, setMemberRole, removeMember, memberRow, createLink, revokeLink, shareLinkOf, linkPreview, acceptLink, setPublic, joinPublic, newOwner, setOwner, trashProject, ensureWelcomeProject, ensureStarterProjects, roleAt, foldersOf, reachesProject, addFolderMember, folderMemberRow, setFolderMemberRole, removeFolderMember, groupLanding, type Role } from './access.ts';
+import { foldersMoved, withinPath } from './foldershares.ts';
 import { canonicalProject, canonicalDocId } from './namespaces.ts';
 import { gdocsRoutes } from './gdocs/routes.ts';
 import { startAutoSync, filesMoved } from './gdocs/sync.ts';
@@ -137,11 +138,15 @@ function admitGuest(req: express.Request, res: express.Response, name?: string |
  */
 const landingRank = (f: { path: string; kind: string }) =>
   /(^|\/)main\.tex$/.test(f.path) ? 0 : f.path.endsWith('.tex') ? 1 : f.kind === 'html' ? (/(^|\/)index\.html?$/i.test(f.path) ? 2 : 3) : /(^|\/)(AGENTS|CLAUDE)\.md$/i.test(f.path) ? 5 : 4;
-function landing(project: ProjectRow, role: Role, wanted: unknown, user: SessionUser | null) {
-  const files = listProjects().find(p => p.name === project.name)?.files ?? [];
+function landing(project: ProjectRow, role: Role, wanted: unknown, user: SessionUser | null, folder: string | null = null) {
+  // a link to a folder lands in it, also for someone who has the whole project
+  const files = (listProjects().find(p => p.name === project.name)?.files ?? []).filter(f => !folder || withinPath(f.path, folder));
   const lyx = files.filter(f => (f.kind === 'doc' || f.kind === 'html') && !isBackupFile(f.name)).sort((a, b) => landingRank(a) - landingRank(b) || a.path.length - b.path.length || a.path.localeCompare(b.path));
   const f = typeof wanted === 'string' && wanted ? files.find(x => x.path === wanted && x.kind !== 'dir') : undefined;
-  return { project: project.name, title: project.title, role, doc: lyx[0] ? `${project.name}/${lyx[0].path}` : null, file: f ? { path: f.path, name: f.name, kind: f.kind } : null, ...(user ? { user } : {}) };
+  // a folder that is a document group opens on its first tab
+  const first = folder ? groupLanding(project.name, folder) : null;
+  if (first) lyx.unshift(...files.filter(x => x.path === first));
+  return { project: project.name, title: project.title, role, doc: lyx[0] ? `${project.name}/${lyx[0].path}` : null, file: f ? { path: f.path, name: f.name, kind: f.kind } : null, folder, ...(user ? { user } : {}) };
 }
 /**
  * What a share link opens, joining nothing: a visitor without a session sees it on the page that
@@ -165,10 +170,10 @@ app.post('/api/share/:token/accept', express.json({ limit: '4kb' }), (req, res) 
       if (!user) return;
       joined = true;
     }
-    const { project, role } = acceptLink(token, user);
-    // a link to one file of the project (`#/<owner>/<project>/<path>?share=<token>`): the whole project is shared, the
-    // file is where the visitor lands
-    res.json(landing(project, role, req.query.path, joined ? user : null));
+    const { project, role, path: folder } = acceptLink(token, user);
+    // a link to one file of the project (`#/<owner>/<project>/<path>?share=<token>`): the whole project (or the
+    // link's folder) is shared, the file is where the visitor lands
+    res.json(landing(project, role, req.query.path, joined ? user : null, folder));
   } catch (e) { res.status(404).json({ error: (e as Error).message }); }
 });
 /**
@@ -243,7 +248,7 @@ api.use(e2eRoutes());
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
-  namespace Express { interface Request { role?: Role } }
+  namespace Express { interface Request { role?: Role; /** only folders of the project are shared with the user (access.ts folderOnly): what is outside them is not shown */ partial?: boolean } }
 }
 
 function deny(res: express.Response, role: Role | null): void {
@@ -262,6 +267,38 @@ const needProject = (min: Role) => (req: express.Request, res: express.Response,
   req.role = role!;
   next();
 };
+
+/**
+ * Project routes on paths of the project (`paths`: project-relative): the user needs at least `min` in
+ * the project — or on each of the paths, through a folder of it shared with them on their own
+ * (access.ts roleAt). Everything else of a project stays closed to people who have only a folder.
+ */
+const needPaths = (min: Role, paths: (req: express.Request) => unknown[]) => (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  req.params.project = canonicalProject(String(req.params.project ?? ''));
+  const project = req.params.project;
+  const role = roleFor(req.user!, project);
+  if (atLeast(role, min)) { needProject(min)(req, res, next); return; }
+  let wanted: string[];
+  try { wanted = paths(req).map(p => String(p ?? '')); } catch { wanted = []; }
+  const roles = wanted.map(p => roleAt(req.user!, project, p));
+  if (!wanted.length || !roles.every(r => atLeast(r, min))) { deny(res, roles.find(Boolean) ?? role); return; }
+  req.role = roles.reduce((a, b) => (atLeast(b, a!) ? a : b))!;
+  req.partial = !role;
+  next();
+};
+/** Project routes everybody who reaches something of the project may use (its event stream, its settings): the project, or a folder of it. */
+const needReach = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  req.params.project = canonicalProject(String(req.params.project ?? ''));
+  if (roleFor(req.user!, req.params.project)) { needProject('view')(req, res, next); return; }
+  if (!reachesProject(req.user!, req.params.project)) { deny(res, null); return; }
+  req.role = 'view';
+  req.partial = true;
+  next();
+};
+/** the path of a wildcard route (`/file/*`, `/text/*`, `/graphics/*`) */
+const wildPath = (req: express.Request) => [decodeURIComponent((req.params as any)[0] ?? '')];
+/** for someone who has only folders of the project (`req.partial`): whether `rel` lies in one of them */
+const reaches = (req: express.Request, project: string, rel: string) => !req.partial || !!roleAt(req.user!, project, rel);
 
 /**
  * What the server still does for an end-to-end encrypted project (e2e/store.ts): who is in it
@@ -289,10 +326,20 @@ api.all('/docs/*', (req, res, next) => {
   const action = m[2] ?? '';
   // exporting only reads the document; the folds, the place and the open are the user's own way of looking at it (viewers keep theirs too)
   const write = req.method !== 'GET' && !/^(export|folds|place|opened)/.test(action);
-  const role = roleFor(req.user!, projectOfDoc(id));
-  if (!atLeast(role, write ? 'edit' : 'view')) { deny(res, role); return; }
+  const project = projectOfDoc(id);
+  let role = roleFor(req.user!, project);
+  if (!atLeast(role, write ? 'edit' : 'view')) {
+    // a document in a folder shared with the user on their own
+    const at = roleAt(req.user!, project, docPathOf(id));
+    if (!atLeast(at, write ? 'edit' : 'view')) { deny(res, at ?? role); return; }
+    // its PDF: unless it is built through a master document outside the folder (that one's PDF is not theirs to see)
+    const master = /^(export|pdf|build|synctex|layoutcheck)/.test(action) ? findMaster(project, docPathOf(id)) : null;
+    if (master && !roleAt(req.user!, project, master)) { res.status(403).json({ error: `This document is built through ${master}, which is not shared with you` }); return; }
+    req.partial = !role;
+    role = at;
+  }
   // an end-to-end encrypted project's documents are ciphertext the server cannot open
-  if (isE2eProject(projectOfDoc(id))) { refuseE2e(res); return; }
+  if (isE2eProject(project)) { refuseE2e(res); return; }
   req.role = role!;
   next();
 });
@@ -309,6 +356,8 @@ api.use(zoteroRoutes());
 api.get('/docs/*/external', (req, res) => {
   const id = docId(req);
   res.setHeader('Cache-Control', 'no-store');
+  // (the project's clones and links are its people's business)
+  if (req.partial) { res.json({ clones: [], google: null }); return; }
   res.json(externalSyncOf(id, projectOfDoc(id), req.user!));
 });
 
@@ -324,7 +373,9 @@ api.get('/projects', (req, res) => {
   const people = projectPeople();
   res.json({ projects: accessibleProjects(req.user!).map(p => ({ name: p.name, title: p.title, kind: p.kind, role: p.role, via: p.via, public: p.public, owner: p.owner, files: p.files, lastOpened: opened.get(p.name) ?? null, lastFile: lastFile.get(p.name) ?? null,
     ...(p.e2e ? { e2e: true } : {}),
-    members: people.get(p.name)?.people ?? [], invited: people.get(p.name)?.invited ?? 0 })) });
+    ...(p.folders ? { folders: p.folders } : {}), ...(p.partial ? { partial: true } : {}),
+    // (who else is in it is the project's people's business, not of someone with a folder of it)
+    members: p.partial ? [] : people.get(p.name)?.people ?? [], invited: p.partial ? 0 : people.get(p.name)?.invited ?? 0 })) });
   void ensureAllRepos();   // directories that appeared since (created by hand, the welcome and starter projects) get their repository
 });
 
@@ -474,19 +525,19 @@ api.post('/import/zip', express.raw({ type: '*/*', limit: '300mb' }), (req, res)
  * graphics file was written (a plot script ran, an upload landed; the editors reload the image) —
  * and `{"kind":"settings"}`: the project's settings changed (Settings ▸ Project, projectsettings.ts).
  */
-api.get('/projects/:project/events', needProject('view'), (req, res) => {
+api.get('/projects/:project/events', needReach, (req, res) => {
   const project = String(req.params.project);
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
   res.write(': connected\n\n');
   const hb = setInterval(() => res.write(': hb\n\n'), 20000);
   const cleanup = () => { clearInterval(hb); projectChangedListeners.delete(listener); graphicsChangedListeners.delete(graphics); projectSettingsListeners.delete(settings); };
-  const allowed = () => { if (roleFor(req.user!, project)) return true; cleanup(); res.end(); return false; };   // access revoked since the connect
+  const allowed = () => { if (reachesProject(req.user!, project)) return true; cleanup(); res.end(); return false; };   // access revoked since the connect
   const listener = (p: string) => {
     if (p !== project || !allowed()) return;
     res.write('data: {"kind":"files"}\n\n');
   };
   const graphics = (p: string, file: string, v: number) => {
-    if (p !== project || !allowed()) return;
+    if (p !== project || !allowed() || !reaches(req, project, file)) return;
     res.write(`data: ${JSON.stringify({ kind: 'graphics', path: file, v })}\n\n`);
   };
   const settings = (p: string) => {
@@ -536,6 +587,13 @@ api.post('/projects/:project/share/members', needProject('owner'), (req, res) =>
   try {
     const role = req.body?.role;
     if (!isRole(role)) { res.status(400).json({ error: 'role must be view or edit' }); return; }
+    // `path`: only that folder of the project (foldershares.ts)
+    if (req.body?.path) {
+      const f = addFolderMember(req.params.project, String(req.body.path), String(req.body?.who ?? ''), role, req.user!);
+      logAccess(req.params.project, req.user!.id, 'share', `shared the folder ${f.path} with ${memberLabel(f)} as ${role === 'edit' ? 'editor' : 'viewer'}`);
+      res.json({ member: f, share: shareInfo(req.params.project) });
+      return;
+    }
     const m = addMember(req.params.project, String(req.body?.who ?? ''), role, req.user!);
     logAccess(req.params.project, req.user!.id, 'share', `added ${memberLabel(m)} as ${role === 'edit' ? 'editor' : 'viewer'}`);
     res.json({ member: m, share: shareInfo(req.params.project) });
@@ -561,13 +619,35 @@ api.delete('/projects/:project/share/members/:id', needProject('owner'), (req, r
   if (m?.user_id != null && isE2eProject(req.params.project) && !roleFor({ id: m.user_id } as SessionUser, req.params.project, false)) { dropKeys(req.params.project, m.user_id); kickE2e(req.params.project, [m.user_id]); }
   res.json({ share: shareInfo(req.params.project) });
 });
-/** A new share link: body { role: 'view' | 'edit' }, the link's role for good (another role is another link). */
+/** Someone a folder of the project is shared with on their own: another role (body { role }), or removed. */
+api.post('/projects/:project/share/folder-members/:id', needProject('owner'), (req, res) => {
+  const role = req.body?.role;
+  if (!isRole(role)) { res.status(400).json({ error: 'role must be view or edit' }); return; }
+  const m = folderMemberRow(req.params.project, Number(req.params.id));
+  if (!m) { res.status(404).json({ error: 'no such member' }); return; }
+  setFolderMemberRole(req.params.project, m.id, role);
+  logAccess(req.params.project, req.user!.id, 'share', `made ${memberLabel(m)} ${role === 'edit' ? 'an editor' : 'a viewer'} of the folder ${m.path}`);
+  if (m.user_id != null) manager.kick(req.params.project, [m.user_id]);
+  res.json({ share: shareInfo(req.params.project) });
+});
+api.delete('/projects/:project/share/folder-members/:id', needProject('owner'), (req, res) => {
+  const m = folderMemberRow(req.params.project, Number(req.params.id));
+  if (!m) { res.status(404).json({ error: 'no such member' }); return; }
+  removeFolderMember(req.params.project, m.id);
+  logAccess(req.params.project, req.user!.id, 'share', `stopped sharing the folder ${m.path} with ${memberLabel(m)}`);
+  if (m.user_id != null) manager.kick(req.params.project, [m.user_id]);
+  res.json({ share: shareInfo(req.params.project) });
+});
+/**
+ * A new share link: body { role: 'view' | 'edit' }, the link's role for good (another role is another
+ * link); `path`: a folder of the project, which the link shares alone (foldershares.ts).
+ */
 api.post('/projects/:project/share/links', needProject('owner'), (req, res) => {
   try {
     const role = req.body?.role;
     if (!isRole(role)) { res.status(400).json({ error: 'role must be view or edit' }); return; }
-    const link = createLink(req.params.project, role, req.user!);
-    logAccess(req.params.project, req.user!.id, 'share', `made a share link for ${role === 'edit' ? 'editors' : 'viewers'}`);
+    const link = createLink(req.params.project, role, req.user!, req.body?.path ? String(req.body.path) : null);
+    logAccess(req.params.project, req.user!.id, 'share', `made a share link for ${role === 'edit' ? 'editors' : 'viewers'}${link.path ? ` of the folder ${link.path}` : ''}`);
     res.json({ link, share: shareInfo(req.params.project) });
   } catch (e) { res.status(400).json({ error: (e as Error).message }); }
 });
@@ -676,7 +756,7 @@ api.post('/projects/:project/share/owner', needProject('owner'), async (req, res
 api.get('/projects/:project/activity', needProject('owner'), (req, res) => {
   res.json({ entries: activityOf(req.params.project, Number(req.query.limit ?? 50) || 50) });
 });
-function memberLabel(m: ReturnType<typeof memberRow>): string {
+function memberLabel(m: { user_id: number | null; email: string | null } | undefined): string {
   if (!m) return 'a member';
   if (m.user_id != null) { const u = db.prepare('SELECT username FROM users WHERE id = ?').get(m.user_id) as { username: string } | undefined; if (u) return u.username; }
   return m.email ?? 'a member';
@@ -820,7 +900,7 @@ api.delete('/mcp-tokens/:id', (req, res) => {
  * The project's settings (Settings ▸ Project: `.overlyx/settings.json`, projectsettings.ts) — what
  * everyone's editor in the project takes over their own. Read by anyone in the project, written by editors.
  */
-api.get('/projects/:project/settings', needProject('view'), (req, res) => { res.json({ settings: readProjectSettings(req.params.project) }); });
+api.get('/projects/:project/settings', needReach, (req, res) => { res.json({ settings: readProjectSettings(req.params.project) }); });
 api.put('/projects/:project/settings', needProject('edit'), (req, res) => {
   try {
     const settings = writeProjectSettings(req.params.project, req.body?.settings);
@@ -830,7 +910,7 @@ api.put('/projects/:project/settings', needProject('edit'), (req, res) => {
   } catch (e) { res.status(400).json({ error: (e as Error).message }); }
 });
 
-api.post('/projects/:project/new', needProject('edit'), (req, res) => {
+api.post('/projects/:project/new', needPaths('edit', req => [req.body?.path ?? 'untitled.tex']), (req, res) => {
   try {
     let rel = String(req.body?.path ?? 'untitled.tex');
     if (rel.endsWith('.lyx')) rel = rel.slice(0, -4) + '.tex';
@@ -860,7 +940,7 @@ api.post('/projects/:project/new', needProject('edit'), (req, res) => {
 /* ------------------------------------------------------------------ HTML deliverables (deliverables.ts) */
 
 /** A new deck / poster / web page: the folder `dir` with an index.html to start from. */
-api.post('/projects/:project/deliverables', needProject('edit'), (req, res) => {
+api.post('/projects/:project/deliverables', needPaths('edit', req => [String(req.body?.dir ?? '').replace(/^\/+|\/+$/g, '') + '/index.html']), (req, res) => {
   try {
     const kind = String(req.body?.kind ?? 'deck') as DeliverableKind;
     if (!DELIVERABLE_KINDS.includes(kind)) { res.status(400).json({ error: 'kind: deck, poster or page' }); return; }
@@ -876,7 +956,7 @@ api.post('/projects/:project/deliverables', needProject('edit'), (req, res) => {
 });
 
 /** The sandboxed address of a deliverable's folder for this account (the editor's frames, a presentation). */
-api.get('/projects/:project/deliverable-link', needProject('view'), (req, res) => {
+api.get('/projects/:project/deliverable-link', needPaths('view', req => [req.query.path]), (req, res) => {
   const rel = String(req.query.path ?? '');
   if (!isHtmlPath(rel)) { res.status(400).json({ error: 'not an HTML file' }); return; }
   // the whole project under the token, the page at its own path: `../figures/plot.pdf` resolves
@@ -887,7 +967,7 @@ api.get('/projects/:project/deliverable-link', needProject('view'), (req, res) =
 });
 
 /** The deliverable as a PDF (rendered by headless Chromium, render.ts). */
-api.get('/projects/:project/deliverable-pdf', needProject('view'), async (req, res) => {
+api.get('/projects/:project/deliverable-pdf', needPaths('view', req => [req.query.path]), async (req, res) => {
   const rel = String(req.query.path ?? '');
   if (!isHtmlPath(rel) || !fs.existsSync(resolveProjectPath(req.params.project, rel))) { res.status(404).json({ error: 'not found' }); return; }
   try {
@@ -904,11 +984,12 @@ api.get('/projects/:project/deliverable-pdf', needProject('view'), async (req, r
  * runtime (presenting, math) included under _overlyx/ — open index.html in any browser, or host it
  * (deliverables.ts deliverableZip).
  */
-api.get('/projects/:project/deliverable-zip', needProject('view'), async (req, res) => {
+// (the deliverable's whole folder goes into the zip)
+api.get('/projects/:project/deliverable-zip', needPaths('view', req => [splitEntry(String(req.query.path ?? '')).dir]), async (req, res) => {
   const rel = String(req.query.path ?? '');
   if (!isHtmlPath(rel)) { res.status(400).json({ error: 'not an HTML file' }); return; }
   try {
-    const { name, entries } = await deliverableZip(req.params.project, rel, config.clientDist);
+    const { name, entries } = await deliverableZip(req.params.project, rel, config.clientDist, r => reaches(req, req.params.project, r));
     res.setHeader('Content-Disposition', `attachment; filename="${(name || splitProjectKey(req.params.project).name).replace(/[^A-Za-z0-9._ -]+/g, '-') || 'deliverable'}.zip"`);
     res.setHeader('Content-Type', 'application/zip');
     res.end(writeZip(entries));
@@ -916,7 +997,7 @@ api.get('/projects/:project/deliverable-zip', needProject('view'), async (req, r
 });
 
 /** Upload a file (raw body) into a project, e.g. figures/plot.png */
-api.post('/projects/:project/upload', needProject('edit'), express.raw({ type: '*/*', limit: '100mb' }), (req, res) => {
+api.post('/projects/:project/upload', needPaths('edit', req => [req.query.path]), express.raw({ type: '*/*', limit: '100mb' }), (req, res) => {
   try {
     const rel = String(req.query.path ?? '');
     if (!rel) { res.status(400).json({ error: 'bad path' }); return; }
@@ -934,10 +1015,12 @@ api.post('/projects/:project/upload', needProject('edit'), express.raw({ type: '
 
 /** File operations behind the explorer's context menu (VS Code-like). Deleted files go to the data
  * directory's trash, never into the void — project files are the user's documents. */
-api.post('/projects/:project/fileops', needProject('edit'), (req, res) => {
+api.post('/projects/:project/fileops', needPaths('edit', req => [req.body?.from, req.body?.to].filter(p => p !== undefined)), (req, res) => {
   try {
     const project = req.params.project;
     const op = String(req.body?.op ?? '');
+    // a shared folder itself stays where its owner put it (what is inside it its people may move)
+    if (req.partial && foldersOf(req.user!, project).some(f => f.path === path.posix.normalize(String(req.body?.from ?? '')).replace(/\/+$/, ''))) { res.status(403).json({ error: 'The shared folder itself can only be renamed or deleted by the project’s owner' }); return; }
     const guard = (rel: string) => { assertWritableRelPath(rel); return resolveProjectPath(project, rel); };
     const moveOut = (abs: string, rel: string) => {   // to the trash; a rename across file systems falls back to copy + delete
       const trash = path.join(config.dataDir, 'trash', 'files', `${project}-${new Date().toISOString().replace(/[:.]/g, '-')}`);
@@ -964,7 +1047,7 @@ api.post('/projects/:project/fileops', needProject('edit'), (req, res) => {
       if (!fs.existsSync(from)) throw new Error('not found');
       if (fs.existsSync(to)) { res.status(409).json({ error: 'a file with that name exists' }); return; }
       fs.mkdirSync(path.dirname(to), { recursive: true });
-      if (op === 'rename') { fs.renameSync(from, to); filesMoved(project, fromRel, toRel); lwFilesMoved(project, fromRel, toRel); groupFileMoved(project, fromRel, toRel); }
+      if (op === 'rename') { fs.renameSync(from, to); filesMoved(project, fromRel, toRel); lwFilesMoved(project, fromRel, toRel); groupFileMoved(project, fromRel, toRel); foldersMoved(project, path.posix.normalize(fromRel), path.posix.normalize(toRel)); }
       else { assertRoom(project, bytesAt(from), 0, 'This copy'); fs.cpSync(from, to, { recursive: true }); }
     } else throw new Error('unknown operation');
     touchProject(req.params.project, req.user!.id);
@@ -976,7 +1059,7 @@ api.post('/projects/:project/fileops', needProject('edit'), (req, res) => {
 const INLINE_EXT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.pdf', '.txt']);
 
 /** Serve a project file (bib, pdf, images, ...). */
-api.get('/projects/:project/file/*', needProject('view'), (req, res) => {
+api.get('/projects/:project/file/*', needPaths('view', wildPath), (req, res) => {
   try {
     const rel = decodeURIComponent((req.params as any)[0]);
     const abs = resolveProjectPath(req.params.project, rel);
@@ -1036,7 +1119,7 @@ function logText(req: express.Request, rel: string, what: string, failed = false
 }
 
 /** A text file of the project (.tex, .bib, .sty, …) for the built-in text editor. */
-api.get('/projects/:project/text/*', needProject('view'), (req, res) => {
+api.get('/projects/:project/text/*', needPaths('view', wildPath), (req, res) => {
   try {
     const rel = decodeURIComponent((req.params as any)[0]);
     if (rel.endsWith('.lyx') || isDocumentFile(req.params.project, rel)) { res.status(400).json({ error: 'Documents are opened as documents, not as text' }); return; }
@@ -1109,7 +1192,7 @@ api.post('/projects/:project/bib/add', needProject('edit'), async (req, res) => 
   }
 });
 
-api.put('/projects/:project/text/*', needProject('edit'), (req, res) => {
+api.put('/projects/:project/text/*', needPaths('edit', wildPath), (req, res) => {
   try {
     const rel = decodeURIComponent((req.params as any)[0]);
     // (a new markdown file may be written as text: it is a document once it exists)
@@ -1145,7 +1228,7 @@ api.put('/projects/:project/text/*', needProject('edit'), (req, res) => {
 });
 
 /** Graphics rendered to PNG for the editor (svg/pdf/eps/... converted; png/jpg passed through). */
-api.get('/projects/:project/graphics/*', needProject('view'), async (req, res) => {
+api.get('/projects/:project/graphics/*', needPaths('view', wildPath), async (req, res) => {
   try {
     const rel = decodeURIComponent((req.params as any)[0]);
     const find = (r: string): string | null => {
@@ -1158,6 +1241,7 @@ api.get('/projects/:project/graphics/*', needProject('view'), async (req, res) =
     // not beside the document: where its \graphicspath leads (?alt=, project-relative, in order — the client's figureCandidates)
     for (const alt of ([] as unknown[]).concat(req.query.alt ?? []).slice(0, 8)) {
       if (abs) break;
+      if (!reaches(req, req.params.project, String(alt))) continue;
       try { abs = find(String(alt)); } catch { /* outside the project */ }
     }
     if (!abs) { res.status(404).json({ error: 'not found' }); return; }
@@ -1195,13 +1279,15 @@ api.get('/docs/*/bib', async (req, res) => {
       idx = { files: [], fallbackProject: doc.project };
     }
     let entries: ReturnType<typeof parseBibtex> = [];
-    for (const f of idx.files) entries.push(...cachedBib(f));
+    const proj = projectDir(projectOfDoc(id));
+    // (someone with only a folder of the project: the bibliographies in it)
+    const seen = (abs: string) => reaches(req, projectOfDoc(id), path.relative(proj, abs));
+    for (const f of idx.files) if (seen(f)) entries.push(...cachedBib(f));
     if (!entries.length && idx.fallbackProject) {
-      const proj = projectDir(idx.fallbackProject);
-      for (const f of listProjects().find(p => p.name === idx!.fallbackProject)?.files ?? []) if (f.kind === 'bib' && !isBackupFile(f.name)) entries.push(...cachedBib(path.join(proj, f.path)));
+      for (const f of listProjects().find(p => p.name === idx!.fallbackProject)?.files ?? []) if (f.kind === 'bib' && !isBackupFile(f.name) && reaches(req, idx.fallbackProject, f.path)) entries.push(...cachedBib(path.join(proj, f.path)));
     }
-    const seen = new Set<string>();
-    entries = entries.filter(e => (seen.has(e.key) ? false : (seen.add(e.key), true)));
+    const keysSeen = new Set<string>();
+    entries = entries.filter(e => (keysSeen.has(e.key) ? false : (keysSeen.add(e.key), true)));
     const keys = String(req.query.keys ?? '').split(',').map(k => k.trim()).filter(Boolean);
     if (keys.length) { res.json({ entries: entries.filter(e => keys.includes(e.key)), total: entries.length }); return; }
     const terms = String(req.query.q ?? '').toLowerCase().split(/\s+/).filter(Boolean);
@@ -1229,15 +1315,18 @@ api.get('/docs/*/meta', async (req, res) => {
     const proj = projectDir(doc.project);
     const docDir = path.dirname(path.join(proj, m.master ? m.master.slice(doc.project.length + 1) : doc.relPath));
     const safe = (fn: string) => { const abs = path.resolve(docDir, fn); return abs.startsWith(proj) ? abs : null; };
+    // someone with only a folder of the project sees the files in it, nothing else
+    const shown = (rel: string) => reaches(req, doc.project, rel);
     const bibFiles = new Set(m.bibFiles), citedKeys = new Set(m.citedKeys);
     const bib: ReturnType<typeof parseBibtex> = [];
     for (const f of bibFiles) {
       const abs = safe(f.endsWith('.bib') ? f : f + '.bib');
-      if (abs && fs.existsSync(abs)) bib.push(...cachedBib(abs));
+      if (abs && fs.existsSync(abs) && shown(path.relative(proj, abs))) bib.push(...cachedBib(abs));
     }
+    const files = (listProjects().find(p => p.name === doc.project)?.files ?? []).filter(f => shown(f.path));
     // also offer all .bib files of the project when none is referenced
     if (!bib.length) {
-      for (const f of listProjects().find(p => p.name === doc.project)?.files ?? []) {
+      for (const f of files) {
         if (f.kind === 'bib' && !isBackupFile(f.name)) bib.push(...cachedBib(path.join(proj, f.path)));
       }
     }
@@ -1255,7 +1344,7 @@ api.get('/docs/*/meta', async (req, res) => {
       role: req.role ?? 'edit',
       labels: m.labels,
       textclass: m.textclass, modules: m.modules,
-      availableModules: describeModules(config.layoutDir, [proj, docDir]),
+      availableModules: describeModules(config.layoutDir, req.partial ? [docDir] : [proj, docDir]),
       language: m.language,
       useRefstyle: m.useRefstyle,
       citeEngine: m.citeEngine,
@@ -1270,7 +1359,7 @@ api.get('/docs/*/meta', async (req, res) => {
       bib: bibUnique.slice(0, 30000).map(e => ({ key: e.key, author: e.authorShort, year: e.year, title: e.title })),
       layouts: m.layouts, flexInsets: m.flexInsets,
       graphicsPath: m.graphicsPath,
-      files: listProjects().find(p => p.name === doc.project)?.files ?? [],
+      files,
       health: m.health,
     });
   } catch (e) { res.status(400).json({ error: String(e) }); }

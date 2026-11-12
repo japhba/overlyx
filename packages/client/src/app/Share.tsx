@@ -6,11 +6,15 @@
  * opens — the one open when the dialog was, or another document picked under the links. *Public*
  * lets everybody view the project at its own address and clone it, no link or account needed. Only
  * the owner (or an administrator) sees it — the server refuses everything else.
+ *
+ * One folder can be shared on its own (FolderShareDialog, the file browser's *Share Folder…*): with
+ * people, or by links of its own — they reach that folder and nothing else of the project. The
+ * project's dialog lists those shares too, under *Shared folders*.
  */
 import { useEffect, useState } from 'preact/hooks';
 import { inkOn } from './contrast';
 import { AvatarContent, initials } from './Avatar';
-import { api, pdfLinkUrl, type ActivityEntry, type PdfLinkInfo, type PdfLinksInfo, type PdfPublishInfo, type ShareInfo, type ShareLinkInfo, type User } from '../api';
+import { api, pdfLinkUrl, type ActivityEntry, type FolderMember, type PdfLinkInfo, type PdfLinksInfo, type PdfPublishInfo, type ShareInfo, type ShareLinkInfo, type User } from '../api';
 import { ago } from './Git';
 import { Dialog, uiConfirm, uiConfirmCheck } from './Dialogs';
 import { docPathOf, projectOfDoc, projectShortName } from '@overlyx/core';
@@ -78,6 +82,8 @@ export function ShareDialog({ project, user, doc, view, onClose, onChanged }: { 
   const [newLink, setNewLink] = useState(false);
   const [copiedPublic, setCopiedPublic] = useState(false);
   const [activity, setActivity] = useState<ActivityEntry[] | null>(null);
+  // a shared folder's own dialog, opened from *Shared folders*
+  const [folderOpen, setFolderOpen] = useState<string | null>(null);
   // public PDF links: the project's documents and which of them have one
   const [pdf, setPdf] = useState<PdfLinksInfo | null>(null);
   const [copiedPdf, setCopiedPdf] = useState<string | null>(null);
@@ -143,6 +149,8 @@ export function ShareDialog({ project, user, doc, view, onClose, onChanged }: { 
     setCopiedPublic(true); setTimeout(() => setCopiedPublic(false), 2000);
   };
   const title = info?.title ?? projectShortName(project);
+  // the links to the whole project (a folder's own are under *Shared folders*)
+  const projectLinks = info?.links.filter(l => !l.path) ?? [];
   // what the link can open: the file open now and the project's documents (main document first)
   const linkFiles = [...new Set([...(openPath ? [openPath] : []), ...(pdf?.docs ?? [])])];
   useEffect(() => { if (linkPath === null && pdf?.docs.length) setLinkPath(pdf.docs[0]); }, [pdf]);
@@ -214,7 +222,7 @@ export function ShareDialog({ project, user, doc, view, onClose, onChanged }: { 
           </div>
           <h4>Links</h4>
           <div class="share-links" data-share-links>
-            {info.links.map(l => (
+            {projectLinks.map(l => (
               <div class="share-link-item" key={l.token} data-share-link={l.role} data-link-token={l.token}>
                 <div class="share-link">
                   <span class={'link-role ' + l.role}>{l.role === 'edit' ? 'Can edit' : 'Can view'}</span>
@@ -227,9 +235,9 @@ export function ShareDialog({ project, user, doc, view, onClose, onChanged }: { 
                 </div>
               </div>
             ))}
-            {!info.links.length && <div class="hint">No links: only the people listed above can open the project.</div>}
+            {!projectLinks.length && <div class="hint">No links: only the people listed above can open the project.</div>}
           </div>
-          {info.links.length > 0 && linkFiles.length > 0 && (
+          {projectLinks.length > 0 && linkFiles.length > 0 && (
             <div class="share-link-file hint">
               They open <OpensFile files={linkFiles} path={linkPath} busy={busy} onPick={setLinkPath} attr="data-link-file" />
               {linkView && <span data-link-view>{' '}as you see it ({describeView(linkView)})</span>}
@@ -239,6 +247,7 @@ export function ShareDialog({ project, user, doc, view, onClose, onChanged }: { 
           <div class="share-link-meta">
             <button type="button" class="btn small" disabled={busy} data-link-new onClick={() => setNewLink(true)}>New link…</button>
           </div>
+          <SharedFolders info={info} busy={busy} onOpen={setFolderOpen} />
           {e2e && <E2eShareKeys project={project} busy={busy} />}
           {!e2e && <>
           <h4>Public</h4>
@@ -328,6 +337,159 @@ export function ShareDialog({ project, user, doc, view, onClose, onChanged }: { 
       )}
     </Dialog>
     {newLink && <NewLinkDialog title={title} path={linkPath} onClose={() => setNewLink(false)} onCreate={r => update(() => api.createLink(project, r))} />}
+    {folderOpen && <FolderShareDialog project={project} folder={folderOpen} user={user} onClose={() => setFolderOpen(null)} onChanged={() => { void api.share(project).then(setInfo).catch(() => {}); onChanged?.(); }} />}
+    </>
+  );
+}
+
+/** The folders of the project shared on their own: each with its people and links, opened in its own dialog. */
+function SharedFolders({ info, busy, onOpen }: { info: ShareInfo; busy: boolean; onOpen: (folder: string) => void }) {
+  const folders = [...new Set([...(info.folderMembers ?? []).map(m => m.path), ...info.links.flatMap(l => (l.path ? [l.path] : []))])].sort();
+  if (!folders.length) return null;
+  return (
+    <>
+      <h4>Shared folders</h4>
+      <div class="hint">Shared on their own: these people and links reach the folder and nothing else of the project.</div>
+      <div class="share-list" data-shared-folders>
+        {folders.map(f => {
+          const people = (info.folderMembers ?? []).filter(m => m.path === f);
+          const links = info.links.filter(l => l.path === f);
+          const what = [
+            people.length && people.map(m => m.user?.name ?? m.email).slice(0, 3).join(', ') + (people.length > 3 ? ` and ${people.length - 3} more` : ''),
+            links.length && `${links.length} link${links.length === 1 ? '' : 's'}`,
+          ].filter(Boolean).join(' · ');
+          return (
+            <div class="share-row" key={f} data-shared-folder={f}>
+              <span class="avatar pending" aria-hidden="true">🗀</span>
+              <span class="who" title={f}>{f}<small>{what}</small></span>
+              <button class="btn small" disabled={busy} onClick={() => onOpen(f)}>Manage…</button>
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
+/**
+ * Share one folder of a project on its own: who is added here, and whoever opens one of its links,
+ * reaches that folder and nothing else of the project (server foldershares.ts). The project's people
+ * keep all of it — a link they open lands them in the folder.
+ */
+export function FolderShareDialog({ project, folder, name, user, onClose, onChanged }: {
+  project: string; folder: string; /** what the folder is called (its document group's title) */ name?: string | null; user: User; onClose: () => void; onChanged?: () => void;
+}) {
+  const [info, setInfo] = useState<ShareInfo | null>(null);
+  const [err, setErr] = useState('');
+  const [who, setWho] = useState('');
+  const [role, setRole] = useState<'view' | 'edit'>('view');
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
+  const [newLink, setNewLink] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    const load = () => api.share(project).then(i => { if (alive) setInfo(i); }).catch(e => { if (alive) setErr((e as Error).message); });
+    void load();
+    const t = setInterval(() => { if (!document.hidden) void load(); }, 4000);
+    window.addEventListener('focus', load);
+    return () => { alive = false; clearInterval(t); window.removeEventListener('focus', load); };
+  }, [project]);
+  const update = async (fn: () => Promise<{ share: ShareInfo }>): Promise<boolean> => {
+    setBusy(true); setErr('');
+    try { const r = await fn(); setInfo(r.share); onChanged?.(); return true; }
+    catch (e) { setErr((e as Error).message); return false; }
+    finally { setBusy(false); }
+  };
+  const add = async () => { if (!who.trim() || busy) return; if (await update(() => api.addMember(project, who.trim(), role, folder))) setWho(''); };
+  const copy = async (l: ShareLinkInfo) => {
+    const url = shareUrl(l.token, project, folder);
+    try { await navigator.clipboard.writeText(url); } catch { const el = document.querySelector<HTMLInputElement>(`[data-link-token="${l.token}"] input`); el?.select(); document.execCommand('copy'); }
+    setCopied(l.token); setTimeout(() => setCopied(c => (c === l.token ? null : c)), 2000);
+  };
+  const revoke = async (l: ShareLinkInfo) => {
+    const what = `The ${l.role === 'edit' ? 'editing' : 'viewing'} link to this folder, made ${madeAt(l.createdAt)}, stops working: nobody new comes in through it.`;
+    let remove = false;
+    if (l.joined) {
+      const r = await uiConfirmCheck('Turn this link off?', what, { label: l.joined === 1 ? 'Also remove the one person who came in through it' : `Also remove the ${l.joined} people who came in through it`, checked: true }, { okLabel: 'Turn off' });
+      if (r === null) return;
+      remove = r;
+    } else if (!await uiConfirm('Turn this link off?', what, { okLabel: 'Turn off' })) return;
+    await update(() => api.revokeLink(project, l.token, remove));
+  };
+  const folderName = name ?? folder.split('/').pop()!;
+  const projectTitle = info?.title ?? projectShortName(project);
+  const people = (info?.folderMembers ?? []).filter(m => m.path === folder);
+  // shares of a folder holding this one reach it too
+  const above = (info?.folderMembers ?? []).filter(m => folder.startsWith(m.path + '/'));
+  const links = info?.links.filter(l => l.path === folder) ?? [];
+  const row = (m: FolderMember, editable: boolean) => (
+    <div class="share-row" key={m.id} data-member={m.user?.username ?? m.email ?? ''}>
+      {m.user
+        ? <span class="avatar" style={{ background: m.user.color, color: inkOn(m.user.color) }} data-initials={m.user.avatar ? undefined : initials(m.user.name).length}><AvatarContent name={m.user.name} src={m.user.avatar} /></span>
+        : <span class="avatar pending" title="Invited — has not signed in yet">✉</span>}
+      <span class="who" title={m.user ? `${m.user.name} (${m.user.username})` : m.email ?? ''}>
+        {m.user ? m.user.name : m.email}
+        <small>{m.user ? m.user.username : 'invited, not signed in yet'}{m.via === 'link' ? (info!.links.some(l => l.token === m.link) ? ' · via link' : ' · via a link, off now') : ''}{editable ? '' : ` · all of ${m.path}`}</small>
+      </span>
+      {editable
+        ? <select value={m.role} disabled={busy} data-member-role onChange={e => void update(() => api.setFolderMemberRole(project, m.id, (e.target as HTMLSelectElement).value as 'view' | 'edit'))}>
+            <option value="edit">Editor</option><option value="view">Viewer</option>
+          </select>
+        : <span class="role-static">{m.role === 'edit' ? 'Editor' : 'Viewer'}</span>}
+      {editable && <button class="mini" title="Stop sharing the folder with them" disabled={busy} onClick={() => void update(() => api.removeFolderMember(project, m.id))}>✕</button>}
+    </div>
+  );
+  return (
+    <>
+    <Dialog title={`Share the folder “${folderName}”`} onClose={onClose}>
+      <div class="hint" data-folder-share={folder}>Only this folder ({folder}) of “{projectTitle}”: who you add here, and whoever opens one of its links, sees it and nothing else of the project. The project’s own people keep all of it.</div>
+      <div class="share-add">
+        <input type="text" autofocus placeholder="Username or e-mail address" value={who} disabled={!info} onInput={e => setWho((e.target as HTMLInputElement).value)}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void add(); } }} />
+        <select value={role} onChange={e => setRole((e.target as HTMLSelectElement).value as 'view' | 'edit')}>
+          <option value="view">Viewer</option><option value="edit">Editor</option>
+        </select>
+        <button class="btn" disabled={!who.trim() || busy || !info} onClick={() => void add()}>Add</button>
+      </div>
+      {err && <div class="err">{err}</div>}
+      {info && (
+        <>
+          <h4>People with access to the folder</h4>
+          <div class="share-list" data-share-members>
+            <div class="share-row">
+              <span class="avatar" style={{ background: 'var(--accent)' }} data-initials={initials(info.owner?.name ?? '?').length}>{initials(info.owner?.name ?? '?')}</span>
+              <span class="who">{info.owner?.name ?? '—'}<small>{info.owner?.id === user.id ? 'you' : info.owner?.username}{info.members.length ? ` · and the ${info.members.length === 1 ? 'one person' : `${info.members.length} people`} the project is shared with` : ''}</small></span>
+              <span class="role-static">Owner</span>
+            </div>
+            {above.map(m => row(m, false))}
+            {people.map(m => row(m, true))}
+            {!people.length && !above.length && <div class="hint">Shared with nobody on its own yet — add people above or make a link.</div>}
+          </div>
+          <h4>Links to the folder</h4>
+          <div class="share-links" data-share-links>
+            {links.map(l => (
+              <div class="share-link-item" key={l.token} data-share-link={l.role} data-link-token={l.token}>
+                <div class="share-link">
+                  <span class={'link-role ' + l.role}>{l.role === 'edit' ? 'Can edit' : 'Can view'}</span>
+                  <input type="text" readonly value={shareUrl(l.token, project, folder)} onFocus={e => (e.target as HTMLInputElement).select()} />
+                  <button class="btn" onClick={() => void copy(l)}>{copied === l.token ? 'Copied ✓' : 'Copy'}</button>
+                  <button class="mini" title="Turn this link off" disabled={busy} data-link-off onClick={() => void revoke(l)}>✕</button>
+                </div>
+                <div class="hint small" data-link-created={l.createdAt}>
+                  Made {madeAt(l.createdAt)} · {l.joined ? `${l.joined} ${l.joined === 1 ? 'person' : 'people'} came in through it` : 'nobody has come in through it yet'}
+                </div>
+              </div>
+            ))}
+            {!links.length && <div class="hint">No links to the folder.</div>}
+          </div>
+          <div class="share-link-meta">
+            <button type="button" class="btn small" disabled={busy} data-link-new onClick={() => setNewLink(true)}>New link…</button>
+          </div>
+          <div class="hint">Viewers read the folder’s documents and files and build their PDFs; editors also change them and add, rename and delete files inside it. Search, git, the project’s other files and its people stay hidden from them.</div>
+        </>
+      )}
+    </Dialog>
+    {newLink && <NewLinkDialog title={folderName} path={null} folder={folder} onClose={() => setNewLink(false)} onCreate={r => update(() => api.createLink(project, r, folder))} />}
     </>
   );
 }
@@ -336,7 +498,7 @@ export function ShareDialog({ project, user, doc, view, onClose, onChanged }: { 
  * New link…: what a link would give away, with each role to pick from — the role the link then keeps
  * for good. A link reaches whoever it is passed on to, account or not, and opens the whole project.
  */
-function NewLinkDialog({ title, path, onCreate, onClose }: { title: string; path: string | null; onCreate: (role: 'view' | 'edit') => Promise<boolean>; onClose: () => void }) {
+function NewLinkDialog({ title, path, folder, onCreate, onClose }: { title: string; path: string | null; /** a link to this folder alone */ folder?: string; onCreate: (role: 'view' | 'edit') => Promise<boolean>; onClose: () => void }) {
   const [role, setRole] = useState<'view' | 'edit'>('view');
   const [busy, setBusy] = useState(false);
   const create = async () => { setBusy(true); if (await onCreate(role)) onClose(); else setBusy(false); };
@@ -346,9 +508,13 @@ function NewLinkDialog({ title, path, onCreate, onClose }: { title: string; path
   return (
     <Dialog title={`New link to “${title}”`} onClose={onClose}
       buttons={<button class="btn primary" disabled={busy} data-link-create onClick={() => void create()}>Create link</button>}>
-      <p>Anyone who has the link comes into the whole project — every file in it{path ? `, not only ${path}` : ''} — without an account if they like, as a guest under a name they choose or anonymously. A forwarded link works just the same.</p>
-      {choice('view', 'Can view', 'Read every file with its comments and history, build the PDF, download the project and clone it with git.')}
-      {choice('edit', 'Can edit', 'Also change everything: write and comment, upload, rename and delete files, accept or reject tracked changes, restore earlier versions.')}
+      {folder
+        ? <p>Anyone who has the link sees the folder {folder} — its files, and nothing else of the project — without an account if they like, as a guest under a name they choose or anonymously. A forwarded link works just the same; the project’s own people land in the folder.</p>
+        : <p>Anyone who has the link comes into the whole project — every file in it{path ? `, not only ${path}` : ''} — without an account if they like, as a guest under a name they choose or anonymously. A forwarded link works just the same.</p>}
+      {folder ? choice('view', 'Can view', 'Read the folder’s documents and files with their comments, and build their PDFs.')
+        : choice('view', 'Can view', 'Read every file with its comments and history, build the PDF, download the project and clone it with git.')}
+      {folder ? choice('edit', 'Can edit', 'Also change them: write and comment, upload, rename and delete files inside the folder, accept or reject tracked changes.')
+        : choice('edit', 'Can edit', 'Also change everything: write and comment, upload, rename and delete files, accept or reject tracked changes, restore earlier versions.')}
       <p class="hint">The link keeps this role for good: for another, make another link. Whoever comes in through it stays until you remove them, or turn the link off with ✕.</p>
     </Dialog>
   );

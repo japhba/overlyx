@@ -184,6 +184,25 @@ try { db.exec('ALTER TABLE project_members ADD COLUMN link_token TEXT'); } catch
 // Each account's key pair: the public key, and the private key sealed with the account's recovery
 // code (both made in the browser; the server never sees the code or the private key in the clear).
 try { db.exec('ALTER TABLE projects ADD COLUMN e2e INTEGER NOT NULL DEFAULT 0'); } catch { /* column exists */ }
+// 2026-11-12: folder shares (foldershares.ts) — a folder of a project shared on its own, with people
+// (`folder_members`, apart from `project_members` so that nothing asking about the whole project
+// sees them) or through a share link that names it (`share_links.path`; null: the whole project)
+try { db.exec('ALTER TABLE share_links ADD COLUMN path TEXT'); } catch { /* column exists */ }
+db.exec(`CREATE TABLE IF NOT EXISTS folder_members (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project TEXT NOT NULL,
+  path TEXT NOT NULL,
+  user_id INTEGER,
+  email TEXT,
+  role TEXT NOT NULL,
+  via TEXT NOT NULL,
+  link_token TEXT,
+  added_by INTEGER,
+  created_at INTEGER NOT NULL
+)`);
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS folder_members_user ON folder_members(project, path, user_id) WHERE user_id IS NOT NULL');
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS folder_members_email ON folder_members(project, path, email) WHERE email IS NOT NULL');
+db.exec('CREATE INDEX IF NOT EXISTS folder_members_person ON folder_members(user_id)');
 db.exec(`CREATE TABLE IF NOT EXISTS e2e_user_keys (
   user_id INTEGER PRIMARY KEY,
   public_key TEXT NOT NULL,
@@ -242,6 +261,12 @@ export interface MemberRow {
   via: string; added_by: number | null; created_at: number;
   /** via 'link': the share link they came in through (`share_links.token`; it may be off since) */
   link_token?: string | null;
+}
+/** A folder of a project shared with a person on its own (foldershares.ts): `path` project-relative, a directory. */
+export interface FolderMemberRow {
+  id: number; project: string; path: string; user_id: number | null; email: string | null; role: string;
+  /** 'user' (added by name) | 'email' (invited by e-mail) | 'link' (joined through a share link naming the folder) */
+  via: string; link_token: string | null; added_by: number | null; created_at: number;
 }
 
 export interface UserRow {

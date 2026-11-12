@@ -10,7 +10,9 @@
  * Google Doc) shows as one entry: its title, then its documents in the group's order under the titles
  * the group gives them (nested ones indented), the folder's other files after them.
  * *Import from Google Docs…* (where Google's picker is set up) brings a Google Doc in: a document, or
- * a group of its tabs (server gdocs/importing.ts).
+ * a group of its tabs (server gdocs/importing.ts). *Share Folder…* (the owner) shares one folder on its
+ * own (app/Share.tsx FolderShareDialog); someone who has only folders of a project (`partial`) sees
+ * those, and changes things inside the ones they may edit.
  */
 import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
@@ -110,6 +112,9 @@ export function siblingDocument(project: Project, goneId: string): string | null
   return pick ? fileTabId(project.name, pick) : null;
 }
 
+/** Share Folder…: the app opens the folder's share dialog (detail: { project, path, name }) */
+export const SHARE_FOLDER_EVENT = 'ol:share-folder';
+
 /** the explorer's cut/copy clipboard (paths within one project; survives re-renders) */
 let fileClip: { project: string; path: string; cut: boolean } | null = null;
 const isBackup = (name: string) => name.endsWith('~') || name.startsWith('#') || name.endsWith('.emergency');
@@ -166,7 +171,11 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
   const project = projects.find(p => p.name === selected) ?? null;
   const role = project?.role ?? 'owner';
   const via = project?.via ?? 'owner';
-  const canEdit = role !== 'view';
+  // only folders of the project are shared with this user: changes inside those they may edit, nothing at the top
+  const partial = !!project?.partial;
+  const canEdit = role !== 'view' && !partial;
+  /** may change what is in `dir` (project-relative, '' the top): the project's editors, or an editor of a folder holding it */
+  const canEditIn = (dir: string) => canEdit || (project?.folders ?? []).some(f => f.role === 'edit' && (dir === f.path || dir.startsWith(f.path + '/')));
   // end-to-end encrypted: no LyX or Google imports there yet (e2e/localapi.ts refuses them)
   const e2e = !!project && isE2eProject(project.name);
   // standalone the browser refreshes itself; under the documents panel the panel subscribes (it
@@ -257,9 +266,9 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
 
   /* ---- drag files (or whole folders) in from the computer; a folder row is a drop target */
   const [dropDir, setDropDir] = useState<string | null>(null);
-  const wantsFiles = (e: DragEvent) => canEdit && !!project && Array.from(e.dataTransfer?.types ?? []).includes('Files');
+  const wantsFiles = (e: DragEvent, dir: string) => canEditIn(dir) && !!project && Array.from(e.dataTransfer?.types ?? []).includes('Files');
   const dragOver = (dir: string) => (e: DragEvent) => {
-    if (!wantsFiles(e)) return;
+    if (!wantsFiles(e, dir)) return;
     e.preventDefault(); e.stopPropagation();
     if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
     setDropDir(dir);
@@ -309,7 +318,7 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
     if (errors.length) await uiAlert('Upload Failed', 'Not everything could be uploaded:\n' + errors.slice(0, 10).join('\n'));
   };
   const drop = (dir: string) => (e: DragEvent) => {
-    if (!wantsFiles(e)) return;
+    if (!wantsFiles(e, dir)) return;
     e.preventDefault(); e.stopPropagation();
     setDropDir(null);
     void uploadDropped(e.dataTransfer!, dir);
@@ -361,30 +370,39 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
   };
   const copyText = (text: string) => { void navigator.clipboard?.writeText(text).catch(() => {}); };
   const download = (p: string) => { const a = document.createElement('a'); a.href = fileUrl(project!.name, p) + '?download=1'; a.click(); };
-  const ctxCommon = (p: string, isDir: boolean): MenuItem[] => [
-    { sep: true },
-    ...(canEdit ? [
-      { label: 'Cut', action: () => { fileClip = { project: project!.name, path: p, cut: true }; } },
-      { label: 'Copy', action: () => { fileClip = { project: project!.name, path: p, cut: false }; } },
-      ...(isDir ? [{ label: 'Paste', disabled: !fileClip, action: () => void pasteInto(p) }] : []),
+  const ctxCommon = (p: string, isDir: boolean): MenuItem[] => {
+    const parent = p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '';
+    // (moving or deleting needs its folder: a folder shared on its own stays where its owner put it)
+    const movable = canEditIn(parent);
+    return [
       { sep: true },
-    ] : [{ sep: true }]),
-    { label: 'Copy Path', action: () => copyText(`${project!.name}/${p}`) },
-    { label: 'Copy Relative Path', action: () => copyText(p) },
-    ...(canEdit ? [
+      ...(movable ? [
+        { label: 'Cut', action: () => { fileClip = { project: project!.name, path: p, cut: true }; } },
+        { label: 'Copy', action: () => { fileClip = { project: project!.name, path: p, cut: false }; } },
+      ] : []),
+      ...(isDir && canEditIn(p) ? [{ label: 'Paste', disabled: !fileClip, action: () => void pasteInto(p) }] : []),
       { sep: true },
-      { label: 'Rename…', action: () => void renamePath(p) },
-      ...(!isDir ? [{ label: 'Duplicate', action: () => void doOp({ op: 'copy', from: p, to: freeName(p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '', p.split('/').pop()!) }) }] : []),
-      { label: 'Delete', action: () => void deletePath(p, isDir) },
-    ] : []),
-  ];
-  const newItems = (dir = ''): MenuItem[] => canEdit ? [
+      { label: 'Copy Path', action: () => copyText(`${project!.name}/${p}`) },
+      { label: 'Copy Relative Path', action: () => copyText(p) },
+      ...(movable ? [
+        { sep: true },
+        { label: 'Rename…', action: () => void renamePath(p) },
+        ...(!isDir ? [{ label: 'Duplicate', action: () => void doOp({ op: 'copy', from: p, to: freeName(parent, p.split('/').pop()!) }) }] : []),
+        { label: 'Delete', action: () => void deletePath(p, isDir) },
+      ] : []),
+    ];
+  };
+  /** Share Folder…: the owner shares one folder on its own (its people see it and nothing else of the project) */
+  const shareItems = (dir: string, name?: string | null): MenuItem[] => role === 'owner' && project && !e2e
+    ? [{ sep: true }, { label: 'Share Folder…', action: () => window.dispatchEvent(new CustomEvent(SHARE_FOLDER_EVENT, { detail: { project: project.name, path: dir, name } })) }] : [];
+  const newItems = (dir = ''): MenuItem[] => canEditIn(dir) ? [
     { label: 'New File…', action: () => void newFile(dir) },
     { label: 'New Slides / Poster / Page…', action: () => setNewLayoutIn(dir) },
     { label: 'New Folder…', action: () => void newFolder(dir) },
     { label: 'Upload…', action: () => void upload(dir) },
-    { label: 'Import from LyX…', action: () => chooseLyxImport(project!.name, dir, r => { reveal(r.created[0] ?? ''); void load(); onOpen(r.id); }) },
-    ...(gdocs ? [{ label: 'Import from Google Docs…', action: () => void importGoogle(dir) }] : []),
+    // (imports are the project's people's: the server refuses them to someone with only a folder)
+    ...(partial ? [] : [{ label: 'Import from LyX…', action: () => chooseLyxImport(project!.name, dir, r => { reveal(r.created[0] ?? ''); void load(); onOpen(r.id); }) }]),
+    ...(gdocs && !partial ? [{ label: 'Import from Google Docs…', action: () => void importGoogle(dir) }] : []),
   ] : [];
   /** `linkId`: the tab the file opens in, whose link "Copy link" copies (editor/permalink.ts) */
   const fileCtx = (f: ProjectFile, openIt: () => void, linkId: string | null) => (e: MouseEvent) => {
@@ -397,16 +415,16 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
       ...ctxCommon(f.path, false),
     ]);
   };
-  const folderCtx = (p: string) => (e: MouseEvent) => {
+  const folderCtx = (p: string, name?: string | null) => (e: MouseEvent) => {
     e.preventDefault(); e.stopPropagation();
-    showContextMenu(e.clientX, e.clientY, [...newItems(p), ...ctxCommon(p, true)]);
+    showContextMenu(e.clientX, e.clientY, [...newItems(p), ...ctxCommon(p, true), ...shareItems(p, name)]);
   };
   const bgCtx = (e: MouseEvent) => {
     if (!project) return;
     e.preventDefault();
     showContextMenu(e.clientX, e.clientY, [
       ...newItems(''),
-      ...(canEdit ? [{ label: 'Paste', disabled: !fileClip, action: () => void pasteInto('') }] : []),
+      ...(canEditIn('') ? [{ label: 'Paste', disabled: !fileClip, action: () => void pasteInto('') }] : []),
       { sep: true },
       { label: showAll ? 'Hide Build Files' : 'Show All Files', action: () => setShowAll(!showAll) },
     ]);
@@ -447,7 +465,7 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
       const n = node.children.filter(c => c.file && byFile.has(c.name)).length;
       return (
         <div key={key} class={'doc-group' + (isCollapsed ? '' : ' open')} data-group={node.path}>
-          <div class={'tree-row folder group-row' + (dropDir === node.path ? ' drop-target' : '')} style={{ paddingLeft: 6 + depth * 14 + 'px' }} onClick={() => toggle(key, closedByDefault)} onContextMenu={folderCtx(node.path)}
+          <div class={'tree-row folder group-row' + (dropDir === node.path ? ' drop-target' : '')} style={{ paddingLeft: 6 + depth * 14 + 'px' }} onClick={() => toggle(key, closedByDefault)} onContextMenu={folderCtx(node.path, node.group.title)}
             onDragOver={dragOver(node.path)} onDrop={drop(node.path)} title={`${node.path} · a document group: ${n} document${n === 1 ? '' : 's'}`}>
             <span class="twisty">{isCollapsed ? '▸' : '▾'}</span>
             {modern
@@ -467,7 +485,7 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
           <div class={'tree-row folder' + (dropDir === node.path ? ' drop-target' : '')} style={{ paddingLeft: 6 + depth * 14 + 'px' }} onClick={() => toggle(key, closedByDefault)} onContextMenu={folderCtx(node.path)}
             onDragOver={dragOver(node.path)} onDrop={drop(node.path)}>
             <span class="twisty">{isCollapsed ? '▸' : '▾'}</span><span class="fname">{node.name}</span>
-            {canEdit && <span class="row-actions">
+            {canEditIn(node.path) && <span class="row-actions">
               <button class="mini" title="New file here (a document, a whiteboard, a .bib …)" onClick={e => { e.stopPropagation(); void newFile(node.path); }}>+</button>
               <button class="mini" title="Upload files here" onClick={e => { e.stopPropagation(); void upload(node.path); }}>⇧</button>
             </span>}
@@ -489,7 +507,7 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
     const href = isLyx ? '#' : inTab ? '#/' + tabId : fileUrl(project!.name, f.path);
     // an SVG drawing opens in the drawing editor over the page (as a figure's double-click does); Ctrl+click: the file in a browser tab
     const isSvg = /\.svg$/i.test(f.name);
-    const editSvg = () => editSvgFile(project!.name, f.path, !canEdit);
+    const editSvg = () => editSvgFile(project!.name, f.path, !canEditIn(f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) : ''));
     const importLyx = async () => {
       if (!(await uiConfirm('Import LyX File', `Import ${f.name} into a .tex document (${f.name.replace(/\.lyx$/, '.tex')})? The .lyx file is kept; child documents it includes are imported too.`, { okLabel: 'Import' }))) return;
       try { const r = await api.importLyx(project!.name, f.path); await load(); onOpen(r.id); if (r.warnings.length) await uiAlert('Imported with Warnings', r.warnings.slice(0, 10).join('\n')); }
@@ -539,7 +557,7 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
         {project && via !== 'owner' && <span class={'badge' + (role === 'view' ? ' view' : '')} title={role === 'view' ? 'Shared with you for viewing' : 'Shared with you for editing'}>{via === 'admin' ? 'admin' : role === 'view' ? 'view' : 'edit'}</span>}
       </div>}
       {project && <div class="project-info" title={project.name}>
-        {via === 'owner' ? 'Your project' : via === 'admin' ? `Owned by ${project.owner?.name ?? '—'}` : `Shared by ${project.owner?.name ?? '—'} · ${role === 'view' ? 'view only' : 'you can edit'}`} · {project.name}
+        {via === 'owner' ? 'Your project' : via === 'admin' ? `Owned by ${project.owner?.name ?? '—'}` : `Shared by ${project.owner?.name ?? '—'} · ${partial ? `only ${(project.folders ?? []).map(f => f.path).join(', ')}` : role === 'view' ? 'view only' : 'you can edit'}`} · {project.name}
       </div>}
       <div class="actions">
         {canEdit && project && <button class="small-btn" onClick={() => void newFile()} title="New file in this project — the ending decides what it is: .tex a LaTeX document, .md a Markdown document, .html slides or a web page, .board a whiteboard, .bib, .sty … a text file">+ File</button>}

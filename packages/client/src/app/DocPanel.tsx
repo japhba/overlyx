@@ -160,10 +160,11 @@ export function DocPanel({ current, currentDoc, refreshKey, outline, activePos, 
           ))}
         </select>
         {project && (project.via ?? 'owner') !== 'owner' && <span class={'badge' + (project.role === 'view' ? ' view' : '')} title={project.role === 'view' ? 'Shared with you for viewing' : 'Shared with you for editing'}>{project.via === 'admin' ? 'admin' : project.role === 'view' ? 'view' : 'edit'}</span>}
-        <button class={'search-toggle' + (searching ? ' on' : '')} aria-pressed={searching} data-search-toggle
+        {/* (searching is the project's people's: someone with only a folder of it has none) */}
+        {!project?.partial && <button class={'search-toggle' + (searching ? ' on' : '')} aria-pressed={searching} data-search-toggle
           title={searching ? 'Back to the files' : 'Search in the project (Ctrl+Shift+F)'}
           onClick={() => { if (!searching) setSearchFocus(s => ({ n: s.n + 1 })); setSearching(!searching); }}
-          dangerouslySetInnerHTML={{ __html: iconSvg(MODERN_ICONS.find, 15) }} />
+          dangerouslySetInnerHTML={{ __html: iconSvg(MODERN_ICONS.find, 15) }} />}
         <button class="hide" title="Hide the files panel (Ctrl+Alt+O)" onClick={onHide}>«</button>
       </div>
       <ProjectSearch project={project} hidden={!searching} focusKey={searchFocus.n} initial={searchFocus.query} />

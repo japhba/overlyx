@@ -10,7 +10,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execFileP = promisify(execFile);
-const VERSION = '0.8.2';
+const VERSION = '0.8.3';
 const DEFAULT_HOST = 'https://overlyx.app';
 
 const HELP = `OverLyX CLI ${VERSION}
@@ -29,6 +29,9 @@ Usage:
   overlyx repo unlink [CLONE]
   overlyx build OWNER/PROJECT/FILE.tex [--pdf FILE] [--log] [--wait SECONDS]
   overlyx restore OWNER/PROJECT COMMIT
+  overlyx share OWNER/PROJECT[/FOLDER] [--role view|edit] [--with USER|EMAIL]
+                                                        a share link (printed) to the project, or to one folder of
+                                                        it alone; --with: share it with that person instead
   overlyx sync [DIR] [--watch]                          keep a clone in step with the server, both ways
   overlyx mcp install [--client claude,codex] [--yes]   let local AI agents use OverLyX (Claude Code: in every directory, no prompts)
   overlyx mcp status | uninstall
@@ -42,6 +45,7 @@ Examples:
   overlyx repo link paper                 # paper/ is a clone inside a code repository: its README.md and AGENTS.md are the repository's too
   overlyx build ada/my-paper/main.tex     # compile on the server: errors, exit code 1 if it fails
   overlyx restore ada/my-paper 3f2a91c    # the whole project as it was at that commit (a new commit)
+  overlyx share ada/notes/meetings/2026-11-12 --role view   # a link that opens this folder and nothing else of the project
   overlyx sync --watch                    # in a clone: saved files reach the server, its changes come here
   overlyx mcp install                     # Claude Code / Codex get OverLyX's tools (your login, your projects)
 
@@ -862,6 +866,22 @@ async function restoreCommand(args, flags) {
   const r = await api(creds, '/git/api/restore', { method: 'POST', body: JSON.stringify({ project, commit: commit.toLowerCase() }) });
   if (!r.restored) { process.stdout.write(`${project} is already as it was at ${commit}\n`); return; }
   process.stdout.write(`${project}: restored to ${commit} as a new commit (${r.files.length} file${r.files.length === 1 ? '' : 's'}: ${r.files.slice(0, 5).join(', ')}${r.files.length > 5 ? ', …' : ''})\n`);
+}
+
+/**
+ * Share a project — or one folder of it alone: whoever comes in reaches that folder and nothing else
+ * of the project — through a new share link (its address printed, for scripts to send on), or with a
+ * person (`--with`). Only the project's owner can.
+ */
+async function shareCommand(args, flags) {
+  const creds = credentials(flags);
+  const parts = String(args[0] ?? '').replace(/^\/+/, '').split('/').filter(Boolean);
+  if (parts.length < 2) fail('usage: overlyx share <owner>/<project>[/<folder>] [--role view|edit] [--with USER|EMAIL]');
+  const role = flags.role ?? 'view';
+  if (role !== 'view' && role !== 'edit') fail('--role is view or edit');
+  const r = await api(creds, '/git/api/share', { method: 'POST', body: JSON.stringify({ project: `${parts[0]}/${parts[1]}`, path: parts.slice(2).join('/'), role, ...(flags.with ? { with: String(flags.with) } : {}) }) });
+  if (r.with) process.stderr.write(`${r.project}${r.path ? '/' + r.path : ''}: shared with ${r.with} (${r.role === 'edit' ? 'can edit' : 'can view'})\n`);
+  process.stdout.write(r.url + '\n');
 }
 
 /* ------------------------------------------------------------ MCP: local agents */
@@ -2003,6 +2023,7 @@ async function main() {
   else if (group === 'repo' || group === 'project') await repoCommand(action, args, flags);
   else if (group === 'build') await buildCommand(positional.slice(1), flags);
   else if (group === 'restore') await restoreCommand(positional.slice(1), flags);
+  else if (group === 'share') await shareCommand(positional.slice(1), flags);
   else if (group === 'sync') await syncCommand(positional.slice(1), flags);
   else if (group === 'mcp') await mcpCommand(action, flags);
   else if (group === 'update') await updateCommand(flags);

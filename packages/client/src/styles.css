@@ -1935,6 +1935,8 @@ a.btn { display: inline-block; color: var(--ui-fg); text-decoration: none; line-
 .dialog .err { color: var(--err); font-size: 12px; }
 .dialog h4 { margin: 6px 0 0; font-size: 12px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--ui-muted); }
 .share-list { display: flex; flex-direction: column; gap: 2px; max-height: 260px; overflow: auto; }
+/* (a scrolling list in the dialog's column would shrink to nothing once the dialog is taller than the screen: the dialog scrolls instead) */
+.dialog .body > .share-list { flex: none; }
 .share-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
 .share-row .avatar { width: 22px; height: 22px; line-height: 22px; font-size: 11px; flex: none; }
 .share-row .avatar.pending { background: var(--ui-border); color: var(--fg2); }

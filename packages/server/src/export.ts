@@ -22,7 +22,20 @@ import { mdTypesetting, textFontsOf, TEXLIVE_FONTS, type LocalFont } from '@over
 import { isMarkdownPath } from '@overlyx/core/md/index.ts';
 import { isHtmlPath } from '@overlyx/core/html/deliverable.ts';
 import { rewriteParentPaths } from './texpaths.ts';
+import { staysInside } from './projectfiles.ts';
+import { confinedRoot } from './foldershares.ts';
 export { rewriteParentPaths };
+
+/**
+ * What a document's build may read of its project: the project — or, a document in a folder shared
+ * for editing on its own, that folder (foldershares.ts confinedRoot) — with the sandbox home that
+ * goes with it (one of its own for such a folder: what its people's code leaves there must not
+ * reach the project's other builds, nor theirs the folder's).
+ */
+export function buildRoot(project: string, rel: string): { root: string; home: string } {
+  const folder = confinedRoot(project, rel);
+  return folder ? { root: resolveProjectPath(project, folder), home: sandboxHome(`${project}\0${folder}`) } : { root: projectDir(project), home: sandboxHome(project) };
+}
 
 export interface BuildResult { ok: boolean; log: string; pdfPath?: string; texPath?: string; warnings: string[]; tex?: string }
 
@@ -262,7 +275,7 @@ const PDFLATEX_FORMATS = new Set(['pdf', 'png', 'jpg', 'jpeg', 'mps']);
  * Rewrite \includegraphics references to formats pdflatex cannot include (svg, eps, tif, ...)
  * to PDF copies converted into the build directory (same relative path, .pdf extension).
  */
-async function rewriteGraphics(text: string, texDir: string, buildTexDir: string, warnings: string[]): Promise<string> {
+async function rewriteGraphics(text: string, texDir: string, buildTexDir: string, warnings: string[], root: string): Promise<string> {
   const re = /\\includegraphics\s*(\*?)\s*(\[[^\]]*\])?\s*\{([^}]*)\}/g;
   const jobs: { m: string; name: string }[] = [];
   for (const m of text.matchAll(re)) jobs.push({ m: m[0], name: m[3].trim() });
@@ -279,6 +292,8 @@ async function rewriteGraphics(text: string, texDir: string, buildTexDir: string
     const dest = path.join(buildTexDir, norm.slice(0, norm.lastIndexOf('.')) + '.pdf');
     const newName = norm.slice(0, norm.lastIndexOf('.')) + '.pdf';
     try {
+      // what the build may read only (the project, or the shared folder: buildRoot) — never another project's pictures
+      if (!src.startsWith(root + path.sep) || !staysInside(root, src)) { warnings.push(`graphics file outside what the build may read: ${j.name}`); done.set(j.name, j.name); continue; }
       if (!fs.existsSync(src)) { warnings.push(`graphics file not found: ${j.name}`); done.set(j.name, j.name); continue; }
       fs.mkdirSync(path.dirname(dest), { recursive: true });
       try { if (fs.lstatSync(dest).isSymbolicLink()) fs.unlinkSync(dest); } catch { /* not there */ }
@@ -322,6 +337,7 @@ export async function exportTex(docId: string, opts: { into?: string } = {}): Pr
   fs.mkdirSync(dir, { recursive: true });
   const docDir = path.dirname(doc.absPath);
   const warnings: string[] = [];
+  const { root } = buildRoot(doc.project, doc.relPath);
   sweepBuildDir(dir, projectDir(doc.project));
   linkDocumentAssets(docDir, dir);
   if (isMarkdownPath(doc.relPath) || isHtmlPath(doc.relPath)) {
@@ -341,7 +357,7 @@ export async function exportTex(docId: string, opts: { into?: string } = {}): Pr
     }
     const tex = markdownAsTex(lyx, doc.project, doc.relPath, { fontFiles });
     const main = path.join(dir, path.basename(doc.relPath).replace(/\.[^.]+$/, '') + '.tex');
-    const rewritten = await rewriteGraphics(tex, docDir, dir, warnings);
+    const rewritten = await rewriteGraphics(tex, docDir, dir, warnings, root);
     fs.writeFileSync(main, rewritten, 'utf8');
     return { dir, main, warnings, tex: rewritten, readAt };
   }
@@ -359,7 +375,7 @@ export async function exportTex(docId: string, opts: { into?: string } = {}): Pr
     const target = path.join(dir, relToDoc);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     try { if (fs.lstatSync(target).isSymbolicLink()) fs.unlinkSync(target); } catch { /* not there */ }
-    const rewritten = rewriteParentPaths(await rewriteGraphics(text, path.dirname(path.join(proj, rel)), path.dirname(target), warnings), path.dirname(path.join(proj, rel)), proj);
+    const rewritten = rewriteParentPaths(await rewriteGraphics(text, path.dirname(path.join(proj, rel)), path.dirname(target), warnings, root), path.dirname(path.join(proj, rel)), root);
     fs.writeFileSync(target, rewritten, 'utf8');
     if (rel === doc.relPath) { mainText = rewritten; mainSource = text; }
   }
@@ -550,8 +566,10 @@ async function buildViaLatexmk(job: BuildJob): Promise<BuildResult> {
   args.push(engineFlag, '-pvc-', '-g', '-f', '-interaction=nonstopmode', '-file-line-error', '-synctex=1', base + '.tex');
   // the build directory is the only writable place (the svg package's cache is a copy in it); the
   // shared cache is not readable (it holds every user's converted pictures and parsed bibliographies)
-  const sandbox = { rw: [exp.dir], ro: [projectDir(project)], home: sandboxHome(project), cgroup: BUILD_CGROUP };
-  const texEnv = { ...texInputs(docDir, exp.dir, projectDir(project)), ...(faceFonts ? { OSFONTDIR: faceFonts } : {}) };
+  // (a document in a folder shared for editing on its own reads that folder only: buildRoot)
+  const { root, home } = buildRoot(project, doc.relPath);
+  const sandbox = { rw: [exp.dir], ro: [root], home, cgroup: BUILD_CGROUP };
+  const texEnv = { ...texInputs(docDir, exp.dir, root), ...(faceFonts ? { OSFONTDIR: faceFonts } : {}) };
   // a house font's faces LuaTeX has not cached in this HOME yet: one per run first (caching them all in
   // the build would take more memory than it may use; googlefonts.ts houseFontWarmups)
   if (faceFonts) {
@@ -629,7 +647,8 @@ async function printArticle(job: BuildJob): Promise<BuildResult> {
     const owner = projectRow(doc.project)?.owner_id;
     if (owner == null) throw new Error('the project has no owner to print it for');
     const { deliverablePdf } = await import('./render.ts');
-    const pdf = await deliverablePdf(doc.project, doc.relPath, owner);
+    // (a page in a folder shared for editing on its own sees that folder only: foldershares.ts)
+    const pdf = await deliverablePdf(doc.project, doc.relPath, owner, { reach: confinedRoot(doc.project, doc.relPath) });
     const dir = buildDir(docId);
     const name = path.basename(doc.relPath).replace(/\.[^.]+$/, '') + '.pdf';
     writeFileIn(dir, name, pdf);

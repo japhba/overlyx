@@ -22,7 +22,8 @@ import type { Express, Request, Response } from 'express';
 import { JWT_SECRET, config } from './config.ts';
 import { db } from './db.ts';
 import { toSessionUser, type SessionUser } from './auth.ts';
-import { roleFor } from './access.ts';
+import { roleAt, reachesProject } from './access.ts';
+import { withinPath } from './foldershares.ts';
 import { projectDir } from './projects.ts';
 import { staysInside } from './projectfiles.ts';
 import { manager, HtmlDoc, BoardDoc, OpenDoc } from './docs.ts';
@@ -37,13 +38,18 @@ import { collect, isBackupFile } from './projectfiles.ts';
 
 const KEY = crypto.createHmac('sha256', JWT_SECRET || 'dev').update('overlyx deliverable token').digest();
 
-export interface DeliverableGrant { project: string; dir: string; userId: number; exp: number }
+/** `reach`: the folder the token reads files in ('': the whole project, as far as its user may) */
+export interface DeliverableGrant { project: string; dir: string; userId: number; exp: number; reach: string }
 
 const b64 = (b: Buffer) => b.toString('base64url');
 
-/** A capability for the folder `dir` of `project` (project-relative, '' for the top) on behalf of `userId`. */
-export function deliverableToken(project: string, dir: string, userId: number, ttlMs = 12 * 3600 * 1000): string {
-  const payload = b64(Buffer.from(JSON.stringify({ p: project, d: dir, u: userId, e: Date.now() + ttlMs })));
+/**
+ * A capability for the folder `dir` of `project` (project-relative, '' for the top) on behalf of
+ * `userId`; `reach`: no file outside that folder (a page printed for everyone from a folder shared on
+ * its own, foldershares.ts confinedRoot).
+ */
+export function deliverableToken(project: string, dir: string, userId: number, ttlMs = 12 * 3600 * 1000, reach = ''): string {
+  const payload = b64(Buffer.from(JSON.stringify({ p: project, d: dir, u: userId, e: Date.now() + ttlMs, ...(reach ? { r: reach } : {}) })));
   const sig = b64(crypto.createHmac('sha256', KEY).update(payload).digest()).slice(0, 32);
   return `${payload}.${sig}`;
 }
@@ -55,9 +61,9 @@ export function verifyDeliverableToken(token: string): DeliverableGrant | null {
   const want = b64(crypto.createHmac('sha256', KEY).update(payload).digest()).slice(0, 32);
   if (sig.length !== want.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(want))) return null;
   try {
-    const j = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as { p: string; d: string; u: number; e: number };
+    const j = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as { p: string; d: string; u: number; e: number; r?: string };
     if (typeof j.p !== 'string' || typeof j.d !== 'string' || typeof j.u !== 'number' || !(j.e > Date.now())) return null;
-    return { project: j.p, dir: j.d, userId: j.u, exp: j.e };
+    return { project: j.p, dir: j.d, userId: j.u, exp: j.e, reach: typeof j.r === 'string' ? j.r : '' };
   } catch { return null; }
 }
 
@@ -161,16 +167,17 @@ export function mountDeliverables(app: Express): void {
 
 /**
  * What the runtime needs with a page besides its files (core html/deckextras.ts): the entries of the
- * keys it cites, from the project's .bib files, and the macros of the .tex files it links.
+ * keys it cites, from the project's .bib files, and the macros of the .tex files it links — of those
+ * `visible` lets through (someone with a folder of the project: the files in it).
  */
-export function extrasOf(project: string, rel: string, html: string): DeckExtras {
+export function extrasOf(project: string, rel: string, html: string, visible: (rel: string) => boolean = () => true): DeckExtras {
   if (!/\\(?:cite|citep|citet|citealp|citealt|citeauthor|citeyear|nocite|parencite|textcite|autocite)\b|ol-bibliography|overlyx-macros/.test(html)) return {};
   const root = projectDir(project);
-  const inside = (r: string) => { const abs = path.join(root, r); return abs.startsWith(root + path.sep) && staysInside(root, abs) ? abs : null; };
+  const inside = (r: string) => { const abs = path.join(root, r); return abs.startsWith(root + path.sep) && staysInside(root, abs) && visible(r) ? abs : null; };
   try {
     return deckExtras(html, rel, {
       read: r => { const abs = inside(r); if (!abs) return null; try { const st = fs.statSync(abs); return st.isFile() && st.size < 4e6 ? fs.readFileSync(abs, 'utf8') : null; } catch { return null; } },
-      bibFiles: () => collect(root, root, [], 0).filter(f => f.kind === 'bib' && !isBackupFile(f.name)).map(f => f.path),
+      bibFiles: () => collect(root, root, [], 0).filter(f => f.kind === 'bib' && !isBackupFile(f.name) && visible(f.path)).map(f => f.path),
       bibEntries: r => { const abs = inside(r); return abs ? cachedBib(abs) : []; },
       resolve: (from, href) => resolveInProject(path.posix.dirname(from) === '.' ? '' : path.posix.dirname(from), href),
     });
@@ -188,12 +195,15 @@ export async function resolveDeliverable(token: string, rawRest: string, query: 
   const grant = verifyDeliverableToken(token);
   if (!grant) return { status: 403, type: 'text/plain', body: 'This link has expired — reload the page.' };
   const user = userById(grant.userId);
-  if (!user || !roleFor(user, grant.project)) return { status: 403, type: 'text/plain', body: 'No access.' };
+  if (!user) return { status: 403, type: 'text/plain', body: 'No access.' };
   let rest: string;
   try { rest = decodeURIComponent(rawRest); } catch { return { status: 400 }; }
   if (!rest || rest.endsWith('/')) rest += 'index.html';
   const rel = resolveInProject(grant.dir, rest);
   if (rel === null) return { status: 404 };
+  // each file as its user may read it: the project, or a folder of it shared with them (foldershares.ts) — and the token's reach
+  const visible = (r: string) => (!grant.reach || withinPath(r, grant.reach)) && !!roleAt(user, grant.project, r);
+  if (!visible(rel)) return reachesProject(user, grant.project) ? { status: 404 } : { status: 403, type: 'text/plain', body: 'No access.' };
   const root = projectDir(grant.project);
   const abs = path.join(root, rel);
   if (!abs.startsWith(root + path.sep) || !staysInside(root, abs)) return { status: 404 };
@@ -202,7 +212,7 @@ export async function resolveDeliverable(token: string, rawRest: string, query: 
     let html: string;
     const mode = (RUNTIME_MODES as readonly string[]).includes(String(query.ol)) ? String(query.ol) as RuntimeMode : 'view';
     try { html = mode === 'embed' ? await embedHtml(grant.project, rel, String(query.b ?? '')) : await liveHtml(grant.project, rel); } catch { return { status: 404, type: 'text/plain', body: 'Not found.' }; }
-    return { status: 200, type: 'text/html; charset=utf-8', body: injectRuntime(html, runtimeTags(mode, { ...extrasOf(grant.project, rel, html), ...((mode === 'edit' || mode === 'thumb' || mode === 'present') ? { source: html } : {}) }, runtimeSrc())), headers: { 'Cache-Control': 'no-store' } };
+    return { status: 200, type: 'text/html; charset=utf-8', body: injectRuntime(html, runtimeTags(mode, { ...extrasOf(grant.project, rel, html, visible), ...((mode === 'edit' || mode === 'thumb' || mode === 'present') ? { source: html } : {}) }, runtimeSrc())), headers: { 'Cache-Control': 'no-store' } };
   }
 
   let st: fs.Stats;
@@ -241,7 +251,7 @@ const ZIP_MAX = 200 * 1024 * 1024;
  * elsewhere in the project copied into `_assets/` and its references rewritten, PDF and EPS
  * figures (which no browser shows in an <img>) converted to SVG / PNG.
  */
-export async function deliverableZip(project: string, rel: string, clientDist: string): Promise<{ name: string; entries: { name: string; data: Buffer }[] }> {
+export async function deliverableZip(project: string, rel: string, clientDist: string, visible: (rel: string) => boolean = () => true): Promise<{ name: string; entries: { name: string; data: Buffer }[] }> {
   // the page's folder inside this project (`..` refused; a prefix test alone let `talk/../talk2` or a
   // sibling project named like this one through), not through a symlinked directory
   const clean = resolveInProject('', rel);
@@ -266,7 +276,7 @@ export async function deliverableZip(project: string, rel: string, clientDist: s
     let decoded: string;
     try { decoded = decodeURIComponent(clean); } catch { return null; }
     const projRel = resolveInProject(path.posix.join(dir, fromZipDir), decoded);
-    if (projRel === null) return null;
+    if (projRel === null || !visible(projRel)) return null;
     const abs = path.join(root, projRel);
     if (!fs.existsSync(abs) || !fs.statSync(abs).isFile() || !staysInside(root, abs)) return null;
     const ext = path.extname(projRel).toLowerCase();
@@ -334,7 +344,7 @@ export async function deliverableZip(project: string, rel: string, clientDist: s
         const text = publishedText(open instanceof HtmlDoc ? open.html.toString() : data.toString('utf8'));
         const kind = deliverableInfo(text).kind;
         const up = '../'.repeat(r.split('/').length - 1);
-        const cfg = JSON.stringify({ mode: kind === 'deck' ? 'present' : 'view', ...extrasOf(project, projRel, text) }).replace(/</g, '\\u003c');
+        const cfg = JSON.stringify({ mode: kind === 'deck' ? 'present' : 'view', ...extrasOf(project, projRel, text, visible) }).replace(/</g, '\\u003c');
         const tags = `<script>window.__OL=${cfg}</script><script src="${up}_overlyx/runtime.js"></script>`;
         data = Buffer.from(injectRuntime(await rewriteHtml(text, path.posix.dirname(r) === '.' ? '' : path.posix.dirname(r)), tags));
       } else if (/\.css$/i.test(e.name)) {

@@ -30,7 +30,7 @@ import { PaneSwitch } from './PaneSwitch';
 import { PaneDividers } from './PaneDividers';
 import { EditModeSwitch, editModeOf, applyEditMode, modeScope, setOwnSuggesting, suggestingFor, switchModeScope, type ModeScope } from './EditModeSwitch';
 import { loadLayout, saveLayout, setPaneShown, togglePane, visiblePanes, paneGrow, applyPreset, presetMatches, parseViewParam, viewParam, type LinkView, type PaneId, type PaneLayout, type ViewKind } from './panes';
-import { ShareDialog } from './Share';
+import { ShareDialog, FolderShareDialog } from './Share';
 import { CopyLinkDialog } from './CopyLinkDialog';
 import { GuestCallout, ShareInvite, type SharePreview } from './Guest';
 import { GitDialog } from './Git';
@@ -77,7 +77,7 @@ import { clearLocalData } from './localData';
 import { createEditor, moveLocalCopies, type EditorHandle, type SaveState } from '../editor/editor';
 import { refreshMacros } from '../editor/macrodefs';
 import { describeChange } from '../editor/assembly';
-import { useProjectEvents, deletedHere, siblingDocument } from './FileBrowser';
+import { useProjectEvents, deletedHere, siblingDocument, SHARE_FOLDER_EVENT } from './FileBrowser';
 import { newerVersionAvailable, reloadHeld } from './update';
 import { generateLyx } from './SourcePane';
 import { editorContext, viewDocId } from '../editor/context';
@@ -586,6 +586,13 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   }, [findOpen, findFocus]);
   // sharing: the project whose share dialog is open; view-only when the current project was shared for viewing
   const [shareFor, setShareFor] = useState<string | null>(null);
+  // one folder shared on its own (the file browser's Share Folder…: SHARE_FOLDER_EVENT)
+  const [shareFolder, setShareFolder] = useState<{ project: string; path: string; name?: string | null } | null>(null);
+  useEffect(() => {
+    const f = (e: Event) => setShareFolder((e as CustomEvent<{ project: string; path: string; name?: string | null }>).detail);
+    window.addEventListener(SHARE_FOLDER_EVENT, f);
+    return () => window.removeEventListener(SHARE_FOLDER_EVENT, f);
+  }, []);
   // "Copy link to …": who may open it, asked first (app/CopyLinkDialog.tsx)
   const [linkAsk, setLinkAsk] = useState<{ url: string; what: string } | null>(null);
   // File ▸ New slides / poster / page…: the project a layout document is created in
@@ -738,7 +745,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       const { share: token, sharePath } = parseHash();
       if (!token) { void visitPublic().then(v => { if (v?.public && v.role === 'view') setRefreshKey(k => k + 1); }); return; }
       api.acceptShare(token, sharePath).then(r => {
-        notify(`You can now ${r.role === 'view' ? 'view' : 'edit'} “${r.title ?? projectShortName(r.project)}”`);
+        notify(`You can now ${r.role === 'view' ? 'view' : 'edit'} ${r.folder ? `the folder ${r.folder} of ` : ''}“${r.title ?? projectShortName(r.project)}”`);
         setRefreshKey(k => k + 1);
         location.hash = shareLanding(r);
       }).catch(e => { notify((e as Error).message, 'error'); location.hash = ''; });
@@ -2099,6 +2106,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       {renderDialog()}
       {linkAsk && <CopyLinkDialog url={linkAsk.url} what={linkAsk.what} user={user} notify={notify} onClose={() => setLinkAsk(null)} />}
       {shareFor && <ShareDialog project={shareFor} user={user} doc={docId?.replace(/^(text|pdf):/, '') ?? null} view={isLyxDoc ? viewParam(panes, pagesOn, viewKindOf(docId!)) : null} onClose={() => setShareFor(null)} onChanged={() => setRefreshKey(k => k + 1)} />}
+      {shareFolder && <FolderShareDialog project={shareFolder.project} folder={shareFolder.path} name={shareFolder.name} user={user} onClose={() => setShareFolder(null)} onChanged={() => setRefreshKey(k => k + 1)} />}
       {newLayoutFor && <NewLayoutDialog project={newLayoutFor} dir={textId ? docPathOf(textId).split('/').slice(0, -1).join('/') : ''} notify={notify} onClose={() => setNewLayoutFor(null)} onCreated={id => { location.hash = '#/' + id; setRefreshKey(k => k + 1); }} />}
       {gitFor && <GitDialog project={gitFor} user={user} onClose={() => setGitFor(null)} />}
       {quickOpen && <QuickOpen project={docId ? projectOfDoc(docId.replace(/^(text|pdf):/, '')) || null : curProject?.name ?? null} onOpen={id => openInTab(id)} onClose={() => setQuickOpen(false)} />}

@@ -159,7 +159,7 @@ describe('link sharing', () => {
     expect(access.roleFor(bob, 'jan/paper')).toBe('view');
     expect(access.accessibleProjects(bob).find(p => p.name === 'jan/paper')?.via).toBe('link');
     expect(access.shareInfo('jan/paper').members.find(m => m.user?.username === 'bob')).toMatchObject({ via: 'link', link: link.token });
-    expect(access.linksOf('jan/paper')).toEqual([{ token: link.token, role: 'view', createdAt: link.createdAt, joined: 1 }]);
+    expect(access.linksOf('jan/paper')).toEqual([{ token: link.token, role: 'view', createdAt: link.createdAt, joined: 1, path: null }]);
     // an explicit membership is never lowered by a link
     access.addMember('jan/paper', 'carol', 'edit', jan);
     expect(access.acceptLink(link.token, carol).role).toBe('edit');

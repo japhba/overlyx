@@ -52,6 +52,10 @@ export interface Project {
   members?: ProjectPerson[];
   /** invitations to an address without an account yet */
   invited?: number;
+  /** folders shared with this user on their own that give more than `role` — with `partial`, all they reach of the project */
+  folders?: { path: string; role: 'view' | 'edit' }[];
+  /** only `folders` of the project are shared with this user: `files` holds theirs, nothing else of the project is theirs to see */
+  partial?: boolean;
 }
 export interface ProjectPerson { name: string; username: string; color: string; avatar: string | null; role: 'view' | 'edit'; via: string; since: number; guest: boolean }
 export interface ShareMember { id: number; role: 'view' | 'edit'; via: string; /** via 'link': the share link they came in through (it may be off since) */ link?: string | null; email: string | null; user: { id: number; name: string; username: string; color: string; avatar: string | null } | null }
@@ -65,8 +69,12 @@ export const pdfLinkUrl = (l: { token: string; fileName: string }) => `${locatio
 export interface PdfPublishInfo { doc: string; repo: string; path: string; branch: string | null; lastPushedAt: number | null; lastAttemptAt: number | null; lastError: string | null; htmlUrl: string }
 export interface PdfLinksInfo { docs: string[]; links: PdfLinkInfo[]; publish: PdfPublishInfo[]; publishAvailable: boolean }
 /** a share link: its role is its own for good (another role is another link); `joined`: the people who came in through it */
-export interface ShareLinkInfo { token: string; role: 'view' | 'edit'; createdAt: number; joined: number }
+export interface ShareLinkInfo { token: string; role: 'view' | 'edit'; createdAt: number; joined: number; /** the folder it shares alone; null: the whole project */ path?: string | null }
+/** someone one folder (`path`) of the project is shared with on their own */
+export type FolderMember = ShareMember & { path: string };
 export interface ShareInfo { name?: string; title?: string | null; owner: { id: number; name: string; username: string } | null; members: ShareMember[]; links: ShareLinkInfo[];
+  /** people a folder of the project is shared with on their own (not the whole project) */
+  folderMembers?: FolderMember[];
   /** anyone may view it at its address and clone it, no account needed; `visitors`: who opened it so */
   public?: boolean; visitors?: number }
 export interface LayoutInfo { name: string; category?: string; labelType?: string; tocLevel?: number; latexType?: string; latexName?: string; isNumbered?: boolean }
@@ -346,10 +354,14 @@ export const api = {
   deleteProject: (name: string) => req<{ ok: boolean }>('DELETE', `/api/projects/${encodeURIComponent(name)}`),
   // sharing (owner only)
   share: (project: string) => req<ShareInfo>('GET', `/api/projects/${encodeURIComponent(project)}/share`),
-  addMember: (project: string, who: string, role: 'view' | 'edit') => req<{ member: ShareMember; share: ShareInfo }>('POST', `/api/projects/${encodeURIComponent(project)}/share/members`, { who, role }),
+  /** `path`: only that folder of the project */
+  addMember: (project: string, who: string, role: 'view' | 'edit', path?: string | null) => req<{ member: ShareMember; share: ShareInfo }>('POST', `/api/projects/${encodeURIComponent(project)}/share/members`, { who, role, ...(path ? { path } : {}) }),
+  setFolderMemberRole: (project: string, id: number, role: 'view' | 'edit') => req<{ share: ShareInfo }>('POST', `/api/projects/${encodeURIComponent(project)}/share/folder-members/${id}`, { role }),
+  removeFolderMember: (project: string, id: number) => req<{ share: ShareInfo }>('DELETE', `/api/projects/${encodeURIComponent(project)}/share/folder-members/${id}`),
   setMemberRole: (project: string, id: number, role: 'view' | 'edit') => req<{ share: ShareInfo }>('POST', `/api/projects/${encodeURIComponent(project)}/share/members/${id}`, { role }),
   removeMember: (project: string, id: number) => req<{ share: ShareInfo }>('DELETE', `/api/projects/${encodeURIComponent(project)}/share/members/${id}`),
-  createLink: (project: string, role: 'view' | 'edit') => req<{ link: ShareLinkInfo; share: ShareInfo }>('POST', `/api/projects/${encodeURIComponent(project)}/share/links`, { role }),
+  /** `path`: a link to that folder of the project alone */
+  createLink: (project: string, role: 'view' | 'edit', path?: string | null) => req<{ link: ShareLinkInfo; share: ShareInfo }>('POST', `/api/projects/${encodeURIComponent(project)}/share/links`, { role, ...(path ? { path } : {}) }),
   /** turn a share link off; `remove`: the people who came in through it lose their access too */
   revokeLink: (project: string, token: string, remove: boolean) => req<{ share: ShareInfo }>('DELETE', `/api/projects/${encodeURIComponent(project)}/share/links/${encodeURIComponent(token)}${remove ? '?remove=1' : ''}`),
   setPublic: (project: string, on: boolean) => req<{ share: ShareInfo }>('POST', `/api/projects/${encodeURIComponent(project)}/share/public`, { public: on }),
@@ -358,13 +370,13 @@ export const api = {
    * what a share link opens, joining nothing (the page that asks a visitor without a session how to
    * come in: app/Guest.tsx ShareInvite); `guests`: whether coming in without an account is possible
    */
-  sharePreview: (token: string) => req<{ project: string; title: string | null; owner: string | null; role: Role; guests: boolean }>('GET', `/api/share/${encodeURIComponent(token)}`),
+  sharePreview: (token: string) => req<{ project: string; title: string | null; owner: string | null; role: Role; guests: boolean; /** a link to this folder alone: its path and name (its document group's title) */ folder?: { path: string; title: string } | null }>('GET', `/api/share/${encodeURIComponent(token)}`),
   /**
    * open a share link (#/share/<token>[/<path>]): join the project; `doc` is its main document, `file`
    * the linked file when the project has it. Without a session the server opens a guest session and
    * returns its `user`, named `name` when the visitor gave one ("Ada (guest)") or else "Anonymous Otter".
    */
-  acceptShare: (token: string, path?: string | null, name?: string) => req<{ project: string; title: string | null; role: Role; doc: string | null; file: Pick<ProjectFile, 'path' | 'name' | 'kind'> | null; user?: User }>('POST', `/api/share/${encodeURIComponent(token)}/accept${path ? '?path=' + encodeURIComponent(path) : ''}`, name ? { name } : undefined),
+  acceptShare: (token: string, path?: string | null, name?: string) => req<{ project: string; title: string | null; role: Role; doc: string | null; file: Pick<ProjectFile, 'path' | 'name' | 'kind'> | null; user?: User; /** a link to this folder alone */ folder?: string | null }>('POST', `/api/share/${encodeURIComponent(token)}/accept${path ? '?path=' + encodeURIComponent(path) : ''}`, name ? { name } : undefined),
   /**
    * open a project at its address: a public one puts it on the visitor's list (and lets a visitor
    * without a session in as a guest: `user`); 404 when it is not public and not theirs

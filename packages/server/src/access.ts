@@ -11,6 +11,9 @@
  *  - or makes **share links** (`createLink`), each with its own role for good: anyone who opens
  *    one joins as viewer/editor — without an account as a **guest** (a temporary account, see
  *    `adoptGuest`); turning a link off can take out who came in through it (`revokeLink`);
+ *  - or shares one **folder** of it on its own, with people or by a link (`addMember` / `createLink`
+ *    with a folder; foldershares.ts): they reach that folder and nothing else of the project —
+ *    `roleFor` does not know them, `roleAt` lets them in to what lies inside the folder;
  *  - or makes it **public** (`setPublic`): everybody may view it at its own address — without an
  *    account as a guest too — and clone it with git anonymously; editing still needs one of the
  *    above. Who opens it is noted as a hidden `via = 'public'` membership (`joinPublic`) so that it
@@ -26,10 +29,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { LLANGLE_PREAMBLE, isProjectKey, splitProjectKey } from '@overlyx/core';
-import { db, type MemberRow, type ProjectRow, type UserRow } from './db.ts';
+import { db, type FolderMemberRow, type MemberRow, type ProjectRow, type UserRow } from './db.ts';
 import { config } from './config.ts';
 import type { SessionUser } from './auth.ts';
 import { listProjects, namespaces, resolveProjectPath, type Project } from './projects.ts';
+import { staysInside } from './projectfiles.ts';
+import { folderRows, folderRowsOf, mergeFolders, sharePath, withinPath } from './foldershares.ts';
 import { canonicalProject, freeKey, moveFlatProjects, moveProject } from './namespaces.ts';
 import { LATER_POSTERS } from './starterupdates.ts';
 
@@ -103,6 +108,57 @@ export function roleFor(user: SessionUser, project: string, withPublic = true): 
 /** Anyone may view the project (and clone it without an account). */
 export function isPublic(project: string): boolean { return !!projectRow(project)?.public; }
 
+/** A folder of a project shared with someone on its own, with the strongest role a share of it gives them. */
+export interface FolderShare { path: string; role: 'view' | 'edit'; via: string }
+
+/** The folders of a project shared with the user on their own (none in an end-to-end encrypted project: its files are ciphertext). */
+export function foldersOf(user: SessionUser, project: string): FolderShare[] {
+  if (!isProjectKey(project)) return [];
+  const row = projectRow(project);
+  if (!row || row.e2e) return [];
+  return mergeFolders(folderRows(project, user.id, userEmail(user)));
+}
+
+/**
+ * The user's role at a path of a project (a file or a folder, project-relative): their role in the
+ * project, or what a share of a folder holding the path gives them — the stronger of the two. A
+ * folder share reaches nothing outside its folder: not with `..`, not through a link on disk.
+ */
+export function roleAt(user: SessionUser, project: string, rel: string, withPublic = true): Role | null {
+  const whole = roleFor(user, project, withPublic);
+  if (atLeast(whole, 'edit')) return whole;
+  let best = whole;
+  for (const f of foldersOf(user, project)) {
+    if (atLeast(best, f.role) || !withinPath(rel, f.path)) continue;
+    const role = withinScope(user, project, f.role);
+    if (role && reachable(project, f.path, rel)) best = role;
+  }
+  return best;
+}
+
+/** `rel` really lies in the shared folder `folder`, also once links on disk are followed (and the folder is no link itself). */
+function reachable(project: string, folder: string, rel: string): boolean {
+  try { return realFolder(project, folder) && staysInside(resolveProjectPath(project, folder), resolveProjectPath(project, rel)); } catch { return false; }
+}
+
+/** `folder` is a directory of the project where it says, no link (nor one on the way) leading elsewhere. */
+function realFolder(project: string, folder: string): boolean {
+  try {
+    const abs = resolveProjectPath(project, folder);
+    return fs.statSync(abs).isDirectory() && fs.realpathSync.native(abs) === path.join(fs.realpathSync.native(resolveProjectPath(project, '.')), folder);
+  } catch { return false; }
+}
+
+/** Only folders of the project are shared with the user, not the project: they see those and nothing else of it. */
+export function folderOnly(user: SessionUser, project: string): boolean {
+  return !roleFor(user, project) && foldersOf(user, project).length > 0;
+}
+
+/** The user can reach something of the project: all of it, or a folder shared with them. */
+export function reachesProject(user: SessionUser, project: string): boolean {
+  return !!roleFor(user, project) || foldersOf(user, project).some(f => withinScope(user, project, f.role));
+}
+
 /**
  * A role as far as the credential the user came in with allows: one narrowed at its authorization
  * (Settings ▸ Account ▸ Fine-grained access, tokenAuth.ts AccessScope) reaches only its projects —
@@ -144,6 +200,10 @@ export interface ProjectAccess extends Project {
   e2e: boolean;
   /** `avatar`: their picture (Google sign-in), shown beside their comments in the editor */
   owner: { id: number; name: string; username: string; avatar: string | null } | null;
+  /** folders shared with the user on their own that give more than `role` (with `partial`: all they reach) */
+  folders?: { path: string; role: 'view' | 'edit' }[];
+  /** only `folders` of the project are shared with the user: `files` holds theirs, nothing else */
+  partial?: boolean;
 }
 
 /** Projects the user can open, with their role in each. */
@@ -157,6 +217,8 @@ export function accessibleProjects(user: SessionUser, opts: { files?: boolean } 
   }
   const owners = new Map((db.prepare('SELECT id, display_name, username, avatar_url FROM users').all() as { id: number; display_name: string; username: string; avatar_url: string | null }[])
     .map(u => [u.id, { id: u.id, name: u.display_name, username: u.username, avatar: u.avatar_url ? `/api/users/${u.id}/avatar` : null }]));
+  const folderShares = new Map<string, FolderMemberRow[]>();
+  for (const f of folderRowsOf(user.id, userEmail(user))) folderShares.set(f.project, [...(folderShares.get(f.project) ?? []), f]);
   const out: ProjectAccess[] = [];
   for (const p of listProjects(opts)) {
     const row = rows.get(p.name);
@@ -167,8 +229,19 @@ export function accessibleProjects(user: SessionUser, opts: { files?: boolean } 
     else if (m && isRole(m.role)) { role = m.role; via = m.via === 'link' || m.via === 'public' ? m.via : 'member'; }
     else if (user.isAdmin && adminGrantActive(user.id, p.name)) { role = 'owner'; via = 'admin'; }
     if (role) role = withinScope(user, p.name, role);
+    const base = { title: row?.title ?? null, kind: row?.kind ?? 'project', public: !!row?.public, e2e: !!row?.e2e, owner: row?.owner_id != null ? owners.get(row.owner_id) ?? null : null };
+    const folders = row?.e2e ? [] : mergeFolders(folderShares.get(p.name) ?? []);
+    if (!role && folders.length) {
+      // only folders of it are shared with the user: their files, nothing else of the project
+      const reach = withinScope(user, p.name, folders.some(f => f.role === 'edit') ? 'edit' : 'view');
+      if (!reach) continue;
+      out.push({ ...p, ...base, files: p.files.filter(f => folders.some(s => withinPath(f.path, s.path))), role: reach, via: folders.every(f => f.via === 'link') ? 'link' : 'member',
+        folders: folders.map(f => ({ path: f.path, role: f.role })), partial: true });
+      continue;
+    }
     if (!role) continue;
-    out.push({ ...p, title: row?.title ?? null, kind: row?.kind ?? 'project', role, via, public: !!row?.public, e2e: !!row?.e2e, owner: row?.owner_id != null ? owners.get(row.owner_id) ?? null : null });
+    const more = folders.filter(f => !atLeast(role, f.role));
+    out.push({ ...p, ...base, role, via, ...(more.length ? { folders: more.map(f => ({ path: f.path, role: f.role })) } : {}) });
   }
   return out;
 }
@@ -286,6 +359,8 @@ export interface ShareInfo {
   owner: { id: number; name: string; username: string } | null;
   /** `link`: the share link a member came in through (`via` 'link'; it may be off since) */
   members: { id: number; role: string; via: string; link: string | null; email: string | null; user: { id: number; name: string; username: string; color: string; avatar: string | null } | null }[];
+  /** people a folder of the project is shared with on their own (`path`), not the whole project */
+  folderMembers: (ShareInfo['members'][number] & { path: string })[];
   /** the project's share links, oldest first */
   links: ShareLink[];
   /** anyone may view it (setPublic); `visitors`: the accounts and guests that opened it so */
@@ -296,15 +371,31 @@ export interface ShareInfo {
 export function shareInfo(project: string): ShareInfo {
   const row = projectRow(project);
   const owner = row?.owner_id != null ? db.prepare('SELECT id, display_name AS name, username FROM users WHERE id = ?').get(row.owner_id) as ShareInfo['owner'] : null;
-  const members = (db.prepare("SELECT * FROM project_members WHERE project = ? AND via != 'public' ORDER BY created_at").all(project) as MemberRow[]).map(m => {
+  const person = (m: MemberRow | FolderMemberRow) => {
     const u = m.user_id != null ? db.prepare('SELECT id, display_name AS name, username, color, avatar_url FROM users WHERE id = ?').get(m.user_id) as { id: number; name: string; username: string; color: string; avatar_url: string | null } | undefined : undefined;
     return { id: m.id, role: m.role, via: m.via, link: m.via === 'link' ? m.link_token ?? null : null, email: m.email, user: u ? { id: u.id, name: u.name, username: u.username, color: u.color, avatar: u.avatar_url ? `/api/users/${u.id}/avatar` : null } : null };
-  });
+  };
+  const members = (db.prepare("SELECT * FROM project_members WHERE project = ? AND via != 'public' ORDER BY created_at").all(project) as MemberRow[]).map(person);
+  const folderMembers = (db.prepare('SELECT * FROM folder_members WHERE project = ? ORDER BY path, created_at').all(project) as FolderMemberRow[]).map(m => ({ ...person(m), path: m.path }));
   const visitors = (db.prepare("SELECT COUNT(*) AS n FROM project_members WHERE project = ? AND via = 'public'").get(project) as { n: number }).n;
-  return { name: project, title: row?.title ?? null, owner: owner ?? null, members, links: linksOf(project), public: !!row?.public, visitors };
+  return { name: project, title: row?.title ?? null, owner: owner ?? null, members, folderMembers, links: linksOf(project), public: !!row?.public, visitors };
 }
 
-/** Share with a person: `who` is a username or an e-mail address. */
+/**
+ * The folder `path` of the project as a folder share names it — one that exists — or an error saying
+ * why it cannot be shared on its own.
+ */
+export function shareableFolder(project: string, folder: unknown): string {
+  const row = projectRow(project);
+  if (!row) throw new Error('project not found');
+  if (row.e2e) throw new Error('An end-to-end encrypted project is shared whole: the server cannot hand out one folder of it');
+  const p = sharePath(folder);
+  if (!p) throw new Error('not a folder of the project');
+  if (!realFolder(project, p)) throw new Error(`there is no folder ${p} in the project`);
+  return p;
+}
+
+/** Share with a person: `who` is a username or an e-mail address (one folder alone: addFolderMember). */
 export function addMember(project: string, who: string, role: 'view' | 'edit', addedBy: SessionUser): MemberRow {
   const row = projectRow(project);
   if (!row) throw new Error('project not found');
@@ -337,6 +428,57 @@ export function addMember(project: string, who: string, role: 'view' | 'edit', a
   return db.prepare('SELECT * FROM project_members WHERE project = ? AND email = ?').get(project, email) as MemberRow;
 }
 
+/**
+ * Share one folder of the project with a person (`who`: a username or an e-mail address) — they
+ * reach that folder and nothing else of the project. Somebody who has the project already, with
+ * this role or more, needs none.
+ */
+export function addFolderMember(project: string, folder: string, who: string, role: 'view' | 'edit', addedBy: SessionUser): FolderMemberRow {
+  const row = projectRow(project);
+  const path = shareableFolder(project, folder);
+  const key = who.trim().toLowerCase();
+  if (!key) throw new Error('enter a username or e-mail address');
+  let user: UserRow | undefined;
+  let email: string | null = null;
+  if (key.includes('@')) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(key)) throw new Error('not a valid e-mail address');
+    user = db.prepare('SELECT * FROM users WHERE lower(email) = ?').get(key) as UserRow | undefined;
+    email = key;
+  } else {
+    user = db.prepare('SELECT * FROM users WHERE username = ?').get(key) as UserRow | undefined;
+    if (!user) throw new Error(`no user "${key}" — use their e-mail address to invite them`);
+  }
+  if (user && user.id === row!.owner_id) throw new Error('that is the owner of the project');
+  if (user?.is_guest) throw new Error('that is a guest — they have to sign in before you can share with them by name');
+  const whole = db.prepare(`SELECT role FROM project_members WHERE project = ? AND via != 'public' AND (user_id = ? OR (email IS NOT NULL AND email = ?))
+                            ORDER BY CASE role WHEN 'edit' THEN 0 ELSE 1 END LIMIT 1`).get(project, user?.id ?? -1, email ?? user?.email?.toLowerCase() ?? '\0') as { role: string } | undefined;
+  if (whole && atLeast(whole.role as Role, role)) throw new Error(`${user?.username ?? email} can ${whole.role === 'edit' ? 'edit' : 'view'} the whole project already`);
+  const now = Date.now();
+  if (user) {
+    db.prepare(`INSERT INTO folder_members (project, path, user_id, email, role, via, added_by, created_at) VALUES (?,?,?,?,?,?,?,?)
+                ON CONFLICT(project, path, user_id) WHERE user_id IS NOT NULL DO UPDATE SET role = excluded.role, via = excluded.via, link_token = NULL`)
+      .run(project, path, user.id, null, role, email ? 'email' : 'user', addedBy.id, now);
+    if (email) db.prepare('DELETE FROM folder_members WHERE project = ? AND path = ? AND user_id IS NULL AND email = ?').run(project, path, email);
+    return db.prepare('SELECT * FROM folder_members WHERE project = ? AND path = ? AND user_id = ?').get(project, path, user.id) as FolderMemberRow;
+  }
+  db.prepare(`INSERT INTO folder_members (project, path, user_id, email, role, via, added_by, created_at) VALUES (?,?,?,?,?,?,?,?)
+              ON CONFLICT(project, path, email) WHERE email IS NOT NULL DO UPDATE SET role = excluded.role`)
+    .run(project, path, null, email, role, 'email', addedBy.id, now);
+  return db.prepare('SELECT * FROM folder_members WHERE project = ? AND path = ? AND email = ?').get(project, path, email) as FolderMemberRow;
+}
+
+export function folderMemberRow(project: string, memberId: number): FolderMemberRow | undefined {
+  return db.prepare('SELECT * FROM folder_members WHERE id = ? AND project = ?').get(memberId, project) as FolderMemberRow | undefined;
+}
+
+export function setFolderMemberRole(project: string, memberId: number, role: 'view' | 'edit'): boolean {
+  return db.prepare('UPDATE folder_members SET role = ? WHERE id = ? AND project = ?').run(role, memberId, project).changes > 0;
+}
+
+export function removeFolderMember(project: string, memberId: number): boolean {
+  return db.prepare('DELETE FROM folder_members WHERE id = ? AND project = ?').run(memberId, project).changes > 0;
+}
+
 export function memberRow(project: string, memberId: number): MemberRow | undefined {
   return db.prepare('SELECT * FROM project_members WHERE id = ? AND project = ?').get(memberId, project) as MemberRow | undefined;
 }
@@ -354,24 +496,32 @@ export function removeMember(project: string, memberId: number): boolean {
  * the link for as long as it lives — another role is another link — so a link already handed out
  * never gives more than it did when it was made. A project has any number of them.
  */
-export interface ShareLink { token: string; role: 'view' | 'edit'; createdAt: number; /** the people on the project who came in through it */ joined: number }
+export interface ShareLink {
+  token: string; role: 'view' | 'edit'; createdAt: number;
+  /** the people on the project who came in through it */
+  joined: number;
+  /** the folder it shares on its own (foldershares.ts); null: the whole project */
+  path: string | null;
+}
 
 /** The project's share links, oldest first. */
 export function linksOf(project: string): ShareLink[] {
-  const rows = db.prepare(`SELECT l.token, l.role, l.created_at,
-      (SELECT COUNT(*) FROM project_members m WHERE m.project = l.project AND m.via = 'link' AND m.link_token = l.token) AS joined
-    FROM share_links l WHERE l.project = ? ORDER BY l.created_at, l.rowid`).all(project) as { token: string; role: string; created_at: number; joined: number }[];
-  return rows.filter(r => isRole(r.role)).map(r => ({ token: r.token, role: r.role as 'view' | 'edit', createdAt: r.created_at, joined: r.joined }));
+  const rows = db.prepare(`SELECT l.token, l.role, l.created_at, l.path,
+      (SELECT COUNT(*) FROM project_members m WHERE m.project = l.project AND m.via = 'link' AND m.link_token = l.token)
+      + (SELECT COUNT(*) FROM folder_members f WHERE f.project = l.project AND f.via = 'link' AND f.link_token = l.token) AS joined
+    FROM share_links l WHERE l.project = ? ORDER BY l.created_at, l.rowid`).all(project) as { token: string; role: string; created_at: number; path: string | null; joined: number }[];
+  return rows.filter(r => isRole(r.role)).map(r => ({ token: r.token, role: r.role as 'view' | 'edit', createdAt: r.created_at, joined: r.joined, path: r.path ?? null }));
 }
 
-/** A new share link with `role`, for good. */
-export function createLink(project: string, role: 'view' | 'edit', by: SessionUser | null): ShareLink {
+/** A new share link with `role`, for good — to the whole project, or (`folder`) to that folder of it alone. */
+export function createLink(project: string, role: 'view' | 'edit', by: SessionUser | null, folder?: string | null): ShareLink {
   if (!projectRow(project)) throw new Error('project not found');
   if (!isRole(role)) throw new Error('role must be view or edit');
+  const path = folder == null || folder === '' ? null : shareableFolder(project, folder);
   const token = crypto.randomBytes(18).toString('base64url');
   const createdAt = Date.now();
-  db.prepare('INSERT INTO share_links (token, project, role, created_by, created_at) VALUES (?, ?, ?, ?, ?)').run(token, project, role, by?.id ?? null, createdAt);
-  return { token, role, createdAt, joined: 0 };
+  db.prepare('INSERT INTO share_links (token, project, role, created_by, created_at, path) VALUES (?, ?, ?, ?, ?, ?)').run(token, project, role, by?.id ?? null, createdAt, path);
+  return { token, role, createdAt, joined: 0, path };
 }
 
 /**
@@ -382,45 +532,77 @@ export function createLink(project: string, role: 'view' | 'edit', by: SessionUs
 export function revokeLink(project: string, token: string, removeJoined: boolean): { role: 'view' | 'edit'; removed: number[] } | undefined {
   const l = db.prepare('SELECT role FROM share_links WHERE token = ? AND project = ?').get(token, project) as { role: 'view' | 'edit' } | undefined;
   if (!l) return undefined;
-  const removed = removeJoined ? (db.prepare("SELECT user_id FROM project_members WHERE project = ? AND via = 'link' AND link_token = ? AND user_id IS NOT NULL").all(project, token) as { user_id: number }[]).map(r => r.user_id) : [];
+  const removed = removeJoined ? (db.prepare(`SELECT user_id FROM project_members WHERE project = ? AND via = 'link' AND link_token = ? AND user_id IS NOT NULL
+    UNION SELECT user_id FROM folder_members WHERE project = ? AND via = 'link' AND link_token = ? AND user_id IS NOT NULL`).all(project, token, project, token) as { user_id: number }[]).map(r => r.user_id) : [];
   db.transaction(() => {
     db.prepare('DELETE FROM share_links WHERE token = ?').run(token);
-    if (removeJoined) db.prepare("DELETE FROM project_members WHERE project = ? AND via = 'link' AND link_token = ?").run(project, token);
+    if (removeJoined) for (const t of ['project_members', 'folder_members']) db.prepare(`DELETE FROM ${t} WHERE project = ? AND via = 'link' AND link_token = ?`).run(project, token);
   })();
   return { role: l.role, removed };
 }
 
-/** The live share link `token`: the project it opens and the role it gives. */
-export function shareLinkOf(token: string): { project: ProjectRow; role: Role } | undefined {
-  const l = db.prepare('SELECT project, role FROM share_links WHERE token = ?').get(token) as { project: string; role: string } | undefined;
+/** The live share link `token`: the project it opens, the role it gives, and the folder it shares alone (null: the whole project). */
+export function shareLinkOf(token: string): { project: ProjectRow; role: Role; path: string | null } | undefined {
+  const l = db.prepare('SELECT project, role, path FROM share_links WHERE token = ?').get(token) as { project: string; role: string; path: string | null } | undefined;
   const row = l && isRole(l.role) ? projectRow(l.project) : undefined;
-  return row ? { project: row, role: l!.role as Role } : undefined;
+  return row ? { project: row, role: l!.role as Role, path: l!.path ?? null } : undefined;
+}
+
+/** The document a shared folder opens on: its document group's first (core/docgroup.ts), else null (the caller's choice). */
+export function groupLanding(project: string, folder: string): string | null {
+  try {
+    const first = JSON.parse(fs.readFileSync(path.join(resolveProjectPath(project, folder), '.overlyx-group.json'), 'utf8'))?.members?.[0]?.file;
+    if (typeof first !== 'string' || first.includes('/') || !fs.statSync(resolveProjectPath(project, `${folder}/${first}`)).isFile()) return null;
+    return `${folder}/${first}`;
+  } catch { return null; }
+}
+
+/** What a shared folder is called: its document group's title (core/docgroup.ts), else its name. */
+export function folderTitle(project: string, folder: string): string {
+  try {
+    const manifest = path.join(resolveProjectPath(project, folder), '.overlyx-group.json');
+    const t = JSON.parse(fs.readFileSync(manifest, 'utf8'))?.title;
+    if (typeof t === 'string' && t.trim()) return t.trim();
+  } catch { /* no group */ }
+  return folder.split('/').pop()!;
 }
 
 /**
  * What a share link opens, before anybody joins: its project, title, owner's name and role — for the
  * page that asks a visitor without a session how to come in (with an account, or as a guest).
  */
-export function linkPreview(token: string): { project: string; title: string | null; owner: string | null; role: Role } | undefined {
+export function linkPreview(token: string): { project: string; title: string | null; owner: string | null; role: Role; folder: { path: string; title: string } | null } | undefined {
   const link = shareLinkOf(token);
   if (!link) return undefined;
   const { project: row } = link;
   const owner = row.owner_id != null ? db.prepare('SELECT display_name AS name FROM users WHERE id = ?').get(row.owner_id) as { name: string } | undefined : undefined;
-  return { project: row.name, title: row.title, owner: owner?.name ?? null, role: link.role };
+  return { project: row.name, title: row.title, owner: owner?.name ?? null, role: link.role, folder: link.path ? { path: link.path, title: folderTitle(row.name, link.path) } : null };
 }
 
-/** A signed-in user (or guest) opens a share link: they join the project with the link's role. */
-export function acceptLink(token: string, user: SessionUser): { project: ProjectRow; role: Role } {
+/**
+ * A signed-in user (or guest) opens a share link: they join the project with the link's role — or,
+ * a link to a folder, that folder alone; someone who has it already (the project's people) only
+ * lands there.
+ */
+export function acceptLink(token: string, user: SessionUser): { project: ProjectRow; role: Role; path: string | null } {
   const link = shareLinkOf(token);
   if (!link) throw new Error('This link is not valid (any more). Ask the owner to share the project again.');
-  const { project: row, role } = link;
+  const { project: row, role, path: folder } = link;
+  if (folder) {
+    const current = roleAt(user, row.name, folder, false);
+    if (atLeast(current, role)) return { project: row, role: current!, path: folder };
+    db.prepare(`INSERT INTO folder_members (project, path, user_id, email, role, via, added_by, created_at, link_token) VALUES (?,?,?,NULL,?,'link',?,?,?)
+                ON CONFLICT(project, path, user_id) WHERE user_id IS NOT NULL DO UPDATE SET role = excluded.role, via = excluded.via, link_token = excluded.link_token`)
+      .run(row.name, folder, user.id, role, row.owner_id, Date.now(), token);
+    return { project: row, role, path: folder };
+  }
   // (viewing a public project is no reason to skip joining: the link's access outlasts it being public)
   const current = roleFor(user, row.name, false);
-  if (atLeast(current, role)) return { project: row, role: current! };
+  if (atLeast(current, role)) return { project: row, role: current!, path: null };
   db.prepare(`INSERT INTO project_members (project, user_id, email, role, via, added_by, created_at, link_token) VALUES (?,?,?,?,?,?,?,?)
               ON CONFLICT(project, user_id) WHERE user_id IS NOT NULL DO UPDATE SET role = excluded.role, via = excluded.via, link_token = excluded.link_token`)
     .run(row.name, user.id, null, role, 'link', row.owner_id, Date.now(), token);
-  return { project: row, role };
+  return { project: row, role, path: null };
 }
 
 /**
@@ -471,6 +653,7 @@ export function setOwner(project: string, owner: { id: number; username: string 
   const prev = projectRow(project)?.owner_id ?? null;
   db.prepare('UPDATE projects SET owner_id = ? WHERE name = ?').run(owner.id, project);
   db.prepare('DELETE FROM project_members WHERE project = ? AND user_id = ?').run(project, owner.id);
+  db.prepare('DELETE FROM folder_members WHERE project = ? AND user_id = ?').run(project, owner.id);
   if (prev != null && prev !== owner.id && db.prepare('SELECT 1 FROM users WHERE id = ? AND is_guest = 0').get(prev)) {
     db.prepare(`INSERT INTO project_members (project, user_id, email, role, via, added_by, created_at) VALUES (?, ?, NULL, 'edit', 'user', ?, ?)
                 ON CONFLICT(project, user_id) WHERE user_id IS NOT NULL DO UPDATE SET role = 'edit'`).run(project, prev, owner.id, Date.now());
@@ -493,6 +676,15 @@ export function bindInvitations(userId: number, email: string | null | undefined
       db.prepare('DELETE FROM project_members WHERE id = ?').run(m.id);
     } else {
       db.prepare('UPDATE project_members SET user_id = ? WHERE id = ?').run(userId, m.id);
+    }
+  }
+  for (const f of db.prepare('SELECT * FROM folder_members WHERE user_id IS NULL AND email = ?').all(key) as FolderMemberRow[]) {
+    const existing = db.prepare('SELECT id, role FROM folder_members WHERE project = ? AND path = ? AND user_id = ?').get(f.project, f.path, userId) as { id: number; role: string } | undefined;
+    if (existing) {
+      if (f.role === 'edit' && existing.role !== 'edit') db.prepare("UPDATE folder_members SET role = 'edit' WHERE id = ?").run(existing.id);
+      db.prepare('DELETE FROM folder_members WHERE id = ?').run(f.id);
+    } else {
+      db.prepare('UPDATE folder_members SET user_id = ? WHERE id = ?').run(userId, f.id);
     }
   }
 }
@@ -518,6 +710,17 @@ export function adoptGuest(guest: SessionUser, userId: number): string[] {
         db.prepare('UPDATE project_members SET user_id = ? WHERE id = ?').run(userId, m.id);
       }
     }
+    for (const f of db.prepare('SELECT * FROM folder_members WHERE user_id = ?').all(guest.id) as FolderMemberRow[]) {
+      if (!moved.includes(f.project)) moved.push(f.project);
+      const owner = projectRow(f.project)?.owner_id === userId;
+      const existing = db.prepare('SELECT id, role FROM folder_members WHERE project = ? AND path = ? AND user_id = ?').get(f.project, f.path, userId) as { id: number; role: string } | undefined;
+      if (owner || existing) {
+        if (existing && f.role === 'edit' && existing.role !== 'edit') db.prepare("UPDATE folder_members SET role = 'edit', via = 'link', link_token = ? WHERE id = ?").run(f.link_token, existing.id);
+        db.prepare('DELETE FROM folder_members WHERE id = ?').run(f.id);
+      } else {
+        db.prepare('UPDATE folder_members SET user_id = ? WHERE id = ?').run(userId, f.id);
+      }
+    }
     db.prepare('UPDATE access_log SET user_id = ? WHERE user_id = ?').run(userId, guest.id);
     // the guest's folded sections come along (the account's own win where both have some)
     db.prepare('UPDATE OR IGNORE user_doc_state SET user_id = ? WHERE user_id = ?').run(userId, guest.id);
@@ -533,6 +736,7 @@ export function pruneGuests(days = config.sessionDays + 1): number {
   db.transaction(() => {
     for (const id of stale) {
       db.prepare('DELETE FROM project_members WHERE user_id = ?').run(id);
+      db.prepare('DELETE FROM folder_members WHERE user_id = ?').run(id);
       db.prepare('DELETE FROM user_doc_state WHERE user_id = ?').run(id);
       db.prepare('DELETE FROM users WHERE id = ?').run(id);
     }
@@ -545,7 +749,8 @@ export function isInvited(email: string | null | undefined): boolean {
   const key = (email ?? '').trim().toLowerCase();
   if (!key) return false;
   if (config.ownerEmail && key === config.ownerEmail) return true;
-  return !!db.prepare('SELECT 1 FROM project_members WHERE email = ? LIMIT 1').get(key) || !!db.prepare('SELECT 1 FROM users WHERE lower(email) = ? LIMIT 1').get(key);
+  return !!db.prepare('SELECT 1 FROM project_members WHERE email = ? LIMIT 1').get(key) || !!db.prepare('SELECT 1 FROM folder_members WHERE email = ? LIMIT 1').get(key)
+    || !!db.prepare('SELECT 1 FROM users WHERE lower(email) = ? LIMIT 1').get(key);
 }
 
 /** Move a project directory to the data dir's trash and forget its rows. Returns the trash path. */
@@ -561,6 +766,7 @@ export function trashProject(project: string): string {
   }
   const row = projectRow(project);
   db.prepare('DELETE FROM project_members WHERE project = ?').run(project);
+  db.prepare('DELETE FROM folder_members WHERE project = ?').run(project);
   db.prepare('DELETE FROM share_links WHERE project = ?').run(project);
   // administrator grants and the activity log belong to this project, not to a later one of the same name
   db.prepare('DELETE FROM admin_grants WHERE project = ?').run(project);

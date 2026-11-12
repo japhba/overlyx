@@ -153,7 +153,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
   };
 
   const metaText = (p: Project, docs: string[]) =>
-    `${p.via === 'owner' ? 'Your project' : p.via === 'admin' ? (p.owner ? `Owned by ${p.owner.name} (${p.owner.username})` : 'No owner') : p.owner ? `Shared by ${p.owner.name}` : 'Shared with you'} · ${p.e2eLocked ? 'locked in this browser' : `${docs.length} document${docs.length === 1 ? '' : 's'}, ${p.files.length} file${p.files.length === 1 ? '' : 's'}`}${recencyLabel(p) ? ` · ${recencyLabel(p)}` : ''}`;
+    `${p.via === 'owner' ? 'Your project' : p.via === 'admin' ? (p.owner ? `Owned by ${p.owner.name} (${p.owner.username})` : 'No owner') : p.owner ? `Shared by ${p.owner.name}` : 'Shared with you'}${p.partial ? ` · only ${(p.folders ?? []).map(f => f.path).join(', ')}` : ''} · ${p.e2eLocked ? 'locked in this browser' : `${docs.length} document${docs.length === 1 ? '' : 's'}, ${p.files.length} file${p.files.length === 1 ? '' : 's'}`}${recencyLabel(p) ? ` · ${recencyLabel(p)}` : ''}`;
   /** an encrypted project this browser cannot open yet lists nothing: not because it is empty */
   const emptyNote = (p: Project) => p.e2eLocked === 'waiting' ? 'Waiting for a member to give you its key.' : p.e2eLocked ? 'Open it to unlock it with your recovery code.' : 'No documents yet.';
   /** who joined the project (and who owns it, when it is someone else's): avatars, then the names — guests ("Anonymous Otter") left out */
@@ -193,10 +193,11 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
         : <button class="btn primary small" onClick={() => onOpen(lastFileOf(p) ?? p.name + '/' + docs[0])}>Open</button>)
         : <button class="btn primary small" onClick={() => onOpen(p.name)} title={p.e2e && p.e2eLocked ? 'End-to-end encrypted: open it to unlock it in this browser' : 'This project has no documents yet — open it to create the first one'}>Open</button>}
       {p.role === 'owner' && p.via !== 'admin' && <button class="btn small" onClick={() => onShare(p.name)} data-share={p.name}>Share…</button>}
-      {!p.e2e && <button class="btn small" onClick={() => onGit(p.name)} data-git={p.name} title="Clone, pull and push this project with git">Git…</button>}
-      {!p.e2e && <a class="btn small" data-download-zip={p.name} href={zipUrl(p.name)} title="Download the whole project as a .zip">Download</a>}
+      {/* (someone with only a folder of the project has no git, no download of the project) */}
+      {!p.e2e && !p.partial && <button class="btn small" onClick={() => onGit(p.name)} data-git={p.name} title="Clone, pull and push this project with git">Git…</button>}
+      {!p.e2e && !p.partial && <a class="btn small" data-download-zip={p.name} href={zipUrl(p.name)} title="Download the whole project as a .zip">Download</a>}
       {p.e2e && !p.e2eLocked && <button class="btn small" data-download-zip={p.name} title="Download the whole project as a .zip, made in this browser" onClick={() => void import('../e2e/download').then(m => m.downloadProjectZip(p.name)).catch(e => notify('Could not make the .zip: ' + (e as Error).message, 'error'))}>Download</button>}
-      {!p.e2e && p.files.some(f => f.kind === 'doc') && <a class="btn small" data-download-lyx={p.name} href={zipUrl(p.name, 'lyx')} title="Download the project as LyX documents with figures and bibliography">LyX</a>}
+      {!p.e2e && !p.partial && p.files.some(f => f.kind === 'doc') && <a class="btn small" data-download-lyx={p.name} href={zipUrl(p.name, 'lyx')} title="Download the project as LyX documents with figures and bibliography">LyX</a>}
       {p.role === 'owner' && <button class="btn small danger" title="Move this project to the trash" onClick={() => void remove(p)}>Delete</button>}
     </div>
   );

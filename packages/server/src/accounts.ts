@@ -54,7 +54,8 @@ export function deletionPreview(user: SessionUser): DeletionPreview {
   const owned = (db.prepare("SELECT name, title FROM projects WHERE owner_id = ? AND kind != 'example-gone' ORDER BY name").all(user.id) as { name: string; title: string | null }[])
     .map(p => ({
       project: p.name, title: p.title,
-      people: (db.prepare('SELECT COUNT(*) AS n FROM project_members WHERE project = ? AND (user_id IS NULL OR user_id != ?)').get(p.name, user.id) as { n: number }).n,
+      people: (db.prepare(`SELECT (SELECT COUNT(*) FROM project_members WHERE project = ? AND (user_id IS NULL OR user_id != ?))
+        + (SELECT COUNT(*) FROM folder_members WHERE project = ? AND (user_id IS NULL OR user_id != ?)) AS n`).get(p.name, user.id, p.name, user.id) as { n: number }).n,
     }));
   const memberOf = (db.prepare('SELECT COUNT(DISTINCT project) AS n FROM project_members WHERE user_id = ?').get(user.id) as { n: number }).n;
   return { owned, memberOf, refused: isInstanceOwner(user) ? 'This is the account of the instance’s owner; it cannot be deleted from the app.' : null };
@@ -76,7 +77,7 @@ async function eraseProject(project: string, live: LiveDocs): Promise<void> {
   cleanupProjectData(project);
   for (const t of db.prepare('SELECT thread_id FROM agent_threads WHERE project = ?').all(project) as { thread_id: string }[]) removeWorkspace(t.thread_id);
   db.transaction(() => {
-    for (const t of ['project_members', 'share_links', 'admin_grants', 'access_log', 'agent_threads']) db.prepare(`DELETE FROM ${t} WHERE project = ?`).run(project);
+    for (const t of ['project_members', 'folder_members', 'share_links', 'admin_grants', 'access_log', 'agent_threads']) db.prepare(`DELETE FROM ${t} WHERE project = ?`).run(project);
     db.prepare('DELETE FROM project_aliases WHERE name = ?').run(project);
     db.prepare('DELETE FROM gdocs_links WHERE substr(doc_id, 1, ?) = ?').run(...docPrefix(project));
     db.prepare('DELETE FROM lesswrong_links WHERE substr(doc_id, 1, ?) = ?').run(...docPrefix(project));
@@ -127,7 +128,7 @@ export async function deleteAccount(user: SessionUser, live: LiveDocs): Promise<
   for (const p of trashEntriesOf(user.username)) fs.rmSync(p, { recursive: true, force: true });
   try { fs.rmdirSync(path.join(config.projectsDir, user.username)); } catch { /* not empty (someone else's project moved in) or absent */ }
 
-  for (const { project } of db.prepare('SELECT DISTINCT project FROM project_members WHERE user_id = ?').all(id) as { project: string }[]) live.kick(project, [id], 'account deleted');
+  for (const { project } of db.prepare('SELECT project FROM project_members WHERE user_id = ? UNION SELECT project FROM folder_members WHERE user_id = ?').all(id, id) as { project: string }[]) live.kick(project, [id], 'account deleted');
   forgetAgentUser(id);
   for (const t of db.prepare('SELECT thread_id FROM agent_threads WHERE user_id = ?').all(id) as { thread_id: string }[]) removeWorkspace(t.thread_id);
   await disconnectDrive(id).catch(() => undefined);
@@ -136,10 +137,11 @@ export async function deleteAccount(user: SessionUser, live: LiveDocs): Promise<
   db.transaction(() => {
     const agents = (db.prepare('SELECT id FROM mcp_agents WHERE user_id = ?').all(id) as { id: number }[]).map(a => a.id);
     for (const a of agents) db.prepare('DELETE FROM mcp_sessions WHERE agent_id = ?').run(a);
-    for (const t of ['project_members', 'git_tokens', 'mcp_tokens', 'oauth_codes', 'oauth_grants', 'mcp_agent_messages', 'mcp_agents',
+    for (const t of ['project_members', 'folder_members', 'git_tokens', 'mcp_tokens', 'oauth_codes', 'oauth_grants', 'mcp_agent_messages', 'mcp_agents',
       'agent_threads', 'user_doc_state', 'starter_projects', 'admin_grants', 'gdocs_links', 'lesswrong_links']) db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).run(id);
     db.prepare('UPDATE access_log SET user_id = NULL WHERE user_id = ?').run(id);
     db.prepare('UPDATE project_members SET added_by = NULL WHERE added_by = ?').run(id);
+    db.prepare('UPDATE folder_members SET added_by = NULL WHERE added_by = ?').run(id);
     db.prepare('UPDATE pdf_links SET created_by = NULL WHERE created_by = ?').run(id);
     db.prepare('UPDATE pdf_publish SET created_by = NULL WHERE created_by = ?').run(id);
     forgetUserReports(id);

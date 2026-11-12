@@ -11,7 +11,7 @@ import * as encoding from 'lib0/encoding';
 import * as decoding from 'lib0/decoding';
 import { manager, type OpenDoc } from './docs.ts';
 import { userFromCookieHeader, type SessionUser } from './auth.ts';
-import { roleFor, logAccess } from './access.ts';
+import { roleAt, logAccess } from './access.ts';
 import { canonicalDocId } from './namespaces.ts';
 import { splitDocId, sanitizeAwarenessState, MAX_AWARENESS_STATE_JSON } from '@overlyx/core';
 import { hasModel, connectParams } from '@overlyx/core/collab/connect.ts';
@@ -141,7 +141,8 @@ export function attachWebSocket(server: Server): void {
       // (searchParams decodes it already: a second decode broke on a '%' in a file name)
       const docId = canonicalDocId(url.searchParams.get('doc') ?? '');
       const { project, path: rel } = splitDocId(docId);
-      const role = roleFor(user, project);
+      // (the project, or a folder of it shared with the user on their own that holds the document)
+      const role = roleAt(user, project, rel);
       if (!role) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); socket.destroy(); return; }
       // an end-to-end encrypted project has no document the server could open (its editors use /e2e)
       if (isE2eProject(project)) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); socket.destroy(); return; }
@@ -173,9 +174,10 @@ export function originAllowed(req: IncomingMessage): boolean {
 }
 
 /** Whether the user still has the role a connection was opened with (an error counts as no). */
-function roleStillHolds(user: SessionUser, project: string, readOnly: boolean): boolean {
+function roleStillHolds(user: SessionUser, docId: string, readOnly: boolean): boolean {
   try {
-    const role = roleFor(user, project);
+    const { project, path: rel } = splitDocId(docId);
+    const role = roleAt(user, project, rel);
     return !!role && (role === 'view') === readOnly;
   } catch { return false; }
 }
@@ -246,7 +248,7 @@ async function handleConnection(conn: WebSocket, docId: string, user: SessionUse
       // the role was decided at the upgrade: whatever ended or changed it since (an administrator's
       // grant running out, an e-mail invitation withdrawn, …) closes the connection like a kick —
       // the client reconnects and learns its new role, or that it has none
-      if (!roleStillHolds(user, doc.project, readOnly)) { try { conn.close(4003, 'access changed'); } catch { /* ignore */ } closeConn(doc, conn); clearInterval(ping); return; }
+      if (!roleStillHolds(user, doc.id, readOnly)) { try { conn.close(4003, 'access changed'); } catch { /* ignore */ } closeConn(doc, conn); clearInterval(ping); return; }
       if (!pongReceived) { closeConn(doc, conn); clearInterval(ping); return; }
       pongReceived = false;
       try { conn.ping(); } catch { closeConn(doc, conn); clearInterval(ping); return; }

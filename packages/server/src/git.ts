@@ -31,7 +31,7 @@ import { db, type UserRow } from './db.ts';
 import { projectDir, listProjects } from './projects.ts';
 import { manager, fileWrittenListeners } from './docs.ts';
 import { verifyPassword, toSessionUser, type SessionUser } from './auth.ts';
-import { roleFor, atLeast, logAccess, accessibleProjects, scopeRefusal, isPublic } from './access.ts';
+import { roleFor, atLeast, logAccess, accessibleProjects, scopeRefusal, isPublic, isRole, createLink, addMember, addFolderMember, groupLanding } from './access.ts';
 import { createOwnedProject } from './projectCreate.ts';
 import { buildIncluding, buildErrors, errorLocations, lastBuild } from './export.ts';
 import { canonicalProject } from './namespaces.ts';
@@ -524,6 +524,8 @@ export function gitRouter(): express.Router {
   r.post('/api/build', express.json({ limit: '32kb' }), (req, res) => { void cliBuild(req, res); });
   r.get('/api/pdf', (req, res) => { void cliPdf(req, res); });
   r.post('/api/restore', express.json({ limit: '32kb' }), (req, res) => { void cliRestore(req, res); });
+  // a share link to the project or one folder of it, or sharing either with a person (`overlyx share`; the owner's)
+  r.post('/api/share', express.json({ limit: '32kb' }), (req, res) => { cliShare(req, res); });
   // the VS Code extension's editors: Google fonts and the account's My fonts (googlefonts.ts,
   // myfonts.ts), the same routes as the web app's /api/fonts, with the CLI's sign-in
   const fonts = express.Router();
@@ -634,6 +636,39 @@ async function cliRestore(req: Request, res: Response): Promise<void> {
     const r = await restoreProject(t.project, String(req.body?.commit ?? ''), user.id);
     logAccess(t.project, user.id, 'git-push', `restore ${String(req.body?.commit ?? '').slice(0, 12)}`);
     res.json(r);
+  } catch (e) { res.status(400).json({ error: (e as Error).message }); }
+}
+
+/**
+ * Share the project, or (`path`) one folder of it alone (access.ts, foldershares.ts): with `with` (a
+ * username or e-mail address) that person, else a new share link with `role` — answered with the
+ * address to send (the link's, with its token).
+ */
+function cliShare(req: Request, res: Response): void {
+  const user = authenticateBasic(req, res);
+  if (!user) return;
+  const t = cliTarget(req, res, user, 'view', false);
+  if (!t) return;
+  if (roleFor(user, t.project) !== 'owner') { res.status(403).json({ error: scopeRefusal(user, t.project, 'edit') ?? `only the owner of "${t.project}" can share it` }); return; }
+  const role = req.body?.role ?? 'view';
+  if (!isRole(role)) { res.status(400).json({ error: 'role must be view or edit' }); return; }
+  const folder = t.path.replace(/\/+$/, '') || null;
+  const seg = (s: string) => s.split('/').map(encodeURIComponent).join('/');
+  const base = `${(config.publicUrl || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '')}/#/${seg(t.project)}`;
+  // (a link lands in the folder by itself; a person is sent to its first tab, or the folder)
+  const address = folder ? `${base}/${seg(groupLanding(t.project, folder) ?? folder)}` : base;
+  const what = folder ? `the folder ${folder}` : 'the project';
+  try {
+    const who = typeof req.body?.with === 'string' ? req.body.with.trim() : '';
+    if (who) {
+      const m = folder ? addFolderMember(t.project, folder, who, role, user) : addMember(t.project, who, role, user);
+      logAccess(t.project, user.id, 'share', `shared ${what} with ${who} as ${role === 'edit' ? 'editor' : 'viewer'} (CLI)`);
+      res.json({ project: t.project, path: 'path' in m ? m.path : null, role, with: who, url: address });
+      return;
+    }
+    const link = createLink(t.project, role, user, folder);
+    logAccess(t.project, user.id, 'share', `made a share link for ${role === 'edit' ? 'editors' : 'viewers'}${link.path ? ` of the folder ${link.path}` : ''} (CLI)`);
+    res.json({ project: t.project, path: link.path, role, url: `${folder ? `${base}/${seg(folder)}` : base}?share=${link.token}` });
   } catch (e) { res.status(400).json({ error: (e as Error).message }); }
 }
 

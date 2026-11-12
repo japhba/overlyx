@@ -263,6 +263,26 @@ blend.
   top level by hand moves into the instance owner's namespace. *File ▸ Share project…*, the 👥
   button in the file browser, or the start screen. Anyone with a Google account may sign in (they only see their own and shared projects);
   set `OVERLYX_SIGNUP=invited` to allow only e-mails that were invited to a project.
+* **Folder shares** (`server/src/foldershares.ts`, 12 Nov 2026): one folder of a project shared on its
+  own — right-click it in the file browser ▸ *Share Folder…* (`app/Share.tsx FolderShareDialog`), or
+  `overlyx share <owner>/<project>/<folder> [--role view|edit] [--with USER|EMAIL]`, which prints the
+  link (a script, e.g. a meeting recorder's hook, sends it on). People added there are rows of
+  `folder_members`, links name the folder in `share_links.path`; whoever comes in that way reaches the
+  folder and nothing else. Deny by default: they are never in `project_members`, so `roleFor` — and
+  with it git, search, the zip, MCP, the agent, Google Docs/LessWrong, sharing, the activity log —
+  does not know them; only what asks about a path lets them in (`access.ts roleAt`: the folder's
+  files, documents over the WebSocket, `/docs` routes, builds and PDFs unless the document is built
+  through a master outside the folder, pictures, decks' frames; `index.ts needPaths` / `needReach`).
+  `..` and links on disk reach nothing outside the folder; the project list, document metadata and
+  bibliographies show them the folder's files only, without the project's people. The shared folder
+  itself can't be renamed or deleted by them; renamed by the owner, its shares follow. Someone who has
+  the project already gets no folder share: a folder link only lands them in the folder (a viewer of
+  the project can be made an editor of one folder). A folder shared **for editing** is built as a
+  project of its own (`confinedRoot`): the builds, typeset snippets and printed pages of its documents
+  see only that folder (sandbox, TEXINPUTS, converted pictures, a sandbox home of its own), so its
+  editors cannot `\input` the rest of the project into a PDF they can read — documents there can't
+  use files outside it. Not for end-to-end encrypted projects (shared whole). The project's Share
+  dialog lists them under *Shared folders*.
 * **Public projects** (Share dialog ▸ *Public*, like a public repository on GitHub): anyone may
   view the project at its own address (`https://<server>/#/<owner>/<project>/<path>`, no token)
   and `git clone` / pull it without credentials; editing and pushing still need an account the

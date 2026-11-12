@@ -123,7 +123,7 @@ async function answer(route: Route): Promise<void> {
   await route.abort();
 }
 
-async function withPage<T>(project: string, rel: string, userId: number, mode: RuntimeMode, viewport: { width: number; height: number }, scale: number, f: (ctx: BrowserContext, page: import('playwright-core').Page) => Promise<T>): Promise<T> {
+async function withPage<T>(project: string, rel: string, userId: number, mode: RuntimeMode, viewport: { width: number; height: number }, scale: number, f: (ctx: BrowserContext, page: import('playwright-core').Page) => Promise<T>, reach = ''): Promise<T> {
   await acquire();
   let ctx: BrowserContext | null = null;
   try {
@@ -132,7 +132,7 @@ async function withPage<T>(project: string, rel: string, userId: number, mode: R
     await ctx.route('**/*', answer);
     const page = await ctx.newPage();
     page.setDefaultTimeout(RENDER_TIMEOUT_MS);
-    const token = deliverableToken(project, '', userId, 10 * 60 * 1000);
+    const token = deliverableToken(project, '', userId, 10 * 60 * 1000, reach);
     await page.goto(`${ORIGIN}/ol-d/${token}/${rel.split('/').map(encodeURIComponent).join('/')}?ol=${mode}`, { waitUntil: 'load' });
     // the runtime says when fonts, math and the page's own scripts have settled
     await page.waitForFunction(() => (window as unknown as { __olReady?: boolean }).__olReady === true, undefined, { timeout: 20000 }).catch(() => undefined);
@@ -190,14 +190,17 @@ export async function renderPages(project: string, rel: string, userId: number, 
   });
 }
 
-/** A PDF: one page per slide (optionally per click step), a poster at its size, a web page on A4. */
-export async function deliverablePdf(project: string, rel: string, userId: number, opts: { steps?: boolean } = {}): Promise<Buffer> {
+/**
+ * A PDF: one page per slide (optionally per click step), a poster at its size, a web page on A4.
+ * `reach`: the page sees no file outside that folder (foldershares.ts confinedRoot).
+ */
+export async function deliverablePdf(project: string, rel: string, userId: number, opts: { steps?: boolean; reach?: string } = {}): Promise<Buffer> {
   return withPage(project, rel, userId, 'print', { width: 1280, height: 900 }, 1, async (_ctx, page) => {
     const rep = await report(page);
     if (rep.kind === 'page') return await page.pdf({ format: 'A4', printBackground: true, margin: { top: '12mm', bottom: '12mm', left: '12mm', right: '12mm' } });
     if (rep.kind === 'deck' && opts.steps) await page.evaluate(() => (window as unknown as { __ol: { printSteps(): void } }).__ol.printSteps());
     return await page.pdf({ width: `${rep.width}px`, height: `${rep.height}px`, printBackground: true, preferCSSPageSize: false, margin: { top: '0', right: '0', bottom: '0', left: '0' } });
-  });
+  }, opts.reach ?? '');
 }
 
 export async function shutdownRenderer(): Promise<void> {
