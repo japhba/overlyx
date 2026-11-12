@@ -10,9 +10,9 @@
  * Google Doc) shows as one entry: its title, then its documents in the group's order under the titles
  * the group gives them (nested ones indented), the folder's other files after them.
  * *Import from Google Docs…* (where Google's picker is set up) brings a Google Doc in: a document, or
- * a group of its tabs (server gdocs/importing.ts). *Share Folder…* (the owner) shares one folder on its
- * own (app/Share.tsx FolderShareDialog); someone who has only folders of a project (`partial`) sees
- * those, and changes things inside the ones they may edit.
+ * a group of its tabs (server gdocs/importing.ts). *Share Folder…* / *Share File…* (the owner) shares
+ * one folder or file on its own (app/Share.tsx FolderShareDialog); someone who has only folders or
+ * files of a project (`partial`) sees those, and changes things inside the ones they may edit.
  */
 import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
@@ -112,7 +112,7 @@ export function siblingDocument(project: Project, goneId: string): string | null
   return pick ? fileTabId(project.name, pick) : null;
 }
 
-/** Share Folder…: the app opens the folder's share dialog (detail: { project, path, name }) */
+/** Share Folder… / Share File…: the app opens its share dialog (detail: { project, path, name, file }) */
 export const SHARE_FOLDER_EVENT = 'ol:share-folder';
 
 /** the explorer's cut/copy clipboard (paths within one project; survives re-renders) */
@@ -392,9 +392,9 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
       ] : []),
     ];
   };
-  /** Share Folder…: the owner shares one folder on its own (its people see it and nothing else of the project) */
-  const shareItems = (dir: string, name?: string | null): MenuItem[] => role === 'owner' && project && !e2e
-    ? [{ sep: true }, { label: 'Share Folder…', action: () => window.dispatchEvent(new CustomEvent(SHARE_FOLDER_EVENT, { detail: { project: project.name, path: dir, name } })) }] : [];
+  /** Share Folder… / Share File…: the owner shares one folder or file on its own (its people see it and nothing else of the project) */
+  const shareItems = (p: string, name?: string | null, file = false): MenuItem[] => role === 'owner' && project && !e2e
+    ? [{ sep: true }, { label: file ? 'Share File…' : 'Share Folder…', action: () => window.dispatchEvent(new CustomEvent(SHARE_FOLDER_EVENT, { detail: { project: project.name, path: p, name, file } })) }] : [];
   const newItems = (dir = ''): MenuItem[] => canEditIn(dir) ? [
     { label: 'New File…', action: () => void newFile(dir) },
     { label: 'New Slides / Poster / Page…', action: () => setNewLayoutIn(dir) },
@@ -405,7 +405,7 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
     ...(gdocs && !partial ? [{ label: 'Import from Google Docs…', action: () => void importGoogle(dir) }] : []),
   ] : [];
   /** `linkId`: the tab the file opens in, whose link "Copy link" copies (editor/permalink.ts) */
-  const fileCtx = (f: ProjectFile, openIt: () => void, linkId: string | null) => (e: MouseEvent) => {
+  const fileCtx = (f: ProjectFile, openIt: () => void, linkId: string | null, title?: string | null) => (e: MouseEvent) => {
     e.preventDefault(); e.stopPropagation();
     showContextMenu(e.clientX, e.clientY, [
       { label: 'Open', action: openIt },
@@ -413,6 +413,7 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
       { label: 'Download', action: () => download(f.path) },
       ...(f.kind === 'doc' ? [{ label: 'Download LyX (.lyx)', action: () => window.open(`/api/docs/${encodeURIComponent(project!.name + '/' + f.path)}/lyx`) }] : []),
       ...ctxCommon(f.path, false),
+      ...shareItems(f.path, title ?? f.name, true),
     ]);
   };
   const folderCtx = (p: string, name?: string | null) => (e: MouseEvent) => {
@@ -521,7 +522,7 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey, project: con
         data-file={f.path}
         onDragOver={dragOver(f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) : '')}
         onDrop={drop(f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) : '')}
-        onContextMenu={fileCtx(f, () => { if (isLyx) void importLyx(); else if (inTab) onOpen(tabId); else if (isSvg) editSvg(); else window.open(href, '_blank'); }, inTab && !isLyx ? tabId : null)}
+        onContextMenu={fileCtx(f, () => { if (isLyx) void importLyx(); else if (inTab) onOpen(tabId); else if (isSvg) editSvg(); else window.open(href, '_blank'); }, inTab && !isLyx ? tabId : null, member?.title)}
         onClick={e => { if (isLyx) { e.preventDefault(); void importLyx(); return; } if (isSvg && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) { e.preventDefault(); editSvg(); return; } if (inTab && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) { e.preventDefault(); onOpen(tabId); } }}>
         {outlines && (outlined
           ? <span class="twisty" role="button" title={open ? 'Hide the outline' : 'Show the outline'} onClick={e => { e.preventDefault(); e.stopPropagation(); outlines.toggle(id); }}>{open ? '▾' : '▸'}</span>

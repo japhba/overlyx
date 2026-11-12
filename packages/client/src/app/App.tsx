@@ -586,10 +586,10 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   }, [findOpen, findFocus]);
   // sharing: the project whose share dialog is open; view-only when the current project was shared for viewing
   const [shareFor, setShareFor] = useState<string | null>(null);
-  // one folder shared on its own (the file browser's Share Folder…: SHARE_FOLDER_EVENT)
-  const [shareFolder, setShareFolder] = useState<{ project: string; path: string; name?: string | null } | null>(null);
+  // one folder or file shared on its own (the file browser's Share Folder… / Share File…: SHARE_FOLDER_EVENT)
+  const [shareFolder, setShareFolder] = useState<{ project: string; path: string; name?: string | null; file?: boolean } | null>(null);
   useEffect(() => {
-    const f = (e: Event) => setShareFolder((e as CustomEvent<{ project: string; path: string; name?: string | null }>).detail);
+    const f = (e: Event) => setShareFolder((e as CustomEvent<{ project: string; path: string; name?: string | null; file?: boolean }>).detail);
     window.addEventListener(SHARE_FOLDER_EVENT, f);
     return () => window.removeEventListener(SHARE_FOLDER_EVENT, f);
   }, []);
@@ -745,7 +745,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       const { share: token, sharePath } = parseHash();
       if (!token) { void visitPublic().then(v => { if (v?.public && v.role === 'view') setRefreshKey(k => k + 1); }); return; }
       api.acceptShare(token, sharePath).then(r => {
-        notify(`You can now ${r.role === 'view' ? 'view' : 'edit'} ${r.folder ? `the folder ${r.folder} of ` : ''}“${r.title ?? projectShortName(r.project)}”`);
+        notify(`You can now ${r.role === 'view' ? 'view' : 'edit'} ${r.folder ? `${r.folder} of ` : ''}“${r.title ?? projectShortName(r.project)}”`);
         setRefreshKey(k => k + 1);
         location.hash = shareLanding(r);
       }).catch(e => { notify((e as Error).message, 'error'); location.hash = ''; });
@@ -2106,7 +2106,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       {renderDialog()}
       {linkAsk && <CopyLinkDialog url={linkAsk.url} what={linkAsk.what} user={user} notify={notify} onClose={() => setLinkAsk(null)} />}
       {shareFor && <ShareDialog project={shareFor} user={user} doc={docId?.replace(/^(text|pdf):/, '') ?? null} view={isLyxDoc ? viewParam(panes, pagesOn, viewKindOf(docId!)) : null} onClose={() => setShareFor(null)} onChanged={() => setRefreshKey(k => k + 1)} />}
-      {shareFolder && <FolderShareDialog project={shareFolder.project} folder={shareFolder.path} name={shareFolder.name} user={user} onClose={() => setShareFolder(null)} onChanged={() => setRefreshKey(k => k + 1)} />}
+      {shareFolder && <FolderShareDialog project={shareFolder.project} folder={shareFolder.path} file={!!shareFolder.file} name={shareFolder.name} user={user} onClose={() => setShareFolder(null)} onChanged={() => setRefreshKey(k => k + 1)} />}
       {newLayoutFor && <NewLayoutDialog project={newLayoutFor} dir={textId ? docPathOf(textId).split('/').slice(0, -1).join('/') : ''} notify={notify} onClose={() => setNewLayoutFor(null)} onCreated={id => { location.hash = '#/' + id; setRefreshKey(k => k + 1); }} />}
       {gitFor && <GitDialog project={gitFor} user={user} onClose={() => setGitFor(null)} />}
       {quickOpen && <QuickOpen project={docId ? projectOfDoc(docId.replace(/^(text|pdf):/, '')) || null : curProject?.name ?? null} onOpen={id => openInTab(id)} onClose={() => setQuickOpen(false)} />}

@@ -34,7 +34,7 @@ export function ShareInvite({ invite, google, onGuest, onSignIn }: {
   const [err, setErr] = useState('');
   const [name, setName] = useState(() => { try { return localStorage.getItem(NAME_KEY) ?? ''; } catch { return ''; } });
   const title = invite.title ?? projectShortName(invite.project);
-  // a link to one folder of the project: that folder, nothing else of it
+  // a link to one folder (or file) of the project: that, nothing else of it
   const folder = invite.folder ?? null;
   const verb = invite.role === 'view' ? 'view' : 'edit';
   const guest = async () => {
@@ -50,14 +50,14 @@ export function ShareInvite({ invite, google, onGuest, onSignIn }: {
         <div class="invite-mark"><Wordmark bauhaus /></div>
         <h1>{invite.owner ? `${invite.owner} invited you to ${verb}` : `You’re invited to ${verb}`} <span class="invite-title">“{folder ? folder.title : title}”</span></h1>
         {folder
-          ? <p class="invite-lede" data-invite-folder={folder.path}>A folder of “{title}”: you see it and nothing else of the project.</p>
+          ? <p class="invite-lede" data-invite-folder={folder.path}>{folder.file ? 'A file' : 'A folder'} of “{title}”: you see it and nothing else of the project.</p>
           : <p class="invite-lede">LaTeX documents, slides and posters, edited and rendered in the same place.</p>}
         <div class="invite-options">
           <section class="invite-option account" data-invite-account>
             <h2>Join with your account</h2>
             <ul>
               <li>{verb === 'edit' ? 'Your edits and comments carry your name' : 'Others see you under your name'}</li>
-              <li>{folder ? 'The folder stays on your start screen, on any device' : 'The project stays on your start screen, on any device'}</li>
+              <li>{folder ? `The ${folder.file ? 'file' : 'folder'} stays on your start screen, on any device` : 'The project stays on your start screen, on any device'}</li>
               <li>{google ? 'Free, with a new or existing Google account' : 'With the account you have here'}</li>
             </ul>
             {google
@@ -70,7 +70,7 @@ export function ShareInvite({ invite, google, onGuest, onSignIn }: {
               <ul>
                 <li>Opens right away, nothing to sign up for</li>
                 <li>Others see the name you give, or “Anonymous Otter”</li>
-                <li>Only in this browser; sign in later to keep the {folder ? 'folder' : 'project'}</li>
+                <li>Only in this browser; sign in later to keep the {folder ? (folder.file ? 'file' : 'folder') : 'project'}</li>
               </ul>
               <label class="invite-name">
                 <span>Your name <i>(optional)</i></span>

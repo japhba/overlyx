@@ -28,9 +28,9 @@ export { rewriteParentPaths };
 
 /**
  * What a document's build may read of its project: the project — or, a document in a folder shared
- * for editing on its own, that folder (foldershares.ts confinedRoot) — with the sandbox home that
- * goes with it (one of its own for such a folder: what its people's code leaves there must not
- * reach the project's other builds, nor theirs the folder's).
+ * for editing on its own, that folder; a document shared for editing alone, itself
+ * (foldershares.ts confinedRoot) — with the sandbox home that goes with it (one of its own: what its
+ * people's code leaves there must not reach the project's other builds, nor theirs its own).
  */
 export function buildRoot(project: string, rel: string): { root: string; home: string } {
   const folder = confinedRoot(project, rel);
@@ -338,8 +338,16 @@ export async function exportTex(docId: string, opts: { into?: string } = {}): Pr
   const docDir = path.dirname(doc.absPath);
   const warnings: string[] = [];
   const { root } = buildRoot(doc.project, doc.relPath);
+  // a build directory last used by a build that read something else (before the document was shared
+  // for editing on its own, or after) starts empty: what that build copied in stays out of this one
+  // (never through a link: the build directory holds what the project's code left there)
+  const was = readTextIn(dir, '.overlyx-root', 4096);
+  if (was !== root) {
+    if (was !== null || root !== projectDir(doc.project)) { fs.rmSync(dir, { recursive: true, force: true }); fs.mkdirSync(dir, { recursive: true }); }
+    writeFileIn(dir, '.overlyx-root', root);
+  }
   sweepBuildDir(dir, projectDir(doc.project));
-  linkDocumentAssets(docDir, dir);
+  linkDocumentAssets(docDir, dir, root);
   if (isMarkdownPath(doc.relPath) || isHtmlPath(doc.relPath)) {
     // a markdown document is built from its LaTeX (an HTML article exported as LaTeX too, though its PDF
     // is the page printed: printArticle): the editor's model written as a .tex file — with the
@@ -372,6 +380,8 @@ export async function exportTex(docId: string, opts: { into?: string } = {}): Pr
     if (rel === doc.relPath && text.includes('\\begin{olbox}')) text = freshManagedBlock(text, await doc.textAsync());
     const relToDoc = path.relative(docDir, path.join(proj, rel));
     if (relToDoc.startsWith('..')) continue;   // outside the document's directory: found through TEXINPUTS
+    // what the build may not read (a document shared for editing alone: the files beside it) stays out
+    if (path.join(proj, rel) !== root && !path.join(proj, rel).startsWith(root + path.sep)) continue;
     const target = path.join(dir, relToDoc);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     try { if (fs.lstatSync(target).isSymbolicLink()) fs.unlinkSync(target); } catch { /* not there */ }
@@ -391,7 +401,9 @@ export async function exportTex(docId: string, opts: { into?: string } = {}): Pr
  * like LyX's temp-dir export. Packages such as `svg` need the files in the working directory to
  * find/keep their conversion cache (svg-inkscape/) and to compare timestamps.
  */
-export function linkDocumentAssets(docDir: string, buildDirPath: string): void {
+export function linkDocumentAssets(docDir: string, buildDirPath: string, root?: string): void {
+  // what the build may not read (a document shared for editing alone: its folder is not the build's, buildRoot) is not linked
+  if (root && docDir !== root && !docDir.startsWith(root + path.sep)) return;
   // graphics, and font files kept next to the document (fontspec's `Path=./` looks in the build directory)
   const LINK_EXT = new Set(['.svg', '.svgz', '.png', '.jpg', '.jpeg', '.eps', '.ps', '.tif', '.tiff', '.gif', '.bmp', '.webp', '.pdf_tex', '.pdf', '.ttf', '.otf', '.ttc', '.pfb', '.pfa', '.afm']);
   // Sub-directories are re-created as real directories with symlinked files (never symlinked as a
@@ -552,12 +564,15 @@ async function buildViaLatexmk(job: BuildJob): Promise<BuildResult> {
     const f = path.join(exp.dir, base + ext);
     try { if (fs.lstatSync(f).isSymbolicLink()) fs.unlinkSync(f); } catch { /* not there */ }
   }
+  // (a document in a folder shared for editing on its own reads that folder only, one shared alone itself: buildRoot)
+  const { root, home } = buildRoot(project, doc.relPath);
   // honour a latexmkrc in the document directory (e.g. for -shell-escape needed by the svg package);
   // it is read where it appears on the command line, so it comes first: our engine choice wins
   const args: string[] = [];
   for (const rc of ['latexmkrc', '.latexmkrc']) {
     const f = path.join(docDir, rc);
-    if (fs.existsSync(f)) { args.push('-r', f); break; }
+    // (one the confined build cannot read is not its own: a document shared for editing alone)
+    if (fs.existsSync(f) && f.startsWith(root + path.sep)) { args.push('-r', f); break; }
   }
   // -pvc-: a latexmkrc written for the author's desktop ($preview_continuous_mode = 1) must not
   // keep latexmk watching the files until the timeout; -f: an error TeX recovers from (an undefined
@@ -566,8 +581,6 @@ async function buildViaLatexmk(job: BuildJob): Promise<BuildResult> {
   args.push(engineFlag, '-pvc-', '-g', '-f', '-interaction=nonstopmode', '-file-line-error', '-synctex=1', base + '.tex');
   // the build directory is the only writable place (the svg package's cache is a copy in it); the
   // shared cache is not readable (it holds every user's converted pictures and parsed bibliographies)
-  // (a document in a folder shared for editing on its own reads that folder only: buildRoot)
-  const { root, home } = buildRoot(project, doc.relPath);
   const sandbox = { rw: [exp.dir], ro: [root], home, cgroup: BUILD_CGROUP };
   const texEnv = { ...texInputs(docDir, exp.dir, root), ...(faceFonts ? { OSFONTDIR: faceFonts } : {}) };
   // a house font's faces LuaTeX has not cached in this HOME yet: one per run first (caching them all in

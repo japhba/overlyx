@@ -1952,6 +1952,8 @@ a.btn { display: inline-block; color: var(--ui-fg); text-decoration: none; line-
 .share-link-file select { max-width: 60%; font-size: 12px; }
 .share-link-meta { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
 .share-link-meta button { margin-left: auto; }
+/* Or share only this file… · its folder… (Share.tsx): links in a sentence */
+.share-link-meta [data-share-part] .fallback-link { margin: 0; padding: 0; border: 0; background: none; color: var(--accent); font: inherit; text-decoration: underline; text-decoration-style: dotted; cursor: pointer; }
 /* share links: one row per link, its role first (Share.tsx) */
 .share-link-item + .share-link-item { margin-top: 8px; }
 .share-link .link-role { align-self: center; flex: none; font-size: 11px; padding: 1px 7px; border-radius: 9px; border: 1px solid var(--ui-border); color: var(--ui-muted); white-space: nowrap; }

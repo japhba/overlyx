@@ -590,7 +590,7 @@ api.post('/projects/:project/share/members', needProject('owner'), (req, res) =>
     // `path`: only that folder of the project (foldershares.ts)
     if (req.body?.path) {
       const f = addFolderMember(req.params.project, String(req.body.path), String(req.body?.who ?? ''), role, req.user!);
-      logAccess(req.params.project, req.user!.id, 'share', `shared the folder ${f.path} with ${memberLabel(f)} as ${role === 'edit' ? 'editor' : 'viewer'}`);
+      logAccess(req.params.project, req.user!.id, 'share', `shared ${f.path} with ${memberLabel(f)} as ${role === 'edit' ? 'editor' : 'viewer'}`);
       res.json({ member: f, share: shareInfo(req.params.project) });
       return;
     }
@@ -626,7 +626,7 @@ api.post('/projects/:project/share/folder-members/:id', needProject('owner'), (r
   const m = folderMemberRow(req.params.project, Number(req.params.id));
   if (!m) { res.status(404).json({ error: 'no such member' }); return; }
   setFolderMemberRole(req.params.project, m.id, role);
-  logAccess(req.params.project, req.user!.id, 'share', `made ${memberLabel(m)} ${role === 'edit' ? 'an editor' : 'a viewer'} of the folder ${m.path}`);
+  logAccess(req.params.project, req.user!.id, 'share', `made ${memberLabel(m)} ${role === 'edit' ? 'an editor' : 'a viewer'} of ${m.path}`);
   if (m.user_id != null) manager.kick(req.params.project, [m.user_id]);
   res.json({ share: shareInfo(req.params.project) });
 });
@@ -634,7 +634,7 @@ api.delete('/projects/:project/share/folder-members/:id', needProject('owner'), 
   const m = folderMemberRow(req.params.project, Number(req.params.id));
   if (!m) { res.status(404).json({ error: 'no such member' }); return; }
   removeFolderMember(req.params.project, m.id);
-  logAccess(req.params.project, req.user!.id, 'share', `stopped sharing the folder ${m.path} with ${memberLabel(m)}`);
+  logAccess(req.params.project, req.user!.id, 'share', `stopped sharing ${m.path} with ${memberLabel(m)}`);
   if (m.user_id != null) manager.kick(req.params.project, [m.user_id]);
   res.json({ share: shareInfo(req.params.project) });
 });
@@ -647,7 +647,7 @@ api.post('/projects/:project/share/links', needProject('owner'), (req, res) => {
     const role = req.body?.role;
     if (!isRole(role)) { res.status(400).json({ error: 'role must be view or edit' }); return; }
     const link = createLink(req.params.project, role, req.user!, req.body?.path ? String(req.body.path) : null);
-    logAccess(req.params.project, req.user!.id, 'share', `made a share link for ${role === 'edit' ? 'editors' : 'viewers'}${link.path ? ` of the folder ${link.path}` : ''}`);
+    logAccess(req.params.project, req.user!.id, 'share', `made a share link for ${role === 'edit' ? 'editors' : 'viewers'}${link.path ? ` of ${link.path}` : ''}`);
     res.json({ link, share: shareInfo(req.params.project) });
   } catch (e) { res.status(400).json({ error: (e as Error).message }); }
 });
@@ -1019,8 +1019,8 @@ api.post('/projects/:project/fileops', needPaths('edit', req => [req.body?.from,
   try {
     const project = req.params.project;
     const op = String(req.body?.op ?? '');
-    // a shared folder itself stays where its owner put it (what is inside it its people may move)
-    if (req.partial && foldersOf(req.user!, project).some(f => f.path === path.posix.normalize(String(req.body?.from ?? '')).replace(/\/+$/, ''))) { res.status(403).json({ error: 'The shared folder itself can only be renamed or deleted by the project’s owner' }); return; }
+    // a folder or file shared on its own stays where its owner put it (what is inside a folder its people may move)
+    if (req.partial && foldersOf(req.user!, project).some(f => f.path === path.posix.normalize(String(req.body?.from ?? '')).replace(/\/+$/, ''))) { res.status(403).json({ error: 'What is shared with you can only be renamed or deleted by the project’s owner' }); return; }
     const guard = (rel: string) => { assertWritableRelPath(rel); return resolveProjectPath(project, rel); };
     const moveOut = (abs: string, rel: string) => {   // to the trash; a rename across file systems falls back to copy + delete
       const trash = path.join(config.dataDir, 'trash', 'files', `${project}-${new Date().toISOString().replace(/[:.]/g, '-')}`);

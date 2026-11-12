@@ -640,7 +640,7 @@ async function cliRestore(req: Request, res: Response): Promise<void> {
 }
 
 /**
- * Share the project, or (`path`) one folder of it alone (access.ts, foldershares.ts): with `with` (a
+ * Share the project, or (`path`) one folder or file of it alone (access.ts, foldershares.ts): with `with` (a
  * username or e-mail address) that person, else a new share link with `role` — answered with the
  * address to send (the link's, with its token).
  */
@@ -655,9 +655,9 @@ function cliShare(req: Request, res: Response): void {
   const folder = t.path.replace(/\/+$/, '') || null;
   const seg = (s: string) => s.split('/').map(encodeURIComponent).join('/');
   const base = `${(config.publicUrl || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '')}/#/${seg(t.project)}`;
-  // (a link lands in the folder by itself; a person is sent to its first tab, or the folder)
+  // (a link lands in the folder, or on the file, by itself; a person is sent to a folder's first tab, or the path)
   const address = folder ? `${base}/${seg(groupLanding(t.project, folder) ?? folder)}` : base;
-  const what = folder ? `the folder ${folder}` : 'the project';
+  const what = folder ? folder : 'the project';
   try {
     const who = typeof req.body?.with === 'string' ? req.body.with.trim() : '';
     if (who) {
@@ -667,7 +667,7 @@ function cliShare(req: Request, res: Response): void {
       return;
     }
     const link = createLink(t.project, role, user, folder);
-    logAccess(t.project, user.id, 'share', `made a share link for ${role === 'edit' ? 'editors' : 'viewers'}${link.path ? ` of the folder ${link.path}` : ''} (CLI)`);
+    logAccess(t.project, user.id, 'share', `made a share link for ${role === 'edit' ? 'editors' : 'viewers'}${link.path ? ` of ${link.path}` : ''} (CLI)`);
     res.json({ project: t.project, path: link.path, role, url: `${folder ? `${base}/${seg(folder)}` : base}?share=${link.token}` });
   } catch (e) { res.status(400).json({ error: (e as Error).message }); }
 }

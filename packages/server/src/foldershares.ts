@@ -1,6 +1,6 @@
 /**
- * Folder shares: one folder of a project shared on its own instead of the whole project — with
- * people by name or e-mail (`folder_members`), or through a share link that names it
+ * Folder shares: one folder — or one file — of a project shared on its own instead of the whole
+ * project, with people by name or e-mail (`folder_members`), or through a share link that names it
  * (`share_links.path`). Whoever comes in that way is never a row of `project_members`, so
  * `roleFor` (access.ts) — and with it every route, the WebSocket, git, search, MCP, the agent —
  * does not know them and refuses them. Only what asks about a path (`roleAt`) lets them in: the
@@ -9,7 +9,8 @@
  *
  * A folder shared for editing is built as a project of its own (`confinedRoot`): builds, typeset
  * snippets and printed pages of its documents see only that folder, so that whoever edits it cannot
- * \input, include or link the rest of the project into a PDF they can read.
+ * \input, include or link the rest of the project into a PDF they can read. A file shared for editing
+ * alone is built from itself alone: the pictures and files it uses beside it stay out of its PDF.
  *
  * The database only (export.ts and snippets.ts use it without access.ts).
  */
@@ -17,8 +18,8 @@ import path from 'node:path';
 import { db, type FolderMemberRow } from './db.ts';
 
 /**
- * A folder as a share names it: project-relative, normalised, never the top of the project (that is
- * sharing the project) and never inside `.git`. Null: no such path.
+ * A folder or file as a share names it: project-relative, normalised, never the top of the project
+ * (that is sharing the project) and never inside `.git`. Null: no such path.
  */
 export function sharePath(p: unknown): string | null {
   if (typeof p !== 'string' || p.includes('\0') || p.includes('\\')) return null;
@@ -27,7 +28,7 @@ export function sharePath(p: unknown): string | null {
   return parts.join('/');
 }
 
-/** Whether the project path `rel` is the folder `folder` or lies inside it (a path climbing out with `..`, or absolute, never does). */
+/** Whether the project path `rel` is `folder` (a folder or a file) or lies inside it (a path climbing out with `..`, or absolute, never does). */
 export function withinPath(rel: string, folder: string): boolean {
   if (typeof rel !== 'string' || rel.includes('\0')) return false;
   const n = path.posix.normalize(rel).replace(/\/+$/, '');
@@ -57,8 +58,9 @@ export function mergeFolders(rows: Pick<FolderMemberRow, 'path' | 'role' | 'via'
 }
 
 /**
- * The folder the builds of the document at `rel` are confined to: the innermost folder holding it
- * that is shared for editing on its own (with people, or by a link); '' — none, the whole project.
+ * What the builds of the document at `rel` are confined to: the innermost folder holding it — or the
+ * document itself — that is shared for editing on its own (with people, or by a link); '' — nothing,
+ * the whole project.
  */
 export function confinedRoot(project: string, rel: string): string {
   const rows = db.prepare(`SELECT path FROM folder_members WHERE project = ? AND role = 'edit'

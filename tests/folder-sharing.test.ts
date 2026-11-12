@@ -1,7 +1,7 @@
 /**
- * Folder shares (packages/server/src/foldershares.ts, access.ts): one folder of a project shared on
- * its own, with people or by a link — they reach that folder and nothing else; `roleFor` does not
- * know them, so every whole-project door (git, search, MCP, the agent) stays shut for them.
+ * Folder shares (packages/server/src/foldershares.ts, access.ts): one folder — or one file — of a
+ * project shared on its own, with people or by a link — they reach that and nothing else; `roleFor`
+ * does not know them, so every whole-project door (git, search, MCP, the agent) stays shut for them.
  */
 import { describe, it, expect } from 'vitest';
 import { mkdirSync, rmSync, symlinkSync, writeFileSync, existsSync } from 'node:fs';
@@ -51,9 +51,11 @@ describe('folder shares', () => {
     expect(shares.withinPath(`${FOLDER}X/other.md`, FOLDER)).toBe(false);
     expect(shares.withinPath(`${FOLDER}/../../private/secret.md`, FOLDER)).toBe(false);
     expect(shares.withinPath(`/${FOLDER}/notes.md`, FOLDER)).toBe(false);
-    expect(() => access.shareableFolder('jan/meetings', 'notes/nope')).toThrow(/no folder/);
-    expect(() => access.shareableFolder('jan/meetings', 'main.tex')).toThrow(/no folder/);
-    expect(() => access.shareableFolder('jan/meetings', `${FOLDER}/escape`)).toThrow(/no folder/);   // a link out of the project's tree
+    expect(() => access.shareablePath('jan/meetings', 'notes/nope')).toThrow(/no folder or file/);
+    expect(access.shareablePath('jan/meetings', 'main.tex')).toBe('main.tex');
+    expect(access.sharedKind('jan/meetings', 'main.tex')).toBe('file');
+    expect(access.sharedKind('jan/meetings', FOLDER)).toBe('folder');
+    expect(() => access.shareablePath('jan/meetings', `${FOLDER}/escape`)).toThrow(/no folder or file/);   // a link out of the project's tree
   });
 
   it('give a person that folder and nothing else of the project', () => {
@@ -121,6 +123,29 @@ describe('folder shares', () => {
     expect(r.removed).toEqual([dee.id]);
     expect(access.roleAt(dee, 'jan/meetings', `${FOLDER}/notes.md`)).toBeNull();
     expect(() => access.acceptLink(link.token, dee)).toThrow(/not valid/);
+  });
+
+  it('of one file: that file alone — not its siblings, not its folder — built from itself alone when edited', () => {
+    const fay = toSessionUser(createUser('fay', 'Fay', 'pw'));
+    access.addFolderMember('jan/meetings', `${FOLDER}X/other.md`, 'fay', 'edit', jan);
+    expect(access.roleFor(fay, 'jan/meetings')).toBeNull();
+    expect(access.roleAt(fay, 'jan/meetings', `${FOLDER}X/other.md`)).toBe('edit');
+    expect(access.roleAt(fay, 'jan/meetings', `${FOLDER}X`)).toBeNull();
+    expect(access.roleAt(fay, 'jan/meetings', `${FOLDER}X/other.md/../other.md`)).toBe('edit');
+    expect(access.roleAt(fay, 'jan/meetings', `${FOLDER}X/new.md`)).toBeNull();
+    expect(access.roleAt(fay, 'jan/meetings', `${FOLDER}/notes.md`)).toBeNull();
+    const p = access.accessibleProjects(fay).find(x => x.name === 'jan/meetings')!;
+    expect(p).toMatchObject({ role: 'edit', partial: true, folders: [{ path: `${FOLDER}X/other.md`, role: 'edit' }] });
+    expect(p.files.map(f => f.path)).toEqual([`${FOLDER}X/other.md`]);
+    expect(shares.confinedRoot('jan/meetings', `${FOLDER}X/other.md`)).toBe(`${FOLDER}X/other.md`);
+    // a file inside a shared folder, shared alone too: the narrower one confines its builds
+    access.addFolderMember('jan/meetings', `${FOLDER}/summary.md`, 'fay', 'edit', jan);
+    expect(shares.confinedRoot('jan/meetings', `${FOLDER}/summary.md`)).toBe(`${FOLDER}/summary.md`);
+    expect(shares.confinedRoot('jan/meetings', `${FOLDER}/notes.md`)).toBe(FOLDER);
+    const link = access.createLink('jan/meetings', 'view', jan, 'main.tex');
+    expect(access.linkPreview(link.token)?.folder).toEqual({ path: 'main.tex', title: 'main.tex', file: true });
+    expect(access.shareInfo('jan/meetings').sharedKinds).toMatchObject({ 'main.tex': 'file', [FOLDER]: 'folder' });
+    access.revokeLink('jan/meetings', link.token, true);
   });
 
   it('follow their folder when it is renamed', () => {

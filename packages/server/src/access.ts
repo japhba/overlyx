@@ -11,9 +11,9 @@
  *  - or makes **share links** (`createLink`), each with its own role for good: anyone who opens
  *    one joins as viewer/editor — without an account as a **guest** (a temporary account, see
  *    `adoptGuest`); turning a link off can take out who came in through it (`revokeLink`);
- *  - or shares one **folder** of it on its own, with people or by a link (`addMember` / `createLink`
- *    with a folder; foldershares.ts): they reach that folder and nothing else of the project —
- *    `roleFor` does not know them, `roleAt` lets them in to what lies inside the folder;
+ *  - or shares one **folder** or **file** of it on its own, with people or by a link (`addFolderMember`,
+ *    `createLink` with a path; foldershares.ts): they reach that and nothing else of the project —
+ *    `roleFor` does not know them, `roleAt` lets them in to what lies inside the folder (the file);
  *  - or makes it **public** (`setPublic`): everybody may view it at its own address — without an
  *    account as a guest too — and clone it with git anonymously; editing still needs one of the
  *    above. Who opens it is noted as a hidden `via = 'public'` membership (`joinPublic`) so that it
@@ -108,10 +108,10 @@ export function roleFor(user: SessionUser, project: string, withPublic = true): 
 /** Anyone may view the project (and clone it without an account). */
 export function isPublic(project: string): boolean { return !!projectRow(project)?.public; }
 
-/** A folder of a project shared with someone on its own, with the strongest role a share of it gives them. */
+/** A folder (or a file) of a project shared with someone on its own, with the strongest role a share of it gives them. */
 export interface FolderShare { path: string; role: 'view' | 'edit'; via: string }
 
-/** The folders of a project shared with the user on their own (none in an end-to-end encrypted project: its files are ciphertext). */
+/** The folders and files of a project shared with the user on their own (none in an end-to-end encrypted project: its files are ciphertext). */
 export function foldersOf(user: SessionUser, project: string): FolderShare[] {
   if (!isProjectKey(project)) return [];
   const row = projectRow(project);
@@ -121,8 +121,8 @@ export function foldersOf(user: SessionUser, project: string): FolderShare[] {
 
 /**
  * The user's role at a path of a project (a file or a folder, project-relative): their role in the
- * project, or what a share of a folder holding the path gives them — the stronger of the two. A
- * folder share reaches nothing outside its folder: not with `..`, not through a link on disk.
+ * project, or what a share of a folder holding the path (or of the file) gives them — the stronger of
+ * the two. A share reaches nothing outside what it names: not with `..`, not through a link on disk.
  */
 export function roleAt(user: SessionUser, project: string, rel: string, withPublic = true): Role | null {
   const whole = roleFor(user, project, withPublic);
@@ -136,25 +136,27 @@ export function roleAt(user: SessionUser, project: string, rel: string, withPubl
   return best;
 }
 
-/** `rel` really lies in the shared folder `folder`, also once links on disk are followed (and the folder is no link itself). */
-function reachable(project: string, folder: string, rel: string): boolean {
-  try { return realFolder(project, folder) && staysInside(resolveProjectPath(project, folder), resolveProjectPath(project, rel)); } catch { return false; }
+/** `rel` really lies in the shared folder (or is the shared file) `shared`, also once links on disk are followed (and that is no link itself). */
+function reachable(project: string, shared: string, rel: string): boolean {
+  try { return !!sharedKind(project, shared) && staysInside(resolveProjectPath(project, shared), resolveProjectPath(project, rel)); } catch { return false; }
 }
 
-/** `folder` is a directory of the project where it says, no link (nor one on the way) leading elsewhere. */
-function realFolder(project: string, folder: string): boolean {
+/** What `p` is in the project — a directory or a regular file where it says, no link (nor one on the way) leading elsewhere — else null. */
+export function sharedKind(project: string, p: string): 'folder' | 'file' | null {
   try {
-    const abs = resolveProjectPath(project, folder);
-    return fs.statSync(abs).isDirectory() && fs.realpathSync.native(abs) === path.join(fs.realpathSync.native(resolveProjectPath(project, '.')), folder);
-  } catch { return false; }
+    const abs = resolveProjectPath(project, p);
+    if (fs.realpathSync.native(abs) !== path.join(fs.realpathSync.native(resolveProjectPath(project, '.')), p)) return null;
+    const st = fs.statSync(abs);
+    return st.isDirectory() ? 'folder' : st.isFile() ? 'file' : null;
+  } catch { return null; }
 }
 
-/** Only folders of the project are shared with the user, not the project: they see those and nothing else of it. */
+/** Only folders or files of the project are shared with the user, not the project: they see those and nothing else of it. */
 export function folderOnly(user: SessionUser, project: string): boolean {
   return !roleFor(user, project) && foldersOf(user, project).length > 0;
 }
 
-/** The user can reach something of the project: all of it, or a folder shared with them. */
+/** The user can reach something of the project: all of it, or a folder or file shared with them. */
 export function reachesProject(user: SessionUser, project: string): boolean {
   return !!roleFor(user, project) || foldersOf(user, project).some(f => withinScope(user, project, f.role));
 }
@@ -359,8 +361,10 @@ export interface ShareInfo {
   owner: { id: number; name: string; username: string } | null;
   /** `link`: the share link a member came in through (`via` 'link'; it may be off since) */
   members: { id: number; role: string; via: string; link: string | null; email: string | null; user: { id: number; name: string; username: string; color: string; avatar: string | null } | null }[];
-  /** people a folder of the project is shared with on their own (`path`), not the whole project */
+  /** people a folder or file of the project is shared with on their own (`path`), not the whole project */
   folderMembers: (ShareInfo['members'][number] & { path: string })[];
+  /** what each path shared on its own (people's and links') is now: a folder, a file, or gone (null) */
+  sharedKinds: Record<string, 'folder' | 'file' | null>;
   /** the project's share links, oldest first */
   links: ShareLink[];
   /** anyone may view it (setPublic); `visitors`: the accounts and guests that opened it so */
@@ -378,21 +382,23 @@ export function shareInfo(project: string): ShareInfo {
   const members = (db.prepare("SELECT * FROM project_members WHERE project = ? AND via != 'public' ORDER BY created_at").all(project) as MemberRow[]).map(person);
   const folderMembers = (db.prepare('SELECT * FROM folder_members WHERE project = ? ORDER BY path, created_at').all(project) as FolderMemberRow[]).map(m => ({ ...person(m), path: m.path }));
   const visitors = (db.prepare("SELECT COUNT(*) AS n FROM project_members WHERE project = ? AND via = 'public'").get(project) as { n: number }).n;
-  return { name: project, title: row?.title ?? null, owner: owner ?? null, members, folderMembers, links: linksOf(project), public: !!row?.public, visitors };
+  const links = linksOf(project);
+  const sharedKinds = Object.fromEntries([...new Set([...folderMembers.map(m => m.path), ...links.flatMap(l => (l.path ? [l.path] : []))])].map(p => [p, sharedKind(project, p)]));
+  return { name: project, title: row?.title ?? null, owner: owner ?? null, members, folderMembers, sharedKinds, links, public: !!row?.public, visitors };
 }
 
 /**
- * The folder `path` of the project as a folder share names it — one that exists — or an error saying
- * why it cannot be shared on its own.
+ * The folder or file `p` of the project as a share of it alone names it — one that exists — or an
+ * error saying why it cannot be shared on its own.
  */
-export function shareableFolder(project: string, folder: unknown): string {
+export function shareablePath(project: string, p: unknown): string {
   const row = projectRow(project);
   if (!row) throw new Error('project not found');
-  if (row.e2e) throw new Error('An end-to-end encrypted project is shared whole: the server cannot hand out one folder of it');
-  const p = sharePath(folder);
-  if (!p) throw new Error('not a folder of the project');
-  if (!realFolder(project, p)) throw new Error(`there is no folder ${p} in the project`);
-  return p;
+  if (row.e2e) throw new Error('An end-to-end encrypted project is shared whole: the server cannot hand out part of it');
+  const clean = sharePath(p);
+  if (!clean) throw new Error('not a folder or file of the project');
+  if (!sharedKind(project, clean)) throw new Error(`there is no folder or file ${clean} in the project`);
+  return clean;
 }
 
 /** Share with a person: `who` is a username or an e-mail address (one folder alone: addFolderMember). */
@@ -429,13 +435,13 @@ export function addMember(project: string, who: string, role: 'view' | 'edit', a
 }
 
 /**
- * Share one folder of the project with a person (`who`: a username or an e-mail address) — they
- * reach that folder and nothing else of the project. Somebody who has the project already, with
- * this role or more, needs none.
+ * Share one folder or file of the project with a person (`who`: a username or an e-mail address) —
+ * they reach that and nothing else of the project. Somebody who has the project already, with this
+ * role or more, needs none.
  */
 export function addFolderMember(project: string, folder: string, who: string, role: 'view' | 'edit', addedBy: SessionUser): FolderMemberRow {
   const row = projectRow(project);
-  const path = shareableFolder(project, folder);
+  const path = shareablePath(project, folder);
   const key = who.trim().toLowerCase();
   if (!key) throw new Error('enter a username or e-mail address');
   let user: UserRow | undefined;
@@ -513,11 +519,11 @@ export function linksOf(project: string): ShareLink[] {
   return rows.filter(r => isRole(r.role)).map(r => ({ token: r.token, role: r.role as 'view' | 'edit', createdAt: r.created_at, joined: r.joined, path: r.path ?? null }));
 }
 
-/** A new share link with `role`, for good — to the whole project, or (`folder`) to that folder of it alone. */
+/** A new share link with `role`, for good — to the whole project, or (`folder`) to that folder or file of it alone. */
 export function createLink(project: string, role: 'view' | 'edit', by: SessionUser | null, folder?: string | null): ShareLink {
   if (!projectRow(project)) throw new Error('project not found');
   if (!isRole(role)) throw new Error('role must be view or edit');
-  const path = folder == null || folder === '' ? null : shareableFolder(project, folder);
+  const path = folder == null || folder === '' ? null : shareablePath(project, folder);
   const token = crypto.randomBytes(18).toString('base64url');
   const createdAt = Date.now();
   db.prepare('INSERT INTO share_links (token, project, role, created_by, created_at, path) VALUES (?, ?, ?, ?, ?, ?)').run(token, project, role, by?.id ?? null, createdAt, path);
@@ -557,8 +563,8 @@ export function groupLanding(project: string, folder: string): string | null {
   } catch { return null; }
 }
 
-/** What a shared folder is called: its document group's title (core/docgroup.ts), else its name. */
-export function folderTitle(project: string, folder: string): string {
+/** What a shared folder or file is called: a folder's document group's title (core/docgroup.ts), else its name. */
+export function shareTitle(project: string, folder: string): string {
   try {
     const manifest = path.join(resolveProjectPath(project, folder), '.overlyx-group.json');
     const t = JSON.parse(fs.readFileSync(manifest, 'utf8'))?.title;
@@ -571,12 +577,12 @@ export function folderTitle(project: string, folder: string): string {
  * What a share link opens, before anybody joins: its project, title, owner's name and role — for the
  * page that asks a visitor without a session how to come in (with an account, or as a guest).
  */
-export function linkPreview(token: string): { project: string; title: string | null; owner: string | null; role: Role; folder: { path: string; title: string } | null } | undefined {
+export function linkPreview(token: string): { project: string; title: string | null; owner: string | null; role: Role; folder: { path: string; title: string; file: boolean } | null } | undefined {
   const link = shareLinkOf(token);
   if (!link) return undefined;
   const { project: row } = link;
   const owner = row.owner_id != null ? db.prepare('SELECT display_name AS name FROM users WHERE id = ?').get(row.owner_id) as { name: string } | undefined : undefined;
-  return { project: row.name, title: row.title, owner: owner?.name ?? null, role: link.role, folder: link.path ? { path: link.path, title: folderTitle(row.name, link.path) } : null };
+  return { project: row.name, title: row.title, owner: owner?.name ?? null, role: link.role, folder: link.path ? { path: link.path, title: shareTitle(row.name, link.path), file: sharedKind(row.name, link.path) === 'file' } : null };
 }
 
 /**

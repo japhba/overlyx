@@ -263,10 +263,13 @@ blend.
   top level by hand moves into the instance owner's namespace. *File ▸ Share project…*, the 👥
   button in the file browser, or the start screen. Anyone with a Google account may sign in (they only see their own and shared projects);
   set `OVERLYX_SIGNUP=invited` to allow only e-mails that were invited to a project.
-* **Folder shares** (`server/src/foldershares.ts`, 12 Nov 2026): one folder of a project shared on its
-  own — right-click it in the file browser ▸ *Share Folder…* (`app/Share.tsx FolderShareDialog`), or
-  `overlyx share <owner>/<project>/<folder> [--role view|edit] [--with USER|EMAIL]`, which prints the
-  link (a script, e.g. a meeting recorder's hook, sends it on). People added there are rows of
+* **Folder and file shares** (`server/src/foldershares.ts`, 12 Nov 2026): one folder — or one file — of
+  a project shared on its own — right-click it in the file browser ▸ *Share Folder…* / *Share File…*,
+  or the project's Share dialog ▸ *Or share only this file… · its folder…* (`app/Share.tsx
+  FolderShareDialog`), or `overlyx share <owner>/<project>/<folder or file> [--role view|edit] [--with
+  USER|EMAIL]`, which prints the link (a script, e.g. a meeting recorder's hook, sends it on). A file
+  shared alone is just that file: the pictures, bibliography and \input files beside it are not
+  shared (share the folder for those). People added there are rows of
   `folder_members`, links name the folder in `share_links.path`; whoever comes in that way reaches the
   folder and nothing else. Deny by default: they are never in `project_members`, so `roleFor` — and
   with it git, search, the zip, MCP, the agent, Google Docs/LessWrong, sharing, the activity log —
@@ -281,8 +284,10 @@ blend.
   project of its own (`confinedRoot`): the builds, typeset snippets and printed pages of its documents
   see only that folder (sandbox, TEXINPUTS, converted pictures, a sandbox home of its own), so its
   editors cannot `\input` the rest of the project into a PDF they can read — documents there can't
-  use files outside it. Not for end-to-end encrypted projects (shared whole). The project's Share
-  dialog lists them under *Shared folders*.
+  use files outside it; a file shared for editing alone is built from itself alone (no pictures or
+  child documents beside it, no latexmkrc). A build directory whose root changed starts empty
+  (`.overlyx-root`). Not for end-to-end encrypted projects (shared whole). The project's Share
+  dialog lists them under *Shared folders and files*.
 * **Public projects** (Share dialog ▸ *Public*, like a public repository on GitHub): anyone may
   view the project at its own address (`https://<server>/#/<owner>/<project>/<path>`, no token)
   and `git clone` / pull it without credentials; editing and pushing still need an account the

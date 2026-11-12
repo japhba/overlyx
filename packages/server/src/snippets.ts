@@ -55,7 +55,7 @@ async function compile(docDir: string, { root, home }: { root: string; home: str
     fs.rmSync(dir, { recursive: true, force: true });
     fs.mkdirSync(dir, { recursive: true });
     fs.mkdirSync(SNIPPETS, { recursive: true });
-    linkDocumentAssets(docDir, dir);
+    linkDocumentAssets(docDir, dir, root);
     fs.writeFileSync(path.join(dir, 'snippet.tex'), rewriteParentPaths(src, docDir, root), 'utf8');
     const engine = magicEngine(src) ?? (/\\usepackage(\[[^\]]*\])?\{fontspec\}/.test(src) ? '-pdfxe' : '-pdf');
     const r = await run('latexmk', [engine, '-pvc-', '-interaction=nonstopmode', '-halt-on-error', 'snippet.tex'], {
