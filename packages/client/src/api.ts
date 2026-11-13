@@ -69,7 +69,7 @@ export const pdfLinkUrl = (l: { token: string; fileName: string }) => `${locatio
 export interface PdfPublishInfo { doc: string; repo: string; path: string; branch: string | null; lastPushedAt: number | null; lastAttemptAt: number | null; lastError: string | null; htmlUrl: string }
 export interface PdfLinksInfo { docs: string[]; links: PdfLinkInfo[]; publish: PdfPublishInfo[]; publishAvailable: boolean }
 /** a share link: its role is its own for good (another role is another link); `joined`: the people who came in through it */
-export interface ShareLinkInfo { token: string; role: 'view' | 'edit'; createdAt: number; joined: number; /** the folder it shares alone; null: the whole project */ path?: string | null }
+export interface ShareLinkInfo { token: string; role: 'view' | 'edit'; createdAt: number; joined: number; /** the folder it shares alone; null: the whole project */ path?: string | null; /** the agent that made it over MCP */ agent?: string | null }
 /** someone one folder (`path`) of the project is shared with on their own */
 export type FolderMember = ShareMember & { path: string };
 export interface ShareInfo { name?: string; title?: string | null; owner: { id: number; name: string; username: string } | null; members: ShareMember[]; links: ShareLinkInfo[];

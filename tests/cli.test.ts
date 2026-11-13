@@ -322,9 +322,9 @@ describe("overlyx mcp: local agents through the CLI's bridge", () => {
     expect(text).toContain(`[mcp_servers.overlyx]`);
     expect(text).toContain(`command = ${JSON.stringify(CLI)}\nargs = ["mcp", "serve"]`);
     expect(readFileSync(toml + '.bak', 'utf8')).toContain('old.example');
-    // launched from any directory, Claude Code does not ask before each OverLyX tool; the rest of its settings stay
+    // launched from any directory, Claude Code does not ask before each OverLyX tool — but before each share link it makes; the rest of its settings stay
     expect(r.stdout).toContain("OverLyX's tools run without asking");
-    expect(JSON.parse(readFileSync(settings, 'utf8'))).toEqual({ model: 'opus', permissions: { allow: ['Bash(git status)', 'mcp__overlyx'], deny: ['WebFetch'] } });
+    expect(JSON.parse(readFileSync(settings, 'utf8'))).toEqual({ model: 'opus', permissions: { allow: ['Bash(git status)', 'mcp__overlyx'], ask: ['mcp__overlyx__create_share_link'], deny: ['WebFetch'] } });
     await execFileP(process.execPath, [CLI, 'mcp', 'install', '--yes'], { encoding: 'utf8', env: agentEnv() });
     expect(JSON.parse(readFileSync(settings, 'utf8')).permissions.allow).toEqual(['Bash(git status)', 'mcp__overlyx']);   // once
     const u = await execFileP(process.execPath, [CLI, 'mcp', 'uninstall'], { encoding: 'utf8', env: agentEnv() });

@@ -4982,6 +4982,15 @@ clientInfo, User-Agent). It exposes these tools:
   by the token's account, `<username>/<name>`. An agent can populate it with `create_document`, `write_document` and
   `write_file`; local files, including binaries and an existing Git history, are imported with the
   CLI instead. This tool is intentionally absent from a fixed `/mcp/<owner>/<project>` connection.
+* `create_share_link(project?, path?, role?)` (13 Nov 2026): a new share link for the project's
+  **owner** — with `path`, to that folder or file alone (folder and file shares, above) — answered
+  with its address, for an agent to send on (a meeting's notes after the meeting). Never offered to
+  the Agent panel's agent (it reads what collaborators wrote) nor to a narrowed credential; the link
+  names the agent in the Share dialog ("Made … by Claude (Opus 5.5) [Jan]") and in the activity log.
+  `overlyx mcp install` lets Claude Code run OverLyX's tools without asking except this one
+  (`permissions.ask: mcp__overlyx__create_share_link`, which wins over the allow rule): a link
+  cannot be taken back from whoever got it, and a document or a web page an agent reads might ask
+  it for one.
 * **Where people are: `get_presence(project?, path?)`** (`agentPresence.ts presenceIn`,
   `ycursor.ts describeCursor`). For each open document of the project (or one): the people in it —
   one entry per browser tab or editor, the account taken from the WebSocket connection, not from

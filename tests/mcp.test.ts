@@ -154,7 +154,7 @@ describe('tools/list', () => {
     const { status, body } = await rpc(t.token, 'tools/list');
     expect(status).toBe(200);
     const names = body.result.tools.map((x: any) => x.name).sort();
-    expect(names).toEqual(['add_comment', 'build_pdf', 'build_status', 'create_deliverable', 'create_document', 'delete_paragraph', 'edit_document', 'edit_file', 'fetch', 'get_presence', 'highlight', 'insert_paragraphs', 'list_comments',
+    expect(names).toEqual(['add_comment', 'build_pdf', 'build_status', 'create_deliverable', 'create_document', 'create_share_link', 'delete_paragraph', 'edit_document', 'edit_file', 'fetch', 'get_presence', 'highlight', 'insert_paragraphs', 'list_comments',
       'list_documents', 'list_files', 'list_projects', 'project_history', 'propose_edit', 'read_document', 'read_file', 'render_page', 'replace_paragraph', 'reply', 'resolve_comment', 'restore_project', 'search',
       'set_markdown_style', 'wait_for_instructions', 'write_document', 'write_file']);
   });
@@ -170,6 +170,29 @@ describe('tools/list', () => {
     expect(readFileSync(join(ROOT, 'projects', 'owner', 'MCP import', '.git', 'HEAD'), 'utf8')).toContain('refs/heads/main');
     const written = await callToolAt(allProjects, token, 'write_document', { project: 'owner/MCP import', path: 'main.tex', tex: doc('Created through MCP.') });
     expect(written.created).toBe(true);
+  });
+});
+
+describe('create_share_link', () => {
+  it('makes a link to a folder or file alone for the project\'s owner, named after the agent; nobody else may', async () => {
+    mkdirSync(join(ROOT, 'projects', 'owner', 'p', 'notes'), { recursive: true });
+    writeFileSync(file('notes/minutes.txt'), 'Minutes\n');
+    const t = createMcpToken(owner.id, 'link-agent').token;
+    const r = await callTool(t, 'create_share_link', { path: 'notes', model: 'Opus 5.5' });
+    expect(r).toMatchObject({ project: 'owner/p', path: 'notes', role: 'view' });
+    expect(r.url).toMatch(/#\/owner\/p\/notes\?share=[\w-]+$/);
+    const { linksOf, shareLinkOf } = await import('../packages/server/src/access.ts');
+    const link = linksOf('owner/p').find(l => r.url.endsWith(l.token))!;
+    expect(link).toMatchObject({ path: 'notes', role: 'view' });
+    expect(link.agent).toMatch(/link-agent|Opus 5\.5/);
+    expect(shareLinkOf(link.token)?.path).toBe('notes');
+    await expect(callTool(t, 'create_share_link', { path: 'nowhere' })).rejects.toThrow(/no folder or file/);
+    // an editor of the project is not its owner
+    const ed = createUser('eddie', 'Eddie', 'pw');
+    db.prepare('INSERT INTO project_members (project, user_id, role, via, created_at) VALUES (?,?,?,?,?)').run('owner/p', ed.id, 'edit', 'member', Date.now());
+    await expect(callTool(createMcpToken(ed.id, 'eddie-agent').token, 'create_share_link', { path: 'notes' })).rejects.toThrow(/Only the owner/);
+    db.prepare("DELETE FROM project_members WHERE user_id = ?").run(ed.id);
+    rmSync(join(ROOT, 'projects', 'owner', 'p', 'notes'), { recursive: true, force: true });
   });
 });
 

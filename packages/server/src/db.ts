@@ -188,6 +188,8 @@ try { db.exec('ALTER TABLE projects ADD COLUMN e2e INTEGER NOT NULL DEFAULT 0');
 // (`folder_members`, apart from `project_members` so that nothing asking about the whole project
 // sees them) or through a share link that names it (`share_links.path`; null: the whole project)
 try { db.exec('ALTER TABLE share_links ADD COLUMN path TEXT'); } catch { /* column exists */ }
+// 2026-11-13: the agent that made a share link over MCP (mcp.ts create_share_link), shown in the Share dialog
+try { db.exec('ALTER TABLE share_links ADD COLUMN agent TEXT'); } catch { /* column exists */ }
 db.exec(`CREATE TABLE IF NOT EXISTS folder_members (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   project TEXT NOT NULL,

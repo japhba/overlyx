@@ -10,7 +10,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execFileP = promisify(execFile);
-const VERSION = '0.8.3';
+const VERSION = '0.8.4';
 const DEFAULT_HOST = 'https://overlyx.app';
 
 const HELP = `OverLyX CLI ${VERSION}
@@ -1160,9 +1160,12 @@ async function claudeRegistered() {
  * only in the directory it was started in. Launched from anywhere, that is a prompt per tool per
  * folder: `mcp install` allows OverLyX's tools once, in Claude Code's user settings (the rule
  * `mcp__overlyx`, merged into permissions.allow; `--ask-each-time` leaves it out). Their edits are
- * tracked changes and every state stays in the project's history.
+ * tracked changes and every state stays in the project's history. A share link is not taken back
+ * that way — whoever has it is in — so Claude Code still asks before each `create_share_link`
+ * (permissions.ask, which wins over allow).
  */
 const CLAUDE_ALLOW = `mcp__${MCP_NAME}`;
+const CLAUDE_ASK = [`mcp__${MCP_NAME}__create_share_link`];
 const claudeSettingsFile = () => path.join(process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), '.claude'), 'settings.json');
 function readClaudeSettings() {
   const file = claudeSettingsFile();
@@ -1175,13 +1178,22 @@ function readClaudeSettings() {
 function claudeToolsAllowed() {
   try { const a = readClaudeSettings().permissions?.allow; return Array.isArray(a) && a.includes(CLAUDE_ALLOW); } catch { return false; }
 }
-/** Add (or take out) the rule; everything else in the file stays as it is. Returns whether the file changed. */
+function claudeAsksForLinks() {
+  try { const a = readClaudeSettings().permissions?.ask; return Array.isArray(a) && CLAUDE_ASK.every(r => a.includes(r)); } catch { return false; }
+}
+/** Add (or take out) the rules; everything else in the file stays as it is. Returns whether the file changed. */
 function allowClaudeTools(on) {
   const settings = readClaudeSettings();
   const perms = settings.permissions && typeof settings.permissions === 'object' && !Array.isArray(settings.permissions) ? settings.permissions : {};
   const allow = Array.isArray(perms.allow) ? perms.allow : [];
-  if (allow.includes(CLAUDE_ALLOW) === on) return false;
-  settings.permissions = { ...perms, allow: on ? [...allow, CLAUDE_ALLOW] : allow.filter(r => r !== CLAUDE_ALLOW) };
+  const askList = Array.isArray(perms.ask) ? perms.ask : [];
+  if (allow.includes(CLAUDE_ALLOW) === on && CLAUDE_ASK.every(r => askList.includes(r) === on)) return false;
+  settings.permissions = {
+    ...perms,
+    allow: on ? [...allow.filter(r => r !== CLAUDE_ALLOW), CLAUDE_ALLOW] : allow.filter(r => r !== CLAUDE_ALLOW),
+    ask: on ? [...askList.filter(r => !CLAUDE_ASK.includes(r)), ...CLAUDE_ASK] : askList.filter(r => !CLAUDE_ASK.includes(r)),
+  };
+  if (!settings.permissions.ask.length) delete settings.permissions.ask;
   const file = claudeSettingsFile();
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.overlyx-${process.pid}`;
@@ -1244,7 +1256,7 @@ async function mcpInstall(flags) {
       await registerClaude(args);
       process.stdout.write('Claude Code: registered "overlyx" (all directories)\n');
       if (quiet) {
-        try { allowClaudeTools(true); process.stdout.write(`Claude Code: OverLyX's tools run without asking, in every directory (${CLAUDE_ALLOW} in ${claudeSettingsFile()})\n`); }
+        try { allowClaudeTools(true); process.stdout.write(`Claude Code: OverLyX's tools run without asking, in every directory (${CLAUDE_ALLOW} in ${claudeSettingsFile()}) — except making share links, which it asks about each time\n`); }
         catch (e) { process.stdout.write(`Claude Code: it will ask before each OverLyX tool — ${e.message}\n`); }
       }
     } catch (e) { process.stdout.write(`Claude Code: not registered — ${String(e.stderr || e.message).trim()}\n`); }
@@ -1268,7 +1280,7 @@ async function mcpUninstall() {
 /** Registrations, and a real round trip through the server: initialize + tools/list. */
 async function mcpStatus(flags) {
   const claude = await has('claude') ? await claudeRegistered() : undefined;
-  process.stdout.write(`Claude Code: ${claude === undefined ? 'not installed' : claude === 'bridge' ? `registered${claudeToolsAllowed() ? ', its tools run without asking' : ', asks before each tool (overlyx mcp install allows them)'}` : claude === 'other' ? 'registered another way (overlyx mcp install replaces it)' : 'not registered'}\n`);
+  process.stdout.write(`Claude Code: ${claude === undefined ? 'not installed' : claude === 'bridge' ? `registered${claudeToolsAllowed() ? `, its tools run without asking${claudeAsksForLinks() ? ' (making share links: it asks)' : ' — making share links too (overlyx mcp install makes it ask before those)'}` : ', asks before each tool (overlyx mcp install allows them)'}` : claude === 'other' ? 'registered another way (overlyx mcp install replaces it)' : 'not registered'}\n`);
   process.stdout.write(`Codex: ${codexRegistered() ? `registered (${codexConfig()})` : 'not registered'}\n`);
   const creds = credentials(flags, false);
   if (!creds.token) { process.stdout.write(`Server: not logged in to ${creds.host}\n`); return; }

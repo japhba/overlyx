@@ -508,26 +508,31 @@ export interface ShareLink {
   joined: number;
   /** the folder it shares on its own (foldershares.ts); null: the whole project */
   path: string | null;
+  /** the agent that made it over MCP ("Claude (Opus 5.5) [Jan]"), null: its owner in OverLyX or the CLI */
+  agent: string | null;
 }
 
 /** The project's share links, oldest first. */
 export function linksOf(project: string): ShareLink[] {
-  const rows = db.prepare(`SELECT l.token, l.role, l.created_at, l.path,
+  const rows = db.prepare(`SELECT l.token, l.role, l.created_at, l.path, l.agent,
       (SELECT COUNT(*) FROM project_members m WHERE m.project = l.project AND m.via = 'link' AND m.link_token = l.token)
       + (SELECT COUNT(*) FROM folder_members f WHERE f.project = l.project AND f.via = 'link' AND f.link_token = l.token) AS joined
-    FROM share_links l WHERE l.project = ? ORDER BY l.created_at, l.rowid`).all(project) as { token: string; role: string; created_at: number; path: string | null; joined: number }[];
-  return rows.filter(r => isRole(r.role)).map(r => ({ token: r.token, role: r.role as 'view' | 'edit', createdAt: r.created_at, joined: r.joined, path: r.path ?? null }));
+    FROM share_links l WHERE l.project = ? ORDER BY l.created_at, l.rowid`).all(project) as { token: string; role: string; created_at: number; path: string | null; agent: string | null; joined: number }[];
+  return rows.filter(r => isRole(r.role)).map(r => ({ token: r.token, role: r.role as 'view' | 'edit', createdAt: r.created_at, joined: r.joined, path: r.path ?? null, agent: r.agent ?? null }));
 }
 
-/** A new share link with `role`, for good — to the whole project, or (`folder`) to that folder or file of it alone. */
-export function createLink(project: string, role: 'view' | 'edit', by: SessionUser | null, folder?: string | null): ShareLink {
+/**
+ * A new share link with `role`, for good — to the whole project, or (`folder`) to that folder or file
+ * of it alone; `agent`: the agent that made it on its owner's behalf (MCP), named in the Share dialog.
+ */
+export function createLink(project: string, role: 'view' | 'edit', by: SessionUser | null, folder?: string | null, agent: string | null = null): ShareLink {
   if (!projectRow(project)) throw new Error('project not found');
   if (!isRole(role)) throw new Error('role must be view or edit');
   const path = folder == null || folder === '' ? null : shareablePath(project, folder);
   const token = crypto.randomBytes(18).toString('base64url');
   const createdAt = Date.now();
-  db.prepare('INSERT INTO share_links (token, project, role, created_by, created_at, path) VALUES (?, ?, ?, ?, ?, ?)').run(token, project, role, by?.id ?? null, createdAt, path);
-  return { token, role, createdAt, joined: 0, path };
+  db.prepare('INSERT INTO share_links (token, project, role, created_by, created_at, path, agent) VALUES (?, ?, ?, ?, ?, ?, ?)').run(token, project, role, by?.id ?? null, createdAt, path, agent);
+  return { token, role, createdAt, joined: 0, path, agent };
 }
 
 /**

@@ -231,7 +231,7 @@ export function ShareDialog({ project, user, doc, view, onClose, onChanged }: { 
                   <button class="mini" title="Turn this link off" disabled={busy} data-link-off onClick={() => void revoke(l)}>✕</button>
                 </div>
                 <div class="hint small" data-link-created={l.createdAt}>
-                  Made {madeAt(l.createdAt)} · {l.joined ? `${l.joined} ${l.joined === 1 ? 'person' : 'people'} came in through it` : 'nobody has come in through it yet'}
+                  Made {madeAt(l.createdAt)}{l.agent ? <> by <b data-link-agent>{l.agent}</b></> : ''} · {l.joined ? `${l.joined} ${l.joined === 1 ? 'person' : 'people'} came in through it` : 'nobody has come in through it yet'}
                 </div>
               </div>
             ))}
@@ -488,7 +488,7 @@ export function FolderShareDialog({ project, folder, file = false, name, user, o
                   <button class="mini" title="Turn this link off" disabled={busy} data-link-off onClick={() => void revoke(l)}>✕</button>
                 </div>
                 <div class="hint small" data-link-created={l.createdAt}>
-                  Made {madeAt(l.createdAt)} · {l.joined ? `${l.joined} ${l.joined === 1 ? 'person' : 'people'} came in through it` : 'nobody has come in through it yet'}
+                  Made {madeAt(l.createdAt)}{l.agent ? <> by <b data-link-agent>{l.agent}</b></> : ''} · {l.joined ? `${l.joined} ${l.joined === 1 ? 'person' : 'people'} came in through it` : 'nobody has come in through it yet'}
                 </div>
               </div>
             ))}
