@@ -112,6 +112,7 @@ export function PenSettings({ nib, color, width, habits, onChange, onHabits, onC
           <input type="checkbox" checked={habits.fingersDraw} data-pen-fingers onChange={e => onHabits({ fingersDraw: (e.target as HTMLInputElement).checked })} /> Fingers draw too
         </label>
       )}
+      {habits.pencil && !habits.fingersDraw && <div class="pen-set-note" data-pen-finger-lasso>One finger resting on the screen while the pen draws: a lasso, which selects. Lift the finger and the pen draws again.</div>}
       <div class="ink-pick-foot">
         {/* (the usual pressure is the hand's, measured: kept) */}
         <button type="button" class="pen-set-reset" data-pen-reset disabled={off({ ...DEFAULT_NIB, ...NO_LAB, usual: nib.usual })} onMouseDown={e => e.preventDefault()} onClick={() => onChange({ ...DEFAULT_NIB, ...NO_LAB, usual: nib.usual })}>Reset</button>

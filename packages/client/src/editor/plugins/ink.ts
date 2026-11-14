@@ -66,6 +66,7 @@ export { INK_PALETTES, HIGHLIGHT_OPACITY } from '@overlyx/core/inkpresets.ts';
 import { INK_PALETTES, HIGHLIGHT_OPACITY } from '@overlyx/core/inkpresets.ts';
 import { loadDeckInk, saveDeckInk, patchDeckInk, subscribeDeckInk, type DeckInk } from '../../deliverable/deckink';
 import { scratchOut, SCRATCH_HOLD_MS, SCRATCH_HOLD_PX } from '@overlyx/core/scratchout.ts';
+import { FingerHold } from '@overlyx/core/fingerlasso.ts';
 import { snapShape, SNAP_HOLD_MS, SNAP_LEAVE_PX } from '@overlyx/core/shapesnap.ts';
 import { eraseAlong } from '@overlyx/core/inkerase.ts';
 import { freshPoint, type InkCache } from '@overlyx/core/freehand.ts';
@@ -382,6 +383,8 @@ class InkLayer {
   private scratch: { cands: { item: SelItem; pts: [number, number][] }[] | null; hits: Set<string>; rest: { x: number; y: number; t: number; timer: ReturnType<typeof setTimeout> | null }; judged: number } | null = null;
   private remoteLasers = new Map<number, RemoteLaser>();
   private lasso: [number, number][] | null = null;
+  /** the fingers on the margins: one resting makes the pen's stroke a lasso (core/fingerlasso.ts) */
+  private fingers = new FingerHold();
   private selection: SelItem[] | null = null;
   private xform: Xform | null = null;
   private dragSel: { mode: 'move' | 'resize' | 'rotate'; corner: string; startX: number; startY: number; base: Rect; pointerId: number } | null = null;
@@ -437,6 +440,17 @@ class InkLayer {
     this.canvas.addEventListener('pointerdown', this.onDown);
     // a pen touching a margin draws, Draw on or not (Apple's HIG: a mark the moment the Pencil touches)
     this.scroller.addEventListener('pointerdown', this.onPenInMargin, true);
+    // the fingers on the page, for one resting while the pen draws a lasso (core/fingerlasso.ts)
+    const onFinger = (e: PointerEvent) => {
+      if (e.pointerType !== 'touch') return;
+      if (e.type === 'pointerdown') this.fingers.down(e.pointerId, e.screenX, e.screenY, performance.now());
+      else if (e.type === 'pointermove') this.fingers.move(e.pointerId, e.screenX, e.screenY);
+      else this.fingers.up(e.pointerId);
+    };
+    for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel'] as const) {
+      this.scroller.addEventListener(type, onFinger, true);
+      this.unsub.push(() => this.scroller?.removeEventListener(type, onFinger, true));
+    }
     // while the pen draws, Safari must neither scroll with it (the canvas lets fingers pan) nor take it for Scribble
     const onTouch = (e: TouchEvent) => {
       if (this.pointerId !== null && Array.from(e.changedTouches).some(t => (t as Touch & { touchType?: string }).touchType === 'stylus')) e.preventDefault();
@@ -984,7 +998,9 @@ class InkLayer {
     this.pasteAt = null;
     inking();
     const side: 'left' | 'right' = cx < (g.edgeL + g.edgeR) / 2 ? 'left' : 'right';
-    if (ui.tool === 'lasso' && !this.penDraw) {
+    // a finger of the other hand resting on the page: the pen draws a lasso, not ink, until it lifts
+    const fingerLasso = e.pointerType === 'pen' && !(e.buttons & 32) && ui.tool !== 'laser' && !ui.drawing.fingersDraw && this.fingers.penLands(performance.now());
+    if ((ui.tool === 'lasso' && !this.penDraw) || fingerLasso) {
       this.lasso = [[cx, cy]];
       this.pointerId = e.pointerId;
       this.canvas.setPointerCapture(e.pointerId);

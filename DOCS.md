@@ -3507,7 +3507,14 @@ laser. Whiteboards' Draw row also has the layout editor's **Lines** (line, arrow
 colour and width (Shift: 45° steps / as wide as high). They are ink strokes with `poly: true`
 (`core/ink.ts` `shapePoints`, `strokeRuns`): `pts` is the exact outline, drawn without smoothing, so
 the eraser, lasso, scribble-erase and live collaboration handle them like any stroke (documents still
-render such strokes). Every Draw row picks its colours from the layout editor's palette (`ColorGrid`:
+render such strokes). **One finger held + the pen = the lasso** (14 Nov 2026, `core/fingerlasso.ts`; slides' runtime,
+`editor/plugins/ink.ts`, `BoardEditor.tsx`): while one finger of the other hand rests on the slide,
+board or page — down at least 120 ms before the pen and still (12 px) — the pen draws a lasso instead
+of ink or erasing, stroke after stroke (a press inside the selection moves it); lifting the finger
+gives the pen back. Two fingers are a pinch or undo as before, a finger that comes down with or after
+the pen is the hand's (palm rejection unchanged), a moving finger pans, and the finger that held is no
+tap (the bars stay). Not where fingers draw. Help ▸ Keyboard shortcuts on slides and the pen's settings
+say so. Tried only with synthetic pointer events, not on an iPad. Every Draw row picks its colours from the layout editor's palette (`ColorGrid`:
 Google's grid, a seaborn row, custom colours). In Modern, *Draw* sits beside the inserts (it was under
 ⋮), and the paper page stays centred between the drawing gutters (it used to scroll out of view).
 On a touch screen the slides' Draw row is a **palette on the canvas** (`deliverable/drawpalette.tsx`,

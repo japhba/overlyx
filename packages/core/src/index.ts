@@ -19,6 +19,7 @@ export * from './newdoc.ts';
 export * from './layout/check.ts';
 export * from './macros.ts';
 export * from './linktext.ts';
+export * from './fingerlasso.ts';
 export * from './bib.ts';
 export * from './comments.ts';
 export * from './math/index.ts';

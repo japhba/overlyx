@@ -29,7 +29,7 @@ function runTouchUp(kind: string, ids = [10, 11]) {
   const context = createContext({
     drag: null,
     palms: new Set<number>(), touches: new Map(ids.map(id => [id, { x: id, y: id, sx: id, sy: id }])),
-    pinch: { active: true }, pinch0: { active: true }, tri: { t0: 1, x0: 0, y0: 0, x: 1, y: 1 }, penOn: null,
+    pinch: { active: true }, pinch0: { active: true }, tri: { t0: 1, x0: 0, y0: 0, x: 1, y: 1 }, penOn: null, lassoFinger: null,
     penOffAt: -1e9, performance: { now: () => 50 }, isSolo: () => true,
     post: (m: unknown) => messages.push(m), endTri: () => { messages.push({ ol: 'history', redo: false }); },
   });
@@ -65,7 +65,7 @@ describe('canvas gesture reliability telemetry', () => {
 
   it('reports a palm once per contact, and never includes a pointer id or content', () => {
     const messages: unknown[] = [];
-    const context = createContext({ post: (m: unknown) => messages.push(m), palms: new Set<number>() });
+    const context = createContext({ post: (m: unknown) => messages.push(m), palms: new Set<number>(), lassoFinger: null });
     runInContext(actualFunctions('postGestureReliability', 'ignorePalmContact'), context);
     context.ignorePalmContact(31); context.ignorePalmContact(31); context.ignorePalmContact(32);
     const events = reliability(messages);
@@ -124,7 +124,7 @@ describe('canvas gesture reliability telemetry', () => {
     const messages: unknown[] = [];
     const context = createContext({
       palms: new Set<number>(), touches: new Map([[41, { x: 1, y: 1, sx: 1, sy: 1 }]]),
-      pinch: null, pinch0: null, tri: null, penOn: null, penOffAt: -1e9,
+      pinch: null, pinch0: null, tri: null, penOn: null, lassoFinger: null, penOffAt: -1e9,
       drag: { kind: 'pen', pointerId: 41, pointerType: 'touch', moved: true, els: [] },
       endingInterruptedDrag: false, guides: [], drawBox: null, state: { version: 1 },
       performance: { now: () => 50 }, isSolo: () => true,

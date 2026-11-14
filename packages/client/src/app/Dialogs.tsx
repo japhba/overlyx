@@ -812,6 +812,7 @@ export const HELP_ROWS: [string, string][] = [
 export const DECK_HELP_ROWS: [string, string][] = [
   ['V, T, R, O, L, A, B', 'Tools: select, text box (click: a label, drag: wrapping text), rectangle, ellipse, line, arrow, Bézier path'],
   ['P, E, S', 'Draw: pen, eraser, lasso (stroke after stroke until Esc)'],
+  ['One finger held, the pen draws', 'Touch screens: a lasso instead of ink while a finger rests on the screen; lift the finger and the pen draws again'],
   ['N', 'Edit the points of the selected shape (a double click on a path does too)'],
   ['Double-click, Enter, or just type', 'Type in the selected text box or shape; Esc ends typing'],
   ['Esc', 'Back to the Select tool; out of a group, a level up; nothing selected'],

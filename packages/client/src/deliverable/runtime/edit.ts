@@ -66,6 +66,7 @@ import { replaceEditingHost, editingTextStyle, carryEditingTextStyle } from './e
 import { textBoundary, textListItem } from './textnavigation';
 import { setInlineStep } from './inlinesteps';
 import { linkSelection } from './linkwords';
+import { fingerHoldsLasso } from '@overlyx/core/fingerlasso.ts';
 import { PH, PH_CSS, phRole, isEmptyPh, isPicturePh, primeList } from './placeholders';
 import { TEXT_ANCHOR, WRAP_LINES, anchorFraction, textBoxStyle, type TextAnchor } from '../textboxes';
 import { textLineCount, wrapWarning, contentRect } from './layout';
@@ -1664,7 +1665,7 @@ function onPointerDown(e: PointerEvent): void {
     const now = performance.now();
     // three fingers come down together; one coming down well after two others is the hand
     if (touches.size === 2 && !tri && fingersPan() && now - Math.min(...[...touches.values()].map(t => t.t0 ?? now)) > 250) { ignorePalmContact(e.pointerId); e.preventDefault(); e.stopPropagation(); return; }
-    touches.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.screenX, sy: e.screenY, t0: now });
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.screenX, sy: e.screenY, t0: now, x0: e.screenX, y0: e.screenY });
     if (touches.size >= 3 || tri) { e.preventDefault(); e.stopPropagation(); if (!tri) startTri(); return; }
     if (touches.size >= 2) { e.preventDefault(); e.stopPropagation(); startPinch(); return; }
   }
@@ -1713,13 +1714,15 @@ function onPointerDown(e: PointerEvent): void {
     penTook = true;
     post({ ol: 'penInks' });
   }
+  // a finger of the other hand resting on the screen: the Pencil draws a lasso, not ink (core/fingerlasso.ts)
+  const fingerLasso = lassoFinger !== null && e.pointerType === 'pen' && (tool === 'pen' || tool === 'eraser');
   // drawing with a Pencil: fingers move the slide, they do not draw (GoodNotes)
   if ((tool === 'pen' || tool === 'eraser') && e.pointerType === 'touch' && fingersPan()) {
     drag = { ...base, kind: 'pan', slide: slideOf(t) };
     capture();
     return;
   }
-  if (tool === 'pen') {
+  if (tool === 'pen' && !fingerLasso) {
     // (on the canvas beside the slide: the slide's, drawn beside it)
     const slide = slideOf(t) ?? besideSlide();
     drag = { ...base, kind: 'pen', slide, pts: [[x, y]] };
@@ -1727,14 +1730,14 @@ function onPointerDown(e: PointerEvent): void {
     capture();
     return;
   }
-  if (tool === 'eraser') {
+  if (tool === 'eraser' && !fingerLasso) {
     drag = { ...base, kind: 'erase', slide: slideOf(t), erased: [] };
     eraseAt(e, drag);
     capture();
     return;
   }
   // the lasso (Draw): a loop round things selects them; a press inside what it took moves that (GoodNotes)
-  if (tool === 'lasso') {
+  if (tool === 'lasso' || fingerLasso) {
     if (e.pointerType === 'touch' && fingersPan()) {
       drag = { ...base, kind: 'pan', slide: slideOf(t) };
       capture();
@@ -2461,7 +2464,7 @@ function lineOp(svg: HTMLElement): HtmlOp | null {
 
 /* ------------------------------------------------------------------ touch: panning and pinching */
 
-const touches = new Map<number, { x: number; y: number; sx: number; sy: number; t0?: number }>();
+const touches = new Map<number, { x: number; y: number; sx: number; sy: number; t0?: number; x0?: number; y0?: number }>();
 let pinch: { d: number; mx: number; my: number; smx: number; smy: number } | null = null;
 /** a web page's pinch: where it began, how far it has zoomed, pan or zoom (gestures.ts) */
 let pinch0: { d: number; smx: number; smy: number; f: number; lock: PinchLock } | null = null;
@@ -2536,6 +2539,7 @@ function onTouchUp(e: PointerEvent): void {
   if (e.pointerType === 'pen' && e.pointerId === penOn) { penOn = null; penOffAt = performance.now(); post({ ol: 'penDown', down: false }); }
   if (e.pointerType !== 'touch') return;
   palms.delete(e.pointerId);
+  if (e.pointerId === lassoFinger) lassoFinger = null;   // the finger lifted: the pen inks again
   // Implicit capture loss after a normal lift is not a new interruption.
   if (!touches.has(e.pointerId)) return;
   if (e.type !== 'pointerup') {
@@ -2646,11 +2650,19 @@ function isPalm(e: PointerEvent): boolean {
   return true;
 }
 
+/** the finger resting on the screen that makes the Pencil's strokes lassos, until it lifts (core/fingerlasso.ts) */
+let lassoFinger: number | null = null;
+
 function penLands(e: PointerEvent): void {
   if (!penSeen) { penSeen = true; post({ ol: 'pencil' }); }
   penOn = e.pointerId;
   post({ ol: 'penDown', down: true });
   if (!touches.size) return;
+  // one finger resting since before the pen came down — not the palm (broad, or with the pen), not two (a pinch)
+  if (lassoFinger === null && touches.size === 1 && fingersPan() && (tool === 'pen' || tool === 'eraser') && !tri && !pinch) {
+    const [id, c] = [...touches.entries()][0];
+    if (fingerHoldsLasso([{ x0: c.x0 ?? c.sx, y0: c.y0 ?? c.sy, x: c.sx, y: c.sy, t0: c.t0 ?? 0 }], performance.now())) lassoFinger = id;
+  }
   if (drag?.pointerType !== 'touch') postGestureReliability('gesture.interrupted', 'touch');
   for (const id of touches.keys()) ignorePalmContact(id);
   touches.clear();

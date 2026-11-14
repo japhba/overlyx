@@ -33,6 +33,7 @@ import { LassoBar, pasteGroups } from '../deliverable/InkSelectionBar';
 import { lassoTakes, usedColors, makeInkClip, holdInk, heldInk, pastedInk, rotatePts, rotationAngle, thickened, type InkClip } from '../deliverable/inkselect';
 import { snapShape, SNAP_HOLD_MS, SNAP_LEAVE_PX } from '@overlyx/core/shapesnap.ts';
 import { eraseAlong } from '@overlyx/core/inkerase.ts';
+import { FingerHold } from '@overlyx/core/fingerlasso.ts';
 import { freshPoint, type NibOpts, type InkCache } from '@overlyx/core/freehand.ts';
 import { pointPressure, pressed, watchForce } from '../deliverable/runtime/pressure';
 import { scratchOut, scribbleCusps, SCRATCH_HOLD_MS, SCRATCH_HOLD_PX } from '@overlyx/core/scratchout.ts';
@@ -291,6 +292,8 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
   }
   const dragRef = useRef<Drag | null>(null);
   const pointers = useRef(new Map<number, [number, number]>());
+  /** the fingers on the board: one resting makes the pen's stroke a lasso, not a pinch (core/fingerlasso.ts) */
+  const fingers = useRef(new FingerHold());
   const pinch = useRef<{ dist: number; s: number } | null>(null);
   const awarenessSend = useRef(0);
 
@@ -418,6 +421,15 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     if (e.pointerType === 'pen' && !loadDeckInk().pencil) saveDeckInk(patchDeckInk(loadDeckInk(), { pencil: true }));
     const finger = e.pointerType === 'touch' && fingerDrawRef.current;
     vp.focus({ preventScroll: true });
+    if (e.pointerType === 'touch' && !finger) fingers.current.down(e.pointerId, e.screenX, e.screenY, performance.now());
+    // a finger of the other hand resting on the board + the pen: this stroke draws a lasso, and the finger
+    // neither pinches with the pen nor pans; lifted, the pen inks again
+    const fingerLasso = e.pointerType === 'pen' && !(e.buttons & 32) && !readOnlyRef.current && toolRef.current !== 'laser' && toolRef.current !== 'note' && fingers.current.penLands(performance.now());
+    if (fingerLasso) {
+      for (const id of [...pointers.current.keys()]) if (fingers.current.isHolding(id)) pointers.current.delete(id);
+      pinch.current = null;
+      dragRef.current = null;
+    }
     pointers.current.set(e.pointerId, [e.clientX, e.clientY]);
     setPasteAt(null);
     if (pointers.current.size === 2) {   // pinch zoom takes over
@@ -438,7 +450,7 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     const penTakes = e.pointerType === 'pen' && toolRef.current === 'select' && loadDeckInk().penInks && !readOnlyRef.current && !corner && !target.closest?.('.board-selbox');
     // its eraser end erases while it is turned round
     const eraserEnd = e.pointerType === 'pen' && (e.buttons & 32) !== 0;
-    const t = eraserEnd ? 'eraser' : penTakes ? boardPen() : toolRef.current;
+    const t = eraserEnd ? 'eraser' : fingerLasso ? 'lasso' : penTakes ? boardPen() : toolRef.current;
     const drawTool = (t === 'pen' || t === 'highlighter') && (e.pointerType !== 'touch' || finger) && !readOnlyRef.current;
     const origsOf = (ids: ReadonlySet<string>) => { const m = new Map<string, BoardObj>(); for (const id of ids) { const o = objects.get(id); if (o) m.set(id, { ...o, pts: o.pts?.map(p => [...p] as [number, number, number]) }); } return m; };
     const onSelBox = !!target.closest?.('.board-selbox');
@@ -511,6 +523,8 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
   };
 
   const onPointerMove = (e: PointerEvent) => {
+    if (e.pointerType === 'touch') fingers.current.move(e.pointerId, e.screenX, e.screenY);
+    if (fingers.current.isHolding(e.pointerId)) return;   // the finger holding for the pen's lasso
     if (pointers.current.has(e.pointerId)) pointers.current.set(e.pointerId, [e.clientX, e.clientY]);
     if (pinch.current && pointers.current.size === 2) {
       const [a, b] = [...pointers.current.values()];
@@ -633,6 +647,8 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
   };
 
   const onPointerUp = (e: PointerEvent) => {
+    if (fingers.current.isHolding(e.pointerId)) { fingers.current.up(e.pointerId); return; }   // lifted: the pen inks again
+    if (e.pointerType === 'touch') fingers.current.up(e.pointerId);
     pointers.current.delete(e.pointerId);
     if (pointers.current.size < 2) pinch.current = null;
     if (dragRef.current?.kind === 'laser' && laser.held) {
