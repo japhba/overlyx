@@ -295,32 +295,49 @@ export class OpenDoc implements DocState, EditableDoc {
   persistState(): void {
     const state = Y.encodeStateAsUpdate(this.ydoc);
     this.persistedSeq = this.updateSeq;
-    this.writeState(state);
+    this.writeState(state, !this.dirty);
   }
 
   /** Persist a state made elsewhere (a worker built it): it must be the document's current one. */
   persistStateBytes(state: Uint8Array): void {
     this.persistedSeq = this.updateSeq;
-    this.writeState(state);
+    this.writeState(state, !this.dirty);
   }
 
-  private writeState(state: Uint8Array): void {
-    db.prepare('INSERT INTO ydocs (id, state, file_hash, updated_at, epoch) VALUES (?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state, file_hash=excluded.file_hash, updated_at=excluded.updated_at, epoch=excluded.epoch')
-      .run(this.id, Buffer.from(state.buffer, state.byteOffset, state.byteLength), this.fileHash, Date.now(), this.epoch);
+  /** the hash of the file text last stored as `ydocs_saved.base` by this process (null: none) */
+  private storedBase: string | null = null;
+
+  /**
+   * Store the state, and with it (one transaction) whether the file holds it (`saved`: nothing
+   * changed since the last save or load). An unsaved state of a text document is stored with the
+   * file text it was based on, once per file version: the next open keeps such a state and merges a
+   * file changed meanwhile three-way against that text (DocManager.openCold).
+   */
+  private writeState(state: Uint8Array, saved: boolean): void {
+    const keepBase = !saved && this.fileText !== null && !(this instanceof HtmlDoc) && !(this instanceof BoardDoc);
+    const newBase = keepBase && this.storedBase !== this.fileHash;
+    db.transaction(() => {
+      db.prepare('INSERT INTO ydocs (id, state, file_hash, updated_at, epoch) VALUES (?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state, file_hash=excluded.file_hash, updated_at=excluded.updated_at, epoch=excluded.epoch')
+        .run(this.id, Buffer.from(state.buffer, state.byteOffset, state.byteLength), this.fileHash, Date.now(), this.epoch);
+      if (keepBase && !newBase) db.prepare('INSERT INTO ydocs_saved (id, file_hash, saved) VALUES (?,?,0) ON CONFLICT(id) DO UPDATE SET file_hash=excluded.file_hash, saved=0').run(this.id, this.fileHash);
+      else db.prepare('INSERT INTO ydocs_saved (id, file_hash, saved, base_hash, base) VALUES (?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET file_hash=excluded.file_hash, saved=excluded.saved, base_hash=excluded.base_hash, base=excluded.base')
+        .run(this.id, this.fileHash, saved ? 1 : 0, newBase ? this.fileHash : null, newBase ? this.fileText : null);
+    })();
+    this.storedBase = keepBase ? this.fileHash : null;
   }
 
   /** persistState with the state encoded by the document worker (a big document's takes a while) */
   async persistStateAsync(): Promise<void> {
     if (this.disposed) return;
     if (!this.usesWorker) { this.persistState(); return; }
-    const seq = this.updateSeq;
+    const seq = this.updateSeq, saved = !this.dirty;
     let state: Uint8Array;
     try { state = await inWorker(this, 'state', {}) as Uint8Array; }
     catch (e) { console.error('persist failed in the worker, persisting here', this.id, e); if (!this.disposed) this.persistState(); return; }
     // a newer state may have been persisted meanwhile (persistState): never go back to an older one
     if (this.disposed || seq < this.persistedSeq) return;
     this.persistedSeq = seq;
-    this.writeState(state);
+    this.writeState(state, saved);
   }
 
   /** last save error (cleared by a successful save); a retry is scheduled */
@@ -1038,6 +1055,12 @@ export class DocManager {
     if (row && article && !storedAsDocument(row.state)) row = undefined;
     if (!row) return this.openFresh(doc, text);
     row = this.convertStored(id, row);
+    // edits stored but not written to the file (a hard stop, a save that kept failing): kept, not
+    // reverted by loading the file over them; a file changed meanwhile is merged in three-way
+    const unsaved = db.prepare('SELECT base_hash, base FROM ydocs_saved WHERE id = ? AND saved = 0 AND file_hash = ?').get(id, row.file_hash) as { base_hash: string | null; base: string | null } | undefined;
+    if (unsaved && (row.file_hash === hash || (unsaved.base !== null && unsaved.base_hash === row.file_hash))) {
+      return (await this.openUnsaved(doc, text, row, unsaved.base)) ?? this.openFresh(doc, text);
+    }
     const { ok, merged } = await this.loadStored(doc, text, row);
     if (!ok) { doc.dispose(); doc.ydoc.destroy(); return this.openFresh(doc, text); }
     doc.markSaved();
@@ -1050,24 +1073,50 @@ export class DocManager {
   }
 
   /**
+   * A stored state with edits its file does not have (ydocs_saved.saved = 0), opened: the state as it
+   * is, the file's change since (if any) merged in three-way against `base`, the file it was based
+   * on — then written to the file. Null when the stored state is no document (the file is opened
+   * fresh, as when the usual open finds that).
+   */
+  private async openUnsaved(doc: OpenDoc, text: string, row: DbState, base: string | null): Promise<OpenDoc | null> {
+    const { ok } = await this.loadStored(doc, text, row, true);
+    if (!ok) { doc.dispose(); doc.ydoc.destroy(); return null; }
+    console.log(`[docs] ${doc.id}: the stored state has edits the file has not — kept${row.file_hash === doc.fileHash ? '' : ', the file\'s change since merged in'}, and written`);
+    doc.lastSavedAt = fs.statSync(doc.absPath).mtimeMs;
+    doc.dirty = true;
+    if (row.file_hash !== doc.fileHash && base !== null) {
+      // as a change on disk while it was open: three-way against what the state was based on
+      const text = doc.fileText!;
+      doc.fileText = base;
+      doc.fileHash = row.file_hash;
+      knownHashes.set(doc.absPath, row.file_hash);
+      await doc.absorbExternalChangeAsync(text);
+      doc.dirty = true;
+    }
+    this.register(doc);
+    void doc.saveToFile();
+    return doc;
+  }
+
+  /**
    * The stored history (the persisted Yjs state) with the file loaded on top (docwork.ts
    * loadOverStored); not ok when that does not give the file back; `merged` when the file was merged
    * into the stored state (loadOverStored's note), which then has to be stored again.
    */
-  private async loadStored(doc: OpenDoc, text: string, row: DbState): Promise<{ ok: boolean; merged: boolean }> {
+  private async loadStored(doc: OpenDoc, text: string, row: DbState, keep = false): Promise<{ ok: boolean; merged: boolean }> {
     const sameFile = row.file_hash === doc.fileHash;
     try {
       Y.applyUpdate(doc.ydoc, new Uint8Array(row.state), 'db');
       if (row.epoch) doc.epoch = row.epoch;
     } catch { return { ok: false, merged: false }; }
     if (!doc.usesWorker) {
-      const r = loadOverStored(doc, text, sameFile, openDocs, d => doc.loadFromLyx(d, 'file-load'));
-      if (r.note) console.log(`[docs] ${doc.id}: ${r.note}`);
+      const r = loadOverStored(doc, text, sameFile, openDocs, d => doc.loadFromLyx(d, 'file-load'), keep);
+      if (r.note && !keep) console.log(`[docs] ${doc.id}: ${r.note}`);
       return { ok: r.ok, merged: !!r.note };
     }
     try {
-      const r = await inWorker(doc, 'open', { text, state: new Uint8Array(row.state), sameFile }, true) as { ok: boolean; note?: string; update: Uint8Array | null; knew?: Uint8Array; isChild: boolean };
-      if (r.note) console.log(`[docs] ${doc.id}: ${r.note}`);
+      const r = await inWorker(doc, 'open', { text, state: new Uint8Array(row.state), sameFile, keep }, true) as { ok: boolean; note?: string; update: Uint8Array | null; knew?: Uint8Array; isChild: boolean };
+      if (r.note && !keep) console.log(`[docs] ${doc.id}: ${r.note}`);
       if (!r.ok) return { ok: false, merged: false };
       doc.isChild = r.isChild;
       doc.applyMirrorUpdate(r.update, 'file-load', r.knew);
@@ -1283,6 +1332,7 @@ export class DocManager {
       this.forgetDoc(doc);
     }
     db.prepare('DELETE FROM ydocs WHERE id = ?').run(id);
+    db.prepare('DELETE FROM ydocs_saved WHERE id = ?').run(id);
   }
 
   /** Save and close every open document of a project (before it is moved away / deleted). */
@@ -1293,6 +1343,7 @@ export class DocManager {
       this.drop(doc, 'project removed');
     }
     db.prepare("DELETE FROM ydocs WHERE substr(id, 1, ?) = ?").run(project.length + 1, project + '/');
+    db.prepare("DELETE FROM ydocs_saved WHERE substr(id, 1, ?) = ?").run(project.length + 1, project + '/');
   }
 
   /** Write every document with unsaved changes (and wait for the saves under way). */

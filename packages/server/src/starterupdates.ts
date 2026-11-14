@@ -82,7 +82,7 @@ export function isLightlyEditedStarter(text: string, folder: string): boolean {
 function moveDocIds(project: string, from: string, to: string): void {
   const a = `${project}/${from}/`, b = `${project}/${to}/`;
   db.transaction(() => {
-    for (const [table, col] of [['ydocs', 'id'], ['versions', 'doc_id'], ['user_doc_state', 'doc_id']] as const) {
+    for (const [table, col] of [['ydocs', 'id'], ['ydocs_saved', 'id'], ['versions', 'doc_id'], ['user_doc_state', 'doc_id']] as const) {
       db.prepare(`UPDATE OR IGNORE ${table} SET ${col} = ? || substr(${col}, ?) WHERE substr(${col}, 1, ?) = ?`).run(b, a.length + 1, a.length, a);
     }
   })();

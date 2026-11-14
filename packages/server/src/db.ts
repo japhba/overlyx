@@ -214,6 +214,17 @@ db.exec(`CREATE TABLE IF NOT EXISTS folder_members (
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS folder_members_user ON folder_members(project, path, user_id) WHERE user_id IS NOT NULL');
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS folder_members_email ON folder_members(project, path, email) WHERE email IS NOT NULL');
 db.exec('CREATE INDEX IF NOT EXISTS folder_members_person ON folder_members(user_id)');
+// 2026-11-14: whether the file holds a document's stored state (docs.ts writeState, written with the
+// `ydocs` row): `saved` 0 = edits stored here are not in the file yet, and `base` (when `base_hash` is
+// `file_hash`) the file text that state was based on — the next open keeps such a state and writes it,
+// merging a file that changed meanwhile three-way against `base`. No row: as before (saved).
+db.exec(`CREATE TABLE IF NOT EXISTS ydocs_saved (
+  id TEXT PRIMARY KEY,
+  file_hash TEXT NOT NULL,
+  saved INTEGER NOT NULL,
+  base_hash TEXT,
+  base TEXT
+)`);
 db.exec(`CREATE TABLE IF NOT EXISTS e2e_user_keys (
   user_id INTEGER PRIMARY KEY,
   public_key TEXT NOT NULL,

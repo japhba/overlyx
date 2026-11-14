@@ -43,6 +43,10 @@ describe('the merge made at open is stored', () => {
     doc.loadFromLyx(doc.parse(docText('one', 'two has It ends here.', 'three')), 'test');
     sync(editor, doc.ydoc);
     doc.persistState();
+    // marked as a state the file has, as one that today's parser structures differently than the
+    // parser that stored it (a deploy): such a state is merged with the file's parse at open (an
+    // unsaved one is kept instead: docs-unsaved-state.test.ts)
+    db.prepare('UPDATE ydocs_saved SET saved = 1 WHERE id = ?').run('u/p/b.tex');
     restart(doc);
 
     // restart 1: the stored state differs from the file's parse: merged — and that merge stored

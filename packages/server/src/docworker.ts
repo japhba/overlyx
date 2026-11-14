@@ -163,7 +163,7 @@ const ops: Record<string, (doc: DocInfo | null, a: Args) => unknown> = {
     mirrors.set(d.id, m);
     m.fileText = a.text;
     try { Y.applyUpdate(m.ydoc, a.state); } catch { mirrors.delete(d.id); return { ok: false }; }
-    const { value, update } = capture(m, () => loadOverStored(m, a.text, a.sameFile, lookup, doc => m.loadFromLyx(doc, 'file-load')));
+    const { value, update } = capture(m, () => loadOverStored(m, a.text, a.sameFile, lookup, doc => m.loadFromLyx(doc, 'file-load'), a.keep));
     if (!value.ok) { m.ydoc.destroy(); mirrors.delete(d.id); }
     return { ...value, update, isChild: m.isChild };
   },

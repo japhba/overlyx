@@ -287,7 +287,14 @@ blend.
   its mirrors rebuilt from the main thread; five deaths in a minute put the work back on the main thread.
 * **Edits are not lost to a failed save or a restart** (`server/src/docs.ts`). Every edit is stored
   in the database (the Yjs state, `ydocs`) within a second and written to the file 1.5–10 s later.
-  When a document's stored state and the parse of its unchanged file differ at open (a parser change
+  With each state the table `ydocs_saved` says whether the file has it (`saved`: nothing changed
+  since the last save or load) and, when it does not, the file text the state was based on (`base`,
+  stored once per version of the file). An open that finds an unsaved state — the server was killed
+  between the two, or stopped while a save kept failing — keeps it, instead of loading the file over
+  it (which reverted the edits, and the revert reached every editor that reconnected), and writes it
+  to the file; a file changed meanwhile (git, the sync, an agent) is merged in three-way against
+  `base`, as a change on disk while the document is open is (`DocManager.openUnsaved`; on the main
+  thread and in the document worker alike). A saved state opens as before. When a document's stored state and the parse of its unchanged file differ at open (a parser change
   between deploys), the file is merged into the state — and that merge is stored right away; it used
   to be made again at every restart as new operations, and an editor that had synced an earlier
   round brought that copy back (text twice). A document whose save keeps failing (a full disk,
@@ -301,10 +308,11 @@ blend.
   tracked change (the word-level combine of sync conflicts), are the owner's decision. An empty
   inline formula is written as `${}$`, which the parser reads back as the empty formula (`$$` opened
   display math in TeX and in the parser, joining paragraphs on reopen). Tests:
-  `docs-open-merge-stored`, `docs-failed-save`, `docs-disk-merge-version`, `tex-empty-formula`. Still open (Nov 2026 core review, finding 1): the stored state does not say
-  whether the file has it, so after a hard kill between the two the next open loads the file over
-  the unsaved edits; the remedy is a `saved` flag (or the hash of the text the state renders) next
-  to the state, and the service's `TimeoutStopSec` raised to about 60 s.
+  `docs-unsaved-state` (and `-worker`: a kill, a failed save then a restart, the normal path, a file
+  changed while closed — for .tex and .md), `docs-open-merge-stored`, `docs-failed-save`,
+  `docs-disk-merge-version`, `tex-empty-formula`. Still open: HTML pages and boards load the file
+  over an unsaved stored state as before; the service's `TimeoutStopSec` (20 s) is better about 60 s,
+  so that a slow `saveAll` at a stop is not cut off (the owner installs the unit).
 * **Sharing** (Google-Docs model): a project is private to its owner until it is shared. The owner
   invites people by username or e-mail address as *viewers* or *editors* (an e-mail that has not
   signed in yet is kept as an invitation and bound to the account on its first Google sign-in), or

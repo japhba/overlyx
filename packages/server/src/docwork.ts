@@ -139,11 +139,16 @@ function droppedOurs(base: LyxDocument, ours: LyxDocument, merged: LyxDocument):
  * The file (`text`, also `s.fileText`) loaded on top of the document's stored history (already
  * in `s.ydoc`; `sameFile`: it was stored for this very text). Returns a note on what was merged,
  * and whether the state now gives the file back exactly (otherwise the history is dropped and the
- * document is rebuilt from the file).
+ * document is rebuilt from the file). `keep`: the stored state has edits the file has not (it was
+ * stored unsaved): it is kept as it is — ok when it is a document — and written to the file next.
  */
-export function loadOverStored(s: DocState, text: string, sameFile: boolean, open: OpenDocs, load: (doc: LyxDocument) => void): { ok: boolean; note?: string } {
+export function loadOverStored(s: DocState, text: string, sameFile: boolean, open: OpenDocs, load: (doc: LyxDocument) => void, keep = false): { ok: boolean; note?: string } {
   let note: string | undefined;
   try {
+    if (keep) {
+      parseFor(s, text);   // learns whether this is a child document, and primes the next save's base
+      return { ok: !isEmptyDoc(s.ydoc), note: 'kept the stored edits the file did not have yet' };
+    }
     if (!sameFile) {
       // the file changed while the document was not open (desktop LyX, git, a restart with a
       // changed file): merge it into the stored history as a diff, keeping the epoch, so that
