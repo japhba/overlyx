@@ -21,6 +21,7 @@ import { styleLabel } from './stylenames';
 import { isMarkdownDoc, insertCodeBlock, insertRule } from '../editor/markdown';
 import { isArticleDoc } from '../articlekinds';
 import { viewDocId } from '../editor/context';
+import { openEmojiKeyboard } from '../editor/emoji/open';
 
 const SECTION_LAYOUTS: [string, string][] = [['0', 'Part'], ['1', 'Chapter'], ['2', 'Section'], ['3', 'Subsection'], ['4', 'Subsubsection'], ['5', 'Paragraph'], ['6', 'Subparagraph']];
 export interface DocumentMenuContext {
@@ -193,6 +194,7 @@ export function documentMenus({ view, meta, run, runView, setDialog, textColor, 
         { label: 'Em dash —', shortcut: 'Alt+-', action: () => run(C.insertDash('em')) },
         { label: 'Opening quote', action: () => run(C.insertQuote('l')) }, { label: 'Closing quote', action: () => run(C.insertQuote('r')) },
       ] },
+      { label: 'Emoji…', shortcut: 'Ctrl+;', action: () => runView(openEmojiKeyboard) },
       { label: 'Line break', shortcut: 'Ctrl+Enter', action: () => run(C.insertNewline('newline')) },
       { sep: true },
       { label: 'Link…', shortcut: LINK_KEY, action: () => runView(openLinkBoxFor) },
@@ -241,6 +243,7 @@ export function documentMenus({ view, meta, run, runView, setDialog, textColor, 
         { label: 'Opening quote', action: () => run(C.insertQuote('l')) }, { label: 'Closing quote', action: () => run(C.insertQuote('r')) },
         { label: 'Single quotes ‘ ’', action: () => run(C.insertQuote('l', 'e', 's')) },
       ] },
+      { label: 'Emoji…', shortcut: 'Ctrl+;', action: () => runView(openEmojiKeyboard) },
       { label: 'Formatting ▸', sub: [
         { label: 'Line break', shortcut: 'Ctrl+Enter', action: () => run(C.insertNewline('newline')) },
         { label: 'Justified line break', shortcut: 'Ctrl+Shift+Enter', action: () => run(C.insertNewline('linebreak')) },

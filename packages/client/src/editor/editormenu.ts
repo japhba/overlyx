@@ -31,6 +31,8 @@ import { isFigureDraft } from '@overlyx/core';
 import { addToDictionary, ignoreWord } from './spell/plugin';
 import { foldMenuItems, sectionFoldState, foldedCount, itemFoldMenuItems, itemFoldState, foldedItemCount } from './plugins/fold';
 import { labelIn, placeLinkItems } from './permalink';
+import { emojiMenuItems } from './emoji/emojimenu';
+import { openEmojiKeyboard } from './emoji/open';
 
 const REF_TYPES: [string, string][] = [
   ['ref', '<reference>'], ['eqref', '(<reference>)'], ['pageref', '<page>'], ['vref', '<reference> on page <page>'],
@@ -84,6 +86,8 @@ export function editorContextMenu(view: EditorView, ev: MouseEvent, spelling?: {
   }
   const dialog = (name: string, arg?: unknown) => () => editorContext.openDialog?.(name, arg);
   const project = viewProject(view), docDir = viewDocDir(view);
+  // an emoji under the pointer or in the selection: it in each emoji font (emoji/emojimenu.ts)
+  if (!target) items.push(...emojiMenuItems(view, coords ? coords.pos : null));
 
   if (target) {
     const { node, pos } = target;
@@ -245,6 +249,7 @@ export function editorContextMenu(view: EditorView, ev: MouseEvent, spelling?: {
       { label: 'Numbered equation', action: () => C.insertMath(true, 'equation')(view) },
       { sep: true },
       { label: 'Link…', shortcut: LINK_KEY, action: () => openLinkBox(view) },
+      { label: 'Emoji…', shortcut: MOD + '+;', action: () => openEmojiKeyboard(view) },
       { label: 'Footnote', action: run(C.insertFootnote) },
       { label: 'LyX note', action: run(C.insertNote('Note')) },
       { label: 'Comment thread', action: run(C.insertComment) },

@@ -17,7 +17,7 @@ import {
   SplinePointer, SquaresUnite, SquaresSubtract, SquaresIntersect, SquaresExclude, Combine, Split, VectorPolygon, VectorSquare,
   ArrowRightLeft, DiamondPlus, DiamondMinus, Diamond, CircleDot, Slash, Unlink, Link2, Pentagon, ChartSpline,
   LassoSelect, Pen, Eraser, Hand, Maximize2, Focus, SquareStack, LockOpen, Maximize, Minimize,
-  FileType, FileType2, PanelsTopLeft, Globe, Brush, BookMarked, FileImage, Folder, Asterisk, Group, Ungroup, Layers2,
+  Smile, FileType, FileType2, PanelsTopLeft, Globe, Brush, BookMarked, FileImage, Folder, Asterisk, Group, Ungroup, Layers2,
   TextAlignStart, TextAlignCenter, TextAlignEnd, TextAlignJustify, AlignCenterVertical, AlignVerticalJustifyStart,
   AlignVerticalJustifyCenter, AlignVerticalJustifyEnd, Grid3x3, SquareDashedTopSolid, RotateCwSquare, RotateCw,
   ArrowUpToLine, ArrowDownToLine, ArrowLeftToLine, ArrowRightToLine, TableConfig, Parentheses, Pi, Radical, Omega,
@@ -44,7 +44,7 @@ export const MODERN_ICONS: Record<string, string> = {
   math: N(Sigma), dmath: N(SquareSigma), graphics: N(Image), table: N(Table), flex: N(Braces),
   margin: N(PanelRight), 'tb-math': N(SquareRadical), 'tb-table': N(TableProperties), 'tb-review': N(FilePenLine),
   pdf: N(FileText), update: N(RefreshCw), outputsync: N(RefreshCcwDot), 'font-clear': N(RemoveFormatting), 'modern-more': N(EllipsisVertical),
-  'modern-search': N(Search), ink: N(PenTool), outline: N(ListTree), new: N(File), open: N(FolderOpen),
+  'modern-search': N(Search), emoji: N(Smile), ink: N(PenTool), outline: N(ListTree), new: N(File), open: N(FolderOpen),
   code: N(CodeXml), 'md-h': N(Heading), 'md-quote': N(TextQuote), 'md-codeblock': N(SquareCode),
   // the extra row
   'l-standard': N(Pilcrow), 'l-itemize': N(List), 'l-enumerate': N(ListOrdered), 'l-labeling': N(ListChecks),

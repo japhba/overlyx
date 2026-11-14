@@ -216,6 +216,8 @@ export const OLFONT_DEF = String.raw`\def\ol@loadfontspec{\let\ol@enc\encodingde
         \__olfont_put:n { BoldFeatures = { RawFeature = { axis = { \l__olfont_axis_tl } } } }
         \__olfont_put:n { BoldItalicFeatures = { RawFeature = { axis = { \l__olfont_axis_tl } } } }
         \tl_if_blank:nF {#2} { \__olfont_put:n { RawFeature = { \exp_not:n {#2} } } }
+        % a colour emoji font (emojifonts.ts): HarfBuzz draws its pictures, LuaTeX's own renderer has no colour bitmaps
+        \sys_if_engine_luatex:T { \str_if_eq:nnT {#3} {Noto~Color~Emoji} { \__olfont_put:n { Renderer = HarfBuzz } } }
       }
     % the font for what follows (a declaration: headings' formats, \olfont)
     \DeclareDocumentCommand \olfontset { O{} O{} m }

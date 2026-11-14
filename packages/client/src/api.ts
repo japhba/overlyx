@@ -480,6 +480,8 @@ export const api = {
   aiRewrite: (id: string, body: AiRewriteRequest, signal?: AbortSignal) => req<AiRewriteResult>('POST', `/api/docs/${encId(id)}/ai/rewrite`, body, undefined, signal),
   aiComplete: (id: string, body: AiCompleteRequest, signal?: AbortSignal) => req<AiCompleteResult>('POST', `/api/docs/${encId(id)}/ai/complete`, body, undefined, signal),
   aiInk: (body: AiInkRequest, signal?: AbortSignal) => req<{ candidates: string[] }>('POST', '/api/ai/ink', body, undefined, signal),
+  /** the emoji keyboard's Make an emoji…: a new emoji (PNG, base64) in the style of the example emoji (server emojimake.ts) */
+  aiEmoji: (body: { description: string; font: string; examples: string[] }, signal?: AbortSignal) => req<{ image: string; model: string }>('POST', '/api/ai/emoji', body, undefined, signal),
   /** a spoken comment (the comment pen's push to talk) put into words by the server's AI: 16 kHz mono WAV, base64 */
   aiTranscribe: (body: { audio: string; lang?: string; engine?: 'whisper' | 'gemini' }, signal?: AbortSignal) => req<{ said: { t: number; text: string }[]; engine?: 'whisper' | 'gemini' }>('POST', '/api/ai/transcribe', body, undefined, signal),
   /** the account's own AI (server linkedai.ts: the Agent panel's ChatGPT sign-in, or a listening MCP agent): its name, null when none is linked */

@@ -199,7 +199,8 @@ async function load(family: string, slug: string): Promise<GoogleFont | null> {
     if (catalog && !entry) { remember(dir, manifest, { family, missingAt: Date.now() }); return null; }
     const name = entry?.f ?? family;
     let got: { files: GoogleFontFile[]; axes?: CatalogAxis[] } = { files: [] };
-    if (entry?.a.length) got = await fromGithubVariable(entry, slug, dir);
+    if (WEB_SUBSETS.has(slug)) got = { files: await fromCss2Subsets(name, slug, dir) };
+    else if (entry?.a.length) got = await fromGithubVariable(entry, slug, dir);
     else if (entry) got = await fromGithubStatic(entry, slug, dir);
     if (!got.files.length) got = { files: await fromCss2(name, entry, slug, dir) };
     if (!got.files.length) { remember(dir, manifest, { family: name, missingAt: Date.now() }); return null; }
@@ -314,6 +315,51 @@ async function fromCss2(family: string, entry: CatalogFamily | null, slug: strin
 }
 
 /**
+ * Families the browser gets as css2's woff2 parts by Unicode range: Noto Color Emoji is 25 MB whole
+ * (bitmaps), the page loads only the parts of the emoji it shows (core emojifonts.ts). LuaTeX reads
+ * the whole TrueType file, fetched for the first build that names the font (texFileOf).
+ */
+const WEB_SUBSETS = new Set(['noto-color-emoji']);
+const BROWSER_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
+const MAX_TEX_FILE = 40 * 1024 * 1024;
+
+async function fromCss2Subsets(family: string, slug: string, dir: string): Promise<GoogleFontFile[]> {
+  const q = encodeURIComponent(family).replace(/%20/g, '+');
+  const r = await fetchImpl(`https://fonts.googleapis.com/css2?family=${q}`, { headers: { 'User-Agent': BROWSER_UA } });
+  if (!r.ok) return [];
+  const files: GoogleFontFile[] = [];
+  for (const block of (await r.text()).split('@font-face').slice(1)) {
+    const url = /src:\s*url\((https:\/\/fonts\.gstatic\.com\/[^)\s]+\.woff2)\)/.exec(block)?.[1];
+    const range = /unicode-range:\s*([^;}]+)/.exec(block)?.[1]?.trim();
+    if (!url || !range || !/^[Uu0-9a-fA-F+, ?-]+$/.test(range)) continue;
+    const data = await download(url);
+    if (!data) continue;
+    const file = `${slug}-${files.length}.woff2`;
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, file), data);
+    files.push({ style: 'normal', weight: 400, file, range });
+  }
+  return files;
+}
+
+/** a web-parts family's whole TrueType file for LuaTeX (css2's file for a client that is no browser), fetched once; null: not there */
+async function texFileOf(g: GoogleFont): Promise<string | null> {
+  const file = `${g.slug}.ttf`, abs = path.join(g.dir, file);
+  if (fs.existsSync(abs)) return file;
+  try {
+    const q = encodeURIComponent(g.family).replace(/%20/g, '+');
+    const r = await fetchImpl(`https://fonts.googleapis.com/css2?family=${q}`);
+    const url = r.ok ? /src:\s*url\((https:\/\/fonts\.gstatic\.com\/[^)\s]+\.ttf)\)/.exec(await r.text())?.[1] : undefined;
+    const got = url ? await fetchImpl(url, { signal: AbortSignal.timeout(120000) }) : null;
+    if (!got?.ok) return null;
+    const data = Buffer.from(await got.arrayBuffer());
+    if (!data.length || data.length > MAX_TEX_FILE) return null;
+    fs.writeFileSync(abs, data);
+    return file;
+  } catch { return null; }
+}
+
+/**
  * regular / bold / italic / bold italic of a family for fontspec (md typesetting): the nearest faces
  * Google has; a variable font is its upright and italic file, set by axis (`variable`).
  */
@@ -355,7 +401,10 @@ export async function provideFaceFonts(tex: string, buildDir: string): Promise<s
     const sub = path.join(root, g.slug);
     fs.mkdirSync(sub, { recursive: true });
     // (a house font: its TrueType files, LuaTeX does not read woff2)
-    for (const file of g.tex ? houseTexFiles(g) : g.files.map(f => f.file)) {
+    // (a family the browser gets in parts: LuaTeX reads its whole TrueType file)
+    const whole = WEB_SUBSETS.has(g.slug) ? await texFileOf(g) : null;
+    if (WEB_SUBSETS.has(g.slug) && !whole) { provided--; continue; }
+    for (const file of g.tex ? houseTexFiles(g) : whole ? [whole] : g.files.map(f => f.file)) {
       const dest = path.join(sub, path.basename(file));
       try { if (fs.statSync(dest).size === fs.statSync(path.join(g.dir, file)).size) continue; } catch { /* not there */ }
       fs.copyFileSync(path.join(g.dir, file), dest);
@@ -391,6 +440,7 @@ export async function googleFontInfo(family: string): Promise<FontInfo | null> {
   const fi = g.tex
     ? { ...fontFileInfo(fs.readFileSync(path.join(g.dir, g.tex.regular))), axes: (g.axes ?? []).map(a => ({ tag: a.t, name: ({ GRAD: 'Grade', wdth: 'Width' } as Record<string, string>)[a.t] ?? 'Weight', min: a.min, def: a.d, max: a.max })),
       instances: [[100, 'Thin'], [200, 'ExtraLight'], [300, 'Light'], [400, 'Regular'], [500, 'Medium'], [600, 'SemiBold'], [700, 'Bold'], [800, 'ExtraBold'], [900, 'Black']].map(([w, name]) => ({ name: name as string, coords: { wght: w as number } })) }
+    : up.file.endsWith('.woff2') ? { axes: [], instances: [], features: [] } as unknown as FontFileInfo // (web parts: an emoji font, nothing to set)
     : fontFileInfo(fs.readFileSync(path.join(g.dir, up.file)));
   const weights = g.axes ? [] : [...new Set(g.files.filter(f => f.style === 'normal').map(f => f.weight))].sort((a, b) => a - b);
   const info: FontInfo = {
@@ -450,11 +500,11 @@ export function googleFontRoutes(): express.Router {
   r.get('/fonts/google/:slug/:file', (req, res) => {
     const { slug, file } = req.params;
     const house = HOUSE_FONTS[slug];
-    if (!/^[a-z0-9-]{1,60}$/.test(slug) || !(house ? /^[a-z0-9-]{1,80}\.woff2$/ : /^[a-z0-9-]{1,80}\.ttf$/).test(file)) { res.status(404).end(); return; }
+    if (!/^[a-z0-9-]{1,60}$/.test(slug) || !(house ? /^[a-z0-9-]{1,80}\.woff2$/ : /^[a-z0-9-]{1,80}\.(?:ttf|woff2)$/).test(file)) { res.status(404).end(); return; }
     const abs = house ? path.join(house.dir, 'web', file) : path.join(ROOT(), slug, file);
     if (!fs.existsSync(abs)) { res.status(404).end(); return; }
     res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
-    res.type(house ? 'font/woff2' : 'font/ttf').sendFile(abs);
+    res.type(file.endsWith('.woff2') ? 'font/woff2' : 'font/ttf').sendFile(abs);
   });
   r.get('/fonts/info', async (req, res) => {
     const family = String(req.query.family ?? '');

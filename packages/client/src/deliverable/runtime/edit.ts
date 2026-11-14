@@ -3696,7 +3696,7 @@ function onKeyDown(e: KeyboardEvent): void {
     // come in (reconcile's guard), so the undone text never showed and ⌘Z seemed to do nothing
     if (mod && /^[zy]$/i.test(e.key)) { e.preventDefault(); stopText(); fwd(e); return; }
     // link, citation, cross-reference: the editor's dialogs (as in documents: Ctrl+K, Ctrl+Shift+C, Ctrl+Shift+I)
-    if (mod && ((!e.shiftKey && e.key.toLowerCase() === 'k') || (e.shiftKey && /^[ci]$/i.test(e.key)))) { e.preventDefault(); commitText(); fwd(e); return; }
+    if (mod && ((!e.shiftKey && e.key.toLowerCase() === 'k') || (e.shiftKey && /^[ci]$/i.test(e.key)) || e.key === ';')) { e.preventDefault(); commitText(); fwd(e); return; }
     if (mod && /^[bi]$/i.test(e.key)) { e.preventDefault(); exec(e.key.toLowerCase() === 'b' ? 'bold' : 'italic'); return; }
     if (mod && e.key.toLowerCase() === 'u') { e.preventDefault(); exec('underline'); return; }
     if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); commitText(); fwd(e); return; }

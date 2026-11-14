@@ -33,6 +33,7 @@ import { formulaTableGrid } from '../editor/formulatable';
 import { acceptAllChanges, rejectAllChanges, gotoChange, resolveSelectionChanges, changesFilterKey, setChangesFilter } from '../editor/plugins/changes';
 import { pasteFromClipboard } from '../editor/clipmenu';
 import { openLinkBoxFor, LINK_KEY } from '../editor/links';
+import { openEmojiKeyboard } from '../editor/emoji/open';
 import { layoutToolbar } from './layouttoolbar';
 import { FontSizeBox } from './fontsize';
 import { FontPicker, DOCUMENT_FONT_ARG } from './FontPicker';
@@ -408,6 +409,7 @@ export function buildToolbars(ctx: ToolbarContext): Toolbars {
       { id: 'comment', title: 'Comment thread (Ctrl+Alt+C)', icon: 'comment', action: () => run(C.insertComment) },
       { id: 'boxinset', title: 'Insert box', icon: 'boxinset', action: () => run(C.insertBox) },
       { id: 'href', title: `Link (${LINK_KEY})`, icon: 'href', action: () => runView(openLinkBoxFor) },
+      { id: 'emoji', title: 'Emoji (Ctrl+;)', icon: '☺', action: () => runView(openEmojiKeyboard) },
       { id: 'ert', title: 'TeX code (Ctrl+L)', icon: 'ert', action: () => run(C.insertERT) },
       { id: 'macro', title: 'Math macro definition', icon: 'macro', action: () => { void uiPrompt('Math Macro', 'Macro name (without backslash):').then(n => { if (n) void uiPrompt('Math Macro', 'Number of arguments:', '0').then(a => run(C.insertMacroDef(n, Number(a || 0), ''))); }); } },
       { id: 'include', title: 'Child document… (include/input another file)', icon: 'include', action: () => setDialog({ name: 'childdoc' }) },
@@ -545,7 +547,7 @@ export function buildToolbars(ctx: ToolbarContext): Toolbars {
   // the Modern row: the common tools; the rest of LyX's rows (action buttons) under ⋮
   const btn = (groups: ToolButton[][], id: string) => groups.flat().find(b => b.id === id);
   const pick = (groups: ToolButton[][], ids: string[]) => ids.map(id => btn(groups, id)).filter((b): b is ToolButton => !!b).map(plainTitle);
-  const inModern = new Set(['undo', 'redo', 'spellcheck', 'fontfamily', 'fontsize', 'bold', 'italic', 'underline', 'textcolor', 'href', 'comment', 'footnote',
+  const inModern = new Set(['undo', 'redo', 'spellcheck', 'fontfamily', 'fontsize', 'bold', 'italic', 'underline', 'textcolor', 'href', 'emoji', 'comment', 'footnote',
     'ref', 'cite', 'label', 'graphics', 'float', 'table', 'math', 'dmath', 'ert', 'l-itemize', 'l-enumerate', 'depthout', 'depthin', 'ink']);
   const moreItems = [...standard, ...extra].flat().filter(b => !inModern.has(b.id) && b.action && !b.widget && !b.palette).map(plainTitle)
     .map(b => ({ label: b.title.replace(/\s*\(.*\)\s*$/, ''), title: b.title, html: MODERN_SVG(b.id) ?? undefined, action: b.action!, active: b.active }));
@@ -554,7 +556,7 @@ export function buildToolbars(ctx: ToolbarContext): Toolbars {
     pick([...standard], ['undo', 'redo', 'spellcheck']),
     pick(standard, ['fontfamily', 'fontsize']),
     pick(standard, ['bold', 'italic', 'underline', 'textcolor']),
-    pick(extra, ['href', 'comment']),
+    pick(extra, ['href', 'emoji', 'comment']),
     pick(extra, ['ref', 'cite']),   // LaTeX's own: cross-reference, citation
     // the inserts, and Draw (margin ink, lines, shapes) beside them — it used to hide under ⋮
     [...pick(standard, ['graphics']), ...pick(extra, ['float']), ...pick(standard, ['table', 'math', 'dmath', 'ink'])],

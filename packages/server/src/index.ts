@@ -9,6 +9,7 @@ import { config } from './config.ts';
 import { cachedBib } from './bibcache.ts';
 import { setSecurityHeaders } from './security.ts';
 import { requestAiRepair, AiRepairError } from './airepair.ts';
+import { makeEmoji } from './emojimake.ts';
 import { aiStatus, aiAvailable, pickRoute, usesServerKey, rewrite as aiRewrite, complete as aiComplete, recognizeInk, transcribeSpeech, transcribeWhisper, speechOptions, pickSpeech, allow as aiAllow, AiError, selectionToTex, texToPm } from './ai.ts';
 import { linkedAi, combineVersions } from './linkedai.ts';
 import { mcpRouter } from './mcp.ts';
@@ -1473,6 +1474,19 @@ api.post('/ai/ink', async (req, res) => {
     req.on('close', () => { if (!res.writableEnded) ac.abort(); });
     const candidates = await recognizeInk({ image: String(body.image ?? ''), before: typeof body.before === 'string' ? body.before : undefined, after: typeof body.after === 'string' ? body.after : undefined, text: body.text === true, notes: body.notes === true, model: body.model }, ac.signal);
     res.json({ candidates });
+  } catch (e) {
+    if (e instanceof AiError) { if (e.status !== 499) res.status(e.status).json({ error: e.message }); return; }
+    res.status(400).json({ error: (e as Error).message ?? String(e) });
+  }
+});
+
+/** The emoji keyboard's Make an emoji…: a description and example emoji (PNG) → a new emoji in their style (emojimake.ts, the account's own OpenAI key). */
+api.post('/ai/emoji', async (req, res) => {
+  try {
+    if (!aiAllow(`emoji:${req.user!.id}`, 30, 3600_000)) { res.status(429).json({ error: 'That is the limit of new emoji for now — try again later.' }); return; }
+    const ac = new AbortController();
+    req.on('close', () => { if (!res.writableEnded) ac.abort(); });
+    res.json(await makeEmoji({ description: req.body?.description, font: req.body?.font, examples: req.body?.examples }, req.user!.id, ac.signal));
   } catch (e) {
     if (e instanceof AiError) { if (e.status !== 499) res.status(e.status).json({ error: e.message }); return; }
     res.status(400).json({ error: (e as Error).message ?? String(e) });

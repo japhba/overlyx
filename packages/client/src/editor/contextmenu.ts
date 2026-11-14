@@ -18,6 +18,8 @@ export interface MenuItem {
   info?: boolean;
   /** the icon before the label (menuicons.ts) */
   icon?: MenuIcon;
+  /** a row of its own making (the emoji in each font: editor/emoji/emojimenu.ts); its clicks call closeContextMenu */
+  custom?: () => HTMLElement;
 }
 
 let open: HTMLElement[] = [];
@@ -56,6 +58,7 @@ function build(items: MenuItem[], x: number, y: number, level: number): HTMLElem
   if (icons) menu.classList.add('with-icons');
   for (const it of items) {
     if (it.sep) { const s = document.createElement('div'); s.className = 'ctx-sep'; menu.appendChild(s); continue; }
+    if (it.custom) { const c = it.custom(); c.classList.add('ctx-custom'); c.addEventListener('mousedown', ev => ev.preventDefault()); menu.appendChild(c); continue; }
     const row = document.createElement('div');
     row.className = 'ctx-item' + (it.disabled ? ' disabled' : '') + (it.checked ? ' checked' : '') + (it.info ? ' info' : '') + (it.sub ? ' has-sub' : '');
     row.setAttribute('role', it.info ? 'presentation' : it.checked !== undefined ? 'menuitemcheckbox' : 'menuitem');

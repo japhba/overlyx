@@ -22,6 +22,7 @@ import { openRewrite, rewriteEnabled } from './ai/rewrite';
 import { openLinkBox } from './links';
 import { recordUsage } from '../usage';
 import { moveListItem } from './listmove';
+import { EMOJI_KEY, emojiKeyboardCommand } from './emoji/open';
 
 export interface UiActions {
   save(): void;
@@ -234,6 +235,8 @@ export function lyxKeymap(): Plugin {
     // end of the paragraph). ⌘J / Ctrl+J: rewrite with AI, when that is switched on (Tools ▸ AI)
     'Mod-k': (_state, _dispatch, view) => { if (view) openLinkBox(view); return true; },
     'Mod-j': (_state, _dispatch, view) => !!view && rewriteEnabled() && openRewrite(view),
+    // ⌘; / Ctrl+;: the emoji keyboard (editor/emoji/)
+    [EMOJI_KEY]: emojiKeyboardCommand,
     'Mod-s': ui(a => a.save()),
     F2: ui(a => a.save()),
     'Mod-r': ui(a => a.viewPdf()),

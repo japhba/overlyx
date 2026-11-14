@@ -31,6 +31,7 @@ export { moduleWarnings, type ModuleInfo } from './modules.ts';
 export { markEditedSettings, hasSettingsLine, MANAGED_BEGIN, MANAGED_END } from './tex/preamble.ts';
 export * from './projectKey.ts';
 export * from './fontface.ts';
+export * from './emojifonts.ts';
 export * from './textstyles.ts';
 export * from './projectsettings.ts';
 export * from './pagebreaks.ts';

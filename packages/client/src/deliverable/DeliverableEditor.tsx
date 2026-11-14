@@ -18,6 +18,7 @@ import { showContextMenu, closeContextMenu, type MenuItem } from '../editor/cont
 import { editSvgFile } from '../editor/svgEditorEvents';
 import { drawDraft, figureMenuItems, newDraft, switchVersion, type FigureSlot } from '../editor/figuredraft';
 import { isFigureDraft, projectOfDoc } from '@overlyx/core';
+import { openDeckEmoji } from '../editor/emoji/deck';
 import { openProjectPath } from '../openpath';
 import { Toolbar, ICONS, type ToolButton } from '../app/Toolbar';
 import { ColorGrid } from '../app/ColorGrid';
@@ -3245,6 +3246,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
         { label: editingText ? 'Formula' : 'Formula — click on the slide', shortcut: editingText ? 'Ctrl+M' : undefined, disabled: ro, action: () => { if (editingText) toCanvas({ ol: 'insertMath', display: false }); else setTool('formula'); } },
         ...(editingText ? [
           { label: 'Link…', shortcut: 'Ctrl+K', action: insertLink },
+          { label: 'Emoji…', shortcut: 'Ctrl+;', action: deckEmoji },
           ...(host.docId ? [{ label: 'Citation…', shortcut: 'Ctrl+Shift+C', action: () => setCiteOpen(true) }] : []),
           { label: 'Cross-reference…', shortcut: 'Ctrl+Shift+I', action: pickReference },
         ] : []),
@@ -3375,6 +3377,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     if (editingTextRef.current && mod && !m.shift && k === 'k') { insertLink(); return; }
     if (editingTextRef.current && mod && m.shift && k === 'c') { if (host.docId) setCiteOpen(true); return; }
     if (editingTextRef.current && mod && m.shift && k === 'i') { pickReference(); return; }
+    if (editingTextRef.current && mod && m.key === ';') { deckEmoji(); return; }
     if (mod && k === 'k') { arrangeSel(m.shift ? 'break-apart' : 'combine'); return; }
     if (mod && k === 'l' && !m.shift) { arrangeSel('simplify'); return; }
     if (mod && m.key === 'ArrowUp') { arrangeSel(m.shift ? 'front' : 'forward'); return; }
@@ -3800,6 +3803,8 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
       toCanvas({ ol: 'exec', command: 'createLink', value: url.trim() });
     });
   };
+  /** Insert ▸ Emoji… / Ctrl+; while typing in a text: the emoji keyboard (editor/emoji/deck.ts) */
+  const deckEmoji = () => openDeckEmoji({ exec, ensureFont, focus: () => canvasFrame.current?.focus() });
   const toggleObjects = (open = !objOpen) => {
     setObjOpen(open);
     try { localStorage.setItem('ol.objPane', open ? '1' : '0'); } catch { /* private window */ }
