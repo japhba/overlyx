@@ -126,12 +126,12 @@ export const TOUR_STEPS: Step[] = [
     done: (now, base) => now.pdfBusy || now.pdfBuiltAt !== base.pdfBuiltAt,
   },
   {
-    id: 'versions', title: 'Versions and recovery',
+    id: 'versions', title: 'History and recovery',
     target: ['[data-tab="versions"]', '.sidebar.right .panel-tabs'],
     enter: a => a.showRight(),
     body: <>
       <p>The history of every document is kept: automatic snapshots, versions you name yourself, and the state before anything drastic (a large deletion, an external change, offline edits that could not be merged). Compare any of them with the current text and restore it.</p>
-      <p><b>Open the <i>Versions</i> tab.</b></p>
+      <p><b>Open the <i>History</i> tab.</b></p>
     </>,
     done: now => now.rightTab === 'versions',
   },

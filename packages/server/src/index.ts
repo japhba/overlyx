@@ -29,6 +29,7 @@ import { deckExport } from './deckexport.ts';
 import { starterFor, pageSize, isHtmlPath, DELIVERABLE_KINDS, type DeliverableKind } from '@overlyx/core/html/deliverable.ts';
 import { newArticleText } from '@overlyx/core/html/articletheme.ts';
 import { refreshScientificStarters } from './starterupdates.ts';
+import { nameVersion, replacePassage, projectHistory, HistoryError } from './history.ts';
 import { listProjects, resolveProjectPath, assertWritableRelPath, projectDir, createProject, newDocumentText, newMarkdownText, fileKind, isBackupFile, isDocumentFile, findMaster } from './projects.ts';
 import { isMarkdownPath } from '@overlyx/core/md/index.ts';
 import { markdownStyle, setMarkdownStyle } from './mdstyle.ts';
@@ -322,7 +323,7 @@ function refuseE2e(res: express.Response): void {
  */
 api.all('/docs/*', (req, res, next) => {
   const full = String((req.params as any)[0] ?? '');
-  const m = /^(.*?)(?:\/(meta|tex|lyx|outline|source|bib|reset|save|header|frontmatter|versions(?:\/\d+(?:\/restore)?)?|export(?:\/cancel)?|pdf|build|folds|place|opened|external|legacy-merge|synctex\/(?:view|edit|pages)))?$/.exec(full)!;
+  const m = /^(.*?)(?:\/(meta|tex|lyx|outline|source|bib|reset|save|header|frontmatter|versions(?:\/\d+(?:\/(?:restore|part))?)?|export(?:\/cancel)?|pdf|build|folds|place|opened|external|legacy-merge|synctex\/(?:view|edit|pages)))?$/.exec(full)!;
   // an id from before a project moved (namespaces.ts) names the document under its current key
   const id = canonicalDocId(decodeURIComponent(m[1]));
   const action = m[2] ?? '';
@@ -1758,6 +1759,20 @@ api.get('/docs/*/versions/:vid', (req, res) => {
 api.post('/docs/*/versions/:vid/restore', async (req, res) => {
   try { await manager.restoreVersion(docId(req), Number(req.params.vid), req.user!.name); res.json({ ok: true }); }
   catch (e) { res.status(400).json({ error: String(e) }); }
+});
+// the History pane (history.ts): name a version, restore one part of it, the project's versions across files
+api.patch('/docs/*/versions/:vid', (req, res) => {
+  try { res.json({ ok: nameVersion(docId(req), Number(req.params.vid), String(req.body?.name ?? '')) }); }
+  catch (e) { res.status(e instanceof HistoryError ? e.status : 400).json({ error: (e as Error).message }); }
+});
+api.post('/docs/*/versions/:vid/part', async (req, res) => {
+  const b = req.body ?? {};
+  if (typeof b.cur !== 'string' || typeof b.text !== 'string' || !Number.isInteger(b.at) || b.cur.length + b.text.length > 20_000_000) { res.status(400).json({ error: 'at, cur and text expected' }); return; }
+  try { res.json(await replacePassage(docId(req), { at: b.at, cur: b.cur, text: b.text })); }
+  catch (e) { res.status(e instanceof HistoryError ? e.status : 400).json({ error: (e as Error).message }); }
+});
+api.get('/projects/:project/history', needProject('view'), (req, res) => {
+  res.json(projectHistory(req.params.project));
 });
 api.delete('/docs/*/versions/:vid', (req, res) => {
   db.prepare('DELETE FROM versions WHERE id = ? AND doc_id = ?').run(Number(req.params.vid), docId(req));

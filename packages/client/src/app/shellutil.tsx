@@ -70,6 +70,13 @@ const AUTHOR_COLORS = ['#126bc5', '#cf630d', '#bb3285', '#008396', '#a67b01', '#
 // the same hues, lifted so that they read on the dark page (app/theme.ts)
 const AUTHOR_COLORS_DARK = ['#90c1fe', '#fca676', '#ff97cd', '#7bccdd', '#dab976', '#c1b0fe', '#e2a3ec'];
 
+/** A person's colour where there is no document's author list to go by (the History pane): by their name, agents grey. */
+export function authorColorOf(name: string, dark = false): string {
+  if (isAgentAuthor(name)) return dark ? '#9e9e9e' : '#757575';
+  const list = dark ? AUTHOR_COLORS_DARK : AUTHOR_COLORS;
+  return list[(hashAuthor(name) >>> 0) % list.length];
+}
+
 /** One colour per LyX author for change tracking (stable across sessions: by author id order). */
 export function applyAuthorColors(authors: { id: number; name: string }[]): void {
   let el = document.getElementById('ol-author-colors') as HTMLStyleElement | null;

@@ -50,6 +50,37 @@ blend.
   Offline edits sync automatically when the connection is back and merge with what others did in
   the meantime (CRDT), and an external change of the file (git, another editor) only replaces the
   paragraphs that actually changed. See *Offline mode* below.
+* **History** (the owner, 14 Nov 2026: "an integrated version control interface from which we can
+  easily diff and restore"; `app/history/`): one pane for the versions of every kind of file the
+  server keeps versions of — LaTeX and markdown documents and articles (the right sidebar's
+  *History* tab, formerly *Versions*), decks, posters, web pages and boards (a pane beside the
+  editor) — opened from the panels' bar at the left (the clock), *File ▸ Version history…* or
+  *View ▸ History*. Its timeline groups the store's versions (server `versions`: automatic ones at
+  most every ten minutes of editing, the last 60 kept; named ones; the state before a restore or a
+  change on disk; offline edits) by day, runs of automatic ones within 45 minutes as one *editing
+  session*, with the people who were there in their author colours (`shellutil.authorColorOf`, by
+  name). *Name this version…* keeps the file as it is now; *Name…* on a version names it, which
+  makes an automatic one a kept one (`PATCH /api/docs/<id>/versions/<vid>`). A version opens its
+  comparison (`HistoryDiff.tsx`, Esc closes) with now or with any other version: the changed
+  passages of the source, side by side or in place, the changed words marked (`textdiff.ts`: lines
+  first — common ends skipped, then an LCS — then words in each changed passage); for a deck or
+  poster first the slides that changed, came or went (`slidediff.ts`), each drawn before and after
+  in a frame without scripts (`sandbox="allow-same-origin"`, the other slides taken out, `<base>` the
+  deck's `/ol-d/` folder for its pictures — math stays TeX there, the runtime does not run).
+  *Restore this version* replaces the whole file as before (server `restoreVersion`: loaded as a
+  diff of the live document, the state before kept as a version) and *Undo* in the pane restores
+  that; *Restore this part* (against now) puts one passage back (`POST …/versions/<vid>/part`,
+  server `history.ts replacePassage`: a splice of a deck's text, a LaTeX/markdown source loaded as a
+  diff — refused with 409 when the passage changed meanwhile), undone the same way. Both are edits
+  of the live Yjs document that collaborators see at once, not overwrites of the file; they are not
+  on the editor's Ctrl+Z (the server made them), hence the pane's Undo. The *Whole project* tab
+  (`GET /api/projects/<p>/history`) lists recent versions across the project's files and the files
+  deleted since whose versions the store still has; *Restore file* writes the newest one back
+  (the ordinary text write). End-to-end encrypted projects: their versions are decrypted in the
+  browser, so they compare and restore whole; naming, parts and the project tab need the server to
+  read them and are not offered. The VS Code extension has no History (its files are in the user's
+  own git there; the pane lives in the web app's shell). Binary files and plain text files have no
+  versions in this store (the project's git history has them: *File ▸ Git repository…*).
 * **Notes and comments**: LyX-style notes (Note / Comment / Greyed out) and OverLyX comment
   threads (author, time, replies, resolve) are kept in the `.tex` file as `%%` comment blocks.
   On screen a note is a yellow sticky and a greyed-out part a quiet grey box. A comment thread is a

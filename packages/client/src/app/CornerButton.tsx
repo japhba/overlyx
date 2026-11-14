@@ -7,7 +7,9 @@
  */
 import type { ComponentChildren, JSX } from 'preact';
 
-const ICONS: Record<'files' | 'slides' | 'notes' | 'bars' | 'library', JSX.Element> = {
+const ICONS: Record<'files' | 'slides' | 'notes' | 'bars' | 'library' | 'history', JSX.Element> = {
+  // a clock with an arrow going back round it (the History pane: app/history/)
+  history: <><path d="M3.2 6.2A5.2 5.2 0 1 1 2.8 9" /><path d="M2.6 3.6v2.8h2.8M8 5.2V8l2 1.4" /></>,
   // a folder
   files: <path d="M2.5 4.5a1 1 0 0 1 1-1h3l1.5 1.5h4.5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z" />,
   // a window with a column on its left

@@ -53,7 +53,7 @@ import { setDocumentNumbering } from '../editor/plugins/numbering';
 import { MarkdownSettingsDialog } from './MarkdownSettings';
 import { Outline, buildOutline, type OutlineItem } from './Outline';
 import { Comments } from './Comments';
-import { Versions } from './Versions';
+import { HistoryPanel } from './history/HistoryPanel';
 import { AgentPanel, askAgentAbout } from './AgentPanel';
 import { inlineModelLabel } from './AgentModelPicker';
 import { PdfPanel, stateFromBuild, jobActive, EMPTY_PDF, type PdfState } from './PdfPanel';
@@ -195,8 +195,8 @@ export function App() {
 
 type RightTab = 'comments' | 'versions' | 'agent';
 const RIGHT_TABS = ['comments', 'versions', 'agent'] as const;
-const RIGHT_TAB_LABELS: Record<RightTab, string> = { comments: 'Comments', versions: 'Versions', agent: 'Agent' };
-const RIGHT_TAB_TITLES: Record<RightTab, string> = { comments: 'Comment threads: open ones and the resolved archive', versions: 'Versions of this document', agent: 'Agents: the coding agent (OpenAI Codex) working in this project, and your agents connected from elsewhere (Claude Code, Codex …)' };
+const RIGHT_TAB_LABELS: Record<RightTab, string> = { comments: 'Comments', versions: 'History', agent: 'Agent' };
+const RIGHT_TAB_TITLES: Record<RightTab, string> = { comments: 'Comment threads: open ones and the resolved archive', versions: 'History: the versions of this document — compare them with now, restore one or a part of it', agent: 'Agents: the coding agent (OpenAI Codex) working in this project, and your agents connected from elsewhere (Claude Code, Codex …)' };
 const PDF_TITLE = 'The PDF beside the text (Ctrl+R builds it)';
 /** below this width one pane at a time (the pane switch works like tabs) */
 const NARROW_PANES = '(max-width: 760px)';
@@ -695,6 +695,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   // the project's people's pictures beside their comments (shellutil applyCommentAvatars)
   useEffect(() => { applyCommentAvatars([user, curProject?.owner, ...(curProject?.members ?? [])]); }, [user, curProject]);
   const [selVersion, setSelVersion] = useState(0);
+  // the History pane beside a deck, poster, web page or board (app/history/); a document's is its right sidebar's tab
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [docTick, setDocTick] = useState(0);
   const [selTick, setSelTick] = useState(0);
   const editorRef = useRef<EditorHandle | null>(null);
@@ -1543,6 +1545,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       ...(isPdfTab ? [] : [{ label: 'Saved automatically (Ctrl+S saves now)', disabled: true, action: () => {} }]),
       { sep: true },
       { label: 'Download', action: () => window.open(`/api/projects/${encodeURIComponent(projectOfDoc(textId!))}/file/${docPathOf(textId!).split('/').map(encodeURIComponent).join('/')}`) },
+      ...(isHtmlTab || isBoardTab ? [{ label: 'Version history…', action: () => setHistoryOpen(true) }] : []),
       { label: 'Share project…', action: () => setShareFor(projectOfDoc(textId!)) },
       { label: 'Git repository…', action: () => setGitFor(projectOfDoc(textId!)) },
       { sep: true },
@@ -1640,7 +1643,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         ]),
         { label: 'Download PDF', action: () => { if (isE2eDocId(docId)) { if (pdf.url) saveLocal(pdf.url, docPathOf(docId).split('/').pop()!.replace(/\.[^.]+$/, '') + '.pdf'); else notify('Build the PDF first (Ctrl+R): it is made in this browser', 'error'); } else window.open(`/api/docs/${encodeURIComponent(docId)}/pdf?download=1`); } },
       ] },
-      { label: 'Versions…', action: () => setRightTab('versions') },
+      { label: 'Version history…', action: () => { setRightTab('versions'); setSelVersion(v => v + 1); } },
       { label: 'Share project…', action: () => setShareFor(projectOfDoc(docId)) },
       { label: 'Google Docs (sync, comments)…', action: () => setDialog({ name: 'gdocs' }) },
       { label: 'LessWrong (sync, comments)…', action: () => setDialog({ name: 'lesswrong' }) },
@@ -1657,7 +1660,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       // (Google Docs' print layout, with TeX's page breaks: editor/plugins/pages.ts)
       { label: 'Pages (breaks as in the PDF)', checked: pagesOn, action: togglePages },
       { label: 'WYSIWYM document', checked: panes.shown.doc, action: () => flipPane('doc') },
-      { label: 'Versions', checked: rightTab === 'versions', action: () => setRightTab(rightTab === 'versions' ? null : 'versions') },
+      { label: 'History', checked: rightTab === 'versions', action: () => setRightTab(rightTab === 'versions' ? null : 'versions') },
       { sep: true },
       ],
       themeItems: [
@@ -2037,6 +2040,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
           <ActivityBar>
             <ActivityButton icon="files" label="Files" title={LEFT_TITLE} on={filesShown} onClick={() => { setShowLibrary(false); toggleFiles(); }} data-rail={filesShown ? undefined : 'outline'} />
             {!user.guest && <ActivityButton icon="library" label="Library" title="My library: your references and their PDFs — cite them in any document" on={libraryShown} onClick={toggleLibrary} data-activity-library />}
+            {(isLyxDoc || isHtmlTab || isBoardTab) && <ActivityButton icon="history" label="History" title="History: versions of this file — compare, restore" on={isLyxDoc ? rightTab === 'versions' : historyOpen} data-history-btn
+              onClick={() => { if (isLyxDoc) { setRightTab(rightTab === 'versions' ? null : 'versions'); setSelVersion(v => v + 1); } else setHistoryOpen(o => !o); }} />}
           </ActivityBar>
         )}
         {libraryShown && <div class="sidebar left library-panel"><LibraryView mode="pane" onClose={() => setShowLibrary(false)} /></div>}
@@ -2074,6 +2079,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         )}
         {isLyxDoc && !narrowPanes && <PaneDividers layout={panes} onChange={setPanesState} onResizeEnd={saveLayout} />}
         </div>
+        {historyOpen && (isHtmlTab || isBoardTab) && <div class="history-drawer"><HistoryPanel docId={docId!} notify={notify} onOpen={id => openInTab(id)} onClose={() => setHistoryOpen(false)} /></div>}
         {isLyxDoc && <ToolbarDock at="right">{toolbarRows}</ToolbarDock>}
         {isLyxDoc && !rightTab && (
           <div class="rail right">
@@ -2087,14 +2093,14 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
           <div class="sidebar right">
             <div class="panel-tabs">
               <button class={rightTab === 'comments' ? 'active' : ''} data-tab="comments" onClick={() => setRightTab('comments')} title={RIGHT_TAB_TITLES.comments}>Comments</button>
-              <button class={rightTab === 'versions' ? 'active' : ''} data-tab="versions" onClick={() => { setRightTab('versions'); setSelVersion(v => v + 1); }} title={RIGHT_TAB_TITLES.versions}>Versions</button>
+              <button class={rightTab === 'versions' ? 'active' : ''} data-tab="versions" onClick={() => { setRightTab('versions'); setSelVersion(v => v + 1); }} title={RIGHT_TAB_TITLES.versions}>{RIGHT_TAB_LABELS.versions}</button>
               {agentTab && <button class={rightTab === 'agent' ? 'active' : ''} data-tab="agent" onClick={() => setRightTab('agent')} title={RIGHT_TAB_TITLES.agent}>Agent</button>}
               <button class={'toggle' + (panes.shown.pdf ? ' on' : '')} data-tab="pdf" onClick={() => flipPane('pdf')} title={PDF_TITLE}>PDF</button>
               <button class={'toggle' + (panes.shown.tex ? ' on' : '')} data-tab="source" onClick={toggleRawSplit} title={SOURCE_TITLE}>Source</button>
               <button class="hide" title="Hide the sidebar" onClick={() => setRightTab(null)}>»</button>
             </div>
             {rightTab === 'comments' && <div class="panel-body"><Comments views={[masterView, ...[...childRefs.current.values()].map(h => h.view)].filter((v): v is EditorView => !!v)} tick={docTick} /></div>}
-            {rightTab === 'versions' && <div class="panel-body"><Versions docId={docId} refreshKey={selVersion} /></div>}
+            {rightTab === 'versions' && <div class="panel-body"><HistoryPanel docId={docId} refreshKey={selVersion} notify={notify} onOpen={id => openInTab(id)} /></div>}
             {rightTab === 'agent' && <AgentPanel project={projectOfDoc(docId)} notify={notify} codex={aiActivated} />}
           </div>
         )}
