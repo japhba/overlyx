@@ -4,7 +4,8 @@
  */
 import type { Node as PMNode } from 'prosemirror-model';
 import type { EditorView, NodeView } from 'prosemirror-view';
-import { paramMap, unquote } from '@overlyx/core';
+import { paramMap, unquote, linkHasMath, linkShownText, linkTextParts } from '@overlyx/core';
+import { isMarkdownDoc } from '../markdown';
 import { getPrefs, subscribePrefs } from '../../prefs';
 import { subscribeProjectEvents, sameGraphicsFile } from '../../projectevents';
 import { editorContext, figureCandidates, figureFile, figureUrl, onMetaChange, resolveDocPath, viewDocDir, viewDocId, viewProject } from '../context';
@@ -320,7 +321,8 @@ export class CommandView implements NodeView {
       }
       case 'href': {
         const name = unquote(p.get('name')), target = unquote(p.get('target')), type = unquote(p.get('type'));
-        text = name || target;
+        // (a LaTeX name shown as its words, its formulas typeset: `\href{…}{see $x^2$}`)
+        text = name ? linkShownText(name, unquote(p.get('literal')) === 'true' && !isMarkdownDoc(viewDocId(this.view))) : target;
         title = linkTooltip(type && !target.startsWith(type) ? type + target : target, viewDocId(this.view));
         this.dom.classList.add('lyx-href');
         break;
@@ -359,6 +361,15 @@ export class CommandView implements NodeView {
       a.className = 'lyx-include-link';
       a.addEventListener('click', (ev) => { if (!ev.ctrlKey && !ev.metaKey && !ev.shiftKey) ev.preventDefault(); });
       this.dom.replaceChildren(a);
+    } else if (cmd === 'href' && linkHasMath(text)) {
+      // the words as text, each formula drawn as formulas are
+      this.dom.replaceChildren(...linkTextParts(text).map(part => {
+        if ('text' in part) return document.createTextNode(part.text);
+        const m = document.createElement('span');
+        m.className = 'lyx-href-math';
+        renderStaticInto(m, '$' + part.math + '$', false, macroTableFor(this.view, this.getPos()).table, undefined, () => this.render());
+        return m;
+      }));
     } else this.dom.textContent = text;
     this.dom.title = title || cmd;
     applyChangeAttrs(this.dom, this.node);   // after the className reset above

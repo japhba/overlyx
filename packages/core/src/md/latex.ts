@@ -9,6 +9,7 @@
  */
 import type { Item, LyxDocument, Paragraph } from '../lyx/ast.ts';
 import { paramMap, quote, setHeaderBlock, unquote } from '../lyx/ast.ts';
+import { linkTextLatex } from '../linktext.ts';
 import { mdTypesetting, applyTypesetting, typesettingPreamble, mdBodyFace, type LocalFont } from './typesetting.ts';
 export { frontMatterVars } from './typesetting.ts';
 
@@ -23,10 +24,7 @@ const LISTINGS_LANGUAGES: Record<string, string> = {
  * A link's text as LaTeX: markdown's is text (with its formulas as `$…$`), written as it is
  * (`literal`), so `_`, `#`, `%` … are escaped here — `[a_b.tex](a_b.tex)` gave "Missing $ inserted".
  */
-function linkText(s: string): string {
-  return s.split(/(\$[^$]+\$)/).map((part, i) => i % 2 ? part : part.replace(/[\\&_$%#{}^~]/g, ch =>
-    ch === '\\' ? '\\textbackslash{}' : ch === '^' ? '\\^{}' : ch === '~' ? '\\textasciitilde{}' : '\\' + ch)).join('');
-}
+const linkText = linkTextLatex;
 
 /** `fontFiles`: fonts the build has as files (Google fonts the server fetched), by name — loaded by file */
 export function markdownForLatex(doc: LyxDocument, opts: { fontFiles?: Record<string, LocalFont> } = {}): LyxDocument {
@@ -46,7 +44,10 @@ export function markdownForLatex(doc: LyxDocument, opts: { fontFiles?: Record<st
           // (an autolink has no name: its address is the text)
           const p = paramMap(ins.params);
           const name = linkText(unquote(p.get('name')) || unquote(p.get('target')));
-          ins.params = ins.params.map(l => l.startsWith('name ') ? 'name ' + quote(name) : l);
+          // (and written as it is: escaped twice, a link made in the editor — not literal — showed its backslashes)
+          ins.params = ins.params.map(l => l.startsWith('name ') ? 'name ' + quote(name) : l.startsWith('literal ') ? 'literal "true"' : l);
+          if (!ins.params.some(l => l.startsWith('name '))) ins.params.splice(1, 0, 'name ' + quote(name));
+          if (!ins.params.some(l => l.startsWith('literal '))) ins.params.splice(ins.params[ins.params.length - 1] === '' ? ins.params.length - 1 : ins.params.length, 0, 'literal "true"');
         }
         if (ins.type === 'Text' && ins.name === 'listings') {
           ins.params = ins.params.map(l => l.replace(/^lstparams "language=([^",]*)"$/, (_m, lang: string) => {

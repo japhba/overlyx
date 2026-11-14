@@ -181,7 +181,8 @@ function insetMd(ins: Inset, w: W, o: InlineOpts, font: FontState = {}): string 
             const href = type === 'mailto:' && !target.startsWith('mailto:') ? 'mailto:' + target : target;
             if (!name && /^[a-z][a-z0-9+.-]{1,31}:[^\s<>]*$/i.test(href)) return '<' + href + '>';
             const shown = name || href;
-            const label = font.family === 'typewriter' ? codeSpan(shown, o.inTable) : escapeText(shown, o).replace(/\]/g, '\\]');
+            // (a formula in the text stays one: `[see $x^2$](…)`)
+            const label = font.family === 'typewriter' ? codeSpan(shown, o.inTable) : shown.split(/(\$[^$]+\$)/).map((part, i) => (i % 2 ? part : escapeText(part, o).replace(/\]/g, '\\]'))).join('');
             return `[${label}](${linkTarget(href)}${linkTitle(unquote(pm.get('title')))})`;
           }
           case 'line': return o.singleLine ? '<hr>' : '<hr>';

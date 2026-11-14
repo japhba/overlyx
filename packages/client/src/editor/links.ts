@@ -13,7 +13,8 @@ import { openProjectPath, resolveInDocument } from '../openpath';
 import { NodeSelection, Plugin, PluginKey, TextSelection, type EditorState } from 'prosemirror-state';
 import { Decoration, DecorationSet } from 'prosemirror-view';
 import type { Node as PMNode, Mark } from 'prosemirror-model';
-import { paramMap, quote, unquote, schema, FONT_KEYS, relativeLink } from '@overlyx/core';
+import { paramMap, quote, unquote, schema, FONT_KEYS, relativeLink, linkNameFor, linkShownText, linkTextParts } from '@overlyx/core';
+import { isMarkdownDoc } from './markdown';
 import { menuIcon, type MenuIcon } from './menuicons';
 import { editorContext, viewDocId } from './context';
 import { activeMathField, mathCursorListeners, mathFocusListeners, type LyxMathField } from './lyxmath/field';
@@ -22,6 +23,7 @@ const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigat
 export const LINK_KEY = isMac ? '⌘K' : 'Ctrl+K';
 /** the click that follows a link in the editor (a plain click puts the cursor into it) */
 export const LINK_CLICK = isMac ? '⌘+click' : 'Ctrl+click';
+const MATH_KEY = isMac ? '⌘M' : 'Ctrl+M';
 
 /* ------------------------------------------------------------------ addresses */
 
@@ -163,18 +165,35 @@ function fontOf(node: PMNode): Mark[] {
   } catch { return []; }
 }
 
-/** The selection as the text of a new link: plain text within one paragraph, else why not. */
-function selectedLinkText(state: EditorState, from = state.selection.from, to = state.selection.to): { text: string; marks: readonly Mark[] } | { error: string } {
+/**
+ * The selection as the text of a new link: text and inline formulas (as `$…$`) within one paragraph,
+ * else why not.
+ */
+export function selectedLinkText(state: EditorState, from = state.selection.from, to = state.selection.to): { text: string; marks: readonly Mark[] } | { error: string } {
   const $from = state.doc.resolve(from), $to = state.doc.resolve(to);
   if (!$from.sameParent($to) || !$from.parent.inlineContent) return { error: 'A link can only be made within one paragraph' };
   let text = '', marks: readonly Mark[] | null = null, other = false;
   state.doc.nodesBetween(from, to, (n, pos) => {
     if (n.isText) { const s = n.text!.slice(Math.max(0, from - pos), to - pos); text += s; marks ??= n.marks; }
+    else if (n.type.name === 'math_inline' && String(n.attrs.latex).trim() && !String(n.attrs.latex).includes('$')) text += '$' + String(n.attrs.latex).trim() + '$';
     else if (n.isInline) other = true;
     return true;
   });
-  if (other) return { error: 'A link can hold only text: select the text without formulas or insets' };
+  if (other) return { error: 'A link can hold only text and formulas: select them without other insets' };
   return { text, marks: marks ?? [] };
+}
+
+/** a markdown document's links keep their text itself; a .tex document's LaTeX (core linktext.ts) */
+const markdownView = (view: EditorView) => isMarkdownDoc(viewDocId(view));
+/** the text of a hyperlink inset as it is typed and shown: its words, formulas as `$…$` */
+export function hrefText(view: EditorView, node: PMNode): string {
+  const { url, name, literal } = hrefOf(node);
+  return name ? linkShownText(name, literal && !markdownView(view)) : url;
+}
+/** the params of a hyperlink inset to `url` with the text `text` typed (words, formulas as `$…$`) */
+function hrefParamsFor(view: EditorView, url: string, text: string): string[] {
+  const { name, literal } = linkNameFor(text, markdownView(view));
+  return hrefParams(url, name, literal);
 }
 
 /** the range the link box works on while it is open (drawn as selected: the editor has lost the focus) */
@@ -193,17 +212,20 @@ export function openLinkBox(view: EditorView): void {
   };
   if (at) {
     const cur = hrefOf(at.node);
+    const shown = hrefText(view, at.node);
     const dom = view.nodeDOM(at.pos) as HTMLElement | null;
     const r = dom?.getBoundingClientRect?.();
     showBox(view, {
       anchor: r ? { left: r.left, top: r.top, bottom: r.bottom } : anchorAt(at.pos, at.pos + at.node.nodeSize),
-      text: cur.name || cur.url, url: cur.url,
+      text: shown, url: cur.url,
       onApply: (url, text, r) => {
         const pos = r?.from ?? at.pos;
         const node = view.state.doc.nodeAt(pos);
         if (!isHref(node)) return;
-        const name = text.trim() || url;
-        const tr = view.state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, params: JSON.stringify(hrefParams(url, name, cur.literal && name === cur.name)) });
+        const typed = text.trim() || url;
+        // the text as it was (only the address changed): the name too, formulas and LaTeX and all
+        const params = typed === shown.trim() && cur.name ? hrefParams(url, cur.name, cur.literal) : hrefParamsFor(view, url, typed);
+        const tr = view.state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, params: JSON.stringify(params) });
         view.dispatch(tr.setSelection(TextSelection.create(tr.doc, pos + node.nodeSize)));
       },
       onRemove: r => unlinkText(view, r?.from ?? at.pos),
@@ -228,7 +250,7 @@ export function openLinkBox(view: EditorView): void {
     anchor: anchorAt(from, from), text: '', url: '',
     onApply: (url, text) => {
       const marks = view.state.storedMarks ?? view.state.selection.$from.marks();
-      const node = schema.nodes.command.create({ cmd: 'href', params: JSON.stringify(hrefParams(url, text.trim() || url)), marks: fontAttr(marks) });
+      const node = schema.nodes.command.create({ cmd: 'href', params: JSON.stringify(hrefParamsFor(view, url, text.trim() || url)), marks: fontAttr(marks) });
       const tr = view.state.tr.replaceSelectionWith(node, false);
       view.dispatch(tr.scrollIntoView());
     },
@@ -238,7 +260,7 @@ export function openLinkBox(view: EditorView): void {
 
 /** Make `from`…`to` (the text `text` in the font `marks`) a hyperlink inset; the cursor goes behind it. */
 function linkRange(view: EditorView, from: number, to: number, url: string, text: string, marks: readonly Mark[]): void {
-  const node = schema.nodes.command.create({ cmd: 'href', params: JSON.stringify(hrefParams(url, text)), marks: fontAttr(marks) });
+  const node = schema.nodes.command.create({ cmd: 'href', params: JSON.stringify(hrefParamsFor(view, url, text)), marks: fontAttr(marks) });
   const tr = view.state.tr.replaceWith(from, to, node);
   view.dispatch(tr.setSelection(TextSelection.create(tr.doc, from + node.nodeSize)).scrollIntoView());
 }
@@ -257,10 +279,12 @@ export function pasteLinkOverSelection(view: EditorView, pasted: string): boolea
 export function unlinkText(view: EditorView, pos: number): void {
   const node = view.state.doc.nodeAt(pos);
   if (!isHref(node)) return;
-  const { url, name } = hrefOf(node);
-  const text = name || url;
-  const tr = text ? view.state.tr.replaceWith(pos, pos + node.nodeSize, schema.text(text, fontOf(node))) : view.state.tr.delete(pos, pos + node.nodeSize);
-  view.dispatch(tr.setSelection(TextSelection.create(tr.doc, pos + text.length)));
+  const text = hrefText(view, node);
+  // the words as text, each formula a formula again (in the link's font)
+  const font = fontOf(node);
+  const nodes = linkTextParts(text).map(part => ('text' in part ? schema.text(part.text, font) : schema.nodes.math_inline.create({ latex: part.math, marks: fontAttr(font) })));
+  const tr = nodes.length ? view.state.tr.replaceWith(pos, pos + node.nodeSize, nodes) : view.state.tr.delete(pos, pos + node.nodeSize);
+  view.dispatch(tr.setSelection(TextSelection.create(tr.doc, pos + nodes.reduce((n, x) => n + x.nodeSize, 0))));
   view.focus();
 }
 
@@ -455,6 +479,7 @@ function openBox(o: { anchor: Anchor; text: string | null; url: string; editing:
     return input;
   };
   const textInput = o.text !== null ? field('text', o.text, 'Text', 'link-text') : null;
+  if (textInput) textInput.title = `A formula in the text goes between dollars, $x^2$ (${MATH_KEY} puts them in)`;
   const urlInput = field('link', o.url, 'Paste a link or type an address', 'link-url');
   const apply = document.createElement('button');
   apply.type = 'button'; apply.className = 'link-apply'; apply.textContent = 'Apply';
@@ -483,6 +508,12 @@ function openBox(o: { anchor: Anchor; text: string | null; url: string; editing:
   apply.addEventListener('click', submit);
   box.addEventListener('keydown', ev => {
     ev.stopPropagation();
+    // ⌘M / Ctrl+M in the text, as in a document: a formula there — between dollars, the cursor inside
+    if (textInput && ev.target === textInput && (isMac ? ev.metaKey : ev.ctrlKey) && !ev.altKey && ev.key.toLowerCase() === 'm') {
+      ev.preventDefault();
+      dollarsAround(textInput);
+      return;
+    }
     if (ev.key === 'Enter') { ev.preventDefault(); submit(); }
     else if (ev.key === 'Escape') { ev.preventDefault(); close(true); }
   });
@@ -496,6 +527,14 @@ function openBox(o: { anchor: Anchor; text: string | null; url: string; editing:
   const first = textInput && !textInput.value ? textInput : urlInput;
   first.focus();
   first.select();
+}
+
+/** the text field's selection between dollars (a formula in a link's text), the cursor inside them */
+export function dollarsAround(input: HTMLInputElement): void {
+  const v = input.value, a = input.selectionStart ?? v.length, b = input.selectionEnd ?? a;
+  input.value = v.slice(0, a) + '$' + v.slice(a, b) + '$' + v.slice(b);
+  if (a === b) input.setSelectionRange(a + 1, a + 1); else input.setSelectionRange(a + 1, b + 1);
+  input.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
 let bubble: HTMLElement | null = null;

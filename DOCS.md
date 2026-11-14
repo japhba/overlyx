@@ -3052,6 +3052,19 @@ blend.
   `\text{Wang24}` cell — becomes `\text{\href{https://…}{Wang24}}`, drawn in the link colour
   (`.lm-href`; not MathJax's own `\href`, which would navigate on a click), with the same bubble;
   the target is kept as LaTeX (`%`, `#` escaped) and the document loads hyperref.
+  **A link's text may hold formulas** (14 Nov 2026): ⌘K over words with an inline formula among them
+  makes one link of both (it used to refuse), the formula drawn typeset inside the link; in the
+  link box's *Text* a formula goes between dollars (`the $\beta$-VAE paper`; ⌘M / Ctrl+M there puts
+  the dollars round the selection); changing only the address keeps the text, formulas and LaTeX
+  as they were; *Remove link* gives back words and real formulas. In a .tex file such a link is
+  `\href{url}{the $\beta$-VAE paper}` (the inset's name with `literal "true"`: the words escaped,
+  the formulas as they are — core `linktext.ts`), in markdown `[the $\beta$-VAE paper](url)` (the
+  writer no longer escapes the dollars; the PDF's LaTeX gets the name literal, so a link made in the
+  editor is not escaped twice). On slides, Link (Ctrl+K) wraps the selected words in one `<a>`,
+  formulas (`\(…\)`) included (`runtime/linkwords.ts`, not the browser's createLink); with the caret
+  or the selection inside a link it changes that link's address. A link or bold put into a `<div>`
+  text box while typing used to be appended once more at the box's end with the next save
+  (`runtime/reconcile.ts` patched the box being retyped; now only its source moves on).
   **Links to files of the project** are relative to the document, as on the web: `\href{README.md}{…}`,
   hyperref's `run:` / `file:` links (LyX's file hyperlinks), `\url{notes/a.md}`, Markdown's
   `[…](README.md)`, HTML's `<a href="README.md">`. Core `relativeLink` (projectKey.ts) tells them from

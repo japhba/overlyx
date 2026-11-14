@@ -65,6 +65,7 @@ import { listInkBox } from './listmarkers';
 import { replaceEditingHost, editingTextStyle, carryEditingTextStyle } from './editinghost';
 import { textBoundary, textListItem } from './textnavigation';
 import { setInlineStep } from './inlinesteps';
+import { linkSelection } from './linkwords';
 import { PH, PH_CSS, phRole, isEmptyPh, isPicturePh, primeList } from './placeholders';
 import { TEXT_ANCHOR, WRAP_LINES, anchorFraction, textBoxStyle, type TextAnchor } from '../textboxes';
 import { textLineCount, wrapWarning, contentRect } from './layout';
@@ -634,6 +635,8 @@ export function exec(command: string, value?: string): void {
   // (a table's cell: the alignment is the cell's — table.ts)
   if (cellExec(command)) return;
   if (command === 'inlineStep') { if (setInlineStep(editing, getSelection(), Number(value))) scheduleCommit(); return; }
+  // a link keeps the formulas in its words, and one under the caret gets the new address (linkwords.ts)
+  if (command === 'createLink' && value && linkSelection(editing, value)) { scheduleCommit(); return; }
   else if (command === 'fontSize' && value) styleRun('font-size', value);
   // a typographic property on the selected words (Text ▸ Typography): "property:value"
   else if (command === 'style' && value && TYPOGRAPHY.has(value.slice(0, value.indexOf(':')))) styleRun(value.slice(0, value.indexOf(':')), value.slice(value.indexOf(':') + 1));

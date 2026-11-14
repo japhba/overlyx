@@ -105,7 +105,14 @@ export function applyPatches(base: number, list: SourcePatch[], version: number)
     const range = src.createRange();
     range.selectNodeContents(box);
     const frag = range.createContextualFragment(p.html);
-    if (p.at === undefined) {
+    // the text being retyped (or a box inside it) is left as it is, as reconcile's guard leaves it: only its
+    // source moves on, and stopText fills it from that. A link or bold put in a <div> text came out of
+    // a partial patch as a new element appended to the live text, which the next save then wrote twice.
+    const retyped = !!guard.editing && (live === guard.editing || guard.editing.contains(live));
+    if (retyped) {
+      if (p.at === undefined) { const next = box.cloneNode(false) as Element; next.append(frag); relink(live, box, next); box.replaceWith(next); }
+      else { const olds = Array.from(box.childNodes).slice(p.at, p.at + (p.count ?? 0)); box.insertBefore(frag, olds[0] ?? box.childNodes[p.at + (p.count ?? 0)] ?? null); for (const o of olds) o.remove(); }
+    } else if (p.at === undefined) {
       // its content anew: compared with what it was, child by child
       const next = box.cloneNode(false) as Element;
       next.append(frag);
