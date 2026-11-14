@@ -40,6 +40,8 @@ exports.startForwarding = async function (vscode, extension) {
     resolved++;
     return vscode.Uri.parse(`${origin}/forwarded/${id}${resolvedTarget.pathname}`);
   } });
+  // a remote window (a local desktop one reaches 127.0.0.1 itself: webviewBridge.ts externalAddress)
+  Object.defineProperty(forwardedEnv, 'remoteName', { value: 'forwarding-test' });
   const forwardedVscode = Object.create(vscode);
   Object.defineProperty(forwardedVscode, 'env', { value: forwardedEnv, enumerable: true });
   return {

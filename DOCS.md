@@ -3478,6 +3478,24 @@ once that editor is verifiably the active one), with a status-bar note; a save t
 an edit the host could not write into the document, is shown as an error with *Retry* / *Save now*.
 The integration test (`test/suite/index.cjs`, step 4b) races both the host's save and the webview's.
 
+**Opening a document quickly.** Between "open" and "the text is there" the host and the webview
+used to wait on each other: the host parsed the file only once the webview had loaded its scripts
+and said `ready`, the webview asked for the metadata (macros, labels, the bibliography: a cold
+`cited.bib` of 10k entries takes a second) only once that parse had arrived and the shell had
+rendered, and the author's name (a synced folder asks overlyx.app for it) was asked for on `ready`
+too. Now the host starts all three as soon as it has set the webview's page (`DocSession.prewarm`,
+`openingParse`, the first `meta()` answered from the prewarmed result while the text is unchanged
+and no project file changed — `coolMeta`), so they run while the webview loads. The webview no
+longer loads what the first paint does not need: the built-PDF pane (pdf.js) loads when it is first
+shown (`webview/lazy.tsx`), the SVG editor (the slide canvas with its toolbars and the deck
+templates' 2.5 MB of fonts) on the first SVG opened (`client/src/app/SvgEditorHost.tsx`), and the
+extension host's bundle leaves those fonts in `dist/template-fonts.cjs`, required when a deck is
+created (`esbuild.mjs`), which halved `dist/extension.cjs`. Measuring: `test/probeOpenTiming.mjs`
+(`STARTUP=1` counts from VS Code's start with the file on its command line, so activation is
+part of it) prints the extension's own steps (`host/timing.ts`, written only when
+`OVERLYX_TIMING_LOG` names a file) and the webview's `ol:*` performance marks (scripts evaluated,
+init received, metadata, editor made) on one timeline.
+
 tests/            vitest: .tex parse/write stability (tex.test.ts: features + a corpus of real
                   papers and LyX's example documents), LyX round trips (import path), PM/Yjs
                   conversions, LaTeX writer unit tests, latexmk compile tests

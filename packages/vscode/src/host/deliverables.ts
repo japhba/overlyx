@@ -33,6 +33,7 @@ import { toPng } from './graphics.ts';
 import { authorName } from './newDocument.ts';
 import { webPlaceOf, onWebPlaces } from './sync.ts';
 import { webFileAddress } from '@overlyx/core/projectKey.ts';
+import { externalAddress } from './webviewBridge.ts';
 
 const TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.htm': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
@@ -197,7 +198,7 @@ export class DeliverableEditorProvider implements vscode.CustomTextEditorProvide
     const entry = path.relative(root, document.uri.fsPath).split(path.sep).join('/');
     const local = this.server.baseFor(root);
     // (Remote-SSH, Codespaces: the forwarded address of the local server)
-    const external = (await vscode.env.asExternalUri(vscode.Uri.parse(this.server.origin))).toString().replace(/\/$/, '');
+    const external = await externalAddress(this.server.origin);
     const base = external + local.slice(this.server.origin.length);
     panel.webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'dist')] };
     panel.webview.html = await webviewHtml(panel.webview, this.context.extensionUri, 'deliverable', { page: 'deliverable', docId: entry, base: await this.bridgeBase(), dark: isDark(), frameOrigin: external });

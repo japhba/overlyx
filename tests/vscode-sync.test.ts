@@ -268,6 +268,26 @@ describe('VS Code host: its own write-and-reparse is not a change on disk', () =
     expect(fs.existsSync(path.join(root, 'recovery'))).toBe(false);
   });
 
+  it('an opening reuses the parse and the metadata the host prepared while the webview loaded, and nothing stale', async () => {
+    session.prewarm();
+    await session.syncFromDisk();   // (the opening's own step, queued behind prewarm's parse)
+    const opened = session.openingParse();
+    expect(session.openingParse()).toBe(opened);   // the same text: no second parse
+    await new Promise(r => setTimeout(r, 20));      // prewarm's metadata (after its parse)
+    const first = session.meta();
+    expect(first.path).toBe('appendix.tex');
+    expect(session.meta()).not.toBe(first);          // answered once from the prewarm, then worked out anew
+    session.prewarm();
+    await new Promise(r => setTimeout(r, 20));
+    session.coolMeta();                               // a project file changed meanwhile
+    const fresh = session.meta();
+    expect(fresh.labels).toEqual(first.labels);
+    doc.text = doc.text.replace('Local notes.', 'Local notes, typed.');
+    const reparsed = session.openingParse();         // the text changed since: parsed again
+    expect(reparsed).not.toBe(opened);
+    expect(JSON.stringify(reparsed.pmDoc)).toContain('Local notes, typed.');
+  });
+
   it('a save of the document text itself (auto save) is not a change to push', async () => {
     const base = model(initial);
     const edited = edit(base, 'Local notes.', 'Local notes, edited.');

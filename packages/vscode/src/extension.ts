@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { texHeadings, lyxToPm, splitDocId, projectOfDoc, layoutCheck } from '@overlyx/core';
 import { Bridge, type BridgeDelegate } from './host/bridge.ts';
-import { connectWebviewBridge } from './host/webviewBridge.ts';
+import { connectWebviewBridge, externalAddress } from './host/webviewBridge.ts';
 import { Registry, type OpenEditor } from './host/registry.ts';
 import { DocSession } from './host/session.ts';
 import { OverlyxEditorProvider } from './host/editorProvider.ts';
@@ -39,11 +39,13 @@ import { initAppearance } from './host/appearance.ts';
 import { fontService } from './host/fonts.ts';
 import type { InteractionAction } from '@overlyx/core/interactions.ts';
 import type { HostToEditor } from './shared/protocol.ts';
+import { timing } from './host/timing.ts';
 
 /** What activate() returns — consumed by the integration test (test/suite/index.cjs). */
 export interface OverlyxTestApi { registry: Registry; bridgeBase(): string; checkForUpdates(opts?: { interactive: boolean; apiOverride?: string; dryRun?: boolean }): Promise<CheckResult> }
 
 export async function activate(context: vscode.ExtensionContext): Promise<OverlyxTestApi> {
+  timing('activate');
   initAppearance(context);
   const telemetry = new OverlyxTelemetry(context);
   context.subscriptions.push(telemetry);
@@ -168,6 +170,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
   try {
     await bridge.start();
     await bridgeBase();
+    timing('activate: bridge up');
   } catch (e) {
     telemetry.report(e, 'activation.bridge');
     bridge.dispose();
@@ -189,7 +192,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
       projects: () => [...projectRoots.entries()].map(([name, root]) => ({ name, files: collectFiles(root) })),
       meta: async (docId) => {
         const l = locate(docId);
-        if (l.session) return l.session.meta();
+        if (l.session) { timing('meta asked'); try { return l.session.meta(); } finally { timing('meta answered'); } }
         const r = cachedParseFile(l.ctx, l.relPath);
         return buildMeta({ ctx: l.ctx, project: projectOfDoc(docId), relPath: l.relPath, lyx: r.doc, isChild: r.fragment, fileText: readTextFile(path.join(l.root, l.relPath)) });
       },
@@ -328,7 +331,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
         await deliverableServer.start();
         // served from its workspace folder, as the slide editor serves pages (`../figures` reaches the project's figures)
         const served = rootFor(vscode.Uri.file(abs));
-        const external = (await vscode.env.asExternalUri(vscode.Uri.parse(deliverableServer.origin))).toString().replace(/\/$/, '');
+        const external = await externalAddress(deliverableServer.origin);
         return { base: external + deliverableServer.baseFor(served).slice(deliverableServer.origin.length), entry: path.relative(served, abs).split(path.sep).join('/'), expires: 0 };
       },
       agentTool: async (call) => {
@@ -375,7 +378,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
     bridgeBase,
     canvasBase: async () => {
       await deliverableServer.start();
-      const origin = (await vscode.env.asExternalUri(vscode.Uri.parse(deliverableServer.origin))).toString().replace(/\/$/, '');
+      const origin = await externalAddress(deliverableServer.origin);
       return origin + '/_ol/';
     },
     layoutDir,
@@ -389,6 +392,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
     track: (action, outcome, ms) => telemetry.track(action, outcome, ms),
   });
 
+  timing('activate: editors registered');
   const deliverableServer = new DeliverableServer(vscode.Uri.joinPath(context.extensionUri, 'dist/ol').fsPath, path.join(context.globalStorageUri.fsPath, 'cache'));
   const outlineTree = new OutlineTree(registry);
   const updater = new Updater(context);
@@ -502,6 +506,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
   // a clone of an OverLyX project in the workspace: kept in step with the server (host/sync.ts)
   setupSync(context, (e, area) => telemetry.report(e, area), (outcome, ms) => telemetry.track('extension-sync', outcome, ms));
 
+  timing('activate: done');
   return { registry, bridgeBase: () => bridge.base, checkForUpdates: (opts) => updater.check(opts ?? { interactive: true }) };
 }
 

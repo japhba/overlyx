@@ -6,6 +6,8 @@
  * changed for 10 s. It prints a timeline (editor mounted, metadata there, formulas typeset, how many
  * still untypeset on screen) and the webview's slowest requests. PROFILE=1 writes a CPU profile of
  * the webview per opening, TRACE=1 a Chrome trace of every process (chrome://tracing, Perfetto).
+ * STARTUP=1 measures the first opening from VS Code's start instead (the file on its command line, as
+ * a restored editor: activation is part of it); the timeline then counts from the spawn.
  *
  *   xvfb-run -a -s "-screen 0 1600x1000x24" node test/probeOpenTiming.mjs <workspace dir> <file.tex> [out dir]
  */
@@ -44,12 +46,18 @@ fs.writeFileSync(path.join(udd, 'User/settings.json'), JSON.stringify({
   'workbench.startupEditor': 'none', 'window.restoreWindows': 'none', 'workbench.colorTheme': 'Default Light Modern',
 }, null, 2));
 const exe = await downloadAndUnzipVSCode({ cachePath: path.join(pkg, '.vscode-test') });
-const PORT = 9343;
+const PORT = Number(process.env.CDP_PORT ?? 9343);
+const STARTUP = !!process.env.STARTUP;
+// the extension's own steps (host/timing.ts), printed on each opening's timeline
+const hostLog = path.join(out, 'host-timing.log');
+fs.rmSync(hostLog, { force: true });
+const spawnedAt = Date.now();
 const child = spawn(exe, [
   '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage', '--disable-workspace-trust', '--disable-updates', '--disable-crash-reporter',
   '--skip-welcome', '--skip-release-notes', '--disable-extensions', '--extensionDevelopmentPath=' + pkg,
   '--user-data-dir=' + udd, '--extensions-dir=' + extDir, '--remote-debugging-port=' + PORT, ws,
-], { detached: true, env: { ...process.env, DONT_PROMPT_WSL_INSTALL: '1' } });
+  ...(STARTUP ? [path.resolve(ws, file)] : []),
+], { detached: true, env: { ...process.env, DONT_PROMPT_WSL_INSTALL: '1', OVERLYX_TIMING_LOG: hostLog } });
 const kill = () => { try { process.kill(-child.pid, 'SIGKILL'); } catch { /* gone */ } };
 process.on('exit', kill);
 
@@ -68,25 +76,29 @@ try {
     return null;
   }, 60000, 'the workbench page');
   page.setDefaultTimeout(30000);
-  await sleep(6000);   // the extension activates (onStartupFinished)
+  if (!STARTUP) await sleep(6000);   // the extension activates (onStartupFinished)
 
   const results = [];
   for (let run = 0; run < RUNS; run++) {
     const timeline = [];
     let session = null;
     // TRACE=1: a Chrome trace of the whole opening (every process), summarised per renderer below
-    const tracer = process.env.TRACE ? await browser.newBrowserCDPSession() : null;
+    const startup = STARTUP && run === 0;
+    const tracer = process.env.TRACE && !startup ? await browser.newBrowserCDPSession() : null;
     if (tracer) await tracer.send('Tracing.start', { categories: 'devtools.timeline,disabled-by-default-devtools.timeline,blink.user_timing', transferMode: 'ReturnAsStream' });
-    await page.keyboard.press('Control+P');
-    await page.waitForSelector('.quick-input-widget input');
-    await page.keyboard.type(file);
-    await sleep(800);
-    const t0 = Date.now();
-    await page.keyboard.press('Enter');
+    let t0 = spawnedAt;
+    if (!startup) {
+      await page.keyboard.press('Control+P');
+      await page.waitForSelector('.quick-input-widget input');
+      await page.keyboard.type(file);
+      await sleep(800);
+      t0 = Date.now();
+      await page.keyboard.press('Enter');
+    }
     const mark = (what, extra = {}) => { timeline.push({ t: Date.now() - t0, what, ...extra }); log(`run ${run}: ${((Date.now() - t0) / 1000).toFixed(2)} s  ${what}`, Object.keys(extra).length ? JSON.stringify(extra) : ''); };
     // the webview frame appears before the editor mounts: profile from its first moment when asked
     let frame = null;
-    if (process.env.PROFILE) {
+    if (process.env.PROFILE && !startup) {
       // the outer webview frame (index.html) holds the content frame (fake.html) once it is filled
       frame = await until(async () => page.frames().find(f => f.url().startsWith('vscode-webview:') && f.parentFrame()?.url().startsWith('vscode-webview:')), 30000, 'the webview frame').catch(() => null);
       if (!frame) log('frames:', page.frames().map(f => f.url().slice(0, 100)).join(' | '));
@@ -130,9 +142,15 @@ try {
     log(`run ${run}: settled at ${(settled / 1000).toFixed(2)} s`);
     const perf = await frame.evaluate(() => {
       const nav = performance.getEntriesByType('navigation')[0];
+      const all = performance.getEntriesByType('resource');
+      const kinds = {};
+      for (const r of all) { const k = (r.name.match(/\.(js|mjs|css|woff2|otf|ttf|svg|png)(\?|$)/) || [, r.initiatorType])[1]; const o = kinds[k] ??= { n: 0, kb: 0, lastEnd: 0 }; o.n++; o.kb += Math.round((r.encodedBodySize || r.transferSize || 0) / 1024); o.lastEnd = Math.max(o.lastEnd, Math.round(r.responseEnd)); }
       const res = performance.getEntriesByType('resource').map(r => ({ name: r.name.replace(/^.*\/(t\/[0-9a-f]+\/)?/, ''), start: Math.round(r.startTime), dur: Math.round(r.duration), size: r.transferSize || r.encodedBodySize }));
       return {
         sinceNavigationStart: Math.round(performance.now()),
+        timeOrigin: performance.timeOrigin,
+        marks: performance.getEntriesByType('mark').filter(m => m.name.startsWith('ol:')).map(m => [m.name, Math.round(m.startTime)]),
+        kinds,
         domContentLoaded: nav ? Math.round(nav.domContentLoadedEventEnd) : null,
         load: nav ? Math.round(nav.loadEventEnd) : null,
         resources: res.length,
@@ -141,6 +159,20 @@ try {
       };
     });
     log(`run ${run}: webview`, JSON.stringify(perf, null, 1));
+    // the webview's own timeline on the probe's clock (its navigation began when the host set its HTML)
+    const at = (ms) => ((perf.timeOrigin + ms - t0) / 1000).toFixed(2) + ' s';
+    log(`run ${run}: webview navigation ${at(0)}, DOMContentLoaded ${at(perf.domContentLoaded)}` + perf.marks.map(([n, ms]) => `, ${n} ${at(ms)}`).join(''));
+    const steps = fs.existsSync(hostLog) ? fs.readFileSync(hostLog, 'utf8').split('\n').filter(Boolean).map(l => [Number(l.slice(0, l.indexOf(' '))), l.slice(l.indexOf(' ') + 1)]) : [];
+    for (const [ms, step] of steps.filter(([ms]) => ms >= t0 - 50 && ms <= t0 + settled)) log(`run ${run}: host ${((ms - t0) / 1000).toFixed(2)} s  ${step}`);
+    if (startup) {
+      // the extension's activation, from the extension host's log
+      const logs = path.join(udd, 'logs');
+      const find = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap(e => e.isDirectory() ? find(path.join(d, e.name)) : e.name === 'exthost.log' ? [path.join(d, e.name)] : []);
+      for (const f of find(logs)) for (const line of fs.readFileSync(f, 'utf8').split('\n')) {
+        const m = /^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d+)/.exec(line);
+        if (m && /overlyx|Eager extensions activated/i.test(line)) log(`run ${run}: exthost ${((new Date(m[1].replace(' ', 'T')).getTime() - t0) / 1000).toFixed(2)} s ${line.slice(m[1].length).trim().slice(0, 160)}`);
+      }
+    }
     if (session) {
       const { profile } = await session.send('Profiler.stop');
       const f = path.join(out, `open-${run}.cpuprofile`);

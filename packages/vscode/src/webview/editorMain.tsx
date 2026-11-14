@@ -18,6 +18,8 @@ import 'prosemirror-view/style/prosemirror.css';
 import 'prosemirror-gapcursor/style/gapcursor.css';
 import 'prosemirror-tables/style/tables.css';
 
+// the opening's steps on the webview's timeline (performance marks `ol:*`: test/probeOpenTiming.mjs reads them)
+performance.mark('ol:scripts');
 useHostTheme();
 applyTheme(G.dark);
 initUsage();
@@ -50,6 +52,7 @@ const onInit = (ev: MessageEvent<HostToEditor>) => {
   const m = ev.data;
   if (m?.type !== 'init') return;
   window.removeEventListener('message', onInit);
+  performance.mark('ol:init');
   applyTheme(m.dark);
   render(<EditorShell init={m} />, document.getElementById('app')!);
 };

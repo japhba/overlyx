@@ -19,6 +19,7 @@ import { buildMeta } from './meta.ts';
 import { findMaster } from './project.ts';
 import { WindowUnreachable, PROBE_MS } from '../agents/handover.ts';
 import { markEditedSettings } from '@overlyx/core/tex/preamble.ts';
+import { timing } from './timing.ts';
 
 export class DocSession {
   private headerLines: string[] = [];
@@ -64,8 +65,43 @@ export class DocSession {
     this.headerLines = r.doc.header.lines;
     const pmDoc = lyxToPm(r.doc);
     this.remember(documentModel(pmDoc, this.headerLines), r.doc);
-    return { pmDoc, headerLines: this.headerLines, fragment: r.fragment, warnings: r.warnings, doc: r.doc };
+    const result = { pmDoc, headerLines: this.headerLines, fragment: r.fragment, warnings: r.warnings, doc: r.doc };
+    this.lastParse = { text: this.synced, result };
+    return result;
   }
+
+  /** the latest parseCurrent and the text it read: the opening and the metadata reuse it while the text is the same */
+  private lastParse: { text: string; result: ReturnType<DocSession['parseCurrent']> } | null = null;
+  /** the metadata worked out ahead of the editor's first request (prewarm), for the text it was read from */
+  private warmMeta: { text: string; at: number; value: Record<string, unknown> } | null = null;
+  /** the text the last metadata answered was read from */
+  private metaAnswered: string | null = null;
+
+  /**
+   * While the webview loads its scripts (another process), the host gets the opening ready: the
+   * parse the editor starts from (in the write queue, as the opening's own parse is) and then the
+   * metadata the editor asks for before it shows the text — both were done only once asked, one
+   * after the other.
+   */
+  prewarm(): void {
+    void this.enqueue(async () => { if (!this.disposed) this.parseCurrent(); timing('prewarm: parsed'); }).then(() => new Promise(r => setImmediate(r))).then(() => {
+      if (this.disposed) return;
+      const text = this.document.getText();
+      // (not when the editor asked first: meta() answered it already)
+      if (this.lastParse?.text !== text || this.metaAnswered === text) return;
+      this.warmMeta = { text, at: Date.now(), value: this.buildMetaFor(text, this.lastParse.result.doc) };
+      timing('prewarm: metadata');
+    }).catch(() => { /* the opening parses and reports itself */ });
+  }
+
+  /** The opening's parse: prewarm's while the document's text is still what it read. */
+  openingParse(): ReturnType<DocSession['parseCurrent']> {
+    const text = this.document.getText();
+    return this.lastParse && this.lastParse.text === text && this.synced === text ? this.lastParse.result : this.parseCurrent();
+  }
+
+  /** a file of the project changed (or the document did): metadata worked out before is stale */
+  coolMeta(): void { this.warmMeta = null; }
 
   private remember(model: DocumentModel, doc: LyxDocument): void {
     const key = JSON.stringify(model);
@@ -351,10 +387,17 @@ export class DocSession {
   }
 
   meta(): Record<string, unknown> {
-    return buildMeta({
-      ctx: this.ctx, project: this.project, relPath: this.relPath,
-      lyx: this.toLyxDocument(), isChild: this.isChild, fileText: this.document.getText(),
-    });
+    const text = this.document.getText();
+    this.metaAnswered = text;
+    // prewarm's, once (the editor's first request comes within seconds of the opening)
+    const warm = this.warmMeta;
+    this.warmMeta = null;
+    if (warm && warm.text === text && Date.now() - warm.at < 30000) return warm.value;
+    return this.buildMetaFor(text, this.lastParse?.text === text ? this.lastParse.result.doc : parseDocumentText(text, this.ctx, this.relPath).doc);
+  }
+
+  private buildMetaFor(text: string, lyx: LyxDocument): Record<string, unknown> {
+    return buildMeta({ ctx: this.ctx, project: this.project, relPath: this.relPath, lyx, isChild: this.isChild, fileText: text });
   }
 
   /**

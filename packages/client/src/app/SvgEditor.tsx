@@ -7,19 +7,10 @@ import { svgCanvasSource, svgFileFromCanvas, SVG_FILE_ROOT } from '../deliverabl
 import { uiConfirm } from './Dialogs';
 import type { SvgTarget } from '../editor/svgEditorEvents';
 
-/** One overlay in each shell; view-specific project/path are captured by its menu. */
-export function SvgEditorHost() {
-  const [target, setTarget] = useState<SvgTarget | null>(null);
-  useEffect(() => {
-    const open = (e: Event) => setTarget((e as CustomEvent<SvgTarget>).detail);
-    addEventListener('ol:edit-svg', open);
-    return () => removeEventListener('ol:edit-svg', open);
-  }, []);
-  return target ? <SvgEditor key={target.project + '/' + target.path} target={target} onClose={() => setTarget(null)} /> : null;
-}
+/** (the overlay that opens it, loading this module on the first SVG: SvgEditorHost.tsx) */
+export { SvgEditorHost } from './SvgEditorHost';
 
-
-function SvgEditor({ target, onClose }: { target: SvgTarget; onClose(): void }) {
+export function SvgEditor({ target, onClose }: { target: SvgTarget; onClose(): void }) {
   const [source, setSource] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [dirty, setDirty] = useState(false);

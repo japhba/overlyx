@@ -18,6 +18,7 @@ import { WindowUnreachable, type HandOver } from '../agents/handover.ts';
 import { isHtmlPath } from '@overlyx/core/html/deliverable.ts';
 import { authorName } from './newDocument.ts';
 import { webPlaceOf, onWebPlaces } from './sync.ts';
+import { timing } from './timing.ts';
 
 export interface ProviderDeps {
   track?(action: InteractionAction, outcome: InteractionOutcome, durationMs?: number): void;
@@ -59,8 +60,10 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
 
   async resolveCustomTextEditor(document: vscode.TextDocument, panel: vscode.WebviewPanel, token: vscode.CancellationToken): Promise<void> {
     const openedAt = performance.now();
+    timing('open: ' + path.basename(document.uri.fsPath));
     this.deps.track?.('extension-open', 'attempt');
-    const base = await this.deps.bridgeBase();
+    // (both addresses at once: each asks the window — with Remote-SSH, over the connection)
+    const [base, canvasBase] = await Promise.all([this.deps.bridgeBase(), this.deps.canvasBase?.()]);
     if (token.isCancellationRequested) return;
     // the project is the directory that holds the file, not the whole workspace (a child
     // document adopts its master's directory so it keeps the master's class and preamble)
@@ -86,6 +89,8 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
 
     const post = (msg: HostToEditor) => void panel.webview.postMessage(msg);
     const subs: vscode.Disposable[] = [];
+    // who edits here: under way while the webview loads (the 'ready' handler waits for it)
+    const named = authorName(path.dirname(document.uri.fsPath)).catch(() => undefined);
     // where the project's directory is on overlyx.app, when its folder is synced with a project there (sync.ts): links
     const sendWeb = () => {
       const w = webPlaceOf(document.uri.fsPath), rel = relPath.split(path.sep).join('/');
@@ -171,7 +176,7 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
       });
     };
     let metadataTimer: NodeJS.Timeout | undefined;
-    const metadataChanged = () => { clearTimeout(metadataTimer); metadataTimer = setTimeout(() => post({ type: 'metadataChanged' }), 300); };
+    const metadataChanged = () => { session.coolMeta(); clearTimeout(metadataTimer); metadataTimer = setTimeout(() => post({ type: 'metadataChanged' }), 300); };
     // (an article's stylesheets set its look in the editor: meta's article.vars)
     const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, article ? '**/*.{tex,bib,sty,cls,lyx,html,htm,css}' : '**/*.{tex,bib,sty,cls,lyx}'));
     const diskChanged = (uri: vscode.Uri) => {
@@ -222,12 +227,13 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
           });
           break;
         case 'ready': {
+          timing('webview ready');
           sendAppearance(panel.webview);   // before init: the shell starts with the theme switch's choices
-          const named = authorName(path.dirname(document.uri.fsPath));
           this.applyChain = this.applyChain.then(async () => {
             const author = await named;
             await session.syncFromDisk();
-            const r = session.parseCurrent();
+            const r = session.openingParse();
+            timing('init sent');
             post({ type: 'init', docId: session.docId, base, pmDoc: r.pmDoc as never, headerLines: r.headerLines, fragment: r.fragment, dark: isDark(), ack: session.applied, author });
             sendWeb();
             if (r.warnings.length) vscode.window.setStatusBarMessage(`OverLyX: ${r.warnings.length} parse warning(s) — details in the raw file`, 8000);
@@ -353,11 +359,14 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
       session.dispose();
       this.registry.remove(entry);
     });
-    const canvasBase = await this.deps.canvasBase?.();
     panel.webview.html = await webviewHtml(panel.webview, this.context.extensionUri, 'editor', {
       page: 'editor', docId: session.docId, base, dark: isDark(), canvasBase,
       ...(canvasBase ? { frameOrigin: new URL(canvasBase).origin } : {}),
     });
+    // while the webview loads its scripts: the parse, the metadata and the author's name (a synced
+    // folder asks overlyx.app for it) — each was started only once the webview had asked
+    timing('open: webview page set');
+    session.prewarm();
     this.deps.track?.('extension-open', 'success', performance.now() - openedAt);
   }
 }

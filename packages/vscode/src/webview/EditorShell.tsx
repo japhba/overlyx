@@ -21,13 +21,13 @@ import { InterfaceZoom } from './InterfaceZoom';
 import { OpenOnWeb } from './OpenOnWeb';
 import { docText, labelIn, placeQuery, quotePlace } from '@client/editor/permalink';
 import { setDefaultZoom } from '@client/app/zoomkeys';
-import { BuiltPdf } from './BuiltPdf';
+import { lazyComponent } from './lazy';
 import { ArticlePage } from '@client/app/ArticlePage';
 import { applyArticleLook } from '@client/editor/article';
 import { noteArticle } from '@client/articlekinds';
 import { setProjectPathOpener } from '@client/openpath';
 import type { PdfTarget } from '@client/app/PdfViewer';
-import { SvgEditorHost } from '@client/app/SvgEditor';
+import { SvgEditorHost } from '@client/app/SvgEditorHost';
 import { ToolbarDock } from '@client/app/tbdock';
 import { ContextBars, contextBars } from '@client/app/ctxdock';
 import { SettingsPanel, settingsSearchEntries, documentFontEntry, settingsArg, type SettingsSection } from '@client/app/Settings';
@@ -84,6 +84,9 @@ import { unquote, projectOfDoc, docDirOf, webFileAddress, lyxAuthorId } from '@o
 import { describeChange } from '@client/editor/assembly';
 
 type DialogState = { name: string; arg?: unknown } | null;
+
+/** the built PDF beside the text (pdf.js): loaded when that pane is first shown, not before the document */
+const BuiltPdf = lazyComponent(() => import('./BuiltPdf').then(m => m.BuiltPdf));
 
 const stored = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
 /** Settings in VS Code: the editor's — no Appearance (VS Code's theme; the dark-theme switches sit in Editor), AI or account; Drawing & pen is the margins' pen of this editor */
@@ -330,6 +333,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       // a \RR rendered before its definition arrives would stay raw (the web app defers the same way)
       let m: DocMeta | null = null;
       try { m = await api.meta(docId); } catch (e) { notify('Could not load document metadata: ' + (e as Error).message, 'error'); }
+      performance.mark('ol:meta');
       if (cancelled || !containerRef.current) return;
       if (m) { setMeta(m); editorContext.meta = m; }
       const cached = editorSessions.has(docId);
@@ -361,6 +365,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       api.aiStatus().then(s => { editorContext.ai = s; }).catch(() => { editorContext.ai = { available: false, model: '', completionModel: '', models: [] }; });
       handle.view.focus();
       if (scrollRef.current) scrollRef.current.scrollTop = editorSessions.get(docId)!.scrollTop;
+      performance.mark('ol:editor');
     })();
     return () => {
       cancelled = true;
