@@ -26,7 +26,7 @@ interface Props {
 }
 
 const KIND_ICON: Record<ObjKind, string> = {
-  text: 'dk-text', shape: 'dk-rect', line: 'dk-line', image: 'dk-image', svg: 'dk-shapes', svgpart: 'dk-path', group: 'dk-group', formula: 'dk-formula', ink: 'dk-draw', other: 'dk-arrange',
+  text: 'dk-text', shape: 'dk-rect', line: 'dk-line', image: 'dk-image', svg: 'dk-shapes', svgpart: 'dk-path', group: 'dk-group', formula: 'dk-formula', ink: 'dk-draw', table: 'table', other: 'dk-arrange',
 };
 
 const keyOf = (p: Path) => p.join('.');

@@ -820,6 +820,7 @@ export const DECK_HELP_ROWS: [string, string][] = [
   ['Ctrl+Shift+C, Ctrl+Shift+I', 'While typing: citation, cross-reference'],
   ['Tab / Shift+Tab', 'While typing in a list: the item a level deeper / back'],
   ['Alt+↑ / ↓', 'While typing in a list: the item up / down'],
+  ['Tab / Shift+Tab, arrows', 'In a table: the next / previous cell (Tab in the last cell adds a row); an arrow at a cell’s edge goes to the cell beside it'],
   ['Ctrl+Shift+. / Ctrl+Shift+,', 'Larger / smaller text'],
   ['Ctrl+Shift+L / E / R / J', 'Align the text left / centre / right / justified'],
   ['Ctrl+\\', 'Clear the text formatting'],

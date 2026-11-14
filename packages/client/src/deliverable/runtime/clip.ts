@@ -20,6 +20,7 @@ import type { HtmlOp, Path } from '../protocol';
 import { post, state, srcOf, pathOf, slides, slideOf, docRect } from './env';
 import { isSvgPart, isLocked, selection, commit, visibleSlideEl, kindOf } from './edit';
 import { isSolo } from './solo';
+import { pasteTable } from './table';
 
 const MARK = /<!--overlyx-objects(?: from=(-?\d+))?-->/;
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -290,5 +291,7 @@ export function paste(d: { html: string; plain: string; files: { name: string; t
     return;
   }
   if (!plain) return;
+  // cells copied from a spreadsheet: a table (table.ts)
+  if (pasteTable(d, slide)) return;
   post({ ol: 'pasteText', version: state.version, slide: slide ? pathOf(slide) : null, after: sel.length === 1 && slideOf(sel[0]) === slide ? pathOf(sel[0]) : null, text: plain });
 }

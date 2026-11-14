@@ -65,6 +65,7 @@ import { setInlineStep } from './inlinesteps';
 import { PH, PH_CSS, phRole, isEmptyPh, isPicturePh, primeList } from './placeholders';
 import { TEXT_ANCHOR, WRAP_LINES, anchorFraction, textBoxStyle, type TextAnchor } from '../textboxes';
 import { textLineCount, wrapWarning, contentRect } from './layout';
+import { initTables, tableClick, tableDblClick, tableEnter, tableMenuAt, typingInCell, tableKey, cellExec, tablesAfterSource, tableInfo, tableParts, bindTableGrips, TABLE_OVERLAY_CSS } from './table';
 
 const NS = 'http://www.w3.org/1999/xhtml';
 let host: HTMLElement;
@@ -131,6 +132,7 @@ export function startEditing(): void {
     ${STEPS_CSS}
     ${REVIEW_OVERLAY_CSS}
     ${LIST_DRAG_CSS}
+    ${TABLE_OVERLAY_CSS}
     .peer-tag { position: absolute; transform: translateY(-100%); color: #fff; padding: 1px 5px; border-radius: 3px 3px 0 0; white-space: nowrap; pointer-events: none; font-size: calc(11px * var(--s)); }
     .psel { position: absolute; opacity: .28; pointer-events: none; }
     .pcaret { position: absolute; width: calc(2px * var(--s)); margin-left: calc(-1px * var(--s)); pointer-events: none; }
@@ -154,6 +156,8 @@ export function startEditing(): void {
     commit: ops => commit(ops),
   });
   setLiveAt(liveAt);
+  // tables: their cells typed in, rows and columns, borders dragged (table.ts)
+  initTables({ editing: () => editing, beginText, stopText, commit, selection, setSelection, report, draw, isLocked, scale: () => scale, capture: e => grab(e, true), visibleSlide: visibleSlideEl });
   const css = document.createElement('style');
   css.setAttribute('data-ol-runtime', '');
   css.textContent = `[data-ol-editing] { outline: none !important; cursor: text !important; caret-color: auto; }
@@ -495,6 +499,7 @@ export function afterSource(): void {
   report();
   draw();
   nodesAfterSource();
+  tablesAfterSource();
 }
 
 /**
@@ -621,6 +626,8 @@ export function insertRef(src: string): void { if (!editing) return; editing.foc
 export function exec(command: string, value?: string): void {
   if (!editing) return;
   editing.focus();
+  // (a table's cell: the alignment is the cell's — table.ts)
+  if (cellExec(command)) return;
   if (command === 'inlineStep') { if (setInlineStep(editing, getSelection(), Number(value))) scheduleCommit(); return; }
   else if (command === 'fontSize' && value) styleRun('font-size', value);
   // a typographic property on the selected words (Text ▸ Typography): "property:value"
@@ -803,6 +810,7 @@ export function isStrokeArt(el: Element): boolean {
 
 export function kindOf(el: Element): ObjKind {
   if (el.localName === 'img' || (el.classList.contains('ol-crop') && el.querySelector('img'))) return 'image';
+  if (el.localName === 'table') return 'table';
   if (isSvgPart(el)) return 'svgpart';
   if (el.localName === 'svg' && el.classList.contains('ol-ink')) return 'ink';
   if (el.localName === 'svg') return lineOf(el) || isStrokeArt(el) ? 'line' : 'svg';
@@ -1179,6 +1187,7 @@ function item(el: Element): SelItem | null {
     ...(masterKey(el) ? { master: masterKey(el)! } : {}),
     ...(el.hasAttribute('data-ol-qr') ? { qr: el.getAttribute('data-ol-qr')! } : {}),
     ...(kind === 'group' ? { layout: groupLayoutOf(el, cs(el)) ?? { direction: 'free', gap: 24, align: 'center', equal: false } } : {}),
+    ...(kind === 'table' ? { table: tableInfo(el) ?? undefined } : {}),
   };
 }
 
@@ -1333,7 +1342,7 @@ const cornersOf = (b: Box): [number, number][] => [handleAt(b, 0, 0), handleAt(b
 const SVG_PART_NAMES: Record<string, string> = { path: 'path', rect: 'rectangle', circle: 'circle', ellipse: 'ellipse', line: 'line', polyline: 'polyline', polygon: 'polygon', text: 'text', tspan: 'text', g: 'group', use: 'symbol', image: 'picture' };
 const KIND_NAMES: Record<ObjKind, [string, string]> = {
   text: ['Text', 'texts'], shape: ['Shape', 'shapes'], line: ['Line', 'lines'], image: ['Picture', 'pictures'], svg: ['SVG', 'SVGs'],
-  svgpart: ['SVG part', 'SVG parts'], group: ['Group', 'groups'], formula: ['Formula', 'formulas'], ink: ['Ink', 'strokes'], other: ['Object', 'objects'],
+  svgpart: ['SVG part', 'SVG parts'], group: ['Group', 'groups'], formula: ['Formula', 'formulas'], ink: ['Ink', 'strokes'], table: ['Table', 'tables'], other: ['Object', 'objects'],
 };
 const OTHER_NAMES: Record<string, string> = { video: 'Video', audio: 'Audio', canvas: 'Canvas', iframe: 'Embedded page', object: 'Embedded object', embed: 'Embedded object', table: 'Table' };
 
@@ -1437,6 +1446,8 @@ export function draw(): void {
     const cls = live.some(e => e === editing) ? ' editing' : live.every(isLocked) ? ' locked' : '';
     parts.push(`<div class="tag${cls}" data-ol-kind style="left:${x}px;top:${y}px">${esc(selectionLabel(live))}</div>`);
   }
+  // the selected table's cell typed in, its borders to drag (table.ts)
+  parts.push(tableParts());
   if (rotating && !(selected.length === 1 && selected[0] === rotating && !editing)) rotating = null;
   if (selected.length === 1 && !editing && selected[0].isConnected && !isLocked(selected[0]) && !drag?.moved) {
     const el = selected[0];
@@ -1494,6 +1505,7 @@ export function draw(): void {
   parts.push(rv.pins);
   layer.innerHTML = parts.join('');
   bindListGrips(layer);
+  bindTableGrips(layer);
   for (const hd of Array.from(layer.querySelectorAll('.handle'))) hd.addEventListener('pointerdown', e => onHandleDown(e as PointerEvent, (hd as HTMLElement).dataset.h!), true);
   bindPins(layer, el => { if (editing) stopText(); selected = [el]; report(); draw(); });
 }
@@ -1501,7 +1513,7 @@ export function draw(): void {
 /** rotated by its round handle: a box on a slide, a picture, a drawing (not the flow of a web page) */
 function rotatable(el: Element): boolean {
   if (isSvgPart(el)) return !!partBox(el);
-  if (!movable(el)) return false;
+  if (!movable(el) || el.localName === 'table') return false;
   return el instanceof HTMLElement || el.localName === 'svg';
 }
 
@@ -2277,6 +2289,8 @@ function onDragEnd(e: PointerEvent): void {
     return;
   }
   if (!d.moved) {
+    // a click in a table: its cell is typed in (a drag moves the table) — table.ts
+    if (d.kind === 'move' && d.clicked && selected.length === 1 && !e.shiftKey && tool === 'select' && tableClick(d.clicked, e)) return;
     // a click on an empty placeholder: the caret in it (a picture's, clicked again: a picture for it)
     if (d.kind === 'move' && d.clicked && selected.length === 1 && !e.shiftKey && isEmptyPh(d.clicked) && !isLocked(d.clicked)
       && (!isPicturePh(d.clicked) || d.again) && tapPlaceholder(d.clicked, e)) return;
@@ -3288,6 +3302,8 @@ function onDblClick(e: MouseEvent): void {
   // a path (or a drawing that is one shape): Inkscape's node editor
   const shape = cur ? nodesTargetOf(t, cur) : null;
   if (shape && !isLocked(cur!)) { startNodesOrConvert(shape); return; }
+  // a table's cell (table.ts)
+  if (tableDblClick(t, e)) return;
   // the selected object retyped, or its text-bearing part under the pointer
   let target: Element | null = null;
   if (cur && cur.contains(t)) {
@@ -3632,6 +3648,8 @@ function onKeyDown(e: KeyboardEvent): void {
       return;
     }
     if (e.key === 'Escape') { e.preventDefault(); stopText(); return; }
+    // a table's cell: Tab and the arrows go from cell to cell (table.ts)
+    if (tableKey(e)) return;
     // Alt+↑ / Alt+↓: the list item the caret is in moves up / down (as in documents)
     if (e.altKey && !mod && !e.shiftKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown') && stepItem(e.key === 'ArrowUp' ? -1 : 1)) { e.preventDefault(); return; }
     // the frame has the keyboard but not the text being retyped (it was just made; a click left the focus
@@ -3693,6 +3711,7 @@ function onKeyDown(e: KeyboardEvent): void {
     removeSelected();
     return;
   }
+  if (e.key === 'Enter' && selected.length === 1 && tableEnter(selected[0])) { e.preventDefault(); return; }
   if (e.key === 'Enter' && selected.length === 1 && canType(selected[0])) { e.preventDefault(); beginText(selected[0] as HTMLElement, null, true); return; }
   if (e.key.startsWith('Arrow') && selected.length && !mod && !e.altKey) {
     e.preventDefault();
@@ -3824,9 +3843,12 @@ function onContextMenu(e: MouseEvent): void {
   if (isCropping()) return;
   e.preventDefault();
   e.stopPropagation();
-  if (editing) return;
+  // (typing in a table's cell: the table's menu — rows and columns)
+  if (editing && !typingInCell()) return;
   const el = objectFor(e.target as Element, e.ctrlKey || e.metaKey, { x: e.clientX, y: e.clientY });
+  if (editing && (!el || !selected.includes(el))) stopText();
   if (el && !selected.includes(el)) { selected = [el]; report(); draw(); }
+  tableMenuAt(el, e);
   // the shape of a drawing under the pointer: the menu's "Edit points" edits that one
   setMenuShape(el && e.target instanceof SVGElement && el.contains(e.target) ? e.target : null);
   const on = el ? 'object' : slideOf(e.target as Element) ? 'slide' : 'canvas';

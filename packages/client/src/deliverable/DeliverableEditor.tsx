@@ -51,6 +51,7 @@ import type { MenuDef } from '../app/MenuBar';
 import { loadDeckInk, saveDeckInk, subscribeDeckInk, patchDeckInk, deckInkStyle, type DeckInk, type DeckInkPatch } from './deckink';
 import { readHandwriting, chooseReading, readingError } from './lassobar';
 import { QuickBar } from './QuickBar';
+import { tableMenuItems, tableInsertItems, type DeckTableCtx } from './decktable';
 import { loadTextDrafts, saveTextDrafts, draftWords, pendingDraftKey, loadPendingTextDrafts, forgetPendingTextDraft, type TextDraft } from './recovery';
 import { BgRemoveDialog } from './BgRemoveDialog';
 import { MathOverlay, type MathEditState, type MathOps } from './MathOverlay';
@@ -2380,6 +2381,12 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     if (qrPh.current.key !== key) qrPh.current = { key, is: !!qrPlaceholderAt(cur, one.path) };
     return qrPh.current.is;
   };
+  // tables (decktable.tsx, runtime/table.ts): on slides and posters, not in a web page's flow
+  const tableCtx: DeckTableCtx | undefined = kind !== 'page' ? {
+    insert: (rows, cols) => toCanvas({ ol: 'table', cmd: { t: 'insert', rows, cols } }),
+    info: sel.length === 1 ? sel[0].table ?? null : null,
+    cmd: cmd => toCanvas({ ol: 'table', cmd }),
+  } : undefined;
   const arrangeSel = (how: ArrangeHow) => toCanvas({ ol: 'arrange', how });
 
   const removeSel = () => { const free = sourceSelection().filter(s => !s.locked); if (free.length) applyOps([{ t: 'remove', paths: free.map(s => s.path) }]); };
@@ -2601,6 +2608,8 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
       ...clipboardItems(),
       { sep: true },
       ...(one && one.canText ? [{ label: 'Edit text', shortcut: 'Enter', action: () => toCanvas({ ol: 'editText', path: one.path }) }] : []),
+      // a table: rows and columns at the cell right-clicked, its look (decktable.tsx)
+      ...(one?.table && tableCtx ? [...tableMenuItems(tableCtx, readOnlyRef.current || !!one.locked), { sep: true }] : []),
       // two shapes cross where it was right-clicked: the lower one over the upper one there, as if woven (runtime/weave.ts)
       ...(weave ? [{ label: weave.label, disabled: readOnlyRef.current, action: () => toCanvas({ ol: 'weave' }) }] : []),
       // a drawing: its points, Inkscape's node editor (the shape right-clicked, when the drawing has several)
@@ -2809,6 +2818,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
       { sep: true },
       { label: 'Text box', action: () => insertObject('text') },
       { label: 'Picture…', action: () => { phPicture.current = null; fileInput.current?.click(); } },
+      ...(tableCtx ? [{ label: 'Table', disabled: ro, sub: tableInsertItems(tableCtx) }] : []),
       ...(pageProject() ? [{ label: 'Figure (draw its draft)…', disabled: ro, action: () => void insertDraftPicture(sp ?? null, menuPoint.current) }] : []),
       { label: 'QR code…', disabled: ro, action: () => void qrCode() },
       { label: kind === 'page' ? 'Comment on the page' : 'Comment on the slide', disabled: ro, action: () => startDraft(sp ?? null, i) },
@@ -3112,7 +3122,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     const one = sel.length === 1 ? sel[0] : null;
     const at = () => { const r = canvasBox.current?.getBoundingClientRect(); return { x: (r?.left ?? 200) + 24, y: (r?.top ?? 120) + 12 }; };
     const pick = (title: string, render: (close: () => void) => ComponentChildren) => { const p = at(); pickAt(p.x, p.y, title, render); };
-    const textOn = editingText !== null || sel.some(s => s.canText || s.text);
+    const textOn = editingText !== null || sel.some(s => s.canText || s.text || s.kind === 'table');
     const master = deck && one && one.slide >= 0 && !ro ? masterOps(one) : null;
     const menus: MenuDef[] = [
       // (entries for the shell's File menu: editormenus.ts mergeEditorMenus)
@@ -3152,6 +3162,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
       { title: 'Insert', items: [
         { label: 'Text box', shortcut: 'T', disabled: ro, action: () => insertObject('text') },
         { label: 'Picture…', disabled: ro, action: () => { phPicture.current = null; fileInput.current?.click(); } },
+        ...(tableCtx ? [{ label: 'Table', disabled: ro, sub: tableInsertItems(tableCtx) }] : []),
         ...(pageProject() ? [{ label: 'Figure (draw its draft)…', disabled: ro, action: () => void insertDraftPicture(null, null) }] : []),
         { label: one?.qr !== undefined ? 'QR code — edit its link…' : 'QR code…', disabled: ro, action: () => void qrCode(one && (one.qr !== undefined || qrOffer(one)) ? one.path : undefined) },
         { label: 'Shape', disabled: ro, sub: SHAPES.map(s => ({ label: s.label, action: () => setTool(s.tool) })) },
@@ -3219,6 +3230,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
         { label: 'Numbered list', shortcut: 'Ctrl+Shift+7', action: () => textActions.list('ol') },
         { sep: true },
         { label: 'Clear formatting', shortcut: 'Ctrl+\\', action: textActions.clear },
+        ...(tableCtx?.info ? [{ sep: true }, { label: 'Table', sub: tableMenuItems(tableCtx, !!one?.locked) }] : []),
         ...(master?.similar ? [{ label: `Make ${master.similar} similar text${master.similar === 1 ? '' : 's'} on other slides look like this`, action: master.lookAlike }] : []),
       ]) }] : []),
       ...(!ro ? [{ title: 'Arrange', items: greyed(!sel.length, [
@@ -3757,7 +3769,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     // (the text being retyped ends first: its box does not take the undone version while it is retyped)
     undo: () => { toCanvas({ ol: 'stopText' }); setTimeout(() => host.undo(), 30); }, redo: () => { toCanvas({ ol: 'stopText' }); setTimeout(() => host.redo(), 30); },
     insertImage: () => { phPicture.current = null; fileInput.current?.click(); },
-    text: textActions, paint, arrange: arrangeSel, groupLayout: layout => toCanvas({ ol: 'groupLayout', layout }), image: imageTools, remove: removeSel,
+    text: textActions, paint, table: tableCtx, arrange: arrangeSel, groupLayout: layout => toCanvas({ ol: 'groupLayout', layout }), image: imageTools, remove: removeSel,
     slideBackground,
     newSlide: () => newSlide(currentRef.current),
     layoutPicker: (close, apply) => layoutPicker(currentRef.current, close, apply),

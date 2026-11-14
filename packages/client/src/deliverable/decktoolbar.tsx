@@ -18,6 +18,7 @@ import { fmtPt, ptToPx, pxToPt, sizePt, stepPt } from './units';
 import { drawingToolbar } from './drawingToolbar';
 import { type DeckInk, type DeckInkPatch, LASSO_KINDS } from './deckink';
 import { lassoGroups } from './lassobar';
+import { tableTool, tableGroups, type DeckTableCtx } from './decktable';
 import { PH_ROLES, PH_LABELS, type PhRole } from './decklayouts';
 import { bundledFont, deckFontFor, firstFontFamily, previewBundledFonts, type DeckFont, type GoogleFamilyStyles } from './deckfonts';
 import { FontList, type FontSection } from '../app/FontPicker';
@@ -92,6 +93,8 @@ export interface DeckCtx {
   master?: { on(): void; unlink(): void; removeOthers(): void; deleteAll(): void; similar: number; lookAlike(): void };
   /** the theme view (Edit theme: the objects on every slide, the deck's colours, fonts and layouts — DeliverableEditor), on or not; in it Background is every slide's */
   theme?: { on: boolean; toggle(): void; disabled?: boolean };
+  /** tables (decktable.tsx): the Table button's grid, the selected table's rows, columns and look — absent on a web page */
+  table?: DeckTableCtx;
   /** placeholders (decklayouts.ts): one of a role put on the slide; a picture put into the empty picture placeholder selected */
   placeholders?: { insert(role: PhRole): void; picture(): void };
   /** LyX's formula editor (MathOverlay): open on a formula of the text, a new formula at the caret, its commands, the math panels; a displayed one numbered and labelled */
@@ -372,7 +375,7 @@ function paintLabel(items: SelItem[]): string {
  * then group / ungroup and arrange, `extra` (duplicate, comment) and delete. Empty while points, a formula or a crop are edited.
  * Over `words` selected in a text being retyped: what is done to words — font, size, bold … highlight, a link —, then `extra`.
  */
-const QUICK: string[][] = [['dk-ph-addpicture'], ['dk-b', 'dk-i', 'dk-color', 'dk-size'], ['dk-align', 'dk-fit'], ['dk-inkcolor', 'dk-ink-thinner', 'dk-ink-thicker', 'dk-ink-convert', 'dk-fill', 'dk-stroke'], ['dk-linecolor', 'dk-lineweight', 'dk-tips'], ['dk-crop', 'dk-nobg'], ['dk-group', 'dk-ungroup', 'dk-arrange']];
+const QUICK: string[][] = [['dk-ph-addpicture'], ['dk-b', 'dk-i', 'dk-color', 'dk-size'], ['dk-align', 'dk-fit'], ['dk-table-row', 'dk-table-col'], ['dk-inkcolor', 'dk-ink-thinner', 'dk-ink-thicker', 'dk-ink-convert', 'dk-fill', 'dk-stroke'], ['dk-linecolor', 'dk-lineweight', 'dk-tips'], ['dk-crop', 'dk-nobg'], ['dk-group', 'dk-ungroup', 'dk-arrange']];
 const QUICK_WORDS: string[][] = [['dk-font', 'dk-size'], ['dk-b', 'dk-i', 'dk-u', 'dk-color', 'dk-hl'], ['dk-href', 'dk-inline-step']];
 export function quickGroups(sections: ToolSection[], extra: ToolButton[], words = false): ToolButton[][] {
   const all = new Map<string, ToolButton>();
@@ -414,6 +417,7 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
       { id: 'dk-draw', title: drawing ? 'Done drawing (Esc)' : held ? 'Drawing — click for the pens, colours and widths again (Esc or V puts the pen away)' : 'Draw (P) — pen, highlighter, eraser and lasso, stroke after stroke until Esc (a Pencil draws without it)',
         icon: 'dk-draw', active: drawing || held, disabled: ro, action: () => { if (held) c.ink.fold!(false); else c.ink.draw(!drawing); } },
       { id: 'dk-image', title: 'Picture… (or drop a picture or an SVG on the slide)', icon: 'dk-image', action: c.insertImage, disabled: ro },
+      ...(c.table ? [tableTool(c.table, ro)] : []),
       { id: 'dk-formula', title: c.editingText ? 'Formula here, in the text (Ctrl+M or $; Ctrl+Shift+M displayed)' : 'Formula — click or drag on the slide; while typing a text, Ctrl+M or $ puts one in it', icon: 'dk-formula',
         action: () => { if (c.editingText) c.math.insert(false); else c.setTool('formula'); }, active: c.tool === 'formula' || c.math.editing, disabled: ro },
       { id: 'dk-references', title: 'References — the works cited (\\cite) listed, as LaTeX\'s bibliography: click or drag on the slide', icon: 'dk-references', action: () => c.setTool('references'), active: c.tool === 'references', disabled: ro },
@@ -443,7 +447,7 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
   ]] });
   /** the groups pushed from here on belong to a section named `label` */
   const section = (label: string) => { context = []; sections.push({ label, groups: context }); };
-  const textish = c.editingText || sel.some(s => s.canText || s.text);
+  const textish = c.editingText || sel.some(s => s.canText || s.text || s.kind === 'table');
   const shapes = sel.filter(s => s.kind === 'shape' || s.kind === 'svg' || s.kind === 'svgpart' || (s.kind === 'text' && s.style.fill));
   const lines = sel.filter(s => s.kind === 'line');
   const images = sel.filter(s => s.kind === 'image');
@@ -530,6 +534,12 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
           ...(c.master && c.master.similar > 0 && one && !c.editingText ? [{ label: `Make ${c.master.similar} similar text${c.master.similar === 1 ? '' : 's'} on the other slides look like this`, html: ICON('dk-master'), action: c.master.lookAlike }] : []),
         ] } },
     ]);
+  }
+
+  // a table selected or typed in: its rows, columns, header row, borders, fills (decktable.tsx)
+  if (c.table?.info) {
+    section('Table');
+    context.push(...tableGroups(c.table));
   }
 
   const paintOf = (items: SelItem[]) => items[0]?.style;

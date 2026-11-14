@@ -43,6 +43,7 @@ import { startLinks } from './links';
 import { looksOf } from './placeholders';
 import { installStorage } from './storage';
 import { refreshAnnotations } from './annotations';
+import { TABLE_CSS, tableCommand, tableValign } from './table';
 
 // a page's localStorage where the sandbox refuses the browser's (storage.ts), before the page's scripts run
 installStorage(MODE === 'view');
@@ -339,7 +340,8 @@ function onMessage(e: MessageEvent): void {
     case 'arrange': if (MODE === 'edit') arrange(m.how); break;
     case 'groupLayout': if (MODE === 'edit') setGroupLayout(m.layout); break;
     case 'paint': if (MODE === 'edit') paint(m.paint); break;
-    case 'valign': if (MODE === 'edit') valign(m.v, m.centre); break;
+    case 'valign': if (MODE === 'edit' && !tableValign(m.v)) valign(m.v, m.centre); break;
+    case 'table': if (MODE === 'edit') tableCommand(m.cmd); break;
     case 'view': if (MODE === 'edit') setView(m.view); break;
     case 'crop': if (MODE === 'edit') edit.cropAt(m.path, { aspect: m.aspect, shape: m.shape }); break;
     case 'cropPreset': if (MODE === 'edit') edit.cropPreset(m.path, m); break;
@@ -441,6 +443,8 @@ function init(): void {
   startMath();
   // citations and lists of references (cite.ts)
   addStyle(CITE_CSS);
+  // tables (class ol-table): their look in every mode — the canvas, the rail, presenting, the PDF, the website
+  addStyle(TABLE_CSS);
   if (document.body) { renderCites([document.body]); refreshCites(); }
   window.__ol = { report, layout, version: () => state.version, slides: () => slideBoxes(), size: pageSize, peerCarets: edit.peerCarets, railPeers: () => railDrawn,
     printSteps: () => {

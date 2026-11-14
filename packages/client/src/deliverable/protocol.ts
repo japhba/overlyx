@@ -14,6 +14,7 @@ import type { MathJaxMacro } from '@overlyx/core/html/deckextras.ts';
 import type { ReliabilityEvent, ReliabilityPointer } from '@overlyx/core/reliability.ts';
 import type { GlitchFields } from '@overlyx/core/glitch.ts';
 import type { PresentState, PresenterState } from '../app/presentshare';
+import type { TableCmd, TableInfo } from './tablemodel';
 
 export type { HtmlOp, Path };
 export type { ReliabilityEvent, ReliabilityPointer };
@@ -62,7 +63,7 @@ export interface InkStyle {
 }
 
 /** what kind of object the toolbar is showing tools for */
-export type ObjKind = 'text' | 'shape' | 'line' | 'image' | 'svg' | 'svgpart' | 'group' | 'formula' | 'ink' | 'other';
+export type ObjKind = 'text' | 'shape' | 'line' | 'image' | 'svg' | 'svgpart' | 'group' | 'formula' | 'ink' | 'table' | 'other';
 
 /** PowerPoint's / Inkscape's arrangement commands, carried out by the runtime on the selection */
 export type ArrangeHow =
@@ -176,6 +177,8 @@ export interface SelItem {
   loose?: boolean;
   /** a QR code (qrcode.ts): the link or text it holds */
   qr?: string;
+  /** a table (tablemodel.ts): its size and look, the cell typed in */
+  table?: TableInfo;
 }
 
 /** `deleted`: deleted as a suggestion (shown faded until accepted; not presented); `skipped`: Skip slide (deckmaster.ts: not presented, not printed) */
@@ -288,6 +291,8 @@ export type ToRuntime =
   | { ol: 'paint'; paint: Paint }
   /** the selected text boxes aligned to their top, middle or bottom (runtime arrange.ts valign); `centre`: and centred across */
   | { ol: 'valign'; v: 'flex-start' | 'center' | 'flex-end'; centre?: boolean }
+  /** the selected table (or the one typed in): rows, columns, its look (runtime/table.ts) */
+  | { ol: 'table'; cmd: TableCmd }
   | { ol: 'view'; view: CanvasView }
   /** crop mode for a picture (optionally with an aspect / a round frame at once) — runtime/crop.ts */
   | { ol: 'crop'; path: Path; aspect?: number | null; shape?: 'rect' | 'circle' }

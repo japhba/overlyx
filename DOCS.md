@@ -1618,6 +1618,35 @@ blend.
     extension's own — not the bridge, whose API edits documents — on 127.0.0.1 with a random token,
     the same sandbox policy and runtime (`dist/ol/`, built by `scripts/build-runtime.mjs`); paths
     resolve in the workspace folder.
+  * **Tables on slides and posters** (14 Nov 2026, survey gap 1; `tablemodel.ts` the format,
+    `runtime/table.ts` the canvas, `decktable.tsx` the toolbar and menus). *Insert ▸ Table*, the
+    toolbar's Table button (PowerPoint's rows × columns grid), the empty slide's right-click menu
+    and a spreadsheet's cells pasted (an HTML table or tab-separated lines on the clipboard) put a
+    plain table on the slide — in the place of an empty body placeholder, as PowerPoint does, else in
+    the middle —, an object like a text box (selected, moved, resized, duplicated, layered, deleted,
+    undone; not rotated):
+    `<table class="ol-table" style="position: absolute; left: …px; top: …px; width: …px">` with
+    `<tr>` / `<th>` / `<td>` rows — the first row of `<th>` is the header row. A click in a cell
+    types there (the text box's typing: bold, colours, formulas, links; Enter a line break); Tab /
+    Shift+Tab the next / previous cell, Tab in the last cell adds a row, an arrow at a cell's edge
+    goes to the cell beside it, Esc leaves the table selected. With the table selected the Text tools
+    act on all of it (its `style`), while a cell is typed in on the words. Rows and columns (above /
+    below / left / right, delete) go at the cell typed in or right-clicked last (dashed outline), else
+    at the end — from the contextual toolbar's *Table* section, the quick menu, the right-click menu
+    and *Format ▸ Table*; the borders between columns and under rows are dragged (column widths as
+    `<colgroup><col style="width: …%">`, a row's height as its `<tr style="height: …px">`); the
+    right-click menu also merges a cell with the one to its right or below (`colspan` / `rowspan`,
+    the texts one under the other) and splits a merged cell again. The look:
+    `class="ol-table"` (TABLE_CSS, the same in editing, the rail, presenting, the PDF and the website)
+    takes the slide's font and text colour and draws its rules in that colour, sizes in em — so it
+    reads on light and dark slides, in every design and on a poster; `data-ol-borders="all"` a line
+    round every cell (the header row tinted with the design's `--accent`), `"none"` no lines, no attribute horizontal
+    rules only (booktabs: above, under the header, below); a cell's fill and alignment are its own
+    `style` (`background`, `text-align`, `vertical-align`). Every change is ordinary source
+    operations (cells, rows, attributes, styles), so undo, co-editing, Suggesting and comments work
+    as for other objects. A `<table>` an agent or a person writes is edited the same way (without the
+    class it keeps its own look until a border style is chosen). Not on web pages (their tables stay
+    one object of the flow).
   * **Anchored annotations** (`runtime/annotations.ts`): an empty SVG directly in a `.slide`
     can carry `data-ol-connector='{"from":{"id":"diagram","side":"right"},"to":{"id":"equation","class":"term","side":"left"},"curve":40}'`
     or `data-ol-frame='{"target":{"id":"equation","class":"term"},"padding":8,"radius":8}'`.
