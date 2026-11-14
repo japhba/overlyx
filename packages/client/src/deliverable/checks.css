@@ -1,0 +1,18 @@
+/* Check (deliverable/ChecksPane.tsx): the list of what is wrong, slide by slide; its frame measures out of sight */
+.dl-check-btn { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.dl-checkframe { position: fixed; left: 0; top: 0; border: 0; opacity: 0; pointer-events: none; z-index: -1; transform: scale(0.02); transform-origin: 0 0; }
+.dl-checks { width: 288px; }
+.dl-chk-sum { padding: 8px 10px; line-height: 1.4; border-bottom: 1px solid var(--ui-border); }
+.dl-chk-sum .dl-btn { margin-left: 4px; }
+.dl-chk-group { padding-bottom: 4px; }
+.dl-chk-slide { display: block; width: 100%; text-align: left; border: 0; background: none; font: inherit; font-weight: 600; font-size: 11.5px; color: var(--ui-muted); padding: 8px 10px 2px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dl-chk-slide span { font-weight: 400; }
+.dl-chk-slide.on { color: var(--ui-fg); }
+.dl-chk-row { display: flex; flex-direction: column; gap: 2px; padding: 5px 10px 6px; cursor: pointer; border-left: 3px solid transparent; line-height: 1.35; }
+.dl-chk-row:hover, .dl-chk-row:focus-visible { background: var(--hover-bg, rgba(47,111,222,.1)); border-left-color: var(--warn-border, #d99a00); outline: none; }
+.dl-chk-kind { font-size: 11px; font-weight: 700; color: var(--warn-fg, #6b4b00); }
+.dl-chk-say { color: var(--ui-fg); overflow-wrap: anywhere; }
+.dl-chk-fix { color: var(--ui-muted); font-size: 12px; }
+.dl-chk-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.dl-chk-acts .dl-btn { font-size: 11.5px; border: 1px solid var(--ui-border); border-radius: 4px; padding: 1px 8px; }
+.dl-chk-foot { padding: 8px 10px; border-top: 1px solid var(--ui-border); color: var(--ui-muted); font-size: 11.5px; line-height: 1.4; }

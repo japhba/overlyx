@@ -33,6 +33,7 @@ import { setView, refreshView, reportColors } from './view';
 import { startPresenting, sourceChanged as presentSourceChanged, presentSettled } from './present';
 import { expandPrintSteps, STEP_VISIBILITY_CSS } from './steps';
 import { report, rememberPage } from './report';
+import { runCheck } from './check';
 import { layout } from './layout';
 import { ensureSolo, notePageBackground, PAGE_BG, SOLO_PAD } from './solo';
 import { setDarkSlides, darkSlidesChanged } from './darkpages';
@@ -79,6 +80,8 @@ let railDrag: { from: number; y0: number; to: number | null; x: number; y: numbe
 let railPeers: PeerInfo[] = [];
 /** who the rail shows where (`window.__ol.railPeers()`, for tests) */
 let railDrawn: { slide: number; name: string }[] = [];
+/** the slides the editor's Check found something on (checks.ts): a quiet dot beside each */
+let railMarks = new Set<number>();
 
 /** the slide a person is at: the one with the text they retype or what they selected, else the one they look at */
 function peerSlide(p: PeerInfo, ss: HTMLElement[]): number {
@@ -125,6 +128,7 @@ function startThumb(): void {
     .chg { position: absolute; width: calc(3px / var(--s)); transform: translateX(calc(-5px / var(--s))); border-radius: calc(2px / var(--s)); }
     .del { position: absolute; transform: translate(-50%, -50%); font: 700 calc(12px / var(--s)) sans-serif; color: #fff; background: #d2453c; padding: calc(2px / var(--s)) calc(8px / var(--s)); border-radius: calc(4px / var(--s)); }
     .del.skip { background: #5f6368; font-weight: 600; }
+    .chk { position: absolute; width: calc(6px / var(--s)); height: calc(6px / var(--s)); border-radius: 50%; background: #d99a00; transform: translate(calc(-100% - 9px / var(--s)), calc(18px / var(--s))); }
     .who { position: absolute; display: flex; gap: calc(2px / var(--s)); transform: translate(calc(-100% - 4px / var(--s)), calc(-100% - 4px / var(--s))); }
     .who span { display: grid; place-items: center; width: calc(18px / var(--s)); height: calc(18px / var(--s)); border-radius: 50%; font: 700 calc(9px / var(--s)) sans-serif; box-shadow: 0 0 0 calc(1.5px / var(--s)) #fff; }
   </style><div class="l"></div>`;
@@ -228,6 +232,7 @@ function drawRail(): void {
   ss.forEach((s, i) => {
     const r = docRect(s);
     parts.push(`<div class="n${i === railCurrent ? ' on' : ''}" style="left:${r.x}px;top:${r.y}px">${i + 1}</div>`);
+    if (railMarks.has(i)) parts.push(`<div class="chk" data-ol-rail-check="${i}" style="left:${r.x}px;top:${r.y}px" title="Check found something on this slide"></div>`);
     // the slide's open comments and suggestions (review.ts)
     const rv = railReview(s);
     if (rv.changed) parts.push(`<div class="chg" style="left:${r.x}px;top:${r.y}px;height:${r.h}px;background:${rv.changed}" title="Suggested changes"></div>`);
@@ -366,6 +371,8 @@ function onMessage(e: MessageEvent): void {
     case 'newComment': if (MODE === 'edit') edit.newComment(); break;
     case 'paste': if (MODE === 'edit') edit.pasteHere(m); break;
     case 'weave': if (MODE === 'edit') weave(); break;
+    case 'check': if (MODE === 'thumb') void runCheck(m.id); break;
+    case 'checkMarks': if (MODE === 'thumb') { railMarks = new Set(m.slides); drawRail(); } break;
   }
 }
 

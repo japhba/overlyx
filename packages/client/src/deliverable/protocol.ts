@@ -181,6 +181,19 @@ export interface SelItem {
   table?: TableInfo;
 }
 
+/* what is wrong with a page (runtime/report.ts): the agents' render_page report and the editor's Check */
+/**
+ * `text` is the agents' wording. For the editor's Check (checks.ts, people's wording): `path` — the
+ * object of the slide the issue is in (what a click on it selects), `name` — its words, if it has
+ * any, `what` — whether it is text or a picture, `n` — the measurements the wording is made of.
+ */
+export interface PageIssue {
+  kind: 'overflow' | 'wrap' | 'offpage' | 'off-slide' | 'overlap' | 'small-text' | 'contrast' | 'low-res' | 'image' | 'math' | 'citation' | 'reference';
+  text: string; at?: { x: number; y: number; w: number; h: number };
+  path?: Path; name?: string; what?: 'text' | 'picture' | 'object'; n?: Record<string, number | string | boolean>;
+}
+export interface PageReport { index: number; title: string; issues: PageIssue[] }
+
 /** `deleted`: deleted as a suggestion (shown faded until accepted; not presented); `skipped`: Skip slide (deckmaster.ts: not presented, not printed) */
 export interface SlideBox { index: number; path: Path; rect: Rect; title: string; deleted?: boolean; skipped?: boolean }
 
@@ -351,7 +364,11 @@ export type ToRuntime =
   /** Ctrl+V with the keyboard in the editor: what the clipboard holds, pasted on the canvas (runtime/clip.ts) */
   | { ol: 'paste'; html: string; plain: string; files: { name: string; type: string; data: ArrayBuffer }[] }
   /** how the deck's text looks where the editor asks (a new slide's placeholders take it: decklayouts.ts) — answered with `looks` */
-  | { ol: 'looks'; id: number; paths: Path[] };
+  | { ol: 'looks'; id: number; paths: Path[] }
+  /** the Check pane's frame (checks.ts): what is wrong with the slides as they are now — answered with `checked` (runtime/check.ts) */
+  | { ol: 'check'; id: number }
+  /** the slide rail: the slides the Check found something on (a quiet dot beside each; none: no dots) */
+  | { ol: 'checkMarks'; slides: number[] };
 
 /** the computed type of a text element (CSS values as the browser gives them) */
 export interface TextLook { fontSize: string; lineHeight: string; fontFamily: string; fontWeight: string; color: string }
@@ -496,7 +513,9 @@ export type FromRuntime =
   /** the answer to `looks`: each path's look (null: no such element) */
   | { ol: 'looks'; id: number; looks: (TextLook | null)[] }
   /** an empty picture placeholder tapped (decklayouts.ts): the editor asks for a picture to put in its place */
-  | { ol: 'placeholderPicture'; path: Path };
+  | { ol: 'placeholderPicture'; path: Path }
+  /** the answer to `check`: each slide's issues (runtime/report.ts), the slides' size (CSS px) */
+  | { ol: 'checked'; id: number; version: number | null; kind: DeliverableKind; width: number; height: number; pages: PageReport[]; error?: string };
 
 /** the room (screen px) left of the rail's thumbnails for their numbers: the editor makes the rail's frame that much wider, the rail's page lays its slides out right of it */
 export const RAIL_NUM = 20;

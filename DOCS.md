@@ -1671,8 +1671,11 @@ blend.
     room than its box (measured by letting the box take its natural size), text running off the
     slide, text of two objects on top of each other (individual glyph boxes, excluding whitespace
     and hidden text), a foreground picture covering text (inline SVG fills/strokes, rather than
-    the viewport), text too small for the kind (deck ~2.2 % of the slide height, poster ~0.55 %),
-    low contrast, pictures that did not
+    the viewport), objects lying outside the slide and pictures the slide's edge cuts 5 % or more
+    off (`off-slide`), text too small for the kind (deck ~2.2 % of the slide height; poster under
+    18 pt in print — `posterPrint`: a poster laid out at its printed size in mm/in prints as it is, a
+    smaller one is taken as an A0), a poster's pictures with fewer than 100 pixels an inch in print
+    (`low-res`, SVG excepted), low contrast, pictures that did not
     load, formulas that did not typeset (MathJax errors and TeX left as written), the page's script
     errors. Its JSON text and MCP `structuredContent` also contain `report` and `layout`:
     the pictured pages' object selectors/ids, rendered boxes, text line counts, soft wrapping
@@ -1682,7 +1685,8 @@ blend.
     Boxes are CSS pixels from the slide's top left (document top left for web pages), before
     screenshot scaling. Layout measurements live in `runtime/layout.ts`; platform fonts come
     from DevTools (`render-layout.ts`). `data-ol-lint="no-overlap"` on either object or an SVG shape opts deliberate layering
-    out of overlap warnings only. The renderer (`render.ts`) is one headless Chromium
+    out of overlap warnings only; `data-ol-lint="no-edge"` opts an object meant to run off the
+    slide's edge out of the `off-slide` warning (the words go together: `data-ol-lint="no-edge no-overlap"`). The renderer (`render.ts`) is one headless Chromium
     (playwright-core) in the bubblewrap
     sandbox with **no network namespace**: every request of the page comes back to the server over
     the DevTools pipe and is answered like the editor's frame (`resolveDeliverable`) or, for a short
@@ -1707,6 +1711,23 @@ blend.
     (`qrPlaceholderAt`). Agents and people who write the HTML by hand cannot compute the path: they
     leave the placeholder, or ask for the code in the editor. `tests/deck-qr.test.ts` reads codes back
     with a reader of its own and checks their Reed–Solomon syndromes.
+  * **Check** (people's side of `render_page`'s report: `ChecksPane.tsx`, `checks.ts`,
+    `runtime/check.ts`): *✓ Check* in the deck editor's top bar (beside *▶ Present*; *View ▸ Check
+    the slides* / *Check the poster*, the side columns' ⋯ menu) opens a pane
+    that lists, slide by slide, what `report.ts` finds — text that does not fit its box or runs off
+    the slide, objects off the slide, text too small (a slide: for the back of a room; a poster: for
+    its printed size), low contrast, objects lying on each other, a poster's pictures with too few
+    pixels for print, pictures that did not load, formulas shown as typed, missing citations — each
+    said as what is wrong and what would fix it, in points as the toolbar shows them, never px or
+    element names (`sayIssue`). A click goes to the slide and selects the object (the issue carries
+    the object's source `path`, its words `name`, `what` it is and the measurements `n`, besides the
+    agents' `text`); slides with something get a quiet amber dot in the rail (`checkMarks`); the
+    button shows the count. *It is meant* on an overlap or a picture cut at the edge adds
+    `no-overlap` / `no-edge` to the object's `data-ol-lint` (one attribute splice, so undo and
+    co-editing work). It never touches the frame people type and draw in: while the pane is open, a
+    frame of its own out of sight (the rail's `thumb` page once more, every slide at its size) gets
+    the editor's settled text — a second after the last change, never while the pen writes — and
+    answers `check` with `checked`; closing the pane removes it. Unit test: `tests/deck-checks.test.ts`.
   * **Usability survey, 14 Nov 2026** (the user: "survey usability … feature completeness of the
     layout editors, especially slides and posters … improve what you think could be better"; walked
     through as a new user on an isolated instance, with a code inventory beside it). **Fixed then**:

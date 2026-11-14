@@ -5,14 +5,14 @@
  * could not read, the page's script errors. Measured in the page as rendered, in CSS px relative
  * to the slide.
  */
-import { slides, slideTitle, state, srcOf, isForeign, pageHtml } from './env';
+import { slides, slideTitle, state, srcOf, isForeign, pageHtml, pathOf, sourced } from './env';
 import { mathTypeset } from './math';
 import { noOverlap, visibleInk, glyphInk, formulaInk, pictureInk, aboveText } from './overlap';
 import { wrapWarning } from './layout';
 import { WRAP_LINES } from '../textboxes';
+import type { PageIssue, PageReport } from '../protocol';
 
-export interface PageIssue { kind: 'overflow' | 'wrap' | 'offpage' | 'overlap' | 'small-text' | 'contrast' | 'image' | 'math' | 'citation' | 'reference'; text: string; at?: { x: number; y: number; w: number; h: number } }
-export interface PageReport { index: number; title: string; issues: PageIssue[] }
+export type { PageIssue, PageReport };
 
 export const scriptErrors: string[] = [];
 addEventListener('error', e => { if (scriptErrors.length < 20) scriptErrors.push(`${e.message}${e.filename ? ` (${e.filename.split('/').pop()}:${e.lineno})` : ''}`); });
@@ -28,6 +28,29 @@ function labelOf(el: Element): string {
 }
 
 const round = (n: number) => Math.round(n);
+
+const PICTURE = 'img, picture, video, canvas, figure, .ol-crop';
+/** for the Check pane: the object of the slide an issue is in, its words, what it is, the measurements */
+function about(el: Element, scope: Element, n?: PageIssue['n']): Pick<PageIssue, 'path' | 'name' | 'what' | 'n'> {
+  let obj: Element = el;
+  if (scope !== document.body) for (let e: Element | null = el; e && e !== scope; e = e.parentElement) obj = e;
+  const live = sourced(obj);
+  const path = live ? pathOf(live) : null;
+  const l = labelOf(el);
+  return { ...(path ? { path } : {}), ...(l.startsWith('"') ? { name: l.slice(1, -1) } : {}), what: l.startsWith('"') ? 'text' : el.matches(PICTURE) || el.querySelector('img') ? 'picture' : 'object', ...(n ? { n } : {}) };
+}
+
+/**
+ * How big a poster is in print: the millimetres of one of its px. A poster laid out at its printed
+ * size (CSS mm or in: a long side of half a metre or more at 96 px an inch) prints as it is; a
+ * smaller one is taken to be printed as an A0 (`assumed`).
+ */
+export function posterPrint(w: number, h: number): { mm: number; assumed: boolean } {
+  const long = Math.max(w, h, 1), asLaid = 25.4 / 96;
+  return long * asLaid >= 500 ? { mm: asLaid, assumed: false } : { mm: 1189 / long, assumed: true };
+}
+/** the smallest type that reads on a printed poster from a metre or two away (pt), the fewest pixels an inch a picture needs there */
+export const POSTER_MIN_PT = 18, POSTER_MIN_DPI = 100;
 
 /** math another tool typeset (KaTeX, MathJax's own, MathML): a formula, measured as one — not its parts as text */
 const OTHER_MATH = '.katex, .MathJax, .MathJax_Display, .MathJax_Preview, mjx-assistive-mml, math';
@@ -135,6 +158,7 @@ function backgroundOf(el: Element): [number, number, number] | null {
   return [255, 255, 255];
 }
 const REPLACED_BG = new Set(['img', 'svg', 'video', 'canvas', 'picture', 'iframe']);
+const PAGE_SKIP = new Set(['script', 'style', 'link', 'meta', 'template', 'noscript']);
 
 function checkScope(scope: Element, frame: DOMRect, kind: 'deck' | 'poster' | 'page'): PageIssue[] {
   const issues: PageIssue[] = [];
@@ -146,7 +170,7 @@ function checkScope(scope: Element, frame: DOMRect, kind: 'deck' | 'poster' | 'p
   if (kind !== 'page') for (const e of all) {
     if (!e.hasAttribute(WRAP_LINES)) continue;
     const lines = wrapWarning(e);
-    if (lines) issues.push({ kind: 'wrap', text: `${labelOf(e)} wraps to ${lines} lines (was ${e.getAttribute(WRAP_LINES)} when resized)`, at: rel(e.getBoundingClientRect()) });
+    if (lines) issues.push({ kind: 'wrap', text: `${labelOf(e)} wraps to ${lines} lines (was ${e.getAttribute(WRAP_LINES)} when resized)`, at: rel(e.getBoundingClientRect()), ...about(e, scope, { lines, was: Number(e.getAttribute(WRAP_LINES)) || 0 }) });
   }
 
   // text overflowing its box: a box whose content needs more room than it was given (measured by
@@ -180,7 +204,7 @@ function checkScope(scope: Element, frame: DOMRect, kind: 'deck' | 'poster' | 'p
   }
   for (const { e, dy, dx } of over) {
     if (over.some(o => o.e !== e && e.contains(o.e))) continue;
-    issues.push({ kind: 'overflow', text: `${labelOf(e)} needs ${dy ? `${dy}px more height` : ''}${dy && dx ? ' and ' : ''}${dx ? `${dx}px more width` : ''} than its box${getComputedStyle(e).overflow === 'hidden' ? ' (cut off)' : ' (spills out)'}`, at: rel(e.getBoundingClientRect()) });
+    issues.push({ kind: 'overflow', text: `${labelOf(e)} needs ${dy ? `${dy}px more height` : ''}${dy && dx ? ' and ' : ''}${dx ? `${dx}px more width` : ''} than its box${getComputedStyle(e).overflow === 'hidden' ? ' (cut off)' : ' (spills out)'}`, at: rel(e.getBoundingClientRect()), ...about(e, scope, { dy, dx, cut: getComputedStyle(e).overflow === 'hidden' }) });
     if (issues.length > 40) break;
   }
 
@@ -197,7 +221,7 @@ function checkScope(scope: Element, frame: DOMRect, kind: 'deck' | 'poster' | 'p
       if (t < frame.top - 2) out.push(`top by ${round(frame.top - t)}px`);
       if (r > frame.right + 2) out.push(`right by ${round(r - frame.right)}px`);
       if (b > frame.bottom + 2) out.push(`bottom by ${round(b - frame.bottom)}px`);
-      if (out.length) issues.push({ kind: 'offpage', text: `text of ${labelOf(c)} runs past the slide's ${out.join(', ')}`, at: rel(new DOMRect(l, t, r - l, b - t)) });
+      if (out.length) issues.push({ kind: 'offpage', text: `text of ${labelOf(c)} runs past the slide's ${out.join(', ')}`, at: rel(new DOMRect(l, t, r - l, b - t)), ...about(c, scope, { sides: out.map(o => o.split(' ')[0]).join(' ') }) });
     }
     // text of two objects on top of each other
     const texts = tops.filter(c => !noOverlap(c)).map(c => ({ c, rs: textRects(c, 4000, true) })).filter(x => x.rs.length);
@@ -205,7 +229,7 @@ function checkScope(scope: Element, frame: DOMRect, kind: 'deck' | 'poster' | 'p
       const a = texts[i], b = texts[j];
       if (a.c.contains(b.c) || b.c.contains(a.c)) continue;
       const clash = a.rs.find(x => b.rs.some(y => hit(x, y, 2)));
-      if (clash) issues.push({ kind: 'overlap', text: `text of ${labelOf(a.c)} and ${labelOf(b.c)} overlap`, at: rel(clash) });
+      if (clash) issues.push({ kind: 'overlap', text: `text of ${labelOf(a.c)} and ${labelOf(b.c)} overlap`, at: rel(clash), ...about(a.c, scope, { other: labelOf(b.c) }) });
     }
     // a picture that overlaps text it does not belong to
     const pics = tops.filter(c => c.matches('img, svg, video, canvas, picture, figure') || (c.querySelector('img, svg:not(mjx-container svg), canvas') && !(c.textContent ?? '').trim()));
@@ -215,13 +239,29 @@ function checkScope(scope: Element, frame: DOMRect, kind: 'deck' | 'poster' | 'p
       for (const t of texts) {
         if (t.c === p || t.c.contains(p) || p.contains(t.c) || !aboveText(p, t.c)) continue;
         const clash = t.rs.find(paints);
-        if (clash) { issues.push({ kind: 'overlap', text: `${labelOf(p)} covers part of the text of ${labelOf(t.c)}`, at: rel(clash) }); break; }
+        if (clash) { issues.push({ kind: 'overlap', text: `${labelOf(p)} covers part of the text of ${labelOf(t.c)}`, at: rel(clash), ...about(p, scope, { other: labelOf(t.c), covers: true }) }); break; }
       }
+    }
+    // an object that lies outside the slide (it does not show), a picture the slide's edge cuts a good part off
+    const what = kind === 'poster' ? 'poster' : 'slide';
+    for (const c of tops) {
+      if (PAGE_SKIP.has(c.localName) || c.closest('[data-ol-lint~="no-edge"]')) continue;
+      const r = c.getBoundingClientRect();
+      if (!(r.width > 1 && r.height > 1)) continue;
+      const iw = Math.min(r.right, frame.right) - Math.max(r.left, frame.left), ih = Math.min(r.bottom, frame.bottom) - Math.max(r.top, frame.top);
+      if (iw <= 1 || ih <= 1) { issues.push({ kind: 'off-slide', text: `${labelOf(c)} lies outside the ${what}: it does not show`, at: rel(r), ...about(c, scope, { all: true }) }); continue; }
+      if (!c.matches(PICTURE) && !(c.querySelector('img, video, canvas') && !(c.textContent ?? '').trim())) continue;
+      const cut = 1 - (iw * ih) / (r.width * r.height);
+      if (cut < 0.05) continue;
+      const sides = [r.left < frame.left - 2 ? 'left' : '', r.top < frame.top - 2 ? 'top' : '', r.right > frame.right + 2 ? 'right' : '', r.bottom > frame.bottom + 2 ? 'bottom' : ''].filter(Boolean);
+      issues.push({ kind: 'off-slide', text: `${labelOf(c)}: the ${what}'s ${sides.join(' and ')} edge cuts ${round(cut * 100)}% of the picture off`, at: rel(r), ...about(c, scope, { sides: sides.join(' '), cut: round(cut * 100) }) });
     }
   }
 
   // text too small for the deliverable, and too little contrast
-  const minPx = kind === 'deck' ? Math.max(14, frame.height * 0.022) : kind === 'poster' ? Math.max(20, frame.height * 0.0055) : 12;
+  // (a poster: by its printed size — POSTER_MIN_PT on the board, whatever px it is laid out in)
+  const print = posterPrint(frame.width, frame.height), ptOf = (px: number) => px * print.mm * 72 / 25.4;
+  const minPx = kind === 'deck' ? Math.max(14, frame.height * 0.022) : kind === 'poster' ? POSTER_MIN_PT / ptOf(1) : 12;
   const seenSmall = new Set<Element>(), seenContrast = new Set<Element>();
   const w = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
   for (let n = w.nextNode(); n; n = w.nextNode()) {
@@ -233,7 +273,10 @@ function checkScope(scope: Element, frame: DOMRect, kind: 'deck' | 'poster' | 'p
     const fs = parseFloat(c.fontSize);
     if (fs < minPx - 0.5 && !seenSmall.has(p) && seenSmall.size < 12) {
       seenSmall.add(p);
-      issues.push({ kind: 'small-text', text: `${labelOf(p)} is ${round(fs)}px — below ~${round(minPx)}px, hard to read ${kind === 'deck' ? 'on a projected slide' : kind === 'poster' ? 'on a printed poster' : 'on screen'}`, at: rel(p.getBoundingClientRect()) });
+      issues.push({ kind: 'small-text', text: kind === 'poster'
+        ? `${labelOf(p)} is ${round(fs)}px: ${round(ptOf(fs))} pt in print${print.assumed ? ' (as an A0)' : ''} — below ${POSTER_MIN_PT} pt (~${round(minPx)}px), hard to read on a printed poster from a metre away`
+        : `${labelOf(p)} is ${round(fs)}px — below ~${round(minPx)}px, hard to read ${kind === 'deck' ? 'on a projected slide' : 'on screen'}`,
+        at: rel(p.getBoundingClientRect()), ...about(p, scope, { px: round(fs), min: Math.ceil(minPx), ...(kind === 'poster' ? { pt: round(ptOf(fs)), minPt: POSTER_MIN_PT, assumed: print.assumed } : {}) }) });
     }
     const fg = parseColor(c.color);
     const bg = backgroundOf(p);
@@ -241,20 +284,30 @@ function checkScope(scope: Element, frame: DOMRect, kind: 'deck' | 'poster' | 'p
       const l1 = lum(fg), l2 = lum(bg);
       const ratio = (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
       const need = kind === 'page' && fs < 24 ? 4.5 : 3;
-      if (ratio < need) { seenContrast.add(p); issues.push({ kind: 'contrast', text: `${labelOf(p)}: contrast ${ratio.toFixed(1)}:1 against its background (want ${need}:1)`, at: rel(p.getBoundingClientRect()) }); }
+      if (ratio < need) { seenContrast.add(p); issues.push({ kind: 'contrast', text: `${labelOf(p)}: contrast ${ratio.toFixed(1)}:1 against its background (want ${need}:1)`, at: rel(p.getBoundingClientRect()), ...about(p, scope, { ratio: Math.round(ratio * 10) / 10, need }) }); }
     }
   }
 
   for (const img of Array.from(scope.querySelectorAll('img')) as HTMLImageElement[]) {
-    if (img.complete && img.naturalWidth === 0) issues.push({ kind: 'image', text: `the picture ${img.getAttribute('src') ?? ''} did not load`, at: rel(img.getBoundingClientRect()) });
+    const file = (srcOf.get(img) ?? img).getAttribute('src') ?? '';
+    if (img.complete && img.naturalWidth === 0) issues.push({ kind: 'image', text: `the picture ${img.getAttribute('src') ?? ''} did not load`, at: rel(img.getBoundingClientRect()), ...about(img, scope, { src: /^data:/i.test(file) ? '' : file.split('/').pop() ?? '' }) });
+    // a poster's picture with too few pixels for the size it is printed at (drawings — SVG — have none to run out of)
+    if (kind !== 'poster' || !img.naturalWidth || /\.svg([?#]|$)|^data:image\/svg/i.test(file)) continue;
+    const box = img.getBoundingClientRect(), inches = box.width * print.mm / 25.4;
+    if (inches < 1.2) continue;
+    const dpi = img.naturalWidth / inches;
+    if (dpi >= POSTER_MIN_DPI) continue;
+    const need = Math.ceil(inches * 150 / 100) * 100;
+    issues.push({ kind: 'low-res', text: `the picture ${/^data:/i.test(file) ? '' : file + ' '}has ${img.naturalWidth}×${img.naturalHeight} px for ${round(inches * 2.54)} cm in print${print.assumed ? ' (as an A0)' : ''}: ${round(dpi)} px an inch, it will look blurred — use one at least ${need} px wide, or show it smaller`,
+      at: rel(box), ...about(img, scope, { w: img.naturalWidth, h: img.naturalHeight, cm: round(inches * 2.54), dpi: round(dpi), need, assumed: print.assumed }) });
   }
   for (const m of Array.from(scope.querySelectorAll('mjx-merror, [data-mjx-error], [data-mml-node="merror"]'))) {
     if (m.parentElement?.closest('[data-mjx-error], [data-mml-node="merror"]')) continue;
-    issues.push({ kind: 'math', text: `a formula did not typeset: ${(m.getAttribute('data-mjx-error') ?? m.getAttribute('title') ?? m.textContent ?? '').slice(0, 120)}`, at: rel(m.getBoundingClientRect()) });
+    issues.push({ kind: 'math', text: `a formula did not typeset: ${(m.getAttribute('data-mjx-error') ?? m.getAttribute('title') ?? m.textContent ?? '').slice(0, 120)}`, at: rel(m.getBoundingClientRect()), ...about(m, scope, { why: (m.getAttribute('data-mjx-error') ?? m.getAttribute('title') ?? '').slice(0, 120) }) });
   }
   // citations of keys no .bib file of the project has (shown as ?, as LaTeX does: cite.ts)
   for (const c of Array.from(scope.querySelectorAll('ol-cite[data-ol-missing]'))) {
-    issues.push({ kind: 'citation', text: `${c.getAttribute('data-ol-cite')} cites ${c.getAttribute('data-ol-missing')}, which no .bib file of the project has — add the entry (or fix the key)`, at: rel(c.getBoundingClientRect()) });
+    issues.push({ kind: 'citation', text: `${c.getAttribute('data-ol-cite')} cites ${c.getAttribute('data-ol-missing')}, which no .bib file of the project has — add the entry (or fix the key)`, at: rel(c.getBoundingClientRect()), ...about(c, scope, { key: c.getAttribute('data-ol-missing') ?? '' }) });
   }
   // references to labels no equation has (MathJax shows ???)
   {
@@ -263,7 +316,7 @@ function checkScope(scope: Element, frame: DOMRect, kind: 'deck' | 'poster' | 'p
     const labels = new Set([...(pageHtml() || raw.html).matchAll(/\\label\{([^}]+)\}/g)].map(m => m[1].trim()));
     for (const m of own.matchAll(/\\(?:eq)?ref\{([^}]+)\}/g)) {
       if (labels.has(m[1].trim())) continue;
-      issues.push({ kind: 'reference', text: `${m[0]} refers to no equation: no \\label{${m[1].trim()}} on the page` });
+      issues.push({ kind: 'reference', text: `${m[0]} refers to no equation: no \\label{${m[1].trim()}} on the page`, n: { ref: m[1].trim() } });
     }
   }
   // TeX left as it was written: MathJax found no formula there (unbalanced braces, a missing delimiter)
@@ -277,7 +330,7 @@ function checkScope(scope: Element, frame: DOMRect, kind: 'deck' | 'poster' | 'p
       const m = /\\\(|\\\[|\$\$/.exec(v);
       if (!m) continue;
       n2++;
-      issues.push({ kind: 'math', text: `TeX shown as written, not typeset: "${v.slice(m.index, m.index + 60).trim()}" — check its braces and delimiters`, at: rel(p.getBoundingClientRect()) });
+      issues.push({ kind: 'math', text: `TeX shown as written, not typeset: "${v.slice(m.index, m.index + 60).trim()}" — check its braces and delimiters`, at: rel(p.getBoundingClientRect()), ...about(p, scope, { raw: v.slice(m.index, m.index + 60).trim() }) });
     }
   }
   return issues;

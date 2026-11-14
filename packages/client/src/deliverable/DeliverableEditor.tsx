@@ -79,6 +79,8 @@ import { PageSetup } from './PageSetup';
 import { deckPageSize, pageSetupSplices } from '@overlyx/core/html/pagesetup.ts';
 import { formatTimestamp } from '@overlyx/core';
 import { ReviewPane, type CommentDraft } from './ReviewPane';
+import { ChecksPane, useChecks } from './ChecksPane';
+import { withLint } from './checks';
 import { VoicePill } from './VoiceTalk';
 import { onTake, voiceSlide, cancelTalk, audioName, type VoiceTake } from './voice';
 import { planVoiceComments, commentInkId, commentInkPaths, looseCommentInk, type CommentStroke } from '@overlyx/core/voicecomment.ts';
@@ -519,6 +521,8 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
   const setRailShown = (on: boolean) => { setRailShownState(on); saveShown('ol.deckSlides', on); };
   const setNotesShown = (on: boolean) => { setNotesShownState(on); saveShown('ol.deckNotes', on); };
   const [codeOpen, setCodeOpen] = useState(false);
+  /** Check (ChecksPane.tsx): what is wrong with the slides, listed beside the canvas */
+  const [checksOpen, setChecksOpen] = useState(false);
   // the Animation pane (open or not: this browser's) and the sequence of the slide it shows (runtime/animate.ts)
   const [animOpen, setAnimOpen] = useState(() => { try { return localStorage.getItem('ol.animPane') === '1'; } catch { return false; } });
   const [seq, setSeq] = useState<Sequence>({ slide: -1, rows: [], steps: 1, ordering: null });
@@ -568,6 +572,8 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     : Math.max(0.05, Math.min(kind === 'page' ? 1 : 2, (box.w - 24) / frameW));
   const scale = fit * zoom;
   const showRail = kind === 'deck';
+  /** Check (ChecksPane.tsx): a deck's or a poster's, not the drawing editor's */
+  const canCheck = kind !== 'page' && !host.bindSvgExporter;
   const railOpen = showRail && railShown;
   const railScale = Math.max(0.05, (railW - 20 - RAIL_NUM) / frameW);
   /**
@@ -3156,6 +3162,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
         { label: 'Objects', checked: objOpen, action: () => toggleObjects() },
         { label: 'Comments and suggestions', checked: reviewOpen, action: () => { setReviewOpen(!reviewOpen); if (reviewOpen) { setDraft(null); setFocus(null); } } },
         { label: 'Code', checked: codeOpen, action: () => setCodeOpen(o => !o) },
+        ...(canCheck ? [{ label: deck ? 'Check the slides' : 'Check the poster', checked: checksOpen, action: () => setChecksOpen(o => !o) }] : []),
         ...(kind !== 'page' ? [{ sep: true }, { label: 'Guides', sub: guideItems(i, null) }] : []),
         { label: 'Canvas', sub: canvasItems(at().x, at().y) },
       ] },
@@ -3699,6 +3706,8 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     return target ? `${target.base}${target.entry.split('/').map(encodeURIComponent).join('/')}?ol=${mode}` : 'about:blank';
   };
   const offlineSrc = (mode: 'edit' | 'thumb' | 'present') => `/_ol/offline-frame.html?ol=${mode}&revision=${offlineRevisions[mode]}`;
+  const checks = useChecks({ open: checksOpen && canCheck && !presenting, kind, host, link: frameLink, src, text: settledText, size: slideSizeNow(), mark: slides => toRail({ ol: 'checkMarks', slides }),
+    init: () => (bibKnown.current.size ? [{ ol: 'bib', entries: [...bibKnown.current.values()] }] : []) });
   const frameH = Math.max(100, box.h / scale);
   const left = leftFor(scale, panX);
   const title = path.split('/').slice(-2).join('/');
@@ -4099,6 +4108,12 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
       title="Objects: what is on the slide as a tree — open groups and drawings, select a letter of a logo, rename, lock, restack (Inkscape's Objects, PowerPoint's Selection Pane)"
       dangerouslySetInnerHTML={{ __html: ICONS['dk-objects'] ?? '' }} />
   );
+  const checkBtn = canCheck && (
+    <button class={'dl-btn dl-check-btn' + (checksOpen ? ' on' : '')} data-dl-check aria-pressed={checksOpen} onClick={() => setChecksOpen(o => !o)}
+      title={`Check the ${kind === 'poster' ? 'poster' : 'slides'}: text that does not fit, runs off the ${kind === 'poster' ? 'poster or is too small for its printed size' : 'slide or is too small to read'}, low contrast, things lying on each other`}>
+      ✓ Check{checks.count > 0 && <span class="dl-rv-count" data-dl-check-count>{checks.count}</span>}
+    </button>
+  );
   const codeBtn = !host.bindSvgExporter && kind !== 'page' && <button class={'dl-btn' + (codeOpen ? ' on' : '')} title="The page's code" data-dl-code onClick={() => setCodeOpen(o => !o)}>&lt;/&gt;</button>;
   const toggleReview = () => { setReviewOpen(!reviewOpen); if (reviewOpen) { setDraft(null); setFocus(null); } };
   const reviewCount = openComments + review.changes.length;
@@ -4128,6 +4143,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     { label: 'Objects', checked: objOpen, action: () => toggleObjects() },
     { label: `Comments and suggestions${reviewCount ? ` (${reviewCount})` : ''}`, checked: reviewOpen, action: toggleReview },
     ...(!host.bindSvgExporter ? [{ label: 'Code', checked: codeOpen, action: () => setCodeOpen(o => !o) }] : []),
+    ...(canCheck ? [{ label: `Check the ${kind === 'poster' ? 'poster' : 'slides'}${checks.count ? ` (${checks.count})` : ''}`, checked: checksOpen, action: () => setChecksOpen(o => !o) }] : []),
     { sep: true },
     { label: 'Editing', checked: !viewing && !suggesting, disabled: readOnly, action: () => setMode('editing') },
     { label: 'Suggesting', checked: !viewing && suggesting, disabled: readOnly, action: () => setMode('suggesting') },
@@ -4213,6 +4229,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
   return (
     <div ref={editorRef} class={'dl-editor' + (presenting ? ' presenting' : '') + (focusOn ? ' dl-drawfocus' : '') + (fullOn ? ' dl-full' : '')} data-kind={kind} data-dock={dock} data-theme-view={themeOn ? '' : undefined}
       style={floatOn ? `--dl-float-top: ${Math.max(0, barSizes.menu - barSizes.top)}px; --dl-float-left: ${Math.max(0, ACTIVITY_W - barSizes.left)}px` : undefined}>
+      {checks.frame}
       {/* the bars floating (ol-bars-float): the pointer at the screen's top edge brings them, as their handle does (on the canvas, below) */}
       {floatOn && !barsAway && <div class="dl-bars-edge" aria-hidden="true" onPointerEnter={e => { if (e.pointerType === 'mouse') showBars(); }} />}
       {saveState?.state === 'stale' && <div role="alert" data-dl-stale-notice style="padding:8px 12px;background:#fff5d8;color:#342700">
@@ -4248,6 +4265,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
         {codeBtn}
         {reviewBtn}
         {modeSwitch}
+        {checkBtn}
         {kind !== 'page' && !host.bindSvgExporter && <button class="dl-btn dl-present" title={kind === 'poster' ? 'Show the poster on the whole screen (F5)' : 'Present from this slide (Shift+F5) — F5 from the first'} data-dl-present onClick={() => startPresenting(false)}>▶ Present</button>}
         {previewBtn}
         {downloadBtn}
@@ -4394,6 +4412,11 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
             accept={c => resolveChange(c, true)} reject={c => resolveChange(c, false)}
             acceptAll={() => resolveEverything(true)} rejectAll={() => resolveEverything(false)}
             close={() => { setReviewOpen(false); setDraft(null); setFocus(null); }} />
+        )}
+        {checksOpen && canCheck && !fullOn && (
+          <ChecksPane checks={checks} kind={kind} current={current} readOnly={locked} close={() => setChecksOpen(false)}
+            show={(slide, p) => { gotoSlide(slide); if (p) toCanvas({ ol: 'select', paths: [p] }); }}
+            meant={(p, word) => { const el = elementAt(parseSource(text.toString()).doc, p); if (el) applyOps([{ t: 'attr', path: p, name: 'data-ol-lint', value: withLint(attr(el, 'data-ol-lint'), word) }]); }} />
         )}
         {themeOn && themePane && themeInfo && !fullOn && (
           <ThemePane theme={themeInfo.theme} fontWarning={fontWarning} objects={themeInfo.objects} slide={current} sel={sel} layouts={themeInfo.layouts}
