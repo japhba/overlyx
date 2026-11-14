@@ -37,6 +37,7 @@ import { presentFingersDraw, savePresentFingersDraw, presentLinked, savePresentL
 import { checkedPresent, docStamp, presenterAtStart, staleness, type PresentState, type PresenterState } from '../app/presentshare';
 import { createPortal } from 'preact/compat';
 import { isFromRuntime, RAIL_NUM, ASIDE_ATTR } from './protocol';
+import type { PlaceTo } from './runtime/place';
 import { copyLinkAt, placeQuery, type Place } from '../editor/permalink';
 import { rebasedSplices, rebaseObjectPaths, objectHtml, imageHtml, insertPlace, newSlideHtml, nextPageHtml, slideDesigns, slidePaths, slideNotes, notesOp, sourceRange, inlineSvgHtml, guidesIn } from './sourceops';
 import { GUIDES_ATTR, LAYOUT_MARGINS_ATTR, layoutMarginGuides, parseGuides, masterGuides, formatGuides, withGuide, type Guide } from './guides';
@@ -76,6 +77,8 @@ import { reviewOps, resolveOps, resolveAll, reviewOf, isSuggesting, suggestingOp
 import { deliverableInfo, slideElements, blankDeck, untouchedPageTitle } from '@overlyx/core/html/deliverable.ts';
 import { usualDeckSize } from '../app/decksize';
 import { PageSetup } from './PageSetup';
+import { PositionSize } from './PositionSize';
+import { loadGrid, saveGrid, gridChoices, gridSize, gridMessage, type GridView } from './gridview';
 import { deckPageSize, pageSetupSplices } from '@overlyx/core/html/pagesetup.ts';
 import { formatTimestamp } from '@overlyx/core';
 import { ReviewPane, type CommentDraft } from './ReviewPane';
@@ -507,6 +510,15 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
   const [guidesShown, setGuidesShown] = useState(() => { try { return localStorage.getItem('ol.deckGuides') === '1'; } catch { return false; } });
   const guidesRef = useRef(guidesShown); guidesRef.current = guidesShown;
   const showGuides = (on: boolean) => { guidesRef.current = on; setGuidesShown(on); saveShown('ol.deckGuides', on); toCanvas({ ol: 'guides', show: on }); };
+  /** the grid and the rulers (gridview.ts, runtime/grid.ts): this browser's, per document; rulers bring the guides (dragged out of them) */
+  const [grid, setGridState] = useState<GridView>(() => loadGrid(host.path));
+  const gridRef = useRef(grid); gridRef.current = grid;
+  const setGrid = (p: Partial<GridView>) => {
+    const v = { ...gridRef.current, ...p };
+    gridRef.current = v; setGridState(v); saveGrid(host.path, v);
+    toCanvas(gridMessage(v, kindRef.current));
+    if (p.rulers && !guidesRef.current) showGuides(true);
+  };
   /** where the slide was last right-clicked (slide px): a guide added there */
   const menuPoint = useRef<{ x: number; y: number } | null>(null);
   /** the app's status bar: the buttons of the folded slides and notes go into its corner (none in VS Code) */
@@ -1257,6 +1269,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
             toCanvas({ ol: 'scale', scale });
             toCanvas({ ol: 'tool', tool, ink: { ...deckInkStyle(inkRef.current, pageWRef.current), penInks: inkRef.current.penInks && !readOnlyRef.current }, held: drawKeptRef.current });
             toCanvas({ ol: 'guides', show: guidesRef.current });
+            toCanvas(gridMessage(gridRef.current, kindRef.current));
             if (themeRef.current) toCanvas({ ol: 'theme', on: true });
             toCanvas({ ol: 'view', view: shownView(viewRef.current) });
             toCanvas({ ol: 'dark', invert: darkRef.current.invert, figures: darkRef.current.figures, desk: null });
@@ -2572,6 +2585,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
   };
 
   const arrangeItems = (): MenuItem[] => [
+    { label: 'Position and size…', disabled: !sel.some(s => s.box), action: () => positionSize() },
     { label: 'Order', sub: [
       { label: 'Bring to front', shortcut: 'Ctrl+Shift+↑', action: () => arrangeSel('front') },
       { label: 'Bring forward', shortcut: 'Ctrl+↑', action: () => arrangeSel('forward') },
@@ -2795,6 +2809,18 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
       { label: 'Remove custom guides', disabled: ro || (!master.length && !owned.length), action: () => write([masterOp([]), ...clearOwn]) },
     ];
   };
+  /** Position and size… (PositionSize.tsx): the selection's X, Y, width, height and rotation, typed (runtime place.ts) */
+  const placeSel = (to: PlaceTo) => toCanvas({ ol: 'place', ...to });
+  const positionSize = () => {
+    const r = canvasBox.current?.getBoundingClientRect();
+    pickAt(Math.max(8, (r?.right ?? 700) - 360), (r?.top ?? 120) + 12, 'Position and size', () => <PositionSize sel={selRef.current} place={placeSel} />);
+  };
+  /** the grid's entries (gridview.ts) — the View menu, the canvas's right-click menu */
+  const gridItems = (): MenuItem[] => [
+    { label: 'Show grid', checked: grid.show, action: () => setGrid({ show: !gridRef.current.show }) },
+    { label: 'Snap to grid', checked: grid.snap, action: () => setGrid({ snap: !gridRef.current.snap }) },
+    { label: 'Grid spacing', sub: gridChoices(kind).map(c => ({ label: c.label, checked: Math.abs(gridSize(grid, kind) - c.px) < 0.01, action: () => setGrid({ size: c.px, show: true }) })) },
+  ];
   /** Page setup… (PageSetup.tsx): the slides' or the poster's size changed, what is on them scaled with it or kept — one undo step */
   const pageSetup = (x?: number, y?: number) => {
     if (kindRef.current === 'page') return;
@@ -2813,7 +2839,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
   };
   const canvasMenu = (x: number, y: number) => showContextMenu(x, y, [
     ...canvasItems(x, y),
-    ...(kind !== 'page' ? [{ sep: true }, { label: 'Guides', sub: guideItems(currentRef.current, menuPoint.current) }] : []),
+    ...(kind !== 'page' ? [{ sep: true }, { label: 'Guides', sub: guideItems(currentRef.current, menuPoint.current) }, { label: 'Grid', sub: gridItems() }, { label: 'Rulers', checked: grid.rulers, action: () => setGrid({ rulers: !gridRef.current.rulers }) }] : []),
   ]);
   const emptySlideMenu = (x: number, y: number, i: number) => {
     const ps = slidePaths(text.toString());
@@ -3163,7 +3189,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
         { label: 'Comments and suggestions', checked: reviewOpen, action: () => { setReviewOpen(!reviewOpen); if (reviewOpen) { setDraft(null); setFocus(null); } } },
         { label: 'Code', checked: codeOpen, action: () => setCodeOpen(o => !o) },
         ...(canCheck ? [{ label: deck ? 'Check the slides' : 'Check the poster', checked: checksOpen, action: () => setChecksOpen(o => !o) }] : []),
-        ...(kind !== 'page' ? [{ sep: true }, { label: 'Guides', sub: guideItems(i, null) }] : []),
+        ...(kind !== 'page' ? [{ sep: true }, { label: 'Guides', sub: guideItems(i, null) }, { label: 'Grid', sub: gridItems() }, { label: 'Rulers', checked: grid.rulers, action: () => setGrid({ rulers: !gridRef.current.rulers }) }] : []),
         { label: 'Canvas', sub: canvasItems(at().x, at().y) },
       ] },
       { title: 'Insert', items: [
@@ -3778,7 +3804,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     // (the text being retyped ends first: its box does not take the undone version while it is retyped)
     undo: () => { toCanvas({ ol: 'stopText' }); setTimeout(() => host.undo(), 30); }, redo: () => { toCanvas({ ol: 'stopText' }); setTimeout(() => host.redo(), 30); },
     insertImage: () => { phPicture.current = null; fileInput.current?.click(); },
-    text: textActions, paint, table: tableCtx, arrange: arrangeSel, groupLayout: layout => toCanvas({ ol: 'groupLayout', layout }), image: imageTools, remove: removeSel,
+    text: textActions, paint, table: tableCtx, arrange: arrangeSel, place: placeSel, groupLayout: layout => toCanvas({ ol: 'groupLayout', layout }), image: imageTools, remove: removeSel,
     slideBackground,
     newSlide: () => newSlide(currentRef.current),
     layoutPicker: (close, apply) => layoutPicker(currentRef.current, close, apply),

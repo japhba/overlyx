@@ -165,6 +165,8 @@ export interface SelItem {
   canText: boolean;
   /** a picture's src as written (for Replace / Remove background) */
   src?: string;
+  /** its own box on its slide (slide px), as it is before it is turned (runtime place.ts boxInSlide) */
+  box?: Rect;
   /** the list it is or holds: its items appear one by one from step `steps` (data-steps), or all at once (null) */
   list?: { path: Path; steps: number | null };
   /** a layout's placeholder (decklayouts.ts): its role, and whether nothing is in it yet */
@@ -280,6 +282,10 @@ export type ToRuntime =
   | { ol: 'inkTyped'; text: string; as: 'notes' | 'formula' }
   /** the guides shown on the slides (guides.ts) or not */
   | { ol: 'guides'; show: boolean }
+  /** the grid and the rulers (runtime grid.ts; the settings: gridview.ts) — `size` in slide px */
+  | { ol: 'grid'; show: boolean; snap: boolean; size: number; rulers: boolean; unit: 'mm' | 'in' }
+  /** the selection placed at a box typed (slide px; PositionSize.tsx → runtime place.ts); what is not given stays */
+  | { ol: 'place'; x?: number; y?: number; w?: number; h?: number; rotate?: number }
   /** the theme view (the editor's Edit theme): the objects on every slide alone shown and taken, the slides' own dimmed and out of reach (edit.ts setThemeView) */
   | { ol: 'theme'; on: boolean }
   | { ol: 'exec'; command: string; value?: string }

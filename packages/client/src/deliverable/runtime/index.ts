@@ -24,6 +24,8 @@ import { renderCites, refreshCites, addEntries, CITE_CSS } from './cite';
 import { applySource, applyPatches, whenTypeset } from './reconcile';
 import * as edit from './edit';
 import { setGuidesShown } from './guides';
+import { setGrid } from './grid';
+import { placeSelection } from './place';
 import { weave } from './weave';
 import { arrange, paint, valign, restack, setGroupLayout } from './arrange';
 import { wantObjects } from './objects';
@@ -334,6 +336,8 @@ function onMessage(e: MessageEvent): void {
     case 'inkConvert': if (MODE === 'edit') edit.inkConvert(m.as); break;
     case 'inkTyped': if (MODE === 'edit') edit.inkTyped(m.text, m.as); break;
     case 'guides': if (MODE === 'edit') setGuidesShown(m.show); break;
+    case 'grid': if (MODE === 'edit') setGrid(m); break;
+    case 'place': if (MODE === 'edit') placeSelection(m); break;
     case 'theme': if (MODE === 'edit') edit.setThemeView(m.on); break;
     case 'exec': if (MODE === 'edit') edit.exec(m.command, m.value); break;
     case 'textBox': if (MODE === 'edit') edit.setTextBox(m.anchor); break;

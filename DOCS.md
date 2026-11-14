@@ -1412,6 +1412,29 @@ blend.
     identical (applied with `follow` off: deckmaster's follow-ups are not needed). One list of splices,
     one undo step; presenting, the rail, the PDF and the website zip read the same stylesheet.
     Nothing new is written into the source beyond the changed values.
+  * **Position and size, grid, rulers** (14 Nov 2026; the LaTeX layout documents had them, the decks
+    did not). *Position and size…* (`deliverable/PositionSize.tsx`; the contextual toolbar's Arrange
+    section `dk-position`, the Arrange menu, an object's right-click menu): X, Y, width, height and
+    rotation of the selection in the document's unit (`units.ts`: mm, inches in the US), from the
+    slide's top left corner — for one object its own box before it is turned (PowerPoint's), for several
+    the box round them. Enter or leaving a field places it, ↑ / ↓ step (1 mm or 0.1 in; Shift ×10, Alt
+    ÷10), *Keep proportions* ties width and height (on at first for pictures and drawings). The runtime
+    (`runtime/place.ts`, message `place` in slide px) resizes one object with its top left corner where
+    it was (`resizeLive` in its own axes), then moves it (`placeLive`); several are moved and spread as
+    one, each scaled about the box's corner (their text keeps its size, as a group's resize). The edits
+    are the ones a drag makes (`styleOp`, the source's units kept, `refitGroups`), one commit — one undo
+    step, suggestions while Suggesting. `SelItem.box` carries each object's unturned box in slide px.
+    **Grid** (*View ▸ Grid*, the canvas's right-click menu: Show grid, Snap to grid, spacing 2 / 5 / 10
+    / 20 mm on slides, 10 / 20 / 50 / 100 mm on posters, ⅛–1 in or ½–4 in in the US) and **Rulers**
+    (*View ▸ Rulers*) are this browser's per document (`deliverable/gridview.ts`, `ol.grid:<path>`, as
+    the canvas colour) and drawn by `runtime/grid.ts` in the overlay over the slide shown — never in a
+    slide, the rail, a presentation or an export. With Snap to grid moved and resized objects snap
+    their edges to the grid's lines besides the guides and the other objects (edit.ts `snap`). The
+    rulers lie along the slide's top and left edges, in mm or in with labels as dense as the zoom
+    allows, the selection's extent shaded and the pointer marked in red; a press on one drags out a
+    new guide, every slide's (the top ruler a horizontal one, the left a vertical one — guides.ts's
+    drag, released back on the ruler it is not made). Turning the rulers on shows the guides. Nothing
+    is written into the source but the objects' places and guides, as before.
   * **Around the canvas** (`DeliverableEditor.tsx`): the slide rail (a second frame in `thumb`
     mode: click, drag to reorder, its menu — new slide in the design of the current one, blank,
     duplicate, move, delete; its header's « folds it away — `ol.deckSlides`, folded at first on

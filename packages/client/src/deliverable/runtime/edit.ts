@@ -58,6 +58,8 @@ import { clipOf, postClip, paste, plainText } from './clip';
 import { bufferedTextHtml } from '../recovery';
 import { weaveMenu } from './weave';
 import { initGuides, guideSlide, guideAt, guideSnaps, guideParts, startGuideDrag, moveGuideDrag, endGuideDrag, GUIDES_CSS } from './guides';
+import { initGrid, gridParts, gridSnaps, rulerAt, rulerPointer, GRID_CSS } from './grid';
+import { boxInSlide } from './place';
 import { listInkBox } from './listmarkers';
 import { replaceEditingHost, editingTextStyle, carryEditingTextStyle } from './editinghost';
 import { textBoundary, textListItem } from './textnavigation';
@@ -124,6 +126,7 @@ export function startEditing(): void {
     .lock { position: absolute; transform: translate(-100%, -100%); font-size: calc(12px * var(--s)); line-height: 1; pointer-events: none; }
     .guide { position: absolute; background: #e8467c; pointer-events: none; }
     ${GUIDES_CSS}
+    ${GRID_CSS}
     .draw { position: absolute; border: 1.5px dashed #2f6fde; background: rgba(47,111,222,.08); pointer-events: none; }
     .drop { position: absolute; border: 3px dashed #2f6fde; background: rgba(47,111,222,.10); pointer-events: none; box-sizing: border-box; }
     .tag { position: absolute; transform: translateY(calc(-100% - 3px * var(--s))); background: #2f6fde; color: #fff; padding: calc(1px * var(--s)) calc(6px * var(--s)); border-radius: calc(3px * var(--s)); white-space: nowrap; pointer-events: none; font: 600 calc(10.5px * var(--s)) / 1.35 sans-serif; letter-spacing: .02em; }
@@ -143,6 +146,7 @@ export function startEditing(): void {
   document.documentElement.appendChild(host);
   initPaths({ root, scale: () => scale });
   initGuides({ scale: () => scale, commit: ops => commit(ops), draw });
+  initGrid({ scale: () => scale, draw });
   // a list's items dragged into another order (listdrag.ts): the text being retyped, else the one box selected
   initListDrag({
     scale: () => scale,
@@ -1183,6 +1187,7 @@ function item(el: Element): SelItem | null {
       ...(looseBox(el, kind) ? { loose: true } : {}),
     } : {}),
     list: listOf(el),
+    ...(state.kind !== 'page' && boxInSlide(el) ? { box: boxInSlide(el)! } : {}),
     ...(phRole(el) ? { ph: { role: phRole(el)!, empty: isEmptyPh(el) } } : {}),
     ...(masterKey(el) ? { master: masterKey(el)! } : {}),
     ...(el.hasAttribute('data-ol-qr') ? { qr: el.getAttribute('data-ol-qr')! } : {}),
@@ -1397,6 +1402,8 @@ export function draw(): void {
   layer.style.setProperty('--s', String(1 / scale));
   const parts: string[] = [];
   const bw = 1.5 / scale;
+  // the grid and the rulers (grid.ts), under everything else
+  if (state.kind !== 'page') parts.push(gridParts(guideSlide(null), selected.filter(e => e.isConnected).map(docRect)));
   if (state.kind !== 'page') {
     const scope = isSolo() ? slides()[soloIndex()] : document.body;
     for (const el of Array.from(scope?.querySelectorAll(`[${WRAP_LINES}]`) ?? [])) {
@@ -1535,6 +1542,7 @@ function onHover(e: PointerEvent): void {
   if (hoverList(e, host)) draw();
   if (isPenDrawing() && e.pointerType !== 'touch') { penMove(e); return; }
   if (e.pointerType === 'touch') { onTouchMove(e); return; }
+  rulerPointer(e.pageX, e.pageY);
   if (drag || editing) return;
   const t = e.target as Element;
   // right on a guide: its own cursor (a press takes it before the object under it)
@@ -1742,6 +1750,14 @@ function onPointerDown(e: PointerEvent): void {
   if (tool !== 'select') {
     const slide = slideOf(t);
     drag = { ...base, kind: 'draw', slide, pts: [[x, y]] };
+    capture();
+    return;
+  }
+  // on a ruler (grid.ts): a new guide dragged out of it, every slide's
+  const rulerAxis = rulerAt(guideSlide(null), x, y);
+  if (rulerAxis) {
+    drag = { ...base, kind: 'guide' };
+    startGuideDrag(guideSlide(null)!, { axis: rulerAxis, at: -1e6, own: false }, true, x, y);
     capture();
     return;
   }
@@ -2012,6 +2028,10 @@ function snap(r: Rect, skip: Set<Element>, slide: HTMLElement | null, axisMoves:
   const ug = guideSnaps(slide);
   xs.push(...ug.xs);
   ys.push(...ug.ys);
+  // the grid's lines, with Snap to grid (grid.ts)
+  const gs = gridSnaps(slide, r);
+  xs.push(...gs.xs);
+  ys.push(...gs.ys);
   let dx = 0, dy = 0, bx = t + 1, by = t + 1, gx: number | null = null, gy: number | null = null;
   if (axisMoves.x) for (const v of [r.x, r.x + r.w / 2, r.x + r.w]) for (const s of xs) { const d = s - v; if (Math.abs(d) < bx) { bx = Math.abs(d); dx = d; gx = s; } }
   if (axisMoves.y) for (const v of [r.y, r.y + r.h / 2, r.y + r.h]) for (const s of ys) { const d = s - v; if (Math.abs(d) < by) { by = Math.abs(d); dy = d; gy = s; } }
@@ -2167,7 +2187,7 @@ function resizePart(d: DragEl, h: string, dx: number, dy: number, keepRatio: boo
   setForm(d.el, { ...f, sx: f.sx * kx, sy: f.sy * ky, p: [c.x, c.y] });
 }
 
-function resizeLive(d: DragEl, h: string, dx: number, dy: number, keepRatio: boolean, noSnap: boolean): void {
+export function resizeLive(d: DragEl, h: string, dx: number, dy: number, keepRatio: boolean, noSnap: boolean): void {
   if (d.part) { resizePart(d, h, dx, dy, keepRatio); return; }
   // a rotated box: the drag in its own axes; the opposite side stays where it is on the page
   const a = d.angle;

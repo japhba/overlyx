@@ -75,6 +75,7 @@ Object.assign(ICONS, {
   'dk-tips': I('<path d="M2 8h11"/><path d="M10 5l3.5 3-3.5 3" fill="currentColor"/>'),
   'dk-radius': I('<path d="M2.5 13.5V8a5.5 5.5 0 0 1 5.5-5.5h5.5"/>'),
   'dk-opacity': '<svg viewBox="0 0 16 16"><defs><pattern id="dkop" width="4" height="4" patternUnits="userSpaceOnUse"><rect width="2" height="2" fill="currentColor" opacity=".55"/><rect x="2" y="2" width="2" height="2" fill="currentColor" opacity=".55"/></pattern></defs><rect x="2" y="2" width="12" height="12" rx="2" fill="url(#dkop)" stroke="currentColor" stroke-width="1.1"/></svg>',
+  'dk-position': I('<rect x="5" y="5" width="8.5" height="8.5" rx="0.6"/><path d="M5 2.2v1.6M2.2 5h1.6M8 2.2h5.5M2.2 8v5.5" stroke-dasharray="1.4 1.2"/>'),
   'dk-shadow': I('<rect x="2" y="2" width="9" height="9" rx="1"/><path d="M13.5 5v8.5H5" stroke-width="2.2" opacity="0.45"/>'),
   'dk-arrange': I('<rect x="2.5" y="2.5" width="7" height="7" stroke-dasharray="1.6 1.2"/><rect x="6.5" y="6.5" width="7" height="7" fill="currentColor"/>'),
   'dk-align': I('<path d="M2 1.5v13"/><rect x="3.5" y="3" width="9" height="3.5"/><rect x="3.5" y="9.5" width="5.5" height="3.5"/>'),

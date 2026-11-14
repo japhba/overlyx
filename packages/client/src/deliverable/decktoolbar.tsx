@@ -24,6 +24,8 @@ import { bundledFont, deckFontFor, firstFontFamily, previewBundledFonts, type De
 import { FontList, type FontSection } from '../app/FontPicker';
 import { fontCatalog, type Catalog } from '../fonts/googlefont';
 import './deckicons';
+import { PositionSize } from './PositionSize';
+import type { PlaceTo } from './runtime/place';
 
 export interface DeckTextActions {
   family(css: string | null, google?: string): void;
@@ -64,6 +66,8 @@ export interface DeckCtx {
   text: DeckTextActions;
   paint(p: Paint): void;
   arrange(how: ArrangeHow): void;
+  /** the selection placed at a box typed (PositionSize.tsx → runtime place.ts) */
+  place?(to: PlaceTo): void;
   groupLayout(layout: GroupLayout): void;
   image: {
     /** crop mode is on (the picture's frame, Done / Cancel) */
@@ -628,6 +632,8 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
       ...(isGroup ? [{ id: 'dk-ungroup', title: 'Ungroup (Ctrl+Shift+G)', icon: 'dk-ungroup', action: () => c.arrange('ungroup') }] : []),
       ...(one?.kind === 'group' && one.tag !== 'svg' ? [{ id: 'dk-group-layout', title: 'Group layout: free, row or column, gap and alignment', icon: 'dk-group',
         palette: { title: 'Group layout', render: (close: () => void) => <GroupLayoutPicker layout={one.layout ?? DEFAULT_GROUP_LAYOUT} onSet={c.groupLayout} close={close} /> } }] : []),
+      ...(c.place && sel.some(s => s.box) ? [{ id: 'dk-position', title: 'Position and size: X, Y, width, height, rotation', icon: 'dk-position',
+        palette: { title: 'Position and size', render: () => <PositionSize sel={sel} place={c.place!} /> } }] : []),
       { id: 'dk-arrange', title: 'Arrange: order, align, rotate, group', icon: 'dk-arrange',
         palette: { title: 'Arrange', list: true, cols: 1, items: [
           { label: 'Bring to front (Ctrl+Shift+↑)', html: ICON('dk-arrange'), action: () => c.arrange('front') },

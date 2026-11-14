@@ -1,0 +1,13 @@
+/* Position and size (deliverable/PositionSize.tsx) */
+.dl-pos { width: min(330px, calc(100vw - 32px)); padding: 2px 8px 8px; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: var(--ui-fg); }
+.dl-pos .dialog-hint { margin: 2px 0; }
+.dl-pos-grid { display: grid; grid-template-columns: auto 1fr 1fr; align-items: center; gap: 6px 8px; }
+.dl-pos-row { color: var(--ui-muted); font-size: 12px; }
+.dl-pos-field { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
+.dl-pos-field > span { width: 14px; text-align: right; color: var(--ui-muted); font-weight: 600; }
+.dl-pos-field input { width: 100%; min-width: 0; height: 26px; padding: 0 6px; border: 1px solid var(--ui-border); border-radius: 5px; background: var(--surface); color: var(--ui-fg); font: 12.5px var(--ui-font); font-variant-numeric: tabular-nums; }
+.dl-pos-field input:focus { outline: 2px solid var(--accent-border); border-color: var(--accent); }
+.dl-pos-field input:disabled { opacity: .55; }
+.dl-pos-field small { color: var(--ui-muted); font-size: 11px; min-width: 16px; }
+.dl-pos-lock { display: inline-flex; align-items: center; gap: 5px; color: var(--ui-fg); font-size: 12px; white-space: nowrap; }
+.dl-pos-keys { font-size: 11px; color: var(--ui-muted); }
