@@ -63,6 +63,7 @@ import { ObjectsPane } from './ObjectsPane';
 import { CiteDialog, Dialog, uiPrompt, uiConfirm } from '../app/Dialogs';
 import { askQr, qrEditOps, qrHtml, qrPlaceholderAt, qrTextAt, qrWarning } from './qrcode';
 import { BackgroundPicker } from './BackgroundPicker';
+import { connectOps, connectorOps, connectorsFor, type Route } from './connectors';
 import { bgOfStyle, bgStyle, picturesIn } from './background';
 import type { DocMeta } from '../api';
 import { citedKeys, citeEntry, type CiteEntry } from '@overlyx/core/html/refs.ts';
@@ -1459,6 +1460,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
         case 'cropping': if (fromCanvas) setCropping(m.path); break;
         case 'editSvg': if (fromCanvas) { const rel = svgOf(m.src); if (rel) editSvgPicture(rel); } break;
         case 'editQr': if (fromCanvas) void qrCode(m.path); break;
+        case 'connect': if (fromCanvas) connectObjects(m.from, m.to, m.sides, m.arrow); break;
         case 'scroll': if (fromCanvas) { scrollRef.current = m.y; setScrollY(m.y); } break;
         case 'needSource':
           if (fromCanvas && canvasReady.current) { sentTo.current.canvas = -1; toCanvas(sourceMsg('canvas')); }
@@ -2414,6 +2416,22 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     const html = qrHtml(value, k === 'page' ? 'width: 200px; height: 200px' : `position: absolute; left: ${Math.round((w - side) / 2)}px; top: ${Math.round((h - side) / 2)}px; width: ${side}px; height: ${side}px`);
     if (html && applyOps([{ t: 'insert', parent: place.parent, index: place.index, html }])) pending.current = { select: [place.path] };
   };
+  /** a line drawn from one object to another (runtime/connect.ts): a connector between the two (connectors.ts) */
+  const connectObjects = (from: Path, to: Path, sides: [string, string], arrow: boolean) => {
+    setToolState('select');
+    if (readOnlyRef.current) return;
+    const r = connectOps(text.toString(), from, to, sides, arrow);
+    if (r && applyOps(r.ops)) { pending.current = { select: [r.path] }; showHud('Connected · it stays attached when either object moves', 1800); }
+  };
+  const connectorItems = (one: SelItem): MenuItem[] => {
+    const set = (change: { route?: Route; head?: boolean }) => { const ops = connectorOps(text.toString(), one.path, change); if (ops) applyOps(ops); };
+    const c = one.connector!, ro = readOnlyRef.current;
+    return [{ label: 'Connector', sub: [
+      ...(['straight', 'elbow', 'curved'] as const).map(r => ({ label: r === 'straight' ? 'Straight' : r === 'elbow' ? 'Elbow' : 'Curved', checked: c.route === r, disabled: ro, action: () => set({ route: r }) })),
+      { sep: true },
+      { label: 'Arrowhead', checked: c.head, disabled: ro, action: () => set({ head: !c.head }) },
+    ] }];
+  };
   /** the selected object is a design's "QR code" placeholder (worked out once per selection: the text is parsed) */
   const qrPh = useRef<{ key: string; is: boolean }>({ key: '', is: false });
   const qrOffer = (one: SelItem | null): boolean => {
@@ -2430,7 +2448,8 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
   } : undefined;
   const arrangeSel = (how: ArrangeHow) => toCanvas({ ol: 'arrange', how });
 
-  const removeSel = () => { const free = sourceSelection().filter(s => !s.locked); if (free.length) applyOps([{ t: 'remove', paths: free.map(s => s.path) }]); };
+  // (with their connectors: connectors.ts)
+  const removeSel = () => { const free = sourceSelection().filter(s => !s.locked).map(s => s.path); if (free.length) applyOps([{ t: 'remove', paths: [...free, ...connectorsFor(text.toString(), free)] }]); };
   const duplicateSel = () => { const selected = sourceSelection(); if (selected.length) applyOps([{ t: 'duplicate', paths: selected.map(s => s.path) }]); };
 
   /* ------------------------------------------------------------- pictures */
@@ -2667,6 +2686,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
         { label: 'Describe the picture (alt text)…', disabled: readOnlyRef.current, action: () => { void describePicture(); } },
       ] : []),
       ...(one && one.qr !== undefined ? [{ label: 'Edit QR code…', shortcut: 'double-click', disabled: readOnlyRef.current, action: () => void qrCode(one.path) }] : []),
+      ...(one && one.connector ? connectorItems(one) : []),
       ...(one && qrOffer(one) ? [{ label: 'Put a QR code here…', disabled: readOnlyRef.current, action: () => void qrCode(one.path) }] : []),
       { label: 'Edit code', action: () => showCode() },
       // a layout's placeholder (decklayouts.ts): what goes in it, said while it is empty — or an ordinary object again

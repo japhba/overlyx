@@ -1,4 +1,6 @@
 /** Data-defined arrows and frames. Only their rendered geometry changes; the source keeps targets. */
+import { MODE } from './env';
+
 const NS = 'http://www.w3.org/2000/svg';
 const SELECTOR = 'svg[data-ol-connector], svg[data-ol-frame]';
 const GENERATED = 'g[data-ol-annotation-shape]';
@@ -52,12 +54,17 @@ function bounds(els: Element[], scope: HTMLElement): Box | null {
     w: (Math.max(...rects.map(r => r.right)) - x) / sx, h: (Math.max(...rects.map(r => r.bottom)) - y) / sy };
 }
 
-function point(b: Box, a: Anchor, toward: Box): Point {
+function sideOf(b: Box, a: Anchor, toward: Box): Side {
   const dx = toward.x + toward.w / 2 - b.x - b.w / 2, dy = toward.y + toward.h / 2 - b.y - b.h / 2;
-  const side = !a.side || a.side === 'auto' ? (Math.abs(dx) >= Math.abs(dy) ? dx >= 0 ? 'right' : 'left' : dy >= 0 ? 'bottom' : 'top') : a.side;
+  return !a.side || a.side === 'auto' ? (Math.abs(dx) >= Math.abs(dy) ? dx >= 0 ? 'right' : 'left' : dy >= 0 ? 'bottom' : 'top') : a.side;
+}
+function point(b: Box, a: Anchor, toward: Box): Point {
+  const side = sideOf(b, a, toward);
   return { x: b.x + (side === 'left' ? 0 : side === 'right' ? b.w : b.w / 2) + num(a.offset?.[0], 0),
     y: b.y + (side === 'top' ? 0 : side === 'bottom' ? b.h : b.h / 2) + num(a.offset?.[1], 0) };
 }
+/** the way out of a side (a unit vector; the centre: towards the other end) */
+const NORMAL: Record<Side, Point> = { top: { x: 0, y: -1 }, bottom: { x: 0, y: 1 }, left: { x: -1, y: 0 }, right: { x: 1, y: 0 }, center: { x: 0, y: 0 }, auto: { x: 0, y: 0 } };
 
 function render(svg: SVGSVGElement, used: Set<Element>): void {
   const scope = svg.parentElement;
@@ -84,14 +91,35 @@ function render(svg: SVGSVGElement, used: Set<Element>): void {
     const curve = num(config.curve, 0);
     const control = { x: (start.x + end.x) / 2 - dy / len * curve, y: (start.y + end.y) / 2 + dx / len * curve };
     const head = Math.max(0, num(config.head, 10));
-    const tail = curve ? control : start, angle = Math.atan2(end.y - tail.y, end.x - tail.x);
+    // `route`: "elbow" (horizontal and vertical runs, PowerPoint's elbow connector) or "curved" (out of
+    // each side and into the other, a cubic curve); else straight, or bent by `curve`
+    const route = config.route === 'elbow' || config.route === 'curved' ? config.route as string : '';
+    const sa = sideOf(ab, a, bb), sb = sideOf(bb, b, ab);
+    const na = NORMAL[sa].x || NORMAL[sa].y ? NORMAL[sa] : Math.abs(dx) >= Math.abs(dy) ? { x: Math.sign(dx) || 1, y: 0 } : { x: 0, y: Math.sign(dy) || 1 };
+    const nb = NORMAL[sb].x || NORMAL[sb].y ? NORMAL[sb] : { x: -na.x, y: -na.y };
+    let via: Point[] = [];
+    if (route === 'elbow') {
+      // out of the first side; a horizontal start meets a horizontal end halfway across, a vertical one at its height
+      if (na.x) via = nb.x ? [{ x: (start.x + end.x) / 2, y: start.y }, { x: (start.x + end.x) / 2, y: end.y }] : [{ x: end.x, y: start.y }];
+      else via = nb.y ? [{ x: start.x, y: (start.y + end.y) / 2 }, { x: end.x, y: (start.y + end.y) / 2 }] : [{ x: start.x, y: end.y }];
+    } else if (route === 'curved') {
+      const k = Math.max(24, len / 3);
+      via = [{ x: start.x + na.x * k, y: start.y + na.y * k }, { x: end.x + nb.x * k, y: end.y + nb.y * k }];
+    }
+    const last = via.length ? via[via.length - 1] : curve ? control : start;
+    const tail = last.x === end.x && last.y === end.y ? start : last, angle = Math.atan2(end.y - tail.y, end.x - tail.x);
     const tips = [-.45, .45].map(turn => ({ x: end.x - head * Math.cos(angle + turn), y: end.y - head * Math.sin(angle + turn) }));
-    const points = [start, end, control, ...tips];
+    const points = [start, end, control, ...via, ...tips];
     const x = Math.min(...points.map(p => p.x)), y = Math.min(...points.map(p => p.y));
     box = { x, y, w: Math.max(1, Math.max(...points.map(p => p.x)) - x), h: Math.max(1, Math.max(...points.map(p => p.y)) - y) };
     const xy = (p: Point) => `${fmt(p.x - x)} ${fmt(p.y - y)}`;
-    markup = `<path fill="none" d="M${xy(start)}${curve ? ` Q${xy(control)} ` : ' L'}${xy(end)}"/>`;
+    const d = route === 'elbow' ? `M${xy(start)}${via.map(p => ` L${xy(p)}`).join('')} L${xy(end)}`
+      : route === 'curved' ? `M${xy(start)} C${xy(via[0])} ${xy(via[1])} ${xy(end)}`
+      : `M${xy(start)}${curve ? ` Q${xy(control)} ` : ' L'}${xy(end)}`;
+    markup = `<path fill="none" d="${d}"/>`;
     if (head) markup += `<path fill="none" d="M${xy(tips[0])} L${xy(end)} L${xy(tips[1])}"/>`;
+    // (while it is edited: a wide invisible line to click it by — the drawn one lets the pointer through)
+    if (MODE === 'edit') markup += `<path fill="none" stroke="transparent" stroke-width="14" pointer-events="stroke" d="${d}"/>`;
   }
   for (const [name, value] of Object.entries({ position: 'absolute', left: `${fmt(box.x)}px`, top: `${fmt(box.y)}px`,
     width: `${fmt(box.w)}px`, height: `${fmt(box.h)}px`, overflow: 'visible', 'pointer-events': 'none' })) style(svg, name, value);

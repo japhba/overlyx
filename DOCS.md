@@ -1862,6 +1862,24 @@ blend.
     Smart invert: gradients invert with the slide (hues kept); a slide whose background is a picture
     is not inverted at all (`runtime/darkpages.ts`), so the photo and the text written for it stay as
     presented. `tests/deck-background.test.ts`.
+  * **Connectors drawn between objects** (`runtime/connect.ts`, `deliverable/connectors.ts`, drawn by
+    `runtime/annotations.ts`): with the **Line** or **Arrow** tool held, the object under the pointer
+    shows its five connection points (its sides' middles and centre; the one a line would take
+    filled). A line drawn from one object to another becomes a connector — the hand-written
+    `data-ol-connector` of *Anchored annotations* above, written for you: the two objects get an `id`
+    when they have none (`box-1`, `picture-1`, or from their name), and
+    `<svg data-ol-connector='{"from":{"id":"box-1","side":"right"},"to":{"id":"box-2"}}' stroke="#1d2433" stroke-width="2"></svg>`
+    goes after the slide's objects (a side is written when the line began or ended at one of the
+    points, else it is `auto`: the side facing the other object). It stays attached when either
+    object moves, is resized or turned, in the editor and when presented or printed. `route`:
+    `"elbow"` (horizontal and vertical runs, meeting halfway) or `"curved"` (a cubic curve out of one
+    side and into the other); straight without one. The right-click menu's *Connector* switches
+    Straight / Elbow / Curved and the arrowhead; colour, width, dashes and the arrowhead come from the
+    line controls (the SVG's own `stroke` attributes, `head: 0` in the settings). A connector is
+    selected by clicking its line (a wide invisible line is laid over it while editing) and cannot be
+    dragged away from its objects. **Deleting an object deletes its connectors** (`connectorsOf`,
+    `connectorsFor`, also for what is inside a deleted group — cut too); a connector whose object went
+    another way (its `id` edited by hand) hides until the object is back.
   * **Usability survey, 14 Nov 2026** (the user: "survey usability … feature completeness of the
     layout editors, especially slides and posters … improve what you think could be better"; walked
     through as a new user on an isolated instance, with a code inventory beside it). **Fixed then**:

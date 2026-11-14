@@ -281,7 +281,7 @@ export const SHAPES: { tool: Tool; label: string }[] = [
   { tool: 'triangle', label: 'Triangle' }, { tool: 'diamond', label: 'Diamond' }, { tool: 'star', label: 'Star' }, { tool: 'hexagon', label: 'Hexagon' },
 ];
 // (freehand strokes: Draw, a tool of its own)
-export const LINES: { tool: Tool; label: string }[] = [{ tool: 'line', label: 'Line' }, { tool: 'arrow', label: 'Arrow' }, { tool: 'bezier', label: 'Path: click for corners, drag for curves (B)' }];
+export const LINES: { tool: Tool; label: string }[] = [{ tool: 'line', label: 'Line: drawn from one object to another, a connector' }, { tool: 'arrow', label: 'Arrow: drawn from one object to another, a connector' }, { tool: 'bezier', label: 'Path: click for corners, drag for curves (B)' }];
 
 const firstFamily = firstFontFamily;
 
@@ -419,7 +419,7 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
       { id: 'dk-text', title: 'Text box (T) — click for auto width, drag for wrapping text', icon: 'dk-text', action: () => c.setTool('text'), active: c.tool === 'text', disabled: ro },
       { id: 'dk-shapes', title: 'Shapes (R rectangle, O ellipse)', icon: shapeTool ? `dk-${shapeTool.tool}` : 'dk-shapes', active: !!shapeTool, disabled: ro,
         palette: { title: 'Shapes', cols: 4, items: SHAPES.map(s => ({ label: s.label, html: ICON(`dk-${s.tool}`), active: c.tool === s.tool, action: () => c.setTool(s.tool) })) } },
-      { id: 'dk-lines', title: 'Lines (L line, A arrow, B Bézier path)', icon: lineTool ? `dk-${lineTool.tool}` : 'dk-line', active: !!lineTool, disabled: ro,
+      { id: 'dk-lines', title: 'Lines (L line, A arrow, B Bézier path) — from one object to another: a connector', icon: lineTool ? `dk-${lineTool.tool}` : 'dk-line', active: !!lineTool, disabled: ro,
         palette: { title: 'Lines', cols: 4, items: LINES.map(s => ({ label: s.label, html: ICON(`dk-${s.tool}`), active: c.tool === s.tool, action: () => c.setTool(s.tool) })) } },
       { id: 'dk-draw', title: drawing ? 'Done drawing (Esc)' : held ? 'Drawing — click for the pens, colours and widths again (Esc or V puts the pen away)' : 'Draw (P) — pen, highlighter, eraser and lasso, stroke after stroke until Esc (a Pencil draws without it)',
         icon: 'dk-draw', active: drawing || held, disabled: ro, action: () => { if (held) c.ink.fold!(false); else c.ink.draw(!drawing); } },

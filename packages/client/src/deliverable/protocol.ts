@@ -181,6 +181,8 @@ export interface SelItem {
   qr?: string;
   /** a table (tablemodel.ts): its size and look, the cell typed in */
   table?: TableInfo;
+  /** a connector (runtime/connect.ts): its route and whether it ends in an arrowhead */
+  connector?: { route: 'straight' | 'elbow' | 'curved'; head: boolean };
 }
 
 /* what is wrong with a page (runtime/report.ts): the agents' render_page report and the editor's Check */
@@ -496,6 +498,8 @@ export type FromRuntime =
   | { ol: 'editSvg'; src: string }
   /** a double click on a QR code (qrcode.ts): the editor asks for its link */
   | { ol: 'editQr'; path: Path }
+  /** a line drawn from one object to another (runtime/connect.ts): the editor writes a connector between them */
+  | { ol: 'connect'; version: number; from: Path; to: Path; sides: [string, string]; arrow: boolean }
   /** presenting: the slide is zoomed in (or not any more) */
   | { ol: 'presentZoom'; zoomed: boolean }
   /** presenting: the bar's "Fingers draw" switched */

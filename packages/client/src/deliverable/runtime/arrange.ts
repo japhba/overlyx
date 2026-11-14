@@ -429,6 +429,7 @@ function boxPaint(el: Element, path: Path, p: Paint, ops: HtmlOp[]): void {
 
 function svgPaint(el: Element, path: Path, p: Paint, ops: HtmlOp[], defs: HtmlOp[]): void {
   const root = el.localName === 'svg' ? el : null;
+  if (root?.hasAttribute('data-ol-connector')) { connectorPaint(root, path, p, ops); return; }
   // the drawing as a whole: opacity, shadow on the <svg>
   if (p.opacity !== undefined || p.shadow !== undefined) {
     const set: Record<string, string | null> = {};
@@ -484,6 +485,25 @@ function svgPaint(el: Element, path: Path, p: Paint, ops: HtmlOp[], defs: HtmlOp
     const id = markerId(el, root);
     const m = `<defs><marker id="${id}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="context-stroke"/></marker></defs>`;
     ops.push({ t: 'insert', parent: path, index: 0, html: m });
+  }
+}
+
+/** a connector (connect.ts): its lines are the runtime's, its colour, width and dashes the SVG's own attributes, its arrowhead in its settings */
+function connectorPaint(el: Element, path: Path, p: Paint, ops: HtmlOp[]): void {
+  const attr = (name: string, value: string | null) => ops.push({ t: 'attr', path, name, value });
+  if (p.stroke !== undefined || p.ink !== undefined) attr('stroke', p.stroke ?? p.ink ?? '#1d2433');
+  if (p.strokeWidth !== undefined) attr('stroke-width', p.strokeWidth === null ? null : String(r2(p.strokeWidth)));
+  if (p.dash !== undefined) {
+    const w = p.strokeWidth ?? (parseFloat(el.getAttribute('stroke-width') ?? '') || 2);
+    attr('stroke-dasharray', dashArray(p.dash, w));
+    attr('stroke-linecap', p.dash === 'dotted' ? 'round' : null);
+  }
+  if (p.opacity !== undefined) ops.push({ t: 'style', path, set: { opacity: p.opacity === null || p.opacity >= 1 ? null : String(r2(p.opacity)) } });
+  if (p.arrowEnd !== undefined) {
+    let cfg: Record<string, unknown> = {};
+    try { cfg = JSON.parse(el.getAttribute('data-ol-connector') ?? '{}') ?? {}; } catch { return; }
+    if (p.arrowEnd) delete cfg.head; else cfg.head = 0;
+    attr('data-ol-connector', JSON.stringify(cfg));
   }
 }
 

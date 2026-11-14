@@ -71,6 +71,7 @@ import { PH, PH_CSS, phRole, isEmptyPh, isPicturePh, primeList } from './placeho
 import { TEXT_ANCHOR, WRAP_LINES, anchorFraction, textBoxStyle, type TextAnchor } from '../textboxes';
 import { textLineCount, wrapWarning, contentRect } from './layout';
 import { initTables, tableClick, tableDblClick, tableEnter, tableMenuAt, typingInCell, tableKey, cellExec, tablesAfterSource, tableInfo, tableParts, bindTableGrips, TABLE_OVERLAY_CSS } from './table';
+import { anchorDots, connectorInfo, connectorsOf, objectUnder, sideAt, type ConnSide } from './connect';
 
 const NS = 'http://www.w3.org/1999/xhtml';
 let host: HTMLElement;
@@ -440,6 +441,8 @@ export function removeSelected(): void {
   const paths = free.map(pathOf).filter((p): p is Path => !!p);
   if (!paths.length) return;
   const refit = refitGroups(free, new Set(free));
+  // (their connectors go with them: connect.ts)
+  for (const c of connectorsOf(free)) if (!paths.some(p => p.join() === c.join())) paths.push(c);
   selected = selected.filter(isLocked);
   report();
   commit([...refit, { t: 'remove', paths }]);
@@ -782,6 +785,8 @@ export function isLocked(el: Element): boolean { return el.hasAttribute('data-ol
 
 export function movable(el: Element): boolean {
   if (isSvgPart(el)) return SVG_SHAPES.has(el.localName);
+  // (a connector goes where its objects are: connect.ts)
+  if (el.hasAttribute('data-ol-connector')) return false;
   if (inGroupLayout(el)) return false;
   const p = cs(el).position;
   if (p === 'absolute' || p === 'fixed' || p === 'relative') return true;
@@ -1153,7 +1158,7 @@ function styleOf(el: Element): SelStyle {
     strokeWidth = stroke ? (parseFloat(tc.strokeWidth) || 1) * userScale(t) : 0;
     dash = stroke ? dashOf('solid', tc.strokeDasharray) : 'none';
     arrowStart = !!t.getAttribute('marker-start');
-    arrowEnd = !!t.getAttribute('marker-end');
+    arrowEnd = el.hasAttribute('data-ol-connector') ? connectorInfo(el).head : !!t.getAttribute('marker-end');
   } else {
     fill = c.backgroundColor !== 'rgba(0, 0, 0, 0)' ? c.backgroundColor : null;
     const bw = parseFloat(c.borderTopWidth) > 0 ? declaredPx(el, ['border-top-width', 'border-width', 'border-top', 'border']) ?? parseFloat(c.borderTopWidth) : 0;
@@ -1196,6 +1201,7 @@ function item(el: Element): SelItem | null {
     ...(phRole(el) ? { ph: { role: phRole(el)!, empty: isEmptyPh(el) } } : {}),
     ...(masterKey(el) ? { master: masterKey(el)! } : {}),
     ...(el.hasAttribute('data-ol-qr') ? { qr: el.getAttribute('data-ol-qr')! } : {}),
+    ...(el.hasAttribute('data-ol-connector') ? { connector: connectorInfo(el) } : {}),
     ...(kind === 'group' ? { layout: groupLayoutOf(el, cs(el)) ?? { direction: 'free', gap: 24, align: 'center', equal: false } } : {}),
     ...(kind === 'table' ? { table: tableInfo(el) ?? undefined } : {}),
   };
@@ -1326,6 +1332,15 @@ export function report(): void {
 /* ------------------------------------------------------------------ drawing */
 
 let hoverEl: Element | null = null;
+/** a line tool held: the object under the pointer and the connection point a line would take (connect.ts) */
+let conn: { el: Element; side: ConnSide } | null = null;
+function connHover(cx: number, cy: number, px: number, py: number, redraw = true): void {
+  const el = objectUnder(cx, cy, t => objectFor(t, false));
+  const next = el ? { el, side: sideAt(el, px, py) } : null;
+  if (next?.el === conn?.el && next?.side === conn?.side) return;
+  conn = next;
+  if (redraw) draw();
+}
 let guides: { axis: 'x' | 'y'; at: number; from: number; to: number }[] = [];
 let drawBox: Rect | null = null;
 let dropBox: Rect | null = null;
@@ -1377,6 +1392,7 @@ export function selectionLabel(els: Element[]): string {
 /** a word for what an element is (the Objects pane's), "Path", "Group", "Text" */
 export function kindWord(el: Element): string {
   if (el.hasAttribute('data-ol-qr')) return 'QR code';
+  if (el.hasAttribute('data-ol-connector')) return 'Connector';
   const k = kindOf(el);
   if (k === 'svgpart') { const n = isLayer(el) ? 'layer' : SVG_PART_NAMES[el.localName] ?? el.localName; return n[0].toUpperCase() + n.slice(1); }
   if (k === 'line' && el.localName === 'svg' && !lineOf(el)) return 'Drawing';
@@ -1507,6 +1523,8 @@ export function draw(): void {
   if (drawBox) parts.push(`<div class="draw" style="left:${drawBox.x}px;top:${drawBox.y}px;width:${drawBox.w}px;height:${drawBox.h}px;border-width:${bw}px"></div>`);
   if (dropBox) parts.push(`<div class="drop" style="left:${dropBox.x}px;top:${dropBox.y}px;width:${dropBox.w}px;height:${dropBox.h}px;border-width:${3 / scale}px"></div>`);
   // (Draw's strokes are drawn in the page itself, as they will stay: startInk)
+  // a line tool held: the connection points of the object under the pointer (connect.ts)
+  if ((tool === 'line' || tool === 'arrow') && conn && conn.el.isConnected) parts.push(anchorDots(conn.el, scale, conn.side));
   if (drag && drag.kind === 'draw' && (tool === 'line' || tool === 'arrow') && drag.pts && drag.moved) {
     const d = `M${drag.pts[0][0]} ${drag.pts[0][1]}L${drag.pts[drag.pts.length - 1][0]} ${drag.pts[drag.pts.length - 1][1]}`;
     parts.push(`<svg class="ink" width="1" height="1"><path d="${d}" fill="none" stroke="#2f6fde" stroke-width="${3 / scale}" stroke-linecap="round" stroke-linejoin="round"/></svg>`);
@@ -1549,6 +1567,7 @@ function onHover(e: PointerEvent): void {
   if (e.pointerType === 'touch') { onTouchMove(e); return; }
   rulerPointer(e.pageX, e.pageY);
   if (drag || editing) return;
+  if (tool === 'line' || tool === 'arrow') { connHover(e.clientX, e.clientY, e.pageX, e.pageY); return; }
   const t = e.target as Element;
   // right on a guide: its own cursor (a press takes it before the object under it)
   const onGuide = tool === 'select' && !isOrdering() ? guideAt(guideSlide(t), e.pageX, e.pageY, 4) : null;
@@ -2097,6 +2116,7 @@ function onDragMove(e: PointerEvent): void {
       if (e.shiftKey) { const a = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4), l = Math.hypot(dx, dy); ex = drag.x0 + Math.cos(a) * l; ey = drag.y0 + Math.sin(a) * l; }
       drag.pts = [[drag.x0, drag.y0], [ex, ey]];
       drawBox = null;
+      connHover(ex - scrollX, ey - scrollY, ex, ey, false);
     } else if (drag.kind === 'draw' && e.shiftKey && tool !== 'text' && tool !== 'formula') { const m = Math.max(drawBox.w, drawBox.h); drawBox = { x: drag.x0 + (dx < 0 ? -m : 0), y: drag.y0 + (dy < 0 ? -m : 0), w: m, h: m }; }
     draw();
     return;
@@ -3235,6 +3255,15 @@ function finishDraw(d: Drag, box: Rect | null, e: PointerEvent): void {
   let rect: Rect;
   let pts: [number, number][] | undefined;
   if ((tool === 'line' || tool === 'arrow') && d.pts && d.pts.length === 2 && d.moved) {
+    // from one object to another: a connector between them (connect.ts), not a loose line
+    const [[x0, y0], [x1, y1]] = d.pts;
+    const a = objectUnder(x0 - scrollX, y0 - scrollY, t => objectFor(t, false)), b = objectUnder(x1 - scrollX, y1 - scrollY, t => objectFor(t, false));
+    conn = null;
+    const pa = a ? pathOf(a) : null, pb = b ? pathOf(b) : null;
+    if (a && b && pa && pb && a !== b && a.parentElement === b.parentElement && !isLocked(a.parentElement!)) {
+      post({ ol: 'connect', version: state.version, from: pa, to: pb, sides: [sideAt(a, x0, y0), sideAt(b, x1, y1)], arrow: tool === 'arrow' });
+      return;
+    }
     pts = d.pts.map(([x, y]) => toLocal(x, y));
     const x = Math.min(pts[0][0], pts[1][0]), y = Math.min(pts[0][1], pts[1][1]);
     rect = { x, y, w: Math.abs(pts[0][0] - pts[1][0]), h: Math.abs(pts[0][1] - pts[1][1]) };
