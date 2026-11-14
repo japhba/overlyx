@@ -3038,6 +3038,30 @@ blend.
   background, named `authorYY_title.pdf` (`packages/server/src/pdffetch.ts`) — arXiv when the entry
   has an arXiv id, else an open-access PDF OpenAlex knows for the DOI; strictly additive (an
   existing file is never replaced), and paywalled papers are simply skipped.
+* **My library** — a reference library of one's own, a Zotero inside OverLyX (14 Nov 2026,
+  `packages/server/src/library.ts`, `packages/client/src/library/`). Per account, on the server:
+  references with type, authors, title, venue, year, DOI, arXiv id, link, abstract, tags, a private
+  note and a BibTeX key (Scholar style `vaswani2017attention`, unique within the account; the full
+  BibTeX kept as it came, its fields edited in place), each with an optional PDF
+  (`<data>/library/<user id>/<ref id>.pdf`, 64 MB each, 2 GB per account). Opened from the start
+  screen (*My library*: a page over the app, Escape closes it) and in the editor from the activity
+  bar's **Library** button below Files (a pane in the files' place; ⤢ opens the page). The box at the
+  top takes a DOI, an arXiv id, an ISBN, a paper's link or a title (looked up as one types through the
+  citation dialog's lookups — `searchLiterature`, its user agent and `netguard.ts` — at most 40 a
+  minute per account; Add or Enter takes a candidate), several identifiers one per line, or BibTeX
+  (one entry or a whole file); PDFs and .bib files can be dropped anywhere on the view or chosen with
+  *Add files…*. A dropped PDF is read for its own DOI or arXiv id (XMP and info dictionary, arXiv's
+  margin stamp, `doi.org/` links in the first streams — `pdfIdentifiers`, no external tool), looked
+  up, and attached; without one it is kept under its title for the user to complete. *Import from
+  Zotero* (when Zotero is connected) brings the whole Zotero library over with its tags and
+  abstracts, and *Export .bib* gives the library back as one file. A paper the library has (same DOI,
+  arXiv id, or title within a year) is never added twice: its entry flashes instead. Search as you
+  type covers title, authors, venue, year, key, tags, DOI and note; tags filter, four sorts.
+  Privacy: every `/api/library` route answers about the signed-in account only, guests have none,
+  and the library goes with the account (`accounts.ts`). Projects get only the entries their
+  documents cite, without abstract, notes, tags or file links. The VS Code extension has no
+  library (its local bridge does not serve `/api/library`), so it shows neither the pane nor the
+  library rows.
 * **Find & replace** (`Ctrl+F`): find next/previous, replace, replace all, case-sensitive and
   whole-word options, live match count and highlighting. *Document ▸ Statistics* counts words and
   characters of the selection / the document (notes excluded).

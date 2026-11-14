@@ -70,6 +70,7 @@ import { allow as rateLimit } from './feedback.ts';
 import { searchLiterature, bibtexFor, addToCitedBib, sourcesAvailable, normTitle, type Hit } from './bibsearch.ts';
 import { identify } from './citelinks.ts';
 import { zoteroRoutes, zoteroStatus, searchZotero } from './zotero.ts';
+import { libraryRoutes, bibtexForProject } from './library.ts';
 import { fetchPdfForEntry } from './pdffetch.ts';
 import { gitRouter, ensureAllRepos, ensureRepo, repoInfo, cloneUrl, commitProject, restoreProject, touchProject, createToken, listTokens, deleteToken, flushCommits } from './git.ts';
 import { syncRouter } from './sync.ts';
@@ -351,6 +352,8 @@ api.use(gdocsRoutes());
 api.use(lessWrongRoutes());
 // the account's Zotero library for the citation dialog (zotero.ts)
 api.use(zoteroRoutes());
+// the account's own reference library (library.ts): its owner's alone
+api.use(libraryRoutes());
 
 // what keeps the document in step from elsewhere right now — synced clones of its project, its
 // Google Docs link (syncPeers.ts): the web interface's "⇄ in sync" chip
@@ -1188,6 +1191,10 @@ api.post('/projects/:project/bib/add', needProject('edit'), async (req, res) => 
     const project = req.params.project;
     const dir = projectDir(project);
     let bibtex = typeof req.body?.bibtex === 'string' ? req.body.bibtex : '';
+    // a reference of the citer's own library (library.ts): the project gets its entry, under its key when free
+    const fromLibrary = !bibtex && req.body?.library != null ? bibtexForProject(req.user!.id, Number(req.body.library)) : null;
+    if (req.body?.library != null && !bibtex && !fromLibrary) { res.status(404).json({ error: 'That reference is not in your library' }); return; }
+    if (fromLibrary) bibtex = fromLibrary.bibtex;
     if (!bibtex && req.body?.hit) {
       if (!config.literature) { res.status(503).json({ error: 'Literature search is switched off on this server.' }); return; }
       bibtex = await bibtexFor(req.body.hit as Hit);
@@ -1197,7 +1204,7 @@ api.post('/projects/:project/bib/add', needProject('edit'), async (req, res) => 
     // the document it is cited in: the entry goes into the cited.bib beside it
     const doc = typeof req.body?.doc === 'string' && req.body.doc.startsWith(project + '/') ? req.body.doc.slice(project.length + 1) : '';
     if (doc) resolveProjectPath(project, doc);   // (inside the project, or it throws)
-    const r = addToCitedBib(dir, bibtex, { docDir: doc ? path.posix.dirname(doc) : '', commit: () => touchProject(project, req.user!.id) });
+    const r = addToCitedBib(dir, bibtex, { docDir: doc ? path.posix.dirname(doc) : '', key: fromLibrary?.key, commit: () => touchProject(project, req.user!.id) });
     console.log(`[bib] ${req.user!.username} → "${project}"${doc ? ` (${doc})` : ''}: ${r.existed ? `${r.key} is in ${r.file} already` : `${r.key} added to ${r.file}${r.copiedFrom ? ` (the entry ${r.copiedFrom} has)` : ''}`}`);
     if (!r.existed) logAccess(project, req.user!.id, 'bib-add', `${r.key} → ${r.file}`);
     // fetch the paper's PDF into <project>/pdf/ in the background (additive; open copies only)

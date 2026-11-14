@@ -29,6 +29,7 @@ import { forgetAgentUser } from './agent.ts';
 import { disconnectDrive } from './gdocs/google.ts';
 import { disconnectLessWrong } from './lesswrong/api.ts';
 import { disconnectZotero } from './zotero.ts';
+import { forgetLibrary } from './library.ts';
 import './gdocs/sync.ts';   // its gdocs_links table
 import './lesswrong/sync.ts';   // its lesswrong_links table
 import { forgetUserReports } from './feedback.ts';
@@ -134,6 +135,7 @@ export async function deleteAccount(user: SessionUser, live: LiveDocs): Promise<
   await disconnectDrive(id).catch(() => undefined);
   await disconnectLessWrong(id).catch(() => undefined);
   disconnectZotero(id);
+  forgetLibrary(id);
   db.transaction(() => {
     const agents = (db.prepare('SELECT id FROM mcp_agents WHERE user_id = ?').all(id) as { id: number }[]).map(a => a.id);
     for (const a of agents) db.prepare('DELETE FROM mcp_sessions WHERE agent_id = ?').run(a);

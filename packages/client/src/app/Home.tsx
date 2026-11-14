@@ -8,6 +8,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { inkOn } from './contrast';
 import { api, zipUrl, type AdminProjectInfo, type Project, type ProjectPerson, type User } from '../api';
 import { AvatarContent, initials } from './Avatar';
+import { openLibrary } from '../library/store';
 import { OverleafImport, projectNameFrom, type ImportInitial } from './OverleafImport';
 import { chooseGoogleImport } from './gpicker';
 import { takePendingImport } from './pendingImport';
@@ -301,6 +302,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
         {!user.guest && <button class="btn" data-import-lyx onClick={() => { setImportSource('lyx'); setImportOpen(true); }}>Import from LyX…</button>}
         {!user.guest && gdocs && <button class="btn" data-import-gdocs onClick={() => void importGoogle()} title="Bring a Google Doc over as a project of its own — kept in sync with it, or as a copy">Import from Google Docs…</button>}
         <button class="btn" onClick={onBrowse}>Show the files panel</button>
+        {!user.guest && <button class="btn" data-open-library onClick={() => openLibrary(true)} title="Your references and their PDFs, a reference library of your own — cite them in any document">My library</button>}
         <FileSortSwitch sort={fileSort} onSort={chooseFileSort} />
         <button class="home-view-switch" data-home-view-switch={view === 'rows' ? 'grid' : 'rows'} onClick={switchView}
           title={view === 'rows' ? 'Show projects as a grid of cards' : 'Show projects as a list'} aria-label={view === 'rows' ? 'Grid view' : 'List view'}>

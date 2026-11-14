@@ -382,7 +382,7 @@ function projectEntries(projectDir: string): { file: string; entry: BibEntry }[]
  * project's root cited.bib, a 5.4 MB file of 10,000 entries the document then read through the
  * search path on every build (+20 s) — or did not find at all where that path is not set.
  */
-export function addToCitedBib(projectDir: string, bibtex: string, opts: { file?: string; docDir?: string; commit?: (rel: string) => void } = {}): AddResult {
+export function addToCitedBib(projectDir: string, bibtex: string, opts: { file?: string; docDir?: string; commit?: (rel: string) => void; /** the key to use when no entry has it (My library's) */ key?: string } = {}): AddResult {
   const parsed = parseBibtex(bibtex);
   if (parsed.length !== 1) throw new Error(parsed.length ? 'Paste one BibTeX entry at a time' : 'That is not a BibTeX entry (it should start with @article{…, @inproceedings{…, …)');
   const e = parsed[0];
@@ -400,7 +400,7 @@ export function addToCitedBib(projectDir: string, bibtex: string, opts: { file?:
   const elsewhere = existing.find(isSame);
   const keys = new Set(existing.map(x => x.entry.key));
   // (the key the paper has elsewhere, unless a file beside the document uses it for another paper)
-  let key = elsewhere && !existing.some(x => beside(x.file) && x.entry.key === elsewhere.entry.key) ? elsewhere.entry.key : scholarKey(e);
+  let key = elsewhere && !existing.some(x => beside(x.file) && x.entry.key === elsewhere.entry.key) ? elsewhere.entry.key : opts.key && /^[\w:.+/-]+$/.test(opts.key) ? opts.key : scholarKey(e);
   if (key !== elsewhere?.entry.key && keys.has(key)) { let i = 0; while (keys.has(key + 'abcdefghijklmnopqrstuvwxyz'[i])) i++; key = key + 'abcdefghijklmnopqrstuvwxyz'[i]; }
   const text = rewriteEntry(bibtex, key);
   const abs = path.join(projectDir, rel);

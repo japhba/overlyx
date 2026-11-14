@@ -1,0 +1,72 @@
+/* My library (LibraryView.tsx): the page over the app and the pane beside the editor */
+.library { position: relative; display: flex; flex-direction: column; gap: 8px; min-height: 0; height: 100%; color: var(--ui-fg); font-family: var(--ui-font); font-size: 13px; }
+.library-pane { padding: 8px 10px; overflow: auto; }
+.library-page { padding: 18px 24px; max-width: 1180px; margin: 0 auto; width: 100%; box-sizing: border-box; }
+.library-overlay { position: fixed; inset: 0; z-index: 900; background: var(--page-bg); overflow: auto; }
+.library-head { display: flex; align-items: center; gap: 8px; }
+.library-head h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.library-page .library-head h2 { font-size: 20px; }
+.library-count { color: var(--ui-muted); font-size: 12px; }
+.library-grow { flex: 1; }
+.library-add textarea { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; padding: 6px 8px; border: 1px solid var(--ui-border); border-radius: 6px; background: var(--surface); color: var(--ui-fg); min-height: 32px; }
+.library-add textarea:focus { outline: 2px solid var(--accent-border); border-color: var(--accent); }
+.library-add-row { display: flex; justify-content: flex-end; margin-top: 4px; }
+.library-hits { margin-top: 4px; border: 1px solid var(--ui-border); border-radius: 6px; background: var(--surface); max-height: 240px; overflow: auto; }
+.library-hit { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--ui-border); }
+.library-hit:last-child { border-bottom: 0; }
+.library-hit-main { flex: 1; min-width: 0; }
+.library-hint { color: var(--ui-muted); font-size: 12px; padding: 6px 8px; }
+.library-hint.error, .library-status.error { color: var(--err); }
+.library-tools { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.library-status { font-size: 12px; color: var(--ok); }
+.library-find { display: flex; gap: 6px; }
+.library-find input { flex: 1; min-width: 0; padding: 4px 8px; border: 1px solid var(--ui-border); border-radius: 6px; background: var(--surface); color: var(--ui-fg); font: inherit; }
+.library-find select { max-width: 45%; font: inherit; }
+.library-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.library-tag { border: 1px solid var(--chip-border); background: var(--chip-bg); color: var(--chip-fg); border-radius: 999px; padding: 1px 8px; font: inherit; font-size: 11px; cursor: pointer; }
+.library-tag span { opacity: 0.6; }
+.library-tag.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.library-body { display: flex; gap: 16px; min-height: 0; flex: 1; }
+.library-list { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.library-page .library-list { overflow: auto; max-height: calc(100vh - 260px); }
+.library-detail { width: 46%; min-width: 320px; overflow: auto; max-height: calc(100vh - 200px); border-left: 1px solid var(--ui-border); padding-left: 16px; }
+.library-ref { padding: 6px 8px; border-radius: 6px; cursor: pointer; border: 1px solid transparent; }
+.library-ref:hover { background: var(--row-hover); }
+.library-ref.sel { background: var(--row-sel); }
+.library-ref.flash { border-color: var(--accent); animation: library-flash 2.4s ease-out; }
+@keyframes library-flash { 0%, 40% { background: var(--hl-bg); } 100% { background: transparent; } }
+.library-ref-title { font-weight: 600; line-height: 1.3; }
+.library-ref-sub { color: var(--ui-muted); font-size: 12px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; }
+.library-ref-meta { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-top: 2px; font-size: 11px; }
+.library-ref-meta code { color: var(--ui-muted); font-family: "DejaVu Sans Mono", monospace; font-size: 10.5px; }
+.library-chip { background: var(--chip-bg); color: var(--chip-fg); border-radius: 999px; padding: 0 6px; }
+.library-pdf { color: var(--err); border: 1px solid currentColor; border-radius: 3px; padding: 0 4px; font-weight: 600; font-size: 10px; text-decoration: none; }
+.library-empty { color: var(--ui-muted); padding: 12px 8px; font-size: 12px; }
+.library-editor { display: flex; flex-direction: column; gap: 6px; padding: 8px; margin: 2px 0 8px; border: 1px solid var(--ui-border); border-radius: 6px; background: var(--surface); cursor: default; }
+.library-page .library-editor { border: 0; padding: 0; background: none; }
+.library-field { display: flex; flex-direction: column; gap: 2px; font-size: 11px; color: var(--ui-muted); min-width: 0; flex: 1; }
+.library-field input, .library-field textarea { font: inherit; font-size: 13px; color: var(--ui-fg); background: var(--surface); border: 1px solid var(--ui-border); border-radius: 4px; padding: 3px 6px; resize: vertical; }
+.library-field-pair { display: flex; gap: 8px; }
+.library-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.library-bibtex textarea { width: 100%; box-sizing: border-box; font-family: "DejaVu Sans Mono", monospace; font-size: 11px; margin: 4px 0; background: var(--code-bg); color: var(--ui-fg); border: 1px solid var(--ui-border); }
+.library-bibtex summary { cursor: pointer; color: var(--ui-muted); font-size: 12px; }
+.library.dropping { outline: 2px dashed var(--accent); outline-offset: -4px; }
+.library-drop { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--page-bg) 80%, transparent); font-size: 15px; color: var(--accent-strong); pointer-events: none; }
+.sidebar.left.library-panel { padding: 0; }
+@media (max-width: 760px) {
+  .library-body { flex-direction: column; }
+  .library-detail { width: auto; min-width: 0; border-left: 0; padding-left: 0; max-height: none; }
+  .library-page { padding: 12px 16px; }
+}
+
+/* the citation dialog's "My library" rows (Dialogs.tsx CiteDialog) and the citation hover card (citehover.ts) */
+.cite-lib-tag { display: inline-block; font-size: 10px; padding: 0 5px; margin-right: 4px; border-radius: 999px; background: var(--chip-bg); color: var(--chip-fg); border: 1px solid var(--chip-border); vertical-align: 1px; }
+.cite-card { position: fixed; z-index: 1000; max-width: 360px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--ui-border); background: var(--surface); color: var(--ui-fg); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18); font-family: var(--ui-font); font-size: 12px; line-height: 1.4; }
+.cite-card + .cite-card { margin-top: 4px; }
+.cite-card-item + .cite-card-item { border-top: 1px solid var(--ui-border); margin-top: 6px; padding-top: 6px; }
+.cite-card b { display: block; font-size: 13px; }
+.cite-card .sub { color: var(--ui-muted); }
+.cite-card .cite-card-actions { display: flex; gap: 8px; margin-top: 4px; }
+.cite-card a { color: var(--link); text-decoration: none; cursor: pointer; }
+.cite-card a:hover { text-decoration: underline; }
+.cite-card .cite-card-note { margin-top: 3px; font-style: italic; color: var(--ui-muted); }

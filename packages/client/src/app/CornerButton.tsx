@@ -7,7 +7,7 @@
  */
 import type { ComponentChildren, JSX } from 'preact';
 
-const ICONS: Record<'files' | 'slides' | 'notes' | 'bars', JSX.Element> = {
+const ICONS: Record<'files' | 'slides' | 'notes' | 'bars' | 'library', JSX.Element> = {
   // a folder
   files: <path d="M2.5 4.5a1 1 0 0 1 1-1h3l1.5 1.5h4.5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z" />,
   // a window with a column on its left
@@ -16,6 +16,8 @@ const ICONS: Record<'files' | 'slides' | 'notes' | 'bars', JSX.Element> = {
   notes: <><rect x="2" y="3" width="12" height="10" rx="1.2" /><path d="M2 9.5h12" /></>,
   // a window with a strip along its top, coming down (the bars floating over a slide: DeliverableEditor)
   bars: <><rect x="2" y="3" width="12" height="10" rx="1.2" /><path d="M2 6h12M6.2 8.7 8 10.5l1.8-1.8" /></>,
+  // books on a shelf, one leaning (My library: library/LibraryView.tsx)
+  library: <><path d="M3 3.5v9M5.5 3.5v9M8 4.5v8M10 4.8l2.6 7.6M2 13h12" /></>,
 };
 export type PanelIconName = keyof typeof ICONS;
 

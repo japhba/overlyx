@@ -116,6 +116,37 @@ export async function searchZotero(userId: number, q: string, limit = 6): Promis
   return { hits: hits.slice(0, limit), warnings };
 }
 
+/**
+ * Every item of the account's Zotero library and the groups its key reads, with their tags and
+ * abstracts — for My library's import (library.ts); null when no Zotero is connected. Pages of a
+ * hundred, one after another; a 429 or Backoff from Zotero is waited out (once, at most 10 s).
+ */
+export async function zoteroLibraryItems(userId: number, max: number): Promise<{ hit: Hit; tags: string[]; abstract: string }[] | null> {
+  const row = db.prepare('SELECT api_key, libraries FROM zotero_accounts WHERE user_id = ?').get(userId) as Pick<Row, 'api_key' | 'libraries'> | undefined;
+  if (!row) return null;
+  let key: string;
+  try { key = unseal(row.api_key); } catch { throw new Error('The Zotero connection can no longer be read — connect Zotero again (Settings ▸ Account)'); }
+  const out: { hit: Hit; tags: string[]; abstract: string }[] = [];
+  for (const lib of (JSON.parse(row.libraries) as Library[]).slice(0, 6)) {
+    for (let start = 0; out.length < max; start += 100) {
+      const params = new URLSearchParams({ include: 'data,bibtex', limit: '100', start: String(start), itemType: '-attachment' });
+      const url = `${API}/${lib.type === 'user' ? 'users' : 'groups'}/${lib.id}/items/top?${params}`;
+      let r = await fetchImpl(url, { headers: headers(key) });
+      const wait = Number(r.headers.get('retry-after') ?? r.headers.get('backoff') ?? 0);
+      if (r.status === 429 || (wait && r.ok)) { await new Promise(res => setTimeout(res, Math.min(10, wait || 5) * 1000)); if (!r.ok) r = await fetchImpl(url, { headers: headers(key) }); }
+      if (r.status === 403) throw new Error('Zotero refused the key — connect Zotero again (Settings ▸ Account)');
+      if (!r.ok) throw new Error(`Zotero answered ${r.status}`);
+      const items = (await r.json()) as any[];
+      for (const it of items) {
+        const hit = zoteroHit(it, lib);
+        if (hit) out.push({ hit, tags: (Array.isArray(it?.data?.tags) ? it.data.tags : []).map((t: any) => String(t?.tag ?? '')).filter(Boolean), abstract: String(it?.data?.abstractNote ?? '') });
+      }
+      if (items.length < 100) break;
+    }
+  }
+  return out.slice(0, max);
+}
+
 /** A Zotero item (Web API JSON, with `include=data,bibtex`) as a hit carrying Zotero's BibTeX of it. */
 export function zoteroHit(item: any, lib: Library): Hit | null {
   const d = item?.data;

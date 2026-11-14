@@ -65,6 +65,8 @@ import { useNotesPane, useNotesFold, NotesSash, NotesUnfoldTab, NotesResolved } 
 import { StatusBar, SaveIndicator, ZoomControl, type Status } from './StatusBar';
 import { CornerButton } from './CornerButton';
 import { ActivityBar, ActivityButton, useDeckBars } from './ActivityBar';
+import { LibraryView, LibraryPage } from '../library/LibraryView';
+import { openLibrary, useLibraryPageOpen } from '../library/store';
 import { SyncChip, useExternalSync } from './SyncChip';
 import { SourcePane, type SourceTarget, cursorLine, docBlocks, blockPos } from './SourcePane';
 import { activeMathField, mathFocusListeners, mathCursorListeners, type LyxMathField } from '../editor/lyxmath/field';
@@ -462,6 +464,11 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   const narrowScreen = useMedia(DRAWER_LAYOUT_QUERY);
   const barsPlace = deckBars?.place ?? (narrowScreen ? 'bottom' : 'left');
   const filesShown = showFiles && !deckBars?.rail;
+  // My library's pane (library/LibraryView.tsx) takes the files' place while it is shown
+  const [showLibrary, setShowLibrary] = useState(false);
+  const libraryShown = showLibrary && !filesShown && !deckBars?.rail && !user.guest;
+  const libraryPage = useLibraryPageOpen();
+  const toggleLibrary = () => { if (libraryShown) { setShowLibrary(false); return; } if (deckBars?.rail) deckBars.showRail(false); setShowFiles(false); setShowLibrary(true); };
   const toggleFiles = () => {
     if (!filesShown && deckBars?.rail) { deckBars.showRail(false); setShowFiles(true); }
     else setShowFiles(!filesShown);
@@ -2028,9 +2035,12 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         {/* the panels' bar (ActivityBar.tsx): the files, a deck's slides (its portal); where it is not, their buttons are in the bottom-left corner (StatusBar `corner`) */}
         {barsPlace === 'left' && (
           <ActivityBar>
-            <ActivityButton icon="files" label="Files" title={LEFT_TITLE} on={filesShown} onClick={toggleFiles} data-rail={filesShown ? undefined : 'outline'} />
+            <ActivityButton icon="files" label="Files" title={LEFT_TITLE} on={filesShown} onClick={() => { setShowLibrary(false); toggleFiles(); }} data-rail={filesShown ? undefined : 'outline'} />
+            {!user.guest && <ActivityButton icon="library" label="Library" title="My library: your references and their PDFs — cite them in any document" on={libraryShown} onClick={toggleLibrary} data-activity-library />}
           </ActivityBar>
         )}
+        {libraryShown && <div class="sidebar left library-panel"><LibraryView mode="pane" onClose={() => setShowLibrary(false)} /></div>}
+        {libraryPage && <LibraryPage onClose={() => openLibrary(false)} />}
         {filesShown && (
           <div class="sidebar left">
             <DocPanel current={textId} currentDoc={isLyxDoc ? docId : null} refreshKey={refreshKey} outline={outline} activePos={activePos} view={masterView}
