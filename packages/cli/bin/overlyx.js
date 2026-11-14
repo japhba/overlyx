@@ -1342,6 +1342,18 @@ function syncablePath(rel) {
   return rel.split('/').every(p => p !== '' && p !== '.' && p !== '..' && p.toLowerCase() !== '.git' && p.toLowerCase() !== 'git~1');
 }
 
+/**
+ * Files the sync never adds to a project (the server refuses them too: server sync.ts syncIgnored):
+ * NFS's renamed open files (.nfs…), editor swap, lock and backup files, .DS_Store, and this clone's
+ * own conflict copies ("name (conflict, computer date).ext", conflictCopy: they stay here, for the
+ * owner to look at). One the sync carried before still syncs.
+ */
+export function syncIgnored(rel) {
+  const name = rel.slice(rel.lastIndexOf('/') + 1);
+  return /^\.nfs[0-9a-f]/i.test(name) || /^\..*\.sw[a-p]$/.test(name) || /^\.#/.test(name) || /^#.*#$/.test(name) || name.endsWith('~')
+    || name === '.DS_Store' || / \(conflict( \d+)?, [^)]*\)/.test(name);
+}
+
 async function gitOut(dir, args, opts = {}) {
   return (await execFileP('git', ['-C', dir, ...args], { encoding: opts.encoding ?? 'utf8', maxBuffer: 256 * 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', ...opts.env }, timeout: opts.timeout ?? 120000 })).stdout;
 }
@@ -1556,7 +1568,7 @@ export class SyncEngine {
   /** Every local file the sync looks at: git's view (tracked + untracked, the project's .gitignore files) and the files of the last state. */
   async localPaths() {
     const out = await gitOut(this.dir, ['ls-files', '-z', '--cached', '--others', '--exclude-per-directory=.gitignore']);
-    const paths = new Set(out.split('\0').filter(syncablePath));
+    const paths = new Set(out.split('\0').filter(rel => syncablePath(rel) && !syncIgnored(rel)));
     for (const rel of Object.keys(this.state.files)) paths.add(rel);
     return paths;
   }

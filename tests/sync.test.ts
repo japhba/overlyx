@@ -210,9 +210,10 @@ describe('overlyx sync: a clone in step with the server', () => {
     const copy = out.match(/"(notes \(conflict, [^"]+\)\.txt)"/)![1];
     expect(p.local(copy)).toContain('line 4: clone');
     expect(readFileSync(join(p.clone, 'fig.png')).at(-1)).toBe(9);
-    // the copies are ordinary new files: they reach the server with the next sync
+    // the copies stay in the clone, for its owner to look at: they never reach the project (syncIgnored)
     await sync(p.clone);
-    expect(p.server(copy)).toContain('line 4: clone');
+    expect(existsSync(join(p.dir, copy))).toBe(false);
+    expect(p.local(copy)).toContain('line 4: clone');
     expect(await sync(p.clone)).toMatch(/In step with/);
   });
 

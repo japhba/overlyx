@@ -115,6 +115,18 @@ function syncable(rel: string): boolean {
   return !rel.endsWith('.overlyx-tmp');
 }
 
+/**
+ * Files a clone must not add to a project (the same list as the CLI's syncIgnored): NFS's renamed
+ * open files (.nfs…), editor swap, lock and backup files, .DS_Store, and a clone's own conflict copies
+ * ("name (conflict, computer date).ext": they hold that clone's side, for its owner to look at).
+ * One already in the project still syncs (changes, deletion); only new ones are refused.
+ */
+export function syncIgnored(rel: string): boolean {
+  const name = rel.slice(rel.lastIndexOf('/') + 1);
+  return /^\.nfs[0-9a-f]/i.test(name) || /^\..*\.sw[a-p]$/.test(name) || /^\.#/.test(name) || /^#.*#$/.test(name) || name.endsWith('~')
+    || name === '.DS_Store' || / \(conflict( \d+)?, [^)]*\)/.test(name);
+}
+
 async function headOf(project: string): Promise<{ branch: string | null; head: string | null }> {
   const branch = await git(project, ['symbolic-ref', '--short', '-q', 'HEAD']).then(s => s.trim() || null, () => null);
   const head = await git(project, ['rev-parse', '-q', '--verify', 'HEAD']).then(s => s.trim() || null, () => null);
@@ -188,6 +200,7 @@ async function applyFile(project: string, user: SessionUser, f: PushedFile): Pro
   if (content && content.length > SYNC_FILE_MAX) return { path: rel, status: 'error', hash: null, error: `larger than ${SYNC_FILE_MAX >> 20} MB: not synced` };
 
   const st = lstatIn(root, rel);
+  if (!st && content && syncIgnored(rel)) return { path: rel, status: 'error', hash: null, error: 'a temporary, backup or conflict file: not added to the project' };
   if (st && !st.isFile()) return { path: rel, status: 'error', hash: null, error: 'not a regular file on the server' };
   const id = `${project}/${rel}`;
   // the file holds what the editors show (an open document's unsaved edits are written first)

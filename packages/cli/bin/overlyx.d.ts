@@ -56,6 +56,8 @@ export function parseSyncRemote(url: string): { host: string; project: string } 
 export function enclosingRepo(dir: string): Promise<string | null>;
 export function addProjectSubmodule(host: string, auth: SyncAuth, project: string, parent: string, name?: string): Promise<string>;
 export function ignoreInRepo(top: string, dir: string): Promise<boolean>;
+/** files the sync never adds to a project (NFS temp files, editor swap/backup files, its own conflict copies) */
+export function syncIgnored(rel: string): boolean;
 export function syncTarget(dir: string): Promise<SyncTarget | null>;
 export function syncCredentials(host: string, dir: string): Promise<SyncAuth | null>;
 export function syncEngineFor(dir: string, opts?: Partial<SyncEngineOptions>): Promise<{ engine?: SyncEngine; target?: SyncTarget; error?: string; signin?: boolean }>;
