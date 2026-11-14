@@ -169,6 +169,19 @@ export function lastFileByProject(userId: number): Map<string, string> {
   return out;
 }
 
+/** When the user last opened each file of each project (project → path → ms): the start page's Recent order of files. */
+export function openedFilesByProject(userId: number): Map<string, Record<string, number>> {
+  const out = new Map<string, Record<string, number>>();
+  for (const r of db.prepare("SELECT doc_id, updated_at FROM user_doc_state WHERE user_id = ? AND key = 'opened'").all(userId) as { doc_id: string; updated_at: number }[]) {
+    const project = projectOfDoc(r.doc_id);
+    if (!project || r.doc_id.length <= project.length + 1) continue;
+    let files = out.get(project);
+    if (!files) out.set(project, files = {});
+    files[r.doc_id.slice(project.length + 1)] = r.updated_at;
+  }
+  return out;
+}
+
 /** When the user last opened a document of each project — the newer of this and the activity log (which goes back further). */
 export function lastOpenedByProject(userId: number): Map<string, number> {
   const out = new Map<string, number>();

@@ -15,10 +15,11 @@
  */
 import path from 'node:path';
 import { Worker } from 'node:worker_threads';
-import { roleFor, atLeast } from './access.ts';
+import { roleFor, roleAt, atLeast, accessibleProjects } from './access.ts';
+import { lastOpenedByProject } from './userSettings.ts';
 import type { SessionUser } from './auth.ts';
 import { collect, resolveProjectPath, isBackupFile } from './projectfiles.ts';
-import { compileQuery, SearchError, SEARCH_LIMITS, type SearchLimits, type SearchQuery, type SearchResult, type SearchTarget } from './searchtext.ts';
+import { compileQuery, SearchError, SEARCH_LIMITS, type SearchFileResult, type SearchLimits, type SearchQuery, type SearchResult, type SearchTarget } from './searchtext.ts';
 
 export { SearchError, type SearchQuery, type SearchResult } from './searchtext.ts';
 
@@ -107,10 +108,64 @@ function pump() {
 export function searchProject(user: SessionUser, project: string, query: SearchQuery, gone: () => boolean = () => false, limits: SearchLimits = SEARCH_LIMITS): Promise<SearchResult> {
   if (!atLeast(roleFor(user, project), 'view')) return Promise.reject(new SearchError('You do not have access to this project', 403));
   try { compileQuery(query); } catch (e) { return Promise.reject(e); }
+  return enqueue(searchTargets(project), query, limits, gone);
+}
+
+function enqueue(targets: SearchTarget[], query: SearchQuery, limits: SearchLimits, gone: () => boolean): Promise<SearchResult> {
   if (queue.length >= QUEUE_MAX) return Promise.reject(new SearchError('Too many searches at once — try again in a moment', 503));
-  const targets = searchTargets(project);
   return new Promise((resolve, reject) => {
     queue.push({ id: nextId++, targets, query, limits, gone, resolve, reject });
     pump();
+  });
+}
+
+/** the start page's search inside all projects: a few lines per file, fewer files than in one project */
+export const ALL_SEARCH_LIMITS: SearchLimits = { ...SEARCH_LIMITS, perFile: 3, shown: 600, files: 300 };
+
+export interface AllSearchResult {
+  /** projects with matches, the ones this person worked in lately first; `files` as in a project's search */
+  projects: { project: string; files: SearchFileResult[]; count: number }[];
+  total: number; truncated: boolean; searched: number; skipped: number;
+  /** end-to-end encrypted projects: the server cannot read them, so they were not searched */
+  encrypted: string[];
+}
+
+/**
+ * Search all the projects `user` can open (the start page's "Search inside files", `GET /api/search`):
+ * one job over all their text files, the projects opened or changed lately first (a search that stops
+ * early has looked there). A project of which only folders or files are shared with them is searched
+ * there only (roleAt); end-to-end encrypted projects are left out and named; projects opened as an
+ * administrator are not "theirs" and are left out too.
+ */
+export function searchAllProjects(user: SessionUser, query: SearchQuery, gone: () => boolean = () => false, limits: SearchLimits = ALL_SEARCH_LIMITS): Promise<AllSearchResult> {
+  try { compileQuery(query); } catch (e) { return Promise.reject(e); }
+  const opened = lastOpenedByProject(user.id);
+  const recency = (p: { name: string; files: { mtime: number; kind: string }[] }) => p.files.reduce((t, f) => f.kind !== 'dir' && f.mtime > t ? f.mtime : t, opened.get(p.name) ?? 0);
+  const list = accessibleProjects(user).filter(p => p.via !== 'admin').sort((a, b) => recency(b) - recency(a));
+  const encrypted: string[] = [];
+  const targets: SearchTarget[] = [];
+  const where = new Map<string, { project: string; path: string }>();
+  for (const p of list) {
+    if (p.e2e) { encrypted.push(p.name); continue; }
+    let own: SearchTarget[];
+    try { own = searchTargets(p.name); } catch { continue; }
+    for (const t of own) {
+      if (p.partial ? !atLeast(roleAt(user, p.name, t.path), 'view') : !atLeast(roleFor(user, p.name), 'view')) continue;
+      const key = p.name + '//' + t.path;
+      where.set(key, { project: p.name, path: t.path });
+      targets.push({ ...t, path: key });
+    }
+  }
+  return enqueue(targets, query, limits, gone).then(r => {
+    const byProject = new Map<string, AllSearchResult['projects'][number]>();
+    for (const f of r.files) {
+      const w = where.get(f.path);
+      if (!w) continue;
+      let entry = byProject.get(w.project);
+      if (!entry) byProject.set(w.project, entry = { project: w.project, files: [], count: 0 });
+      entry.files.push({ ...f, path: w.path });
+      entry.count += f.count;
+    }
+    return { projects: [...byProject.values()], total: r.total, truncated: r.truncated, searched: r.searched, skipped: r.skipped, encrypted };
   });
 }

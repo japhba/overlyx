@@ -1,0 +1,52 @@
+/* the start page's search (app/HomeSearch.tsx): the box over the projects, and the "Inside files" results */
+.hs-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: -4px 0 14px; }
+.hs-box { position: relative; flex: 1 1 320px; max-width: 520px; }
+.hs-box input { width: 100%; box-sizing: border-box; padding: 7px 34px 7px 32px; border: 1px solid var(--ui-border); border-radius: 6px; background: var(--page-bg); color: var(--ui-fg); font-size: 13.5px; outline: none; }
+.hs-box input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent); }
+.hs-box input::-webkit-search-cancel-button { cursor: pointer; }
+.hs-icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); fill: none; stroke: var(--ui-muted); stroke-width: 1.6; stroke-linecap: round; pointer-events: none; }
+.hs-key { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); min-width: 16px; padding: 0 4px; border: 1px solid var(--ui-border); border-radius: 4px; color: var(--ui-muted); font: 11px/16px "DejaVu Sans Mono", monospace; text-align: center; pointer-events: none; }
+.hs-modes { display: inline-flex; border: 1px solid var(--ui-border); border-radius: 6px; overflow: hidden; }
+.hs-mode { border: 0; background: none; color: var(--ui-muted); font-size: 12.5px; padding: 5px 11px; cursor: pointer; }
+.hs-mode + .hs-mode { border-left: 1px solid var(--ui-border); }
+.hs-mode:hover { background: var(--ui-hover); color: var(--ui-fg); }
+.hs-mode.on { background: var(--row-sel); color: var(--ui-fg); font-weight: 600; }
+.hs-count { color: var(--ui-muted); font-size: 12px; }
+mark.hs-mark { background: color-mix(in srgb, var(--accent) 22%, transparent); color: inherit; border-radius: 2px; padding: 0 1px; }
+/* the project ↑ ↓ chose: Enter opens it */
+.home .home-card.hs-active { outline: 2px solid var(--accent); outline-offset: -2px; }
+.home .home-row.hs-active { background: var(--row-hover); }
+.home .docs .hs-files-label { color: var(--ui-muted); font-size: 11.5px; flex: none; }
+
+.hs-files { background: var(--surface); border: 1px solid var(--ui-border); border-radius: 8px; padding: 6px 0 10px; font-size: 12.5px; }
+.hs-files-head { display: flex; align-items: center; gap: 10px; padding: 4px 14px 6px; }
+.hs-summary { flex: 1; color: var(--ui-muted); font-size: 12px; }
+.hs-files-head .hs-opts { position: static; transform: none; flex: none; }
+.hs-note { margin: 2px 14px 8px; padding: 6px 10px; border-radius: 6px; background: var(--chip-bg); color: var(--ui-fg); font-size: 12px; line-height: 1.45; }
+.hs-project { padding: 4px 0; border-top: 1px solid var(--ui-border2); }
+.hs-project-name { display: flex; align-items: center; gap: 8px; padding: 4px 14px 2px; font-weight: 700; font-size: 13px; }
+.hs-project-name .group-count { padding: 0 6px; border-radius: 8px; font-size: 10.5px; line-height: 15px; font-weight: 400; color: var(--ui-muted); background: color-mix(in srgb, var(--ui-muted) 14%, transparent); }
+.hs-file-name { display: flex; align-items: center; gap: 6px; padding: 3px 14px 1px 22px; cursor: pointer; color: var(--link); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hs-file-name:hover { text-decoration: underline; }
+.hs-file-name .ficon { display: inline-flex; flex: none; color: var(--ui-muted); }
+.hs-more { color: var(--ui-muted); font-size: 11px; }
+.hs-match { display: flex; align-items: baseline; gap: 8px; padding: 2px 14px 2px 42px; cursor: pointer; white-space: nowrap; overflow: hidden; }
+.hs-match:hover, .hs-match.active { background: var(--row-hover); }
+.hs-where { flex: none; min-width: 28px; color: var(--muted2); font-size: 11px; text-align: right; font-variant-numeric: tabular-nums; }
+.hs-match .ps-text { overflow: hidden; text-overflow: ellipsis; }
+.hs-match mark { background: color-mix(in srgb, var(--accent) 25%, transparent); color: inherit; border-radius: 2px; }
+
+html[data-ui="modern"] .hs-box input { border-color: var(--m-line); background: var(--m-field); border-radius: var(--m-radius); }
+html[data-ui="modern"] .hs-box input:focus { border-color: var(--m-blue); box-shadow: 0 0 0 2px color-mix(in srgb, var(--m-blue) 18%, transparent); }
+html[data-ui="modern"] .hs-modes { border-color: var(--m-line); border-radius: var(--m-radius); }
+html[data-ui="modern"] .hs-mode + .hs-mode { border-left-color: var(--m-line); }
+html[data-ui="modern"] .hs-mode.on { background: var(--m-blue-soft); color: var(--m-ink); }
+html[data-ui="modern"] .hs-files { border-color: var(--m-line); border-radius: 10px; background: var(--m-paper); }
+html[data-ui="modern"] .hs-project { border-top-color: var(--m-line2); }
+html[data-ui="modern"] .hs-project-name { font-family: var(--m-display); font-weight: 500; font-size: 14px; color: var(--m-ink); }
+html[data-ui="modern"] .hs-file-name { color: var(--m-ink2); }
+html[data-ui="modern"] .home .home-card.hs-active { outline-color: var(--m-blue); }
+html[data-ui="modern"] .home .home-row.hs-active { background: var(--m-blue-soft); }
+@media (max-width: 720px) {
+  .hs-box { max-width: none; }
+}

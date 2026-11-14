@@ -20,6 +20,7 @@ import { DocPanel, openProjectSearch } from './DocPanel';
 import { QuickOpen } from './QuickOpen';
 import { DRAWER_LAYOUT_QUERY, foldDrawersOnNarrow } from './drawerLayout';
 import { Home, projectDocs, ProjectRootPanel } from './Home';
+import { HOME_SEARCH_EVENT } from './HomeSearch';
 import { pendingImportFlag } from './pendingImport';
 import { TextEditor } from './TextEditor';
 import { isMarkdownDoc } from '../editor/markdown';
@@ -951,6 +952,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   // the presenter's keys); rebound ones are run by the palette's listener
   const [quickOpen, setQuickOpen] = useState(false);
   const searchProject = useCallback(() => {
+    // on the start page: its search, inside all the projects (HomeSearch.tsx)
+    if (!parseHash().id) { window.dispatchEvent(new Event(HOME_SEARCH_EVENT)); return; }
     const sel = window.getSelection()?.toString().trim() ?? '';
     setShowFiles(true);
     openProjectSearch(sel && sel.length <= 120 && !sel.includes('\n') ? sel : undefined);

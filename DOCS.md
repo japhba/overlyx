@@ -123,6 +123,25 @@ blend.
   **Download**: the whole project as a .zip (`GET /api/projects/<key, URL-encoded>/zip`, view rights,
   without `.git` and LaTeX's build byproducts; `server/src/zip.ts` writes it). The Git dialog
   has the same link.
+* **Searching the start page** (`app/HomeSearch.tsx`, `app/homesearch.ts`, `homesearch.css`): a box
+  over the projects filters them as one types — every word typed must be found in a project's name,
+  its owner (name or user name) or the path of one of its files, in any order and case; words found
+  only among the files put those files on the project's line (marked), so a click opens the one
+  looked for. **`/`** puts the cursor in the box (as on Google Drive and GitHub; not while typing
+  elsewhere), **↑ ↓** choose a project (outlined), **Enter** opens it (the first found file, or the
+  file it reopens on), **Esc** empties the box. **Inside files** (or `Ctrl/⌘+Shift+F` on the start
+  page) searches the text of all the projects one can open at once with the project search's engine:
+  `GET /api/search?q=…&case=1&word=1&regex=1` (`projectsearch.ts searchAllProjects`: one worker job over
+  every project's files, the projects opened or changed lately first, three lines per file, 300
+  files at most; projects opened as an administrator left out; a project of which only folders or
+  files are shared is searched there only, `roleAt`). End-to-end encrypted projects cannot be read by
+  the server: they are named in the results as not searched. ↑ ↓ Enter move through the matches.
+* **A project's files, most recent first** (`app/filesort.ts`, `FileSortSwitch.tsx`): the documents
+  listed under each project on the start page and on a project's own page (`ProjectRootPanel`) are
+  in the order *Recent* — the later of when the file last changed and when this person last opened
+  it (`/api/projects` gives `opened`, path → time, from `user_doc_state` *opened*;
+  `userSettings.ts openedFilesByProject`) — or *Name* (the main document first, as before). The
+  *Files: Recent · Name* switch beside the list/grid switch is remembered per browser (`ol.fileSort`).
 * **Questions are in-app dialogs**, never the browser's `prompt()`/`confirm()`/`alert()`
   (`uiPrompt`/`uiConfirm`/`uiAlert` in `app/Dialogs.tsx`, one `DialogHost` per shell, VS Code
   webview included): Enter accepts, Esc cancels, the proposed text is selected. A new file or

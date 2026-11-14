@@ -1,0 +1,15 @@
+/* the order of each project's files on the start page and a project's page (app/filesort.ts): Recent · Name */
+.hfs { display: inline-flex; align-items: center; gap: 6px; color: var(--ui-muted); font-size: 12px; }
+.home .home-actions .hfs { margin-left: auto; }
+.home .home-actions .hfs + .home-view-switch { margin-left: 2px; }
+.hfs-pair { display: inline-flex; border: 1px solid var(--ui-border); border-radius: 6px; overflow: hidden; }
+.hfs-pair button { border: 0; background: none; color: var(--ui-muted); font-size: 12px; padding: 4px 9px; cursor: pointer; }
+.hfs-pair button + button { border-left: 1px solid var(--ui-border); }
+.hfs-pair button:hover { background: var(--ui-hover); color: var(--ui-fg); }
+.hfs-pair button.on { background: var(--row-sel); color: var(--ui-fg); font-weight: 600; }
+.home .project-docs-head { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
+.home .project-docs-head .sub { margin: 0; flex: 1; }
+html[data-ui="modern"] .hfs-pair { border-color: var(--m-line); border-radius: var(--m-radius); }
+html[data-ui="modern"] .hfs-pair button + button { border-left-color: var(--m-line); }
+html[data-ui="modern"] .hfs-pair button.on { background: var(--m-blue-soft); color: var(--m-ink); }
+@media (max-width: 720px) { .home .home-actions .hfs { margin-left: 0; } }

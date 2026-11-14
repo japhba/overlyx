@@ -48,6 +48,8 @@ export interface Project {
   lastOpened?: number | null;
   /** the file this user was in last (a tab id: a document's, or `text:`/`pdf:` + a file's — app/lastfile.ts), null: none noted */
   lastFile?: string | null;
+  /** when this user last opened each of its files (project-relative path → server clock, ms): the files' Recent order (app/filesort.ts) */
+  opened?: Record<string, number>;
   /** who joined it besides the owner (server access.ts projectPeople): names and avatars, in the order they came */
   members?: ProjectPerson[];
   /** invitations to an address without an account yet */
@@ -259,6 +261,14 @@ export interface ProjectSearchMatch { line: number; col: number; len: number; pr
 export interface ProjectSearchResult {
   files: { path: string; count: number; matches: ProjectSearchMatch[] }[];
   total: number; truncated: boolean; searched: number; skipped: number;
+}
+
+/** the start page's search inside all projects (server projectsearch.ts searchAllProjects): matches by project, then file */
+export interface AllProjectsSearchResult {
+  projects: { project: string; count: number; files: ProjectSearchResult['files'] }[];
+  total: number; truncated: boolean; searched: number; skipped: number;
+  /** end-to-end encrypted projects, which the server cannot search */
+  encrypted: string[];
 }
 
 export interface GdocsLink { fileId: string; tabId: string | null; url: string; auto: boolean; lastSync: number | null; lastError: string | null; linkedBy: number; format: 'text' | 'docx'; warnings: string[] }
@@ -522,6 +532,9 @@ export const api = {
   /** the project's files searched (the files panel's Search: server projectsearch.ts) */
   projectSearch: (project: string, q: string, o: ProjectSearchOptions = {}, signal?: AbortSignal) =>
     req<ProjectSearchResult>('GET', `/api/projects/${encodeURIComponent(project)}/search?q=${encodeURIComponent(q)}${o.matchCase ? '&case=1' : ''}${o.wholeWord ? '&word=1' : ''}${o.regex ? '&regex=1' : ''}`, undefined, undefined, signal),
+  /** all the projects one can open searched at once (the start page's Search inside files) */
+  searchAll: (q: string, o: ProjectSearchOptions = {}, signal?: AbortSignal) =>
+    req<AllProjectsSearchResult>('GET', `/api/search?q=${encodeURIComponent(q)}${o.matchCase ? '&case=1' : ''}${o.wholeWord ? '&word=1' : ''}${o.regex ? '&regex=1' : ''}`, undefined, undefined, signal),
   synctexView: (id: string, line: number) => req<{ boxes: SyncBox[] }>('GET', `/api/docs/${encId(id)}/synctex/view?line=${line}`),
   /** the Pages view: where the last build's pages begin in the built .tex, with their geometry (core pagebreaks.ts); null before a build */
   synctexPages: (id: string) => req<{ breaks: PageBreaks | null }>('GET', `/api/docs/${encId(id)}/synctex/pages`),

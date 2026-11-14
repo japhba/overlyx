@@ -19,7 +19,7 @@ import { oauthRoutes, wellKnownRoutes } from './mcpOauth.ts';
 import { listMcpTokens, deleteMcpToken } from './mcpTokens.ts';
 import { cliDownloadRoutes } from './cliDownload.ts';
 import { cliLoginRoutes } from './cliLogin.ts';
-import { userSettings, setUserSettings, userKeys, setUserKeys, docFolds, setDocFolds, docPlace, setDocPlace, markDocOpened, lastOpenedByProject, lastFileByProject } from './userSettings.ts';
+import { userSettings, setUserSettings, userKeys, setUserKeys, docFolds, setDocFolds, docPlace, setDocPlace, markDocOpened, lastOpenedByProject, lastFileByProject, openedFilesByProject } from './userSettings.ts';
 import { authMiddleware, authRouter, requireAuth, createUser, createGuest, generatePassword, setSessionCookie, toSessionUser, type SessionUser } from './auth.ts';
 import { attachWebSocket, originAllowed } from './ws.ts';
 import { manager, docWorkers, projectChangedListeners, graphicsChangedListeners } from './docs.ts';
@@ -65,7 +65,7 @@ import { deletionPreview, deleteAccount, pruneTrash } from './accounts.ts';
 import { privacyPage } from './privacy.ts';
 import { termsPage } from './terms.ts';
 import { usageRoutes, vscodeUsageRoutes } from './usage.ts';
-import { searchProject, SearchError } from './projectsearch.ts';
+import { searchProject, searchAllProjects, SearchError } from './projectsearch.ts';
 import { allow as rateLimit } from './feedback.ts';
 import { searchLiterature, bibtexFor, addToCitedBib, sourcesAvailable, normTitle, type Hit } from './bibsearch.ts';
 import { identify } from './citelinks.ts';
@@ -371,8 +371,10 @@ api.get('/projects', (req, res) => {
   const opened = lastOpenedByProject(req.user!.id);
   // and which file they were in last (the project reopens on it)
   const lastFile = lastFileByProject(req.user!.id);
+  // and when they opened each file (the files' Recent order)
+  const openedFiles = openedFilesByProject(req.user!.id);
   const people = projectPeople();
-  res.json({ projects: accessibleProjects(req.user!).map(p => ({ name: p.name, title: p.title, kind: p.kind, role: p.role, via: p.via, public: p.public, owner: p.owner, files: p.files, lastOpened: opened.get(p.name) ?? null, lastFile: lastFile.get(p.name) ?? null,
+  res.json({ projects: accessibleProjects(req.user!).map(p => ({ name: p.name, title: p.title, kind: p.kind, role: p.role, via: p.via, public: p.public, owner: p.owner, files: p.files, lastOpened: opened.get(p.name) ?? null, lastFile: lastFile.get(p.name) ?? null, opened: openedFiles.get(p.name) ?? {},
     ...(p.e2e ? { e2e: true } : {}),
     ...(p.folders ? { folders: p.folders } : {}), ...(p.partial ? { partial: true } : {}),
     // (who else is in it is the project's people's business, not of someone with a folder of it)
@@ -560,6 +562,17 @@ api.get('/projects/:project/search', needProject('view'), async (req, res) => {
   const flag = (k: string) => req.query[k] === '1';
   try {
     res.json(await searchProject(req.user!, String(req.params.project), { q: String(req.query.q ?? ''), matchCase: flag('case'), wholeWord: flag('word'), regex: flag('regex') }, () => req.destroyed));
+  } catch (e) {
+    if (!(e instanceof SearchError)) console.error('[search]', e);
+    res.status(e instanceof SearchError ? e.status : 500).json({ error: e instanceof SearchError ? e.message : 'The search failed' });
+  }
+});
+/** The same in all the projects the user can open (the start page's Search inside files; projectsearch.ts searchAllProjects). */
+api.get('/search', async (req, res) => {
+  if (!rateLimit(`search:${req.user!.id}`, 600)) { res.status(429).json({ error: 'Too many searches — try again in a while' }); return; }
+  const flag = (k: string) => req.query[k] === '1';
+  try {
+    res.json(await searchAllProjects(req.user!, { q: String(req.query.q ?? ''), matchCase: flag('case'), wholeWord: flag('word'), regex: flag('regex') }, () => req.destroyed));
   } catch (e) {
     if (!(e instanceof SearchError)) console.error('[search]', e);
     res.status(e instanceof SearchError ? e.status : 500).json({ error: e instanceof SearchError ? e.message : 'The search failed' });

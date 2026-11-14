@@ -22,6 +22,10 @@ import { ScientificTemplates, chosenDesign } from './ScientificTemplates';
 import { initialDeckSize, initialPosterSize, rememberDeckSize, rememberPosterSize, sizeOf, usualDeckSize } from './decksize';
 import { BetaNote } from './Login';
 import { ensureAccountKeys } from '../e2e/ui';
+import { HomeSearchBox, HomeFileResults, Marked, openProjectFile, type HomeSearchMode } from './HomeSearch';
+import { matchProject, searchTerms, type ProjectHit } from './homesearch';
+import { sortFiles, storedFileSort, rememberFileSort, type FileSort } from './filesort';
+import { FileSortSwitch } from './FileSortSwitch';
 
 const isBackup = (name: string) => name.endsWith('~') || name.startsWith('#') || name.endsWith('.emergency');
 const mainFirst = (a: string, b: string) => Number(!/(^|\/)main\.tex$/.test(a)) - Number(!/(^|\/)main\.tex$/.test(b)) || a.split('/').length - b.split('/').length || a.localeCompare(b);
@@ -104,6 +108,9 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
     } catch (e) { await uiAlert('Import Failed', (e as Error).message); }
   };
   const [view, setView] = useState<HomeView>(storedView);
+  // each project's files: the most recent first, or by name (filesort.ts)
+  const [fileSort, setFileSort] = useState<FileSort>(storedFileSort);
+  const chooseFileSort = (s: FileSort) => { setFileSort(s); rememberFileSort(s); };
   const switchView = () => {
     const next: HomeView = view === 'rows' ? 'grid' : 'rows';
     setView(next);
@@ -138,10 +145,39 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
   };
   const others = (adminList ?? []).filter(p => p.access === null && p.kind !== 'example-gone');
 
-  const example = projects?.find(p => p.kind === 'example' && p.via === 'owner') ?? null;
-  const mine = sortByRecency(projects?.filter(p => p.via === 'owner' && p !== example) ?? []);
-  const shared = sortByRecency(projects?.filter(p => p.via === 'member' || p.via === 'link' || p.via === 'public') ?? []);
-  const admin = projects?.filter(p => p.via === 'admin') ?? [];
+  // the search over the projects (HomeSearch.tsx): names, owners and file names filter the lists; "Inside files" searches their text
+  const [q, setQ] = useState('');
+  const [searchMode, setSearchMode] = useState<HomeSearchMode>('projects');
+  const [active, setActive] = useState(0);
+  useEffect(() => setActive(0), [q, searchMode]);
+  const terms = searchMode === 'projects' ? searchTerms(q) : [];
+  const hits = new Map<string, ProjectHit>();
+  const matching = (ps: Project[]) => !terms.length ? ps : ps.filter(p => { const h = matchProject(p, terms); if (h) hits.set(p.name, h); return !!h; });
+  const exampleProject = projects?.find(p => p.kind === 'example' && p.via === 'owner') ?? null;
+  const example = exampleProject && matching([exampleProject]).length ? exampleProject : null;
+  const mine = matching(sortByRecency(projects?.filter(p => p.via === 'owner' && p !== exampleProject) ?? []));
+  const shared = matching(sortByRecency(projects?.filter(p => p.via === 'member' || p.via === 'link' || p.via === 'public') ?? []));
+  const admin = matching(projects?.filter(p => p.via === 'admin') ?? []);
+  /** the projects shown, in order: ↑ ↓ choose among them, Enter opens the chosen one */
+  const shownProjects = [...(example ? [example] : []), ...mine, ...shared, ...admin];
+  const chosen = terms.length ? shownProjects[Math.min(active, shownProjects.length - 1)] ?? null : null;
+  useEffect(() => { if (chosen) document.querySelector(`.home [data-project="${CSS.escape(chosen.name)}"]`)?.scrollIntoView({ block: 'nearest' }); }, [chosen?.name]);
+  const openChosen = () => {
+    const p = chosen;
+    if (!p) return;
+    const hit = hits.get(p.name);
+    if (hit?.files.length) { openProjectFile(p, hit.files[0], onOpen); return; }
+    const docs = projectDocs(p, true);
+    onOpen(lastFileOf(p) ?? (docs[0] ? p.name + '/' + docs[0] : p.name));
+  };
+  /** the files a search found in a project, in place of its first documents */
+  const foundFiles = (p: Project) => {
+    const files = hits.get(p.name)?.files ?? [];
+    return files.length ? <>
+      {files.slice(0, 8).map(f => <a key={f} href="#" data-found-file={f} onClick={e => { e.preventDefault(); openProjectFile(p, f, onOpen); }}><Glyph kind={p.files.find(x => x.path === f)?.kind === 'doc' ? 'doc' : 'other'} emoji="📄" /> <Marked text={f} terms={terms} /></a>)}
+      {files.length > 8 && <span class="meta">+{files.length - 8} more</span>}
+    </> : null;
+  };
 
   const [newOpen, setNewOpen] = useState(false);
   const remove = async (p: Project) => {
@@ -206,9 +242,9 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
     const docs = projectDocs(p, true);
     const isExample = p === example;
     return (
-      <div class={'home-card' + (isExample ? ' example' : '')} key={p.name} data-project={p.name}>
+      <div class={'home-card' + (isExample ? ' example' : '') + (p === chosen ? ' hs-active' : '')} key={p.name} data-project={p.name}>
         <div class="title">
-          <span>{isExample ? <Glyph kind="hello" emoji="👋" /> : <Glyph kind="project" emoji="📁" />} {projectTitle(p)}</span>
+          <span>{isExample ? <Glyph kind="hello" emoji="👋" /> : <Glyph kind="project" emoji="📁" />} <Marked text={projectTitle(p)} terms={terms} /></span>
           {badge(p)}
         </div>
         {isExample && (
@@ -221,7 +257,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
         {!isExample && <div class="meta">{metaText(p, docs)}</div>}
         {people(p)}
         <div class="docs">
-          {docs.slice(0, isExample ? 1 : 6).map(d => docLink(p, d))}
+          {foundFiles(p) ?? (isExample ? docs : sortFiles(p, docs, fileSort)).slice(0, isExample ? 1 : 6).map(d => docLink(p, d))}
           {!isExample && docs.length > 6 && <span class="meta">+{docs.length - 6} more in the files panel</span>}
           {!docs.length && <span class="meta">{emptyNote(p)}</span>}
         </div>
@@ -235,15 +271,15 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
     const docs = projectDocs(p, true);
     const target = lastFileOf(p) ?? (docs[0] ? p.name + '/' + docs[0] : p.name);
     return (
-      <div class="home-card home-row" key={p.name} data-project={p.name}>
+      <div class={'home-card home-row' + (p === chosen ? ' hs-active' : '')} key={p.name} data-project={p.name}>
         <div class="title">
-          <a class="name" href={'#/' + target} onClick={e => { e.preventDefault(); onOpen(target); }}><Glyph kind="project" emoji="📁" /> {projectTitle(p)}</a>
+          <a class="name" href={'#/' + target} onClick={e => { e.preventDefault(); onOpen(target); }}><Glyph kind="project" emoji="📁" /> <Marked text={projectTitle(p)} terms={terms} /></a>
           {badge(p)}
         </div>
         <div class="meta">{metaText(p, docs)}</div>
         {people(p)}
         <div class="docs">
-          {docs.slice(0, 8).map(d => docLink(p, d))}
+          {foundFiles(p) ?? sortFiles(p, docs, fileSort).slice(0, 8).map(d => docLink(p, d))}
           {!docs.length && <span class="meta">{emptyNote(p)}</span>}
         </div>
         {actions(p, docs)}
@@ -265,6 +301,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
         {!user.guest && <button class="btn" data-import-lyx onClick={() => { setImportSource('lyx'); setImportOpen(true); }}>Import from LyX…</button>}
         {!user.guest && gdocs && <button class="btn" data-import-gdocs onClick={() => void importGoogle()} title="Bring a Google Doc over as a project of its own — kept in sync with it, or as a copy">Import from Google Docs…</button>}
         <button class="btn" onClick={onBrowse}>Show the files panel</button>
+        <FileSortSwitch sort={fileSort} onSort={chooseFileSort} />
         <button class="home-view-switch" data-home-view-switch={view === 'rows' ? 'grid' : 'rows'} onClick={switchView}
           title={view === 'rows' ? 'Show projects as a grid of cards' : 'Show projects as a list'} aria-label={view === 'rows' ? 'Grid view' : 'List view'}>
           {viewIcon(view === 'rows' ? 'grid' : 'rows')}
@@ -275,11 +312,15 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
       {importOpen && <OverleafImport source={importSource} existing={(projects ?? []).filter(p => splitProjectKey(p.name).owner === user.username).map(p => projectShortName(p.name))} onClose={() => { setImportOpen(false); setPending(null); }} onImported={() => { void load(); onChanged(); }} notify={notify}
         initial={pending ?? undefined} autostart={!!pending} onDone={names => void openImported(names)} />}
       {projects === null && <div class="meta">Loading your projects…</div>}
+      {projects && projects.length > 0 && <HomeSearchBox q={q} onQ={setQ} mode={searchMode} onMode={setSearchMode} count={terms.length ? shownProjects.length : null}
+        onMove={d => setActive(a => Math.max(0, Math.min(shownProjects.length - 1, a + d)))} onEnter={openChosen} />}
+      {searchMode === 'files' && q.trim() ? <HomeFileResults q={q} projects={projects ?? []} onOpen={onOpen} /> : <>
       {example && <div class="cards">{card(example)}</div>}
       {mine.length > 0 && <><h3>Your projects</h3>{list(mine)}</>}
-      {projects && !mine.length && !example && !user.guest && <div class="meta">You have no projects yet — create one, or ask a colleague to share theirs with you.</div>}
+      {projects && !mine.length && !example && !user.guest && !terms.length && <div class="meta">You have no projects yet — create one, or ask a colleague to share theirs with you.</div>}
       {shared.length > 0 && <><h3>Shared with you</h3>{list(shared)}</>}
       {admin.length > 0 && <><h3>Opened as administrator</h3>{list(admin)}</>}
+      </>}
       {user.isAdmin && adminList && others.length > 0 && (
         <>
           <h3>Administration</h3>
@@ -385,6 +426,7 @@ export function NewProjectDialog({ user, onClose, onCreated, notify }: { user: U
 export function ProjectRootPanel({ project, notify, onCreated }: { project: string; notify: (text: string, kind?: 'info' | 'error') => void; onCreated: (id: string) => void }) {
   const [info, setInfo] = useState<Project | null | undefined>(undefined);
   const [loads, setLoads] = useState(0);
+  const [fileSort, setFileSort] = useState<FileSort>(storedFileSort);
   useEffect(() => {
     let alive = true;
     setInfo(undefined);
@@ -409,8 +451,11 @@ export function ProjectRootPanel({ project, notify, onCreated }: { project: stri
     <div class="home">
       <h1><Glyph kind="project" emoji="📁" /> {projectTitle(info)}</h1>
       {docs.length ? <>
-        <div class="sub">Open one of its documents — all its files are in the files panel on the left.</div>
-        <div class="docs project-docs">{docs.map(d => <a key={d} href={'#/' + project + '/' + d.split('/').map(encodeURIComponent).join('/')} onClick={e => { e.preventDefault(); onCreated(project + '/' + d); }}><Glyph kind="doc" emoji="📄" /> {d}</a>)}</div>
+        <div class="project-docs-head">
+          <div class="sub">Open one of its documents — all its files are in the files panel on the left.</div>
+          {docs.length > 1 && <FileSortSwitch sort={fileSort} onSort={s => { setFileSort(s); rememberFileSort(s); }} />}
+        </div>
+        <div class="docs project-docs">{sortFiles(info, docs, fileSort).map(d => <a key={d} href={'#/' + project + '/' + d.split('/').map(encodeURIComponent).join('/')} onClick={e => { e.preventDefault(); onCreated(project + '/' + d); }}><Glyph kind="doc" emoji="📄" /> {d}</a>)}</div>
       </> : info.e2eLocked ? <div class="sub" data-e2e-locked>🔒 This project is end-to-end encrypted, and this browser does not hold its key yet. {info.e2eLocked === 'waiting' ? 'A member who has it gives it to you in the project’s Share dialog; it opens here by itself then.' : 'Unlock it with your recovery code.'}</div>
         : <div class="sub">This project has no documents yet. Its files (if any) are in the files panel on the left.</div>}
       <div class="home-actions">
