@@ -84,7 +84,8 @@ export function SlideFind(p: SlideFindProps) {
     const shown = matches.slice(lo, lo + MAX_MARKS);
     pp.current.mark({ ...opts, marks: shown.map(m => ({ path: m.path, nth: m.nth })), current: at - lo });
   }, [matches, at]);
-  useEffect(() => { if (now) pp.current.go(now); }, [now?.from, now?.slide, at]);
+  // (to the match's slide when it becomes the current one — not when an edit elsewhere moves it in the source)
+  useEffect(() => { if (now) pp.current.go(now); }, [at, query, matchCase, words, matches.length]);
   useEffect(() => () => pp.current.mark(null), []);
 
   const step = (d: 1 | -1) => { if (matches.length) setAt(a => (a + d + matches.length) % matches.length); };
