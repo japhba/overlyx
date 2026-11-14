@@ -144,14 +144,15 @@ function dosDateTime(d = new Date()): { date: number; time: number } {
  * the write side of `readZip` above, same layout, so round-tripping through this module works.
  * No zip64: fine for a project's files (readZip's own ceiling is 65535 entries / 4 GB anyway).
  */
-export function writeZip(entries: { name: string; data: Buffer }[]): Buffer {
+export function writeZip(entries: { name: string; data: Buffer; store?: boolean }[]): Buffer {
   const { date, time } = dosDateTime();
   const parts: Buffer[] = [];
   const central: Buffer[] = [];
   let offset = 0;
   for (const e of entries) {
     const nameBuf = Buffer.from(e.name, 'utf8');
-    const deflated = zlib.deflateRawSync(e.data);
+    // (`store`: what is compressed already — a PNG, a JPEG — goes in as it is)
+    const deflated = e.store ? e.data : zlib.deflateRawSync(e.data);
     const useDeflate = deflated.length < e.data.length;
     const payload = useDeflate ? deflated : e.data;
     const method = useDeflate ? 8 : 0;

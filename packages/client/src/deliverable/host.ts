@@ -75,8 +75,8 @@ export interface DeliverableHost {
   docClock?(): number;
   /** a file of the project, read here rather than at the folder's address (an end-to-end encrypted project's: e2e/deckframes.ts) */
   readFile?(rel: string): Promise<Blob>;
-  /** the Download menu's entries (the web app: PDF, website; VS Code: print, open in the browser) */
-  downloads(open: (mode: string) => string): MenuItem[];
+  /** the Download menu's entries (the web app: PDF, pictures, handouts, website; VS Code: print, open in the browser); `at`: where it was opened */
+  downloads(open: (mode: string) => string, at?: DownloadPlace): MenuItem[];
   /** present here (a full-screen frame) — or elsewhere, returning true (VS Code: the browser) */
   present?(url: string): boolean;
   /** ⌘S (the web app saves by itself; VS Code saves the document) */
@@ -96,6 +96,9 @@ export interface DeliverableHost {
   /** the project's bibliography (its .bib files): the entries of `keys` (with their fields), for citations typed or pasted */
   bibliography?(keys: string[]): Promise<BibRecord[]>;
 }
+
+/** where the Download menu was opened: the slide shown (from 0), which slides an export has (not the skipped ones, not a suggested deletion), a slide's size (CSS px) */
+export interface DownloadPlace { slide: number; exported: boolean[]; width: number; height: number }
 
 /** an entry of the project's bibliography as the server sends it */
 export interface BibRecord { key: string; type?: string; fields?: Record<string, string>; authorShort?: string; author?: string; year?: string; title?: string }

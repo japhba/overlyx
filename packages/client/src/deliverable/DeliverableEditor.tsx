@@ -4049,7 +4049,8 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     <EditModeSwitch mode={viewing ? 'viewing' : suggesting ? 'suggesting' : 'editing'} canEdit={!readOnly} view={null} views={() => []} onMode={setMode}
       changes={{ ins: showIns, del: showDel, set: setChanges }} shortcuts={false} scope={{ doc: pageSuggesting, set: setModeScopeTo }} />
   );
-  const downloads = (x: number, y: number) => showContextMenu(x, y, host.downloads(m => src(m === 'view' && kind === 'deck' ? 'present' : m)));
+  const downloads = (x: number, y: number) => showContextMenu(x, y, host.downloads(m => src(m === 'view' && kind === 'deck' ? 'present' : m),
+    { slide: current, exported: slides.map(s => !s.deleted && !s.skipped), width: pageW || 1280, height: pageH || (pageW || 1280) * 9 / 16 }));
   const downloadBtn = !host.bindSvgExporter && (
     <button class="dl-btn" title="Download" data-dl-download onClick={e => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); downloads(r.left, r.bottom + 4); }}>⤓</button>
   );

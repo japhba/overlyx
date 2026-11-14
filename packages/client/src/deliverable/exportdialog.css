@@ -1,0 +1,17 @@
+/* Download ▸ Pictures… / Handouts and notes pages… (ExportDialog.tsx) */
+.dx { display: flex; flex-direction: column; gap: 8px; }
+.dx-row { display: flex; flex-direction: column; gap: 5px; }
+.dx-row label { display: flex; align-items: center; gap: 7px; cursor: pointer; }
+.dx-label { margin-top: 6px; font-size: 11px; font-weight: 600; color: var(--ui-muted); text-transform: none; }
+.dx-size { margin: 4px 0 0; font-variant-numeric: tabular-nums; }
+.dx-note { margin: 0; font-size: 12px; line-height: 1.4; color: var(--ui-muted); }
+.dx-error { margin: 0; padding: 6px 8px; border-radius: 4px; font-size: 12px; color: var(--danger, #b3261e); background: color-mix(in srgb, var(--danger, #b3261e) 10%, transparent); }
+.dx-per { display: flex; flex-wrap: wrap; gap: 8px; }
+.dx-per-btn { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 8px 4px; border: 1px solid var(--border); border-radius: 5px; background: none; color: var(--ui-fg); font: 11px/1.2 var(--ui-font); cursor: pointer; }
+.dx-per-btn:hover { background: var(--hover, rgba(127, 127, 127, 0.12)); }
+.dx-per-btn.on { border-color: var(--accent, #2a62d6); box-shadow: 0 0 0 1px var(--accent, #2a62d6); }
+/* a small upright page with its slides as the handout sets them out */
+.dx-page { display: grid; gap: 2px; width: 34px; height: 46px; padding: 4px; border: 1px solid var(--ui-muted); border-radius: 1px; background: #fff; }
+.dx-page i { display: block; min-height: 0; }
+.dx-page i.s { align-self: center; aspect-ratio: 16 / 9; width: 100%; max-height: 100%; background: #9aa3ad; }
+.dx-page i.l { align-self: center; height: 60%; background: repeating-linear-gradient(to bottom, transparent 0 2px, #9aa3ad 2px 3px); }

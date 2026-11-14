@@ -25,6 +25,7 @@ import { attachWebSocket, originAllowed } from './ws.ts';
 import { manager, docWorkers, projectChangedListeners, graphicsChangedListeners } from './docs.ts';
 import { mountDeliverables, deliverableToken, splitEntry, createDeliverable, deliverableZip } from './deliverables.ts';
 import { deliverablePdf } from './render.ts';
+import { deckExport } from './deckexport.ts';
 import { starterFor, pageSize, isHtmlPath, DELIVERABLE_KINDS, type DeliverableKind } from '@overlyx/core/html/deliverable.ts';
 import { newArticleText } from '@overlyx/core/html/articletheme.ts';
 import { refreshScientificStarters } from './starterupdates.ts';
@@ -977,6 +978,13 @@ api.get('/projects/:project/deliverable-pdf', needPaths('view', req => [req.quer
     res.setHeader('Content-Disposition', `${req.query.download === '1' ? 'attachment' : 'inline'}; filename="${name}.pdf"`);
     res.end(pdf);
   } catch (e) { console.error('[deliverables] pdf', e); res.status(500).json({ error: (e as Error).message }); }
+});
+
+/** A deck's slides or a poster as pictures, handouts, notes pages (deckexport.ts; rendered like the PDF). */
+api.get('/projects/:project/deliverable-export', needPaths('view', req => [req.query.path]), (req, res) => {
+  const rel = String(req.query.path ?? '');
+  if (!isHtmlPath(rel) || !fs.existsSync(resolveProjectPath(req.params.project, rel))) { res.status(404).json({ error: 'not found' }); return; }
+  void deckExport(req.params.project, rel, req.user!.id, req.query, res);
 });
 
 /**

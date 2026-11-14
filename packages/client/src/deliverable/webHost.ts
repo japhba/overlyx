@@ -13,6 +13,7 @@ import { connectParams } from '@overlyx/core/collab/connect.ts';
 import * as decoding from 'lib0/decoding';
 import { splitDocId } from '@overlyx/core';
 import { deliverableInfo } from '@overlyx/core/html/deliverable.ts';
+import { exportMenuItems } from './ExportDialog';
 import { lastSlide, noteSlide } from './slidememory';
 import { webAppLink } from '../editor/permalink';
 import { api, type User } from '../api';
@@ -336,18 +337,22 @@ export function webHost(id: string, user: User): DeliverableHost & { destroy(): 
     setPresent(state) { try { provider.awareness.setLocalStateField(PRESENT_FIELD, state); } catch { /* closing */ } },
     onPresent: cb => watchPresenters(provider.awareness, cb),
     docClock() { let n = 0; for (const c of Y.decodeStateVector(Y.encodeStateVector(ydoc)).values()) n += c; return n; },
-    downloads(open) {
-      // (an encrypted project's page: printed here; the server makes neither its PDF nor its website)
+    downloads(open, at) {
+      const kind = deliverableInfo(text.toString()).kind;
+      // (an encrypted project's page: printed here; the server makes neither its PDF nor its website, nor pictures or handouts of it)
       if (e2e) return [
         { label: 'Print or save as PDF…', action: () => void printE2ePage(e2e).catch(e => console.warn('[e2e] print', e)) },
         { label: 'Project as .zip (made in this browser)', action: () => void import('../e2e/download').then(m => m.downloadProjectZip(project)) },
+        ...(kind !== 'page' ? [{ label: `Pictures${kind === 'deck' ? ', handouts' : ''}: not in an encrypted project (the server draws them, and cannot read it)`, disabled: true }] : []),
       ];
       const q = `?path=${encodeURIComponent(path)}&download=1`;
       return [
         { label: 'PDF', action: () => window.open(`/api/projects/${encodeURIComponent(project)}/deliverable-pdf${q}`, '_blank') },
-        ...(deliverableInfo(text.toString()).kind === 'deck' ? [
+        ...(kind === 'deck' ? [
           { label: 'PDF with click steps', action: () => window.open(`/api/projects/${encodeURIComponent(project)}/deliverable-pdf${q}&steps=all`, '_blank') },
         ] : []),
+        // (what else the server renders of a deck or a poster: ExportDialog.tsx)
+        ...(kind !== 'page' && at ? exportMenuItems({ ...at, project, path, kind }) : []),
         { label: 'Web page (.zip, works offline)', action: () => window.open(`/api/projects/${encodeURIComponent(project)}/deliverable-zip${q}`, '_blank') },
         { label: 'Open in a new tab', action: () => window.open(open('view'), '_blank', 'noopener') },
       ];

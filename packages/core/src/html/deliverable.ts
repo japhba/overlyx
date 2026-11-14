@@ -153,8 +153,8 @@ export const DECK_SIZES: readonly PagePreset[] = [
   { id: '4:3', label: '4:3', hint: 'Standard: older projectors, beamer, and the 10.5″, 12.9″ and 13″ iPads', width: 1024, height: 768, unit: 'px' },
   { id: '16:10', label: '16:10', hint: 'Laptop screens (a MacBook’s), beamer’s 16:10', width: 1280, height: 800, unit: 'px' },
   { id: 'ipad11', label: 'iPad 11″', hint: 'The iPad and the iPad Air 11″ (the iPad Pro 11″ is a hair wider)', width: 1180, height: 820, unit: 'px' },
-  { id: 'a4', label: 'A4', hint: 'Paper: notes and handouts that print on A4', width: 297, height: 210, unit: 'mm' },
-  { id: 'letter', label: 'Letter', hint: 'Paper: notes and handouts that print on US Letter', width: 11, height: 8.5, unit: 'in' },
+  { id: 'a4', label: 'A4', hint: 'Paper: pages that print on A4 as they are (any deck prints as handouts or notes pages too: Download)', width: 297, height: 210, unit: 'mm' },
+  { id: 'letter', label: 'Letter', hint: 'Paper: pages that print on US Letter as they are (any deck prints as handouts or notes pages too: Download)', width: 11, height: 8.5, unit: 'in' },
 ];
 export const DEFAULT_DECK_SIZE: PageSize = DECK_SIZES[0];
 

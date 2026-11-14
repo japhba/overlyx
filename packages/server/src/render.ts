@@ -203,6 +203,9 @@ export async function deliverablePdf(project: string, rel: string, userId: numbe
   }, opts.reach ?? '');
 }
 
+/** for the other things rendered here (render-export.ts: pictures, handouts, PowerPoint) */
+export { ORIGIN as RENDER_ORIGIN, withPage, report as pageReport };
+
 export async function shutdownRenderer(): Promise<void> {
   const b = browser;
   browser = null;

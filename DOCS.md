@@ -1435,6 +1435,23 @@ blend.
     **website `.zip`** that works without OverLyX (the runtime and MathJax under `_overlyx/`, a deck
     opening presenting, files from elsewhere in the project copied into `_assets/`, PDF figures as
     SVG).
+  * **Pictures, handouts and notes pages** (14 Nov 2026, survey gap 8; `deliverable/ExportDialog.tsx`,
+    server `deckexport.ts` + `render-export.ts`, core `html/exportsize.ts` + `html/handout.ts`,
+    route `GET /api/projects/:p/deliverable-export?path=…&what=png|pngs|handout|notes`).
+    *Download ▸ Pictures (PNG)…* exports the slide shown or all slides (a `.zip`,
+    `slide-01.png` …, numbered without gaps; skipped slides and suggested deletions left out as in
+    the PDF) at a size on a slider with rungs (as on screen, Full HD, 2×, 4K, 4×), a poster by
+    print resolution (72 … 300 dpi; the pixel size and the printed mm shown). The renderer is the
+    PDF's (`print` mode), one element screenshot a slide; the limits are this server's
+    (`exportsize.ts`: 36 M pixels a picture — A0 at 150 dpi —, 480 M for a whole deck, 16000 px a
+    side); the dialog offers nothing above them and the server lowers or refuses with a sentence.
+    Exports run one at a time. *Handouts and notes pages (PDF)…*: 1 / 2 / 3 / 4 / 6 slides on an
+    upright A4 or Letter page (3 with ruled lines for notes beside each, as PowerPoint's), the
+    slide numbers of the deck, the deck's title on top, page numbers below; notes pages put a
+    slide on top and its `aside.notes` text below (running on to the next page when long). The
+    slides are JPEG pictures at 2× inside that PDF (the deck's own PDF keeps selectable text).
+    The A4 / Letter deck sizes' hints say any deck prints as handouts. Not in end-to-end encrypted
+    projects (the server draws them; the menu says so) nor in VS Code (its Download menu prints).
   * **Presenter view and presenting from two screens** (7 Nov 2026, the user: "a presenter's view
     with timer, speaker notes, slide browser … suitable for multiscreen use … switching to this view
     by hovering the bottom menu, in particular when on iPad … when remote controlling a session").
