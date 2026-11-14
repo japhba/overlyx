@@ -1909,17 +1909,12 @@ blend.
     `vertical-align` span); a picture's description (alt text) from its right-click menu; *Format* and
     *Arrange* stay in the menu bar, greyed when nothing they apply to is selected. Two source-level
     tests broken since ▶ Preview (a second `onMessage` in DeliverableEditor.tsx) pass again.
-    **Open, by what a talk or a poster needs most**: tables (no tool; a `<table>` in the source is one
-    object whose cells cannot be typed in); checks shown to people (overflow, text off the slide, too
-    small for the poster's size, contrast — `report.ts` runs for agents only); a slide's size changed
-    after it is made; numeric position and size (the LaTeX layout documents have mm fields); several
-    slides selected in the rail, a slide sorter, slides copied between decks; find and replace on
-    slides; version history (the server keeps versions, the panel shows only for LaTeX documents);
-    connectors drawn from object to object (`data-ol-connector` is written by hand); QR codes (the
-    poster designs have a box that says "QR code"); gradients and background pictures; transitions
-    and timed builds; PPTX / PNG export, handouts and notes pages (the A4 / Letter sizes' hints promise
-    them), PPTX / PDF import; the starter designs' bars and numbers are no master objects (*Edit theme*
-    says nothing is on every slide). Seen, not fixed: keys typed within a few ms of drawing a shape
+    **Built the same day** (the wave of 14 Nov 2026, each described in its own paragraph of this
+    section): tables, Check, Page setup, position and size with grid and rulers, slide management
+    (several slides, copying between decks, the sorter, find and replace), History for every file,
+    connectors, QR codes, backgrounds and gradients, pictures / handouts / notes pages, PowerPoint
+    export, PDF import. **Still open**: transitions and timed builds; PPTX import; the starter
+    designs' bars and numbers are no master objects (*Edit theme* says nothing is on every slide). Seen, not fixed: keys typed within a few ms of drawing a shape
     arrive out of order ("Box label" → "labelBox") and the canvas then shows the shape empty until it
     is loaded again; a "recovered text draft" banner once, after the title became a `<div>`.
   * **Slide management** (14 Nov 2026). **Several slides selected** in the slide list
