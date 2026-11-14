@@ -73,6 +73,8 @@ import { ThemePane } from './ThemePane';
 import { reviewOps, resolveOps, resolveAll, reviewOf, isSuggesting, suggestingOp, stampOf, threadsOp, parseThreads, newThreadId, describe as describeObject, COMMENTS, COMMENT_INK_ATTR, type ReviewChange, type ReviewThread, type Thread } from '@overlyx/core/html/review.ts';
 import { deliverableInfo, slideElements, blankDeck, untouchedPageTitle } from '@overlyx/core/html/deliverable.ts';
 import { usualDeckSize } from '../app/decksize';
+import { PageSetup } from './PageSetup';
+import { deckPageSize, pageSetupSplices } from '@overlyx/core/html/pagesetup.ts';
 import { formatTimestamp } from '@overlyx/core';
 import { ReviewPane, type CommentDraft } from './ReviewPane';
 import { VoicePill } from './VoiceTalk';
@@ -2732,6 +2734,22 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
       { label: 'Remove custom guides', disabled: ro || (!master.length && !owned.length), action: () => write([masterOp([]), ...clearOwn]) },
     ];
   };
+  /** Page setup… (PageSetup.tsx): the slides' or the poster's size changed, what is on them scaled with it or kept — one undo step */
+  const pageSetup = (x?: number, y?: number) => {
+    if (kindRef.current === 'page') return;
+    if (suggestStamp()) { notify('Page setup changes every slide at once, so it is not a suggestion: switch to Editing to use it.', 'error'); return; }
+    const r = canvasBox.current?.getBoundingClientRect();
+    const size = deckPageSize(text.toString());
+    pickAt(x ?? (r?.left ?? 200) + 24, y ?? (r?.top ?? 120) + 12, 'Page setup', close => <PageSetup kind={kindRef.current === 'poster' ? 'poster' : 'deck'} size={size} close={close}
+      apply={(to, mode) => {
+        const res = pageSetupSplices(text.toString(), to, mode);
+        if (!res || !res.splices.length) return;
+        toCanvas({ ol: 'stopText' });
+        applySplices(res.splices, 'canvas', true, false);
+        setTimeout(fitSlide, 200);
+        notify(`${kindRef.current === 'poster' ? 'The poster is' : 'The slides are'} now ${to.width} × ${to.height} ${to.unit}${mode === 'scale' && Math.abs(res.factor - 1) > 0.005 ? `, what is on ${kindRef.current === 'poster' ? 'it' : 'them'} ${Math.round(res.factor * 100)} % of its size` : ''} — Ctrl+Z brings the old size back.`);
+      }} />);
+  };
   const canvasMenu = (x: number, y: number) => showContextMenu(x, y, [
     ...canvasItems(x, y),
     ...(kind !== 'page' ? [{ sep: true }, { label: 'Guides', sub: guideItems(currentRef.current, menuPoint.current) }] : []),
@@ -2765,6 +2783,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
           { label: 'Placeholder', sub: PH_ROLES.map(r => ({ label: PH_LABELS[r], disabled: ro, action: () => { void insertPlaceholder(r); } })) },
         ] : []),
         { label: 'Guides', sub: guideItems(i, menuPoint.current) },
+        { label: 'Page setup…', disabled: ro, action: () => pageSetup(x, y) },
       ] : []),
       { sep: true },
       { label: 'Canvas', sub: canvasItems(x, y) },
@@ -3049,6 +3068,8 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     const textOn = editingText !== null || sel.some(s => s.canText || s.text);
     const master = deck && one && one.slide >= 0 && !ro ? masterOps(one) : null;
     const menus: MenuDef[] = [
+      // (entries for the shell's File menu: editormenus.ts mergeEditorMenus)
+      ...(kind !== 'page' ? [{ title: 'File', items: [{ label: 'Page setup…', disabled: ro || suggesting, action: () => pageSetup() }] }] : []),
       { title: 'Edit', items: [
         { label: 'Undo', shortcut: 'Ctrl+Z', disabled: ro, action: () => { toCanvas({ ol: 'stopText' }); setTimeout(() => host.undo(), 30); } },
         { label: 'Redo', shortcut: 'Ctrl+Y', disabled: ro, action: () => { toCanvas({ ol: 'stopText' }); setTimeout(() => host.redo(), 30); } },
@@ -3119,6 +3140,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
         { label: 'Background colour…', disabled: ro, action: () => pick('Slide background', close => <ColorGrid current={null} close={close} none="As the design has it" onPick={c => slideBackground(c)} />) },
         { label: 'Background colour of every slide…', disabled: ro, action: () => pick('Background of every slide', close => <ColorGrid current={null} close={close} none="As the design has it" onPick={c => slideBackground(c, true)} />) },
         { label: 'Slide numbers', disabled: ro, action: insertSlideNumbers },
+        { label: 'Page setup…', disabled: ro || suggesting, action: () => pageSetup() },
         { sep: true },
         { label: 'Move slide up', disabled: ro || i <= 0, action: () => moveSlide(i, -1) },
         { label: 'Move slide down', disabled: ro || i >= slides.length - 1, action: () => moveSlide(i, 1) },
@@ -4046,6 +4068,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     { label: 'Suggesting', checked: !viewing && suggesting, disabled: readOnly, action: () => setMode('suggesting') },
     { label: 'Viewing', checked: viewing, action: () => setMode('viewing') },
     ...(darkS.dark ? [{ sep: true }, { label: 'Smart invert pages', checked: darkS.invert, action: toggleDarkPages }] : []),
+    ...(kind !== 'page' ? [{ sep: true }, { label: 'Page setup…', disabled: readOnlyRef.current || locked || suggesting, action: () => pageSetup() }] : []),
     // (a menu of its own, not a submenu: a submenu opens on hover, which a finger does not do)
     ...(!host.bindSvgExporter ? [{ sep: true }, { label: 'Download…', action: () => downloads(x, y) }] : []),
   ]);

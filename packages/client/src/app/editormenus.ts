@@ -49,3 +49,15 @@ export function useEditorMenus(): MenuDef[] {
     }, []),
   }));
 }
+
+/**
+ * The shell's menus with the editor's: a menu of the editor that the shell has too (File) adds its
+ * entries to the end of that one, after a line; the others follow in their order.
+ */
+export function mergeEditorMenus(shell: MenuDef[], editor: MenuDef[]): MenuDef[] {
+  const out = shell.map(m => {
+    const more = editor.filter(e => e.title === m.title).flatMap(e => e.items);
+    return more.length ? { ...m, items: [...m.items, { sep: true } as MenuEntry, ...more] } : m;
+  });
+  return [...out, ...editor.filter(e => !shell.some(m => m.title === e.title))];
+}

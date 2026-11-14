@@ -1340,6 +1340,28 @@ blend.
     (`state.src`: the live `<body>` is the page's own and does not follow the text) and writes them to
     the source body's path. Guide edits are never suggestions (Suggesting): `applyRuntimeOps` and the
     menu's `applyOps(…, true)` pass them as they are.
+  * **Page setup** (14 Nov 2026; PowerPoint's Slide Size, Google Slides' Page setup —
+    `deliverable/PageSetup.tsx`, core `html/pagesetup.ts`): a deck's or poster's size changed after it
+    was made — *File ▸ Page setup…* (the editor's File entries are added to the shell's File menu,
+    `editormenus.ts mergeEditorMenus`), the *Slide* menu, the ⋯ menu, a right-click on a slide. The
+    sizes the New dialogs offer (`app/decksize.ts`), either way up, or any width × height in px, mm or
+    in; then what happens to what is on the pages, said in the dialog with the factor: **Fit it to the
+    new page** (the default) or **Leave it as it is** (only the page; what no longer fits hangs over
+    the edge). The size lives where the stylesheet has it — the top-level `.slide { width; height }`
+    rule (a `var(--…)` there: that custom property) and the print rule's `@page { size }`; a deck whose
+    size is set otherwise gets a note pointing at the code. Fitting multiplies every length of the
+    stylesheets and inline styles (type, lines, corners, paddings, custom properties) by s, the smaller
+    of the two factors; a placed object (a slide's direct child with left / top …, or a rule with
+    `position: absolute`) keeps its place: left / right / width follow the width's factor, top / bottom
+    / height the height's (a bar from edge to edge still reaches both); pictures, drawings, videos,
+    groups and round shapes keep their shape (scaled by s, centred where they would have been); a length
+    equal to the page's width or height becomes the new one; `data-ol-guides` and
+    `data-ol-layout-margins` move with the page; an `<svg>` without a `viewBox` gets one of its old box
+    so its strokes scale. %, em and unitless values are left alone. Every slide, the layouts in
+    `<template>`s and every copy of a master object get the same change, so linked copies stay
+    identical (applied with `follow` off: deckmaster's follow-ups are not needed). One list of splices,
+    one undo step; presenting, the rail, the PDF and the website zip read the same stylesheet.
+    Nothing new is written into the source beyond the changed values.
   * **Around the canvas** (`DeliverableEditor.tsx`): the slide rail (a second frame in `thumb`
     mode: click, drag to reorder, its menu — new slide in the design of the current one, blank,
     duplicate, move, delete; its header's « folds it away — `ol.deckSlides`, folded at first on
