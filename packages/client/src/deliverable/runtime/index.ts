@@ -47,6 +47,7 @@ import { looksOf } from './placeholders';
 import { installStorage } from './storage';
 import { refreshAnnotations } from './annotations';
 import { TABLE_CSS, tableCommand, tableValign } from './table';
+import { setFindMarks } from './findmarks';
 
 // a page's localStorage where the sandbox refuses the browser's (storage.ts), before the page's scripts run
 installStorage(MODE === 'view');
@@ -77,7 +78,12 @@ function printCss(): void {
 let railCurrent = -1;
 let railScale = 0.15;
 let railLayer: HTMLElement | null = null;
-let railDrag: { from: number; y0: number; to: number | null; x: number; y: number; touch: boolean; hold?: ReturnType<typeof setTimeout> } | null = null;
+let railDrag: { from: number; x0: number; y0: number; to: number | null; ref: number; after: boolean; x: number; y: number; touch: boolean; shift: boolean; ctrl: boolean; hold?: ReturnType<typeof setTimeout> } | null = null;
+/** the slides selected in the slide list (the editor's: slideops.ts), and whether it is a grid (the slide sorter) */
+let railSel: number[] = [];
+let railGrid = false;
+/** the last slide tapped, and when: twice in a moment opens it (the sorter) */
+let railTap = { slide: -1, at: 0 };
 /** the others on the page: a dot with their initials on the slide they are at */
 let railPeers: PeerInfo[] = [];
 /** who the rail shows where (`window.__ol.railPeers()`, for tests) */
@@ -103,6 +109,8 @@ const initials = (name: string): string => {
 
 /** the gap (screen px) between two thumbnails */
 const RAIL_GAP = 12;
+/** the same in the slide sorter's grid (its columns: this and the room of the numbers) */
+const GRID_GAP = 22;
 
 function startThumb(): void {
   addStyle(`html, body { scrollbar-width: none; } html::-webkit-scrollbar { display: none; } html, html * { cursor: pointer !important; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }`);
@@ -115,7 +123,9 @@ function startThumb(): void {
     html.ol-thumb .slide { margin: 0 0 var(--ol-gap, 40px) 0 !important; transform: none !important;
       box-shadow: 0 0 0 var(--ol-hair, 1px) rgba(0, 0, 0, 0.2), 0 var(--ol-hair, 1px) calc(4 * var(--ol-hair, 1px)) rgba(0, 0, 0, 0.18) !important; }
     :where(html.ol-thumb .slide) { ${PAGE_BG} }
-    html.ol-thumb .slide[data-ol-skip] { opacity: .45 !important; }`);
+    html.ol-thumb .slide[data-ol-skip] { opacity: .45 !important; }
+    html.ol-thumb.ol-grid :has(> .slide) { display: flex !important; flex-wrap: wrap !important; align-content: flex-start !important; gap: var(--ol-gap, 40px) calc(var(--ol-gap, 40px) + var(--ol-num, 0px)) !important; }
+    html.ol-thumb.ol-grid .slide { flex: none !important; margin: 0 !important; }`);
   notePageBackground();
   const host = document.createElement('ol-overlay');
   host.setAttribute('data-ol-runtime', '');
@@ -125,7 +135,10 @@ function startThumb(): void {
     .n { position: absolute; width: calc(${RAIL_NUM - 6}px / var(--s)); transform: translateX(calc(-100% - 6px / var(--s))); text-align: right; font: 500 calc(11px / var(--s)) / 1 sans-serif; font-variant-numeric: tabular-nums; color: #8a8f98; }
     .n.on { color: #2f6fde; font-weight: 700; }
     .cur { position: absolute; box-sizing: border-box; border: calc(2.5px / var(--s)) solid #2f6fde; border-radius: calc(4px / var(--s)); }
+    .cur.sel { border-width: calc(2px / var(--s)); border-color: rgba(47, 111, 222, .6); background: rgba(47, 111, 222, .12); }
     .drop { position: absolute; height: calc(3px / var(--s)); background: #2f6fde; }
+    .drop.v { height: auto; width: calc(3px / var(--s)); }
+    .drop b { position: absolute; left: 50%; top: 0; transform: translate(-50%, -50%); font: 700 calc(11px / var(--s)) sans-serif; color: #fff; background: #2f6fde; padding: calc(1px / var(--s)) calc(6px / var(--s)); border-radius: calc(8px / var(--s)); white-space: nowrap; }
     .c { position: absolute; transform: translate(calc(-100% - 4px / var(--s)), calc(4px / var(--s))); display: flex; align-items: center; gap: calc(2px / var(--s)); font: 700 calc(11px / var(--s)) sans-serif; color: #3a2a00; background: #f6b400; padding: calc(1px / var(--s)) calc(5px / var(--s)); border-radius: calc(8px / var(--s)) calc(8px / var(--s)) calc(8px / var(--s)) calc(2px / var(--s)); }
     .chg { position: absolute; width: calc(3px / var(--s)); transform: translateX(calc(-5px / var(--s))); border-radius: calc(2px / var(--s)); }
     .del { position: absolute; transform: translate(-50%, -50%); font: 700 calc(12px / var(--s)) sans-serif; color: #fff; background: #d2453c; padding: calc(2px / var(--s)) calc(8px / var(--s)); border-radius: calc(4px / var(--s)); }
@@ -140,9 +153,9 @@ function startThumb(): void {
   addEventListener('pointerdown', e => {
     e.preventDefault(); e.stopPropagation();
     if (e.button !== 0) return;
-    const i = slideAt(e.pageY);
+    const i = slideAt(e.pageY, e.pageX);
     if (i < 0) return;
-    const d: NonNullable<typeof railDrag> = { from: i, y0: e.pageY, to: null, x: e.clientX, y: e.clientY, touch: e.pointerType !== 'mouse' };
+    const d: NonNullable<typeof railDrag> = { from: i, x0: e.pageX, y0: e.pageY, to: null, ref: i, after: false, x: e.clientX, y: e.clientY, touch: e.pointerType !== 'mouse', shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey };
     // a finger or a pen has no right button, and iPad Safari sends no contextmenu: a slide held
     // still for a moment opens its menu (as the canvas picks up an object, edit.ts)
     if (d.touch) d.hold = setTimeout(() => { if (railDrag !== d || d.to !== null) return; railEnd(); post({ ol: 'contextmenu', x: d.x, y: d.y, slide: d.from }); }, 450);
@@ -153,7 +166,7 @@ function startThumb(): void {
   }, true);
   addEventListener('contextmenu', e => {
     e.preventDefault(); e.stopPropagation();
-    const i = slideAt(e.pageY);
+    const i = slideAt(e.pageY, e.pageX);
     post({ ol: 'contextmenu', x: e.clientX, y: e.clientY, slide: i });
   }, true);
   addEventListener('keydown', e => { e.preventDefault(); post({ ol: 'key', key: e.key, ctrl: e.ctrlKey, shift: e.shiftKey, alt: e.altKey, meta: e.metaKey }); }, true);
@@ -161,25 +174,57 @@ function startThumb(): void {
   new ResizeObserver(drawRail).observe(document.documentElement);
 }
 
-function slideAt(y: number): number {
+function slideAt(y: number, x = 0): number {
   const ss = slides();
   let best = -1, bd = Infinity;
-  ss.forEach((s, i) => { const r = docRect(s); const d = y < r.y ? r.y - y : y > r.y + r.h ? y - r.y - r.h : 0; if (d < bd) { bd = d; best = i; } });
+  ss.forEach((s, i) => {
+    const r = docRect(s);
+    const dy = y < r.y ? r.y - y : y > r.y + r.h ? y - r.y - r.h : 0;
+    // (the sorter's grid: the nearest slide both ways)
+    const dx = !railGrid ? 0 : x < r.x ? r.x - x : x > r.x + r.w ? x - r.x - r.w : 0;
+    const d = Math.hypot(dx, dy);
+    if (d < bd) { bd = d; best = i; }
+  });
   return best;
 }
 
-/** where a dragged slide would go: before slide `to` (slides.length: after the last) */
-function dropIndex(y: number): number {
+/** where dragged slides would go: before slide `to` (slides.length: after the last) — the mark drawn before slide `ref`, or after it */
+function dropPlace(x: number, y: number): { to: number; ref: number; after: boolean } {
   const ss = slides();
-  for (let i = 0; i < ss.length; i++) { const r = docRect(ss[i]); if (y < r.y + r.h / 2) return i; }
-  return ss.length;
+  if (!railGrid) {
+    for (let i = 0; i < ss.length; i++) { const r = docRect(ss[i]); if (y < r.y + r.h / 2) return { to: i, ref: i, after: false }; }
+    return { to: ss.length, ref: ss.length - 1, after: true };
+  }
+  // the grid: the row the pointer is in, then the first slide of it whose middle lies right of the pointer
+  const rs = ss.map(s => docRect(s));
+  const near = slideAt(y, x);
+  if (near < 0) return { to: ss.length, ref: ss.length - 1, after: true };
+  const row = rs.map((_, i) => i).filter(i => Math.abs(rs[i].y - rs[near].y) < rs[near].h / 2);
+  for (const i of row) if (x < rs[i].x + rs[i].w / 2) return { to: i, ref: i, after: false };
+  const last = row[row.length - 1];
+  return { to: last + 1, ref: last, after: true };
+}
+
+/** the slide a row up or down from the one shown (the sorter's ↑ / ↓; the rail: the one before / after) */
+function railRow(dir: -1 | 1): number {
+  const ss = slides();
+  const cur = Math.max(0, Math.min(ss.length - 1, railCurrent));
+  if (!railGrid || !ss.length) return Math.max(0, Math.min(ss.length - 1, cur + dir));
+  const rs = ss.map(s => docRect(s)), c = rs[cur];
+  let best = -1, bd = Infinity;
+  rs.forEach((r, i) => {
+    if (dir < 0 ? r.y >= c.y - c.h / 2 : r.y <= c.y + c.h / 2) return;
+    const d = Math.abs(r.y - c.y) * 4 + Math.abs(r.x - c.x);
+    if (d < bd) { bd = d; best = i; }
+  });
+  return best < 0 ? (dir < 0 ? 0 : ss.length - 1) : best;
 }
 
 function railMove(e: PointerEvent): void {
   if (!railDrag) return;
-  if (railDrag.to === null && Math.abs(e.pageY - railDrag.y0) * railScale < 6) return;
+  if (railDrag.to === null && Math.hypot(e.pageY - railDrag.y0, railGrid ? e.pageX - railDrag.x0 : 0) * railScale < 6) return;
   if (railDrag.hold) { clearTimeout(railDrag.hold); railDrag.hold = undefined; }
-  railDrag.to = dropIndex(e.pageY);
+  Object.assign(railDrag, dropPlace(e.pageX, e.pageY));
   const ss = slides(), r0 = docRect(ss[0] ?? document.body);
   if (scrollY > 0 && e.clientY < 40) scrollBy(0, -20 / railScale);
   if (e.clientY > innerHeight - 40) scrollBy(0, 20 / railScale);
@@ -203,9 +248,16 @@ function railUp(e: PointerEvent): void {
   if (!d) return;
   // a tap on the slide already shown opens its menu, as in Keynote and PowerPoint on an iPad
   if (d.to === null && d.touch && d.from === railCurrent) { post({ ol: 'contextmenu', x: e.clientX, y: e.clientY, slide: d.from }); return; }
-  if (d.to === null) { post({ ol: 'goto', slide: d.from }); return; }
+  if (d.to === null) {
+    const now = performance.now(), twice = railTap.slide === d.from && now - railTap.at < 450 && !d.shift && !d.ctrl;
+    railTap = { slide: d.from, at: twice ? 0 : now };
+    post({ ol: 'goto', slide: d.from, ...(d.shift ? { shift: true } : {}), ...(d.ctrl ? { ctrl: true } : {}), ...(twice ? { open: true } : {}) });
+    return;
+  }
   const ss = slides();
   const moved = ss[d.from];
+  // several slides selected, one of them dragged: all of them go (the editor's: slideops.ts)
+  if (railSel.length > 1 && railSel.includes(d.from)) { post({ ol: 'slidesDrop', from: d.from, to: d.to }); return; }
   if (d.to === d.from || d.to === d.from + 1 || !moved) return;
   const src = srcOf.get(moved);
   const path = pathOf(moved);
@@ -226,7 +278,7 @@ function drawRail(): void {
   railLayer.style.setProperty('--s', String(railScale));
   const st = document.documentElement.style;
   st.setProperty('--ol-num', `${RAIL_NUM / railScale}px`);
-  st.setProperty('--ol-gap', `${RAIL_GAP / railScale}px`);
+  st.setProperty('--ol-gap', `${(railGrid ? GRID_GAP : RAIL_GAP) / railScale}px`);
   st.setProperty('--ol-hair', `${1 / railScale}px`);
   const ss = slides();
   const parts: string[] = [];
@@ -243,7 +295,7 @@ function drawRail(): void {
     if (rv.comments) parts.push(`<div class="c" style="left:${r.x + r.w}px;top:${r.y}px">💬 ${rv.comments}</div>`);
     // (a ring round it, a hair apart from its edge)
     const o = 4 / railScale;
-    if (i === railCurrent) parts.push(`<div class="cur" style="left:${r.x - o}px;top:${r.y - o}px;width:${r.w + 2 * o}px;height:${r.h + 2 * o}px"></div>`);
+    if (i === railCurrent || railSel.includes(i)) parts.push(`<div class="cur${i === railCurrent ? '' : ' sel'}"${railSel.includes(i) ? ' data-ol-rail-sel' : ''} style="left:${r.x - o}px;top:${r.y - o}px;width:${r.w + 2 * o}px;height:${r.h + 2 * o}px"></div>`);
     const here = railPeers.filter(p => peerSlide(p, ss) === i).slice(0, 4);
     for (const p of here) railDrawn.push({ slide: i, name: p.name });
     if (here.length) {
@@ -252,16 +304,24 @@ function drawRail(): void {
     }
   });
   if (railDrag && railDrag.to !== null) {
-    const t = railDrag.to;
-    const r = t < ss.length ? docRect(ss[t]) : docRect(ss[ss.length - 1]);
-    const y = t < ss.length ? r.y - (RAIL_GAP / 2 + 1.5) / railScale : r.y + r.h + (RAIL_GAP / 2 - 1.5) / railScale;
-    parts.push(`<div class="drop" style="left:${r.x}px;top:${y}px;width:${r.w}px"></div>`);
+    const r = docRect(ss[railDrag.ref] ?? ss[ss.length - 1]), after = railDrag.after;
+    // (how many slides go: several selected, one of them dragged)
+    const n = railSel.length > 1 && railSel.includes(railDrag.from) ? `<b>${railSel.length} slides</b>` : '';
+    if (railGrid) {
+      const x = after ? r.x + r.w + (GRID_GAP / 2 - 1.5) / railScale : r.x - (GRID_GAP / 2 + 1.5) / railScale;
+      parts.push(`<div class="drop v" style="left:${x}px;top:${r.y}px;height:${r.h}px">${n}</div>`);
+    } else {
+      const y = after ? r.y + r.h + (RAIL_GAP / 2 - 1.5) / railScale : r.y - (RAIL_GAP / 2 + 1.5) / railScale;
+      parts.push(`<div class="drop" style="left:${r.x}px;top:${y}px;width:${r.w}px">${n}</div>`);
+    }
   }
   railLayer.innerHTML = parts.join('');
 }
 
-function railShow(i: number): void {
+function railShow(i: number, sel?: number[]): void {
   railCurrent = i;
+  // (told without the selection: as it was while the slide is one of it, else the slide alone)
+  railSel = sel ? sel.filter(k => Number.isInteger(k)) : railSel.includes(i) ? railSel : [i];
   drawRail();
   const s = slides()[i];
   if (!s) return;
@@ -326,6 +386,7 @@ function onMessage(e: MessageEvent): void {
       break;
     }
     case 'select': if (MODE === 'edit') edit.selectPaths(m.paths as Path[]); break;
+    case 'findMarks': if (MODE === 'edit') setFindMarks(m.find); break;
     case 'looks': post({ ol: 'looks', id: m.id, looks: looksOf(m.paths.map(p => liveAt(p))) }); break;
     case 'editText': if (MODE === 'edit') edit.editTextAt(m.path, m.selectAll, m.math); break;
     case 'stopText': if (MODE === 'edit') edit.stopText(m.save !== false); break;
@@ -344,7 +405,9 @@ function onMessage(e: MessageEvent): void {
     case 'peers': if (MODE === 'edit') edit.setPeers(m.peers); else if (MODE === 'thumb') { railPeers = m.peers; drawRail(); } break;
     case 'dark': if (MODE === 'edit' || MODE === 'thumb') { setDarkSlides(m.invert, !!m.figures); if (MODE === 'thumb') railDesk(m.desk); } break;
     case 'fitBox': if (MODE === 'edit') edit.fitBoxes(); break;
-    case 'current': if (MODE === 'thumb') railShow(m.slide); break;
+    case 'current': if (MODE === 'thumb') railShow(m.slide, m.sel); break;
+    case 'railGrid': if (MODE === 'thumb') { railGrid = m.on; document.documentElement.classList.toggle('ol-grid', m.on); drawRail(); requestAnimationFrame(() => railShow(railCurrent, railSel)); } break;
+    case 'railRow': if (MODE === 'thumb') post({ ol: 'goto', slide: railRow(m.dir), ...(m.shift ? { shift: true } : {}) }); break;
     case 'asset': refreshAsset(m.path, m.v); break;
     case 'arrange': if (MODE === 'edit') arrange(m.how); break;
     case 'groupLayout': if (MODE === 'edit') setGroupLayout(m.layout); break;

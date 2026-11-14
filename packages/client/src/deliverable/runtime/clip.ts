@@ -282,6 +282,8 @@ export function paste(d: { html: string; plain: string; files: { name: string; t
   const sel = selection();
   const slide = pasteSlide(sel);
   if (d.files.length) { post({ ol: 'pasteFiles', files: d.files, slide: slide ? pathOf(slide) : null, at: null }); return; }
+  // (slides copied in a slide list: they go into the deck, not onto the slide — the editor's, slideclip.ts)
+  if (/<!--overlyx-slides [A-Za-z0-9+/=]+-->/.test(d.html)) { post({ ol: 'pasteSlides', html: d.html }); return; }
   const m = MARK.exec(d.html);
   if (m) { pasteObjects(d.html.slice(m.index + m[0].length), Number(m[1] ?? -1), sel); return; }
   const plain = d.plain.trim();

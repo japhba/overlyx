@@ -1793,6 +1793,45 @@ blend.
     says nothing is on every slide). Seen, not fixed: keys typed within a few ms of drawing a shape
     arrive out of order ("Box label" → "labelBox") and the canvas then shows the shape empty until it
     is loaded again; a "recovered text draft" banner once, after the title became a `<div>`.
+  * **Slide management** (14 Nov 2026). **Several slides selected** in the slide list
+    (`slideselection.ts` the list's logic, keys and menu; `slideops.ts` the operations, pure and tested
+    in `tests/slideops.test.ts`): Shift+click a range, Ctrl/⌘+click one more or less, Shift+↑ / ↓,
+    Ctrl+A, Esc back to the slide shown; drag, Delete, Ctrl+D (the copies after the last selected),
+    *Skip slide* (all skipped, or all back when all were), Ctrl+↑ / ↓ (a block steps over its
+    neighbour, slides apart gather), Cut / Copy / Paste — each one change of the text (`reorder`,
+    `remove`, `insert`, `attr`), so one undo step, tracked while suggesting, and `deckmaster.ts
+    followUps` keep linked objects and slide numbers right. The runtime's rail draws the selection
+    (`railSel`, a pale ring; `current` carries `sel`) and drags all selected slides (`slidesDrop`, a
+    "N slides" badge on the drop mark). **Slides between decks** (`slideclip.ts`, tested in
+    `tests/slideclip.test.ts`): a copy puts `<!--overlyx-slides <base64 JSON>-->` and the slides' words
+    into the system clipboard's text/html (plain words in text/plain) — the slides' source, the deck's
+    id and folder, the deck stylesheet's rules for the classes the slides use and the custom properties
+    behind them; a paste (rail, canvas, *Paste slides*; this tab's last copy when the browser keeps the
+    clipboard from the page) puts them after the slide shown. From another deck they take the receiving
+    deck's look, as PowerPoint's *Use destination theme*: their markup and inline styles stay, classes
+    the receiving stylesheet knows are styled by it, rules for classes it does not know (and custom
+    properties it does not set) come along in one `<style data-ol-pasted>` in the head; the old deck's
+    objects on every slide (`data-ol-master`) are replaced by the receiving deck's (or kept unlinked
+    when it has none); pictures named by relative addresses are fetched from the old deck's project
+    and uploaded into the receiving deck's folder (same sub-folder name, else `images/`), the
+    addresses rewritten — a picture that cannot be fetched (another account's project, VS Code) is
+    reported. **Slide sorter** (`slidesorter.tsx`; *View ▸ Slide sorter*, ⊞ above the slide list):
+    the slide list's frame over the whole editor body laid out as a grid (runtime `railGrid`: flex
+    wrap, `dropPlace` / `railRow` for the grid), slides Small / Medium / Large on a slider with rungs
+    (`ol.sorterThumb`); the rail's selection, keys (↑ ↓ go a row), menu and drag; double-click or Enter
+    opens the slide, Esc / Done goes back. **Find and replace** (`slidefind.ts`, `SlideFind.tsx`,
+    runtime `findmarks.ts`, shared search `findre.ts`; Ctrl+F, Ctrl+H, *Edit ▸ Find and replace…*;
+    decks and posters): the words of every slide and its speaker notes (`<aside class="notes">`) as
+    written in the source — not formulas' TeX (`\(…\)`, `\[…\]`, `$…$`), `<script>`, `<style>`,
+    `<svg>`, words a suggestion deletes (`<del>`, `data-ol-del`) or generated bibliographies; a match
+    lies within one text node (words split by bold or a link are not found as one); a space in the
+    search finds any run of spaces; Match case, Whole words. Each match is named by its element and
+    which match of that element's own text it is; the canvas marks them with the CSS Custom Highlight
+    API (no change of the page), the current one strong, its slide shown; a match in the notes opens the
+    notes pane (not marked there). Replace / Replace all are `inner` operations with `before` on the
+    elements holding the matches (an element inside another one with matches goes with that one) —
+    the retyping path: one undo step, word-level tracked changes while suggesting, a co-author's
+    words kept. Nothing new is written into the deck besides `data-ol-pasted`.
 * **Layout documents** (LaTeX; since the HTML deliverables above, behind *A LaTeX (beamer) layout
   document instead…* in the New dialog; `editor/layout/`, core
   `layout/`): slides, posters and free-form pages — fixed-size pages whose objects sit anywhere:

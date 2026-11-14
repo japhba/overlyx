@@ -266,6 +266,8 @@ export type ToRuntime =
   | { ol: 'assets'; urls: Record<string, string> }
   | { ol: 'folder'; base: string }
   | { ol: 'select'; paths: Path[] }
+  /** find on slides (SlideFind.tsx): the words found marked — the element, which match of its own text; `current`: the one marked strong (null: no marks) */
+  | { ol: 'findMarks'; find: { query: string; matchCase: boolean; words: boolean; marks: { path: Path; nth: number }[]; current: number } | null }
   /** `math`: its first formula opened in LyX's formula editor at once (a new formula object) */
   | { ol: 'editText'; path: Path; selectAll?: boolean; math?: boolean }
   /** end the retyping of a text (before an undo from the toolbar: the box being retyped does not take new versions) */
@@ -302,7 +304,12 @@ export type ToRuntime =
    * null for the page's own
    */
   | { ol: 'dark'; invert: boolean; figures?: boolean; desk: string | null }
-  | { ol: 'current'; slide: number }
+  /** the slide shown, for the slide list (the rail, the sorter) — `sel`: the slides selected there (slideops.ts; absent: as they were, or the slide alone) */
+  | { ol: 'current'; slide: number; sel?: number[] }
+  /** the slide list as a grid (the slide sorter) or one under the other (the rail) */
+  | { ol: 'railGrid'; on: boolean }
+  /** the slide list: the slide a row up (-1) or down (1) from the one shown, please (answered with `goto`) */
+  | { ol: 'railRow'; dir: -1 | 1; shift: boolean }
   /** a file of the project changed on disk (project-relative): stylesheets and pictures are fetched again, scripts and data reload the page */
   | { ol: 'asset'; path: string; v: number }
   | { ol: 'arrange'; how: ArrangeHow }
@@ -450,7 +457,12 @@ export type FromRuntime =
   /** (`at`: the point of the slide right-clicked, slide px — a guide added there) */
   | { ol: 'contextmenu'; x: number; y: number; slide?: number; on?: 'object' | 'slide' | 'canvas'; weave?: { label: string; undo: boolean }; at?: { x: number; y: number } }
   | { ol: 'visible'; slide: number }
-  | { ol: 'goto'; slide: number }
+  /** a slide of the slide list clicked — with Shift (a range) or Ctrl/⌘ (one more or less); `open`: twice (the sorter opens it) */
+  | { ol: 'goto'; slide: number; shift?: boolean; ctrl?: boolean; open?: boolean }
+  /** a paste on the canvas of slides copied in a slide list (slideclip.ts): the editor's */
+  | { ol: 'pasteSlides'; html: string }
+  /** the selected slides of the slide list dragged (by slide `from`) to before slide `to` */
+  | { ol: 'slidesDrop'; from: number; to: number }
   | { ol: 'exit' }
   | { ol: 'reload' }
   /** patches came for a version the frame does not show: all of the text, please */

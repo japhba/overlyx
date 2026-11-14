@@ -1,0 +1,14 @@
+/* Find and replace on slides (SlideFind.tsx): a bar at the top right of the canvas */
+.dl-main:has(> .dl-find) { position: relative; }
+.dl-find { position: absolute; top: 8px; right: 16px; z-index: 25; display: flex; flex-direction: column; gap: 4px; padding: 6px; border-radius: 8px;
+  background: var(--ui-bg); border: 1px solid var(--ui-border); box-shadow: 0 4px 16px rgba(0, 0, 0, .14); font-size: 12.5px; max-width: calc(100% - 32px); box-sizing: border-box; }
+.dl-find-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.dl-find-input { width: 220px; min-width: 80px; flex: 1 1 220px; height: 26px; padding: 0 8px; border: 1px solid var(--ui-border); border-radius: 5px; background: var(--ui-bg); color: inherit; font: inherit; box-sizing: border-box; }
+.dl-find-input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.dl-find-count { min-width: 64px; white-space: nowrap; color: var(--ui-muted); display: flex; flex-direction: column; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.dl-find-count.none { color: #c0392b; }
+.dl-find-where { font-size: 10.5px; }
+.dl-find .dl-btn { min-width: 26px; height: 26px; padding: 0 6px; flex: none; }
+.dl-find-opt.on { background: var(--accent); color: #fff; }
+.dl-find-toggle, .dl-find-toggle-space { width: 22px; min-width: 22px !important; flex: none; padding: 0 !important; }
+@media (max-width: 560px) { .dl-find { left: 8px; right: 8px; max-width: none; } .dl-find-input { width: auto; } }

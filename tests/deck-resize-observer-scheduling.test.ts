@@ -47,7 +47,9 @@ function setup(initialBox = { w: 100, h: 100 }, withRail = true) {
     disconnect = vi.fn();
     constructor(readonly callback: () => void) { observers.push(this); }
   }
-  const context = createContext({ canvasBox, railBox, RAIL_HEAD: 28, setBox, setRailH,
+  // (the slide sorter's width of the list: slidesorter.tsx)
+  const setRailBoxW = vi.fn();
+  const context = createContext({ canvasBox, railBox, RAIL_HEAD: 28, setBox, setRailH, setRailBoxW,
     ResizeObserver: NativeObserverBoundary, requestAnimationFrame: request, cancelAnimationFrame: cancel });
   const cleanup = (runInContext(code, context) as () => () => void)();
   if (observers.length !== 1) throw new Error('Expected one actual observer subscription');

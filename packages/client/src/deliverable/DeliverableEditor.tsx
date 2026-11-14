@@ -73,6 +73,9 @@ import { followUps, composeSplices, twinsOf, putOnEverySlide, otherCopies, slide
 import { deckTheme, themeSplices, type ThemeChange } from './decktheme';
 import { embeddedFontFamilies, fontPortabilityWarning, fontResource } from './deckfonts';
 import { ThemePane } from './ThemePane';
+import { useSlideList } from './slideselection';
+import { SorterBar, loadSorterThumb, SORTER_HEAD } from './slidesorter';
+import { SlideFind } from './SlideFind';
 import { reviewOps, resolveOps, resolveAll, reviewOf, isSuggesting, suggestingOp, stampOf, threadsOp, parseThreads, newThreadId, describe as describeObject, COMMENTS, COMMENT_INK_ATTR, type ReviewChange, type ReviewThread, type Thread } from '@overlyx/core/html/review.ts';
 import { deliverableInfo, slideElements, blankDeck, untouchedPageTitle } from '@overlyx/core/html/deliverable.ts';
 import { usualDeckSize } from '../app/decksize';
@@ -351,6 +354,13 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
   const [inset, setInset] = useState(NO_INSET);
   const box = { w: Math.max(1, canvasSize.w - inset.l - inset.r), h: Math.max(1, canvasSize.h - inset.t - inset.b) };
   const [railH, setRailH] = useState(600);
+  /** the slide sorter (slidesorter.tsx): the slide list as a grid over the editor, its slides this wide (screen px), the list's width */
+  const [sorter, setSorter] = useState(false);
+  const [sorterThumb, setSorterThumb] = useState(loadSorterThumb);
+  const [railBoxW, setRailBoxW] = useState(0);
+  /** find and replace on the slides (SlideFind.tsx): open, with the replace row; `tick`: Ctrl+F / Ctrl+H again */
+  const [find, setFind] = useState<{ replace: boolean; tick: number } | null>(null);
+  const openFind = (replace: boolean) => { if (kindRef.current !== 'page') setFind(f => ({ replace, tick: (f?.tick ?? 0) + 1 })); };
   const [zoom, setZoom] = useState(1);
   /** the frame's left edge when it is wider than the canvas (zoomed in): panned sideways */
   const [panX, setPanX] = useState(0);
@@ -587,7 +597,8 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
   /** Check (ChecksPane.tsx): a deck's or a poster's, not the drawing editor's */
   const canCheck = kind !== 'page' && !host.bindSvgExporter;
   const railOpen = showRail && railShown;
-  const railScale = Math.max(0.05, (railW - 20 - RAIL_NUM) / frameW);
+  const sorterOn = sorter && showRail;
+  const railScale = sorterOn ? Math.max(0.05, sorterThumb / frameW) : Math.max(0.05, (railW - 20 - RAIL_NUM) / frameW);
   /**
    * The inside of the slide's layout margins (frame px; decklayouts.ts deckMargins — the template's,
    * else where the deck's objects sit): what Fit margins shows as big as the canvas takes it.
@@ -1285,6 +1296,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
             toRail({ ol: 'scale', scale: railScale });
             if (host.ready()) { sentTo.current.rail = -1; toRail(sourceMsg('rail')); }
             toRail({ ol: 'current', slide: currentRef.current });
+            if (slideList.grid.current) toRail({ ol: 'railGrid', on: true });
             toRail({ ol: 'dark', invert: darkRef.current.invert, figures: darkRef.current.figures, desk: railColor() });
             if (peersRef.current.length) toRail({ ol: 'peers', peers: peersRef.current });
           }
@@ -1355,7 +1367,10 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
         case 'mathRect': if (fromCanvas) setMathEdit(st => st && st.id === m.id ? { ...st, box: m.box } : st); break;
         case 'mathClose': if (fromCanvas) setMathEdit(st => m.id === undefined || st?.id === m.id ? null : st); break;
         case 'visible': if (fromCanvas && m.slide >= 0) { setCurrent(m.slide); toRail({ ol: 'current', slide: m.slide }); } break;
-        case 'goto': if (fromRail) railKeys.current = true; setCurrent(m.slide); toCanvas({ ol: 'scrollTo', slide: m.slide, smooth: false }); toRail({ ol: 'current', slide: m.slide }); break;
+        // (a click in the slide list: with Shift or Ctrl/⌘ it selects several — slideselection.ts)
+        case 'goto': if (fromRail) { railKeys.current = true; slideList.pick(m.slide, m.shift ? 'range' : m.ctrl ? 'toggle' : 'one'); if (m.open) slideList.open(); break; } setCurrent(m.slide); toCanvas({ ol: 'scrollTo', slide: m.slide, smooth: false }); toRail({ ol: 'current', slide: m.slide }); break;
+        case 'slidesDrop': if (fromRail) slideList.drop(m.from, m.to); break;
+        case 'pasteSlides': if (fromCanvas) void slideList.paste(m.html); break;
         case 'ops': {
           const before = text.toString();
           const ok = applyRuntimeOps(m.version, m.ops);
@@ -1395,7 +1410,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
           break;
         }
         case 'nodeEditing': if (fromCanvas) { setNodeEd(m.path ? { selected: m.selected, total: m.total } : null); if (m.path && document.activeElement !== canvasFrame.current) canvasFrame.current?.focus(); } break;
-        case 'key': if (!(fromRail && railKey(m))) onRuntimeKey(m); break;
+        case 'key': if (!(fromRail && railKey(m, true))) onRuntimeKey(m); break;
         case 'pressed': if (fromCanvas) railKeys.current = false; break;
         case 'contextmenu': {
           const f = (fromRail ? railFrame : canvasFrame).current;
@@ -1482,7 +1497,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
         setBox(prev => prev.w === w && prev.h === h ? prev : { w, h });
       }
       const rb = railBox.current;
-      if (rb) setRailH(Math.max(0, rb.clientHeight - RAIL_HEAD));
+      if (rb) { setRailH(Math.max(0, rb.clientHeight - RAIL_HEAD)); setRailBoxW(rb.clientWidth); }
     };
     // A state update can mount the rail and reobserve it during this delivery.
     // Measure once in the next frame, outside ResizeObserver's delivery loop.
@@ -1499,7 +1514,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
   // Refs are assigned after render; depending on ref.current recreates the observer
   // during its initial size notification. Only the conditional rail mounting changes
   // the observed nodes. Keep one observer while those nodes remain mounted.
-  }, [showRail, railShown]);
+  }, [showRail, railShown, sorterOn]);
   const scaleRef = useRef(scale); scaleRef.current = scale;
   useEffect(() => { const anchor = anchorRef.current ?? undefined; anchorRef.current = null; toCanvas({ ol: 'scale', scale, anchor }); }, [scale]);
   // one slide on the canvas: the frame's place (viewport.ts), set outside renders
@@ -2731,6 +2746,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
         else if (type === 'text/plain') plain = await b.text();
         else if (type.startsWith('image/')) files.push({ name: 'pasted.' + type.split('/')[1].replace('svg+xml', 'svg'), type, data: await b.arrayBuffer() });
       }
+      if (kindRef.current === 'deck' && slideList.hasSlidesClip(html)) { void slideList.paste(html); return; }
       toCanvas({ ol: 'paste', html, plain, files });
     }).catch(() => notify(`The browser did not let the page read the clipboard: press ${keys} to paste.`));
   };
@@ -3118,14 +3134,37 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     applyOps([{ t: 'move', path: p, parent, index: d > 0 ? qi + 1 : qi }]);
     setCurrent(i + d);
   };
+  /** the slide list's selection: several slides dragged, deleted, duplicated, skipped, cut, copied, pasted (slideselection.ts) */
+  const slideList = useSlideList(current, slides.length, {
+    text: () => text.toString(), readOnly: () => readOnlyRef.current || host.readOnly(), applyOps: ops => applyOps(ops),
+    show: k => { setCurrent(k); toCanvas({ ol: 'scrollTo', slide: k, smooth: false }); },
+    toList: toRail, notify, deck: host.docId ?? host.path, dir, docId: host.docId,
+    upload: (f, sub) => uploadFile(f, sub), skipped: i => !!slidesRef.current[i]?.skipped,
+    closeGrid: () => setSorter(false),
+  });
+  // the slide sorter: the list a grid, and its keys (slidesorter.tsx)
+  useEffect(() => {
+    const was = slideList.grid.current;
+    slideList.grid.current = sorterOn;
+    if (was === sorterOn) return;
+    toRail({ ol: 'railGrid', on: sorterOn });
+    // (the list's keys: nothing selected on the canvas — railKey)
+    if (sorterOn) { railKeys.current = true; if (selRef.current.length) toCanvas({ ol: 'select', paths: [] }); setTimeout(() => railFrame.current?.focus(), 50); }
+    else toCanvas({ ol: 'scrollTo', slide: currentRef.current, smooth: false });
+  }, [sorterOn]);
   const slideMenu = (x: number, y: number, i: number) => {
     const n = slides.length;
+    // (a slide outside the selection: that one alone; several selected: what can be done to all of them)
+    if (slideList.of(i).length > 1) { showContextMenu(x, y, slideList.menu(i)); return; }
+    if (i !== currentRef.current || slideList.sel.length > 1) slideList.pick(i, 'one');
     showContextMenu(x, y, [
       { label: 'New slide', shortcut: 'Ctrl+M', action: () => newSlide(i) },
       // (pickers of their own, not submenus: a submenu opens on hover, which a finger does not do)
       { label: 'New slide in a layout…', action: () => pickAt(x, y, 'New slide', close => layoutPicker(i, close)) },
       { label: 'Duplicate slide', action: () => duplicateSlide(i) },
       { label: 'Skip slide (not presented)', checked: !!slides[i]?.skipped, disabled: readOnlyRef.current, action: () => toggleSkip(i) },
+      { sep: true },
+      ...slideList.clipItems(i),
       { sep: true },
       { label: 'Layout of this slide…', disabled: readOnlyRef.current, action: () => pickAt(x, y, 'Layout of this slide', close => layoutPicker(i, close, true)) },
       { label: 'Save as layout…', disabled: readOnlyRef.current, action: () => { void saveAsLayout(i); } },
@@ -3167,6 +3206,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
         { label: 'Duplicate', shortcut: 'Ctrl+D', disabled: ro || !sel.length, action: duplicateSel },
         { label: 'Delete', shortcut: 'Del', disabled: ro || !sel.length || sel.every(s => s.locked), action: removeSel },
         { label: kind === 'page' ? 'Select all' : 'Select all on the slide', shortcut: 'Ctrl+A', action: () => toCanvas({ ol: 'selectAll' }) },
+        ...(kind !== 'page' ? [{ label: 'Find and replace…', shortcut: 'Ctrl+F', action: () => openFind(false) }] : []),
         { sep: true },
         { label: 'Comment', shortcut: 'Ctrl+Alt+M', disabled: readOnlyRef.current, action: () => toCanvas({ ol: 'newComment' }) },
         { label: 'Editing', checked: !viewing && !suggesting, disabled: readOnly, action: () => setMode('editing') },
@@ -3182,6 +3222,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
         { sep: true },
         ...(deck ? [
           { label: 'Slides', checked: railShown, action: () => setRailShown(!railShown) },
+          { label: 'Slide sorter', checked: sorterOn, action: () => setSorter(!sorterOn) },
           { label: 'Speaker notes', checked: notesShown, action: () => setNotesShown(!notesShown) },
           { label: 'Animation', checked: animOpen, action: () => toggleAnim() },
         ] : []),
@@ -3221,9 +3262,11 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
       ...(deck ? [{ title: 'Slide', items: [
         { label: 'New slide', shortcut: 'Ctrl+M', disabled: ro, action: () => newSlide(i) },
         { label: 'New slide in a layout…', disabled: ro, action: () => pick('New slide', close => layoutPicker(i, close)) },
-        { label: 'Duplicate slide', disabled: ro, action: () => duplicateSlide(i) },
-        { label: 'Delete slide', disabled: ro || slides.length <= 1, action: () => deleteSlide(i) },
-        { label: 'Skip slide (not presented)', checked: !!slides[i]?.skipped, disabled: ro, action: () => toggleSkip(i) },
+        // (several slides selected in the slide list: all of them)
+        { label: slideList.sel.length > 1 ? `Duplicate ${slideList.sel.length} slides` : 'Duplicate slide', disabled: ro, action: () => slideList.duplicate(i) },
+        { label: slideList.sel.length > 1 ? `Delete ${slideList.sel.length} slides` : 'Delete slide', disabled: ro || slides.length <= slideList.sel.length, action: () => { slideList.remove(i); } },
+        { label: slideList.sel.length > 1 ? `Skip ${slideList.sel.length} slides (not presented)` : 'Skip slide (not presented)', checked: slideList.of(i).every(k => !!slides[k]?.skipped), disabled: ro, action: () => slideList.skip(i) },
+        ...slideList.clipItems(i),
         { sep: true },
         { label: 'Layout of this slide…', disabled: ro, action: () => pick('Layout of this slide', close => layoutPicker(i, close, true)) },
         { label: 'Save as layout…', disabled: ro, action: () => { void saveAsLayout(i); } },
@@ -3234,8 +3277,8 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
         { label: 'Slide numbers', disabled: ro, action: insertSlideNumbers },
         { label: 'Page setup…', disabled: ro || suggesting, action: () => pageSetup() },
         { sep: true },
-        { label: 'Move slide up', disabled: ro || i <= 0, action: () => moveSlide(i, -1) },
-        { label: 'Move slide down', disabled: ro || i >= slides.length - 1, action: () => moveSlide(i, 1) },
+        { label: 'Move slide up', disabled: ro || i <= 0, action: () => slideList.step(i, -1) },
+        { label: 'Move slide down', disabled: ro || i >= slides.length - 1, action: () => slideList.step(i, 1) },
         { label: 'Previous slide', shortcut: 'PageUp', disabled: i <= 0, action: () => gotoSlide(i - 1) },
         { label: 'Next slide', shortcut: 'PageDown', disabled: i >= slides.length - 1, action: () => gotoSlide(i + 1) },
         { sep: true },
@@ -3311,25 +3354,10 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
    * Delete removes the slide, Ctrl+D duplicates it and Ctrl+↑ / ↓ move it. A press on the canvas, a
    * selection there or a text being typed takes the keys back (they did nothing on a slide of the rail).
    */
-  const railKey = (k: { key: string; ctrl: boolean; meta: boolean; shift: boolean; alt: boolean }): boolean => {
+  const railKey = (k: { key: string; ctrl: boolean; meta: boolean; shift: boolean; alt: boolean }, inFrame = false): boolean => {
     if (!railKeys.current || kindRef.current !== 'deck' || selRef.current.length || editingTextRef.current || presenting || k.alt) return false;
-    const mod = k.ctrl || k.meta, i = currentRef.current, n = slidesRef.current.length, ro = readOnlyRef.current;
-    if (!mod && !k.shift) {
-      if (k.key === 'ArrowUp' || k.key === 'ArrowLeft') { gotoSlide(i - 1); return true; }
-      if (k.key === 'ArrowDown' || k.key === 'ArrowRight') { gotoSlide(i + 1); return true; }
-      if (k.key === 'Home') { gotoSlide(0); return true; }
-      if (k.key === 'End') { gotoSlide(n - 1); return true; }
-      if ((k.key === 'Delete' || k.key === 'Backspace') && !ro) {
-        if (n > 1) { deleteSlide(i); notify(`Slide ${i + 1} deleted — Ctrl+Z brings it back.`); }
-        return true;
-      }
-    }
-    if (mod && !k.shift && !ro) {
-      if (k.key.toLowerCase() === 'd') { duplicateSlide(i); return true; }
-      if (k.key === 'ArrowUp') { if (i > 0) moveSlide(i, -1); return true; }
-      if (k.key === 'ArrowDown') { if (i < n - 1) moveSlide(i, 1); return true; }
-    }
-    return false;
+    // (with Shift the arrows select on, Ctrl+A selects every slide, Delete / Ctrl+D / Ctrl+↑ ↓ are for all the selected: slideselection.ts)
+    return slideList.key(k, inFrame);
   };
   const onRuntimeKey = (m: Extract<FromRuntime, { ol: 'key' }>) => {
     const mod = m.ctrl || m.meta;
@@ -3339,6 +3367,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     if (mod && k === 'z') { if (m.shift) host.redo(); else host.undo(); return; }
     if (mod && k === 'y') { host.redo(); return; }
     if (mod && k === 's') { if (host.save) host.save(); else notify('Saved automatically.'); return; }
+    if (mod && !m.alt && (k === 'f' || k === 'h') && kindRef.current !== 'page') { openFind(k === 'h'); return; }
     if (m.key === 'F5' || (mod && m.key === 'Enter')) { startPresenting(m.key === 'F5' && !m.shift); return; }
     if (mod && k === 'g') { arrangeSel(m.shift ? 'ungroup' : 'group'); return; }
     // Inkscape's Path ▸ Combine / Break apart / Simplify
@@ -3393,6 +3422,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
       if (mod && e.altKey && e.code === 'KeyM') { e.preventDefault(); toCanvas({ ol: 'newComment' }); }
       else if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) host.redo(); else host.undo(); }
       else if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); host.redo(); }
+      else if (mod && !e.altKey && (e.key.toLowerCase() === 'f' || e.key.toLowerCase() === 'h') && kindRef.current !== 'page') { e.preventDefault(); openFind(e.key.toLowerCase() === 'h'); }
       else if (e.key === 'F5') { e.preventDefault(); startPresenting(!e.shiftKey); }
       // the focus left the canvas (a toolbar button, a palette): its shortcuts still work on the selection
       else if (mod && (['g', 'm', '0', '=', '+', '-', '\\'].includes(e.key.toLowerCase()) || (['k', 'l'].includes(e.key.toLowerCase()) && selRef.current.length)) || (mod && (e.key === 'ArrowUp' || e.key === 'ArrowDown'))) { e.preventDefault(); onRuntimeKey({ ol: 'key', key: e.key, ctrl: e.ctrlKey, shift: e.shiftKey, alt: e.altKey, meta: e.metaKey }); }
@@ -3455,14 +3485,18 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
       const s = getSelection();
       return !s || s.isCollapsed;
     };
+    /** the slide list has the keys (railKey): the clipboard is its slides' */
+    const slidesTurn = () => railKeys.current && kindRef.current === 'deck' && !selRef.current.length;
     const onCopy = (e: ClipboardEvent) => {
       const c = clipRef.current;
+      if (ours(e) && slidesTurn() && slideList.copyEvent(e, e.type === 'cut')) return;
       if (!ours(e) || !c || !selRef.current.length || !e.clipboardData) return;
       e.preventDefault();
       e.clipboardData.setData('text/html', c.html);
       e.clipboardData.setData('text/plain', c.plain);
     };
     const onCut = (e: ClipboardEvent) => {
+      if (ours(e) && slidesTurn()) { onCopy(e); return; }
       if (!ours(e) || !clipRef.current || !selRef.current.length || readOnlyRef.current) return;
       onCopy(e);
       removeSel();
@@ -3472,6 +3506,8 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
       e.preventDefault();
       const cd = e.clipboardData;
       const html = cd.getData('text/html'), plain = cd.getData('text/plain');
+      // (slides copied in a deck — this one or another: they go in after the slide shown)
+      if (kindRef.current === 'deck' && slideList.hasSlidesClip(html)) { void slideList.paste(html); return; }
       void Promise.all(Array.from(cd.files ?? []).map(async f => ({ name: f.name, type: f.type, data: await f.arrayBuffer() })))
         .then(files => toCanvas({ ol: 'paste', html, plain, files }));
     };
@@ -4306,14 +4342,16 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
         <input ref={replaceInput} type="file" accept="image/*,.svg" hidden onChange={e => { const fs = Array.from((e.target as HTMLInputElement).files ?? []); (e.target as HTMLInputElement).value = ''; void replacePicture(fs); }} />
       <div class="dl-body" data-sides={sides ? '' : undefined} style={sides ? `--dl-col: ${placed.col}px` : undefined}>
         {leftCol}
-        {showRail && railShown && (
-          <div class="dl-rail" ref={railBox} style={{ width: `${railW}px` }}>
+        {showRail && (railShown || sorterOn) && (
+          <div class={'dl-rail' + (sorterOn ? ' dl-sorter' : '')} ref={railBox} style={{ width: `${railW}px` }}>
               <div class="dl-rail-head">
-                <span class="dl-rail-count" title="The slide shown, of all slides">{slides.length ? `Slide ${current + 1} of ${slides.length}` : 'Slides'}</span>
+                {sorterOn && <SorterBar count={slides.length} selected={slideList.sel.length} thumb={sorterThumb} setThumb={setSorterThumb} done={() => setSorter(false)} />}
+                <span class="dl-rail-count" title={slideList.sel.length > 1 ? 'Drag them, or right-click one of them: what you do there is done to all the selected slides' : 'The slide shown, of all slides (Shift+click or Ctrl+click selects several)'} data-dl-slides-selected={slideList.sel.length}>{slides.length ? slideList.sel.length > 1 ? `${slideList.sel.length} slides selected` : `Slide ${current + 1} of ${slides.length}` : 'Slides'}</span>
+                {!sorterOn && <button class="dl-btn dl-rail-sorter-btn" title="Slide sorter: all slides in a grid, to see the whole talk and reorder it" aria-label="Slide sorter" data-dl-sorter onClick={() => setSorter(true)}>⊞</button>}
                 <button class="dl-btn dl-rail-hide" title="Hide the slides (more room for the slide)" aria-label="Hide the slides" data-dl-rail-hide onClick={() => setRailShown(false)}>«</button>
               </div>
               {link && synced && <iframe ref={railFrame} class="dl-railframe" title="Slides" sandbox={offlineDocs.thumb ? undefined : 'allow-scripts'} src={offlineDocs.thumb ? offlineSrc('thumb') : src('thumb')}
-                style={{ top: `${RAIL_HEAD}px`, width: `${frameW + RAIL_NUM / railScale}px`, height: `${railH / railScale}px`, transform: `scale(${railScale})` }} />}
+                style={{ top: `${sorterOn ? SORTER_HEAD : RAIL_HEAD}px`, width: `${sorterOn ? Math.max(frameW + RAIL_NUM / railScale, (railBoxW - 24) / railScale) : frameW + RAIL_NUM / railScale}px`, height: `${(railH + RAIL_HEAD - (sorterOn ? SORTER_HEAD : RAIL_HEAD)) / railScale}px`, transform: `scale(${railScale})` }} />}
               <div class="dl-rail-grip" role="separator" aria-orientation="vertical" aria-label="Slide rail width" title="Drag to make the slides wider or narrower (double-click: back to the usual width)"
                 data-dl-railgrip onPointerDown={onRailGrip} onDblClick={() => setRail(RAIL_W)} />
               <div class="dl-rail-actions">
@@ -4324,6 +4362,10 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
           </div>
         )}
         <div class="dl-main">
+          {find && kind !== 'page' && <SlideFind source={() => text.toString()} onChange={cb => host.onChange(cb)} current={current} readOnly={locked}
+            go={m => { if (m.slide !== currentRef.current) gotoSlide(m.slide); if (m.notes && kind === 'deck' && !notesShown) setNotesShown(true); }}
+            mark={f => toCanvas({ ol: 'findMarks', find: f })} apply={ops => applyOps(ops)} replace={find.replace} focusTick={find.tick} notify={notify}
+            close={() => { setFind(null); canvasFrame.current?.focus(); }} />}
           {themeOn && !fullOn && (
             <div class="dl-theme-bar" role="status" data-dl-theme-bar>
               <span class="dl-theme-badge">Theme</span>

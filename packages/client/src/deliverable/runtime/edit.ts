@@ -3700,6 +3700,8 @@ function onKeyDown(e: KeyboardEvent): void {
     if (mod && /^[bi]$/i.test(e.key)) { e.preventDefault(); exec(e.key.toLowerCase() === 'b' ? 'bold' : 'italic'); return; }
     if (mod && e.key.toLowerCase() === 'u') { e.preventDefault(); exec('underline'); return; }
     if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); commitText(); fwd(e); return; }
+    // find and replace on the slides: the editor's bar (not the browser's find)
+    if (mod && !e.altKey && /^[fh]$/i.test(e.key)) { e.preventDefault(); commitText(); fwd(e); return; }
     // Tab in a list item nests it (Shift+Tab lifts it back), as in PowerPoint; elsewhere it stays in the
     // text — the browser moved the focus out of the frame, and the next words went into the speaker notes
     if (e.key === 'Tab' && !mod && !e.altKey) {

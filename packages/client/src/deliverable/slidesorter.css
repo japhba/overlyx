@@ -1,0 +1,17 @@
+/* The slide sorter (slidesorter.tsx): the slide list over the whole editor body, its slides in a grid */
+.dl-body:has(> .dl-rail.dl-sorter) { position: relative; }
+.dl-rail.dl-sorter { position: absolute; inset: 0; width: auto !important; z-index: 30; border-right: 0; }
+.dl-rail.dl-sorter .dl-rail-grip, .dl-rail.dl-sorter .dl-rail-head > .dl-rail-count, .dl-rail.dl-sorter .dl-rail-hide { display: none; }
+.dl-rail.dl-sorter .dl-railframe { left: 16px; }
+.dl-sorter-bar { display: flex; align-items: center; gap: 14px; flex: 1; min-width: 0; font-size: 12.5px; color: var(--ui-fg, inherit); }
+.dl-sorter-title { font-weight: 600; white-space: nowrap; }
+.dl-sorter-count { color: var(--ui-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dl-sorter-size { position: relative; margin-left: auto; width: 180px; padding-bottom: 12px; flex: none; }
+.dl-sorter-size input { width: 100%; margin: 0; }
+.dl-sorter-rungs { position: absolute; left: 7px; right: 7px; bottom: -2px; height: 12px; }
+.dl-sorter-rungs button { position: absolute; transform: translateX(-50%); border: 0; background: none; padding: 0; font: inherit; font-size: 10px; line-height: 12px; color: var(--ui-muted); cursor: pointer; }
+.dl-sorter-rungs button.on { color: var(--accent); font-weight: 600; }
+.dl-sorter-done { flex: none; }
+.dl-rail-sorter-btn { flex: none; min-width: 24px; height: 22px; padding: 0 4px; color: var(--ui-muted); margin-left: auto; }
+.dl-rail.dl-sorter .dl-rail-head { height: 40px; padding: 0 12px 0 16px; }
+@media (max-width: 560px) { .dl-sorter-size { width: 120px; } .dl-sorter-count { display: none; } }
