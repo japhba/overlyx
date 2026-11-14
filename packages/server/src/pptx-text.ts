@@ -80,6 +80,9 @@ export const PPTX_TEXT_SCRIPT = String.raw`(() => {
         if (!cur.runs.length || cur.runs[cur.runs.length - 1].br) t = t.replace(/^ +/, '');
         if (!t) return;
         var s = getComputedStyle(node.parentElement);
+        // (the case as shown: a kicker in capitals is typed in lower case)
+        if (s.textTransform === 'uppercase') t = t.toUpperCase();
+        else if (s.textTransform === 'lowercase') t = t.toLowerCase();
         var color = hex(s.color);
         if (!color && s.color !== 'transparent') color = undefined;
         var deco = s.textDecorationLine || '';
