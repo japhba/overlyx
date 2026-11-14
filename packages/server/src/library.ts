@@ -24,6 +24,7 @@
  *   GET    /api/library/lookup?q=        candidates for the add box { hits, warnings }
  *   POST   /api/library { hit | text }   add → { added, duplicates, failed }
  *   POST   /api/library/zotero           import the connected Zotero library → the same
+ *   POST   /api/library/from-document { doc, key }  a document's cited entry → the same
  *   POST   /api/library/pdf  (a PDF)     a reference from a dropped PDF → { ref, duplicate, found }
  *   GET    /api/library/export.bib       the whole library as one .bib file
  *   GET    /api/library/:id              one reference with its abstract and BibTeX
@@ -41,6 +42,12 @@ import { config } from './config.ts';
 import { searchLiterature, bibtexFor, hitFromDoi, scholarKey, rewriteEntry, normTitle, type Hit } from './bibsearch.ts';
 import { identify, resolveLink } from './citelinks.ts';
 import { slimBibtex, zoteroLibraryItems, zoteroStatus } from './zotero.ts';
+import { projectOfDoc, docPathOf } from '@overlyx/core';
+import { roleFor, atLeast } from './access.ts';
+import type { SessionUser } from './auth.ts';
+import { canonicalDocId } from './namespaces.ts';
+import { projectDir } from './projectfiles.ts';
+import { isE2eProject } from './e2e/store.ts';
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS library_refs (
@@ -399,6 +406,52 @@ export function bibtexForProject(uid: number, id: number): { bibtex: string; key
   return r ? { bibtex: slimBibtex(r.bibtex), key: r.key } : null;
 }
 
+/**
+ * A document's cited entry into the citer's library ("Add to my library" on a citation's card): the
+ * entry for `key` in the .bib files beside the document, else elsewhere in the project — only a key
+ * one of the project's documents cites (a .bib file's other entries stay where they are). Needs read
+ * access to the whole project, and not an end-to-end encrypted one (the server cannot read those).
+ */
+export function entryOfDocument(user: SessionUser, docId: string, key: string): string {
+  if (!/^[\w:.+/-]{1,120}$/.test(key)) throw new Error('Which entry?');
+  const id = canonicalDocId(docId);
+  const project = projectOfDoc(id);
+  if (!atLeast(roleFor(user, project), 'view')) throw Object.assign(new Error('No access to that document'), { status: 403 });
+  if (isE2eProject(project)) throw Object.assign(new Error('This project is end-to-end encrypted: copy the entry from its .bib file instead'), { status: 403 });
+  const root = projectDir(project);
+  const docDir = path.resolve(root, path.posix.dirname(docPathOf(id)));
+  if (docDir !== root && !docDir.startsWith(root + path.sep)) throw new Error('bad document');
+  const bibs: string[] = [], docs: string[] = [];
+  const walk = (dir: string, depth: number) => {
+    if (depth > 3 || bibs.length + docs.length > 400) return;
+    for (const d of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (d.name.startsWith('.') || d.name === '_build' || d.name === 'node_modules') continue;
+      const p = path.join(dir, d.name);
+      if (d.isDirectory()) walk(p, depth + 1);
+      else if (d.isFile() && d.name.endsWith('.bib')) bibs.push(p);
+      else if (d.isFile() && /\.(tex|lyx|md|html)$/i.test(d.name)) docs.push(p);
+    }
+  };
+  walk(root, 0);
+  const esc = key.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+  // cited: the key as a word of a document (\cite{a,key}, LyX's key "a,key", a deck's citation)
+  const word = new RegExp(`(^|[^\\w:.+/-])${esc}(?=$|[^\\w:.+/-])`);
+  const cited = (f: string) => fs.statSync(f).size < 8 * 1024 * 1024 && word.test(fs.readFileSync(f, 'utf8'));
+  if (!docs.some(cited)) throw Object.assign(new Error(`No document of the project cites ${key}`), { status: 404 });
+  // the files beside the document first
+  bibs.sort((a, b) => Number(path.dirname(b) === docDir) - Number(path.dirname(a) === docDir));
+  const head = new RegExp(`@\\w+\\s*[{(]\\s*${esc}\\s*,`);
+  for (const f of bibs) {
+    if (fs.statSync(f).size > 16 * 1024 * 1024) continue;
+    const text = fs.readFileSync(f, 'utf8');
+    const at = text.search(head);
+    if (at < 0) continue;
+    const one = splitEntries(text.slice(at, at + BIB_MAX))[0];
+    if (one) return one;
+  }
+  throw Object.assign(new Error(`The project has no entry ${key}`), { status: 404 });
+}
+
 /* ------------------------------------------------------------------ PDFs */
 
 function pdfBytes(uid: number): number {
@@ -578,6 +631,13 @@ export function libraryRoutes(): express.Router {
       if (/@[a-zA-Z]{2,24}\s*[{(]/.test(text)) { res.json(addBibtex(uid, text, req.body?.source === 'file' ? 'bib-file' : 'bibtex')); return; }
       if (!config.literature) throw new Error('Looking papers up is switched off on this server — paste BibTeX instead');
       res.json(await addIdentifiers(uid, text));
+    } catch (e) { fail(res, e); }
+  });
+  r.post('/library/from-document', (req, res) => {
+    try {
+      const key = String(req.body?.key ?? ''), doc = String(req.body?.doc ?? '');
+      if (!doc) throw new Error('Which document?');
+      res.json(addBibtex(req.user!.id, entryOfDocument(req.user!, doc, key), 'project'));
     } catch (e) { fail(res, e); }
   });
   r.post('/library/zotero', async (req, res) => {

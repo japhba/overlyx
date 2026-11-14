@@ -68,6 +68,7 @@ import { CornerButton } from './CornerButton';
 import { ActivityBar, ActivityButton, useDeckBars } from './ActivityBar';
 import { LibraryView, LibraryPage } from '../library/LibraryView';
 import { openLibrary, useLibraryPageOpen } from '../library/store';
+import { installCiteHover } from '../library/citehover';
 import { SyncChip, useExternalSync } from './SyncChip';
 import { TandemChip } from './TandemChip';
 import { bindTandemText, tandemProject, tandemShow } from './tandem';
@@ -473,6 +474,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   const [showLibrary, setShowLibrary] = useState(false);
   const libraryShown = showLibrary && !filesShown && !deckBars?.rail && !user.guest;
   const libraryPage = useLibraryPageOpen();
+  useEffect(() => (user.guest ? undefined : installCiteHover()), [user.guest]);
   const toggleLibrary = () => { if (libraryShown) { setShowLibrary(false); return; } if (deckBars?.rail) deckBars.showRail(false); setShowFiles(false); setShowLibrary(true); };
   const toggleFiles = () => {
     if (!filesShown && deckBars?.rail) { deckBars.showRail(false); setShowFiles(true); }

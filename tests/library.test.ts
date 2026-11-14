@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import zlib from 'node:zlib';
-import { rmSync } from 'node:fs';
+import { rmSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 // server code reads config.ts at import: a data directory of the test's own, never the real one
 const ROOT = vi.hoisted(() => {
@@ -11,7 +12,11 @@ const ROOT = vi.hoisted(() => {
   return r;
 });
 rmSync(ROOT, { recursive: true, force: true });
-const { addBibtex, editRef, bibtexForProject, setBibField, splitEntries, personName, pdfIdentifiers, attachPdf, deleteRef, forgetLibrary, getRef } = await import('../packages/server/src/library.ts');
+const { addBibtex, editRef, bibtexForProject, setBibField, splitEntries, personName, pdfIdentifiers, attachPdf, deleteRef, forgetLibrary, getRef, entryOfDocument } = await import('../packages/server/src/library.ts');
+const access = await import('../packages/server/src/access.ts');
+const { createUser, toSessionUser } = await import('../packages/server/src/auth.ts');
+const { markE2e } = await import('../packages/server/src/e2e/store.ts');
+const { addToCitedBib } = await import('../packages/server/src/bibsearch.ts');
 
 const VASWANI = `@inproceedings{whatever,
   title = {Attention Is All You Need},
@@ -92,5 +97,53 @@ describe('My library', () => {
     addBibtex(6, VASWANI);
     forgetLibrary(6);
     expect(addBibtex(6, VASWANI).added).toHaveLength(1);
+  });
+});
+
+describe('My library and projects', () => {
+  const ann = toSessionUser(createUser('ann', 'Ann', 'pw'));
+  const ben = toSessionUser(createUser('ben', 'Ben', 'pw'));
+  const cat = toSessionUser(createUser('cat', 'Cat', 'pw'));
+  const dir = join(ROOT, 'projects', 'ann', 'paper'), secret = join(ROOT, 'projects', 'ann', 'secret');
+  mkdirSync(join(dir, 'sub'), { recursive: true });
+  mkdirSync(secret, { recursive: true });
+  writeFileSync(join(dir, 'sub', 'main.tex'), 'As shown \\citep{knuth1984literate}.\n\\bibliography{refs}\n');
+  const bib = '@article{knuth1984literate, title = {Literate Programming}, author = {Knuth, Donald}, year = {1984}, journal = {The Computer Journal}}\n@book{hidden2020draft, title = {Not cited anywhere}, author = {Doe, Jane}, year = {2020}}\n';
+  writeFileSync(join(dir, 'sub', 'refs.bib'), bib);
+  writeFileSync(join(secret, 'main.tex'), '\\cite{knuth1984literate}');
+  writeFileSync(join(secret, 'refs.bib'), bib);
+  access.adoptProjects();
+  access.addMember('ann/paper', 'ben', 'view', ann);
+  markE2e('ann/secret');
+
+  it('takes a cited entry of a project the user can read into their library', () => {
+    const e = entryOfDocument(ben, 'ann/paper/sub/main.tex', 'knuth1984literate');
+    expect(e).toMatch(/^@article\{knuth1984literate,/);
+    expect(e).not.toContain('hidden2020draft');
+    const r = addBibtex(ben.id, e, 'project');
+    expect(r.added[0].title).toBe('Literate Programming');
+  });
+
+  it('gives only what the project\u2019s documents cite', () => {
+    expect(() => entryOfDocument(ben, 'ann/paper/sub/main.tex', 'hidden2020draft')).toThrow(/No document of the project cites/);
+    expect(() => entryOfDocument(ben, 'ann/paper/sub/main.tex', 'x}, evil = {')).toThrow(/Which entry/);
+  });
+
+  it('refuses people without access to the project, and end-to-end encrypted projects', () => {
+    expect(() => entryOfDocument(cat, 'ann/paper/sub/main.tex', 'knuth1984literate')).toThrow(/No access/);
+    expect(() => entryOfDocument(ann, 'ann/secret/main.tex', 'knuth1984literate')).toThrow(/end-to-end encrypted/);
+  });
+
+  it('a project gets a library entry under its library key, without note, tags or abstract', () => {
+    const got = addBibtex(ann.id, VASWANI), ref = got.added[0] ?? got.duplicates[0];
+    editRef(ann.id, ref.id, { note: 'my private thoughts', tags: ['secret-tag'] });
+    const out = bibtexForProject(ann.id, ref.id)!;
+    const r = addToCitedBib(dir, out.bibtex, { docDir: 'sub', key: out.key });
+    expect(r.key).toBe('vaswani2017attention');
+    const written = readFileSync(join(dir, 'sub', 'cited.bib'), 'utf8');
+    expect(written).toContain('@inproceedings{vaswani2017attention,');
+    expect(written).not.toMatch(/private thoughts|secret-tag|abstract/);
+    // someone else's library entry is not theirs to give
+    expect(bibtexForProject(ben.id, ref.id)).toBeNull();
   });
 });

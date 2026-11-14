@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useId, useMemo, useRef, useState } from 'preact/hooks';
+import { LibraryCiteRows, AddHitToLibrary } from '../library/CiteLibrary';
 import { formatShortcut } from './shortcuts';
 import type { ComponentChildren } from 'preact';
 import type { DocMeta, ProjectFile, BibItem } from '../api';
@@ -263,7 +264,8 @@ export function CiteDialog({ meta, docId, project, initial, onInsert, onAdded, o
   const [cmd, setCmd] = useState(initial?.cmd ?? (meta?.citeEngine === 'natbib' ? 'citep' : meta?.citeEngine === 'biblatex' ? 'parencite' : 'cite'));
   const [before, setBefore] = useState(initial?.before ?? ''), [after, setAfter] = useState(initial?.after ?? '');
   const [added, setAdded] = useState<BibItem[]>([]);
-  const local = useMemo(() => [...added, ...(meta?.bib ?? [])], [meta, added]);
+  // (an entry just added is in the metadata too once it is reread: listed once)
+  const local = useMemo(() => { const seen = new Set<string>(); return [...added, ...(meta?.bib ?? [])].filter(e => !seen.has(e.key) && !!seen.add(e.key)); }, [meta, added]);
   const total = (meta?.bibTotal ?? (meta?.bib ?? []).length) + added.length;
   const remote = !!search || total > local.length;    // large bibliography: search on the server
   const [hits, setHits] = useState<BibItem[]>([]);
@@ -344,11 +346,13 @@ export function CiteDialog({ meta, docId, project, initial, onInsert, onAdded, o
         <>
           <Row label="Search"><input type="text" autofocus value={q} onInput={e => setQ((e.target as HTMLInputElement).value)} placeholder="author, year, title, key" /><span class="sub" style="color:#888;font-size:11px;white-space:nowrap">{searching ? 'searching…' : search ? `${list.length} found` : `${total} entries`}</span></Row>
           <div class="list" style="max-height:320px">
+            {project && <LibraryCiteRows q={q} project={project} docId={docId} have={[...known.values()]} onTook={took} onError={m => setStatus('Could not add: ' + m)} />}
             {keys.filter(k => !list.some(e => e.key === k)).map(k => <div key={'sel-' + k} class="sel" onClick={() => toggle(k)}><b>{known.get(k)?.author || k}</b> <span class="sub">[{k}] (selected)</span></div>)}
             {list.map(e => <div key={e.key} class={keys.includes(e.key) ? 'sel' : ''} onClick={() => toggle(e.key)}><b>{e.author || e.key}</b> {e.year} <span class="sub">— {e.title}</span> <span class="sub">[{e.key}]</span></div>)}
             {(search ? !searching && !list.length : !total) && <div class="sub">{search && q ? 'Nothing found in the project\u2019s .bib files' : 'No bibliography entries yet'} — find the paper online (tab above) or add a .bib file to the project.</div>}
             {remote && !search && !q && total > local.length && <div class="sub" style="padding:4px 6px;color:#888">Type to search all {total} entries; the cited ones are listed first.</div>}
           </div>
+          {status && <div class="sub">{status}</div>}
         </>
       ) : (
         <>
@@ -360,7 +364,7 @@ export function CiteDialog({ meta, docId, project, initial, onInsert, onAdded, o
                   <b>{h.title}</b>
                   <div class="sub">{h.note && <span class={'lit-tag' + (h.sources.includes('zotero') ? ' zotero' : '')}>{h.note}</span>}{authorsOf(h)}{h.year ? ` · ${h.year}` : ''}{h.venue ? ` · ${h.venue}` : ''}{h.citations != null ? ` · cited by ${h.citations}` : ''}{h.arxiv ? ` · arXiv:${h.arxiv}` : ''}</div>
                 </div>
-                <button class="small-btn" disabled={busyId === h.id || addedIds.has(h.id)} onClick={ev => { ev.stopPropagation(); void cite(h); }}>{addedIds.has(h.id) ? `✓ ${addedIds.get(h.id)}` : busyId === h.id ? 'Adding…' : 'Cite'}</button>
+                <AddHitToLibrary hit={h} /><button class="small-btn" disabled={busyId === h.id || addedIds.has(h.id)} onClick={ev => { ev.stopPropagation(); void cite(h); }}>{addedIds.has(h.id) ? `✓ ${addedIds.get(h.id)}` : busyId === h.id ? 'Adding…' : 'Cite'}</button>
               </div>
             ))}
             {oerror && <div class="sub" style="color:#b00;padding:4px 6px" data-cite-error>⚠ {oerror}</div>}

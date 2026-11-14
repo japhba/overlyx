@@ -328,7 +328,7 @@ export const api = {
   connectZotero: (key: string) => req<ZoteroStatus>('POST', '/api/zotero', { key }),
   disconnectZotero: () => req<ZoteroStatus>('DELETE', '/api/zotero'),
   /** `doc`: the document it is for — the entry goes into the cited.bib beside it */
-  bibAdd: (project: string, data: { hit?: LitHit; bibtex?: string; doc?: string }) => req<BibAddResult>('POST', `/api/projects/${encodeURIComponent(project)}/bib/add`, data),
+  bibAdd: (project: string, data: { hit?: LitHit; bibtex?: string; doc?: string; /** a reference of My library (library/store.ts) */ library?: number }) => req<BibAddResult>('POST', `/api/projects/${encodeURIComponent(project)}/bib/add`, data),
   feedbackInfo: () => req<FeedbackInfo>('GET', '/api/feedback/info'),
   feedback: (data: { kind: 'bug' | 'idea' | 'question'; title: string; body: string; doc?: string | null; error?: string | null }) => req<{ id: number }>('POST', '/api/feedback', data),
   clientError: (data: { message: string; stack?: string | null }) => req<{ id: number | null }>('POST', '/api/client-error', data),

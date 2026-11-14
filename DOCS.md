@@ -3381,7 +3381,20 @@ blend.
   type covers title, authors, venue, year, key, tags, DOI and note; tags filter, four sorts.
   Privacy: every `/api/library` route answers about the signed-in account only, guests have none,
   and the library goes with the account (`accounts.ts`). Projects get only the entries their
-  documents cite, without abstract, notes, tags or file links. The VS Code extension has no
+  documents cite, without abstract, notes, tags or file links. **Citing from it**: the citation
+  dialog (`Ctrl+Shift+C`, the same in documents and on slides) lists the library's references that
+  match the search and that the project lacks first, marked *My library* (`library/CiteLibrary.tsx`);
+  choosing one adds its entry to the `cited.bib` beside the document through `/bib/add` with
+  `{ library: <id> }` — under its library key when the project has no entry by that key, the
+  project's key when it has the paper already — and selects it, so the document compiles anywhere.
+  *+ Library* beside a paper found online keeps it in the library too. A citation in a document
+  shows a card when the pointer rests on it (`library/citehover.ts`; the citation views carry
+  `data-cite-keys`): for each key the library has (same key, or the project entry's title) its
+  title, authors, venue, year and note with *Open PDF*, *Open link* and *Show in my library*; for a
+  cited paper it lacks, *Add to my library*, which copies the project's entry
+  (`POST /api/library/from-document`: only a key one of the project's documents cites, whole-project
+  read access, not in end-to-end encrypted projects). Not yet: the card on slides (their citations live in the slide's frame), collections
+  beyond tags. The VS Code extension has no
   library (its local bridge does not serve `/api/library`), so it shows neither the pane nor the
   library rows.
 * **Find & replace** (`Ctrl+F`): find next/previous, replace, replace all, case-sensitive and

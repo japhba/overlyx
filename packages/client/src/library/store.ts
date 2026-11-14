@@ -39,6 +39,7 @@ export const libraryApi = {
   addHit: (hit: LitHit) => call<AddOutcome>('POST', '/api/library', { hit }),
   addText: (text: string, source?: 'file') => call<AddOutcome>('POST', '/api/library', { text, source }),
   importZotero: () => call<AddOutcome>('POST', '/api/library/zotero', {}),
+  fromDocument: (doc: string, key: string) => call<AddOutcome>('POST', '/api/library/from-document', { doc, key }),
   addPdf: (file: File) => call<{ ref: LibRef; duplicate: boolean; found: string | null }>('POST', '/api/library/pdf', undefined, file, { 'x-file-name': encodeURIComponent(file.name) }),
   edit: (id: number, patch: Record<string, unknown>) => call<LibRef>('PATCH', `/api/library/${id}`, patch),
   remove: (id: number) => call<{ ok: boolean }>('DELETE', `/api/library/${id}`),

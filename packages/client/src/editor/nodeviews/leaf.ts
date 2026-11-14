@@ -317,6 +317,8 @@ export class CommandView implements NodeView {
         if (latexCmd === 'nocite') text = 'nocite: ' + keys.join(', ');
         title = `Citation (${latexCmd}): ${keys.join(', ')}`;
         this.dom.classList.add('lyx-cite');
+        // (My library's hover card finds the papers by these: library/citehover.ts)
+        this.dom.dataset.citeKeys = keys.join(',');
         break;
       }
       case 'href': {
