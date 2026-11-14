@@ -15,6 +15,8 @@ export interface Status { connected: boolean; synced: boolean; users: PresenceUs
 /** Google-Docs-style save indicator: everything is saved automatically; this tells where the edits are. */
 export function SaveIndicator({ save }: { save: SaveState }) {
   const when = save.savedAt ? new Date(save.savedAt).toLocaleTimeString() : '';
+  // the server could not write the file (it keeps trying): the edits are kept on the server meanwhile
+  if (save.saveError && (save.state === 'saved' || save.state === 'saving')) return <span class="save-state offline" title={`The server could not write your edits to the file: ${save.saveError}. It keeps trying; your edits are kept on the server meanwhile.${when ? ` Last written at ${when}.` : ''}`}>⚠ Could not save</span>;
   switch (save.state) {
     case 'saved': return <span class="save-state saved" title={when ? `The .tex file on the server was last written at ${when}` : 'Everything is saved on the server'}>✓ All changes saved</span>;
     case 'saving': return <span class="save-state saving" title="Your edits are being written to the .tex file on the server">Saving…</span>;

@@ -207,7 +207,9 @@ function latexFormula(ctx: ExportContext, os: TexStream, rp: RunParams, f: Formu
       // user macros are fragile: LyX protects them in moving arguments
       latex = latex.replace(/(\\protect)?\\([A-Za-z]+)/g, (m0, prot: string | undefined, name: string) => (!prot && ctx.macroNames.has(name) ? '\\protect' + m0 : m0));
     }
-    os.write(latex);
+    // an empty formula (just opened in the editor) as ${}$: `$$` opens display math in TeX and in the
+    // parser, which then swallows the text up to the next one (the parser reads ${}$ back as empty)
+    os.write(latex === '$$' ? '${}$' : latex);
     return;
   }
   // display math: starts on its own line

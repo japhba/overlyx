@@ -348,11 +348,13 @@ export class OpenDoc implements DocState, EditableDoc {
     const fileTextBefore = this.fileText;
     // three-way: only what changed on disk (relative to what we last read / wrote) is taken over;
     // edits made here meanwhile in other paragraphs are kept (they are saved right after)
-    const { dirty } = mergeFileText(this, t, openDocs, doc => {
+    const { dirty, kept } = mergeFileText(this, t, openDocs, doc => {
       this.fileHash = hash;
       knownHashes.set(this.absPath, hash);
       this.loadFromLyx(doc, 'file-load');
     });
+    // the change on disk replaced paragraphs edited here: what they were is kept as a version
+    if (kept !== undefined) this.snapshot('before a change on disk', kept);
     if (fileTextBefore !== null && dirty) this.dirty = true;   // ours differs from the disk: write it
     this.persistState();
     return true;
@@ -384,8 +386,9 @@ export class OpenDoc implements DocState, EditableDoc {
     console.log(`[docs] external change detected: ${this.id} — merging`);
     const hash = sha1(t);
     const seq = this.updateSeq, base = this.fileText;
-    const r = await inWorker(this, 'absorb', { text: t, fileText: base, isChild: this.isChild }) as { dirty: boolean; rendered?: Rendered; update: Uint8Array | null; knew?: Uint8Array; isChild: boolean };
+    const r = await inWorker(this, 'absorb', { text: t, fileText: base, isChild: this.isChild }) as { dirty: boolean; rendered?: Rendered; kept?: string; update: Uint8Array | null; knew?: Uint8Array; isChild: boolean };
     if (this.disposed) return false;
+    if (r.kept !== undefined) this.snapshot('before a change on disk', r.kept);
     this.isChild = r.isChild;
     this.fileHash = hash;
     this.fileText = t;
@@ -519,8 +522,11 @@ export class OpenDoc implements DocState, EditableDoc {
 
   private saveFailed(e: unknown): void {
     console.error('save failed', this.absPath, e);
+    const first = !this.saveError;
     this.saveError = String(e);
     if (this.disposed) return;
+    // the editors are told (the saved message carries the error: the status bar says "Could not save")
+    if (first) for (const l of this.savedListeners) { try { l(); } catch { /* ignore */ } }
     if (this.retryTimer) clearTimeout(this.retryTimer);
     this.retryTimer = setTimeout(() => { this.retryTimer = null; void this.saveToFile(); }, 15000);
   }
@@ -1032,40 +1038,43 @@ export class DocManager {
     if (row && article && !storedAsDocument(row.state)) row = undefined;
     if (!row) return this.openFresh(doc, text);
     row = this.convertStored(id, row);
-    const ok = await this.loadStored(doc, text, row);
+    const { ok, merged } = await this.loadStored(doc, text, row);
     if (!ok) { doc.dispose(); doc.ydoc.destroy(); return this.openFresh(doc, text); }
     doc.markSaved();
     doc.lastSavedAt = fs.statSync(absPath).mtimeMs;
-    if (row.file_hash !== hash) await doc.persistStateAsync();
+    // a merge made here is stored: otherwise every later open makes it again as new operations, and
+    // an editor that synced an earlier round brings that copy back (text twice)
+    if (row.file_hash !== hash || merged) await doc.persistStateAsync();
     this.register(doc);
     return doc;
   }
 
   /**
    * The stored history (the persisted Yjs state) with the file loaded on top (docwork.ts
-   * loadOverStored); false when that does not give the file back.
+   * loadOverStored); not ok when that does not give the file back; `merged` when the file was merged
+   * into the stored state (loadOverStored's note), which then has to be stored again.
    */
-  private async loadStored(doc: OpenDoc, text: string, row: DbState): Promise<boolean> {
+  private async loadStored(doc: OpenDoc, text: string, row: DbState): Promise<{ ok: boolean; merged: boolean }> {
     const sameFile = row.file_hash === doc.fileHash;
     try {
       Y.applyUpdate(doc.ydoc, new Uint8Array(row.state), 'db');
       if (row.epoch) doc.epoch = row.epoch;
-    } catch { return false; }
+    } catch { return { ok: false, merged: false }; }
     if (!doc.usesWorker) {
       const r = loadOverStored(doc, text, sameFile, openDocs, d => doc.loadFromLyx(d, 'file-load'));
       if (r.note) console.log(`[docs] ${doc.id}: ${r.note}`);
-      return r.ok;
+      return { ok: r.ok, merged: !!r.note };
     }
     try {
       const r = await inWorker(doc, 'open', { text, state: new Uint8Array(row.state), sameFile }, true) as { ok: boolean; note?: string; update: Uint8Array | null; knew?: Uint8Array; isChild: boolean };
       if (r.note) console.log(`[docs] ${doc.id}: ${r.note}`);
-      if (!r.ok) return false;
+      if (!r.ok) return { ok: false, merged: false };
       doc.isChild = r.isChild;
       doc.applyMirrorUpdate(r.update, 'file-load', r.knew);
-      return true;
+      return { ok: true, merged: !!r.note };
     } catch (e) {
       console.error(`[docs] ${doc.id}: loading the stored state failed`, e);
-      return false;
+      return { ok: false, merged: false };
     }
   }
 
@@ -1254,6 +1263,9 @@ export class DocManager {
     if (!doc || doc.conns.size) return;
     if (doc.dirty || doc.saving) await doc.saveToFile();
     if (this.docs.get(id) !== doc || doc.conns.size) return;   // opened again meanwhile
+    // a document whose save keeps failing (a full disk, permissions) stays loaded and keeps retrying:
+    // its edits are not in the file, and a later open would load the file over them
+    if (doc.saveError) { doc.touchUnload(); return; }
     this.forgetDoc(doc);
   }
 

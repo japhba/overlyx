@@ -612,7 +612,8 @@ class BodyParser {
     const save = s.pos;
     const inner = s.readDollarMath();
     if (inner === null) { s.pos = save; this.pushERT(ctx, st, '$'); return; }
-    this.pushInset(ctx, st, { type: 'Formula', inline: true, latex: '$' + inner + '$' });
+    // ${}$ is how the writer writes an empty formula (latex/insets.ts latexFormula)
+    this.pushInset(ctx, st, { type: 'Formula', inline: true, latex: inner === '{}' ? '$$' : '$' + inner + '$' });
   }
 
   private handleComment(s: Scanner, ctx: TextCtx, st: State, t: Tok): void {

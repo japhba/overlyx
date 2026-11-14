@@ -285,6 +285,26 @@ blend.
   the last change. A client's first sync of a document over 100 kB is encoded by the worker too,
   and a big document opened from its file is applied in steps. A worker that dies is replaced and
   its mirrors rebuilt from the main thread; five deaths in a minute put the work back on the main thread.
+* **Edits are not lost to a failed save or a restart** (`server/src/docs.ts`). Every edit is stored
+  in the database (the Yjs state, `ydocs`) within a second and written to the file 1.5–10 s later.
+  When a document's stored state and the parse of its unchanged file differ at open (a parser change
+  between deploys), the file is merged into the state — and that merge is stored right away; it used
+  to be made again at every restart as new operations, and an editor that had synced an earlier
+  round brought that copy back (text twice). A document whose save keeps failing (a full disk,
+  permissions) is never unloaded: it stays in memory, retries every 15 s, and its editors' status
+  bar says *⚠ Could not save* with the reason in plain words (the saved message, type 3, carries it
+  after the snapshot; empty once a save succeeds again). A change on disk merged into the open
+  document (`mergeFileText`) wins where it and unsaved typing here touch the same or neighbouring
+  paragraphs; the document as it was here is then kept as a version *before a change on disk* (as
+  HTML pages already did), so the typing can be restored from the history. The merge itself is
+  unchanged: not growing a region on mere adjacency, and laying the typing over the disk's text as a
+  tracked change (the word-level combine of sync conflicts), are the owner's decision. An empty
+  inline formula is written as `${}$`, which the parser reads back as the empty formula (`$$` opened
+  display math in TeX and in the parser, joining paragraphs on reopen). Tests:
+  `docs-open-merge-stored`, `docs-failed-save`, `docs-disk-merge-version`, `tex-empty-formula`. Still open (Nov 2026 core review, finding 1): the stored state does not say
+  whether the file has it, so after a hard kill between the two the next open loads the file over
+  the unsaved edits; the remedy is a `saved` flag (or the hash of the text the state renders) next
+  to the state, and the service's `TimeoutStopSec` raised to about 60 s.
 * **Sharing** (Google-Docs model): a project is private to its owner until it is shared. The owner
   invites people by username or e-mail address as *viewers* or *editors* (an e-mail that has not
   signed in yet is kept as an invitation and bound to the account on its first Google sign-in), or
@@ -526,8 +546,12 @@ blend.
   paragraph the live text stays and the clone's is laid over it as a tracked change by the account
   (the document's tracking mode is not touched); other text by lines (`git merge-file`). What cannot
   be merged (overlapping lines, binary files, a file both created) keeps the server's version, and the
-  clone keeps its own beside it as `name (conflict, <computer> <date>).ext`, which then syncs like
-  any new file; an edit beats a removal on the other side. Nothing local is overwritten unless it is
+  clone keeps its own beside it as `name (conflict, <computer> <date>).ext`, which stays in the
+  clone (since 14 Nov 2026: a built-in ignore list, `syncIgnored` in the CLI and in server
+  `sync.ts`, keeps NFS's `.nfs…` files, editor swap / lock / backup files (`.x.swp`, `.#x`, `#x#`,
+  `x~`), `.DS_Store` and conflict copies out of projects — the clone does not send a new one, the
+  server refuses to add one; one synced before still syncs; test `sync-ignore`); an edit beats a
+  removal on the other side. Nothing local is overwritten unless it is
   still the version both sides agreed on, a file with unsaved changes in a VS Code editor waits
   until it is saved, viewers receive but never send, nothing is written through a symlinked
   directory of the clone or outside it, files over 20 MB stay out, `core.autocrlf` clones compare

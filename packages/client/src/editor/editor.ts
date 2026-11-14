@@ -105,6 +105,8 @@ export interface SaveState {
   localError?: string;
   /** time of the last write to the .lyx file (server clock, ms) */
   savedAt: number;
+  /** why the server's last save of the file failed, in plain words (it keeps trying; cleared by a save) */
+  saveError?: string;
   /** offline and nothing cached locally: the document cannot be shown */
   unavailable: boolean;
   /** why there is no connection (diagnostics for the tooltip) */
@@ -202,6 +204,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   let localWriteSeq = 0, localSavedSeq = 0;
   let localError: string | undefined;
   let savedAt = 0;
+  let saveError: string | undefined;
   let localSynced = false;      // IndexedDB copy loaded
   let localEmpty = true;
   let pendingFromStore = false; // the stored copy had unsaved edits when it was last used
@@ -229,7 +232,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
       if (lastConnInfo) detail += ` (${lastConnInfo})`;
       detail += ' — reconnecting automatically';
     }
-    return { state, pending, localPending: localWriteSeq > localSavedSeq, localError, savedAt, unavailable: state === 'offline' && localEmpty, detail };
+    return { state, pending, localPending: localWriteSeq > localSavedSeq, localError, savedAt, saveError, unavailable: state === 'offline' && localEmpty, detail };
   };
   let lastEmitted = '';
   const emitSaveState = () => {
@@ -283,6 +286,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
       // the server has all the offline edits (and merged them): their base is no longer needed
       if (offlineBase) { offlineBase = null; void persistence.del('offlineBase').catch(() => {}); }
     }
+    saveError = decoding.hasContent(dec) ? decoding.readVarString(dec) || undefined : undefined;
     emitSaveState();
   };
   // Message type 4 = server heartbeat (no payload): it only refreshes y-websocket's "last message

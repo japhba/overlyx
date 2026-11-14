@@ -52,14 +52,26 @@ const HEARTBEAT_MS = 10000;
  * server to merge (client editor/legacycopy.ts).
  */
 
-function savedMessage(doc: OpenDoc): Uint8Array {
+export function savedMessage(doc: OpenDoc): Uint8Array {
   const enc = encoding.createEncoder();
   encoding.writeVarUint(enc, MSG_SAVED);
   encoding.writeVarUint(enc, Math.round(doc.lastSavedAt));
   encoding.writeVarUint8Array(enc, doc.lastSavedSV);
   // A vector alone cannot acknowledge deletions: those do not advance the client's clock.
   encoding.writeVarUint8Array(enc, doc.lastSavedSnapshot);
+  // why the last save failed ('' = it did not): the status bar says "Could not save" (older editors
+  // stop reading before it)
+  encoding.writeVarString(enc, saveErrorInWords(doc.saveError));
   return encoding.toUint8Array(enc);
+}
+
+/** A save's error in plain words, without the server's paths. */
+export function saveErrorInWords(e: string | null): string {
+  if (!e) return '';
+  if (/ENOSPC|EDQUOT/.test(e)) return 'the server’s disk is full';
+  if (/EACCES|EPERM|EROFS/.test(e)) return 'the server may not write the file';
+  if (/refusing to write/.test(e)) return 'the text made from the document did not look like a document';
+  return 'the file could not be written';
 }
 
 function send(doc: OpenDoc, conn: WebSocket, msg: Uint8Array): void {

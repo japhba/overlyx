@@ -113,15 +113,26 @@ export function parseResultFor(s: DocState, text: string): ParseTexResult {
  * applies the result to the CRDT; `s.fileText` becomes `text`. Returns whether the document now
  * differs from the file (it has to be written), and the text it was compared as.
  */
-export function mergeFileText(s: DocState, text: string, open: OpenDocs, load: (doc: LyxDocument) => void): { dirty: boolean; rendered?: Rendered } {
+export function mergeFileText(s: DocState, text: string, open: OpenDocs, load: (doc: LyxDocument) => void): { dirty: boolean; rendered?: Rendered; kept?: string } {
   const parsed = parseFor(s, text);
   const base = s.fileText !== null ? parseFor(s, s.fileText) : null;
-  const merged = base ? mergeLyx(base, lyxDocumentOf(s.ydoc), parsed) : parsed;
+  const ours = lyxDocumentOf(s.ydoc);
+  const merged = base ? mergeLyx(base, ours, parsed) : parsed;
+  // where both sides changed the same or neighbouring paragraphs the disk wins: the text as it was
+  // here is handed back (`kept`), to be kept as a version ("before a change on disk")
+  const kept = base && droppedOurs(base, ours, merged) ? renderDoc(s, open).text : undefined;
   s.fileText = text;
   load(merged);
   if (!base) return { dirty: false };
   const rendered = renderDoc(s, open);
-  return { dirty: sha1(rendered.text) !== sha1(text), rendered };
+  return { dirty: sha1(rendered.text) !== sha1(text), rendered, kept };
+}
+
+/** whether a paragraph changed here (not in `base`) is missing from the merge's result */
+function droppedOurs(base: LyxDocument, ours: LyxDocument, merged: LyxDocument): boolean {
+  const key = (p: LyxDocument['body'][number]) => writeParagraphs([p]);
+  const inBase = new Set(base.body.map(key)), inMerged = new Set(merged.body.map(key));
+  return ours.body.some(p => { const k = key(p); return !inBase.has(k) && !inMerged.has(k); });
 }
 
 /**
