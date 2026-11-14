@@ -93,7 +93,7 @@ const rect = (x: number, y: number, w: number, h: number) => `<a:xfrm><a:off x="
 function theme(name: string): string {
   const c = (tag: string, hex: string) => `<a:${tag}><a:srgbClr val="${hex}"/></a:${tag}>`;
   const fill = '<a:solidFill><a:schemeClr val="phClr"/></a:solidFill>';
-  const font = '<a:latin typeface="Arial"/><a:ea typeface=""/><a:cs typeface=""/>';
+  const font = '<a:latin typeface="Liberation Sans"/><a:ea typeface=""/><a:cs typeface=""/>';
   return `${HEAD}<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="${name}"><a:themeElements>`
     + `<a:clrScheme name="${name}">${c('dk1', '000000')}${c('lt1', 'FFFFFF')}${c('dk2', '1D2433')}${c('lt2', 'EEF0F3')}${c('accent1', '2F6FDE')}${c('accent2', 'EB811B')}${c('accent3', '3A9A5B')}${c('accent4', '8E5BB5')}${c('accent5', 'C8423B')}${c('accent6', '2A9BA8')}${c('hlink', '2F6FDE')}${c('folHlink', '8E5BB5')}</a:clrScheme>`
     + `<a:fontScheme name="${name}"><a:majorFont>${font}</a:majorFont><a:minorFont>${font}</a:minorFont></a:fontScheme>`
@@ -125,7 +125,7 @@ function paraXml(p: PptxPara, k: number): string {
   if (p.lineHeight && p.lineHeight > 0) inner += `<a:lnSpc><a:spcPct val="${Math.round(Math.max(0.5, Math.min(5, p.lineHeight / 1.2)) * 100000)}"/></a:lnSpc>`;
   if (p.before) inner += `<a:spcBef><a:spcPts val="${Math.round(p.before * k * 100)}"/></a:spcBef>`;
   if (p.after) inner += `<a:spcAft><a:spcPts val="${Math.round(p.after * k * 100)}"/></a:spcAft>`;
-  if (p.bullet === 'char') inner += `<a:buFont typeface="Arial"/><a:buChar char="${xmlEsc(p.char || '•')}"/>`;
+  if (p.bullet === 'char') inner += `<a:buFont typeface="Liberation Sans"/><a:buChar char="${xmlEsc(p.char || '•')}"/>`;
   else if (p.bullet === 'num') inner += `<a:buAutoNum type="arabicPeriod"${p.start && p.start > 1 ? ` startAt="${Math.round(p.start)}"` : ''}/>`;
   else inner += '<a:buNone/>';
   const size = p.size ?? p.runs.find(r => r.size)?.size;

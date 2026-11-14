@@ -1556,7 +1556,7 @@ blend.
     XML, PresentationML — covered by Microsoft's Open Specification Promise), the minimal set
     (content types, presentation, one master with one blank layout, a notes master, two themes,
     slides, notes slides, media, docProps); nothing is copied from Office's templates or theme
-    parts (the theme is ours: black on white, six plain accents, Arial by name); fonts are
+    parts (the theme is ours: black on white, six plain accents, Liberation Sans by name — an open face with Arial's metrics, so lines break alike where PowerPoint substitutes it); fonts are
     referenced by name and never embedded; the zip is `zip.ts`. Every slide (a poster: its page)
     is a picture at 2× at the deck's slide size (9525 EMU a CSS pixel; above PowerPoint's 56 in a
     side scaled down) with its speaker notes on the notes page. *Editable text where possible*
