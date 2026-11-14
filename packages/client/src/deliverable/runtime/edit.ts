@@ -1177,6 +1177,7 @@ function item(el: Element): SelItem | null {
     list: listOf(el),
     ...(phRole(el) ? { ph: { role: phRole(el)!, empty: isEmptyPh(el) } } : {}),
     ...(masterKey(el) ? { master: masterKey(el)! } : {}),
+    ...(el.hasAttribute('data-ol-qr') ? { qr: el.getAttribute('data-ol-qr')! } : {}),
     ...(kind === 'group' ? { layout: groupLayoutOf(el, cs(el)) ?? { direction: 'free', gap: 24, align: 'center', equal: false } } : {}),
   };
 }
@@ -1356,6 +1357,7 @@ export function selectionLabel(els: Element[]): string {
 
 /** a word for what an element is (the Objects pane's), "Path", "Group", "Text" */
 export function kindWord(el: Element): string {
+  if (el.hasAttribute('data-ol-qr')) return 'QR code';
   const k = kindOf(el);
   if (k === 'svgpart') { const n = isLayer(el) ? 'layer' : SVG_PART_NAMES[el.localName] ?? el.localName; return n[0].toUpperCase() + n.slice(1); }
   if (k === 'line' && el.localName === 'svg' && !lineOf(el)) return 'Drawing';
@@ -2073,7 +2075,7 @@ function onDragMove(e: PointerEvent): void {
     resizeMany(drag, dx, dy, e.shiftKey);
   } else if (drag.kind === 'resize') {
     const d = drag.els[0];
-    resizeLive(d, drag.handle!, dx, dy, e.shiftKey || d.el.localName === 'img' || d.el.classList.contains('ol-crop') || !!d.members, e.ctrlKey || e.metaKey);
+    resizeLive(d, drag.handle!, dx, dy, e.shiftKey || d.el.localName === 'img' || d.el.classList.contains('ol-crop') || d.el.hasAttribute('data-ol-qr') || !!d.members, e.ctrlKey || e.metaKey);
   } else if (drag.kind === 'rotate' && drag.multi) {
     rotateMany(drag, e);
   } else if (drag.kind === 'rotate') {
@@ -3277,6 +3279,8 @@ function onDblClick(e: MouseEvent): void {
   // a picture that is an SVG drawing: the documents' drawing editor, over the deck
   const svg = pic ? svgSrc(pic) : null;
   if (svg) { selected = [pic!]; report(); draw(); post({ ol: 'editSvg', src: svg }); return; }
+  // a QR code: its link (qrcode.ts)
+  if (pic?.hasAttribute('data-ol-qr')) { const p = pathOf(pic); selected = [pic]; report(); draw(); if (p && !isLocked(pic)) post({ ol: 'editQr', path: p }); return; }
   if (pic && cropTarget(pic) && !isLocked(pic)) { selected = [pic]; report(); if (startCrop(pic, cropCtx())) post({ ol: 'cropping', path: pathOf(pic) }); draw(); return; }
   // a drawing's text: retyped where it is (Inkscape's text tool)
   const run = svgRunAt(t);

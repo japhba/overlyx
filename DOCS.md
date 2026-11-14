@@ -1628,6 +1628,25 @@ blend.
     the DevTools pipe and is answered like the editor's frame (`resolveDeliverable`) or, for a short
     list of public font / script CDNs, fetched by the server — nothing else is reachable. At most two
     pages at once; the browser closes when idle.
+  * **QR codes** (`deliverable/qrcode.ts`, the encoder core `qr.ts` — written here, no dependency:
+    UTF-8 bytes, error correction M, versions 1–40, the best of the eight masks): *Insert ▸ QR code…*
+    (the slide's right-click menu too) asks for a link or any text and puts its code in the middle of
+    the slide, poster or page as an inline SVG — vector, sharp at A0, drawn without OverLyX when the
+    page is presented, printed or exported:
+    `<svg data-ol-qr="https://example.org" role="img" aria-label="QR code: …" style="…; background: #ffffff" viewBox="0 0 33 33" shape-rendering="crispEdges"><path fill="#000000" d="…"/></svg>`.
+    `data-ol-qr` is the text the code holds; the path its dark modules (rows as runs), four light
+    modules of quiet zone inside the viewBox on the SVG's own white ground. It is an object like any
+    other — moved, turned, resized (always square, as a picture keeps its shape), *Fill* recolours the
+    dark modules; a colour a phone may not read (a contrast under 4 : 1 with its ground, a light code
+    on a dark ground, no fill) is said at once (`qrWarning`). A double click, the quick menu's *Edit
+    QR code…* or the right-click menu ask for another link: the code is drawn again where it is
+    (`qrEditOps`: the attribute, the viewBox and the path's `d` alone change — place, colour, name and
+    comments stay). The poster designs' **"QR code" placeholder** (a dashed outline with the words
+    over it, two objects) offers *QR code…* in the quick menu and the right-click menu when either is
+    selected: the code takes the outline's place and the words go, one undo step
+    (`qrPlaceholderAt`). Agents and people who write the HTML by hand cannot compute the path: they
+    leave the placeholder, or ask for the code in the editor. `tests/deck-qr.test.ts` reads codes back
+    with a reader of its own and checks their Reed–Solomon syndromes.
   * **Usability survey, 14 Nov 2026** (the user: "survey usability … feature completeness of the
     layout editors, especially slides and posters … improve what you think could be better"; walked
     through as a new user on an isolated instance, with a code inventory beside it). **Fixed then**:

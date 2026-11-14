@@ -57,6 +57,7 @@ import { MathOverlay, type MathEditState, type MathOps } from './MathOverlay';
 import { AnimationPane, type Sequence } from './AnimationPane';
 import { ObjectsPane } from './ObjectsPane';
 import { CiteDialog, Dialog, uiPrompt, uiConfirm } from '../app/Dialogs';
+import { askQr, qrEditOps, qrHtml, qrPlaceholderAt, qrTextAt, qrWarning } from './qrcode';
 import type { DocMeta } from '../api';
 import { citedKeys, citeEntry, type CiteEntry } from '@overlyx/core/html/refs.ts';
 import type { MathJaxMacro } from '@overlyx/core/html/deckextras.ts';
@@ -65,7 +66,7 @@ import { activeMathField } from '../editor/lyxmath/field';
 import { mathReady } from '../editor/lyxmath/mathjax';
 import { setLayoutMathFont } from '../fonts/editorfont';
 import { useMathPanels } from '../app/toolbars';
-import { parseSource, opSplices, elementAt, elementChildren, attr, parseStyle, sourcePatch, walk, pathOf, applySplices as applyTextSplices, type SourcePatch } from '@overlyx/core/html/source.ts';
+import { parseSource, opSplices, elementAt, elementChildren, attr, parseStyle, sourcePatch, walk, pathOf, rebasePath, applySplices as applyTextSplices, type SourcePatch } from '@overlyx/core/html/source.ts';
 import { followUps, composeSplices, twinsOf, putOnEverySlide, otherCopies, slideNumberOps, lookAlikeOps, similarTexts, everySlideOps, masterObjects, MASTER_ATTR, SKIP_ATTR } from './deckmaster';
 import { deckTheme, themeSplices, type ThemeChange } from './decktheme';
 import { embeddedFontFamilies, fontPortabilityWarning, fontResource } from './deckfonts';
@@ -1415,6 +1416,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
         case 'colors': if (fromCanvas) setColors({ desk: m.desk, page: m.page }); break;
         case 'cropping': if (fromCanvas) setCropping(m.path); break;
         case 'editSvg': if (fromCanvas) { const rel = svgOf(m.src); if (rel) editSvgPicture(rel); } break;
+        case 'editQr': if (fromCanvas) void qrCode(m.path); break;
         case 'scroll': if (fromCanvas) { scrollRef.current = m.y; setScrollY(m.y); } break;
         case 'needSource':
           if (fromCanvas && canvasReady.current) { sentTo.current.canvas = -1; toCanvas(sourceMsg('canvas')); }
@@ -2335,7 +2337,49 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     step: n => exec('inlineStep', String(n)),
     clear: () => { if (editingText) exec('removeFormat'); else styleSel({ 'font-weight': null, 'font-style': null, 'text-decoration': null, color: null, 'font-family': null }); },
   };
-  const paint = (p: Paint) => toCanvas({ ol: 'paint', paint: p });
+  const paint = (p: Paint) => {
+    toCanvas({ ol: 'paint', paint: p });
+    // a QR code recoloured (qrcode.ts): said when a phone may no longer read it
+    const code = p.fill !== undefined ? selRef.current.find(s => s.qr !== undefined) : undefined;
+    const warn = code ? qrWarning(p.fill!, code.style.background) : null;
+    if (warn) notify(warn, 'error');
+  };
+  /**
+   * QR codes (qrcode.ts). Insert ▸ QR code asks for the link and puts its code in the middle of the
+   * slide; `at` an existing code: its link edited (the code drawn again where it is); `at` a design's
+   * "QR code" placeholder (the poster designs' dashed outline): the code takes its place.
+   */
+  const qrCode = async (at?: Path) => {
+    if (readOnlyRef.current) { notify('You can only view this page.', 'error'); return; }
+    const before = text.toString();
+    const now = at ? qrTextAt(before, at) : null;
+    const value = await askQr(now ?? undefined);
+    if (!value || readOnlyRef.current) return;
+    const cur = text.toString(), k = kindRef.current;
+    const path = at ? (cur === before ? at : rebasePath(before, cur, at)) : null;
+    if (now !== null) { const ops = path ? qrEditOps(cur, path, value) : null; if (ops) applyOps(ops); return; }
+    const ph = path ? qrPlaceholderAt(cur, path) : null;
+    if (ph) {
+      const html = qrHtml(value, ph.place);
+      const to = ph.replace.slice();
+      if (ph.remove.some(r => r.length === to.length && r[r.length - 1] < to[to.length - 1])) to[to.length - 1]--;
+      if (html && applyOps([{ t: 'outer', path: ph.replace, html }, ...(ph.remove.length ? [{ t: 'remove' as const, paths: ph.remove }] : [])])) pending.current = { select: [to] };
+      return;
+    }
+    const place = insertPlace(cur, k !== 'page' ? slides[currentRef.current]?.path ?? null : null, selRef.current[0]?.path ?? null, k);
+    if (!place) return;
+    const w = pageW, h = pageH || pageW * 9 / 16, side = Math.round(Math.min(w, h) * (k === 'poster' ? 0.12 : 0.3));
+    const html = qrHtml(value, k === 'page' ? 'width: 200px; height: 200px' : `position: absolute; left: ${Math.round((w - side) / 2)}px; top: ${Math.round((h - side) / 2)}px; width: ${side}px; height: ${side}px`);
+    if (html && applyOps([{ t: 'insert', parent: place.parent, index: place.index, html }])) pending.current = { select: [place.path] };
+  };
+  /** the selected object is a design's "QR code" placeholder (worked out once per selection: the text is parsed) */
+  const qrPh = useRef<{ key: string; is: boolean }>({ key: '', is: false });
+  const qrOffer = (one: SelItem | null): boolean => {
+    if (!one || one.qr !== undefined || !(/^\s*QR(\s+code)?\s*$/i.test(one.label) || (one.kind === 'shape' && /dashed/.test(one.style.border)))) return false;
+    const cur = text.toString(), key = `${one.path.join()}:${cur.length}`;
+    if (qrPh.current.key !== key) qrPh.current = { key, is: !!qrPlaceholderAt(cur, one.path) };
+    return qrPh.current.is;
+  };
   const arrangeSel = (how: ArrangeHow) => toCanvas({ ol: 'arrange', how });
 
   const removeSel = () => { const free = sourceSelection().filter(s => !s.locked); if (free.length) applyOps([{ t: 'remove', paths: free.map(s => s.path) }]); };
@@ -2571,6 +2615,8 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
         { label: 'Replace picture…', action: imageTools.replace },
         { label: 'Describe the picture (alt text)…', disabled: readOnlyRef.current, action: () => { void describePicture(); } },
       ] : []),
+      ...(one && one.qr !== undefined ? [{ label: 'Edit QR code…', shortcut: 'double-click', disabled: readOnlyRef.current, action: () => void qrCode(one.path) }] : []),
+      ...(one && qrOffer(one) ? [{ label: 'Put a QR code here…', disabled: readOnlyRef.current, action: () => void qrCode(one.path) }] : []),
       { label: 'Edit code', action: () => showCode() },
       // a layout's placeholder (decklayouts.ts): what goes in it, said while it is empty — or an ordinary object again
       ...(one && kind === 'deck' && one.kind !== 'ink' && one.slide >= 0 ? [{ label: 'Placeholder', sub: [
@@ -2764,6 +2810,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
       { label: 'Text box', action: () => insertObject('text') },
       { label: 'Picture…', action: () => { phPicture.current = null; fileInput.current?.click(); } },
       ...(pageProject() ? [{ label: 'Figure (draw its draft)…', disabled: ro, action: () => void insertDraftPicture(sp ?? null, menuPoint.current) }] : []),
+      { label: 'QR code…', disabled: ro, action: () => void qrCode() },
       { label: kind === 'page' ? 'Comment on the page' : 'Comment on the slide', disabled: ro, action: () => startDraft(sp ?? null, i) },
       ...slideLinkItems(i),
       ...(kind !== 'page' ? [
@@ -3106,6 +3153,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
         { label: 'Text box', shortcut: 'T', disabled: ro, action: () => insertObject('text') },
         { label: 'Picture…', disabled: ro, action: () => { phPicture.current = null; fileInput.current?.click(); } },
         ...(pageProject() ? [{ label: 'Figure (draw its draft)…', disabled: ro, action: () => void insertDraftPicture(null, null) }] : []),
+        { label: one?.qr !== undefined ? 'QR code — edit its link…' : 'QR code…', disabled: ro, action: () => void qrCode(one && (one.qr !== undefined || qrOffer(one)) ? one.path : undefined) },
         { label: 'Shape', disabled: ro, sub: SHAPES.map(s => ({ label: s.label, action: () => setTool(s.tool) })) },
         { label: 'Line', disabled: ro, sub: LINES.map(s => ({ label: s.label.replace(/:.*/, ''), action: () => setTool(s.tool) })) },
         { label: 'Drawing (pen)', shortcut: 'P', disabled: ro, action: () => { setDrawOpen(true); setDrawHeld(false); setToolState('pen'); } },
@@ -3738,7 +3786,11 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
   const comment: ToolButton = { id: 'dk-comment', title: 'Comment (Ctrl+Alt+M)', icon: 'dk-comment', action: () => toCanvas({ ol: 'newComment' }) };
   const quick = !locked && !dragging && !presenting && (tool === 'select' || tool === 'lasso') && sel.length && !nodeEd && !mathEdit && !cropping && !words?.choosing
     ? onWords ? quickGroups(bars.sections, [comment], true)
-    : quickGroups(bars.sections, [{ id: 'dk-dup', title: 'Duplicate (Ctrl+D)', icon: 'dk-duplicate', action: duplicateSel }, comment]) : [];
+    : quickGroups(bars.sections, [
+      // a QR code's link; a design's "QR code" placeholder offers the code (qrcode.ts)
+      ...(one1?.qr !== undefined && !readOnly ? [{ id: 'dk-qr', title: `Edit the QR code — it opens ${one1.qr.length > 60 ? one1.qr.slice(0, 57) + '…' : one1.qr}`, icon: 'Edit QR code…', action: () => void qrCode(one1.path) }] : []),
+      ...(!readOnly && qrOffer(one1) ? [{ id: 'dk-qr', title: 'Put a QR code here: the link people open when they scan it', icon: 'QR code…', action: () => void qrCode(one1!.path) }] : []),
+      { id: 'dk-dup', title: 'Duplicate (Ctrl+D)', icon: 'dk-duplicate', action: duplicateSel }, comment]) : [];
   const quickRect = onWords ? words!.rect : sel.length ? sel.map(s => s.rect).reduce((a, r) => {
     const x = Math.min(a.x, r.x), y = Math.min(a.y, r.y);
     return { x, y, w: Math.max(a.x + a.w, r.x + r.w) - x, h: Math.max(a.y + a.h, r.y + r.h) - y };

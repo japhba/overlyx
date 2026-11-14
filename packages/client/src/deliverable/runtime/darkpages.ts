@@ -2,7 +2,7 @@
  * The slides shown light on dark while they are edited — smart invert, the editor's dark theme
  * (app/darkpages.ts, `{ol:'dark'}`): each slide inverted with a 180° hue rotation, so colours keep
  * their hue, and what is a picture inverted back to its own colours: videos, canvases, embedded
- * frames, backgrounds with a picture, SVG images — and the <img> pictures that are photographs.
+ * frames, backgrounds with a picture, SVG images, QR codes — and the <img> pictures that are photographs.
  * With `figures` (prefs.invertFigures) an <img> is judged by its pixels as the editor's figures are
  * (editor/figureinvert.ts): a plot or diagram on a white or transparent ground is line art and stays
  * inverted with the slide (`data-ol-lineart`, the runtime's own attribute — never written to the
@@ -66,7 +66,8 @@ export function setDarkSlides(on: boolean, figures: boolean): void {
   if (on && !css) {
     css = document.createElement('style');
     css.setAttribute('data-ol-runtime', '');
-    const pictures = ':is(img, video, canvas, iframe, object, embed, image, [style*="background-image"], [style*="url("])';
+    // (a QR code too: dark squares on white, or phones cannot read it off the screen)
+    const pictures = ':is(img, video, canvas, iframe, object, embed, image, [style*="background-image"], [style*="url("], svg[data-ol-qr])';
     css.textContent = `html.ol-invert:not(.ol-invert-page) .slide { filter: ${F}; }
       html.ol-invert:not(.ol-invert-page) .slide ${pictures} { filter: ${F}; }
       html.ol-invert.ol-invert-figures:not(.ol-invert-page) .slide img[${LINEART}] { filter: none; }

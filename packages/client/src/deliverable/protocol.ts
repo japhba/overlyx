@@ -174,6 +174,8 @@ export interface SelItem {
   textBox?: 'fixed' | 'left' | 'center' | 'right';
   /** a text box or formula bigger than what it shows (the quick menu offers Fit) */
   loose?: boolean;
+  /** a QR code (qrcode.ts): the link or text it holds */
+  qr?: string;
 }
 
 /** `deleted`: deleted as a suggestion (shown faded until accepted; not presented); `skipped`: Skip slide (deckmaster.ts: not presented, not printed) */
@@ -450,6 +452,8 @@ export type FromRuntime =
   | { ol: 'cropping'; path: Path | null }
   /** a double click on a picture that is an SVG file: the editor opens it in the drawing editor (`src` as written) */
   | { ol: 'editSvg'; src: string }
+  /** a double click on a QR code (qrcode.ts): the editor asks for its link */
+  | { ol: 'editQr'; path: Path }
   /** presenting: the slide is zoomed in (or not any more) */
   | { ol: 'presentZoom'; zoomed: boolean }
   /** presenting: the bar's "Fingers draw" switched */
