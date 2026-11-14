@@ -161,6 +161,7 @@ export function startPresenting(): void {
     else if (e.data.ol === 'unzoom') kit?.resetZoom();
     else if (e.data.ol === 'presentFingers') kit?.setFingersDraw(e.data.on === true, false);
     else if (e.data.ol === 'presentLinked') kit?.setLinked(e.data.on !== false, false);
+    else if (e.data.ol === 'presentInkOnly') kit?.setInkOnly(e.data.on === true);
     else if (e.data.ol === 'presentPeers' && Array.isArray(e.data.peers)) kit?.setPeers(e.data.peers);
     else if (e.data.ol === 'presenter') { if (typeof e.data.notes === 'number') pv?.setNotes(e.data.notes); pv?.set(e.data.on === true); kit?.refresh(); }
   });

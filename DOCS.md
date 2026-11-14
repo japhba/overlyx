@@ -1575,6 +1575,47 @@ blend.
     start tag) was patched into that slide (core `html/source.ts`: a patch closing an element it did
     not open is no patch now, `closesOutside`). Probes: `scratch/forkc-presenter.mts`,
     `forkc-audience.mts`, `forkc-insert.mts`.
+  * **Tandem: two devices of one account as one** (14 Nov 2026, the owner: "when say iPad and laptop
+    are online within the same user and project, every device's input methods are reflected at the
+    other's and interface state is synced, but rendering happens independently. Presentation mode is
+    a special case; there the iPad only shows drawing tools and possibly presenter mode"). When a
+    second device of the account opens the same project, the status bar offers a chip, *Tandem with
+    iPad* (`app/TandemChip.tsx`); never on by itself — a click turns it on on that device, the other
+    then says *Join Mac in tandem* until it is clicked there too (*In tandem with …*; a click again
+    works separately; kept per browser and project, `ol.tandem:<project>`). **Interface state** that
+    follows, both ways: the file open (the address's id, without the source pane's `raw:` — the panes
+    stay each device's), the place in it — a deck's slide (the editor's index; not while presenting,
+    Linked does that), a document's place at the top of the window (the editor position there, so
+    each device scrolls by its own layout) —, the deck's tool in hand (`Tool`) and the pen's settings
+    (`deckink.ts`: which pen, its colour and width), and presenting. **Input reflected**: the
+    documents already sync through Yjs, and the other device's caret, selection and live strokes in
+    the same file come through the document's awareness as anyone's do (documents: carets and the
+    margin ink's live stroke; decks: `htmlCaret` / `htmlSel`, presenting ink and laser via
+    `presentshare.ts`; a deck's Draw stroke shows when finished). **Rendering** stays each
+    device's: its window, zoom, fit, bars and panes. **Who leads when both move**: whoever moved
+    last — the place, the tool and presenting each have a clock (a move takes the highest number
+    seen plus one and the screen's id; a screen follows the newer move of a screen in tandem, and
+    following is not a move: a change that carries out what was followed, one while a followed file
+    or slide settles (3 s / 0.7 s), or a scroll without a pointer, wheel, touch or key on this device
+    in the second before is not counted). Turning tandem on joins the devices already in it (goes
+    where they are); the first one on leads. **Presenting in tandem**: when one device presents,
+    the other presents the same deck from the same slide, Linked (`presentshare.ts`), as a second
+    screen (`ol.presentHere`): a touch screen with only the drawing tools — the presenting bar
+    pinned, bigger, pen, highlighter, eraser, laser, colours, the presenter view (notes, next slide,
+    timer) one tap away, End (`presentInkOnly` → `PresentKit.setInkOnly`) — so what is drawn there
+    appears on the presented slide; anything else as a second screen decides (`presenterAtStart`:
+    the presenter view). Ending on the device that started ends it on both; ending on the one that
+    followed ends it there only. **Transport** (`packages/server/src/tandem.ts`): not the documents'
+    awareness, which is per file — `GET /api/projects/:project/tandem?c=<screen>&d=<device>&n=<name>`
+    (server-sent events: `peers`, `join`, `state`, `leave`) and `POST …/tandem {c, s}`; the room is
+    the signed-in user and the project, so a state reaches only that account's screens, never anyone
+    else (guests have none); in memory only, a state ≤ 4 KB, ≤ 8 screens, ≤ 25 states/s (the client
+    sends at most every 150 ms). A device is a random id kept in the browser (`ol.deviceId`) and a
+    name from its user agent (*iPad*, *iPhone*, *Android tablet*, *Mac*, *Windows PC*, *Linux PC*;
+    `deviceName`) — nothing private; two tabs of one browser are no tandem pair. Not in end-to-end
+    encrypted projects (the server would learn the file names; the server refuses them too) and not
+    in the VS Code extension (it keeps no project connection of this sort; it would need its own
+    host route). Other views (PDF, plain text files, boards) follow the file only, not the place in it.
   * **Menus, the slide master, slide numbers, skipped slides** (24 Oct 2026, the user: "improve our
     slide/layout editor … compared against typical presentation editing, slide master etc. … my main
     concern is that things are intuitive"). **Menus**: the editor hands the menu bar (and the Modern

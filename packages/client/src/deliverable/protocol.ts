@@ -334,6 +334,8 @@ export type ToRuntime =
   | { ol: 'presentFingers'; on: boolean }
   /** presenting: the bar's "Linked" as this browser keeps it */
   | { ol: 'presentLinked'; on: boolean }
+  /** presenting in tandem on a tablet (app/tandem.ts): only the drawing tools in the bar, always shown (presentkit.ts setInkOnly) */
+  | { ol: 'presentInkOnly'; on: boolean }
   /** presenting: the other screens presenting the document, their `present` awareness states as they came (app/presentshare.ts checks them) */
   | { ol: 'presentPeers'; peers: PresenterState[] }
   /** presenting: the presenter view (runtime/presenter.ts) on or off and its notes' size, as this browser keeps them */

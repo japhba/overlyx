@@ -36,6 +36,7 @@ import { CornerButton, PanelIcon } from '../app/CornerButton';
 import { keepAwake } from '../app/wakelock';
 import { presentFingersDraw, savePresentFingersDraw, presentLinked, savePresentLinked } from '../app/presentkit';
 import { checkedPresent, docStamp, presenterAtStart, staleness, type PresentState, type PresenterState } from '../app/presentshare';
+import { bindTandemDeck, tandemPresenting, tandemSlide, tandemTool } from '../app/tandem';
 import { createPortal } from 'preact/compat';
 import { isFromRuntime, RAIL_NUM, ASIDE_ATTR } from './protocol';
 import type { PlaceTo } from './runtime/place';
@@ -1169,6 +1170,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     if (backTo.current !== 'done') { if (current === 0) return; backTo.current = 'done'; }
     host.noteSlide?.(current);
   }, [current, kind, host]);
+  useEffect(() => { if (kind === 'deck') tandemSlide(current); }, [current, kind]);
   /** when a frame last asked for a menu (the slide rail's tap or hold, a right-click on the canvas) */
   const frameMenuAt = useRef(0);
   /**
@@ -1219,6 +1221,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
           toFrame(presentFrame.current, { ol: 'presentFingers', on: presentFingersDraw() });
           applyPresentMode(presentModeNow());
           toFrame(presentFrame.current, { ol: 'presentPeers', peers: presentPeers.current });
+          if (tandemInk.current) toFrame(presentFrame.current, { ol: 'presentInkOnly', on: true });
           sendPresentSource();
         }
         if (m.ol === 'needSource') { sentTo.current.present = -1; sendPresentSource(); }
@@ -3652,6 +3655,22 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
   useEffect(() => (presenting ? keepAwake() : undefined), [presenting]);
   // no reload for a newer build (app/update.ts) mid-talk, nor with edits not yet confirmed
   const presentingNow = useRef(presenting); presentingNow.current = presenting;
+  // Tandem with this account's other device (app/tandem.ts): the slide, the tool and presenting followed both ways;
+  // a tablet presenting in tandem shows only the drawing tools (`tandemInk`), the presenter view a tap away
+  const tandemInk = useRef(false);
+  const tandemFns = useRef({ start: startPresenting, stop: stopPresenting }); tandemFns.current = { start: startPresenting, stop: stopPresenting };
+  useEffect(() => { if (kind === 'deck') tandemTool(tool); }, [tool, kind]);
+  useEffect(() => { tandemPresenting(presenting); if (!presenting) tandemInk.current = false; }, [presenting]);
+  useEffect(() => (host.docId && kind === 'deck' ? bindTandemDeck({
+    doc: host.docId, current: () => currentRef.current, goto: i => gotoSlideRef.current(i), tool: () => toolRef.current, setTool: t => setTool(t as Tool),
+    presenting: () => presentingNow.current,
+    present: (on, inkOnly) => {
+      if (!on) { tandemFns.current.stop(); return; }
+      tandemInk.current = inkOnly;
+      try { if (inkOnly) sessionStorage.setItem(PRESENT_HERE_KEY, JSON.stringify({ on: false, linked: true })); } catch { /* private window */ }
+      void tandemFns.current.start(false, undefined, 'here');
+    },
+  }) : undefined), [host, kind]);
   useEffect(() => holdReload(() => { const s = host.saveState?.(); return presentingNow.current || (!!s && (s.pending || !!s.localPending || s.state !== 'saved')); }), [host]);
   // presented on other screens too (an iPad and a Mac): their states into the frame as they change; this one's withdrawn as it ends
   useEffect(() => {

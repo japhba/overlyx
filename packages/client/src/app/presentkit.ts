@@ -258,6 +258,9 @@ const UI_CSS = `:host { all: initial; }
   button.on { background: rgba(255, 255, 255, 0.24); }
   button[data-k="laser"].on { background: rgba(224, 40, 75, 0.32); }
   button[hidden], .colors[hidden] { display: none; }
+  .bar.inkonly { opacity: 1; pointer-events: auto; padding: 6px; border-radius: 28px; }
+  .bar.inkonly button { min-width: 44px; height: 44px; border-radius: 22px; }
+  .bar.inkonly :is([data-k="prev"], .pos, [data-k="next"], .sep, [data-k="zoom"], [data-k="link"]) { display: none; }
   .sep { width: 1px; height: 18px; margin: 0 4px; background: rgba(255, 255, 255, 0.22); }
   .colors { display: inline-flex; align-items: center; gap: 4px; padding: 0 4px; }
   button.sw { min-width: 0; width: 20px; height: 20px; padding: 0; border-radius: 50%; background: var(--c); box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.45); }
@@ -727,11 +730,19 @@ export class PresentKit {
 
   hideBar(): void {
     clearTimeout(this.idle);
-    if (this.pinned) return;
+    if (this.pinned || this.inkOnly) return;
     this.bar.classList.remove('show');
   }
 
   get barShown(): boolean { return this.bar.classList.contains('show'); }
+
+  /** a tablet presenting in tandem with another screen (app/tandem.ts): only the drawing tools, the presenter view and End, always shown */
+  private inkOnly = false;
+  setInkOnly(on: boolean): void {
+    this.inkOnly = on;
+    this.bar.classList.toggle('inkonly', on);
+    if (on) this.showBar(); else this.hideBar();
+  }
 
   private toggleBar(): void { if (this.barShown) this.hideBar(); else this.showBar(TAP_IDLE_MS); }
 

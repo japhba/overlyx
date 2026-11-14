@@ -68,6 +68,8 @@ import { ActivityBar, ActivityButton, useDeckBars } from './ActivityBar';
 import { LibraryView, LibraryPage } from '../library/LibraryView';
 import { openLibrary, useLibraryPageOpen } from '../library/store';
 import { SyncChip, useExternalSync } from './SyncChip';
+import { TandemChip } from './TandemChip';
+import { bindTandemText, tandemProject, tandemShow } from './tandem';
 import { SourcePane, type SourceTarget, cursorLine, docBlocks, blockPos } from './SourcePane';
 import { activeMathField, mathFocusListeners, mathCursorListeners, type LyxMathField } from '../editor/lyxmath/field';
 import { Tour, InterfacePrompt, tourWanted, rememberTour, type TourEnd } from './Tour';
@@ -702,6 +704,9 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   const editorRef = useRef<EditorHandle | null>(null);
   const childRefs = useRef(new Map<string, EditorHandle>());
   const activeViewRef = useRef<EditorView | null>(null);
+  // Tandem with this account's other device in the project (tandem.ts): the file shown, the document's place
+  useEffect(() => { tandemProject(docProject); tandemShow(hashId); }, [docProject, hashId]);
+  useEffect(() => bindTandemText({ scroller: () => scrollRef.current, view: () => activeViewRef.current }), []);
   const containerRef = useRef<HTMLDivElement>(null);
   const pendingGoto = useRef<string | null>(parseHash().goto);
   const pendingHeading = useRef<number | null>(parseHash().heading);
@@ -2123,7 +2128,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         readOnly={!!docId && viewOnly} updateReady={updateReady} aiBusy={aiBusy > 0}
         quiet={!!docId && !isLyxDoc} stats={docStats} pageInfo={pagesOn && masterView && isLyxDoc ? pageAtCursor(masterView.state) : null} zoom={zoom} onZoom={setZoom}
         corner={barsPlace === 'bottom' && !filesShown && <CornerButton icon="files" title={LEFT_TITLE} data-rail="outline" onClick={toggleFiles}>Files</CornerButton>}
-        sync={syncChip}
+        sync={<>{syncChip}<TandemChip /></>}
         pdf={isLyxDoc ? { state: pdf, onClick: rebuild => { if (rebuild && !pdf.busy) void build(); else if (!pdfPaneVisible) changePanes(l => (narrowPanes ? { ...setPaneShown(l, 'pdf', true), order: ['pdf', ...l.order.filter(p => p !== 'pdf')] } : setPaneShown(l, 'pdf', true))); } } : undefined} />
       {renderDialog()}
       {linkAsk && <CopyLinkDialog url={linkAsk.url} what={linkAsk.what} user={user} notify={notify} onClose={() => setLinkAsk(null)} />}

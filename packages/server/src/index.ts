@@ -79,6 +79,7 @@ import { syncRouter } from './sync.ts';
 import { assertRoom, bytesAt, noteWritten, ProjectFullError, directoryBytes, formatBytes } from './projectsize.ts';
 import { runSelfCheck, selfCheckEnabled, selfCheckState } from './selfcheck.ts';
 import { externalSyncOf } from './syncPeers.ts';
+import { mountTandem } from './tandem.ts';
 import { e2eRoutes } from './e2e/routes.ts';
 import { kickE2e } from './e2e/relay.ts';
 import { isE2eProject, markE2e, e2eEnabled, closeE2eStore, dropKeys, E2eRefusal } from './e2e/store.ts';
@@ -557,6 +558,9 @@ api.get('/projects/:project/events', needReach, (req, res) => {
   projectSettingsListeners.add(settings);
   req.on('close', cleanup);
 });
+
+/** Tandem: the account's screens in the project tell each other what they show (tandem.ts) */
+mountTandem(api, needReach);
 
 /**
  * Search in the project's files (the files panel's Search; projectsearch.ts): `q`, and `case`, `word`,

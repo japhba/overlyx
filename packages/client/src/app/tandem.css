@@ -1,0 +1,9 @@
+/* the status bar's Tandem chip (TandemChip.tsx) */
+.tandem-chip { display: inline-flex; flex-shrink: 0; align-items: center; gap: 5px; font: inherit; color: var(--ui-muted); background: none; border: 1px solid transparent; border-radius: 3px; padding: 0 6px; line-height: 18px; cursor: pointer; white-space: nowrap; }
+.tandem-chip:hover { border-color: var(--ui-border); background: var(--surface); }
+.tandem-chip .tandem-glyph { flex: none; }
+.tandem-chip.on { color: var(--accent); border-color: var(--accent); }
+.tandem-chip.waiting { color: var(--accent); border-style: dashed; border-color: var(--accent); }
+.tandem-chip.asked { color: var(--accent); border-color: var(--accent); animation: tandem-ask 1.6s ease-in-out 3; }
+@keyframes tandem-ask { 50% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .tandem-chip.asked { animation: none; } }
