@@ -1544,6 +1544,12 @@ blend.
     transparent (their fills and borders stay in it). *Every slide as one picture* keeps the look
     exactly. The dialog says which is which. Not checked in PowerPoint itself (none on the box):
     LibreOffice Impress opens the files.
+    **Import PDF as slides…** (File menu; `deliverable/importpdf.ts`): a PDF becomes a new deck, a
+    slide a page — pdf.js draws each page in the browser at twice the slide's size and uploads it as
+    `pages/page-01.png` …; the deck (a blank deck of the first page's shape, 1280 px on its longer
+    side) gets a folder named after the file (`talk/`, `talk-2/` …) and one full-slide `img` a slide,
+    so anything can be put over it. At most 300 pages; not in encrypted projects (greyed). Importing
+    a .pptx is not built.
   * **Presenter view and presenting from two screens** (7 Nov 2026, the user: "a presenter's view
     with timer, speaker notes, slide browser … suitable for multiscreen use … switching to this view
     by hovering the bottom menu, in particular when on iPad … when remote controlling a session").

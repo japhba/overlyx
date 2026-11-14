@@ -1528,11 +1528,17 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     const p = docId ? projectOfDoc(textId ?? docId) : null;
     if (p) chooseLyxImport(p, '', r => { setRefreshKey(k => k + 1); location.hash = '#/' + r.id; });
   } };
+  // (a PDF as a deck, a page a slide: deliverable/importpdf.ts; the pictures are uploaded, so not into an encrypted project)
+  const importPdfItem = { label: 'Import PDF as slides…', disabled: curProject?.role === 'view' || (!!docId && isE2eProject(projectOfDoc(textId ?? docId))), action: () => {
+    const p = docId ? projectOfDoc(textId ?? docId) : null;
+    if (p) void import('../deliverable/importpdf').then(m => m.choosePdfImport(p, notify, id => { setRefreshKey(k => k + 1); location.hash = '#/' + id; }));
+  } };
   const projectRootMenus: MenuDef[] = docId ? [
     { title: 'File', items: [
       { label: 'New…', shortcut: 'Ctrl+N', action: () => editorContext.ui?.newFile() },
       newSlidesItem,
       importLyxItem,
+      importPdfItem,
       { label: 'Go to file…', shortcut: GOTO_FILE_KEY, action: () => setQuickOpen(true) },
       { label: 'Search in the project…', shortcut: SEARCH_PROJECT_KEY, action: searchProject },
       { label: 'Download LyX project (.zip)', action: () => window.open(`/api/projects/${encodeURIComponent(projectOfDoc(docId))}/zip?format=lyx`) },
@@ -1547,6 +1553,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       { label: 'New…', shortcut: 'Ctrl+N', action: () => editorContext.ui?.newFile() },
       newSlidesItem,
       importLyxItem,
+      importPdfItem,
       { label: 'Open… (files panel)', shortcut: 'Ctrl+O', action: () => setShowFiles(true) },
       { label: 'Go to file…', shortcut: GOTO_FILE_KEY, action: () => setQuickOpen(true) },
       { label: 'Search in the project…', shortcut: SEARCH_PROJECT_KEY, action: searchProject },
@@ -1623,6 +1630,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       { label: 'New…', shortcut: 'Ctrl+N', action: () => editorContext.ui?.newFile() },
       newSlidesItem,
       importLyxItem,
+      importPdfItem,
       { label: 'New whiteboard…', action: () => {
         const p = textId ? projectOfDoc(textId) : null;
         if (!p) return;
