@@ -43,6 +43,8 @@ const runtimeCode = compile([
     'movable', 'inGroupLayout', 'fixedHeight', 'kindOf', 'label', 'pictureSrc', 'listOf', 'item', 'report'].map(n => declaration(editSource, n)),
   // the quick menu's Fit measures the rendered box; jsdom lays nothing out
   'function looseBox() { return false; }',
+  // Position and size reads the box on the slide; jsdom lays nothing out
+  'function boxInSlide() { return null; }',
 ].join('\n'));
 type Pending = { select?: Path[]; editText?: Path; math?: boolean };
 type Layout = Extract<FromRuntime, { ol: 'layout' }>;
