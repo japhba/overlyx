@@ -1380,10 +1380,16 @@ blend.
     tools, Arrange, Path and the rest — and with nothing selected the slide's *Background* (this
     slide or every slide), *Layout* (the slide put in another layout), guides, placeholders,
     animation and *+ Slide* ▾ (words on the buttons where an icon says little, as Google's);
-    when they do not fit beside the tools they float as a bar of their own over the canvas's top edge
-    (`dl-ctx-row` — the canvas never moves when something is selected), going on to a second line
-    rather than off the window's edge (the quick menu then stays below that bar), its palettes fixed
-    to the window), speaker
+    when they do not fit beside the tools they have a line of their own under them, inside the toolbar
+    (`dl-ctx-row`; since 14 Nov 2026 — floating over the canvas's top edge, as before, the bar covered
+    the slides' titles, which could be neither read nor clicked there). The line's room is kept whatever
+    is selected, so the canvas never moves as the selection changes: `checkContextRow` decides by the
+    window — a line whenever the room beside the tools is under `CTX_ROOM` (1000 px, what a
+    selection's tools usually need) and, once something needed more than there was, until the window
+    changes size; the room is the toolbar's `padding-bottom` (styles.css, `:has(> .dl-ctx:not(:empty))`;
+    modern.css). Only a second line of them — a narrow window, much selected — goes on over the canvas
+    (the quick menu then stays below it); 900 px and narrower the row is in the toolbar's flow as it
+    was; its palettes are fixed to the window), speaker
     notes (`<aside class="notes">` of the slide in view), the code (a textarea on the same `Y.Text`;
     *Edit code* jumps to an object's source), others' selections (awareness `htmlSel`; a dashed frame
     and their name), their carets in a text they retype (`htmlCaret`: the box's path and places in its
@@ -1564,6 +1570,48 @@ blend.
     the DevTools pipe and is answered like the editor's frame (`resolveDeliverable`) or, for a short
     list of public font / script CDNs, fetched by the server — nothing else is reachable. At most two
     pages at once; the browser closes when idle.
+  * **Usability survey, 14 Nov 2026** (the user: "survey usability … feature completeness of the
+    layout editors, especially slides and posters … improve what you think could be better"; walked
+    through as a new user on an isolated instance, with a code inventory beside it). **Fixed then**:
+    Enter typed through the editor's key forwarding or held while a formula closed made a paragraph in a
+    title (`mathedit.ts typeKeysHere` — `breaksLine`: a line break in a heading or paragraph box, as
+    the Enter key itself; the `<h1>` became a `<div>` and lost its look); *Title and body* / *Title
+    only* after a lone title slide put the title across the middle (`decklayouts.ts coverOnly`: a deck
+    of its cover alone has no content slide to read the title's place and the top margin from); the
+    presenter view's next slide and strip were in the browser's serif where a deck sets its font on
+    `<body>` (`presenter.ts inheritedOf`: the copies' holder is reset, so it is given what a slide
+    inherits) and the presenting bar's counter too (`presentkit.ts`: `--ui-font` is the app's, not the
+    frame's); a blank deck was listed as a web page (`projectfiles.ts htmlKind` read 16 KB, the font
+    licence before the meta tag is 24 KB: now 64 KB); the header named every deck `index.html` (App.tsx
+    `shownFileName`: its folder, as the start screen); the contextual toolbar over the slides' titles
+    (above). **Added**: the slide rail's keys (`railKey`: after a click on a slide there, with nothing
+    selected on the canvas — ↑ ↓ ← →, Home, End go from slide to slide, Delete removes the slide and
+    says so, Ctrl+D duplicates it, Ctrl+↑ / ↓ move it; a press on the canvas — the runtime's `pressed`
+    — or anywhere else in the editor takes the keys back; they did nothing before, and Ctrl+↑ restacked
+    the canvas's selection); **blank posters** in the board's size (core `blankPoster`, `POSTER_SIZES`:
+    A0, A1, A2, 48 × 36, 42 × 30, 36 × 24 in, either way up; A0 upright at first, the last one kept as
+    `ol.posterSize`; text a hundredth of the long side; the dialogs' *Blank* card for posters with the
+    size picker scrolled into view, VS Code's New Poster too — the designs come only in the size they
+    were made in, and there was no A0 landscape or A1 at all); *Help ▸ Keyboard shortcuts* lists the
+    canvas editor's keys while a deck, poster or page is open (`DECK_HELP_ROWS`; it showed the
+    documents' and the LaTeX layout documents', where E is the ellipse); superscript / subscript for
+    the words selected while typing (*More text options*, *Format*; `<sup>` / `<sub>`, not a
+    `vertical-align` span); a picture's description (alt text) from its right-click menu; *Format* and
+    *Arrange* stay in the menu bar, greyed when nothing they apply to is selected. Two source-level
+    tests broken since ▶ Preview (a second `onMessage` in DeliverableEditor.tsx) pass again.
+    **Open, by what a talk or a poster needs most**: tables (no tool; a `<table>` in the source is one
+    object whose cells cannot be typed in); checks shown to people (overflow, text off the slide, too
+    small for the poster's size, contrast — `report.ts` runs for agents only); a slide's size changed
+    after it is made; numeric position and size (the LaTeX layout documents have mm fields); several
+    slides selected in the rail, a slide sorter, slides copied between decks; find and replace on
+    slides; version history (the server keeps versions, the panel shows only for LaTeX documents);
+    connectors drawn from object to object (`data-ol-connector` is written by hand); QR codes (the
+    poster designs have a box that says "QR code"); gradients and background pictures; transitions
+    and timed builds; PPTX / PNG export, handouts and notes pages (the A4 / Letter sizes' hints promise
+    them), PPTX / PDF import; the starter designs' bars and numbers are no master objects (*Edit theme*
+    says nothing is on every slide). Seen, not fixed: keys typed within a few ms of drawing a shape
+    arrive out of order ("Box label" → "labelBox") and the canvas then shows the shape empty until it
+    is loaded again; a "recovered text draft" banner once, after the title became a `<div>`.
 * **Layout documents** (LaTeX; since the HTML deliverables above, behind *A LaTeX (beamer) layout
   document instead…* in the New dialog; `editor/layout/`, core
   `layout/`): slides, posters and free-form pages — fixed-size pages whose objects sit anywhere:

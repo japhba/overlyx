@@ -237,3 +237,26 @@ it('restores an empty dollar before replaying prose', async () => {
   expect(getSelection()?.anchorOffset).toBe(1);
   expect(inserted).toEqual(['a']);
 });
+
+it('Enter typed ahead is a line break in a title or a paragraph box, a paragraph in a list item or a block box', () => {
+  const commands = (document.execCommand as unknown as ReturnType<typeof vi.fn>).mock.calls;
+  const caretIn = (html: string, sel: string) => {
+    document.body.innerHTML = html;
+    const at = document.querySelector(sel)!;
+    const range = document.createRange(); range.selectNodeContents(at); range.collapse(false);
+    getSelection()!.removeAllRanges(); getSelection()!.addRange(range);
+    commands.length = 0;
+    math.typeKeysHere([{ key: 'Enter' }]);
+    return commands.map(c => c[0]).join();
+  };
+  // (the keys forwarded from the editor, or held while a formula closed: a paragraph inside an <h1> made the box a <div> — the title lost its look)
+  expect(caretIn('<h1 data-ol-editing contenteditable="true">A title</h1>', 'h1')).toBe('insertLineBreak');
+  expect(caretIn('<p data-ol-editing contenteditable="true">A <b>bold</b></p>', 'b')).toBe('insertLineBreak');
+  expect(caretIn('<div data-ol-editing contenteditable="true"><ul><li>item</li></ul></div>', 'li')).toBe('insertParagraph');
+  expect(caretIn('<div data-ol-editing contenteditable="true">words</div>', 'div')).toBe('insertParagraph');
+  // Shift+Enter: a line break anywhere
+  document.body.innerHTML = '<div data-ol-editing contenteditable="true">words</div>';
+  commands.length = 0;
+  math.typeKeysHere([{ key: 'Enter', shift: true }]);
+  expect(commands.map(c => c[0]).join()).toBe('insertLineBreak');
+});

@@ -79,6 +79,25 @@ describe('the layouts made of the deck', () => {
     expect(cols[0][1]).toBe(cols[1][1]);
     expect(html('picture')).toMatch(/<div data-ol-ph="picture" style="[^"]*height: \d+px"><\/div>/);
   });
+  it('a deck of its title slide alone: a content slide\'s title at the frame\'s top, not across the middle where the cover has its own', () => {
+    const cover = deck(slide(`<h1 data-ol-ph="title" style="${at(77, 249, 1126, 'min-height: 72px')}">A talk</h1>\n  <p data-ol-ph="subtitle" style="${at(77, 342, 1126, 'min-height: 36px')}"></p>`));
+    const d = deckDesign(cover, SIZE, 0);
+    expect(d.title).toBeNull();
+    expect(d.frame.top).toBeCloseTo(0.07 * 720);
+    expect(d.frame.left).toBe(77);
+    const ls = builtInLayouts(d);
+    const body = ls.find(l => l.id === 'body')!.html, only = ls.find(l => l.id === 'only')!.html;
+    expect(body).toMatch(/<h2 data-ol-ph="title" style="position: absolute; left: 77px; top: 50px;/);
+    const listTop = Number(/<ul data-ol-ph="body" style="position: absolute; left: 77px; top: (\d+)px/.exec(body)![1]);
+    expect(listTop).toBeGreaterThan(100);
+    expect(listTop).toBeLessThan(160);
+    expect(only).toMatch(/top: 50px/);
+    // the title slide itself is still the cover's
+    expect(ls.find(l => l.id === 'title')!.html).toMatch(/<h1 data-ol-ph="title" style="position: absolute; left: 77px; top: 249px;/);
+    // a lone content slide (its title at the top, no subtitle) is what the layouts are made of, as before
+    const content = deck(slide(`<h2 style="${at(72, 48, 1136)}">One</h2>\n  <p style="${at(72, 135, 1136)}">Text</p>`));
+    expect(deckDesign(content, SIZE, 0).title?.box).toMatchObject({ x: 72, y: 48 });
+  });
   it('a deck without lists: the list placeholder looks like its text (measured where the canvas shows it)', () => {
     const text = deck([
       slide(`<h1 style="${at(96, 200, 1088)}">Cover</h1>`),

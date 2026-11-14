@@ -29,6 +29,8 @@ export interface DeckTextActions {
   /** points (1 pt = 4/3 CSS px) */
   size(pt: number): void;
   bold(): void; italic(): void; underline(): void; strike(): void;
+  /** the selected words raised or lowered (and smaller), while a text is typed: a footnote mark, CO₂, m² */
+  script?(kind: 'superscript' | 'subscript'): void;
   color(c: string | null): void;
   highlight(c: string | null): void;
   align(a: 'left' | 'center' | 'right' | 'justify'): void;
@@ -510,6 +512,11 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
       { id: 'dk-more-text', title: 'More text options', icon: 'dk-lines',
         palette: { title: 'Text', list: true, cols: 1, items: [
           { label: 'Strikethrough', html: ICON('dk-strike'), action: c.text.strike },
+          // (of the words selected while typing: a whole box raised makes no sense)
+          ...(c.editingText && c.text.script ? [
+            { label: 'Superscript (x²)', action: () => c.text.script!('superscript') },
+            { label: 'Subscript (x₂)', action: () => c.text.script!('subscript') },
+          ] : []),
           ...(c.text.box && sel.some(s => s.textBox) && !c.editingText ? [
             ...(['left', 'center', 'right'] as const).map(anchor => ({
               label: `Auto width · ${anchor === 'center' ? 'centre' : anchor} anchor`,

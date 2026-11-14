@@ -74,7 +74,8 @@ export function htmlKind(abs: string, st: fs.Stats): ProjectFile['deliverable'] 
   let kind: ProjectFile['deliverable'] | 'article';
   try {
     const fd = fs.openSync(abs, 'r');
-    const buf = Buffer.alloc(Math.min(st.size, 16384));
+    // (a blank deck begins with its font's licence, a 24 KB comment: its meta tag is past the first 16 KB — it was listed as a web page)
+    const buf = Buffer.alloc(Math.min(st.size, 65536));
     fs.readSync(fd, buf, 0, buf.length, 0);
     fs.closeSync(fd);
     const m = /<meta\b[^>]*\bname\s*=\s*["']?overlyx["']?[^>]*>/i.exec(buf.toString('utf8'));

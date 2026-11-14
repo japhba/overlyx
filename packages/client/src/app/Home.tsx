@@ -19,7 +19,7 @@ import { promptNewFile, createProjectFile } from './newfile';
 import { useUiMode } from './uimode';
 import { KIND_ICONS, iconSvg } from './modernicons';
 import { ScientificTemplates, chosenDesign } from './ScientificTemplates';
-import { initialDeckSize, rememberDeckSize, sizeOf, usualDeckSize } from './decksize';
+import { initialDeckSize, initialPosterSize, rememberDeckSize, rememberPosterSize, sizeOf, usualDeckSize } from './decksize';
 import { BetaNote } from './Login';
 import { ensureAccountKeys } from '../e2e/ui';
 
@@ -303,7 +303,7 @@ type NewKind = 'doc' | 'deck' | 'poster' | 'board' | 'empty';
 const NEW_KINDS: { id: NewKind; label: string; hint: string; w: number; h: number; name: string }[] = [
   { id: 'doc', label: 'Document', hint: 'A paper, thesis or notes', w: 210, h: 297, name: 'Untitled document' },
   { id: 'deck', label: 'Slides', hint: 'Blank pages or a design, any size', w: 16, h: 9, name: 'Untitled slides' },
-  { id: 'poster', label: 'Poster', hint: '48 × 36 in or portrait', w: 48, h: 36, name: 'Untitled poster' },
+  { id: 'poster', label: 'Poster', hint: 'A design, or blank: A0, 48 × 36 in …', w: 48, h: 36, name: 'Untitled poster' },
   // (no page: its thumbnail is a patch of the endless dotted canvas, styles.css .ol-newthumb.board)
   { id: 'board', label: 'Whiteboard', hint: 'An endless canvas to draw and think on', w: 0, h: 0, name: 'Untitled whiteboard' },
   { id: 'empty', label: 'Empty project', hint: 'Add files later', w: 0, h: 0, name: '' },
@@ -317,6 +317,7 @@ export function NewProjectDialog({ user, onClose, onCreated, notify }: { user: U
   const [kind, setKind] = useState<NewKind>('doc');
   const [template, setTemplate] = useState<string>();
   const [size, setSize] = useState(initialDeckSize);
+  const [posterSize, setPosterSize] = useState(initialPosterSize);
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [encrypted, setEncrypted] = useState(false);
@@ -337,9 +338,10 @@ export function NewProjectDialog({ user, onClose, onCreated, notify }: { user: U
       const key = project.name;
       const chosenTemplate = chosenDesign(selectedKind, selectedKind === kind ? template : undefined);
       if (selectedKind === 'deck' && chosenTemplate === 'blank') rememberDeckSize(size);
+      if (selectedKind === 'poster' && chosenTemplate === 'blank') rememberPosterSize(posterSize);
       const id = selectedKind === 'doc' ? (await api.newDoc(key, 'main.tex', { title: n })).id
         : selectedKind === 'deck' ? (await api.newDeliverable(key, 'slides', 'deck', n, chosenTemplate, chosenTemplate === 'blank' ? sizeOf(size) : undefined)).id
-        : selectedKind === 'poster' ? (await api.newDeliverable(key, 'poster', 'poster', n, chosenTemplate)).id
+        : selectedKind === 'poster' ? (await api.newDeliverable(key, 'poster', 'poster', n, chosenTemplate, chosenTemplate === 'blank' ? sizeOf(posterSize, 'poster') : undefined)).id
         : selectedKind === 'board' ? await createProjectFile(key, 'whiteboard.board')
         : null;
       onCreated(id, n);
@@ -364,7 +366,7 @@ export function NewProjectDialog({ user, onClose, onCreated, notify }: { user: U
           );
         })}
       </div>
-      {(kind === 'deck' || kind === 'poster') && <ScientificTemplates kind={kind} value={template} onChange={setTemplate} size={size} onSize={setSize} />}
+      {(kind === 'deck' || kind === 'poster') && <ScientificTemplates kind={kind} value={template} onChange={setTemplate} size={kind === 'poster' ? posterSize : size} onSize={kind === 'poster' ? setPosterSize : setSize} />}
       <label class="dialog-row">Name <input type="text" value={name} autofocus placeholder={k.name || 'Name of the project'} data-new-name
         onInput={e => setName((e.target as HTMLInputElement).value)} onKeyDown={e => { if (e.key === 'Enter') void create(); }} /></label>
       {invalid && <p class="dialog-hint error">{invalid}</p>}

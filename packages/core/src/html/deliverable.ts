@@ -212,12 +212,58 @@ ${TEMPLATE_FONT_LICENSE}
 `;
 }
 
-/** `template` "blank": blankDeck of `size`; otherwise a scientific design (its own size) */
+/**
+ * The sizes a new blank poster can have (landscape; turned for portrait): what conferences ask for —
+ * the designs come in the size they were made in, and a board that takes A0 upright takes no 48 × 36 in.
+ */
+export const POSTER_SIZES: readonly PagePreset[] = [
+  { id: 'a0', label: 'A0', hint: 'The usual conference poster in Europe and Asia', width: 1189, height: 841, unit: 'mm' },
+  { id: 'a1', label: 'A1', hint: 'Half an A0: smaller boards and departmental poster sessions', width: 841, height: 594, unit: 'mm' },
+  { id: 'a2', label: 'A2', hint: 'A quarter of an A0: notice boards and small prints', width: 594, height: 420, unit: 'mm' },
+  { id: '48x36', label: '48 × 36 in', hint: 'The usual conference poster in North America', width: 48, height: 36, unit: 'in' },
+  { id: '42x30', label: '42 × 30 in', hint: 'A common size of US poster printers and boards', width: 42, height: 30, unit: 'in' },
+  { id: '36x24', label: '36 × 24 in', hint: 'Arch D: the small US poster', width: 36, height: 24, unit: 'in' },
+];
+export const DEFAULT_POSTER_SIZE: PageSize = { width: 841, height: 1189, unit: 'mm' };
+
+/**
+ * A poster with nothing on it: one white page of `size`, printed at that size. Text written on it gets
+ * a size that reads from a metre or two (a hundredth of the long side: about 34 pt on an A0), headings
+ * theirs from it.
+ */
+export function blankPoster(title: string, size: PageSize = DEFAULT_POSTER_SIZE): string {
+  const { width, height, unit } = pageSize(size);
+  const w = `${width}${unit}`, h = `${height}${unit}`;
+  const text = `${Math.round(Math.max(width, height) / 100 * 1000) / 1000}${unit}`;
+  return `<!doctype html>
+<!--
+${TEMPLATE_FONT_LICENSE}
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="overlyx" content="poster">
+<title>${esc(title || 'Untitled poster')}</title>
+<style>
+  ${TEMPLATE_FONTS['Instrument Sans']}
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #dce0e4; color: #1d1d1f; font-family: "Instrument Sans", sans-serif; }
+  .slide { width: ${w}; height: ${h}; position: relative; overflow: hidden; background: #fff; margin: 0 auto; font-size: ${text}; line-height: 1.35; }
+  h1, h2, h3, p, ul, ol { margin: 0; }
+  :where(.slide li)::marker { color: #80868b; }
+  @media print { @page { size: ${w} ${h}; margin: 0; } body { background: none; } .slide { margin: 0; break-inside: avoid; print-color-adjust: exact; -webkit-print-color-adjust: exact; } }
+</style>
+</head>
+<body>
+<section class="slide"></section>
+</body>
+</html>
+`;
+}
+
+/** `template` "blank": blankDeck / blankPoster of `size`; otherwise a scientific design (its own size) */
 export function starterFor(kind: DeliverableKind, title: string, template?: string, size?: PageSize): string {
   if (kind === 'page' && template !== undefined) throw new Error('Web pages do not have scientific templates.');
-  if (template === 'blank') {
-    if (kind !== 'deck') throw new Error('Only slide decks start blank.');
-    return blankDeck(title, size);
-  }
+  if (template === 'blank') return kind === 'poster' ? blankPoster(title, size) : blankDeck(title, size);
   return kind === 'deck' ? starterDeck(title, template) : kind === 'poster' ? starterPoster(title, template) : starterPage(title);
 }

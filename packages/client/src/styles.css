@@ -3522,8 +3522,8 @@ html[data-theme="dark"] .dl-canvas { background: #2a2c31; }
 .dl-toolbar .toolbar { border: 0; padding: 0; background: none; flex-wrap: nowrap; flex: none; }
 .dl-ctx { flex: 1 1 auto; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; display: flex; align-items: center; }
 .dl-ctx::-webkit-scrollbar { display: none; }
-/* the contextual tools did not fit beside the others: a bar of their own floating under the toolbar,
-   over the canvas's top edge (the canvas does not move when something is selected) */
+/* the contextual tools did not fit beside the others: a bar of their own under the tools (wide windows:
+   a line inside the toolbar, below; the canvas does not move when something is selected) */
 .dl-toolbar { position: relative; }
 .dl-toolbar.dl-ctx-row > .dl-ctx { position: absolute; left: var(--ctx-left, 8px); top: calc(100% + 4px); z-index: 6; max-width: calc(100% - var(--ctx-left, 8px) - 8px); flex: none; padding: 3px 6px; background: var(--surface); border: 1px solid var(--ui-border); border-radius: 6px; box-shadow: 0 2px 10px rgba(0,0,0,.14); }
 .dl-toolbar.dl-ctx-row > .dl-ctx:empty { display: none; }
@@ -3535,6 +3535,13 @@ html[data-theme="dark"] .dl-canvas { background: #2a2c31; }
 /* more than one line of them: the sections go on to the next line — never cut off at the window's edge
    (the row floats over the canvas, nothing under it moves); a section wider than the row wraps its groups */
 @media (min-width: 901px) {
+  /* A line of their own inside the toolbar, under the tools: its room is kept whatever is selected
+     (DeliverableEditor checkContextRow decides by the window, not the selection), so the canvas never
+     moves as the selection changes — and nothing lies over the slide: floating over the canvas's top edge
+     the bar covered the slides' titles, which could be neither read nor clicked there (14 Nov 2026).
+     Only a second line of them — a narrow window, much selected — goes on over the canvas. */
+  .dl-toolbar.dl-ctx-row:has(> .dl-ctx:not(:empty)) { padding-bottom: 40px; min-height: 70px; }
+  .dl-toolbar.dl-ctx-row > .dl-ctx { left: 6px; right: 6px; top: calc(100% - 37px); max-width: none; padding: 3px 2px; background: inherit; border: 0; border-top: 1px solid var(--ui-border); border-radius: 0 0 6px 6px; box-shadow: none; }
   .dl-toolbar.dl-ctx-row > .dl-ctx { overflow: visible; }
   .dl-toolbar.dl-ctx-row > .dl-ctx > .dl-ctx-secs { flex-wrap: wrap; width: auto; row-gap: 3px; }
   .dl-toolbar.dl-ctx-row > .dl-ctx .toolbar { max-width: 100%; flex-wrap: wrap; row-gap: 2px; }
@@ -3855,8 +3862,6 @@ html.ol-bars-shown .dl-bars-handle { opacity: 0; pointer-events: none; }
 .dl-theme-say { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dl-theme-done { flex: none; background: #7c4dff; color: #fff; font-weight: 600; padding: 0 12px; }
 .dl-theme-done:hover:not(:disabled) { background: #6a3df0; }
-/* (the contextual tools floating under the toolbar go under the bar) */
-@media (min-width: 901px) { .dl-editor[data-theme-view] .dl-toolbar.dl-ctx-row > .dl-ctx { top: calc(100% + 38px); } }
 .dl-theme-scroll { flex: 1; overflow: auto; padding-bottom: 12px; }
 .dl-theme-hint { padding: 8px 10px; border-bottom: 1px solid var(--ui-border); }
 .dl-theme-list { padding: 2px 0 4px; }

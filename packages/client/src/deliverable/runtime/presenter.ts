@@ -101,14 +101,32 @@ function copyOf(s: HTMLElement, step: number, w: number, h: number): HTMLElement
   return c;
 }
 
-/** a holder for a copy, slotted into the panel `slot`: `bw` × `bh` px, the copy scaled into it */
-function holder(slot: string, copy: HTMLElement, w: number, h: number, bw: number, bh: number): HTMLElement {
+/**
+ * What a slide takes from the page round it (its <body>'s font, colour, line height …): a copy in a
+ * panel is no child of the page's body — the panels' element is reset (`all: initial`), and a deck that
+ * sets its font on <body> showed its next slide and the strip's slides in the browser's serif.
+ */
+const INHERITED = ['color', 'font-family', 'font-size', 'font-style', 'font-weight', 'font-stretch', 'font-variant', 'font-feature-settings',
+  'font-variation-settings', 'font-kerning', 'font-optical-sizing', 'line-height', 'letter-spacing', 'word-spacing', 'text-align', 'text-transform',
+  'text-indent', 'text-rendering', 'white-space', 'word-break', 'overflow-wrap', 'hyphens', 'direction', 'tab-size', 'quotes', 'list-style-position',
+  '-webkit-font-smoothing', '-webkit-text-size-adjust'];
+function inheritedOf(slide: HTMLElement): string {
+  const from = slide.parentElement;
+  if (!from) return '';
+  const cs = getComputedStyle(from);
+  let css = '';
+  for (const p of INHERITED) { const v = cs.getPropertyValue(p); if (v) css += `${p}:${v};`; }
+  return css;
+}
+
+/** a holder for a copy of `slide`, slotted into the panel `slot`: `bw` × `bh` px, the copy scaled into it */
+function holder(slot: string, slide: HTMLElement, copy: HTMLElement, w: number, h: number, bw: number, bh: number): HTMLElement {
   const k = Math.min(bw / w, bh / h);
   copy.style.transform = `scale(${k})`;
   const d = document.createElement('div');
   d.setAttribute('slot', slot);
   d.setAttribute('data-ol-runtime', '');
-  d.style.cssText = `all:initial;display:block;position:relative;overflow:hidden;pointer-events:none;width:${Math.round(w * k)}px;height:${Math.round(h * k)}px`;
+  d.style.cssText = `all:initial;${inheritedOf(slide)}display:block;position:relative;overflow:hidden;pointer-events:none;width:${Math.round(w * k)}px;height:${Math.round(h * k)}px`;
   d.append(copy);
   return d;
 }
@@ -289,7 +307,7 @@ export class PresenterView {
     const bw = Math.max(40, this.nbox.clientWidth || this.side.clientWidth - 24);
     const bh = Math.max(30, Math.min(bw * this.size.h / this.size.w, this.side.clientHeight * 0.4));
     this.nbox.style.height = `${Math.round(bh)}px`;
-    if (next) this.el.append(holder('next', copyOf(next.el, next.step, this.size.w, this.size.h), this.size.w, this.size.h, bw, bh));
+    if (next) this.el.append(holder('next', next.el, copyOf(next.el, next.step, this.size.w, this.size.h), this.size.w, this.size.h, bw, bh));
     // the notes: the slide's <aside class="notes"> (sourceops.ts slideNotes), as text
     const notes = s ? Array.from(s.children).filter(c => c.localName === 'aside' && c.classList.contains('notes')).map(c => (c.textContent ?? '').trim()).filter(Boolean).join('\n\n') : '';
     this.ntext.textContent = notes || 'No notes for this slide.';
@@ -314,7 +332,7 @@ export class PresenterView {
     for (const c of Array.from(this.el.querySelectorAll(':scope > [slot^="t"]'))) c.remove();
     const { w, h } = this.size, th = this.thumbH, tw = Math.round(th * w / h);
     this.track.innerHTML = ss.map((_, i) => `<button class="th" data-i="${i}" title="Slide ${i + 1}" aria-label="Slide ${i + 1}" style="width:${tw}px;height:${th}px"><slot name="t${i}"></slot><span class="n">${i + 1}</span></button>`).join('');
-    ss.forEach((s, i) => this.el.append(holder(`t${i}`, copyOf(s, slideStepCount(s), w, h), w, h, tw, th)));
+    ss.forEach((s, i) => this.el.append(holder(`t${i}`, s, copyOf(s, slideStepCount(s), w, h), w, h, tw, th)));
   }
 
   /** the slide shown marked in the strip, and in view there */

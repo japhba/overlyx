@@ -6,7 +6,7 @@
  * are there.
  */
 import { describe, it, expect, afterAll } from 'vitest';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import http from 'node:http';
@@ -88,7 +88,27 @@ describe('agents make and edit deliverables', () => {
     expect(blankDeck('A4', { width: 210, height: 297, unit: 'mm' })).toContain('width: 210mm; height: 297mm');
     expect(() => pageSize({ width: 12, height: 720 })).toThrow(/size.width/);
     expect(() => pageSize({ width: 1280, height: 720, unit: 'em' })).toThrow(/size.unit/);
-    await expect(callTool(token, 'create_deliverable', { folder: 'blank-poster', kind: 'poster', template: 'blank' })).rejects.toThrow(/Only slide decks/);
+    // a blank deck begins with its font's licence (24 KB): its meta tag, well past the first 16 KB, is still found — it was listed as a web page
+    const { htmlKind } = await import('../packages/server/src/projectfiles.ts');
+    expect(html.indexOf('<meta name="overlyx"')).toBeGreaterThan(16384);
+    expect(htmlKind(file('notes/index.html'), statSync(file('notes/index.html')))).toBe('deck');
+  });
+  it('a poster starts blank too, in the size the board takes (A0 upright unless another is asked for)', async () => {
+    const { blankPoster, starterFor, deliverableInfo, POSTER_SIZES } = await import('../packages/core/src/html/deliverable.ts');
+    await callTool(token, 'create_deliverable', { folder: 'blank-poster', kind: 'poster', template: 'blank', title: 'Waves' });
+    const html = readFileSync(file('blank-poster/index.html'), 'utf8');
+    expect(html).toContain('<meta name="overlyx" content="poster">');
+    expect(html).toContain('<title>Waves</title>');
+    expect(html).toContain('width: 841mm; height: 1189mm');
+    expect(html).toContain('@page { size: 841mm 1189mm');
+    expect(deliverableInfo(html)).toMatchObject({ kind: 'poster', slides: [expect.any(Array)] });
+    const us = blankPoster('P', { width: 48, height: 36, unit: 'in' });
+    expect(us).toContain('width: 48in; height: 36in');
+    // (text that reads from a metre or two: a hundredth of the long side)
+    expect(us).toContain('font-size: 0.48in');
+    expect(starterFor('poster', 'P', 'blank', { width: 594, height: 841, unit: 'mm' })).toContain('width: 594mm; height: 841mm');
+    expect(POSTER_SIZES.map(s => s.id)).toEqual(['a0', 'a1', 'a2', '48x36', '42x30', '36x24']);
+    expect(() => starterFor('page', 'P', 'blank')).toThrow(/Web pages/);
   });
   it('create_deliverable starts a folder of the kind asked for, list_documents shows it', async () => {
     const r = json(await callTool(token, 'create_deliverable', { folder: 'talk', kind: 'deck', title: 'Waves' }));

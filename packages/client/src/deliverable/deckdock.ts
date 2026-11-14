@@ -14,6 +14,13 @@ export type DeckDock = 'top' | 'sides';
 
 /** a row of the toolbar (screen px), and a side column at its narrowest (a button and its padding) and widest (two buttons a row) */
 export const DOCK_ROW = 48;
+/**
+ * The contextual tools' line under the tools (px), there whenever the room beside the tools is less
+ * than a selection's tools usually need (CTX_ROOM px; DeliverableEditor checkContextRow keeps its room
+ * in the toolbar whatever is selected, so the canvas never moves).
+ */
+export const CTX_LINE = 38;
+export const CTX_ROOM = 1000;
 export const DOCK_COL_MIN = 48;
 export const DOCK_COL_MAX = 92;
 
@@ -40,8 +47,10 @@ export function chooseDock(i: DockInput): { dock: DeckDock; col: number; fit: nu
   if (!(area.w > 0 && area.h > 0 && slide.w > 0 && slide.h > 0)) return { dock: i.current, col: DOCK_COL_MIN, fit: 0 };
   // the top: one row, or two when the tools and the rest do not fit side by side (the tools scroll sideways)
   const rows = i.tools + i.rest <= area.w ? 1 : 2;
+  // (and the contextual tools' line under them, where they have one)
+  const ctx = area.w - i.tools - i.rest < CTX_ROOM ? CTX_LINE : 0;
   const gap = i.gap ?? fitGap(area);
-  const top = fitScale({ w: area.w, h: area.h - rows * DOCK_ROW }, slide, gap);
+  const top = fitScale({ w: area.w, h: area.h - rows * DOCK_ROW - ctx }, slide, gap);
   // the room beside the slide fitted to the whole height
   const shown = (area.h - 2 * gap) * slide.w / slide.h;
   const col = Math.round(Math.min(DOCK_COL_MAX, Math.max(DOCK_COL_MIN, (area.w - shown) / 2)));

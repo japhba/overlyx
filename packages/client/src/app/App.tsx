@@ -1481,6 +1481,9 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   // the Share button (top right) belongs to the project's owner; the panel reports the project it shows
   const shareProject = curProject && curProject.role === 'owner' && curProject.via !== 'admin' && (!docId || projectOfDoc(docId.replace(/^(text|pdf):/, '')) === curProject.name) ? curProject.name : null;
   const base = (id: string) => id.split('/').pop() ?? id;
+  // the header's name for the open file: a deck, poster or web page (`<folder>/index.html`) by its folder, as
+  // the start screen and the files list it — every one of them read "index.html"
+  const shownFileName = (p: string) => { const parts = p.split('/'), f = parts.pop() ?? p; return /^index\.html?$/i.test(f) && parts.length ? parts[parts.length - 1] : f; };
   // the project's name: the tab already names the file (a combined master shows the children it includes)
   const docLabel = docId ? (combined && childIds.length ? [docId, ...childIds].map(base).join(' + ') : projectShortName(projectOfDoc(docId.replace(/^(text|pdf):/, '')))) : '';
 
@@ -1789,7 +1792,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     if (!dialog) return null;
     // dialogs that do not need an editor (start screen, text files)
     if (dialog.name === 'feedback') return <FeedbackDialog docId={docId} onClose={() => { setDialog(null); view?.focus(); }} />;
-    if (dialog.name === 'help') return <HelpDialog onClose={() => { setDialog(null); view?.focus(); }} />;
+    if (dialog.name === 'help') return <HelpDialog deck={isHtmlTab} onClose={() => { setDialog(null); view?.focus(); }} />;
     if (dialog.name === 'preferences') {
       // (the open document's project and the document itself: their tabs — Settings' scopes)
       const settingsProject = textId && !isE2eDocId(textId) ? projectOfDoc(textId) || null : null;
@@ -1968,7 +1971,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         right={docId && <span class="doc-title" title={docId}>{docLabel}{meta?.master && !combined && <> · child of <a href={'#/' + meta.master} onClick={e => { e.preventDefault(); openInTab(meta.master!); }}>{meta.master.split('/').pop()}</a></>}</span>}
         title={docId && ui === 'modern' ? (
           <>
-            <span class="mt-name" title={docId}>{docPathOf(docId.replace(/^(text|pdf):/, '')).split('/').pop()}</span>
+            <span class="mt-name" title={docId}>{shownFileName(docPathOf(docId.replace(/^(text|pdf):/, '')))}</span>
             <span class="mt-project">{curProject?.title ?? projectShortName(projectOfDoc(docId.replace(/^(text|pdf):/, '')))}</span>
             {isLyxDoc && <SaveIndicator save={save} />}
           </>

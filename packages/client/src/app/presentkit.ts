@@ -247,7 +247,7 @@ const DOC_CSS = `.olpk-surface, .olpk-surface * { touch-action: none !important;
 const UI_CSS = `:host { all: initial; }
   svg.laser { position: fixed; left: 0; top: 0; width: 100vw; height: 100vh; overflow: visible; pointer-events: none; }
   .bar { position: fixed; left: 16px; bottom: 16px; display: flex; align-items: center; gap: 2px; padding: 4px; border-radius: 22px;
-    background: rgba(32, 33, 36, 0.84); color: #fff; font: 13px/1 var(--ui-font); box-shadow: 0 2px 12px rgba(0,0,0,0.35);
+    background: rgba(32, 33, 36, 0.84); color: #fff; font: 13px/1 var(--ui-font, "OL Inter", Inter, Roboto, sans-serif); box-shadow: 0 2px 12px rgba(0,0,0,0.35);
     opacity: 0; transition: opacity 0.45s; pointer-events: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
   .bar.show { opacity: 1; pointer-events: auto; }
   .bar.pinned { opacity: 1; pointer-events: auto; transition: none; box-shadow: none; }

@@ -803,10 +803,57 @@ export const HELP_ROWS: [string, string][] = [
     ['Arrows (Shift / Alt)', 'Layout documents: nudge the selection by 1 mm (10 mm / 0.1 mm)'],
 ];
 
-export function HelpDialog({ onClose }: { onClose: () => void }) {
+/**
+ * The keys of slides, posters and web pages (the canvas editor, deliverable/): its tools, objects,
+ * slides and presenting — what Help ▸ Keyboard shortcuts shows while one is open (it listed the
+ * documents' keys and the LaTeX layout documents' there: E was the ellipse, not the eraser).
+ */
+export const DECK_HELP_ROWS: [string, string][] = [
+  ['V, T, R, O, L, A, B', 'Tools: select, text box (click: a label, drag: wrapping text), rectangle, ellipse, line, arrow, Bézier path'],
+  ['P, E, S', 'Draw: pen, eraser, lasso (stroke after stroke until Esc)'],
+  ['N', 'Edit the points of the selected shape (a double click on a path does too)'],
+  ['Double-click, Enter, or just type', 'Type in the selected text box or shape; Esc ends typing'],
+  ['Esc', 'Back to the Select tool; out of a group, a level up; nothing selected'],
+  ['Ctrl+B, Ctrl+I, Ctrl+U', 'While typing: bold, italic, underline'],
+  ['Ctrl+K', 'While typing: link over the selected words — with shapes selected: combine their paths (Ctrl+Shift+K: break apart)'],
+  ['Ctrl+M, Ctrl+Shift+M, $', 'While typing: a formula, a displayed formula ($ typed opens one too)'],
+  ['Ctrl+Shift+C, Ctrl+Shift+I', 'While typing: citation, cross-reference'],
+  ['Tab / Shift+Tab', 'While typing in a list: the item a level deeper / back'],
+  ['Alt+↑ / ↓', 'While typing in a list: the item up / down'],
+  ['Ctrl+Shift+. / Ctrl+Shift+,', 'Larger / smaller text'],
+  ['Ctrl+Shift+L / E / R / J', 'Align the text left / centre / right / justified'],
+  ['Ctrl+\\', 'Clear the text formatting'],
+  ['Arrows (Shift)', 'Nudge the selection by 1 px (10 px)'],
+  ['Shift+click, drag on nothing', 'Select one more; a box round several'],
+  ['Ctrl+click', 'Select an object inside a group, or a part of a drawing'],
+  ['Alt+drag', 'Drag a copy'],
+  ['Shift while drawing or turning', 'Lines in 45° steps, rotation in 15° steps'],
+  ['Ctrl+D, Delete', 'Duplicate, delete the selection'],
+  ['Ctrl+A', 'Select everything on the slide'],
+  ['Ctrl+G / Ctrl+Shift+G', 'Group / ungroup'],
+  ['Ctrl+↑ / Ctrl+↓', 'Bring forward / send backward (with Shift: to the front / the back)'],
+  ['Ctrl+L', 'Simplify the selected path'],
+  ['Ctrl+Alt+M', 'Comment on the selection, the selected words or the slide'],
+  ['Ctrl+M', 'New slide after this one (not while typing)'],
+  ['Page Down / Page Up', 'Next / previous slide'],
+  ['In the slide list: ↑ ↓, Home, End', 'After a click on a slide there: go from slide to slide'],
+  ['In the slide list: Delete, Ctrl+D, Ctrl+↑ / ↓', 'Delete the slide, duplicate it, move it up / down'],
+  ['Ctrl+0, Ctrl+=, Ctrl+-', 'Fit the slide, zoom in, zoom out (Ctrl+wheel or a pinch zooms too)'],
+  ['Ctrl+Z / Ctrl+Y', 'Undo / redo'],
+  ['F5 / Shift+F5', 'Present from the start / from this slide'],
+  ['→ Space click, ←', 'Presenting: on, back (through a slide’s steps first)'],
+  ['Home / End, a number then Enter', 'Presenting: the first / last slide, that slide'],
+  ['S, L, B or ., W or ,', 'Presenting: presenter view (timer, notes, next slide), laser pointer, black screen, white screen'],
+  ['Ctrl+wheel or a pinch, 0', 'Presenting: zoom in, back to the whole slide'],
+  ['Ctrl+Shift+P (or F1)', 'Command palette: search the menus and shortcuts'],
+];
+
+export function HelpDialog({ onClose, deck }: { onClose: () => void; deck?: boolean }) {
+  const rows = (r: [string, string][]) => <table class="help-table"><tbody>{r.map(([k, v]) => <tr key={k}><td>{formatShortcut(k)}</td><td>{v}</td></tr>)}</tbody></table>;
+  if (deck) return <Dialog title="Keyboard shortcuts — slides, posters and web pages" onClose={onClose} wide>{rows(DECK_HELP_ROWS)}</Dialog>;
   return (
     <Dialog title="Keyboard shortcuts (LyX bindings)" onClose={onClose} wide>
-      <table class="help-table"><tbody>{HELP_ROWS.map(([k, v]) => <tr key={k}><td>{formatShortcut(k)}</td><td>{v}</td></tr>)}</tbody></table>
+      {rows(HELP_ROWS)}
     </Dialog>
   );
 }

@@ -144,6 +144,19 @@ export function deckMargins(text: string, size: Size, slide = -1): { sides: Marg
   return marginsOf(slides, bodyEl, size, slide);
 }
 
+/**
+ * A deck of one slide that is its title slide — a subtitle under the title, or the title well down
+ * the slide — has no content slide yet: what a content slide is like (where its title is, how far its
+ * text is from the top) is not read from the cover. (Title and body after a lone title slide put the
+ * title across the middle of the slide and the list under it.)
+ */
+function coverOnly(slides: SlideInfo[], size: Size): boolean {
+  if (slides.length !== 1) return false;
+  const s = slides[0];
+  const title = s.objs.find(o => o.ph === 'title') ?? s.objs.find(o => o.heading && !o.decor);
+  return s.objs.some(o => o.ph === 'subtitle') || (title?.y !== undefined && title.y > 0.3 * size.h);
+}
+
 function marginsOf(slides: SlideInfo[], bodyEl: HElement | null, size: Size, slide: number): { sides: MarginSides; from: 'slide' | 'template' | 'deck' | 'default' } {
   const own = slides[slide] ? layoutMarginSides(attr(slides[slide].el, LAYOUT_MARGINS_ATTR), size.w, size.h) : null;
   if (own) return { sides: own, from: 'slide' };
@@ -152,11 +165,14 @@ function marginsOf(slides: SlideInfo[], bodyEl: HElement | null, size: Size, sli
   const { w: W, h: H } = size;
   const L: number[] = [], R: number[] = [], T: number[] = [], B: number[] = [];
   const content = slides.length > 1 ? slides.slice(1) : slides;
+  const cover = coverOnly(slides, size);
   for (const s of content) {
     const os = s.objs.filter(o => !o.decor && o.x !== undefined && o.y !== undefined && o.w !== undefined && o.w < 0.9 * W && (o.textual || o.ph || o.tag === 'img' || o.tag === 'svg'));
     if (!os.length) continue;
     L.push(Math.min(...os.map(o => o.x!)));
     R.push(W - Math.max(...os.map(o => o.x! + o.w!)));
+    // (a lone title slide's words sit in its middle: its sides say where the deck's text is, not its head and foot)
+    if (cover) continue;
     T.push(Math.min(...os.map(o => o.y!)));
     const tall = os.filter(o => o.h !== undefined);
     if (tall.length) B.push(H - Math.max(...tall.map(o => o.y! + o.h!)));
@@ -186,7 +202,8 @@ export interface DeckDesign {
 export function deckDesign(text: string, size: Size, current = 1): DeckDesign {
   const { slides, bodyEl } = readSlides(text, size);
   const frame = marginsOf(slides, bodyEl, size, current).sides;
-  const contentSlides = slides.length > 1 ? slides.slice(1) : slides;
+  // (a lone title slide is no content slide: their title goes at the frame's top, not where the cover has its own)
+  const contentSlides = slides.length > 1 ? slides.slice(1) : coverOnly(slides, size) ? [] : slides;
   // the content slides' title: their placeholder for one, else the commonest place of their first heading
   const titles = contentSlides.map(s => s.objs.find(o => o.ph === 'title') ?? s.objs.find(o => o.heading && !o.decor)).filter((o): o is Obj => !!o);
   const at = (o: Obj) => `${o.tag}:${Math.round((o.x ?? -1) / 8)}:${Math.round((o.y ?? -1) / 8)}`;

@@ -91,6 +91,8 @@ function setup() {
     typeAhead: { current: null }, textAhead: { current: false }, editingTextRef: { current: false },
     nodeEdRef: { current: null }, readOnlyRef: { current: false }, setToolState,
     themeRef: { current: false }, setTheme: vi.fn(),
+    // (the slide rail's keys — arrows, Delete, Ctrl+D after a click on a slide there: no slide was clicked here)
+    railKeys: { current: false }, railKey: () => false,
     setKind: vi.fn(), setSlides: vi.fn(), setPageW: vi.fn(), setPageH: vi.fn(),
     setSolo: (update: (before: null) => unknown) => update(null),
     toCanvas: (message: ToRuntime) => {

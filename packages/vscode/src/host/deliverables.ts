@@ -23,7 +23,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { URL } from 'node:url';
 import { runtimeTags, injectRuntime, resolveInProject, SANDBOX_CSP, RUNTIME_MODES, type RuntimeMode } from '@overlyx/core/html/serve.ts';
-import { starterFor, DECK_SIZES, type DeliverableKind, type PageSize } from '@overlyx/core/html/deliverable.ts';
+import { starterFor, DECK_SIZES, POSTER_SIZES, type DeliverableKind, type PageSize } from '@overlyx/core/html/deliverable.ts';
 import { SCIENTIFIC_TEMPLATES, templateLabel } from '@overlyx/core/html/scientific.ts';
 import { deckExtras, type DeckExtras } from '@overlyx/core/html/deckextras.ts';
 import { isArticleHtml, asArticleText, parseArticle, htmlBlockOf, blockKey, rawSource } from '@overlyx/core/html/article.ts';
@@ -314,8 +314,10 @@ const FOLDER: Record<DeliverableKind, string> = { deck: 'talk', poster: 'poster'
 export async function newDeliverable(kind: DeliverableKind, startDir: string): Promise<void> {
   let template: string | undefined, size: PageSize | undefined;
   if (kind !== 'page') {
-    // a deck can start blank (as GoodNotes' pages): then its page size is asked for
-    const blank = kind === 'deck' ? [{ label: 'Blank', description: 'empty pages · any size', detail: 'Nothing on them: write, draw or build from scratch.', id: 'blank' }] : [];
+    // a deck can start blank (as GoodNotes' pages), a poster too (in the size the board takes): then its page size is asked for
+    const blank = [kind === 'deck'
+      ? { label: 'Blank', description: 'empty pages · any size', detail: 'Nothing on them: write, draw or build from scratch.', id: 'blank' }
+      : { label: 'Blank', description: 'empty · A0, A1, 48 × 36 in …', detail: 'An empty poster in the size your board takes.', id: 'blank' }];
     const style = await vscode.window.showQuickPick([...blank, ...SCIENTIFIC_TEMPLATES.filter(t => t.kind === kind).map(t => ({
       label: templateLabel(t), description: t.size, detail: t.description, id: t.id,
     }))], { title: `New ${KIND_LABEL[kind]} — blank or a scientific style`, placeHolder: 'Open-licensed templates' });
@@ -324,7 +326,7 @@ export async function newDeliverable(kind: DeliverableKind, startDir: string): P
     if (template === 'blank') {
       const dims = (p: PageSize) => `${p.width} × ${p.height}${p.unit === 'px' ? '' : ' ' + p.unit}`;
       // the slide sizes landscape, the paper sizes either way
-      const sizes = DECK_SIZES.flatMap(p => p.unit === 'px' ? [{ label: p.label, p }]
+      const sizes = (kind === 'poster' ? POSTER_SIZES : DECK_SIZES).flatMap(p => p.unit === 'px' ? [{ label: p.label, p }]
         : [{ label: `${p.label} landscape`, p }, { label: `${p.label} portrait`, p: { ...p, width: p.height, height: p.width } }]);
       const picked = await vscode.window.showQuickPick(sizes.map(({ label, p }) => ({ label, description: dims(p), detail: p.hint, p })),
         { title: `New ${KIND_LABEL[kind]} — page size` });

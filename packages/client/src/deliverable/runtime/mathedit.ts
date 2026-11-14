@@ -242,6 +242,18 @@ export function flushAfter(): void {
 /** edit.ts's end of retyping (an Escape typed ahead) */
 export const chipHooks = { stop: () => {} };
 
+/**
+ * Enter at the caret is a line break, not a paragraph: the text being retyped is a heading or a
+ * paragraph (a title, a subtitle) and the caret is in no list item — as the Enter key itself does
+ * there (edit.ts onKeyDown). A paragraph inside would make the box a <div>: the title lost its look.
+ */
+function breaksLine(): boolean {
+  const n = getSelection()?.anchorNode;
+  const el = n ? (n.nodeType === Node.ELEMENT_NODE ? n as Element : n.parentElement) : null;
+  const box = el?.closest('[data-ol-editing]');
+  return !!box && /^(p|h[1-6])$/.test(box.localName) && !el!.closest('li');
+}
+
 /** keys typed ahead, applied to the text being retyped at its caret (what they would have done there) */
 export function typeKeysHere(keys: KeyPress[], stop?: () => void): void {
   const sel = getSelection();
@@ -251,7 +263,7 @@ export function typeKeysHere(keys: KeyPress[], stop?: () => void): void {
     else if (k.key.length === 1 && !k.alt) document.execCommand('insertText', false, k.key);
     else if (k.key === 'Backspace') document.execCommand('delete');
     else if (k.key === 'Delete') document.execCommand('forwardDelete');
-    else if (k.key === 'Enter') document.execCommand(k.shift ? 'insertLineBreak' : 'insertParagraph');
+    else if (k.key === 'Enter') document.execCommand(k.shift || breaksLine() ? 'insertLineBreak' : 'insertParagraph');
     else if (k.key === 'ArrowLeft' || k.key === 'ArrowRight') sel?.modify(k.shift ? 'extend' : 'move', k.key === 'ArrowLeft' ? 'backward' : 'forward', 'character');
     else if (k.key === 'Escape') { stop?.(); return; }
   }

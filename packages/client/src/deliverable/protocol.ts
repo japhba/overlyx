@@ -414,6 +414,8 @@ export type FromRuntime =
    */
   | { ol: 'words'; rect: Rect | null; style?: WordsStyle; choosing?: boolean }
   | { ol: 'key'; key: string; ctrl: boolean; shift: boolean; alt: boolean; meta: boolean }
+  /** a press on the canvas (a pointer came down in the editing frame): the keys are the canvas's again, not the slide rail's */
+  | { ol: 'pressed' }
   /** `on`: what was right-clicked — an object (now selected), a slide's empty area, or the canvas around the pages; `weave`: two shapes cross there (runtime/weave.ts) */
   /** (`at`: the point of the slide right-clicked, slide px — a guide added there) */
   | { ol: 'contextmenu'; x: number; y: number; slide?: number; on?: 'object' | 'slide' | 'canvas'; weave?: { label: string; undo: boolean }; at?: { x: number; y: number } }

@@ -626,6 +626,13 @@ export function exec(command: string, value?: string): void {
   // a typographic property on the selected words (Text ▸ Typography): "property:value"
   else if (command === 'style' && value && TYPOGRAPHY.has(value.slice(0, value.indexOf(':')))) styleRun(value.slice(0, value.indexOf(':')), value.slice(value.indexOf(':') + 1));
   else if (command === 'lineHeight' && value) { editing.style.setProperty('line-height', value); scheduleCommit(); return; }
+  else if (command === 'superscript' || command === 'subscript') {
+    // as elements, not styles: <sup> / <sub> are smaller as well as raised — the span with vertical-align
+    // the browser writes otherwise keeps the letters' size (and is no superscript to a screen reader)
+    try { document.execCommand('styleWithCSS', false, 'false'); } catch { /* old browsers */ }
+    document.execCommand(command);
+    try { document.execCommand('styleWithCSS', false, 'true'); } catch { /* old browsers */ }
+  }
   else {
     const listCommand = command === 'insertUnorderedList' || command === 'insertOrderedList';
     const originalTag = editing.localName;
@@ -1619,6 +1626,7 @@ function endLasso(d: Drag, e: PointerEvent): void {
 }
 
 function onPointerDown(e: PointerEvent): void {
+  post({ ol: 'pressed' });
   if (isCropping() || isNodeEditing() || listDragging()) return;
   notePointer(e);
   // keys typed after leaving a formula, before this press: theirs first

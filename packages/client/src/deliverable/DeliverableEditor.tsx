@@ -42,7 +42,7 @@ import { rebasedSplices, rebaseObjectPaths, objectHtml, imageHtml, insertPlace, 
 import { GUIDES_ATTR, LAYOUT_MARGINS_ATTR, layoutMarginGuides, parseGuides, masterGuides, formatGuides, withGuide, type Guide } from './guides';
 import { deckMargins, deckDesign, builtInLayouts, savedLayouts, layoutFromSlide, saveLayoutOp, applyLayoutOp, placeholderObject, layoutThumb, deckColors, PH_ATTR, PH_LABELS, PH_ROLES, LAYOUT_ATTR, type PhRole, type DesignLooks, type DeckDesign, type Layout } from './decklayouts';
 import { LayoutPicker, type LayoutCard } from './LayoutPicker';
-import { chooseDock, chooseBars, touchScreen, smallScreen, smallDisplay, dockAsked, DOCK_ROW, type DeckDock } from './deckdock';
+import { chooseDock, chooseBars, touchScreen, smallScreen, smallDisplay, dockAsked, DOCK_ROW, CTX_ROOM, type DeckDock } from './deckdock';
 import { ActivityButton, setDeckBars, ACTIVITY_W, type BarsPlace } from '../app/ActivityBar';
 import { sizePt, stepPt } from './units';
 import { deckToolbar, quickGroups, SHAPES, LINES, type DeckTextActions } from './decktoolbar';
@@ -152,6 +152,8 @@ type Inset = { t: number; r: number; b: number; l: number };
 const NO_INSET: Inset = { t: 0, r: 0, b: 0, l: 0 };
 /** how long the bars take to slide away or back while drawing (ms; styles.css ol-bars-leaving / ol-bars-back) */
 const BARS_MS = 180;
+// (CTX_ROOM, deckdock.ts: the room the tools of a selection usually need in the toolbar — a text's about 960 px, a
+// shape's with its text 1190: with less beside the tools they have a line of their own under them, whatever is selected)
 
 /** the natural size of a picture file (null when the browser cannot decode it) */
 async function naturalSize(data: Blob): Promise<{ w: number; h: number } | null> {
@@ -358,7 +360,8 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
   useEffect(() => {
     if (!liveView) return;
     liveScroll.current = scrollRef.current;
-    const onMessage = (e: MessageEvent) => {
+    // (not `onMessage`: the canvas's — tests/deck-*.test.ts take that one declaration out of this file by its name)
+    const onLiveMessage = (e: MessageEvent) => {
       const f = liveFrame.current;
       if (!f || e.source !== f.contentWindow) return;
       const d = e.data as { ol?: string; y?: unknown; path?: unknown } | null;
@@ -367,8 +370,8 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
       // a link to another file of the project (runtime/links.ts)
       else if (d?.ol === 'openPath' && typeof d.path === 'string' && host.docId) openProjectPath(projectOfDoc(host.docId), d.path);
     };
-    addEventListener('message', onMessage);
-    return () => removeEventListener('message', onMessage);
+    addEventListener('message', onLiveMessage);
+    return () => removeEventListener('message', onLiveMessage);
   }, [liveView]);
   const [view, setViewState] = useState<CanvasView>(() => loadView(host.path));
   // the dark theme: a dark grey canvas unless one was chosen; the slides light on dark with smart invert (app/darkpages.ts)
@@ -1329,7 +1332,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
         case 'mathRect': if (fromCanvas) setMathEdit(st => st && st.id === m.id ? { ...st, box: m.box } : st); break;
         case 'mathClose': if (fromCanvas) setMathEdit(st => m.id === undefined || st?.id === m.id ? null : st); break;
         case 'visible': if (fromCanvas && m.slide >= 0) { setCurrent(m.slide); toRail({ ol: 'current', slide: m.slide }); } break;
-        case 'goto': setCurrent(m.slide); toCanvas({ ol: 'scrollTo', slide: m.slide, smooth: false }); toRail({ ol: 'current', slide: m.slide }); break;
+        case 'goto': if (fromRail) railKeys.current = true; setCurrent(m.slide); toCanvas({ ol: 'scrollTo', slide: m.slide, smooth: false }); toRail({ ol: 'current', slide: m.slide }); break;
         case 'ops': {
           const before = text.toString();
           const ok = applyRuntimeOps(m.version, m.ops);
@@ -1369,7 +1372,8 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
           break;
         }
         case 'nodeEditing': if (fromCanvas) { setNodeEd(m.path ? { selected: m.selected, total: m.total } : null); if (m.path && document.activeElement !== canvasFrame.current) canvasFrame.current?.focus(); } break;
-        case 'key': onRuntimeKey(m); break;
+        case 'key': if (!(fromRail && railKey(m))) onRuntimeKey(m); break;
+        case 'pressed': if (fromCanvas) railKeys.current = false; break;
         case 'contextmenu': {
           const f = (fromRail ? railFrame : canvasFrame).current;
           if (!f) break;
@@ -1484,6 +1488,14 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
   /** a swipe turned the page: the next slide comes in from that side */
   const pageDir = useRef<0 | 1 | -1>(0);
   const gotoSlideRef = useRef<(i: number) => void>(() => {});
+  /** a slide of the rail was clicked last (nothing on the canvas since): the keys are the rail's (railKey) */
+  const railKeys = useRef(false);
+  useEffect(() => {
+    // (a press anywhere else in the editor — a toolbar, a pane, the notes — ends it; the canvas says `pressed`)
+    const down = (e: PointerEvent) => { if (!(e.target as Element | null)?.closest?.('.dl-rail')) railKeys.current = false; };
+    document.addEventListener('pointerdown', down, true);
+    return () => document.removeEventListener('pointerdown', down, true);
+  }, []);
   /** a swipe on past the last slide adds one (viewport.ts addsPage): on a touch screen, in a deck that can be changed */
   const addsPage = () => touchRef.current && kindRef.current === 'deck' && !readOnlyRef.current && currentRef.current === slidesRef.current.length - 1;
   const addPageRef = useRef<() => void>(() => {});
@@ -2298,6 +2310,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     italic: () => { if (editingText) exec('italic'); else toggle('font-style', 'italic', 'normal', s => s.style.fontStyle === 'italic'); },
     underline: () => { if (editingText) exec('underline'); else toggle('text-decoration', 'underline', 'none', s => s.style.textDecoration.includes('underline')); },
     strike: () => { if (editingText) exec('strikeThrough'); else toggle('text-decoration', 'line-through', 'none', s => s.style.textDecoration.includes('line-through')); },
+    script: kind => { if (editingText) exec(kind); },
     color: c => { if (editingText) exec('foreColor', c ?? 'inherit'); else styleSel({ color: c }); },
     highlight: c => exec('hiliteColor', c ?? 'transparent'),
     align: a => { if (editingText) exec(a === 'left' ? 'justifyLeft' : a === 'center' ? 'justifyCenter' : a === 'right' ? 'justifyRight' : 'justifyFull'); else styleSel({ 'text-align': a }); },
@@ -2339,6 +2352,21 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     // the <img> itself, or the one inside a crop frame
     const p = one.cropped ? [...one.path, 0] : one.path;
     applyOps([{ t: 'attr', path: p, name: 'src', value: rel }]);
+  };
+  /**
+   * A picture's description (its alt text): what a screen reader says in its place, and what stands
+   * there when the picture does not load — every picture put on a slide had an empty one and nothing
+   * could set it. Asked for from the picture's right-click menu; empty takes it off again.
+   */
+  const describePicture = async () => {
+    const one = imagePath();
+    if (!one) return;
+    const p = one.cropped ? [...one.path, 0] : one.path;
+    const el = elementAt(parseSource(text.toString()).doc, p);
+    const now = el ? attr(el, 'alt') ?? '' : '';
+    const said = await uiPrompt('Describe the picture', 'What the picture shows, in a sentence — read out by screen readers and shown where the picture cannot be (its alt text).', now, { okLabel: 'Save' });
+    if (said === null || said.trim() === now.trim()) return;
+    applyOps([{ t: 'attr', path: p, name: 'alt', value: said.trim() }]);
   };
   /** a project path of a src written relative to the page's folder (./ and ../ resolved), null when it leaves the project */
   const resolveRel = (src: string): string | null => {
@@ -2512,7 +2540,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     ] },
     ...(sel.length > 1 ? [{ label: 'Group', shortcut: 'Ctrl+G', action: () => arrangeSel('group') }] : []),
     ...(sel.some(s => s.kind === 'group' || (s.kind === 'svgpart' && s.tag === 'g')) ? [{ label: 'Ungroup', shortcut: 'Ctrl+Shift+G', action: () => arrangeSel('ungroup') }] : []),
-    sel.every(s => s.locked) ? { label: 'Unlock', action: () => arrangeSel('unlock') } : { label: 'Lock', action: () => arrangeSel('lock') },
+    sel.length && sel.every(s => s.locked) ? { label: 'Unlock', action: () => arrangeSel('unlock') } : { label: 'Lock', action: () => arrangeSel('lock') },
   ];
 
   // an object right-clicked: its menu once the selection it made is in (the canvas sends both at once)
@@ -2539,6 +2567,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
         { label: 'Crop', action: imageTools.crop },
         { label: 'Remove background', action: imageTools.removeBackground },
         { label: 'Replace picture…', action: imageTools.replace },
+        { label: 'Describe the picture (alt text)…', disabled: readOnlyRef.current, action: () => { void describePicture(); } },
       ] : []),
       { label: 'Edit code', action: () => showCode() },
       // a layout's placeholder (decklayouts.ts): what goes in it, said while it is empty — or an ordinary object again
@@ -3010,6 +3039,8 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
    * everything the toolbars, the right-click menus and the keys do, found by its name, its key beside it
    * (the menu bar's search finds them too). Pickers open at the canvas's top left.
    */
+  /** a menu's entries, all greyed when there is nothing they apply to (`off`) */
+  const greyed = (off: boolean, items: MenuItem[]): MenuItem[] => off ? items.map(it => (it as { sep?: boolean }).sep ? it : { ...it, disabled: true, sub: undefined }) : items;
   const deckMenus = (): MenuDef[] => {
     const ro = readOnlyRef.current || locked, deck = kind === 'deck', i = currentRef.current;
     const one = sel.length === 1 ? sel[0] : null;
@@ -3097,11 +3128,15 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
         { label: 'Present from this slide', shortcut: 'Shift+F5', action: () => { void startPresenting(false); } },
         { label: 'Present from the start', shortcut: 'F5', action: () => { void startPresenting(true); } },
       ] }] : []),
-      ...(textOn && !ro ? [{ title: 'Format', items: [
+      // (Format and Arrange stay in the menu bar whatever is selected, greyed while there is nothing they
+      // apply to — they came and went with the selection, and the menus after them moved)
+      ...(!ro ? [{ title: 'Format', items: greyed(!textOn, [
         { label: 'Bold', shortcut: 'Ctrl+B', action: textActions.bold },
         { label: 'Italic', shortcut: 'Ctrl+I', action: textActions.italic },
         { label: 'Underline', shortcut: 'Ctrl+U', action: textActions.underline },
         { label: 'Strikethrough', action: textActions.strike },
+        { label: 'Superscript', disabled: !editingText, action: () => textActions.script?.('superscript') },
+        { label: 'Subscript', disabled: !editingText, action: () => textActions.script?.('subscript') },
         { label: 'Larger', shortcut: 'Ctrl+Shift+.', action: () => fontSize(1) },
         { label: 'Smaller', shortcut: 'Ctrl+Shift+,', action: () => fontSize(-1) },
         { sep: true },
@@ -3115,11 +3150,11 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
         { sep: true },
         { label: 'Clear formatting', shortcut: 'Ctrl+\\', action: textActions.clear },
         ...(master?.similar ? [{ label: `Make ${master.similar} similar text${master.similar === 1 ? '' : 's'} on other slides look like this`, action: master.lookAlike }] : []),
-      ] }] : []),
-      ...(sel.length && !ro ? [{ title: 'Arrange', items: [
+      ]) }] : []),
+      ...(!ro ? [{ title: 'Arrange', items: greyed(!sel.length, [
         ...arrangeItems(),
         ...(master ? [{ sep: true }, ...masterItems(one!, master).filter(m => !(m as MenuItem).info)] : []),
-      ] }] : []),
+      ]) }] : []),
     ];
     return menus;
   };
@@ -3153,6 +3188,32 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     // (P, E and S open Draw: its row shows)
     if (map[k]) { setToolState(map[k]); setDrawOpen(k === 'p' || k === 'e' || k === 's'); setDrawHeld(false); return true; }
     if (k === 'n' && selRef.current.length) { nodesTimer.current = setTimeout(() => { nodesTimer.current = null; arrangeSel('edit-nodes'); }, 600); return true; }
+    return false;
+  };
+  /**
+   * The slide rail's keys (PowerPoint's thumbnail pane, Keynote's navigator): after a click on a slide
+   * in the rail, with nothing selected on the canvas, the arrows, Home and End go from slide to slide,
+   * Delete removes the slide, Ctrl+D duplicates it and Ctrl+↑ / ↓ move it. A press on the canvas, a
+   * selection there or a text being typed takes the keys back (they did nothing on a slide of the rail).
+   */
+  const railKey = (k: { key: string; ctrl: boolean; meta: boolean; shift: boolean; alt: boolean }): boolean => {
+    if (!railKeys.current || kindRef.current !== 'deck' || selRef.current.length || editingTextRef.current || presenting || k.alt) return false;
+    const mod = k.ctrl || k.meta, i = currentRef.current, n = slidesRef.current.length, ro = readOnlyRef.current;
+    if (!mod && !k.shift) {
+      if (k.key === 'ArrowUp' || k.key === 'ArrowLeft') { gotoSlide(i - 1); return true; }
+      if (k.key === 'ArrowDown' || k.key === 'ArrowRight') { gotoSlide(i + 1); return true; }
+      if (k.key === 'Home') { gotoSlide(0); return true; }
+      if (k.key === 'End') { gotoSlide(n - 1); return true; }
+      if ((k.key === 'Delete' || k.key === 'Backspace') && !ro) {
+        if (n > 1) { deleteSlide(i); notify(`Slide ${i + 1} deleted — Ctrl+Z brings it back.`); }
+        return true;
+      }
+    }
+    if (mod && !k.shift && !ro) {
+      if (k.key.toLowerCase() === 'd') { duplicateSlide(i); return true; }
+      if (k.key === 'ArrowUp') { if (i > 0) moveSlide(i, -1); return true; }
+      if (k.key === 'ArrowDown') { if (i < n - 1) moveSlide(i, 1); return true; }
+    }
     return false;
   };
   const onRuntimeKey = (m: Extract<FromRuntime, { ol: 'key' }>) => {
@@ -3199,6 +3260,8 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
       if ((e.target as HTMLElement)?.closest?.('textarea, input')) return;
       if ((e.target as HTMLElement)?.isContentEditable) return;
       const mod = e.ctrlKey || e.metaKey;
+      // a slide of the rail was clicked last: its keys (arrows, Delete, Ctrl+D, Ctrl+↑ / ↓)
+      if (railKey({ key: e.key, ctrl: e.ctrlKey, meta: e.metaKey, shift: e.shiftKey, alt: e.altKey })) { e.preventDefault(); return; }
       // a new formula is opening: what is typed goes into it
       if (typeAhead.current && !mod && !e.altKey && e.key.length === 1 && !document.querySelector('[data-dl-mathedit]')) { e.preventDefault(); typeAhead.current.push(e.key); return; }
       // a text box was just drawn: what is typed goes into it once it is ready
@@ -3720,9 +3783,14 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
   const sides = dock === 'sides' && !barsAway;
   const topBar = !sides && !barsAway;
 
-  // the contextual tools on a row of their own when they do not fit beside the others (nothing hidden)
+  // the contextual tools on a row of their own when they do not fit beside the others (nothing hidden).
+  // The row has room of its own inside the toolbar (styles.css), so whether there is one is decided by the
+  // window, not by what is selected — else the canvas moved with every selection: a row whenever the room
+  // beside the tools is less than a selection's tools usually need (CTX_ROOM), and, once something needed
+  // more than there was, until the window changes.
   const barRef = useRef<HTMLDivElement>(null);
   const [ctxRow, setCtxRow] = useState(false);
+  const ctxStuck = useRef({ w: 0, row: false });
   const checkContextRow = () => {
     const bar = barRef.current;
     if (!bar) return;
@@ -3734,7 +3802,10 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     for (const k of Array.from(bar.children) as HTMLElement[]) if (k !== ctx && k.offsetParent !== null) others += k.offsetWidth + 4;
     const cs = getComputedStyle(bar);
     const room = bar.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0) - others - 16;
-    setCtxRow(need > room);
+    const st = ctxStuck.current;
+    if (st.w !== bar.clientWidth) { st.w = bar.clientWidth; st.row = false; }
+    if (need > room || room < CTX_ROOM) st.row = true;
+    setCtxRow(st.row);
   };
   // Remeasure changing tools before paint, without disconnecting/re-observing the
   // same toolbar after every render (which creates fresh initial notifications).
@@ -3993,7 +4064,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
         {fullBtn}
         {floatSides && !barsAway && barsHandle}
         {barsLockBtn}
-        {kind !== 'page' && !host.bindSvgExporter && <button class="dl-btn dl-present" title="Present from this slide (Shift+F5) — F5 from the first" aria-label="Present" data-dl-present onClick={() => startPresenting(false)}>▶</button>}
+        {kind !== 'page' && !host.bindSvgExporter && <button class="dl-btn dl-present" title={kind === 'poster' ? 'Show the poster on the whole screen (F5)' : 'Present from this slide (Shift+F5) — F5 from the first'} aria-label="Present" data-dl-present onClick={() => startPresenting(false)}>▶</button>}
         <button class="dl-btn dl-more" title="More: objects, comments, code, editing or suggesting, download" aria-label="More" data-dl-more
           onClick={e => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); moreMenu(r.left, r.top); }}>
           ⋯{reviewCount > 0 && <span class="dl-rv-count">{reviewCount}</span>}
@@ -4089,7 +4160,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
         {codeBtn}
         {reviewBtn}
         {modeSwitch}
-        {kind !== 'page' && !host.bindSvgExporter && <button class="dl-btn dl-present" title="Present from this slide (Shift+F5) — F5 from the first" data-dl-present onClick={() => startPresenting(false)}>▶ Present</button>}
+        {kind !== 'page' && !host.bindSvgExporter && <button class="dl-btn dl-present" title={kind === 'poster' ? 'Show the poster on the whole screen (F5)' : 'Present from this slide (Shift+F5) — F5 from the first'} data-dl-present onClick={() => startPresenting(false)}>▶ Present</button>}
         {previewBtn}
         {downloadBtn}
         {statusEl}

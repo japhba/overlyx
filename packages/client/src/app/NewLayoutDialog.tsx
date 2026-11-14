@@ -12,12 +12,12 @@ import { noteArticle } from '../articlekinds';
 import { isE2eProject } from '../e2e/known';
 import { Dialog } from './Dialogs';
 import { ScientificTemplates, chosenDesign } from './ScientificTemplates';
-import { initialDeckSize, rememberDeckSize, sizeOf } from './decksize';
+import { initialDeckSize, initialPosterSize, rememberDeckSize, rememberPosterSize, sizeOf } from './decksize';
 
 type Kind = 'deck' | 'poster' | 'page' | 'article';
 const KINDS: { id: Kind; label: string; hint: string; w: number; h: number; dir: string }[] = [
   { id: 'deck', label: 'Slide deck', hint: 'Blank pages or a design, any size', w: 16, h: 9, dir: 'talk' },
-  { id: 'poster', label: 'Poster', hint: '48 × 36 in or portrait, printed as PDF', w: 48, h: 36, dir: 'poster' },
+  { id: 'poster', label: 'Poster', hint: 'A design, or blank in A0, A1, 48 × 36 in …', w: 48, h: 36, dir: 'poster' },
   { id: 'page', label: 'Web page', hint: 'A project page or a small site', w: 12, h: 9, dir: 'site' },
   { id: 'article', label: 'Article', hint: 'A research post or an essay: written like a document', w: 9, h: 12, dir: 'article' },
 ];
@@ -27,6 +27,7 @@ export function NewLayoutDialog({ project, dir, onClose, onCreated, notify }: { 
   const [kind, setKind] = useState<Kind>('deck');
   const [template, setTemplate] = useState<string>();
   const [size, setSize] = useState(initialDeckSize);
+  const [posterSize, setPosterSize] = useState(initialPosterSize);
   const [folder, setFolder] = useState('talk');
   const [title, setTitle] = useState('');
   const [touched, setTouched] = useState(false);
@@ -37,11 +38,12 @@ export function NewLayoutDialog({ project, dir, onClose, onCreated, notify }: { 
     const f = (touched || selectedKind === kind ? folder.trim().replace(/^\/+|\/+$/g, '') : '') || KINDS.find(x => x.id === selectedKind)!.dir;
     setBusy(true);
     const design = selectedKind === 'article' || selectedKind === 'page' ? undefined : chosenDesign(selectedKind, selectedKind === kind ? template : undefined);
-    if (design === 'blank') rememberDeckSize(size);
+    const poster = selectedKind === 'poster';
+    if (design === 'blank') { if (poster) rememberPosterSize(posterSize); else rememberDeckSize(size); }
     // an article is a document (core html/article.ts), written in the document editor: its folder's index.html
     const made = selectedKind === 'article'
       ? api.newDoc(project, (dir ? dir + '/' : '') + f + '/index.html', { title: title.trim() || undefined }).then(r => { noteArticle(r.id, true); return r; })
-      : api.newDeliverable(project, (dir ? dir + '/' : '') + f, selectedKind, title.trim() || undefined, design, design === 'blank' ? sizeOf(size) : undefined);
+      : api.newDeliverable(project, (dir ? dir + '/' : '') + f, selectedKind, title.trim() || undefined, design, design === 'blank' ? (poster ? sizeOf(posterSize, 'poster') : sizeOf(size)) : undefined);
     made.then(r => { onClose(); onCreated(r.id); })
       .catch(e => { setBusy(false); notify('Could not create it: ' + (e as Error).message, 'error'); });
   };
@@ -64,7 +66,7 @@ export function NewLayoutDialog({ project, dir, onClose, onCreated, notify }: { 
           );
         })}
       </div>
-      {kind !== 'page' && kind !== 'article' && <ScientificTemplates kind={kind} value={template} onChange={setTemplate} size={size} onSize={setSize} />}
+      {kind !== 'page' && kind !== 'article' && <ScientificTemplates kind={kind} value={template} onChange={setTemplate} size={kind === 'poster' ? posterSize : size} onSize={kind === 'poster' ? setPosterSize : setSize} />}
       {kind === 'article' && <p class="dialog-hint">Prose, formulas, citations and figures, written with comments and suggestions like any document — and published as a web page, with interactive figures your agent can build.</p>}
       <label class="dialog-row">Title <input value={title} placeholder="Untitled" onInput={e => setTitle((e.target as HTMLInputElement).value)} onKeyDown={e => { if (e.key === 'Enter') create(); }} data-deliverable-title /></label>
       <label class="dialog-row">Folder <input value={folder} onInput={e => { setTouched(true); setFolder((e.target as HTMLInputElement).value); }} onKeyDown={e => { if (e.key === 'Enter') create(); }} data-deliverable-folder /></label>

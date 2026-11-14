@@ -5,7 +5,7 @@
  * chosen is kept for the next deck, also for the decks made without a dialog (▭ Slides on a blank
  * page, a name ending in .html, + New slides of an empty project).
  */
-import { DECK_SIZES, type PagePreset, type PageSize } from '@overlyx/core/html/deliverable.ts';
+import { DECK_SIZES, POSTER_SIZES, type PagePreset, type PageSize } from '@overlyx/core/html/deliverable.ts';
 
 export interface DeckSizeChoice { id: string; portrait: boolean }
 
@@ -40,6 +40,10 @@ export function deckSizes(): PagePreset[] {
   return d ? [d, ...DECK_SIZES] : [...DECK_SIZES];
 }
 
+/** what is made blank: a deck, or a poster (its sizes are the boards': A0 … 36 × 24 in) */
+export type BlankKind = 'deck' | 'poster';
+export const pageSizes = (kind: BlankKind = 'deck'): PagePreset[] => kind === 'poster' ? [...POSTER_SIZES] : deckSizes();
+
 /** a preset turned to the orientation */
 export function turned(p: PageSize, portrait: boolean): PageSize {
   const long = Math.max(p.width, p.height), short = Math.min(p.width, p.height);
@@ -47,8 +51,8 @@ export function turned(p: PageSize, portrait: boolean): PageSize {
 }
 
 /** the page size of a choice (an unknown one: the first there is) */
-export function sizeOf(c: DeckSizeChoice): PageSize {
-  const sizes = deckSizes();
+export function sizeOf(c: DeckSizeChoice, kind: BlankKind = 'deck'): PageSize {
+  const sizes = pageSizes(kind);
   return turned(sizes.find(s => s.id === c.id) ?? sizes[0], c.portrait);
 }
 
@@ -77,6 +81,21 @@ export function initialDeckSize(): DeckSizeChoice {
 
 export function rememberDeckSize(c: DeckSizeChoice): void {
   try { localStorage.setItem(KEY, JSON.stringify(c)); } catch { /* no storage */ }
+}
+
+const POSTER_KEY = 'ol.posterSize';
+
+/** a blank poster's size the dialog starts with: the last one chosen, else A0 upright */
+export function initialPosterSize(): DeckSizeChoice {
+  try {
+    const c = JSON.parse(localStorage.getItem(POSTER_KEY) ?? 'null') as DeckSizeChoice | null;
+    if (c && typeof c.id === 'string' && POSTER_SIZES.some(s => s.id === c.id)) return { id: c.id, portrait: !!c.portrait };
+  } catch { /* no storage */ }
+  return { id: 'a0', portrait: true };
+}
+
+export function rememberPosterSize(c: DeckSizeChoice): void {
+  try { localStorage.setItem(POSTER_KEY, JSON.stringify(c)); } catch { /* no storage */ }
 }
 
 /** the size of a deck made without asking: the last one chosen, else this tablet's or 16:9 */
