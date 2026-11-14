@@ -62,6 +62,8 @@ import { AnimationPane, type Sequence } from './AnimationPane';
 import { ObjectsPane } from './ObjectsPane';
 import { CiteDialog, Dialog, uiPrompt, uiConfirm } from '../app/Dialogs';
 import { askQr, qrEditOps, qrHtml, qrPlaceholderAt, qrTextAt, qrWarning } from './qrcode';
+import { BackgroundPicker } from './BackgroundPicker';
+import { bgOfStyle, bgStyle, picturesIn } from './background';
 import type { DocMeta } from '../api';
 import { citedKeys, citeEntry, type CiteEntry } from '@overlyx/core/html/refs.ts';
 import type { MathJaxMacro } from '@overlyx/core/html/deckextras.ts';
@@ -2878,9 +2880,8 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
       ...slideLinkItems(i),
       ...(kind !== 'page' ? [
         { sep: true },
-        { label: deck ? 'Background colour of this slide…' : 'Background colour…', disabled: !sp || ro, action: () => pickAt(x, y, 'Slide background', close => <ColorGrid current={null} close={close} none="As the design has it" onPick={c => { if (sp) applyOps([{ t: 'style', path: sp, set: { background: c } }]); }} />) },
+        { label: deck ? 'Background of this slide…' : 'Background…', disabled: !sp || ro, action: () => backgroundPicker(x, y, false, i) },
         ...(deck ? [
-          { label: 'Background colour of every slide…', disabled: ro, action: () => pickAt(x, y, 'Background of every slide', close => <ColorGrid current={null} close={close} none="As the design has it" onPick={c => slideBackground(c, true)} />) },
           { label: 'Layout of this slide…', disabled: ro, action: () => pickAt(x, y, 'Layout of this slide', close => layoutPicker(i, close, true)) },
           { label: themeRef.current ? 'Done editing the theme' : 'Edit theme', disabled: ro, action: () => setTheme(!themeRef.current) },
           { sep: true },
@@ -3059,12 +3060,26 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     const on = !slidesRef.current[i]?.skipped;
     if (applyOps([{ t: 'attr', path: p, name: SKIP_ATTR, value: on ? '' : null }]) && on) notify(`Slide ${i + 1} is skipped: it is not presented or printed. Skip slide again brings it back.`);
   };
-  /** the background colour of the slide shown, or of every slide (always, in the theme view) */
-  const slideBackground = (c: string | null, every = false) => {
-    const ps = slidePaths(text.toString());
-    const paths = every || themeRef.current ? ps : ps[currentRef.current] ? [ps[currentRef.current]] : [];
-    if (paths.length) applyOps(paths.map(p => ({ t: 'style' as const, path: p, set: { background: c } })));
+  /** the background (a colour, gradient or picture: background.ts) of the slide shown, or of every slide (always, in the theme view) */
+  const slideBackground = (c: string | null, every = false, slide?: number) => {
+    const ps = slidePaths(text.toString()), i = slide ?? currentRef.current;
+    const paths = every || themeRef.current ? ps : ps[i] ? [ps[i]] : [];
+    if (paths.length) applyOps(paths.map(p => ({ t: 'style' as const, path: p, set: bgStyle(c) })));
   };
+  /** Background…: colour, gradient or picture, for this slide or every slide (BackgroundPicker.tsx) — also the toolbar's Background palette */
+  const backgroundPanel = (close: () => void, every = false, slide?: number) => {
+    const cur = text.toString(), i = slide ?? currentRef.current;
+    const sp = slidePaths(cur)[i];
+    const el = sp ? elementAt(parseSource(cur).doc, sp) : null;
+    return (
+      <BackgroundPicker current={el ? bgOfStyle(attr(el, 'style') ?? '') : null} scopes={kindRef.current === 'deck' && !themeRef.current} every={every || themeRef.current} pictures={picturesIn(cur)} close={close}
+        upload={f => (readOnlyRef.current ? Promise.resolve(null) : uploadFile({ name: f.name, type: f.type, data: f }))}
+        thumb={async rel => { const r = resolveRel(rel); return r && host.readFile ? URL.createObjectURL(await host.readFile(r)) : null; }}
+        apply={(css, all) => slideBackground(css, all, i)} />
+    );
+  };
+  const backgroundPicker = (x: number, y: number, every = false, slide?: number) =>
+    pickAt(x, y, kindRef.current === 'deck' ? 'Background' : 'Poster background', close => backgroundPanel(close, every, slide));
 
   /* ------------------------------------------------------------- the theme view (Edit theme) */
 
@@ -3278,8 +3293,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
         { label: 'Save as layout…', disabled: ro, action: () => { void saveAsLayout(i); } },
         // (Google Slides' Slide ▸ Edit theme: the slide master — what is on every slide, the colours, fonts and layouts)
         { label: 'Edit theme', checked: themeOn, disabled: ro || (suggesting && !themeOn), action: () => setTheme(!themeOn) },
-        { label: 'Background colour…', disabled: ro, action: () => pick('Slide background', close => <ColorGrid current={null} close={close} none="As the design has it" onPick={c => slideBackground(c)} />) },
-        { label: 'Background colour of every slide…', disabled: ro, action: () => pick('Background of every slide', close => <ColorGrid current={null} close={close} none="As the design has it" onPick={c => slideBackground(c, true)} />) },
+        { label: 'Background…', disabled: ro, action: () => { const p = at(); backgroundPicker(p.x, p.y); } },
         { label: 'Slide numbers', disabled: ro, action: insertSlideNumbers },
         { label: 'Page setup…', disabled: ro || suggesting, action: () => pageSetup() },
         { sep: true },
@@ -3867,7 +3881,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     undo: () => { toCanvas({ ol: 'stopText' }); setTimeout(() => host.undo(), 30); }, redo: () => { toCanvas({ ol: 'stopText' }); setTimeout(() => host.redo(), 30); },
     insertImage: () => { phPicture.current = null; fileInput.current?.click(); },
     text: textActions, paint, table: tableCtx, arrange: arrangeSel, place: placeSel, groupLayout: layout => toCanvas({ ol: 'groupLayout', layout }), image: imageTools, remove: removeSel,
-    slideBackground,
+    slideBackground, backgroundPanel: close => backgroundPanel(close),
     newSlide: () => newSlide(currentRef.current),
     layoutPicker: (close, apply) => layoutPicker(currentRef.current, close, apply),
     master: kind === 'deck' ? masterOps(sel.length === 1 ? sel[0] : null) : undefined,
@@ -4517,7 +4531,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
             aspect={slideSizeNow().w / slideSizeNow().h} readOnly={locked} pick={pickAt}
             setColor={(name, value) => changeTheme({ color: name, value })}
             setFont={(which, css, google) => changeTheme({ font: which, value: css, google })}
-            background={c => slideBackground(c, true)}
+            background={(x, y) => backgroundPicker(x, y, true)}
             select={p => toCanvas({ ol: 'select', paths: [p] })} hover={p => toCanvas({ ol: 'hover', path: p })}
             layoutMenu={layoutMenu} saveLayout={() => { void saveAsLayout(currentRef.current); }}
             close={() => { setThemePane(false); toCanvas({ ol: 'hover', path: null }); }} />

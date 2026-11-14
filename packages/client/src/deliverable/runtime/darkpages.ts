@@ -3,6 +3,8 @@
  * (app/darkpages.ts, `{ol:'dark'}`): each slide inverted with a 180° hue rotation, so colours keep
  * their hue, and what is a picture inverted back to its own colours: videos, canvases, embedded
  * frames, backgrounds with a picture, SVG images, QR codes — and the <img> pictures that are photographs.
+ * A slide whose background is a picture (Slide ▸ Background) is not inverted at all: its photo and
+ * the text written for it stay as they are presented.
  * With `figures` (prefs.invertFigures) an <img> is judged by its pixels as the editor's figures are
  * (editor/figureinvert.ts): a plot or diagram on a white or transparent ground is line art and stays
  * inverted with the slide (`data-ol-lineart`, the runtime's own attribute — never written to the
@@ -71,6 +73,8 @@ export function setDarkSlides(on: boolean, figures: boolean): void {
     css.textContent = `html.ol-invert:not(.ol-invert-page) .slide { filter: ${F}; }
       html.ol-invert:not(.ol-invert-page) .slide ${pictures} { filter: ${F}; }
       html.ol-invert.ol-invert-figures:not(.ol-invert-page) .slide img[${LINEART}] { filter: none; }
+      html.ol-invert:not(.ol-invert-page) .slide:is([style*="url("]) { filter: none; }
+      html.ol-invert:not(.ol-invert-page) .slide:is([style*="url("]) ${pictures} { filter: none; }
       html.ol-invert.ol-invert-page { filter: ${F}; }
       :where(html.ol-invert.ol-invert-page) { background-color: #fff; }
       html.ol-invert.ol-invert-page > ol-overlay[data-ol-runtime] { filter: ${F} !important; }

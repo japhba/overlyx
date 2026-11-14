@@ -11,6 +11,7 @@ import { useEffect, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import { mathPreview, type ToolButton, type Palette } from '../app/Toolbar';
 import { ColorGrid } from '../app/ColorGrid';
+import { FillPicker } from './BackgroundPicker';
 import type { SelItem, SelStyle, Tool, Paint, ArrangeHow, DeliverableKind, NodeCmd, GroupLayout } from './protocol';
 import { DEFAULT_GROUP_LAYOUT } from './grouplayout';
 import { ASPECTS } from './runtime/crop';
@@ -84,6 +85,8 @@ export interface DeckCtx {
   remove(): void;
   /** the slide's background colour — or (`every`) every slide's */
   slideBackground(c: string | null, every?: boolean): void;
+  /** the background picker (BackgroundPicker.tsx: colour, gradient, picture) for the Background palette */
+  backgroundPanel?(close: () => void): ComponentChildren;
   /** the guides (guides.ts): shown or not, and what can be done with them (the slide's right-click menu's Guides) */
   guides: { shown: boolean; items(): { label: string; action: () => void; active?: boolean }[] };
   newSlide(): void;
@@ -553,7 +556,7 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
     const boxShape = shapes.some(s => s.kind === 'shape');
     context.push([
       { id: 'dk-fill', title: 'Fill colour', icon: '', html: swatchIcon(ICONSVG.fill, st.fill),
-        palette: { title: 'Fill colour', render: close => <ColorGrid current={st.fill} close={close} none="Transparent" onPick={col => c.paint({ fill: col })} /> } },
+        palette: { title: 'Fill colour', render: close => <FillPicker current={st.fill} close={close} fill={col => c.paint({ fill: col })} /> } },
       { id: 'dk-stroke', title: 'Border colour', icon: '', html: swatchIcon(ICONSVG.stroke, st.stroke),
         palette: { title: 'Border colour', render: close => <ColorGrid current={st.stroke} close={close} none="No border" onPick={col => c.paint({ stroke: col })} /> } },
       weightBtn('dk-weight', 'Border weight', st.strokeWidth, w => c.paint(w === 0 ? { stroke: null } : { strokeWidth: w })),
@@ -683,8 +686,8 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
     section(what);
     // (words on the buttons, as Google Slides' Background, Layout and Edit theme: what they do is not drawn easily)
     context.push([
-      { id: 'dk-bg', title: theme ? 'Background colour of every slide' : deck ? 'Background colour — of this slide, or of every slide' : `${what} background colour`, icon: 'Background',
-        palette: { title: theme ? 'Background of every slide' : `${what} background`, render: close => <BackgroundPalette close={close} every={deck} always={!!theme} onPick={c.slideBackground} /> } },
+      { id: 'dk-bg', title: theme ? 'Background of every slide — a colour, gradient or picture' : deck ? 'Background — a colour, gradient or picture, of this slide or of every slide' : `${what} background — a colour, gradient or picture`, icon: 'Background',
+        palette: { title: theme ? 'Background of every slide' : `${what} background`, render: close => c.backgroundPanel ? c.backgroundPanel(close) : <BackgroundPalette close={close} every={deck} always={!!theme} onPick={c.slideBackground} /> } },
       ...(deck && !theme ? [{ id: 'dk-applylayout', title: 'Layout — this slide in another layout (title slide, title and body, two columns …): its words go into the new layout’s places; or this slide saved as a layout', icon: 'Layout',
         palette: { title: 'Layout of this slide', render: (close: () => void) => c.layoutPicker(close, true) } } as ToolButton] : []),
       ...(deck && c.theme ? [{ id: 'dk-theme', icon: theme ? 'Done' : 'Edit theme', active: theme, disabled: c.theme.disabled && !theme, action: c.theme.toggle,

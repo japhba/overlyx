@@ -34,7 +34,8 @@ interface Props {
   setColor(name: string, value: string): void;
   /** `css` null: the headings as the text */
   setFont(which: 'text' | 'headings', css: string | null, google?: string): void;
-  background(c: string | null): void;
+  /** Background of every slide…: the background picker at (x, y) — a colour, gradient or picture */
+  background(x: number, y: number): void;
   select(path: Path): void;
   hover(path: Path | null): void;
   /** a saved layout's menu at (x, y): a new slide in it, rename, the slide shown in its place, delete */
@@ -98,7 +99,7 @@ export function ThemePane({ theme, fontWarning, objects, slide, sel, layouts, as
         <div class="dl-anim-stephead">Background</div>
         <div class="dl-theme-row">
           <button type="button" class="dl-btn dl-theme-wide" disabled={readOnly} data-dl-theme-bg
-            onClick={e => { const p = at(e); pick(p.x, p.y, 'Background of every slide', c => <ColorGrid current={null} close={c} none="As the design has it" onPick={background} />); }}>
+            onClick={e => { const p = at(e); background(p.x, p.y); }}>
             Background of every slide…
           </button>
         </div>

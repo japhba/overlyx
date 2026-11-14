@@ -1792,6 +1792,27 @@ blend.
     frame of its own out of sight (the rail's `thumb` page once more, every slide at its size) gets
     the editor's settled text — a second after the last change, never while the pen writes — and
     answers `check` with `checked`; closing the pane removes it. Unit test: `tests/deck-checks.test.ts`.
+  * **Backgrounds and gradients** (`deliverable/BackgroundPicker.tsx`, `background.ts`): *Slide ▸
+    Background…*, the slide's or poster's right-click menu and the theme pane's *Background of every
+    slide…* open one picker — **Colour**, **Gradient** (linear at an angle — a slider with the eight
+    directions as rungs — or radial; two to six colours, each with its position; six starting points)
+    or **Picture** (one the deck already uses, or one from the computer, uploaded to `images/`; *Fill*,
+    *Fit* or *Tile*; *Dim* 0–80 % towards white or black so text stays readable) — for *This slide* or
+    *Every slide* (decks; the theme view always every slide). It is plain CSS in the slide's `style`, so
+    presenting, the PDF, thumbnails and the website zip show it without OverLyX:
+    `background: linear-gradient(135deg, #1a73e8 0%, #9334e6 100%)`,
+    `background: radial-gradient(circle, #ffffff 0%, #c6dafc 100%)`,
+    `background: linear-gradient(rgba(0, 0, 0, 0.4), rgba(0, 0, 0, 0.4)), url('images/hall.jpg') center / cover no-repeat`
+    (the first layer is the dimming; a fitted picture ends in `#ffffff` for what it leaves free). The
+    longhands that would fight it (`background-color`, `-image`, `-size` …) are removed with it;
+    *As the design has it* removes the slide's own background. A background written by hand in
+    another form is shown as it is and replaced only when another is chosen. The **fill palette** has
+    *Gradient…* too: a box gets the CSS gradient as its `background`; a drawing's shapes (triangles,
+    stars, Inkscape drawings) get an SVG paint server — `<defs><linearGradient id="olg…"
+    gradientTransform="rotate(…)">` with its stops, first in the drawing — and `fill="url(#olg…)"`.
+    Smart invert: gradients invert with the slide (hues kept); a slide whose background is a picture
+    is not inverted at all (`runtime/darkpages.ts`), so the photo and the text written for it stay as
+    presented. `tests/deck-background.test.ts`.
   * **Usability survey, 14 Nov 2026** (the user: "survey usability … feature completeness of the
     layout editors, especially slides and posters … improve what you think could be better"; walked
     through as a new user on an isolated instance, with a code inventory beside it). **Fixed then**:

@@ -17,6 +17,7 @@ import { pxToPt } from '../units';
 import { srcOf, pathOf, slideOf, docRect, liveAt } from './env';
 import { pathCommand } from './pathedit';
 import { DEFAULT_GROUP_LAYOUT, groupLayoutOf, laidOutGroup, type GroupMemberBox } from '../grouplayout';
+import { isGradient, svgGradient } from '../background';
 
 export function arrange(how: ArrangeHow): void {
   const sel = selection();
@@ -394,14 +395,15 @@ export function valign(v: 'flex-start' | 'center' | 'flex-end', centre = false):
 
 export function paint(p: Paint): void {
   const sel = selection().filter(el => !isLocked(el));
-  const ops: HtmlOp[] = [];
+  const ops: HtmlOp[] = [], defs: HtmlOp[] = [];
   for (const el of sel) {
     const path = pathOf(el);
     if (!path) continue;
-    if (el.localName === 'svg' || isSvgPart(el)) svgPaint(el, path, p, ops);
+    if (el.localName === 'svg' || isSvgPart(el)) svgPaint(el, path, p, ops, defs);
     else boxPaint(el, path, p, ops);
   }
-  commit(ops, { select: 'keep' });
+  // (gradients' definitions last: they go first in their drawings, after the paths above were used)
+  commit([...ops, ...defs], { select: 'keep' });
 }
 
 function boxPaint(el: Element, path: Path, p: Paint, ops: HtmlOp[]): void {
@@ -425,7 +427,7 @@ function boxPaint(el: Element, path: Path, p: Paint, ops: HtmlOp[]): void {
   if (Object.keys(set).length) ops.push({ t: 'style', path, set });
 }
 
-function svgPaint(el: Element, path: Path, p: Paint, ops: HtmlOp[]): void {
+function svgPaint(el: Element, path: Path, p: Paint, ops: HtmlOp[], defs: HtmlOp[]): void {
   const root = el.localName === 'svg' ? el : null;
   // the drawing as a whole: opacity, shadow on the <svg>
   if (p.opacity !== undefined || p.shadow !== undefined) {
@@ -435,6 +437,14 @@ function svgPaint(el: Element, path: Path, p: Paint, ops: HtmlOp[]): void {
     ops.push({ t: 'style', path, set });
   }
   const shapes = shapesOf(el);
+  // a gradient fill (the fill palette's): a paint server in the drawing, the shapes filled with it (background.ts)
+  const svgRoot = root ?? (el as SVGGraphicsElement).ownerSVGElement, rootPath = svgRoot ? pathOf(svgRoot) : null;
+  let gradientDef: string | null = null;
+  if (isGradient(p.fill) && rootPath) {
+    const id = `olg${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`;
+    gradientDef = svgGradient(p.fill!, id);
+    if (gradientDef) p = { ...p, fill: `url(#${id})` };
+  }
   for (const s of shapes) {
     const sp = s === el ? path : pathOf(s);
     if (!sp) continue;
@@ -468,6 +478,7 @@ function svgPaint(el: Element, path: Path, p: Paint, ops: HtmlOp[]): void {
     }
   }
   if (p.stroke !== undefined && p.stroke !== null && root && shapes.some(s => s.getAttribute('stroke') === 'currentColor')) ops.push({ t: 'style', path, set: { color: p.stroke } });
+  if (gradientDef && rootPath) defs.push({ t: 'insert', parent: rootPath, index: 0, html: `<defs>${gradientDef}</defs>` });
   // an arrow tip asked for where the drawing has none defined: a marker added to it
   if ((p.arrowStart || p.arrowEnd) && root && !root.querySelector('marker')) {
     const id = markerId(el, root);
