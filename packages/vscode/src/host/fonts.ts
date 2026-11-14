@@ -71,7 +71,7 @@ export function fontService(dir: string, who: () => Promise<{ host: string; auth
   const fetchFamily = async (family: string) => {
     const css = await cached(path.join(dir, 'css', slugOf(family) + '.css'), DAY, 'google.css', '?family=' + encodeURIComponent(family));
     if (css?.status !== 200) return;
-    for (const m of css.data.toString('utf8').matchAll(/url\((?:\/api\/fonts\/)?google\/([a-z0-9-]{1,60})\/([a-z0-9-]{1,80}\.ttf)\)/g)) {
+    for (const m of css.data.toString('utf8').matchAll(/url\((?:\/api\/fonts\/)?google\/([a-z0-9-]{1,60})\/([a-z0-9-]{1,80}\.(?:ttf|woff2))\)/g)) {
       await cached(path.join(dir, 'files', m[1], m[2]), Infinity, `google/${m[1]}/${m[2]}`, '');
     }
   };
@@ -108,10 +108,11 @@ export function fontService(dir: string, who: () => Promise<{ host: string; auth
       // (an older server names the files from its root: here they are relative to this stylesheet)
       return { status: 200, type: 'text/css', body: got?.status === 200 ? got.data.toString('utf8').replace(/url\(\/api\/fonts\/google\//g, 'url(google/') : '', cache: 'no-cache' };
     }
-    const file = /^google\/([a-z0-9-]{1,60})\/([a-z0-9-]{1,80}\.ttf)$/.exec(sub);
+    // (.woff2: the parts of a font by Unicode range — Noto Color Emoji, server googlefonts.ts WEB_SUBSETS)
+    const file = /^google\/([a-z0-9-]{1,60})\/([a-z0-9-]{1,80}\.(?:ttf|woff2))$/.exec(sub);
     if (file) {
       const got = await cached(path.join(dir, 'files', file[1], file[2]), Infinity, sub, '');
-      return got?.status === 200 ? { status: 200, type: 'font/ttf', body: got.data, cache: 'max-age=31536000, immutable' } : json(404, { error: 'no such font file' });
+      return got?.status === 200 ? { status: 200, type: file[2].endsWith('.woff2') ? 'font/woff2' : 'font/ttf', body: got.data, cache: 'max-age=31536000, immutable' } : json(404, { error: 'no such font file' });
     }
     if (sub === 'info' || sub === 'sample') {
       if (!FAMILY.test(family)) return json(404, { error: 'not a Google font' });

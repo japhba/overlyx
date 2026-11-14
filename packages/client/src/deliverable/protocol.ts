@@ -455,7 +455,7 @@ export type FromRuntime =
   | { ol: 'pressed' }
   /** `on`: what was right-clicked — an object (now selected), a slide's empty area, or the canvas around the pages; `weave`: two shapes cross there (runtime/weave.ts) */
   /** (`at`: the point of the slide right-clicked, slide px — a guide added there) */
-  | { ol: 'contextmenu'; x: number; y: number; slide?: number; on?: 'object' | 'slide' | 'canvas'; weave?: { label: string; undo: boolean }; at?: { x: number; y: number } }
+  | { ol: 'contextmenu'; x: number; y: number; slide?: number; on?: 'object' | 'slide' | 'canvas'; weave?: { label: string; undo: boolean }; at?: { x: number; y: number }; /** an emoji right-clicked in the text being retyped (selected now: runtime/emojipick.ts) */ emoji?: string }
   | { ol: 'visible'; slide: number }
   /** a slide of the slide list clicked — with Shift (a range) or Ctrl/⌘ (one more or less); `open`: twice (the sorter opens it) */
   | { ol: 'goto'; slide: number; shift?: boolean; ctrl?: boolean; open?: boolean }

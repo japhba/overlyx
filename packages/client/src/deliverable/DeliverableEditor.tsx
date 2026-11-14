@@ -18,7 +18,7 @@ import { showContextMenu, closeContextMenu, type MenuItem } from '../editor/cont
 import { editSvgFile } from '../editor/svgEditorEvents';
 import { drawDraft, figureMenuItems, newDraft, switchVersion, type FigureSlot } from '../editor/figuredraft';
 import { isFigureDraft, projectOfDoc } from '@overlyx/core';
-import { openDeckEmoji } from '../editor/emoji/deck';
+import { openDeckEmoji, deckEmojiMenu } from '../editor/emoji/deck';
 import { openProjectPath } from '../openpath';
 import { Toolbar, ICONS, type ToolButton } from '../app/Toolbar';
 import { ColorGrid } from '../app/ColorGrid';
@@ -1421,7 +1421,8 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
           const s = fromRail ? railScale : scale;
           const x = r.left + m.x * s, y = r.top + m.y * s;
           menuPoint.current = fromRail ? null : m.at ?? null;
-          if (fromRail) slideMenu(x, y, m.slide ?? currentRef.current);
+          if (m.emoji && !fromRail) deckEmojiMenuAt(x, y, m.emoji);
+          else if (fromRail) slideMenu(x, y, m.slide ?? currentRef.current);
           else if (m.on === 'canvas') canvasMenu(x, y);
           else if (m.on === 'slide' && !selRef.current.length) emptySlideMenu(x, y, m.slide ?? currentRef.current);
           // (after the selection the right-click made has come in: the menu is that object's)
@@ -3805,6 +3806,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
   };
   /** Insert ▸ Emoji… / Ctrl+; while typing in a text: the emoji keyboard (editor/emoji/deck.ts) */
   const deckEmoji = () => openDeckEmoji({ exec, ensureFont, focus: () => canvasFrame.current?.focus() });
+  const deckEmojiMenuAt = (x: number, y: number, emoji: string) => showContextMenu(x, y, deckEmojiMenu(emoji, { exec, ensureFont, focus: () => canvasFrame.current?.focus() }));
   const toggleObjects = (open = !objOpen) => {
     setObjOpen(open);
     try { localStorage.setItem('ol.objPane', open ? '1' : '0'); } catch { /* private window */ }

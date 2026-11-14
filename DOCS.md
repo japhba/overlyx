@@ -4703,7 +4703,10 @@ licence was read at its source:
   `<span style="font-family: 'Noto Color Emoji'">👍🏽</span>` (Noto Emoji's styles add `font-weight`),
   and the family is linked from Google Fonts in the page's `<head>` like the Text toolbar's fonts
   (`fontResource`, `Noto Color Emoji:wght@400`), so it survives presenting, the PDF and the website zip
-  as any linked font does. Make an emoji… and the right-click row are not there yet on slides.
+  as any linked font does. A **right-click on an emoji** while typing in a text (the runtime selects
+  it: `runtime/emojipick.ts`, the `contextmenu` message's `emoji`) shows the same row of fonts; a click
+  puts the emoji back in that font (the device's own: `font-family: inherit`, as the Text toolbar's
+  Default). Make an emoji… is not offered on slides yet.
 * **Make an emoji…** (the keyboard's foot; `editor/emoji/make.ts`, server `emojimake.ts`,
   `POST /api/ai/emoji`): describe the emoji, pick the font whose style to follow (an open one: not
   the device's, whose emoji may be proprietary) and the example emoji (five by default); the

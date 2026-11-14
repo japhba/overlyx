@@ -26,6 +26,7 @@
 import type { Path, SelItem, SelStyle, Tool, Rect, HtmlOp, ObjKind, KeyPress, InkStyle, PeerInfo, TextCaret, WordsStyle, ReliabilityEvent, ReliabilityPointer } from '../protocol';
 import { ASIDE_ATTR } from '../protocol';
 import { COMMENT_INK_ATTR } from '@overlyx/core/html/review.ts';
+import { emojiAtPointer } from './emojipick';
 import { inkOn } from '../../app/contrast';
 import { MODE, post, state, srcOf, link, pathOf, liveAt, sourced, slides, slideOf, docRect, isForeign, sendLayout, penWork } from './env';
 import { mapAssets, restoreMappedAssets } from '../offlineassets';
@@ -3865,6 +3866,7 @@ function onContextMenu(e: MouseEvent): void {
   if (isCropping()) return;
   e.preventDefault();
   e.stopPropagation();
+  if (editing) { const emoji = emojiAtPointer(editing, e.clientX, e.clientY); if (emoji) { post({ ol: 'contextmenu', x: e.clientX, y: e.clientY, on: 'object', emoji }); return; } }
   // (typing in a table's cell: the table's menu — rows and columns)
   if (editing && !typingInCell()) return;
   const el = objectFor(e.target as Element, e.ctrlKey || e.metaKey, { x: e.clientX, y: e.clientY });
