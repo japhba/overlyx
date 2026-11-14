@@ -530,6 +530,9 @@ export const api = {
   /** the History pane (app/history/, server history.ts): name a version; restore a part (`cur` at `at` of the live text becomes `text`); the project's versions */
   nameVersion: (id: string, vid: number, name: string) => req<{ ok: boolean }>('PATCH', `/api/docs/${encId(id)}/versions/${vid}`, { name }),
   restorePart: (id: string, vid: number, part: { at: number; cur: string; text: string }) => req<{ at: number }>('POST', `/api/docs/${encId(id)}/versions/${vid}/part`, part),
+  projectChanges: (project: string) => req<{ commits: { hash: string; author: string; date: number; message: string; files: { status: string; path: string }[] }[] | null }>('GET', `/api/projects/${encodeURIComponent(project)}/history/git`),
+  projectFileAt: (project: string, hash: string, path: string, parent = false) => fetch(`${API_BASE}/api/projects/${encodeURIComponent(project)}/history/git/${hash}/file?path=${encodeURIComponent(path)}${parent ? '&parent=1' : ''}`).then(r => (r.ok ? r.text() : r.status === 404 ? '' : Promise.reject(new Error(`${r.status} ${r.statusText}`)))),
+  restoreDeletedFile: (project: string, hash: string, path: string) => req<{ ok: boolean }>('POST', `/api/projects/${encodeURIComponent(project)}/history/git/${hash}/restore`, { path }),
   projectHistory: (project: string) => req<{ recent: (VersionInfo & { doc: string; path: string })[]; files: { doc: string; path: string; exists: boolean; versions: number; last: number }[] }>('GET', `/api/projects/${encodeURIComponent(project)}/history`),
   /** the entries of `keys` in a document's bibliography (with their fields: decks render citations from them) */
   bibKeys: (id: string, keys: string[]) => req<{ entries: (BibItem & { type?: string; fields?: Record<string, string>; authorShort?: string })[] }>('GET', `/api/docs/${encId(id)}/bib?keys=${encodeURIComponent(keys.join(','))}`),

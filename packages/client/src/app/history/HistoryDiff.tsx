@@ -21,8 +21,11 @@ function Pieces({ list, side }: { list: Piece[]; side: 'old' | 'new' }) {
   return <>{list.map((p, i) => p.kind === 'same' ? <span key={i}>{p.text}</span> : side === 'old' ? <del key={i}>{p.text}</del> : <ins key={i}>{p.text}</ins>)}</>;
 }
 
-export default function HistoryDiff({ docId, versions, from, to, e2e, onPick, onClose, onRestoreWhole, onRestoredPart, say }: {
-  docId: string; versions: VersionInfo[]; from: number; to: number | null; e2e: boolean;
+/** a comparison of two texts from elsewhere (a commit of the project's history and the one before it): no versions to pick, nothing to restore from here */
+export interface CustomCompare { title: string; sub: string; load: () => Promise<{ a: string; b: string }> }
+
+export default function HistoryDiff({ docId, versions, from, to, e2e, custom, onPick, onClose, onRestoreWhole, onRestoredPart, say }: {
+  docId: string; versions: VersionInfo[]; from: number; to: number | null; e2e: boolean; custom?: CustomCompare;
   onPick: (from: number, to: number | null) => void; onClose: () => void;
   onRestoreWhole: (v: VersionInfo) => void | Promise<void>; onRestoredPart: (u: Undo) => void; say: Notify;
 }) {
@@ -38,11 +41,11 @@ export default function HistoryDiff({ docId, versions, from, to, e2e, onPick, on
   useEffect(() => {
     let live = true;
     setTexts(null); setErr(null);
-    Promise.all([api.getVersion(docId, from).then(v => v.lyx), to === null ? api.texText(docId) : api.getVersion(docId, to).then(v => v.lyx)])
-      .then(([a, b]) => { if (live) setTexts({ a, b }); })
+    (custom ? custom.load() : Promise.all([api.getVersion(docId, from).then(v => v.lyx), to === null ? api.texText(docId) : api.getVersion(docId, to).then(v => v.lyx)]).then(([a, b]) => ({ a, b })))
+      .then(t => { if (live) setTexts(t); })
       .catch(() => { if (live) setErr('The comparison could not be loaded. Try again when the server is available.'); });
     return () => { live = false; };
-  }, [docId, from, to, seq]);
+  }, [docId, from, to, seq, custom]);
   useEffect(() => {
     if (!isPage || e2e) return;
     let live = true;
@@ -65,7 +68,7 @@ export default function HistoryDiff({ docId, versions, from, to, e2e, onPick, on
     return { a, b, changes: slideChanges(a, b) };
   }, [texts, isPage]);
   const count = changeCount(list);
-  const partsOk = to === null && !e2e && !isBoard && !!texts && !isLyxText(texts.a);
+  const partsOk = !custom && to === null && !e2e && !isBoard && !!texts && !isLyxText(texts.a);
 
   const restorePart = async (h: Hunk) => {
     try {
@@ -85,22 +88,24 @@ export default function HistoryDiff({ docId, versions, from, to, e2e, onPick, on
     <div class="hist-diff-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
       <div class="hist-diff" role="dialog" aria-label="Compare versions" data-history-diff>
         <div class="hist-diff-head">
-          <label>Compare <select aria-label="Older version" onChange={e => onPick(Number((e.target as HTMLSelectElement).value), to)}>{options(from, false)}</select></label>
-          <label>with <select aria-label="Newer version" onChange={e => { const v = (e.target as HTMLSelectElement).value; onPick(from, v === 'now' ? null : Number(v)); }}>{options(to, true)}</select></label>
+          {custom ? <b class="hist-custom-title">{custom.title}</b> : <>
+            <label>Compare <select aria-label="Older version" onChange={e => onPick(Number((e.target as HTMLSelectElement).value), to)}>{options(from, false)}</select></label>
+            <label>with <select aria-label="Newer version" onChange={e => { const v = (e.target as HTMLSelectElement).value; onPick(from, v === 'now' ? null : Number(v)); }}>{options(to, true)}</select></label>
+          </>}
           <span class="hist-seg" role="group" aria-label="Layout">
             <button type="button" class={mode === 'split' ? 'on' : ''} aria-pressed={mode === 'split'} onClick={() => setModeKept('split')}>Side by side</button>
             <button type="button" class={mode === 'inline' ? 'on' : ''} aria-pressed={mode === 'inline'} onClick={() => setModeKept('inline')}>In place</button>
           </span>
           <span class="hist-grow" />
-          {fromV && to === null && <button type="button" class="small-btn primary" onClick={() => void onRestoreWhole(fromV)}>Restore this version</button>}
+          {!custom && fromV && to === null && <button type="button" class="small-btn primary" onClick={() => void onRestoreWhole(fromV)}>Restore this version</button>}
           <button type="button" class="hist-close" aria-label="Close" title="Close (Esc)" onClick={onClose}>×</button>
         </div>
-        {fromV && <div class="hist-diff-sub">{versionTitle(fromV)} · {when(fromV.created_at)} <Authors names={fromV.author} /> {texts && <span class="hist-count">{list.length ? <><ins>+{count.added}</ins> <del>−{count.removed}</del> lines in {list.length} {list.length === 1 ? 'place' : 'places'}</> : 'No differences'}</span>}</div>}
+        {(custom || fromV) && <div class="hist-diff-sub">{custom ? custom.sub : <>{versionTitle(fromV!)} · {when(fromV!.created_at)} <Authors names={fromV!.author} /></>} {texts && <span class="hist-count">{list.length ? <><ins>+{count.added}</ins> <del>−{count.removed}</del> lines in {list.length} {list.length === 1 ? 'place' : 'places'}</> : 'No differences'}</span>}</div>}
         <div class="hist-diff-body">
           {err && <div class="hist-note">{err} <button type="button" class="small-btn" onClick={() => setSeq(s => s + 1)}>Try again</button></div>}
           {!texts && !err && <div class="hist-note">Comparing…</div>}
           {texts && texts.a === texts.b && <div class="hist-note">The two are the same.</div>}
-          {slides && slides.changes.length > 0 && <SlideCompare a={slides.a} b={slides.b} changes={slides.changes} base={base} rightLabel={to === null ? 'Now' : 'Newer'} />}
+          {slides && slides.changes.length > 0 && <SlideCompare a={slides.a} b={slides.b} changes={slides.changes} base={base} rightLabel={custom ? 'After' : to === null ? 'Now' : 'Newer'} />}
           {texts && list.length > 0 && (
             <details class="hist-code" open={!slides || !slides.changes.length}>
               <summary>{slides ? 'Changes in the code' : 'Changes'}</summary>

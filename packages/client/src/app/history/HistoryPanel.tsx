@@ -21,11 +21,16 @@ import { projectOfDoc, docPathOf } from '@overlyx/core';
 import { uiPrompt, uiConfirm } from '../Dialogs';
 import { authorColorOf } from '../shellutil';
 import { useTheme } from '../theme';
+import type { CustomCompare } from './HistoryDiff';
 import './history.css';
 
 const HistoryDiff = lazy(() => import('./HistoryDiff'));
 
 type Notify = (msg: string, kind?: 'info' | 'error') => void;
+type Commit = NonNullable<Awaited<ReturnType<typeof api.projectChanges>>['commits']>[number];
+/** files whose change can be read as text */
+const TEXT_FILE = /\.(tex|md|markdown|html?|bib|txt|sty|cls|bst|css|js|mjs|json|svg|csv|tsv|ya?ml|board|lyx|py|r|jl|m)$/i;
+const FILE_STATUS: Record<string, string> = { A: 'Added', M: 'Changed', D: 'Deleted' };
 
 /** what can be undone of the last restore from here */
 export interface Undo { label: string; run: () => Promise<void> }
@@ -217,9 +222,25 @@ export function HistoryPanel({ docId, refreshKey = 0, notify, onOpen, onClose }:
 /** the project's tab: recent versions across its files, and files deleted since that can come back */
 function ProjectHistory({ project, current, onOpen, say }: { project: string; current: string; onOpen?: (id: string) => void; say: Notify }) {
   const [data, setData] = useState<Awaited<ReturnType<typeof api.projectHistory>> | null>(null);
+  const [commits, setCommits] = useState<Commit[] | null>(null);
   const [failed, setFailed] = useState(false);
-  const load = () => api.projectHistory(project).then(d => { setData(d); setFailed(false); }).catch(() => setFailed(true));
+  const [compare, setCompare] = useState<{ doc: string; custom: CustomCompare } | null>(null);
+  const load = () => {
+    void api.projectChanges(project).then(r => setCommits(r.commits)).catch(() => setCommits(null));
+    return api.projectHistory(project).then(d => { setData(d); setFailed(false); }).catch(() => setFailed(true));
+  };
   useEffect(() => { void load(); }, [project]);
+  /** what one commit did to one file: the file before it and after it */
+  const compareFile = (c: Commit, f: Commit['files'][number]) => setCompare({ doc: project + '/' + f.path, custom: {
+    title: f.path,
+    sub: `${c.message} · ${c.author} · ${new Date(c.date).toLocaleString()}`,
+    load: async () => ({ a: f.status === 'A' ? '' : await api.projectFileAt(project, c.hash, f.path, true), b: f.status === 'D' ? '' : await api.projectFileAt(project, c.hash, f.path) }),
+  } });
+  const restoreFromGit = async (c: Commit, f: Commit['files'][number]) => {
+    if (!(await uiConfirm('Restore File', `Bring back ${f.path} as it was before “${c.message}” (${new Date(c.date).toLocaleString()})?`, { okLabel: 'Restore file' }))) return;
+    try { await api.restoreDeletedFile(project, c.hash, f.path); say(`${f.path} is back`); void load(); }
+    catch (e) { say('Could not restore the file: ' + (e as Error).message, 'error'); }
+  };
   const deleted = data?.files.filter(f => !f.exists) ?? [];
   const exists = new Set(data?.files.filter(f => f.exists).map(f => f.doc));
   const bringBack = async (f: { doc: string; path: string }) => {
@@ -250,6 +271,37 @@ function ProjectHistory({ project, current, onOpen, say }: { project: string; cu
             </li>
           ))}</ul>
         </section>
+      )}
+      {commits && commits.length > 0 && (
+        <section class="hist-day">
+          <h4>Saved changes (the project's git history)</h4>
+          <ul>{commits.map(c => (
+            <li key={c.hash} class="hist-item hist-commit">
+              <span class="hist-main static">
+                <span class="hist-time">{dayLabel(c.date)} {clock(c.date)}</span>
+                <span class="hist-name">{c.message}</span>
+                <Authors names={c.author} />
+                <span class="hist-files">
+                  {c.files.slice(0, 12).map(f => (
+                    <span key={f.path} class={'hist-file ' + f.status}>
+                      {TEXT_FILE.test(f.path)
+                        ? <button type="button" class="hist-file-btn" title={`${FILE_STATUS[f.status] ?? 'Changed'}: compare before and after`} onClick={() => compareFile(c, f)}><b>{f.status}</b> {f.path}</button>
+                        : <span class="hist-file-btn" title={FILE_STATUS[f.status] ?? 'Changed'}><b>{f.status}</b> {f.path}</span>}
+                      {f.status === 'D' && <button type="button" class="small-btn" onClick={() => void restoreFromGit(c, f)}>Restore</button>}
+                    </span>
+                  ))}
+                  {c.files.length > 12 && <span class="hist-time">and {c.files.length - 12} more</span>}
+                </span>
+              </span>
+            </li>
+          ))}</ul>
+        </section>
+      )}
+      {compare && (
+        <Suspense fallback={null}>
+          <HistoryDiff docId={compare.doc} versions={[]} from={0} to={null} e2e={false} custom={compare.custom}
+            onPick={() => {}} onClose={() => setCompare(null)} onRestoreWhole={() => {}} onRestoredPart={() => {}} say={say} />
+        </Suspense>
       )}
       <section class="hist-day">
         <h4>Recent versions in this project</h4>

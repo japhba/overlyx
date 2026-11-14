@@ -76,11 +76,16 @@ blend.
   on the editor's Ctrl+Z (the server made them), hence the pane's Undo. The *Whole project* tab
   (`GET /api/projects/<p>/history`) lists recent versions across the project's files and the files
   deleted since whose versions the store still has; *Restore file* writes the newest one back
-  (the ordinary text write). End-to-end encrypted projects: their versions are decrypted in the
+  (the ordinary text write). Above them, where the project has its git repository, its recent
+  commits (`GET /api/projects/<p>/history/git`, `history.ts gitChanges`: OverLyX's own commits of
+  people's edits and pushes from elsewhere) with the files each added (A), changed (M) or deleted
+  (D) — every kind of file, figures too; a text file opens the comparison of that commit's change
+  (`…/history/git/<hash>/file?path=…[&parent=1]`), and a deleted one comes back as it was before
+  that commit (`POST …/history/git/<hash>/restore`, only where no file is now). End-to-end encrypted projects: their versions are decrypted in the
   browser, so they compare and restore whole; naming, parts and the project tab need the server to
   read them and are not offered. The VS Code extension has no History (its files are in the user's
   own git there; the pane lives in the web app's shell). Binary files and plain text files have no
-  versions in this store (the project's git history has them: *File ▸ Git repository…*).
+  versions in the version store; the git history above has them.
 * **Notes and comments**: LyX-style notes (Note / Comment / Greyed out) and OverLyX comment
   threads (author, time, replies, resolve) are kept in the `.tex` file as `%%` comment blocks.
   On screen a note is a yellow sticky and a greyed-out part a quiet grey box. A comment thread is a

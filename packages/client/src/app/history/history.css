@@ -11,7 +11,8 @@
 .hist-bar { display: flex; gap: 6px; }
 .hist-note { color: var(--ui-muted); padding: 4px 0; line-height: 1.4; }
 .hist-undo { background: color-mix(in oklab, var(--accent) 12%, transparent); border-radius: 6px; padding: 5px 8px; display: flex; gap: 8px; align-items: center; justify-content: space-between; }
-.hist-list { overflow: auto; flex: 1; min-height: 0; }
+.hist-list { overflow-y: auto; overflow-x: hidden; flex: 1; min-height: 0; }
+.hist-main > * { min-width: 0; }
 .hist-day h4 { margin: 10px 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--ui-muted); font-weight: 600; }
 .hist-day ul, .hist-session ul { list-style: none; margin: 0; padding: 0; }
 .hist-session ul { margin-left: 12px; border-left: 1px solid var(--ui-border); }
@@ -87,3 +88,14 @@ html[data-theme="dark"] .history-panel del, html[data-theme="dark"] .hist-diff d
   .hist-diff-backdrop { padding: 0; }
   .hist-diff { border-radius: 0; }
 }
+
+/* the project's git history: a commit and the files it changed */
+.hist-files { grid-column: 2; display: flex; flex-direction: column; gap: 2px; margin-top: 2px; }
+.hist-file { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.hist-file-btn { border: 0; background: none; padding: 0; font: 12px/1.4 "DejaVu Sans Mono", monospace; color: inherit; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+button.hist-file-btn { cursor: pointer; }
+button.hist-file-btn:hover { text-decoration: underline; }
+.hist-file-btn b { display: inline-block; width: 1.2em; font-weight: 600; }
+.hist-file.A b { color: #0a6b2d; }
+.hist-file.D b { color: #a4262c; }
+.hist-custom-title { font-family: "DejaVu Sans Mono", monospace; font-weight: 600; }

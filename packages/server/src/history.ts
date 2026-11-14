@@ -8,12 +8,23 @@
  *    document — a splice of a deck's Y.Text, a LaTeX/markdown source loaded as a diff — that
  *    collaborators see at once; refused when that passage changed meanwhile;
  *  - the project's recent versions across its files, also of files deleted since (their versions
- *    stay in the store, keyed by the document's id, until the project is deleted).
+ *    stay in the store, keyed by the document's id, until the project is deleted);
+ *  - the project's git history (git.ts) with the files each commit changed, a file as a commit had
+ *    it, and a file a commit deleted brought back.
  */
 import fs from 'node:fs';
+import path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { config } from './config.ts';
+import { git, gitEnv, hasRepo, touchProject } from './git.ts';
+import { isE2eProject } from './e2e/store.ts';
+import { assertRoom } from './projectsize.ts';
 import { db } from './db.ts';
 import { manager, HtmlDoc, BoardDoc } from './docs.ts';
-import { resolveProjectPath } from './projects.ts';
+import { resolveProjectPath, projectDir } from './projects.ts';
+
+const execFileP = promisify(execFile);
 
 export class HistoryError extends Error { constructor(message: string, public status = 400) { super(message); } }
 
@@ -60,4 +71,50 @@ export function projectHistory(project: string, limit = 80): { recent: ProjectVe
   const files = (db.prepare(`SELECT doc_id AS doc, COUNT(*) AS versions, MAX(created_at) AS last FROM versions WHERE doc_id LIKE ? ESCAPE '\\' GROUP BY doc_id ORDER BY last DESC`).all(like) as { doc: string; versions: number; last: number }[])
     .map(f => ({ ...f, path: rel(f.doc), exists: exists(rel(f.doc)) }));
   return { recent, files };
+}
+
+/* ------------------------------------------------- the project's git history */
+
+/** a commit of the project's history with the files it changed (A added, M changed, D deleted, R renamed) */
+export interface GitChange { hash: string; author: string; date: number; message: string; files: { status: string; path: string; from?: string }[] }
+
+const HASH = /^[0-9a-f]{7,64}$/;
+/** a project-relative path that stays inside the project */
+const safeRel = (p: string) => !!p && !p.startsWith('/') && !p.split('/').some(s => s === '..' || s === '' || s === '.git');
+
+/**
+ * The project's recent commits (git.ts: OverLyX commits people's edits every few minutes, with
+ * their names; pushes from elsewhere land here too) with the files each changed — every kind of
+ * file, not only documents. Null where the project has no repository (git off, encrypted projects).
+ */
+export async function gitChanges(project: string, limit = 40): Promise<GitChange[] | null> {
+  if (!config.git || isE2eProject(project) || !hasRepo(project)) return null;
+  const out = await git(project, ['-c', 'core.quotePath=false', 'log', `-n${Math.min(200, Math.max(1, limit))}`, '--format=%x1e%H%x1f%an%x1f%at%x1f%s', '--name-status', '--no-renames']).catch(() => '');
+  return out.split('\x1e').filter(s => s.trim()).map(block => {
+    const [head, ...lines] = block.split('\n');
+    const [hash, author, at, message] = head.split('\x1f');
+    const files = lines.filter(Boolean).map(l => { const [status, ...rest] = l.split('\t'); return { status: status.charAt(0), path: rest[rest.length - 1] ?? '' }; }).filter(f => f.path);
+    return { hash, author, date: Number(at) * 1000, message, files };
+  });
+}
+
+/** A file as a commit had it (null: not there or too large); `parent`: as it was just before that commit. */
+export async function gitFileAt(project: string, hash: string, rel: string, parent = false): Promise<Buffer | null> {
+  if (!config.git || !HASH.test(hash) || !safeRel(rel) || !hasRepo(project)) return null;
+  try {
+    const { stdout } = await execFileP('git', ['-C', projectDir(project), 'show', `${hash}${parent ? '^' : ''}:${rel}`], { env: gitEnv(), encoding: 'buffer', maxBuffer: 64 * 1024 * 1024 });
+    return stdout as Buffer;
+  } catch { return null; }
+}
+
+/** Bring back a file a commit deleted, as it was before that commit — only where nothing is now. */
+export async function restoreDeletedFile(project: string, hash: string, rel: string, by: number): Promise<void> {
+  const data = await gitFileAt(project, hash, rel, true);
+  if (!data) throw new HistoryError('That file is not in the history before this change', 404);
+  const abs = resolveProjectPath(project, rel);
+  if (fs.existsSync(abs)) throw new HistoryError(`${rel} exists — it is not restored over the file that is there now`, 409);
+  assertRoom(project, data.length, 0, 'The restored file');
+  fs.mkdirSync(path.dirname(abs), { recursive: true });
+  fs.writeFileSync(abs, data, { flag: 'wx' });
+  touchProject(project, by);
 }

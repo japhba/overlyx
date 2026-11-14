@@ -30,7 +30,7 @@ import { deckExport } from './deckexport.ts';
 import { starterFor, pageSize, isHtmlPath, DELIVERABLE_KINDS, type DeliverableKind } from '@overlyx/core/html/deliverable.ts';
 import { newArticleText } from '@overlyx/core/html/articletheme.ts';
 import { refreshScientificStarters } from './starterupdates.ts';
-import { nameVersion, replacePassage, projectHistory, HistoryError } from './history.ts';
+import { nameVersion, replacePassage, projectHistory, gitChanges, gitFileAt, restoreDeletedFile, HistoryError } from './history.ts';
 import { listProjects, resolveProjectPath, assertWritableRelPath, projectDir, createProject, newDocumentText, newMarkdownText, fileKind, isBackupFile, isDocumentFile, findMaster } from './projects.ts';
 import { isMarkdownPath } from '@overlyx/core/md/index.ts';
 import { markdownStyle, setMarkdownStyle } from './mdstyle.ts';
@@ -1799,6 +1799,19 @@ api.post('/docs/*/versions/:vid/part', async (req, res) => {
 });
 api.get('/projects/:project/history', needProject('view'), (req, res) => {
   res.json(projectHistory(req.params.project));
+});
+api.get('/projects/:project/history/git', needProject('view'), async (req, res) => {
+  try { res.json({ commits: await gitChanges(req.params.project) }); } catch (e) { res.status(400).json({ error: String(e) }); }
+});
+api.get('/projects/:project/history/git/:hash/file', needProject('view'), async (req, res) => {
+  const data = await gitFileAt(req.params.project, req.params.hash, String(req.query.path ?? ''), req.query.parent === '1');
+  if (!data) { res.status(404).json({ error: 'not in that commit' }); return; }
+  res.setHeader('Cache-Control', 'no-store');
+  res.type('text/plain; charset=utf-8').send(data);
+});
+api.post('/projects/:project/history/git/:hash/restore', needProject('edit'), async (req, res) => {
+  try { await restoreDeletedFile(req.params.project, req.params.hash, String(req.body?.path ?? ''), req.user!.id); res.json({ ok: true }); }
+  catch (e) { res.status(e instanceof HistoryError ? e.status : 400).json({ error: (e as Error).message }); }
 });
 api.delete('/docs/*/versions/:vid', (req, res) => {
   db.prepare('DELETE FROM versions WHERE id = ? AND doc_id = ?').run(Number(req.params.vid), docId(req));
