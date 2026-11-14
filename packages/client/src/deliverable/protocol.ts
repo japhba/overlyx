@@ -384,6 +384,8 @@ export type ToRuntime =
   | { ol: 'looks'; id: number; paths: Path[] }
   /** the Check pane's frame (checks.ts): what is wrong with the slides as they are now — answered with `checked` (runtime/check.ts) */
   | { ol: 'check'; id: number }
+  /** the Check pane's one-click fixes (runtime/checkfix.ts): the object's text made smaller until it fits, the object moved back onto the slide */
+  | { ol: 'checkFix'; path: Path; fix: 'fit' | 'onto' }
   /** the slide rail: the slides the Check found something on (a quiet dot beside each; none: no dots) */
   | { ol: 'checkMarks'; slides: number[] };
 

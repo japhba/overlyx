@@ -36,6 +36,7 @@ import { startPresenting, sourceChanged as presentSourceChanged, presentSettled 
 import { expandPrintSteps, STEP_VISIBILITY_CSS } from './steps';
 import { report, rememberPage } from './report';
 import { runCheck } from './check';
+import { checkFix } from './checkfix';
 import { layout } from './layout';
 import { ensureSolo, notePageBackground, PAGE_BG, SOLO_PAD } from './solo';
 import { setDarkSlides, darkSlidesChanged } from './darkpages';
@@ -439,6 +440,7 @@ function onMessage(e: MessageEvent): void {
     case 'paste': if (MODE === 'edit') edit.pasteHere(m); break;
     case 'weave': if (MODE === 'edit') weave(); break;
     case 'check': if (MODE === 'thumb') void runCheck(m.id); break;
+    case 'checkFix': if (MODE === 'edit') checkFix(m.path as Path, m.fix); break;
     case 'checkMarks': if (MODE === 'thumb') { railMarks = new Set(m.slides); drawRail(); } break;
   }
 }

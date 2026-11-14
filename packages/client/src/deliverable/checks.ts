@@ -17,6 +17,8 @@ export interface CheckEntry {
   fix: string;
   /** "It is meant": the overlap (or the cut at the edge) is on purpose — the object gets this word in `data-ol-lint` and is not reported for it again */
   lint?: Lint;
+  /** a fix one click makes (runtime/checkfix.ts): the text made smaller until it fits, the object moved back onto the slide */
+  act?: 'fit' | 'onto';
 }
 /** the words of `data-ol-lint` the Check honours: overlap on purpose, running off the edge on purpose */
 export type Lint = 'no-overlap' | 'no-edge';
@@ -73,7 +75,7 @@ export function sayIssue(i: PageIssue, kind: DeliverableKind): { say: string; fi
     case 'contrast':
       return { say: `${called(i)} is hard to tell from what is behind it (contrast ${num(n.ratio)} to 1).`, fix: `Make the text darker or lighter, or change the colour behind it — ${num(n.need) || 3} to 1 or more reads well.` };
     case 'low-res':
-      return { say: `${called(i)} has too few pixels for its size in print: ${num(n.w)} across ${num(n.cm)} cm${n.assumed ? ' (as an A0)' : ''} — it will look blurred.`, fix: `Use a picture at least ${num(n.need)} pixels wide, or show it smaller.` };
+      return { say: `${called(i)} has too few pixels for its size in print: ${num(n.w)} pixels across ${num(n.cm)} cm${n.assumed ? ' (as an A0)' : ''} — it will look blurred.`, fix: `Use a picture at least ${num(n.need)} pixels wide, or show it smaller.` };
     case 'image':
       return { say: `A picture did not load${n.src ? ` (${short(String(n.src), 40)})` : ''}.`, fix: 'Replace it (right-click ▸ Replace picture) or delete it.' };
     case 'math':
@@ -104,12 +106,16 @@ export function checkGroups(pages: PageReport[], kind: DeliverableKind): CheckGr
       const key = `${i.kind}|${i.path?.join('.') ?? ''}|${s.say}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      entries.push({ kind: i.kind, slide: p.index, ...(i.path ? { path: i.path } : {}), say: s.say, fix: s.fix, ...(s.lint && i.path ? { lint: s.lint } : {}) });
+      const act = !i.path ? undefined : i.kind === 'overflow' ? 'fit' as const : i.kind === 'offpage' || i.kind === 'off-slide' ? 'onto' as const : undefined;
+      entries.push({ kind: i.kind, slide: p.index, ...(i.path ? { path: i.path } : {}), say: s.say, fix: s.fix, ...(s.lint && i.path ? { lint: s.lint } : {}), ...(act ? { act } : {}) });
     }
     out.push({ slide: p.index, title: p.title.replace(/\\[()[\]]/g, '').replace(/\s+/g, ' ').trim(), entries });
   }
   return out;
 }
+
+/** the one-click fix's button */
+export const actLabel = (act: 'fit' | 'onto', kind: DeliverableKind): string => act === 'fit' ? 'Shrink text to fit' : `Move onto the ${kind === 'poster' ? 'poster' : 'slide'}`;
 
 /** what the Check button says of the count */
 export const checkCount = (groups: CheckGroup[]): number => groups.reduce((a, g) => a + g.entries.length, 0);
@@ -122,3 +128,17 @@ export const CHECK_LABEL: Record<PageIssue['kind'], string> = {
 
 /** `data-ol-lint` with one more word (the words it had kept) */
 export const withLint = (was: string | null, word: Lint): string => [...new Set([...(was ?? '').split(/\s+/).filter(Boolean), word])].join(' ');
+
+/** the moves (in the boxes' px) that bring the box `r` inside `f`, its left / top edge kept inside when it is too big */
+export function ontoMoves(r: { left: number; top: number; right: number; bottom: number }, f: { left: number; top: number; right: number; bottom: number }): { dx: number; dy: number } {
+  const one = (a0: number, a1: number, f0: number, f1: number) => (a0 < f0 ? f0 - a0 : a1 > f1 ? Math.max(f1 - a1, f0 - a0) : 0);
+  return { dx: one(r.left, r.right, f.left, f.right), dy: one(r.top, r.bottom, f.top, f.bottom) };
+}
+
+const PX_PER: Record<string, number> = { mm: 96 / 25.4, cm: 96 / 2.54, in: 96, pt: 96 / 72 };
+/** a position moved by `dPx` CSS px, in the unit the source wrote it in (a poster's mm stay mm), else px */
+export function shiftLength(inline: string, computedPx: number, dPx: number): string {
+  const m = /^\s*(-?[\d.]+)(mm|cm|in|pt)\s*$/.exec(inline);
+  const r2 = (v: number) => Math.round(v * 100) / 100;
+  return m ? `${r2(parseFloat(m[1]) + dPx / PX_PER[m[2]])}${m[2]}` : `${r2(computedPx + dPx)}px`;
+}

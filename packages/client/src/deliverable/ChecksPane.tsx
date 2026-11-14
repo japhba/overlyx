@@ -14,7 +14,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import type { DeliverableHost } from './host';
 import { isFromRuntime, type DeliverableKind, type FromRuntime, type PageReport, type Path, type ToRuntime } from './protocol';
-import { checkGroups, checkCount, CHECK_LABEL, type CheckEntry, type CheckGroup, type Lint } from './checks';
+import { checkGroups, checkCount, actLabel, CHECK_LABEL, type CheckEntry, type CheckGroup, type Lint } from './checks';
 import './checks.css';
 
 export interface Checks {
@@ -154,10 +154,12 @@ interface Props {
   show(slide: number, path?: Path): void;
   /** it is so on purpose: the object gets the word in data-ol-lint and is not reported for it again */
   meant(path: Path, word: Lint): void;
+  /** the one-click fix: to the slide, the object selected, then fixed */
+  fix(slide: number, path: Path, how: 'fit' | 'onto'): void;
   close(): void;
 }
 
-export function ChecksPane({ checks, kind, current, readOnly, show, meant, close }: Props) {
+export function ChecksPane({ checks, kind, current, readOnly, show, meant, fix, close }: Props) {
   const poster = kind === 'poster';
   const n = checks.count;
   const pick = (e: CheckEntry) => show(e.slide, e.path);
@@ -187,11 +189,16 @@ export function ChecksPane({ checks, kind, current, readOnly, show, meant, close
                 <span class="dl-chk-kind">{CHECK_LABEL[e.kind]}</span>
                 <span class="dl-chk-say">{e.say}</span>
                 {e.fix && <span class="dl-chk-fix">{e.fix}</span>}
-                {e.lint && e.path && !readOnly && (
+                {(e.lint || e.act) && e.path && !readOnly && (
                   <span class="dl-chk-acts">
-                    <button type="button" class="dl-btn" data-chk-meant disabled={!checks.fresh}
+                    {e.act && (
+                      <button type="button" class="dl-btn" data-chk-fix={e.act} disabled={!checks.fresh}
+                        title={e.act === 'fit' ? 'Makes the text of this box smaller until it fits (Ctrl+Z takes it back)' : 'Moves it the least that brings it back inside (Ctrl+Z takes it back)'}
+                        onClick={ev => { ev.stopPropagation(); if (e.path && e.act) fix(e.slide, e.path, e.act); }}>{actLabel(e.act, kind)}</button>
+                    )}
+                    {e.lint && <button type="button" class="dl-btn" data-chk-meant disabled={!checks.fresh}
                       title={e.lint === 'no-edge' ? 'It runs off the edge on purpose: Check leaves this object alone from now on' : 'They lie on each other on purpose: Check leaves this object alone from now on'}
-                      onClick={ev => { ev.stopPropagation(); if (e.path && e.lint) meant(e.path, e.lint); }}>It is meant</button>
+                      onClick={ev => { ev.stopPropagation(); if (e.path && e.lint) meant(e.path, e.lint); }}>It is meant</button>}
                   </span>
                 )}
               </div>

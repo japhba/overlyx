@@ -1850,7 +1850,12 @@ blend.
     agents' `text`); slides with something get a quiet amber dot in the rail (`checkMarks`); the
     button shows the count. *It is meant* on an overlap or a picture cut at the edge adds
     `no-overlap` / `no-edge` to the object's `data-ol-lint` (one attribute splice, so undo and
-    co-editing work). It never touches the frame people type and draw in: while the pane is open, a
+    co-editing work). One-click fixes (`runtime/checkfix.ts`, in the canvas frame because they
+    measure): *Shrink text to fit* sets the object's `font-size` to the largest half pixel at which
+    its text fits its box (down to a third; else nothing changes); *Move onto the slide* changes
+    `left` / `top` by the least that brings the box and its text inside (its left / top edge when it
+    is bigger than the slide) — each one style edit in the unit the source has (a poster's mm stay
+    mm, `shiftLength`), one undo step. It never touches the frame people type and draw in: while the pane is open, a
     frame of its own out of sight (the rail's `thumb` page once more, every slide at its size) gets
     the editor's settled text — a second after the last change, never while the pen writes — and
     answers `check` with `checked`; closing the pane removes it. Unit test: `tests/deck-checks.test.ts`.

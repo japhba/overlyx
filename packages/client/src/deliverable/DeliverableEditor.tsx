@@ -4547,6 +4547,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
         {checksOpen && canCheck && !fullOn && (
           <ChecksPane checks={checks} kind={kind} current={current} readOnly={locked} close={() => setChecksOpen(false)}
             show={(slide, p) => { gotoSlide(slide); if (p) toCanvas({ ol: 'select', paths: [p] }); }}
+            fix={(slide, p, how) => { gotoSlide(slide); toCanvas({ ol: 'select', paths: [p] }); setTimeout(() => toCanvas({ ol: 'checkFix', path: p, fix: how }), 150); }}
             meant={(p, word) => { const el = elementAt(parseSource(text.toString()).doc, p); if (el) applyOps([{ t: 'attr', path: p, name: 'data-ol-lint', value: withLint(attr(el, 'data-ol-lint'), word) }]); }} />
         )}
         {themeOn && themePane && themeInfo && !fullOn && (
