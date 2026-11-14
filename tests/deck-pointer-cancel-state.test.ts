@@ -51,6 +51,8 @@ function makeState(touchIds: number[], options: { tri?: boolean; pinch?: boolean
     pinch0: options.pinch ? { active: true } : null,
     penOn: null as number | null,
     penOffAt: -1e9,
+    // (the finger holding a lasso for the pen: onTouchUp lets it go)
+    lassoFinger: null as number | null,
     post: (message: unknown) => {
       if (message && typeof message === 'object' && (message as { ol?: unknown }).ol === 'reliability') telemetry.push(message);
       else messages.push(message);
