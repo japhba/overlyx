@@ -21,6 +21,7 @@ import { QuickOpen } from './QuickOpen';
 import { DRAWER_LAYOUT_QUERY, foldDrawersOnNarrow } from './drawerLayout';
 import { Home, projectDocs, ProjectRootPanel } from './Home';
 import { HOME_SEARCH_EVENT } from './HomeSearch';
+import { startAccountPrefs } from './accountprefs';
 import { pendingImportFlag } from './pendingImport';
 import { TextEditor } from './TextEditor';
 import { isMarkdownDoc } from '../editor/markdown';
@@ -124,6 +125,8 @@ type Dialog = { name: string; arg?: unknown } | null;
 /** LyX language name → BCP 47 tag (for the browser's spell checker). */
 export function App() {
   const [user, setUser] = useState<User | null>(null);
+  // the person's preferences follow their account to every device (accountprefs.ts; not for guests)
+  useEffect(() => (user && !user.guest ? startAccountPrefs(user.id) : undefined), [user?.id, user?.guest]);
   const [google, setGoogle] = useState(false);
   const [ready, setReady] = useState(false);
   // why the share link in the URL did not open (shown on the sign-in page)

@@ -263,6 +263,9 @@ export interface ProjectSearchResult {
   total: number; truncated: boolean; searched: number; skipped: number;
 }
 
+/** preferences kept with the account, each with the time it was chosen (server accountprefs.ts; app/accountprefs.ts) */
+export type AccountPrefs = Record<string, { value: unknown; at: number }>;
+
 /** the start page's search inside all projects (server projectsearch.ts searchAllProjects): matches by project, then file */
 export interface AllProjectsSearchResult {
   projects: { project: string; count: number; files: ProjectSearchResult['files'] }[];
@@ -423,6 +426,10 @@ export const api = {
   /** a file shown in the text editor or the PDF viewer (they keep no connection that would say so): its project reopens on it */
   markOpened: (id: string, view: 'text' | 'pdf') => req<{ ok: boolean }>('PUT', `/api/docs/${encId(id)}/opened`, { view }),
   keys: () => req<{ keys: Record<string, string | null> }>('GET', '/api/keys'),
+  /** the preferences that follow the account to every device (app/accountprefs.ts) */
+  accountPrefs: () => req<{ prefs: AccountPrefs }>('GET', '/api/prefs'),
+  /** `onlyNew`: a browser's first sync — only what the account has no value for */
+  setAccountPrefs: (set: AccountPrefs, onlyNew = false) => req<{ prefs: AccountPrefs }>('PUT', '/api/prefs', { set, onlyNew }),
   setKeys: (keys: Record<string, string | null>) => req<{ keys: Record<string, string | null> }>('POST', '/api/keys', { keys }),
   setSettings: (patch: { fineGrainedAccess?: boolean; paragraphSkip?: boolean; interface?: 'classic' | 'modern' }) => req<{ settings: UserSettings }>('POST', '/api/settings', patch),
   adminUserSettings: (id: number, patch: Partial<UserSettings>) => req<{ settings: UserSettings }>('POST', `/api/admin/users/${id}/settings`, patch),

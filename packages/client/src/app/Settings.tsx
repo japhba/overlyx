@@ -61,6 +61,7 @@ import { loadGoogleFont } from '../fonts/googlefont';
 import { FontChooser, editorFontSections, editorFontLabel, mathFontSections, mathFontLabel } from './FontPicker';
 import { PALETTE_LABEL, openPalette, type SearchEntry } from './MenuBar';
 import { PenSettings } from '../deliverable/PenSettings';
+import { DeviceSettings } from './DeviceSettings';
 import { loadDeckInk, saveDeckInk, patchDeckInk, subscribeDeckInk, type DeckInkPatch } from '../deliverable/deckink';
 import { parseFace, projectShortName, type ProjectSettings } from '@overlyx/core';
 import { renderMath } from '../editor/lyxmath/mathjax';
@@ -68,14 +69,16 @@ import { useMathRendererVersion } from '../editor/lyxmath/usemath';
 
 const SECTIONS = [['editor', 'Editor'], ['fonts', 'Fonts'], ['styles', 'Text styles'], ['drawing', 'Drawing & pen'], ['keyboard', 'Keyboard'], ['ai', 'AI assistance'], ['appearance', 'Appearance'], ['privacy', 'Privacy'], ['account', 'Account'], ['admin', 'Administration']] as const;
 export type SettingsSection = (typeof SECTIONS)[number][0];
-export type SettingsScope = 'user' | 'project' | 'document';
+export type SettingsScope = 'user' | 'device' | 'project' | 'document';
 /** the sections of each scope: a project and a document set what concerns their documents; the rest is each person's own */
 const SCOPE_SECTIONS: Record<SettingsScope, SettingsSection[]> = {
   user: SECTIONS.map(([id]) => id),
+  // (This device has one page of its own: DeviceSettings.tsx)
+  device: ['editor'],
   project: ['editor', 'fonts', 'styles'],
   document: ['styles', 'editor'],
 };
-const sectionLabel = (id: SettingsSection, scope: SettingsScope) => (scope === 'document' && id === 'editor' ? 'Paragraphs' : SECTIONS.find(([s]) => s === id)![1]);
+const sectionLabel = (id: SettingsSection, scope: SettingsScope) => (scope === 'device' ? 'This device' : scope === 'document' && id === 'editor' ? 'Paragraphs' : SECTIONS.find(([s]) => s === id)![1]);
 /** which project settings each section has (its dot in the Project tab) */
 const PROJECT_KEYS: Partial<Record<SettingsSection, (keyof ProjectSettings)[]>> = {
   editor: ['spellcheck', 'autoCorrect', 'autoBuild', 'autoBuildDelay', 'paragraphSkip'], fonts: ['editorFont', 'editorMathFont'], styles: ['textStyles'],
@@ -106,7 +109,7 @@ type RowState = { here: boolean; from?: string; over?: string };
  * narrow screen); a scoped one says where its value comes from, a bar at its left when set in the
  * scope shown, ↺ to inherit again, and what a more specific scope sets instead.
  */
-function Setting({ label, hint, state, onReset, id, children }: { label: ComponentChildren; hint?: ComponentChildren; state?: RowState; onReset?: () => void; id?: string; children?: ComponentChildren }) {
+export function Setting({ label, hint, state, onReset, id, children }: { label: ComponentChildren; hint?: ComponentChildren; state?: RowState; onReset?: () => void; id?: string; children?: ComponentChildren }) {
   return (
     <div class={'set-row' + (state?.here ? ' here' : '')} data-setting-row={id}>
       <div class="set-text">
@@ -200,7 +203,11 @@ export function SettingsPanel({ ai, user, initial, scope: initialScope, onClose,
   /** the open document (its tab) */
   document?: SettingsDocument | null;
 }) {
-  const scopes: SettingsScope[] = ['user', ...(project ? ['project' as const] : []), ...(doc ? ['document' as const] : [])];
+  // This device: in the web app, signed in — where the User tab's settings follow the account (accountprefs.ts)
+  const deviceTab = shown.includes('account') && !user.guest;
+  const scopes: SettingsScope[] = ['user', ...(deviceTab ? ['device' as const] : []), ...(project ? ['project' as const] : []), ...(doc ? ['document' as const] : [])];
+  /** where the User tab's settings are kept */
+  const kept = deviceTab ? 'Kept with your account, on every device you sign in on.' : 'Kept in this browser.';
   const [scope, setScopeState] = useState<SettingsScope>(initialScope && scopes.includes(initialScope) ? initialScope : 'user');
   // (Administration only for administrators; the shell's sections in the User tab)
   const sectionsOf = (s: SettingsScope) => SCOPE_SECTIONS[s].filter(id => (s !== 'user' || shown.includes(id)) && (id !== 'admin' || user.isAdmin));
@@ -320,7 +327,7 @@ export function SettingsPanel({ ai, user, initial, scope: initialScope, onClose,
         </select>
       </Setting>
       {check('selectionBar', 'Quick menu over selected text', 'Selecting words brings up a small bar right above them: font, size, bold / italic / underline, colour, link, comment — the toolbar’s own buttons, where the words are. Escape puts it away.')}
-      <h3 class="set-group">Formulas</h3>
+      {!deviceTab && <><h3 class="set-group">Formulas</h3>
       <Setting id="mathKeyboard" label="Math keyboard" hint="A keyboard for formulas at the bottom of the screen, in place of the system keyboard: numbers and structures, functions, Greek, relations, letters — and ✎ Write, to write a formula by hand (AI assistance). Its ⌨ key hands over to the system keyboard."
         state={{ here: p.mathKeyboard !== DEFAULT_PREFS.mathKeyboard }} onReset={() => setPref('mathKeyboard', DEFAULT_PREFS.mathKeyboard)}>
         <select data-pref="mathKeyboard" value={p.mathKeyboard} onChange={e => setPref('mathKeyboard', (e.target as HTMLSelectElement).value as Prefs['mathKeyboard'])}>
@@ -328,7 +335,7 @@ export function SettingsPanel({ ai, user, initial, scope: initialScope, onClose,
           <option value="on">Always — whenever a formula has the cursor</option>
           <option value="off">Never — the system keyboard</option>
         </select>
-      </Setting>
+      </Setting></>}
     </>}
     <h3 class="set-group">PDF</h3>
     <Setting id="autoBuild" label="Automatic builds" hint="Build the PDF by itself a moment after the document is saved (it is saved 1.5 s after you stop typing). Builds run in the background on the server. The ▾ beside View PDF switches it too." state={autoBuild.state} onReset={autoBuild.reset}>
@@ -364,7 +371,7 @@ export function SettingsPanel({ ai, user, initial, scope: initialScope, onClose,
   const fontsSection = <>
     <p class="set-desc">{scope === 'project'
       ? `How the editor shows the text and the formulas of ${projectName}’s documents, for everyone in it — over each person’s own fonts. The PDF stays as it is.`
-      : 'How your editor shows the text and the formulas of every document, in this browser — the PDF and other people’s editors stay as they are. A project or a document can set its own.'}</p>
+      : `How your editor shows the text and the formulas of every document, ${deviceTab ? 'on every device you sign in on' : 'in this browser'} — the PDF and other people’s editors stay as they are. A project or a document can set its own.`}</p>
     <Setting id="editorFont" label="Text font" hint="Normal text’s font in the editor; Text styles set the rest — headings, sizes, colours." state={{ ...textFont.state, over: [textFont.state.over, docFontOver].filter(Boolean).join(' ') || undefined }} onReset={textFont.reset}>
       <FontChooser label={editorFontLabel(textFont.value)} face={googleFace} labelFont={googleFace ? undefined : editorFace(textFont.value === FOLLOW_DOCUMENT ? resolvedFace(FOLLOW_DOCUMENT) : textFont.value).text}
         sections={editorFontSections(textFont.value, id => textFont.set(id))} onPick={f => textFont.set(GOOGLE_FACE + f)} title="Text font" data={{ 'data-pref': 'editorFont', 'data-value': textFont.value }} />
@@ -390,13 +397,14 @@ export function SettingsPanel({ ai, user, initial, scope: initialScope, onClose,
     : <>
       <p class="set-desc">{scope === 'project'
         ? `How the editor draws each kind of text in ${projectName}, for everyone in it — over each person’s own styles, under a document’s. Values not set here come from User (yours) or the defaults. The PDF keeps the document’s own.`
-        : 'How your editor draws each kind of text — Title, Normal text, Quote, the headings — in every document, in this browser. They start from sensible defaults (LaTeX’s article); a project or a document can set its own, and the more specific wins. The PDF keeps the document’s own.'}</p>
+        : `How your editor draws each kind of text — Title, Normal text, Quote, the headings — in every document, ${deviceTab ? 'on every device you sign in on' : 'in this browser'}. They start from sensible defaults (LaTeX’s article); a project or a document can set its own, and the more specific wins. The PDF keeps the document’s own.`}</p>
       <div class="set-block"><EditorStyles key={scope} scope={scope === 'project' ? 'project' : 'user'} project={project} document={!!doc} readOnly={scope === 'project' && projectReadOnly} /></div>
     </>;
 
   const content = (() => {
     switch (section) {
-      case 'editor': return scope === 'document' && doc ? <DocumentParagraphs doc={doc} /> : editorSection;
+      case 'editor': return scope === 'device' ? <DeviceSettings onDrawing={() => { setScopeState('user'); setSection('drawing'); }} />
+        : scope === 'document' && doc ? <DocumentParagraphs doc={doc} /> : editorSection;
       case 'fonts': return fontsSection;
       case 'styles': return stylesSection;
       case 'drawing': return <DrawingSettings onClose={onClose} />;
@@ -438,7 +446,7 @@ export function SettingsPanel({ ai, user, initial, scope: initialScope, onClose,
           <span><input type="number" min={80} max={5000} step={20} value={p.aiCompleteDelay} onInput={e => setPref('aiCompleteDelay', Math.max(80, Number((e.target as HTMLInputElement).value) || 200))} style="max-width:90px" /> ms</span>
         </Setting>
         <h3 class="set-group">Models</h3>
-        <p class="set-desc">Any OpenRouter model id works; the notes are from measurements on a real paper. The choice is kept in this browser. What is sent: your instruction or the text around the cursor together with the document’s LaTeX source (so the model knows the notation, macros, citation keys) goes to the model through the OverLyX server. Nothing is written to the document without your Tab or Accept. The switches are also in the Tools menu, so the command palette finds them.</p>
+        <p class="set-desc">Any OpenRouter model id works; the notes are from measurements on a real paper. {kept} What is sent: your instruction or the text around the cursor together with the document’s LaTeX source (so the model knows the notation, macros, citation keys) goes to the model through the OverLyX server. Nothing is written to the document without your Tab or Accept. The switches are also in the Tools menu, so the command palette finds them.</p>
         {/* the rewrite's picker is the ⌘J prompt's and the Agent panel's: the server's models, then your own providers */}
         <Setting id="aiModel" label={`Rewrite (${REWRITE_KEY})`}>
           <div data-pref="aiModel"><InlineModelPicker server={ai ?? null} value={p.aiModel} onChange={v => setPref('aiModel', v)} placement="down" /></div>
@@ -447,7 +455,7 @@ export function SettingsPanel({ ai, user, initial, scope: initialScope, onClose,
           <ModelPicker value={p.aiCompletionModel} fallback={ai?.completionModel ?? ''} models={ai?.models ?? []} onChange={v => setPref('aiCompletionModel', v)} pref="aiCompletionModel" />
         </Setting>
         <h3 class="set-group">Spoken comments</h3>
-        <Setting id="speechEngine" label="Put into words by" hint={<span data-speech-now>What you say with the comment pen’s push to talk becomes a comment on the slide. Now: {hearerLabel(chooseHearer(p.speechEngine, speech, deviceSpeech), speech)}. Kept in this browser.</span>}>
+        <Setting id="speechEngine" label="Put into words by" hint={<span data-speech-now>What you say with the comment pen’s push to talk becomes a comment on the slide. Now: {hearerLabel(chooseHearer(p.speechEngine, speech, deviceSpeech), speech)}. {kept}</span>}>
           <div class="set-choices column">{speechChoices(speech, deviceSpeech).map(c => (
             <label class={'pref' + (c.available ? '' : ' disabled')} key={c.value}><input type="radio" name="ol-speech" data-pref-speech={c.value} checked={p.speechEngine === c.value} disabled={!c.available} onChange={() => setPref('speechEngine', c.value)} /><span>{c.label}<span class="sub">{c.hint}</span></span></label>
           ))}</div>
@@ -458,25 +466,26 @@ export function SettingsPanel({ ai, user, initial, scope: initialScope, onClose,
         <p class="set-desc">Classic shows LyX’s toolbars and menus; Modern is calmer and simpler — one toolbar, tools that appear when you need them. The same functions either way. Kept for your account.</p>
         <div class="set-block"><UiChoice /></div>
         <h3 class="set-group">Theme</h3>
-        <Setting id="theme" label="Theme" hint="Kept in this browser." state={{ here: themeChoice !== 'system' }} onReset={() => setThemePref('system')}>
+        <Setting id="theme" label="Theme" hint={kept} state={{ here: themeChoice !== 'system' }} onReset={() => setThemePref('system')}>
           <div class="set-choices column">{THEMES.map(([v, label, hint]) => (
             <label class="pref" key={v}><input type="radio" name="ol-theme" data-theme-pref={v} checked={themeChoice === v} onChange={() => setThemePref(v)} /><span>{label}{hint && <span class="sub">{hint}</span>}</span></label>
           ))}</div>
         </Setting>
         {darkTheme}
-        <h3 class="set-group">Text grade</h3>
+        {!deviceTab && <><h3 class="set-group">Text grade</h3>
         <Setting id="textGrade" label="Grade" hint="How dark the interface’s letters are — and those of documents set in Anodyne — in this browser. Grade changes the strokes only, never the width of a letter, so nothing moves. The dark theme takes 25 off by itself, as light letters on dark look heavier."
           state={{ here: p.textGrade !== DEFAULT_PREFS.textGrade }} onReset={() => setPref('textGrade', DEFAULT_PREFS.textGrade)}>
           <div class="settings-grade" data-pref="textGrade">
             <AxisSlider name="Grade" min={GRADE_MIN} max={GRADE_MAX} def={0} rungs={GRADE_RUNGS} value={p.textGrade} onChange={v => setPref('textGrade', v)} />
             <div class="settings-grade-sample">Il1 O0 — The quick brown fox jumps over the lazy dog, 3 × 4 ≠ 12 ± 1</div>
           </div>
-        </Setting>
+        </Setting></>}
+        {deviceTab && <p class="set-desc">The text grade depends on the screen: it is in the This device tab.</p>}
       </>;
       case 'privacy': return <>
         <h3 class="set-group">Usage statistics</h3>
         {check('usageStats', 'Send anonymous usage statistics', 'Which menu entries, buttons, shortcuts and dialogs are used, and which of them do nothing, are undone right away or end in an error message — so that confusing parts of the editor can be found and fixed.')}
-        <p class="set-desc" data-setting="usage-what">What is sent: the kind of action (for example “Edit ▸ Text Style ▸ Bold”, “toolbar m-frac”, “Ctrl+Shift+K unbound”, “Citation dialog dismissed”), where it happened (text, formula, table, dialog), the template of an error message with its data removed, the kind of screen, and a random id for this page load. Never your name or account, document or project names, text, formulas or file names — quoted strings, file names and numbers are removed before anything leaves the browser, and again on the server. The browser’s Global Privacy Control signal switches it off as well. Kept in this browser.</p>
+        <p class="set-desc" data-setting="usage-what">What is sent: the kind of action (for example “Edit ▸ Text Style ▸ Bold”, “toolbar m-frac”, “Ctrl+Shift+K unbound”, “Citation dialog dismissed”), where it happened (text, formula, table, dialog), the template of an error message with its data removed, the kind of screen, and a random id for this page load. Never your name or account, document or project names, text, formulas or file names — quoted strings, file names and numbers are removed before anything leaves the browser, and again on the server. The browser’s Global Privacy Control signal switches it off as well. {kept}</p>
         <p class="set-desc">Detailed diagnostics also record fixed categories for clicks, context menus, drag/drop, paste/cut and deletion outcomes, selection type, empty or filled notes, collapsed or margin display, editing permissions, change tracking, pointer type, API success or failure, connectivity, resource errors and duration buckets. Short action trails help investigate errors, repeated attempts and undo. No input values, typed text, clipboard contents, positions, URLs or identifiers are collected. Detailed events are kept for 30 days.</p>
         <h3 class="set-group">Beta reliability diagnostics</h3>
         {check('betaDiagnostics', 'Send beta reliability diagnostics', 'Optional: keyboard-load fallback, cancelled touch/pen gestures, canvas recovery, save-state transitions and background/orientation changes. Only fixed event names, pointer kind, coarse context, duration buckets and a random ID for this page load; never text, formulas, coordinates, pressure, file names, document or account identifiers. Kept on this server for 30 days. Usage statistics, Global Privacy Control and the server’s statistics switch still apply.', !p.usageStats)}
@@ -519,7 +528,8 @@ export function SettingsPanel({ ai, user, initial, scope: initialScope, onClose,
   })();
 
   const scopeSay: Record<SettingsScope, ComponentChildren> = {
-    user: <>Yours, in every project and document — kept in this browser, some with your account.{scopes.length > 1 ? ' A project or a document can set its own: the more specific wins.' : ''}</>,
+    user: <>Yours, in every project and document — {deviceTab ? 'kept with your account, so every device you sign in on has them (what depends on the device: This device).' : 'kept in this browser, some with your account.'}{project || doc ? ' A project or a document can set its own: the more specific wins.' : ''}</>,
+    device: <>This device alone — this browser, on this computer, tablet or phone: what depends on its screen, keyboard or pen, and settings you keep here only.</>,
     project: <>Everyone’s in <b>{projectName}</b>: kept in the project (<code>.overlyx/settings.json</code>, in its history) — over each person’s own, under a document’s.{projectReadOnly ? ' You can see them; the project’s editors change them.' : ''}</>,
     document: <><b>{docName}</b> alone: kept in the document, so its PDF and everyone’s editor follow it — over the project’s and each person’s.</>,
   };
@@ -533,8 +543,8 @@ export function SettingsPanel({ ai, user, initial, scope: initialScope, onClose,
             <div class="settings-scope-tabs" role="tablist" aria-label="Where the settings apply">
               {scopes.map(s => (
                 <button key={s} type="button" role="tab" aria-selected={scope === s} class={'settings-scope' + (scope === s ? ' active' : '')} data-settings-scope={s} onClick={() => setScope(s)}>
-                  <span class="settings-scope-name">{s === 'user' ? 'User' : s === 'project' ? 'Project' : 'Document'}</span>
-                  <span class="settings-scope-where">{s === 'user' ? user.username : s === 'project' ? projectName : docName}</span>
+                  <span class="settings-scope-name">{s === 'user' ? 'User' : s === 'device' ? 'This device' : s === 'project' ? 'Project' : 'Document'}</span>
+                  <span class="settings-scope-where">{s === 'user' ? user.username : s === 'device' ? 'this browser' : s === 'project' ? projectName : docName}</span>
                   {s === 'project' && projectCount > 0 && <span class="settings-scope-count" title={`${projectCount} set in the project`}>{projectCount}</span>}
                 </button>
               ))}
@@ -552,7 +562,7 @@ export function SettingsPanel({ ai, user, initial, scope: initialScope, onClose,
         </div>
         <div class="settings-content" key={scope + section}>
           <div class="settings-page">
-            <h2 class="settings-title">{sectionLabel(section, scope)}<span class="settings-title-scope">{scope === 'user' ? '' : scope === 'project' ? ` · ${projectName}` : ` · ${docName}`}</span></h2>
+            <h2 class="settings-title">{sectionLabel(section, scope)}<span class="settings-title-scope">{scope === 'user' || scope === 'device' ? '' : scope === 'project' ? ` · ${projectName}` : ` · ${docName}`}</span></h2>
             {scope === 'project' && projectError && <div class="err" data-project-settings-error>{projectError}</div>}
             {scope === 'project' && ps === null && !projectError && <p class="set-desc">Loading the project’s settings…</p>}
             {scope === 'project' && projectReadOnly

@@ -1,0 +1,4 @@
+/* Settings ▸ This device (app/DeviceSettings.tsx) */
+.device-only-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 2px 16px; margin: 4px 0 12px; }
+.device-only-list .pref { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 13px; }
+.device-sync { font-size: 12px; }

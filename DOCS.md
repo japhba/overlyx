@@ -2210,6 +2210,29 @@ blend.
   document that keeps LaTeX's (Computer Modern, no styles) shows the project's or the person's
   (`fonts/editorfont.ts documentSetsFont`, `editor/paragraphsep.ts`). `tests/screenstyles.test.ts`;
   `scratch/settings-scopes.mts` screenshots the tabs against an isolated instance.
+* **Settings follow the account to every device; This device** (14 Nov 2026; the owner's iPad showed
+  another editor font than the laptop). In the web app, signed in, the User tab's settings are kept
+  with the account (`app/accountprefs.ts`; server `accountprefs.ts`, table `user_prefs`: one row per
+  setting with the time it was chosen, `GET /api/prefs`, `PUT /api/prefs {set: {key: {value, at}},
+  onlyNew}`; guests and narrowed sign-ins cannot write): every `prefs.ts` preference — fonts, text
+  styles of my editor, spell checking, the AI switches and models, smart invert, autoBuild, privacy
+  switches … — as `pref.<name>`, and a few keys other modules keep in localStorage, whole, as
+  `ls.<key>` (`SYNCED_STORAGE`: the theme, custom colours, recent fonts; not yet the personal
+  dictionary — the spell checker keeps its words in memory and would write back a list without the
+  words another device added). The newer choice wins per setting, so a font chosen on one device
+  leaves a switch changed on another alone. **Order:** a browser's first sync (no `ol.prefsSync` yet)
+  takes the account's values; where the account has none it uploads what it had chosen (not
+  defaults) with `onlyNew`, which never overwrites a value another device put there first — the first
+  device to sign in after the change brings its settings along, a stale device never overwrites them.
+  A browser last synced for another account takes, never uploads. After that a change goes up within
+  a second (prefs) or four (the localStorage keys), and the account's are fetched again when the
+  window comes back into focus (at most every 15 s) and every five minutes. **This device** (a tab
+  after User, `app/DeviceSettings.tsx`): what depends on the device stays in the browser
+  (`prefs.ts DEVICE_PREF_KEYS`: the math keyboard and the text grade, moved here from User; pens,
+  calibration and palm in Drawing & pen; panes, zoom and docked toolbars as they are changed), and
+  *Only on this device* ticks keep any synced setting here alone (`ol.deviceOnly`; unticked, it takes
+  the account's value again). The VS Code extension keeps its own settings (its webview never starts
+  the sync). `tests/account-prefs.test.ts`, `tests/account-prefs-sync.test.ts`.
 * **Fonts, for the editor and for the PDF separately** (like LyX's screen fonts and document fonts;
   catalogue in `client/src/fonts/catalog.ts`). *Settings ▸ Fonts* (per browser, both shells) has two
   choices. *Text font* (`prefs.editorFont`): Computer Modern (bundled CMU Serif, the default), the text

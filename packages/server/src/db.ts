@@ -129,6 +129,15 @@ CREATE TABLE IF NOT EXISTS user_doc_state (
   updated_at INTEGER NOT NULL,
   PRIMARY KEY (user_id, doc_id, key)
 );
+-- per user: the preferences that follow them to every device, a key each with the time it was
+-- chosen (accountprefs.ts; client app/accountprefs.ts)
+CREATE TABLE IF NOT EXISTS user_prefs (
+  user_id INTEGER NOT NULL,
+  key TEXT NOT NULL,
+  value TEXT NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, key)
+);
 CREATE TABLE IF NOT EXISTS pdf_publish (
   doc_id TEXT PRIMARY KEY,
   repo TEXT NOT NULL,

@@ -68,6 +68,7 @@ import { privacyPage } from './privacy.ts';
 import { termsPage } from './terms.ts';
 import { usageRoutes, vscodeUsageRoutes } from './usage.ts';
 import { searchProject, searchAllProjects, SearchError } from './projectsearch.ts';
+import { accountPrefs, setAccountPrefs } from './accountprefs.ts';
 import { allow as rateLimit } from './feedback.ts';
 import { searchLiterature, bibtexFor, addToCitedBib, sourcesAvailable, normTitle, type Hit } from './bibsearch.ts';
 import { identify } from './citelinks.ts';
@@ -902,6 +903,13 @@ api.post('/settings', (req, res) => {
 /** The account's custom keyboard shortcuts — keybindings.ts on the client syncs them across browsers. */
 api.get('/keys', (req, res) => { res.json({ keys: userKeys(req.user!.id) }); });
 api.post('/keys', (req, res) => { res.json({ keys: setUserKeys(req.user!.id, req.body?.keys) }); });
+/** The preferences that follow the account to every device, each with the time it was chosen (accountprefs.ts; client app/accountprefs.ts). */
+api.get('/prefs', (req, res) => { res.json({ prefs: req.user!.guest ? {} : accountPrefs(req.user!.id) }); });
+api.put('/prefs', (req, res) => {
+  // (guests have no account to keep them in; a narrowed sign-in — an agent's — does not change a person's settings)
+  if (req.user!.guest || req.user!.scope) { res.status(403).json({ error: 'sign in first' }); return; }
+  res.json({ prefs: setAccountPrefs(req.user!.id, req.body?.set, req.body?.onlyNew === true) });
+});
 
 /** OAuth connections and legacy agent tokens. New manual clients use the single account token. */
 api.get('/mcp-tokens', (req, res) => {

@@ -140,7 +140,7 @@ export async function deleteAccount(user: SessionUser, live: LiveDocs): Promise<
     const agents = (db.prepare('SELECT id FROM mcp_agents WHERE user_id = ?').all(id) as { id: number }[]).map(a => a.id);
     for (const a of agents) db.prepare('DELETE FROM mcp_sessions WHERE agent_id = ?').run(a);
     for (const t of ['project_members', 'folder_members', 'git_tokens', 'mcp_tokens', 'oauth_codes', 'oauth_grants', 'mcp_agent_messages', 'mcp_agents',
-      'agent_threads', 'user_doc_state', 'starter_projects', 'admin_grants', 'gdocs_links', 'lesswrong_links']) db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).run(id);
+      'agent_threads', 'user_doc_state', 'user_prefs', 'starter_projects', 'admin_grants', 'gdocs_links', 'lesswrong_links']) db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).run(id);
     db.prepare('UPDATE access_log SET user_id = NULL WHERE user_id = ?').run(id);
     db.prepare('UPDATE project_members SET added_by = NULL WHERE added_by = ?').run(id);
     db.prepare('UPDATE folder_members SET added_by = NULL WHERE added_by = ?').run(id);

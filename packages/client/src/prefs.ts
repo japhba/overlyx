@@ -1,6 +1,7 @@
 /**
- * Per-browser editor preferences (Tools ▸ Preferences…; the toggles also sit in the Tools menu
- * and are therefore searchable from the command palette). Stored in localStorage `ol.prefs`.
+ * Editor preferences (Tools ▸ Preferences…; the toggles also sit in the Tools menu and are
+ * therefore searchable from the command palette). Stored in localStorage `ol.prefs`; in the web app
+ * they follow the account to every device (app/accountprefs.ts), except DEVICE_PREF_KEYS.
  *
  * They are the User scope of Settings: the open project's settings (Settings ▸ Project,
  * app/projectsettings.ts) are laid over them for the keys a project may set (PROJECT_PREF_KEYS), as
@@ -123,6 +124,12 @@ function load(): Prefs {
   } catch { return { ...DEFAULT_PREFS }; }
 }
 
+/**
+ * Preferences that depend on the device, not the person — they stay in this browser (Settings ▸ This
+ * device); all the others follow the account to every device (app/accountprefs.ts)
+ */
+export const DEVICE_PREF_KEYS = ['mathKeyboard', 'textGrade'] as const;
+
 /** the preferences a project may set for everyone in it (core projectsettings.ts) */
 export const PROJECT_PREF_KEYS = ['spellcheck', 'autoCorrect', 'autoBuild', 'autoBuildDelay', 'editorFont', 'editorMathFont'] as const;
 export type ProjectPrefKey = typeof PROJECT_PREF_KEYS[number];
@@ -141,6 +148,15 @@ export function getUserPrefs(): Prefs { return user; }
 export function setPref<K extends keyof Prefs>(key: K, value: Prefs[K]): void {
   if (user[key] === value) return;
   user = { ...user, [key]: value, ...(key === 'autoCorrect' ? { autoCorrectChosen: true } : {}), ...(key === 'editorFont' ? { editorFontChosen: true } : {}) };
+  try { localStorage.setItem(STORAGE, JSON.stringify(user)); } catch { /* ignore */ }
+  prefs = { ...user, ...overlay };
+  notify();
+}
+/** The account's values for some preferences (app/accountprefs.ts), taken as they are — never sent back as a change of this browser's. */
+export function adoptUserPrefs(patch: Partial<Prefs>): void {
+  const next = { ...user, ...patch };
+  if ((Object.keys(patch) as (keyof Prefs)[]).every(k => JSON.stringify(user[k]) === JSON.stringify(next[k]))) return;
+  user = next;
   try { localStorage.setItem(STORAGE, JSON.stringify(user)); } catch { /* ignore */ }
   prefs = { ...user, ...overlay };
   notify();
