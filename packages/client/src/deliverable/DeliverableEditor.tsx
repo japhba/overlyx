@@ -3217,7 +3217,9 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     const master = deck && one && one.slide >= 0 && !ro ? masterOps(one) : null;
     const menus: MenuDef[] = [
       // (entries for the shell's File menu: editormenus.ts mergeEditorMenus)
-      ...(kind !== 'page' ? [{ title: 'File', items: [{ label: 'Page setup…', disabled: ro || suggesting, action: () => pageSetup() }] }] : []),
+      ...(kind !== 'page' ? [{ title: 'File', items: [{ label: 'Page setup…', disabled: ro || suggesting, action: () => pageSetup() },
+        // (the Download button's entries: PDF, pictures, handouts, PowerPoint, website — webHost.ts, ExportDialog.tsx)
+        ...(host.bindSvgExporter ? [] : [{ label: 'Export ▸', sub: downloadItems() }])] }] : []),
       { title: 'Edit', items: [
         { label: 'Undo', shortcut: 'Ctrl+Z', disabled: ro, action: () => { toCanvas({ ol: 'stopText' }); setTimeout(() => host.undo(), 30); } },
         { label: 'Redo', shortcut: 'Ctrl+Y', disabled: ro, action: () => { toCanvas({ ol: 'stopText' }); setTimeout(() => host.redo(), 30); } },
@@ -4230,8 +4232,9 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     <EditModeSwitch mode={viewing ? 'viewing' : suggesting ? 'suggesting' : 'editing'} canEdit={!readOnly} view={null} views={() => []} onMode={setMode}
       changes={{ ins: showIns, del: showDel, set: setChanges }} shortcuts={false} scope={{ doc: pageSuggesting, set: setModeScopeTo }} />
   );
-  const downloads = (x: number, y: number) => showContextMenu(x, y, host.downloads(m => src(m === 'view' && kind === 'deck' ? 'present' : m),
-    { slide: current, exported: slides.map(s => !s.deleted && !s.skipped), width: pageW || 1280, height: pageH || (pageW || 1280) * 9 / 16 }));
+  const downloadItems = () => host.downloads(m => src(m === 'view' && kind === 'deck' ? 'present' : m),
+    { slide: current, exported: slides.map(s => !s.deleted && !s.skipped), width: pageW || 1280, height: pageH || (pageW || 1280) * 9 / 16, kind });
+  const downloads = (x: number, y: number) => showContextMenu(x, y, downloadItems());
   const downloadBtn = !host.bindSvgExporter && (
     <button class="dl-btn" title="Download" data-dl-download onClick={e => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); downloads(r.left, r.bottom + 4); }}>⤓</button>
   );

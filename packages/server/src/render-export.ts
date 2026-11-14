@@ -11,6 +11,8 @@ import type { Page } from 'playwright-core';
 import { RENDER_ORIGIN, withPage, pageReport } from './render.ts';
 import { maxPictureScale, type HandoutPaper, type HandoutPerPage } from '@overlyx/core/html/exportsize.ts';
 import { handoutHtml } from '@overlyx/core/html/handout.ts';
+import { writePptx, type PptxText } from './pptx.ts';
+import { PPTX_TEXT_SCRIPT } from './pptx-text.ts';
 
 /** what the person asked for cannot be made (said to them as it is), as opposed to a failure of the renderer */
 export class ExportError extends Error {}
@@ -22,6 +24,8 @@ export interface SlideShot {
   /** the speaker notes (plain text) */
   notes: string;
   image: Buffer;
+  /** the texts taken out of the picture as editable text (`texts`) */
+  texts?: PptxText[];
 }
 export interface DeckShots {
   kind: 'deck' | 'poster';
@@ -42,6 +46,8 @@ interface ShotOptions {
   slide?: number;
   /** JPEG (photographs of slides inside a PDF) instead of PNG */
   jpeg?: boolean;
+  /** the texts whose mapping is clean as text boxes (pptx-text.ts), left out of the pictures */
+  texts?: boolean;
   reach?: string;
 }
 
@@ -86,10 +92,11 @@ async function shoot<T>(project: string, rel: string, userId: number, o: ShotOpt
         if (o.fit && attempt === 0) return { again: most };
         throw new ExportError(`Pictures that large are more than this server renders (at most ${Math.round(width * most)} × ${Math.round(height * most)} pixels here).`);
       }
+      const texts = o.texts ? await page.evaluate(PPTX_TEXT_SCRIPT) as Record<string, PptxText[]> : {};
       const shots: SlideShot[] = [];
       for (const s of found.slides) {
         const image = await page.locator(`[data-ol-shot="${s.n}"]`).screenshot(o.jpeg ? { animations: 'disabled', type: 'jpeg', quality: 88 } : { animations: 'disabled', type: 'png' });
-        shots.push({ index: s.index, title: s.title, notes: s.notes, image });
+        shots.push({ index: s.index, title: s.title, notes: s.notes, image, texts: texts[String(s.n)] });
       }
       return { value: await after(page, { kind: rep.kind === 'poster' ? 'poster' : 'deck', title: found.title, width, height, scale, jpeg: !!o.jpeg, shots }) };
     }, o.reach ?? '');
@@ -124,5 +131,20 @@ export function handoutPdf(project: string, rel: string, userId: number, o: { la
     });
     await page.goto(`${RENDER_ORIGIN}/__export/index.html`, { waitUntil: 'load' });
     return await page.pdf({ format: o.paper === 'letter' ? 'Letter' : 'A4', printBackground: true, preferCSSPageSize: true, margin: { top: '0', right: '0', bottom: '0', left: '0' } });
+  }));
+}
+
+/**
+ * A PowerPoint file (pptx.ts): every slide its picture at twice its size (a poster at what fits),
+ * its speaker notes on the notes page; `editable`: the texts whose mapping is clean as text boxes
+ * over the picture, the rest (formulas, drawings, pictures, tables, ink, the background) in it.
+ */
+export function pptxFile(project: string, rel: string, userId: number, o: { editable: boolean; reach?: string }): Promise<{ data: Buffer; slides: number; texts: number }> {
+  return inTurn(() => shoot(project, rel, userId, { scale: 2, fit: true, texts: o.editable, reach: o.reach }, async (_page, deck) => {
+    const data = writePptx({
+      title: deck.title, width: deck.width, height: deck.height,
+      slides: deck.shots.map(s => ({ image: s.image, imageType: 'png' as const, title: s.title, notes: s.notes, texts: s.texts })),
+    });
+    return { data, slides: deck.shots.length, texts: deck.shots.reduce((n, s) => n + (s.texts?.length ?? 0), 0) };
   }));
 }

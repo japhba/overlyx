@@ -338,7 +338,8 @@ export function webHost(id: string, user: User): DeliverableHost & { destroy(): 
     onPresent: cb => watchPresenters(provider.awareness, cb),
     docClock() { let n = 0; for (const c of Y.decodeStateVector(Y.encodeStateVector(ydoc)).values()) n += c; return n; },
     downloads(open, at) {
-      const kind = deliverableInfo(text.toString()).kind;
+      // (the kind as the editor knows it: File ▸ Export asks on every change, a parse of the source each time would be too slow)
+      const kind = at?.kind ?? deliverableInfo(text.toString()).kind;
       // (an encrypted project's page: printed here; the server makes neither its PDF nor its website, nor pictures or handouts of it)
       if (e2e) return [
         { label: 'Print or save as PDF…', action: () => void printE2ePage(e2e).catch(e => console.warn('[e2e] print', e)) },

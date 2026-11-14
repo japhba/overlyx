@@ -1,5 +1,5 @@
 /**
- * Download ▸ Pictures… / Handouts and notes pages…: what a deck or a poster exports as besides its
+ * Download ▸ Pictures… / Handouts and notes pages… / PowerPoint…: what a deck or a poster exports as besides its
  * PDF and its website. The server renders them (deckexport.ts) like the PDF; this dialog chooses
  * what and how large, shows the size in pixels before anything is rendered (core
  * html/exportsize.ts has the server's limits, so nothing is offered that it would refuse) and
@@ -15,7 +15,7 @@ import type { MenuItem } from '../editor/contextmenu';
 import type { DownloadPlace } from './host';
 import './exportdialog.css';
 
-export type ExportWhat = 'pictures' | 'handouts';
+export type ExportWhat = 'pictures' | 'handouts' | 'pptx';
 export interface ExportContext extends DownloadPlace { project: string; path: string; kind: 'deck' | 'poster' }
 
 /** the Download menu's entries for what the server renders of a deck or a poster */
@@ -23,6 +23,7 @@ export function exportMenuItems(ctx: ExportContext): MenuItem[] {
   return [
     { label: ctx.kind === 'poster' ? 'Picture (PNG)…' : 'Pictures (PNG)…', action: () => openDeckExport('pictures', ctx) },
     ...(ctx.kind === 'deck' ? [{ label: 'Handouts and notes pages (PDF)…', action: () => openDeckExport('handouts', ctx) }] : []),
+    { label: 'PowerPoint (.pptx)…', action: () => openDeckExport('pptx', ctx) },
   ];
 }
 
@@ -34,7 +35,7 @@ export function openDeckExport(what: ExportWhat, ctx: ExportContext): void {
   document.body.append(host);
   open = host;
   const close = () => { render(null, host); host.remove(); open = null; };
-  render(what === 'pictures' ? <PicturesDialog ctx={ctx} onClose={close} /> : <HandoutsDialog ctx={ctx} onClose={close} />, host);
+  render(what === 'pictures' ? <PicturesDialog ctx={ctx} onClose={close} /> : what === 'pptx' ? <PptxDialog ctx={ctx} onClose={close} /> : <HandoutsDialog ctx={ctx} onClose={close} />, host);
 }
 
 const remembered = (key: string): string | null => { try { return localStorage.getItem(key); } catch { return null; } };
@@ -168,6 +169,35 @@ function HandoutsDialog({ ctx, onClose }: { ctx: ExportContext; onClose: () => v
         </div>
         <p class="dx-size" data-export-size><b>{pages} page{pages === 1 ? '' : 's'}</b> for {count} slide{count === 1 ? '' : 's'}{ctx.exported.some(e => !e) ? ' (skipped slides are left out)' : ''}</p>
         <p class="dx-note">The slides are pictures in this PDF, sharp in print; their text cannot be selected there as it can in the deck’s own PDF.</p>
+        {ex.error && <p class="dx-error" role="alert">{ex.error}</p>}
+      </div>
+    </Dialog>
+  );
+}
+
+/** PowerPoint: every slide its picture, or editable text boxes over a picture of the rest (server pptx.ts, pptx-text.ts) */
+function PptxDialog({ ctx, onClose }: { ctx: ExportContext; onClose: () => void }) {
+  const [editable, setEditable] = useState(() => remembered('ol.pptxEditable') !== '0');
+  const ex = useExport(onClose);
+  const count = ctx.kind === 'poster' ? 1 : ctx.exported.filter(Boolean).length;
+  const go = () => ex.run(async () => {
+    remember('ol.pptxEditable', editable ? '1' : '0');
+    await download(ctx, { what: 'pptx', editable: editable ? 1 : 0 });
+  });
+  return (
+    <Dialog title="Export as PowerPoint" onClose={onClose}
+      buttons={<>
+        <button class="btn primary" disabled={ex.busy || count < 1} data-export-go onClick={go}>{ex.busy ? 'Making the file…' : 'Export .pptx'}</button>
+      </>}>
+      <div class="dx" data-export="pptx">
+        <div class="dx-row" role="radiogroup" aria-label="What PowerPoint gets">
+          <label><input type="radio" name="dx-pptx" checked={editable} onChange={() => setEditable(true)} data-export-editable /> Editable text where possible</label>
+          <label><input type="radio" name="dx-pptx" checked={!editable} onChange={() => setEditable(false)} data-export-pictures /> Every {ctx.kind === 'poster' ? 'page' : 'slide'} as one picture (looks exactly the same)</label>
+        </div>
+        {editable
+          ? <p class="dx-note"><b>Editable:</b> text boxes — their font (by name), size, colour, bold, italic, underline, alignment, bullets and numbering. <b>Pictures:</b> formulas, drawings and ink, charts, images, tables, rotated objects, and the background and shapes behind the text. A font PowerPoint does not have is shown in another, so lines may break differently.</p>
+          : <p class="dx-note">Each {ctx.kind === 'poster' ? 'page' : 'slide'} is a picture at twice its size: nothing on it can be edited in PowerPoint, but it looks as it does here.</p>}
+        <p class="dx-size" data-export-size><b>{count} slide{count === 1 ? '' : 's'}</b>{ctx.kind === 'deck' ? ', speaker notes on the notes pages' : ''}{ctx.kind === 'deck' && ctx.exported.some(e => !e) ? ' (skipped slides are left out)' : ''}</p>
         {ex.error && <p class="dx-error" role="alert">{ex.error}</p>}
       </div>
     </Dialog>

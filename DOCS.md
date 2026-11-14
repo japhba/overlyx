@@ -1525,6 +1525,25 @@ blend.
     slides are JPEG pictures at 2× inside that PDF (the deck's own PDF keeps selectable text).
     The A4 / Letter deck sizes' hints say any deck prints as handouts. Not in end-to-end encrypted
     projects (the server draws them; the menu says so) nor in VS Code (its Download menu prints).
+    **PowerPoint (.pptx)** (`what=pptx&editable=0|1`; server `pptx.ts`, `pptx-text.ts`; also
+    *File ▸ Export ▸*, which repeats the Download button's entries). *Licence verdict (14 Nov 2026,
+    the owner: "only do pptx export if there is no license trouble"): clean.* No library: the
+    parts are written by `pptx.ts` from the open standard (ECMA-376 / ISO/IEC 29500 Office Open
+    XML, PresentationML — covered by Microsoft's Open Specification Promise), the minimal set
+    (content types, presentation, one master with one blank layout, a notes master, two themes,
+    slides, notes slides, media, docProps); nothing is copied from Office's templates or theme
+    parts (the theme is ours: black on white, six plain accents, Arial by name); fonts are
+    referenced by name and never embedded; the zip is `zip.ts`. Every slide (a poster: its page)
+    is a picture at 2× at the deck's slide size (9525 EMU a CSS pixel; above PowerPoint's 56 in a
+    side scaled down) with its speaker notes on the notes page. *Editable text where possible*
+    (the default): each child object of a slide that is only text — no formula, picture, SVG,
+    table, video, embed, ink, crop; not transformed, not translucent — becomes a text box over the
+    picture (font by its first family name, size, colour, bold, italic, underline, strike,
+    super/subscript, alignment, bullets / numbering with nesting, line height, spacing, padding as
+    insets, a flex box's vertical centring), and the picture is taken with those texts painted
+    transparent (their fills and borders stay in it). *Every slide as one picture* keeps the look
+    exactly. The dialog says which is which. Not checked in PowerPoint itself (none on the box):
+    LibreOffice Impress opens the files.
   * **Presenter view and presenting from two screens** (7 Nov 2026, the user: "a presenter's view
     with timer, speaker notes, slide browser … suitable for multiscreen use … switching to this view
     by hovering the bottom menu, in particular when on iPad … when remote controlling a session").

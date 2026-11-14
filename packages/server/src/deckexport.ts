@@ -6,16 +6,17 @@
  *   poster — at `scale` picture pixels per CSS pixel (core html/exportsize.ts has the limits);
  * - `what=pngs`: every slide as `slide-01.png` … in a .zip;
  * - `what=handout`: handouts, `per` = 1 | 2 | 3 | 4 | 6 slides a page, `paper` = a4 | letter (PDF);
- * - `what=notes`: notes pages — a slide, its speaker notes below (PDF).
+ * - `what=notes`: notes pages — a slide, its speaker notes below (PDF);
+ * - `what=pptx`: a PowerPoint file, `editable=1`: texts as text boxes over the slides' pictures (pptx.ts).
  */
 import type { Response } from 'express';
 import { splitProjectKey } from '@overlyx/core';
 import { handoutPaper, handoutPerPage } from '@overlyx/core/html/exportsize.ts';
 import { splitEntry } from './deliverables.ts';
-import { deliverableShots, handoutPdf, ExportError } from './render-export.ts';
+import { deliverableShots, handoutPdf, pptxFile, ExportError } from './render-export.ts';
 import { writeZip } from './zip.ts';
 
-export const EXPORT_KINDS = ['png', 'pngs', 'handout', 'notes'] as const;
+export const EXPORT_KINDS = ['png', 'pngs', 'handout', 'notes', 'pptx'] as const;
 
 function send(res: Response, type: string, name: string, data: Buffer): void {
   res.setHeader('Content-Type', type);
@@ -41,6 +42,10 @@ export async function deckExport(project: string, rel: string, userId: number, q
     } else if (what === 'handout' || what === 'notes') {
       const pdf = await handoutPdf(project, rel, userId, { layout: what, per: handoutPerPage(q.per), paper: handoutPaper(q.paper) });
       send(res, 'application/pdf', `${name}-${what === 'notes' ? 'notes' : 'handout'}.pdf`, pdf);
+    } else if (what === 'pptx') {
+      const f = await pptxFile(project, rel, userId, { editable: q.editable === '1' });
+      res.setHeader('X-OverLyX-Texts', String(f.texts));
+      send(res, 'application/vnd.openxmlformats-officedocument.presentationml.presentation', `${name}.pptx`, f.data);
     } else {
       res.status(400).json({ error: `what: ${EXPORT_KINDS.join(', ')}` });
     }

@@ -97,8 +97,8 @@ export interface DeliverableHost {
   bibliography?(keys: string[]): Promise<BibRecord[]>;
 }
 
-/** where the Download menu was opened: the slide shown (from 0), which slides an export has (not the skipped ones, not a suggested deletion), a slide's size (CSS px) */
-export interface DownloadPlace { slide: number; exported: boolean[]; width: number; height: number }
+/** where the Download menu was opened: the slide shown (from 0), which slides an export has (not the skipped ones, not a suggested deletion), a slide's size (CSS px), the deliverable's kind */
+export interface DownloadPlace { slide: number; exported: boolean[]; width: number; height: number; kind?: 'deck' | 'poster' | 'page' }
 
 /** an entry of the project's bibliography as the server sends it */
 export interface BibRecord { key: string; type?: string; fields?: Record<string, string>; authorShort?: string; author?: string; year?: string; title?: string }
