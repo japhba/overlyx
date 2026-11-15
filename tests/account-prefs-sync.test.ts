@@ -25,13 +25,13 @@ vi.mock('../packages/client/src/app/theme', () => ({
 }));
 
 /** a browser: its localStorage, then the modules loaded fresh, signed in as user 1 */
-async function device(stored: Record<string, string>) {
+async function device(stored: Record<string, string>, exclude?: string[]) {
   localStorage.clear();
   for (const [k, v] of Object.entries(stored)) localStorage.setItem(k, v);
   vi.resetModules();
   const prefs = await import('../packages/client/src/prefs');
   const sync = await import('../packages/client/src/app/accountprefs');
-  const stop = sync.startAccountPrefs(1);
+  const stop = sync.startAccountPrefs(1, { exclude });
   await sync.sync(); await sync.sync();
   return { prefs, sync, stop };
 }
@@ -71,6 +71,17 @@ describe('preferences that follow the account', () => {
   it('the first device picks up a change made elsewhere', async () => {
     const { prefs, sync, stop } = await device({ 'ol.prefs': JSON.stringify({ editorFont: 'gf:Lora', editorFontChosen: true }), 'ol.prefsSync': JSON.stringify({ user: 1, values: { 'pref.editorFont': '"gf:Lora"' }, at: { 'pref.editorFont': 1 } }) });
     expect(prefs.getUserPrefs().spellcheck).toBe(false);
+    stop();
+  });
+  it('VS Code takes the account’s fonts but keeps its theme and telemetry (exclude)', async () => {
+    const { prefs, sync, stop } = await device({ 'ol.prefs': JSON.stringify({ usageStats: false }) }, ['ls.ol.theme', 'pref.usageStats']);
+    expect(prefs.getUserPrefs().editorFont).toBe('gf:Lora');
+    expect(localStorage.getItem('ol.theme')).toBeNull();
+    expect(server.prefs['pref.usageStats']).toBeUndefined();
+    expect(sync.followsAccount('ls.ol.theme')).toBe(false);
+    prefs.setPref('usageStats', true); prefs.setPref('usageStats', false);
+    await sync.sync();
+    expect(server.prefs['pref.usageStats']).toBeUndefined();
     stop();
   });
 });

@@ -17,7 +17,9 @@
  *
  * After that: a change here goes up at once (a prefs change) or within seconds (the localStorage
  * keys); the account's values are fetched again when the window comes back into focus.
- * The web app only: the VS Code extension keeps its own settings.
+ * The VS Code extension's editors too, when VS Code is signed in to OverLyX (vscode
+ * webview/accountPrefs.ts, through the extension's bridge): without the keys VS Code decides itself
+ * (`exclude` — its theme, its telemetry setting).
  */
 import { api, type AccountPrefs } from '../api';
 import { getUserPrefs, adoptUserPrefs, subscribePrefs, DEFAULT_PREFS, DEVICE_PREF_KEYS, type Prefs } from '../prefs';
@@ -60,13 +62,17 @@ const writeJson = (key: string, v: unknown) => { try { localStorage.setItem(key,
 /* ------------------------------------------------------------ on this device only */
 
 let deviceOnlySet = new Set<string>(readJson<string[]>(DEVICE_ONLY_KEY) ?? []);
+/** keys this shell never syncs (startAccountPrefs `exclude`) */
+let excluded = new Set<string>();
+/** whether a key of SYNCED_LABELS follows the account here at all */
+export const followsAccount = (key: string): boolean => !excluded.has(key);
 const listeners = new Set<() => void>();
 const changed = () => { for (const l of listeners) { try { l(); } catch { /* ignore */ } } };
 export function subscribeAccountPrefs(l: () => void): () => void { listeners.add(l); return () => { listeners.delete(l); }; }
 
 /** settings kept on this device only (keys of SYNCED_LABELS) */
 export function deviceOnly(): ReadonlySet<string> { return deviceOnlySet; }
-const isDeviceOnly = (key: string) => deviceOnlySet.has(FOLLOWS[key] ?? key);
+const isDeviceOnly = (key: string) => deviceOnlySet.has(FOLLOWS[key] ?? key) || excluded.has(FOLLOWS[key] ?? key);
 
 /** Keep a setting on this device only, or let it follow the account again (it takes the account's value then). */
 export function setDeviceOnly(key: string, on: boolean): void {
@@ -199,10 +205,14 @@ export function sync(): Promise<void> {
 }
 
 let stop: (() => void) | null = null;
-/** After sign-in (not for guests): sync the account's preferences, and keep them in step. Gives a stop function. */
-export function startAccountPrefs(id: number): () => void {
+/**
+ * After sign-in (not for guests): sync the account's preferences, and keep them in step. Gives a stop
+ * function. `exclude`: keys of SYNCED_LABELS this shell keeps for itself (VS Code: its theme …).
+ */
+export function startAccountPrefs(id: number, opts: { exclude?: readonly string[] } = {}): () => void {
   stop?.();
   userId = id;
+  excluded = new Set(opts.exclude ?? []);
   const stored = readJson<SyncState>(STATE_KEY);
   state = stored && stored.user === id && stored.values ? stored : null;
   if (stored && stored.user !== id) writeJson(STATE_KEY, { ...stored, user: id, values: {}, at: {} });   // another account's browser: adopt, never upload

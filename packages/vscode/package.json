@@ -426,6 +426,14 @@
           "default": "",
           "description": "Override the release-check endpoint (testing / self-hosted mirrors). Leave empty."
         },
+        "overlyx.accountSettings": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Use your OverLyX account's settings in the OverLyX editors, as in the browser: the editor's fonts, text styles, spell checking, autocorrect and the other settings that follow your account to every device — while VS Code is signed in to OverLyX (**OverLyX: Sign In…**). A change made here reaches the browser too. VS Code's theme and telemetry setting stay VS Code's, and Settings ▸ This device keeps a setting for VS Code only. Off: the editors keep settings of their own on this computer.",
+          "tags": [
+            "usesOnlineServices"
+          ]
+        },
         "overlyx.sync.enabled": {
           "type": "boolean",
           "default": true,

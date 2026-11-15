@@ -30,6 +30,7 @@ import type { PdfTarget } from '@client/app/PdfViewer';
 import { SvgEditorHost } from '@client/app/SvgEditorHost';
 import { ToolbarDock } from '@client/app/tbdock';
 import { ContextBars, contextBars } from '@client/app/ctxdock';
+import { useAccountState, signInForPrefs } from './accountPrefs';
 import { SettingsPanel, settingsSearchEntries, documentFontEntry, settingsArg, type SettingsSection } from '@client/app/Settings';
 import { DOCUMENT_FONT_ARG } from '@client/app/FontPicker';
 import { HelpDialog, HELP_ROWS, DialogHost, uiPrompt } from '@client/app/Dialogs';
@@ -196,6 +197,8 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   const [toolbars, setToolbars] = useState<ToolbarPrefs>(loadToolbarPrefs);
   const [mathField, setMathField] = useState<LyxMathField | null>(null);
   const [prefs, setPrefsState] = useState<Prefs>(getPrefs);
+  // whose settings the User tab is (webview/accountPrefs.ts): the OverLyX account's while signed in
+  const account = useAccountState();
   const [docTick, setDocTick] = useState(0);
   const [combined, setCombined] = useState(stored('ol.vscode.combined') === '1');
   const [selTick, setSelTick] = useState(0);
@@ -764,6 +767,9 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
     switch (dialog.name) {
       // (User and Document: the workspace's own settings are VS Code's)
       case 'preferences': return <SettingsPanel ai={null} user={editorContext.user!} sections={VSCODE_SETTINGS} {...settingsArg(dialog.arg)} onClose={close}
+        keptWith={{ account: account.account?.username ?? null, device: 'VS Code', note: !account.enabled
+          ? <>Your OverLyX account’s are not used here: the VS Code setting <code>overlyx.accountSettings</code> is off.</>
+          : <><button type="button" class="btn" data-prefs-signin onClick={() => void signInForPrefs()}>Sign in to OverLyX…</button> to use your account’s settings here, as in the browser — fonts, text styles, spell checking.</> }}
         document={{ docId: targetId, headerLines: docHeaders(targetId), view, markdown: isMarkdownDoc(targetId), onSaved: () => { void api.header(targetId).then(h => updateHeader(targetId, h.headerLines)); }, openSettings: () => setDialog({ name: isMarkdownDoc(targetId) ? 'mdsettings' : 'settings' }) }} />;
       case 'help': return <HelpDialog onClose={close} />;
       case 'stats': return <StatsDialog view={view} onClose={close} />;

@@ -2332,8 +2332,17 @@ blend.
   (`prefs.ts DEVICE_PREF_KEYS`: the math keyboard and the text grade, moved here from User; pens,
   calibration and palm in Drawing & pen; panes, zoom and docked toolbars as they are changed), and
   *Only on this device* ticks keep any synced setting here alone (`ol.deviceOnly`; unticked, it takes
-  the account's value again). The VS Code extension keeps its own settings (its webview never starts
-  the sync). `tests/account-prefs.test.ts`, `tests/account-prefs-sync.test.ts`.
+  the account's value again). **VS Code** (15 Nov 2026; the browser's fonts did not reach VS Code):
+  while VS Code is signed in to OverLyX (the CLI's / extension's sign-in, overlyx.app first) and
+  `overlyx.accountSettings` is on (default), the editor webview runs the same sync
+  (`vscode webview/accountPrefs.ts` → `startAccountPrefs(id, {exclude})`): the bridge answers
+  `/api/prefs` from the server's `GET/PUT /git/api/prefs` (Basic auth; read-only sign-ins cannot
+  write), `/api/prefs/account` says whose settings to follow (looked at again on focus),
+  `/api/prefs/signin` runs *OverLyX: Sign In…* (`host/accountprefs.ts`). VS Code keeps its theme,
+  its telemetry setting and the AI switches (`exclude`, also left out of This device's list);
+  Settings ▸ User then says it is kept with the account, This device is "VS Code", and signed out it
+  offers *Sign in to OverLyX…*. `tests/account-prefs.test.ts`, `tests/account-prefs-sync.test.ts`,
+  `tests/vscode-account-prefs.test.ts`.
 * **Fonts, for the editor and for the PDF separately** (like LyX's screen fonts and document fonts;
   catalogue in `client/src/fonts/catalog.ts`). *Settings ▸ Fonts* (per browser, both shells) has two
   choices. *Text font* (`prefs.editorFont`): Computer Modern (bundled CMU Serif, the default), the text

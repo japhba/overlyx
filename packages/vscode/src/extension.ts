@@ -37,6 +37,7 @@ import { placeSelection, SELECTION_MAX } from './shared/agentSelection.ts';
 import * as build from './host/build.ts';
 import { initAppearance } from './host/appearance.ts';
 import { fontService } from './host/fonts.ts';
+import { accountPrefsService } from './host/accountprefs.ts';
 import type { InteractionAction } from '@overlyx/core/interactions.ts';
 import type { HostToEditor } from './shared/protocol.ts';
 import { timing } from './host/timing.ts';
@@ -315,6 +316,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
       synctexEdit: (docId, page, x, y) => build.synctexEdit(docId, page, x, y),
       cacheDir: () => path.join(context.globalStorageUri.fsPath, 'graphics'),
       fonts: fontService(path.join(context.globalStorageUri.fsPath, 'google-fonts')),
+      prefs: accountPrefsService({
+        enabled: () => vscode.workspace.getConfiguration('overlyx').get<boolean>('accountSettings', true) !== false,
+        signIn: () => vscode.commands.executeCommand('overlyx.signIn'),
+      }),
       dictionary: (lang, ext) => {
         const bundled = path.join(context.extensionPath, 'dist/dict', `${lang}.${ext}`);
         if (fs.existsSync(bundled)) return bundled;

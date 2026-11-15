@@ -23,19 +23,22 @@ const FAMILY = /^[A-Za-z0-9][A-Za-z0-9 ]{0,59}$/;
 const slugOf = (family: string) => family.trim().toLowerCase().replace(/\s+/g, '-');
 const json = (status: number, v: unknown): FontResponse => ({ status, type: 'application/json; charset=utf-8', body: JSON.stringify(v) });
 
-let known: { at: number; value: Promise<{ host: string; authorization: string } | null> } | null = null;
-/** the server to ask and its sign-in (null: signed in nowhere) — looked up again after a minute (a sign-in, a sign-out) */
-function account(): Promise<{ host: string; authorization: string } | null> {
-  if (!known || Date.now() - known.at > 60000) known = { at: Date.now(), value: lookUp() };
+/** the OverLyX server this computer is signed in to and its sign-in */
+export interface SignedIn { host: string; username: string; authorization: string }
+let known: { at: number; value: Promise<SignedIn | null> } | null = null;
+/** the server to ask and its sign-in (null: signed in nowhere) — looked up again after a minute (a sign-in, a sign-out), or now with `fresh` */
+export function signedInAccount(fresh = false): Promise<SignedIn | null> {
+  if (fresh || !known || Date.now() - known.at > 60000) known = { at: Date.now(), value: lookUp() };
   return known.value;
 }
-async function lookUp(): Promise<{ host: string; authorization: string } | null> {
+const account = () => signedInAccount();
+async function lookUp(): Promise<SignedIn | null> {
   let hosts: { host: string }[] = [];
   try { hosts = signedInHosts(); } catch { /* no CLI configuration */ }
   const host = hosts.find(h => h.host === DEFAULT_HOST)?.host ?? hosts[0]?.host;
   if (!host) return null;
   const auth = await syncCredentials(host, os.homedir());
-  return auth ? { host, authorization: 'Basic ' + Buffer.from(`${auth.username}:${auth.token}`, 'utf8').toString('base64') } : null;
+  return auth ? { host, username: auth.username, authorization: 'Basic ' + Buffer.from(`${auth.username}:${auth.token}`, 'utf8').toString('base64') } : null;
 }
 
 /**

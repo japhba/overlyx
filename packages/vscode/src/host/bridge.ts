@@ -52,6 +52,8 @@ export interface BridgeDelegate {
   agentSelection(): unknown;
   /** Google fonts and the account's My fonts, from the OverLyX server signed in to (fonts.ts): `/api/fonts/<sub>` */
   fonts?(method: string, sub: string, search: string, body?: unknown): Promise<{ status: number; type: string; body: Buffer | string; cache?: string }>;
+  /** the account's settings from the OverLyX server signed in to (accountprefs.ts): `/api/prefs`, `/api/prefs/account`, `/api/prefs/signin` */
+  prefs?(method: string, sub: '' | 'account' | 'signin', body?: unknown): Promise<{ status: number; type: string; body: string }>;
 }
 
 const JSON_LIMIT = 32 * 1024 * 1024;
@@ -121,6 +123,17 @@ export class Bridge {
       res.statusCode = r.status;
       res.setHeader('Content-Type', r.type);
       if (r.cache) res.setHeader('Cache-Control', r.cache);
+      res.end(r.body);
+      return;
+    }
+
+    // the account's settings (accountprefs.ts)
+    m = /^\/prefs(?:\/(account|signin))?$/.exec(api);
+    if (m && d.prefs) {
+      const r = await d.prefs(req.method ?? 'GET', (m[1] ?? '') as '' | 'account' | 'signin', req.method === 'PUT' ? await body(req, 1024 * 1024) : undefined);
+      res.statusCode = r.status;
+      res.setHeader('Content-Type', r.type);
+      res.setHeader('Cache-Control', 'no-store');
       res.end(r.body);
       return;
     }

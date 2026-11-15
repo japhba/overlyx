@@ -36,6 +36,7 @@ import { createOwnedProject } from './projectCreate.ts';
 import { buildIncluding, buildErrors, errorLocations, lastBuild } from './export.ts';
 import { canonicalProject } from './namespaces.ts';
 import { verifyAccessToken } from './tokenAuth.ts';
+import { accountPrefs, setAccountPrefs } from './accountprefs.ts';
 import { PANEL_AGENT } from './agentwork.ts';
 import { sendFileAt } from './confined.ts';
 import { sealer } from './sealed.ts';
@@ -532,6 +533,14 @@ export function gitRouter(): express.Router {
   fonts.use((req, res, next) => { const user = authenticateBasic(req, res); if (!user) return; req.user = user; next(); });
   fonts.use(googleFontRoutes(), myFontRoutes());
   r.use('/api', (req, res, next) => { if (req.path.startsWith('/fonts/')) fonts(req, res, next); else next(); });
+  // …and the account's settings (accountprefs.ts: fonts, text styles, spell checking …), as the web app's /api/prefs
+  r.get('/api/prefs', (req, res) => { const user = authenticateBasic(req, res); if (user) res.json({ prefs: accountPrefs(user.id) }); });
+  r.put('/api/prefs', express.json({ limit: '1mb' }), (req, res) => {
+    const user = authenticateBasic(req, res);
+    if (!user) return;
+    if (user.scope?.readonly) { res.status(403).json({ error: 'This sign-in is read only' }); return; }
+    res.json({ prefs: setAccountPrefs(user.id, req.body?.set, req.body?.onlyNew === true) });
+  });
   r.all(/.*/, (req, res) => { void handle(req, res); });
   return r;
 }

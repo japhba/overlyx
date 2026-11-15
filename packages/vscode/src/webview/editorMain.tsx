@@ -12,6 +12,7 @@ import { undoRedoKey } from '@client/app/codearea';
 import { EditorShell } from './EditorShell';
 import { initUsage } from '@client/usage';
 import { relayAppearance } from './appearance';
+import { followAccountPrefs } from './accountPrefs';
 import type { HostToEditor } from '../shared/protocol';
 import '@client/styles.css';
 import 'prosemirror-view/style/prosemirror.css';
@@ -29,6 +30,8 @@ relayAppearance(t => {
   try { if (t === 'system') localStorage.removeItem('ol.theme'); else localStorage.setItem('ol.theme', t); } catch { /* ignore */ }
   window.dispatchEvent(new CustomEvent('ol:theme', { detail: t }));
 });
+// the OverLyX account's settings (fonts, text styles …) when VS Code is signed in, as in the browser
+followAccountPrefs();
 // toolbar icons are absolute paths (/lyxicons/x.svg) in the web app: point them at our assets
 for (const k of Object.keys(LYX_ICONS)) if (LYX_ICONS[k].startsWith('/')) LYX_ICONS[k] = G.assetBase + LYX_ICONS[k].slice(1);
 

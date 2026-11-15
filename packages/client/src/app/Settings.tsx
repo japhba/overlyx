@@ -196,18 +196,25 @@ const THEMES: [ThemePref, string, string][] = [
   ['dark', 'Dark', ''],
 ];
 
-export function SettingsPanel({ ai, user, initial, scope: initialScope, onClose, sections: shown = SECTIONS.map(([id]) => id), project = null, projectReadOnly = false, document: doc = null }: {
+export function SettingsPanel({ ai, user, initial, scope: initialScope, onClose, sections: shown = SECTIONS.map(([id]) => id), project = null, projectReadOnly = false, document: doc = null, keptWith }: {
   sections?: SettingsSection[]; ai: AiStatus | null; user: User; initial?: SettingsSection; scope?: SettingsScope; onClose: () => void;
+  /**
+   * Where the User tab's settings are kept, when the shell decides (VS Code, its webview/accountPrefs.ts):
+   * with the account `account` (a username; null: not) — This device is then `device` — else on
+   * `device`, `note` saying why and what to do. Without it: the web app's rule (signed in, not a guest).
+   */
+  keptWith?: { account: string | null; device: string; note?: ComponentChildren };
   /** the project of the open document (its tab); read-only for its viewers */
   project?: string | null; projectReadOnly?: boolean;
   /** the open document (its tab) */
   document?: SettingsDocument | null;
 }) {
   // This device: in the web app, signed in — where the User tab's settings follow the account (accountprefs.ts)
-  const deviceTab = shown.includes('account') && !user.guest;
+  const deviceTab = keptWith ? !!keptWith.account : shown.includes('account') && !user.guest;
+  const device = keptWith?.device ?? 'this browser';
   const scopes: SettingsScope[] = ['user', ...(deviceTab ? ['device' as const] : []), ...(project ? ['project' as const] : []), ...(doc ? ['document' as const] : [])];
   /** where the User tab's settings are kept */
-  const kept = deviceTab ? 'Kept with your account, on every device you sign in on.' : 'Kept in this browser.';
+  const kept = deviceTab ? 'Kept with your account, on every device you sign in on.' : `Kept in ${device}.`;
   const [scope, setScopeState] = useState<SettingsScope>(initialScope && scopes.includes(initialScope) ? initialScope : 'user');
   // (Administration only for administrators; the shell's sections in the User tab)
   const sectionsOf = (s: SettingsScope) => SCOPE_SECTIONS[s].filter(id => (s !== 'user' || shown.includes(id)) && (id !== 'admin' || user.isAdmin));
@@ -397,13 +404,13 @@ export function SettingsPanel({ ai, user, initial, scope: initialScope, onClose,
     : <>
       <p class="set-desc">{scope === 'project'
         ? `How the editor draws each kind of text in ${projectName}, for everyone in it — over each person’s own styles, under a document’s. Values not set here come from User (yours) or the defaults. The PDF keeps the document’s own.`
-        : `How your editor draws each kind of text — Title, Normal text, Quote, the headings — in every document, ${deviceTab ? 'on every device you sign in on' : 'in this browser'}. They start from sensible defaults (LaTeX’s article); a project or a document can set its own, and the more specific wins. The PDF keeps the document’s own.`}</p>
+        : `How your editor draws each kind of text — Title, Normal text, Quote, the headings — in every document, ${deviceTab ? 'on every device you sign in on' : 'in ' + device}. They start from sensible defaults (LaTeX’s article); a project or a document can set its own, and the more specific wins. The PDF keeps the document’s own.`}</p>
       <div class="set-block"><EditorStyles key={scope} scope={scope === 'project' ? 'project' : 'user'} project={project} document={!!doc} readOnly={scope === 'project' && projectReadOnly} /></div>
     </>;
 
   const content = (() => {
     switch (section) {
-      case 'editor': return scope === 'device' ? <DeviceSettings onDrawing={() => { setScopeState('user'); setSection('drawing'); }} />
+      case 'editor': return scope === 'device' ? <DeviceSettings where={keptWith ? `${keptWith.device}, on this computer` : undefined} onDrawing={() => { setScopeState('user'); setSection('drawing'); }} />
         : scope === 'document' && doc ? <DocumentParagraphs doc={doc} /> : editorSection;
       case 'fonts': return fontsSection;
       case 'styles': return stylesSection;
@@ -528,7 +535,7 @@ export function SettingsPanel({ ai, user, initial, scope: initialScope, onClose,
   })();
 
   const scopeSay: Record<SettingsScope, ComponentChildren> = {
-    user: <>Yours, in every project and document — {deviceTab ? 'kept with your account, so every device you sign in on has them (what depends on the device: This device).' : 'kept in this browser, some with your account.'}{project || doc ? ' A project or a document can set its own: the more specific wins.' : ''}</>,
+    user: <>Yours, in every project and document — {deviceTab ? 'kept with your account, so every device you sign in on has them (what depends on the device: This device).' : keptWith ? <>kept in {device}.{keptWith.note ? <> {keptWith.note}</> : null}</> : 'kept in this browser, some with your account.'}{project || doc ? ' A project or a document can set its own: the more specific wins.' : ''}</>,
     device: <>This device alone — this browser, on this computer, tablet or phone: what depends on its screen, keyboard or pen, and settings you keep here only.</>,
     project: <>Everyone’s in <b>{projectName}</b>: kept in the project (<code>.overlyx/settings.json</code>, in its history) — over each person’s own, under a document’s.{projectReadOnly ? ' You can see them; the project’s editors change them.' : ''}</>,
     document: <><b>{docName}</b> alone: kept in the document, so its PDF and everyone’s editor follow it — over the project’s and each person’s.</>,
@@ -544,7 +551,7 @@ export function SettingsPanel({ ai, user, initial, scope: initialScope, onClose,
               {scopes.map(s => (
                 <button key={s} type="button" role="tab" aria-selected={scope === s} class={'settings-scope' + (scope === s ? ' active' : '')} data-settings-scope={s} onClick={() => setScope(s)}>
                   <span class="settings-scope-name">{s === 'user' ? 'User' : s === 'device' ? 'This device' : s === 'project' ? 'Project' : 'Document'}</span>
-                  <span class="settings-scope-where">{s === 'user' ? user.username : s === 'device' ? 'this browser' : s === 'project' ? projectName : docName}</span>
+                  <span class="settings-scope-where">{s === 'user' ? keptWith?.account ?? user.username : s === 'device' ? device : s === 'project' ? projectName : docName}</span>
                   {s === 'project' && projectCount > 0 && <span class="settings-scope-count" title={`${projectCount} set in the project`}>{projectCount}</span>}
                 </button>
               ))}
