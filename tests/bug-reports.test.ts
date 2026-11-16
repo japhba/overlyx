@@ -110,7 +110,10 @@ describe('GitHub bug reports', () => {
     expect(mml).toMatch(/<mpadded[^>]*voffset="1depth"/);
     expect(mml).toMatch(/<mpadded[^>]*depth="-1depth"/);
     expect(mml).not.toMatch(/<mpadded[^>]*height=/);
-    expect(mml).toMatch(/<mo[^>]*>&#x22BA;<\/mo>/);
+    // amssymb's small heavy ⊺ drawn with rules: the math fonts' U+22BA is a copy of \top's ⊤
+    expect(mml).not.toContain('&#x22BA;');
+    expect(mml).toMatch(/data-mjx-texclass="BIN"[^>]*data-latex="\\intercal"/);
+    expect(mml.match(/<mspace[^>]*mathbackground="currentColor"/g)).toHaveLength(2);
     expect(renderStaticHtml(String.raw`\mathbf{u}^{\T}\mathbf{h}`, false, macros, { project: 'paper', docDir: '' })).not.toMatch(/lm-error|lm-unknown|lm-undefined/);
   });
 

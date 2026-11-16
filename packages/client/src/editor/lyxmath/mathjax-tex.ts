@@ -8,6 +8,7 @@
  *    mrow is transparent to TeX's spacing. Also in `\text{…}`.
  *  - `\includegraphics[height=…]{file}`: the image as a glyph (macros drawn with a picture).
  *  - `\raisebox{lift}[height][depth]{…}`.
+ *  - `\intercal` in amssymb's shape (the math fonts draw it as a copy of `\top`).
  *  - stmaryrd's `\llbracket` `\rrbracket` and `\llangle` `\rrangle`, as (stretchy) delimiters.
  *  - `\textsc{…}`; `\middle` inside the editor's cell boxes.
  *  - an undefined command shows its name (`lm-undefined`) instead of failing the whole formula.
@@ -190,6 +191,24 @@ const OverlyxMethods = {
     if (color) def.mathcolor = color;
     parser.Push(parser.create('token', 'mo', def, delim) as MmlNode);
   },
+  /**
+   * \intercal as amssymb draws it (msam10): a small, heavy T — its bar at x-height, its stem reaching
+   * below the baseline, strokes twice \top's. The OpenType math fonts draw U+22BA as a copy of ⊤, so
+   * a transpose written with \intercal (or a macro around it) and one written \top looked the same
+   * in the editor while the PDF tells them apart. Drawn with rules in the text colour, msam10's
+   * metrics in em (advance .555, bar .056–.5 at .351–.431, stem .182–.262 down to −.213).
+   */
+  Intercal(parser: TexParser) {
+    const color = (parser.stack.env.color as string | undefined) ?? 'currentColor';
+    const rule = (w: number, h: number, d: number) => parser.create('node', 'mspace', [], {
+      width: w + 'em', height: h + 'em', depth: d + 'em', mathbackground: color, style: 'border-radius:.04em',
+    }) as MmlNode;
+    const space = (w: number) => parser.create('node', 'mspace', [], { width: w + 'em' }) as MmlNode;
+    // the bar laps over the stem's start (\mathrlap); the stem runs into the bar so no seam shows
+    const bar = parser.create('node', 'mpadded', [rule(0.444, 0.431, -0.351)], { width: '0em' }) as MmlNode;
+    const glyph = parser.create('node', 'mrow', [space(0.056), bar, space(0.182), rule(0.08, 0.411, 0.213), space(0.237)]) as MmlNode;
+    parser.Push(parser.create('node', 'TeXAtom', [glyph], { texClass: TEXCLASS.BIN }) as MmlNode);
+  },
   /** \textsc{…}: small capitals of the surrounding text font */
   TextSc(parser: TexParser, name: string) {
     const nodes = ParseUtil.internalMath(parser, parser.GetArgument(name), 0);
@@ -234,6 +253,7 @@ new CommandMap('overlyx-macros', {
   Citealp: OverlyxMethods.CiteAlp,
   includegraphics: OverlyxMethods.IncludeGraphics,
   raisebox: OverlyxMethods.Raisebox,
+  intercal: OverlyxMethods.Intercal,
   textsc: OverlyxMethods.TextSc,
   middle: OverlyxMethods.Middle,
 } as never);
