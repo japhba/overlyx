@@ -12,6 +12,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import type { ModuleInfo } from '../modules.ts';
+import { stripComments } from '../macros.ts';
 
 const moduleCache = new Map<string, { at: number; list: ModuleInfo[] }>();
 export function describeModules(layoutDir: string, localDirs: string[] = []): ModuleInfo[] {
@@ -948,17 +949,25 @@ export function scanNewtheorems(text: string): NewtheoremDecl[] {
  * carries (even the AMS module calls the environment `defn`). Each declaration is aliased onto
  * the matching AMS theorem layout (by its label; `Theorem` as the fallback), cloned with the
  * declared environment as its LaTeX name and with no layout preamble — the user's declaration
- * stays the one source of the environment, so nothing is declared twice. Returns a copy of the
- * class (they are cached and shared); the class itself when there is nothing to do.
+ * stays the one source of the environment, so nothing is declared twice. Loading amsthm also
+ * makes its standard proof environment available without requiring a LyX theorem module.
+ * Returns a copy of the class (they are cached and shared); the class itself when there is
+ * nothing to do.
  */
 export function applyDocumentTheorems(dc: DocumentClass, declText: string, layoutDir?: string, localDirs: string[] = []): DocumentClass {
-  if (!declText || !declText.includes('\\newtheorem')) return dc;
   const existing = new Set([...dc.styles.values()].map(st => st.latexName));
+  const needsProof = !existing.has('proof') && (dc.provides.has('amsthm') ||
+    [...stripComments(declText).matchAll(/\\(?:usepackage|RequirePackage)\s*(?:\[[^\]]*\])?\s*\{([^}]*)\}/g)]
+      .some(m => m[1].split(',').some(p => p.trim() === 'amsthm')));
   const wanted = scanNewtheorems(declText).filter(d => !existing.has(d.env));
-  if (!wanted.length) return dc;
+  if (!wanted.length && !needsProof) return dc;
   let pool: DocumentClass;
   try { pool = loadDocumentClass(dc.name, ['theorems-ams', 'theorems-ams-extended'], layoutDir, localDirs); } catch { return dc; }
   const styles = new Map(dc.styles);
+  if (needsProof) {
+    const proof = pool.styles.get('Proof');
+    if (proof) styles.set('Proof', { ...proof, requires: [...proof.requires, 'amsthm'] });
+  }
   for (const d of wanted) {
     const label = d.label.replace(/\\protect|\\/g, '').trim() || d.env;
     const key = label.toLowerCase();

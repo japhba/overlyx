@@ -567,6 +567,29 @@ describe('corpus: every imported document is stable under parse/write', () => {
   }
 });
 
+describe('the standard amsthm proof environment', () => {
+  it.each(['\\usepackage{amsthm}', '\\RequirePackage{amsmath, amsthm}'])(
+    'renders proofs with %s without a LyX theorem module', preamble => {
+      const src = doc('\\begin{proof}[Proof of the claim]\nBy $x=x$.\n\nThe claim follows.\n\\end{proof}\n\nAfter.', preamble);
+      const parsed = parseTex(src);
+      expect(parsed.warnings).toEqual([]);
+      expect(parsed.doc.body.map(p => p.layout)).toEqual(['Proof', 'Proof', 'Standard']);
+      expect(insets(parsed.doc, 'ERT')).toHaveLength(0);
+      expect(insets(parsed.doc, 'Argument', '1')).toHaveLength(1);
+      const out = expectStable(src);
+      expect(out).toContain('\\begin{proof}[Proof of the claim]');
+      expect(out).toContain('\\end{proof}');
+      expect((out.match(/\\(?:usepackage|RequirePackage)(?:\[[^\]]*\])?\{[^}]*amsthm[^}]*\}/g) ?? []).length).toBe(1);
+    },
+  );
+
+  it('leaves proofs raw when amsthm is absent, including a commented package', () => {
+    const d = parse(doc('\\begin{proof}\nA claim.\n\\end{proof}', '% \\usepackage{amsthm}'));
+    expect(d.body[0].layout).toBe('Standard');
+    expect(insets(d, 'ERT')).toHaveLength(2);
+  });
+});
+
 describe("theorem environments from the document's own \\newtheorem", () => {
   const PRE = '\\usepackage{amsthm}\n\\newtheorem{definition}{Definition}\n\\newtheorem{example}{Example}';
   it('parse as theorem layouts and write back under their own names, declared once', () => {
