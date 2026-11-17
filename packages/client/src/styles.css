@@ -1534,6 +1534,8 @@ html.ol-inking, html.ol-inking * { -webkit-user-select: none !important; user-se
 .board-stroke { pointer-events: none; }
 .board-stroke path { pointer-events: auto; }
 .board-stroke.live, .board-stroke.live path { pointer-events: none; }
+/* the stroke being drawn (BoardEditor paintLive): a layer of its own, unscaled — each frame paints that stroke alone */
+.board-liveink { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; will-change: transform; }
 .board-note { box-sizing: border-box; padding: 10px 12px; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.18); color: #202124;
   font-family: var(--ui-font); font-size: 14px; line-height: 1.35; white-space: pre-wrap; overflow-wrap: break-word; user-select: none; }
 .board-note-hint { opacity: 0.45; font-style: italic; }

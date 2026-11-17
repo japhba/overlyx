@@ -11,7 +11,7 @@
  * resizing scales the points). The server serialises the map to the .board JSON file on disk.
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
-import type { ComponentChildren } from 'preact';
+import type { ComponentChildren, VNode } from 'preact';
 import { inkOn } from './contrast';
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
@@ -102,16 +102,23 @@ function restroke(o: BoardObj, pts: [number, number, number][]): BoardObj {
 const absPts = (o: BoardObj): [number, number, number][] => (o.pts ?? []).map(([x, y, p]) => [o.x + x, o.y + y, p] as [number, number, number]);
 
 const pathDCache = new WeakMap<object, string>();
-/** a stroke object's runs, worked out once (the board renders at every move of a pen drawing: every stroke worked out again each time made the line lag behind the pen) */
-const runsCache = new WeakMap<object, { w: number; d: string }[] | null>();
+/**
+ * A stroke object's runs, worked out once (the board renders at every move of a pen drawing: every
+ * stroke worked out again each time made the line lag behind the pen). Kept by its points, which a
+ * move or a new colour leave as they are: strokes dragged across the board were worked out afresh at
+ * every move of the drag.
+ */
+const runsCache = new WeakMap<object, { o: BoardObj; r: { w: number; d: string }[] | null }>();
 function objRuns(o: BoardObj): { w: number; d: string }[] | null {
-  let r = runsCache.get(o);
-  if (r === undefined) {
-    r = strokeRuns({ color: o.color ?? '#000', w: o.sw ?? 2, pts: o.pts ?? [], nib: o.nib, pressure: o.pressure, o: o.o, poly: o.poly } as InkStroke);
-    runsCache.set(o, r);
-  }
+  const c = runsCache.get(o.pts ?? o);
+  if (c && (c.o === o || (c.o.sw === o.sw && c.o.nib === o.nib && c.o.pressure === o.pressure && c.o.o === o.o && c.o.poly === o.poly))) { c.o = o; return c.r; }
+  const r = strokeRuns({ color: o.color ?? '#000', w: o.sw ?? 2, pts: o.pts ?? [], nib: o.nib, pressure: o.pressure, o: o.o, poly: o.poly } as InkStroke);
+  runsCache.set(o.pts ?? o, { o, r });
   return r;
 }
+const SVG_NS = 'http://www.w3.org/2000/svg';
+/** an attribute set only when it changes (the live stroke's layer, painted at every move of the pen) */
+const put = (el: Element, k: string, v: string) => { if (el.getAttribute(k) !== v) el.setAttribute(k, v); };
 
 function strokeD(obj: BoardObj): string {
   let d = pathDCache.get(obj as object);
@@ -169,6 +176,43 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
   const liveFirst = useRef({ kind: '', p: 0.5 });
   // (a force click while drawing: no Look Up)
   useEffect(() => watchForce(() => liveRef.current !== null), []);
+  /**
+   * The stroke being drawn, painted by itself in a layer of its own over the board (`.board-liveink`:
+   * unscaled, its paths placed by the camera, as the decks' `.dl-liveink`): a move of the pen redraws
+   * that stroke alone. It was a render of the whole board at every move, inside the board's layer, so
+   * that every frame also repainted the strokes under it: on a full board (785 strokes, 17 Nov 2026)
+   * the iPad fell behind the Pencil, took a point every few frames (Safari gives no coalesced events)
+   * and the letters came out angular, late — fewer points per stroke the fuller the board got.
+   */
+  const liveSvg = useRef<SVGSVGElement>(null);
+  /** the objects' elements as the last render made them (render: made again only when changed) */
+  const objNodes = useRef(new Map<string, { o: BoardObj; sel: boolean; hit: boolean; ed: boolean; node: VNode }>());
+  const paintLive = () => {
+    const svg = liveSvg.current;
+    if (!svg) return;
+    const live = liveRef.current;
+    if (!live?.pts.length) { if (svg.firstChild) svg.replaceChildren(); return; }
+    let g = svg.firstElementChild as SVGGElement | null;
+    if (!g) { g = document.createElementNS(SVG_NS, 'g'); svg.append(g); }
+    const c = camRef.current;
+    put(g, 'transform', `matrix(${c.s} 0 0 ${c.s} ${c.tx} ${c.ty})`);
+    // (what a scribble would erase fades as it goes: the scribble in grey meanwhile)
+    const color = scratchRef.current?.hits.size ? '#8a9099' : live.color;
+    // (only the stroke's end worked out again: liveCache; the paths of its chunks drawn already come out the same)
+    const runs = strokeRuns(live as InkStroke, liveCache.current);
+    const paths = runs ?? [{ w: 0, d: strokePathD(live as InkStroke) }];
+    if (runs) { put(g, 'fill', 'none'); put(g, 'stroke', color); put(g, 'stroke-linecap', 'round'); put(g, 'stroke-linejoin', 'round'); put(g, 'opacity', String(live.o ?? 1)); }
+    else { put(g, 'fill', color); put(g, 'fill-opacity', String(live.o ?? 1)); g.removeAttribute('stroke'); g.removeAttribute('opacity'); }
+    const kids = g.children;
+    paths.forEach((p, i) => {
+      let el = kids[i];
+      if (!el) { el = document.createElementNS(SVG_NS, 'path'); g!.append(el); }
+      put(el, 'd', p.d);
+      if (runs) put(el, 'stroke-width', String(p.w)); else el.removeAttribute('stroke-width');
+    });
+    while (kids.length > paths.length) kids[kids.length - 1].remove();
+  };
+  useLayoutEffect(() => paintLive());
   /** the pointer drawing the stroke (another's moves are not its points), and its points as the screen had them (glitches.ts) */
   const drawingRef = useRef<{ id: number; watch: StrokeWatch | null } | null>(null);
   /** scratch-out while the pen draws (core/scratchout.ts): the strokes it would erase now (faded), where and since when the pen rests */
@@ -233,7 +277,9 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     // connection (WebKit, a warm second page) was connected and synced already, and the board said
     // "Connecting…" for good — take the state it is in
     if (provider.synced) onSync(true); else if (provider.wsconnected) onStatus({ status: 'connected' });
-    const onAwareness = () => {
+    const onAwareness = (ch?: { added: number[]; updated: number[]; removed: number[] }) => {
+      // (my own fields — the pointer, the view, the stroke I draw, many times a second — change nothing shown here: no render for them)
+      if (ch && [...ch.added, ...ch.updated, ...ch.removed].every(id => id === ydoc.clientID)) return;
       // lasers: the trace each holds, gathered into its session; a vanished field lets them fade
       const seen = new Set<number>();
       const now = performance.now();
@@ -752,6 +798,8 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     // one finger on an empty place in full screen, nothing selected: a tap there takes the bars away or brings them back
     tapRef.current = e.pointerType === 'touch' && dragRef.current?.kind === 'pan' ? { id: e.pointerId, sx: e.screenX, sy: e.screenY, t: performance.now(), hadSel: selectedRef.current.size > 0 } : null;
     if (dragRef.current || liveRef.current) e.preventDefault();
+    // (a stroke begun: its first point shown (paintLive, after the render), the lasso's bar away)
+    if (liveRef.current) rerender();
   };
 
   const onPointerMove = (e: PointerEvent) => {
@@ -848,8 +896,9 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     } else if (liveRef.current?.poly && d?.kind === 'draw' && isShapeTool(toolRef.current)) {
       liveRef.current.pts = shapePoints(toolRef.current, d.start, [bx, by], liveRef.current.w, e.shiftKey);
       try { provider.awareness.setLocalStateField('boardInk', liveRef.current); } catch { /* closing */ }
-      rerender();
+      paintLive();
     } else if (liveRef.current?.raw && (!liveRef.current.restAt || Math.hypot(e.clientX - liveRef.current.restAt[0], e.clientY - liveRef.current.restAt[1]) <= SNAP_LEAVE_PX)) {
+      // (the shape it snapped to: painted already, snapLive's render)
       // snapped to a shape (draw and hold): it stays while the pen rests
     } else if (liveRef.current && (!drawingRef.current || drawingRef.current.id === e.pointerId)) {
       // the pen moved on from where it snapped: it only paused — the stroke as drawn again
@@ -878,7 +927,8 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
           if (r.timer) clearTimeout(r.timer);
           sc.rest = { x: e.clientX, y: e.clientY, t: now, timer: setTimeout(() => { judgeScratch(true); rerender(); }, SCRATCH_HOLD_MS) };
         }
-        if (now - sc.judged > 80) judgeScratch(false);
+        // (the board renders only when what it would erase changed: those strokes fade)
+        if (now - sc.judged > 80) { const was = sc.hits; judgeScratch(false); if (was.size !== sc.hits.size || [...sc.hits].some(k => !was.has(k))) rerender(); }
       }
       // (to the others ~25 times a second, as the margins do: every point of the stroke at every move was a
       // message as long as the stroke, and a render of the board more)
@@ -887,7 +937,8 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
         liveSent.current = now;
         try { provider.awareness.setLocalStateField('boardInk', { ...liveRef.current, pts: liveRef.current.pts.map(([x, y, p]) => [round1(x), round1(y), Math.round(p * 100) / 100]) }); } catch { /* closing */ }
       }
-      rerender();
+      // the stroke alone, in its layer: no render of the board (paintLive)
+      paintLive();
     }
   };
 
@@ -1303,6 +1354,41 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     );
   };
 
+  const nextNodes = new Map<string, { o: BoardObj; sel: boolean; hit: boolean; ed: boolean; node: VNode }>();
+  const objectNodes = entries.map(([key, o]) => {
+    // (each object's element made again only when it, its selection or its fading changed; the same
+    // element again is one Preact passes over: a render — the others' strokes coming in 25 times a
+    // second, a drag — went over every stroke on the board)
+    // (a note written in: made at every render, as before — its text box's handlers)
+    const sel = selected.has(key), hit = !!scratchRef.current?.hits.has(key), ed = editing === key;
+    const was = objNodes.current.get(key);
+    if (was && was.o === o && was.sel === sel && was.hit === hit && !ed && !was.ed) { nextNodes.set(key, was); return was.node; }
+    let node: VNode;
+    if (o.t === 'img') {
+      node = <img key={key} data-obj={key} class={'board-img' + (sel ? ' selected' : '')} src={fileUrl(project, o.src ?? '')} draggable={false}
+        style={{ left: o.x + 'px', top: o.y + 'px', width: o.w + 'px', height: o.h + 'px' }} />;
+    } else if (o.t === 'note') {
+      node = (
+        <div key={key} data-obj={key} class={'board-note' + (sel ? ' selected' : '')}
+          style={{ left: o.x + 'px', top: o.y + 'px', width: o.w + 'px', minHeight: o.h + 'px', background: o.color ?? NOTE_COLORS[0] }}>
+          {editing === key ? noteEdit(key, o) : (o.text || <span class="board-note-hint">{coarse ? 'double-tap' : 'double-click'} to write</span>)}
+        </div>
+      );
+    } else {
+      const runs = objRuns(o);
+      node = (
+        <svg key={key} data-obj={key} class={'board-stroke' + (sel ? ' selected' : '')}
+          style={{ left: o.x + 'px', top: o.y + 'px', width: o.w + 'px', height: o.h + 'px', overflow: 'visible', ...(hit ? { opacity: 0.3 } : {}) }}
+          viewBox={`0 0 ${o.w} ${o.h}`} width={o.w} height={o.h}>
+          <BoardStroke stroke={{ color: o.color ?? '#000', w: o.sw ?? 2, pts: o.pts ?? [], nib: o.nib, pressure: o.pressure, o: o.o, poly: o.poly }} runs={runs} legacy={runs ? undefined : strokeD(o)} />
+        </svg>
+      );
+    }
+    nextNodes.set(key, { o, sel, hit, ed, node });
+    return node;
+  });
+  objNodes.current = nextNodes;
+
   return (
     <div class={'board' + (full ? ' full' : '') + (full && barsAway ? ' bars-away' : '')} ref={vpRef} tabIndex={0} data-grid={prefs.boardGrid}
       style={grid ?? { backgroundImage: 'none' }}
@@ -1315,31 +1401,11 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
       onDragOver={e => e.preventDefault()} onDrop={onDrop as never}
       data-tool={tool}>
       <div class="board-content" style={{ transform: `translate(${cam.tx}px, ${cam.ty}px) scale(${cam.s})` }}>
-        {entries.map(([key, o]) => {
-          if (o.t === 'img') {
-            return <img key={key} data-obj={key} class={'board-img' + (selected.has(key) ? ' selected' : '')} src={fileUrl(project, o.src ?? '')} draggable={false}
-              style={{ left: o.x + 'px', top: o.y + 'px', width: o.w + 'px', height: o.h + 'px' }} />;
-          }
-          if (o.t === 'note') {
-            return (
-              <div key={key} data-obj={key} class={'board-note' + (selected.has(key) ? ' selected' : '')}
-                style={{ left: o.x + 'px', top: o.y + 'px', width: o.w + 'px', minHeight: o.h + 'px', background: o.color ?? NOTE_COLORS[0] }}>
-                {editing === key ? noteEdit(key, o) : (o.text || <span class="board-note-hint">{coarse ? 'double-tap' : 'double-click'} to write</span>)}
-              </div>
-            );
-          }
-          return (
-            <svg key={key} data-obj={key} class={'board-stroke' + (selected.has(key) ? ' selected' : '')}
-              style={{ left: o.x + 'px', top: o.y + 'px', width: o.w + 'px', height: o.h + 'px', overflow: 'visible', ...(scratchRef.current?.hits.has(key) ? { opacity: 0.3 } : {}) }}
-              viewBox={`0 0 ${o.w} ${o.h}`} width={o.w} height={o.h}>
-              <BoardStroke stroke={{ color: o.color ?? '#000', w: o.sw ?? 2, pts: o.pts ?? [], nib: o.nib, pressure: o.pressure, o: o.o, poly: o.poly }} runs={objRuns(o)} legacy={strokeD(o)} />
-            </svg>
-          );
-        })}
-        {/* in-progress strokes: mine and the other clients' (awareness) */}
-        {[...remoteInks, ...(liveRef.current ? [scratchRef.current?.hits.size ? { ...liveRef.current, color: '#8a9099' } : liveRef.current] : [])].map((s, i) => (
+        {objectNodes}
+        {/* the others' strokes in progress (awareness); mine is painted in its own layer (paintLive, .board-liveink) */}
+        {remoteInks.map((s, i) => (
           <svg key={'live' + i} class="board-stroke live" style={{ left: 0, top: 0, overflow: 'visible' }} width={1} height={1}>
-            <BoardStroke stroke={s} live={i === remoteInks.length ? liveCache.current : undefined} />
+            <BoardStroke stroke={s} />
           </svg>
         ))}
         {selBB && (
@@ -1373,6 +1439,7 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
           </div>
         ))}
       </div>
+      <svg ref={liveSvg} class="board-liveink" aria-hidden="true" />
       {/* the lasso selection's bar (recolour, copy, convert …), and Paste after a tap with the lasso */}
       {selBB && !readOnly && !editing && !dragRef.current && !liveRef.current && <LassoBar id="board-lasso-bar" groups={lassoGroups(lassoActions())} rect={clientBox(selBB)} />}
       {pasteAt && !selBB && heldInk() && <LassoBar id="board-paste-bar" groups={pasteGroups(() => { const clip = heldInk(); const at = pasteAt; setPasteAt(null); if (clip) pasteClip(clip, at); })} rect={clientBox({ x: pasteAt[0], y: pasteAt[1], w: 0, h: 0 })} />}
