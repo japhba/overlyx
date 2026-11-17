@@ -386,6 +386,19 @@ export class DocSession {
     });
   }
 
+  /**
+   * A document `save` wrote past a conflict while its editor was not the active one (resync left
+   * it marked as modified): reverted now, when it still holds exactly the file's text — typed since,
+   * it is left for its next save. Resolves to whether it is clean.
+   */
+  settle(resync: (target: DocSession) => Promise<boolean>): Promise<boolean> {
+    return this.enqueue(async () => {
+      if (!this.document.isDirty) return true;
+      if (this.document.isClosed || this.document.getText() !== this.readFile()) return false;
+      return await resync(this).catch(() => false) && !this.document.isDirty;
+    });
+  }
+
   meta(): Record<string, unknown> {
     const text = this.document.getText();
     this.metaAnswered = text;

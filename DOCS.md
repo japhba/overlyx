@@ -3051,6 +3051,15 @@ blend.
   `boardSnap`, `boardPointers` — the person's, following the account): the grid is a background of the
   board drawn for the camera (`gridStyle`; it used to be a fixed dot pattern that did not move with the
   board), coarser steps when zoomed out; snapping lines new notes and moved selections up with it.
+  **Drawing on a full board** (17 Nov 2026): the stroke being drawn is painted by itself in
+  `.board-liveink`, an unscaled `will-change` layer over the board placed by the camera (`paintLive`,
+  as the decks' `.dl-liveink`); a pen's move no longer renders the board. Before, every move rendered
+  every object and repainted the strokes under the line: on a 785-stroke board the iPad fell behind the
+  Pencil, Safari (no coalesced events) kept a point every few frames, and letters came out angular —
+  points per stroke fell from 19 to 7 as the board filled. 150 moves on that board took 10.1 s in
+  WebKit, now 1.0 s (`scratch/board-lag.mts`). Renders that do happen (the others' strokes coming in,
+  drags) reuse each unchanged object's element (`objNodes`, Preact skips it), stroke runs are kept by
+  their points (a drag no longer works them out again), and the board ignores its own awareness changes.
 * **Comments panel** (right sidebar, *Comments* tab; `app/Comments.tsx`, `editor/commentops.ts`):
   every comment thread of the open editors — open ones first, then the *Resolved* archive, like
   Google Docs' comment history. A resolved thread leaves the text and the margin; a small grey
@@ -3704,7 +3713,12 @@ refuses its own save (*file modified since*). That refusal used to be logged to 
 the user believed the file was saved, and the edit never reached the disk. `DocSession.save` now
 writes the merged text itself and reverts the document's editor to the file — which then holds the
 same text — so nothing is left modified (`resync` in `host/editorProvider.ts`; the revert runs only
-once that editor is verifiably the active one), with a status-bar note; a save that still fails, or
+while that editor is verifiably the active one), with a status-bar note. `resync` never reveals the
+panel or opens the document's text to get there: it used to, and with Codex or Claude Code editing
+the files beside the user (every save after a change on disk takes this path, the agents' tracked
+edits included) the window jumped to the OverLyX panel and documents of the combined view opened and
+closed by themselves (17 Nov 2026). An editor in the background stays marked as modified and is
+reverted when it is active again (`settle`), if it still holds exactly the file's text; a save that still fails, or
 an edit the host could not write into the document, is shown as an error with *Retry* / *Save now*.
 The integration test (`test/suite/index.cjs`, step 4b) races both the host's save and the webview's.
 

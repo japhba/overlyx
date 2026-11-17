@@ -114,20 +114,33 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
       this.registry.touch();
     };
     /**
-     * VS Code reverts editors, not documents: make `target`'s editor the active one for a moment
-     * (this panel, or a text editor for a document of the combined view) and revert it to the
-     * file — only once it is verifiably the active one: a revert of another editor would discard
-     * that editor's unsaved changes.
+     * VS Code reverts editors, not documents: `target`'s editor (this panel, or a text editor of a
+     * document of the combined view) is reverted to the file — only while it is verifiably the
+     * active one: a revert of another editor would discard that editor's unsaved changes.
+     *
+     * Never by revealing this panel or opening the document's text: that took the focus. With an
+     * agent editing the files beside the user (Codex, Claude Code: a file changed on disk makes
+     * every later save of it take this path), each of its edits pulled the window over to this
+     * panel or opened and closed the document's text — the cursor jumped and files opened by
+     * themselves while the user worked elsewhere. Not active now: the document stays marked as
+     * modified until its editor is active again (`settle` below), and is reverted then if it still
+     * holds exactly the file's text.
      */
+    const unsettled = new Set<DocSession>();
     const resync = async (target: DocSession): Promise<boolean> => {
-      const isActive = () => (target === session ? panel.active : vscode.window.activeTextEditor?.document === target.document);
-      if (target === session) panel.reveal(panel.viewColumn, false);
-      else await vscode.window.showTextDocument(target.document, { preview: true, preserveFocus: false });
-      for (let i = 0; i < 20 && !isActive(); i++) await new Promise(r => setTimeout(r, 50));
-      if (!isActive()) return false;
+      const active = target === session ? panel.active : vscode.window.activeTextEditor?.document === target.document;
+      if (!active) { unsettled.add(target); return false; }
+      unsettled.delete(target);
       await vscode.commands.executeCommand('workbench.action.files.revert');
-      if (target !== session) { await vscode.commands.executeCommand('workbench.action.closeActiveEditor'); panel.reveal(panel.viewColumn, false); }
       return !target.document.isDirty;
+    };
+    /** documents saved past a conflict while their editor was in the background: reverted now that it is active (resync) */
+    const settle = (targets: DocSession[]) => {
+      for (const target of targets) {
+        if (!unsettled.has(target)) continue;
+        if (!target.document.isDirty) { unsettled.delete(target); continue; }
+        this.applyChain = this.applyChain.then(async () => { await target.settle(resync); }).catch(e => console.error('overlyx settle failed', e));
+      }
     };
     entry.resync = resync;
     entry.agentEdit = <T>(absPath: string, run: (store: TextStore) => Promise<T>, handOver: HandOver): Promise<T> | undefined => {
@@ -161,7 +174,8 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
           if (await target.syncFromDisk()) pushSnapshot(target);
           const how = await target.save(resync).catch((e: unknown) => { throw Object.assign(new Error(String((e as Error)?.message ?? e)), { target }); });
           const name = path.basename(target.relPath);
-          if (how === 'merged') vscode.window.setStatusBarMessage(`OverLyX: saved ${name} — merged with the change made to the file outside VS Code`, 8000);
+          // (a document of the combined view has no tab of its own to show it modified: resync leaves it, unseen)
+          if (how === 'merged' || (how === 'merged-dirty' && target !== session)) vscode.window.setStatusBarMessage(`OverLyX: saved ${name} — merged with the change made to the file outside VS Code`, 8000);
           else if (how === 'merged-dirty') void vscode.window.showWarningMessage(`OverLyX saved ${name} (merged with the change made to it outside VS Code), but VS Code still marks it as modified. If VS Code asks about a conflict when you save it again, choose Overwrite: the file already holds this text.`);
         }
         this.deps.track?.('extension-save', 'success', performance.now() - started);
@@ -339,7 +353,9 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
         }
         metadataChanged();
       }).catch(e => void vscode.window.showErrorMessage(`OverLyX could not refresh open documents: ${String(e)}`));
+      if (panel.active) settle([session]);
     };
+    subs.push(vscode.window.onDidChangeActiveTextEditor(ed => { const t = ed && [...related.values()].find(s => s.document === ed.document); if (t) settle([t]); }));
     subs.push(panel.onDidChangeViewState(() => {
       if (panel.active) { this.registry.setActive(entry); refreshDocuments(); }
       if (panel.active) setArticlePanel(article ? panel : undefined);
