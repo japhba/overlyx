@@ -1,0 +1,95 @@
+/* The whiteboard (app/BoardEditor.tsx) — what came with working together and full screen: the grid's
+   colours, the others' faces, markers and selections, the settings, full screen. The rest of the
+   board's look is in styles.css (.board …) and boardminimap.css. */
+
+/* the grid behind the board (app/boardview.ts gridStyle draws it for the camera with these colours) */
+.board { --board-grid: color-mix(in srgb, var(--ui-fg) 8%, transparent); --board-grid-major: color-mix(in srgb, var(--ui-fg) 16%, transparent);
+  --board-grid-dot: color-mix(in srgb, var(--ui-fg) 28%, transparent); }
+
+/* the tool bar wraps onto a second row on a narrow screen (it cannot scroll: the pens' popups are pinned inside it) */
+.board-tools { max-width: calc(100% - 24px); flex-wrap: wrap; justify-content: center; box-sizing: border-box; row-gap: 4px; }
+.board-tools .toolbar { flex-wrap: nowrap; border: 0; padding: 0; background: none; }
+@media (max-width: 640px) { .board-tools .toolbar { flex-wrap: wrap; } }
+.board-tools .small-btn:disabled { opacity: 0.35; cursor: default; }
+.board-tools .small-btn svg { display: block; }
+.board-tools .bd-glyph { display: inline-flex; width: 17px; height: 17px; align-items: center; justify-content: center; }
+.board-tools .bd-glyph svg { width: 15px; height: 15px; }
+.board-zoom .bd-glyph { display: inline-flex; width: 15px; height: 15px; }
+.board-zoom .bd-glyph svg { width: 14px; height: 14px; }
+
+/* ---------------------------------------------------------------- full screen: the board alone on the screen */
+html.ol-board-full .app > .menubar, html.ol-board-full .app .statusbar, html.ol-board-full .app > .health-bar, html.ol-board-full .app > .find-bar-wrap,
+html.ol-board-full .app > .guest-callout, html.ol-board-full .app > .tb-dock-top, html.ol-board-full .app > .main > .sidebar, html.ol-board-full .app > .main > .sidebar-grip,
+html.ol-board-full .app > .main > .activitybar, html.ol-board-full .history-drawer { display: none !important; }
+/* a finger's tap takes the bars away and brings them back */
+.board .board-tools, .board .board-zoom, .board .board-minimap, .board .board-minimap-open, .board .board-people { transition: opacity .18s, visibility .18s; }
+.board.bars-away .board-tools, .board.bars-away .board-zoom, .board.bars-away .board-minimap, .board.bars-away .board-minimap-open { opacity: 0; visibility: hidden; pointer-events: none; }
+.board-full-hint { position: absolute; left: 50%; bottom: 64px; transform: translateX(-50%); z-index: 12; padding: 7px 14px; border-radius: 16px;
+  background: color-mix(in srgb, var(--ui-fg) 82%, transparent); color: var(--ui-bg); font: 12.5px/1.3 var(--ui-font); pointer-events: none;
+  animation: board-hint 4s ease forwards; white-space: nowrap; }
+@keyframes board-hint { 0% { opacity: 0; } 8% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; } }
+
+/* ---------------------------------------------------------------- the others */
+/* their faces, top right */
+.board-people { position: absolute; top: 10px; right: 14px; z-index: 11; display: flex; align-items: center; gap: 0; }
+.board-person { position: relative; padding: 0; margin-left: -6px; border: 0; background: none; border-radius: 50%; cursor: pointer; touch-action: manipulation;
+  box-shadow: 0 0 0 2px var(--page-bg), 0 0 0 3.5px var(--peer); }
+.board-person:first-child { margin-left: 0; }
+.board-person.following, .board-person.open { box-shadow: 0 0 0 2px var(--page-bg), 0 0 0 4.5px var(--peer); z-index: 1; }
+.board-face { width: 30px; height: 30px; line-height: 30px; font-size: 11.5px; font-weight: 600; flex: none; }
+.board-face.more { background: var(--ui-bg2, var(--ui-bg)); color: var(--ui-muted); margin-left: 4px; box-shadow: 0 0 0 1px var(--ui-border); }
+.board-face[data-initials="2"] { font-size: 11px; }
+.board-person-menu { position: absolute; top: calc(100% + 8px); right: 0; min-width: 210px; padding: 6px; border-radius: 10px; border: 1px solid var(--ui-border);
+  background: var(--surface); color: var(--ui-fg); box-shadow: 0 8px 24px rgba(0, 0, 0, .2); font-family: var(--ui-font); display: flex; flex-direction: column; gap: 2px; }
+.board-person-head { display: flex; align-items: center; gap: 8px; padding: 4px 6px 8px; font-size: 13px; font-weight: 600; border-bottom: 1px solid var(--ui-border); margin-bottom: 4px; }
+.board-person-menu button { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 7px 8px; border: 0; border-radius: 6px; background: none;
+  color: inherit; font: 13px/1.25 var(--ui-font); text-align: left; cursor: pointer; }
+.board-person-menu button small { color: var(--ui-muted); font-size: 11px; }
+.board-person-menu button:hover:not(:disabled) { background: var(--ui-hover); }
+.board-person-menu button:disabled { opacity: .45; cursor: default; }
+
+/* someone out of sight: their face at the view's edge, an arrow pointing their way */
+.board-edge { position: absolute; z-index: 9; transform: translate(-50%, -50%); padding: 0; border: 0; background: none; cursor: pointer; touch-action: manipulation;
+  display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.board-edge.below { flex-direction: column-reverse; }
+.board-edge > .board-face { width: 28px; height: 28px; line-height: 28px; box-shadow: 0 0 0 2px var(--page-bg), 0 0 0 3.5px var(--peer), 0 3px 10px rgba(0, 0, 0, .25); }
+.board-edge-arrow { position: absolute; left: 50%; top: 50%; width: 0; height: 0; pointer-events: none; }
+.board-edge.below .board-edge-arrow { top: auto; bottom: 14px; }
+.board-edge:not(.below) .board-edge-arrow { top: 14px; }
+.board-edge-arrow svg { position: absolute; left: 19px; top: -5px; fill: var(--peer); filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .3)); }
+.board-edge-name { padding: 1px 6px; border-radius: 8px; background: var(--peer); color: #fff; font: 600 10.5px/1.4 var(--ui-font); white-space: nowrap;
+  text-shadow: 0 0 2px rgba(0, 0, 0, .35); }
+.board-edge:hover > .board-face, .board-edge:focus-visible > .board-face { box-shadow: 0 0 0 2px var(--page-bg), 0 0 0 4.5px var(--peer), 0 3px 12px rgba(0, 0, 0, .3); }
+
+/* following someone: their colour round the view, the way out at its foot */
+.board-follow { position: absolute; inset: 0; z-index: 8; pointer-events: none; box-shadow: inset 0 0 0 3px var(--peer); }
+.board-follow-bar { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); pointer-events: auto; display: flex; align-items: center; gap: 10px;
+  padding: 5px 6px 5px 12px; border-radius: 18px; background: var(--peer); color: #fff; font: 12.5px/1.2 var(--ui-font); box-shadow: 0 4px 14px rgba(0, 0, 0, .25);
+  text-shadow: 0 0 2px rgba(0, 0, 0, .3); white-space: nowrap; }
+.board-follow-bar button { border: 0; border-radius: 13px; padding: 5px 12px; background: rgba(255, 255, 255, .92); color: #202124; font: 600 12px var(--ui-font); cursor: pointer; text-shadow: none; }
+
+/* what they selected, and the note they write in: their colour round it, their name at its corner */
+.board-peer-sel { pointer-events: none; z-index: 2; box-sizing: border-box; border-style: solid; border-color: var(--peer); border-radius: 2px; }
+.board-peer-tag { position: absolute; left: 0; bottom: 100%; transform-origin: 0 100%; padding: 1px 6px; border-radius: 3px 3px 3px 0; background: var(--peer);
+  color: #fff; font: 600 11px/1.4 var(--ui-font); white-space: nowrap; text-shadow: 0 0 2px rgba(0, 0, 0, .3); }
+
+/* ---------------------------------------------------------------- the settings (the tool bar's ⚙) */
+.board-settings { position: absolute; z-index: 12; width: 300px; max-width: calc(100% - 24px); box-sizing: border-box;
+  padding: 10px 12px 12px; border-radius: 10px; border: 1px solid var(--ui-border); background: var(--surface); color: var(--ui-fg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .2); font: 13px/1.3 var(--ui-font); max-height: calc(100% - 80px); overflow: auto; }
+.board-set-head { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ui-muted); margin: 4px 0 6px; }
+.board-set-head:not(:first-child) { margin-top: 14px; }
+.board-seg { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.board-seg-btn { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px 2px 5px; border: 1px solid var(--ui-border); border-radius: 7px;
+  background: none; color: var(--ui-fg); font: 11.5px var(--ui-font); cursor: pointer; touch-action: manipulation; }
+.board-seg-btn:hover { background: var(--ui-hover); }
+.board-seg-btn.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--ui-fg); }
+.board-set-size { margin-top: 10px; }
+.board-set-size.off { opacity: .45; }
+.board-set-check { display: flex; align-items: flex-start; gap: 8px; margin-top: 10px; cursor: pointer; }
+.board-set-check input { margin: 2px 0 0; accent-color: var(--accent); flex: none; }
+.board-set-check span { display: flex; flex-direction: column; gap: 1px; }
+.board-set-check small { color: var(--ui-muted); font-size: 11.5px; }
+.board-set-note { margin: 12px 0 0; color: var(--ui-muted); font-size: 11.5px; }
+html[data-ui="modern"] .board-settings, html[data-ui="modern"] .board-person-menu { border-color: var(--m-line); background: var(--m-paper); box-shadow: var(--m-shadow); }
+html[data-ui="modern"] .board-seg-btn.on { background: var(--m-key-on); color: var(--m-on-key-on); border-color: transparent; }

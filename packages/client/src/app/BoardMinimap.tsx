@@ -3,8 +3,9 @@
  * zoom pill has the right) — strokes as thin lines in their colours, notes in theirs, pictures as
  * grey boxes — over what is drawn and what is in view together, the view an outlined rectangle on it.
  * A press or a drag on it takes the view there; a press inside the rectangle drags the view from where
- * it was taken, without a jump. Hidden on an empty board; its − folds it to a button (remembered per
- * browser, `ol.boardMinimap`).
+ * it was taken, without a jump. The others' views are rectangles in their colours (the frame takes
+ * them in too). Hidden on an empty board; its − folds it to a button (remembered per browser,
+ * `ol.boardMinimap`).
  *
  * It paints a canvas outside Preact's renders, at most once a frame: the objects again only when they
  * changed or the frame the board is fitted into did (the view went past the drawing); while the camera
@@ -51,9 +52,13 @@ function darkInk(color: string): boolean {
   return (0.299 * r + 0.587 * g + 0.114 * b) / 255 < 0.3;
 }
 
-export function BoardMinimap({ objects, cam, view, onCenter }: {
+/** another person's view of the board (board coordinates), in their colour */
+export interface MinimapPeer { id: number; color: string; view: { x: number; y: number; w: number; h: number } }
+
+export function BoardMinimap({ objects, cam, view, onCenter, peers = [] }: {
   objects: Y.Map<BoardObj>;
   cam: MinimapCamera;
+  peers?: MinimapPeer[];
   /** the board's viewport (the view is its size) */
   view: () => HTMLElement | null;
   /** move the camera so that the board point (x, y) is in the middle of the view */
@@ -65,7 +70,9 @@ export function BoardMinimap({ objects, cam, view, onCenter }: {
   const cardRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rectRef = useRef<HTMLDivElement>(null);
+  const peersEl = useRef<HTMLDivElement>(null);
   const camRef = useRef(cam); camRef.current = cam;
+  const peersRef = useRef(peers); peersRef.current = peers;
   const sizeRef = useRef(size); sizeRef.current = size;
   /** what is drawn, and whether the canvas still shows it as it is */
   const content = useRef<Box | null>(null);
@@ -135,6 +142,7 @@ export function BoardMinimap({ objects, cam, view, onCenter }: {
     const [W, H] = sizeRef.current;
     // the frame: what is drawn and what is in view together, with a margin
     const u = { x0: Math.min(box.x0, vb.x0), y0: Math.min(box.y0, vb.y0), x1: Math.max(box.x1, vb.x1), y1: Math.max(box.y1, vb.y1) };
+    for (const p of peersRef.current) { u.x0 = Math.min(u.x0, p.view.x); u.y0 = Math.min(u.y0, p.view.y); u.x1 = Math.max(u.x1, p.view.x + p.view.w); u.y1 = Math.max(u.y1, p.view.y + p.view.h); }
     const pad = 0.05 * Math.max(u.x1 - u.x0, u.y1 - u.y0, 1);
     u.x0 -= pad; u.y0 -= pad; u.x1 += pad; u.y1 += pad;
     // the card takes the frame's shape once the camera rests (while it moves, the card would twitch)
@@ -158,6 +166,21 @@ export function BoardMinimap({ objects, cam, view, onCenter }: {
     st.top = `${f.oy + (vb.y0 - f.y0) * f.k}px`;
     st.width = `${Math.max(4, (vb.x1 - vb.x0) * f.k)}px`;
     st.height = `${Math.max(4, (vb.y1 - vb.y0) * f.k)}px`;
+    // the others' views
+    const box2 = peersEl.current;
+    if (box2) {
+      const ps = peersRef.current;
+      while (box2.children.length > ps.length) box2.lastElementChild!.remove();
+      while (box2.children.length < ps.length) { const d = document.createElement('div'); d.className = 'board-minimap-peer'; box2.appendChild(d); }
+      ps.forEach((p, i) => {
+        const el = box2.children[i] as HTMLElement;
+        el.dataset.peer = String(p.id);
+        Object.assign(el.style, {
+          left: `${f.ox + (p.view.x - f.x0) * f.k}px`, top: `${f.oy + (p.view.y - f.y0) * f.k}px`,
+          width: `${Math.max(4, p.view.w * f.k)}px`, height: `${Math.max(4, p.view.h * f.k)}px`, borderColor: p.color,
+        });
+      });
+    }
   };
   const paintRef = useRef(paint); paintRef.current = paint;
   const schedule = () => {
@@ -171,8 +194,9 @@ export function BoardMinimap({ objects, cam, view, onCenter }: {
     objects.observe(changed);
     return () => objects.unobserve(changed);
   }, [objects]);
-  // the camera (the board renders on every move of it) and the board's own size
+  // the camera (the board renders on every move of it) and the board's own size; the others' views
   useEffect(schedule, [cam.tx, cam.ty, cam.s]);
+  useEffect(schedule, [peers.map(p => `${p.id}:${p.color}:${p.view.x},${p.view.y},${p.view.w},${p.view.h}`).join(' ')]);
   useEffect(() => {
     const vp = view();
     const ro = vp && typeof ResizeObserver !== 'undefined' ? new ResizeObserver(schedule) : null;
@@ -256,6 +280,7 @@ export function BoardMinimap({ objects, cam, view, onCenter }: {
       aria-label="Minimap of the board — press or drag to move the view"
       onPointerDown={onDown as never} onPointerMove={onMove as never} onPointerUp={onUp as never} onPointerCancel={onUp as never} onLostPointerCapture={onUp as never}>
       <canvas ref={canvasRef} />
+      <div class="board-minimap-peers" ref={peersEl} aria-hidden="true" />
       <div class="board-minimap-view" ref={rectRef} />
       <button type="button" class="board-minimap-fold" title="Fold the minimap away" aria-label="Fold the minimap away" onClick={() => toggle(false)}>
         <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M2 5h6" /></svg>

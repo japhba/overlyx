@@ -21,6 +21,7 @@ import { isFigureDraft, projectOfDoc } from '@overlyx/core';
 import { openDeckEmoji, deckEmojiMenu } from '../editor/emoji/deck';
 import { openProjectPath } from '../openpath';
 import { Toolbar, ICONS, type ToolButton } from '../app/Toolbar';
+import { browserFullscreen } from '../app/fullscreen';
 import { ColorGrid } from '../app/ColorGrid';
 import type { DeliverableHost, Peer } from './host';
 import { webHost } from './webHost';
@@ -1730,19 +1731,14 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
   const setFull = (on: boolean) => {
     if (on) setDrawFocus(false);
     setFullState(on);
-    const html = document.documentElement;
-    try {
-      const standalone = (navigator as { standalone?: boolean }).standalone === true || matchMedia('(display-mode: standalone)').matches;
-      if (on && !standalone && !document.fullscreenElement && document.fullscreenEnabled) void html.requestFullscreen?.()?.catch(() => undefined);
-      else if (!on && document.fullscreenElement === html) void document.exitFullscreen().catch(() => undefined);
-    } catch { /* no full screen here */ }
+    browserFullscreen(on);
     // (the whole slide, edge to edge, into the room it gets)
     if (Math.abs(zoomRef.current - 1) > 0.01 || slideView.isFree()) fitSlide();
   };
   useLayoutEffect(() => { document.documentElement.classList.toggle('ol-deck-full', fullOn); }, [fullOn]);
   useEffect(() => () => {
     document.documentElement.classList.remove('ol-deck-full');
-    if (document.fullscreenElement === document.documentElement) void document.exitFullscreen().catch(() => undefined);
+    browserFullscreen(false);
   }, []);
   useEffect(() => { toRail({ ol: 'scale', scale: railScale }); }, [railScale]);
   // (the Bézier pen takes Enter / Esc / Backspace: the keyboard goes to the canvas)

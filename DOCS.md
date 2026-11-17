@@ -3028,6 +3028,29 @@ blend.
   *draw with a finger* (the ☝ button, `ol.fingerDraw`): off, a finger pans and only a pen or the mouse
   draws; on by default on touch screens until the first pen stroke (then the pen draws and the
   finger pans, as with an Apple Pencil), two fingers always pan and zoom.
+  **Working together** (17 Nov 2026; `app/BoardPresence.tsx`, `app/boardview.ts`): the others' faces
+  sit in the board's top right corner — a tap offers *Go to* (their view fitted into yours, their
+  pointer in it; `camForPeer`) and *Follow* (your view moves with theirs, their colour round it, until
+  you pan, zoom or draw). Someone out of sight gets a marker at your view's edge pointing their way;
+  a tap flies there. Each client's awareness carries `boardCursor` (cleared when a mouse leaves the
+  board), `boardView` (what its screen shows, ≤ 10/s), `boardSel` and `boardEdit`: the others'
+  selections show in their colours with their names, a note someone writes in says so and the others
+  cannot open it meanwhile (whole-object last-writer-wins would overwrite), and its text reaches them
+  as it is typed (written ≤ 4/s). The minimap outlines the others' views. Double-click (mouse) or
+  double-tap (finger) opens a note — the board holds the pointer (capture), so the hit test is by
+  `elementsFromPoint`; double-click had never reached the note before.
+  **Tablets**: two fingers pan *and* zoom about their middle (`deliverable/gestures.ts` pinchLock, as on
+  slides; before, two fingers only zoomed), two fingers tapped undo, three tapped undo and swiped
+  left/right undo/redo; a finger landing while the pen is down is the resting hand and is ignored;
+  Undo/Redo buttons lead the tool bar. **Full screen** (the ⛶ in the zoom group; `html.ol-board-full`
+  hides the app's bars, files and panes, `app/fullscreen.ts` asks the browser's own where it has one,
+  shared with decks): a finger's tap on an empty place hides the board's bars and brings them back;
+  Esc or the button leaves (on a computer leaving the browser's full screen leaves it too).
+  **Settings** (the tool bar's sliders button, `app/BoardSettings.tsx`; prefs `boardGrid` none / dots /
+  squares / lines, `boardGridSize` 8–128 on a ratio slider with Fine 16 · Medium 32 · Coarse 64,
+  `boardSnap`, `boardPointers` — the person's, following the account): the grid is a background of the
+  board drawn for the camera (`gridStyle`; it used to be a fixed dot pattern that did not move with the
+  board), coarser steps when zoomed out; snapping lines new notes and moved selections up with it.
 * **Comments panel** (right sidebar, *Comments* tab; `app/Comments.tsx`, `editor/commentops.ts`):
   every comment thread of the open editors — open ones first, then the *Resolved* archive, like
   Google Docs' comment history. A resolved thread leaves the text and the margin; a small grey

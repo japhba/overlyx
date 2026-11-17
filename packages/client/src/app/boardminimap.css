@@ -10,6 +10,9 @@ html[data-ui="modern"] .board-minimap { border-radius: 10px; }
 /* the view: an accent frame, a breath of the accent inside */
 .board-minimap-view { position: absolute; left: 0; top: 0; box-sizing: border-box; border: 1.5px solid var(--accent); border-radius: 2px;
   background: color-mix(in srgb, var(--accent) 10%, transparent); pointer-events: none; }
+/* the others' views: outlines in their colours */
+.board-minimap-peers { position: absolute; inset: 0; pointer-events: none; }
+.board-minimap-peer { position: absolute; box-sizing: border-box; border: 1.5px solid; border-radius: 2px; opacity: 0.85; }
 .board-minimap.dragging { cursor: grabbing; }
 .board-minimap.dragging .board-minimap-view { background: color-mix(in srgb, var(--accent) 18%, transparent); }
 /* − folds it away (always shown: a tablet has no hover); the folded card is a button in the same corner */

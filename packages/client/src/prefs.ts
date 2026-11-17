@@ -94,9 +94,14 @@ export interface Prefs {
   autoCorrectChosen?: boolean;
   /** resolved comment threads keep a small marker in the text (View ▸ Resolved comments in the text); off, they are only in the Comments panel */
   showResolvedComments: boolean;
+  /** whiteboards (app/BoardEditor.tsx, its ⚙): what is drawn behind the board, a cell's size in board units, whether moved and new objects snap to it, the others' pointers shown */
+  boardGrid: 'none' | 'dots' | 'squares' | 'lines';
+  boardGridSize: number;
+  boardSnap: boolean;
+  boardPointers: boolean;
 }
 
-export const DEFAULT_PREFS: Prefs = { spellcheck: true, spellEngine: 'overlyx', autoCorrect: false, aiButton: false, aiRewrite: false, aiCompleteText: false, aiCompleteMath: false, aiCompleteDelay: 200, darkPages: true, invertFigures: true, aiModel: '', aiCompletionModel: '', darkTone: 'white', textGrade: 0, usageStats: true, betaDiagnostics: false, autoBuild: 'shown', autoBuildDelay: 1, editorFont: 'document', editorMathFont: 'match', screenStyles: {}, shortcutTips: true, selectionBar: true, mathKeyboard: 'auto', aiInk: false, speechEngine: 'auto', showResolvedComments: false };
+export const DEFAULT_PREFS: Prefs = { spellcheck: true, spellEngine: 'overlyx', autoCorrect: false, aiButton: false, aiRewrite: false, aiCompleteText: false, aiCompleteMath: false, aiCompleteDelay: 200, darkPages: true, invertFigures: true, aiModel: '', aiCompletionModel: '', darkTone: 'white', textGrade: 0, usageStats: true, betaDiagnostics: false, autoBuild: 'shown', autoBuildDelay: 1, editorFont: 'document', editorMathFont: 'match', screenStyles: {}, shortcutTips: true, selectionBar: true, mathKeyboard: 'auto', aiInk: false, speechEngine: 'auto', showResolvedComments: false, boardGrid: 'dots', boardGridSize: 32, boardSnap: false, boardPointers: true };
 /** delays that were the default in earlier builds: a stored one of these follows the current default */
 const OLD_DEFAULT_DELAYS = new Set([600, 450]);
 const STORAGE = 'ol.prefs';

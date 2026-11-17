@@ -10,7 +10,8 @@
  * strokes store their points relative to (x, y), normalised so the bounding box is (0,0,w,h) —
  * resizing scales the points). The server serialises the map to the .board JSON file on disk.
  */
-import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
+import type { ComponentChildren } from 'preact';
 import { inkOn } from './contrast';
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
@@ -25,7 +26,15 @@ import { useUiMode } from './uimode';
 import { MODERN_ICONS, iconSvg } from './modernicons';
 import { hostedZoomPill } from './zoomhud';
 import { BoardMinimap } from './BoardMinimap';
-import { Toolbar } from './Toolbar';
+import { Toolbar, ICONS } from './Toolbar';
+import { BoardPresence } from './BoardPresence';
+import { BoardSettings } from './BoardSettings';
+import { gridStyle, snapTo, clampZoom, viewRect, camForPeer, lerpCam, ease, readPeer, type BoardPeer, type Camera } from './boardview';
+import { browserFullscreen } from './fullscreen';
+import { getPrefs, subscribePrefs } from '../prefs';
+import { pinchLock, pinchFactor, triGesture, type PinchLock } from '../deliverable/gestures';
+import { touchScreen } from '../deliverable/deckdock';
+import './board.css';
 import { drawingToolbar } from '../deliverable/drawingToolbar';
 import { loadDeckInk, saveDeckInk, patchDeckInk, ERASER_PX } from '../deliverable/deckink';
 import { lassoGroups, readHandwriting, chooseReading, readingError, type LassoActions } from '../deliverable/lassobar';
@@ -60,7 +69,6 @@ export interface BoardObj {
 }
 
 type Tool = 'select' | 'lasso' | 'pen' | 'highlighter' | 'eraser' | 'note' | 'laser' | InkShape;
-interface Camera { tx: number; ty: number; s: number }
 /** `raw`: the stroke as drawn, once draw and hold snapped it to a shape (`pts` is the shape then), and where the pen rested (client px) */
 interface LiveStroke { color: string; w: number; o?: number; nib?: NibOpts; pressure?: boolean; poly?: true; pts: [number, number, number][]; raw?: [number, number, number][]; restAt?: [number, number] }
 /**
@@ -172,6 +180,29 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
   const [pasteAt, setPasteAt] = useState<[number, number] | null>(null);
   /** where the pointer last was on the board (a paste with the keys goes there) */
   const lastAt = useRef<[number, number] | null>(null);
+  /** the person's board settings (the ⚙: grid, snapping, the others' pointers — prefs.ts) */
+  const [prefs, setPrefsState] = useState(getPrefs);
+  useEffect(() => subscribePrefs(p => setPrefsState(p)), []);
+  const prefsRef = useRef(prefs); prefsRef.current = prefs;
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  /** the board alone on the screen (full), its bars tapped away with a finger there (barsAway), the hint saying so */
+  const [full, setFullState] = useState(false);
+  const fullRef = useRef(full); fullRef.current = full;
+  const [barsAway, setBarsAway] = useState(false);
+  const [fullHint, setFullHint] = useState(0);
+  /** whose view this one moves with (BoardPresence's Follow), and a flight to someone under way (its number: a newer one, or the person's own pan, ends it) */
+  const [following, setFollowingState] = useState<number | null>(null);
+  const followingRef = useRef(following); followingRef.current = following;
+  const flight = useRef(0);
+  const flying = useRef(false);
+  /** the view's size (the others' markers at its edges, what it shows of the board to the others) */
+  const [vpSize, setVpSize] = useState<[number, number]>([0, 0]);
+  /** the others on the board as their awareness states say, as the last render saw them */
+  const peersRef = useRef<BoardPeer[]>([]);
+  /** the tool bar (the markers for the others stay below it) */
+  const toolsRef = useRef<HTMLDivElement>(null);
+  /** the board was fitted into the view once it came (not again at every reconnection) */
+  const fitted = useRef(false);
 
   /** Yjs document + provider, once per board. */
   const conn0 = useMemo(() => {
@@ -195,7 +226,8 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     objects.observe(onObjects);
     const onStatus = ({ status }: { status: string }) => setConn(status === 'connected' ? 'online' : 'offline');
     provider.on('status', onStatus);
-    const onSync = (s: boolean) => { if (s) { setConn('online'); fit(); } };
+    // (fitted the first time only: a reconnection — a tablet woken up — leaves the view where it is)
+    const onSync = (s: boolean) => { if (s) { setConn('online'); if (!fitted.current) { fitted.current = true; fit(); } } };
     provider.on('sync', onSync);
     // the provider connects as it is created (useMemo above), before this effect runs: a fast
     // connection (WebKit, a warm second page) was connected and synced already, and the board said
@@ -244,6 +276,121 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
 
   const mutate = (fn: () => void) => { if (!readOnlyRef.current) ydoc.transact(fn, 'local'); };
 
+  // Undo and Redo show whether there is a step to take
+  useEffect(() => {
+    const on = () => rerender();
+    undo.on('stack-item-added', on); undo.on('stack-item-popped', on); undo.on('stack-cleared', on);
+    return () => { undo.off('stack-item-added', on); undo.off('stack-item-popped', on); undo.off('stack-cleared', on); };
+  }, [undo]);
+  const doUndo = () => { undo.undo(); rerender(); };
+  const doRedo = () => { undo.redo(); rerender(); };
+
+  /* ------------------------------------------------------------- what the others see of me */
+
+  // the view's size
+  useLayoutEffect(() => {
+    const vp = vpRef.current;
+    if (!vp) return;
+    const read = () => setVpSize(s => (s[0] === vp.clientWidth && s[1] === vp.clientHeight ? s : [vp.clientWidth, vp.clientHeight]));
+    read();
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(read) : null;
+    ro?.observe(vp);
+    return () => ro?.disconnect();
+  }, []);
+  // what my screen shows of the board (Go to and Follow on the others' screens, their minimaps), ten times a second at most
+  const viewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (viewTimer.current) return;
+    viewTimer.current = setTimeout(() => {
+      viewTimer.current = null;
+      const vp = vpRef.current;
+      if (!vp || !vp.clientWidth || !vp.clientHeight) return;
+      const r = viewRect(camRef.current, vp.clientWidth, vp.clientHeight);
+      try { provider.awareness.setLocalStateField('boardView', { x: round1(r.x), y: round1(r.y), w: round1(r.w), h: round1(r.h) }); } catch { /* closing */ }
+    }, 100);
+  }, [cam, vpSize]);
+  useEffect(() => () => { if (viewTimer.current) clearTimeout(viewTimer.current); }, []);
+  // what I selected, and the note I write in: the others see it in my colour (and leave that note to me)
+  useEffect(() => { try { provider.awareness.setLocalStateField('boardSel', selected.size ? [...selected].slice(0, 500) : null); } catch { /* closing */ } }, [selected]);
+  useEffect(() => { try { provider.awareness.setLocalStateField('boardEdit', editing); } catch { /* closing */ } }, [editing]);
+
+  /* ------------------------------------------------------------- going to the others, following them */
+
+  /** the camera taken from the person (a flight, the following): they pan, zoom, draw or use the minimap */
+  const stopCam = () => {
+    flight.current++;
+    flying.current = false;
+    if (followingRef.current !== null) setFollowingState(null);
+  };
+  /** the camera flown to `to` (~0.4 s; at once where motion is reduced) */
+  const flyTo = (to: Camera) => {
+    const vp = vpRef.current;
+    if (!vp) return;
+    const from = camRef.current, W = vp.clientWidth, H = vp.clientHeight, t0 = performance.now(), id = ++flight.current;
+    let still = false;
+    try { still = matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { /* moves */ }
+    if (still) { setCam(to); return; }
+    flying.current = true;
+    const step = () => {
+      if (flight.current !== id) return;
+      const t = Math.min(1, (performance.now() - t0) / 420);
+      setCam(lerpCam(from, to, ease(t), W, H));
+      if (t < 1) requestAnimationFrame(step); else flying.current = false;
+    };
+    requestAnimationFrame(step);
+  };
+  /** to the person: what they see, their pointer in it (boardview.ts camForPeer) */
+  const goTo = (p: BoardPeer) => {
+    const vp = vpRef.current;
+    const c = vp && camForPeer(p, camRef.current.s, vp.clientWidth, vp.clientHeight);
+    if (!c) { notify(`${p.name} has not looked at the board yet`); return; }
+    if (followingRef.current !== null && followingRef.current !== p.clientId) setFollowingState(null);
+    flyTo(c);
+  };
+  const follow = (clientId: number | null) => {
+    followingRef.current = clientId;
+    setFollowingState(clientId);
+    const p = clientId === null ? null : peersRef.current.find(q => q.clientId === clientId);
+    if (p) goTo(p);
+  };
+  // following: my view is theirs whenever theirs changes; they left, the following ends
+  const followedName = useRef('');
+  useEffect(() => {
+    if (following === null) return;
+    const p = peersRef.current.find(q => q.clientId === following);
+    if (!p) { setFollowingState(null); notify(`${followedName.current || 'They'} left the board — no longer following`); return; }
+    followedName.current = p.name;
+    const vp = vpRef.current;
+    if (!p.view || !vp || flying.current) return;
+    const c = camForPeer({ view: p.view, cursor: null }, camRef.current.s, vp.clientWidth, vp.clientHeight);
+    if (c) setCam(cur => (Math.abs(cur.s - c.s) < 1e-4 && Math.abs(cur.tx - c.tx) < 0.5 && Math.abs(cur.ty - c.ty) < 0.5 ? cur : c));
+  }, [peerTick, following, vpSize]);
+
+  /* ------------------------------------------------------------- full screen */
+
+  /**
+   * The board alone on the screen, or back: the app's bars, the files and the panes go (board.css
+   * html.ol-board-full), the browser's own full screen too where it has one (app/fullscreen.ts);
+   * a finger's tap on the board then takes the board's own bars away and brings them back.
+   */
+  const setFull = (on: boolean) => {
+    setFullState(on);
+    setBarsAway(false);
+    browserFullscreen(on);
+    if (on && touchScreen()) setFullHint(h => h + 1);
+  };
+  useLayoutEffect(() => { document.documentElement.classList.toggle('ol-board-full', full); }, [full]);
+  useEffect(() => {
+    // a computer's Esc ends the browser's full screen: the board's with it (a tablet's browser leaves its own as text is typed in: the board's stays)
+    const left = () => { if (!document.fullscreenElement && fullRef.current && !touchScreen()) { setFullState(false); setBarsAway(false); } };
+    document.addEventListener('fullscreenchange', left);
+    return () => {
+      document.removeEventListener('fullscreenchange', left);
+      document.documentElement.classList.remove('ol-board-full');
+      if (fullRef.current) browserFullscreen(false);
+    };
+  }, []);
+
   /* ------------------------------------------------------------- camera */
 
   const toBoard = (clientX: number, clientY: number): [number, number] => {
@@ -256,6 +403,7 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
   const fit = () => {
     const vp = vpRef.current;
     if (!vp || objects.size === 0) return;
+    stopCam();
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     objects.forEach(o => { minX = Math.min(minX, o.x); minY = Math.min(minY, o.y); maxX = Math.max(maxX, o.x + o.w); maxY = Math.max(maxY, o.y + o.h); });
     if (minX > maxX) return;
@@ -267,8 +415,9 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
 
   const zoomAt = (clientX: number, clientY: number, factor: number) => {
     const r = vpRef.current!.getBoundingClientRect();
+    stopCam();
     setCam(c => {
-      const s = Math.min(4, Math.max(0.08, c.s * factor));
+      const s = clampZoom(c.s * factor);
       const k = s / c.s;
       return { s, tx: (c.tx - (clientX - r.left)) * k + (clientX - r.left), ty: (c.ty - (clientY - r.top)) * k + (clientY - r.top) };
     });
@@ -277,6 +426,7 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
   /** the minimap's press or drag (BoardMinimap.tsx): the middle of the view at that board point, the zoom kept */
   const centreAt = (x: number, y: number) => {
     const vp = vpRef.current;
+    stopCam();
     if (vp) setCam(c => ({ ...c, tx: vp.clientWidth / 2 - x * c.s, ty: vp.clientHeight / 2 - y * c.s }));
   };
 
@@ -285,17 +435,82 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
   interface Drag {
     kind: 'pan' | 'move' | 'resize' | 'rotate' | 'draw' | 'erase' | 'lasso' | 'laser';
     start: [number, number]; origs?: Map<string, BoardObj>; corner?: string; base?: { x: number; y: number; w: number; h: number };
-    /** the eraser's last place (the precise eraser rubs along the way from there); whether the pen's other end erases */
+    /** the eraser's last place (the precise eraser rubs along the way from there), a move's last offset; whether the pen's other end erases */
     last?: [number, number]; end?: boolean;
     /** the rotation's centre and the angle the press began at */
     rot?: { cx: number; cy: number; a0: number };
   }
   const dragRef = useRef<Drag | null>(null);
-  const pointers = useRef(new Map<number, [number, number]>());
+  /** the pointer the drag belongs to: another's moves (a hand resting on the screen) are not its */
+  const dragOwner = useRef<number | null>(null);
+  /** the fingers on the board (client and screen px, when each came down) — two or more are a gesture */
+  const touches = useRef(new Map<number, { x: number; y: number; sx: number; sy: number; t0: number }>());
+  /**
+   * Two fingers: they pan and zoom the board about the point between them (gestures.ts: a pan stays a
+   * pan until they close or spread enough), and tapped together they undo; three fingers: a tap
+   * undoes, a swipe left undoes and right redoes (gestures.ts triGesture, as on slides).
+   */
+  type Gesture =
+    | { kind: 'pinch'; d0: number; mid0: [number, number]; cam0: Camera; lock: PinchLock; tap: { t0: number; at: Map<number, [number, number]>; moved: boolean } | null }
+    | { kind: 'tri'; mid0: [number, number]; last: [number, number]; t0: number }
+    | { kind: 'many' };
+  const gesture = useRef<Gesture | null>(null);
+  /** the pen on the board (its pointer): fingers that come down meanwhile are the hand resting, nothing else */
+  const penDown = useRef<number | null>(null);
+  /** one finger's tap on an empty place in full screen: the bars away or back (where it came down, when; whether something was selected) */
+  const tapRef = useRef<{ id: number; sx: number; sy: number; t: number; hadSel: boolean } | null>(null);
+  /** the last tap on a sticky note with a finger: a second one soon after on it opens it to write in */
+  const lastTap = useRef<{ id: string; t: number } | null>(null);
   /** the fingers on the board: one resting makes the pen's stroke a lasso, not a pinch (core/fingerlasso.ts) */
   const fingers = useRef(new FingerHold());
-  const pinch = useRef<{ dist: number; s: number } | null>(null);
   const awarenessSend = useRef(0);
+
+  const centroid = (screen: boolean): [number, number] => {
+    let x = 0, y = 0;
+    const ts = [...touches.current.values()];
+    for (const t of ts) { x += screen ? t.sx : t.x; y += screen ? t.sy : t.y; }
+    return [x / Math.max(1, ts.length), y / Math.max(1, ts.length)];
+  };
+  /** two or more fingers came down: what the first one began gives way (a stroke it began is not kept, its pan becomes the pinch) */
+  const startGesture = () => {
+    if (liveRef.current) {
+      liveRef.current = null;
+      drawingRef.current = null;
+      try { provider.awareness.setLocalStateField('boardInk', null); } catch { /* closing */ }
+    }
+    endHold();
+    endScratch();
+    if (laser.held) { laser.drop(performance.now()); fadeLaser(); }
+    if (dragRef.current?.kind === 'lasso') setLassoPts(null);
+    dragRef.current = null;
+    dragOwner.current = null;
+    tapRef.current = null;
+    const ts = [...touches.current.entries()];
+    const now = performance.now();
+    if (ts.length === 2) {
+      const [[, a], [, b]] = ts;
+      gesture.current = {
+        kind: 'pinch', d0: Math.hypot(a.x - b.x, a.y - b.y), mid0: [(a.x + b.x) / 2, (a.y + b.y) / 2], cam0: camRef.current, lock: pinchLock(),
+        tap: Math.abs(a.t0 - b.t0) < 150 ? { t0: now, at: new Map(ts.map(([id, p]) => [id, [p.sx, p.sy] as [number, number]])), moved: false } : null,
+      };
+    } else if (ts.length === 3) {
+      const c = centroid(true);
+      gesture.current = { kind: 'tri', mid0: c, last: c, t0: now };
+    } else gesture.current = { kind: 'many' };
+    rerender();
+  };
+  /** the two fingers moved: the board point that was between them stays between them, at the zoom their spread gives */
+  const pinchMove = (g: Extract<Gesture, { kind: 'pinch' }>) => {
+    const ts = [...touches.current.values()];
+    if (ts.length < 2) return;
+    const [a, b] = ts;
+    const r = vpRef.current!.getBoundingClientRect();
+    const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    const f = pinchFactor(g.lock, g.d0, Math.hypot(a.x - b.x, a.y - b.y), Math.hypot(mx - g.mid0[0], my - g.mid0[1]));
+    const s = clampZoom(g.cam0.s * f);
+    const bx = (g.mid0[0] - r.left - g.cam0.tx) / g.cam0.s, by = (g.mid0[1] - r.top - g.cam0.ty) / g.cam0.s;
+    setCam({ s, tx: mx - r.left - bx * s, ty: my - r.top - by * s });
+  };
 
   /**
    * The eraser at (bx, by), come from `from`, with Draw's eraser settings: its size, whole strokes or the
@@ -418,28 +633,33 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
 
   const onPointerDown = (e: PointerEvent) => {
     const vp = vpRef.current!;
+    // (a hand resting on the screen while the pen draws: not a pinch, nor anything else)
+    if (e.pointerType === 'touch' && penDown.current !== null) return;
     if (e.pointerType === 'pen' && !loadDeckInk().pencil) saveDeckInk(patchDeckInk(loadDeckInk(), { pencil: true }));
     const finger = e.pointerType === 'touch' && fingerDrawRef.current;
     vp.focus({ preventScroll: true });
+    // the person moves the board: a flight to someone, the following, end
+    stopCam();
+    if (settingsOpen) setSettingsOpen(false);
     if (e.pointerType === 'touch' && !finger) fingers.current.down(e.pointerId, e.screenX, e.screenY, performance.now());
     // a finger of the other hand resting on the board + the pen: this stroke draws a lasso, and the finger
     // neither pinches with the pen nor pans; lifted, the pen inks again
     const fingerLasso = e.pointerType === 'pen' && !(e.buttons & 32) && !readOnlyRef.current && toolRef.current !== 'laser' && toolRef.current !== 'note' && fingers.current.penLands(performance.now());
     if (fingerLasso) {
-      for (const id of [...pointers.current.keys()]) if (fingers.current.isHolding(id)) pointers.current.delete(id);
-      pinch.current = null;
+      for (const id of [...touches.current.keys()]) if (fingers.current.isHolding(id)) touches.current.delete(id);
+      gesture.current = null;
       dragRef.current = null;
     }
-    pointers.current.set(e.pointerId, [e.clientX, e.clientY]);
+    if (e.pointerType === 'pen') penDown.current = e.pointerId;
     setPasteAt(null);
-    if (pointers.current.size === 2) {   // pinch zoom takes over
-      const [a, b] = [...pointers.current.values()];
-      pinch.current = { dist: Math.hypot(a[0] - b[0], a[1] - b[1]), s: camRef.current.s };
-      dragRef.current = null;
-      liveRef.current = null;
-      if (laser.held) { laser.drop(performance.now()); fadeLaser(); }
-      endHold();
-      return;
+    if (e.pointerType === 'touch') {
+      touches.current.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.screenX, sy: e.screenY, t0: performance.now() });
+      if (touches.current.size >= 2 || gesture.current) {
+        vp.setPointerCapture(e.pointerId);
+        if (touches.current.size >= 2) startGesture();
+        e.preventDefault();
+        return;
+      }
     }
     const [bx, by] = toBoard(e.clientX, e.clientY);
     const target = e.target as HTMLElement;
@@ -454,6 +674,14 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     const drawTool = (t === 'pen' || t === 'highlighter') && (e.pointerType !== 'touch' || finger) && !readOnlyRef.current;
     const origsOf = (ids: ReadonlySet<string>) => { const m = new Map<string, BoardObj>(); for (const id of ids) { const o = objects.get(id); if (o) m.set(id, { ...o, pts: o.pts?.map(p => [...p] as [number, number, number]) }); } return m; };
     const onSelBox = !!target.closest?.('.board-selbox');
+    // a second tap with a finger on a sticky note (or on the box of the one selected) opens it to write in
+    const one = selectedRef.current.size === 1 ? [...selectedRef.current][0] : null;
+    const noteId = objId && objects.get(objId)?.t === 'note' ? objId : onSelBox && one && objects.get(one)?.t === 'note' ? one : null;
+    if (noteId && e.pointerType === 'touch' && !corner && (t === 'select' || t === 'lasso') && !readOnlyRef.current) {
+      const lt = lastTap.current, now = performance.now();
+      if (lt && lt.id === noteId && now - lt.t < 400) { lastTap.current = null; openNote(noteId); e.preventDefault(); return; }
+      lastTap.current = { id: noteId, t: now };
+    }
     vp.setPointerCapture(e.pointerId);
     if (t === 'laser' && (e.pointerType !== 'touch' || finger)) {
       // the laser pointer: a viewer may use it too — nothing is written; its traces still fading come back
@@ -464,7 +692,7 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
       rerender();
     } else if (onSelBox && !corner && selectedRef.current.size && !readOnlyRef.current) {
       // dragging inside the selection box moves the whole selection
-      dragRef.current = { kind: 'move', start: [bx, by], origs: origsOf(selectedRef.current) };
+      dragRef.current = { kind: 'move', start: [bx, by], origs: origsOf(selectedRef.current), base: groupBBox(selectedRef.current) ?? undefined };
     } else if (e.button === 1 || ((t === 'select' || t === 'lasso') && !objId && !corner && (t === 'select' || (e.pointerType === 'touch' && !finger)))) {
       if (selectedRef.current.size) setSelected(new Set());
       dragRef.current = { kind: 'pan', start: [e.clientX - camRef.current.tx, e.clientY - camRef.current.ty] };
@@ -490,14 +718,15 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
         ? new Set(cur.has(objId) ? [...cur].filter(id => id !== objId) : [...cur, objId])
         : cur.has(objId) ? cur : new Set([objId]);
       setSelected(next);
-      if (!readOnlyRef.current && next.has(objId)) dragRef.current = { kind: 'move', start: [bx, by], origs: origsOf(next) };
+      if (!readOnlyRef.current && next.has(objId)) dragRef.current = { kind: 'move', start: [bx, by], origs: origsOf(next), base: groupBBox(next) ?? undefined };
     } else if (t === 'eraser' && !readOnlyRef.current) {
       dragRef.current = { kind: 'erase', start: [bx, by], last: [bx, by], end: eraserEnd };
       undo.stopCapturing();
       eraseAt(bx, by);
     } else if (t === 'note' && !readOnlyRef.current) {
       const nid = newId();
-      mutate(() => objects.set(nid, { t: 'note', x: round1(bx), y: round1(by), w: 180, h: 100, color: NOTE_COLORS[objects.size % NOTE_COLORS.length], text: '' }));
+      const g = prefsRef.current.boardSnap ? prefsRef.current.boardGridSize : 0;
+      mutate(() => objects.set(nid, { t: 'note', x: round1(g ? snapTo(bx, g) : bx), y: round1(g ? snapTo(by, g) : by), w: g ? Math.max(g, Math.round(180 / g) * g) : 180, h: g ? Math.max(g, Math.round(100 / g) * g) : 100, color: NOTE_COLORS[objects.size % NOTE_COLORS.length], text: '' }));
       setTool('select');
       setSelected(new Set([nid]));
       setEditing(nid);
@@ -519,19 +748,28 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
       endHold();
       if (drawing.snap) holdRef.current = { x: e.clientX, y: e.clientY, timer: setTimeout(snapLive, SNAP_HOLD_MS) };
     }
+    dragOwner.current = dragRef.current || liveRef.current ? e.pointerId : null;
+    // one finger on an empty place in full screen, nothing selected: a tap there takes the bars away or brings them back
+    tapRef.current = e.pointerType === 'touch' && dragRef.current?.kind === 'pan' ? { id: e.pointerId, sx: e.screenX, sy: e.screenY, t: performance.now(), hadSel: selectedRef.current.size > 0 } : null;
     if (dragRef.current || liveRef.current) e.preventDefault();
   };
 
   const onPointerMove = (e: PointerEvent) => {
     if (e.pointerType === 'touch') fingers.current.move(e.pointerId, e.screenX, e.screenY);
     if (fingers.current.isHolding(e.pointerId)) return;   // the finger holding for the pen's lasso
-    if (pointers.current.has(e.pointerId)) pointers.current.set(e.pointerId, [e.clientX, e.clientY]);
-    if (pinch.current && pointers.current.size === 2) {
-      const [a, b] = [...pointers.current.values()];
-      const dist = Math.hypot(a[0] - b[0], a[1] - b[1]);
-      zoomAt((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (pinch.current.s * (dist / pinch.current.dist)) / camRef.current.s);
+    const tf = e.pointerType === 'touch' ? touches.current.get(e.pointerId) : undefined;
+    if (tf) { tf.x = e.clientX; tf.y = e.clientY; tf.sx = e.screenX; tf.sy = e.screenY; }
+    const tap = tapRef.current;
+    if (tap && tap.id === e.pointerId && Math.hypot(e.screenX - tap.sx, e.screenY - tap.sy) > 10) tapRef.current = null;
+    const g = gesture.current;
+    if (g && tf) {
+      if (g.kind === 'pinch') {
+        if (g.tap && !g.tap.moved) { const o = g.tap.at.get(e.pointerId); if (o && Math.hypot(e.screenX - o[0], e.screenY - o[1]) > 10) g.tap.moved = true; }
+        pinchMove(g);
+      } else if (g.kind === 'tri' && touches.current.size === 3) g.last = centroid(true);
       return;
     }
+    if (g && e.pointerType === 'touch') return;
     // broadcast the cursor (board coordinates) for presence
     const now = performance.now();
     if (now - awarenessSend.current > 50) {
@@ -542,6 +780,7 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     lastAt.current = toBoard(e.clientX, e.clientY);
     const d = dragRef.current;
     if (!d && !liveRef.current) return;
+    if (dragOwner.current !== null && e.pointerId !== dragOwner.current) return;
     const [bx, by] = toBoard(e.clientX, e.clientY);
     if (d?.kind === 'laser' && laser.held) {
       const evs = e.getCoalescedEvents?.() ?? [];
@@ -562,7 +801,13 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
         return (last[0] - bx) ** 2 + (last[1] - by) ** 2 > 4 / camRef.current.s ? [...pts, [bx, by]] : pts;
       });
     } else if (d?.kind === 'move' && d.origs) {
-      const dx = bx - d.start[0], dy = by - d.start[1];
+      let dx = bx - d.start[0], dy = by - d.start[1];
+      // (snapping: the selection's top left corner on the grid)
+      const pr = prefsRef.current;
+      if (pr.boardSnap && d.base) { dx = snapTo(d.base.x + dx, pr.boardGridSize) - d.base.x; dy = snapTo(d.base.y + dy, pr.boardGridSize) - d.base.y; }
+      // (no change: nothing written — a snapped move stays put between grid lines)
+      if (d.last && d.last[0] === dx && d.last[1] === dy) return;
+      d.last = [dx, dy];
       mutate(() => {
         for (const [id, o0] of d.origs!) {
           const cur = objects.get(id);
@@ -649,8 +894,31 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
   const onPointerUp = (e: PointerEvent) => {
     if (fingers.current.isHolding(e.pointerId)) { fingers.current.up(e.pointerId); return; }   // lifted: the pen inks again
     if (e.pointerType === 'touch') fingers.current.up(e.pointerId);
-    pointers.current.delete(e.pointerId);
-    if (pointers.current.size < 2) pinch.current = null;
+    if (e.pointerId === penDown.current) penDown.current = null;
+    if (e.pointerType === 'touch' && touches.current.has(e.pointerId)) {
+      touches.current.delete(e.pointerId);
+      const g = gesture.current;
+      if (g) {
+        // the gesture's last finger lifted: two fingers tapped together undo; three tapped or swiped, as gestures.ts says
+        if (!touches.current.size) {
+          gesture.current = null;
+          const now = performance.now();
+          if (e.type === 'pointerup' && !readOnlyRef.current) {
+            if (g.kind === 'pinch' && g.tap && !g.tap.moved && now - g.tap.t0 < 320) doUndo();
+            else if (g.kind === 'tri') {
+              const act = triGesture(g.last[0] - g.mid0[0], g.last[1] - g.mid0[1], now - g.t0);
+              if (act === 'undo') doUndo(); else if (act === 'redo') doRedo();
+            }
+          }
+        }
+        return;
+      }
+    }
+    // (another pointer's lift — a resting hand's — ends nothing of the drag)
+    if (dragOwner.current !== null && e.pointerId !== dragOwner.current && (dragRef.current || liveRef.current)) return;
+    const tap = tapRef.current;
+    tapRef.current = null;
+    if (tap && tap.id === e.pointerId && e.type === 'pointerup' && performance.now() - tap.t < 350 && !tap.hadSel && fullRef.current) setBarsAway(b => !b);
     if (dragRef.current?.kind === 'laser' && laser.held) {
       // lifted: the traces linger and fade (CSS); the others fade theirs when the field vanishes
       laser.end(performance.now());
@@ -689,6 +957,7 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
       }
     }
     if (dragRef.current?.kind === 'erase' && !dragRef.current.end && toolRef.current === 'eraser' && loadDeckInk().eraser.back) setTool(boardPen());
+    dragOwner.current = null;
     if (dragRef.current?.kind === 'lasso') {
       const poly = lassoRef.current;
       setLassoPts(null);
@@ -710,13 +979,29 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
       }
     }
     dragRef.current = null;
+    // a note just opened to write in: its text box takes the keys while this is still the tap (a tablet shows its keyboard only then)
+    const ta = vpRef.current?.querySelector<HTMLTextAreaElement>('.board-note-edit');
+    if (ta && document.activeElement !== ta) { ta.dataset.focused = '1'; ta.focus({ preventScroll: true }); ta.setSelectionRange(ta.value.length, ta.value.length); }
     rerender();
+  };
+
+  /** a pointer the browser took away without its lift (a system gesture): it is no longer on the board */
+  const onLostCapture = (e: PointerEvent) => {
+    if (touches.current.delete(e.pointerId) && !touches.current.size) gesture.current = null;
+    if (e.pointerId === penDown.current) penDown.current = null;
   };
 
   const onWheel = (e: WheelEvent) => {
     e.preventDefault();
+    stopCam();
     if (e.ctrlKey || e.metaKey) zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.01));
     else setCam(c => ({ ...c, tx: c.tx - e.deltaX, ty: c.ty - e.deltaY }));
+    // (the board moved under the pointer: the others see it where it now points)
+    const { clientX: x, clientY: y } = e;
+    requestAnimationFrame(() => {
+      const [bx, by] = toBoard(x, y);
+      try { provider.awareness.setLocalStateField('boardCursor', { x: round1(bx), y: round1(by) }); } catch { /* closing */ }
+    });
   };
 
   /* ------------------------------------------------------------- the lasso's selection */
@@ -841,7 +1126,42 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     } else if (mod && k === 'd' && selectedRef.current.size && !readOnlyRef.current) { duplicateSelection(); e.preventDefault(); } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.shiftKey ? undo.redo() : undo.undo(); e.preventDefault(); }
     else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { undo.redo(); e.preventDefault(); }
     else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') { setSelected(new Set([...objects.keys()])); setTool('select'); e.preventDefault(); }
-    else if (e.key === 'Escape') { setSelected(new Set()); setTool('select'); }
+    else if (e.key === 'Escape') {
+      // (nothing more to let go of in full screen: Esc leaves it)
+      if (fullRef.current && !selectedRef.current.size && toolRef.current === 'select') setFull(false);
+      setSelected(new Set()); setTool('select');
+    }
+  };
+
+  /* ------------------------------------------------------------- sticky notes */
+
+  /** a screen pointed at with fingers (the notes say double-tap) */
+  const coarse = useMemo(touchScreen, []);
+  const noteTimer = useRef<ReturnType<typeof setTimeout>>();
+  /** a note opened to write in — unless someone else writes in it (their name says so; two writing at once would overwrite each other) */
+  const openNote = (key: string) => {
+    if (readOnlyRef.current || objects.get(key)?.t !== 'note') return;
+    const by = peersRef.current.find(p => p.edit === key);
+    if (by) { notify(`${by.name} is writing in this note`); return; }
+    setSelected(new Set([key]));
+    setEditing(key);
+  };
+  /**
+   * A double click on a note opens it. (The board holds the pointer from the press on — pointer capture —
+   * so the click comes to the board, not to the note: the note is the topmost one under the pointer.)
+   */
+  const onDblClick = (e: MouseEvent) => {
+    if ((e.target as HTMLElement).closest?.('.board-tools, .board-zoom, .board-minimap, .board-settings, .board-people, .board-edge, .board-note-edit')) return;
+    const hit = document.elementsFromPoint(e.clientX, e.clientY).find(n => n instanceof HTMLElement && n.classList.contains('board-note'));
+    let key = hit?.getAttribute('data-obj') ?? null;
+    if (!key) {
+      // (by its box on the board: the last drawn, the topmost)
+      const [bx, by] = toBoard(e.clientX, e.clientY);
+      for (const [k, o] of [...objects.entries()].sort((a, b) => (a[1].z ?? 0) - (b[1].z ?? 0) || (a[0] < b[0] ? -1 : 1))) {
+        if (o.t === 'note' && bx >= o.x && by >= o.y && bx <= o.x + o.w && by <= o.y + o.h) key = k;
+      }
+    }
+    if (key && objects.get(key)?.t === 'note') openNote(key);
   };
 
   /* ------------------------------------------------------------- images */
@@ -900,16 +1220,31 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
 
   const entries = [...objects.entries()].sort((a, b) => (a[1].z ?? 0) - (b[1].z ?? 0) || (a[0] < b[0] ? -1 : 1));
   const selBB = selected.size ? groupBBox(selected) : null;
-  const peers: { clientId: number; name: string; color: string; x: number; y: number }[] = [];
+  // the others: who they are, their pointers, views, selections (boardview.ts readPeer); the strokes they are drawing
+  const peerList: BoardPeer[] = [];
   const remoteInks: LiveStroke[] = [];
   provider.awareness.getStates().forEach((state, clientId) => {
     if (clientId === ydoc.clientID) return;
-    const s = state as { user?: { name: string; color: string }; boardCursor?: { x: number; y: number }; boardInk?: LiveStroke };
-    if (s.user && s.boardCursor) peers.push({ clientId, name: s.user.name, color: s.user.color, x: s.boardCursor.x, y: s.boardCursor.y });
+    const p = readPeer(clientId, state);
+    if (p) peerList.push(p);
+    const s = state as { boardInk?: LiveStroke };
     if (s.boardInk?.pts?.length) remoteInks.push(s.boardInk);
   });
+  peerList.sort((a, b) => a.clientId - b.clientId);
+  peersRef.current = peerList;
   void peerTick;
+  /** what each of the others selected, or writes in: the box round it */
+  const peerBoxes = peerList.flatMap(p => {
+    const ids = new Set(p.sel);
+    if (p.edit) ids.add(p.edit);
+    const bb = ids.size ? groupBBox(ids) : null;
+    return bb ? [{ p, bb }] : [];
+  });
+  const grid = gridStyle(prefs.boardGrid, prefs.boardGridSize, cam);
+  const firstName = (name: string) => name.replace(/\s*\([^)]*\)\s*$/, '').trim().split(/\s+/)[0] || name;
 
+  /** a note's text into the board (a note deleted meanwhile stays deleted) */
+  const writeNote = (key: string, v: string) => mutate(() => { const cur = objects.get(key); if (cur && cur.text !== v) objects.set(key, { ...cur, text: v.slice(0, 4000) }); });
   const noteEdit = (key: string, o: BoardObj) => (
     <textarea
       class="board-note-edit"
@@ -918,8 +1253,11 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
       // stayed empty and the board, still "editing", ignored Ctrl+Z from then on
       defaultValue={o.text ?? ''}
       // (after the click that made the note: its mousedown focuses the board, which would close the note again)
-      ref={el => { if (el && !el.dataset.focused) { el.dataset.focused = '1'; setTimeout(() => { if (el.isConnected && document.activeElement !== el) { el.focus({ preventScroll: true }); el.select(); } }, 0); } }}
-      onBlur={e => { const v = (e.target as HTMLTextAreaElement).value; mutate(() => { const cur = objects.get(key); if (cur) objects.set(key, { ...cur, text: v }); }); setEditing(null); }}
+      // (the caret at the end of what is written: a whole note selected went with the first key typed)
+      ref={el => { if (el && !el.dataset.focused) { el.dataset.focused = '1'; setTimeout(() => { if (el.isConnected && document.activeElement !== el) { el.focus({ preventScroll: true }); el.setSelectionRange(el.value.length, el.value.length); } }, 0); } }}
+      // (written as it is typed — the others see the note fill — a quarter of a second at most behind)
+      onInput={e => { const v = (e.target as HTMLTextAreaElement).value; clearTimeout(noteTimer.current); noteTimer.current = setTimeout(() => writeNote(key, v), 250); }}
+      onBlur={e => { clearTimeout(noteTimer.current); writeNote(key, (e.target as HTMLTextAreaElement).value); setEditing(null); }}
       onKeyDown={e => { e.stopPropagation(); if (e.key === 'Escape') (e.target as HTMLTextAreaElement).blur(); }}
       onPointerDown={e => e.stopPropagation()}
     />
@@ -927,7 +1265,16 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
 
   // the Modern interface draws its line icons where Classic shows the emoji
   const modern = useUiMode() === 'modern';
-  const face = (id: string, emoji: string) => (modern && MODERN_ICONS[id] ? <span class="bd-ic" dangerouslySetInnerHTML={{ __html: iconSvg(MODERN_ICONS[id], 17) }} /> : emoji);
+  const face = (id: string, emoji: ComponentChildren) => (modern && MODERN_ICONS[id] ? <span class="bd-ic" dangerouslySetInnerHTML={{ __html: iconSvg(MODERN_ICONS[id], 17) }} /> : emoji);
+  /** the settings' place: under their button, kept inside the board (300 px wide) */
+  const settingsAt = () => {
+    const vp = vpRef.current, btn = vp?.querySelector<HTMLElement>('[data-board-settings-btn]');
+    if (!vp || !btn) return { left: 12, top: 58 };
+    const r = vp.getBoundingClientRect(), b = btn.getBoundingClientRect(), tools = toolsRef.current?.getBoundingClientRect();
+    return { left: Math.max(12, Math.min(r.width - 312, b.left + b.width / 2 - r.left - 150)), top: (tools ? tools.bottom : b.bottom) - r.top + 6 };
+  };
+  /** a line icon of the toolbars' table (Classic's face where no emoji fits) */
+  const glyph = (svg: string | undefined, alt: string) => (svg ? <span class="bd-glyph" dangerouslySetInnerHTML={{ __html: svg }} /> : alt);
   const toolBtn = (t: Tool, label: string, title: string) => (
     <button class={'small-btn' + (tool === t ? ' active' : '')} data-tool={t} title={title} onClick={() => setTool(t)}>{face('bd-' + t, label)}</button>
   );
@@ -957,8 +1304,12 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
   };
 
   return (
-    <div class="board" ref={vpRef} tabIndex={0}
+    <div class={'board' + (full ? ' full' : '') + (full && barsAway ? ' bars-away' : '')} ref={vpRef} tabIndex={0} data-grid={prefs.boardGrid}
+      style={grid ?? { backgroundImage: 'none' }}
       onPointerDown={onPointerDown as never} onPointerMove={onPointerMove as never} onPointerUp={onPointerUp as never} onPointerCancel={onPointerUp as never}
+      onLostPointerCapture={onLostCapture as never}
+      onPointerLeave={(e: PointerEvent) => { if (e.pointerType === 'mouse' && !dragRef.current) { try { provider.awareness.setLocalStateField('boardCursor', null); } catch { /* closing */ } } }}
+      onDblClick={onDblClick as never}
       onWheel={onWheel as never} onKeyDown={onKeyDown as never} onPaste={onPaste as never}
       onCopy={(e: ClipboardEvent) => { if (!editing && selectedRef.current.size) copySelection(e); }}
       onDragOver={e => e.preventDefault()} onDrop={onDrop as never}
@@ -972,9 +1323,8 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
           if (o.t === 'note') {
             return (
               <div key={key} data-obj={key} class={'board-note' + (selected.has(key) ? ' selected' : '')}
-                style={{ left: o.x + 'px', top: o.y + 'px', width: o.w + 'px', minHeight: o.h + 'px', background: o.color ?? NOTE_COLORS[0] }}
-                onDblClick={() => { if (!readOnly) { setSelected(new Set([key])); setEditing(key); } }}>
-                {editing === key ? noteEdit(key, o) : (o.text || <span class="board-note-hint">double-click to write</span>)}
+                style={{ left: o.x + 'px', top: o.y + 'px', width: o.w + 'px', minHeight: o.h + 'px', background: o.color ?? NOTE_COLORS[0] }}>
+                {editing === key ? noteEdit(key, o) : (o.text || <span class="board-note-hint">{coarse ? 'double-tap' : 'double-click'} to write</span>)}
               </div>
             );
           }
@@ -1009,8 +1359,15 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
         {/* laser traces: the others' (fading once lifted), then mine */}
         {[...remoteLasers.current.entries()].map(([clientId, r]) => laserSvg(r.s, r.color, 'laser' + clientId, false, r.name))}
         {laserSvg(laser, LASER_COLOR, 'mylaser', true)}
-        {peers.map(p => (
-          <div key={p.clientId} class="board-peer" style={{ left: p.x + 'px', top: p.y + 'px' }}>
+        {/* what the others selected, the note one writes in: their colour round it, their name at its corner */}
+        {peerBoxes.map(({ p, bb }) => (
+          <div key={'psel' + p.clientId} class="board-peer-sel" data-peer-sel={p.clientId}
+            style={{ left: bb.x + 'px', top: bb.y + 'px', width: bb.w + 'px', height: bb.h + 'px', '--peer': p.color, outline: `${2 / cam.s}px solid ${p.color}`, outlineOffset: `${3 / cam.s}px` } as never}>
+            <span class="board-peer-tag" style={{ transform: `translate(${-3 / cam.s}px, ${-3 / cam.s}px) scale(${1 / cam.s})`, color: inkOn(p.color) }}>{p.edit ? `${firstName(p.name)} is writing` : firstName(p.name)}</span>
+          </div>
+        ))}
+        {prefs.boardPointers && peerList.map(p => p.cursor && (
+          <div key={p.clientId} class="board-peer" data-peer-cursor={p.clientId} style={{ left: p.cursor.x + 'px', top: p.cursor.y + 'px' }}>
             <span class="dot" style={{ background: p.color, transform: `scale(${1 / cam.s})` }} />
             <span class="name" style={{ background: p.color, color: inkOn(p.color), transform: `scale(${1 / cam.s})` }}>{p.name}</span>
           </div>
@@ -1019,13 +1376,18 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
       {/* the lasso selection's bar (recolour, copy, convert …), and Paste after a tap with the lasso */}
       {selBB && !readOnly && !editing && !dragRef.current && !liveRef.current && <LassoBar id="board-lasso-bar" groups={lassoGroups(lassoActions())} rect={clientBox(selBB)} />}
       {pasteAt && !selBB && heldInk() && <LassoBar id="board-paste-bar" groups={pasteGroups(() => { const clip = heldInk(); const at = pasteAt; setPasteAt(null); if (clip) pasteClip(clip, at); })} rect={clientBox({ x: pasteAt[0], y: pasteAt[1], w: 0, h: 0 })} />}
-      <div class="board-tools" onPointerDown={e => e.stopPropagation()}>
+      <div class="board-tools" ref={toolsRef} onPointerDown={e => e.stopPropagation()}>
+        {!readOnly && <button class="small-btn" data-board-undo title="Undo (Ctrl+Z, or tap with two fingers)" aria-label="Undo" disabled={!undo.undoStack.length} onClick={doUndo}>{face('bd-undo', glyph(ICONS.undo, '↶'))}</button>}
+        {!readOnly && <button class="small-btn" data-board-redo title="Redo (Ctrl+Shift+Z, or swipe right with three fingers)" aria-label="Redo" disabled={!undo.redoStack.length} onClick={doRedo}>{face('bd-redo', glyph(ICONS.redo, '↷'))}</button>}
+        {!readOnly && <span class="board-sep" />}
         {toolBtn('select', '⤢', 'Select / move (drag empty space to pan)')}
         {toolBtn('laser', '🔴', 'Laser pointer — a glowing trace that stays while you hold the pen down and fades when you lift it (put down again before it is gone, it comes back); not saved, seen live by everyone on the board')}
         {!readOnly && toolBtn('note', '🗒', 'Sticky note')}
         {!readOnly && <button class="small-btn" title="Add images (or paste / drag them in)" onClick={pickImages}>{face('bd-image', '🖼')}</button>}
         <button class={'small-btn' + (fingerDraw ? ' active' : '')} data-finger-draw title={fingerDraw ? 'Drawing with a finger is on — a finger draws, two fingers pan and zoom (click to let a finger pan)' : 'Draw with a finger (otherwise only a pen or the mouse draws; a finger pans)'} onClick={() => setFingerDraw(!fingerDraw)}>{face('bd-finger', '☝')}</button>
-        {!readOnly && <span class="board-sep" />}
+        <button class={'small-btn' + (settingsOpen ? ' active' : '')} data-board-settings-btn aria-expanded={settingsOpen} aria-label="Board settings"
+          title="Board settings: the grid, snapping to it, the others' pointers, drawing with a finger" onClick={() => setSettingsOpen(o => !o)}>{face('bd-settings', '⚙')}</button>
+        {!readOnly && <span class="board-sep board-sep-draw" />}
         {!readOnly && <Toolbar id="board-draw" groups={drawingToolbar({
           tool: tool === 'pen' || tool === 'highlighter' ? 'pen' : tool,
           setTool: next => { if (next === 'pen') setTool(boardPen()); else if (next === 'eraser' || next === 'lasso') setTool(next); },
@@ -1034,19 +1396,27 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
           done: false,
           shapes: { tool: isShapeTool(tool) ? tool : null, set: kind => setTool(kind) },
         })} />}
-
       </div>
+      {settingsOpen && <BoardSettings at={settingsAt()} fingerDraw={fingerDraw} onFingerDraw={setFingerDraw} onClose={() => setSettingsOpen(false)} />}
       <div class="board-zoom" onPointerDown={e => e.stopPropagation()}>
         <button class="small-btn" title="Zoom out" onClick={() => zoomAt(innerWidth / 2, innerHeight / 2, 1 / 1.25)}>−</button>
-        <button class="small-btn" title="Reset zoom" onClick={() => setCam(c => ({ ...c, s: 1 }))}>{Math.round(cam.s * 100)}%</button>
+        <button class="small-btn" title="Reset zoom" onClick={() => zoomAt(innerWidth / 2, innerHeight / 2, 1 / camRef.current.s)}>{Math.round(cam.s * 100)}%</button>
         <button class="small-btn" title="Zoom in" onClick={() => zoomAt(innerWidth / 2, innerHeight / 2, 1.25)}>+</button>
         <button class="small-btn" title="Zoom to fit everything" onClick={fit}>{face('bd-fit', '⤢')}</button>
+        <button class={'small-btn' + (full ? ' active' : '')} data-board-full aria-pressed={full} aria-label={full ? 'Leave full screen' : 'Full screen'}
+          title={full ? 'Leave full screen (Esc): the menus, the files and the panes back' : 'Full screen: the board alone on the screen' + (coarse ? ' — a tap with a finger hides the tools and brings them back' : '')}
+          onClick={() => setFull(!full)}>{face(full ? 'bd-full-exit' : 'bd-full', glyph(ICONS[full ? 'dk-fullscreen-exit' : 'dk-fullscreen'], full ? '✕' : '⛶'))}</button>
         <span class={'board-conn ' + conn} title={conn === 'online' ? 'Connected — changes sync live and save automatically' : conn === 'offline' ? 'No connection — reconnecting' : 'Connecting…'}>
           {conn === 'online' ? (readOnly ? '👁 view only' : '✓ live') : conn === 'offline' ? 'offline' : '…'}
         </span>
       </div>
       {/* the whole board small, the view on it: bottom left (the zoom pill has the right) */}
-      <BoardMinimap objects={objects} cam={cam} view={() => vpRef.current} onCenter={centreAt} />
+      <BoardMinimap objects={objects} cam={cam} view={() => vpRef.current} onCenter={centreAt}
+        peers={peerList.flatMap(p => (p.view ? [{ id: p.clientId, color: p.color, view: p.view }] : []))} />
+      {/* the others: their faces top right (Go to, Follow), markers at the edges for those out of sight, the follow frame */}
+      <BoardPresence peers={peerList} cam={cam} size={vpSize} following={following} faces={!(full && barsAway)} onGo={goTo} onFollow={follow}
+        insets={full && barsAway ? { top: 40, right: 44, bottom: 44, left: 44 } : { top: 40 + (toolsRef.current?.offsetHeight ?? 40), right: 48, bottom: 80, left: 48 }} />
+      {full && fullHint > 0 && <div key={fullHint} class="board-full-hint">A tap with a finger hides the tools and brings them back</div>}
     </div>
   );
 }

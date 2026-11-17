@@ -23,7 +23,7 @@ import {
   ArrowUpToLine, ArrowDownToLine, ArrowLeftToLine, ArrowRightToLine, TableConfig, Parentheses, Pi, Radical, Omega,
   FilePen, FileDiff, GitCompare, GitBranch, GitCommitVertical, Eye, BookA, Shrink, SquareDot, Circle, Triangle, Star,
   Hexagon, MoveUpRight, RectangleHorizontal, SendToBack, ArrowUp, ArrowDown, SquarePlus, PaintBucket, AlignHorizontalJustifyCenter,
-  FlipHorizontal2, Pencil, Grid2x2,
+  FlipHorizontal2, Pencil, Grid2x2, Settings2,
 } from 'lucide';
 
 type IconNode = [string, Record<string, string | number | undefined>][];
@@ -120,6 +120,7 @@ export const MODERN_ICONS: Record<string, string> = {
   // the whiteboard's palette (BoardEditor.tsx)
   'bd-select': N(MousePointer2), 'bd-lasso': N(LassoSelect), 'bd-pen': N(Pen), 'bd-highlighter': N(Highlighter), 'bd-eraser': N(Eraser),
   'bd-laser': N(Focus), 'bd-note': N(StickyNote), 'bd-image': N(Image), 'bd-finger': N(Hand), 'bd-fit': N(Maximize2),
+  'bd-undo': N(Undo2), 'bd-redo': N(Redo2), 'bd-settings': N(Settings2), 'bd-full': N(Maximize), 'bd-full-exit': N(Minimize),
   // the side rails (modern.css draws them as masks from these)
   'rail-comments': N(MessageSquare), 'rail-versions': N(History), 'rail-agent': N(Sparkles), 'rail-pdf': N(FileText),
   'rail-source': N(CodeXml), 'rail-outline': N(ListTree),

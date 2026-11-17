@@ -45,6 +45,7 @@ export const SYNCED_LABELS: Record<string, string> = {
   'pref.aiButton': 'The ✦ AI button', 'pref.aiRewrite': 'Rewrite with AI', 'pref.aiCompleteText': 'Autocomplete text', 'pref.aiCompleteMath': 'Autocomplete formulas',
   'pref.aiCompleteDelay': 'Pause before suggesting', 'pref.aiModel': 'Rewrite model', 'pref.aiCompletionModel': 'Autocomplete model',
   'pref.aiInk': 'Read handwritten formulas', 'pref.speechEngine': 'Spoken comments put into words by',
+  'pref.boardGrid': 'Whiteboard grid', 'pref.boardGridSize': 'Whiteboard grid size', 'pref.boardSnap': 'Snap to the whiteboard grid', 'pref.boardPointers': 'Others\' pointers on whiteboards',
   'pref.usageStats': 'Anonymous usage statistics', 'pref.betaDiagnostics': 'Beta reliability diagnostics',
 };
 
