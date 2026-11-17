@@ -35,6 +35,12 @@ export class DocSession {
   /** file-side forms of the models the webview may name as its base (see baseDocument) */
   private known: { key: string; doc: LyxDocument }[] = [];
   private writes: Promise<unknown> = Promise.resolve();
+  /**
+   * VS Code's record of the file is older than the file: it changed on disk while the document had
+   * unsaved edits (VS Code reloads no dirty document) or VS Code missed the change. VS Code would
+   * refuse its own save of the document as a conflict (see saveOver).
+   */
+  private behind = false;
   /** the TextDocument text's parse and writer output: writing into it keeps its unchanged LaTeX (core tex/preserve.ts) */
   private preserveCache: PreserveCache = {};
 
@@ -194,12 +200,15 @@ export class DocSession {
   private async readDisk(): Promise<boolean> {
     // Child editors in a joint view do not own VS Code tabs, so their buffers may be released.
     const reopened = this.document.isClosed;
-    if (reopened) this.document = await vscode.workspace.openTextDocument(this.document.uri);
+    if (reopened) { this.document = await vscode.workspace.openTextDocument(this.document.uri); this.behind = false; }
     let disk = this.readFile();
     if (disk === this.diskText) return reopened;
     // Let VS Code reload a clean file itself: a WorkspaceEdit would mark it dirty while
     // leaving VS Code's saved-file timestamp behind, causing a false save conflict.
-    if (!this.document.isDirty && this.document.getText() !== disk && await this.reloaded()) disk = this.readFile();
+    const dirty = this.document.isDirty;
+    let missed = false;
+    if (!dirty && this.document.getText() !== disk) { if (await this.reloaded()) disk = this.readFile(); else missed = true; }
+    this.behind = dirty || missed;
     const local = this.document.getText();
     let text = disk;
     // (a clean document VS Code did not reload has nothing unsaved: it takes the file's text)
@@ -362,41 +371,53 @@ export class DocSession {
   }
 
   /**
-   * Save the TextDocument. VS Code refuses a save when the file changed on disk after it last read
-   * it ("file modified since") — also when readDisk has merged that change into the document, which
-   * it always has right before: then the document is exactly what belongs on disk. It is written
-   * directly, and `resync` brings VS Code's copy of the file up to date (reverting its editor to the
-   * file, which now holds the same text) so that it no longer shows the document as modified.
-   * Resolves to how it was saved; throws when it could not be.
+   * Save the TextDocument, merged with what changed on disk. Resolves to how it was saved:
+   * 'merged' when the file had changed (saveOver), 'merged-dirty' when the merged text is on disk
+   * but VS Code still marks the document as modified; throws when the file could not be written.
    */
-  save(resync?: (target: DocSession) => Promise<boolean>): Promise<'saved' | 'clean' | 'merged' | 'merged-dirty'> {
+  save(): Promise<'saved' | 'clean' | 'merged' | 'merged-dirty'> {
     return this.enqueue(async () => {
       await this.readDisk();
       if (!this.document.isDirty) return 'clean';
-      if (await this.document.save()) return 'saved';
+      // (behind, VS Code would refuse it — and say so in a notification — before saveOver gets to it)
+      if (!this.behind && await this.document.save()) return 'saved';
       await this.readDisk();   // whatever arrived since is in the document too
-      const text = this.document.getText();
-      const file = this.document.uri.fsPath;
-      const tmp = `${file}.overlyx-tmp`;
-      try { fs.writeFileSync(tmp, text); fs.renameSync(tmp, file); }
-      catch (e) { try { fs.rmSync(tmp, { force: true }); } catch { /* ignore */ } throw new Error(`the file could not be written (${(e as Error).message})`); }
-      this.diskText = text;
-      const clean = await resync?.(this).catch(() => false) ?? false;
-      return clean && !this.document.isDirty ? 'merged' : 'merged-dirty';
+      if (!await this.saveOver()) return 'merged-dirty';
+      this.behind = false;
+      return 'merged';
     });
   }
 
   /**
-   * A document `save` wrote past a conflict while its editor was not the active one (resync left
-   * it marked as modified): reverted now, when it still holds exactly the file's text — typed since,
-   * it is left for its next save. Resolves to whether it is clean.
+   * VS Code refuses to save a document whose file changed after it last read it ("file modified
+   * since", with a notification offering Compare / Overwrite) — also when readDisk has merged that
+   * change into the document, which it always has right before: the document is then exactly what
+   * belongs on disk. But VS Code does not refuse a save when the file already holds exactly what it
+   * is about to write. So the text is written to the file first, and VS Code's own save then goes
+   * through: VS Code takes the file as its own again and no longer shows the document as modified,
+   * whichever editor is in front (checked in VS Code 1.146: no conflict, no notification).
+   * VS Code compares the contents only for a text it hands over in at most three chunks of 64 KB or
+   * more (190,000 characters at least): for a longer one, the file's time is set back for the moment
+   * of the save — to before VS Code read it, which its check passes as well.
+   *
+   * It used to revert the document's editor instead. VS Code reverts only the active editor, so
+   * this revealed the panel or opened the document's text first: with Codex or Claude Code editing
+   * the files beside the user (each of their tracked edits is saved at once), the window jumped to the
+   * OverLyX panel and files opened and closed by themselves (17 Nov 2026).
    */
-  settle(resync: (target: DocSession) => Promise<boolean>): Promise<boolean> {
-    return this.enqueue(async () => {
-      if (!this.document.isDirty) return true;
-      if (this.document.isClosed || this.document.getText() !== this.readFile()) return false;
-      return await resync(this).catch(() => false) && !this.document.isDirty;
-    });
+  private async saveOver(): Promise<boolean> {
+    const file = this.document.uri.fsPath;
+    const text = this.document.getText();
+    const tmp = `${file}.overlyx-tmp`;
+    try { fs.writeFileSync(tmp, text); fs.renameSync(tmp, file); }
+    catch (e) { try { fs.rmSync(tmp, { force: true }); } catch { /* ignore */ } throw new Error(`the file could not be written (${(e as Error).message})`); }
+    this.diskText = text;
+    if (await this.document.save()) return true;
+    let stat: fs.Stats;
+    try { stat = fs.statSync(file); fs.utimesSync(file, stat.atime, new Date(0)); } catch { return false; }
+    try { return await this.document.save(); }
+    // (not saved after all: the file gets its time back)
+    finally { try { if (fs.statSync(file).mtimeMs < 1000) fs.utimesSync(file, stat.atime, stat.mtime); } catch { /* ignore */ } }
   }
 
   meta(): Record<string, unknown> {

@@ -3709,17 +3709,22 @@ browser's undo from `webview/editorMain.tsx` (VS Code's webview script cancels i
 **A save racing an outside write.** When the file changes on disk while the document has unsaved
 edits, the host merges the change into the document (`readDisk`; the unsaved text is kept as a draft
 in the extension's `recovery` folder first), but VS Code still holds the older file as "saved" and
-refuses its own save (*file modified since*). That refusal used to be logged to the console only:
-the user believed the file was saved, and the edit never reached the disk. `DocSession.save` now
-writes the merged text itself and reverts the document's editor to the file — which then holds the
-same text — so nothing is left modified (`resync` in `host/editorProvider.ts`; the revert runs only
-while that editor is verifiably the active one), with a status-bar note. `resync` never reveals the
-panel or opens the document's text to get there: it used to, and with Codex or Claude Code editing
-the files beside the user (every save after a change on disk takes this path, the agents' tracked
-edits included) the window jumped to the OverLyX panel and documents of the combined view opened and
-closed by themselves (17 Nov 2026). An editor in the background stays marked as modified and is
-reverted when it is active again (`settle`), if it still holds exactly the file's text; a save that still fails, or
-an edit the host could not write into the document, is shown as an error with *Retry* / *Save now*.
+refuses its own save (*file modified since*, with a notification offering Compare / Overwrite).
+That refusal used to be logged to the console only: the user believed the file was saved, and the
+edit never reached the disk. `DocSession.saveOver` writes the merged text to the file first and then
+lets VS Code save the document: VS Code does not count a save as a conflict when the file already
+holds exactly what it writes, so its save goes through, the notification closes and nothing is left
+modified, whichever editor is in front. VS Code compares the contents only for a text it hands over
+in at most three chunks of 64 KB or more (190,000 characters at least); for a longer document the
+file's time is set back to 1970 for the moment of the save, which VS Code's check passes as well.
+Where the host knows VS Code is behind the file (a change on disk arrived while the document had
+unsaved edits, or VS Code missed it: `DocSession.behind`), the first save takes this path straight
+away, so VS Code shows no notification (for a longer document, only for a moment). Before (until 17 Nov 2026) the host reverted the document's
+editor to the file — VS Code reverts only the active editor, so it revealed the OverLyX panel or
+opened the document's text first: with Codex or Claude Code editing the files beside the user (each
+of their tracked edits is saved at once) the window jumped to the panel and files of the combined
+view opened and closed by themselves. A save that still fails, or an edit the host could not write
+into the document, is shown as an error with *Retry* / *Save now*.
 The integration test (`test/suite/index.cjs`, step 4b) races both the host's save and the webview's.
 
 **Opening a document quickly.** Between "open" and "the text is there" the host and the webview

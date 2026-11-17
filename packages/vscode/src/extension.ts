@@ -135,7 +135,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
       docId: session.docId, absPath: target.absPath, header: target.header, latexmk, texInputs: target.texInputs,
       prepare: async () => {
         // the .tex file on disk is what latexmk compiles: write the editor's state first
-        await session.save(e.resync);
+        await session.save();
         return saveBuildInputs(e);
       },
     });

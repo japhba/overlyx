@@ -76,7 +76,7 @@ exports.run = async function run() {
 
   // 4b. a save racing an outside write of the dirty file (sim vscode.md P1): VS Code refuses its own
   // save ("file modified since") although the change on disk is merged into the document; the save
-  // writes the merged text, VS Code's copy is brought up to date, nothing is left modified
+  // writes the merged text, VS Code's own save then goes through, nothing is left modified
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const race = async (mark, outside) => {
     await entry.session.applySource(entry.session.document.getText().replace('are studied', 'are studied ' + mark));
@@ -86,7 +86,7 @@ exports.run = async function run() {
   };
   await race('RACE-ONE', 'Outside paragraph one.');
   assert.strictEqual(await entry.session.document.save(), false, 'VS Code refuses the plain save (the precondition of the bug)');
-  assert.strictEqual(await entry.session.save(entry.resync), 'merged');
+  assert.strictEqual(await entry.session.save(), 'merged');
   let disk = fs.readFileSync(p, 'utf8');
   assert.ok(disk.includes('RACE-ONE') && disk.includes('Outside paragraph one.'), 'both the edit and the outside change are on disk: ' + disk);
   assert.ok(!entry.session.document.isDirty, 'nothing is left modified');
