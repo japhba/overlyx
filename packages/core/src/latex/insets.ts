@@ -928,6 +928,7 @@ function latexSpace(ctx: ExportContext, os: TexStream, rp: RunParams, inset: Lea
     '\\dotfill{}': '\\dotfill{}', '\\hrulefill{}': '\\hrulefill{}', '\\leftarrowfill{}': '\\leftarrowfill{}',
     '\\rightarrowfill{}': '\\rightarrowfill{}', '\\upbracefill{}': '\\upbracefill{}', '\\downbracefill{}': '\\downbracefill{}',
     '\\hspace{}': free ? ' ' : `\\hspace{${len}}`, '\\hspace*{}': free ? ' ' : `\\hspace*{${len}}`,
+    '\\newblock{}': '\\newblock{}',
   };
   if (arg === '\\medspace{}' || arg === '\\thickspace{}' || arg === '\\negmedspace{}' || arg === '\\negthickspace{}') ctx.features.require('amsmath');
   const out = map[arg];

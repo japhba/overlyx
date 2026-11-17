@@ -112,6 +112,7 @@ const SPACE_CMDS: Record<string, string> = {
   negthickspace: '\\negthickspace{}', quad: '\\quad{}', qquad: '\\qquad{}', enspace: '\\enspace{}', enskip: '\\enskip{}', hfill: '\\hfill{}',
   dotfill: '\\dotfill{}', hrulefill: '\\hrulefill{}', leftarrowfill: '\\leftarrowfill{}', rightarrowfill: '\\rightarrowfill{}',
   upbracefill: '\\upbracefill{}', downbracefill: '\\downbracefill{}', nobreakspace: '\\nobreakspace{}', textvisiblespace: '\\textvisiblespace{}',
+  newblock: '\\newblock{}',
 };
 const SPECIAL_CMDS: Record<string, string> = {
   ldots: 'ldots', dots: 'ldots', LyX: 'LyX', TeX: 'TeX', LaTeX: 'LaTeX', LaTeXe: 'LaTeX2e', slash: 'breakableslash',

@@ -358,6 +358,8 @@ const nodes: Record<string, NodeSpec> = {
       if (/^\\hspace\*?\{\}$/.test(node.attrs.kind)) {
         try { const l = (JSON.parse(node.attrs.params) as string[]).find(p => p.startsWith('\\length ')); if (l) { a.style = 'width:' + cssLength(l.slice(8).trim()); a.title += ' ' + l.slice(8).trim(); } } catch { /* ignore */ }
       }
+      // Standard bibliography block separator: .11em of stretchable glue in LaTeX.
+      if (node.attrs.kind === '\\newblock{}') a.style = 'display:inline-block;width:0.11em';
       return ['span', a, spaceChar(node.attrs.kind)];
     },
     parseDOM: [{ tag: 'span.lyx-space', getAttrs: (d: HTMLElement) => ({ kind: attr(d, 'data-kind', '~'), params: jsonFrom(d, 'data-params', '[]') }) }],
