@@ -97,7 +97,11 @@ blend.
   does not move), or highlighted in the margin column (*View ▸ Notes & comments in the margin*,
   Google-Docs style). A click on the chip opens the thread at its last message; Escape or Ctrl+Enter
   go back to the text; a message of one's own left empty (a reply just started, a new comment nothing
-  was written into) goes when the cursor leaves the thread. Resolving puts the cursor back after the
+  was written into) goes when the cursor leaves the thread. A new comment is a **draft** until the
+  cursor leaves it (`markCommentDraft` in `insertComment`, class `cm-draft`): its card has *Cancel* ·
+  *Comment* at the foot, as Google Docs' new comment, and neither the ✓ nor the Reply field — people
+  clicked the ✓ to post what they had written, which resolved it, and the comment left the text
+  (18 Nov 2026). Resolving puts the cursor back after the
   thread's marker (Ctrl+Z undoes it; the Comments panel can reopen it). A thread is a point in the text
   (`%% @comment` has no range): commenting on selected text keeps the text and anchors the thread
   right after it (`editor/commands.ts insertComment`).
@@ -3294,7 +3298,10 @@ blend.
   even with the panel open, so the next request runs the new one.
   **Agents from elsewhere** (`app/ExternalAgents.tsx`, see *MCP connector*): the account's agents
   connected over MCP — Claude Code, Codex, ChatGPT — get tabs of their own at the top of the panel
-  (the Agent tab appears when AI assistance is on *or* the account has such agents): status
+  while they are connected or hold a message not yet picked up (`panelAgents`; since 18 Nov 2026 —
+  every sign-in ever used, and hooks that only call tools, had left a row of dead tabs; a client
+  that is no known agent and never listened has `talks: false`) (the Agent tab appears when AI
+  assistance is on *or* such an agent is there): status
   (listening / working / connected / offline, the project and document it last worked in, whether
   messages reach it pushed), the conversation, a composer that sends the document and the
   selection along (the same context as a Codex turn), "take back" for a message it has not picked

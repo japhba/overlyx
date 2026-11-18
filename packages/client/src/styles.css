@@ -883,6 +883,15 @@ html[data-theme="dark"] { --cm-accent: #f4c03c; --cm-chip-bg: #8a6b12; --cm-chip
 .lyx-inset-note-comment > .inset-box .inset-action[data-act="reply"]::after { content: "…"; }
 .lyx-inset-note-comment > .inset-box .inset-action[data-act="reply"]:hover { border-color: var(--cm-accent); color: var(--ui-fg); }
 .lyx-inset-note-comment.cm-active > .inset-box .inset-action[data-act="reply"] { display: block; }
+/* a comment being written (cm-draft, plugins/commentui.ts): Cancel · Comment at its foot, as a new
+   comment in Google Docs — no ✓ (it resolved what had just been written) and no Reply field */
+.lyx-inset-note-comment > .inset-box .cm-draft-actions { display: none; }
+.lyx-inset-note-comment.cm-draft > .inset-box .cm-draft-actions { order: 3; display: flex; justify-content: flex-end; gap: 6px; margin-top: 10px; }
+.lyx-inset-note-comment.cm-draft > .inset-box .inset-action[data-act="resolve"], .lyx-inset-note-comment.cm-draft > .inset-box .inset-action[data-act="reply"] { display: none !important; }
+.lyx-inset-note-comment > .inset-box .cm-draft-actions > .inset-action { height: 26px; padding: 0 12px; border: 1px solid var(--cm-line); border-radius: 13px; background: var(--page-bg); color: var(--ui-fg); font: 600 12px/24px var(--ui-font); cursor: pointer; }
+.lyx-inset-note-comment > .inset-box .cm-draft-actions > .inset-action[data-act="cancel"]:hover { border-color: var(--ui-muted); }
+.lyx-inset-note-comment > .inset-box .cm-draft-actions > .inset-action[data-act="post"] { border-color: var(--cm-accent); background: var(--cm-chip-bg); color: var(--cm-chip-fg); }
+.lyx-inset-note-comment > .inset-box .cm-draft-actions > .inset-action[data-act="post"]:hover { filter: brightness(1.05); box-shadow: 0 0 0 2px color-mix(in srgb, var(--cm-accent) 35%, transparent); }
 /* in the text: only the chip, the card opens as a popover while the cursor is in the thread */
 .editor-host:not(.margin-mode) .lyx-inset-note-comment:not(.cm-active) > .inset-box { display: none; }
 .editor-host:not(.margin-mode) .lyx-inset-note-comment.cm-active > .inset-box { position: absolute; z-index: 20; width: 340px; max-width: none; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08), 0 14px 36px -10px rgba(0, 0, 0, 0.3); }

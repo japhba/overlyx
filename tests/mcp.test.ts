@@ -1052,6 +1052,20 @@ describe('messages from OverLyX to an agent elsewhere', () => {
     expect((await callToolAt(allBase, t2, 'wait_for_instructions', { timeout_seconds: 1 })).messages.map((x: any) => x.message_id)).toEqual([m.id]);
   });
 
+  it('a hook that only calls tools is no one to write to in the Agent panel; Codex is', async () => {
+    const hana = createUser('hana', 'Hana', 'pw');
+    const hook = createMcpToken(hana.id, 'Notes hook').token;
+    await initialize(hook, 'notes-hook', allBase);
+    const bot = createMcpToken(hana.id, 'Laptop').token;
+    await initialize(bot, 'codex-mcp-client', allBase);
+    const list = listAgents(hana.id);
+    expect(list.find(a => a.id === agentIdOf(hook))?.talks).toBe(false);
+    expect(list.find(a => a.id === agentIdOf(bot))?.talks).toBe(true);
+    // once it listens it is
+    await callToolAt(allBase, hook, 'wait_for_instructions', { timeout_seconds: 1 });
+    expect(listAgents(hana.id).find(a => a.id === agentIdOf(hook))?.talks).toBe(true);
+  });
+
   it('a view-only account\'s agent listens and replies, and still cannot edit', async () => {
     const vera = db.prepare("SELECT id FROM users WHERE username = 'vera'").get() as { id: number };
     const t = createMcpToken(vera.id, 'Vera bot').token;

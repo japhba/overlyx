@@ -378,6 +378,9 @@ export interface PublicAgent {
   /** pushed messages: 'confirmed' (its channel has delivered), 'possible' (a session stream is open), null */
   push: 'confirmed' | 'possible' | null;
   queued: number;
+  /** one can write to it: an agent (Claude Code, Codex …), or a client that has listened or has a
+   * conversation — not a script or hook that only calls tools (a meeting-notes hook, overlyx mcp status) */
+  talks: boolean;
 }
 
 const ONLINE_MS = 3 * 60_000;
@@ -387,7 +390,7 @@ export function publicAgent(row: AgentRow): PublicAgent {
   const streams = [...pushers.values()].filter(p => p.agentId === row.id && p.streamOpen());
   const push = streams.some(p => sessionRow(p.sessionId)?.channel_ok === 1) ? 'confirmed' : streams.length ? 'possible' : null;
   const polling = !!waiters.get(row.id)?.length || now - (lastPollEnd.get(row.id) ?? 0) < 20_000;
-  const counts = db.prepare("SELECT SUM(state = 'queued') AS queued, SUM(state = 'delivered') AS open FROM mcp_agent_messages WHERE agent_id = ? AND role = 'user'").get(row.id) as { queued: number | null; open: number | null };
+  const counts = db.prepare("SELECT SUM(state = 'queued') AS queued, SUM(state = 'delivered') AS open, COUNT(*) AS total FROM mcp_agent_messages WHERE agent_id = ? AND role = 'user'").get(row.id) as { queued: number | null; open: number | null; total: number };
   const status = (counts.open ?? 0) > 0 && now - row.last_seen_at < 60 * 60_000 ? 'working'
     : polling || push === 'confirmed' ? 'listening'
     : now - row.last_seen_at < ONLINE_MS || streams.length ? 'online' : 'offline';
@@ -396,6 +399,7 @@ export function publicAgent(row: AgentRow): PublicAgent {
     client: { name: row.client_name, version: row.client_version }, token: tokenLabel(row),
     lastSeen: row.last_seen_at, project: row.last_project, path: row.last_path, lastTool: row.last_tool,
     status, push, queued: counts.queued ?? 0,
+    talks: Object.hasOwn(CLIENT_TITLES, row.client_name) || polling || streams.length > 0 || counts.total > 0,
   };
 }
 

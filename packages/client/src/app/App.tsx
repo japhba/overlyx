@@ -56,6 +56,7 @@ import { Outline, buildOutline, type OutlineItem } from './Outline';
 import { Comments } from './Comments';
 import { HistoryPanel } from './history/HistoryPanel';
 import { AgentPanel, askAgentAbout } from './AgentPanel';
+import { panelAgents } from './ExternalAgents';
 import { inlineModelLabel } from './AgentModelPicker';
 import { PdfPanel, stateFromBuild, jobActive, EMPTY_PDF, type PdfState } from './PdfPanel';
 import { E2eKeyHost } from './E2eKeys';
@@ -657,7 +658,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     if (user?.guest) return;
     let last = 0;
     // again when the page comes back to the front (an agent was just started in a terminal)
-    const check = () => { if (Date.now() - last < 5000 || document.hidden) return; last = Date.now(); api.externalAgents().then(r => setHasExternalAgents(r.agents.length > 0)).catch(() => { /* none */ }); };
+    const check = () => { if (Date.now() - last < 5000 || document.hidden) return; last = Date.now(); api.externalAgents().then(r => setHasExternalAgents(panelAgents(r.agents).length > 0)).catch(() => { /* none */ }); };
     check();
     window.addEventListener('focus', check);
     document.addEventListener('visibilitychange', check);

@@ -27,6 +27,16 @@ export function ago(t: number): string {
 type MessageListener = (agentId: number, m: ExternalAgentMessage) => void;
 
 /**
+ * The agents the panel offers: those connected now, or holding a message of yours not yet picked up.
+ * An agent that went away keeps its row on the server (it comes back when it connects again), but a
+ * tab for every Claude Code / Codex sign-in ever used — and for hooks that only call tools — made
+ * the panel a row of dead ends (18 Nov 2026).
+ */
+export function panelAgents(agents: ExternalAgent[]): ExternalAgent[] {
+  return agents.filter(a => a.talks !== false && (a.status !== 'offline' || a.queued > 0));
+}
+
+/**
  * The account's agents from elsewhere, live: the list (status, last seen) and a way to hear about
  * messages as they are added or change. After the stream dropped (sleep, a deploy) it reloads;
  * `resync` counts those reconnects so a conversation view can reload too.

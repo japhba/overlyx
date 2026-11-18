@@ -9,6 +9,7 @@ import { insetLabel, argumentLabel } from '../layouts';
 import { parseHeader } from '@overlyx/core';
 import { editorContext } from '../context';
 import { toggleCommentResolved, replyToThread } from '../commentops';
+import { commentDraft, leaveThread } from '../plugins/commentui';
 import { recordInteraction } from '../../usage';
 import { footnoteJump } from '../plugins/mdfootnotes';
 import type { InteractionAction, InteractionOutcome } from '@overlyx/core/interactions.ts';
@@ -150,6 +151,19 @@ export class InsetView implements NodeView {
       resolve.setAttribute('aria-label', resolve.textContent);
       resolve.addEventListener('mousedown', (ev) => { ev.preventDefault(); this.toggleResolved(); });
       this.actions.append(reply, resolve);
+      if (!h?.resolved) {
+        // a comment being written (cm-draft, plugins/commentui.ts): Cancel · Comment at its foot instead of the ✓ and the Reply field
+        const draft = document.createElement('span');
+        draft.className = 'cm-draft-actions';
+        const cancel = document.createElement('button');
+        cancel.type = 'button'; cancel.className = 'inset-action'; cancel.dataset.act = 'cancel'; cancel.textContent = 'Cancel'; cancel.title = 'Remove this comment (Ctrl+Z brings it back)';
+        cancel.addEventListener('mousedown', (ev) => { ev.preventDefault(); this.cancelDraft(); });
+        const post = document.createElement('button');
+        post.type = 'button'; post.className = 'inset-action'; post.dataset.act = 'post'; post.textContent = 'Comment'; post.title = 'Done: back to the text, the comment stays (Ctrl+Enter)';
+        post.addEventListener('mousedown', (ev) => { ev.preventDefault(); const pos = this.getPos(); if (pos !== undefined) { leaveThread(this.view, pos); this.view.focus(); } });
+        draft.append(cancel, post);
+        this.actions.append(draft);
+      }
     }
     // the field at the card's foot writes the first message while it is empty, replies after that
     const replyBtn = this.actions.querySelector<HTMLElement>('[data-act="reply"]');
@@ -200,6 +214,16 @@ export class InsetView implements NodeView {
     if (!done) return;
     this.view.focus();
     this.recordAction('comment-reply', done);
+  }
+
+  /** the draft's Cancel: the comment being written goes (only that one — a thread with replies is never a draft) */
+  cancelDraft() {
+    const pos = this.getPos();
+    if (pos === undefined || commentDraft(this.view.state) !== pos) return;
+    const cur = this.view.state.doc.nodeAt(pos);
+    if (!cur) return;
+    this.view.dispatch(this.view.state.tr.delete(pos, pos + cur.nodeSize).scrollIntoView());
+    this.view.focus();
   }
 
   toggleResolved() {

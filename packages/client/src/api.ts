@@ -199,6 +199,8 @@ export interface ExternalAgent {
   /** pushed messages (Claude Code channels): 'confirmed' once its channel delivered, 'possible' while a session stream is open */
   push: 'confirmed' | 'possible' | null;
   queued: number;
+  /** one can write to it (an agent, not a script or hook that only calls tools); older servers: absent */
+  talks?: boolean;
 }
 /** one message between the owner and an external agent: role 'user' from OverLyX, 'agent' its reply */
 export interface ExternalAgentMessage {

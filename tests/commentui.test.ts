@@ -8,7 +8,7 @@ import { EditorState, TextSelection, type Transaction } from 'prosemirror-state'
 import type { Node as PMNode } from 'prosemirror-model';
 import { schema } from '../packages/core/src/schema.ts';
 import { commentHeader } from '../packages/core/src/index.ts';
-import { commentUiPlugin, emptyTail, threadAt, hiddenThreadsPlugin } from '../packages/client/src/editor/plugins/commentui.ts';
+import { commentUiPlugin, emptyTail, threadAt, hiddenThreadsPlugin, markCommentDraft, commentDraft } from '../packages/client/src/editor/plugins/commentui.ts';
 import { editorContext } from '../packages/client/src/editor/context.ts';
 import { setPref } from '../packages/client/src/prefs.ts';
 
@@ -68,6 +68,23 @@ describe('the plugin', () => {
     const a = state.apply(state.tr.setSelection(TextSelection.create(state.doc, start + node.nodeSize - 2)));
     const b = a.applyTransaction(a.tr.setSelection(TextSelection.create(a.doc, start + 3))).state;
     expect(b.doc.nodeAt(start)?.type.name).toBe('inset');
+  });
+  it('a new comment is a draft (Comment / Cancel, no ✓) while it is written, a posted one once the cursor left', () => {
+    const { state, start, node } = setup(thread(header('Ada'), plain()));
+    const cls = (s: EditorState) => (commentUiPlugin().props.decorations!.call(null as never, s) as { find(): { type: { attrs: { class: string } } }[] } | null)?.find()[0]?.type.attrs.class;
+    let s = state.apply(markCommentDraft(state.tr.setSelection(TextSelection.create(state.doc, start + node.nodeSize - 2))));
+    expect(commentDraft(s)).toBe(start);
+    expect(cls(s)).toBe('cm-active cm-draft');
+    // typing the message (text before the thread moves it) keeps the draft
+    s = s.apply(s.tr.insertText('check'));
+    s = s.apply(s.tr.insertText('Well. ', 1));
+    expect(commentDraft(s)).toBe(start + 6);
+    // the cursor left: posted — back in it, the card has the ✓ again
+    s = s.applyTransaction(s.tr.setSelection(TextSelection.create(s.doc, 2))).state;
+    expect(commentDraft(s)).toBeNull();
+    s = s.apply(s.tr.setSelection(TextSelection.create(s.doc, start + 6 + 3)));
+    expect(cls(s)).toBe('cm-active');
+    expect(commentDraft(s)).toBeNull();
   });
 });
 

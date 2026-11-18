@@ -12,7 +12,7 @@
  */
 import type { Node as PMNode } from 'prosemirror-model';
 import { NodeSelection, Plugin, PluginKey, TextSelection, type EditorState, type Transaction } from 'prosemirror-state';
-import { Decoration, DecorationSet } from 'prosemirror-view';
+import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
 import { parseHeader } from '@overlyx/core';
 import { isCommentNode, replyToThread } from '../commentops';
 import { othersMessages } from './commentguard';
@@ -60,13 +60,41 @@ export function emptyTail(node: PMNode, me: string): { from: number; to: number 
   return { from: 1 + paras[last].offset, to: node.content.size + 1 };
 }
 
+/**
+ * A comment being written for the first time (commands.ts insertComment marks it) is a draft until
+ * the cursor leaves it: its card then offers Comment / Cancel, as Google Docs' new comment does,
+ * not the ✓ that resolves a thread. People wrote a comment and clicked the ✓ to post it — the
+ * comment was resolved and left the text at once ("comments do not show", 18 Nov 2026).
+ */
+export const markCommentDraft = (tr: Transaction): Transaction => tr.setMeta(commentUiKey, 'draft');
+/** the position of the thread being written as a draft, or null */
+export const commentDraft = (state: EditorState): number | null => commentUiKey.getState(state) ?? null;
+
+/** The thread at `pos` done with: the cursor goes back into the text, right after its marker (Ctrl+Enter, the draft's Comment). */
+export function leaveThread(view: EditorView, pos: number): void {
+  const node = view.state.doc.nodeAt(pos);
+  if (!node) return;
+  view.dispatch(view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(pos + node.nodeSize))).scrollIntoView());
+}
+
 export function commentUiPlugin(): Plugin {
-  return new Plugin({
+  return new Plugin<number | null>({
     key: commentUiKey,
+    state: {
+      init: () => null,
+      apply(tr, draft, _old, state) {
+        if (tr.getMeta(commentUiKey) === 'draft') return activeThread(state)?.pos ?? null;
+        if (draft === null) return null;
+        // a remote update may replace the whole document: the thread the cursor is still in is the draft
+        if (tr.getMeta('y-sync$')) return activeThread(state)?.pos ?? null;
+        const r = tr.mapping.mapResult(draft, 1);
+        return !r.deleted && activeThread(state)?.pos === r.pos ? r.pos : null;
+      },
+    },
     props: {
       decorations(state) {
         const t = activeThread(state);
-        return t ? DecorationSet.create(state.doc, [Decoration.node(t.pos, t.pos + t.node.nodeSize, { class: 'cm-active' })]) : null;
+        return t ? DecorationSet.create(state.doc, [Decoration.node(t.pos, t.pos + t.node.nodeSize, { class: commentDraft(state) === t.pos ? 'cm-active cm-draft' : 'cm-active' })]) : null;
       },
       handleKeyDown(view, ev) {
         const sel = selectedThread(view.state);
@@ -82,7 +110,7 @@ export function commentUiPlugin(): Plugin {
         const t = activeThread(view.state);
         if (!t) return false;
         // Ctrl+Enter: done — back into the text, right after the thread's marker
-        view.dispatch(view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(t.pos + t.node.nodeSize))).scrollIntoView());
+        leaveThread(view, t.pos);
         return true;
       },
       // typing into a selected thread is a reply (not the thread replaced by the letter)

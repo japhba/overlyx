@@ -24,7 +24,7 @@ import { editorContext } from '../editor/context';
 import { bibRefs, type BibRef } from './bibrefs';
 import { RichText, transcriptCopy } from './agentText';
 import { uiConfirm } from './Dialogs';
-import { useExternalAgents, ExternalAgentView, AgentChip, NoExternalAgents, ago } from './ExternalAgents';
+import { useExternalAgents, panelAgents, ExternalAgentView, AgentChip, NoExternalAgents, ago } from './ExternalAgents';
 
 interface Approval { requestId: string; method: string; params: any }
 
@@ -738,6 +738,7 @@ export function askAgentAbout(): void {
  */
 export function AgentPanel({ project, notify, codex }: { project: string; notify: (msg: string, kind?: 'info' | 'error') => void; codex: boolean }) {
   const ext = useExternalAgents();
+  const agents = panelAgents(ext.agents);
   const [which, setWhich] = useState<string>(() => stored('ol.agent.which') ?? '');
   const [pinned, setPinned] = useState<AgentTurnContext | null>(null);
   const [focusKey, setFocusKey] = useState(0);
@@ -748,16 +749,16 @@ export function AgentPanel({ project, notify, codex }: { project: string; notify
     return () => window.removeEventListener(PIN_EVENT, take);
   }, []);
   const choose = (w: string) => { setWhich(w); store('ol.agent.which', w); };
-  const current = which.startsWith('ext:') ? ext.agents.find(a => `ext:${a.id}` === which) ?? null : null;
+  const current = which.startsWith('ext:') ? agents.find(a => `ext:${a.id}` === which) ?? null : null;
   // nothing chosen (or the choice is gone): the embedded agent, else the agent from elsewhere seen last
-  const shown = current ? which : codex ? 'codex' : ext.agents[0] ? `ext:${ext.agents[0].id}` : '';
-  const agent = shown.startsWith('ext:') ? ext.agents.find(a => `ext:${a.id}` === shown) ?? null : null;
+  const shown = current ? which : codex ? 'codex' : agents[0] ? `ext:${agents[0].id}` : '';
+  const agent = shown.startsWith('ext:') ? agents.find(a => `ext:${a.id}` === shown) ?? null : null;
   return (
     <div class="agent-wrap">
-      {ext.agents.length > 0 && (
+      {agents.length > 0 && (
         <div class="agent-switch" role="tablist">
           {codex && <button role="tab" class={shown === 'codex' ? 'active' : ''} data-agent-tab="codex" title="The agent built into OverLyX: Codex or Claude Code on this server, with your ChatGPT sign-in or your API keys" onClick={() => choose('codex')}>Built-in agent</button>}
-          {ext.agents.map(a => (
+          {agents.map(a => (
             <button key={a.id} role="tab" class={shown === `ext:${a.id}` ? 'active' : ''} data-agent-tab={`ext:${a.id}`} title={`${a.label} — ${a.status === 'offline' ? 'last seen ' + ago(a.lastSeen) : a.status}`} onClick={() => choose(`ext:${a.id}`)}>
               <AgentChip a={a} />
             </button>

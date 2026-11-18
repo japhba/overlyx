@@ -15,6 +15,7 @@ import { setValueMarkIn } from './fontsize';
 import { isLayoutDoc, pageAt } from './layout/commands';
 import { placeImage } from './layout/images';
 import { listUnitAt, childPos } from './listmove';
+import { markCommentDraft } from './plugins/commentui';
 
 /* ------------------------------------------------------------ paragraphs */
 
@@ -669,7 +670,8 @@ export const insertComment: Command = (state, dispatch) => {
   placeInset(tr, node);
   // the cursor sits at the end of the header paragraph: +1 closes it, +1 opens the body paragraph
   const pos = tr.selection.from + 2;
-  dispatch(tr.setSelection(TextSelection.near(tr.doc.resolve(Math.min(pos, tr.doc.content.size)))).scrollIntoView());
+  // a draft until the cursor leaves it: its card offers Comment / Cancel, not the ✓ (plugins/commentui.ts)
+  dispatch(markCommentDraft(tr.setSelection(TextSelection.near(tr.doc.resolve(Math.min(pos, tr.doc.content.size))))).scrollIntoView());
   return true;
 };
 
