@@ -428,4 +428,25 @@ if (a[0] === 'mcp' && a[1] === 'remove') process.exit(1);
     expect(reg.launcherCommand('/snap/code/187/usr/share/code/code', launcher).command).toBe('/snap/code/current/usr/share/code/code');
     expect(reg.launcherCommand('/usr/share/code/code', launcher)).toEqual({ command: '/usr/share/code/code', args: [launcher], env: { ELECTRON_RUN_AS_NODE: '1' } });
   });
+
+  it('on macOS the app\'s main program runs the launcher (Code since VS Code renamed Electron), never the extension host\'s helper', () => {
+    const app = path.join(ROOT, 'Visual Studio Code.app', 'Contents');
+    const appRoot = path.join(app, 'Resources', 'app');
+    const helper = path.join(app, 'Frameworks', 'Code Helper (Plugin).app', 'Contents', 'MacOS', 'Code Helper (Plugin)');
+    fs.mkdirSync(appRoot, { recursive: true }); fs.mkdirSync(path.join(app, 'MacOS'), { recursive: true });
+    const mac = (root = appRoot) => reg.launcherCommand(helper, '/storage/agents/overlyx-local.cjs', root, 'darwin').command;
+    // nothing to run Node with: no registration rather than the helper (which made VS Code open the launcher)
+    expect(() => mac()).toThrow(/not found/);
+    // VS Code until early 2026: MacOS/Electron
+    fs.writeFileSync(path.join(app, 'MacOS', 'Electron'), '');
+    expect(mac()).toBe(path.join(app, 'MacOS', 'Electron'));
+    // renamed after the product (product.json's nameShort; Info.plist's CFBundleExecutable first)
+    fs.rmSync(path.join(app, 'MacOS', 'Electron'));
+    fs.writeFileSync(path.join(app, 'MacOS', 'Code'), '');
+    fs.writeFileSync(path.join(appRoot, 'product.json'), JSON.stringify({ nameShort: 'Code' }));
+    expect(mac()).toBe(path.join(app, 'MacOS', 'Code'));
+    fs.writeFileSync(path.join(app, 'MacOS', 'Code - Insiders'), '');
+    fs.writeFileSync(path.join(app, 'Info.plist'), '<?xml version="1.0"?>\n<plist><dict>\n\t<key>CFBundleExecutable</key>\n\t<string>Code - Insiders</string>\n</dict></plist>\n');
+    expect(mac()).toBe(path.join(app, 'MacOS', 'Code - Insiders'));
+  });
 });

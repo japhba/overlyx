@@ -74,16 +74,39 @@ function writeIfChanged(file: string, text: string): void {
   fs.renameSync(tmp, file);
 }
 
+const isFile = (f: string): boolean => { try { return fs.statSync(f).isFile(); } catch { return false; } };
+
+/**
+ * The app's main program on macOS (`Contents/MacOS/…`, `appRoot` being `Contents/Resources/app`):
+ * Info.plist's CFBundleExecutable — VS Code named it `Electron` until early 2026, then after the
+ * product (`Code`, `Code - Insiders`: product.json's nameShort) and soon dropped the `Electron` link.
+ */
+export function macMainExecutable(appRoot: string): string | null {
+  const contents = path.resolve(appRoot, '..', '..');
+  const names: string[] = [];
+  try { const m = /<key>CFBundleExecutable<\/key>\s*<string>([^<]+)<\/string>/.exec(fs.readFileSync(path.join(contents, 'Info.plist'), 'utf8')); if (m) names.push(m[1].trim()); } catch { /* none, or a binary plist */ }
+  try { const n = JSON.parse(fs.readFileSync(path.join(appRoot, 'product.json'), 'utf8'))?.nameShort; if (typeof n === 'string') names.push(n); } catch { /* none */ }
+  names.push('Electron');
+  for (const n of names) {
+    const f = path.join(contents, 'MacOS', n);
+    if (n && !n.includes('/') && isFile(f)) return f;
+  }
+  return null;
+}
+
 /**
  * The runtime the agents start the launcher with: VS Code's Electron in Node mode. A Snap's
- * versioned path goes through its `current` link; on macOS the app's main binary, whose Node mode
- * VS Code's own `code` command relies on (execPath is a helper there).
+ * versioned path goes through its `current` link; on macOS the app's main program, whose Node mode
+ * VS Code's own `code` command relies on. Never the extension host's execPath there: that is a
+ * helper app, which ignores ELECTRON_RUN_AS_NODE — started by an agent, it had VS Code open
+ * overlyx-local.cjs as a file (18 Nov 2026, after VS Code renamed `MacOS/Electron` to `MacOS/Code`).
  */
-export function launcherCommand(execPath: string, launcher: string, appRoot?: string): StdioCommand {
+export function launcherCommand(execPath: string, launcher: string, appRoot?: string, platform: NodeJS.Platform = process.platform): StdioCommand {
   let command = execPath.replace(/^\/snap\/([^/]+)\/\d+\//, '/snap/$1/current/');
-  if (process.platform === 'darwin' && appRoot) {
-    const electron = path.resolve(appRoot, '..', '..', 'MacOS', 'Electron');
-    if (fs.existsSync(electron)) command = electron;
+  if (platform === 'darwin' && appRoot) {
+    const main = macMainExecutable(appRoot);
+    if (!main) throw new Error(`VS Code's program was not found in ${path.resolve(appRoot, '..', '..', 'MacOS')}`);
+    command = main;
   }
   return { command, args: [launcher], env: { ELECTRON_RUN_AS_NODE: '1' } };
 }
