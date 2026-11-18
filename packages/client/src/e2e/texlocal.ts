@@ -15,26 +15,12 @@ import { Reader, writeDocument, markModel2 } from '@overlyx/core/collab/index.ts
 import { parseTex, parseTexTitle, writeTex, writeTexPreserving, type ParseTexResult, type PreserveCache } from '@overlyx/core/tex/index.ts';
 import { applyDocumentTheorems, loadDocumentClass, describeLayouts, flexInsetNames, describeModules } from '@overlyx/core/latex/layouts.ts';
 import { isMarkdownPath, MARKDOWN_LAYOUTS, parseMarkdown, writeMarkdown, writeMarkdownPreserving, markdownForLatex } from '@overlyx/core/md/index.ts';
-import { mount, mounted } from './vfs';
+import { LAYOUT_DIR } from './lyxlib';
 import { layoutTemplate } from '@overlyx/core/layout/templates.ts';
 import { setHeaderValue } from '@overlyx/core/lyx/ast.ts';
 import { markEditedSettings } from '@overlyx/core/tex/preamble.ts';
 
-export const LYX_LIB = '/lyx/lib';
-export const LAYOUT_DIR = '/lyx/lib/layouts';
-
-let loading: Promise<void> | null = null;
-/** LyX's library in the virtual file system (once per page). */
-export function ensureLyxLib(): Promise<void> {
-  if (mounted(LAYOUT_DIR)) return Promise.resolve();
-  return loading ??= (async () => {
-    const st = await (await fetch('/api/e2e/status', { credentials: 'same-origin' })).json() as { lyxlib: string };
-    const res = await fetch(`/api/e2e/lyxlib/${encodeURIComponent(st.lyxlib)}`, { credentials: 'same-origin' });
-    if (!res.ok) throw new Error('LyX\'s layout files could not be loaded');
-    const { files } = await res.json() as { files: Record<string, string> };
-    mount(LYX_LIB, files);
-  })().catch(e => { loading = null; throw e; });
-}
+export { LYX_LIB, LAYOUT_DIR, ensureLyxLib } from './lyxlib';
 
 /** What a document's text is read and written with: its place in the project, the project's other text files. */
 export interface TexContext {

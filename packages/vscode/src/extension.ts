@@ -188,6 +188,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
     const DICT_PKG: Record<string, string> = { en: 'dictionary-en', 'en-gb': 'dictionary-en-gb', de: 'dictionary-de', fr: 'dictionary-fr' };
     return {
       usageBatch: value => telemetry.usageBatch(value),
+      lyxlibDir: () => path.dirname(layoutDir()),
       typesetReport: value => telemetry.typeset(value),
       projectRoot: (project) => projectRoots.get(project),
       projects: () => [...projectRoots.entries()].map(([name, root]) => ({ name, files: collectFiles(root) })),

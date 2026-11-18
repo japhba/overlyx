@@ -54,6 +54,8 @@ export interface BridgeDelegate {
   fonts?(method: string, sub: string, search: string, body?: unknown): Promise<{ status: number; type: string; body: Buffer | string; cache?: string }>;
   /** the account's settings from the OverLyX server signed in to (accountprefs.ts): `/api/prefs`, `/api/prefs/account`, `/api/prefs/signin` */
   prefs?(method: string, sub: '' | 'account' | 'signin', body?: unknown): Promise<{ status: number; type: string; body: string }>;
+  /** LyX's lib/ directory (the parent of the layouts): the editor's copy as LaTeX reads it (client e2e/lyxlib.ts) */
+  lyxlibDir?(): string;
 }
 
 const JSON_LIMIT = 32 * 1024 * 1024;
@@ -135,6 +137,16 @@ export class Bridge {
       res.setHeader('Content-Type', r.type);
       res.setHeader('Cache-Control', 'no-store');
       res.end(r.body);
+      return;
+    }
+
+    // LyX's library for the editor's LaTeX writer (copying a selection as LaTeX), as the server's /api/e2e/lyxlib
+    if ((api === '/e2e/status' || api.startsWith('/e2e/lyxlib/')) && d.lyxlibDir) {
+      const b = lyxlibBundle(d.lyxlibDir());
+      if (api === '/e2e/status') { send(res, 200, { enabled: false, lyxlib: b.version }); return; }
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Cache-Control', 'no-store');
+      res.end(b.json);
       return;
     }
 
@@ -327,6 +339,27 @@ export function watchGraphics(root: string, cb: (rel: string, v: number) => void
     mine.watcher?.close();
     if (graphicsWatchers.get(root) === mine) graphicsWatchers.delete(root);
   };
+}
+
+let bundle: { dir: string; version: string; json: Buffer } | null = null;
+/** LyX's layouts, modules and data files as one JSON (the server's e2e/texlive.ts lyxlibBundle) */
+function lyxlibBundle(lib: string): { dir: string; version: string; json: Buffer } {
+  if (bundle?.dir === lib) return bundle;
+  const files: Record<string, string> = {};
+  const add = (rel: string) => { try { files[rel] = fs.readFileSync(path.join(lib, rel), 'utf8'); } catch { /* missing */ } };
+  for (const f of ['unicodesymbols', 'languages', 'latexfonts', 'symbols']) add(f);
+  const walk = (dir: string) => {
+    let entries: fs.Dirent[] = [];
+    try { entries = fs.readdirSync(path.join(lib, dir), { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      const rel = `${dir}/${e.name}`;
+      if (e.isDirectory()) walk(rel);
+      else if (/\.(layout|inc|module)$/.test(e.name)) add(rel);
+    }
+  };
+  walk('layouts');
+  const json = Buffer.from(JSON.stringify({ files }));
+  return bundle = { dir: lib, version: crypto.createHash('sha1').update(json).digest('hex').slice(0, 12), json };
 }
 
 function send(res: http.ServerResponse, status: number, data: unknown): void {

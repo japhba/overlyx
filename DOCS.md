@@ -229,8 +229,15 @@ blend.
   directory is honoured, except that preview-continuous mode is switched off (`-pvc-`).
 * **Copy & paste** keeps every inset: a paragraph copied and pasted elsewhere (or into another
   OverLyX tab) still has its citations, cross-references, labels, formulas, tables and figures; the
-  plain-text form of the clipboard is LaTeX-ish (`$…$`, `\ref{…}`, `\citep{…}`), so pasting into a
-  `.tex` file or a chat gives something useful; HTML from a web page or another editor pastes as
+  plain-text form of the clipboard is the document's source — in a `.tex` document the LaTeX the
+  file has for the selection (`\section{…}`, `\emph{…}`, environments, `\footnote{…}`), in a
+  markdown document the markdown — written by the writers that save the files
+  (`editor/clipsource.ts`; tracked deletions and comment threads left out; the writer and, for
+  LaTeX, LyX's layout files via `/api/e2e/lyxlib` — the VS Code bridge serves them too — load when
+  something is first selected; until then, in `.lyx` documents and for table cells it is
+  `cliptext.ts`'s LaTeX-ish plain text). The other way round, LaTeX (and in a markdown document,
+  markdown) pasted as text arrives as structure, also when it comes with a code editor's
+  highlighting HTML (VS Code: `cliphtml.ts isCodeHtml`); HTML from a web page or another editor pastes as
   LyX content (headings, bold/italic/typewriter, lists — numbered ones as Enumerate, Google Docs'
   `<li><p>` items too —, tables). Several blocks pasted into the middle of a paragraph split it and
   land as paragraphs: ProseMirror's content fitting never wraps them into an inset (the only inline

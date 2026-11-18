@@ -375,6 +375,8 @@ export function setLayoutHeader(lines: string[]): void {
   shellHeader = lines;
   for (const f of shellHeaderListeners) f();
 }
+/** the header the shell set last (null before it did) */
+export function layoutHeader(): string[] | null { return shellHeader; }
 
 /* ------------------------------------------------------------------ canvas zoom (status bar, keys) */
 

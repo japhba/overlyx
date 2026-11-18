@@ -36,3 +36,21 @@ export function clipboardSerializer(): DOMSerializer {
   if (!serializer) { const base = DOMSerializer.fromSchema(schema); serializer = new ClipboardSerializer(base.nodes, base.marks); }
   return serializer;
 }
+
+const CODE_TAGS = new Set(['HTML', 'HEAD', 'BODY', 'META', 'STYLE', 'DIV', 'SPAN', 'BR', 'PRE', 'CODE']);
+/**
+ * HTML that is only highlighted source code: what VS Code (and other code editors, a web page's
+ * code block) put on the clipboard beside the text — lines as `<div>`s of coloured `<span>`s under
+ * `white-space: pre`, or a `<pre>`. LaTeX or markdown copied from there is pasted as its text would
+ * be (parsed into structure), not as the colours of its highlighting. Never ProseMirror's own HTML.
+ */
+export function isCodeHtml(html: string): boolean {
+  if (!html || html.includes('data-pm-slice')) return false;
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  let pre = false;
+  for (const el of Array.from(doc.querySelectorAll('*'))) {
+    if (!CODE_TAGS.has(el.tagName)) return false;
+    if (el.tagName === 'PRE' || el.tagName === 'CODE' || /white-space:\s*pre\b/i.test(el.getAttribute('style') ?? '')) pre = true;
+  }
+  return pre;
+}

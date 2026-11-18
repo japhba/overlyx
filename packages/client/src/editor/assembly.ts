@@ -62,8 +62,8 @@ import { isArticleDoc } from '../articlekinds';
 import { GraphicsView, CommandView, LeafView } from './nodeviews/leaf';
 import { editorContext, viewDocDir, viewDocId, viewProject } from './context';
 import { imageFiles, insertImageFiles, isSvgMarkup, looksLikeImageFileName, svgFile } from './imagepaste';
-import { sliceText } from './cliptext';
-import { clipboardSerializer } from './cliphtml';
+import { clipboardText, sourceCopyPlugin } from './clipsource';
+import { clipboardSerializer, isCodeHtml } from './cliphtml';
 import { showContextMenu } from './contextmenu';
 import { editorContextMenu } from './editormenu';
 import { includeTarget, insertMath } from './commands';
@@ -182,6 +182,7 @@ export function assemblePlugins(o: AssemblyOptions): Plugin[] {
     mathOccurrencesPlugin(),   // a symbol selected in a formula: the same symbol in the other formulas, a lighter shade
     macroUsagePlugin(),   // commands only shown as TeX code (unknown in formulas, TeX-code boxes): their names counted, anonymously
     pasteTargetsPlugin(),
+    sourceCopyPlugin(),   // a selection made in a .tex / .md document: the writer that copies it as LaTeX / markdown loads (clipsource.ts)
     linksPlugin(),   // the bubble under a hyperlink, the selection shown while the link box is open
     mirrorCaretPlugin(),
     macroDefsPlugin(o.getView),
@@ -275,8 +276,9 @@ export function editorViewProps(o: ViewPropsOptions): Pick<EditorProps, 'nodeVie
   const viewOnly = () => o.viewOnly?.() ?? false;
   return {
     nodeViews: editorNodeViews(),
-    // text/plain for the clipboard: formulas as $…$, references as \ref{…}, … (see cliptext.ts)
-    clipboardTextSerializer: sliceText,
+    // text/plain for the clipboard: a .tex document's LaTeX, a markdown document's markdown (clipsource.ts);
+    // elsewhere plain text with formulas as $…$, references as \ref{…}, … (cliptext.ts)
+    clipboardTextSerializer: clipboardText,
     // text/html: an inset's paragraphs (a comment, a note, a footnote, a table's cells) stay inside it (see cliphtml.ts)
     clipboardSerializer: clipboardSerializer(),
     handleDoubleClickOn(view, _pos, node, nodePos) {
@@ -366,10 +368,12 @@ export function editorViewProps(o: ViewPropsOptions): Pick<EditorProps, 'nodeVie
         });
         view.dispatch(tr);
       };
-      if (text && !html) {
+      // highlighted source code beside the text (copied in VS Code, a code block): LaTeX / markdown in it is parsed as below
+      const codeHtml = !!html && !!text && isCodeHtml(html);
+      if (text && (!html || codeHtml)) {
         // just an image file's name: Safari (and Firefox on macOS) deliver only that for a file
         // copied in the Finder — paste it as text, but say how to get the image itself in
-        if (looksLikeImageFileName(text)) {
+        if (!html && looksLikeImageFileName(text)) {
           plainPaste();
           editorContext.notify?.('Only the file’s name was on the clipboard — to insert the image, drag the file into the text (or copy it in Chrome)');
           return true;
@@ -385,8 +389,8 @@ export function editorViewProps(o: ViewPropsOptions): Pick<EditorProps, 'nodeVie
           void pasteLatex(view, view.dom.dataset.docId ?? o.docId, text);
           return true;
         }
-        plainPaste();
-        return true;
+        // (other code: its lines, as ProseMirror reads the HTML — below)
+        if (!codeHtml) { plainPaste(); return true; }
       }
       // blocks into an empty paragraph: they replace it (a pasted heading stays one)
       if (!viewOnly() && pasteBlocksIntoEmpty(view, slice)) return true;
