@@ -48,7 +48,10 @@ class OverlyxTelemetrySender implements vscode.TelemetrySender {
     private usageEnabled: () => boolean,
   ) {}
 
-  sendEventData(eventName: string, data: Record<string, unknown> = {}): void {
+  sendEventData(fullName: string, data: Record<string, unknown> = {}): void {
+    // TelemetryLogger hands the name over prefixed with the extension's id ("overlyx.overlyx-vscode/usage"):
+    // compared whole, no usage, error or typeset event of the extension was ever sent
+    const eventName = fullName.slice(fullName.lastIndexOf('/') + 1);
     if (eventName === 'usage') {
       if (!this.usageEnabled() || !validUsageSession(data.session)) return;
       const consent = data.reliabilityConsent === true;

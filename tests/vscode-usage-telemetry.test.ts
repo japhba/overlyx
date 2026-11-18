@@ -9,8 +9,10 @@ vi.mock('vscode', () => ({
     createTelemetryLogger: (sender: any) => ({
       get isUsageEnabled() { return state.enabled && state.level === 'all'; },
       onDidChangeEnableStates: () => ({ dispose() {} }),
-      logUsage(name: string, data: any) { if (this.isUsageEnabled) sender.sendEventData(name, data); },
-      logError(name: string, data: any) { if (state.enabled && ['all', 'error'].includes(state.level)) sender.sendEventData(name, data); },
+      // (as VS Code does: the event name reaches the sender prefixed with the extension's id — the
+      // sender once compared the bare name, and no usage or error event of the extension ever arrived, 18 Nov 2026)
+      logUsage(name: string, data: any) { if (this.isUsageEnabled) sender.sendEventData('overlyx.overlyx-vscode/' + name, data); },
+      logError(name: string, data: any) { if (state.enabled && ['all', 'error'].includes(state.level)) sender.sendEventData('overlyx.overlyx-vscode/' + name, data); },
       dispose() { void sender.flush(); },
     }),
   },
