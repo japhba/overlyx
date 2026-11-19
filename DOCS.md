@@ -5566,7 +5566,9 @@ clientInfo, User-Agent). It exposes these tools:
   `code` script and Copilot's `copilot-debug` do); on Windows `Code.exe` with the variable in the
   registration's `env`. Given only as the agent's `env`, the variable did not reach the process on a
   colleague's Mac (Codex from the VS Code extension / ChatGPT app, 18–19 Nov 2026): VS Code started as
-  an app and opened `overlyx-local.cjs` in a tab at every reply. It runs a launcher in the
+  an app and opened `overlyx-local.cjs` in a tab at every reply (issue #29). The setting
+  `overlyx.agents.runtime` (machine scope) names a Node.js to use instead; the script follows it, so
+  the refresh at every start keeps it. It runs a launcher in the
   global storage (`agents/overlyx-local.cjs` + `current.json`), which starts the registering version's
   `dist/agents.cjs` or, once an update removed it, the newest installed `overlyx.overlyx-vscode-*`.
   Tests: `tests/vscode-agents.test.ts` (scratch `CLAUDE_CONFIG_DIR` / `CODEX_HOME`, fake `claude` /

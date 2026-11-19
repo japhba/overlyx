@@ -29,7 +29,7 @@ export function setupAgents(context: vscode.ExtensionContext, layoutDir: () => s
       extensionsDir: path.dirname(context.extensionPath),
       extensionId: context.extension.id,
     });
-    return launcherCommand(process.execPath, launcher, vscode.env.appRoot);
+    return launcherCommand(process.execPath, launcher, vscode.env.appRoot, process.platform, vscode.workspace.getConfiguration('overlyx').get<string>('agents.runtime'));
   };
 
   /** Register with the agents found (or refresh a registration that went stale); returns what was done, for a message. */
@@ -98,6 +98,10 @@ export function setupAgents(context: vscode.ExtensionContext, layoutDir: () => s
   // in the background: never in the way of opening the editor. Only for the installed extension —
   // development hosts and the extension's tests (GUI probes included) prompt nobody and touch no agent config
   if (context.extensionMode !== vscode.ExtensionMode.Production) return;
+  // another runtime chosen: the script (Windows: the registration) follows at once
+  context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(e => {
+    if (e.affectsConfiguration('overlyx.agents.runtime') && context.globalState.get(STATE) === 'connected') refresh().catch(err => report(err, 'agents.runtime'));
+  }));
   void (async () => {
     const state = context.globalState.get<string | number>(STATE);
     if (state === 'connected') { await refresh(); return; }

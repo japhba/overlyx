@@ -396,6 +396,12 @@
           "default": "",
           "description": "Directory with LyX layout files. Empty: the copy bundled with the extension (or LYX_LAYOUT_DIR)."
         },
+        "overlyx.agents.runtime": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "Program that runs OverLyX's local tool server for Claude Code and Codex (\"OverLyX: Connect AI Agents\"). Empty: VS Code's own runtime in Node mode, so no Node.js installation is needed. Or the full path of a Node.js executable (e.g. /usr/local/bin/node); the extension keeps using it when it starts again."
+        },
         "overlyx.latexmk": {
           "type": "string",
           "default": "latexmk",

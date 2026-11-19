@@ -121,10 +121,12 @@ exec ${shQuote(runtime)} ${shQuote(launcher)}
  * opened overlyx-local.cjs in a tab at every Codex reply. A Node-mode runtime cannot open windows.
  * The registration stays the same when VS Code moves; only the script changes.
  */
-export function launcherCommand(execPath: string, launcher: string, appRoot?: string, platform: NodeJS.Platform = process.platform): StdioCommand {
+export function launcherCommand(execPath: string, launcher: string, appRoot?: string, platform: NodeJS.Platform = process.platform, node?: string): StdioCommand {
   let runtime = execPath.replace(/^\/snap\/([^/]+)\/\d+\//, '/snap/$1/current/');
   if (platform === 'darwin' && appRoot) runtime = macMainExecutable(appRoot) ?? runtime;
-  if (platform === 'win32') return { command: runtime, args: [launcher], env: { ELECTRON_RUN_AS_NODE: '1' } };
+  // the user's own Node.js (setting overlyx.agents.runtime) instead: in the script, so a restart keeps it
+  if (node?.trim()) runtime = node.trim();
+  if (platform === 'win32') return { command: runtime, args: [launcher], env: node?.trim() ? {} : { ELECTRON_RUN_AS_NODE: '1' } };
   const script = launcher.replace(/\.cjs$/, '') + '.sh';
   writeIfChanged(script, launcherScript(runtime, launcher));
   return { command: '/bin/sh', args: [script], env: {} };

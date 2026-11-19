@@ -432,6 +432,10 @@ if (a[0] === 'mcp' && a[1] === 'remove') process.exit(1);
     reg.launcherCommand('/snap/code/187/usr/share/code/code', launcher, undefined, 'linux');
     expect(fs.readFileSync(script, 'utf8')).toContain(`exec '/snap/code/current/usr/share/code/code' '${launcher}'`);
     expect(reg.launcherCommand('C:\\VS Code\\Code.exe', launcher, undefined, 'win32')).toEqual({ command: 'C:\\VS Code\\Code.exe', args: [launcher], env: { ELECTRON_RUN_AS_NODE: '1' } });
+    // the user's own Node.js (overlyx.agents.runtime): the same registration, the script names it
+    expect(reg.launcherCommand('/usr/share/code/code', launcher, undefined, 'linux', ' /usr/local/bin/node ')).toEqual({ command: '/bin/sh', args: [script], env: {} });
+    expect(fs.readFileSync(script, 'utf8')).toContain(`exec '/usr/local/bin/node' '${launcher}'`);
+    expect(reg.launcherCommand('C:\\VS Code\\Code.exe', launcher, undefined, 'win32', 'C:\\node\\node.exe')).toEqual({ command: 'C:\\node\\node.exe', args: [launcher], env: {} });
     // the script really starts the launcher in Node mode, with an empty environment like an agent that passes none, and quoting survives spaces and quotes
     const odd = path.join(ROOT, "Application Support's", 'agents');
     const oddLauncher = reg.installLauncher(odd, { main: path.join(exts, 'overlyx.overlyx-vscode-0.3.41', 'dist', 'agents.cjs'), layoutDir: '/layouts/41', extensionsDir: exts, extensionId: 'overlyx.overlyx-vscode' });
