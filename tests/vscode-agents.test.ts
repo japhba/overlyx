@@ -425,18 +425,42 @@ if (a[0] === 'mcp' && a[1] === 'remove') process.exit(1);
     mk('overlyx.overlyx-vscode-0.3.41', 'v41');
     fs.rmSync(path.join(exts, 'overlyx.overlyx-vscode-0.3.40'), { recursive: true });
     expect(run()).toBe(`v41 ${path.join(exts, 'overlyx.overlyx-vscode-0.3.41', 'dist', 'lyxlib', 'layouts')}`);
-    expect(reg.launcherCommand('/snap/code/187/usr/share/code/code', launcher).command).toBe('/snap/code/current/usr/share/code/code');
-    expect(reg.launcherCommand('/usr/share/code/code', launcher)).toEqual({ command: '/usr/share/code/code', args: [launcher], env: { ELECTRON_RUN_AS_NODE: '1' } });
+    // the agents run /bin/sh with a script that sets ELECTRON_RUN_AS_NODE itself (an agent dropping it from `env` had VS Code open the launcher as a file)
+    const script = path.join(storage, 'overlyx-local.sh');
+    expect(reg.launcherCommand('/usr/share/code/code', launcher, undefined, 'linux')).toEqual({ command: '/bin/sh', args: [script], env: {} });
+    expect(fs.readFileSync(script, 'utf8')).toContain(`ELECTRON_RUN_AS_NODE=1\nexport ELECTRON_RUN_AS_NODE\nexec '/usr/share/code/code' '${launcher}'\n`);
+    reg.launcherCommand('/snap/code/187/usr/share/code/code', launcher, undefined, 'linux');
+    expect(fs.readFileSync(script, 'utf8')).toContain(`exec '/snap/code/current/usr/share/code/code' '${launcher}'`);
+    expect(reg.launcherCommand('C:\\VS Code\\Code.exe', launcher, undefined, 'win32')).toEqual({ command: 'C:\\VS Code\\Code.exe', args: [launcher], env: { ELECTRON_RUN_AS_NODE: '1' } });
+    // the script really starts the launcher in Node mode, with an empty environment like an agent that passes none, and quoting survives spaces and quotes
+    const odd = path.join(ROOT, "Application Support's", 'agents');
+    const oddLauncher = reg.installLauncher(odd, { main: path.join(exts, 'overlyx.overlyx-vscode-0.3.41', 'dist', 'agents.cjs'), layoutDir: '/layouts/41', extensionsDir: exts, extensionId: 'overlyx.overlyx-vscode' });
+    const fakeElectron = path.join(ROOT, 'fake electron');
+    fs.writeFileSync(fakeElectron, `#!/bin/sh\n[ "$ELECTRON_RUN_AS_NODE" = 1 ] || { echo "opened as an app: $1"; exit 1; }\nexec ${JSON.stringify(process.execPath)} "$@"\n`, { mode: 0o755 });
+    const c = reg.launcherCommand(fakeElectron, oddLauncher, undefined, 'linux');
+    expect(execFileSync(c.command, c.args, { encoding: 'utf8', env: {} })).toBe('v41 /layouts/41');
+    // Codex's table: no env line when there is nothing to set
+    fs.mkdirSync(process.env.CODEX_HOME!, { recursive: true });
+    fs.writeFileSync(reg.codexConfigFile(), 'model = "gpt-6"\n');
+    reg.registerCodex(c);
+    expect(fs.readFileSync(reg.codexConfigFile(), 'utf8')).toContain(`args = [${JSON.stringify(c.args[0])}]\ndefault_tools_approval_mode = "approve"\n`);
+    expect(reg.codexRegistered(c)).toBe(true);
+    reg.unregisterCodex();
   });
 
-  it('on macOS the app\'s main program runs the launcher (Code since VS Code renamed Electron), never the extension host\'s helper', () => {
+  it('on macOS the app\'s main program runs the launcher (Code since VS Code renamed Electron), as VS Code\'s `code` command does', () => {
     const app = path.join(ROOT, 'Visual Studio Code.app', 'Contents');
     const appRoot = path.join(app, 'Resources', 'app');
     const helper = path.join(app, 'Frameworks', 'Code Helper (Plugin).app', 'Contents', 'MacOS', 'Code Helper (Plugin)');
     fs.mkdirSync(appRoot, { recursive: true }); fs.mkdirSync(path.join(app, 'MacOS'), { recursive: true });
-    const mac = (root = appRoot) => reg.launcherCommand(helper, '/storage/agents/overlyx-local.cjs', root, 'darwin').command;
-    // nothing to run Node with: no registration rather than the helper (which made VS Code open the launcher)
-    expect(() => mac()).toThrow(/not found/);
+    const launcher = path.join(ROOT, 'mac-storage', 'agents', 'overlyx-local.cjs');
+    fs.mkdirSync(path.dirname(launcher), { recursive: true });
+    const mac = (root = appRoot) => {
+      expect(reg.launcherCommand(helper, launcher, root, 'darwin')).toEqual({ command: '/bin/sh', args: [launcher.replace(/\.cjs$/, '.sh')], env: {} });
+      return /^exec '([^']+)'/m.exec(fs.readFileSync(launcher.replace(/\.cjs$/, '.sh'), 'utf8'))![1];
+    };
+    // no main program found: the helper, which runs as Node too now that the script sets ELECTRON_RUN_AS_NODE (Copilot's copilot-debug does the same)
+    expect(mac()).toBe(helper);
     // VS Code until early 2026: MacOS/Electron
     fs.writeFileSync(path.join(app, 'MacOS', 'Electron'), '');
     expect(mac()).toBe(path.join(app, 'MacOS', 'Electron'));

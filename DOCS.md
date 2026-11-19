@@ -5558,12 +5558,15 @@ clientInfo, User-Agent). It exposes these tools:
   the user says "this", "here", "the selected text".
   Verified with real agents (the block as a project-level AGENTS.md for Codex): a plain request → their
   own edit, "with track changes" → `edit_document`, marks signed with the agent, the model it names
-  (the tools' optional `model`) and git's `user.name` ("Claude (Opus 5.5) [Jan]"). The command is `process.execPath` with `ELECTRON_RUN_AS_NODE=1` (a
+  (the tools' optional `model`) and git's `user.name` ("Claude (Opus 5.5) [Jan]"). The command is VS Code's runtime in Node mode (a
   Snap's revision path via `current`; on macOS the app's main program, `macMainExecutable`: Info.plist's
-  CFBundleExecutable — `MacOS/Code` since VS Code renamed `MacOS/Electron` in early 2026; never the
-  extension host's execPath, a helper app that ignores ELECTRON_RUN_AS_NODE: Codex, which starts its
-  MCP servers for every reply, made VS Code open `overlyx-local.cjs` as a file each time, 18 Nov 2026)
-  running a launcher in the
+  CFBundleExecutable — `MacOS/Code` since VS Code renamed `MacOS/Electron` in early 2026 — else
+  `process.execPath`). Outside Windows the agents run `/bin/sh agents/overlyx-local.sh`, a script
+  rewritten at every start that sets `ELECTRON_RUN_AS_NODE=1` itself and execs the runtime (as VS Code's
+  `code` script and Copilot's `copilot-debug` do); on Windows `Code.exe` with the variable in the
+  registration's `env`. Given only as the agent's `env`, the variable did not reach the process on a
+  colleague's Mac (Codex from the VS Code extension / ChatGPT app, 18–19 Nov 2026): VS Code started as
+  an app and opened `overlyx-local.cjs` in a tab at every reply. It runs a launcher in the
   global storage (`agents/overlyx-local.cjs` + `current.json`), which starts the registering version's
   `dist/agents.cjs` or, once an update removed it, the newest installed `overlyx.overlyx-vscode-*`.
   Tests: `tests/vscode-agents.test.ts` (scratch `CLAUDE_CONFIG_DIR` / `CODEX_HOME`, fake `claude` /

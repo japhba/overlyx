@@ -2,7 +2,9 @@
  * AI agents on this computer (Claude Code, Codex) and the documents open here: the extension
  * offers once to connect them to its local tool server (agents/server.ts) — their edits of
  * OverLyX documents then arrive as tracked changes, and they can comment. Connected, every start
- * of the extension refreshes the launcher and re-registers if VS Code's runtime moved (an update);
+ * of the extension refreshes the launcher (and its script, which names VS Code's runtime) and
+ * re-registers a registration that differs from the current command (an older version's, or one
+ * edited by hand);
  * "OverLyX: Connect AI Agents" / "Disconnect AI Agents" do it on demand.
  */
 import * as vscode from 'vscode';

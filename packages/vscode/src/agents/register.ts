@@ -8,7 +8,8 @@
  * The agents run a launcher kept in the extension's global storage, which outlives extension
  * updates: it starts dist/agents.cjs of the version that registered it — or, once an update has
  * removed that one, of the newest version installed. The command is VS Code's own runtime in
- * Node mode, so no Node.js installation is needed.
+ * Node mode (through a shell script outside Windows, launcherCommand), so no Node.js installation
+ * is needed.
  *
  * No VS Code API here (host/agents.ts asks the user and calls these); tests run it against
  * scratch config directories and fake `claude` / `codex` executables.
@@ -94,21 +95,39 @@ export function macMainExecutable(appRoot: string): string | null {
   return null;
 }
 
+/** A POSIX shell word: single quotes, a single quote inside as '\'' */
+const shQuote = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`;
+
+/** The shell script beside the launcher that starts it with VS Code's runtime in Node mode (VS Code's own `code` script and Copilot's `copilot-debug` do the same). */
+export function launcherScript(runtime: string, launcher: string): string {
+  return `#!/bin/sh
+# Written by the OverLyX VS Code extension: starts its local tool server for AI agents (Claude Code,
+# Codex) with VS Code's own runtime in Node mode. Rewritten whenever the extension starts.
+# ELECTRON_RUN_AS_NODE is set here, not in the agent's settings: an agent that left it out of the
+# server's environment started VS Code itself, which then opened ${path.basename(launcher)} as a file.
+unset NODE_OPTIONS
+ELECTRON_RUN_AS_NODE=1
+export ELECTRON_RUN_AS_NODE
+exec ${shQuote(runtime)} ${shQuote(launcher)}
+`;
+}
+
 /**
- * The runtime the agents start the launcher with: VS Code's Electron in Node mode. A Snap's
- * versioned path goes through its `current` link; on macOS the app's main program, whose Node mode
- * VS Code's own `code` command relies on. Never the extension host's execPath there: that is a
- * helper app, which ignores ELECTRON_RUN_AS_NODE — started by an agent, it had VS Code open
- * overlyx-local.cjs as a file (18 Nov 2026, after VS Code renamed `MacOS/Electron` to `MacOS/Code`).
+ * How the agents start the launcher: VS Code's Electron in Node mode. A Snap's versioned path goes
+ * through its `current` link; on macOS the app's main program (as VS Code's own `code` command), else
+ * the extension host's execPath. Outside Windows the agents run `/bin/sh` with a script next to the
+ * launcher (written here) that sets ELECTRON_RUN_AS_NODE itself: given only in the agent's `env`, it
+ * did not reach the process on a colleague's Mac (18–19 Nov 2026) — VS Code started as an app and
+ * opened overlyx-local.cjs in a tab at every Codex reply. A Node-mode runtime cannot open windows.
+ * The registration stays the same when VS Code moves; only the script changes.
  */
 export function launcherCommand(execPath: string, launcher: string, appRoot?: string, platform: NodeJS.Platform = process.platform): StdioCommand {
-  let command = execPath.replace(/^\/snap\/([^/]+)\/\d+\//, '/snap/$1/current/');
-  if (platform === 'darwin' && appRoot) {
-    const main = macMainExecutable(appRoot);
-    if (!main) throw new Error(`VS Code's program was not found in ${path.resolve(appRoot, '..', '..', 'MacOS')}`);
-    command = main;
-  }
-  return { command, args: [launcher], env: { ELECTRON_RUN_AS_NODE: '1' } };
+  let runtime = execPath.replace(/^\/snap\/([^/]+)\/\d+\//, '/snap/$1/current/');
+  if (platform === 'darwin' && appRoot) runtime = macMainExecutable(appRoot) ?? runtime;
+  if (platform === 'win32') return { command: runtime, args: [launcher], env: { ELECTRON_RUN_AS_NODE: '1' } };
+  const script = launcher.replace(/\.cjs$/, '') + '.sh';
+  writeIfChanged(script, launcherScript(runtime, launcher));
+  return { command: '/bin/sh', args: [script], env: {} };
 }
 
 const sameCommand = (a: Partial<StdioCommand> | undefined, b: StdioCommand): boolean =>
@@ -206,7 +225,7 @@ const tomlString = (v: string) => JSON.stringify(v);   // a TOML basic string: J
 function codexTable(cmd: StdioCommand): string {
   const env = Object.entries(cmd.env).map(([k, v]) => `${k} = ${tomlString(v)}`).join(', ');
   // approve: Codex asks before every MCP tool call otherwise (its counterpart of Claude Code's permission rule)
-  return `[mcp_servers.${SERVER_NAME}]\n# OverLyX VS Code extension: tracked edits and comments in the documents on this computer\ncommand = ${tomlString(cmd.command)}\nargs = [${cmd.args.map(tomlString).join(', ')}]\nenv = { ${env} }\ndefault_tools_approval_mode = "approve"\n`;
+  return `[mcp_servers.${SERVER_NAME}]\n# OverLyX VS Code extension: tracked edits and comments in the documents on this computer\ncommand = ${tomlString(cmd.command)}\nargs = [${cmd.args.map(tomlString).join(', ')}]\n${env ? `env = { ${env} }\n` : ''}default_tools_approval_mode = "approve"\n`;
 }
 
 export function codexRegistered(cmd?: StdioCommand): boolean {
