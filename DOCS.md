@@ -391,6 +391,22 @@ blend.
   document and 3 minutes in all, the rest is written at its next open as before. One log line per
   document (`[rescue] <id>: written` / `skipped …` / `failed …`) and a summary; nothing in it throws
   (errors are logged). Test: `docs-rescue-startup` (with document workers).
+  **People are told** (`server/src/docnotices.ts`, client `app/disknotice.ts`): wherever a change on
+  disk won over edits made in the editor and those were kept as a version — the versions *before a
+  change on disk* and *unsaved edits from before a restart*, for documents, decks and boards alike — a
+  notice is recorded (tables `doc_notices`, `doc_notices_seen`) and sent over the document's WebSocket
+  as message 8 (JSON: notice id, document, version id, `kind` `disk` / `restart` / `stale`, how many
+  places both changed, when). The editors connected at the time get it at once; everybody else with
+  edit access gets it at their next open of the document within 7 days; each person once (viewers made
+  no edits and are not told). The editor shows a small card at the bottom right, not a dialog: what
+  happened in plain words ("… was changed outside the editor today at 14:32 (by another program, git
+  or an agent) while edits made here were not saved yet. Both were combined; where both had changed
+  the same thing (one place), the file's version was kept. The version from here is in History as
+  “Before a change on disk”.") with **Show in History**, which opens History comparing that version
+  with the file as it is now (`HistoryPanel`'s `focus`), and × to dismiss. The VS Code extension
+  edits its local synced copy and never holds a server document's unsaved edits, so it has nothing to
+  be told here (its edits reach the server through the sync, which merges as tracked changes).
+  Test: `docs-notices`.
   A stop or crash stores every open document's unsaved state before it saves (section "Running",
   the systemd unit), so the service's `TimeoutStopSec` (20 s) cutting a slow `saveAll` off loses nothing
   any more: the next start writes the rest.

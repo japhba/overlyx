@@ -50,6 +50,7 @@ import type { StrokeWatch } from '@overlyx/core/glitch.ts';
 import { strokeWatch, strokeEnded } from '../glitches';
 import { shapePoints, INK_SHAPES, type InkShape } from '@overlyx/core';
 import { holdReload } from './update';
+import { MSG_NOTICE, noticeHandler } from './disknotice';
 const isShapeTool = (t: string): t is InkShape => (INK_SHAPES as readonly string[]).includes(t);
 
 /** the pen in hand as a board has it (the comment pen, a slide's, draws as the pen here) */
@@ -257,6 +258,7 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     handlers[2] = (_e, dec) => { decoding.readVarString(dec); };            // epoch (no local copy: nothing to compare)
     handlers[3] = (_e, dec) => { decoding.readVarUint(dec); decoding.readVarUint8Array(dec); };  // saved
     handlers[4] = () => {};                                                 // heartbeat
+    handlers[MSG_NOTICE] = noticeHandler();                                 // a change on disk won over edits here (disknotice.ts)
     handlers[5] = (_e, dec) => { Y.applyUpdate(ydoc, decoding.readVarUint8Array(dec), 'agent'); };
     provider.awareness.setLocalStateField('user', { name: user.name, color: user.color, username: user.username, avatar: user.avatar ?? null });
     const objects = ydoc.getMap<BoardObj>('objects');

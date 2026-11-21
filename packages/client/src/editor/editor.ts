@@ -34,6 +34,7 @@ import { E2eSocket } from '../e2e/socket';
 import { isE2eDocId, registerOpenDoc } from '../e2e/project';
 import type { MergeEntry, MergeSource } from './plugins/mergereview';
 import type { User } from '../api';
+import { MSG_NOTICE, noticeHandler } from '../app/disknotice';
 
 installMathAssist();
 editorContext.aiRewriteMath = (field) => openRewriteMath(field);
@@ -295,6 +296,8 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   // Message type 4 = server heartbeat (no payload): it only refreshes y-websocket's "last message
   // received" watchdog, so a healthy connection in a throttled background tab stays open.
   (provider as any).messageHandlers[4] = () => {};
+  // Message type 8 = a change on disk won over edits made here, kept in History: a notice (app/disknotice.ts)
+  (provider as any).messageHandlers[MSG_NOTICE] = noticeHandler();
 
   // Message type 2 = document epoch (OverLyX extension, sent by the server before sync step 1). If the
   // server's Yjs history differs from the one our local copy belongs to (the server re-created the

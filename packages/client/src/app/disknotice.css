@@ -1,0 +1,27 @@
+/* the notice that a change on disk won over edits made here (disknotice.ts): a small card, bottom right */
+.ol-disknotices {
+  position: fixed; right: 16px; bottom: 40px; z-index: 90;
+  display: flex; flex-direction: column; gap: 8px; align-items: flex-end;
+  max-width: min(360px, calc(100vw - 32px)); pointer-events: none;
+}
+.ol-disknotice {
+  pointer-events: auto; box-sizing: border-box; width: 100%;
+  background: var(--surface, #fff); color: var(--ui-fg, #222);
+  border: 1px solid var(--ui-border, #c9c9c4); border-left: 3px solid var(--accent, #3b6ea5);
+  border-radius: 8px; box-shadow: 0 6px 20px rgba(0, 0, 0, .16);
+  padding: 10px 12px; font: 13px/1.4 var(--ui-font, sans-serif);
+}
+.ol-disknotice-title { display: flex; align-items: flex-start; gap: 8px; font-weight: 600; }
+.ol-disknotice-close {
+  margin-left: auto; border: 0; background: none; color: var(--ui-muted, #666);
+  font: 16px/1 var(--ui-font, sans-serif); cursor: pointer; padding: 0 2px;
+}
+.ol-disknotice-close:hover { color: var(--ui-fg, #222); }
+.ol-disknotice p { margin: 4px 0 0; color: var(--ui-fg, #222); }
+.ol-disknotice-actions { display: flex; justify-content: flex-end; margin-top: 8px; }
+.ol-disknotice-show {
+  border: 1px solid var(--accent-border, #b9cde6); background: var(--chip-bg, #eef2f8); color: var(--accent-strong, #1f4f87);
+  border-radius: 6px; padding: 3px 10px; font: inherit; cursor: pointer;
+}
+.ol-disknotice-show:hover { background: var(--row-hover, #e8eef7); }
+@media (max-width: 600px) { .ol-disknotices { left: 16px; right: 16px; max-width: none; } }

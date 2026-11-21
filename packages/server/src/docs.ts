@@ -33,6 +33,7 @@ import { convertModel1, model1Document } from './collabdoc.ts';
 import { isModel2 } from '@overlyx/core/collab/model.ts';
 import { mergeLyx, mergeApart, pmToLyxBody, writeParagraphs, type Paragraph } from '@overlyx/core';
 import { mergeLines, mergeObjects, boardObjects } from './filemerge.ts';
+import { recordNotice } from './docnotices.ts';
 
 export type { SourceSpan, DocMeta };
 export { readTextFile, looksLikeDocument };
@@ -372,7 +373,7 @@ export class OpenDoc implements DocState, EditableDoc {
       this.loadFromLyx(doc, 'file-load');
     });
     // the change on disk replaced paragraphs edited here: what they were is kept as a version
-    if (kept !== undefined) this.snapshot('before a change on disk', kept);
+    if (kept !== undefined) this.keepBeforeDisk(kept);
     if (fileTextBefore !== null && dirty) this.dirty = true;   // ours differs from the disk: write it
     this.persistState();
     return true;
@@ -406,7 +407,7 @@ export class OpenDoc implements DocState, EditableDoc {
     const seq = this.updateSeq, base = this.fileText;
     const r = await inWorker(this, 'absorb', { text: t, fileText: base, isChild: this.isChild }) as { dirty: boolean; rendered?: Rendered; kept?: string; update: Uint8Array | null; knew?: Uint8Array; isChild: boolean };
     if (this.disposed) return false;
-    if (r.kept !== undefined) this.snapshot('before a change on disk', r.kept);
+    if (r.kept !== undefined) this.keepBeforeDisk(r.kept);
     this.isChild = r.isChild;
     this.fileHash = hash;
     this.fileText = t;
@@ -698,12 +699,23 @@ export class OpenDoc implements DocState, EditableDoc {
     return { doc: info, full: Y.encodeStateAsUpdate(this.ydoc), updates: [] };
   }
 
-  /** Keep a copy of some text as a version of this document (never fails the caller). */
-  snapshot(name: string, text: string, kind = 'auto'): void {
+  /** Keep a copy of some text as a version of this document (never fails the caller); its id, null when it failed. */
+  snapshot(name: string, text: string, kind = 'auto'): number | null {
     try {
       const authors = [...this.awareness.getStates().values()].map(s => (s as any)?.user?.name).filter(Boolean);
-      db.prepare('INSERT INTO versions (doc_id, name, author, kind, created_at, lyx) VALUES (?,?,?,?,?,?)').run(this.id, name, authors.join(', ') || 'system', kind, Date.now(), text);
-    } catch (e) { console.error('snapshot failed', this.id, e); }
+      return Number(db.prepare('INSERT INTO versions (doc_id, name, author, kind, created_at, lyx) VALUES (?,?,?,?,?,?)').run(this.id, name, authors.join(', ') || 'system', kind, Date.now(), text).lastInsertRowid);
+    } catch (e) { console.error('snapshot failed', this.id, e); return null; }
+  }
+
+  /** what a merge's notice calls it: a change on disk, or one met when rescuing edits after a restart */
+  mergeKind: 'disk' | 'restart' = 'disk';
+
+  /**
+   * A change on disk won over edits made here (in `places` places, when counted): the document as it
+   * was here is kept as a version, and its editors are told (docnotices.ts: at once, or at their next open).
+   */
+  protected keepBeforeDisk(ours: string, places: number | null = null): void {
+    recordNotice(this.id, this.snapshot('before a change on disk', ours), this.mergeKind, places);
   }
 
   /** Stop all timers (the document is being dropped); the worker forgets its mirror. */
@@ -872,7 +884,7 @@ export class BoardDoc extends OpenDoc {
     const ours = new Map(m.entries());
     const { set, conflicts } = mergeObjects(base, ours, theirs);
     // an object both changed takes the file's: the board as it was is kept as a version
-    if (conflicts) this.snapshot('before a change on disk', this.render().text);
+    if (conflicts) this.keepBeforeDisk(this.render().text, conflicts);
     this.ydoc.transact(() => {
       for (const [k, v] of set) { if (v === undefined) m.delete(k); else m.set(k, v); }
     }, 'file-load');
@@ -937,10 +949,12 @@ export class HtmlDoc extends OpenDoc {
     knownHashes.set(this.absPath, hash);
     if (ours === base) this.loadFromText(text, 'file-load');
     else {
-      // unsaved edits here: the disk's change goes in where it is, unless it touches them
-      const d = changedRegion(base, text);
+      // unsaved edits here: the disk's change goes in where it is, unless it touches them (a disk
+      // region around the whole of ours mapped too, and replaced the typing without a trace)
+      const d = changedRegion(base, text), r = changedRegion(base, ours);
+      const apart = d.from + d.removed <= r.from || d.from >= r.from + r.removed;
       const from = mapThrough(base, ours, d.from), to = mapThrough(base, ours, d.from + d.removed);
-      if (from !== null && to !== null && to >= from) {
+      if (apart && from !== null && to !== null && to >= from) {
         this.ydoc.transact(() => {
           if (to > from) this.html.delete(from, to - from);
           if (d.insert) this.html.insert(from, d.insert);
@@ -950,7 +964,7 @@ export class HtmlDoc extends OpenDoc {
         // the disk's changes and ours overlap as one region: merged by lines (filemerge.ts); lines
         // both changed take the disk's, and the text before is kept as a version
         const m = mergeLines(base, ours, text);
-        if (m.conflicts) this.snapshot('before a change on disk', ours);
+        if (m.conflicts) this.keepBeforeDisk(ours, m.conflicts);
         this.ydoc.transact(() => {
           for (const s of [...m.splices].reverse()) {
             if (s.removed) this.html.delete(s.from, s.removed);
@@ -1120,7 +1134,8 @@ export class DocManager {
       doc.fileText = base;
       doc.fileHash = row.file_hash;
       knownHashes.set(doc.absPath, row.file_hash);
-      await doc.absorbExternalChangeAsync(text);
+      doc.mergeKind = 'restart';
+      try { await doc.absorbExternalChangeAsync(text); } finally { doc.mergeKind = 'disk'; }
       doc.dirty = true;
     }
     this.register(doc);
@@ -1301,7 +1316,8 @@ export class DocManager {
         doc.fileText = base;
         doc.fileHash = row.file_hash;
         knownHashes.set(doc.absPath, row.file_hash);
-        doc.absorbExternalChange(text);
+        doc.mergeKind = 'restart';
+        try { doc.absorbExternalChange(text); } finally { doc.mergeKind = 'disk'; }
       }
       doc.dirty = true;
     }
@@ -1315,7 +1331,7 @@ export class DocManager {
     const ours = doc.toText();
     if (ours === text) return;
     console.log(`[docs] ${doc.id}: the stored state has edits the file has not, and the file changed — the file is loaded, the edits kept as a version`);
-    doc.snapshot('unsaved edits from before a restart', ours);
+    recordNotice(doc.id, doc.snapshot('unsaved edits from before a restart', ours), 'stale');
   }
 
   private openHtmlFresh(id: string, project: string, relPath: string, absPath: string, text: string, hash: string): HtmlDoc {

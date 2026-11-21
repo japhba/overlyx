@@ -69,6 +69,9 @@ export function Authors({ names }: { names: string }) {
   );
 }
 
+/** the last notice focus applied (across mounts: History closed and opened again does not apply it twice) */
+let focusApplied = 0;
+
 type Row = { kind: 'one'; v: VersionInfo } | { kind: 'session'; list: VersionInfo[]; key: string };
 
 /** the timeline's rows of one day: named versions one by one, runs of automatic ones as sessions */
@@ -85,7 +88,7 @@ function rowsOf(list: VersionInfo[]): Row[] {
   return out;
 }
 
-export function HistoryPanel({ docId, refreshKey = 0, notify, onOpen, onClose }: { docId: string; refreshKey?: number; notify?: Notify; onOpen?: (id: string) => void; onClose?: () => void }) {
+export function HistoryPanel({ docId, refreshKey = 0, notify, onOpen, onClose, focus }: { docId: string; refreshKey?: number; notify?: Notify; onOpen?: (id: string) => void; onClose?: () => void; focus?: { id: number; n: number } | null }) {
   const [versions, setVersions] = useState<VersionInfo[] | null>(null);
   const [failed, setFailed] = useState(false);
   const [tab, setTab] = useState<'file' | 'project'>('file');
@@ -98,6 +101,13 @@ export function HistoryPanel({ docId, refreshKey = 0, notify, onOpen, onClose }:
   const load = () => api.versions(docId).then(r => { setVersions(r.versions); setFailed(false); }).catch(() => setFailed(true));
   useEffect(() => { setVersions(null); setUndo(null); setCompare(null); void load(); }, [docId]);
   useEffect(() => { void load(); }, [refreshKey, tick]);
+  // a notice's "Show in History" (app/disknotice.ts): that version compared with the file as it is now
+  useEffect(() => {
+    if (!focus || focusApplied === focus.n || !versions?.some(v => v.id === focus.id)) return;
+    focusApplied = focus.n;
+    setTab('file');
+    setCompare({ from: focus.id, to: null });
+  }, [focus, versions]);
 
   const days = useMemo(() => {
     const out: { label: string; rows: Row[] }[] = [];

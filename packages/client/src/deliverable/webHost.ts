@@ -29,6 +29,7 @@ import { isE2eDocId } from '../e2e/known';
 import { E2eSocket } from '../e2e/socket';
 import { e2eFrames, printE2ePage } from '../e2e/deckframes';
 import { registerOpenDoc } from '../e2e/project';
+import { MSG_NOTICE, noticeHandler } from '../app/disknotice';
 
 /** Check that storage can actually be opened and written before y-indexeddb installs
  * its listeners. Its constructor leaves an unhandled rejection when private mode
@@ -69,6 +70,7 @@ export function webHost(id: string, user: User): DeliverableHost & { destroy(): 
   const provider = new WebsocketProvider(wsUrl, '', ydoc, { params: connectParams(id), disableBc: true, connect: false, ...(encrypted ? { WebSocketPolyfill: E2eSocket as unknown as typeof WebSocket } : {}) });
   let persistence: IndexeddbPersistence | null = null;
   const handlers = (provider as unknown as { messageHandlers: ((enc: unknown, dec: decoding.Decoder, ...context: unknown[]) => void)[] }).messageHandlers;
+  handlers[MSG_NOTICE] = noticeHandler();   // a change on disk won over edits made here (app/disknotice.ts)
   const text = ydoc.getText('html');
   // the text as one string for each version of it, not made anew at every ask: on a deck with much ink
   // it is half a MB, asked for many times an edit — and two equal copies compared as strings (a memo's

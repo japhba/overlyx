@@ -55,6 +55,7 @@ import { MarkdownSettingsDialog } from './MarkdownSettings';
 import { Outline, buildOutline, type OutlineItem } from './Outline';
 import { Comments } from './Comments';
 import { HistoryPanel } from './history/HistoryPanel';
+import { setHistoryOpener } from './disknotice';
 import { AgentPanel, askAgentAbout } from './AgentPanel';
 import { panelAgents } from './ExternalAgents';
 import { inlineModelLabel } from './AgentModelPicker';
@@ -705,6 +706,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   const [selVersion, setSelVersion] = useState(0);
   // the History pane beside a deck, poster, web page or board (app/history/); a document's is its right sidebar's tab
   const [historyOpen, setHistoryOpen] = useState(false);
+  // a notice's "Show in History" (disknotice.ts): History opened at that version, the document first if another one is open
+  const [historyFocus, setHistoryFocus] = useState<{ doc: string; id: number; n: number } | null>(null);
   const [docTick, setDocTick] = useState(0);
   const [selTick, setSelTick] = useState(0);
   const editorRef = useRef<EditorHandle | null>(null);
@@ -830,6 +833,14 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   }, []);
   /** leave the document: back to the start screen */
   const closeDoc = useCallback(() => { location.hash = '#/'; }, []);
+  useEffect(() => {
+    setHistoryOpener((doc, id) => { setHistoryFocus({ doc, id, n: Date.now() }); if (doc !== docId) openInTab(doc); });
+    return () => setHistoryOpener(null);
+  }, [docId, openInTab]);
+  useEffect(() => {
+    if (!historyFocus || historyFocus.doc !== docId) return;
+    if (isLyxDoc) { setRightTab('versions'); setSelVersion(v => v + 1); } else setHistoryOpen(true);
+  }, [historyFocus, docId, isLyxDoc]);
 
   /** Find a label in a view and select it. */
   const gotoLabelIn = (view: EditorView, name: string): boolean => {
@@ -2101,7 +2112,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         )}
         {isLyxDoc && !narrowPanes && <PaneDividers layout={panes} onChange={setPanesState} onResizeEnd={saveLayout} />}
         </div>
-        {historyOpen && (isHtmlTab || isBoardTab) && <div class="history-drawer"><HistoryPanel docId={docId!} notify={notify} onOpen={id => openInTab(id)} onClose={() => setHistoryOpen(false)} /></div>}
+        {historyOpen && (isHtmlTab || isBoardTab) && <div class="history-drawer"><HistoryPanel docId={docId!} notify={notify} onOpen={id => openInTab(id)} onClose={() => setHistoryOpen(false)} focus={historyFocus?.doc === docId ? historyFocus : null} /></div>}
         {isLyxDoc && <ToolbarDock at="right">{toolbarRows}</ToolbarDock>}
         {isLyxDoc && !rightTab && (
           <div class="rail right">
@@ -2122,7 +2133,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
               <button class="hide" title="Hide the sidebar" onClick={() => setRightTab(null)}>»</button>
             </div>
             {rightTab === 'comments' && <div class="panel-body"><Comments views={[masterView, ...[...childRefs.current.values()].map(h => h.view)].filter((v): v is EditorView => !!v)} tick={docTick} /></div>}
-            {rightTab === 'versions' && <div class="panel-body"><HistoryPanel docId={docId} refreshKey={selVersion} notify={notify} onOpen={id => openInTab(id)} /></div>}
+            {rightTab === 'versions' && <div class="panel-body"><HistoryPanel docId={docId} refreshKey={selVersion} notify={notify} onOpen={id => openInTab(id)} focus={historyFocus?.doc === docId ? historyFocus : null} /></div>}
             {rightTab === 'agent' && <AgentPanel project={projectOfDoc(docId)} notify={notify} codex={aiActivated} />}
           </div>
         )}

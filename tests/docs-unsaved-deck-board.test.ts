@@ -153,6 +153,28 @@ describe('decks: edits stored but not written when the server stopped', () => {
   });
 });
 
+describe('decks: a change on disk while open', () => {
+  it('the disk rewrote the very words typed here: the file\'s words, the typing kept as a version (it used to vanish)', async () => {
+    quiet();
+    const { id, doc } = await freshDeck();
+    editDeck(doc, '<h1>Two</h1>', '<h1>Deux TYPED</h1>');
+    const disk = FIVE.replace('<h1>Two</h1>', '<h1>Second ON DISK</h1>');
+    expect(doc.absorbExternalChange(disk)).toBe(true);
+    expect(doc.toText()).toBe(disk);
+    expect(versions(id).find(v => v.name === 'before a change on disk')?.text).toBe(FIVE.replace('<h1>Two</h1>', '<h1>Deux TYPED</h1>'));
+    restart(doc);
+  });
+
+  it('a change on disk elsewhere in the same line as the typing still goes in beside it', async () => {
+    quiet();
+    const { doc } = await freshDeck();
+    editDeck(doc, '<p>Body of Two.</p>', '<p>Body of Two TYPED.</p>');
+    doc.absorbExternalChange(FIVE.replace('<p>Body of Two.</p>', '<p class="x">Body of Two.</p>'));
+    expect(doc.toText()).toBe(FIVE.replace('<p>Body of Two.</p>', '<p class="x">Body of Two TYPED.</p>'));
+    restart(doc);
+  });
+});
+
 /* ------------------------------------------------------------------ boards */
 
 const board = (objs: Record<string, unknown>) => {

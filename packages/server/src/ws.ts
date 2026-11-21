@@ -21,6 +21,7 @@ import { isAgentClient, trackMoves } from './agentPresence.ts';
 import { offlineBase, applyClientUpdate } from './offlinemerge.ts';
 import { e2eUpgrade } from './e2e/relay.ts';
 import { isE2eProject } from './e2e/store.ts';
+import { noticeListeners, unseenNotices, markNoticeSeen, type DocNotice } from './docnotices.ts';
 
 const MSG_SYNC = 0;
 const MSG_AWARENESS = 1;
@@ -42,6 +43,8 @@ const MSG_PING = 4;
 const MSG_AGENT_EDIT = 5;
 /** OverLyX extension: an editor with offline edits sends the state they were made on, before its sync step 2 (offlinemerge.ts) */
 const MSG_OFFLINE_BASE = 7;
+/** OverLyX extension: a notice that a change on disk won over edits made here, kept in History (docnotices.ts; JSON: client app/disknotice.ts); the editor answers with the notice's id once it was seen */
+const MSG_NOTICE = 8;
 const HEARTBEAT_MS = 10000;
 /*
  * The CRDT model editors must hold the document in (core collab/model.ts), from the connection's
@@ -235,6 +238,10 @@ async function handleConnection(conn: WebSocket, docId: string, user: SessionUse
           }
           break;
         }
+        case MSG_NOTICE: {
+          markNoticeSeen(decoding.readVarUint(dec), user.id, doc.id);   // seen: not told again
+          break;
+        }
         case MSG_OFFLINE_BASE: {
           if (!readOnly) offlineBase(conn, decoding.readVarUint8Array(dec), user.name);
           break;
@@ -298,7 +305,24 @@ async function handleConnection(conn: WebSocket, docId: string, user: SessionUse
     }
   }
   for (const data of early) onMessage(data);
+  // what happened to the document's edits while this person was not there (once; viewers made none)
+  if (!readOnly) for (const n of unseenNotices(doc.id, user.id)) send(doc, conn, noticeMessage(n));
 }
+
+/** message 8: a notice (docnotices.ts) */
+export function noticeMessage(n: DocNotice): Uint8Array {
+  const enc = encoding.createEncoder();
+  encoding.writeVarUint(enc, MSG_NOTICE);
+  encoding.writeVarString(enc, JSON.stringify(n));
+  return encoding.toUint8Array(enc);
+}
+
+// a notice reaches the document's connected editors at once; the others (and whoever did not see it) at their next open
+noticeListeners.add(n => {
+  const doc = manager.docs.get(n.doc);
+  if (!doc) return;
+  for (const conn of [...doc.connUsers.keys()]) send(doc, conn, noticeMessage(n));
+});
 
 export { Y };
 

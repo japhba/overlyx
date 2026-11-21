@@ -225,6 +225,25 @@ db.exec(`CREATE TABLE IF NOT EXISTS ydocs_saved (
   base_hash TEXT,
   base TEXT
 )`);
+// 2026-11-21: notices to a document's editors that a change on disk was merged with edits made in the
+// editor and, where both changed the same place, the file's version was kept — theirs is the version
+// `version_id` in History (docnotices.ts). `kind`: 'disk' (while open or at an open), 'restart' (edits
+// the server had not written before it stopped), 'stale' (such edits kept whole, the file loaded).
+// Each person is told once (`doc_notices_seen`): at once when connected, else at their next open.
+db.exec(`CREATE TABLE IF NOT EXISTS doc_notices (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  doc_id TEXT NOT NULL,
+  version_id INTEGER,
+  kind TEXT NOT NULL,
+  places INTEGER,
+  created_at INTEGER NOT NULL
+)`);
+db.exec('CREATE INDEX IF NOT EXISTS doc_notices_doc ON doc_notices(doc_id, created_at)');
+db.exec(`CREATE TABLE IF NOT EXISTS doc_notices_seen (
+  notice_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  PRIMARY KEY (notice_id, user_id)
+)`);
 db.exec(`CREATE TABLE IF NOT EXISTS e2e_user_keys (
   user_id INTEGER PRIMARY KEY,
   public_key TEXT NOT NULL,
