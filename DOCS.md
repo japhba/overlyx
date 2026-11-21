@@ -1082,7 +1082,10 @@ blend.
     text typed into them — and triangle, diamond, star, hexagon as SVG polygons stretched to their box
     with a constant-width outline), lines and arrows from where the drag started to where it ended
     (Shift: 45° steps), **Draw** (P; `deckink.ts`: pen, highlighter and eraser E with the documents'
-    margin-ink presets — a click on the picked colour / width changes it, `ol.deckInk`; the pen stays in
+    margin-ink presets — a click on the picked colour / width changes it, `ol.deckInk`; the pen, the
+    eraser and (21 Nov 2026, `HighlighterSettings.tsx`) the highlighter in hand clicked again open their
+    settings — the highlighter's: its colours, another one, its width on a slider with rungs at the
+    row's three widths; the pen stays in
     hand stroke after stroke until Esc. A stroke is GoodNotes' (`runtime/freehand.ts` `inkRuns`): a
     line through every point the pen reported (however few: loops stay loops), as far as the pen's
     **rounding** says (`nib.rounding`, default 30 %; strokes saved before it had none and draw at

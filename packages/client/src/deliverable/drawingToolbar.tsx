@@ -9,6 +9,7 @@ import { ICONS } from '../app/Toolbar';
 import type { InkShape } from '@overlyx/core';
 import './deckicons';
 import { PenSettings } from './PenSettings';
+import { HighlighterSettings } from './HighlighterSettings';
 import { editorContext } from '../editor/context';
 import { inkColorName } from '../editor/plugins/ink';
 import { fmtPt, pxToPt } from './units';
@@ -87,7 +88,11 @@ export function drawingToolbar(c: DrawingContext): ToolButton[][] {
         palette: { title: 'Pen', render: close => <PenSettings nib={ink.nib} color={ink.pens.pen.color} width={ink.pens.pen.width} habits={{ scribble: ink.scribble, fingersDraw: ink.fingersDraw, pencil: ink.pencil, penInks: ink.penInks, snap: ink.snap }}
           onChange={nib => takePen({ pen: 'pen', nib })} onHabits={h => c.ink.set(h)} onClose={close}
           onAllSettings={editorContext.ui ? () => editorContext.ui!.openDialog('preferences', 'drawing') : undefined} /> } },
-      { id: 'dk-ink-hl', title: 'Highlighter — with its own colour and width; what is under it shows through (draw and hold: a straight one)', icon: 'inkhl', active: c.tool === 'pen' && hl, action: () => { takePen({ pen: 'highlighter' }); done(); } },
+      { id: 'dk-ink-hl', title: 'Highlighter — with its own colour and width; what is under it shows through (draw and hold: a straight one); click it again for its settings: colour, width', icon: 'inkhl', active: c.tool === 'pen' && hl, action: () => { takePen({ pen: 'highlighter' }); done(); },
+        // (as the pen and the eraser: the one in hand clicked again — people pressed it again and again, 21 Nov 2026)
+        paletteWhenActive: true,
+        palette: { title: 'Highlighter', render: () => <HighlighterSettings color={ink.pens.highlighter.color} width={ink.pens.highlighter.width} colors={ink.pens.highlighter.colors} widths={ink.pens.highlighter.widths}
+          onChange={p => takePen({ pen: 'highlighter', ...p })} /> } },
       ...(c.comment ? [{ id: 'dk-ink-comment', title: 'Comment pen — marks in glowing orange that are review comments, not content (not presented, printed or published); hold the microphone that comes with it and talk: what you say with what you draw becomes a comment agents and co-authors can act on',
         icon: 'inkcomment', active: c.tool === 'pen' && cm, action: () => { takePen({ pen: 'comment' }); done(); } }] : []),
       { id: 'dk-ink-eraser', title: `Eraser (E) — ${ink.eraser.precise ? 'rubs out the part of a stroke it passes over' : 'removes the strokes it passes over'} (drawn ones: shapes and text stay); click it again for its settings: precise, size, highlighter only`,
