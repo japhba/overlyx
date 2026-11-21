@@ -1108,7 +1108,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         // attributed and macros would not render — keep the document read-only and retry
         metaAttempt++;
         const delay = Math.min(30000, 2000 * 2 ** Math.min(metaAttempt - 1, 4));
-        notify(`Could not load document metadata: ${e.message}${metaAttempt <= 8 ? ' — read-only until it loads, retrying…' : ' — read-only; reload the page to try again'}`, 'error');
+        // said once, and again when the retries give up (not at each of the eight)
+        if (metaAttempt === 1 || metaAttempt > 8) notify(`Could not load document metadata: ${e.message}${metaAttempt <= 8 ? ' — read-only until it loads, retrying…' : ' — read-only; reload the page to try again'}`, 'error');
         h.setEditable(false);
         if (metaAttempt <= 8) metaRetry = setTimeout(loadMeta, delay);
       });

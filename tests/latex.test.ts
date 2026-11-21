@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
+import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { parseLyx } from '../packages/core/src/lyx/parser.ts';
 import { exportLatex } from '../packages/core/src/latex/export.ts';
@@ -531,7 +532,7 @@ describe('lengths', () => {
 const LYX_BIN = spawnSync('which', ['lyx']).status === 0;
 
 describe.skipIf(!LYX_BIN)('comparison with LyX 2.4 export', () => {
-  const scratch = process.env.OVERLYX_SCRATCH ?? '/tmp/claude-0/-root-lyx/9250d901-48e6-4b48-98b5-a211e39f6f1d/scratchpad/lyx-compare';
+  const scratch = join(process.env.OVERLYX_SCRATCH ?? tmpdir(), 'overlyx-lyx-compare');
   const files = ['examples/Welcome.lyx', 'doc/Intro.lyx', 'examples/Example_%28LyXified%29.lyx', 'doc/Tutorial.lyx'].map(f => join(LYX_LIB, f));
   for (const f of files) {
     it(`body of ${f.split('/').pop()} matches modulo whitespace`, () => {

@@ -464,9 +464,10 @@ describe('preamble, classes and child documents', () => {
     expect(bodyOf(out)).toContain('\\citep{k}');
   });
 
-  it('project-local layout files are found', () => {
-    const dir = '/root/projects/recurrent_feature';
-    if (!existsSync(join(dir, 'icml.layout'))) return;
+  // (a real project's own layout file: only where its directory is readable — root's, not another account's)
+  const icmlDir = '/root/projects/recurrent_feature';
+  it.skipIf(!existsSync(join(icmlDir, 'icml.layout')))('project-local layout files are found', () => {
+    const dir = icmlDir;
     const r = parseTex('\\documentclass{icml}\n\\begin{document}\n\\section{S}\nText.\n\\end{document}\n', { localDirs: [dir] });
     expect(headerValue(r.doc.header, 'textclass')).toBe('icml');
     expect(r.doc.body[0].layout).toBe('Section');

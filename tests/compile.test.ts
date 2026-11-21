@@ -6,12 +6,13 @@
 import { describe, it, expect } from 'vitest';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { parseLyx } from '../packages/core/src/lyx/parser.ts';
 import { exportLatex } from '../packages/core/src/latex/export.ts';
 import { LYX_LIB } from './lyxlib.ts';
 
-const SCRATCH = process.env.OVERLYX_SCRATCH ?? '/tmp/claude-0/-root-lyx/9250d901-48e6-4b48-98b5-a211e39f6f1d/scratchpad/compile-tests';
+const SCRATCH = join(process.env.OVERLYX_SCRATCH ?? tmpdir(), 'overlyx-compile-tests');
 const HAVE_LATEXMK = spawnSync('which', ['latexmk']).status === 0;
 
 interface CompileResult { pdf: boolean; errors: string[]; log: string; warnings: string[] }
@@ -752,9 +753,9 @@ describe.skipIf(!HAVE_LATEXMK)('compile with latexmk', () => {
     expect(existsSync(join(SCRATCH, 'synthetic', 'synthetic.bbl'))).toBe(true);
   }, 300000);
 
-  it('bayesian_chaos (revtex4-2, includes, svg graphics, bibtex)', () => {
+  // (root's copy of a real paper: skipped where it is not readable)
+  it.skipIf(!existsSync('/root/projects/bayesian_chaos/main.lyx'))('bayesian_chaos (revtex4-2, includes, svg graphics, bibtex)', () => {
     const file = '/root/projects/bayesian_chaos/main.lyx';
-    if (!existsSync(file)) return;
     const r = exportAndCompile(file, join(SCRATCH, 'bayesian_chaos'), 400000);
     report('bayesian_chaos', r);
     expect(r.pdf).toBe(true);

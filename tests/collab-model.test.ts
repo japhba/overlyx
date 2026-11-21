@@ -426,7 +426,7 @@ function runRandom(seed: number, steps: number, diffing = false) {
           Y.iterateDeletedStructs(w.tr, w.tr.deleteSet, st => { if (st instanceof Y.Item) dels.push(st.content instanceof Y.ContentString ? JSON.stringify(st.content.str) : st.content.constructor.name); });
           console.log('  ins', ins.join(' '), '\n  del', dels.join(' '));
         }
-        require('fs').writeFileSync('/tmp/claude-0/-root/f7a517a7-ebe6-4c3d-938c-3147d563d36c/scratchpad/step.json', JSON.stringify({ before: docBefore.toJSON(), after: p.doc.toJSON() }));
+        require('fs').writeFileSync(require('path').join(require('os').tmpdir(), 'overlyx-collab-step.json'), JSON.stringify({ before: docBefore.toJSON(), after: p.doc.toJSON() }));
       }
       if (process.env.TRACE_LOG) console.log(`LOG ${step}: ${log[log.length - 1]}`);
       settle(p, i, typedNow, docBefore);

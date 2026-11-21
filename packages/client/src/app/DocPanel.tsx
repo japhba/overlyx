@@ -127,7 +127,8 @@ export function DocPanel({ current, currentDoc, refreshKey, outline, activePos, 
   };
 
   const fetchStatic = (id: string) => {
-    api.docOutline(id).then(r => setStatics(s => ({ ...s, [id]: r.headings }))).catch(e => { setStatics(s => ({ ...s, [id]: s[id] ?? [] })); notify('Outline: ' + (e as Error).message, 'error'); });
+    // (offline — no answer at all — the entry just stays without headings; a server's refusal is said, with the file)
+    api.docOutline(id).then(r => setStatics(s => ({ ...s, [id]: r.headings }))).catch(e => { setStatics(s => ({ ...s, [id]: s[id] ?? [] })); if ((e as { status?: number }).status) notify(`Could not read the outline of ${id.split('/').pop()}: ${(e as Error).message}`, 'error'); });
   };
   const toggle = (id: string) => {
     const open = !expanded[id];

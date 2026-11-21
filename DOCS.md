@@ -4361,6 +4361,14 @@ npm test                                  # vitest (round trips, conversions, La
 npx playwright test                       # e2e (needs the dev servers running)
 ```
 
+`npm test` means the same from every account (root, `jan`, the autodeploy's checker): `tests/setup-env.ts`
+(vitest `setupFiles`) finds LyX's layouts when `LYX_LAYOUT_DIR` is unset (the repo's `lyx` submodule, the
+LyX tree the repo sits in, `~/lyx/lib`, root's) and gives each account its own temporary directory
+(`$TMPDIR/overlyx-tests-<uid>`: /tmp is full of root's fixed-name test directories). Tests that read real
+projects or need a program (`/root/projects`, `lyx`, `latexmk`) skip with a reason where they are missing;
+a server test sets `OVERLYX_DATA_DIR` / `OVERLYX_PROJECTS_DIR` first (config.ts otherwise gives a test a
+throw-away tree, never the instance's).
+
 The e2e suites copy real papers (`OVERLYX_E2E_FIXTURES`, default `/root/projects/jan`) into scratch
 projects in the admin's namespace (`admin/e2e-…`); to keep them away from the production server and
 its data, run them against an isolated instance:

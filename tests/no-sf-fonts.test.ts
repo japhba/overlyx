@@ -11,8 +11,8 @@ import { join } from 'node:path';
 
 const ROOT = join(__dirname, '..');
 const FORBIDDEN = /-apple-system|BlinkMacSystemFont|\bsystem-ui\b|\bui-(?:sans-serif|serif|monospace|rounded)\b|\.?\bSF[ -](?:Pro|Compact|Mono|Camera|Arabic|Hebrew|Armenian|Georgian)\b|SFMono|SFNS|--sf-font|"New York"|'New York'/i;
-/** lines that name the keywords only to recognise them, never to use them */
-const ALLOWED = [/^const GENERIC = /];
+/** lines that name the keywords only to recognise them, never to use them (pptx-text.ts's is page-side ES5: `var`) */
+const ALLOWED = [/^(?:const|let|var) GENERIC = /];
 
 describe('no San Francisco fonts', () => {
   it('no font stack names San Francisco or a keyword that resolves to it', () => {

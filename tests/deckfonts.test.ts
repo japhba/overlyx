@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+// (decktoolbar.tsx reaches the app's theme through BackgroundPicker → TextStyles → toolbars → MenuBar: it touches the document when loaded)
 import { expect, it } from 'vitest';
 import { blankDeck } from '../packages/core/src/html/deliverable.ts';
 import { embeddedFontFamilies, fontPortabilityWarning, fontResource, firstFontFamily, googleFontSpec, myDeckFonts, deckFontFor } from '../packages/client/src/deliverable/deckfonts';
