@@ -565,7 +565,11 @@ blend.
   went wrong right: a modal says which files it replaces and removes, files unsaved in an editor and
   files that were only ever here are left alone, and every version it replaces is copied first into
   `.git/overlyx-sync/kept/<time>/` — *Undo* on the notice afterwards puts them back (`restoreKept`;
-  they then reach the server as edits). A clone *inside* a workspace
+  they then reach the server as edits). A sync out of step for ten minutes (`STOP_NOTICE_MS`:
+  offline, an error, paused by git, another branch or an older checkout — not "synced by another
+  window", the engine's `status.cause` `lock`, and not the user's own Pause) is said once in a
+  notification (*Sync Now* / *Show Log*), not only by the status bar; back in step, a status bar
+  message says so, and the next spell may notify again (test `vscode-sync-stopped`). A clone *inside* a workspace
   folder is synced too, without being added to the workspace (14 Oct 2026; a paper in a subdirectory
   or submodule of its code's repository): `nestedClones` searches each folder that is not a clone
   itself breadth first, three levels down, at most 2000 directories (hidden ones, `node_modules`,

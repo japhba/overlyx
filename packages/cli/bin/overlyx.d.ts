@@ -14,6 +14,8 @@ export interface SyncChanges {
 export interface SyncStatus {
   /** idle: in step; paused: the engine waits (another process, another branch, git busy) — `message` says why */
   state: 'idle' | 'syncing' | 'paused' | 'offline' | 'error' | 'signin';
+  /** why a paused engine waits: another engine syncs the clone (it is in step), another branch, git busy, an older checkout */
+  cause?: 'lock' | 'branch' | 'git' | 'checkout' | null;
   message: string;
   lastSync: number;
   conflicts: (SyncChanges['conflicts'][number] & { at: number })[];

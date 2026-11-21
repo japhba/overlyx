@@ -55,6 +55,9 @@ interface FolderSync {
   connecting: Promise<void> | null;
   /** the files git put back that the user was last told of (one notice per new set) */
   heldNoted?: string;
+  /** since when the sync has not been in step (offline, an error, paused by git or a branch), and whether that was said */
+  stoppedSince?: number | null;
+  stopNoted?: boolean;
 }
 
 const DEFAULT_HOST = 'https://overlyx.app';
@@ -97,6 +100,8 @@ const syncedBefore = (dir: string) => { try { return fs.existsSync(path.join(git
 /** directories never searched for clones: dependencies, environments, build output */
 const SKIP = new Set(['node_modules', '__pycache__', 'venv', 'env', 'site-packages', 'dist', 'build', '_build', 'target', 'out']);
 const NEST_DEPTH = 3, NEST_DIRS = 2000, RESCAN_MS = 120_000;
+/** a sync not in step for this long is said in a notification (once per spell), not only in the status bar */
+export const STOP_NOTICE_MS = 10 * 60_000;
 
 /** The git clones below `root` (not `root` itself): directories with a .git (a directory, or a file
  *  for submodules and worktrees) at most NEST_DEPTH levels down, breadth first, at most NEST_DIRS
@@ -161,8 +166,34 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
     f.item.show();
   }
 
+  /**
+   * A spell out of step: offline, an error, paused by git or another branch — not "another window
+   * syncs this clone" (it is in step there), not the user's own Pause (no engine then). It starts at
+   * the first such status and ends at the next round in step; `stopNotice` says it once it lasts.
+   */
+  function noteStopped(f: FolderSync, s: SyncStatus): void {
+    if (s.state === 'offline' || s.state === 'error' || (s.state === 'paused' && s.cause !== 'lock')) { f.stoppedSince ??= Date.now(); return; }
+    if (s.state !== 'idle' && !(s.state === 'paused' && s.cause === 'lock')) return;
+    if (f.stopNoted) vscode.window.setStatusBarMessage(`$(check) OverLyX: ${f.target.project} is in step again`, 8000);
+    f.stoppedSince = null; f.stopNoted = false;
+  }
+
+  function stopNotice(): void {
+    for (const f of syncs.values()) {
+      const s = f.engine?.status;
+      if (!s || !f.stoppedSince || f.stopNoted || Date.now() - f.stoppedSince < STOP_NOTICE_MS) continue;
+      f.stopNoted = true;
+      const why = s.message || (s.state === 'offline' ? 'the server cannot be reached' : s.state);
+      void vscode.window.showWarningMessage(`OverLyX: ${f.target.project} has not been in step with ${hostName(f.target.host)} since ${time(f.stoppedSince)} — ${why}. What you save stays on this computer until it is.`, 'Sync Now', 'Show Log').then(a => {
+        if (a === 'Sync Now') void vscode.commands.executeCommand('overlyx.syncNow', f.dir);
+        else if (a === 'Show Log') out.show(true);
+      });
+    }
+  }
+
   /** "syncing" shows only when a round takes a moment (it runs after every save and every change on the server) */
   function onStatus(f: FolderSync, s: SyncStatus): void {
+    noteStopped(f, s);
     if (s.state === 'signin') {
       // the credential stopped working (revoked, expired): sign in again
       disconnect(f);
@@ -298,6 +329,7 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
   function disconnect(f: FolderSync): void {
     f.engine?.stop();
     f.engine = null;
+    f.stoppedSince = null; f.stopNoted = false;   // (paused or signed out: said otherwise)
     render(f);
   }
 
@@ -565,7 +597,9 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
   };
   webListeners.add(updateOnWeb);
 
+  const stopTimer = setInterval(stopNotice, 60_000);
   context.subscriptions.push(
+    { dispose: () => clearInterval(stopTimer) },
     out,
     { dispose: () => { disposed = true; for (const dir of [...syncs.keys()]) removeFolder(dir); } },
     vscode.commands.registerCommand('overlyx.syncNow', async (dir?: string) => {

@@ -10,7 +10,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execFileP = promisify(execFile);
-const VERSION = '0.8.7';
+const VERSION = '0.8.8';
 const DEFAULT_HOST = 'https://overlyx.app';
 
 const HELP = `OverLyX CLI ${VERSION}
@@ -1776,7 +1776,7 @@ export class SyncEngine {
     let known = (await gitOut(this.dir, ['rev-parse', '-q', '--verify', `refs/remotes/${this.o.remote}/${remote.branch}`]).catch(() => '')).trim();
     if (known !== remote.head) known = await this.fetchBranch(remote.branch).catch(() => known);
     if (!known || !(await gitOut(this.dir, ['merge-base', '--is-ancestor', head, known]).then(() => true, () => false))) return false;
-    this.setStatus({ state: 'paused', message: `the checkout is at ${head.slice(0, 7)}, an older commit than ${remote.branch} on the server — the sync waits so as not to send those older files back (git switch ${remote.branch} to resume)` });
+    this.setStatus({ state: 'paused', cause: 'checkout', message: `the checkout is at ${head.slice(0, 7)}, an older commit than ${remote.branch} on the server — the sync waits so as not to send those older files back (git switch ${remote.branch} to resume)` });
     return true;
   }
 
@@ -1897,16 +1897,16 @@ export class SyncEngine {
     const changes = { sent: [], received: [], conflicts: [], waiting: [], notSent: [], held: [], errors: [] };
     if (!this.gitDir) await this.open();
     const holder = this.lock();
-    if (holder) { this.setStatus({ state: 'paused', message: `synced by another process (${holder.by || 'pid ' + holder.pid})` }); return changes; }
+    if (holder) { this.setStatus({ state: 'paused', cause: 'lock', message: `synced by another process (${holder.by || 'pid ' + holder.pid})` }); return changes; }
     this.loadState();   // (another engine may have synced the clone since this one last did)
-    const lost = () => { if (this.holds()) return false; this.setStatus({ state: 'paused', message: 'another process took over the sync' }); return true; };
+    const lost = () => { if (this.holds()) return false; this.setStatus({ state: 'paused', cause: 'lock', message: 'another process took over the sync' }); return true; };
     const busy = await this.busyGit();
-    if (busy) { this.setStatus({ state: 'paused', message: `git is in the middle of something (${busy}) — the sync waits` }); return changes; }
-    this.setStatus({ state: 'syncing', message: '' });
+    if (busy) { this.setStatus({ state: 'paused', cause: 'git', message: `git is in the middle of something (${busy}) — the sync waits` }); return changes; }
+    this.setStatus({ state: 'syncing', cause: null, message: '' });
     let remote = await this.remoteState();
     this.role = remote.role ?? this.role;
     const branch = await this.localBranch();
-    if (remote.branch && branch && branch !== remote.branch) { this.setStatus({ state: 'paused', message: `on branch ${branch} — the sync runs on ${remote.branch}` }); return changes; }
+    if (remote.branch && branch && branch !== remote.branch) { this.setStatus({ state: 'paused', cause: 'branch', message: `on branch ${branch} — the sync runs on ${remote.branch}` }); return changes; }
     if (!branch && await this.olderCheckout(remote)) return changes;
     if (!this.state) { this.state = await this.initialState(remote); this.saveState(); }
     const base = this.state.files;
