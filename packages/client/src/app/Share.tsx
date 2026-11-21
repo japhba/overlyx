@@ -160,13 +160,22 @@ export function ShareDialog({ project, user, doc, view, onClose, onChanged }: { 
   const quick = info ? quickOf(quickRole) : null;
   const copyQuick = async () => {
     if (busy) return;
-    let l = quick;
-    if (!l) {
-      setBusy(true); setErr('');
-      try { const r = await api.createLink(project, quickRole); setInfo(r.share); onChanged?.(); l = r.link; }
-      catch (e) { setErr((e as Error).message); return; }
-      finally { setBusy(false); }
-    }
+    if (quick) { await copy(quick); return; }
+    setBusy(true); setErr('');
+    const made = api.createLink(project, quickRole);
+    // Safari (the iPad) lets a page write to the clipboard only within the click itself, and the
+    // address exists only once the server has answered: hand the clipboard a promise of it right now
+    let early: Promise<void> | null = null;
+    try {
+      if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
+        early = navigator.clipboard.write([new ClipboardItem({ 'text/plain': made.then(r => new Blob([shareUrl(r.link.token, project, linkPath, linkView)], { type: 'text/plain' })) })]);
+      }
+    } catch { early = null; }
+    let l: ShareLinkInfo;
+    try { const r = await made; setInfo(r.share); onChanged?.(); l = r.link; }
+    catch (e) { setErr((e as Error).message); early?.catch(() => undefined); return; }
+    finally { setBusy(false); }
+    if (early && await early.then(() => true, () => false)) { setCopied(l.token); setTimeout(() => setCopied(c => (c === l.token ? null : c)), 2000); return; }
     await copy(l);
   };
   // what the link can open: the file open now and the project's documents (main document first)
