@@ -15,7 +15,8 @@
  */
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import { lazy, Suspense } from 'preact/compat';
-import { api, type VersionInfo } from '../../api';
+import { api, type VersionInfo, type ActivityEntry } from '../../api';
+import { describe } from '../Share';
 import { isE2eDocId } from '../../e2e/known';
 import { projectOfDoc, docPathOf } from '@overlyx/core';
 import { uiPrompt, uiConfirm } from '../Dialogs';
@@ -235,7 +236,11 @@ function ProjectHistory({ project, current, onOpen, say }: { project: string; cu
   const [commits, setCommits] = useState<Commit[] | null>(null);
   const [failed, setFailed] = useState(false);
   const [compare, setCompare] = useState<{ doc: string; custom: CustomCompare } | null>(null);
+  // the owner's activity log (it was the Share dialog's): who opened, built, pulled or pushed, shared —
+  // and an administrator's access; only the owner may read it (the server refuses the others: none shown)
+  const [activity, setActivity] = useState<ActivityEntry[] | null>(null);
   const load = () => {
+    void api.activity(project, 60).then(r => setActivity(r.entries)).catch(() => setActivity(null));
     void api.projectChanges(project).then(r => setCommits(r.commits)).catch(() => setCommits(null));
     return api.projectHistory(project).then(d => { setData(d); setFailed(false); }).catch(() => setFailed(true));
   };
@@ -327,6 +332,19 @@ function ProjectHistory({ project, current, onOpen, say }: { project: string; cu
         ))}</ul>
         {!data.recent.length && <div class="hist-note">No versions in this project yet.</div>}
       </section>
+      {activity && activity.length > 0 && (
+        <section class="hist-day" data-history-activity>
+          <h4>Activity: opened, built, pulled, pushed, shared</h4>
+          <ul>{activity.map(e => (
+            <li key={e.id} class={'hist-item' + (e.action === 'admin-access' ? ' hist-admin' : '')}>
+              <span class="hist-main static">
+                <span class="hist-time">{dayLabel(e.at)} {clock(e.at)}</span>
+                <span class="hist-name">{e.user?.name ?? 'Someone'} {describe(e)}</span>
+              </span>
+            </li>
+          ))}</ul>
+        </section>
+      )}
     </div>
   );
 }

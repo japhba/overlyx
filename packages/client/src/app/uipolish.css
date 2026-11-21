@@ -56,3 +56,19 @@ html[data-ui="modern"] .settings-search { border-radius: var(--m-radius); border
 .set-ctl [data-setting="display-name"] { flex-wrap: nowrap; }
 .set-ctl [data-setting="display-name"] input { flex: 1 1 auto; min-width: 0; }
 .set-password { display: grid; gap: 6px; max-width: 22em; }
+
+/* Share: "Anyone with the link [Can view ▾] [Copy link]" at the top (Share.tsx) */
+.share-quick { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto; align-items: center; gap: 4px 10px; padding: 10px 12px; margin: 0 0 14px; border: 1px solid var(--ui-border); border-radius: 8px; }
+.share-quick-icon { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; color: var(--ui-muted); }
+.share-quick[data-share-quick="on"] .share-quick-icon { color: var(--link); }
+.share-quick-say { display: flex; flex-direction: column; min-width: 0; }
+.share-quick-say small { color: var(--ui-muted); font-size: 12px; }
+.share-quick-hint { grid-column: 2 / -1; margin: 0; }
+html[data-ui="modern"] .share-quick { border-color: var(--m-line); border-radius: var(--m-radius); }
+@media (max-width: 560px) {
+  .share-quick { grid-template-columns: auto minmax(0, 1fr); }
+  .share-quick > select, .share-quick > button { grid-column: 2; justify-self: start; }
+}
+
+/* History ▸ Whole project ▸ Activity: an administrator's access stands out */
+.hist-item.hist-admin .hist-name { color: var(--warn-fg, var(--err)); }

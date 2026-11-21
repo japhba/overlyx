@@ -2567,6 +2567,20 @@ blend.
   The status bar's build stamp reads `2026-11-21 12:06` (`buildStampShown`; the stamp itself, which
   telemetry and presenting compare, is unchanged); the start page's switches say **Sort:** and
   **Search:**. `tests/account-profile.test.ts`.
+  **Third round (21 Nov 2026, the owner's choice):** the Share dialog opens with **Anyone with the
+  link [Can view ▾] [Copy link]** (`data-share-quick`): the row is about the newest link to the whole
+  project of the chosen role that a person made (an agent's links are its own); Copy link makes it
+  the first time (`POST …/share/links`) and copies it after, the row then says it is on, how many came
+  in, and offers Turn off (the usual revoke, which may take those people out too). The role picks which
+  link the row is about — a link keeps its role for good; New link… stays for more links. E2E projects
+  say who can read through it (someone with the key gives it; a guest cannot). The activity log moved
+  to **History ▸ Whole project ▸ Activity** (owner only: the server refuses others and the section is
+  not shown); the Share dialog keeps an *Administrator access* list (`data-share-activity`) when an
+  administrator opened the project, and a line saying where the rest is. The **start page's button
+  row is + New alone**: Overleaf, LyX and Google Docs imports are + New's "Or bring a project over"
+  (`data-new-import-from`); the files panel and My library are the left bar's keys, the start
+  screen's **View** menu (Files panel, My library…) and, where a narrow screen has no left bar, the
+  status bar's corner keys Files and Library (`data-corner-library`).
 * **Fonts, for the editor and for the PDF separately** (like LyX's screen fonts and document fonts;
   catalogue in `client/src/fonts/catalog.ts`). *Settings ▸ Fonts* (per browser, both shells) has two
   choices. *Text font* (`prefs.editorFont`): Computer Modern (bundled CMU Serif, the default), the text

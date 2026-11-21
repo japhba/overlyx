@@ -151,6 +151,24 @@ export function ShareDialog({ project, user, doc, view, onClose, onChanged }: { 
   const title = info?.title ?? projectShortName(project);
   // the links to the whole project (a folder's or file's own are under *Shared folders and files*)
   const projectLinks = info?.links.filter(l => !l.path) ?? [];
+  // "Anyone with the link" (Google Docs' row): the newest link to the whole project of the role chosen,
+  // made by a person (an agent's links are its own) — made only when Copy link is first pressed; the
+  // role picks which link the row is about (a link keeps its role for good), ✕ turns that one off
+  const quickOf = (r: 'view' | 'edit') => projectLinks.filter(l => l.role === r && !l.agent).sort((a, b) => b.createdAt - a.createdAt)[0] ?? null;
+  const [quickPick, setQuickPick] = useState<'view' | 'edit' | null>(null);
+  const quickRole = quickPick ?? (!quickOf('view') && quickOf('edit') ? 'edit' : 'view');
+  const quick = info ? quickOf(quickRole) : null;
+  const copyQuick = async () => {
+    if (busy) return;
+    let l = quick;
+    if (!l) {
+      setBusy(true); setErr('');
+      try { const r = await api.createLink(project, quickRole); setInfo(r.share); onChanged?.(); l = r.link; }
+      catch (e) { setErr((e as Error).message); return; }
+      finally { setBusy(false); }
+    }
+    await copy(l);
+  };
   // what the link can open: the file open now and the project's documents (main document first)
   const linkFiles = [...new Set([...(openPath ? [openPath] : []), ...(pdf?.docs ?? [])])];
   useEffect(() => { if (linkPath === null && pdf?.docs.length) setLinkPath(pdf.docs[0]); }, [pdf]);
@@ -179,6 +197,24 @@ export function ShareDialog({ project, user, doc, view, onClose, onChanged }: { 
   return (
     <>
     <Dialog title={`Share “${title}”`} onClose={onClose}>
+      {info && <div class="share-quick" data-share-quick={quick ? 'on' : 'off'}>
+        <svg class="share-quick-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7" /><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7" /></svg>
+        <span class="share-quick-say">
+          <b>Anyone with the link</b>
+          <small data-share-quick-state>{quick
+            ? <>On{quick.joined ? ` · ${quick.joined} ${quick.joined === 1 ? 'person' : 'people'} came in through it` : ''} · made {madeAt(quick.createdAt)}</>
+            : 'Off — Copy link turns it on'}</small>
+        </span>
+        <select value={quickRole} disabled={busy} aria-label="What the link lets people do" data-share-quick-role onChange={e => setQuickPick((e.target as HTMLSelectElement).value as 'view' | 'edit')}>
+          <option value="view">Can view</option><option value="edit">Can edit</option>
+        </select>
+        <button type="button" class="btn" disabled={busy} data-share-quick-copy onClick={() => void copyQuick()}>{quick && copied === quick.token ? 'Copied ✓' : 'Copy link'}</button>
+        {quick && <button type="button" class="mini" title="Turn this link off — its address stops working" disabled={busy} data-share-quick-off onClick={() => void revoke(quick)}>Turn off</button>}
+        <div class="hint share-quick-hint">{quickRole === 'edit'
+          ? 'Whoever has it can change everything in the project — write, comment, upload, delete files — without an account if they like, as a guest.'
+          : 'Whoever has it can read every file with its comments, build the PDF, download and clone the project — without an account if they like, as a guest.'}
+          {e2e && ' The project is end-to-end encrypted: they read it once someone who holds its key gives it to them (below) — a guest without an account cannot.'}</div>
+      </div>}
       <div class="share-add">
         <input type="text" autofocus placeholder="Username or e-mail address" value={who} disabled={!info} onInput={e => setWho((e.target as HTMLInputElement).value)}
           onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void add(); } }} />
@@ -327,18 +363,20 @@ export function ShareDialog({ project, user, doc, view, onClose, onChanged }: { 
             {pdf && !pdf.docs.length && <div class="hint">No documents in this project yet.</div>}
           </div>
           </>}
-          <h4>Activity</h4>
-          <div class="hint">Who opened, built, pulled or pushed this project, changes to its sharing, and every time an administrator opened it (repeated opens by the same person are one entry per 10 minutes).</div>
-          <div class="share-activity git-tokens" data-share-activity>
-            {(activity ?? []).map(e => (
-              <div class={'git-token' + (e.action === 'admin-access' ? ' admin' : '')} key={e.id}>
-                <span class="name">{e.user ? (e.user.id === user.id ? 'You' : e.user.name) : 'Someone'}</span>
-                <span class="what">{describe(e)}</span>
-                <span class="meta">{ago(e.at)}</span>
-              </div>
-            ))}
-            {activity && !activity.length && <div class="hint">Nothing yet.</div>}
-          </div>
+          {/* (the whole activity log is in History ▸ Whole project; an administrator's access stays in sight here) */}
+          {(activity ?? []).some(e => e.action === 'admin-access') && <>
+            <h4>Administrator access</h4>
+            <div class="share-activity git-tokens" data-share-activity>
+              {(activity ?? []).filter(e => e.action === 'admin-access').slice(0, 5).map(e => (
+                <div class="git-token admin" key={e.id}>
+                  <span class="name">{e.user ? (e.user.id === user.id ? 'You' : e.user.name) : 'Someone'}</span>
+                  <span class="what">{describe(e)}</span>
+                  <span class="meta">{ago(e.at)}</span>
+                </div>
+              ))}
+            </div>
+          </>}
+          <div class="hint" data-share-activity-where>Who opened, built, pulled or pushed the project and changed its sharing: History ▸ Whole project, in any of its documents (the clock in the left bar).</div>
 
         </>
       )}
