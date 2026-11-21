@@ -268,9 +268,9 @@ blend.
   the writer, and a document setting changed in the dialog is merged into the preamble line by
   line. A file without a managed block gets one (right before `\begin{document}`) only when the
   content comes to need a package or macro the file does not load, or uses something only the
-  block defines (layout objects, the change-tracking macros); a block is brought up to date when
-  the writer's differs (an update of OverLyX's macros), and removed when it would hold nothing but
-  the settings line. A co-author's `git diff` after one typed word shows that paragraph, not a
+  block defines (layout objects, the change-tracking macros); a block is removed when it would
+  hold nothing but the settings line, and otherwise kept as the file has it while the content
+  needs the same (below). A co-author's `git diff` after one typed word shows that paragraph, not a
   reformatted file. How: the parser records where every body paragraph came from
   (`ParseTexResult.sources`), the writer where it wrote each one (`spans`); paragraphs are matched
   by the writer's text for them, and the base's glue is kept where the writer's glue is the same;
@@ -282,6 +282,28 @@ blend.
   goes through it: the server (`server/src/docwork.ts renderDoc`, so autosave, MCP edits, agent
   turns, restores), and the VS Code extension (`DocSession`, against the TextDocument's text). Costs
   one extra parse per save; the base's parse and writer output are cached per document between saves.
+* **The first edit leaves the preamble, the settings line and the neighbours alone** (21 Nov 2026;
+  `tests/tex-firstsave.test.ts`: the starters, the welcome document and synthetic documents shaped
+  like real ones, unedited save byte for byte and a one-word edit changing only its paragraph's
+  lines; on copies of 62 of the owner's documents the unedited save went from 54 to 62 identical,
+  the one-word edit from 38 to 48 of 48 local). Three rules make it so. *A settings line says every
+  setting*: the settings a preamble implies (natbib / biblatex, hyperref, cleveref, fontspec →
+  XeTeX, `\bibliographystyle`, babel's language; `tex/parse.ts`) are derived only for a file
+  without one — a file from elsewhere; the line omits defaults, so a key it leaves out is the
+  default, and an imported LyX document whose `\input{preamble}` loads fontspec under `\ifxetex`
+  stays pdfLaTeX. (A document OverLyX wrote whose preamble later gains fontspec is not switched to
+  XeTeX by itself any more: its author ticks non-TeX fonts or adds `% !TeX program = xelatex`.)
+  *The file's managed block is the file's* (`preserve.ts splitOuter`): kept byte for byte while the
+  writer writes the same block for the base and the new document — what a newer OverLyX would write
+  there (or no longer writes: `\usepackage{amstext}`, a doubled `\addbibresource`, hyperref for a
+  PDF setting) waits until the content needs something new; then the settings line changes key by
+  key (`mergeSettings`) and the other lines by a three-way merge, the writer's whole block only
+  where that does not merge or where the file's block lacks a definition the body uses (a
+  co-author's `\lyxadded` from git). *A paragraph's source takes its alignment environment's
+  closer along* (`\end{center}`, as the writer's span takes `\par\end{center}`), so text right
+  after a centred table is edited without rewriting the table. And the writer knows what packages
+  load (`tex/preamble.ts providedFeatures`: hyperref and biblatex load url, amsmath amstext, …):
+  `\path{…}` in a document with hyperref adds no `\usepackage{url}`.
 * **One document's work never stalls the others** (`server/src/docpool.ts`, `docworker.ts`). Making
   a save's text, opening a document, merging a change on disk, an agent's edit (parse, merge,
   tracked diff) take seconds for a big paper — on the server's single event loop that stalled every

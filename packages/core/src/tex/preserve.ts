@@ -22,7 +22,7 @@ import type { LyxDocument } from '../lyx/ast.ts';
 import { align } from '../lyx/merge.ts';
 import type { ParseTexResult } from './parse.ts';
 import type { WriteTexResult } from './write.ts';
-import { MANAGED_BEGIN, MANAGED_END, SETTINGS_PREFIX, maskComments } from './preamble.ts';
+import { MANAGED_BEGIN, MANAGED_END, SETTINGS_PREFIX, maskComments, readSettings, settingsLine } from './preamble.ts';
 
 /** What one document remembers between saves (the base's parse and writer output; the last result). */
 export interface PreserveCache {
@@ -253,10 +253,9 @@ function preserve(doc: LyxDocument, full: WriteTexResult, o: PreserveOptions, ca
     if (seg) segments.push(seg);
     // a file without a managed block gets one when its body uses what only the block defines (the
     // layout macros, the change-tracking ones, \guillemotleft in OT1, …): it would not compile
-    if (!parts.pres[preAt].includes(MANAGED_BEGIN) && usesDefined(R, parts.blockNames)) {
-      const k = parts.pres.findIndex((x, i) => i > preAt && x.includes(MANAGED_BEGIN));
-      if (k >= 0) preAt = k;
-    }
+    // — or a file's own block from before keeps it, lacking a definition the body now uses: the next
+    // preamble that has them (the last, the writer's own, has everything)
+    while (preAt + 1 < parts.pres.length && usesDefined(R, parts.lacks[preAt])) preAt++;
     const pre = parts.pres[preAt];
     for (const sg of segments) { sg.rFrom += pre.length; sg.rTo += pre.length; }
     for (let q = 0; q < n1; q++) { const x = spans[q]; if (x) spans[q] = { start: x.start + pre.length, end: x.end + pre.length }; }
@@ -413,6 +412,8 @@ interface Outer {
   post: string;
   /** commands and environments the writer's managed block defines (LyX's and OverLyX's own) */
   blockNames: Set<string>;
+  /** per preamble of `pres`: which of `blockNames` it does not define */
+  lacks: Set<string>[];
 }
 
 /** The names a managed block defines; \tabularnewline is LaTeX's own (LyX provides it for old versions). */
@@ -431,31 +432,96 @@ function usesDefined(body: string, names: Set<string>): boolean {
   return false;
 }
 
-/** The preamble and trailer of the result: the base's own, with the writer's changes merged in. */
+/**
+ * The preamble and trailer of the result: the base's own, with the writer's changes merged in.
+ *
+ * The file's managed block stays byte for byte as long as what the content needs from it is the
+ * same (the writer writes the same block for the base and for the new document): a save after a
+ * typed word does not bring in what a newer OverLyX would write there, nor drop what an older one
+ * wrote. When the needs change (a first tracked change, a setting changed in the dialog), only
+ * that change is made to the file's block — the settings line key by key, the other lines as a
+ * three-way merge — and the writer's whole block where that does not merge, or where the file's
+ * block lacks a definition the body uses (a co-author's \lyxadded from git: see preserve). A
+ * package the writer's block would load and the file's does not stays out, as it was before the
+ * edit (an older OverLyX did not load hyperref for a PDF setting without "use hyperref", as LyX).
+ */
 function splitOuter(T: string, P0: ParseTexResult, Wb: WriteTexResult, Wn: WriteTexResult, fragment: boolean): Outer {
   const preT = T.slice(0, P0.bodyRange!.start), preB = Wb.text.slice(0, Wb.bodyRange.start), preN = Wn.text.slice(0, Wn.bodyRange.start);
   const postT = T.slice(P0.bodyRange!.end), postB = Wb.text.slice(Wb.bodyRange.end), postN = Wn.text.slice(Wn.bodyRange.end);
   const post = postB === postN ? postT : postN;
   const t = managedParts(preT), b = managedParts(preB), n = managedParts(preN);
   const blockNames = fragment ? new Set<string>() : definedIn(n.block);
-  const out = (...pres: string[]): Outer => ({ pres: [...pres, preN], post, blockNames });
-  if (fragment) return preB === preN ? out(preT) : out();
+  const out = (...pres: string[]): Outer => {
+    const all = [...pres, preN];
+    return { pres: all, post, blockNames, lacks: all.map(p => { const have = definedIn(p); return new Set([...blockNames].filter(x => !have.has(x))); }) };
+  };
+  if (fragment) {
+    if (preB === preN) return out(preT);
+    // a child's settings line: the setting that changed, in the file's line
+    const merged = mergeSettingsLines(preT, preB, preN);
+    return merged !== null ? out(merged) : out();
+  }
   if (!b.block || !n.block || b.after !== n.after) return preB === preN ? out(preT) : out();
   const before = b.before === n.before ? t.before : merge3(t.before, b.before, n.before);
   if (before === null) return out();
   // the new block in place of the base's — or, when there is none, on the lines right before
   // \begin{document} (taking it out again gives the file back)
   const withBlock = before + (before === '' || before.endsWith('\n') ? '' : '\n') + n.block + t.after;
-  // the file's managed block is OverLyX's own: it is what the writer makes of the document now
-  // (also after an update of OverLyX's macros); a file without one gets one when the content comes
-  // to need it — or uses what it defines (see preserve)
-  const blockSame = t.block ? t.block === n.block : b.block === n.block;
-  if (blockSame) return t.block ? out(before + t.block + t.after) : out(before + t.after, withBlock);
-  if (!trivialBlock(n.block)) return out(withBlock);
-  // nothing in it but the settings line: the file may well do without (when reading it back
-  // without one gives the same settings); two blank lines around a removed block become one
-  const without = before + (before.endsWith('\n\n') && t.after.startsWith('\n') ? t.after.slice(1) : t.after);
-  return out(without, withBlock);
+  // nothing in the writer's block but the settings line: the file may well do without (when reading
+  // it back without one gives the same settings); two blank lines around a removed block become one
+  const without = () => before + (before.endsWith('\n\n') && t.after.startsWith('\n') ? t.after.slice(1) : t.after);
+  if (t.block) {
+    if (b.block === n.block) return out(before + t.block + t.after, withBlock);
+    const merged = mergeBlock(t.block, b.block, n.block);
+    const own = merged === null ? [] : [before + merged + t.after];
+    return trivialBlock(n.block) ? out(without(), ...own, withBlock) : out(...own, withBlock);
+  }
+  // a file without a block gets one when the content comes to need it — or uses what it defines
+  // (see preserve)
+  if (b.block === n.block) return out(before + t.after, withBlock);
+  return trivialBlock(n.block) ? out(without(), withBlock) : out(withBlock);
+}
+
+/**
+ * Settings JSON `t` (the file's) with the changes from `b` to `n` (the writer's for the base and the
+ * new document): a key that changed takes its new value or goes, every other key — also one the
+ * writer would no longer write, one it writes in another order — stays as the file has it.
+ */
+export function mergeSettings(t: Record<string, unknown>, b: Record<string, unknown>, n: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...t };
+  for (const k of new Set([...Object.keys(b), ...Object.keys(n)])) {
+    if (JSON.stringify(b[k]) === JSON.stringify(n[k])) continue;
+    if (k in n) out[k] = n[k]; else delete out[k];
+  }
+  return out;
+}
+
+/** `s` with its settings line (one at the start of a line) replaced by `line`. */
+function withSettingsLine(s: string, line: string): string {
+  const at = s.startsWith(SETTINGS_PREFIX) ? 0 : s.indexOf('\n' + SETTINGS_PREFIX) + 1;
+  if (at === 0 && !s.startsWith(SETTINGS_PREFIX)) return s;
+  const end = s.indexOf('\n', at);
+  return s.slice(0, at) + line + (end < 0 ? '' : s.slice(end));
+}
+
+/** Texts that each hold one settings line: `t` with the change from `b` to `n` made to its line, null when one has none. */
+function mergeSettingsLines(t: string, b: string, n: string): string | null {
+  const st = readSettings(t), sb = readSettings(b), sn = readSettings(n);
+  if (!st || !sb || !sn) return null;
+  const line = settingsLine(mergeSettings(st, sb, sn));
+  const merged = withSettingsLine(t, line);
+  // nothing but the line may have changed
+  return withSettingsLine(b, line) === withSettingsLine(n, line) ? merged : null;
+}
+
+/** The file's managed block `t` with the change from the writer's `b` to its `n`: the settings line key by key, the rest line by line. */
+function mergeBlock(t: string, b: string, n: string): string | null {
+  const st = readSettings(t), sb = readSettings(b), sn = readSettings(n);
+  if (st && sb && sn) {
+    const line = settingsLine(mergeSettings(st, sb, sn));
+    t = withSettingsLine(t, line); b = withSettingsLine(b, line); n = withSettingsLine(n, line);
+  }
+  return merge3(t, b, n);
 }
 
 /** A managed block with no packages or macros in it: the markers, the settings line, the comment. */

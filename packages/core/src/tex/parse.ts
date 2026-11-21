@@ -1511,7 +1511,11 @@ class BodyParser {
       this.envStack.push(env);
       this.parseText(s, ctx, cloneState(st), { env });
       this.envStack.pop();
+      const last = ctx.cur;
       this.endPar(ctx);
+      // the last paragraph's source takes the \end{center} along, as the writer's span does
+      // (…\par\end{center}): one kept next to an edited one brings its own closer (core tex/preserve.ts)
+      if (last && ctx === this.root && s === this.main) this.ends.set(last, s.pos);
       ctx.align = saved;
       return;
     }
@@ -2191,22 +2195,25 @@ export function parseTex(text: string, opts: ParseTexOptions = {}): ParseTexResu
   const dc = applyDocumentTheorems(loadDocumentClass(textclass, modules, layoutDir, opts.localDirs), split.userPreamble + '\n' + split.body, layoutDir, opts.localDirs);
   if (dc.warnings.length) warnings.push(...dc.warnings);
 
-  // derived settings (only used when the settings line does not say)
+  // derived settings: a file brought from elsewhere (no settings line) gets the settings its own
+  // preamble implies — natbib or biblatex citations, hyperref, cleveref, fontspec (XeTeX), babel's
+  // language. A file with a settings line was written by OverLyX: the line says every setting, one
+  // it leaves out is the default (it omits defaults), and the preamble's packages do not override
+  // it (an \ifxetex-guarded fontspec in an imported LyX document must not switch it to XeTeX;
+  // derived values written into the line would change the first save's preamble).
   const derived: Record<string, string> = {};
   const body = split.body;
-  if (!setStr('cite_engine')) {
+  if (!split.hasSettings) {
     if (facts.packages.has('biblatex')) { derived.cite_engine = 'biblatex'; derived.cite_engine_type = 'authoryear'; }
     else if (facts.packages.has('natbib') || dc.provides.has('natbib') || /\\cite[tp]\b/.test(body)) {
       derived.cite_engine = 'natbib';
       derived.cite_engine_type = /numbers/.test(facts.packageOptions.get('natbib') ?? '') ? 'numerical' : 'authoryear';
     }
-  }
-  if (!setStr('crossref_package') && facts.packages.has('cleveref')) derived.crossref_package = 'cleveref';
-  if (!setStr('use_hyperref') && facts.packages.has('hyperref')) derived.use_hyperref = 'true';
-  if (!setStr('use_non_tex_fonts') && facts.packages.has('fontspec')) { derived.use_non_tex_fonts = 'true'; derived.default_output_format = 'pdf4'; }
-  if (!setStr('biblio_style') && facts.bibliographystyle) derived.biblio_style = facts.bibliographystyle;
-  if (!setStr('use_minted') && facts.packages.has('minted')) derived.use_minted = '1';
-  if (!setStr('language')) {
+    if (facts.packages.has('cleveref')) derived.crossref_package = 'cleveref';
+    if (facts.packages.has('hyperref')) derived.use_hyperref = 'true';
+    if (facts.packages.has('fontspec')) { derived.use_non_tex_fonts = 'true'; derived.default_output_format = 'pdf4'; }
+    if (facts.bibliographystyle) derived.biblio_style = facts.bibliographystyle;
+    if (facts.packages.has('minted')) derived.use_minted = '1';
     const babel = /\\usepackage\[([^\]]*)\]\{babel\}/.exec(split.userPreamble);
     if (babel) { const last = babel[1].split(',').map(x => x.trim()).filter(Boolean).pop(); const l = last && [...langs.entries()].find(([, v]) => v.babel === last); if (l) derived.language = l[0]; }
   }

@@ -59,6 +59,8 @@ export interface DocumentSplit {
   hasDocument: boolean;
   /** settings JSON from the settings line (in the managed block, or at the top of a child) */
   settings: Record<string, unknown>;
+  /** the file has a settings line (OverLyX wrote it): it says every setting, a key left out is its default */
+  hasSettings: boolean;
 }
 
 /** `s` with every comment replaced by blanks of the same length (positions are preserved). */
@@ -88,7 +90,7 @@ function findOutsideComments(s: string, re: RegExp): number {
 }
 
 export function splitDocument(text: string): DocumentSplit {
-  const out: DocumentSplit = { head: '', documentclass: '', classOptions: '', className: '', userPreamble: '', managed: '', body: text, bodyStart: 0, trailer: '', hasDocument: false, settings: {} };
+  const out: DocumentSplit = { head: '', documentclass: '', classOptions: '', className: '', userPreamble: '', managed: '', body: text, bodyStart: 0, trailer: '', hasDocument: false, settings: {}, hasSettings: false };
   const dcPos = findOutsideComments(text, /\\documentclass\s*(\[[^\]]*\])?\s*\{[^}]*\}/);
   const beginPos = findOutsideComments(text, /\\begin\{document\}/);
   if (beginPos >= 0) {
@@ -117,12 +119,15 @@ export function splitDocument(text: string): DocumentSplit {
     }
     preamble = preamble.replace(/^%% OverLyX package options\r?\n[\s\S]*?^%% end OverLyX package options\r?\n/gm, '');
     out.userPreamble = preamble.replace(/^\n/, '').replace(/\s+$/, '');
-    out.settings = readSettings(out.managed) ?? {};
+    const settings = readSettings(out.managed);
+    out.settings = settings ?? {};
+    out.hasSettings = !!settings;
   } else {
     // a child document / fragment: body only, possibly with a settings line at the top
     const settings = readSettings(text);
     if (settings) {
       out.settings = settings;
+      out.hasSettings = true;
       const line = new RegExp('^[ \\t]*' + SETTINGS_PREFIX.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&') + '.*\\n?', 'm').exec(text);
       if (line) {
         out.body = text.slice(0, line.index) + text.slice(line.index + line[0].length);
@@ -212,8 +217,25 @@ function mergeFacts(facts: PreambleFacts, sub: PreambleFacts): void {
  * Features (in the exporter's sense) that the user's preamble already provides, so that the
  * managed block does not load them a second time.
  */
+/**
+ * Packages that load others unconditionally (their .sty files' \RequirePackage): hyperref and
+ * biblatex load url, so a \path{…} in a document that loads hyperref needs no \usepackage{url}
+ * in the managed block.
+ */
+const LOADS: Record<string, string[]> = {
+  hyperref: ['url', 'nameref', 'color', 'etoolbox', 'keyval', 'kvoptions'],
+  biblatex: ['url', 'etoolbox', 'ifthen', 'keyval', 'kvoptions'],
+  mathtools: ['amsmath', 'calc', 'keyval'],
+  amsmath: ['amsbsy', 'amsopn', 'amstext'],
+  amssymb: ['amsfonts'],
+  tikz: ['pgf'],
+  pgf: ['graphicx', 'xcolor', 'keyval'],
+  graphicx: ['graphics', 'keyval'],
+};
+
 export function providedFeatures(f: PreambleFacts): Set<string> {
   const out = new Set<string>(f.packages);
+  for (const p of out) for (const q of LOADS[p] ?? []) out.add(q);   // (a Set iterates what is added)
   const macroFeature: Record<string, string> = {
     lyxadded: 'ct-xcolor-ulem', lyxdeleted: 'ct-xcolor-ulem', LyX: 'LyX', noun: 'noun', lyxarrow: 'lyxarrow', LyXZeroWidthSpace: 'lyxzerowidthspace',
     lyxgreyedout: 'lyxgreyedout', lyxdot: 'lyxdot', binom: 'binom', mathcircumflex: 'mathcircumflex', LyXParagraphLeftIndent: 'ParagraphLeftIndent',

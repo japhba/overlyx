@@ -216,19 +216,74 @@ describe('saving keeps the file as it is where nothing changed', () => {
     expect(back.text).toBe(PAPER);
   });
 
-  it("a managed block from an older OverLyX is brought up to date (it is OverLyX's own)", () => {
+  it('a managed block from an older OverLyX stays as it is while the content needs the same: an edit changes nothing else', () => {
     const old = PAPER.replace('\\begin{document}', '%% OverLyX ------------------------------------------------------------------\n%% overlyx-settings: {"textclass":"article"}\n\\providecommand{\\lyxoldmacro}{x}\n%% end OverLyX --------------------------------------------------------------\n\\begin{document}');
-    const r = save(old, () => {});
-    expect(r.text).not.toContain('lyxoldmacro');
-    expect(r.text).toContain('Recent work on things has focused on\ntheir size.');
-    readsBack(r.text, r.doc);
-    // and a block that is current stays as it is
-    const tracked = save(PAPER, d => {
-      const ann = lyxAuthorId('Ann', '');
+    expect(save(old, () => {}).text).toBe(old);
+    const r = save(old, d => replaceText(d, 'Second point.', 'Second point, revised.'));
+    expect(r.text).toBe(old.replace('\\item Second point.', '\\item Second point, revised.'));
+    // what the content comes to need is written (a first tracked change: the change-tracking macros)
+    const ann = lyxAuthorId('Ann', '');
+    const tracked = save(old, d => {
       addAuthor(d.header, ann, 'Ann', '');
       par(d, 'This concludes the method.').items.push({ kind: 'text', text: ' Added.', font: {}, change: { type: 'inserted', author: ann, time: 1790000000 } });
     });
+    expect(tracked.text).toContain('\\lyxadded');
+    expect(tracked.text).toMatch(/\\(newcommand|DeclareRobustCommand)\{\\lyxadded\}/);
+    readsBack(tracked.text, tracked.doc);
+    // and a block that is current stays as it is
     expect(save(tracked.text, () => {}).text).toBe(tracked.text);
+  });
+
+  it("a file's block that lacks a definition the body uses (a co-author's tracked change from git) is written anew", () => {
+    const ann = lyxAuthorId('Ann', '');
+    const tracked = save(PAPER, d => {
+      addAuthor(d.header, ann, 'Ann', '');
+      par(d, 'This concludes the method.').items.push({ kind: 'text', text: ' Added.', font: {}, change: { type: 'inserted', author: ann, time: 1790000000 } });
+    }).text;
+    // the same file with a block that defines nothing: its \lyxadded would not compile
+    const bare = tracked.replace(/(%% overlyx-settings: .*\n)[\s\S]*?(%% end OverLyX)/, '$1$2');
+    expect(bare).not.toMatch(/\{\\lyxadded\}/);
+    const r = save(bare, d => replaceText(d, 'Second point.', 'Second point, revised.'));
+    expect(r.text).toMatch(/\\(newcommand|DeclareRobustCommand)\{\\lyxadded\}/);
+    readsBack(r.text, r.doc);
+  });
+
+  it('settings the preamble implies are not added to a settings line that leaves them out (it says the default)', () => {
+    // a file OverLyX wrote (an imported LyX document): hyperref, cleveref and an \ifxetex-guarded
+    // fontspec in its preamble, none of them in its settings line
+    const file = PAPER.replace('\\usepackage{graphicx}', '\\usepackage{graphicx}\n\\usepackage{hyperref}\n\\usepackage{cleveref}\n\\usepackage{iftex}\n\\ifxetex\\usepackage{fontspec}\\fi')
+      .replace('\\begin{document}', '%% OverLyX ------------------------------------------------------------------\n%% overlyx-settings: {"textclass":"article","pdf_colorlinks":"false"}\n%% Packages and macros needed by the content (generated on every save; put your own preamble above this block).\n%% end OverLyX --------------------------------------------------------------\n\n\\begin{document}');
+    const p = parse(file).doc.header.lines;
+    expect(p).toContain('\\use_non_tex_fonts false');
+    expect(p).toContain('\\default_output_format default');
+    expect(p.find(l => l.startsWith('\\use_hyperref'))).toBe('\\use_hyperref false');
+    expect(save(file, () => {}).text).toBe(file);
+    const r = save(file, d => replaceText(d, 'Second point.', 'Second point, revised.'));
+    expect(r.text).toBe(file.replace('\\item Second point.', '\\item Second point, revised.'));
+    // the same preamble without a settings line (a file from elsewhere) still gets them
+    const foreign = parse(file.replace(/%% OverLyX -+\n[\s\S]*?%% end OverLyX -+\n\n/, '')).doc.header.lines;
+    expect(foreign).toContain('\\use_non_tex_fonts true');
+    expect(foreign).toContain('\\use_hyperref true');
+    expect(foreign).toContain('\\crossref_package cleveref');
+  });
+
+  it('a setting changed in the dialog changes that key of the settings line, the rest of the line and block as they were', () => {
+    const file = PAPER.replace('\\begin{document}', '%% OverLyX ------------------------------------------------------------------\n%% overlyx-settings: {"textclass":"article","language":"english","tracking_changes":"true"}\n%% Packages and macros needed by the content (generated on every save; put your own preamble above this block).\n\\usepackage{amstext}\n%% end OverLyX --------------------------------------------------------------\n\n\\begin{document}');
+    const r = save(file, d => {
+      d.header.lines = d.header.lines.map(l => (l.startsWith('\\output_changes') ? '\\output_changes false' : l));
+    });
+    const { removed, added } = changedLines(file, r.text);
+    expect(removed).toEqual(['%% overlyx-settings: {"textclass":"article","language":"english","tracking_changes":"true"}']);
+    expect(added).toEqual(['%% overlyx-settings: {"textclass":"article","language":"english","tracking_changes":"true","output_changes":"false"}']);
+  });
+
+  it('\\path in a document that loads hyperref (which loads url) adds no \\usepackage{url}', () => {
+    const file = PAPER.replace('\\usepackage{graphicx}', '\\usepackage{graphicx,hyperref}').replace('This concludes the method.', 'The code is in \\path{src/main.py}.');
+    const p = parse(file);
+    const out = writeTex(p.doc, {}).text;
+    expect(out).not.toContain('\\usepackage{url}');
+    const plain = writeTex(parse(file.replace('graphicx,hyperref', 'graphicx')).doc, {}).text;
+    expect(plain).toContain('\\usepackage{url}');
   });
 
   it('a file that uses what only the managed block defines (layout objects) gets the block', () => {
