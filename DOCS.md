@@ -3874,7 +3874,11 @@ zoom stays independent: Ctrl/⌘ + − 0 (and the numpad's) are bound to nothing
 OverLyX editor or PDF is active (`overlyx.editorKey` in package.json — they zoomed the whole window,
 31 Oct 2026), and every webview zooms its content with them (`app/zoomkeys.ts`, the web app too):
 the pane last pressed on — the PDF (a step; 0: Fit width), the article's Page pane — else the
-document's text (a slide deck its slide). The Page pane has − 100 % + in its bar (`viewZoomStep`
+document's text (a slide deck its slide: the deck editor sets its own default over the shell's while
+it is open, `setDefaultZoom(…, zero)` keeps a list, the latest used — pressed with the focus on the
+deck's toolbar or a pane they had zoomed the text of the document open before, "Text · 140 %", 21 Nov
+2026; Ctrl+0 fits the slide; typing in a slide or not, they zoom the slide, as they zoom a document's
+view while typing in it). The Page pane has − 100 % + in its bar (`viewZoomStep`
 to the frame); keys pressed inside the page's frame zoom it there (`runtime/viewzoom.ts`). The *PDF* segment opens the compiled PDF in the same editor without
 rebuilding; PDFs already on disk are rediscovered after a host reload. *Build & View PDF* and
 forward SyncTeX also select this view, and double-clicking the PDF returns to the document.

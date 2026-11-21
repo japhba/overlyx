@@ -90,6 +90,7 @@ import { PageSetup } from './PageSetup';
 import { PositionSize } from './PositionSize';
 import { loadGrid, saveGrid, gridSize, gridMessage, type GridView } from './gridview';
 import { CanvasRulers, RulerPainter, RULER } from './rulers';
+import { setDefaultZoom, type ZoomStep } from '../app/zoomkeys';
 import { GridSpacing, spacingLabel } from './GridSpacing';
 import { deckPageSize, pageSetupSplices } from '@overlyx/core/html/pagesetup.ts';
 import { formatTimestamp } from '@overlyx/core';
@@ -2152,6 +2153,11 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     if (soloRef.current) { slideView.recentre(true); return; }
     setTimeout(() => toCanvas({ ol: 'scrollTo', slide: currentRef.current, smooth: true }), 30);
   };
+  // Ctrl/⌘ + − 0 pressed out here (a toolbar, a pane; the frames send theirs: onRuntimeKey) zoom the slide, as in a
+  // document they zoom its text wherever the focus is — not the text of the document open before (app/zoomkeys.ts)
+  const zoomKey = useRef<(d: ZoomStep) => void>(() => {});
+  zoomKey.current = d => { if (d === 0) fitSlide(); else zoomStep(d > 0 ? 1.25 : 1 / 1.25); };
+  useEffect(() => setDefaultZoom(d => zoomKey.current(d), true), []);
 
   /* ------------------------------------------------------------- the rail's width (its right edge dragged) */
 
