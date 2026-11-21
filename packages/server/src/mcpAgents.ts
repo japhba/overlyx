@@ -459,6 +459,7 @@ export function mcpAgentRoutes(): express.Router {
 
   r.get('/mcp-agents/events', (req, res) => {
     if (req.user!.guest) { res.status(403).end(); return; }
+    res.on('error', () => { /* a write after the end: never the server's crash (Tandem, 21 Nov) */ });
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
     const send = (e: PanelEvent) => res.write(`data: ${JSON.stringify(e)}\n\n`);
     send({ kind: 'agents', agents: listAgents(req.user!.id) });

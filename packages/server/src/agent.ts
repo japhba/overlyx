@@ -511,6 +511,8 @@ class AgentHost {
         ...(process.env.OVERLYX_KEEPER_IDLE_MS ? { KEEPER_IDLE_MS: process.env.OVERLYX_KEEPER_IDLE_MS } : {}),
       },
     });
+    // a spawn that fails (EAGAIN at a process limit, a missing setpriv) emits 'error': unheard, it crashed the server
+    child.on('error', e => console.error(`${this.tag} the agent keeper could not start:`, e.message));
     child.unref();
   }
 
@@ -1290,6 +1292,7 @@ export function agentRoutes(): express.Router {
     if (!needRole(req, res, 'edit')) return;
     // both engines' events for this user and project (a host is only an object until it is needed)
     const hs = [host(req.user!.id, 'codex'), host(req.user!.id, 'claude')];
+    res.on('error', () => { /* a write after the end: never the server's crash (Tandem, 21 Nov) */ });
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
     res.write(`data: ${JSON.stringify({ kind: 'status', running: hs.some(h => h.running) })}\n\n`);
     const sub: Subscriber = { project: String(req.params.project), res };

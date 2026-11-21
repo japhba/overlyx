@@ -1433,6 +1433,21 @@ export class DocManager {
     db.prepare("DELETE FROM ydocs_saved WHERE substr(id, 1, ?) = ?").run(project.length + 1, project + '/');
   }
 
+  /**
+   * Store the state of every document with edits not in its file yet, at once (marked unsaved), on
+   * the main thread: before a stop or after a crash, when the saves that follow may not finish (systemd
+   * kills after TimeoutStopSec) — the next open, or the next start's pass (rescue.ts), writes them.
+   * Returns how many; a failure is logged per document.
+   */
+  persistUnsaved(): number {
+    let n = 0;
+    for (const d of this.docs.values()) {
+      if (!d.dirty && !d.saving) continue;
+      try { d.persistState(); n++; } catch (e) { console.error('[docs] storing the state failed', d.id, e); }
+    }
+    return n;
+  }
+
   /** Write every document with unsaved changes (and wait for the saves under way). */
   async saveAll(): Promise<void> {
     await Promise.all([...this.docs.values()].filter(d => d.dirty || d.saving).map(d => d.saveToFile()));
@@ -1468,6 +1483,8 @@ export class DocManager {
     this.watcher.on('change', (file: string) => void this.onExternalChange(file));
     this.watcher.on('add', (file: string) => void this.onExternalChange(file));
     this.watcher.on('unlink', (file: string) => void this.onExternalRemove(file));
+    // chokidar emits 'error' for what it cannot watch (ENOSPC: the inotify limit, EMFILE, EACCES): unheard, that crashed the server
+    this.watcher.on('error', (e: unknown) => console.error('[docs] file watcher:', e instanceof Error ? e.message : e));
     // structural changes only ('change' would fire on every document save while someone types)
     this.watcher.on('all', (event: string, file: string) => {
       if (event !== 'change') this.notifyProjectChanged(file);

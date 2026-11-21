@@ -108,3 +108,18 @@ it('keeps to its bounds: too large is skipped, out of time leaves the rest for t
   expect(readFileSync(e.file, 'utf8')).toContain('RESCUED');
   restart(doc);
 });
+
+it('a crash: the open documents\' states are stored at once (persistUnsaved), and the next start writes them', async () => {
+  vi.spyOn(console, 'log').mockImplementation(() => undefined);
+  // edited a moment ago: neither the persist timer nor the save has run
+  const write = (rel: string, text: string) => { writeFileSync(join(ROOT, 'projects', ...rel.split('/')), text); return manager.open(rel); };
+  const t = await write('u/p/crash.tex', tex('Alpha one.', 'Beta two.'));
+  const h = await write('u/p/crash.html', deck('Title'));
+  editText(t, tex);
+  editDeck(h);
+  expect(manager.persistUnsaved()).toBe(2);
+  restart(t); restart(h);                                 // the process exits before any save
+  const r = await writeRescuedEdits({ log: () => undefined });
+  expect(r.written).toEqual(expect.arrayContaining(['u/p/crash.html', 'u/p/crash.tex']));   // (and what the first test left open)
+  for (const f of ['crash.tex', 'crash.html']) expect(readFileSync(join(dir, f), 'utf8')).toContain('RESCUED');
+});

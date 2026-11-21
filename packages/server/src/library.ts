@@ -677,7 +677,10 @@ export function libraryRoutes(): express.Router {
     res.setHeader('content-type', 'application/pdf');
     res.setHeader('content-disposition', `${req.query.download ? 'attachment' : 'inline'}; filename="${row.key.replace(/[^\w.-]/g, '_')}.pdf"`);
     res.setHeader('cache-control', 'private, max-age=0');
-    fs.createReadStream(pdfPath(uid, row.id)).pipe(res);
+    // (removed or unreadable since the check: an unheard 'error' of the stream crashed the server)
+    const pdf = fs.createReadStream(pdfPath(uid, row.id));
+    pdf.on('error', () => { if (res.headersSent) res.destroy(); else res.status(404).json({ error: 'No PDF' }); });
+    pdf.pipe(res);
   });
   r.delete('/library/:id(\\d+)/pdf', (req, res) => {
     const uid = req.user!.id, id = Number(req.params.id);

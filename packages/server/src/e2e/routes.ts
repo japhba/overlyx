@@ -200,7 +200,10 @@ export function e2eRoutes(): express.Router {
     // blobs never change: a new version of a file is a new blob
     res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
     res.setHeader('Content-Type', 'application/octet-stream');
-    fs.createReadStream(f).pipe(res);
+    // (removed or unreadable since the check: an unheard 'error' of the stream crashed the server)
+    const blob = fs.createReadStream(f);
+    blob.on('error', () => { if (res.headersSent) res.destroy(); else res.status(404).json({ error: 'no such file' }); });
+    blob.pipe(res);
   });
   r.delete('/e2e/projects/:project/blobs/:id', need('edit'), (req, res) => {
     if (!OPAQUE_ID.test(req.params.id)) { res.status(400).json({ error: 'bad id' }); return; }

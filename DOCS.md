@@ -375,8 +375,9 @@ blend.
   document and 3 minutes in all, the rest is written at its next open as before. One log line per
   document (`[rescue] <id>: written` / `skipped …` / `failed …`) and a summary; nothing in it throws
   (errors are logged). Test: `docs-rescue-startup` (with document workers).
-  The service's `TimeoutStopSec` (20 s) is better about 60 s, so that a slow `saveAll` at a stop is
-  not cut off (the owner installs the unit).
+  A stop or crash stores every open document's unsaved state before it saves (section "Running",
+  the systemd unit), so the service's `TimeoutStopSec` (20 s) cutting a slow `saveAll` off loses nothing
+  any more: the next start writes the rest.
 * **Sharing** (Google-Docs model): a project is private to its owner until it is shared. The owner
   invites people by username or e-mail address as *viewers* or *editors* (an e-mail that has not
   signed in yet is kept as an invitation and bound to the account on its first Google sign-in), or
@@ -4129,7 +4130,18 @@ A systemd unit is installed as `overlyx.service` (see `deploy/`). `deploy/overly
 `scripts/backup.sh` every night: an online backup of the SQLite database and a tarball of the
 projects directory (without build products) into `<data dir>/backups/<timestamp>/`, keeping the
 newest 14 (`OVERLYX_BACKUP_KEEP`). The server logs unhandled promise rejections instead of dying;
-on an uncaught exception it saves the open documents and exits so that systemd restarts it.
+on an uncaught exception it saves the open documents and exits so that systemd restarts it. A stop
+(SIGINT/SIGTERM) and a crash both first store every open document's unsaved state at once
+(`DocManager.persistUnsaved`, marked unsaved), then save the files: what a save does not finish —
+systemd kills a stop after `TimeoutStopSec` (20 s; the server exits by itself after 18 s, a crash
+after 10 s) — is written by the next start (`rescue.ts`, "Decks, posters, web pages and boards
+survive a crash too"). The stop logs `open documents saved in … ms`. An 'error' event nobody listens
+for is an uncaught exception, so every stream, socket and child process has a listener (21 Nov 2026,
+after the Tandem stream crashed the server ten times): the editors' WebSockets from the moment they
+connect (a client breaking the protocol while its document still opened crashed it —
+`tests/ws-early-error`), the server-sent-event streams (project events, Tandem, the agent panels), the
+projects' file watcher (ENOSPC/EMFILE), the agent keeper's spawn, file streams sent to the browser
+(library PDFs, E2E blobs: a file removed since the check), git's http-backend.
 
 ## Secrets
 

@@ -198,6 +198,9 @@ async function handleConnection(conn: WebSocket, docId: string, user: SessionUse
   // what the client sends while the document is being opened (its sync step 1 comes right away;
   // a big document takes a moment) is handled once it is open — after the epoch, as always
   conn.binaryType = 'arraybuffer';
+  // a client that breaks the protocol (an invalid frame, one over maxPayload) makes the socket emit
+  // 'error': with no listener yet — its document still opening — that took the whole server down
+  conn.on('error', () => { /* the socket closes; 'close' tidies up */ });
   const early: (ArrayBuffer | Buffer)[] = [];
   const keep = (data: ArrayBuffer | Buffer) => { early.push(data); };
   conn.on('message', keep);
@@ -205,7 +208,8 @@ async function handleConnection(conn: WebSocket, docId: string, user: SessionUse
   try {
     doc = await manager.open(docId);
   } catch (e) {
-    conn.close(4004, String(e));
+    // (a close reason over 123 bytes throws)
+    try { conn.close(4004, Buffer.from(String(e)).subarray(0, 120).toString()); } catch { conn.terminate(); }
     return;
   } finally {
     conn.off('message', keep);

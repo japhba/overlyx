@@ -763,6 +763,7 @@ async function handle(req: Request, res: Response): Promise<void> {
       if (rest.length) res.write(rest);
     });
     child.stdout.on('end', () => {
+      if (res.writableEnded) return;   // a failed start answered already: a write after the end emits 'error'
       if (!headerDone) { if (!res.headersSent) res.status(500); res.write(head); }
       res.end();
     });

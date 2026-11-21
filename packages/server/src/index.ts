@@ -538,6 +538,7 @@ api.post('/import/zip', express.raw({ type: '*/*', limit: '300mb' }), (req, res)
  */
 api.get('/projects/:project/events', needReach, (req, res) => {
   const project = String(req.params.project);
+  res.on('error', () => { /* a write after the end: never the server's crash (Tandem, 21 Nov) */ });
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
   res.write(': connected\n\n');
   const hb = setInterval(() => res.write(': hb\n\n'), 20000);
@@ -2116,18 +2117,31 @@ server.listen(config.port, config.host, () => {
   setTimeout(() => { writeRescuedEdits().catch(e => console.error('[rescue] failed:', e)); }, 5000).unref();
 });
 
+// A stop or a crash first stores every document's unsaved state at once (marked unsaved: nothing is
+// lost if the saves below do not finish — systemd kills after TimeoutStopSec, 20 s — the next start
+// writes it, rescue.ts), then writes the files.
+let stopping = false;
 for (const sig of ['SIGINT', 'SIGTERM'] as const) {
   process.on(sig, () => {
+    if (stopping) return;
+    stopping = true;
     console.log('shutting down, saving open documents…');
+    const t0 = Date.now();
+    manager.persistUnsaved();
     disconnectAgents();   // the keepers keep codex (and running turns) alive across the restart
-    manager.saveAll().then(() => flushCommits()).finally(() => process.exit(0));
+    setTimeout(() => { console.error(`[server] saving took over 18 s — stopping anyway; the next start writes the rest`); process.exit(0); }, 18000).unref();
+    manager.saveAll().then(() => console.log(`[server] open documents saved in ${Date.now() - t0} ms`)).then(() => flushCommits()).finally(() => process.exit(0));
   });
 }
 // A promise nobody awaited must not take the server (and everybody's session) down: log it.
 process.on('unhandledRejection', (reason) => { console.error('[server] unhandled rejection:', reason); reportServerError(reason); });
 // A real crash: save what can be saved, then let systemd restart us.
+let crashed = false;
 process.on('uncaughtException', (err) => {
   console.error('[server] uncaught exception — saving open documents and exiting:', err);
-  const bail = setTimeout(() => process.exit(1), 5000);
+  if (crashed) return;   // another one while saving: the first handler exits
+  crashed = true;
+  try { manager.persistUnsaved(); } catch (e) { console.error('[server] storing the open documents failed:', e); }
+  const bail = setTimeout(() => process.exit(1), 10000);
   manager.saveAll().finally(() => { clearTimeout(bail); process.exit(1); });
 });
