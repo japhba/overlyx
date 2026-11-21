@@ -1640,6 +1640,27 @@ export class SyncEngine {
     return true;
   }
 
+  /**
+   * The server renamed `rel` changing only its case (Plot.png → plot.png) and this file system ignores
+   * case (macOS, Windows): the server's new name finds the very file `rel` names here. Removing `rel`
+   * removed that one file — and the next round sent the new name's absence to the server as a
+   * deletion: the file was gone on both sides. It is renamed here instead. Resolves with the new name, or null.
+   */
+  caseRename(rel, theirs) {
+    const lower = rel.toLowerCase();
+    let twin = null;
+    for (const q of theirs.keys()) if (q !== rel && q.toLowerCase() === lower) { twin = q; break; }
+    if (!twin) return null;
+    try {
+      const a = fs.lstatSync(path.join(this.dir, rel)), t = fs.lstatSync(path.join(this.dir, twin));
+      if (a.ino !== t.ino || a.dev !== t.dev) return null;   // two files (a file system that tells case apart)
+      fs.renameSync(path.join(this.dir, rel), path.join(this.dir, twin));
+    } catch { return null; }
+    this.hashes.delete(rel);
+    this.hashes.delete(twin);
+    return twin;
+  }
+
   /** `dir/name (conflict, <computer> <date>).ext` next to `rel`, holding this side's version. */
   conflictCopy(rel, buf) {
     const ext = path.extname(rel), stem = rel.slice(0, rel.length - ext.length);
@@ -1730,6 +1751,25 @@ export class SyncEngine {
     this.state.head = known;
   }
 
+  /**
+   * HEAD detached at a commit older than the server's branch (git checkout <commit> to look at an
+   * old version; a submodule that `git submodule update` put on the commit its repository recorded):
+   * the files differ from the agreed ones by what was written since — sent as changes, they undid it
+   * on the server for everybody. The sync waits (paused, said) until HEAD is back on the branch, whose
+   * checkout brings the files in step again. A detached HEAD at the server's commit (or where this
+   * sync left the branch) syncs as before (followBranch attaches it).
+   */
+  async olderCheckout(remote) {
+    if (!remote.head || !remote.branch) return false;
+    const head = (await gitOut(this.dir, ['rev-parse', '-q', '--verify', 'HEAD']).catch(() => '')).trim();
+    if (!head || head === remote.head || head === this.state?.head) return false;
+    let known = (await gitOut(this.dir, ['rev-parse', '-q', '--verify', `refs/remotes/${this.o.remote}/${remote.branch}`]).catch(() => '')).trim();
+    if (known !== remote.head) known = await this.fetchBranch(remote.branch).catch(() => known);
+    if (!known || !(await gitOut(this.dir, ['merge-base', '--is-ancestor', head, known]).then(() => true, () => false))) return false;
+    this.setStatus({ state: 'paused', message: `the checkout is at ${head.slice(0, 7)}, an older commit than ${remote.branch} on the server — the sync waits so as not to send those older files back (git switch ${remote.branch} to resume)` });
+    return true;
+  }
+
   /* ---- one round */
 
   /** Sync once; resolves with what changed. Concurrent calls run one after the other. */
@@ -1761,6 +1801,7 @@ export class SyncEngine {
     this.role = remote.role ?? this.role;
     const branch = await this.localBranch();
     if (remote.branch && branch && branch !== remote.branch) { this.setStatus({ state: 'paused', message: `on branch ${branch} — the sync runs on ${remote.branch}` }); return changes; }
+    if (!branch && await this.olderCheckout(remote)) return changes;
     if (!this.state) { this.state = await this.initialState(remote); this.saveState(); }
     const base = this.state.files;
     const remoteHash = (r) => new Map(r.files.filter(f => syncablePath(f.path)).map(f => [f.path, f.hash]));
@@ -1799,6 +1840,8 @@ export class SyncEngine {
       if (l !== b) { if (this.role === 'view') changes.notSent.push(rel); continue; }   // changed here too: sent next round (merged there)
       if (this.o.isBusy?.(rel)) { changes.waiting.push(rel); continue; }
       if (r === null) {
+        const renamed = this.caseRename(rel, theirs);
+        if (renamed) { delete base[rel]; changes.received.push({ path: renamed, from: rel }); continue; }
         if (this.removeLocal(rel, b)) { delete base[rel]; changes.received.push({ path: rel, deleted: true }); }
         continue;
       }
@@ -2041,7 +2084,7 @@ export function knownSyncHosts() {
 export function describeChanges(c) {
   const lines = [];
   for (const s of c.sent) lines.push(`↑ ${s.path}${s.deleted ? ' (removed)' : s.status === 'merged' ? ' (merged with changes on the server)' : s.status === 'conflict' ? ` (${s.conflicts} paragraph${s.conflicts > 1 ? 's' : ''} changed on both sides: yours are tracked changes there)` : ''}`);
-  for (const r of c.received) lines.push(`↓ ${r.path}${r.deleted ? ' (removed)' : ''}`);
+  for (const r of c.received) lines.push(`↓ ${r.path}${r.deleted ? ' (removed)' : r.from ? ` (renamed from ${r.from})` : ''}`);
   for (const k of c.conflicts) {
     if (k.kind === 'copy') lines.push(`! ${k.path}: changed on both sides — the server's version is here now, yours is "${k.copy}"`);
     if (k.kind === 'restored') lines.push(`! ${k.path}: changed on the server, so it was not removed — it is back`);

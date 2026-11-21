@@ -633,7 +633,13 @@ blend.
   engine that takes the clone over re-reads `state.json` (it used to keep the bases it had read at
   its start: every file changed since went up against an old base — a conflict, the file put back to
   the server's version, the edit in a conflict copy), and a round that finds the lock taken over
-  stops before sending or writing (test `sync-engines`). The MCP bridge tells agents in a synced clone
+  stops before sending or writing (test `sync-engines`). A HEAD detached at a commit older than the
+  server's branch (`git checkout <commit>` to look at an old version, a submodule `git submodule
+  update` put on its recorded commit) pauses the sync, said in the status, until `git switch <branch>`
+  (its older files used to go up as edits and undo the project for everybody); a case-only rename on
+  the server (`Plot.png` → `plot.png`) renames the file in a clone on a case-insensitive file system
+  instead of removing it (removing the one file both names found deleted it there and then, at the
+  next round, on the server). The MCP bridge tells agents in a synced clone
   that saved files reach the server by themselves. Tests: `tests/sync.test.ts` (the CLI against the
   real routes: both directions, open documents with unsaved edits, paragraph / line / binary
   conflicts, removals, viewers, branch following and adopted commits, no commit per sync, links,

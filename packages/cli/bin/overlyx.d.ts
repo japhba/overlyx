@@ -2,7 +2,7 @@
 
 export interface SyncChanges {
   sent: { path: string; deleted?: boolean; status?: string; conflicts?: number }[];
-  received: { path: string; deleted?: boolean }[];
+  received: { path: string; deleted?: boolean; from?: string }[];
   conflicts: { path: string; kind: 'copy' | 'restored' | 'tracked'; copy?: string; count?: number; at?: number }[];
   waiting: string[];
   notSent: string[];

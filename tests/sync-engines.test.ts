@@ -105,3 +105,85 @@ describe('several engines for one clone', () => {
     expect(existsSync(join(p.clone, '.git', 'overlyx-sync', 'lock'))).toBe(false);
   });
 });
+
+describe('a checkout git moved to an older commit', () => {
+  const git = async (dir: string, ...args: string[]) => (await execFileP('git', ['-C', dir, ...args], { encoding: 'utf8' })).stdout.trim();
+
+  it('is not sent back to the server as changes (git checkout <old commit>, a submodule on its recorded commit)', async () => {
+    const p = await project('detached', { 'a.txt': 'a, first version\n', 'b.txt': 'b, first version\n' });
+    const first = await git(p.dir, 'rev-parse', 'HEAD');
+    const e = p.engine('window A');
+    await e.sync();
+    writeFileSync(join(p.dir, 'a.txt'), 'a, second version\n');
+    await gitmod.commitProject(p.key, { message: 'Second version' });
+    writeFileSync(join(p.dir, 'b.txt'), 'b, written since the last commit\n');   // not committed yet (the server commits minutes later)
+    await e.sync();
+    expect(p.local('a.txt')).toBe('a, second version\n');
+    expect(p.local('b.txt')).toBe('b, written since the last commit\n');
+
+    await git(p.clone, 'checkout', '-q', first);   // to look at the first version
+    expect(p.local('a.txt')).toBe('a, first version\n');
+    await e.sync();
+    expect(p.server('a.txt')).toBe('a, second version\n');
+    expect(e.status.state).toBe('paused');
+    expect(e.status.message).toMatch(/older commit/);
+
+    await git(p.clone, 'switch', '-q', '-');   // back on the branch: the files are in step again, nothing is sent
+    await e.sync();
+    expect(e.status.state).toBe('idle');
+    expect(p.server('a.txt')).toBe('a, second version\n');
+    expect(p.server('b.txt')).toBe('b, written since the last commit\n');
+    e.stop();
+  });
+});
+
+describe('a clone on a file system that ignores case (macOS, Windows)', () => {
+  /** the clone's paths looked up as such a file system does: a name matches an entry of any case */
+  async function ignoringCase<T>(clone: string, run: () => Promise<T>): Promise<T> {
+    const fs = (await import('node:fs')).default;
+    const pathm = (await import('node:path')).default;
+    const real = { lstatSync: fs.lstatSync, statSync: fs.statSync, readFileSync: fs.readFileSync, existsSync: fs.existsSync, rmSync: fs.rmSync, renameSync: fs.renameSync, writeFileSync: fs.writeFileSync, chmodSync: fs.chmodSync, readdirSync: fs.readdirSync };
+    const ci = (p: unknown): unknown => {
+      if (typeof p !== 'string' || !p.startsWith(clone + pathm.sep) || p.includes(`${pathm.sep}.git${pathm.sep}`)) return p;
+      let cur = clone;
+      const parts = p.slice(clone.length + 1).split(pathm.sep);
+      for (let i = 0; i < parts.length; i++) {
+        let names: string[];
+        try { names = real.readdirSync.call(fs, cur) as unknown as string[]; } catch { return pathm.join(cur, ...parts.slice(i)); }
+        cur = pathm.join(cur, names.find(n => n === parts[i]) ?? names.find(n => n.toLowerCase() === parts[i].toLowerCase()) ?? parts[i]);
+      }
+      return cur;
+    };
+    const spies = [
+      vi.spyOn(fs, 'lstatSync').mockImplementation(((p: string, ...a: unknown[]) => (real.lstatSync as Function).call(fs, ci(p), ...a)) as never),
+      vi.spyOn(fs, 'statSync').mockImplementation(((p: string, ...a: unknown[]) => (real.statSync as Function).call(fs, ci(p), ...a)) as never),
+      vi.spyOn(fs, 'readFileSync').mockImplementation(((p: string, ...a: unknown[]) => (real.readFileSync as Function).call(fs, ci(p), ...a)) as never),
+      vi.spyOn(fs, 'existsSync').mockImplementation(((p: string) => real.existsSync.call(fs, ci(p) as string)) as never),
+      vi.spyOn(fs, 'rmSync').mockImplementation(((p: string, ...a: unknown[]) => (real.rmSync as Function).call(fs, ci(p), ...a)) as never),
+      vi.spyOn(fs, 'chmodSync').mockImplementation(((p: string, ...a: unknown[]) => (real.chmodSync as Function).call(fs, ci(p), ...a)) as never),
+      vi.spyOn(fs, 'writeFileSync').mockImplementation(((p: string, ...a: unknown[]) => (real.writeFileSync as Function).call(fs, ci(p), ...a)) as never),
+      // the target's directory as the file system finds it; its name as given (a rename that changes only the case keeps the file)
+      vi.spyOn(fs, 'renameSync').mockImplementation(((a: string, b: string) => real.renameSync.call(fs, ci(a) as string, pathm.join(ci(pathm.dirname(b)) as string, pathm.basename(b)))) as never),
+    ];
+    try { return await run(); } finally { for (const s of spies) s.mockRestore(); }
+  }
+
+  it('a file renamed on the server only in case stays, here and there', async () => {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 1, 2, 3]);
+    const p = await project('casefold', { 'notes.txt': 'notes\n' });
+    writeFileSync(join(p.dir, 'Plot.png'), png);
+    const e = p.engine('a Mac');
+    await ignoringCase(p.clone, async () => {
+      await e.sync();
+      expect(readFileSync(join(p.clone, 'Plot.png'))).toEqual(png);
+      // renamed in the browser (or by a co-author on Linux): only the case changes
+      const { renameSync } = await import('node:fs');
+      renameSync(join(p.dir, 'Plot.png'), join(p.dir, 'plot.png'));
+      await e.sync();
+      await e.sync();
+    });
+    expect(readFileSync(join(p.dir, 'plot.png'))).toEqual(png);
+    expect(readdirSync(p.clone).filter(n => n.toLowerCase() === 'plot.png')).toHaveLength(1);
+    e.stop();
+  });
+});
