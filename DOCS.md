@@ -1319,8 +1319,10 @@ blend.
     Animations API on `translate` / `opacity` / `clip-path`, so the fit and the zoom stay the
     placement's; push and wipe run backwards going back; a jump (Home, a number, the overview) cuts;
     reduced motion makes every transition a short fade. The timer waits while the screen is black or
-    white, zoomed or on the overview. Neither shows in the rail, the PDF (one page per slide, or per
-    step with click steps), PNG or PPTX export. `<meta
+    white, zoomed or on the overview. The slide list marks such a slide quietly under its number
+    (runtime `index.ts` `.fx`: two slides for a transition, a clock for one that goes on by itself; its
+    tooltip says which). Neither shows in the PDF (one page per slide, or per step with click steps),
+    PNG or PPTX export. `<meta
     name="overlyx-steps" content="dim">` shows hidden objects faintly. While a text is retyped, references and citations are
     uneditable chips, environments editable formulas. The text row's insert group matches the
     documents': link (Ctrl+K), cross-reference (Ctrl+Shift+I), citation (Ctrl+Shift+C, the

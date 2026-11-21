@@ -25,6 +25,7 @@ import { applySource, applyPatches, whenTypeset } from './reconcile';
 import * as edit from './edit';
 import { setGuidesShown } from './guides';
 import { setGrid, rulerGuide } from './grid';
+import { railFx } from './transition';
 import { placeSelection } from './place';
 import { weave } from './weave';
 import { arrange, paint, valign, restack, setGroupLayout } from './arrange';
@@ -144,6 +145,8 @@ function startThumb(): void {
     .chg { position: absolute; width: calc(3px / var(--s)); transform: translateX(calc(-5px / var(--s))); border-radius: calc(2px / var(--s)); }
     .del { position: absolute; transform: translate(-50%, -50%); font: 700 calc(12px / var(--s)) sans-serif; color: #fff; background: #d2453c; padding: calc(2px / var(--s)) calc(8px / var(--s)); border-radius: calc(4px / var(--s)); }
     .del.skip { background: #5f6368; font-weight: 600; }
+    .fx { position: absolute; width: calc(11px / var(--s)); height: calc(11px / var(--s)); color: #8a8f98; transform: translate(calc(-100% - 6px / var(--s)), calc(30px / var(--s))); }
+    .fx svg { display: block; width: 100%; height: 100%; }
     .chk { position: absolute; width: calc(6px / var(--s)); height: calc(6px / var(--s)); border-radius: 50%; background: #d99a00; transform: translate(calc(-100% - 9px / var(--s)), calc(18px / var(--s))); }
     .who { position: absolute; display: flex; gap: calc(2px / var(--s)); transform: translate(calc(-100% - 4px / var(--s)), calc(-100% - 4px / var(--s))); }
     .who span { display: grid; place-items: center; width: calc(18px / var(--s)); height: calc(18px / var(--s)); border-radius: 50%; font: 700 calc(9px / var(--s)) sans-serif; box-shadow: 0 0 0 calc(1.5px / var(--s)) #fff; }
@@ -274,6 +277,10 @@ function railUp(e: PointerEvent): void {
   void e;
 }
 
+/** the slide list's transition mark (two slides, one coming over the other) and timed mark (a clock) */
+const FX_MOVES = '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M4.2 3.6H1.6c-.44 0-.8.36-.8.8v4c0 .44.36.8.8.8H7c.44 0 .8-.36.8-.8V7.2" opacity="0.55"/><rect x="4.2" y="1.6" width="7" height="5.6" rx="0.8"/></svg>';
+const FX_TIMED = '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="6" cy="6.5" r="4.6"/><path d="M6 4v2.7l1.8 1.1"/></svg>';
+
 function drawRail(): void {
   if (!railLayer) return;
   railLayer.style.setProperty('--s', String(railScale));
@@ -287,6 +294,9 @@ function drawRail(): void {
   ss.forEach((s, i) => {
     const r = docRect(s);
     parts.push(`<div class="n${i === railCurrent ? ' on' : ''}" style="left:${r.x}px;top:${r.y}px">${i + 1}</div>`);
+    // a transition, a slide that goes on by itself (transition.ts): a small quiet mark under its number
+    const fx = railFx(s);
+    if (fx) parts.push(`<div class="fx" data-ol-rail-fx="${i}" title="${escAttr(fx.say)}" style="left:${r.x}px;top:${r.y}px">${fx.moves ? FX_MOVES : FX_TIMED}</div>`);
     if (railMarks.has(i)) parts.push(`<div class="chk" data-ol-rail-check="${i}" style="left:${r.x}px;top:${r.y}px" title="Check found something on this slide"></div>`);
     // the slide's open comments and suggestions (review.ts)
     const rv = railReview(s);

@@ -82,3 +82,13 @@ export function armAdvance(slide: HTMLElement | null | undefined, go: () => void
   };
   timer = setTimeout(tick, secs * 1000);
 }
+
+/** the slide list's mark for a slide that comes in with a transition or goes on by itself (index.ts drawRail): what it says, and which glyph; null: neither */
+export function railFx(slide: Element): { say: string; timed: boolean; moves: boolean } | null {
+  const t = transitionOf(attrOf(slide, TRANSITION_ATTR), bodyAttr(TRANSITION_ATTR));
+  const a = advanceOf(attrOf(slide, ADVANCE_ATTR), bodyAttr(ADVANCE_ATTR));
+  if (!t && a === null) return null;
+  const kind = t ? t.kind[0].toUpperCase() + t.kind.slice(1) : '';
+  return { say: [t ? `Comes in: ${kind}` : '', a !== null ? `goes on by itself after ${Math.round(a * 10) / 10} s` : ''].filter(Boolean).join(', '), timed: a !== null, moves: !!t };
+}
+
