@@ -10,7 +10,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execFileP = promisify(execFile);
-const VERSION = '0.8.4';
+const VERSION = '0.8.5';
 const DEFAULT_HOST = 'https://overlyx.app';
 
 const HELP = `OverLyX CLI ${VERSION}
@@ -1422,6 +1422,9 @@ export async function syncCredentials(host, dir) {
   return null;
 }
 
+/** the engines of this process that hold or wait for a clone (their lock tokens): two in one process tell each other apart by these, not by the pid */
+const liveEngines = new Set();
+
 class SyncHttpError extends Error {
   constructor(status, message) { super(message); this.status = status; }
 }
@@ -1443,6 +1446,9 @@ export class SyncEngine {
     this.stopped = false;
     this.cursor = null;
     this.role = null;
+    // this engine in the clone's lock (a VS Code window may find one clone twice, and every window restores every clone)
+    this.token = crypto.randomBytes(8).toString('hex');
+    this.stateText = null;
   }
 
   log(line) { this.o.log?.(line); }
@@ -1484,14 +1490,31 @@ export class SyncEngine {
     this.stateDir = path.join(this.gitDir, 'overlyx-sync');
     fs.mkdirSync(path.join(this.stateDir, 'objects'), { recursive: true });
     this.autocrlf = (await gitOut(this.dir, ['config', '--get', 'core.autocrlf']).catch(() => '')).trim();
-    try { this.state = JSON.parse(fs.readFileSync(path.join(this.stateDir, 'state.json'), 'utf8')); } catch { this.state = null; }
+    this.loadState();
+  }
+
+  /**
+   * The merge bases as state.json holds them — when another engine wrote it since this one last read
+   * or wrote it (another VS Code window, `overlyx sync --watch`: they take turns with the clone). An
+   * engine that kept its own, older bases sent every file changed here since against a base the
+   * server no longer had: a conflict, the file put back to the server's version and the edit moved to
+   * a conflict copy (21 Nov 2026).
+   */
+  loadState() {
+    let text = null;
+    try { text = fs.readFileSync(path.join(this.stateDir, 'state.json'), 'utf8'); } catch { /* none yet */ }
+    if (text !== null && text === this.stateText) return;
+    this.stateText = text;
+    try { this.state = text === null ? null : JSON.parse(text); } catch { this.state = null; }
     if (this.state && (this.state.project !== this.o.project || this.state.host !== this.o.host)) this.state = null;
   }
 
   saveState() {
     const file = path.join(this.stateDir, 'state.json');
-    fs.writeFileSync(file + '.tmp', JSON.stringify(this.state));
+    const text = JSON.stringify(this.state);
+    fs.writeFileSync(file + '.tmp', text);
     fs.renameSync(file + '.tmp', file);
+    this.stateText = text;
   }
 
   keepObject(hash, buf) {
@@ -1511,23 +1534,46 @@ export class SyncEngine {
     for (const n of fs.readdirSync(path.join(this.stateDir, 'objects'))) if (!keep.has(n)) fs.rmSync(path.join(this.stateDir, 'objects', n), { force: true });
   }
 
-  /** One sync process per clone (the VS Code extension and a terminal's `overlyx sync --watch` would race). */
+  /**
+   * One engine per clone at a time (VS Code windows — each restores every clone accepted on the
+   * computer —, a terminal's `overlyx sync --watch`): resolves with the holder when another engine
+   * holds it, else takes (or refreshes) it. Another process holds it while it lives and refreshed it
+   * within two minutes; another engine of this process (by its token: a clone found twice) while it runs.
+   */
   lock() {
     const file = path.join(this.stateDir, 'lock');
-    const me = { pid: process.pid, at: Date.now(), by: this.o.client ?? '' };
+    const me = { pid: process.pid, at: Date.now(), by: this.o.client ?? '', token: this.token };
     try {
       const other = JSON.parse(fs.readFileSync(file, 'utf8'));
-      let alive = other.pid !== process.pid && Date.now() - other.at < 120000;
-      if (alive) { try { process.kill(other.pid, 0); } catch (e) { alive = e.code === 'EPERM'; } }
+      let alive;
+      if (other.token === this.token) alive = false;
+      else if (other.pid === process.pid) alive = !!other.token && liveEngines.has(other.token);
+      else {
+        alive = Date.now() - other.at < 120000;
+        if (alive) { try { process.kill(other.pid, 0); } catch (e) { alive = e.code === 'EPERM'; } }
+      }
       if (alive) return other;
     } catch { /* free */ }
     fs.writeFileSync(file, JSON.stringify(me));
+    liveEngines.add(this.token);
     return null;
   }
 
+  /** Whether the lock still names this engine (another may have taken it over: this one slept, or a round took minutes). */
+  holds() {
+    try { const l = JSON.parse(fs.readFileSync(path.join(this.stateDir, 'lock'), 'utf8')); return l.token ? l.token === this.token : l.pid === process.pid; } catch { return false; }
+  }
+
+  /** Keep the lock fresh while a long round runs (another process takes a lock not refreshed for two minutes). */
+  touchLock() {
+    if (!this.stateDir || !liveEngines.has(this.token) || !this.holds()) return;
+    try { fs.writeFileSync(path.join(this.stateDir, 'lock'), JSON.stringify({ pid: process.pid, at: Date.now(), by: this.o.client ?? '', token: this.token })); } catch { /* the next round takes it again */ }
+  }
+
   unlock() {
+    liveEngines.delete(this.token);
     const file = path.join(this.stateDir ?? '', 'lock');
-    try { if (JSON.parse(fs.readFileSync(file, 'utf8')).pid === process.pid) fs.rmSync(file, { force: true }); } catch { /* not ours */ }
+    try { const l = JSON.parse(fs.readFileSync(file, 'utf8')); if (l.token ? l.token === this.token : l.pid === process.pid) fs.rmSync(file, { force: true }); } catch { /* not ours */ }
   }
 
   /* ---- local files */
@@ -1706,6 +1752,8 @@ export class SyncEngine {
     if (!this.gitDir) await this.open();
     const holder = this.lock();
     if (holder) { this.setStatus({ state: 'paused', message: `synced by another process (${holder.by || 'pid ' + holder.pid})` }); return changes; }
+    this.loadState();   // (another engine may have synced the clone since this one last did)
+    const lost = () => { if (this.holds()) return false; this.setStatus({ state: 'paused', message: 'another process took over the sync' }); return true; };
     const busy = await this.busyGit();
     if (busy) { this.setStatus({ state: 'paused', message: `git is in the middle of something (${busy}) — the sync waits` }); return changes; }
     this.setStatus({ state: 'syncing', message: '' });
@@ -1734,12 +1782,14 @@ export class SyncEngine {
       send.push(rel);
     }
     if (send.length) {
+      if (lost()) return changes;
       await this.send(send, base, changes);
       remote = await this.remoteState();
       theirs = remoteHash(remote);
     }
 
     // 2. what changed on the server comes here
+    if (lost()) return changes;   // (what was sent stays unrecorded: the next round finds it on both sides)
     for (const rel of new Set([...theirs.keys(), ...Object.keys(base)])) {
       const r = theirs.get(rel) ?? null, b = base[rel] ?? null;
       if (r === b) continue;
@@ -1757,6 +1807,7 @@ export class SyncEngine {
       if (this.writeLocal(rel, buf, b)) { base[rel] = r; this.keepObject(r, buf); changes.received.push({ path: rel }); }
     }
     this.cursor = remote.cursor;
+    if (lost()) return changes;
     this.saveState();
     this.collect();
 
@@ -1840,7 +1891,8 @@ export class SyncEngine {
       } catch (e) { this.log(`not watching the files (${e.message}); syncing every minute`); }
     }
     const tick = setInterval(kick, 60_000);
-    this.stopTimers = () => { clearInterval(tick); clearTimeout(timer); this.watcher?.close(); wake?.(); };
+    const heartbeat = setInterval(() => this.touchLock(), 30_000);
+    this.stopTimers = () => { clearInterval(tick); clearInterval(heartbeat); clearTimeout(timer); this.watcher?.close(); wake?.(); };
     while (!this.stopped) {
       try {
         await this.sync();
