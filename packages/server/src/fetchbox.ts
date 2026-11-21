@@ -137,7 +137,7 @@ function toResponse(raw: Buffer, u: URL, method: string): Response {
     try { headers.append(String(k), String(v)); } catch { /* a header fetch() would refuse too */ }
   }
   const empty = method === 'HEAD' || [204, 205, 304].includes(meta.status);
-  const r = new Response(empty ? null : raw.subarray(nl + 1), { status: meta.status, statusText: reason(meta.statusText), headers });
+  const r = new Response(empty ? null : new Uint8Array(raw.subarray(nl + 1)), { status: meta.status, statusText: reason(meta.statusText), headers });
   Object.defineProperty(r, 'url', { value: u.href });
   return r;
 }

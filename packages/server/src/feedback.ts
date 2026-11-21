@@ -304,7 +304,7 @@ export function vscodeTelemetryRoutes(): express.Router {
       const t = typesetReport({ ...b.typeset, app: 'vscode' });
       if (!t) { res.status(400).json({ error: 'not a typesetting report' }); return; }
       if (!allow('vscode-typeset', 120) || !allow(`vscode-typeset:${req.ip ?? 'x'}`, 30)) { res.status(429).json({ error: 'rate limited' }); return; }
-      const extension = typeof b.extensionVersion === 'string' ? { Extension: clean(b.extensionVersion, 40) } : {};
+      const extension: Record<string, string> = typeof b.extensionVersion === 'string' ? { Extension: clean(b.extensionVersion, 40) } : {};
       res.json({ id: reportError({ kind: 'client-typeset', message: t.message, details: { ...t.details, ...extension }, keepRepeats: 4, userAgent: req.get('user-agent') ?? '' }) });
       return;
     }
