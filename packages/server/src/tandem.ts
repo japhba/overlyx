@@ -25,7 +25,12 @@ const POSTS_PER_S = 25;
 const ID = /^[A-Za-z0-9_-]{6,40}$/;
 
 const roomKey = (req: express.Request) => `${req.user!.id}\u0000${String(req.params.project)}`;
-const send = (to: Screen, data: string) => { try { to.res.write(`data: ${data}\n\n`); } catch { /* closing */ } };
+// A write to a stream that has ended does not throw: Node emits 'error' on the response a tick later,
+// and with no listener that crashed the whole server (ten times, 14–20 Nov — a screen reconnecting
+// was ended below and then still sent the "join"). So never write to an ended stream, and every
+// stream has an error listener.
+const write = (res: express.Response, text: string) => { if (!res.writableEnded && !res.destroyed) res.write(text); };
+const send = (to: Screen, data: string) => write(to.res, `data: ${data}\n\n`);
 const cleanName = (v: unknown) => String(v ?? '').replace(/[^\p{L}\p{N} ()._-]/gu, '').slice(0, 32) || 'Another screen';
 
 export function mountTandem(api: express.Router, guard: express.RequestHandler): void {
@@ -36,15 +41,19 @@ export function mountTandem(api: express.Router, guard: express.RequestHandler):
     let room = rooms.get(key);
     if (!room) rooms.set(key, room = new Map());
     if (room.size >= ROOM_MAX && !room.has(c)) { res.status(429).json({ error: 'Too many screens' }); return; }
-    room.get(c)?.res.end();
+    // The same screen connecting again (a reload, a dropped connection): its old stream ends and
+    // leaves the room before the others are told, so nothing is sent to it any more.
+    const old = room.get(c);
+    if (old) { room.delete(c); old.res.end(); }
+    res.on('error', () => { /* the client went away; 'close' tidies up */ });
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
     const me: Screen = { c, d, n: cleanName(req.query.n), res, s: null, posts: [] };
     const others = [...room.values()];
-    res.write(`data: ${JSON.stringify({ kind: 'peers', peers: others.map(o => ({ c: o.c, d: o.d, n: o.n, s: o.s ? JSON.parse(o.s) : null })) })}\n\n`);
+    write(res, `data: ${JSON.stringify({ kind: 'peers', peers: others.map(o => ({ c: o.c, d: o.d, n: o.n, s: o.s ? JSON.parse(o.s) : null })) })}\n\n`);
     const hello = JSON.stringify({ kind: 'join', c, d, n: me.n });
     for (const o of others) send(o, hello);
     room.set(c, me);
-    const hb = setInterval(() => { try { res.write(': hb\n\n'); } catch { /* closing */ } }, 20000);
+    const hb = setInterval(() => write(res, ': hb\n\n'), 20000);
     req.on('close', () => {
       clearInterval(hb);
       const r = rooms.get(key);
