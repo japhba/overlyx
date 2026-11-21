@@ -77,7 +77,7 @@ const viewIcon = (to: HomeView) => to === 'grid'
   : <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><circle cx="2.5" cy="3.5" r="1.3" /><circle cx="2.5" cy="8" r="1.3" /><circle cx="2.5" cy="12.5" r="1.3" /><rect x="5.5" y="2.6" width="9" height="1.8" rx="0.9" /><rect x="5.5" y="7.1" width="9" height="1.8" rx="0.9" /><rect x="5.5" y="11.6" width="9" height="1.8" rx="0.9" /></svg>;
 
 export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, onChanged, onBrowse, onSignIn, notify }: {
-  user: User; refreshKey: number; onOpen: (id: string) => void; onStartTour: (id: string) => void; onShare: (project: string) => void; onGit: (project: string) => void; onChanged: () => void; onBrowse: () => void;
+  user: User; refreshKey: number; onOpen: (id: string) => void; onStartTour: (id: string) => void; onShare: (project: string) => void; onGit: (project: string) => void; onChanged: () => void; /** shows the files panel (none while it is shown) */ onBrowse?: () => void;
   /** guests cannot create projects; they are asked to sign in instead */
   onSignIn: () => void;
   notify: (text: string, kind?: 'info' | 'error') => void;
@@ -301,7 +301,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
         {!user.guest && <button class="btn" data-import-overleaf onClick={() => { setImportSource('overleaf'); setImportOpen(true); }} title="Bring projects over from Overleaf — through its Git access, or from a downloaded zip">Import from Overleaf…</button>}
         {!user.guest && <button class="btn" data-import-lyx onClick={() => { setImportSource('lyx'); setImportOpen(true); }}>Import from LyX…</button>}
         {!user.guest && gdocs && <button class="btn" data-import-gdocs onClick={() => void importGoogle()} title="Bring a Google Doc over as a project of its own — kept in sync with it, or as a copy">Import from Google Docs…</button>}
-        <button class="btn" onClick={onBrowse}>Show the files panel</button>
+        {onBrowse && <button class="btn" onClick={onBrowse}>Show the files panel</button>}
         {!user.guest && <button class="btn" data-open-library onClick={() => openLibrary(true)} title="Your references and their PDFs, a reference library of your own — cite them in any document">My library</button>}
         <FileSortSwitch sort={fileSort} onSort={chooseFileSort} />
         <button class="home-view-switch" data-home-view-switch={view === 'rows' ? 'grid' : 'rows'} onClick={switchView}

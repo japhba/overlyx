@@ -31,7 +31,7 @@
  * `settingsSearchEntries` puts the sections into the command palette. */
 import { UiChoice } from './Tour';
 import { ZoteroConnect } from './ZoteroConnect';
-import { useEffect, useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import type { EditorView } from 'prosemirror-view';
 import { api, type AiStatus, type AiModelInfo, type User, type UserSettings, type AdminUser, type DeletionPreview, type AdminReport, type BackupRun } from '../api';
@@ -61,6 +61,7 @@ import { loadGoogleFont } from '../fonts/googlefont';
 import { FontChooser, editorFontSections, editorFontLabel, mathFontSections, mathFontLabel } from './FontPicker';
 import { PALETTE_LABEL, openPalette, type SearchEntry } from './MenuBar';
 import { PenSettings } from '../deliverable/PenSettings';
+import { findSections, matchesAll, queryTerms } from './settingssearch';
 import { DeviceSettings } from './DeviceSettings';
 import { loadDeckInk, saveDeckInk, patchDeckInk, subscribeDeckInk, type DeckInkPatch } from '../deliverable/deckink';
 import { parseFace, projectShortName, type ProjectSettings } from '@overlyx/core';
@@ -334,7 +335,7 @@ export function SettingsPanel({ ai, user, initial, scope: initialScope, onClose,
     {scopedCheck('spellcheck', 'Spell checking', 'Misspelt words are underlined; the right-click menu offers corrections.')}
     {scopedCheck('autoCorrect', 'Autocorrect typos', 'A minor typo is fixed when the word is finished (never in formulas); Backspace right after puts it back.')}
     {scope === 'user' && <>
-      <Setting id="spellEngine" label="Checker" hint="OverLyX’s own knows LaTeX: it skips formulas, commands and code, and offers suggestions in the right-click menu.">
+      <Setting id="spellEngine" label="Spell checker" hint="OverLyX’s own knows LaTeX: it skips formulas, commands and code, and offers suggestions in the right-click menu.">
         <select data-pref="spellEngine" value={p.spellEngine} onChange={e => setPref('spellEngine', (e.target as HTMLSelectElement).value as Prefs['spellEngine'])}>
           <option value="overlyx">OverLyX — instant, knows LaTeX; English, British, German, French</option>
           <option value="browser">Browser — the browser's own (suggestions via {/Mac/.test(navigator.platform) ? '⇧' : 'Shift+'}right-click)</option>
@@ -552,6 +553,37 @@ export function SettingsPanel({ ai, user, initial, scope: initialScope, onClose,
   };
   const projectCount = ps ? Object.keys(ps).length : 0;
 
+  /* ------------------------------------------------------------ the search box (settingssearch.ts) */
+  // every section of every scope offered, the scope shown first; a section is found by its name and
+  // keywords (SECTION_WORDS), the rows of the one open are marked by their own text
+  const [query, setQuery] = useState('');
+  const searchRef = useRef<HTMLInputElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const searchable = [scope, ...scopes.filter(s => s !== scope)].flatMap(s => sectionsOf(s).map(id => ({ scope: s, id, label: sectionLabel(id, s), words: sectionWords(id, s, deviceTab) })));
+  const found = query.trim() ? findSections(query, searchable) : null;
+  const foundKey = found?.map(f => f.scope + ':' + f.id).join(' ') ?? '';
+  // (the first section found opens, unless the one open is among them)
+  useEffect(() => {
+    if (!found?.length || found.some(f => f.scope === scope && f.id === section)) return;
+    setScopeState(found[0].scope); setSection(found[0].id);
+  }, [foundKey]);
+  useEffect(() => {
+    const terms = queryTerms(query);
+    let first: HTMLElement | null = null;
+    for (const row of contentRef.current?.querySelectorAll<HTMLElement>('.set-row, .set-block[data-setting]') ?? []) {
+      const hit = matchesAll(terms, row.textContent ?? '');
+      if (hit) { row.dataset.searchHit = ''; first ??= row; } else delete row.dataset.searchHit;
+    }
+    first?.scrollIntoView({ block: 'nearest' });
+  }, [query, scope, section, settings, ps]);
+  // Escape in the search box empties it first (before the dialog's own Escape: window capture runs ahead of it)
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => { if (e.key === 'Escape' && document.activeElement === searchRef.current && searchRef.current?.value) { e.preventDefault(); e.stopImmediatePropagation(); setQuery(''); } };
+    window.addEventListener('keydown', k, true);
+    return () => window.removeEventListener('keydown', k, true);
+  }, []);
+  const scopeName = (s: SettingsScope) => (s === 'user' ? 'User' : s === 'device' ? 'This device' : s === 'project' ? 'Project' : 'Document');
+
   return (
     <Dialog title="Settings" onClose={onClose} wide>
       <div class="settings-dialog" data-scope={scope}>
@@ -569,15 +601,26 @@ export function SettingsPanel({ ai, user, initial, scope: initialScope, onClose,
             <div class="settings-scope-say">{scopeSay[scope]}</div>
           </div>
         )}
-        <div class="settings-nav" role="tablist" aria-label="Sections">
-          {sections.map(id => {
-            const set = scope === 'project' && ps && (PROJECT_KEYS[id] ?? []).some(k => ps[k] !== undefined);
-            return <button key={id} role="tab" aria-selected={section === id} data-settings-section={id} class={section === id ? 'active' : ''} onClick={() => setSection(id)}>
-              {sectionLabel(id, scope)}{set && <span class="settings-nav-dot" title="Set in the project" />}
-            </button>;
-          })}
+        <div class="settings-nav">
+          <input ref={searchRef} type="search" class="settings-search" placeholder="Search settings" aria-label="Search settings" value={query} data-settings-search
+            onInput={e => setQuery((e.target as HTMLInputElement).value)} />
+          <div class="settings-nav-list" role="tablist" aria-label={found ? 'Sections found' : 'Sections'}>
+            {found
+              ? found.length
+                ? found.map(f => <button key={f.scope + f.id} role="tab" aria-selected={f.scope === scope && f.id === section} data-settings-found={f.scope + ':' + f.id} class={f.scope === scope && f.id === section ? 'active' : ''}
+                    onClick={() => { setScopeState(f.scope); setSection(f.id); }}>
+                    {f.label}{scopes.length > 1 && <span class="settings-found-scope">{scopeName(f.scope)}</span>}
+                  </button>)
+                : <div class="settings-nothing" data-settings-nothing>No setting matches.</div>
+              : sections.map(id => {
+                const set = scope === 'project' && ps && (PROJECT_KEYS[id] ?? []).some(k => ps[k] !== undefined);
+                return <button key={id} role="tab" aria-selected={section === id} data-settings-section={id} class={section === id ? 'active' : ''} onClick={() => setSection(id)}>
+                  {sectionLabel(id, scope)}{set && <span class="settings-nav-dot" title="Set in the project" />}
+                </button>;
+              })}
+          </div>
         </div>
-        <div class="settings-content" key={scope + section}>
+        <div class="settings-content" key={scope + section} ref={contentRef}>
           <div class="settings-page">
             <h2 class="settings-title">{sectionLabel(section, scope)}<span class="settings-title-scope">{scope === 'user' || scope === 'device' ? '' : scope === 'project' ? ` · ${projectName}` : ` · ${docName}`}</span></h2>
             {scope === 'project' && projectError && <div class="err" data-project-settings-error>{projectError}</div>}
@@ -667,6 +710,28 @@ function DrawingSettings({ onClose }: { onClose: () => void }) {
  * Settings' sections in the command palette (Help ▸ search): "font" finds Settings ▸ Fonts, "pen" the
  * pen settings — each opens the dialog there.
  */
+/** a section's keywords for the search box: those of the palette, This device's and the document's Paragraphs their own */
+const sectionWords = (id: SettingsSection, scope: SettingsScope, deviceTab: boolean) =>
+  scope === 'device' && id === 'editor' ? 'math keyboard, text grade, how dark the letters are, panes, zoom, toolbars, only on this device, sync with the account'
+    : scope === 'document' && id === 'editor' ? 'paragraph separation, indentation, vertical space, document settings, class, paper, margins'
+      : scope === 'project' && id === 'editor' ? 'spell checking, autocorrect, typos, automatic PDF builds, compile, new documents, paragraph indentation'
+        : scope === 'project' && id === 'fonts' ? 'the editor’s text font and math font, typeface, formulas'
+          // (the math keyboard is This device's where that tab exists)
+          : deviceTab && id === 'editor' ? (SECTION_WORDS.editor + ', ' + MORE_WORDS.editor).replace('math keyboard, ', '')
+            : SECTION_WORDS[id] + ', ' + MORE_WORDS[id];
+/** more words for the search box only (the palette shows SECTION_WORDS) */
+const MORE_WORDS: Record<SettingsSection, string> = {
+  editor: 'checker, dictionary, typos, selection bar, PDF build, compile, paragraph indentation, citations, bibliography',
+  fonts: 'typeface, Google fonts, formulas, sample',
+  styles: 'heading, section, title, size, colour, color, spacing, bold',
+  drawing: 'stylus, Apple Pencil, palm, fountain pen, ball pen, ink, stabilization, smoothing, shapes, eraser',
+  keyboard: 'keys, key bindings, hotkeys, Ctrl+I, LyX',
+  ai: 'assistant, pause, delay, speech, voice, dictation, OpenRouter, model',
+  appearance: 'dark mode, night, theme, colours, text tone, sepia, figures, invert, text grade, interface',
+  privacy: 'telemetry, analytics, tracking, problem reports, privacy notice',
+  account: 'Git, CLI, MCP, OAuth, password, token re-copy, fine-grained access, sign out',
+  admin: 'users, accounts, administrator',
+};
 const SECTION_WORDS: Record<SettingsSection, string> = {
   editor: 'spell checking, autocorrect, quick menu, math keyboard, automatic PDF builds, new documents, Zotero, project settings',
   fonts: 'the editor’s text font and math font, My fonts',

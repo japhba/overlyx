@@ -2478,6 +2478,13 @@ blend.
   estimate and build stamp. Dialog footers use `btn` and carry no Cancel beside Close. Links without
   a class take `--link`. AI ▸ Pause before suggesting is a slider with rungs; the server's
   `OPENROUTER_API_KEY` note shows to administrators only.
+  **Settings has a search box** at the head of its sections (`app/settingssearch.ts`, pure; `tests/
+  settings-search.test.ts`): every word typed must occur in a section's name or keywords
+  (`SECTION_WORDS` + `MORE_WORDS`, This device's, the project's and the document's own) — across all
+  scopes, the one shown first, each hit naming its scope; the first hit opens unless the open section
+  is one, and the rows (and Zotero's block) of the open section whose text holds every word are
+  marked (`data-search-hit`). Escape empties the box before it closes the dialog. The start page's
+  "Show the files panel" is gone while the panel is shown.
 * **Fonts, for the editor and for the PDF separately** (like LyX's screen fonts and document fonts;
   catalogue in `client/src/fonts/catalog.ts`). *Settings ▸ Fonts* (per browser, both shells) has two
   choices. *Text font* (`prefs.editorFont`): Computer Modern (bundled CMU Serif, the default), the text
