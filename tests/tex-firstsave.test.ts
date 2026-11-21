@@ -288,6 +288,22 @@ function changeWord(p: Paragraph): void {
   for (const it of p.items) if (it.kind === 'text' && !it.change && /\b[a-z]{5,}\b/.test(it.text)) { it.text = it.text.replace(/\b[a-z]{5,}\b/, 'CHANGED'); return; }
 }
 
+/** `from` → `to` in the first text run or formula holding it, inside floats, tables and captions too */
+function replaceDeep(d: LyxDocument, from: string, to: string): boolean {
+  const inItems = (items: Paragraph['items']): boolean => {
+    for (const it of items) {
+      if (it.kind === 'text' && !it.change && it.text.includes(from)) { it.text = it.text.replace(from, to); return true; }
+      if (it.kind !== 'inset') continue;
+      const ins = it.inset;
+      if (ins.type === 'Formula' && ins.latex.includes(from)) { ins.latex = ins.latex.replace(from, to); return true; }
+      if (ins.type === 'Text' && ins.paragraphs.some(q => inItems(q.items))) return true;
+      if (ins.type === 'Tabular' && ins.rows.some(r => r.cells.some(c => c.paragraphs.some(q => inItems(q.items))))) return true;
+    }
+    return false;
+  };
+  return d.body.some(p => inItems(p.items));
+}
+
 describe('the first save changes only what was edited', () => {
   for (const c of CASES) {
     it(`${c.name}: a save without an edit gives the file back byte for byte`, () => {
@@ -308,6 +324,28 @@ describe('the first save changes only what was edited', () => {
         expect(outside.map(h => c.text.split('\n').slice(h.a0, h.a1).join('\n') + ` (+${h.added})`), `paragraph ${k}`).toEqual([]);
         expect(parse(r.text).doc.body.map(canonical)).toEqual(r.doc.body.map(canonical));
       }
+    });
+  }
+
+  // an edit in a caption, a cell or a formula of a float keeps the rest of the float as the file
+  // has it (\\ row ends, \renewcommand{\arraystretch}, formulas over several lines, \end{center})
+  const IN_FLOATS: [string, string, string][] = [
+    ['hand-written paper', 'Equation or assumption', 'Formula or assumption'],   // a header cell
+    ['hand-written paper', 'derivation', 'proof'],                               // the caption
+    ['hand-written paper', 'label noise', 'label error'],                        // a cell holding a formula over two lines
+    ['hand-written paper', '\\epsilon_\\mu', '\\varepsilon_\\mu'],               // that formula's second line
+    ['hand-written paper', 'Shallow', 'Wide'],                                   // a centred table followed by text
+    ['imported LyX document', 'bottleneck sizes', 'bottleneck widths'],          // a caption under \renewcommand{\arraystretch}
+    ['imported LyX document', '0.21', '0.25'],                                   // a number in a cell
+    ['child of tables', 'Deep', 'Deeper'],
+  ];
+  for (const [name, from, to] of IN_FLOATS) {
+    it(`${name}: "${from}" → "${to}" inside a float or table changes that line only`, () => {
+      const c = CASES.find(x => x.name === name)!;
+      const r = save(c, d => expect(replaceDeep(d, from, to)).toBe(true));
+      const h = hunks(c.text, r.text);
+      expect(h.map(x => [c.text.split('\n').slice(x.a0, x.a1), r.text.split('\n').slice(x.a0, x.a0 + x.added)])).toEqual([[[c.text.split('\n')[h[0].a0]], [c.text.split('\n')[h[0].a0].replace(from, to)]]]);
+      expect(tools(c).parse(r.text).doc.body.map(canonical)).toEqual(r.doc.body.map(canonical));
     });
   }
 

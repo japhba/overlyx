@@ -18,7 +18,7 @@
  * When it does not, the paragraphs around the difference are rewritten as well, and in the end
  * the full writer output is used: never worse than writing the whole file.
  */
-import type { LyxDocument } from '../lyx/ast.ts';
+import type { LyxDocument, Paragraph } from '../lyx/ast.ts';
 import { align } from '../lyx/merge.ts';
 import type { ParseTexResult } from './parse.ts';
 import type { WriteTexResult } from './write.ts';
@@ -47,6 +47,8 @@ export interface PreserveStats {
   kept?: number;
   /** body paragraphs written */
   written?: number;
+  /** edited paragraphs written as their own source with the change made to it (of `kept`) */
+  patched?: number;
   /** verification rounds that failed before the result was accepted */
   retries?: number;
   /** 'kept' (all or part preserved), 'full' (writer output), and why a full write was used */
@@ -133,6 +135,31 @@ function preserve(doc: LyxDocument, full: WriteTexResult, o: PreserveOptions, ca
   for (const [i, j] of pairs) match[j + 1] = i;
   const src = (j: number) => match[j + 1];
   const T0 = P0.bodyRange.start, T1 = P0.bodyRange.end;
+  // An edited paragraph that holds a float, a table or a display formula, between two matched ones
+  // and one for one with the base's paragraphs there (a word changed in a caption, a table cell, a
+  // formula): its own source with that change made to it (patchSource), so the float's frame, the
+  // other rows and cells and the formula's lines keep their bytes. It is a kept unit like the
+  // matched ones and verified like them: one that does not read back as the paragraph being saved
+  // is written by the writer after all. (A paragraph of text is written whole, on one line: the
+  // file format's rule.)
+  const patched = new Map<number, string>();
+  {
+    let jp = -1;
+    for (let k = 0; k <= n1; k++) {
+      if (k < n1 && src(k) < 0) continue;
+      const ip = src(jp), ik = src(k);
+      if (k - jp > 1 && ik - ip === k - jp) {
+        for (let j = jp + 1; j < k; j++) {
+          const i = ip + (j - jp);
+          if (tS[i] === undefined || tE[i] === undefined || bS[i] === undefined || bE[i] === undefined || nS[j] === undefined || nE[j] === undefined) continue;
+          if (bS[i] === bE[i] || nS[j] === nE[j] || !(hasBlock(doc.body[j]) || hasBlock(P0.doc.body[i]))) continue;
+          const text = patchSource(T.slice(tS[i], tE[i]), Wb.text.slice(bS[i], bE[i]), full.text.slice(nS[j], nE[j]));
+          if (text !== null) { patched.set(j, text); match[j + 1] = i; }
+        }
+      }
+      jp = k;
+    }
+  }
   const tStartOf = (i: number) => (i < 0 ? T0 : i < n0 ? tS[i] : T1), tEndOf = (i: number) => (i < 0 ? T0 : i < n0 ? tE[i] : T1);
   const bStartOf = (i: number) => (i < 0 ? Wb.bodyRange.start : i < n0 ? bS[i] : Wb.bodyRange.end), bEndOf = (i: number) => (i < 0 ? Wb.bodyRange.start : i < n0 ? bE[i] : Wb.bodyRange.end);
   const nStartOf = (j: number) => (j < 0 ? full.bodyRange.start : j < n1 ? nS[j] : full.bodyRange.end), nEndOf = (j: number) => (j < 0 ? full.bodyRange.start : j < n1 ? nE[j] : full.bodyRange.end);
@@ -218,8 +245,9 @@ function preserve(doc: LyxDocument, full: WriteTexResult, o: PreserveOptions, ca
       if (j >= 0 && j < n1) {
         // the kept paragraph's own text
         const sg = open(true, j);
-        spans[j] = { start: R.length, end: R.length + tE[i]! - tS[i]! };
-        R += T.slice(tS[i], tE[i]);
+        const own = patched.get(j) ?? T.slice(tS[i], tE[i]);
+        spans[j] = { start: R.length, end: R.length + own.length };
+        R += own;
         keptPars++;
         sg.j1 = j; sg.rTo = R.length;
       }
@@ -278,6 +306,7 @@ function preserve(doc: LyxDocument, full: WriteTexResult, o: PreserveOptions, ca
       // the writer's output for it, which is the one just made
       cache.base = { text: R, parsed: PR, written: R === T ? Wb : exact ? full : undefined };
       stats.outcome = 'kept'; stats.kept = keptPars; stats.written = n1 - keptPars; stats.retries = retries;
+      stats.patched = kept.filter(j => patched.has(j)).length;
       const text = (bom ? '\ufeff' : '') + (crlf ? R.replace(/\n/g, '\r\n') : R);
       if (!bom && !crlf) return { ...full, text, spans, bodyRange };
       const nl = crlf ? newlines(R) : [];
@@ -293,6 +322,81 @@ function preserve(doc: LyxDocument, full: WriteTexResult, o: PreserveOptions, ca
       for (let j = Math.max(-1, seg.j0 - pad); j <= Math.min(n1 - 1, seg.j1 + pad); j++) forced.add(j);
     }
   }
+}
+
+/** Does the paragraph hold a float, a table or a display formula (LaTeX over several lines)? */
+function hasBlock(p: Paragraph): boolean {
+  return p.items.some(it => it.kind === 'inset' && (it.inset.type === 'Tabular' || (it.inset.type === 'Formula' && !it.inset.inline)
+    || (it.inset.type === 'Text' && (it.inset.name === 'Float' || it.inset.name === 'Wrap'))));
+}
+
+/** TeX-ish tokens: a comment with its line end, control words and symbols, words, blanks, any other character */
+const TOKEN = /%[^\n]*\n?|\\[A-Za-z@]+\*?|\\[^A-Za-z@]|[A-Za-z0-9]+|\s+|[^]/g;
+function tokens(s: string): string[] { return s.match(TOKEN) ?? []; }
+/** what two tokens must share to stand for each other in the file and the writer's text */
+function key(t: string): string {
+  if (/^\s+$/.test(t)) return /\n[ \t]*\n/.test(t) ? '\n\n' : ' ';
+  return t === '\\tabularnewline' ? '\\\\' : t;
+}
+
+/**
+ * An edited paragraph written as its base source `S` with the change made to it that turns the
+ * writer's text for the base paragraph (`W0`) into the writer's text for the edited one (`W1`):
+ * each changed stretch of tokens replaced where the same stretch lies in `S` (found by aligning
+ * `W0` with `S`), so the rows, cells, formula lines and frame around an edit in a table or a
+ * caption keep their bytes. Null when a change cannot be placed (the caller writes the paragraph).
+ */
+export function patchSource(S: string, W0: string, W1: string): string | null {
+  const s = tokens(S), a = tokens(W0), b = tokens(W1);
+  if (!a.length || !s.length) return null;
+  // the changes from a to b: [a0, a1) replaced by [b0, b1)
+  const hunks: { a0: number; a1: number; b0: number; b1: number }[] = [];
+  {
+    let ai = 0, bi = 0;
+    for (const [i, j] of [...align(a, b), [a.length, b.length] as [number, number]]) {
+      if (i > ai || j > bi) hunks.push({ a0: ai, a1: i, b0: bi, b1: j });
+      ai = i + 1; bi = j + 1;
+    }
+  }
+  if (!hunks.length) return S;
+  // where a's tokens are in s
+  const inS = new Array<number>(a.length).fill(-1);
+  for (const [i, j] of align(a.map(key), s.map(key))) inS[i] = j;
+  const sAt: number[] = [];
+  { let o = 0; for (const t of s) { sAt.push(o); o += t.length; } sAt.push(o); }
+  // widen each change until the tokens on either side are found in s (the tokens outside the
+  // changes are the same in a and b), merging changes that meet
+  const wide: { l: number; r: number; bl: number; br: number }[] = [];
+  for (const h of hunks) {
+    let l = h.a0 - 1, r = h.a1, bl = h.b0 - 1, br = h.b1;
+    for (let n = 0; (l >= 0 && inS[l] < 0) || (r < a.length && inS[r] < 0); n++) {
+      if (n > 64) return null;
+      if (l >= 0 && inS[l] < 0) { l--; bl--; }
+      if (r < a.length && inS[r] < 0) { r++; br++; }
+    }
+    const last = wide[wide.length - 1];
+    if (last && l <= last.r) { last.r = Math.max(last.r, r); last.br = Math.max(last.br, br); continue; }
+    wide.push({ l, r, bl, br });
+  }
+  // a change that replaces most of the paragraph is a rewrite: the writer's text is as good
+  const changed = wide.reduce((n, w) => n + (w.r - w.l - 1), 0);
+  if (changed > Math.max(24, a.length / 2)) return null;
+  let out = '', from = 0;
+  for (const w of wide) {
+    // the file's own stretch for the tokens replaced when they all lie there (blanks only the file
+    // has next to them stay: "0.21 \\" → "0.25 \\"), an insertion right after the token before
+    // it, else everything between the tokens on either side
+    let start = w.l < 0 ? 0 : sAt[inS[w.l] + 1];
+    let end = w.r >= a.length ? S.length : sAt[inS[w.r]];
+    let inner = true;
+    for (let x = w.l + 1; x < w.r; x++) if (inS[x] < 0) { inner = false; break; }
+    if (w.r === w.l + 1) end = start;
+    else if (inner) { start = sAt[inS[w.l + 1]]; end = sAt[inS[w.r - 1] + 1]; }
+    if (start < from || end < start) return null;
+    out += S.slice(from, start) + b.slice(w.bl + 1, w.br).join('');
+    from = end;
+  }
+  return out + S.slice(from);
 }
 
 /** A stretch of the result: kept from the base text, or the writer's text for the new document. */

@@ -286,7 +286,7 @@ blend.
   `tests/tex-firstsave.test.ts`: the starters, the welcome document and synthetic documents shaped
   like real ones, unedited save byte for byte and a one-word edit changing only its paragraph's
   lines; on copies of 62 of the owner's documents the unedited save went from 54 to 62 identical,
-  the one-word edit from 38 to 48 of 48 local). Three rules make it so. *What the preamble implies
+  the one-word edit from 38 to 48 of 48 local). These rules make it so. *What the preamble implies
   is derived, never written*: the settings a preamble's packages imply where the settings line does
   not say (natbib / biblatex, hyperref, cleveref, fontspec → built with XeTeX, `\bibliographystyle`,
   babel's language; `tex/parse.ts`) take effect at every open — also in a file OverLyX wrote whose
@@ -303,8 +303,17 @@ blend.
   file's settings line, merged the same way) only where that does not merge or where the file's
   block lacks a definition the body uses (a co-author's `\lyxadded` from git). *A paragraph's
   source takes its alignment environment's closer along* (`\end{center}`, as the writer's span takes `\par\end{center}`), so text right
-  after a centred table is edited without rewriting the table. And the writer knows what packages
-  load (`tex/preamble.ts providedFeatures`: hyperref and biblatex load url, amsmath amstext, …):
+  after a centred table is edited without rewriting the table. *An edited paragraph that holds a
+  float, a table or a display formula is its own source with the change made to it*
+  (`preserve.ts patchSource`): the writer's text for it before and after the edit are compared
+  token by token, and each changed stretch is replaced where it lies in the file's text (found by
+  aligning the writer's text with the file's: blanks and `\\` / `\tabularnewline` count as alike) —
+  so a word changed in a caption, a cell or a formula keeps the float's frame, the other rows,
+  `\renewcommand{\arraystretch}`, `\\` row ends, a formula's other lines and `\end{center}` as the
+  file has them; the result is verified like a kept paragraph, else the paragraph is written whole.
+  (A paragraph of only text is still written whole, on one line, when edited.) And the writer
+  knows what packages load (`tex/preamble.ts providedFeatures`: hyperref and biblatex load url,
+  amsmath amstext, …):
   `\path{…}` in a document with hyperref adds no `\usepackage{url}`.
 * **One document's work never stalls the others** (`server/src/docpool.ts`, `docworker.ts`). Making
   a save's text, opening a document, merging a change on disk, an agent's edit (parse, merge,
