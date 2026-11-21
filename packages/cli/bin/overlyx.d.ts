@@ -54,6 +54,10 @@ export class SyncEngine {
   unlock(): void;
   /** send the files git put back all the same */
   sendHeld(paths?: string[]): Promise<SyncChanges>;
+  /** the server's version of every file that differs here (or of `paths`); `dryRun`: only what it would do. Local versions are kept in `kept`. */
+  takeServer(opts?: { dryRun?: boolean; paths?: string[] | null }): Promise<{ replace: string[]; remove: string[]; busy: string[]; kept: string | null; failed: string[] }>;
+  /** undo takeServer: the versions kept in that folder go back in place */
+  restoreKept(kept: string): Promise<string[]>;
 }
 
 export function blobHash(buf: Buffer): string;

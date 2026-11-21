@@ -193,6 +193,11 @@
         "category": "OverLyX"
       },
       {
+        "command": "overlyx.syncTakeServer",
+        "title": "Take the Server's Version of This Folder…",
+        "category": "OverLyX"
+      },
+      {
         "command": "overlyx.cloneProject",
         "title": "Clone Project from OverLyX…",
         "category": "OverLyX",

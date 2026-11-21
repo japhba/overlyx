@@ -238,3 +238,52 @@ describe('git writing the files of a synced clone', () => {
     e.stop();
   });
 });
+
+describe('taking the server\'s version', () => {
+  it('replaces what differs here, keeps the versions here (Undo puts them back), leaves new local files alone', async () => {
+    const p = await project('takeserver', { 'a.txt': 'a, server\n', 'b.txt': 'b\n', 'gone.txt': 'gone\n' });
+    const e = p.engine('a laptop');
+    await e.sync();
+    // the clone went wrong: a.txt holds what must not reach the server, gone.txt was removed on the
+    // server but changed here, new.txt is a new file of this clone
+    writeFileSync(join(p.clone, 'a.txt'), 'a, broken here\n');
+    writeFileSync(join(p.clone, 'gone.txt'), 'gone, changed here\n');
+    rmSync(join(p.dir, 'gone.txt'));
+    writeFileSync(join(p.clone, 'new.txt'), 'new here\n');
+    const plan = await e.takeServer({ dryRun: true });
+    expect(plan).toMatchObject({ replace: ['a.txt'], remove: ['gone.txt'], busy: [] });
+    expect(p.local('a.txt')).toBe('a, broken here\n');   // a dry run changes nothing
+
+    const done = await e.takeServer();
+    expect(p.local('a.txt')).toBe('a, server\n');
+    expect(existsSync(join(p.clone, 'gone.txt'))).toBe(false);
+    expect(p.local('new.txt')).toBe('new here\n');
+    expect(readFileSync(join(done.kept!, 'a.txt'), 'utf8')).toBe('a, broken here\n');
+    expect(readFileSync(join(done.kept!, 'gone.txt'), 'utf8')).toBe('gone, changed here\n');
+    await e.sync();
+    expect(p.server('a.txt')).toBe('a, server\n');
+    expect(existsSync(join(p.dir, 'gone.txt'))).toBe(false);
+
+    await e.restoreKept(done.kept!);                 // Undo
+    expect(p.local('a.txt')).toBe('a, broken here\n');
+    expect(p.server('a.txt')).toBe('a, broken here\n');
+    expect(p.server('gone.txt')).toBe('gone, changed here\n');
+    e.stop();
+  });
+
+  it('takes the server\'s version of files git put back, which then wait no more', async () => {
+    const p = await project('takeheld', { 'a.txt': lines(4) });
+    const e = p.engine('a laptop');
+    await e.sync();
+    writeFileSync(join(p.dir, 'a.txt'), lines(4, { 2: 'line 2, written on the server' }));
+    await e.sync();
+    await execFileP('git', ['-C', p.clone, 'reset', '-q', '--hard']);
+    await e.sync();
+    expect(e.status.held).toEqual(['a.txt']);
+    await e.takeServer({ paths: e.status.held });
+    expect(p.local('a.txt')).toContain('written on the server');
+    await e.sync();
+    expect(e.status.held).toEqual([]);
+    e.stop();
+  });
+});

@@ -10,7 +10,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execFileP = promisify(execFile);
-const VERSION = '0.8.6';
+const VERSION = '0.8.7';
 const DEFAULT_HOST = 'https://overlyx.app';
 
 const HELP = `OverLyX CLI ${VERSION}
@@ -33,6 +33,7 @@ Usage:
                                                         a share link (printed) to the project, or to one folder of
                                                         it alone; --with: share it with that person instead
   overlyx sync [DIR] [--watch] [--send-restored]        keep a clone in step with the server, both ways
+  overlyx sync [DIR] --take-server [--yes]              put the server's version of every file here (yours kept in .git/overlyx-sync/kept)
   overlyx mcp install [--client claude,codex] [--yes]   let local AI agents use OverLyX (Claude Code: in every directory, no prompts)
   overlyx mcp status | uninstall
   overlyx mcp serve                                      (what the agents run: the MCP bridge)
@@ -63,7 +64,7 @@ function fail(message, code = 1) {
 function parse(argv) {
   const positional = [];
   const flags = {};
-  const booleans = new Set(['push', 'with-token', 'help', 'version', 'log', 'yes', 'web', 'no-browser', 'no-git', 'ask-each-time', 'watch', 'send-restored']);
+  const booleans = new Set(['push', 'with-token', 'help', 'version', 'log', 'yes', 'web', 'no-browser', 'no-git', 'ask-each-time', 'watch', 'send-restored', 'take-server']);
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--') { positional.push(...argv.slice(i + 1)); break; }
@@ -1809,6 +1810,72 @@ export class SyncEngine {
     return this.sync();
   }
 
+  /**
+   * "Take the server's version": every file here that differs from the server's gets the server's
+   * version — a clone whose sync went wrong is put right. Files with unsaved changes in an editor
+   * (`isBusy`) are left alone (`busy`), and so are files that are only here and were never on the
+   * server (new files of this clone). Every local version replaced or removed is copied first into
+   * `.git/overlyx-sync/kept/<time>/` (`kept`): restoreKept(kept) puts them back. `dryRun` only says
+   * what it would replace / remove. `paths` limits it to those files.
+   */
+  async takeServer({ dryRun = false, paths = null } = {}) {
+    while (this.running) await this.running.catch(() => undefined);
+    if (!this.gitDir) await this.open();
+    const holder = this.lock();
+    if (holder) throw new Error(`the clone is synced by another process (${holder.by || 'pid ' + holder.pid}): take the server's version there`);
+    this.loadState();
+    const remote = await this.remoteState();
+    if (!this.state) { this.state = await this.initialState(remote); this.saveState(); }
+    const base = this.state.files;
+    const theirs = new Map(remote.files.filter(f => syncablePath(f.path)).map(f => [f.path, f.hash]));
+    const all = paths ?? [...new Set([...theirs.keys(), ...Object.keys(base), ...(await this.localPaths())])].sort();
+    const plan = { replace: [], remove: [], busy: [], kept: null, failed: [] };
+    for (const rel of all) {
+      const l = this.localHash(rel);
+      if (l === undefined) continue;
+      const r = theirs.get(rel) ?? null, b = base[rel] ?? null;
+      if (l === r) continue;
+      if (r === null && b === null) continue;   // only here, never agreed with the server: this clone's new file
+      if (this.o.isBusy?.(rel)) { plan.busy.push(rel); continue; }
+      (r === null ? plan.remove : plan.replace).push(rel);
+    }
+    if (dryRun || (!plan.replace.length && !plan.remove.length)) return plan;
+    const d = new Date(), pad = (n) => String(n).padStart(2, '0');
+    plan.kept = path.join(this.stateDir, 'kept', `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}.${pad(d.getMinutes())}.${pad(d.getSeconds())}`);
+    for (const rel of [...plan.replace, ...plan.remove]) {
+      const r = theirs.get(rel) ?? null, l = this.localHash(rel);
+      if (l) {
+        const copy = path.join(plan.kept, rel);
+        fs.mkdirSync(path.dirname(copy), { recursive: true });
+        fs.copyFileSync(path.join(this.dir, rel), copy);
+      }
+      if (r === null) { if (this.removeLocal(rel, l)) delete base[rel]; else plan.failed.push(rel); continue; }
+      const buf = await this.download(rel, r).catch(() => null);
+      if (buf && this.writeLocal(rel, buf, l)) { base[rel] = r; this.keepObject(r, buf); } else plan.failed.push(rel);
+    }
+    this.sendAnyway.clear();
+    this.saveState();
+    this.setStatus({ held: (this.status.held ?? []).filter(h => !plan.replace.includes(h) && !plan.remove.includes(h)) });
+    this.log(`took the server's version of ${plan.replace.length + plan.remove.length} file(s); the ones here are kept in ${plan.kept}`);
+    return plan;
+  }
+
+  /** Undo takeServer: the versions kept in `kept` go back in place (they reach the server as edits). */
+  async restoreKept(kept) {
+    const files = [];
+    const walk = (dir) => { for (const e of fs.readdirSync(dir, { withFileTypes: true })) { const abs = path.join(dir, e.name); if (e.isDirectory()) walk(abs); else if (e.isFile()) files.push(path.relative(kept, abs).split(path.sep).join('/')); } };
+    walk(kept);
+    while (this.running) await this.running.catch(() => undefined);
+    for (const rel of files) {
+      if (!syncablePath(rel) || this.belowLink(rel)) continue;
+      const buf = fs.readFileSync(path.join(kept, ...rel.split('/')));
+      this.writeLocal(rel, buf, this.localHash(rel));
+      this.sendAnyway.add(`${rel}\0${blobHash(this.normalized(buf))}`);   // (a version git has: not held back)
+    }
+    await this.sync();
+    return files;
+  }
+
   /* ---- one round */
 
   /** Sync once; resolves with what changed. Concurrent calls run one after the other. */
@@ -2148,6 +2215,26 @@ async function syncCommand(args, flags) {
   });
   if (!engine) fail(error);
   const stamp = () => new Date().toLocaleTimeString();
+  if (flags['take-server']) {
+    const plan = await engine.takeServer({ dryRun: true });
+    if (!plan.replace.length && !plan.remove.length) { engine.unlock(); process.stdout.write(`Every file here is the server's version already (${target.project})\n`); return; }
+    const list = (xs) => xs.slice(0, 20).map(x => `  ${x}\n`).join('') + (xs.length > 20 ? `  … and ${xs.length - 20} more\n` : '');
+    process.stdout.write(`${plan.replace.length ? `Replaced by the server's version:\n${list(plan.replace)}` : ''}${plan.remove.length ? `Removed (the server no longer has them):\n${list(plan.remove)}` : ''}`);
+    if (!flags.yes) {
+      // (an explicit yes: ask() takes an empty answer for one)
+      let yes = false;
+      if (process.stdin.isTTY && process.stderr.isTTY) {
+        const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
+        yes = /^\s*y/i.test(await new Promise(resolve => rl.question('Take the server\'s version of these files? Yours are kept in the clone\'s .git/overlyx-sync/kept. [y/N] ', resolve)));
+        rl.close();
+      }
+      if (!yes) { engine.unlock(); fail('nothing changed (--yes takes them without asking)'); }
+    }
+    const done = await engine.takeServer();
+    engine.unlock();
+    process.stdout.write(`Took the server's version of ${done.replace.length + done.remove.length} file(s). Yours are in ${done.kept}${done.failed.length ? `\nNot done (changed meanwhile): ${done.failed.join(', ')}` : ''}\n`);
+    return;
+  }
   if (!flags.watch) {
     const c = await engine.sync();
     engine.unlock();

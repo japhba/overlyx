@@ -557,7 +557,13 @@ blend.
   pushing. The VS Code extension does it by itself for every workspace folder whose git remote is a
   project on overlyx.app (or on a server in `overlyx.sync.servers` or signed in with the CLI) while
   the window is open (`host/sync.ts`: status bar item, *OverLyX: Sync Now / Pause / Resume / Show
-  Sync Log*, a one-time notice, `overlyx.sync.enabled` switches it off). A clone *inside* a workspace
+  Sync Log / Take the Server's Version of This Folder…*, a one-time notice, `overlyx.sync.enabled`
+  switches it off). *Take the Server's Version* (also in the status bar item's menu and on the notice
+  about files git put back; `overlyx sync --take-server [--yes]` in a terminal) puts a clone whose sync
+  went wrong right: a modal says which files it replaces and removes, files unsaved in an editor and
+  files that were only ever here are left alone, and every version it replaces is copied first into
+  `.git/overlyx-sync/kept/<time>/` — *Undo* on the notice afterwards puts them back (`restoreKept`;
+  they then reach the server as edits). A clone *inside* a workspace
   folder is synced too, without being added to the workspace (14 Oct 2026; a paper in a subdirectory
   or submodule of its code's repository): `nestedClones` searches each folder that is not a clone
   itself breadth first, three levels down, at most 2000 directories (hidden ones, `node_modules`,

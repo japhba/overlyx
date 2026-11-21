@@ -206,10 +206,45 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
     const n = held.length, what = n === 1 ? held[0] : `${n} files`;
     void vscode.window.showWarningMessage(
       `OverLyX: ${what} in ${f.target.project} went back to the version of the last commit (git stash, reset or checkout?). Sending ${n === 1 ? 'it' : 'them'} would undo the newer version${n === 1 ? '' : 's'} on the server for everybody, so ${n === 1 ? 'it waits' : 'they wait'} — git stash pop brings yours back.`,
-      'Send Anyway', 'Show Files').then(a => {
+      'Send Anyway', 'Take the Server\'s Version', 'Show Files').then(a => {
       if (a === 'Send Anyway') void f.engine?.sendHeld(held).catch(e => void vscode.window.showErrorMessage(`OverLyX sync: ${(e as Error).message}`));
+      else if (a === 'Take the Server\'s Version') void takeServer(f, held);
       else if (a === 'Show Files') { for (const h of held) log(f.dir, `⏸ ${h}: back to the last commit's version — not sent`); out.show(true); }
     });
+  }
+
+  /**
+   * "Take the server's version": a folder whose sync went wrong (or the files git put back) gets the
+   * server's version of every file that differs — after a confirmation that says what is replaced and
+   * removed. The versions here are kept in the clone (.git/overlyx-sync/kept/<time>); Undo puts them back.
+   */
+  async function takeServer(f: FolderSync, paths?: string[]): Promise<void> {
+    const engine = f.engine;
+    if (!engine) { void vscode.window.showInformationMessage(`OverLyX: the sync of ${f.target.project} is not running here (paused or signed out) — start it first.`); return; }
+    const fail = (e: unknown) => void vscode.window.showErrorMessage(`OverLyX sync: ${(e as Error).message}`);
+    let plan: Awaited<ReturnType<SyncEngine['takeServer']>>;
+    try { plan = await engine.takeServer({ dryRun: true, paths: paths ?? null }); } catch (e) { fail(e); return; }
+    const n = plan.replace.length + plan.remove.length;
+    const list = (xs: string[]) => xs.slice(0, 8).join(', ') + (xs.length > 8 ? ` and ${xs.length - 8} more` : '');
+    const busyNote = plan.busy.length ? `Left alone, unsaved in an editor (save or revert them first): ${list(plan.busy)}.` : '';
+    if (!n) { void vscode.window.showInformationMessage(`OverLyX: ${paths ? 'these files are' : 'every file here is'} the server's version already. ${busyNote}`); return; }
+    const detail = [
+      plan.replace.length ? `Replaced by the server's version: ${list(plan.replace)}.` : '',
+      plan.remove.length ? `Removed (the server no longer has them): ${list(plan.remove)}.` : '',
+      busyNote,
+      'Your versions are kept in the clone (.git/overlyx-sync/kept) — Undo puts them back. Files that are only here and were never on the server stay as they are.',
+    ].filter(Boolean).join('\n\n');
+    const ok = await vscode.window.showWarningMessage(`Take the server's version of ${n === 1 ? (plan.replace[0] ?? plan.remove[0]) : `${n} files`} in ${f.target.project}?`, { modal: true, detail }, 'Take the Server\'s Version');
+    if (!ok) return;
+    let done: typeof plan;
+    try { done = await engine.takeServer({ paths: paths ?? null }); } catch (e) { fail(e); return; }
+    const m = done.replace.length + done.remove.length;
+    log(f.dir, `took the server's version of ${m} file(s)${done.kept ? `; yours are in ${done.kept}` : ''}`);
+    render(f);
+    const a = await vscode.window.showInformationMessage(`OverLyX: ${f.target.project} — took the server's version of ${m === 1 ? 'a file' : `${m} files`}${done.failed.length ? ` (${done.failed.length} changed meanwhile and stayed as they were)` : ''}. Yours are kept.`, 'Undo', 'Show Kept Copies');
+    if (a === 'Undo' && done.kept) {
+      try { const back = await engine.restoreKept(done.kept); log(f.dir, `put back ${back.length} file(s) from ${done.kept}`); } catch (e) { fail(e); }
+    } else if (a === 'Show Kept Copies' && done.kept) void vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(done.kept));
   }
 
   function connect(f: FolderSync): Promise<void> {
@@ -543,6 +578,7 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
     vscode.commands.registerCommand('overlyx.syncPause', (dir?: string) => { const f = pick(dir); return f ? setPaused(f, true) : none(); }),
     vscode.commands.registerCommand('overlyx.syncResume', (dir?: string) => { const f = pick(dir); return f ? setPaused(f, false) : none(); }),
     vscode.commands.registerCommand('overlyx.syncShowLog', () => out.show(true)),
+    vscode.commands.registerCommand('overlyx.syncTakeServer', (dir?: string) => { const f = pick(dir); return f ? takeServer(f) : none(); }),
     // (a string, not a Uri: VS Code would encode the address's #/…?… part)
     vscode.commands.registerCommand('overlyx.openOnWeb', (uri?: vscode.Uri) => { const url = webUrl(uri); if (url) void vscode.env.openExternal(url as unknown as vscode.Uri); }),
     vscode.commands.registerCommand('overlyx.copyWebLink', async (uri?: vscode.Uri) => {
@@ -569,6 +605,7 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
           ? { label: '$(play) Resume syncing', description: enabled() ? '' : 'overlyx.sync.enabled is off', run: () => enabled() ? setPaused(f, false) : vscode.commands.executeCommand('workbench.action.openSettings', 'overlyx.sync') }
           : { label: '$(debug-pause) Pause syncing this folder', run: () => setPaused(f, true) },
         ...(f.engine?.status.held?.length ? [{ label: `$(warning) Send the ${f.engine.status.held.length === 1 ? 'file' : `${f.engine.status.held.length} files`} git put back`, description: 'undoes the newer versions on the server', run: () => f.engine?.sendHeld() }] : []),
+        ...(f.engine ? [{ label: '$(cloud-download) Take the server\'s version of every file…', description: 'yours are kept, Undo puts them back', run: () => takeServer(f) }] : []),
         { label: '$(output) Show the sync log', run: () => out.show(true) },
         { label: `$(globe) Open ${f.target.project} on ${new URL(f.target.host).host}`, run: () => vscode.env.openExternal(vscode.Uri.parse(projectUrl(f.target))) },
         ...(f.engine?.status.conflicts ?? []).filter(c => c.kind === 'copy' && c.copy).map(c => ({
