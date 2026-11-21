@@ -8,7 +8,6 @@ import { useEffect, useState } from 'preact/hooks';
 import { inkOn } from './contrast';
 import { api, zipUrl, type AdminProjectInfo, type Project, type ProjectPerson, type User } from '../api';
 import { AvatarContent, initials } from './Avatar';
-import { openLibrary } from '../library/store';
 import { OverleafImport, projectNameFrom, type ImportInitial } from './OverleafImport';
 import { chooseGoogleImport } from './gpicker';
 import { takePendingImport } from './pendingImport';
@@ -77,8 +76,8 @@ const viewIcon = (to: HomeView) => to === 'grid'
   ? <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="1.5" y="1.5" width="5.5" height="5.5" rx="1" /><rect x="9" y="1.5" width="5.5" height="5.5" rx="1" /><rect x="1.5" y="9" width="5.5" height="5.5" rx="1" /><rect x="9" y="9" width="5.5" height="5.5" rx="1" /></svg>
   : <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><circle cx="2.5" cy="3.5" r="1.3" /><circle cx="2.5" cy="8" r="1.3" /><circle cx="2.5" cy="12.5" r="1.3" /><rect x="5.5" y="2.6" width="9" height="1.8" rx="0.9" /><rect x="5.5" y="7.1" width="9" height="1.8" rx="0.9" /><rect x="5.5" y="11.6" width="9" height="1.8" rx="0.9" /></svg>;
 
-export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, onChanged, onBrowse, onSignIn, notify }: {
-  user: User; refreshKey: number; onOpen: (id: string) => void; onStartTour: (id: string) => void; onShare: (project: string) => void; onGit: (project: string) => void; onChanged: () => void; /** shows the files panel (none while it is shown) */ onBrowse?: () => void;
+export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, onChanged, onSignIn, notify }: {
+  user: User; refreshKey: number; onOpen: (id: string) => void; onStartTour: (id: string) => void; onShare: (project: string) => void; onGit: (project: string) => void; onChanged: () => void;
   /** guests cannot create projects; they are asked to sign in instead */
   onSignIn: () => void;
   notify: (text: string, kind?: 'info' | 'error') => void;
@@ -310,11 +309,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
         {user.guest
           ? <button class="btn primary" data-guest-signin onClick={onSignIn}>Sign in</button>
           : <button class="btn primary" data-new-project onClick={() => setNewOpen(true)} title="A new document, slide deck, poster or whiteboard — each in a project of its own">+ New</button>}
-        {!user.guest && <button class="btn" data-import-overleaf onClick={() => { setImportSource('overleaf'); setImportOpen(true); }} title="Bring projects over from Overleaf — through its Git access, or from a downloaded zip">Import from Overleaf…</button>}
-        {!user.guest && classic && <button class="btn" data-import-lyx onClick={() => { setImportSource('lyx'); setImportOpen(true); }}>Import from LyX…</button>}
-        {!user.guest && gdocs && <button class="btn" data-import-gdocs onClick={() => void importGoogle()} title="Bring a Google Doc over as a project of its own — kept in sync with it, or as a copy">Import from Google Docs…</button>}
-        {onBrowse && <button class="btn" onClick={onBrowse}>Show the files panel</button>}
-        {!user.guest && <button class="btn" data-open-library onClick={() => openLibrary(true)} title="Your references and their PDFs, a reference library of your own — cite them in any document">My library</button>}
+        {/* (importing: + New ▸ "Or bring a project over"; the files panel and My library: the left bar, the View menu, a phone's corner buttons — App.tsx) */}
         <FileSortSwitch sort={fileSort} onSort={chooseFileSort} />
         <button class="home-view-switch" data-home-view-switch={view === 'rows' ? 'grid' : 'rows'} onClick={switchView}
           title={view === 'rows' ? 'Show projects as a grid of cards' : 'Show projects as a list'} aria-label={view === 'rows' ? 'Grid view' : 'List view'}>

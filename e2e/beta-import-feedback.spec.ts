@@ -9,7 +9,8 @@ const source = '<!doctype html><html><head><meta name="overlyx" content="deck"><
 const requireFixture = () => test.skip(['OVERLYX_E2E_BASE', 'OVERLYX_PROJECTS_DIR', 'OVERLYX_E2E_CREDENTIALS'].some(key => !process.env[key]), 'Requires an isolated GUI test instance');
 async function choose(page: import('@playwright/test').Page, name: string, buffer: Buffer) {
   await login(page, userCredentials('luna6'), { ui: 'default' });
-  await page.locator('[data-import-overleaf]').click();
+  await page.locator('[data-new-project]').click();
+  await page.locator('[data-new-import-from="overleaf"]').click();
   const panel = page.locator('[data-overleaf-import]');
   await panel.locator('[data-overleaf-zip]').setInputFiles({ name: `${name}.zip`, mimeType: 'application/zip', buffer });
   await panel.locator('[data-overleaf-import-zip]').click();

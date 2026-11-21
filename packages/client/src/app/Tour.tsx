@@ -304,7 +304,7 @@ export function Tour({ ctx, actions, intro, onEnd }: { ctx: TourCtx; actions: To
         {step < 0 ? (
           <>
             <h3>Welcome to OverLyX 👋</h3>
-            <p>Create a document with <b>+ New</b>, or bring an existing project with <b>Import from Overleaf</b>. Write in the editor, check the PDF, and share the project with a colleague.</p>
+            <p>Create a document with <b>+ New</b> — or bring an existing project over from Overleaf, LyX or Google Docs, at the foot of the same dialog. Write in the editor, check the PDF, and share the project with a colleague.</p>
             <p>The hands-on tour opens an example you can edit and guides you through writing, a formula, a comment, PDF output and sharing.</p>
             <details><summary>Change the interface</summary><UiChoice /></details>
             <p class="tour-muted">Every step can be skipped and you can leave at any time; restart it from <i>Help ▸ Take the tour</i>.</p>

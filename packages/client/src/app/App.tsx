@@ -1533,6 +1533,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   // Settings… in every editor and on the start screen (Tools ▸ Settings…, as in a document); the document's Tools has its switches too
   const settingsItem = { label: 'Settings…', action: () => setDialog({ name: 'preferences' }) };
   const plainTools: MenuDef = { title: 'Tools', items: [settingsItem] };
+  // the start screen's View: the files panel and My library (the left bar's keys, also where a phone has no left bar)
+  const homeView: MenuDef = { title: 'View', items: [{ label: 'Files panel', checked: filesShown, action: () => { setShowLibrary(false); toggleFiles(); } }, ...(user.guest ? [] : [{ label: 'My library…', action: () => openLibrary(true) }])] };
   // Help is available everywhere (feedback must be reachable from the start screen too)
   const helpMenu: MenuDef = { title: 'Help', search: true, items: [
     { label: PALETTE_LABEL, shortcut: PALETTE_DEFAULT, action: openPalette },
@@ -1750,7 +1752,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       { sep: true },
       settingsItem,
     ] },
-  ] : []), ...(docId && isLyxDoc ? [] : [plainTools]), helpMenu];
+  ] : []), ...(docId ? [] : [homeView]), ...(docId && isLyxDoc ? [] : [plainTools]), helpMenu];
 
   /** A paper was added to cited.bib: make the entry known, list cited.bib in the BibTeX inset, refresh the metadata. */
   const onBibAdded = (r: BibAddResult) => {
@@ -2107,7 +2109,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
                   register={(cid, h) => { if (h) childRefs.current.set(cid, h); else childRefs.current.delete(cid); rerender(); }} />
               ))}
             </div>
-          ) : <Home user={user} refreshKey={refreshKey} onOpen={id => openInTab(id)} onStartTour={id => { openInTab(id); openTour('steps'); }} onShare={p => setShareFor(p)} onGit={p => setGitFor(p)} onChanged={() => setRefreshKey(k => k + 1)} onBrowse={filesShown ? undefined : () => setShowFiles(true)} onSignIn={signIn} notify={notify} />}
+          ) : <Home user={user} refreshKey={refreshKey} onOpen={id => openInTab(id)} onStartTour={id => { openInTab(id); openTour('steps'); }} onShare={p => setShareFor(p)} onGit={p => setGitFor(p)} onChanged={() => setRefreshKey(k => k + 1)} onSignIn={signIn} notify={notify} />}
         </div>
         {isLyxDoc && <SourcePane key={docId!} fill style={paneStyle('tex')} target={sourceTarget} tick={docTick} selTick={selTick} mathField={mathField} onNotify={notify} onClose={() => showPane('tex', false)} />}
         {isLyxDoc && pdfMounted && (
@@ -2161,7 +2163,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         docLabel={view && masterView && view !== masterView ? viewDocId(view).split('/').pop() ?? null : null}
         readOnly={!!docId && viewOnly} updateReady={updateReady} aiBusy={aiBusy > 0}
         quiet={!isLyxDoc} stats={docStats} pageInfo={pagesOn && masterView && isLyxDoc ? pageAtCursor(masterView.state) : null} zoom={zoom} onZoom={setZoom}
-        corner={barsPlace === 'bottom' && !filesShown && <CornerButton icon="files" title={LEFT_TITLE} data-rail="outline" onClick={toggleFiles}>Files</CornerButton>}
+        corner={<>{barsPlace === 'bottom' && !filesShown && <CornerButton icon="files" title={LEFT_TITLE} data-rail="outline" onClick={toggleFiles}>Files</CornerButton>}
+          {barsPlace === 'bottom' && !docId && !user.guest && !libraryShown && <CornerButton icon="library" title="My library: your references and their PDFs — cite them in any document" data-corner-library onClick={toggleLibrary}>Library</CornerButton>}</>}
         sync={<>{syncChip}<TandemChip /></>}
         pdf={isLyxDoc ? { state: pdf, onClick: rebuild => { if (rebuild && !pdf.busy) void build(); else if (!pdfPaneVisible) changePanes(l => (narrowPanes ? { ...setPaneShown(l, 'pdf', true), order: ['pdf', ...l.order.filter(p => p !== 'pdf')] } : setPaneShown(l, 'pdf', true))); } } : undefined} />
       {renderDialog()}
