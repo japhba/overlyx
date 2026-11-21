@@ -59,8 +59,6 @@ export interface DocumentSplit {
   hasDocument: boolean;
   /** settings JSON from the settings line (in the managed block, or at the top of a child) */
   settings: Record<string, unknown>;
-  /** the file has a settings line (OverLyX wrote it): it says every setting, a key left out is its default */
-  hasSettings: boolean;
 }
 
 /** `s` with every comment replaced by blanks of the same length (positions are preserved). */
@@ -90,7 +88,7 @@ function findOutsideComments(s: string, re: RegExp): number {
 }
 
 export function splitDocument(text: string): DocumentSplit {
-  const out: DocumentSplit = { head: '', documentclass: '', classOptions: '', className: '', userPreamble: '', managed: '', body: text, bodyStart: 0, trailer: '', hasDocument: false, settings: {}, hasSettings: false };
+  const out: DocumentSplit = { head: '', documentclass: '', classOptions: '', className: '', userPreamble: '', managed: '', body: text, bodyStart: 0, trailer: '', hasDocument: false, settings: {} };
   const dcPos = findOutsideComments(text, /\\documentclass\s*(\[[^\]]*\])?\s*\{[^}]*\}/);
   const beginPos = findOutsideComments(text, /\\begin\{document\}/);
   if (beginPos >= 0) {
@@ -119,15 +117,12 @@ export function splitDocument(text: string): DocumentSplit {
     }
     preamble = preamble.replace(/^%% OverLyX package options\r?\n[\s\S]*?^%% end OverLyX package options\r?\n/gm, '');
     out.userPreamble = preamble.replace(/^\n/, '').replace(/\s+$/, '');
-    const settings = readSettings(out.managed);
-    out.settings = settings ?? {};
-    out.hasSettings = !!settings;
+    out.settings = readSettings(out.managed) ?? {};
   } else {
     // a child document / fragment: body only, possibly with a settings line at the top
     const settings = readSettings(text);
     if (settings) {
       out.settings = settings;
-      out.hasSettings = true;
       const line = new RegExp('^[ \\t]*' + SETTINGS_PREFIX.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&') + '.*\\n?', 'm').exec(text);
       if (line) {
         out.body = text.slice(0, line.index) + text.slice(line.index + line[0].length);

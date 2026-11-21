@@ -286,21 +286,23 @@ blend.
   `tests/tex-firstsave.test.ts`: the starters, the welcome document and synthetic documents shaped
   like real ones, unedited save byte for byte and a one-word edit changing only its paragraph's
   lines; on copies of 62 of the owner's documents the unedited save went from 54 to 62 identical,
-  the one-word edit from 38 to 48 of 48 local). Three rules make it so. *A settings line says every
-  setting*: the settings a preamble implies (natbib / biblatex, hyperref, cleveref, fontspec →
-  XeTeX, `\bibliographystyle`, babel's language; `tex/parse.ts`) are derived only for a file
-  without one — a file from elsewhere; the line omits defaults, so a key it leaves out is the
-  default, and an imported LyX document whose `\input{preamble}` loads fontspec under `\ifxetex`
-  stays pdfLaTeX. (A document OverLyX wrote whose preamble later gains fontspec is not switched to
-  XeTeX by itself any more: its author ticks non-TeX fonts or adds `% !TeX program = xelatex`.)
+  the one-word edit from 38 to 48 of 48 local). Three rules make it so. *What the preamble implies
+  is derived, never written*: the settings a preamble's packages imply where the settings line does
+  not say (natbib / biblatex, hyperref, cleveref, fontspec → built with XeTeX, `\bibliographystyle`,
+  babel's language; `tex/parse.ts`) take effect at every open — also in a file OverLyX wrote whose
+  preamble gained a package since (by hand, from an agent, from git) — but are not written into
+  the settings line (until 21 Nov the first save wrote them there, a different engine in the diff),
+  so removing the package again takes them back. (An imported LyX document whose
+  `\input{preamble}` loads fontspec under `\ifxetex` is therefore built with XeTeX, as before;
+  `% !TeX program = pdflatex` or the font settings choose otherwise.)
   *The file's managed block is the file's* (`preserve.ts splitOuter`): kept byte for byte while the
   writer writes the same block for the base and the new document — what a newer OverLyX would write
   there (or no longer writes: `\usepackage{amstext}`, a doubled `\addbibresource`, hyperref for a
   PDF setting) waits until the content needs something new; then the settings line changes key by
-  key (`mergeSettings`) and the other lines by a three-way merge, the writer's whole block only
-  where that does not merge or where the file's block lacks a definition the body uses (a
-  co-author's `\lyxadded` from git). *A paragraph's source takes its alignment environment's
-  closer along* (`\end{center}`, as the writer's span takes `\par\end{center}`), so text right
+  key (`mergeSettings`) and the other lines by a three-way merge, the writer's whole block (with the
+  file's settings line, merged the same way) only where that does not merge or where the file's
+  block lacks a definition the body uses (a co-author's `\lyxadded` from git). *A paragraph's
+  source takes its alignment environment's closer along* (`\end{center}`, as the writer's span takes `\par\end{center}`), so text right
   after a centred table is edited without rewriting the table. And the writer knows what packages
   load (`tex/preamble.ts providedFeatures`: hyperref and biblatex load url, amsmath amstext, …):
   `\path{…}` in a document with hyperref adds no `\usepackage{url}`.

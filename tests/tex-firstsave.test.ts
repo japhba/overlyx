@@ -311,10 +311,21 @@ describe('the first save changes only what was edited', () => {
     });
   }
 
-  it('an imported document keeps its engine: an \\ifxetex-guarded fontspec does not make it XeTeX', () => {
-    const { parse } = tools(CASES.find(c => c.name === 'imported LyX document')!);
-    const h = parse(IMPORTED).doc.header.lines;
-    expect(h).toContain('\\use_non_tex_fonts false');
-    expect(h).toContain('\\default_output_format default');
+  it('what the preamble loads takes effect without being written into the settings line', () => {
+    // fontspec (through \input{preamble}) builds with XeTeX, hyperref and cleveref count, as before;
+    // the settings line, which leaves them out, stays as it is
+    const c = CASES.find(x => x.name === 'imported LyX document')!;
+    const h = tools(c).parse(IMPORTED).doc.header.lines;
+    expect(h).toContain('\\use_non_tex_fonts true');
+    expect(h).toContain('\\default_output_format pdf4');
+    expect(h).toContain('\\use_hyperref true');
+    expect(h).toContain('\\crossref_package cleveref');
+    const r = save(c, d => { d.header.lines = d.header.lines.map(l => (l.startsWith('\\output_changes') ? '\\output_changes true' : l)); });
+    const line = (t: string) => JSON.parse(t.split('\n').find(l => l.startsWith('%% overlyx-settings: '))!.slice('%% overlyx-settings: '.length));
+    // (output_changes back to its default: the key goes, the rest of the line is the file's)
+    const want = { ...line(IMPORTED) };
+    delete want.output_changes;
+    expect(line(r.text)).toEqual(want);
+    expect(line(r.text).use_non_tex_fonts).toBeUndefined();
   });
 });

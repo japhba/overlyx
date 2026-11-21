@@ -466,7 +466,9 @@ function splitOuter(T: string, P0: ParseTexResult, Wb: WriteTexResult, Wn: Write
   if (before === null) return out();
   // the new block in place of the base's — or, when there is none, on the lines right before
   // \begin{document} (taking it out again gives the file back)
-  const withBlock = before + (before === '' || before.endsWith('\n') ? '' : '\n') + n.block + t.after;
+  // (its settings line the file's, with the settings that changed: what the preamble implies —
+  // hyperref, fontspec, … — is derived at every open and never written into the line)
+  const withBlock = before + (before === '' || before.endsWith('\n') ? '' : '\n') + (t.block ? withLineOf(n.block, t.block, b.block) : n.block) + t.after;
   // nothing in the writer's block but the settings line: the file may well do without (when reading
   // it back without one gives the same settings); two blank lines around a removed block become one
   const without = () => before + (before.endsWith('\n\n') && t.after.startsWith('\n') ? t.after.slice(1) : t.after);
@@ -512,6 +514,12 @@ function mergeSettingsLines(t: string, b: string, n: string): string | null {
   const merged = withSettingsLine(t, line);
   // nothing but the line may have changed
   return withSettingsLine(b, line) === withSettingsLine(n, line) ? merged : null;
+}
+
+/** The writer's block `n` with the settings line of the file's block `t` and the change from `b` to `n` made to it. */
+function withLineOf(n: string, t: string, b: string): string {
+  const st = readSettings(t), sb = readSettings(b), sn = readSettings(n);
+  return st && sb && sn ? withSettingsLine(n, settingsLine(mergeSettings(st, sb, sn))) : n;
 }
 
 /** The file's managed block `t` with the change from the writer's `b` to its `n`: the settings line key by key, the rest line by line. */

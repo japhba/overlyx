@@ -248,23 +248,32 @@ describe('saving keeps the file as it is where nothing changed', () => {
     readsBack(r.text, r.doc);
   });
 
-  it('settings the preamble implies are not added to a settings line that leaves them out (it says the default)', () => {
-    // a file OverLyX wrote (an imported LyX document): hyperref, cleveref and an \ifxetex-guarded
-    // fontspec in its preamble, none of them in its settings line
-    const file = PAPER.replace('\\usepackage{graphicx}', '\\usepackage{graphicx}\n\\usepackage{hyperref}\n\\usepackage{cleveref}\n\\usepackage{iftex}\n\\ifxetex\\usepackage{fontspec}\\fi')
+  it('settings the preamble implies take effect but are not written into a settings line that leaves them out', () => {
+    // a file OverLyX wrote (an imported LyX document): hyperref, cleveref and fontspec in its
+    // preamble (added later, by hand), none of them in its settings line
+    const file = PAPER.replace('\\usepackage{graphicx}', '\\usepackage{graphicx}\n\\usepackage{hyperref}\n\\usepackage{cleveref}\n\\usepackage{fontspec}')
       .replace('\\begin{document}', '%% OverLyX ------------------------------------------------------------------\n%% overlyx-settings: {"textclass":"article","pdf_colorlinks":"false"}\n%% Packages and macros needed by the content (generated on every save; put your own preamble above this block).\n%% end OverLyX --------------------------------------------------------------\n\n\\begin{document}');
+    // they take effect: XeTeX, hyperref, cleveref
     const p = parse(file).doc.header.lines;
-    expect(p).toContain('\\use_non_tex_fonts false');
-    expect(p).toContain('\\default_output_format default');
-    expect(p.find(l => l.startsWith('\\use_hyperref'))).toBe('\\use_hyperref false');
+    expect(p).toContain('\\use_non_tex_fonts true');
+    expect(p).toContain('\\default_output_format pdf4');
+    expect(p).toContain('\\use_hyperref true');
+    expect(p).toContain('\\crossref_package cleveref');
+    // and stay out of the file
     expect(save(file, () => {}).text).toBe(file);
     const r = save(file, d => replaceText(d, 'Second point.', 'Second point, revised.'));
     expect(r.text).toBe(file.replace('\\item Second point.', '\\item Second point, revised.'));
-    // the same preamble without a settings line (a file from elsewhere) still gets them
-    const foreign = parse(file.replace(/%% OverLyX -+\n[\s\S]*?%% end OverLyX -+\n\n/, '')).doc.header.lines;
-    expect(foreign).toContain('\\use_non_tex_fonts true');
-    expect(foreign).toContain('\\use_hyperref true');
-    expect(foreign).toContain('\\crossref_package cleveref');
+    // a setting changed in the dialog is the only one written, also when the whole block is the writer's
+    const ann = lyxAuthorId('Ann', '');
+    const t = save(file, d => {
+      d.header.lines = d.header.lines.map(l => (l.startsWith('\\output_changes') ? '\\output_changes false' : l));
+      addAuthor(d.header, ann, 'Ann', '');
+      par(d, 'This concludes the method.').items.push({ kind: 'text', text: ' Added.', font: {}, change: { type: 'inserted', author: ann, time: 1790000000 } });
+    });
+    const line = t.text.split('\n').find(l => l.startsWith('%% overlyx-settings: '))!;
+    expect(JSON.parse(line.slice('%% overlyx-settings: '.length))).toEqual({ textclass: 'article', pdf_colorlinks: 'false', output_changes: 'false' });
+    expect(t.text).toContain('\\lyxadded');
+    readsBack(t.text, t.doc);
   });
 
   it('a setting changed in the dialog changes that key of the settings line, the rest of the line and block as they were', () => {
