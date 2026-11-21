@@ -7,7 +7,8 @@
 import { Plugin } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
 import { setDocumentMacros, setInlineMacroDefs, markMacrosReady, macroTableFor, macrosReady, macroVersion, mathViews } from './lyxmath/macrotable';
-import { editorContext } from './context';
+import type { MacroTable } from '@overlyx/core';
+import { editorContext, viewProject } from './context';
 
 type ServerMacros = Record<string, { def: string; args: number; optional?: string; expand: boolean }>;
 interface InlineDef { pos: number; name: string; def: string; args: number }
@@ -82,6 +83,22 @@ export function refreshMacros(view: EditorView, serverMacros: ServerMacros | nul
   serverMacrosByView.set(view, { macros, merge: mrg });
   markMacrosReady(view);
   applyMacros(view, inlineMacroDefs(view.state.doc), macros, mrg);
+  if (Object.keys(macros).length) { const p = viewProject(view); if (p) tableByProject.set(p, macroTableFor(view, undefined).table); }
+}
+
+/** the whole macro table of the last document of each project that had macros */
+const tableByProject = new Map<string, MacroTable>();
+
+/**
+ * The macros for formulas outside the document (the Agent panel's transcript): the active document's
+ * over the last ones of the same project — beside a markdown note or a deck of the project, or
+ * before the metadata has arrived, the paper's \bh & co still draw.
+ */
+export function projectMacroTable(project: string | null | undefined): MacroTable {
+  const remembered = project ? tableByProject.get(project) : undefined;
+  const v = editorContext.activeView;
+  const active = v && !v.isDestroyed && macrosReady(v) && (!project || viewProject(v) === project) ? macroTableFor(v, undefined).table : undefined;
+  return remembered && active ? { ...remembered, ...active } : active ?? remembered ?? {};
 }
 
 

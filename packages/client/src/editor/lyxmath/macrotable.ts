@@ -15,6 +15,13 @@ const FALLBACK_MACROS: Record<string, { def: string; args: number }> = {
   qty: { def: '\\left(#1\\right)', args: 1 }, order: { def: '\\mathcal{O}\\left(#1\\right)', args: 1 },
   tr: { def: '\\operatorname{tr}', args: 0 }, Tr: { def: '\\operatorname{Tr}', args: 0 },
   var: { def: '\\operatorname{Var}', args: 0 }, expval: { def: '\\left\\langle #1\\right\\rangle', args: 1 },
+  // siunitx (\SI{30}{\milli\second}): a number, a thin space, the units upright
+  SI: { def: '#1\\,\\mathrm{#2}', args: 2 }, si: { def: '\\mathrm{#1}', args: 1 }, num: { def: '#1', args: 1 },
+  ...Object.fromEntries(Object.entries({
+    kilo: 'k', mega: 'M', giga: 'G', centi: 'c', milli: 'm', micro: '\\mu ', nano: 'n', pico: 'p',
+    second: 's', metre: 'm', meter: 'm', gram: 'g', hertz: 'Hz', volt: 'V', ampere: 'A', kelvin: 'K', mole: 'mol',
+    joule: 'J', watt: 'W', newton: 'N', percent: '\\%', per: '/', squared: '^{2}', cubed: '^{3}',
+  }).map(([k, def]) => [k, { def, args: 0 }])),
 };
 
 /**

@@ -151,8 +151,19 @@ const braced = (c: Cell, ctx: TexContext, owner: Atom, idx: number, mode: 'math'
  */
 let unknownSink: ((kind: 'math' | 'env', name: string) => void) | null = null;
 export function onUnknownMathCommand(sink: typeof unknownSink): void { unknownSink = sink; }
+let counting = true;
+/**
+ * Draw formulas that are not the document's without counting their unknown commands: the Agent
+ * panel's transcript quotes the paper's macros (and makes up its own), which the count would
+ * otherwise list as commands documents need drawn.
+ */
+export function withoutUnknownCounting<T>(f: () => T): T {
+  const was = counting;
+  counting = false;
+  try { return f(); } finally { counting = was; }
+}
 function shownAsCode(kind: 'math' | 'env', name: string): void {
-  if (unknownSink) try { unknownSink(kind, name); } catch { /* counting never stops drawing */ }
+  if (unknownSink && counting) try { unknownSink(kind, name); } catch { /* counting never stops drawing */ }
 }
 
 export function atomToTex(a: Atom, ctx: TexContext, mode: 'math' | 'text'): string {

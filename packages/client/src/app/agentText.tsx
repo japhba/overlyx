@@ -2,12 +2,15 @@
  * Agent text in the Agent panel — the embedded agent's transcript and the replies of agents
  * connected from elsewhere: block structure (fenced code, tables, quotes, headings, rules —
  * app/mdblocks.ts) over running text with $…$ / \[…\] formulas, rendered through the math
- * editor's MathJax path with the open document's macros, `code`, **bold** and links.
+ * editor's MathJax path with the project's macros (editor/macrodefs.ts projectMacroTable), `code`, **bold** and links.
  */
 import { useMemo, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import { editorContext } from '../editor/context';
+import { withoutUnknownCounting } from '@overlyx/core';
 import { renderStaticHtml } from '../editor/lyxmath/field';
+import { macroVersion } from '../editor/lyxmath/macrotable';
+import { projectMacroTable } from '../editor/macrodefs';
 import { useMathRendererVersion } from '../editor/lyxmath/usemath';
 import { latexSelectionText } from './richcopy';
 import { parseBlocks, type MdBlock } from './mdblocks';
@@ -25,8 +28,11 @@ function MathBit({ latex, display }: { latex: string; display: boolean }) {
   const version = useMathRendererVersion();
   const [retried, setRetried] = useState(0);
   const html = useMemo(() => {
-    try { return renderStaticHtml(latex, display, (editorContext.meta?.macros ?? {}) as never, undefined, () => setRetried(n => n + 1)); } catch { return null; }
-  }, [latex, display, version, retried]);
+    // the project's macros in the parser's form (the metadata's own form lost every macro's arguments);
+    // the agent's formulas are not the document's: what they leave as code is not counted (macrousage.ts)
+    const macros = projectMacroTable(editorContext.project);
+    try { return withoutUnknownCounting(() => renderStaticHtml(latex, display, macros, undefined, () => setRetried(n => n + 1))); } catch { return null; }
+  }, [latex, display, version, retried, macroVersion]);
   const attrs = { 'data-latex': latex, 'data-display': display ? '1' : undefined };
   if (!html) return <span class="agent-math" {...attrs}>{display ? `\\[${latex}\\]` : `$${latex}$`}</span>;
   return <span class={'agent-math' + (display ? ' display' : '')} {...attrs} dangerouslySetInnerHTML={{ __html: html }} />;
