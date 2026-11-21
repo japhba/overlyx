@@ -143,7 +143,7 @@ function showTip(key: string, label: string, anchor: Anchor): void {
   off.type = 'button';
   off.className = 'shortcut-tip-off';
   off.textContent = "Don't show again";
-  off.title = 'No more shortcut tips (Settings ▸ Editor turns them back on)';
+  off.title = 'No more shortcut tips (Settings ▸ Keyboard turns them back on)';
   off.addEventListener('click', () => { setPref('shortcutTips', false); hideShortcutTip(); });
   const close = document.createElement('button');
   close.type = 'button';

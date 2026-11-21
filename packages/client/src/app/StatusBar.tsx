@@ -128,9 +128,15 @@ export function PdfStatusChip({ pdf, savedAt, onClick }: { pdf: PdfStatusInput; 
   );
 }
 
+/** the build stamp as people read a date ("2026-11-21 12:06"); the stamp itself (yy/mm/dd-HH:MM, build-version.ts) stays what telemetry and presenting compare */
+export function buildStampShown(version: string | undefined): string {
+  const m = /^(\d{2})\/(\d{2})\/(\d{2})-(\d{2}:\d{2})$/.exec(version ?? '');
+  return m ? `20${m[1]}-${m[2]}-${m[3]} ${m[4]}` : version ?? '';
+}
+
 function BuildVersion() {
-  const version = import.meta.env.VITE_BUILD_VERSION;
-  return <span class="build-version" title={`OverLyX build (UTC): ${version}`}>{version}</span>;
+  const shown = buildStampShown(import.meta.env.VITE_BUILD_VERSION);
+  return <span class="build-version" title={`The version of OverLyX running here: built ${shown} (UTC)`}>{shown}</span>;
 }
 
 export function StatusBar({ layout, markdown, status, chord, message, save, tracking, trackingAs, change, docLabel, readOnly, quiet, updateReady, aiBusy, stats, pageInfo, zoom, onZoom, pdf, corner, sync }: {

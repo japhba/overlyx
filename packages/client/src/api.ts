@@ -340,6 +340,11 @@ export const api = {
   clientTypeset: (data: import('@overlyx/core/typeset.ts').TypesetInput) => req<{ id: number | null } | null>('POST', '/api/client-typeset', data),
   /** the pen lab's answers (PenLab.tsx; server feedback.ts): the settings compared and what was chosen, the writing if ticked */
   inkLab: (data: Record<string, unknown>) => req<{ id: number }>('POST', '/api/ink-lab', data),
+  /** Settings ▸ Account (server profile.ts): the name, and whether there is a password to change */
+  accountProfile: () => req<{ name: string; hasPassword: boolean; google: boolean }>('GET', '/api/account/profile'),
+  setDisplayName: (name: string) => req<{ user: User }>('POST', '/api/account/name', { name }),
+  /** every other browser is signed out; this one keeps going with a new cookie */
+  changePassword: (current: string, next: string) => req<{ ok: boolean }>('POST', '/api/account/password', { current, next }),
   accountDeletion: () => req<DeletionPreview>('GET', '/api/account/deletion'),
   /** administrators: problem reports, error records, mail to privacy@ / contact@ (server feedback.ts) */
   adminReports: (kind?: string) => req<{ reports: AdminReport[] }>('GET', `/api/admin/reports${kind ? `?kind=${encodeURIComponent(kind)}` : ''}`),

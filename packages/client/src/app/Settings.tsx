@@ -13,20 +13,22 @@
  * when a more specific scope sets it too ("Project sets Off — that applies to its documents"); set
  * here, it has a bar at its left and ↺ to inherit again. The sections, by scope:
  *
- *   Editor          User: spell checking, the quick menu, the math keyboard, automatic PDF builds (this
- *                   browser); new documents' paragraph separation and Zotero (the account).
- *                   Project: spell checking, autocorrect, PDF builds, new documents' paragraphs.
+ *   Editor          User: spell checking, the quick menu, the math keyboard (without a This device tab),
+ *                   new documents' paragraph separation (the account).
+ *                   Project: spell checking, autocorrect, new documents' paragraphs.
  *                   Document (“Paragraphs”): this document's paragraph separation.
+ *   PDF             automatic builds and their delay (User, Project)
  *   Fonts           the editor's text and math fonts (User, Project), My fonts (the account)
  *   Text styles     Title, Normal text, Quote, the headings (EditorStyles in User and Project, the
  *                   document's own in Document: TextStylesPanel in place)
- *   Drawing & pen   the pen of slides, boards and margins (this browser, deliverable/deckink.ts)
+ *   Drawing & pen   the pen of slides, boards and margins (This device; User without that tab)
  *   Keyboard        shortcuts (the account, keybindings.ts), shortcut tips, LyX's keys
  *   AI assistance   the AI features and models        (this browser, prefs.ts)
  *   Appearance      Classic / Modern, light / dark / follow the system, smart invert (theme.ts)
  *   Privacy         usage statistics and diagnostics
- *   Account         who is signed in, the account's own access token and sign-ins (Git.tsx, as in
- *                   File ▸ Git repository), fine-grained access, token re-copy, deleting the account
+ *   Connections     Zotero, Google Drive, LessWrong; the account's access token and sign-ins (Git.tsx,
+ *                   as in File ▸ Git repository), fine-grained access, token re-copy
+ *   Account         who is signed in, deleting the account
  *   Administration  administrators: token re-copy per account, backups, mail and reports
  * `settingsSearchEntries` puts the sections into the command palette. */
 import { UiChoice } from './Tour';
@@ -34,7 +36,7 @@ import { ZoteroConnect } from './ZoteroConnect';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import type { EditorView } from 'prosemirror-view';
-import { api, type AiStatus, type AiModelInfo, type User, type UserSettings, type AdminUser, type DeletionPreview, type AdminReport, type BackupRun } from '../api';
+import { api, type AiStatus, type AiModelInfo, type User, type UserSettings, type AdminUser, type DeletionPreview, type AdminReport, type BackupRun, type GdocsStatus, type LessWrongStatus } from '../api';
 import { clearLocalData } from './localData';
 import { getUserPrefs, setPref, subscribePrefs, DEFAULT_PREFS, type Prefs, type ProjectPrefKey } from '../prefs';
 import { saveProjectSettings, useProjectSettings } from '../projectsettings';
@@ -68,7 +70,7 @@ import { parseFace, projectShortName, type ProjectSettings } from '@overlyx/core
 import { renderMath } from '../editor/lyxmath/mathjax';
 import { useMathRendererVersion } from '../editor/lyxmath/usemath';
 
-const SECTIONS = [['editor', 'Editor'], ['fonts', 'Fonts'], ['styles', 'Text styles'], ['drawing', 'Drawing & pen'], ['keyboard', 'Keyboard'], ['ai', 'AI assistance'], ['appearance', 'Appearance'], ['privacy', 'Privacy'], ['account', 'Account'], ['admin', 'Administration']] as const;
+const SECTIONS = [['editor', 'Editor'], ['pdf', 'PDF'], ['fonts', 'Fonts'], ['styles', 'Text styles'], ['drawing', 'Drawing & pen'], ['keyboard', 'Keyboard'], ['ai', 'AI assistance'], ['appearance', 'Appearance'], ['privacy', 'Privacy'], ['connections', 'Connections'], ['account', 'Account'], ['admin', 'Administration']] as const;
 export type SettingsSection = (typeof SECTIONS)[number][0];
 export type SettingsScope = 'user' | 'device' | 'project' | 'document';
 /** the sections of each scope: a project and a document set what concerns their documents; the rest is each person's own */
@@ -77,13 +79,13 @@ const SCOPE_SECTIONS: Record<SettingsScope, SettingsSection[]> = {
   // (This device: its own page, DeviceSettings.tsx, and the pens — they belong to this screen and pen;
   // without a This device tab (not signed in, VS Code without the account) Drawing & pen is under User)
   device: ['editor', 'drawing'],
-  project: ['editor', 'fonts', 'styles'],
+  project: ['editor', 'pdf', 'fonts', 'styles'],
   document: ['styles', 'editor'],
 };
 const sectionLabel = (id: SettingsSection, scope: SettingsScope) => (scope === 'device' && id === 'editor' ? 'This device' : scope === 'document' && id === 'editor' ? 'Paragraphs' : SECTIONS.find(([s]) => s === id)![1]);
 /** which project settings each section has (its dot in the Project tab) */
 const PROJECT_KEYS: Partial<Record<SettingsSection, (keyof ProjectSettings)[]>> = {
-  editor: ['spellcheck', 'autoCorrect', 'autoBuild', 'autoBuildDelay', 'paragraphSkip'], fonts: ['editorFont', 'editorMathFont'], styles: ['textStyles'],
+  editor: ['spellcheck', 'autoCorrect', 'paragraphSkip'], pdf: ['autoBuild', 'autoBuildDelay'], fonts: ['editorFont', 'editorMathFont'], styles: ['textStyles'],
 };
 
 /** Settings' argument (setDialog's arg): a section, or a section in a scope */
@@ -352,7 +354,20 @@ export function SettingsPanel({ ai, user, initial, scope: initialScope, onClose,
         </select>
       </Setting></>}
     </>}
-    <h3 class="set-group">PDF</h3>
+    {(scope === 'project' || (web && !user.guest)) && <>
+      <h3 class="set-group">New documents</h3>
+      <Setting id="paragraphSkip" label="No paragraph indentation" state={paragraphSkip.state} onReset={paragraphSkip.reset}
+        hint={<>Documents created {scope === 'project' ? 'in this project' : 'by you'} separate paragraphs by vertical space instead of indenting their first line, in the editor and in the PDF. Each document keeps its own (Document ▸ Settings ▸ Paragraph separation{doc ? ', or the Document tab' : ''}); documents that exist already keep theirs. {scope === 'project' ? 'Kept in the project.' : 'Kept for your account.'}</>}>
+        <Switch checked={paragraphSkip.value} disabled={scope === 'user' && settings === null} data={{ 'data-setting': 'paragraph-skip' }} onChange={paragraphSkip.set} />
+      </Setting>
+    </>}
+    {err && <div class="err">{err}</div>}
+    {scope === 'user' && !shown.includes('appearance') && darkTheme}
+  </>;
+
+  // Settings ▸ PDF (User, Project): automatic builds
+  const pdfSection = <>
+    <h3 class="set-group">Builds</h3>
     <Setting id="autoBuild" label="Automatic builds" hint="Build the PDF by itself a moment after the document is saved (it is saved 1.5 s after you stop typing). Builds run in the background on the server. The ▾ beside View PDF switches it too." state={autoBuild.state} onReset={autoBuild.reset}>
       <div class="set-choices column">{AUTO_BUILD_CHOICES.map(([v, label, hint]) => (
         <label class="pref" key={v}><input type="radio" name={`ol-autobuild-${scope}`} data-pref-autobuild={v} checked={autoBuild.value === v} onChange={() => autoBuild.set(v)} /><span>{label}<span class="sub">{hint}</span></span></label>
@@ -363,19 +378,6 @@ export function SettingsPanel({ ai, user, initial, scope: initialScope, onClose,
         {AUTO_BUILD_DELAYS.map(d => <option key={d} value={String(d)}>{d === 0 ? 'right away' : `${d} s`}</option>)}
       </select>
     </Setting>
-    {(scope === 'project' || (web && !user.guest)) && <>
-      <h3 class="set-group">New documents</h3>
-      <Setting id="paragraphSkip" label="No paragraph indentation" state={paragraphSkip.state} onReset={paragraphSkip.reset}
-        hint={<>Documents created {scope === 'project' ? 'in this project' : 'by you'} separate paragraphs by vertical space instead of indenting their first line, in the editor and in the PDF. Each document keeps its own (Document ▸ Settings ▸ Paragraph separation{doc ? ', or the Document tab' : ''}); documents that exist already keep theirs. {scope === 'project' ? 'Kept in the project.' : 'Kept for your account.'}</>}>
-        <Switch checked={paragraphSkip.value} disabled={scope === 'user' && settings === null} data={{ 'data-setting': 'paragraph-skip' }} onChange={paragraphSkip.set} />
-      </Setting>
-    </>}
-    {scope === 'user' && web && !user.guest && <>
-      <h3 class="set-group">Citations from Zotero</h3>
-      <div class="set-block" data-setting="zotero"><ZoteroConnect /></div>
-    </>}
-    {err && <div class="err">{err}</div>}
-    {scope === 'user' && !shown.includes('appearance') && darkTheme}
   </>;
 
   const textFont = scoped('editorFont', editorFontLabel);
@@ -420,6 +422,20 @@ export function SettingsPanel({ ai, user, initial, scope: initialScope, onClose,
     switch (section) {
       case 'editor': return scope === 'device' ? <DeviceSettings where={keptWith ? `${keptWith.device}, on this computer` : undefined} onDrawing={() => setSection('drawing')} />
         : scope === 'document' && doc ? <DocumentParagraphs doc={doc} /> : editorSection;
+      case 'pdf': return pdfSection;
+      case 'connections': return <Connections user={user}>{web && !user.guest && <AccountCredentials>
+          <Setting id="fineGrained" label="Fine-grained access" hint="When you authorize a new sign-in, choose which projects it reaches and whether it may only read (clone, pull, read and build — no push, edits or comments). Sign-ins made before keep their access; switching this off does not widen narrowed ones.">
+            <Switch checked={!!settings?.fineGrainedAccess} disabled={settings === null} data={{ 'data-setting': 'fine-grained' }} onChange={v => void toggleAccountSetting({ fineGrainedAccess: v })} />
+          </Setting>
+        </AccountCredentials>}
+        {err && <div class="err">{err}</div>}
+        {web && !user.guest && <>
+          <h3 class="set-group">Token re-copy</h3>
+          <Setting id="recopy" label="Re-copy the access token" hint={`The account access token (File ▸ Git repository…) works with Git, the CLI and MCP. It is normally shown exactly once — only a hash is kept. With re-copy enabled, its plaintext remains on the server and the Git dialog offers Copy again later. This convenience stores a recoverable secret, so it is off by default; an administrator switches it per account${user.isAdmin ? ' (Administration)' : ''}.`}>
+            <div data-setting="recopy"><b>{settings === null ? 'Checking…' : settings.allowRecopyTokens ? 'Enabled for your account' : 'Disabled for your account'}</b>{settings !== null && !settings.allowRecopyTokens ? ' (the default)' : ''}</div>
+          </Setting>
+        </>}
+      </Connections>;
       case 'fonts': return fontsSection;
       case 'styles': return stylesSection;
       case 'drawing': return <DrawingSettings onClose={onClose} />;
@@ -515,16 +531,8 @@ export function SettingsPanel({ ai, user, initial, scope: initialScope, onClose,
       case 'account': return <>
         <h3 class="set-group">Signed in</h3>
         <p class="set-desc" data-setting="whoami">{user.name} ({user.username}){user.isAdmin ? ' — administrator' : ''}</p>
-        {!user.guest && <AccountCredentials>
-          <Setting id="fineGrained" label="Fine-grained access" hint="When you authorize a new sign-in, choose which projects it reaches and whether it may only read (clone, pull, read and build — no push, edits or comments). Sign-ins made before keep their access; switching this off does not widen narrowed ones.">
-            <Switch checked={!!settings?.fineGrainedAccess} disabled={settings === null} data={{ 'data-setting': 'fine-grained' }} onChange={v => void toggleAccountSetting({ fineGrainedAccess: v })} />
-          </Setting>
-        </AccountCredentials>}
-        {err && <div class="err">{err}</div>}
-        <h3 class="set-group">Token re-copy</h3>
-        <Setting id="recopy" label="Re-copy the access token" hint={`The account access token (File ▸ Git repository…) works with Git, the CLI and MCP. It is normally shown exactly once — only a hash is kept. With re-copy enabled, its plaintext remains on the server and the Git dialog offers Copy again later. This convenience stores a recoverable secret, so it is off by default; an administrator switches it per account${user.isAdmin ? ' (Administration)' : ''}.`}>
-          <div data-setting="recopy"><b>{settings === null ? 'Checking…' : settings.allowRecopyTokens ? 'Enabled for your account' : 'Disabled for your account'}</b>{settings !== null && !settings.allowRecopyTokens ? ' (the default)' : ''}</div>
-        </Setting>
+        {web && !user.guest && <AccountProfile user={user} />}
+        {web && !user.guest && <p class="set-desc">The access token for Git, the CLI and MCP, and the computers and apps signed in to your account: <button type="button" class="set-link" data-goto-connections onClick={() => setSection('connections')}>Connections</button>.</p>}
         {!user.guest && <DeleteAccount user={user} />}
       </>;
       case 'admin': return user.isAdmin ? <>
@@ -714,14 +722,15 @@ function DrawingSettings({ onClose }: { onClose: () => void }) {
 const sectionWords = (id: SettingsSection, scope: SettingsScope, deviceTab: boolean) =>
   scope === 'device' && id === 'editor' ? 'math keyboard, text grade, how dark the letters are, panes, zoom, toolbars, only on this device, sync with the account'
     : scope === 'document' && id === 'editor' ? 'paragraph separation, indentation, vertical space, document settings, class, paper, margins'
-      : scope === 'project' && id === 'editor' ? 'spell checking, autocorrect, typos, automatic PDF builds, compile, new documents, paragraph indentation'
+      : scope === 'project' && id === 'editor' ? 'spell checking, autocorrect, typos, new documents, paragraph indentation'
         : scope === 'project' && id === 'fonts' ? 'the editor’s text font and math font, typeface, formulas'
           // (the math keyboard is This device's where that tab exists)
           : deviceTab && id === 'editor' ? (SECTION_WORDS.editor + ', ' + MORE_WORDS.editor).replace('math keyboard, ', '')
             : SECTION_WORDS[id] + ', ' + MORE_WORDS[id];
 /** more words for the search box only (the palette shows SECTION_WORDS) */
 const MORE_WORDS: Record<SettingsSection, string> = {
-  editor: 'checker, dictionary, typos, selection bar, PDF build, compile, paragraph indentation, citations, bibliography',
+  editor: 'checker, dictionary, typos, selection bar, project settings',
+  pdf: 'build, latexmk, delay, background, public PDF link',
   fonts: 'typeface, Google fonts, formulas, sample',
   styles: 'heading, section, title, size, colour, color, spacing, bold',
   drawing: 'stylus, Apple Pencil, palm, fountain pen, ball pen, ink, stabilization, smoothing, shapes, eraser',
@@ -729,11 +738,13 @@ const MORE_WORDS: Record<SettingsSection, string> = {
   ai: 'assistant, pause, delay, speech, voice, dictation, OpenRouter, model',
   appearance: 'dark mode, night, theme, colours, text tone, sepia, figures, invert, text grade, interface',
   privacy: 'telemetry, analytics, tracking, problem reports, privacy notice',
-  account: 'Git, CLI, MCP, OAuth, password, token re-copy, fine-grained access, sign out',
+  connections: 'citations, bibliography, sync, Git, CLI, MCP, OAuth, ChatGPT, token re-copy, connected apps',
+  account: 'profile, display name, change password, picture, sign out',
   admin: 'users, accounts, administrator',
 };
 const SECTION_WORDS: Record<SettingsSection, string> = {
-  editor: 'spell checking, autocorrect, quick menu, math keyboard, automatic PDF builds, new documents, Zotero, project settings',
+  editor: 'spell checking, autocorrect, quick menu, math keyboard, new documents, paragraph indentation',
+  pdf: 'automatic PDF builds, when the PDF is built, compile',
   fonts: 'the editor’s text font and math font, My fonts',
   styles: 'Title, Normal text, Quote, headings: font, weight, size, colour, spacing — yours, the project’s, the document’s',
   drawing: 'pen tip, pressure, smoothing, rounding, calibration, scribble to erase',
@@ -741,7 +752,8 @@ const SECTION_WORDS: Record<SettingsSection, string> = {
   ai: 'rewrite, autocomplete, models, handwriting, spoken comments',
   appearance: 'Classic or Modern interface, light or dark theme, smart invert',
   privacy: 'usage statistics, diagnostics',
-  account: 'access token, sign-ins, delete account',
+  connections: 'Zotero, Google Drive, Google Docs, LessWrong, access token, sign-ins, fine-grained access',
+  account: 'who is signed in, your name, password, delete account',
   admin: 'token re-copy per account, backups, messages and reports',
 };
 export function settingsSearchEntries(open: (s: SettingsSection) => void, shown: SettingsSection[] = SECTIONS.map(([id]) => id), admin = false): SearchEntry[] {
@@ -756,6 +768,67 @@ export const documentFontEntry = (open: () => void): SearchEntry => ({ id: 'Docu
  * handed over in their Share dialog first), confirmed by typing the user name; then this browser
  * forgets the account as at sign-out and the start page appears (server accounts.ts).
  */
+/**
+ * Settings ▸ Account: the name people see, and the password (server profile.ts) — the current one
+ * needed to change it, every other browser signed out after; an account that signs in with Google
+ * and has none is told so. The picture is the Google account's.
+ */
+function AccountProfile({ user }: { user: User }) {
+  const [profile, setProfile] = useState<{ name: string; hasPassword: boolean; google: boolean } | null>(null);
+  const [name, setName] = useState(user.name);
+  const [nameSay, setNameSay] = useState<{ ok?: string; err?: string }>({});
+  const [cur, setCur] = useState(''), [next, setNext] = useState(''), [again, setAgain] = useState('');
+  const [pwSay, setPwSay] = useState<{ ok?: string; err?: string }>({});
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { api.accountProfile().then(p => { setProfile(p); setName(p.name); }).catch(() => {}); }, []);
+  const saveName = async () => {
+    if (busy || name.trim() === user.name) return;
+    setBusy(true); setNameSay({});
+    try {
+      const r = await api.setDisplayName(name);
+      setName(r.user.name);
+      window.dispatchEvent(new CustomEvent('ol:user', { detail: { ...user, name: r.user.name } }));
+      setNameSay({ ok: 'Saved. Documents you open from now on show it; what you wrote before keeps the name it was written under.' });
+    } catch (e) { setNameSay({ err: (e as Error).message }); }
+    finally { setBusy(false); }
+  };
+  const mismatch = !!again && next !== again;
+  const savePassword = async () => {
+    if (busy || !cur || !next || next !== again) return;
+    setBusy(true); setPwSay({});
+    try {
+      await api.changePassword(cur, next);
+      setCur(''); setNext(''); setAgain('');
+      setPwSay({ ok: 'Your password is changed. Every other browser is signed out; this one stays signed in.' });
+    } catch (e) { setPwSay({ err: (e as Error).message }); }
+    finally { setBusy(false); }
+  };
+  return <>
+    <Setting id="displayName" label="Your name" hint="What collaborators see beside your cursor, your comments and your changes.">
+      <div class="set-buttons" data-setting="display-name">
+        <input type="text" value={name} maxLength={60} autoComplete="name" aria-label="Your name" onInput={e => { setName((e.target as HTMLInputElement).value); setNameSay({}); }} onKeyDown={e => { if (e.key === 'Enter') void saveName(); }} />
+        <button type="button" class="btn small" disabled={busy || !name.trim() || name.trim() === user.name} data-save-name onClick={() => void saveName()}>Save</button>
+      </div>
+      {nameSay.ok && <div class="set-hint" role="status">{nameSay.ok}</div>}
+      {nameSay.err && <div class="err" role="alert">{nameSay.err}</div>}
+    </Setting>
+    <Setting id="password" label="Password" hint={profile && !profile.hasPassword
+      ? 'Your account signs in with Google: it has no password here. Your picture is your Google account’s too.'
+      : 'Changing it signs every other browser out. Computers and apps signed in to your account (Connections) keep their access until you revoke them there. Encrypted projects are unlocked with your recovery code, not your password, so they are not affected.'}>
+      {profile === null ? <span class="sub">Checking…</span> : profile.hasPassword && <form class="set-password" data-setting="password" onSubmit={e => { e.preventDefault(); void savePassword(); }}>
+        <input type="text" autoComplete="username" value={user.username} hidden readOnly />
+        <input type="password" placeholder="Current password" aria-label="Current password" autoComplete="current-password" value={cur} onInput={e => { setCur((e.target as HTMLInputElement).value); setPwSay({}); }} />
+        <input type="password" placeholder="New password (at least 10 characters)" aria-label="New password" autoComplete="new-password" value={next} onInput={e => { setNext((e.target as HTMLInputElement).value); setPwSay({}); }} />
+        <input type="password" placeholder="New password again" aria-label="New password again" autoComplete="new-password" value={again} onInput={e => { setAgain((e.target as HTMLInputElement).value); setPwSay({}); }} />
+        {mismatch && <div class="err" role="alert">The two new passwords differ.</div>}
+        <div><button type="submit" class="btn small" disabled={busy || !cur || next.length < 10 || next !== again} data-change-password>Change password</button></div>
+        {pwSay.ok && <div class="set-hint" role="status">{pwSay.ok}</div>}
+        {pwSay.err && <div class="err" role="alert">{pwSay.err}</div>}
+      </form>}
+    </Setting>
+  </>;
+}
+
 function DeleteAccount({ user }: { user: User }) {
   const [open, setOpen] = useState(false);
   const [preview, setPreview] = useState<DeletionPreview | null>(null);
@@ -896,7 +969,49 @@ function MailAnswer({ id, onSent }: { id: number; onSent: () => void }) {
   );
 }
 
-/** Settings ▸ Account: the account's own access token and sign-ins — never anybody else's */
+/**
+ * Settings ▸ Connections: what the account is connected to — Zotero, Google Drive, LessWrong — and
+ * (children) the access token, the sign-ins of computers and apps, token re-copy. Each service's
+ * documents are synced from their own dialogs (File ▸ Google Docs…, LessWrong…); here is the account's
+ * side: connected or not, Connect, Disconnect.
+ */
+function Connections({ user, children }: { user: User; children?: ComponentChildren }) {
+  const [gd, setGd] = useState<GdocsStatus | null>(null);
+  const [lw, setLw] = useState<LessWrongStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const load = () => {
+    api.gdocsAccount().then(setGd).catch(() => setGd({ configured: false } as GdocsStatus));
+    api.lwStatus('').then(setLw).catch(() => setLw(null));
+  };
+  useEffect(() => { if (!user.guest) load(); }, []);
+  if (user.guest) return <p class="set-desc">Sign in to connect Zotero, Google Drive or LessWrong to your account.</p>;
+  // (back here after the service's consent screen: the place open now, without a query)
+  const next = encodeURIComponent(/^#\/\S*$/.test(location.hash.replace(/\?.*$/, '')) ? location.hash.replace(/\?.*$/, '') : '#/');
+  const disconnect = async (fn: () => Promise<unknown>) => { setBusy(true); setErr(''); try { await fn(); load(); } catch (e) { setErr((e as Error).message); } finally { setBusy(false); } };
+  const lwDays = lw?.account ? Math.round((lw.account.expiresAt - Date.now()) / 86_400_000) : 0;
+  return <>
+    <p class="set-desc">The services, computers and apps connected to your account. Each is used only for what you ask of it; disconnecting one leaves your documents as they are.</p>
+    <h3 class="set-group">Citations from Zotero</h3>
+    <div class="set-block" data-setting="zotero"><ZoteroConnect /></div>
+    <h3 class="set-group">Documents elsewhere</h3>
+    <Setting id="gdocs" label="Google Drive" hint="Sync a document with a Google Doc (File ▸ Google Docs…) or bring one over as a project (+ New ▸ Import).">
+      <div data-setting="gdocs">{gd === null ? <span class="sub">Checking…</span>
+        : !gd.configured ? <span class="sub">Not set up on this server.</span>
+          : gd.account ? <span class="set-buttons"><span>Connected{gd.account.email ? ` as ${gd.account.email}` : ''}</span><button type="button" class="btn small" disabled={busy} data-gdocs-disconnect onClick={() => void disconnect(() => api.gdocsDisconnect())}>Disconnect</button></span>
+            : <a class="btn small" href={`/api/gdocs/connect?next=${next}`} data-gdocs-connect>Connect Google Drive…</a>}</div>
+    </Setting>
+    <Setting id="lesswrong" label="LessWrong" hint="Sync a document with a LessWrong draft (File ▸ LessWrong…): the text and its comment threads.">
+      <div data-setting="lesswrong">{lw === null ? <span class="sub">Checking…</span>
+        : lw.account ? <span class="set-buttons"><span>Connected{lwDays < 14 ? ` — for ${Math.max(lwDays, 0)} more days` : ''}</span>{lwDays < 14 && <a class="btn small" href={`/api/lesswrong/connect?next=${next}`}>Connect again…</a>}<button type="button" class="btn small" disabled={busy} data-lw-disconnect onClick={() => void disconnect(() => api.lwDisconnect())}>Disconnect</button></span>
+          : <a class="btn small" href={`/api/lesswrong/connect?next=${next}`} data-lw-connect>Connect LessWrong…</a>}</div>
+    </Setting>
+    {err && <div class="err">{err}</div>}
+    {children}
+  </>;
+}
+
+/** Settings ▸ Connections: the account's own access token and sign-ins — never anybody else's */
 function AccountCredentials({ children }: { children: ComponentChildren }) {
   const t = useAccountTokens();
   return <>

@@ -171,6 +171,12 @@ export function App() {
     void rekeyLocalCopies().then(canonicalHash).then(() => visitPublic()).finally(() => { if (live) setLinkChecked(user.id); });
     return () => { live = false; };
   }, [user?.id]);
+  // Settings ▸ Account renamed the account: the new name everywhere at once (and for offline starts)
+  useEffect(() => {
+    const h = (e: Event) => { const u = (e as CustomEvent<User>).detail; try { localStorage.setItem('ol.user', JSON.stringify(u)); } catch { /* private mode */ } setUser(u); };
+    window.addEventListener('ol:user', h);
+    return () => window.removeEventListener('ol:user', h);
+  }, []);
   const acceptLogin = (u: User) => {
     // A native sign-in does not rerun the initial identity effect. Remember this
     // authenticated user too, and replace the worker's pre-login anonymous cache.
@@ -1254,7 +1260,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       if (!opts.auto) notify('Could not start the PDF build: ' + String((e as Error).message), 'error');
     }
   };
-  // Auto-build (Settings ▸ Editor ▸ PDF, or the ▾ beside View PDF): a moment after the document was
+  // Auto-build (Settings ▸ PDF, or the ▾ beside View PDF): a moment after the document was
   // saved, when the PDF is older than that save — while the PDF pane is shown, or always. Never
   // while a build runs (when it is done and the document is still newer, this asks again), and
   // never twice for the same save (a failing document is not rebuilt in a loop).

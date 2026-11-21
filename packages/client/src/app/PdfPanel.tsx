@@ -106,7 +106,7 @@ export function PdfPanel({ docId, state, savedAt, onBuild, onCancel, onShowTex, 
               </label>
               <div class="sub foot">The document is saved 1.5 s after you stop typing. Builds run on the server in the background; the PDF keeps its page and zoom.</div>
               {/* (every quick menu ends in its place in Settings) */}
-              {editorContext.ui && <button type="button" class="pdf-build-settings" data-pdf-settings onClick={() => { setMenu(false); editorContext.ui!.openDialog('preferences', 'editor'); }}>PDF settings…</button>}
+              {editorContext.ui && <button type="button" class="pdf-build-settings" data-pdf-settings onClick={() => { setMenu(false); editorContext.ui!.openDialog('preferences', 'pdf'); }}>PDF settings…</button>}
             </div>
           )}
         </div>

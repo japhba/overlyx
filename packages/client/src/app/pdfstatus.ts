@@ -7,7 +7,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import type { Prefs } from '../prefs';
 
-/** the auto-build choices (the ▾ beside View PDF, Settings ▸ Editor ▸ PDF) */
+/** the auto-build choices (the ▾ beside View PDF, Settings ▸ PDF) */
 export const AUTO_BUILD_CHOICES: [Prefs['autoBuild'], string, string][] = [
   ['off', 'Off', 'Only when you ask (Ctrl+R, View PDF)'],
   ['shown', 'While the PDF is shown', 'A moment after the document was saved, if the PDF pane is open'],

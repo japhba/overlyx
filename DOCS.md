@@ -2545,6 +2545,28 @@ blend.
   is one, and the rows (and Zotero's block) of the open section whose text holds every word are
   marked (`data-search-hit`). Escape empties the box before it closes the dialog. The start page's
   "Show the files panel" is gone while the panel is shown.
+  **Second round (21 Nov 2026):** *LyX's words only in Classic* — in Modern the start page has no
+  "Import from LyX…" (it is + New ▸ "Or bring a project over: … from a LyX file (.lyx)…", which opens
+  the same import) and a document project's Download is a menu: Project (.zip) · LyX file (.lyx, with
+  figures, .zip); the files panel's LyX⇩ import is Classic's (Modern: File ▸ Import from LyX… in a
+  document); Document Settings' Modules, Branches and Raw settings sit under an **Advanced** tab
+  (`arg 'branches'` opens it), the footer drops the Layouts count. *Settings* gains **PDF** (automatic
+  builds; User and Project, `PROJECT_KEYS.pdf`; PdfPanel's "PDF settings…" opens it; VS Code's
+  `VSCODE_SETTINGS` too) and **Connections** (Zotero; Google Drive and LessWrong connected or not,
+  Connect / Disconnect through their `/api/gdocs|lesswrong/connect?next=#/…`; the access token,
+  sign-ins, fine-grained access and token re-copy, moved from Account). **Account** shows who is
+  signed in, *Your name* and *Password* (server `profile.ts`: `GET /api/account/profile`, `POST
+  /api/account/name {name}` — tidied, ≤ 60 characters, guests refused — and `POST
+  /api/account/password {current, next}` — the current one required, ≥ 10 characters, five wrong
+  current passwords per account wait 15 minutes, an account without a password (Google) is told so).
+  A password change signs every other browser out: session cookies carry the account's session
+  generation (`sessiongen.ts`, table `session_generations`; no row = 0 = every older cookie) and an
+  older one signs nobody in; the browser that changed it gets a new cookie. Git / CLI / MCP
+  credentials are not sessions and keep working; E2E keys are unlocked by the recovery code, never
+  the password. The picture stays the Google account's (it is refreshed at every Google sign-in).
+  The status bar's build stamp reads `2026-11-21 12:06` (`buildStampShown`; the stamp itself, which
+  telemetry and presenting compare, is unchanged); the start page's switches say **Sort:** and
+  **Search:**. `tests/account-profile.test.ts`.
 * **Fonts, for the editor and for the PDF separately** (like LyX's screen fonts and document fonts;
   catalogue in `client/src/fonts/catalog.ts`). *Settings ▸ Fonts* (per browser, both shells) has two
   choices. *Text font* (`prefs.editorFont`): Computer Modern (bundled CMU Serif, the default), the text

@@ -20,6 +20,7 @@ import { recordUsage, dialogKey } from '../usage';
 import { DOCUMENT_FONT_SETS, matchFontSet, fontSetValues, fontValues, editorFace, type DocumentFontSet } from '../fonts/catalog';
 import { FontChooser } from './FontPicker';
 import { parseFace } from '@overlyx/core';
+import { useUiMode } from './uimode';
 
 
 export function Dialog({ title, onClose, children, buttons, wide, restoreFocus }: { title: string; onClose: () => void; children: ComponentChildren; buttons?: ComponentChildren; wide?: boolean; restoreFocus?: () => boolean }) {
@@ -447,8 +448,11 @@ export function SettingsDialog({ docId, meta, headerLines, onSaved, onClose, tab
   const moduleIssues = meta?.availableModules ? moduleWarnings(moduleIds, meta.availableModules) : [];
   const [raw, setRaw] = useState(false);
   const [rawText, setRawText] = useState(headerLines.join('\n'));
-  type Tab = 'general' | 'page' | 'text' | 'numbering' | 'fonts' | 'branches' | 'pdf' | 'preamble' | 'raw';
-  const [tab, setTab] = useState<Tab>(() => (['general', 'page', 'text', 'numbering', 'fonts', 'branches', 'pdf', 'preamble', 'raw'].includes(tab0 ?? '') ? tab0 as Tab : 'general'));
+  type Tab = 'general' | 'page' | 'text' | 'numbering' | 'fonts' | 'branches' | 'pdf' | 'preamble' | 'raw' | 'advanced';
+  // (LyX's own notions — modules, branches, the raw header — only in the Classic interface's tab row;
+  // Modern keeps them under Advanced)
+  const classic = useUiMode() === 'classic';
+  const [tab, setTab] = useState<Tab>(() => (['general', 'page', 'text', 'numbering', 'fonts', 'branches', 'pdf', 'preamble', 'raw'].includes(tab0 ?? '') ? (!classic && tab0 === 'branches' ? 'advanced' : tab0 as Tab) : 'general'));
   const save = async () => {
     if (tab === 'raw' || raw) { await api.setHeader(docId, { headerLines: rawText.split('\n') }); onSaved(); onClose(); return; }
     const lines = [...headerLines];
@@ -494,7 +498,30 @@ export function SettingsDialog({ docId, meta, headerLines, onSaved, onClose, tab
   const text = (k: string, placeholder = '', style = '') => <input type="text" value={v[k] ?? ''} onInput={e => set(k, (e.target as HTMLInputElement).value)} placeholder={placeholder} style={style} />;
   const sel = (k: string, opts: (string | [string, string])[]) => <select value={v[k] ?? ''} onChange={e => set(k, (e.target as HTMLSelectElement).value)}>{opts.map(o => { const [val, label] = Array.isArray(o) ? o : [o, o]; return <option key={val} value={val}>{label}</option>; })}</select>;
   const bool = (k: string) => <input type="checkbox" checked={v[k] === 'true'} onChange={e => set(k, String((e.target as HTMLInputElement).checked))} />;
-  const TABS: [Tab, string][] = [['general', 'Class & options'], ['page', 'Page'], ['text', 'Text layout'], ['numbering', 'Numbering & floats'], ['fonts', 'Fonts'], ['pdf', 'PDF'], ['branches', 'Branches'], ['preamble', 'LaTeX preamble'], ['raw', 'Raw settings']];
+  const TABS: [Tab, string][] = classic
+    ? [['general', 'Class & options'], ['page', 'Page'], ['text', 'Text layout'], ['numbering', 'Numbering & floats'], ['fonts', 'Fonts'], ['pdf', 'PDF'], ['branches', 'Branches'], ['preamble', 'LaTeX preamble'], ['raw', 'Raw settings']]
+    : [['general', 'Class & options'], ['page', 'Page'], ['text', 'Text layout'], ['numbering', 'Numbering & floats'], ['fonts', 'Fonts'], ['pdf', 'PDF'], ['preamble', 'LaTeX preamble'], ['advanced', 'Advanced']];
+  const tabOn = (t: Tab) => tab === t || (!classic && t === 'advanced' && (tab === 'branches' || tab === 'raw'));
+  const modulesBody = <>
+    <Row label="Modules"><input type="text" value={modules} onInput={e => setModules((e.target as HTMLInputElement).value)} placeholder="e.g. theorems-ams, customHeadersFooters" /></Row>
+    <details><summary>Choose modules</summary>
+      <input type="search" aria-label="Search modules" value={moduleQuery} onInput={e => setModuleQuery(e.currentTarget.value)} placeholder="Search by name or description" />
+      <div class="list reference-list" style="max-height:200px">{(meta?.availableModules ?? []).filter(m => (m.title + ' ' + m.id + ' ' + m.description).toLowerCase().includes(moduleQuery.toLowerCase())).map(m => <button type="button" key={m.id} class={moduleIds.includes(m.id) ? 'sel' : ''} aria-pressed={moduleIds.includes(m.id)} onClick={() => setModules(moduleIds.includes(m.id) ? moduleIds.filter(id => id !== m.id).join(', ') : [...moduleIds, m.id].join(', '))}><strong>{m.title}</strong><span class="sub">{m.description}</span></button>)}</div>
+    </details>
+    {moduleIssues.map(issue => <div class="err" role="status" key={issue}>{issue}</div>)}
+  </>;
+  const branchesBody = <>
+    <div class="list" style="max-height:220px">
+      {branches.map((b, i) => <div key={b.name} style="display:flex;gap:8px;align-items:center">
+        <input type="checkbox" checked={b.selected} onChange={e => setBranches(bs => bs.map((x, j) => (j === i ? { ...x, selected: (e.target as HTMLInputElement).checked } : x)))} />
+        <b style="flex:1">{b.name}</b><span class="sub">{b.selected ? 'activated' : 'not activated'}</span>
+        <button class="small-btn" onClick={() => setBranches(bs => bs.filter((_, j) => j !== i))}>Remove</button>
+      </div>)}
+      {!branches.length && <div class="sub">No branches defined. Text in a branch inset is only output when the branch is activated.</div>}
+    </div>
+    <Row label="New branch"><input type="text" value={newBranch} onInput={e => setNewBranch((e.target as HTMLInputElement).value)} placeholder="name" />
+      <button class="small-btn" disabled={!newBranch.trim() || branches.some(b => b.name === newBranch.trim())} onClick={() => { setBranches([...branches, { name: newBranch.trim(), selected: true, lines: ['\\selected 1', '\\filename_suffix 0', '\\color #faf0e6 #faf0e6'] }]); setNewBranch(''); }}>Add</button></Row>
+  </>;
   const geometry = v.use_geometry === 'true';
   const fontFields = { font_roman: v.font_roman, font_sans: v.font_sans, font_typewriter: v.font_typewriter, font_math: v.font_math, font_sf_scale: v.font_sf_scale };
   const fontSet = matchFontSet(fontFields);
@@ -509,17 +536,12 @@ export function SettingsDialog({ docId, meta, headerLines, onSaved, onClose, tab
     <Dialog title="Document Settings" onClose={onClose} wide buttons={<button class="btn primary" onClick={save}>Apply</button>}>
       <div class="hint">Changes here apply to the PDF and take precedence over matching settings in your preamble. Your preamble remains editable.</div>
       <div class="panel-tabs" style="flex-wrap:wrap">
-        {TABS.map(([t, l]) => <button key={t} class={tab === t ? 'active' : ''} onClick={() => { setTab(t); if (t === 'raw') setRaw(true); }}>{l}</button>)}
+        {TABS.map(([t, l]) => <button key={t} class={tabOn(t) ? 'active' : ''} data-docsettings-tab={t} onClick={() => { setTab(t); if (t === 'raw') setRaw(true); }}>{l}</button>)}
       </div>
       {tab === 'general' && <>
         <Row label="Document class"><input type="text" list="ol-classes" value={v.textclass} onInput={e => set('textclass', (e.target as HTMLInputElement).value)} /><datalist id="ol-classes">{CLASSES.map(c => <option key={c} value={c} />)}</datalist></Row>
         <Row label="Class options"><input type="text" value={options} onInput={e => setOptions((e.target as HTMLInputElement).value)} placeholder="e.g. prx,amsmath,superscriptaddress" /></Row>
-        <Row label="Modules"><input type="text" value={modules} onInput={e => setModules((e.target as HTMLInputElement).value)} placeholder="e.g. theorems-ams, customHeadersFooters" /></Row>
-        <details><summary>Choose modules</summary>
-          <input type="search" aria-label="Search modules" value={moduleQuery} onInput={e => setModuleQuery(e.currentTarget.value)} placeholder="Search by name or description" />
-          <div class="list reference-list" style="max-height:200px">{(meta?.availableModules ?? []).filter(m => (m.title + ' ' + m.id + ' ' + m.description).toLowerCase().includes(moduleQuery.toLowerCase())).map(m => <button type="button" key={m.id} class={moduleIds.includes(m.id) ? 'sel' : ''} aria-pressed={moduleIds.includes(m.id)} onClick={() => setModules(moduleIds.includes(m.id) ? moduleIds.filter(id => id !== m.id).join(', ') : [...moduleIds, m.id].join(', '))}><strong>{m.title}</strong><span class="sub">{m.description}</span></button>)}</div>
-        </details>
-        {moduleIssues.map(issue => <div class="err" role="status" key={issue}>{issue}</div>)}
+        {classic ? modulesBody : moduleIssues.map(issue => <div class="err" role="status" key={issue}>{issue} (Advanced ▸ Modules)</div>)}
         <Row label="Language">{text('language')}</Row>
         <Row label="Citation engine">{sel('cite_engine', ['basic', 'natbib', 'biblatex', 'jurabib'])}{sel('cite_engine_type', ['default', 'authoryear', 'numerical'])}</Row>
         <Row label="Bibliography style">{text('biblio_style')}</Row>
@@ -577,17 +599,17 @@ export function SettingsDialog({ docId, meta, headerLines, onSaved, onClose, tab
           <Row label="Sans / typewriter scale">{text('font_sf_scale', '100 100', 'width:7em')}{text('font_tt_scale', '100 100', 'width:7em')}</Row>
         </details>
       </>}
-      {tab === 'branches' && <>
-        <div class="list" style="max-height:220px">
-          {branches.map((b, i) => <div key={b.name} style="display:flex;gap:8px;align-items:center">
-            <input type="checkbox" checked={b.selected} onChange={e => setBranches(bs => bs.map((x, j) => (j === i ? { ...x, selected: (e.target as HTMLInputElement).checked } : x)))} />
-            <b style="flex:1">{b.name}</b><span class="sub">{b.selected ? 'activated' : 'not activated'}</span>
-            <button class="small-btn" onClick={() => setBranches(bs => bs.filter((_, j) => j !== i))}>Remove</button>
-          </div>)}
-          {!branches.length && <div class="sub">No branches defined. Text in a branch inset is only output when the branch is activated.</div>}
-        </div>
-        <Row label="New branch"><input type="text" value={newBranch} onInput={e => setNewBranch((e.target as HTMLInputElement).value)} placeholder="name" />
-          <button class="small-btn" disabled={!newBranch.trim() || branches.some(b => b.name === newBranch.trim())} onClick={() => { setBranches([...branches, { name: newBranch.trim(), selected: true, lines: ['\\selected 1', '\\filename_suffix 0', '\\color #faf0e6 #faf0e6'] }]); setNewBranch(''); }}>Add</button></Row>
+      {tab === 'branches' && branchesBody}
+      {tab === 'advanced' && <>
+        <h4>Modules</h4>
+        <div class="hint">Extra features of the document class — theorem environments, custom headers and footers — as LyX names them.</div>
+        {modulesBody}
+        <h4>Branches</h4>
+        <div class="hint">Parts of the text that go into the PDF only while their branch is on: a version for reviewers, a long and a short one.</div>
+        {branchesBody}
+        <h4>Raw settings</h4>
+        <div class="hint">Every setting of the document as it is written at the top of the file, to edit by hand.</div>
+        <div><button type="button" class="btn small" data-docsettings-raw onClick={() => { setTab('raw'); setRaw(true); }}>Edit the raw settings…</button></div>
       </>}
       {tab === 'pdf' && <>
         <Row label="Use title & author">{bool('pdf_pdfusetitle')}</Row>
@@ -603,7 +625,7 @@ export function SettingsDialog({ docId, meta, headerLines, onSaved, onClose, tab
       </>}
       {tab === 'preamble' && <textarea style="min-height:360px" value={preamble} onInput={e => setPreamble((e.target as HTMLTextAreaElement).value)} spellcheck={false} />}
       {tab === 'raw' && <textarea style="min-height:420px" value={rawText} onInput={e => setRawText((e.target as HTMLTextAreaElement).value)} spellcheck={false} />}
-      {meta && <div style="color:#777;font-size:11px">Macros available: {meta.macroList.length} · Bibliography entries: {meta.bib.length} · Layouts: {meta.layouts?.length ?? 'n/a'}</div>}
+      {meta && <div style="color:#777;font-size:11px">Macros available: {meta.macroList.length} · Bibliography entries: {meta.bib.length}{classic ? ` · Layouts: ${meta.layouts?.length ?? 'n/a'}` : ''}</div>}
     </Dialog>
   );
 }

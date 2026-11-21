@@ -41,3 +41,18 @@ html[data-ui="modern"] .settings-search { border-radius: var(--m-radius); border
 @media (max-width: 640px) {
   .settings-search { flex: none; width: 11em; margin: 0 6px 0 0; }
 }
+
+/* the start page's two switches say what they switch: "Sort:" (FileSortSwitch) and "Search:" here */
+.hs-say { color: var(--ui-muted); font-size: 12px; margin-right: -2px; }
+
+/* + New ▸ "Or bring a project over: from Overleaf… · from a LyX file… · from Google Docs…" */
+.ol-new-import .fallback-link { margin: 0; padding: 0; border: 0; background: none; color: var(--link); font: inherit; text-decoration: underline; text-decoration-style: dotted; cursor: pointer; }
+
+/* Settings: a link to another section inside a sentence; a status with its buttons on one line */
+.set-link { margin: 0; padding: 0; border: 0; background: none; color: var(--link); font: inherit; text-decoration: underline; cursor: pointer; }
+.set-ctl .set-buttons { align-items: center; }
+
+/* Settings ▸ Account: the name field and the password form */
+.set-ctl [data-setting="display-name"] { flex-wrap: nowrap; }
+.set-ctl [data-setting="display-name"] input { flex: 1 1 auto; min-width: 0; }
+.set-password { display: grid; gap: 6px; max-width: 22em; }

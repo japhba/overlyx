@@ -1,5 +1,5 @@
 /**
- * Connect to Zotero (Settings ▸ Editor ▸ Citations from Zotero, or the citation dialog's "Connect Zotero…"): the
+ * Connect to Zotero (Settings ▸ Connections ▸ Citations from Zotero, or the citation dialog's "Connect Zotero…"): the
  * account links its Zotero library with a Zotero Web API key (zotero.org/settings/keys — "Allow
  * library access" is enough; nothing is ever written to Zotero). The citation dialog's search then
  * lists the matching items of that library, and of the groups the key can read, above the papers
@@ -90,13 +90,13 @@ export async function searchZotero(userId: number, q: string, limit = 6): Promis
   const row = db.prepare('SELECT api_key, username, libraries FROM zotero_accounts WHERE user_id = ?').get(userId) as Row | undefined;
   if (!row) return null;
   let key: string;
-  try { key = unseal(row.api_key); } catch { return { hits: [], warnings: ['The Zotero connection can no longer be read — connect Zotero again (Settings ▸ Account)'] }; }
+  try { key = unseal(row.api_key); } catch { return { hits: [], warnings: ['The Zotero connection can no longer be read — connect Zotero again (Settings ▸ Connections)'] }; }
   const libs = JSON.parse(row.libraries) as Library[];
   // (the Web API has no relevance order: the most recently changed matches come first)
   const params = new URLSearchParams({ q, qmode: 'titleCreatorYear', include: 'data,bibtex', limit: String(limit), itemType: '-attachment' });
   const settled = await Promise.allSettled(libs.slice(0, 6).map(async lib => {
     const r = await fetchImpl(`${API}/${lib.type === 'user' ? 'users' : 'groups'}/${lib.id}/items/top?${params}`, { headers: headers(key) });
-    if (r.status === 403) throw new Error('Zotero refused the key — connect Zotero again (Settings ▸ Account)');
+    if (r.status === 403) throw new Error('Zotero refused the key — connect Zotero again (Settings ▸ Connections)');
     if (!r.ok) throw new Error(`Zotero answered ${r.status}`);
     return ((await r.json()) as any[]).map(it => zoteroHit(it, lib)).filter((h): h is Hit => !!h);
   }));
@@ -125,7 +125,7 @@ export async function zoteroLibraryItems(userId: number, max: number): Promise<{
   const row = db.prepare('SELECT api_key, libraries FROM zotero_accounts WHERE user_id = ?').get(userId) as Pick<Row, 'api_key' | 'libraries'> | undefined;
   if (!row) return null;
   let key: string;
-  try { key = unseal(row.api_key); } catch { throw new Error('The Zotero connection can no longer be read — connect Zotero again (Settings ▸ Account)'); }
+  try { key = unseal(row.api_key); } catch { throw new Error('The Zotero connection can no longer be read — connect Zotero again (Settings ▸ Connections)'); }
   const out: { hit: Hit; tags: string[]; abstract: string }[] = [];
   for (const lib of (JSON.parse(row.libraries) as Library[]).slice(0, 6)) {
     for (let start = 0; out.length < max; start += 100) {
@@ -134,7 +134,7 @@ export async function zoteroLibraryItems(userId: number, max: number): Promise<{
       let r = await fetchImpl(url, { headers: headers(key) });
       const wait = Number(r.headers.get('retry-after') ?? r.headers.get('backoff') ?? 0);
       if (r.status === 429 || (wait && r.ok)) { await new Promise(res => setTimeout(res, Math.min(10, wait || 5) * 1000)); if (!r.ok) r = await fetchImpl(url, { headers: headers(key) }); }
-      if (r.status === 403) throw new Error('Zotero refused the key — connect Zotero again (Settings ▸ Account)');
+      if (r.status === 403) throw new Error('Zotero refused the key — connect Zotero again (Settings ▸ Connections)');
       if (!r.ok) throw new Error(`Zotero answered ${r.status}`);
       const items = (await r.json()) as any[];
       for (const it of items) {

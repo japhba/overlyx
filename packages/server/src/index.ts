@@ -65,6 +65,7 @@ import { statusOf as mirrorStatus, pushProject as mirrorPush, setMirrorEnabled, 
 import { feedbackRoutes, vscodeTelemetryRoutes, reportServerError, pruneReports, listReports, deleteReport, answerMail, appVersion, appCommit } from './feedback.ts';
 import { startInboxImport } from './inbox.ts';
 import { deletionPreview, deleteAccount, pruneTrash } from './accounts.ts';
+import { profileOf, changeDisplayName, changePassword, ProfileError } from './profile.ts';
 import { privacyPage } from './privacy.ts';
 import { termsPage } from './terms.ts';
 import { usageRoutes, vscodeUsageRoutes } from './usage.ts';
@@ -880,6 +881,19 @@ api.post('/account/delete', async (req, res) => {
     console.error('[account] deletion failed:', e);
     res.status(500).json({ error: 'The account could not be deleted completely: ' + (e as Error).message });
   }
+});
+
+/** Settings ▸ Account: the name, and whether there is a password to change (profile.ts). */
+api.get('/account/profile', (req, res) => { res.json(profileOf(req.user!)); });
+/** a new display name ({ name }) */
+api.post('/account/name', (req, res) => {
+  try { const name = changeDisplayName(req.user!, req.body?.name); res.json({ user: { ...req.user!, name } }); }
+  catch (e) { if (e instanceof ProfileError) res.status(e.status).json({ error: e.message }); else throw e; }
+});
+/** a new password ({ current, next }): every other browser signed out, this one gets a new cookie */
+api.post('/account/password', (req, res) => {
+  try { changePassword(req.user!, req.body?.current, req.body?.next); setSessionCookie(req, res, req.user!); res.json({ ok: true }); }
+  catch (e) { if (e instanceof ProfileError) res.status(e.status).json({ error: e.message }); else throw e; }
 });
 
 /** The signed-in account's server-side settings (userSettings.ts) — the Settings panel. */

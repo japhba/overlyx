@@ -10,6 +10,7 @@ import { notifySignup } from './mailer.ts';
 import { tidy } from '@overlyx/core/agentname.ts';
 import { isDriveCallback, finishConnect } from './gdocs/google.ts';
 import type { AccessScope } from './tokenAuth.ts';
+import { sessionGeneration } from './sessiongen.ts';
 
 export interface SessionUser {
   id: number; username: string; name: string; color: string; isAdmin: boolean; avatar?: string | null; email?: string | null;
@@ -78,15 +79,18 @@ export function toSessionUser(u: UserRow): SessionUser {
 }
 
 export function signSession(u: SessionUser): string {
-  return jwt.sign({ sub: String(u.id), username: u.username }, JWT_SECRET, { expiresIn: `${config.sessionDays}d` });
+  // (`gen`: the account's session generation — a password change moves it on and signs older cookies out, sessiongen.ts)
+  const gen = sessionGeneration(u.id);
+  return jwt.sign({ sub: String(u.id), username: u.username, ...(gen ? { gen } : {}) }, JWT_SECRET, { expiresIn: `${config.sessionDays}d` });
 }
 
 export function userFromToken(token: string | undefined): SessionUser | null {
   if (!token) return null;
   try {
-    const payload = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }) as { sub: string };
+    const payload = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }) as { sub: string; gen?: number };
     const row = db.prepare('SELECT * FROM users WHERE id = ?').get(Number(payload.sub)) as UserRow | undefined;
-    return row ? toSessionUser(row) : null;
+    if (!row || (payload.gen ?? 0) !== sessionGeneration(row.id)) return null;
+    return toSessionUser(row);
   } catch {
     return null;
   }

@@ -91,7 +91,7 @@ const BuiltPdf = lazyComponent(() => import('./BuiltPdf').then(m => m.BuiltPdf))
 
 const stored = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
 /** Settings in VS Code: the editor's — no Appearance (VS Code's theme; the dark-theme switches sit in Editor), AI or account; Drawing & pen is the margins' pen of this editor */
-const VSCODE_SETTINGS: SettingsSection[] = ['editor', 'fonts', 'styles', 'drawing', 'keyboard'];
+const VSCODE_SETTINGS: SettingsSection[] = ['editor', 'pdf', 'fonts', 'styles', 'drawing', 'keyboard'];
 
 export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'init' }> }) {
   const docId = init.docId;

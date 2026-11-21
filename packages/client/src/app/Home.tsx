@@ -18,6 +18,7 @@ import { projectShortName, splitProjectKey, isProjectName } from '@overlyx/core'
 import { uiConfirm, uiAlert, Dialog } from './Dialogs';
 import { promptNewFile, createProjectFile } from './newfile';
 import { useUiMode } from './uimode';
+import { showContextMenu } from '../editor/contextmenu';
 import { KIND_ICONS, iconSvg } from './modernicons';
 import { ScientificTemplates, chosenDesign } from './ScientificTemplates';
 import { initialDeckSize, initialPosterSize, rememberDeckSize, rememberPosterSize, sizeOf, usualDeckSize } from './decksize';
@@ -87,6 +88,9 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
   const [importOpen, setImportOpen] = useState(false);
   const [importSource, setImportSource] = useState<'overleaf' | 'lyx'>('overleaf');
   // Google's picker is set up on this server: Import from Google Docs is offered
+  // (LyX's words only in the Classic interface: in Modern, importing from LyX is under + New ▸ Import
+  // and the .lyx download under Download)
+  const classic = useUiMode() === 'classic';
   const [gdocs, setGdocs] = useState(false);
   useEffect(() => { if (!user.guest) api.gdocsAccount().then(s => setGdocs(s.picker)).catch(() => setGdocs(false)); }, [user.guest]);
   /** a picked Google Doc as a project of its own, named after it — its document opened */
@@ -232,9 +236,17 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
       {p.role === 'owner' && p.via !== 'admin' && <button class="btn small" onClick={() => onShare(p.name)} data-share={p.name}>Share…</button>}
       {/* (someone with only a folder of the project has no git, no download of the project) */}
       {!p.e2e && !p.partial && <button class="btn small" onClick={() => onGit(p.name)} data-git={p.name} title="Clone, pull and push this project with git">Git…</button>}
-      {!p.e2e && !p.partial && <a class="btn small" data-download-zip={p.name} href={zipUrl(p.name)} title="Download the whole project as a .zip">Download</a>}
+      {!p.e2e && !p.partial && (classic || !p.files.some(f => f.kind === 'doc')
+        ? <a class="btn small" data-download-zip={p.name} href={zipUrl(p.name)} title="Download the whole project as a .zip">Download</a>
+        : <button type="button" class="btn small" data-download-menu={p.name} aria-haspopup="menu" title="Download the project — as it is, or as LyX files" onClick={e => {
+          const r = e.currentTarget.getBoundingClientRect();
+          showContextMenu(r.left, r.bottom + 2, [
+            { label: 'Project (.zip)', action: () => { location.href = zipUrl(p.name); } },
+            { label: 'LyX file (.lyx, with figures, .zip)', action: () => { location.href = zipUrl(p.name, 'lyx'); } },
+          ]);
+        }}>Download ▾</button>)}
       {p.e2e && !p.e2eLocked && <button class="btn small" data-download-zip={p.name} title="Download the whole project as a .zip, made in this browser" onClick={() => void import('../e2e/download').then(m => m.downloadProjectZip(p.name)).catch(e => notify('Could not make the .zip: ' + (e as Error).message, 'error'))}>Download</button>}
-      {!p.e2e && !p.partial && p.files.some(f => f.kind === 'doc') && <a class="btn small" data-download-lyx={p.name} href={zipUrl(p.name, 'lyx')} title="Download the project as LyX documents with figures and bibliography">LyX</a>}
+      {classic && !p.e2e && !p.partial && p.files.some(f => f.kind === 'doc') && <a class="btn small" data-download-lyx={p.name} href={zipUrl(p.name, 'lyx')} title="Download the project as LyX documents with figures and bibliography">LyX</a>}
       {p.role === 'owner' && <button class="btn small danger" title="Move this project to the trash" onClick={() => void remove(p)}>Delete</button>}
     </div>
   );
@@ -299,7 +311,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
           ? <button class="btn primary" data-guest-signin onClick={onSignIn}>Sign in</button>
           : <button class="btn primary" data-new-project onClick={() => setNewOpen(true)} title="A new document, slide deck, poster or whiteboard — each in a project of its own">+ New</button>}
         {!user.guest && <button class="btn" data-import-overleaf onClick={() => { setImportSource('overleaf'); setImportOpen(true); }} title="Bring projects over from Overleaf — through its Git access, or from a downloaded zip">Import from Overleaf…</button>}
-        {!user.guest && <button class="btn" data-import-lyx onClick={() => { setImportSource('lyx'); setImportOpen(true); }}>Import from LyX…</button>}
+        {!user.guest && classic && <button class="btn" data-import-lyx onClick={() => { setImportSource('lyx'); setImportOpen(true); }}>Import from LyX…</button>}
         {!user.guest && gdocs && <button class="btn" data-import-gdocs onClick={() => void importGoogle()} title="Bring a Google Doc over as a project of its own — kept in sync with it, or as a copy">Import from Google Docs…</button>}
         {onBrowse && <button class="btn" onClick={onBrowse}>Show the files panel</button>}
         {!user.guest && <button class="btn" data-open-library onClick={() => openLibrary(true)} title="Your references and their PDFs, a reference library of your own — cite them in any document">My library</button>}
@@ -310,6 +322,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
         </button>
       </div>
       {newOpen && <NewProjectDialog user={user} onClose={() => setNewOpen(false)} notify={notify}
+        onImport={source => { setNewOpen(false); if (source === 'gdocs') void importGoogle(); else { setImportSource(source); setImportOpen(true); } }} gdocs={gdocs}
         onCreated={(id, name) => { setNewOpen(false); void load(); onChanged(); if (id) onOpen(id); else notify(`Project "${name}" created — add a document with + File in the files panel`); }} />}
       {importOpen && <OverleafImport source={importSource} existing={(projects ?? []).filter(p => splitProjectKey(p.name).owner === user.username).map(p => projectShortName(p.name))} onClose={() => { setImportOpen(false); setPending(null); }} onImported={() => { void load(); onChanged(); }} notify={notify}
         initial={pending ?? undefined} autostart={!!pending} onDone={names => void openImported(names)} />}
@@ -356,7 +369,9 @@ const NEW_KINDS: { id: NewKind; label: string; hint: string; w: number; h: numbe
  * The start page's + New: a document, slides, a poster or a whiteboard, each in a project of its own
  * (named like it), opened right away — or an empty project. Inside a project, + File and File ▸ New … add more.
  */
-export function NewProjectDialog({ user, onClose, onCreated, notify }: { user: User; onClose: () => void; onCreated: (id: string | null, name: string) => void; notify: (text: string, kind?: 'info' | 'error') => void }) {
+export function NewProjectDialog({ user, onClose, onCreated, notify, onImport, gdocs = false }: { user: User; onClose: () => void; onCreated: (id: string | null, name: string) => void; notify: (text: string, kind?: 'info' | 'error') => void;
+  /** + New ▸ Import: a project brought over from Overleaf, LyX or Google Docs (the start page's import dialogs) */
+  onImport?: (source: 'overleaf' | 'lyx' | 'gdocs') => void; gdocs?: boolean }) {
   const [kind, setKind] = useState<NewKind>('doc');
   const [template, setTemplate] = useState<string>();
   const [size, setSize] = useState(initialDeckSize);
@@ -416,6 +431,11 @@ export function NewProjectDialog({ user, onClose, onCreated, notify }: { user: U
       {canEncrypt && <label class="feedback-opt" data-new-e2e><input type="checkbox" checked={encrypted} onChange={e => setEncrypted((e.target as HTMLInputElement).checked)} /> End-to-end encrypted</label>}
       {canEncrypt && encrypted && <p class="dialog-hint" data-new-e2e-hint>Only you and the people you share it with can read it: the server keeps ciphertext, and the PDF is built in your browser. Agents, AI, git, sync and public links are not available for it.</p>}
       <p class="dialog-hint">{kind === 'empty' ? 'A project holds documents, slides, figures and a bibliography together. Share it to work on it with others.' : kind === 'board' ? `It gets a project of its own, “${typed || k.name}”, where the pictures you put on it are kept too.` : `It gets a project of its own, “${typed || k.name}”, where figures and a bibliography can go too.`}</p>
+      {onImport && !user.guest && <p class="dialog-hint ol-new-import" data-new-import>Or bring a project over: {' '}
+        <button type="button" class="fallback-link" data-new-import-from="overleaf" onClick={() => onImport('overleaf')}>from Overleaf…</button>{' · '}
+        <button type="button" class="fallback-link" data-new-import-from="lyx" onClick={() => onImport('lyx')}>from a LyX file (.lyx)…</button>
+        {gdocs && <>{' · '}<button type="button" class="fallback-link" data-new-import-from="gdocs" onClick={() => onImport('gdocs')}>from Google Docs…</button></>}
+      </p>}
     </Dialog>
   );
 }

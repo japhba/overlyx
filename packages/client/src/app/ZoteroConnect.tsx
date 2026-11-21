@@ -1,7 +1,7 @@
 /**
  * Connect to Zotero: a Zotero Web API key pasted here links the account's Zotero library (and the
  * groups the key reads) to the citation dialog's search (server zotero.ts) — its items are listed
- * first and cited with Zotero's own BibTeX. Shown in Settings ▸ Account, and folded behind
+ * first and cited with Zotero's own BibTeX. Shown in Settings ▸ Connections, and folded behind
  * "Connect Zotero…" on the citation dialog's Find online tab (`compact`).
  */
 import { useEffect, useState } from 'preact/hooks';

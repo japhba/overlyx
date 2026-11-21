@@ -327,7 +327,7 @@ export async function addIdentifiers(uid: number, text: string): Promise<AddOutc
 /** Everything in the connected Zotero library (its own items and the groups the key reads). */
 export async function importZotero(uid: number): Promise<AddOutcome> {
   const items = await zoteroLibraryItems(uid, IMPORT_MAX);
-  if (!items) throw new Error('Connect Zotero first (Settings ▸ Account ▸ Zotero)');
+  if (!items) throw new Error('Connect Zotero first (Settings ▸ Connections)');
   const out: AddOutcome = { added: [], duplicates: [], failed: [] };
   const idx = dupIndex(uid);
   db.transaction(() => {

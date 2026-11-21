@@ -68,6 +68,7 @@ export function HomeSearchBox({ q, onQ, mode, onMode, count, onMove, onEnter }: 
           }} />
         {!q && <kbd class="hs-key" title="Press / to search">/</kbd>}
       </div>
+      <span class="hs-say" aria-hidden="true">Search:</span>
       <div class="hs-modes" role="radiogroup" aria-label="What to search">
         <button type="button" role="radio" aria-checked={mode === 'projects'} class={'hs-mode' + (mode === 'projects' ? ' on' : '')} data-home-search-mode="projects"
           title="Find projects by their name, their owner or the names of their files" onClick={() => { onMode('projects'); input.current?.focus(); }}>Names</button>
