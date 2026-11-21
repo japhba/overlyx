@@ -53,6 +53,8 @@ interface FolderSync {
   signin: boolean;
   spin: NodeJS.Timeout | null;
   connecting: Promise<void> | null;
+  /** the files git put back that the user was last told of (one notice per new set) */
+  heldNoted?: string;
 }
 
 const DEFAULT_HOST = 'https://overlyx.app';
@@ -141,11 +143,12 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
     else if (f.problem || !s) { text = `$(${f.problem ? 'warning' : 'sync'}) OverLyX${name}`; detail = f.problem ?? 'Starting…'; }
     else {
       const icon = s.state === 'syncing' ? (f.spin ? 'sync' : 'sync~spin') : s.state === 'offline' ? 'cloud-offline' : s.state === 'error' ? 'error' : s.state === 'paused' ? 'debug-pause'
-        : s.state === 'signin' ? 'account' : s.conflicts.length ? 'warning' : s.waiting.length ? 'sync' : 'check';
+        : s.state === 'signin' ? 'account' : s.conflicts.length || s.held?.length ? 'warning' : s.waiting.length ? 'sync' : 'check';
       text = `$(${icon}) OverLyX${name}`;
       const lines = [
         s.state === 'idle' ? `In step${s.lastSync ? ` (${time(s.lastSync)})` : ''}: files you save reach the server, its changes come here.` : s.state === 'syncing' ? 'Syncing…' : s.message,
         ...s.waiting.map(w => `· ${w} waits until it is saved`),
+        ...(s.held ?? []).map(h => `⏸ ${h}: back to the last commit's version (git stash, reset or checkout?) — not sent; the server keeps its newer one`),
         ...[...new Set(s.notSent)].map(n => `· ${n} changed here — not sent (view only)`),
         ...s.conflicts.map(c => c.kind === 'copy' ? `⚠ ${c.path}: changed on both sides, yours is "${c.copy}"` : c.kind === 'tracked' ? `⚠ ${c.path}: ${c.count} paragraph(s) changed on both sides — yours are tracked changes` : `⚠ ${c.path}: changed on the server, not removed`),
       ];
@@ -191,6 +194,24 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
     }
   }
 
+  /**
+   * Files git put back to the last commit's version (the engine's `held`): sent, they would undo the
+   * server's newer versions for everybody — so they wait, and the user is asked once per new set.
+   */
+  function noticeHeld(f: FolderSync, held: string[]): void {
+    const key = [...held].sort().join('\0');
+    if (key === (f.heldNoted ?? '')) return;
+    f.heldNoted = key;
+    if (!held.length) return;
+    const n = held.length, what = n === 1 ? held[0] : `${n} files`;
+    void vscode.window.showWarningMessage(
+      `OverLyX: ${what} in ${f.target.project} went back to the version of the last commit (git stash, reset or checkout?). Sending ${n === 1 ? 'it' : 'them'} would undo the newer version${n === 1 ? '' : 's'} on the server for everybody, so ${n === 1 ? 'it waits' : 'they wait'} — git stash pop brings yours back.`,
+      'Send Anyway', 'Show Files').then(a => {
+      if (a === 'Send Anyway') void f.engine?.sendHeld(held).catch(e => void vscode.window.showErrorMessage(`OverLyX sync: ${(e as Error).message}`));
+      else if (a === 'Show Files') { for (const h of held) log(f.dir, `⏸ ${h}: back to the last commit's version — not sent`); out.show(true); }
+    });
+  }
+
   function connect(f: FolderSync): Promise<void> {
     f.connecting ??= start(f).finally(() => { f.connecting = null; });
     return f.connecting;
@@ -218,6 +239,7 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
         track?.(c.conflicts.length ? 'conflict' : 'success', performance.now() - started);
         for (const l of describeChanges(c)) log(f.dir, l);
         noticeConflicts(f, c);
+        noticeHeld(f, c.held ?? []);
         return c;
       } catch (e) { track?.('failed', performance.now() - started); throw e; }
     };
@@ -546,6 +568,7 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
         isPaused
           ? { label: '$(play) Resume syncing', description: enabled() ? '' : 'overlyx.sync.enabled is off', run: () => enabled() ? setPaused(f, false) : vscode.commands.executeCommand('workbench.action.openSettings', 'overlyx.sync') }
           : { label: '$(debug-pause) Pause syncing this folder', run: () => setPaused(f, true) },
+        ...(f.engine?.status.held?.length ? [{ label: `$(warning) Send the ${f.engine.status.held.length === 1 ? 'file' : `${f.engine.status.held.length} files`} git put back`, description: 'undoes the newer versions on the server', run: () => f.engine?.sendHeld() }] : []),
         { label: '$(output) Show the sync log', run: () => out.show(true) },
         { label: `$(globe) Open ${f.target.project} on ${new URL(f.target.host).host}`, run: () => vscode.env.openExternal(vscode.Uri.parse(projectUrl(f.target))) },
         ...(f.engine?.status.conflicts ?? []).filter(c => c.kind === 'copy' && c.copy).map(c => ({

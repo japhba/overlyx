@@ -187,3 +187,54 @@ describe('a clone on a file system that ignores case (macOS, Windows)', () => {
     e.stop();
   });
 });
+
+describe('git writing the files of a synced clone', () => {
+  const git = async (dir: string, ...args: string[]) => (await execFileP('git', ['-C', dir, ...args], { encoding: 'utf8' })).stdout.trim();
+
+  it('the first sync of a clone made before the server\'s last commits takes them in, and sends only what was changed here', async () => {
+    const p = await project('behind', { 'a.txt': 'a, first\n', 'b.txt': lines(6) });
+    // cloned at the first commit; since then the server committed a change, and the clone's owner edited b.txt
+    writeFileSync(join(p.dir, 'a.txt'), 'a, second\n');
+    await gitmod.commitProject(p.key, { message: 'Second' });
+    writeFileSync(join(p.clone, 'b.txt'), lines(6, { 4: 'line 4, typed here' }));
+    const e = p.engine('a laptop');
+    await e.sync();
+    expect(p.server('a.txt')).toBe('a, second\n');
+    expect(p.local('a.txt')).toBe('a, second\n');
+    expect(p.server('b.txt')).toBe(lines(6, { 4: 'line 4, typed here' }));
+    e.stop();
+  });
+
+  it('files git put back (stash, reset --hard, checkout -- .) wait instead of undoing the server\'s newer versions; sent when the user says so', async () => {
+    const p = await project('restore', { 'a.txt': lines(6), 'b.txt': 'b\n' });
+    const e = p.engine('a laptop');
+    await e.sync();
+    writeFileSync(join(p.dir, 'a.txt'), lines(6, { 1: 'line 1, written on the server' }));   // not committed yet
+    await e.sync();
+    expect(p.local('a.txt')).toContain('written on the server');
+
+    await git(p.clone, 'stash', '-q');
+    expect(p.local('a.txt')).toBe(lines(6));
+    const held = await e.sync();
+    expect(held.held).toEqual(['a.txt']);
+    expect(e.status.held).toEqual(['a.txt']);
+    expect(p.server('a.txt')).toContain('written on the server');
+
+    await git(p.clone, 'stash', 'pop', '-q');   // back: nothing waits, nothing was sent
+    await e.sync();
+    expect(e.status.held).toEqual([]);
+    expect(p.server('a.txt')).toContain('written on the server');
+
+    await git(p.clone, 'reset', '-q', '--hard');
+    await e.sync();
+    expect(e.status.held).toEqual(['a.txt']);
+    await e.sendHeld();                          // the user meant it
+    expect(p.server('a.txt')).toBe(lines(6));
+    expect(e.status.held).toEqual([]);
+
+    writeFileSync(join(p.clone, 'b.txt'), 'b, typed here\n');   // an ordinary edit goes at once
+    await e.sync();
+    expect(p.server('b.txt')).toBe('b, typed here\n');
+    e.stop();
+  });
+});

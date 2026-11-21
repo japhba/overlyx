@@ -654,7 +654,16 @@ blend.
   (its older files used to go up as edits and undo the project for everybody); a case-only rename on
   the server (`Plot.png` → `plot.png`) renames the file in a clone on a case-insensitive file system
   instead of removing it (removing the one file both names found deleted it there and then, at the
-  next round, on the server). The MCP bridge tells agents in a synced clone
+  next round, on the server). **Git writing the files** (21 Nov 2026): the local branch follows the
+  server's commits, which trail the files by minutes, so `git stash`, `git reset --hard` or `git
+  checkout -- .` put files back to an *older* version — sent as edits, they undid everybody's newer
+  ones. A file changed here that holds exactly its version in HEAD while HEAD is where the sync left
+  the branch (or behind it) and the agreed version differs now waits (`held`): the status lists it,
+  VS Code asks once per new set ("Send Anyway"), the CLI says so (`overlyx sync --send-restored` sends
+  them); `git stash pop` ends the wait by itself. A pull or switch that moves HEAD forward is not held
+  (those versions merge into the server's newer ones). The first sync of a clone takes as merge base
+  the last commit clone and server have in common (it took the server's newest: a clone made before
+  it sent every newer change back as an old version). The MCP bridge tells agents in a synced clone
   that saved files reach the server by themselves. Tests: `tests/sync.test.ts` (the CLI against the
   real routes: both directions, open documents with unsaved edits, paragraph / line / binary
   conflicts, removals, viewers, branch following and adopted commits, no commit per sync, links,

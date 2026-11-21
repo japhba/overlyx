@@ -10,7 +10,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execFileP = promisify(execFile);
-const VERSION = '0.8.5';
+const VERSION = '0.8.6';
 const DEFAULT_HOST = 'https://overlyx.app';
 
 const HELP = `OverLyX CLI ${VERSION}
@@ -32,7 +32,7 @@ Usage:
   overlyx share OWNER/PROJECT[/FOLDER] [--role view|edit] [--with USER|EMAIL]
                                                         a share link (printed) to the project, or to one folder of
                                                         it alone; --with: share it with that person instead
-  overlyx sync [DIR] [--watch]                          keep a clone in step with the server, both ways
+  overlyx sync [DIR] [--watch] [--send-restored]        keep a clone in step with the server, both ways
   overlyx mcp install [--client claude,codex] [--yes]   let local AI agents use OverLyX (Claude Code: in every directory, no prompts)
   overlyx mcp status | uninstall
   overlyx mcp serve                                      (what the agents run: the MCP bridge)
@@ -63,7 +63,7 @@ function fail(message, code = 1) {
 function parse(argv) {
   const positional = [];
   const flags = {};
-  const booleans = new Set(['push', 'with-token', 'help', 'version', 'log', 'yes', 'web', 'no-browser', 'no-git', 'ask-each-time', 'watch']);
+  const booleans = new Set(['push', 'with-token', 'help', 'version', 'log', 'yes', 'web', 'no-browser', 'no-git', 'ask-each-time', 'watch', 'send-restored']);
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--') { positional.push(...argv.slice(i + 1)); break; }
@@ -1440,7 +1440,7 @@ export class SyncEngine {
     this.dir = path.resolve(opts.dir);
     this.hashes = new Map();       // rel → { size, mtime, ino, hash } of local files
     this.failed = new Map();       // rel → retry-after time, for files the server refused
-    this.status = { state: 'idle', conflicts: [], waiting: [], notSent: [], lastSync: 0, message: '' };
+    this.status = { state: 'idle', conflicts: [], waiting: [], notSent: [], held: [], lastSync: 0, message: '' };
     this.running = null;
     this.again = false;
     this.stopped = false;
@@ -1449,6 +1449,7 @@ export class SyncEngine {
     // this engine in the clone's lock (a VS Code window may find one clone twice, and every window restores every clone)
     this.token = crypto.randomBytes(8).toString('hex');
     this.stateText = null;
+    this.sendAnyway = new Set();   // `${rel}\0${hash}`: files git put back that the user said to send all the same
   }
 
   log(line) { this.o.log?.(line); }
@@ -1699,11 +1700,19 @@ export class SyncEngine {
     return null;
   }
 
-  /** The first sync of this clone: the merge base of every file is the server's last commit (fetched now), or what is checked out. */
+  /**
+   * The first sync of this clone: the merge base of every file is the last commit the clone and the
+   * server have in common — the clone's own commit when the server's branch has moved on since it was
+   * made (fetched now), else what is checked out. It used to be the server's newest commit: in a clone
+   * made before it, every file changed on the server since looked changed *here*, back to its old
+   * version, and went up as such — undoing those changes for everybody.
+   */
   async initialState(remote) {
     let commit = null;
     if (remote.head && remote.branch) { try { commit = await this.fetchBranch(remote.branch); } catch (e) { this.log(`fetch: ${e.message.trim()}`); } }
-    if (!commit) commit = (await gitOut(this.dir, ['rev-parse', '-q', '--verify', 'HEAD']).catch(() => '')).trim() || null;
+    const head = (await gitOut(this.dir, ['rev-parse', '-q', '--verify', 'HEAD']).catch(() => '')).trim() || null;
+    if (commit && head && head !== commit) commit = (await gitOut(this.dir, ['merge-base', head, commit]).catch(() => '')).trim() || commit;
+    if (!commit) commit = head;
     const files = {};
     if (commit) {
       for (const line of (await gitOut(this.dir, ['ls-tree', '-r', '-z', commit])).split('\0')) {
@@ -1770,6 +1779,36 @@ export class SyncEngine {
     return true;
   }
 
+  /**
+   * Files changed here that git put back to the commit the branch follows (`git stash`, `git reset
+   * --hard`, `git checkout -- .`, `git restore`): each holds exactly its version in HEAD while the
+   * agreed one is newer. The branch trails the files by the server's commit delay (minutes), so
+   * sending them undid on the server, for everybody, what was written since that commit. They wait
+   * (`held`) until the user sends them (sendHeld), git brings the newer versions back (`git stash
+   * pop`), or the user takes the server's. Only while HEAD is where this sync left the branch, or
+   * behind it: a pull or switch that moves HEAD forward writes versions the server had already
+   * passed — sent, they merge into its newer ones and change nothing.
+   */
+  async restoredByGit(rels, base) {
+    if (this.o.sendRestored || !this.state.head) return [];
+    const cands = rels.filter(rel => { const l = this.localHash(rel); return l && base[rel] && !this.sendAnyway.has(`${rel}\0${l}`); });
+    if (!cands.length) return [];
+    const head = (await gitOut(this.dir, ['rev-parse', '-q', '--verify', 'HEAD']).catch(() => '')).trim();
+    if (!head || (head !== this.state.head && !(await gitOut(this.dir, ['merge-base', '--is-ancestor', head, this.state.head]).then(() => true, () => false)))) return [];
+    const tree = new Map();
+    for (const line of (await gitOut(this.dir, ['ls-tree', '-r', '-z', head]).catch(() => '')).split('\0')) {
+      const m = /^\d+ blob ([0-9a-f]+)\t(.*)$/s.exec(line);
+      if (m) tree.set(m[2], m[1]);
+    }
+    return cands.filter(rel => tree.get(rel) === this.localHash(rel));
+  }
+
+  /** Send the files git put back all the same (the user meant it); resolves with the round's changes. */
+  sendHeld(paths = this.status.held) {
+    for (const rel of paths ?? []) { const l = this.localHash(rel); if (l) this.sendAnyway.add(`${rel}\0${l}`); }
+    return this.sync();
+  }
+
   /* ---- one round */
 
   /** Sync once; resolves with what changed. Concurrent calls run one after the other. */
@@ -1788,7 +1827,7 @@ export class SyncEngine {
   }
 
   async round() {
-    const changes = { sent: [], received: [], conflicts: [], waiting: [], notSent: [], errors: [] };
+    const changes = { sent: [], received: [], conflicts: [], waiting: [], notSent: [], held: [], errors: [] };
     if (!this.gitDir) await this.open();
     const holder = this.lock();
     if (holder) { this.setStatus({ state: 'paused', message: `synced by another process (${holder.by || 'pid ' + holder.pid})` }); return changes; }
@@ -1809,7 +1848,7 @@ export class SyncEngine {
     const now = Date.now();
 
     // 1. what changed here goes to the server
-    const send = [];
+    let send = [];
     for (const rel of await this.localPaths()) {
       const l = this.localHash(rel);
       if (l === undefined) continue;
@@ -1822,6 +1861,9 @@ export class SyncEngine {
       if ((this.failed.get(rel) ?? 0) > now) continue;
       send.push(rel);
     }
+    // (except what git put back: see restoredByGit)
+    changes.held = send.length ? await this.restoredByGit(send, base) : [];
+    if (changes.held.length) send = send.filter(rel => !changes.held.includes(rel));
     if (send.length) {
       if (lost()) return changes;
       await this.send(send, base, changes);
@@ -1858,7 +1900,7 @@ export class SyncEngine {
     try { await this.followBranch(remote, inStep); this.saveState(); }
     catch (e) { this.log(`branch: ${String(e.message ?? e).trim()}`); }
     const conflicts = [...this.status.conflicts.filter(c => now - c.at < 24 * 3600_000), ...changes.conflicts.map(c => ({ ...c, at: now }))].slice(-20);
-    this.setStatus({ state: 'idle', lastSync: Date.now(), conflicts, waiting: changes.waiting, notSent: changes.notSent, message: changes.errors.length ? changes.errors.map(e => `${e.path}: ${e.error}`).join('; ') : '' });
+    this.setStatus({ state: 'idle', lastSync: Date.now(), conflicts, waiting: changes.waiting, notSent: changes.notSent, held: changes.held, message: changes.errors.length ? changes.errors.map(e => `${e.path}: ${e.error}`).join('; ') : '' });
     return changes;
   }
 
@@ -2090,6 +2132,7 @@ export function describeChanges(c) {
     if (k.kind === 'restored') lines.push(`! ${k.path}: changed on the server, so it was not removed — it is back`);
   }
   for (const w of c.waiting) lines.push(`… ${w}: unsaved in an editor, waits`);
+  for (const h of c.held ?? []) lines.push(`⏸ ${h}: back to the version of the last commit (git stash, reset or checkout?) — not sent, the server keeps its newer one`);
   for (const n of new Set(c.notSent)) lines.push(`· ${n}: changed here, not sent (you can only view this project)`);
   for (const e of c.errors) lines.push(`✗ ${e.path}: ${e.error}`);
   return lines;
@@ -2100,6 +2143,7 @@ async function syncCommand(args, flags) {
   const creds = flags.token || flags.username ? credentials(flags, false) : null;
   const { engine, error, target } = await syncEngineFor(dir, {
     ...(creds?.token && creds?.username ? { auth: { username: creds.username, token: creds.token } } : {}),
+    ...(flags['send-restored'] ? { sendRestored: true } : {}),
     log: (line) => process.stderr.write(`overlyx sync: ${line}\n`),
   });
   if (!engine) fail(error);
@@ -2110,6 +2154,7 @@ async function syncCommand(args, flags) {
     if (engine.status.state === 'paused') fail(engine.status.message);
     const lines = describeChanges(c);
     process.stdout.write(lines.length ? lines.join('\n') + '\n' : `In step with ${target.host} (${target.project})\n`);
+    if (c.held.length) process.stderr.write(`${c.held.length} file(s) went back to the last commit and were not sent. To send them anyway (undoing the newer versions on the server): overlyx sync --send-restored\n`);
     if (!await syncRunning(dir)) process.stderr.write('Automatic sync is not running for this clone. This command synced once; later edits stay local until the next sync. Run overlyx sync --watch to keep it in step.\n');
     if (c.errors.length) process.exitCode = 1;
     return;

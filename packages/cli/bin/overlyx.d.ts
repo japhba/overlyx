@@ -6,6 +6,8 @@ export interface SyncChanges {
   conflicts: { path: string; kind: 'copy' | 'restored' | 'tracked'; copy?: string; count?: number; at?: number }[];
   waiting: string[];
   notSent: string[];
+  /** changed here by git back to the commit's version (stash, reset --hard, checkout -- .): not sent */
+  held: string[];
   errors: { path: string; error: string }[];
 }
 
@@ -17,6 +19,7 @@ export interface SyncStatus {
   conflicts: (SyncChanges['conflicts'][number] & { at: number })[];
   waiting: string[];
   notSent: string[];
+  held: string[];
 }
 
 export interface SyncTarget { host: string; project: string; remote: string; url: string }
@@ -34,6 +37,8 @@ export interface SyncEngineOptions {
   isBusy?: (rel: string) => boolean;
   onStatus?: (status: SyncStatus) => void;
   log?: (line: string) => void;
+  /** send the files git put back without holding them (`overlyx sync --send-restored`) */
+  sendRestored?: boolean;
 }
 
 export class SyncEngine {
@@ -47,6 +52,8 @@ export class SyncEngine {
   watch(opts?: { watchFiles?: boolean }): Promise<void>;
   stop(): void;
   unlock(): void;
+  /** send the files git put back all the same */
+  sendHeld(paths?: string[]): Promise<SyncChanges>;
 }
 
 export function blobHash(buf: Buffer): string;
