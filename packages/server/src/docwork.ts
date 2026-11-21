@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import * as Y from 'yjs';
-import { mergeLyx, pmToLyxBody, writeParagraphs, type LyxDocument } from '@overlyx/core';
+import { mergeLyx, mergeApart, pmToLyxBody, writeParagraphs, type LyxDocument } from '@overlyx/core';
 import { readPm, isEmptyDoc } from './collabdoc.ts';
 import { primePreserveCache, type PreserveCache, type ParseTexResult } from '@overlyx/core/tex/index.ts';
 import { projectDir } from './projectfiles.ts';
@@ -117,9 +117,10 @@ export function mergeFileText(s: DocState, text: string, open: OpenDocs, load: (
   const parsed = parseFor(s, text);
   const base = s.fileText !== null ? parseFor(s, s.fileText) : null;
   const ours = lyxDocumentOf(s.ydoc);
-  const merged = base ? mergeLyx(base, ours, parsed) : parsed;
-  // where both sides changed the same or neighbouring paragraphs the disk wins: the text as it was
-  // here is handed back (`kept`), to be kept as a version ("before a change on disk")
+  // each side's changes kept where they touch different paragraphs (mergeApart: typing next to the
+  // paragraph the file changed survives); where both changed the same paragraph the disk wins: the
+  // text as it was here is handed back (`kept`), to be kept as a version ("before a change on disk")
+  const merged = base ? mergeLyx(base, ours, parsed, mergeApart) : parsed;
   const kept = base && droppedOurs(base, ours, merged) ? renderDoc(s, open).text : undefined;
   s.fileText = text;
   load(merged);

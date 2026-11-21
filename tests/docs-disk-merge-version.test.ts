@@ -1,9 +1,9 @@
 /**
- * A change on disk (an agent writing the file, git, desktop LyX) is merged three-way into the open
- * document; where it and unsaved typing here touch the same or neighbouring paragraphs, the disk wins
- * (core lyx/merge.ts). That typing used to vanish without a trace: now the document as it was here is
- * kept as a version "before a change on disk" (as HtmlDoc does), so it can be restored from history.
- * The merge itself is unchanged.
+ * A change on disk (an agent writing the file, git, desktop LyX, a synced clone) is merged three-way
+ * into the open document; where it and unsaved typing here changed the same paragraph, the disk wins
+ * and the document as it was here is kept as a version "before a change on disk" (as HtmlDoc does), so
+ * the typing can be restored from history. Typing in the *next* paragraph is kept (core merge.ts
+ * mergeApart, since 21 Nov 2026 — before, a region grown over touching changes went to the disk whole).
  */
 import { it, expect, vi } from 'vitest';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -26,7 +26,7 @@ const versions = (id: string) => db.prepare("SELECT name, lyx FROM versions WHER
 const PARS = ['Alpha one.', 'Beta two.', 'Gamma three.', 'Delta four.', 'Epsilon five.'];
 const DISK = doc('Alpha one.', 'Beta two CHANGED ON DISK.', 'Gamma three.', 'Delta four.', 'Epsilon five.');
 
-for (const [name, at, lost] of [['the next paragraph', 2, true], ['the same paragraph', 1, true], ['a distant paragraph', 4, false]] as const) {
+for (const [name, at, lost] of [['the next paragraph', 2, false], ['the same paragraph', 1, true], ['a distant paragraph', 4, false]] as const) {
   it(`typing in ${name} as the file changes on disk: ${lost ? 'kept as a version' : 'merged, no version'}`, async () => {
     vi.spyOn(console, 'log').mockImplementation(() => undefined);
     const id = `u/p/${at}.tex`;

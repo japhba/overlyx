@@ -31,7 +31,7 @@ import { documentMeta, type DocumentMeta } from './docmeta.ts';
 import { applyTrackedSource, applyPlainSource, applySyncedSource, restoreSource, foldEdits, replaceInSource, type EditableDoc, type TrackedResult } from './docedit.ts';
 import { convertModel1, model1Document } from './collabdoc.ts';
 import { isModel2 } from '@overlyx/core/collab/model.ts';
-import { mergeLyx, pmToLyxBody, writeParagraphs, type Paragraph } from '@overlyx/core';
+import { mergeLyx, mergeApart, pmToLyxBody, writeParagraphs, type Paragraph } from '@overlyx/core';
 import { mergeLines, mergeObjects, boardObjects } from './filemerge.ts';
 
 export type { SourceSpan, DocMeta };
@@ -612,7 +612,7 @@ export class OpenDoc implements DocState, EditableDoc {
   async mergeLegacy(base: Paragraph[], theirs: Paragraph[]): Promise<void> {
     await this.exclusive(async () => {
       const ours = this.toLyxDocument();
-      const merged = mergeLyx({ ...ours, body: base }, ours, { ...ours, body: theirs });
+      const merged = mergeLyx({ ...ours, body: base }, ours, { ...ours, body: theirs }, mergeApart);
       this.loadFromLyx(merged, 'legacy-merge');
     });
     this.scheduleSave();

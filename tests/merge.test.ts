@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { parseLyx } from '../packages/core/src/lyx/parser.ts';
 import { writeLyx } from '../packages/core/src/lyx/writer.ts';
-import { mergeLyx, mergeInPlace, align } from '../packages/core/src/lyx/merge.ts';
+import { mergeLyx, mergeInPlace, mergeApart, align } from '../packages/core/src/lyx/merge.ts';
 
 const HEAD = `#LyX 2.5 created this file. For more info see https://www.lyx.org/
 \\lyxformat 643
@@ -98,5 +98,21 @@ describe('mergeLyx', () => {
     expect(fine(['one', 'two ours', 'three', 'four'], ['one', 'two theirs', 'three', 'four'])).toEqual(['one', 'two theirs', 'three', 'four']);
     // a touching region with a different paragraph count: theirs for the region
     expect(fine(['one', 'two', 'three ours', 'four'], ['one', 'two', 'three', 'new', 'four'])).toEqual(['one', 'two', 'three', 'new', 'four']);
+  });
+
+  it('mergeApart keeps each side\'s changes where they touch different paragraphs, insertions too; the disk wins the same paragraph', () => {
+    const b = ['one', 'two', 'three', 'four'];
+    const apart = (o: string[], t: string[]) => pars(mergeLyx(doc(...b), doc(...o), doc(...t), mergeApart));
+    expect(apart(['one', 'two ours', 'three', 'four'], ['one', 'two', 'three theirs', 'four'])).toEqual(['one', 'two ours', 'three theirs', 'four']);
+    // a paragraph inserted here right before / after the one changed on disk
+    expect(apart(['one', 'two', 'new here', 'three', 'four'], ['one', 'two', 'three theirs', 'four'])).toEqual(['one', 'two', 'new here', 'three theirs', 'four']);
+    expect(apart(['one', 'two', 'three', 'new here', 'four'], ['one', 'two', 'three theirs', 'four'])).toEqual(['one', 'two', 'three theirs', 'new here', 'four']);
+    // a paragraph deleted here next to one changed on disk; one inserted on disk next to one changed here
+    expect(apart(['one', 'three', 'four'], ['one', 'two', 'three theirs', 'four'])).toEqual(['one', 'three theirs', 'four']);
+    expect(apart(['one', 'two ours', 'three', 'four'], ['one', 'two', 'new there', 'three', 'four'])).toEqual(['one', 'two ours', 'new there', 'three', 'four']);
+    // the same paragraph: the disk's version
+    expect(apart(['one', 'two ours', 'three', 'four'], ['one', 'two theirs', 'three', 'four'])).toEqual(['one', 'two theirs', 'three', 'four']);
+    // both inserted at one place (order unknown): as mergeInPlace — the disk's region
+    expect(apart(['one', 'mine', 'two', 'three', 'four'], ['one', 'yours', 'two', 'three', 'four'])).toEqual(['one', 'yours', 'two', 'three', 'four']);
   });
 });

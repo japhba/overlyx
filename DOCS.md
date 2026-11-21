@@ -341,11 +341,14 @@ blend.
   permissions) is never unloaded: it stays in memory, retries every 15 s, and its editors' status
   bar says *⚠ Could not save* with the reason in plain words (the saved message, type 3, carries it
   after the snapshot; empty once a save succeeds again). A change on disk merged into the open
-  document (`mergeFileText`) wins where it and unsaved typing here touch the same or neighbouring
-  paragraphs; the document as it was here is then kept as a version *before a change on disk* (as
-  HTML pages already did), so the typing can be restored from the history. The merge itself is
-  unchanged: not growing a region on mere adjacency, and laying the typing over the disk's text as a
-  tracked change (the word-level combine of sync conflicts), are the owner's decision. An empty
+  document (`mergeFileText`) wins where it and unsaved typing here changed the same paragraph; the
+  document as it was here is then kept as a version *before a change on disk* (as HTML pages already
+  did), so the typing can be restored from the history. Typing in a *neighbouring* paragraph — or a
+  new paragraph inserted next to the one the file changed — is kept since 21 Nov 2026 (the owner's
+  decision): `core/lyx/merge.ts mergeApart` applies each side's changes inside a region `mergeLyx` grew
+  over touching changes, where it used to take the disk's side whole (also for an old copy's offline
+  edits, `mergeLegacy`, and in the VS Code extension). Laying same-paragraph typing over the disk's
+  text as a tracked change is not done here. An empty
   inline formula is written as `${}$`, which the parser reads back as the empty formula (`$$` opened
   display math in TeX and in the parser, joining paragraphs on reopen). Tests:
   `docs-unsaved-state` (and `-worker`: a kill, a failed save then a restart, the normal path, a file
