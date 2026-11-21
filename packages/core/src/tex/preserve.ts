@@ -18,7 +18,7 @@
  * When it does not, the paragraphs around the difference are rewritten as well, and in the end
  * the full writer output is used: never worse than writing the whole file.
  */
-import type { LyxDocument, Paragraph } from '../lyx/ast.ts';
+import type { LyxDocument } from '../lyx/ast.ts';
 import { align } from '../lyx/merge.ts';
 import type { ParseTexResult } from './parse.ts';
 import type { WriteTexResult } from './write.ts';
@@ -135,13 +135,13 @@ function preserve(doc: LyxDocument, full: WriteTexResult, o: PreserveOptions, ca
   for (const [i, j] of pairs) match[j + 1] = i;
   const src = (j: number) => match[j + 1];
   const T0 = P0.bodyRange.start, T1 = P0.bodyRange.end;
-  // An edited paragraph that holds a float, a table or a display formula, between two matched ones
-  // and one for one with the base's paragraphs there (a word changed in a caption, a table cell, a
-  // formula): its own source with that change made to it (patchSource), so the float's frame, the
-  // other rows and cells and the formula's lines keep their bytes. It is a kept unit like the
-  // matched ones and verified like them: one that does not read back as the paragraph being saved
-  // is written by the writer after all. (A paragraph of text is written whole, on one line: the
-  // file format's rule.)
+  // An edited paragraph between two matched ones, one for one with the base's paragraphs there (a
+  // word changed in a sentence, a caption, a table cell, a formula): its own source with that
+  // change made to it (patchSource), so the file's line breaks in a hard-wrapped paragraph, a
+  // float's frame, the other rows and cells and a formula's lines keep their bytes. It is a kept
+  // unit like the matched ones and verified like them: one that does not read back as the
+  // paragraph being saved is written by the writer after all (whole, on one line). Paragraphs
+  // joined or split are not one for one there: written whole.
   const patched = new Map<number, string>();
   {
     let jp = -1;
@@ -152,7 +152,7 @@ function preserve(doc: LyxDocument, full: WriteTexResult, o: PreserveOptions, ca
         for (let j = jp + 1; j < k; j++) {
           const i = ip + (j - jp);
           if (tS[i] === undefined || tE[i] === undefined || bS[i] === undefined || bE[i] === undefined || nS[j] === undefined || nE[j] === undefined) continue;
-          if (bS[i] === bE[i] || nS[j] === nE[j] || !(hasBlock(doc.body[j]) || hasBlock(P0.doc.body[i]))) continue;
+          if (bS[i] === bE[i] || nS[j] === nE[j]) continue;
           const text = patchSource(T.slice(tS[i], tE[i]), Wb.text.slice(bS[i], bE[i]), full.text.slice(nS[j], nE[j]));
           if (text !== null) { patched.set(j, text); match[j + 1] = i; }
         }
@@ -324,12 +324,6 @@ function preserve(doc: LyxDocument, full: WriteTexResult, o: PreserveOptions, ca
   }
 }
 
-/** Does the paragraph hold a float, a table or a display formula (LaTeX over several lines)? */
-function hasBlock(p: Paragraph): boolean {
-  return p.items.some(it => it.kind === 'inset' && (it.inset.type === 'Tabular' || (it.inset.type === 'Formula' && !it.inset.inline)
-    || (it.inset.type === 'Text' && (it.inset.name === 'Float' || it.inset.name === 'Wrap'))));
-}
-
 /** TeX-ish tokens: a comment with its line end, control words and symbols, words, blanks, any other character */
 const TOKEN = /%[^\n]*\n?|\\[A-Za-z@]+\*?|\\[^A-Za-z@]|[A-Za-z0-9]+|\s+|[^]/g;
 function tokens(s: string): string[] { return s.match(TOKEN) ?? []; }
@@ -364,37 +358,36 @@ export function patchSource(S: string, W0: string, W1: string): string | null {
   for (const [i, j] of align(a.map(key), s.map(key))) inS[i] = j;
   const sAt: number[] = [];
   { let o = 0; for (const t of s) { sAt.push(o); o += t.length; } sAt.push(o); }
-  // widen each change until the tokens on either side are found in s (the tokens outside the
-  // changes are the same in a and b), merging changes that meet
-  const wide: { l: number; r: number; bl: number; br: number }[] = [];
+  const found = (x: number) => x >= 0 && x < a.length && inS[x] >= 0;
+  // each change as a stretch of s and its new text: the change's own tokens where they all lie in s
+  // (blanks only the file has next to them stay: "0.21 \\" → "0.25 \\"); an insertion right after
+  // the token before it or right before the token after it; else widened until the tokens on
+  // either side are found (the tokens outside the changes are the same in a and b)
+  const edits: { start: number; end: number; text: string }[] = [];
+  let changed = 0;
   for (const h of hunks) {
+    changed += Math.max(h.a1 - h.a0, h.b1 - h.b0);
+    let own = h.a1 > h.a0;
+    for (let x = h.a0; own && x < h.a1; x++) if (!found(x)) own = false;
+    if (own) { edits.push({ start: sAt[inS[h.a0]], end: sAt[inS[h.a1 - 1] + 1], text: b.slice(h.b0, h.b1).join('') }); continue; }
+    if (h.a1 === h.a0 && (h.a0 === 0 || found(h.a0 - 1))) { const at = h.a0 === 0 ? 0 : sAt[inS[h.a0 - 1] + 1]; edits.push({ start: at, end: at, text: b.slice(h.b0, h.b1).join('') }); continue; }
+    if (h.a1 === h.a0 && found(h.a1)) { const at = sAt[inS[h.a1]]; edits.push({ start: at, end: at, text: b.slice(h.b0, h.b1).join('') }); continue; }
     let l = h.a0 - 1, r = h.a1, bl = h.b0 - 1, br = h.b1;
-    for (let n = 0; (l >= 0 && inS[l] < 0) || (r < a.length && inS[r] < 0); n++) {
+    for (let n = 0; (l >= 0 && !found(l)) || (r < a.length && !found(r)); n++) {
       if (n > 64) return null;
-      if (l >= 0 && inS[l] < 0) { l--; bl--; }
-      if (r < a.length && inS[r] < 0) { r++; br++; }
+      if (l >= 0 && !found(l)) { l--; bl--; }
+      if (r < a.length && !found(r)) { r++; br++; }
     }
-    const last = wide[wide.length - 1];
-    if (last && l <= last.r) { last.r = Math.max(last.r, r); last.br = Math.max(last.br, br); continue; }
-    wide.push({ l, r, bl, br });
+    // (the widened stretch must not reach into another change: that is a rewrite, not a patch)
+    edits.push({ start: l < 0 ? 0 : sAt[inS[l] + 1], end: r >= a.length ? S.length : sAt[inS[r]], text: b.slice(bl + 1, br).join('') });
   }
   // a change that replaces most of the paragraph is a rewrite: the writer's text is as good
-  const changed = wide.reduce((n, w) => n + (w.r - w.l - 1), 0);
   if (changed > Math.max(24, a.length / 2)) return null;
   let out = '', from = 0;
-  for (const w of wide) {
-    // the file's own stretch for the tokens replaced when they all lie there (blanks only the file
-    // has next to them stay: "0.21 \\" → "0.25 \\"), an insertion right after the token before
-    // it, else everything between the tokens on either side
-    let start = w.l < 0 ? 0 : sAt[inS[w.l] + 1];
-    let end = w.r >= a.length ? S.length : sAt[inS[w.r]];
-    let inner = true;
-    for (let x = w.l + 1; x < w.r; x++) if (inS[x] < 0) { inner = false; break; }
-    if (w.r === w.l + 1) end = start;
-    else if (inner) { start = sAt[inS[w.l + 1]]; end = sAt[inS[w.r - 1] + 1]; }
-    if (start < from || end < start) return null;
-    out += S.slice(from, start) + b.slice(w.bl + 1, w.br).join('');
-    from = end;
+  for (const e of edits) {
+    if (e.start < from || e.end < e.start) return null;
+    out += S.slice(from, e.start) + e.text;
+    from = e.end;
   }
   return out + S.slice(from);
 }

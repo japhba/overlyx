@@ -284,9 +284,10 @@ blend.
   one extra parse per save; the base's parse and writer output are cached per document between saves.
 * **The first edit leaves the preamble, the settings line and the neighbours alone** (21 Nov 2026;
   `tests/tex-firstsave.test.ts`: the starters, the welcome document and synthetic documents shaped
-  like real ones, unedited save byte for byte and a one-word edit changing only its paragraph's
-  lines; on copies of 62 of the owner's documents the unedited save went from 54 to 62 identical,
-  the one-word edit from 38 to 48 of 48 local). These rules make it so. *What the preamble implies
+  like real ones, unedited save byte for byte and a one-word edit changing only its line; on
+  copies of 62 of the owner's documents the unedited save went from 54 to 62 identical, a one-word
+  edit from 38 to 48 of 48 staying in its paragraph, one inside a float from 8 to 30 of 30 changing
+  one line). These rules make it so. *What the preamble implies
   is derived, never written*: the settings a preamble's packages imply where the settings line does
   not say (natbib / biblatex, hyperref, cleveref, fontspec → built with XeTeX, `\bibliographystyle`,
   babel's language; `tex/parse.ts`) take effect at every open — also in a file OverLyX wrote whose
@@ -303,18 +304,19 @@ blend.
   file's settings line, merged the same way) only where that does not merge or where the file's
   block lacks a definition the body uses (a co-author's `\lyxadded` from git). *A paragraph's
   source takes its alignment environment's closer along* (`\end{center}`, as the writer's span takes `\par\end{center}`), so text right
-  after a centred table is edited without rewriting the table. *An edited paragraph that holds a
-  float, a table or a display formula is its own source with the change made to it*
-  (`preserve.ts patchSource`): the writer's text for it before and after the edit are compared
-  token by token, and each changed stretch is replaced where it lies in the file's text (found by
-  aligning the writer's text with the file's: blanks and `\\` / `\tabularnewline` count as alike) —
-  so a word changed in a caption, a cell or a formula keeps the float's frame, the other rows,
-  `\renewcommand{\arraystretch}`, `\\` row ends, a formula's other lines and `\end{center}` as the
-  file has them; the result is verified like a kept paragraph, else the paragraph is written whole.
-  (A paragraph of only text is still written whole, on one line, when edited.) And the writer
-  knows what packages load (`tex/preamble.ts providedFeatures`: hyperref and biblatex load url,
-  amsmath amstext, …):
-  `\path{…}` in a document with hyperref adds no `\usepackage{url}`.
+  after a centred table is edited without rewriting the table. *An edited paragraph is its own
+  source with the change made to it* (`preserve.ts patchSource`): the writer's text for it before
+  and after the edit are compared token by token, and each changed stretch is replaced where it
+  lies in the file's text (found by aligning the writer's text with the file's: blanks and `\\` /
+  `\tabularnewline` count as alike) — so a word changed in a hard-wrapped paragraph changes that
+  line and keeps the line breaks, and one changed in a caption, a cell or a formula keeps the
+  float's frame, the other rows, `\renewcommand{\arraystretch}`, `\\` row ends, a formula's other
+  lines and `\end{center}` as the file has them. Only paragraphs that pair one for one with the
+  file's are patched (one split or joined is written whole), and a change of more than half of a
+  paragraph is written whole; the result is verified like a kept paragraph, else the paragraph is
+  written whole, on one line. And the writer knows what packages load (`tex/preamble.ts
+  providedFeatures`: hyperref and biblatex load url, amsmath amstext, …): `\path{…}` in a
+  document with hyperref adds no `\usepackage{url}`.
 * **One document's work never stalls the others** (`server/src/docpool.ts`, `docworker.ts`). Making
   a save's text, opening a document, merging a change on disk, an agent's edit (parse, merge,
   tracked diff) take seconds for a big paper — on the server's single event loop that stalled every
@@ -5538,9 +5540,13 @@ invisible to LaTeX itself:
   without the word it is shown open. A comment thread's messages are paragraphs headed
   `Name (2026-08-26 14:03):`, the first one marked `[resolved]` when resolved. A note inside a
   paragraph is preceded by `%` at the end of the line, so the surrounding text joins as in TeX.
-* **No hard line breaks** in what OverLyX writes: a paragraph it writes is one line of the file
-  (paragraphs it only read keep theirs until they are edited; LyX re-wrapped at 65 columns; a
-  line break in the file would only move around in diffs). The text editors wrap to their width.
+* **New paragraphs are written on one line; existing ones keep their line breaks.** A paragraph
+  OverLyX writes fresh (typed in the editor, pasted, an agent's new one, one split or joined) is
+  one line of the file; a paragraph the file has wrapped over several lines (by a person, Overleaf,
+  an agent, LyX's 65 columns) keeps its line breaks when it is edited — a word changed is that line
+  changed (`tex/preserve.ts patchSource`; where the change cannot be placed in the file's text, or
+  the result does not read back right, the paragraph is written whole, on one line). The text
+  editors wrap to their width.
 * **Child documents** (`\input{appendix.tex}` from the body) are fragments without a preamble;
   their first line is their settings line. They are edited on their own and built through their
   master. `\input`s in the preamble (`macros.tex`, `preamble.tex`) are plain text files.

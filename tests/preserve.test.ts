@@ -141,17 +141,43 @@ describe('saving keeps the file as it is where nothing changed', () => {
     });
   }
 
-  it('one word typed into a hard-wrapped paragraph changes that paragraph only', () => {
+  it('one word typed into a hard-wrapped paragraph changes that line only: the file keeps its line breaks', () => {
     const r = save(PAPER, d => replaceText(d, 'the size of a thing', 'the true size of a thing'));
     const { removed, added } = changedLines(PAPER, r.text);
-    // the paragraph's source lines (the comment line after it belongs to it) become the writer's
-    // one line; nothing else moves
-    expect(removed.join('\n')).toBe('Recent work on things has focused on\ntheir size. We show that the size of a thing\nin $\\R^n$ is bounded by its volume\n(see Section~\\ref{sec:method}).\n% TODO: cite more papers here');
-    expect(added).toEqual(['Recent work on things has focused on their size. We show that the true size of a thing in $\\R^n$ is bounded by its volume (see Section~\\ref{sec:method}). % TODO: cite more papers here']);
+    expect(removed).toEqual(['their size. We show that the size of a thing']);
+    expect(added).toEqual(['their size. We show that the true size of a thing']);
     expect(r.text).toContain('\\newcommand{\\R}{\\mathbb{R}}   % reals');
+    expect(r.text).toContain('% TODO: cite more papers here');
     expect(r.text).not.toContain('%% OverLyX');
     expect(r.stats.outcome).toBe('kept');
+    expect(r.stats.patched).toBe(1);
     readsBack(r.text, r.doc);
+  });
+
+  it('a paragraph split or joined is written whole (new paragraphs on one line); the rest is kept', () => {
+    // split after "their size." into two paragraphs
+    const split = save(PAPER, d => {
+      const p = par(d, 'the size of a thing');
+      const i = d.body.indexOf(p);
+      const t = p.items.findIndex(it => it.kind === 'text' && it.text.includes('their size. '));
+      const it = p.items[t] as { kind: 'text'; text: string; font: object };
+      const at = it.text.indexOf('their size. ') + 'their size. '.length;
+      const second = { ...p, items: [{ ...it, text: it.text.slice(at) }, ...p.items.slice(t + 1)] };
+      p.items = [...p.items.slice(0, t), { ...it, text: it.text.slice(0, at).trimEnd() }];
+      d.body.splice(i + 1, 0, second);
+    });
+    readsBack(split.text, split.doc);
+    expect(split.text).toContain('Recent work on things has focused on their size.\n');
+    expect(split.text).toContain('The second paragraph has\nseveral lines, too.');
+    // two paragraphs joined into one: written whole, on one line; the rest kept
+    const joined = save(REVTEX, d => {
+      const p = par(d, 'Body text'), q = par(d, 'Another paragraph.');
+      const last = p.items[p.items.length - 1] as { text: string };
+      last.text += ' Another paragraph.';   // (one run, as the editor holds it)
+      d.body.splice(d.body.indexOf(q), 1);
+    });
+    readsBack(joined.text, joined.doc);
+    expect(changedLines(REVTEX, joined.text)).toEqual({ removed: ['Body text', 'that is wrapped.', '', 'Another paragraph.'], added: ['Body text that is wrapped. Another paragraph.'] });
   });
 
   it('an edited list item is written; its neighbours and the list around it are kept', () => {

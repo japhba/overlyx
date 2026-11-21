@@ -6,7 +6,9 @@
  * no hyperref; a hand-written paper with \path, floats with tables and \renewcommand{\arraystretch},
  * multi-line formulas, \end{center} followed by text; a child document of tables):
  *   (a) open + save untouched gives the file back byte for byte;
- *   (b) one word changed in one paragraph changes that paragraph's lines and nothing else.
+ *   (b) one word changed in one paragraph changes that one line of it and nothing else (a
+ *       hard-wrapped paragraph keeps its line breaks);
+ *   (c) one word changed in a caption, a cell or a formula of a float changes that line only.
  *   npx vitest run tests/tex-firstsave.test.ts
  */
 import { describe, it, expect } from 'vitest';
@@ -310,7 +312,7 @@ describe('the first save changes only what was edited', () => {
       expect(save(c, () => {}).text).toBe(c.text);
     });
 
-    it(`${c.name}: one word changed in a paragraph changes that paragraph's lines only`, () => {
+    it(`${c.name}: one word changed in a paragraph changes that line only`, () => {
       const { parse } = tools(c);
       const base = parse(c.text);
       const ks = wordParagraphs(viaEditor(base.doc)).filter(k => base.sources[k]);
@@ -320,8 +322,11 @@ describe('the first save changes only what was edited', () => {
         expect(r.text).toContain('CHANGED');
         const src = base.sources[k]!;
         const l0 = lineAt(c.text, src.start), l1 = lineAt(c.text, src.end);
-        const outside = hunks(c.text, r.text).filter(h => h.a0 < l0 || h.a1 > l1 + 1);
+        const hs = hunks(c.text, r.text);
+        const outside = hs.filter(h => h.a0 < l0 || h.a1 > l1 + 1);
         expect(outside.map(h => c.text.split('\n').slice(h.a0, h.a1).join('\n') + ` (+${h.added})`), `paragraph ${k}`).toEqual([]);
+        // and the paragraph keeps its line breaks: the one line with the word changes
+        expect(hs.map(h => [h.a1 - h.a0, h.added]), `paragraph ${k}`).toEqual([[1, 1]]);
         expect(parse(r.text).doc.body.map(canonical)).toEqual(r.doc.body.map(canonical));
       }
     });
