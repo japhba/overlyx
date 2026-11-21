@@ -206,8 +206,7 @@ describe('VS Code host: its own write-and-reparse is not a change on disk', () =
     // (which wins) — the second update was dropped and "notes." came back in the editor
     const second = edit(first, 'Local ', 'Loc');
     expect(await session.applyPmUpdate(second.pmDoc, second.headerLines, first, { epoch: 'e', seq: 2 })).toBe(false);
-    // (the line keeps its trailing space since the .tex writer changes only the edited part of a line, 21 Nov 2026: LaTeX ignores it)
-    expect(doc.text).toMatch(/\nLoc ?\n/);
+    expect(doc.text).toContain('\nLoc\n');
     expect(doc.text).not.toContain('notes.');
     expect(fs.existsSync(path.join(root, 'recovery'))).toBe(false);   // nothing was "rebased"
     expect(session.applied).toEqual({ epoch: 'e', seq: 2 });

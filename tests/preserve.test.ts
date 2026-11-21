@@ -7,7 +7,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { parseTex, writeTex, writeTexPreserving, type PreserveCache, type PreserveStats } from '../packages/core/src/tex/index.ts';
-import { canonical, texBalance } from '../packages/core/src/tex/preserve.ts';
+import { canonical, texBalance, patchSource } from '../packages/core/src/tex/preserve.ts';
 import { lyxToPm, pmToLyxBody, lyxAuthorId, addAuthor, type LyxDocument, type Paragraph } from '../packages/core/src/index.ts';
 import { LYX_LAYOUTS } from './lyxlib.ts';
 
@@ -152,6 +152,20 @@ describe('saving keeps the file as it is where nothing changed', () => {
     expect(r.stats.outcome).toBe('kept');
     expect(r.stats.patched).toBe(1);
     readsBack(r.text, r.doc);
+  });
+
+  it('a word deleted at the end or start of a line leaves the line as the writer would write it, the line breaks kept', () => {
+    // (file text, writer's text before, writer's text after → the file's text after)
+    const cases: [string, string, string, string][] = [
+      ['Local ', 'Local', 'Loc', 'Loc'],                                       // no blank left at the paragraph's end
+      ['Local notes.', 'Local notes.', 'Local ', 'Local '],                   // unless the writer writes one there
+      ['foo bar\nbaz qux', 'foo bar baz qux', 'foo baz qux', 'foo\nbaz qux'],
+      ['Local notes.\nNext line', 'Local notes. Next line', 'Local Next line', 'Local\nNext line'],
+      ['foo\nbar\nbaz', 'foo bar baz', 'foo baz', 'foo\nbaz'],                // a line emptied goes
+      ['first\nbar baz', 'first bar baz', 'first baz', 'first\nbaz'],
+      ['one two\n  three four', 'one two three four', 'one two four', 'one two\n  four'],
+    ];
+    for (const [S, W0, W1, want] of cases) expect(patchSource(S, W0, W1), JSON.stringify(S)).toBe(want);
   });
 
   it('a paragraph split or joined is written whole (new paragraphs on one line); the rest is kept', () => {

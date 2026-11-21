@@ -256,7 +256,12 @@ function preserve(doc: LyxDocument, full: WriteTexResult, o: PreserveOptions, ca
       if (baseGlue(j, k)) {
         // the base's glue (with the made-up paragraphs in it)
         const sg = open(true, Math.max(j, 0));
-        R += T.slice(tEndOf(i), tStartOf(src(k)));
+        let glue = T.slice(tEndOf(i), tStartOf(src(k)));
+        // after a patched paragraph whose last line was edited, that line ends as the writer
+        // would end it: blanks the file had after its last word go, unless the writer writes some
+        const own = patched.get(j);
+        if (own !== undefined && lastLine(own) !== lastLine(T.slice(tS[i], tE[i])) && !/^[ \t]/.test(full.text.slice(nEndOf(j)!, nStartOf(k)!))) glue = glue.replace(/^[ \t]+(?=\n|$)/, '');
+        R += glue;
         sg.j1 = Math.max(sg.j1, k - 1); sg.rTo = R.length;
         for (let q = j + 1; q < k; q++) keptPars++;
       } else {
@@ -367,9 +372,19 @@ export function patchSource(S: string, W0: string, W1: string): string | null {
   let changed = 0;
   for (const h of hunks) {
     changed += Math.max(h.a1 - h.a0, h.b1 - h.b0);
-    let own = h.a1 > h.a0;
-    for (let x = h.a0; own && x < h.a1; x++) if (!found(x)) own = false;
-    if (own) { edits.push({ start: sAt[inS[h.a0]], end: sAt[inS[h.a1 - 1] + 1], text: b.slice(h.b0, h.b1).join('') }); continue; }
+    const all = (x0: number, x1: number) => { for (let x = x0; x < x1; x++) if (!found(x)) return false; return x1 > x0; };
+    if (all(h.a0, h.a1)) {
+      let a0 = h.a0, a1 = h.a1;
+      // a deletion that could as well be one token to the left or right ("bar " or " bar" of
+      // "foo bar baz"): the one that does not take a line break of the file along
+      const span = (x0: number, x1: number) => S.slice(sAt[inS[x0]], sAt[inS[x1 - 1] + 1]);
+      if (h.b0 === h.b1 && span(a0, a1).includes('\n')) {
+        if (a0 > 0 && a[a0 - 1] === a[a1 - 1] && all(a0 - 1, a1 - 1) && !span(a0 - 1, a1 - 1).includes('\n')) { a0--; a1--; }
+        else if (a1 < a.length && a[a0] === a[a1] && all(a0 + 1, a1 + 1) && !span(a0 + 1, a1 + 1).includes('\n')) { a0++; a1++; }
+      }
+      edits.push({ start: sAt[inS[a0]], end: sAt[inS[a1 - 1] + 1], text: b.slice(h.b0, h.b1).join('') });
+      continue;
+    }
     if (h.a1 === h.a0 && (h.a0 === 0 || found(h.a0 - 1))) { const at = h.a0 === 0 ? 0 : sAt[inS[h.a0 - 1] + 1]; edits.push({ start: at, end: at, text: b.slice(h.b0, h.b1).join('') }); continue; }
     if (h.a1 === h.a0 && found(h.a1)) { const at = sAt[inS[h.a1]]; edits.push({ start: at, end: at, text: b.slice(h.b0, h.b1).join('') }); continue; }
     let l = h.a0 - 1, r = h.a1, bl = h.b0 - 1, br = h.b1;
@@ -384,12 +399,51 @@ export function patchSource(S: string, W0: string, W1: string): string | null {
   // a change that replaces most of the paragraph is a rewrite: the writer's text is as good
   if (changed > Math.max(24, a.length / 2)) return null;
   let out = '', from = 0;
+  const at: [number, number][] = [];
   for (const e of edits) {
     if (e.start < from || e.end < e.start) return null;
-    out += S.slice(from, e.start) + e.text;
+    out += S.slice(from, e.start);
+    at.push([out.length, out.length + e.text.length]);
+    out += e.text;
     from = e.end;
   }
-  return out + S.slice(from);
+  out += S.slice(from);
+  // the lines an edit ends as the writer would write them: no blanks left at the end of a line
+  // (the paragraph's last only where the writer's text ends with one too), none exposed at the
+  // start of one, and a line the edit emptied gone (an empty line would end the paragraph)
+  const endsBlank = /[ \t]$/.test(W1);
+  for (let k = at.length - 1; k >= 0; k--) {
+    const r = tidyEdit(out, at[k][0], at[k][1], endsBlank);
+    if (r === null) return null;
+    out = r;
+  }
+  return out;
+}
+
+const isBlank = (c: string | undefined) => c === ' ' || c === '\t';
+const lastLine = (t: string) => t.slice(t.lastIndexOf('\n') + 1);
+
+/** `t` with the blanks around an edit (`s0`..`e`, its new text) tidied as the writer would write them (patchSource); null when the edit emptied it. */
+function tidyEdit(t: string, s0: number, e: number, endsBlank: boolean): string | null {
+  let x = e, y = e;
+  while (x > 0 && isBlank(t[x - 1]) && t[x - 2] !== '\\') x--;
+  while (y < t.length && isBlank(t[y])) y++;
+  if (t[y] === '\n' || (y === t.length && !endsBlank)) {
+    // at a line's end (the paragraph's, unless the writer ends it with a blank too)
+    t = t.slice(0, x) + t.slice(y);
+    if ((x === 0 || t[x - 1] === '\n') && (x === t.length || t[x] === '\n')) {
+      if (!t.trim()) return null;
+      t = x < t.length ? t.slice(0, x) + t.slice(x + 1) : t.slice(0, x - 1);
+    }
+    return t;
+  }
+  if (s0 === e) {
+    // a deletion at a line's start (after its indentation): the blanks it exposed go
+    let l = s0;
+    while (l > 0 && isBlank(t[l - 1])) l--;
+    if (l === 0 || t[l - 1] === '\n') { let r = s0; while (r < t.length && isBlank(t[r])) r++; t = t.slice(0, s0) + t.slice(r); }
+  }
+  return t;
 }
 
 /** A stretch of the result: kept from the base text, or the writer's text for the new document. */
