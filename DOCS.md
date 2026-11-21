@@ -343,6 +343,16 @@ blend.
   not a board's JSON any more (half written by another tool) is ignored instead of emptying the board.
   HTML articles are documents (`OpenDoc`) and were covered already. Tests: `docs-unsaved-deck-board`,
   `filemerge`.
+  **Written at the start, not only at the next open** (`server/src/rescue.ts`): five seconds after
+  the server listens (it does not wait for this), `writeRescuedEdits` looks for the states stored
+  unsaved within the last 30 days (`ydocs_saved.saved = 0`), most recent first, and opens each through
+  the same path an open takes — so it is kept, merged with a file changed meanwhile, and written —
+  then closes it again unless somebody is editing it by then. Until then a LaTeX build, git, the sync
+  and the VS Code clones saw the older file. One document at a time; a state or file over 32 MB, an
+  end-to-end encrypted project, a document open already and a file that is gone are skipped; 60 s per
+  document and 3 minutes in all, the rest is written at its next open as before. One log line per
+  document (`[rescue] <id>: written` / `skipped …` / `failed …`) and a summary; nothing in it throws
+  (errors are logged). Test: `docs-rescue-startup` (with document workers).
   The service's `TimeoutStopSec` (20 s) is better about 60 s, so that a slow `saveAll` at a stop is
   not cut off (the owner installs the unit).
 * **Sharing** (Google-Docs model): a project is private to its owner until it is shared. The owner

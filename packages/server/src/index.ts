@@ -24,6 +24,7 @@ import { userSettings, setUserSettings, userKeys, setUserKeys, docFolds, setDocF
 import { authMiddleware, authRouter, requireAuth, createUser, createGuest, generatePassword, setSessionCookie, toSessionUser, type SessionUser } from './auth.ts';
 import { attachWebSocket, originAllowed } from './ws.ts';
 import { manager, docWorkers, projectChangedListeners, graphicsChangedListeners } from './docs.ts';
+import { writeRescuedEdits } from './rescue.ts';
 import { mountDeliverables, deliverableToken, splitEntry, createDeliverable, deliverableZip } from './deliverables.ts';
 import { deliverablePdf } from './render.ts';
 import { deckExport } from './deckexport.ts';
@@ -2110,6 +2111,8 @@ server.listen(config.port, config.host, () => {
   console.log(`OverLyX server listening on http://${config.host}:${config.port}  (projects: ${config.projectsDir}, data: ${config.dataDir}, document workers: ${docWorkers.enabled ? docWorkers.size : 'none'})`);
   docWorkers.warm();
   if (selfCheckEnabled()) setTimeout(() => void runSelfCheck(config.port), 3000).unref();
+  // edits stored but not written before the last stop (a crash, a hard kill): written now, not only at their next open
+  setTimeout(() => { writeRescuedEdits().catch(e => console.error('[rescue] failed:', e)); }, 5000).unref();
 });
 
 for (const sig of ['SIGINT', 'SIGTERM'] as const) {
