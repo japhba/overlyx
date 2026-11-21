@@ -7,6 +7,7 @@
  * Step 1 is the slide as it comes up; step n comes with the (n−1)th click.
  */
 import { useEffect, useState } from 'preact/hooks';
+import type { ComponentChildren } from 'preact';
 import type { Path, SelItem, StepCmd, StepKind, StepRow } from './protocol';
 
 export interface Sequence { slide: number; rows: StepRow[]; steps: number; ordering: StepKind | null }
@@ -18,9 +19,11 @@ interface Props {
   send(cmd: StepCmd): void;
   select(path: Path): void;
   close(): void;
+  /** above the steps: the slide's transition and timing (SlideFx.tsx) */
+  top?: ComponentChildren;
 }
 
-export function AnimationPane({ seq, sel, readOnly, send, select, close }: Props) {
+export function AnimationPane({ seq, sel, readOnly, send, select, close, top }: Props) {
   const [together, setTogether] = useState(false);
   const [orderKind, setOrderKind] = useState<StepKind>('appear');
   const ordering = seq.ordering;
@@ -44,6 +47,7 @@ export function AnimationPane({ seq, sel, readOnly, send, select, close }: Props
         <span>Animation{seq.slide >= 0 ? ` · slide ${seq.slide + 1}` : ''}</span>
         <button class="dl-btn" onClick={close} title="Close">×</button>
       </div>
+      {top}
       {!readOnly && (
         <div class="dl-anim-tools">
           <div class="dl-anim-add">

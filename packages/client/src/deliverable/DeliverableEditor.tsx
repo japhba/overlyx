@@ -60,6 +60,7 @@ import { loadTextDrafts, saveTextDrafts, draftWords, pendingDraftKey, loadPendin
 import { BgRemoveDialog } from './BgRemoveDialog';
 import { MathOverlay, type MathEditState, type MathOps } from './MathOverlay';
 import { AnimationPane, type Sequence } from './AnimationPane';
+import { SlideFx, slideFxIn } from './SlideFx';
 import { ObjectsPane } from './ObjectsPane';
 import { CiteDialog, Dialog, uiPrompt, uiConfirm } from '../app/Dialogs';
 import { askQr, qrEditOps, qrHtml, qrPlaceholderAt, qrTextAt, qrWarning } from './qrcode';
@@ -570,6 +571,8 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
   // the Animation pane (open or not: this browser's) and the sequence of the slide it shows (runtime/animate.ts)
   const [animOpen, setAnimOpen] = useState(() => { try { return localStorage.getItem('ol.animPane') === '1'; } catch { return false; } });
   const [seq, setSeq] = useState<Sequence>({ slide: -1, rows: [], steps: 1, ordering: null });
+  /** the slides' transitions and timing (SlideFx.tsx), read while the Animation pane shows them */
+  const slideFx = useMemo(() => animOpen && kind === 'deck' ? slideFxIn(textNow) : null, [animOpen, kind, textNow]);
   const [objOpen, setObjOpen] = useState(() => { try { return localStorage.getItem('ol.objPane') === '1'; } catch { return false; } });
   const objOpenRef = useRef(objOpen); objOpenRef.current = objOpen;
   const [objects, setObjects] = useState<{ slide: number; items: ObjNode[] }>({ slide: -1, items: [] });
@@ -3256,6 +3259,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
       { label: 'New slide in a layout…', action: () => pickAt(x, y, 'New slide', close => layoutPicker(i, close)) },
       { label: 'Duplicate slide', action: () => duplicateSlide(i) },
       { label: 'Skip slide (not presented)', checked: !!slides[i]?.skipped, disabled: readOnlyRef.current, action: () => toggleSkip(i) },
+      { label: 'Transition…', action: () => toggleAnim(true) },
       { sep: true },
       ...slideList.clipItems(i),
       { sep: true },
@@ -4589,7 +4593,8 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
         )}
         {animOpen && kind === 'deck' && !fullOn && (
           <AnimationPane seq={seq} sel={sel} readOnly={locked} close={() => toggleAnim(false)}
-            send={cmd => toCanvas({ ol: 'steps', cmd })} select={p => toCanvas({ ol: 'select', paths: [p] })} />
+            send={cmd => toCanvas({ ol: 'steps', cmd })} select={p => toCanvas({ ol: 'select', paths: [p] })}
+            top={slideFx && <SlideFx fx={slideFx} slides={slideList.sel.length > 1 && slideList.sel.includes(current) ? slideList.sel : [current]} readOnly={locked} apply={ops => { applyOps(ops); }} />} />
         )}
         {reviewOpen && !fullOn && (
           <ReviewPane review={review} slideTitles={slides.map(s => s.title)} current={current} kind={kind} me={me} canEdit={!locked}

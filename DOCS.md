@@ -1283,7 +1283,22 @@ blend.
     step 1 removes their inline steps, and hidden words keep their space.
     **Download ▸ PDF with click steps** exports each step
     with the presenter's visibility rules, including inline reveals (at most 1000 pages;
-    `deliverable-pdf?path=…&steps=all`). Ordinary PDF export still shows everything. `<meta
+    `deliverable-pdf?path=…&steps=all`). Ordinary PDF export still shows everything. **Transitions and
+    timed advance** (21 Nov 2026; core `html/transitions.ts`, runtime `transition.ts`, the Animation
+    pane's top part `SlideFx.tsx`): `data-ol-transition="fade"` (or `push`, `wipe`, `none`, with an
+    optional length, `"push 0.8s"`) on a slide says how it comes in when presenting, on `<body>` how
+    every slide does (a slide's own wins; `none` cuts to it whatever the deck's); `data-ol-advance="5s"`
+    makes a slide go on by itself — each of its steps, then the next slide, that long after the last
+    (a click or key still goes on at once; `click` on a slide undoes the body's). The pane sets them for
+    the slide shown or the slides selected in the slide list (None · Fade · Push · Wipe, Speed and After
+    on sliders with rungs, *Apply to all slides* moves them to `<body>`), each choice one change of the
+    text. Presenting (also the presenter view, Linked screens, the website) keeps the slide before on
+    screen (`data-ol-leaving`, placed as the current one) while the new one comes in through the Web
+    Animations API on `translate` / `opacity` / `clip-path`, so the fit and the zoom stay the
+    placement's; push and wipe run backwards going back; a jump (Home, a number, the overview) cuts;
+    reduced motion makes every transition a short fade. The timer waits while the screen is black or
+    white, zoomed or on the overview. Neither shows in the rail, the PDF (one page per slide, or per
+    step with click steps), PNG or PPTX export. `<meta
     name="overlyx-steps" content="dim">` shows hidden objects faintly. While a text is retyped, references and citations are
     uneditable chips, environments editable formulas. The text row's insert group matches the
     documents': link (Ctrl+K), cross-reference (Ctrl+Shift+I), citation (Ctrl+Shift+C, the

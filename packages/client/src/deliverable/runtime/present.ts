@@ -25,6 +25,7 @@ import { textHash } from '../../app/presentshare';
 import { slideStepCount as lastStep, showSlideStep, STEP_VISIBILITY_CSS } from './steps';
 import { PresenterView, slideThumb, type StageRect } from './presenter';
 import { pairAll } from './reconcile';
+import { slideIn, armAdvance, TRANSITION_CSS } from './transition';
 
 let current = 0;
 /** the step of the slide shown (beamer's overlays: objects with data-step show on the steps it names, core html/steps.ts) */
@@ -84,7 +85,7 @@ export function startPresenting(): void {
   css.textContent = `html, body { overflow: hidden !important; background: #000 !important; }
     body { margin: 0 !important; }
     :is(body, :has(.slide[data-ol-current])):not(html) { position: static !important; }
-    .slide:not([data-ol-current]):not([data-ol-copy]) { display: none !important; }
+    .slide:not([data-ol-current]):not([data-ol-copy]):not([data-ol-leaving]) { display: none !important; }
     .slide[data-ol-current] { position: absolute !important; left: var(--ol-cx, 50%) !important; top: var(--ol-cy, 50%) !important; margin: 0 !important;
       transform: translate(var(--ol-ztx, 0px), var(--ol-zty, 0px)) scale(var(--ol-zs, 1)) scale(var(--ol-fit, 1)) translate(-50%, -50%) !important;
       transform-origin: 0 0 !important; box-shadow: none !important; }
@@ -93,7 +94,8 @@ export function startPresenting(): void {
     html.ol-present-blank .slide { opacity: 0 !important; visibility: hidden !important; }
     html.ol-present-blank ol-present-ui { display: none !important; }
     html.ol-hide-cursor, html.ol-hide-cursor * { cursor: none !important; }
-    ${STEP_VISIBILITY_CSS}`;
+    ${STEP_VISIBILITY_CSS}
+    ${TRANSITION_CSS}`;
   // <meta name="overlyx-steps" content="dim">: what comes later shows faintly (beamer's \setbeamercovered{transparent})
   if (/^dim/i.test(document.querySelector('meta[name="overlyx-steps"]')?.getAttribute('content') ?? '')) document.documentElement.classList.add('ol-steps-dim');
   document.head.appendChild(css);
@@ -239,7 +241,11 @@ function blankScreen(white: boolean): void {
 function showStep(): void {
   const s = slides()[current];
   if (s) showSlideStep(s, step);
+  // a slide that goes on by itself (data-ol-advance, transition.ts): not while the screen is paused, zoomed or on the overview
+  armAdvance(s, forward, () => document.documentElement.classList.contains('ol-present-blank') || !!kit?.zoomed || !!kit?.overviewOn);
 }
+/** the slide shown before (it leaves with the transition of the one coming in) */
+let shownEl: HTMLElement | null = null;
 
 /** on: the next step of the slide, or the next slide */
 function forward(): void {
@@ -264,6 +270,10 @@ export function go(i: number, atEnd = false, at?: number): void {
   showStep();
   ss.forEach((s, k) => { if (k === current) s.setAttribute('data-ol-current', ''); else s.removeAttribute('data-ol-current'); });
   fit();
+  // how it comes in (transition.ts): to the next slide or the one before; a jump cuts
+  const was = shownEl ? ss.indexOf(shownEl) : -1, to = ss[current];
+  slideIn(was >= 0 && was !== current ? shownEl : null, to, was < 0 ? 0 : current === was + 1 ? 1 : current === was - 1 ? -1 : 0);
+  shownEl = to;
   kit?.slideChanged();
   pv?.update();
   try { history.replaceState(null, '', `#${current + 1}`); } catch { /* sandboxed: no history */ }

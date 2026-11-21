@@ -1,0 +1,17 @@
+/* The Animation pane's slide part: transition and timed advance (SlideFx.tsx) */
+.dl-fx { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px 10px; border-bottom: 1px solid var(--ui-border); font-size: 12.5px; }
+.dl-fx-head { font-weight: 600; font-size: 11.5px; color: var(--ui-muted); margin-top: 2px; }
+.dl-fx-note { font-weight: 400; }
+.dl-fx-kinds { display: flex; gap: 0; }
+.dl-fx .dl-fx-kinds .dl-btn { flex: 1; height: 26px; border: 1px solid var(--ui-border); border-radius: 0; margin-left: -1px; background: var(--surface); color: var(--ui-fg); font-size: 12px; }
+.dl-fx .dl-fx-kinds .dl-btn:first-child { border-radius: 5px 0 0 5px; margin-left: 0; }
+.dl-fx .dl-fx-kinds .dl-btn:last-child { border-radius: 0 5px 5px 0; }
+.dl-fx .dl-fx-kinds .dl-btn.on { background: var(--active-bg, rgba(47, 111, 222, .14)); border-color: var(--accent); position: relative; z-index: 1; font-weight: 600; }
+.dl-fx-slider { position: relative; display: grid; grid-template-columns: 1fr auto; row-gap: 2px; padding-bottom: 16px; }
+.dl-fx-label { color: var(--ui-muted); }
+.dl-fx-value { font-variant-numeric: tabular-nums; font-weight: 600; }
+.dl-fx-slider input { grid-column: 1 / -1; width: 100%; margin: 0; accent-color: var(--accent); }
+.dl-fx-rungs { position: absolute; left: 7px; right: 7px; bottom: 0; height: 14px; }
+.dl-fx-rungs button { position: absolute; transform: translateX(-50%); border: 0; background: none; padding: 0; font: inherit; font-size: 10.5px; line-height: 14px; white-space: nowrap; color: var(--ui-muted); cursor: pointer; }
+.dl-fx-rungs button.on { color: var(--accent); font-weight: 600; }
+.dl-anim .dl-fx .dl-fx-all { align-self: flex-start; height: 24px; padding: 0 9px; border: 1px solid var(--ui-border); border-radius: 5px; background: var(--surface); color: var(--ui-fg); font-size: 11.5px; }
