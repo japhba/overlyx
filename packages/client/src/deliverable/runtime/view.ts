@@ -3,8 +3,11 @@
  * editor keeps it per document in this browser): the canvas colour (by default the page's own
  * background, so the frame and the editor around it are one surface), a transparency checkerboard
  * for the canvas, and one under the pages, where a slide without a background of its own shows it
- * (Inkscape's desk and page checkerboards). The page's own colours are reported to the editor,
- * which paints its surroundings to match.
+ * (Inkscape's desk and page checkerboards) — or a colour there instead (`page`: an SVG drawing's
+ * canvas, white in the SVG editor, apart from the canvas round it; Inkscape's page colour). What is
+ * under the pages is drawn beside them, never on them: the drawing exported from the page stays as
+ * the file has it. The page's own colours are reported to the editor, which paints its surroundings
+ * to match.
  */
 import type { CanvasView } from '../protocol';
 import { post, slides, docRect } from './env';
@@ -25,14 +28,20 @@ function apply(): void {
   }
   const desk = view.deskChecker ? checker() : view.desk;
   const rules: string[] = [];
-  // the page checkerboard lies under the body: the body itself is then see-through, the canvas on <html>
+  // what is under the pages lies under the body: the body itself is then see-through, the canvas on <html>
   // (`ol-bg-read`: the page's own read for a moment, solo.ts notePageBackground)
-  if (view.pageChecker) rules.push(`html.ol-edit:not(.ol-bg-read) { background: ${desk ?? currentDesk()} !important; } html.ol-edit:not(.ol-bg-read) body { background: transparent !important; }`);
+  if (under()) rules.push(`html.ol-edit:not(.ol-bg-read) { background: ${desk ?? currentDesk()} !important; } html.ol-edit:not(.ol-bg-read) body { background: transparent !important; }`);
   else if (desk) rules.push(`html.ol-edit:not(.ol-bg-read), html.ol-edit:not(.ol-bg-read) body { background: ${desk} !important; }`);
   style.textContent = rules.join('\n');
-  // (a slide without a background shows the checkerboard, not the page's colour: solo.ts)
-  document.documentElement.classList.toggle('ol-page-checker', view.pageChecker);
+  // (a slide without a background shows what is under it, not the page's colour: solo.ts)
+  document.documentElement.classList.toggle('ol-page-checker', !!under());
   refreshView();
+}
+
+/** what is under the pages: the checkerboard, else the colour chosen (CSS), else nothing */
+function under(): string | null {
+  if (view.pageChecker) return checker('#cfd3d9', '#f4f5f7', 20);
+  return view.page && /^(#[0-9a-f]{3,8}|rgba?\([\d\s.,%]+\)|[a-z]+)$/i.test(view.page.trim()) ? view.page.trim() : null;
 }
 
 /** the page's own canvas colour (what its body / html paint, without the editor's) */
@@ -47,18 +56,21 @@ function currentDesk(): string {
   } finally { root.classList.remove('ol-bg-read'); }
 }
 
-/** the checkerboards under the slides, where they are now */
+/** what is under the slides (the checkerboard, a colour), where they are now */
 export function refreshView(): void {
-  if (!view.pageChecker) { backdrop?.remove(); backdrop = null; return; }
+  const fill = under();
+  if (!fill) { backdrop?.remove(); backdrop = null; return; }
   if (!backdrop) {
     backdrop = document.createElement('ol-backdrop');
     backdrop.setAttribute('data-ol-runtime', '');
     backdrop.style.cssText = 'all:initial;position:absolute;left:0;top:0;width:0;height:0;z-index:-2147483647;pointer-events:none;display:block;';
     document.documentElement.appendChild(backdrop);
   }
+  // (a colour is part of the drawing as shown: inverted with it in the dark theme, darkpages.ts)
+  backdrop.toggleAttribute('data-ol-page-colour', !view.pageChecker);
   const ss = slides();
   const boxes = ss.length ? ss.map(s => docRect(s)) : [{ x: 0, y: 0, w: document.documentElement.scrollWidth, h: document.documentElement.scrollHeight }];
-  backdrop.innerHTML = boxes.map(r => `<div style="position:absolute;left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px;background:${checker('#cfd3d9', '#f4f5f7', 20)}"></div>`).join('');
+  backdrop.innerHTML = boxes.map(r => `<div style="position:absolute;left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px;background:${fill}"></div>`).join('');
 }
 
 /** the colours the editor paints around the frame: the page's canvas, and the slides' usual background */

@@ -16,7 +16,8 @@ export function exportPageSvg(page: Element | null | undefined, except?: string)
   const style = getComputedStyle(page);
   const width = number(style.width, page.clientWidth || 800), height = number(style.height, page.clientHeight || 600);
   const out = make('svg', { width, height, viewBox: `0 0 ${width} ${height}` });
-  if (style.backgroundColor && style.backgroundColor !== 'rgba(0, 0, 0, 0)' && style.backgroundColor !== 'transparent') out.append(make('rect', { width, height, fill: style.backgroundColor }));
+  // (marked: the SVG editor puts it under the file's drawing — svgSource.ts PAGE_BG_ATTR)
+  if (style.backgroundColor && style.backgroundColor !== 'rgba(0, 0, 0, 0)' && style.backgroundColor !== 'transparent') out.append(make('rect', { width, height, fill: style.backgroundColor, 'data-ol-page-bg': '' }));
   const copy = (el: Element): Element | null => {
     if (isForeign(el) || el.matches('script, style, link, meta, .notes, [data-ol-deleted]')) return null;
     const css = getComputedStyle(el);

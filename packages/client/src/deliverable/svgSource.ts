@@ -5,6 +5,8 @@ const XMLNS_NS = 'http://www.w3.org/2000/xmlns/';
 const INKSCAPE_NS = 'http://www.inkscape.org/namespaces/inkscape';
 /** marks the SVG file's own drawing on the canvas page; anything else there was added on top of it */
 export const SVG_FILE_ROOT = 'data-ol-svgfile';
+/** marks the page's background in the canvas's SVG export (runtime/svgexport.ts): it goes under the drawing, not over it */
+export const PAGE_BG_ATTR = 'data-ol-page-bg';
 /** what the canvas puts in the root's style to place it on the page */
 const CANVAS_STYLE = ['position', 'left', 'top', 'width', 'height', 'max-width', 'overflow'];
 
@@ -122,15 +124,21 @@ export function svgFileFromCanvas(original: string, html: string, added?: string
         const fx = /xMid/.test(par) ? 0.5 : /xMax/.test(par) ? 1 : 0, fy = /YMid/.test(par) ? 0.5 : /YMax/.test(par) ? 1 : 0;
         tx = (w - vw * sx) * fx; ty = (h - vh * sy) * fy;
       }
-      const g = doc.createElementNS(SVG_NS, 'g');
       const n = (v: number) => +v.toFixed(6);
-      g.setAttribute('transform', `matrix(${n(1 / sx)} 0 0 ${n(1 / sy)} ${n(vx - (left + tx) / sx)} ${n(vy - (top + ty) / sy)})`);
-      if (Array.from(root.attributes).some(a => a.value === INKSCAPE_NS)) {
-        g.setAttributeNS(INKSCAPE_NS, 'inkscape:groupmode', 'layer');
-        g.setAttributeNS(INKSCAPE_NS, 'inkscape:label', 'Drawn in OverLyX');
-      }
-      for (const kid of Array.from(extra.children)) g.appendChild(doc.importNode(kid, true));
-      out.appendChild(g);
+      const layer = (kids: Element[], label: string): Element => {
+        const g = doc.createElementNS(SVG_NS, 'g');
+        g.setAttribute('transform', `matrix(${n(1 / sx)} 0 0 ${n(1 / sy)} ${n(vx - (left + tx) / sx)} ${n(vy - (top + ty) / sy)})`);
+        if (Array.from(root.attributes).some(a => a.value === INKSCAPE_NS)) {
+          g.setAttributeNS(INKSCAPE_NS, 'inkscape:groupmode', 'layer');
+          g.setAttributeNS(INKSCAPE_NS, 'inkscape:label', label);
+        }
+        for (const kid of kids) { const made = doc.importNode(kid, true) as Element; made.removeAttribute(PAGE_BG_ATTR); g.appendChild(made); }
+        return g;
+      };
+      // the page's background (the SVG row's Background) under the drawing, what was drawn on top of it
+      const kids = Array.from(extra.children), under = kids.filter(k => k.hasAttribute(PAGE_BG_ATTR)), over = kids.filter(k => !k.hasAttribute(PAGE_BG_ATTR));
+      if (over.length) out.appendChild(layer(over, 'Drawn in OverLyX'));
+      if (under.length) out.insertBefore(layer(under, 'Background'), out.firstChild);
     }
   }
   return prologOf(original) + new XMLSerializer().serializeToString(out) + (/\n\s*$/.test(original) ? '\n' : '');

@@ -140,13 +140,15 @@ const BUILD: string = String(import.meta.env?.VITE_BUILD_VERSION ?? '');
 interface ScreenArea { availLeft: number; availTop: number; availWidth: number; availHeight: number }
 const CHECKER = 'repeating-conic-gradient(#e3e5e8 0 25%, #ffffff 0 50%) 0 0 / 16px 16px';
 const NO_VIEW: CanvasView = { desk: null, deskChecker: false, pageChecker: false };
+/** the SVG editor's canvas under the drawing unless another was chosen (CanvasView.page) */
+const SVG_CANVAS = '#ffffff';
 
 /** how this browser shows what is around a document's pages (view only, never in the file) */
 function loadView(path: string): CanvasView {
   try { const v = JSON.parse(localStorage.getItem('ol.canvas:' + path) ?? 'null'); return v && typeof v === 'object' ? { ...NO_VIEW, ...v } : NO_VIEW; } catch { return NO_VIEW; }
 }
 function saveView(path: string, v: CanvasView): void {
-  try { if (v.desk === null && !v.deskChecker && !v.pageChecker) localStorage.removeItem('ol.canvas:' + path); else localStorage.setItem('ol.canvas:' + path, JSON.stringify(v)); } catch { /* private window */ }
+  try { if (v.desk === null && !v.deskChecker && !v.pageChecker && v.page === undefined) localStorage.removeItem('ol.canvas:' + path); else localStorage.setItem('ol.canvas:' + path, JSON.stringify(v)); } catch { /* private window */ }
 }
 
 /** the same slide shown in the same place (a layout that changes nothing does not render the editor) */
@@ -409,7 +411,15 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
    * edges show: deskBeside).
    */
   const shownView = (v: CanvasView): CanvasView => {
+    const svg = !!host.bindSvgExporter;
+    // an SVG drawing's canvas: white unless another colour (or none) was chosen — shown, never written to the file
+    if (svg && v.page === undefined) v = { ...v, page: SVG_CANVAS };
     if (kindRef.current === 'page' || v.desk !== null || v.deskChecker) return v;
+    // round it, in either theme, a shade further apart from it than round slides: the drawing's edge reads
+    if (svg && v.page && !v.pageChecker) {
+      const d = darkRef.current, page = d.dark && d.invert ? invertedColor(v.page) : v.page;
+      return { ...v, desk: deskBeside(d.dark ? DARK_DESK : colorsRef.current?.desk ?? '#ffffff', page, 0.15, 0.2) };
+    }
     if (darkRef.current.dark) return { ...v, desk: DARK_DESK };
     const c = colorsRef.current, apart = c ? deskBeside(c.desk, c.page) : null;
     return c && apart !== c.desk ? { ...v, desk: apart } : v;
@@ -2782,6 +2792,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
   const pickAt = (x: number, y: number, title: string, render: (close: () => void) => ComponentChildren) => { closeContextMenu(); setFloatPop({ x, y, title, render }); };
   const canvasItems = (x: number, y: number): MenuItem[] => {
     const v = viewRef.current;
+    if (host.bindSvgExporter) return svgCanvasItems(x, y, v);
     return [
       { label: 'Canvas colour', sub: [
         { label: darkRef.current.dark ? 'Automatic (dark grey in the dark theme)' : 'Same as the page', checked: v.desk === null && !v.deskChecker, action: () => setView({ desk: null, deskChecker: false }) },
@@ -2797,6 +2808,37 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
       ...(darkRef.current.dark ? [{ label: 'Smart invert pages (dark theme)', checked: darkRef.current.invert, action: toggleDarkPages }] : []),
       { sep: true },
       { label: zoomRef.current > 1.01 ? 'Fit the slide' : 'Back to the slide', action: fitSlide },
+    ];
+  };
+  /**
+   * The SVG editor's: the drawing's canvas (under it where it is transparent: white unless chosen) and
+   * the background round it, each a colour of its own (Inkscape's page and desk colours) — shown
+   * only, never written to the SVG.
+   */
+  const svgCanvasItems = (x: number, y: number, v: CanvasView): MenuItem[] => {
+    const page = v.pageChecker ? 'checker' : v.page === undefined ? SVG_CANVAS : v.page;
+    const setPage = (c: string | null) => setView({ page: c === SVG_CANVAS ? undefined : c, pageChecker: false });
+    const canvas = (label: string, c: string) => ({ label, checked: page === c, action: () => setPage(c) });
+    const desk = (label: string, c: string) => ({ label, checked: v.desk === c && !v.deskChecker, action: () => setView({ desk: c, deskChecker: false }) });
+    return [
+      { label: 'Canvas colour (under the drawing)', sub: [
+        canvas('White', SVG_CANVAS), canvas('Light grey', '#e8eaed'), canvas('Dark grey', '#3c4043'), canvas('Black', '#000000'),
+        { label: 'Other colour…', action: () => pickAt(x, y, 'Canvas colour', close => <ColorGrid current={page !== 'checker' ? page : null} close={close} none="None — the background shows through" onPick={c => setPage(c)} />) },
+        { sep: true },
+        { label: 'None — the background shows through', checked: page === null, action: () => setPage(null) },
+        { label: 'Checkerboard (shows transparency)', checked: page === 'checker', action: () => setView({ pageChecker: true }) },
+        { sep: true },
+        { label: 'Shown here only, never saved in the SVG', info: true },
+      ] },
+      { label: 'Background colour (around the canvas)', sub: [
+        { label: 'Automatic (a shade apart from the canvas)', checked: v.desk === null && !v.deskChecker, action: () => setView({ desk: null, deskChecker: false }) },
+        desk('White', '#ffffff'), desk('Light grey', '#e8eaed'), desk('Grey', '#9aa0a6'), desk('Dark grey', '#3c4043'), desk('Black', '#000000'),
+        { label: 'Other colour…', action: () => pickAt(x, y, 'Background colour', close => <ColorGrid current={v.desk} close={close} none="Automatic" onPick={c => setView({ desk: c, deskChecker: false })} />) },
+        { label: 'Checkerboard', checked: v.deskChecker, action: () => setView({ deskChecker: !v.deskChecker }) },
+      ] },
+      ...(darkRef.current.dark ? [{ label: 'Smart invert pages (dark theme)', checked: darkRef.current.invert, action: toggleDarkPages }] : []),
+      { sep: true },
+      { label: zoomRef.current > 1.01 ? 'Fit the drawing' : 'Back to the drawing', action: fitSlide },
     ];
   };
   /**

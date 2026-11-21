@@ -11,6 +11,11 @@
  *   gesture events), two fingers on a touch screen (once they spread or close by an eighth: two
  *   fingers moving together, or a resting hand, do not zoom), `+` / `-`; zoomed, a drag or a two-finger scroll
  *   pans, a click does not advance, `0`, a double click / tap or Escape go back to the whole slide;
+ * - every slide on a grid (Keynote's light table, PowerPoint's "−" / G): zoomed out past the whole
+ *   slide — a pinch that begins there (one that began zoomed in stops at the whole slide) — the slide
+ *   shrinks with the fingers, and past OVERVIEW_AT it snaps into the overview (let go before, it
+ *   springs back). There a tap / click, the arrows and Enter or a pinch out on a slide open it;
+ *   Escape (or G) goes back to the one shown. The presenter hands the slides over (`overview`);
  * - drawing on the slides (Keynote's and PowerPoint's presenting ink): a pen, a highlighter, an
  *   eraser (Ctrl+P, Ctrl+I, Ctrl+E; Ctrl+A or Escape put the tool away; E clears the slide), in a few
  *   colours. The drawings belong to their slide (kept while presenting, never saved) and zoom with
@@ -84,6 +89,16 @@ export function savePresentLinked(on: boolean): void {
 }
 /** how often a presenter's state goes to the other screens at most, while a stroke or the laser moves (ms) */
 export const SHARE_MS = 50;
+/** a pinch that began at the whole slide, zoomed out to this: every slide on a grid */
+export const OVERVIEW_AT = 0.72;
+/** on the overview, fingers (a trackpad) spreading by this much open the slide under them */
+export const OVERVIEW_OPEN_AT = 1.3;
+/** a Ctrl + wheel pinch has ended once no step came for this long (no event says so) */
+export const WHEEL_END_MS = 180;
+/** the overview's opening and closing (ms) */
+const OV_MS = 240;
+const OV_BG = 'rgb(20, 21, 24)';
+const OV_CLEAR = 'rgba(20, 21, 24, 0)';
 
 export type PresentTool = 'laser' | 'pen' | 'marker' | 'eraser';
 type InkTool = Exclude<PresentTool, 'laser'>;
@@ -138,6 +153,45 @@ export function panBy(v: ZoomView, dx: number, dy: number, base: Rect | null, vw
 export function wheelZoomFactor(deltaY: number, deltaMode = 0, pageH = 800): number {
   const dy = deltaMode === 1 ? deltaY * 16 : deltaMode === 2 ? deltaY * pageH : deltaY;
   return Math.min(1.6, Math.max(0.6, Math.exp(-dy * 0.0075)));
+}
+
+/** the slide drawn at `s` of its size about its middle (`base`: its rect without the zoom) — a pull below the whole slide */
+export function pullView(s: number, base: Rect | null): ZoomView {
+  return base ? { s, x: (1 - s) * (base.x + base.w / 2), y: (1 - s) * (base.y + base.h / 2) } : { ...IDENTITY };
+}
+
+/* ------------------------------------------------------------------ the overview's grid */
+
+export interface OverviewGrid { cols: number; w: number; h: number; gap: number; pad: number }
+/** the room under each slide on the overview (its number) */
+export const OV_LABEL = 24;
+const clampN = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+
+/**
+ * The overview's grid for `n` slides of shape `aspect` (height / width) in a `W` × `H` window: its
+ * columns and the slides' size there — as big as lets every slide show at once (a lone slide at most
+ * 60 % of the window), and where that is too small to read, as many columns as keep them readable
+ * (the grid then scrolls).
+ */
+export function overviewGrid(n: number, aspect: number, W: number, H: number): OverviewGrid {
+  const a = aspect > 0 && Number.isFinite(aspect) ? aspect : 9 / 16;
+  const pad = Math.round(clampN(Math.min(W, H) * 0.05, 16, 56)), gap = Math.round(clampN(W * 0.02, 10, 28));
+  const aw = Math.max(40, W - 2 * pad), ah = Math.max(40, H - 2 * pad);
+  const count = Math.max(1, n);
+  const maxW = count === 1 ? 0.6 * Math.min(aw, (ah - OV_LABEL) / a) : Infinity;
+  let cols = 1, w = 0;
+  for (let c = 1; c <= count; c++) {
+    const rows = Math.ceil(count / c);
+    const cw = Math.min(maxW, (aw - gap * (c - 1)) / c, ((ah - gap * (rows - 1)) / rows - OV_LABEL) / a);
+    if (cw > w) { w = cw; cols = c; }
+  }
+  const minW = clampN(W * 0.14, 110, 220);
+  if (w < minW) {
+    cols = Math.max(1, Math.min(count, Math.floor((aw + gap) / (minW + gap))));
+    w = Math.min(maxW, (aw - gap * (cols - 1)) / cols);
+  }
+  w = Math.max(1, Math.floor(w));
+  return { cols, w, h: Math.max(1, Math.round(w * a)), gap, pad };
 }
 
 /* ------------------------------------------------------------------ the laser's trail */
@@ -233,6 +287,16 @@ export interface PresentKitHost {
   outside?(target: EventTarget | null): boolean;
   /** the presenter view (notes, the next slide, a timer, every slide): the bar's button and S switch it */
   presenterView?: { on(): boolean; toggle(): void };
+  /** the slides for the overview (every slide on a grid); absent: none */
+  overview?: {
+    count(): number;
+    /** the slides' shape: height / width */
+    aspect(): number;
+    /** a copy of slide `i` as it ends (all its steps), `w` × `h` px — slotted into the overview, so the page's styles draw it */
+    thumb(i: number, w: number, h: number): HTMLElement | null;
+    /** show slide `i`, from its first step */
+    go(i: number): void;
+  };
 }
 
 // (nothing on the slide is selected either: on an iPad a long press or a Pencil drag brought the
@@ -260,7 +324,7 @@ const UI_CSS = `:host { all: initial; }
   button[hidden], .colors[hidden] { display: none; }
   .bar.inkonly { opacity: 1; pointer-events: auto; padding: 6px; border-radius: 28px; }
   .bar.inkonly button { min-width: 44px; height: 44px; border-radius: 22px; }
-  .bar.inkonly :is([data-k="prev"], .pos, [data-k="next"], .sep, [data-k="zoom"], [data-k="link"]) { display: none; }
+  .bar.inkonly :is([data-k="prev"], .pos, [data-k="next"], [data-k="grid"], .sep, [data-k="zoom"], [data-k="link"]) { display: none; }
   .sep { width: 1px; height: 18px; margin: 0 4px; background: rgba(255, 255, 255, 0.22); }
   .colors { display: inline-flex; align-items: center; gap: 4px; padding: 0 4px; }
   button.sw { min-width: 0; width: 20px; height: 20px; padding: 0; border-radius: 50%; background: var(--c); box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.45); }
@@ -275,6 +339,26 @@ const UI_CSS = `:host { all: initial; }
   .pos { padding: 0 8px; font-variant-numeric: tabular-nums; color: rgba(255, 255, 255, 0.86); white-space: nowrap; }
   .dot { width: 12px; height: 12px; border-radius: 50%; background: radial-gradient(circle, #fff 0 18%, ${LASER_COLOR} 24% 55%, rgba(224,40,75,0.35) 62%, transparent 72%); }`;
 
+/** the overview (every slide on a grid): a shadow tree of its own; the slides' copies are the page's, slotted in */
+const OV_CSS = `:host { all: initial; }
+  * { box-sizing: border-box; }
+  .ov { position: fixed; inset: 0; overflow-x: hidden; overflow-y: auto; -webkit-overflow-scrolling: touch; touch-action: pan-y; overscroll-behavior: contain;
+    background: ${OV_BG}; pointer-events: auto; cursor: default; color: #e8eaed; font: 13px/1.2 var(--ui-font, "OL Inter", Inter, Roboto, sans-serif);
+    -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.28) transparent; }
+  .wrap { min-height: 100%; display: flex; align-items: center; justify-content: center; }
+  .grid { display: grid; justify-content: center; align-content: start; }
+  .cell { all: unset; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; gap: 6px; cursor: pointer !important; border-radius: 6px; -webkit-tap-highlight-color: transparent; }
+  .th { position: relative; display: flex; align-items: center; justify-content: center; background: #000; border-radius: 4px; overflow: hidden;
+    box-shadow: 0 1px 8px rgba(0, 0, 0, 0.55); outline: 2px solid transparent; outline-offset: 3px; transition: outline-color 0.12s; }
+  .cell:hover .th { outline-color: rgba(138, 180, 248, 0.6); }
+  .cell.cur .th { outline: 3px solid #8ab4f8; }
+  .cell.sel .th { outline: 3px solid #fff; }
+  .n { height: 18px; line-height: 18px; font-variant-numeric: tabular-nums; color: rgba(255, 255, 255, 0.72); }
+  .cell.cur .n { color: #8ab4f8; font-weight: 600; }
+  .grid.moving .th { outline-color: transparent !important; transition: none; }
+  .grid.moving .n { visibility: hidden; }
+  @media (pointer: coarse) { .n { font-size: 14px; } }`;
+
 const ICON = {
   prev: '<svg width="16" height="16" viewBox="0 0 16 16"><path d="M10.5 3 5.5 8l5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   next: '<svg width="16" height="16" viewBox="0 0 16 16"><path d="M5.5 3l5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
@@ -287,17 +371,22 @@ const ICON = {
   fit: '<svg width="16" height="16" viewBox="0 0 16 16"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   link: '<svg width="16" height="16" viewBox="0 0 16 16"><path d="M6.8 9.2a2.6 2.6 0 0 0 3.7 0l2.3-2.3a2.6 2.6 0 0 0-3.7-3.7l-.9.9M9.2 6.8a2.6 2.6 0 0 0-3.7 0L3.2 9.1a2.6 2.6 0 0 0 3.7 3.7l.9-.9" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   presenter: '<svg width="16" height="16" viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="8.5" height="6.5" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M12.2 3h2.3M12.2 5.8h2.3M12.2 8.6h2.3M1.8 12h5.4M9.3 12h4.9M1.8 14.2h3.6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
+  grid: '<svg width="16" height="16" viewBox="0 0 16 16"><path d="M2.5 3.2h4.2v3.3H2.5zM9.3 3.2h4.2v3.3H9.3zM2.5 9.5h4.2v3.3H2.5zM9.3 9.5h4.2v3.3H9.3z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>',
 };
 
 type Gesture =
   /** `lock`: a zoom only once the fingers' spread has changed enough, else a pan (deliverable/gestures.ts, as on the canvas) */
-  | { kind: 'pinch'; ids: [number, number]; d0: number; c0: { x: number; y: number }; v0: ZoomView; lock: PinchLock }
+  /** `pull`: it began at the whole slide, and zooming out it shrinks the slide towards the overview */
+  | { kind: 'pinch'; ids: [number, number]; d0: number; c0: { x: number; y: number }; v0: ZoomView; lock: PinchLock; pull: boolean }
   /** `v0`: the view it began from (put back should the touch turn out to be the hand's) */
   | { kind: 'pan'; id: number; x: number; y: number; moved: boolean; v0: ZoomView }
   | { kind: 'laser'; id: number }
   /** a drawing tool's stroke (or the eraser's sweep), with the tool it draws with; `moved`: past a tap */
   | { kind: 'draw'; id: number; tool: InkTool; x0: number; y0: number; moved: boolean; erased: boolean; stroke: InkStroke | null; f: { k: number; ox: number; oy: number } | null; watch: StrokeWatch | null }
   | { kind: 'swipe'; id: number; x0: number; y0: number; t0: number; moved: boolean };
+
+/** the overview shown: its element and parts, its grid, the slide chosen with the keys */
+interface OverviewState { el: HTMLElement; sr: ShadowRoot; scroller: HTMLElement; wrap: HTMLElement; grid: HTMLElement; g: OverviewGrid; sel: number }
 
 /**
  * The laser, the drawing tools, the zoom and the bar on a presenting surface. The presenter keeps its
@@ -379,8 +468,22 @@ export class PresentKit {
   private suppressClick = false;
   private lastTap: { t: number; x: number; y: number } | null = null;
   private safari: ZoomView | null = null;
+  /** Safari's pinch began at the whole slide: zooming out it pulls towards the overview */
+  private safariPull = false;
   private idle: ReturnType<typeof setTimeout> | undefined;
   private offs: (() => void)[] = [];
+  private gridBtn: HTMLElement;
+  /** the overview while it is shown (every slide on a grid) */
+  private ov: OverviewState | null = null;
+  /** a pinch on the overview: how far it spread (`ids`: two fingers' pointers, `d0` their distance then; else a trackpad's, `f` so far) */
+  private ovPinch: { ids?: [number, number]; d0: number; f: number } | null = null;
+  private ovResize: ReturnType<typeof setTimeout> | undefined;
+  /** a pull let go springing back */
+  private springRaf = 0;
+  /** the last Ctrl + wheel step, whether the pinch it belongs to may pull below the whole slide, and when it is over */
+  private wheelAt = -1e9;
+  private wheelPull = false;
+  private wheelT: ReturnType<typeof setTimeout> | undefined;
 
   constructor(host: PresentKitHost) {
     this.host = host;
@@ -401,6 +504,7 @@ export class PresentKit {
         <button data-k="prev" title="Previous (←)" aria-label="Previous">${ICON.prev}</button>
         <span class="pos"></span>
         <button data-k="next" title="Next (→)" aria-label="Next">${ICON.next}</button>
+        <button data-k="grid" title="All slides — or pinch out past the whole slide (G)" aria-label="All slides" hidden>${ICON.grid}</button>
         <span class="sep"></span>
         <button data-k="pen" title="Pen (Ctrl+P)" aria-label="Pen" aria-pressed="false">${ICON.pen}</button>
         <button data-k="marker" title="Highlighter (Ctrl+I)" aria-label="Highlighter" aria-pressed="false">${ICON.marker}</button>
@@ -432,6 +536,7 @@ export class PresentKit {
     this.pvBtn = sr.querySelector('[data-k="pv"]') as HTMLElement;
     this.pvBtn.hidden = !host.presenterView;
     this.zoomBtn = sr.querySelector('[data-k="zoom"]') as HTMLElement;
+    this.gridBtn = sr.querySelector('[data-k="grid"]') as HTMLElement;
     this.clearBtn = sr.querySelector('[data-k="clear"]') as HTMLElement;
     this.colorsEl = sr.querySelector('.colors') as HTMLElement;
     for (const b of Array.from(sr.querySelectorAll<HTMLElement>('button'))) {
@@ -456,16 +561,42 @@ export class PresentKit {
     on('selectstart', e => { if (!(e.target as Element | null)?.closest?.('input, textarea, select')) e.preventDefault(); });
     on('wheel', e => this.wheel(e), { capture: true, passive: false });
     // Safari's trackpad pinch
-    on('gesturestart' as keyof WindowEventMap, (e: Event) => { if (this.fromUi(e) || this.outside(e)) return; e.preventDefault(); this.safari = { ...this.view }; });
+    on('gesturestart' as keyof WindowEventMap, (e: Event) => {
+      // (on the overview: a pinch out may open the slide under it)
+      if (this.ov) { e.preventDefault(); if (!this.ovPinch?.ids) this.ovPinch = { d0: 1, f: 1 }; return; }
+      if (this.fromUi(e) || this.outside(e)) return;
+      e.preventDefault();
+      this.stopSpring();
+      this.safari = { ...this.view };
+      this.safariPull = this.pullable();
+    });
     on('gesturechange' as keyof WindowEventMap, (e: Event) => {
+      const g = e as Event & { scale: number; clientX: number; clientY: number };
+      const cx = g.clientX ?? this.win.innerWidth / 2, cy = g.clientY ?? this.win.innerHeight / 2;
+      if (this.ov) {
+        e.preventDefault();
+        if (this.ovPinch && !this.ovPinch.ids && (g.scale || 1) > OVERVIEW_OPEN_AT) this.closeOverview(this.cellAt(cx, cy));
+        return;
+      }
       if (!this.safari) return;
       e.preventDefault();
-      const g = e as Event & { scale: number; clientX: number; clientY: number };
-      const s0 = this.safari;
-      this.setView(zoomAt(s0, g.scale || 1, g.clientX ?? this.win.innerWidth / 2, g.clientY ?? this.win.innerHeight / 2, this.host.base(), this.win.innerWidth, this.win.innerHeight));
+      // (a touch screen: the fingers' own pointers zoom, with the pinch lock — move())
+      if (this.gesture?.kind === 'pinch') return;
+      const scale = g.scale || 1;
+      if (this.safariPull && scale < 1) { if (this.pullTo(scale)) this.safari = null; return; }
+      if (this.view.s < 1) this.setView({ ...IDENTITY });
+      this.setView(zoomAt(this.safari, scale, cx, cy, this.host.base(), this.win.innerWidth, this.win.innerHeight));
     });
-    on('gestureend' as keyof WindowEventMap, (e: Event) => { if (this.safari) { e.preventDefault(); this.safari = null; this.suppressClick = true; } });
-    on('resize', () => { this.resetZoom(); this.scheduleInk(); });
+    on('gestureend' as keyof WindowEventMap, (e: Event) => {
+      if (this.ov) { e.preventDefault(); if (!this.ovPinch?.ids) this.ovPinch = null; return; }
+      if (this.safari) { e.preventDefault(); this.safari = null; this.suppressClick = true; this.springBack(); }
+    });
+    on('resize', () => {
+      this.resetZoom();
+      this.scheduleInk();
+      // (the overview laid out again for the new window, once it has its size)
+      if (this.ov) { clearTimeout(this.ovResize); this.ovResize = setTimeout(() => this.layoutOverview(), 120); }
+    });
     if (this.win === this.win.top) this.offs.push(keepAwake(this.win));
     this.setFingersDraw(presentFingersDraw(), false);
     this.setLinked(presentLinked(), false);
@@ -497,10 +628,12 @@ export class PresentKit {
   /**
    * The presenter's keys first: L (laser), Ctrl+P / Ctrl+I / Ctrl+E (pen, highlighter, eraser —
    * PowerPoint's), Ctrl+A (the tool put away), E (the slide's drawings cleared), 0, +, -, Escape
-   * (back to the whole slide, else the tool put away). True: taken.
+   * (back to the whole slide, else the tool put away), G or - at the whole slide (every slide on a
+   * grid; there the arrows, Enter, Escape: overviewKey). True: taken.
    */
   key(e: KeyboardEvent, typing = false): boolean {
     if (e.altKey) return false;
+    if (this.ov && !e.ctrlKey && !e.metaKey) return this.overviewKey(e, typing);
     const k = e.key;
     if (e.ctrlKey || e.metaKey) {
       if (e.shiftKey) return false;
@@ -514,14 +647,16 @@ export class PresentKit {
     if ((k === 'e' || k === 'E') && !typing) { this.clearInk(); return true; }
     if (k === '0' && !typing && this.zoomed) { this.resetZoom(); return true; }
     if (k === '+' || k === '=') { this.zoomBy(1.25); return true; }
-    if (k === '-' || k === '_') { if (this.zoomed) this.zoomBy(0.8); return true; }
+    // (at the whole slide, zooming out shows every slide: PowerPoint's "−")
+    if (k === '-' || k === '_') { if (this.zoomed) this.zoomBy(0.8); else this.openOverview(); return true; }
+    if ((k === 'g' || k === 'G') && !typing && this.canOverview()) { this.openOverview(); return true; }
     if (k === 'Escape' && this.zoomed) { this.resetZoom(); return true; }
     if (k === 'Escape' && this.tool) { this.setTool(null); return true; }
     return false;
   }
 
   /** another slide shown: the whole of it, with its drawings */
-  slideChanged(): void { this.cancelDraw(); this.mine.clear(); this.resetZoom(); this.refresh(); this.renderInk(); this.render(); this.moved(); }
+  slideChanged(): void { this.cancelDraw(); this.mine.clear(); this.resetZoom(); this.refresh(); this.renderInk(); this.render(); this.moved(); this.markOverview(); }
 
   /**
    * The presenter showed another slide or step: the other screens are told (linked, they go along). A
@@ -598,7 +733,7 @@ export class PresentKit {
     } finally { this.following = null; }
   }
 
-  refresh(): void { this.posEl.textContent = this.host.position(); this.markPresenter(); }
+  refresh(): void { this.posEl.textContent = this.host.position(); this.gridBtn.hidden = !this.canOverview(); this.markPresenter(); }
 
   private markPresenter(): void {
     const on = !!this.host.presenterView?.on();
@@ -676,7 +811,10 @@ export class PresentKit {
     this.publish(true);
   }
 
-  resetZoom(): void { if (this.zoomed || this.view.x || this.view.y) this.setView({ ...IDENTITY }); }
+  resetZoom(): void { this.stopSpring(); if (this.zoomed || this.view.x || this.view.y) this.setView({ ...IDENTITY }); }
+
+  /** back to the whole slide: from the overview (to the slide shown), else out of the zoom */
+  unzoom(): void { if (this.ov) this.closeOverview(); else this.resetZoom(); }
 
   zoomBy(f: number, cx = this.win.innerWidth / 2, cy = this.win.innerHeight / 2): void {
     this.setView(zoomAt(this.view, f, cx, cy, this.host.base(), this.win.innerWidth, this.win.innerHeight));
@@ -690,9 +828,15 @@ export class PresentKit {
     cancelAnimationFrame(this.raf);
     cancelAnimationFrame(this.inkRaf);
     clearTimeout(this.idle);
+    this.stopSpring();
+    clearTimeout(this.wheelT);
+    clearTimeout(this.ovResize);
+    this.ov?.el.remove();
+    this.ov = null;
+    for (const el of Array.from(this.doc.querySelectorAll('ol-present-overview[data-ol-runtime]'))) el.remove();
     this.ui.remove();
     this.style.remove();
-    this.host.root.classList.remove('olpk-surface', 'olpk-laser-on', 'olpk-drawing', 'olpk-zoomed', 'olpk-panning');
+    this.host.root.classList.remove('olpk-surface', 'olpk-laser-on', 'olpk-drawing', 'olpk-zoomed', 'olpk-panning', 'olpk-overview');
   }
 
   /* -------------------------------------------------------------- the bar */
@@ -712,11 +856,14 @@ export class PresentKit {
       this.markColor();
     } else if (k === 'clear') this.clearInk();
     else if (k === 'zoom') this.resetZoom();
+    else if (k === 'grid') this.openOverview();
     else if (k === 'exit') this.host.exit();
   }
 
   /** the bar shown, fading out `ms` after (the last time it was asked for: the mouse, a tap, a button) */
   showBar(ms = this.barMs): void {
+    // (not over the overview)
+    if (this.ov) return;
     this.barMs = ms;
     this.refresh();
     this.bar.classList.add('show');
@@ -740,6 +887,7 @@ export class PresentKit {
   private inkOnly = false;
   setInkOnly(on: boolean): void {
     this.inkOnly = on;
+    if (on && this.ov) this.closeOverview();
     this.bar.classList.toggle('inkonly', on);
     if (on) this.showBar(); else this.hideBar();
   }
@@ -751,7 +899,7 @@ export class PresentKit {
     for (const b of Array.from(this.colorsEl.querySelectorAll<HTMLElement>('button'))) b.classList.toggle('on', b.dataset.c === cur);
   }
 
-  private fromUi(e: Event): boolean { return e.composedPath().includes(this.ui); }
+  private fromUi(e: Event): boolean { const p = e.composedPath(); return p.includes(this.ui) || (!!this.ov && p.includes(this.ov.el)); }
 
   /** on the presenter's own panels (the presenter view's): not the slide's */
   private outside(e: Event): boolean { return !!this.host.outside?.(e.target); }
@@ -769,7 +917,8 @@ export class PresentKit {
     this.view = v;
     this.host.apply(v);
     const z = this.zoomed;
-    if (z !== was) this.host.onZoom?.(z);
+    // (the overview counts as zoomed for the presenter: it says so as it opens and closes)
+    if (z !== was && !this.ov) this.host.onZoom?.(z);
     this.host.root.classList.toggle('olpk-zoomed', z);
     this.zoomBtn.hidden = !z;
     const zt = this.zoomBtn.querySelector('.z');
@@ -778,12 +927,30 @@ export class PresentKit {
   }
 
   private wheel(e: WheelEvent): void {
+    if (this.ov) { this.overviewWheel(e); return; }
     if (this.fromUi(e) || this.outside(e)) return;
     const W = this.win.innerWidth, H = this.win.innerHeight;
     if (e.ctrlKey) {
       e.preventDefault(); e.stopPropagation();
-      this.setView(zoomAt(this.view, wheelZoomFactor(e.deltaY, e.deltaMode, H), e.clientX, e.clientY, this.host.base(), W, H));
       this.suppressClick = true;
+      // a new pinch (no step for a while) may pull below the whole slide only if it begins there:
+      // zooming out from zoomed in stops at the whole slide
+      const now = performance.now();
+      if (now - this.wheelAt > WHEEL_END_MS) { this.stopSpring(); this.wheelPull = this.pullable(); }
+      this.wheelAt = now;
+      let f = wheelZoomFactor(e.deltaY, e.deltaMode, H);
+      if (this.wheelPull && !this.zoomed) {
+        const s = this.view.s * f;
+        if (s < 1) {
+          // (its steps stop: let go before the overview, the slide springs back)
+          if (!this.pullTo(s)) { clearTimeout(this.wheelT); this.wheelT = setTimeout(() => this.springBack(), WHEEL_END_MS); }
+          return;
+        }
+        // back past the whole slide: the rest zooms in
+        f = s;
+        if (this.view.s < 1) this.setView({ ...IDENTITY });
+      }
+      this.setView(zoomAt(this.view, f, e.clientX, e.clientY, this.host.base(), W, H));
     } else if (this.zoomed) {
       e.preventDefault(); e.stopPropagation();
       const k = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? H : 1;
@@ -834,6 +1001,7 @@ export class PresentKit {
 
   private down(e: PointerEvent): void {
     this.lastType = e.pointerType;
+    if (this.ov) { this.overviewDown(e); return; }
     if (this.fromUi(e) || this.outside(e)) return;
     // the hand on the glass while the Pencil writes: nothing
     if (e.pointerType === 'touch' && this.isPalm()) { this.palms.add(e.pointerId); e.preventDefault(); return; }
@@ -845,7 +1013,10 @@ export class PresentKit {
       const [a, b] = ids.map(id => this.pointers.get(id)!);
       this.mine.end(performance.now());
       this.cancelDraw();
-      this.gesture = { kind: 'pinch', ids, d0: Math.hypot(a.x - b.x, a.y - b.y), c0: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, v0: { ...this.view }, lock: pinchLock() };
+      // (a pull springing back: from the whole slide)
+      this.stopSpring();
+      if (this.view.s < 1) this.setView({ ...IDENTITY });
+      this.gesture = { kind: 'pinch', ids, d0: Math.hypot(a.x - b.x, a.y - b.y), c0: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, v0: { ...this.view }, lock: pinchLock(), pull: this.pullable() };
       this.suppressClick = true;
       e.preventDefault();
       return;
@@ -889,6 +1060,7 @@ export class PresentKit {
   private move(e: PointerEvent): void {
     const p = this.pointers.get(e.pointerId);
     if (p) { p.x = e.clientX; p.y = e.clientY; }
+    if (this.ov) { this.overviewMove(e); return; }
     const g = this.gesture;
     const W = this.win.innerWidth, H = this.win.innerHeight;
     // the mouse brings the bar only near the bottom edge: pointing at the slide does not
@@ -899,6 +1071,9 @@ export class PresentKit {
       e.preventDefault();
       const c = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
       const f = pinchFactor(g.lock, g.d0, Math.hypot(a.x - b.x, a.y - b.y), Math.hypot(c.x - g.c0.x, c.y - g.c0.y));
+      // begun at the whole slide, closing: the slide shrinks with the fingers, then the overview
+      if (g.pull && f < 1) { if (this.pullTo(f)) { this.gesture = null; this.suppressClick = true; } return; }
+      if (this.view.s < 1) this.setView({ ...IDENTITY });
       this.setView(pinchView(g.v0, 1, f, g.c0, c, this.host.base(), W, H));
       return;
     }
@@ -968,10 +1143,12 @@ export class PresentKit {
     if (this.palms.delete(e.pointerId)) { this.suppressClick = true; return; }
     if (e.pointerId === this.penOn) { this.penOn = null; this.penOffAt = performance.now(); }
     this.pointers.delete(e.pointerId);
+    if (this.ov) { if (this.ovPinch?.ids?.includes(e.pointerId)) this.ovPinch = null; return; }
     const g = this.gesture;
     if (!g) return;
     if (g.kind === 'pinch') {
-      if (this.pointers.size < 2) { this.gesture = null; this.suppressClick = true; }
+      // (let go before the overview: the slide springs back)
+      if (this.pointers.size < 2) { this.gesture = null; this.suppressClick = true; this.springBack(); }
       return;
     }
     if ((g.kind === 'laser' || g.kind === 'pan' || g.kind === 'swipe' || g.kind === 'draw') && g.id !== e.pointerId) return;
@@ -1025,6 +1202,259 @@ export class PresentKit {
   private dblclick(e: MouseEvent): void {
     if (this.fromUi(e) || this.outside(e)) return;
     if (this.zoomed) { e.preventDefault(); e.stopPropagation(); this.resetZoom(); }
+  }
+
+  /* -------------------------------------------------------------- every slide on a grid */
+
+  get overviewOn(): boolean { return !!this.ov; }
+
+  /** the overview can be had: slides to show (more than one), and not on a tablet holding only the drawing tools */
+  private canOverview(): boolean {
+    try { return !!this.host.overview && this.host.overview.count() > 1 && !this.inkOnly; } catch { return false; }
+  }
+
+  /** a pinch beginning now may pull below the whole slide, towards the overview */
+  private pullable(): boolean { return !this.zoomed && this.canOverview(); }
+
+  /** where the slide is on screen now: its fit, the zoom or the pull */
+  private slideRect(): Rect | null {
+    const b = this.host.base(), v = this.view;
+    return b && b.w > 0 ? { x: v.s * b.x + v.x, y: v.s * b.y + v.y, w: v.s * b.w, h: v.s * b.h } : null;
+  }
+
+  /** pulled below the whole slide to `s` (a pinch that began there): past OVERVIEW_AT the overview opens — true then */
+  private pullTo(s: number): boolean {
+    this.stopSpring();
+    if (s < OVERVIEW_AT) { this.openOverview(); return !!this.ov; }
+    this.setView(s < 1 ? pullView(s, this.host.base()) : { ...IDENTITY });
+    return false;
+  }
+
+  private stopSpring(): void { cancelAnimationFrame(this.springRaf); this.springRaf = 0; clearTimeout(this.wheelT); }
+
+  /** a pull let go before the overview: the slide grows back to the whole of it */
+  private springBack(): void {
+    const from = this.view.s;
+    if (this.ov || from >= 1) return;
+    this.stopSpring();
+    const t0 = performance.now();
+    const step = () => {
+      this.springRaf = 0;
+      if (this.ov || this.view.s >= 1) return;
+      const t = Math.min(1, (performance.now() - t0) / 180);
+      if (t >= 1) { this.setView({ ...IDENTITY }); return; }
+      this.setView(pullView(from + (1 - from) * (1 - (1 - t) ** 3), this.host.base()));
+      this.springRaf = requestAnimationFrame(step);
+    };
+    this.springRaf = requestAnimationFrame(step);
+  }
+
+  /** animations wanted, and to be had */
+  private motion(): boolean {
+    if (typeof this.ui.animate !== 'function') return false;
+    try { return !this.win.matchMedia?.('(prefers-reduced-motion: reduce)').matches; } catch { return true; }
+  }
+
+  /** every slide on a grid, the slide shown marked (and chosen for the keys): its copy shrinks from where the slide is into its place */
+  openOverview(): void {
+    const src = this.host.overview;
+    if (this.ov || !src || !this.canOverview()) return;
+    this.stopSpring();
+    const from = this.slideRect();
+    if (this.gesture?.kind === 'laser') { this.mine.end(performance.now()); this.head = null; }
+    this.cancelDraw();
+    this.host.root.classList.remove('olpk-panning');
+    this.gesture = null;
+    this.ovPinch = null;
+    this.safari = null;
+    this.suppressClick = true;
+    this.hideBar();
+    const el = this.doc.createElement('ol-present-overview');
+    el.setAttribute('data-ol-runtime', '');
+    el.style.cssText = 'all:initial;position:fixed;left:0;top:0;width:0;height:0;z-index:2147483647;display:block;';
+    const sr = el.attachShadow({ mode: 'open' });
+    sr.innerHTML = `<style>${OV_CSS}</style><div class="ov" role="dialog" aria-label="All slides"><div class="wrap"><div class="grid" role="listbox" aria-label="Slides"></div></div></div>`;
+    // its clicks, wheels and right-clicks are its own, never the presenter's (they go on, or back)
+    for (const t of ['click', 'dblclick', 'contextmenu'] as const) el.addEventListener(t, ev => { ev.stopPropagation(); if (t === 'contextmenu') ev.preventDefault(); });
+    el.addEventListener('wheel', ev => ev.stopPropagation(), { passive: true });
+    sr.addEventListener('click', ev => {
+      const c = (ev.target as Element | null)?.closest?.('.cell') as HTMLElement | null;
+      if (c && this.ov?.el === el) this.closeOverview(Number(c.dataset.i));
+    });
+    // (in a deck's page, in its body: the copies take the styles the slides there have)
+    (this.host.root === this.doc.documentElement ? this.doc.body ?? this.host.root : this.host.root).appendChild(el);
+    const cur = this.host.at?.().slide ?? 0;
+    const o: OverviewState = { el, sr, scroller: sr.querySelector('.ov') as HTMLElement, wrap: sr.querySelector('.wrap') as HTMLElement, grid: sr.querySelector('.grid') as HTMLElement, g: overviewGrid(1, 1, 1, 1), sel: cur };
+    this.ov = o;
+    // (the bar and the drawings belong to the slide)
+    this.ui.style.visibility = 'hidden';
+    this.host.onZoom?.(true);
+    this.layoutOverview();
+    // the slide shown left as it was until the copy covers it
+    const done = () => { if (this.ov === o) this.setView({ ...IDENTITY }); };
+    const tf = from && this.motion() ? cellTransform(o, cur, from) : null;
+    if (!tf) { done(); return; }
+    o.grid.style.transformOrigin = tf.origin;
+    o.grid.animate([{ transform: tf.transform }, { transform: 'none' }], { duration: OV_MS, easing: 'cubic-bezier(.2, .7, .2, 1)' });
+    fadeCells(o, cur, true);
+    // (the ground dark as soon as the copy covers the slide: no slide seen twice)
+    const a = o.scroller.animate([{ backgroundColor: OV_CLEAR }, { backgroundColor: OV_BG, offset: 0.25 }, { backgroundColor: OV_BG }], { duration: OV_MS, easing: 'linear' });
+    a.onfinish = a.oncancel = done;
+  }
+
+  /** back from the overview: to slide `i` (else the one shown), its copy growing into the slide as the grid fades */
+  closeOverview(i?: number): void {
+    const o = this.ov, src = this.host.overview;
+    if (!o) return;
+    this.ov = null;
+    this.ovPinch = null;
+    clearTimeout(this.ovResize);
+    o.el.style.pointerEvents = 'none';
+    const cur = this.host.at?.().slide ?? -1;
+    const to = i !== undefined && i >= 0 && i < (src?.count() ?? 0) ? i : cur;
+    if (src && to >= 0 && to !== cur) src.go(to);
+    this.resetZoom();
+    this.host.onZoom?.(this.zoomed);
+    let over = false;
+    const finish = () => {
+      if (over) return;
+      over = true;
+      o.el.remove();
+      if (!this.ov) this.ui.style.visibility = '';
+    };
+    const r = this.slideRect();
+    const tf = r && this.motion() ? cellTransform(o, to, r) : null;
+    if (!tf) { finish(); return; }
+    o.grid.style.transformOrigin = tf.origin;
+    o.grid.animate([{ transform: 'none' }, { transform: tf.transform }], { duration: OV_MS, easing: 'cubic-bezier(.4, 0, .2, 1)', fill: 'forwards' });
+    fadeCells(o, to, false);
+    // (the ground dark until the copy lies on the slide, then both go together)
+    const a = o.scroller.animate([{ backgroundColor: OV_BG }, { backgroundColor: OV_BG, offset: 0.8 }, { backgroundColor: OV_CLEAR }], { duration: OV_MS, easing: 'linear', fill: 'forwards' });
+    a.onfinish = a.oncancel = finish;
+    setTimeout(finish, OV_MS + 400);
+  }
+
+  toggleOverview(): void { if (this.ov) this.closeOverview(); else this.openOverview(); }
+
+  /** the overview's grid for the window as it is now, with a copy of every slide in it */
+  private layoutOverview(): void {
+    const o = this.ov, src = this.host.overview;
+    if (!o || !src) return;
+    const n = src.count();
+    const g = overviewGrid(n, src.aspect(), this.win.innerWidth, this.win.innerHeight);
+    o.g = g;
+    o.wrap.style.padding = `${g.pad}px`;
+    o.grid.style.gridTemplateColumns = `repeat(${g.cols}, ${g.w}px)`;
+    o.grid.style.gap = `${g.gap}px`;
+    for (const c of Array.from(o.el.children)) c.remove();
+    o.grid.innerHTML = Array.from({ length: n }, (_, i) => `<button class="cell" type="button" role="option" tabindex="-1" data-i="${i}" aria-label="Slide ${i + 1}"><span class="th" style="width:${g.w}px;height:${g.h}px"><slot name="t${i}"></slot></span><span class="n">${i + 1}</span></button>`).join('');
+    for (let i = 0; i < n; i++) {
+      let t: HTMLElement | null = null;
+      try { t = src.thumb(i, g.w, g.h); } catch { /* that slide shows empty */ }
+      if (!t) continue;
+      t.setAttribute('slot', `t${i}`);
+      o.el.appendChild(t);
+    }
+    o.sel = Math.max(0, Math.min(n - 1, o.sel));
+    this.markOverview();
+    this.cellInView(o.sel, true);
+  }
+
+  /** the slide shown (blue) and the one the keys chose (white) marked */
+  private markOverview(): void {
+    const o = this.ov;
+    if (!o) return;
+    const cur = this.host.at?.().slide ?? -1;
+    for (const c of Array.from(o.grid.querySelectorAll<HTMLElement>('.cell'))) {
+      const i = Number(c.dataset.i);
+      c.classList.toggle('cur', i === cur);
+      c.classList.toggle('sel', i === o.sel && i !== cur);
+      c.setAttribute('aria-selected', String(i === o.sel));
+      if (i === cur) c.setAttribute('aria-current', 'true'); else c.removeAttribute('aria-current');
+    }
+  }
+
+  private selectCell(i: number): void {
+    const o = this.ov;
+    if (!o) return;
+    o.sel = i;
+    this.markOverview();
+    this.cellInView(i, false);
+  }
+
+  /** slide `i`'s cell scrolled into view (`centre`: to the middle) */
+  private cellInView(i: number, centre: boolean): void {
+    const o = this.ov, c = o?.grid.querySelector<HTMLElement>(`.cell[data-i="${i}"]`);
+    if (!o || !c) return;
+    const r = c.getBoundingClientRect(), s = o.scroller.getBoundingClientRect(), m = o.g.pad / 2;
+    if (centre) o.scroller.scrollTop += r.top - s.top - (s.height - r.height) / 2;
+    else if (r.top < s.top + m) o.scroller.scrollTop -= s.top + m - r.top;
+    else if (r.bottom > s.bottom - m) o.scroller.scrollTop += r.bottom - (s.bottom - m);
+  }
+
+  /** the slide whose cell is at (x, y) on screen */
+  private cellAt(x: number, y: number): number | undefined {
+    const hit = this.ov?.sr.elementFromPoint?.(x, y) as Element | null | undefined;
+    const c = hit?.closest?.('.cell') as HTMLElement | null | undefined;
+    return c ? Number(c.dataset.i) : undefined;
+  }
+
+  /** the keys on the overview: the arrows, Home / End, Page Up / Down choose; Enter, Space, + open it; Escape, G go back to the slide shown */
+  private overviewKey(e: KeyboardEvent, typing: boolean): boolean {
+    const o = this.ov!, n = this.host.overview?.count() ?? 0, cols = o.g.cols, k = e.key;
+    // (a number typed and Enter: the presenter goes to that slide)
+    if (typing && k === 'Enter') { this.closeOverview(); return false; }
+    const rows = Math.max(1, Math.floor(o.scroller.clientHeight / (o.g.h + OV_LABEL + o.g.gap)));
+    const to = (i: number) => { this.selectCell(Math.max(0, Math.min(n - 1, i))); return true; };
+    const row = (i: number) => Math.floor(i / cols);
+    switch (k) {
+      case 'ArrowRight': return to(o.sel + 1);
+      case 'ArrowLeft': return to(o.sel - 1);
+      // (down to a shorter last row: its last slide)
+      case 'ArrowDown': return to(o.sel + cols < n ? o.sel + cols : row(o.sel) < row(n - 1) ? n - 1 : o.sel);
+      case 'ArrowUp': return to(o.sel - cols >= 0 ? o.sel - cols : o.sel);
+      case 'Home': return to(0);
+      case 'End': return to(n - 1);
+      case 'PageDown': return to(o.sel + cols * rows);
+      case 'PageUp': return to(o.sel - cols * rows);
+      case 'Enter': case ' ': case '+': case '=': this.closeOverview(o.sel); return true;
+      case 'Escape': case 'g': case 'G': this.closeOverview(); return true;
+      case '-': case '_': return true;
+      default: return false;
+    }
+  }
+
+  /** a wheel on the overview scrolls it; a pinch out there (Ctrl + wheel) opens the slide under it */
+  private overviewWheel(e: WheelEvent): void {
+    // (not the presenter's: a wheel there goes on)
+    e.stopPropagation();
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    const now = performance.now(), fresh = now - this.wheelAt > WHEEL_END_MS;
+    this.wheelAt = now;
+    // (what is left of the pinch that opened it is no new one)
+    if (fresh) this.ovPinch = { d0: 1, f: 1 };
+    const p = this.ovPinch;
+    if (!p || p.ids) return;
+    p.f *= wheelZoomFactor(e.deltaY, e.deltaMode, this.win.innerHeight);
+    if (p.f > OVERVIEW_OPEN_AT) this.closeOverview(this.cellAt(e.clientX, e.clientY));
+  }
+
+  /** two fingers on the overview: spreading, they open the slide between them (one finger scrolls, a tap opens: the page's own) */
+  private overviewDown(e: PointerEvent): void {
+    if (e.pointerType !== 'touch') return;
+    this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, type: e.pointerType });
+    if (this.pointers.size !== 2) return;
+    const ids = [...this.pointers.keys()] as [number, number];
+    const [a, b] = ids.map(id => this.pointers.get(id)!);
+    this.ovPinch = { ids, d0: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)), f: 1 };
+  }
+
+  private overviewMove(e: PointerEvent): void {
+    const p = this.ovPinch;
+    if (!p?.ids?.includes(e.pointerId)) return;
+    const a = this.pointers.get(p.ids[0]), b = this.pointers.get(p.ids[1]);
+    if (a && b && Math.hypot(a.x - b.x, a.y - b.y) / p.d0 > OVERVIEW_OPEN_AT) this.closeOverview(this.cellAt((a.x + b.x) / 2, (a.y + b.y) / 2));
   }
 
   /* -------------------------------------------------------------- drawing on the slide */
@@ -1205,6 +1635,32 @@ export class PresentKit {
     const peers = this.drawPeerLasers(now);
     this.live.innerHTML = peers.html + html;
     if ((this.tool === 'laser' && !m.held && this.tail.length > 1) || m.fading(now) || peers.moving) this.schedule();
+  }
+}
+
+/** the overview's grid moved so that slide `i`'s copy lies on `r` (screen px): about that copy's corner */
+function cellTransform(o: OverviewState, i: number, r: Rect): { origin: string; transform: string } | null {
+  const th = o.grid.querySelector<HTMLElement>(`.cell[data-i="${i}"] .th`);
+  if (!th) return null;
+  const c = th.getBoundingClientRect(), g = o.grid.getBoundingClientRect();
+  if (!(c.width > 0) || !(r.w > 0)) return null;
+  return { origin: `${c.left - g.left}px ${c.top - g.top}px`, transform: `translate(${r.x - c.left}px, ${r.y - c.top}px) scale(${r.w / c.width})` };
+}
+
+/**
+ * The cells coming in (`opening`) or going: the slide's own a little sooner and later than the others —
+ * its copy shows all its steps, the slide under it the step it is at.
+ */
+function fadeCells(o: OverviewState, own: number, opening: boolean): void {
+  // (no rings while they move: scaled up, they were thick frames round the slide)
+  o.grid.classList.add('moving');
+  for (const c of Array.from(o.grid.querySelectorAll<HTMLElement>('.cell'))) {
+    const mine = Number(c.dataset.i) === own;
+    const frames = mine
+      ? opening ? [{ opacity: 0 }, { opacity: 1, offset: 0.25 }, { opacity: 1 }] : [{ opacity: 1 }, { opacity: 1, offset: 0.8 }, { opacity: 0 }]
+      : opening ? [{ opacity: 0 }, { opacity: 0, offset: 0.2 }, { opacity: 1 }] : [{ opacity: 1 }, { opacity: 0, offset: 0.6 }, { opacity: 0 }];
+    const a = c.animate(frames, { duration: OV_MS, easing: 'linear', fill: opening ? 'none' : 'forwards' });
+    if (mine && opening) a.onfinish = a.oncancel = () => o.grid.classList.remove('moving');
   }
 }
 

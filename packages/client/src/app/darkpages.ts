@@ -38,15 +38,17 @@ export function invertedColor(css: string): string {
 
 /**
  * The canvas round a slide in the page's own colour (`desk`), a shade apart from the slide's (`page`)
- * when the two are all but the same — white slides on a white page: the slide's edge shows.
+ * when the two are all but the same — white slides on a white page: the slide's edge shows. `near`:
+ * how alike in lightness they may be, `k`: how far the canvas then moves (the SVG editor's canvas
+ * round a drawing: both more, so its edge reads plainly in either theme).
  */
-export function deskBeside(desk: string, page: string): string {
+export function deskBeside(desk: string, page: string, k = 0.1, near = 0.06): string {
   const d = parseColor(desk), p = parseColor(page);
   if (!d || !p) return desk;
   const lum = (c: number[]) => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
   const ld = lum(d);
-  if (Math.abs(ld - lum(p)) >= 0.06) return desk;
-  const to = ld > 0.5 ? 0 : 1, k = 0.1;
+  if (Math.abs(ld - lum(p)) >= near) return desk;
+  const to = ld > 0.5 ? 0 : 1;
   const ch = (x: number) => Math.round(255 * (x + (to - x) * k));
   return `rgb(${ch(d[0])}, ${ch(d[1])}, ${ch(d[2])})`;
 }

@@ -105,6 +105,18 @@ it('saves the edits made on the canvas, names as Inkscape labels and objects dra
   expect(layer.querySelector('rect')?.getAttribute('fill')).toBe('red');
 });
 
+it('the page\'s background (the SVG row\'s Background) is saved under the drawing, not over it', () => {
+  const html = svgCanvasSource(INKSCAPE_FILE);
+  const added = '<svg xmlns="http://www.w3.org/2000/svg" width="720" height="400" viewBox="0 0 720 400"><rect width="720" height="400" fill="rgb(255, 250, 230)" data-ol-page-bg=""/><g transform="translate(10 20)"><rect width="100" height="40" fill="red"/></g></svg>';
+  const saved = svgFileFromCanvas(INKSCAPE_FILE, html, added)!;
+  expect(saved).not.toContain('data-ol-');
+  const root = new DOMParser().parseFromString(saved, 'image/svg+xml').documentElement;
+  const first = root.firstElementChild!, last = root.lastElementChild!;
+  expect(first.getAttributeNS('http://www.inkscape.org/namespaces/inkscape', 'label')).toBe('Background');
+  expect(first.querySelector('rect')?.getAttribute('fill')).toBe('rgb(255, 250, 230)');
+  expect(last.querySelector('rect')?.getAttribute('fill')).toBe('red');
+});
+
 it('opens big SVG files (figures with embedded pictures) up to 20 MB', () => {
   const picture = 'data:image/png;base64,' + 'A'.repeat(3_000_000);
   const big = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 100 100"><image xlink:href="${picture}" width="10" height="10"/></svg>`;

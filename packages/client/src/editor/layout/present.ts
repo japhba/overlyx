@@ -9,7 +9,8 @@
  * a page number then Enter, B / . (black screen), W / , (white screen), L (laser pointer),
  * S (presenter view: notes, next page, timer — in a second window), Esc (end).
  *
- * The laser pointer, pinch to zoom and pan (+ / - / 0 too) and the control bar are app/presentkit.ts's:
+ * The laser pointer, pinch to zoom and pan (+ / - / 0 too), the overview (every page on a grid: pinched
+ * out past the whole page, G or - there) and the control bar are app/presentkit.ts's:
  * zoomed, a click does not go on and Escape first goes back to the whole page. Presented on other
  * screens at the same time, the drawings, the laser and (Linked) the page go between them through the
  * document's awareness (app/presentshare.ts).
@@ -167,6 +168,20 @@ class Presentation {
       share: aw ? state => { try { aw.setLocalStateField(PRESENT_FIELD, state); } catch { /* closing */ } } : undefined,
       // (the bar's presenter-view button and S: the second window below)
       presenterView: { on: () => !!this.presenter && !this.presenter.closed, toggle: () => { if (this.presenter && !this.presenter.closed) { this.presenter.close(); this.presenter = null; } else this.openPresenter(); } },
+      // every page on a grid (pinched out past the whole page, G or -)
+      overview: {
+        count: () => this.slides.length,
+        aspect: () => this.page.h / this.page.w,
+        // (drawn as the stage draws its page: `.ol-present-stage` — the stage's own styles, never the dark theme's inverted pages)
+        thumb: (i, w, h) => {
+          const s = this.slides[i];
+          if (!s) return null;
+          const copy = this.pageCopy(document, s, s.steps, Math.min(w / this.page.w, h / this.page.h));
+          copy.classList.add('ol-present-stage');
+          return copy;
+        },
+        go: i => { if (i !== this.index) this.show(i, 1, null); },
+      },
     });
     this.cleanup.push(() => this.kit.destroy());
     this.fit();
@@ -177,7 +192,7 @@ class Presentation {
     const onKey = (e: KeyboardEvent) => this.key(e);
     const onResize = () => this.fit();
     // leaving full screen (Escape, in a real browser) ends it — zoomed, it first goes back to the whole page, windowed
-    const onFs = () => { if (!document.fullscreenElement) { if (this.kit.zoomed) this.kit.resetZoom(); else this.end(); } };
+    const onFs = () => { if (!document.fullscreenElement) { if (this.kit.zoomed || this.kit.overviewOn) this.kit.unzoom(); else this.end(); } };
     window.addEventListener('keydown', onKey, true);
     window.addEventListener('resize', onResize);
     document.addEventListener('fullscreenchange', onFs);
@@ -308,6 +323,21 @@ class Presentation {
     }
   }
 
+  /** a copy of `slide` at its step `step`, `px` px per mm, in a holder of document `d` that sizes and styles it as the stage does */
+  private pageCopy(d: Document, slide: Slide, step: number, px: number): HTMLElement {
+    const holder = d.createElement('div');
+    holder.className = 'ol-layout' + (this.deck === 'beamer' ? ' bm-deck' : '');
+    holder.dataset.olFont = this.stage.dataset.olFont ?? 'sans';
+    holder.style.cssText = `position:relative;width:${px * this.page.w}px;height:${px * this.page.h}px;color:#000;pointer-events:none;--ol-mm:${px}px;--ol-pt:${px / 2.845276}px;--ol-page-w:${this.page.w};--ol-page-h:${this.page.h};--ol-basept:${this.stage.style.getPropertyValue('--ol-basept')};max-width:none`;
+    for (const v of PAGE_FONT_VARS) { const x = this.stage.style.getPropertyValue(v); if (x) holder.style.setProperty(v, x); }
+    const copy = slide.el.cloneNode(true) as HTMLElement;
+    copy.classList.remove('ol-tr-in', 'ol-tr-out', 'ol-tr-fade', 'ol-tr-push', 'ol-tr-wipe', 'ol-tr-back');
+    for (const e of copy.querySelectorAll<HTMLElement>('[data-step]')) e.classList.toggle('ol-hidden', !stepVisible(e.dataset.step, step));
+    applyOverlays(copy, step);
+    holder.append(copy);
+    return holder;
+  }
+
   /** the presenter view: this page, the next one, the notes and a timer, in a second window */
   private openPresenter(): void {
     if (this.presenter && !this.presenter.closed) { this.presenter.focus(); return; }
@@ -349,16 +379,8 @@ class Presentation {
       if (!slide) { box.textContent = cls === 'pv-next' ? 'End of the presentation' : ''; return; }
       const r = box.getBoundingClientRect();
       const px = Math.min(r.width / this.page.w, r.height / this.page.h) || 2;
-      const holder = d.createElement('div');
-      holder.className = 'lyx-editor ol-layout' + (this.deck === 'beamer' ? ' bm-deck' : '');
-      holder.dataset.olFont = this.stage.dataset.olFont ?? 'sans';
-      holder.style.cssText = `--ol-mm:${px}px;--ol-pt:${px / 2.845276}px;--ol-page-w:${this.page.w};--ol-page-h:${this.page.h};--ol-basept:${this.stage.style.getPropertyValue('--ol-basept')};max-width:none`;
-      for (const v of PAGE_FONT_VARS) { const x = this.stage.style.getPropertyValue(v); if (x) holder.style.setProperty(v, x); }
-      const copy = slide.el.cloneNode(true) as HTMLElement;
-      copy.classList.remove('ol-tr-in', 'ol-tr-out', 'ol-tr-fade', 'ol-tr-push', 'ol-tr-wipe');
-      for (const e of copy.querySelectorAll<HTMLElement>('[data-step]')) e.classList.toggle('ol-hidden', !stepVisible(e.dataset.step, step));
-      applyOverlays(copy, step);
-      holder.append(copy);
+      const holder = this.pageCopy(d, slide, step, px);
+      holder.classList.add('lyx-editor');
       box.append(holder);
     };
     const cur = this.slides[this.index];

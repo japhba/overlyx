@@ -8,8 +8,9 @@
  * With `figures` (prefs.invertFigures) an <img> is judged by its pixels as the editor's figures are
  * (editor/figureinvert.ts): a plot or diagram on a white or transparent ground is line art and stays
  * inverted with the slide (`data-ol-lineart`, the runtime's own attribute — never written to the
- * text); without it every picture keeps its colours. Only the slides: the runtime's frames and
- * handles and the canvas around them stay as they are. A web page (no slides) is inverted as a whole
+ * text); without it every picture keeps its colours. Only the slides (and a colour put under one
+ * without a background of its own: an SVG drawing's canvas, view.ts — inverted with the drawing on
+ * it): the runtime's frames and handles and the canvas around them stay as they are. A web page (no slides) is inverted as a whole
  * — its root, so that its background goes too and fixed elements stay where they are — with the
  * runtime's overlay (frames, handles) inverted back.
  *
@@ -79,7 +80,8 @@ export function setDarkSlides(on: boolean, figures: boolean): void {
       :where(html.ol-invert.ol-invert-page) { background-color: #fff; }
       html.ol-invert.ol-invert-page > ol-overlay[data-ol-runtime] { filter: ${F} !important; }
       html.ol-invert.ol-invert-page body ${pictures} { filter: ${F}; }
-      html.ol-invert.ol-invert-figures.ol-invert-page body img[${LINEART}] { filter: none; }`;
+      html.ol-invert.ol-invert-figures.ol-invert-page body img[${LINEART}] { filter: none; }
+      html.ol-invert:not(.ol-invert-page) ol-backdrop[data-ol-page-colour] > * { filter: ${F}; }`;
     document.head.appendChild(css);
     document.addEventListener('load', onLoad, true);
   }

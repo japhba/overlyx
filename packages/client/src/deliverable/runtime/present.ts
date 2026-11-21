@@ -7,8 +7,9 @@
  * shared link keeps it. B / . and W / , pause on a black or white screen; the next navigation
  * resumes the same slide and step. A poster is shown whole, a web page as it is.
  *
- * The laser pointer (L), pinch to zoom and pan, and the control bar are app/presentkit.ts's: zoomed,
- * a click does not go on, Escape first goes back to the whole slide. Presented on other screens at the
+ * The laser pointer (L), pinch to zoom and pan, the overview (every slide on a grid: pinched out past
+ * the whole slide, G or -) and the control bar are app/presentkit.ts's: zoomed, a click does not go
+ * on, Escape first goes back to the whole slide. Presented on other screens at the
  * same time, the drawings, the laser and (Linked) the slide go between them: the kit's state goes to
  * the editor (`presentShare`), which shares it in the document's awareness and brings the others'
  * (`presentPeers`; app/presentshare.ts).
@@ -22,7 +23,7 @@ import { slides, post, srcOf, state } from './env';
 import { PresentKit, type ZoomView } from '../../app/presentkit';
 import { textHash } from '../../app/presentshare';
 import { slideStepCount as lastStep, showSlideStep, STEP_VISIBILITY_CSS } from './steps';
-import { PresenterView, type StageRect } from './presenter';
+import { PresenterView, slideThumb, type StageRect } from './presenter';
 import { pairAll } from './reconcile';
 
 let current = 0;
@@ -134,6 +135,13 @@ export function startPresenting(): void {
     onLinked: on => post({ ol: 'presentLinked', on }),
     outside: t => !!pv?.contains(t),
     presenterView: { on: () => !!pv?.on, toggle: () => pv?.set(!pv.on, true) },
+    // every slide on a grid (pinched out past the whole slide, G): copies of the page's slides
+    overview: {
+      count: () => slides().length,
+      aspect: () => { const z = slideSize(); return z.h / z.w; },
+      thumb: (i, w, h) => { const s = slides()[i]; return s ? slideThumb(s, slideSize(), w, h) : null; },
+      go: i => go(i),
+    },
   });
   pv = new PresenterView({
     at: () => ({ slide: current, step }),
@@ -158,7 +166,7 @@ export function startPresenting(): void {
   addEventListener('message', e => {
     if (e.source !== window.parent || !e.data) return;
     if (e.data.ol === 'go') go(Number(e.data.slide));
-    else if (e.data.ol === 'unzoom') kit?.resetZoom();
+    else if (e.data.ol === 'unzoom') kit?.unzoom();
     else if (e.data.ol === 'presentFingers') kit?.setFingersDraw(e.data.on === true, false);
     else if (e.data.ol === 'presentLinked') kit?.setLinked(e.data.on !== false, false);
     else if (e.data.ol === 'presentInkOnly') kit?.setInkOnly(e.data.on === true);
@@ -260,6 +268,12 @@ export function go(i: number, atEnd = false, at?: number): void {
   pv?.update();
   try { history.replaceState(null, '', `#${current + 1}`); } catch { /* sandboxed: no history */ }
   post({ ol: 'visible', slide: current });
+}
+
+/** the slides' size (the one shown's: the others are not laid out while presenting) */
+function slideSize(): { w: number; h: number } {
+  const s = slides()[current];
+  return s && s.offsetWidth && s.offsetHeight ? { w: s.offsetWidth, h: s.offsetHeight } : { w: 960, h: 540 };
 }
 
 function fit(): void {

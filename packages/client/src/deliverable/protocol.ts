@@ -113,6 +113,12 @@ export interface CanvasView {
   deskChecker: boolean;
   /** a transparency checkerboard under the pages */
   pageChecker: boolean;
+  /**
+   * The colour under the pages where they have no background of their own (an SVG drawing's canvas,
+   * the SVG editor's: white unless chosen); null = none, what is around them shows through; absent:
+   * the default (none but in the SVG editor). The checkerboard comes first.
+   */
+  page?: string | null;
 }
 
 export interface Rect { x: number; y: number; w: number; h: number }

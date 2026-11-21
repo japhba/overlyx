@@ -77,7 +77,7 @@ export function SvgEditor({ target, onClose }: { target: SvgTarget; onClose(): v
     setSaving(true); setError('');
     try {
       // the file as it was with the edits made to it (the page as drawn only when the drawing is gone)
-      const svg = svgFileFromCanvas(original.current, host.text(), await exporter.current(`[${SVG_FILE_ROOT}]`)) ?? await exporter.current();
+      const svg = svgFileFromCanvas(original.current, host.text(), await exporter.current(`[${SVG_FILE_ROOT}]`)) ?? (await exporter.current()).replace(/ data-ol-page-bg=""/g, '');
       const response = await fetch(fileUrl(target.project, target.path), { credentials: 'include', cache: 'no-store' });
       if (!response.ok || await response.text() !== original.current) throw new Error('The SVG changed on disk while this editor was open. Reopen it before saving your changes.');
       await api.upload(target.project, target.path, new Blob([svg], { type: 'image/svg+xml' }));

@@ -1549,7 +1549,19 @@ blend.
     and fades on release, clicks do not advance while it is on) and **pinch to zoom / pan** (Ctrl+wheel,
     Safari's gestures, two fingers; while zoomed a drag pans and a click does not advance; 0, a
     double click or Escape goes back to the whole slide — Escape leaving full screen first only
-    zooms out); **B / .** pauses on black and **W / ,** on white, as in the LaTeX presenter.
+    zooms out); **every slide on a grid** (21 Nov 2026, the user: "zoom out in presentation mode
+    should threshold-snap into slide overview on a grid"; presentkit `openOverview`, shared with the
+    Layout presenter): a pinch out that *begins* at the whole slide shrinks it with the fingers
+    (`pullView`, about its middle) and below `OVERVIEW_AT` (0.72) snaps into the overview — let go
+    before, it springs back; a pinch that began zoomed in stops at the whole slide (a Ctrl+wheel
+    pinch ends after `WHEEL_END_MS` without a step); G, − at the whole slide and the bar's grid
+    button open it too. Copies of the slides as they end (all steps) are slotted into the kit's
+    shadow tree (host `overview.thumb`: `presenter.ts slideThumb`, the Layout presenter's
+    `pageCopy` in an `.ol-present-stage`), as big as lets all show at once (`overviewGrid`, scrolling
+    below ~110–220 px); the slide's copy flies from where the slide was into its cell and back. A
+    tap / click, the arrows + Enter, or a pinch out over a slide opens it; Escape or G goes back to
+    the one shown (it counts as zoomed for the editor's leave-full-screen Escape: `unzoom`);
+    **B / .** pauses on black and **W / ,** on white, as in the LaTeX presenter.
     The same shortcut, a click or forward / backward navigation resumes the current slide and
     animation step; Home / End or a slide number jumps directly. *Download* gives the **PDF** (headless Chromium,
     `print` mode: a deck one slide per page at its size, a poster one page, a web page on A4) and a
@@ -3551,7 +3563,19 @@ handlers and links out of the file go. Save writes the file back from the edited
 (`svgFileFromCanvas`: names re-spelled and re-namespaced after the HTML parser lowercased `rdf:RDF`,
 the root's units and prolog restored, `data-ol-name`/`data-ol-locked` as `inkscape:label` /
 `sodipodi:insensitive`); objects drawn on top (pen, shapes, text boxes) are exported by the frame
-(`exportSvg` `except`) and appended as a layer "Drawn in OverLyX" in user units. An unchanged save is
+(`exportSvg` `except`) and appended as a layer "Drawn in OverLyX" in user units; the page's own
+background (the SVG row's *Background*, written into the file) goes in as a first layer
+"Background", under the drawing (`PAGE_BG_ATTR`; before 21 Nov 2026 it was appended on top and
+covered the drawing). **Canvas colour vs background colour** (21 Nov 2026, the user: the grey
+drawing area had poor contrast): the drawing's canvas — under it, where the SVG is transparent —
+is white by default and set apart from the background round it (right-click the canvas, or View ▸
+Canvas: *Canvas colour (under the drawing)* — white, greys, black, any colour, none, a
+checkerboard — and *Background colour (around the canvas)*). Both are this browser's view of the
+file (`CanvasView.page` / `desk`, `ol.canvas:<path>`), never saved in the SVG: the runtime draws the
+canvas colour beside the page (`runtime/view.ts` `ol-backdrop`, as the transparency checkerboard),
+so the exported drawing stays as the file has it; smart invert inverts it with the drawing. The
+automatic background is a shade further from the canvas than round slides (`deskBeside` k 0.15,
+near 0.2: #d9d9d9 round white, lighter than `DARK_DESK` round the inverted canvas). An unchanged save is
 the same document node for node (checked on the 2 MB COSYNE figure, 17 Oct 2026; before, files over
 400 KB did not open and saves lost layers and TextExt data). On that canvas the drawing is the page,
 as Inkscape's: a click takes the object in its layer (`edit.ts` `fileObject`, locked layers skipped;

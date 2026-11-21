@@ -131,6 +131,14 @@ function holder(slot: string, slide: HTMLElement, copy: HTMLElement, w: number, 
   return d;
 }
 
+/**
+ * A copy of `slide` as it ends (all its steps shown), the slides being `size` (the one presented's),
+ * scaled into `bw` × `bh` px — for the presenting overview (app/presentkit.ts, which slots it in).
+ */
+export function slideThumb(slide: HTMLElement, size: { w: number; h: number }, bw: number, bh: number): HTMLElement {
+  return holder('', slide, copyOf(slide, slideStepCount(slide), size.w, size.h), size.w, size.h, bw, bh);
+}
+
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
 /** 1:05 or 1:02:05 */

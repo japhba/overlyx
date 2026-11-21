@@ -800,7 +800,7 @@ export const HELP_ROWS: [string, string][] = [
     ['Ctrl+Alt++ / Ctrl+Alt+-', 'Wider / narrower text column'],
     ['Ctrl+Alt+S', 'Source pane below the text'],
     ['Ctrl+Shift+P (or F1)', 'Command palette: search the menus and shortcuts, set your own shortcuts'],
-    ['F5 / Shift+F5', 'Layout documents: present from the first / the current page (→ next step, ← back, B black, L laser, S presenter view, Esc end)'],
+    ['F5 / Shift+F5', 'Layout documents: present from the first / the current page (→ next step, ← back, B black, L laser, S presenter view, G every page, Esc end)'],
     ['V, T, R, E, L, A, B, P, N, C', 'Layout documents: select, text box, rectangle, ellipse, line, arrow, Bézier pen, pencil, nodes, crop'],
     ['Ctrl+G / Ctrl+Shift+G', 'Layout documents: group / ungroup the selected objects'],
     ['Ctrl+] / Ctrl+[', 'Layout documents: bring forward / send backward (with Shift: to the front / the back)'],
@@ -857,6 +857,7 @@ export const DECK_HELP_ROWS: [string, string][] = [
   ['Home / End, a number then Enter', 'Presenting: the first / last slide, that slide'],
   ['S, L, B or ., W or ,', 'Presenting: presenter view (timer, notes, next slide), laser pointer, black screen, white screen'],
   ['Ctrl+wheel or a pinch, 0', 'Presenting: zoom in, back to the whole slide'],
+  ['G, − or a pinch out', 'Presenting: every slide on a grid (arrows and Enter, or a click, go to one; Esc back)'],
   ['Ctrl+Shift+P (or F1)', 'Command palette: search the menus and shortcuts'],
 ];
 
