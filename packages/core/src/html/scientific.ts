@@ -75,6 +75,16 @@ const p = (x: number, y: number, w: number, text: string, cls = '', extra = '') 
 const heading = (x: number, y: number, w: number, text: string) => object('h2', x, y, w, text);
 const rule = (x: number, y: number, w: number, colour = 'var(--accent)', h = 2) => object('div', x, y, w, '', `height: ${h}px; background: ${colour}`, 'decoration');
 const equation = (x: number, y: number, w: number, tex: string) => p(x, y, w, `\\[${tex}\\]`, 'equation');
+/**
+ * One of the design's objects on every slide (a bar, a footer, the slide number): a copy of the slide
+ * master's (`data-ol-master`, client deliverable/deckmaster.ts) — changed on one slide, changed on all,
+ * and on the slides added later. Only what is the same on every slide: a progress bar's length is each
+ * slide's own.
+ */
+const master = (key: string, html: string) => html.replace(/^(\s*<[a-z0-9]+)/, `$1 data-ol-master="${key}"`);
+/** the slide's number (and the count of slides) as fields: written as the numbers, kept right as slides come and go */
+const slideNo = (n: number) => `<span data-ol-field="slide-number">${n}</span>`;
+const slideCount = (n: number) => `<span data-ol-field="slide-count">${n}</span>`;
 
 function document(t: ScientificTemplate, title: string, pages: string[], css = ''): string {
   const poster = t.kind === 'poster';
@@ -158,23 +168,25 @@ export function scientificDeck(title = '', id?: string): string {
   const kicker = (x: number, y: number, w: number, text: string) => p(x, y, w, text, 'kicker');
   // Metropolis: the frame number bottom right and its frametitle progress bar; Focus: its numbered
   // progress bar along the bottom; CambridgeUS: the three-part footer.
+  // (the slide master's objects: `master`; Focus's numbers stay typed — its title slide is not counted, and the
+  // last one's number is light on the full bar — deckmaster.ts renumbers them)
   const foot = (n: number): string => serif ? [
-    rule(0, 870, 400, '#a30000', 30), rule(400, 870, 400, '#ececec', 30), rule(800, 870, 400, '#d9d9d9', 30),
-    p(18, 874, 370, 'Your Name (Institution)', 'footer', 'color: #ffffff; text-align: center; font-size: 20px'),
-    p(414, 874, 370, 'Scientific presentation', 'footer', 'color: #8f0000; text-align: center; font-size: 20px'),
-    p(818, 874, 365, `Conference / Date <span style="float: right">${n} / 5</span>`, 'footer', 'color: #7a0000; font-size: 20px'),
+    master('footer-left', rule(0, 870, 400, '#a30000', 30)), master('footer-middle', rule(400, 870, 400, '#ececec', 30)), master('footer-right', rule(800, 870, 400, '#d9d9d9', 30)),
+    master('footer-author', p(18, 874, 370, 'Your Name (Institution)', 'footer', 'color: #ffffff; text-align: center; font-size: 20px')),
+    master('footer-title', p(414, 874, 370, 'Scientific presentation', 'footer', 'color: #8f0000; text-align: center; font-size: 20px')),
+    master('footer-date', p(818, 874, 365, `Conference / Date <span style="float: right">${slideNo(n)} / ${slideCount(5)}</span>`, 'footer', 'color: #7a0000; font-size: 20px')),
   ].join('\n') : dark ? n === 1 ? '' : [
-    rule(0, 700, 1280, '#d6d6d6', 20),
+    master('footer-bar', rule(0, 700, 1280, '#d6d6d6', 20)),
     rule(0, 700, 1280 * (n - 1) / 4, '#404040', 20),
     p(1180, 698, 76, `${n - 1} / 4`, 'footer', `color: ${n === 5 ? '#efefef' : '#404040'}; text-align: right; font-size: 17px; line-height: 24px`),
   ].join('\n') : [
     ...(n > 1 ? [rule(0, 84, 1280 * n / 5, t.accent, 4)] : []),
-    p(1160, 668, 80, String(n), 'footer', 'text-align: right'),
+    master('slide-number', p(1160, 668, 80, slideNo(n), 'footer', 'text-align: right')),
   ].join('\n');
-  const navigation = (label: string) => [rule(0, 0, 600, '#a30000', 36), rule(600, 0, 600, '#d9d9d9', 36), p(30, 4, 540, 'Research', 'footer', 'color: white; text-align: right; font-size: 22px'), p(620, 4, 540, esc(label.replace(/^.*?\/ /, '')), 'footer', 'color: #7a0000; font-size: 22px')];
+  const navigation = (label: string) => [master('nav-left', rule(0, 0, 600, '#a30000', 36)), master('nav-right', rule(600, 0, 600, '#d9d9d9', 36)), master('nav-research', p(30, 4, 540, 'Research', 'footer', 'color: white; text-align: right; font-size: 22px')), p(620, 4, 540, esc(label.replace(/^.*?\/ /, '')), 'footer', 'color: #7a0000; font-size: 22px')];
   const section = (n: number, label: string, head: string, objects: string[], notes: string) => [
-    ...(serif ? [...navigation(label), rule(0, 36, 1200, '#f2f2f2', 92), object('h2', 30, 60, 1140, head, 'color: #cc0000; font-size: 44px; font-weight: 400')]
-      : [rule(0, 0, 1280, dark ? '#404040' : '#23373b', 84), object('h2', dark ? 60 : 40, dark ? 18 : 21, dark ? 1160 : 1200, head, `color: ${dark ? '#efefef' : '#fafafa'}; font-size: ${dark ? 38 : 36}px; font-weight: 400; line-height: 1.2${dark ? '; font-variant-caps: small-caps' : ''}`)]),
+    ...(serif ? [...navigation(label), master('title-band', rule(0, 36, 1200, '#f2f2f2', 92)), object('h2', 30, 60, 1140, head, 'color: #cc0000; font-size: 44px; font-weight: 400')]
+      : [master('title-bar', rule(0, 0, 1280, dark ? '#404040' : '#23373b', 84)), object('h2', dark ? 60 : 40, dark ? 18 : 21, dark ? 1160 : 1200, head, `color: ${dark ? '#efefef' : '#fafafa'}; font-size: ${dark ? 38 : 36}px; font-weight: 400; line-height: 1.2${dark ? '; font-variant-caps: small-caps' : ''}`)]),
     ...objects, foot(n), `<aside class="notes">${notes}</aside>`,
   ].join('\n');
   const titleObjects = serif ? [

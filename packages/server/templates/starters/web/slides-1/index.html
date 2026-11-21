@@ -260,11 +260,11 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
   <p style="position: absolute; left: 96px; top: 404px; width: 1088px; font-size: 30px; font-weight: 400">Your Name</p>
   <p style="position: absolute; left: 96px; top: 452px; width: 1088px; font-size: 26px">Conference / Date</p>
   <p style="position: absolute; left: 96px; top: 494px; width: 1088px; font-size: 26px; color: var(--muted)">Department / Institution</p>
-  <p class="footer" style="position: absolute; left: 1160px; top: 668px; width: 80px; text-align: right">1</p>
+  <p data-ol-master="slide-number" class="footer" style="position: absolute; left: 1160px; top: 668px; width: 80px; text-align: right"><span data-ol-field="slide-number">1</span></p>
 </section>
 
 <section class="slide">
-  <div class="decoration" style="position: absolute; left: 0px; top: 0px; width: 1280px; height: 84px; background: #23373b"></div>
+  <div data-ol-master="title-bar" class="decoration" style="position: absolute; left: 0px; top: 0px; width: 1280px; height: 84px; background: #23373b"></div>
   <h2 style="position: absolute; left: 40px; top: 21px; width: 1200px; color: #fafafa; font-size: 36px; font-weight: 400; line-height: 1.2">How long does a spatial pattern survive?</h2>
   <p style="position: absolute; left: 96px; top: 168px; width: 500px">A field diffuses on a periodic one-dimensional domain. Follow one Fourier component at a time.</p>
   <p style="position: absolute; left: 96px; top: 352px; width: 500px">Each mode keeps its shape and only shrinks, at a rate set by its spatial frequency k.</p>
@@ -275,12 +275,12 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
   <div class="decoration" style="position: absolute; left: 96px; top: 560px; width: 1088px; height: 1px; background: var(--muted)"></div>
   <p class="caption" style="position: absolute; left: 96px; top: 580px; width: 1088px">Assumptions: constant D · no sources · no advection</p>
   <div class="decoration" style="position: absolute; left: 0px; top: 84px; width: 512px; height: 4px; background: #eb811b"></div>
-  <p class="footer" style="position: absolute; left: 1160px; top: 668px; width: 80px; text-align: right">2</p>
+  <p data-ol-master="slide-number" class="footer" style="position: absolute; left: 1160px; top: 668px; width: 80px; text-align: right"><span data-ol-field="slide-number">2</span></p>
 <aside class="notes">Substitute one Fourier mode into the heat equation. The example is analytical rather than experimental.</aside>
 </section>
 
 <section class="slide">
-  <div class="decoration" style="position: absolute; left: 0px; top: 0px; width: 1280px; height: 84px; background: #23373b"></div>
+  <div data-ol-master="title-bar" class="decoration" style="position: absolute; left: 0px; top: 0px; width: 1280px; height: 84px; background: #23373b"></div>
   <h2 style="position: absolute; left: 40px; top: 21px; width: 1200px; color: #fafafa; font-size: 36px; font-weight: 400; line-height: 1.2">Double the frequency. Four times faster decay.</h2>
   <svg role="img" aria-label="Analytical diffusion: normalized amplitude against dimensionless time. The second spatial mode decays four times faster." viewBox="0 0 600 433" style="position: absolute; left: 96px; top: 128px; width: 720px; height: 520px"><line x1="56.82" x2="579.84" y1="372.51" y2="372.51" stroke="currentColor" stroke-opacity=".12"/><text x="47.66" y="378.93" text-anchor="end" font-size="18.33" fill="currentColor" fill-opacity=".75">0</text><line x1="56.82" x2="579.84" y1="206.42" y2="206.42" stroke="currentColor" stroke-opacity=".12"/><text x="47.66" y="212.83" text-anchor="end" font-size="18.33" fill="currentColor" fill-opacity=".75">0.5</text><line x1="56.82" x2="579.84" y1="40.33" y2="40.33" stroke="currentColor" stroke-opacity=".12"/><text x="47.66" y="46.74" text-anchor="end" font-size="18.33" fill="currentColor" fill-opacity=".75">1</text><line x1="56.82" x2="56.82" y1="372.51" y2="378.93" stroke="currentColor" stroke-opacity=".5"/><text x="56.82" y="399.09" text-anchor="middle" font-size="18.33" fill="currentColor" fill-opacity=".75">0</text><line x1="231.16" x2="231.16" y1="372.51" y2="378.93" stroke="currentColor" stroke-opacity=".5"/><text x="231.16" y="399.09" text-anchor="middle" font-size="18.33" fill="currentColor" fill-opacity=".75">1</text><line x1="405.5" x2="405.5" y1="372.51" y2="378.93" stroke="currentColor" stroke-opacity=".5"/><text x="405.5" y="399.09" text-anchor="middle" font-size="18.33" fill="currentColor" fill-opacity=".75">2</text><line x1="579.84" x2="579.84" y1="372.51" y2="378.93" stroke="currentColor" stroke-opacity=".5"/><text x="579.84" y="399.09" text-anchor="middle" font-size="18.33" fill="currentColor" fill-opacity=".75">3</text><line x1="56.82" x2="579.84" y1="372.51" y2="372.51" stroke="currentColor" stroke-opacity=".5"/><text x="318.33" y="424.75" text-anchor="middle" font-size="18.33" fill="currentColor">Time  t / τ₁</text><text x="9.16" y="23.83" text-anchor="start" font-size="18.33" fill="currentColor">Normalized amplitude</text><polyline points="56.82,40.33 62.05,50.14 67.28,59.67 72.51,68.92 77.74,77.89 82.97,86.6 88.2,95.05 93.43,103.25 98.66,111.21 103.89,118.93 109.12,126.42 114.35,133.7 119.58,140.75 124.81,147.6 130.04,154.25 135.28,160.7 140.51,166.96 145.74,173.04 150.97,178.93 156.2,184.65 161.43,190.2 166.66,195.59 171.89,200.82 177.12,205.89 182.35,210.82 187.58,215.6 192.81,220.24 198.04,224.74 203.27,229.1 208.5,233.34 213.73,237.45 218.96,241.45 224.19,245.32 229.42,249.08 234.65,252.73 239.88,256.27 245.11,259.7 250.34,263.04 255.57,266.27 260.8,269.41 266.03,272.46 271.26,275.42 276.49,278.29 281.72,281.07 286.95,283.77 292.18,286.4 297.41,288.94 302.64,291.41 307.87,293.81 313.1,296.13 318.33,298.39 323.56,300.58 328.79,302.71 334.02,304.77 339.25,306.77 344.48,308.71 349.71,310.6 354.94,312.43 360.17,314.21 365.4,315.93 370.63,317.6 375.86,319.22 381.09,320.8 386.32,322.33 391.55,323.81 396.78,325.25 402.01,326.65 407.24,328 412.47,329.32 417.7,330.59 422.93,331.83 428.16,333.04 433.39,334.2 438.62,335.33 443.85,336.43 449.08,337.5 454.31,338.53 459.54,339.54 464.77,340.51 470,341.46 475.23,342.38 480.46,343.27 485.69,344.13 490.92,344.97 496.15,345.78 501.38,346.57 506.62,347.34 511.85,348.08 517.08,348.81 522.31,349.51 527.54,350.19 532.77,350.85 538,351.49 543.23,352.11 548.46,352.71 553.69,353.3 558.92,353.86 564.15,354.41 569.38,354.95 574.61,355.47 579.84,355.97" fill="none" stroke="var(--accent)" stroke-width="3.12" stroke-linecap="round" stroke-linejoin="round"/><polyline points="56.82,40.33 62.05,77.89 67.28,111.21 72.51,140.75 77.74,166.96 82.97,190.2 88.2,210.82 93.43,229.1 98.66,245.32 103.89,259.7 109.12,272.46 114.35,283.77 119.58,293.81 124.81,302.71 130.04,310.6 135.28,317.6 140.51,323.81 145.74,329.32 150.97,334.2 156.2,338.53 161.43,342.38 166.66,345.78 171.89,348.81 177.12,351.49 182.35,353.86 187.58,355.97 192.81,357.84 198.04,359.5 203.27,360.97 208.5,362.28 213.73,363.43 218.96,364.46 224.19,365.37 229.42,366.18 234.65,366.89 239.88,367.53 245.11,368.09 250.34,368.59 255.57,369.04 260.8,369.43 266.03,369.78 271.26,370.09 276.49,370.36 281.72,370.6 286.95,370.82 292.18,371.01 297.41,371.18 302.64,371.33 307.87,371.46 313.1,371.58 318.33,371.69 323.56,371.78 328.79,371.86 334.02,371.94 339.25,372 344.48,372.06 349.71,372.11 354.94,372.16 360.17,372.2 365.4,372.23 370.63,372.26 375.86,372.29 381.09,372.32 386.32,372.34 391.55,372.36 396.78,372.37 402.01,372.39 407.24,372.4 412.47,372.42 417.7,372.43 422.93,372.44 428.16,372.44 433.39,372.45 438.62,372.46 443.85,372.46 449.08,372.47 454.31,372.47 459.54,372.48 464.77,372.48 470,372.49 475.23,372.49 480.46,372.49 485.69,372.49 490.92,372.5 496.15,372.5 501.38,372.5 506.62,372.5 511.85,372.5 517.08,372.5 522.31,372.5 527.54,372.5 532.77,372.5 538,372.51 543.23,372.51 548.46,372.51 553.69,372.51 558.92,372.51 564.15,372.51 569.38,372.51 574.61,372.51 579.84,372.51" fill="none" stroke="var(--secondary)" stroke-width="3.12" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="8.31 6.23"/><line x1="467.29" x2="502.12" y1="47.66" y2="47.66" stroke="var(--accent)" stroke-width="3.12" stroke-linecap="round"/><text x="511.28" y="54.07" text-anchor="start" font-size="18.33" fill="currentColor">mode k</text><line x1="467.29" x2="502.12" y1="72.4" y2="72.4" stroke="var(--secondary)" stroke-width="3.12" stroke-linecap="round" stroke-dasharray="8.31 6.23"/><text x="511.28" y="78.82" text-anchor="start" font-size="18.33" fill="currentColor">mode 2k</text></svg>
   <p class="kicker" style="position: absolute; left: 870px; top: 196px; width: 314px">Lifetime</p>
@@ -288,12 +288,12 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
   <p style="position: absolute; left: 870px; top: 400px; width: 314px">Small-scale structure disappears first.</p>
   <p class="caption" style="position: absolute; left: 870px; top: 540px; width: 314px">Curves: e<sup>−s</sup> and e<sup>−4s</sup>, s = t / τ₁.</p>
   <div class="decoration" style="position: absolute; left: 0px; top: 84px; width: 768px; height: 4px; background: #eb811b"></div>
-  <p class="footer" style="position: absolute; left: 1160px; top: 668px; width: 80px; text-align: right">3</p>
+  <p data-ol-master="slide-number" class="footer" style="position: absolute; left: 1160px; top: 668px; width: 80px; text-align: right"><span data-ol-field="slide-number">3</span></p>
 <aside class="notes">The curves show exp(−s) and exp(−4s), with s = t/τ₁. Both modes start at unit amplitude.</aside>
 </section>
 
 <section class="slide">
-  <div class="decoration" style="position: absolute; left: 0px; top: 0px; width: 1280px; height: 84px; background: #23373b"></div>
+  <div data-ol-master="title-bar" class="decoration" style="position: absolute; left: 0px; top: 0px; width: 1280px; height: 84px; background: #23373b"></div>
   <h2 style="position: absolute; left: 40px; top: 21px; width: 1200px; color: #fafafa; font-size: 36px; font-weight: 400; line-height: 1.2">The conclusion depends on the model assumptions</h2>
   <p class="kicker" style="position: absolute; left: 96px; top: 210px; width: 490px">What follows</p>
   <p style="position: absolute; left: 96px; top: 256px; width: 490px">For constant diffusivity, the mode lifetime falls as the inverse square of spatial frequency.</p>
@@ -302,12 +302,12 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
   <div class="decoration" style="position: absolute; left: 96px; top: 480px; width: 1088px; height: 1px; background: var(--muted)"></div>
   <p class="caption" style="position: absolute; left: 96px; top: 500px; width: 1088px">In measured data, estimate lifetimes with uncertainty and inspect residuals.</p>
   <div class="decoration" style="position: absolute; left: 0px; top: 84px; width: 1024px; height: 4px; background: #eb811b"></div>
-  <p class="footer" style="position: absolute; left: 1160px; top: 668px; width: 80px; text-align: right">4</p>
+  <p data-ol-master="slide-number" class="footer" style="position: absolute; left: 1160px; top: 668px; width: 80px; text-align: right"><span data-ol-field="slide-number">4</span></p>
 <aside class="notes">Separate the exact mathematical statement from its application to a real system.</aside>
 </section>
 
 <section class="slide">
-  <div class="decoration" style="position: absolute; left: 0px; top: 0px; width: 1280px; height: 84px; background: #23373b"></div>
+  <div data-ol-master="title-bar" class="decoration" style="position: absolute; left: 0px; top: 0px; width: 1280px; height: 84px; background: #23373b"></div>
   <h2 style="position: absolute; left: 40px; top: 21px; width: 1200px; color: #fafafa; font-size: 36px; font-weight: 400; line-height: 1.2">Spatial scale predicts the lifetime of a pattern</h2>
   <p class="kicker" style="position: absolute; left: 96px; top: 168px; width: 1088px">Takeaway</p>
   <p style="position: absolute; left: 96px; top: 208px; width: 1088px; font-size: 44px; font-weight: 400; line-height: 1.2">Higher-frequency modes decay sooner under diffusion.</p>
@@ -316,7 +316,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
   <p class="caption" style="position: absolute; left: 96px; top: 520px; width: 1088px">Reproduce the plot: evaluate exp(−s) and exp(−4s) at 101 equally spaced values of s from 0 to 3.</p>
   <p class="caption" style="position: absolute; left: 96px; top: 580px; width: 1088px"><a href="https://doi.org/10.1017/CBO9781139086967">J. R. Cannon, The One-Dimensional Heat Equation (1984)</a></p>
   <div class="decoration" style="position: absolute; left: 0px; top: 84px; width: 1280px; height: 4px; background: #eb811b"></div>
-  <p class="footer" style="position: absolute; left: 1160px; top: 668px; width: 80px; text-align: right">5</p>
+  <p data-ol-master="slide-number" class="footer" style="position: absolute; left: 1160px; top: 668px; width: 80px; text-align: right"><span data-ol-field="slide-number">5</span></p>
 <aside class="notes">Close with the single result. The plot has no fitted parameters; all functions and the sampling grid are given on the slide.</aside>
 </section>
 </body>

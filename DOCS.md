@@ -1867,6 +1867,18 @@ blend.
     text (agents' decks, the starters) follow too when the slides were numbered right before
     (`numbering`: one place on ≥ 60 % of the slides, from the first slide or the one after the title,
     "n / total" kept), and *Put on every slide* on such a footer turns its number into a field.
+    **The starter designs** (core `html/scientific.ts` `master`, 21 Nov 2026) write their repeated
+    decoration as master copies: Metropolis its title bar (`title-bar`) and slide number
+    (`slide-number`, a field), Focus its title bar and footer bar (`footer-bar`; its numbers stay typed —
+    the title slide is not counted and the last one's is light on the full bar), CambridgeUS its
+    navigation bars and "Research" (`nav-left`, `nav-right`, `nav-research`), title band (`title-band`)
+    and three-part footer (`footer-left` / `-middle` / `-right`, `footer-author`, `footer-title`,
+    `footer-date` with "n / total" as fields). Progress bars, whose length is each slide's, stay the
+    slides' own. Only new decks and new accounts' examples get them: the shipped examples
+    (`templates/starters/web/slides-1..3`) changed only by those attributes and fields (their licence
+    comment kept), and as their previous version is in no `starters-legacy` set, the start-up refresh
+    (`starterupdates.ts`) treats existing accounts' copies as their own and leaves them alone. The PDF
+    of each example is the same pixel for pixel (checked at 40 dpi).
     **Skip slide** (rail, right-click, Slide menu): `data-ol-skip` — not presented, not printed
     (runtime `slides()` in `present`/`print`), faded with *Skipped* on the rail. **Background colour of
     every slide** and **Layout of this slide** (the layout picker applying to the slide) sit beside
