@@ -4,7 +4,7 @@ import { render } from 'preact';
 import { App } from './app/App';
 import { editorContext } from './editor/context';
 import { api } from './api';
-import { isBenignBrowserError } from './error-reporting';
+import { isBenignBrowserError, STORAGE_CLOSED } from './error-reporting';
 import { initUsage, recordUsage, noticeTemplate } from './usage';
 import { initGlitchWatch } from './glitches';
 import { initZoomLock } from './zoomlock';
@@ -37,6 +37,12 @@ watchPenStrokes();   // an iPad held to 60 Hz while its screen does 120: said on
     // a request the network (or leaving the page) cut off — every browser words it differently, Safari
     // as "… due to access control checks": no application error, and offline the app goes on by itself
     if (/Failed to fetch|NetworkError|Load failed|access control checks|network connection was lost/i.test(msg)) return;
+    // the browser closed the local copy's database (Safari): the editor opens it again (editor/localreopen.ts)
+    // and its save indicator says when the local copy fails — no alarm, no report
+    if (STORAGE_CLOSED.test(msg.trim())) return;
+    // an error in a script of another origin (a browser extension, Google's picker): the browser hides
+    // everything but these words — nothing to show anyone or to act on (error report #7)
+    if (msg.trim() === 'Script error.' && !stack) { recordUsage('error', 'Script error.'); return; }
     const now = Date.now();
     if (msg === last && now - lastAt < 5000) return;
     last = msg; lastAt = now;

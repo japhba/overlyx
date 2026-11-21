@@ -960,6 +960,43 @@ async function composeInput(text: string, ctx: TurnContext | undefined, user: Se
 interface ThreadRow { thread_id: string; project: string; user_id: number; title: string | null; created_at: number; updated_at: number; scope: string | null; mcp_key: string | null; provider: string | null; model: string | null }
 const threadRow = (tid: string) => db.prepare('SELECT * FROM agent_threads WHERE thread_id = ?').get(tid) as ThreadRow | undefined;
 
+/** codex has no readable record of a thread any more: its rollout is gone, or its saved history is not one this codex can follow */
+export const LOST_THREAD = /no rollout found|invalid paginated history lineage|thread not found/i;
+/** What the panel says about such a thread (it then sends the next message to a new thread). */
+export const LOST_THREAD_TEXT = 'The agent no longer has this conversation (Codex lost or cannot read its saved history). Your next message starts a new thread.';
+const errMessage = (e: unknown) => (e as Error)?.message ?? String(e);
+
+/**
+ * A thread's transcript: one full read (`includeTurns`), or — codex 0.17x keeps paginated threads,
+ * for which the full read is deprecated and can fail ("invalid paginated history lineage"; "not
+ * materialized" before the first message) — its metadata with the turns paged in. `lost`: codex has
+ * no readable record of the thread.
+ */
+export async function readThread(request: (method: string, params?: any) => Promise<any>, threadId: string): Promise<{ thread: any; lost?: boolean }> {
+  try { return { thread: (await request('thread/read', { threadId, includeTurns: true })).thread }; }
+  catch (e) { if (!/paginated|materialized|list_turns|hydration/i.test(errMessage(e)) && !LOST_THREAD.test(errMessage(e))) throw e; }
+  let meta: any;
+  try { meta = (await request('thread/read', { threadId })).thread; }
+  catch (e) { if (LOST_THREAD.test(errMessage(e))) return { thread: { id: threadId, turns: [] }, lost: true }; throw e; }
+  const turns: any[] = [];
+  try {
+    let cursor: string | null = null;
+    for (let page = 0; page < 100; page++) {
+      const r = await request('thread/turns/list', { threadId, itemsView: 'full', sortDirection: 'asc', limit: 50, ...(cursor ? { cursor } : {}) });
+      turns.push(...(r?.data ?? []));
+      cursor = r?.nextCursor ?? null;
+      if (!cursor) break;
+    }
+  } catch (e) {
+    const m = errMessage(e);
+    // a thread without its first message yet has no turns to list
+    if (/materialized|list_turns is not supported/i.test(m)) return { thread: { ...meta, turns: [] } };
+    if (LOST_THREAD.test(m)) return { thread: { ...meta, turns: [] }, lost: true };
+    throw e;
+  }
+  return { thread: { ...meta, turns } };
+}
+
 export function agentRoutes(): express.Router {
   const r = express.Router();
   if (config.agent.enabled) {
@@ -1128,10 +1165,10 @@ export function agentRoutes(): express.Router {
     if (!row || row.project !== String(req.params.project)) { res.status(404).json({ error: 'no such thread in this project' }); return; }
     try {
       const h = hostOf(row); await h.ensure();       // transcripts are read through their owner's engine
-      const out = await h.request('thread/read', { threadId: row.thread_id, includeTurns: true });
+      const out = await readThread((m, p) => h.request(m, p), row.thread_id);
       const approvals = row.user_id === req.user!.id ? h.pendingApprovals(row.thread_id) : [];
       const checkpoints = isNativeThread(row.created_at) ? listCheckpoints(row.thread_id).map(publicCheckpoint) : [];
-      res.json({ thread: out.thread, mine: row.user_id === req.user!.id, user: row.user_id, approvals, checkpoints, scope: scopeOf(row.scope), provider: providerOfRow(row), model: row.model ?? null });
+      res.json({ thread: out.thread, ...(out.lost ? { lost: LOST_THREAD_TEXT } : {}), mine: row.user_id === req.user!.id, user: row.user_id, approvals, checkpoints, scope: scopeOf(row.scope), provider: providerOfRow(row), model: row.model ?? null });
     } catch (e) { fail(res, e); }
   })(); });
 
@@ -1159,7 +1196,8 @@ export function agentRoutes(): express.Router {
       const effort = typeof req.body?.effort === 'string' && req.body.effort ? String(req.body.effort).slice(0, 20) : undefined;
       // the turn's changes are signed with the model it runs on: "Claude (Opus 5.5) [Jan]"
       const cwd = native ? await prepareWorkspace(row.thread_id, row.project, req.user!.id, tracked, panelAuthor({ ...row, model: model ?? row.model })) : projectDir(row.project);
-      await h.ensureThreadLoaded(row, cwd);
+      try { await h.ensureThreadLoaded(row, cwd); }
+      catch (e) { if (LOST_THREAD.test(errMessage(e))) { res.status(410).json({ error: LOST_THREAD_TEXT, code: 'thread-lost' }); return; } throw e; }
       const input = await composeInput(text, req.body?.context as TurnContext | undefined, req.user!, scope === 'project' ? row.project : undefined);
       const legacy = legacyThreadNote(row.created_at);
       if (legacy) input.unshift({ type: 'text', text: legacy, text_elements: [] });

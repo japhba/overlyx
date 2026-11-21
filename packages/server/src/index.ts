@@ -1824,6 +1824,7 @@ api.delete('/docs/*/versions/:vid', (req, res) => {
 api.post('/docs/*/export', async (req, res) => {
   try {
     const id = docId(req);
+    if (!docPathOf(id)) { res.status(400).json({ error: 'A project has no PDF of its own: open one of its documents to build it' }); return; }
     const format = String(req.body?.format ?? 'pdf');
     const engine = 'overlyx';
     if (format === 'tex') {

@@ -459,7 +459,9 @@ function PaletteButton({ b }: { b: ToolButton }) {
   // only while open: an item's `html` may be rendered on first access (mathPanelPalettes)
   const withSyms = open && !!p.items?.some(it => it.html);
   const onClick = (e: MouseEvent) => {
-    recordUsage('toolbar', b.id);
+    // (the second click on a selected pen / colour opens its settings: counted apart from picking it, which
+    // the usage report's bursts could not tell from three swatches picked in a row — all are dk-ink-c#)
+    recordUsage('toolbar', preset && b.active ? `${b.id} ▸ settings` : b.id);
     if (!open) tipFor(b, e.currentTarget);
     if (preset && !b.active) { b.action?.(); return; }   // select first; a second click edits
     setOpen(o => !o);

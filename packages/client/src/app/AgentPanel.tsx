@@ -341,6 +341,7 @@ function CodexPanel({ project, notify, pinned, onUnpin }: { project: string; not
    *  thread takes the last choice, an open thread shows (and changes) its own */
   const [scope, setScope] = useState<AgentScope>(stored('ol.agent.scope') === 'project' ? 'project' : 'all');
   const selRef = useRef(sel); selRef.current = sel;
+  const lostRef = useRef<string | null>(null);   // a thread codex no longer has (its next message goes to a new thread)
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => { if (pinned) inputRef.current?.focus(); }, [pinned]);
@@ -490,7 +491,9 @@ function CodexPanel({ project, notify, pinned, onUnpin }: { project: string; not
     const done = cps.filter(c => c.finished || c.undone);
     const list = r.thread.turns.flatMap(turn => [...turn.items, ...turnErrorItems(turn), ...done.filter(c => c.turnId === turn.id).map(cpItem)]);
     const placed = new Set(list.map(x => x.id));
-    setItems([...list, ...done.filter(c => !placed.has('cp-' + c.n)).map(cpItem)]);
+    // codex lost the conversation: said where it was, not as an alarm each time the panel reopens it
+    if (r.lost) { lostRef.current = tid; if (stored('ol.agent.sel:' + project) === tid) store('ol.agent.sel:' + project, ''); }
+    setItems([...list, ...done.filter(c => !placed.has('cp-' + c.n)).map(cpItem), ...(r.lost ? [{ type: 'error', id: 'thread-lost', text: r.lost } as AgentItem] : [])]);
     setLiveCp(cps.find(c => !c.finished && !c.undone) ?? null);
     setMine(r.mine);
     if (r.scope) setScope(r.scope);
@@ -545,16 +548,29 @@ function CodexPanel({ project, notify, pinned, onUnpin }: { project: string; not
           tid = null;
           notify(`A new thread on ${PROVIDER_LABEL[providerOf(chosen)]}: a conversation stays with the provider it started on`);
         }
-        if (!tid) {
+        const fresh = async () => {
           const prov = (chosen ? providerOf(chosen) : 'chatgpt') as AgentProvider;
           const r = await api.agentStartThread(project, scope, prov, chosen?.id);
-          tid = r.id; setSel(tid); setMine(true); setItems([]); setLiveCp(null); setApprovals([]);
+          setSel(r.id); setMine(true); setItems([]); setLiveCp(null); setApprovals([]);
           setThreadAt({ provider: r.provider ?? prov, model: r.model ?? chosen?.id ?? null });
-          store('ol.agent.sel:' + project, tid); void refreshThreads();
-        }
+          store('ol.agent.sel:' + project, r.id); void refreshThreads();
+          return r.id;
+        };
+        // a conversation codex no longer has (agent.ts LOST_THREAD) cannot take the message: a new thread does
+        if (!tid || tid === lostRef.current) tid = await fresh();
         setItems(list => [...list, localItem]);
         setBusyTurn('pending');
-        await api.agentTurn(project, tid, { text: t, context, clientMessageId: localItem.id, tracked, scope, ...(chosen ? { model: chosen.id } : {}), ...(effort ? { effort } : {}) });
+        const turn = (id: string) => api.agentTurn(project, id, { text: t, context, clientMessageId: localItem.id, tracked, scope, ...(chosen ? { model: chosen.id } : {}), ...(effort ? { effort } : {}) });
+        try { await turn(tid); }
+        catch (e) {
+          if ((e as { data?: { code?: string } }).data?.code !== 'thread-lost') throw e;
+          notify('The agent no longer had that conversation: your message started a new thread');
+          lostRef.current = tid;
+          tid = await fresh();
+          setItems(list => [...list, localItem]);
+          setBusyTurn('pending');
+          await turn(tid);
+        }
       } catch (e) { setBusyTurn(null); notify(errText(e), 'error'); }
     })();
   };

@@ -3367,10 +3367,17 @@ blend.
   context automatically: the open documents and the current selection — as LaTeX (the ⌘J
   conversion) and marked ⟦SELECTION⟧…⟦/SELECTION⟧ in an excerpt of the file. Formulas in the
   transcript (assistant, user and reasoning text) render through the math editor's MathJax path
-  with the document's macros; they select as one unit, and copying puts their LaTeX source on
+  with the project's macros (`editor/macrodefs.ts` projectMacroTable: the active document's over the last ones
+  of the project that had any, so they draw beside a note or a deck too; not counted as "shown as TeX code");
+  they select as one unit, and copying puts their LaTeX source on
   the clipboard (`app/richcopy.ts`) — so equations round-trip between the transcript, the
   editor (LaTeX paste) and the composer, and a paste into a formula sheds `$…$`/`\[…\]`. Threads belong to the
   project: every editor sees them and can read transcripts, only the creator drives one.
+  A transcript is one `thread/read` with its turns, or — codex ≥ 0.17x keeps paginated threads, for which
+  that read is deprecated and can fail ("invalid paginated history lineage") — the thread's metadata with
+  its turns paged in by `thread/turns/list` (`agent.ts readThread`). A thread codex has no record of any
+  more ("no rollout found …") is answered `lost`: the panel says so in the transcript, does not reopen it
+  next time, and the next message (or a send the server refuses with 410 `thread-lost`) starts a new thread.
   Each user's codex child is owned by a detached keeper process (`scripts/agent-keeper.mjs`,
   JSON-lines over a unix socket at `data/agent-home/<id>/keeper.sock`): a server restart — a
   deploy — reconnects instead of killing a running turn; buffered events are replayed, pending

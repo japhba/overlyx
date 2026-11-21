@@ -1229,7 +1229,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
 
   /** Build the PDF. `open: false` (LyX's Update) leaves the PDF pane as it is; `auto`: started by the auto-build setting (quiet). */
   const build = async (opts: { open?: boolean; auto?: boolean } = {}) => {
-    if (!docId) return;
+    // (a project's own page — Ctrl+R there — has no PDF: the server was asked to build "owner/project")
+    if (!docId || isProjectRoot) return;
     if (opts.open !== false) showPane('pdf');
     setPdf(p => ({ ...p, busy: true, auto: !!opts.auto }));
     try {

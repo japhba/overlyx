@@ -8,6 +8,7 @@ import { ROBOT_SVG } from '../app/Avatar';
 import { EditorView } from 'prosemirror-view';
 import * as Y from 'yjs';
 import { snapshotCovers, localWritesCommitted } from './savedstate';
+import { keepLocalCopyOpen } from './localreopen';
 import { WebsocketProvider } from 'y-websocket';
 import { IndexeddbPersistence } from 'y-indexeddb';
 import * as decoding from 'lib0/decoding';
@@ -277,6 +278,8 @@ export function createEditor(opts: EditorOptions): EditorHandle {
     }).catch(error => { if (!destroyed) { localError = String(error); emitSaveState(); } });
   });
   ydoc.on('update', () => { localEmpty = isEmpty(); });
+  // the browser closed the local copy's database (Safari, a tab left in the background): open it again
+  keepLocalCopyOpen(persistence, () => { if (destroyed) return; localSavedSeq = localWriteSeq; localError = undefined; emitSaveState(); });
   (provider as any).messageHandlers[3] = (_enc: unknown, dec: decoding.Decoder) => {
     savedAt = decoding.readVarUint(dec);
     decoding.readVarUint8Array(dec);   // legacy state vector
