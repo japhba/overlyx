@@ -32,6 +32,7 @@ import { applyTrackedSource, applyPlainSource, applySyncedSource, restoreSource,
 import { convertModel1, model1Document } from './collabdoc.ts';
 import { isModel2 } from '@overlyx/core/collab/model.ts';
 import { mergeLyx, pmToLyxBody, writeParagraphs, type Paragraph } from '@overlyx/core';
+import { mergeLines, mergeObjects, boardObjects } from './filemerge.ts';
 
 export type { SourceSpan, DocMeta };
 export { readTextFile, looksLikeDocument };
@@ -309,12 +310,12 @@ export class OpenDoc implements DocState, EditableDoc {
 
   /**
    * Store the state, and with it (one transaction) whether the file holds it (`saved`: nothing
-   * changed since the last save or load). An unsaved state of a text document is stored with the
-   * file text it was based on, once per file version: the next open keeps such a state and merges a
-   * file changed meanwhile three-way against that text (DocManager.openCold).
+   * changed since the last save or load). An unsaved state is stored with the file text it was
+   * based on, once per file version: the next open keeps such a state and merges a file changed
+   * meanwhile three-way against that text (DocManager.openCold, openHtmlCold, openBoardCold).
    */
   private writeState(state: Uint8Array, saved: boolean): void {
-    const keepBase = !saved && this.fileText !== null && !(this instanceof HtmlDoc) && !(this instanceof BoardDoc);
+    const keepBase = !saved && this.fileText !== null;
     const newBase = keepBase && this.storedBase !== this.fileHash;
     db.transaction(() => {
       db.prepare('INSERT INTO ydocs (id, state, file_hash, updated_at, epoch) VALUES (?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state, file_hash=excluded.file_hash, updated_at=excluded.updated_at, epoch=excluded.epoch')
@@ -803,8 +804,9 @@ async function inWorker(doc: OpenDoc, op: string, args: unknown, created = false
 /**
  * A whiteboard document (.board): the same Yjs sync, presence and persistence machinery as a
  * .tex document, but the state is a flat Y.Map('objects') of board items (strokes, images,
- * notes) and the file on disk is JSON — no LaTeX anywhere. External changes replace the state
- * (boards have no three-way merge; concurrent live editing is already conflict-free via Yjs).
+ * notes) and the file on disk is JSON — no LaTeX anywhere. An external change is merged three-way
+ * by object (filemerge.ts): the objects it changed are taken over, those changed here since the last
+ * save are kept; one changed on both sides takes the file's, and the board before is kept as a version.
  */
 export class BoardDoc extends OpenDoc {
   constructor(id: string, project: string, relPath: string, absPath: string) {
@@ -850,13 +852,31 @@ export class BoardDoc extends OpenDoc {
     }
     const hash = sha1(text);
     if (hash === this.fileHash || hash === knownHashes.get(this.absPath)) return false;
+    const base = this.fileText === null ? null : boardObjects(this.fileText);
+    const theirs = boardObjects(text);
+    // a file that is no board's JSON (half written by another tool) must not empty the board
+    if (!theirs && base) { console.warn(`[docs] ${this.id}: the file on disk is not a board any more — ignoring it`); return false; }
     this.fileHash = hash;
     this.fileText = text;
     knownHashes.set(this.absPath, hash);
-    this.loadFromJson(text, 'file-load');
-    if (sha1(this.toText()) !== hash) this.dirty = true;   // ours differs (normalisation): write it back
+    if (base && theirs) this.mergeJson(base, theirs);
+    else this.loadFromJson(text, 'file-load');
+    if (sha1(this.toText()) !== hash) this.dirty = true;   // ours differs (edits here, normalisation): write it
     this.persistState();
     return true;
+  }
+
+  /** What changed from `base` to `theirs` (the file's objects) merged into the board, three-way by object. */
+  private mergeJson(base: Record<string, unknown>, theirs: Record<string, unknown>): void {
+    const m = this.objects;
+    const ours = new Map(m.entries());
+    const { set, conflicts } = mergeObjects(base, ours, theirs);
+    // an object both changed takes the file's: the board as it was is kept as a version
+    if (conflicts) this.snapshot('before a change on disk', this.render().text);
+    this.ydoc.transact(() => {
+      for (const [k, v] of set) { if (v === undefined) m.delete(k); else m.set(k, v); }
+    }, 'file-load');
+    if (sha1(this.toText()) === this.fileHash) this.markSaved();
   }
 }
 
@@ -866,7 +886,8 @@ export class BoardDoc extends OpenDoc {
  * written to disk as it is. People edit it on the canvas and in the code, agents through the file
  * tools — every change lands here as a splice of the text, so whatever an agent wrote stays byte
  * for byte. A change on disk is taken over where it does not touch unsaved edits (three-way, by
- * the changed region); when it does, the disk wins and the state before is kept as a version.
+ * the changed region, else by lines: filemerge.ts); lines both changed take the disk's, and the
+ * state before is kept as a version.
  */
 export class HtmlDoc extends OpenDoc {
   constructor(id: string, project: string, relPath: string, absPath: string) {
@@ -926,8 +947,17 @@ export class HtmlDoc extends OpenDoc {
         }, 'file-load');
         this.dirty = true;
       } else {
-        this.snapshot('before a change on disk', ours);
-        this.loadFromText(text, 'file-load');
+        // the disk's changes and ours overlap as one region: merged by lines (filemerge.ts); lines
+        // both changed take the disk's, and the text before is kept as a version
+        const m = mergeLines(base, ours, text);
+        if (m.conflicts) this.snapshot('before a change on disk', ours);
+        this.ydoc.transact(() => {
+          for (const s of [...m.splices].reverse()) {
+            if (s.removed) this.html.delete(s.from, s.removed);
+            if (s.insert) this.html.insert(s.from, s.insert);
+          }
+        }, 'file-load');
+        if (m.text === text) this.markSaved(); else this.dirty = true;
       }
     }
     this.persistState();
@@ -1188,7 +1218,11 @@ export class DocManager {
       try {
         Y.applyUpdate(doc.ydoc, new Uint8Array(row.state), 'db');
         if (row.epoch) doc.epoch = row.epoch;
+        // edits stored but not written (a crash, a save that kept failing): kept and written
+        const unsaved = this.unsavedFor(id, row, hash);
+        if (unsaved && unsaved !== 'stale') return this.rescueUnsaved(doc, row, text, unsaved.base);
         if (row.file_hash !== hash) {
+          if (unsaved === 'stale') this.keepStale(doc, text);
           console.log(`[docs] ${id}: board file changed since last persisted state — reloading`);
           doc.loadFromJson(text, 'file-load');
         }
@@ -1222,6 +1256,10 @@ export class DocManager {
         Y.applyUpdate(doc.ydoc, new Uint8Array(row.state), 'db');
         if (row.epoch) doc.epoch = row.epoch;
       } catch { doc.ydoc.destroy(); return this.openHtmlFresh(id, project, relPath, absPath, text, hash); }
+      // edits stored but not written (a crash, a save that kept failing): kept and written
+      const unsaved = this.unsavedFor(id, row, hash);
+      if (unsaved && unsaved !== 'stale') return this.rescueUnsaved(doc, row, text, unsaved.base);
+      if (unsaved === 'stale') this.keepStale(doc, text);
     }
     // the stored history with the file on top (a change made while it was closed is one splice)
     doc.loadFromText(text, 'file-load');
@@ -1229,6 +1267,55 @@ export class DocManager {
     if (!row || row.file_hash !== hash) doc.persistState();
     this.register(doc);
     return doc;
+  }
+
+  /**
+   * Whether a stored state (`row`) has edits its file does not have (ydocs_saved.saved = 0), and can
+   * be rescued over the file as it is now (`hash`): the file is the one the state was stored for, or
+   * the file text it was based on is stored (`base`: merge the file's change since against it).
+   * 'stale': unsaved, but the file changed and its base is not stored (a row from before 21 Nov).
+   */
+  private unsavedFor(id: string, row: DbState, hash: string): { base: string | null } | 'stale' | null {
+    const u = db.prepare('SELECT base_hash, base FROM ydocs_saved WHERE id = ? AND saved = 0 AND file_hash = ?').get(id, row.file_hash) as { base_hash: string | null; base: string | null } | undefined;
+    if (!u) return null;
+    if (row.file_hash === hash) return { base: null };
+    if (u.base !== null && u.base_hash === row.file_hash) return { base: u.base };
+    return 'stale';
+  }
+
+  /**
+   * A deck's, poster's, page's or board's stored state with edits its file does not have, opened:
+   * the state as it is, the file's change since (if any) merged in three-way against `base` (the
+   * document's absorbExternalChange, as for a change on disk while it is open) — then written.
+   */
+  private rescueUnsaved<D extends HtmlDoc | BoardDoc>(doc: D, row: DbState, text: string, base: string | null): D {
+    const changed = row.file_hash !== doc.fileHash;
+    doc.lastSavedAt = fs.statSync(doc.absPath).mtimeMs;
+    if (!changed && doc.toText() === text) {
+      // nothing the file lacks after all (the save ended just after the state was stored)
+      doc.markSaved();
+      doc.persistState();
+    } else {
+      console.log(`[docs] ${doc.id}: the stored state has edits the file has not — kept${changed ? ', the file\'s change since merged in' : ''}, and written`);
+      if (changed && base !== null) {
+        doc.fileText = base;
+        doc.fileHash = row.file_hash;
+        knownHashes.set(doc.absPath, row.file_hash);
+        doc.absorbExternalChange(text);
+      }
+      doc.dirty = true;
+    }
+    this.register(doc);
+    if (doc.dirty) void doc.saveToFile();
+    return doc;
+  }
+
+  /** Unsaved edits that cannot be merged with the file (no base stored): kept as a version before the file is loaded. */
+  private keepStale(doc: HtmlDoc | BoardDoc, text: string): void {
+    const ours = doc.toText();
+    if (ours === text) return;
+    console.log(`[docs] ${doc.id}: the stored state has edits the file has not, and the file changed — the file is loaded, the edits kept as a version`);
+    doc.snapshot('unsaved edits from before a restart', ours);
   }
 
   private openHtmlFresh(id: string, project: string, relPath: string, absPath: string, text: string, hash: string): HtmlDoc {

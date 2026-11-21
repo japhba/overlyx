@@ -326,9 +326,25 @@ blend.
   display math in TeX and in the parser, joining paragraphs on reopen). Tests:
   `docs-unsaved-state` (and `-worker`: a kill, a failed save then a restart, the normal path, a file
   changed while closed — for .tex and .md), `docs-open-merge-stored`, `docs-failed-save`,
-  `docs-disk-merge-version`, `tex-empty-formula`. Still open: HTML pages and boards load the file
-  over an unsaved stored state as before; the service's `TimeoutStopSec` (20 s) is better about 60 s,
-  so that a slow `saveAll` at a stop is not cut off (the owner installs the unit).
+  `docs-disk-merge-version`, `tex-empty-formula`. HTML pages and boards: next paragraph.
+* **Decks, posters, web pages and boards survive a crash too** (21 Nov 2026, `server/src/docs.ts`,
+  `filemerge.ts`). The same `ydocs_saved` row, with its `base`, is stored for them; an open that finds
+  an unsaved state (`DocManager.openHtmlCold` / `openBoardCold` → `rescueUnsaved`) keeps it and writes
+  it, instead of loading the file over a deck's edits (and instead of keeping a board's without ever
+  writing them, or dropping them when the board file had changed). A file changed meanwhile is merged
+  three-way against `base`, as a change on disk while the document is open is: an HTML text first by
+  the one changed region (as before), else **by lines** (`mergeLines`, diff3 like `git merge-file`:
+  lines only one side changed are that side's, lines both changed — or adjacent changes with no
+  unchanged line between — take the file's); a board **by object** (`mergeObjects`: the objects the file
+  changed are taken, those changed here kept, one changed on both sides takes the file's). Wherever
+  the file's version won over an edit here, the document as it was is kept as a version *before a
+  change on disk* in History. An unsaved state stored before this (no `base`) whose file changed is
+  kept as a version *unsaved edits from before a restart*, and the file is loaded. A board file that is
+  not a board's JSON any more (half written by another tool) is ignored instead of emptying the board.
+  HTML articles are documents (`OpenDoc`) and were covered already. Tests: `docs-unsaved-deck-board`,
+  `filemerge`.
+  The service's `TimeoutStopSec` (20 s) is better about 60 s, so that a slow `saveAll` at a stop is
+  not cut off (the owner installs the unit).
 * **Sharing** (Google-Docs model): a project is private to its owner until it is shared. The owner
   invites people by username or e-mail address as *viewers* or *editors* (an e-mail that has not
   signed in yet is kept as an invitation and bound to the account on its first Google sign-in), or
