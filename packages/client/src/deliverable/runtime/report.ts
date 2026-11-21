@@ -5,7 +5,7 @@
  * could not read, the page's script errors. Measured in the page as rendered, in CSS px relative
  * to the slide.
  */
-import { slides, slideTitle, state, srcOf, isForeign, pageHtml, pathOf, sourced } from './env';
+import { slides, slideTitle, state, srcOf, isForeign, pageHtml, pathOf, sourced, wordsOf } from './env';
 import { mathTypeset } from './math';
 import { noOverlap, visibleInk, glyphInk, formulaInk, pictureInk, aboveText } from './overlap';
 import { wrapWarning } from './layout';
@@ -21,7 +21,7 @@ addEventListener('unhandledrejection', e => { if (scriptErrors.length < 20) scri
 function labelOf(el: Element): string {
   // (typeset math has no text of its own: the source says what it was)
   const src = el.querySelector('mjx-container') ? srcOf.get(el) : null;
-  const t = ((src ?? el).textContent ?? '').replace(/\s+/g, ' ').trim();
+  const t = wordsOf(src ?? el);
   if (t) return `"${t.length > 48 ? t.slice(0, 45) + '…' : t}"`;
   const cls = (el.getAttribute('class') ?? '').trim().split(/\s+/)[0];
   return `<${el.localName}${cls ? '.' + cls : ''}>`;

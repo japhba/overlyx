@@ -35,7 +35,8 @@ const hostCode = compile([
   declaration(hostSource, 'onMessage', true),
 ].join('\n'));
 const runtimeCode = compile([
-  ...['link', 'srcPath', 'pathOf', 'liveAt', 'slideOf', 'docRect', 'slideTitle', 'slideBoxes', 'pageSize', 'sendLayout'].map(n => declaration(envSource, n)),
+  ...['link', 'srcPath', 'pathOf', 'liveAt', 'slideOf', 'docRect', 'wordsOf', 'slideTitle', 'slideBoxes', 'pageSize', 'sendLayout'].map(n => declaration(envSource, n)),
+  declaration(envSource, 'APART', true),
   ...['TEXT_TAGS', 'REPLACED', 'SVG_SHAPES', 'masterKey'].map(n => declaration(editSource, n, true)),
   ...['PH', 'MEDIA', 'isPicturePh'].map(n => declaration(placeholderSource, n, true)),
   ...['phRole', 'isEmptyPh'].map(n => declaration(placeholderSource, n)),

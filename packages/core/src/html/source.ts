@@ -503,20 +503,31 @@ function gapBefore(text: string, at: number): string {
 const reindent = (html: string, indent: string) => html.split('\n').map((l, i) => (i && l ? indent + l : l)).join('\n');
 
 /** Insert `html` as the `index`-th element child of `parent` (past the end: last), lined up with its siblings. */
+/**
+ * Where a child stands in the text: its own place, or — an element the parser implied, as a table's
+ * `<tbody>` round rows written straight into the `<table>` — from its first written part to its last
+ * (the canvas's source DOM has it too and counts it: a `<colgroup>` inserted at 0 goes before the rows).
+ */
+function spanOf(k: HElement): { start: number; end: number } | null {
+  if (k.sourceCodeLocation) return { start: k.sourceCodeLocation.startOffset, end: k.sourceCodeLocation.endOffset };
+  const inner = elementChildren(k).map(spanOf).filter((s): s is { start: number; end: number } => !!s);
+  return inner.length ? { start: inner[0].start, end: inner[inner.length - 1].end } : null;
+}
+
 export function insertSplice(text: string, parent: HElement, index: number, html: string): Splice {
-  const kids = elementChildren(parent).filter(k => k.sourceCodeLocation);
+  const kids = elementChildren(parent).map(spanOf).filter((s): s is { start: number; end: number } => !!s);
   const before = kids[index];
   if (before) {
-    const at = before.sourceCodeLocation!.startOffset;
+    const at = before.start;
     const indent = indentBefore(text, at);
     if (indent !== null) return { from: at, to: at, insert: reindent(html, indent) + gapBefore(text, at) + indent };
     return { from: at, to: at, insert: html };
   }
   const last = kids[kids.length - 1];
   if (last) {
-    const at = last.sourceCodeLocation!.endOffset;
-    const indent = indentBefore(text, last.sourceCodeLocation!.startOffset);
-    if (indent !== null) return { from: at, to: at, insert: gapBefore(text, last.sourceCodeLocation!.startOffset) + indent + reindent(html, indent) };
+    const at = last.end;
+    const indent = indentBefore(text, last.start);
+    if (indent !== null) return { from: at, to: at, insert: gapBefore(text, last.start) + indent + reindent(html, indent) };
     return { from: at, to: at, insert: html };
   }
   const r = innerRange(parent);

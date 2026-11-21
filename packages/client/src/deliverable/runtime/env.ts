@@ -180,9 +180,30 @@ export function docRect(el: Element): { x: number; y: number; w: number; h: numb
   return { x: r.left + scrollX, y: r.top + scrollY, w: r.width, h: r.height };
 }
 
+/** the elements whose words stand apart from their neighbours' (a line break, a cell, a paragraph) */
+const APART = new Set(['br', 'p', 'div', 'li', 'td', 'th', 'tr', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'table', 'section', 'figure', 'figcaption', 'blockquote', 'pre', 'dt', 'dd']);
+/** an element's words as one reads them: a space where a line, a cell or a paragraph ends (textContent ran "a1</td><td>b1" together); no speaker notes, scripts or styles */
+export function wordsOf(el: Element): string {
+  let out = '';
+  const walk = (n: Node) => {
+    for (const c of Array.from(n.childNodes)) {
+      if (c.nodeType === 3) { out += c.nodeValue ?? ''; continue; }
+      if (c.nodeType !== 1) continue;
+      const e = c as Element;
+      if (e.localName === 'script' || e.localName === 'style' || e.localName === 'template' || (e.localName === 'aside' && e.classList.contains('notes'))) continue;
+      const apart = APART.has(e.localName);
+      if (apart) out += ' ';
+      walk(e);
+      if (apart) out += ' ';
+    }
+  };
+  walk(el);
+  return out.replace(/\s+/g, ' ').trim();
+}
+
 export function slideTitle(s: Element): string {
-  const h = s.querySelector('h1, h2, h3, h4');
-  return ((h?.textContent ?? s.textContent ?? '').replace(/\s+/g, ' ').trim()).slice(0, 80);
+  const h = s.querySelector('h1, h2, h3, h4, [data-ol-ph="title"]');
+  return wordsOf(h ?? s).slice(0, 80);
 }
 
 export function slideBoxes(): SlideBox[] {

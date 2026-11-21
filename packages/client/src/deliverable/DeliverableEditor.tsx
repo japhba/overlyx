@@ -3682,7 +3682,9 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     if (link && host.present?.(src('present') + `#${presentFrom.current + 1}`)) return;
     setPresentUrl(src('present') + `#${presentFrom.current + 1}`);
     setPresenting(true);
-    if (as) { setFullAsk(!!document.fullscreenEnabled); return; }
+    // (no gesture to go full screen with: asked by a button over the slide — not on a touch screen presenting
+    // because another screen began, Tandem's tablet: its first pen stroke went into the button)
+    if (as) { setFullAsk(!!document.fullscreenEnabled && !(as === 'here' && touchRef.current)); return; }
     setTimeout(() => {
       void presentBox.current?.requestFullscreen?.().catch(() => undefined);
       presentFrame.current?.focus();

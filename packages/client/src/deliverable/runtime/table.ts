@@ -503,6 +503,18 @@ function mergeOps(g: Grid, cell: Cell, dir: 'right' | 'down'): HtmlOp[] {
   // (both texts kept, one under the other)
   const x = a.innerHTML.trim(), y = b.innerHTML.trim();
   if (y) ops.push({ t: 'inner', path: p, html: x ? `${x}<br>${y}` : y });
+  // a row whose last cell this was goes with it (an empty <tr> is no row): what spans it a row shorter
+  const tr = dir === 'down' ? other.parentElement : null, q = posOf(g, other), trp = tr ? pathOf(tr) : null;
+  if (tr && q && trp && !Array.from(tr.children).some(c => c !== other && srcOf.has(c) && (c.localName === 'td' || c.localName === 'th'))) {
+    const span = (cell.rowSpan || 1) + (other.rowSpan || 1) - 1;
+    ops[0] = { t: 'attr', path: p, name: 'rowspan', value: span > 1 ? String(span) : null };
+    for (const c of new Set(g.at[q.row])) {
+      const cp = c && c !== cell && c !== other && (posOf(g, c)?.row ?? q.row) < q.row ? pathOf(c) : null;
+      if (c && cp) ops.push({ t: 'attr', path: cp, name: 'rowspan', value: (c.rowSpan || 1) > 2 ? String((c.rowSpan || 1) - 1) : null });
+    }
+    ops.push({ t: 'remove', paths: [trp] });
+    return ops;
+  }
   ops.push({ t: 'remove', paths: [op] });
   return ops;
 }

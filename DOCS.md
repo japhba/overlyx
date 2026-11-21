@@ -1862,7 +1862,10 @@ blend.
     and *Format ▸ Table*; the borders between columns and under rows are dragged (column widths as
     `<colgroup><col style="width: …%">`, a row's height as its `<tr style="height: …px">`); the
     right-click menu also merges a cell with the one to its right or below (`colspan` / `rowspan`,
-    the texts one under the other) and splits a merged cell again. The look:
+    the texts one under the other) and splits a merged cell again; a merge down that takes a row's
+    last cell takes the row too, the cells spanning it a row shorter (21 Nov 2026: an empty `<tr>`
+    was left). The `<colgroup>` goes before the rows (core `insertSplice` counts the `<tbody>` the
+    parser implies round rows written straight into a `<table>`, as the canvas does). The look:
     `class="ol-table"` (TABLE_CSS, the same in editing, the rail, presenting, the PDF and the website)
     takes the slide's font and text colour and draws its rules in that colour, sizes in em — so it
     reads on light and dark slides, in every design and on a poster; `data-ol-borders="all"` a line

@@ -87,6 +87,12 @@ describe('html deliverable source edits', () => {
     expect(li).toContain('<li>Two</li>\n    <li>One</li>\n  </ul>');
     // to where it is: nothing
     expect(applyOp(DECK, { t: 'move', path: [1, 1, 0, 0], parent: [1, 1, 0], index: 0 })).toBe(DECK);
+    // a table's rows sit in a <tbody> the parser implied: a <colgroup> inserted first goes before them
+    const tbl = '<!doctype html>\n<html><body>\n<table class="ol-table">\n  <tr><td>a</td></tr>\n  <tr><td>b</td></tr>\n</table>\n</body></html>';
+    const { doc: td } = parseSource(tbl);
+    const tp = pathOf(td.childNodes.find((n: any) => n.tagName === 'html')!.childNodes.find((n: any) => n.tagName === 'body')!.childNodes.find((n: any) => n.tagName === 'table') as any);
+    const cg = applyOp(tbl, { t: 'insert', parent: tp, index: 0, html: '<colgroup><col style="width: 50%"></colgroup>' });
+    expect(cg).toContain('<table class="ol-table">\n  <colgroup><col style="width: 50%"></colgroup>\n  <tr><td>a</td></tr>');
   });
 
   it('rebases a path over an edit made elsewhere, refuses one made to the element', () => {
