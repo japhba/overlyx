@@ -116,9 +116,9 @@ test('GUI authoring, recovery, saved state, PDF and offline website export', asy
   // Cancel a secondary deliverable dialog and a download menu; both should leave this deck usable.
   await page.locator('.menubar').getByText('File', { exact: true }).click();
   await page.getByText('New slides / poster / page…').click();
-  const addDialog = page.locator('.dialog').filter({ hasText: 'New slides, poster or web page' });
+  const addDialog = page.locator('.dialog').filter({ hasText: 'New slides, poster' });
   await expect(addDialog).toBeVisible();
-  await addDialog.getByRole('button', { name: 'Cancel' }).click();
+  await addDialog.getByRole('button', { name: 'Close' }).click();
   await expect(addDialog).toHaveCount(0);
   await page.locator('[data-dl-download]').click();
   await expect(page.locator('.ctx-menu')).toBeVisible();

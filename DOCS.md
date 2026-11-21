@@ -797,7 +797,9 @@ blend.
   `usageReport.ts`): the web app records the *kind* of every deliberate action — a menu entry
   ("Edit ▸ Text Style ▸ Bold"), toolbar button, shortcut or Alt+P chord, and whether its command did
   anything — plus modifier combinations that reached the editor unanswered, dialogs (applied or
-  dismissed, how long open), error messages as templates, uncaught errors, undo/redo, the kind of
+  dismissed, how long open; one without a primary button — Settings, Share, whose changes apply at
+  once — counts as applied when something in it was changed or pressed, tabs and pop-ups aside:
+  before 21 Nov 2026 every visit of theirs read "dismissed"), error messages as templates, uncaught errors, undo/redo, the kind of
   screen, and once per page load the platform / browser / width class. Every event carries where it
   happened (text, formula, table, inset, dialog) and a random per-page-load session id; no user id,
   document, project or file name, text or formula: quoted strings, file names, e-mail addresses and
@@ -2446,6 +2448,18 @@ blend.
   Settings ▸ User then says it is kept with the account, This device is "VS Code", and signed out it
   offers *Sign in to OverLyX…*. `tests/account-prefs.test.ts`, `tests/account-prefs-sync.test.ts`,
   `tests/vscode-account-prefs.test.ts`.
+* **Interface review, 21 Nov 2026** (findings and proposals: the wave report `ui-nov21.md`). Repairs
+  that cut across components live in `client/src/app/uipolish.css` (imported by main.tsx). Settings ▸
+  **Drawing & pen is a section of This device** where that tab exists (pens, calibration and palm are
+  kept per device; `SCOPE_SECTIONS.device`), under User otherwise; `arg: 'drawing'` opens it there.
+  The start screen's status bar is quiet (no connection, style or zoom without a document) and the
+  header's Share appears there only while the files panel shows its project. Modern's ⋮ More tools
+  stays pinned at the strip's end when a narrow window cannot fit the row; the "View n%"
+  magnification chip shows only while magnified. On a phone the Modern header keeps the file name
+  (project name hidden, "✓ All changes saved" shrinks to ✓) and the status bar drops the style, page
+  estimate and build stamp. Dialog footers use `btn` and carry no Cancel beside Close. Links without
+  a class take `--link`. AI ▸ Pause before suggesting is a slider with rungs; the server's
+  `OPENROUTER_API_KEY` note shows to administrators only.
 * **Fonts, for the editor and for the PDF separately** (like LyX's screen fonts and document fonts;
   catalogue in `client/src/fonts/catalog.ts`). *Settings ▸ Fonts* (per browser, both shells) has two
   choices. *Text font* (`prefs.editorFont`): Computer Modern (bundled CMU Serif, the default), the text

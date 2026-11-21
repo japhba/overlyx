@@ -73,12 +73,13 @@ export type SettingsScope = 'user' | 'device' | 'project' | 'document';
 /** the sections of each scope: a project and a document set what concerns their documents; the rest is each person's own */
 const SCOPE_SECTIONS: Record<SettingsScope, SettingsSection[]> = {
   user: SECTIONS.map(([id]) => id),
-  // (This device has one page of its own: DeviceSettings.tsx)
-  device: ['editor'],
+  // (This device: its own page, DeviceSettings.tsx, and the pens — they belong to this screen and pen;
+  // without a This device tab (not signed in, VS Code without the account) Drawing & pen is under User)
+  device: ['editor', 'drawing'],
   project: ['editor', 'fonts', 'styles'],
   document: ['styles', 'editor'],
 };
-const sectionLabel = (id: SettingsSection, scope: SettingsScope) => (scope === 'device' ? 'This device' : scope === 'document' && id === 'editor' ? 'Paragraphs' : SECTIONS.find(([s]) => s === id)![1]);
+const sectionLabel = (id: SettingsSection, scope: SettingsScope) => (scope === 'device' && id === 'editor' ? 'This device' : scope === 'document' && id === 'editor' ? 'Paragraphs' : SECTIONS.find(([s]) => s === id)![1]);
 /** which project settings each section has (its dot in the Project tab) */
 const PROJECT_KEYS: Partial<Record<SettingsSection, (keyof ProjectSettings)[]>> = {
   editor: ['spellcheck', 'autoCorrect', 'autoBuild', 'autoBuildDelay', 'paragraphSkip'], fonts: ['editorFont', 'editorMathFont'], styles: ['textStyles'],
@@ -190,6 +191,9 @@ function FontSample() {
   return <div class="lyx-editor font-sample" data-font-sample aria-hidden="true" dangerouslySetInnerHTML={{ __html: sample.html }} />;
 }
 
+/** Settings ▸ AI ▸ Pause before suggesting: its slider's rungs (ms) */
+const DELAY_RUNGS = [{ v: 200, label: 'default' }, { v: 1000, label: '1 s' }, { v: 2000, label: '2 s' }];
+
 const THEMES: [ThemePref, string, string][] = [
   ['system', 'Default', 'Light or dark with the operating system.'],
   ['light', 'Light', ''],
@@ -215,9 +219,12 @@ export function SettingsPanel({ ai, user, initial, scope: initialScope, onClose,
   const scopes: SettingsScope[] = ['user', ...(deviceTab ? ['device' as const] : []), ...(project ? ['project' as const] : []), ...(doc ? ['document' as const] : [])];
   /** where the User tab's settings are kept */
   const kept = deviceTab ? 'Kept with your account, on every device you sign in on.' : `Kept in ${device}.`;
-  const [scope, setScopeState] = useState<SettingsScope>(initialScope && scopes.includes(initialScope) ? initialScope : 'user');
-  // (Administration only for administrators; the shell's sections in the User tab)
-  const sectionsOf = (s: SettingsScope) => SCOPE_SECTIONS[s].filter(id => (s !== 'user' || shown.includes(id)) && (id !== 'admin' || user.isAdmin));
+  // (Drawing & pen asked for: where it is — This device when there is one)
+  const [scope, setScopeState] = useState<SettingsScope>(initialScope && scopes.includes(initialScope) ? initialScope : initial === 'drawing' && deviceTab ? 'device' : 'user');
+  // (Administration only for administrators; the shell's sections in the User tab — and Drawing & pen in
+  // This device when it has a tab, under User otherwise)
+  const sectionsOf = (s: SettingsScope) => SCOPE_SECTIONS[s].filter(id => (s === 'project' || s === 'document' || shown.includes(id)) && (id !== 'admin' || user.isAdmin)
+    && (id !== 'drawing' || (s === 'device') === deviceTab));
   const sections = sectionsOf(scope);
   const [section, setSection] = useState<SettingsSection>(initial && sections.includes(initial) ? initial : sections[0] ?? 'editor');
   const setScope = (s: SettingsScope) => { setScopeState(s); if (!sectionsOf(s).includes(section)) setSection(sectionsOf(s)[0]); };
@@ -410,7 +417,7 @@ export function SettingsPanel({ ai, user, initial, scope: initialScope, onClose,
 
   const content = (() => {
     switch (section) {
-      case 'editor': return scope === 'device' ? <DeviceSettings where={keptWith ? `${keptWith.device}, on this computer` : undefined} onDrawing={() => { setScopeState('user'); setSection('drawing'); }} />
+      case 'editor': return scope === 'device' ? <DeviceSettings where={keptWith ? `${keptWith.device}, on this computer` : undefined} onDrawing={() => setSection('drawing')} />
         : scope === 'document' && doc ? <DocumentParagraphs doc={doc} /> : editorSection;
       case 'fonts': return fontsSection;
       case 'styles': return stylesSection;
@@ -442,15 +449,18 @@ export function SettingsPanel({ ai, user, initial, scope: initialScope, onClose,
         </div>}
       </>;
       case 'ai': return <>
-        <p class="set-desc">{ai === null ? 'Checking the server…' : ai.available ? `Available on this server — model ${ai.model}${ai.completionModel !== ai.model ? `, autocomplete ${ai.completionModel}` : ''}.` : 'Not configured on this server: the administrator has to set OPENROUTER_API_KEY (deploy/secrets.env). The switches below have no effect until then.'}</p>
+        <p class="set-desc">{ai === null ? 'Checking the server…' : ai.available ? `Available on this server — model ${ai.model}${ai.completionModel !== ai.model ? `, autocomplete ${ai.completionModel}` : ''}.` : user.isAdmin ? 'Not configured on this server: set OPENROUTER_API_KEY (deploy/secrets.env). The switches below have no effect until then.' : 'Not set up on this server yet — its administrator can turn it on. The switches below have no effect until then.'}</p>
         <h3 class="set-group">Features</h3>
         {check('aiButton', 'Show the ✦ AI button on the toolbar', 'One button that switches autocomplete (text and formulas) on and off. Hidden until you enable it here.')}
         {check('aiRewrite', `Rewrite with AI (${REWRITE_KEY})`, 'Select text or a formula, press the key and describe the change; the proposal is shown in place and applied only when you accept it.')}
         {check('aiCompleteText', 'Autocomplete text', 'After a pause while typing, a continuation appears in grey after the caret — formulas already rendered — while ✦ AI… shows in the status bar. Tab inserts it, anything else dismisses it. Works at the end of a word or paragraph, in ordinary text.')}
         {check('aiCompleteMath', 'Autocomplete formulas', 'The same inside formulas: a suggested continuation at the caret, Tab inserts it.')}
         {check('aiInk', 'Read handwritten formulas', `The math keyboard’s ✎ Write: what you write with a pen or a finger is read as LaTeX — a picture of it and the formula around the cursor go to the model${ai?.inkModel ? ` (${ai.inkModel})` : ''}. Nothing is inserted until you tap a reading.`)}
-        <Setting id="aiCompleteDelay" label="Pause before suggesting" state={{ here: p.aiCompleteDelay !== DEFAULT_PREFS.aiCompleteDelay }} onReset={() => setPref('aiCompleteDelay', DEFAULT_PREFS.aiCompleteDelay)}>
-          <span><input type="number" min={80} max={5000} step={20} value={p.aiCompleteDelay} onInput={e => setPref('aiCompleteDelay', Math.max(80, Number((e.target as HTMLInputElement).value) || 200))} style="max-width:90px" /> ms</span>
+        <Setting id="aiCompleteDelay" label="Pause before suggesting" hint="How long typing must pause before a continuation is asked for." state={{ here: p.aiCompleteDelay !== DEFAULT_PREFS.aiCompleteDelay }} onReset={() => setPref('aiCompleteDelay', DEFAULT_PREFS.aiCompleteDelay)}>
+          {/* (a slider with rungs, as every continuous value; whole seconds and the default named) */}
+          <div class="settings-delay" data-pref="aiCompleteDelay">
+            <AxisSlider name="Milliseconds" min={80} max={2000} def={DEFAULT_PREFS.aiCompleteDelay} rungs={DELAY_RUNGS} value={Math.min(2000, p.aiCompleteDelay)} onChange={v => setPref('aiCompleteDelay', Math.round(v / 10) * 10)} />
+          </div>
         </Setting>
         <h3 class="set-group">Models</h3>
         <p class="set-desc">Any OpenRouter model id works; the notes are from measurements on a real paper. {kept} What is sent: your instruction or the text around the cursor together with the document’s LaTeX source (so the model knows the notation, macros, citation keys) goes to the model through the OverLyX server. Nothing is written to the document without your Tab or Accept. The switches are also in the Tools menu, so the command palette finds them.</p>

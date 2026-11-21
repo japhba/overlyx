@@ -12,6 +12,7 @@ import { watchPenStrokes } from './app/promotion';
 import { currentMathFont, onMathRendererChange } from './editor/lyxmath/mathjax';
 import { warmOfflineResponses } from './offline-warm';
 import './styles.css';
+import './app/uipolish.css';
 import 'prosemirror-view/style/prosemirror.css';
 import 'prosemirror-gapcursor/style/gapcursor.css';
 import 'prosemirror-tables/style/tables.css';

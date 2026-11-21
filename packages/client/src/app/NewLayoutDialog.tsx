@@ -49,8 +49,7 @@ export function NewLayoutDialog({ project, dir, onClose, onCreated, notify }: { 
   };
   return (
     <Dialog title="New slides, poster, web page or article" onClose={onClose} buttons={<>
-      <button type="button" class="small-btn" onClick={onClose}>Cancel</button>
-      <button type="button" class="small-btn primary" disabled={busy} onClick={() => create()} data-create-deliverable>Create</button>
+      <button type="button" class="btn primary" disabled={busy} onClick={() => create()} data-create-deliverable>Create</button>
     </>}>
       <p class="dialog-hint">A folder with a web page (<code>index.html</code>) that you and agents can design any way you like. Edit it on the canvas or in its code, present it, and download it as a PDF or a website.</p>
       <div class="ol-newkinds">
@@ -97,9 +96,8 @@ function LatexLayoutDialog({ project, dir, onClose, onCreated, notify, onBack }:
   };
   return (
     <Dialog title="New LaTeX layout document" onClose={onClose} buttons={<>
-      <button type="button" class="small-btn" onClick={onBack}>Back</button>
-      <button type="button" class="small-btn" onClick={onClose}>Cancel</button>
-      <button type="button" class="small-btn primary" disabled={busy} onClick={create} data-create-layout>Create</button>
+      <button type="button" class="btn" onClick={onBack}>Back</button>
+      <button type="button" class="btn primary" disabled={busy} onClick={create} data-create-layout>Create</button>
     </>}>
       <p class="dialog-hint">Pages of text boxes, shapes, images and formulas, placed freely. The file is an ordinary beamer <code>.tex</code> document: it compiles anywhere, and animations are beamer overlays.</p>
       <div class="ol-newgrid">

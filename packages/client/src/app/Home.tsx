@@ -392,7 +392,7 @@ export function NewProjectDialog({ user, onClose, onCreated, notify }: { user: U
   };
   return (
     <Dialog title="New" onClose={onClose} buttons={
-      <button type="button" class="small-btn primary" disabled={busy || !!invalid || (kind === 'empty' && !typed)} onClick={() => void create()} data-new-create>Create</button>
+      <button type="button" class="btn primary" disabled={busy || !!invalid || (kind === 'empty' && !typed)} onClick={() => void create()} data-new-create>Create</button>
     }>
       <div class="ol-newkinds five" role="radiogroup" aria-label="What to make">
         {NEW_KINDS.map(x => {

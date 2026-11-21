@@ -187,7 +187,7 @@ export function ShareDialog({ project, user, doc, view, onClose, onChanged }: { 
         </select>
         <button class="btn" disabled={!who.trim() || busy || !info} onClick={() => void add()}>Add</button>
       </div>
-      <div class="hint">People invited by e-mail get access the moment they sign in with Google using that address.</div>
+      <div class="hint">Viewers can read and compile; editors can also change the documents and upload files. People invited by e-mail get access the moment they sign in with Google using that address.</div>
       {err && <div class="err">{err}</div>}
       {info && (
         <>
@@ -236,6 +236,7 @@ export function ShareDialog({ project, user, doc, view, onClose, onChanged }: { 
               </div>
             ))}
             {!projectLinks.length && <div class="hint">No links: only the people listed above can open the project.</div>}
+            {projectLinks.length > 0 && <div class="hint">Whoever opens a link comes in with its role — without an account as a guest (under a name they give, or “Anonymous Otter”), who keeps the project by signing in.</div>}
           </div>
           {projectLinks.length > 0 && linkFiles.length > 0 && (
             <div class="share-link-file hint">
@@ -338,7 +339,7 @@ export function ShareDialog({ project, user, doc, view, onClose, onChanged }: { 
             ))}
             {activity && !activity.length && <div class="hint">Nothing yet.</div>}
           </div>
-          <div class="hint">Viewers can read and compile; editors can also change the documents and upload files.{info.links.length ? ' Whoever opens a link comes in with its role — without an account as a guest (under a name they give, or “Anonymous Otter”), who keeps the project by signing in.' : ''}</div>
+
         </>
       )}
     </Dialog>

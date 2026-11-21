@@ -32,6 +32,12 @@ export function Dialog({ title, onClose, children, buttons, wide, restoreFocus }
   // usage statistics: the dialog's kind, whether its primary button was used, how long it was open (usage.ts)
   const usage = useRef({ key: dialogKey(title), opened: performance.now(), applied: false });
   useEffect(() => () => { const u = usage.current; recordUsage('dialog', u.key, { ok: u.applied, dt: performance.now() - u.opened, where: 'dialog' }); }, []);
+  const noteUse = (t: HTMLElement | null) => {
+    if (boxRef.current?.querySelector(':scope > .buttons button.primary')) return;   // (its primary button says it)
+    if (t && !t.closest('button, [role="menuitem"], [role="option"], input[type="checkbox"], input[type="radio"]')) return;
+    if (t?.closest('[role="tab"], [aria-haspopup], [aria-expanded], summary')) return;   // (finding one's way: tabs, pop-ups, folds)
+    usage.current.applied = true;
+  };
   useLayoutEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     const box = boxRef.current!;
@@ -70,7 +76,9 @@ export function Dialog({ title, onClose, children, buttons, wide, restoreFocus }
     <div class="dialog-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
       <div class={'dialog' + (wide ? ' wide' : '')} ref={boxRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}>
         <h2 id={titleId}>{title}</h2>
-        <div class="body">{children}</div>
+        {/* (a dialog that applies its changes at once — Settings, Share — has no primary button: it counts as
+            applied when something in it was changed or pressed, not when it was only looked through) */}
+        <div class="body" onChangeCapture={() => noteUse(null)} onClickCapture={e => noteUse(e.target as HTMLElement)}>{children}</div>
         <div class="buttons" onClickCapture={e => { if ((e.target as HTMLElement).closest?.('button.primary')) usage.current.applied = true; }}>{buttons}<button class="btn" onClick={onClose}>Close</button></div>
       </div>
     </div>

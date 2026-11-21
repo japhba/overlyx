@@ -18,7 +18,7 @@ export function SaveIndicator({ save }: { save: SaveState }) {
   // the server could not write the file (it keeps trying): the edits are kept on the server meanwhile
   if (save.saveError && (save.state === 'saved' || save.state === 'saving')) return <span class="save-state offline" title={`The server could not write your edits to the file: ${save.saveError}. It keeps trying; your edits are kept on the server meanwhile.${when ? ` Last written at ${when}.` : ''}`}>⚠ Could not save</span>;
   switch (save.state) {
-    case 'saved': return <span class="save-state saved" title={when ? `The .tex file on the server was last written at ${when}` : 'Everything is saved on the server'}>✓ All changes saved</span>;
+    case 'saved': return <span class="save-state saved" title={when ? `The .tex file on the server was last written at ${when}` : 'Everything is saved on the server'}>✓<span class="ss-words"> All changes saved</span></span>;
     case 'saving': return <span class="save-state saving" title="Your edits are being written to the .tex file on the server">Saving…</span>;
     case 'connecting': return <span class="save-state connecting">connecting…</span>;
     case 'stale': return <span class="save-state offline" title="The document on the server has a different history than this copy; it is being reloaded.">⚠ document was re-created on the server — reloading…</span>;
@@ -67,6 +67,9 @@ export function ViewportZoomIndicator() {
   useEffect(() => { const read = () => setScale(viewportZoom()); const off = onViewportZoom(read); read(); return off; }, []);
   if (scale === null) return null;
   const pct = Math.round(scale * 100);
+  // (only while the view is magnified: at 100% there is nothing to reset, and the chip took the room
+  // a narrow window's toolbar needs — the Text level beside it is the zoom people change)
+  if (pct === 100) return null;
   return <span class="viewport-zoom-control"><button type="button" data-viewport-zoom-reset disabled={pct === 100}
     title="Viewport magnification (trackpad pinch). Click to reset to 100%. Text size and line breaks stay the same."
     aria-label={`Viewport zoom ${pct}%. Reset viewport zoom`} onClick={resetViewportZoom}>View {pct}%{pct !== 100 && ' ↺'}</button></span>;
@@ -161,7 +164,7 @@ export function StatusBar({ layout, markdown, status, chord, message, save, trac
       {start}
       <span><span class={'dot' + (status.connected ? ' on' : '')} />{status.connected ? (status.synced ? 'connected' : 'syncing…') : save.state === 'connecting' ? 'connecting…' : 'offline'}</span>
       {docLabel && <span class="doclabel" title="Document under the cursor">{docLabel}</span>}
-      {document.documentElement.dataset.ui === 'modern' ? <span title="Paragraph style at the cursor">{styleLabel(layout, 'modern', markdown)}</span> : <span title="Current paragraph layout">{styleLabel(layout, 'classic', markdown)}</span>}
+      {document.documentElement.dataset.ui === 'modern' ? <span class="sb-style" title="Paragraph style at the cursor">{styleLabel(layout, 'modern', markdown)}</span> : <span class="sb-style" title="Current paragraph layout">{styleLabel(layout, 'classic', markdown)}</span>}
       {readOnly && <span class="readonly-badge" title="This project was shared with you for viewing: you can read and compile it, but not change it">👁 view only</span>}
       {aiBusy && <span class="ai-busy" title="Asking the model for a continuation…" data-ai-busy>✦ AI…</span>}
       {chord && <span class="chord">{chord} …</span>}

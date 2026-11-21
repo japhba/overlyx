@@ -1,0 +1,32 @@
+/*
+ * Small interface repairs from the 21 Nov 2026 review (DOCS.md "Interface review, 21 Nov 2026"):
+ * rules that cut across components, kept together here rather than appended to styles.css / modern.css.
+ */
+
+/* Links that have no style of their own take the theme's link colour: the browser's default
+   (#0000EE, visited purple) is hard to read on the dark theme. Zero specificity — any rule wins. */
+:where(a:not([class])) { color: var(--link); }
+
+/* Modern's toolbar strip: ⋮ More tools stays at the strip's right end when a narrow window (an iPad,
+   a split screen) cannot fit the row after its groups have folded into it — the rest scrolls under it. */
+html[data-ui="modern"] .tb-modern-row > .toolbar .tb-pal:has(> [data-tb="modern-more"]) {
+  position: sticky; right: 0; z-index: 1; background: var(--m-strip);
+  box-shadow: -10px 0 8px -4px var(--m-strip);
+}
+
+/* Settings: a lone button under a section's text (Account ▸ Create token) keeps its own width */
+.settings-page > .btn { align-self: flex-start; }
+
+/* a phone */
+@media (max-width: 600px) {
+  /* the header keeps the document's name: the project's goes, "✓ All changes saved" shrinks to its
+     ✓ (the words stay in its tooltip); "Saving…" and the offline notes keep their words */
+  html[data-ui="modern"] .menubar-title .mt-project { display: none; }
+  html[data-ui="modern"] .menubar-title .save-state.saved .ss-words { display: none; }
+  html[data-ui="modern"] .menubar-title .mt-name { flex: 0 1 auto; min-width: 4em; }
+  /* the status bar: no room for the paragraph style and the build stamp (both were cut to a letter), nor the page estimate */
+  .statusbar .sb-style, .statusbar .build-version, .statusbar .stats-pages { display: none; }
+}
+
+/* Settings ▸ AI ▸ Pause before suggesting: its slider as wide as the grade's */
+.settings-delay { max-width: 420px; display: grid; }

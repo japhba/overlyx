@@ -39,8 +39,7 @@ function SetupDialog({ req }: { req: Extract<KeyRequest, { kind: 'setup' }> }) {
   if (!code) {
     return (
       <Dialog title={req.replace ? 'New encryption keys' : 'Set up end-to-end encryption'} onClose={() => req.resolve(false)} buttons={<>
-        <button class="small-btn" onClick={() => req.resolve(false)}>Cancel</button>
-        <button class="small-btn primary" disabled={busy} onClick={() => void start()} data-e2e-setup>{busy ? 'Making keys…' : req.replace ? 'Make new keys' : 'Set up'}</button>
+        <button class="btn primary" disabled={busy} onClick={() => void start()} data-e2e-setup>{busy ? 'Making keys…' : req.replace ? 'Make new keys' : 'Set up'}</button>
       </>}>
         <p>Encrypted projects are locked with keys that only you and the people you share them with hold. The server keeps only ciphertext: it cannot read the documents, the files or their names, and nobody running it can either.</p>
         <p>This browser makes your keys now and shows you a <b>recovery code</b>. Keep it somewhere safe: you need it to open your encrypted projects on another device, and if it is lost, nobody can recover them for you.</p>
@@ -51,7 +50,7 @@ function SetupDialog({ req }: { req: Extract<KeyRequest, { kind: 'setup' }> }) {
   }
   return (
     <Dialog title="Your recovery code" onClose={() => { if (saved) req.resolve(true); }} buttons={
-      <button class="small-btn primary" disabled={!saved} onClick={() => req.resolve(true)} data-e2e-saved>Continue</button>
+      <button class="btn primary" disabled={!saved} onClick={() => req.resolve(true)} data-e2e-saved>Continue</button>
     }>
       <p>Write it down or keep it in your password manager. It is shown only now.</p>
       <p class="e2e-code" data-e2e-code><code>{code}</code></p>
@@ -76,8 +75,8 @@ function UnlockDialog({ req }: { req: Extract<KeyRequest, { kind: 'unlock' }> })
   };
   return (
     <Dialog title="Unlock encrypted projects" onClose={() => req.resolve(false)} buttons={<>
-      <button class="small-btn" onClick={() => req.resolve(false)}>Not now</button>
-      <button class="small-btn primary" disabled={busy || !code.trim()} onClick={() => void unlock()} data-e2e-unlock>Unlock</button>
+      <button class="btn" onClick={() => req.resolve(false)}>Not now</button>
+      <button class="btn primary" disabled={busy || !code.trim()} onClick={() => void unlock()} data-e2e-unlock>Unlock</button>
     </>}>
       <p>This project is end-to-end encrypted. To open it in this browser, enter the recovery code you were shown when you set up encryption.</p>
       <label class="dialog-row">Recovery code <input type="text" value={code} autofocus spellcheck={false} autocomplete="off" placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XX" data-e2e-code-input

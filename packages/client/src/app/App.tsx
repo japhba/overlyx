@@ -1503,7 +1503,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
 
   const layouts = meta?.layouts?.length ? meta.layouts : STANDARD_LAYOUTS;
   // the Share button (top right) belongs to the project's owner; the panel reports the project it shows
-  const shareProject = curProject && curProject.role === 'owner' && curProject.via !== 'admin' && (!docId || projectOfDoc(docId.replace(/^(text|pdf):/, '')) === curProject.name) ? curProject.name : null;
+  // (on the start screen only while the files panel shows that project: the header's Share must not act on a project out of sight)
+  const shareProject = curProject && curProject.role === 'owner' && curProject.via !== 'admin' && (docId ? projectOfDoc(docId.replace(/^(text|pdf):/, '')) === curProject.name : filesShown) ? curProject.name : null;
   const base = (id: string) => id.split('/').pop() ?? id;
   // the header's name for the open file: a deck, poster or web page (`<folder>/index.html`) by its folder, as
   // the start screen and the files list it — every one of them read "index.html"
@@ -2141,7 +2142,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       <StatusBar layout={layout} markdown={isMarkdownDoc(docId) || isArticle} status={status} chord={chord} message={message} save={save} tracking={tracking} trackingAs={user.name} change={changeInfo}
         docLabel={view && masterView && view !== masterView ? viewDocId(view).split('/').pop() ?? null : null}
         readOnly={!!docId && viewOnly} updateReady={updateReady} aiBusy={aiBusy > 0}
-        quiet={!!docId && !isLyxDoc} stats={docStats} pageInfo={pagesOn && masterView && isLyxDoc ? pageAtCursor(masterView.state) : null} zoom={zoom} onZoom={setZoom}
+        quiet={!isLyxDoc} stats={docStats} pageInfo={pagesOn && masterView && isLyxDoc ? pageAtCursor(masterView.state) : null} zoom={zoom} onZoom={setZoom}
         corner={barsPlace === 'bottom' && !filesShown && <CornerButton icon="files" title={LEFT_TITLE} data-rail="outline" onClick={toggleFiles}>Files</CornerButton>}
         sync={<>{syncChip}<TandemChip /></>}
         pdf={isLyxDoc ? { state: pdf, onClick: rebuild => { if (rebuild && !pdf.busy) void build(); else if (!pdfPaneVisible) changePanes(l => (narrowPanes ? { ...setPaneShown(l, 'pdf', true), order: ['pdf', ...l.order.filter(p => p !== 'pdf')] } : setPaneShown(l, 'pdf', true))); } } : undefined} />
