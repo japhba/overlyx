@@ -98,7 +98,8 @@ export function createLocalEditor(opts: LocalEditorOptions): LocalEditorHandle {
     applyExternal(pmDoc: unknown, headerLines: string[], ack?: SyncTag | null) {
       const incoming = documentModel(pmDoc, headerLines);
       const local = documentModel(view.state.doc.toJSON(), session!.headerLines!);
-      const merged = mergeModels(session!.ledger.baseFor(ack), local, incoming);
+      const id = editorContext.changeAuthorId, name = editorContext.user?.name;
+      const merged = mergeModels(session!.ledger.baseFor(ack), local, incoming, id !== undefined && name ? { id, name } : null);
       session!.ledger.applied(incoming);
       session!.headerLines = merged.headerLines;
       ydoc.transact(() => { writeDocument(schema, ydoc, schema.nodeFromJSON(merged.pmDoc)); }, EXTERNAL_ORIGIN);

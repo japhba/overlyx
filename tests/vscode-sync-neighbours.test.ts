@@ -11,7 +11,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { lyxToPm } from '@overlyx/core';
+import { lyxToPm, lyxAuthorId } from '@overlyx/core';
 
 const state = vi.hoisted(() => ({ documents: new Map<string, { text: string; version: number }>(), listeners: new Set<(event: unknown) => void>() }));
 vi.mock('vscode', () => ({
@@ -147,5 +147,46 @@ describe('when the file\'s version replaced what was typed', () => {
     expect(await session.applyPmUpdate(update.pmDoc, update.headerLines, base)).toBe(true);
     expect(doc.text).toContain('changed on the server');
     expect(told).toHaveLength(1);
+  });
+});
+
+describe('the same paragraph changed in the editor and in the file, the author known', () => {
+  const ada = { id: lyxAuthorId('Ada Lovelace', ''), name: 'Ada Lovelace' };
+
+  it('the webview lays its typing over the file\'s version as Ada\'s tracked change', () => {
+    const merged = textOf(mergeModels(model(initial), model(withPars({ 1: 'Second, typed in VS Code.' })), model(withPars({ 1: 'Second, changed on the server.' })), ada));
+    expect(merged).toContain('typed in VS Code');
+    expect(merged).toContain('changed on the server');
+  });
+
+  it('the host does the same with unsaved typing and a changed file: nothing lost, nobody sent to a draft', async () => {
+    const told: string[] = [];
+    let tracked = 0;
+    session.onDropped = draft => told.push(draft);
+    session.onTracked = () => { tracked++; };
+    session.author = 'Ada Lovelace';
+    doc.isDirty = true;
+    doc.text = withPars({ 1: 'Second paragraph, typed in VS Code.' });
+    fs.writeFileSync(doc.uri.fsPath, withPars({ 1: 'Second paragraph, changed by an agent.' }));
+    expect(await session.syncFromDisk()).toBe(true);
+    expect(doc.text).toMatch(/\\lyxdeleted\{Ada Lovelace\}/);
+    expect(doc.text).toMatch(/\\lyxadded\{Ada Lovelace\}/);
+    expect(doc.text).toContain('typed in VS Code');
+    expect(doc.text).toContain('changed by an agent');
+    expect(told).toEqual([]);
+    expect(tracked).toBe(1);
+  });
+
+  it('and with the webview\'s update', async () => {
+    session.author = 'Ada Lovelace';
+    const base = model(initial);
+    const outside = withPars({ 1: 'Second paragraph, changed on the server.' });
+    fs.writeFileSync(doc.uri.fsPath, outside);
+    doc.text = outside; doc.version++;
+    const update = model(withPars({ 1: 'Second paragraph, typed in VS Code.' }));
+    expect(await session.applyPmUpdate(update.pmDoc, update.headerLines, base)).toBe(true);
+    expect(doc.text).toMatch(/\\lyxadded\{Ada Lovelace\}/);
+    expect(doc.text).toContain('typed in VS Code');
+    expect(doc.text).toContain('changed on the server');
   });
 });

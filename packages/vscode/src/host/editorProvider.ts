@@ -55,6 +55,7 @@ const isDark = () => [vscode.ColorThemeKind.Dark, vscode.ColorThemeKind.HighCont
  */
 function tellWhenDropped(session: DocSession): DocSession {
   let shown = 0;
+  session.onTracked = () => vscode.window.setStatusBarMessage(`OverLyX: a paragraph you were editing in ${path.basename(session.relPath)} also changed outside VS Code — yours is a tracked change over it (accept or reject it)`, 10_000);
   session.onDropped = draft => {
     if (Date.now() - shown < 10_000) return;   // (one notice for a burst of merges)
     shown = Date.now();
@@ -212,6 +213,7 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
             const { abs, rel } = relatedPath(msg.id);
             if (!related.has(msg.id)) related.set(msg.id, tellWhenDropped(new DocSession(await vscode.workspace.openTextDocument(vscode.Uri.file(abs)), ctx, project, rel, path.join(this.context.globalStorageUri.fsPath, 'recovery'))));
             const child = related.get(msg.id)!;
+            child.author = await named;
             await child.syncFromDisk();
             const parsed = child.parseCurrent();
             post({ type: 'relatedInit', id: msg.id, pmDoc: parsed.pmDoc as never, headerLines: parsed.headerLines, meta: child.meta() as never, ack: child.applied });
@@ -231,6 +233,7 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
           sendAppearance(panel.webview);   // before init: the shell starts with the theme switch's choices
           this.applyChain = this.applyChain.then(async () => {
             const author = await named;
+            session.author = author;
             await session.syncFromDisk();
             const r = session.openingParse();
             timing('init sent');

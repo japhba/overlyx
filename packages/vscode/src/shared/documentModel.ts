@@ -1,4 +1,4 @@
-import { lyxToPm, mergeLyx, mergeApart, pmToLyxBody, schema, type LyxDocument, type PMJSON } from '@overlyx/core';
+import { lyxToPm, mergeLyx, mergeApart, pmToLyxBody, schema, trackDiff, addAuthor, writeParagraphs, type LyxDocument, type PMJSON } from '@overlyx/core';
 
 /** A snapshot is also the base against which the next editor change is interpreted. */
 export interface DocumentModel { pmDoc: PMJSON; headerLines: string[] }
@@ -63,11 +63,41 @@ export class SyncLedger {
   applied(incoming: DocumentModel): void { if (!this.pending.length) this.agreed = incoming; }
 }
 
-/** Keep independent pending edits when a newer host snapshot arrives. */
-export function mergeModels(base: DocumentModel, local: DocumentModel, incoming: DocumentModel): DocumentModel {
+/** Whether a paragraph `ours` changed or added (not in `base`) is missing from the merge: the file's side won it. */
+export function droppedOurs(base: LyxDocument, ours: LyxDocument, merged: LyxDocument): boolean {
+  const key = (p: LyxDocument['body'][number]) => writeParagraphs([p]);
+  const inBase = new Set(base.body.map(key)), inMerged = new Set(merged.body.map(key));
+  return ours.body.some(p => { const k = key(p); return !inBase.has(k) && !inMerged.has(k); });
+}
+
+/** who edits in this editor: the author of its tracked changes */
+export interface ChangeAuthor { id: number; name: string }
+
+/**
+ * `ours` (the editor's, not yet in the file) merged with `theirs` (the file, changed meanwhile by
+ * the synced clone, an agent, git): each side's changes kept where they touch different paragraphs
+ * (mergeApart). Where both changed the same paragraph the file's version is the text, and — with
+ * `author` — ours is laid over it as that author's tracked change (as the server does for a synced
+ * clone's, docedit.ts applySyncedSource): accept it and the paragraph is ours, reject it and it is the
+ * file's; nothing is lost. Without an author ours is `dropped` (the caller keeps a draft and says so).
+ */
+export function mergeWithFile(base: LyxDocument, ours: LyxDocument, theirs: LyxDocument, author?: ChangeAuthor | null): { merged: LyxDocument; dropped: boolean; tracked: boolean } {
+  const merged = mergeLyx(base, ours, theirs, mergeApart);
+  if (!droppedOurs(base, ours, merged)) return { merged, dropped: false, tracked: false };
+  if (!author) return { merged, dropped: true, tracked: false };
+  // the same merge with ours winning the paragraphs both changed; the difference is ours, tracked
+  const oursWins = mergeLyx(base, ours, theirs, (b, o, t) => mergeApart(b, t, o));
+  oursWins.header = { ...oursWins.header, lines: [...oursWins.header.lines] };
+  addAuthor(oursWins.header, author.id, author.name, '');
+  oursWins.body = trackDiff(merged.body, oursWins.body, { author: author.id, time: Math.floor(Date.now() / 1000) });
+  return { merged: oursWins, dropped: false, tracked: true };
+}
+
+/** Keep independent pending edits when a newer host snapshot arrives (a paragraph both changed: see mergeWithFile). */
+export function mergeModels(base: DocumentModel, local: DocumentModel, incoming: DocumentModel, author?: ChangeAuthor | null): DocumentModel {
   if (sameModel(local, base) || sameModel(local, incoming)) return incoming;
   if (sameModel(incoming, base)) return local;
   const context: LyxDocument = { preamble: [], format: 643, header: { lines: [] }, body: [], trailer: [] };
-  const merged = mergeLyx(modelDocument(base, context), modelDocument(local, context), modelDocument(incoming, context), mergeApart);
+  const { merged } = mergeWithFile(modelDocument(base, context), modelDocument(local, context), modelDocument(incoming, context), author);
   return documentModel(lyxToPm(merged), merged.header.lines);
 }

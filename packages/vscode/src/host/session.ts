@@ -9,8 +9,8 @@ import * as vscode from 'vscode';
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
-import { lyxToPm, headerValue, mergeLyx, mergeApart, getAuthors, addAuthor, writeParagraphs, type LyxDocument, type PMJSON } from '@overlyx/core';
-import { documentModel, sameModel, modelDocument, type DocumentModel, type SyncTag } from '../shared/documentModel.ts';
+import { lyxToPm, headerValue, getAuthors, addAuthor, lyxAuthorId, type LyxDocument, type PMJSON } from '@overlyx/core';
+import { documentModel, sameModel, modelDocument, mergeWithFile, type DocumentModel, type SyncTag } from '../shared/documentModel.ts';
 import os from 'node:os';
 import { parseDocumentText, writeDocumentText, includeResolver, cachedParseFile, sameDocumentText, markdownAsTex, type TexContext } from './texdoc.ts';
 import { isMarkdownPath } from '@overlyx/core/md/index.ts';
@@ -175,8 +175,7 @@ export class DocSession {
     const currentModel = documentModel(lyxToPm(current.doc), current.doc.header.lines);
     if (sameModel(incoming, currentModel)) { this.remember(incoming, current.doc); return diskChanged; }
     const ours = modelDocument(incoming, current.doc);
-    const baseDoc = this.baseDocument(base, current);
-    const merged = mergeLyx(baseDoc, ours, current.doc, mergeApart);
+    const { merged, dropped, tracked } = mergeWithFile(this.baseDocument(base, current), ours, current.doc, this.changeAuthor());
     // the webview's authors stay known to the writer when the file's header won (a .tex names an
     // author only in their changes: one whose first change this is is in the webview's header alone)
     merged.header = { ...merged.header, lines: [...merged.header.lines] };
@@ -186,7 +185,8 @@ export class DocSession {
     if (rebased) {
       const draft = this.preserveDraft(writeDocumentText(ours, this.ctx, this.relPath, current.fragment, includeResolver(this.ctx, this.relPath)).text);
       // the file's side replaced a paragraph the editor had changed (both changed it): the user is told where theirs is
-      if (droppedOurs(baseDoc, ours, merged)) this.onDropped?.(draft);
+      if (dropped) this.onDropped?.(draft);
+      else if (tracked) this.onTracked?.();
     }
     // written into the TextDocument's text: what nobody changed keeps its LaTeX
     const { text, files } = writeDocumentText(merged, this.ctx, this.relPath, current.fragment, includeResolver(this.ctx, this.relPath), { base: currentText, cache: this.preserveCache });
@@ -222,8 +222,9 @@ export class DocSession {
       const ours = parseDocumentText(local, this.ctx, this.relPath);
       const theirs = parseDocumentText(disk, this.ctx, this.relPath);
       const draft = this.preserveDraft(local);
-      const merged = mergeLyx(base.doc, ours.doc, theirs.doc, mergeApart);
-      if (droppedOurs(base.doc, ours.doc, merged)) this.onDropped?.(draft);
+      const { merged, dropped, tracked } = mergeWithFile(base.doc, ours.doc, theirs.doc, this.changeAuthor());
+      if (dropped) this.onDropped?.(draft);
+      else if (tracked) this.onTracked?.();
       text = writeDocumentText(merged, this.ctx, this.relPath, theirs.fragment, includeResolver(this.ctx, this.relPath), { base: disk, cache: this.preserveCache }).text;
     }
     await this.replaceText(text);
@@ -294,6 +295,11 @@ export class DocSession {
    * the draft that holds the user's version. Before, only a hidden recovery file knew.
    */
   onDropped?: (draft: string) => void;
+  /** …and when the user's version of such a paragraph was laid over the file's as their tracked change instead (`author` known) */
+  onTracked?: () => void;
+  /** who edits in this editor (the synced account's name, newDocument.ts authorName): the author of tracked changes laid over the file's */
+  author?: string;
+  private changeAuthor(): { id: number; name: string } | null { return this.author ? { id: lyxAuthorId(this.author, ''), name: this.author } : null; }
 
   private async replaceText(text: string): Promise<void> {
     if (text === this.document.getText()) return;
@@ -472,13 +478,6 @@ export class DocSession {
   }
 
   dispose(): void { this.disposed = true; }
-}
-
-/** Whether a paragraph `ours` changed or added (not in `base`) is missing from the merge: the file's side won it. */
-function droppedOurs(base: LyxDocument, ours: LyxDocument, merged: LyxDocument): boolean {
-  const key = (p: LyxDocument['body'][number]) => writeParagraphs([p]);
-  const inBase = new Set(base.body.map(key)), inMerged = new Set(merged.body.map(key));
-  return ours.body.some(p => { const k = key(p); return !inBase.has(k) && !inMerged.has(k); });
 }
 
 export function headerBool(header: LyxDocument['header'] | null, key: string): boolean {

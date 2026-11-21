@@ -3905,9 +3905,13 @@ that merely touch it, and without a combiner takes the file's side for all of it
 paragraph while the synced clone, an agent or git changed the *next* one lost the typing. The three
 merges of the extension (`mergeModels` in the webview, `writePmUpdate`, `readDisk`) pass
 `core/lyx/merge.ts mergeApart`: each side's changes are kept where they touch different paragraphs
-(a new paragraph inserted before a changed one too); the file still wins a paragraph both changed.
-When it does, the draft goes to `recovery` as before and the user is told (`DocSession.onDropped`,
-a warning with "Open Your Version"). Test: `tests/vscode-sync-neighbours.test.ts`.
+(a new paragraph inserted before a changed one too). A paragraph *both* changed is the file's version
+with the user's laid over it as their tracked change (`shared/documentModel.ts mergeWithFile`, the
+author the editor tracks as: the synced account's name; as the server does for a synced clone's
+paragraphs) — accept it and the paragraph is theirs, reject it and it is the file's; a status bar
+message says so (`DocSession.onTracked`). Only without a known author does the file's version
+replace theirs: the draft goes to `recovery` and a warning offers "Open Your Version"
+(`DocSession.onDropped`). Test: `tests/vscode-sync-neighbours.test.ts`.
 
 **Undo is the editor's, not the TextDocument's.** VS Code's webview hands every key to the workbench
 too, and in a custom text editor its Undo undoes the *TextDocument* — so Ctrl+Z ran both the editor's
