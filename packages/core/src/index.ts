@@ -2,7 +2,7 @@ export * from './lyx/ast.ts';
 export { parseLyx } from './lyx/parser.ts';
 export { writeLyx, writeParagraphs, writeInset } from './lyx/writer.ts';
 export { exportLyx } from './lyx/export.ts';
-export { mergeLyx, mergeInPlace, type RegionMerge } from './lyx/merge.ts';
+export { mergeLyx, mergeInPlace, mergeApart, type RegionMerge } from './lyx/merge.ts';
 export { merge3, reviewBody, adoptReview, type Merge3 } from './lyx/merge3.ts';
 export { trackDiff, resolveChanges, rejectOwnChanges, changeStats, type TrackAs } from './lyx/trackdiff.ts';
 export { diffText, diffTokens, tokenize, coalesce } from './lyx/tokendiff.ts';

@@ -3757,6 +3757,15 @@ on focus) used to be taken for the newer state and undid that update in the edit
 moment ago came back. `tests/vscode-ledger.test.ts` and `tests/vscode-sync.test.ts` cover both;
 `packages/vscode/test/probeEditing.mjs` reproduces them in the real extension.
 
+**Neighbouring paragraphs keep both sides' edits.** `mergeLyx` grows a changed region over changes
+that merely touch it, and without a combiner takes the file's side for all of it: typing in one
+paragraph while the synced clone, an agent or git changed the *next* one lost the typing. The three
+merges of the extension (`mergeModels` in the webview, `writePmUpdate`, `readDisk`) pass
+`core/lyx/merge.ts mergeApart`: each side's changes are kept where they touch different paragraphs
+(a new paragraph inserted before a changed one too); the file still wins a paragraph both changed.
+When it does, the draft goes to `recovery` as before and the user is told (`DocSession.onDropped`,
+a warning with "Open Your Version"). Test: `tests/vscode-sync-neighbours.test.ts`.
+
 **Undo is the editor's, not the TextDocument's.** VS Code's webview hands every key to the workbench
 too, and in a custom text editor its Undo undoes the *TextDocument* — so Ctrl+Z ran both the editor's
 undo (a word at a time, `plugins/undogroups.ts`) and VS Code's, which took back one whole-file write

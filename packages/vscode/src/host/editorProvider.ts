@@ -48,6 +48,23 @@ function setArticlePanel(panel: vscode.WebviewPanel | undefined): void {
 
 const isDark = () => [vscode.ColorThemeKind.Dark, vscode.ColorThemeKind.HighContrast].includes(vscode.window.activeColorTheme.kind);
 
+/**
+ * A paragraph the user was changing also changed in the file (the synced clone brought a co-author's
+ * edit of it, an agent or git wrote it): the file's version is in the editor now. Said, with the way
+ * to the user's own version — it used to go to a recovery file nobody was told of.
+ */
+function tellWhenDropped(session: DocSession): DocSession {
+  let shown = 0;
+  session.onDropped = draft => {
+    if (Date.now() - shown < 10_000) return;   // (one notice for a burst of merges)
+    shown = Date.now();
+    void vscode.window.showWarningMessage(`OverLyX: a paragraph you were editing in ${path.basename(session.relPath)} was also changed outside VS Code (the synced project, an agent or git). Its new version is in the editor; yours is kept in a copy.`, 'Open Your Version').then(a => {
+      if (a) void vscode.workspace.openTextDocument(vscode.Uri.file(draft)).then(d => vscode.window.showTextDocument(d, { viewColumn: vscode.ViewColumn.Beside, preview: true }));
+    });
+  };
+  return session;
+}
+
 export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
   private pendingNavigation = new Map<string, Extract<HostToEditor, { type: 'navigate' }>>();
   navigateTo(id: string, target: Extract<HostToEditor, { type: 'navigate' }>): void {
@@ -81,7 +98,7 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
       panel.webview.html = `<!doctype html><body style="font-family:sans-serif;padding:2em">${String(e)}</body>`;
       return;
     }
-    const session = new DocSession(document, ctx, project, relPath, path.join(this.context.globalStorageUri.fsPath, 'recovery'));
+    const session = tellWhenDropped(new DocSession(document, ctx, project, relPath, path.join(this.context.globalStorageUri.fsPath, 'recovery')));
     const entry: OpenEditor = { session, panel, outline: [], selectionPos: 0 };
     this.registry.add(entry);
 
@@ -193,7 +210,7 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
         case 'loadRelated':
           this.applyChain = this.applyChain.then(async () => {
             const { abs, rel } = relatedPath(msg.id);
-            if (!related.has(msg.id)) related.set(msg.id, new DocSession(await vscode.workspace.openTextDocument(vscode.Uri.file(abs)), ctx, project, rel, path.join(this.context.globalStorageUri.fsPath, 'recovery')));
+            if (!related.has(msg.id)) related.set(msg.id, tellWhenDropped(new DocSession(await vscode.workspace.openTextDocument(vscode.Uri.file(abs)), ctx, project, rel, path.join(this.context.globalStorageUri.fsPath, 'recovery'))));
             const child = related.get(msg.id)!;
             await child.syncFromDisk();
             const parsed = child.parseCurrent();

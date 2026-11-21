@@ -1,4 +1,4 @@
-import { lyxToPm, mergeLyx, pmToLyxBody, schema, type LyxDocument, type PMJSON } from '@overlyx/core';
+import { lyxToPm, mergeLyx, mergeApart, pmToLyxBody, schema, type LyxDocument, type PMJSON } from '@overlyx/core';
 
 /** A snapshot is also the base against which the next editor change is interpreted. */
 export interface DocumentModel { pmDoc: PMJSON; headerLines: string[] }
@@ -68,6 +68,6 @@ export function mergeModels(base: DocumentModel, local: DocumentModel, incoming:
   if (sameModel(local, base) || sameModel(local, incoming)) return incoming;
   if (sameModel(incoming, base)) return local;
   const context: LyxDocument = { preamble: [], format: 643, header: { lines: [] }, body: [], trailer: [] };
-  const merged = mergeLyx(modelDocument(base, context), modelDocument(local, context), modelDocument(incoming, context));
+  const merged = mergeLyx(modelDocument(base, context), modelDocument(local, context), modelDocument(incoming, context), mergeApart);
   return documentModel(lyxToPm(merged), merged.header.lines);
 }

@@ -76,6 +76,48 @@ export const mergeInPlace: RegionMerge = (b, o, t) => {
   return b.map((bp, k) => (writeParagraph(t[k]) === writeParagraph(bp) ? o[k] : t[k]));
 };
 
+/** Where `side` replaced base paragraphs [start, end) by its own [from, to) (an insertion: start === end). */
+interface Hunk { start: number; end: number; from: number; to: number }
+function hunks(baseLen: number, pairs: [number, number][], sideLen: number): Hunk[] {
+  const out: Hunk[] = [];
+  let bi = 0, si = 0;
+  for (const [pb, ps] of [...pairs, [baseLen, sideLen] as [number, number]]) {
+    if (pb > bi || ps > si) out.push({ start: bi, end: pb, from: si, to: ps });
+    bi = pb + 1; si = ps + 1;
+  }
+  return out;
+}
+
+/**
+ * A region resolved by each side's own changes where they touch different paragraphs — a paragraph
+ * typed or changed next to one that changed on disk, a new paragraph inserted before it — and as
+ * mergeInPlace where both changed the same paragraph (the disk wins there). mergeLyx grows a region
+ * over changes that merely touch, so that its edges can be found on both sides; taken from `theirs`
+ * as a whole, what was typed in the neighbouring paragraph was lost (the VS Code extension, 21 Nov 2026).
+ */
+export const mergeApart: RegionMerge = (b, o, t) => {
+  const kb = b.map(p => writeParagraph(p)), ko = o.map(p => writeParagraph(p)), kt = t.map(p => writeParagraph(p));
+  const pairsO = align(kb, ko);
+  const ho = hunks(kb.length, pairsO, ko.length), ht = hunks(kb.length, align(kb, kt), kt.length);
+  const clash = (x: Hunk, y: Hunk) => (x.start < y.end && y.start < x.end)
+    || (x.start === x.end && y.start === y.end && x.start === y.start)          // two insertions at one place: which first?
+    || (x.start === x.end && x.start > y.start && x.start < y.end)             // an insertion inside the other's change
+    || (y.start === y.end && y.start > x.start && y.start < x.end);
+  if (ho.some(x => ht.some(y => clash(x, y)))) return mergeInPlace(b, o, t);
+  const oursAt = new Map(pairsO);
+  const all = [...ho.map(h => ({ ...h, side: o })), ...ht.map(h => ({ ...h, side: t }))]
+    .sort((x, y) => x.start - y.start || (x.end - x.start) - (y.end - y.start));   // an insertion before a change at the same place
+  const out: Paragraph[] = [];
+  let i = 0;
+  for (const h of all) {
+    for (; i < h.start; i++) out.push(o[oursAt.get(i)!]);
+    out.push(...h.side.slice(h.from, h.to));
+    i = Math.max(i, h.end);
+  }
+  for (; i < kb.length; i++) out.push(o[oursAt.get(i)!]);
+  return out;
+};
+
 export function mergeLyx(base: LyxDocument, ours: LyxDocument, theirs: LyxDocument, combine?: RegionMerge): LyxDocument {
   const kb = base.body.map(writeParagraph), ko = ours.body.map(writeParagraph), kt = theirs.body.map(writeParagraph);
   const bo = align(kb, ko), bt = align(kb, kt);
