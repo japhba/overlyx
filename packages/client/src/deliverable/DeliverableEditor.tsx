@@ -48,7 +48,7 @@ import { deckMargins, deckDesign, builtInLayouts, savedLayouts, layoutFromSlide,
 import { LayoutPicker, type LayoutCard } from './LayoutPicker';
 import { chooseDock, chooseBars, touchScreen, smallScreen, smallDisplay, dockAsked, DOCK_ROW, CTX_ROOM, type DeckDock } from './deckdock';
 import { ActivityButton, setDeckBars, ACTIVITY_W, type BarsPlace } from '../app/ActivityBar';
-import { sizePt, stepPt } from './units';
+import { sizePt, stepPt, lengthUnit } from './units';
 import { deckToolbar, quickGroups, SHAPES, LINES, type DeckTextActions } from './decktoolbar';
 import { setEditorMenus } from '../app/editormenus';
 import type { MenuDef } from '../app/MenuBar';
@@ -87,7 +87,9 @@ import { deliverableInfo, slideElements, blankDeck, untouchedPageTitle } from '@
 import { usualDeckSize } from '../app/decksize';
 import { PageSetup } from './PageSetup';
 import { PositionSize } from './PositionSize';
-import { loadGrid, saveGrid, gridChoices, gridSize, gridMessage, type GridView } from './gridview';
+import { loadGrid, saveGrid, gridSize, gridMessage, type GridView } from './gridview';
+import { CanvasRulers, RulerPainter, RULER } from './rulers';
+import { GridSpacing, spacingLabel } from './GridSpacing';
 import { deckPageSize, pageSetupSplices } from '@overlyx/core/html/pagesetup.ts';
 import { formatTimestamp } from '@overlyx/core';
 import { ReviewPane, type CommentDraft } from './ReviewPane';
@@ -360,7 +362,6 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
    * the slide zooming in as one began to draw was confusing). None once they are back.
    */
   const [inset, setInset] = useState(NO_INSET);
-  const box = { w: Math.max(1, canvasSize.w - inset.l - inset.r), h: Math.max(1, canvasSize.h - inset.t - inset.b) };
   const [railH, setRailH] = useState(600);
   /** the slide sorter (slidesorter.tsx): the slide list as a grid over the editor, its slides this wide (screen px), the list's width */
   const [sorter, setSorter] = useState(false);
@@ -539,6 +540,11 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
   /** the grid and the rulers (gridview.ts, runtime/grid.ts): this browser's, per document; rulers bring the guides (dragged out of them) */
   const [grid, setGridState] = useState<GridView>(() => loadGrid(host.path));
   const gridRef = useRef(grid); gridRef.current = grid;
+  /** the rulers (rulers.tsx) along the canvas's top and left edges: the slide's part of the canvas begins past them */
+  const rulerRoom = grid.rulers && kind !== 'page' && !!solo && !drawFocus && !full ? RULER : 0;
+  const box = { w: Math.max(1, canvasSize.w - inset.l - inset.r - rulerRoom), h: Math.max(1, canvasSize.h - inset.t - inset.b - rulerRoom) };
+  const rulerPaint = useMemo(() => new RulerPainter(), []);
+  const selBoxes = useMemo(() => sel.map(s => s.box).filter((b): b is Rect => !!b), [sel]);
   const setGrid = (p: Partial<GridView>) => {
     const v = { ...gridRef.current, ...p };
     gridRef.current = v; setGridState(v); saveGrid(host.path, v);
@@ -1473,6 +1479,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
         case 'editQr': if (fromCanvas) void qrCode(m.path); break;
         case 'connect': if (fromCanvas) connectObjects(m.from, m.to, m.sides, m.arrow); break;
         case 'scroll': if (fromCanvas) { scrollRef.current = m.y; setScrollY(m.y); } break;
+        case 'rulerPointer': if (fromCanvas) rulerPaint.point(m.at); break;
         case 'needSource':
           if (fromCanvas && canvasReady.current) { sentTo.current.canvas = -1; toCanvas(sourceMsg('canvas')); }
           else if (fromRail && railReady.current) { sentTo.current.rail = -1; toRail(sourceMsg('rail')); }
@@ -1593,6 +1600,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     // (the pen and Undo on the slide's corner go with it as it moves — a page turned, a pull — not only as the editor draws)
     placed: p => {
       placeLive(p);
+      rulerPaint.place(p, soloState.current?.rect);
       const el = focusPillEl.current, so = soloState.current;
       if (!el || !so) return;
       const at = focusSpot(p, so.rect, boxRef.current);
@@ -1710,7 +1718,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     const next = drawFocus && was && soloRef.current
       ? { t: Math.max(0, was.top - r.top), r: Math.max(0, r.right - was.right), b: Math.max(0, r.bottom - was.bottom), l: Math.max(0, was.left - r.left) }
       : NO_INSET;
-    if (v) Object.assign(v.style, { top: `${next.t}px`, right: `${next.r}px`, bottom: `${next.b}px`, left: `${next.l}px` });
+    if (v) Object.assign(v.style, { top: `${next.t + rulerRoom}px`, right: `${next.r}px`, bottom: `${next.b}px`, left: `${next.l + rulerRoom}px` });
     setInset(next);
     setBox(prev => prev.w === c.clientWidth && prev.h === c.clientHeight ? prev : { w: c.clientWidth, h: c.clientHeight });
   }, [drawFocus]);
@@ -2900,8 +2908,13 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
   const gridItems = (): MenuItem[] => [
     { label: 'Show grid', checked: grid.show, action: () => setGrid({ show: !gridRef.current.show }) },
     { label: 'Snap to grid', checked: grid.snap, action: () => setGrid({ snap: !gridRef.current.snap }) },
-    { label: 'Grid spacing', sub: gridChoices(kind).map(c => ({ label: c.label, checked: Math.abs(gridSize(grid, kind) - c.px) < 0.01, action: () => setGrid({ size: c.px, show: true }) })) },
+    { label: `Grid spacing (${spacingLabel(gridSize(grid, kind), lengthUnit())})…`, action: () => gridSpacing() },
   ];
+  /** the grid's spacing on a slider with rungs (GridSpacing.tsx) */
+  const gridSpacing = () => {
+    const r = canvasBox.current?.getBoundingClientRect();
+    pickAt(Math.max(8, (r?.right ?? 700) - 320), (r?.top ?? 120) + 12, 'Grid', () => <GridSpacing kind={kindRef.current} view={gridRef.current} set={setGrid} />);
+  };
   /** Page setup… (PageSetup.tsx): the slides' or the poster's size changed, what is on them scaled with it or kept — one undo step */
   const pageSetup = (x?: number, y?: number) => {
     if (kindRef.current === 'page') return;
@@ -2952,6 +2965,8 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
           { label: 'Placeholder', sub: PH_ROLES.map(r => ({ label: PH_LABELS[r], disabled: ro, action: () => { void insertPlaceholder(r); } })) },
         ] : []),
         { label: 'Guides', sub: guideItems(i, menuPoint.current) },
+        { label: 'Grid', sub: gridItems() },
+        { label: 'Rulers', checked: grid.rulers, action: () => setGrid({ rulers: !gridRef.current.rulers }) },
         { label: 'Page setup…', disabled: ro, action: () => pageSetup(x, y) },
       ] : []),
       { sep: true },
@@ -4495,7 +4510,8 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
             onDragOver={e => { if (e.dataTransfer?.types.includes('Files')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } }}
             onDrop={e => { if (!e.dataTransfer?.files.length) return; e.preventDefault(); const fs = Array.from(e.dataTransfer.files); void placeFiles(fs.map(f => ({ name: f.name, type: f.type, data: f })), null, null); }}>
             {/* (the slide's part of the canvas: all of it, but while drawing holds the slide where the bars left it) */}
-            <div ref={viewEl} class="dl-view" style={{ top: `${inset.t}px`, right: `${inset.r}px`, bottom: `${inset.b}px`, left: `${inset.l}px` }}>
+            {rulerRoom > 0 && <CanvasRulers painter={rulerPaint} unit={lengthUnit()} sel={selBoxes} off={{ x: inset.l + RULER, y: inset.t + RULER }} send={toCanvas} />}
+            <div ref={viewEl} class="dl-view" style={{ top: `${inset.t + rulerRoom}px`, right: `${inset.r}px`, bottom: `${inset.b}px`, left: `${inset.l + rulerRoom}px` }}>
               {link && synced && <iframe ref={canvasFrame} class={'dl-frame' + (soloOn ? ' solo' : '')} title="Page" sandbox={offlineDocs.edit ? undefined : 'allow-scripts allow-modals allow-popups allow-forms'} src={offlineDocs.edit ? offlineSrc('edit') : src('edit')}
                 style={soloOn ? { width: `${soloFrameW}px`, height: `${solo!.height}px`, left: '0px' } : { width: `${frameW}px`, height: `${frameH}px`, transform: `scale(${scale})`, left: `${left}px`, visibility: liveView ? 'hidden' : undefined }} />}
               {liveView && link && synced && <iframe key={liveRev} ref={liveFrame} class="dl-frame" title="The page, running" data-dl-live src={`${src('view')}&n=${liveRev}`}

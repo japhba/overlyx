@@ -16,6 +16,7 @@ import { selection, setSelection, start, placeLive, styleOp, commit, isLocked, m
 import { pxToPt } from '../units';
 import { srcOf, pathOf, slideOf, docRect, liveAt } from './env';
 import { pathCommand } from './pathedit';
+import { turnTogether, turnsTogether } from './place';
 import { DEFAULT_GROUP_LAYOUT, groupLayoutOf, laidOutGroup, type GroupMemberBox } from '../grouplayout';
 import { isGradient, svgGradient } from '../background';
 
@@ -158,6 +159,12 @@ function distribute(sel: Element[], horizontal: boolean): void {
 const deg = (a: number) => { a = ((a % 360) + 540) % 360 - 180; return Math.abs(a) === 180 ? 180 : Math.round(a * 10) / 10; };
 
 function rotateBy(sel: Element[], how: 'rotate-cw' | 'rotate-ccw' | 'rotate-reset'): void {
+  // several boxes a quarter turn: together, about the centre of the box round them (place.ts)
+  const boxes = sel.filter(el => !isLocked(el));
+  if (how !== 'rotate-reset' && boxes.length > 1 && boxes.every(turnsTogether)) {
+    commit([...turnTogether(boxes, how === 'rotate-cw' ? 90 : -90), ...refitGroups(boxes)], { select: 'keep' });
+    return;
+  }
   const ops: HtmlOp[] = [];
   for (const el of sel) {
     const p = pathOf(el);

@@ -1531,17 +1531,29 @@ blend.
     one, each scaled about the box's corner (their text keeps its size, as a group's resize). The edits
     are the ones a drag makes (`styleOp`, the source's units kept, `refitGroups`), one commit — one undo
     step, suggestions while Suggesting. `SelItem.box` carries each object's unturned box in slide px.
-    **Grid** (*View ▸ Grid*, the canvas's right-click menu: Show grid, Snap to grid, spacing 2 / 5 / 10
-    / 20 mm on slides, 10 / 20 / 50 / 100 mm on posters, ⅛–1 in or ½–4 in in the US) and **Rulers**
-    (*View ▸ Rulers*) are this browser's per document (`deliverable/gridview.ts`, `ol.grid:<path>`, as
-    the canvas colour) and drawn by `runtime/grid.ts` in the overlay over the slide shown — never in a
-    slide, the rail, a presentation or an export. With Snap to grid moved and resized objects snap
-    their edges to the grid's lines besides the guides and the other objects (edit.ts `snap`). The
-    rulers lie along the slide's top and left edges, in mm or in with labels as dense as the zoom
-    allows, the selection's extent shaded and the pointer marked in red; a press on one drags out a
-    new guide, every slide's (the top ruler a horizontal one, the left a vertical one — guides.ts's
-    drag, released back on the ruler it is not made). Turning the rulers on shows the guides. Nothing
-    is written into the source but the objects' places and guides, as before.
+    A rotation typed for several objects turns them together about the centre of the box round them
+    (`place.ts turnTogether`: all at the angle typed when they shared one, turned by it when their angles
+    differ — the field then reads "mixed"), as the round handle of several does (edit.ts `rotateMany`)
+    and as *Rotate 90°* now does for several (arrange.ts); *Reset rotation* stays per object.
+    **Grid** (*View ▸ Grid*, the slide's and the canvas's right-click menus: Show grid, Snap to grid,
+    *Grid spacing…* — `GridSpacing.tsx`, a logarithmic slider with labelled rungs the knob snaps to near
+    them: 2 / 5 / 10 / 20 mm on slides between 1 and 50 mm, 10 / 20 / 50 / 100 mm on posters between 5 and
+    250 mm, ⅛–1 in or ½–4 in in the US) and **Rulers** (*View ▸ Rulers*, the same menus) are this
+    browser's per document (`deliverable/gridview.ts`, `ol.grid:<path>`, as the canvas colour). The grid
+    is drawn by `runtime/grid.ts` in the overlay over the slide shown — never in a slide, the rail, a
+    presentation or an export; with Snap to grid moved and resized objects snap their edges to its lines
+    besides the guides and the other objects (edit.ts `snap`). The rulers (21 Nov 2026,
+    `deliverable/rulers.tsx`) are the editor's, along the canvas's top and left edges as PowerPoint's and
+    Keynote's are — the slide's part of the canvas begins past them (`rulerRoom`), so they are in view at
+    every zoom and pan (on 14 Nov they lay along the slide's own edges, off the canvas when the slide
+    filled it); hidden in drawing focus and full screen. In mm or in, 0 at the slide's top left corner,
+    labels as dense as the zoom allows, the slide's extent light, the selection's shaded, the pointer's
+    place a red mark (the runtime posts `rulerPointer` in slide px while they are shown). A press on one
+    drags out a new guide on every slide — the top ruler a horizontal one, the left a vertical one: the
+    editor sends `rulerGuide` start / move / end (frame px) and the runtime runs guides.ts's drag (the
+    frame takes no pointer events meanwhile, `.dl-ruling`); released back on the ruler, none is made.
+    Turning the rulers on shows the guides. Nothing is written into the source but the objects' places
+    and guides, as before.
   * **Around the canvas** (`DeliverableEditor.tsx`): the slide rail (a second frame in `thumb`
     mode: click, drag to reorder, its menu — new slide in the design of the current one, blank,
     duplicate, move, delete; its header's « folds it away — `ol.deckSlides`, folded at first on

@@ -8,7 +8,7 @@
  */
 import type { HtmlOp, Rect } from '../protocol';
 import { docRect, slideOf, pathOf } from './env';
-import { start, placeLive, resizeLive, styleOp, commit, refitGroups, selection, movable, isLocked, angleOf, fixedHeight, draw, report } from './edit';
+import { start, placeLive, resizeLive, styleOp, commit, refitGroups, selection, movable, isLocked, angleOf, fixedHeight, draw, report, isSvgPart, cs } from './edit';
 
 /** an object's own box on its slide (slide px), as it is before it is turned; null off a slide */
 export function boxInSlide(el: Element): Rect | null {
@@ -64,8 +64,16 @@ export function placeSelection(to: PlaceTo): void {
     });
   }
   if (to.rotate !== undefined && Number.isFinite(to.rotate)) {
-    const a = Math.round((((to.rotate % 360) + 540) % 360 - 180) * 10) / 10;
-    for (const el of els) {
+    const a = deg(to.rotate);
+    // several boxes: turned together about the centre of the box round them, as the round handle turns
+    // them — by the angle typed less the one they share (all at it then), or by the angle typed when theirs differ
+    const together = els.length > 1 && els.every(turnsTogether);
+    if (together) {
+      const angles = els.map(angleOf), same = angles.every(x => Math.abs(x - angles[0]) < 0.05);
+      const delta = same ? a - angles[0] : a;
+      if (Math.abs(delta) >= 0.05) ops.push(...turnTogether(els, delta));
+    }
+    for (const el of together ? [] : els) {
       const path = pathOf(el);
       if (!path || el instanceof SVGElement || Math.abs(angleOf(el) - a) < 0.05) continue;
       el.style.setProperty('rotate', `${a}deg`);
@@ -76,6 +84,35 @@ export function placeSelection(to: PlaceTo): void {
   commit([...ops, ...refitGroups(els)]);
   draw();
   report();
+}
+
+const deg = (a: number) => { a = ((a % 360) + 540) % 360 - 180; return Math.abs(a) === 180 ? 180 : Math.round(a * 10) / 10; };
+
+/** a box on a slide that turns with others (not a part of a drawing, not in the flow of the page) */
+export const turnsTogether = (el: Element): el is HTMLElement => el instanceof HTMLElement && !isSvgPart(el) && movable(el) && !isLocked(el) && cs(el).position === 'absolute';
+
+/**
+ * Several objects turned together by `delta` degrees (clockwise) about the centre of the box round
+ * them, each one's own angle turning with it — what every slide editor does with a selection turned
+ * (edit.ts rotateMany is the round handle's). Changed live; the operations to commit returned.
+ */
+export function turnTogether(els: HTMLElement[], delta: number): HtmlOp[] {
+  const ds = els.map(el => start(el));
+  const u = union(ds.map(d => d.r0));
+  const cx = u.x + u.w / 2, cy = u.y + u.h / 2, t = delta * Math.PI / 180, cos = Math.cos(t), sin = Math.sin(t);
+  const ops: HtmlOp[] = [];
+  for (const d of ds) {
+    const s = slideOf(d.el), k = s && s.offsetWidth ? docRect(s).w / s.offsetWidth : 1;
+    const ox = d.r0.x + d.r0.w / 2 - cx, oy = d.r0.y + d.r0.h / 2 - cy;
+    placeLive(d, (ox * cos - oy * sin - ox) / k, (ox * sin + oy * cos - oy) / k);
+    const a = deg(d.angle + delta);
+    d.el.style.setProperty('rotate', `${a}deg`);
+    const op = styleOp(d);
+    if (op) ops.push(op);
+    const path = pathOf(d.el);
+    if (path) ops.push({ t: 'style', path, set: { rotate: a ? `${a}deg` : null } });
+  }
+  return ops;
 }
 
 function union(rs: Rect[]): Rect {

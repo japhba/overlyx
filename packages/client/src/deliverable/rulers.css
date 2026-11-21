@@ -1,0 +1,14 @@
+/* The rulers along the slide canvas's top and left edges (rulers.tsx) */
+.dl-ruler { position: absolute; z-index: 4; overflow: hidden; background: var(--surface2, #f8f8f6); touch-action: none; }
+.dl-ruler.top { cursor: s-resize; border-bottom: 1px solid var(--ui-border, rgba(0, 0, 0, .18)); box-sizing: border-box; }
+.dl-ruler.left { cursor: e-resize; border-right: 1px solid var(--ui-border, rgba(0, 0, 0, .18)); box-sizing: border-box; }
+.dl-ruler .rs { fill: var(--surface, #fff); }
+.dl-ruler .rsel { fill: color-mix(in srgb, var(--accent, #2f6fde) 22%, transparent); }
+.dl-ruler .rtick { stroke: var(--ui-muted, #6b7280); stroke-width: 1px; fill: none; shape-rendering: crispEdges; }
+.dl-ruler .rmark { stroke: #d93025; stroke-width: 1px; shape-rendering: crispEdges; }
+.dl-ruler text { fill: var(--ui-muted, #4b5563); font: 500 9px / 1 "OL Inter", Inter, sans-serif; }
+.dl-ruler-corner { position: absolute; z-index: 4; width: 18px; height: 18px; box-sizing: border-box; display: flex; align-items: center; justify-content: center;
+  background: var(--surface2, #f8f8f6); border-right: 1px solid var(--ui-border, rgba(0, 0, 0, .18)); border-bottom: 1px solid var(--ui-border, rgba(0, 0, 0, .18));
+  color: var(--ui-muted, #6b7280); font: 500 8px / 1 "OL Inter", Inter, sans-serif; }
+/* a guide being dragged out of a ruler: the pointer over the slide stays the ruler's */
+.dl-canvas.dl-ruling .dl-frame { pointer-events: none; }

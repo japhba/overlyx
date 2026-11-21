@@ -59,7 +59,7 @@ import { clipOf, postClip, paste, plainText } from './clip';
 import { bufferedTextHtml } from '../recovery';
 import { weaveMenu } from './weave';
 import { initGuides, guideSlide, guideAt, guideSnaps, guideParts, startGuideDrag, moveGuideDrag, endGuideDrag, GUIDES_CSS } from './guides';
-import { initGrid, gridParts, gridSnaps, rulerAt, rulerPointer, GRID_CSS } from './grid';
+import { initGrid, gridParts, gridSnaps, rulerPointer, GRID_CSS } from './grid';
 import { boxInSlide } from './place';
 import { listInkBox } from './listmarkers';
 import { replaceEditingHost, editingTextStyle, carryEditingTextStyle } from './editinghost';
@@ -1423,8 +1423,8 @@ export function draw(): void {
   layer.style.setProperty('--s', String(1 / scale));
   const parts: string[] = [];
   const bw = 1.5 / scale;
-  // the grid and the rulers (grid.ts), under everything else
-  if (state.kind !== 'page') parts.push(gridParts(guideSlide(null), selected.filter(e => e.isConnected).map(docRect)));
+  // the grid (grid.ts), under everything else
+  if (state.kind !== 'page') parts.push(gridParts(guideSlide(null)));
   if (state.kind !== 'page') {
     const scope = isSolo() ? slides()[soloIndex()] : document.body;
     for (const el of Array.from(scope?.querySelectorAll(`[${WRAP_LINES}]`) ?? [])) {
@@ -1776,14 +1776,6 @@ function onPointerDown(e: PointerEvent): void {
   if (tool !== 'select') {
     const slide = slideOf(t);
     drag = { ...base, kind: 'draw', slide, pts: [[x, y]] };
-    capture();
-    return;
-  }
-  // on a ruler (grid.ts): a new guide dragged out of it, every slide's
-  const rulerAxis = rulerAt(guideSlide(null), x, y);
-  if (rulerAxis) {
-    drag = { ...base, kind: 'guide' };
-    startGuideDrag(guideSlide(null)!, { axis: rulerAxis, at: -1e6, own: false }, true, x, y);
     capture();
     return;
   }

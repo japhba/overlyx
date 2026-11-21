@@ -5,7 +5,8 @@
  * mm, inches in the US), from the slide's top left corner; for one object its own box before it is
  * turned, for several the box round them (moved and spread as one). Enter or leaving a field places
  * it, ↑ / ↓ step (Shift: ten times, Alt: a tenth) — each a move as a drag makes it, one undo step
- * (runtime place.ts). Keep proportions: a width typed brings the height with it, and the other way.
+ * (runtime place.ts). Several objects turn together about the centre of the box round them (all at the
+ * angle typed when they shared one; turned by it when their angles differ, the field then empty). Keep proportions: a width typed brings the height with it, and the other way.
  */
 import { useEffect, useState } from 'preact/hooks';
 import type { Rect, SelItem } from './protocol';
@@ -74,14 +75,14 @@ export function PositionSize({ sel, place }: Props) {
   };
   const field = (f: Field, label: string, title: string, suffix: string) => <label class="dl-pos-field" title={title}>
     <span>{label}</span>
-    <input type="text" inputMode="decimal" value={value(f)} disabled={locked} data-pos={f} aria-label={title}
+    <input type="text" inputMode="decimal" value={value(f)} disabled={locked} data-pos={f} aria-label={title} placeholder={f === 'r' && angle === null ? 'mixed' : undefined}
       onInput={e => { const v = (e.target as HTMLInputElement).value; setDraft(d => ({ ...d, [f]: v })); }}
       onKeyDown={key(f)} onBlur={e => { if (draft[f] !== undefined) commit(f, (e.target as HTMLInputElement).value); }} />
     <small>{suffix}</small>
   </label>;
 
   return <div class="dl-pos" data-dl-position>
-    <p class="dialog-hint">{sel.length > 1 ? `${sel.length} objects — the box round them. ` : ''}From the {sel.some(s => s.slide >= 0) ? 'slide' : 'page'}’s top left corner{locked ? ' — locked: unlock it to move it' : ''}.</p>
+    <p class="dialog-hint">{sel.length > 1 ? `${sel.length} objects — the box round them; a rotation typed turns them together about its centre. ` : ''}From the {sel.some(s => s.slide >= 0) ? 'slide' : 'page'}’s top left corner{locked ? ' — locked: unlock it to move it' : ''}.</p>
     <div class="dl-pos-grid">
       <span class="dl-pos-row">Position</span>
       {field('x', 'X', 'Distance from the left edge', unit)}

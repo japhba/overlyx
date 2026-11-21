@@ -294,6 +294,8 @@ export type ToRuntime =
   | { ol: 'guides'; show: boolean }
   /** the grid and the rulers (runtime grid.ts; the settings: gridview.ts) — `size` in slide px */
   | { ol: 'grid'; show: boolean; snap: boolean; size: number; rulers: boolean; unit: 'mm' | 'in' }
+  /** a guide dragged out of the editor's rulers (rulers.ts; the top ruler: axis 'y', a horizontal guide) — a point of the canvas's page (CSS px); `free`: no snapping */
+  | { ol: 'rulerGuide'; phase: 'start' | 'move' | 'end' | 'cancel'; axis: 'x' | 'y'; x: number; y: number; free?: boolean }
   /** the selection placed at a box typed (slide px; PositionSize.tsx → runtime place.ts); what is not given stays */
   | { ol: 'place'; x?: number; y?: number; w?: number; h?: number; rotate?: number }
   /** the theme view (the editor's Edit theme): the objects on every slide alone shown and taken, the slides' own dimmed and out of reach (edit.ts setThemeView) */
@@ -481,6 +483,8 @@ export type FromRuntime =
   | { ol: 'needSource' }
   | { ol: 'pasteFiles'; files: { name: string; type: string; data: ArrayBuffer }[]; slide: Path | null; at: { x: number; y: number } | null }
   | { ol: 'scroll'; y: number }
+  /** the pointer on the slide shown (slide px; null: off the page), for the rulers' mark — sent only while they are shown */
+  | { ol: 'rulerPointer'; at: { x: number; y: number } | null }
   /** a pinch or Ctrl+wheel in the frame: zoom by `factor` about a point (frame client px; its document y) */
   | { ol: 'zoom'; factor: number; clientX: number; clientY: number; pageY: number }
   /** panning asked for in the frame (frame px; the editor pans what overflows its canvas): a wheel or trackpad scroll, a finger */
