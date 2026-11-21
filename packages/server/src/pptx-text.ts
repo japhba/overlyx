@@ -23,8 +23,10 @@ export const PPTX_TEXT_SCRIPT = String.raw`(() => {
     if (a < 0.05) return null;
     return [m[1], m[2], m[3]].map(function (v) { return ('0' + Math.round(+v).toString(16)).slice(-2); }).join('').toUpperCase();
   };
-  var GENERIC = { serif: 1, 'sans-serif': 1, monospace: 1, cursive: 1, fantasy: 1, 'system-ui': 1, 'ui-sans-serif': 1, 'ui-serif': 1, 'ui-monospace': 1, math: 1, emoji: 1 };
-  var family = function (f) { var n = (f || '').split(',')[0].trim().replace(/^["']|["']$/g, ''); return GENERIC[n] ? '' : n; };
+  // CSS's generic families name no face to write into the file (nor do the system-/ui- keywords, which
+  // OverLyX never sets — the test no-sf-fonts keeps their names out of the code)
+  var GENERIC = { serif: 1, 'sans-serif': 1, monospace: 1, cursive: 1, fantasy: 1, math: 1, emoji: 1 };
+  var family = function (f) { var n = (f || '').split(',')[0].trim().replace(/^["']|["']$/g, ''); return GENERIC[n] || /^(?:system|ui)-/.test(n) ? '' : n; };
   var out = {};
   var marked = [];
   document.querySelectorAll('[data-ol-shot]').forEach(function (slide) {
