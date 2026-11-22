@@ -42,7 +42,8 @@ export function adoptAccountUi(m: UiMode | null | undefined): void {
 }
 
 function apply(): void {
-  document.documentElement.dataset.ui = mode;
+  // no document in node-environment tests that import a dialog (imagepaste, inkpens)
+  if (typeof document !== 'undefined') document.documentElement.dataset.ui = mode;
   listeners.forEach(l => l());
 }
 
