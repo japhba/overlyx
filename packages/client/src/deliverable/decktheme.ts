@@ -26,7 +26,7 @@ export interface DeckTheme {
 /** a top-level rule of a stylesheet: its selector, and where its `{` and `}` are in the page's text */
 interface Rule { sel: string[]; open: number; close: number }
 /** a declaration of a rule: where its value is (trimmed) and where it ends (after its `;`, if any) */
-interface Decl { prop: string; value: string; from: number; to: number }
+interface Decl { prop: string; value: string; from: number; to: number; start: number; end: number }
 
 /** the contents of the page's <style> elements (offsets in the text), in document order */
 function sheets(text: string): { from: number; to: number }[] {
@@ -72,7 +72,8 @@ function declsOf(text: string, r: Rule): Decl[] {
       const raw = part.slice(colon + 1), lead = raw.length - raw.trimStart().length;
       const value = raw.trim();
       const from = r.open + 1 + start + colon + 1 + lead;
-      if (prop && value) out.push({ prop, value, from, to: from + value.length });
+      const at = r.open + 1 + start + (part.length - part.trimStart().length);
+      if (prop && value) out.push({ prop, value, from, to: from + value.length, start: at, end: r.open + 1 + Math.min(i + 1, body.length) });
     }
     start = i + 1;
   };
@@ -111,8 +112,12 @@ const isHeadings = (r: Rule) => r.sel.length > 0 && r.sel.every(s => HEADING.tes
 /** the family of a `font` shorthand (after its size and line height) */
 const shorthandFamily = (v: string) => /(?:^|\s)[\d.]+(?:px|pt|pc|em|rem|ex|ch|%|vw|vh|vmin|vmax|mm|cm|in|q)?(?:\s*\/\s*\S+)?\s+(.+)$/i.exec(v)?.[1]?.trim() ?? null;
 
-/** the top-level rules of all the page's stylesheets, in order */
-const rulesOf = (text: string): Rule[] => sheets(text).flatMap(s => rulesIn(text, s.from, s.to));
+/** the top-level rules of all the page's stylesheets, in order (of the text read last: the theme pane and the layout read the same one) */
+let rulesRead: { text: string; rules: Rule[] } | null = null;
+const rulesOf = (text: string): Rule[] => {
+  if (rulesRead?.text !== text) rulesRead = { text, rules: sheets(text).flatMap(s => rulesIn(text, s.from, s.to)) };
+  return rulesRead.rules;
+};
 
 /** the rules setting the text's font, the strongest first (`.slide` over `body` over `html`) */
 function textRules(text: string, all: Rule[]): { rule: Rule; rank: number; decl: Decl | null; short: Decl | null }[] {
@@ -227,5 +232,150 @@ export function themeSplices(text: string, ch: ThemeChange): Splice[] {
   const tail = [link, rule && !ss.length ? `<style>\n  ${rule}\n</style>` : ''].filter(Boolean).join('\n');
   const head = tail ? headOf(text) : null;
   if (tail && head) out.push(insertSplice(text, head, 1e6, tail));
+  return out;
+}
+
+/* ------------------------------------------------------------------ the layout's rules (deckmaster layoutGroups) */
+
+/** a top-level rule of the page's stylesheets: its place among them, its selectors, its declarations (the last of a property wins) */
+export interface SheetRule { index: number; sel: string[]; decls: Map<string, string> }
+
+/** the top-level rules of all the page's stylesheets, in order */
+export function sheetRules(text: string): SheetRule[] {
+  return rulesOf(text).map((r, index) => ({ index, sel: r.sel, decls: new Map(declsOf(text, r).map(d => [d.prop, d.value])) }));
+}
+
+/** an element as a selector sees it (core html/source.ts HElement: tag, attributes, parent) */
+export interface SelElement { tagName: string; attrs: { name: string; value: string }[]; parentNode?: unknown }
+
+interface Compound { tag: string | null; ids: string[]; classes: string[]; attrs: { name: string; op: string; value: string }[] }
+/** a selector: its compounds, and the combinators between them (' ' a descendant, '>' a child) */
+export interface Selector { parts: Compound[]; combs: string[]; specificity: number }
+
+const IDENT = /^-?[_a-zA-Z -￿][-_a-zA-Z0-9 -￿]*/;
+
+/**
+ * One selector of a rule, as far as the layout needs one: elements, classes, ids, attributes, joined by
+ * descendant and child combinators. Null: anything else (a pseudo-class, `+`, `~`, an escape) — never
+ * taken to match.
+ */
+export function parseSelector(sel: string): Selector | null {
+  const s = sel.trim();
+  const parts: Compound[] = [], combs: string[] = [];
+  let cur: Compound | null = null, i = 0;
+  while (i < s.length) {
+    const c = s[i];
+    if (/\s/.test(c) || c === '>') {
+      let comb = ' ';
+      while (i < s.length && (/\s/.test(s[i]) || s[i] === '>')) { if (s[i] === '>') { if (comb === '>') return null; comb = '>'; } i++; }
+      if (!cur || i >= s.length) return null;
+      parts.push(cur); combs.push(comb); cur = null;
+      continue;
+    }
+    const fresh = !cur;
+    cur ??= { tag: null, ids: [], classes: [], attrs: [] };
+    if (c === '*' && fresh) { i++; continue; }
+    if (c === '.' || c === '#') {
+      const m = IDENT.exec(s.slice(i + 1));
+      if (!m) return null;
+      (c === '.' ? cur.classes : cur.ids).push(m[0]);
+      i += 1 + m[0].length;
+      continue;
+    }
+    if (c === '[') {
+      const j = s.indexOf(']', i);
+      const m = j < 0 ? null : /^\s*([-\w:]+)\s*(?:([~|^$*]?=)\s*(?:"([^"]*)"|'([^']*)'|([^\s"'\]]+))\s*)?$/.exec(s.slice(i + 1, j));
+      if (!m || (m[2] && m[2] !== '=' && m[2] !== '~=')) return null;
+      cur.attrs.push({ name: m[1].toLowerCase(), op: m[2] ?? '', value: m[3] ?? m[4] ?? m[5] ?? '' });
+      i = j + 1;
+      continue;
+    }
+    const m = fresh ? IDENT.exec(s.slice(i)) : null;
+    if (!m) return null;
+    cur.tag = m[0].toLowerCase();
+    i += m[0].length;
+  }
+  if (!cur) return null;
+  parts.push(cur);
+  const specificity = parts.reduce((n, p) => n + p.ids.length * 10000 + (p.classes.length + p.attrs.length) * 100 + (p.tag ? 1 : 0), 0);
+  return { parts, combs, specificity };
+}
+
+const attrOf = (el: SelElement, name: string) => el.attrs.find(a => a.name === name)?.value ?? null;
+const parentOf = (el: SelElement): SelElement | null => {
+  const p = el.parentNode as SelElement | undefined;
+  return p && typeof p.tagName === 'string' && Array.isArray(p.attrs) ? p : null;
+};
+
+function compoundMatches(el: SelElement, c: Compound): boolean {
+  if (c.tag && el.tagName.toLowerCase() !== c.tag) return false;
+  if (c.ids.some(id => attrOf(el, 'id') !== id)) return false;
+  const cls = (attrOf(el, 'class') ?? '').split(/\s+/);
+  if (c.classes.some(k => !cls.includes(k))) return false;
+  return c.attrs.every(a => {
+    const v = attrOf(el, a.name);
+    return v !== null && (a.op === '' || (a.op === '=' ? v === a.value : v.split(/\s+/).includes(a.value)));
+  });
+}
+
+/** the selector takes the element */
+export function selectorMatches(el: SelElement, sel: Selector, k = sel.parts.length - 1): boolean {
+  if (!compoundMatches(el, sel.parts[k])) return false;
+  if (k === 0) return true;
+  let p = parentOf(el);
+  if (sel.combs[k - 1] === '>') return !!p && selectorMatches(p, sel, k - 1);
+  for (; p; p = parentOf(p)) if (selectorMatches(p, sel, k - 1)) return true;
+  return false;
+}
+
+/** a change of a rule (by its place among the page's rules, and its selectors to find it again): a value per property, null to take one out */
+export interface RuleEdit { index: number; sel: string; set: Record<string, string | null> }
+
+/**
+ * Rule changes as splices of `text` — the rule found where it was (its place and selectors), else the
+ * last rule with those selectors (the text may have changed meanwhile); a value replaced where it is
+ * written (its `!important` kept), a declaration taken out, the new ones added at the end of the rule.
+ * One splice a rule: its body.
+ */
+export function ruleEditSplices(text: string, edits: readonly RuleEdit[]): Splice[] {
+  const all = rulesOf(text);
+  const by = new Map<Rule, Record<string, string | null>>();
+  for (const e of edits) {
+    const r = all[e.index]?.sel.join(', ') === e.sel ? all[e.index] : all.filter(x => x.sel.join(', ') === e.sel).pop();
+    if (r) by.set(r, { ...by.get(r), ...e.set });
+  }
+  const out: Splice[] = [];
+  for (const [r, set] of by) {
+    const base = r.open + 1, body = text.slice(base, r.close);
+    const ds = declsOf(text, r);
+    const local: Splice[] = [];
+    const add: string[] = [];
+    for (const [prop, value] of Object.entries(set)) {
+      const mine = ds.filter(d => d.prop === prop);
+      if (value === null) {
+        // (the whitespace before it goes with it)
+        for (const d of mine) { let s = d.start - base; while (s > 0 && /[ \t]/.test(body[s - 1])) s--; local.push({ from: s, to: d.end - base, insert: '' }); }
+        continue;
+      }
+      const d = mine[mine.length - 1];
+      if (!d) { add.push(`${prop}: ${value}`); continue; }
+      const imp = /\s*!important$/i.exec(d.value)?.[0] ?? '';
+      if (d.value.slice(0, d.value.length - imp.length) !== value) local.push({ from: d.from - base, to: d.to - base - imp.length, insert: value });
+    }
+    let next = applySpliced(body, local);
+    if (add.length) {
+      const trimmed = next.replace(/\s+$/, ''), tail = next.slice(trimmed.length);
+      const sep = !trimmed.trim() ? ' ' : trimmed.endsWith(';') ? ' ' : '; ';
+      next = `${trimmed}${sep}${add.join('; ')};${tail || ' '}`;
+    }
+    if (next !== body) out.push({ from: base, to: r.close, insert: next });
+  }
+  return out;
+}
+
+/** splices of a string applied (non-overlapping) */
+function applySpliced(s: string, splices: Splice[]): string {
+  let out = s;
+  for (const x of [...splices].sort((a, b) => b.from - a.from || b.to - a.to)) out = out.slice(0, x.from) + x.insert + out.slice(x.to);
   return out;
 }

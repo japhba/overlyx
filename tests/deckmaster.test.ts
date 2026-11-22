@@ -6,7 +6,8 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { composeSplices, followUps, numberObjects, withoutFields, putOnEverySlide, otherCopies, slideNumberOps, lookAlikeOps, similarTexts, withAttr, twinsOf, everySlideOps, masterObjects } from '../packages/client/src/deliverable/deckmaster.ts';
+import { composeSplices, followUps, numberObjects, withoutFields, putOnEverySlide, otherCopies, slideNumberOps, lookAlikeOps, similarTexts, withAttr, twinsOf, everySlideOps, masterObjects, layoutGroups, layoutOps } from '../packages/client/src/deliverable/deckmaster.ts';
+import { ruleEditSplices, parseSelector } from '../packages/client/src/deliverable/decktheme.ts';
 import { applyOp, applySplices, opSplices, parseSource, type HtmlOp, type Splice } from '../packages/core/src/html/source.ts';
 import { slideElements } from '../packages/core/src/html/deliverable.ts';
 import { newSlideHtml } from '../packages/client/src/deliverable/sourceops.ts';
@@ -278,5 +279,72 @@ describe('the theme view (Edit theme): what is done on one slide is on every sli
     ]);
     expect(masterObjects(t2, 1).map(o => o.key)).toEqual(['m1']);
     expect(masterObjects(t2, 5)).toEqual([]);
+  });
+});
+
+describe('the layout in the theme view (layoutGroups, layoutOps)', () => {
+  // a deck as an agent writes one: titles placed by a class, subtitles in the same place on two slides
+  const css = '.slide{width:1280px;height:720px;position:relative}\n  .ttl { position: absolute; left: 56px; top: 34px; width: 1168px; font-size: 40px; }\n  .sub { position: absolute; font-size: 21px; }\n  :where(.slide li)::marker { color: #888; }';
+  const page = (body: string) => `<!doctype html><html><head><meta name="overlyx" content="deck"><style>\n  ${css}\n</style></head><body>\n${body}\n</body></html>`;
+  const sub = (t: string, left = 56) => `<p class="sub" style="left:${left}px; top:92px; width:1168px;">${t}</p>`;
+  const text = page([
+    slide('<h1 style="position: absolute; left: 96px; top: 230px">Talk</h1>'),
+    slide('<h2 class="ttl">One</h2>', sub('a'), bar()),
+    slide('<h2 class="ttl">Two</h2>', sub('b'), '<p class="sub" style="left:600px; top:300px">alone</p>'),
+    slide('<h2 class="ttl" style="left: 10px; top: 10px">Three, placed itself</h2>', sub('c', 70)),
+  ].join('\n'));
+  const run = (ops: HtmlOp[]) => {
+    const l = layoutOps(text, ops);
+    const src = parseSource(text);
+    return { ...l, text: applySplices(text, [...l.ops.flatMap(o => opSplices(src, o)), ...ruleEditSplices(text, l.rules)]) };
+  };
+  it('finds the titles the stylesheet places and the boxes in the same place on several slides', () => {
+    const gs = layoutGroups(text);
+    expect(gs).toEqual([
+      { paths: [[1, 1, 0], [1, 2, 0]], rule: { index: 1, sel: '.ttl' } },
+      { paths: [[1, 1, 1], [1, 2, 1]], rule: null },
+    ]);
+  });
+  it('moves the titles by their rule: every slide placed by it follows, one placed itself keeps its place', () => {
+    const out = run([{ t: 'style', path: [1, 1, 0], set: { left: '32px', top: '20px' } }]);
+    expect(out.rules).toEqual([{ index: 1, sel: '.ttl', set: { left: '32px', top: '20px' } }]);
+    expect(out.ops).toEqual([]);
+    expect(out.text).toContain('.ttl { position: absolute; left: 32px; top: 20px; width: 1168px; font-size: 40px; }');
+    expect(out.text).toContain('<h2 class="ttl">One</h2>');
+    expect(out.text).toContain('<h2 class="ttl" style="left: 10px; top: 10px">');
+  });
+  it('a size of the rule\'s own added to it; what the object sets itself taken off it so the change shows', () => {
+    const t2 = text.replace('<h2 class="ttl">One</h2>', '<h2 class="ttl" style="color: red; height: 60px">One</h2>');
+    const l = layoutOps(t2, [{ t: 'style', path: [1, 1, 0], set: { height: '80px', color: '#222' } }]);
+    expect(l.rules[0].set).toEqual({ height: '80px', color: '#222' });
+    expect(l.ops).toEqual([{ t: 'style', path: [1, 1, 0], set: { height: null, color: null } }]);
+    const out = applySplices(t2, ruleEditSplices(t2, l.rules));
+    expect(out).toContain('font-size: 40px; height: 80px; color: #222; }');
+  });
+  it('moves a box in the same place on several slides on all of them', () => {
+    const out = run([{ t: 'style', path: [1, 2, 1], set: { left: '40px', width: '1200px' } }]);
+    expect(out.text.match(/<p class="sub" style="left: 40px; top: 92px; width: 1200px">/g)).toHaveLength(2);
+    expect(out.text).toContain('<p class="sub" style="left:70px; top:92px; width:1168px;">c</p>');
+    expect(out.text).toContain('left:600px; top:300px');
+  });
+  it('keeps a layout object deleted in the theme view (its words are its slide\'s); others go as ever', () => {
+    const out = layoutOps(text, [{ t: 'remove', paths: [[1, 1, 0], [1, 2, 2]] }]);
+    expect(out.kept).toBe(1);
+    expect(out.ops).toEqual([{ t: 'remove', paths: [[1, 2, 2]] }]);
+  });
+  it('leaves what is not of the layout as it came', () => {
+    const ops: HtmlOp[] = [{ t: 'style', path: [1, 0, 0], set: { left: '0px' } }, { t: 'inner', path: [1, 1, 0], html: 'New' }];
+    expect(layoutOps(text, ops)).toEqual({ ops, rules: [], kept: 0 });
+  });
+  it('matches selectors of elements, classes and ids joined by descendant and child combinators', () => {
+    const t2 = page(slide('<h2>T</h2>', '<p id="x" class="a b" data-k="v">P</p>')).replace('.sub {', 'section.slide > h2 { position: absolute; top: 5px }\n  .slide p#x.b[data-k="v"] { left: 1px }\n  .sub {');
+    expect(layoutGroups(t2).map(g => g.rule?.sel)).toEqual(['section.slide > h2', '.slide p#x.b[data-k="v"]']);
+    expect(parseSelector('a + b')).toBeNull();
+    expect(parseSelector('li:first-child')).toBeNull();
+  });
+  it('rule edits find their rule again in a text that changed, keep !important, take declarations out', () => {
+    const t2 = text.replace('.ttl { position: absolute; left: 56px;', '.x { color: red }\n  .ttl { position: absolute; right: 9px; left: 56px !important;');
+    const out = applySplices(t2, ruleEditSplices(t2, [{ index: 1, sel: '.ttl', set: { left: '30px', right: null } }]));
+    expect(out).toContain('.ttl { position: absolute; left: 30px !important; top: 34px;');
   });
 });

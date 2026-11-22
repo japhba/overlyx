@@ -21,6 +21,7 @@
  */
 import { parseSource, elementChildren, elementAt, attr, pathOf, parseStyle, outerRange, innerRange, applySplices, type HElement, type HNode, type HDocument, type HtmlOp, type Path, type Splice } from '@overlyx/core/html/source.ts';
 import { slideElements } from '@overlyx/core/html/deliverable.ts';
+import { sheetRules, parseSelector, selectorMatches, type Selector, type RuleEdit } from './decktheme';
 
 export const MASTER_ATTR = 'data-ol-master';
 export const FIELD_ATTR = 'data-ol-field';
@@ -616,4 +617,119 @@ export function twinsOf(before: string, splices: readonly Splice[]): number {
     return ss.filter((x, j) => j !== i && objectsOf(x).some(k => { const q = outerRange(k); return q.to - q.from === len && before.slice(q.from, q.to) === src; })).length;
   }
   return 0;
+}
+
+/* ------------------------------------------------------------------ the layout, in the theme view */
+
+/**
+ * An object of the deck's layout and the others of its kind, as the theme view moves and resizes them
+ * (the user, 22 Nov 2026: "in the slide theme editor … I can't move headings and so on to create
+ * smaller margins" — PowerPoint's slide master: its title and text placeholders):
+ *
+ * - placed by the stylesheet (`rule`): a rule such as `.ttl { position: absolute; left: 56px; top: 34px }`
+ *   places it — a slide's object with no place of its own in its style. A change goes into the rule,
+ *   so the slides follow, a new slide in that style too; one that places its own keeps its place.
+ * - in the same place on several slides: the same element and class at the same left / top / width /
+ *   height (an agent's deck writes its titles so) — a change goes to all of them.
+ */
+export interface LayoutGroup { paths: Path[]; rule: { index: number; sel: string } | null }
+
+const PLACE = ['left', 'right', 'top', 'bottom'];
+const NOT_OBJECTS = new Set(['script', 'style', 'template', 'link', 'meta', 'noscript']);
+const styleOf = (el: HElement) => new Map(parseStyle(attr(el, 'style') ?? '').map(d => [d.prop.toLowerCase(), d.value.trim()]));
+
+/** the deck's layout (see LayoutGroup): each kind of object, and where the slides have one */
+export function layoutGroups(text: string): LayoutGroup[] {
+  const { doc } = parseSource(text);
+  const ss = slideElements(doc);
+  if (!ss.length) return [];
+  // the rules that place something, with their selectors as the layout can match them
+  const rules = sheetRules(text).filter(r => PLACE.some(p => r.decls.has(p)))
+    .map(r => ({ r, sels: r.sel.map(parseSelector).filter((s): s is Selector => !!s) }))
+    .filter(x => x.sels.length);
+  const byRule = new Map<number, LayoutGroup>();
+  const bySpot = new Map<string, { paths: Path[]; slides: Set<number> }>();
+  ss.forEach((s, i) => {
+    for (const o of objectsOf(s)) {
+      const cls = (attr(o, 'class') ?? '').trim().split(/\s+/).filter(Boolean);
+      if (attr(o, MASTER_ATTR) !== null || NOT_OBJECTS.has(o.tagName) || cls.includes('notes') || attr(o, 'data-ol-aside') !== null) continue;
+      const own = styleOf(o);
+      if (!PLACE.some(p => own.get(p))) {
+        // the strongest rule that places it (of equal ones, the last)
+        let best: { index: number; sel: string; spec: number } | null = null;
+        for (const { r, sels } of rules) for (const sel of sels) {
+          if (!selectorMatches(o, sel)) continue;
+          if (!best || sel.specificity > best.spec || (sel.specificity === best.spec && r.index > best.index)) best = { index: r.index, sel: r.sel.join(', '), spec: sel.specificity };
+        }
+        if (best) {
+          const g = byRule.get(best.index) ?? { paths: [], rule: { index: best.index, sel: best.sel } };
+          g.paths.push(pathOf(o));
+          byRule.set(best.index, g);
+        }
+        continue;
+      }
+      const spot = spotOf(o);
+      if (!spot) continue;
+      const key = `${o.tagName}|${[...cls].sort().join(' ')}|${spot}`;
+      const g = bySpot.get(key) ?? { paths: [], slides: new Set<number>() };
+      g.paths.push(pathOf(o));
+      g.slides.add(i);
+      bySpot.set(key, g);
+    }
+  });
+  return [...byRule.values(), ...[...bySpot.values()].filter(g => g.slides.size > 1).map(g => ({ paths: g.paths, rule: null }))];
+}
+
+/**
+ * The theme view's edits of the layout (see LayoutGroup): a style changed on one of its objects (moved,
+ * resized, a size or colour from the toolbar) changed for all of its kind — in the rule that places
+ * them (`rules`; what the object's own style sets of it taken off there, so it shows), or on every one
+ * in that place. A layout object deleted there stays (`kept`: how many): its words are its slide's.
+ * The rest as it came.
+ */
+export function layoutOps(text: string, ops: readonly HtmlOp[]): { ops: HtmlOp[]; rules: RuleEdit[]; kept: number } {
+  if (!ops.some(o => o.t === 'style' || o.t === 'remove')) return { ops: [...ops], rules: [], kept: 0 };
+  const groups = layoutGroups(text);
+  if (!groups.length) return { ops: [...ops], rules: [], kept: 0 };
+  const key = (p: Path) => p.join('.');
+  const groupOf = new Map<string, LayoutGroup>();
+  for (const g of groups) for (const p of g.paths) groupOf.set(key(p), g);
+  const { doc } = parseSource(text);
+  const out: HtmlOp[] = [];
+  /** the style edits of one element made one (several ops of a commit on one element would overlap) */
+  const styled = new Map<string, Extract<HtmlOp, { t: 'style' }>>();
+  const style = (path: Path, set: Record<string, string | null>) => {
+    const was = styled.get(key(path));
+    if (was) { Object.assign(was.set, set); return; }
+    const op: Extract<HtmlOp, { t: 'style' }> = { t: 'style', path, set: { ...set } };
+    styled.set(key(path), op);
+    out.push(op);
+  };
+  const rules = new Map<number, RuleEdit>();
+  let kept = 0;
+  for (const op of ops) {
+    if (op.t === 'remove') {
+      const rest = op.paths.filter(p => !groupOf.has(key(p)));
+      kept += op.paths.length - rest.length;
+      if (rest.length) out.push({ ...op, paths: rest });
+      continue;
+    }
+    const g = op.t === 'style' ? groupOf.get(key(op.path)) : undefined;
+    if (op.t !== 'style' || !g) { out.push(op); continue; }
+    if (!g.rule) { for (const p of g.paths) style(p, op.set); continue; }
+    const el = elementAt(doc, op.path);
+    const own = el ? styleOf(el) : new Map<string, string>();
+    const rule: Record<string, string | null> = {}, mine: Record<string, string | null> = {};
+    for (const [k, v] of Object.entries(op.set)) {
+      if (v !== null) rule[k] = v;
+      if (own.has(k)) mine[k] = null;
+    }
+    if (Object.keys(rule).length) {
+      const r = rules.get(g.rule.index) ?? { index: g.rule.index, sel: g.rule.sel, set: {} };
+      Object.assign(r.set, rule);
+      rules.set(g.rule.index, r);
+    }
+    if (Object.keys(mine).length) style(op.path, mine);
+  }
+  return { ops: out, rules: [...rules.values()], kept };
 }

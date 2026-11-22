@@ -83,7 +83,7 @@ export function ThemePane({ theme, fontWarning, objects, slide, sel, layouts, as
         <button class="dl-btn" onClick={close} title="Hide the theme pane (the theme view stays: Done leaves it)">×</button>
       </div>
       <div class="dl-theme-scroll">
-        <div class="dl-anim-hint dl-theme-hint">What is here is on every slide: change an object and every slide follows, anything added goes on every slide, Delete takes it off all of them. The slide’s own objects are dimmed.</div>
+        <div class="dl-anim-hint dl-theme-hint">What is here is on every slide: change an object and every slide follows, anything added goes on every slide, Delete takes it off all of them. Outlined: the layout — the titles and boxes the deck’s style places, or that sit in the same place on several slides. Move or resize one and the others follow (their words stay the slides’). The slide’s own objects are dimmed.</div>
 
         <div class="dl-anim-stephead">On every slide{slide >= 0 ? <span> · slide {slide + 1}</span> : null}</div>
         <div class="dl-theme-list" onMouseLeave={() => hover(null)}>

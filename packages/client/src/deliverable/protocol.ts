@@ -298,8 +298,12 @@ export type ToRuntime =
   | { ol: 'rulerGuide'; phase: 'start' | 'move' | 'end' | 'cancel'; axis: 'x' | 'y'; x: number; y: number; free?: boolean }
   /** the selection placed at a box typed (slide px; PositionSize.tsx → runtime place.ts); what is not given stays */
   | { ol: 'place'; x?: number; y?: number; w?: number; h?: number; rotate?: number }
-  /** the theme view (the editor's Edit theme): the objects on every slide alone shown and taken, the slides' own dimmed and out of reach (edit.ts setThemeView) */
-  | { ol: 'theme'; on: boolean }
+  /**
+   * the theme view (the editor's Edit theme): the objects on every slide and those of the layout
+   * (`layout`, deckmaster layoutGroups: moved and resized for all — not retyped, not deleted) alone
+   * shown and taken, the slides' own dimmed and out of reach (edit.ts setThemeView)
+   */
+  | { ol: 'theme'; on: boolean; layout?: Path[] }
   | { ol: 'exec'; command: string; value?: string }
   | { ol: 'textBox'; anchor: 'fixed' | 'left' | 'center' | 'right' }
   /** the selected text boxes and formulas fitted to what they show (runtime edit.ts fitBoxes) */

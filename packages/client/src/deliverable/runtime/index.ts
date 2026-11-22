@@ -411,7 +411,7 @@ function onMessage(e: MessageEvent): void {
     case 'grid': if (MODE === 'edit') setGrid(m); break;
     case 'rulerGuide': if (MODE === 'edit') rulerGuide(m); break;
     case 'place': if (MODE === 'edit') placeSelection(m); break;
-    case 'theme': if (MODE === 'edit') edit.setThemeView(m.on); break;
+    case 'theme': if (MODE === 'edit') edit.setThemeView(m.on, m.layout); break;
     case 'exec': if (MODE === 'edit') edit.exec(m.command, m.value); break;
     case 'textBox': if (MODE === 'edit') edit.setTextBox(m.anchor); break;
     case 'peers': if (MODE === 'edit') edit.setPeers(m.peers); else if (MODE === 'thumb') { railPeers = m.peers; drawRail(); } break;

@@ -76,8 +76,8 @@ import { mathReady } from '../editor/lyxmath/mathjax';
 import { setLayoutMathFont } from '../fonts/editorfont';
 import { useMathPanels } from '../app/toolbars';
 import { parseSource, opSplices, elementAt, elementChildren, attr, parseStyle, sourcePatch, walk, pathOf, rebasePath, applySplices as applyTextSplices, type SourcePatch } from '@overlyx/core/html/source.ts';
-import { followUps, composeSplices, twinsOf, putOnEverySlide, otherCopies, slideNumberOps, lookAlikeOps, similarTexts, everySlideOps, masterObjects, MASTER_ATTR, SKIP_ATTR } from './deckmaster';
-import { deckTheme, themeSplices, type ThemeChange } from './decktheme';
+import { followUps, composeSplices, twinsOf, putOnEverySlide, otherCopies, slideNumberOps, lookAlikeOps, similarTexts, everySlideOps, masterObjects, layoutOps, layoutGroups, MASTER_ATTR, SKIP_ATTR } from './deckmaster';
+import { deckTheme, themeSplices, ruleEditSplices, type ThemeChange, type RuleEdit } from './decktheme';
 import { embeddedFontFamilies, fontPortabilityWarning, fontResource } from './deckfonts';
 import { ThemePane } from './ThemePane';
 import { useSlideList } from './slideselection';
@@ -946,15 +946,32 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     // diagnostics here: never HTML, element paths, style values, text, coordinates or IDs.
     for (const action of new Set(ops.map(op => canvasInteraction(op.t)))) if (action) recordInteraction(action, outcome, { target: 'canvas', access: outcome === 'denied' ? 'view' : 'edit' });
   };
-  /** in the theme view: an edit on the slide as what it means there — on every slide (deckmaster everySlideOps) */
-  const themeOps = (t: string, ops: HtmlOp[]): HtmlOp[] => (themeRef.current && kindRef.current === 'deck' ? everySlideOps(t, ops) : ops);
+  /**
+   * in the theme view: an edit on the slide as what it means there — of the layout, for all of its kind
+   * (deckmaster layoutOps: the stylesheet's rule that places them, `rules`, or all in that place), else
+   * on every slide (deckmaster everySlideOps)
+   */
+  const themeOps = (t: string, ops: HtmlOp[]): { ops: HtmlOp[]; rules: RuleEdit[] } => {
+    if (!themeRef.current || kindRef.current !== 'deck') return { ops, rules: [] };
+    const l = layoutOps(t, ops);
+    if (l.kept) notify('In Edit theme, titles and boxes of the layout are moved and resized for every slide; they are deleted on their slide.');
+    else if ((l.rules.length || l.ops.length > ops.length) && !layoutTold.current) {
+      layoutTold.current = true;
+      notify(l.rules.length ? 'Changed for every slide the deck’s style places it on. A slide that places its own keeps it there.' : 'Changed on every slide that has it in the same place.');
+    }
+    return { ops: everySlideOps(t, l.ops), rules: l.rules };
+  };
+  const layoutTold = useRef(false);
   const applyOps = (ops: HtmlOp[], raw = false): boolean => {
     if (readOnlyRef.current || host.readOnly()) { recordOps(ops, 'denied'); notify('You can only view this page.', 'error'); return false; }
     const cur = text.toString();
     const src = parseSource(cur);
     try {
-      const sp = (raw ? ops : reviewOps(src, themeOps(cur, ops), suggestStamp())).flatMap(op => opSplices(src, op));
-      applySplices(sp);
+      const th = raw ? { ops, rules: [] } : themeOps(cur, ops);
+      const sp = (raw ? ops : reviewOps(src, th.ops, suggestStamp())).flatMap(op => opSplices(src, op));
+      // (the stylesheet's rules the layout's edits changed: theirs, beside the objects' — decktheme.ts)
+      sp.push(...ruleEditSplices(cur, th.rules));
+      applySplices(sp.sort((a, b) => a.from - b.from || a.to - b.to));
       recordOps(ops, text.toString() === cur ? 'unchanged' : 'changed');
       return true;
     } catch (e) { recordOps(ops, 'failed'); notify(String((e as Error).message ?? e), 'error'); return false; }
@@ -980,11 +997,14 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
       notify('The page changed meanwhile. Your text is available in Recover text.', 'error'); return false;
     }
     let reviewed: HtmlOp[];
-    try { ops = themeOps(base, ops); } catch { /* as they came */ }
+    let rules: RuleEdit[] = [];
+    try { ({ ops, rules } = themeOps(base, ops)); } catch { /* as they came */ }
     // (a guide moved is no suggestion: guides are the editor's, not the slides')
     if (ops.every(o => o.t === 'attr' && o.name === GUIDES_ATTR)) reviewed = ops;
     else try { reviewed = reviewOps(parseSource(base), ops, suggestStamp()); } catch { reviewed = ops; }
     const sp = rebasedSplices(base, cur, reviewed);
+    // (the layout's rules, found again in the text as it is now: decktheme ruleEditSplices)
+    if (sp && rules.length) { sp.push(...ruleEditSplices(cur, rules)); sp.sort((a, b) => a.from - b.from || a.to - b.to); }
     if (!sp) {
       recordOps(ops, 'conflict');
       const typing = ops.filter((op): op is Extract<HtmlOp, { t: 'inner' }> => op.t === 'inner' && op.before !== undefined);
@@ -1309,7 +1329,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
             toCanvas({ ol: 'tool', tool, ink: { ...deckInkStyle(inkRef.current, pageWRef.current), penInks: inkRef.current.penInks && !readOnlyRef.current }, held: drawKeptRef.current });
             toCanvas({ ol: 'guides', show: guidesRef.current });
             toCanvas(gridMessage(gridRef.current, kindRef.current));
-            if (themeRef.current) toCanvas({ ol: 'theme', on: true });
+            if (themeRef.current) toCanvas({ ol: 'theme', on: true, layout: layoutRef.current });
             toCanvas({ ol: 'view', view: shownView(viewRef.current) });
             toCanvas({ ol: 'dark', invert: darkRef.current.invert, figures: darkRef.current.figures, desk: null });
             toCanvas(reviewMsgRef.current());
@@ -3954,6 +3974,13 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     if (!themeOn || kind !== 'deck') return null;
     try { return { theme: deckTheme(textNow), objects: masterObjects(textNow, current), layouts: savedLayoutCards() }; } catch (e) { console.warn('theme', e); return null; }
   }, [themeOn, kind, textNow, current]);
+  /** the deck's layout (deckmaster layoutGroups): what the theme view moves and resizes for all, taken on the canvas besides the objects on every slide */
+  const layoutPaths = useMemo(() => {
+    if (!themeOn || kind !== 'deck') return [];
+    try { return layoutGroups(textNow).flatMap(g => g.paths); } catch (e) { console.warn('layout', e); return []; }
+  }, [themeOn, kind, textNow]);
+  const layoutRef = useRef(layoutPaths); layoutRef.current = layoutPaths;
+  useEffect(() => { if (themeOn) toCanvas({ ol: 'theme', on: true, layout: layoutPaths }); }, [layoutPaths]);
   const fontInfo = useMemo(() => ({ embedded: embeddedFontFamilies(settledText), defaultFont: deckTheme(settledText).text.value }), [settledText]);
   const fontWarning = (css: string) => fontPortabilityWarning(css, fontInfo.embedded);
   const bars = deckToolbar({

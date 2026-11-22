@@ -492,6 +492,7 @@ export function inkTyped(text: string, as: 'notes' | 'formula'): void {
 /** after a new version of the text: the selection found again, the frame redrawn */
 export function afterSource(): void {
   inkArrived();
+  if (themeView) { markLayout(); layoutPlaced(); }
   if (tool === 'lasso') postSlideColors();
   selected = selected.map(e => (e.isConnected ? e : null)).filter((e): e is Element => !!e && !!pathOf(e));
   if (editing && !editing.isConnected) {
@@ -1008,29 +1009,70 @@ function fileObject(el: Element, root: Element): Element | null {
  * The theme view (the editor's Edit theme, Google Slides' theme builder): the objects on every slide
  * (the editor's deckmaster.ts, `data-ol-master` on a slide's object) are the canvas; the slide's own
  * are dimmed and let the pointer through — a click, a marquee, Ctrl+A, the Objects pane take none of
- * them. What is added, changed and deleted there the editor puts on every slide.
+ * them. What is added, changed and deleted there the editor puts on every slide. The layout's objects
+ * (deckmaster layoutGroups: a slide's title placed by the stylesheet, a box in the same place on several
+ * slides — PowerPoint's master placeholders) are taken too, outlined: moved and resized there, the
+ * editor changes all of their kind; their words are their slide's, not typed there.
  */
 let themeView = false;
 let themeCss: HTMLStyleElement | null = null;
-export function setThemeView(on: boolean): void {
+/** the layout's objects (paths of the text the editor last said, LAYOUT_ATTR on them while shown) */
+let layoutPaths: Path[] = [];
+const LAYOUT_ATTR = 'data-ol-layout-obj';
+export function setThemeView(on: boolean, layout?: Path[]): void {
   themeView = on;
+  if (layout || !on) layoutPaths = on ? layout ?? [] : [];
   if (on && !themeCss) {
     themeCss = document.createElement('style');
     themeCss.setAttribute('data-ol-runtime', '');
-    themeCss.textContent = `html[data-ol-theme-view] .slide > :not([data-ol-master]):not([data-ol-runtime]) { opacity: .14 !important; filter: grayscale(1) !important; pointer-events: none !important; }`;
+    themeCss.textContent = `html[data-ol-theme-view] .slide > :not([data-ol-master]):not([data-ol-runtime]):not([${LAYOUT_ATTR}]) { opacity: .14 !important; filter: grayscale(1) !important; pointer-events: none !important; }
+html[data-ol-theme-view] .slide > [${LAYOUT_ATTR}] { outline: 1.5px dashed rgba(26, 115, 232, .7) !important; outline-offset: 2px; }`;
     (document.head ?? document.documentElement).appendChild(themeCss);
   }
   document.documentElement.toggleAttribute('data-ol-theme-view', on);
+  markLayout();
   const kept = selected.filter(inTheme);
-  if (kept.length !== selected.length) { if (editing) stopText(); selected = kept; report(); }
+  if (kept.length !== selected.length || (editing && !inTheme(editing))) { if (editing) stopText(); selected = kept; report(); }
   draw();
 }
-/** what the theme view lets be taken: an object on every slide or what is in one (off the slides: anything) */
+/** the layout's objects marked again (after a new version of the text, or of the paths) */
+function markLayout(): void {
+  for (const el of Array.from(document.querySelectorAll(`[${LAYOUT_ATTR}]`))) el.removeAttribute(LAYOUT_ATTR);
+  if (!themeView) return;
+  for (const p of layoutPaths) { const el = liveAt(p); if (el && slideOf(el) && el.parentElement === slideOf(el)) el.setAttribute(LAYOUT_ATTR, ''); }
+}
+/** a slide's object of the layout, in the theme view (or what is in one) */
+function inLayout(el: Element): boolean {
+  if (!themeView) return false;
+  const s = slideOf(el);
+  for (let e: Element | null = el; e && e !== s; e = e.parentElement) if (e.parentElement === s) return e.hasAttribute(LAYOUT_ATTR);
+  return false;
+}
+/**
+ * The layout's objects where their text puts them: a title moved in the theme view kept the place it
+ * was dragged to in its own style (the page's, not its text's) while the editor wrote it into the
+ * stylesheet's rule — that style left as the text has it, it follows the rule (and an undo).
+ */
+function layoutPlaced(): void {
+  if (!themeView || drag) return;
+  for (const el of Array.from(document.querySelectorAll(`[${LAYOUT_ATTR}]`))) {
+    const src = srcOf.get(el), st = (el as HTMLElement).style;
+    if (!src || !st || el === editing) continue;
+    const want = (src as HTMLElement).style;
+    for (const p of ['left', 'top', 'right', 'bottom', 'width', 'height', 'rotate']) {
+      const v = want?.getPropertyValue(p) ?? '';
+      if (st.getPropertyValue(p) === v) continue;
+      if (v) st.setProperty(p, v, want.getPropertyPriority(p)); else st.removeProperty(p);
+    }
+    if (!el.getAttribute('style')) el.removeAttribute('style');
+  }
+}
+/** what the theme view lets be taken: an object on every slide or of the layout, or what is in one (off the slides: anything) */
 function inTheme(el: Element): boolean {
   if (!themeView) return true;
   const s = slideOf(el);
   if (!s) return true;
-  for (let e: Element | null = el; e && e !== s; e = e.parentElement) if (e.parentElement === s) return (srcOf.get(e) ?? e).hasAttribute('data-ol-master');
+  for (let e: Element | null = el; e && e !== s; e = e.parentElement) if (e.parentElement === s) return (srcOf.get(e) ?? e).hasAttribute('data-ol-master') || e.hasAttribute(LAYOUT_ATTR);
   return false;
 }
 
@@ -3464,7 +3506,8 @@ function tapPlaceholder(el: Element, e: PointerEvent): boolean {
 
 function beginText(el: HTMLElement, at: { x: number; y: number } | null, selectAll = false, openMath = false): void {
   const src = srcOf.get(el);
-  if (!src) return;
+  // (the layout's titles and boxes are moved and resized in the theme view; their words are typed on their slide)
+  if (!src || inLayout(el)) return;
   flushAfter();
   stopText();
   editing = el;
