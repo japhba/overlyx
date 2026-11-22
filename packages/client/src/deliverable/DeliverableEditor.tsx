@@ -3506,6 +3506,9 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // a modal over this editor (the SVG pop-up, a dialog) has the keyboard: with the focus on the page's body both
+      // canvases heard its keys, and Delete in the SVG pop-up also removed the deck's selected picture
+      for (const modal of document.querySelectorAll('[aria-modal="true"]')) if (!canvasBox.current || !modal.contains(canvasBox.current)) return;
       if (!canvasBox.current?.closest('.dl-editor')?.contains(document.activeElement) && document.activeElement !== document.body) return;
       if ((e.target as HTMLElement)?.closest?.('textarea, input')) return;
       if ((e.target as HTMLElement)?.isContentEditable) return;
