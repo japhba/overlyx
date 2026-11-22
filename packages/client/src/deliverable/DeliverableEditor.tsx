@@ -957,7 +957,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     if (l.kept) notify('In Edit theme, titles and boxes of the layout are moved and resized for every slide; they are deleted on their slide.');
     else if ((l.rules.length || l.ops.length > ops.length) && !layoutTold.current) {
       layoutTold.current = true;
-      notify(l.rules.length ? 'Changed for every slide the deck’s style places it on. A slide that places its own keeps it there.' : 'Changed on every slide that has it in the same place.');
+      notify(l.rules.length ? 'Changed for every slide the deck’s style places it on. A slide that places its own keeps it there.' : 'Changed on every slide that has one in about the same place, by as much.');
     }
     return { ops: everySlideOps(t, l.ops), rules: l.rules };
   };

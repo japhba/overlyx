@@ -302,7 +302,7 @@ describe('the layout in the theme view (layoutGroups, layoutOps)', () => {
     const gs = layoutGroups(text);
     expect(gs).toEqual([
       { paths: [[1, 1, 0], [1, 2, 0]], rule: { index: 1, sel: '.ttl' } },
-      { paths: [[1, 1, 1], [1, 2, 1]], rule: null },
+      { paths: [[1, 1, 1], [1, 2, 1], [1, 3, 1]], rule: null },
     ]);
   });
   it('moves the titles by their rule: every slide placed by it follows, one placed itself keeps its place', () => {
@@ -321,11 +321,32 @@ describe('the layout in the theme view (layoutGroups, layoutOps)', () => {
     const out = applySplices(t2, ruleEditSplices(t2, l.rules));
     expect(out).toContain('font-size: 40px; height: 80px; color: #222; }');
   });
-  it('moves a box in the same place on several slides on all of them', () => {
+  it('moves a box in about the same place on several slides on all of them, by as much', () => {
     const out = run([{ t: 'style', path: [1, 2, 1], set: { left: '40px', width: '1200px' } }]);
     expect(out.text.match(/<p class="sub" style="left: 40px; top: 92px; width: 1200px">/g)).toHaveLength(2);
-    expect(out.text).toContain('<p class="sub" style="left:70px; top:92px; width:1168px;">c</p>');
+    expect(out.text).toContain('<p class="sub" style="left: 54px; top: 92px; width: 1200px">c</p>');
     expect(out.text).toContain('left:600px; top:300px');
+  });
+  it('takes text boxes and pictures in about the same place as one placeholder, one per slide; not ones elsewhere or placed otherwise', () => {
+    const box = (l: number, t: number, w: number, extra = '') => `<div class="txt" style="left:${l}px; top:${t}px; width:${w}px;${extra}">x</div>`;
+    const pic = (l: number, t: number, wd: number, ht?: number) => `<img class="fig" src="a.svg" style="left:${l}px; top:${t}px; width:${wd}px;${ht ? ` height:${ht}px;` : ''}">`;
+    const t2 = page([
+      slide(box(56, 134, 1168), pic(28, 392, 404, 280)),
+      slide(box(60, 150, 1120), box(60, 400, 1120), pic(40, 380, 420)),
+      slide(box(56, 134, 560), box(648, 134, 580), pic(500, 392, 404)),
+      slide(box(56, 134, 1168, ' right:0px;'), box(56, 140, 560)),
+    ].join('\n'));
+    expect(layoutGroups(t2).map(g => g.paths)).toEqual([
+      [[1, 0, 0], [1, 1, 0]], // the wide text box (not the one lower down; not the half-wide; not the one placed by its right too)
+      [[1, 2, 0], [1, 3, 1]], // the left column
+      [[1, 0, 1], [1, 1, 2]], // the picture at the left
+    ]);
+    // the picture without a height of its own keeps it so; the other moves by as much
+    const l = layoutOps(t2, [{ t: 'style', path: [1, 0, 1], set: { left: '20px', top: '370px', height: '300px' } }]);
+    expect(l.ops).toEqual([
+      { t: 'style', path: [1, 0, 1], set: { left: '20px', top: '370px', height: '300px' } },
+      { t: 'style', path: [1, 1, 2], set: { left: '32px', top: '358px' } },
+    ]);
   });
   it('keeps a layout object deleted in the theme view (its words are its slide\'s); others go as ever', () => {
     const out = layoutOps(text, [{ t: 'remove', paths: [[1, 1, 0], [1, 2, 2]] }]);

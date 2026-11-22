@@ -629,26 +629,79 @@ export function twinsOf(before: string, splices: readonly Splice[]): number {
  * - placed by the stylesheet (`rule`): a rule such as `.ttl { position: absolute; left: 56px; top: 34px }`
  *   places it — a slide's object with no place of its own in its style. A change goes into the rule,
  *   so the slides follow, a new slide in that style too; one that places its own keeps its place.
- * - in the same place on several slides: the same element and class at the same left / top / width /
- *   height (an agent's deck writes its titles so) — a change goes to all of them.
+ * - in about the same place on several slides (the user, 22 Nov: "same for textboxes and other things
+ *   that are typically similarly placed on a slide"): the same element and class, placed by the same
+ *   sides, every edge within 5 % of the slide of the first one's — one per slide, as a placeholder of
+ *   PowerPoint's layout. A move or a new size goes to all of them by as much as it moved this one
+ *   (each keeps how it differed), anything else as it is.
  */
 export interface LayoutGroup { paths: Path[]; rule: { index: number; sel: string } | null }
 
 const PLACE = ['left', 'right', 'top', 'bottom'];
 const NOT_OBJECTS = new Set(['script', 'style', 'template', 'link', 'meta', 'noscript']);
 const styleOf = (el: HElement) => new Map(parseStyle(attr(el, 'style') ?? '').map(d => [d.prop.toLowerCase(), d.value.trim()]));
+/** the properties a move or a new size changes */
+const BOX = new Set(['left', 'right', 'top', 'bottom', 'width', 'height']);
+const pxOf = (v: string | null | undefined): number | null => { const m = v ? /^(-?\d*\.?\d+)px$/i.exec(v.trim()) : null; return m ? parseFloat(m[1]) : null; };
+
+/** the slide's size in px, as the stylesheet's `.slide` rule has it (1280 × 720 when it does not) */
+function slidePx(text: string): { w: number; h: number } {
+  const px = (v: string | undefined) => { const m = v ? /^(\d*\.?\d+)px$/i.exec(v.trim()) : null; return m ? parseFloat(m[1]) : null; };
+  let w: number | null = null, h: number | null = null;
+  for (const r of sheetRules(text)) {
+    if (!r.sel.some(x => /(?:^|[\s>])(?:section)?\.slide$/.test(x.trim()))) continue;
+    w = px(r.decls.get('width')) ?? w;
+    h = px(r.decls.get('height')) ?? h;
+  }
+  return { w: w ?? 1280, h: h ?? 720 };
+}
+
+/** the sides that place a box */
+const SIDES = ['left', 'right', 'top', 'bottom'] as const;
+/** an object's edges on a w × h slide as its own style places it: px, or (a length not in px or %) the value as written */
+function edgesOf(own: Map<string, string>, w: number, h: number): Record<(typeof SIDES)[number], number | string | null> {
+  const len = (k: string, total: number): number | string | null => {
+    const v = own.get(k);
+    if (!v) return null;
+    const m = /^(-?\d*\.?\d+)(px|%)?$/i.exec(v);
+    if (!m) return v;
+    const n = parseFloat(m[1]);
+    return m[2] === '%' ? n * total / 100 : m[2] || n === 0 ? n : v;
+  };
+  const span = (a: string, b: string, size: string, total: number) => {
+    const x = len(a, total), y = len(b, total), s = len(size, total);
+    const num = (v: number | string | null): v is number => typeof v === 'number';
+    return [x ?? (num(y) && num(s) ? total - y - s : null), num(x) && num(s) ? x + s : num(y) ? total - y : y] as const;
+  };
+  const [left, right] = span('left', 'right', 'width', w), [top, bottom] = span('top', 'bottom', 'height', h);
+  return { left, right, top, bottom };
+}
+
+/** how far apart two objects' edges are, as a share of the tolerance (≤ 1: in about the same place); Infinity when they are not */
+function apart(a: ReturnType<typeof edgesOf>, b: ReturnType<typeof edgesOf>, w: number, h: number): number {
+  let worst = 0;
+  for (const k of SIDES) {
+    const x = a[k], y = b[k];
+    if (x === null || y === null) continue;
+    if (typeof x === 'string' || typeof y === 'string') { if (x !== y) return Infinity; continue; }
+    worst = Math.max(worst, Math.abs(x - y) / (0.05 * (k === 'left' || k === 'right' ? w : h)));
+  }
+  return worst;
+}
 
 /** the deck's layout (see LayoutGroup): each kind of object, and where the slides have one */
 export function layoutGroups(text: string): LayoutGroup[] {
   const { doc } = parseSource(text);
   const ss = slideElements(doc);
   if (!ss.length) return [];
+  const { w, h } = slidePx(text);
   // the rules that place something, with their selectors as the layout can match them
   const rules = sheetRules(text).filter(r => PLACE.some(p => r.decls.has(p)))
     .map(r => ({ r, sels: r.sel.map(parseSelector).filter((s): s is Selector => !!s) }))
     .filter(x => x.sels.length);
   const byRule = new Map<number, LayoutGroup>();
-  const bySpot = new Map<string, { paths: Path[]; slides: Set<number> }>();
+  /** the placeholders so far of each kind: the first one's edges, its objects, their slides */
+  const byKind = new Map<string, { edges: ReturnType<typeof edgesOf>; paths: Path[]; slides: Set<number> }[]>();
   ss.forEach((s, i) => {
     for (const o of objectsOf(s)) {
       const cls = (attr(o, 'class') ?? '').trim().split(/\s+/).filter(Boolean);
@@ -668,23 +721,32 @@ export function layoutGroups(text: string): LayoutGroup[] {
         }
         continue;
       }
-      const spot = spotOf(o);
-      if (!spot) continue;
-      const key = `${o.tagName}|${[...cls].sort().join(' ')}|${spot}`;
-      const g = bySpot.get(key) ?? { paths: [], slides: new Set<number>() };
-      g.paths.push(pathOf(o));
-      g.slides.add(i);
-      bySpot.set(key, g);
+      if (!spotOf(o)) continue;
+      // its kind: the element, its classes, the sides that place it; its placeholder: the nearest of
+      // that kind in about the same place that has none on this slide yet
+      const kind = `${o.tagName}|${[...cls].sort().join(' ')}|${SIDES.map(k => own.get(k) ? k : '').join(',')}`;
+      const edges = edgesOf(own, w, h);
+      const holders = byKind.get(kind) ?? [];
+      let near: (typeof holders)[number] | null = null, nearBy = 1;
+      for (const g of holders) {
+        if (g.slides.has(i)) continue;
+        const d = apart(g.edges, edges, w, h);
+        if (d <= nearBy) { near = g; nearBy = d; }
+      }
+      if (!near) holders.push(near = { edges, paths: [], slides: new Set() });
+      near.paths.push(pathOf(o));
+      near.slides.add(i);
+      byKind.set(kind, holders);
     }
   });
-  return [...byRule.values(), ...[...bySpot.values()].filter(g => g.slides.size > 1).map(g => ({ paths: g.paths, rule: null }))];
+  return [...byRule.values(), ...[...byKind.values()].flat().filter(g => g.slides.size > 1).map(g => ({ paths: g.paths, rule: null }))];
 }
 
 /**
  * The theme view's edits of the layout (see LayoutGroup): a style changed on one of its objects (moved,
  * resized, a size or colour from the toolbar) changed for all of its kind — in the rule that places
  * them (`rules`; what the object's own style sets of it taken off there, so it shows), or on every one
- * in that place. A layout object deleted there stays (`kept`: how many): its words are its slide's.
+ * in about that place (moved and resized by as much). A layout object deleted there stays (`kept`: how many): its words are its slide's.
  * The rest as it came.
  */
 export function layoutOps(text: string, ops: readonly HtmlOp[]): { ops: HtmlOp[]; rules: RuleEdit[]; kept: number } {
@@ -716,9 +778,26 @@ export function layoutOps(text: string, ops: readonly HtmlOp[]): { ops: HtmlOp[]
     }
     const g = op.t === 'style' ? groupOf.get(key(op.path)) : undefined;
     if (op.t !== 'style' || !g) { out.push(op); continue; }
-    if (!g.rule) { for (const p of g.paths) style(p, op.set); continue; }
     const el = elementAt(doc, op.path);
     const own = el ? styleOf(el) : new Map<string, string>();
+    if (!g.rule) {
+      // the others by as much as this one moved and grew (each keeps how it differs)
+      for (const p of g.paths) {
+        if (key(p) === key(op.path)) { style(p, op.set); continue; }
+        const m = elementAt(doc, p);
+        const theirs = m ? styleOf(m) : new Map<string, string>();
+        const set: Record<string, string | null> = {};
+        for (const [k, v] of Object.entries(op.set)) {
+          const was = pxOf(own.get(k)), now = pxOf(v), their = pxOf(theirs.get(k));
+          if (!BOX.has(k) || was === null || now === null) set[k] = v;
+          else if (their !== null) set[k] = `${Math.round((their + now - was) * 100) / 100}px`;
+          else if (k !== 'width' && k !== 'height') set[k] = v;
+          // (a size it leaves to its content, as a picture's height, it keeps leaving so)
+        }
+        if (Object.keys(set).length) style(p, set);
+      }
+      continue;
+    }
     const rule: Record<string, string | null> = {}, mine: Record<string, string | null> = {};
     for (const [k, v] of Object.entries(op.set)) {
       if (v !== null) rule[k] = v;
