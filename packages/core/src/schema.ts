@@ -406,7 +406,7 @@ const nodes: Record<string, NodeSpec> = {
   leaf: {
     inline: true, group: 'inline', atom: true,
     attrs: { name: { default: '' }, arg: { default: '' }, params: jsonAttr([]) },
-    toDOM: node => ['span', { class: 'lyx-leaf lyx-leaf-' + String(node.attrs.name).toLowerCase(), 'data-name': node.attrs.name, 'data-arg': node.attrs.arg, 'data-params': node.attrs.params }, node.attrs.name + (node.attrs.arg ? ' ' + node.attrs.arg : '')],
+    toDOM: node => ['span', { class: 'lyx-leaf lyx-leaf-' + String(node.attrs.name).toLowerCase(), 'data-name': node.attrs.name, 'data-arg': node.attrs.arg, 'data-params': node.attrs.params }, node.attrs.name === 'Date' ? todayText() : node.attrs.name + (node.attrs.arg ? ' ' + node.attrs.arg : '')],
     parseDOM: [{ tag: 'span.lyx-leaf', getAttrs: (d: HTMLElement) => ({ name: attr(d, 'data-name', ''), arg: attr(d, 'data-arg', ''), params: jsonFrom(d, 'data-params', '[]') }) }],
   },
 
@@ -649,6 +649,11 @@ export function spaceChar(kind: string): string {
     case '\\textvisiblespace{}': return '\u2423';
     default: return ' ';
   }
+}
+
+/** A dynamic \today preview, kept out of the document model and saved source. */
+export function todayText(): string {
+  return new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
 export function specialText(token: string, arg: string): string {

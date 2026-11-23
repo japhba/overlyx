@@ -991,6 +991,11 @@ class BodyParser {
       this.makeTitle(ctx, st, name);
       return null;
     }
+    if (name === 'today' && !this.facts.defined.has(name)) {
+      if (s.peekChar() === '{' && s.peekChar(1) === '}') s.pos += 2;
+      this.pushInset(ctx, st, { type: 'Leaf', name: 'Date', arg: '', params: [] });
+      return null;
+    }
 
     // special characters
     const ch = CHAR_CMDS[name];

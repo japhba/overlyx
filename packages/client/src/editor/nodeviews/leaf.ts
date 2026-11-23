@@ -4,7 +4,7 @@
  */
 import type { Node as PMNode } from 'prosemirror-model';
 import type { EditorView, NodeView } from 'prosemirror-view';
-import { paramMap, unquote, linkHasMath, linkShownText, linkTextParts } from '@overlyx/core';
+import { paramMap, unquote, linkHasMath, linkShownText, linkTextParts, todayText } from '@overlyx/core';
 import { isMarkdownDoc } from '../markdown';
 import { getPrefs, subscribePrefs } from '../../prefs';
 import { subscribeProjectEvents, sameGraphicsFile } from '../../projectevents';
@@ -432,6 +432,12 @@ export class LeafView implements NodeView {
         renderTitlePreview(this.dom, paragraphs, (el, latex, display) => renderStaticInto(el, latex, display, macroTableFor(this.view, this.getPos()).table));
         return;
       } catch { text = 'Title block'; }
+    }
+    else if (name === 'Date') {
+      this.dom.className = 'lyx-leaf lyx-leaf-date';
+      this.dom.textContent = todayText();
+      this.dom.title = '\\today — current date';
+      return;
     }
     else if (name === 'VSpace') { this.renderVSpace(arg); return; }
     else if (name === 'Separator') { text = arg === 'plain' ? '' : '— separator —'; if (arg === 'plain') { this.dom.classList.remove('lyx-button'); this.dom.classList.add('lyx-separator-plain'); } }
