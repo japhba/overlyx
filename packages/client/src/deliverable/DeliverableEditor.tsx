@@ -318,6 +318,23 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     }
     if (open) setRecoveryOpen(true);
   };
+  /** drafts dropped for good (Discard, or their words already in the saved document) */
+  const forgetDrafts = (ids: ReadonlySet<string>) => {
+    if (!ids.size) return;
+    const next = recoveredRef.current.filter(d => !ids.has(d.id));
+    recoveredRef.current = next; setRecovered(next); saveTextDrafts(recoveryKey, next);
+    for (const id of ids) forgetPendingTextDraft(recoveryKey, id);
+    if (!next.length) { setRecoveryOpen(false); setDiscardAsk(false); }
+  };
+  const [discardAsk, setDiscardAsk] = useState(false);
+  // A buffer left from a tab closed mid-save (or an edit that did arrive after all) holds words the saved
+  // document already has: nothing to recover, so no notice about it on every opening
+  useEffect(() => {
+    if (!synced || !recoveredRef.current.length) return;
+    const words = (s: string) => s.replace(/\s+/g, '');
+    const saved = words(new DOMParser().parseFromString(text.toString(), 'text/html').body.textContent ?? '');
+    forgetDrafts(new Set(recoveredRef.current.filter(d => { const w = words(draftWords(d.html)); return !w || saved.includes(w); }).map(d => d.id)));
+  }, [synced, recovered.length]);
 
   /* ------------------------------------------------------------- the frames */
 
@@ -4439,9 +4456,7 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     if (!place) { notify('Choose a slide to insert the recovered copy.', 'error'); return; }
     const html = `<div style="position: absolute; left: 80px; top: 120px; width: ${Math.min(1000, Math.max(240, pageW - 160))}px; font-size: 28px; color: #1d2433; background: #fff">${draft.html}</div>`;
     if (!applyOps([{ t: 'insert', parent: place.parent, index: place.index, html }])) return;
-    const next = recoveredRef.current.filter(d => d.id !== draft.id);
-    recoveredRef.current = next; setRecovered(next); saveTextDrafts(recoveryKey, next);
-    forgetPendingTextDraft(recoveryKey, draft.id);
+    forgetDrafts(new Set([draft.id]));
     setRecoveryOpen(false);
     notify('Recovered text inserted as a separate box. The existing box was not overwritten.');
   };
@@ -4462,8 +4477,15 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
         <button class="btn" onClick={() => { void host.discardLocal?.().then(() => location.reload()).catch(error => notify(String(error), 'error')); }}>Reopen latest file</button>
       </div>}
       {!!recovered.length && !presenting && <div role="status" data-dl-recovery-notice style="padding:6px 10px;background:#fff5d8;color:#342700;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-        <span>{recovered.length} recovered text draft{recovered.length === 1 ? '' : 's'} — the saved document was kept.</span>
-        <button class="btn" onClick={() => setRecoveryOpen(true)}>Recover text</button>
+        {discardAsk ? <>
+          <span>Discard {recovered.length === 1 ? 'the recovered draft' : `all ${recovered.length} recovered drafts`}? {recovered.length === 1 ? 'Its' : 'Their'} text will be gone; the saved document stays as it is.</span>
+          <button class="btn" onClick={() => forgetDrafts(new Set(recoveredRef.current.map(d => d.id)))}>Discard</button>
+          <button class="btn" onClick={() => setDiscardAsk(false)}>Cancel</button>
+        </> : <>
+          <span>{recovered.length} recovered text draft{recovered.length === 1 ? '' : 's'} — the saved document was kept.</span>
+          <button class="btn" onClick={() => setRecoveryOpen(true)}>Recover text</button>
+          <button class="btn" onClick={() => setDiscardAsk(true)}>Discard…</button>
+        </>}
       </div>}
       {(tool === 'select' || tool === 'lasso') && quick.length > 0 && quickRect && <QuickBar groups={quick} rect={quickRect} box={onWords ? sel[0]?.rect : undefined} frame={() => canvasFrame.current} scrollY={() => (soloOn ? 0 : scrollRef.current)} />}
       {/* (the context tools, when they float below the bar, start right of the slide rail: its header stays clear) */}
@@ -4691,7 +4713,9 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
           if (dir) canvasFrame.current?.focus();
           toCanvas({ ol: 'mathDone', id, tex, dir, putBack, keys });
         }} />}
-      {recoveryOpen && recovered[0] && <Dialog title="Recover text" onClose={() => setRecoveryOpen(false)} buttons={<>
+      {recoveryOpen && recovered[0] && <Dialog title={recovered.length > 1 ? `Recover text (1 of ${recovered.length})` : 'Recover text'} onClose={() => setRecoveryOpen(false)} buttons={<>
+        <button class="btn" onClick={() => forgetDrafts(new Set([recovered[0].id]))}>Discard</button>
+        <button class="btn" onClick={() => { void navigator.clipboard?.writeText(draftWords(recovered[0].html)).then(() => notify('Copied.'), () => notify('Select the text and copy it.', 'error')); }}>Copy</button>
         <button class="btn" onClick={() => setRecoveryOpen(false)}>Keep for later</button>
         <button class="btn primary" disabled={locked || !curSlidePath} onClick={insertRecoveredCopy}>Insert recovered copy</button>
       </>}>

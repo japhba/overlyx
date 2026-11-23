@@ -70,6 +70,21 @@ it('Shift with a stale external anchor retains the existing collapsed root fallb
   getSelection()!.collapse(outside.firstChild!, 2); navigation.textBoundary(root, true, true); caret(root, 1);
 });
 
+it('Backspace target: only a caret at the start of an item\'s own words, nested or outermost', () => {
+  const root = box('<ul><li id="a">\n  Alpha</li><li id="b">Beta<ul><li id="c">Gamma</li></ul></li><li id="d">x<br>y</li></ul>');
+  const text = (id: string) => root.querySelector('#' + id)!.firstChild!;
+  getSelection()!.collapse(text('a'), 3); expect(navigation.listItemAtStart(root, getSelection())).toEqual({ item: root.querySelector('#a'), nested: false });
+  getSelection()!.collapse(text('a'), 4); expect(navigation.listItemAtStart(root, getSelection())).toBeNull();
+  getSelection()!.collapse(text('c'), 0); expect(navigation.listItemAtStart(root, getSelection())).toEqual({ item: root.querySelector('#c'), nested: true });
+  getSelection()!.collapse(root.querySelector('#d')!.lastChild!, 0); expect(navigation.listItemAtStart(root, getSelection())).toBeNull();
+  getSelection()!.setBaseAndExtent(text('b'), 0, text('b'), 2); expect(navigation.listItemAtStart(root, getSelection())).toBeNull();
+});
+it('Backspace target in a box that is itself the list', () => {
+  const root = document.createElement('ul'); root.contentEditable = 'true'; root.innerHTML = '<li>One</li><li>Two</li>'; document.body.append(root);
+  getSelection()!.collapse(root.lastElementChild!.firstChild!, 0);
+  expect(navigation.listItemAtStart(root, getSelection())).toEqual({ item: root.lastElementChild, nested: false });
+});
+
 it('list item lookup accepts an element anchor at the item itself', () => {
   const root = box('<ul><li>First</li><li id="last">Last</li></ul>'), item = root.querySelector('#last')!;
   expect(navigation.textListItem(root, item)).toBe(item);

@@ -6,6 +6,22 @@ export function textListItem(root: HTMLElement, anchor: Node | null | undefined)
   return item && root.contains(item) ? item : null;
 }
 
+/** The list item whose own text the collapsed caret is at the very start of (Backspace there leaves
+ *  the list level, as in Google Slides), and whether it is nested in another item of the box. */
+export function listItemAtStart(root: HTMLElement, selection: Selection | null): { item: HTMLLIElement; nested: boolean } | null {
+  if (!selection?.rangeCount || !selection.isCollapsed || !selection.anchorNode) return null;
+  const item = textListItem(root, selection.anchorNode);
+  if (!item) return null;
+  const before = root.ownerDocument.createRange();
+  before.setStart(item, 0);
+  before.setEnd(selection.anchorNode, selection.anchorOffset);
+  const part = before.cloneContents();
+  if (part.querySelector('img, svg, video, canvas, br, math, input, .ol-mathchip, [data-ol-chip]')) return null;
+  if ((part.textContent ?? '').replace(/[ \t\n\r​﻿]/g, '')) return null;
+  const outer = item.parentElement?.closest('li');
+  return { item, nested: !!outer && root.contains(outer) };
+}
+
 /** A list at the textbox edge retains an editable item boundary for Tab. */
 function listBoundary(root: HTMLElement, end: boolean): HTMLLIElement | null {
   const edge = (parent: Element): Node | null => {

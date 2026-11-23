@@ -63,7 +63,7 @@ import { initGrid, gridParts, gridSnaps, rulerPointer, GRID_CSS } from './grid';
 import { boxInSlide } from './place';
 import { listInkBox } from './listmarkers';
 import { replaceEditingHost, editingTextStyle, carryEditingTextStyle } from './editinghost';
-import { textBoundary, textListItem } from './textnavigation';
+import { textBoundary, textListItem, listItemAtStart } from './textnavigation';
 import { setInlineStep } from './inlinesteps';
 import { linkSelection } from './linkwords';
 import { fingerHoldsLasso } from '@overlyx/core/fingerlasso.ts';
@@ -655,6 +655,8 @@ export function exec(command: string, value?: string): void {
   }
   else {
     const listCommand = command === 'insertUnorderedList' || command === 'insertOrderedList';
+    // items whose bullet Backspace took off (list-style-type: none): the list's button gives it back
+    if (listCommand && bulletBack(editing, command === 'insertUnorderedList' ? 'ul' : 'ol')) { scheduleCommit(); return; }
     const originalTag = editing.localName;
     // Firefox rejects a list inside a P/H1 editing host. A DIV is a valid block host;
     // the existing incremental commit records that source-tag conversion with the list.
@@ -677,6 +679,17 @@ export function exec(command: string, value?: string): void {
     }
   }
   scheduleCommit();
+}
+
+/** the items at the caret or in the selection that are in a `tag` list but show no bullet get it back; true if any did */
+function bulletBack(root: HTMLElement, tag: 'ul' | 'ol'): boolean {
+  const sel = getSelection();
+  if (!sel?.rangeCount) return false;
+  const range = sel.getRangeAt(0);
+  const items = range.collapsed ? [textListItem(root, sel.anchorNode)] : Array.from(root.querySelectorAll('li')).filter(li => range.intersectsNode(li));
+  const bare = items.filter((li): li is HTMLLIElement => li?.style.listStyleType === 'none' && li.parentElement?.localName === tag);
+  for (const li of bare) { li.style.removeProperty('list-style-type'); if (!li.getAttribute('style')) li.removeAttribute('style'); }
+  return bare.length > 0;
 }
 
 /** Keep the editor/source pairing and listeners when a list needs a block-capable host. */
@@ -3768,6 +3781,16 @@ function onKeyDown(e: KeyboardEvent): void {
     if (e.key === '$' && !mod && !e.altKey && !inCode()) { e.preventDefault(); insertChip(editing, false, '$'); return; }
     // Backspace right after -> became →: the typed characters back (runtime/arrows.ts)
     if (e.key === 'Backspace' && !mod && !e.altKey && !e.shiftKey && arrowBackspace(editing)) { e.preventDefault(); scheduleCommit(); return; }
+    // Backspace at the start of a list item, as in Google Slides: a nested item moves out a level, an item of
+    // the outermost list loses its bullet (its words stay where they are — the box is often the <ul> itself,
+    // which nothing can leave); once without one, Backspace joins it to the line before (the browser's)
+    if (e.key === 'Backspace' && !mod && !e.altKey && !e.shiftKey && !e.isComposing) {
+      const at = listItemAtStart(editing, getSelection());
+      if (at?.nested) { e.preventDefault(); exec('outdent'); return; }
+      if (at && getComputedStyle(at.item).display === 'list-item' && getComputedStyle(at.item).listStyleType !== 'none') {
+        e.preventDefault(); at.item.style.listStyleType = 'none'; scheduleCommit(); return;
+      }
+    }
     if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !mod && !e.shiftKey && !e.altKey) {
       const c = chipBeside(e.key === 'ArrowLeft' ? 'before' : 'after');
       if (c) { e.preventDefault(); openChip(c, null, e.key === 'ArrowLeft' ? 'end' : 'start'); return; }
