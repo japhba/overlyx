@@ -21,6 +21,16 @@ it('takes a refusal for an answer: a document one may not see is asked for once 
   expect(fetch).toHaveBeenCalledOnce();
 });
 
+it('takes "too many requests" (429) and a timeout (408) for "not now", not for a refusal', async () => {
+  vi.useFakeTimers();
+  const fetch = vi.fn().mockRejectedValueOnce(refusal(429)).mockRejectedValueOnce(refusal(408)).mockResolvedValue({ job: { status: 'ok' } });
+  const receive = vi.fn(), refused = vi.fn();
+  watchBuild({ fetch, receive, refused }).poll();
+  await vi.advanceTimersByTimeAsync(10000);
+  expect(refused).not.toHaveBeenCalled();
+  expect(receive).toHaveBeenCalledWith({ job: { status: 'ok' } });
+});
+
 it('asks an unreachable server again, each time later, and at once goes on when it answers', async () => {
   vi.useFakeTimers();
   const fetch = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));

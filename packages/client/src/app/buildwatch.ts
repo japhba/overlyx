@@ -5,7 +5,7 @@
  *   - `poll()` asks now, and again every second while a job is queued or running;
  *   - once nothing builds it stops — or, with `idleMs`, keeps asking that often (the extension: a
  *     build may be started from another editor);
- *   - a refusal (4xx: the document is gone, or no longer this person's to see) is an answer, not a
+ *   - a refusal (4xx but 408 / 429: the document is gone, or no longer this person's to see) is an answer, not a
  *     failure: nothing more is asked. Only an answer that did not come (the network, a server
  *     restarting) is asked for again, 3 s, 6 s, 12 s … at most 30 s apart;
  *   - `stop()` ends it for good — the document was left. An answer still on its way is dropped.
@@ -43,7 +43,8 @@ export function watchBuild<T extends { job?: { status: string } | null }>(option
       try { build = await options.fetch(); } catch (e) {
         if (stopped || run !== generation) return;
         const status = (e as { status?: unknown } | null)?.status;
-        if (typeof status === 'number' && status >= 400 && status < 500) { stopped = true; options.refused?.(); return; }
+        // (408 and 429 say "not now", not "no": asked again like an answer that did not come)
+        if (typeof status === 'number' && status >= 400 && status < 500 && status !== 408 && status !== 429) { stopped = true; options.refused?.(); return; }
         timer = setTimeout(step, Math.min(RETRY_MAX_MS, RETRY_MS * 2 ** failures++));
         return;
       }
