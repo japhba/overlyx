@@ -21,6 +21,7 @@ import { readerFor, writeDocumentText, cachedParseFile } from './texdoc.ts';
 import { parseTex, SETTINGS_PREFIX } from '@overlyx/core/tex/index.ts';
 import { paragraphsToPm, pmBlocksToParagraphs, collectMacros, type PMJSON, type LyxDocument } from '@overlyx/core';
 import { projectDir, findMaster } from './projects.ts';
+import { allow as rateLimit } from './ratelimit.ts';
 
 export class AiError extends Error { constructor(msg: string, public status = 502) { super(msg); } }
 
@@ -795,13 +796,5 @@ export async function transcribeWhisper(req: { audio: string; lang?: string }, u
 
 /* ------------------------------------------------------------------ rate limiting */
 
-const buckets = new Map<string, number[]>();
-/** true when `key` may make another request (`limit` per minute, or per `windowMs`) */
-export function allow(key: string, limit: number, windowMs = 60000): boolean {
-  const now = Date.now();
-  const arr = (buckets.get(key) ?? []).filter(t => now - t < windowMs);
-  if (arr.length >= limit) { buckets.set(key, arr); return false; }
-  arr.push(now);
-  buckets.set(key, arr);
-  return true;
-}
+/** true when `key` may make another request (`limit` per minute, or per `windowMs`; ratelimit.ts) */
+export function allow(key: string, limit: number, windowMs = 60000): boolean { return rateLimit(key, limit, windowMs); }

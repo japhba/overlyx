@@ -35,6 +35,7 @@ import crypto from 'node:crypto';
 import { db } from './db.ts';
 import { config, REPO_ROOT } from './config.ts';
 import { notifyOwner, READ_IT, sendAnswer } from './mailer.ts';
+import { allow as limit } from './ratelimit.ts';
 import { glitchReport } from '@overlyx/core/glitch.ts';
 import { typesetReport } from '@overlyx/core/typeset.ts';
 import { inkLabReport } from '@overlyx/core/inklab.ts';
@@ -211,15 +212,8 @@ export function forgetUserReports(userId: number): void {
   db.prepare('UPDATE reports SET user_id = NULL WHERE user_id = ?').run(userId);
 }
 
-/** simple per-key rate limit (sliding hour) */
-const buckets = new Map<string, number[]>();
-export function allow(key: string, max: number, windowMs = 60 * 60 * 1000): boolean {
-  const now = Date.now();
-  const arr = (buckets.get(key) ?? []).filter(t => now - t < windowMs);
-  if (arr.length >= max) { buckets.set(key, arr); return false; }
-  arr.push(now); buckets.set(key, arr);
-  return true;
-}
+/** per-key rate limit, an hour's window unless said (ratelimit.ts) */
+export function allow(key: string, max: number, windowMs = 60 * 60 * 1000): boolean { return limit(key, max, windowMs); }
 
 /** Routes; mounted on the authenticated /api router. */
 export function feedbackRoutes(): express.Router {
