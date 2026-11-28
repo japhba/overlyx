@@ -8,7 +8,7 @@ import { pdfStatus, useTicker } from '@client/app/pdfstatus';
 import type { HostToPdf } from '../shared/protocol';
 import { setHostDark } from './appearance';
 import { InterfaceZoom } from './InterfaceZoom';
-import { watchPdfBuild } from './pdfPolling';
+import { watchBuild } from '@client/app/buildwatch';
 
 // The webview page cannot start a cross-origin worker from the asset host: load the pdf.js
 // worker's code and hand pdf.js a same-origin blob URL instead.
@@ -46,10 +46,12 @@ export function BuiltPdf({ target: requestedTarget, onBuild, onInverse, onForwar
   const [pdf, setPdf] = useState<PdfState>({ url: null, log: '', busy: false, ok: null, warnings: [] });
   const [target, setTarget] = useState<PdfTarget | null>(null);
   const [showLog, setShowLog] = useState(false);
-  const watcher = useMemo(() => watchPdfBuild({
+  // (the preview stays subscribed while idle: a build can be started in another editor)
+  const watcher = useMemo(() => watchBuild({
     fetch: () => api.build(G.docId),
     receive: r => setPdf(p => stateFromBuild(p, r)),
-    failed: r => vscode.postMessage({ type: 'notify', text: r.job?.status === 'cancelled' ? 'PDF build cancelled' : 'PDF build failed — see the log in the PDF panel', kind: 'error' }),
+    ended: r => { if (r.job?.status !== 'ok') vscode.postMessage({ type: 'notify', text: r.job?.status === 'cancelled' ? 'PDF build cancelled' : 'PDF build failed — see the log in the PDF panel', kind: 'error' }); },
+    idleMs: 2000,
   }), []);
   const poll = (announce: boolean) => watcher.poll(announce);
 
@@ -73,7 +75,7 @@ export function BuiltPdf({ target: requestedTarget, onBuild, onInverse, onForwar
       else if (m?.type === 'built') poll(false);
     };
     window.addEventListener('message', onMsg);
-    return () => { window.removeEventListener('message', onMsg); watcher.dispose(); };
+    return () => { window.removeEventListener('message', onMsg); watcher.stop(); };
   }, []);
 
   const job = pdf.job;

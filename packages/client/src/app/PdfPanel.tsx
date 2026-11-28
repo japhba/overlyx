@@ -13,6 +13,7 @@ import { PdfViewer, type PdfTarget } from './PdfViewer';
 import { pdfStatus, useTicker, AUTO_BUILD_CHOICES, AUTO_BUILD_DELAYS } from './pdfstatus';
 import { getPrefs, setPref, subscribePrefs, type Prefs } from '../prefs';
 import { editorContext } from '../editor/context';
+import { jobActive } from './buildwatch';
 
 export interface PdfState {
   url: string | null; log: string; busy: boolean; ok: boolean | null; warnings: string[]; tex?: string;
@@ -132,8 +133,6 @@ export function PdfPanel({ docId, state, savedAt, onBuild, onCancel, onShowTex, 
   );
 }
 
-const ACTIVE = new Set(['queued', 'exporting', 'compiling']);
-export const jobActive = (j: BuildJob | null | undefined): boolean => !!j && ACTIVE.has(j.status);
 
 /** PdfState from the server's last build + job (`now`: the server's clock when it answered). */
 export function stateFromBuild(prev: PdfState, r: { build: BuildInfo | null; job: BuildJob | null; now?: number }): PdfState {

@@ -216,7 +216,11 @@ blend.
   non-TeX fonts or asks for them via its default output format), the PDF pane shows the phase /
   elapsed time / last log line in a small note floating over the pages (a thin line runs along the
   top — nothing moves) and has a *Cancel* button, and a build keeps running if you switch documents
-  or tabs (the pane picks it up again). A request while a build is running re-builds once more
+  or tabs (the pane picks it up again). The pane follows a build by asking for its status
+  (`app/buildwatch.ts`, shared with the extension's preview): every second while a job is queued
+  or running, not at all otherwise; the watch belongs to the open document and ends when it is
+  left; a 4xx answer (the document is not this person's to see) ends it too, and only a server that
+  could not be reached is asked again, 3 s … 30 s apart. A request while a build is running re-builds once more
   afterwards with the latest content (`requestBuild`; an automatic request never does, so several
   open editors reacting to the same save do not build twice). **How old the PDF is** stands in the
   pane's bar (“✓ built 2 min ago”, amber *· outdated* once the document was saved after it, red after
@@ -3943,7 +3947,9 @@ to the frame); keys pressed inside the page's frame zoom it there (`runtime/view
 rebuilding; PDFs already on disk are rediscovered after a host reload. *Build & View PDF* and
 forward SyncTeX also select this view, and double-clicking the PDF returns to the document.
 *Open beside* keeps a separate PDF panel available. Both use `webview/BuiltPdf.tsx` and continue
-polling while idle so builds started elsewhere appear too (`webview/pdfPolling.ts`). The document,
+polling while idle so builds started elsewhere appear too (the web app's `app/buildwatch.ts`, with
+`idleMs`: one watcher for both — a 4xx answer ends it, an unreachable server is asked again with a
+growing pause). The document,
 source draft and PDF stay mounted when switching views, preserving their state.
 
 **How the extension syncs the file.** The TextDocument is authoritative. The webview sends its whole

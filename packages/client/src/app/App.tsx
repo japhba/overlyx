@@ -59,7 +59,8 @@ import { setHistoryOpener } from './disknotice';
 import { AgentPanel, askAgentAbout } from './AgentPanel';
 import { panelAgents } from './ExternalAgents';
 import { inlineModelLabel } from './AgentModelPicker';
-import { PdfPanel, stateFromBuild, jobActive, EMPTY_PDF, type PdfState } from './PdfPanel';
+import { PdfPanel, stateFromBuild, EMPTY_PDF, type PdfState } from './PdfPanel';
+import { watchBuild, type BuildWatch } from './buildwatch';
 import { E2eKeyHost } from './E2eKeys';
 import { installE2e } from '../e2e/install';
 import { isE2eDocId, isE2eProject } from '../e2e/known';
@@ -1223,25 +1224,23 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   const run = (cmd: (state: any, dispatch: any, view?: any) => boolean) => { const v = activeViewRef.current ?? editorRef.current?.view; if (!v) return; cmd(v.state, v.dispatch, v); v.focus(); };
   const runView = (fn: (v: EditorView) => boolean) => { const v = activeViewRef.current ?? editorRef.current?.view; if (!v) return; fn(v); };
 
-  // PDF builds are background jobs on the server: start one, then poll its status (also picks up
-  // a build that is already running for this document, e.g. started from another tab)
-  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pollBuild = useCallback((id: string, announce: boolean) => {
-    if (pollRef.current) clearTimeout(pollRef.current);
-    const step = async () => {
-      if (editorContext.docId !== id) return;
-      let r: Awaited<ReturnType<typeof api.build>>;
-      try { r = await api.build(id); } catch { pollRef.current = setTimeout(step, 3000); return; }
-      if (editorContext.docId !== id) return;
-      setPdf(p => ({ ...stateFromBuild(p, r), known: true }));
-      if (jobActive(r.job)) { pollRef.current = setTimeout(step, 1000); return; }
-      if (announce && r.job) notify(r.job.status === 'ok' ? 'PDF built' : r.job.status === 'cancelled' ? 'PDF build cancelled' : 'PDF build failed — see log', r.job.status === 'ok' ? 'info' : 'error');
-    };
-    void step();
-  }, []);
-  useEffect(() => () => { if (pollRef.current) clearTimeout(pollRef.current); }, []);
-  // when a document opens: show its last PDF, and resume polling if a build is running
-  useEffect(() => { if (docId && !isProjectRoot) pollBuild(docId, false); }, [docId, isProjectRoot]);
+  // PDF builds are background jobs on the server: start one, then follow its status (buildwatch.ts) —
+  // which also picks up a build already running for this document, e.g. started from another tab.
+  // The watch is the open document's: it shows its last PDF when the document opens, and ends when
+  // the document is left or the server refuses it (a document one may not see: nothing is asked twice).
+  const buildWatch = useRef<BuildWatch | null>(null);
+  useEffect(() => {
+    if (!docId || !isLyxDoc) return;
+    const watch = watchBuild({
+      fetch: () => api.build(docId),
+      receive: r => setPdf(p => ({ ...stateFromBuild(p, r), known: true })),
+      ended: r => notify(r.job!.status === 'ok' ? 'PDF built' : r.job!.status === 'cancelled' ? 'PDF build cancelled' : 'PDF build failed — see log', r.job!.status === 'ok' ? 'info' : 'error'),
+      refused: () => setPdf(p => (p.busy ? { ...p, busy: false } : p)),
+    });
+    buildWatch.current = watch;
+    watch.poll();
+    return () => { watch.stop(); if (buildWatch.current === watch) buildWatch.current = null; };
+  }, [docId, isLyxDoc, reloadKey]);
   // a layout document: each new PDF brings the check of its text boxes against it (editor/layout/controller.ts)
   useEffect(() => { const v = editorRef.current?.view; if (v && docId && pdf.url) refreshLayoutCheck(v, () => api.layoutCheck(docId)); }, [docId, pdf.url]);
 
@@ -1254,7 +1253,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     try {
       const r = await api.export(docId, 'pdf', { auto: opts.auto });
       setPdf(p => ({ ...p, busy: true, job: r.job ?? p.job }));
-      pollBuild(docId, !opts.auto);
+      buildWatch.current?.poll(!opts.auto);
     } catch (e) {
       setPdf(p => ({ ...p, busy: false, ok: false, log: String((e as Error).message) }));
       if (!opts.auto) notify('Could not start the PDF build: ' + String((e as Error).message), 'error');
@@ -1313,7 +1312,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     if (!docId) return;
     lastAutoFor.current = Math.max(lastAutoFor.current, save.savedAt);   // cancelled: no automatic build for this save either
     await api.cancelBuild(docId).catch(() => {});
-    pollBuild(docId, true);
+    buildWatch.current?.poll(true);
   };
   /** SyncTeX: the place in the PDF to show (forward search) */
   const [syncTarget, setSyncTarget] = useState<PdfTarget | null>(null);
