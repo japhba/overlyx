@@ -67,3 +67,14 @@ describe('project file classification', () => {
     expect(hasSettingsLine('')).toBe(false);
   });
 });
+
+describe('listing a project', () => {
+  it('leaves out a link to nothing (or a file gone since the directory was read) and lists the rest', () => {
+    const Q = path.join(ROOT, 'projects', 'alice', 'links');
+    fs.mkdirSync(Q, { recursive: true });
+    fs.writeFileSync(path.join(Q, 'main.tex'), '\\documentclass{article}\n\\begin{document}\nx\n\\end{document}\n');
+    fs.symlinkSync(path.join(Q, 'gone.tex'), path.join(Q, 'dangling.tex'));
+    const files = listProjects().find(p => p.name === 'alice/links')?.files ?? [];
+    expect(files.map(f => f.path)).toEqual(['main.tex']);
+  });
+});

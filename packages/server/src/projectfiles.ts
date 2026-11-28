@@ -110,7 +110,9 @@ export function collect(root: string, dir: string, out: ProjectFile[], depth: nu
       collect(root, full, out, depth + 1);
       continue;
     }
-    const st = fs.statSync(full);
+    // (gone since the directory was read, or a link to nothing: not listed — it must not fail the whole list)
+    let st: fs.Stats;
+    try { st = fs.statSync(full); } catch { continue; }
     const kind = fileKind(e.name);
     const f: ProjectFile = { path: path.relative(root, full), name: e.name, size: st.size, mtime: st.mtimeMs, kind };
     if (kind === 'html') {
