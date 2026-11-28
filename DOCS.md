@@ -2011,7 +2011,10 @@ blend.
     sandbox with **no network namespace**: every request of the page comes back to the server over
     the DevTools pipe and is answered like the editor's frame (`resolveDeliverable`) or, for a short
     list of public font / script CDNs, fetched by the server — nothing else is reachable. At most two
-    pages at once; the browser closes when idle.
+    pages at once; the browser closes when idle. A job (loading, settling, and the PDF or pictures made
+    of the page) gets four minutes in all (`withPage`): Playwright bounds navigation but not `evaluate`,
+    `pdf` or a screenshot, so a page whose own script spins after loading held its slot for ever — at
+    the deadline its context is closed and the person is told the page took too long.
   * **QR codes** (`deliverable/qrcode.ts`, the encoder core `qr.ts` — written here, no dependency:
     UTF-8 bytes, error correction M, versions 1–40, the best of the eight masks): *Insert ▸ QR code…*
     (the slide's right-click menu too) asks for a link or any text and puts its code in the middle of

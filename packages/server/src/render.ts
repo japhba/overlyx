@@ -28,6 +28,9 @@ const CDN_HOSTS = new Set(['fonts.googleapis.com', 'fonts.gstatic.com', 'cdn.jsd
 const CDN_MAX = 20 * 1024 * 1024;
 const IDLE_MS = 3 * 60 * 1000;
 const RENDER_TIMEOUT_MS = 45000;
+/** all of one job: loading, settling and what is made of the page (a long deck as 4K pictures takes about a minute here) */
+const JOB_TIMEOUT_MS = 4 * 60 * 1000;
+const CLOSE_TIMEOUT_MS = 10000;
 
 let browser: Promise<Browser> | null = null;
 let idleTimer: NodeJS.Timeout | null = null;
@@ -123,12 +126,36 @@ async function answer(route: Route): Promise<void> {
   await route.abort();
 }
 
+/** the page did not finish in the time a render gets (its own scripts keep the browser busy, or it is far too large) */
+export class RenderTimeout extends Error {}
+
+/**
+ * A page of the pool for one job, which gets `JOB_TIMEOUT_MS` in all. Playwright bounds navigation
+ * and waiting, but not `evaluate`, `pdf` or a screenshot: a page whose own script spins after it
+ * has loaded would hold its slot for ever, and two of those every export and render_page after
+ * them. At the deadline the context is closed, which ends whatever the job awaits on it; a browser
+ * that does not even close a context any more is given up (the next job starts a new one).
+ */
 async function withPage<T>(project: string, rel: string, userId: number, mode: RuntimeMode, viewport: { width: number; height: number }, scale: number, f: (ctx: BrowserContext, page: import('playwright-core').Page) => Promise<T>, reach = ''): Promise<T> {
   await acquire();
   let ctx: BrowserContext | null = null;
+  let late = false;
+  let deadline: NodeJS.Timeout | null = null;
+  const launched = getBrowser();
+  const close = async () => {
+    const c = ctx;
+    ctx = null;
+    if (!c) return;
+    const closed = await Promise.race([c.close().then(() => true, () => true), new Promise<false>(r => setTimeout(() => r(false), CLOSE_TIMEOUT_MS).unref())]);
+    if (closed) return;
+    console.error('[render] the browser does not close a page: starting a new one for the next job');
+    if (browser === launched) browser = null;
+    void launched.then(b => b.close()).catch(() => undefined);
+  };
   try {
-    const b = await getBrowser();
+    const b = await launched;
     ctx = await b.newContext({ viewport, deviceScaleFactor: scale, serviceWorkers: 'block', acceptDownloads: false });
+    deadline = setTimeout(() => { late = true; void close(); }, JOB_TIMEOUT_MS);
     await ctx.route('**/*', answer);
     const page = await ctx.newPage();
     page.setDefaultTimeout(RENDER_TIMEOUT_MS);
@@ -137,8 +164,12 @@ async function withPage<T>(project: string, rel: string, userId: number, mode: R
     // the runtime says when fonts, math and the page's own scripts have settled
     await page.waitForFunction(() => (window as unknown as { __olReady?: boolean }).__olReady === true, undefined, { timeout: 20000 }).catch(() => undefined);
     return await f(ctx, page);
+  } catch (e) {
+    if (late) throw new RenderTimeout('The page took too long to render. If its own scripts keep running (an animation, a loop), they keep the export waiting.');
+    throw e;
   } finally {
-    await ctx?.close().catch(() => undefined);
+    if (deadline) clearTimeout(deadline);
+    await close();
     release();
   }
 }
@@ -157,11 +188,10 @@ async function report(page: import('playwright-core').Page): Promise<Deliverable
 export interface RenderedPage { index: number; png: Buffer; report: PageReport }
 
 /**
- * Pages of a deliverable as images (at most `maxWidth` px wide) with their reports. `pages`:
+ * Pages of a deliverable as images (a slide at its own size, a poster at half of it) with their reports. `pages`:
  * 0-based indices (deck); default the first. A web page is shot from the top, `width` CSS px wide.
  */
-export async function renderPages(project: string, rel: string, userId: number, opts: { pages?: number[]; maxWidth?: number; width?: number } = {}): Promise<{ report: DeliverableReport; layout: DeliverableLayout; images: RenderedPage[] }> {
-  const maxWidth = Math.min(2400, Math.max(320, opts.maxWidth ?? 1568));
+export async function renderPages(project: string, rel: string, userId: number, opts: { pages?: number[]; width?: number } = {}): Promise<{ report: DeliverableReport; layout: DeliverableLayout; images: RenderedPage[] }> {
   const pageWidth = Math.min(2400, Math.max(320, opts.width ?? 1280));
   // a poster is large (A0: ~3200 CSS px wide): shot at half scale, an image an agent can take in whole
   let kind = 'deck';
@@ -173,7 +203,6 @@ export async function renderPages(project: string, rel: string, userId: number, 
     const layout = await page.evaluate(indices => (window as unknown as { __ol: { layout(pages: number[]): DeliverableLayout } }).__ol.layout(indices), want);
     const cdp = await ctx.newCDPSession(page);
     try { await measureFonts(cdp, layout); } finally { await cdp.detach(); }
-    void maxWidth;
     const images: RenderedPage[] = [];
     if (rep.kind === 'page') {
       const full = await page.evaluate(() => Math.min(document.documentElement.scrollHeight, 6000));
