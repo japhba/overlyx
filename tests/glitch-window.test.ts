@@ -97,3 +97,42 @@ it('preserves panning on a zoomed-in page', async () => {
   await settle();
   expect(scrollTo).not.toHaveBeenCalled();
 });
+
+/** a pane of the app that fills the screen, scrolled as given */
+function pane(cls: string, style: string, scroll: { top?: number; left?: number }): HTMLElement {
+  const box = document.createElement('div');
+  box.className = cls;
+  box.setAttribute('style', style);
+  vi.spyOn(box, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, top: 0, left: 0, right: innerWidth, bottom: innerHeight, width: innerWidth, height: innerHeight, toJSON() {} } as DOMRect);
+  document.querySelector('.app')!.append(box);
+  box.scrollTop = scroll.top ?? 0; box.scrollLeft = scroll.left ?? 0;
+  box.dispatchEvent(new Event('scroll'));
+  return box;
+}
+const containerReports = () => report.mock.calls.map(c => c[0]).filter(g => g.fields.scroller === 'container');
+
+it('takes a pane scrolled the way it scrolls for what it is: the fitted PDF pages, scrolled down (report #12)', async () => {
+  vi.stubGlobal('scrollY', 0); vi.stubGlobal('scrollX', 0); viewport.height = 1000; viewport.scale = 1; viewport.offsetTop = 0;
+  pane('pdf-pages fitted', 'overflow-y: auto; overflow-x: hidden', { top: 489 });
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(containerReports()).toEqual([]);
+});
+
+it('reports a pane moved along the axis it cannot be scrolled along', async () => {
+  vi.stubGlobal('scrollY', 0); vi.stubGlobal('scrollX', 0); viewport.height = 1000; viewport.scale = 1; viewport.offsetTop = 0;
+  pane('pdf-pages fitted', 'overflow-y: auto; overflow-x: hidden', { top: 489, left: 40 });
+  pane('main', 'overflow-x: hidden; overflow-y: hidden', { top: 45 });   // (happy-dom does not expand the `overflow` shorthand)
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(containerReports().map(g => [g.fields.container, g.fields.scrollY, g.fields.scrollX])).toEqual([['pdf-pages', 489, 40], ['main', 45, 0]]);
+});
+
+it('judges a pane by how it scrolls now, not by how it did when it was first seen (the PDF, zoomed in after it was fitted)', async () => {
+  vi.stubGlobal('scrollY', 0); vi.stubGlobal('scrollX', 0); viewport.height = 1000; viewport.scale = 1; viewport.offsetTop = 0;
+  const box = pane('pdf-pages fitted', 'overflow-y: auto; overflow-x: hidden', { top: 100 });
+  await vi.advanceTimersByTimeAsync(2000);
+  box.setAttribute('style', 'overflow: auto');
+  box.scrollLeft = 300;
+  box.dispatchEvent(new Event('scroll'));
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(containerReports()).toEqual([]);
+});

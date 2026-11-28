@@ -45,8 +45,8 @@ function send(kind: GlitchKind, fields: GlitchFields): void {
   const now = performance.now();
   const g = cleanGlitch(kind, { ...screenFields(), ...fields }, trail.map(e => `${Math.round(now - e.t)} ${e.what}`));
   if (!g) return;
-  // the same glitch once in two minutes: the server counts the rest
-  const key = `${kind} ${g.fields.engine ?? ''} ${g.fields.scroller ?? ''} ${g.fields.keyboard ?? ''} ${g.fields.focus ?? ''}`;
+  // the same glitch once in two minutes: the server counts the rest (another pane's is another glitch)
+  const key = `${kind} ${g.fields.engine ?? ''} ${g.fields.scroller ?? ''} ${g.fields.container ?? ''} ${g.fields.keyboard ?? ''} ${g.fields.focus ?? ''}`;
   if (now - (lastSent.get(key) ?? -Infinity) < 120000) return;
   lastSent.set(key, now);
   reports++;
@@ -157,7 +157,8 @@ function check(): void {
     send('zoom', { zoom: Math.round(v.zoom * 100) / 100, viewportTop: Math.round(v.viewportTop), viewportHeight: Math.round(v.viewportHeight), layoutHeight: v.layoutHeight, keyboard: v.keyboard, focus: focusKind(document.activeElement) });
   }
   for (const box of [...scrolledBoxes]) {
-    if (!box.isConnected || box.scrollTop < 1 && box.scrollLeft < 1) { scrolledBoxes.delete(box); continue; }
+    // (asked anew: a pane's overflow changes with its state — the PDF's pages fitted to the pane or zoomed in)
+    if (!box.isConnected || !displaced(box, fixedAxes(box))) { scrolledBoxes.delete(box); continue; }
     if (now - Number(box.dataset.olScrolledAt ?? now) < SETTLE_MS) continue;
     scrolledBoxes.delete(box);
     const el = document.activeElement;
@@ -178,16 +179,27 @@ function checkSoon(): void {
   checkTimer = setTimeout(() => { checkTimer = null; check(); }, SETTLE_MS + 50);
 }
 
-/** whether an element cannot be scrolled (overflow hidden or clip) — asked once per element: panes scroll all the time */
-const unscrollable = new WeakMap<Element, boolean>();
+/** the axes an element cannot be scrolled along (overflow hidden or clip) */
+type Axes = { x: boolean; y: boolean };
+function fixedAxes(box: Element): Axes {
+  const cs = getComputedStyle(box);
+  return { x: /hidden|clip/.test(cs.overflowX), y: /hidden|clip/.test(cs.overflowY) };
+}
+/**
+ * Moved along an axis it cannot be scrolled along. The other axis is the element's own: the PDF's
+ * pages, fitted to their pane (`overflow-x: hidden`), scroll down all day — report #12 was that.
+ */
+const displaced = (box: HTMLElement, fixed: Axes) => fixed.y && box.scrollTop >= 1 || fixed.x && box.scrollLeft >= 1;
+/** an element's axes as first seen — a filter for the scroll events (panes scroll all the time); `check` asks anew before it reports */
+const seenAxes = new WeakMap<Element, Axes>();
 
-/** an element that cannot be scrolled and fills much of the screen, scrolled (a focus does that) */
+/** an element that fills much of the screen, moved where it cannot be scrolled (a focus does that) */
 function boxScrolled(ev: Event): void {
   const box = ev.target;
   if (!(box instanceof HTMLElement) || scrolledBoxes.has(box)) return;
-  let fixed = unscrollable.get(box);
-  if (fixed === undefined) { const cs = getComputedStyle(box); fixed = /hidden|clip/.test(cs.overflowY + cs.overflowX); unscrollable.set(box, fixed); }
-  if (!fixed || !document.querySelector('.app')) return;
+  let fixed = seenAxes.get(box);
+  if (fixed === undefined) seenAxes.set(box, fixed = fixedAxes(box));
+  if (!displaced(box, fixed) || !document.querySelector('.app')) return;
   const r = box.getBoundingClientRect();
   if (r.width * r.height < 0.5 * innerWidth * innerHeight) return;
   box.dataset.olScrolledAt = String(performance.now());
