@@ -2579,7 +2579,11 @@ blend.
   current passwords per account wait 15 minutes, an account without a password (Google) is told so).
   A password change signs every other browser out: session cookies carry the account's session
   generation (`sessiongen.ts`, table `session_generations`; no row = 0 = every older cookie) and an
-  older one signs nobody in; the browser that changed it gets a new cookie. Git / CLI / MCP
+  older one signs nobody in; the browser that changed it gets a new cookie. What the sessions hold
+  open ends with them — documents' WebSockets, the encrypted relay, the event streams register
+  how to end them (`sessiongen.ts holdOpen`), so an editor left open elsewhere stops reading and
+  writing at once; the changing browser's editors reconnect by themselves with the new cookie.
+  Deleting the account ends them the same way. Git / CLI / MCP
   credentials are not sessions and keep working; E2E keys are unlocked by the recovery code, never
   the password. The picture stays the Google account's (it is refreshed at every Google sign-in).
   The status bar's build stamp reads `2026-11-21 12:06` (`buildStampShown`; the stamp itself, which

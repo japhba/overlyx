@@ -32,7 +32,7 @@ import { disconnectZotero } from './zotero.ts';
 import { forgetLibrary } from './library.ts';
 import './gdocs/sync.ts';   // its gdocs_links table
 import './lesswrong/sync.ts';   // its lesswrong_links table
-import './sessiongen.ts';   // its session_generations table
+import { endOpenConnections } from './sessiongen.ts';   // (and its session_generations table)
 import { forgetUserReports } from './feedback.ts';
 
 export const TRASH_DAYS = 30;
@@ -151,6 +151,8 @@ export async function deleteAccount(user: SessionUser, live: LiveDocs): Promise<
     db.prepare('DELETE FROM users WHERE id = ?').run(id);
   })();
   fs.rmSync(path.join(config.dataDir, 'cache', `avatar-${id}`), { force: true });
+  // whatever its sessions still hold open (a public project's document, an event stream) ends with it
+  endOpenConnections(id);
   console.log(`[account] account ${id} deleted with ${erased.length} project(s)`);
   return erased;
 }

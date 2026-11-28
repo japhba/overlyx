@@ -22,6 +22,7 @@ import { offlineBase, applyClientUpdate } from './offlinemerge.ts';
 import { e2eUpgrade } from './e2e/relay.ts';
 import { isE2eProject } from './e2e/store.ts';
 import { noticeListeners, unseenNotices, markNoticeSeen, type DocNotice } from './docnotices.ts';
+import { holdOpen } from './sessiongen.ts';
 
 const MSG_SYNC = 0;
 const MSG_AWARENESS = 1;
@@ -204,6 +205,8 @@ async function handleConnection(conn: WebSocket, docId: string, user: SessionUse
   // a client that breaks the protocol (an invalid frame, one over maxPayload) makes the socket emit
   // 'error': with no listener yet — its document still opening — that took the whole server down
   conn.on('error', () => { /* the socket closes; 'close' tidies up */ });
+  // the session it came in with is signed out (a password change, sessiongen.ts): closed like a kick — it reconnects, if its browser has the new cookie
+  conn.on('close', holdOpen(user.id, () => { try { conn.close(4003, 'signed out'); } catch { /* ignore */ } }));
   const early: (ArrayBuffer | Buffer)[] = [];
   const keep = (data: ArrayBuffer | Buffer) => { early.push(data); };
   conn.on('message', keep);
@@ -223,6 +226,8 @@ async function handleConnection(conn: WebSocket, docId: string, user: SessionUse
   doc.connUsers.set(conn, user.id);
 
   const onMessage = (data: ArrayBuffer | Buffer) => {
+    // closed from here (a kick, a role that ended, a sign-out): what a client that does not answer the close still sends is not applied
+    if (conn.readyState !== conn.OPEN) return;
     try {
       const message = new Uint8Array(data as ArrayBuffer);
       const enc = encoding.createEncoder();

@@ -15,6 +15,7 @@
  */
 import type express from 'express';
 import { isE2eProject } from './e2e/store.ts';
+import { holdOpen } from './sessiongen.ts';
 
 interface Screen { c: string; d: string; n: string; res: express.Response; s: string | null; posts: number[] }
 
@@ -54,6 +55,7 @@ export function mountTandem(api: express.Router, guard: express.RequestHandler):
     for (const o of others) send(o, hello);
     room.set(c, me);
     const hb = setInterval(() => write(res, ': hb\n\n'), 20000);
+    req.on('close', holdOpen(req.user!.id, () => res.destroy()));   // ends when the session is signed out (sessiongen.ts)
     req.on('close', () => {
       clearInterval(hb);
       const r = rooms.get(key);

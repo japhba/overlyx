@@ -34,6 +34,7 @@
  */
 import express, { type Request, type Response } from 'express';
 import { isE2eProject } from './e2e/store.ts';
+import { holdOpen } from './sessiongen.ts';
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import net from 'node:net';
@@ -1299,6 +1300,7 @@ export function agentRoutes(): express.Router {
     for (const h of hs) h.subscribers.add(sub);
     const hb = setInterval(() => res.write(': hb\n\n'), 20000);
     req.on('close', () => { clearInterval(hb); for (const h of hs) h.subscribers.delete(sub); });
+    req.on('close', holdOpen(req.user!.id, () => res.destroy()));   // ends when the session is signed out (sessiongen.ts)
   });
 
   return r;

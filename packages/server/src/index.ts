@@ -66,6 +66,7 @@ import { feedbackRoutes, vscodeTelemetryRoutes, reportServerError, pruneReports,
 import { startInboxImport } from './inbox.ts';
 import { deletionPreview, deleteAccount, pruneTrash } from './accounts.ts';
 import { profileOf, changeDisplayName, changePassword, ProfileError } from './profile.ts';
+import { holdOpen } from './sessiongen.ts';
 import { privacyPage } from './privacy.ts';
 import { termsPage } from './terms.ts';
 import { usageRoutes, vscodeUsageRoutes } from './usage.ts';
@@ -561,6 +562,7 @@ api.get('/projects/:project/events', needReach, (req, res) => {
   graphicsChangedListeners.add(graphics);
   projectSettingsListeners.add(settings);
   req.on('close', cleanup);
+  req.on('close', holdOpen(req.user!.id, () => res.destroy()));   // ends when the session is signed out (sessiongen.ts)
 });
 
 /** Tandem: the account's screens in the project tell each other what they show (tandem.ts) */

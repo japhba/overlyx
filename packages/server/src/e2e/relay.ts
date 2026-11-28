@@ -21,6 +21,7 @@ import type { SessionUser } from '../auth.ts';
 import { roleFor, atLeast } from '../access.ts';
 import { canonicalProject } from '../namespaces.ts';
 import { assertRoom, ProjectFullError } from '../projectsize.ts';
+import { holdOpen } from '../sessiongen.ts';
 import { isE2eProject, e2eEnabled, OPAQUE_ID, MANIFEST_DOC, entriesSince, appendUpdate, compact, headSeq, keyVersion, KIND_UPDATE } from './store.ts';
 
 export const S_ENTRY = 0, S_SYNCED = 1, S_ACK = 2, S_AWARENESS = 3, S_GONE = 4, S_PING = 5, S_ERROR = 6, S_COMPACTED = 7, S_KEY = 8;
@@ -85,6 +86,7 @@ function connect(ws: WebSocket, project: string, doc: string, user: SessionUser,
 
   const fail = (msg: string) => send(c, message(S_ERROR, enc => encoding.writeVarString(enc, msg)));
   ws.on('message', (raw: ArrayBuffer | Buffer) => {
+    if (ws.readyState !== ws.OPEN) return;   // closed from here (a kick, a sign-out): nothing more of it is stored or passed on
     try {
       const data = raw instanceof ArrayBuffer ? new Uint8Array(raw) : new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength);
       const dec = decoding.createDecoder(data);
@@ -144,7 +146,10 @@ function connect(ws: WebSocket, project: string, doc: string, user: SessionUser,
     send(c, ping);
   }, HEARTBEAT_MS);
   ws.on('pong', () => { alive = true; });
+  // its session signed out (a password change, sessiongen.ts): closed, to reconnect with the browser's new cookie
+  const release = holdOpen(user.id, () => { try { ws.close(4003, 'signed out'); } catch { /* ignore */ } });
   const close = () => {
+    release();
     clearInterval(timer);
     const r = rooms.get(key);
     if (!r?.delete(c)) return;

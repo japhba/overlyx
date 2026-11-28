@@ -29,6 +29,7 @@ import express, { type Request, type Response } from 'express';
 import { db } from './db.ts';
 import type { SessionUser } from './auth.ts';
 import { originAllowed } from './ws.ts';
+import { holdOpen } from './sessiongen.ts';
 import { editorContextLines, ownerFirstName, type TurnContext } from './agent.ts';
 import { agentAuthorName } from '@overlyx/core/agentname.ts';
 
@@ -468,6 +469,7 @@ export function mcpAgentRoutes(): express.Router {
     set.add(send);
     const hb = setInterval(() => res.write(': hb\n\n'), 20_000);
     req.on('close', () => { clearInterval(hb); set.delete(send); if (!set.size) subscribers.delete(req.user!.id); });
+    req.on('close', holdOpen(req.user!.id, () => res.destroy()));   // ends when the session is signed out (sessiongen.ts)
   });
 
   r.get('/mcp-agents/:id/messages', (req, res) => {
