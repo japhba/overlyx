@@ -207,7 +207,7 @@ export interface GoogleApi {
   deleteComment?(id: string, commentId: string): Promise<void>;
 }
 
-import { GoogleApiError } from './errors.ts';
+import { GoogleApiError, retryDelay } from './errors.ts';
 export { GoogleApiError };
 
 const COMMENT_FIELDS = 'id,content,author(displayName,me),createdTime,modifiedTime,resolved,deleted,quotedFileContent(value),anchor,replies(id,content,author(displayName,me),createdTime,deleted,action)';
@@ -217,12 +217,23 @@ export function googleApi(userId: number): GoogleApi {
   const call = async <T,>(method: string, url: string, body?: unknown): Promise<T> => {
     for (let attempt = 0; ; attempt++) {
       const token = await accessToken(userId);
-      const res = await timedFetch(url, { method, headers: { authorization: 'Bearer ' + token, ...(body !== undefined ? { 'content-type': 'application/json' } : {}) }, body: body === undefined ? undefined : JSON.stringify(body) });
+      let res: globalThis.Response;
+      try {
+        res = await timedFetch(url, { method, headers: { authorization: 'Bearer ' + token, ...(body !== undefined ? { 'content-type': 'application/json' } : {}) }, body: body === undefined ? undefined : JSON.stringify(body) });
+      } catch (e) {
+        // no answer: a read is asked again; a write may have been made, and is not repeated blindly (the next sync reads it back)
+        const wait = method === 'GET' ? retryDelay(0, undefined, attempt) : null;
+        if (wait === null) throw e;
+        await new Promise(r => setTimeout(r, wait));
+        continue;
+      }
       if (res.ok) return (res.status === 204 ? {} : await res.json()) as T;
-      const err = await res.json().catch(() => ({})) as { error?: { message?: string; status?: string; errors?: { reason?: string }[] } };
-      // rate limits and Google's own hiccups: a second try after a moment
-      if ((res.status === 429 || res.status >= 500) && attempt < 2) { await new Promise(r => setTimeout(r, 1500 * (attempt + 1))); continue; }
-      throw new GoogleApiError(err.error?.message ?? `Google API ${res.status}`, res.status, err.error?.errors?.[0]?.reason ?? err.error?.status);
+      const err = await res.json().catch(() => ({})) as { error?: { message?: string; status?: string; errors?: { reason?: string }[]; details?: { reason?: string }[] } };
+      // (Drive names the reason in errors[], the Docs API in status and an ErrorInfo of details[])
+      const reason = err.error?.errors?.[0]?.reason ?? err.error?.details?.find(d => d.reason)?.reason ?? err.error?.status;
+      const wait = retryDelay(res.status, reason, attempt, res.headers.get('retry-after'));
+      if (wait === null) throw new GoogleApiError(err.error?.message ?? `Google API ${res.status}`, res.status, reason);
+      await new Promise(r => setTimeout(r, wait));
     }
   };
   const DOCS = 'https://docs.googleapis.com/v1/documents/';

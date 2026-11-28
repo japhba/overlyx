@@ -21,7 +21,7 @@ import type { LyxDocument } from '../packages/core/src/lyx/ast.ts';
 import { project, readGoogle, strip, blockKey, type GBlock } from '../packages/server/src/gdocs/model.ts';
 import { planRound } from '../packages/server/src/gdocs/edits.ts';
 import { FakeGoogle } from '../packages/server/src/gdocs/fake.ts';
-import { GoogleApiError } from '../packages/server/src/gdocs/errors.ts';
+import { GoogleApiError, retryDelay } from '../packages/server/src/gdocs/errors.ts';
 
 const want = (md: string): GBlock[] => strip(project(parseMarkdown(md).doc).blocks);
 const keys = (bs: GBlock[]) => bs.map(blockKey);
@@ -141,6 +141,25 @@ describe('writing a document into a Google Doc', () => {
       await push(g, f.id, target);
       expect(keys(await read(g, f.id)), `step ${step}:\n${md}`).toEqual(keys(target));
     }
+  });
+});
+
+describe('a request Google did not take', () => {
+  it('is tried again for rate limits, Google\'s own failures and no answer — later each time, or when Google says — and nothing else', () => {
+    const mid = () => 0.5;
+    // the Docs API's quota (429), the Drive API's "User rate limit exceeded" (403 with its reason), a 503, no answer (0)
+    expect([0, 1, 2, 3].map(a => retryDelay(429, 'RESOURCE_EXHAUSTED', a, null, mid))).toEqual([1500, 2500, 4500, null]);
+    expect(retryDelay(403, 'userRateLimitExceeded', 0, null, mid)).toBe(1500);
+    expect(retryDelay(403, 'rateLimitExceeded', 1, null, mid)).toBe(2500);
+    expect(retryDelay(403, 'RATE_LIMIT_EXCEEDED', 0, null, mid)).toBe(1500);
+    expect(retryDelay(503, undefined, 0, null, mid)).toBe(1500);
+    expect(retryDelay(0, undefined, 2, null, mid)).toBe(4500);
+    // Google says when: in seconds or as a date; longer than a sync waits is no retry (the automatic sync's back-off takes over)
+    expect(retryDelay(429, undefined, 0, '7')).toBe(7000);
+    expect(retryDelay(403, 'userRateLimitExceeded', 0, new Date(Date.UTC(2026, 10, 28, 12, 0, 12)).toUTCString(), mid, Date.UTC(2026, 10, 28, 12, 0, 0))).toBe(12_000);
+    expect(retryDelay(429, undefined, 0, '120')).toBeNull();
+    // the request's own fault: no access, no such file, a revision that moved on, a daily limit, an expired token
+    for (const [status, reason] of [[403, 'insufficientFilePermissions'], [403, 'dailyLimitExceeded'], [404, 'notFound'], [400, 'FAILED_PRECONDITION'], [401, 'authError']] as const) expect(retryDelay(status, reason, 0)).toBeNull();
   });
 });
 
@@ -353,6 +372,28 @@ describe('the sync of a document', async () => {
     } finally {
       getDocument.mockRestore();
       vi.useRealTimers();
+    }
+  });
+
+  it('Drive\'s "User rate limit exceeded" is asked again after the pause Google names; a refusal of the request itself is not', async () => {
+    const { googleApi } = await import('../packages/server/src/gdocs/google.ts');
+    const { sealer } = await import('../packages/server/src/sealed.ts');
+    const { db } = await import('../packages/server/src/db.ts');
+    const { seal } = sealer('google-drive');
+    db.prepare('INSERT OR REPLACE INTO google_drive (user_id, email, refresh_token, access_token, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(owner.id, null, seal('refresh'), seal('access'), Date.now() + 3_600_000, Date.now());
+    const json = (status: number, body: unknown, headers: Record<string, string> = {}) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } });
+    // (Drive v3's answer, as its documentation gives it)
+    const limited = json(403, { error: { code: 403, message: 'User rate limit exceeded.', errors: [{ domain: 'usageLimits', reason: 'userRateLimitExceeded', message: 'User rate limit exceeded.' }] } }, { 'retry-after': '0' });
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(limited).mockResolvedValueOnce(json(200, { id: 'f1', version: '3' }));
+    try {
+      expect((await googleApi(owner.id).getFile('f1')).version).toBe('3');
+      expect(fetch).toHaveBeenCalledTimes(2);
+      fetch.mockResolvedValueOnce(json(404, { error: { code: 404, message: 'File not found: f2.', errors: [{ domain: 'global', reason: 'notFound', message: 'File not found: f2.' }] } }));
+      await expect(googleApi(owner.id).getFile('f2')).rejects.toMatchObject({ status: 404, reason: 'notFound', message: 'File not found: f2.' });
+      expect(fetch).toHaveBeenCalledTimes(3);
+    } finally {
+      fetch.mockRestore();
+      db.prepare('DELETE FROM google_drive WHERE user_id = ?').run(owner.id);
     }
   });
 
