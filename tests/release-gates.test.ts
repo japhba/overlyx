@@ -213,6 +213,7 @@ it('rejects untracked or staged source while permitting ignored build output in 
   expect(() => assertCleanCheckout(root)).not.toThrow();
   write('new-helper.mjs', 'export const helper=true;');
   expect(() => assertCleanCheckout(root)).toThrow('tracked and untracked source');
+  expect(() => assertCleanCheckout(root)).toThrow('?? new-helper.mjs');   // …and says which files
   execFileSync('git', ['add', 'new-helper.mjs'], { cwd: root });
   expect(() => assertCleanCheckout(root)).toThrow('tracked and untracked source');
   execFileSync('git', ['rm', '--cached', '--quiet', 'new-helper.mjs'], { cwd: root });

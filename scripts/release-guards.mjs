@@ -21,7 +21,12 @@ export function assertCleanCheckout(repo, expectedCommit) {
     dirty = execFileSync('git', ['status', '--porcelain', '--untracked-files=normal'], { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
     if (expectedCommit) commit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
   } catch { throw new Error('Could not inspect the release checkout.'); }
-  if (dirty) throw new Error('Commit all tracked and untracked source changes before deploying.');
+  if (dirty) {
+    // (git's own short status of this checkout: which files, so that nobody has to go looking)
+    const lines = dirty.split('\n').filter(Boolean);
+    throw new Error(['Commit all tracked and untracked source changes before deploying:', ...lines.slice(0, 20).map(l => `  ${l}`),
+      ...(lines.length > 20 ? [`  … and ${lines.length - 20} more`] : [])].join('\n'));
+  }
   if (expectedCommit && commit !== expectedCommit) throw new Error('The release checkout changed after validation.');
 }
 

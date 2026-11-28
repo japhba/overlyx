@@ -17,6 +17,7 @@ import { execFileSync } from 'node:child_process';
 import Database from 'better-sqlite3';
 import { usageSummary, formatUsageReport } from '../packages/server/src/usageReport.ts';
 import { privateText } from './maintenance.ts';
+import { TIMER_LOG_CONTENT } from './timerlog.ts';
 
 const dataDir = process.env.OVERLYX_DATA_DIR ?? '/root/lyx/overlyx/data';
 const projectsDir = process.env.OVERLYX_PROJECTS_DIR ?? '/root/projects';
@@ -27,6 +28,7 @@ const units: Record<string, string[]> = { overlyx: ['overlyx'], autodeploy: ['ov
   // the backups: the local nightly one, the off-site one and its weekly restore check (their status also in /var/lib/overlyx-backup-offsite)
   backup: ['overlyx-backup', 'overlyx-backup-offsite', 'overlyx-backup-check'] };
 const usage = 'usage: telemetry.ts usage [days] | reports [days] | report <id> | logs [hours] [overlyx|autodeploy|maintenance|backup]';
+const LOG_LINES = 5000;
 
 // A keyed hash, so that hashing guessed names does not undo a pseudonym; the key stays root's.
 function pseudonymKey(): Buffer {
@@ -127,9 +129,20 @@ function main() {
         console.log('');
       }
     } else {
-      const log = execFileSync('journalctl', [...units[second ?? 'overlyx'].flatMap(u => ['-u', u]), '--since', `-${number(first, 6, 24 * 90)}h`, '-n', '5000', '--no-pager', '-o', 'short-iso'],
-        { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-      process.stdout.write((second ?? 'overlyx') === 'overlyx' ? serverLog(log, clean) : log.split('\n').map(clean).join('\n'));
+      const service = second ?? 'overlyx';
+      // (the server's log: its newest lines; a timer's: its content, the newest lines of that — with
+      // --grep journalctl's own -n would print them newest first)
+      let log: string;
+      try {
+        log = execFileSync('journalctl', [...units[service].flatMap(u => ['-u', u]), '--since', `-${number(first, 6, 24 * 90)}h`,
+          ...(service === 'overlyx' ? ['-n', String(LOG_LINES)] : ['--grep', TIMER_LOG_CONTENT]), '--no-pager', '-o', 'short-iso'],
+          { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'inherit'] });
+      } catch (e) {
+        // (with --grep, journalctl's exit status is 1 when nothing matched)
+        if ((e as { status?: number }).status !== 1 || service === 'overlyx') throw e;
+        log = '-- No entries --\n';
+      }
+      process.stdout.write(service === 'overlyx' ? serverLog(log, clean) : log.split('\n').slice(-LOG_LINES).map(clean).join('\n'));
     }
   } finally { db.close(); }
 }

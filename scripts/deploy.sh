@@ -75,17 +75,26 @@ fi
 candidate=$(mktemp -d /tmp/overlyx-deploy-candidate.XXXXXX)
 trap 'rm -rf "$candidate"' EXIT
 OVERLYX_BETA_BROWSER="$FULL" OVERLYX_BETA_BUILD_DIR="$candidate/dist" OVERLYX_BETA_ASSET_PROOF="$candidate/asset-proof.json" node scripts/check-beta.mjs
+node scripts/release-guards.mjs clean "$DEV" "$HEAD"
+
+# A relay marks the commit as checked here. The trailer rewrites the commit, so it is the last thing
+# before the push (the guard above has just seen the validated commit, clean) and it is taken back
+# when the push does not happen: a deploy that fails leaves master as it was.
+validated=$HEAD
 if [ "$RELAY" = 1 ] && ! git merge-base --is-ancestor HEAD origin/master &&
    [ "$(git log -1 --format='%(trailers:key=Deploy,valueonly)' HEAD | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')" != no-checks ]; then
   git commit --amend --no-edit --quiet --trailer 'Deploy: no-checks'
   HEAD=$(git rev-parse HEAD)
-  echo "checked here: the trailer Deploy: no-checks spares the server a second run (commit $HEAD)"
+  echo "checked here: the trailer Deploy: no-checks spares the server a second run (commit $HEAD, was $validated)"
 fi
-node scripts/release-guards.mjs clean "$DEV" "$HEAD"
 
 if [ "$PUSH" = 1 ]; then
   step "origin: push master (starts the extension release workflow)"
-  git push origin "$HEAD:refs/heads/master"
+  if ! git push origin "$HEAD:refs/heads/master"; then
+    # (only if master still is the marked commit: the same tree, so the checkout stays clean)
+    if [ "$HEAD" != "$validated" ] && git update-ref refs/heads/master "$validated" "$HEAD"; then echo "not pushed: master is back at $validated" >&2; fi
+    exit 1
+  fi
 else
   step "origin: not pushed (--no-push): the extension keeps its last release"
 fi
@@ -129,12 +138,12 @@ step "check $SITE"
 # the restarted server takes a moment to listen; the reverse proxy answers 502 until then
 code=000
 for _ in $(seq 1 15); do
-  code=$(curl -s --max-time 5 -o /tmp/overlyx-deploy-index.html -w '%{http_code}' "$SITE/")
+  code=$(curl -s --max-time 5 -o "$candidate/served-index.html" -w '%{http_code}' "$SITE/")
   [ "$code" = 200 ] && break
   sleep 2
 done
 [ "$code" = 200 ] || { echo "$SITE answered $code" >&2; exit 1; }
-served=$(grep -o 'assets/index-[^"]*' /tmp/overlyx-deploy-index.html | head -1)
+served=$(grep -o 'assets/index-[^"]*' "$candidate/served-index.html" | head -1)
 built=$(grep -o 'assets/index-[^"]*' "$PROD/packages/client/dist/index.html" | head -1)
 [ -n "$served" ] && [ "$served" = "$built" ] || { echo "served bundle ($served) differs from the built one ($built)" >&2; exit 1; }
 for i in 1 2 3 4 5; do
