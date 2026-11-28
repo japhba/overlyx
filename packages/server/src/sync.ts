@@ -10,7 +10,8 @@
  * edited, whether in the browser or in a synced clone. The clone's branch follows those commits.
  *
  *   GET  state?project=          every file (git's view: tracked + not ignored) with its git blob
- *                                hash, the branch, its head, and a cursor for `wait`
+ *                                hash, the branch, its head, and a cursor for `wait`; `large`: the
+ *                                files too large to sync (they are here, but not in `files`)
  *   GET  wait?project=&cursor=   returns as soon as something in the project changed (long poll)
  *   GET  file?project=&path=     a file's bytes
  *   POST push {project, files}   the clone's changed files, each with the hash (and, for text, the
@@ -83,19 +84,26 @@ const hashCache = new Map<string, { size: number; mtime: number; ino: number; ha
 
 export interface SyncFile { path: string; hash: string; size: number }
 
-/** Every file of the project git would keep (tracked, or untracked and not ignored by a .gitignore), regular files only. */
-async function listFiles(project: string): Promise<SyncFile[]> {
+/**
+ * Every file of the project git would keep (tracked, or untracked and not ignored by a .gitignore),
+ * regular files only — and, apart, the ones too large to sync (`large`). Left out of the listing
+ * without a word, a file that grew past the limit here looked removed to every clone: each deleted
+ * its copy, and a clone that had changed its copy sent it, replacing the large file (applyFile read
+ * "no file here"). A clone that knows `large` leaves its copy alone and says so.
+ */
+async function listFiles(project: string): Promise<{ files: SyncFile[]; large: string[] }> {
   const root = projectDir(project);
   // the project's own .gitignore files only — what a clone's `overlyx sync` lists the same way, whatever
   // its machine's global excludes say (a file one side skips would look deleted to the other)
   const out = await git(project, ['ls-files', '-z', '--cached', '--others', '--exclude-per-directory=.gitignore'], { maxBuffer: 64 * 1024 * 1024 });
   const seen = new Set<string>();
-  const files: SyncFile[] = [];
+  const files: SyncFile[] = [], large: string[] = [];
   for (const rel of out.split('\0')) {
     if (!rel || seen.has(rel) || !syncable(rel)) continue;
     seen.add(rel);
     const st = lstatIn(root, rel);
-    if (!st?.isFile() || st.size > SYNC_FILE_MAX) continue;
+    if (!st?.isFile()) continue;
+    if (st.size > SYNC_FILE_MAX) { large.push(rel); continue; }
     const key = `${project}\0${rel}`;
     const c = hashCache.get(key);
     if (c && c.size === st.size && c.mtime === st.mtimeMs && c.ino === st.ino) { files.push({ path: rel, hash: c.hash, size: st.size }); continue; }
@@ -106,7 +114,7 @@ async function listFiles(project: string): Promise<SyncFile[]> {
     files.push({ path: rel, hash, size: data.length });
   }
   if (hashCache.size > 200_000) hashCache.clear();
-  return files;
+  return { files, large };
 }
 
 /** a path the sync may carry: inside the project, never into .git, never our temp files */
@@ -202,6 +210,8 @@ async function applyFile(project: string, user: SessionUser, f: PushedFile): Pro
   const st = lstatIn(root, rel);
   if (!st && content && syncIgnored(rel)) return { path: rel, status: 'error', hash: null, error: 'a temporary, backup or conflict file: not added to the project' };
   if (st && !st.isFile()) return { path: rel, status: 'error', hash: null, error: 'not a regular file on the server' };
+  // (read below as "no file here", the clone's version replaced it)
+  if (st && st.size > SYNC_FILE_MAX) return { path: rel, status: 'error', hash: null, error: `larger than ${SYNC_FILE_MAX >> 20} MB on the server: not synced` };
   const id = `${project}/${rel}`;
   // the file holds what the editors show (an open document's unsaved edits are written first)
   const open = manager.docs.get(id);
@@ -276,9 +286,9 @@ export function syncRouter(): express.Router {
       await ensureRepo(t.project);
       await manager.saveProject(t.project);   // the files hold what the editors show (unsaved edits too)
       const cursor = cursorOf(t.project);   // before listing: a change during the listing wakes the next wait
-      const [files, h] = await Promise.all([listFiles(t.project), headOf(t.project)]);
+      const [{ files, large }, h] = await Promise.all([listFiles(t.project), headOf(t.project)]);
       logAccess(t.project, t.user.id, 'git-fetch', 'sync');
-      res.json({ project: t.project, role: roleFor(t.user, t.project), ...h, cursor, max: SYNC_FILE_MAX, files });
+      res.json({ project: t.project, role: roleFor(t.user, t.project), ...h, cursor, max: SYNC_FILE_MAX, files, large });
     } catch (e) { res.status(500).json({ error: (e as Error).message }); }
   });
 

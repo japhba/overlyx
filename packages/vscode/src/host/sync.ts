@@ -169,6 +169,7 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
         s.state === 'idle' ? (refused.length ? `Not everything is in step${s.lastSync ? ` (${time(s.lastSync)})` : ''}: the server did not take ${refused.length === 1 ? 'a file' : `${refused.length} files`} — tried again every few minutes.`
           : `In step${s.lastSync ? ` (${time(s.lastSync)})` : ''}: files you save reach the server, its changes come here.`) : s.state === 'syncing' ? 'Syncing…' : s.message,
         ...refused.map(r => `✗ ${r.path}: ${r.error}`),
+        ...(s.large ?? []).map(l => `· ${l} is larger than 20 MB — not synced (each side keeps its own)`),
         ...s.waiting.map(w => `· ${w} waits until it is saved`),
         ...(s.held ?? []).map(h => `⏸ ${h}: back to the last commit's version (git stash, reset or checkout?) — not sent; the server keeps its newer one`),
         ...[...new Set(s.notSent)].map(n => `· ${n} changed here — not sent (view only)`),

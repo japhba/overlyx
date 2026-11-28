@@ -318,3 +318,55 @@ describe('what the status says', () => {
     e.stop();
   });
 });
+
+describe('a file larger than the sync carries (20 MB)', () => {
+  const big = (fill: number) => Buffer.alloc(21 * 1024 * 1024, fill);
+
+  it('grown past it on the server: the clone keeps its copy, and an edit of that copy does not replace the server\'s file', async () => {
+    const p = await project('grown', { 'data.bin': 'small\n', 'a.txt': 'a\n' });
+    const e = p.engine('a laptop');
+    await e.sync();
+    writeFileSync(join(p.dir, 'data.bin'), big(1));                // an upload in the browser, a job on the server
+    await e.sync();
+    expect(p.local('data.bin')).toBe('small\n');                    // not taken for removed on the server
+    expect(e.status.large).toEqual(['data.bin']);
+    writeFileSync(join(p.clone, 'data.bin'), 'small, edited here\n');
+    await e.sync();
+    expect(readFileSync(join(p.dir, 'data.bin')).length).toBe(21 * 1024 * 1024);
+    expect(p.local('data.bin')).toBe('small, edited here\n');
+    // small again on the server, changed there too: both changes meet as any other — the edit here is kept beside it
+    writeFileSync(join(p.dir, 'data.bin'), 'small, changed on the server\n');
+    const back = await e.sync();
+    expect(p.local('data.bin')).toBe('small, changed on the server\n');
+    expect(back.conflicts).toEqual([expect.objectContaining({ path: 'data.bin', kind: 'copy' })]);
+    expect(readFileSync(join(p.clone, back.conflicts[0].copy!), 'utf8')).toBe('small, edited here\n');
+    expect(e.status.large).toEqual([]);
+    e.stop();
+  });
+
+  it('an older engine that sends its copy all the same is refused: the server\'s large file stays', async () => {
+    const p = await project('grown-old', { 'data.bin': 'small\n' });
+    const base = (await import('node:crypto')).createHash('sha1').update('blob 6\0small\n').digest('hex');
+    writeFileSync(join(p.dir, 'data.bin'), big(2));
+    const res = await fetch(`${host}/git/api/sync/push`, { method: 'POST', headers: { Authorization: basic(auth.username, auth.token), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project: p.key, files: [{ path: 'data.bin', base, baseText: 'small\n', text: 'small, edited in the clone\n' }] }) });
+    const { results } = await res.json() as { results: { status: string; error?: string }[] };
+    expect(results[0]).toMatchObject({ status: 'error', error: expect.stringMatching(/larger than 20 MB/) });
+    expect(readFileSync(join(p.dir, 'data.bin')).length).toBe(21 * 1024 * 1024);
+  });
+
+  it('grown past it here: said in the status, the server keeps the version it has', async () => {
+    const p = await project('grown-here', { 'data.bin': 'small\n' });
+    const e = p.engine('a laptop');
+    await e.sync();
+    writeFileSync(join(p.clone, 'data.bin'), big(3));
+    await e.sync();
+    expect(e.status.large).toEqual(['data.bin']);
+    expect(p.server('data.bin')).toBe('small\n');
+    writeFileSync(join(p.clone, 'data.bin'), 'small again\n');     // small enough again: it syncs
+    await e.sync();
+    expect(e.status.large).toEqual([]);
+    expect(p.server('data.bin')).toBe('small again\n');
+    e.stop();
+  });
+});

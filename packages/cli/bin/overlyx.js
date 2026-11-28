@@ -10,7 +10,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execFileP = promisify(execFile);
-const VERSION = '0.8.10';
+const VERSION = '0.8.11';
 const DEFAULT_HOST = 'https://overlyx.app';
 
 const HELP = `OverLyX CLI ${VERSION}
@@ -1441,7 +1441,8 @@ export class SyncEngine {
     this.dir = path.resolve(opts.dir);
     this.hashes = new Map();       // rel → { size, mtime, ino, hash } of local files
     this.failed = new Map();       // rel → { until, error }: files the server refused, and when they are tried again
-    this.status = { state: 'idle', conflicts: [], waiting: [], notSent: [], held: [], refused: [], lastSync: 0, message: '' };
+    this.large = new Set();        // rel: local files larger than SYNC_FILE_MAX (as last looked at)
+    this.status = { state: 'idle', conflicts: [], waiting: [], notSent: [], held: [], refused: [], large: [], lastSync: 0, message: '' };
     this.running = null;
     this.again = false;
     this.stopped = false;
@@ -1584,8 +1585,10 @@ export class SyncEngine {
   localHash(rel) {
     if (!syncablePath(rel) || this.belowLink(rel)) return undefined;
     let st;
-    try { st = fs.lstatSync(path.join(this.dir, rel)); } catch { this.hashes.delete(rel); return null; }
-    if (!st.isFile() || st.size > SYNC_FILE_MAX) return undefined;
+    try { st = fs.lstatSync(path.join(this.dir, rel)); } catch { this.hashes.delete(rel); this.large.delete(rel); return null; }
+    if (st.isFile() && st.size > SYNC_FILE_MAX) { this.large.add(rel); return undefined; }
+    this.large.delete(rel);
+    if (!st.isFile()) return undefined;
     const c = this.hashes.get(rel);
     if (c && c.size === st.size && c.mtime === st.mtimeMs && c.ino === st.ino) return c.hash;
     const hash = blobHash(this.normalized(fs.readFileSync(path.join(this.dir, rel))));
@@ -1828,11 +1831,12 @@ export class SyncEngine {
     if (!this.state) { this.state = await this.initialState(remote); this.saveState(); }
     const base = this.state.files;
     const theirs = new Map(remote.files.filter(f => syncablePath(f.path)).map(f => [f.path, f.hash]));
+    const theirLarge = new Set(remote.large ?? []);
     const all = paths ?? [...new Set([...theirs.keys(), ...Object.keys(base), ...(await this.localPaths())])].sort();
     const plan = { replace: [], remove: [], busy: [], kept: null, failed: [] };
     for (const rel of all) {
       const l = this.localHash(rel);
-      if (l === undefined) continue;
+      if (l === undefined || theirLarge.has(rel)) continue;   // (too large to sync, here or there: left as it is)
       const r = theirs.get(rel) ?? null, b = base[rel] ?? null;
       if (l === r) continue;
       if (r === null && b === null) continue;   // only here, never agreed with the server: this clone's new file
@@ -1926,11 +1930,14 @@ export class SyncEngine {
     const base = this.state.files;
     const remoteHash = (r) => new Map(r.files.filter(f => syncablePath(f.path)).map(f => [f.path, f.hash]));
     let theirs = remoteHash(remote);
+    // files the server has but does not sync (too large): not removed there — the copy here stays and is not sent
+    let theirLarge = new Set(remote.large ?? []);
     const now = Date.now();
 
     // 1. what changed here goes to the server
     let send = [];
     const refused = new Map();
+    this.large.clear();   // (localHash notes the files too large to sync as it meets them)
     for (const rel of await this.localPaths()) {
       const l = this.localHash(rel);
       if (l === undefined) continue;
@@ -1938,6 +1945,7 @@ export class SyncEngine {
       if (l === b) continue;
       const r = theirs.get(rel) ?? null;
       if (l === r) { base[rel] = l; if (l) this.keepObject(l, this.readLocal(rel)); continue; }   // the same change on both sides
+      if (theirLarge.has(rel)) continue;
       if (l === null && b !== null && !theirs.has(rel)) { delete base[rel]; continue; }             // removed on both sides
       if (this.role === 'view') { changes.notSent.push(rel); continue; }
       const f = this.failed.get(rel);
@@ -1954,13 +1962,14 @@ export class SyncEngine {
       await this.send(send, base, changes);
       remote = await this.remoteState();
       theirs = remoteHash(remote);
+      theirLarge = new Set(remote.large ?? []);
     }
 
     // 2. what changed on the server comes here
     if (lost()) return changes;   // (what was sent stays unrecorded: the next round finds it on both sides)
     for (const rel of new Set([...theirs.keys(), ...Object.keys(base)])) {
       const r = theirs.get(rel) ?? null, b = base[rel] ?? null;
-      if (r === b) continue;
+      if (r === b || theirLarge.has(rel)) continue;
       const l = this.localHash(rel);
       if (l === undefined) continue;
       if (l === r) { base[rel] = r; if (r === null) delete base[rel]; else this.keepObject(r, this.readLocal(rel)); continue; }
@@ -1988,7 +1997,8 @@ export class SyncEngine {
     try { await this.followBranch(remote, inStep); this.saveState(); }
     catch (e) { this.log(`branch: ${String(e.message ?? e).trim()}`); }
     const conflicts = [...this.status.conflicts.filter(c => now - c.at < 24 * 3600_000), ...changes.conflicts.map(c => ({ ...c, at: now }))].slice(-20);
-    this.setStatus({ state: 'idle', lastSync: Date.now(), conflicts, waiting: changes.waiting, notSent: changes.notSent, held: changes.held, refused: refusedNow, message: refusedNow.map(e => `${e.path}: ${e.error}`).join('; ') });
+    const large = [...new Set([...this.large, ...theirLarge])].filter(syncablePath).sort();
+    this.setStatus({ state: 'idle', lastSync: Date.now(), conflicts, waiting: changes.waiting, notSent: changes.notSent, held: changes.held, refused: refusedNow, large, message: refusedNow.map(e => `${e.path}: ${e.error}`).join('; ') });
     return changes;
   }
 
@@ -2226,6 +2236,8 @@ export function describeChanges(c) {
   return lines;
 }
 
+const largeNote = (large) => `Not synced, larger than ${SYNC_FILE_MAX >> 20} MB: ${large.slice(0, 10).join(', ')}${large.length > 10 ? ` and ${large.length - 10} more` : ''}`;
+
 async function syncCommand(args, flags) {
   const dir = path.resolve(args[0] ?? '.');
   const creds = flags.token || flags.username ? credentials(flags, false) : null;
@@ -2263,6 +2275,7 @@ async function syncCommand(args, flags) {
     const lines = describeChanges(c);
     process.stdout.write(lines.length ? lines.join('\n') + '\n' : `In step with ${target.host} (${target.project})\n`);
     if (c.held.length) process.stderr.write(`${c.held.length} file(s) went back to the last commit and were not sent. To send them anyway (undoing the newer versions on the server): overlyx sync --send-restored\n`);
+    if (engine.status.large.length) process.stderr.write(`${largeNote(engine.status.large)}\n`);
     if (!await syncRunning(dir)) process.stderr.write('Automatic sync is not running for this clone. This command synced once; later edits stay local until the next sync. Run overlyx sync --watch to keep it in step.\n');
     if (c.errors.length) process.exitCode = 1;
     return;
@@ -2275,9 +2288,14 @@ async function syncCommand(args, flags) {
     last = line;
   };
   const round = engine.round.bind(engine);
+  let large = '';
   engine.round = async () => {
     const c = await round();
     for (const l of describeChanges(c)) process.stdout.write(`[${stamp()}] ${l}\n`);
+    // (once per change of the list, not every round)
+    const now = engine.status.large.join('\n');
+    if (now !== large && now) process.stderr.write(`[${stamp()}] ${largeNote(engine.status.large)}\n`);
+    large = now;
     return c;
   };
   const stop = () => { engine.stop(); process.exit(0); };

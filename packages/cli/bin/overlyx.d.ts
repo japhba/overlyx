@@ -24,6 +24,8 @@ export interface SyncStatus {
   held: string[];
   /** changed here, and the server did not take them (why: `error`) — tried again every five minutes, listed until it does */
   refused: { path: string; error: string }[];
+  /** too large to sync (over 20 MB here or on the server): each side keeps what it has */
+  large: string[];
 }
 
 export interface SyncTarget { host: string; project: string; remote: string; url: string }

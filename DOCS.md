@@ -693,7 +693,10 @@ blend.
   removal on the other side. Nothing local is overwritten unless it is
   still the version both sides agreed on, a file with unsaved changes in a VS Code editor waits
   until it is saved, viewers receive but never send, nothing is written through a symlinked
-  directory of the clone or outside it, files over 20 MB stay out, `core.autocrlf` clones compare
+  directory of the clone or outside it, files over 20 MB stay out (each side keeps its own and the
+  status lists them; `state` names the server's apart, `large`, and a push onto one is refused — left
+  out without a word, a file that grew past 20 MB on the server looked removed: the clones deleted
+  their copies, and one that had edited its copy replaced it), `core.autocrlf` clones compare
   text with LF. A file the server does not take (the project over its size limit, a directory of that
   name there) is tried again every five minutes and stays in the status until it is taken or no
   longer differs (⚠ and one notice in VS Code; before 28 Nov 2026 the next round said "in step").
