@@ -47,7 +47,8 @@ describe('the self-check after a start', () => {
     const files = (readdirSync(src, { recursive: true }) as string[]).filter(f => /\.(ts|tsx)$/.test(f) && !f.includes('node_modules') && !/(^|\/)dist/.test(f));
     const providers = files.flatMap(f => (readFileSync(join(src, f), 'utf8').match(/new WebsocketProvider\([^\n]*/g) ?? []).map(l => `${f}: ${l}`));
     expect(providers.length).toBeGreaterThanOrEqual(3);
-    for (const p of providers) expect(p).toMatch(/params: connectParams\(/);
+    // (with more of its own after them: the editors that ask for refusals as close codes, REFUSAL_PARAMS)
+    for (const p of providers) expect(p).toMatch(/params: (\{ \.\.\.)?connectParams\(/);
   });
 
   it('fails, naming each document, when the server sends nothing (as it held the decks)', async () => {
