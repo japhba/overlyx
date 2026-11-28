@@ -141,6 +141,8 @@ describe('authorization + token', () => {
     const html = await (await fetch(`${base}/oauth/authorize?${q}`, { headers: { cookie } })).text();
     expect(html).toContain('Connect ChatGPT test?');
     expect(html).toContain('Owner');
+    // a client names itself; where the access goes is the address it sends people back to
+    expect(html).toContain('The access goes to <b>chatgpt.com</b>');
   });
 
   it('permits only the validated callback origin in the consent form policy', async () => {
@@ -250,5 +252,17 @@ describe('fine-grained access (Settings ▸ Account, off by default)', () => {
     } finally {
       setUserSettings(owner.id, { fineGrainedAccess: false });
     }
+  });
+});
+
+describe('open registration', () => {
+  it('is bounded per address, and a redirect address has a length', async () => {
+    const register = (body: unknown) => fetch(`${base}/oauth/register`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    expect((await register({ client_name: 'Long', redirect_uris: ['https://example.org/' + 'x'.repeat(3000)] })).status).toBe(400);
+    let refused = 0;
+    for (let i = 0; i < 25 && !refused; i++) if ((await register({ client_name: `Client ${i}`, redirect_uris: ['https://example.org/cb'] })).status === 429) refused = i + 1;
+    // (the registrations of the tests above count too: at most 20 an hour from one address)
+    expect(refused).toBeGreaterThan(0);
+    expect(refused).toBeLessThanOrEqual(21);
   });
 });

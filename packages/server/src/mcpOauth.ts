@@ -17,10 +17,14 @@ import { createMcpToken } from './mcpTokens.ts';
 import { parseScope, type AccessScope } from './tokenAuth.ts';
 import { SCOPE_CSS, scopeFields, scopeFromForm } from './credentialScope.ts';
 import { setSecurityHeaders } from './security.ts';
+import { allow } from './ratelimit.ts';
 import type { SessionUser } from './auth.ts';
 
 const ACCESS_MS = 30 * 24 * 3600 * 1000;   // access tokens; ChatGPT refreshes with the refresh token
 const CODE_MS = 10 * 60 * 1000;
+/** dynamic client registrations (open to anybody): per hour in all, and from one address; a redirect address's length */
+const REGISTRATIONS_PER_HOUR = 300, REGISTRATIONS_PER_HOUR_AND_ADDRESS = 20, REDIRECT_URI_MAX = 2000;
+const HOUR_MS = 60 * 60 * 1000;
 
 interface ClientRow { client_id: string; name: string; redirect_uris: string; created_at: number }
 interface CodeRow { code: string; client_id: string; user_id: number; challenge: string; redirect_uri: string; scope: string | null; access_scope: string | null; expires_at: number }
@@ -90,9 +94,11 @@ export function oauthRoutes(): express.Router {
   /** RFC 7591: ChatGPT registers itself before the first authorization. Open registration —
    *  a client row grants nothing by itself; every token still requires a user's consent. */
   r.post('/register', (req, res) => {
+    // (anybody may register, without a session: a few an hour per address and a ceiling for all, or the table is a way to fill the disk)
+    if (!allow('oauth-register', REGISTRATIONS_PER_HOUR, HOUR_MS) || !allow(`oauth-register:${req.ip ?? 'x'}`, REGISTRATIONS_PER_HOUR_AND_ADDRESS, HOUR_MS)) { res.status(429).json({ error: 'too_many_requests', error_description: 'too many client registrations — try again later' }); return; }
     const name = String(req.body?.client_name ?? 'MCP client').slice(0, 80);
     const uris = Array.isArray(req.body?.redirect_uris) ? (req.body.redirect_uris as unknown[]).map(String).slice(0, 10) : [];
-    if (!uris.length || !uris.every(validRedirect)) { res.status(400).json({ error: 'invalid_client_metadata', error_description: 'redirect_uris must be https (or localhost) URLs' }); return; }
+    if (!uris.length || !uris.every(u => u.length <= REDIRECT_URI_MAX && validRedirect(u))) { res.status(400).json({ error: 'invalid_client_metadata', error_description: 'redirect_uris must be https (or localhost) URLs' }); return; }
     const clientId = 'olxc_' + rand(16);
     db.prepare('INSERT INTO oauth_clients (client_id, name, redirect_uris, created_at) VALUES (?,?,?,?)').run(clientId, name, JSON.stringify(uris), Date.now());
     res.status(201).json({
@@ -122,8 +128,12 @@ export function oauthRoutes(): express.Router {
     const keep = ['client_id', 'redirect_uri', 'state', 'code_challenge', 'code_challenge_method', 'scope', 'response_type']
       .map(k => `<input type="hidden" name="${k}" value="${esc(String(q[k] ?? (k === 'response_type' ? 'code' : k === 'code_challenge_method' ? 'S256' : '')))}">`).join('');
     const fields = scopeFields(user, { previous });
+    // where the access goes: a client names itself (anybody may register one called "ChatGPT"), the address it sends people back to is what it is
+    const to = new URL(v.redirectUri);
+    const where = to.protocol === 'http:' ? 'an app on this computer' : `<b>${esc(to.host)}</b>`;
     page(res, error ? 400 : 200, `<h2>Connect ${esc(v.client.name)}?</h2>
 <p><b>${esc(v.client.name)}</b> wants to work with the OverLyX projects of <b>${esc(user.name)}</b> (@${esc(user.username)})${fields ? ' chosen below' : ''} — read documents and files, propose tracked-change edits, comment, and build PDFs, with your role in each project.</p>
+<p>The access goes to ${where}. Only allow it if you started this connection there yourself.</p>
 <p class="muted">This creates a short-lived credential for this OAuth connection; disconnect it any time in OverLyX under File ▸ Git repository ▸ OAuth connections.</p>
 ${error ? `<p class="err">${esc(error)}</p>` : ''}<form method="post" action="/oauth/authorize">${keep}${fields}<button class="primary" name="decision" value="approve">Allow</button> <button name="decision" value="deny">Deny</button></form>`);
   }
