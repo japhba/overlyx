@@ -113,6 +113,15 @@ describe('writing a document into a Google Doc', () => {
     expect(keys(await read(g, f.id))).toEqual(keys(want('Plain **words** here.\n')));
   });
 
+  it('a changed character outside the Basic Multilingual Plane, or with a combining mark, is replaced whole (Google refuses a request that splits one)', async () => {
+    const g = new FakeGoogle();
+    const f = await g.createDocument('Astral');
+    await push(g, f.id, want('Let 𝑥 be small, 😀 too, and café.\n'));
+    // U+1D465 → U+1D466 share their first code unit, U+1F600 → U+1FA00 their second; é → è (combining) their letter
+    await push(g, f.id, want('Let 𝑦 be small, \u{1FA00} too, and cafè.\n'));
+    expect(g.doc(f.id).text()).toBe('Let 𝑦 be small, \u{1FA00} too, and cafè.');
+  });
+
   it('random edits always converge to the document (seeded)', async () => {
     let seed = 7;
     const rnd = (n: number) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; };

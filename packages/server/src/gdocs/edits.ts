@@ -131,9 +131,16 @@ function editText(plan: Plan, raw: DocsDocument, start: number, oldElements: Doc
   }
 }
 
+const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+/** a text's characters as a reader sees them (grapheme clusters: a surrogate pair, a letter with its combining marks) */
+const clusters = (s: string): string[] => Array.from(graphemes.segment(s), g => g.segment);
+
 /**
  * Word changes narrowed to the characters that changed ("bold," → "strong," deletes "bold" and
- * inserts "strong"; the comma stays, and whatever is anchored to it).
+ * inserts "strong"; the comma stays, and whatever is anchored to it). Whole characters: the Docs API
+ * counts UTF-16 code units but refuses a deletion of one unit of a surrogate pair and an insertion
+ * inside a grapheme cluster — 𝑥 → 𝑦 (U+1D465 → U+1D466) share their first unit, and narrowing by units
+ * made a request Google refuses, so every sync of the document failed.
  */
 function trimChanges(ops: { type: 'same' | 'add' | 'del'; text: string }[]): { type: 'same' | 'add' | 'del'; text: string }[] {
   const out: { type: 'same' | 'add' | 'del'; text: string }[] = [];
@@ -141,10 +148,12 @@ function trimChanges(ops: { type: 'same' | 'add' | 'del'; text: string }[]): { t
     if (ops[k].type === 'same') { out.push(ops[k]); k++; continue; }
     let del = '', add = '';
     for (; k < ops.length && ops[k].type !== 'same'; k++) { if (ops[k].type === 'del') del += ops[k].text; else add += ops[k].text; }
-    let p = 0;
-    while (p < del.length && p < add.length && del[p] === add[p] && del[p] !== FOOT) p++;
-    let q = 0;
-    while (q < del.length - p && q < add.length - p && del[del.length - 1 - q] === add[add.length - 1 - q] && del[del.length - 1 - q] !== FOOT) q++;
+    const dc = clusters(del), ac = clusters(add);
+    // (p, q: how many code units the common start and end take — whole clusters of them)
+    let pc = 0, p = 0;
+    while (pc < dc.length && pc < ac.length && dc[pc] === ac[pc] && dc[pc] !== FOOT) p += dc[pc++].length;
+    let qc = 0, q = 0;
+    while (qc < dc.length - pc && qc < ac.length - pc && dc[dc.length - 1 - qc] === ac[ac.length - 1 - qc] && dc[dc.length - 1 - qc] !== FOOT) q += dc[dc.length - 1 - qc++].length;
     if (p) out.push({ type: 'same', text: del.slice(0, p) });
     if (del.length - p - q > 0) out.push({ type: 'del', text: del.slice(p, del.length - q) });
     if (add.length - p - q > 0) out.push({ type: 'add', text: add.slice(p, add.length - q) });

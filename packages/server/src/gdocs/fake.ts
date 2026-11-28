@@ -58,6 +58,9 @@ function locate(els: El[], base: number, index: number): { list: El[]; i: number
   throw new GoogleApiError(`Index ${index} is not in a paragraph`, 400);
 }
 
+const isHigh = (c?: string) => !!c && c >= '\ud800' && c <= '\udbff';
+const isLow = (c?: string) => !!c && c >= '\udc00' && c <= '\udfff';
+
 export class FakeDoc {
   body: El[] = [newPara()];
   footnotes = new Map<string, El[]>();
@@ -104,6 +107,8 @@ export class FakeDoc {
     let p = list[i] as Para;
     let off = index - start;
     const inherit = { ...(p.chars[off - 1]?.style ?? p.chars[off]?.style ?? {}) };
+    // (as Google: an insertion between the two code units of a surrogate pair is refused)
+    if (isHigh(p.chars[off - 1]?.ch) && isLow(p.chars[off]?.ch)) throw new GoogleApiError('Invalid requests[0].insertText: The insertion index cannot be within a grapheme cluster.', 400);
     for (const c of text.replace(/[\u0000-\u0008\u000c-\u001f]/g, m => (m === '\n' ? m : '')).split('')) {
       if (c === '\n') {
         const q: Para = { k: 'p', chars: p.chars.slice(off), ps: { ...p.ps }, bullet: p.bullet ? { ...p.bullet } : undefined };
@@ -118,6 +123,9 @@ export class FakeDoc {
 
   deleteRange(startIndex: number, endIndex: number, segmentId?: string): void {
     if (endIndex <= startIndex) return;
+    // (as Google: "deleting one code unit of a surrogate pair" is an invalid deletion)
+    const unit = (i: number) => this.charsIn(i, i + 1, segmentId)[0]?.ch;
+    if ([startIndex, endIndex].some(i => isHigh(unit(i - 1)) && isLow(unit(i)))) throw new GoogleApiError('Invalid requests[0].deleteContentRange: The range cannot delete one code unit of a surrogate pair.', 400);
     const seg = this.segment(segmentId);
     const total = seg.base + seg.els.reduce((s, e) => s + elSize(e), 0);
     if (endIndex > total - 1) throw new GoogleApiError('Invalid deletion range: cannot delete the last newline of a segment', 400);
