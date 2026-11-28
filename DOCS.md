@@ -353,8 +353,11 @@ blend.
   thread and in the document worker alike). A saved state opens as before. When a document's stored state and the parse of its unchanged file differ at open (a parser change
   between deploys), the file is merged into the state — and that merge is stored right away; it used
   to be made again at every restart as new operations, and an editor that had synced an earlier
-  round brought that copy back (text twice). A document whose save keeps failing (a full disk,
-  permissions) is never unloaded: it stays in memory, retries every 15 s, and its editors' status
+  round brought that copy back (text twice). A document is unloaded only when its file holds all of
+  it (`DocManager.settle`): one whose save keeps failing (a full disk, permissions), whose file was
+  just removed, or which got edits during its last save stays in memory; a reset or a project closed
+  keeps what could not be written as a version (*edits not written to the file before …*). A failing
+  save retries every 15 s, and its editors' status
   bar says *⚠ Could not save* with the reason in plain words (the saved message, type 3, carries it
   after the snapshot; empty once a save succeeds again). A change on disk merged into the open
   document (`mergeFileText`) wins where it and unsaved typing here changed the same paragraph; the

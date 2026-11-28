@@ -1417,12 +1417,31 @@ export class DocManager {
   async unload(id: string): Promise<void> {
     const doc = this.docs.get(id);
     if (!doc || doc.conns.size) return;
-    if (doc.dirty || doc.saving) await doc.saveToFile();
+    const written = await this.settle(doc);
     if (this.docs.get(id) !== doc || doc.conns.size) return;   // opened again meanwhile
-    // a document whose save keeps failing (a full disk, permissions) stays loaded and keeps retrying:
-    // its edits are not in the file, and a later open would load the file over them
-    if (doc.saveError) { doc.touchUnload(); return; }
+    // a document whose file does not hold all of it stays loaded (and keeps retrying): a save that
+    // keeps failing (a full disk, permissions), a file just removed (the watcher keeps the text as a
+    // version, onExternalRemove), edits still coming in — a later open would load the file over them
+    if (!written) { doc.touchUnload(); return; }
     this.forgetDoc(doc);
+  }
+
+  /**
+   * Write what an open document holds (edits may come in during a save: a few rounds); whether its
+   * file holds all of it now. What closes a document asks this before it forgets it.
+   */
+  private async settle(doc: OpenDoc): Promise<boolean> {
+    for (let round = 0; round < 3 && (doc.dirty || doc.saving) && !doc.disposed; round++) await doc.saveToFile();
+    return !doc.dirty && !doc.saving && !doc.saveError;
+  }
+
+  /** Close a document for good (reset, its project closed): what its file could not take is kept as a version. */
+  private async closeDoc(doc: OpenDoc, why: string, reason: string): Promise<void> {
+    if (!await this.settle(doc)) {
+      try { doc.snapshot(`edits not written to the file before ${why}`, await doc.textAsync()); }
+      catch (e) { console.error(`[docs] ${doc.id}: edits not written to the file before ${why} could not be kept:`, e); }
+    }
+    this.drop(doc, reason);
   }
 
   /**
@@ -1433,11 +1452,7 @@ export class DocManager {
    */
   async reset(id: string): Promise<void> {
     const doc = this.docs.get(id);
-    if (doc) {
-      if (doc.dirty || doc.saving) await doc.saveToFile();
-      for (const c of [...doc.conns.keys()]) { doc.conns.delete(c); try { c.close(4001, 'document reset'); } catch { /* ignore */ } }
-      this.forgetDoc(doc);
-    }
+    if (doc) await this.closeDoc(doc, 'its history was reset', 'document reset');
     db.prepare('DELETE FROM ydocs WHERE id = ?').run(id);
     db.prepare('DELETE FROM ydocs_saved WHERE id = ?').run(id);
   }
@@ -1445,9 +1460,7 @@ export class DocManager {
   /** Save and close every open document of a project (before it is moved away / deleted). */
   async closeProject(project: string): Promise<void> {
     for (const doc of [...this.docs.values()]) {
-      if (doc.project !== project) continue;
-      if (doc.dirty || doc.saving) await doc.saveToFile();
-      this.drop(doc, 'project removed');
+      if (doc.project === project) await this.closeDoc(doc, 'its project was closed', 'project removed');
     }
     db.prepare("DELETE FROM ydocs WHERE substr(id, 1, ?) = ?").run(project.length + 1, project + '/');
     db.prepare("DELETE FROM ydocs_saved WHERE substr(id, 1, ?) = ?").run(project.length + 1, project + '/');
