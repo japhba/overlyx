@@ -58,6 +58,23 @@ export function driveAccount(userId: number): { email: string | null } | null {
 
 export class GoogleAuthError extends Error {}
 
+/**
+ * How long one request to Google may take. Without a limit a connection that stalls never settles,
+ * and the document's sync (one at a time) waits on it until the server restarts.
+ */
+const API_TIMEOUT_MS = 30_000;
+/** … and a DOCX upload, which Drive converts before it answers */
+const UPLOAD_TIMEOUT_MS = 120_000;
+
+/** fetch with a time limit; no answer is a GoogleApiError too (status 0), in words a person can read */
+async function timedFetch(url: string, init: RequestInit, ms = API_TIMEOUT_MS): Promise<globalThis.Response> {
+  try { return await fetch(url, { ...init, signal: AbortSignal.timeout(ms) }); }
+  catch (e) {
+    const timeout = (e as Error).name === 'TimeoutError';
+    throw new GoogleApiError(timeout ? `Google did not answer within ${Math.round(ms / 1000)} seconds` : `Google could not be reached (${(e as Error).message})`, 0, timeout ? 'timeout' : 'network');
+  }
+}
+
 /** A valid access token for the account's Drive (refreshed when it is about to expire). */
 export async function accessToken(userId: number): Promise<string> {
   const row = db.prepare('SELECT * FROM google_drive WHERE user_id = ?').get(userId) as Row | undefined;
@@ -69,7 +86,7 @@ export async function accessToken(userId: number): Promise<string> {
     db.prepare('DELETE FROM google_drive WHERE user_id = ?').run(userId);
     throw new GoogleAuthError('The Google Drive authorisation can no longer be read — connect Google Drive again');
   }
-  const res = await fetch('https://oauth2.googleapis.com/token', {
+  const res = await timedFetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ client_id: config.google.clientId, client_secret: config.google.clientSecret, refresh_token: refresh, grant_type: 'refresh_token' }),
@@ -88,7 +105,7 @@ export async function disconnectDrive(userId: number): Promise<void> {
   const row = db.prepare('SELECT refresh_token FROM google_drive WHERE user_id = ?').get(userId) as { refresh_token: string } | undefined;
   db.prepare('DELETE FROM google_drive WHERE user_id = ?').run(userId);
   const refresh = row && open(row.refresh_token);
-  if (refresh && !GOOGLE_STUB) await fetch('https://oauth2.googleapis.com/revoke?token=' + encodeURIComponent(refresh), { method: 'POST' }).catch(() => undefined);
+  if (refresh && !GOOGLE_STUB) await timedFetch('https://oauth2.googleapis.com/revoke?token=' + encodeURIComponent(refresh), { method: 'POST' }).catch(() => undefined);
 }
 
 /* ------------------------------------------------------------------ connecting (OAuth) */
@@ -142,7 +159,7 @@ export async function finishConnect(req: ExpressRequest & { user?: { id: number 
   };
   if (!req.user) { res.status(401).send('sign in first'); return; }
   if (req.query.error) { back('Google Drive was not connected (' + String(req.query.error) + ')'); return; }
-  const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+  const tokenRes = await timedFetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ code: String(req.query.code ?? ''), client_id: config.google.clientId, client_secret: config.google.clientSecret, redirect_uri: redirectUri(req), grant_type: 'authorization_code' }),
@@ -152,7 +169,7 @@ export async function finishConnect(req: ExpressRequest & { user?: { id: number 
   if (!String(tok.scope ?? '').includes(DRIVE_SCOPE)) { back('Google Drive access was not granted (the box for Drive files must be ticked)'); return; }
   let email: string | null = null;
   try {
-    const info = await (await fetch('https://openidconnect.googleapis.com/v1/userinfo', { headers: { authorization: 'Bearer ' + tok.access_token } })).json() as { email?: string };
+    const info = await (await timedFetch('https://openidconnect.googleapis.com/v1/userinfo', { headers: { authorization: 'Bearer ' + tok.access_token } })).json() as { email?: string };
     email = info.email ?? null;
   } catch { /* the address is only shown */ }
   db.prepare(`INSERT INTO google_drive (user_id, email, refresh_token, access_token, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)
@@ -200,7 +217,7 @@ export function googleApi(userId: number): GoogleApi {
   const call = async <T,>(method: string, url: string, body?: unknown): Promise<T> => {
     for (let attempt = 0; ; attempt++) {
       const token = await accessToken(userId);
-      const res = await fetch(url, { method, headers: { authorization: 'Bearer ' + token, ...(body !== undefined ? { 'content-type': 'application/json' } : {}) }, body: body === undefined ? undefined : JSON.stringify(body) });
+      const res = await timedFetch(url, { method, headers: { authorization: 'Bearer ' + token, ...(body !== undefined ? { 'content-type': 'application/json' } : {}) }, body: body === undefined ? undefined : JSON.stringify(body) });
       if (res.ok) return (res.status === 204 ? {} : await res.json()) as T;
       const err = await res.json().catch(() => ({})) as { error?: { message?: string; status?: string; errors?: { reason?: string }[] } };
       // rate limits and Google's own hiccups: a second try after a moment
@@ -220,9 +237,9 @@ export function googleApi(userId: number): GoogleApi {
       // A create with an unknown outcome must not be retried: conversion cannot use a
       // preallocated Drive ID, so a retry could create a second document.
       const token = await accessToken(userId);
-      const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink,mimeType', {
+      const res = await timedFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink,mimeType', {
         method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'multipart/related; boundary=' + boundary }, body,
-      });
+      }, UPLOAD_TIMEOUT_MS);
       if (!res.ok) {
         const err = await res.json().catch(() => ({})) as { error?: { message?: string } };
         throw new GoogleApiError(err.error?.message ?? `Google Docs import failed (${res.status})`, res.status);
@@ -235,9 +252,9 @@ export function googleApi(userId: number): GoogleApi {
       // Not retried either: a second upload of the same content would only cost time, but an upload
       // with an unknown outcome is better read back by the next sync than repeated blindly.
       const token = await accessToken(userId);
-      const res = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(id)}?uploadType=media&fields=id,mimeType`, {
+      const res = await timedFetch(`https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(id)}?uploadType=media&fields=id,mimeType`, {
         method: 'PATCH', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }, body: Buffer.from(docx),
-      });
+      }, UPLOAD_TIMEOUT_MS);
       if (!res.ok) {
         const err = await res.json().catch(() => ({})) as { error?: { message?: string } };
         throw new GoogleApiError(err.error?.message ?? `Google Docs upload failed (${res.status})`, res.status);

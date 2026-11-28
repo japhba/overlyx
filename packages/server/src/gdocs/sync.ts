@@ -783,7 +783,13 @@ const authSaid = new Set<string>();
  */
 export function startAutoSync(intervalMs = 60_000): void {
   if (timer) return;
-  timer = setInterval(() => { void tick(); }, intervalMs);
+  // one pass at a time: a pass that takes longer than the interval (many links, a slow Google) is not joined by another over the same links
+  let ticking = false;
+  timer = setInterval(() => {
+    if (ticking) return;
+    ticking = true;
+    void tick().catch(e => console.warn(`[gdocs] automatic sync: ${(e as Error).message}`)).finally(() => { ticking = false; });
+  }, intervalMs);
   timer.unref();
 }
 
