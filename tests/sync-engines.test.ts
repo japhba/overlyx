@@ -38,6 +38,7 @@ const { syncRouter } = await import('../packages/server/src/sync.ts');
 const { createUser } = await import('../packages/server/src/auth.ts');
 const { createOwnedProject } = await import('../packages/server/src/projectCreate.ts');
 const { SyncEngine } = await import('../packages/cli/bin/overlyx.js');
+const { manager } = await import('../packages/server/src/docs.ts');
 
 const execFileP = promisify(execFile);
 const ada = createUser('ada', 'Ada Lovelace', 'password');
@@ -56,8 +57,14 @@ async function project(name: string, files: Record<string, string>) {
   await gitmod.ensureRepo(key);
   const clone = join(ROOT, 'clones', name);
   await execFileP('git', ['-c', `http.extraHeader=Authorization: ${basic(auth.username, auth.token)}`, 'clone', '-q', `${host}/git/${key}.git`, clone]).catch(e => { throw new Error(`git clone: ${e.stderr}`); });
-  const engine = (client: string) => new SyncEngine({ dir: clone, host, project: key, remote: 'origin', auth, client, app: 'vscode' });
-  return { key, dir, clone, engine, server: (rel: string) => readFileSync(join(dir, rel), 'utf8'), local: (rel: string) => readFileSync(join(clone, rel), 'utf8') };
+  const engine = (client: string, dir = clone) => new SyncEngine({ dir, host, project: key, remote: 'origin', auth, client, app: 'vscode' });
+  /** another computer's clone of the project */
+  const second = async () => {
+    const other = join(ROOT, 'clones', `${name}-2`);
+    await execFileP('git', ['-c', `http.extraHeader=Authorization: ${basic(auth.username, auth.token)}`, 'clone', '-q', `${host}/git/${key}.git`, other]).catch(e => { throw new Error(`git clone: ${e.stderr}`); });
+    return other;
+  };
+  return { key, dir, clone, engine, second, server: (rel: string) => readFileSync(join(dir, rel), 'utf8'), local: (rel: string) => readFileSync(join(clone, rel), 'utf8') };
 }
 
 const lines = (n: number, change: Record<number, string> = {}) => Array.from({ length: n }, (_, i) => change[i] ?? `line ${i}`).join('\n') + '\n';
@@ -368,5 +375,64 @@ describe('a file larger than the sync carries (20 MB)', () => {
     expect(e.status.large).toEqual([]);
     expect(p.server('data.bin')).toBe('small again\n');
     e.stop();
+  });
+});
+
+/**
+ * Convergence: a change is carried once, and then every round is quiet. The service log showed single
+ * files "applied" a hundred times a day (28 Nov 2026) — were two engines, or the server's open
+ * document and a clone, sending one file back and forth? A round that moves nothing must follow at
+ * once, whatever the file is: with or without a final newline, CRLF line ends, a document that is
+ * open in the server's editor while the clone's version arrives (its writer must not re-spell it).
+ */
+describe('two clones and the server converge', () => {
+  const tex = (...paras: string[]) => `\\documentclass{article}\n\\begin{document}\n\n${paras.join('\n\n')}\n\n\\end{document}\n`;
+  const moved = (c: { sent: unknown[]; received: unknown[]; conflicts: unknown[] }) => c.sent.length + c.received.length + c.conflicts.length;
+
+  async function settle(a: InstanceType<typeof SyncEngine>, b: InstanceType<typeof SyncEngine>) {
+    const rounds: number[] = [];
+    for (let i = 0; i < 6; i++) rounds.push(moved(await a.sync()) + moved(await b.sync()));
+    return rounds;
+  }
+
+  it('one push, one download, then quiet — for every kind of file, also while its document is open on the server', async () => {
+    const files: Record<string, string> = {
+      'notes.py': lines(5),
+      'no-newline.json': '{"a": 1}',
+      'crlf.txt': 'one\r\ntwo\r\n',
+      'README.md': '# Title\n\nA paragraph with *emphasis* and a list:\n\n- one\n- two\n\n| a | b |\n|---|---|\n| 1 | 2 |\n',
+      'main.tex': tex('First paragraph.', 'Second paragraph, with $x^2$.'),
+    };
+    const p = await project('converge', files);
+    const a = p.engine('laptop'), b = p.engine('desktop', await p.second());
+    expect((await settle(a, b)).slice(1)).toEqual([0, 0, 0, 0, 0]);
+    const applied = vi.spyOn(console, 'log');
+    const pushes = () => applied.mock.calls.filter(c => String(c[0]).startsWith('[sync]')).length;
+
+    // each file edited in the laptop's clone, the documents while they are open in the server's editor
+    const md = await manager.open(`${p.key}/README.md`), doc = await manager.open(`${p.key}/main.tex`);
+    const edits: Record<string, string> = {
+      'notes.py': lines(5, { 2: 'line 2, edited' }),
+      'no-newline.json': '{"a": 2}',
+      'crlf.txt': 'one\r\ntwo, edited\r\n',
+      'README.md': files['README.md'].replace('A paragraph', 'An edited paragraph').replace('| 1 | 2 |', '| 1 | 3 |'),
+      'main.tex': tex('First paragraph,   edited\n(with a line break in the source).', 'Second paragraph, with $x^2$.'),
+    };
+    for (const [rel, text] of Object.entries(edits)) {
+      const before = pushes();
+      writeFileSync(join(p.clone, rel), text);
+      const rounds = await settle(a, b);
+      // the laptop sends it, the desktop takes it, and nothing moves after that
+      expect([rel, rounds], `${rel}: rounds until quiet`).toEqual([rel, [2, 0, 0, 0, 0, 0]]);
+      expect([rel, pushes() - before]).toEqual([rel, 1]);
+      // the bytes written in the clone are what all three hold
+      expect([rel, p.server(rel)]).toEqual([rel, text]);
+      expect([rel, readFileSync(join(ROOT, 'clones', 'converge-2', rel), 'utf8')]).toEqual([rel, text]);
+      expect([rel, p.local(rel)]).toEqual([rel, text]);
+    }
+    expect(md.toText()).toContain('An edited paragraph');
+    expect(doc.toText()).toContain('edited');
+    applied.mockRestore();
+    a.stop(); b.stop();
   });
 });
