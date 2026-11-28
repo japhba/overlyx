@@ -432,6 +432,92 @@ describe('the sync of a document', async () => {
     }
   });
 
+  it('somebody typing in the Google Doc between the reading and the writing of a sync does not fail it: it starts over and brings that edit in — once, also what came in before', async () => {
+    const id = 'u/p/busy.md';
+    const path = join(ROOT, 'projects', 'u', 'p', 'busy.md');
+    writeFileSync(path, '# Busy\n\nA first paragraph.\n\nA second paragraph.\n');
+    const link = await sync.linkNewGoogleDoc(id, owner.id, 'Busy');
+    const doc = await manager.open(id);
+    // Suggesting: what comes in from Google Docs is a tracked change, so bringing it in twice would show
+    doc.ydoc.transact(() => { doc.meta.set('header', JSON.stringify(doc.getMeta().headerLines.map(l => (l.startsWith('\\tracking_changes') ? '\\tracking_changes true' : l)))); }, 'header');
+    await doc.saveToFile();
+    await sync.syncDoc(id);
+    // an edit there, and one here
+    await g.batchUpdate(link.file_id, [{ insertText: { location: { index: g.indexOf(link.file_id, 'paragraph.') }, text: 'opening ' } }], undefined, 'Kirsten');
+    const lyx = doc.toLyxDocument();
+    for (const p of lyx.body) for (const it of p.items) if (it.kind === 'text') it.text = it.text.replace('A second paragraph.', 'A second paragraph, edited here.');
+    doc.loadFromLyx(lyx, 'test');
+    await doc.saveToFile();
+    const real = g.batchUpdate.bind(g);
+    let typed = 0;
+    const batch = vi.spyOn(g, 'batchUpdate').mockImplementation(async (fid, requests, required, by) => {
+      // Kirsten types again just before each of the sync's first two writes arrives
+      if (required && typed < 2) {
+        const [after, word] = typed++ === 0 ? ['Busy', ' now'] : ['now', ' again'];
+        await real(fid, [{ insertText: { location: { index: g.indexOf(fid, after) + after.length }, text: word } }], undefined, 'Kirsten');
+      }
+      return real(fid, requests, required, by);
+    });
+    try {
+      const r = await sync.syncDoc(id);
+      expect(typed).toBe(2);
+      expect(r.pulled).toBeGreaterThan(0);
+      expect(sync.linkOf(id)?.last_error).toBeNull();
+      expect(g.doc(link.file_id).text()).toBe('Busy now again\nA first opening paragraph.\nA second paragraph, edited here.');
+      const saved = readFileSync(path, 'utf8');
+      expect(saved.match(/opening/g)).toHaveLength(1);
+      expect(saved.match(/now/g)).toHaveLength(1);
+      expect(saved).toMatch(/<ins author="Kirsten \(Google Docs\)" datetime="[^"]+">opening ?<\/ins>/);
+      expect(saved).toContain('A second paragraph, edited here.');
+    } finally { batch.mockRestore(); }
+  });
+
+  it('a Google Doc that never stays still long enough: the sync gives up after three attempts, and says why in words', async () => {
+    const id = 'u/p/busier.md';
+    writeFileSync(join(ROOT, 'projects', 'u', 'p', 'busier.md'), '# Busier\n\nText.\n');
+    const link = await sync.linkNewGoogleDoc(id, owner.id, 'Busier');
+    const doc = await manager.open(id);
+    doc.loadFromLyx(parseMarkdown('# Busier\n\nText, edited here.\n').doc, 'test');
+    await doc.saveToFile();
+    const real = g.batchUpdate.bind(g);
+    let typed = 0;
+    const batch = vi.spyOn(g, 'batchUpdate').mockImplementation(async (fid, requests, required, by) => {
+      if (required) { typed++; await real(fid, [{ insertText: { location: { index: g.indexOf(fid, 'Busier') + 6 }, text: '!' } }], undefined, 'Kirsten'); }
+      return real(fid, requests, required, by);
+    });
+    try {
+      await expect(sync.syncDoc(id)).rejects.toThrow(sync.BUSY_MESSAGE);
+      expect(typed).toBe(3);
+      expect(sync.linkOf(id)?.last_error).toBe(sync.BUSY_MESSAGE);
+    } finally { batch.mockRestore(); }
+    // when it is quiet there: everything in, nothing twice
+    await sync.syncDoc(id);
+    expect(g.doc(link.file_id).text()).toBe('Busier!!!\nText, edited here.');
+    expect(readFileSync(join(ROOT, 'projects', 'u', 'p', 'busier.md'), 'utf8')).toContain('# Busier!!!\n');
+  });
+
+  it('a sync that stops between two rounds leaves its own half-written table alone: the next sync fills it, and the table here stays', async () => {
+    const id = 'u/p/rounds.md';
+    const path = join(ROOT, 'projects', 'u', 'p', 'rounds.md');
+    writeFileSync(path, '# Rounds\n\nSome text.\n');
+    const link = await sync.linkNewGoogleDoc(id, owner.id, 'Rounds');
+    const doc = await manager.open(id);
+    doc.loadFromLyx(parseMarkdown('# Rounds\n\nSome text.\n\n| key | value |\n|---|---|\n| alpha | 42 |\n').doc, 'test');
+    await doc.saveToFile();
+    // the table goes in empty in one round and is filled in the next: that second write is refused (a rate limit that lasts)
+    const real = g.batchUpdate.bind(g);
+    let n = 0;
+    const batch = vi.spyOn(g, 'batchUpdate').mockImplementation(async (fid, requests, required, by) => {
+      if (++n === 2) throw new GoogleApiError('Quota exceeded for quota metric \'Write requests\'', 429, 'RESOURCE_EXHAUSTED');
+      return real(fid, requests, required, by);
+    });
+    try { await expect(sync.syncDoc(id)).rejects.toThrow(/Quota exceeded/); } finally { batch.mockRestore(); }
+    expect(g.doc(link.file_id).text()).not.toContain('alpha');
+    await sync.syncDoc(id);
+    expect(readFileSync(path, 'utf8')).toMatch(/\| *alpha *\| *42 *\|/);
+    expect(g.doc(link.file_id).text()).toContain('alpha');
+  });
+
   it('a .tex document syncs too: headings, formulas and citations as text Docs can hold', async () => {
     const tex = join(ROOT, 'projects', 'u', 'p', 'note.tex');
     writeFileSync(tex, '\\documentclass{article}\n\\begin{document}\n\\section{Intro}\nEnergy $E=mc^2$ as in \\cite{einstein}.\n\\begin{itemize}\n\\item one\n\\end{itemize}\n\\end{document}\n');

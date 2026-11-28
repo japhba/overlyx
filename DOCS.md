@@ -5488,6 +5488,16 @@ read, comment and edit in Google Docs.
   deletions by “Name (Google Docs)” (Drive's last modifier) — accepting them changes nothing in
   Google Docs, rejecting them takes the Google Doc back. Linking an existing Google Doc with 'merge'
   always brings its differences in tracked (`syncDoc(…, { pullTracked })`): they are for review.
+  The base (`base_text`, `base_google`) moves along with the sync, not only at its end: to what the
+  pull brought in, and after each write into the Google Doc (a round of requests, a DOCX upload) to
+  the document as written and the Google Doc as read back. A sync that stops half-way (a refused
+  write, a rate limit, a restart) therefore leaves nothing of its own for the next one to take for
+  an edit made in Google Docs — a table goes in empty in one round and is filled in the next, and a
+  stop between the two used to empty the table here. Each write names the revision it was planned
+  against (`writeControl.requiredRevisionId`); when somebody typed there in between, Google refuses
+  it ("The required revision ID … does not match"), and the sync starts over from the pull (three
+  attempts, then "being edited" on the link). Still open (review of 28 Nov, rconn.md G4): what is
+  typed there between a write and its reading back is taken for a difference by the next round.
 * **Comments** both ways: a Google comment becomes a thread right after the text it quotes, its
   replies messages; a thread written here becomes a Google comment (anchored to the text before it
   with the Docs API's `insertComment` where the project has it — it is in preview — else a Drive
@@ -5496,7 +5506,13 @@ read, comment and edit in Google Docs.
 * **When**: every minute (`startAutoSync`) a linked document is synced if it was saved since its
   last sync or Drive reports a new version of the Google Doc; *Sync now* in the dialog any time;
   *Sync automatically* off leaves it to the button. The sync uses the Drive of whoever linked the
-  document. Unlinking keeps the Google Doc; a link whose document is gone is dropped.
+  document. Unlinking keeps the Google Doc; a link whose document is gone is dropped. An automatic
+  sync that fails waits longer each time (1, 2, 4 … minutes, an hour at most; in memory) — a deleted
+  Google Doc or a lasting rate limit is not asked about every minute for ever; *Sync now* always
+  runs, and a sync that works ends the waiting. Every call to Google has a time limit (30 s, a DOCX
+  upload 2 min); a rate limit (429, or Drive's 403 `userRateLimitExceeded` / `rateLimitExceeded`),
+  Google's own failures and a read that got no answer are asked again with exponential back-off, or
+  after the `Retry-After` Google sends (up to 30 s), three times at most (`gdocs/errors.ts`).
 * **Tests**: `tests/gdocs.test.ts` runs against `gdocs/fake.ts`, a simulation of the Docs / Drive
   APIs (indices, paragraph joins, bullets from tabs, tables, footnotes, anchored comments, tabs:
   a body per tab, requests routed by their `tabId`, a collaborator adding tabs);

@@ -434,7 +434,7 @@ export class FakeGoogle implements GoogleApi {
   /** a batch by `by` (the sync is "me"; a collaborator's edits are made through here as well) */
   async batchUpdate(id: string, requests: Record<string, unknown>[], requiredRevisionId?: string, by = this.me): Promise<{ replies: Record<string, unknown>[]; revisionId: string }> {
     const d = this.doc(id), tabs = this.tabs.get(id)!;
-    if (requiredRevisionId && requiredRevisionId !== 'rev' + d.revision) throw new GoogleApiError('The document was changed since the revision', 400, 'FAILED_PRECONDITION');
+    if (requiredRevisionId && requiredRevisionId !== 'rev' + d.revision) throw new GoogleApiError(`The required revision ID '${requiredRevisionId}' does not match the latest revision.`, 400, 'INVALID_ARGUMENT');
     // all or nothing, like the real API (every tab)
     const backup = JSON.stringify(tabs.map(t => ({ body: t.doc.body, footnotes: [...t.doc.footnotes], lists: [...t.doc.lists], namedRanges: [...t.doc.namedRanges] })));
     const replies: Record<string, unknown>[] = [];

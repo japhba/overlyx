@@ -197,6 +197,7 @@ export interface GoogleApi {
   getDocument(id: string): Promise<DocsDocument>;
   /** every tab's body (documents.get with includeTabsContent) */
   getDocumentTabs(id: string): Promise<DocsFile>;
+  /** `revisionId`: the Google Doc's revision this write made */
   batchUpdate(id: string, requests: Request[], requiredRevisionId?: string): Promise<{ replies: Record<string, unknown>[]; revisionId?: string }>;
   getFile(id: string): Promise<GFile>;
   listComments(id: string): Promise<GComment[]>;
@@ -280,7 +281,11 @@ export function googleApi(userId: number): GoogleApi {
     // (suggestions inline: the indices are the document's own; model.ts reads around them)
     getDocument: (id) => call<DocsDocument>('GET', DOCS + encodeURIComponent(id) + '?suggestionsViewMode=SUGGESTIONS_INLINE'),
     getDocumentTabs: (id) => call<DocsFile>('GET', DOCS + encodeURIComponent(id) + '?includeTabsContent=true&suggestionsViewMode=SUGGESTIONS_INLINE'),
-    batchUpdate: (id, requests, requiredRevisionId) => call('POST', DOCS + encodeURIComponent(id) + ':batchUpdate', { requests, ...(requiredRevisionId ? { writeControl: { requiredRevisionId } } : {}) }),
+    // (BatchUpdateDocumentResponse: its writeControl names the revision the write made)
+    batchUpdate: async (id, requests, requiredRevisionId) => {
+      const r = await call<{ replies?: Record<string, unknown>[]; writeControl?: { requiredRevisionId?: string } }>('POST', DOCS + encodeURIComponent(id) + ':batchUpdate', { requests, ...(requiredRevisionId ? { writeControl: { requiredRevisionId } } : {}) });
+      return { replies: r.replies ?? [], revisionId: r.writeControl?.requiredRevisionId };
+    },
     getFile: (id) => call<GFile>('GET', DRIVE + encodeURIComponent(id) + '?fields=id,name,webViewLink,trashed,version,modifiedTime,lastModifyingUser(displayName,me)'),
     listComments: async (id) => {
       const out: GComment[] = [];

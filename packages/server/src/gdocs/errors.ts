@@ -3,6 +3,13 @@ export class GoogleApiError extends Error {
   constructor(message: string, public status: number, public reason?: string) { super(message); }
 }
 
+/**
+ * Google refused a write because the Google Doc is no longer at the revision it was planned for
+ * (writeControl.requiredRevisionId — "The required revision ID '…' does not match the latest
+ * revision."): somebody typed there between the sync's reading and its writing. Not a failure.
+ */
+export const changedMeanwhile = (e: unknown): boolean => e instanceof GoogleApiError && e.status === 400 && /\brequired revision id\b/i.test(e.message);
+
 /** how often a request Google did not take is tried again */
 export const RETRIES = 3;
 /** the longest wait Google may ask for (Retry-After) that a sync waits out; a longer one fails it, and the automatic sync's back-off takes over */

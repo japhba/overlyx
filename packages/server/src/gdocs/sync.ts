@@ -39,6 +39,7 @@ import { buildDocx, markThreads } from './docx.ts';
 import { attachObjectSources, bindImportedObjects, type ObjectBindings } from './native.ts';
 import { reconcileGroup } from './importing.ts';
 import { googleApi, GoogleAuthError, type GComment, type GoogleApi } from './google.ts';
+import { changedMeanwhile } from './errors.ts';
 import { roleFor, atLeast } from '../access.ts';
 import { lcsPairs, lcsRegions } from '../lcs.ts';
 import { toSessionUser } from '../auth.ts';
@@ -276,13 +277,45 @@ export function linkerMayEdit(link: Pick<LinkRow, 'doc_id' | 'user_id'>): boolea
   return atLeast(roleFor(toSessionUser(row), splitDocId(link.doc_id).project), 'edit');
 }
 
+/** how often one sync starts over because the Google Doc changed between its reading and its writing */
+const ATTEMPTS = 3;
+export const BUSY_MESSAGE = 'The Google Doc was being edited while the sync wrote to it — it is synced again when it is quiet there.';
+
+/**
+ * One sync. Somebody typing in the Google Doc between the sync's reading and its writing makes
+ * Google refuse the write (changedMeanwhile): the sync then starts over — reads again and brings
+ * that edit in first — instead of failing with Google's sentence about revision IDs. Starting over
+ * is exact because the base moves along with the sync (syncOnce): to what the pull brought in, and
+ * to what each write of the sync left in the Google Doc, so the next attempt's pull sees only what
+ * somebody else did there.
+ */
 async function runSync(docId: string, opts: { pullTracked?: boolean } = {}): Promise<SyncReport> {
+  let pulled = 0;
+  for (let attempt = 1; ; attempt++) {
+    const report: SyncReport = { pulled: 0, pushed: 0, rounds: 0, comments: { fromGoogle: 0, toGoogle: 0 }, warnings: [], notes: [] };
+    try {
+      await syncOnce(docId, opts, report);
+      report.pulled += pulled;
+      // (a manual sync that works ends the automatic one's back-off)
+      failures.delete(docId);
+      return report;
+    } catch (e) {
+      pulled += report.pulled;
+      if (changedMeanwhile(e) && attempt < ATTEMPTS) continue;
+      const err = changedMeanwhile(e) ? new Error(BUSY_MESSAGE) : e as Error;
+      // Keep the last successful sync time: saved local edits still need an automatic retry.
+      db.prepare('UPDATE gdocs_links SET last_error = ? WHERE doc_id = ?').run(err.message, docId);
+      throw err;
+    }
+  }
+}
+
+async function syncOnce(docId: string, opts: { pullTracked?: boolean }, report: SyncReport): Promise<void> {
   const link = linkOf(docId);
   if (!link) throw new Error('This document is not linked to a Google Doc');
   if (!linkerMayEdit(link)) { unlink(docId); throw new Error('The person who linked this document to Google Docs may not edit it any more: the link is removed'); }
   const api = apiFor(link.user_id);
-  const report: SyncReport = { pulled: 0, pushed: 0, rounds: 0, comments: { fromGoogle: 0, toGoogle: 0 }, warnings: [], notes: [] };
-  try {
+  {
     const doc = await manager.open(docId);
     const markdown = isMarkdownPath(doc.relPath);
     const file = await api.getFile(link.file_id);
@@ -318,6 +351,8 @@ async function runSync(docId: string, opts: { pullTracked?: boolean } = {}): Pro
           const after = doc.textOf(theirs);
           const r = await doc.agentEdit(tracking || opts.pullTracked ? 'tracked' : 'plain', link.base_text, { after }, { author });
           report.pulled = 'inserted' in r.result ? r.result.inserted + r.result.deleted : changedChars(link.base_text, after);
+          // what came in is the base from now on: a sync that stops or starts over after this does not bring it in twice
+          setBase(docId, after, gNow);
           // the agents' edit path may switch change tracking; the document's mode stays as it was
           const lines = doc.getMeta().headerLines;
           if (isTracking(lines) !== tracking) {
@@ -329,16 +364,25 @@ async function runSync(docId: string, opts: { pullTracked?: boolean } = {}): Pro
     }
 
     // 2. the document into the Google Doc: formulas and images by a DOCX upload when they differ, then the text
-    const ours = doc.toLyxDocument();
+    // Each write of this sync, read back, is the base from then on (the document as written, the Google
+    // Doc as read): a sync that stops half-way — a refused or rate-limited write, a restart — leaves no
+    // writing of its own for the next one to take for an edit made in Google Docs (a table or a footnote
+    // goes in empty in one round and is filled in the next; read as a change made there, it emptied the
+    // table here).
+    const ours = doc.toLyxDocument(), oursText = doc.textOf(ours);
     const uploaded = await reexport(api, link, doc, ours, raw, gNow, report);
-    if (uploaded) { raw = uploaded.raw; bindings = uploaded.bindings; native = true; }
+    if (uploaded) { raw = uploaded.raw; bindings = uploaded.bindings; native = true; setBase(docId, oursText, strip(readGoogle(raw).blocks)); }
     const want = strip(project(ours, native).blocks);
     for (; report.rounds < 10; report.rounds++) {
       const requests = planRound(raw, want, report.warnings);
       if (!requests.length) break;
-      await api.batchUpdate(link.file_id, aimed(requests), raw.revisionId || undefined);
+      const wrote = await api.batchUpdate(link.file_id, aimed(requests), raw.revisionId || undefined);
       report.pushed += requests.length;
       raw = await readRaw();
+      setBase(docId, oursText, strip(readGoogle(raw).blocks));
+      // (another revision than the one the write made: somebody typed there between this write and the reading
+      // back, and the next round takes what they typed for a difference to undo — rconn.md G4, open)
+      if (wrote.revisionId && raw.revisionId && wrote.revisionId !== raw.revisionId) console.warn(`[gdocs] ${docId}: the Google Doc changed between a write of the sync and its reading back (round ${report.rounds + 1})`);
     }
     if (report.rounds >= 10) report.warnings.push('The Google Doc could not be brought fully in line in one sync');
 
@@ -353,14 +397,12 @@ async function runSync(docId: string, opts: { pullTracked?: boolean } = {}): Pro
       .run(doc.textOf(withComments), JSON.stringify(strip(readGoogle(raw).blocks)), link.comments, Date.now(), after.version ?? null, JSON.stringify(report.warnings), docId);
     // the tabs of a Google Doc that is a group here: tabs made there since become documents, titles and order follow
     if (whole) { const g = await reconcileGroup(docId, link, whole); report.warnings.push(...g.warnings); report.notes.push(...g.notes); }
-    // (a manual sync that works ends the automatic one's back-off)
-    failures.delete(docId);
-    return report;
-  } catch (e) {
-    // Keep the last successful sync time: saved local edits still need an automatic retry.
-    db.prepare('UPDATE gdocs_links SET last_error = ? WHERE doc_id = ?').run((e as Error).message, docId);
-    throw e;
   }
+}
+
+/** what both sides hold as of now, for the next pull: the document's text and the Google Doc's blocks */
+function setBase(docId: string, text: string, google: GBlock[]): void {
+  db.prepare('UPDATE gdocs_links SET base_text = ?, base_google = ? WHERE doc_id = ?').run(text, JSON.stringify(google), docId);
 }
 
 /** how many characters an edit changed, roughly: the span between the common start and end */
