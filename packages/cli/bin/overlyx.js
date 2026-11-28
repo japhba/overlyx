@@ -10,7 +10,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execFileP = promisify(execFile);
-const VERSION = '0.8.8';
+const VERSION = '0.8.9';
 const DEFAULT_HOST = 'https://overlyx.app';
 
 const HELP = `OverLyX CLI ${VERSION}
@@ -1887,10 +1887,24 @@ export class SyncEngine {
         // again: a file changed while it was read, or sync() was called meanwhile — at most a few rounds in a row
         let n = 0;
         do { this.again = false; result = await this.round(); } while (this.again && !this.stopped && ++n < 4);
-      } finally { this.running = null; }
+      } catch (e) { this.noteFailure(e); throw e; }
+      finally { this.running = null; }
       return result;
     })();
     return this.running;
+  }
+
+  /**
+   * A round that failed, in the status — whoever started it (watch, a save's poke, the minute's tick,
+   * Sync Now): the server out of reach is `offline`, a sign-in it no longer takes `signin`, anything
+   * else (its answer, git here) `error`. Only watch()'s own rounds said so before: a round a save
+   * started that failed left the status at "syncing" — in a quiet project for good, and the "not in
+   * step for ten minutes" notice, which waits for an offline or error status, never came.
+   */
+  noteFailure(e) {
+    if (this.stopped) return;
+    const http = e instanceof SyncHttpError ? e.status : null;
+    this.setStatus({ state: http === 0 ? 'offline' : http === 401 ? 'signin' : 'error', message: String(e?.message ?? e).trim() });
   }
 
   async round() {
@@ -2059,9 +2073,9 @@ export class SyncEngine {
         }
       } catch (e) {
         if (this.stopped) break;
+        this.noteFailure(e);   // (the long poll's failures too)
         const status = e.status ?? 0;
-        if (status === 401 || status === 403 || status === 404) { this.setStatus({ state: status === 401 ? 'signin' : 'error', message: e.message }); await nap(60_000); continue; }
-        this.setStatus({ state: status === 0 ? 'offline' : 'error', message: e.message });
+        if (status === 401 || status === 403 || status === 404) { await nap(60_000); continue; }
         this.log(e.message);
         await nap(backoff);
         backoff = Math.min(backoff * 2, 60_000);

@@ -287,3 +287,13 @@ describe('taking the server\'s version', () => {
     e.stop();
   });
 });
+
+describe('what the status says', () => {
+  it('a round that cannot reach the server says so, whoever started it (a save, Sync Now — not only the watch loop)', async () => {
+    const p = await project('unreachable', { 'a.txt': 'a\n' });
+    const e = new SyncEngine({ dir: p.clone, host: 'http://127.0.0.1:9', project: p.key, remote: 'origin', auth, client: 'a laptop', app: 'vscode' });
+    await expect(e.sync()).rejects.toThrow(/cannot reach/);
+    expect(e.status.state).toBe('offline');
+    e.stop();
+  });
+});
