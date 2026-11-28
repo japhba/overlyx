@@ -57,7 +57,7 @@ blend.
   editor) — opened from the panels' bar at the left (the clock), *File ▸ Version history…* or
   *View ▸ History*. Its timeline groups the store's versions (server `versions`: automatic ones at
   most every ten minutes of editing, the last 60 kept; named ones; the state before a restore or a
-  change on disk; offline edits) by day, runs of automatic ones within 45 minutes as one *editing
+  change on disk, which the 60 do not push out; offline edits) by day, runs of automatic ones within 45 minutes as one *editing
   session*, with the people who were there in their author colours (`shellutil.authorColorOf`, by
   name). *Name this version…* keeps the file as it is now; *Name…* on a version names it, which
   makes an automatic one a kept one (`PATCH /api/docs/<id>/versions/<vid>`). A version opens its

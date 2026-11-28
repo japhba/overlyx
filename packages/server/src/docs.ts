@@ -740,8 +740,9 @@ export class OpenDoc implements DocState, EditableDoc {
     const authors = [...this.awareness.getStates().values()].map(s => (s as any)?.user?.name).filter(Boolean);
     db.prepare('INSERT INTO versions (doc_id, name, author, kind, created_at, lyx) VALUES (?,?,?,?,?,?)')
       .run(this.id, 'autosave', authors.join(', ') || 'system', 'auto', now, text);
-    // prune old autosaves (keep 60)
-    db.prepare(`DELETE FROM versions WHERE doc_id = ? AND kind = 'auto' AND id NOT IN (SELECT id FROM versions WHERE doc_id = ? AND kind = 'auto' ORDER BY created_at DESC LIMIT 60)`).run(this.id, this.id);
+    // prune old autosaves (keep 60) — only those: the versions kept so that nothing is lost (before a
+    // change on disk, a restore, a large deletion, a file removed…) are of kind 'auto' too
+    db.prepare(`DELETE FROM versions WHERE doc_id = ? AND kind = 'auto' AND name = 'autosave' AND id NOT IN (SELECT id FROM versions WHERE doc_id = ? AND kind = 'auto' AND name = 'autosave' ORDER BY created_at DESC LIMIT 60)`).run(this.id, this.id);
     this.lastAutoVersion = now;
   }
 
