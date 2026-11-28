@@ -2431,6 +2431,10 @@ blend.
   * **Raw LaTeX objects** are typeset with the document's preamble on a page of the object's size in
     the build sandbox and shown as SVG (`POST /api/docs/:id/snippet`, `server/snippets.ts`; cached by
     content in `data/cache/snippets/`, two at a time) — TikZ, pgfplots or `\qrcode` look as in the PDF.
+    Viewers see them too, but for someone who cannot edit the document the server typesets only the
+    document's own objects (`ownOnly`: what a build of it typesets — a snippet runs with the project's
+    sandbox HOME, and a folder shared for viewing is not confined to itself); until 28 Nov 2026 the
+    route needed edit access and viewers saw the objects blank.
   * **Fidelity**: pages use the PDF's fonts (`pageFontsOf` in core `layout/model.ts`): beamer's text
     face (CMU Sans Serif, bundled; Noto / Fira / Lato when the preamble loads them, CMU Serif with
     `\usefonttheme{serif}`) at the scale its package loads it (notomath: 0.9 of the nominal size —

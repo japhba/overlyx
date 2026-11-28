@@ -13,6 +13,7 @@ import { manager } from './docs.ts';
 import { projectDir } from './projects.ts';
 import { run, texInputs, linkDocumentAssets, magicEngine, rewriteParentPaths, buildRoot, BUILD_CGROUP } from './export.ts';
 import { isRegularFileAt, readFileAt } from './confined.ts';
+import type { Paragraph } from '@overlyx/core';
 
 const SNIPPETS = path.join(config.dataDir, 'cache', 'snippets');
 const inflight = new Map<string, Promise<string>>();
@@ -27,9 +28,33 @@ export function snippetFile(key: string): string | null {
   return fs.existsSync(f) ? f : null;
 }
 
-/** The SVG of a snippet (its cache key), compiling it when it is not cached yet. */
-export async function snippetSvg(docId: string, latex: string, wmm: number, hmm: number): Promise<string> {
+/** A snippet that is not the requester's to typeset (SnippetRefused.message says why). */
+export class SnippetRefused extends Error {}
+
+/** The LaTeX of the raw objects a document holds (OLRaw, also inside groups) — as the editor sends it. */
+export function rawObjectsOf(body: Paragraph[], out = new Set<string>()): Set<string> {
+  for (const p of body) {
+    for (const it of p.items) {
+      if (it.kind !== 'inset') continue;
+      const ins = it.inset;
+      if (ins.type === 'Leaf' && ins.name === 'OLRaw') {
+        const line = ins.params.find(l => l.startsWith('latex '));
+        try { out.add(JSON.parse(line ? line.slice(6) : '""')); } catch { /* damaged: none */ }
+      } else if (ins.type === 'Text') rawObjectsOf(ins.paragraphs, out);
+    }
+  }
+  return out;
+}
+
+/**
+ * The SVG of a snippet (its cache key), compiling it when it is not cached yet. `ownOnly`: for
+ * someone who may not edit the document — one of the document's own raw objects only, so that they
+ * typeset nothing a build of the document would not (a snippet runs in the project's build sandbox,
+ * with its HOME, and a folder shared for viewing is not confined to itself).
+ */
+export async function snippetSvg(docId: string, latex: string, wmm: number, hmm: number, opts: { ownOnly?: boolean } = {}): Promise<string> {
   const doc = await manager.open(docId);
+  if (opts.ownOnly && !rawObjectsOf(doc.toLyxDocument().body).has(latex)) throw new SnippetRefused('Only the document\'s own LaTeX objects are typeset for someone who can view it');
   const text = await doc.textAsync();
   const at = text.indexOf('\\begin{document}');
   if (at < 0) throw new Error('not a document');

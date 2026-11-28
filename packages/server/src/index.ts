@@ -37,7 +37,7 @@ import { isMarkdownPath } from '@overlyx/core/md/index.ts';
 import { markdownStyle, setMarkdownStyle } from './mdstyle.ts';
 import { googleFontRoutes } from './googlefonts.ts';
 import { myFontRoutes } from './myfonts.ts';
-import { snippetSvg, snippetFile } from './snippets.ts';
+import { snippetSvg, snippetFile, SnippetRefused } from './snippets.ts';
 import { importLyxFile, parseFragmentText, newLayoutDocumentText, withDocumentSettings, NO_INDENT_SETTINGS } from './texdoc.ts';
 import { readProjectSettings, writeProjectSettings, projectSettingsListeners } from './projectsettings.ts';
 import { importLyxUpload } from './lyximport.ts';
@@ -1575,14 +1575,15 @@ api.post('/docs/*/ai/complete', needDoc('edit'), async (req, res) => {
 
 /** The document's LaTeX source (what the file on disk contains once saved); `?map=1`: as JSON with the source map (paragraph → character range). */
 /** A raw LaTeX object of a layout page, typeset with the document's preamble (snippets.ts): the URL of its SVG. */
-api.post('/docs/*/snippet', needDoc('edit'), async (req, res) => {
+api.post('/docs/*/snippet', needDoc('view'), async (req, res) => {
   try {
     const latex = String(req.body?.latex ?? '');
     const w = Number(req.body?.w), h = Number(req.body?.h);
     if (!latex.trim() || latex.length > 64 * 1024 || !(w > 0) || !(h > 0)) { res.status(400).json({ error: 'bad snippet' }); return; }
-    const key = await snippetSvg(docId(req), latex, w, h);
+    // (viewers see the document's own objects: what a build of it typesets)
+    const key = await snippetSvg(docId(req), latex, w, h, { ownOnly: !atLeast(req.role, 'edit') });
     res.json({ url: `/api/snippets/${key}.svg` });
-  } catch (e) { res.status(422).json({ error: String((e as Error).message ?? e) }); }
+  } catch (e) { res.status(e instanceof SnippetRefused ? 403 : 422).json({ error: String((e as Error).message ?? e) }); }
 });
 api.get('/snippets/:key.svg', (req, res) => {
   const f = snippetFile(String(req.params.key));

@@ -64,8 +64,8 @@ const ROLES: Record<string, string> = {
   'POST /docs/*/as-article': 'edit',
   'POST /docs/*/repair': 'edit',
   'POST /docs/*/clip': 'edit',
-  // (typesets LaTeX the request brings, in the project's build sandbox and HOME)
-  'POST /docs/*/snippet': 'edit',
+  // (below edit only the document's own raw objects: snippets.ts ownOnly)
+  'POST /docs/*/snippet': 'view',
   'POST /docs/*/ai-repair': 'edit',
   'POST /docs/*/ai-repair/apply': 'edit',
   'POST /docs/*/ai/rewrite': 'edit',
