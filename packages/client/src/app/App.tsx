@@ -169,7 +169,7 @@ export function App() {
   useEffect(() => {
     if (!user) return;
     let live = true;
-    void rekeyLocalCopies().then(canonicalHash).then(() => visitPublic()).finally(() => { if (live) setLinkChecked(user.id); });
+    void rekeyLocalCopies().then(canonicalHash).then(() => visitPublic(user.id)).finally(() => { if (live) setLinkChecked(user.id); });
     return () => { live = false; };
   }, [user?.id]);
   // Settings ▸ Account renamed the account: the new name everywhere at once (and for offline starts)
@@ -275,26 +275,46 @@ function shareLanding(r: { project: string; doc: string | null; file: Parameters
   return '#/' + id + (rest ? '?' + rest : '');
 }
 
+type Visit = Awaited<ReturnType<typeof api.visitPublic>>;
 /**
- * Open the public project the address names (`#/<owner>/<project>[/<path>]`) — someone else's that
- * this person has no other way into: the server puts it on their project list, and lets a visitor
- * without a session in as a guest (`user`). An address naming only the project goes on to its main
- * document. Null: not a public project, or the server is out of reach.
+ * The visits asked for, by account and address: each is asked once a page load — the start asks
+ * before the workspace opens (App's link check), the workspace when the address changes, and both
+ * asked at every start with a document address before. An answer that did not come (offline, no
+ * answer in 3 s) is asked for again.
  */
-async function visitPublic(): Promise<Awaited<ReturnType<typeof api.visitPublic>> | null> {
-  const h = parseHash();
-  if (h.share || !h.id) return null;
-  const { project, path } = splitDocId(h.id.replace(/^(raw|text|pdf):/, ''));
-  if (!isProjectKey(project) || knownProjects.has(project) || isE2eProject(project)) return null;
-  const visit = (p: string | null) => Promise.race([api.visitPublic(project, p), new Promise<null>(res => setTimeout(res, 3000, null))]);
+const visits = new Map<string, Promise<Visit | null | undefined>>();
+async function askVisit(project: string, path: string): Promise<Visit | null | undefined> {
+  const visit = (p: string | null) => Promise.race([api.visitPublic(project, p), new Promise<undefined>(res => setTimeout(res, 3000, undefined))]);
   try {
     // (the project first; the file's path only to a public one, which anyone may see — an end-to-end
     // encrypted project's names are not the server's to know)
     let v = await visit(null);
     if (v?.public && path) v = await visit(path);
-    if (v?.public && v.role === 'view' && !path) location.replace(shareLanding(v) || location.hash);
     return v;
-  } catch { return null; }
+  } catch (e) { return (e as { status?: number }).status ? null : undefined; }
+}
+
+/**
+ * Open the public project the address names (`#/<owner>/<project>[/<path>]`) — someone else's that
+ * this person has no other way into: the server puts it on their project list, and lets a visitor
+ * without a session in as a guest (`user`). An address naming only the project goes on to its main
+ * document. Null: not a public project, or the server is out of reach. `who`: the account asking
+ * (none yet: a visitor without a session).
+ */
+async function visitPublic(who: number | null = null): Promise<Visit | null> {
+  const h = parseHash();
+  if (h.share || !h.id) return null;
+  const { project, path } = splitDocId(h.id.replace(/^(raw|text|pdf):/, ''));
+  if (!isProjectKey(project) || knownProjects.has(project) || isE2eProject(project)) return null;
+  const key = `${who ?? ''}\0${project}\0${path}`;
+  let asked = visits.get(key);
+  if (!asked) {
+    visits.set(key, asked = askVisit(project, path));
+    void asked.then(v => { if (v === undefined) visits.delete(key); });
+  }
+  const v = await asked;
+  if (v?.public && v.role === 'view' && !path) location.replace(shareLanding(v) || location.hash);
+  return v ?? null;
 }
 
 /**
@@ -774,7 +794,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   useEffect(() => {
     const check = () => {
       const { share: token, sharePath } = parseHash();
-      if (!token) { void visitPublic().then(v => { if (v?.public && v.role === 'view') setRefreshKey(k => k + 1); }); return; }
+      if (!token) { void visitPublic(user.id).then(v => { if (v?.public && v.role === 'view') setRefreshKey(k => k + 1); }); return; }
       api.acceptShare(token, sharePath).then(r => {
         notify(`You can now ${r.role === 'view' ? 'view' : 'edit'} ${r.folder ? `${r.folder} of ` : ''}“${r.title ?? projectShortName(r.project)}”`);
         setRefreshKey(k => k + 1);
