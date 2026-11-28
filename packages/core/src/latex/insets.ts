@@ -1215,9 +1215,26 @@ function escapeLabel(s: string): string {
   return s;
 }
 
+/**
+ * The package a formatted reference is written with: the one of the command the author wrote
+ * (`package`, set by the .tex reader: \cref, \autoref, \prettyref, \secref), else the document's
+ * choice for references made in the editor.
+ */
+function refPackage(ctx: ExportContext, g: (k: string) => string): string { return g('package') || ctx.bp.crossrefPackage; }
+const FORMATTED_REF_CMD = new Map([['hyperref', 'autoref'], ['prettyref', 'prettyref']]);
+
 function latexRef(ctx: ExportContext, os: TexStream, rp: RunParams, cmd: string, g: (k: string) => string): void {
   const refs = g('reference').split(',').map(r => r.trim()).filter(Boolean);
-  if (cmd === 'formatted' && (g('package') === 'cleveref' || ctx.bp.crossrefPackage === 'cleveref')) {
+  const own = cmd === 'formatted' ? FORMATTED_REF_CMD.get(g('package')) : undefined;
+  if (own) {
+    if (own === 'prettyref') ctx.features.require('prettyref');
+    if (rp.inulemcmd > 0) os.write('\\mbox{');
+    if (rp.movingArg) os.write('\\protect');
+    os.write(`\\${own}${own === 'autoref' && g('nolink') === 'true' ? '*' : ''}{${g('reference')}}`);
+    if (rp.inulemcmd > 0) os.write('}');
+    return;
+  }
+  if (cmd === 'formatted' && refPackage(ctx, g) === 'cleveref') {
     ctx.features.require('cleveref');
     const prefix = g('caps') === 'true' ? 'Cref' : 'cref';
     const star = g('nolink') === 'true' ? '*' : '';
@@ -1242,7 +1259,7 @@ function latexRefOne(ctx: ExportContext, os: TexStream, rp: RunParams, cmd: stri
   const hyper = ctx.bp.pdf.useHyperref;
   const nolink = hyper && g('nolink') === 'true';
   const star = nolink ? '*' : '';
-  const useRefstyle = ctx.bp.crossrefPackage === 'refstyle';
+  const useRefstyle = (cmd === 'formatted' ? refPackage(ctx, g) : ctx.bp.crossrefPackage) === 'refstyle';
   if (rp.inulemcmd > 0) os.write('\\mbox{');
   if (rp.movingArg) os.write('\\protect');
   if (cmd === 'eqref' && useRefstyle) {
@@ -1253,7 +1270,7 @@ function latexRefOne(ctx: ExportContext, os: TexStream, rp: RunParams, cmd: stri
     const colon = ref.indexOf(':');
     let prefix = colon > 0 ? ref.slice(0, colon) : '';
     const label = colon > 0 ? ref.slice(colon + 1) : ref;
-    if (ctx.bp.crossrefPackage === 'cleveref') {
+    if (refPackage(ctx, g) === 'cleveref') {
       ctx.features.require('cleveref');
       os.write(`${caps ? '\\Cref' : '\\cref'}{${ref}}`);
     } else if (!useRefstyle || !prefix || !label || !/^[A-Za-z]+$/.test(prefix)) {

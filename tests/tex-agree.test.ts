@@ -49,6 +49,13 @@ describe('the author\'s LaTeX is written back as it was', () => {
     expect(shown).toEqual(['http://x.org/~me/a', 'http://x.org/a%20b', 'http://x.org/{a}b\\c_d#e&f']);
   });
 
+  it('formatted references keep their command: \\autoref, \\prettyref, \\secref, \\cref', () => {
+    const refs = 'See \\autoref{sec:a}, \\autoref*{b}, \\prettyref{sec:a}, \\secref{a}, \\cref{sec:a} and \\ref{x}.';
+    expect(roundTrip(doc(refs, '\\usepackage{hyperref}')).body).toBe(refs);
+    // whatever the document's own choice for references made in the editor
+    expect(roundTrip(doc(refs, '\\usepackage{hyperref}\n\\usepackage{cleveref}')).body).toBe(refs);
+  });
+
   it('a tracked change inside a URL stays a tracked change', () => {
     const r = roundTrip(doc('See \\url{a\\lyxadded{Ann}{Mon Jan  5 10:00:00 2026}{x~y}b\\lyxdeleted{Ann}{Mon Jan  5 10:00:00 2026}{old}c}.'));
     expect(r.body).toContain('\\url{a\\lyxadded{Ann}{Mon Jan  5 10:00:00 2026}{x~y}b\\lyxdeleted{Ann}{Mon Jan  5 10:00:00 2026}{old}c}');

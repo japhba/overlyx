@@ -1120,12 +1120,14 @@ class BodyParser {
       if (g === null) { this.pushERT(ctx, st, '\\' + name + (star ? '*' : '') + (opt !== null ? `[${opt}]` : '')); return null; }
       const ref = g.trim();
       if (name === 'cref' || name === 'Cref' || name === 'prettyref' || name === 'autoref') {
-        this.pushInset(ctx, st, refInset('formatted', ref, { caps: name === 'Cref', nolink: star, package: name === 'cref' || name === 'Cref' ? 'cleveref' : undefined }));
+        // (which command the author chose stays with the reference: the document's own choice of
+        // package for references written fresh is no reason to turn "Section 2" into "2")
+        this.pushInset(ctx, st, refInset('formatted', ref, { caps: name === 'Cref', nolink: star, package: name === 'cref' || name === 'Cref' ? 'cleveref' : name === 'autoref' ? 'hyperref' : 'prettyref' }));
       } else if (!REF_CMDS.has(name)) {
         // \figref{x} (refstyle): formatted reference to "fig:x"
         const prefix = name.slice(0, -3);
         const plural = opt === 's';
-        this.pushInset(ctx, st, refInset('formatted', ref.includes(':') ? ref : `${prefix.toLowerCase()}:${ref}`, { caps: prefix[0] === prefix[0].toUpperCase() && prefix[0] !== prefix[0].toLowerCase(), plural, nolink: star }));
+        this.pushInset(ctx, st, refInset('formatted', ref.includes(':') ? ref : `${prefix.toLowerCase()}:${ref}`, { caps: prefix[0] === prefix[0].toUpperCase() && prefix[0] !== prefix[0].toLowerCase(), plural, nolink: star, package: 'refstyle' }));
       } else {
         const cmd = name === 'labelcref' ? 'formatted' : name === 'cpageref' || name === 'Cpageref' ? 'pageref' : name;
         this.pushInset(ctx, st, refInset(cmd, ref, { nolink: star }));
