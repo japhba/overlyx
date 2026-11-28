@@ -492,7 +492,7 @@
     "test:gui": "xvfb-run -a -s \"-screen 0 1600x1000x24\" node test/guiTest.mjs"
   },
   "devDependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "@types/vscode": "1.90.0",
     "@vscode/vsce": "^3.9.0",
     "@vscode/test-electron": "^2.4.1",
