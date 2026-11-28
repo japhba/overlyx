@@ -75,6 +75,7 @@ export function saveErrorInWords(e: string | null): string {
   if (/ENOSPC|EDQUOT/.test(e)) return 'the server’s disk is full';
   if (/EACCES|EPERM|EROFS/.test(e)) return 'the server may not write the file';
   if (/refusing to write/.test(e)) return 'the text made from the document did not look like a document';
+  if (/kept changing on disk/.test(e)) return 'the file kept changing on disk (trying again)';
   return 'the file could not be written';
 }
 

@@ -491,8 +491,12 @@ export class OpenDoc implements DocState, EditableDoc {
         const { text, files } = p && p.seq === seq && p.base === base ? p.r : await this.renderAsync();
         if (this.disposed) return false;
         // the text took a while: a change written to the file meanwhile is merged first (and the
-        // text made again), not written over
-        if (round < 2 && await this.absorbLocked()) continue;
+        // text made again), never written over — a file that keeps changing is left alone for now
+        // (the merges are in the document; the retry writes them)
+        if (await this.absorbLocked()) {
+          if (round < 2) continue;
+          throw new Error('the file kept changing on disk while it was saved');
+        }
         if (!this.writeOut(text, files)) return false;
         if (this.updateSeq === seq) this.dirty = false;   // else the edits since are saved next
         this.saveError = null;
