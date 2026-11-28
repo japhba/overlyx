@@ -1,6 +1,6 @@
 /**
- * HTTP routes of the Google Docs sync (mounted on /api after the document access rules: changing a
- * link needs edit access to the document's project, reading its state view access).
+ * HTTP routes of the Google Docs sync (mounted on /api: changing a link needs edit access to the
+ * document — docaccess.ts needDoc — reading its state view access).
  *
  *   GET  /gdocs/status?doc=<id>     whether Google is configured, the account's Drive connection, the document's link
  *   GET  /gdocs/connect?next=#/…    to Google's consent screen (Drive files OverLyX creates), back to `next`
@@ -19,6 +19,8 @@ import express from 'express';
 import { projectOfDoc, docPathOf, isProjectKey } from '@overlyx/core';
 import { roleFor, atLeast } from '../access.ts';
 import { canonicalDocId, canonicalProject } from '../namespaces.ts';
+// the document routes' access: edit (docaccess.ts)
+import { needDoc, docId as docIdOf } from '../docaccess.ts';
 import { config } from '../config.ts';
 import { assertWritableRelPath } from '../projects.ts';
 import { driveAccount, driveConfigured, disconnectDrive, startConnect, accessToken, pickerConfigured, pickerAppId, GoogleApiError, GOOGLE_STUB } from './google.ts';
@@ -27,7 +29,6 @@ import { importGoogleDoc } from './importing.ts';
 import { flatTabs } from './model.ts';
 import { FakeGoogle } from './fake.ts';
 
-const docIdOf = (req: express.Request) => canonicalDocId(decodeURIComponent(String((req.params as Record<string, string>)[0] ?? '')));
 
 function failure(res: express.Response, e: unknown): void {
   const err = e as Error;
@@ -99,7 +100,7 @@ export function gdocsRoutes(): express.Router {
     res.json({ ok: true });
   });
 
-  r.post('/docs/*/gdocs/link', async (req, res) => {
+  r.post('/docs/*/gdocs/link', needDoc('edit'), async (req, res) => {
     try {
       const id = docIdOf(req);
       if (!driveAccount(req.user!.id)) { res.status(409).json({ error: 'Connect Google Drive first' }); return; }
@@ -116,7 +117,7 @@ export function gdocsRoutes(): express.Router {
     } catch (e) { failure(res, e); }
   });
 
-  r.post('/docs/*/gdocs/sync', async (req, res) => {
+  r.post('/docs/*/gdocs/sync', needDoc('edit'), async (req, res) => {
     try {
       const id = docIdOf(req);
       if (!linkOf(id)) { res.status(404).json({ error: 'This document is not linked to a Google Doc' }); return; }
@@ -125,12 +126,12 @@ export function gdocsRoutes(): express.Router {
     } catch (e) { failure(res, e); }
   });
 
-  r.post('/docs/*/gdocs/unlink', (req, res) => {
+  r.post('/docs/*/gdocs/unlink', needDoc('edit'), (req, res) => {
     unlink(docIdOf(req));
     res.json({ ok: true });
   });
 
-  r.post('/docs/*/gdocs/auto', (req, res) => {
+  r.post('/docs/*/gdocs/auto', needDoc('edit'), (req, res) => {
     const id = docIdOf(req);
     setAuto(id, !!req.body?.auto);
     res.json({ link: publicLink(linkOf(id)) });

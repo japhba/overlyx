@@ -32,7 +32,7 @@ import { starterFor, pageSize, isHtmlPath, DELIVERABLE_KINDS, type DeliverableKi
 import { newArticleText } from '@overlyx/core/html/articletheme.ts';
 import { refreshScientificStarters } from './starterupdates.ts';
 import { nameVersion, replacePassage, projectHistory, gitChanges, gitFileAt, restoreDeletedFile, HistoryError } from './history.ts';
-import { listProjects, resolveProjectPath, assertWritableRelPath, projectDir, createProject, newDocumentText, newMarkdownText, fileKind, isBackupFile, isDocumentFile, findMaster } from './projects.ts';
+import { listProjects, resolveProjectPath, assertWritableRelPath, projectDir, createProject, newDocumentText, newMarkdownText, fileKind, isBackupFile, isDocumentFile } from './projects.ts';
 import { isMarkdownPath } from '@overlyx/core/md/index.ts';
 import { markdownStyle, setMarkdownStyle } from './mdstyle.ts';
 import { googleFontRoutes } from './googlefonts.ts';
@@ -53,6 +53,8 @@ import { db, type ProjectRow } from './db.ts';
 import { accessibleProjects, adoptProjects, roleFor, atLeast, isRole, registerProject, projectRow, shareInfo, addMember, setMemberRole, removeMember, memberRow, createLink, revokeLink, shareLinkOf, linkPreview, acceptLink, setPublic, joinPublic, newOwner, setOwner, trashProject, ensureWelcomeProject, ensureStarterProjects, roleAt, foldersOf, reachesProject, addFolderMember, folderMemberRow, setFolderMemberRole, removeFolderMember, groupLanding, type Role } from './access.ts';
 import { foldersMoved, withinPath } from './foldershares.ts';
 import { canonicalProject, canonicalDocId } from './namespaces.ts';
+// document routes: each says what it needs (docaccess.ts)
+import { needDoc, docId, deny, refuseE2e } from './docaccess.ts';
 import { gdocsRoutes } from './gdocs/routes.ts';
 import { startAutoSync, filesMoved } from './gdocs/sync.ts';
 import { lessWrongRoutes, lessWrongCallbackRoutes } from './lesswrong/routes.ts';
@@ -86,7 +88,7 @@ import { externalSyncOf } from './syncPeers.ts';
 import { mountTandem } from './tandem.ts';
 import { e2eRoutes } from './e2e/routes.ts';
 import { kickE2e } from './e2e/relay.ts';
-import { isE2eProject, markE2e, e2eEnabled, closeE2eStore, dropKeys, E2eRefusal } from './e2e/store.ts';
+import { isE2eProject, markE2e, e2eEnabled, closeE2eStore, dropKeys } from './e2e/store.ts';
 import { texHeadings, parseBibtex, lyxToPm, exportLyx, splitDocId, projectOfDoc, docPathOf, splitProjectKey, isProjectKey } from '@overlyx/core';
 
 const app = express();
@@ -260,10 +262,6 @@ declare global {
   namespace Express { interface Request { role?: Role; /** only folders of the project are shared with the user (access.ts folderOnly): what is outside them is not shown */ partial?: boolean } }
 }
 
-function deny(res: express.Response, role: Role | null): void {
-  res.status(403).json({ error: role ? 'You can only view this project' : 'You do not have access to this project (ask its owner to share it with you)' });
-}
-
 /**
  * Project routes: the user needs at least `min` in `:project` — a project key `<owner>/<name>`, one
  * path segment (the client encodes the slash); an old name (namespaces.ts) stands for the project.
@@ -319,41 +317,8 @@ function e2eAllows(req: express.Request): boolean {
   if (rest === '') return req.method === 'DELETE';
   return /^\/(events|activity|share(\/(members|links|owner)(\/[^/]+)?)?)$/.test(rest);
 }
-function refuseE2e(res: express.Response): void {
-  res.status(403).json({ error: new E2eRefusal().message, code: 'e2e' });
-}
 
-/**
- * Document routes (`/docs/<id>/<action>`): reading needs *view*, changing the document *edit*.
- * Building a PDF / exporting only reads the document, so viewers may do it.
- */
-api.all('/docs/*', (req, res, next) => {
-  const full = String((req.params as any)[0] ?? '');
-  const m = /^(.*?)(?:\/(meta|tex|lyx|outline|source|bib|reset|save|header|frontmatter|versions(?:\/\d+(?:\/(?:restore|part))?)?|export(?:\/cancel)?|pdf|build|folds|place|opened|external|legacy-merge|synctex\/(?:view|edit|pages)))?$/.exec(full)!;
-  // an id from before a project moved (namespaces.ts) names the document under its current key
-  const id = canonicalDocId(decodeURIComponent(m[1]));
-  const action = m[2] ?? '';
-  // exporting only reads the document; the folds, the place and the open are the user's own way of looking at it (viewers keep theirs too)
-  const write = req.method !== 'GET' && !/^(export|folds|place|opened)/.test(action);
-  const project = projectOfDoc(id);
-  let role = roleFor(req.user!, project);
-  if (!atLeast(role, write ? 'edit' : 'view')) {
-    // a document in a folder shared with the user on their own
-    const at = roleAt(req.user!, project, docPathOf(id));
-    if (!atLeast(at, write ? 'edit' : 'view')) { deny(res, at ?? role); return; }
-    // its PDF: unless it is built through a master document outside the folder (that one's PDF is not theirs to see)
-    const master = /^(export|pdf|build|synctex|layoutcheck)/.test(action) ? findMaster(project, docPathOf(id)) : null;
-    if (master && !roleAt(req.user!, project, master)) { res.status(403).json({ error: `This document is built through ${master}, which is not shared with you` }); return; }
-    req.partial = !role;
-    role = at;
-  }
-  // an end-to-end encrypted project's documents are ciphertext the server cannot open
-  if (isE2eProject(project)) { refuseE2e(res); return; }
-  req.role = role!;
-  next();
-});
-
-// the Google Docs sync (gdocs/): after the document access rules above
+// the Google Docs sync (gdocs/)
 api.use(gdocsRoutes());
 // the LessWrong sync (lesswrong/): the same
 api.use(lessWrongRoutes());
@@ -364,7 +329,7 @@ api.use(libraryRoutes());
 
 // what keeps the document in step from elsewhere right now — synced clones of its project, its
 // Google Docs link (syncPeers.ts): the web interface's "⇄ in sync" chip
-api.get('/docs/*/external', (req, res) => {
+api.get('/docs/*/external', needDoc('view'), (req, res) => {
   const id = docId(req);
   res.setHeader('Cache-Control', 'no-store');
   // (the project's clones and links are its people's business)
@@ -1323,18 +1288,11 @@ api.get('/projects/:project/graphics/*', needPaths('view', wildPath), async (req
 
 /* -------------------------------------------------------------------- docs */
 
-/** The document of a /docs route — under its current key, also when the id is from before its project moved (namespaces.ts). */
-function docId(req: express.Request): string {
-  return canonicalDocId(decodeURIComponent((req.params as any)[0] ?? req.params.id));
-}
-
-
-
 /** bib files used by a document (filled by the meta route) for the /bib search endpoint */
 const bibIndex = new Map<string, { files: string[]; fallbackProject: string | null }>();
 
 /** Search the bibliography of a document: ?q=words (matches key/author/year/title) or ?keys=a,b */
-api.get('/docs/*/bib', async (req, res) => {
+api.get('/docs/*/bib', needDoc('view'), async (req, res) => {
   try {
     const id = docId(req);
     if (!bibIndex.has(id)) { await manager.open(id); }
@@ -1366,7 +1324,7 @@ api.get('/docs/*/bib', async (req, res) => {
 });
 
 /** Document metadata for the editor: class, layouts, macros, bib entries, labels, authors. */
-api.get('/docs/*/meta', async (req, res) => {
+api.get('/docs/*/meta', needDoc('view'), async (req, res) => {
   const t0 = performance.now();
   const timings: Record<string, number> = {};
   let tPrev = t0;
@@ -1433,7 +1391,7 @@ api.get('/docs/*/meta', async (req, res) => {
 
 /** Mend mechanically-fixable structural damage (managed-block markers) left by an external edit. */
 /** A web page (a deliverable) made an article: written in the document editor from now on (docs.ts makeArticle). */
-api.post('/docs/*/as-article', async (req, res) => {
+api.post('/docs/*/as-article', needDoc('edit'), async (req, res) => {
   try {
     if (!atLeast(req.role, 'edit')) { res.status(403).json({ error: 'view-only' }); return; }
     const id = docId(req);
@@ -1443,7 +1401,7 @@ api.post('/docs/*/as-article', async (req, res) => {
   } catch (e) { res.status(400).json({ error: String(e) }); }
 });
 
-api.post('/docs/*/repair', async (req, res) => {
+api.post('/docs/*/repair', needDoc('edit'), async (req, res) => {
   try {
     if (!atLeast(req.role, 'edit')) { res.status(403).json({ error: 'view-only' }); return; }
     const doc = await manager.open(docId(req));
@@ -1453,7 +1411,7 @@ api.post('/docs/*/repair', async (req, res) => {
 
 /** Parse a LaTeX fragment against this document's own preamble (pasting LaTeX text into the
  *  editor): the ProseMirror blocks to insert. Nothing is written — the client inserts them. */
-api.post('/docs/*/clip', async (req, res) => {
+api.post('/docs/*/clip', needDoc('edit'), async (req, res) => {
   try {
     if (!atLeast(req.role, 'edit')) { res.status(403).json({ error: 'view-only' }); return; }
     const latex = String(req.body?.latex ?? '');
@@ -1466,7 +1424,7 @@ api.post('/docs/*/clip', async (req, res) => {
 
 /** Ask the configured OpenRouter model to propose a fix for structural damage the mechanical
  *  repair can't handle. Never applied automatically — see POST .../ai-repair/apply. */
-api.post('/docs/*/ai-repair', async (req, res) => {
+api.post('/docs/*/ai-repair', needDoc('edit'), async (req, res) => {
   try {
     if (!atLeast(req.role, 'edit')) { res.status(403).json({ error: 'view-only' }); return; }
     if (!config.openrouter.apiKey) { res.status(503).json({ error: 'AI repair is not configured on this server (OPENROUTER_API_KEY is unset).' }); return; }
@@ -1483,7 +1441,7 @@ api.post('/docs/*/ai-repair', async (req, res) => {
 });
 
 /** Apply an AI-proposed fix once the user has approved it in the merge editor. */
-api.post('/docs/*/ai-repair/apply', async (req, res) => {
+api.post('/docs/*/ai-repair/apply', needDoc('edit'), async (req, res) => {
   try {
     if (!atLeast(req.role, 'edit')) { res.status(403).json({ error: 'view-only' }); return; }
     const { original, proposed } = req.body ?? {};
@@ -1551,7 +1509,7 @@ api.post('/ai/transcribe', async (req, res) => {
 });
 
 /** ⌘K: rewrite the selected passage (or a formula) according to an instruction; the client previews the proposal. */
-api.post('/docs/*/ai/rewrite', async (req, res) => {
+api.post('/docs/*/ai/rewrite', needDoc('edit'), async (req, res) => {
   try {
     if (!atLeast(req.role, 'edit')) { res.status(403).json({ error: 'view-only' }); return; }
     const body = req.body ?? {};
@@ -1574,7 +1532,7 @@ api.post('/docs/*/ai/rewrite', async (req, res) => {
 api.get('/ai/linked', (req, res) => { res.json({ via: linkedAi(req.user!)?.via ?? null }); });
 
 /** A place of an offline merge (editor plugins/mergereview.ts): one version of the paragraph made from both — by the account's own AI, never the server's key. */
-api.post('/docs/*/ai/merge', async (req, res) => {
+api.post('/docs/*/ai/merge', needDoc('edit'), async (req, res) => {
   try {
     if (!atLeast(req.role, 'edit')) { res.status(403).json({ error: 'view-only' }); return; }
     const ai = linkedAi(req.user!);
@@ -1597,7 +1555,7 @@ api.post('/docs/*/ai/merge', async (req, res) => {
 });
 
 /** Autocomplete: a short continuation at the cursor (text: parsed nodes for the ghost; math: LaTeX). */
-api.post('/docs/*/ai/complete', async (req, res) => {
+api.post('/docs/*/ai/complete', needDoc('edit'), async (req, res) => {
   try {
     if (!atLeast(req.role, 'edit')) { res.status(403).json({ error: 'view-only' }); return; }
     if (!aiAvailable()) { res.status(503).json({ error: 'AI assistance is not configured on this server.' }); return; }
@@ -1617,7 +1575,7 @@ api.post('/docs/*/ai/complete', async (req, res) => {
 
 /** The document's LaTeX source (what the file on disk contains once saved); `?map=1`: as JSON with the source map (paragraph → character range). */
 /** A raw LaTeX object of a layout page, typeset with the document's preamble (snippets.ts): the URL of its SVG. */
-api.post('/docs/*/snippet', async (req, res) => {
+api.post('/docs/*/snippet', needDoc('edit'), async (req, res) => {
   try {
     const latex = String(req.body?.latex ?? '');
     const w = Number(req.body?.w), h = Number(req.body?.h);
@@ -1633,7 +1591,7 @@ api.get('/snippets/:key.svg', (req, res) => {
   res.type('image/svg+xml').sendFile(f);
 });
 
-api.get('/docs/*/tex', async (req, res) => {
+api.get('/docs/*/tex', needDoc('view'), async (req, res) => {
   try {
     const doc = await manager.open(docId(req));
     if (req.query.map === '1') { res.json(await doc.textMapAsync()); return; }
@@ -1644,7 +1602,7 @@ api.get('/docs/*/tex', async (req, res) => {
   } catch (e) { res.status(400).json({ error: String(e) }); }
 });
 
-api.get('/docs/*/lyx', async (req, res) => {
+api.get('/docs/*/lyx', needDoc('view'), async (req, res) => {
   try {
     const doc = await manager.open(docId(req));
     res.attachment(path.basename(doc.relPath).replace(/\.[^.]+$/, '.lyx'));
@@ -1653,7 +1611,7 @@ api.get('/docs/*/lyx', async (req, res) => {
 });
 
 /** The headings of a document from its file on disk (no parse, no loading): the document panel's outline of documents that are not open. */
-api.get('/docs/*/outline', (req, res) => {
+api.get('/docs/*/outline', needDoc('view'), (req, res) => {
   try {
     const id = docId(req);
     const { project, path: rel } = splitDocId(id);
@@ -1667,7 +1625,7 @@ api.get('/docs/*/outline', (req, res) => {
 });
 
 /** Replace the document by LaTeX source edited by hand (applied as a diff: untouched paragraphs keep their identity). */
-api.post('/docs/*/source', async (req, res) => {
+api.post('/docs/*/source', needDoc('edit'), async (req, res) => {
   try {
     const text = req.body?.text;
     if (typeof text !== 'string') { res.status(400).json({ error: 'text missing' }); return; }
@@ -1693,12 +1651,12 @@ api.post('/projects/:project/import', needProject('edit'), async (req, res) => {
 });
 
 /** Admin: start a fresh collaboration history for a document (see DocManager.reset). */
-api.post('/docs/*/reset', async (req, res) => {
+api.post('/docs/*/reset', needDoc('edit'), async (req, res) => {
   if (!req.user?.isAdmin) { res.status(403).json({ error: 'admin only' }); return; }
   try { await manager.reset(docId(req)); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: String(e) }); }
 });
 
-api.post('/docs/*/save', async (req, res) => {
+api.post('/docs/*/save', needDoc('edit'), async (req, res) => {
   try {
     const doc = await manager.open(docId(req));
     const ok = await doc.saveToFile();
@@ -1707,7 +1665,7 @@ api.post('/docs/*/save', async (req, res) => {
 });
 
 /** The document settings (header lines) — for clients that need the master's settings. */
-api.get('/docs/*/header', async (req, res) => {
+api.get('/docs/*/header', needDoc('view'), async (req, res) => {
   try { const doc = await manager.open(docId(req)); res.json({ headerLines: doc.getMeta().headerLines }); }
   catch (e) { res.status(400).json({ error: String(e) }); }
 });
@@ -1715,7 +1673,7 @@ api.get('/docs/*/header', async (req, res) => {
 /** Update header (document settings): full header lines list, or preamble text. */
 /** Header updates are read-modify-write on one value: run them one at a time per document. */
 const headerQueue = new Map<string, Promise<unknown>>();
-api.post('/docs/*/header', async (req, res) => {
+api.post('/docs/*/header', needDoc('edit'), async (req, res) => {
   const id = docId(req);
   const prev = headerQueue.get(id) ?? Promise.resolve();
   const job = prev.catch(() => {}).then(async () => {
@@ -1752,11 +1710,11 @@ api.post('/docs/*/header', async (req, res) => {
  * them (the rest stays as written) and the settings it amounts to follow, in one change: the editor
  * shows the fonts, numbering and headings at once, and the file is saved with the new front matter.
  */
-api.get('/docs/*/frontmatter', async (req, res) => {
+api.get('/docs/*/frontmatter', needDoc('view'), async (req, res) => {
   try { res.json(await markdownStyle(docId(req))); }
   catch (e) { res.status(400).json({ error: (e as Error).message ?? String(e) }); }
 });
-api.post('/docs/*/frontmatter', async (req, res) => {
+api.post('/docs/*/frontmatter', needDoc('edit'), async (req, res) => {
   const id = docId(req);
   const prev = headerQueue.get(id) ?? Promise.resolve();
   const job = prev.catch(() => {}).then(async () => {
@@ -1775,7 +1733,7 @@ api.post('/docs/*/frontmatter', async (req, res) => {
  * A local copy kept by an editor of the CRDT's old model (its whole Yjs state, client
  * editor/legacycopy.ts): its offline edits merged into the document (docs.ts legacyMerge).
  */
-api.post('/docs/*/legacy-merge', express.raw({ type: 'application/octet-stream', limit: '64mb' }), async (req, res) => {
+api.post('/docs/*/legacy-merge', needDoc('edit'), express.raw({ type: 'application/octet-stream', limit: '64mb' }), async (req, res) => {
   try {
     const body = req.body as Buffer;
     if (!Buffer.isBuffer(body) || !body.length) { res.status(400).json({ error: 'a Yjs state is expected' }); return; }
@@ -1790,10 +1748,10 @@ api.post('/docs/*/legacy-merge', express.raw({ type: 'application/octet-stream',
 
 /* ---------------------------------------------------------------- versions */
 
-api.get('/docs/*/versions', (req, res) => {
+api.get('/docs/*/versions', needDoc('view'), (req, res) => {
   res.json({ versions: manager.listVersions(docId(req)) });
 });
-api.post('/docs/*/versions', async (req, res) => {
+api.post('/docs/*/versions', needDoc('edit'), async (req, res) => {
   try {
     // `lyx` = explicit content (a client's offline edits that could not be merged), else the current state
     const lyx = typeof req.body?.lyx === 'string' && req.body.lyx.length < 20_000_000 ? req.body.lyx : undefined;
@@ -1801,21 +1759,21 @@ api.post('/docs/*/versions', async (req, res) => {
     res.json({ id });
   } catch (e) { res.status(400).json({ error: String(e) }); }
 });
-api.get('/docs/*/versions/:vid', (req, res) => {
+api.get('/docs/*/versions/:vid', needDoc('view'), (req, res) => {
   const v = manager.getVersion(docId(req), Number(req.params.vid));
   if (!v) { res.status(404).json({ error: 'not found' }); return; }
   res.json(v);
 });
-api.post('/docs/*/versions/:vid/restore', async (req, res) => {
+api.post('/docs/*/versions/:vid/restore', needDoc('edit'), async (req, res) => {
   try { await manager.restoreVersion(docId(req), Number(req.params.vid), req.user!.name); res.json({ ok: true }); }
   catch (e) { res.status(400).json({ error: String(e) }); }
 });
 // the History pane (history.ts): name a version, restore one part of it, the project's versions across files
-api.patch('/docs/*/versions/:vid', (req, res) => {
+api.patch('/docs/*/versions/:vid', needDoc('edit'), (req, res) => {
   try { res.json({ ok: nameVersion(docId(req), Number(req.params.vid), String(req.body?.name ?? '')) }); }
   catch (e) { res.status(e instanceof HistoryError ? e.status : 400).json({ error: (e as Error).message }); }
 });
-api.post('/docs/*/versions/:vid/part', async (req, res) => {
+api.post('/docs/*/versions/:vid/part', needDoc('edit'), async (req, res) => {
   const b = req.body ?? {};
   if (typeof b.cur !== 'string' || typeof b.text !== 'string' || !Number.isInteger(b.at) || b.cur.length + b.text.length > 20_000_000) { res.status(400).json({ error: 'at, cur and text expected' }); return; }
   try { res.json(await replacePassage(docId(req), { at: b.at, cur: b.cur, text: b.text })); }
@@ -1837,14 +1795,14 @@ api.post('/projects/:project/history/git/:hash/restore', needProject('edit'), as
   try { await restoreDeletedFile(req.params.project, req.params.hash, String(req.body?.path ?? ''), req.user!.id); res.json({ ok: true }); }
   catch (e) { res.status(e instanceof HistoryError ? e.status : 400).json({ error: (e as Error).message }); }
 });
-api.delete('/docs/*/versions/:vid', (req, res) => {
+api.delete('/docs/*/versions/:vid', needDoc('edit'), (req, res) => {
   db.prepare('DELETE FROM versions WHERE id = ? AND doc_id = ?').run(Number(req.params.vid), docId(req));
   res.json({ ok: true });
 });
 
 /* ------------------------------------------------------------------ export */
 
-api.post('/docs/*/export', async (req, res) => {
+api.post('/docs/*/export', needDoc('view', { built: true }), async (req, res) => {
   try {
     const id = docId(req);
     if (!docPathOf(id)) { res.status(400).json({ error: 'A project has no PDF of its own: open one of its documents to build it' }); return; }
@@ -1868,11 +1826,11 @@ api.post('/docs/*/export', async (req, res) => {
   } catch (e) { res.status(500).json({ error: String(e) }); }
 });
 
-api.post('/docs/*/export/cancel', (req, res) => {
+api.post('/docs/*/export/cancel', needDoc('view', { built: true }), (req, res) => {
   res.json({ ok: cancelBuild(docId(req)) });
 });
 
-api.get('/docs/*/pdf', (req, res) => {
+api.get('/docs/*/pdf', needDoc('view', { built: true }), (req, res) => {
   const b = lastBuild(docId(req));
   if (!b?.pdf_path || !isRegularFileAt(b.pdf_path)) { res.status(404).json({ error: 'no pdf built yet' }); return; }
   res.setHeader('Content-Type', 'application/pdf');
@@ -1882,14 +1840,14 @@ api.get('/docs/*/pdf', (req, res) => {
 });
 
 /** SyncTeX forward search: the PDF boxes of a line (1-based) of the .tex as built (`?line=`). */
-api.get('/docs/*/synctex/view', async (req, res) => {
+api.get('/docs/*/synctex/view', needDoc('view', { built: true }), async (req, res) => {
   const line = Number(req.query.line), column = Number(req.query.column ?? 0);
   if (!Number.isFinite(line) || line < 1) { res.status(400).json({ error: 'line required' }); return; }
   try { res.json({ boxes: await synctexView(docId(req), Math.floor(line), Number.isFinite(column) ? column : 0) }); }
   catch (e) { res.status(500).json({ error: String(e) }); }
 });
 /** SyncTeX inverse search: the source line under a point of the PDF (`?page=&x=&y=`, points from the page's top-left). */
-api.get('/docs/*/synctex/edit', async (req, res) => {
+api.get('/docs/*/synctex/edit', needDoc('view', { built: true }), async (req, res) => {
   const page = Number(req.query.page), x = Number(req.query.x), y = Number(req.query.y);
   if (!(page >= 1) || !Number.isFinite(x) || !Number.isFinite(y)) { res.status(400).json({ error: 'page, x, y required' }); return; }
   try { res.json(await synctexEdit(docId(req), Math.floor(page), x, y) ?? { line: null }); }
@@ -1897,26 +1855,26 @@ api.get('/docs/*/synctex/edit', async (req, res) => {
 });
 
 /** The Pages view: where each page of the last build begins in the built .tex, with the pages' geometry (core pagebreaks.ts); null before a build. */
-api.get('/docs/*/synctex/pages', async (req, res) => {
+api.get('/docs/*/synctex/pages', needDoc('view', { built: true }), async (req, res) => {
   try { res.json({ breaks: await synctexPages(docId(req)) }); }
   catch (e) { res.status(500).json({ error: String(e) }); }
 });
 
 /** The user's folded sections of a document (client editor/plugins/fold.ts): per user, on every browser. */
-api.get('/docs/*/folds', (req, res) => { res.json(docFolds(req.user!.id, docId(req))); });
-api.put('/docs/*/folds', (req, res) => { res.json(setDocFolds(req.user!.id, docId(req), req.body?.folds, req.body?.at)); });
+api.get('/docs/*/folds', needDoc('view'), (req, res) => { res.json(docFolds(req.user!.id, docId(req))); });
+api.put('/docs/*/folds', needDoc('view'), (req, res) => { res.json(setDocFolds(req.user!.id, docId(req), req.body?.folds, req.body?.at)); });
 /** Where the user was in a document — a deck's slide (client deliverable/slidememory.ts): it reopens there, on every browser. */
-api.get('/docs/*/place', (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(docPlace(req.user!.id, docId(req))); });
-api.put('/docs/*/place', (req, res) => { res.json(setDocPlace(req.user!.id, docId(req), req.body?.slide, req.body?.at)); });
+api.get('/docs/*/place', needDoc('view'), (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(docPlace(req.user!.id, docId(req))); });
+api.put('/docs/*/place', needDoc('view'), (req, res) => { res.json(setDocPlace(req.user!.id, docId(req), req.body?.slide, req.body?.at)); });
 /** A file shown without a connection of its own (the text editor, the PDF viewer; client app/lastfile.ts) counts as opened: its project reopens on it. */
-api.put('/docs/*/opened', (req, res) => { markDocOpened(req.user!.id, docId(req), req.body?.view === 'pdf' ? 'pdf' : 'text'); res.json({ ok: true }); });
+api.put('/docs/*/opened', needDoc('view'), (req, res) => { markDocOpened(req.user!.id, docId(req), req.body?.view === 'pdf' ? 'pdf' : 'text'); res.json({ ok: true }); });
 
 /**
  * Last build result + the current job (running / queued / just finished), for the PDF panel.
  * `pdf_at` is when the PDF file was written (a failed build can leave the previous PDF), `now` the
  * server's clock — the client shows the PDF's age with it, whatever its own clock says.
  */
-api.get('/docs/*/build', (req, res) => {
+api.get('/docs/*/build', needDoc('view', { built: true }), (req, res) => {
   const id = docId(req);
   const b = lastBuild(id);
   const job = currentJob(id);
@@ -1931,7 +1889,7 @@ api.get('/docs/*/build', (req, res) => {
 });
 
 /** A layout document's text boxes as TeX set them in the last build, for the editor's check against the PDF (export.ts layoutCheckOf). */
-api.get('/docs/*/layoutcheck', async (req, res) => {
+api.get('/docs/*/layoutcheck', needDoc('view', { built: true }), async (req, res) => {
   try { res.json(await layoutCheckOf(docId(req))); } catch (e) { res.status(500).json({ error: String((e as Error).message ?? e) }); }
 });
 

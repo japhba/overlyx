@@ -450,7 +450,12 @@ blend.
   document afterwards (the landing page's Google buttons carry the current hash). Guests older than
   the session are pruned at startup (`pruneGuests`). `OVERLYX_SIGNUP=invited` instances admit no
   guests (the link asks to sign in). Viewers can read and compile but every change is refused
-  — in the UI, on the API and on the WebSocket. Administrators (`OVERLYX_OWNER_EMAIL`, or
+  — in the UI, on the API and on the WebSocket. (On the API every route says what it needs where it
+  is registered: `needProject` / `needPaths` / `needReach` in index.ts, and for a document's routes
+  `/docs/<id>/<action>` `docaccess.ts needDoc('view' | 'edit')`, the id being the route's own match
+  — `tests/docs-routes.test.ts` lists each one's role; until 28 Nov 2026 one gate in front of them
+  all split the id from the action with a list of actions kept by hand, which had fallen behind the
+  routes.) Administrators (`OVERLYX_OWNER_EMAIL`, or
   `is_admin` in the database) do **not** see other people's projects: the start screen lists them
   under *Administration*, and *Open as administrator…* grants owner rights for one hour — logged in
   that project's **activity log**, which its owner sees in the Share dialog together with who

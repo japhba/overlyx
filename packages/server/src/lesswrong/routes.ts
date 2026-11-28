@@ -1,6 +1,6 @@
 /**
- * HTTP routes of the LessWrong sync (mounted on /api after the document access rules: changing a
- * link needs edit access to the document's project, reading its state view access).
+ * HTTP routes of the LessWrong sync (mounted on /api: changing a link needs edit access to the
+ * document — docaccess.ts needDoc — reading its state view access).
  *
  *   GET  /lesswrong/status?doc=<id>    the account's LessWrong connection, the document's link
  *   GET  /lesswrong/connect?next=#/…   to LessWrong's consent page, back to `next`
@@ -19,11 +19,12 @@ import express from 'express';
 import { projectOfDoc } from '@overlyx/core';
 import { roleFor, atLeast } from '../access.ts';
 import { canonicalDocId } from '../namespaces.ts';
+// the document routes' access: edit (docaccess.ts)
+import { needDoc, docId as docIdOf } from '../docaccess.ts';
 import { lessWrongAccount, startConnect, finishConnect, callbackPost, disconnectLessWrong, parsePostRef, LESSWRONG_STUB } from './api.ts';
 import { lwLinkOf, publicLwLink, linkPost, setLinkKey, syncDoc, unlinkPost, setLwAuto, setLessWrongApiFactory } from './sync.ts';
 import { FakeLessWrong } from './fake.ts';
 
-const docIdOf = (req: express.Request) => canonicalDocId(decodeURIComponent(String((req.params as Record<string, string>)[0] ?? '')));
 const failure = (res: express.Response, e: unknown, what = '') => {
   if (what) console.warn(`[lesswrong] ${what}: ${(e as Error).message.slice(0, 200)}`);
   res.status(400).json({ error: (e as Error).message });
@@ -58,7 +59,7 @@ export function lessWrongRoutes(): express.Router {
     res.json({ ok: true });
   });
 
-  r.post('/docs/*/lesswrong/link', async (req, res) => {
+  r.post('/docs/*/lesswrong/link', needDoc('edit'), async (req, res) => {
     try {
       const id = docIdOf(req);
       if (!lessWrongAccount(req.user!.id)) { res.status(409).json({ error: 'Connect LessWrong first' }); return; }
@@ -70,7 +71,7 @@ export function lessWrongRoutes(): express.Router {
     } catch (e) { failure(res, e, `${docIdOf(req)}: linking failed`); }
   });
 
-  r.post('/docs/*/lesswrong/key', async (req, res) => {
+  r.post('/docs/*/lesswrong/key', needDoc('edit'), async (req, res) => {
     try {
       const id = docIdOf(req);
       const url = String(req.body?.url ?? '').trim();
@@ -83,7 +84,7 @@ export function lessWrongRoutes(): express.Router {
     } catch (e) { failure(res, e); }
   });
 
-  r.post('/docs/*/lesswrong/sync', async (req, res) => {
+  r.post('/docs/*/lesswrong/sync', needDoc('edit'), async (req, res) => {
     try {
       const id = docIdOf(req);
       if (!lwLinkOf(id)) { res.status(404).json({ error: 'This document is not linked to a LessWrong draft' }); return; }
@@ -95,12 +96,12 @@ export function lessWrongRoutes(): express.Router {
     } catch (e) { failure(res, e, `${docIdOf(req)}: sync failed`); }
   });
 
-  r.post('/docs/*/lesswrong/unlink', (req, res) => {
+  r.post('/docs/*/lesswrong/unlink', needDoc('edit'), (req, res) => {
     unlinkPost(docIdOf(req));
     res.json({ ok: true });
   });
 
-  r.post('/docs/*/lesswrong/auto', (req, res) => {
+  r.post('/docs/*/lesswrong/auto', needDoc('edit'), (req, res) => {
     const id = docIdOf(req);
     setLwAuto(id, !!req.body?.auto);
     res.json({ link: publicLwLink(lwLinkOf(id)) });
