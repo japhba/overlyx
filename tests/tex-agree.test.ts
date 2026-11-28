@@ -80,6 +80,23 @@ describe('the author\'s LaTeX is written back as it was', () => {
     expect(roundTrip(doc(src)).body).toBe('I use {\\mymacro} daily, {\\setlength{\\parskip}{0pt} x} y, w{a\\foo b}c and {\\small s} t, \\textit{Key\\/}: x.');
   });
 
+  it('\\begingroup … \\endgroup scopes what is declared in it, like braces', () => {
+    const r = roundTrip(doc('A \\begingroup\\small small\\endgroup{} normal.\n\nB \\begingroup\\centering c\\par\\endgroup{} d.\n\nE \\begingroup\\foo e\\endgroup\\ f.'));
+    // the size and the alignment end with the group
+    const small = r.doc.body[0].items.filter(it => it.kind === 'text').map(it => [(it as { text: string }).text, it.font.size]);
+    expect(small).toEqual([['A ', undefined], ['small', 'small'], [' normal.', undefined]]);
+    expect(r.doc.body.map(p => p.params.align)).toEqual([undefined, 'center', undefined, undefined]);
+    expect(r.body).toContain('A \\begingroup{\\small small}\\endgroup{} normal.');
+    expect(r.body).toContain('E \\begingroup\\foo e\\endgroup\\ f.');
+  });
+
+  it('raw LaTeX that ends in a control word is never glued to the letters after it', () => {
+    // (\centering, modelled as the paragraph's alignment, was what ended the control word)
+    const r = roundTrip(doc('B \\mycmd\\centering c\\par'));
+    expect(r.body).not.toMatch(/\\mycmdc/);
+    expect(r.body).toMatch(/\\mycmd c/);
+  });
+
   it('a tracked change inside a URL stays a tracked change', () => {
     const r = roundTrip(doc('See \\url{a\\lyxadded{Ann}{Mon Jan  5 10:00:00 2026}{x~y}b\\lyxdeleted{Ann}{Mon Jan  5 10:00:00 2026}{old}c}.'));
     expect(r.body).toContain('\\url{a\\lyxadded{Ann}{Mon Jan  5 10:00:00 2026}{x~y}b\\lyxdeleted{Ann}{Mon Jan  5 10:00:00 2026}{old}c}');

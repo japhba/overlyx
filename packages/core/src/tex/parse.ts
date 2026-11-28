@@ -188,8 +188,8 @@ interface TextCtx {
   rawDepth: number;
 }
 
-interface Stop { close?: boolean; env?: string; item?: boolean; cell?: boolean; itemStart?: number }
-type StopReason = 'eof' | 'close' | 'end' | 'item' | 'amp' | 'newrow';
+interface Stop { close?: boolean; env?: string; item?: boolean; cell?: boolean; itemStart?: number; endgroup?: boolean }
+type StopReason = 'eof' | 'close' | 'end' | 'item' | 'amp' | 'newrow' | 'endgroup';
 
 const cloneState = (st: State): State => ({ font: { ...st.font }, change: st.change ? { ...st.change } : undefined });
 
@@ -464,6 +464,15 @@ class BodyParser {
     ctx.skipSpace = false;
     const p = this.ensurePar(ctx);
     const last = p.items[p.items.length - 1];
+    // Raw LaTeX that ends in a control word, then letters: what ended the word in the file (a
+    // \centering, a \small — now the paragraph's alignment, a font) is not written there any more,
+    // so the word gets the blank that ends it, or it would swallow the letters (\begingroupc)
+    if (last && last.kind === 'inset' && last.inset.type === 'Text' && last.inset.name === 'ERT' && /^[A-Za-z]/.test(text) && sameFont(last.font, st.font) && sameChange(last.change, st.change)) {
+      const pars = last.inset.paragraphs;
+      const lp = pars[pars.length - 1];
+      const lt = lp.items[lp.items.length - 1];
+      if (lt && lt.kind === 'text' && /\\[A-Za-z]+$/.test(lt.text) && !/(^|[^\\])(\\\\)*\\\\[A-Za-z]+$/.test(lt.text)) appendErtText(lp, ' ');
+    }
     if (last && last.kind === 'text' && sameFont(last.font, st.font) && sameChange(last.change, st.change)) {
       last.text += text;
       this.tail = { item: last, length: last.text.length, blank: text.endsWith(' ') };
@@ -591,7 +600,7 @@ class BodyParser {
           const align = ctx.align;
           const start = { par: ctx.cur, pars: ctx.pars.length, items: ctx.cur?.items.length ?? 0, tail: tailText(ctx.cur) };
           this.groupDepth++;
-          const r = this.parseText(s, ctx, cloneState(st), { ...stop, close: true, item: false });
+          const r = this.parseText(s, ctx, cloneState(st), { ...stop, close: true, item: false, endgroup: false });
           this.groupDepth--;
           ctx.align = align;
           if (script) this.pushERT(ctx, st, '}');
@@ -686,6 +695,25 @@ class BodyParser {
     }
     this.pushERT(ctx, st, '}');
   }
+  /**
+   * \begingroup … \endgroup: a group as braces are — a font, an alignment, a definition declared in
+   * it ends with it; the two words stay raw LaTeX around what is read in between.
+   */
+  private handleBegingroup(s: Scanner, ctx: TextCtx, st: State, t: Tok, stop: Stop): StopReason | null {
+    // (the blank after a word, as for any raw command: kept unless a group or a blank follows)
+    this.pushERT(ctx, st, '\\begingroup' + (t.spaceAfter && !/^[{}[\s]/.test(s.peekChar() || ' ') ? ' ' : ''));
+    const align = ctx.align;
+    this.groupDepth++;
+    const r = this.parseText(s, ctx, cloneState(st), { ...stop, item: false, endgroup: true });
+    this.groupDepth--;
+    ctx.align = align;
+    if (r !== 'endgroup') return r === 'eof' ? null : r;
+    // \endgroup itself as any raw command (with a {} after it, the blank that follows)
+    return this.handleCommand(s, ctx, st, this.endgroupTok!, { ...stop, endgroup: false });
+  }
+  /** the \endgroup that ended the group being read */
+  private endgroupTok: Tok | null = null;
+
   /** how many brace groups enclose what is being read (definitions in them are local) */
   private groupDepth = 0;
 
@@ -824,6 +852,8 @@ class BodyParser {
 
   private handleCommand(s: Scanner, ctx: TextCtx, st: State, t: Tok, stop: Stop): StopReason | null {
     let name = t.value;
+    if (name === 'begingroup') return this.handleBegingroup(s, ctx, st, t, stop);
+    if (name === 'endgroup' && stop.endgroup) { this.endgroupTok = t; return 'endgroup'; }
     // \begin / \end
     if (name === 'begin') {
       const env = s.readGroup();
@@ -1448,7 +1478,7 @@ class BodyParser {
         this.pushERT(ctx, st, '{');
         const align = ctx.align;
         ctx.rawDepth++;
-        const r = this.parseText(s, ctx, cloneState(st), { ...stop, close: true, item: false });
+        const r = this.parseText(s, ctx, cloneState(st), { ...stop, close: true, item: false, endgroup: false });
         ctx.rawDepth--;
         ctx.align = align;
         this.pushERT(ctx, st, '}');
