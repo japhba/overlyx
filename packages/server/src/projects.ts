@@ -34,10 +34,29 @@ export function listProjects(opts: { files?: boolean } = {}): Project[] {
       if (!entry.isDirectory() || entry.name.startsWith('.') || !isProjectKey(name)) continue;
       const p = path.join(root, ns.name, entry.name);
       // `files: false`: names only (the CLI's project list needs no walk through every project)
-      out.push({ name, path: p, files: opts.files === false ? [] : classifyDocs(p, collect(p, p, [], 0)) });
+      out.push(opts.files === false ? { name, path: p, files: [] } : withFiles(name, p));
     }
   }
   return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * A project whose `files` are read when first asked for (once), not when the projects are listed:
+ * most callers want one project's (`listProjects().find(…)?.files`) or those of the projects an
+ * account can open, and the walk — a `stat` per file, on the server's one thread — of every
+ * account's projects for each such request made everybody's typing wait for it.
+ */
+function withFiles(name: string, dir: string): Project {
+  const project = { name, path: dir } as Project;
+  Object.defineProperty(project, 'files', {
+    enumerable: true, configurable: true,
+    get(this: Project) {
+      const files = classifyDocs(dir, collect(dir, dir, [], 0));
+      Object.defineProperty(this, 'files', { value: files, enumerable: true, configurable: true, writable: true });
+      return files;
+    },
+  });
+  return project;
 }
 
 /** Mark .tex files that are documents (own \\begin{document}, written by OverLyX, or \\input by a document's body). */
