@@ -9,7 +9,10 @@
  * All documents of a project go to the same worker (a master includes its children's live state).
  * A worker processes one request at a time, in the order they were sent. A worker that dies (out
  * of memory on a pathological file) is replaced; its mirrors are rebuilt from the main thread's
- * state on the next request. OVERLYX_DOC_WORKERS=0 does everything on the main thread, as before.
+ * state on the next request. A request that runs past a bound (REQUEST_LIMIT_MS: a parse or merge
+ * that never ends) would hold every request behind it — every document's saves and stored states —
+ * so the worker is ended and replaced the same way, and that request fails (WorkerTimeout).
+ * OVERLYX_DOC_WORKERS=0 does everything on the main thread, as before.
  */
 import { Worker } from 'node:worker_threads';
 
@@ -26,12 +29,26 @@ export type WorkerResponse = { id: number; ok: true; result: unknown } | { id: n
 export class WorkerGone extends Error {}
 /** The worker could not bring its mirrors up to date: they were dropped; send the whole state again. */
 export class MirrorLost extends Error {}
+/** The request ran past the bound and its worker was ended (not to be sent again: it would hang again). */
+export class WorkerTimeout extends Error {}
+
+/**
+ * How long a worker may take over one request. The longest a real document's request takes is a few
+ * seconds (a 240 kB thesis: open 2.3 s, a tracked agent's edit 3.4 s; six times that, 1.4 MB: 6.8 s
+ * and 20 s — measured on the production box, 28 Nov 2026); a request past this is stuck.
+ */
+const REQUEST_LIMIT_MS = 120_000;
+
+interface Call { op: string; resolve: (v: unknown) => void; reject: (e: Error) => void }
 
 interface Slot {
   worker: Worker | null;
   /** incremented whenever the worker is replaced: mirrors made by an earlier one are gone */
   gen: number;
-  calls: Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>;
+  /** the requests not answered yet, in the order sent: the first is the one the worker is on */
+  calls: Map<number, Call>;
+  /** ends the worker when the request it is on takes too long (armed whenever it begins one) */
+  watchdog: NodeJS.Timeout | null;
   /** projects assigned to this worker */
   projects: number;
 }
@@ -45,9 +62,14 @@ export class DocWorkers {
   private deaths: number[] = [];
   /** the workers died too often: everything is done on the main thread from now on */
   private broken = false;
+  private readonly url: URL;
+  private readonly limitMs: number;
 
-  constructor(readonly size: number) {
-    this.slots = Array.from({ length: Math.max(0, size) }, () => ({ worker: null, gen: 0, calls: new Map(), projects: 0 }));
+  /** (`url`, `limitMs`: a stand-in worker and a shorter bound, for tests) */
+  constructor(readonly size: number, opts: { url?: URL; limitMs?: number } = {}) {
+    this.slots = Array.from({ length: Math.max(0, size) }, () => ({ worker: null, gen: 0, calls: new Map(), watchdog: null, projects: 0 }));
+    this.url = opts.url ?? WORKER_URL;
+    this.limitMs = opts.limitMs ?? REQUEST_LIMIT_MS;
   }
 
   get enabled(): boolean { return this.slots.length > 0 && !this.broken; }
@@ -80,11 +102,48 @@ export class DocWorkers {
     const w = s.worker ?? this.spawn(slot);
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
-      s.calls.set(id, { resolve, reject });
-      if (s.calls.size === 1) w.ref();
+      s.calls.set(id, { op, resolve, reject });
+      if (s.calls.size === 1) { w.ref(); this.watch(slot, w); }
       try { w.postMessage({ id, op, doc, sync, args } satisfies WorkerRequest); }
-      catch (e) { s.calls.delete(id); if (!s.calls.size) w.unref(); reject(e as Error); }
+      catch (e) { s.calls.delete(id); if (!s.calls.size) this.idle(s, w); reject(e as Error); }
     });
+  }
+
+  /** The worker begins the first request in line: it has the bound's time for it. */
+  private watch(slot: number, w: Worker): void {
+    const s = this.slots[slot];
+    if (s.watchdog) clearTimeout(s.watchdog);
+    const head = s.calls.keys().next().value;
+    s.watchdog = setTimeout(() => {
+      s.watchdog = null;
+      const c = head === undefined ? undefined : s.calls.get(head);
+      if (s.worker !== w || !c) return;
+      console.error(`[docs] document worker ${slot}: a request (${c.op}) ran past ${this.limitMs / 1000} s — the worker is ended and replaced`);
+      s.calls.delete(head!);
+      c.reject(new WorkerTimeout(`the document worker took over ${this.limitMs / 1000} s (${c.op})`));
+      this.lost(slot, w, 'ended: a request ran too long');
+      void w.terminate();
+    }, this.limitMs);
+    s.watchdog.unref();
+  }
+
+  /** nothing to do: the worker no longer keeps the server up, and nothing is timed */
+  private idle(s: Slot, w: Worker): void {
+    if (s.worker !== w) return;
+    w.unref();
+    if (s.watchdog) { clearTimeout(s.watchdog); s.watchdog = null; }
+  }
+
+  /** The worker `w` of a slot is gone (exited, or ended): its mirrors with it; what it was asked is handed back. */
+  private lost(slot: number, w: Worker, why: string): void {
+    const s = this.slots[slot];
+    if (s.worker !== w) return;
+    s.worker = null;
+    s.gen++;
+    if (s.watchdog) { clearTimeout(s.watchdog); s.watchdog = null; }
+    const calls = [...s.calls.values()];
+    s.calls.clear();
+    for (const c of calls) c.reject(new WorkerGone(`document worker ${slot} ${why}`));
   }
 
   /** Tell a worker to drop its mirror of a document (closed); nothing to wait for. */
@@ -105,25 +164,22 @@ export class DocWorkers {
     // the server runs TypeScript through tsx (`node --import tsx`), and a worker inherits that; a
     // process that loaded TypeScript some other way (vitest) has the worker register tsx itself
     const viaTsx = process.execArgv.some(a => a.includes('tsx'));
-    const w = new Worker(WORKER_URL, { name: `overlyx-doc-${slot}`, ...(viaTsx ? {} : { execArgv: ['--import', 'tsx'] }) });
+    const w = new Worker(this.url, { name: `overlyx-doc-${slot}`, ...(viaTsx ? {} : { execArgv: ['--import', 'tsx'] }) });
     w.unref();
     s.worker = w;
     w.on('message', (m: WorkerResponse) => {
       const c = s.calls.get(m.id);
       if (!c) return;
       s.calls.delete(m.id);
-      if (!s.calls.size && s.worker === w) w.unref();
+      if (!s.calls.size) this.idle(s, w);
+      else if (s.worker === w) this.watch(slot, w);   // on to the next one
       if (m.ok) c.resolve(m.result);
       else c.reject(Object.assign(m.resync ? new MirrorLost(m.error) : new Error(m.error), m.stack ? { stack: m.stack } : {}));
     });
     w.on('error', (e) => console.error(`[docs] document worker ${slot} failed:`, e));
     w.on('exit', (code) => {
-      if (s.worker !== w) return;
-      s.worker = null;
-      s.gen++;
-      const calls = [...s.calls.values()];
-      s.calls.clear();
-      for (const c of calls) c.reject(new WorkerGone(`document worker ${slot} exited (${code})`));
+      if (s.worker !== w) return;   // (ended by its watchdog: replaced already)
+      this.lost(slot, w, `exited (${code})`);
       if (this.closing) return;
       console.error(`[docs] document worker ${slot} exited (code ${code}) — replaced on the next request`);
       const now = Date.now();

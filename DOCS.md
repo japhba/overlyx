@@ -341,6 +341,11 @@ blend.
   the last change. A client's first sync of a document over 100 kB is encoded by the worker too,
   and a big document opened from its file is applied in steps. A worker that dies is replaced and
   its mirrors rebuilt from the main thread; five deaths in a minute put the work back on the main thread.
+  A request that runs past two minutes (`docpool.ts REQUEST_LIMIT_MS`; the longest real one takes
+  seconds — a 1.4 MB document's tracked agent edit 20 s) is stuck: it would hold every document's
+  saves and stored states behind it, so the worker is ended and replaced the same way, that request
+  fails (`WorkerTimeout`: not sent again; a save says *Could not save* and retries) and the ones
+  behind it go to the new worker. A stuck request is not a death (the main thread would hang on it).
 * **Edits are not lost to a failed save or a restart** (`server/src/docs.ts`). Every edit is stored
   in the database (the Yjs state, `ydocs`) within a second and written to the file 1.5–10 s later.
   With each state the table `ydocs_saved` says whether the file has it (`saved`: nothing changed
