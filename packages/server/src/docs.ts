@@ -181,7 +181,7 @@ export class OpenDoc implements DocState, EditableDoc {
         try { if (fs.readFileSync(abs, 'utf8') === content) continue; } catch { /* new file */ }
         fs.mkdirSync(path.dirname(abs), { recursive: true });
         fs.writeFileSync(abs, content);
-      } catch (e) { console.error('sidecar write failed', this.id, rel, e); }
+      } catch (e) { console.error(`[docs] ${this.id}: writing ${rel} failed:`, e); }
     }
   }
 
@@ -288,7 +288,7 @@ export class OpenDoc implements DocState, EditableDoc {
     if (this.usesWorker && this.savedSeq === this.updateSeq && !this.saveError) {
       // nothing changed since the last save (it wrote this very state): only look for a change on disk
       this.dirty = false;
-      void this.exclusive(() => this.absorbLocked()).catch(e => console.error('reload failed', this.id, e));
+      void this.exclusive(() => this.absorbLocked()).catch(e => console.error(`[docs] ${this.id}: merging the file's change failed:`, e));
       return;
     }
     void this.saveToFile();
@@ -335,7 +335,7 @@ export class OpenDoc implements DocState, EditableDoc {
     const seq = this.updateSeq, saved = !this.dirty;
     let state: Uint8Array;
     try { state = await inWorker(this, 'state', {}) as Uint8Array; }
-    catch (e) { console.error('persist failed in the worker, persisting here', this.id, e); if (!this.disposed) this.persistState(); return; }
+    catch (e) { console.error(`[docs] ${this.id}: storing the state in the worker failed — storing it here:`, e); if (!this.disposed) this.persistState(); return; }
     // a newer state may have been persisted meanwhile (persistState): never go back to an older one
     if (this.disposed || seq < this.persistedSeq) return;
     this.persistedSeq = seq;
@@ -544,7 +544,7 @@ export class OpenDoc implements DocState, EditableDoc {
   }
 
   private saveFailed(e: unknown): void {
-    console.error('save failed', this.absPath, e);
+    console.error(`[docs] ${this.id}: save failed:`, e);
     const first = !this.saveError;
     this.saveError = String(e);
     if (this.disposed) return;
@@ -708,7 +708,7 @@ export class OpenDoc implements DocState, EditableDoc {
     try {
       const authors = [...this.awareness.getStates().values()].map(s => (s as any)?.user?.name).filter(Boolean);
       return Number(db.prepare('INSERT INTO versions (doc_id, name, author, kind, created_at, lyx) VALUES (?,?,?,?,?,?)').run(this.id, name, authors.join(', ') || 'system', kind, Date.now(), text).lastInsertRowid);
-    } catch (e) { console.error('snapshot failed', this.id, e); return null; }
+    } catch (e) { console.error(`[docs] ${this.id}: keeping a version failed:`, e); return null; }
   }
 
   /** what a merge's notice calls it: a change on disk, or one met when rescuing edits after a restart */
@@ -1566,7 +1566,7 @@ export class DocManager {
     const wasMissing = doc.fileMissing;
     doc.fileMissing = false;
     try { await doc.absorbExternalChangeAsync(); }
-    catch (e) { console.error('reload failed', e); }
+    catch (e) { console.error(`[docs] ${doc.id}: merging the file's change failed:`, e); }
     if (wasMissing && doc.dirty) doc.scheduleSave();
   }
 

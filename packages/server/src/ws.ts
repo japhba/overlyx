@@ -177,7 +177,7 @@ export function attachWebSocket(server: Server): void {
     }
   });
 
-  wss.on('error', (e) => console.error('wss error', e));
+  wss.on('error', (e) => console.error('[ws] server error:', e));
 }
 
 /** Same-origin check for the upgrade: the Origin's host must be ours (the request's Host, the public URL, or localhost in development). */
@@ -261,7 +261,7 @@ async function handleConnection(conn: WebSocket, docId: string, user: SessionUse
         }
       }
     } catch (e) {
-      console.error('ws message error', e);
+      console.error('[ws] message failed:', e);
     }
   };
   conn.on('message', onMessage);
