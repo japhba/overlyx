@@ -17,7 +17,7 @@ import {
 import { editorContext } from './context';
 import { activeMathField } from './lyxmath/field';
 import { ATOMS } from './plugins/dragselect';
-import { trackedDelete } from './plugins/changes';
+import { trackedDelete, trackedDeleteRange } from './plugins/changes';
 import { openRewrite, rewriteEnabled } from './ai/rewrite';
 import { openLinkBox } from './links';
 import { recordUsage } from '../usage';
@@ -61,23 +61,23 @@ const traced = (key: string, cmd: Command): Command => (state, dispatch, view) =
 /** 'M-p' → 'Alt+P' for the statistics */
 const chordLabel = (prefix: string) => prefix.replace(/^M-(\w)/, (_m, c: string) => 'Alt+' + c.toUpperCase());
 
-/** LyX word-delete-backward/forward: within a paragraph's text; at an inset or paragraph edge the character command takes over. */
+/**
+ * LyX word-delete-backward/forward: within a paragraph's text; at an inset or paragraph edge the
+ * character command takes over. While suggesting, the word is struck through as Backspace / Delete
+ * would (trackedDeleteRange), the caret before it, so the next press takes the word before.
+ */
 const deleteWord = (dir: -1 | 1, fallback: Command): Command => (state, dispatch, view) => {
   const { $from, empty } = state.selection;
   if (!empty || !$from.parent.isTextblock) return fallback(state, dispatch, view);
   const off = $from.parentOffset;
   const par = $from.parent;
-  if (dir < 0) {
-    const before = par.textBetween(0, off, '\u0000', '\u0000');
-    const m = /(\s*\S+|\s+)$/.exec(before);
-    if (!m || m[0].includes('\u0000')) return fallback(state, dispatch, view);
-    if (dispatch) dispatch(state.tr.delete($from.pos - m[0].length, $from.pos).scrollIntoView());
-    return true;
-  }
-  const after = par.textBetween(off, par.content.size, '\u0000', '\u0000');
-  const m = /^(\S+\s*|\s+)/.exec(after);
+  const m = dir < 0
+    ? /(\s*\S+|\s+)$/.exec(par.textBetween(0, off, '\u0000', '\u0000'))
+    : /^(\S+\s*|\s+)/.exec(par.textBetween(off, par.content.size, '\u0000', '\u0000'));
   if (!m || m[0].includes('\u0000')) return fallback(state, dispatch, view);
-  if (dispatch) dispatch(state.tr.delete($from.pos, $from.pos + m[0].length).scrollIntoView());
+  const from = dir < 0 ? $from.pos - m[0].length : $from.pos, to = dir < 0 ? $from.pos : $from.pos + m[0].length;
+  if (trackedDeleteRange(from, to, dir)(state, dispatch && (tr => dispatch(tr.scrollIntoView())), view)) return true;
+  if (dispatch) dispatch(state.tr.delete(from, to).scrollIntoView());
   return true;
 };
 

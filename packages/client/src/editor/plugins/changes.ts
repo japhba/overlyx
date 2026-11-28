@@ -57,6 +57,18 @@ function withChange(node: PMNode, attrs: Record<string, unknown>): Record<string
   return { ...node.attrs, marks: JSON.stringify(marks) };
 }
 
+/**
+ * What a deletion while suggesting removes outright instead of striking it through — the one rule
+ * for every way of deleting (the keys' trackedDeleteRange, every other edit's deletedSlice), LyX's
+ * Paragraph::eraseChar: the typist's own suggested text (a co-author's suggestion is struck
+ * through, so that it can still be seen and rejected), a comment thread, a margin drawing's anchor.
+ */
+function goesWhenDeleted(node: PMNode): boolean {
+  if (UNTRACKED_NODES.has(node.type.name) || isComment(node)) return true;
+  const ch = changeOf(node);
+  return ch?.type === 'inserted' && ch.author === editorContext.changeAuthorId;
+}
+
 /** Keep removed original content in the document, including paragraph boundaries. */
 function deletedSlice(slice: Slice): Slice {
   const del = changeMark('deleted');
@@ -67,7 +79,7 @@ function deletedSlice(slice: Slice): Slice {
       const end = index === content.childCount - 1 ? openEnd : 0;
       const ch = changeOf(node);
       if (node.isInline) {
-        if (UNTRACKED_NODES.has(node.type.name) || isComment(node) || (ch?.type === 'inserted' && ch.author === editorContext.changeAuthorId)) return;
+        if (goesWhenDeleted(node)) return;
         if (ch?.type === 'deleted') nodes.push(node);
         else nodes.push(node.isText ? node.mark(del.addToSet(node.marks)) : node.type.create(withChange(node, del.attrs), node.content, node.marks));
       } else {
@@ -276,13 +288,44 @@ export function applyNodeFont(dom: HTMLElement, node: PMNode): void {
   else if (prevColor) { delete dom.dataset.color; dom.style.color = ''; }
 }
 
-/** Backspace/Delete while tracking: mark as deleted (unless the text was inserted by tracking, then remove). */
-export function trackedDelete(dir: -1 | 1): Command {
+/**
+ * Delete `from`…`to` (inline content of one paragraph) from the keyboard while suggesting: what
+ * goesWhenDeleted is removed, the rest struck through, and the caret put before it (`dir` -1:
+ * Backspace, Ctrl+Backspace) or after it (1: Delete), so the next press goes on to the next
+ * character or word. (A plain deletion would be put back struck through by changeTrackingPlugin
+ * with the caret mapped after it: a second Ctrl+Backspace met the same word again.) False when not
+ * suggesting, or inside a comment (edited directly, as in appendTransaction).
+ */
+export function trackedDeleteRange(from: number, to: number, dir: -1 | 1): Command {
   return (state, dispatch) => {
     if (!editorContext.trackChanges || editorContext.changeAuthorId === undefined) return false;
+    if (inComment(state.doc, from) && inComment(state.doc, to)) return false;
+    if (!dispatch) return true;
+    let tr = state.tr;
+    const del = changeMark('deleted');
+    const removals: [number, number][] = [];
+    state.doc.nodesBetween(from, to, (node, pos) => {
+      if (!node.isInline) return true;
+      const s = Math.max(from, pos), e = Math.min(to, pos + node.nodeSize);
+      if (goesWhenDeleted(node)) removals.push([s, e]);
+      else if (changeOf(node)?.type !== 'deleted') {
+        if (node.isText) tr = tr.addMark(s, e, del);
+        else tr = tr.setNodeMarkup(pos, undefined, withChange(node, del.attrs));
+      }
+      return false;
+    });
+    for (const [s, e] of removals.reverse()) tr = tr.delete(s, e);
+    tr = tr.setSelection(TextSelection.create(tr.doc, dir < 0 ? tr.mapping.map(from) : tr.mapping.map(to)));
+    dispatch(tr.setMeta('lyx-changes', true));
+    return true;
+  };
+}
+
+/** Backspace/Delete while suggesting: the selection, or the character / inline node beside the caret (trackedDeleteRange). */
+export function trackedDelete(dir: -1 | 1): Command {
+  return (state, dispatch, view) => {
+    if (!editorContext.trackChanges || editorContext.changeAuthorId === undefined) return false;
     const sel = state.selection;
-    // Comments are edited directly, including keyboard deletions (as in appendTransaction).
-    if (inComment(state.doc, sel.from) && inComment(state.doc, sel.to)) return false;
     if (!sel.empty && !sel.$from.sameParent(sel.$to)) return false;
     let from: number, to: number;
     if (!sel.empty) { from = sel.from; to = sel.to; }
@@ -294,31 +337,7 @@ export function trackedDelete(dir: -1 | 1): Command {
       const n = dir < 0 ? $c.nodeBefore : $c.nodeAfter;
       if (n && !n.isText) { if (dir < 0) from = $c.pos - n.nodeSize; else to = $c.pos + n.nodeSize; }
     }
-    if (!dispatch) return true;
-    let tr = state.tr;
-    // Text inserted by change tracking is simply removed; other text is marked deleted.
-    const del = changeMark('deleted');
-    const removals: [number, number][] = [];
-    state.doc.nodesBetween(from, to, (node, pos) => {
-      if (!node.isInline) return true;
-      const s = Math.max(from, pos), e = Math.min(to, pos + node.nodeSize);
-      if (isComment(node)) { removals.push([s, e]); return false; }
-      const ch = node.marks.find(m => m.type === schema.marks.change);
-      if (ch && ch.attrs.type === 'inserted') removals.push([s, e]);
-      else if (!(ch && ch.attrs.type === 'deleted')) {
-        if (node.isText) tr = tr.addMark(s, e, del);
-        else {
-          const marks = JSON.parse(node.attrs.marks || '[]').filter((m: any) => m.type !== 'change');
-          marks.push({ type: 'change', attrs: del.attrs });
-          tr = tr.setNodeMarkup(pos, undefined, { ...node.attrs, marks: JSON.stringify(marks) });
-        }
-      }
-      return false;
-    });
-    for (const [s, e] of removals.reverse()) tr = tr.delete(s, e);
-    tr = tr.setSelection(TextSelection.create(tr.doc, dir < 0 ? tr.mapping.map(from) : tr.mapping.map(to)));
-    dispatch(tr.setMeta('lyx-changes', true));
-    return true;
+    return trackedDeleteRange(from, to, dir)(state, dispatch, view);
   };
 }
 

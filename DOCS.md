@@ -4962,6 +4962,11 @@ Google fonts (`\olfont`), which the server would have to put into the build; XeT
   view. The change mark is not inclusive (`core/src/schema.ts`): text typed at the end of a
   suggestion is plain while tracking is off, and the typist's own insertion while it is on (typing
   on at the end of one's own insertion extends it: one `\lyxadded` group); `tests/changes-typing.test.ts`.
+  Deleting while suggesting follows one rule whatever deletes (`plugins/changes.ts` `goesWhenDeleted`,
+  LyX's `Paragraph::eraseChar`): one's own suggested text goes, everything else — a co-author's
+  suggestion included — is struck through. The keys (Backspace, Delete, Ctrl/⌥+Backspace and
+  +Delete: `trackedDeleteRange`) put the caret before what they struck through (after it for
+  Delete), so the next press goes on; `tests/changes-delete-keys.test.ts`.
   Edits inside a formula that was there before are applied directly, not as a suggestion — LyX does not
   track inside math either (a formula is one value); the first such edit of a session says so in the
   status bar (to suggest a different formula, insert the new one beside it and delete the old one). A
