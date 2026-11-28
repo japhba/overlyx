@@ -5713,12 +5713,17 @@ invisible to LaTeX itself:
   captions, graphics, tables (`tabular`/`longtable`, `\multicolumn`/`\multirow`, booktabs),
   citations, references, footnotes, macros (`\newcommand` / `\global\long\def` in the body keep
   their position, as in LyX; a macro's on-screen *display* form, LyX's second definition line, is
-  the trailer `%% @display {…}` on the definition line), fonts, quotes, accents. What is not understood is kept verbatim as
+  the trailer `%% @display {…}` on the definition line — only a definition at the document's top
+  level is such a macro: one inside a group (`{…}`, `\begingroup … \endgroup`) or an environment, like
+  a table float's `\renewcommand{\arraystretch}{1.5}`, is local in LaTeX and stays raw LaTeX, written
+  as it was, not as a global `\global\long\def`), fonts, quotes, accents. What is not understood is kept verbatim as
   raw LaTeX (shown like LyX's ERT) with its arguments still editable as text; LyX-specific
   spellings (`\SpecialChar`, protected spaces, …) are written as their LaTeX equivalents. Inside
   such raw LaTeX (an environment OverLyX does not know, like `titlepage`; an unknown command's
   argument) an alignment declaration (`\centering`), an alignment environment and a heading stay
-  raw too, and what is declared inside ends with it; the writer keeps raw `\begin`/`\end` and
+  raw too, and what is declared inside ends with it — as it does in a group that holds raw LaTeX:
+  its braces (or `\begingroup`/`\endgroup`) stay, as raw LaTeX, so `{\mymacro} text` and
+  `{\setlength{…}{…} …}` keep their scope; the writer keeps raw `\begin`/`\end` and
   braces out of its font groups and puts one alignment environment around paragraphs that raw
   LaTeX links, so it never splits an environment.
 
