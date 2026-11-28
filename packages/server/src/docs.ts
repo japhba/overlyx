@@ -558,9 +558,15 @@ export class OpenDoc implements DocState, EditableDoc {
   private writeText(text: string): void {
     const hash = sha1(text);
     const tmp = this.absPath + '.overlyx-tmp';
-    const fd = fs.openSync(tmp, 'w');
-    try { fs.writeSync(fd, text); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
-    fs.renameSync(tmp, this.absPath);
+    try {
+      const fd = fs.openSync(tmp, 'w');
+      try { fs.writeSync(fd, text); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+      fs.renameSync(tmp, this.absPath);
+    } catch (e) {
+      // a write that failed half-way (a full disk) leaves no copy of the document behind
+      try { fs.rmSync(tmp, { force: true }); } catch { /* the write's error is the one that matters */ }
+      throw e;
+    }
     if (process.env.OVERLYX_DEBUG_WATCH) console.log(`[docs] wrote ${this.id} hash=${hash.slice(0, 8)} len=${text.length}`);
     this.fileHash = hash;
     this.fileText = text;
