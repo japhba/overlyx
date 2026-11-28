@@ -212,34 +212,47 @@ export function changeTrackingPlugin(): Plugin {
       return null;
     },
     props: {
-      decorations(state) {
-        const decos: Decoration[] = [];
-        const filter = changesFilterKey.getState(state);
-        state.doc.descendants((node, pos) => {
-          if (node.type.name !== 'paragraph' || !node.attrs.endChange) return true;
-          const change = JSON.parse(node.attrs.endChange);
-          if (change.type === 'inserted' ? filter?.showInsertions === false : filter?.showDeletions === false) return true;
-          const at = pos + node.nodeSize - 1;
-          decos.push(Decoration.widget(at, view => {
-            const el = document.createElement('span');
-            for (const [name, value] of Object.entries(changeDomAttrs(change))) el.setAttribute(name, value);
-            el.classList.add('lyx-change-boundary');
-            el.textContent = '¶';
-            el.title = `${change.type === 'inserted' ? 'Inserted' : 'Deleted'} paragraph break`;
-            el.setAttribute('aria-label', el.title);
-            el.onmousedown = event => {
-              event.preventDefault();
-              view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, at, Math.min(at + 2, view.state.doc.content.size))).setMeta('addToHistory', false));
-              view.focus();
-            };
-            return el;
-          }, { side: 1 }));
-          return true;
-        });
-        return decos.length ? DecorationSet.create(state.doc, decos) : null;
-      },
+      decorations: state => boundaryMarks(state.doc, changesFilterKey.getState(state)),
     },
   });
+}
+
+/**
+ * The ¶ of each tracked paragraph break, at the paragraph's end. Built once per document and
+ * filter — ProseMirror asks on every update, a caret move too — and keyed by the change, so that a
+ * break's ¶ stays the same element while one types elsewhere (a widget made anew each time was
+ * redrawn, its paragraph with it, on every keystroke and arrow key).
+ */
+const boundaryCache = new WeakMap<PMNode, { ins?: boolean; del?: boolean; set: DecorationSet | null }>();
+function boundaryMarks(doc: PMNode, filter: { showInsertions?: boolean; showDeletions?: boolean } | undefined): DecorationSet | null {
+  const c = boundaryCache.get(doc);
+  if (c && c.ins === filter?.showInsertions && c.del === filter?.showDeletions) return c.set;
+  const decos: Decoration[] = [];
+  doc.descendants((node, pos) => {
+    if (node.type.name !== 'paragraph' || !node.attrs.endChange) return true;
+    const change = JSON.parse(node.attrs.endChange);
+    if (change.type === 'inserted' ? filter?.showInsertions === false : filter?.showDeletions === false) return true;
+    decos.push(Decoration.widget(pos + node.nodeSize - 1, (view, getPos) => {
+      const el = document.createElement('span');
+      for (const [name, value] of Object.entries(changeDomAttrs(change))) el.setAttribute(name, value);
+      el.classList.add('lyx-change-boundary');
+      el.textContent = '¶';
+      el.title = `${change.type === 'inserted' ? 'Inserted' : 'Deleted'} paragraph break`;
+      el.setAttribute('aria-label', el.title);
+      el.onmousedown = event => {
+        event.preventDefault();
+        const at = getPos();
+        if (at === undefined) return;
+        view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, at, Math.min(at + 2, view.state.doc.content.size))).setMeta('addToHistory', false));
+        view.focus();
+      };
+      return el;
+    }, { side: 1, key: `¶${node.attrs.endChange}` }));
+    return true;
+  });
+  const set = decos.length ? DecorationSet.create(doc, decos) : null;
+  boundaryCache.set(doc, { ins: filter?.showInsertions, del: filter?.showDeletions, set });
+  return set;
 }
 
 /**
