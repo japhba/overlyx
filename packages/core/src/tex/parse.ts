@@ -246,6 +246,9 @@ function lineAt(s: Scanner): number {
 }
 const newlineCache = new WeakMap<Scanner, number[]>();
 
+/** nesting beyond this is kept as raw LaTeX (BodyParser.depth) */
+const MAX_DEPTH = 200;
+
 /** `\\fontsize{25}{30}` → "25pt" (leading 1.2 × the size), "25pt/33.5pt" otherwise; null for sizes that are no plain lengths */
 function absoluteSize(size: string, skip: string): string | null {
   const num = (v: string) => { const m = /^\s*(\d+(?:\.\d+)?)\s*(pt)?\s*$/.exec(v); return m ? Number(m[1]) : null; };
@@ -456,16 +459,34 @@ class BodyParser {
       if (ctx.skipSpace) return;
       const last = ctx.cur.items[ctx.cur.items.length - 1];
       if (!last) return;
-      if (last.kind === 'text' && last.text.endsWith(' ') && sameFont(last.font, st.font) && sameChange(last.change, st.change)) return;
+      if (last.kind === 'text' && this.endsBlank(last) && sameFont(last.font, st.font) && sameChange(last.change, st.change)) return;
     }
     ctx.skipSpace = false;
     const p = this.ensurePar(ctx);
     const last = p.items[p.items.length - 1];
-    if (last && last.kind === 'text' && sameFont(last.font, st.font) && sameChange(last.change, st.change)) { last.text += text; return; }
+    if (last && last.kind === 'text' && sameFont(last.font, st.font) && sameChange(last.change, st.change)) {
+      last.text += text;
+      this.tail = { item: last, length: last.text.length, blank: text.endsWith(' ') };
+      return;
+    }
     const it: Item = { kind: 'text', text, font: { ...st.font } };
     if (st.change) it.change = { ...st.change };
     p.items.push(it);
+    this.tail = { item: it, length: text.length, blank: text.endsWith(' ') };
   }
+
+  /**
+   * Whether a text item ends in a blank — known from the piece pushText appended last, without
+   * reading the item's text: looking at the end of a string that grows by appending makes the
+   * engine copy all of it every time, so a paragraph of n words took n² (6 s for 200 kB on one
+   * line, a minute for 400 kB — on the server's only thread). Anything else that changed the item
+   * since (its length differs) is answered from the text itself.
+   */
+  private endsBlank(it: Item & { kind: 'text' }): boolean {
+    const t = this.tail;
+    return t && t.item === it && t.length === it.text.length ? t.blank : it.text.endsWith(' ');
+  }
+  private tail: { item: Item; length: number; blank: boolean } | null = null;
 
   private pushInset(ctx: TextCtx, st: State, inset: Inset): void {
     const it: Item = { kind: 'inset', inset, font: { ...st.font } };
@@ -499,14 +520,31 @@ class BodyParser {
     if (last && last.kind === 'inset' && last.inset.type === 'Text' && last.inset.name === 'ERT' && sameFont(last.font, st.font) && sameChange(last.change, st.change)) {
       const pars = last.inset.paragraphs;
       const lp = pars[pars.length - 1];
-      const lastText = lp.items.length ? (lp.items[lp.items.length - 1] as { text?: string }).text ?? '' : '';
-      if (hasComment(lastText)) { appendErtLines(pars, text); return; }
+      const line = this.ertLine(lp);
+      if (line.comment) { appendErtLines(pars, text); return; }
       appendErtText(lp, text);
       if (text.includes('\n')) { const merged = ertText(pars); pars.splice(0, pars.length, ...ertParagraphs(merged)); }
+      else this.ertTail = { par: lp, length: line.length + text.length, ...scanComment(text, line.escaped) };
       return;
     }
     this.pushInset(ctx, st, { type: 'Text', name: 'ERT', arg: '', params: [], status: 'collapsed', paragraphs: ertParagraphs(text) });
   }
+
+  /**
+   * The line a raw-LaTeX inset ends with: whether it holds a comment (what follows must start a
+   * new line) and whether it ends in a backslash that takes the next character. Kept for the line
+   * appended to last and carried on from the appended piece: scanning the whole line on every
+   * append made a run of raw LaTeX (`\a\b\c…`, `^_^_…`) quadratic — 50 s for 80 kB.
+   */
+  private ertLine(lp: Paragraph): { length: number; comment: boolean; escaped: boolean } {
+    const last = lp.items[lp.items.length - 1];
+    const text = last && last.kind === 'text' ? last.text : '';
+    const t = this.ertTail;
+    if (t && t.par === lp && t.length === text.length) return t;
+    this.ertTail = { par: lp, length: text.length, ...scanComment(text, false) };
+    return this.ertTail;
+  }
+  private ertTail: { par: Paragraph; length: number; comment: boolean; escaped: boolean } | null = null;
 
   /* ---------------------------------------------------------- main loop */
 
@@ -520,10 +558,24 @@ class BodyParser {
     return ctx.pars;
   }
 
+  /**
+   * How deep groups, environments and commands with arguments are nested where this is running.
+   * Beyond MAX_DEPTH nothing is entered any more: a group, an environment or a command is kept as
+   * the raw LaTeX it is (so the reader never runs out of stack on `{{{{…` — it threw there — and the
+   * model is never deeper than the code reading it can follow). TeX itself gives up at 255 levels.
+   */
+  private depth = 0;
+
   private parseText(s: Scanner, ctx: TextCtx, st: State, stop: Stop): StopReason {
+    this.depth++;
+    try { return this.parseTokens(s, ctx, st, stop); } finally { this.depth--; }
+  }
+
+  private parseTokens(s: Scanner, ctx: TextCtx, st: State, stop: Stop): StopReason {
     for (;;) {
       const t = s.next();
       if (s === this.main) this.noteToken(t);
+      if (this.depth >= MAX_DEPTH && this.keepRaw(s, ctx, st, t)) continue;
       switch (t.kind) {
         case 'eof': return 'eof';
         case 'par': this.endPar(ctx); continue;
@@ -569,6 +621,27 @@ class BodyParser {
         }
       }
     }
+  }
+
+  /**
+   * At the nesting limit: a group, an environment, a command (with the groups after it) as raw
+   * LaTeX, byte for byte. False for what ends or divides the level being read (`}`, \end, \item,
+   * a row or cell end, \par) and for plain text, which are read as everywhere.
+   */
+  private keepRaw(s: Scanner, ctx: TextCtx, st: State, t: Tok): boolean {
+    if (t.kind === 'open') {
+      const end = groupEnd(s.s, t.start);
+      this.pushERT(ctx, st, s.s.slice(t.start, end));
+      s.pos = end;
+      return true;
+    }
+    if (t.kind !== 'cs' || t.value === 'end' || t.value === 'item' || t.value === '\\' || t.value === 'par') return false;
+    if (t.value === 'begin') {
+      const env = s.readGroup();
+      if (env !== null) s.readUntilEnd(env.trim(), true);
+    }
+    this.pushERT(ctx, st, s.s.slice(t.start, s.pos));
+    return true;
   }
 
   private handleText(ctx: TextCtx, st: State, v: string): void {
@@ -1943,9 +2016,11 @@ function lastERTEndsWithScript(ctx: TextCtx): boolean {
   return /[\^_]$/.test(ertText(last.inset.paragraphs));
 }
 
-function hasComment(s: string): boolean {
-  for (let i = 0; i < s.length; i++) { if (s[i] === '\\') { i++; continue; } if (s[i] === '%') return true; }
-  return false;
+/** Whether a `%` in `s` starts a comment (`escaped`: the text before ended in a backslash that takes the first character), and whether `s` ends in such a backslash. */
+function scanComment(s: string, escaped: boolean): { comment: boolean; escaped: boolean } {
+  let i = escaped ? 1 : 0;
+  for (; i < s.length; i++) { if (s[i] === '\\') { i++; continue; } if (s[i] === '%') return { comment: true, escaped: false }; }
+  return { comment: false, escaped: i > s.length };
 }
 
 /** The inner paragraphs of a body paragraph that is nothing but one collapsed ERT of pure

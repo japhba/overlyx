@@ -52,6 +52,9 @@ interface Grid {
   ncols: number;
   booktabs: boolean;
   longtable: boolean;
+  /** columnLeftLine / columnRightLine per column, once asked */
+  leftLines: boolean[];
+  rightLines: boolean[];
 }
 
 function buildGrid(tab: TabularInset): Grid {
@@ -105,13 +108,21 @@ function buildGrid(tab: TabularInset): Grid {
       }
     }
   }
-  return { cells, cols, nrows: cells.length, ncols, booktabs: isTrue(attr(tab.features, 'booktabs')), longtable: isTrue(attr(tab.features, 'islongtable')) };
+  return { cells, cols, nrows: cells.length, ncols, booktabs: isTrue(attr(tab.features, 'booktabs')), longtable: isTrue(attr(tab.features, 'islongtable')), leftLines: [], rightLines: [] };
 }
 
 function isPartOfMultiColumn(g: Grid, r: number, c: number): boolean { return g.cells[r][c].multicolumn === 2; }
 function isPartOfMultiRow(g: Grid, r: number, c: number): boolean { return g.cells[r][c].multirow === 2; }
 
-function columnLeftLine(g: Grid, c: number): boolean {
+/**
+ * Whether a column has a line at its left / right in most rows (the column specification's "|").
+ * Asked for every cell, answered once per column: counting the rows each time made writing a table
+ * quadratic in its rows (18 s for 10,000 rows).
+ */
+function columnLeftLine(g: Grid, c: number): boolean { return g.leftLines[c] ??= countLeftLine(g, c); }
+function columnRightLine(g: Grid, c: number): boolean { return g.rightLines[c] ??= countRightLine(g, c); }
+
+function countLeftLine(g: Grid, c: number): boolean {
   if (g.booktabs) return false;
   let left = 0, total = 0;
   for (let r = 0; r < g.nrows; r++) {
@@ -123,7 +134,7 @@ function columnLeftLine(g: Grid, c: number): boolean {
   return 2 * left >= total;
 }
 
-function columnRightLine(g: Grid, c: number): boolean {
+function countRightLine(g: Grid, c: number): boolean {
   if (g.booktabs) return false;
   let right = 0, total = 0;
   for (let r = 0; r < g.nrows; r++) {
