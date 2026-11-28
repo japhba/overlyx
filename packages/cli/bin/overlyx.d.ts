@@ -12,7 +12,7 @@ export interface SyncChanges {
 }
 
 export interface SyncStatus {
-  /** idle: in step; paused: the engine waits (another process, another branch, git busy) — `message` says why */
+  /** idle: the last round went through (in step unless `refused`, `waiting`, `held` or `notSent` name files); paused: the engine waits (another process, another branch, git busy) — `message` says why */
   state: 'idle' | 'syncing' | 'paused' | 'offline' | 'error' | 'signin';
   /** why a paused engine waits: another engine syncs the clone (it is in step), another branch, git busy, an older checkout */
   cause?: 'lock' | 'branch' | 'git' | 'checkout' | null;
@@ -22,6 +22,8 @@ export interface SyncStatus {
   waiting: string[];
   notSent: string[];
   held: string[];
+  /** changed here, and the server did not take them (why: `error`) — tried again every five minutes, listed until it does */
+  refused: { path: string; error: string }[];
 }
 
 export interface SyncTarget { host: string; project: string; remote: string; url: string }

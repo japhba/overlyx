@@ -55,6 +55,8 @@ interface FolderSync {
   connecting: Promise<void> | null;
   /** the files git put back that the user was last told of (one notice per new set) */
   heldNoted?: string;
+  /** whether the user was told that the server does not take some files (once until all are in step again) */
+  refusedNoted?: boolean;
   /** since when the sync has not been in step (offline, an error, paused by git or a branch), and whether that was said */
   stoppedSince?: number | null;
   stopNoted?: boolean;
@@ -160,16 +162,18 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
     else if (f.problem || !s) { text = `$(${f.problem ? 'warning' : 'sync'}) OverLyX${name}`; detail = f.problem ?? 'Starting…'; }
     else {
       const icon = s.state === 'syncing' ? (f.spin ? 'sync' : 'sync~spin') : s.state === 'offline' ? 'cloud-offline' : s.state === 'error' ? 'error' : s.state === 'paused' ? 'debug-pause'
-        : s.state === 'signin' ? 'account' : s.conflicts.length || s.held?.length ? 'warning' : s.waiting.length ? 'sync' : 'check';
+        : s.state === 'signin' ? 'account' : s.conflicts.length || s.held?.length || s.refused?.length ? 'warning' : s.waiting.length ? 'sync' : 'check';
       text = `$(${icon}) OverLyX${name}`;
+      const refused = s.refused ?? [];
       const lines = [
-        s.state === 'idle' ? `In step${s.lastSync ? ` (${time(s.lastSync)})` : ''}: files you save reach the server, its changes come here.` : s.state === 'syncing' ? 'Syncing…' : s.message,
+        s.state === 'idle' ? (refused.length ? `Not everything is in step${s.lastSync ? ` (${time(s.lastSync)})` : ''}: the server did not take ${refused.length === 1 ? 'a file' : `${refused.length} files`} — tried again every few minutes.`
+          : `In step${s.lastSync ? ` (${time(s.lastSync)})` : ''}: files you save reach the server, its changes come here.`) : s.state === 'syncing' ? 'Syncing…' : s.message,
+        ...refused.map(r => `✗ ${r.path}: ${r.error}`),
         ...s.waiting.map(w => `· ${w} waits until it is saved`),
         ...(s.held ?? []).map(h => `⏸ ${h}: back to the last commit's version (git stash, reset or checkout?) — not sent; the server keeps its newer one`),
         ...[...new Set(s.notSent)].map(n => `· ${n} changed here — not sent (view only)`),
         ...s.conflicts.map(c => c.kind === 'copy' ? `⚠ ${c.path}: changed on both sides, yours is "${c.copy}"` : c.kind === 'tracked' ? `⚠ ${c.path}: ${c.count} paragraph(s) changed on both sides — yours are tracked changes` : `⚠ ${c.path}: changed on the server, not removed`),
       ];
-      if (s.state === 'idle' && s.message) lines.push(s.message);
       detail = lines.filter(Boolean).join('\n\n');
     }
     if (!vscode.workspace.getWorkspaceFolder(vscode.Uri.file(f.dir))) detail += '\n\nThis clone is outside this workspace. Pause or resume it from this item.';
@@ -265,6 +269,21 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
   }
 
   /**
+   * Files the server did not take (the project is full, the name is one it does not write…): they
+   * stay on this computer while the status bar's small mark is all that says so — said once when it
+   * begins, and again only after everything was in step in between.
+   */
+  function noticeRefused(f: FolderSync, refused: { path: string; error: string }[]): void {
+    if (!refused.length) { f.refusedNoted = false; return; }
+    if (f.refusedNoted) return;
+    f.refusedNoted = true;
+    const n = refused.length;
+    void vscode.window.showWarningMessage(`OverLyX: ${hostName(f.target.host)} did not take ${n === 1 ? refused[0].path : `${n} files`} of ${f.target.project} — ${refused[0].error}. ${n === 1 ? 'It stays' : 'They stay'} on this computer; the sync tries again every few minutes.`, 'Show Log').then(a => {
+      if (a) out.show(true);
+    });
+  }
+
+  /**
    * "Take the server's version": a folder whose sync went wrong (or the files git put back) gets the
    * server's version of every file that differs — after a confirmation that says what is replaced and
    * removed. The versions here are kept in the clone (.git/overlyx-sync/kept/<time>); Undo puts them back.
@@ -326,6 +345,7 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
       for (const l of describeChanges(c)) log(f.dir, l);
       noticeConflicts(f, c);
       noticeHeld(f, c.held ?? []);
+      noticeRefused(f, engine.status.refused ?? []);
       return c;
     };
     await remember(f);

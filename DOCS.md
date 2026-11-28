@@ -694,7 +694,10 @@ blend.
   still the version both sides agreed on, a file with unsaved changes in a VS Code editor waits
   until it is saved, viewers receive but never send, nothing is written through a symlinked
   directory of the clone or outside it, files over 20 MB stay out, `core.autocrlf` clones compare
-  text with LF. One sync per clone (`.git/overlyx-sync/lock`, pid + time + a token per engine,
+  text with LF. A file the server does not take (the project over its size limit, a directory of that
+  name there) is tried again every five minutes and stays in the status until it is taken or no
+  longer differs (⚠ and one notice in VS Code; before 28 Nov 2026 the next round said "in step").
+  One sync per clone (`.git/overlyx-sync/lock`, pid + time + a token per engine,
   refreshed every round and every 30 s while watching): VS Code windows (each restores every clone
   accepted on the computer), two engines of one window and a terminal's `--watch` never race; an
   engine that takes the clone over re-reads `state.json` (it used to keep the bases it had read at

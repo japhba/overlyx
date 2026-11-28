@@ -10,7 +10,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execFileP = promisify(execFile);
-const VERSION = '0.8.9';
+const VERSION = '0.8.10';
 const DEFAULT_HOST = 'https://overlyx.app';
 
 const HELP = `OverLyX CLI ${VERSION}
@@ -1440,8 +1440,8 @@ export class SyncEngine {
     this.o = opts;
     this.dir = path.resolve(opts.dir);
     this.hashes = new Map();       // rel → { size, mtime, ino, hash } of local files
-    this.failed = new Map();       // rel → retry-after time, for files the server refused
-    this.status = { state: 'idle', conflicts: [], waiting: [], notSent: [], held: [], lastSync: 0, message: '' };
+    this.failed = new Map();       // rel → { until, error }: files the server refused, and when they are tried again
+    this.status = { state: 'idle', conflicts: [], waiting: [], notSent: [], held: [], refused: [], lastSync: 0, message: '' };
     this.running = null;
     this.again = false;
     this.stopped = false;
@@ -1930,6 +1930,7 @@ export class SyncEngine {
 
     // 1. what changed here goes to the server
     let send = [];
+    const refused = new Map();
     for (const rel of await this.localPaths()) {
       const l = this.localHash(rel);
       if (l === undefined) continue;
@@ -1939,9 +1940,12 @@ export class SyncEngine {
       if (l === r) { base[rel] = l; if (l) this.keepObject(l, this.readLocal(rel)); continue; }   // the same change on both sides
       if (l === null && b !== null && !theirs.has(rel)) { delete base[rel]; continue; }             // removed on both sides
       if (this.role === 'view') { changes.notSent.push(rel); continue; }
-      if ((this.failed.get(rel) ?? 0) > now) continue;
+      const f = this.failed.get(rel);
+      if (f && f.until > now) { refused.set(rel, f); continue; }
       send.push(rel);
     }
+    // (a file that no longer differs, or is due for another try, is not refused any more: settle notes the ones refused again)
+    this.failed = refused;
     // (except what git put back: see restoredByGit)
     changes.held = send.length ? await this.restoredByGit(send, base) : [];
     if (changes.held.length) send = send.filter(rel => !changes.held.includes(rel));
@@ -1977,11 +1981,14 @@ export class SyncEngine {
     this.saveState();
     this.collect();
 
-    const inStep = !changes.waiting.length && !changes.notSent.length && !changes.errors.length && !this.again;
+    // the files the server did not take stay in the status until it takes them (or they no longer differ):
+    // said only in the round that sent them, the next round — a minute later at most — said "in step"
+    const refusedNow = [...this.failed].map(([path, f]) => ({ path, error: f.error }));
+    const inStep = !changes.waiting.length && !changes.notSent.length && !refusedNow.length && !this.again;
     try { await this.followBranch(remote, inStep); this.saveState(); }
     catch (e) { this.log(`branch: ${String(e.message ?? e).trim()}`); }
     const conflicts = [...this.status.conflicts.filter(c => now - c.at < 24 * 3600_000), ...changes.conflicts.map(c => ({ ...c, at: now }))].slice(-20);
-    this.setStatus({ state: 'idle', lastSync: Date.now(), conflicts, waiting: changes.waiting, notSent: changes.notSent, held: changes.held, message: changes.errors.length ? changes.errors.map(e => `${e.path}: ${e.error}`).join('; ') : '' });
+    this.setStatus({ state: 'idle', lastSync: Date.now(), conflicts, waiting: changes.waiting, notSent: changes.notSent, held: changes.held, refused: refusedNow, message: refusedNow.map(e => `${e.path}: ${e.error}`).join('; ') });
     return changes;
   }
 
@@ -2012,7 +2019,7 @@ export class SyncEngine {
   settle({ rel, sent }, r, base, changes) {
     if (!r || r.status === 'error') {
       changes.errors.push({ path: rel, error: r?.error ?? 'no answer' });
-      this.failed.set(rel, Date.now() + 5 * 60_000);
+      this.failed.set(rel, { until: Date.now() + 5 * 60_000, error: r?.error ?? 'no answer' });
       return;
     }
     this.failed.delete(rel);

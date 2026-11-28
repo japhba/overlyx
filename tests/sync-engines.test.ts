@@ -289,6 +289,27 @@ describe('taking the server\'s version', () => {
 });
 
 describe('what the status says', () => {
+  it('a file the server does not take stays listed until it does — the next round does not say "in step"', async () => {
+    const p = await project('refused', { 'a.txt': 'a\n', '.gitignore': 'out/\n' });
+    mkdirSync(join(p.dir, 'out'));                                 // a directory on the server (ignored there: not in the listing)
+    writeFileSync(join(p.dir, 'out', 'run.log'), 'x\n');
+    const e = p.engine('a laptop');
+    await e.sync();
+    writeFileSync(join(p.clone, 'out'), 'a file of that name here\n');
+    const c = await e.sync();
+    expect(c.errors).toEqual([{ path: 'out', error: expect.stringMatching(/not a regular file/) }]);
+    expect(e.status.refused).toEqual([{ path: 'out', error: expect.stringMatching(/not a regular file/) }]);
+    const next = await e.sync();                                    // the next round — a minute later at most; the file is tried again after five
+    expect(next.errors).toEqual([]);
+    expect(e.status.refused.map((r: { path: string }) => r.path)).toEqual(['out']);
+    expect(e.status.message).toMatch(/out: not a regular file/);
+    rmSync(join(p.clone, 'out'));                                   // gone here: nothing is refused any more
+    await e.sync();
+    expect(e.status.refused).toEqual([]);
+    expect(e.status.message).toBe('');
+    e.stop();
+  });
+
   it('a round that cannot reach the server says so, whoever started it (a save, Sync Now — not only the watch loop)', async () => {
     const p = await project('unreachable', { 'a.txt': 'a\n' });
     const e = new SyncEngine({ dir: p.clone, host: 'http://127.0.0.1:9', project: p.key, remote: 'origin', auth, client: 'a laptop', app: 'vscode' });
