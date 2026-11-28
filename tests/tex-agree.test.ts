@@ -56,6 +56,30 @@ describe('the author\'s LaTeX is written back as it was', () => {
     expect(roundTrip(doc(refs, '\\usepackage{hyperref}\n\\usepackage{cleveref}')).body).toBe(refs);
   });
 
+  it('a minipage without a position is centred, as in LaTeX (not top-aligned)', () => {
+    const r = roundTrip(doc('A \\begin{minipage}{3cm} x \\end{minipage} B \\begin{minipage}[t]{3cm} y \\end{minipage}'));
+    const boxes = [...walkInsets(r.doc.body)].filter(x => x.inset.type === 'Text' && x.inset.name === 'Box').map(x => (x.inset as { params: string[] }).params.find(p => p.startsWith('position ')));
+    expect(boxes).toEqual(['position "c"', 'position "t"']);
+    expect(r.body).toContain('\\begin{minipage}[c]{3cm}');
+    expect(r.body).toContain('\\begin{minipage}[t]{3cm}');
+  });
+
+  it('a definition local to a group or an environment stays local (not \\global\\long\\def), its group stays', () => {
+    const src = 'A {\\renewcommand{\\arraystretch}{1.2} x} B {\\def\\x{y} F} and\n\n\\begin{table}\n\\renewcommand{\\arraystretch}{1.5}\n\\begin{tabular}{l}\na\n\\end{tabular}\n\\end{table}';
+    const r = roundTrip(doc(src));
+    expect(r.body).toContain('A {\\renewcommand{\\arraystretch}{1.2} x} B {\\def\\x{y} F} and');
+    expect(r.body).toContain('\\begin{table}\n\\renewcommand{\\arraystretch}{1.5}');
+    expect(r.body).not.toContain('\\global\\long\\def\\arraystretch');
+    // a definition at the top level is still the document's math macro
+    const top = parseTex(doc('A \\newcommand{\\R}{r} B {\\newcommand{\\S}{s} C}'), opts).doc;
+    expect([...walkInsets(top.body)].filter(x => x.inset.type === 'FormulaMacro').map(x => (x.inset as { lines: string[] }).lines[0])).toEqual(['\\newcommand{\\R}{r}']);
+  });
+
+  it('a group around raw LaTeX keeps its braces: {\\mymacro} text, {\\setlength…}, \\frame<1>{…}', () => {
+    const src = 'I use {\\mymacro} daily, {\\setlength{\\parskip}{0pt} x} y, w{a\\foo b}c and {\\small s} t, {\\it Key\\/}: x.';
+    expect(roundTrip(doc(src)).body).toBe('I use {\\mymacro} daily, {\\setlength{\\parskip}{0pt} x} y, w{a\\foo b}c and {\\small s} t, \\textit{Key\\/}: x.');
+  });
+
   it('a tracked change inside a URL stays a tracked change', () => {
     const r = roundTrip(doc('See \\url{a\\lyxadded{Ann}{Mon Jan  5 10:00:00 2026}{x~y}b\\lyxdeleted{Ann}{Mon Jan  5 10:00:00 2026}{old}c}.'));
     expect(r.body).toContain('\\url{a\\lyxadded{Ann}{Mon Jan  5 10:00:00 2026}{x~y}b\\lyxdeleted{Ann}{Mon Jan  5 10:00:00 2026}{old}c}');

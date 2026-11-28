@@ -589,9 +589,13 @@ class BodyParser {
           // a \centering (\raggedright, …) inside the group ends with it, as in TeX: {\centering … \par}
           // centres what it holds, not the rest of the document
           const align = ctx.align;
+          const start = { par: ctx.cur, pars: ctx.pars.length, items: ctx.cur?.items.length ?? 0, tail: tailText(ctx.cur) };
+          this.groupDepth++;
           const r = this.parseText(s, ctx, cloneState(st), { ...stop, close: true, item: false });
+          this.groupDepth--;
           ctx.align = align;
           if (script) this.pushERT(ctx, st, '}');
+          else if (r === 'close') this.keepGroupOfRaw(ctx, st, start);
           if (r === 'close' || r === 'eof') continue;
           return r;   // \end / \item / cell separator inside a group: propagate
         }
@@ -643,6 +647,47 @@ class BodyParser {
     this.pushERT(ctx, st, s.s.slice(t.start, s.pos));
     return true;
   }
+
+  /**
+   * A group whose content holds raw LaTeX with a control word keeps its braces, as raw LaTeX too:
+   * what that LaTeX declares (\setlength, \renewcommand, \mymacro) ends with the group, as in TeX,
+   * and a control word at the group's end does not take the blank after it ({\mymacro} text).
+   * A group of text and modelled fonts only (`{\small …}`) is the fonts' business: the writer groups
+   * them itself.
+   */
+  private keepGroupOfRaw(ctx: TextCtx, st: State, start: { par: Paragraph | null; pars: number; items: number; tail: string | null }): void {
+    const p = ctx.cur;
+    if (!p || (start.par ? p !== start.par || ctx.pars.length !== start.pars : ctx.pars.length !== start.pars + 1)) return;
+    const from = start.par ? start.items : 0;
+    if (!p.items.slice(from).some(it => it.kind === 'inset' && it.inset.type === 'Text' && it.inset.name === 'ERT' && /\\[A-Za-z@]/.test(ertText(it.inset.paragraphs)))) return;
+    // what the group began with may have been appended to the item before it: split it off
+    const before = p.items[from - 1];
+    if (before && start.tail !== null) {
+      const now = itemText(before) ?? '';
+      if (now.length > start.tail.length) {
+        const grown = now.slice(start.tail.length);
+        if (before.kind === 'text') { before.text = start.tail; p.items.splice(from, 0, { ...before, text: grown }); }
+        else if (before.kind === 'inset' && !grown.includes('\n')) {
+          const ins = before.inset as TextInset;
+          ins.paragraphs = ertParagraphs(start.tail);
+          p.items.splice(from, 0, { ...before, inset: { ...ins, paragraphs: ertParagraphs(grown) } });
+        } else return;
+      }
+    }
+    const first = p.items[from];
+    const isErt = (it: Item | undefined): it is Item & { kind: 'inset' } => !!it && it.kind === 'inset' && it.inset.type === 'Text' && it.inset.name === 'ERT';
+    if (isErt(first) && sameFont(first.font, st.font) && sameChange(first.change, st.change)) {
+      const head = (first.inset as TextInset).paragraphs[0].items[0];
+      if (head && head.kind === 'text') head.text = '{' + head.text; else (first.inset as TextInset).paragraphs[0].items.unshift({ kind: 'text', text: '{', font: {} });
+    } else {
+      const it: Item = { kind: 'inset', font: { ...st.font }, inset: { type: 'Text', name: 'ERT', arg: '', params: [], status: 'collapsed', paragraphs: ertParagraphs('{') } };
+      if (st.change) it.change = { ...st.change };
+      p.items.splice(from, 0, it);
+    }
+    this.pushERT(ctx, st, '}');
+  }
+  /** how many brace groups enclose what is being read (definitions in them are local) */
+  private groupDepth = 0;
 
   private handleText(ctx: TextCtx, st: State, v: string): void {
     let buf = '';
@@ -1003,6 +1048,14 @@ class BodyParser {
     if (/^(?:newcommand|renewcommand|providecommand|newcommandx|renewcommandx|def|global|long|DeclareMathOperator)\*?$/.test(name)) {
       const start = t.start;
       const def = readMacroDefinition(s.s, start);
+      // A definition local to a group or an environment (\renewcommand{\arraystretch}{1.5} in a
+      // table) stays raw LaTeX: as a math macro it would be written \global\long\def — for the rest
+      // of the document.
+      if (def && (this.groupDepth > 0 || this.envStack.length > 0) && !/^(?:\\(?:long|outer|protected)\s*)*\\(?:global\b|gdef\b|xdef\b)/.test(def.text)) {
+        s.pos = def.end;
+        this.pushERT(ctx, st, def.text);
+        return null;
+      }
       if (def) {
         s.pos = def.end;
         const lines = [def.text];
@@ -1795,7 +1848,8 @@ class BodyParser {
     const innerPos = height !== null ? s.readOptional() : null;
     // the writer subtracts the frame from a full-width box: take that back
     const width = (s.readGroup() ?? '\\columnwidth').replace(/(\s*-\s*2\\fboxsep\s*-\s*2\\fboxrule)+\s*$/, '').replace(/(\s*-\s*2\\FrameSep\s*-\s*2\\FrameRule)+\s*$/, '');
-    const p = (pos ?? 't').trim();
+    // (LaTeX's minipage is centred on the line when no position is given, as \parbox is)
+    const p = (pos ?? 'c').trim() || 'c';
     const params = [`position "${p}"`, 'hor_pos "c"', 'has_inner_box 1', `inner_pos "${(innerPos ?? p).trim()}"`, 'use_parbox 0', 'use_makebox 0', `width "${lyxLength(width)}"`, 'special "none"', `height "${height ? lyxLength(height) : '1in'}"`, `height_special "${height ? 'none' : 'totalheight'}"`, 'thickness "0.4pt"', 'separation "3pt"', 'shadowsize "4pt"', 'framecolor "black"', 'backgroundcolor "none"'];
     const pars = this.parseInsetEnv(s, 'minipage', 'Plain Layout', st);
     // the writer adds \noindent in front of a full-width box itself
@@ -2120,6 +2174,16 @@ function readLiteralGroup(s: Scanner): string | null {
   if (arg && !arg.text.includes('\n')) return arg.text;
   s.pos = save;
   return null;
+}
+
+/** The text of a paragraph's last item, when it is text or raw LaTeX (what a push may append to). */
+function tailText(p: Paragraph | null): string | null {
+  const last = p?.items[p.items.length - 1];
+  return last ? itemText(last) : null;
+}
+function itemText(it: Item): string | null {
+  if (it.kind === 'text') return it.text;
+  return it.kind === 'inset' && it.inset.type === 'Text' && it.inset.name === 'ERT' ? ertText(it.inset.paragraphs) : null;
 }
 
 function ertText(pars: Paragraph[]): string {
