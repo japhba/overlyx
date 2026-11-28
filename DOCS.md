@@ -261,7 +261,12 @@ blend.
   change is merged *three-way* at paragraph level before we write: only the paragraphs they changed
   are taken over, edits made here in other paragraphs are kept (the disk wins where both changed
   the same paragraph). A document whose file was deleted is closed and its content kept as a
-  version instead of being silently re-created; a large deletion keeps the previous content as a
+  version instead of being silently re-created. Renamed or deleted in the explorer (`fileops`), an
+  open document is written first and then closed (`DocManager.closeUnder`: the moved or trashed file
+  has the typing of the last seconds), and what the store keeps under its name — History, public
+  PDF link, publishing target, last build and its directory, each person's folds, notices
+  (`db.ts DOC_TABLES`) — follows a rename (`filesMoved`); a copy is made of the document as it is
+  (`saveUnder`). A large deletion keeps the previous content as a
   version; the writer refuses to replace a document with something that is not a LyX document.
   Damaged files (an unterminated inset, unknown tokens, latin-1 bytes) open and are written back
   structurally complete.

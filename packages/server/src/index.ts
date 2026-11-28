@@ -1072,7 +1072,7 @@ api.post('/projects/:project/upload', needPaths('edit', req => [req.query.path])
 
 /** File operations behind the explorer's context menu (VS Code-like). Deleted files go to the data
  * directory's trash, never into the void — project files are the user's documents. */
-api.post('/projects/:project/fileops', needPaths('edit', req => [req.body?.from, req.body?.to].filter(p => p !== undefined)), (req, res) => {
+api.post('/projects/:project/fileops', needPaths('edit', req => [req.body?.from, req.body?.to].filter(p => p !== undefined)), async (req, res) => {
   try {
     const project = req.params.project;
     const op = String(req.body?.op ?? '');
@@ -1092,11 +1092,12 @@ api.post('/projects/:project/fileops', needPaths('edit', req => [req.body?.from,
       const rel = String(req.body?.from ?? '');
       const abs = guard(rel);
       if (!fs.existsSync(abs)) throw new Error('not found');
+      await manager.closeUnder(abs);   // the trashed file has the typing of the last seconds
       const bytes = bytesAt(abs);
       moveOut(abs, rel);
       noteWritten(project, -bytes);
       // a Google Docs tab's document stays deleted (its tab is not synced back in); its group forgets it
-      filesMoved(project, rel, null); lwFilesMoved(project, rel, null); groupFileMoved(project, rel, null);
+      manager.filesMoved(project, rel, null); filesMoved(project, rel, null); lwFilesMoved(project, rel, null); groupFileMoved(project, rel, null);
     } else if (op === 'rename' || op === 'copy') {
       const fromRel = String(req.body?.from ?? ''), toRel = String(req.body?.to ?? '');
       const from = guard(fromRel);
@@ -1104,8 +1105,12 @@ api.post('/projects/:project/fileops', needPaths('edit', req => [req.body?.from,
       if (!fs.existsSync(from)) throw new Error('not found');
       if (fs.existsSync(to)) { res.status(409).json({ error: 'a file with that name exists' }); return; }
       fs.mkdirSync(path.dirname(to), { recursive: true });
-      if (op === 'rename') { fs.renameSync(from, to); filesMoved(project, fromRel, toRel); lwFilesMoved(project, fromRel, toRel); groupFileMoved(project, fromRel, toRel); foldersMoved(project, path.posix.normalize(fromRel), path.posix.normalize(toRel)); }
-      else { assertRoom(project, bytesAt(from), 0, 'This copy'); fs.cpSync(from, to, { recursive: true }); }
+      if (op === 'rename') {
+        await manager.closeUnder(from);   // the renamed file has the typing of the last seconds
+        if (fs.existsSync(to) || !fs.existsSync(from)) { res.status(409).json({ error: 'the files changed meanwhile — try again' }); return; }
+        fs.renameSync(from, to);
+        manager.filesMoved(project, fromRel, toRel); filesMoved(project, fromRel, toRel); lwFilesMoved(project, fromRel, toRel); groupFileMoved(project, fromRel, toRel); foldersMoved(project, path.posix.normalize(fromRel), path.posix.normalize(toRel));
+      } else { assertRoom(project, bytesAt(from), 0, 'This copy'); await manager.saveUnder(from); fs.cpSync(from, to, { recursive: true }); }
     } else throw new Error('unknown operation');
     touchProject(req.params.project, req.user!.id);
     res.json({ ok: true });

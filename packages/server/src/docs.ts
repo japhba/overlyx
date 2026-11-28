@@ -20,7 +20,8 @@ import { isMarkdownPath } from '@overlyx/core/md/index.ts';
 import { isHtmlPath } from '@overlyx/core/html/deliverable.ts';
 import { isArticleHtml, asArticleText } from '@overlyx/core/html/article.ts';
 import { checkTexHealth, repairTex, type HealthIssue, type PreserveCache } from '@overlyx/core/tex/index.ts';
-import { db } from './db.ts';
+import { db, DOC_TABLES } from './db.ts';
+import { buildDirPath } from './namespaces.ts';
 import { config } from './config.ts';
 import { listProjects, resolveProjectPath, projectDir, type ProjectFile } from './projects.ts';
 import { applyLyxDocument } from './ydiff.ts';
@@ -1463,12 +1464,81 @@ export class DocManager {
     this.dropStored(id);
   }
 
-  /** Forget a document's stored state (its history reset, its file gone: what it held is in the file or a version). */
-  private dropStored(id: string): void {
+  /**
+   * Forget a document's stored state (its history reset, its file gone: what it held is in the file
+   * or a version) — `below`: also of the documents in the folder of that path.
+   */
+  private dropStored(id: string, below = false): void {
     db.transaction(() => {
-      db.prepare('DELETE FROM ydocs WHERE id = ?').run(id);
-      db.prepare('DELETE FROM ydocs_saved WHERE id = ?').run(id);
+      for (const t of ['ydocs', 'ydocs_saved']) {
+        db.prepare(`DELETE FROM ${t} WHERE id = ?`).run(id);
+        if (below) db.prepare(`DELETE FROM ${t} WHERE substr(id, 1, ?) = ?`).run(id.length + 1, id + '/');
+      }
     })();
+  }
+
+  /* ------------------------------------- files renamed, copied or deleted through the app */
+
+  /** The open documents whose file is `abs`, or lies in the folder `abs`. */
+  private openUnder(abs: string): OpenDoc[] {
+    return [...this.docs.values()].filter(d => d.absPath === abs || d.absPath.startsWith(abs + path.sep));
+  }
+
+  /** Write what the open documents at `abs` (a file, or a folder: those in it) hold — the file is about to be copied. */
+  async saveUnder(abs: string): Promise<void> {
+    await Promise.all(this.openUnder(abs).filter(d => d.dirty || d.saving).map(d => d.saveToFile()));
+  }
+
+  /**
+   * A file or folder is about to be renamed or deleted through the app (index.ts fileops): what its
+   * open documents hold is written first — the file that moves is the document as it is now, not as
+   * of its last save (the watcher learns of the move only afterwards, and kept the unsaved typing as
+   * a version of the old name) — and they are closed, their editors told as when a file disappears
+   * on disk (close code 4001); what could not be written is kept as a version. The caller moves the
+   * file right after (nothing is awaited after the last document is closed), then calls filesMoved.
+   */
+  async closeUnder(abs: string): Promise<void> {
+    for (const doc of this.openUnder(abs)) await this.closeDoc(doc, 'its file was moved', 'document removed');
+  }
+
+  /**
+   * A file or folder of a project was renamed through the app, or deleted (`to` null) — after the
+   * file system (closeUnder before it). What the store keeps under a document's id (db.ts DOC_TABLES)
+   * follows a renamed document: its History, public PDF link and publishing target, its last build
+   * with the build directory, each person's folds and place, its notices — replacing what an earlier
+   * file of the new name left there. A deleted document keeps them (History lists deleted files).
+   * The stored CRDT state goes in both cases, for the old name and the new: the file holds the text,
+   * and the next open starts from it.
+   */
+  filesMoved(project: string, from: string, to: string | null): void {
+    const clean = (rel: string) => path.posix.normalize(rel).replace(/\/+$/, '');
+    const old = `${project}/${clean(from)}`, next = to === null ? null : `${project}/${clean(to)}`;
+    this.dropStored(old, true);
+    if (next === null) return;
+    this.dropStored(next, true);
+    const renamed = (id: string) => next + id.slice(old.length);
+    const builds = db.prepare('SELECT doc_id, pdf_path, tex_path FROM builds WHERE doc_id = ? OR substr(doc_id, 1, ?) = ?').all(old, old.length + 1, old + '/') as { doc_id: string; pdf_path: string | null; tex_path: string | null }[];
+    db.transaction(() => {
+      for (const [t, c] of DOC_TABLES) {
+        if (t === 'ydocs' || t === 'ydocs_saved') continue;
+        db.prepare(`UPDATE OR REPLACE ${t} SET ${c} = ? || substr(${c}, ?) WHERE ${c} = ? OR substr(${c}, 1, ?) = ?`).run(next, old.length + 1, old, old.length + 1, old + '/');
+      }
+    })();
+    // the build directories are named by the document's id (and its LaTeX export's beside them): they move along, and the rows' paths with them
+    const moved: [string, string][] = [];
+    for (const b of builds) {
+      const a = buildDirPath(b.doc_id), z = buildDirPath(renamed(b.doc_id));
+      for (const [x, y] of [[a, z], [a + '.tex', z + '.tex']]) {
+        try {
+          if (!fs.existsSync(x)) continue;
+          fs.rmSync(y, { recursive: true, force: true });
+          fs.renameSync(x, y);
+          if (x === a) moved.push([a, z]);
+        } catch (e) { console.warn(`[docs] the build directory of ${b.doc_id} stays behind:`, e instanceof Error ? e.message : e); }
+      }
+    }
+    const there = (p: string | null) => { if (p) for (const [a, z] of moved) if (p.startsWith(a + path.sep)) return z + p.slice(a.length); return p; };
+    for (const b of builds) db.prepare('UPDATE builds SET pdf_path = ?, tex_path = ? WHERE doc_id = ?').run(there(b.pdf_path), there(b.tex_path), renamed(b.doc_id));
   }
 
   /** Save and close every open document of a project (before it is moved away / deleted). */

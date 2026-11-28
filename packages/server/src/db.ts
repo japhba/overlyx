@@ -244,6 +244,15 @@ db.exec(`CREATE TABLE IF NOT EXISTS doc_notices_seen (
   user_id INTEGER NOT NULL,
   PRIMARY KEY (notice_id, user_id)
 )`);
+/**
+ * Every table keyed by a document's id (`<project>/<path>`), with that column: what follows a
+ * document when its project is given another key (namespaces.ts moveProject) or its file another
+ * name (docs.ts DocManager.filesMoved). A new table that names documents belongs here.
+ */
+export const DOC_TABLES: readonly (readonly [table: string, column: string])[] = [
+  ['ydocs', 'id'], ['ydocs_saved', 'id'], ['versions', 'doc_id'], ['builds', 'doc_id'], ['pdf_links', 'doc_id'],
+  ['user_doc_state', 'doc_id'], ['pdf_publish', 'doc_id'], ['doc_notices', 'doc_id'],
+];
 db.exec(`CREATE TABLE IF NOT EXISTS e2e_user_keys (
   user_id INTEGER PRIMARY KEY,
   public_key TEXT NOT NULL,

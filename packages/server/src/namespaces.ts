@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { isProjectKey, isProjectName, splitDocId } from '@overlyx/core';
-import { db } from './db.ts';
+import { db, DOC_TABLES } from './db.ts';
 import { config } from './config.ts';
 
 db.exec(`
@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS project_moves (
 
 /** Tables naming a project, and tables naming documents (ids `<project>/<path>`). */
 const PROJECT_COLUMNS: [string, string][] = [['projects', 'name'], ['project_members', 'project'], ['folder_members', 'project'], ['share_links', 'project'], ['admin_grants', 'project'], ['access_log', 'project'], ['mirrors', 'project'], ['agent_threads', 'project'], ['starter_projects', 'project']];
-const DOC_COLUMNS: [string, string][] = [['ydocs', 'id'], ['ydocs_saved', 'id'], ['versions', 'doc_id'], ['builds', 'doc_id'], ['pdf_links', 'doc_id'], ['user_doc_state', 'doc_id'], ['pdf_publish', 'doc_id']];
+const DOC_COLUMNS = DOC_TABLES;
 
 /** A document's build directory (export.ts buildDir): named by a hash of its id. */
 export function buildDirPath(docId: string): string {
