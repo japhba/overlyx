@@ -63,7 +63,7 @@ describe('what a session holds open', () => {
     const ws = new WebSocket(url, { headers: { cookie: old } });
     await once(ws, 'message');   // the document is open and syncing
     const closed = once(ws, 'close');
-    changePassword(ada, 'first-password-1', 'second-password-2');
+    await changePassword(ada, 'first-password-1', 'second-password-2');
     const [code] = await closed;
     expect(code).toBe(4003);
 

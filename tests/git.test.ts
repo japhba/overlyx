@@ -140,28 +140,28 @@ describe('repository', () => {
 });
 
 describe('access tokens', () => {
-  it('keeps one account token, checked before the password; rotation and revocation stop the old value', () => {
+  it('keeps one account token, checked before the password; rotation and revocation stop the old value', async () => {
     const t = gitmod.createToken(bob.id, 'laptop');
     expect(t.token).toMatch(/^olx_[A-Za-z0-9_-]{30,}$/);
     expect(gitmod.listTokens(bob.id).map(x => x.name)).toEqual(['laptop']);
-    expect(gitmod.userForCredentials('bob', t.token)?.username).toBe('bob');
-    expect(gitmod.userForCredentials('bob', 'bobs-password')?.username).toBe('bob');
-    expect(gitmod.userForCredentials('jan', t.token)).toBeNull();       // somebody else's token
-    expect(gitmod.userForCredentials('bob', 'wrong')).toBeNull();
-    expect(gitmod.userForCredentials('bob', '')).toBeNull();
-    expect(gitmod.userForCredentials('nobody', t.token)).toBeNull();
+    expect((await gitmod.userForCredentials('bob', t.token))?.username).toBe('bob');
+    expect((await gitmod.userForCredentials('bob', 'bobs-password'))?.username).toBe('bob');
+    expect(await gitmod.userForCredentials('jan', t.token)).toBeNull();       // somebody else's token
+    expect(await gitmod.userForCredentials('bob', 'wrong')).toBeNull();
+    expect(await gitmod.userForCredentials('bob', '')).toBeNull();
+    expect(await gitmod.userForCredentials('nobody', t.token)).toBeNull();
     const t2 = gitmod.createToken(bob.id, 'old phone');
     expect(gitmod.listTokens(bob.id).map(x => x.name)).toEqual(['old phone']);
-    expect(gitmod.userForCredentials('bob', t.token)).toBeNull();
-    expect(gitmod.userForCredentials('bob', t2.token)?.username).toBe('bob');
+    expect(await gitmod.userForCredentials('bob', t.token)).toBeNull();
+    expect((await gitmod.userForCredentials('bob', t2.token))?.username).toBe('bob');
     expect(gitmod.deleteToken(bob.id, t2.id)).toBe(true);
-    expect(gitmod.userForCredentials('bob', t2.token)).toBeNull();
+    expect(await gitmod.userForCredentials('bob', t2.token)).toBeNull();
     expect(gitmod.deleteToken(jan.id, t.id)).toBe(false);               // not yours
     bobToken = gitmod.createToken(bob.id, 'Account access token').token;
     // Google accounts have no password: only a token works
     const tj = gitmod.createToken(jan.id, 'jan laptop');
-    expect(gitmod.userForCredentials('jan', tj.token)?.username).toBe('jan');
-    expect(gitmod.userForCredentials('jan', 'anything')).toBeNull();
+    expect((await gitmod.userForCredentials('jan', tj.token))?.username).toBe('jan');
+    expect(await gitmod.userForCredentials('jan', 'anything')).toBeNull();
   });
 });
 

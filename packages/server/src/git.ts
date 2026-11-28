@@ -462,22 +462,27 @@ export function deleteToken(userId: number, id: number): boolean {
   return db.prepare('DELETE FROM git_tokens WHERE id = ? AND user_id = ?').run(id, userId).changes > 0;
 }
 
+/** an access token (tokenAuth.ts), never tried as a password */
+const isToken = (secret: string) => secret.startsWith('olx_') || secret.startsWith('olxmcp_');
+
 /**
  * The account behind HTTP Basic credentials: `secret` is either kind of access token belonging to
- * that user, or their OverLyX password. Tokens first (a cheap hash), then password scrypt.
+ * that user (a cheap hash), or their OverLyX password (scrypt, off the event loop).
  */
-export function userForCredentials(username: string, secret: string): SessionUser | null {
+export async function userForCredentials(username: string, secret: string): Promise<SessionUser | null> {
   const row = db.prepare('SELECT * FROM users WHERE username = ?').get(username.trim().toLowerCase()) as UserRow | undefined;
-  if (!row || !secret || row.is_guest) return null;
-  // an administrator's temporary grant on somebody else's project holds in the browser only, where
-  // it was asked for and is logged — never through git, the CLI or a sync (access.ts adminGrantActive)
-  const user: SessionUser = { ...toSessionUser(row), isAdmin: false };
+  if (!secret) return null;
+  const account = row && !row.is_guest ? row : null;
+  // a password: checked against nothing, with the same work, when there is no such account (the time does not tell)
+  if (!isToken(secret)) return (await verifyPassword(secret, account?.password_hash ?? null)) && account ? signedIn(account) : null;
+  if (!account) return null;
   const token = verifyAccessToken(secret);
   // the Agent panel's credential is narrowed per thread on /mcp only (agent.ts panelThreadScope): here it would be the whole account
-  if (token) return token.userId === row.id && token.name !== PANEL_AGENT ? { ...user, ...(token.scope ? { scope: token.scope } : {}) } : null;
-  if (secret.startsWith('olx_') || secret.startsWith('olxmcp_')) return null; // invalid/revoked token: never try it as a password
-  return verifyPassword(secret, row.password_hash) ? user : null;
+  return token && token.userId === account.id && token.name !== PANEL_AGENT ? { ...signedIn(account), ...(token.scope ? { scope: token.scope } : {}) } : null;
 }
+// an administrator's temporary grant on somebody else's project holds in the browser only, where
+// it was asked for and is logged — never through git, the CLI or a sync (access.ts adminGrantActive)
+const signedIn = (row: UserRow): SessionUser => ({ ...toSessionUser(row), isAdmin: false });
 
 /* ------------------------------------------------------------------ smart HTTP */
 
@@ -510,12 +515,12 @@ export function gitRouter(): express.Router {
   // A tiny, Basic-authenticated API used by the CLI. Keeping it beside smart HTTP means the same
   // access token, rate limiting and account/project permissions cover both repository creation and
   // the push that follows it.
-  r.get('/api/user', (req, res) => {
-    const user = authenticateBasic(req, res);
+  r.get('/api/user', async (req, res) => {
+    const user = await authenticateBasic(req, res);
     if (user) res.json({ user: { username: user.username, name: user.name, email: user.email }, ...(user.scope ? { scope: user.scope } : {}) });
   });
-  r.get('/api/projects', (req, res) => {
-    const user = authenticateBasic(req, res);
+  r.get('/api/projects', async (req, res) => {
+    const user = await authenticateBasic(req, res);
     if (!user) return;
     res.json({ projects: accessibleProjects(user, { files: false }).map(p => ({ name: p.name, title: p.title, role: p.role })) });
   });
@@ -526,17 +531,17 @@ export function gitRouter(): express.Router {
   r.get('/api/pdf', (req, res) => { void cliPdf(req, res); });
   r.post('/api/restore', express.json({ limit: '32kb' }), (req, res) => { void cliRestore(req, res); });
   // a share link to the project or one folder of it, or sharing either with a person (`overlyx share`; the owner's)
-  r.post('/api/share', express.json({ limit: '32kb' }), (req, res) => { cliShare(req, res); });
+  r.post('/api/share', express.json({ limit: '32kb' }), (req, res) => { void cliShare(req, res); });
   // the VS Code extension's editors: Google fonts and the account's My fonts (googlefonts.ts,
   // myfonts.ts), the same routes as the web app's /api/fonts, with the CLI's sign-in
   const fonts = express.Router();
-  fonts.use((req, res, next) => { const user = authenticateBasic(req, res); if (!user) return; req.user = user; next(); });
+  fonts.use(async (req, res, next) => { const user = await authenticateBasic(req, res); if (!user) return; req.user = user; next(); });
   fonts.use(googleFontRoutes(), myFontRoutes());
   r.use('/api', (req, res, next) => { if (req.path.startsWith('/fonts/')) fonts(req, res, next); else next(); });
   // …and the account's settings (accountprefs.ts: fonts, text styles, spell checking …), as the web app's /api/prefs
-  r.get('/api/prefs', (req, res) => { const user = authenticateBasic(req, res); if (user) res.json({ prefs: accountPrefs(user.id) }); });
-  r.put('/api/prefs', express.json({ limit: '1mb' }), (req, res) => {
-    const user = authenticateBasic(req, res);
+  r.get('/api/prefs', async (req, res) => { const user = await authenticateBasic(req, res); if (user) res.json({ prefs: accountPrefs(user.id) }); });
+  r.put('/api/prefs', express.json({ limit: '1mb' }), async (req, res) => {
+    const user = await authenticateBasic(req, res);
     if (!user) return;
     if (user.scope?.readonly) { res.status(403).json({ error: 'This sign-in is read only' }); return; }
     res.json({ prefs: setAccountPrefs(user.id, req.body?.set, req.body?.onlyNew === true) });
@@ -545,18 +550,25 @@ export function gitRouter(): express.Router {
   return r;
 }
 
-export function authenticateBasic(req: Request, res: Response): SessionUser | null {
+export async function authenticateBasic(req: Request, res: Response): Promise<SessionUser | null> {
   if (!config.git) { res.status(404).type('text').send('git access is disabled on this server\n'); return null; }
   const ip = req.ip ?? 'x';
   const f = failures.get(ip);
   if (f && f.n >= 10 && Date.now() < f.until) { res.status(429).type('text').send('too many failed attempts, try again later\n'); return null; }
   const creds = basicCredentials(req);
   if (!creds) { unauthorized(res); return null; }
-  const user = userForCredentials(creds.username, creds.secret);
-  if (!user) {
+  const fail = () => {
     const cur = failures.get(ip) ?? { n: 0, until: 0 };
     cur.n++; cur.until = Date.now() + 10 * 60 * 1000; failures.set(ip, cur);
     if (failures.size > 5000) { const now = Date.now(); for (const [k, v] of failures) if (v.until < now) failures.delete(k); }
+  };
+  // a password is counted before it is checked (that takes a while: attempts sent at once must not all
+  // get past the limit); a good one clears it. Tokens are checked at once, counted when they fail.
+  const password = !isToken(creds.secret);
+  if (password) fail();
+  const user = await userForCredentials(creds.username, creds.secret);
+  if (!user) {
+    if (!password) fail();
     unauthorized(res, 'Invalid username or token/password');
     return null;
   }
@@ -565,7 +577,7 @@ export function authenticateBasic(req: Request, res: Response): SessionUser | nu
 }
 
 async function createCliProject(req: Request, res: Response): Promise<void> {
-  const user = authenticateBasic(req, res);
+  const user = await authenticateBasic(req, res);
   if (!user) return;
   const narrowed = scopeRefusal(user, null, 'create');
   if (narrowed) { res.status(403).json({ error: narrowed }); return; }
@@ -600,7 +612,7 @@ const BUILD_LOG_TAIL = 8000;
 
 /** Compile a document as the editor's PDF button does and answer with the outcome (waits up to `wait` seconds). */
 async function cliBuild(req: Request, res: Response): Promise<void> {
-  const user = authenticateBasic(req, res);
+  const user = await authenticateBasic(req, res);
   if (!user) return;
   const t = cliTarget(req, res, user, 'view', true);
   if (!t) return;
@@ -628,7 +640,7 @@ async function cliBuild(req: Request, res: Response): Promise<void> {
 }
 
 async function cliPdf(req: Request, res: Response): Promise<void> {
-  const user = authenticateBasic(req, res);
+  const user = await authenticateBasic(req, res);
   if (!user) return;
   const t = cliTarget(req, res, user, 'view', true);
   if (!t) return;
@@ -637,7 +649,7 @@ async function cliPdf(req: Request, res: Response): Promise<void> {
 }
 
 async function cliRestore(req: Request, res: Response): Promise<void> {
-  const user = authenticateBasic(req, res);
+  const user = await authenticateBasic(req, res);
   if (!user) return;
   const t = cliTarget(req, res, user, 'edit', false);
   if (!t) return;
@@ -653,8 +665,8 @@ async function cliRestore(req: Request, res: Response): Promise<void> {
  * username or e-mail address) that person, else a new share link with `role` — answered with the
  * address to send (the link's, with its token).
  */
-function cliShare(req: Request, res: Response): void {
-  const user = authenticateBasic(req, res);
+async function cliShare(req: Request, res: Response): Promise<void> {
+  const user = await authenticateBasic(req, res);
   if (!user) return;
   const t = cliTarget(req, res, user, 'view', false);
   if (!t) return;
@@ -698,7 +710,7 @@ async function handle(req: Request, res: Response): Promise<void> {
   const ip = req.ip ?? 'x';
   const write = service === 'git-receive-pack';
   const anonymous = !write && !req.headers.authorization && isPublic(project);
-  const user = anonymous ? null : authenticateBasic(req, res);
+  const user = anonymous ? null : await authenticateBasic(req, res);
   if (!user && !anonymous) return;
 
   // --- what they may do

@@ -26,13 +26,20 @@ export function hashPassword(password: string): string {
   return `scrypt$${salt}$${hash}`;
 }
 
-export function verifyPassword(password: string, stored: string | null): boolean {
-  if (!stored) return false;
-  const [alg, salt, hash] = stored.split('$');
-  if (alg !== 'scrypt') return false;
-  const test = crypto.scryptSync(password, salt, 64, { N: 16384 });
+/** what a password is checked against where there is none (no such user, a Google account): the same work, so the time taken does not tell which */
+const NO_PASSWORD = `scrypt$${'0'.repeat(32)}$${'0'.repeat(128)}`;
+
+/**
+ * Whether `password` is the one `stored` (hashPassword's form) was made from. Off the event loop
+ * (crypto.scrypt, ~50 ms of the thread pool — scryptSync held every editor that long per attempt),
+ * and as slow for a missing or unusable `stored` as for a real one.
+ */
+export async function verifyPassword(password: string, stored: string | null): Promise<boolean> {
+  const usable = !!stored && stored.split('$')[0] === 'scrypt';
+  const [, salt, hash] = (usable ? stored! : NO_PASSWORD).split('$');
+  const test = await new Promise<Buffer>((resolve, reject) => crypto.scrypt(password, salt, 64, { N: 16384 }, (e, key) => (e ? reject(e) : resolve(key))));
   const ref = Buffer.from(hash, 'hex');
-  return test.length === ref.length && crypto.timingSafeEqual(test, ref);
+  return usable && test.length === ref.length && crypto.timingSafeEqual(test, ref);
 }
 
 /** Generate a strong random password (letters, digits, symbols; 20 chars). */
@@ -168,26 +175,31 @@ export function authRouter(hooks: AuthHooks = {}): Router {
     if (moved.length) hooks.onGuestAdopted?.(moved, req.user.id);
   };
 
-  r.post('/login', express.json(), (req, res) => {
-    const { username, password } = req.body ?? {};
-    const ip = req.ip ?? 'x';
-    if (loginAttempts.size > 5000) { const now = Date.now(); for (const [k, v] of loginAttempts) if (v.until < now) loginAttempts.delete(k); }
-    const la = loginAttempts.get(ip);
-    if (la && la.n >= 8 && Date.now() < la.until) { res.status(429).json({ error: 'too many attempts, try again later' }); return; }
-    const row = db.prepare('SELECT * FROM users WHERE username = ?').get(String(username ?? '').trim().toLowerCase()) as UserRow | undefined;
-    if (!row || !verifyPassword(String(password ?? ''), row.password_hash)) {
-      const cur = loginAttempts.get(ip) ?? { n: 0, until: 0 };
+  r.post('/login', express.json(), async (req, res, next) => {
+    try {
+      const { username, password } = req.body ?? {};
+      const ip = req.ip ?? 'x';
+      if (loginAttempts.size > 5000) { const now = Date.now(); for (const [k, v] of loginAttempts) if (v.until < now) loginAttempts.delete(k); }
+      const la = loginAttempts.get(ip);
+      if (la && la.n >= 8 && Date.now() < la.until) { res.status(429).json({ error: 'too many attempts, try again later' }); return; }
+      // counted before the password is checked (that takes a while: attempts sent at once must not all get past the limit); a good one clears it
+      const cur = la ?? { n: 0, until: 0 };
       cur.n++; cur.until = Date.now() + 10 * 60 * 1000;
       loginAttempts.set(ip, cur);
-      res.status(401).json({ error: 'invalid credentials' });
-      return;
-    }
-    loginAttempts.delete(ip);
-    bindInvitations(row.id, row.email);
-    adopt(req, row);
-    const u = toSessionUser(row);
-    setSessionCookie(req, res, u);
-    res.json({ user: u });
+      const row = db.prepare('SELECT * FROM users WHERE username = ?').get(String(username ?? '').trim().toLowerCase()) as UserRow | undefined;
+      // (checked against nothing, with the same work, when there is no such user)
+      const ok = await verifyPassword(String(password ?? ''), row?.password_hash ?? null);
+      if (!row || !ok) {
+        res.status(401).json({ error: 'invalid credentials' });
+        return;
+      }
+      loginAttempts.delete(ip);
+      bindInvitations(row.id, row.email);
+      adopt(req, row);
+      const u = toSessionUser(row);
+      setSessionCookie(req, res, u);
+      res.json({ user: u });
+    } catch (e) { next(e); }
   });
 
   r.post('/logout', (_req, res) => {

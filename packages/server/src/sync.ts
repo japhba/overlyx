@@ -266,8 +266,8 @@ async function writeWhole(open: OpenDoc | undefined, root: string, rel: string, 
 
 /* -------------------------------------------------------------------- routes */
 
-function target(req: Request, res: Response, need: 'view' | 'edit'): { user: SessionUser; project: string } | null {
-  const user = (res.locals.user as SessionUser | undefined) ?? authenticateBasic(req, res);
+async function target(req: Request, res: Response, need: 'view' | 'edit'): Promise<{ user: SessionUser; project: string } | null> {
+  const user = (res.locals.user as SessionUser | undefined) ?? await authenticateBasic(req, res);
   if (!user) return null;
   const t = cliTarget(req, res, user, need, false);
   if (!t) return null;
@@ -280,7 +280,7 @@ export function syncRouter(): express.Router {
   const r = express.Router();
 
   r.get('/state', async (req, res) => {
-    const t = target(req, res, 'view');
+    const t = await target(req, res, 'view');
     if (!t) return;
     try {
       await ensureRepo(t.project);
@@ -292,8 +292,8 @@ export function syncRouter(): express.Router {
     } catch (e) { res.status(500).json({ error: (e as Error).message }); }
   });
 
-  r.get('/wait', (req, res) => {
-    const t = target(req, res, 'view');
+  r.get('/wait', async (req, res) => {
+    const t = await target(req, res, 'view');
     if (!t) return;
     const since = String(req.query.cursor ?? '');
     if (since !== cursorOf(t.project)) { res.json({ cursor: cursorOf(t.project) }); return; }
@@ -315,8 +315,8 @@ export function syncRouter(): express.Router {
     res.on('close', finish);
   });
 
-  r.get('/file', (req, res) => {
-    const t = target(req, res, 'view');
+  r.get('/file', async (req, res) => {
+    const t = await target(req, res, 'view');
     if (!t) return;
     const rel = String(req.query.path ?? '');
     if (!syncable(rel)) { res.status(400).json({ error: 'bad path' }); return; }
@@ -326,7 +326,7 @@ export function syncRouter(): express.Router {
   });
 
   // authenticated before the (large) body is read
-  const authFirst = (req: Request, res: Response, next: () => void) => { const user = authenticateBasic(req, res); if (user) { res.locals.user = user; next(); } };
+  const authFirst = async (req: Request, res: Response, next: () => void) => { const user = await authenticateBasic(req, res); if (user) { res.locals.user = user; next(); } };
 
   // one user's pushes: how many run now, and when the recent ones started
   const pushing = new Map<number, number>();
@@ -344,7 +344,7 @@ export function syncRouter(): express.Router {
   };
 
   r.post('/push', authFirst, pushAllowed, express.json({ limit: '64mb' }), async (req, res) => {
-    const t = target(req, res, 'edit');
+    const t = await target(req, res, 'edit');
     if (!t) return;
     const files = Array.isArray(req.body?.files) ? req.body.files as PushedFile[] : null;
     if (!files) { res.status(400).json({ error: 'files missing' }); return; }
@@ -367,7 +367,7 @@ export function syncRouter(): express.Router {
   });
 
   r.post('/commit', authFirst, express.json({ limit: '64kb' }), async (req, res) => {
-    const t = target(req, res, 'edit');
+    const t = await target(req, res, 'edit');
     if (!t) return;
     const message = String(req.body?.message ?? '').trim().slice(0, 10_000);
     if (!message) { res.status(400).json({ error: 'message missing' }); return; }

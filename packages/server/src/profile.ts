@@ -49,24 +49,23 @@ export function changeDisplayName(user: SessionUser, name: unknown): string {
 
 const wrong = new Map<number, { n: number; until: number }>();
 
-/** the password changed (every other session signed out); throws ProfileError with what is wrong */
-export function changePassword(user: SessionUser, current: unknown, next: unknown, now = Date.now()): void {
+/** the password changed (every other session signed out); rejects with a ProfileError that says what is wrong */
+export async function changePassword(user: SessionUser, current: unknown, next: unknown, now = Date.now()): Promise<void> {
   if (user.guest) throw new ProfileError('Sign in first: a guest has no password.', 403);
   const w = wrong.get(user.id);
   if (w && w.n >= TRIES && now < w.until) throw new ProfileError(`Too many wrong passwords — try again in ${Math.ceil((w.until - now) / 60000)} minutes.`, 429);
   const row = db.prepare('SELECT password_hash FROM users WHERE id = ?').get(user.id) as { password_hash: string | null } | undefined;
   if (!row) throw new ProfileError('This account no longer exists.', 404);
   if (!row.password_hash) throw new ProfileError('Your account signs in with Google: it has no password to change.', 400);
-  if (typeof current !== 'string' || !verifyPassword(current, row.password_hash)) {
-    const cur = w && now < w.until ? w : { n: 0, until: 0 };
-    cur.n++; cur.until = now + WAIT_MS;
-    wrong.set(user.id, cur);
-    throw new ProfileError('That is not your current password.', 403);
-  }
+  // a try is counted before the password is checked (that takes a while: tries sent at once must not all get past the limit); the right one clears it
+  const cur = w && now < w.until ? w : { n: 0, until: 0 };
+  cur.n++; cur.until = now + WAIT_MS;
+  wrong.set(user.id, cur);
+  if (typeof current !== 'string' || !(await verifyPassword(current, row.password_hash))) throw new ProfileError('That is not your current password.', 403);
+  wrong.delete(user.id);
   if (typeof next !== 'string' || next.length < PASSWORD_MIN) throw new ProfileError(`Choose a new password of at least ${PASSWORD_MIN} characters.`);
   if (next.length > PASSWORD_MAX) throw new ProfileError(`A password can be at most ${PASSWORD_MAX} characters long.`);
   if (next === current) throw new ProfileError('The new password is the current one — choose another.');
-  wrong.delete(user.id);
   db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(next), user.id);
   bumpSessionGeneration(user.id);
 }

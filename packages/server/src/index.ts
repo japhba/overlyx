@@ -858,9 +858,9 @@ api.post('/account/name', (req, res) => {
   catch (e) { if (e instanceof ProfileError) res.status(e.status).json({ error: e.message }); else throw e; }
 });
 /** a new password ({ current, next }): every other browser signed out, this one gets a new cookie */
-api.post('/account/password', (req, res) => {
-  try { changePassword(req.user!, req.body?.current, req.body?.next); setSessionCookie(req, res, req.user!); res.json({ ok: true }); }
-  catch (e) { if (e instanceof ProfileError) res.status(e.status).json({ error: e.message }); else throw e; }
+api.post('/account/password', async (req, res, next) => {
+  try { await changePassword(req.user!, req.body?.current, req.body?.next); setSessionCookie(req, res, req.user!); res.json({ ok: true }); }
+  catch (e) { if (e instanceof ProfileError) res.status(e.status).json({ error: e.message }); else next(e); }
 });
 
 /** The signed-in account's server-side settings (userSettings.ts) — the Settings panel. */
