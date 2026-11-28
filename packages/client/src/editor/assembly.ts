@@ -66,7 +66,7 @@ import { clipboardText, sourceCopyPlugin } from './clipsource';
 import { clipboardSerializer, isCodeHtml } from './cliphtml';
 import { showContextMenu } from './contextmenu';
 import { editorContextMenu } from './editormenu';
-import { includeTarget, insertMath } from './commands';
+import { includeTarget, insertMath, splitParagraph } from './commands';
 import { LAYOUT_NODE_VIEWS } from './layout/nodeviews';
 import { layoutPlugin, layoutKey } from './layout/controller';
 import { layoutPaste, layoutDrop } from './layout/images';
@@ -363,7 +363,7 @@ export function editorViewProps(o: ViewPropsOptions): Pick<EditorProps, 'nodeVie
         if (paras.length === 1) { view.dispatch(view.state.tr.insertText(text!.replace(/\n/g, ' '))); return; }
         let tr = view.state.tr.deleteSelection();
         paras.forEach((p, i) => {
-          if (i > 0) tr = tr.split(tr.selection.from);
+          if (i > 0) tr = splitParagraph(tr, tr.selection.from);
           tr = tr.insertText(p.replace(/\n/g, ' '));
         });
         view.dispatch(tr);

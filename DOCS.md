@@ -4971,7 +4971,10 @@ Google fonts (`\olfont`), which the server would have to put into the build; XeT
   LyX's `Paragraph::eraseChar`): one's own suggested text goes, everything else — a co-author's
   suggestion included — is struck through. The keys (Backspace, Delete, Ctrl/⌥+Backspace and
   +Delete: `trackedDeleteRange`) put the caret before what they struck through (after it for
-  Delete), so the next press goes on; `tests/changes-delete-keys.test.ts`.
+  Delete), so the next press goes on; `tests/changes-delete-keys.test.ts`. A paragraph's `endChange`
+  is the change of the break at its end: splitting it (Enter, Alt+Enter, pasted paragraphs —
+  `commands.ts` `splitParagraph`, LyX's `Text::breakParagraph`) gives it to the second half and the
+  new break none (the typist's insertion while suggesting); `tests/changes-paragraph-split.test.ts`.
   Edits inside a formula that was there before are applied directly, not as a suggestion — LyX does not
   track inside math either (a formula is one value); the first such edit of a session says so in the
   status bar (to suggest a different formula, insert the new one beside it and delete the old one). A

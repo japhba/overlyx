@@ -223,28 +223,27 @@ export const paragraphBreak: Command = (state, dispatch, view) => {
   // Enter on an empty list item ends the list (Google Docs): the item becomes an ordinary paragraph
   if (state.selection.empty && cur.node.content.size === 0 && $from.parent === cur.node && isListLayout(cur.node.attrs.layout as string)) return leaveList(state, dispatch, view);
   if (!dispatch) return true;
-  let tr = state.tr.deleteSelection();
-  const pos = tr.selection.from;
-  const $pos = tr.doc.resolve(pos);
-  // paragraphs are always splittable in our schema (block+ / paragraph+)
-  // the new paragraph: the layout LyX gives it; never the start-of-appendix marker (it belongs to one paragraph)
-  const attrs = { ...cur.node.attrs, layout: atEnd ? next : cur.node.attrs.layout, endChange: null, appendix: false };
-  tr = tr.split(pos, 1, [{ type: schema.nodes.paragraph, attrs }]);
-  if (!atEnd && isHeadingLayout(cur.node.attrs.layout, layouts)) {
-    // splitting in the middle of a heading keeps the layout (LyX behaviour)
-  }
-  // paragraph break inside a change-tracked document
-  if (editorContext.trackChanges && editorContext.changeAuthorId !== undefined) {
-    const before = tr.doc.resolve(tr.selection.from).before();
-    const prev = tr.doc.resolve(before - 1).nodeBefore;
-    if (prev && prev.type.name === 'paragraph') {
-      tr = tr.setNodeMarkup(before - prev.nodeSize, undefined, { ...prev.attrs, endChange: JSON.stringify({ type: 'inserted', author: editorContext.changeAuthorId, time: Math.floor(Date.now() / 1000) }) });
-    }
-  }
-  void $pos;
+  const tr = state.tr.deleteSelection();
+  // the new paragraph: the layout LyX gives it (splitting in the middle of a heading keeps the heading's)
+  splitParagraph(tr, tr.selection.from, { ...cur.node.attrs, layout: atEnd ? next : cur.node.attrs.layout });
   dispatch(tr.scrollIntoView());
   return true;
 };
+
+/**
+ * Split the paragraph at `pos` (LyX Text::breakParagraph), the second half with `attrs` (by default
+ * the paragraph's). The change of the paragraph's own break (`endChange`) goes with the second half
+ * — that break is still at its end — and the new break between the halves has none: while
+ * suggesting, changeTrackingPlugin makes it the typist's insertion. The start of the appendix stays
+ * with the first half (the marker belongs to one paragraph).
+ */
+export function splitParagraph(tr: Transaction, pos: number, attrs?: Attrs): Transaction {
+  const $pos = tr.doc.resolve(pos);
+  const par = $pos.parent, start = $pos.before();
+  tr.split(pos, 1, [{ type: par.type, attrs: { ...(attrs ?? par.attrs), endChange: par.attrs.endChange, appendix: false } }]);
+  if (par.attrs.endChange) tr.setNodeMarkup(start, undefined, { ...tr.doc.nodeAt(start)!.attrs, endChange: null });
+  return tr;
+}
 
 /**
  * Out of the list, Google-Docs style: a nested item (or any nested paragraph) moves out one level
@@ -302,8 +301,8 @@ export const paragraphBreakInverse: Command = (state, dispatch) => {
   const def = inset ? 'Plain Layout' : 'Standard';
   const layout = cur.node.attrs.layout === def ? def : def;
   if (!dispatch) return true;
-  let tr = state.tr.deleteSelection();
-  tr = tr.split(tr.selection.from, 1, [{ type: schema.nodes.paragraph, attrs: { ...cur.node.attrs, layout, endChange: null, appendix: false } }]);
+  const tr = state.tr.deleteSelection();
+  splitParagraph(tr, tr.selection.from, { ...cur.node.attrs, layout });
   dispatch(tr.scrollIntoView());
   return true;
 };
