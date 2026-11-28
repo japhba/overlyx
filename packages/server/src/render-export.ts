@@ -48,7 +48,6 @@ interface ShotOptions {
   jpeg?: boolean;
   /** the texts whose mapping is clean as text boxes (pptx-text.ts), left out of the pictures */
   texts?: boolean;
-  reach?: string;
 }
 
 let last: Promise<unknown> = Promise.resolve();
@@ -99,7 +98,7 @@ async function shoot<T>(project: string, rel: string, userId: number, o: ShotOpt
         shots.push({ index: s.index, title: s.title, notes: s.notes, image, texts: texts[String(s.n)] });
       }
       return { value: await after(page, { kind: rep.kind === 'poster' ? 'poster' : 'deck', title: found.title, width, height, scale, jpeg: !!o.jpeg, shots }) };
-    }, o.reach ?? '');
+    });
     if ('again' in r) { scale = r.again; continue; }
     return r.value;
   }
@@ -116,8 +115,8 @@ export function deliverableShots(project: string, rel: string, userId: number, o
  * their size (sharp in print at these sizes); the page around them is laid out here
  * (core html/handout.ts) and printed by the same browser.
  */
-export function handoutPdf(project: string, rel: string, userId: number, o: { layout: 'handout' | 'notes'; per: HandoutPerPage; paper: HandoutPaper; reach?: string }): Promise<Buffer> {
-  return inTurn(() => shoot(project, rel, userId, { scale: 2, fit: true, jpeg: true, reach: o.reach }, async (page, deck) => {
+export function handoutPdf(project: string, rel: string, userId: number, o: { layout: 'handout' | 'notes'; per: HandoutPerPage; paper: HandoutPaper }): Promise<Buffer> {
+  return inTurn(() => shoot(project, rel, userId, { scale: 2, fit: true, jpeg: true }, async (page, deck) => {
     const html = handoutHtml({
       title: deck.title, layout: o.layout, per: o.per, paper: o.paper, aspect: deck.width / deck.height,
       slides: deck.shots.map((s, i) => ({ src: `${RENDER_ORIGIN}/__export/${i}.jpg`, number: s.index + 1, title: s.title, notes: s.notes })),
@@ -139,8 +138,8 @@ export function handoutPdf(project: string, rel: string, userId: number, o: { la
  * its speaker notes on the notes page; `editable`: the texts whose mapping is clean as text boxes
  * over the picture, the rest (formulas, drawings, pictures, tables, ink, the background) in it.
  */
-export function pptxFile(project: string, rel: string, userId: number, o: { editable: boolean; reach?: string }): Promise<{ data: Buffer; slides: number; texts: number }> {
-  return inTurn(() => shoot(project, rel, userId, { scale: 2, fit: true, texts: o.editable, reach: o.reach }, async (_page, deck) => {
+export function pptxFile(project: string, rel: string, userId: number, o: { editable: boolean }): Promise<{ data: Buffer; slides: number; texts: number }> {
+  return inTurn(() => shoot(project, rel, userId, { scale: 2, fit: true, texts: o.editable }, async (_page, deck) => {
     const data = writePptx({
       title: deck.title, width: deck.width, height: deck.height,
       slides: deck.shots.map(s => ({ image: s.image, imageType: 'png' as const, title: s.title, notes: s.notes, texts: s.texts })),

@@ -25,7 +25,7 @@ import { authMiddleware, authRouter, requireAuth, createUser, createGuest, gener
 import { attachWebSocket, originAllowed } from './ws.ts';
 import { manager, docWorkers, projectChangedListeners, graphicsChangedListeners } from './docs.ts';
 import { writeRescuedEdits } from './rescue.ts';
-import { mountDeliverables, deliverableToken, splitEntry, createDeliverable, deliverableZip } from './deliverables.ts';
+import { mountDeliverables, pageToken, splitEntry, createDeliverable, deliverableZip } from './deliverables.ts';
 import { deliverablePdf } from './render.ts';
 import { deckExport } from './deckexport.ts';
 import { starterFor, pageSize, isHtmlPath, DELIVERABLE_KINDS, type DeliverableKind } from '@overlyx/core/html/deliverable.ts';
@@ -1007,8 +1007,9 @@ api.get('/projects/:project/deliverable-link', needPaths('view', req => [req.que
   const rel = String(req.query.path ?? '');
   if (!isHtmlPath(rel)) { res.status(400).json({ error: 'not an HTML file' }); return; }
   // the whole project under the token, the page at its own path: `../figures/plot.pdf` resolves
-  // to the project's figures (a token per folder would be climbed out of by the URL itself)
-  const token = deliverableToken(req.params.project, '', req.user!.id);
+  // to the project's figures (a token per folder would be climbed out of by the URL itself) —
+  // unless the page lies in a folder shared for editing on its own (deliverables.ts pageToken)
+  const token = pageToken(req.params.project, rel, req.user!.id);
   res.setHeader('Cache-Control', 'no-store');
   res.json({ base: `/ol-d/${token}/`, entry: rel, expires: Date.now() + 12 * 3600 * 1000 - 60000 });
 });

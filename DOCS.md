@@ -465,7 +465,10 @@ blend.
   editors cannot `\input` the rest of the project into a PDF they can read — documents there can't
   use files outside it; a file shared for editing alone is built from itself alone (no pictures or
   child documents beside it, no latexmkrc). A build directory whose root changed starts empty
-  (`.overlyx-root`). Not for end-to-end encrypted projects (shared whole). The project's Share
+  (`.overlyx-root`). The same holds for a deck, poster or web page there, in everybody's editor, PDF
+  and export, the owner's too: its scripts are written by the folder's editors and run with the
+  token of whoever opens the page, so that token reads the folder only (`deliverables.ts
+  pageToken`; `../figures/plot.pdf` outside the folder does not load). Not for end-to-end encrypted projects (shared whole). The project's Share
   dialog lists them under *Shared folders and files*.
 * **Public projects** (Share dialog ▸ *Public*, like a public repository on GitHub): anyone may
   view the project at its own address (`https://<server>/#/<owner>/<project>/<path>`, no token)
@@ -998,7 +1001,8 @@ blend.
     splice (three-way by the changed region; when it touches unsaved edits the disk wins and the
     state before is kept as a version). Nothing ever normalises the file: every edit is a splice.
   * **The canvas is the page itself**, rendered in a sandboxed frame. The server serves a project's
-    files under `/ol-d/<token>/<path>` — the token a signed capability (project, account, expiry;
+    files under `/ol-d/<token>/<path>` — the token a signed capability (project, account, expiry,
+    and for a page in a folder shared for editing on its own that folder as its reach: `pageToken`;
     the account's access is checked on every request), the response `Content-Security-Policy:
     sandbox allow-scripts …` (an opaque origin: no cookies, no storage of the app, no same-origin
     requests), `Referrer-Policy: no-referrer`; the frames are sandboxed too. Relative paths resolve

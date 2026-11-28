@@ -660,8 +660,8 @@ async function printArticle(job: BuildJob): Promise<BuildResult> {
     const owner = projectRow(doc.project)?.owner_id;
     if (owner == null) throw new Error('the project has no owner to print it for');
     const { deliverablePdf } = await import('./render.ts');
-    // (a page in a folder shared for editing on its own sees that folder only: foldershares.ts)
-    const pdf = await deliverablePdf(doc.project, doc.relPath, owner, { reach: confinedRoot(doc.project, doc.relPath) });
+    // (a page in a folder shared for editing on its own sees that folder only: deliverables.ts pageToken)
+    const pdf = await deliverablePdf(doc.project, doc.relPath, owner);
     const dir = buildDir(docId);
     const name = path.basename(doc.relPath).replace(/\.[^.]+$/, '') + '.pdf';
     writeFileIn(dir, name, pdf);

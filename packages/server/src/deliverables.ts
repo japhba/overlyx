@@ -23,7 +23,7 @@ import { JWT_SECRET, config } from './config.ts';
 import { db } from './db.ts';
 import { toSessionUser, type SessionUser } from './auth.ts';
 import { roleAt, reachesProject } from './access.ts';
-import { withinPath } from './foldershares.ts';
+import { withinPath, confinedRoot } from './foldershares.ts';
 import { projectDir } from './projects.ts';
 import { staysInside } from './projectfiles.ts';
 import { manager, HtmlDoc, BoardDoc, OpenDoc } from './docs.ts';
@@ -45,13 +45,23 @@ const b64 = (b: Buffer) => b.toString('base64url');
 
 /**
  * A capability for the folder `dir` of `project` (project-relative, '' for the top) on behalf of
- * `userId`; `reach`: no file outside that folder (a page printed for everyone from a folder shared on
- * its own, foldershares.ts confinedRoot).
+ * `userId`; `reach`: no file outside that folder (pageToken).
  */
 export function deliverableToken(project: string, dir: string, userId: number, ttlMs = 12 * 3600 * 1000, reach = ''): string {
   const payload = b64(Buffer.from(JSON.stringify({ p: project, d: dir, u: userId, e: Date.now() + ttlMs, ...(reach ? { r: reach } : {}) })));
   const sig = b64(crypto.createHmac('sha256', KEY).update(payload).digest()).slice(0, 32);
   return `${payload}.${sig}`;
+}
+
+/**
+ * The capability a page of the project is shown with — in the editor's frame, a presentation, a
+ * print, an agent's render: the project as far as `userId` may read it. A page in a folder (or a file)
+ * that is shared for editing on its own reads that alone (foldershares.ts confinedRoot), whoever looks
+ * at it: its scripts are written by people who have nothing else of the project, and they run with
+ * the reader's token — the owner's, when the owner opens the page.
+ */
+export function pageToken(project: string, rel: string, userId: number, ttlMs?: number): string {
+  return deliverableToken(project, '', userId, ttlMs, confinedRoot(project, rel));
 }
 
 export function verifyDeliverableToken(token: string): DeliverableGrant | null {
