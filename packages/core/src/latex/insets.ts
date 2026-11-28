@@ -106,15 +106,13 @@ export function insetTextLatex(ctx: ExportContext, os: TexStream, rp: RunParams,
   }
   const args = il?.args ?? new Map();
   const found = new Map<string, TextInset>();
-  if (args.size) {
-    for (const p of pars) for (const it of p.items) if (it.kind === 'inset' && it.inset.type === 'Text' && it.inset.name === 'Argument') found.set(it.inset.arg, it.inset);
-  }
+  for (const p of pars) for (const it of p.items) if (it.kind === 'inset' && it.inset.type === 'Text' && it.inset.name === 'Argument') found.set(it.inset.arg, it.inset);
   if (il?.forceOwnlines) os.breakln();
   if (il && il.latexName) {
     if (il.latexType === 'command') {
       if (rp.movingArg) os.write('\\protect');
       os.write('\\' + il.latexName);
-      if (args.size) latexArgInsets(ctx, os, rp, args, found, '');
+      latexArgInsets(ctx, os, rp, args, found, '');
       if (il.latexParam) os.write(il.latexParam);
       os.write('{');
     } else if (il.latexType === 'environment') {

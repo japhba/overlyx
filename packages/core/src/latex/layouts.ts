@@ -320,7 +320,7 @@ function newInsetLayout(name: string): InsetLayout {
   };
 }
 
-function newArgument(id: string): ArgumentSpec {
+export function newArgument(id: string): ArgumentSpec {
   return {
     id, labelString: '', menuString: '', tooltip: '', mandatory: false, nodelims: false, leftDelim: '', rightDelim: '',
     presetArg: '', defaultArg: '', decoration: '', passThru: false, passThruChars: '', freeSpacing: false, requires: [],

@@ -7,7 +7,7 @@
 import type { Change, Item, Paragraph, TextInset } from '../lyx/ast.ts';
 import type { ExportContext, RunParams } from './context.ts';
 import type { ArgumentSpec, InsetLayout, LayoutStyle } from './layouts.ts';
-import { findStyle } from './layouts.ts';
+import { findStyle, newArgument } from './layouts.ts';
 import { latexLength, isZeroLength } from './lengths.ts';
 import { TexStream } from './stream.ts';
 import {
@@ -134,10 +134,18 @@ function argumentBreak(pars: Paragraph[], pit: number): number {
   return pars.length;
 }
 
+/** an optional argument the layout does not declare */
+const UNDECLARED_ARG = newArgument('');
+
 /** Output the LaTeX arguments (Argument insets) of a paragraph/inset, like getArgInsets(). */
 export function latexArgInsets(ctx: ExportContext, os: TexStream, rp: RunParams, args: Map<string, ArgumentSpec>, found: Map<string, TextInset>, prefix: string): void {
   const relevant = [...args.entries()].filter(([id]) => (prefix ? id.startsWith(prefix) : !id.includes(':')));
-  if (relevant.length === 0) return;
+  if (relevant.length === 0) {
+    // The layout declares none: the .tex reader kept the author's [...] options as arguments 1, 2, …
+    // (`\begin{enumerate}[label=(\alph*)]` without the enumitem module) — written back as they were.
+    for (let i = 1; found.has(prefix + i); i++) latexArgument(ctx, os, rp, found.get(prefix + i)!, UNDECLARED_ARG, '[', ']');
+    return;
+  }
   const required = new Set<string>();
   for (const [, a] of relevant) if ((a.presetArg || a.defaultArg) && a.requires.length) for (const r of a.requires) required.add(r);
   for (const [id] of relevant) {
@@ -178,7 +186,7 @@ function latexArgument(ctx: ExportContext, os: TexStream, rp: RunParams, ins: Te
   latexParagraphs(ctx, { pars: ins.paragraphs, isMainText: false }, inner, rp2);
   inner.flushTermination();
   const content = inner.toString();
-  const addBraces = ldelim !== '' && ldelim !== '{' && content.includes(rdelim);
+  const addBraces = ldelim !== '' && ldelim !== '{' && closesEarly(content, rdelim);
   os.write(ldelim);
   if (addBraces) os.write('{');
   os.write(spec.presetArg);
@@ -186,6 +194,22 @@ function latexArgument(ctx: ExportContext, os: TexStream, rp: RunParams, ins: Te
   os.write(content);
   if (addBraces) os.write('}');
   os.write(rdelim);
+}
+
+/**
+ * Whether `rdelim` occurs in `content` outside braces — where it would end the argument early, so
+ * the argument needs a group (`[{a]b}]`). Inside braces it ends nothing (`[label={[}x{]}]`).
+ */
+function closesEarly(content: string, rdelim: string): boolean {
+  let depth = 0;
+  for (let i = 0; i < content.length; i++) {
+    const c = content[i];
+    if (c === '\\') { i++; continue; }
+    if (c === '{') depth++;
+    else if (c === '}') depth--;
+    else if (depth === 0 && content.startsWith(rdelim, i)) return true;
+  }
+  return false;
 }
 
 /* ------------------------------------------------------------ environments */
@@ -421,13 +445,13 @@ function parStartCommand(ctx: ExportContext, os: TexStream, rp: RunParams, par: 
   switch (style.latexType) {
     case 'Command':
       os.write('\\' + style.latexName);
-      if (hasArgsStyle(style)) latexArgInsets(ctx, os, rp, style.args, argInsetsOf(par, ''), '');
+      latexArgInsets(ctx, os, rp, style.args, argInsetsOf(par, ''), '');
       os.write(style.latexParam);
       break;
     case 'Item_Environment':
     case 'List_Environment':
       os.write('\\' + style.itemCommand);
-      if (hasArgsStyle(style)) latexArgInsets(ctx, os, rp, style.args, argInsetsOf(par, 'item:'), 'item:');
+      latexArgInsets(ctx, os, rp, style.args, argInsetsOf(par, 'item:'), 'item:');
       os.write(' ');
       break;
     default:

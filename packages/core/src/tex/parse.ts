@@ -1148,7 +1148,8 @@ class BodyParser {
       return null;
     }
     if (name === 'href') {
-      const url = s.readGroup();
+      // (hyperref reads the URL as \url does)
+      const url = readLiteralGroup(s) ?? s.readGroup();
       const text = s.readGroup();
       if (url === null) { this.pushERT(ctx, st, '\\href'); return null; }
       let target = url.trim().replace(/\\%/g, '%').replace(/\\#/g, '#');
@@ -1519,12 +1520,42 @@ class BodyParser {
     }
   }
 
+  /** A literal argument's text — but for the change-tracking marks the writer puts around changed text in it. */
+  private literalItems(text: string): Item[] {
+    const items: Item[] = [];
+    const push = (t: string, change?: Change) => {
+      if (!t) return;
+      const last = items[items.length - 1];
+      if (last && last.kind === 'text' && sameChange(last.change, change)) { last.text += t; return; }
+      items.push(change ? { kind: 'text', text: t, font: {}, change } : { kind: 'text', text: t, font: {} });
+    };
+    const s = new Scanner(text);
+    const re = /\\lyx(added|deleted)(?![A-Za-z])/g;
+    let at = 0;
+    for (let m; (m = re.exec(text));) {
+      s.pos = re.lastIndex;
+      s.readOptional();
+      const author = s.readGroup(), time = s.readGroup();
+      s.skipBlanks();
+      const inner = author !== null && time !== null && s.peekChar() === '{' ? readPathArgument(s) : null;
+      if (!inner) continue;
+      push(text.slice(at, m.index));
+      push(inner.text, { type: m[1] === 'added' ? 'inserted' : 'deleted', author: this.authorId(author!.trim()), time: parseAsctime(time!) });
+      at = re.lastIndex = s.pos;
+    }
+    push(text.slice(at));
+    return items;
+  }
+
   /** An inset defined by an inset layout with LatexType command. */
   private handleInsetCommand(s: Scanner, ctx: TextCtx, st: State, il: InsetLayout): void {
     const { name, arg } = insetNameOf(il);
-    const args: TextInset[] = il.args.size ? this.readArguments(s, il.args) : (s.readOptional(), []);
+    const args = this.readArguments(s, il.args);
     const base = name === 'Flex' && !il.forcePlain && il.multiPar ? 'Standard' : 'Plain Layout';
-    const pars = this.parseInsetGroup(s, base, st);
+    // a pass-through inset's argument (\url) is written as it is, so it is read as it is — as the
+    // command itself reads it: a ~ is no space, a % no comment, a brace no group
+    const literal = il.passThru ? readLiteralGroup(s) : null;
+    const pars = literal !== null ? [{ layout: base, depth: 0, params: {}, items: this.literalItems(literal) }] : this.parseInsetGroup(s, base, st);
     for (const a of args.reverse()) pars[0].items.unshift({ kind: 'inset', font: {}, inset: a });
     const inset: TextInset = { type: 'Text', name, arg, params: [], status: name === 'Foot' || name === 'Marginal' ? 'collapsed' : 'open', paragraphs: pars };
     if (name === 'Caption') inset.status = undefined;
@@ -2076,6 +2107,16 @@ function readPathArgument(s: Scanner): { text: string; delimiter: string } | nul
       return { text, delimiter };
     }
   }
+  return null;
+}
+
+/** A `{…}` argument read literally (balanced braces, nothing else special); null, nothing consumed, when there is none on this line. */
+function readLiteralGroup(s: Scanner): string | null {
+  const save = s.pos;
+  s.skipBlanks();
+  const arg = s.peekChar() === '{' ? readPathArgument(s) : null;
+  if (arg && !arg.text.includes('\n')) return arg.text;
+  s.pos = save;
   return null;
 }
 
