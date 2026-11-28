@@ -14,7 +14,7 @@ import { userFromCookieHeader, type SessionUser } from './auth.ts';
 import { roleAt, logAccess } from './access.ts';
 import { canonicalDocId } from './namespaces.ts';
 import { splitDocId, sanitizeAwarenessState, MAX_AWARENESS_STATE_JSON } from '@overlyx/core';
-import { hasModel, connectParams } from '@overlyx/core/collab/connect.ts';
+import { hasModel, connectParams, wantsRefusalClose, CLOSE_SIGNED_OUT, CLOSE_NO_ACCESS } from '@overlyx/core/collab/connect.ts';
 import { markDocOpened } from './userSettings.ts';
 import { config } from './config.ts';
 import { isAgentClient, trackMoves } from './agentPresence.ts';
@@ -36,9 +36,12 @@ const MSG_SAVED = 3;
  * every 15 s) keep it alive, but browsers throttle the timers of hidden tabs (Chrome: one wake-up
  * per minute after five minutes in the background), so a lone background tab used to flap between
  * connected and "offline". A heartbeat that does not depend on client timers keeps a healthy
- * connection open; a dead one still trips the watchdog.
+ * connection open; a dead one still trips the watchdog. An editor sends the same message to ask
+ * whether its connection is alive (client editor/connection.ts, after the browser said "offline"):
+ * it is answered at once.
  */
 const MSG_PING = 4;
+const PING = new Uint8Array([MSG_PING]);
 /** an update that came from the embedded agent (origin 'mcp'), sent additionally under this type
  *  so clients can apply it with an undo-tracked origin (see editor.ts messageHandlers[5]) */
 const MSG_AGENT_EDIT = 5;
@@ -149,8 +152,15 @@ export function attachWebSocket(server: Server): void {
     if (url.pathname !== '/ws' && url.pathname !== '/ws/' && !e2e) { socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n'); socket.destroy(); return; }
     // browsers send the page's origin: a foreign site must not be able to open a socket with our cookie
     if (!originAllowed(req)) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); socket.destroy(); return; }
+    // a refusal: a close code the editor can read, if it asks for one (core collab/connect.ts REFUSAL_PARAMS); else the bare status
+    const refuse = (status: string, code: number, reason: string) => {
+      if (!e2e && wantsRefusalClose(url.searchParams)) {
+        try { wss.handleUpgrade(req, socket, head, (ws) => ws.close(code, reason)); return; } catch (e) { console.error('[ws] refusal failed:', e); }
+      }
+      try { socket.write(`HTTP/1.1 ${status}\r\n\r\n`); socket.destroy(); } catch { /* gone */ }
+    };
     const user = userFromCookieHeader(req.headers.cookie);
-    if (!user) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); socket.destroy(); return; }
+    if (!user) { refuse('401 Unauthorized', CLOSE_SIGNED_OUT, 'signed out'); return; }
     // an end-to-end encrypted document: ciphertext relayed (e2e/relay.ts)
     if (e2e) { try { e2eUpgrade(wss, req, socket, head, user); } catch (e) { console.error('[e2e] upgrade failed:', e); try { socket.write('HTTP/1.1 400 Bad Request\r\n\r\n'); socket.destroy(); } catch { /* gone */ } } return; }
     // (an exception in this listener would take the whole server down: answer it instead)
@@ -161,9 +171,9 @@ export function attachWebSocket(server: Server): void {
       const { project, path: rel } = splitDocId(docId);
       // (the project, or a folder of it shared with the user on their own that holds the document)
       const role = roleAt(user, project, rel);
-      if (!role) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); socket.destroy(); return; }
+      if (!role) { refuse('403 Forbidden', CLOSE_NO_ACCESS, 'no access'); return; }
       // an end-to-end encrypted project has no document the server could open (its editors use /e2e)
-      if (isE2eProject(project)) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); socket.destroy(); return; }
+      if (isE2eProject(project)) { refuse('403 Forbidden', CLOSE_NO_ACCESS, 'no access'); return; }
       logAccess(project, user.id, 'open', rel || null);
       markDocOpened(user.id, docId);
       const model = url.searchParams.get('model'), needs = connectParams(docId).model;
@@ -245,6 +255,10 @@ async function handleConnection(conn: WebSocket, docId: string, user: SessionUse
           }
           break;
         }
+        case MSG_PING: {
+          send(doc, conn, PING);   // "are you there?" (see MSG_PING)
+          break;
+        }
         case MSG_NOTICE: {
           markNoticeSeen(decoding.readVarUint(dec), user.id, doc.id);   // seen: not told again
           break;
@@ -270,7 +284,6 @@ async function handleConnection(conn: WebSocket, docId: string, user: SessionUse
   // page is throttled or frozen) and an application-level heartbeat every 10 s (see MSG_PING)
   let pongReceived = true;
   let tick = 0;
-  const heartbeat = new Uint8Array([MSG_PING]);
   const ping = setInterval(() => {
     if (!doc.conns.has(conn)) { clearInterval(ping); return; }
     tick++;
@@ -283,7 +296,7 @@ async function handleConnection(conn: WebSocket, docId: string, user: SessionUse
       pongReceived = false;
       try { conn.ping(); } catch { closeConn(doc, conn); clearInterval(ping); return; }
     }
-    send(doc, conn, heartbeat);
+    send(doc, conn, PING);
   }, HEARTBEAT_MS);
   conn.on('pong', () => { pongReceived = true; });
   conn.on('close', () => { closeConn(doc, conn); clearInterval(ping); });
@@ -338,8 +351,7 @@ export { Y };
  * sends is applied, nothing of the document goes to it.
  */
 function holdOutdated(conn: WebSocket): void {
-  const heartbeat = new Uint8Array([MSG_PING]);
-  const ping = setInterval(() => { try { conn.send(heartbeat); } catch { clearInterval(ping); } }, HEARTBEAT_MS);
+  const ping = setInterval(() => { try { conn.send(PING); } catch { clearInterval(ping); } }, HEARTBEAT_MS);
   conn.on('close', () => clearInterval(ping));
   conn.on('error', () => clearInterval(ping));
 }

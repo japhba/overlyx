@@ -4657,14 +4657,33 @@ How it works, in order of what happens when you open a document:
    last change and then tells all clients *"the file now contains state X"* (message type 3);
    the status bar switches from *Saving…* to *All changes saved* when that confirmation covers
    everything this browser has sent.
-3. **Offline.** When the connection drops (the browser's `offline` event, or y-websocket's
-   30 s watchdog), the status bar shows *⚡ Offline — changes kept on this device*. Editing continues
+3. **Offline.** The connection's own evidence says when it is gone (client `editor/connection.ts`,
+   for documents and decks alike): the socket closes, y-websocket's 30 s watchdog finds it silent
+   (the server sends a heartbeat every 10 s), or — when the browser fires its `offline` event — a
+   ping the server answers at once (message 4) gets no answer within 4 s. A socket that answers
+   stays open: `navigator.onLine` is wrong behind some VPNs and flips several times a minute on some
+   Macs, and until 28 Nov 2026 the event closed a working socket (a full re-sync, the presence
+   leaving and joining for the others, "offline" while saving worked). A closed socket reads
+   *connecting…* for 8 s (a server restart takes ~2 s), *offline* at once if the browser says so;
+   `online` and the tab returning reconnect without the back-off. Then the status bar shows
+   *⚡ Offline — changes kept on this device*. Editing continues
    against the local copy; the service worker (`packages/client/src/sw.js`, generated into
    `dist/sw.js` with the list of built files) serves the app shell and the last responses of the
    few read-only API calls the editor needs (`/api/auth/me`, the project list, a document's
    metadata, rendered graphics), so a reload while offline still works. Documents with a local
    copy are marked ⬇ in the file browser; a document that was never opened on this device cannot
    be shown offline.
+   A **refused** connection is not "offline": the session was signed out (a password change, the
+   30-day sign-in ending) or the user has no access to the document. A browser cannot read the HTTP
+   status of a refused upgrade (it is close code 1006, as for a network failure), so editors ask for
+   a close code instead (connect parameter `refusal=close`, core `collab/connect.ts`): the server
+   accepts the upgrade and closes it with 4401 / 4403. The status bar says *Signed out — reload the
+   page to sign in* (the edits wait in the local copy) or *No access* (a document then closes, as
+   when access is withdrawn while it is open); the editor tries again when that could have changed:
+   the tab returns or gets the focus, the network returns, somebody signs in in another tab, and
+   by itself 5 s, 10 s, 20 s … apart, once a minute at most. Editors that do not ask (bundles from before, the whiteboard) get the bare 401 /
+   403 as before — y-websocket stops for good after a close in 4400–4499, which they would not get
+   over.
 4. **Back online.** y-websocket reconnects; the Yjs sync sends the offline edits and receives
    everybody else's. Because the document is a CRDT, concurrent edits merge without conflicts
    (two people editing the same sentence simply both get their words in, one word after the other);

@@ -10,6 +10,7 @@ import type { MenuItem } from '../editor/contextmenu';
 import type { RuntimeMode } from '@overlyx/core/html/serve.ts';
 import type { AssetUrls } from './offlineassets';
 import type { PresentState, PresenterState } from '../app/presentshare';
+import type { Refusal } from '../editor/refusal';
 
 export type { Splice };
 
@@ -17,7 +18,9 @@ export type { Splice };
 export type ChangeOrigin = 'canvas' | 'code' | 'remote';
 
 export type Peer = PeerInfo;
-export interface DeliverableSaveState { pending: boolean; localPending?: boolean; localError?: string; state: 'saved' | 'saving' | 'offline' | 'connecting' | 'stale' }
+export interface DeliverableSaveState { pending: boolean; localPending?: boolean; localError?: string; state: 'saved' | 'saving' | 'offline' | 'connecting' | 'stale';
+  /** the server refuses the connection (state 'offline'): the session was signed out, or the user has no access (editor/connection.ts) */
+  refused?: Refusal }
 
 export interface DeliverableHost {
   /** project-relative path of the page (folder of uploads, the title) */

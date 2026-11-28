@@ -1,5 +1,6 @@
 import type { ComponentChildren } from 'preact';
 import type { SaveState, PresenceUser } from '../editor/editor';
+import { refusalLabel, refusalTitle } from '../editor/refusal';
 import { AvatarContent, AgentBadge, initials } from './Avatar';
 import { inkOn } from './contrast';
 import { pdfStatus, useTicker, type PdfStatusInput } from './pdfstatus';
@@ -17,6 +18,8 @@ export function SaveIndicator({ save }: { save: SaveState }) {
   const when = save.savedAt ? new Date(save.savedAt).toLocaleTimeString() : '';
   // the server could not write the file (it keeps trying): the edits are kept on the server meanwhile
   if (save.saveError && (save.state === 'saved' || save.state === 'saving')) return <span class="save-state offline" title={`The server could not write your edits to the file: ${save.saveError}. It keeps trying; your edits are kept on the server meanwhile.${when ? ` Last written at ${when}.` : ''}`}>⚠ Could not save</span>;
+  // the server refuses the connection: why, instead of "will sync when back online"
+  if (save.refused && save.state === 'offline') return <span class="save-state offline" data-refused={save.refused} title={refusalTitle(save.refused)}>⚠ {refusalLabel(save.refused)}</span>;
   switch (save.state) {
     case 'saved': return <span class="save-state saved" title={when ? `The .tex file on the server was last written at ${when}` : 'Everything is saved on the server'}>✓<span class="ss-words"> All changes saved</span></span>;
     case 'saving': return <span class="save-state saving" title="Your edits are being written to the .tex file on the server">Saving…</span>;
@@ -168,7 +171,7 @@ export function StatusBar({ layout, markdown, status, chord, message, save, trac
   return (
     <div class="statusbar">
       {start}
-      <span><span class={'dot' + (status.connected ? ' on' : '')} />{status.connected ? (status.synced ? 'connected' : 'syncing…') : save.state === 'connecting' ? 'connecting…' : 'offline'}</span>
+      <span><span class={'dot' + (status.connected ? ' on' : '')} />{status.connected ? (status.synced ? 'connected' : 'syncing…') : save.state === 'connecting' ? 'connecting…' : save.refused ? (save.refused === 'signed-out' ? 'signed out' : 'no access') : 'offline'}</span>
       {docLabel && <span class="doclabel" title="Document under the cursor">{docLabel}</span>}
       {document.documentElement.dataset.ui === 'modern' ? <span class="sb-style" title="Paragraph style at the cursor">{styleLabel(layout, 'modern', markdown)}</span> : <span class="sb-style" title="Current paragraph layout">{styleLabel(layout, 'classic', markdown)}</span>}
       {readOnly && <span class="readonly-badge" title="This project was shared with you for viewing: you can read and compile it, but not change it">👁 view only</span>}

@@ -18,7 +18,8 @@ import { collabSync, cursorPlugin, undoPlugin, cursorPosition } from './collab';
 import { salvageLegacyCopy, LEGACY_DB_PREFIX } from './legacycopy';
 import { schema, sanitizeAwarenessState } from '@overlyx/core';
 import { BODY, PAGES } from '@overlyx/core/collab/model.ts';
-import { connectParams } from '@overlyx/core/collab/connect.ts';
+import { connectParams, REFUSAL_PARAMS } from '@overlyx/core/collab/connect.ts';
+import { watchConnection, type Refusal } from './connection';
 import type { Awareness } from 'y-protocols/awareness';
 import { inkPlugin } from './plugins/ink';
 import { editorContext } from './context';
@@ -113,6 +114,8 @@ export interface SaveState {
   unavailable: boolean;
   /** why there is no connection (diagnostics for the tooltip) */
   detail?: string;
+  /** the server refuses the connection: the session was signed out, or the user has no access to the document (state 'offline') */
+  refused?: Refusal;
 }
 
 export interface EditorOptions {
@@ -188,7 +191,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   // model=2 (core collab/connect.ts): this editor holds the document as flows (core collab/model.ts); the server refuses older editors
   // a document of an end-to-end encrypted project syncs through the encrypted relay (e2e/socket.ts)
   const encrypted = isE2eDocId(opts.docId);
-  const provider = new WebsocketProvider(wsUrl, '', ydoc, { params: connectParams(opts.docId), disableBc: true, connect: false, ...(encrypted ? { WebSocketPolyfill: E2eSocket as unknown as typeof WebSocket } : {}) });
+  const provider = new WebsocketProvider(wsUrl, '', ydoc, { params: { ...connectParams(opts.docId), ...REFUSAL_PARAMS }, disableBc: true, connect: false, ...(encrypted ? { WebSocketPolyfill: E2eSocket as unknown as typeof WebSocket } : {}) });
   const unregister = encrypted ? registerOpenDoc(opts.docId, ydoc) : null;
   let destroyed = false;
   /** the document is empty here (nothing loaded or synced yet) */
@@ -210,31 +213,21 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   let localSynced = false;      // IndexedDB copy loaded
   let localEmpty = true;
   let pendingFromStore = false; // the stored copy had unsaved edits when it was last used
-  let lastConnInfo = '';
-  // A lost connection is reported as "connecting…" for a few seconds before it becomes "offline":
-  // the server restarts in ~2 s for a deployment and the WebSocket reconnects right away, which
-  // should not read as an outage. (The browser's own offline signal is shown immediately.)
-  const RECONNECT_GRACE_MS = 8000;
-  let disconnectedAt = 0;
-  let graceTimer: ReturnType<typeof setTimeout> | null = null;
-  const inGrace = () => navigator.onLine !== false && disconnectedAt > 0 && Date.now() - disconnectedAt < RECONNECT_GRACE_MS;
-  const noteDisconnected = () => {
-    if (disconnectedAt) return;
-    disconnectedAt = Date.now();
-    if (graceTimer) clearTimeout(graceTimer);
-    graceTimer = setTimeout(() => { graceTimer = null; emitSaveState(); }, RECONNECT_GRACE_MS + 50);
-  };
+  // the connection: kept, and judged by its own evidence (connection.ts) — "connecting…" for a few
+  // seconds after a loss (a server restart), "offline" once that is over or the browser says so
+  const connection = watchConnection(provider, {
+    active: () => !destroyed && !stale,
+    onChange: () => emitSaveState(),
+    // (no access: the metadata says so too, and the document closes — App.tsx)
+    onRefused: why => { if (why === 'no-access') opts.onAccessChanged?.(); },
+  });
   const saveState = (): SaveState => {
     const pending = editSeq > savedSeq || pendingFromStore;
     const connected = provider.wsconnected;
-    const state: SaveState['state'] = stale ? 'stale' : connected && provider.synced ? (pending ? 'saving' : 'saved') : connected || !localSynced || inGrace() ? 'connecting' : 'offline';
-    let detail: string | undefined;
-    if (state === 'offline') {
-      detail = navigator.onLine === false ? 'the browser reports no network connection' : 'no WebSocket connection to the server';
-      if (lastConnInfo) detail += ` (${lastConnInfo})`;
-      detail += ' — reconnecting automatically';
-    }
-    return { state, pending, localPending: localWriteSeq > localSavedSeq, localError, savedAt, saveError, unavailable: state === 'offline' && localEmpty, detail };
+    const refused = connected ? null : connection.refused();
+    const state: SaveState['state'] = stale ? 'stale' : connected && provider.synced ? (pending ? 'saving' : 'saved') : refused ? 'offline' : connected || !localSynced || !connection.offline() ? 'connecting' : 'offline';
+    const detail = state === 'offline' && !refused ? connection.detail() : undefined;
+    return { state, pending, localPending: localWriteSeq > localSavedSeq, localError, savedAt, saveError, unavailable: state === 'offline' && localEmpty, detail, ...(refused ? { refused } : {}) };
   };
   let lastEmitted = '';
   const emitSaveState = () => {
@@ -293,9 +286,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
     saveError = decoding.hasContent(dec) ? decoding.readVarString(dec) || undefined : undefined;
     emitSaveState();
   };
-  // Message type 4 = server heartbeat (no payload): it only refreshes y-websocket's "last message
-  // received" watchdog, so a healthy connection in a throttled background tab stays open.
-  (provider as any).messageHandlers[4] = () => {};
+  // (message type 4, the server's heartbeat, is the connection watch's: connection.ts)
   // Message type 8 = a change on disk won over edits made here, kept in History: a notice (app/disknotice.ts)
   (provider as any).messageHandlers[MSG_NOTICE] = noticeHandler();
 
@@ -305,13 +296,9 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   let epoch: string | null = null;
   let stale = false;
   provider.on('connection-close', (ev: CloseEvent | null) => {
-    if (ev) lastConnInfo = `closed with code ${ev.code}${ev.reason ? ': ' + ev.reason : ''}`;
-    noteDisconnected();
-    emitSaveState();
     if (ev?.code === 4003) opts.onAccessChanged?.();
     if (ev?.code === 4001 || ev?.code === 4004) opts.onGone?.(ev.reason || 'document not available');
   });
-  provider.on('connection-error', () => { lastConnInfo = 'connection attempt failed'; noteDisconnected(); emitSaveState(); });
   // A remote update dispatched between a mouse click and the browser's (asynchronous)
   // `selectionchange` event would make ProseMirror write its stale state selection back into the
   // DOM and the click would be lost (the editor's selection is mapped through the remote change and
@@ -472,7 +459,6 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   const userCursorPos = (clientId: number): number | null => cursorPosition(view.state, checkedAwareness(provider.awareness), clientId);
   provider.on('status', (e: { status: string }) => {
     status.connected = e.status === 'connected';
-    if (status.connected) { disconnectedAt = 0; if (graceTimer) { clearTimeout(graceTimer); graceTimer = null; } } else noteDisconnected();
     pushStatus(); emitSaveState();
   });
   provider.on('sync', (s: boolean) => {
@@ -485,52 +471,10 @@ export function createEditor(opts: EditorOptions): EditorHandle {
     pushStatus(); emitSaveState();
   });
   provider.awareness.on('change', pushStatus);
-  // The browser's online/offline events give immediate feedback (the WebSocket itself only notices a
-  // dead connection through y-websocket's 30 s watchdog). They are hints only: after an "offline"
-  // event we keep trying to connect every few seconds, since the flag is wrong in some setups.
-  let retry: ReturnType<typeof setInterval> | null = null;
-  const stopRetry = () => { if (retry) { clearInterval(retry); retry = null; } };
-  const reconnect = () => { if (destroyed || stale) return; if (!provider.wsconnected) { provider.disconnect(); provider.connect(); } };
-  const onOnline = () => { stopRetry(); reconnect(); };
-  const onOffline = () => {
-    if (destroyed || stale) return;
-    provider.disconnect(); emitSaveState();
-    stopRetry();
-    retry = setInterval(() => { if (provider.wsconnected) stopRetry(); else reconnect(); }, 5000);
-  };
-  window.addEventListener('online', onOnline);
-  window.addEventListener('offline', onOffline);
   const protectUnstoredEdits = (event: BeforeUnloadEvent) => {
     if (saveState().pending && localWriteSeq > localSavedSeq) { event.preventDefault(); event.returnValue = ''; }
   };
   window.addEventListener('beforeunload', protectUnstoredEdits);
-  // Hidden tabs: the page's timers are throttled (Chrome wakes a long-hidden tab once a minute), so
-  // the presence renewal (every 15 s, the server drops a user's presence after 30 s) and the
-  // reconnect back-off timer fall behind, and the user appeared to go offline whenever their tab
-  // was covered. A worker's timer is not throttled: it renews the presence state when the page's
-  // own timer missed it and reconnects a dropped connection without waiting for the back-off.
-  const renewPresence = () => {
-    const aw = provider.awareness;
-    const meta = aw.meta.get(ydoc.clientID);
-    if (aw.getLocalState() !== null && (!meta || Date.now() - meta.lastUpdated >= 15000)) aw.setLocalState(aw.getLocalState());
-  };
-  const keepAlive = () => {
-    if (destroyed || stale) return;
-    if (provider.wsconnected) renewPresence();
-    else if (provider.shouldConnect && !provider.wsconnecting && provider.ws === null) provider.connect();
-  };
-  let heartbeat: Worker | null = null;
-  try {
-    heartbeat = new Worker(new URL('./heartbeat.ts', import.meta.url), { type: 'module' });
-    heartbeat.onmessage = keepAlive;
-  } catch { /* no worker support: the page timers still do their best */ }
-  // Back in the foreground: reconnect immediately (no back-off) and tell the others we are here.
-  const onVisible = () => {
-    if (document.visibilityState !== 'visible' || destroyed || stale) return;
-    if (!provider.wsconnected && !provider.wsconnecting) reconnect();
-    else if (provider.wsconnected) renewPresence();
-  };
-  document.addEventListener('visibilitychange', onVisible);
 
   // Cursor where it was the last time this document was open here (else at the start), once the
   // document is available: from the local copy, or from the server. Children (combined view) keep
@@ -589,13 +533,8 @@ export function createEditor(opts: EditorOptions): EditorHandle {
       unsubscribePrefs();
       window.removeEventListener('pagehide', flushCursor);
       destroyed = true;
-      stopRetry();
-      window.removeEventListener('online', onOnline);
-      window.removeEventListener('offline', onOffline);
+      connection.destroy();
       window.removeEventListener('beforeunload', protectUnstoredEdits);
-      document.removeEventListener('visibilitychange', onVisible);
-      heartbeat?.terminate();
-      if (graceTimer) clearTimeout(graceTimer);
       // the view and its binding first: they must be gone before the provider/awareness fire their last events
       view.destroy();
       sync.destroy();

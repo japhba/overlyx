@@ -9,7 +9,8 @@
 import * as Y from 'yjs';
 import { IndexeddbPersistence } from 'y-indexeddb';
 import { WebsocketProvider } from 'y-websocket';
-import { connectParams } from '@overlyx/core/collab/connect.ts';
+import { connectParams, REFUSAL_PARAMS } from '@overlyx/core/collab/connect.ts';
+import { watchConnection } from '../editor/connection';
 import * as decoding from 'lib0/decoding';
 import { splitDocId } from '@overlyx/core';
 import { deliverableInfo } from '@overlyx/core/html/deliverable.ts';
@@ -67,7 +68,7 @@ export function webHost(id: string, user: User): DeliverableHost & { destroy(): 
   // Load this history before connecting: an offline reopen must not start with a
   // fresh empty document, and histories from a replaced server file must not merge.
   const encrypted = isE2eDocId(id);
-  const provider = new WebsocketProvider(wsUrl, '', ydoc, { params: connectParams(id), disableBc: true, connect: false, ...(encrypted ? { WebSocketPolyfill: E2eSocket as unknown as typeof WebSocket } : {}) });
+  const provider = new WebsocketProvider(wsUrl, '', ydoc, { params: { ...connectParams(id), ...REFUSAL_PARAMS }, disableBc: true, connect: false, ...(encrypted ? { WebSocketPolyfill: E2eSocket as unknown as typeof WebSocket } : {}) });
   let persistence: IndexeddbPersistence | null = null;
   const handlers = (provider as unknown as { messageHandlers: ((enc: unknown, dec: decoding.Decoder, ...context: unknown[]) => void)[] }).messageHandlers;
   handlers[MSG_NOTICE] = noticeHandler();   // a change on disk won over edits made here (app/disknotice.ts)
@@ -178,7 +179,6 @@ export function webHost(id: string, user: User): DeliverableHost & { destroy(): 
     }
     emitSave();
   };
-  handlers[4] = () => {};
   handlers[5] = (_e, dec) => { if (!stale) Y.applyUpdate(ydoc, decoding.readVarUint8Array(dec), 'agent'); };
   provider.awareness.setLocalStateField('user', { name: user.name, color: user.color, username: user.username, avatar: user.avatar ?? null });
   ydoc.on('update', (_update: Uint8Array, origin: unknown) => {
@@ -204,9 +204,12 @@ export function webHost(id: string, user: User): DeliverableHost & { destroy(): 
     if (synced && !stale) readyListeners.forEach(callback => callback());
     emitSave();
   });
-  const onOnline = () => { if (!destroyed && !stale && localReady) { provider.disconnect(); provider.connect(); } emitSave(); };
-  const onOffline = () => { frames.disconnected(); provider.disconnect(); emitSave(); };
-  window.addEventListener('offline', onOffline); window.addEventListener('online', onOnline);
+  // kept, and judged by its own evidence, as the document editor's (editor/connection.ts)
+  const connection = watchConnection(provider, {
+    active: () => !destroyed && !stale && localReady,
+    onChange: () => emitSave(),
+    onRefused: why => { if (why === 'no-access') readOnly = true; },
+  });
   void (async () => {
     try {
       await checkLocalStorage('overlyx:' + id);
@@ -311,8 +314,11 @@ export function webHost(id: string, user: User): DeliverableHost & { destroy(): 
     online: () => provider.wsconnected,
     onStatus(cb) { provider.on('status', cb); return () => provider.off('status', cb); },
     readOnly: () => readOnly || stale,
-    saveState: () => ({ pending: pending(), localPending: localWriteSeq > localSavedSeq, localError,
-      state: stale ? 'stale' : navigator.onLine === false || !provider.wsconnected ? (localReady ? 'offline' : 'connecting') : !provider.synced ? 'connecting' : pending() ? 'saving' : 'saved' }),
+    saveState: () => {
+      const refused = provider.wsconnected ? null : connection.refused();
+      return { pending: pending(), localPending: localWriteSeq > localSavedSeq, localError, ...(refused ? { refused } : {}),
+        state: stale ? 'stale' : !provider.wsconnected ? (localReady || refused ? 'offline' : 'connecting') : !provider.synced ? 'connecting' : pending() ? 'saving' : 'saved' };
+    },
     discardLocal: async () => { await persistence?.destroy(); await new Promise<void>((resolve, reject) => { const request = indexedDB.deleteDatabase('overlyx:' + id); request.onsuccess = () => resolve(); request.onerror = () => reject(request.error); request.onblocked = () => reject(new Error('Close other tabs displaying this file, then reopen it.')); }); },
     onSaveState(cb) { saveListeners.add(cb); return () => saveListeners.delete(cb); },
     link: () => (e2e ? Promise.resolve(e2e.link()) : api.deliverableLink(project, path)),
@@ -363,7 +369,7 @@ export function webHost(id: string, user: User): DeliverableHost & { destroy(): 
     destroy() {
       text.unobserve(warmFrames); frames.destroy(); unregister();
       destroyed = true;
-      window.removeEventListener('offline', onOffline); window.removeEventListener('online', onOnline);
+      connection.destroy();
       saveListeners.clear(); readyListeners.clear();
       provider.awareness.setLocalState(null);
       provider.destroy();

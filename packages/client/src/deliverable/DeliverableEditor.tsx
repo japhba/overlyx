@@ -32,6 +32,7 @@ import { SlideView, fitScale, viewLevels, viewDetents, levelAt, levelAnchor, VIE
 import { pinchFactor, pinchLock, triGesture, type PinchLock } from './gestures';
 import { DetentPinch, stepOnto, type Detent, type Shown } from '../app/zoomdetent';
 import { holdReload } from '../app/update';
+import { refusalLabel, refusalTitle } from '../editor/refusal';
 import { zoomPill } from '../app/zoomhud';
 import { CornerButton, PanelIcon } from '../app/CornerButton';
 import { keepAwake } from '../app/wakelock';
@@ -4371,8 +4372,8 @@ export function DeliverableCanvas({ host, notify, chrome, place }: { host: Deliv
     <button class="dl-btn" title="Download" data-dl-download onClick={e => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); downloads(r.left, r.bottom + 4); }}>⤓</button>
   );
   const statusEl = (
-    <span role="status" aria-live="polite" class={'dl-status' + (online ? '' : ' off')} title={saveState?.localError ? 'Browser storage failed: ' + saveState.localError : saveState?.pending ? saveState.localPending === false ? 'Changes are kept in this browser and will sync when connected.' : 'Changes are still being written. Keep this tab open until Saved appears.' : undefined}>
-      {saveState?.state === 'stale' ? 'Older local copy' : !synced ? 'Loading…' : readOnly ? 'View only' : saveState?.state === 'offline' || !online ? (saveState?.pending ? saveState.localPending === false && !saveState.localError ? 'Offline — saved in this browser' : 'Offline — keep this tab open' : 'Offline') : saveState?.state === 'saving' ? 'Saving…' : saveState?.state === 'saved' ? 'Saved' : ''}
+    <span role="status" aria-live="polite" class={'dl-status' + (online ? '' : ' off')} title={saveState?.refused ? refusalTitle(saveState.refused) : saveState?.localError ? 'Browser storage failed: ' + saveState.localError : saveState?.pending ? saveState.localPending === false ? 'Changes are kept in this browser and will sync when connected.' : 'Changes are still being written. Keep this tab open until Saved appears.' : undefined}>
+      {saveState?.state === 'stale' ? 'Older local copy' : saveState?.refused ? refusalLabel(saveState.refused) : !synced ? 'Loading…' : readOnly ? 'View only' : saveState?.state === 'offline' || !online ? (saveState?.pending ? saveState.localPending === false && !saveState.localError ? 'Offline — saved in this browser' : 'Offline — keep this tab open' : 'Offline') : saveState?.state === 'saving' ? 'Saving…' : saveState?.state === 'saved' ? 'Saved' : ''}
     </span>
   );
   /** the side columns' ⋯: what the top row has besides the zoom and Present (a column has no room for all of it) */

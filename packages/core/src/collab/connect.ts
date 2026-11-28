@@ -16,3 +16,16 @@ export function hasModel(docId: string): boolean {
 export function connectParams(docId: string): Record<string, string> {
   return hasModel(docId) ? { doc: docId, model: String(MODEL) } : { doc: docId };
 }
+
+/**
+ * A refused connection (no session, no access to the document) used to be a bare HTTP status before
+ * the upgrade, which a browser cannot read — close code 1006, as for a network failure — so the editor
+ * retried for ever and said "offline". An editor that handles refusals (client editor/connection.ts)
+ * asks for them as close codes with these parameters: the server then accepts the upgrade and closes
+ * it at once with CLOSE_SIGNED_OUT or CLOSE_NO_ACCESS (server ws.ts). Both are in y-websocket's
+ * 4400–4499 range, after which it stops reconnecting — so an editor that does not ask (a bundle from
+ * before 28 Nov 2026 in an open tab, the whiteboard) keeps getting the bare status and retrying.
+ */
+export const REFUSAL_PARAMS: Readonly<Record<string, string>> = { refusal: 'close' };
+export const CLOSE_SIGNED_OUT = 4401, CLOSE_NO_ACCESS = 4403;
+export const wantsRefusalClose = (params: URLSearchParams): boolean => params.get('refusal') === 'close';
