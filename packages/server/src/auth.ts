@@ -84,16 +84,21 @@ export function signSession(u: SessionUser): string {
   return jwt.sign({ sub: String(u.id), username: u.username, ...(gen ? { gen } : {}) }, JWT_SECRET, { expiresIn: `${config.sessionDays}d` });
 }
 
-export function userFromToken(token: string | undefined): SessionUser | null {
+/** the account of a valid session cookie, and when the cookie was issued (seconds since the epoch) */
+function verifySession(token: string | undefined): { user: SessionUser; issuedAt: number } | null {
   if (!token) return null;
   try {
-    const payload = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }) as { sub: string; gen?: number };
+    const payload = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }) as { sub: string; gen?: number; iat?: number };
     const row = db.prepare('SELECT * FROM users WHERE id = ?').get(Number(payload.sub)) as UserRow | undefined;
     if (!row || (payload.gen ?? 0) !== sessionGeneration(row.id)) return null;
-    return toSessionUser(row);
+    return { user: toSessionUser(row), issuedAt: payload.iat ?? 0 };
   } catch {
     return null;
   }
+}
+
+export function userFromToken(token: string | undefined): SessionUser | null {
+  return verifySession(token)?.user ?? null;
 }
 
 export function userFromCookieHeader(cookieHeader: string | undefined): SessionUser | null {
@@ -107,8 +112,20 @@ declare global {
   namespace Express { interface Request { user?: SessionUser } }
 }
 
-export function authMiddleware(req: Request, _res: Response, next: NextFunction): void {
-  req.user = userFromCookieHeader(req.headers.cookie) ?? undefined;
+/** a session cookie older than this is issued again when the app uses it */
+const RENEW_AFTER_S = 24 * 3600;
+
+/**
+ * The signed-in account of a request. A session the app is using is renewed — a new cookie, valid
+ * `sessionDays` from now, once a day on the app's own requests (`/api/…`, never a static file a cache
+ * could keep) — so a session ends `sessionDays` after it was last used, not after the sign-in (until
+ * 28 Nov 2026 everybody was signed out mid-work a month after signing in, however much they used it).
+ * A password change still ends it: the renewed cookie carries the same session generation.
+ */
+export function authMiddleware(req: Request, res: Response, next: NextFunction): void {
+  const session = req.headers.cookie ? verifySession(parseCookie(req.headers.cookie).ol_session) : null;
+  req.user = session?.user;
+  if (session && req.path.startsWith('/api/') && Date.now() / 1000 - session.issuedAt > RENEW_AFTER_S) setSessionCookie(req, res, session.user);
   next();
 }
 
