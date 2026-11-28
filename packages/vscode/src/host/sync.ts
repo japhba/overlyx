@@ -58,7 +58,19 @@ interface FolderSync {
   /** since when the sync has not been in step (offline, an error, paused by git or a branch), and whether that was said */
   stoppedSince?: number | null;
   stopNoted?: boolean;
+  /** the state the usage statistics were last told of (in step, or not: offline or an error) — one event per change of it */
+  counted?: 'in' | 'out' | null;
 }
+
+/**
+ * What the anonymous usage statistics learn of a folder's sync: its changes of state — in step
+ * (`online`: started, or back, with how long it was not), the server out of reach (`offline`), an
+ * error (`failed`), the sign-in refused (`denied`) — and the rounds that did something: files sent or
+ * received (`changed`, with how long the round took), a change on both sides (`conflict`). Never a
+ * round that found nothing: one runs every minute and after every change on either side, and counted
+ * one by one (as "success", until 28 Nov 2026) they were 83,000 of a week's 100,000 events.
+ */
+export type SyncEvent = 'online' | 'offline' | 'failed' | 'denied' | 'changed' | 'conflict';
 
 const DEFAULT_HOST = 'https://overlyx.app';
 const hostName = (h: string) => new URL(h).host;
@@ -124,7 +136,7 @@ export async function nestedClones(root: string): Promise<string[]> {
   return found;
 }
 
-export function setupSync(context: vscode.ExtensionContext, report: (e: unknown, area: string) => void, track?: (outcome: 'success' | 'failed' | 'conflict', durationMs: number) => void): void {
+export function setupSync(context: vscode.ExtensionContext, report: (e: unknown, area: string) => void, track?: (outcome: SyncEvent, durationMs?: number) => void): void {
   const out = vscode.window.createOutputChannel('OverLyX Sync');
   const syncs = new Map<string, FolderSync>();
   const config = () => vscode.workspace.getConfiguration('overlyx');
@@ -170,10 +182,17 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
    * A spell out of step: offline, an error, paused by git or another branch — not "another window
    * syncs this clone" (it is in step there), not the user's own Pause (no engine then). It starts at
    * the first such status and ends at the next round in step; `stopNotice` says it once it lasts.
+   * The usage statistics hear of its start and end once (SyncEvent), not of the rounds in between.
    */
   function noteStopped(f: FolderSync, s: SyncStatus): void {
-    if (s.state === 'offline' || s.state === 'error' || (s.state === 'paused' && s.cause !== 'lock')) { f.stoppedSince ??= Date.now(); return; }
+    if (s.state === 'offline' || s.state === 'error' || (s.state === 'paused' && s.cause !== 'lock')) {
+      f.stoppedSince ??= Date.now();
+      // (paused by git or a branch is the user's own doing: not counted)
+      if (s.state !== 'paused' && f.counted !== 'out') { f.counted = 'out'; track?.(s.state === 'offline' ? 'offline' : 'failed'); }
+      return;
+    }
     if (s.state !== 'idle' && !(s.state === 'paused' && s.cause === 'lock')) return;
+    if (s.state === 'idle' && f.counted !== 'in') { track?.('online', f.counted === 'out' && f.stoppedSince ? Date.now() - f.stoppedSince : undefined); f.counted = 'in'; }
     if (f.stopNoted) vscode.window.setStatusBarMessage(`$(check) OverLyX: ${f.target.project} is in step again`, 8000);
     f.stoppedSince = null; f.stopNoted = false;
   }
@@ -198,6 +217,7 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
       // the credential stopped working (revoked, expired): sign in again
       disconnect(f);
       f.signin = true; f.problem = s.message;
+      track?.('denied');
       render(f);
       offerSignIn(f.target);
       return;
@@ -300,14 +320,13 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
     const round = engine.round.bind(engine);
     engine.round = async () => {
       const started = performance.now();
-      try {
-        const c = await round();
-        track?.(c.conflicts.length ? 'conflict' : 'success', performance.now() - started);
-        for (const l of describeChanges(c)) log(f.dir, l);
-        noticeConflicts(f, c);
-        noticeHeld(f, c.held ?? []);
-        return c;
-      } catch (e) { track?.('failed', performance.now() - started); throw e; }
+      const c = await round();   // (a round that fails changes the status: counted there, once per spell)
+      if (c.conflicts.length) track?.('conflict', performance.now() - started);
+      else if (c.sent.length || c.received.length) track?.('changed', performance.now() - started);
+      for (const l of describeChanges(c)) log(f.dir, l);
+      noticeConflicts(f, c);
+      noticeHeld(f, c.held ?? []);
+      return c;
     };
     await remember(f);
     if (disposed || syncs.get(f.dir) !== f || !enabled() || paused(f.dir)) return;
@@ -330,6 +349,7 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
     f.engine?.stop();
     f.engine = null;
     f.stoppedSince = null; f.stopNoted = false;   // (paused or signed out: said otherwise)
+    f.counted = null;
     render(f);
   }
 

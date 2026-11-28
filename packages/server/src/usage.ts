@@ -18,7 +18,7 @@ import express from 'express';
 import { db } from './db.ts';
 import { config } from './config.ts';
 import { allow, appVersion } from './feedback.ts';
-import { USAGE_NAMES, scrubDetail, usageSummary, DETAIL_MAX } from './usageReport.ts';
+import { USAGE_NAMES, scrubDetail, usageSummary, DETAIL_MAX, PER_ROUND_SYNC } from './usageReport.ts';
 import { isReliabilityContext, isReliabilityDurationBucket, parseReliabilityDetail } from '@overlyx/core/reliability.ts';
 import { parseInteractionDetail, isInteractionTarget, isClientBuildVersion } from '@overlyx/core/interactions.ts';
 import { sanitizeUsageEvents, validUsageSession, vscodeUsageMeta, parseMacroUsageDetail } from '@overlyx/core/usagePayload.ts';
@@ -63,6 +63,7 @@ export const storeUsage = db.transaction((session: string, events: unknown[], no
     let dt: number | null;
     if (e.name === 'interaction') {
       if (!parseInteractionDetail(e.detail) || !isInteractionTarget(e.where)) continue;
+      if (e.detail === PER_ROUND_SYNC) continue;   // (old extension builds: one per sync round)
       if (e.dt !== undefined && !isReliabilityDurationBucket(e.dt)) continue;
       detail = e.detail as string;
       ok = null;

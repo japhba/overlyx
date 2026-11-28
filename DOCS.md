@@ -911,8 +911,15 @@ blend.
   diagnostics below keep their own opt-in.
 * **VS Code anonymous usage** (`vscode/src/host/telemetry.ts`, `core/usagePayload.ts`): the
   editor, PDF and deliverable webviews use the same collector through the token-protected local
-  bridge. Native activation, command, open/close, save/edit, PDF build, sync-round and agent-handoff
-  outcomes add fixed categories and duration buckets. Events pass through VS Code's
+  bridge. Native activation, command, open/close, save/edit, PDF build, sync and agent-handoff
+  outcomes add fixed categories and duration buckets. The sync of a folder is counted by its changes
+  of state and its work, not by its rounds (one runs every minute and after every change on either
+  side; counted per round they were 83 % of a week's events, 28 Nov 2026): `online` when it starts or
+  comes back in step (with how long it was out), `offline` / `failed` once when a spell out of step
+  begins, `denied` when the sign-in stops working, `changed` for a round that moved files, `conflict`
+  for one with conflicts. Older extension builds still send `extension-sync success` per round: the
+  receiver drops exactly that event (`usageReport.ts PER_ROUND_SYNC`) and the report leaves out the
+  rows stored before. Events pass through VS Code's
   `TelemetryLogger` with built-in common properties disabled; they require telemetry level **All**
   and `overlyx.usageStatistics` (on by default). Error/crash-only levels send no usage. The separate
   `overlyx.errorReports` setting continues to control sanitized crash reports. No account, file,

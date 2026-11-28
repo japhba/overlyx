@@ -17,7 +17,17 @@
 import { scrubUsageDetail, parseMacroUsageDetail } from '@overlyx/core/usagePayload.ts';
 import type Database from 'better-sqlite3';
 import { isReliabilityContext, isReliabilityDurationBucket, parseReliabilityDetail } from '@overlyx/core/reliability.ts';
-import { parseInteractionDetail, isInteractionTarget, isClientBuildVersion } from '@overlyx/core/interactions.ts';
+import { parseInteractionDetail, isInteractionTarget, isClientBuildVersion, makeInteractionDetail } from '@overlyx/core/interactions.ts';
+
+/**
+ * What VS Code extension builds before 28 Nov 2026 sent after every round of a synced folder's sync —
+ * one a minute per folder, and one after every change on either side: 83,000 of a week's 100,000
+ * events, drowning the rest of the report. Newer builds send the sync's changes of state and the
+ * rounds that moved files instead (vscode host/sync.ts SyncEvent) and never this event. Old builds
+ * keep sending it until they update themselves: it is not stored (usage.ts storeUsage), and the rows
+ * stored before are left out of the summary until the retention removes them.
+ */
+export const PER_ROUND_SYNC = makeInteractionDetail('extension-sync', 'success')!;
 
 export const USAGE_NAMES = ['session', 'view', 'menu', 'palette', 'shortcut', 'toolbar', 'key', 'chord', 'key-unbound', 'dialog', 'notice', 'error', 'undo', 'redo', 'reliability', 'interaction', 'macro'] as const;
 export type UsageName = (typeof USAGE_NAMES)[number];
@@ -109,7 +119,8 @@ const median = (xs: number[]): number | null => {
 export function usageSummary(db: Database.Database, opts: { sinceMs: number; untilMs?: number; top?: number }): UsageSummary {
   const until = opts.untilMs ?? Date.now();
   const top = opts.top ?? 40;
-  const rows = db.prepare('SELECT session, at, name, detail, ok, place, dt, version FROM usage_events WHERE at >= ? AND at < ? ORDER BY session, at, id').all(opts.sinceMs, until) as UsageRow[];
+  const rows = db.prepare(`SELECT session, at, name, detail, ok, place, dt, version FROM usage_events
+    WHERE at >= ? AND at < ? AND NOT (name = 'interaction' AND detail = ?) ORDER BY session, at, id`).all(opts.sinceMs, until, PER_ROUND_SYNC) as UsageRow[];
   return summarise(rows, { since: opts.sinceMs, until, top });
 }
 

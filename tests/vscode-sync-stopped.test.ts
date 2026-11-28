@@ -44,12 +44,14 @@ vi.mock('vscode', () => ({
 vi.mock('../packages/cli/bin/overlyx.js', () => ({
   syncTarget: async (dir: string) => mock.targets.get(dir) ?? null,
   knownSyncHosts: () => ['https://overlyx.app'],
+  describeChanges: () => [],
   syncEngineFor: vi.fn(async (_dir: string, o: any) => {
     const engine = {
       o, status: { state: 'idle', message: '', conflicts: [], waiting: [], notSent: [] },
-      round: vi.fn(),
+      round: vi.fn(), inner: null as any,
       watch: vi.fn(() => new Promise<void>(() => {})), stop: vi.fn(), poke: vi.fn(),
     };
+    engine.inner = engine.round;   // (setupSync wraps round: this is the engine's own)
     mock.engines.push(engine); return { engine };
   }),
 }));
@@ -112,4 +114,54 @@ it('says once that a folder has been out of step for a while, not for another wi
   status({ state: 'paused', cause: 'branch', message: 'on branch draft — the sync runs on main' });
   await vi.advanceTimersByTimeAsync(STOP_NOTICE_MS + 60_000);
   expect(warn).toHaveBeenCalledTimes(2);
+});
+
+/**
+ * The usage statistics hear of the sync's changes of state and of the rounds that moved files — not
+ * of every round: one runs each minute and after every change on either side, and "extension-sync
+ * success" per round was 83,351 of a week's 100,797 events (28 Nov 2026).
+ */
+it('counts what the sync did and when it went out of step and came back, never one event per round', async () => {
+  const dir = path.join(root, 'paper');
+  fs.mkdirSync(path.join(dir, '.git', 'overlyx-sync'), { recursive: true });
+  mock.targets.set(dir, { host: 'https://overlyx.app', project: 'example/paper', remote: 'origin' });
+  mock.folders = [{ uri: { scheme: 'file', fsPath: dir } }];
+  const ctx = { globalState: memento(), workspaceState: memento(), subscriptions: [] };
+  contexts.push(ctx);
+  const events: [string, number | undefined][] = [];
+  setupSync(ctx as never, e => { throw e; }, (outcome, ms) => events.push([outcome, ms]));
+  await vi.waitFor(() => expect(mock.engines[0]?.watch).toHaveBeenCalledOnce());
+  const e = mock.engines[0];
+  const status = (patch: Record<string, unknown>) => { e.status = { ...e.status, ...patch }; e.o.onStatus(e.status); };
+  const quiet = { sent: [], received: [], conflicts: [], waiting: [], notSent: [], held: [], errors: [] };
+  const round = async (c: Record<string, unknown> = {}) => { e.inner.mockResolvedValueOnce({ ...quiet, ...c }); status({ state: 'syncing' }); await e.round(); status({ state: 'idle', message: '' }); };
+
+  for (let i = 0; i < 5; i++) await round();                    // in step, nothing to do: said once
+  expect(events.map(x => x[0])).toEqual(['online']);
+  await round({ sent: [{ path: 'main.tex', status: 'applied' }] });
+  await round({ received: [{ path: 'refs.bib' }] });
+  await round({ sent: [{ path: 'main.tex', status: 'conflict', conflicts: 1 }], conflicts: [{ path: 'main.tex', kind: 'tracked', count: 1 }] });
+  expect(events.map(x => x[0])).toEqual(['online', 'changed', 'changed', 'conflict']);
+  expect(typeof events[1][1]).toBe('number');
+
+  events.length = 0;
+  status({ state: 'paused', cause: 'lock', message: 'synced by another process' });   // in step, by another window: nothing to count
+  status({ state: 'idle', message: '' });
+  expect(events).toEqual([]);
+
+  status({ state: 'offline', message: 'cannot reach https://overlyx.app' });
+  for (let i = 0; i < 4; i++) {                                   // retries that fail: the same spell
+    e.inner.mockRejectedValueOnce(new Error('cannot reach https://overlyx.app'));
+    status({ state: 'syncing' });
+    await e.round().catch(() => undefined);
+    status({ state: i % 2 ? 'error' : 'offline', message: 'cannot reach https://overlyx.app' });
+  }
+  await vi.advanceTimersByTimeAsync(40_000);
+  await round();
+  expect(events.map(x => x[0])).toEqual(['offline', 'online']);
+  expect(events[1][1]).toBeGreaterThanOrEqual(40_000);              // how long it was out of step
+
+  events.length = 0;
+  status({ state: 'signin', message: '401 Unauthorized' });         // the sign-in stopped working
+  expect(events.map(x => x[0])).toEqual(['denied']);
 });

@@ -52,7 +52,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
   context.subscriptions.push(telemetry);
   telemetry.track('extension-activate', 'success');
   const registerCommand = (id: string, run: (...args: any[]) => unknown): vscode.Disposable => {
-    const action: InteractionAction = /build/i.test(id) ? 'extension-build' : /open/i.test(id) ? 'extension-open' : /sync/i.test(id) ? 'extension-sync' : /update/i.test(id) ? 'extension-update' : 'extension-command';
+    const action: InteractionAction = /build/i.test(id) ? 'extension-build' : /open/i.test(id) ? 'extension-open' : /update/i.test(id) ? 'extension-update' : 'extension-command';
     return vscode.commands.registerCommand(id, (...args: unknown[]) => {
       if (id === 'overlyx.editorKey') return run(...args);
       const started = performance.now();

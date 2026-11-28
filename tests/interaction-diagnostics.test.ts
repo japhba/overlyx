@@ -52,6 +52,25 @@ describe('detailed interaction storage and reports', () => {
     expect(rows[0]).toMatchObject({ dt: 500 });
   });
 
+  it('neither stores nor reports the per-round "extension-sync success" of old extension builds; the sync\'s changes of state are kept', () => {
+    db.exec('DELETE FROM usage_events');
+    const now = Date.now();
+    const perRound = makeInteractionDetail('extension-sync', 'success')!;
+    // (a row stored before the receiver dropped them)
+    db.prepare("INSERT INTO usage_events (session, at, name, detail, place) VALUES ('cccccccccccccccc', ?, 'interaction', ?, 'ui')").run(now - 1000, perRound);
+    const stored = storeUsage('abcdef0123456789', [
+      ...Array.from({ length: 50 }, () => ({ name: 'interaction', detail: perRound, where: 'ui', dt: 250 })),
+      { name: 'interaction', detail: makeInteractionDetail('extension-sync', 'changed'), where: 'ui', dt: 500 },
+      { name: 'interaction', detail: makeInteractionDetail('extension-sync', 'offline'), where: 'ui' },
+      { name: 'interaction', detail: makeInteractionDetail('extension-sync', 'online'), where: 'ui', dt: 30000 },
+      { name: 'interaction', detail: makeInteractionDetail('extension-sync', 'failed'), where: 'ui' },
+    ], now);
+    expect(stored).toBe(4);
+    const summary = usageSummary(db, { sinceMs: now - 30000, untilMs: now + 1 });
+    expect(summary.interactions.events).toBe(4);
+    expect(summary.interactions.details.map(d => d.key).sort()).toEqual(['changed', 'failed', 'offline', 'online'].map(o => `ui: ${makeInteractionDetail('extension-sync', o as 'changed')}`));
+  });
+
   it('reports bounded action trails without crossing page-load sessions or copying free text', () => {
     db.exec('DELETE FROM usage_events');
     const now = Date.now();
