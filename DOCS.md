@@ -336,7 +336,10 @@ blend.
   the call; edits that arrive while a save's text is made leave the document dirty and outside that
   save's *All changes saved*; a change written to the file meanwhile is merged before writing (a
   file that changes again during each of three rounds is not written over: the save fails for the
-  moment, *the file kept changing on disk*, and retries); a file deleted meanwhile is not re-created. A document whose save took a while (seconds, a big one)
+  moment, *the file kept changing on disk*, and retries); a file deleted meanwhile is not re-created.
+  A file removed for good (still gone 1.5 s later) closes its document: its text is kept as a
+  version *file removed on disk* and its stored state is dropped, so a later file of that name opens
+  as it is (the state used to be merged into it). A document whose save took a while (seconds, a big one)
   is saved at most every other such period while people type in it; an idle one still 1.5 s after
   the last change. A client's first sync of a document over 100 kB is encoded by the worker too,
   and a big document opened from its file is applied in steps. A worker that dies is replaced and

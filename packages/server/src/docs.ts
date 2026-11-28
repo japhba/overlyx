@@ -1454,8 +1454,15 @@ export class DocManager {
   async reset(id: string): Promise<void> {
     const doc = this.docs.get(id);
     if (doc) await this.closeDoc(doc, 'its history was reset', 'document reset');
-    db.prepare('DELETE FROM ydocs WHERE id = ?').run(id);
-    db.prepare('DELETE FROM ydocs_saved WHERE id = ?').run(id);
+    this.dropStored(id);
+  }
+
+  /** Forget a document's stored state (its history reset, its file gone: what it held is in the file or a version). */
+  private dropStored(id: string): void {
+    db.transaction(() => {
+      db.prepare('DELETE FROM ydocs WHERE id = ?').run(id);
+      db.prepare('DELETE FROM ydocs_saved WHERE id = ?').run(id);
+    })();
   }
 
   /** Save and close every open document of a project (before it is moved away / deleted). */
@@ -1584,6 +1591,8 @@ export class DocManager {
     if (this.docs.get(doc.id) !== doc) return;
     doc.snapshot('file removed on disk', text);
     this.drop(doc, 'document removed');
+    // its stored state goes too: left behind (unsaved), it was merged into whatever file took the name later
+    this.dropStored(doc.id);
   }
 
   /** Forget an open document without saving it (its file is gone / the project was removed). */
