@@ -149,9 +149,31 @@ function liveText(project: string, rel: string): string | null {
   return d instanceof HtmlDoc ? d.html.toString() : null;
 }
 
-async function readDocument(project: string, path: string) {
+/** `from_line` / `to_line` of read_document: 1-based, inclusive */
+interface LineRange { fromLine?: number; toLine?: number }
+const ranged = (r: LineRange) => r.fromLine !== undefined || r.toLine !== undefined;
+
+/** `text`, or its lines from … to of a range, with how many lines there are (`total_lines`, how far a range can go) */
+function linesOf(text: string, r: LineRange): { text: string; from_line?: number; to_line?: number; total_lines: number } {
+  const lines = text.split('\n');
+  if (!ranged(r)) return { text, total_lines: lines.length };
+  const from = r.fromLine ?? 1, to = Math.min(lines.length, r.toLine ?? lines.length);
+  if (from > lines.length) throw new Error(`from_line ${from} is past the end: there are ${lines.length} lines.`);
+  if (to < from) throw new Error(`to_line ${to} is before from_line ${from}.`);
+  return { text: lines.slice(from - 1, to).join('\n'), from_line: from, to_line: to, total_lines: lines.length };
+}
+
+/**
+ * read_document: the source and the paragraph list (index, layout, depth, plain text) — as before
+ * without arguments. An agent may ask for less: `paragraphs: false` leaves the list out (it repeats
+ * the text: half the answer); a line range gives those lines of the source only (the list then only
+ * on `paragraphs: true`).
+ */
+async function readDocument(project: string, path: string, opts: LineRange & { paragraphs?: boolean } = {}) {
   const doc = await manager.open(`${project}/${path}`);
-  return doc.readAsync();   // { text, paragraphs: index, layout, depth, text }
+  const r = await doc.readAsync();
+  const withParagraphs = ranged(opts) ? opts.paragraphs === true : opts.paragraphs !== false;
+  return { ...linesOf(r.text, opts), ...(withParagraphs ? { paragraphs: r.paragraphs } : {}) };
 }
 
 async function proposeEdit(project: string, author: string, path: string, paragraphIndex: number, newText: string) {
@@ -706,10 +728,24 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
   }, async ({ project: p }) => { try { return ok(listDocuments(need(p, 'view'))); } catch (e) { return fail(e); } });
 
   register('read_document', {
-    description: 'Read a document: its full source (`text` — what edit_document edits: LaTeX, markdown, or a web article\'s whole HTML page), and its paragraphs (index, layout, depth, plain text) for the paragraph tools and add_comment.',
+    description: 'Read a document: its full source (`text` — what edit_document edits: LaTeX, markdown, or a web article\'s whole HTML page), and its paragraphs (index, layout, depth, plain text) for the paragraph tools and add_comment. To ask for less of a long document: paragraphs: false leaves the paragraph list out (it repeats the text — half the answer); from_line / to_line give those lines of the source only (total_lines says how many there are).',
     annotations: { readOnlyHint: true },
-    inputSchema: { ...projArg, path: z.string().describe('Project-relative path, e.g. "main.tex"') },
-  }, async ({ project: p, path }) => { try { const project = need(p, 'view'); if (isHtmlPath(path) && !isDocumentFile(project, path)) return ok(readFile(project, path)); const r = await readDocument(project, path); await present(project, path); return ok(r); } catch (e) { return fail(e); } });
+    inputSchema: {
+      ...projArg, path: z.string().describe('Project-relative path, e.g. "main.tex"'),
+      from_line: z.number().int().positive().optional().describe('Only the source from this line on (1-based)'),
+      to_line: z.number().int().positive().optional().describe('… up to and including this line'),
+      paragraphs: z.boolean().optional().describe('The paragraph list: given with the whole source unless false; with a line range only when true (then all of it)'),
+    },
+  }, async ({ project: p, path, from_line, to_line, paragraphs }) => {
+    try {
+      const project = need(p, 'view');
+      // (an HTML deck, poster or page: its text, as read_file gives it)
+      if (isHtmlPath(path) && !isDocumentFile(project, path)) { const f = readFile(project, path); return ok({ ...f, ...linesOf(f.text, { fromLine: from_line, toLine: to_line }) }); }
+      const r = await readDocument(project, path, { fromLine: from_line, toLine: to_line, paragraphs });
+      await present(project, path);
+      return ok(r);
+    } catch (e) { return fail(e); }
+  });
 
   register('propose_edit', {
     description: 'Replace the text of one plain-text paragraph. Always applied as a tracked change (insertions/deletions attributed to this agent) — never a silent overwrite. Only works on paragraphs with no formulas/insets and uniform formatting; read_document first to get paragraph indices and check the content is plain.',

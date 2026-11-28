@@ -5782,8 +5782,11 @@ process does not know (after a restart) brings its session back for the same tok
 session answers 405. `OVERLYX_MCP_LOG=1` logs one line per request (method, tool, session,
 clientInfo, User-Agent). It exposes these tools:
 
-* `list_documents`, `read_document(path)` — the project's `.tex` documents and one document's LaTeX
-  source (`text`) plus its paragraphs (index, layout, depth, plain text) for the paragraph tools.
+* `list_documents`, `read_document(path, from_line?, to_line?, paragraphs?)` — the project's `.tex`
+  documents and one document's LaTeX source (`text`) plus its paragraphs (index, layout, depth, plain
+  text) for the paragraph tools, and `total_lines`. An agent can ask for less of a long document:
+  `paragraphs: false` leaves the list out (it repeats the text), a line range gives those lines only
+  (the list then only with `paragraphs: true`). Without the new arguments the answer is as before.
 * `edit_document(path, old_text, new_text, replace_all?)` — the main edit tool: replaces a passage of
   the document's source, the way coding agents edit files. `old_text` must be unique; it may be
   quoted without the `\lyxadded`/`\lyxdeleted` markup the source contains, and with different

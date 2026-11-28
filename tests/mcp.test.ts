@@ -227,6 +227,22 @@ describe('read_document / list_documents', () => {
     expect(r.paragraphs.map((p: any) => p.text)).toEqual(['First paragraph text.', 'Second paragraph here.']);
     expect(r.text).toContain('First paragraph text.');
   });
+
+  it('reads less when asked: the source without the paragraph list, or a range of its lines', async () => {
+    const t = createMcpToken(owner.id, 'agent').token;
+    const whole = await callTool(t, 'read_document', { path: 'a.tex' });
+    const lines = whole.text.split('\n');
+    expect(whole.total_lines).toBe(lines.length);
+    const bare = await callTool(t, 'read_document', { path: 'a.tex', paragraphs: false });
+    expect(bare.paragraphs).toBeUndefined();
+    expect(bare.text).toBe(whole.text);
+    const at = lines.findIndex((l: string) => l.includes('Second paragraph')) + 1;
+    const part = await callTool(t, 'read_document', { path: 'a.tex', from_line: at, to_line: at });
+    expect(part).toMatchObject({ text: lines[at - 1], from_line: at, to_line: at, total_lines: lines.length });
+    expect(part.paragraphs).toBeUndefined();
+    expect((await callTool(t, 'read_document', { path: 'a.tex', from_line: at, paragraphs: true })).paragraphs).toHaveLength(2);
+    await expect(callTool(t, 'read_document', { path: 'a.tex', from_line: lines.length + 1 })).rejects.toThrow(/past the end/);
+  });
 });
 
 describe('propose_edit', () => {
