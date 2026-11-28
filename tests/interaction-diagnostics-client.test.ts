@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorState, NodeSelection, TextSelection } from 'prosemirror-state';
 import { EditorView } from 'prosemirror-view';
 import { deleteSelection } from 'prosemirror-commands';
@@ -7,7 +7,8 @@ import { schema } from '../packages/core/src/schema.ts';
 import { parseInteractionDetail } from '../packages/core/src/interactions.ts';
 import { recordInteraction, recordUsage, pendingUsage, resetUsageForTests, interactionTarget } from '../packages/client/src/usage.ts';
 import { setPref } from '../packages/client/src/prefs.ts';
-import { usagePlugin } from '../packages/client/src/editor/plugins/usage.ts';
+import { usagePlugin, awaitOutcome } from '../packages/client/src/editor/plugins/usage.ts';
+import { ySyncPluginKey } from '../packages/client/src/editor/collab.ts';
 
 beforeEach(() => { resetUsageForTests(); setPref('usageStats', true); });
 afterEach(() => { resetUsageForTests(); delete (navigator as any).globalPrivacyControl; document.body.replaceChildren(); });
@@ -70,10 +71,44 @@ describe('content-free detailed diagnostics', () => {
       });
       try {
         view.dom.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true }));
-        await Promise.resolve();
+        // nothing is known yet for a key that may still act; the next action settles it
+        expect(pendingUsage().filter(e => e.name === 'interaction')).toHaveLength(editable ? 0 : 1);
+        view.dom.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
         const event = pendingUsage().find(e => e.name === 'interaction')!;
         expect(parseInteractionDetail(event.detail)).toMatchObject({ action: 'delete', outcome: editable ? 'unchanged' : 'denied', state: { content: 'empty' } });
       } finally { view.destroy(); }
     }
+  });
+
+  // What every real Backspace in a text is: the browser deletes the character as the key's default
+  // action — after the microtask checkpoint that follows each listener — and ProseMirror reads the
+  // change from the DOM. Decided in a microtask of the keydown listener, all of them read "unchanged".
+  it('records a key whose change arrives after the keydown listeners as changed, a dead key as unchanged', async () => {
+    vi.useFakeTimers();
+    const doc = schema.nodes.doc.create(null, schema.nodes.paragraph.create(null, schema.text('word')));
+    const view = new EditorView(document.body.appendChild(document.createElement('div')), {
+      state: EditorState.create({ doc, selection: TextSelection.create(doc, 5), plugins: [usagePlugin()] }),
+    });
+    const outcomes = () => pendingUsage().filter(e => e.name === 'interaction').map(e => { const d = parseInteractionDetail(e.detail)!; return `${d.action} ${d.outcome}`; });
+    try {
+      view.dom.dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true, cancelable: true }));
+      await Promise.resolve();
+      view.dispatch(view.state.tr.delete(4, 5));   // the native deletion, read from the DOM
+      expect(outcomes()).toEqual(['backspace changed']);
+      // a co-author's change is not this key's doing
+      view.dom.dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true, cancelable: true }));
+      view.dispatch(view.state.tr.insertText('!', 1).setMeta(ySyncPluginKey, { isChangeOrigin: true }));
+      vi.advanceTimersByTime(300);
+      expect(outcomes()).toEqual(['backspace changed', 'backspace unchanged']);
+      // a paste parsed on the server: decided when the answer is in
+      let answer!: () => void;
+      view.dom.dispatchEvent(new Event('paste', { bubbles: true, cancelable: true }));
+      void awaitOutcome(view, new Promise<void>(r => { answer = r; }));
+      vi.advanceTimersByTime(2000);
+      expect(outcomes()).toHaveLength(2);
+      view.dispatch(view.state.tr.insertText('pasted', 1));
+      answer();
+      expect(outcomes()).toEqual(['backspace changed', 'backspace unchanged', 'paste changed']);
+    } finally { view.destroy(); vi.useRealTimers(); }
   });
 });

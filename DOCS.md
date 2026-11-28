@@ -875,7 +875,14 @@ blend.
   canvas operation kinds, HTTP outcomes, connectivity, resource errors and sampled slow tasks are
   recorded as categories. Deletion events distinguish removed / emptied / changed / unchanged /
   read-only, with selection kind, empty/filled note, inline/margin/collapsed display, access and
-  tracking state. No DOM labels, input values, clipboard contents, text, HTML, element paths,
+  tracking state. An editing key's or paste's outcome is decided from what follows it
+  (`editor/plugins/usage.ts`): *changed* with the editor's own next document change, *unchanged*
+  when the next action comes or 250 ms pass without one (ProseMirror acts in a later listener, a
+  Backspace in a text is the browser's own deletion read from the DOM afterwards, iOS answers Enter
+  up to 200 ms later), and a paste that waits for the server (LaTeX, markdown, an image) when its
+  work has settled (`awaitOutcome`). Until 28 Nov 2026 it was decided in a microtask of the keydown
+  listener, which reported every key as *unchanged*: `text: backspace/enter/paste unchanged` counts
+  from before that date say nothing. No DOM labels, input values, clipboard contents, text, HTML, element paths,
   coordinates, file names, URLs, account IDs or document IDs enter this schema. Events use the
   existing random page-load session, usage switch and Global Privacy Control. VS Code uses the host-gated channel described below.
   They expire after 30 days. `/api/admin/usage` and `scripts/usage-report.ts` include counts by

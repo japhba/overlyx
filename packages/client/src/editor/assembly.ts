@@ -53,7 +53,7 @@ import { spellPlugin, misspelledAt, spellSuggest } from './spell/plugin';
 import { aiRewritePlugin } from './ai/rewrite';
 import { aiCompletePlugin } from './ai/complete';
 import { macroDefsPlugin } from './macrodefs';
-import { usagePlugin } from './plugins/usage';
+import { usagePlugin, awaitOutcome } from './plugins/usage';
 import { linksPlugin, installLinks, openLink, openLinkBox, pasteLinkOverSelection } from './links';
 import { MathInlineView, MathDisplayView, MacroView } from './nodeviews/math';
 import { InsetView } from './nodeviews/inset';
@@ -347,14 +347,14 @@ export function editorViewProps(o: ViewPropsOptions): Pick<EditorProps, 'nodeVie
       // an image on the clipboard (a screenshot, a copied image file): upload it, insert a graphics inset
       const images = imageFiles(event.clipboardData);
       if (images.length) {
-        if (!viewOnly()) void insertImageFiles(view, images);
+        if (!viewOnly()) void awaitOutcome(view, insertImageFiles(view, images));
         return true;
       }
       const text = event.clipboardData?.getData('text/plain');
       // (objects or words copied on a slide: their text, its formulas' TeX — parsed below as formulas)
       const html = event.clipboardData?.getData('text/html')?.replace(/^[\s\S]*<!--overlyx-(?:objects|tex)\b[\s\S]*$/, '');
       // SVG markup on the text clipboard ("Copy as SVG" in drawing tools): an image, not text
-      if (text && !viewOnly() && isSvgMarkup(text)) { void insertImageFiles(view, [svgFile(text)]); return true; }
+      if (text && !viewOnly() && isSvgMarkup(text)) { void awaitOutcome(view, insertImageFiles(view, [svgFile(text)])); return true; }
       // an address pasted over selected text: the text becomes a link to it (Google Docs)
       if (text && !viewOnly() && pasteLinkOverSelection(view, text)) return true;
       /** plain text without LaTeX: LyX semantics (blank line = new paragraph, no HTML structure) */
@@ -380,13 +380,13 @@ export function editorViewProps(o: ViewPropsOptions): Pick<EditorProps, 'nodeVie
         }
         // a markdown document: markdown pasted as text arrives as structure
         if (!viewOnly() && (isMarkdownDoc(view.dom.dataset.docId ?? o.docId) || isArticleDoc(view.dom.dataset.docId ?? o.docId)) && looksLikeMarkdown(text)) {
-          void pasteMarkdown(view, text);
+          void awaitOutcome(view, pasteMarkdown(view, text));
           return true;
         }
         // pasted LaTeX (a \command, $…$, \[ …) is parsed on the server against this document's own
         // preamble and inserted as real structure — sections, formulas, citations, lists
         if (!viewOnly() && /\\[a-zA-Z]+|\\\[|\\\(|\$[^$\n][^$]*\$/.test(text)) {
-          void pasteLatex(view, view.dom.dataset.docId ?? o.docId, text);
+          void awaitOutcome(view, pasteLatex(view, view.dom.dataset.docId ?? o.docId, text));
           return true;
         }
         // (other code: its lines, as ProseMirror reads the HTML — below)
@@ -404,7 +404,7 @@ export function editorViewProps(o: ViewPropsOptions): Pick<EditorProps, 'nodeVie
       const images = imageFiles(event.dataTransfer);
       if (!images.length) { editorContext.notify?.('Only images can be dropped into the text — other files go into the file browser', 'error'); return true; }
       const pos = view.posAtCoords({ left: event.clientX, top: event.clientY });
-      void insertImageFiles(view, images, pos ? pos.pos : null);
+      void awaitOutcome(view, insertImageFiles(view, images, pos ? pos.pos : null));
       return true;
     },
   };
