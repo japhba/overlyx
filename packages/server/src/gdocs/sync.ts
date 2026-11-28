@@ -353,6 +353,8 @@ async function runSync(docId: string, opts: { pullTracked?: boolean } = {}): Pro
       .run(doc.textOf(withComments), JSON.stringify(strip(readGoogle(raw).blocks)), link.comments, Date.now(), after.version ?? null, JSON.stringify(report.warnings), docId);
     // the tabs of a Google Doc that is a group here: tabs made there since become documents, titles and order follow
     if (whole) { const g = await reconcileGroup(docId, link, whole); report.warnings.push(...g.warnings); report.notes.push(...g.notes); }
+    // (a manual sync that works ends the automatic one's back-off)
+    failures.delete(docId);
     return report;
   } catch (e) {
     // Keep the last successful sync time: saved local edits still need an automatic retry.
@@ -778,6 +780,21 @@ let timer: NodeJS.Timeout | null = null;
 const authSaid = new Set<string>();
 
 /**
+ * Automatic syncs that failed, by document: how many in a row, and when the next is due — at the
+ * next pass after the first failure (as before), then 2, 4, 8 … intervals later, an hour at most. A
+ * Google Doc that was deleted, access withdrawn there or a rate limit that lasts is then asked about
+ * a few times an hour, not every minute for ever (with a log line each time). In memory: a restarted
+ * server tries at once. Any sync that works clears it — a manual one too, which always runs.
+ */
+const failures = new Map<string, { n: number; due: number }>();
+const BACKOFF_MAX_MS = 60 * 60_000;
+function backOff(docId: string, intervalMs: number): void {
+  const n = (failures.get(docId)?.n ?? 0) + 1;
+  // (half an interval early: the pass that comes that many intervals later is not missed by a few milliseconds)
+  failures.set(docId, { n, due: Date.now() + Math.min(intervalMs * 2 ** (n - 1), BACKOFF_MAX_MS) - intervalMs / 2 });
+}
+
+/**
  * Every minute: each linked document with `auto` whose document was saved since its last sync,
  * or whose Google Doc changed (Drive's version), is synced. Started by the server.
  */
@@ -788,19 +805,21 @@ export function startAutoSync(intervalMs = 60_000): void {
   timer = setInterval(() => {
     if (ticking) return;
     ticking = true;
-    void tick().catch(e => console.warn(`[gdocs] automatic sync: ${(e as Error).message}`)).finally(() => { ticking = false; });
+    void tick(intervalMs).catch(e => console.warn(`[gdocs] automatic sync: ${(e as Error).message}`)).finally(() => { ticking = false; });
   }, intervalMs);
   timer.unref();
 }
 
-async function tick(): Promise<void> {
+/** One pass of the automatic sync (exported for the tests). */
+export async function tick(intervalMs = 60_000): Promise<void> {
   const links = db.prepare('SELECT * FROM gdocs_links WHERE auto = 1').all() as LinkRow[];
   for (const l of links) {
     if (running.has(l.doc_id)) continue;
     // a document that is gone (deleted, its project removed) is not synced any more
-    if (!documentExists(l.doc_id)) { unlink(l.doc_id); continue; }
+    if (!documentExists(l.doc_id)) { unlink(l.doc_id); failures.delete(l.doc_id); continue; }
     // nor is one whose linker lost access to it
-    if (!linkerMayEdit(l)) { unlink(l.doc_id); console.log(`[gdocs] ${l.doc_id}: unlinked (its linker may not edit it any more)`); continue; }
+    if (!linkerMayEdit(l)) { unlink(l.doc_id); failures.delete(l.doc_id); console.log(`[gdocs] ${l.doc_id}: unlinked (its linker may not edit it any more)`); continue; }
+    if (Date.now() < (failures.get(l.doc_id)?.due ?? 0)) continue;
     try {
       const open = manager.docs.get(l.doc_id) as OpenDoc | undefined;
       const changedHere = !!open && open.lastSavedAt > (l.last_sync ?? 0);
@@ -810,11 +829,14 @@ async function tick(): Promise<void> {
         changedThere = !!f.version && f.version !== l.last_version;
       }
       if (changedHere || changedThere) await syncDoc(l.doc_id);
+      failures.delete(l.doc_id);
     } catch (e) {
+      backOff(l.doc_id, intervalMs);
+      // (what failed before the sync began — Drive's answer about the file — is shown on the link too)
+      db.prepare('UPDATE gdocs_links SET last_error = ? WHERE doc_id = ?').run((e as Error).message, l.doc_id);
       if (e instanceof GoogleAuthError) {
-        // (said once per run of the server: it stays so every minute until the linker connects Google Drive again)
+        // (said once per run of the server: it stays so until the linker connects Google Drive again)
         if (!authSaid.has(l.doc_id + '\n' + e.message)) { authSaid.add(l.doc_id + '\n' + e.message); console.warn(`[gdocs] ${l.doc_id}: ${e.message}`); }
-        db.prepare('UPDATE gdocs_links SET last_error = ? WHERE doc_id = ?').run(e.message, l.doc_id);
       }
       else console.warn(`[gdocs] ${l.doc_id}: ${(e as Error).message}`);
     }

@@ -21,6 +21,7 @@ import type { LyxDocument } from '../packages/core/src/lyx/ast.ts';
 import { project, readGoogle, strip, blockKey, type GBlock } from '../packages/server/src/gdocs/model.ts';
 import { planRound } from '../packages/server/src/gdocs/edits.ts';
 import { FakeGoogle } from '../packages/server/src/gdocs/fake.ts';
+import { GoogleApiError } from '../packages/server/src/gdocs/errors.ts';
 
 const want = (md: string): GBlock[] => strip(project(parseMarkdown(md).doc).blocks);
 const keys = (bs: GBlock[]) => bs.map(blockKey);
@@ -351,6 +352,41 @@ describe('the sync of a document', async () => {
       });
     } finally {
       getDocument.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('an automatic sync that keeps failing is tried less and less often; a manual sync always runs, and one that works ends the waiting', async () => {
+    const id = 'u/p/gone.md';
+    writeFileSync(join(ROOT, 'projects', 'u', 'p', 'gone.md'), '# Gone\n\nText.\n');
+    const link = await sync.linkNewGoogleDoc(id, owner.id, 'Gone');
+    const real = g.getFile.bind(g);
+    let asked = 0, gone = true;
+    // (Drive's answer for a Google Doc deleted for good)
+    const getFile = vi.spyOn(g, 'getFile').mockImplementation(async fid => {
+      if (fid !== link.file_id) return real(fid);
+      asked++;
+      if (gone) throw new GoogleApiError(`File not found: ${fid}.`, 404, 'notFound');
+      return real(fid);
+    });
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const t0 = Date.now();
+      const pass = async (minute: number) => { vi.setSystemTime(t0 + minute * 60_000); await sync.tick(60_000); return asked; };
+      expect(await pass(0)).toBe(1);
+      expect(sync.linkOf(id)?.last_error).toMatch(/File not found/);
+      // passes a minute apart: asked again 1, 2, 4 minutes after each failure
+      expect([await pass(1), await pass(2), await pass(3), await pass(4), await pass(5), await pass(6), await pass(7)]).toEqual([2, 2, 3, 3, 3, 3, 4]);
+      await expect(sync.syncDoc(id)).rejects.toThrow(/File not found/);
+      expect(asked).toBe(5);
+      gone = false;
+      await sync.syncDoc(id);
+      expect(sync.linkOf(id)?.last_error).toBeNull();
+      // (without it the next automatic attempt would be at minute 14)
+      const before = asked;
+      expect(await pass(8)).toBeGreaterThan(before);
+    } finally {
+      getFile.mockRestore();
       vi.useRealTimers();
     }
   });
